@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,16 +12,14 @@
 #include "base/message_loop.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/importer/firefox_proxy_settings.h"
 #include "chrome/common/chrome_switches.h"
 #include "net/base/cert_verifier.h"
-#include "net/base/cookie_monster.h"
 #include "net/base/host_resolver.h"
-#include "net/base/host_resolver_impl.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_util.h"
 #include "net/base/ssl_config_service_defaults.h"
+#include "net/cookies/cookie_monster.h"
 #include "net/ftp/ftp_network_layer.h"
 #include "net/http/http_auth_handler_factory.h"
 #include "net/http/http_cache.h"
@@ -34,6 +32,10 @@
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_storage.h"
+
+#if !defined(OS_ANDROID)
+#include "chrome/browser/importer/firefox_proxy_settings.h"
+#endif
 
 namespace {
 
@@ -70,7 +72,7 @@ class ExperimentURLRequestContext : public net::URLRequestContext {
 
     // The rest of the dependencies are standard, and don't depend on the
     // experiment being run.
-    storage_.set_cert_verifier(new net::CertVerifier);
+    storage_.set_cert_verifier(net::CertVerifier::CreateDefault());
     storage_.set_ftp_transaction_factory(
         new net::FtpNetworkLayer(host_resolver()));
     storage_.set_ssl_config_service(new net::SSLConfigServiceDefaults);
@@ -110,9 +112,10 @@ class ExperimentURLRequestContext : public net::URLRequestContext {
     // Create a vanilla HostResolver that disables caching.
     const size_t kMaxJobs = 50u;
     const size_t kMaxRetryAttempts = 4u;
-    net::HostResolverImpl* impl =
-        new net::HostResolverImpl(NULL, NULL, kMaxJobs, kMaxRetryAttempts,
-                                  NULL);
+    net::HostResolver* impl = net::CreateNonCachingSystemHostResolver(
+        kMaxJobs,
+        kMaxRetryAttempts,
+        NULL /* NetLog */);
 
     host_resolver->reset(impl);
 
@@ -227,6 +230,10 @@ class ExperimentURLRequestContext : public net::URLRequestContext {
   // code.
   int CreateFirefoxProxyConfigService(
       scoped_ptr<net::ProxyConfigService>* config_service) {
+#if defined(OS_ANDROID)
+    // Chrome on Android does not support Firefox settings.
+    return net::ERR_NOT_IMPLEMENTED;
+#else
     // Fetch Firefox's proxy settings (can fail if Firefox is not installed).
     FirefoxProxySettings firefox_settings;
     if (!FirefoxProxySettings::GetSettings(&firefox_settings))
@@ -242,6 +249,7 @@ class ExperimentURLRequestContext : public net::URLRequestContext {
     }
 
     return net::ERR_FAILED;
+#endif
   }
 
   const scoped_refptr<net::URLRequestContext> proxy_request_context_;

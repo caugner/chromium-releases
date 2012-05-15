@@ -7,10 +7,10 @@
 #include "base/string16.h"
 #include "content/browser/browser_thread_impl.h"
 #include "content/browser/browsing_instance.h"
-#include "content/browser/child_process_security_policy.h"
+#include "content/browser/child_process_security_policy_impl.h"
 #include "content/browser/mock_content_browser_client.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
-#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/renderer_host/test_render_view_host.h"
 #include "content/browser/site_instance_impl.h"
 #include "content/browser/tab_contents/navigation_entry_impl.h"
@@ -19,13 +19,17 @@
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/common/url_constants.h"
+#include "content/test/mock_render_process_host.h"
 #include "content/test/test_browser_context.h"
+#include "content/test/test_content_client.h"
 #include "googleurl/src/url_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using content::BrowserContext;
 using content::BrowserThread;
 using content::BrowserThreadImpl;
+using content::MockRenderProcessHost;
+using content::MockRenderProcessHostFactory;
 using content::NavigationEntry;
 using content::NavigationEntryImpl;
 using content::SiteInstance;
@@ -51,18 +55,25 @@ class SiteInstanceTestWebUIControllerFactory
   }
   virtual bool UseWebUIForURL(BrowserContext* browser_context,
                               const GURL& url) const OVERRIDE {
-    return HasWebUIScheme(url);
+    return content::GetContentClient()->HasWebUIScheme(url);
   }
   virtual bool UseWebUIBindingsForURL(BrowserContext* browser_context,
                                       const GURL& url) const OVERRIDE {
-    return HasWebUIScheme(url);
-  }
-  virtual bool HasWebUIScheme(const GURL& url) const OVERRIDE {
-    return url.SchemeIs(chrome::kChromeUIScheme);
+    return content::GetContentClient()->HasWebUIScheme(url);
   }
   virtual bool IsURLAcceptableForWebUI(BrowserContext* browser_context,
       const GURL& url) const OVERRIDE {
     return false;
+  }
+};
+
+class SiteInstanceTestClient : public TestContentClient {
+ public:
+  SiteInstanceTestClient() {
+  }
+
+  virtual bool HasWebUIScheme(const GURL& url) const OVERRIDE {
+    return url.SchemeIs(chrome::kChromeUIScheme);
   }
 };
 
@@ -80,11 +91,6 @@ class SiteInstanceTestBrowserClient : public content::MockContentBrowserClient {
   virtual bool ShouldUseProcessPerSite(BrowserContext* browser_context,
                                        const GURL& effective_url) OVERRIDE {
     return false;
-  }
-
-  virtual bool IsURLSameAsAnySiteInstance(const GURL& url) OVERRIDE {
-    return url == GURL(kSameAsAnyInstanceURL) ||
-           url == GURL(chrome::kAboutCrashURL);
   }
 
   virtual bool IsSuitableHost(content::RenderProcessHost* process_host,
@@ -106,11 +112,14 @@ class SiteInstanceTest : public testing::Test {
  public:
   SiteInstanceTest()
       : ui_thread_(BrowserThread::UI, &message_loop_),
+        old_client_(NULL),
         old_browser_client_(NULL) {
   }
 
   virtual void SetUp() {
+    old_client_ = content::GetContentClient();
     old_browser_client_ = content::GetContentClient()->browser();
+    content::SetContentClient(&client_);
     content::GetContentClient()->set_browser(&browser_client_);
     url_util::AddStandardScheme(kPrivilegedScheme);
     url_util::AddStandardScheme(chrome::kChromeUIScheme);
@@ -118,6 +127,7 @@ class SiteInstanceTest : public testing::Test {
 
   virtual void TearDown() {
     content::GetContentClient()->set_browser(old_browser_client_);
+    content::SetContentClient(old_client_);
   }
 
   void set_privileged_process_id(int process_id) {
@@ -128,7 +138,9 @@ class SiteInstanceTest : public testing::Test {
   MessageLoopForUI message_loop_;
   BrowserThreadImpl ui_thread_;
 
+  SiteInstanceTestClient client_;
   SiteInstanceTestBrowserClient browser_client_;
+  content::ContentClient* old_client_;
   content::ContentBrowserClient* old_browser_client_;
 };
 
@@ -194,10 +206,9 @@ class TestSiteInstance : public SiteInstanceImpl {
 
 // Test to ensure no memory leaks for SiteInstance objects.
 TEST_F(SiteInstanceTest, SiteInstanceDestructor) {
-  // The existence of these factories will cause TabContents to create our test
-  // one instead of the real one.
-  MockRenderProcessHostFactory rph_factory;
-  TestRenderViewHostFactory rvh_factory(&rph_factory);
+  // The existence of this object will cause TabContents to create our
+  // test one instead of the real one.
+  content::RenderViewHostTestEnabler rvh_test_enabler;
   int site_delete_counter = 0;
   int browsing_delete_counter = 0;
   const GURL url("test:foo");
@@ -366,8 +377,6 @@ TEST_F(SiteInstanceTest, IsSameWebSite) {
   GURL url_foo_https = GURL("https://foo/a.html");
   GURL url_foo_port = GURL("http://foo:8080/a.html");
   GURL url_javascript = GURL("javascript:alert(1);");
-  GURL url_crash = GURL(chrome::kAboutCrashURL);
-  GURL url_browser_specified = GURL(kSameAsAnyInstanceURL);
 
   // Same scheme and port -> same site.
   EXPECT_TRUE(SiteInstance::IsSameWebSite(NULL, url_foo, url_foo2));
@@ -383,12 +392,6 @@ TEST_F(SiteInstanceTest, IsSameWebSite) {
   EXPECT_TRUE(SiteInstance::IsSameWebSite(NULL, url_javascript, url_foo));
   EXPECT_TRUE(SiteInstance::IsSameWebSite(NULL, url_javascript, url_foo_https));
   EXPECT_TRUE(SiteInstance::IsSameWebSite(NULL, url_javascript, url_foo_port));
-
-  // The URLs specified by the ContentBrowserClient should also be treated as
-  // same site.
-  EXPECT_TRUE(SiteInstance::IsSameWebSite(NULL, url_crash, url_foo));
-  EXPECT_TRUE(SiteInstance::IsSameWebSite(NULL, url_browser_specified,
-                                          url_foo));
 }
 
 // Test to ensure that there is only one SiteInstance per site in a given
@@ -540,8 +543,8 @@ static SiteInstanceImpl* CreateSiteInstance(
 // in processes with similar pages.
 TEST_F(SiteInstanceTest, ProcessSharingByType) {
   MockRenderProcessHostFactory rph_factory;
-  ChildProcessSecurityPolicy* policy =
-      ChildProcessSecurityPolicy::GetInstance();
+  ChildProcessSecurityPolicyImpl* policy =
+      ChildProcessSecurityPolicyImpl::GetInstance();
 
   // Make a bunch of mock renderers so that we hit the limit.
   std::vector<MockRenderProcessHost*> hosts;

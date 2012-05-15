@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -33,6 +33,32 @@ class ChromeRenderMessageFilter : public content::BrowserMessageFilter {
   ChromeRenderMessageFilter(int render_process_id,
                             Profile* profile,
                             net::URLRequestContextGetter* request_context);
+
+  // Notification detail classes.
+  class FPSDetails {
+   public:
+    FPSDetails(int routing_id, float fps)
+        : routing_id_(routing_id),
+          fps_(fps) {}
+    int routing_id() const { return routing_id_; }
+    float fps() const { return fps_; }
+   private:
+    int routing_id_;
+    float fps_;
+  };
+
+  class V8HeapStatsDetails {
+   public:
+    V8HeapStatsDetails(size_t v8_memory_allocated,
+                       size_t v8_memory_used)
+        : v8_memory_allocated_(v8_memory_allocated),
+          v8_memory_used_(v8_memory_used) {}
+    size_t v8_memory_allocated() const { return v8_memory_allocated_; }
+    size_t v8_memory_used() const { return v8_memory_used_; }
+   private:
+    size_t v8_memory_allocated_;
+    size_t v8_memory_used_;
+  };
 
   // content::BrowserMessageFilter methods:
   virtual bool OnMessageReceived(const IPC::Message& message,
@@ -87,12 +113,17 @@ class ChromeRenderMessageFilter : public content::BrowserMessageFilter {
                               const std::string& event_name);
   void OnExtensionRemoveListener(const std::string& extension_id,
                                  const std::string& event_name);
-  void OnExtensionIdle(const std::string& extension_id);
+  void OnExtensionAddLazyListener(const std::string& extension_id,
+                                  const std::string& event_name);
+  void OnExtensionRemoveLazyListener(const std::string& extension_id,
+                                     const std::string& event_name);
   void OnExtensionEventAck(const std::string& extension_id);
   void OnExtensionCloseChannel(int port_id);
   void OnExtensionRequestForIOThread(
       int routing_id,
       const ExtensionHostMsg_Request_Params& params);
+  void OnExtensionShouldCloseAck(const std::string& extension_id,
+                                 int sequence_id);
 #if defined(USE_TCMALLOC)
   void OnRendererTcmalloc(const std::string& output);
   void OnWriteTcmallocHeapProfile(const FilePath::StringType& filename,
@@ -137,8 +168,6 @@ class ChromeRenderMessageFilter : public content::BrowserMessageFilter {
   scoped_refptr<ExtensionInfoMap> extension_info_map_;
   // Used to look up permissions at database creation time.
   scoped_refptr<CookieSettings> cookie_settings_;
-
-  const content::ResourceContext& resource_context_;
 
   base::WeakPtrFactory<ChromeRenderMessageFilter> weak_ptr_factory_;
 

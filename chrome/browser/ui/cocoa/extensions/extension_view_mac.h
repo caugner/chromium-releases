@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,14 +13,25 @@
 
 class Browser;
 class ExtensionHost;
-class RenderViewHost;
 class SkBitmap;
+
+namespace content {
+class RenderViewHost;
+}
 
 // This class represents extension views. An extension view internally contains
 // a bridge to an extension process, which draws to the extension view's
 // native view object through IPC.
 class ExtensionViewMac {
  public:
+  class Container {
+   public:
+    virtual ~Container() {}
+    virtual void OnExtensionSizeChanged(ExtensionViewMac* view,
+                                        const gfx::Size& new_size) {}
+    virtual void OnExtensionViewDidShow(ExtensionViewMac* view) {};
+  };
+
   ExtensionViewMac(ExtensionHost* extension_host, Browser* browser);
   ~ExtensionViewMac();
 
@@ -41,9 +52,12 @@ class ExtensionViewMac {
   // Sets the extensions's background image.
   void SetBackground(const SkBitmap& background);
 
+  // Sets the container for this view.
+  void set_container(Container* container) { container_ = container; }
+
   // Method for the ExtensionHost to notify us about the correct size for
   // extension contents.
-  void UpdatePreferredSize(const gfx::Size& new_size);
+  void ResizeDueToAutoResize(const gfx::Size& new_size);
 
   // Method for the ExtensionHost to notify us when the RenderViewHost has a
   // connection.
@@ -62,7 +76,7 @@ class ExtensionViewMac {
   static const CGFloat kMaxHeight;
 
  private:
-  RenderViewHost* render_view_host() const;
+  content::RenderViewHost* render_view_host() const;
 
   void CreateWidgetHostView();
 
@@ -80,6 +94,8 @@ class ExtensionViewMac {
   // What we should set the preferred width to once the ExtensionView has
   // loaded.
   gfx::Size pending_preferred_size_;
+
+  Container* container_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionViewMac);
 };

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -31,8 +31,9 @@ using content::BrowserThread;
 namespace {
 
 // Version number of the current theme pack. We just throw out and rebuild
-// theme packs that aren't int-equal to this.
-const int kThemePackVersion = 18;
+// theme packs that aren't int-equal to this. Increment this number if you
+// change default theme assets.
+const int kThemePackVersion = 20;
 
 // IDs that are in the DataPack won't clash with the positive integer
 // uint16. kHeaderID should always have the maximum value because we want the
@@ -286,9 +287,9 @@ const int kPreloadIDs[] = {
 // Returns a piece of memory with the contents of the file |path|.
 RefCountedMemory* ReadFileData(const FilePath& path) {
   if (!path.empty()) {
-    net::FileStream file;
+    net::FileStream file(NULL);
     int flags = base::PLATFORM_FILE_OPEN | base::PLATFORM_FILE_READ;
-    if (file.Open(path, flags) == net::OK) {
+    if (file.OpenSync(path, flags) == net::OK) {
       int64 avail = file.Available();
       if (avail > 0 && avail < INT_MAX) {
         size_t size = static_cast<size_t>(avail);
@@ -333,13 +334,13 @@ BrowserThemePack::~BrowserThemePack() {
 }
 
 // static
-BrowserThemePack* BrowserThemePack::BuildFromExtension(
+scoped_refptr<BrowserThemePack> BrowserThemePack::BuildFromExtension(
     const Extension* extension) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(extension);
   DCHECK(extension->is_theme());
 
-  scoped_refptr<BrowserThemePack> pack = new BrowserThemePack;
+  scoped_refptr<BrowserThemePack> pack(new BrowserThemePack);
   pack->BuildHeader(extension);
   pack->BuildTintsFromJSON(extension->GetThemeTints());
   pack->BuildColorsFromJSON(extension->GetThemeColors());
@@ -352,10 +353,8 @@ BrowserThemePack* BrowserThemePack::BuildFromExtension(
                                 &file_paths);
   pack->BuildSourceImagesArray(file_paths);
 
-  if (!pack->LoadRawBitmapsTo(file_paths, &pack->prepared_images_)) {
-    delete pack;
+  if (!pack->LoadRawBitmapsTo(file_paths, &pack->prepared_images_))
     return NULL;
-  }
 
   pack->GenerateFrameImages(&pack->prepared_images_);
 
@@ -366,7 +365,7 @@ BrowserThemePack* BrowserThemePack::BuildFromExtension(
   pack->GenerateTabBackgroundImages(&pack->prepared_images_);
 
   // The BrowserThemePack is now in a consistent state.
-  return pack.release();
+  return pack;
 }
 
 // static
@@ -504,12 +503,10 @@ SkBitmap* BrowserThemePack::GetBitmapNamed(int idr_id) const {
   if (!image)
     return NULL;
 
-  const SkBitmap* bitmap = *image;
-
   // TODO(sail): This cast should be removed. Currently we use this const_cast
   // to avoid changing the BrowserThemePack::GetBitmapNamed API. Once we
   // switch to using gfx::Image everywhere this can be removed.
-  return const_cast<SkBitmap*>(bitmap);
+  return const_cast<SkBitmap*>(image->ToSkBitmap());
 }
 
 const gfx::Image* BrowserThemePack::GetImageNamed(int idr_id) const {
@@ -547,7 +544,7 @@ const gfx::Image* BrowserThemePack::GetImageNamed(int idr_id) const {
       return NULL;
     }
 
-    gfx::Image* ret = new gfx::Image(new SkBitmap(bitmap));
+    gfx::Image* ret = new gfx::Image(bitmap);
     loaded_images_[prs_id] = ret;
 
     return ret;
@@ -894,7 +891,7 @@ bool BrowserThemePack::LoadRawBitmapsTo(
       SkBitmap bitmap;
       if (gfx::PNGCodec::Decode(raw_data->front(), raw_data->size(),
                                 &bitmap)) {
-        (*raw_bitmaps)[it->first] = new gfx::Image(new SkBitmap(bitmap));
+        (*raw_bitmaps)[it->first] = new gfx::Image(bitmap);
       } else {
         NOTREACHED() << "Unable to decode theme image resource " << it->first;
       }
@@ -1004,7 +1001,7 @@ void BrowserThemePack::GenerateTabBackgroundImages(ImageCache* bitmaps) const {
         // If they've provided a custom image, overlay it.
         ImageCache::const_iterator overlay_it = bitmaps->find(prs_id);
         if (overlay_it != bitmaps->end()) {
-          const SkBitmap* overlay = *(overlay_it->second);
+          const SkBitmap* overlay = overlay_it->second->ToSkBitmap();
           SkCanvas canvas(*bg_tab);
           for (int x = 0; x < bg_tab->width(); x += overlay->width())
             canvas.drawBitmap(*overlay, static_cast<SkScalar>(x), 0, NULL);
@@ -1026,7 +1023,8 @@ void BrowserThemePack::RepackImages(const ImageCache& images,
   for (ImageCache::const_iterator it = images.begin();
        it != images.end(); ++it) {
     std::vector<unsigned char> image_data;
-    if (!gfx::PNGCodec::EncodeBGRASkBitmap(*(it->second), false, &image_data)) {
+    if (!gfx::PNGCodec::EncodeBGRASkBitmap(*it->second->ToSkBitmap(), false,
+                                           &image_data)) {
       NOTREACHED() << "Image file for resource " << it->first
                    << " could not be encoded.";
     } else {

@@ -30,14 +30,17 @@
 #include "grit/webkit_chromium_resources.h"
 #include "media/base/filter_collection.h"
 #include "media/base/media_log.h"
-#include "media/base/message_loop_factory_impl.h"
+#include "media/base/message_loop_factory.h"
 #include "net/base/escape.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebCache.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFileSystemCallbacks.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginParams.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebStorageNamespace.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLError.h"
 #if defined(TOOLKIT_USES_GTK)
 #include "ui/base/keycodes/keyboard_code_conversion_gtk.h"
@@ -61,6 +64,8 @@
 #include "webkit/support/simple_database_system.h"
 #include "webkit/support/test_webkit_platform_support.h"
 #include "webkit/support/test_webplugin_page_delegate.h"
+#include "webkit/tools/test_shell/simple_appcache_system.h"
+#include "webkit/tools/test_shell/simple_dom_storage_system.h"
 #include "webkit/tools/test_shell/simple_file_system.h"
 #include "webkit/tools/test_shell/simple_resource_loader_bridge.h"
 
@@ -74,6 +79,8 @@ using WebKit::WebPlugin;
 using WebKit::WebPluginParams;
 using WebKit::WebString;
 using WebKit::WebURL;
+using webkit::gpu::WebGraphicsContext3DInProcessImpl;
+using webkit::gpu::WebGraphicsContext3DInProcessCommandBufferImpl;
 
 namespace {
 
@@ -187,11 +194,20 @@ FilePath GetWebKitRootDirFilePath() {
   FilePath basePath;
   PathService::Get(base::DIR_SOURCE_ROOT, &basePath);
   if (file_util::PathExists(basePath.Append(FILE_PATH_LITERAL("chrome")))) {
+    // We're in a WebKit-in-chrome checkout.
     return basePath.Append(FILE_PATH_LITERAL("third_party/WebKit"));
-  } else {
-    // WebKit/Source/WebKit/chromium/ -> WebKit/
+  } else if (file_util::PathExists(
+                 basePath.Append(FILE_PATH_LITERAL("chromium")))) {
+    // We're in a WebKit-only checkout on Windows.
+    return basePath.Append(FILE_PATH_LITERAL("../.."));
+  } else if (file_util::PathExists(
+                 basePath.Append(FILE_PATH_LITERAL("webkit/support")))) {
+    // We're in a WebKit-only/xcodebuild checkout on Mac
     return basePath.Append(FILE_PATH_LITERAL("../../.."));
   }
+  // We're in a WebKit-only, make-build, so the DIR_SOURCE_ROOT is already the
+  // WebKit root. That, or we have no idea where we are.
+  return basePath;
 }
 
 class WebKitClientMessageLoopImpl
@@ -202,10 +218,8 @@ class WebKitClientMessageLoopImpl
     message_loop_ = NULL;
   }
   virtual void run() {
-    bool old_state = message_loop_->NestableTasksAllowed();
-    message_loop_->SetNestableTasksAllowed(true);
+    MessageLoop::ScopedNestableTaskAllower allow(message_loop_);
     message_loop_->Run();
-    message_loop_->SetNestableTasksAllowed(old_state);
   }
   virtual void quitNow() {
     message_loop_->QuitNow();
@@ -274,6 +288,8 @@ void TearDownTestEnvironment() {
   MessageLoop::current()->RunAllPending();
 
   BeforeShutdown();
+  if (RunningOnValgrind())
+    WebKit::WebCache::clear();
   WebKit::shutdown();
   delete test_environment;
   test_environment = NULL;
@@ -312,7 +328,7 @@ WebKit::WebMediaPlayer* CreateMediaPlayer(
   return NULL;
 #else
   scoped_ptr<media::MessageLoopFactory> message_loop_factory(
-      new media::MessageLoopFactoryImpl());
+      new media::MessageLoopFactory());
 
   scoped_ptr<media::FilterCollection> collection(
       new media::FilterCollection());
@@ -338,6 +354,14 @@ WebKit::WebMediaPlayer* CreateMediaPlayer(
 WebKit::WebApplicationCacheHost* CreateApplicationCacheHost(
     WebFrame*, WebKit::WebApplicationCacheHostClient* client) {
   return SimpleAppCacheSystem::CreateApplicationCacheHost(client);
+}
+
+WebKit::WebStorageNamespace* CreateSessionStorageNamespace(unsigned quota) {
+#ifdef ENABLE_NEW_DOM_STORAGE_BACKEND
+  return SimpleDomStorageSystem::instance().CreateSessionStorageNamespace();
+#else
+  return WebKit::WebStorageNamespace::createSessionStorageNamespace(quota);
+#endif
 }
 
 WebKit::WebString GetWebKitRootDir() {
@@ -372,20 +396,23 @@ WebKit::WebGraphicsContext3D* CreateGraphicsContext3D(
     const WebKit::WebGraphicsContext3D::Attributes& attributes,
     WebKit::WebView* web_view,
     bool direct) {
-  scoped_ptr<WebKit::WebGraphicsContext3D> context;
   switch (webkit_support::GetGraphicsContext3DImplementation()) {
     case webkit_support::IN_PROCESS:
-      context.reset(new webkit::gpu::WebGraphicsContext3DInProcessImpl(
-          gfx::kNullPluginWindow, NULL));
-      break;
-    case webkit_support::IN_PROCESS_COMMAND_BUFFER:
-      context.reset(
-          new webkit::gpu::WebGraphicsContext3DInProcessCommandBufferImpl());
-      break;
+      return WebGraphicsContext3DInProcessImpl::CreateForWebView(
+          attributes, direct);
+    case webkit_support::IN_PROCESS_COMMAND_BUFFER: {
+      WebKit::WebGraphicsContext3D* view_context = 0;
+      if (!direct)
+          view_context = web_view->graphicsContext3D();
+      scoped_ptr<WebGraphicsContext3DInProcessCommandBufferImpl> context(
+          new WebGraphicsContext3DInProcessCommandBufferImpl());
+      if (!context->Initialize(attributes, view_context))
+        return NULL;
+      return context.release();
+    }
   }
-  if (!context->initialize(attributes, web_view, direct))
-    return NULL;
-  return context.release();
+  NOTREACHED();
+  return NULL;
 }
 
 void RegisterMockedURL(const WebKit::WebURL& url,
@@ -439,10 +466,8 @@ void MessageLoopSetNestableTasksAllowed(bool allowed) {
 
 void DispatchMessageLoop() {
   MessageLoop* current = MessageLoop::current();
-  bool old_state = current->NestableTasksAllowed();
-  current->SetNestableTasksAllowed(true);
+  MessageLoop::ScopedNestableTaskAllower allow(current);
   current->RunAllPending();
-  current->SetNestableTasksAllowed(old_state);
 }
 
 WebDevToolsAgentClient::WebKitClientMessageLoop* CreateDevToolsMessageLoop() {

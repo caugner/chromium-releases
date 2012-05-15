@@ -12,6 +12,7 @@
 #include "chrome/browser/importer/external_process_importer_bridge.h"
 #include "chrome/browser/importer/importer.h"
 #include "chrome/browser/importer/profile_import_process_messages.h"
+#include "chrome/common/child_process_logging.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_utility_messages.h"
 #include "chrome/common/extensions/extension.h"
@@ -96,11 +97,15 @@ bool ChromeContentUtilityClient::Send(IPC::Message* message) {
 }
 
 void ChromeContentUtilityClient::OnUnpackExtension(
-    const FilePath& extension_path, int location, int creation_flags) {
+    const FilePath& extension_path,
+    const std::string& extension_id,
+    int location,
+    int creation_flags) {
   CHECK(location > Extension::INVALID);
   CHECK(location < Extension::NUM_LOCATIONS);
   ExtensionUnpacker unpacker(
       extension_path,
+      extension_id,
       static_cast<Extension::Location>(location),
       creation_flags);
   if (unpacker.Run() && unpacker.DumpImagesToFile() &&
@@ -368,6 +373,10 @@ void ChromeContentUtilityClient::OnGetPrinterCapsAndDefaults(
   scoped_refptr<printing::PrintBackend> print_backend =
       printing::PrintBackend::CreateInstance(NULL);
   printing::PrinterCapsAndDefaults printer_info;
+
+  child_process_logging::ScopedPrinterInfoSetter prn_info(
+      print_backend->GetPrinterDriverInfo(printer_name));
+
   if (print_backend->GetPrinterCapsAndDefaults(printer_name, &printer_info)) {
     Send(new ChromeUtilityHostMsg_GetPrinterCapsAndDefaults_Succeeded(
         printer_name, printer_info));

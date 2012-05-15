@@ -1,26 +1,31 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/extensions/extension_message_service.h"
 
 #include "base/atomic_sequence_num.h"
+#include "base/bind.h"
+#include "base/callback.h"
 #include "base/json/json_writer.h"
 #include "base/stl_util.h"
 #include "base/values.h"
+#include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
+#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
+#include "chrome/browser/extensions/lazy_background_task_queue.h"
 #include "chrome/browser/extensions/process_map.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/chrome_view_type.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_messages.h"
-#include "content/browser/child_process_security_policy.h"
-#include "content/browser/renderer_host/render_view_host.h"
 #include "content/public/browser/notification_service.h"
-#include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/site_instance.h"
 #include "content/public/browser/web_contents.h"
 
@@ -40,16 +45,43 @@ using content::WebContents;
 #define GET_OPPOSITE_PORT_ID(source_port_id) ((source_port_id) ^ 1)
 
 struct ExtensionMessageService::MessagePort {
-  IPC::Message::Sender* sender;
+  content::RenderProcessHost* process;
   int routing_id;
-  explicit MessagePort(IPC::Message::Sender* sender = NULL,
+  explicit MessagePort(content::RenderProcessHost* process = NULL,
                        int routing_id = MSG_ROUTING_CONTROL)
-     : sender(sender), routing_id(routing_id) {}
+     : process(process), routing_id(routing_id) {}
 };
 
 struct ExtensionMessageService::MessageChannel {
   ExtensionMessageService::MessagePort opener;
   ExtensionMessageService::MessagePort receiver;
+  std::string source_extension_id;
+  std::string target_extension_id;
+};
+
+struct ExtensionMessageService::OpenChannelParams {
+  content::RenderProcessHost* source;
+  std::string tab_json;
+  MessagePort receiver;
+  int receiver_port_id;
+  std::string source_extension_id;
+  std::string target_extension_id;
+  std::string channel_name;
+
+  OpenChannelParams(content::RenderProcessHost* source,
+                    const std::string& tab_json,
+                    const MessagePort& receiver,
+                    int receiver_port_id,
+                    const std::string& source_extension_id,
+                    const std::string& target_extension_id,
+                    const std::string& channel_name)
+      : source(source),
+        tab_json(tab_json),
+        receiver(receiver),
+        receiver_port_id(receiver_port_id),
+        source_extension_id(source_extension_id),
+        target_extension_id(target_extension_id),
+        channel_name(channel_name) {}
 };
 
 const char ExtensionMessageService::kDispatchOnConnect[] =
@@ -59,7 +91,7 @@ const char ExtensionMessageService::kDispatchOnDisconnect[] =
 
 namespace {
 
-static base::AtomicSequenceNumber g_next_channel_id(base::LINKER_INITIALIZED);
+static base::StaticAtomicSequenceNumber g_next_channel_id;
 
 static void DispatchOnConnect(const ExtensionMessageService::MessagePort& port,
                               int dest_port_id,
@@ -73,12 +105,13 @@ static void DispatchOnConnect(const ExtensionMessageService::MessagePort& port,
   args.Set(2, Value::CreateStringValue(tab_json));
   args.Set(3, Value::CreateStringValue(source_extension_id));
   args.Set(4, Value::CreateStringValue(target_extension_id));
-  CHECK(port.sender);
-  port.sender->Send(
+  CHECK(port.process);
+  port.process->Send(
       new ExtensionMsg_MessageInvoke(
           port.routing_id,
           target_extension_id,
-          ExtensionMessageService::kDispatchOnConnect, args, GURL()));
+          ExtensionMessageService::kDispatchOnConnect, args, GURL(),
+          false));  // Not a user gesture
 }
 
 static void DispatchOnDisconnect(
@@ -87,19 +120,20 @@ static void DispatchOnDisconnect(
   ListValue args;
   args.Set(0, Value::CreateIntegerValue(source_port_id));
   args.Set(1, Value::CreateBooleanValue(connection_error));
-  port.sender->Send(new ExtensionMsg_MessageInvoke(port.routing_id,
-      "", ExtensionMessageService::kDispatchOnDisconnect, args, GURL()));
+  port.process->Send(new ExtensionMsg_MessageInvoke(port.routing_id,
+      "", ExtensionMessageService::kDispatchOnDisconnect, args, GURL(),
+      false));  // Not a user gesture
 }
 
 static void DispatchOnMessage(const ExtensionMessageService::MessagePort& port,
                               const std::string& message, int target_port_id) {
-  port.sender->Send(
+  port.process->Send(
       new ExtensionMsg_DeliverMessage(
           port.routing_id, target_port_id, message));
 }
 
-static content::RenderProcessHost* GetExtensionProcess(Profile* profile,
-                                              const std::string& extension_id) {
+static content::RenderProcessHost* GetExtensionProcess(
+    Profile* profile, const std::string& extension_id) {
   SiteInstance* site_instance =
       profile->GetExtensionProcessManager()->GetSiteInstanceForURL(
           Extension::GetBaseURLFromExtensionId(extension_id));
@@ -108,6 +142,26 @@ static content::RenderProcessHost* GetExtensionProcess(Profile* profile,
     return NULL;
 
   return site_instance->GetProcess();
+}
+
+static void IncrementLazyKeepaliveCount(content::RenderProcessHost* process,
+                                        const std::string& extension_id) {
+  Profile* profile = Profile::FromBrowserContext(process->GetBrowserContext());
+  const Extension* extension = profile->GetExtensionService()->extensions()->
+      GetByID(extension_id);
+  if (extension)
+    profile->GetExtensionProcessManager()->IncrementLazyKeepaliveCount(
+        extension);
+}
+
+static void DecrementLazyKeepaliveCount(content::RenderProcessHost* process,
+                                        const std::string& extension_id) {
+  Profile* profile = Profile::FromBrowserContext(process->GetBrowserContext());
+  const Extension* extension = profile->GetExtensionService()->extensions()->
+      GetByID(extension_id);
+  if (extension)
+    profile->GetExtensionProcessManager()->DecrementLazyKeepaliveCount(
+        extension);
 }
 
 }  // namespace
@@ -131,25 +185,17 @@ void ExtensionMessageService::AllocatePortIdPair(int* port1, int* port2) {
   *port2 = port2_id;
 }
 
-ExtensionMessageService::ExtensionMessageService(Profile* profile)
-    : profile_(profile) {
+ExtensionMessageService::ExtensionMessageService(LazyBackgroundTaskQueue* queue)
+    : lazy_background_task_queue_(queue) {
   registrar_.Add(this, content::NOTIFICATION_RENDERER_PROCESS_TERMINATED,
                  content::NotificationService::AllBrowserContextsAndSources());
   registrar_.Add(this, content::NOTIFICATION_RENDERER_PROCESS_CLOSED,
-                 content::NotificationService::AllBrowserContextsAndSources());
-  registrar_.Add(this, content::NOTIFICATION_RENDER_VIEW_HOST_DELETED,
                  content::NotificationService::AllBrowserContextsAndSources());
 }
 
 ExtensionMessageService::~ExtensionMessageService() {
   STLDeleteContainerPairSecondPointers(channels_.begin(), channels_.end());
   channels_.clear();
-}
-
-void ExtensionMessageService::DestroyingProfile() {
-  profile_ = NULL;
-  if (!registrar_.IsEmpty())
-    registrar_.RemoveAll();
 }
 
 void ExtensionMessageService::OpenChannelToExtension(
@@ -177,11 +223,19 @@ void ExtensionMessageService::OpenChannelToExtension(
   if (source_contents) {
     scoped_ptr<DictionaryValue> tab_value(
         ExtensionTabUtil::CreateTabValue(source_contents));
-    base::JSONWriter::Write(tab_value.get(), false, &tab_json);
+    base::JSONWriter::Write(tab_value.get(), &tab_json);
   }
 
-  OpenChannelImpl(source, tab_json, receiver, receiver_port_id,
-                  source_extension_id, target_extension_id, channel_name);
+  OpenChannelParams params(source, tab_json, receiver, receiver_port_id,
+                           source_extension_id, target_extension_id,
+                           channel_name);
+
+  // If the target process doesn't exist, it might be a lazy background page.
+  // In that case, queue up the task and load the page.
+  if (!receiver.process && MaybeAddPendingOpenChannelTask(profile, params))
+    return;
+
+  OpenChannelImpl(params);
 }
 
 void ExtensionMessageService::OpenChannelToTab(
@@ -198,9 +252,9 @@ void ExtensionMessageService::OpenChannelToTab(
   MessagePort receiver;
   if (ExtensionTabUtil::GetTabById(tab_id, profile, true,
                                    NULL, NULL, &contents, NULL)) {
-    receiver.sender = contents->web_contents()->GetRenderViewHost();
+    receiver.process = contents->web_contents()->GetRenderProcessHost();
     receiver.routing_id =
-        contents->web_contents()->GetRenderViewHost()->routing_id();
+        contents->web_contents()->GetRenderViewHost()->GetRoutingID();
   }
 
   if (contents && contents->web_contents()->GetController().NeedsReload()) {
@@ -219,124 +273,113 @@ void ExtensionMessageService::OpenChannelToTab(
   if (source_contents) {
     scoped_ptr<DictionaryValue> tab_value(
         ExtensionTabUtil::CreateTabValue(source_contents));
-    base::JSONWriter::Write(tab_value.get(), false, &tab_json);
+    base::JSONWriter::Write(tab_value.get(), &tab_json);
   }
 
-  OpenChannelImpl(source, tab_json, receiver, receiver_port_id,
-                  extension_id, extension_id, channel_name);
+  OpenChannelParams params(source, tab_json, receiver, receiver_port_id,
+                           extension_id, extension_id, channel_name);
+  OpenChannelImpl(params);
 }
 
-bool ExtensionMessageService::OpenChannelImpl(
-    IPC::Message::Sender* source,
-    const std::string& tab_json,
-    const MessagePort& receiver, int receiver_port_id,
-    const std::string& source_extension_id,
-    const std::string& target_extension_id,
-    const std::string& channel_name) {
-  if (!source)
+bool ExtensionMessageService::OpenChannelImpl(const OpenChannelParams& params) {
+  if (!params.source)
     return false;  // Closed while in flight.
 
-  if (!receiver.sender) {
+  if (!params.receiver.process) {
     // Treat it as a disconnect.
-    DispatchOnDisconnect(MessagePort(source, MSG_ROUTING_CONTROL),
-                         GET_OPPOSITE_PORT_ID(receiver_port_id), true);
+    DispatchOnDisconnect(MessagePort(params.source, MSG_ROUTING_CONTROL),
+                         GET_OPPOSITE_PORT_ID(params.receiver_port_id), true);
     return false;
   }
 
   // Add extra paranoid CHECKs, since we have crash reports of this being NULL.
   // http://code.google.com/p/chromium/issues/detail?id=19067
-  CHECK(receiver.sender);
+  CHECK(params.receiver.process);
 
   MessageChannel* channel(new MessageChannel);
-  channel->opener = MessagePort(source, MSG_ROUTING_CONTROL);
-  channel->receiver = receiver;
+  channel->opener = MessagePort(params.source, MSG_ROUTING_CONTROL);
+  channel->receiver = params.receiver;
+  channel->source_extension_id = params.source_extension_id;
+  channel->target_extension_id = params.target_extension_id;
 
-  CHECK(receiver.sender);
+  CHECK(params.receiver.process);
 
-  CHECK(channels_.find(GET_CHANNEL_ID(receiver_port_id)) == channels_.end());
-  channels_[GET_CHANNEL_ID(receiver_port_id)] = channel;
+  int channel_id = GET_CHANNEL_ID(params.receiver_port_id);
+  CHECK(channels_.find(channel_id) == channels_.end());
+  channels_[channel_id] = channel;
+  pending_channels_.erase(channel_id);
 
-  CHECK(receiver.sender);
+  CHECK(params.receiver.process);
 
   // Send the connect event to the receiver.  Give it the opener's port ID (the
   // opener has the opposite port ID).
-  DispatchOnConnect(receiver, receiver_port_id, channel_name, tab_json,
-                    source_extension_id, target_extension_id);
+  DispatchOnConnect(params.receiver, params.receiver_port_id,
+                    params.channel_name, params.tab_json,
+                    params.source_extension_id, params.target_extension_id);
 
+  // Keep both ends of the channel alive until the channel is closed.
+  IncrementLazyKeepaliveCount(channel->opener.process,
+                              channel->source_extension_id);
+  IncrementLazyKeepaliveCount(channel->receiver.process,
+                              channel->target_extension_id);
   return true;
-}
-
-int ExtensionMessageService::OpenSpecialChannelToExtension(
-    const std::string& extension_id, const std::string& channel_name,
-    const std::string& tab_json, IPC::Message::Sender* source) {
-  DCHECK(profile_);
-
-  int port1_id = -1;
-  int port2_id = -1;
-  // Create a channel ID for both sides of the channel.
-  AllocatePortIdPair(&port1_id, &port2_id);
-
-  MessagePort receiver(
-      GetExtensionProcess(profile_, extension_id),
-      MSG_ROUTING_CONTROL);
-  if (!OpenChannelImpl(source, tab_json, receiver, port2_id,
-                       extension_id, extension_id, channel_name))
-    return -1;
-
-  return port1_id;
-}
-
-int ExtensionMessageService::OpenSpecialChannelToTab(
-    const std::string& extension_id, const std::string& channel_name,
-    WebContents* target_web_contents, IPC::Message::Sender* source) {
-  DCHECK(target_web_contents);
-
-  if (target_web_contents->GetController().NeedsReload()) {
-    // The tab isn't loaded yet. Don't attempt to connect.
-    return -1;
-  }
-
-  int port1_id = -1;
-  int port2_id = -1;
-  // Create a channel ID for both sides of the channel.
-  AllocatePortIdPair(&port1_id, &port2_id);
-
-  MessagePort receiver(
-      target_web_contents->GetRenderViewHost(),
-      target_web_contents->GetRenderViewHost()->routing_id());
-  if (!OpenChannelImpl(source, "null", receiver, port2_id,
-                       extension_id, extension_id, channel_name))
-    return -1;
-
-  return port1_id;
 }
 
 void ExtensionMessageService::CloseChannel(int port_id) {
   // Note: The channel might be gone already, if the other side closed first.
-  MessageChannelMap::iterator it = channels_.find(GET_CHANNEL_ID(port_id));
-  if (it != channels_.end())
-    CloseChannelImpl(it, port_id, true);
+  int channel_id = GET_CHANNEL_ID(port_id);
+  MessageChannelMap::iterator it = channels_.find(channel_id);
+  if (it == channels_.end()) {
+    PendingChannelMap::iterator pending = pending_channels_.find(channel_id);
+    if (pending != pending_channels_.end()) {
+      lazy_background_task_queue_->AddPendingTask(
+          pending->second.first, pending->second.second,
+          base::Bind(&ExtensionMessageService::PendingCloseChannel,
+                     base::Unretained(this), port_id));
+    }
+    return;
+  }
+  CloseChannelImpl(it, port_id, true);
 }
 
 void ExtensionMessageService::CloseChannelImpl(
     MessageChannelMap::iterator channel_iter, int closing_port_id,
     bool notify_other_port) {
-  // Notify the other side.
-  const MessagePort& port = IS_OPENER_PORT_ID(closing_port_id) ?
-      channel_iter->second->receiver : channel_iter->second->opener;
+  MessageChannel* channel = channel_iter->second;
 
-  if (notify_other_port)
+  // Notify the other side.
+  if (notify_other_port) {
+    const MessagePort& port = IS_OPENER_PORT_ID(closing_port_id) ?
+        channel->receiver : channel->opener;
     DispatchOnDisconnect(port, GET_OPPOSITE_PORT_ID(closing_port_id), false);
+  }
+
+  // Balance the addrefs in OpenChannelImpl.
+  DecrementLazyKeepaliveCount(channel->opener.process,
+                              channel->source_extension_id);
+  DecrementLazyKeepaliveCount(channel->receiver.process,
+                              channel->target_extension_id);
+
   delete channel_iter->second;
   channels_.erase(channel_iter);
 }
 
 void ExtensionMessageService::PostMessageFromRenderer(
     int source_port_id, const std::string& message) {
-  MessageChannelMap::iterator iter =
-      channels_.find(GET_CHANNEL_ID(source_port_id));
-  if (iter == channels_.end())
+  int channel_id = GET_CHANNEL_ID(source_port_id);
+  MessageChannelMap::iterator iter = channels_.find(channel_id);
+  if (iter == channels_.end()) {
+    // If this channel is pending, queue up the PostMessage to run once
+    // the channel opens.
+    PendingChannelMap::iterator pending = pending_channels_.find(channel_id);
+    if (pending != pending_channels_.end()) {
+      lazy_background_task_queue_->AddPendingTask(
+          pending->second.first, pending->second.second,
+          base::Bind(&ExtensionMessageService::PendingPostMessage,
+                     base::Unretained(this), source_port_id, message));
+    }
     return;
+  }
 
   // Figure out which port the ID corresponds to.
   int dest_port_id = GET_OPPOSITE_PORT_ID(source_port_id);
@@ -345,6 +388,7 @@ void ExtensionMessageService::PostMessageFromRenderer(
 
   DispatchOnMessage(port, message, dest_port_id);
 }
+
 void ExtensionMessageService::Observe(
     int type,
     const content::NotificationSource& source,
@@ -354,19 +398,17 @@ void ExtensionMessageService::Observe(
     case content::NOTIFICATION_RENDERER_PROCESS_CLOSED: {
       content::RenderProcessHost* renderer =
           content::Source<content::RenderProcessHost>(source).ptr();
-      OnSenderClosed(renderer);
+      OnProcessClosed(renderer);
       break;
     }
-    case content::NOTIFICATION_RENDER_VIEW_HOST_DELETED:
-      OnSenderClosed(content::Source<RenderViewHost>(source).ptr());
-      break;
     default:
       NOTREACHED();
       return;
   }
 }
 
-void ExtensionMessageService::OnSenderClosed(IPC::Message::Sender* sender) {
+void ExtensionMessageService::OnProcessClosed(
+    content::RenderProcessHost* process) {
   // Close any channels that share this renderer.  We notify the opposite
   // port that his pair has closed.
   for (MessageChannelMap::iterator it = channels_.begin();
@@ -375,14 +417,52 @@ void ExtensionMessageService::OnSenderClosed(IPC::Message::Sender* sender) {
     // If both sides are the same renderer, and it is closing, there is no
     // "other" port, so there's no need to notify it.
     bool notify_other_port =
-        current->second->opener.sender != current->second->receiver.sender;
+        current->second->opener.process != current->second->receiver.process;
 
-    if (current->second->opener.sender == sender) {
+    if (current->second->opener.process == process) {
       CloseChannelImpl(current, GET_CHANNEL_OPENER_ID(current->first),
                        notify_other_port);
-    } else if (current->second->receiver.sender == sender) {
+    } else if (current->second->receiver.process == process) {
       CloseChannelImpl(current, GET_CHANNEL_RECEIVERS_ID(current->first),
                        notify_other_port);
     }
   }
+}
+
+bool ExtensionMessageService::MaybeAddPendingOpenChannelTask(
+    Profile* profile,
+    const OpenChannelParams& params) {
+  ExtensionService* service = profile->GetExtensionService();
+  const std::string& extension_id = params.target_extension_id;
+  const Extension* extension = service->extensions()->GetByID(extension_id);
+  if (extension && extension->has_lazy_background_page()) {
+    // If the extension uses spanning incognito mode, make sure we're always
+    // using the original profile since that is what the extension process
+    // will use.
+    if (!extension->incognito_split_mode())
+      profile = profile->GetOriginalProfile();
+    lazy_background_task_queue_->AddPendingTask(profile, extension_id,
+        base::Bind(&ExtensionMessageService::PendingOpenChannel,
+                   base::Unretained(this), params, params.source->GetID()));
+    pending_channels_[GET_CHANNEL_ID(params.receiver_port_id)] =
+        PendingChannel(profile, extension_id);
+    return true;
+  }
+
+  return false;
+}
+
+void ExtensionMessageService::PendingOpenChannel(
+    const OpenChannelParams& params_in,
+    int source_process_id,
+    ExtensionHost* host) {
+  // Re-lookup the source process since it may no longer be valid.
+  OpenChannelParams params = params_in;
+  params.source = content::RenderProcessHost::FromID(source_process_id);
+  if (!params.source)
+    return;
+
+  params.receiver = MessagePort(host->render_process_host(),
+                                MSG_ROUTING_CONTROL);
+  OpenChannelImpl(params);
 }

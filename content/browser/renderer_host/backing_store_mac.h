@@ -12,7 +12,7 @@
 
 class BackingStoreMac : public BackingStore {
  public:
-  BackingStoreMac(RenderWidgetHost* widget, const gfx::Size& size);
+  BackingStoreMac(content::RenderWidgetHost* widget, const gfx::Size& size);
   virtual ~BackingStoreMac();
 
   // A CGLayer that stores the contents of the backing store, cached in GPU
@@ -36,6 +36,9 @@ class BackingStoreMac : public BackingStore {
   virtual void ScrollBackingStore(int dx, int dy,
                                   const gfx::Rect& clip_rect,
                                   const gfx::Size& view_size) OVERRIDE;
+
+  void CopyFromBackingStoreToCGContext(const CGRect& dest_rect,
+                                       CGContextRef context);
 
  private:
   // Creates a CGLayer associated with its owner view's window's graphics

@@ -9,6 +9,8 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "chrome/common/extensions/feature.h"
+#include "chrome/renderer/module_system.h"
 #include "v8/include/v8.h"
 
 namespace WebKit {
@@ -28,7 +30,8 @@ class ChromeV8Context {
  public:
   ChromeV8Context(v8::Handle<v8::Context> context,
                   WebKit::WebFrame* frame,
-                  const std::string& extension_id);
+                  const std::string& extension_id,
+                  extensions::Feature::Context context_type);
   ~ChromeV8Context();
 
   v8::Handle<v8::Context> v8_context() const {
@@ -44,6 +47,14 @@ class ChromeV8Context {
   }
   void clear_web_frame() {
     web_frame_ = NULL;
+  }
+
+  extensions::Feature::Context context_type() const {
+    return context_type_;
+  }
+
+  void set_module_system(scoped_ptr<ModuleSystem> module_system) {
+    module_system_ = module_system.Pass();
   }
 
   // Returns a special Chrome-specific hidden object that is associated with a
@@ -95,6 +106,12 @@ class ChromeV8Context {
 
   // The extension ID this context is associated with.
   std::string extension_id_;
+
+  // The type of context.
+  extensions::Feature::Context context_type_;
+
+  // Owns and structures the JS that is injected to set up extension bindings.
+  scoped_ptr<ModuleSystem> module_system_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeV8Context);
 };

@@ -16,10 +16,11 @@
 #include "base/threading/thread.h"
 #include "base/time.h"
 #include "base/values.h"
+#include "chrome/browser/autocomplete/autocomplete.h"
+#include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/browser_about_handler.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/webui/options2/advanced_options_handler2.h"
 #include "chrome/browser/ui/webui/options2/autofill_options_handler2.h"
 #include "chrome/browser/ui/webui/options2/browser_options_handler2.h"
 #include "chrome/browser/ui/webui/options2/clear_browser_data_handler2.h"
@@ -28,22 +29,23 @@
 #include "chrome/browser/ui/webui/options2/core_options_handler2.h"
 #include "chrome/browser/ui/webui/options2/font_settings_handler2.h"
 #include "chrome/browser/ui/webui/options2/handler_options_handler2.h"
+#include "chrome/browser/ui/webui/options2/home_page_overlay_handler2.h"
 #include "chrome/browser/ui/webui/options2/import_data_handler2.h"
 #include "chrome/browser/ui/webui/options2/language_options_handler2.h"
 #include "chrome/browser/ui/webui/options2/manage_profile_handler2.h"
-#include "chrome/browser/ui/webui/options2/options_sync_setup_handler2.h"
+#include "chrome/browser/ui/webui/options2/options_sync_setup_handler.h"
 #include "chrome/browser/ui/webui/options2/password_manager_handler2.h"
 #include "chrome/browser/ui/webui/options2/search_engine_manager_handler2.h"
 #include "chrome/browser/ui/webui/options2/startup_pages_handler2.h"
-#include "chrome/browser/ui/webui/options2/stop_syncing_handler2.h"
+#include "chrome/browser/ui/webui/options2/stop_syncing_handler.h"
 #include "chrome/browser/ui/webui/options2/web_intents_settings_handler2.h"
 #include "chrome/browser/ui/webui/theme_source.h"
 #include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/time_format.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/renderer_host/render_view_host.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_ui.h"
@@ -63,8 +65,8 @@
 #include "chrome/browser/ui/webui/options2/chromeos/core_chromeos_options_handler2.h"
 #include "chrome/browser/ui/webui/options2/chromeos/cros_language_options_handler2.h"
 #include "chrome/browser/ui/webui/options2/chromeos/internet_options_handler2.h"
-#include "chrome/browser/ui/webui/options2/chromeos/language_chewing_handler2.h"
 #include "chrome/browser/ui/webui/options2/chromeos/keyboard_handler2.h"
+#include "chrome/browser/ui/webui/options2/chromeos/language_chewing_handler2.h"
 #include "chrome/browser/ui/webui/options2/chromeos/language_hangul_handler2.h"
 #include "chrome/browser/ui/webui/options2/chromeos/language_mozc_handler2.h"
 #include "chrome/browser/ui/webui/options2/chromeos/language_pinyin_handler2.h"
@@ -75,17 +77,24 @@
 #include "chrome/browser/ui/webui/options2/chromeos/virtual_keyboard_manager_handler2.h"
 #endif
 
+#if defined(OS_CHROMEOS) && defined(USE_ASH)
+#include "chrome/browser/ui/webui/options2/chromeos/set_wallpaper_options_handler2.h"
+#endif
+
 #if defined(USE_NSS)
 #include "chrome/browser/ui/webui/options2/certificate_manager_handler2.h"
 #endif
 
-using content::WebContents;
-using content::WebUIMessageHandler;
+using content::RenderViewHost;
+
+namespace {
+
+const char kLocalizedStringsFile[] = "strings.js";
+const char kOptionsBundleJsFile[]  = "options_bundle.js";
+
+}  // namespace
 
 namespace options2 {
-
-static const char kLocalizedStringsFile[] = "strings.js";
-static const char kOptionsBundleJsFile[]  = "options_bundle.js";
 
 ////////////////////////////////////////////////////////////////////////////////
 //
@@ -210,13 +219,13 @@ OptionsUI::OptionsUI(content::WebUI* web_ui)
   core_handler->set_handlers_host(this);
   AddOptionsPageUIHandler(localized_strings, core_handler);
 
-  AddOptionsPageUIHandler(localized_strings, new AdvancedOptionsHandler());
   AddOptionsPageUIHandler(localized_strings, new AutofillOptionsHandler());
   AddOptionsPageUIHandler(localized_strings, new BrowserOptionsHandler());
   AddOptionsPageUIHandler(localized_strings, new ClearBrowserDataHandler());
   AddOptionsPageUIHandler(localized_strings, new ContentSettingsHandler());
   AddOptionsPageUIHandler(localized_strings, new CookiesViewHandler());
   AddOptionsPageUIHandler(localized_strings, new FontSettingsHandler());
+  AddOptionsPageUIHandler(localized_strings, new HomePageOverlayHandler());
   AddOptionsPageUIHandler(localized_strings, new WebIntentsSettingsHandler());
 #if defined(OS_CHROMEOS)
   AddOptionsPageUIHandler(localized_strings,
@@ -260,6 +269,11 @@ OptionsUI::OptionsUI(content::WebUI* web_ui)
       new chromeos::options2::ChangePictureOptionsHandler());
   AddOptionsPageUIHandler(localized_strings,
                           new chromeos::options2::StatsOptionsHandler());
+#endif
+#if defined(OS_CHROMEOS) && defined(USE_ASH)
+  AddOptionsPageUIHandler(
+      localized_strings,
+      new chromeos::options2::SetWallpaperOptionsHandler());
 #endif
 #if defined(USE_NSS)
   AddOptionsPageUIHandler(localized_strings, new CertificateManagerHandler());
@@ -312,6 +326,27 @@ void OptionsUI::DidBecomeActiveForReusedRenderView() {
 }
 
 // static
+void OptionsUI::ProcessAutocompleteSuggestions(
+      const AutocompleteResult& autocompleteResult,
+      ListValue * const suggestions) {
+  for (size_t i = 0; i < autocompleteResult.size(); ++i) {
+    const AutocompleteMatch& match = autocompleteResult.match_at(i);
+    AutocompleteMatch::Type type = match.type;
+    if (type != AutocompleteMatch::HISTORY_URL &&
+        type != AutocompleteMatch::HISTORY_TITLE &&
+        type != AutocompleteMatch::HISTORY_BODY &&
+        type != AutocompleteMatch::HISTORY_KEYWORD &&
+        type != AutocompleteMatch::NAVSUGGEST)
+      continue;
+    DictionaryValue* entry = new DictionaryValue();
+    entry->SetString("title", match.description);
+    entry->SetString("displayURL", match.contents);
+    entry->SetString("url", match.destination_url.spec());
+    suggestions->Append(entry);
+  }
+}
+
+// static
 RefCountedMemory* OptionsUI::GetFaviconResourceBytes() {
   return ResourceBundle::GetSharedInstance().
       LoadDataResourceBytes(IDR_SETTINGS_FAVICON);
@@ -325,24 +360,27 @@ void OptionsUI::InitializeHandlers() {
   // delivered after a new web page DOM has been brought up in an existing
   // renderer (due to IPC delays), causing this method to be called twice. If
   // that happens, ignore the second call.
-  if (initialized_handlers_)
-    return;
-  initialized_handlers_ = true;
+  if (!initialized_handlers_) {
+    for (size_t i = 0; i < handlers_.size(); ++i)
+      handlers_[i]->InitializeHandler();
+    initialized_handlers_ = true;
+  }
 
-  std::vector<WebUIMessageHandler*>::iterator iter;
+  // Always initialize the page as when handlers are left over we still need to
+  // do various things like show/hide sections and send data to the Javascript.
   for (size_t i = 0; i < handlers_.size(); ++i)
-    handlers_[i]->Initialize();
+    handlers_[i]->InitializePage();
 }
 
 void OptionsUI::AddOptionsPageUIHandler(DictionaryValue* localized_strings,
-                                         OptionsPageUIHandler* handler_raw) {
+                                        OptionsPageUIHandler* handler_raw) {
   scoped_ptr<OptionsPageUIHandler> handler(handler_raw);
   DCHECK(handler.get());
   // Add only if handler's service is enabled.
   if (handler->IsEnabled()) {
-    handler->GetLocalizedValues(localized_strings);
     // Add handler to the list and also pass the ownership.
     web_ui()->AddMessageHandler(handler.release());
+    handler_raw->GetLocalizedValues(localized_strings);
     handlers_.push_back(handler_raw);
   }
 }

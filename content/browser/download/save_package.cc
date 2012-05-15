@@ -20,13 +20,13 @@
 #include "base/utf_string_conversions.h"
 #include "content/browser/download/download_file_manager.h"
 #include "content/browser/download/download_item_impl.h"
+#include "content/browser/download/download_stats.h"
 #include "content/browser/download/save_file.h"
 #include "content/browser/download/save_file_manager.h"
 #include "content/browser/download/save_item.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
-#include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/renderer_host/resource_dispatcher_host.h"
-#include "content/browser/resource_context.h"
+#include "content/browser/renderer_host/render_view_host_impl.h"
+#include "content/browser/renderer_host/resource_dispatcher_host_impl.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/browser_context.h"
@@ -36,6 +36,7 @@
 #include "content/public/browser/download_manager_delegate.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/render_view_host_delegate.h"
+#include "content/public/browser/resource_context.h"
 #include "content/public/common/url_constants.h"
 #include "net/base/io_buffer.h"
 #include "net/base/mime_util.h"
@@ -47,6 +48,7 @@ using base::Time;
 using content::BrowserThread;
 using content::DownloadItem;
 using content::NavigationEntry;
+using content::ResourceDispatcherHostImpl;
 using content::WebContents;
 using WebKit::WebPageSerializerClient;
 
@@ -135,7 +137,9 @@ SavePackage::SavePackage(WebContents* web_contents,
       all_save_items_count_(0),
       wait_state_(INITIALIZE),
       tab_id_(web_contents->GetRenderProcessHost()->GetID()),
-      unique_id_(g_save_package_id++) {
+      unique_id_(g_save_package_id++),
+      wrote_to_completed_file_(false),
+      wrote_to_failed_file_(false) {
   DCHECK(page_url_.is_valid());
   DCHECK(save_type_ == content::SAVE_PAGE_TYPE_AS_ONLY_HTML ||
          save_type_ == content::SAVE_PAGE_TYPE_AS_COMPLETE_HTML);
@@ -161,7 +165,9 @@ SavePackage::SavePackage(TabContents* tab_contents)
       all_save_items_count_(0),
       wait_state_(INITIALIZE),
       tab_id_(tab_contents->GetRenderProcessHost()->GetID()),
-      unique_id_(g_save_package_id++) {
+      unique_id_(g_save_package_id++),
+      wrote_to_completed_file_(false),
+      wrote_to_failed_file_(false) {
   DCHECK(page_url_.is_valid());
   InternalInit();
 }
@@ -186,7 +192,9 @@ SavePackage::SavePackage(TabContents* tab_contents,
       all_save_items_count_(0),
       wait_state_(INITIALIZE),
       tab_id_(0),
-      unique_id_(g_save_package_id++) {
+      unique_id_(g_save_package_id++),
+      wrote_to_completed_file_(false),
+      wrote_to_failed_file_(false) {
 }
 
 SavePackage::~SavePackage() {
@@ -236,12 +244,14 @@ void SavePackage::Cancel(bool user_action) {
       disk_error_occurred_ = true;
     Stop();
   }
+  download_stats::RecordSavePackageEvent(
+      download_stats::SAVE_PACKAGE_CANCELLED);
 }
 
 // Init() can be called directly, or indirectly via GetSaveInfo(). In both
 // cases, we need file_manager_ to be initialized, so we do this first.
 void SavePackage::InternalInit() {
-  ResourceDispatcherHost* rdh = ResourceDispatcherHost::Get();
+  ResourceDispatcherHostImpl* rdh = ResourceDispatcherHostImpl::Get();
   if (!rdh) {
     NOTREACHED();
     return;
@@ -252,6 +262,8 @@ void SavePackage::InternalInit() {
 
   download_manager_ = web_contents()->GetBrowserContext()->GetDownloadManager();
   DCHECK(download_manager_);
+
+  download_stats::RecordSavePackageEvent(download_stats::SAVE_PACKAGE_STARTED);
 }
 
 bool SavePackage::Init() {
@@ -653,7 +665,7 @@ void SavePackage::CheckFinish() {
                  final_names,
                  dir,
                  web_contents()->GetRenderProcessHost()->GetID(),
-                 web_contents()->GetRenderViewHost()->routing_id(),
+                 web_contents()->GetRenderViewHost()->GetRoutingID(),
                  id()));
 }
 
@@ -665,6 +677,20 @@ void SavePackage::Finish() {
 
   wait_state_ = SUCCESSFUL;
   finished_ = true;
+
+  // Record finish.
+  download_stats::RecordSavePackageEvent(download_stats::SAVE_PACKAGE_FINISHED);
+
+  // Record any errors that occurred.
+  if (wrote_to_completed_file_) {
+    download_stats::RecordSavePackageEvent(
+        download_stats::SAVE_PACKAGE_WRITE_TO_COMPLETED);
+  }
+
+  if (wrote_to_failed_file_) {
+    download_stats::RecordSavePackageEvent(
+        download_stats::SAVE_PACKAGE_WRITE_TO_FAILED);
+  }
 
   // This vector contains the save ids of the save files which SaveFileManager
   // needs to remove from its save_file_map_.
@@ -956,8 +982,22 @@ void SavePackage::OnReceivedSerializedHtmlData(const GURL& frame_url,
   }
 
   SaveUrlItemMap::iterator it = in_progress_items_.find(frame_url.spec());
-  if (it == in_progress_items_.end())
+  if (it == in_progress_items_.end()) {
+    for (SavedItemMap::iterator saved_it = saved_success_items_.begin();
+      saved_it != saved_success_items_.end(); ++saved_it) {
+      if (saved_it->second->url() == frame_url) {
+        wrote_to_completed_file_ = true;
+        break;
+      }
+    }
+
+    it = saved_failed_items_.find(frame_url.spec());
+    if (it != saved_failed_items_.end())
+      wrote_to_failed_file_ = true;
+
     return;
+  }
+
   SaveItem* save_item = it->second;
   DCHECK(save_item->save_source() == SaveFileCreateInfo::SAVE_FILE_FROM_DOM);
 
@@ -1233,6 +1273,8 @@ void SavePackage::ContinueGetSaveInfo(const FilePath& suggested_path,
   if (can_save_as_complete)
     default_extension = kDefaultHtmlExtension;
 
+  // On ChromeOS, OnPathPicked is not invoked; SavePackageFilePickerChromeOS
+  // handles the the save.
   download_manager_->delegate()->ChooseSavePath(
       web_contents(), suggested_path, default_extension, can_save_as_complete,
       base::Bind(&SavePackage::OnPathPicked, AsWeakPtr()));
@@ -1268,7 +1310,7 @@ void SavePackage::StopObservation() {
   download_manager_ = NULL;
 }
 
-void SavePackage::OnDownloadUpdated(content::DownloadItem* download) {
+void SavePackage::OnDownloadUpdated(DownloadItem* download) {
   DCHECK(download_);
   DCHECK(download_ == download);
   DCHECK(download_manager_);

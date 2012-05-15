@@ -1,10 +1,12 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef IPC_IPC_CHANNEL_H_
 #define IPC_IPC_CHANNEL_H_
 #pragma once
+
+#include <string>
 
 #include "base/compiler_specific.h"
 #include "ipc/ipc_channel_handle.h"
@@ -94,6 +96,17 @@ class IPC_EXPORT Channel : public Message::Sender {
 #endif
   };
 
+  // The Hello message is internal to the Channel class.  It is sent
+  // by the peer when the channel is connected.  The message contains
+  // just the process id (pid).  The message has a special routing_id
+  // (MSG_ROUTING_NONE) and type (HELLO_MESSAGE_TYPE).
+  enum {
+    HELLO_MESSAGE_TYPE = kuint16max  // Maximum value of message type (uint16),
+                                     // to avoid conflicting with normal
+                                     // message types, which are enumeration
+                                     // constants starting from 0.
+  };
+
   // The maximum message size in bytes. Attempting to receive a message of this
   // size or bigger results in a channel error.
   static const size_t kMaximumMessageSize = 128 * 1024 * 1024;
@@ -179,6 +192,15 @@ class IPC_EXPORT Channel : public Message::Sender {
   // ID. Even if true, the server may have already accepted a connection.
   static bool IsNamedServerInitialized(const std::string& channel_id);
 
+  // Generates a channel ID that's non-predictable and unique.
+  static std::string GenerateUniqueRandomChannelID();
+
+  // Generates a channel ID that, if passed to the client as a shared secret,
+  // will validate that the client's authenticity. On platforms that do not
+  // require additional this is simply calls GenerateUniqueRandomChannelID().
+  // For portability the prefix should not include the \ character.
+  static std::string GenerateVerifiedChannelID(const std::string& prefix);
+
 #if defined(OS_LINUX)
   // Sandboxed processes live in a PID namespace, so when sending the IPC hello
   // message from client to server we need to send the PID from the global
@@ -197,17 +219,6 @@ class IPC_EXPORT Channel : public Message::Sender {
   // PIMPL to which all channel calls are delegated.
   class ChannelImpl;
   ChannelImpl *channel_impl_;
-
-  // The Hello message is internal to the Channel class.  It is sent
-  // by the peer when the channel is connected.  The message contains
-  // just the process id (pid).  The message has a special routing_id
-  // (MSG_ROUTING_NONE) and type (HELLO_MESSAGE_TYPE).
-  enum {
-    HELLO_MESSAGE_TYPE = kuint16max  // Maximum value of message type (uint16),
-                                     // to avoid conflicting with normal
-                                     // message types, which are enumeration
-                                     // constants starting from 0.
-  };
 };
 
 }  // namespace IPC

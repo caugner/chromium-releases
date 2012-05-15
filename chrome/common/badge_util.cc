@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 #include "third_party/skia/include/core/SkPaint.h"
 #include "third_party/skia/include/core/SkTypeface.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/canvas.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/size.h"
 
@@ -84,8 +84,8 @@ SkBitmap DrawBadgeIconOverlay(const SkBitmap& icon,
     badge_width--;
 
   // Render the badge bitmap and overlay into a canvas.
-  scoped_ptr<gfx::CanvasSkia> canvas(
-      new gfx::CanvasSkia(gfx::Size(badge_width, icon.height()), false));
+  scoped_ptr<gfx::Canvas> canvas(
+      new gfx::Canvas(gfx::Size(badge_width, icon.height()), false));
   canvas->DrawBitmapInt(icon, 0, 0);
 
   // Draw the text overlay centered horizontally and vertically. Skia expects

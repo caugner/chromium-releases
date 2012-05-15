@@ -11,6 +11,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
 #include "base/threading/thread.h"
+#include "net/base/backoff_entry.h"
 #include "remoting/base/encoder.h"
 #include "remoting/host/capturer.h"
 #include "remoting/host/client_session.h"
@@ -106,13 +107,15 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
   ////////////////////////////////////////////////////////////////////////////
   // ClientSession::EventHandler implementation.
   virtual void OnSessionAuthenticated(ClientSession* client) OVERRIDE;
+  virtual void OnSessionChannelsConnected(ClientSession* client) OVERRIDE;
   virtual void OnSessionAuthenticationFailed(ClientSession* client) OVERRIDE;
   virtual void OnSessionClosed(ClientSession* session) OVERRIDE;
   virtual void OnSessionSequenceNumber(ClientSession* session,
                                        int64 sequence_number) OVERRIDE;
-  virtual void OnSessionIpAddress(ClientSession* session,
-                                  const std::string& channel_name,
-                                  const net::IPEndPoint& end_point) OVERRIDE;
+  virtual void OnSessionRouteChange(
+      ClientSession* session,
+      const std::string& channel_name,
+      const protocol::TransportRoute& route) OVERRIDE;
 
   // SessionManager::Listener implementation.
   virtual void OnSessionManagerReady() OVERRIDE;
@@ -175,15 +178,6 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
   DesktopEnvironment* desktop_environment_;
   protocol::NetworkSettings network_settings_;
 
-  // TODO(lambroslambrou): The following is a temporary fix for Me2Me
-  // (crbug.com/105995), pending the AuthenticatorFactory work.
-  // Cache the shared secret, in case SetSharedSecret() is called before the
-  // session manager has been created.
-  // The |have_shared_secret_| flag is to distinguish SetSharedSecret() not
-  // being called at all, from being called with an empty string.
-  std::string shared_secret_;
-  bool have_shared_secret_;
-
   // Connection objects.
   SignalStrategy* signal_strategy_;
   scoped_ptr<protocol::SessionManager> session_manager_;
@@ -209,6 +203,9 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
 
   // Configuration of the protocol.
   scoped_ptr<protocol::CandidateSessionConfig> protocol_config_;
+
+  // Login backoff state.
+  net::BackoffEntry login_backoff_;
 
   // Flags used for RejectAuthenticatingClient().
   bool authenticating_client_;

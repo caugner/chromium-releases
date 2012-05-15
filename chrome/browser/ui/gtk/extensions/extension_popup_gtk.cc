@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,13 +19,15 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/gtk/gtk_theme_service.h"
+#include "chrome/browser/ui/gtk/theme_service_gtk.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/renderer_host/render_widget_host_view_gtk.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/browser/render_view_host.h"
+#include "content/public/browser/render_widget_host_view.h"
 #include "googleurl/src/gurl.h"
+
+using content::RenderViewHost;
 
 ExtensionPopupGtk* ExtensionPopupGtk::current_extension_popup_ = NULL;
 
@@ -60,6 +62,14 @@ ExtensionPopupGtk::ExtensionPopupGtk(Browser* browser,
 
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_HOST_VIEW_SHOULD_CLOSE,
                  content::Source<Profile>(host->profile()));
+
+  registrar_.Add(this, content::NOTIFICATION_DEVTOOLS_WINDOW_CLOSING,
+                 content::Source<Profile>(host->profile()));
+
+  if (!being_inspected_) {
+    registrar_.Add(this, content::NOTIFICATION_DEVTOOLS_WINDOW_OPENING,
+                   content::Source<Profile>(host->profile()));
+  }
 }
 
 ExtensionPopupGtk::~ExtensionPopupGtk() {
@@ -91,9 +101,20 @@ void ExtensionPopupGtk::Observe(int type,
       if (content::Details<ExtensionHost>(host_.get()) == details)
         DestroyPopup();
       break;
+    case content::NOTIFICATION_DEVTOOLS_WINDOW_OPENING:
+      // Make sure it's the devtools window that is inspecting our popup.
+      if (content::Details<RenderViewHost>(host_->render_view_host()) !=
+          details)
+        break;
+
+      // Make sure that the popup won't go away when the inspector is activated.
+      if (bubble_)
+        bubble_->StopGrabbingInput();
+      break;
     case content::NOTIFICATION_DEVTOOLS_WINDOW_CLOSING:
-      // Make sure its the devtools window that inspecting our popup.
-      if (content::Details<RenderViewHost>(host_->render_view_host()) != details)
+      // Make sure it's the devtools window that is inspecting our popup.
+      if (content::Details<RenderViewHost>(host_->render_view_host()) !=
+          details)
         break;
 
       // If the devtools window is closing, we post a task to ourselves to
@@ -115,13 +136,13 @@ void ExtensionPopupGtk::BubbleClosing(BubbleGtk* bubble,
   delete this;
 }
 
-void ExtensionPopupGtk::OnExtensionPreferredSizeChanged(
+void ExtensionPopupGtk::OnExtensionSizeChanged(
     ExtensionViewGtk* view,
     const gfx::Size& new_size) {
   int width = std::max(kMinWidth, std::min(kMaxWidth, new_size.width()));
   int height = std::max(kMinHeight, std::min(kMaxHeight, new_size.height()));
 
-  view->render_view_host()->view()->SetSize(gfx::Size(width, height));
+  view->render_view_host()->GetView()->SetSize(gfx::Size(width, height));
   gtk_widget_set_size_request(view->native_view(), width, height);
 }
 
@@ -141,12 +162,8 @@ void ExtensionPopupGtk::ShowPopup() {
     return;
   }
 
-  if (being_inspected_) {
+  if (being_inspected_)
     DevToolsWindow::OpenDevToolsWindow(host_->render_view_host());
-    // Listen for the the devtools window closing.
-    registrar_.Add(this, content::NOTIFICATION_DEVTOOLS_WINDOW_CLOSING,
-        content::Source<content::BrowserContext>(host_->profile()));
-  }
 
   // Only one instance should be showing at a time. Get rid of the old one, if
   // any. Typically, |current_extension_popup_| will be NULL, but it can be
@@ -169,7 +186,7 @@ void ExtensionPopupGtk::ShowPopup() {
                             arrow_location,
                             false,  // match_system_theme
                             !being_inspected_,  // grab_input
-                            GtkThemeService::GetFrom(browser_->profile()),
+                            ThemeServiceGtk::GetFrom(browser_->profile()),
                             this);
 }
 

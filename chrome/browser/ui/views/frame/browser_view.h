@@ -21,7 +21,9 @@
 #include "chrome/browser/ui/views/frame/browser_frame.h"
 #include "chrome/browser/ui/views/tabs/abstract_tab_strip_view.h"
 #include "chrome/browser/ui/views/unhandled_keyboard_event_handler.h"
+#include "ui/base/accelerators/accelerator.h"
 #include "ui/base/models/simple_menu_model.h"
+#include "ui/gfx/sys_color_change_listener.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/views/controls/single_split_view_listener.h"
 #include "ui/views/widget/widget_delegate.h"
@@ -42,7 +44,6 @@ class BrowserViewLayout;
 class BrowserWindowMoveObserver;
 class ContentsContainer;
 class DownloadShelfView;
-class EncodingMenuModel;
 class Extension;
 class FullscreenExitBubbleViews;
 class InfoBarContainerView;
@@ -52,7 +53,6 @@ class TabContentsContainer;
 class TabContentsContainer;
 class TabStripModel;
 class ToolbarView;
-class ZoomMenuModel;
 
 #if defined(OS_WIN)
 class AeroPeekManager;
@@ -60,12 +60,8 @@ class JumpList;
 #endif
 
 #if defined(USE_AURA)
-class LauncherIconUpdater;
+class LauncherUpdater;
 #endif
-
-namespace ui {
-class Accelerator;
-}
 
 namespace views {
 class AccessiblePaneView;
@@ -82,12 +78,13 @@ class Menu;
 class BrowserView : public BrowserWindow,
                     public BrowserWindowTesting,
                     public TabStripModelObserver,
-                    public ui::SimpleMenuModel::Delegate,
+                    public ui::AcceleratorProvider,
                     public views::WidgetDelegate,
                     public views::Widget::Observer,
                     public views::ClientView,
                     public InfoBarContainer::Delegate,
-                    public views::SingleSplitViewListener {
+                    public views::SingleSplitViewListener,
+                    public gfx::SysColorChangeListener {
  public:
   // The browser view's class name.
   static const char kViewClassName[];
@@ -190,19 +187,13 @@ class BrowserView : public BrowserWindow,
   // Retrieves the icon to use in the frame to indicate guest session.
   SkBitmap GetGuestAvatarIcon() const;
 
-#if defined(OS_WIN)
-  // Called right before displaying the system menu to allow the BrowserView
-  // to add or delete entries.
-  void PrepareToRunSystemMenu(HMENU menu);
-#endif
-
   // Returns true if the Browser object associated with this BrowserView is a
   // tabbed-type window (i.e. a browser window, not an app or popup).
   bool IsBrowserTypeNormal() const {
     return browser_->is_type_tabbed();
   }
 
-  // Register preferences specific to this view.
+  // Register local state preferences specific to this view.
   static void RegisterBrowserViewPrefs(PrefService* prefs);
 
   // Returns true if the specified point(BrowserView coordinates) is in
@@ -224,6 +215,10 @@ class BrowserView : public BrowserWindow,
     move_observer_ = observer;
   }
 
+#if defined(USE_AURA)
+  LauncherUpdater* icon_updater() const { return icon_updater_.get(); }
+#endif
+
   // Overridden from BrowserWindow:
   virtual void Show() OVERRIDE;
   virtual void ShowInactive() OVERRIDE;
@@ -233,6 +228,7 @@ class BrowserView : public BrowserWindow,
   virtual void Deactivate() OVERRIDE;
   virtual bool IsActive() const OVERRIDE;
   virtual void FlashFrame(bool flash) OVERRIDE;
+  virtual bool IsAlwaysOnTop() const OVERRIDE;
   virtual gfx::NativeWindow GetNativeHandle() OVERRIDE;
   virtual BrowserWindowTesting* GetBrowserWindowTesting() OVERRIDE;
   virtual StatusBubble* GetStatusBubble() OVERRIDE;
@@ -276,10 +272,6 @@ class BrowserView : public BrowserWindow,
   virtual bool IsPanel() const OVERRIDE;
   virtual gfx::Rect GetRootWindowResizerRect() const OVERRIDE;
   virtual void DisableInactiveFrame() OVERRIDE;
-  virtual void ConfirmSetDefaultSearchProvider(
-      content::WebContents* web_contents,
-      TemplateURL* template_url,
-      Profile* profile) OVERRIDE;
   virtual void ConfirmAddSearchProvider(const TemplateURL* template_url,
                                         Profile* profile) OVERRIDE;
   virtual void ToggleBookmarkBar() OVERRIDE;
@@ -287,13 +279,16 @@ class BrowserView : public BrowserWindow,
   virtual void ShowUpdateChromeDialog() OVERRIDE;
   virtual void ShowTaskManager() OVERRIDE;
   virtual void ShowBackgroundPages() OVERRIDE;
-  virtual void ShowBookmarkBubble(const GURL& url, bool already_bookmarked)
-      OVERRIDE;
+  virtual void ShowBookmarkBubble(const GURL& url,
+                                  bool already_bookmarked) OVERRIDE;
+  virtual void ShowChromeToMobileBubble() OVERRIDE;
+#if defined(ENABLE_ONE_CLICK_SIGNIN)
+  virtual void ShowOneClickSigninBubble() OVERRIDE;
+#endif
   // TODO(beng): Not an override, move somewhere else.
   void SetDownloadShelfVisible(bool visible);
   virtual bool IsDownloadShelfVisible() const OVERRIDE;
   virtual DownloadShelf* GetDownloadShelf() OVERRIDE;
-  virtual void ShowCollectedCookiesDialog(TabContentsWrapper* wrapper) OVERRIDE;
   virtual void ConfirmBrowserCloseWithPendingDownloads() OVERRIDE;
   virtual void UserChangedTheme() OVERRIDE;
   virtual int GetExtraRenderViewHeight() const OVERRIDE;
@@ -302,6 +297,11 @@ class BrowserView : public BrowserWindow,
                             const GURL& url,
                             const content::SSLStatus& ssl,
                             bool show_history) OVERRIDE;
+  virtual void ShowWebsiteSettings(Profile* profile,
+                                   TabContentsWrapper* tab_contents_wrapper,
+                                   const GURL& url,
+                                   const content::SSLStatus& ssl,
+                                   bool show_history) OVERRIDE;
   virtual void ShowAppMenu() OVERRIDE;
   virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
                                       bool* is_keyboard_shortcut) OVERRIDE;
@@ -327,6 +327,7 @@ class BrowserView : public BrowserWindow,
   virtual void ShowAvatarBubble(content::WebContents* web_contents,
                                 const gfx::Rect& rect) OVERRIDE;
   virtual void ShowAvatarBubbleFromAvatarButton() OVERRIDE;
+  virtual void ShowPasswordGenerationBubble(const gfx::Rect& rect) OVERRIDE;
 
   // Overridden from BrowserWindowTesting:
   virtual BookmarkBarView* GetBookmarkBarView() const OVERRIDE;
@@ -347,14 +348,9 @@ class BrowserView : public BrowserWindow,
                              int index) OVERRIDE;
   virtual void TabStripEmpty() OVERRIDE;
 
-  // Overridden from ui::SimpleMenuModel::Delegate:
-  virtual bool IsCommandIdChecked(int command_id) const OVERRIDE;
-  virtual bool IsCommandIdEnabled(int command_id) const OVERRIDE;
-  virtual bool GetAcceleratorForCommandId(
-      int command_id, ui::Accelerator* accelerator) OVERRIDE;
-  virtual bool IsItemForCommandIdDynamic(int command_id) const OVERRIDE;
-  virtual string16 GetLabelForCommandId(int command_id) const OVERRIDE;
-  virtual void ExecuteCommand(int command_id) OVERRIDE;
+  // Overridden from ui::AcceleratorProvider:
+  virtual bool GetAcceleratorForCommandId(int command_id,
+      ui::Accelerator* accelerator) OVERRIDE;
 
   // Overridden from views::WidgetDelegate:
   virtual bool CanResize() const OVERRIDE;
@@ -397,6 +393,9 @@ class BrowserView : public BrowserWindow,
 
   // views::SingleSplitViewListener overrides:
   virtual bool SplitHandleMoved(views::SingleSplitView* sender) OVERRIDE;
+
+  // gfx::ScopedSysColorChangeListener overrides:
+  virtual void OnSysColorChange() OVERRIDE;
 
  protected:
   // Appends to |toolbars| a pointer to each AccessiblePaneView that
@@ -456,11 +455,6 @@ class BrowserView : public BrowserWindow,
     FullscreenExitBubbleType bubble_type;
   };
 
-#if defined(OS_WIN)
-  // Creates the system menu.
-  void InitSystemMenu();
-#endif
-
   // Returns the BrowserViewLayout.
   BrowserViewLayout* GetBrowserViewLayout() const;
 
@@ -518,15 +512,6 @@ class BrowserView : public BrowserWindow,
   // use.
   void LoadAccelerators();
 
-#if defined(OS_WIN)
-  // Builds the correct menu for when we have minimal chrome.
-  void BuildSystemMenuForBrowserWindow();
-  void BuildSystemMenuForAppOrPopupWindow();
-
-  // Adds optional debug items for frame type toggling.
-  void AddFrameToggleItems();
-#endif
-
   // Retrieves the command id for the specified Windows app command.
   int GetCommandIDForAppCommandID(int app_command_id) const;
 
@@ -551,6 +536,9 @@ class BrowserView : public BrowserWindow,
 
   // Set the value of |toolbar_| and hook it into the views hierarchy
   void SetToolbar(ToolbarView* toolbar);
+
+  // Create an icon for this window in the launcher (currently only for Ash).
+  void CreateLauncherIcon();
 
   // Last focused view that issued a tab traversal.
   int last_focused_view_storage_id_;
@@ -662,13 +650,6 @@ class BrowserView : public BrowserWindow,
   scoped_ptr<FullscreenExitBubbleViews> fullscreen_bubble_;
 
 #if defined(OS_WIN) && !defined(USE_AURA)
-  // The additional items we insert into the system menu.
-  scoped_ptr<views::SystemMenuModel> system_menu_contents_;
-  scoped_ptr<ZoomMenuModel> zoom_menu_contents_;
-  scoped_ptr<EncodingMenuModel> encoding_menu_contents_;
-  // The wrapped system menu itself.
-  scoped_ptr<views::NativeMenuWin> system_menu_;
-
   // This object is used to perform periodic actions in a worker
   // thread. It is currently used to monitor hung plugin windows.
   WorkerThreadTicker ticker_;
@@ -690,7 +671,7 @@ class BrowserView : public BrowserWindow,
 #endif
 
 #if defined(USE_AURA)
-  scoped_ptr<LauncherIconUpdater> icon_updater_;
+  scoped_ptr<LauncherUpdater> icon_updater_;
 #endif
 
   // The timer used to update frames for the Loading Animation.
@@ -708,6 +689,8 @@ class BrowserView : public BrowserWindow,
   PendingFullscreenRequest fullscreen_request_;
 
   BrowserWindowMoveObserver* move_observer_;
+
+  gfx::ScopedSysColorChangeListener color_change_listener_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserView);
 };

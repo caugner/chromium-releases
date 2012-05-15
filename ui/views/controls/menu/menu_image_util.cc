@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,8 @@
 #include "grit/ui_resources.h"
 #include "third_party/skia/include/effects/SkGradientShader.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/canvas.h"
+#include "ui/gfx/image/image.h"
 #include "ui/gfx/point.h"
 #include "ui/gfx/size.h"
 
@@ -30,16 +31,13 @@ const SkColor kIndicatorStroke = SkColorSetRGB(0, 0, 0);
 
 SkBitmap* CreateRadioButtonImage(bool selected) {
   // + 2 (1px on each side) to cover rounding error.
-  gfx::CanvasSkia canvas(gfx::Size(kIndicatorSize + 2, kIndicatorSize + 2),
-                         false);
+  gfx::Canvas canvas(gfx::Size(kIndicatorSize + 2, kIndicatorSize + 2), false);
   canvas.Translate(gfx::Point(1, 1));
 
   SkPoint gradient_points[3];
-  gradient_points[0].set(SkIntToScalar(0), SkIntToScalar(0));
-  gradient_points[1].set(
-      SkIntToScalar(0),
-      SkIntToScalar(static_cast<int>(kIndicatorSize * kGradientStop)));
-  gradient_points[2].set(SkIntToScalar(0), SkIntToScalar(kIndicatorSize));
+  gradient_points[0].iset(0, 0);
+  gradient_points[1].iset(0, static_cast<int>(kIndicatorSize * kGradientStop));
+  gradient_points[2].iset(0, kIndicatorSize);
   SkColor gradient_colors[3] = { kGradient0, kGradient1, kGradient2 };
   SkShader* shader = SkGradientShader::CreateLinear(
       gradient_points, gradient_colors, NULL, arraysize(gradient_points),
@@ -60,10 +58,8 @@ SkBitmap* CreateRadioButtonImage(bool selected) {
 
   if (selected) {
     SkPoint selected_gradient_points[2];
-    selected_gradient_points[0].set(SkIntToScalar(0), SkIntToScalar(0));
-    selected_gradient_points[1].set(
-        SkIntToScalar(0),
-        SkIntToScalar(kSelectedIndicatorSize));
+    selected_gradient_points[0].iset(0, 0);
+    selected_gradient_points[1].iset(0, kSelectedIndicatorSize);
     SkColor selected_gradient_colors[2] = { kRadioButtonIndicatorGradient0,
                                             kRadioButtonIndicatorGradient1 };
     shader = SkGradientShader::CreateLinear(
@@ -88,9 +84,9 @@ SkBitmap* CreateRadioButtonImage(bool selected) {
 SkBitmap* GetRtlSubmenuArrowImage() {
   static SkBitmap* kRtlArrow = NULL;
   if (!kRtlArrow) {
-    ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-    SkBitmap* r = rb.GetBitmapNamed(IDR_MENU_ARROW);
-    gfx::CanvasSkia canvas(gfx::Size(r->width(), r->height()), false);
+    ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+    const SkBitmap* r = rb.GetImageNamed(IDR_MENU_ARROW).ToSkBitmap();
+    gfx::Canvas canvas(gfx::Size(r->width(), r->height()), false);
     canvas.Scale(-1, 1);
     canvas.DrawBitmapInt(*r, - r->width(), 0);
     kRtlArrow = new SkBitmap(canvas.ExtractBitmap());
@@ -110,9 +106,9 @@ const SkBitmap* GetRadioButtonImage(bool selected) {
 }
 
 const SkBitmap* GetSubmenuArrowImage() {
-  return base::i18n::IsRTL() ?
-      GetRtlSubmenuArrowImage() :
-      ResourceBundle::GetSharedInstance().GetBitmapNamed(IDR_MENU_ARROW);
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+  return base::i18n::IsRTL() ? GetRtlSubmenuArrowImage()
+                             : rb.GetImageNamed(IDR_MENU_ARROW).ToSkBitmap();
 }
 
-}  // namespace views;
+}  // namespace views

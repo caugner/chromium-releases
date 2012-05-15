@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,18 +30,19 @@
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
 #include "chrome/browser/ui/gtk/custom_button.h"
 #include "chrome/browser/ui/gtk/gtk_chrome_button.h"
-#include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/location_bar_view_gtk.h"
 #include "chrome/browser/ui/gtk/reload_button_gtk.h"
 #include "chrome/browser/ui/gtk/rounded_window.h"
 #include "chrome/browser/ui/gtk/tabs/tab_strip_gtk.h"
+#include "chrome/browser/ui/gtk/theme_service_gtk.h"
 #include "chrome/browser/ui/gtk/view_id_util.h"
 #include "chrome/browser/ui/toolbar/encoding_menu_controller.h"
 #include "chrome/browser/upgrade_detector.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "content/public/browser/host_zoom_map.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/user_metrics.h"
@@ -127,7 +128,7 @@ BrowserToolbarGtk::~BrowserToolbarGtk() {
 
 void BrowserToolbarGtk::Init(GtkWindow* top_level_window) {
   Profile* profile = browser_->profile();
-  theme_service_ = GtkThemeService::GetFrom(profile);
+  theme_service_ = ThemeServiceGtk::GetFrom(profile);
   registrar_.Add(this,
                  chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
                  content::Source<ThemeService>(theme_service_));
@@ -234,7 +235,8 @@ void BrowserToolbarGtk::Init(GtkWindow* top_level_window) {
   wrench_menu_model_->bookmark_sub_menu_model()->SetMenuGtk(wrench_menu_.get());
 
   registrar_.Add(this, content::NOTIFICATION_ZOOM_LEVEL_CHANGED,
-      content::Source<HostZoomMap>(profile->GetHostZoomMap()));
+      content::Source<HostZoomMap>(
+          HostZoomMap::GetForBrowserContext(profile)));
 
   if (ShouldOnlyShowLocation()) {
     gtk_widget_show(event_box_);
@@ -477,7 +479,7 @@ gboolean BrowserToolbarGtk::OnAlignmentExpose(GtkWidget* widget,
   if (theme_service_->UsingNativeTheme())
     return FALSE;
 
-  cairo_t* cr = gdk_cairo_create(GDK_DRAWABLE(widget->window));
+  cairo_t* cr = gdk_cairo_create(gtk_widget_get_window(widget));
   gdk_cairo_rectangle(cr, &e->area);
   cairo_clip(cr);
 
@@ -624,7 +626,7 @@ void BrowserToolbarGtk::OnDragDataReceived(GtkWidget* widget,
     return;
   }
 
-  GURL url(reinterpret_cast<char*>(data->data));
+  GURL url(reinterpret_cast<const char*>(gtk_selection_data_get_data(data)));
   if (!url.is_valid())
     return;
 
@@ -656,6 +658,8 @@ bool BrowserToolbarGtk::ShouldOnlyShowLocation() const {
 void BrowserToolbarGtk::RebuildWrenchMenu() {
   wrench_menu_model_.reset(new WrenchMenuModel(this, browser_));
   wrench_menu_.reset(new MenuGtk(this, wrench_menu_model_.get()));
+  // The bookmark menu model needs to be able to force the wrench menu to close.
+  wrench_menu_model_->bookmark_sub_menu_model()->SetMenuGtk(wrench_menu_.get());
   is_wrench_menu_model_valid_ = true;
 }
 

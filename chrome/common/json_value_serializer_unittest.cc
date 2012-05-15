@@ -1,11 +1,12 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/basictypes.h"
 #include "base/file_util.h"
+#include "base/json/json_file_value_serializer.h"
 #include "base/json/json_reader.h"
-#include "base/json/json_value_serializer.h"
+#include "base/json/json_string_value_serializer.h"
 #include "base/json/json_writer.h"
 #include "base/path_service.h"
 #include "base/scoped_temp_dir.h"
@@ -109,7 +110,7 @@ TEST(JSONValueSerializerTest, StringEscape) {
   std::string output_js;
   DictionaryValue valueRoot;
   valueRoot.SetString("all_chars", all_chars);
-  base::JSONWriter::Write(&valueRoot, false, &output_js);
+  base::JSONWriter::Write(&valueRoot, &output_js);
   ASSERT_EQ(expected_output, output_js);
 
   // Test JSONValueSerializer interface (uses JSONWriter).

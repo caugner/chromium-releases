@@ -12,10 +12,15 @@
 
 #include "base/compiler_specific.h"
 #include "base/basictypes.h"
+#include "base/supports_user_data.h"
 #include "base/threading/non_thread_safe.h"
 #include "content/common/content_export.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/x509_certificate.h"
+
+namespace content {
+class BrowserContext;
+}
 
 // SSLHostState
 //
@@ -26,10 +31,13 @@
 // controllers.
 
 class CONTENT_EXPORT SSLHostState
-    : NON_EXPORTED_BASE(public base::NonThreadSafe) {
+    : NON_EXPORTED_BASE(base::SupportsUserData::Data),
+      NON_EXPORTED_BASE(public base::NonThreadSafe) {
  public:
+  static SSLHostState* GetFor(content::BrowserContext* browser_context);
+
   SSLHostState();
-  ~SSLHostState();
+  virtual ~SSLHostState();
 
   // Records that a host has run insecure content.
   void HostRanInsecureContent(const std::string& host, int pid);

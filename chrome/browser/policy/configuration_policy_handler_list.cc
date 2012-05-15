@@ -39,9 +39,6 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kHomepageIsNewTabPage,
     prefs::kHomePageIsNewTabPage,
     Value::TYPE_BOOLEAN },
-  { key::kRestoreOnStartup,
-    prefs::kRestoreOnStartup,
-    Value::TYPE_INTEGER },
   { key::kRestoreOnStartupURLs,
     prefs::kURLsToRestoreOnStartup,
     Value::TYPE_LIST },
@@ -180,6 +177,9 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kDisableSSLRecordSplitting,
     prefs::kDisableSSLRecordSplitting,
     Value::TYPE_BOOLEAN },
+  { key::kEnableOnlineRevocationChecks,
+    prefs::kCertRevocationCheckingEnabled,
+    Value::TYPE_BOOLEAN },
   { key::kAuthSchemes,
     prefs::kAuthSchemes,
     Value::TYPE_STRING },
@@ -271,7 +271,7 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
     prefs::kMaxConnectionsPerProxy,
     Value::TYPE_INTEGER },
   { key::kHideWebStorePromo,
-    prefs::kNTPHideWebStorePromo,
+    prefs::kNtpHideWebStorePromo,
     Value::TYPE_BOOLEAN },
   { key::kURLBlacklist,
     prefs::kUrlBlacklist,
@@ -296,7 +296,19 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kChromeOsReleaseChannel,
     prefs::kChromeOsReleaseChannel,
     Value::TYPE_STRING },
+  { key::kGDataDisabled,
+    prefs::kDisableGData,
+    Value::TYPE_BOOLEAN },
+  { key::kGDataDisabledOverCellular,
+    prefs::kDisableGDataOverCellular,
+    Value::TYPE_BOOLEAN },
 #endif  // defined(OS_CHROMEOS)
+
+#if !defined(OS_MACOSX) && !defined(OS_CHROMEOS)
+  { key::kBackgroundModeEnabled,
+    prefs::kBackgroundModeEnabled,
+    Value::TYPE_BOOLEAN },
+#endif  // !defined(OS_MACOSX) && !defined(OS_CHROMEOS)
 };
 
 }  // namespace
@@ -316,6 +328,7 @@ ConfigurationPolicyHandlerList::ConfigurationPolicyHandlerList() {
   handlers_.push_back(new IncognitoModePolicyHandler());
   handlers_.push_back(new JavascriptPolicyHandler());
   handlers_.push_back(new ProxyPolicyHandler());
+  handlers_.push_back(new RestoreOnStartupPolicyHandler());
   handlers_.push_back(new SyncPolicyHandler());
 
 #if !defined(OS_CHROMEOS)

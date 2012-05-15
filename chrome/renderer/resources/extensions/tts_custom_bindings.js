@@ -4,16 +4,14 @@
 
 // Custom bindings for the tts API.
 
-(function() {
+var ttsNatives = requireNative('tts');
+var GetNextTTSEventId = ttsNatives.GetNextTTSEventId;
 
-native function GetChromeHidden();
-native function GetNextTTSEventId();
-
-var chromeHidden = GetChromeHidden();
+var chromeHidden = requireNative('chrome_hidden').GetChromeHidden();
+var sendRequest = require('sendRequest').sendRequest;
 
 chromeHidden.registerCustomHook('tts', function(api) {
   var apiFunctions = api.apiFunctions;
-  var sendRequest = api.sendRequest;
 
   chromeHidden.tts = {};
   chromeHidden.tts.handlers = {};
@@ -31,7 +29,7 @@ chromeHidden.registerCustomHook('tts', function(api) {
     }
   });
 
-  apiFunctions.setHandleRequest("tts.speak", function() {
+  apiFunctions.setHandleRequest('speak', function() {
     var args = arguments;
     if (args.length > 1 && args[1] && args[1].onEvent) {
       var id = GetNextTTSEventId();
@@ -42,5 +40,3 @@ chromeHidden.registerCustomHook('tts', function(api) {
     return id;
   });
 });
-
-})();

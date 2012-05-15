@@ -5,11 +5,12 @@
 #include "chrome/browser/intents/cws_intents_registry.h"
 
 #include "base/callback.h"
-#include "base/json/json_value_serializer.h"
+#include "base/json/json_string_value_serializer.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/stl_util.h"
 #include "base/string16.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/intents/api_key.h"
 #include "chrome/browser/net/browser_url_util.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/browser/webdata/web_data_service.h"
@@ -19,30 +20,37 @@
 
 namespace {
 
-// URL for CWS intents API. TODO(groby): points to staging, fix for M18 release.
+// URL for CWS intents API.
 const char kCWSIntentServiceURL[] =
-  "https://www-googleapis-staging.sandbox.google.com"
-  "/chromewebstore/v1.1b/items/intent";
-
-// Build a REST query URL to retrieve intent info from CWS.
-GURL BuildQueryURL(const string16& action, const string16& type) {
-  GURL request(kCWSIntentServiceURL);
-  request = chrome_browser_net::AppendQueryParameter(request, "intent",
-                                                     UTF16ToUTF8(action));
-  return chrome_browser_net::AppendQueryParameter(request, "mime_types",
-                                                  UTF16ToUTF8(type));
-}
+  "https://www.googleapis.com/chromewebstore/v1.1b/items/intent";
 
 }  // namespace
 
 // Internal object representing all data associated with a single query.
 struct CWSIntentsRegistry::IntentsQuery {
+  IntentsQuery();
+  ~IntentsQuery();
+
   // Underlying URL request query.
-  scoped_ptr<content::URLFetcher> url_fetcher_;
+  scoped_ptr<content::URLFetcher> url_fetcher;
 
   // The callback - invoked on completed retrieval.
-  ResultsCallback callback_;
+  ResultsCallback callback;
 };
+
+CWSIntentsRegistry::IntentsQuery::IntentsQuery() {
+}
+
+CWSIntentsRegistry::IntentsQuery::~IntentsQuery() {
+}
+
+CWSIntentsRegistry::IntentExtensionInfo::IntentExtensionInfo()
+    : num_ratings(0),
+      average_rating(0) {
+}
+
+CWSIntentsRegistry::IntentExtensionInfo::~IntentExtensionInfo() {
+}
 
 CWSIntentsRegistry::CWSIntentsRegistry(net::URLRequestContextGetter* context)
     : request_context_(context) {
@@ -60,7 +68,7 @@ void CWSIntentsRegistry::OnURLFetchComplete(const content::URLFetcher* source) {
   QueryMap::iterator it = queries_.find(handle);
   DCHECK(it != queries_.end());
   scoped_ptr<IntentsQuery> query(it->second);
-  DCHECK(query != NULL);
+  DCHECK(query.get() != NULL);
   queries_.erase(it);
 
   std::string response;
@@ -74,7 +82,7 @@ void CWSIntentsRegistry::OnURLFetchComplete(const content::URLFetcher* source) {
   scoped_ptr<Value> parsed_response;
   JSONStringValueSerializer serializer(response);
   parsed_response.reset(serializer.Deserialize(NULL, &error));
-  if (parsed_response == NULL)
+  if (parsed_response.get() == NULL)
     return;
 
   DictionaryValue* response_dict;
@@ -82,7 +90,7 @@ void CWSIntentsRegistry::OnURLFetchComplete(const content::URLFetcher* source) {
   if (!response_dict)
     return;
   ListValue* items;
-  if (!response_dict->GetList("items",&items))
+  if (!response_dict->GetList("items", &items))
     return;
 
   IntentExtensionList intents;
@@ -92,6 +100,9 @@ void CWSIntentsRegistry::OnURLFetchComplete(const content::URLFetcher* source) {
 
     // All fields are mandatory - skip this result if we can't find a field.
     IntentExtensionInfo info;
+    if (!item->GetString("id", &info.id))
+      continue;
+
     if (!item->GetInteger("num_ratings", &info.num_ratings))
       continue;
 
@@ -99,6 +110,18 @@ void CWSIntentsRegistry::OnURLFetchComplete(const content::URLFetcher* source) {
       continue;
 
     if (!item->GetString("manifest", &info.manifest))
+      continue;
+
+    std::string manifest_utf8 = UTF16ToUTF8(info.manifest);
+    JSONStringValueSerializer manifest_serializer(manifest_utf8);
+    scoped_ptr<Value> manifest_value;
+    manifest_value.reset(manifest_serializer.Deserialize(NULL, &error));
+    if (manifest_value.get() == NULL)
+      continue;
+
+    DictionaryValue* manifest_dict;
+    manifest_value->GetAsDictionary(&manifest_dict);
+    if (!manifest_dict->GetString("name", &info.name))
       continue;
 
     string16 url_string;
@@ -109,28 +132,43 @@ void CWSIntentsRegistry::OnURLFetchComplete(const content::URLFetcher* source) {
     intents.push_back(info);
   }
 
-  if (!query->callback_.is_null())
-    query->callback_.Run(intents);
+  if (!query->callback.is_null())
+    query->callback.Run(intents);
 }
 
-void CWSIntentsRegistry::GetIntentProviders(
-    const string16& action, const string16& mimetype,
-    const ResultsCallback& cb) {
+void CWSIntentsRegistry::GetIntentServices(const string16& action,
+                                           const string16& mimetype,
+                                           const ResultsCallback& cb) {
   scoped_ptr<IntentsQuery> query(new IntentsQuery);
-  query->callback_ = cb;
-  query->url_fetcher_.reset(content::URLFetcher::Create(
+  query->callback = cb;
+  query->url_fetcher.reset(content::URLFetcher::Create(
       0, BuildQueryURL(action,mimetype), content::URLFetcher::GET, this));
 
-  if (query->url_fetcher_ == NULL)
+  if (query->url_fetcher.get() == NULL)
     return;
 
-  query->url_fetcher_->SetRequestContext(request_context_);
-  query->url_fetcher_->SetLoadFlags(
+  query->url_fetcher->SetRequestContext(request_context_);
+  query->url_fetcher->SetLoadFlags(
       net::LOAD_DO_NOT_SEND_COOKIES | net::LOAD_DO_NOT_SAVE_COOKIES);
 
   URLFetcherHandle handle = reinterpret_cast<URLFetcherHandle>(
-      query->url_fetcher_.get());
+      query->url_fetcher.get());
   queries_[handle] = query.release();
-  queries_[handle]->url_fetcher_->Start();
+  queries_[handle]->url_fetcher->Start();
 }
 
+// static
+GURL CWSIntentsRegistry::BuildQueryURL(const string16& action,
+                                       const string16& type) {
+  GURL request(kCWSIntentServiceURL);
+  request = chrome_browser_net::AppendQueryParameter(request, "intent",
+                                                     UTF16ToUTF8(action));
+  request = chrome_browser_net::AppendQueryParameter(request, "mime_types",
+                                                     UTF16ToUTF8(type));
+  if (web_intents::kApiKey[0]) {
+    request = chrome_browser_net::AppendQueryParameter(request, "key",
+                                                       web_intents::kApiKey);
+  }
+
+  return request;
+}

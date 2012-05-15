@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -302,29 +302,22 @@ bool PPB_Font_Shared::IsPPFontDescriptionValid(
 }
 
 // static
-PP_Resource PPB_Font_Shared::CreateAsImpl(
-    PP_Instance instance,
-    const PP_FontDescription_Dev& description,
-    const ::ppapi::Preferences& prefs) {
+PP_Resource PPB_Font_Shared::Create(ResourceObjectType type,
+                                    PP_Instance instance,
+                                    const PP_FontDescription_Dev& description,
+                                    const ::ppapi::Preferences& prefs) {
   if (!::ppapi::PPB_Font_Shared::IsPPFontDescriptionValid(description))
     return 0;
-  return (new PPB_Font_Shared(instance, description, prefs))->GetReference();
+  return (new PPB_Font_Shared(type, instance, description,
+                              prefs))->GetReference();
 }
 
-// static
-PP_Resource PPB_Font_Shared::CreateAsProxy(
-    PP_Instance instance,
-    const PP_FontDescription_Dev& description,
-    const ::ppapi::Preferences& prefs) {
-  return CreateAsImpl(instance, description, prefs);
-}
-
-PPB_Font_Shared::PPB_Font_Shared(PP_Instance pp_instance,
+PPB_Font_Shared::PPB_Font_Shared(ResourceObjectType type,
+                                 PP_Instance instance,
                                  const PP_FontDescription_Dev& desc,
                                  const ::ppapi::Preferences& prefs)
-    : Resource(pp_instance) {
+    : Resource(type, instance) {
   StringVar* face_name = StringVar::FromPPVar(desc.face);
-
   font_impl_.reset(new FontImpl(
       desc, face_name ? face_name->value() : std::string(), prefs));
 }

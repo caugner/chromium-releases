@@ -11,13 +11,13 @@ var remoting = remoting || {};
 /** @constructor
  *  @extends HTMLElement
  */
-remoting.ViewerPlugin = function() {};
+remoting.ViewerPlugin = function() { };
+
+/** @param {string} message The message to send to the host. */
+remoting.ViewerPlugin.prototype.postMessage = function(message) {};
 
 /** @param {string} iq The Iq stanza received from the host. */
 remoting.ViewerPlugin.prototype.onIq = function(iq) {};
-
-/** @param {boolean} scale True to enable scaling, false to disable. */
-remoting.ViewerPlugin.prototype.setScaleToFit = function(scale) {};
 
 /** Release all keys currently pressed by this client. */
 remoting.ViewerPlugin.prototype.releaseAllKeys = function() {};
@@ -37,6 +37,11 @@ remoting.ViewerPlugin.prototype.releaseAllKeys = function() {};
 remoting.ViewerPlugin.prototype.connect =
     function(hostJid, hostPublicKey, clientJid, sharedSecret,
              authenticationMethod, authenticationTag) {};
+
+/**
+ * @param {boolean} scaleToFit New scaleToFit value.
+ */
+remoting.ViewerPlugin.prototype.setScaleToFit = function(scaleToFit) {};
 
 /** @type {function(number, number): void} State change callback function. */
 remoting.ViewerPlugin.prototype.connectionInfoUpdate;

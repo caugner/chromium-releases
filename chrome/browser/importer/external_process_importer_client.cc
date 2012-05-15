@@ -14,12 +14,13 @@
 #include "chrome/browser/importer/profile_import_process_messages.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_service.h"
-#include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/utility_process_host.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
 using content::BrowserThread;
+using content::UtilityProcessHost;
 
 ExternalProcessImporterClient::ExternalProcessImporterClient(
     ExternalProcessImporterHost* importer_host,
@@ -34,16 +35,15 @@ ExternalProcessImporterClient::ExternalProcessImporterClient(
       items_(items),
       bridge_(bridge),
       cancelled_(false) {
-  bridge_->AddRef();
   process_importer_host_->NotifyImportStarted();
 }
 
 ExternalProcessImporterClient::~ExternalProcessImporterClient() {
-  bridge_->Release();
 }
 
 void ExternalProcessImporterClient::CancelImportProcessOnIOThread() {
-  utility_process_host_->Send(new ProfileImportProcessMsg_CancelImport());
+  if (utility_process_host_)
+    utility_process_host_->Send(new ProfileImportProcessMsg_CancelImport());
 }
 
 void ExternalProcessImporterClient::NotifyItemFinishedOnIOThread(
@@ -75,15 +75,15 @@ void ExternalProcessImporterClient::Start() {
 void ExternalProcessImporterClient::StartProcessOnIOThread(
     BrowserThread::ID thread_id) {
   utility_process_host_ =
-      (new UtilityProcessHost(this, thread_id))->AsWeakPtr();
-  utility_process_host_->set_no_sandbox(true);
+      UtilityProcessHost::Create(this, thread_id)->AsWeakPtr();
+  utility_process_host_->DisableSandbox();
 
 #if defined(OS_MACOSX)
-  base::environment_vector env;
+  base::EnvironmentVector env;
   std::string dylib_path = GetFirefoxDylibPath().value();
   if (!dylib_path.empty())
     env.push_back(std::make_pair("DYLD_FALLBACK_LIBRARY_PATH", dylib_path));
-  utility_process_host_->set_env(env);
+  utility_process_host_->SetEnv(env);
 #endif
 
   // Dictionary of all localized strings that could be needed by the importer
@@ -117,13 +117,11 @@ void ExternalProcessImporterClient::Cancel() {
     return;
 
   cancelled_ = true;
-  if (utility_process_host_) {
-    BrowserThread::PostTask(
-        BrowserThread::IO, FROM_HERE,
-        base::Bind(
-            &ExternalProcessImporterClient::CancelImportProcessOnIOThread,
-            this));
-  }
+  BrowserThread::PostTask(
+      BrowserThread::IO, FROM_HERE,
+      base::Bind(
+          &ExternalProcessImporterClient::CancelImportProcessOnIOThread,
+          this));
   Release();
 }
 
@@ -219,7 +217,7 @@ void ExternalProcessImporterClient::OnHistoryImportStart(
 }
 
 void ExternalProcessImporterClient::OnHistoryImportGroup(
-    const std::vector<history::URLRow>& history_rows_group,
+    const history::URLRows& history_rows_group,
     int visit_source) {
   if (cancelled_)
     return;
@@ -292,19 +290,11 @@ void ExternalProcessImporterClient::OnPasswordFormImportReady(
 }
 
 void ExternalProcessImporterClient::OnKeywordsImportReady(
-    const std::vector<TemplateURL>& template_urls,
-        int default_keyword_index, bool unique_on_host_and_path) {
+    const std::vector<TemplateURL*>& template_urls,
+    bool unique_on_host_and_path) {
   if (cancelled_)
     return;
 
-  std::vector<TemplateURL*> template_url_vec;
-  template_url_vec.reserve(template_urls.size());
-  std::vector<TemplateURL>::const_iterator iter;
-  for (iter = template_urls.begin();
-       iter != template_urls.end();
-       ++iter) {
-    template_url_vec.push_back(new TemplateURL(*iter));
-  }
-  bridge_->SetKeywords(template_url_vec, default_keyword_index,
-                       unique_on_host_and_path);
+  bridge_->SetKeywords(template_urls, unique_on_host_and_path);
+  // The pointers in |template_urls| have now been deleted.
 }

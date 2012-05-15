@@ -15,6 +15,7 @@ namespace switches {
 
 CONTENT_EXPORT extern const char kAllowFileAccessFromFiles[];
 extern const char kAllowSandboxDebugging[];
+extern const char kAllowWebUICompositing[];
 extern const char kAuditHandles[];
 extern const char kAuditAllHandles[];
 CONTENT_EXPORT extern const char kBrowserAssertTest[];
@@ -22,7 +23,7 @@ CONTENT_EXPORT extern const char kBrowserCrashTest[];
 CONTENT_EXPORT extern const char kBrowserSubprocessPath[];
 // TODO(jam): this doesn't belong in content.
 CONTENT_EXPORT extern const char kChromeFrame[];
-extern const char kDartFlags[];
+CONTENT_EXPORT extern const char kDefaultDeviceScaleFactor[];
 CONTENT_EXPORT extern const char kDisable3DAPIs[];
 CONTENT_EXPORT extern const char kDisableAccelerated2dCanvas[];
 CONTENT_EXPORT extern const char kDisableAcceleratedCompositing[];
@@ -43,13 +44,13 @@ CONTENT_EXPORT extern const char kBlacklistWebGL[];
 extern const char kDisableFileSystem[];
 extern const char kDisableGeolocation[];
 CONTENT_EXPORT extern const char kDisableGLMultisampling[];
-extern const char kDisableGLSLTranslator[];
 extern const char kDisableGpuDriverBugWorkarounds[];
 extern const char kDisableGpuSandbox[];
 extern const char kReduceGpuSandbox[];
 extern const char kDisableGpuWatchdog[];
 CONTENT_EXPORT extern const char kDisableHangMonitor[];
 extern const char kDisableImageTransportSurface[];
+CONTENT_EXPORT extern const char kDisableInteractiveFormValidation[];
 CONTENT_EXPORT extern const char kDisableJava[];
 CONTENT_EXPORT extern const char kDisableJavaScript[];
 extern const char kDisableJavaScriptI18NAPI[];
@@ -58,69 +59,80 @@ CONTENT_EXPORT extern const char kDisableLogging[];
 CONTENT_EXPORT extern const char kDisableSmoothScrolling[];
 CONTENT_EXPORT extern const char kDisablePlugins[];
 CONTENT_EXPORT extern const char kDisablePopupBlocking[];
+extern const char kDisableRemoteFonts[];
 extern const char kDisableRendererAccessibility[];
 extern const char kDisableSSLFalseStart[];
 extern const char kDisableSeccompSandbox[];
 extern const char kDisableSessionStorage[];
 extern const char kDisableSharedWorkers[];
+extern const char kDisableSiteSpecificQuirks[];
 CONTENT_EXPORT extern const char kDisableSpeechInput[];
-extern const char kDisableSpellcheckAPI[];
+CONTENT_EXPORT extern const char kEnableScriptedSpeech[];
+CONTENT_EXPORT extern const char kDisableThreadedAnimation[];
 CONTENT_EXPORT extern const char kDisableWebAudio[];
+extern const char kDisableWebSecurity[];
 extern const char kDisableWebSockets[];
+extern const char kDisableXSSAuditor[];
+CONTENT_EXPORT extern const char kDomAutomationController[];
 extern const char kEnableAccelerated2dCanvas[];
 CONTENT_EXPORT extern const char kEnableAcceleratedPainting[];
 CONTENT_EXPORT extern const char kEnableAcceleratedFilters[];
 extern const char kEnableAccessibility[];
 extern const char kEnableAccessibilityLogging[];
+extern const char kEnableBrowserPlugin[];
 CONTENT_EXPORT extern const char kEnableCompositingForFixedPosition[];
-CONTENT_EXPORT extern const char kEnableDNSCertProvenanceChecking[];
+extern const char kEnableCssRegions[];
+CONTENT_EXPORT extern const char kEnableDeferred2dCanvas[];
+extern const char kEnableCompositeToTexture[];
 CONTENT_EXPORT extern const char kEnableDeviceMotion[];
+extern const char kEnableFastback[];
+CONTENT_EXPORT extern const char kEnableFixedLayout[];
 CONTENT_EXPORT extern const char kDisableFullScreen[];
 extern const char kEnablePointerLock[];
 extern const char kEnableGamepad[];
-extern const char kEnableGPUPlugin[];
 CONTENT_EXPORT extern const char kEnableLogging[];
 extern const char kEnableMediaSource[];
 extern const char kEnableMediaStream[];
 extern const char kEnableMonitorProfile[];
 extern const char kEnableOriginBoundCerts[];
+extern const char kEnablePartialSwap[];
 extern const char kEnablePreparsedJsCaching[];
 CONTENT_EXPORT extern const char kEnablePrivilegedWebGLExtensions[];
+extern const char kEnablePruneGpuCommandBuffers[];
 extern const char kEnableSSLCachedInfo[];
 extern const char kEnableSandboxLogging[];
 extern const char kEnableSeccompSandbox[];
 extern const char kEnableShadowDOM[];
+extern const char kEnableStyleScoped[];
+CONTENT_EXPORT extern const char kEnableSmoothScrolling[];
 CONTENT_EXPORT extern const char kEnableStatsTable[];
 extern const char kEnableStrictSiteIsolation[];
 CONTENT_EXPORT extern const char kEnableThreadedCompositing[];
+CONTENT_EXPORT extern const char kDisableThreadedCompositing[];
 CONTENT_EXPORT extern const char kEnableTcpFastOpen[];
 CONTENT_EXPORT extern const char kEnableTouchEvents[];
-extern const char kEnableVideoFullscreen[];
 CONTENT_EXPORT extern const char kEnableVideoTrack[];
-CONTENT_EXPORT extern const char kEnableWebIntents[];
+extern const char kEnableViewport[];
+CONTENT_EXPORT extern const char kDisableWebIntents[];
 CONTENT_EXPORT extern const char kExperimentalLocationFeatures[];
 extern const char kExtraPluginDir[];
+CONTENT_EXPORT extern const char kForceCompositingMode[];
 extern const char kForceFieldTestNameAndValue[];
 CONTENT_EXPORT extern const char kForceRendererAccessibility[];
 extern const char kGpuLauncher[];
 CONTENT_EXPORT extern const char kGpuProcess[];
 extern const char kGpuStartupDialog[];
-CONTENT_EXPORT extern const char kIgnoreGpuBlacklist[];
 extern const char kInProcessGPU[];
 extern const char kInProcessPlugins[];
 CONTENT_EXPORT extern const char kInProcessWebGL[];
+CONTENT_EXPORT extern const char kInvertWebContent[];
 CONTENT_EXPORT extern const char kJavaScriptFlags[];
 extern const char kLoadPlugin[];
 CONTENT_EXPORT extern const char kLoggingLevel[];
 extern const char kLogPluginMessages[];
-extern const char kHighLatencyAudio[];
 // TODO(jam): this doesn't belong in content.
 CONTENT_EXPORT extern const char kNaClBrokerProcess[];
 CONTENT_EXPORT extern const char kNaClLoaderProcess[];
-// TODO(bradchen): remove kNaClLinuxHelper switch.
-// This switch enables the experimental lightweight nacl_helper for Linux.
-// It will be going away soon, when the helper is enabled permanently.
-extern const char kNaClLinuxHelper[];
 extern const char kNoJsRandomness[];
 CONTENT_EXPORT extern const char kNoReferrers[];
 CONTENT_EXPORT extern const char kNoSandbox[];
@@ -147,18 +159,21 @@ CONTENT_EXPORT extern const char kRendererAssertTest[];
 extern const char kRendererCmdPrefix[];
 CONTENT_EXPORT extern const char kRendererCrashTest[];
 CONTENT_EXPORT extern const char kRendererProcess[];
+extern const char kRendererProcessLimit[];
 extern const char kRendererStartupDialog[];
 // TODO(jam): this doesn't belong in content.
 CONTENT_EXPORT extern const char kServiceProcess[];
+extern const char kShowCompositedLayerBorders[];
+extern const char kShowCompositedLayerTree[];
+extern const char kShowFPSCounter[];
 extern const char kShowPaintRects[];
 CONTENT_EXPORT extern const char kSingleProcess[];
 CONTENT_EXPORT extern const char kSkipGpuDataLoading[];
 CONTENT_EXPORT extern const char kTestSandbox[];
-extern const char kTouchOptimizedUI[];
 extern const char kTraceStartup[];
 extern const char kTraceStartupFile[];
 extern const char kTraceStartupDuration[];
-extern const char kUnlimitedQuotaForFiles[];
+extern const char kUIUseGPUProcess[];
 CONTENT_EXPORT extern const char kUserAgent[];
 extern const char kUtilityCmdPrefix[];
 CONTENT_EXPORT extern const char kUtilityProcess[];
@@ -187,6 +202,12 @@ CONTENT_EXPORT extern const char kRendererCheckFalseTest[];
 #endif
 
 extern const char kEnablePerTilePainting[];
+
+#if defined(USE_AURA)
+CONTENT_EXPORT extern const char kFlingTapSuppressMaxDown[];
+CONTENT_EXPORT extern const char kFlingTapSuppressMaxGap[];
+CONTENT_EXPORT extern const char kTestCompositor[];
+#endif
 
 }  // namespace switches
 

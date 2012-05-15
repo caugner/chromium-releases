@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,17 +26,18 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_error_utils.h"
-#include "content/browser/renderer_host/render_view_host.h"
 #include "content/public/browser/devtools_agent_host_registry.h"
 #include "content/public/browser/devtools_client_host.h"
 #include "content/public/browser/devtools_manager.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_view_host_delegate.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/content_client.h"
 #include "grit/generated_resources.h"
-#include "webkit/glue/webkit_glue.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "webkit/glue/webkit_glue.h"
 
 using content::DevToolsAgentHost;
 using content::DevToolsAgentHostRegistry;
@@ -147,10 +148,10 @@ class AttachedClientHosts {
           DevToolsManager::GetInstance()->GetDevToolsAgentHostFor(*it);
       if (!agent_host)
         continue;
-      RenderViewHost* rvh =
+      content::RenderViewHost* rvh =
           DevToolsAgentHostRegistry::GetRenderViewHost(agent_host);
-      if (rvh && rvh->delegate() &&
-          rvh->delegate()->GetAsWebContents() == contents)
+      if (rvh && rvh->GetDelegate() &&
+          rvh->GetDelegate()->GetAsWebContents() == contents)
         return static_cast<ExtensionDevToolsClientHost*>(*it);
     }
     return NULL;
@@ -245,7 +246,7 @@ void ExtensionDevToolsClientHost::SendMessageToBackend(
     protocol_request.Set("params", params->DeepCopy());
 
   std::string json_args;
-  base::JSONWriter::Write(&protocol_request, false, &json_args);
+  base::JSONWriter::Write(&protocol_request, &json_args);
   DevToolsManager::GetInstance()->DispatchOnInspectorBackend(this, json_args);
 }
 
@@ -257,7 +258,7 @@ void ExtensionDevToolsClientHost::SendDetachedEvent() {
     args.Append(CreateDebuggeeId(tab_id_));
 
     std::string json_args;
-    base::JSONWriter::Write(&args, false, &json_args);
+    base::JSONWriter::Write(&args, &json_args);
 
     profile->GetExtensionEventRouter()->DispatchEventToExtension(
         extension_id_, keys::kOnDetach, json_args, profile, GURL());
@@ -301,7 +302,7 @@ void ExtensionDevToolsClientHost::DispatchOnInspectorFrontend(
       args.Append(params_value->DeepCopy());
 
     std::string json_args;
-    base::JSONWriter::Write(&args, false, &json_args);
+    base::JSONWriter::Write(&args, &json_args);
 
     profile->GetExtensionEventRouter()->DispatchEventToExtension(
         extension_id_, keys::kOnEvent, json_args, profile, GURL());
@@ -377,7 +378,7 @@ bool DebuggerFunction::InitTabContents() {
   }
   contents_ = wrapper->web_contents();
 
-  if (ChromeWebUIControllerFactory::GetInstance()->HasWebUIScheme(
+  if (content::GetContentClient()->HasWebUIScheme(
           contents_->GetURL())) {
     error_ = ExtensionErrorUtils::FormatErrorMessage(
         keys::kAttachToWebUIError,
@@ -481,7 +482,7 @@ void SendCommandDebuggerFunction::SendResponseBody(
     DictionaryValue* dictionary) {
   Value* error_body;
   if (dictionary->Get("error", &error_body)) {
-    base::JSONWriter::Write(error_body, false, &error_);
+    base::JSONWriter::Write(error_body, &error_);
     SendResponse(false);
     return;
   }

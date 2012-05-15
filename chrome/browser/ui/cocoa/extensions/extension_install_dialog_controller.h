@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,12 +18,13 @@
 class Extension;
 class Profile;
 
-// A controller for dialog to let the user install an extension. Created by
-// CrxInstaller.
+// Displays the extension or bundle install prompt, and notifies the
+// ExtensionInstallUI::Delegate of success or failure.
 @interface ExtensionInstallDialogController : NSWindowController {
-@private
+ @private
   IBOutlet NSImageView* iconView_;
   IBOutlet NSTextField* titleField_;
+  IBOutlet NSTextField* itemsField_;
   IBOutlet NSButton* cancelButton_;
   IBOutlet NSButton* okButton_;
 
@@ -40,14 +41,13 @@ class Profile;
   NSWindow* parentWindow_;  // weak
   Profile* profile_;  // weak
   ExtensionInstallUI::Delegate* delegate_;  // weak
-  const Extension* extension_; // weak
   scoped_ptr<ExtensionInstallUI::Prompt> prompt_;
-  SkBitmap icon_;
 }
 
 // For unit test use only
 @property(nonatomic, readonly) NSImageView* iconView;
 @property(nonatomic, readonly) NSTextField* titleField;
+@property(nonatomic, readonly) NSTextField* itemsField;
 @property(nonatomic, readonly) NSTextField* subtitleField;
 @property(nonatomic, readonly) NSTextField* warningsField;
 @property(nonatomic, readonly) NSButton* cancelButton;
@@ -59,9 +59,7 @@ class Profile;
 
 - (id)initWithParentWindow:(NSWindow*)window
                    profile:(Profile*)profile
-                 extension:(const Extension*)extension
                   delegate:(ExtensionInstallUI::Delegate*)delegate
-                      icon:(SkBitmap*)bitmap
                     prompt:(const ExtensionInstallUI::Prompt&)prompt;
 - (void)runAsModalSheet;
 - (IBAction)storeLinkClicked:(id)sender; // Callback for "View details" link.

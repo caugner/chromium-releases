@@ -2,14 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-var chrome = chrome || {};
-(function () {
-  native function GetChromeHidden();
-  native function AttachEvent(eventName);
-  native function DetachEvent(eventName);
-  native function Print();
+  var eventBindingsNatives = requireNative('event_bindings');
+  var AttachEvent = eventBindingsNatives.AttachEvent;
+  var DetachEvent = eventBindingsNatives.DetachEvent;
+  var Print = eventBindingsNatives.Print;
 
-  var chromeHidden = GetChromeHidden();
+  var chromeHidden = requireNative('chrome_hidden').GetChromeHidden();
 
   // Local implementation of JSON.parse & JSON.stringify that protect us
   // from being clobbered by an extension.
@@ -51,16 +49,25 @@ var chrome = chrome || {};
 
   // Event object.  If opt_eventName is provided, this object represents
   // the unique instance of that named event, and dispatching an event
-  // with that name will route through this object's listeners.
+  // with that name will route through this object's listeners. Note that
+  // opt_eventName is required for events that support rules.
   //
   // Example:
   //   chrome.tabs.onChanged = new chrome.Event("tab-changed");
   //   chrome.tabs.onChanged.addListener(function(data) { alert(data); });
   //   chromeHidden.Event.dispatch("tab-changed", "hi");
   // will result in an alert dialog that says 'hi'.
-  chrome.Event = function(opt_eventName, opt_argSchemas) {
+  //
+  // If opt_eventOptions exists, it is a dictionary that contains the boolean
+  // entries "supportsListeners" and "supportsRules".
+  chrome.Event = function(opt_eventName, opt_argSchemas, opt_eventOptions) {
     this.eventName_ = opt_eventName;
     this.listeners_ = [];
+    this.eventOptions_ = opt_eventOptions ||
+        {"supportsListeners": true, "supportsRules": false};
+
+    if (this.eventOptions_.supportsRules && !opt_eventName)
+      throw new Error("Events that support rules require an event name.");
 
     // Validate event parameters if we are in debug.
     if (opt_argSchemas &&
@@ -75,6 +82,8 @@ var chrome = chrome || {};
                  exception;
         }
       };
+    } else {
+      this.validate_ = function() {}
     }
   };
 
@@ -127,6 +136,8 @@ var chrome = chrome || {};
 
   // Registers a callback to be called when this event is dispatched.
   chrome.Event.prototype.addListener = function(cb) {
+    if (!this.eventOptions_.supportsListeners)
+      throw new Error("This event does not support listeners.");
     if (this.listeners_.length == 0) {
       this.attach_();
     }
@@ -135,6 +146,8 @@ var chrome = chrome || {};
 
   // Unregisters a callback.
   chrome.Event.prototype.removeListener = function(cb) {
+    if (!this.eventOptions_.supportsListeners)
+      throw new Error("This event does not support listeners.");
     var idx = this.findListener_(cb);
     if (idx == -1) {
       return;
@@ -142,17 +155,21 @@ var chrome = chrome || {};
 
     this.listeners_.splice(idx, 1);
     if (this.listeners_.length == 0) {
-      this.detach_();
+      this.detach_(true);
     }
   };
 
   // Test if the given callback is registered for this event.
   chrome.Event.prototype.hasListener = function(cb) {
+    if (!this.eventOptions_.supportsListeners)
+      throw new Error("This event does not support listeners.");
     return this.findListener_(cb) > -1;
   };
 
   // Test if any callbacks are registered for this event.
-  chrome.Event.prototype.hasListeners = function(cb) {
+  chrome.Event.prototype.hasListeners = function() {
+    if (!this.eventOptions_.supportsListeners)
+      throw new Error("This event does not support listeners.");
     return this.listeners_.length > 0;
   };
 
@@ -171,12 +188,12 @@ var chrome = chrome || {};
   // Dispatches this event object to all listeners, passing all supplied
   // arguments to this function each listener.
   chrome.Event.prototype.dispatch = function(varargs) {
+    if (!this.eventOptions_.supportsListeners)
+      throw new Error("This event does not support listeners.");
     var args = Array.prototype.slice.call(arguments);
-    if (this.validate_) {
-      var validationErrors = this.validate_(args);
-      if (validationErrors) {
-        return validationErrors;
-      }
+    var validationErrors = this.validate_(args);
+    if (validationErrors) {
+      return validationErrors;
     }
     for (var i = 0; i < this.listeners_.length; i++) {
       try {
@@ -205,11 +222,11 @@ var chrome = chrome || {};
   };
 
   // Detaches this event object from its name.
-  chrome.Event.prototype.detach_ = function() {
+  chrome.Event.prototype.detach_ = function(manual) {
     var i = allAttachedEvents.indexOf(this);
     if (i >= 0)
       delete allAttachedEvents[i];
-    DetachEvent(this.eventName_);
+    DetachEvent(this.eventName_, manual);
     if (!this.eventName_)
       return;
 
@@ -224,8 +241,52 @@ var chrome = chrome || {};
   chrome.Event.prototype.destroy_ = function() {
     this.listeners_ = [];
     this.validate_ = [];
-    this.detach_();
+    this.detach_(false);
   };
+
+  // Gets the declarative API object, or undefined if this extension doesn't
+  // have access to it.
+  //
+  // This is defined as a function (rather than a variable) because it isn't
+  // accessible until the schema bindings have been generated.
+  function getDeclarativeAPI() {
+    if (chromeHidden.internalAPIs.experimental)
+      return chromeHidden.internalAPIs.experimental.declarative;
+    else
+      return undefined;
+  }
+
+  chrome.Event.prototype.addRules = function(rules, opt_cb) {
+    if (!this.eventOptions_.supportsRules)
+      throw new Error("This event does not support rules.");
+    if (!getDeclarativeAPI()) {
+      throw new Error("You must have permission to use the declarative " +
+                      "API to support rules in events");
+    }
+    getDeclarativeAPI().addRules(this.eventName_, rules, opt_cb);
+  }
+
+  chrome.Event.prototype.removeRules = function(ruleIdentifiers, opt_cb) {
+    if (!this.eventOptions_.supportsRules)
+      throw new Error("This event does not support rules.");
+    if (!getDeclarativeAPI()) {
+      throw new Error("You must have permission to use the declarative " +
+                      "API to support rules in events");
+    }
+    getDeclarativeAPI().removeRules(
+        this.eventName_, ruleIdentifiers, opt_cb);
+  }
+
+  chrome.Event.prototype.getRules = function(ruleIdentifiers, cb) {
+    if (!this.eventOptions_.supportsRules)
+      throw new Error("This event does not support rules.");
+    if (!getDeclarativeAPI()) {
+      throw new Error("You must have permission to use the declarative " +
+                      "API to support rules in events");
+    }
+    getDeclarativeAPI().getRules(
+        this.eventName_, ruleIdentifiers, cb);
+  }
 
   // Special load events: we don't use the DOM unload because that slows
   // down tab shutdown.  On the other hand, onUnload might not always fire,
@@ -241,11 +302,10 @@ var chrome = chrome || {};
     for (var i = 0; i < allAttachedEvents.length; ++i) {
       var event = allAttachedEvents[i];
       if (event)
-        event.detach_();
+        event.detach_(false);
     }
   };
 
   chromeHidden.dispatchError = function(msg) {
     console.error(msg);
   };
-})();

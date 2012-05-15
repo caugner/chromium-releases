@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,9 @@
 #include <string>
 
 class Browser;
+class Extension;
+class GURL;
 class Profile;
-class TabContents;
 class TabContentsWrapper;
 class TabStripModel;
 
@@ -47,8 +48,7 @@ class ExtensionTabUtil {
   static base::DictionaryValue* CreateTabValueActive(
       const content::WebContents* web_contents,
       bool active);
-  static base::DictionaryValue* CreateWindowValue(const Browser* browser,
-                                                  bool populate_tabs);
+
   // Gets the |tab_strip_model| and |tab_index| for the given |web_contents|.
   static bool GetTabStripModel(const content::WebContents* web_contents,
                                TabStripModel** tab_strip_model,
@@ -63,6 +63,20 @@ class ExtensionTabUtil {
                          TabStripModel** tab_strip,
                          TabContentsWrapper** contents,
                          int* tab_index);
+
+  // Takes |url_string| and returns a GURL which is either valid and absolute
+  // or invalid. If |url_string| is not directly interpretable as a valid (it is
+  // likely a relative URL) an attempt is made to resolve it. |extension| is
+  // provided so it can be resolved relative to its extension base
+  // (chrome-extension://<id>/). Using the source frame url would be more
+  // correct, but because the api shipped with urls resolved relative to their
+  // extension base, we decided it wasn't worth breaking existing extensions to
+  // fix.
+  static GURL ResolvePossiblyRelativeURL(const std::string& url_string,
+                                         const Extension* extension);
+
+  // Returns true if |url| is used for testing crashes.
+  static bool IsCrashURL(const GURL& url);
 };
 
 #endif  // CHROME_BROWSER_EXTENSIONS_EXTENSION_TAB_UTIL_H__

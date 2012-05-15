@@ -8,15 +8,14 @@
 #include "base/message_loop.h"
 #include "chrome/browser/sync/notifier/invalidation_version_tracker.h"
 #include "chrome/browser/sync/notifier/mock_sync_notifier_observer.h"
-#include "chrome/browser/sync/syncable/model_type.h"
-#include "chrome/browser/sync/syncable/model_type_payload_map.h"
-#include "chrome/browser/sync/util/weak_handle.h"
-#include "chrome/test/base/test_url_request_context_getter.h"
-#include "content/test/test_browser_thread.h"
 #include "jingle/notifier/base/fake_base_task.h"
 #include "jingle/notifier/base/notifier_options.h"
 #include "net/base/cert_verifier.h"
 #include "net/base/host_resolver.h"
+#include "net/url_request/url_request_test_util.h"
+#include "sync/syncable/model_type.h"
+#include "sync/syncable/model_type_payload_map.h"
+#include "sync/util/weak_handle.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -26,18 +25,14 @@ namespace {
 
 using ::testing::InSequence;
 using ::testing::StrictMock;
-using content::BrowserThread;
 
 class InvalidationNotifierTest : public testing::Test {
- public:
-  InvalidationNotifierTest() : io_thread_(BrowserThread::IO, &message_loop_) {}
-
  protected:
   virtual void SetUp() {
     notifier::NotifierOptions notifier_options;
     // Note: URLRequestContextGetters are ref-counted.
     notifier_options.request_context_getter =
-        new TestURLRequestContextGetter();
+        new TestURLRequestContextGetter(message_loop_.message_loop_proxy());
     invalidation_notifier_.reset(
         new InvalidationNotifier(
             notifier_options,
@@ -50,16 +45,19 @@ class InvalidationNotifierTest : public testing::Test {
 
   virtual void TearDown() {
     invalidation_notifier_->RemoveObserver(&mock_observer_);
-    invalidation_notifier_.reset();
+    // Stopping the invalidation notifier stops its scheduler, which deletes any
+    // pending tasks without running them.  Some tasks "run and delete" another
+    // task, so they must be run in order to avoid leaking the inner task.
+    // Stopping does not schedule any tasks, so it's both necessary and
+    // sufficient to drain the task queue before stopping the notifier.
     message_loop_.RunAllPending();
+    invalidation_notifier_.reset();
   }
 
   MessageLoop message_loop_;
   scoped_ptr<InvalidationNotifier> invalidation_notifier_;
   StrictMock<MockSyncNotifierObserver> mock_observer_;
   notifier::FakeBaseTask fake_base_task_;
-  // Since this test calls HostResolver code, we need an IO thread.
-  content::TestBrowserThread io_thread_;
 };
 
 TEST_F(InvalidationNotifierTest, Basic) {

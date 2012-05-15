@@ -12,31 +12,36 @@
 #include "ui/aura/window.h"
 #include "ui/base/ui_base_types.h"
 
-// This approach (of using RenderViewHostTestHarness's RenderViewHost for a new
-// RenderWidgetHostView) is borrowed from RenderWidgetHostViewMacTest.
-class RenderWidgetHostViewAuraTest : public RenderViewHostTestHarness {
+using content::RenderWidgetHostView;
+using content::RenderViewHostImplTestHarness;
+
+// This approach (of using RenderViewHostImplTestHarness's
+// RenderViewHost for a new RenderWidgetHostView) is borrowed from
+// RenderWidgetHostViewMacTest.
+class RenderWidgetHostViewAuraTest : public RenderViewHostImplTestHarness {
  public:
   RenderWidgetHostViewAuraTest() : old_rwhv_(NULL) {}
 
   virtual void SetUp() {
-    RenderViewHostTestHarness::SetUp();
-    old_rwhv_ = rvh()->view();
-    rwhv_aura_.reset(static_cast<RenderWidgetHostViewAura*>(
-        RenderWidgetHostView::CreateViewForWidget(rvh())));
+    RenderViewHostImplTestHarness::SetUp();
+    old_rwhv_ = rvh()->GetView();
+    rwhv_aura_ = static_cast<RenderWidgetHostViewAura*>(
+        RenderWidgetHostView::CreateViewForWidget(rvh()));
   }
 
   virtual void TearDown() {
     aura::Window* window = rwhv_aura_->GetNativeView();
     if (window->parent())
       window->parent()->RemoveChild(window);
-
-    rvh()->SetView(old_rwhv_);
-    rwhv_aura_.reset();
-    RenderViewHostTestHarness::TearDown();
+    rwhv_aura_->Destroy();
+    // Destroying RWHV sets the host's view to NULL, so destroying view first,
+    // then set the view.
+    test_rvh()->SetView(old_rwhv_);
+    RenderViewHostImplTestHarness::TearDown();
   }
 
  protected:
-  scoped_ptr<RenderWidgetHostViewAura> rwhv_aura_;
+  RenderWidgetHostViewAura* rwhv_aura_;
 
  private:
   RenderWidgetHostView* old_rwhv_;
@@ -52,7 +57,7 @@ TEST_F(RenderWidgetHostViewAuraTest, Fullscreen) {
   aura::Window* window = rwhv_aura_->GetNativeView();
   ASSERT_TRUE(window != NULL);
   EXPECT_EQ(ui::SHOW_STATE_FULLSCREEN,
-            window->GetIntProperty(aura::client::kShowStateKey));
+            window->GetProperty(aura::client::kShowStateKey));
 
   // Check that we requested and received the focus.
   EXPECT_TRUE(window->HasFocus());

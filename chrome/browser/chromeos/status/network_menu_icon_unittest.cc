@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 
 namespace {
 
+// Compares each pixel in two bitmaps for testing.
 bool CompareTwoBitmaps(const SkBitmap& a, const SkBitmap& b, int log_level) {
   CHECK(!a.empty());
   CHECK(!b.empty());
@@ -79,40 +80,49 @@ class NetworkMenuIconTest : public testing::Test {
     wifi_connected_100_bitmap_ = NetworkMenuIcon::GenerateBitmapFromComponents(
         NetworkMenuIcon::GetBitmap(
             NetworkMenuIcon::ARCS,
-            NetworkMenuIcon::NumBitmaps(NetworkMenuIcon::ARCS) - 1),
+            NetworkMenuIcon::NumBitmaps(NetworkMenuIcon::ARCS) - 1,
+            NetworkMenuIcon::COLOR_DARK),
         NULL, NULL, NULL, NULL);
     // Wifi connected, strength = 50%, encrypted = ARCS2 icon + SECURE badge.
     wifi_encrypted_50_bitmap_ = NetworkMenuIcon::GenerateBitmapFromComponents(
-        NetworkMenuIcon::GetBitmap(NetworkMenuIcon::ARCS, 3),
+        NetworkMenuIcon::GetBitmap(NetworkMenuIcon::ARCS, 3,
+                                   NetworkMenuIcon::COLOR_DARK),
         NULL, NULL, NULL, rb_.GetBitmapNamed(IDR_STATUSBAR_NETWORK_SECURE));
     // Wifi disconnected (strength = 0%) = ARCS0 icon.
     wifi_disconnected_bitmap_ = NetworkMenuIcon::GenerateBitmapFromComponents(
-        NetworkMenuIcon::GetBitmap(NetworkMenuIcon::ARCS, 0),
+        NetworkMenuIcon::GetBitmap(NetworkMenuIcon::ARCS, 0,
+                                   NetworkMenuIcon::COLOR_DARK),
         NULL, NULL, NULL, NULL);
     // Wifi connecting = IDR_STATUSBAR_NETWORK_ARCS1 (faded).
     wifi_connecting_bitmap_ = NetworkMenuIcon::GenerateConnectingBitmap(
-        NetworkMenuIcon::GetBitmap(NetworkMenuIcon::ARCS, 1));
+        NetworkMenuIcon::GetBitmap(NetworkMenuIcon::ARCS, 1,
+                                   NetworkMenuIcon::COLOR_DARK));
     // 3G connected, strength = 100% = BARS4 icon + 3G badge.
     cellular_connected_100_bitmap_ =
         NetworkMenuIcon::GenerateBitmapFromComponents(
             NetworkMenuIcon::GetBitmap(
                 NetworkMenuIcon::BARS,
-                NetworkMenuIcon::NumBitmaps(NetworkMenuIcon::BARS) - 1),
+                NetworkMenuIcon::NumBitmaps(NetworkMenuIcon::BARS) - 1,
+                NetworkMenuIcon::COLOR_DARK),
         NULL, NULL, NULL, rb_.GetBitmapNamed(IDR_STATUSBAR_NETWORK_3G));
     // 3G connected, strength = 50%, roaming = BARS2 icon + roaming & 3G badges.
     cellular_roaming_50_bitmap_ = NetworkMenuIcon::GenerateBitmapFromComponents(
-        NetworkMenuIcon::GetBitmap(NetworkMenuIcon::BARS, 3),
+        NetworkMenuIcon::GetBitmap(NetworkMenuIcon::BARS, 3,
+                                   NetworkMenuIcon::COLOR_DARK),
         rb_.GetBitmapNamed(IDR_STATUSBAR_NETWORK_ROAMING), NULL,
         NULL, rb_.GetBitmapNamed(IDR_STATUSBAR_NETWORK_3G));
     // 3G disconnected (strength = 0%) = BARS0 icon + 3G badge.
     cellular_disconnected_bitmap_ =
         NetworkMenuIcon::GenerateBitmapFromComponents(
-            NetworkMenuIcon::GetBitmap(NetworkMenuIcon::BARS, 0),
+            NetworkMenuIcon::GetBitmap(NetworkMenuIcon::BARS, 0,
+                                       NetworkMenuIcon::COLOR_DARK),
             NULL, NULL, NULL, rb_.GetBitmapNamed(IDR_STATUSBAR_NETWORK_3G));
     // 3G connecting = IDR_STATUSBAR_NETWORK_BARS1 (faded).
     cellular_connecting_bitmap_ = NetworkMenuIcon::GenerateConnectingBitmap(
-        NetworkMenuIcon::GetBitmap(NetworkMenuIcon::BARS, 1));
+        NetworkMenuIcon::GetBitmap(NetworkMenuIcon::BARS, 1,
+                                   NetworkMenuIcon::COLOR_DARK));
   }
+
   virtual void TearDown() OVERRIDE {
   }
 
@@ -166,6 +176,7 @@ class NetworkMenuIconTest : public testing::Test {
     return false;
   }
 
+ protected:
   ScopedStubCrosEnabler cros_stub_;
   NetworkLibrary* cros_;
   ResourceBundle& rb_;
@@ -186,29 +197,34 @@ TEST_F(NetworkMenuIconTest, EthernetIcon) {
   Network* network = cros_->FindNetworkByPath("eth1");
   ASSERT_NE(static_cast<const Network*>(NULL), network);
   SetConnected(network, true);
-  SkBitmap icon = NetworkMenuIcon::GetBitmap(network);
+  SkBitmap icon = NetworkMenuIcon::GetBitmap(network,
+                                             NetworkMenuIcon::COLOR_DARK);
   EXPECT_TRUE(CompareBitmaps(icon, ethernet_connected_bitmap_));
 
   SetConnected(network, false);
-  icon = NetworkMenuIcon::GetBitmap(network);
+  icon = NetworkMenuIcon::GetBitmap(network,
+                                    NetworkMenuIcon::COLOR_DARK);
   EXPECT_TRUE(CompareBitmaps(icon, ethernet_disconnected_bitmap_));
 }
 
 TEST_F(NetworkMenuIconTest, WifiIcon) {
   WifiNetwork* network = cros_->FindWifiNetworkByPath("wifi1");
   ASSERT_NE(static_cast<const Network*>(NULL), network);
-  SkBitmap icon = NetworkMenuIcon::GetBitmap(network);
+  SkBitmap icon = NetworkMenuIcon::GetBitmap(network,
+                                             NetworkMenuIcon::COLOR_DARK);
   EXPECT_TRUE(CompareBitmaps(icon, wifi_connected_100_bitmap_));
 
   SetStrength(network, 50);
   SetEncryption(network, SECURITY_RSN);
-  icon = NetworkMenuIcon::GetBitmap(network);
+  icon = NetworkMenuIcon::GetBitmap(network,
+                                    NetworkMenuIcon::COLOR_DARK);
   EXPECT_TRUE(CompareBitmaps(icon, wifi_encrypted_50_bitmap_));
 
   SetConnected(network, false);
   SetStrength(network, 0);
   SetEncryption(network, SECURITY_NONE);
-  icon = NetworkMenuIcon::GetBitmap(network);
+  icon = NetworkMenuIcon::GetBitmap(network,
+                                    NetworkMenuIcon::COLOR_DARK);
   EXPECT_TRUE(CompareBitmaps(icon, wifi_disconnected_bitmap_));
 }
 
@@ -218,18 +234,21 @@ TEST_F(NetworkMenuIconTest, CellularIcon) {
   SetConnected(network, true);
   SetStrength(network, 100);
   SetRoamingState(network, ROAMING_STATE_HOME);
-  SkBitmap icon = NetworkMenuIcon::GetBitmap(network);
+  SkBitmap icon = NetworkMenuIcon::GetBitmap(network,
+                                             NetworkMenuIcon::COLOR_DARK);
   EXPECT_TRUE(CompareBitmaps(icon, cellular_connected_100_bitmap_));
 
   SetStrength(network, 50);
   SetRoamingState(network, ROAMING_STATE_ROAMING);
-  icon = NetworkMenuIcon::GetBitmap(network);
+  icon = NetworkMenuIcon::GetBitmap(network,
+                                    NetworkMenuIcon::COLOR_DARK);
   EXPECT_TRUE(CompareBitmaps(icon, cellular_roaming_50_bitmap_));
 
   SetConnected(network, false);
   SetStrength(network, 0);
   SetRoamingState(network, ROAMING_STATE_HOME);
-  icon = NetworkMenuIcon::GetBitmap(network);
+  icon = NetworkMenuIcon::GetBitmap(network,
+                                    NetworkMenuIcon::COLOR_DARK);
   EXPECT_TRUE(CompareBitmaps(icon, cellular_disconnected_bitmap_));
 }
 
@@ -262,7 +281,6 @@ class TestNetworkMenuIcon : public NetworkMenuIcon {
   Delegate delegate_;
   double animation_;
 };
-
 
 }  // namespace
 

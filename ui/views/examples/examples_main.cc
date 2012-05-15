@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ui/views/examples/examples_main.h"
-
 #include "base/at_exit.h"
 #include "base/command_line.h"
 #include "base/i18n/icu_util.h"
@@ -18,13 +16,13 @@
 #include "ui/views/test/test_views_delegate.h"
 #include "ui/views/widget/widget.h"
 
+#if defined(OS_WIN)
+#include "ui/base/win/scoped_ole_initializer.h"
+#endif
+
 int main(int argc, char** argv) {
 #if defined(OS_WIN)
-  OleInitialize(NULL);
-#elif defined(OS_LINUX)
-  // Initializes gtk stuff.
-  g_type_init();
-  gtk_init(&argc, &argv);
+  ui::ScopedOleInitializer ole_initializer;
 #endif
   CommandLine::Init(argc, argv);
 
@@ -48,18 +46,10 @@ int main(int argc, char** argv) {
 
   views::TestViewsDelegate delegate;
 
-  // We do not use this header: chrome/common/chrome_switches.h
-  // because that would create a bad dependency back on Chrome.
-  views::Widget::SetPureViews(
-      CommandLine::ForCurrentProcess()->HasSwitch("use-pure-views"));
-
   views::examples::ShowExamplesWindow(true);
 
   views::AcceleratorHandler accelerator_handler;
   MessageLoopForUI::current()->RunWithDispatcher(&accelerator_handler);
 
-#if defined(OS_WIN)
-  OleUninitialize();
-#endif
   return 0;
 }

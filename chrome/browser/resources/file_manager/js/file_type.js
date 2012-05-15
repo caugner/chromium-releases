@@ -7,55 +7,94 @@
  */
 var FileType = {};
 
-FileType.types = {
+FileType.types = [
   // Images
-  'jpeg': {type: 'image', name: 'IMAGE_FILE_TYPE', subtype: 'JPEG'},
-  'jpg':  {type: 'image', name: 'IMAGE_FILE_TYPE', subtype: 'JPEG'},
-  'bmp':  {type: 'image', name: 'IMAGE_FILE_TYPE', subtype: 'BMP'},
-  'gif':  {type: 'image', name: 'IMAGE_FILE_TYPE', subtype: 'GIF'},
-  'ico':  {type: 'image', name: 'IMAGE_FILE_TYPE', subtype: 'ICO'},
-  'png':  {type: 'image', name: 'IMAGE_FILE_TYPE', subtype: 'PNG'},
-  'webp': {type: 'image', name: 'IMAGE_FILE_TYPE', subtype: 'WebP'},
+  {type: 'image', name: 'IMAGE_FILE_TYPE', subtype: 'JPEG',
+   pattern: /\.jpe?g$/i},
+  {type: 'image', name: 'IMAGE_FILE_TYPE', subtype: 'BMP',
+   pattern: /\.bmp$/i},
+  {type: 'image', name: 'IMAGE_FILE_TYPE', subtype: 'GIF',
+   pattern: /\.gif$/i},
+  {type: 'image', name: 'IMAGE_FILE_TYPE', subtype: 'ICO',
+   pattern: /\.ico$/i},
+  {type: 'image', name: 'IMAGE_FILE_TYPE', subtype: 'PNG',
+   pattern: /\.png$/i},
+  {type: 'image', name: 'IMAGE_FILE_TYPE', subtype: 'WebP',
+   pattern: /\.webp$/i},
 
   // Video
-  '3gp':  {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: '3GP'},
-  'avi':  {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: 'AVI'},
-  'mov':  {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: 'QuickTime'},
-  'mp4':  {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: 'MPEG'},
-  'm4v':  {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: 'MPEG'},
-  'mpg':  {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: 'MPEG'},
-  'mpeg': {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: 'MPEG'},
-  'mpg4': {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: 'MPEG'},
-  'mpeg4': {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: 'MPEG'},
-  'ogm':  {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: 'OGG'},
-  'ogv':  {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: 'OGG'},
-  'ogx':  {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: 'OGG'},
-  'webm': {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: 'WebM'},
+  {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: '3GP',
+   pattern: /\.3gp$/i},
+  {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: 'AVI',
+   pattern: /\.avi$/i},
+  {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: 'QuickTime',
+   pattern: /\.mov$/i},
+  {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: 'MPEG',
+   pattern: /\.m(p4|4v|pg|peg|pg4|peg4)$/i},
+  {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: 'OGG',
+   pattern: /\.og(m|v|x)$/i},
+  {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: 'WebM',
+   pattern: /\.webm$/i},
 
   // Audio
-  'flac': {type: 'audio', name: 'AUDIO_FILE_TYPE', subtype: 'FLAC'},
-  'mp3':  {type: 'audio', name: 'AUDIO_FILE_TYPE', subtype: 'MP3'},
-  'm4a':  {type: 'audio', name: 'AUDIO_FILE_TYPE', subtype: 'MPEG'},
-  'oga':  {type: 'audio', name: 'AUDIO_FILE_TYPE', subtype: 'OGG'},
-  'ogg':  {type: 'audio', name: 'AUDIO_FILE_TYPE', subtype: 'OGG'},
-  'wav':  {type: 'audio', name: 'AUDIO_FILE_TYPE', subtype: 'WAV'},
+  {type: 'audio', name: 'AUDIO_FILE_TYPE', subtype: 'FLAC',
+   pattern: /\.flac$/i},
+  {type: 'audio', name: 'AUDIO_FILE_TYPE', subtype: 'MP3',
+   pattern: /\.mp3$/i},
+  {type: 'audio', name: 'AUDIO_FILE_TYPE', subtype: 'MPEG',
+   pattern: /\.m4a$/i},
+  {type: 'audio', name: 'AUDIO_FILE_TYPE', subtype: 'OGG',
+   pattern: /\.og(a|g)$/i},
+  {type: 'audio', name: 'AUDIO_FILE_TYPE', subtype: 'WAV',
+   pattern: /\.wav$/i},
 
   // Text
-  'pod': {type: 'text', name: 'PLAIN_TEXT_FILE_TYPE', subtype: 'POD'},
-  'rst': {type: 'text', name: 'PLAIN_TEXT_FILE_TYPE', subtype: 'RST'},
-  'txt': {type: 'text', name: 'PLAIN_TEXT_FILE_TYPE', subtype: 'TXT'},
-  'log': {type: 'text', name: 'PLAIN_TEXT_FILE_TYPE', subtype: 'LOG'},
+  {type: 'text', name: 'PLAIN_TEXT_FILE_TYPE', subtype: 'POD',
+   pattern: /\.pod$/i},
+  {type: 'text', name: 'PLAIN_TEXT_FILE_TYPE', subtype: 'RST',
+   pattern: /\.rst$/i},
+  {type: 'text', name: 'PLAIN_TEXT_FILE_TYPE', subtype: 'TXT',
+   pattern: /\.txt$/i},
+  {type: 'text', name: 'PLAIN_TEXT_FILE_TYPE', subtype: 'LOG',
+   pattern: /\.log$/i},
+
+  // Archive
+  {type: 'archive', name: 'ZIP_ARCHIVE_FILE_TYPE', subtype:'ZIP',
+   pattern: /\.zip$/i},
+  {type: 'archive', name: 'RAR_ARCHIVE_FILE_TYPE', subtype:'RAR',
+   pattern: /\.rar$/i},
+  {type: 'archive', name: 'TAR_ARCHIVE_FILE_TYPE', subtype:'TAR',
+   pattern: /\.tar$/i},
+  {type: 'archive', name: 'TAR_BZIP2_ARCHIVE_FILE_TYPE', subtype:'TBZ2',
+   pattern: /\.(tar.bz2|tbz|tbz2)$/i},
+  {type: 'archive', name: 'TAR_GZIP_ARCHIVE_FILE_TYPE', subtype:'TGZ',
+   pattern: /\.(tar.|t)gz$/i},
+
+  // Hosted docs.
+  {type: 'hosted', icon: 'gdoc', name: 'GDOC_DOCUMENT_FILE_TYPE',
+   pattern: /\.gdoc$/i},
+  {type: 'hosted', icon: 'gsheet', name: 'GSHEET_DOCUMENT_FILE_TYPE',
+   pattern: /\.gsheet$/i,
+   offline: true},
+  {type: 'hosted', icon: 'gslides', name: 'GSLIDES_DOCUMENT_FILE_TYPE',
+   pattern: /\.gslides$/i},
+  {type: 'hosted', icon: 'gdraw', name: 'GDRAW_DOCUMENT_FILE_TYPE',
+   pattern: /\.gdraw$/i},
+  {type: 'hosted', icon: 'gtable', name: 'GTABLE_DOCUMENT_FILE_TYPE',
+   pattern: /\.gtable$/i},
 
   // Others
-  'zip': {type: 'archive', name: 'ZIP_ARCHIVE_FILE_TYPE'},
-
-  'pdf': {type: 'text', icon: 'pdf', name: 'PDF_DOCUMENT_FILE_TYPE',
-          subtype: 'PDF'},
-  'html': {type: 'text', icon: 'html', name: 'HTML_DOCUMENT_FILE_TYPE',
-           subtype: 'HTML'},
-  'htm': {type: 'text', icon: 'html', name: 'HTML_DOCUMENT_FILE_TYPE',
-          subtype: 'HTML'}
-};
+  {type: 'document', icon: 'pdf', name: 'PDF_DOCUMENT_FILE_TYPE',
+   pattern: /\.pdf$/i},
+  {type: 'document', icon: 'html', name: 'HTML_DOCUMENT_FILE_TYPE',
+   pattern: /\.html?$/i},
+  {type: 'document', icon: 'word', name: 'WORD_DOCUMENT_FILE_TYPE',
+   pattern: /\.(doc|docx)$/i},
+  {type: 'document', icon: 'ppt', name: 'POWERPOINT_PRESENTATION_FILE_TYPE',
+   pattern: /\.(ppt|pptx)$/i},
+  {type: 'document', icon: 'excel', name: 'EXCEL_FILE_TYPE',
+   pattern: /\.(xls|xlsx)$/i},
+];
 
 FileType.previewArt = {
   'audio': 'images/filetype_large_audio.png',
@@ -66,22 +105,18 @@ FileType.previewArt = {
 };
 
 /**
- * Extract extension from the file name and convert it to lower case.
+ * Get the file type object that matches a given url.
  *
  * @param {string} url
- * @return {string}
+ * @return {Object} The matching file type object or an empty object.
  */
-FileType.getFileExtension_ = function (url) {
-  var extIndex = url.lastIndexOf('.');
-  if (extIndex < 0)
-    return '';
-  return url.substr(extIndex + 1).toLowerCase();
-};
-
 FileType.getType = function(url) {
-  var extension = FileType.getFileExtension_(url);
-  if (extension in FileType.types)
-    return FileType.types[extension];
+  var types = FileType.types;
+  for (var i = 0; i < types.length; i++) {
+    if (types[i].pattern.test(url)) {
+      return types[i];
+    }
+  }
   return {};
 };
 
@@ -94,6 +129,26 @@ FileType.getType = function(url) {
  */
 FileType.getMediaType = function(url) {
   return FileType.getType(url).type;
+};
+
+/*
+ * Helper functions useful with Array.filter().
+ */
+FileType.isAudio = function(url) {
+  return FileType.getMediaType(url) == 'audio';
+};
+
+FileType.isImage = function(url) {
+  return FileType.getMediaType(url) == 'image';
+};
+
+FileType.isVideo = function(url) {
+  return FileType.getMediaType(url) == 'video';
+};
+
+FileType.isImageOrVideo = function(url) {
+  var type = FileType.getMediaType(url);
+  return type == 'image' || type == 'video';
 };
 
 /**

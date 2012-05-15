@@ -40,8 +40,7 @@ cr.define('cr.ui', function() {
       this.popup_.textContent = '';
       this.buttonContainer_.textContent = '';
       this.multiple = false;
-      this.style.minWidth = '0';
-      this.popup_.style.minWidth = '0';
+      this.popup_.style.minWidth = '';
     },
 
     addItem: function(item) {
@@ -50,18 +49,17 @@ cr.define('cr.ui', function() {
         this.buttonContainer_.appendChild(item);
       } else {
         this.multiple = true;
-        if (this.visible)
-          this.setPopupSize_();
         if (this.popup_.hasChildNodes())
           this.popup_.insertBefore(item, this.popup_.firstChild);
         else
           this.popup_.appendChild(item);
+        if (this.visible)
+          this.setPopupSize_();
       }
     },
 
     setPopupSize_: function() {
-      this.popup_.style.bottom = this.clientHeight + 'px';
-      enlarge(this, this.popup_);
+      this.popup_.style.bottom = (this.clientHeight + 1) + 'px';
       enlarge(this.popup_, this);
     },
 
@@ -79,6 +77,7 @@ cr.define('cr.ui', function() {
       this.buttonContainer_.className = 'cr-button cr-cb-button-container';
       this.trigger_ = this.ownerDocument.createElement('div');
       this.trigger_.className = 'cr-button cr-cb-trigger';
+      this.trigger_.appendChild(this.ownerDocument.createElement('img'));
       this.container_.appendChild(this.buttonContainer_);
       this.container_.appendChild(this.trigger_);
 
@@ -145,7 +144,7 @@ cr.define('cr.ui', function() {
     set visible(value) {
       if (value) {
         this.setAttribute('visible', 'visible');
-        this.setPopupSize_();
+        setTimeout(this.setPopupSize_.bind(this), 0);
       } else {
         this.removeAttribute('visible');
       }

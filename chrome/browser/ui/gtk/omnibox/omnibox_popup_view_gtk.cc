@@ -22,14 +22,15 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_service.h"
-#include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
+#include "chrome/browser/ui/gtk/theme_service_gtk.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_source.h"
 #include "grit/theme_resources.h"
 #include "ui/base/gtk/gtk_compat.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
+#include "ui/base/gtk/gtk_screen_util.h"
 #include "ui/base/gtk/gtk_windowing.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/font.h"
@@ -280,7 +281,7 @@ OmniboxPopupViewGtk::OmniboxPopupViewGtk(const gfx::Font& font,
       location_bar_(location_bar),
       window_(gtk_window_new(GTK_WINDOW_POPUP)),
       layout_(NULL),
-      theme_service_(GtkThemeService::GetFrom(edit_model->profile())),
+      theme_service_(ThemeServiceGtk::GetFrom(edit_model->profile())),
       font_(font.DeriveFont(kEditFontAdjust)),
       ignore_mouse_drag_(false),
       opened_(false) {
@@ -351,9 +352,10 @@ bool OmniboxPopupViewGtk::IsOpen() const {
 void OmniboxPopupViewGtk::InvalidateLine(size_t line) {
   // TODO(deanm): Is it possible to use some constant for the width, instead
   // of having to query the width of the window?
+  GdkWindow* gdk_window = gtk_widget_get_window(GTK_WIDGET(window_));
   GdkRectangle line_rect = GetRectForLine(
-      line, GetWindowRect(window_->window).width()).ToGdkRectangle();
-  gdk_window_invalidate_rect(window_->window, &line_rect, FALSE);
+      line, GetWindowRect(gdk_window).width()).ToGdkRectangle();
+  gdk_window_invalidate_rect(gdk_window, &line_rect, FALSE);
 }
 
 void OmniboxPopupViewGtk::UpdatePopupAppearance() {
@@ -371,7 +373,7 @@ gfx::Rect OmniboxPopupViewGtk::GetTargetBounds() {
   if (!gtk_widget_get_realized(window_))
     return gfx::Rect();
 
-  gfx::Rect retval = gtk_util::GetWidgetScreenBounds(window_);
+  gfx::Rect retval = ui::GetWidgetScreenBounds(window_);
 
   // The widget bounds don't update synchronously so may be out of sync with
   // our last size request.
@@ -385,7 +387,8 @@ gfx::Rect OmniboxPopupViewGtk::GetTargetBounds() {
 
 void OmniboxPopupViewGtk::PaintUpdatesNow() {
   // Paint our queued invalidations now, synchronously.
-  gdk_window_process_updates(window_->window, FALSE);
+  GdkWindow* gdk_window = gtk_widget_get_window(window_);
+  gdk_window_process_updates(gdk_window, FALSE);
 }
 
 void OmniboxPopupViewGtk::OnDragCanceled() {
@@ -439,8 +442,10 @@ void OmniboxPopupViewGtk::Observe(int type,
 
 void OmniboxPopupViewGtk::Show(size_t num_results) {
   gint origin_x, origin_y;
-  gdk_window_get_origin(location_bar_->window, &origin_x, &origin_y);
-  GtkAllocation allocation = location_bar_->allocation;
+  GdkWindow* gdk_window = gtk_widget_get_window(location_bar_);
+  gdk_window_get_origin(gdk_window, &origin_x, &origin_y);
+  GtkAllocation allocation;
+  gtk_widget_get_allocation(location_bar_, &allocation);
 
   int horizontal_offset = 1;
   gtk_window_move(GTK_WINDOW(window_),
@@ -479,14 +484,13 @@ void OmniboxPopupViewGtk::AcceptLine(size_t line,
   // extension, |match| and its contents.  So copy the relevant match out to
   // make sure it stays alive until the call completes.
   AutocompleteMatch match = model_->result().match_at(line);
-  string16 keyword;
-  const bool is_keyword_hint = model_->GetKeywordForMatch(match, &keyword);
-  omnibox_view_->OpenMatch(match, disposition, GURL(), line,
-                           is_keyword_hint ? string16() : keyword);
+  omnibox_view_->OpenMatch(match, disposition, GURL(), line);
 }
 
 const gfx::Image* OmniboxPopupViewGtk::IconForMatch(
-    const AutocompleteMatch& match, bool selected) {
+    const AutocompleteMatch& match,
+    bool selected,
+    bool is_selected_keyword) {
   const SkBitmap* bitmap = model_->GetIconIfExtensionMatch(match);
   if (bitmap) {
     if (!ContainsKey(images_, bitmap)) {
@@ -497,8 +501,14 @@ const gfx::Image* OmniboxPopupViewGtk::IconForMatch(
     return images_[bitmap];
   }
 
-  int icon = match.starred ?
-      IDR_OMNIBOX_STAR : AutocompleteMatch::TypeToIcon(match.type);
+  int icon;
+  if (is_selected_keyword)
+    icon = IDR_OMNIBOX_TTS;
+  else if (match.starred)
+    icon = IDR_OMNIBOX_STAR;
+  else
+    icon = AutocompleteMatch::TypeToIcon(match.type);
+
   if (selected) {
     switch (icon) {
       case IDR_OMNIBOX_EXTENSION_APP:
@@ -516,6 +526,9 @@ const gfx::Image* OmniboxPopupViewGtk::IconForMatch(
       case IDR_OMNIBOX_STAR:
         icon = IDR_OMNIBOX_STAR_DARK;
         break;
+      case IDR_OMNIBOX_TTS:
+        icon = IDR_OMNIBOX_TTS_DARK;
+        break;
       default:
         NOTREACHED();
         break;
@@ -523,6 +536,24 @@ const gfx::Image* OmniboxPopupViewGtk::IconForMatch(
   }
 
   return theme_service_->GetImageNamed(icon);
+}
+
+void OmniboxPopupViewGtk::GetVisibleMatchForInput(
+    size_t index,
+    const AutocompleteMatch** match,
+    bool* is_selected_keyword) {
+  const AutocompleteResult& result = model_->result();
+
+  if (result.match_at(index).associated_keyword.get() &&
+      model_->selected_line() == index &&
+      model_->selected_line_state() == AutocompletePopupModel::KEYWORD) {
+    *match = result.match_at(index).associated_keyword.get();
+    *is_selected_keyword = true;
+    return;
+  }
+
+  *match = &result.match_at(index);
+  *is_selected_keyword = false;
 }
 
 gboolean OmniboxPopupViewGtk::HandleMotion(GtkWidget* widget,
@@ -587,7 +618,7 @@ gboolean OmniboxPopupViewGtk::HandleExpose(GtkWidget* widget,
   if (window_rect.width() < (kIconAreaWidth * 3))
     return TRUE;
 
-  cairo_t* cr = gdk_cairo_create(GDK_DRAWABLE(widget->window));
+  cairo_t* cr = gdk_cairo_create(gtk_widget_get_window(widget));
   gdk_cairo_rectangle(cr, &event->area);
   cairo_clip(cr);
 
@@ -608,7 +639,9 @@ gboolean OmniboxPopupViewGtk::HandleExpose(GtkWidget* widget,
     if (!line_rect.Intersects(damage_rect))
       continue;
 
-    const AutocompleteMatch& match = result.match_at(i);
+    const AutocompleteMatch* match = NULL;
+    bool is_selected_keyword = false;
+    GetVisibleMatchForInput(i, &match, &is_selected_keyword);
     bool is_selected = (model_->selected_line() == i);
     bool is_hovered = (model_->hovered_line() == i);
     if (is_selected || is_hovered) {
@@ -624,20 +657,20 @@ gboolean OmniboxPopupViewGtk::HandleExpose(GtkWidget* widget,
         (line_rect.width() - kIconLeftPadding - kIconWidth);
     // Draw the icon for this result.
     DrawFullImage(cr, widget,
-                  IconForMatch(match, is_selected),
+                  IconForMatch(*match, is_selected, is_selected_keyword),
                   icon_start_x, line_rect.y() + kIconTopPadding);
 
     // Draw the results text vertically centered in the results space.
     // First draw the contents / url, but don't let it take up the whole width
     // if there is also a description to be shown.
-    bool has_description = !match.description.empty();
+    bool has_description = !match->description.empty();
     int text_width = window_rect.width() - (kIconAreaWidth + kRightPadding);
     int allocated_content_width = has_description ?
         static_cast<int>(text_width * kContentWidthPercentage) : text_width;
     pango_layout_set_width(layout_, allocated_content_width * PANGO_SCALE);
 
     // Note: We force to URL to LTR for all text directions.
-    SetupLayoutForMatch(layout_, match.contents, match.contents_class,
+    SetupLayoutForMatch(layout_, match->contents, match->contents_class,
                         is_selected ? &selected_content_text_color_ :
                             &content_text_color_,
                         is_selected ? &selected_content_dim_text_color_ :
@@ -672,7 +705,7 @@ gboolean OmniboxPopupViewGtk::HandleExpose(GtkWidget* widget,
       // In Windows, a boolean "force_dim" is passed as true for the
       // description.  Here, we pass the dim text color for both normal and dim,
       // to accomplish the same thing.
-      SetupLayoutForMatch(layout_, match.description, match.description_class,
+      SetupLayoutForMatch(layout_, match->description, match->description_class,
                           is_selected ? &selected_content_dim_text_color_ :
                               &content_dim_text_color_,
                           is_selected ? &selected_content_dim_text_color_ :
@@ -691,6 +724,18 @@ gboolean OmniboxPopupViewGtk::HandleExpose(GtkWidget* widget,
                     content_y);
       pango_cairo_show_layout(cr, layout_);
       cairo_restore(cr);
+    }
+
+    if (match->associated_keyword.get()) {
+      // If this entry has an associated keyword, draw the arrow at the extreme
+      // other side of the omnibox.
+      icon_start_x = ltr ? (line_rect.width() - kIconLeftPadding - kIconWidth) :
+          kIconLeftPadding;
+      // Draw the icon for this result.
+      DrawFullImage(cr, widget,
+                    theme_service_->GetImageNamed(
+                        is_selected ? IDR_OMNIBOX_TTS_DARK : IDR_OMNIBOX_TTS),
+                    icon_start_x, line_rect.y() + kIconTopPadding);
     }
   }
 

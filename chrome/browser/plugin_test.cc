@@ -30,14 +30,13 @@
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/test/test_timeouts.h"
-#include "chrome/browser/plugin_download_helper.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/automation/automation_proxy.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "chrome/test/ui/ui_test.h"
-#include "content/browser/net/url_request_mock_http_job.h"
+#include "content/test/net/url_request_mock_http_job.h"
 #include "net/base/net_util.h"
 #include "third_party/npapi/bindings/npapi.h"
 #include "webkit/plugins/npapi/plugin_constants_win.h"
@@ -140,7 +139,7 @@ TEST_F(PluginTest, Flash) {
 #elif defined(OS_POSIX)
       "libflashplayer.so"
 #endif
-      ;
+      "";
   TestPlugin("flash.html", kFlashQuery,
              TestTimeouts::action_max_timeout_ms(), false);
 }
@@ -169,7 +168,14 @@ TEST_F(ClickToPlayPluginTest, Flash) {
   WaitForFinish(TestTimeouts::action_max_timeout_ms(), true);
 }
 
-TEST_F(ClickToPlayPluginTest, FlashDocument) {
+#if defined(OS_WIN)
+// Flaky on Windows, see http://crbug.com/113057
+#define MAYBE_FlashDocument DISABLED_FlashDocument
+#else
+#define MAYBE_FlashDocument FlashDocument
+#endif
+
+TEST_F(ClickToPlayPluginTest, MAYBE_FlashDocument) {
   scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
   ASSERT_TRUE(browser.get());
   ASSERT_TRUE(browser->SetDefaultContentSetting(CONTENT_SETTINGS_TYPE_PLUGINS,
@@ -201,7 +207,7 @@ TEST_F(PluginTest, DISABLED_FlashSecurity) {
 // TODO(port) Port the following tests to platforms that have the required
 // plugins.
 // Flaky: http://crbug.com/55915
-TEST_F(PluginTest, FLAKY_Quicktime) {
+TEST_F(PluginTest, DISABLED_Quicktime) {
   TestPlugin("quicktime.html", "",
              TestTimeouts::action_max_timeout_ms(), false);
 }
@@ -228,7 +234,7 @@ TEST_F(PluginTest, FlashOctetStream) {
 
 #if defined(OS_WIN)
 // http://crbug.com/53926
-TEST_F(PluginTest, FLAKY_FlashLayoutWhilePainting) {
+TEST_F(PluginTest, DISABLED_FlashLayoutWhilePainting) {
 #else
 TEST_F(PluginTest, FlashLayoutWhilePainting) {
 #endif

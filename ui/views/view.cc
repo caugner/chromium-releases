@@ -15,7 +15,7 @@
 #include "third_party/skia/include/core/SkRect.h"
 #include "ui/base/accessibility/accessibility_types.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
-#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/canvas.h"
 #include "ui/gfx/compositor/compositor.h"
 #include "ui/gfx/compositor/layer.h"
 #include "ui/gfx/compositor/layer_animator.h"
@@ -36,9 +36,6 @@
 #if defined(OS_WIN)
 #include "base/win/scoped_gdi_object.h"
 #include "ui/views/accessibility/native_view_accessibility_win.h"
-#endif
-#if defined(TOOLKIT_USES_GTK)
-#include "ui/base/gtk/scoped_handle_gtk.h"
 #endif
 
 namespace {
@@ -115,6 +112,7 @@ View::View()
       visible_(true),
       enabled_(true),
       painting_enabled_(true),
+      notify_enter_exit_on_child_(false),
       registered_for_visible_bounds_notification_(false),
       clip_insets_(0, 0, 0, 0),
       needs_layout_(true),
@@ -314,7 +312,7 @@ gfx::Rect View::GetContentsBounds() const {
 }
 
 gfx::Rect View::GetLocalBounds() const {
-  return gfx::Rect(gfx::Point(), size());
+  return gfx::Rect(size());
 }
 
 gfx::Insets View::GetInsets() const {
@@ -327,7 +325,7 @@ gfx::Insets View::GetInsets() const {
 gfx::Rect View::GetVisibleBounds() const {
   if (!IsDrawn())
     return gfx::Rect();
-  gfx::Rect vis_bounds(0, 0, width(), height());
+  gfx::Rect vis_bounds(GetLocalBounds());
   gfx::Rect ancestor_bounds;
   const View* view = this;
   ui::Transform transform;
@@ -381,6 +379,10 @@ gfx::Size View::GetMinimumSize() {
   return GetPreferredSize();
 }
 
+gfx::Size View::GetMaximumSize() {
+  return gfx::Size();
+}
+
 int View::GetHeightForWidth(int w) {
   if (layout_manager_.get())
     return layout_manager_->GetPreferredHeightForWidth(this, w);
@@ -395,6 +397,10 @@ void View::SetVisible(bool visible) {
       SchedulePaint();
 
     visible_ = visible;
+
+    // Notify the parent.
+    if (parent_)
+      parent_->ChildVisibilityChanged(this);
 
     // This notifies all sub-views recursively.
     PropagateVisibilityNotifications(this, visible_);
@@ -776,9 +782,6 @@ bool View::HitTest(const gfx::Point& l) const {
 #elif defined(OS_WIN)
       base::win::ScopedRegion rgn(mask.CreateNativeRegion());
       return !!PtInRegion(rgn, l.x(), l.y());
-#elif defined(TOOLKIT_USES_GTK)
-      ui::ScopedRegion rgn(mask.CreateNativeRegion());
-      return gdk_region_point_in(rgn.Get(), l.x(), l.y());
 #endif
     }
     // No mask, but inside our bounds.
@@ -812,11 +815,15 @@ void View::OnMouseExited(const MouseEvent& event) {
 }
 
 ui::TouchStatus View::OnTouchEvent(const TouchEvent& event) {
-  DVLOG(1) << "visited the OnTouchEvent";
   return ui::TOUCH_STATUS_UNKNOWN;
 }
 
 ui::GestureStatus View::OnGestureEvent(const GestureEvent& event) {
+  if (event.type() == ui::ET_GESTURE_LONG_PRESS) {
+    // TODO(XXX): Call CanStartDragForView first?
+    DoDrag(event, event.location());
+    return ui::GESTURE_STATUS_CONSUMED;
+  }
   return ui::GESTURE_STATUS_UNKNOWN;
 }
 
@@ -927,7 +934,8 @@ View* View::GetPreviousFocusableView() {
 }
 
 void View::SetNextFocusableView(View* view) {
-  view->previous_focusable_view_ = this;
+  if (view)
+    view->previous_focusable_view_ = this;
   next_focusable_view_ = view;
 }
 
@@ -983,7 +991,7 @@ void View::ShowContextMenu(const gfx::Point& p, bool is_mouse_gesture) {
   if (!context_menu_controller_)
     return;
 
-  context_menu_controller_->ShowContextMenuForView(this, p, is_mouse_gesture);
+  context_menu_controller_->ShowContextMenuForView(this, p);
 }
 
 // Drag and drop ---------------------------------------------------------------
@@ -1114,8 +1122,8 @@ void View::OnPaint(gfx::Canvas* canvas) {
 void View::OnPaintBackground(gfx::Canvas* canvas) {
   if (background_.get()) {
     TRACE_EVENT2("views", "View::OnPaintBackground",
-                 "width", canvas->GetSkCanvas()->getDevice()->width(),
-                 "height", canvas->GetSkCanvas()->getDevice()->height());
+                 "width", canvas->sk_canvas()->getDevice()->width(),
+                 "height", canvas->sk_canvas()->getDevice()->height());
     background_->Paint(canvas, this);
   }
 }
@@ -1123,8 +1131,8 @@ void View::OnPaintBackground(gfx::Canvas* canvas) {
 void View::OnPaintBorder(gfx::Canvas* canvas) {
   if (border_.get()) {
     TRACE_EVENT2("views", "View::OnPaintBorder",
-                 "width", canvas->GetSkCanvas()->getDevice()->width(),
-                 "height", canvas->GetSkCanvas()->getDevice()->height());
+                 "width", canvas->sk_canvas()->getDevice()->width(),
+                 "height", canvas->sk_canvas()->getDevice()->height());
     border_->Paint(*this, canvas);
   }
 }
@@ -1132,8 +1140,8 @@ void View::OnPaintBorder(gfx::Canvas* canvas) {
 void View::OnPaintFocusBorder(gfx::Canvas* canvas) {
   if (HasFocus() && (focusable() || IsAccessibilityFocusable())) {
     TRACE_EVENT2("views", "views::OnPaintFocusBorder",
-                 "width", canvas->GetSkCanvas()->getDevice()->width(),
-                 "height", canvas->GetSkCanvas()->getDevice()->height());
+                 "width", canvas->sk_canvas()->getDevice()->width(),
+                 "height", canvas->sk_canvas()->getDevice()->height());
     canvas->DrawFocusRect(GetLocalBounds());
   }
 }
@@ -1223,7 +1231,7 @@ void View::UpdateChildLayerBounds(const gfx::Point& offset) {
 
 void View::OnPaintLayer(gfx::Canvas* canvas) {
   if (!layer() || !layer()->fills_bounds_opaquely())
-    canvas->GetSkCanvas()->drawColor(SK_ColorBLACK, SkXfermode::kClear_Mode);
+    canvas->sk_canvas()->drawColor(SK_ColorBLACK, SkXfermode::kClear_Mode);
   PaintCommon(canvas);
 }
 
@@ -1954,7 +1962,8 @@ void View::RegisterPendingAccelerators() {
   for (std::vector<ui::Accelerator>::const_iterator i(
            accelerators_->begin() + registered_accelerator_count_);
        i != accelerators_->end(); ++i) {
-    accelerator_focus_manager_->RegisterAccelerator(*i, this);
+    accelerator_focus_manager_->RegisterAccelerator(
+        *i, ui::AcceleratorManager::kNormalPriority, this);
   }
   registered_accelerator_count_ = accelerators_->size();
 }
@@ -2050,7 +2059,7 @@ void View::UpdateTooltip() {
 
 // Drag and drop ---------------------------------------------------------------
 
-void View::DoDrag(const MouseEvent& event, const gfx::Point& press_pt) {
+void View::DoDrag(const LocatedEvent& event, const gfx::Point& press_pt) {
 #if !defined(OS_MACOSX)
   int drag_operations = GetDragOperations(press_pt);
   if (drag_operations == ui::DragDropTypes::DRAG_NONE)
@@ -2061,7 +2070,9 @@ void View::DoDrag(const MouseEvent& event, const gfx::Point& press_pt) {
 
   // Message the RootView to do the drag and drop. That way if we're removed
   // the RootView can detect it and avoid calling us back.
-  GetWidget()->RunShellDrag(this, data, drag_operations);
+  gfx::Point widget_location(event.location());
+  ConvertPointToWidget(this, &widget_location);
+  GetWidget()->RunShellDrag(this, data, widget_location, drag_operations);
 #endif  // !defined(OS_MACOSX)
 }
 

@@ -9,7 +9,7 @@
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/i18n/rtl.h"
-#include "base/json/json_value_serializer.h"
+#include "base/json/json_string_value_serializer.h"
 #include "base/md5.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/scoped_temp_dir.h"
@@ -32,7 +32,7 @@
 #include "chrome/test/automation/window_proxy.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "chrome/test/ui/ui_test.h"
-#include "content/browser/net/url_request_slow_http_job.h"
+#include "content/test/net/url_request_slow_http_job.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/net_util.h"
 #include "net/test/test_server.h"
@@ -413,7 +413,7 @@ TEST_F(AutomationProxyTest2, GetActiveTabIndex) {
 
 // http://crbug.com/98071
 #if defined(OS_MACOSX)
-#define MAYBE_GetTabTitle FLAKY_GetTabTitle
+#define MAYBE_GetTabTitle DISABLED_GetTabTitle
 #else
 #define MAYBE_GetTabTitle GetTabTitle
 #endif
@@ -516,7 +516,7 @@ TEST_F(AutomationProxyTest, AcceleratorDownloads) {
 
 // http://crbug.com/109642
 #if defined(OS_MACOSX)
-#define MAYBE_AcceleratorExtensions FLAKY_AcceleratorExtensions
+#define MAYBE_AcceleratorExtensions DISABLED_AcceleratorExtensions
 #else
 #define MAYBE_AcceleratorExtensions AcceleratorExtensions
 #endif
@@ -526,7 +526,7 @@ TEST_F(AutomationProxyTest, MAYBE_AcceleratorExtensions) {
 
   ASSERT_TRUE(window->RunCommand(IDC_MANAGE_EXTENSIONS));
 
-  EXPECT_EQ("chrome://settings/extensions", GetActiveTabURL().spec());
+  EXPECT_EQ("chrome://chrome/extensions", GetActiveTabURL().spec());
 }
 
 TEST_F(AutomationProxyTest, AcceleratorHistory) {
@@ -535,8 +535,9 @@ TEST_F(AutomationProxyTest, AcceleratorHistory) {
 
   ASSERT_TRUE(window->RunCommand(IDC_SHOW_HISTORY));
 
-  // We expect the RunCommand above to wait until the title is updated.
-  EXPECT_EQ(L"History", GetActiveTabTitle());
+  EXPECT_EQ(std::string(chrome::kChromeUIUberURL) +
+                chrome::kChromeUIHistoryHost + "/",
+            GetActiveTabURL().spec());
 }
 
 class AutomationProxyTest4 : public UITest {
@@ -657,7 +658,7 @@ TEST_F(AutomationProxyTest3, FrameDocumentCanBeAccessed) {
 }
 
 // Flaky, http://crbug.com/70937
-TEST_F(AutomationProxyTest, FLAKY_BlockedPopupTest) {
+TEST_F(AutomationProxyTest, DISABLED_BlockedPopupTest) {
   scoped_refptr<BrowserProxy> window(automation()->GetBrowserWindow(0));
   ASSERT_TRUE(window.get());
 
@@ -757,7 +758,7 @@ void ExternalTabUITestMockClient::IgnoreFaviconNetworkRequest() {
 
 void ExternalTabUITestMockClient::InvalidateHandle(
     const IPC::Message& message) {
-  void* iter = NULL;
+  PickleIterator iter(message);
   int handle;
   ASSERT_TRUE(message.ReadInt(&iter, &handle));
 
@@ -919,7 +920,7 @@ ProxyLauncher* ExternalTabUITest::CreateProxyLauncher() {
 
 // Create with specifying a url
 // Flaky, http://crbug.com/32293
-TEST_F(ExternalTabUITest, FLAKY_CreateExternalTab1) {
+TEST_F(ExternalTabUITest, DISABLED_CreateExternalTab1) {
   scoped_refptr<TabProxy> tab;
   TimedMessageLoopRunner loop(MessageLoop::current());
   ASSERT_THAT(mock_, testing::NotNull());
@@ -942,7 +943,7 @@ TEST_F(ExternalTabUITest, FLAKY_CreateExternalTab1) {
 
 // Create with empty url and then navigate
 // Flaky, http://crbug.com/32293
-TEST_F(ExternalTabUITest, FLAKY_CreateExternalTab2) {
+TEST_F(ExternalTabUITest, DISABLED_CreateExternalTab2) {
   scoped_refptr<TabProxy> tab;
   TimedMessageLoopRunner loop(MessageLoop::current());
   ASSERT_THAT(mock_, testing::NotNull());
@@ -965,7 +966,7 @@ TEST_F(ExternalTabUITest, FLAKY_CreateExternalTab2) {
 }
 
 // FLAKY: http://crbug.com/60409
-TEST_F(ExternalTabUITest, FLAKY_IncognitoMode) {
+TEST_F(ExternalTabUITest, DISABLED_IncognitoMode) {
   scoped_refptr<TabProxy> tab;
   TimedMessageLoopRunner loop(MessageLoop::current());
   ASSERT_THAT(mock_, testing::NotNull());
@@ -1007,7 +1008,7 @@ TEST_F(ExternalTabUITest, FLAKY_IncognitoMode) {
 }
 
 // FLAKY: http://crbug.com/44617
-TEST_F(ExternalTabUITest, FLAKY_TabPostMessage) {
+TEST_F(ExternalTabUITest, DISABLED_TabPostMessage) {
   scoped_refptr<TabProxy> tab;
   TimedMessageLoopRunner loop(MessageLoop::current());
   ASSERT_THAT(mock_, testing::NotNull());
@@ -1051,9 +1052,10 @@ TEST_F(ExternalTabUITest, FLAKY_TabPostMessage) {
 }
 
 // Flaky: http://crbug.com/62143
-TEST_F(ExternalTabUITest, FLAKY_PostMessageTarget)  {
+TEST_F(ExternalTabUITest, DISABLED_PostMessageTarget)  {
   net::TestServer test_server(
       net::TestServer::TYPE_HTTP,
+      net::TestServer::kLocalhost,
       FilePath(FILE_PATH_LITERAL("chrome/test/data/external_tab")));
   ASSERT_TRUE(test_server.Start());
 
@@ -1400,7 +1402,7 @@ TEST_F(ExternalTabUITestPopupEnabled, MAYBE_UserGestureTargetBlank) {
 #endif  // defined(OS_WIN)
 
 // Flaky especially on Windows. See crbug.com/25039.
-TEST_F(AutomationProxyTest, FLAKY_AppModalDialogTest) {
+TEST_F(AutomationProxyTest, DISABLED_AppModalDialogTest) {
   scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
   ASSERT_TRUE(browser.get());
   scoped_refptr<TabProxy> tab(browser->GetTab(0));

@@ -33,6 +33,8 @@
   # This is the suite that gets run on 'Chromium' builds.
   'CONTINUOUS': {
     'all': [
+      'about_plugins_ui.AboutPluginsUITest',
+      'apptest',
       'autofill',
       'bookmark_bar',
       'bookmarks',
@@ -50,6 +52,7 @@
       'flash',
       'history',
       'https',
+      'gtalk.test_basic',
       'imports',
       'indexeddb',
       'infobars',
@@ -85,42 +88,66 @@
       # ==================================================
       # crbug.com/83686
       '-autofill.AutofillTest.testFillProfileCrazyCharacters',
+      # crbug.com/102798
+      '-autofill.AutofillTest.testMergeAggregatedProfilesWithSameAddress',
       # crbug.com/99475
       '-autofill.AutofillTest.testNoDuplicatePhoneNumsInPrefs',
-      # crbug.com/99506
-      '-notifications.NotificationsTest.testSpecialURLNotification',
-      # crbug.com/71715
-      '-omnibox.OmniboxTest.testHistoryResult',
-      # crbug.com/97140
-      '-plugins.PluginsTest.testDisableEnableAllPlugins',
-      # crbug.com/82629 - real bug.
-      '-popups.PopupsTest.testPopupsLaunchUponBrowserBackButton',
-      # crbug.com/47935
-      '-popups.PopupsTest.testBlockedPopupNotShowInHistory',
-      # crbug.com/83827
-      '-popups.PopupsTest.testUnblockedPopupAddedToOmnibox',
-      # crbug.com/85600
-      '-prefs.PrefsTest.testNavigationStateOnSessionRestore',
-      # Flaky: crbug.com/67851
-      '-special_tabs.SpecialTabsTest.testAboutDNSTab',
-      # crbug.com/102517 -- external webpage throws 500
-      '-special_tabs.SpecialTabsTest.testAboutAppCacheTab',
-      # crbug.com/95140
-      '-translate.TranslateTest.testGoBackAndForwardToTranslatePage',
-      # crbug.com/86524
-      '-plugins.PluginsTest.testAllowPluginException',
-      # crbug.com/85307
-      '-plugins.PluginsTest.testKillAndReloadAllPlugins',
-      # crbug.com/88574 and crbug.com/110914
-      '-special_tabs.SpecialTabsTest.testSpecialURLTabs',
-      # crbug.com/88593
-      '-sync.SyncTest.testPersonalStuffSyncSection',
+      # crbug.com/115534
+      '-gtalk.test_basic',
+      # crbug.com/119173
+      '-https.SSLTest',
+      # crbug.com/119110
+      '-https.SSLTest.testSSLCertOK',
       # crbug.com/100593
       '-nacl_sdk.NaClSDKTest.testVerifyNaClPlugin',
       # crbug.com/105560
       '-notifications',
+      # crbug.com/99506
+      '-notifications.NotificationsTest.testSpecialURLNotification',
+      # crbug.com/71715
+      '-omnibox.OmniboxTest.testHistoryResult',
+      # crbug.com/86524
+      '-plugins.PluginsTest.testAllowPluginException',
+      # crbug.com/97140
+      '-plugins.PluginsTest.testDisableEnableAllPlugins',
+      # crbug.com/85307
+      '-plugins.PluginsTest.testKillAndReloadAllPlugins',
+      # crbug.com/115427
+      '-policy.PolicyTest.testAlwaysAuthorizePlugins',
+      # crbug.com/118054
+      '-policy.PolicyTest.testApplicationLocaleValue',
+      # crbug.com/103379
+      '-policy.PolicyTest.testDisable3DAPIs',
+      # crbug.com/96896
+      '-policy.PolicyTest.testEnabledPlugins',
+      # crbug.com/118123
+      '-policy.PolicyTest.testExtensionInstallFromForceList',
+      # crbug.com/47935
+      '-popups.PopupsTest.testBlockedPopupNotShowInHistory',
+      # crbug.com/82629 - real bug.
+      '-popups.PopupsTest.testPopupsLaunchUponBrowserBackButton',
+      # crbug.com/83827
+      '-popups.PopupsTest.testUnblockedPopupAddedToOmnibox',
+      # crbug.com/85600
+      '-prefs.PrefsTest.testNavigationStateOnSessionRestore',
       # crbug.com/112051
       '-prefs_ui.PrefsUITest.testChangeExceptionBehaviorUI',
+      # crbug.com/119183
+      '-protector.ProtectorSessionStartupTest.testDetectSessionStartupChangeAndApply',
+      # crbug.com/119326
+      '-protector.ProtectorSessionStartupTest.testSessionStartupChangeDismissedOnEdit',
+      # crbug.com/119183
+      '-protector.ProtectorSessionStartupTest.testSessionStartupPrefMigration',
+      # crbug.com/102517 -- external webpage throws 500
+      '-special_tabs.SpecialTabsTest.testAboutAppCacheTab',
+      # Flaky: crbug.com/67851
+      '-special_tabs.SpecialTabsTest.testAboutDNSTab',
+      # crbug.com/88574
+      '-special_tabs.SpecialTabsTest.testSpecialURLTabs',
+      # crbug.com/88593
+      '-sync.SyncTest.testPersonalStuffSyncSection',
+      # crbug.com/95140
+      '-translate.TranslateTest.testGoBackAndForwardToTranslatePage',
     ],
 
     'win': [
@@ -137,12 +164,8 @@
       # -imports.ImportsTest.testFirefoxImportFromPrefs
       # Disabled on vista in the actual test. crbug.com/89767
       # -imports.ImportsTest.testImportFirefoxPasswordsFromPrefs
-      # crbug.com/70694, crbug.com/73078
-      '-passwords.PasswordTest.testInfoBarDisappearByReload',
-      '-passwords.PasswordTest.testNeverSavePasswords',
-      # crbug.com/91887
+      # crbug.com/117569
       '-passwords.PasswordTest.testSavedPasswordInTabsAndWindows',
-      '-passwords.PasswordTest.testClearFetchedCredForNewUserName',
       # crbug.com/104227
       '-sync.SyncIntegrationTest',
       # crbug.com/88679
@@ -158,25 +181,37 @@
       '-pyauto_webdriver.PyAutoWebDriverTest.testTypeIntoTextBox',
       # crbug.com/95031
       '-notifications.NotificationsTest.testOriginPrefsNotSavedInIncognito',
-      # crbug.com/103379
-      '-policy.PolicyTest.testDisable3DAPIs',
+      # crbug.com/119602
+      '-passwords.PasswordTest.testDisplayAndSavePasswordInfobar',
+      '-passwords.PasswordTest.testNeverSavePasswords',
+      '-passwords.PasswordTest.testClearFetchedCredForNewUserName',
+      '-passwords.PasswordTest.testInfoBarDisappearByNavigatingPage',
+      '-passwords.PasswordTest.testInfoBarDisappearByReload',
     ],
 
     'mac': [
       # ==================================================
       # Disabled tests that need to be investigated/fixed.
       # ==================================================
+      # crbug.com/117317
+      '-policy',
+      '-policy_prefs_ui',
       # Keychain popups make autofill/password tests difficult: crbug.com/49378
       '-autofill',
       # Autofill on Mac. crbug.com/95165
       '-browsing_data.BrowsingDataTest.testClearAutofillData',
       # codesign tests should run *after* signing. crbug.com/50481
       '-codesign',
-      '-crash_reporter.CrashReporterTest.testRendererCrash',  # crbug.com/69464
+      # crbug.com/69464
+      '-crash_reporter.CrashReporterTest.testRendererCrash',
       # crbug.com/75724
       '-downloads.DownloadsTest.testDeclineDangerousDownload',
       # crbug.com/75724
       '-downloads.DownloadsTest.testSaveDangerousFile',
+      # crbug.com/119110
+      '-https.SSLTest.testSSLCertAuthorityOK',
+      # crbug.com/114244
+      '-imports.ImportsTest.testImportSafariDataTwice',
       '-ntp.NTPTest.testLaunchAppNewWindow',  # crbug.com/79812
       # Causes browser crash.  crbug.com/93548
       '-notifications.NotificationsTest.testIncognitoNotification',
@@ -192,6 +227,8 @@
       '-plugins.PluginsTest.testDisableEnableAllPlugins',
       # crbug.com/79263
       '-popups.PopupsTest.testPopupsLaunchUponBrowserBackButton',
+      # crbug.com/120317
+      '-protector.ProtectorPreferencesTest.testPreferencesBackupInvalidRestoreLastSession',
       # crbug.com/69619
       '-search_engines.SearchEnginesTest.testDiscoverSearchEngine',
       # Keychain popups make sync tests difficult on Mac.  crbug.com/49378
@@ -210,6 +247,8 @@
       # Permanently-disabled tests.
       # ===========================
       '-browser.BrowserTest.testWindowResize',  # Details at: crbug.com/44963
+      # crbug.com/119110
+      '-https.SSLTest.testSSLCertAuthorityOK',
       # crbug.com/104206
       '-notifications.NotificationsTest.testKillNotificationProcess',
       # Several omnibox tests do not show omnibox results when run
@@ -248,12 +287,12 @@
       '-sync',
       # crbug.com/66072
       '-notifications.NotificationsTest.testNotificationOrderAfterClosingOne',
-      # crbug.com/103379
-      '-policy.PolicyTest.testDisable3DAPIs',
       # crbug.com/109035
       '-youtube.YoutubeTest.testPlayerBytes',
       # crbug.com/109035
       '-youtube.YoutubeTest.testPlayerResolution',
+      # crbug.com/118055
+      '-policy.PolicyTest.testPrivacyPrefs',
     ],
 
     # ChromeOS is linux, but note that this section does not include the
@@ -289,6 +328,8 @@
       '-policy_prefs_ui',
       # No Protector on ChromeOS.
       '-protector',
+      # You cannot adjust the downloads directory on ChromeOS.
+      '-prefs.PrefsTest.testDownloadDirPref',
 
       # ==================================================
       # Disabled tests that need to be investigated/fixed.
@@ -296,6 +337,10 @@
       # crosbug.com/19556
       '-autofill.AutofillTest.testDisplayLineItemForEntriesWithNoCCNum',
       '-autofill.AutofillTest.testPostalCodeAndStateLabelsBasedOnCountry',
+      # crosbug.com/27405
+      '-browser.BrowserTest.testKillAndReloadSharedProcess',
+      # crosbug.com/26669
+      '-chromeos_file_browser',
       # Downloads panel stays even after declining a download.
       # crosbug.com/14728
       '-downloads.DownloadsTest.testDeclineDangerousDownload',
@@ -339,14 +384,14 @@
       '-chromeos_wifi_sanity.ChromeosWifiSanity.testConnectToHiddenWiFiNonExistent',
       # crosbug.com/20025
       '-chromeos_browser.ChromeosBrowserTest.testFullScreen',
-      # crosbug.com/19556
-      '-pyauto_webdriver',
       # crbug.com/102549
       '-notifications.NotificationsTest.testOriginPrefsNotSavedInIncognito',
-      # crbug.com/103379
-      '-policy.PolicyTest.testDisable3DAPIs',
       # Chrome driver does not work in Chrome OS.
+      # crosbug.com/19556
       '-prefs_ui',
+      '-prefs.PrefsTest.testGeolocationBlockedWhenTrackingDenied',
+      '-prefs.PrefsTest.testGeolocationPref',
+      '-pyauto_webdriver',
     ],
   },
 
@@ -421,6 +466,9 @@
       '-autofill.AutofillTest.testNoDuplicatePhoneNumsInPrefs',
       # Media files test uses internal media files
       '-chromeos_file_browser.ChromeosFileBrowserTest.testOpenMediaFiles',
+      # No flash plugin in non-branded OS images.  crosbug.com/25905
+      '-youtube',
+      '-flash',
     ],
   },
 
@@ -429,16 +477,16 @@
   'FULL': {
     'all': [
       '@CONTINUOUS',
+      'about_plugins_ui.ChromeAboutPluginsUITest',
       'media.media_basic_playback',
       'nacl_sdk',
       'translate',
 
-      # Remove when r119687 reaches official builds.  Revisit 01/31/2012
-      '-special_tabs.SpecialTabsTest.testSpecialAcceratorTabs',
-
       # ==================================================
       # Disabled tests that need to be investigated/fixed.
       # ==================================================
+      # Disable app tests until r125069 reaches Google Chrome.
+      '-apptest',
       # This test fails due to crbug.com/35485
       '-translate.TranslateTest.testBarNotVisibleOnSSLErrorPage',
       # This test fails due to crbug.com/50706
@@ -458,21 +506,17 @@
       '-extensions.ExtensionsTest.testTriggerPageActionWithPopup',
       # crbug.com/109160
       '-execute_javascript.ExecuteJavascriptTest.testExecuteJavascriptInExtension',
-      # crbug.com/111407
-      '-indexeddb.IndexedDBTest.testConnectionsClosedOnTabClose',
+      # crbug.com/119605
+      '-protector.ProtectorPreferencesTest.testPreferencesBackupInvalid',
+      '-protector.ProtectorPreferencesTest.testPreferencesBackupInvalidChangeDismissedOnEdit',
     ],
 
     'win': [
-      'enterprise',
       'gpu',
 
       # ===========================
       # Permanently-disabled tests.
       # ===========================
-      # Can't use automation to change the policy data on Chrome builds.
-      '-policy',
-      '-policy_prefs_ui',
-
       # Preloaded extensions affect process count: crbug.com/94350
       '-process_count',
       # Disable sync.SyncIntegrationTest on the QA bots in FULL,
@@ -482,32 +526,30 @@
       # ==================================================
       # Disabled tests that need to be investigated/fixed.
       # ==================================================
-      # crbug.com/101787
-      '-enterprise.EnterpriseTestReverse.testDefaultSearchProviderDisabled',
-      # crbug.com/96896
-      '-enterprise.EnterpriseTest.testDisabledPlugins',
-      '-enterprise.EnterpriseTest.testEnabledPlugins',
-      # crbug.com/100893
-      '-enterprise.EnterpriseTestReverse.testEnableSPDY',
       # crbug.com/105948
       '-autofill.AutofillTest.testDisplayLineItemForEntriesWithNoCCNum',
       '-autofill.AutofillTest.testPostalCodeAndStateLabelsBasedOnCountry',
+      # crbug.com/115707
+      '-browser.BrowserTest.testMaxProcess',
+      # crbug.com/111289
+      '-extensions.ExtensionsTest.testAllowAccessFileURLs',
+      # crbug.com/113090
+      '-extensions.ExtensionsTest.testAllowIncognitoExtension',
+      # crbug.com/115646
+      '-translate.TranslateTest.testSeveralLanguages',
     ],
 
     'mac': [
       # ===========================
       # Permanently-disabled tests.
       # ===========================
-      # Can't use automation to change the policy data on Chrome builds.
-      '-policy',
-      '-policy_prefs_ui',
-
       # Consistently failing on Mac QA bots only: crbug.com/97810
       '-process_count',
+      # crbug.com/115646
+      '-translate.TranslateTest.testSeveralLanguages',
     ],
 
     'linux': [
-      'enterprise',
       # Add back the omnibox tests excluded from the CONTINUOUS suite above
       # because they do not produce omnibox results under virtual X on linux.
       # crbug.com/85310
@@ -529,22 +571,23 @@
       'omnibox.OmniboxTest.testSuggest',
       'omnibox.OmniboxTest.testSuggestPref',
 
-      # ===========================
-      # Permanently-disabled tests.
-      # ===========================
-      # Can't use automation to change the policy data on Chrome builds.
-      '-policy',
-      '-policy_prefs_ui',
-
       # ==================================================
       # Disabled tests that need to be investigated/fixed.
       # ==================================================
-      # crbug.com/101787
-      '-enterprise.EnterpriseTestReverse.testDefaultSearchProviderDisabled',
-      # crbug.com/97179
-      '-enterprise.EnterpriseTest.testAlwaysAuthorizePlugins',
       # crbug.com/111289
       '-extensions.ExtensionsTest.testAllowAccessFileURLs',
+      # crbug.com/100365
+      '-autofill.AutofillTest.testDisplayLineItemForEntriesWithNoCCNum',
+      # crbug.com/115917
+      '-flash.FlashTest.testFlashLoadsAfterKill',
+      '-infobars.InfobarTest.testPluginCrashForMultiTabs',
+      '-infobars.InfobarTest.testPluginCrashInfobar',
+      '-flash.FlashTest.testCanLoadFlash',
+      '-flash.FlashTest.testFlashIncognitoMode',
+      '-flash.FlashTest.testFlashWithMultipleTabs',
+      '-flash.FlashTest.testSingleFlashPluginProcess',
+      '-plugins.PluginsTest.testBlockAllPlugins',
+      '-plugins.PluginsTest.testBlockPluginException',
     ],
 
     'chromeos': [
@@ -562,6 +605,16 @@
       '-translate.TranslateTest.testSessionRestore',
       # Deal with i18n chars.  crosbug.com/12639
       '-translate.TranslateTest.testDownloadsNotTranslated',
+    ],
+  },
+
+  'PERFORMANCE_LAB': {
+    'all': [
+      'perf.BenchmarkPerfTest.testV8BenchmarkSuite',
+      'perf.FlashTest.testFlashGaming',
+      'perf.ScrollTest.testGooglePlusScroll',
+      'perf.TabPerfTest.test20Tabs',
+      'perf.WebGLTest.testWebGLSpaceRocks',
     ],
   },
 
@@ -606,8 +659,16 @@
   # require custom setup on ChromeOS.
   'CHROMEOS_POLICY': {
     'chromeos': [
+      'chromeos_onc',
       'policy',
       'policy_prefs_ui',
+      # crbug.com/115427
+      '-policy.PolicyTest.testAlwaysAuthorizePlugins',
+      # crbug.com/118054
+      '-policy.PolicyTest.testApplicationLocaleValue',
+      # crbug.com/118123
+      '-policy.PolicyTest.testExtensionInstallFromForceList',
+      '-policy.PolicyTest.testSetDownloadDirectory',
     ],
   },
 
@@ -618,10 +679,20 @@
     ],
   },
 
+  # ChromeOS Accessibility tests.
+  'CHROMEOS_ACCESSIBILITY': {
+    'chromeos': [
+      'chromeos_accessibility',
+      # crosbug.com/26731
+      '-chromeos_accessibility.AccessibilityTest.testPagePerformance',
+    ],
+  },
+
   # ChromeOS performance tests.
   'CHROMEOS_PERF': {
     'chromeos': [
       'perf',
+      '-perf.GPUPerfTest',
     ],
   },
 
@@ -638,6 +709,8 @@
   'AV_PERF': {
      'linux': [
        'media.media_constrained_network_perf',
+       'media.media_jerky',
+       'media.media_stat_perf',
      ],
   },
 }

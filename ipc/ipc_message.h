@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,10 @@
 #include "base/pickle.h"
 #include "ipc/ipc_export.h"
 
-#ifndef NDEBUG
+// Ipc logging adds a dependency from the 'chrome' target on all ipc message
+// classes. In a component build, this would require exporting all message
+// classes, so don't support ipc logging in the components build.
+#if !defined(NDEBUG) && !defined(COMPONENT_BUILD)
 #define IPC_MESSAGE_LOG_ENABLED
 #endif
 
@@ -177,7 +180,8 @@ class IPC_EXPORT Message : public Pickle {
   bool WriteFileDescriptor(const base::FileDescriptor& descriptor);
   // Get a file descriptor from the message. Returns false on error.
   //   iter: a Pickle iterator to the current location in the message.
-  bool ReadFileDescriptor(void** iter, base::FileDescriptor* descriptor) const;
+  bool ReadFileDescriptor(PickleIterator* iter,
+                          base::FileDescriptor* descriptor) const;
 #endif
 
 #ifdef IPC_MESSAGE_LOG_ENABLED

@@ -12,11 +12,14 @@
 #include <windows.h>
 #include <shlobj.h>
 
+#include <list>
+
 #include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/path_service.h"
 #include "base/stl_util.h"
 #include "base/string_number_conversions.h"
 #include "base/string_split.h"
@@ -32,8 +35,6 @@
 #include "chrome/installer/util/install_util.h"
 #include "chrome/installer/util/master_preferences.h"
 #include "chrome/installer/util/master_preferences_constants.h"
-
-#include "installer_util_strings.h"
 
 using base::win::RegKey;
 
@@ -83,7 +84,8 @@ class RegistryEntry {
 
     // File association ProgId
     std::wstring chrome_html_prog_id(ShellUtil::kRegClasses);
-    file_util::AppendToPath(&chrome_html_prog_id, ShellUtil::kChromeHTMLProgId);
+    chrome_html_prog_id.push_back(FilePath::kSeparators[0]);
+    chrome_html_prog_id.append(ShellUtil::kChromeHTMLProgId);
     chrome_html_prog_id.append(suffix);
     entries->push_front(new RegistryEntry(
         chrome_html_prog_id, ShellUtil::kChromeHTMLProgIdDesc));
@@ -181,7 +183,8 @@ class RegistryEntry {
     // Application Registration.
     FilePath chrome_path(chrome_exe);
     std::wstring app_path_key(ShellUtil::kAppPathsRegistryKey);
-    file_util::AppendToPath(&app_path_key, chrome_path.BaseName().value());
+    app_path_key.push_back(FilePath::kSeparators[0]);
+    app_path_key.append(chrome_path.BaseName().value());
     entries->push_front(new RegistryEntry(app_path_key, chrome_exe));
     entries->push_front(new RegistryEntry(app_path_key,
         ShellUtil::kAppPathsRegistryPathName, chrome_path.DirName().value()));
@@ -198,7 +201,8 @@ class RegistryEntry {
                                      std::list<RegistryEntry*>* entries) {
     // Protocols associations.
     std::wstring url_key(ShellUtil::kRegClasses);
-    file_util::AppendToPath(&url_key, protocol);
+    url_key.push_back(FilePath::kSeparators[0]);
+    url_key.append(protocol);
 
     // This registry value tells Windows that this 'class' is a URL scheme
     // so IE, explorer and other apps will route it to our handler.
@@ -236,7 +240,8 @@ class RegistryEntry {
     html_prog_id.append(suffix);
     for (int i = 0; ShellUtil::kFileAssociations[i] != NULL; i++) {
       std::wstring ext_key(ShellUtil::kRegClasses);
-      file_util::AppendToPath(&ext_key, ShellUtil::kFileAssociations[i]);
+      ext_key.push_back(FilePath::kSeparators[0]);
+      ext_key.append(ShellUtil::kFileAssociations[i]);
       entries->push_front(new RegistryEntry(ext_key, html_prog_id));
     }
 
@@ -303,8 +308,6 @@ class RegistryEntry {
   }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(RegistryEntry);
-
   // Create a object that represent default value of a key
   RegistryEntry(const std::wstring& key_path, const std::wstring& value)
       : _key_path(key_path), _name(),
@@ -330,6 +333,8 @@ class RegistryEntry {
   bool _is_string;         // true if current registry entry is of type REG_SZ
   std::wstring _value;     // string value (useful if _is_string = true)
   DWORD _int_value;        // integer value (useful if _is_string = false)
+
+  DISALLOW_COPY_AND_ASSIGN(RegistryEntry);
 };  // class RegistryEntry
 
 
@@ -494,6 +499,18 @@ bool AnotherUserHasDefaultBrowser(BrowserDistribution* dist,
   return true;
 }
 
+// Launches the Windows 7 and Windows 8 application association dialog, which
+// is the only documented way to make a browser the default browser on
+// Windows 8.
+bool LaunchApplicationAssociationDialog(const std::wstring& app_id) {
+  base::win::ScopedComPtr<IApplicationAssociationRegistrationUI> aarui;
+  HRESULT hr = aarui.CreateInstance(CLSID_ApplicationAssociationRegistrationUI);
+  if (FAILED(hr))
+    return false;
+  hr = aarui->LaunchAdvancedAssociationUI(app_id.c_str());
+  return SUCCEEDED(hr);
+}
+
 }  // namespace
 
 const wchar_t* ShellUtil::kRegDefaultIcon = L"\\DefaultIcon";
@@ -610,10 +627,11 @@ bool ShellUtil::CreateChromeQuickLaunchShortcut(BrowserDistribution* dist,
   bool ret = true;
   // First create shortcut for the current user.
   if (shell_change & ShellUtil::CURRENT_USER) {
-    std::wstring user_ql_path;
+    FilePath user_ql_path;
     if (ShellUtil::GetQuickLaunchPath(false, &user_ql_path)) {
-      file_util::AppendToPath(&user_ql_path, shortcut_name);
-      ret = ShellUtil::UpdateChromeShortcut(dist, chrome_exe, user_ql_path,
+      user_ql_path = user_ql_path.Append(shortcut_name);
+      ret = ShellUtil::UpdateChromeShortcut(dist, chrome_exe,
+                                            user_ql_path.value(),
                                             L"", L"", chrome_exe,
                                             dist->GetIconIndex(),
                                             create_new);
@@ -625,10 +643,11 @@ bool ShellUtil::CreateChromeQuickLaunchShortcut(BrowserDistribution* dist,
   // Add a shortcut to Default User's profile so that all new user profiles
   // get it.
   if (shell_change & ShellUtil::SYSTEM_LEVEL) {
-    std::wstring default_ql_path;
+    FilePath default_ql_path;
     if (ShellUtil::GetQuickLaunchPath(true, &default_ql_path)) {
-      file_util::AppendToPath(&default_ql_path, shortcut_name);
-      ret = ShellUtil::UpdateChromeShortcut(dist, chrome_exe, default_ql_path,
+      default_ql_path = default_ql_path.Append(shortcut_name);
+      ret = ShellUtil::UpdateChromeShortcut(dist, chrome_exe,
+                                            default_ql_path.value(),
                                             L"", L"", chrome_exe,
                                             dist->GetIconIndex(),
                                             create_new) && ret;
@@ -677,11 +696,9 @@ bool ShellUtil::GetDesktopPath(bool system_level, FilePath* path) {
   return true;
 }
 
-bool ShellUtil::GetQuickLaunchPath(bool system_level, std::wstring* path) {
-  static const wchar_t* kQuickLaunchPath =
-      L"Microsoft\\Internet Explorer\\Quick Launch";
-  wchar_t qlaunch[MAX_PATH];
+bool ShellUtil::GetQuickLaunchPath(bool system_level, FilePath* path) {
   if (system_level) {
+    wchar_t qlaunch[MAX_PATH];
     // We are accessing GetDefaultUserProfileDirectory this way so that we do
     // not have to declare dependency to Userenv.lib for chrome.exe
     typedef BOOL (WINAPI *PROFILE_FUNC)(LPWSTR, LPDWORD);
@@ -691,19 +708,21 @@ bool ShellUtil::GetQuickLaunchPath(bool system_level, std::wstring* path) {
     DWORD size = _countof(qlaunch);
     if ((p == NULL) || ((p)(qlaunch, &size) != TRUE))
       return false;
-    *path = qlaunch;
+    *path = FilePath(qlaunch);
     if (base::win::GetVersion() >= base::win::VERSION_VISTA) {
-      file_util::AppendToPath(path, L"AppData\\Roaming");
+      *path = path->AppendASCII("AppData");
+      *path = path->AppendASCII("Roaming");
     } else {
-      file_util::AppendToPath(path, L"Application Data");
+      *path = path->AppendASCII("Application Data");
     }
   } else {
-    if (FAILED(SHGetFolderPath(NULL, CSIDL_APPDATA, NULL,
-                               SHGFP_TYPE_CURRENT, qlaunch)))
+    if (!PathService::Get(base::DIR_APP_DATA, path)) {
       return false;
-    *path = qlaunch;
+    }
   }
-  file_util::AppendToPath(path, kQuickLaunchPath);
+  *path = path->AppendASCII("Microsoft");
+  *path = path->AppendASCII("Internet Explorer");
+  *path = path->AppendASCII("Quick Launch");
   return true;
 }
 
@@ -763,17 +782,29 @@ bool ShellUtil::MakeChromeDefault(BrowserDistribution* dist,
   bool ret = true;
   // First use the new "recommended" way on Vista to make Chrome default
   // browser.
-  if (base::win::GetVersion() >= base::win::VERSION_VISTA) {
+  std::wstring app_name = dist->GetApplicationName();
+  std::wstring app_suffix;
+  if (ShellUtil::GetUserSpecificDefaultBrowserSuffix(dist, &app_suffix))
+    app_name += app_suffix;
+
+  if (base::win::GetVersion() >= base::win::VERSION_WIN8) {
+    // On Windows 8, you can't set yourself as the default handler
+    // programatically. In other words IApplicationAssociationRegistration
+    // has been rendered useless. What you can do is to launch
+    // "Set Program Associations" section of the "Default Programs"
+    // control panel. This action does not require elevation and we
+    // don't get to control window activation. More info at:
+    // http://msdn.microsoft.com/en-us/library/cc144154(VS.85).aspx
+    return LaunchApplicationAssociationDialog(app_name.c_str());
+
+  } else if (base::win::GetVersion() >= base::win::VERSION_VISTA) {
+    // On Windows Vista and Win7 we still can set ourselves via the
+    // the IApplicationAssociationRegistration interface.
     VLOG(1) << "Registering Chrome as default browser on Vista.";
     base::win::ScopedComPtr<IApplicationAssociationRegistration> pAAR;
     HRESULT hr = pAAR.CreateInstance(CLSID_ApplicationAssociationRegistration,
         NULL, CLSCTX_INPROC);
     if (SUCCEEDED(hr)) {
-      std::wstring app_name = dist->GetApplicationName();
-      std::wstring suffix;
-      if (ShellUtil::GetUserSpecificDefaultBrowserSuffix(dist, &suffix))
-        app_name += suffix;
-
       for (int i = 0; ShellUtil::kBrowserProtocolAssociations[i] != NULL; i++) {
         hr = pAAR->SetAppAsDefault(app_name.c_str(),
             ShellUtil::kBrowserProtocolAssociations[i], AT_URLPROTOCOL);
@@ -1034,9 +1065,9 @@ bool ShellUtil::RemoveChromeQuickLaunchShortcut(BrowserDistribution* dist,
   bool ret = true;
   // First remove shortcut for the current user.
   if (shell_change & ShellUtil::CURRENT_USER) {
-    std::wstring user_ql_path;
+    FilePath user_ql_path;
     if (ShellUtil::GetQuickLaunchPath(false, &user_ql_path)) {
-      file_util::AppendToPath(&user_ql_path, shortcut_name);
+      user_ql_path = user_ql_path.Append(shortcut_name);
       ret = file_util::Delete(user_ql_path, false);
     } else {
       ret = false;
@@ -1045,9 +1076,9 @@ bool ShellUtil::RemoveChromeQuickLaunchShortcut(BrowserDistribution* dist,
 
   // Delete shortcut in Default User's profile
   if (shell_change & ShellUtil::SYSTEM_LEVEL) {
-    std::wstring default_ql_path;
+    FilePath default_ql_path;
     if (ShellUtil::GetQuickLaunchPath(true, &default_ql_path)) {
-      file_util::AppendToPath(&default_ql_path, shortcut_name);
+      default_ql_path = default_ql_path.Append(shortcut_name);
       ret = file_util::Delete(default_ql_path, false) && ret;
     } else {
       ret = false;

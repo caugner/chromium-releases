@@ -2,29 +2,28 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ui/aura/root_window_host.h"
+#include "ui/aura/root_window_host_linux.h"
 
 #include <X11/cursorfont.h>
-#include <X11/Xlib.h>
-
-// Get rid of a macro from Xlib.h that conflicts with Aura's RootWindow class.
-#undef RootWindow
-
+#include <X11/extensions/XInput2.h>
+#include <X11/extensions/Xfixes.h>
+#include <X11/extensions/Xrandr.h>
 #include <algorithm>
 
-#include "base/message_loop.h"
 #include "base/message_pump_x.h"
+#include "base/stl_util.h"
+#include "base/stringprintf.h"
 #include "ui/aura/cursor.h"
+#include "ui/aura/dispatcher_linux.h"
+#include "ui/aura/env.h"
 #include "ui/aura/event.h"
+#include "ui/aura/monitor.h"
+#include "ui/aura/monitor_manager.h"
 #include "ui/aura/root_window.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/touch/touch_factory.h"
 #include "ui/base/x/x11_util.h"
 #include "ui/gfx/compositor/layer.h"
-
-#include <X11/cursorfont.h>
-#include <X11/extensions/XInput2.h>
-#include <X11/Xlib.h>
 
 using std::max;
 using std::min;
@@ -273,64 +272,7 @@ bool ShouldSendCharEventForKeyboardCode(ui::KeyboardCode keycode) {
   }
 }
 
-class RootWindowHostLinux : public RootWindowHost,
-                            public MessageLoop::DestructionObserver {
- public:
-  explicit RootWindowHostLinux(const gfx::Rect& bounds);
-  virtual ~RootWindowHostLinux();
-
- private:
-  // MessageLoop::Dispatcher Override.
-  virtual DispatchStatus Dispatch(XEvent* xev) OVERRIDE;
-
-  // RootWindowHost Overrides.
-  virtual void SetRootWindow(RootWindow* root_window) OVERRIDE;
-  virtual gfx::AcceleratedWidget GetAcceleratedWidget() OVERRIDE;
-  virtual void Show() OVERRIDE;
-  virtual void ToggleFullScreen() OVERRIDE;
-  virtual gfx::Size GetSize() const OVERRIDE;
-  virtual void SetSize(const gfx::Size& size) OVERRIDE;
-  virtual gfx::Point GetLocationOnNativeScreen() const OVERRIDE;
-  virtual void SetCursor(gfx::NativeCursor cursor_type) OVERRIDE;
-  virtual void ShowCursor(bool show) OVERRIDE;
-  virtual gfx::Point QueryMouseLocation() OVERRIDE;
-  virtual bool ConfineCursorToRootWindow() OVERRIDE;
-  virtual void UnConfineCursor() OVERRIDE;
-  virtual void MoveCursorTo(const gfx::Point& location) OVERRIDE;
-  virtual void PostNativeEvent(const base::NativeEvent& event) OVERRIDE;
-
-  // MessageLoop::DestructionObserver Overrides.
-  virtual void WillDestroyCurrentMessageLoop() OVERRIDE;
-
-  // Returns true if there's an X window manager present... in most cases.  Some
-  // window managers (notably, ion3) don't implement enough of ICCCM for us to
-  // detect that they're there.
-  bool IsWindowManagerPresent();
-
-  RootWindow* root_window_;
-
-  // The display and the native X window hosting the root window.
-  Display* xdisplay_;
-  ::Window xwindow_;
-
-  // The native root window.
-  ::Window x_root_window_;
-
-  // Current Aura cursor.
-  gfx::NativeCursor current_cursor_;
-
-  // The default cursor is showed after startup, and hidden when touch pressed.
-  // Once mouse moved, the cursor is immediately displayed.
-  bool is_cursor_visible_;
-
-  // The invisible cursor.
-  ::Cursor invisible_cursor_;
-
-  // The bounds of |xwindow_|.
-  gfx::Rect bounds_;
-
-  DISALLOW_COPY_AND_ASSIGN(RootWindowHostLinux);
-};
+}  // namespace
 
 RootWindowHostLinux::RootWindowHostLinux(const gfx::Rect& bounds)
     : root_window_(NULL),
@@ -338,8 +280,10 @@ RootWindowHostLinux::RootWindowHostLinux(const gfx::Rect& bounds)
       xwindow_(0),
       x_root_window_(DefaultRootWindow(xdisplay_)),
       current_cursor_(aura::kCursorNull),
-      is_cursor_visible_(true),
-      bounds_(bounds) {
+      cursor_shown_(true),
+      bounds_(bounds),
+      focus_when_shown_(false),
+      pointer_barriers_(NULL) {
   XSetWindowAttributes swa;
   memset(&swa, 0, sizeof(swa));
   swa.background_pixmap = None;
@@ -352,24 +296,22 @@ RootWindowHostLinux::RootWindowHostLinux(const gfx::Rect& bounds)
       CopyFromParent,  // visual
       CWBackPixmap,
       &swa);
+  static_cast<DispatcherLinux*>(Env::GetInstance()->GetDispatcher())->
+      WindowDispatcherCreated(xwindow_, this);
 
-  long event_mask = ButtonPressMask | ButtonReleaseMask |
+  long event_mask = ButtonPressMask | ButtonReleaseMask | FocusChangeMask |
                     KeyPressMask | KeyReleaseMask |
                     EnterWindowMask | LeaveWindowMask |
                     ExposureMask | VisibilityChangeMask |
                     StructureNotifyMask | PropertyChangeMask |
                     PointerMotionMask;
   XSelectInput(xdisplay_, xwindow_, event_mask);
-  XSelectInput(xdisplay_, x_root_window_, StructureNotifyMask);
   XFlush(xdisplay_);
 
   if (base::MessagePumpForUI::HasXInput2())
     ui::TouchFactory::GetInstance()->SetupXI2ForXWindow(xwindow_);
 
-  base::MessagePumpX::SetDefaultDispatcher(this);
-  MessageLoopForUI::current()->AddDestructionObserver(this);
-
-  // Initializes invisiable cursor.
+  // Initialize invisible cursor.
   char nodata[] = { 0, 0, 0, 0, 0, 0, 0, 0 };
   XColor black;
   black.red = black.green = black.blue = 0;
@@ -377,18 +319,29 @@ RootWindowHostLinux::RootWindowHostLinux(const gfx::Rect& bounds)
                                        nodata, 8, 8);
   invisible_cursor_ = XCreatePixmapCursor(xdisplay_, blank, blank,
                                           &black, &black, 0, 0);
+  if (RootWindow::hide_host_cursor())
+    XDefineCursor(xdisplay_, x_root_window_, invisible_cursor_);
+
+  // crbug.com/120229 - set the window title so gtalk can find the primary root
+  // window to broadcast.
+  // TODO(jhorwich) Remove this once Chrome supports window-based broadcasting.
+  static int root_window_number = 0;
+  std::string name = StringPrintf("aura_root_%d", root_window_number++);
+  XStoreName(xdisplay_, xwindow_, name.c_str());
 }
 
 RootWindowHostLinux::~RootWindowHostLinux() {
+  static_cast<DispatcherLinux*>(Env::GetInstance()->GetDispatcher())->
+      WindowDispatcherDestroying(xwindow_);
+
+  UnConfineCursor();
+
   XDestroyWindow(xdisplay_, xwindow_);
 
   // Clears XCursorCache.
   ui::GetXCursor(ui::kCursorClearXCursorCache);
 
   XFreeCursor(xdisplay_, invisible_cursor_);
-
-  MessageLoopForUI::current()->RemoveDestructionObserver(this);
-  base::MessagePumpX::SetDefaultDispatcher(NULL);
 }
 
 base::MessagePumpDispatcher::DispatchStatus RootWindowHostLinux::Dispatch(
@@ -400,7 +353,7 @@ base::MessagePumpDispatcher::DispatchStatus RootWindowHostLinux::Dispatch(
 
   switch (xev->type) {
     case Expose:
-      root_window_->ScheduleDraw();
+      root_window_->ScheduleFullDraw();
       handled = true;
       break;
     case KeyPress: {
@@ -419,17 +372,21 @@ base::MessagePumpDispatcher::DispatchStatus RootWindowHostLinux::Dispatch(
       handled = root_window_->DispatchMouseEvent(&mouseev);
       break;
     }
+    case FocusOut:
+      if (xev->xfocus.mode != NotifyGrab)
+        root_window_->SetCapture(NULL);
+      break;
     case ConfigureNotify: {
-      if (xev->xconfigure.window == x_root_window_) {
-        root_window_->OnNativeScreenResized(
-            gfx::Size(xev->xconfigure.width, xev->xconfigure.height));
-        handled = true;
-        break;
-      }
-
       DCHECK_EQ(xwindow_, xev->xconfigure.window);
       DCHECK_EQ(xwindow_, xev->xconfigure.event);
-
+      // Update barrier and mouse location when the root window has
+      // moved/resized.
+      if (pointer_barriers_.get()) {
+        UnConfineCursor();
+        gfx::Point p = root_window_->last_mouse_location();
+        XWarpPointer(xdisplay_, None,  xwindow_, 0, 0, 0, 0, p.x(), p.y());
+        ConfineCursorToRootWindow();
+      }
       // It's possible that the X window may be resized by some other means than
       // from within aura (e.g. the X window manager can change the size). Make
       // sure the root window size is maintained properly.
@@ -446,13 +403,6 @@ base::MessagePumpDispatcher::DispatchStatus RootWindowHostLinux::Dispatch(
       ui::TouchFactory* factory = ui::TouchFactory::GetInstance();
       if (!factory->ShouldProcessXI2Event(xev))
         break;
-
-      // Update the device list if necessary.
-      if (xev->xgeneric.evtype == XI_HierarchyChanged) {
-        ui::UpdateDeviceList();
-        handled = true;
-        break;
-      }
 
       ui::EventType type = ui::EventTypeFromNative(xev);
       // If this is a motion event we want to coalesce all pending motion
@@ -485,6 +435,8 @@ base::MessagePumpDispatcher::DispatchStatus RootWindowHostLinux::Dispatch(
           handled = root_window_->DispatchMouseEvent(&mouseev);
           break;
         }
+        case ui::ET_SCROLL_FLING_START:
+        case ui::ET_SCROLL_FLING_CANCEL:
         case ui::ET_SCROLL: {
           ScrollEvent scrollev(xev);
           handled = root_window_->DispatchScrollEvent(&scrollev);
@@ -505,7 +457,7 @@ base::MessagePumpDispatcher::DispatchStatus RootWindowHostLinux::Dispatch(
     case MapNotify: {
       // If there's no window manager running, we need to assign the X input
       // focus to our host window.
-      if (!IsWindowManagerPresent())
+      if (!IsWindowManagerPresent() && focus_when_shown_)
         XSetInputFocus(xdisplay_, xwindow_, RevertToNone, CurrentTime);
       handled = true;
       break;
@@ -548,7 +500,8 @@ base::MessagePumpDispatcher::DispatchStatus RootWindowHostLinux::Dispatch(
       break;
     }
   }
-  return handled ? EVENT_PROCESSED : EVENT_IGNORED;
+  return handled ? base::MessagePumpDispatcher::EVENT_PROCESSED :
+      base::MessagePumpDispatcher::EVENT_IGNORED;
 }
 
 void RootWindowHostLinux::SetRootWindow(RootWindow* root_window) {
@@ -567,60 +520,59 @@ void RootWindowHostLinux::ToggleFullScreen() {
   NOTIMPLEMENTED();
 }
 
-gfx::Size RootWindowHostLinux::GetSize() const {
-  return bounds_.size();
+gfx::Rect RootWindowHostLinux::GetBounds() const {
+  return bounds_;
 }
 
-void RootWindowHostLinux::SetSize(const gfx::Size& size) {
-  if (size == bounds_.size())
+void RootWindowHostLinux::SetBounds(const gfx::Rect& bounds) {
+  bool size_changed = bounds_.size() != bounds.size();
+  if (bounds == bounds_) {
+    root_window_->SchedulePaintInRect(root_window_->bounds());
     return;
-
-  XResizeWindow(xdisplay_, xwindow_, size.width(), size.height());
+  }
+  if (bounds.size() != bounds_.size())
+    XResizeWindow(xdisplay_, xwindow_, bounds.width(), bounds.height());
+  if (bounds.origin() != bounds_.origin())
+    XMoveWindow(xdisplay_, xwindow_, bounds.x(), bounds.y());
 
   // Assume that the resize will go through as requested, which should be the
   // case if we're running without a window manager.  If there's a window
   // manager, it can modify or ignore the request, but (per ICCCM) we'll get a
   // (possibly synthetic) ConfigureNotify about the actual size and correct
   // |bounds_| later.
-  bounds_.set_size(size);
-  root_window_->OnHostResized(size);
+  bounds_ = bounds;
+  if (size_changed)
+    root_window_->OnHostResized(bounds.size());
 }
 
 gfx::Point RootWindowHostLinux::GetLocationOnNativeScreen() const {
   return bounds_.origin();
 }
 
-void RootWindowHostLinux::SetCursor(gfx::NativeCursor cursor) {
-  if (cursor == kCursorNone && is_cursor_visible_) {
-    current_cursor_ = cursor;
-    ShowCursor(false);
-    return;
-  }
+void RootWindowHostLinux::SetCapture() {
+}
 
-  if (current_cursor_ == cursor)
+void RootWindowHostLinux::ReleaseCapture() {
+}
+
+void RootWindowHostLinux::SetCursor(gfx::NativeCursor cursor) {
+  if (cursor == current_cursor_)
     return;
   current_cursor_ = cursor;
+
   // Custom web cursors are handled directly.
   if (cursor == kCursorCustom)
     return;
-  int cursor_shape = CursorShapeFromNative(cursor);
-  ::Cursor xcursor = ui::GetXCursor(cursor_shape);
-  XDefineCursor(xdisplay_, xwindow_, xcursor);
+
+  if (cursor_shown_)
+    SetCursorInternal(cursor);
 }
 
 void RootWindowHostLinux::ShowCursor(bool show) {
-   if (show == is_cursor_visible_)
-     return;
-
-   is_cursor_visible_ = show;
-
-   if (show) {
-     int cursor_shape = CursorShapeFromNative(current_cursor_);
-     ::Cursor xcursor = ui::GetXCursor(cursor_shape);
-     XDefineCursor(xdisplay_, xwindow_, xcursor);
-   } else {
-     XDefineCursor(xdisplay_, xwindow_, invisible_cursor_);
-   }
+  if (show == cursor_shown_)
+    return;
+  cursor_shown_ = show;
+  SetCursorInternal(show ? current_cursor_ : kCursorNone);
 }
 
 gfx::Point RootWindowHostLinux::QueryMouseLocation() {
@@ -639,24 +591,66 @@ gfx::Point RootWindowHostLinux::QueryMouseLocation() {
 }
 
 bool RootWindowHostLinux::ConfineCursorToRootWindow() {
-  return XGrabPointer(xdisplay_,
-                      xwindow_,  // grab_window
-                      False,  // owner_events
-                      ButtonPressMask | ButtonReleaseMask | PointerMotionMask,
-                      GrabModeAsync,
-                      GrabModeAsync,
-                      xwindow_,  // confine_to
-                      None,  // cursor
-                      CurrentTime) == GrabSuccess;
+#if XFIXES_MAJOR >= 5
+  DCHECK(!pointer_barriers_.get());
+  if (pointer_barriers_.get())
+    return false;
+  // Pointer barriers extend all the way across the screen to
+  // avoid leaks at the corners.
+  gfx::Size screen_size = RootWindowHost::GetNativeScreenSize();
+  pointer_barriers_.reset(new XID[4]);
+  // Horizontal barriers.
+  pointer_barriers_[0] = XFixesCreatePointerBarrier(
+      xdisplay_, x_root_window_,
+      0, bounds_.y(), screen_size.width(), bounds_.y(),
+      BarrierPositiveY,
+      0, NULL);  // default device
+  pointer_barriers_[1] = XFixesCreatePointerBarrier(
+      xdisplay_, x_root_window_,
+      0, bounds_.bottom(), screen_size.width(),  bounds_.bottom(),
+      BarrierNegativeY,
+      0, NULL);  // default device
+  // Vertical barriers.
+  pointer_barriers_[2] = XFixesCreatePointerBarrier(
+      xdisplay_, x_root_window_,
+      bounds_.x(), 0, bounds_.x(), screen_size.height(),
+      BarrierPositiveX,
+      0, NULL);  // default device
+  pointer_barriers_[3] = XFixesCreatePointerBarrier(
+      xdisplay_, x_root_window_,
+      bounds_.right(), 0, bounds_.right(), screen_size.height(),
+      BarrierNegativeX,
+      0, NULL);  // default device
+#endif
+  return true;
 }
 
 void RootWindowHostLinux::UnConfineCursor() {
-  XUngrabPointer(xdisplay_, CurrentTime);
+#if XFIXES_MAJOR >= 5
+  if (pointer_barriers_.get()) {
+    XFixesDestroyPointerBarrier(xdisplay_, pointer_barriers_[0]);
+    XFixesDestroyPointerBarrier(xdisplay_, pointer_barriers_[1]);
+    XFixesDestroyPointerBarrier(xdisplay_, pointer_barriers_[2]);
+    XFixesDestroyPointerBarrier(xdisplay_, pointer_barriers_[3]);
+    pointer_barriers_.reset();
+  }
+#endif
 }
 
 void RootWindowHostLinux::MoveCursorTo(const gfx::Point& location) {
   XWarpPointer(xdisplay_, None, xwindow_, 0, 0, 0, 0, location.x(),
       location.y());
+}
+
+void RootWindowHostLinux::SetFocusWhenShown(bool focus_when_shown) {
+  static const char* k_NET_WM_USER_TIME = "_NET_WM_USER_TIME";
+  focus_when_shown_ = focus_when_shown;
+  if (IsWindowManagerPresent() && !focus_when_shown_) {
+    ui::SetIntProperty(xwindow_,
+                       k_NET_WM_USER_TIME,
+                       k_NET_WM_USER_TIME,
+                       0);
+  }
 }
 
 void RootWindowHostLinux::PostNativeEvent(
@@ -692,10 +686,6 @@ void RootWindowHostLinux::PostNativeEvent(
   XSendEvent(xdisplay_, xwindow_, False, 0, &xevent);
 }
 
-void RootWindowHostLinux::WillDestroyCurrentMessageLoop() {
-  aura::RootWindow::DeleteInstance();
-}
-
 bool RootWindowHostLinux::IsWindowManagerPresent() {
   // Per ICCCM 2.8, "Manager Selections", window managers should take ownership
   // of WM_Sn selections (where n is a screen number).
@@ -703,7 +693,13 @@ bool RootWindowHostLinux::IsWindowManagerPresent() {
   return XGetSelectionOwner(xdisplay_, wm_s0_atom) != None;
 }
 
-}  // namespace
+void RootWindowHostLinux::SetCursorInternal(gfx::NativeCursor cursor) {
+  ::Cursor xcursor =
+      cursor == kCursorNone ?
+      invisible_cursor_ :
+      ui::GetXCursor(CursorShapeFromNative(cursor));
+  XDefineCursor(xdisplay_, xwindow_, xcursor);
+}
 
 // static
 RootWindowHost* RootWindowHost::Create(const gfx::Rect& bounds) {

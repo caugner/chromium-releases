@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -139,9 +139,6 @@ class DefaultTabDragController : public TabDragController,
   virtual base::EventStatus WillProcessEvent(
       const base::NativeEvent& event) OVERRIDE;
   virtual void DidProcessEvent(const base::NativeEvent& event) OVERRIDE;
-#elif defined(TOOLKIT_USES_GTK)
-  virtual void WillProcessEvent(GdkEvent* event) OVERRIDE;
-  virtual void DidProcessEvent(GdkEvent* event) OVERRIDE;
 #endif
 
   // Initialize the offset used to calculate the position to create windows
@@ -363,6 +360,9 @@ class DefaultTabDragController : public TabDragController,
 
   // The selection model of |attached_tabstrip_| before the tabs were attached.
   TabStripSelectionModel selection_model_before_attach_;
+
+  // Are we operating with tabs stacking/scrolling?
+  bool stacking_;
 
   DISALLOW_COPY_AND_ASSIGN(DefaultTabDragController);
 };

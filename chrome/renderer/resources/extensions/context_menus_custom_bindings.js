@@ -4,20 +4,18 @@
 
 // Custom bindings for the contextMenus API.
 
-(function() {
+var contextMenus = requireNative('context_menus');
+var GetNextContextMenuId = contextMenus.GetNextContextMenuId;
+var sendRequest = require('sendRequest').sendRequest;
 
-native function GetChromeHidden();
-native function GetNextContextMenuId();
-
-var chromeHidden = GetChromeHidden();
+var chromeHidden = requireNative('chrome_hidden').GetChromeHidden();
 
 chromeHidden.registerCustomHook('contextMenus', function(bindingsAPI) {
   var apiFunctions = bindingsAPI.apiFunctions;
-  var sendRequest = bindingsAPI.sendRequest;
 
   chromeHidden.contextMenus = {};
   chromeHidden.contextMenus.handlers = {};
-  var eventName = "contextMenus";
+  var eventName = 'contextMenus';
   chromeHidden.contextMenus.event = new chrome.Event(eventName);
   chromeHidden.contextMenus.ensureListenerSetup = function() {
     if (chromeHidden.contextMenus.listening) {
@@ -35,7 +33,7 @@ chromeHidden.registerCustomHook('contextMenus', function(bindingsAPI) {
     });
   };
 
-  apiFunctions.setHandleRequest("contextMenus.create", function() {
+  apiFunctions.setHandleRequest('create', function() {
     var args = arguments;
     var id = GetNextContextMenuId();
     args[0].generatedId = id;
@@ -46,8 +44,7 @@ chromeHidden.registerCustomHook('contextMenus', function(bindingsAPI) {
     return id;
   });
 
-  apiFunctions.setCustomCallback("contextMenus.create",
-      function(name, request, response) {
+  apiFunctions.setCustomCallback('create', function(name, request, response) {
     if (chrome.extension.lastError) {
       return;
     }
@@ -62,8 +59,7 @@ chromeHidden.registerCustomHook('contextMenus', function(bindingsAPI) {
     }
   });
 
-  apiFunctions.setCustomCallback("contextMenus.remove",
-      function(name, request, response) {
+  apiFunctions.setCustomCallback('remove', function(name, request, response) {
     if (chrome.extension.lastError) {
       return;
     }
@@ -71,8 +67,7 @@ chromeHidden.registerCustomHook('contextMenus', function(bindingsAPI) {
     delete chromeHidden.contextMenus.handlers[id];
   });
 
-  apiFunctions.setCustomCallback("contextMenus.update",
-      function(name, request, response) {
+  apiFunctions.setCustomCallback('update', function(name, request, response) {
     if (chrome.extension.lastError) {
       return;
     }
@@ -82,13 +77,11 @@ chromeHidden.registerCustomHook('contextMenus', function(bindingsAPI) {
     }
   });
 
-  apiFunctions.setCustomCallback("contextMenus.removeAll",
-      function(name, request, response) {
+  apiFunctions.setCustomCallback('removeAll',
+                                 function(name, request, response) {
     if (chrome.extension.lastError) {
       return;
     }
     chromeHidden.contextMenus.handlers = {};
   });
 });
-
-})();

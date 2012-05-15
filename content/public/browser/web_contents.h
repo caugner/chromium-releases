@@ -7,6 +7,7 @@
 #pragma once
 
 #include "base/basictypes.h"
+#include "base/callback_forward.h"
 #include "base/process_util.h"
 #include "base/string16.h"
 #include "content/common/content_export.h"
@@ -14,13 +15,9 @@
 #include "content/public/browser/save_page_type.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/common/view_type.h"
+#include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/native_widget_types.h"
 #include "webkit/glue/window_open_disposition.h"
-
-class InterstitialPage;
-class RenderViewHost;
-class RenderWidgetHostView;
-class SessionStorageNamespace;
 
 namespace base {
 class PropertyBag;
@@ -39,15 +36,16 @@ struct LoadStateWithParam;
 namespace content {
 
 class BrowserContext;
+class InterstitialPage;
 class NavigationController;
 class RenderProcessHost;
-class WebContentsDelegate;
-struct RendererPreferences;
+class RenderViewHost;
+class RenderWidgetHostView;
+class SessionStorageNamespace;
 class SiteInstance;
-struct SSLStatus;
-// TODO(jam): of course we will have to rename WebContentsView etc to use
-// WebContents.
+class WebContentsDelegate;
 class WebContentsView;
+struct RendererPreferences;
 
 // Describes what goes in the main content area of a tab.
 class WebContents : public PageNavigator {
@@ -104,7 +102,7 @@ class WebContents : public PageNavigator {
 
   // Returns the currently active RenderWidgetHostView. This may change over
   // time and can be NULL (during setup and teardown).
-  virtual RenderWidgetHostView* GetRenderWidgetHostView() const = 0;
+  virtual content::RenderWidgetHostView* GetRenderWidgetHostView() const = 0;
 
   // The WebContentsView will never change and is guaranteed non-NULL.
   virtual WebContentsView* GetView() const = 0;
@@ -217,11 +215,6 @@ class WebContents : public PageNavigator {
   // heap-allocated pointer is owned by the caller.
   virtual WebContents* Clone() = 0;
 
-  // Shows the page info.
-  virtual void ShowPageInfo(const GURL& url,
-                            const SSLStatus& ssl,
-                            bool show_history) = 0;
-
   // Window management ---------------------------------------------------------
 
   // Adds a new tab or window with the given already-created contents.
@@ -276,6 +269,12 @@ class WebContents : public PageNavigator {
   virtual bool SavePage(const FilePath& main_file,
                         const FilePath& dir_path,
                         SavePageType save_type) = 0;
+
+  // Generate an MHTML representation of the current page in the given file.
+  virtual void GenerateMHTML(
+      const FilePath& file,
+      const base::Callback<void(const FilePath& /* path to the MHTML file */,
+                                int64 /* size of the file */)>& callback) = 0;
 
   // Returns true if the active NavigationEntry's page_id equals page_id.
   virtual bool IsActiveEntry(int32 page_id) = 0;
@@ -358,6 +357,13 @@ class WebContents : public PageNavigator {
   // locked.
   virtual bool GotResponseToLockMouseRequest(bool allowed) = 0;
 
+  // Called when the user has selected a color in the color chooser.
+  virtual void DidChooseColorInColorChooser(int color_chooser_id,
+                                            const SkColor&) = 0;
+
+  // Called when the color chooser has ended.
+  virtual void DidEndColorChooser(int color_chooser_id) = 0;
+
   // Returns true if the location bar should be focused by default rather than
   // the page contents. The view calls this function when the tab is focused
   // to see what it should do.
@@ -365,6 +371,9 @@ class WebContents : public PageNavigator {
 
   // Focuses the location bar.
   virtual void SetFocusToLocationBar(bool select_all) = 0;
+
+  // Does this have an opener associated with it?
+  virtual bool HasOpener() const = 0;
 };
 
 }  // namespace content

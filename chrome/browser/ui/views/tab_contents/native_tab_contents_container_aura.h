@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,8 +21,9 @@ class NativeTabContentsContainerAura : public NativeTabContentsContainer,
   virtual void SetFastResize(bool fast_resize) OVERRIDE;
   virtual bool GetFastResize() const OVERRIDE;
   virtual bool FastResizeAtLastLayout() const OVERRIDE;
-  virtual void RenderViewHostChanged(RenderViewHost* old_host,
-                                     RenderViewHost* new_host) OVERRIDE;
+  virtual void RenderViewHostChanged(
+      content::RenderViewHost* old_host,
+      content::RenderViewHost* new_host) OVERRIDE;
   virtual void WebContentsFocused(content::WebContents* contents) OVERRIDE;
   virtual views::View* GetView() OVERRIDE;
 
@@ -33,7 +34,7 @@ class NativeTabContentsContainerAura : public NativeTabContentsContainer,
   virtual void RequestFocus() OVERRIDE;
   virtual void AboutToRequestFocusFromTabTraversal(bool reverse) OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
-  virtual gfx::NativeViewAccessible GetNativeViewAccessible();
+  virtual gfx::NativeViewAccessible GetNativeViewAccessible() OVERRIDE;
 
  private:
   TabContentsContainer* container_;

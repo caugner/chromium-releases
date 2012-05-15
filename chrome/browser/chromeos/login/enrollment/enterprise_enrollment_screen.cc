@@ -11,8 +11,11 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/cryptohome_library.h"
+#include "chrome/browser/chromeos/login/authenticator.h"
 #include "chrome/browser/chromeos/login/screen_observer.h"
+#include "chrome/browser/policy/auto_enrollment_client.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
+#include "chrome/browser/policy/cloud_policy_data_store.h"
 #include "chrome/browser/policy/enterprise_metrics.h"
 
 namespace chromeos {
@@ -50,7 +53,7 @@ EnterpriseEnrollmentScreen::~EnterpriseEnrollmentScreen() {}
 void EnterpriseEnrollmentScreen::SetParameters(bool is_auto_enrollment,
                                                const std::string& user) {
   is_auto_enrollment_ = is_auto_enrollment;
-  user_ = user;
+  user_ = user.empty() ? user : Authenticator::Canonicalize(user);
 }
 
 void EnterpriseEnrollmentScreen::PrepareToShow() {
@@ -70,7 +73,7 @@ void EnterpriseEnrollmentScreen::Hide() {
 void EnterpriseEnrollmentScreen::OnOAuthTokenAvailable(
     const std::string& user,
     const std::string& token) {
-  user_ = user;
+  user_ = Authenticator::Canonicalize(user);
   RegisterForDevicePolicy(token);
 }
 
@@ -93,12 +96,17 @@ void EnterpriseEnrollmentScreen::OnPolicyStateChanged(
   if (is_showing_) {
     switch (state) {
       case policy::CloudPolicySubsystem::UNENROLLED:
-        if (error_details == policy::CloudPolicySubsystem::BAD_SERIAL_NUMBER) {
-          actor_->ShowSerialNumberError();
-          break;
+        switch (error_details) {
+          case policy::CloudPolicySubsystem::BAD_SERIAL_NUMBER:
+            actor_->ShowSerialNumberError();
+            break;
+          case policy::CloudPolicySubsystem::BAD_ENROLLMENT_MODE:
+            actor_->ShowEnrollmentModeError();
+            break;
+          default:  // Still working...
+            return;
         }
-        // Still working...
-        return;
+        break;
       case policy::CloudPolicySubsystem::BAD_GAIA_TOKEN:
       case policy::CloudPolicySubsystem::LOCAL_ERROR:
         actor_->ShowFatalEnrollmentError();
@@ -110,8 +118,23 @@ void EnterpriseEnrollmentScreen::OnPolicyStateChanged(
         actor_->ShowNetworkEnrollmentError();
         break;
       case policy::CloudPolicySubsystem::TOKEN_FETCHED:
-        WriteInstallAttributesData();
-        return;
+        if (!is_auto_enrollment_ ||
+            g_browser_process->browser_policy_connector()->
+                GetDeviceCloudPolicyDataStore()->device_mode() ==
+            policy::DEVICE_MODE_ENTERPRISE) {
+          WriteInstallAttributesData();
+          return;
+        } else {
+          LOG(ERROR) << "Enrollment can not proceed because Auto-enrollment is "
+                     << "not supported for non-enterprise enrollment modes.";
+          policy::AutoEnrollmentClient::CancelAutoEnrollment();
+          is_auto_enrollment_ = false;
+          actor_->ShowAutoEnrollmentError();
+          // Set the error state to something distinguishable in the logs.
+          state = policy::CloudPolicySubsystem::LOCAL_ERROR;
+          error_details = policy::CloudPolicySubsystem::AUTO_ENROLLMENT_ERROR;
+        }
+        break;
       case policy::CloudPolicySubsystem::SUCCESS:
         // Success!
         registrar_.reset();

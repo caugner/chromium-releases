@@ -21,11 +21,17 @@
 #include "ui/gfx/surface/transport_dib.h"
 
 class CommandLine;
+class GpuMessageFilter;
 class RendererMainThread;
 class RenderWidgetHelper;
 
 namespace base {
 class WaitableEvent;
+}
+
+namespace content {
+class RenderWidgetHost;
+class RenderWidgetHostImpl;
 }
 
 // Implements a concrete RenderProcessHost for the browser process for talking
@@ -71,23 +77,24 @@ class CONTENT_EXPORT RenderProcessHostImpl
   virtual content::BrowserContext* GetBrowserContext() const OVERRIDE;
   virtual int GetID() const OVERRIDE;
   virtual bool HasConnection() const OVERRIDE;
-  virtual IPC::Channel::Listener* GetListenerByID(int routing_id) OVERRIDE;
+  virtual content::RenderWidgetHost* GetRenderWidgetHostByID(int routing_id)
+      OVERRIDE;
   virtual void SetIgnoreInputEvents(bool ignore_input_events) OVERRIDE;
   virtual bool IgnoreInputEvents() const OVERRIDE;
-  virtual void Attach(IPC::Channel::Listener* listener, int routing_id)
+  virtual void Attach(content::RenderWidgetHost* host, int routing_id)
       OVERRIDE;
-  virtual void Release(int listener_id) OVERRIDE;
+  virtual void Release(int routing_id) OVERRIDE;
   virtual void Cleanup() OVERRIDE;
-  virtual void ReportExpectingClose(int32 listener_id) OVERRIDE;
   virtual void AddPendingView() OVERRIDE;
   virtual void RemovePendingView() OVERRIDE;
   virtual void SetSuddenTerminationAllowed(bool enabled) OVERRIDE;
   virtual bool SuddenTerminationAllowed() const OVERRIDE;
   virtual IPC::ChannelProxy* GetChannel() OVERRIDE;
-  virtual listeners_iterator ListenersIterator() OVERRIDE;
+  virtual RenderWidgetHostsIterator GetRenderWidgetHostsIterator() OVERRIDE;
   virtual bool FastShutdownForPageCount(size_t count) OVERRIDE;
   virtual bool FastShutdownStarted() const OVERRIDE;
   virtual base::TimeDelta GetChildProcessIdleTime() const OVERRIDE;
+  virtual void SurfaceUpdated(int32 surface_id) OVERRIDE;
 
   // IPC::Channel::Sender via RenderProcessHost.
   virtual bool Send(IPC::Message* msg) OVERRIDE;
@@ -126,9 +133,9 @@ class CONTENT_EXPORT RenderProcessHostImpl
   // browser_process.h)
   scoped_ptr<IPC::ChannelProxy> channel_;
 
-  // The registered listeners. When this list is empty or all NULL, we should
-  // delete ourselves
-  IDMap<IPC::Channel::Listener> listeners_;
+  // The registered render widget hosts. When this list is empty or all NULL,
+  // we should delete ourselves
+  IDMap<content::RenderWidgetHost> render_widget_hosts_;
 
   // True if fast shutdown has been performed on this RPH.
   bool fast_shutdown_started_;
@@ -187,6 +194,14 @@ class CONTENT_EXPORT RenderProcessHostImpl
   // IO thread.
   scoped_refptr<RenderWidgetHelper> widget_helper_;
 
+  // The filter for GPU-related messages coming from the renderer.
+  // Thread safety note: this field is to be accessed from the UI thread.
+  // We don't keep a reference to it, to avoid it being destroyed on the UI
+  // thread, but we clear this field when we clear channel_. When channel_ goes
+  // away, it posts a task to the IO thread to destroy it there, so we know that
+  // it's valid if non-NULL.
+  GpuMessageFilter* gpu_message_filter_;
+
   // A map of transport DIB ids to cached TransportDIBs
   std::map<TransportDIB::Id, TransportDIB*> cached_dibs_;
 
@@ -230,9 +245,6 @@ class CONTENT_EXPORT RenderProcessHostImpl
   int id_;
 
   content::BrowserContext* browser_context_;
-
-  // set of listeners that expect the renderer process to close
-  std::set<int> listeners_expecting_close_;
 
   // True if the process can be shut down suddenly.  If this is true, then we're
   // sure that all the RenderViews in the process can be shutdown suddenly.  If

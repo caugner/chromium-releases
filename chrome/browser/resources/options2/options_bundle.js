@@ -20,11 +20,12 @@
   <include src="chromeos/internet_network_element.js"></include>
   <include src="chromeos/internet_options.js"></include>
   <include src="chromeos/internet_detail.js"></include>
+  <include src="chromeos/network_list.js"></include>
+  <include src="chromeos/preferred_networks.js"></include>
   <include src="chromeos/bluetooth_device_list.js"></include>
   <include src="chromeos/bluetooth_add_device_overlay.js"></include>
   <include src="chromeos/bluetooth_pair_device_overlay.js"></include>
   <include src="chromeos/accounts_options.js"></include>
-  <include src="chromeos/proxy_options.js"></include>
   <include src="chromeos/proxy_rules_list.js"></include>
   <include src="chromeos/accounts_user_list.js"></include>
   <include src="chromeos/accounts_user_name_edit.js"></include>
@@ -41,7 +42,11 @@
   var KeyboardOverlay = options.KeyboardOverlay;
   var PointerOverlay = options.PointerOverlay;
 </if>
-<if expr="not pp_ifdef('win32') and not pp_ifdef('darwin')">
+<if expr="pp_ifdef('chromeos') and pp_ifdef('use_ash')">
+  <include src="chromeos/set_wallpaper_options.js"></include>
+  var SetWallpaperOptions = options.SetWallpaperOptions;
+</if>
+<if expr="not is_win and not is_macosx">
   <include src="certificate_tree.js"></include>
   <include src="certificate_manager.js"></include>
   <include src="certificate_restore_overlay.js"></include>
@@ -54,7 +59,6 @@
   var CertificateEditCaTrustOverlay = options.CertificateEditCaTrustOverlay;
   var CertificateImportErrorOverlay = options.CertificateImportErrorOverlay;
 </if>
-<include src="advanced_options.js"></include>
 <include src="alert_overlay.js"></include>
 <include src="autofill_edit_address_overlay.js"></include>
 <include src="autofill_edit_creditcard_overlay.js"></include>
@@ -77,10 +81,6 @@
 <include src="home_page_overlay.js"></include>
 <include src="import_data_overlay.js"></include>
 <include src="instant_confirm_overlay.js"></include>
-<if expr="pp_ifdef('enable_web_intents_tag')">
-  <include src="intents_list.js"></include>
-  <include src="intents_view.js"></include>
-</if>
 <include src="language_add_language_overlay.js"></include>
 <include src="language_list.js"></include>
 <include src="language_options.js"></include>
@@ -91,6 +91,7 @@
 <include src="search_engine_manager.js"></include>
 <include src="search_engine_manager_engine_list.js"></include>
 <include src="search_page.js"></include>
+<include src="session_restore_overlay.js"></include>
 <include src="startup_overlay.js"></include>
 <include src="../sync_setup_overlay.js"></include>
 <include src="../uber/uber_utils.js"></include>

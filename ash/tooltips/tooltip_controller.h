@@ -60,6 +60,16 @@ class ASH_EXPORT TooltipController : public aura::client::TooltipClient,
 
   class Tooltip;
 
+  // Trims the tooltip to fit, setting |text| to the clipped result,
+  // |max_width| to the width (in pixels) of the clipped text and |line_count|
+  // to the number of lines of text in the tooltip. |x| and |y| give the
+  // location of the tooltip in screen coordinates.
+  static void TrimTooltipToFit(string16* text,
+                               int* max_width,
+                               int* line_count,
+                               int x,
+                               int y);
+
   void TooltipTimerFired();
 
   // Updates the tooltip if required (if there is any change in the tooltip
@@ -69,8 +79,16 @@ class ASH_EXPORT TooltipController : public aura::client::TooltipClient,
   // Only used in tests.
   bool IsTooltipVisible();
 
+  bool IsDragDropInProgress();
+
   aura::Window* tooltip_window_;
   string16 tooltip_text_;
+
+  // These fields are for tracking state when the user presses a mouse button.
+  aura::Window* tooltip_window_at_mouse_press_;
+  string16 tooltip_text_at_mouse_press_;
+  bool mouse_pressed_;
+
   scoped_ptr<Tooltip> tooltip_;
 
   base::RepeatingTimer<TooltipController> tooltip_timer_;

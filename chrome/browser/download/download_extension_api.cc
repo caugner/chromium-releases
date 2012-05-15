@@ -26,6 +26,7 @@
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_file_icon_extractor.h"
+#include "chrome/browser/download/download_query.h"
 #include "chrome/browser/download/download_service.h"
 #include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/download/download_util.h"
@@ -37,13 +38,13 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/webui/web_ui_util.h"
 #include "content/browser/download/download_state_info.h"
-#include "content/browser/download/download_types.h"
-#include "content/browser/download/interrupt_reasons.h"
-#include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/renderer_host/resource_dispatcher_host.h"
+#include "content/public/browser/download_interrupt_reasons.h"
 #include "content/public/browser/download_item.h"
-#include "content/public/browser/download_query.h"
+#include "content/public/browser/download_save_info.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/render_view_host.h"
+#include "content/public/browser/resource_dispatcher_host.h"
+#include "net/base/load_flags.h"
 #include "net/http/http_util.h"
 #include "net/url_request/url_request.h"
 
@@ -51,7 +52,6 @@ using content::BrowserThread;
 using content::DownloadId;
 using content::DownloadItem;
 using content::DownloadManager;
-using content::DownloadQuery;
 
 namespace download_extension_errors {
 
@@ -82,6 +82,7 @@ const char kDangerContent[] = "content";
 const char kDangerFile[] = "file";
 const char kDangerKey[] = "danger";
 const char kDangerSafe[] = "safe";
+const char kDangerUncommon[] = "uncommon";
 const char kDangerUrl[] = "url";
 const char kEndTimeKey[] = "endTime";
 const char kErrorKey[] = "error";
@@ -90,6 +91,7 @@ const char kFilenameKey[] = "filename";
 const char kFilenameRegexKey[] = "filenameRegex";
 const char kHeaderNameKey[] = "name";
 const char kHeaderValueKey[] = "value";
+const char kHeaderBinaryValueKey[] = "binaryValue";
 const char kHeadersKey[] = "headers";
 const char kIdKey[] = "id";
 const char kLimitKey[] = "limit";
@@ -113,14 +115,21 @@ const char kTotalBytesLessKey[] = "totalBytesLess";
 const char kUrlKey[] = "url";
 const char kUrlRegexKey[] = "urlRegex";
 
+// Note: Any change to the danger type strings, should be accompanied by a
+// corresponding change to {experimental.}downloads.json.
 const char* kDangerStrings[] = {
   kDangerSafe,
   kDangerFile,
   kDangerUrl,
   kDangerContent,
   kDangerSafe,
+  kDangerUncommon,
 };
+COMPILE_ASSERT(arraysize(kDangerStrings) == content::DOWNLOAD_DANGER_TYPE_MAX,
+               download_danger_type_enum_changed);
 
+// Note: Any change to the state strings, should be accompanied by a
+// corresponding change to {experimental.}downloads.json.
 const char* kStateStrings[] = {
   kStateInProgress,
   kStateComplete,
@@ -128,6 +137,8 @@ const char* kStateStrings[] = {
   NULL,
   kStateInterrupted,
 };
+COMPILE_ASSERT(arraysize(kStateStrings) == DownloadItem::MAX_DOWNLOAD_STATE,
+               download_item_state_enum_changed);
 
 const char* DangerString(content::DownloadDangerType danger) {
   DCHECK(danger >= 0);
@@ -187,11 +198,12 @@ scoped_ptr<base::DictionaryValue> DownloadItemToJSON(DownloadItem* item) {
       (item->GetStartTime() - base::Time::UnixEpoch()).InMilliseconds());
   json->SetInteger(kBytesReceivedKey, item->GetReceivedBytes());
   json->SetInteger(kTotalBytesKey, item->GetTotalBytes());
-  if (item->GetState() == DownloadItem::INTERRUPTED)
+  if (item->GetState() == DownloadItem::INTERRUPTED) {
     json->SetInteger(kErrorKey, static_cast<int>(item->GetLastReason()));
-  else if (item->GetState() == DownloadItem::CANCELLED)
+  } else if (item->GetState() == DownloadItem::CANCELLED) {
     json->SetInteger(kErrorKey, static_cast<int>(
-        DOWNLOAD_INTERRUPT_REASON_USER_CANCELED));
+        content::DOWNLOAD_INTERRUPT_REASON_USER_CANCELED));
+  }
   // TODO(benjhayden): Implement endTime and fileSize.
   // json->SetInteger(kEndTimeKey, -1);
   json->SetInteger(kFileSizeKey, item->GetTotalBytes());
@@ -237,7 +249,7 @@ void DownloadFileIconExtractorImpl::OnIconLoadComplete(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   std::string url;
   if (icon)
-    url = web_ui_util::GetImageDataUrl(*icon);
+    url = web_ui_util::GetImageDataUrl(*icon->ToSkBitmap());
   callback_.Run(url);
 }
 
@@ -405,23 +417,35 @@ bool DownloadsDownloadFunction::ParseArgs() {
   if (iodata_->extra_headers != NULL) {
     for (size_t index = 0; index < iodata_->extra_headers->GetSize(); ++index) {
       base::DictionaryValue* header = NULL;
-      std::string name, value;
+      std::string name;
       EXTENSION_FUNCTION_VALIDATE(iodata_->extra_headers->GetDictionary(
             index, &header));
       EXTENSION_FUNCTION_VALIDATE(header->GetString(
             kHeaderNameKey, &name));
-      EXTENSION_FUNCTION_VALIDATE(header->GetString(
-            kHeaderValueKey, &value));
+      if (header->HasKey(kHeaderBinaryValueKey)) {
+        base::ListValue* binary_value = NULL;
+        EXTENSION_FUNCTION_VALIDATE(header->GetList(
+              kHeaderBinaryValueKey, &binary_value));
+        for (size_t char_i = 0; char_i < binary_value->GetSize(); ++char_i) {
+          int char_value = 0;
+          EXTENSION_FUNCTION_VALIDATE(binary_value->GetInteger(
+                char_i, &char_value));
+        }
+      } else if (header->HasKey(kHeaderValueKey)) {
+        std::string value;
+        EXTENSION_FUNCTION_VALIDATE(header->GetString(
+              kHeaderValueKey, &value));
+      }
       if (!net::HttpUtil::IsSafeHeader(name)) {
         error_ = download_extension_errors::kGenericError;
         return false;
       }
     }
   }
-  iodata_->rdh = ResourceDispatcherHost::Get();
-  iodata_->resource_context = &profile()->GetResourceContext();
-  iodata_->render_process_host_id = render_view_host()->process()->GetID();
-  iodata_->render_view_host_routing_id = render_view_host()->routing_id();
+  iodata_->rdh = content::ResourceDispatcherHost::Get();
+  iodata_->resource_context = profile()->GetResourceContext();
+  iodata_->render_process_host_id = render_view_host()->GetProcess()->GetID();
+  iodata_->render_view_host_routing_id = render_view_host()->GetRoutingID();
   return true;
 }
 
@@ -438,22 +462,34 @@ bool DownloadsDownloadFunction::RunInternal() {
 void DownloadsDownloadFunction::BeginDownloadOnIOThread() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   DVLOG(1) << __FUNCTION__ << " " << iodata_->url.spec();
-  DownloadSaveInfo save_info;
+  content::DownloadSaveInfo save_info;
   // TODO(benjhayden) Ensure that this filename is interpreted as a path
   // relative to the default downloads directory without allowing '..'.
   save_info.suggested_name = iodata_->filename;
   save_info.prompt_for_save_location = iodata_->save_as;
 
-  scoped_ptr<net::URLRequest> request(
-      new net::URLRequest(iodata_->url, iodata_->rdh));
+  scoped_ptr<net::URLRequest> request(new net::URLRequest(iodata_->url, NULL));
   request->set_method(iodata_->method);
   if (iodata_->extra_headers != NULL) {
     for (size_t index = 0; index < iodata_->extra_headers->GetSize(); ++index) {
       base::DictionaryValue* header = NULL;
       std::string name, value;
       CHECK(iodata_->extra_headers->GetDictionary(index, &header));
-      CHECK(header->GetString("name", &name));
-      CHECK(header->GetString("value", &value));
+      CHECK(header->GetString(kHeaderNameKey, &name));
+      if (header->HasKey(kHeaderBinaryValueKey)) {
+        base::ListValue* binary_value = NULL;
+        CHECK(header->GetList(kHeaderBinaryValueKey, &binary_value));
+        for (size_t char_i = 0; char_i < binary_value->GetSize(); ++char_i) {
+          int char_value = 0;
+          CHECK(binary_value->GetInteger(char_i, &char_value));
+          if ((0 <= char_value) &&
+              (char_value <= 0xff)) {
+            value.push_back(char_value);
+          }
+        }
+      } else if (header->HasKey(kHeaderValueKey)) {
+        CHECK(header->GetString(kHeaderValueKey, &value));
+      }
       request->SetExtraRequestHeaderByName(name, value, false/*overwrite*/);
     }
   }
@@ -461,14 +497,19 @@ void DownloadsDownloadFunction::BeginDownloadOnIOThread() {
     request->AppendBytesToUpload(iodata_->post_body.data(),
                                  iodata_->post_body.size());
   }
+
+  // Prevent login prompts for 401/407 responses.
+  request->set_load_flags(request->load_flags() |
+                          net::LOAD_DO_NOT_PROMPT_FOR_LOGIN);
+
   net::Error error = iodata_->rdh->BeginDownload(
       request.Pass(),
-      false,  // prefer_cache
-      save_info,
-      base::Bind(&DownloadsDownloadFunction::OnStarted, this),
+      iodata_->resource_context,
       iodata_->render_process_host_id,
       iodata_->render_view_host_routing_id,
-      *(iodata_->resource_context));
+      false,  // prefer_cache
+      save_info,
+      base::Bind(&DownloadsDownloadFunction::OnStarted, this));
   iodata_.reset();
 
   if (error != net::OK) {
@@ -593,20 +634,17 @@ bool DownloadsSearchFunction::ParseOrderBy(const base::Value& order_by_value) {
 }
 
 bool DownloadsSearchFunction::RunInternal() {
-  DownloadQuery::DownloadVector cpp_results;
+  DownloadQuery::DownloadVector all_items, cpp_results;
   DownloadManager* manager = DownloadServiceFactory::GetForProfile(profile())
     ->GetDownloadManager();
   if (has_get_id_) {
     DownloadItem* item = manager->GetDownloadItem(get_id_);
-    if (item != NULL) {
-      DownloadQuery::DownloadVector all_items;
+    if (item != NULL)
       all_items.push_back(item);
-      query_->Search(all_items.begin(), all_items.end(), &cpp_results);
-    }
   } else {
-    query_->AddFilter(base::Bind(&IsNotTemporaryDownloadFilter));
-    manager->SearchByQuery(*query_.get(), &cpp_results);
+    manager->GetAllDownloads(FilePath(FILE_PATH_LITERAL("")), &all_items);
   }
+  query_->Search(all_items.begin(), all_items.end(), &cpp_results);
   base::ListValue* json_results = new base::ListValue();
   for (DownloadManager::DownloadVector::const_iterator it = cpp_results.begin();
        it != cpp_results.end(); ++it) {
@@ -864,7 +902,9 @@ void DownloadsGetFileIconFunction::OnIconURLExtracted(const std::string& url) {
 
 ExtensionDownloadsEventRouter::ExtensionDownloadsEventRouter(Profile* profile)
   : profile_(profile),
-    manager_(NULL) {
+    manager_(NULL),
+    delete_item_jsons_(&item_jsons_),
+    delete_on_changed_stats_(&on_changed_stats_) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(profile_);
   // Register a callback with the DownloadService for this profile to be called
@@ -880,60 +920,153 @@ ExtensionDownloadsEventRouter::ExtensionDownloadsEventRouter(Profile* profile)
 void ExtensionDownloadsEventRouter::Init(DownloadManager* manager) {
   DCHECK(manager_ == NULL);
   manager_ = manager;
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   manager_->AddObserver(this);
 }
 
 ExtensionDownloadsEventRouter::~ExtensionDownloadsEventRouter() {
   if (manager_ != NULL)
     manager_->RemoveObserver(this);
+  for (ItemMap::const_iterator iter = downloads_.begin();
+       iter != downloads_.end(); ++iter) {
+    if (iter->second != NULL)
+      iter->second->RemoveObserver(this);
+  }
 }
 
-void ExtensionDownloadsEventRouter::ModelChanged() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  if (manager_ == NULL)
+ExtensionDownloadsEventRouter::OnChangedStat::OnChangedStat()
+  : fires(0),
+    total(0) {
+}
+
+ExtensionDownloadsEventRouter::OnChangedStat::~OnChangedStat() {
+  if (total > 0)
+    UMA_HISTOGRAM_PERCENTAGE("Download.OnChanged", (fires * 100 / total));
+}
+
+void ExtensionDownloadsEventRouter::OnDownloadUpdated(DownloadItem* item) {
+  int download_id = item->GetId();
+  if (item->GetState() == DownloadItem::REMOVING) {
+    // The REMOVING state indicates that this item is being erased.
+    // Let's unregister as an observer so that we don't see any more updates
+    // from it, dispatch the onErased event, and remove its json and is
+    // OnChangedStat from our maps.
+    downloads_.erase(download_id);
+    item->RemoveObserver(this);
+    DispatchEvent(extension_event_names::kOnDownloadErased,
+                  base::Value::CreateIntegerValue(download_id));
+    delete item_jsons_[download_id];
+    item_jsons_.erase(download_id);
+    delete on_changed_stats_[download_id];
+    on_changed_stats_.erase(download_id);
     return;
+  }
+
+  base::DictionaryValue* old_json = item_jsons_[download_id];
+  scoped_ptr<base::DictionaryValue> new_json(DownloadItemToJSON(item));
+  scoped_ptr<base::DictionaryValue> delta(new base::DictionaryValue());
+  delta->SetInteger(kIdKey, download_id);
+  std::set<std::string> new_fields;
+  bool changed = false;
+
+  // For each field in the new json representation of the item except the
+  // bytesReceived field, if the field has changed from the previous old json,
+  // set the differences in the |delta| object and remember that something
+  // significant changed.
+  for (base::DictionaryValue::Iterator iter(*new_json.get());
+       iter.HasNext(); iter.Advance()) {
+    new_fields.insert(iter.key());
+    if (iter.key() != kBytesReceivedKey) {
+      base::Value* old_value = NULL;
+      if (!old_json->HasKey(iter.key()) ||
+          (old_json->Get(iter.key(), &old_value) &&
+           !iter.value().Equals(old_value))) {
+        delta->Set(iter.key() + ".new", iter.value().DeepCopy());
+        if (old_value)
+          delta->Set(iter.key() + ".old", old_value->DeepCopy());
+        changed = true;
+      }
+    }
+  }
+
+  // If a field was in the previous json but is not in the new json, set the
+  // difference in |delta|.
+  for (base::DictionaryValue::Iterator iter(*old_json);
+       iter.HasNext(); iter.Advance()) {
+    if (new_fields.find(iter.key()) == new_fields.end()) {
+      delta->Set(iter.key() + ".old", iter.value().DeepCopy());
+      changed = true;
+    }
+  }
+
+  // Update the OnChangedStat and dispatch the event if something significant
+  // changed. Replace the stored json with the new json.
+  ++(on_changed_stats_[download_id]->total);
+  if (changed) {
+    DispatchEvent(extension_event_names::kOnDownloadChanged, delta.release());
+    ++(on_changed_stats_[download_id]->fires);
+  }
+  item_jsons_[download_id]->Swap(new_json.get());
+}
+
+void ExtensionDownloadsEventRouter::OnDownloadOpened(DownloadItem* item) {
+}
+
+void ExtensionDownloadsEventRouter::ModelChanged(DownloadManager* manager) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(manager_ == manager);
+  typedef std::set<int> DownloadIdSet;
+
+  // Get all the download items.
   DownloadManager::DownloadVector current_vec;
   manager_->SearchDownloads(string16(), &current_vec);
-  DownloadIdSet current_set;
+
+  // Populate set<>s of download item identifiers so that we can find
+  // differences between the old and the new set of download items.
+  DownloadIdSet current_set, prev_set;
+  for (ItemMap::const_iterator iter = downloads_.begin();
+       iter != downloads_.end(); ++iter) {
+    prev_set.insert(iter->first);
+  }
   ItemMap current_map;
   for (DownloadManager::DownloadVector::const_iterator iter =
        current_vec.begin();
        iter != current_vec.end(); ++iter) {
     DownloadItem* item = *iter;
     int item_id = item->GetId();
-    // TODO(benjhayden): Remove the following line when every item's id >= 0,
-    // which will allow firing onErased events for items from the history.
-    if (item_id < 0) continue;
+    CHECK(item_id >= 0);
     DCHECK(current_map.find(item_id) == current_map.end());
     current_set.insert(item_id);
     current_map[item_id] = item;
   }
-  DownloadIdSet new_set;  // current_set - downloads_;
-  DownloadIdSet erased_set;  // downloads_ - current_set;
-  std::insert_iterator<DownloadIdSet> new_insertor(new_set, new_set.begin());
-  std::insert_iterator<DownloadIdSet> erased_insertor(
-      erased_set, erased_set.begin());
+  DownloadIdSet new_set;  // current_set - prev_set;
   std::set_difference(current_set.begin(), current_set.end(),
-                      downloads_.begin(), downloads_.end(),
-                      new_insertor);
-  std::set_difference(downloads_.begin(), downloads_.end(),
-                      current_set.begin(), current_set.end(),
-                      erased_insertor);
+                      prev_set.begin(), prev_set.end(),
+                      std::insert_iterator<DownloadIdSet>(
+                        new_set, new_set.begin()));
+
+  // For each download that was not in the old set of downloads but is in the
+  // new set of downloads, fire an onCreated event, register as an Observer of
+  // the item, store a json representation of the item so that we can easily
+  // find changes in that json representation, and make an OnChangedStat.
   for (DownloadIdSet::const_iterator iter = new_set.begin();
        iter != new_set.end(); ++iter) {
     scoped_ptr<base::DictionaryValue> item(
         DownloadItemToJSON(current_map[*iter]));
-    DispatchEvent(extension_event_names::kOnDownloadCreated, item.release());
+    DispatchEvent(extension_event_names::kOnDownloadCreated, item->DeepCopy());
+    DCHECK(item_jsons_.find(*iter) == item_jsons_.end());
+    on_changed_stats_[*iter] = new OnChangedStat();
+    current_map[*iter]->AddObserver(this);
+    item_jsons_[*iter] = item.release();
   }
-  for (DownloadIdSet::const_iterator iter = erased_set.begin();
-       iter != erased_set.end(); ++iter) {
-    DispatchEvent(extension_event_names::kOnDownloadErased,
-                  base::Value::CreateIntegerValue(*iter));
-  }
-  downloads_.swap(current_set);
+  downloads_.swap(current_map);
+
+  // Dispatching onErased is handled in OnDownloadUpdated when an item
+  // transitions to the REMOVING state.
 }
 
-void ExtensionDownloadsEventRouter::ManagerGoingDown() {
+void ExtensionDownloadsEventRouter::ManagerGoingDown(
+    DownloadManager* manager) {
   manager_->RemoveObserver(this);
   manager_ = NULL;
 }
@@ -943,7 +1076,7 @@ void ExtensionDownloadsEventRouter::DispatchEvent(
   ListValue args;
   args.Append(arg);
   std::string json_args;
-  base::JSONWriter::Write(&args, false, &json_args);
+  base::JSONWriter::Write(&args, &json_args);
   profile_->GetExtensionEventRouter()->DispatchEventToRenderers(
       event_name,
       json_args,

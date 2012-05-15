@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,9 @@
 class LoadTimingObserverUITest : public UITest {
  public:
   LoadTimingObserverUITest()
-      : http_server_(net::TestServer::TYPE_HTTP, FilePath()) {
+      : http_server_(net::TestServer::TYPE_HTTP,
+                     net::TestServer::kLocalhost,
+                     FilePath()) {
     dom_automation_enabled_ = true;
   }
 
@@ -20,7 +22,8 @@ class LoadTimingObserverUITest : public UITest {
 };
 
 // http://crbug.com/102030
-TEST_F(LoadTimingObserverUITest, FLAKY_CacheHitAfterRedirect) {
+// http://crbug.com/114390
+TEST_F(LoadTimingObserverUITest, DISABLED_CacheHitAfterRedirect) {
   ASSERT_TRUE(http_server_.Start());
   GURL cached_page = http_server_.GetURL("cachetime");
   std::string redirect = "server-redirect?" + cached_page.spec();

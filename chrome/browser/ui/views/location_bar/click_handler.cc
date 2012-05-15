@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include "content/public/browser/web_contents.h"
 #include "ui/views/view.h"
 
+using content::NavigationController;
 using content::NavigationEntry;
 using content::WebContents;
 
@@ -30,10 +31,13 @@ void ClickHandler::OnMouseReleased(const views::MouseEvent& event) {
     return;
 
   WebContents* tab = location_bar_->GetTabContentsWrapper()->web_contents();
-  NavigationEntry* nav_entry = tab->GetController().GetActiveEntry();
+  const NavigationController& controller = tab->GetController();
+  NavigationEntry* nav_entry = controller.GetActiveEntry();
   if (!nav_entry) {
     NOTREACHED();
     return;
   }
-  tab->ShowPageInfo(nav_entry->GetURL(), nav_entry->GetSSL(), true);
+
+  location_bar_->delegate()->ShowPageInfo(
+      tab, nav_entry->GetURL(), nav_entry->GetSSL(), true);
 }

@@ -4,15 +4,20 @@
 
 #include "chrome/browser/ui/views/tab_contents/native_tab_contents_view_win.h"
 
-#include "chrome/browser/tab_contents/web_drop_target_win.h"
+#include "base/bind.h"
+#include "chrome/browser/ui/sad_tab_helper.h"
+#include "chrome/browser/tab_contents/web_drag_bookmark_handler_win.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/views/tab_contents/native_tab_contents_view_delegate.h"
-#include "chrome/browser/ui/views/tab_contents/tab_contents_drag_win.h"
-#include "content/browser/renderer_host/render_widget_host_view.h"
+#include "content/browser/tab_contents/web_contents_drag_win.h"
+#include "content/browser/tab_contents/web_drag_dest_win.h"
+#include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 #include "ui/views/views_delegate.h"
 #include "ui/views/widget/widget.h"
 
+using content::RenderWidgetHostView;
 using content::WebContents;
 
 namespace {
@@ -97,19 +102,13 @@ void NativeTabContentsViewWin::InitNativeTabContentsView() {
 
   // Remove the root view drop target so we can register our own.
   RevokeDragDrop(GetNativeView());
-  drop_target_ = new WebDropTarget(GetNativeView(),
-                                   delegate_->GetWebContents());
-}
-
-void NativeTabContentsViewWin::Unparent() {
-  // Note that we do not DCHECK on focus_manager_ as it may be NULL when used
-  // with an external tab container.
-  views::Widget::ReparentNativeView(GetNativeView(),
-                                    HiddenTabHostWindow::Instance());
+  drag_dest_ = new WebDragDest(GetNativeView(), delegate_->GetWebContents());
+  bookmark_handler_.reset(new WebDragBookmarkHandlerWin());
+  drag_dest_->set_delegate(bookmark_handler_.get());
 }
 
 RenderWidgetHostView* NativeTabContentsViewWin::CreateRenderWidgetHostView(
-    RenderWidgetHost* render_widget_host) {
+    content::RenderWidgetHost* render_widget_host) {
   RenderWidgetHostView* view =
       RenderWidgetHostView::CreateViewForWidget(render_widget_host);
 
@@ -132,7 +131,12 @@ void NativeTabContentsViewWin::StartDragging(const WebDropData& drop_data,
                                              WebKit::WebDragOperationsMask ops,
                                              const SkBitmap& image,
                                              const gfx::Point& image_offset) {
-  drag_handler_ = new TabContentsDragWin(this);
+  drag_handler_ = new WebContentsDragWin(
+      GetNativeView(),
+      delegate_->GetWebContents(),
+      drag_dest_,
+      base::Bind(&NativeTabContentsViewWin::EndDragging,
+                 base::Unretained(this)));
   drag_handler_->StartDragging(drop_data, ops, image, image_offset);
 }
 
@@ -146,7 +150,7 @@ bool NativeTabContentsViewWin::IsDoingDrag() const {
 
 void NativeTabContentsViewWin::SetDragCursor(
     WebKit::WebDragOperation operation) {
-  drop_target_->set_drag_cursor(operation);
+  drag_dest_->set_drag_cursor(operation);
 }
 
 views::NativeWidget* NativeTabContentsViewWin::AsNativeWidget() {
@@ -157,9 +161,9 @@ views::NativeWidget* NativeTabContentsViewWin::AsNativeWidget() {
 // NativeTabContentsViewWin, views::NativeWidgetWin overrides:
 
 void NativeTabContentsViewWin::OnDestroy() {
-  if (drop_target_.get()) {
+  if (drag_dest_.get()) {
     RevokeDragDrop(GetNativeView());
-    drop_target_ = NULL;
+    drag_dest_ = NULL;
   }
 
   NativeWidgetWin::OnDestroy();
@@ -174,7 +178,9 @@ void NativeTabContentsViewWin::OnHScroll(int scroll_type,
 LRESULT NativeTabContentsViewWin::OnMouseRange(UINT msg,
                                                WPARAM w_param,
                                                LPARAM l_param) {
-  if (delegate_->IsShowingSadTab())
+  TabContentsWrapper* wrapper =
+      TabContentsWrapper::GetCurrentWrapperForContents(GetWebContents());
+  if (wrapper && wrapper->sad_tab_helper()->HasSadTab())
     return NativeWidgetWin::OnMouseRange(msg, w_param, l_param);
 
   switch (msg) {
@@ -209,10 +215,6 @@ LRESULT NativeTabContentsViewWin::OnReflectedMessage(UINT msg,
         return 1;
       }
       break;
-    case WM_HSCROLL:
-    case WM_VSCROLL:
-      if (ScrollZoom(LOWORD(message->wParam)))
-        return 1;
     default:
       break;
   }
@@ -282,6 +284,12 @@ void NativeTabContentsViewWin::OnNCPaint(HRGN rgn) {
   // here since the view will draw everything correctly.
 }
 
+LRESULT NativeTabContentsViewWin::OnNCHitTest(const CPoint& point) {
+  // Allow hit tests to fall through to the parent window.
+  SetMsgHandled(true);
+  return HTTRANSPARENT;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // NativeTabContentsViewWin, private:
 
@@ -289,16 +297,6 @@ void NativeTabContentsViewWin::ScrollCommon(UINT message, int scroll_type,
                                             short position, HWND scrollbar) {
   // This window can receive scroll events as a result of the ThinkPad's
   // touch-pad scroll wheel emulation.
-  if (!ScrollZoom(scroll_type)) {
-    // Reflect scroll message to the view() to give it a chance
-    // to process scrolling.
-    SendMessage(delegate_->GetWebContents()->GetView()->GetContentNativeView(),
-                message, MAKELONG(scroll_type, position),
-                reinterpret_cast<LPARAM>(scrollbar));
-  }
-}
-
-bool NativeTabContentsViewWin::ScrollZoom(int scroll_type) {
   // If ctrl is held, zoom the UI.  There are three issues with this:
   // 1) Should the event be eaten or forwarded to content?  We eat the event,
   //    which is like Firefox and unlike IE.
@@ -324,9 +322,14 @@ bool NativeTabContentsViewWin::ScrollZoom(int scroll_type) {
     }
 
     delegate_->OnNativeTabContentsViewWheelZoom(distance > 0);
-    return true;
+    return;
   }
-  return false;
+
+  // Reflect scroll message to the view() to give it a chance
+  // to process scrolling.
+  SendMessage(delegate_->GetWebContents()->GetView()->GetContentNativeView(),
+              message, MAKELONG(scroll_type, position),
+              reinterpret_cast<LPARAM>(scrollbar));
 }
 
 ////////////////////////////////////////////////////////////////////////////////

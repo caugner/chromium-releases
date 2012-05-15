@@ -6,8 +6,8 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/values.h"
 #include "base/utf_string_conversions.h"
+#include "base/values.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_util.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "chrome/common/chrome_version_info.h"
@@ -43,6 +43,11 @@ void CoreOobeHandler::GetLocalizedStrings(
       "title", l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME));
   localized_strings->SetString(
       "productName", l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME));
+  localized_strings->SetString(
+      "learnMore", l10n_util::GetStringUTF16(IDS_LEARN_MORE));
+  localized_strings->SetString(
+      "reportingHint",
+      l10n_util::GetStringUTF16(IDS_LOGIN_MANAGED_REPORTING_HINT));
 }
 
 void CoreOobeHandler::Initialize() {
@@ -68,7 +73,7 @@ void CoreOobeHandler::OnInitialized(const base::ListValue* args) {
 }
 
 void CoreOobeHandler::OnToggleAccessibility(const base::ListValue* args) {
-  accessibility::ToggleAccessibility(web_ui());
+  accessibility::ToggleSpokenFeedback(web_ui());
 }
 
 void CoreOobeHandler::ShowOobeUI(bool show) {
@@ -98,6 +103,16 @@ void CoreOobeHandler::OnOSVersionLabelTextUpdated(
 void CoreOobeHandler::OnBootTimesLabelTextUpdated(
     const std::string& boot_times_label_text) {
   UpdateLabel("boot-times", boot_times_label_text);
+}
+
+void CoreOobeHandler::OnEnterpriseInfoUpdated(
+    const std::string& message_text,
+    bool reporting_hint) {
+  base::StringValue message_text_vaue(UTF8ToUTF16(message_text));
+  base::FundamentalValue show_help_link(reporting_hint);
+  web_ui()->CallJavascriptFunction("cr.ui.Oobe.setEnterpriseInfo",
+                                   message_text_vaue,
+                                   show_help_link);
 }
 
 void CoreOobeHandler::UpdateLabel(const std::string& id,

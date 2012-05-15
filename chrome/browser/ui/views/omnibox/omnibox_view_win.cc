@@ -53,9 +53,8 @@
 #include "ui/base/l10n/l10n_util_win.h"
 #include "ui/base/win/mouse_wheel_util.h"
 #include "ui/gfx/canvas.h"
-#include "ui/gfx/canvas_skia.h"
+#include "ui/views/button_drag_utils.h"
 #include "ui/views/controls/textfield/native_textfield_win.h"
-#include "ui/views/drag_utils.h"
 #include "ui/views/widget/widget.h"
 
 #pragma comment(lib, "oleacc.lib")  // Needed for accessibility support.
@@ -436,7 +435,7 @@ OmniboxViewWin::OmniboxViewWin(AutocompleteEditController* controller,
                                bool popup_window_mode,
                                views::View* location_bar)
     : model_(new AutocompleteEditModel(this, controller,
-                                       parent_view->browser()->profile())),
+                                       parent_view->profile())),
       popup_view_(new AutocompletePopupContentsView(parent_view->font(), this,
                                                     model_.get(),
                                                     location_bar)),
@@ -647,8 +646,7 @@ void OmniboxViewWin::Update(const WebContents* tab_for_state_restoring) {
 void OmniboxViewWin::OpenMatch(const AutocompleteMatch& match,
                                WindowOpenDisposition disposition,
                                const GURL& alternate_nav_url,
-                               size_t selected_line,
-                               const string16& keyword) {
+                               size_t selected_line) {
   if (!match.destination_url.is_valid())
     return;
 
@@ -657,8 +655,7 @@ void OmniboxViewWin::OpenMatch(const AutocompleteMatch& match,
   // here, the user could potentially see a flicker of the current URL before
   // the new one reappears, which would look glitchy.
   ScopedFreeze freeze(this, GetTextObjectModel());
-  model_->OpenMatch(match, disposition, alternate_nav_url,
-                    selected_line, keyword);
+  model_->OpenMatch(match, disposition, alternate_nav_url, selected_line);
 }
 
 string16 OmniboxViewWin::GetText() const {
@@ -689,16 +686,22 @@ void OmniboxViewWin::SetUserText(const string16& text,
   ScopedFreeze freeze(this, GetTextObjectModel());
   model_->SetUserText(text);
   saved_selection_for_focus_change_.cpMin = -1;
-  SetWindowTextAndCaretPos(display_text, display_text.length());
-  if (update_popup)
-    UpdatePopup();
-  TextChanged();
+  SetWindowTextAndCaretPos(display_text, display_text.length(), update_popup,
+      true);
 }
 
 void OmniboxViewWin::SetWindowTextAndCaretPos(const string16& text,
-                                              size_t caret_pos) {
+                                              size_t caret_pos,
+                                              bool update_popup,
+                                              bool notify_text_changed) {
   SetWindowText(text.c_str());
   PlaceCaretAt(caret_pos);
+
+  if (update_popup)
+    UpdatePopup();
+
+  if (notify_text_changed)
+    TextChanged();
 }
 
 void OmniboxViewWin::SetForcedQuery() {
@@ -738,9 +741,8 @@ void OmniboxViewWin::SelectAll(bool reversed) {
 void OmniboxViewWin::RevertAll() {
   ScopedFreeze freeze(this, GetTextObjectModel());
   ClosePopup();
-  model_->Revert();
   saved_selection_for_focus_change_.cpMin = -1;
-  TextChanged();
+  model_->Revert();
 }
 
 void OmniboxViewWin::UpdatePopup() {
@@ -835,8 +837,7 @@ void OmniboxViewWin::OnTemporaryTextMaybeChanged(const string16& display_text,
   // text and then arrowed to another entry with the same text, we'd still want
   // to move the caret.
   ScopedFreeze freeze(this, GetTextObjectModel());
-  SetWindowTextAndCaretPos(display_text, display_text.length());
-  TextChanged();
+  SetWindowTextAndCaretPos(display_text, display_text.length(), false, true);
 }
 
 bool OmniboxViewWin::OnInlineAutocompleteTextMaybeChanged(
@@ -911,8 +912,8 @@ bool OmniboxViewWin::OnAfterPossibleChangeInternal(bool force_text_changed) {
                                  sel_before_change_.cpMax));
 
   const bool something_changed = model_->OnAfterPossibleChange(
-      new_text, new_sel.cpMin, new_sel.cpMax, selection_differs,
-      text_differs, just_deleted_text, !IsImeComposing());
+      text_before_change_, new_text, new_sel.cpMin, new_sel.cpMax,
+      selection_differs, text_differs, just_deleted_text, !IsImeComposing());
 
   if (selection_differs)
     controller_->OnSelectionBoundsChanged();
@@ -1362,7 +1363,8 @@ void OmniboxViewWin::OnCopy() {
   // GetSel() doesn't preserve selection direction, so sel.cpMin will always be
   // the smaller value.
   model_->AdjustTextForCopy(sel.cpMin, IsSelectAll(), &text, &url, &write_url);
-  ui::ScopedClipboardWriter scw(g_browser_process->clipboard());
+  ui::ScopedClipboardWriter scw(g_browser_process->clipboard(),
+                                ui::Clipboard::BUFFER_STANDARD);
   scw.WriteText(text);
   if (write_url) {
     scw.WriteBookmark(text, url.spec());
@@ -2095,17 +2097,17 @@ bool OmniboxViewWin::OnKeyDownOnlyWritable(TCHAR key,
     }
 
     case VK_TAB: {
-      if (model_->is_keyword_hint()) {
+      const bool shift_pressed = GetKeyState(VK_SHIFT) < 0;
+      if (model_->is_keyword_hint() && !shift_pressed) {
         // Accept the keyword.
         ScopedFreeze freeze(this, GetTextObjectModel());
         model_->AcceptKeyword();
-      } else if (!IsCaretAtEnd()) {
-        ScopedFreeze freeze(this, GetTextObjectModel());
-        OnBeforePossibleChange();
-        PlaceCaretAt(GetTextLength());
-        OnAfterPossibleChange();
+      } else if (shift_pressed &&
+                 model_->popup_model()->selected_line_state() ==
+                    AutocompletePopupModel::KEYWORD) {
+        model_->ClearKeyword(GetText());
       } else {
-        model_->CommitSuggestedText(true);
+        model_->OnUpOrDownKeyPressed(shift_pressed ? -count : count);
       }
       return true;
     }
@@ -2365,8 +2367,8 @@ void OmniboxViewWin::DrawSlashForInsecureScheme(HDC hdc,
   // Create a canvas as large as |scheme_rect| to do our drawing, and initialize
   // it to fully transparent so any antialiasing will look nice when painted
   // atop the edit.
-  gfx::CanvasSkia canvas(gfx::Size(scheme_rect.Width(), scheme_rect.Height()),
-                         false);
+  gfx::Canvas canvas(gfx::Size(scheme_rect.Width(), scheme_rect.Height()),
+                     false);
   SkCanvas* sk_canvas = canvas.sk_canvas();
   sk_canvas->getDevice()->accessBitmap(true).eraseARGB(0, 0, 0, 0);
 
@@ -2543,7 +2545,7 @@ void OmniboxViewWin::StartDragIfNecessary(const CPoint& point) {
     SkBitmap favicon;
     if (is_all_selected)
       model_->GetDataForURLExport(&url, &title, &favicon);
-    drag_utils::SetURLAndDragImage(url, title, favicon, &data);
+    button_drag_utils::SetURLAndDragImage(url, title, favicon, &data);
     supported_modes |= DROPEFFECT_LINK;
     content::RecordAction(UserMetricsAction("Omnibox_DragURL"));
   } else {

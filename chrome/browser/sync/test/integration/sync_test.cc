@@ -24,8 +24,8 @@
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/sync/notifier/p2p_notifier.h"
+#include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/sync/profile_sync_service_harness.h"
-#include "chrome/browser/sync/protocol/sync.pb.h"
 #include "chrome/browser/sync/test/integration/sync_datatype_helper.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
@@ -41,6 +41,7 @@
 #include "content/test/test_url_fetcher_factory.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/escape.h"
+#include "net/base/load_flags.h"
 #include "net/base/network_change_notifier.h"
 #include "net/proxy/proxy_config.h"
 #include "net/proxy/proxy_config_service_fixed.h"
@@ -49,6 +50,7 @@
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_status.h"
+#include "sync/protocol/sync.pb.h"
 
 using content::BrowserThread;
 
@@ -108,11 +110,14 @@ void SetProxyConfigCallback(
 }
 
 SyncTest::SyncTest(TestType test_type)
-    : sync_server_(net::TestServer::TYPE_SYNC, FilePath()),
+    : sync_server_(net::TestServer::TYPE_SYNC,
+                   net::TestServer::kLocalhost,
+                   FilePath()),
       test_type_(test_type),
       server_type_(SERVER_TYPE_UNDECIDED),
       num_clients_(-1),
       use_verifier_(true),
+      notifications_enabled_(true),
       test_server_handle_(base::kNullProcessHandle),
       number_of_default_sync_items_(0) {
   InProcessBrowserTest::set_show_window(true);
@@ -216,10 +221,6 @@ void SyncTest::AddOptionalTypesToCommandLine(CommandLine* cl) {
   // TODO(sync): Remove this once sessions sync is enabled by default.
   if (!cl->HasSwitch(switches::kEnableSyncTabs))
     cl->AppendSwitch(switches::kEnableSyncTabs);
-  // TODO(kalman): Remove this once extension/app settings sync is enabled by
-  // default.
-  if (!cl->HasSwitch(switches::kEnableSyncExtensionSettings))
-    cl->AppendSwitch(switches::kEnableSyncExtensionSettings);
 }
 
 // static
@@ -231,7 +232,8 @@ Profile* SyncTest::MakeProfile(const FilePath::StringType name) {
   if (!file_util::PathExists(path))
     CHECK(file_util::CreateDirectory(path));
 
-  Profile* profile = Profile::CreateProfile(path);
+  Profile* profile =
+      Profile::CreateProfile(path, NULL, Profile::CREATE_MODE_SYNCHRONOUS);
   g_browser_process->profile_manager()->RegisterTestingProfile(profile, true);
   return profile;
 }
@@ -280,23 +282,11 @@ bool SyncTest::SetupClients() {
   SetUpTestServerIfRequired();
 
   // Create the required number of sync profiles, browsers and clients.
+  profiles_.resize(num_clients_);
+  browsers_.resize(num_clients_);
+  clients_.resize(num_clients_);
   for (int i = 0; i < num_clients_; ++i) {
-    profiles_.push_back(MakeProfile(
-        base::StringPrintf(FILE_PATH_LITERAL("Profile%d"), i)));
-    EXPECT_FALSE(GetProfile(i) == NULL) << "GetProfile(" << i << ") failed.";
-
-    browsers_.push_back(Browser::Create(GetProfile(i)));
-    EXPECT_FALSE(GetBrowser(i) == NULL) << "GetBrowser(" << i << ") failed.";
-
-    clients_.push_back(
-        new ProfileSyncServiceHarness(GetProfile(i), username_, password_));
-    EXPECT_FALSE(GetClient(i) == NULL) << "GetClient(" << i << ") failed.";
-
-    ui_test_utils::WaitForBookmarkModelToLoad(
-        GetProfile(i)->GetBookmarkModel());
-
-    ui_test_utils::WaitForTemplateURLServiceToLoad(
-        TemplateURLServiceFactory::GetForProfile(GetProfile(i)));
+    InitializeInstance(i);
   }
 
   // Create the verifier profile.
@@ -305,6 +295,43 @@ bool SyncTest::SetupClients() {
   ui_test_utils::WaitForTemplateURLServiceToLoad(
       TemplateURLServiceFactory::GetForProfile(verifier()));
   return (verifier_ != NULL);
+}
+
+void SyncTest::InitializeInstance(int index) {
+  profiles_[index] = MakeProfile(
+      base::StringPrintf(FILE_PATH_LITERAL("Profile%d"), index));
+  EXPECT_FALSE(GetProfile(index) == NULL) << "Could not create Profile "
+                                          << index << ".";
+
+  browsers_[index] = Browser::Create(GetProfile(index));
+  EXPECT_FALSE(GetBrowser(index) == NULL) << "Could not create Browser "
+                                          << index << ".";
+
+  clients_[index] = new ProfileSyncServiceHarness(GetProfile(index),
+                                                  username_,
+                                                  password_);
+  EXPECT_FALSE(GetClient(index) == NULL) << "Could not create Client "
+                                         << index << ".";
+
+  ui_test_utils::WaitForBookmarkModelToLoad(
+      GetProfile(index)->GetBookmarkModel());
+
+  ui_test_utils::WaitForTemplateURLServiceToLoad(
+      TemplateURLServiceFactory::GetForProfile(GetProfile(index)));
+}
+
+void SyncTest::RestartSyncService(int index) {
+  DVLOG(1) << "Restarting profile sync service for profile " << index << ".";
+  delete clients_[index];
+  Profile* profile = GetProfile(index);
+  ProfileSyncService* service =
+      ProfileSyncServiceFactory::GetForProfile(profile);
+  service->ResetForTest();
+  clients_[index] = new ProfileSyncServiceHarness(profile,
+                                                  username_,
+                                                  password_);
+  service->Initialize();
+  GetClient(index)->AwaitSyncRestart();
 }
 
 bool SyncTest::SetupSync() {
@@ -451,8 +478,8 @@ bool SyncTest::SetUpLocalPythonTestServer() {
   xmpp_host_port_pair.set_port(xmpp_port);
   xmpp_port_.reset(new net::ScopedPortException(xmpp_port));
 
-  if (!cl->HasSwitch(switches::kSyncNotificationHost)) {
-    cl->AppendSwitchASCII(switches::kSyncNotificationHost,
+  if (!cl->HasSwitch(switches::kSyncNotificationHostPort)) {
+    cl->AppendSwitchASCII(switches::kSyncNotificationHostPort,
                           xmpp_host_port_pair.ToString());
     // The local XMPP server only supports insecure connections.
     cl->AppendSwitch(switches::kSyncAllowInsecureXmppConnection);
@@ -514,7 +541,8 @@ bool SyncTest::WaitForTestServerToStart(int time_ms, int intervals) {
   for (int i = 0; i < intervals; ++i) {
     if (IsTestServerRunning())
       return true;
-    base::PlatformThread::Sleep(time_ms / intervals);
+    base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(
+        time_ms / intervals));
   }
   return false;
 }
@@ -526,7 +554,10 @@ bool SyncTest::IsTestServerRunning() {
   SyncServerStatusChecker delegate;
   scoped_ptr<content::URLFetcher> fetcher(content::URLFetcher::Create(
     sync_url_status, content::URLFetcher::GET, &delegate));
-  fetcher->SetRequestContext(Profile::Deprecated::GetDefaultRequestContext());
+  fetcher->SetLoadFlags(net::LOAD_DISABLE_CACHE |
+                        net::LOAD_DO_NOT_SEND_COOKIES |
+                        net::LOAD_DO_NOT_SAVE_COOKIES);
+  fetcher->SetRequestContext(g_browser_process->system_request_context());
   fetcher->Start();
   ui_test_utils::RunMessageLoop();
   return delegate.running();
@@ -535,11 +566,15 @@ bool SyncTest::IsTestServerRunning() {
 void SyncTest::EnableNetwork(Profile* profile) {
   SetProxyConfig(profile->GetRequestContext(),
                  net::ProxyConfig::CreateDirect());
+  if (notifications_enabled_) {
+    EnableNotificationsImpl();
+  }
   // TODO(rsimha): Remove this line once http://crbug.com/53857 is fixed.
   net::NetworkChangeNotifier::NotifyObserversOfIPAddressChangeForTests();
 }
 
 void SyncTest::DisableNetwork(Profile* profile) {
+  DisableNotificationsImpl();
   // Set the current proxy configuration to a nonexistent proxy to effectively
   // disable networking.
   net::ProxyConfig config;
@@ -568,7 +603,7 @@ bool SyncTest::ServerSupportsNotificationControl() const {
   return server_type_ == LOCAL_PYTHON_SERVER;
 }
 
-void SyncTest::DisableNotifications() {
+void SyncTest::DisableNotificationsImpl() {
   ASSERT_TRUE(ServerSupportsNotificationControl());
   std::string path = "chromiumsync/disablenotifications";
   ui_test_utils::NavigateToURL(browser(), sync_server_.GetURL(path));
@@ -576,12 +611,22 @@ void SyncTest::DisableNotifications() {
             UTF16ToASCII(browser()->GetSelectedWebContents()->GetTitle()));
 }
 
-void SyncTest::EnableNotifications() {
+void SyncTest::DisableNotifications() {
+  DisableNotificationsImpl();
+  notifications_enabled_ = false;
+}
+
+void SyncTest::EnableNotificationsImpl() {
   ASSERT_TRUE(ServerSupportsNotificationControl());
   std::string path = "chromiumsync/enablenotifications";
   ui_test_utils::NavigateToURL(browser(), sync_server_.GetURL(path));
   ASSERT_EQ("Notifications enabled",
             UTF16ToASCII(browser()->GetSelectedWebContents()->GetTitle()));
+}
+
+void SyncTest::EnableNotifications() {
+  EnableNotificationsImpl();
+  notifications_enabled_ = true;
 }
 
 void SyncTest::TriggerNotification(
@@ -616,7 +661,7 @@ void SyncTest::TriggerMigrationDoneError(
     path.append(
         base::StringPrintf(
             "%ctype=%d", joiner,
-            syncable::GetExtensionFieldNumberFromModelType(it.Get())));
+            syncable::GetSpecificsFieldNumberFromModelType(it.Get())));
     joiner = '&';
   }
   ui_test_utils::NavigateToURL(browser(), sync_server_.GetURL(path));
@@ -672,31 +717,31 @@ sync_pb::SyncEnums::ErrorType
   }
 }
 
-sync_pb::ClientToServerResponse::Error::Action
-    GetClientToServerResponseAction(
-        const browser_sync::ClientAction& action) {
+sync_pb::SyncEnums::Action GetClientToServerResponseAction(
+    const browser_sync::ClientAction& action) {
   switch (action) {
     case browser_sync::UPGRADE_CLIENT:
-      return sync_pb::ClientToServerResponse::Error::UPGRADE_CLIENT;
+      return sync_pb::SyncEnums::UPGRADE_CLIENT;
     case browser_sync::CLEAR_USER_DATA_AND_RESYNC:
-      return sync_pb::ClientToServerResponse::Error::CLEAR_USER_DATA_AND_RESYNC;
+      return sync_pb::SyncEnums::CLEAR_USER_DATA_AND_RESYNC;
     case browser_sync::ENABLE_SYNC_ON_ACCOUNT:
-      return sync_pb::ClientToServerResponse::Error::ENABLE_SYNC_ON_ACCOUNT;
+      return sync_pb::SyncEnums::ENABLE_SYNC_ON_ACCOUNT;
     case browser_sync::STOP_AND_RESTART_SYNC:
-      return sync_pb::ClientToServerResponse::Error::STOP_AND_RESTART_SYNC;
+      return sync_pb::SyncEnums::STOP_AND_RESTART_SYNC;
     case browser_sync::DISABLE_SYNC_ON_CLIENT:
-      return sync_pb::ClientToServerResponse::Error::DISABLE_SYNC_ON_CLIENT;
+      return sync_pb::SyncEnums::DISABLE_SYNC_ON_CLIENT;
     case browser_sync::UNKNOWN_ACTION:
-      return sync_pb::ClientToServerResponse::Error::UNKNOWN_ACTION;
+      return sync_pb::SyncEnums::UNKNOWN_ACTION;
     default:
       NOTREACHED();
-      return sync_pb::ClientToServerResponse::Error::UNKNOWN_ACTION;
+      return sync_pb::SyncEnums::UNKNOWN_ACTION;
   }
 }
 
 }  // namespace
 
-void SyncTest::TriggerSyncError(const browser_sync::SyncProtocolError& error) {
+void SyncTest::TriggerSyncError(const browser_sync::SyncProtocolError& error,
+                                SyncErrorFrequency frequency) {
   ASSERT_TRUE(ServerSupportsErrorTriggering());
   std::string path = "chromiumsync/error";
   int error_type =
@@ -708,8 +753,10 @@ void SyncTest::TriggerSyncError(const browser_sync::SyncProtocolError& error) {
   path.append(base::StringPrintf("?error=%d", error_type));
   path.append(base::StringPrintf("&action=%d", action));
 
-  path += "&error_description=" + error.error_description;
-  path += "&url=" + error.url;
+  path.append(base::StringPrintf("&error_description=%s",
+                                 error.error_description.c_str()));
+  path.append(base::StringPrintf("&url=%s", error.url.c_str()));
+  path.append(base::StringPrintf("&frequency=%d", frequency));
 
   ui_test_utils::NavigateToURL(browser(), sync_server_.GetURL(path));
   std::string output = UTF16ToASCII(
@@ -722,6 +769,14 @@ void SyncTest::TriggerSetSyncTabs() {
   std::string path = "chromiumsync/synctabs";
   ui_test_utils::NavigateToURL(browser(), sync_server_.GetURL(path));
   ASSERT_EQ("Sync Tabs",
+            UTF16ToASCII(browser()->GetSelectedWebContents()->GetTitle()));
+}
+
+void SyncTest::TriggerCreateSyncedBookmarks() {
+  ASSERT_TRUE(ServerSupportsErrorTriggering());
+  std::string path = "chromiumsync/createsyncedbookmarks";
+  ui_test_utils::NavigateToURL(browser(), sync_server_.GetURL(path));
+  ASSERT_EQ("Synced Bookmarks",
             UTF16ToASCII(browser()->GetSelectedWebContents()->GetTitle()));
 }
 

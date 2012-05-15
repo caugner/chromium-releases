@@ -1,4 +1,4 @@
-/* Copyright (c) 2011 The Chromium Authors. All rights reserved.
+/* Copyright (c) 2012 The Chromium Authors. All rights reserved.
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
@@ -27,13 +27,12 @@ header {
 }
 
 #print-preview #navbar-content-title {
+  cursor: default;
   text-align: start;
 }
 
 #print-header {
-  -webkit-padding-end: 16px;
-  font-size: 13px;
-  line-height: 22px;
+  -webkit-padding-end: 14px;
   padding-bottom: 10px;
   padding-top: 10px;
 }
@@ -54,15 +53,8 @@ header {
   padding-top: 2px;
 }
 
-label input[disabled] + span,
-input[type=text][disabled] {
-  color: gray;
-}
-
 .two-column {
   display: table-row;
-  font-size: 13px;
-  line-height: 22px;
 }
 
 .right-column {
@@ -71,9 +63,19 @@ input[type=text][disabled] {
   width: auto;
 }
 
+.right-column .checkbox, .right-column .radio {
+  margin: 0;
+}
+
+.right-column > *:not(:first-child):not(.hint),
+.right-column > .collapsible > *:not(:first-child):not(.hint) {
+  margin-top: 8px;
+}
+
 .two-column h1 {
   -webkit-padding-start: 16px;
   display: table-cell;
+  font-size: 1.1em;
   width: 86px;
 }
 
@@ -98,7 +100,6 @@ p {
 
 h1 {
   color: #808080;
-  font-size: 100%;
   font-weight: 300;
 }
 
@@ -124,11 +125,11 @@ button.loading {
   cursor: progress;
 }
 
-button.default {
+#print-preview button.default {
   font-weight: bold;
 }
 
-button.default:not(:focus):not(:disabled) {
+#print-preview button.default:not(:focus):not(:disabled) {
   border-color: #808080;
 }
 
@@ -136,11 +137,10 @@ span.hint {
   -webkit-transition: color 200ms;
   background: white;
   display: block;
-  font-size: 11px;
+  font-size: 0.9em;
   font-weight: bold;
   height: 0;
   line-height: 10px;
-  margin-bottom: 0;
   margin: 0;
   overflow: hidden;
 }
@@ -151,7 +151,7 @@ span.hint.visible {
   -webkit-user-select: text;
   color: #8c1414;
   height: auto;
-  margin-bottom: -10px;
+  margin-bottom: -5px;
   margin-top: 5px;
   padding-bottom: 5px;
 }
@@ -160,8 +160,7 @@ span.hint.closing {
   -webkit-transition: margin 150ms, height 150ms, opacity 150ms;
   background: transparent;
   height: 0 !important;
-  margin-bottom: 0;
-  margin-top: 0;
+  margin: 0;
   opacity: 0;
 }
 
@@ -241,21 +240,13 @@ label {
 }
 
 #collate-option {
- -webkit-transition: opacity 200ms, -webkit-transform 200ms;
  -webkit-padding-start: 16px;
- display: inline-block;
- opacity: 1;
-}
-
-#collate-option[hidden] {
- -webkit-transition: opacity 100ms, -webkit-transform 100ms;
- opacity: 0;
- pointer-events: none;
+  display: inline-block;
 }
 
 #copies {
   position: relative;
-  width: 1.5em;
+  width: 2.75em;
 }
 
 #copies.invalid {
@@ -265,12 +256,13 @@ label {
 
 #increment,
 #decrement {
-  -webkit-padding-end: 8px;
-  -webkit-padding-start: 8px;
+  -webkit-padding-end: 0;
+  -webkit-padding-start: 0;
   font-weight: 600;
+  margin: 0;
   min-width: 0;
   position: relative;
-  width: 25px;
+  width: 2em;
 }
 
 #increment:focus,
@@ -297,6 +289,12 @@ html[dir='rtl'] #decrement {
   border-bottom-right-radius: 0;
   border-top-left-radius: 3px;
   border-top-right-radius: 0;
+}
+
+#system-dialog-link {
+  -webkit-margin-start: 16px;
+  margin-top: 10px;
+  padding: 0;
 }
 
 /* PDF view */
@@ -360,7 +358,7 @@ html[dir='rtl'] #decrement {
 
 #messages {
   color: #404040;
-  font-size: 13px;
+  font-size: 1.1em;
   position: relative;
   text-align: center;
   text-shadow: 0 1px 0 rgba(255, 255, 255, .5);
@@ -382,9 +380,7 @@ html[dir='rtl'] #decrement {
 }
 
 .message-with-dots span span {
-  -webkit-animation-duration: 1800ms;
-  -webkit-animation-iteration-count: infinite;
-  -webkit-animation-name: dancing-dots-jump;
+  -webkit-animation: dancing-dots-jump 1800ms infinite;
   padding: 1px;
   position: relative;
 }
@@ -397,27 +393,22 @@ html[dir='rtl'] #decrement {
   -webkit-animation-delay: 300ms;
 }
 
-#two-sided-option {
-  display: inline-block;
-  margin-top: 10px;
-}
-
 #error-action-area {
   margin-top: 10px;
 }
 
 /* TODO(estade): unfork this code. */
 .button-strip {
+<if expr="not pp_ifdef('toolkit_views')">
+  -webkit-box-direction: reverse;
+</if>
   -webkit-box-orient: horizontal;
   -webkit-box-pack: end;
   display: -webkit-box;
 }
 
-html:not([toolkit=views]) .button-strip {
-  -webkit-box-direction: reverse;
-}
-
-.button-strip button {
+#print-preview .button-strip button {
+  -webkit-margin-start: 4px;
   display: block;
 }
 

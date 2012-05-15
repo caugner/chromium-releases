@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,7 @@
 #include "base/values.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/extension_constants.h"
+#include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/extension_l10n_util.h"
 #include "chrome/common/extensions/extension_message_bundle.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -281,6 +281,22 @@ ExtensionMessageBundle* CreateManifestBundle() {
   file_handler_title_tree->SetString("message", "file handler title");
   catalog->Set("file_handler_title", file_handler_title_tree);
 
+  DictionaryValue* launch_local_path_tree = new DictionaryValue();
+  launch_local_path_tree->SetString("message", "main.html");
+  catalog->Set("launch_local_path", launch_local_path_tree);
+
+  DictionaryValue* launch_web_url_tree = new DictionaryValue();
+  launch_web_url_tree->SetString("message", "http://www.google.com/");
+  catalog->Set("launch_web_url", launch_web_url_tree);
+
+  DictionaryValue* intent_title_tree = new DictionaryValue();
+  intent_title_tree->SetString("message", "intent title");
+  catalog->Set("intent_title", intent_title_tree);
+
+  DictionaryValue* intent_title_tree_2 = new DictionaryValue();
+  intent_title_tree_2->SetString("message", "intent title 2");
+  catalog->Set("intent_title2", intent_title_tree_2);
+
   std::vector<linked_ptr<DictionaryValue> > catalogs;
   catalogs.push_back(catalog);
 
@@ -338,6 +354,104 @@ TEST(ExtensionL10nUtil, LocalizeManifestWithNameMsgAndEmptyDescription) {
 
   EXPECT_TRUE(error.empty());
 }
+
+TEST(ExtensionL10nUtil, LocalizeManifestWithLocalLaunchURL) {
+  DictionaryValue manifest;
+  manifest.SetString(keys::kName, "name");
+  manifest.SetString(keys::kLaunchLocalPath, "__MSG_launch_local_path__");
+  std::string error;
+  scoped_ptr<ExtensionMessageBundle> messages(CreateManifestBundle());
+
+  EXPECT_TRUE(
+      extension_l10n_util::LocalizeManifest(*messages, &manifest, &error));
+
+  std::string result;
+  ASSERT_TRUE(manifest.GetString(keys::kLaunchLocalPath, &result));
+  EXPECT_EQ("main.html", result);
+
+  EXPECT_TRUE(error.empty());
+}
+
+TEST(ExtensionL10nUtil, LocalizeManifestWithHostedLaunchURL) {
+  DictionaryValue manifest;
+  manifest.SetString(keys::kName, "name");
+  manifest.SetString(keys::kLaunchWebURL, "__MSG_launch_web_url__");
+  std::string error;
+  scoped_ptr<ExtensionMessageBundle> messages(CreateManifestBundle());
+
+  EXPECT_TRUE(
+      extension_l10n_util::LocalizeManifest(*messages, &manifest, &error));
+
+  std::string result;
+  ASSERT_TRUE(manifest.GetString(keys::kLaunchWebURL, &result));
+  EXPECT_EQ("http://www.google.com/", result);
+
+  EXPECT_TRUE(error.empty());
+}
+
+TEST(ExtensionL10nUtil, LocalizeManifestWithIntents) {
+  DictionaryValue manifest;
+  DictionaryValue* intents = new DictionaryValue;
+  DictionaryValue* action = new DictionaryValue;
+
+  action->SetString(keys::kIntentTitle, "__MSG_intent_title__");
+  intents->Set("share", action);
+  manifest.SetString(keys::kName, "name");
+  manifest.Set(keys::kIntents, intents);
+
+  std::string error;
+  scoped_ptr<ExtensionMessageBundle> messages(CreateManifestBundle());
+
+  EXPECT_TRUE(
+      extension_l10n_util::LocalizeManifest(*messages, &manifest, &error));
+
+  std::string result;
+  ASSERT_TRUE(manifest.GetString("intents.share.title", &result));
+  EXPECT_EQ("intent title", result);
+
+  EXPECT_TRUE(error.empty());
+}
+
+TEST(ExtensionL10nUtil, LocalizeManifestWithIntentsList) {
+  DictionaryValue manifest;
+  DictionaryValue* intents = new DictionaryValue;
+  ListValue* actions = new ListValue;
+  DictionaryValue* action1 = new DictionaryValue;
+  DictionaryValue* action2 = new DictionaryValue;
+
+  action1->SetString(keys::kIntentTitle, "__MSG_intent_title__");
+  action2->SetString(keys::kIntentTitle, "__MSG_intent_title2__");
+  actions->Append(action1);
+  actions->Append(action2);
+  intents->Set("share", actions);
+  manifest.SetString(keys::kName, "name");
+  manifest.Set(keys::kIntents, intents);
+
+  std::string error;
+  scoped_ptr<ExtensionMessageBundle> messages(CreateManifestBundle());
+
+  EXPECT_TRUE(
+      extension_l10n_util::LocalizeManifest(*messages, &manifest, &error));
+
+  std::string result;
+  ListValue* l10n_actions = NULL;
+  ASSERT_TRUE(manifest.GetList("intents.share", &l10n_actions));
+
+  DictionaryValue* l10n_action = NULL;
+  ASSERT_TRUE(l10n_actions->GetDictionary(0, &l10n_action));
+
+  ASSERT_TRUE(l10n_action->GetString(keys::kIntentTitle, &result));
+  EXPECT_EQ("intent title", result);
+
+  l10n_action = NULL;
+  ASSERT_TRUE(l10n_actions->GetDictionary(1, &l10n_action));
+
+  ASSERT_TRUE(l10n_action->GetString(keys::kIntentTitle, &result));
+  EXPECT_EQ("intent title 2", result);
+
+  EXPECT_TRUE(error.empty());
+}
+
 
 TEST(ExtensionL10nUtil, LocalizeManifestWithBadNameMsg) {
   DictionaryValue manifest;

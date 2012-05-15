@@ -27,17 +27,22 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/print_messages.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/renderer_host/render_view_host.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 #include "content/public/browser/web_ui.h"
 #include "ui/base/l10n/l10n_util.h"
+
+#if defined(OS_WIN)
+#include "ui/base/win/foreground_helper.h"
+#endif
+
 #include "webkit/glue/webpreferences.h"
 
 #include "grit/generated_resources.h"
@@ -45,6 +50,7 @@
 #if defined(USE_AURA)
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/views/html_dialog_view.h"
+#include "ui/aura/root_window.h"
 #include "ui/views/widget/widget.h"
 #endif
 
@@ -114,6 +120,7 @@
 using content::BrowserThread;
 using content::NavigationController;
 using content::NavigationEntry;
+using content::RenderViewHost;
 using content::WebContents;
 using content::WebUIMessageHandler;
 
@@ -349,8 +356,8 @@ void CloudPrintFlowHandler::Observe(
         url.path() == dialog_url.path() &&
         url.scheme() == dialog_url.scheme()) {
       RenderViewHost* rvh = web_ui()->GetWebContents()->GetRenderViewHost();
-      if (rvh && rvh->delegate()) {
-        WebPreferences webkit_prefs = rvh->delegate()->GetWebkitPrefs();
+      if (rvh && rvh->GetDelegate()) {
+        WebPreferences webkit_prefs = rvh->GetDelegate()->GetWebkitPrefs();
         webkit_prefs.allow_scripts_to_close_windows = true;
         rvh->UpdateWebkitPreferences(webkit_prefs);
       } else {
@@ -602,7 +609,7 @@ bool CloudPrintHtmlDialogDelegate::ShouldShowDialogTitle() const {
 }
 
 bool CloudPrintHtmlDialogDelegate::HandleContextMenu(
-    const ContextMenuParams& params) {
+    const content::ContextMenuParams& params) {
   return true;
 }
 
@@ -683,15 +690,35 @@ void CreateDialogImpl(const FilePath& path_to_file,
           callback);
   if (modal) {
     DCHECK(browser);
+
 #if defined(USE_AURA)
     HtmlDialogView* html_view =
         new HtmlDialogView(profile, browser, dialog_delegate);
     views::Widget::CreateWindowWithParent(html_view,
         browser->window()->GetNativeHandle());
     html_view->InitDialog();
-    html_view->GetWidget()->Show();
+    views::Widget* widget = html_view->GetWidget();
+    DCHECK(widget);
+    widget->Show();
+#if defined(OS_WIN)
+    gfx::NativeWindow window = widget->GetNativeWindow();
+#endif
 #else
-    browser->BrowserShowHtmlDialog(dialog_delegate, NULL, STYLE_GENERIC);
+#if defined(OS_WIN)
+    gfx::NativeWindow window =
+#endif
+        browser->BrowserShowHtmlDialog(dialog_delegate, NULL, STYLE_GENERIC);
+#endif
+#if defined(OS_WIN)
+    HWND dialog_handle;
+#if defined(USE_AURA)
+    dialog_handle = window->GetRootWindow()->GetAcceleratedWidget();
+#else
+    dialog_handle = window;
+#endif
+    if (::GetForegroundWindow() != dialog_handle) {
+      ui::ForegroundHelper::SetForeground(dialog_handle);
+    }
 #endif
   } else {
     browser::ShowHtmlDialog(NULL,

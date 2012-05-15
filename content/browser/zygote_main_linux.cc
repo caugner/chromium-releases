@@ -1,8 +1,8 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "content/browser/zygote_host_linux.h"
+#include "content/browser/zygote_host_impl_linux.h"
 
 #include <dlfcn.h>
 #include <fcntl.h>
@@ -124,7 +124,7 @@ class Zygote {
       bool r = UnixDomainSocket::SendMsg(kBrowserDescriptor, kZygoteMagic,
                                          sizeof(kZygoteMagic), empty);
 #if defined(OS_CHROMEOS)
-      LOG_IF(WARNING, r) << "Sending zygote magic failed";
+      LOG_IF(WARNING, !r) << "Sending zygote magic failed";
       // Exit normally on chromeos because session manager may send SIGTERM
       // right after the process starts and it may fail to send zygote magic
       // number to browser process.
@@ -169,26 +169,26 @@ class Zygote {
     }
 
     Pickle pickle(buf, len);
-    void* iter = NULL;
+    PickleIterator iter(pickle);
 
     int kind;
     if (pickle.ReadInt(&iter, &kind)) {
       switch (kind) {
-        case ZygoteHost::kCmdFork:
+        case ZygoteHostImpl::kCmdFork:
           // This function call can return multiple times, once per fork().
           return HandleForkRequest(fd, pickle, iter, fds);
 
-        case ZygoteHost::kCmdReap:
+        case ZygoteHostImpl::kCmdReap:
           if (!fds.empty())
             break;
           HandleReapRequest(fd, pickle, iter);
           return false;
-        case ZygoteHost::kCmdGetTerminationStatus:
+        case ZygoteHostImpl::kCmdGetTerminationStatus:
           if (!fds.empty())
             break;
           HandleGetTerminationStatus(fd, pickle, iter);
           return false;
-        case ZygoteHost::kCmdGetSandboxStatus:
+        case ZygoteHostImpl::kCmdGetSandboxStatus:
           HandleGetSandboxStatus(fd, pickle, iter);
           return false;
         default:
@@ -204,7 +204,7 @@ class Zygote {
     return false;
   }
 
-  void HandleReapRequest(int fd, const Pickle& pickle, void* iter) {
+  void HandleReapRequest(int fd, const Pickle& pickle, PickleIterator iter) {
     base::ProcessId child;
     base::ProcessId actual_child;
 
@@ -225,7 +225,9 @@ class Zygote {
     base::EnsureProcessTerminated(actual_child);
   }
 
-  void HandleGetTerminationStatus(int fd, const Pickle& pickle, void* iter) {
+  void HandleGetTerminationStatus(int fd,
+                                  const Pickle& pickle,
+                                  PickleIterator iter) {
     base::ProcessHandle child;
 
     if (!pickle.ReadInt(&iter, &child)) {
@@ -347,7 +349,7 @@ class Zygote {
         }
 
         Pickle reply(reinterpret_cast<char*>(reply_buf), r);
-        void* iter = NULL;
+        PickleIterator iter(reply);
         if (!reply.ReadInt(&iter, &real_pid))
           goto error;
         if (real_pid <= 0) {
@@ -393,7 +395,7 @@ class Zygote {
   // Returns -1 on error, otherwise returns twice, returning 0 to the child
   // process and the child process ID to the parent process, like fork().
   base::ProcessId ReadArgsAndFork(const Pickle& pickle,
-                                  void* iter,
+                                  PickleIterator iter,
                                   std::vector<int>& fds,
                                   std::string* uma_name,
                                   int* uma_sample,
@@ -486,7 +488,7 @@ class Zygote {
   // otherwise writes the child_pid back to the browser via |fd|.  Writes a
   // child_pid of -1 on error.
   bool HandleForkRequest(int fd, const Pickle& pickle,
-                         void* iter, std::vector<int>& fds) {
+                         PickleIterator iter, std::vector<int>& fds) {
     std::string uma_name;
     int uma_sample;
     int uma_boundary_value;
@@ -521,9 +523,11 @@ class Zygote {
     return false;
   }
 
-  bool HandleGetSandboxStatus(int fd, const Pickle& pickle, void* iter) {
-    if (HANDLE_EINTR(write(fd, &sandbox_flags_, sizeof(sandbox_flags_)) !=
-                     sizeof(sandbox_flags_))) {
+  bool HandleGetSandboxStatus(int fd,
+                              const Pickle& pickle,
+                              PickleIterator iter) {
+    if (HANDLE_EINTR(write(fd, &sandbox_flags_, sizeof(sandbox_flags_))) !=
+                     sizeof(sandbox_flags_)) {
       PLOG(ERROR) << "write";
     }
 
@@ -567,7 +571,7 @@ static void ProxyLocaltimeCallToBrowser(time_t input, struct tm* output,
   }
 
   Pickle reply(reinterpret_cast<char*>(reply_buf), r);
-  void* iter = NULL;
+  PickleIterator iter(reply);
   std::string result, timezone;
   if (!reply.ReadString(&iter, &result) ||
       !reply.ReadString(&iter, &timezone) ||
@@ -846,11 +850,11 @@ bool ZygoteMain(const content::MainFunctionParams& params,
 
   int sandbox_flags = 0;
   if (getenv("SBX_D"))
-    sandbox_flags |= ZygoteHost::kSandboxSUID;
+    sandbox_flags |= ZygoteHostImpl::kSandboxSUID;
   if (getenv("SBX_PID_NS"))
-    sandbox_flags |= ZygoteHost::kSandboxPIDNS;
+    sandbox_flags |= ZygoteHostImpl::kSandboxPIDNS;
   if (getenv("SBX_NET_NS"))
-    sandbox_flags |= ZygoteHost::kSandboxNetNS;
+    sandbox_flags |= ZygoteHostImpl::kSandboxNetNS;
 
 #if defined(SECCOMP_SANDBOX)
   // The seccomp sandbox will be turned on when the renderers start. But we can
@@ -867,7 +871,7 @@ bool ZygoteMain(const content::MainFunctionParams& params,
                     "sandboxing disabled.";
     } else {
       VLOG(1) << "Enabling experimental Seccomp sandbox.";
-      sandbox_flags |= ZygoteHost::kSandboxSeccomp;
+      sandbox_flags |= ZygoteHostImpl::kSandboxSeccomp;
     }
   }
 #endif  // SECCOMP_SANDBOX

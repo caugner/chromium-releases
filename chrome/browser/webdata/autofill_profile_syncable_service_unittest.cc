@@ -7,12 +7,10 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autofill/autofill_profile.h"
 #include "chrome/browser/sync/internal_api/read_node_mock.h"
-#include "chrome/browser/sync/internal_api/syncapi_mock.h"
-#include "chrome/browser/sync/syncable/syncable.h"
-#include "chrome/browser/sync/syncable/syncable_mock.h"
 #include "chrome/browser/webdata/autofill_change.h"
 #include "chrome/browser/webdata/autofill_profile_syncable_service.h"
 #include "content/test/test_browser_thread.h"
+#include "sync/syncable/syncable.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -57,10 +55,8 @@ MATCHER_P(CheckSyncChanges, n_sync_changes_list, "") {
     DCHECK(passed->IsValid());
     if (passed->change_type() != expected->change_type())
       return false;
-    if (passed->sync_data().GetSpecifics().GetExtension(
-            sync_pb::autofill_profile).guid() !=
-        expected->sync_data().GetSpecifics().GetExtension(
-            sync_pb::autofill_profile).guid()) {
+    if (passed->sync_data().GetSpecifics().autofill_profile().guid() !=
+        expected->sync_data().GetSpecifics().autofill_profile().guid()) {
       return false;
     }
   }
@@ -110,14 +106,6 @@ class AutofillProfileSyncableServiceTest : public testing::Test {
     sync_processor_.reset(new MockSyncChangeProcessor);
   }
 
-  virtual void TearDown() OVERRIDE {
-    // Each test passes ownership of the sync processor to the SyncableService.
-    // We don't release it immediately so we can verify the mock calls, so
-    // release it at teardown. Any test that doesn't call
-    // MergeDataAndStartSyncing or set_sync_processor must ensure the
-    // sync_processor_ gets properly reset.
-    ignore_result(sync_processor_.release());
-  }
  protected:
   MessageLoop message_loop_;
   content::TestBrowserThread ui_thread_;
@@ -181,7 +169,8 @@ TEST_F(AutofillProfileSyncableServiceTest, MergeDataAndStartSyncing) {
 
   // Takes ownership of sync_processor_.
   autofill_syncable_service_.MergeDataAndStartSyncing(
-      syncable::AUTOFILL_PROFILE, data_list, sync_processor_.get());
+      syncable::AUTOFILL_PROFILE, data_list,
+      sync_processor_.PassAs<SyncChangeProcessor>());
   autofill_syncable_service_.StopSyncing(syncable::AUTOFILL_PROFILE);
 }
 
@@ -211,16 +200,17 @@ TEST_F(AutofillProfileSyncableServiceTest, GetAllSyncData) {
   SyncDataList data_list;
   // Takes ownership of sync_processor_.
   autofill_syncable_service_.MergeDataAndStartSyncing(
-      syncable::AUTOFILL_PROFILE, data_list, sync_processor_.get());
+      syncable::AUTOFILL_PROFILE, data_list,
+      sync_processor_.PassAs<SyncChangeProcessor>());
 
   SyncDataList data =
       autofill_syncable_service_.GetAllSyncData(syncable::AUTOFILL_PROFILE);
 
   EXPECT_EQ(2U, data.size());
   EXPECT_EQ(guid_present1, data.front().GetSpecifics()
-                               .GetExtension(sync_pb::autofill_profile).guid());
+      .autofill_profile().guid());
   EXPECT_EQ(guid_present2, data.back().GetSpecifics()
-                               .GetExtension(sync_pb::autofill_profile).guid());
+                               .autofill_profile().guid());
 }
 
 TEST_F(AutofillProfileSyncableServiceTest, ProcessSyncChanges) {
@@ -248,7 +238,7 @@ TEST_F(AutofillProfileSyncableServiceTest, ProcessSyncChanges) {
       .Times(1)
       .WillOnce(Return(true));
 
-  autofill_syncable_service_.set_sync_processor(sync_processor_.get());
+  autofill_syncable_service_.set_sync_processor(sync_processor_.release());
   SyncError error = autofill_syncable_service_.ProcessSyncChanges(
       FROM_HERE, change_list);
 
@@ -265,7 +255,7 @@ TEST_F(AutofillProfileSyncableServiceTest, ActOnChange) {
                                       syncable::AUTOFILL_PROFILE)));
   EXPECT_CALL(*sync_processor_, ProcessSyncChanges(_, _)).Times(2);
 
-  autofill_syncable_service_.set_sync_processor(sync_processor_.get());
+  autofill_syncable_service_.set_sync_processor(sync_processor_.release());
   autofill_syncable_service_.ActOnChange(change1);
   autofill_syncable_service_.ActOnChange(change2);
 }

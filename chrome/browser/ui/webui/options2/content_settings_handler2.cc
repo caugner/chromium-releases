@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,6 +18,7 @@
 #include "chrome/browser/content_settings/content_settings_utils.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
+#include "chrome/browser/intents/web_intents_util.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/notifications/desktop_notification_service_factory.h"
 #include "chrome/browser/prefs/pref_service.h"
@@ -38,6 +39,10 @@
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "ui/base/l10n/l10n_util.h"
+
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/login/user_manager.h"
+#endif
 
 using content::UserMetricsAction;
 
@@ -264,11 +269,8 @@ void ContentSettingsHandler::GetLocalizedValues(
     { "notifications_ask", IDS_NOTIFICATIONS_ASK_RADIO },
     { "notifications_block", IDS_NOTIFICATIONS_BLOCK_RADIO },
     // Intents filter.
-    { "intentsTabLabel", IDS_INTENTS_TAB_LABEL },
-    { "intentsAllow", IDS_INTENTS_ALLOW_RADIO },
-    { "intentsAsk", IDS_INTENTS_ASK_RADIO },
-    { "intentsBlock", IDS_INTENTS_BLOCK_RADIO },
-    { "intents_header", IDS_INTENTS_HEADER },
+    { "webIntentsTabLabel", IDS_WEB_INTENTS_TAB_LABEL },
+    { "allowWebIntents", IDS_ALLOW_WEB_INTENTS },
     // Fullscreen filter.
     { "fullscreen_tab_label", IDS_FULLSCREEN_TAB_LABEL },
     { "fullscreen_header", IDS_FULLSCREEN_HEADER },
@@ -284,11 +286,14 @@ void ContentSettingsHandler::GetLocalizedValues(
   RegisterTitle(localized_strings, "contentSettingsPage",
                 IDS_CONTENT_SETTINGS_TITLE);
   localized_strings->SetBoolean("enable_web_intents",
-      CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableWebIntents));
+                                web_intents::IsWebIntentsEnabled());
+  // TODO(marja): clean up the options UI after the decision on the session
+  // restore changes has stabilized.
+  localized_strings->SetBoolean(
+      "enable_restore_session_state", false);
 }
 
-void ContentSettingsHandler::Initialize() {
+void ContentSettingsHandler::InitializeHandler() {
   notification_registrar_.Add(
       this, chrome::NOTIFICATION_PROFILE_CREATED,
       content::NotificationService::AllSources());
@@ -296,8 +301,6 @@ void ContentSettingsHandler::Initialize() {
       this, chrome::NOTIFICATION_PROFILE_DESTROYED,
       content::NotificationService::AllSources());
 
-  UpdateHandlersEnabledRadios();
-  UpdateAllExceptionsViewsFromModel();
   notification_registrar_.Add(
       this, chrome::NOTIFICATION_CONTENT_SETTINGS_CHANGED,
       content::NotificationService::AllSources());
@@ -312,6 +315,11 @@ void ContentSettingsHandler::Initialize() {
   PrefService* prefs = profile->GetPrefs();
   pref_change_registrar_.Init(prefs);
   pref_change_registrar_.Add(prefs::kGeolocationContentSettings, this);
+}
+
+void ContentSettingsHandler::InitializePage() {
+  UpdateHandlersEnabledRadios();
+  UpdateAllExceptionsViewsFromModel();
 }
 
 void ContentSettingsHandler::Observe(
@@ -387,6 +395,8 @@ void ContentSettingsHandler::UpdateSettingDefaultFromModel(
 
   web_ui()->CallJavascriptFunction(
       "ContentSettings.setContentFilterSettingsValue", filter_settings);
+  web_ui()->CallJavascriptFunction(
+      "BrowserOptions.setContentFilterSettingsValue", filter_settings);
 }
 
 std::string ContentSettingsHandler::GetSettingDefaultFromModel(
@@ -438,10 +448,9 @@ void ContentSettingsHandler::UpdateAllOTRExceptionsViewsFromModel() {
 
 void ContentSettingsHandler::UpdateExceptionsViewFromModel(
     ContentSettingsType type) {
-  // Skip updating intents unless it's enabled from the command line.
-  if (type == CONTENT_SETTINGS_TYPE_INTENTS &&
-      !CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableWebIntents))
+  // Don't update intents settings at this point.
+  // Turn on when enable_web_intents_tag is enabled.
+  if (type == CONTENT_SETTINGS_TYPE_INTENTS)
     return;
 
   switch (type) {
@@ -710,12 +719,20 @@ void ContentSettingsHandler::SetContentFilter(const ListValue* args) {
 
   ContentSetting default_setting = ContentSettingFromString(setting);
   ContentSettingsType content_type = ContentSettingsTypeFromGroupName(group);
+  Profile* profile = Profile::FromWebUI(web_ui());
+
+#if defined(OS_CHROMEOS)
+  // ChromeOS special case : in Guest mode settings are opened in Incognito
+  // mode, so we need original profile to actually modify settings.
+  if (chromeos::UserManager::Get()->IsLoggedInAsGuest())
+    profile = profile->GetOriginalProfile();
+#endif
+
   if (content_type == CONTENT_SETTINGS_TYPE_NOTIFICATIONS) {
-    Profile* profile = Profile::FromWebUI(web_ui());
     DesktopNotificationServiceFactory::GetForProfile(profile)->
         SetDefaultContentSetting(default_setting);
   } else {
-    HostContentSettingsMap* map = GetContentSettingsMap();
+    HostContentSettingsMap* map = profile->GetHostContentSettingsMap();
     ApplyWhitelist(content_type, default_setting);
     map->SetDefaultContentSetting(content_type, default_setting);
   }

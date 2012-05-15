@@ -19,7 +19,7 @@ if [ ! -d "${ANDROID_NDK_ROOT}" ]; then
   echo "ANDROID_NDK_ROOT must be set to the path of Android NDK, Revision 6b." \
     >& 2
   echo "which could be installed by" >& 2
-  echo "<chromium_tree>/src/build/install-build-deps-android.sh" >& 2
+  echo "<chromium_tree>/src/build/install-build-deps-android-sdk.sh" >& 2
   return 1
 fi
 
@@ -27,7 +27,7 @@ if [ ! -d "${ANDROID_SDK_ROOT}" ]; then
   echo "ANDROID_SDK_ROOT must be set to the path of Android SDK, Android 3.2." \
     >& 2
   echo "which could be installed by" >& 2
-  echo "<chromium_tree>/src/build/install-build-deps-android.sh" >& 2
+  echo "<chromium_tree>/src/build/install-build-deps-android-sdk.sh" >& 2
   return 1
 fi
 
@@ -47,6 +47,8 @@ esac
 
 export ANDROID_TOOLCHAIN="${ANDROID_NDK_ROOT}/toolchains/arm-linux-androideabi-4.4.3/prebuilt/${toolchain_dir}/bin/"
 
+export ANDROID_SDK_VERSION="15"
+
 # Add Android SDK's platform-tools to system path.
 export PATH="${PATH}:${ANDROID_SDK_ROOT}/platform-tools/"
 
@@ -57,8 +59,8 @@ if [ ! -d "${ANDROID_TOOLCHAIN}" ]; then
 fi
 
 if [ -z "${CHROME_SRC}" ]; then
-  # if $CHROME_SRC was not set, assume current directory is CHROME_SRC.
-  export CHROME_SRC=$(pwd)
+  # If $CHROME_SRC was not set, assume current directory is CHROME_SRC.
+  export CHROME_SRC=$(readlink -f .)
 fi
 
 if [ ! -d "${CHROME_SRC}" ]; then
@@ -66,44 +68,23 @@ if [ ! -d "${CHROME_SRC}" ]; then
   return 1
 fi
 
-make() {
-  # TODO(michaelbai): how to use ccache in NDK.
-  if [ -n "${USE_CCACHE}" ]; then
-    if [ -e "${PREBUILT_CCACHE_PATH}" ]; then
-      use_ccache_var="$PREBUILT_CCACHE_PATH "
-    else
-      use_ccache_var=""
-    fi
-  fi
-  # Only cross-compile if the build is being done either from Chromium's src/
-  # directory, or through WebKit, in which case the WEBKIT_ANDROID_BUILD
-  # environment variable will be defined. WebKit uses a different directory.
-  if [ -f "$PWD/build/android/envsetup.sh" ] ||
-     [ -n "${WEBKIT_ANDROID_BUILD}" ]; then
-    CC="${use_ccache_var}${CROSS_CC}" CXX="${use_ccache_var}${CROSS_CXX}" \
-    LINK="${CROSS_LINK}" AR="${CROSS_AR}" RANLIB="${CROSS_RANLIB}" \
-      command make $*
-  else
-    command make $*
-  fi
-}
-
 # Performs a gyp_chromium run to convert gyp->Makefile for android code.
 android_gyp() {
+  GOMA_WRAPPER=""
+  if [[ -d $GOMA_DIR ]]; then
+    GOMA_WRAPPER="$GOMA_DIR/gomacc"
+  fi
+  # Ninja requires "*_target" for target builds.
+  GOMA_WRAPPER=${GOMA_WRAPPER} \
+  CC_target=$(basename ${ANDROID_TOOLCHAIN}/*-gcc) \
+  CXX_target=$(basename ${ANDROID_TOOLCHAIN}/*-g++) \
+  LINK_target=$(basename ${ANDROID_TOOLCHAIN}/*-gcc) \
+  AR_target=$(basename ${ANDROID_TOOLCHAIN}/*-ar) \
   "${CHROME_SRC}/build/gyp_chromium" --depth="${CHROME_SRC}"
 }
 
-firstword() {
-  echo "${1}"
-}
-
-export CROSS_AR="$(firstword "${ANDROID_TOOLCHAIN}"/*-ar)"
-export CROSS_CC="$(firstword "${ANDROID_TOOLCHAIN}"/*-gcc)"
-export CROSS_CXX="$(firstword "${ANDROID_TOOLCHAIN}"/*-g++)"
-export CROSS_LINK="$(firstword "${ANDROID_TOOLCHAIN}"/*-gcc)"
-export CROSS_RANLIB="$(firstword "${ANDROID_TOOLCHAIN}"/*-ranlib)"
-export OBJCOPY="$(firstword "${ANDROID_TOOLCHAIN}"/*-objcopy)"
-export STRIP="$(firstword "${ANDROID_TOOLCHAIN}"/*-strip)"
+export OBJCOPY=$(echo ${ANDROID_TOOLCHAIN}/*-objcopy)
+export STRIP=$(echo ${ANDROID_TOOLCHAIN}/*-strip)
 
 # The set of GYP_DEFINES to pass to gyp. Use 'readlink -e' on directories
 # to canonicalize them (remove double '/', remove trailing '/', etc).

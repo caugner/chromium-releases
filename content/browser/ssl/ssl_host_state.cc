@@ -5,6 +5,19 @@
 #include "content/browser/ssl/ssl_host_state.h"
 
 #include "base/logging.h"
+#include "base/lazy_instance.h"
+#include "content/public/browser/browser_context.h"
+
+static const char* kKeyName = "content_ssl_host_state";
+
+SSLHostState* SSLHostState::GetFor(content::BrowserContext* context) {
+  SSLHostState* rv = static_cast<SSLHostState*>(context->GetUserData(kKeyName));
+  if (!rv) {
+    rv = new SSLHostState();
+    context->SetUserData(kKeyName, rv);
+  }
+  return rv;
+}
 
 SSLHostState::SSLHostState() {
 }

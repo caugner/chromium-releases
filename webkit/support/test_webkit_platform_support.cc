@@ -11,11 +11,10 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "media/base/media.h"
-#include "net/base/cookie_monster.h"
+#include "net/cookies/cookie_monster.h"
 #include "net/http/http_cache.h"
 #include "net/test/test_server.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebAudioDevice.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebCache.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebData.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDatabase.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebFileSystem.h"
@@ -78,6 +77,10 @@ TestWebKitPlatformSupport::TestWebKitPlatformSupport(bool unit_test_mode)
   WebKit::WebSecurityPolicy::registerURLSchemeAsLocal(
       WebKit::WebString::fromUTF8("test-shell-resource"));
   WebKit::WebSecurityPolicy::registerURLSchemeAsNoAccess(
+      WebKit::WebString::fromUTF8("test-shell-resource"));
+  WebKit::WebSecurityPolicy::registerURLSchemeAsDisplayIsolated(
+      WebKit::WebString::fromUTF8("test-shell-resource"));
+  WebKit::WebSecurityPolicy::registerURLSchemeAsEmptyDocument(
       WebKit::WebString::fromUTF8("test-shell-resource"));
   WebScriptController::enableV8SingleThreadMode();
   WebKit::WebRuntimeFeatures::enableSockets(true);
@@ -149,9 +152,6 @@ TestWebKitPlatformSupport::TestWebKitPlatformSupport(bool unit_test_mode)
 }
 
 TestWebKitPlatformSupport::~TestWebKitPlatformSupport() {
-  if (RunningOnValgrind())
-    WebKit::WebCache::clear();
-  WebKit::shutdown();
 }
 
 WebKit::WebMimeRegistry* TestWebKitPlatformSupport::mimeRegistry() {
@@ -321,7 +321,11 @@ WebKit::WebString TestWebKitPlatformSupport::defaultLocale() {
 WebKit::WebStorageNamespace*
 TestWebKitPlatformSupport::createLocalStorageNamespace(
     const WebKit::WebString& path, unsigned quota) {
+#ifdef ENABLE_NEW_DOM_STORAGE_BACKEND
+  return dom_storage_system_.CreateLocalStorageNamespace();
+#else
   return WebKit::WebStorageNamespace::createLocalStorageNamespace(path, quota);
+#endif
 }
 
 void TestWebKitPlatformSupport::dispatchStorageEvent(
@@ -329,7 +333,11 @@ void TestWebKitPlatformSupport::dispatchStorageEvent(
     const WebKit::WebString& old_value, const WebKit::WebString& new_value,
     const WebKit::WebString& origin, const WebKit::WebURL& url,
     bool is_local_storage) {
-  // The event is dispatched by the proxy.
+  // All events are dispatched by the WebCore::StorageAreaProxy in the
+  // simple single process case.
+#ifdef ENABLE_NEW_DOM_STORAGE_BACKEND
+  NOTREACHED();
+#endif
 }
 
 WebKit::WebIDBFactory* TestWebKitPlatformSupport::idbFactory() {
@@ -374,36 +382,29 @@ TestWebKitPlatformSupport::sharedWorkerRepository() {
 }
 
 WebKit::WebGraphicsContext3D*
-TestWebKitPlatformSupport::createGraphicsContext3D() {
-  switch (webkit_support::GetGraphicsContext3DImplementation()) {
-    case webkit_support::IN_PROCESS:
-      return new webkit::gpu::WebGraphicsContext3DInProcessImpl(
-          gfx::kNullPluginWindow, NULL);
-    case webkit_support::IN_PROCESS_COMMAND_BUFFER:
-      return new webkit::gpu::WebGraphicsContext3DInProcessCommandBufferImpl();
-    default:
-      CHECK(false) << "Unknown GraphicsContext3D Implementation";
-      return NULL;
-  }
-}
-
-WebKit::WebGraphicsContext3D*
 TestWebKitPlatformSupport::createOffscreenGraphicsContext3D(
     const WebKit::WebGraphicsContext3D::Attributes& attributes) {
-  scoped_ptr<WebKit::WebGraphicsContext3D> context;
   switch (webkit_support::GetGraphicsContext3DImplementation()) {
     case webkit_support::IN_PROCESS:
-      context.reset(new webkit::gpu::WebGraphicsContext3DInProcessImpl(
-          gfx::kNullPluginWindow, NULL));
-      break;
-    case webkit_support::IN_PROCESS_COMMAND_BUFFER:
-      context.reset(
-          new webkit::gpu::WebGraphicsContext3DInProcessCommandBufferImpl());
-      break;
+      return webkit::gpu::WebGraphicsContext3DInProcessImpl::CreateForWebView(
+          attributes, false);
+    case webkit_support::IN_PROCESS_COMMAND_BUFFER: {
+      scoped_ptr<webkit::gpu::WebGraphicsContext3DInProcessCommandBufferImpl>
+          context(new
+              webkit::gpu::WebGraphicsContext3DInProcessCommandBufferImpl());
+      if (!context->Initialize(attributes, NULL))
+        return NULL;
+      return context.release();
+    }
   }
-  if (!context->initialize(attributes, NULL, false))
-    return NULL;
-  return context.release();
+  NOTREACHED();
+  return NULL;
+}
+
+bool TestWebKitPlatformSupport::canAccelerate2dCanvas() {
+  // We supply an OS-MESA based context for accelarated 2d
+  // canvas, which should always work.
+  return true;
 }
 
 double TestWebKitPlatformSupport::audioHardwareSampleRate() {

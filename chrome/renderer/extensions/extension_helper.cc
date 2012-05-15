@@ -7,7 +7,7 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
-#include "base/json/json_value_serializer.h"
+#include "base/json/json_string_value_serializer.h"
 #include "base/lazy_instance.h"
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
@@ -16,10 +16,7 @@
 #include "chrome/common/extensions/extension_messages.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/renderer/extensions/app_bindings.h"
 #include "chrome/renderer/extensions/chrome_v8_context.h"
-#include "chrome/renderer/extensions/chrome_webstore_bindings.h"
-#include "chrome/renderer/extensions/event_bindings.h"
 #include "chrome/renderer/extensions/extension_dispatcher.h"
 #include "chrome/renderer/extensions/miscellaneous_bindings.h"
 #include "chrome/renderer/extensions/schema_generated_bindings.h"
@@ -29,6 +26,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebConsoleMessage.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLRequest.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebScopedUserGesture.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "webkit/glue/image_resource_fetcher.h"
 #include "webkit/glue/resource_fetcher.h"
@@ -39,6 +37,7 @@ using WebKit::WebConsoleMessage;
 using WebKit::WebDataSource;
 using WebKit::WebFrame;
 using WebKit::WebURLRequest;
+using WebKit::WebScopedUserGesture;
 using WebKit::WebView;
 using webkit_glue::ImageResourceFetcher;
 using webkit_glue::ResourceFetcher;
@@ -113,21 +112,6 @@ bool ExtensionHelper::InstallWebApplicationUsingDefinitionFile(
   return true;
 }
 
-void ExtensionHelper::InlineWebstoreInstall(
-    int install_id,
-    const std::string& webstore_item_id,
-    const GURL& requestor_url) {
-  Send(new ExtensionHostMsg_InlineWebstoreInstall(
-      routing_id(), install_id, webstore_item_id, requestor_url));
-}
-
-void ExtensionHelper::OnInlineWebstoreInstallResponse(
-    int install_id,
-    bool success,
-    const std::string& error) {
-  ChromeWebstoreExtension::HandleInstallResponse(install_id, success, error);
-}
-
 bool ExtensionHelper::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(ExtensionHelper, message)
@@ -140,8 +124,6 @@ bool ExtensionHelper::OnMessageReceived(const IPC::Message& message) {
                         OnUpdateBrowserWindowId)
     IPC_MESSAGE_HANDLER(ExtensionMsg_NotifyRenderViewType,
                         OnNotifyRendererViewType)
-    IPC_MESSAGE_HANDLER(ExtensionMsg_InlineWebstoreInstallResponse,
-                        OnInlineWebstoreInstallResponse)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
@@ -209,14 +191,18 @@ void ExtensionHelper::OnExtensionResponse(int request_id,
   SchemaGeneratedBindings::HandleResponse(
       extension_dispatcher_->v8_context_set(), request_id, success,
       response, error, &extension_id);
-
-  extension_dispatcher_->CheckIdleStatus(extension_id);
 }
 
 void ExtensionHelper::OnExtensionMessageInvoke(const std::string& extension_id,
                                                const std::string& function_name,
                                                const ListValue& args,
-                                               const GURL& event_url) {
+                                               const GURL& event_url,
+                                               bool user_gesture) {
+  scoped_ptr<WebScopedUserGesture> web_user_gesture;
+  if (user_gesture) {
+    web_user_gesture.reset(new WebScopedUserGesture);
+  }
+
   extension_dispatcher_->v8_context_set().DispatchChromeHiddenMethod(
       extension_id, function_name, args, render_view(), event_url);
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,10 @@
 #include "base/string_number_conversions.h"
 #include "chrome/browser/extensions/app_notification.h"
 #include "chrome/browser/extensions/app_notification_manager.h"
-#include "chrome/browser/sync/protocol/app_notification_specifics.pb.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/test/test_browser_thread.h"
+#include "sync/protocol/app_notification_specifics.pb.h"
+#include "sync/protocol/sync.pb.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using content::BrowserThread;
@@ -19,8 +20,7 @@ namespace {
 
 // Extract notification guid from SyncData.
 std::string GetGuid(const SyncData& sync_data) {
-  return sync_data.GetSpecifics().GetExtension(
-      sync_pb::app_notification).guid();
+  return sync_data.GetSpecifics().app_notification().guid();
 }
 
 // Dummy SyncChangeProcessor used to help review what SyncChanges are pushed
@@ -61,13 +61,38 @@ class TestChangeProcessor : public SyncChangeProcessor {
   DISALLOW_COPY_AND_ASSIGN(TestChangeProcessor);
 };
 
+class SyncChangeProcessorDelegate : public SyncChangeProcessor {
+ public:
+  explicit SyncChangeProcessorDelegate(SyncChangeProcessor* recipient)
+      : recipient_(recipient) {
+    DCHECK(recipient_);
+  }
+  virtual ~SyncChangeProcessorDelegate() {}
+
+  // SyncChangeProcessor implementation.
+  virtual SyncError ProcessSyncChanges(
+      const tracked_objects::Location& from_here,
+      const SyncChangeList& change_list) OVERRIDE {
+    return recipient_->ProcessSyncChanges(from_here, change_list);
+  }
+
+ private:
+  // The recipient of all sync changes.
+  SyncChangeProcessor* recipient_;
+
+  DISALLOW_COPY_AND_ASSIGN(SyncChangeProcessorDelegate);
+};
+
 }  // namespace
 
 class AppNotificationManagerSyncTest : public testing::Test {
  public:
   AppNotificationManagerSyncTest()
       : ui_thread_(BrowserThread::UI, &ui_loop_),
-        file_thread_(BrowserThread::FILE) { }
+        file_thread_(BrowserThread::FILE),
+        sync_processor_(new TestChangeProcessor),
+        sync_processor_delegate_(new SyncChangeProcessorDelegate(
+            sync_processor_.get())) {}
 
   ~AppNotificationManagerSyncTest() {
     model_ = NULL;
@@ -104,7 +129,11 @@ class AppNotificationManagerSyncTest : public testing::Test {
   }
 
   AppNotificationManager* model() { return model_.get(); }
-  TestChangeProcessor* processor() { return &processor_; }
+  TestChangeProcessor* processor() { return sync_processor_.get(); }
+
+  scoped_ptr<SyncChangeProcessor> PassProcessor() {
+    return sync_processor_delegate_.PassAs<SyncChangeProcessor>();
+  }
 
   // Creates a notification whose properties are set from the given integer.
   static AppNotification* CreateNotification(int suffix) {
@@ -194,7 +223,8 @@ class AppNotificationManagerSyncTest : public testing::Test {
   scoped_ptr<TestingProfile> profile_;
   scoped_refptr<AppNotificationManager> model_;
 
-  TestChangeProcessor processor_;
+  scoped_ptr<TestChangeProcessor> sync_processor_;
+  scoped_ptr<SyncChangeProcessorDelegate> sync_processor_delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(AppNotificationManagerSyncTest);
 };
@@ -273,7 +303,7 @@ TEST_F(AppNotificationManagerSyncTest, ModelAssocBothEmpty) {
   model()->MergeDataAndStartSyncing(
       syncable::APP_NOTIFICATIONS,
       SyncDataList(),  // Empty.
-      processor());
+      PassProcessor());
 
   EXPECT_EQ(0U, model()->GetAllSyncData(syncable::APP_NOTIFICATIONS).size());
   EXPECT_EQ(0, processor()->change_list_size());
@@ -290,7 +320,7 @@ TEST_F(AppNotificationManagerSyncTest, ModelAssocModelEmpty) {
   model()->MergeDataAndStartSyncing(
       syncable::APP_NOTIFICATIONS,
       initial_data,
-      processor());
+      PassProcessor());
 
   EXPECT_EQ(4U, model()->GetAllSyncData(syncable::APP_NOTIFICATIONS).size());
   // Model should all of the initial sync data.
@@ -327,7 +357,7 @@ TEST_F(AppNotificationManagerSyncTest, ModelAssocBothNonEmptyNoOverlap) {
   model()->MergeDataAndStartSyncing(
       syncable::APP_NOTIFICATIONS,
       initial_data,
-      processor());
+      PassProcessor());
 
   EXPECT_EQ(6U, model()->GetAllSyncData(syncable::APP_NOTIFICATIONS).size());
   for (SyncDataList::const_iterator iter = initial_data.begin();
@@ -378,7 +408,7 @@ TEST_F(AppNotificationManagerSyncTest, ModelAssocBothNonEmptySomeOverlap) {
   model()->MergeDataAndStartSyncing(
       syncable::APP_NOTIFICATIONS,
       initial_data,
-      processor());
+      PassProcessor());
 
   EXPECT_EQ(6U, model()->GetAllSyncData(syncable::APP_NOTIFICATIONS).size());
   for (SyncDataList::const_iterator iter = initial_data.begin();
@@ -426,7 +456,7 @@ TEST_F(AppNotificationManagerSyncTest, ModelAssocBothNonEmptyTitleMismatch) {
   SyncError sync_error = model()->MergeDataAndStartSyncing(
       syncable::APP_NOTIFICATIONS,
       initial_data,
-      processor());
+      PassProcessor());
 
   EXPECT_TRUE(sync_error.IsSet());
   EXPECT_EQ(syncable::APP_NOTIFICATIONS, sync_error.type());
@@ -450,7 +480,7 @@ TEST_F(AppNotificationManagerSyncTest, ModelAssocBothNonEmptyMatchesLocal) {
   SyncError sync_error = model()->MergeDataAndStartSyncing(
       syncable::APP_NOTIFICATIONS,
       initial_data,
-      processor());
+      PassProcessor());
 
   EXPECT_TRUE(sync_error.IsSet());
   EXPECT_EQ(syncable::APP_NOTIFICATIONS, sync_error.type());
@@ -463,7 +493,7 @@ TEST_F(AppNotificationManagerSyncTest, ProcessSyncChangesEmptyModel) {
   model()->MergeDataAndStartSyncing(
       syncable::APP_NOTIFICATIONS,
       SyncDataList(),
-      processor());
+      PassProcessor());
 
   // Set up a bunch of ADDs.
   SyncChangeList changes;
@@ -489,7 +519,7 @@ TEST_F(AppNotificationManagerSyncTest, ProcessSyncChangesNonEmptyModel) {
   model()->MergeDataAndStartSyncing(
       syncable::APP_NOTIFICATIONS,
       SyncDataList(),
-      processor());
+      PassProcessor());
 
   // Some adds and some deletes.
   SyncChangeList changes;
@@ -505,13 +535,86 @@ TEST_F(AppNotificationManagerSyncTest, ProcessSyncChangesNonEmptyModel) {
   EXPECT_EQ(2, processor()->change_list_size());
 }
 
-// Process over 15 changes changes when model is not empty.
+// Process sync changes should ignore a bad ADD.
+TEST_F(AppNotificationManagerSyncTest, ProcessSyncChangesIgnoreBadAdd) {
+  AppNotification* n1 = CreateNotification(1);
+  model()->Add(n1);
+  AppNotification* n2 = CreateNotification(2);
+  model()->Add(n2);
+  model()->MergeDataAndStartSyncing(
+      syncable::APP_NOTIFICATIONS,
+      SyncDataList(),
+      PassProcessor());
+
+  // Some adds and some deletes.
+  SyncChangeList changes;
+  changes.push_back(CreateSyncChange(
+      SyncChange::ACTION_ADD, CreateNotification(1)));
+
+  SyncError error = model()->ProcessSyncChanges(FROM_HERE, changes);
+  EXPECT_FALSE(error.IsSet());
+
+  EXPECT_EQ(2U, model()->GetAllSyncData(syncable::APP_NOTIFICATIONS).size());
+  EXPECT_EQ(2, processor()->change_list_size());
+}
+
+// Process sync changes should ignore a bad DELETE.
+TEST_F(AppNotificationManagerSyncTest, ProcessSyncChangesIgnoreBadDelete) {
+  AppNotification* n1 = CreateNotification(1);
+  model()->Add(n1);
+  AppNotification* n2 = CreateNotification(2);
+  model()->Add(n2);
+  model()->MergeDataAndStartSyncing(
+      syncable::APP_NOTIFICATIONS,
+      SyncDataList(),
+      PassProcessor());
+
+  // Some adds and some deletes.
+  SyncChangeList changes;
+  changes.push_back(CreateSyncChange(
+      SyncChange::ACTION_DELETE, CreateNotification(3)));
+
+  SyncError error = model()->ProcessSyncChanges(FROM_HERE, changes);
+  EXPECT_FALSE(error.IsSet());
+
+  EXPECT_EQ(2U, model()->GetAllSyncData(syncable::APP_NOTIFICATIONS).size());
+  EXPECT_EQ(2, processor()->change_list_size());
+}
+
+// Process sync changes should ignore bad UPDATEs.
+TEST_F(AppNotificationManagerSyncTest, ProcessSyncChangesIgnoreBadUpdates) {
+  AppNotification* n1 = CreateNotification(1);
+  model()->Add(n1);
+  AppNotification* n2 = CreateNotification(2);
+  model()->Add(n2);
+  model()->MergeDataAndStartSyncing(
+      syncable::APP_NOTIFICATIONS,
+      SyncDataList(),
+      PassProcessor());
+
+  // Some adds and some deletes.
+  SyncChangeList changes;
+  changes.push_back(CreateSyncChange(
+      SyncChange::ACTION_UPDATE, CreateNotification(3)));
+  AppNotification* n2_changed = n2->Copy();
+  n2_changed->set_link_text(n2_changed->link_text() + "-changed");
+  changes.push_back(CreateSyncChange(
+      SyncChange::ACTION_UPDATE, n2_changed));
+
+  SyncError error = model()->ProcessSyncChanges(FROM_HERE, changes);
+  EXPECT_FALSE(error.IsSet());
+
+  EXPECT_EQ(2U, model()->GetAllSyncData(syncable::APP_NOTIFICATIONS).size());
+  EXPECT_EQ(2, processor()->change_list_size());
+}
+
+// Process over 15 changes when model is not empty.
 TEST_F(AppNotificationManagerSyncTest, ProcessSyncChangesEmptyModelWithMax) {
   const std::string& ext_id = "e1";
   model()->MergeDataAndStartSyncing(
       syncable::APP_NOTIFICATIONS,
       SyncDataList(),
-      processor());
+      PassProcessor());
   for (unsigned int i = 0;
        i < AppNotificationManager::kMaxNotificationPerApp * 2; i++) {
     SyncChangeList changes;
@@ -546,19 +649,19 @@ TEST_F(AppNotificationManagerSyncTest,
 
 // Stop syncing sets state correctly.
 TEST_F(AppNotificationManagerSyncTest, StopSyncing) {
-  EXPECT_FALSE(model()->sync_processor_);
+  EXPECT_FALSE(model()->sync_processor_.get());
   EXPECT_FALSE(model()->models_associated_);
 
   model()->MergeDataAndStartSyncing(
       syncable::APP_NOTIFICATIONS,
       SyncDataList(),
-      processor());
+      PassProcessor());
 
-  EXPECT_TRUE(model()->sync_processor_);
+  EXPECT_TRUE(model()->sync_processor_.get());
   EXPECT_TRUE(model()->models_associated_);
 
   model()->StopSyncing(syncable::APP_NOTIFICATIONS);
-  EXPECT_FALSE(model()->sync_processor_);
+  EXPECT_FALSE(model()->sync_processor_.get());
   EXPECT_FALSE(model()->models_associated_);
 }
 
@@ -567,7 +670,7 @@ TEST_F(AppNotificationManagerSyncTest, AddsGetsSynced) {
   model()->MergeDataAndStartSyncing(
       syncable::APP_NOTIFICATIONS,
       SyncDataList(),
-      processor());
+      PassProcessor());
 
   AppNotification* n1 = CreateNotification(1);
   model()->Add(n1);
@@ -604,7 +707,7 @@ TEST_F(AppNotificationManagerSyncTest, ClearAllGetsSynced) {
   model()->MergeDataAndStartSyncing(
       syncable::APP_NOTIFICATIONS,
       initial_data,
-      processor());
+      PassProcessor());
 
   model()->ClearAll(ext_id);
 

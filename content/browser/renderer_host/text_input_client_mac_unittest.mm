@@ -7,15 +7,19 @@
 #include "base/bind.h"
 #include "base/message_loop.h"
 #include "base/threading/thread.h"
-#include "content/browser/renderer_host/mock_render_process_host.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
-#include "content/browser/renderer_host/render_widget_host.h"
+#include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/browser/renderer_host/text_input_client_message_filter.h"
 #include "content/common/text_input_client_messages.h"
 #include "content/test//test_browser_context.h"
+#include "content/test/mock_render_process_host.h"
 #include "ipc/ipc_test_sink.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/gtest_mac.h"
+
+using content::MockRenderProcessHost;
+using content::MockRenderProcessHostFactory;
+using content::RenderWidgetHostImpl;
 
 namespace {
 
@@ -46,12 +50,12 @@ class TextInputClientMacTest : public testing::Test {
     thread_.message_loop()->PostDelayedTask(from_here, task, delay);
   }
 
-  RenderWidgetHost* widget() {
+  RenderWidgetHostImpl* widget() {
     return &widget_;
   }
 
   IPC::TestSink& ipc_sink() {
-    return static_cast<MockRenderProcessHost*>(widget()->process())->sink();
+    return static_cast<MockRenderProcessHost*>(widget()->GetProcess())->sink();
   }
 
  private:
@@ -62,7 +66,7 @@ class TextInputClientMacTest : public testing::Test {
 
   // Gets deleted when the last RWH in the "process" gets destroyed.
   MockRenderProcessHostFactory process_factory_;
-  RenderWidgetHost widget_;
+  RenderWidgetHostImpl widget_;
 
   base::Thread thread_;
 };
@@ -130,10 +134,10 @@ TEST_F(TextInputClientMacTest, NotFoundCharacterIndex) {
                       base::Unretained(service()), kPreviousValue));
 
   scoped_refptr<TextInputClientMessageFilter> filter(
-      new TextInputClientMessageFilter(widget()->process()->GetID()));
+      new TextInputClientMessageFilter(widget()->GetProcess()->GetID()));
   scoped_ptr<IPC::Message> message(
       new TextInputClientReplyMsg_GotCharacterIndexForPoint(
-          widget()->routing_id(), kNotFoundValue));
+          widget()->GetRoutingID(), kNotFoundValue));
   bool message_ok = true;
   // Set |WTF::notFound| to the index |kTaskDelayMs| after the previous
   // setting.

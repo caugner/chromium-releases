@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,9 +20,8 @@
 #include "chrome/browser/sync/internal_api/read_transaction.h"
 #include "chrome/browser/sync/internal_api/write_node.h"
 #include "chrome/browser/sync/internal_api/write_transaction.h"
-#include "chrome/browser/sync/util/cryptographer.h"
-#include "chrome/common/chrome_switches.h"
 #include "content/public/browser/browser_thread.h"
+#include "sync/util/cryptographer.h"
 
 using content::BrowserThread;
 
@@ -94,6 +93,23 @@ class BookmarkNodeFinder {
   BookmarkNodesSet child_nodes_;
 
   DISALLOW_COPY_AND_ASSIGN(BookmarkNodeFinder);
+};
+
+class ScopedAssociationUpdater {
+ public:
+  explicit ScopedAssociationUpdater(BookmarkModel* model) {
+    model_ = model;
+    model->BeginExtensiveChanges();
+  }
+
+  ~ScopedAssociationUpdater() {
+    model_->EndExtensiveChanges();
+  }
+
+ private:
+  BookmarkModel* model_;
+
+  DISALLOW_COPY_AND_ASSIGN(ScopedAssociationUpdater);
 };
 
 BookmarkNodeFinder::BookmarkNodeFinder(const BookmarkNode* parent_node)
@@ -170,10 +186,12 @@ const BookmarkNode* BookmarkNodeIdIndex::Find(int64 id) const {
 BookmarkModelAssociator::BookmarkModelAssociator(
     BookmarkModel* bookmark_model,
     sync_api::UserShare* user_share,
-    UnrecoverableErrorHandler* unrecoverable_error_handler)
+    DataTypeErrorHandler* unrecoverable_error_handler,
+    bool expect_mobile_bookmarks_folder)
     : bookmark_model_(bookmark_model),
       user_share_(user_share),
       unrecoverable_error_handler_(unrecoverable_error_handler),
+      expect_mobile_bookmarks_folder_(expect_mobile_bookmarks_folder),
       ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)),
       number_of_new_sync_nodes_created_at_association_(0) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -334,6 +352,8 @@ bool BookmarkModelAssociator::GetSyncIdForTaggedNode(const std::string& tag,
 }
 
 bool BookmarkModelAssociator::AssociateModels(SyncError* error) {
+  scoped_ptr<ScopedAssociationUpdater> association_updater(
+      new ScopedAssociationUpdater(bookmark_model_));
   // Try to load model associations from persisted associations first. If that
   // succeeds, we don't need to run the complex model matching algorithm.
   if (LoadAssociations())
@@ -380,13 +400,11 @@ bool BookmarkModelAssociator::BuildAssociations(SyncError* error) {
   }
   if (!AssociateTaggedPermanentNode(bookmark_model_->mobile_node(),
                                     kMobileBookmarksTag) &&
-      // The mobile folder only need exist if kCreateMobileBookmarksFolder is
-      // set.
-      CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kCreateMobileBookmarksFolder)) {
+      expect_mobile_bookmarks_folder_) {
     error->Reset(FROM_HERE, kServerError, model_type());
     return false;
   }
+
   int64 bookmark_bar_sync_id = GetSyncIdFromChromeId(
       bookmark_model_->bookmark_bar_node()->id());
   DCHECK_NE(bookmark_bar_sync_id, sync_api::kInvalidId);
@@ -395,8 +413,7 @@ bool BookmarkModelAssociator::BuildAssociations(SyncError* error) {
   DCHECK_NE(other_bookmarks_sync_id, sync_api::kInvalidId);
   int64 mobile_bookmarks_sync_id = GetSyncIdFromChromeId(
        bookmark_model_->mobile_node()->id());
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kCreateMobileBookmarksFolder)) {
+  if (expect_mobile_bookmarks_folder_) {
     DCHECK_NE(sync_api::kInvalidId, mobile_bookmarks_sync_id);
   }
 
@@ -448,8 +465,18 @@ bool BookmarkModelAssociator::BuildAssociations(SyncError* error) {
         // Create a new bookmark node for the sync node.
         child_node = BookmarkChangeProcessor::CreateBookmarkNode(
             &sync_child_node, parent_node, bookmark_model_, index);
+        if (!child_node) {
+          // This can happen if a sync bookmark node doesn't have a valid url.
+          // As far as we can tell, it appears this can only happen if something
+          // interrupts association. For now, we just ignore the bookmark.
+          LOG(ERROR) << "Failed to create bookmark node with title "
+                     << sync_child_node.GetTitle() << " and url "
+                     << sync_child_node.GetURL().possibly_invalid_spec();
+        }
       }
-      Associate(child_node, sync_child_id);
+      if (child_node) {
+        Associate(child_node, sync_child_id);
+      }
       if (sync_child_node.GetIsFolder())
         dfs_stack.push(sync_child_id);
 
@@ -544,8 +571,7 @@ bool BookmarkModelAssociator::LoadAssociations() {
   }
   int64 mobile_bookmarks_id = -1;
   if (!GetSyncIdForTaggedNode(kMobileBookmarksTag, &mobile_bookmarks_id) &&
-      CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kCreateMobileBookmarksFolder)) {
+      expect_mobile_bookmarks_folder_) {
     return false;
   }
 

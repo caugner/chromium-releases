@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -59,8 +59,7 @@ class DownloadProtectionService {
   enum DownloadCheckResult {
     SAFE,
     DANGEROUS,
-    // In the future we may introduce a third category which corresponds to
-    // suspicious downloads that are not known to be malicious.
+    UNCOMMON,
   };
 
   // Callback type which is invoked once the download request is done.
@@ -91,10 +90,14 @@ class DownloadProtectionService {
   virtual void CheckDownloadUrl(const DownloadInfo& info,
                                 const CheckDownloadCallback& callback);
 
-  // Returns true iff the given filename has an extension that is supported
-  // by this service.  In other words: this method returns true if it can
-  // protect users against files with that particular extension.
-  bool IsSupportedFileType(const FilePath& filename) const;
+  // Returns true iff the download specified by |info| should be scanned by
+  // CheckClientDownload() for malicious content.
+  bool IsSupportedDownload(const DownloadInfo& info) const;
+
+  // Display more information to the user regarding the download specified by
+  // |info|. This method is invoked when the user requests more information
+  // about a download that was marked as malicious.
+  void ShowDetailsForDownload(const DownloadInfo& info);
 
   // Enables or disables the service.  This is usually called by the
   // SafeBrowsingService, which tracks whether any profile uses these services
@@ -131,6 +134,9 @@ class DownloadProtectionService {
     REASON_PING_DISABLED,
     REASON_TRUSTED_EXECUTABLE,
     REASON_OS_NOT_SUPPORTED,
+    REASON_DOWNLOAD_UNCOMMON,
+    REASON_DOWNLOAD_NOT_SUPPORTED,
+    REASON_INVALID_RESPONSE_VERDICT,
     REASON_MAX  // Always add new values before this one.
   };
 
@@ -145,6 +151,8 @@ class DownloadProtectionService {
                            CheckClientDownloadFetchFailed);
   FRIEND_TEST_ALL_PREFIXES(DownloadProtectionServiceTest,
                            TestDownloadRequestTimeout);
+  FRIEND_TEST_ALL_PREFIXES(DownloadProtectionServiceTest,
+                           CheckClientCrxDownloadSuccess);
   static const char kDownloadRequestUrl[];
 
   // Cancels all requests in |download_requests_|, and empties it, releasing

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -53,8 +53,9 @@ void AudioInputDeviceManager::EnumerateDevices() {
   for (media::AudioDeviceNames::iterator it = device_names.begin();
        it != device_names.end();
        ++it) {
-    devices->push_back(StreamDeviceInfo(kAudioCapture, it->device_name,
-                                        it->unique_id, false));
+         devices->push_back(StreamDeviceInfo(
+            content::MEDIA_STREAM_DEVICE_TYPE_AUDIO_CAPTURE, it->device_name,
+            it->unique_id, false));
   }
 
   // Returns the device list through the listener by posting a task on
@@ -63,7 +64,7 @@ void AudioInputDeviceManager::EnumerateDevices() {
       BrowserThread::IO,
       FROM_HERE,
       base::Bind(&AudioInputDeviceManager::DevicesEnumeratedOnIOThread,
-                 base::Unretained(this),
+                 this,
                  devices));
 }
 
@@ -86,7 +87,7 @@ int AudioInputDeviceManager::Open(const StreamDeviceInfo& device) {
   BrowserThread::PostTask(BrowserThread::IO,
                           FROM_HERE,
                           base::Bind(&AudioInputDeviceManager::OpenedOnIOThread,
-                                     base::Unretained(this),
+                                     this,
                                      session_id));
 
   return session_id;
@@ -111,7 +112,7 @@ void AudioInputDeviceManager::Close(int session_id) {
   BrowserThread::PostTask(BrowserThread::IO,
                           FROM_HERE,
                           base::Bind(&AudioInputDeviceManager::ClosedOnIOThread,
-                                     base::Unretained(this),
+                                     this,
                                      session_id));
 }
 
@@ -158,20 +159,25 @@ void AudioInputDeviceManager::DevicesEnumeratedOnIOThread(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   // Ensures that |devices| gets deleted on exit.
   scoped_ptr<StreamDeviceInfoArray> devices_array(devices);
-  if (listener_)
-    listener_->DevicesEnumerated(kAudioCapture, *devices_array);
+  if (listener_) {
+    listener_->DevicesEnumerated(
+        content::MEDIA_STREAM_DEVICE_TYPE_AUDIO_CAPTURE,
+        *devices_array);
+  }
 }
 
 void AudioInputDeviceManager::OpenedOnIOThread(int session_id) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   if (listener_)
-    listener_->Opened(kAudioCapture, session_id);
+    listener_->Opened(content::MEDIA_STREAM_DEVICE_TYPE_AUDIO_CAPTURE,
+                      session_id);
 }
 
 void AudioInputDeviceManager::ClosedOnIOThread(int session_id) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   if (listener_)
-    listener_->Closed(kAudioCapture, session_id);
+    listener_->Closed(content::MEDIA_STREAM_DEVICE_TYPE_AUDIO_CAPTURE,
+                      session_id);
 }
 
 }  // namespace media_stream

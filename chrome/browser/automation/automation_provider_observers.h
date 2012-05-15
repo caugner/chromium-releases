@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -63,9 +63,7 @@ class ExtensionService;
 class InfoBarTabHelper;
 class Notification;
 class Profile;
-class RenderViewHost;
 class SavePackage;
-class TabContents;
 class TranslateInfoBarDelegate;
 
 #if defined(OS_CHROMEOS)
@@ -80,6 +78,7 @@ class Message;
 
 namespace content {
 class NavigationController;
+class RenderViewHost;
 class WebContents;
 }
 
@@ -773,7 +772,6 @@ class LoginObserver : public chromeos::LoginStatusConsumer {
   virtual void OnLoginSuccess(
       const std::string& username,
       const std::string& password,
-      const GaiaAuthConsumer::ClientLoginResult& credentials,
       bool pending_requests,
       bool using_oauth);
 
@@ -826,7 +824,6 @@ class ScreenUnlockObserver : public ScreenLockUnlockObserver,
   virtual void OnLoginSuccess(
       const std::string& username,
       const std::string& password,
-      const GaiaAuthConsumer::ClientLoginResult& credentials,
       bool pending_requests,
       bool using_oauth) {}
 
@@ -1117,7 +1114,7 @@ class AutomationProviderDownloadModelChangedObserver
       content::DownloadManager* download_manager);
   virtual ~AutomationProviderDownloadModelChangedObserver();
 
-  virtual void ModelChanged();
+  virtual void ModelChanged(content::DownloadManager* manager) OVERRIDE;
 
  private:
   base::WeakPtr<AutomationProvider> provider_;
@@ -1139,12 +1136,12 @@ class AllDownloadsCompleteObserver
       ListValue* pre_download_ids);
   virtual ~AllDownloadsCompleteObserver();
 
-  // DownloadManager::Observer.
-  virtual void ModelChanged();
+  // content::DownloadManager::Observer.
+  virtual void ModelChanged(content::DownloadManager* manager) OVERRIDE;
 
-  // DownloadItem::Observer.
-  virtual void OnDownloadUpdated(content::DownloadItem* download);
-  virtual void OnDownloadOpened(content::DownloadItem* download) {}
+  // content::DownloadItem::Observer.
+  virtual void OnDownloadUpdated(content::DownloadItem* download) OVERRIDE;
+  virtual void OnDownloadOpened(content::DownloadItem* download) OVERRIDE {}
 
  private:
   void ReplyIfNecessary();
@@ -1434,7 +1431,7 @@ class AppLaunchObserver : public content::NotificationObserver {
 class AutofillDisplayedObserver : public content::NotificationObserver {
  public:
   AutofillDisplayedObserver(int notification,
-                            RenderViewHost* render_view_host,
+                            content::RenderViewHost* render_view_host,
                             AutomationProvider* automation,
                             IPC::Message* reply_message);
   virtual ~AutofillDisplayedObserver();
@@ -1446,7 +1443,7 @@ class AutofillDisplayedObserver : public content::NotificationObserver {
 
  private:
   int notification_;
-  RenderViewHost* render_view_host_;
+  content::RenderViewHost* render_view_host_;
   base::WeakPtr<AutomationProvider> automation_;
   scoped_ptr<IPC::Message> reply_message_;
   content::NotificationRegistrar registrar_;
@@ -1780,6 +1777,50 @@ class ProcessInfoObserver : public MemoryDetails {
   scoped_ptr<IPC::Message> reply_message_;
 
   DISALLOW_COPY_AND_ASSIGN(ProcessInfoObserver);
+};
+
+// Observes when new v8 heap statistics are computed for a renderer process.
+class V8HeapStatsObserver : public content::NotificationObserver {
+ public:
+  V8HeapStatsObserver(AutomationProvider* automation,
+                      IPC::Message* reply_message,
+                      base::ProcessId renderer_id);
+  virtual ~V8HeapStatsObserver();
+
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details);
+
+ private:
+  content::NotificationRegistrar registrar_;
+  base::WeakPtr<AutomationProvider> automation_;
+  scoped_ptr<IPC::Message> reply_message_;
+  base::ProcessId renderer_id_;
+
+  DISALLOW_COPY_AND_ASSIGN(V8HeapStatsObserver);
+};
+
+// Observes when a new FPS value is computed for a renderer process.
+class FPSObserver : public content::NotificationObserver {
+ public:
+  FPSObserver(AutomationProvider* automation,
+              IPC::Message* reply_message,
+              base::ProcessId renderer_id,
+              int routing_id);
+  virtual ~FPSObserver();
+
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details);
+
+ private:
+  content::NotificationRegistrar registrar_;
+  base::WeakPtr<AutomationProvider> automation_;
+  scoped_ptr<IPC::Message> reply_message_;
+  base::ProcessId renderer_id_;
+  int routing_id_;
+
+  DISALLOW_COPY_AND_ASSIGN(FPSObserver);
 };
 
 // Manages the process of creating a new Profile and opening a new browser with

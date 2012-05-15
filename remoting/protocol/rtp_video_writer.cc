@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -44,8 +44,8 @@ void RtpVideoWriter::Init(protocol::Session* session,
                  base::Unretained(this), false));
 }
 
-void RtpVideoWriter::OnChannelReady(bool rtp, net::Socket* socket) {
-  if (!socket) {
+void RtpVideoWriter::OnChannelReady(bool rtp, scoped_ptr<net::Socket> socket) {
+  if (!socket.get()) {
     if (!initialized_) {
       initialized_ = true;
       initialized_callback_.Run(false);
@@ -55,11 +55,11 @@ void RtpVideoWriter::OnChannelReady(bool rtp, net::Socket* socket) {
 
   if (rtp) {
     DCHECK(!rtp_channel_.get());
-    rtp_channel_.reset(socket);
-    rtp_writer_.Init(socket);
+    rtp_channel_ = socket.Pass();
+    rtp_writer_.Init(rtp_channel_.get());
   } else {
     DCHECK(!rtcp_channel_.get());
-    rtcp_channel_.reset(socket);
+    rtcp_channel_ = socket.Pass();
     // TODO(sergeyu): Use RTCP channel somehow.
   }
 
@@ -85,7 +85,7 @@ bool RtpVideoWriter::is_connected() {
   return rtp_channel_.get() && rtcp_channel_.get();
 }
 
-void RtpVideoWriter::ProcessVideoPacket(const VideoPacket* packet,
+void RtpVideoWriter::ProcessVideoPacket(const scoped_ptr<VideoPacket> packet,
                                         const base::Closure& done) {
   CHECK(packet->format().encoding() == VideoPacketFormat::ENCODING_VP8)
       << "Only VP8 is supported in RTP.";
@@ -140,7 +140,8 @@ void RtpVideoWriter::ProcessVideoPacket(const VideoPacket* packet,
   }
   DCHECK_EQ(position, payload.total_bytes());
 
-  done.Run();
+  if (!done.is_null())
+    done.Run();
 }
 
 int RtpVideoWriter::GetPendingPackets() {

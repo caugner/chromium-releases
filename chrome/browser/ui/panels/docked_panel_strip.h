@@ -6,12 +6,13 @@
 #define CHROME_BROWSER_UI_PANELS_DOCKED_PANEL_STRIP_H_
 #pragma once
 
+#include <list>
 #include <set>
-#include <vector>
 #include "base/basictypes.h"
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/ui/panels/auto_hiding_desktop_bar.h"
+#include "chrome/browser/ui/panels/display_settings_provider.h"
 #include "chrome/browser/ui/panels/panel.h"
+#include "chrome/browser/ui/panels/panel_strip.h"
 #include "chrome/browser/ui/panels/panel_mouse_watcher_observer.h"
 #include "ui/gfx/rect.h"
 
@@ -22,39 +23,58 @@ class PanelManager;
 // positioning the panels and controlling how they are displayed.
 // Panels in the strip appear minimized, showing title-only or expanded.
 // All panels in the strip are contained within the bounds of the strip.
-class DockedPanelStrip : public PanelMouseWatcherObserver {
+class DockedPanelStrip : public PanelStrip,
+                         public PanelMouseWatcherObserver {
  public:
-  typedef std::vector<Panel*> Panels;
+  typedef std::list<Panel*> Panels;
 
   explicit DockedPanelStrip(PanelManager* panel_manager);
   virtual ~DockedPanelStrip();
 
-  // Sets the bounds of the panel strip.
-  // |area| is in screen coordinates.
-  void SetDisplayArea(const gfx::Rect& area);
+  // PanelStrip OVERRIDES:
+  virtual void SetDisplayArea(const gfx::Rect& display_area) OVERRIDE;
+
+  // Rearranges the positions of the panels in the strip.
+  // Handles moving panels to/from overflow area as needed.
+  // This is called when the display space has been changed, i.e. working
+  // area being changed or a panel being closed.
+  virtual void RefreshLayout() OVERRIDE;
 
   // Adds a panel to the strip. The panel may be a newly created panel or one
   // that is transitioning from another grouping of panels.
-  void AddPanel(Panel* panel);
+  virtual void AddPanel(Panel* panel,
+                        PositioningMask positioning_mask) OVERRIDE;
+  virtual void RemovePanel(Panel* panel) OVERRIDE;
+  virtual void CloseAll() OVERRIDE;
+  virtual void ResizePanelWindow(
+      Panel* panel,
+      const gfx::Size& preferred_window_size) OVERRIDE;
+  virtual void OnPanelAttentionStateChanged(Panel* panel) OVERRIDE;
+  virtual void OnPanelTitlebarClicked(Panel* panel,
+                                      panel::ClickModifier modifier) OVERRIDE;
+  virtual void ActivatePanel(Panel* panel) OVERRIDE;
+  virtual void MinimizePanel(Panel* panel) OVERRIDE;
+  virtual void RestorePanel(Panel* panel) OVERRIDE;
+  virtual bool IsPanelMinimized(const Panel* panel) const OVERRIDE;
+  virtual bool CanShowPanelAsActive(const Panel* panel) const OVERRIDE;
+  virtual void SavePanelPlacement(Panel* panel) OVERRIDE;
+  virtual void RestorePanelToSavedPlacement() OVERRIDE;
+  virtual void DiscardSavedPanelPlacement() OVERRIDE;
+  virtual bool CanDragPanel(const Panel* panel) const OVERRIDE;
+  virtual void StartDraggingPanelWithinStrip(Panel* panel) OVERRIDE;
+  virtual void DragPanelWithinStrip(Panel* panel,
+                                    int delta_x,
+                                    int delta_y) OVERRIDE;
+  virtual void EndDraggingPanelWithinStrip(Panel* panel,
+                                           bool aborted) OVERRIDE;
+  virtual bool CanResizePanel(const Panel* panel) const OVERRIDE;
+  virtual void SetPanelBounds(Panel* panel,
+                              const gfx::Rect& new_bounds) OVERRIDE;
 
-  // Returns |false| if the panel is not in the strip.
-  bool Remove(Panel* panel);
-  void RemoveAll();
-
-  // Drags the given panel.
-  void StartDragging(Panel* panel);
-  void Drag(int delta_x);
-  void EndDragging(bool cancelled);
+  virtual void UpdatePanelOnStripChange(Panel* panel) OVERRIDE;
 
   // Invoked when a panel's expansion state changes.
   void OnPanelExpansionStateChanged(Panel* panel);
-
-  // Invoked when a panel's attention state changes.
-  void OnPanelAttentionStateChanged(Panel* panel);
-
-  // Invoked when the window size of the given panel is changed.
-  void OnWindowSizeChanged(
-      Panel* panel, const gfx::Size& preferred_window_size);
 
   // Returns true if we should bring up the titlebars, given the current mouse
   // point.
@@ -73,8 +93,8 @@ class DockedPanelStrip : public PanelMouseWatcherObserver {
   // do NOT have a temporary layout.
   int num_panels() const { return panels_.size(); }
   const Panels& panels() const { return panels_; }
+  Panel* last_panel() const { return panels_.empty() ? NULL : panels_.back(); }
 
-  bool is_dragging_panel() const;
   gfx::Rect display_area() const { return display_area_; }
 
   int GetMaxPanelWidth() const;
@@ -82,15 +102,20 @@ class DockedPanelStrip : public PanelMouseWatcherObserver {
   int StartingRightPosition() const;
 
   void OnAutoHidingDesktopBarVisibilityChanged(
-      AutoHidingDesktopBar::Alignment alignment,
-      AutoHidingDesktopBar::Visibility visibility);
+      DisplaySettingsProvider::DesktopBarAlignment alignment,
+      DisplaySettingsProvider::DesktopBarVisibility visibility);
 
   void OnFullScreenModeChanged(bool is_full_screen);
+
+  // Returns |true| if panel can fit in the dock strip.
+  bool CanFitPanel(const Panel* panel) const;
 
 #ifdef UNIT_TEST
   int num_temporary_layout_panels() const {
     return panels_in_temporary_layout_.size();
   }
+
+  int minimized_panel_count() const {return minimized_panel_count_; }
 #endif
 
  private:
@@ -100,30 +125,34 @@ class DockedPanelStrip : public PanelMouseWatcherObserver {
     BRING_DOWN
   };
 
+  struct PanelPlacement {
+    Panel* panel;
+    // Used to remember the panel to the left of |panel|, if any, for use when
+    // restoring the position of |panel|. Will be updated if this panel is
+    // closed or moved out of the dock (e.g. to overflow)..
+    Panel* left_panel;
+
+    PanelPlacement() : panel(NULL), left_panel(NULL) { }
+  };
+
   // Overridden from PanelMouseWatcherObserver:
   virtual void OnMouseMove(const gfx::Point& mouse_position) OVERRIDE;
 
+  // Helper methods to put the panel to the collection.
+  void InsertNewlyCreatedPanel(Panel* panel);
+  void InsertExistingPanelAtKnownPosition(Panel* panel);
+  void InsertExistingPanelAtDefaultPosition(Panel* panel, bool refresh_bounds);
+
   // Keep track of the minimized panels to control mouse watching.
-  void IncrementMinimizedPanels();
-  void DecrementMinimizedPanels();
+  void UpdateMinimizedPanelCount();
 
-  // Handles all the panels that're delayed to be removed.
-  void DelayedRemove();
-
-  // Does the actual remove. Caller is responsible for rearranging
-  // the panel strip if necessary.
-  // Returns |false| if panel is not in the strip.
-  bool DoRemove(Panel* panel);
-
-  // Rearranges the positions of the panels in the strip.
-  // Handles moving panels to/from overflow area as needed.
-  // This is called when the display space has been changed, i.e. working
-  // area being changed or a panel being closed.
-  void Rearrange();
+  // Minimizes/Restores all panels in the strip depending on the current
+  // state of |panel|.
+  void ToggleMinimizeAll(Panel* panel);
 
   // Help functions to drag the given panel.
-  void DragLeft();
-  void DragRight();
+  void DragLeft(Panel* dragging_panel);
+  void DragRight(Panel* dragging_panel);
 
   // Does the real job of bringing up or down the titlebars.
   void DoBringUpOrDownTitlebars(bool bring_up);
@@ -132,6 +161,12 @@ class DockedPanelStrip : public PanelMouseWatcherObserver {
   void DelayedBringUpOrDownTitlebarsCheck();
 
   int GetRightMostAvailablePosition() const;
+
+  // Determines position in strip where a panel of |width| will fit.
+  // Other panels in the strip may be moved to overflow to make room.
+  // Returns x position where a panel of |width| wide can fit.
+  // |width| is in screen coordinates.
+  int FitPanelWithWidth(int width);
 
   // Called by AddPanel() after a delay to move a newly created panel from
   // the panel strip to overflow because the panel could not fit
@@ -147,10 +182,6 @@ class DockedPanelStrip : public PanelMouseWatcherObserver {
 
   Panels panels_;
 
-  // Stores the panels that are pending to remove. We want to delay the removal
-  // when we're in the process of the dragging.
-  Panels panels_pending_to_remove_;
-
   // Stores newly created panels that have a temporary layout until they
   // are moved to overflow after a delay.
   std::set<Panel*> panels_in_temporary_layout_;
@@ -158,17 +189,11 @@ class DockedPanelStrip : public PanelMouseWatcherObserver {
   int minimized_panel_count_;
   bool are_titlebars_up_;
 
-  // Panel to drag.
-  size_t dragging_panel_index_;
+  bool minimizing_all_;  // True while minimizing all panels.
 
-  // Original x coordinate of the panel to drag. This is used to get back to
-  // the original position when we cancel the dragging.
-  int dragging_panel_original_x_;
-
-  // Bounds of the panel to drag. It is first set to the original bounds when
-  // the dragging happens. Then it is updated to the position that will be set
-  // to when the dragging ends.
-  gfx::Rect dragging_panel_bounds_;
+  // Referring to current position in |panels_| where the dragging panel
+  // resides.
+  Panels::iterator dragging_panel_current_iterator_;
 
   // Delayed transitions support. Sometimes transitions between minimized and
   // title-only states are delayed, for better usability with Taskbars/Docks.
@@ -176,6 +201,9 @@ class DockedPanelStrip : public PanelMouseWatcherObserver {
 
   // Owned by MessageLoop after posting.
   base::WeakPtrFactory<DockedPanelStrip> titlebar_action_factory_;
+
+  // Used to save the placement information for a panel.
+  PanelPlacement saved_panel_placement_;
 
   static const int kPanelsHorizontalSpacing = 4;
 

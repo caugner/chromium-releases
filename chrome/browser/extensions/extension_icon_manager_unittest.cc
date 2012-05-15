@@ -1,8 +1,8 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/json/json_value_serializer.h"
+#include "base/json/json_file_value_serializer.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/values.h"
@@ -76,9 +76,10 @@ class TestIconManager : public ExtensionIconManager {
   // Implements the ImageLoadingTracker::Observer interface, and calls through
   // to the base class' implementation. Then it lets the test know that an
   // image load was observed.
-  virtual void OnImageLoaded(SkBitmap* image, const ExtensionResource& resource,
-                             int index) {
-    ExtensionIconManager::OnImageLoaded(image, resource, index);
+  virtual void OnImageLoaded(const gfx::Image& image,
+                             const std::string& extension_id,
+                             int index) OVERRIDE {
+    ExtensionIconManager::OnImageLoaded(image, extension_id, index);
     test_->ImageLoadObserved();
   }
 

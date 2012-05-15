@@ -5,14 +5,16 @@
 #include "chrome/browser/chromeos/system/statistics_provider.h"
 
 #include "base/bind.h"
+#include "base/chromeos/chromeos_version.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/memory/singleton.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/time.h"
+#include "base/chromeos/chromeos_version.h"
 #include "chrome/browser/chromeos/system/name_value_pairs_parser.h"
-#include "chrome/browser/chromeos/system/runtime_environment.h"
+#include "chrome/common/child_process_logging.h"
 #include "chrome/common/chrome_version_info.h"
 #include "content/public/browser/browser_thread.h"
 
@@ -40,6 +42,12 @@ const char kUnknownHardwareClass[] = "unknown";
 const char kMachineHardwareInfoFile[] = "/tmp/machine-info";
 const char kMachineHardwareInfoEq[] = "=";
 const char kMachineHardwareInfoDelim[] = " \n";
+
+// File to get ECHO coupon info from, and key/value delimiters of
+// the file.
+const char kOffersCouponFile[] = "/var/cache/offers/vpd_echo.txt";
+const char kOffersCouponEq[] = "=";
+const char kOffersCouponDelim[] = "\n";
 
 // File to get machine OS info from, and key/value delimiters of the file.
 const char kMachineOSInfoFile[] = "/etc/lsb-release";
@@ -146,6 +154,9 @@ void StatisticsProviderImpl::LoadMachineStatistics() {
   parser.GetNameValuePairsFromFile(FilePath(kMachineHardwareInfoFile),
                                    kMachineHardwareInfoEq,
                                    kMachineHardwareInfoDelim);
+  parser.GetNameValuePairsFromFile(FilePath(kOffersCouponFile),
+                                   kOffersCouponEq,
+                                   kOffersCouponDelim);
   parser.GetNameValuePairsFromFile(FilePath(kMachineOSInfoFile),
                                    kMachineOSInfoEq,
                                    kMachineOSInfoDelim);
@@ -166,6 +177,15 @@ void StatisticsProviderImpl::LoadMachineStatistics() {
   std::string channel;
   if (GetMachineStatistic(kChromeOSReleaseTrack, &channel)) {
       chrome::VersionInfo::SetChannel(channel);
+      // Set the product channel for crash reports.  We can't just do this in
+      // ChromeBrowserMainParts::PreCreateThreads like we do for Linux because
+      // the FILE thread hasn't been created yet there so we can't possibly
+      // have read this yet.  Note that this string isn't exactly the same as
+      // 'channel', it's been parsed to be consistent with other platforms
+      // (eg. "canary-channel" becomes "canary", "testimage-channel" becomes
+      // "unknown").
+      child_process_logging::SetChannel(
+          chrome::VersionInfo::GetVersionStringModifier());
   }
 #endif
 }
@@ -199,7 +219,7 @@ class StatisticsProviderStubImpl : public StatisticsProvider {
 };
 
 StatisticsProvider* StatisticsProvider::GetInstance() {
-  if (system::runtime_environment::IsRunningOnChromeOS()) {
+  if (base::chromeos::IsRunningOnChromeOS()) {
     return StatisticsProviderImpl::GetInstance();
   } else {
     return StatisticsProviderStubImpl::GetInstance();

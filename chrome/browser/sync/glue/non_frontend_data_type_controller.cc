@@ -10,11 +10,13 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/api/sync_error.h"
 #include "chrome/browser/sync/glue/change_processor.h"
+#include "chrome/browser/sync/glue/chrome_report_unrecoverable_error.h"
 #include "chrome/browser/sync/glue/model_associator.h"
 #include "chrome/browser/sync/profile_sync_components_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
-#include "chrome/browser/sync/syncable/model_type.h"
 #include "content/public/browser/browser_thread.h"
+#include "sync/syncable/model_type.h"
+#include "sync/util/data_type_histogram.h"
 
 using content::BrowserThread;
 
@@ -65,7 +67,8 @@ void NonFrontendDataTypeController::Start(const StartCallback& start_callback) {
   if (!StartModels()) {
     // If we are waiting for some external service to load before associating
     // or we failed to start the models, we exit early.
-    DCHECK(state_ == NOT_RUNNING || state_ == MODEL_STARTING);
+    DCHECK(state_ == NOT_RUNNING || state_ == MODEL_STARTING
+           || state_ == DISABLED);
     return;
   }
 
@@ -126,6 +129,9 @@ void NonFrontendDataTypeController::StartAssociation() {
 void NonFrontendDataTypeController::StartFailed(StartResult result,
                                                 const SyncError& error) {
   DCHECK(!BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  if (IsUnrecoverableResult(result))
+    RecordUnrecoverableError(FROM_HERE, "StartFailed");
   StopAssociation();
   StartDone(result,
             result == ASSOCIATION_FAILED ? DISABLED : NOT_RUNNING,
@@ -271,11 +277,67 @@ void NonFrontendDataTypeController::OnUnrecoverableError(
                  message));
 }
 
+void NonFrontendDataTypeController::OnSingleDatatypeUnrecoverableError(
+    const tracked_objects::Location& from_here,
+    const std::string& message) {
+  DCHECK(!BrowserThread::CurrentlyOn(BrowserThread::UI));
+  RecordUnrecoverableError(from_here, message);
+  BrowserThread::PostTask(BrowserThread::UI, from_here,
+      base::Bind(&NonFrontendDataTypeController::DisableImpl,
+                 this,
+                 from_here,
+                 message));
+}
+
 void NonFrontendDataTypeController::OnUnrecoverableErrorImpl(
     const tracked_objects::Location& from_here,
     const std::string& message) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   profile_sync_service_->OnUnrecoverableError(from_here, message);
+}
+
+bool NonFrontendDataTypeController::StartAssociationAsync() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_EQ(state(), ASSOCIATING);
+  return PostTaskOnBackendThread(
+      FROM_HERE,
+      base::Bind(&NonFrontendDataTypeController::StartAssociation, this));
+}
+
+bool NonFrontendDataTypeController::StopAssociationAsync() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_EQ(state(), STOPPING);
+  return PostTaskOnBackendThread(
+      FROM_HERE,
+      base::Bind(
+          &NonFrontendDataTypeController::StopAssociation, this));
+}
+
+void NonFrontendDataTypeController::DisableImpl(
+    const tracked_objects::Location& from_here,
+    const std::string& message) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  profile_sync_service_->OnDisableDatatype(type(), from_here, message);
+}
+
+void NonFrontendDataTypeController::RecordAssociationTime(
+    base::TimeDelta time) {
+  DCHECK(!BrowserThread::CurrentlyOn(BrowserThread::UI));
+#define PER_DATA_TYPE_MACRO(type_str) \
+    UMA_HISTOGRAM_TIMES("Sync." type_str "AssociationTime", time);
+  SYNC_DATA_TYPE_HISTOGRAM(type());
+#undef PER_DATA_TYPE_MACRO
+}
+
+void NonFrontendDataTypeController::RecordStartFailure(StartResult result) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  UMA_HISTOGRAM_ENUMERATION("Sync.DataTypeStartFailures", type(),
+                            syncable::MODEL_TYPE_COUNT);
+#define PER_DATA_TYPE_MACRO(type_str) \
+    UMA_HISTOGRAM_ENUMERATION("Sync." type_str "StartFailure", result, \
+                              MAX_START_RESULT);
+  SYNC_DATA_TYPE_HISTOGRAM(type());
+#undef PER_DATA_TYPE_MACRO
 }
 
 ProfileSyncComponentsFactory*

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,36 +7,37 @@
 #pragma once
 
 #include "chrome/browser/ui/select_file_dialog.h"
-#include "content/public/browser/download_manager.h"
 
 class FilePath;
 
 namespace content {
+class DownloadManager;
 class WebContents;
 }
 
 // Handles showing a dialog to the user to ask for the filename for a download.
-class DownloadFilePicker : public content::DownloadManager::Observer,
-                           public SelectFileDialog::Listener {
+class DownloadFilePicker : public SelectFileDialog::Listener {
  public:
   DownloadFilePicker(content::DownloadManager* download_manager,
                      content::WebContents* web_contents,
                      const FilePath& suggested_path,
-                     void* params);
+                     int32 download_id);
   virtual ~DownloadFilePicker();
 
- private:
-  // content::DownloadManager::Observer implementation.
-  virtual void ModelChanged() OVERRIDE;
-  virtual void ManagerGoingDown() OVERRIDE;
+ protected:
+  void RecordFileSelected(const FilePath& path);
 
+  scoped_refptr<content::DownloadManager> download_manager_;
+  int32 download_id_;
+
+ private:
   // SelectFileDialog::Listener implementation.
   virtual void FileSelected(const FilePath& path,
                             int index,
                             void* params) OVERRIDE;
   virtual void FileSelectionCanceled(void* params) OVERRIDE;
 
-  content::DownloadManager* download_manager_;
+  FilePath suggested_path_;
 
   // For managing select file dialogs.
   scoped_refptr<SelectFileDialog> select_file_dialog_;

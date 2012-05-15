@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include "base/bind.h"
 #include "base/base_paths.h"
 #include "base/compiler_specific.h"
+#include "base/cpu.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/logging.h"
@@ -16,9 +17,11 @@
 #include "chrome/browser/component_updater/component_updater_service.h"
 #include "chrome/common/chrome_paths.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/browser/gpu/gpu_data_manager.h"
+#include "content/public/browser/gpu_data_manager.h"
+#include "content/public/browser/gpu_data_manager_observer.h"
 
 using content::BrowserThread;
+using content::GpuDataManager;
 
 namespace {
 
@@ -150,7 +153,7 @@ void FinishSwiftShaderUpdateRegistration(ComponentUpdateService* cus,
   }
 }
 
-class UpdateChecker : public GpuDataManager::Observer {
+class UpdateChecker : public content::GpuDataManagerObserver {
  public:
   explicit UpdateChecker(ComponentUpdateService* cus);
 
@@ -168,9 +171,9 @@ void UpdateChecker::OnGpuInfoUpdate() {
   GpuDataManager *gpu_data_manager = GpuDataManager::GetInstance();
 
   if (!gpu_data_manager->GpuAccessAllowed() ||
-      (gpu_data_manager->GetGpuFeatureFlags().flags() &
-       GpuFeatureFlags::kGpuFeatureWebgl) ||
-      gpu_data_manager->software_rendering()) {
+      (gpu_data_manager->GetGpuFeatureType() &
+       content::GPU_FEATURE_TYPE_WEBGL) ||
+      gpu_data_manager->ShouldUseSoftwareRendering()) {
     gpu_data_manager->RemoveObserver(this);
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
     FilePath path = GetSwiftShaderBaseDirectory();
@@ -209,6 +212,10 @@ void RegisterSwiftShaderPath(ComponentUpdateService* cus) {
 
 void RegisterSwiftShaderComponent(ComponentUpdateService* cus) {
 #if defined(ENABLE_SWIFTSHADER)
+  base::CPU cpu;
+
+  if (!cpu.has_sse2())
+    return;
   BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
       base::Bind(&RegisterSwiftShaderPath, cus));
 #endif

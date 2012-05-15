@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,16 +8,21 @@
 
 #include <string>
 
+#include "chrome/browser/extensions/bundle_installer.h"
 #include "chrome/browser/extensions/extension_function.h"
 #include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/webstore_install_helper.h"
 #include "chrome/browser/extensions/webstore_installer.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
-#include "content/browser/gpu/gpu_data_manager.h"
+#include "content/public/browser/gpu_data_manager_observer.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 
 class ProfileSyncService;
+
+namespace content {
+class GpuDataManager;
+}
 
 class WebstorePrivateApi {
  public:
@@ -32,6 +37,29 @@ class WebstorePrivateApi {
   // If |allow| is true, then the extension IDs used by the SilentlyInstall
   // apitest will be trusted.
   static void SetTrustTestIDsForTesting(bool allow);
+};
+
+class InstallBundleFunction : public AsyncExtensionFunction,
+                              public extensions::BundleInstaller::Delegate {
+ public:
+  InstallBundleFunction();
+
+  // BundleInstaller::Delegate implementation.
+  virtual void OnBundleInstallApproved() OVERRIDE;
+  virtual void OnBundleInstallCanceled(bool user_initiated) OVERRIDE;
+  virtual void OnBundleInstallCompleted() OVERRIDE;
+
+ protected:
+  virtual ~InstallBundleFunction();
+  virtual bool RunImpl() OVERRIDE;
+
+  // Reads the extension |details| into |items|.
+  bool ReadBundleInfo(base::ListValue* details,
+                      extensions::BundleInstaller::ItemList* items);
+
+ private:
+  scoped_refptr<extensions::BundleInstaller> bundle_;
+  DECLARE_EXTENSION_FUNCTION_NAME("webstorePrivate.installBundle");
 };
 
 class BeginInstallWithManifestFunction
@@ -161,11 +189,11 @@ class SetStoreLoginFunction : public SyncExtensionFunction {
 };
 
 class GetWebGLStatusFunction : public AsyncExtensionFunction,
-                               public GpuDataManager::Observer {
+                               public content::GpuDataManagerObserver {
  public:
   GetWebGLStatusFunction();
 
-  // Implementing GpuDataManager::Observer interface.
+  // Implementing GpuDataManagerObserver interface.
   virtual void OnGpuInfoUpdate() OVERRIDE;
 
  protected:
@@ -177,7 +205,7 @@ class GetWebGLStatusFunction : public AsyncExtensionFunction,
 
   // A false return value is always valid, but a true one is only valid if full
   // GPU info has been collected in a GPU process.
-  static bool IsWebGLAllowed(GpuDataManager* manager);
+  static bool IsWebGLAllowed(content::GpuDataManager* manager);
 
   DECLARE_EXTENSION_FUNCTION_NAME("webstorePrivate.getWebGLStatus");
 };

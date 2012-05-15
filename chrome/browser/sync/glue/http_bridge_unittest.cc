@@ -1,11 +1,12 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/message_loop_proxy.h"
+#include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
 #include "chrome/browser/sync/glue/http_bridge.h"
-#include "chrome/test/base/test_url_request_context_getter.h"
+#include "content/public/common/url_fetcher_delegate.h"
 #include "content/test/test_browser_thread.h"
 #include "content/test/test_url_fetcher_factory.h"
 #include "net/test/test_server.h"
@@ -20,11 +21,14 @@ namespace {
 const FilePath::CharType kDocRoot[] = FILE_PATH_LITERAL("chrome/test/data");
 }
 
-class HttpBridgeTest : public testing::Test {
+class SyncHttpBridgeTest : public testing::Test {
  public:
-  HttpBridgeTest()
-      : test_server_(net::TestServer::TYPE_HTTP, FilePath(kDocRoot)),
+  SyncHttpBridgeTest()
+      : test_server_(net::TestServer::TYPE_HTTP,
+                     net::TestServer::kLocalhost,
+                     FilePath(kDocRoot)),
         fake_default_request_context_getter_(NULL),
+        bridge_for_race_test_(NULL),
         io_thread_(BrowserThread::IO) {
   }
 
@@ -43,7 +47,9 @@ class HttpBridgeTest : public testing::Test {
 
   HttpBridge* BuildBridge() {
     if (!fake_default_request_context_getter_) {
-      fake_default_request_context_getter_ = new TestURLRequestContextGetter();
+      fake_default_request_context_getter_ =
+          new TestURLRequestContextGetter(
+              BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO));
       fake_default_request_context_getter_->AddRef();
     }
     HttpBridge* bridge = new HttpBridge(
@@ -56,8 +62,13 @@ class HttpBridgeTest : public testing::Test {
     bridge->Abort();
   }
 
+  // Used by AbortAndReleaseBeforeFetchCompletes to test an interesting race
+  // condition.
+  void RunSyncThreadBridgeUseTest(base::WaitableEvent* signal_when_created,
+                                  base::WaitableEvent* signal_when_released);
+
   static void TestSameHttpNetworkSession(MessageLoop* main_message_loop,
-                                         HttpBridgeTest* test) {
+                                         SyncHttpBridgeTest* test) {
     scoped_refptr<HttpBridge> http_bridge(test->BuildBridge());
     EXPECT_TRUE(test->GetTestRequestContextGetter());
     net::HttpNetworkSession* test_session =
@@ -81,10 +92,16 @@ class HttpBridgeTest : public testing::Test {
 
   net::TestServer test_server_;
 
+  content::TestBrowserThread* io_thread() { return &io_thread_; }
+
+  HttpBridge* bridge_for_race_test() { return bridge_for_race_test_; }
+
  private:
   // A make-believe "default" request context, as would be returned by
   // Profile::GetDefaultRequestContext().  Created lazily by BuildBridge.
   TestURLRequestContextGetter* fake_default_request_context_getter_;
+
+  HttpBridge* bridge_for_race_test_;
 
   // Separate thread for IO used by the HttpBridge.
   content::TestBrowserThread io_thread_;
@@ -93,12 +110,14 @@ class HttpBridgeTest : public testing::Test {
 
 // An HttpBridge that doesn't actually make network requests and just calls
 // back with dummy response info.
+// TODO(tim): Instead of inheriting here we should inject a component
+// responsible for the MakeAsynchronousPost bit.
 class ShuntedHttpBridge : public HttpBridge {
  public:
   // If |never_finishes| is true, the simulated request never actually
   // returns.
   ShuntedHttpBridge(net::URLRequestContextGetter* baseline_context_getter,
-                    HttpBridgeTest* test, bool never_finishes)
+                    SyncHttpBridgeTest* test, bool never_finishes)
       : HttpBridge(new HttpBridge::RequestContextGetter(
                        baseline_context_getter)),
                    test_(test), never_finishes_(never_finishes) { }
@@ -129,24 +148,48 @@ class ShuntedHttpBridge : public HttpBridge {
     fetcher.SetResponseString(response_content);
     OnURLFetchComplete(&fetcher);
   }
-  HttpBridgeTest* test_;
+  SyncHttpBridgeTest* test_;
   bool never_finishes_;
 };
 
-TEST_F(HttpBridgeTest, TestUsesSameHttpNetworkSession) {
+void SyncHttpBridgeTest::RunSyncThreadBridgeUseTest(
+    base::WaitableEvent* signal_when_created,
+    base::WaitableEvent* signal_when_released) {
+  scoped_refptr<net::URLRequestContextGetter> ctx_getter(
+      new TestURLRequestContextGetter(
+          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO)));
+  {
+    scoped_refptr<ShuntedHttpBridge> bridge(new ShuntedHttpBridge(
+        ctx_getter, this, true));
+    bridge->SetUserAgent("bob");
+    bridge->SetURL("http://www.google.com", 9999);
+    bridge->SetPostPayload("text/plain", 2, " ");
+    bridge_for_race_test_ = bridge;
+    signal_when_created->Signal();
+
+    int os_error = 0;
+    int response_code = 0;
+    bridge->MakeSynchronousPost(&os_error, &response_code);
+    bridge_for_race_test_ = NULL;
+  }
+  signal_when_released->Signal();
+}
+
+TEST_F(SyncHttpBridgeTest, TestUsesSameHttpNetworkSession) {
   // Run this test on the IO thread because we can only call
   // URLRequestContextGetter::GetURLRequestContext on the IO thread.
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(&HttpBridgeTest::TestSameHttpNetworkSession,
+      base::Bind(&SyncHttpBridgeTest::TestSameHttpNetworkSession,
                  MessageLoop::current(), this));
   MessageLoop::current()->Run();
 }
 
 // Test the HttpBridge without actually making any network requests.
-TEST_F(HttpBridgeTest, TestMakeSynchronousPostShunted) {
+TEST_F(SyncHttpBridgeTest, TestMakeSynchronousPostShunted) {
   scoped_refptr<net::URLRequestContextGetter> ctx_getter(
-      new TestURLRequestContextGetter());
+      new TestURLRequestContextGetter(
+          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO)));
   scoped_refptr<HttpBridge> http_bridge(new ShuntedHttpBridge(
       ctx_getter, this, false));
   http_bridge->SetUserAgent("bob");
@@ -167,7 +210,7 @@ TEST_F(HttpBridgeTest, TestMakeSynchronousPostShunted) {
 
 // Full round-trip test of the HttpBridge, using default UA string and
 // no request cookies.
-TEST_F(HttpBridgeTest, TestMakeSynchronousPostLiveWithPayload) {
+TEST_F(SyncHttpBridgeTest, TestMakeSynchronousPostLiveWithPayload) {
   ASSERT_TRUE(test_server_.Start());
 
   scoped_refptr<HttpBridge> http_bridge(BuildBridge());
@@ -190,7 +233,7 @@ TEST_F(HttpBridgeTest, TestMakeSynchronousPostLiveWithPayload) {
 }
 
 // Full round-trip test of the HttpBridge, using custom UA string
-TEST_F(HttpBridgeTest, TestMakeSynchronousPostLiveComprehensive) {
+TEST_F(SyncHttpBridgeTest, TestMakeSynchronousPostLiveComprehensive) {
   ASSERT_TRUE(test_server_.Start());
 
   scoped_refptr<HttpBridge> http_bridge(BuildBridge());
@@ -217,7 +260,7 @@ TEST_F(HttpBridgeTest, TestMakeSynchronousPostLiveComprehensive) {
   EXPECT_NE(std::string::npos, response.find(test_payload.c_str()));
 }
 
-TEST_F(HttpBridgeTest, TestExtraRequestHeaders) {
+TEST_F(SyncHttpBridgeTest, TestExtraRequestHeaders) {
   ASSERT_TRUE(test_server_.Start());
 
   scoped_refptr<HttpBridge> http_bridge(BuildBridge());
@@ -245,7 +288,7 @@ TEST_F(HttpBridgeTest, TestExtraRequestHeaders) {
   EXPECT_NE(std::string::npos, response.find(test_payload.c_str()));
 }
 
-TEST_F(HttpBridgeTest, TestResponseHeader) {
+TEST_F(SyncHttpBridgeTest, TestResponseHeader) {
   ASSERT_TRUE(test_server_.Start());
 
   scoped_refptr<HttpBridge> http_bridge(BuildBridge());
@@ -268,9 +311,10 @@ TEST_F(HttpBridgeTest, TestResponseHeader) {
   EXPECT_TRUE(http_bridge->GetResponseHeaderValue("invalid-header").empty());
 }
 
-TEST_F(HttpBridgeTest, Abort) {
+TEST_F(SyncHttpBridgeTest, Abort) {
   scoped_refptr<net::URLRequestContextGetter> ctx_getter(
-      new TestURLRequestContextGetter());
+      new TestURLRequestContextGetter(
+          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO)));
   scoped_refptr<ShuntedHttpBridge> http_bridge(new ShuntedHttpBridge(
       ctx_getter, this, true));
   http_bridge->SetUserAgent("bob");
@@ -281,15 +325,16 @@ TEST_F(HttpBridgeTest, Abort) {
   int response_code = 0;
 
   BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
-                          base::Bind(&HttpBridgeTest::Abort, http_bridge));
+                          base::Bind(&SyncHttpBridgeTest::Abort, http_bridge));
   bool success = http_bridge->MakeSynchronousPost(&os_error, &response_code);
   EXPECT_FALSE(success);
   EXPECT_EQ(net::ERR_ABORTED, os_error);
 }
 
-TEST_F(HttpBridgeTest, AbortLate) {
+TEST_F(SyncHttpBridgeTest, AbortLate) {
   scoped_refptr<net::URLRequestContextGetter> ctx_getter(
-      new TestURLRequestContextGetter());
+      new TestURLRequestContextGetter(
+          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO)));
   scoped_refptr<ShuntedHttpBridge> http_bridge(new ShuntedHttpBridge(
       ctx_getter, this, false));
   http_bridge->SetUserAgent("bob");
@@ -303,4 +348,64 @@ TEST_F(HttpBridgeTest, AbortLate) {
   ASSERT_TRUE(success);
   http_bridge->Abort();
   // Ensures no double-free of URLFetcher, etc.
+}
+
+// Tests an interesting case where code using the HttpBridge aborts the fetch
+// and releases ownership before a pending fetch completed callback is issued by
+// the underlying URLFetcher (and before that URLFetcher is destroyed, which
+// would cancel the callback).
+TEST_F(SyncHttpBridgeTest, AbortAndReleaseBeforeFetchComplete) {
+  base::Thread sync_thread("SyncThread");
+  sync_thread.Start();
+
+  // First, block the sync thread on the post.
+  base::WaitableEvent signal_when_created(false, false);
+  base::WaitableEvent signal_when_released(false, false);
+  sync_thread.message_loop()->PostTask(FROM_HERE,
+      base::Bind(&SyncHttpBridgeTest::RunSyncThreadBridgeUseTest,
+                 base::Unretained(this),
+                 &signal_when_created,
+                 &signal_when_released));
+
+  // Stop IO so we can control order of operations.
+  base::WaitableEvent io_waiter(false, false);
+  ASSERT_TRUE(BrowserThread::PostTask(
+      BrowserThread::IO, FROM_HERE,
+      base::Bind(&base::WaitableEvent::Wait, base::Unretained(&io_waiter))));
+
+  signal_when_created.Wait();  // Wait till we have a bridge to abort.
+  ASSERT_TRUE(bridge_for_race_test());
+
+  // Schedule the fetch completion callback (but don't run it yet). Don't take
+  // a reference to the bridge to mimic URLFetcher's handling of the delegate.
+  content::URLFetcherDelegate* delegate =
+      static_cast<content::URLFetcherDelegate*>(bridge_for_race_test());
+  net::ResponseCookies cookies;
+  std::string response_content = "success!";
+  TestURLFetcher fetcher(0, GURL(), NULL);
+  fetcher.set_url(GURL("www.google.com"));
+  fetcher.set_response_code(200);
+  fetcher.set_cookies(cookies);
+  fetcher.SetResponseString(response_content);
+  ASSERT_TRUE(BrowserThread::PostTask(
+      BrowserThread::IO, FROM_HERE,
+      base::Bind(&content::URLFetcherDelegate::OnURLFetchComplete,
+          base::Unretained(delegate), &fetcher)));
+
+  // Abort the fetch. This should be smart enough to handle the case where
+  // the bridge is destroyed before the callback scheduled above completes.
+  bridge_for_race_test()->Abort();
+
+  // Wait until the sync thread releases its ref on the bridge.
+  signal_when_released.Wait();
+  ASSERT_FALSE(bridge_for_race_test());
+
+  // Unleash the hounds. The fetch completion callback should fire first, and
+  // succeed even though we Release()d the bridge above because the call to
+  // Abort should have held a reference.
+  io_waiter.Signal();
+
+  // Done.
+  sync_thread.Stop();
+  io_thread()->Stop();
 }

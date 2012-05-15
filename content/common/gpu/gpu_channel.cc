@@ -26,7 +26,11 @@
 #endif
 
 namespace {
-const int64 kHandleMoreWorkPeriodMs = 1;
+// The first time polling a fence, delay some extra time to allow other
+// stubs to process some work, or else the timing of the fences could
+// allow a pattern of alternating fast and slow frames to occur.
+const int64 kHandleMoreWorkPeriodMs = 2;
+const int64 kHandleMoreWorkPeriodBusyMs = 1;
 }
 
 GpuChannel::GpuChannel(GpuChannelManager* gpu_channel_manager,
@@ -48,9 +52,7 @@ GpuChannel::GpuChannel(GpuChannelManager* gpu_channel_manager,
   DCHECK(gpu_channel_manager);
   DCHECK(client_id);
 
-  static int last_channel_id = 0;
-  channel_id_ = ++last_channel_id;
-
+  channel_id_ = IPC::Channel::GenerateVerifiedChannelID("gpu");
   const CommandLine* command_line = CommandLine::ForCurrentProcess();
   log_messages_ = command_line->HasSwitch(switches::kLogPluginMessages);
   disallowed_features_.multisampling =
@@ -73,10 +75,8 @@ bool GpuChannel::OnMessageReceived(const IPC::Message& message) {
   }
 
   // Control messages are not deferred and can be handled out of order with
-  // respect to routed ones. Except for Echo, which must be deferred in order
-  // to respect the asynchronous Mac SwapBuffers.
-  if (message.routing_id() == MSG_ROUTING_CONTROL &&
-      message.type() != GpuChannelMsg_Echo::ID)
+  // respect to routed ones.
+  if (message.routing_id() == MSG_ROUTING_CONTROL)
     return OnControlMessageReceived(message);
 
   if (message.type() == GpuCommandBufferMsg_GetStateFast::ID) {
@@ -104,8 +104,7 @@ bool GpuChannel::OnMessageReceived(const IPC::Message& message) {
     deferred_messages_.push_back(new IPC::Message(message));
   }
 
-  if (IsScheduled())
-    OnScheduled();
+  OnScheduled();
 
   return true;
 }
@@ -135,16 +134,12 @@ bool GpuChannel::Send(IPC::Message* message) {
   return channel_->Send(message);
 }
 
-bool GpuChannel::IsScheduled() {
+void GpuChannel::AppendAllCommandBufferStubs(
+    std::vector<GpuCommandBufferStubBase*>& stubs) {
   for (StubMap::Iterator<GpuCommandBufferStub> it(&stubs_);
-       !it.IsAtEnd();
-       it.Advance()) {
-    GpuCommandBufferStub* stub = it.GetCurrentValue();
-    if (!stub->IsScheduled())
-      return false;
+      !it.IsAtEnd(); it.Advance()) {
+    stubs.push_back(it.GetCurrentValue());
   }
-
-  return true;
 }
 
 void GpuChannel::OnScheduled() {
@@ -176,7 +171,7 @@ void GpuChannel::OnDestroy() {
 }
 
 void GpuChannel::CreateViewCommandBuffer(
-    gfx::PluginWindowHandle window,
+    const gfx::GLSurfaceHandle& window,
     int32 surface_id,
     const GPUCreateCommandBufferConfig& init_params,
     int32* route_id) {
@@ -221,7 +216,6 @@ bool GpuChannel::OnControlMessageReceived(const IPC::Message& msg) {
                                     OnCreateOffscreenCommandBuffer)
     IPC_MESSAGE_HANDLER_DELAY_REPLY(GpuChannelMsg_DestroyCommandBuffer,
                                     OnDestroyCommandBuffer)
-    IPC_MESSAGE_HANDLER(GpuChannelMsg_Echo, OnEcho);
     IPC_MESSAGE_HANDLER_DELAY_REPLY(GpuChannelMsg_WillGpuSwitchOccur,
                                     OnWillGpuSwitchOccur)
     IPC_MESSAGE_HANDLER(GpuChannelMsg_CloseChannel, OnCloseChannel)
@@ -233,18 +227,27 @@ bool GpuChannel::OnControlMessageReceived(const IPC::Message& msg) {
 
 void GpuChannel::HandleMessage() {
   handle_messages_scheduled_ = false;
-  if (!IsScheduled())
-      return;
 
   if (!deferred_messages_.empty()) {
-    scoped_ptr<IPC::Message> message(deferred_messages_.front());
+    IPC::Message* m = deferred_messages_.front();
+    GpuCommandBufferStub* stub = stubs_.Lookup(m->routing_id());
+
+    if (stub && !stub->IsScheduled()) {
+      if (m->type() == GpuCommandBufferMsg_Echo::ID) {
+        stub->DelayEcho(m);
+        deferred_messages_.pop_front();
+        if (!deferred_messages_.empty())
+          OnScheduled();
+      }
+      return;
+    }
+
+    scoped_ptr<IPC::Message> message(m);
     deferred_messages_.pop_front();
     processed_get_state_fast_ =
         (message->type() == GpuCommandBufferMsg_GetStateFast::ID);
     // Handle deferred control messages.
-    if (message->routing_id() == MSG_ROUTING_CONTROL)
-      OnControlMessageReceived(*message);
-    else if (!router_.RouteMessage(*message)) {
+    if (!router_.RouteMessage(*message)) {
       // Respond to sync messages even if router failed to route.
       if (message->is_sync()) {
         IPC::Message* reply = IPC::SyncMessage::GenerateReply(&*message);
@@ -252,29 +255,43 @@ void GpuChannel::HandleMessage() {
         Send(reply);
       }
     } else {
-      // If the channel becomes unscheduled as a result of handling the message
-      // or has more work to do, synthesize an IPC message to flush the command
-      // buffer that became unscheduled.
-      GpuCommandBufferStub* stub = stubs_.Lookup(message->routing_id());
+      // If the command buffer becomes unscheduled as a result of handling the
+      // message but still has more commands to process, synthesize an IPC
+      // message to flush that command buffer.
       if (stub) {
-        if (!stub->IsScheduled() || stub->HasMoreWork()) {
+        if (stub->HasUnprocessedCommands()) {
           deferred_messages_.push_front(new GpuCommandBufferMsg_Rescheduled(
               stub->route_id()));
         }
-        if (stub->HasMoreWork() && !handle_messages_scheduled_) {
-          MessageLoop::current()->PostDelayedTask(
-              FROM_HERE,
-              base::Bind(&GpuChannel::HandleMessage,
-                         weak_factory_.GetWeakPtr()),
-              base::TimeDelta::FromMilliseconds(kHandleMoreWorkPeriodMs));
-          handle_messages_scheduled_ = true;
-        }
+
+        ScheduleDelayedWork(stub, kHandleMoreWorkPeriodMs);
       }
     }
   }
 
-  if (IsScheduled() && !deferred_messages_.empty()) {
+  if (!deferred_messages_.empty()) {
     OnScheduled();
+  }
+}
+
+void GpuChannel::PollWork(int route_id) {
+  GpuCommandBufferStub* stub = stubs_.Lookup(route_id);
+  if (stub) {
+    stub->PollWork();
+
+    ScheduleDelayedWork(stub, kHandleMoreWorkPeriodBusyMs);
+  }
+}
+
+void GpuChannel::ScheduleDelayedWork(GpuCommandBufferStub *stub,
+                                     int64 delay) {
+  if (stub->HasMoreWork()) {
+    MessageLoop::current()->PostDelayedTask(
+        FROM_HERE,
+        base::Bind(&GpuChannel::PollWork,
+                   weak_factory_.GetWeakPtr(),
+                   stub->route_id()),
+        base::TimeDelta::FromMilliseconds(delay));
   }
 }
 
@@ -321,7 +338,7 @@ void GpuChannel::OnCreateOffscreenCommandBuffer(
   scoped_ptr<GpuCommandBufferStub> stub(new GpuCommandBufferStub(
       this,
       share_group,
-      gfx::kNullPluginWindow,
+      gfx::GLSurfaceHandle(),
       size,
       disallowed_features_,
       init_params.allowed_extensions,
@@ -366,10 +383,6 @@ void GpuChannel::OnDestroyCommandBuffer(int32 route_id,
     Send(reply_message);
 }
 
-void GpuChannel::OnEcho(const IPC::Message& message) {
-  TRACE_EVENT0("gpu", "GpuCommandBufferStub::OnEcho");
-  Send(new IPC::Message(message));
-}
 
 void GpuChannel::OnWillGpuSwitchOccur(bool is_creating_context,
                                       gfx::GpuPreference gpu_preference,
@@ -403,9 +416,8 @@ bool GpuChannel::Init(base::MessageLoopProxy* io_message_loop,
   DCHECK(!channel_.get());
 
   // Map renderer ID to a (single) channel to that process.
-  std::string channel_name = GetChannelName();
   channel_.reset(new IPC::SyncChannel(
-      channel_name,
+      channel_id_,
       IPC::Channel::MODE_SERVER,
       this,
       io_message_loop,
@@ -427,7 +439,7 @@ void GpuChannel::DidDestroyCommandBuffer(gfx::GpuPreference gpu_preference) {
 }
 
 std::string GpuChannel::GetChannelName() {
-  return StringPrintf("%d.r%d.gpu", base::GetCurrentProcId(), channel_id_);
+  return channel_id_;
 }
 
 #if defined(OS_POSIX)

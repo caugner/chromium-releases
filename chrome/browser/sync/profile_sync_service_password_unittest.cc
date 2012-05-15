@@ -12,10 +12,13 @@
 #include "base/test/test_timeouts.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/password_manager/mock_password_store.h"
 #include "chrome/browser/password_manager/password_store.h"
+#include "chrome/browser/password_manager/password_store_factory.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
+#include "chrome/browser/signin/token_service_factory.h"
 #include "chrome/browser/sync/abstract_profile_sync_service_test.h"
 #include "chrome/browser/sync/glue/password_change_processor.h"
 #include "chrome/browser/sync/glue/password_data_type_controller.h"
@@ -28,10 +31,6 @@
 #include "chrome/browser/sync/profile_sync_components_factory_mock.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_test_util.h"
-#include "chrome/browser/sync/protocol/password_specifics.pb.h"
-#include "chrome/browser/sync/syncable/directory_manager.h"
-#include "chrome/browser/sync/syncable/syncable.h"
-#include "chrome/browser/sync/test/engine/test_id_factory.h"
 #include "chrome/browser/sync/test_profile_sync_service.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/net/gaia/gaia_constants.h"
@@ -40,6 +39,9 @@
 #include "content/public/browser/notification_source.h"
 #include "content/test/notification_observer_mock.h"
 #include "content/test/test_browser_thread.h"
+#include "sync/protocol/password_specifics.pb.h"
+#include "sync/syncable/syncable.h"
+#include "sync/test/engine/test_id_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "webkit/forms/password_form.h"
 
@@ -54,7 +56,6 @@ using sync_api::SyncManager;
 using sync_api::UserShare;
 using syncable::BASE_VERSION;
 using syncable::CREATE;
-using syncable::DirectoryManager;
 using syncable::IS_DEL;
 using syncable::IS_DIR;
 using syncable::IS_UNAPPLIED_UPDATE;
@@ -63,7 +64,6 @@ using syncable::MutableEntry;
 using syncable::SERVER_IS_DIR;
 using syncable::SERVER_VERSION;
 using syncable::SPECIFICS;
-using syncable::ScopedDirLookup;
 using syncable::UNIQUE_SERVER_TAG;
 using syncable::UNITTEST;
 using syncable::WriteTransaction;
@@ -101,28 +101,6 @@ ACTION_P(AcquireSyncTransaction, password_test_service) {
 static void QuitMessageLoop() {
   MessageLoop::current()->Quit();
 }
-
-class MockPasswordStore : public PasswordStore {
- public:
-  MOCK_METHOD1(RemoveLogin, void(const PasswordForm&));
-  MOCK_METHOD2(GetLogins, int(const PasswordForm&, PasswordStoreConsumer*));
-  MOCK_METHOD1(AddLogin, void(const PasswordForm&));
-  MOCK_METHOD1(UpdateLogin, void(const PasswordForm&));
-  MOCK_METHOD0(ReportMetrics, void());
-  MOCK_METHOD0(ReportMetricsImpl, void());
-  MOCK_METHOD1(AddLoginImpl, void(const PasswordForm&));
-  MOCK_METHOD1(UpdateLoginImpl, void(const PasswordForm&));
-  MOCK_METHOD1(RemoveLoginImpl, void(const PasswordForm&));
-  MOCK_METHOD2(RemoveLoginsCreatedBetweenImpl, void(const base::Time&,
-               const base::Time&));
-  MOCK_METHOD2(GetLoginsImpl, void(GetLoginsRequest*, const PasswordForm&));
-  MOCK_METHOD1(GetAutofillableLoginsImpl, void(GetLoginsRequest*));
-  MOCK_METHOD1(GetBlacklistLoginsImpl, void(GetLoginsRequest*));
-  MOCK_METHOD1(FillAutofillableLogins,
-      bool(std::vector<PasswordForm*>*));
-  MOCK_METHOD1(FillBlacklistLogins,
-      bool(std::vector<PasswordForm*>*));
-};
 
 class PasswordTestProfileSyncService : public TestProfileSyncService {
  public:
@@ -179,11 +157,10 @@ class ProfileSyncServicePasswordTest : public AbstractProfileSyncServiceTest {
   virtual void SetUp() {
     AbstractProfileSyncServiceTest::SetUp();
     profile_.CreateRequestContext();
-    password_store_ = new MockPasswordStore();
+    password_store_ = static_cast<MockPasswordStore*>(
+        PasswordStoreFactory::GetInstance()->SetTestingFactoryAndUse(
+            &profile_, MockPasswordStore::Build).get());
 
-    notification_service_ = new ThreadNotificationService(
-        db_thread_.DeprecatedGetThreadObject());
-    notification_service_->Init();
     registrar_.Add(&observer_,
         chrome::NOTIFICATION_SYNC_CONFIGURE_DONE,
         content::NotificationService::AllSources());
@@ -193,9 +170,8 @@ class ProfileSyncServicePasswordTest : public AbstractProfileSyncServiceTest {
   }
 
   virtual void TearDown() {
-    password_store_->Shutdown();
+    password_store_->ShutdownOnUIThread();
     service_.reset();
-    notification_service_->TearDown();
     profile_.ResetRequestContext();
     AbstractProfileSyncServiceTest::TearDown();
   }
@@ -218,6 +194,9 @@ class ProfileSyncServicePasswordTest : public AbstractProfileSyncServiceTest {
     if (!service_.get()) {
       SigninManager* signin = SigninManagerFactory::GetForProfile(&profile_);
       signin->SetAuthenticatedUsername("test_user");
+      token_service_ = static_cast<TokenService*>(
+          TokenServiceFactory::GetInstance()->SetTestingFactoryAndUse(
+              &profile_, BuildTokenService));
       ProfileSyncComponentsFactoryMock* factory =
           new ProfileSyncComponentsFactoryMock();
       service_.reset(new PasswordTestProfileSyncService(
@@ -227,8 +206,6 @@ class ProfileSyncServicePasswordTest : public AbstractProfileSyncServiceTest {
           service_->GetPreferredDataTypes();
       preferred_types.Put(syncable::PASSWORDS);
       service_->ChangePreferredDataTypes(preferred_types);
-      EXPECT_CALL(profile_, GetProfileSyncService()).WillRepeatedly(
-          Return(service_.get()));
       PasswordDataTypeController* data_type_controller =
           new PasswordDataTypeController(factory,
                                          &profile_,
@@ -246,13 +223,6 @@ class ProfileSyncServicePasswordTest : public AbstractProfileSyncServiceTest {
       token_service_->IssueAuthTokenForTest(
           GaiaConstants::kSyncService, "token");
 
-      EXPECT_CALL(profile_, GetTokenService()).
-          WillRepeatedly(Return(token_service_.get()));
-
-      EXPECT_CALL(profile_, GetPasswordStore(_)).
-          Times(AtLeast(2)).  // Can be more if we hit NEEDS_CRYPTO.
-          WillRepeatedly(Return(password_store_.get()));
-
       EXPECT_CALL(observer_,
           Observe(
               int(chrome::NOTIFICATION_SYNC_CONFIGURE_DONE),_,_));
@@ -267,9 +237,7 @@ class ProfileSyncServicePasswordTest : public AbstractProfileSyncServiceTest {
       MessageLoop::current()->Run();
       FlushLastDBTask();
 
-      service_->SetPassphrase("foo",
-                              ProfileSyncService::IMPLICIT,
-                              ProfileSyncService::INTERNAL);
+      service_->SetEncryptionPassphrase("foo", ProfileSyncService::IMPLICIT);
       MessageLoop::current()->Run();
     }
   }
@@ -317,7 +285,6 @@ class ProfileSyncServicePasswordTest : public AbstractProfileSyncServiceTest {
     EXPECT_CALL(*password_store_, RemoveLoginImpl(_)).Times(0);
   }
 
-  scoped_refptr<ThreadNotificationService> notification_service_;
   content::NotificationObserverMock observer_;
   ProfileMock profile_;
   scoped_refptr<MockPasswordStore> password_store_;

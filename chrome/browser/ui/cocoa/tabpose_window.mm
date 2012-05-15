@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,9 +29,8 @@
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_model_observer_bridge.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/pref_names.h"
-#include "content/browser/renderer_host/backing_store_mac.h"
-#include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/renderer_host/render_widget_host_view.h"
+#include "content/public/browser/render_view_host.h"
+#include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/theme_resources.h"
 #include "grit/ui_resources.h"
@@ -42,6 +41,7 @@
 #include "ui/gfx/scoped_cg_context_save_gstate_mac.h"
 
 using content::BrowserThread;
+using content::RenderWidgetHost;
 
 // Height of the bottom gradient, in pixels.
 const CGFloat kBottomGradientHeight = 50;
@@ -255,39 +255,22 @@ void ThumbnailLoader::LoadThumbnail() {
       DevToolsWindow::GetDevToolsContents(contents_->web_contents());
   if (devToolsContents && devToolsContents->web_contents() &&
       devToolsContents->web_contents()->GetRenderViewHost() &&
-      devToolsContents->web_contents()->GetRenderViewHost()->view()) {
+      devToolsContents->web_contents()->GetRenderViewHost()->GetView()) {
     // The devtool's size might not be up-to-date, but since its height doesn't
     // change on window resize, and since most users don't use devtools, this is
     // good enough.
     bottomOffset +=
-        devToolsContents->web_contents()->GetRenderViewHost()->view()->
+        devToolsContents->web_contents()->GetRenderViewHost()->GetView()->
             GetViewBounds().height();
     bottomOffset += 1;  // :-( Divider line between web contents and devtools.
   }
   return bottomOffset;
 }
 
-- (void)drawBackingStore:(BackingStoreMac*)backing_store
-                  inRect:(CGRect)destRect
-                 context:(CGContextRef)context {
-  // TODO(thakis): Add a sublayer for each accelerated surface in the rwhv.
-  // Until then, accelerated layers (CoreAnimation NPAPI plugins, compositor)
-  // won't show up in tabpose.
-  gfx::ScopedCGContextSaveGState CGContextSaveGState(context);
-  CGContextSetInterpolationQuality(context, kCGInterpolationHigh);
-  if (backing_store->cg_layer()) {
-    CGContextDrawLayerInRect(context, destRect, backing_store->cg_layer());
-  } else {
-    base::mac::ScopedCFTypeRef<CGImageRef> image(
-        CGBitmapContextCreateImage(backing_store->cg_bitmap()));
-    CGContextDrawImage(context, destRect, image);
-  }
-}
-
 - (void)drawInContext:(CGContextRef)context {
   RenderWidgetHost* rwh = contents_->web_contents()->GetRenderViewHost();
   // NULL if renderer crashed.
-  RenderWidgetHostView* rwhv = rwh ? rwh->view() : NULL;
+  content::RenderWidgetHostView* rwhv = rwh ? rwh->GetView() : NULL;
   if (!rwhv) {
     // TODO(thakis): Maybe draw a sad tab layer?
     [super drawInContext:context];
@@ -311,10 +294,7 @@ void ThumbnailLoader::LoadThumbnail() {
   // a) there's no backing store or
   // b) the backing store's size doesn't match our required size and
   // c) we didn't already send a thumbnail request to the renderer.
-  BackingStoreMac* backing_store =
-      (BackingStoreMac*)rwh->GetBackingStore(/*force_create=*/false);
-  bool draw_backing_store =
-      backing_store && backing_store->size() == desiredThumbSize;
+  bool draw_backing_store = rwh->GetBackingStoreSize() == desiredThumbSize;
 
   // Next weirdness: The destination rect. If the layer is |fullSize_| big, the
   // destination rect is (0, bottomOffset), (fullSize_.width, topOffset). But we
@@ -345,7 +325,10 @@ void ThumbnailLoader::LoadThumbnail() {
 
   if (draw_backing_store) {
     // Backing store 'cache' hit!
-    [self drawBackingStore:backing_store inRect:destRect context:context];
+    // TODO(thakis): Add a sublayer for each accelerated surface in the rwhv.
+    // Until then, accelerated layers (CoreAnimation NPAPI plugins, compositor)
+    // won't show up in tabpose.
+    rwh->CopyFromBackingStoreToCGContext(destRect, context);
   } else if (thumbnail_) {
     // No cache hit, but the renderer returned a thumbnail to us.
     gfx::ScopedCGContextSaveGState CGContextSaveGState(context);

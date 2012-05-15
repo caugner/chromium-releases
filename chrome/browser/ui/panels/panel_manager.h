@@ -11,17 +11,21 @@
 #include "base/lazy_instance.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/timer.h"
-#include "chrome/browser/ui/panels/auto_hiding_desktop_bar.h"
+#include "chrome/browser/ui/panels/display_settings_provider.h"
 #include "chrome/browser/ui/panels/panel.h"
+#include "chrome/browser/ui/panels/panel_resize_controller.h"
+#include "chrome/browser/ui/panels/panel_strip.h"
 #include "ui/gfx/rect.h"
 
 class Browser;
-class PanelMouseWatcher;
-class OverflowPanelStrip;
+class DetachedPanelStrip;
 class DockedPanelStrip;
+class OverflowPanelStrip;
+class PanelDragController;
+class PanelMouseWatcher;
 
 // This class manages a set of panels.
-class PanelManager : public AutoHidingDesktopBar::Observer {
+class PanelManager : public DisplaySettingsProvider::Observer {
  public:
   // Returns a single instance.
   static PanelManager* GetInstance();
@@ -36,31 +40,50 @@ class PanelManager : public AutoHidingDesktopBar::Observer {
   // later.
   Panel* CreatePanel(Browser* browser);
 
-  void Remove(Panel* panel);
-  void RemoveAll();
+  // Close all panels (asynchronous). Panels will be removed after closing.
+  void CloseAll();
 
-  // Asynchronous confirmation of panel having been removed.
-  void OnPanelRemoved(Panel* panel);
+  // Asynchronous confirmation of panel having been closed.
+  void OnPanelClosed(Panel* panel);
 
   // Drags the given panel.
-  void StartDragging(Panel* panel);
-  void Drag(int delta_x);
+  // |mouse_location| is in screen coordinate system.
+  void StartDragging(Panel* panel, const gfx::Point& mouse_location);
+  void Drag(const gfx::Point& mouse_location);
   void EndDragging(bool cancelled);
+
+  // Resizes the given panel.
+  // |mouse_location| is in screen coordinate system.
+  void StartResizingByMouse(Panel* panel, const gfx::Point& mouse_location,
+                            PanelResizeController::ResizingSides sides);
+  void ResizeByMouse(const gfx::Point& mouse_location);
+  void EndResizingByMouse(bool cancelled);
 
   // Invoked when a panel's expansion state changes.
   void OnPanelExpansionStateChanged(Panel* panel);
 
-  // Invoked when a panel is starting/stopping drawing an attention.
-  void OnPanelAttentionStateChanged(Panel* panel);
-
   // Invoked when the preferred window size of the given panel might need to
   // get changed.
-  void OnPreferredWindowSizeChanged(
-      Panel* panel, const gfx::Size& preferred_window_size);
+  void OnWindowAutoResized(Panel* panel,
+                           const gfx::Size& preferred_window_size);
 
   // Resizes the panel. Explicitly setting the panel size is not allowed
   // for panels that are auto-sized.
   void ResizePanel(Panel* panel, const gfx::Size& new_size);
+
+  // Resizes the panel and sets the origin.
+  void SetPanelBounds(Panel* panel, const gfx::Rect& new_bounds);
+
+  // Moves the |panel| to a different type of panel strip.
+  void MovePanelToStrip(Panel* panel,
+                        PanelStrip::Type new_layout,
+                        PanelStrip::PositioningMask positioning_mask);
+
+  // Move all panels up to, and including, the |last_panel_to_move| to overflow.
+  void MovePanelsToOverflow(Panel* last_panel_to_move);
+
+  // Moves as many panels out of overflow as space allows.
+  void MovePanelsOutOfOverflowIfCanFit();
 
   // Returns true if we should bring up the titlebars, given the current mouse
   // point.
@@ -78,12 +101,26 @@ class PanelManager : public AutoHidingDesktopBar::Observer {
   int StartingRightPosition() const;
   std::vector<Panel*> panels() const;
 
-  AutoHidingDesktopBar* auto_hiding_desktop_bar() const {
-    return auto_hiding_desktop_bar_;
+  PanelDragController* drag_controller() const {
+    return drag_controller_.get();
+  }
+
+#ifdef UNIT_TEST
+  PanelResizeController* resize_controller() const {
+    return resize_controller_.get();
+  }
+#endif
+
+  DisplaySettingsProvider* display_settings_provider() const {
+    return display_settings_provider_.get();
   }
 
   PanelMouseWatcher* mouse_watcher() const {
     return panel_mouse_watcher_.get();
+  }
+
+  DetachedPanelStrip* detached_strip() const {
+    return detached_strip_.get();
   }
 
   DockedPanelStrip* docked_strip() const {
@@ -95,6 +132,9 @@ class PanelManager : public AutoHidingDesktopBar::Observer {
     return overflow_strip_.get();
   }
 
+  // Width of the overflow strip in compact state i.e mouse not hovering over.
+  int overflow_strip_width() const;
+
   // Reduces time interval in tests to shorten test run time.
   // Wrapper should be used around all time intervals in panels code.
   static inline double AdjustTimeInterval(double interval) {
@@ -104,14 +144,19 @@ class PanelManager : public AutoHidingDesktopBar::Observer {
       return interval;
   }
 
+
+  bool auto_sizing_enabled() const {
+    return auto_sizing_enabled_;
+  }
+
 #ifdef UNIT_TEST
   static void shorten_time_intervals_for_testing() {
     shorten_time_intervals_ = true;
   }
 
-  void set_auto_hiding_desktop_bar(
-      AutoHidingDesktopBar* auto_hiding_desktop_bar) {
-    auto_hiding_desktop_bar_ = auto_hiding_desktop_bar;
+  void set_display_settings_provider(
+      DisplaySettingsProvider* display_settings_provider) {
+    display_settings_provider_.reset(display_settings_provider);
   }
 
   void enable_auto_sizing(bool enabled) {
@@ -120,10 +165,6 @@ class PanelManager : public AutoHidingDesktopBar::Observer {
 
   const gfx::Rect& work_area() const {
     return work_area_;
-  }
-
-  void SetWorkAreaForTesting(const gfx::Rect& work_area) {
-    SetWorkArea(work_area);
   }
 
   void SetMouseWatcherForTesting(PanelMouseWatcher* watcher) {
@@ -137,18 +178,14 @@ class PanelManager : public AutoHidingDesktopBar::Observer {
   PanelManager();
   virtual ~PanelManager();
 
-  // Overridden from AutoHidingDesktopBar::Observer:
+  // Overridden from DisplaySettingsProvider::Observer:
   virtual void OnAutoHidingDesktopBarThicknessChanged() OVERRIDE;
   virtual void OnAutoHidingDesktopBarVisibilityChanged(
-      AutoHidingDesktopBar::Alignment alignment,
-      AutoHidingDesktopBar::Visibility visibility) OVERRIDE;
-
-  // Applies the new work area. This is called by OnDisplayChanged and the test
-  // code.
-  void SetWorkArea(const gfx::Rect& work_area);
+      DisplaySettingsProvider::DesktopBarAlignment alignment,
+      DisplaySettingsProvider::DesktopBarVisibility visibility) OVERRIDE;
 
   // Adjusts the work area to exclude the influence of auto-hiding desktop bars.
-  void AdjustWorkAreaForAutoHidingDesktopBars();
+  void AdjustWorkAreaForDisplaySettingsProviders();
 
   // Positions the various groupings of panels.
   void Layout();
@@ -162,8 +199,12 @@ class PanelManager : public AutoHidingDesktopBar::Observer {
   // Tests may want to shorten time intervals to reduce running time.
   static bool shorten_time_intervals_;
 
+  scoped_ptr<DetachedPanelStrip> detached_strip_;
   scoped_ptr<DockedPanelStrip> docked_strip_;
   scoped_ptr<OverflowPanelStrip> overflow_strip_;
+
+  scoped_ptr<PanelDragController> drag_controller_;
+  scoped_ptr<PanelResizeController> resize_controller_;
 
   // Use a mouse watcher to know when to bring up titlebars to "peek" at
   // minimized panels. Mouse movement is only tracked when there is a minimized
@@ -180,7 +221,7 @@ class PanelManager : public AutoHidingDesktopBar::Observer {
   // right of the screen edges) when they become fully visible.
   gfx::Rect adjusted_work_area_;
 
-  scoped_refptr<AutoHidingDesktopBar> auto_hiding_desktop_bar_;
+  scoped_ptr<DisplaySettingsProvider> display_settings_provider_;
 
   // Whether or not bounds will be updated when the preferred content size is
   // changed. The testing code could set this flag to false so that other tests
@@ -192,6 +233,10 @@ class PanelManager : public AutoHidingDesktopBar::Observer {
 
   // True if current active app is in full screen mode.
   bool is_full_screen_;
+
+  // True only while moving panels to overflow. Used to prevent moving panels
+  // out of overflow while in the process of moving panels to overflow.
+  bool is_processing_overflow_;
 
   DISALLOW_COPY_AND_ASSIGN(PanelManager);
 };

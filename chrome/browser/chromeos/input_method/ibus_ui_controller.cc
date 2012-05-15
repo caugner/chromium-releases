@@ -14,7 +14,8 @@
 #include "base/string_util.h"
 #include "third_party/mozc/session/candidates_lite.pb.h"
 
-#if defined(HAVE_IBUS) && defined(USE_AURA)
+#if defined(HAVE_IBUS)
+#include "ash/shell.h"
 #include "chrome/browser/chromeos/input_method/input_method_manager.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "ui/aura/client/aura_constants.h"
@@ -87,16 +88,13 @@ class IBusUiControllerImpl : public IBusUiController {
   IBusUiControllerImpl()
       : ibus_(NULL),
         ibus_panel_service_(NULL) {
-#if defined(USE_AURA)
     ui::InputMethodIBus* input_method = GetChromeInputMethod();
     DCHECK(input_method);
     input_method->set_ibus_client(scoped_ptr<ui::internal::IBusClient>(
         new IBusChromeOSClientImpl(this)).Pass());
-#endif  // USE_AURA
   }
 
   ~IBusUiControllerImpl() {
-#if defined(USE_AURA)
     ui::InputMethodIBus* input_method = GetChromeInputMethod();
     if (input_method) {
       ui::internal::IBusClient* client = input_method->ibus_client();
@@ -104,7 +102,6 @@ class IBusUiControllerImpl : public IBusUiController {
       DCHECK(client);
       static_cast<IBusChromeOSClientImpl*>(client)->set_ui(NULL);
     }
-#endif  // USE_AURA
     // ibus_panel_service_ depends on ibus_, thus unref it first.
     if (ibus_panel_service_) {
       DisconnectPanelServiceSignals();
@@ -278,7 +275,6 @@ class IBusUiControllerImpl : public IBusUiController {
   }
 
  private:
-#if defined(USE_AURA)
   // A class for customizing the behavior of ui::InputMethodIBus for Chrome OS.
   class IBusChromeOSClientImpl : public ui::internal::IBusClientImpl {
    public:
@@ -324,7 +320,7 @@ class IBusUiControllerImpl : public IBusUiController {
    private:
     std::string GetCurrentInputMethodId() {
       InputMethodManager* manager = InputMethodManager::GetInstance();
-      return manager->current_input_method().id();
+      return manager->GetCurrentInputMethod().id();
     }
 
     IBusUiControllerImpl* ui_;
@@ -333,11 +329,10 @@ class IBusUiControllerImpl : public IBusUiController {
   // Returns a ui::InputMethodIBus object which is associated with the root
   // window.
   static ui::InputMethodIBus* GetChromeInputMethod() {
-    return reinterpret_cast<ui::InputMethodIBus*>(
-        aura::RootWindow::GetInstance()->GetProperty(
-            aura::client::kRootWindowInputMethod));
+    return static_cast<ui::InputMethodIBus*>(
+        ash::Shell::GetRootWindow()->GetProperty(
+            aura::client::kRootWindowInputMethodKey));
   }
-#endif  // USE_AURA
 
   // Functions that end with Thunk are used to deal with glib callbacks.
   //
@@ -599,7 +594,6 @@ class IBusUiControllerImpl : public IBusUiController {
       lookup_table.orientation = InputMethodLookupTable::kHorizontal;
     }
 
-#ifdef OS_CHROMEOS
     // The function ibus_serializable_get_attachment had been changed
     // to use GVariant by the commit
     // https://github.com/ibus/ibus/commit/ac9dfac13cef34288440a2ecdf067cd827fb2f8f
@@ -619,7 +613,7 @@ class IBusUiControllerImpl : public IBusUiController {
         g_byte_array_unref(bytearray);
       }
     }
-#endif
+
     // Copy candidates and annotations to |lookup_table|.
     for (int i = 0; ; i++) {
       IBusText *text = ibus_lookup_table_get_candidate(table, i);

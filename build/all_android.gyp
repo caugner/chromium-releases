@@ -21,15 +21,25 @@
       # until the full set supported.  If adding a new test here,
       # please also add it to build/android/run_tests.py, else the
       # test is not run.
+      #
+      # WARNING:
+      # Do not add targets here without communicating the implications
+      # on tryserver triggers and load.  Discuss with jrg please.
       'target_name': 'android_builder_tests',
       'type': 'none',
       'dependencies': [
         '../base/base.gyp:base_unittests',
+        '../chrome/chrome.gyp:sync_unit_tests',
+        '../content/content.gyp:content_unittests',
         '../sql/sql.gyp:sql_unittests',
         '../ipc/ipc.gyp:ipc_tests',
         '../net/net.gyp:net_unittests',
+        '../third_party/WebKit/Source/WebKit/chromium/All.gyp:*',
         # From here down: not added to run_tests.py yet.
         '../jingle/jingle.gyp:jingle_unittests',
+        '../tools/android/fake_dns/fake_dns.gyp:fake_dns',
+        '../tools/android/forwarder/forwarder.gyp:forwarder',
+        '../media/media.gyp:media_unittests',
       ],
     },
     { 
@@ -39,9 +49,6 @@
       'target_name': 'android_experimental',
       'type': 'none',
       'dependencies': [
-        '../webkit/webkit.gyp:pull_in_webkit_unit_tests',
-        '../webkit/webkit.gyp:pull_in_DumpRenderTree',
-        '../chrome/chrome.gyp:unit_tests',
       ],
     },
     {
@@ -51,8 +58,7 @@
       'type': 'none',
       'dependencies': [
         '../content/content.gyp:content_browsertests',
-        '../content/content.gyp:content_unittests',
-        '../chrome/chrome.gyp:sync_unit_tests',
+        '../chrome/chrome.gyp:unit_tests',
         '../ui/ui.gyp:gfx_unittests',
       ],
     },

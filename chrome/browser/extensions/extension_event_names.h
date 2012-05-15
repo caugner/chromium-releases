@@ -38,6 +38,7 @@ extern const char kOnExtensionDisabled[];
 extern const char kOnFileBrowserDiskChanged[];
 extern const char kOnFileChanged[];
 extern const char kOnFileBrowserMountCompleted[];
+extern const char kOnFileTransfersUpdated[];
 
 // InputMethod.
 extern const char kOnInputMethodChanged[];
@@ -52,6 +53,15 @@ extern const char kOnSettingsChanged[];
 
 // TerminalPrivate.
 extern const char kOnTerminalProcessOutput[];
+
+// OffscreenTabs.
+extern const char kOnOffscreenTabUpdated[];
+
+#if defined(OS_CHROMEOS)
+// Bluetooth.
+extern const char kBluetoothOnAvailabilityChanged[];
+extern const char kBluetoothOnPowerChanged[];
+#endif
 
 };  // namespace extension_event_names
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -61,8 +61,7 @@ class TestPresubmit(unittest.TestCase):
             local_path='chrome/common/extensions/docs/static/foo.html')])
     expected_warning = (
         'This change modifies the extension docs but the generated docs '
-        'have not been updated properly. See %s for more info. '
-        '(Report problems to tessamac@chromium.org.)\n'
+        'have not been updated properly. See %s for more info.\n'
         ' - Changes to %s not reflected in generated doc.\n'
         ' - Changes to sample %s have not been re-zipped.\n'
         ' - Docs out of sync with %s changes.\n'
@@ -81,8 +80,7 @@ class TestPresubmit(unittest.TestCase):
         FakeAffectedFile(local_path='chrome/common/extensions/docs/bar.html')])
     expected_warning = (
         'This change modifies the extension docs but the generated docs '
-        'have not been updated properly. See %s for more info. '
-        '(Report problems to tessamac@chromium.org.)\n'
+        'have not been updated properly. See %s for more info.\n'
         ' - Changes to generated doc %s not reflected in non-generated files.\n'
         ' - Changes to generated doc %s not reflected in non-generated files.\n'
         'First build DumpRenderTree, then update the docs by running:\n  %s' %
@@ -384,6 +382,26 @@ class TestPresubmit(unittest.TestCase):
     # Duplicate lines in static file (second arg) must each have a matching
     # line in the generated file.
     self.assertFalse(PRESUBMIT._ChangesMatch(af, af_dups))
+
+  def testChangesMatch_SkipEmptyLinesInStaticFile(self):
+    generated_file = FakeAffectedFile(changed_contents=[(1, 'foo'),
+                                                        (14, 'bar')])
+    static_file = FakeAffectedFile(changed_contents=[(1, 'foo'),
+                                                     (2, ''),
+                                                     (14, 'bar')])
+    self.assertTrue(PRESUBMIT._ChangesMatch(generated_file, static_file))
+
+  def testChangesMatch_SkipExtraTextInGeneratedFile(self):
+    generated_file = FakeAffectedFile(changed_contents=[(1, 'foo'),
+                                                        (14, 'bar'),
+                                                        (15, 'baz')])
+    static_file = FakeAffectedFile(changed_contents=[(1, 'bar')])
+    self.assertTrue(PRESUBMIT._ChangesMatch(generated_file, static_file))
+
+  def testChangesMatch_Multiline(self):
+    generated_file = FakeAffectedFile(changed_contents=[(1, '<pre>{')])
+    static_file = FakeAffectedFile(changed_contents=[(1, 'pre'), (2, '{')])
+    self.assertTrue(PRESUBMIT._ChangesMatch(generated_file, static_file))
 
   def testSampleZipped_ZipInAffectedFiles(self):
     sample_file = FakeAffectedFile(

@@ -34,7 +34,7 @@
 #include "ui/base/animation/slide_animation.h"
 #include "ui/base/events.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/canvas.h"
 #include "ui/gfx/screen.h"
 #include "ui/views/events/event.h"
 #include "ui/views/widget/root_view.h"
@@ -43,15 +43,8 @@
 #if defined(USE_AURA)
 #include "ash/shell.h"
 #include "chrome/browser/ui/views/tabs/tab_drag_controller2.h"
-#endif
-
-#if defined(OS_WIN)
+#elif defined(OS_WIN)
 #include "chrome/browser/ui/views/tabs/tab_drag_controller2.h"
-#endif
-
-#if defined(TOOLKIT_USES_GTK)
-#include <gdk/gdk.h>  // NOLINT
-#include <gdk/gdkkeysyms.h>  // NOLINT
 #endif
 
 using content::OpenURLParams;
@@ -95,7 +88,7 @@ class DockView : public views::View {
     SkPaint paint;
     paint.setColor(SkColorSetRGB(108, 108, 108));
     paint.setStyle(SkPaint::kFill_Style);
-    canvas->GetSkCanvas()->drawRoundRect(
+    canvas->sk_canvas()->drawRoundRect(
         outer_rect, SkIntToScalar(kRoundedRectRadius),
         SkIntToScalar(kRoundedRectRadius), paint);
 
@@ -326,7 +319,8 @@ DefaultTabDragController::DefaultTabDragController()
       started_drag_(false),
       active_(true),
       source_tab_index_(std::numeric_limits<size_t>::max()),
-      initial_move_(true) {
+      initial_move_(true),
+      stacking_(false) {
   instance_ = this;
 }
 
@@ -360,6 +354,7 @@ void DefaultTabDragController::Init(
   source_tab_offset_ = source_tab_offset;
   start_screen_point_ = GetCursorScreenPoint();
   mouse_offset_ = mouse_offset;
+  stacking_ = source_tabstrip->IsStacking();
 
   drag_data_.resize(tabs.size());
   for (size_t i = 0; i < tabs.size(); ++i)
@@ -448,6 +443,18 @@ WebContents* DefaultTabDragController::OpenURLFromTab(
 
 void DefaultTabDragController::NavigationStateChanged(const WebContents* source,
                                                       unsigned changed_flags) {
+  if (attached_tabstrip_) {
+    for (size_t i = 0; i < drag_data_.size(); ++i) {
+      if (drag_data_[i].contents->web_contents() == source) {
+        // Pass the NavigationStateChanged call to the original delegate so
+        // that the title is updated. Do this only when we are attached as
+        // otherwise the Tab isn't in the TabStrip.
+        drag_data_[i].original_delegate->NavigationStateChanged(source,
+                                                                changed_flags);
+        break;
+      }
+    }
+  }
   if (view_.get())
     view_->Update();
 }
@@ -526,16 +533,6 @@ void DefaultTabDragController::DidProcessEvent(const base::NativeEvent& event) {
   // kinds of tab dragging.
   if (ui::EventTypeFromNative(event) == ui::ET_KEY_PRESSED &&
       ui::KeyboardCodeFromNative(event) == ui::VKEY_ESCAPE) {
-    EndDrag(true);
-  }
-}
-#elif defined(TOOLKIT_USES_GTK)
-void DefaultTabDragController::WillProcessEvent(GdkEvent* event) {
-}
-
-void DefaultTabDragController::DidProcessEvent(GdkEvent* event) {
-  if (event->type == GDK_KEY_PRESS &&
-      reinterpret_cast<GdkEventKey*>(event)->keyval == GDK_Escape) {
     EndDrag(true);
   }
 }
@@ -653,7 +650,11 @@ void DefaultTabDragController::ContinueDragging() {
   // Determine whether or not we have dragged over a compatible TabStrip in
   // another browser window. If we have, we should attach to it and start
   // dragging within it.
-  TabStrip* target_tabstrip = GetTabStripForPoint(screen_point);
+  // TODO(scottmg): Determine design for when tabs should actually detach when
+  // in stacking mode.
+  TabStrip* target_tabstrip = stacking_ ?
+      source_tabstrip_ :
+      GetTabStripForPoint(screen_point);
 #else
   TabStrip* target_tabstrip = source_tabstrip_;
 #endif
@@ -703,9 +704,9 @@ void DefaultTabDragController::MoveAttached(const gfx::Point& screen_point) {
   // Update the model, moving the TabContents from one index to another. Do this
   // only if we have moved a minimum distance since the last reorder (to prevent
   // jitter) or if this the first move and the tabs are not consecutive.
-  if (abs(MajorAxisValue(screen_point, attached_tabstrip_) -
+  if (!stacking_ && (abs(MajorAxisValue(screen_point, attached_tabstrip_) -
           last_move_screen_loc_) > threshold ||
-      (initial_move_ && !AreTabsConsecutive())) {
+        (initial_move_ && !AreTabsConsecutive()))) {
     TabStripModel* attached_model = GetModel(attached_tabstrip_);
     gfx::Rect bounds = GetDraggedViewTabStripBounds(dragged_view_point);
     int to_index = GetInsertionIndexForDraggedBounds(bounds);
@@ -1030,6 +1031,11 @@ gfx::Point DefaultTabDragController::GetAttachedDragPoint(
   int x =
       attached_tabstrip_->GetMirroredXInView(tab_loc.x()) - mouse_offset_.x();
   int y = tab_loc.y() - mouse_offset_.y();
+
+  // Don't limit the edge of tab strip when stacking so tabs can be pulled past
+  // the edge to stack.
+  if (stacking_)
+    return gfx::Point(x, 0);
 
   // TODO: consider caching this.
   std::vector<BaseTab*> attached_tabs;
@@ -1425,7 +1431,7 @@ bool DefaultTabDragController::AreTabsConsecutive() {
 #if defined(USE_AURA) || defined(OS_WIN)
 static bool ShouldCreateTabDragController2() {
 #if defined(USE_AURA)
-  return !ash::Shell::GetInstance()->IsWindowModeCompact();
+  return true;
 #else
   return CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kTabBrowserDragging);

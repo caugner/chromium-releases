@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "base/file_util.h"
-#include "base/json/json_value_serializer.h"
+#include "base/json/json_file_value_serializer.h"
 #include "base/memory/scoped_handle.h"
 #include "base/string_number_conversions.h"
 #include "base/stringprintf.h"
@@ -158,7 +158,7 @@ ComponentUnpacker::ComponentUnpacker(const std::vector<uint8>& pk_hash,
   }
   file.Close();
 
-  // File is vaild and the digital signature matches. Now make sure
+  // File is valid and the digital signature matches. Now make sure
   // the public key hash matches the expected hash. If they do we fully
   // trust this CRX.
   uint8 hash[32];
@@ -199,7 +199,7 @@ ComponentUnpacker::ComponentUnpacker(const std::vector<uint8>& pk_hash,
     error_ = kInstallerError;
     return;
   }
-  // Installation succesful. The directory is not our concern now.
+  // Installation successful. The directory is not our concern now.
   unpack_path_.clear();
 }
 

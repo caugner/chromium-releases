@@ -6,13 +6,16 @@
 #define CHROME_BROWSER_RENDERER_HOST_CHROME_RESOURCE_DISPATCHER_HOST_DELEGATE_H_
 #pragma once
 
+#include <vector>
+
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "content/public/browser/resource_dispatcher_host_delegate.h"
 
+class DelayedResourceQueue;
 class DownloadRequestLimiter;
-class ResourceDispatcherHost;
 class SafeBrowsingService;
+class UserScriptListener;
 
 namespace prerender {
 class PrerenderTracker;
@@ -25,10 +28,8 @@ class ChromeResourceDispatcherHostDelegate
  public:
   // This class does not take ownership of the tracker but merely holds a
   // reference to it to avoid accessing g_browser_process.
-  // Both |resource_dispatcher_host| and |prerender_tracker| must outlive
-  // |this|.
-  ChromeResourceDispatcherHostDelegate(
-      ResourceDispatcherHost* resource_dispatcher_host,
+  // |prerender_tracker| must outlive |this|.
+  explicit ChromeResourceDispatcherHostDelegate(
       prerender::PrerenderTracker* prerender_tracker);
   virtual ~ChromeResourceDispatcherHostDelegate();
 
@@ -39,27 +40,24 @@ class ChromeResourceDispatcherHostDelegate
       const std::string& method,
       const GURL& url,
       ResourceType::Type resource_type,
-      const content::ResourceContext& resource_context,
+      content::ResourceContext* resource_context,
       const content::Referrer& referrer) OVERRIDE;
-  virtual ResourceHandler* RequestBeginning(
-      ResourceHandler* handler,
+  virtual void RequestBeginning(
       net::URLRequest* request,
-      const content::ResourceContext& resource_context,
-      bool is_subresource,
+      content::ResourceContext* resource_context,
+      ResourceType::Type resource_type,
       int child_id,
       int route_id,
-      bool is_continuation_of_transferred_request) OVERRIDE;
-  virtual ResourceHandler* DownloadStarting(
-      ResourceHandler* handler,
-      const content::ResourceContext& resource_context,
+      bool is_continuation_of_transferred_request,
+      ScopedVector<content::ResourceThrottle>* throttles) OVERRIDE;
+  virtual void DownloadStarting(
       net::URLRequest* request,
+      content::ResourceContext* resource_context,
       int child_id,
       int route_id,
       int request_id,
-      bool is_new_request) OVERRIDE;
-  virtual bool ShouldDeferStart(
-      net::URLRequest* request,
-      const content::ResourceContext& resource_context) OVERRIDE;
+      bool is_new_request,
+      ScopedVector<content::ResourceThrottle>* throttles) OVERRIDE;
   virtual bool AcceptSSLClientCertificateRequest(
         net::URLRequest* request,
         net::SSLCertRequestInfo* cert_request_info) OVERRIDE;
@@ -81,12 +79,17 @@ class ChromeResourceDispatcherHostDelegate
       content::ResourceResponse* response) OVERRIDE;
 
  private:
-  ResourceHandler* CreateSafeBrowsingResourceHandler(
-      ResourceHandler* handler, int child_id, int route_id, bool subresource);
+  void AppendStandardResourceThrottles(
+      const net::URLRequest* request,
+      content::ResourceContext* resource_context,
+      int child_id,
+      int route_id,
+      ResourceType::Type resource_type,
+      ScopedVector<content::ResourceThrottle>* throttles);
 
-  ResourceDispatcherHost* resource_dispatcher_host_;
   scoped_refptr<DownloadRequestLimiter> download_request_limiter_;
   scoped_refptr<SafeBrowsingService> safe_browsing_;
+  scoped_refptr<UserScriptListener> user_script_listener_;
   prerender::PrerenderTracker* prerender_tracker_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeResourceDispatcherHostDelegate);

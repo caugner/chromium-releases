@@ -1,10 +1,12 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/logging.h"
+#include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
+#include "chrome/browser/search_engines/template_url.h"
 #include "grit/theme_resources.h"
 
 // AutocompleteMatch ----------------------------------------------------------
@@ -46,7 +48,59 @@ AutocompleteMatch::AutocompleteMatch(AutocompleteProvider* provider,
       from_previous(false) {
 }
 
+AutocompleteMatch::AutocompleteMatch(const AutocompleteMatch& match)
+    : provider(match.provider),
+      relevance(match.relevance),
+      deletable(match.deletable),
+      fill_into_edit(match.fill_into_edit),
+      inline_autocomplete_offset(match.inline_autocomplete_offset),
+      destination_url(match.destination_url),
+      stripped_destination_url(match.stripped_destination_url),
+      contents(match.contents),
+      contents_class(match.contents_class),
+      description(match.description),
+      description_class(match.description_class),
+      transition(match.transition),
+      is_history_what_you_typed_match(match.is_history_what_you_typed_match),
+      type(match.type),
+      keyword(match.keyword),
+      template_url(match.template_url),
+      starred(match.starred),
+      from_previous(match.from_previous) {
+  if (match.associated_keyword.get())
+    associated_keyword.reset(new AutocompleteMatch(*match.associated_keyword));
+}
+
 AutocompleteMatch::~AutocompleteMatch() {
+}
+
+AutocompleteMatch& AutocompleteMatch::operator=(
+    const AutocompleteMatch& match) {
+  if (this == &match)
+    return *this;
+
+  provider = match.provider;
+  relevance = match.relevance;
+  deletable = match.deletable;
+  fill_into_edit = match.fill_into_edit;
+  inline_autocomplete_offset = match.inline_autocomplete_offset;
+  destination_url = match.destination_url;
+  stripped_destination_url = match.stripped_destination_url;
+  contents = match.contents;
+  contents_class = match.contents_class;
+  description = match.description;
+  description_class = match.description_class;
+  transition = match.transition;
+  is_history_what_you_typed_match = match.is_history_what_you_typed_match;
+  type = match.type;
+  associated_keyword.reset(match.associated_keyword.get() ?
+      new AutocompleteMatch(*match.associated_keyword) : NULL);
+  keyword = match.keyword;
+  template_url = match.template_url;
+  starred = match.starred;
+  from_previous = match.from_previous;
+
+  return *this;
 }
 
 // static
@@ -95,10 +149,8 @@ bool AutocompleteMatch::MoreRelevant(const AutocompleteMatch& elem1,
   // For equal-relevance matches, we sort alphabetically, so that providers
   // who return multiple elements at the same priority get a "stable" sort
   // across multiple updates.
-  if (elem1.relevance == elem2.relevance)
-    return elem1.contents > elem2.contents;
-
-  return elem1.relevance > elem2.relevance;
+  return (elem1.relevance == elem2.relevance) ?
+      (elem1.contents < elem2.contents) : (elem1.relevance > elem2.relevance);
 }
 
 // static
@@ -107,15 +159,14 @@ bool AutocompleteMatch::DestinationSortFunc(const AutocompleteMatch& elem1,
   // Sort identical destination_urls together.  Place the most relevant matches
   // first, so that when we call std::unique(), these are the ones that get
   // preserved.
-  return (elem1.destination_url != elem2.destination_url) ?
-      (elem1.destination_url < elem2.destination_url) :
-      MoreRelevant(elem1, elem2);
+  return DestinationsEqual(elem1, elem2) ? MoreRelevant(elem1, elem2) :
+      (elem1.stripped_destination_url < elem2.stripped_destination_url);
 }
 
 // static
 bool AutocompleteMatch::DestinationsEqual(const AutocompleteMatch& elem1,
                                           const AutocompleteMatch& elem2) {
-  return elem1.destination_url == elem2.destination_url;
+  return elem1.stripped_destination_url == elem2.stripped_destination_url;
 }
 
 // static
@@ -154,7 +205,7 @@ void AutocompleteMatch::ClassifyLocationInString(
   }
   // Classifying an empty match makes no sense and will lead to validation
   // errors later.
-  DCHECK(match_length > 0);
+  DCHECK_GT(match_length, 0U);
   classification->push_back(ACMatchClassification(match_location,
       (style | ACMatchClassification::MATCH) & ~ACMatchClassification::DIM));
 
@@ -166,6 +217,53 @@ void AutocompleteMatch::ClassifyLocationInString(
 }
 
 // static
+std::string AutocompleteMatch::ClassificationsToString(
+    const ACMatchClassifications& classifications) {
+  std::string serialized_classifications;
+  for (size_t i = 0; i < classifications.size(); ++i) {
+    if (i)
+      serialized_classifications += ',';
+    serialized_classifications += base::IntToString(classifications[i].offset) +
+        ',' + base::IntToString(classifications[i].style);
+  }
+  return serialized_classifications;
+}
+
+// static
+ACMatchClassifications AutocompleteMatch::ClassificationsFromString(
+    const std::string& serialized_classifications) {
+  ACMatchClassifications classifications;
+  std::vector<std::string> tokens;
+  Tokenize(serialized_classifications, ",", &tokens);
+  DCHECK(!(tokens.size() & 1));  // The number of tokens should be even.
+  for (size_t i = 0; i < tokens.size(); i += 2) {
+    int classification_offset = 0;
+    int classification_style = ACMatchClassification::NONE;
+    if (!base::StringToInt(tokens[i], &classification_offset) ||
+        !base::StringToInt(tokens[i + 1], &classification_style)) {
+      NOTREACHED();
+      return classifications;
+    }
+    classifications.push_back(ACMatchClassification(classification_offset,
+                                                    classification_style));
+  }
+  return classifications;
+}
+
+// static
+void AutocompleteMatch::AddLastClassificationIfNecessary(
+    ACMatchClassifications* classifications,
+    size_t offset,
+    int style) {
+  DCHECK(classifications);
+  if (classifications->empty() || classifications->back().style != style) {
+    DCHECK(classifications->empty() ||
+           (offset > classifications->back().offset));
+    classifications->push_back(ACMatchClassification(offset, style));
+  }
+}
+
+// static
 string16 AutocompleteMatch::SanitizeString(const string16& text) {
   // NOTE: This logic is mirrored by |sanitizeString()| in
   // schema_generated_bindings.js.
@@ -173,6 +271,38 @@ string16 AutocompleteMatch::SanitizeString(const string16& text) {
   TrimWhitespace(text, TRIM_LEADING, &result);
   RemoveChars(result, kInvalidChars, &result);
   return result;
+}
+
+void AutocompleteMatch::ComputeStrippedDestinationURL() {
+  static const char prefix[] = "www.";
+  static const size_t prefix_len = arraysize(prefix) - 1;
+
+  std::string host = destination_url.host();
+  if (destination_url.is_valid() && host.compare(0, prefix_len, prefix) == 0) {
+    host = host.substr(prefix_len);
+    GURL::Replacements replace_host;
+    replace_host.SetHostStr(host);
+    stripped_destination_url = destination_url.ReplaceComponents(replace_host);
+  } else {
+    stripped_destination_url = destination_url;
+  }
+}
+
+void AutocompleteMatch::GetKeywordUIState(string16* keyword,
+                                          bool* is_keyword_hint) const {
+  *is_keyword_hint = associated_keyword.get() != NULL;
+  keyword->assign(*is_keyword_hint ? associated_keyword->keyword :
+      GetSubstitutingExplicitlyInvokedKeyword());
+}
+
+string16 AutocompleteMatch::GetSubstitutingExplicitlyInvokedKeyword() const {
+  return ((transition == content::PAGE_TRANSITION_KEYWORD) &&
+      TemplateURL::SupportsReplacement(GetTemplateURL())) ?
+      keyword : string16();
+}
+
+const TemplateURL* AutocompleteMatch::GetTemplateURL() const {
+  return template_url;
 }
 
 #ifndef NDEBUG
@@ -190,8 +320,9 @@ void AutocompleteMatch::ValidateClassifications(
   }
 
   // The classifications should always cover the whole string.
-  DCHECK(!classifications.empty()) << "No classification for text";
-  DCHECK(classifications[0].offset == 0) << "Classification misses beginning";
+  DCHECK(!classifications.empty()) << "No classification for \"" << text << '"';
+  DCHECK_EQ(0U, classifications[0].offset)
+      << "Classification misses beginning for \"" << text << '"';
   if (classifications.size() == 1)
     return;
 
@@ -199,8 +330,10 @@ void AutocompleteMatch::ValidateClassifications(
   size_t last_offset = classifications[0].offset;
   for (ACMatchClassifications::const_iterator i(classifications.begin() + 1);
        i != classifications.end(); ++i) {
-    DCHECK(i->offset > last_offset) << "Classification unsorted";
-    DCHECK(i->offset < text.length()) << "Classification out of bounds";
+    DCHECK_GT(i->offset, last_offset)
+        << "Classification unsorted for \"" << text << '"';
+    DCHECK_LT(i->offset, text.length())
+        << "Classification out of bounds for \"" << text << '"';
     last_offset = i->offset;
   }
 }

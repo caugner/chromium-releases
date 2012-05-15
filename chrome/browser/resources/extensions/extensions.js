@@ -30,7 +30,7 @@ cr.define('extensions', function() {
      * Perform initial setup.
      */
     initialize: function() {
-      cr.enablePlatformSpecificCSSRules();
+      uber.onContentFrameLoaded();
 
       // Set the title.
       var title = localStrings.getString('extensionSettings');
@@ -40,16 +40,10 @@ cr.define('extensions', function() {
       // back in returnExtensionsData.
       chrome.send('extensionSettingsRequestExtensionsData');
 
-      // Set up the developer mode button.
-      var toggleDevMode = $('toggle-dev-on');
-      toggleDevMode.addEventListener('click',
+      $('toggle-dev-on').addEventListener('change',
           this.handleToggleDevMode_.bind(this));
-
-      // Setup the gallery related links and text.
-      $('suggest-gallery').innerHTML =
-          localStrings.getString('extensionSettingsSuggestGallery');
-      $('get-more-extensions').innerHTML =
-          localStrings.getString('extensionSettingsGetMoreExtensions');
+      $('dev-controls').addEventListener('webkitTransitionEnd',
+          this.handleDevControlsTransitionEnd_.bind(this));
 
       // Set up the three dev mode buttons (load unpacked, pack and update).
       $('load-unpacked').addEventListener('click',
@@ -62,7 +56,6 @@ cr.define('extensions', function() {
       this.pageHeader_ = $('page-header');
 
       document.addEventListener('scroll', this.handleScroll_.bind(this));
-      window.addEventListener('message', this.handleWindowMessage_.bind(this));
 
       var packExtensionOverlay = extensions.PackExtensionOverlay.getInstance();
       packExtensionOverlay.initializePage();
@@ -73,32 +66,15 @@ cr.define('extensions', function() {
     },
 
     /**
-     * Utility function which asks the C++ to show a platform-specific file
-     * select dialog, and fire |callback| with the |filePath| that resulted.
-     * |selectType| can be either 'file' or 'folder'. |operation| can be 'load',
-     * 'packRoot', or 'pem' which are signals to the C++ to do some
-     * operation-specific configuration.
-     * @private
-     */
-    showFileDialog_: function(selectType, operation, callback) {
-      handleFilePathSelected = function(filePath) {
-        callback(filePath);
-        handleFilePathSelected = function() {};
-      };
-
-      chrome.send('extensionSettingsSelectFilePath', [selectType, operation]);
-    },
-
-    /**
      * Handles the Load Unpacked Extension button.
      * @param {Event} e Change event.
      * @private
      */
     handleLoadUnpackedExtension_: function(e) {
-      this.showFileDialog_('folder', 'pem', function(filePath) {
-        chrome.send('extensionSettingsLoad', [String(filePath)]);
-      });
+      chrome.send('extensionSettingsLoadUnpackedExtension');
 
+      // TODO(jhawkins): Refactor metrics support out of options and use it
+      // in extensions.html.
       chrome.send('coreOptionsUserMetricsAction',
                   ['Options_LoadUnpackedExtension']);
     },
@@ -119,7 +95,7 @@ cr.define('extensions', function() {
      * @private
      */
     handleUpdateExtensionNow_: function(e) {
-      chrome.send('extensionSettingsAutoupdate', []);
+      chrome.send('extensionSettingsAutoupdate');
     },
 
     /**
@@ -128,32 +104,28 @@ cr.define('extensions', function() {
      * @private
      */
     handleToggleDevMode_: function(e) {
-      var dev = $('dev');
-      if (!dev.classList.contains('dev-open')) {
-        // Make the Dev section visible.
-        dev.classList.add('dev-open');
-        dev.classList.remove('dev-closed');
-
-        $('load-unpacked').classList.add('dev-button-visible');
-        $('load-unpacked').classList.remove('dev-button-hidden');
-        $('pack-extension').classList.add('dev-button-visible');
-        $('pack-extension').classList.remove('dev-button-hidden');
-        $('update-extensions-now').classList.add('dev-button-visible');
-        $('update-extensions-now').classList.remove('dev-button-hidden');
+      if ($('toggle-dev-on').checked) {
+        $('dev-controls').hidden = false;
+        window.setTimeout(function() {
+          $('extension-settings').classList.add('dev-mode');
+        }, 0);
       } else {
-        // Hide the Dev section.
-        dev.classList.add('dev-closed');
-        dev.classList.remove('dev-open');
-
-        $('load-unpacked').classList.add('dev-button-hidden');
-        $('load-unpacked').classList.remove('dev-button-visible');
-        $('pack-extension').classList.add('dev-button-hidden');
-        $('pack-extension').classList.remove('dev-button-visible');
-        $('update-extensions-now').classList.add('dev-button-hidden');
-        $('update-extensions-now').classList.remove('dev-button-visible');
+        $('extension-settings').classList.remove('dev-mode');
       }
 
-      chrome.send('extensionSettingsToggleDeveloperMode', []);
+      chrome.send('extensionSettingsToggleDeveloperMode');
+    },
+
+    /**
+     * Called when a transition has ended for #dev-controls.
+     * @param {Event} e webkitTransitionEnd event.
+     * @private
+     */
+    handleDevControlsTransitionEnd_: function(e) {
+      if (e.propertyName == 'height' &&
+          !$('extension-settings').classList.contains('dev-mode')) {
+        $('dev-controls').hidden = true;
+      }
     },
 
     /**
@@ -166,26 +138,6 @@ cr.define('extensions', function() {
       this.pageHeader_.style.webkitTransform = 'translateX(' + offset + 'px)';
       uber.invokeMethodOnParent('adjustToScroll', document.body.scrollLeft);
     },
-
-    /**
-     * Handles postMessage from chrome://chrome.
-     * @param {Event} e The post data.
-     */
-    handleWindowMessage_: function(e) {
-      if (e.data.method === 'frameSelected')
-        this.handleFrameSelected_();
-      else
-        console.error('Received unexpected message', e.data);
-    },
-
-    /**
-     * This is called when a user selects this frame via the navigation bar
-     * frame (and is triggered via postMessage() from the uber page).
-     * @private
-     */
-    handleFrameSelected_: function() {
-      document.body.scrollLeft = 0;
-    },
   };
 
   /**
@@ -193,11 +145,16 @@ cr.define('extensions', function() {
    * the current state of installed extensions.
    */
   ExtensionSettings.returnExtensionsData = function(extensionsData) {
-    webui_responded_ = true;
+    // We can get called many times in short order, thus we need to
+    // be careful to remove the 'finished loading' timeout.
+    if (this.loadingTimeout_)
+      window.clearTimeout(this.loadingTimeout_);
+    document.documentElement.classList.add('loading');
+    this.loadingTimeout_ = window.setTimeout(function() {
+      document.documentElement.classList.remove('loading');
+    }, 0);
 
-    $('no-extensions').hidden = true;
-    $('suggest-gallery').hidden = true;
-    $('get-more-extensions-container').hidden = true;
+    webui_responded_ = true;
 
     if (extensionsData.extensions.length > 0) {
       // Enforce order specified in the data or (if equal) then sort by
@@ -211,15 +168,18 @@ cr.define('extensions', function() {
           return a.order < b.order ? -1 : 1;
         }
       });
+    }
 
-      $('get-more-extensions-container').hidden = false;
+    if (extensionsData.developerMode) {
+      $('toggle-dev-on').checked = true;
+      $('extension-settings').classList.add('dev-mode');
+      $('dev-controls').hidden = false;
     } else {
-      $('no-extensions').hidden = false;
-      $('suggest-gallery').hidden = false;
+      $('toggle-dev-on').checked = false;
+      $('extension-settings').classList.remove('dev-mode');
     }
 
     ExtensionsList.prototype.data_ = extensionsData;
-
     var extensionList = $('extension-settings-list');
     ExtensionsList.decorate(extensionList);
   }
@@ -261,6 +221,8 @@ cr.define('extensions', function() {
     if (node)
       node.classList.add('showing');
     overlay.hidden = !node;
+    uber.invokeMethodOnParent(node ? 'beginInterceptingEvents' :
+                                     'stopInterceptingEvents');
   }
 
   // Export

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -75,9 +75,10 @@
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/shared_memory.h"
-#include "base/threading/simple_thread.h"
 #include "content/common/content_export.h"
+#include "content/renderer/media/audio_device_thread.h"
 #include "content/renderer/media/audio_input_message_filter.h"
+#include "content/renderer/media/scoped_loop_observer.h"
 #include "media/audio/audio_parameters.h"
 
 // TODO(henrika): This class is based on the AudioDevice class and it has
@@ -87,7 +88,7 @@
 // to any clients using this class.
 class CONTENT_EXPORT AudioInputDevice
     : public AudioInputMessageFilter::Delegate,
-      public base::DelegateSimpleThread::Delegate,
+      NON_EXPORTED_BASE(public ScopedLoopObserver),
       public base::RefCountedThreadSafe<AudioInputDevice> {
  public:
   class CONTENT_EXPORT CaptureCallback {
@@ -95,6 +96,7 @@ class CONTENT_EXPORT AudioInputDevice
     virtual void Capture(const std::vector<float*>& audio_data,
                          size_t number_of_frames,
                          size_t audio_delay_milliseconds) = 0;
+    virtual void OnCaptureError() = 0;
    protected:
     virtual ~CaptureCallback() {}
   };
@@ -114,10 +116,7 @@ class CONTENT_EXPORT AudioInputDevice
   };
 
   // Methods called on main render thread -------------------------------------
-  AudioInputDevice(size_t buffer_size,
-                   int channels,
-                   double sample_rate,
-                   CaptureCallback* callback,
+  AudioInputDevice(const AudioParameters& params, CaptureCallback* callback,
                    CaptureEventHandler* event_handler);
   virtual ~AudioInputDevice();
 
@@ -142,14 +141,19 @@ class CONTENT_EXPORT AudioInputDevice
   // Returns |true| on success.
   bool GetVolume(double* volume);
 
-  double sample_rate() const { return audio_parameters_.sample_rate; }
-  size_t buffer_size() const { return audio_parameters_.samples_per_packet; }
+  double sample_rate() const {
+    return audio_parameters_.sample_rate();
+  }
+
+  size_t buffer_size() const {
+    return audio_parameters_.frames_per_buffer();
+  }
 
   // Methods called on IO thread ----------------------------------------------
   // AudioInputMessageFilter::Delegate impl., called by AudioInputMessageFilter
-  virtual void OnLowLatencyCreated(base::SharedMemoryHandle handle,
-                                   base::SyncSocket::Handle socket_handle,
-                                   uint32 length) OVERRIDE;
+  virtual void OnStreamCreated(base::SharedMemoryHandle handle,
+                               base::SyncSocket::Handle socket_handle,
+                               uint32 length) OVERRIDE;
   virtual void OnVolume(double volume) OVERRIDE;
   virtual void OnStateChanged(AudioStreamState state) OVERRIDE;
   virtual void OnDeviceReady(const std::string& device_id) OVERRIDE;
@@ -162,17 +166,14 @@ class CONTENT_EXPORT AudioInputDevice
   void InitializeOnIOThread();
   void SetSessionIdOnIOThread(int session_id);
   void StartOnIOThread();
-  void ShutDownOnIOThread(base::WaitableEvent* completion);
+  void ShutDownOnIOThread();
   void SetVolumeOnIOThread(double volume);
 
   void Send(IPC::Message* message);
 
-  // Method called on the audio thread ----------------------------------------
-  // Calls the client's callback for capturing audio.
-  void FireCaptureCallback(int16* input_audio);
-
-  // DelegateSimpleThread::Delegate implementation.
-  virtual void Run() OVERRIDE;
+  // MessageLoop::DestructionObserver implementation for the IO loop.
+  // If the IO loop dies before we do, we shut down the audio thread from here.
+  virtual void WillDestroyCurrentMessageLoop() OVERRIDE;
 
   // Format
   AudioParameters audio_parameters_;
@@ -180,19 +181,8 @@ class CONTENT_EXPORT AudioInputDevice
   CaptureCallback* callback_;
   CaptureEventHandler* event_handler_;
 
-  // The client callback receives captured audio here.
-  std::vector<float*> audio_data_;
-
-  // The client stores the last reported audio delay in this member.
-  // The delay shall reflect the amount of audio which still resides in
-  // the input buffer, i.e., the expected audio input delay.
-  int audio_delay_milliseconds_;
-
   // The current volume scaling [0.0, 1.0] of the audio stream.
   double volume_;
-
-  // Callbacks for capturing audio occur on this thread.
-  scoped_ptr<base::DelegateSimpleThread> audio_thread_;
 
   // Cached audio input message filter (lives on the main render thread).
   scoped_refptr<AudioInputMessageFilter> filter_;
@@ -208,9 +198,14 @@ class CONTENT_EXPORT AudioInputDevice
   // callback. Only modified on the IO thread.
   bool pending_device_ready_;
 
-  base::SharedMemoryHandle shared_memory_handle_;
-  base::SyncSocket::Handle socket_handle_;
-  int memory_length_;
+  // Our audio thread callback class.  See source file for details.
+  class AudioThreadCallback;
+
+  // In order to avoid a race between OnStreamCreated and Stop(), we use this
+  // guard to control stopping and starting the audio thread.
+  base::Lock audio_thread_lock_;
+  AudioDeviceThread audio_thread_;
+  scoped_ptr<AudioInputDevice::AudioThreadCallback> audio_callback_;
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(AudioInputDevice);
 };

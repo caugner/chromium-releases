@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,12 +9,14 @@
 #include <set>
 
 #include "base/time.h"
+#include "ui/base/animation/tween.h"
 #include "ui/gfx/compositor/compositor_export.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/transform.h"
 
 namespace ui {
 
+class InterpolatedTransform;
 class LayerAnimationDelegate;
 class Transform;
 
@@ -26,7 +28,8 @@ class COMPOSITOR_EXPORT LayerAnimationElement {
   enum AnimatableProperty {
     TRANSFORM = 0,
     BOUNDS,
-    OPACITY
+    OPACITY,
+    VISIBILITY
   };
 
   struct COMPOSITOR_EXPORT TargetValue {
@@ -37,6 +40,7 @@ class COMPOSITOR_EXPORT LayerAnimationElement {
     gfx::Rect bounds;
     Transform transform;
     float opacity;
+    bool visibility;
   };
 
   typedef std::set<AnimatableProperty> AnimatableProperties;
@@ -51,6 +55,17 @@ class COMPOSITOR_EXPORT LayerAnimationElement {
       const Transform& transform,
       base::TimeDelta duration);
 
+  // Creates an element that transitions to another in a way determined by an
+  // interpolated transform. The element accepts ownership of the interpolated
+  // transform. NB: at every step, the interpolated transform clobbers the
+  // existing transform. That is, it does not interpolate between the existing
+  // transform and the last value the interpolated transform will assume. It is
+  // therefore important that the value of the interpolated at time 0 matches
+  // the current transform.
+  static LayerAnimationElement* CreateInterpolatedTransformElement(
+      InterpolatedTransform* interpolated_transform,
+      base::TimeDelta duration);
+
   // Creates an element that transitions to the given bounds. The caller owns
   // the return value.
   static LayerAnimationElement* CreateBoundsElement(
@@ -63,6 +78,12 @@ class COMPOSITOR_EXPORT LayerAnimationElement {
       float opacity,
       base::TimeDelta duration);
 
+  // Creates an element that sets visibily following a delay. The caller owns
+  // the return value.
+  static LayerAnimationElement* CreateVisibilityElement(
+      bool visibility,
+      base::TimeDelta duration);
+
   // Creates an element that pauses the given properties. The caller owns the
   // return value.
   static LayerAnimationElement* CreatePauseElement(
@@ -72,8 +93,8 @@ class COMPOSITOR_EXPORT LayerAnimationElement {
   // Updates the delegate to the appropriate value for |t|, which is in the
   // range [0, 1] (0 for initial, and 1 for final). If the animation is not
   // aborted, it is guaranteed that Progress will eventually be called with
-  // t = 1.0.
-  void Progress(double t, LayerAnimationDelegate* delegate);
+  // t = 1.0. Returns true if a redraw is required.
+  bool Progress(double t, LayerAnimationDelegate* delegate);
 
   // Called if the animation is not allowed to complete. This may be called
   // before OnStarted or Progress.
@@ -88,11 +109,14 @@ class COMPOSITOR_EXPORT LayerAnimationElement {
   // The duration of the animation
   base::TimeDelta duration() const { return duration_; }
 
+  Tween::Type tween_type() const { return tween_type_; }
+  void set_tween_type(Tween::Type tween_type) { tween_type_ = tween_type;}
+
  protected:
   // Called once each time the animation element is run before any call to
   // OnProgress.
   virtual void OnStart(LayerAnimationDelegate* delegate) = 0;
-  virtual void OnProgress(double t, LayerAnimationDelegate* delegate) = 0;
+  virtual bool OnProgress(double t, LayerAnimationDelegate* delegate) = 0;
   virtual void OnGetTarget(TargetValue* target) const = 0;
   virtual void OnAbort() = 0;
 
@@ -100,6 +124,7 @@ class COMPOSITOR_EXPORT LayerAnimationElement {
   bool first_frame_;
   const AnimatableProperties properties_;
   const base::TimeDelta duration_;
+  Tween::Type tween_type_;
 
   DISALLOW_COPY_AND_ASSIGN(LayerAnimationElement);
 };

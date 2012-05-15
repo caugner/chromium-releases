@@ -103,9 +103,16 @@ class PpbAudioConfigRpcServer {
       NaClSrpcClosure* done,
       PP_Resource resource,
       int32_t* out_bool);
+  static void PPB_AudioConfig_RecommendSampleFrameCount_1_0(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      int32_t request_sample_rate,
+      int32_t request_sample_frame_count,
+      int32_t* out_sample_frame_count);
   static void PPB_AudioConfig_RecommendSampleFrameCount(
       NaClSrpcRpc* rpc,
       NaClSrpcClosure* done,
+      PP_Instance instance,
       int32_t request_sample_rate,
       int32_t request_sample_frame_count,
       int32_t* out_sample_frame_count);
@@ -119,6 +126,11 @@ class PpbAudioConfigRpcServer {
       NaClSrpcClosure* done,
       PP_Resource resource,
       int32_t* sample_frame_count);
+  static void PPB_AudioConfig_RecommendSampleRate(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      PP_Instance instance,
+      int32_t* sample_rate);
 
  private:
   PpbAudioConfigRpcServer();
@@ -489,7 +501,7 @@ class PpbFullscreenRpcServer {
 
 class PpbGamepadRpcServer {
  public:
-  static void PPB_Gamepad_SampleGamepads(
+  static void PPB_Gamepad_Sample(
       NaClSrpcRpc* rpc,
       NaClSrpcClosure* done,
       PP_Instance instance,
@@ -658,6 +670,51 @@ class PpbGraphics3DRpcServer {
   PpbGraphics3DRpcServer(const PpbGraphics3DRpcServer&);
   void operator=(const PpbGraphics3DRpcServer);
 };  // class PpbGraphics3DRpcServer
+
+class PpbHostResolverPrivateRpcServer {
+ public:
+  static void PPB_HostResolver_Private_Create(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      PP_Instance instance,
+      PP_Resource* resource);
+  static void PPB_HostResolver_Private_IsHostResolver(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      PP_Resource resource,
+      int32_t* is_host_resolver);
+  static void PPB_HostResolver_Private_Resolve(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      PP_Resource host_resolver,
+      const char* host,
+      int32_t port,
+      nacl_abi_size_t hint_bytes, char* hint,
+      int32_t callback_id,
+      int32_t* pp_error);
+  static void PPB_HostResolver_Private_GetCanonicalName(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      PP_Resource host_resolver,
+      nacl_abi_size_t* canonical_name_bytes, char* canonical_name);
+  static void PPB_HostResolver_Private_GetSize(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      PP_Resource host_resolver,
+      int32_t* size);
+  static void PPB_HostResolver_Private_GetNetAddress(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      PP_Resource host_resolver,
+      int32_t index,
+      nacl_abi_size_t* addr_bytes, char* addr,
+      int32_t* success);
+
+ private:
+  PpbHostResolverPrivateRpcServer();
+  PpbHostResolverPrivateRpcServer(const PpbHostResolverPrivateRpcServer&);
+  void operator=(const PpbHostResolverPrivateRpcServer);
+};  // class PpbHostResolverPrivateRpcServer
 
 class PpbImageDataRpcServer {
  public:
@@ -841,6 +898,40 @@ class PpbNetAddressPrivateRpcServer {
       NaClSrpcClosure* done,
       int32_t is_ipv6,
       nacl_abi_size_t* addr_bytes, char* addr);
+  static void PPB_NetAddress_Private_GetFamily(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      nacl_abi_size_t addr_bytes, char* addr,
+      int32_t* addr_family);
+  static void PPB_NetAddress_Private_GetPort(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      nacl_abi_size_t addr_bytes, char* addr,
+      int32_t* port);
+  static void PPB_NetAddress_Private_GetAddress(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      nacl_abi_size_t addr_bytes, char* addr,
+      nacl_abi_size_t* address_bytes, char* address,
+      int32_t* success);
+  static void PPB_NetAddress_Private_GetScopeID(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      nacl_abi_size_t addr_bytes, char* addr,
+      int32_t* scope_id);
+  static void PPB_NetAddress_Private_CreateFromIPv4Address(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      nacl_abi_size_t ip_bytes, char* ip,
+      int32_t port,
+      nacl_abi_size_t* addr_bytes, char* addr);
+  static void PPB_NetAddress_Private_CreateFromIPv6Address(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      nacl_abi_size_t ip_bytes, char* ip,
+      int32_t scope_id,
+      int32_t port,
+      nacl_abi_size_t* addr_bytes, char* addr);
 
  private:
   PpbNetAddressPrivateRpcServer();
@@ -979,6 +1070,44 @@ class PpbScrollbarRpcServer {
   void operator=(const PpbScrollbarRpcServer);
 };  // class PpbScrollbarRpcServer
 
+class PpbTCPServerSocketPrivateRpcServer {
+ public:
+  static void PPB_TCPServerSocket_Private_Create(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      PP_Instance instance,
+      PP_Resource* resource);
+  static void PPB_TCPServerSocket_Private_IsTCPServerSocket(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      PP_Resource resource,
+      int32_t* is_tcp_server_socket);
+  static void PPB_TCPServerSocket_Private_Listen(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      PP_Resource tcp_server_socket,
+      nacl_abi_size_t addr_bytes, char* addr,
+      int32_t backlog,
+      int32_t callback_id,
+      int32_t* pp_error);
+  static void PPB_TCPServerSocket_Private_Accept(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      PP_Resource tcp_server_socket,
+      int32_t callback_id,
+      PP_Resource* tcp_socket,
+      int32_t* pp_error);
+  static void PPB_TCPServerSocket_Private_StopListening(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      PP_Resource tcp_server_socket);
+
+ private:
+  PpbTCPServerSocketPrivateRpcServer();
+  PpbTCPServerSocketPrivateRpcServer(const PpbTCPServerSocketPrivateRpcServer&);
+  void operator=(const PpbTCPServerSocketPrivateRpcServer);
+};  // class PpbTCPServerSocketPrivateRpcServer
+
 class PpbTCPSocketPrivateRpcServer {
  public:
   static void PPB_TCPSocket_Private_Create(
@@ -1112,6 +1241,12 @@ class PpbUDPSocketPrivateRpcServer {
       nacl_abi_size_t addr_bytes, char* addr,
       int32_t callback_id,
       int32_t* pp_error);
+  static void PPB_UDPSocket_Private_GetBoundAddress(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      PP_Resource udp_socket,
+      nacl_abi_size_t* addr_bytes, char* addr,
+      int32_t* success);
   static void PPB_UDPSocket_Private_RecvFrom(
       NaClSrpcRpc* rpc,
       NaClSrpcClosure* done,

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,8 +13,8 @@
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/sync/glue/data_type_manager_impl.h"
 #include "chrome/browser/sync/profile_sync_service.h"
-#include "chrome/browser/sync/test/engine/test_id_factory.h"
 #include "chrome/test/base/profile_mock.h"
+#include "sync/test/engine/test_id_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 class Profile;
@@ -36,7 +36,8 @@ class SyncBackendHostForProfileSyncTest : public SyncBackendHost {
       const base::WeakPtr<SyncPrefs>& sync_prefs,
       bool set_initial_sync_ended_on_init,
       bool synchronous_init,
-      bool fail_initial_download);
+      bool fail_initial_download,
+      bool use_real_database);
   virtual ~SyncBackendHostForProfileSyncTest();
 
   MOCK_METHOD1(RequestNudge, void(const tracked_objects::Location&));
@@ -47,8 +48,6 @@ class SyncBackendHostForProfileSyncTest : public SyncBackendHost {
 
   virtual void StartConfiguration(const base::Closure& callback) OVERRIDE;
 
-  static void SetDefaultExpectationsForWorkerCreation(ProfileMock* profile);
-
   static void SetHistoryServiceExpectations(ProfileMock* profile);
 
  protected:
@@ -57,6 +56,7 @@ class SyncBackendHostForProfileSyncTest : public SyncBackendHost {
  private:
   bool synchronous_init_;
   bool fail_initial_download_;
+  bool use_real_database_;
 };
 
 }  // namespace browser_sync
@@ -92,6 +92,7 @@ class TestProfileSyncService : public ProfileSyncService {
   void set_synchronous_sync_configuration();
 
   void fail_initial_download();
+  void set_use_real_database();
 
   browser_sync::TestIdFactory* id_factory();
 
@@ -118,6 +119,7 @@ class TestProfileSyncService : public ProfileSyncService {
   bool set_initial_sync_ended_on_init_;
 
   bool fail_initial_download_;
+  bool use_real_database_;
 };
 
 

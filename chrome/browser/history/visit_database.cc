@@ -12,6 +12,7 @@
 #include "base/logging.h"
 #include "base/string_number_conversions.h"
 #include "chrome/browser/history/url_database.h"
+#include "chrome/browser/history/visit_filter.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/common/page_transition_types.h"
 #include "sql/statement.h"
@@ -106,6 +107,9 @@ void VisitDatabase::FillVisitRow(sql::Statement& statement, VisitRow* visit) {
 // static
 bool VisitDatabase::FillVisitVector(sql::Statement& statement,
                                     VisitVector* visits) {
+  if (!statement.is_valid())
+    return false;
+
   while (statement.Step()) {
     history::VisitRow visit;
     FillVisitRow(statement, &visit);
@@ -327,6 +331,29 @@ void VisitDatabase::GetVisibleVisitsInRange(base::Time begin_time,
 
     if (max_count > 0 && static_cast<int>(visits->size()) >= max_count)
       break;
+  }
+}
+
+void VisitDatabase::GetVisibleVisitsDuringTimes(const VisitFilter& time_filter,
+                                                int max_results,
+                                                VisitVector* visits) {
+  visits->clear();
+  if (max_results)
+    visits->reserve(max_results);
+  for (VisitFilter::TimeVector::const_iterator it = time_filter.times().begin();
+       it != time_filter.times().end(); ++it) {
+    VisitVector v;
+    GetVisibleVisitsInRange(it->first, it->second, max_results, &v);
+    size_t take_only = 0;
+    if (max_results &&
+        static_cast<int>(visits->size() + v.size()) > max_results) {
+      take_only = max_results - visits->size();
+    }
+
+    visits->insert(visits->end(),
+                   v.begin(), take_only ? v.begin() + take_only : v.end());
+    if (max_results && static_cast<int>(visits->size()) == max_results)
+      return;
   }
 }
 

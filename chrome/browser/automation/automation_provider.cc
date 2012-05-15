@@ -12,7 +12,7 @@
 #include "base/debug/trace_event.h"
 #include "base/file_path.h"
 #include "base/json/json_reader.h"
-#include "base/json/json_value_serializer.h"
+#include "base/json/json_string_value_serializer.h"
 #include "base/json/json_writer.h"
 #include "base/json/string_escape.h"
 #include "base/message_loop.h"
@@ -34,14 +34,12 @@
 #include "chrome/browser/automation/automation_resource_message_filter.h"
 #include "chrome/browser/automation/automation_tab_tracker.h"
 #include "chrome/browser/automation/automation_window_tracker.h"
-#include "chrome/browser/automation/ui_controls.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_storage.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browsing_data_remover.h"
 #include "chrome/browser/character_encoding.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
-#include "chrome/browser/dom_operation_notification_details.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_browser_event_router.h"
 #include "chrome/browser/extensions/extension_host.h"
@@ -78,10 +76,10 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/ssl/ssl_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_item.h"
+#include "content/public/browser/render_view_host.h"
+#include "content/public/browser/trace_controller.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 #include "net/proxy/proxy_config_service_fixed.h"
@@ -103,6 +101,8 @@ using base::Time;
 using content::BrowserThread;
 using content::DownloadItem;
 using content::NavigationController;
+using content::RenderViewHost;
+using content::TraceController;
 using content::WebContents;
 
 namespace {
@@ -171,6 +171,7 @@ AutomationProvider::AutomationProvider(Profile* profile)
       reinitialize_on_channel_error_(
           CommandLine::ForCurrentProcess()->HasSwitch(
               switches::kAutomationReinitializeOnChannelError)),
+      use_initial_load_observers_(true),
       is_connected_(false),
       initial_tab_loads_complete_(false),
       network_library_initialized_(true),
@@ -227,20 +228,22 @@ bool AutomationProvider::InitializeChannel(const std::string& channel_id) {
   channel_->AddFilter(automation_resource_message_filter_);
 
 #if defined(OS_CHROMEOS)
-  // Wait for webui login to be ready.
-  // Observer will delete itself.
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kLoginManager) &&
-      !chromeos::UserManager::Get()->user_is_logged_in()) {
-    login_webui_ready_ = false;
-    new LoginWebuiReadyObserver(this);
-  }
+  if (use_initial_load_observers_) {
+    // Wait for webui login to be ready.
+    // Observer will delete itself.
+    if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kLoginManager) &&
+        !chromeos::UserManager::Get()->IsUserLoggedIn()) {
+      login_webui_ready_ = false;
+      new LoginWebuiReadyObserver(this);
+    }
 
-  // Wait for the network manager to initialize.
-  // The observer will delete itself when done.
-  network_library_initialized_ = false;
-  NetworkManagerInitObserver* observer = new NetworkManagerInitObserver(this);
-  if (!observer->Init())
-    delete observer;
+    // Wait for the network manager to initialize.
+    // The observer will delete itself when done.
+    network_library_initialized_ = false;
+    NetworkManagerInitObserver* observer = new NetworkManagerInitObserver(this);
+    if (!observer->Init())
+      delete observer;
+  }
 #endif
 
   TRACE_EVENT_END_ETW("AutomationProvider::InitializeChannel", 0, "");
@@ -262,6 +265,7 @@ std::string AutomationProvider::GetProtocolVersion() {
 }
 
 void AutomationProvider::SetExpectedTabCount(size_t expected_tabs) {
+  VLOG(2) << "SetExpectedTabCount:" << expected_tabs;
   if (expected_tabs == 0)
     OnInitialTabLoadsComplete();
   else
@@ -271,23 +275,34 @@ void AutomationProvider::SetExpectedTabCount(size_t expected_tabs) {
 void AutomationProvider::OnInitialTabLoadsComplete() {
   initial_tab_loads_complete_ = true;
   VLOG(2) << "OnInitialTabLoadsComplete";
-  if (is_connected_ && network_library_initialized_ && login_webui_ready_)
-    Send(new AutomationMsg_InitialLoadsComplete());
+  SendInitialLoadMessage();
 }
 
 void AutomationProvider::OnNetworkLibraryInit() {
   network_library_initialized_ = true;
   VLOG(2) << "OnNetworkLibraryInit";
-  if (is_connected_ && initial_tab_loads_complete_ && login_webui_ready_)
-    Send(new AutomationMsg_InitialLoadsComplete());
+  SendInitialLoadMessage();
 }
 
 void AutomationProvider::OnLoginWebuiReady() {
   login_webui_ready_ = true;
   VLOG(2) << "OnLoginWebuiReady";
+  SendInitialLoadMessage();
+}
+
+void AutomationProvider::SendInitialLoadMessage() {
   if (is_connected_ && initial_tab_loads_complete_ &&
-      network_library_initialized_)
+      network_library_initialized_ && login_webui_ready_) {
+    VLOG(2) << "Initial loads complete; sending initial loads message.";
     Send(new AutomationMsg_InitialLoadsComplete());
+  }
+}
+
+void AutomationProvider::DisableInitialLoadObservers() {
+  use_initial_load_observers_ = false;
+  OnInitialTabLoadsComplete();
+  OnNetworkLibraryInit();
+  OnLoginWebuiReady();
 }
 
 void AutomationProvider::AddLoginHandler(NavigationController* tab,
@@ -376,13 +391,12 @@ const Extension* AutomationProvider::GetDisabledExtension(
 
 void AutomationProvider::OnChannelConnected(int pid) {
   is_connected_ = true;
-  LOG(INFO) << "Testing channel connected, sending hello message";
 
   // Send a hello message with our current automation protocol version.
+  VLOG(2) << "Testing channel connected, sending hello message";
   channel_->Send(new AutomationMsg_Hello(GetProtocolVersion()));
-  if (initial_tab_loads_complete_ && network_library_initialized_ &&
-      login_webui_ready_)
-    Send(new AutomationMsg_InitialLoadsComplete());
+
+  SendInitialLoadMessage();
 }
 
 void AutomationProvider::OnEndTracingComplete() {
@@ -395,8 +409,8 @@ void AutomationProvider::OnEndTracingComplete() {
 }
 
 void AutomationProvider::OnTraceDataCollected(
-    const std::string& trace_fragment) {
-  tracing_data_.trace_output.push_back(trace_fragment);
+    const scoped_refptr<base::RefCountedString>& trace_fragment) {
+  tracing_data_.trace_output.push_back(trace_fragment->data());
 }
 
 bool AutomationProvider::OnMessageReceived(const IPC::Message& message) {
@@ -754,7 +768,7 @@ void AutomationProvider::JavaScriptStressTestControl(int tab_handle,
   }
 
   view->Send(new ChromeViewMsg_JavaScriptStressTestControl(
-      view->routing_id(), cmd, param));
+      view->GetRoutingID(), cmd, param));
 }
 
 void AutomationProvider::BeginTracing(const std::string& categories,

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,8 +13,8 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/spellcheck_messages.h"
-#include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/renderer_host/render_widget_host_view.h"
+#include "content/public/browser/render_view_host.h"
+#include "content/public/browser/render_widget_host_view.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/simple_menu_model.h"
@@ -34,7 +34,8 @@ SpellCheckerSubMenuObserver::SpellCheckerSubMenuObserver(
 SpellCheckerSubMenuObserver::~SpellCheckerSubMenuObserver() {
 }
 
-void SpellCheckerSubMenuObserver::InitMenu(const ContextMenuParams& params) {
+void SpellCheckerSubMenuObserver::InitMenu(
+    const content::ContextMenuParams& params) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   check_spelling_while_typing_ = params.spellcheck_enabled;
@@ -116,15 +117,15 @@ bool SpellCheckerSubMenuObserver::IsCommandIdEnabled(int command_id) {
 void SpellCheckerSubMenuObserver::ExecuteCommand(int command_id) {
   DCHECK(IsCommandIdSupported(command_id));
 
-  RenderViewHost* rvh = proxy_->GetRenderViewHost();
+  content::RenderViewHost* rvh = proxy_->GetRenderViewHost();
   switch (command_id) {
     case IDC_CHECK_SPELLING_OF_THIS_FIELD:
-      rvh->Send(new SpellCheckMsg_ToggleSpellCheck(rvh->routing_id()));
+      rvh->Send(new SpellCheckMsg_ToggleSpellCheck(rvh->GetRoutingID()));
       break;
 
     case IDC_SPELLPANEL_TOGGLE:
       rvh->Send(new SpellCheckMsg_ToggleSpellPanel(
-          rvh->routing_id(), spellcheck_mac::SpellingPanelVisible()));
+          rvh->GetRoutingID(), spellcheck_mac::SpellingPanelVisible()));
       break;
   }
 }

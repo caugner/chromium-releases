@@ -15,6 +15,7 @@
 #include "net/base/completion_callback.h"
 #include "net/base/load_states.h"
 #include "net/base/net_export.h"
+#include "net/http/http_server_properties.h"
 #include "net/socket/ssl_client_socket.h"
 
 class GURL;
@@ -229,12 +230,26 @@ class NET_EXPORT HttpStreamFactory {
   // Check if a HostPortPair is excluded from using spdy.
   static bool HasSpdyExclusion(const HostPortPair& endpoint);
 
-  // Sets the next protocol negotiation value used during the SSL handshake.
-  static void set_next_protos(const std::vector<std::string>& value) {
-    if (!next_protos_)
-      next_protos_ = new std::vector<std::string>;
-    *next_protos_ = value;
-  }
+  // Sets http/1.1 and spdy/2 (the default spdy protocol) as the protocols
+  // supported.
+  static void EnableNpnSpdy();
+
+  // Sets http/1.1 as the protocols supported.
+  static void EnableNpnHttpOnly();
+
+  // Sets http/1.1, spdy/2 and spdy/2.1 as the protocols supported.
+  // If flow-control is enabled, received WINDOW_UPDATE and SETTINGS messages
+  // are processed and outstanding window size is actually obeyed when sending
+  // data frames, and WINDOW_UPDATE messages are generated when data is
+  // consumed.
+  static void EnableFlowControl();
+
+  // Sets http/1.1, spdy/2, spdy/2.1 and spdy/3 as the protocols supported.
+  static void EnableNpnSpdy3();
+
+  // Sets the protocols supported by NPN (next protocol negotiation) during the
+  // SSL handshake as well as by HTTP Alternate-Protocol.
+  static void SetNextProtos(const std::vector<std::string>& value);
   static bool has_next_protos() { return next_protos_ != NULL; }
   static const std::vector<std::string>& next_protos() {
     return *next_protos_;
@@ -274,6 +289,7 @@ class NET_EXPORT HttpStreamFactory {
 
   static const HostMappingRules* host_mapping_rules_;
   static std::vector<std::string>* next_protos_;
+  static bool enabled_protocols_[NUM_ALTERNATE_PROTOCOLS];
   static bool spdy_enabled_;
   static bool use_alternate_protocols_;
   static bool force_spdy_over_ssl_;

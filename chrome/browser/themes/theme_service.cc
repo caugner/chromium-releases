@@ -29,6 +29,7 @@ using content::BrowserThread;
 using content::UserMetricsAction;
 
 // Strings used in alignment properties.
+const char* ThemeService::kAlignmentCenter = "center";
 const char* ThemeService::kAlignmentTop = "top";
 const char* ThemeService::kAlignmentBottom = "bottom";
 const char* ThemeService::kAlignmentLeft = "left";
@@ -80,6 +81,11 @@ const SkColor kDefaultColorFrameIncognitoInactive =
 const SkColor kDefaultColorToolbar = SkColorSetRGB(230, 230, 230);
 #else
 const SkColor kDefaultColorToolbar = SkColorSetRGB(223, 223, 223);
+#endif
+#if defined(USE_AURA)
+const SkColor kDefaultColorToolbarSeparator = SkColorSetRGB(128, 128, 128);
+#else
+const SkColor kDefaultColorToolbarSeparator = SkColorSetRGB(182, 186, 192);
 #endif
 const SkColor kDefaultColorTabText = SK_ColorBLACK;
 #if defined(OS_MACOSX)
@@ -376,8 +382,8 @@ std::string ThemeService::GetThemeID() const {
 // static
 std::string ThemeService::AlignmentToString(int alignment) {
   // Convert from an AlignmentProperty back into a string.
-  std::string vertical_string;
-  std::string horizontal_string;
+  std::string vertical_string(kAlignmentCenter);
+  std::string horizontal_string(kAlignmentCenter);
 
   if (alignment & ThemeService::ALIGN_TOP)
     vertical_string = kAlignmentTop;
@@ -389,11 +395,7 @@ std::string ThemeService::AlignmentToString(int alignment) {
   else if (alignment & ThemeService::ALIGN_RIGHT)
     horizontal_string = kAlignmentRight;
 
-  if (vertical_string.empty())
-    return horizontal_string;
-  if (horizontal_string.empty())
-    return vertical_string;
-  return vertical_string + " " + horizontal_string;
+  return horizontal_string + " " + vertical_string;
 }
 
 // static
@@ -476,6 +478,8 @@ SkColor ThemeService::GetDefaultColor(int id) {
       return kDefaultColorFrameIncognitoInactive;
     case COLOR_TOOLBAR:
       return kDefaultColorToolbar;
+    case COLOR_TOOLBAR_SEPARATOR:
+      return kDefaultColorToolbarSeparator;
     case COLOR_TAB_TEXT:
       return kDefaultColorTabText;
     case COLOR_BACKGROUND_TAB_TEXT:

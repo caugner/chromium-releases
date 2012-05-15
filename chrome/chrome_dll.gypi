@@ -100,6 +100,7 @@
                 '<(SHARED_INTERMEDIATE_DIR)/chrome/renderer_resources.rc',
                 '<(SHARED_INTERMEDIATE_DIR)/chrome/theme_resources.rc',
                 '<(SHARED_INTERMEDIATE_DIR)/chrome/theme_resources_standard.rc',
+                '<(SHARED_INTERMEDIATE_DIR)/content/content_resources.rc',
                 '<(SHARED_INTERMEDIATE_DIR)/net/net_resources.rc',
                 '<(SHARED_INTERMEDIATE_DIR)/ui/gfx/gfx_resources.rc',
                 '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources/ui_resources.rc',
@@ -193,7 +194,7 @@
                 # LD_DYLIB_INSTALL_NAME affect -install_name.
                 'DYLIB_INSTALL_NAME_BASE':
                     '@executable_path/../Versions/<(version_full)',
-                # See tools/build/mac/copy_framework_unversioned for
+                # See /build/mac/copy_framework_unversioned.sh for
                 # information on LD_DYLIB_INSTALL_NAME.
                 'LD_DYLIB_INSTALL_NAME':
                     '$(DYLIB_INSTALL_NAME_BASE:standardizepath)/$(WRAPPER_NAME)/$(PRODUCT_NAME)',
@@ -241,6 +242,7 @@
                 'app/nibs/BookmarkEditor.xib',
                 'app/nibs/BookmarkNameFolder.xib',
                 'app/nibs/BrowserWindow.xib',
+                'app/nibs/ChromeToMobileBubble.xib',
                 'app/nibs/CollectedCookies.xib',
                 'app/nibs/CookieDetailsView.xib',
                 'app/nibs/ContentBlockedCookies.xib',
@@ -252,10 +254,12 @@
                 'app/nibs/DownloadItem.xib',
                 'app/nibs/DownloadShelf.xib',
                 'app/nibs/EditSearchEngine.xib',
-                'app/nibs/ExtensionInstalledBubble.xib',
                 'app/nibs/ExtensionInstallPrompt.xib',
+                'app/nibs/ExtensionInstallPromptBundle.xib',
                 'app/nibs/ExtensionInstallPromptInline.xib',
                 'app/nibs/ExtensionInstallPromptNoWarnings.xib',
+                'app/nibs/ExtensionInstalledBubble.xib',
+                'app/nibs/ExtensionInstalledBubbleBundle.xib',
                 'app/nibs/FindBar.xib',
                 'app/nibs/FirstRunBubble.xib',
                 'app/nibs/FirstRunDialog.xib',
@@ -269,11 +273,12 @@
                 'app/nibs/InstantOptIn.xib',
                 'app/nibs/MainMenu.xib',
                 'app/nibs/Notification.xib',
+                'app/nibs/OneClickSigninDialog.xib',
                 'app/nibs/Panel.xib',
                 'app/nibs/PreviewableContents.xib',
                 'app/nibs/SaveAccessoryView.xib',
                 'app/nibs/SadTab.xib',
-                'app/nibs/SpeechInputBubble.xib',
+                'app/nibs/SpeechRecognitionBubble.xib',
                 'app/nibs/TabView.xib',
                 'app/nibs/TaskManager.xib',
                 'app/nibs/Toolbar.xib',
@@ -309,13 +314,17 @@
                 'app/framework-Info.plist',
               ],
               'dependencies': [
+                'app_mode_app',
                 # Bring in pdfsqueeze and run it on all pdfs
                 '../build/temp_gyp/pdfsqueeze.gyp:pdfsqueeze',
                 '../crypto/crypto.gyp:crypto',
                 # On Mac, Flash gets put into the framework, so we need this
                 # dependency here. flash_player.gyp will copy the Flash bundle
                 # into PRODUCT_DIR.
+                # TODO(viettrungluu): Once enabled for Mac, Flapper binaries
+                # will also need to be put into the bundle.
                 '../third_party/adobe/flash/flash_player.gyp:flash_player',
+                '../third_party/adobe/flash/flash_player.gyp:flapper_binaries',
                 'chrome_resources.gyp:packed_extra_resources',
                 'chrome_resources.gyp:packed_resources',
               ],
@@ -346,7 +355,7 @@
               },
               'actions': [
                 {
-                  'includes': ['chrome_repack_theme_resources_large.gypi']
+                  'includes': ['chrome_repack_theme_resources_2x.gypi']
                 },
               ],
               'postbuilds': [
@@ -376,10 +385,9 @@
                   'action': ['<(tweak_info_plist_path)',
                              '--breakpad=<(mac_breakpad_compiled_in)',
                              '--breakpad_uploads=<(mac_breakpad_uploads)',
-                             '-k0',
-                             '-s1',
-                             '<(branding)',
-                             '<(mac_bundle_id)'],
+                             '--keystone=0',
+                             '--svn=1',
+                             '--branding=<(branding)'],
                 },
                 {
                   'postbuild_name': 'Symlink Libraries',
@@ -440,7 +448,10 @@
                 },
                 {
                   'destination': '<(PRODUCT_DIR)/$(CONTENTS_FOLDER_PATH)/resources',
-                  'files': [],
+                  'files': [
+                    # Loader bundle for platform apps.
+                    '<(PRODUCT_DIR)/app_mode_loader.app',
+                  ],
                   'conditions': [
                     ['debug_devtools!=0', {
                       'files': [
@@ -504,7 +515,7 @@
                     {
                       'postbuild_name': 'Copy KeystoneRegistration.framework',
                       'action': [
-                        'tools/build/mac/copy_framework_unversioned',
+                        '../build/mac/copy_framework_unversioned.sh',
                         '../third_party/googlemac/Releases/Keystone/KeystoneRegistration.framework',
                         '${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Frameworks',
                       ],

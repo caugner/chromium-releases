@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,13 +10,13 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/icon_messages.h"
-#include "content/browser/renderer_host/render_view_host.h"
 #include "content/public/browser/favicon_status.h"
 #include "content/public/browser/invalidate_type.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_ui.h"
@@ -140,9 +140,9 @@ NavigationEntry* FaviconTabHelper::GetActiveEntry() {
 }
 
 void FaviconTabHelper::StartDownload(int id, const GURL& url, int image_size) {
-  RenderViewHost* host = web_contents()->GetRenderViewHost();
+  content::RenderViewHost* host = web_contents()->GetRenderViewHost();
   host->Send(new IconMsg_DownloadFavicon(
-                 host->routing_id(), id, url, image_size));
+                 host->GetRoutingID(), id, url, image_size));
 }
 
 void FaviconTabHelper::NotifyFaviconUpdated() {
@@ -173,7 +173,7 @@ void FaviconTabHelper::DidNavigateMainFrame(
 }
 
 bool FaviconTabHelper::OnMessageReceived(const IPC::Message& message) {
-  bool message_handled = true;
+  bool message_handled = false;   // Allow other handlers to receive these.
   IPC_BEGIN_MESSAGE_MAP(FaviconTabHelper, message)
     IPC_MESSAGE_HANDLER(IconHostMsg_DidDownloadFavicon, OnDidDownloadFavicon)
     IPC_MESSAGE_HANDLER(IconHostMsg_UpdateFaviconURL, OnUpdateFaviconURL)

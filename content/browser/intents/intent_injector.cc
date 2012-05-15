@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/string16.h"
-#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/common/intents_messages.h"
 #include "content/public/browser/web_intents_dispatcher.h"
@@ -16,6 +16,7 @@
 #include "webkit/glue/web_intent_data.h"
 #include "webkit/glue/web_intent_reply_data.h"
 
+using content::RenderViewHost;
 using content::WebContents;
 
 IntentInjector::IntentInjector(WebContents* web_contents)
@@ -56,14 +57,14 @@ void IntentInjector::OnSendReturnMessage(
 
 void IntentInjector::RenderViewCreated(RenderViewHost* render_view_host) {
   if (source_intent_.get() == NULL ||
-      !CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableWebIntents) ||
+      CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableWebIntents) ||
       web_contents()->GetRenderViewHost() == NULL) {
     return;
   }
 
   render_view_host->Send(new IntentsMsg_SetWebIntentData(
-      render_view_host->routing_id(), *(source_intent_.get())));
+      render_view_host->GetRoutingID(), *(source_intent_.get())));
 }
 
 bool IntentInjector::OnMessageReceived(const IPC::Message& message) {
@@ -77,7 +78,7 @@ bool IntentInjector::OnMessageReceived(const IPC::Message& message) {
 
 void IntentInjector::OnReply(webkit_glue::WebIntentReplyType reply_type,
                              const string16& data) {
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableWebIntents))
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kDisableWebIntents))
     NOTREACHED();
 
   if (intents_dispatcher_) {

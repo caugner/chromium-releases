@@ -26,6 +26,10 @@ class VisitedLinkSlave;
 
 struct ChromeViewHostMsg_GetPluginInfo_Status;
 
+namespace prerender {
+class PrerenderDispatcher;
+}
+
 namespace safe_browsing {
 class PhishingClassifierFilter;
 }
@@ -75,7 +79,6 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
   virtual bool AllowPopup(const GURL& creator) OVERRIDE;
   virtual bool ShouldFork(WebKit::WebFrame* frame,
                           const GURL& url,
-                          bool is_content_initiated,
                           bool is_initial_navigation,
                           bool* send_referrer) OVERRIDE;
   virtual bool WillSendRequest(WebKit::WebFrame* frame,
@@ -84,6 +87,7 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
   virtual bool ShouldPumpEventsDuringCookieMessage() OVERRIDE;
   virtual void DidCreateScriptContext(WebKit::WebFrame* frame,
                                       v8::Handle<v8::Context> context,
+                                      int extension_group,
                                       int world_id) OVERRIDE;
   virtual void WillReleaseScriptContext(WebKit::WebFrame* frame,
                                         v8::Handle<v8::Context> context,
@@ -133,20 +137,24 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
       const std::string& actual_mime_type);
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(ChromeContentRendererClientTest, NaClRestriction);
+
   // Returns true if the frame is navigating to an URL either into or out of an
   // extension app's extent.
   bool CrossesExtensionExtents(WebKit::WebFrame* frame,
                                const GURL& new_url,
+                               const ExtensionSet& extensions,
+                               bool is_extension_url,
                                bool is_initial_navigation);
 
-  // Returns true if the NaCl plugin can be created. If it returns true, as a
-  // side effect, it may add special attributes to params.
-  bool IsNaClAllowed(const webkit::WebPluginInfo& plugin,
-                     const GURL& url,
-                     const std::string& actual_mime_type,
-                     bool is_nacl_mime_type,
-                     bool enable_nacl,
-                     WebKit::WebPluginParams& params);
+  static GURL GetNaClContentHandlerURL(const std::string& actual_mime_type,
+                                       const webkit::WebPluginInfo& plugin);
+  static bool IsNaClAllowed(const GURL& manifest_url,
+                            const GURL& top_url,
+                            bool is_nacl_unrestricted,
+                            bool is_extension_unrestricted,
+                            bool is_extension_from_webstore,
+                            WebKit::WebPluginParams* params);
 
   scoped_ptr<ChromeRenderProcessObserver> chrome_observer_;
   scoped_ptr<ExtensionDispatcher> extension_dispatcher_;
@@ -155,6 +163,7 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
   scoped_ptr<SpellCheck> spellcheck_;
   scoped_ptr<VisitedLinkSlave> visited_link_slave_;
   scoped_ptr<safe_browsing::PhishingClassifierFilter> phishing_classifier_;
+  scoped_ptr<prerender::PrerenderDispatcher> prerender_dispatcher_;
 };
 
 }  // namespace chrome

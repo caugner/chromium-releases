@@ -5,13 +5,13 @@
 #include "chrome/browser/ui/views/avatar_menu_button.h"
 
 #include "chrome/browser/profiles/avatar_menu_model.h"
-#include "chrome/browser/profiles/profile_metrics.h"
 #include "chrome/browser/profiles/profile_info_util.h"
+#include "chrome/browser/profiles/profile_metrics.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/views/avatar_menu_bubble_view.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/window.h"
-#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/canvas.h"
 #include "ui/views/widget/widget.h"
 
 
@@ -103,8 +103,8 @@ void AvatarMenuButton::OnPaint(gfx::Canvas* canvas) {
 
   if (old_height_ != height() || button_icon_.isNull()) {
     old_height_ = height();
-    button_icon_ = profiles::GetAvatarIconForTitleBar(
-        *icon_, is_gaia_picture_, width(), height());
+    button_icon_ = *profiles::GetAvatarIconForTitleBar(
+        *icon_, is_gaia_picture_, width(), height()).ToSkBitmap();
   }
 
   // Scale the image to fit the width of the button.
@@ -142,8 +142,9 @@ void AvatarMenuButton::SetAvatarIcon(const gfx::Image& icon,
   SchedulePaint();
 }
 
-// views::ViewMenuDelegate implementation
-void AvatarMenuButton::RunMenu(views::View* source, const gfx::Point& pt) {
+// views::MenuButtonListener implementation
+void AvatarMenuButton::OnMenuButtonClicked(views::View* source,
+                                           const gfx::Point& point) {
   ShowAvatarBubble();
 }
 

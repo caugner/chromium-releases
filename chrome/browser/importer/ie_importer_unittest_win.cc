@@ -106,7 +106,9 @@ bool CreateOrderBlob(const FilePath& favorites_folder,
     ITEMIDLIST* id_list_full = ILCreateFromPath(
         favorites_folder.Append(path).Append(entries[i]).value().c_str());
     ITEMIDLIST* id_list = ILFindLastID(id_list_full);
-    size_t id_list_size = id_list->mkid.cb + sizeof(id_list->mkid);
+    // Include the trailing zero-length item id.  Don't include the single
+    // element array.
+    size_t id_list_size = id_list->mkid.cb + sizeof(id_list->mkid.cb);
 
     blob.resize(blob.size() + 8);
     uint32 total_size = id_list_size + 8;
@@ -133,7 +135,7 @@ bool CreateOrderBlob(const FilePath& favorites_folder,
   return true;
 }
 
-bool CreateUrlFile(const string16& file, const string16& url) {
+bool CreateUrlFile(const FilePath& file, const string16& url) {
   base::win::ScopedComPtr<IUniformResourceLocator> locator;
   HRESULT result = locator.CreateInstance(CLSID_InternetShortcut, NULL,
                                           CLSCTX_INPROC_SERVER);
@@ -146,7 +148,7 @@ bool CreateUrlFile(const string16& file, const string16& url) {
   result = locator->SetURL(url.c_str(), 0);
   if (FAILED(result))
     return false;
-  result = persist_file->Save(file.c_str(), TRUE);
+  result = persist_file->Save(file.value().c_str(), TRUE);
   if (FAILED(result))
     return false;
   return true;
@@ -232,7 +234,7 @@ class TestObserver : public ProfileWriter,
     ++password_count_;
   }
 
-  virtual void AddHistoryPage(const std::vector<history::URLRow>& page,
+  virtual void AddHistoryPage(const history::URLRows& page,
                               history::VisitSource visit_source) {
     // Importer should read the specified URL.
     for (size_t i = 0; i < page.size(); ++i) {
@@ -292,7 +294,7 @@ class MalformedFavoritesRegistryTestObserver
   virtual bool TemplateURLServiceIsLoaded() const { return true; }
 
   virtual void AddPasswordForm(const webkit::forms::PasswordForm& form) {}
-  virtual void AddHistoryPage(const std::vector<history::URLRow>& page,
+  virtual void AddHistoryPage(const history::URLRows& page,
                               history::VisitSource visit_source) {}
   virtual void AddKeyword(std::vector<TemplateURL*> template_url,
                           int default_keyword_index) {}
@@ -351,30 +353,34 @@ class IEImporterTest : public ImporterTest {
 TEST_F(IEImporterTest, IEImporter) {
   // Sets up a favorites folder.
   base::win::ScopedCOMInitializer com_init;
-  string16 path = temp_dir_.path().AppendASCII("Favorites").value();
-  CreateDirectory(path.c_str(), NULL);
-  CreateDirectory((path + L"\\SubFolder").c_str(), NULL);
-  CreateDirectory((path + L"\\Links").c_str(), NULL);
-  CreateDirectory((path + L"\\Links\\SubFolderOfLinks").c_str(), NULL);
-  CreateDirectory((path + L"\\\x0061").c_str(), NULL);
-  ASSERT_TRUE(CreateUrlFile(path + L"\\Google Home Page.url",
+  FilePath path = temp_dir_.path().AppendASCII("Favorites");
+  CreateDirectory(path.value().c_str(), NULL);
+  CreateDirectory(path.AppendASCII("SubFolder").value().c_str(), NULL);
+  FilePath links_path = path.AppendASCII("Links");
+  CreateDirectory(links_path.value().c_str(), NULL);
+  CreateDirectory(links_path.AppendASCII("SubFolderOfLinks").value().c_str(),
+                  NULL);
+  CreateDirectory(path.AppendASCII("\x0061").value().c_str(), NULL);
+  ASSERT_TRUE(CreateUrlFile(path.AppendASCII("Google Home Page.url"),
                             L"http://www.google.com/"));
-  ASSERT_TRUE(CreateUrlFile(path + L"\\SubFolder\\Title.url",
+  ASSERT_TRUE(CreateUrlFile(path.AppendASCII("SubFolder\\Title.url"),
                             L"http://www.link.com/"));
-  ASSERT_TRUE(CreateUrlFile(path + L"\\SubFolder.url",
+  ASSERT_TRUE(CreateUrlFile(path.AppendASCII("SubFolder.url"),
                             L"http://www.subfolder.com/"));
-  ASSERT_TRUE(CreateUrlFile(path + L"\\TheLink.url",
+  ASSERT_TRUE(CreateUrlFile(path.AppendASCII("TheLink.url"),
                             L"http://www.links-thelink.com/"));
-  ASSERT_TRUE(CreateUrlFile(path + L"\\WithPortAndQuery.url",
+  ASSERT_TRUE(CreateUrlFile(path.AppendASCII("WithPortAndQuery.url"),
                             L"http://host:8080/cgi?q=query"));
-  ASSERT_TRUE(CreateUrlFile(path + L"\\\x0061\\\x4E2D\x6587.url",
-                            L"http://chinese-title-favorite/"));
-  ASSERT_TRUE(CreateUrlFile(path + L"\\Links\\TheLink.url",
+  ASSERT_TRUE(CreateUrlFile(
+      path.AppendASCII("\x0061").Append(L"\x4E2D\x6587.url"),
+      L"http://chinese-title-favorite/"));
+  ASSERT_TRUE(CreateUrlFile(links_path.AppendASCII("TheLink.url"),
                             L"http://www.links-thelink.com/"));
-  ASSERT_TRUE(CreateUrlFile(path + L"\\Links\\SubFolderOfLinks\\SubLink.url",
-                            L"http://www.links-sublink.com/"));
-  file_util::WriteFile(path + L"\\InvalidUrlFile.url", "x", 1);
-  file_util::WriteFile(path + L"\\PlainTextFile.txt", "x", 1);
+  ASSERT_TRUE(CreateUrlFile(
+      links_path.AppendASCII("SubFolderOfLinks").AppendASCII("SubLink.url"),
+      L"http://www.links-sublink.com/"));
+  file_util::WriteFile(path.AppendASCII("InvalidUrlFile.url"), "x", 1);
+  file_util::WriteFile(path.AppendASCII("PlainTextFile.txt"), "x", 1);
 
   const char16* root_links[] = {
     L"Links",
@@ -430,16 +436,16 @@ TEST_F(IEImporterTest, IEImporter) {
 TEST_F(IEImporterTest, IEImporterMalformedFavoritesRegistry) {
   // Sets up a favorites folder.
   base::win::ScopedCOMInitializer com_init;
-  string16 path = temp_dir_.path().AppendASCII("Favorites").value();
-  CreateDirectory(path.c_str(), NULL);
-  CreateDirectory((path + L"\\b").c_str(), NULL);
-  ASSERT_TRUE(CreateUrlFile(path + L"\\a.url",
+  FilePath path = temp_dir_.path().AppendASCII("Favorites");
+  CreateDirectory(path.value().c_str(), NULL);
+  CreateDirectory(path.AppendASCII("b").value().c_str(), NULL);
+  ASSERT_TRUE(CreateUrlFile(path.AppendASCII("a.url"),
                             L"http://www.google.com/0"));
-  ASSERT_TRUE(CreateUrlFile(path + L"\\b\\a.url",
+  ASSERT_TRUE(CreateUrlFile(path.AppendASCII("b").AppendASCII("a.url"),
                             L"http://www.google.com/1"));
-  ASSERT_TRUE(CreateUrlFile(path + L"\\b\\b.url",
+  ASSERT_TRUE(CreateUrlFile(path.AppendASCII("b").AppendASCII("b.url"),
                             L"http://www.google.com/2"));
-  ASSERT_TRUE(CreateUrlFile(path + L"\\c.url",
+  ASSERT_TRUE(CreateUrlFile(path.AppendASCII("c.url"),
                             L"http://www.google.com/3"));
 
   struct BadBinaryData {

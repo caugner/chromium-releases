@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,9 @@
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
 #include "content/browser/ssl/ssl_policy_backend.h"
+#include "content/browser/ssl/ssl_error_handler.h"
 #include "content/common/content_export.h"
+#include "content/public/browser/global_request_id.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "googleurl/src/gurl.h"
@@ -20,19 +22,17 @@
 
 class LoadFromMemoryCacheDetails;
 class NavigationControllerImpl;
-class ResourceDispatcherHost;
-class ResourceRedirectDetails;
-class ResourceRequestDetails;
 class SSLPolicy;
 
 namespace content {
 class NavigationEntryImpl;
+struct ResourceRedirectDetails;
+struct ResourceRequestDetails;
 }
 
 namespace net {
 class SSLInfo;
-class URLRequest;
-}  // namespace net
+}
 
 // The SSLManager SSLManager controls the SSL UI elements in a TabContents.  It
 // listens for various events that influence when these elements should or
@@ -46,12 +46,16 @@ class SSLManager : public content::NotificationObserver {
  public:
   // Entry point for SSLCertificateErrors.  This function begins the process
   // of resolving a certificate error during an SSL connection.  SSLManager
-  // will adjust the security UI and either call |Cancel| or
-  // |ContinueDespiteLastError| on the net::URLRequest.
+  // will adjust the security UI and either call |CancelSSLRequest| or
+  // |ContinueSSLRequest| of |delegate| with |id| as the first argument.
   //
   // Called on the IO thread.
-  static void OnSSLCertificateError(ResourceDispatcherHost* resource_dispatcher,
-                                    net::URLRequest* request,
+  static void OnSSLCertificateError(SSLErrorHandler::Delegate* delegate,
+                                    const content::GlobalRequestID& id,
+                                    ResourceType::Type resource_type,
+                                    const GURL& url,
+                                    int render_process_id,
+                                    int render_view_id,
                                     const net::SSLInfo& ssl_info,
                                     bool fatal);
 
@@ -59,18 +63,6 @@ class SSLManager : public content::NotificationObserver {
   // SSL_INTERNAL_STATE_CHANGED notification.
   static void NotifySSLInternalStateChanged(
       NavigationControllerImpl* controller);
-
-  // Convenience methods for serializing/deserializing the security info.
-  static std::string SerializeSecurityInfo(int cert_id,
-                                           net::CertStatus cert_status,
-                                           int security_bits,
-                                           int connection_status);
-  CONTENT_EXPORT static bool DeserializeSecurityInfo(
-      const std::string& state,
-      int* cert_id,
-      net::CertStatus* cert_status,
-      int* security_bits,
-      int* connection_status);
 
   // Construct an SSLManager for the specified tab.
   // If |delegate| is NULL, SSLPolicy::GetDefaultPolicy() is used.
@@ -92,9 +84,6 @@ class SSLManager : public content::NotificationObserver {
   // Insecure content entry point.
   void DidRunInsecureContent(const std::string& security_origin);
 
-  // Called to determine if there were any processed SSL errors from request.
-  CONTENT_EXPORT bool ProcessedSSLErrorFromRequest() const;
-
   // Entry point for navigation.  This function begins the process of updating
   // the security UI when the main frame navigates to a new URL.
   //
@@ -109,8 +98,8 @@ class SSLManager : public content::NotificationObserver {
   // the type we need is in NavigationController which would create a circular
   // header file dependency.
   void DidLoadFromMemoryCache(LoadFromMemoryCacheDetails* details);
-  void DidStartResourceResponse(ResourceRequestDetails* details);
-  void DidReceiveResourceRedirect(ResourceRedirectDetails* details);
+  void DidStartResourceResponse(content::ResourceRequestDetails* details);
+  void DidReceiveResourceRedirect(content::ResourceRedirectDetails* details);
   void DidChangeSSLInternalState();
 
   // Update the NavigationEntry with our current state.

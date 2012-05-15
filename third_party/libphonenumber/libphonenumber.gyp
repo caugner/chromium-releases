@@ -1,4 +1,4 @@
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -42,9 +42,8 @@
       #'src/phonenumbers/metadata.cc',
       'src/phonenumbers/logger.cc',
       'src/phonenumbers/phonenumber.cc',
-      # The following two files should be added on 'as needed' basis.
-      #'src/phonenumbers/phonenumbermatch.cc',
-      #'src/phonenumbers/phonenumbermatcher.cc',
+      'src/phonenumbers/phonenumbermatch.cc',
+      'src/phonenumbers/phonenumbermatcher.cc',
       'src/phonenumbers/phonenumberutil.cc',
       'src/phonenumbers/regexp_adapter_icu.cc',
       'src/phonenumbers/regexp_cache.cc',
@@ -78,12 +77,10 @@
     'target_name': 'libphonenumber_unittests',
     'type': 'executable',
     'sources': [
-      '../../base/test/run_all_unittests.cc',
       'src/phonenumbers/test_metadata.cc',
       'src/test/phonenumbers/asyoutypeformatter_test.cc',
-      # The following two files should be added on 'as needed' basis.
-      #'src/test/phonenumbers/phonenumbermatch_test.cc',
-      #'src/test/phonenumbers/phonenumbermatcher_test.cc',
+      'src/test/phonenumbers/phonenumbermatch_test.cc',
+      'src/test/phonenumbers/phonenumbermatcher_test.cc',
       'src/test/phonenumbers/phonenumberutil_test.cc',
       'src/test/phonenumbers/regexp_adapter_test.cc',
       'src/test/phonenumbers/stringutil_test.cc',
@@ -94,7 +91,7 @@
       '../icu/icu.gyp:icui18n',
       '../icu/icu.gyp:icuuc',
       '../../base/base.gyp:base',
-      '../../base/base.gyp:test_support_base',
+      '../../base/base.gyp:run_all_unittests',
       '../../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
       '../../testing/gmock.gyp:gmock',
       '../../testing/gtest.gyp:gtest',

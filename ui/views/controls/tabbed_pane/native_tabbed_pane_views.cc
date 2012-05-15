@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 #include "base/logging.h"
 #include "base/stl_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/canvas.h"
 #include "ui/gfx/font.h"
 #include "ui/views/controls/tabbed_pane/tabbed_pane.h"
 #include "ui/views/controls/tabbed_pane/tabbed_pane_listener.h"
@@ -78,7 +78,7 @@ class Tab : public View {
     paint.setColor(kTabBorderColor);
     paint.setStrokeWidth(kTabBorderThickness * 2);
 
-    canvas->AsCanvasSkia()->sk_canvas()->drawPath(path, paint);
+    canvas->sk_canvas()->drawPath(path, paint);
   }
 
   void PaintTabTitle(gfx::Canvas* canvas, bool selected) {
@@ -162,8 +162,7 @@ class TabStrip : public View {
     paint.setStrokeWidth(kTabBorderThickness);
     SkScalar line_y = SkIntToScalar(height()) - kTabBorderThickness;
     SkScalar line_width = SkIntToScalar(width());
-    canvas->AsCanvasSkia()->sk_canvas()->drawLine(0, line_y, line_width, line_y,
-                                                  paint);
+    canvas->sk_canvas()->drawLine(0, line_y, line_width, line_y, paint);
   }
 
  private:

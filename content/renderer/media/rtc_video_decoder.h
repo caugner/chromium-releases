@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -33,7 +33,7 @@ class CONTENT_EXPORT RTCVideoDecoder
   // Filter implementation.
   virtual void Play(const base::Closure& callback) OVERRIDE;
   virtual void Seek(base::TimeDelta time,
-                    const media::FilterStatusCB& cb) OVERRIDE;
+                    const media::PipelineStatusCB& cb) OVERRIDE;
   virtual void Pause(const base::Closure& callback) OVERRIDE;
   virtual void Flush(const base::Closure& callback) OVERRIDE;
   virtual void Stop(const base::Closure& callback) OVERRIDE;
@@ -41,8 +41,8 @@ class CONTENT_EXPORT RTCVideoDecoder
   // Decoder implementation.
   virtual void Initialize(
       media::DemuxerStream* demuxer_stream,
-      const media::PipelineStatusCB& filter_callback,
-      const media::StatisticsCallback& stat_callback) OVERRIDE;
+      const media::PipelineStatusCB& status_cb,
+      const media::StatisticsCB& statistics_cb) OVERRIDE;
   virtual void Read(const ReadCB& callback) OVERRIDE;
   virtual const gfx::Size& natural_size() OVERRIDE;
 
@@ -70,6 +70,9 @@ class CONTENT_EXPORT RTCVideoDecoder
   std::string url_;
   DecoderState state_;
   ReadCB read_cb_;
+  bool got_first_frame_;
+  base::TimeDelta last_frame_timestamp_;
+  base::TimeDelta start_time_;
 
   // Used for accessing |read_cb_| from another thread.
   base::Lock lock_;

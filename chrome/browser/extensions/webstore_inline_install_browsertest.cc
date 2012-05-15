@@ -49,6 +49,10 @@ class WebstoreInlineInstallTest : public InProcessBrowserTest {
     GURL crx_url = GenerateTestServerUrl(kWebstoreDomain, "extension.crx");
     CommandLine::ForCurrentProcess()->AppendSwitchASCII(
         switches::kAppsGalleryUpdateURL, crx_url.spec());
+
+    // Allow tests to call window.gc(), so that we can check that callback
+    // functions don't get collected prematurely.
+    command_line->AppendSwitchASCII(switches::kJavaScriptFlags, "--expose-gc");
   }
 
   virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
@@ -95,8 +99,8 @@ IN_PROC_BROWSER_TEST_F(WebstoreInlineInstallTest, Install) {
   EXPECT_TRUE(extension);
 }
 
-IN_PROC_BROWSER_TEST_F(
-    WebstoreInlineInstallTest, InstallNotAllowedFromNonVerifiedDomains) {
+IN_PROC_BROWSER_TEST_F(WebstoreInlineInstallTest,
+    InstallNotAllowedFromNonVerifiedDomains) {
   CommandLine::ForCurrentProcess()->AppendSwitchASCII(
       switches::kAppsGalleryInstallAutoConfirmForTests, "cancel");
   ui_test_utils::NavigateToURL(
@@ -161,7 +165,8 @@ class WebstoreInlineInstallUnpackFailureTest
   }
 };
 
-IN_PROC_BROWSER_TEST_F(WebstoreInlineInstallUnpackFailureTest, Test) {
+IN_PROC_BROWSER_TEST_F(WebstoreInlineInstallUnpackFailureTest,
+    WebstoreInlineInstallUnpackFailureTest) {
   CommandLine::ForCurrentProcess()->AppendSwitchASCII(
       switches::kAppsGalleryInstallAutoConfirmForTests, "accept");
 

@@ -3,9 +3,9 @@
 // found in the LICENSE file.
 
 cr.define('options.contentSettings', function() {
-  const InlineEditableItemList = options.InlineEditableItemList;
-  const InlineEditableItem = options.InlineEditableItem;
-  const ArrayDataModel = cr.ui.ArrayDataModel;
+  /** @const */ var InlineEditableItemList = options.InlineEditableItemList;
+  /** @const */ var InlineEditableItem = options.InlineEditableItem;
+  /** @const */ var ArrayDataModel = cr.ui.ArrayDataModel;
 
   /**
    * Creates a new exceptions list item.
@@ -120,7 +120,7 @@ cr.define('options.contentSettings', function() {
       // If the source of the content setting exception is not the user
       // preference, then the content settings exception is managed and the user
       // can't edit it.
-      if (this.dataItem.source  &&
+      if (this.dataItem.source &&
           this.dataItem.source != 'preference') {
         this.setAttribute('managedby', this.dataItem.source);
         this.deletable = false;
@@ -493,6 +493,9 @@ cr.define('options.contentSettings', function() {
 
       // If the user types in the URL without a hash, show just cookies.
       this.showList('cookies');
+
+      $('content-settings-exceptions-overlay-confirm').onclick =
+          OptionsPage.closeOverlay.bind(OptionsPage);
     },
 
     /**

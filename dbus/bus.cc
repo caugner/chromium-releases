@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -16,6 +16,7 @@
 #include "base/threading/thread_restrictions.h"
 #include "base/time.h"
 #include "dbus/exported_object.h"
+#include "dbus/object_path.h"
 #include "dbus/object_proxy.h"
 #include "dbus/scoped_dbus_error.h"
 
@@ -116,7 +117,7 @@ class Timeout : public base::RefCountedThreadSafe<Timeout> {
     bus->PostDelayedTaskToDBusThread(FROM_HERE,
                                      base::Bind(&Timeout::HandleTimeout,
                                                 this),
-                                     GetIntervalInMs());
+                                     GetInterval());
     monitoring_is_active_ = true;
   }
 
@@ -127,9 +128,10 @@ class Timeout : public base::RefCountedThreadSafe<Timeout> {
     monitoring_is_active_ = false;
   }
 
-  // Returns the interval in milliseconds.
-  int GetIntervalInMs() {
-    return dbus_timeout_get_interval(raw_timeout_);
+  // Returns the interval.
+  base::TimeDelta GetInterval() {
+    return base::TimeDelta::FromMilliseconds(
+        dbus_timeout_get_interval(raw_timeout_));
   }
 
   // Cleans up the raw_timeout and marks that timeout is completed.
@@ -207,39 +209,74 @@ Bus::~Bus() {
 }
 
 ObjectProxy* Bus::GetObjectProxy(const std::string& service_name,
-                                 const std::string& object_path) {
+                                 const ObjectPath& object_path) {
+  return GetObjectProxyWithOptions(service_name, object_path,
+                                   ObjectProxy::DEFAULT_OPTIONS);
+}
+
+ObjectProxy* Bus::GetObjectProxyWithOptions(const std::string& service_name,
+                                            const dbus::ObjectPath& object_path,
+                                            int options) {
   AssertOnOriginThread();
 
   // Check if we already have the requested object proxy.
-  const std::string key = service_name + object_path;
+  const ObjectProxyTable::key_type key(service_name + object_path.value(),
+                                       options);
   ObjectProxyTable::iterator iter = object_proxy_table_.find(key);
   if (iter != object_proxy_table_.end()) {
     return iter->second;
   }
 
   scoped_refptr<ObjectProxy> object_proxy =
-      new ObjectProxy(this, service_name, object_path);
+      new ObjectProxy(this, service_name, object_path, options);
   object_proxy_table_[key] = object_proxy;
 
   return object_proxy.get();
 }
 
-ExportedObject* Bus::GetExportedObject(const std::string& service_name,
-                                       const std::string& object_path) {
+ExportedObject* Bus::GetExportedObject(const ObjectPath& object_path) {
   AssertOnOriginThread();
 
   // Check if we already have the requested exported object.
-  const std::string key = service_name + object_path;
-  ExportedObjectTable::iterator iter = exported_object_table_.find(key);
+  ExportedObjectTable::iterator iter = exported_object_table_.find(object_path);
   if (iter != exported_object_table_.end()) {
     return iter->second;
   }
 
   scoped_refptr<ExportedObject> exported_object =
-      new ExportedObject(this, service_name, object_path);
-  exported_object_table_[key] = exported_object;
+      new ExportedObject(this, object_path);
+  exported_object_table_[object_path] = exported_object;
 
   return exported_object.get();
+}
+
+void Bus::UnregisterExportedObject(const ObjectPath& object_path) {
+  AssertOnOriginThread();
+
+  // Remove the registered object from the table first, to allow a new
+  // GetExportedObject() call to return a new object, rather than this one.
+  ExportedObjectTable::iterator iter = exported_object_table_.find(object_path);
+  if (iter == exported_object_table_.end())
+    return;
+
+  scoped_refptr<ExportedObject> exported_object = iter->second;
+  exported_object_table_.erase(iter);
+
+  // Post the task to perform the final unregistration to the D-Bus thread.
+  // Since the registration also happens on the D-Bus thread in
+  // TryRegisterObjectPath(), and the message loop proxy we post to is a
+  // MessageLoopProxy which inherits from SequencedTaskRunner, there is a
+  // guarantee that this will happen before any future registration call.
+  PostTaskToDBusThread(FROM_HERE, base::Bind(
+      &Bus::UnregisterExportedObjectInternal,
+      this, exported_object));
+}
+
+void Bus::UnregisterExportedObjectInternal(
+    scoped_refptr<dbus::ExportedObject> exported_object) {
+  AssertOnDBusThread();
+
+  exported_object->Unregister();
 }
 
 bool Bus::Connect() {
@@ -330,7 +367,40 @@ void Bus::ShutdownOnDBusThreadAndBlock() {
   LOG_IF(ERROR, !signaled) << "Failed to shutdown the bus";
 }
 
-bool Bus::RequestOwnership(const std::string& service_name) {
+void Bus::RequestOwnership(const std::string& service_name,
+                           OnOwnershipCallback on_ownership_callback) {
+  AssertOnOriginThread();
+
+  PostTaskToDBusThread(FROM_HERE, base::Bind(
+      &Bus::RequestOwnershipInternal,
+      this, service_name, on_ownership_callback));
+}
+
+void Bus::RequestOwnershipInternal(const std::string& service_name,
+                                   OnOwnershipCallback on_ownership_callback) {
+  AssertOnDBusThread();
+
+  bool success = Connect();
+  if (success)
+    success = RequestOwnershipAndBlock(service_name);
+
+  PostTaskToOriginThread(FROM_HERE,
+                         base::Bind(&Bus::OnOwnership,
+                                    this,
+                                    on_ownership_callback,
+                                    service_name,
+                                    success));
+}
+
+void Bus::OnOwnership(OnOwnershipCallback on_ownership_callback,
+                      const std::string& service_name,
+                      bool success) {
+  AssertOnOriginThread();
+
+  on_ownership_callback.Run(service_name, success);
+}
+
+bool Bus::RequestOwnershipAndBlock(const std::string& service_name) {
   DCHECK(connection_);
   // dbus_bus_request_name() is a blocking call.
   AssertOnDBusThread();
@@ -514,7 +584,7 @@ void Bus::RemoveMatch(const std::string& match_rule, DBusError* error) {
   match_rules_added_.erase(match_rule);
 }
 
-bool Bus::TryRegisterObjectPath(const std::string& object_path,
+bool Bus::TryRegisterObjectPath(const ObjectPath& object_path,
                                 const DBusObjectPathVTable* vtable,
                                 void* user_data,
                                 DBusError* error) {
@@ -523,13 +593,13 @@ bool Bus::TryRegisterObjectPath(const std::string& object_path,
 
   if (registered_object_paths_.find(object_path) !=
       registered_object_paths_.end()) {
-    LOG(ERROR) << "Object path already registered: " << object_path;
+    LOG(ERROR) << "Object path already registered: " << object_path.value();
     return false;
   }
 
   const bool success = dbus_connection_try_register_object_path(
       connection_,
-      object_path.c_str(),
+      object_path.value().c_str(),
       vtable,
       user_data,
       error);
@@ -538,20 +608,20 @@ bool Bus::TryRegisterObjectPath(const std::string& object_path,
   return success;
 }
 
-void Bus::UnregisterObjectPath(const std::string& object_path) {
+void Bus::UnregisterObjectPath(const ObjectPath& object_path) {
   DCHECK(connection_);
   AssertOnDBusThread();
 
   if (registered_object_paths_.find(object_path) ==
       registered_object_paths_.end()) {
     LOG(ERROR) << "Requested to unregister an unknown object path: "
-               << object_path;
+               << object_path.value();
     return;
   }
 
   const bool success = dbus_connection_unregister_object_path(
       connection_,
-      object_path.c_str());
+      object_path.value().c_str());
   CHECK(success) << "Unable to allocate memory";
   registered_object_paths_.erase(object_path);
 }
@@ -602,16 +672,16 @@ void Bus::PostTaskToDBusThread(const tracked_objects::Location& from_here,
 void Bus::PostDelayedTaskToDBusThread(
     const tracked_objects::Location& from_here,
     const base::Closure& task,
-    int delay_ms) {
+    base::TimeDelta delay) {
   if (dbus_thread_message_loop_proxy_.get()) {
     if (!dbus_thread_message_loop_proxy_->PostDelayedTask(
-            from_here, task, delay_ms)) {
+            from_here, task, delay)) {
       LOG(WARNING) << "Failed to post a task to the D-Bus thread message loop";
     }
   } else {
     DCHECK(origin_message_loop_proxy_.get());
     if (!origin_message_loop_proxy_->PostDelayedTask(
-            from_here, task, delay_ms)) {
+            from_here, task, delay)) {
       LOG(WARNING) << "Failed to post a task to the origin message loop";
     }
   }

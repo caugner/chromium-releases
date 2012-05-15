@@ -23,10 +23,23 @@ void DebugInfoEventListener::OnSyncCycleCompleted(
   sync_pb::SyncCycleCompletedEventInfo* sync_completed_event_info =
       event_info.mutable_sync_cycle_completed_event_info();
 
-  sync_completed_event_info->set_num_blocking_conflicts(
-      snapshot->num_conflicting_updates);
-  sync_completed_event_info->set_num_non_blocking_conflicts(
-      snapshot->num_blocking_conflicting_updates);
+  sync_completed_event_info->set_num_encryption_conflicts(
+      snapshot->num_encryption_conflicts);
+  sync_completed_event_info->set_num_hierarchy_conflicts(
+      snapshot->num_hierarchy_conflicts);
+  sync_completed_event_info->set_num_simple_conflicts(
+      snapshot->num_simple_conflicts);
+  sync_completed_event_info->set_num_server_conflicts(
+      snapshot->num_server_conflicts);
+
+  sync_completed_event_info->set_num_updates_downloaded(
+      snapshot->syncer_status.num_updates_downloaded_total);
+  sync_completed_event_info->set_num_reflected_updates_downloaded(
+      snapshot->syncer_status.num_reflected_updates_downloaded_total);
+  sync_completed_event_info->mutable_caller_info()->set_source(
+      snapshot->source.updates_source);
+  sync_completed_event_info->mutable_caller_info()->set_notifications_enabled(
+      snapshot->notifications_enabled);
 
   AddEventToQueue(event_info);
 }
@@ -37,9 +50,9 @@ void DebugInfoEventListener::OnInitializationComplete(
   CreateAndAddEvent(sync_pb::DebugEventInfo::INITIALIZATION_COMPLETE);
 }
 
-void DebugInfoEventListener::OnAuthError(
-    const GoogleServiceAuthError& auth_error) {
-  CreateAndAddEvent(sync_pb::DebugEventInfo::AUTH_ERROR);
+void DebugInfoEventListener::OnConnectionStatusChange(
+    sync_api::ConnectionStatus status) {
+  CreateAndAddEvent(sync_pb::DebugEventInfo::CONNECTION_STATUS_CHANGE);
 }
 
 void DebugInfoEventListener::OnPassphraseRequired(

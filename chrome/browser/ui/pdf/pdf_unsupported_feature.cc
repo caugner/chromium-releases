@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,16 +13,18 @@
 #include "chrome/browser/plugin_prefs.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/tab_contents/chrome_interstitial_page.h"
+#include "chrome/browser/renderer_preferences_util.h"
 #include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_content_client.h"
 #include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/pref_names.h"
-#include "content/browser/renderer_host/render_view_host.h"
+#include "content/public/browser/interstitial_page.h"
+#include "content/public/browser/interstitial_page_delegate.h"
 #include "content/public/browser/plugin_service.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/browser_resources.h"
@@ -33,6 +35,7 @@
 #include "ui/gfx/image/image.h"
 #include "webkit/plugins/npapi/plugin_group.h"
 
+using content::InterstitialPage;
 using content::OpenURLParams;
 using content::PluginService;
 using content::Referrer;
@@ -146,7 +149,7 @@ void OpenUsingReader(TabContentsWrapper* tab,
                      InfoBarDelegate* new_delegate) {
   ChromePluginServiceFilter::GetInstance()->OverridePluginForTab(
       tab->web_contents()->GetRenderProcessHost()->GetID(),
-      tab->web_contents()->GetRenderViewHost()->routing_id(),
+      tab->web_contents()->GetRenderViewHost()->GetRoutingID(),
       tab->web_contents()->GetURL(),
       ASCIIToUTF16(PluginGroup::kAdobeReaderGroupName));
   tab->web_contents()->GetRenderViewHost()->ReloadFrame();
@@ -162,21 +165,23 @@ void OpenUsingReader(TabContentsWrapper* tab,
 
 // An interstitial to be used when the user chooses to open a PDF using Adobe
 // Reader, but it is out of date.
-class PDFUnsupportedFeatureInterstitial : public ChromeInterstitialPage {
+class PDFUnsupportedFeatureInterstitial
+    : public content::InterstitialPageDelegate {
  public:
   PDFUnsupportedFeatureInterstitial(
       TabContentsWrapper* tab,
       const WebPluginInfo& reader_webplugininfo)
-      : ChromeInterstitialPage(
-            tab->web_contents(), false, tab->web_contents()->GetURL()),
-        tab_contents_(tab),
+      : tab_contents_(tab),
         reader_webplugininfo_(reader_webplugininfo) {
     content::RecordAction(UserMetricsAction("PDF_ReaderInterstitialShown"));
+    interstitial_page_ = InterstitialPage::Create(
+        tab->web_contents(), false, tab->web_contents()->GetURL(), this);
+    interstitial_page_->Show();
   }
 
  protected:
-  // ChromeInterstitialPage implementation.
-  virtual std::string GetHTMLContents() {
+  // InterstitialPageDelegate implementation.
+  virtual std::string GetHTMLContents() OVERRIDE {
     DictionaryValue strings;
     strings.SetString(
         "title",
@@ -204,18 +209,18 @@ class PDFUnsupportedFeatureInterstitial : public ChromeInterstitialPage {
     return jstemplate_builder::GetI18nTemplateHtml(html, &strings);
   }
 
-  virtual void CommandReceived(const std::string& command) {
+  virtual void CommandReceived(const std::string& command) OVERRIDE {
     if (command == "0") {
       content::RecordAction(
           UserMetricsAction("PDF_ReaderInterstitialCancel"));
-      DontProceed();
+      interstitial_page_->DontProceed();
       return;
     }
 
     if (command == "1") {
       content::RecordAction(
           UserMetricsAction("PDF_ReaderInterstitialUpdate"));
-      OpenReaderUpdateURL(tab());
+      OpenReaderUpdateURL(tab_contents_->web_contents());
     } else if (command == "2") {
       content::RecordAction(
           UserMetricsAction("PDF_ReaderInterstitialIgnore"));
@@ -223,12 +228,19 @@ class PDFUnsupportedFeatureInterstitial : public ChromeInterstitialPage {
     } else {
       NOTREACHED();
     }
-    Proceed();
+    interstitial_page_->Proceed();
+  }
+
+  virtual void OverrideRendererPrefs(
+      content::RendererPreferences* prefs) OVERRIDE {
+    renderer_preferences_util::UpdateFromSystemSettings(
+        prefs, tab_contents_->profile());
   }
 
  private:
   TabContentsWrapper* tab_contents_;
   WebPluginInfo reader_webplugininfo_;
+  InterstitialPage* interstitial_page_;  // Owns us.
 
   DISALLOW_COPY_AND_ASSIGN(PDFUnsupportedFeatureInterstitial);
 };
@@ -341,10 +353,7 @@ bool PDFUnsupportedFeatureInfoBarDelegate::OnYes() {
   content::RecordAction(UserMetricsAction("PDF_UseReaderInfoBarOK"));
 
   if (reader_vulnerable_) {
-    PDFUnsupportedFeatureInterstitial* interstitial =
-        new PDFUnsupportedFeatureInterstitial(tab_contents_,
-                                              reader_webplugininfo_);
-    interstitial->Show();
+    new PDFUnsupportedFeatureInterstitial(tab_contents_, reader_webplugininfo_);
     return true;
   }
 
@@ -412,5 +421,5 @@ void PDFHasUnsupportedFeature(TabContentsWrapper* tab) {
   PluginService::GetInstance()->GetPluginGroups(
       base::Bind(&GotPluginGroupsCallback,
           tab->web_contents()->GetRenderProcessHost()->GetID(),
-          tab->web_contents()->GetRenderViewHost()->routing_id()));
+          tab->web_contents()->GetRenderViewHost()->GetRoutingID()));
 }

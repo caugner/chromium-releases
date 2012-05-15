@@ -30,6 +30,13 @@ AutofillDataTypeController::~AutofillDataTypeController() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 }
 
+bool AutofillDataTypeController::PostTaskOnBackendThread(
+    const tracked_objects::Location& from_here,
+    const base::Closure& task) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  return BrowserThread::PostTask(BrowserThread::DB, from_here, task);
+}
+
 bool AutofillDataTypeController::StartModels() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK_EQ(MODEL_STARTING, state());
@@ -60,31 +67,11 @@ void AutofillDataTypeController::Observe(
   }
 }
 
-bool AutofillDataTypeController::StartAssociationAsync() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  DCHECK_EQ(ASSOCIATING, state());
-  return BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-      base::Bind(&AutofillDataTypeController::StartAssociation, this));
-}
-
-base::WeakPtr<SyncableService>
-    AutofillDataTypeController::GetWeakPtrToSyncableService() const {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
-  return profile_sync_factory()->GetAutocompleteSyncableService(
-      web_data_service_.get());
-}
-
 void AutofillDataTypeController::StopModels() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(state() == STOPPING || state() == NOT_RUNNING || state() == DISABLED);
   DVLOG(1) << "AutofillDataTypeController::StopModels() : State = " << state();
   notification_registrar_.RemoveAll();
-}
-
-void AutofillDataTypeController::StopLocalServiceAsync() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-      base::Bind(&AutofillDataTypeController::StopLocalService, this));
 }
 
 syncable::ModelType AutofillDataTypeController::type() const {
@@ -94,25 +81,6 @@ syncable::ModelType AutofillDataTypeController::type() const {
 browser_sync::ModelSafeGroup AutofillDataTypeController::model_safe_group()
     const {
   return browser_sync::GROUP_DB;
-}
-
-void AutofillDataTypeController::RecordUnrecoverableError(
-    const tracked_objects::Location& from_here,
-    const std::string& message) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
-  UMA_HISTOGRAM_COUNTS("Sync.AutofillRunFailures", 1);
-}
-
-void AutofillDataTypeController::RecordAssociationTime(base::TimeDelta time) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
-  UMA_HISTOGRAM_TIMES("Sync.AutofillAssociationTime", time);
-}
-
-void AutofillDataTypeController::RecordStartFailure(StartResult result) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  UMA_HISTOGRAM_ENUMERATION("Sync.AutofillStartFailures",
-                            result,
-                            MAX_START_RESULT);
 }
 
 }  // namespace browser_sync

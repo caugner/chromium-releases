@@ -10,7 +10,6 @@
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/browser_shutdown.h"
-#include "chrome/browser/content_settings/cookie_settings.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
 #include "chrome/browser/debugger/devtools_window.h"
@@ -23,7 +22,9 @@
 #include "chrome/browser/geolocation/geolocation_prefs.h"
 #include "chrome/browser/google/google_url_tracker.h"
 #include "chrome/browser/instant/instant_controller.h"
+#include "chrome/browser/intents/web_intents_util.h"
 #include "chrome/browser/intranet_redirect_detector.h"
+#include "chrome/browser/managed_mode.h"
 #include "chrome/browser/metrics/metrics_log.h"
 #include "chrome/browser/metrics/metrics_service.h"
 #include "chrome/browser/net/http_server_properties_manager.h"
@@ -39,6 +40,7 @@
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/printing/print_job_manager.h"
+#include "chrome/browser/profiles/chrome_version_service.h"
 #include "chrome/browser/profiles/gaia_info_update_service.h"
 #include "chrome/browser/profiles/profile_impl.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
@@ -52,25 +54,27 @@
 #include "chrome/browser/ui/alternate_error_tab_observer.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_init.h"
+#include "chrome/browser/ui/gesture_prefs.h"
 #include "chrome/browser/ui/prefs/prefs_tab_helper.h"
 #include "chrome/browser/ui/search_engines/keyword_editor_controller.h"
+#include "chrome/browser/ui/webui/extensions/extension_settings_handler.h"
 #include "chrome/browser/ui/webui/flags_ui.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_page_handler.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
-#include "chrome/browser/ui/webui/options/extension_settings_handler.h"
 #include "chrome/browser/ui/webui/plugins_ui.h"
 #include "chrome/browser/ui/webui/sync_promo/sync_promo_ui.h"
 #include "chrome/browser/upgrade_detector.h"
 #include "chrome/browser/web_resource/promo_resource_service.h"
 #include "chrome/common/pref_names.h"
-#include "content/browser/ssl/ssl_manager.h"
 #include "content/public/browser/render_process_host.h"
 
 #if defined(OS_MACOSX)
+#include "chrome/browser/ui/cocoa/confirm_quit.h"
 #include "chrome/browser/ui/cocoa/presentation_mode_prefs.h"
 #endif
 
 #if defined(TOOLKIT_VIEWS)  // TODO(port): whittle this down as we port
+#include "chrome/browser/accessibility/invert_bubble_views.h"
 #include "chrome/browser/ui/views/browser_actions_container.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #endif
@@ -80,7 +84,7 @@
 #endif
 
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/audio/audio_mixer_alsa.h"
+#include "chrome/browser/chromeos/audio/audio_handler.h"
 #include "chrome/browser/chromeos/customization_document.h"
 #include "chrome/browser/chromeos/login/signed_settings_cache.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
@@ -95,112 +99,148 @@
 #include "chrome/browser/extensions/default_apps.h"
 #endif
 
+#if defined(USE_ASH)
+#include "chrome/browser/ui/views/ash/launcher/chrome_launcher_delegate.h"
+#endif
+
 namespace browser {
 
 void RegisterLocalState(PrefService* local_state) {
   // Prefs in Local State
   local_state->RegisterIntegerPref(prefs::kMultipleProfilePrefMigration, 0);
+
   AppsPromo::RegisterPrefs(local_state);
   Browser::RegisterPrefs(local_state);
-  FlagsUI::RegisterPrefs(local_state);
-  WebCacheManager::RegisterPrefs(local_state);
+  browser_shutdown::RegisterPrefs(local_state);
   ExternalProtocolHandler::RegisterPrefs(local_state);
+  FlagsUI::RegisterPrefs(local_state);
+  geolocation::RegisterPrefs(local_state);
   GoogleURLTracker::RegisterPrefs(local_state);
   IntranetRedirectDetector::RegisterPrefs(local_state);
   KeywordEditorController::RegisterPrefs(local_state);
+  ManagedMode::RegisterPrefs(local_state);
   MetricsLog::RegisterPrefs(local_state);
   MetricsService::RegisterPrefs(local_state);
-  NewTabPageHandler::RegisterPrefs(local_state);
-  printing::PrintJobManager::RegisterPrefs(local_state);
-  PromoResourceService::RegisterPrefs(local_state);
+  NotificationUIManager::RegisterPrefs(local_state);
+  PrefProxyConfigTrackerImpl::RegisterPrefs(local_state);
+  ProfileInfoCache::RegisterPrefs(local_state);
+  ProfileManager::RegisterPrefs(local_state);
+  SSLConfigServiceManager::RegisterPrefs(local_state);
+  TaskManager::RegisterPrefs(local_state);
+  WebCacheManager::RegisterPrefs(local_state);
+
+#if defined(ENABLE_CONFIGURATION_POLICY)
+  policy::CloudPolicySubsystem::RegisterPrefs(local_state);
+#endif
 
 #if defined(ENABLE_SAFE_BROWSING)
   SafeBrowsingService::RegisterPrefs(local_state);
 #endif
-  browser_shutdown::RegisterPrefs(local_state);
+
 #if defined(TOOLKIT_VIEWS)
   BrowserView::RegisterBrowserViewPrefs(local_state);
 #endif
-  UpgradeDetector::RegisterPrefs(local_state);
-  TaskManager::RegisterPrefs(local_state);
-  geolocation::RegisterPrefs(local_state);
+
+#if !defined(OS_ANDROID)
   BackgroundModeManager::RegisterPrefs(local_state);
-  NotificationUIManager::RegisterPrefs(local_state);
-  PrefProxyConfigTrackerImpl::RegisterPrefs(local_state);
-  SSLConfigServiceManager::RegisterPrefs(local_state);
-#if defined(ENABLE_CONFIGURATION_POLICY)
-  policy::CloudPolicySubsystem::RegisterPrefs(local_state);
+  NewTabPageHandler::RegisterPrefs(local_state);
+  printing::PrintJobManager::RegisterPrefs(local_state);
+  PromoResourceService::RegisterPrefs(local_state);
+  UpgradeDetector::RegisterPrefs(local_state);
 #endif
-  ProfileInfoCache::RegisterPrefs(local_state);
-  ProfileManager::RegisterPrefs(local_state);
+
 #if defined(OS_CHROMEOS)
-  chromeos::AudioMixerAlsa::RegisterPrefs(local_state);
-  chromeos::UserManager::RegisterPrefs(local_state);
-  chromeos::WizardController::RegisterPrefs(local_state);
-  chromeos::InputMethodMenu::RegisterPrefs(local_state);
-  chromeos::ServicesCustomizationDocument::RegisterPrefs(local_state);
-  chromeos::signed_settings_cache::RegisterPrefs(local_state);
+  chromeos::AudioHandler::RegisterPrefs(local_state);
+  chromeos::language_prefs::RegisterPrefs(local_state);
   chromeos::NetworkMenuButton::RegisterPrefs(local_state);
   chromeos::ProxyConfigServiceImpl::RegisterPrefs(local_state);
+  chromeos::UserManager::RegisterPrefs(local_state);
+  chromeos::ServicesCustomizationDocument::RegisterPrefs(local_state);
+  chromeos::signed_settings_cache::RegisterPrefs(local_state);
+  chromeos::WizardController::RegisterPrefs(local_state);
   policy::AutoEnrollmentClient::RegisterPrefs(local_state);
   policy::DeviceStatusCollector::RegisterPrefs(local_state);
 #endif
+
+#if defined(OS_MACOSX)
+  confirm_quit::RegisterLocalState(local_state);
+#endif
+
+  GesturePrefsRegisterPrefs(local_state);
 }
 
 void RegisterUserPrefs(PrefService* user_prefs) {
   // User prefs
+  AlternateErrorPageTabObserver::RegisterUserPrefs(user_prefs);
   AppsPromo::RegisterUserPrefs(user_prefs);
   AutofillManager::RegisterUserPrefs(user_prefs);
-  SessionStartupPref::RegisterUserPrefs(user_prefs);
+  bookmark_utils::RegisterUserPrefs(user_prefs);
   BookmarkModel::RegisterUserPrefs(user_prefs);
   Browser::RegisterUserPrefs(user_prefs);
   BrowserInit::RegisterUserPrefs(user_prefs);
-  PasswordManager::RegisterUserPrefs(user_prefs);
+  ChromeVersionService::RegisterUserPrefs(user_prefs);
+  chrome_browser_net::HttpServerPropertiesManager::RegisterPrefs(user_prefs);
   chrome_browser_net::Predictor::RegisterUserPrefs(user_prefs);
-  DownloadPrefs::RegisterUserPrefs(user_prefs);
-  bookmark_utils::RegisterUserPrefs(user_prefs);
-  AlternateErrorPageTabObserver::RegisterUserPrefs(user_prefs);
-  PrefsTabHelper::RegisterUserPrefs(user_prefs);
-  TemplateURLPrepopulateData::RegisterUserPrefs(user_prefs);
-  ExtensionWebUI::RegisterUserPrefs(user_prefs);
-  ExtensionSettingsHandler::RegisterUserPrefs(user_prefs);
-  IncognitoModePrefs::RegisterUserPrefs(user_prefs);
-  NewTabUI::RegisterUserPrefs(user_prefs);
-  PluginsUI::RegisterUserPrefs(user_prefs);
-  ProfileImpl::RegisterUserPrefs(user_prefs);
-  PromoResourceService::RegisterUserPrefs(user_prefs);
-  HostContentSettingsMap::RegisterUserPrefs(user_prefs);
-  CookieSettings::RegisterUserPrefs(user_prefs);
   DevToolsWindow::RegisterUserPrefs(user_prefs);
-  PinnedTabCodec::RegisterUserPrefs(user_prefs);
+  DownloadPrefs::RegisterUserPrefs(user_prefs);
+  extensions::ComponentLoader::RegisterUserPrefs(user_prefs);
   ExtensionPrefs::RegisterUserPrefs(user_prefs);
-  TranslatePrefs::RegisterUserPrefs(user_prefs);
+  ExtensionSettingsHandler::RegisterUserPrefs(user_prefs);
+  ExtensionWebUI::RegisterUserPrefs(user_prefs);
+  GAIAInfoUpdateService::RegisterUserPrefs(user_prefs);
+  HostContentSettingsMap::RegisterUserPrefs(user_prefs);
+  IncognitoModePrefs::RegisterUserPrefs(user_prefs);
+  InstantController::RegisterUserPrefs(user_prefs);
+  NetPrefObserver::RegisterPrefs(user_prefs);
+  NewTabUI::RegisterUserPrefs(user_prefs);
+  PasswordManager::RegisterUserPrefs(user_prefs);
+  PinnedTabCodec::RegisterUserPrefs(user_prefs);
   PrefProxyConfigTrackerImpl::RegisterPrefs(user_prefs);
+  PrefsTabHelper::RegisterUserPrefs(user_prefs);
+  ProfileImpl::RegisterUserPrefs(user_prefs);
+  ProtocolHandlerRegistry::RegisterPrefs(user_prefs);
+  SessionStartupPref::RegisterUserPrefs(user_prefs);
+  TemplateURLPrepopulateData::RegisterUserPrefs(user_prefs);
+  TranslatePrefs::RegisterUserPrefs(user_prefs);
+
+#if defined(ENABLE_CONFIGURATION_POLICY)
+  policy::URLBlacklistManager::RegisterPrefs(user_prefs);
+#endif
+
+#if defined(ENABLE_WEB_INTENTS)
+  web_intents::RegisterUserPrefs(user_prefs);
+#endif
+
 #if defined(TOOLKIT_VIEWS)
   BrowserActionsContainer::RegisterUserPrefs(user_prefs);
+  InvertBubble::RegisterUserPrefs(user_prefs);
 #elif defined(TOOLKIT_GTK)
   BrowserWindowGtk::RegisterUserPrefs(user_prefs);
 #endif
+
+#if defined(USE_ASH)
+  ChromeLauncherDelegate::RegisterUserPrefs(user_prefs);
+#endif
+
+#if !defined(OS_ANDROID)
+  PluginsUI::RegisterUserPrefs(user_prefs);
+  PromoResourceService::RegisterUserPrefs(user_prefs);
+  SyncPromoUI::RegisterUserPrefs(user_prefs);
+#endif
+
+#if !defined(OS_ANDROID) && !defined(OS_CHROMEOS)
+  default_apps::RegisterUserPrefs(user_prefs);
+#endif
+
 #if defined(OS_CHROMEOS)
   chromeos::Preferences::RegisterUserPrefs(user_prefs);
   chromeos::ProxyConfigServiceImpl::RegisterPrefs(user_prefs);
 #endif
-  InstantController::RegisterUserPrefs(user_prefs);
-  NetPrefObserver::RegisterPrefs(user_prefs);
-  ProtocolHandlerRegistry::RegisterPrefs(user_prefs);
+
 #if defined(OS_MACOSX)
+  confirm_quit::RegisterObsoleteUserPrefs(user_prefs);
   PresentationModePrefs::RegisterUserPrefs(user_prefs);
 #endif
-#if defined(ENABLE_CONFIGURATION_POLICY)
-  policy::URLBlacklistManager::RegisterPrefs(user_prefs);
-#endif
-  SyncPromoUI::RegisterUserPrefs(user_prefs);
-  GAIAInfoUpdateService::RegisterUserPrefs(user_prefs);
-  chrome_browser_net::HttpServerPropertiesManager::RegisterPrefs(user_prefs);
-#if !defined(OS_CHROMEOS)
-  default_apps::RegisterUserPrefs(user_prefs);
-#endif
-  extensions::ComponentLoader::RegisterUserPrefs(user_prefs);
 }
 
 void MigrateBrowserPrefs(PrefService* user_prefs, PrefService* local_state) {
@@ -209,16 +249,28 @@ void MigrateBrowserPrefs(PrefService* user_prefs, PrefService* local_state) {
   int current_version =
       local_state->GetInteger(prefs::kMultipleProfilePrefMigration);
 
-  if ((current_version & WINDOWS_PREFS) == 0) {
-    // Migrate the devtools split location preference.
-    local_state->RegisterIntegerPref(prefs::kDevToolsSplitLocation, -1);
-    if (local_state->HasPrefPath(prefs::kDevToolsSplitLocation)) {
-      user_prefs->SetInteger(prefs::kDevToolsSplitLocation,
-          local_state->GetInteger(prefs::kDevToolsSplitLocation));
-    }
-    local_state->ClearPref(prefs::kDevToolsSplitLocation);
+  if (!(current_version & DNS_PREFS)) {
+    local_state->RegisterListPref(prefs::kDnsStartupPrefetchList,
+                                  PrefService::UNSYNCABLE_PREF);
+    local_state->ClearPref(prefs::kDnsStartupPrefetchList);
 
-    // Migrate the browser window placement preference.
+    local_state->RegisterListPref(prefs::kDnsHostReferralList,
+                                  PrefService::UNSYNCABLE_PREF);
+    local_state->ClearPref(prefs::kDnsHostReferralList);
+
+    current_version |= DNS_PREFS;
+    local_state->SetInteger(prefs::kMultipleProfilePrefMigration,
+                            current_version);
+  }
+
+  if (!(current_version & WINDOWS_PREFS)) {
+    local_state->RegisterIntegerPref(prefs::kDevToolsHSplitLocation, -1);
+    if (local_state->HasPrefPath(prefs::kDevToolsHSplitLocation)) {
+      user_prefs->SetInteger(prefs::kDevToolsHSplitLocation,
+          local_state->GetInteger(prefs::kDevToolsHSplitLocation));
+    }
+    local_state->ClearPref(prefs::kDevToolsHSplitLocation);
+
     local_state->RegisterDictionaryPref(prefs::kBrowserWindowPlacement);
     if (local_state->HasPrefPath(prefs::kBrowserWindowPlacement)) {
       const PrefService::Preference* pref =
@@ -228,8 +280,9 @@ void MigrateBrowserPrefs(PrefService* user_prefs, PrefService* local_state) {
     }
     local_state->ClearPref(prefs::kBrowserWindowPlacement);
 
+    current_version |= WINDOWS_PREFS;
     local_state->SetInteger(prefs::kMultipleProfilePrefMigration,
-                            current_version | WINDOWS_PREFS);
+                            current_version);
   }
 }
 

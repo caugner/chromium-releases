@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,6 +16,7 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_action.h"
+#include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/extension_resource.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
@@ -27,16 +28,17 @@
 using content::WebContents;
 
 PageActionImageView::PageActionImageView(LocationBarView* owner,
-                                         ExtensionAction* page_action)
+                                         ExtensionAction* page_action,
+                                         Browser* browser)
     : owner_(owner),
       page_action_(page_action),
+      browser_(browser),
       ALLOW_THIS_IN_INITIALIZER_LIST(tracker_(this)),
       current_tab_id_(-1),
       preview_enabled_(false),
       popup_(NULL) {
-  const Extension* extension = owner_->browser()->profile()->
-      GetExtensionService()->GetExtensionById(page_action->extension_id(),
-                                              false);
+  const Extension* extension = owner_->profile()->GetExtensionService()->
+      GetExtensionById(page_action->extension_id(), false);
   DCHECK(extension);
 
   // Load all the icons declared in the manifest. This is the contents of the
@@ -55,12 +57,29 @@ PageActionImageView::PageActionImageView(LocationBarView* owner,
 
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
                  content::Source<Profile>(
-                     owner_->browser()->profile()->GetOriginalProfile()));
+                     owner_->profile()->GetOriginalProfile()));
 
   set_accessibility_focusable(true);
+
+  // Iterate through all the keybindings and see if one is assigned to the
+  // pageAction.
+  const std::vector<Extension::ExtensionKeybinding>& commands =
+      extension->keybindings();
+  for (size_t i = 0; i < commands.size(); ++i) {
+    if (commands[i].command_name() ==
+        extension_manifest_values::kPageActionKeybindingEvent) {
+      keybinding_.reset(new ui::Accelerator(commands[i].accelerator()));
+      owner_->GetFocusManager()->RegisterAccelerator(
+          *keybinding_.get(), ui::AcceleratorManager::kHighPriority, this);
+      break;
+    }
+  }
 }
 
 PageActionImageView::~PageActionImageView() {
+  if (keybinding_.get() && owner_->GetFocusManager())
+    owner_->GetFocusManager()->UnregisterAccelerator(*keybinding_.get(), this);
+
   if (popup_)
     popup_->GetWidget()->RemoveObserver(this);
   HidePopup();
@@ -88,13 +107,13 @@ void PageActionImageView::ExecuteAction(int button,
 
     popup_ = ExtensionPopup::ShowPopup(
         page_action_->GetPopupUrl(current_tab_id_),
-        owner_->browser(),
+        browser_,
         this,
         arrow_location,
         inspect_with_devtools);
     popup_->GetWidget()->AddObserver(this);
   } else {
-    Profile* profile = owner_->browser()->profile();
+    Profile* profile = owner_->profile();
     ExtensionService* service = profile->GetExtensionService();
     service->browser_event_router()->PageActionExecuted(
         profile, page_action_->extension_id(), page_action_->id(),
@@ -142,14 +161,13 @@ bool PageActionImageView::OnKeyPressed(const views::KeyEvent& event) {
 
 void PageActionImageView::ShowContextMenu(const gfx::Point& p,
                                           bool is_mouse_gesture) {
-  const Extension* extension = owner_->browser()->profile()->
-      GetExtensionService()->GetExtensionById(page_action()->extension_id(),
-                                              false);
+  const Extension* extension = owner_->profile()->GetExtensionService()->
+      GetExtensionById(page_action()->extension_id(), false);
   if (!extension->ShowConfigureContextMenus())
     return;
 
   scoped_refptr<ExtensionContextMenuModel> context_menu_model(
-      new ExtensionContextMenuModel(extension, owner_->browser(), this));
+      new ExtensionContextMenuModel(extension, browser_, this));
   views::MenuModelAdapter menu_model_adapter(context_menu_model.get());
   menu_runner_.reset(new views::MenuRunner(menu_model_adapter.CreateMenu()));
   gfx::Point screen_loc;
@@ -160,8 +178,9 @@ void PageActionImageView::ShowContextMenu(const gfx::Point& p,
     return;
 }
 
-void PageActionImageView::OnImageLoaded(
-    SkBitmap* image, const ExtensionResource& resource, int index) {
+void PageActionImageView::OnImageLoaded(const gfx::Image& image,
+                                        const std::string& extension_id,
+                                        int index) {
   // We loaded icons()->size() icons, plus one extra if the page action had
   // a default icon.
   int total_icons = static_cast<int>(page_action_->icon_paths()->size());
@@ -171,11 +190,12 @@ void PageActionImageView::OnImageLoaded(
 
   // Map the index of the loaded image back to its name. If we ever get an
   // index greater than the number of icons, it must be the default icon.
-  if (image) {
+  if (!image.IsEmpty()) {
+    const SkBitmap* bitmap = image.ToSkBitmap();
     if (index < static_cast<int>(page_action_->icon_paths()->size()))
-      page_action_icons_[page_action_->icon_paths()->at(index)] = *image;
+      page_action_icons_[page_action_->icon_paths()->at(index)] = *bitmap;
     else
-      page_action_icons_[page_action_->default_icon_path()] = *image;
+      page_action_icons_[page_action_->default_icon_path()] = *bitmap;
   }
 
   // During object construction (before the parent has been set) we are already
@@ -183,6 +203,20 @@ void PageActionImageView::OnImageLoaded(
   // doing so causes crash described in http://crbug.com/57333).
   if (parent())
     owner_->UpdatePageActions();
+}
+
+bool PageActionImageView::AcceleratorPressed(
+    const ui::Accelerator& accelerator) {
+  DCHECK(visible());  // Should not have happened due to CanHandleAccelerator.
+
+  ExecuteAction(1, false);  // 1 means left-click, false means "don't inspect".
+  return true;
+}
+
+bool PageActionImageView::CanHandleAccelerators() const {
+  // While visible, we don't handle accelerators and while so we also don't
+  // count as a priority accelerator handler.
+  return visible();
 }
 
 void PageActionImageView::UpdateVisibility(WebContents* contents,

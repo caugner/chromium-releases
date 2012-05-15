@@ -17,7 +17,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebSize.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebSolidColorLayer.h"
 #include "ui/base/animation/animation.h"
-#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/canvas.h"
 #include "ui/gfx/compositor/compositor_switches.h"
 #include "ui/gfx/compositor/layer_animator.h"
 #include "ui/gfx/interpolated_transform.h"
@@ -65,6 +65,10 @@ Layer::Layer(LayerType type)
 }
 
 Layer::~Layer() {
+  // Destroying the animator may cause observers to use the layer (and
+  // indirectly the WebLayer). Destroy the animator first so that the WebLayer
+  // is still around.
+  animator_.reset();
   if (compositor_)
     compositor_->SetRootLayer(NULL);
   if (parent_)
@@ -150,7 +154,8 @@ void Layer::SetTransform(const ui::Transform& transform) {
 }
 
 Transform Layer::GetTargetTransform() const {
-  if (animator_.get() && animator_->is_animating())
+  if (animator_.get() && animator_->IsAnimatingProperty(
+      LayerAnimationElement::TRANSFORM))
     return animator_->GetTargetTransform();
   return transform_;
 }
@@ -160,9 +165,18 @@ void Layer::SetBounds(const gfx::Rect& bounds) {
 }
 
 gfx::Rect Layer::GetTargetBounds() const {
-  if (animator_.get() && animator_->is_animating())
+  if (animator_.get() && animator_->IsAnimatingProperty(
+      LayerAnimationElement::BOUNDS))
     return animator_->GetTargetBounds();
   return bounds_;
+}
+
+void Layer::SetMasksToBounds(bool masks_to_bounds) {
+  web_layer_.setMasksToBounds(masks_to_bounds);
+}
+
+bool Layer::GetMasksToBounds() const {
+  return web_layer_.masksToBounds();
 }
 
 void Layer::SetOpacity(float opacity) {
@@ -170,18 +184,21 @@ void Layer::SetOpacity(float opacity) {
 }
 
 float Layer::GetTargetOpacity() const {
-  if (animator_.get() && animator_->is_animating())
+  if (animator_.get() && animator_->IsAnimatingProperty(
+      LayerAnimationElement::OPACITY))
     return animator_->GetTargetOpacity();
   return opacity_;
 }
 
 void Layer::SetVisible(bool visible) {
-  if (visible_ == visible)
-    return;
+  GetAnimator()->SetVisibility(visible);
+}
 
-  visible_ = visible;
-  // TODO(piman): Expose a visibility flag on WebLayer.
-  web_layer_.setOpacity(visible_ ? opacity_ : 0.f);
+bool Layer::GetTargetVisibility() const {
+  if (animator_.get() && animator_->IsAnimatingProperty(
+      LayerAnimationElement::VISIBILITY))
+    return animator_->GetTargetVisibility();
+  return visible_;
 }
 
 bool Layer::IsDrawn() const {
@@ -265,19 +282,16 @@ void Layer::SetColor(SkColor color) {
   SetFillsBoundsOpaquely(SkColorGetA(color) == 0xFF);
 }
 
-void Layer::SchedulePaint(const gfx::Rect& invalid_rect) {
-  if (type_ == LAYER_SOLID_COLOR)
-    return;
-
-  WebKit::WebFloatRect web_rect(
-      invalid_rect.x(),
-      invalid_rect.y(),
-      invalid_rect.width(),
-      invalid_rect.height());
-  if (!web_layer_is_accelerated_)
-    web_layer_.to<WebKit::WebContentLayer>().invalidateRect(web_rect);
-  else
-    web_layer_.to<WebKit::WebExternalTextureLayer>().invalidateRect(web_rect);
+bool Layer::SchedulePaint(const gfx::Rect& invalid_rect) {
+  if (type_ == LAYER_SOLID_COLOR || !delegate_)
+    return false;
+  damaged_region_.op(invalid_rect.x(),
+                     invalid_rect.y(),
+                     invalid_rect.right(),
+                     invalid_rect.bottom(),
+                     SkRegion::kUnion_Op);
+  ScheduleDraw();
+  return true;
 }
 
 void Layer::ScheduleDraw() {
@@ -286,10 +300,40 @@ void Layer::ScheduleDraw() {
     compositor->ScheduleDraw();
 }
 
+void Layer::SendDamagedRects() {
+  if (delegate_ && !damaged_region_.isEmpty()) {
+    for (SkRegion::Iterator iter(damaged_region_);
+         !iter.done(); iter.next()) {
+      const SkIRect& damaged = iter.rect();
+      WebKit::WebFloatRect web_rect(
+          damaged.x(),
+          damaged.y(),
+          damaged.width(),
+          damaged.height());
+      if (!web_layer_is_accelerated_)
+        web_layer_.to<WebKit::WebContentLayer>().invalidateRect(web_rect);
+      else
+        web_layer_.to<WebKit::WebExternalTextureLayer>().invalidateRect(
+            web_rect);
+    }
+    damaged_region_.setEmpty();
+  }
+  for (size_t i = 0; i < children_.size(); ++i)
+    children_[i]->SendDamagedRects();
+}
+
+void Layer::SuppressPaint() {
+  if (!delegate_)
+    return;
+  delegate_ = NULL;
+  for (size_t i = 0; i < children_.size(); ++i)
+    children_[i]->SuppressPaint();
+}
+
 void Layer::paintContents(WebKit::WebCanvas* web_canvas,
                           const WebKit::WebRect& clip) {
   TRACE_EVENT0("ui", "Layer::paintContents");
-  gfx::CanvasSkia canvas(web_canvas);
+  gfx::Canvas canvas(web_canvas);
   if (delegate_)
     delegate_->OnPaintLayer(&canvas);
 }
@@ -325,30 +369,6 @@ void Layer::StackRelativeTo(Layer* child, Layer* other, bool above) {
 
   child->web_layer_.removeFromParent();
   web_layer_.insertChild(child->web_layer_, dest_i);
-}
-
-void Layer::GetLayerProperties(const ui::Transform& parent_transform,
-                               std::vector<LayerProperties>* traversal) {
-  if (!visible_ || opacity_ != 1.0f)
-    return;
-
-  ui::Transform current_transform;
-  if (transform().HasChange())
-    current_transform.ConcatTransform(transform());
-  current_transform.ConcatTranslate(
-      static_cast<float>(bounds().x()),
-      static_cast<float>(bounds().y()));
-  current_transform.ConcatTransform(parent_transform);
-
-  if (fills_bounds_opaquely_ && type_ != LAYER_NOT_DRAWN) {
-    LayerProperties properties;
-    properties.layer = this;
-    properties.transform_relative_to_root = current_transform;
-    traversal->push_back(properties);
-  }
-
-  for (size_t i = 0; i < children_.size(); i++)
-    children_[i]->GetLayerProperties(current_transform, traversal);
 }
 
 bool Layer::ConvertPointForAncestor(const Layer* ancestor,
@@ -417,6 +437,15 @@ void Layer::SetOpacityImmediately(float opacity) {
     ScheduleDraw();
 }
 
+void Layer::SetVisibilityImmediately(bool visible) {
+  if (visible_ == visible)
+    return;
+
+  visible_ = visible;
+  // TODO(piman): Expose a visibility flag on WebLayer.
+  web_layer_.setOpacity(visible_ ? opacity_ : 0.f);
+}
+
 void Layer::SetBoundsFromAnimation(const gfx::Rect& bounds) {
   SetBoundsImmediately(bounds);
 }
@@ -427,6 +456,10 @@ void Layer::SetTransformFromAnimation(const Transform& transform) {
 
 void Layer::SetOpacityFromAnimation(float opacity) {
   SetOpacityImmediately(opacity);
+}
+
+void Layer::SetVisibilityFromAnimation(bool visibility) {
+  SetVisibilityImmediately(visibility);
 }
 
 void Layer::ScheduleDrawForAnimation() {
@@ -443,6 +476,10 @@ const Transform& Layer::GetTransformForAnimation() const {
 
 float Layer::GetOpacityForAnimation() const {
   return opacity();
+}
+
+bool Layer::GetVisibilityForAnimation() const {
+  return visible();
 }
 
 void Layer::CreateWebLayer() {

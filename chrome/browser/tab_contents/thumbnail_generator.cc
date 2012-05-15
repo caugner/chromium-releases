@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <map>
 
+#include "base/bind.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram.h"
 #include "base/time.h"
@@ -15,12 +16,12 @@
 #include "chrome/browser/history/top_sites.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/thumbnail_score.h"
-#include "content/browser/renderer_host/backing_store.h"
-#include "content/browser/renderer_host/render_view_host.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/render_view_host.h"
+#include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "googleurl/src/gurl.h"
 #include "skia/ext/image_operations.h"
@@ -51,6 +52,8 @@
 // We'll likely revise the algorithm to improve quality of thumbnails this
 // service generates.
 
+using content::RenderViewHost;
+using content::RenderWidgetHost;
 using content::WebContents;
 
 namespace {
@@ -58,12 +61,35 @@ namespace {
 static const int kThumbnailWidth = 212;
 static const int kThumbnailHeight = 132;
 
+// This factor determines the number of pixels to be copied by
+// RenderWidgetHost::CopyFromBackingStore for generating thumbnail.
+// Smaller scale is good for performance, but too small scale causes aliasing
+// because the resampling method is not good enough to retain the image quality.
+// TODO(mazda): the Improve resampling method and use a smaller scale
+// (http://crbug.com/118571).
+static const double kThumbnailCopyScale = 2.0;
+
 static const char kThumbnailHistogramName[] = "Thumbnail.ComputeMS";
 
-// Creates a downsampled thumbnail for the given backing store. The returned
-// bitmap will be isNull if there was an error creating it.
-SkBitmap GetBitmapForBackingStore(
-    BackingStore* backing_store,
+// Calculates the size used by RenderWidgetHost::CopyFromBackingStore.
+// The result is computed as the minimum size that satisfies the following
+// conditions.
+//   result.width : result.height == view_size.width : view_size.height
+//   result.width >= kThumbnailCopyScale * desired_size.width
+//   result.height >= kThumbnailCopyScale * desired_size.height
+gfx::Size GetCopySizeForThumbnail(const gfx::Size& view_size,
+                                  const gfx::Size& desired_size) {
+  const double scale = kThumbnailCopyScale *
+      std::max(static_cast<double>(desired_size.width()) / view_size.width(),
+               static_cast<double>(desired_size.height()) / view_size.height());
+  return gfx::Size(static_cast<int>(scale * view_size.width()),
+                   static_cast<int>(scale * view_size.height()));
+}
+
+// Creates a downsampled thumbnail for the given RenderWidgetHost's backing
+// store. The returned bitmap will be isNull if there was an error creating it.
+SkBitmap GetBitmapForRenderWidgetHost(
+    RenderWidgetHost* render_widget_host,
     int desired_width,
     int desired_height,
     int options,
@@ -76,8 +102,14 @@ SkBitmap GetBitmapForBackingStore(
   // allocation and we can tolerate failure here, so give up if the allocation
   // fails.
   skia::PlatformCanvas temp_canvas;
-  if (!backing_store->CopyFromBackingStore(gfx::Rect(backing_store->size()),
-                                           &temp_canvas))
+  content::RenderWidgetHostView* view = render_widget_host->GetView();
+  if (!view)
+    return result;
+  const gfx::Size copy_size =
+      GetCopySizeForThumbnail(view->GetViewBounds().size(),
+                              gfx::Size(desired_width, desired_height));
+  if (!render_widget_host->CopyFromBackingStore(
+          gfx::Rect(), copy_size, &temp_canvas))
     return result;
   const SkBitmap& bmp_with_scrollbars =
       skia::GetTopDevice(temp_canvas)->accessBitmap(false);
@@ -200,17 +232,13 @@ void ThumbnailGenerator::AskForSnapshot(RenderWidgetHost* renderer,
                                         gfx::Size page_size,
                                         gfx::Size desired_size) {
   if (prefer_backing_store) {
-    BackingStore* backing_store = renderer->GetBackingStore(false);
-    if (backing_store) {
-      // We were able to find a non-null backing store for this renderer, so
-      // we'll go with it.
-      SkBitmap first_try = GetBitmapForBackingStore(backing_store,
-                                                    desired_size.width(),
-                                                    desired_size.height(),
-                                                    kNoOptions,
-                                                    NULL);
+    // We were able to find a non-null backing store for this renderer, so
+    // we'll go with it.
+    SkBitmap first_try = GetBitmapForRenderWidgetHost(
+        renderer, desired_size.width(), desired_size.height(), kNoOptions,
+        NULL);
+    if (!first_try.isNull()) {
       callback.Run(first_try);
-
       return;
     }
     // Now, if the backing store didn't exist, we will still try and
@@ -237,7 +265,7 @@ void ThumbnailGenerator::AskForSnapshot(RenderWidgetHost* renderer,
   // which is responsible for closing it.
   TransportDIB::Handle renderer_dib_handle;
   DuplicateHandle(GetCurrentProcess(), thumbnail_dib->handle(),
-                  renderer->process()->GetHandle(), &renderer_dib_handle,
+                  renderer->GetProcess()->GetHandle(), &renderer_dib_handle,
                   STANDARD_RIGHTS_REQUIRED | FILE_MAP_READ | FILE_MAP_WRITE,
                   FALSE, 0);
   if (!renderer_dib_handle) {
@@ -275,18 +303,8 @@ SkBitmap ThumbnailGenerator::GetThumbnailForRendererWithOptions(
     RenderWidgetHost* renderer,
     int options,
     ClipResult* clip_result) const {
-  BackingStore* backing_store = renderer->GetBackingStore(false);
-  if (!backing_store) {
-    // When we have no backing store, there's no choice in what to use. We
-    // have to return the empty thumbnail.
-    return SkBitmap();
-  }
-
-  return GetBitmapForBackingStore(backing_store,
-                                  kThumbnailWidth,
-                                  kThumbnailHeight,
-                                  options,
-                                  clip_result);
+  return GetBitmapForRenderWidgetHost(
+      renderer, kThumbnailWidth, kThumbnailHeight, options, clip_result);
 }
 
 void ThumbnailGenerator::WidgetDidReceivePaintAtSizeAck(
@@ -343,13 +361,12 @@ void ThumbnailGenerator::Observe(int type,
       break;
 
     case content::NOTIFICATION_RENDER_WIDGET_HOST_DID_RECEIVE_PAINT_AT_SIZE_ACK: {
-      RenderWidgetHost::PaintAtSizeAckDetails* size_ack_details =
-          content::Details<RenderWidgetHost::PaintAtSizeAckDetails>(details).
-              ptr();
+      std::pair<int, gfx::Size>* size_ack_details =
+          content::Details<std::pair<int, gfx::Size> >(details).ptr();
       WidgetDidReceivePaintAtSizeAck(
           content::Source<RenderWidgetHost>(source).ptr(),
-          size_ack_details->tag,
-          size_ack_details->size);
+          size_ack_details->first,
+          size_ack_details->second);
       break;
     }
 
@@ -388,14 +405,14 @@ void ThumbnailGenerator::WebContentsDisconnected(WebContents* contents) {
   }
 }
 
-double ThumbnailGenerator::CalculateBoringScore(SkBitmap* bitmap) {
-  if (bitmap->isNull() || bitmap->empty())
+double ThumbnailGenerator::CalculateBoringScore(const SkBitmap& bitmap) {
+  if (bitmap.isNull() || bitmap.empty())
     return 1.0;
   int histogram[256] = {0};
   color_utils::BuildLumaHistogram(bitmap, histogram);
 
   int color_count = *std::max_element(histogram, histogram + 256);
-  int pixel_count = bitmap->width() * bitmap->height();
+  int pixel_count = bitmap.width() * bitmap.height();
   return static_cast<double>(color_count) / pixel_count;
 }
 
@@ -429,8 +446,11 @@ SkBitmap ThumbnailGenerator::GetClippedBitmap(const SkBitmap& bitmap,
       S16CPU new_width = static_cast<S16CPU>(bitmap.height() * dest_aspect);
       S16CPU x_offset = (bitmap.width() - new_width) / 2;
       src_rect.set(x_offset, 0, new_width + x_offset, bitmap.height());
-      if (clip_result)
-        *clip_result = ThumbnailGenerator::kWiderThanTall;
+      if (clip_result) {
+        *clip_result = (src_aspect >= ThumbnailScore::kTooWideAspectRatio) ?
+            ThumbnailGenerator::kTooWiderThanTall :
+            ThumbnailGenerator::kWiderThanTall;
+      }
     } else if (src_aspect < dest_aspect) {
       src_rect.set(0, 0, bitmap.width(),
                    static_cast<S16CPU>(bitmap.width() / dest_aspect));
@@ -466,17 +486,32 @@ void ThumbnailGenerator::UpdateThumbnailIfNecessary(
   if (thumbnail.isNull())
     return;
 
+  UpdateThumbnail(web_contents, thumbnail, clip_result);
+}
+
+void ThumbnailGenerator::UpdateThumbnail(
+    WebContents* web_contents, const SkBitmap& thumbnail,
+    const ThumbnailGenerator::ClipResult& clip_result) {
+
+  Profile* profile =
+      Profile::FromBrowserContext(web_contents->GetBrowserContext());
+  history::TopSites* top_sites = profile->GetTopSites();
+  if (!top_sites)
+    return;
+
   // Compute the thumbnail score.
   ThumbnailScore score;
   score.at_top =
-      (web_contents->GetRenderViewHost()->last_scroll_offset().y() == 0);
-  score.boring_score = ThumbnailGenerator::CalculateBoringScore(&thumbnail);
+      (web_contents->GetRenderViewHost()->GetLastScrollOffset().y() == 0);
+  score.boring_score = ThumbnailGenerator::CalculateBoringScore(thumbnail);
   score.good_clipping =
-      (clip_result == ThumbnailGenerator::kTallerThanWide ||
+      (clip_result == ThumbnailGenerator::kWiderThanTall ||
+       clip_result == ThumbnailGenerator::kTallerThanWide ||
        clip_result == ThumbnailGenerator::kNotClipped);
   score.load_completed = (!load_interrupted_ && !web_contents->IsLoading());
 
   gfx::Image image(new SkBitmap(thumbnail));
+  const GURL& url = web_contents->GetURL();
   top_sites->SetPageThumbnail(url, &image, score);
   VLOG(1) << "Thumbnail taken for " << url << ": " << score.ToString();
 }

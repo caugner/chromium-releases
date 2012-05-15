@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,8 +10,6 @@
 #include "chrome/browser/chromeos/input_method/input_method_manager.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chrome/browser/chromeos/status/status_area_view_chromeos.h"
-#include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
@@ -19,20 +17,12 @@
 
 namespace {
 
-PrefService* GetPrefService() {
-  Profile* profile = ProfileManager::GetDefaultProfile();
-  if (profile)
-    return profile->GetPrefs();
-  return NULL;
-}
-
 // A class which implements interfaces of chromeos::InputMethodMenu. This class
 // is just for avoiding multiple inheritance.
 class MenuImpl : public chromeos::InputMethodMenu {
  public:
-  MenuImpl(chromeos::InputMethodMenuButton* button,
-           PrefService* pref_service)
-      : InputMethodMenu(pref_service, false), button_(button) {}
+  explicit MenuImpl(chromeos::InputMethodMenuButton* button)
+      : button_(button) {}
 
  private:
   // InputMethodMenu implementation.
@@ -64,7 +54,7 @@ namespace chromeos {
 InputMethodMenuButton::InputMethodMenuButton(
     StatusAreaButton::Delegate* delegate)
     : StatusAreaButton(delegate, this),
-      menu_(new MenuImpl(this, GetPrefService())) {
+      menu_(new MenuImpl(this)) {
   set_id(VIEW_ID_STATUS_BUTTON_INPUT_METHOD);
   UpdateUIFromCurrentInputMethod();
 }
@@ -84,14 +74,17 @@ void InputMethodMenuButton::OnLocaleChanged() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// views::ViewMenuDelegate implementation:
+// views::MenuButtonListener implementation:
 
-void InputMethodMenuButton::RunMenu(views::View* unused_source,
-                                    const gfx::Point& pt) {
-  menu_->RunMenu(unused_source, pt);
+void InputMethodMenuButton::OnMenuButtonClicked(views::View* source,
+                                                const gfx::Point& point) {
+  menu_->OnMenuButtonClicked(source, point);
 }
 
-bool InputMethodMenuButton::WindowIsActive() {
+bool InputMethodMenuButton::StatusAreaIsVisible() {
+#if defined(USE_ASH)
+  return true;
+#else
   Browser* active_browser = BrowserList::GetLastActive();
   if (!active_browser) {
     // Can't get an active browser. Just return true, which is safer.
@@ -104,6 +97,7 @@ bool InputMethodMenuButton::WindowIsActive() {
     return true;
   }
   return active_window->GetNativeHandle() == current_window->GetNativeWindow();
+#endif
 }
 
 void InputMethodMenuButton::UpdateUI(const std::string& input_method_id,
@@ -123,7 +117,7 @@ void InputMethodMenuButton::UpdateUI(const std::string& input_method_id,
   SetTooltipText(tooltip);
   SetAccessibleName(tooltip);
 
-  if (WindowIsActive()) {
+  if (StatusAreaIsVisible()) {
     // We don't call these functions if the |current_window| is not active since
     // the calls are relatively expensive (crosbug.com/9206). Please note that
     // PrepareMenuModel() is necessary for fixing crosbug.com/7522 when the
@@ -152,8 +146,9 @@ void InputMethodMenuButton::UpdateUIFromCurrentInputMethod() {
   input_method::InputMethodManager* input_method_manager =
       input_method::InputMethodManager::GetInstance();
   const input_method::InputMethodDescriptor& input_method =
-      input_method_manager->current_input_method();
-  const string16 name = InputMethodMenu::GetTextForIndicator(input_method);
+      input_method_manager->GetCurrentInputMethod();
+  const string16 name = input_method_manager->GetInputMethodUtil()->
+      GetInputMethodShortName(input_method);
   const string16 tooltip = InputMethodMenu::GetTextForMenu(input_method);
   const size_t num_active_input_methods =
       input_method_manager->GetNumActiveInputMethods();

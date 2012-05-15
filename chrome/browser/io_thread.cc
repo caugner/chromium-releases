@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,9 @@
 
 #include <vector>
 
-#include "base/command_line.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/command_line.h"
 #include "base/debug/leak_tracker.h"
 #include "base/logging.h"
 #include "base/stl_util.h"
@@ -20,12 +20,10 @@
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_event_router_forwarder.h"
-#include "chrome/browser/media/media_internals.h"
 #include "chrome/browser/net/chrome_net_log.h"
 #include "chrome/browser/net/chrome_network_delegate.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/browser/net/connect_interceptor.h"
-#include "chrome/browser/net/passive_log_collector.h"
 #include "chrome/browser/net/pref_proxy_config_tracker.h"
 #include "chrome/browser/net/proxy_service_factory.h"
 #include "chrome/browser/net/sdch_dictionary_fetcher.h"
@@ -36,16 +34,14 @@
 #include "content/public/common/content_client.h"
 #include "content/public/common/url_fetcher.h"
 #include "net/base/cert_verifier.h"
-#include "net/base/cookie_monster.h"
-#include "net/base/default_origin_bound_cert_store.h"
+#include "net/base/default_server_bound_cert_store.h"
 #include "net/base/host_cache.h"
 #include "net/base/host_resolver.h"
-#include "net/base/host_resolver_impl.h"
 #include "net/base/mapped_host_resolver.h"
 #include "net/base/net_util.h"
-#include "net/base/origin_bound_cert_service.h"
 #include "net/base/sdch_manager.h"
-#include "net/dns/async_host_resolver.h"
+#include "net/base/server_bound_cert_service.h"
+#include "net/cookies/cookie_monster.h"
 #include "net/ftp/ftp_network_layer.h"
 #include "net/http/http_auth_filter.h"
 #include "net/http/http_auth_handler_factory.h"
@@ -65,6 +61,8 @@
 #endif  // defined(OS_CHROMEOS)
 
 using content::BrowserThread;
+
+class SafeBrowsingURLRequestContext;
 
 // The IOThread object must outlive any tasks posted to the IO thread before the
 // Quit task, so base::Bind() calls are not refcounted.
@@ -89,14 +87,14 @@ class SystemURLRequestContext : public URLRequestContextWithUserAgent {
  public:
   SystemURLRequestContext() {
 #if defined(USE_NSS)
-    net::SetURLRequestContextForOCSP(this);
+    net::SetURLRequestContextForNSSHttpIO(this);
 #endif  // defined(USE_NSS)
   }
 
  private:
   virtual ~SystemURLRequestContext() {
 #if defined(USE_NSS)
-    net::SetURLRequestContextForOCSP(NULL);
+    net::SetURLRequestContextForNSSHttpIO(NULL);
 #endif  // defined(USE_NSS)
   }
 };
@@ -136,17 +134,9 @@ net::HostResolver* CreateGlobalHostResolver(net::NetLog* net_log) {
   }
 
   net::HostResolver* global_host_resolver = NULL;
-  if (command_line.HasSwitch(switches::kDnsServer)) {
-    std::string dns_ip_string =
-      command_line.GetSwitchValueASCII(switches::kDnsServer);
-    net::IPAddressNumber dns_ip_number;
-    if (net::ParseIPLiteralToNumber(dns_ip_string, &dns_ip_number)) {
-      global_host_resolver =
-        net::CreateAsyncHostResolver(parallelism, dns_ip_number, net_log);
-    } else {
-      LOG(ERROR) << "Invalid IP address specified for --dns-server: "
-                 << dns_ip_string;
-    }
+  if (command_line.HasSwitch(switches::kEnableAsyncDns)) {
+    global_host_resolver =
+        net::CreateAsyncHostResolver(parallelism, retry_attempts, net_log);
   }
 
   if (!global_host_resolver) {
@@ -192,11 +182,8 @@ class LoggingNetworkChangeObserver
   virtual void OnIPAddressChanged() {
     VLOG(1) << "Observed a change to the network IP addresses";
 
-    net_log_->AddEntry(net::NetLog::TYPE_NETWORK_IP_ADDRESSES_CHANGED,
-                       base::TimeTicks::Now(),
-                       net::NetLog::Source(),
-                       net::NetLog::PHASE_NONE,
-                       NULL);
+    net_log_->AddGlobalEntry(net::NetLog::TYPE_NETWORK_IP_ADDRESSES_CHANGED,
+                             NULL);
   }
 
  private:
@@ -224,8 +211,8 @@ ConstructProxyScriptFetcherContext(IOThread::Globals* globals,
   context->set_ftp_transaction_factory(
       globals->proxy_script_fetcher_ftp_transaction_factory.get());
   context->set_cookie_store(globals->system_cookie_store.get());
-  context->set_origin_bound_cert_service(
-      globals->system_origin_bound_cert_service.get());
+  context->set_server_bound_cert_service(
+      globals->system_server_bound_cert_service.get());
   context->set_network_delegate(globals->system_network_delegate.get());
   // TODO(rtenneti): We should probably use HttpServerPropertiesManager for the
   // system URLRequestContext too. There's no reason this should be tied to a
@@ -251,8 +238,8 @@ ConstructSystemRequestContext(IOThread::Globals* globals,
   context->set_ftp_transaction_factory(
       globals->system_ftp_transaction_factory.get());
   context->set_cookie_store(globals->system_cookie_store.get());
-  context->set_origin_bound_cert_service(
-      globals->system_origin_bound_cert_service.get());
+  context->set_server_bound_cert_service(
+      globals->system_server_bound_cert_service.get());
   return context;
 }
 
@@ -298,10 +285,6 @@ SystemURLRequestContextGetter::GetIOMessageLoopProxy() const {
 IOThread::Globals::Globals() {}
 
 IOThread::Globals::~Globals() {}
-
-IOThread::Globals::MediaGlobals::MediaGlobals() {}
-
-IOThread::Globals::MediaGlobals::~MediaGlobals() {}
 
 // |local_state| is passed in explicitly in order to (1) reduce implicit
 // dependencies and (2) make IOThread more flexible for testing.
@@ -380,13 +363,11 @@ void IOThread::Init() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
 #if defined(USE_NSS)
-  net::SetMessageLoopForOCSP();
+  net::SetMessageLoopForNSSHttpIO();
 #endif  // defined(USE_NSS)
 
   DCHECK(!globals_);
   globals_ = new Globals;
-
-  globals_->media.media_internals.reset(new MediaInternals());
 
   // Add an observer that will emit network change events to the ChromeNetLog.
   // Assuming NetworkChangeNotifier dispatches in FIFO order, we should be
@@ -401,10 +382,11 @@ void IOThread::Init() {
       NULL,
       NULL,
       NULL,
+      NULL,
       &system_enable_referrers_));
   globals_->host_resolver.reset(
       CreateGlobalHostResolver(net_log_));
-  globals_->cert_verifier.reset(new net::CertVerifier);
+  globals_->cert_verifier.reset(net::CertVerifier::CreateDefault());
   globals_->transport_security_state.reset(new net::TransportSecurityState(""));
   globals_->ssl_config_service = GetSSLConfigService();
   globals_->http_auth_handler_factory.reset(CreateDefaultAuthHandlerFactory(
@@ -415,15 +397,15 @@ void IOThread::Init() {
       net::ProxyService::CreateDirectWithNetLog(net_log_));
   // In-memory cookie store.
   globals_->system_cookie_store = new net::CookieMonster(NULL, NULL);
-  // In-memory origin-bound cert store.
-  globals_->system_origin_bound_cert_service.reset(
-      new net::OriginBoundCertService(
-          new net::DefaultOriginBoundCertStore(NULL)));
+  // In-memory server bound cert store.
+  globals_->system_server_bound_cert_service.reset(
+      new net::ServerBoundCertService(
+          new net::DefaultServerBoundCertStore(NULL)));
   net::HttpNetworkSession::Params session_params;
   session_params.host_resolver = globals_->host_resolver.get();
   session_params.cert_verifier = globals_->cert_verifier.get();
-  session_params.origin_bound_cert_service =
-      globals_->system_origin_bound_cert_service.get();
+  session_params.server_bound_cert_service =
+      globals_->system_server_bound_cert_service.get();
   session_params.transport_security_state =
       globals_->transport_security_state.get();
   session_params.proxy_service =
@@ -449,7 +431,6 @@ void IOThread::Init() {
       ConstructProxyScriptFetcherContext(globals_, net_log_);
 
   sdch_manager_ = new net::SdchManager();
-  sdch_manager_->set_sdch_fetcher(new SdchDictionaryFetcher);
 
   // InitSystemRequestContext turns right around and posts a task back
   // to the IO thread, so we can't let it run until we know the IO
@@ -473,11 +454,13 @@ void IOThread::Init() {
 }
 
 void IOThread::CleanUp() {
+  base::debug::LeakTracker<SafeBrowsingURLRequestContext>::CheckForLeaks();
+
   delete sdch_manager_;
   sdch_manager_ = NULL;
 
 #if defined(USE_NSS)
-  net::ShutdownOCSP();
+  net::ShutdownNSSHttpIO();
 #endif  // defined(USE_NSS)
 
   system_url_request_context_getter_ = NULL;
@@ -554,11 +537,6 @@ void IOThread::ChangedToOnTheRecordOnIOThread() {
   // Clear the host cache to avoid showing entries from the OTR session
   // in about:net-internals.
   ClearHostCache();
-
-  // Clear all of the passively logged data.
-  // TODO(eroman): this is a bit heavy handed, really all we need to do is
-  //               clear the data pertaining to incognito context.
-  net_log_->ClearAllPassivelyCapturedEvents();
 }
 
 void IOThread::InitSystemRequestContext() {
@@ -601,8 +579,8 @@ void IOThread::InitSystemRequestContextOnIOThread() {
   net::HttpNetworkSession::Params system_params;
   system_params.host_resolver = globals_->host_resolver.get();
   system_params.cert_verifier = globals_->cert_verifier.get();
-  system_params.origin_bound_cert_service =
-      globals_->system_origin_bound_cert_service.get();
+  system_params.server_bound_cert_service =
+      globals_->system_server_bound_cert_service.get();
   system_params.transport_security_state =
       globals_->transport_security_state.get();
   system_params.ssl_host_info_factory = NULL;
@@ -620,4 +598,7 @@ void IOThread::InitSystemRequestContextOnIOThread() {
       new net::FtpNetworkLayer(globals_->host_resolver.get()));
   globals_->system_request_context =
       ConstructSystemRequestContext(globals_, net_log_);
+
+  sdch_manager_->set_sdch_fetcher(
+      new SdchDictionaryFetcher(system_url_request_context_getter_.get()));
 }

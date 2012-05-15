@@ -235,6 +235,10 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // GetPreferredSize.
   virtual gfx::Size GetMinimumSize();
 
+  // Gets the maximum size of the view. Currently only used for sizing shell
+  // windows.
+  virtual gfx::Size GetMaximumSize();
+
   // Return the height necessary to display this view with the provided width.
   // View's implementation returns the value from getPreferredSize.cy.
   // Override if your View's preferred height depends upon the width (such
@@ -617,6 +621,14 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // will be given a chance.
   virtual bool OnMouseWheel(const MouseWheelEvent& event);
 
+  // See field for description.
+  void set_notify_enter_exit_on_child(bool notify) {
+    notify_enter_exit_on_child_ = notify;
+  }
+  bool notify_enter_exit_on_child() const {
+    return notify_enter_exit_on_child_;
+  }
+
   // Returns the View's TextInputClient instance or NULL if the View doesn't
   // support text input.
   virtual ui::TextInputClient* GetTextInputClient();
@@ -882,6 +894,10 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // Called when the preferred size of a child view changed.  This gives the
   // parent an opportunity to do a fresh layout if that makes sense.
   virtual void ChildPreferredSizeChanged(View* child) {}
+
+  // Called when the visibility of a child view changed.  This gives the parent
+  // an opportunity to do a fresh layout if that makes sense.
+  virtual void ChildVisibilityChanged(View* child) {}
 
   // Invalidates the layout and calls ChildPreferredSizeChanged on the parent
   // if there is one. Be sure to call View::PreferredSizeChanged when
@@ -1303,8 +1319,9 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
 
   // Starts a drag and drop operation originating from this view. This invokes
   // WriteDragData to write the data and GetDragOperations to determine the
-  // supported drag operations. When done, OnDragDone is invoked.
-  void DoDrag(const MouseEvent& event, const gfx::Point& press_pt);
+  // supported drag operations. When done, OnDragDone is invoked. |press_pt| is
+  // in the view's coordinate system.
+  void DoDrag(const LocatedEvent& event, const gfx::Point& press_pt);
 
   //////////////////////////////////////////////////////////////////////////////
 
@@ -1345,6 +1362,21 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
 
   // Whether this view is painting.
   bool painting_enabled_;
+
+  // When this flag is on, a View receives a mouse-enter and mouse-leave event
+  // even if a descendant View is the event-recipient for the real mouse
+  // events. When this flag is turned on, and mouse moves from outside of the
+  // view into a child view, both the child view and this view receives
+  // mouse-enter event. Similarly, if the mouse moves from inside a child view
+  // and out of this view, then both views receive a mouse-leave event.
+  // When this flag is turned off, if the mouse moves from inside this view into
+  // a child view, then this view receives a mouse-leave event. When this flag
+  // is turned on, it does not receive the mouse-leave event in this case.
+  // When the mouse moves from inside the child view out of the child view but
+  // still into this view, this view receives a mouse-enter event if this flag
+  // is turned off, but doesn't if this flag is turned on.
+  // This flag is initialized to false.
+  bool notify_enter_exit_on_child_;
 
   // Whether or not RegisterViewForVisibleBoundsNotification on the RootView
   // has been invoked.

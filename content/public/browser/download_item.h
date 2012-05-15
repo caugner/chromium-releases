@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -23,14 +23,13 @@
 
 #include "base/string16.h"
 #include "content/browser/download/download_state_info.h"
-#include "content/browser/download/interrupt_reasons.h"
 #include "content/public/browser/download_danger_type.h"
+#include "content/public/browser/download_interrupt_reasons.h"
 
 class DownloadFileManager;
 class FilePath;
 class GURL;
 struct DownloadCreateInfo;
-struct DownloadPersistentStoreInfo;
 
 namespace base {
 class Time;
@@ -43,6 +42,7 @@ class BrowserContext;
 class DownloadId;
 class DownloadManager;
 class WebContents;
+struct DownloadPersistentStoreInfo;
 
 // One DownloadItem per download. This is the model class that stores all the
 // state for a download. Multiple views, such as a tab's download shelf and the
@@ -183,7 +183,7 @@ class CONTENT_EXPORT DownloadItem {
   // |reason| is the download interrupt reason code that the operation received.
   virtual void Interrupted(int64 size,
                            const std::string& hash_state,
-                           InterruptReason reason) = 0;
+                           DownloadInterruptReason reason) = 0;
 
   // Deletes the file from disk and removes the download from the views and
   // history.  |user| should be true if this is the result of the user clicking
@@ -251,6 +251,9 @@ class CONTENT_EXPORT DownloadItem {
   // Returns true if we have all the data and know the final file name.
   virtual bool IsComplete() const = 0;
 
+  virtual void SetIsPersisted() = 0;
+  virtual bool IsPersisted() const = 0;
+
   // Accessors
   virtual const std::string& GetHash() const = 0;
   virtual DownloadState GetState() const = 0;
@@ -283,10 +286,8 @@ class CONTENT_EXPORT DownloadItem {
   virtual SafetyState GetSafetyState() const = 0;
   // Why |safety_state_| is not SAFE.
   virtual DownloadDangerType GetDangerType() const = 0;
+  virtual void SetDangerType(DownloadDangerType danger_type) = 0;
   virtual bool IsDangerous() const = 0;
-  virtual void MarkContentDangerous() = 0;
-  virtual void MarkFileDangerous() = 0;
-  virtual void MarkUrlDangerous() = 0;
 
   virtual bool GetAutoOpened() = 0;
   virtual const FilePath& GetTargetName() const = 0;
@@ -294,13 +295,14 @@ class CONTENT_EXPORT DownloadItem {
   virtual bool IsOtr() const = 0;
   virtual const FilePath& GetSuggestedPath() const = 0;
   virtual bool IsTemporary() const = 0;
+  virtual void SetIsTemporary(bool temporary) = 0;
   virtual void SetOpened(bool opened) = 0;
   virtual bool GetOpened() const = 0;
 
   virtual const std::string& GetLastModifiedTime() const = 0;
   virtual const std::string& GetETag() const = 0;
 
-  virtual InterruptReason GetLastReason() const = 0;
+  virtual DownloadInterruptReason GetLastReason() const = 0;
   virtual DownloadPersistentStoreInfo GetPersistentStoreInfo() const = 0;
   virtual DownloadStateInfo GetStateInfo() const = 0;
   virtual BrowserContext* GetBrowserContext() const = 0;
@@ -309,9 +311,15 @@ class CONTENT_EXPORT DownloadItem {
   // Returns the final target file path for the download.
   virtual FilePath GetTargetFilePath() const = 0;
 
-  // Returns the file-name that should be reported to the user, which is
-  // target_name possibly with the uniquifier number.
+  // Returns the file-name that should be reported to the user. If a display
+  // name has been explicitly set using SetDisplayName(), this function returns
+  // that display name. Otherwise returns the final target filename.
   virtual FilePath GetFileNameToReportUser() const = 0;
+
+  // Set a display name for the download that will be independent of the target
+  // filename. If |name| is not empty, then GetFileNameToReportUser() will
+  // return |name|. Has no effect on the final target filename.
+  virtual void SetDisplayName(const FilePath& name) = 0;
 
   // Returns the user-verified target file path for the download.
   // This returns the same path as GetTargetFilePath() for safe downloads
@@ -341,7 +349,8 @@ class CONTENT_EXPORT DownloadItem {
   // If an object is already held by the DownloadItem associated with
   // the passed key, it will be destroyed if overwriten by a new pointer
   // (overwrites by the same pointer are ignored).
-  virtual ExternalData* GetExternalData(const void* key) = 0;
+  virtual       ExternalData* GetExternalData(const void* key) = 0;
+  virtual const ExternalData* GetExternalData(const void* key) const = 0;
   virtual void SetExternalData(const void* key, ExternalData* data) = 0;
 
   virtual std::string DebugString(bool verbose) const = 0;

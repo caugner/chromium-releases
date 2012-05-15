@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,17 +23,13 @@ AppNotificationDataTypeController::AppNotificationDataTypeController(
     ProfileSyncComponentsFactory* profile_sync_factory,
     Profile* profile,
     ProfileSyncService* sync_service)
-    : FrontendDataTypeController(profile_sync_factory,
-                                 profile,
-                                 sync_service) {
+    : UIDataTypeController(syncable::APP_NOTIFICATIONS,
+                           profile_sync_factory,
+                           profile,
+                           sync_service) {
 }
 
 AppNotificationDataTypeController::~AppNotificationDataTypeController() {
-  CleanUpState();
-}
-
-syncable::ModelType AppNotificationDataTypeController::type() const {
-  return syncable::APP_NOTIFICATIONS;
 }
 
 void AppNotificationDataTypeController::Observe(
@@ -62,33 +58,8 @@ bool AppNotificationDataTypeController::StartModels() {
 }
 
 // Cleanup for our extra registrar usage.
-void AppNotificationDataTypeController::CleanUpState() {
+void AppNotificationDataTypeController::StopModels() {
   registrar_.RemoveAll();
-}
-
-void AppNotificationDataTypeController::CreateSyncComponents() {
-  ProfileSyncComponentsFactory::SyncComponents sync_components =
-      profile_sync_factory_->CreateAppNotificationSyncComponents(
-          sync_service_, this);
-  set_model_associator(sync_components.model_associator);
-  set_change_processor(sync_components.change_processor);
-}
-
-void AppNotificationDataTypeController::RecordUnrecoverableError(
-    const tracked_objects::Location& from_here,
-    const std::string& message) {
-  UMA_HISTOGRAM_COUNTS("Sync.AppNotificationRunFailures", 1);
-}
-
-void AppNotificationDataTypeController::RecordAssociationTime(
-    base::TimeDelta time) {
-  UMA_HISTOGRAM_TIMES("Sync.AppNotificationAssociationTime", time);
-}
-
-void AppNotificationDataTypeController::RecordStartFailure(StartResult result) {
-  UMA_HISTOGRAM_ENUMERATION("Sync.AppNotificationStartFailures",
-                            result,
-                            MAX_START_RESULT);
 }
 
 AppNotificationManager*

@@ -32,15 +32,14 @@ void NetworkLoginObserver::CreateModalPopup(views::WidgetDelegate* view) {
     browser = BrowserList::FindTabbedBrowser(browser->profile(), true);
   }
   if (browser) {
-    views::Widget* window = browser::CreateViewsWindow(
-        browser->window()->GetNativeHandle(), view, STYLE_GENERIC);
+    views::Widget* window = views::Widget::CreateWindowWithParent(
+        view, browser->window()->GetNativeHandle());
     window->SetAlwaysOnTop(true);
     window->Show();
   } else {
     // Browser not found, so we should be in login/oobe screen.
-    views::Widget* window = browser::CreateViewsWindow(
-        BaseLoginDisplayHost::default_host()->GetNativeWindow(),
-        view, STYLE_GENERIC);
+    views::Widget* window = views::Widget::CreateWindowWithParent(
+        view, BaseLoginDisplayHost::default_host()->GetNativeWindow());
     window->SetAlwaysOnTop(true);
     window->Show();
   }
@@ -56,10 +55,12 @@ void NetworkLoginObserver::OnNetworkManagerChanged(NetworkLibrary* cros) {
     WifiNetwork* wifi = *it;
     if (wifi->notify_failure()) {
       // Display login dialog again for bad_passphrase and bad_wepkey errors.
+      // Always re-display for user initiated connections that fail.
       // Always re-display the login dialog for encrypted networks that were
       // added and failed to connect for any reason.
       if (wifi->error() == ERROR_BAD_PASSPHRASE ||
           wifi->error() == ERROR_BAD_WEPKEY ||
+          wifi->connection_started() ||
           (wifi->encrypted() && wifi->added())) {
         CreateModalPopup(new NetworkConfigView(wifi));
         return;  // Only support one failure per notification.

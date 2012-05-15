@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/sync/glue/data_type_controller.h"
+#include "chrome/browser/sync/glue/data_type_error_handler.h"
 
 class Profile;
 class ProfileSyncService;
@@ -24,8 +25,6 @@ namespace browser_sync {
 class AssociatorInterface;
 class ChangeProcessor;
 
-// TODO(zea): have naming and style match NonFrontendDataTypeController.
-// TODO(zea): Rename frontend to UI (http://crbug.com/78833).
 // Implementation for datatypes that reside on the frontend thread
 // (UI thread). This is the same thread we perform initialization on, so we
 // don't have to worry about thread safety. The main start/stop funtionality is
@@ -33,11 +32,9 @@ class ChangeProcessor;
 // Derived classes must implement (at least):
 //    syncable::ModelType type() const
 //    void CreateSyncComponents();
-//    void RecordUnrecoverableError(
-//        const tracked_objects::Location& from_here,
-//        const std::string& message);
-//    void RecordAssociationTime(base::TimeDelta time);
-//    void RecordStartFailure(StartResult result);
+// NOTE: This class is deprecated! New sync datatypes should be using the
+// SyncableService API and the UIDataTypeController instead.
+// TODO(zea): Delete this once all types are on the new API.
 class FrontendDataTypeController : public DataTypeController {
  public:
   FrontendDataTypeController(
@@ -54,9 +51,12 @@ class FrontendDataTypeController : public DataTypeController {
   virtual std::string name() const OVERRIDE;
   virtual State state() const OVERRIDE;
 
-  // UnrecoverableErrorHandler interface.
+  // DataTypeErrorHandler interface.
   virtual void OnUnrecoverableError(const tracked_objects::Location& from_here,
                                     const std::string& message) OVERRIDE;
+  virtual void OnSingleDatatypeUnrecoverableError(
+      const tracked_objects::Location& from_here,
+      const std::string& message) OVERRIDE;
 
  protected:
   // For testing only.
@@ -88,16 +88,10 @@ class FrontendDataTypeController : public DataTypeController {
   virtual void StartFailed(StartResult result, const SyncError& error);
   virtual void FinishStart(StartResult result);
 
-  // DataType specific histogram methods. Because histograms use static's, the
-  // specific datatype controllers must implement this themselves.
-  // Record unrecoverable errors.
-  virtual void RecordUnrecoverableError(
-      const tracked_objects::Location& from_here,
-      const std::string& message) = 0;
   // Record association time.
-  virtual void RecordAssociationTime(base::TimeDelta time) = 0;
+  virtual void RecordAssociationTime(base::TimeDelta time);
   // Record causes of start failure.
-  virtual void RecordStartFailure(StartResult result) = 0;
+  virtual void RecordStartFailure(StartResult result);
 
   virtual AssociatorInterface* model_associator() const;
   virtual void set_model_associator(AssociatorInterface* associator);

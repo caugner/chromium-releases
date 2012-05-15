@@ -13,8 +13,10 @@ namespace extension_tabs_module_constants {
 // Keys used in serializing tab data & events.
 extern const char kActiveKey[];
 extern const char kAllFramesKey[];
+extern const char kAlwaysOnTopKey[];
 extern const char kBypassCache[];
 extern const char kCodeKey[];
+extern const char kCurrentWindowKey[];
 extern const char kDrawAttentionKey[];
 extern const char kFaviconUrlKey[];
 extern const char kFileKey[];
@@ -24,6 +26,7 @@ extern const char kFromIndexKey[];
 extern const char kHeightKey[];
 extern const char kIdKey[];
 extern const char kIndexKey[];
+extern const char kLastFocusedWindowKey[];
 extern const char kLeftKey[];
 extern const char kNewPositionKey[];
 extern const char kNewWindowIdKey[];
@@ -31,7 +34,6 @@ extern const char kOldPositionKey[];
 extern const char kOldWindowIdKey[];
 extern const char kOpenerTabIdKey[];
 extern const char kPinnedKey[];
-extern const char kPopulateKey[];
 extern const char kQualityKey[];
 extern const char kHighlightedKey[];
 extern const char kSelectedKey[];
@@ -62,12 +64,14 @@ extern const char kMimeTypePng[];
 extern const char kShowStateValueNormal[];
 extern const char kShowStateValueMinimized[];
 extern const char kShowStateValueMaximized[];
+extern const char kShowStateValueFullscreen[];
 extern const char kStatusValueComplete[];
 extern const char kStatusValueLoading[];
 extern const char kWindowTypeValueNormal[];
 extern const char kWindowTypeValuePopup[];
 extern const char kWindowTypeValuePanel[];
 extern const char kWindowTypeValueApp[];
+extern const char kWindowTypeValueShell[];
 
 // Error messages.
 extern const char kNoCrashBrowserError[];

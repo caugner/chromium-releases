@@ -8,12 +8,12 @@
 #include "base/message_loop.h"
 #include "base/message_loop_proxy.h"
 #include "googleurl/src/gurl.h"
-#include "webkit/fileapi/file_system_callback_dispatcher.h"
 #include "webkit/fileapi/file_system_context.h"
 #include "webkit/fileapi/file_system_operation.h"
 #include "webkit/fileapi/file_system_operation_context.h"
 #include "webkit/fileapi/file_system_usage_cache.h"
 #include "webkit/fileapi/file_system_util.h"
+#include "webkit/fileapi/file_util_helper.h"
 #include "webkit/fileapi/mock_file_system_options.h"
 #include "webkit/fileapi/sandbox_mount_point_provider.h"
 #include "webkit/quota/mock_special_storage_policy.h"
@@ -107,7 +107,7 @@ FilePath FileSystemTestOriginHelper::GetLocalPath(const FilePath& path) {
   DCHECK(file_util_);
   FilePath local_path;
   scoped_ptr<FileSystemOperationContext> context(NewOperationContext());
-  file_util_->GetLocalFilePath(context.get(), path, &local_path);
+  file_util_->GetLocalFilePath(context.get(), CreatePath(path), &local_path);
   return local_path;
 }
 
@@ -126,6 +126,25 @@ FilePath FileSystemTestOriginHelper::GetUsageCachePath() const {
       sandbox_provider()->GetUsageCachePathForOriginAndType(origin_, type_);
 }
 
+FileSystemPath FileSystemTestOriginHelper::CreatePath(
+    const FilePath& path) const {
+  return FileSystemPath(origin_, type_, path);
+}
+
+base::PlatformFileError FileSystemTestOriginHelper::SameFileUtilCopy(
+    FileSystemOperationContext* context,
+    const FileSystemPath& src,
+    const FileSystemPath& dest) const {
+  return FileUtilHelper::Copy(context, file_util(), file_util(), src, dest);
+}
+
+base::PlatformFileError FileSystemTestOriginHelper::SameFileUtilMove(
+    FileSystemOperationContext* context,
+    const FileSystemPath& src,
+    const FileSystemPath& dest) const {
+  return FileUtilHelper::Move(context, file_util(), file_util(), src, dest);
+}
+
 int64 FileSystemTestOriginHelper::GetCachedOriginUsage() const {
   return FileSystemUsageCache::GetUsage(GetUsageCachePath());
 }
@@ -141,36 +160,21 @@ int64 FileSystemTestOriginHelper::ComputeCurrentOriginUsage() const {
   return size;
 }
 
-FileSystemOperation* FileSystemTestOriginHelper::NewOperation(
-    FileSystemCallbackDispatcher* callback_dispatcher) {
+FileSystemOperation* FileSystemTestOriginHelper::NewOperation() {
   DCHECK(file_system_context_.get());
   DCHECK(file_util_);
   FileSystemOperation* operation =
-    new FileSystemOperation(scoped_ptr<FileSystemCallbackDispatcher>(
-                                callback_dispatcher),
-                            base::MessageLoopProxy::current(),
+    new FileSystemOperation(base::MessageLoopProxy::current(),
                             file_system_context_.get());
   operation->set_override_file_util(file_util_);
-  InitializeOperationContext(operation->file_system_operation_context());
   return operation;
 }
 
 FileSystemOperationContext* FileSystemTestOriginHelper::NewOperationContext() {
   DCHECK(file_system_context_.get());
-  DCHECK(file_util_);
   FileSystemOperationContext* context =
-    new FileSystemOperationContext(file_system_context_.get(), file_util_);
-  InitializeOperationContext(context);
+    new FileSystemOperationContext(file_system_context_.get());
   return context;
-}
-
-void FileSystemTestOriginHelper::InitializeOperationContext(
-    FileSystemOperationContext* context) {
-  DCHECK(context);
-  context->set_src_origin_url(origin_);
-  context->set_src_type(type_);
-  context->set_dest_origin_url(origin_);
-  context->set_dest_type(type_);
 }
 
 }  // namespace fileapi

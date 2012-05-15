@@ -41,16 +41,18 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/browser/renderer_host/render_process_host_impl.h"
-#include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/tab_contents/interstitial_page.h"
 #include "content/public/browser/favicon_status.h"
+#include "content/public/browser/interstitial_page.h"
+#include "content/public/browser/interstitial_page_delegate.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/browser/render_process_host.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/page_transition_types.h"
+#include "content/public/common/renderer_preferences.h"
 #include "content/public/common/url_constants.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -63,6 +65,7 @@
 #include "chrome/browser/browser_process.h"
 #endif
 
+using content::InterstitialPage;
 using content::NavigationController;
 using content::NavigationEntry;
 using content::OpenURLParams;
@@ -153,15 +156,24 @@ void RunCloseWithAppMenuCallback(Browser* browser) {
 // Displays "INTERSTITIAL" while the interstitial is attached.
 // (InterstitialPage can be used in a test directly, but there would be no way
 // to visually tell if it is showing or not.)
-class TestInterstitialPage : public InterstitialPage {
+class TestInterstitialPage : public content::InterstitialPageDelegate {
  public:
-  TestInterstitialPage(WebContents* tab, bool new_navigation, const GURL& url)
-      : InterstitialPage(tab, new_navigation, url) { }
+  TestInterstitialPage(WebContents* tab, bool new_navigation, const GURL& url) {
+    interstitial_page_ = InterstitialPage::Create(
+        tab, new_navigation, url , this);
+    interstitial_page_->Show();
+  }
   virtual ~TestInterstitialPage() { }
+  void Proceed() {
+    interstitial_page_->Proceed();
+  }
 
   virtual std::string GetHTMLContents() OVERRIDE {
     return "<h1>INTERSTITIAL</h1>";
   }
+
+ private:
+  InterstitialPage* interstitial_page_;  // Owns us.
 };
 
 }  // namespace
@@ -247,11 +259,9 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, JavascriptAlertActivatesTab) {
 }
 
 
-
 #if defined(OS_WIN)
-// http://crbug.com/75274. On XP crashes inside
-// URLFetcher::Core::Registry::RemoveURLFetcherCore.
-#define MAYBE_ThirtyFourTabs FLAKY_ThirtyFourTabs
+// http://crbug.com/114859. Times out frequently on Windows.
+#define MAYBE_ThirtyFourTabs DISABLED_ThirtyFourTabs
 #else
 #define MAYBE_ThirtyFourTabs ThirtyFourTabs
 #endif
@@ -267,16 +277,24 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, MAYBE_ThirtyFourTabs) {
                                      FilePath(kTitle2File)));
 
   // There is one initial tab.
-  for (int ix = 0; ix != 33; ++ix)
+  const int kTabCount = 34;
+  for (int ix = 0; ix != (kTabCount - 1); ++ix)
     browser()->AddSelectedTabWithURL(url, content::PAGE_TRANSITION_TYPED);
-  EXPECT_EQ(34, browser()->tab_count());
+  EXPECT_EQ(kTabCount, browser()->tab_count());
 
-  // See browser\renderer_host\render_process_host.cc for the algorithm to
-  // decide how many processes to create.
+  // See GetMaxRendererProcessCount() in
+  // content/browser/renderer_host/render_process_host_impl.cc
+  // for the algorithm to decide how many processes to create.
+  const int kExpectedProcessCount =
+#if defined(ARCH_CPU_64_BITS)
+      17;
+#else
+      25;
+#endif
   if (base::SysInfo::AmountOfPhysicalMemoryMB() >= 2048) {
-    EXPECT_GE(CountRenderProcessHosts(), 24);
+    EXPECT_GE(CountRenderProcessHosts(), kExpectedProcessCount);
   } else {
-    EXPECT_LE(CountRenderProcessHosts(), 23);
+    EXPECT_LT(CountRenderProcessHosts(), kExpectedProcessCount);
   }
 }
 
@@ -363,6 +381,32 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, MAYBE_SingleBeforeUnloadAfterWindowClose) {
   alert->native_dialog()->AcceptAppModalDialog();
 }
 
+// Test that when a page has an onunload handler, reloading a page shows a
+// different dialog than navigating to a different page.
+IN_PROC_BROWSER_TEST_F(BrowserTest, BeforeUnloadVsBeforeReload) {
+  GURL url(std::string("data:text/html,") + kBeforeUnloadHTML);
+  ui_test_utils::NavigateToURL(browser(), url);
+
+  // Reload the page, and check that we get a "before reload" dialog.
+  browser()->Reload(CURRENT_TAB);
+  AppModalDialog* alert = ui_test_utils::WaitForAppModalDialog();
+  EXPECT_TRUE(static_cast<JavaScriptAppModalDialog*>(alert)->is_reload());
+
+  // Cancel the reload.
+  alert->native_dialog()->CancelAppModalDialog();
+
+  // Navigate to another url, and check that we get a "before unload" dialog.
+  GURL url2(std::string("about:blank"));
+  browser()->OpenURL(OpenURLParams(
+      url2, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED, false));
+
+  alert = ui_test_utils::WaitForAppModalDialog();
+  EXPECT_FALSE(static_cast<JavaScriptAppModalDialog*>(alert)->is_reload());
+
+  // Accept the navigation so we end up on a page without a beforeunload hook.
+  alert->native_dialog()->AcceptAppModalDialog();
+}
+
 // Test that scripts can fork a new renderer process for a cross-site popup,
 // based on http://www.google.com/chrome/intl/en/webmasters-faq.html#newtab.
 // The script must open a new tab, set its window.opener to null, and navigate
@@ -375,6 +419,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, NullOpenerRedirectForksProcess) {
   // Create http and https servers for a cross-site transition.
   ASSERT_TRUE(test_server()->Start());
   net::TestServer https_test_server(net::TestServer::TYPE_HTTPS,
+                                    net::TestServer::kLocalhost,
                                     FilePath(kDocRoot));
   ASSERT_TRUE(https_test_server.Start());
   GURL http_url(test_server()->GetURL("files/title1.html"));
@@ -463,6 +508,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, OtherRedirectsDontForkProcess) {
   // Create http and https servers for a cross-site transition.
   ASSERT_TRUE(test_server()->Start());
   net::TestServer https_test_server(net::TestServer::TYPE_HTTPS,
+                                    net::TestServer::kLocalhost,
                                     FilePath(kDocRoot));
   ASSERT_TRUE(https_test_server.Start());
   GURL http_url(test_server()->GetURL("files/title1.html"));
@@ -571,7 +617,9 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, CommandCreateAppShortcutHttp) {
 IN_PROC_BROWSER_TEST_F(BrowserTest, CommandCreateAppShortcutHttps) {
   CommandUpdater* command_updater = browser()->command_updater();
 
-  net::TestServer test_server(net::TestServer::TYPE_HTTPS, FilePath(kDocRoot));
+  net::TestServer test_server(net::TestServer::TYPE_HTTPS,
+                              net::TestServer::kLocalhost,
+                              FilePath(kDocRoot));
   ASSERT_TRUE(test_server.Start());
   GURL https_url(test_server.GetURL("/"));
   ASSERT_TRUE(https_url.SchemeIs(chrome::kHttpsScheme));
@@ -582,7 +630,9 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, CommandCreateAppShortcutHttps) {
 IN_PROC_BROWSER_TEST_F(BrowserTest, CommandCreateAppShortcutFtp) {
   CommandUpdater* command_updater = browser()->command_updater();
 
-  net::TestServer test_server(net::TestServer::TYPE_FTP, FilePath(kDocRoot));
+  net::TestServer test_server(net::TestServer::TYPE_FTP,
+                              net::TestServer::kLocalhost,
+                              FilePath(kDocRoot));
   ASSERT_TRUE(test_server.Start());
   GURL ftp_url(test_server.GetURL(""));
   ASSERT_TRUE(ftp_url.SchemeIs(chrome::kFtpScheme));
@@ -679,7 +729,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest,
 
 #if defined(OS_MACOSX) || defined(OS_LINUX)
 // http://crbug.com/83828. On Mac 10.6, the failure rate is 14%
-#define MAYBE_FaviconChange FLAKY_FaviconChange
+#define MAYBE_FaviconChange DISABLED_FaviconChange
 #else
 #define MAYBE_FaviconChange FaviconChange
 #endif
@@ -779,15 +829,8 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, AppIdSwitch) {
 }
 #endif
 
-#if defined(OS_WIN) || defined(OS_MACOSX)
-// http://crbug.com/46198: On XP/Vista, the failure rate is 5 ~ 6%.
-// On OS 10.5 it's 1%, 10.6 currently 4%.
-#define MAYBE_PageLanguageDetection FLAKY_PageLanguageDetection
-#else
-#define MAYBE_PageLanguageDetection PageLanguageDetection
-#endif
 // Tests that the CLD (Compact Language Detection) works properly.
-IN_PROC_BROWSER_TEST_F(BrowserTest, MAYBE_PageLanguageDetection) {
+IN_PROC_BROWSER_TEST_F(BrowserTest, PageLanguageDetection) {
   ASSERT_TRUE(test_server()->Start());
 
   std::string lang;
@@ -953,7 +996,7 @@ IN_PROC_BROWSER_TEST_F(
     ui_test_utils::WindowedNotificationObserver fullscreen_observer(
         chrome::NOTIFICATION_FULLSCREEN_CHANGED,
         content::NotificationService::AllSources());
-    browser()->TogglePresentationMode(false);
+    browser()->TogglePresentationMode();
     fullscreen_observer.Wait();
     ASSERT_FALSE(browser()->window()->IsFullscreen());
     ASSERT_FALSE(browser()->window()->InPresentationMode());
@@ -965,7 +1008,7 @@ IN_PROC_BROWSER_TEST_F(
     ui_test_utils::WindowedNotificationObserver fullscreen_observer(
         chrome::NOTIFICATION_FULLSCREEN_CHANGED,
         content::NotificationService::AllSources());
-    browser()->ToggleFullscreenMode(false);
+    browser()->ToggleFullscreenMode();
     fullscreen_observer.Wait();
     ASSERT_TRUE(browser()->window()->IsFullscreen());
     ASSERT_FALSE(browser()->window()->InPresentationMode());
@@ -1046,7 +1089,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, RestorePinnedTabs) {
   EXPECT_TRUE(new_model->IsTabPinned(1));
   EXPECT_FALSE(new_model->IsTabPinned(2));
 
-  EXPECT_EQ(browser()->profile()->GetHomePage(),
+  EXPECT_EQ(GURL(chrome::kChromeUINewTabURL),
       new_model->GetTabContentsAt(2)->web_contents()->GetURL());
 
   EXPECT_TRUE(
@@ -1057,7 +1100,13 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, RestorePinnedTabs) {
 
 // This test verifies we don't crash when closing the last window and the app
 // menu is showing.
-IN_PROC_BROWSER_TEST_F(BrowserTest, CloseWithAppMenuOpen) {
+// And on Chrome OS we do (http://crbug.com/113949).
+#if defined(OS_CHROMEOS)
+#define MAYBE_CloseWithAppMenuOpen DISABLED_CloseWithAppMenuOpen
+#else
+#define MAYBE_CloseWithAppMenuOpen CloseWithAppMenuOpen
+#endif
+IN_PROC_BROWSER_TEST_F(BrowserTest, MAYBE_CloseWithAppMenuOpen) {
   if (browser_defaults::kBrowserAliveWithNoWindows)
     return;
 
@@ -1176,18 +1225,8 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, ForwardDisabledOnForward) {
   forward_nav_load_observer.Wait();
 }
 
-#if defined(OS_WIN)
-// see http://crbug.com/105306
-#define MAYBE_DisableMenuItemsWhenIncognitoIsForced \
-    FLAKY_DisableMenuItemsWhenIncognitoIsForced
-#else
-#define MAYBE_DisableMenuItemsWhenIncognitoIsForced \
-    DisableMenuItemsWhenIncognitoIsForced
-#endif
-
 // Makes sure certain commands are disabled when Incognito mode is forced.
-IN_PROC_BROWSER_TEST_F(BrowserTest,
-                       MAYBE_DisableMenuItemsWhenIncognitoIsForced) {
+IN_PROC_BROWSER_TEST_F(BrowserTest, DisableMenuItemsWhenIncognitoIsForced) {
   CommandUpdater* command_updater = browser()->command_updater();
   // At the beginning, all commands are enabled.
   EXPECT_TRUE(command_updater->IsCommandEnabled(IDC_NEW_WINDOW));
@@ -1358,7 +1397,6 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, InterstitialCommandDisable) {
   ui_test_utils::WindowedNotificationObserver interstitial_observer(
       content::NOTIFICATION_INTERSTITIAL_ATTACHED,
       content::Source<WebContents>(contents));
-  interstitial->Show();
   interstitial_observer.Wait();
 
   EXPECT_TRUE(contents->ShowingInterstitialPage());
@@ -1379,7 +1417,6 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, InterstitialCommandDisable) {
   EXPECT_TRUE(command_updater->IsCommandEnabled(IDC_PRINT));
   EXPECT_TRUE(command_updater->IsCommandEnabled(IDC_SAVE_PAGE));
   EXPECT_TRUE(command_updater->IsCommandEnabled(IDC_ENCODING_MENU));
-
 }
 
 class MockWebContentsObserver : public WebContentsObserver {

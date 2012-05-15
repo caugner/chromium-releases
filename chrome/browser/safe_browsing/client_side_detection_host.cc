@@ -21,9 +21,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/safe_browsing/csd.pb.h"
 #include "chrome/common/safe_browsing/safebrowsing_messages.h"
-#include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/renderer_host/resource_dispatcher_host.h"
-#include "content/browser/renderer_host/resource_request_details.h"
+#include "content/public/browser/resource_request_details.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_details.h"
@@ -32,6 +30,7 @@
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_view_host_delegate.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/frame_navigate_params.h"
@@ -39,6 +38,7 @@
 
 using content::BrowserThread;
 using content::NavigationEntry;
+using content::ResourceRequestDetails;
 using content::WebContents;
 
 namespace safe_browsing {
@@ -216,9 +216,9 @@ class ClientSideDetectionHost::ShouldClassifyUrlRequest
     // before it is.
     VLOG(1) << "Instruct renderer to start phishing detection for URL: "
             << params_.url;
-    RenderViewHost* rvh = web_contents_->GetRenderViewHost();
+    content::RenderViewHost* rvh = web_contents_->GetRenderViewHost();
     rvh->Send(new SafeBrowsingMsg_StartPhishingDetection(
-        rvh->routing_id(), params_.url));
+        rvh->GetRoutingID(), params_.url));
   }
 
   // No need to protect |canceled_| with a lock because it is only read and
@@ -329,7 +329,7 @@ void ClientSideDetectionHost::OnSafeBrowsingHit(
   if (web_contents() &&
       web_contents()->GetRenderProcessHost()->GetID() ==
           resource.render_process_host_id &&
-      web_contents()->GetRenderViewHost()->routing_id() ==
+      web_contents()->GetRenderViewHost()->GetRoutingID() ==
           resource.render_view_id &&
       (resource.threat_type == SafeBrowsingService::URL_PHISHING ||
        resource.threat_type == SafeBrowsingService::URL_MALWARE) &&
@@ -408,7 +408,7 @@ void ClientSideDetectionHost::MaybeShowPhishingWarning(GURL phishing_url,
       resource.render_process_host_id =
           web_contents()->GetRenderProcessHost()->GetID();
       resource.render_view_id =
-          web_contents()->GetRenderViewHost()->routing_id();
+          web_contents()->GetRenderViewHost()->GetRoutingID();
       if (!sb_service_->IsWhitelisted(resource)) {
         // We need to stop any pending navigations, otherwise the interstital
         // might not get created properly.
@@ -451,7 +451,7 @@ void ClientSideDetectionHost::Observe(
   const ResourceRequestDetails* req = content::Details<ResourceRequestDetails>(
       details).ptr();
   if (req && browse_info_.get()) {
-    browse_info_->ips.insert(req->socket_address().host());
+    browse_info_->ips.insert(req->socket_address.host());
   }
 }
 

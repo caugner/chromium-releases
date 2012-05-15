@@ -23,11 +23,9 @@
 #include "webkit/glue/window_open_disposition.h"
 
 class GURL;
-class RenderViewHost;
 class SkBitmap;
 class TabContents;
 class WebKeyboardEvent;
-struct ContextMenuParams;
 struct NativeWebKeyboardEvent;
 struct ViewHostMsg_CreateWindow_Params;
 struct ViewHostMsg_FrameNavigate_Params;
@@ -37,6 +35,7 @@ struct WebPreferences;
 
 namespace base {
 class ListValue;
+class TimeTicks;
 }
 
 namespace gfx {
@@ -48,7 +47,9 @@ class Size;
 namespace content {
 
 class BrowserContext;
+class RenderViewHost;
 class WebContents;
+struct ContextMenuParams;
 struct FileChooserParams;
 struct GlobalRequestID;
 struct Referrer;
@@ -120,7 +121,7 @@ class CONTENT_EXPORT RenderViewHostDelegate : public IPC::Channel::Listener {
 
     // A context menu should be shown, to be built using the context information
     // provided in the supplied params.
-    virtual void ShowContextMenu(const ContextMenuParams& params) = 0;
+    virtual void ShowContextMenu(const content::ContextMenuParams& params) = 0;
 
     // Shows a popup menu with the specified items.
     // This method should call RenderViewHost::DidSelectPopupMenuItemAt() or
@@ -166,9 +167,12 @@ class CONTENT_EXPORT RenderViewHostDelegate : public IPC::Channel::Listener {
     // AttemptToClosePage.  This is called before a cross-site request or before
     // a tab/window is closed (as indicated by the first parameter) to allow the
     // appropriate renderer to approve or deny the request.  |proceed| indicates
-    // whether the user chose to proceed.
-    virtual void ShouldClosePage(bool for_cross_site_transition,
-                                 bool proceed) = 0;
+    // whether the user chose to proceed.  |proceed_time| is the time when the
+    // request was allowed to proceed.
+    virtual void ShouldClosePage(
+        bool for_cross_site_transition,
+        bool proceed,
+        const base::TimeTicks& proceed_time) = 0;
 
     // Called by ResourceDispatcherHost when a response for a pending cross-site
     // request is received.  The ResourceDispatcherHost will pause the response
@@ -304,6 +308,7 @@ class CONTENT_EXPORT RenderViewHostDelegate : public IPC::Channel::Listener {
 
   virtual void RunBeforeUnloadConfirm(RenderViewHost* rvh,
                                       const string16& message,
+                                      bool is_reload,
                                       IPC::Message* reply_msg) {}
 
   // Return a dummy RendererPreferences object that will be used by the renderer
@@ -385,6 +390,9 @@ class CONTENT_EXPORT RenderViewHostDelegate : public IPC::Channel::Listener {
 
   // The contents' preferred size changed.
   virtual void UpdatePreferredSize(const gfx::Size& pref_size) {}
+
+  // The contents auto-resized and the container should match it.
+  virtual void ResizeDueToAutoResize(const gfx::Size& new_size) {}
 
   // Notification message from HTML UI.
   virtual void WebUISend(RenderViewHost* render_view_host,

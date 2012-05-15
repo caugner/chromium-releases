@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,10 @@
 #pragma once
 
 #include "base/memory/ref_counted.h"
+#include "base/memory/singleton.h"
 #include "base/observer_list.h"
-#include "base/threading/non_thread_safe.h"
 #include "base/values.h"
-#include "content/browser/renderer_host/media/media_observer.h"
+#include "content/public/browser/media_observer.h"
 
 class MediaInternalsObserver;
 
@@ -19,12 +19,15 @@ struct MediaLogEvent;
 }
 
 // This class stores information about currently active media.
-// All of its methods are called on the IO thread.
-class MediaInternals : public MediaObserver, public base::NonThreadSafe {
+// It's constructed on the UI thread but all of its methods are called on the IO
+// thread.
+class MediaInternals : public content::MediaObserver {
  public:
   virtual ~MediaInternals();
 
-  // MediaObserver implementation.
+  static MediaInternals* GetInstance();
+
+  // Overridden from content::MediaObserver:
   virtual void OnDeleteAudioStream(void* host, int stream_id) OVERRIDE;
   virtual void OnSetAudioStreamPlaying(void* host,
                                        int stream_id,
@@ -46,8 +49,8 @@ class MediaInternals : public MediaObserver, public base::NonThreadSafe {
   void SendEverything();
 
  private:
-  friend class IOThread;
   friend class MediaInternalsTest;
+  friend struct DefaultSingletonTraits<MediaInternals>;
 
   MediaInternals();
 

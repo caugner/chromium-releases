@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,7 @@
 #endif
 
 #include "ui/base/accessibility/accessible_view_state.h"
-#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/canvas.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/native_theme.h"
 #include "ui/views/border.h"
@@ -81,7 +81,7 @@ class MenuScrollButton : public View {
     gfx::Rect item_bounds(0, 0, width(), height());
     NativeTheme::ExtraParams extra;
     extra.menu_item.is_selected = false;
-    NativeTheme::instance()->Paint(canvas->GetSkCanvas(),
+    NativeTheme::instance()->Paint(canvas->sk_canvas(),
                                    NativeTheme::kMenuItemBackground,
                                    NativeTheme::kNormal, item_bounds, extra);
 #if defined(OS_WIN)
@@ -99,7 +99,7 @@ class MenuScrollButton : public View {
       y += config.scroll_arrow_height;
     }
     for (int i = 0; i < config.scroll_arrow_height; ++i, --x, y += delta_y)
-      canvas->FillRect(arrow_color, gfx::Rect(x, y, (i * 2) + 1, 1));
+      canvas->FillRect(gfx::Rect(x, y, (i * 2) + 1, 1), arrow_color);
   }
 
  private:
@@ -183,7 +183,7 @@ void MenuScrollViewContainer::OnPaintBackground(gfx::Canvas* canvas) {
 #endif
   gfx::Rect bounds(0, 0, width(), height());
   NativeTheme::ExtraParams extra;
-  NativeTheme::instance()->Paint(canvas->GetSkCanvas(),
+  NativeTheme::instance()->Paint(canvas->sk_canvas(),
       NativeTheme::kMenuPopupBackground, NativeTheme::kNormal, bounds, extra);
 #if defined(OS_WIN)
   canvas->EndPlatformPaint();

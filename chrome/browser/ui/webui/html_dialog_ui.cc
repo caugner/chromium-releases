@@ -10,13 +10,14 @@
 #include "base/property_bag.h"
 #include "base/values.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/browser/renderer_host/render_view_host.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_message_handler.h"
 #include "content/public/common/bindings_policy.h"
 
+using content::RenderViewHost;
 using content::WebUIMessageHandler;
 
 static base::LazyInstance<base::PropertyAccessor<HtmlDialogUIDelegate*> >
@@ -103,7 +104,16 @@ ExternalHtmlDialogUI::ExternalHtmlDialogUI(content::WebUI* web_ui)
 ExternalHtmlDialogUI::~ExternalHtmlDialogUI() {
 }
 
-bool HtmlDialogUIDelegate::HandleContextMenu(const ContextMenuParams& params) {
+std::string HtmlDialogUIDelegate::GetDialogName() const {
+  return std::string();
+}
+
+void HtmlDialogUIDelegate::GetMinimumDialogSize(gfx::Size* size) const {
+  GetDialogSize(size);
+}
+
+bool HtmlDialogUIDelegate::HandleContextMenu(
+    const content::ContextMenuParams& params) {
   return false;
 }
 

@@ -17,24 +17,26 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_utility_messages.h"
 #include "chrome/common/web_resource/web_resource_unpacker.h"
-#include "content/browser/renderer_host/resource_dispatcher_host.h"
-#include "content/browser/utility_process_host.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/resource_dispatcher_host.h"
+#include "content/public/browser/utility_process_host.h"
+#include "content/public/browser/utility_process_host_client.h"
 #include "content/public/common/url_fetcher.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/load_flags.h"
 #include "net/url_request/url_request_status.h"
 
 using content::BrowserThread;
+using content::UtilityProcessHost;
+using content::UtilityProcessHostClient;
 
 // This class coordinates a web resource unpack and parse task which is run in
 // a separate process.  Results are sent back to this class and routed to
 // the WebResourceService.
-class WebResourceService::UnpackerClient : public UtilityProcessHost::Client {
+class WebResourceService::UnpackerClient : public UtilityProcessHostClient {
  public:
   explicit UnpackerClient(WebResourceService* web_resource_service)
     : web_resource_service_(web_resource_service),
-      resource_dispatcher_host_(ResourceDispatcherHost::Get()),
       got_response_(false) {
   }
 
@@ -42,11 +44,11 @@ class WebResourceService::UnpackerClient : public UtilityProcessHost::Client {
     AddRef();  // balanced in Cleanup.
 
     // TODO(willchan): Look for a better signal of whether we're in a unit test
-    // or not. Using |resource_dispatcher_host_| for this is pretty lame.
-    // If we don't have a resource_dispatcher_host_, assume we're in
-    // a test and run the unpacker directly in-process.
+    // or not. Using |ResourceDispatcherHost::Get()| for this is pretty lame.
+    // If we don't have a ResourceDispatcherHost, assume we're in a test and
+    // run the unpacker directly in-process.
     bool use_utility_process =
-        resource_dispatcher_host_ != NULL &&
+        content::ResourceDispatcherHost::Get() &&
         !CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess);
     if (use_utility_process) {
       BrowserThread::ID thread_id;
@@ -68,8 +70,8 @@ class WebResourceService::UnpackerClient : public UtilityProcessHost::Client {
  private:
   virtual ~UnpackerClient() {}
 
-  // UtilityProcessHost::Client
-  virtual bool OnMessageReceived(const IPC::Message& message) {
+  // UtilityProcessHostClient
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE {
     bool handled = true;
     IPC_BEGIN_MESSAGE_MAP(WebResourceService::UnpackerClient, message)
       IPC_MESSAGE_HANDLER(ChromeUtilityHostMsg_UnpackWebResource_Succeeded,
@@ -81,7 +83,7 @@ class WebResourceService::UnpackerClient : public UtilityProcessHost::Client {
     return handled;
   }
 
-  virtual void OnProcessCrashed(int exit_code) {
+  virtual void OnProcessCrashed(int exit_code) OVERRIDE {
     if (got_response_)
       return;
 
@@ -111,17 +113,14 @@ class WebResourceService::UnpackerClient : public UtilityProcessHost::Client {
 
   void StartProcessOnIOThread(BrowserThread::ID thread_id,
                               const std::string& json_data) {
-    UtilityProcessHost* host = new UtilityProcessHost(this, thread_id);
-    host->set_use_linux_zygote(true);
+    UtilityProcessHost* host = UtilityProcessHost::Create(this, thread_id);
+    host->EnableZygote();
     // TODO(mrc): get proper file path when we start using web resources
     // that need to be unpacked.
     host->Send(new ChromeUtilityMsg_UnpackWebResource(json_data));
   }
 
   scoped_refptr<WebResourceService> web_resource_service_;
-
-  // Owned by the global browser process.
-  ResourceDispatcherHost* resource_dispatcher_host_;
 
   // True if we got a response from the utility process and have cleaned up
   // already.
@@ -213,6 +212,7 @@ void WebResourceService::StartFetch() {
   // Do not let url fetcher affect existing state in system context
   // (by setting cookies, for example).
   url_fetcher_->SetLoadFlags(net::LOAD_DISABLE_CACHE |
+                             net::LOAD_DO_NOT_SEND_COOKIES |
                              net::LOAD_DO_NOT_SAVE_COOKIES);
   net::URLRequestContextGetter* url_request_context_getter =
       g_browser_process->system_request_context();

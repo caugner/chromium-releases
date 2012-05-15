@@ -1,6 +1,10 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
+// Chromium settings and storage represent user-selected preferences and
+// information and MUST not be extracted, overwritten or modified except
+// through Chromium defined APIs.
 
 #ifndef CHROME_BROWSER_WEBDATA_WEB_DATA_SERVICE_H__
 #define CHROME_BROWSER_WEBDATA_WEB_DATA_SERVICE_H__
@@ -17,6 +21,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/synchronization/lock.h"
 #include "chrome/browser/search_engines/template_url_id.h"
+#include "chrome/browser/webdata/keyword_table.h"
 #include "content/public/browser/browser_thread.h"
 #include "sql/init_status.h"
 
@@ -25,6 +30,7 @@ class AutofillChange;
 class AutofillProfile;
 class AutofillProfileSyncableService;
 class CreditCard;
+struct DefaultWebIntentService;
 class GURL;
 #if defined(OS_WIN)
 struct IE7PasswordInfo;
@@ -85,7 +91,8 @@ typedef enum {
   AUTOFILL_PROFILES_RESULT,    // WDResult<std::vector<AutofillProfile*>>
   AUTOFILL_CREDITCARD_RESULT,  // WDResult<CreditCard>
   AUTOFILL_CREDITCARDS_RESULT, // WDResult<std::vector<CreditCard*>>
-  WEB_INTENTS_RESULT           // WDResult<std::vector<string16>>
+  WEB_INTENTS_RESULT,          // WDResult<std::vector<WebIntentServiceData>>
+  WEB_INTENTS_DEFAULTS_RESULT, // WDResult<std::vector<DefaultWebIntentService>>
 } WDResultType;
 
 typedef std::vector<AutofillChange> AutofillChangeList;
@@ -106,7 +113,7 @@ struct WDKeywordsResult {
   WDKeywordsResult();
   ~WDKeywordsResult();
 
-  std::vector<TemplateURL*> keywords;
+  KeywordTable::Keywords keywords;
   // Identifies the ID of the TemplateURL that is the default search. A value of
   // 0 indicates there is no default search provider.
   int64 default_search_provider_id;
@@ -335,7 +342,7 @@ class WebDataService
   void UpdateKeyword(const TemplateURL& url);
 
   // Fetches the keywords.
-  // On success, consumer is notified with WDResult<std::vector<TemplateURL*>.
+  // On success, consumer is notified with WDResult<KeywordTable::Keywords>.
   Handle GetKeywords(WebDataServiceConsumer* consumer);
 
   // Sets the keywords used for the default search provider.
@@ -389,6 +396,23 @@ class WebDataService
 
   // Get all web intent services registered. |consumer| must not be NULL.
   Handle GetAllWebIntentServices(WebDataServiceConsumer* consumer);
+
+  // Adds a default web intent service entry.
+  void AddDefaultWebIntentService(const DefaultWebIntentService& service);
+
+  // Removes a default web intent service entry. Removes entries matching
+  // the |action|, |type|, and |url_pattern| of |service|.
+  void RemoveDefaultWebIntentService(const DefaultWebIntentService& service);
+
+  // Get a list of all web intent service defaults for the given |action|.
+  // |consumer| must not be null.
+  Handle GetDefaultWebIntentServicesForAction(const string16& action,
+                                              WebDataServiceConsumer* consumer);
+
+  // Get a list of all registered web intent service defaults.
+  // |consumer| must not be null.
+  Handle GetAllDefaultWebIntentServices(WebDataServiceConsumer* consumer);
+
 
   //////////////////////////////////////////////////////////////////////////////
   //
@@ -575,7 +599,7 @@ class WebDataService
   friend class base::DeleteHelper<WebDataService>;
 
   typedef GenericRequest2<std::vector<const TemplateURL*>,
-                          std::vector<TemplateURL*> > SetKeywordsRequest;
+                          KeywordTable::Keywords> SetKeywordsRequest;
 
   // Invoked on the main thread if initializing the db fails.
   void DBInitFailed(sql::InitStatus init_status);
@@ -642,6 +666,13 @@ class WebDataService
   void GetWebIntentServicesImpl(GenericRequest<string16>* request);
   void GetWebIntentServicesForURLImpl(GenericRequest<string16>* request);
   void GetAllWebIntentServicesImpl(GenericRequest<std::string>* request);
+  void AddDefaultWebIntentServiceImpl(
+      GenericRequest<DefaultWebIntentService>* request);
+  void RemoveDefaultWebIntentServiceImpl(
+      GenericRequest<DefaultWebIntentService>* request);
+  void GetDefaultWebIntentServicesForActionImpl(
+      GenericRequest<string16>* request);
+  void GetAllDefaultWebIntentServicesImpl(GenericRequest<std::string>* request);
 
   //////////////////////////////////////////////////////////////////////////////
   //

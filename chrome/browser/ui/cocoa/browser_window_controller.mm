@@ -34,6 +34,7 @@
 #import "chrome/browser/ui/cocoa/browser_window_cocoa.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller_private.h"
 #import "chrome/browser/ui/cocoa/browser_window_utils.h"
+#import "chrome/browser/ui/cocoa/chrome_to_mobile_bubble_controller.h"
 #import "chrome/browser/ui/cocoa/dev_tools_controller.h"
 #import "chrome/browser/ui/cocoa/download/download_shelf_controller.h"
 #import "chrome/browser/ui/cocoa/event_utils.h"
@@ -62,8 +63,8 @@
 #include "chrome/browser/ui/window_sizer.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/renderer_host/render_widget_host_view.h"
+#include "content/public/browser/render_view_host.h"
+#include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
@@ -147,6 +148,7 @@
 
 using content::OpenURLParams;
 using content::Referrer;
+using content::RenderWidgetHostView;
 using content::WebContents;
 
 @interface NSWindow (NSPrivateApis)
@@ -929,7 +931,7 @@ enum {
   if (resizeRectDirty) {
     // Send new resize rect to foreground tab.
     if (content::WebContents* contents = browser_->GetSelectedWebContents()) {
-      if (RenderViewHost* rvh = contents->GetRenderViewHost()) {
+      if (content::RenderViewHost* rvh = contents->GetRenderViewHost()) {
         rvh->ResizeRectChanged(windowShim_->GetRootWindowResizerRect());
       }
     }
@@ -1041,7 +1043,7 @@ enum {
           }
           break;
         }
-        case IDC_SYNC_BOOKMARKS: {
+        case IDC_SHOW_SYNC_SETUP: {
           Profile* original_profile =
               browser_->profile()->GetOriginalProfile();
           enable &= original_profile->IsSyncAccessible();
@@ -1093,6 +1095,14 @@ enum {
 // command key is down, ignore the command key, but process any other modifiers.
 - (void)commandDispatchUsingKeyModifiers:(id)sender {
   DCHECK(sender);
+
+  if (![sender isEnabled]) {
+    // This code is reachable e.g. if the user mashes the back button, queuing
+    // up a bunch of events before the button's enabled state is updated:
+    // http://crbug.com/63254
+    return;
+  }
+
   // See comment above for why we do this.
   BrowserWindowController* targetController = self;
   if ([sender respondsToSelector:@selector(window)])
@@ -1236,7 +1246,7 @@ enum {
 
     // Before the tab is detached from its originating tab strip, store the
     // pinned state so that it can be maintained between the windows.
-    bool isPinned = dragBWC->browser_->tabstrip_model()->IsTabPinned(index);
+    bool isPinned = dragBWC->browser_->IsTabPinned(index);
 
     // Now that we have enough information about the tab, we can remove it from
     // the dragging window. We need to do this *before* we add it to the new
@@ -1318,7 +1328,7 @@ enum {
                                 -tabOverflow.width, -tabOverflow.height);
 
   // Before detaching the tab, store the pinned state.
-  bool isPinned = browser_->tabstrip_model()->IsTabPinned(index);
+  bool isPinned = browser_->IsTabPinned(index);
 
   // Detach it from the source window, which just updates the model without
   // deleting the tab contents. This needs to come before creating the new
@@ -1468,7 +1478,7 @@ enum {
 
 - (NSInteger)numberOfTabs {
   // count() includes pinned tabs.
-  return browser_->tabstrip_model()->count();
+  return browser_->tab_count();
 }
 
 - (BOOL)hasLiveTabs {
@@ -1590,20 +1600,59 @@ enum {
     [bookmarkBubbleController_ showWindow:self];
     NSNotificationCenter* center = [NSNotificationCenter defaultCenter];
     [center addObserver:self
-               selector:@selector(bubbleWindowWillClose:)
+               selector:@selector(bookmarkBubbleWindowWillClose:)
                    name:NSWindowWillCloseNotification
                  object:[bookmarkBubbleController_ window]];
   }
 }
 
 // Nil out the weak bookmark bubble controller reference.
-- (void)bubbleWindowWillClose:(NSNotification*)notification {
-  DCHECK([notification object] == [bookmarkBubbleController_ window]);
+- (void)bookmarkBubbleWindowWillClose:(NSNotification*)notification {
+  DCHECK_EQ([notification object], [bookmarkBubbleController_ window]);
+
   NSNotificationCenter* center = [NSNotificationCenter defaultCenter];
   [center removeObserver:self
-                 name:NSWindowWillCloseNotification
-               object:[bookmarkBubbleController_ window]];
+                    name:NSWindowWillCloseNotification
+                  object:[bookmarkBubbleController_ window]];
   bookmarkBubbleController_ = nil;
+}
+
+- (NSPoint)chromeToMobileBubblePoint {
+  return [toolbarController_ chromeToMobileBubblePoint];
+}
+
+// Show the Chrome To Mobile bubble (e.g. user just clicked on the icon).
+- (void)showChromeToMobileBubble {
+  // Do nothing if the bubble is already showing.
+  if (chromeToMobileBubbleController_)
+    return;
+
+  chromeToMobileBubbleController_ =
+      [[ChromeToMobileBubbleController alloc]
+          initWithParentWindow:[self window]
+                       profile:[self profile]];
+  [chromeToMobileBubbleController_ showWindow:self];
+
+  NSNotificationCenter* center = [NSNotificationCenter defaultCenter];
+  [center addObserver:self
+             selector:@selector(chromeToMobileBubbleWindowWillClose:)
+                 name:NSWindowWillCloseNotification
+               object:[chromeToMobileBubbleController_ window]];
+  // Show the lit Chrome To Mobile icon while the bubble is visible.
+  [self locationBarBridge]->SetChromeToMobileDecorationLit(true);
+}
+
+// Nil out the weak Chrome To Mobile bubble controller reference.
+- (void)chromeToMobileBubbleWindowWillClose:(NSNotification*)notification {
+  DCHECK_EQ([notification object], [chromeToMobileBubbleController_ window]);
+
+  NSNotificationCenter* center = [NSNotificationCenter defaultCenter];
+  [center removeObserver:self
+                    name:NSWindowWillCloseNotification
+                  object:[chromeToMobileBubbleController_ window]];
+  chromeToMobileBubbleController_ = nil;
+  // Restore the dimmed Chrome To Mobile icon when the bubble closes.
+  [self locationBarBridge]->SetChromeToMobileDecorationLit(false);
 }
 
 // Handle the editBookmarkNode: action sent from bookmark bubble controllers.

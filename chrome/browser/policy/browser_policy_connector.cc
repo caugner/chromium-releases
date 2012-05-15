@@ -5,6 +5,7 @@
 #include "chrome/browser/policy/browser_policy_connector.h"
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/path_service.h"
@@ -13,7 +14,7 @@
 #include "chrome/browser/policy/cloud_policy_provider_impl.h"
 #include "chrome/browser/policy/cloud_policy_subsystem.h"
 #include "chrome/browser/policy/configuration_policy_provider.h"
-#include "chrome/browser/policy/network_configuration_updater.h"
+#include "chrome/browser/policy/policy_service_impl.h"
 #include "chrome/browser/policy/user_policy_cache.h"
 #include "chrome/browser/policy/user_policy_token_cache.h"
 #include "chrome/browser/signin/token_service.h"
@@ -38,7 +39,9 @@
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/system/statistics_provider.h"
+#include "chrome/browser/policy/app_pack_updater.h"
 #include "chrome/browser/policy/device_policy_cache.h"
+#include "chrome/browser/policy/network_configuration_updater.h"
 #endif
 
 using content::BrowserThread;
@@ -89,6 +92,9 @@ BrowserPolicyConnector::~BrowserPolicyConnector() {
 #if defined(OS_CHROMEOS)
   if (device_cloud_policy_subsystem_.get())
     device_cloud_policy_subsystem_->Shutdown();
+  // The AppPackUpdater may be observing the |device_cloud_policy_subsystem_|.
+  // Delete it first.
+  app_pack_updater_.reset();
   device_cloud_policy_subsystem_.reset();
   device_data_store_.reset();
 #endif
@@ -114,6 +120,14 @@ void BrowserPolicyConnector::Init() {
       GetChromePolicyDefinitionList(),
       POLICY_LEVEL_RECOMMENDED));
 
+  // |providers| in decreasing order of priority.
+  PolicyServiceImpl::Providers providers;
+  providers.push_back(managed_platform_provider_.get());
+  providers.push_back(managed_cloud_provider_.get());
+  providers.push_back(recommended_platform_provider_.get());
+  providers.push_back(recommended_cloud_provider_.get());
+  policy_service_.reset(new PolicyServiceImpl(providers));
+
 #if defined(OS_CHROMEOS)
   InitializeDevicePolicy();
 
@@ -123,6 +137,14 @@ void BrowserPolicyConnector::Init() {
             managed_cloud_provider_.get(),
             chromeos::CrosLibrary::Get()->GetNetworkLibrary()));
   }
+
+  // Create the AppPackUpdater to start updating the cache. It requires the
+  // system request context, which isn't available yet; therefore it is
+  // created only once the loops are running.
+  MessageLoop::current()->PostTask(
+      FROM_HERE,
+      base::Bind(base::IgnoreResult(&BrowserPolicyConnector::GetAppPackUpdater),
+                 weak_ptr_factory_.GetWeakPtr()));
 #endif
 }
 
@@ -144,6 +166,10 @@ ConfigurationPolicyProvider*
 ConfigurationPolicyProvider*
     BrowserPolicyConnector::GetRecommendedCloudProvider() const {
   return recommended_cloud_provider_.get();
+}
+
+PolicyService* BrowserPolicyConnector::GetPolicyService() const {
+  return policy_service_.get();
 }
 
 void BrowserPolicyConnector::RegisterForDevicePolicy(
@@ -174,8 +200,11 @@ bool BrowserPolicyConnector::IsEnterpriseManaged() {
 EnterpriseInstallAttributes::LockResult
     BrowserPolicyConnector::LockDevice(const std::string& user) {
 #if defined(OS_CHROMEOS)
-  if (install_attributes_.get())
-    return install_attributes_->LockDevice(user);
+  if (install_attributes_.get()) {
+    return install_attributes_->LockDevice(user,
+                                           device_data_store_->device_mode(),
+                                           device_data_store_->device_id());
+  }
 #endif
 
   return EnterpriseInstallAttributes::LOCK_BACKEND_ERROR;
@@ -207,6 +236,18 @@ std::string BrowserPolicyConnector::GetEnterpriseDomain() {
   return std::string();
 }
 
+DeviceMode BrowserPolicyConnector::GetDeviceMode() {
+#if defined(OS_CHROMEOS)
+  if (install_attributes_.get())
+    return install_attributes_->GetMode();
+  else
+    return DEVICE_MODE_UNKNOWN;
+#endif
+
+  // We only have the notion of "enterprise" device on ChromeOS for now.
+  return DEVICE_MODE_CONSUMER;
+}
+
 void BrowserPolicyConnector::ResetDevicePolicy() {
 #if defined(OS_CHROMEOS)
   if (device_cloud_policy_subsystem_.get())
@@ -217,9 +258,9 @@ void BrowserPolicyConnector::ResetDevicePolicy() {
 void BrowserPolicyConnector::FetchCloudPolicy() {
 #if defined(OS_CHROMEOS)
   if (device_cloud_policy_subsystem_.get())
-    device_cloud_policy_subsystem_->RefreshPolicies();
+    device_cloud_policy_subsystem_->RefreshPolicies(false);
   if (user_cloud_policy_subsystem_.get())
-    user_cloud_policy_subsystem_->RefreshPolicies();
+    user_cloud_policy_subsystem_->RefreshPolicies(true);  // wait_for_auth_token
 #endif
 }
 
@@ -329,8 +370,7 @@ void BrowserPolicyConnector::RegisterForUserPolicy(
   }
 }
 
-const CloudPolicyDataStore*
-    BrowserPolicyConnector::GetDeviceCloudPolicyDataStore() const {
+CloudPolicyDataStore* BrowserPolicyConnector::GetDeviceCloudPolicyDataStore() {
 #if defined(OS_CHROMEOS)
   return device_data_store_.get();
 #else
@@ -338,8 +378,7 @@ const CloudPolicyDataStore*
 #endif
 }
 
-const CloudPolicyDataStore*
-    BrowserPolicyConnector::GetUserCloudPolicyDataStore() const {
+CloudPolicyDataStore* BrowserPolicyConnector::GetUserCloudPolicyDataStore() {
   return user_data_store_.get();
 }
 
@@ -361,6 +400,21 @@ UserAffiliation BrowserPolicyConnector::GetUserAffiliation(
 #endif
 
   return USER_AFFILIATION_NONE;
+}
+
+AppPackUpdater* BrowserPolicyConnector::GetAppPackUpdater() {
+#if defined(OS_CHROMEOS)
+  if (!app_pack_updater_.get()) {
+    // system_request_context() is NULL in unit tests.
+    net::URLRequestContextGetter* request_context =
+        g_browser_process->system_request_context();
+    if (request_context)
+      app_pack_updater_.reset(new AppPackUpdater(request_context, this));
+  }
+  return app_pack_updater_.get();
+#else
+  return NULL;
+#endif
 }
 
 void BrowserPolicyConnector::Observe(

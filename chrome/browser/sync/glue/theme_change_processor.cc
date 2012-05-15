@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,25 +6,26 @@
 
 #include "base/location.h"
 #include "base/logging.h"
+#include "base/string_number_conversions.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/glue/theme_util.h"
-#include "chrome/browser/sync/internal_api/includes/unrecoverable_error_handler.h"
 #include "chrome/browser/sync/internal_api/change_record.h"
 #include "chrome/browser/sync/internal_api/read_node.h"
 #include "chrome/browser/sync/internal_api/write_node.h"
 #include "chrome/browser/sync/internal_api/write_transaction.h"
-#include "chrome/browser/sync/protocol/theme_specifics.pb.h"
-#include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/themes/theme_service.h"
+#include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
+#include "sync/protocol/theme_specifics.pb.h"
+#include "sync/util/unrecoverable_error_handler.h"
 
 namespace browser_sync {
 
 ThemeChangeProcessor::ThemeChangeProcessor(
-    UnrecoverableErrorHandler* error_handler)
+    DataTypeErrorHandler* error_handler)
     : ChangeProcessor(error_handler),
       profile_(NULL) {
   DCHECK(error_handler);
@@ -75,8 +76,8 @@ void ThemeChangeProcessor::ApplyChangesFromSyncModel(
   // we can remove the extra logic below.  See:
   // http://code.google.com/p/chromium/issues/detail?id=41696 .
   if (changes.Get().empty()) {
-    error_handler()->OnUnrecoverableError(FROM_HERE,
-                                          "Change list unexpectedly empty");
+    error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
+        "Change list unexpectedly empty");
     return;
   }
   const size_t change_count = changes.Get().size();
@@ -88,7 +89,8 @@ void ThemeChangeProcessor::ApplyChangesFromSyncModel(
       changes.Get()[change_count - 1];
   if (change.action != sync_api::ChangeRecord::ACTION_UPDATE &&
       change.action != sync_api::ChangeRecord::ACTION_DELETE) {
-    std::string err = "strange theme change.action " + change.action;
+    std::string err = "strange theme change.action " +
+        base::IntToString(change.action);
     error_handler()->OnUnrecoverableError(FROM_HERE, err);
     return;
   }
@@ -98,8 +100,8 @@ void ThemeChangeProcessor::ApplyChangesFromSyncModel(
   if (change.action != sync_api::ChangeRecord::ACTION_DELETE) {
     sync_api::ReadNode node(trans);
     if (!node.InitByIdLookup(change.id)) {
-      error_handler()->OnUnrecoverableError(FROM_HERE,
-                                            "Theme node lookup failed.");
+      error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
+          "Theme node lookup failed.");
       return;
     }
     DCHECK_EQ(node.GetModelType(), syncable::THEMES);

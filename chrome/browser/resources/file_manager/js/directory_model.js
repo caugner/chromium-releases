@@ -10,14 +10,18 @@ const SIMULTANEOUS_RESCAN_INTERVAL = 1000;
  * Data model of the file manager.
  *
  * @param {DirectoryEntry} root File system root.
- * @param {boolean} singleSelection True if only one file could be seletet
+ * @param {boolean} singleSelection True if only one file could be selected
  *                                  at the time.
+ * @param {boolean} showGData Defines whether GData root should be should
+ *   (regardless of its mounts status).
  */
-function DirectoryModel(root, singleSelection) {
+function DirectoryModel(root, singleSelection, showGData) {
   this.root_ = root;
   this.fileList_ = new cr.ui.ArrayDataModel([]);
   this.fileListSelection_ = singleSelection ?
       new cr.ui.ListSingleSelectionModel() : new cr.ui.ListSelectionModel();
+
+  this.showGData_ = showGData;
 
   this.runningScan_ = null;
   this.pendingScan_ = null;
@@ -37,6 +41,9 @@ function DirectoryModel(root, singleSelection) {
 
   // True if we should filter out files that start with a dot.
   this.filterHidden_ = true;
+
+  // Readonly status for removable volumes.
+  this.readonly_ = false;
 }
 
 /**
@@ -56,9 +63,10 @@ DirectoryModel.ARCHIVE_DIRECTORY = 'archive';
  * @enum
  */
 DirectoryModel.RootType = {
-  CHROMEBOOK: 'chromebook',
+  DOWNLOADS: 'downloads',
   ARCHIVE: 'archive',
-  REMOVABLE: 'removable'
+  REMOVABLE: 'removable',
+  GDATA: 'gdata'
 };
 
 /**
@@ -66,14 +74,13 @@ DirectoryModel.RootType = {
 */
 DirectoryModel.DOWNLOADS_DIRECTORY = 'Downloads';
 
+/**
+* The name of the gdata provider directory.
+*/
+DirectoryModel.GDATA_DIRECTORY = 'gdata';
+
 DirectoryModel.prototype = {
   __proto__: cr.EventTarget.prototype,
-
-  rootPaths_: window.location.scheme == 'chrome-extension' ? null : [
-    DirectoryModel.DOWNLOADS_DIRECTORY,
-    DirectoryModel.REMOVABLE_DIRECTORY,
-    DirectoryModel.ARCHIVE_DIRECTORY
-  ],
 
   /**
    * Files in the current directory.
@@ -116,8 +123,42 @@ DirectoryModel.prototype = {
     return DirectoryModel.getRootPath(this.currentEntry.fullPath);
   },
 
+  get rootType() {
+    return DirectoryModel.getRootType(this.currentEntry.fullPath);
+  },
+
+  get rootName() {
+    return DirectoryModel.getRootName(this.currentEntry.fullPath);
+  },
+
+  get rootEntry() {
+    return this.rootsList.item(this.rootsListSelection.selectedIndex);
+  },
+
+  /**
+   * True if current directory is read only. Value may be set
+   * for directories on a removable device.
+   * @type {boolean}
+   */
   get readonly() {
-    return this.isSystemDirectoy;
+    switch (this.rootType) {
+      case DirectoryModel.RootType.REMOVABLE:
+        return this.readonly_;
+      case DirectoryModel.RootType.ARCHIVE:
+        return true;
+      case DirectoryModel.RootType.DOWNLOADS:
+        return false;
+      case DirectoryModel.RootType.GDATA:
+        return false;
+      default:
+        return true;
+    }
+  },
+
+  set readonly(value) {
+    if (this.rootType == DirectoryModel.RootType.REMOVABLE) {
+      this.readonly_ = !!value;
+    }
   },
 
   get isSystemDirectoy() {
@@ -279,7 +320,7 @@ DirectoryModel.prototype = {
   },
 
   replaceFileList_: function(entries) {
-    // TODO(serya): Reinserting breaks renaming. Need to be merged gracefully.
+    cr.dispatchSimpleEvent(this, 'begin-update-files');
     this.fileListSelection_.beginChange();
 
     var selectedNames = this.selectedNames;
@@ -295,25 +336,45 @@ DirectoryModel.prototype = {
     this.fileListSelection_.leadIndex = leadIndex;
     this.leadName = leadName;
     this.fileListSelection_.endChange();
+    cr.dispatchSimpleEvent(this, 'end-update-files');
   },
 
   /**
    * Cancels waiting and scheduled rescans and starts new scan.
    *
-   * @param {Function} callback Called when scan completed.
+   * If the scan completes successfully on the first attempt, the callback will
+   * be invoked and a 'scan-completed' event will be dispatched.  If the scan
+   * fails for any reason, we'll periodically retry until it succeeds (and then
+   * send a 'rescan-complete' event) or is cancelled or replaced by another
+   * scan.
+   *
+   * @param {Function} callback Called if scan completes on the first attempt.
+   *   Note that this will NOT be called if the scan fails but later succeeds.
    */
   scan_: function(callback) {
     if (this.rescanTimeout_) {
       clearTimeout(this.rescanTimeout_);
       this.rescanTimeout_ = 0;
     }
-    if (this.runningScan_)
+    if (this.runningScan_) {
       this.runningScan_.cancel();
+      this.runningScan_ = null;
+    }
     this.pendingScan_ = null;
+
+    var onDone = function() {
+      cr.dispatchSimpleEvent(this, 'scan-completed');
+      callback();
+    }.bind(this);
 
     // Clear the table first.
     this.fileList_.splice(0, this.fileList_.length);
-    this.runningScan_ = this.createScanner_(this.fileList_, callback);
+    cr.dispatchSimpleEvent(this, 'scan-started');
+    if (this.currentDirEntry_ == this.unmountedGDataEntry_) {
+      onDone();
+      return;
+    }
+    this.runningScan_ = this.createScanner_(this.fileList_, onDone);
     this.runningScan_.run();
   },
 
@@ -352,15 +413,10 @@ DirectoryModel.prototype = {
         onComplete();
       }.bind(null, entry);
 
-      if (entry.isFile) {
-        entry.remove(
-            onSuccess,
-            util.flog('Error deleting file: ' + entry.fullPath, onComplete));
-      } else {
-        entry.removeRecursively(
-            onSuccess,
-            util.flog('Error deleting folder: ' + entry.fullPath, onComplete));
-      }
+      util.removeFileOrDirectory(
+          entry,
+          onSuccess,
+          util.flog('Error deleting ' + entry.fullPath, onComplete));
     }
     onComplete();
   },
@@ -421,8 +477,10 @@ DirectoryModel.prototype = {
           self.selectEntry(name);
           successCallback(existing[0]);
         } else {
+          self.fileListSelection.beginChange();
           fileList.splice(0, 0, newEntry);
           self.selectEntry(name);
+          self.fileListSelection.endChange();
           successCallback(newEntry);
         }
       });
@@ -433,7 +491,7 @@ DirectoryModel.prototype = {
   },
 
   /**
-   * Canges directory. Causes 'directory-change' event.
+   * Changes directory. Causes 'directory-change' event.
    *
    * @param {string} path New current directory path.
    */
@@ -443,6 +501,20 @@ DirectoryModel.prototype = {
       this.changeDirectoryEntry_(dirEntry, autoSelect, false);
     }.bind(this);
 
+    if (this.unmountedGDataEntry_ &&
+        DirectoryModel.getRootType(path) == DirectoryModel.RootType.GDATA) {
+      this.readonly_ = true;
+      // TODO(kaznacheeev): Currently if path points to some GData subdirectory
+      // and GData is not mounted we will change to the fake GData root and
+      // ignore the rest of the path. Consider remembering the path and
+      // changing to it once GDdata is mounted. This is only relevant for cases
+      // when we open the File Manager with an URL pointing to GData (e.g. via
+      // a bookmark).
+      onDirectoryResolved(this.unmountedGDataEntry_);
+      return;
+    }
+
+    this.readonly_ = false;
     if (path == '/')
       return onDirectoryResolved(this.root_);
 
@@ -463,14 +535,14 @@ DirectoryModel.prototype = {
    * changed.
    *
    * @param {DirectoryEntry} dirEntry The absolute path to the new directory.
-   * @param {function} action Action executed when the directory loaded.
-   *                              By default selects the first item
-   *                              (unless it's a save dialog).
+   * @param {function} action Action executed if the directory loads
+   *    successfully.  By default selects the first item (unless it's a save
+   *    dialog).
    * @param {boolean} initial True if it comes from setupPath and
    *                          false if caused by an user action.
    */
   changeDirectoryEntry_: function(dirEntry, action, initial) {
-    var current = this.currentEntry;
+    var previous = this.currentEntry;
     this.currentDirEntry_ = dirEntry;
     function onRescanComplete() {
       action();
@@ -482,16 +554,34 @@ DirectoryModel.prototype = {
     this.scan_(onRescanComplete);
 
     var e = new cr.Event('directory-changed');
-    e.previousDirEntry = this.currentEntry;
+    e.previousDirEntry = previous;
     e.newDirEntry = dirEntry;
     e.initial = initial;
     this.dispatchEvent(e);
   },
 
-  setupPath: function(path, opt_pathResolveCallback) {
+  /**
+   * Change the state of the model to reflect the specified path (either a
+   * file or directory).
+   *
+   * @param {string} path The root path to use
+   * @param {Function=} opt_loadedCallback Invoked when the entire directory
+   *     has been loaded and any default file selected.  If there are any
+   *     errors loading the directory this will not get called (even if the
+   *     directory loads OK on retry later).
+   * @param {Function=} opt_pathResolveCallback Invoked as soon as the path has
+   *     been resolved, and called with the base and leaf portions of the path
+   *     name, and a flag indicating if the entry exists.
+   */
+  setupPath: function(path, opt_loadedCallback, opt_pathResolveCallback) {
     // Split the dirname from the basename.
     var ary = path.match(/^(?:(.*)\/)?([^\/]*)$/);
-    var autoSelect = this.selectIndex.bind(this, this.autoSelectIndex_);
+    var autoSelect = function() {
+          this.selectIndex(this.autoSelectIndex_);
+          if (opt_loadedCallback)
+            opt_loadedCallback();
+    }.bind(this);
+
     if (!ary) {
       console.warn('Unable to split default path: ' + path);
       this.changeDirectoryEntry_(this.root_, autoSelect, true);
@@ -501,46 +591,53 @@ DirectoryModel.prototype = {
     var baseName = ary[1];
     var leafName = ary[2];
 
-    function callBack() {
+    function resolveCallback(exists) {
       if (opt_pathResolveCallback)
-        opt_pathResolveCallback(baseName, leafName);
+        opt_pathResolveCallback(baseName, leafName, exists);
     }
 
     function onLeafFound(baseDirEntry, leafEntry) {
       if (leafEntry.isDirectory) {
         baseName = path;
         leafName = '';
-        callBack();
+        resolveCallback(true);
         this.changeDirectoryEntry_(leafEntry, autoSelect, true);
         return;
       }
 
-      callBack();
+      resolveCallback(true);
       // Leaf is an existing file, cd to its parent directory and select it.
       this.changeDirectoryEntry_(baseDirEntry,
-                                 this.selectEntry.bind(this, leafEntry.name),
-                                 true);
+                                 function() {
+                                   this.selectEntry(leafEntry.name);
+                                   if (opt_loadedCallback)
+                                     opt_loadedCallback();
+                                 }.bind(this),
+                                 false /*HACK*/);
+      // TODO(kaznacheev): Fix history.replaceState for the File Browser and
+      // change the last parameter back to |true|. Passing |false| makes things
+      // less ugly for now.
     }
 
     function onLeafError(baseDirEntry, err) {
-      callBack();
+      resolveCallback(false);
       // Usually, leaf does not exist, because it's just a suggested file name.
-      if (err != FileError.NOT_FOUND_ERR)
+      if (err.code != FileError.NOT_FOUND_ERR)
         console.log('Unexpected error resolving default leaf: ' + err);
       this.changeDirectoryEntry_(baseDirEntry, autoSelect, true);
     }
 
     var onBaseError = function(err) {
-      callBack();
+      resolveCallback(false);
       console.log('Unexpected error resolving default base "' +
                   baseName + '": ' + err);
       if (path != '/' + DirectoryModel.DOWNLOADS_DIRECTORY) {
         // Can't find the provided path, let's go to default one instead.
-        this.setupDefaultPath();
+        this.setupDefaultPath(opt_loadedCallback);
       } else {
         // Well, we can't find the downloads dir. Let's just show something,
         // or we will get an infinite recursion.
-        this.changeDirectory('/', undefined, true);
+        this.changeDirectoryEntry_(this.root_, opt_loadedCallback, true);
       }
     }.bind(this);
 
@@ -569,8 +666,10 @@ DirectoryModel.prototype = {
     }
   },
 
-  setupDefaultPath: function() {
-    this.getDefaultDirectory_(this.setupPath.bind(this));
+  setupDefaultPath: function(opt_callback) {
+    this.getDefaultDirectory_(function(path) {
+      this.setupPath(path, opt_callback);
+    }.bind(this));
   },
 
   getDefaultDirectory_: function(callback) {
@@ -622,9 +721,9 @@ DirectoryModel.prototype = {
     if (field == 'name' || field == 'cachedMtime_') {
       // Mtime is the tie-breaker for a name sort, so we need to resolve
       // it for both mtime and name sorts.
-      cacheFunction = this.cacheEntryDate;
+      cacheFunction = this.cacheEntryDateAndSize;
     } else if (field == 'cachedSize_') {
-      cacheFunction = this.cacheEntrySize;
+      cacheFunction = this.cacheEntryDateAndSize;
     } else if (field == 'type') {
       cacheFunction = this.cacheEntryFileType;
     } else if (field == 'cachedIconType_') {
@@ -640,7 +739,7 @@ DirectoryModel.prototype = {
       var entry = entries[i];
       if (!(field in entry)) {
         waitCount++;
-        cacheFunction(entry, onCacheDone)
+        cacheFunction(entry, onCacheDone, onCacheDone);
       }
     }
     onCacheDone();  // Finish the fake callback.
@@ -662,7 +761,8 @@ DirectoryModel.prototype = {
     var groups = {
       downloads: null,
       archives: null,
-      removables: null
+      removables: null,
+      gdata: null
     };
 
     metrics.startInterval('Load.Roots');
@@ -672,6 +772,7 @@ DirectoryModel.prototype = {
           return;
 
       callback(groups.downloads.
+               concat(groups.gdata).
                concat(groups.archives).
                concat(groups.removables));
       metrics.recordInterval('Load.Roots');
@@ -692,6 +793,26 @@ DirectoryModel.prototype = {
       done();
     }
 
+    var self = this;
+
+    function onGData(entry) {
+      console.log('onGData');
+      console.log(entry);
+      self.unmountedGDataEntry_ = null;
+      groups.gdata = [entry];
+      done();
+    }
+
+    function onGDataError(error) {
+      console.log('onGDataError');
+      console.log(error);
+      self.unmountedGDataEntry_ = {
+        fullPath: '/' + DirectoryModel.GDATA_DIRECTORY
+      };
+      groups.gdata = [self.unmountedGDataEntry_];
+      done();
+    }
+
     var root = this.root_;
     root.getDirectory(DirectoryModel.DOWNLOADS_DIRECTORY, { create: false },
                       onDownloads, onDownloadsError);
@@ -699,19 +820,28 @@ DirectoryModel.prototype = {
                        append.bind(this, 'archives'));
     util.readDirectory(root, DirectoryModel.REMOVABLE_DIRECTORY,
                        append.bind(this, 'removables'));
+    if (this.showGData_) {
+      root.getDirectory(DirectoryModel.GDATA_DIRECTORY, { create: false },
+                        onGData, onGDataError);
+    } else {
+      groups.gdata = [];
+    }
   },
 
-  updateRoots: function(opt_changeDirectoryTo) {
+  updateRoots: function(opt_callback) {
+    console.log('directoryModel_.updateRoots');
     var self = this;
     this.resolveRoots_(function(rootEntries) {
+      console.log('rootsList_ = ');
+      console.log(self.rootsList_);
       var dm = self.rootsList_;
       var args = [0, dm.length].concat(rootEntries);
       dm.splice.apply(dm, args);
 
       self.updateRootsListSelection_();
 
-      if (opt_changeDirectoryTo)
-        self.changeDirectory(opt_changeDirectoryTo);
+      if (opt_callback)
+        opt_callback();
     });
   },
 
@@ -738,8 +868,10 @@ DirectoryModel.prototype = {
 DirectoryModel.getRootPath = function(path) {
   var type = DirectoryModel.getRootType(path);
 
-  if (type == DirectoryModel.RootType.CHROMEBOOK)
+  if (type == DirectoryModel.RootType.DOWNLOADS)
     return '/' + DirectoryModel.DOWNLOADS_DIRECTORY;
+  if (type == DirectoryModel.RootType.GDATA)
+    return '/' + DirectoryModel.GDATA_DIRECTORY;
 
   function subdir(dir) {
     var end = path.indexOf('/', dir.length + 2);
@@ -753,13 +885,21 @@ DirectoryModel.getRootPath = function(path) {
   return '/';
 };
 
+DirectoryModel.getRootName = function(path) {
+  var root = DirectoryModel.getRootPath(path);
+  var index = root.lastIndexOf('/');
+  return index == -1 ? root : root.substring(index + 1);
+};
+
 DirectoryModel.getRootType = function(path) {
   function isTop(dir) {
     return path.substr(1, dir.length) == dir;
   }
 
   if (isTop(DirectoryModel.DOWNLOADS_DIRECTORY))
-    return DirectoryModel.RootType.CHROMEBOOK;
+    return DirectoryModel.RootType.DOWNLOADS;
+  else if (isTop(DirectoryModel.GDATA_DIRECTORY))
+    return DirectoryModel.RootType.GDATA;
   else if (isTop(DirectoryModel.ARCHIVE_DIRECTORY))
     return DirectoryModel.RootType.ARCHIVE;
   else if(isTop(DirectoryModel.REMOVABLE_DIRECTORY))

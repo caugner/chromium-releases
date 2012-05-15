@@ -9,6 +9,7 @@
 #include "base/message_loop_proxy.h"
 #include "google/protobuf/message.h"
 #include "net/base/io_buffer.h"
+#include "remoting/protocol/clipboard_stub.h"
 #include "remoting/protocol/host_control_dispatcher.h"
 #include "remoting/protocol/host_event_dispatcher.h"
 #include "remoting/protocol/host_stub.h"
@@ -19,6 +20,7 @@ namespace protocol {
 
 ConnectionToClient::ConnectionToClient(protocol::Session* session)
     : handler_(NULL),
+      clipboard_stub_(NULL),
       host_stub_(NULL),
       input_stub_(NULL),
       session_(session) {
@@ -31,10 +33,6 @@ ConnectionToClient::ConnectionToClient(protocol::Session* session)
 }
 
 ConnectionToClient::~ConnectionToClient() {
-  if (session_.get()) {
-    base::MessageLoopProxy::current()->DeleteSoon(
-        FROM_HERE, session_.release());
-  }
 }
 
 void ConnectionToClient::SetEventHandler(EventHandler* event_handler) {
@@ -53,12 +51,7 @@ void ConnectionToClient::Disconnect() {
   CloseChannels();
 
   DCHECK(session_.get());
-  Session* session = session_.release();
-
-  // It may not be safe to delete |session_| here becase this method
-  // may be invoked in resonse to a libjingle event and libjingle's
-  // sigslot doesn't handle it properly, so postpone the deletion.
-  base::MessageLoopProxy::current()->DeleteSoon(FROM_HERE, session);
+  scoped_ptr<Session> session = session_.Pass();
 
   // This should trigger OnConnectionClosed() event and this object
   // may be destroyed as the result.
@@ -79,6 +72,12 @@ VideoStub* ConnectionToClient::video_stub() {
 ClientStub* ConnectionToClient::client_stub() {
   DCHECK(CalledOnValidThread());
   return control_dispatcher_.get();
+}
+
+void ConnectionToClient::set_clipboard_stub(
+    protocol::ClipboardStub* clipboard_stub) {
+  DCHECK(CalledOnValidThread());
+  clipboard_stub_ = clipboard_stub;
 }
 
 void ConnectionToClient::set_host_stub(protocol::HostStub* host_stub) {
@@ -103,10 +102,13 @@ void ConnectionToClient::OnSessionStateChange(Session::State state) {
       break;
 
     case Session::AUTHENTICATED:
+      handler_->OnConnectionAuthenticated(this);
+
       // Initialize channels.
       control_dispatcher_.reset(new HostControlDispatcher());
       control_dispatcher_->Init(session_.get(), base::Bind(
           &ConnectionToClient::OnChannelInitialized, base::Unretained(this)));
+      control_dispatcher_->set_clipboard_stub(clipboard_stub_);
       control_dispatcher_->set_host_stub(host_stub_);
 
       event_dispatcher_.reset(new HostEventDispatcher());
@@ -124,19 +126,19 @@ void ConnectionToClient::OnSessionStateChange(Session::State state) {
       break;
 
     case Session::CLOSED:
-      CloseChannels();
-      handler_->OnConnectionClosed(this);
+      Close(OK);
       break;
 
     case Session::FAILED:
-      CloseOnError();
+      Close(session_->error());
       break;
   }
 }
 
 void ConnectionToClient::OnSessionRouteChange(
-    const std::string& channel_name, const net::IPEndPoint& end_point) {
-  handler_->OnClientIpAddress(this, channel_name, end_point);
+    const std::string& channel_name,
+    const TransportRoute& route) {
+  handler_->OnRouteChange(this, channel_name, route);
 }
 
 void ConnectionToClient::OnChannelInitialized(bool successful) {
@@ -144,7 +146,7 @@ void ConnectionToClient::OnChannelInitialized(bool successful) {
 
   if (!successful) {
     LOG(ERROR) << "Failed to connect a channel";
-    CloseOnError();
+    Close(CHANNEL_CONNECTION_ERROR);
     return;
   }
 
@@ -157,13 +159,13 @@ void ConnectionToClient::NotifyIfChannelsReady() {
   if (control_dispatcher_.get() && control_dispatcher_->is_connected() &&
       event_dispatcher_.get() && event_dispatcher_->is_connected() &&
       video_writer_.get() && video_writer_->is_connected()) {
-    handler_->OnConnectionOpened(this);
+    handler_->OnConnectionChannelsConnected(this);
   }
 }
 
-void ConnectionToClient::CloseOnError() {
+void ConnectionToClient::Close(ErrorCode error) {
   CloseChannels();
-  handler_->OnConnectionFailed(this, session_->error());
+  handler_->OnConnectionClosed(this, error);
 }
 
 void ConnectionToClient::CloseChannels() {

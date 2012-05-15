@@ -47,10 +47,6 @@ class ExtensionHelper
   bool InstallWebApplicationUsingDefinitionFile(WebKit::WebFrame* frame,
                                                 string16* error);
 
-  void InlineWebstoreInstall(int install_id,
-                             const std::string& webstore_item_id,
-                             const GURL& requestor_url);
-
   int browser_window_id() const { return browser_window_id_; }
   content::ViewType view_type() const { return view_type_; }
 
@@ -71,15 +67,14 @@ class ExtensionHelper
   void OnExtensionMessageInvoke(const std::string& extension_id,
                                 const std::string& function_name,
                                 const base::ListValue& args,
-                                const GURL& event_url);
+                                const GURL& event_url,
+                                bool user_gesture);
   void OnExtensionDeliverMessage(int target_port_id,
                                  const std::string& message);
   void OnExecuteCode(const ExtensionMsg_ExecuteCode_Params& params);
   void OnGetApplicationInfo(int page_id);
   void OnNotifyRendererViewType(content::ViewType view_type);
   void OnUpdateBrowserWindowId(int window_id);
-  void OnInlineWebstoreInstallResponse(
-      int install_id, bool success, const std::string& error);
 
   // Callback triggered when we finish downloading the application definition
   // file.

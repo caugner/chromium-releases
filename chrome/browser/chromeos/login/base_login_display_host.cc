@@ -4,6 +4,8 @@
 
 #include "chrome/browser/chromeos/login/base_login_display_host.h"
 
+#include "ash/shell.h"
+#include "ash/shell_window_ids.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
@@ -30,47 +32,45 @@
 #include "chrome/browser/policy/auto_enrollment_client.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/browser/prefs/pref_service.h"
+#include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "googleurl/src/gurl.h"
 #include "third_party/cros_system_api/window_manager/chromeos_wm_ipc_enums.h"
-#include "ui/base/resource/resource_bundle.h"
-#include "ui/gfx/rect.h"
-#include "unicode/timezone.h"
-
-#if defined(TOOLKIT_USES_GTK)
-#include "chrome/browser/chromeos/legacy_window_manager/wm_ipc.h"
-#endif
-
-#if defined(USE_AURA)
-#include "ash/shell.h"
-#include "ash/shell_window_ids.h"
 #include "ui/aura/window.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/compositor/layer.h"
 #include "ui/gfx/compositor/layer_animation_element.h"
 #include "ui/gfx/compositor/layer_animation_sequence.h"
 #include "ui/gfx/compositor/layer_animator.h"
 #include "ui/gfx/compositor/scoped_layer_animation_settings.h"
 #include "ui/gfx/transform.h"
+#include "ui/gfx/rect.h"
 #include "ui/views/widget/widget.h"
-#endif
+#include "unicode/timezone.h"
 
 namespace {
 
 // Whether sign in transitions are enabled.
 const bool kEnableBackgroundAnimation = false;
 const bool kEnableBrowserWindowsOpacityAnimation = true;
+const bool kEnableBrowserWindowsTransformAnimation = true;
 
 // Sign in transition timings.
 static const int kBackgroundTransitionPauseMs = 100;
 static const int kBackgroundTransitionDurationMs = 400;
 static const int kBrowserTransitionPauseMs = 750;
-static const int kBrowserTransitionDurationMs = 300;
+static const int kBrowserTransitionDurationMs = 350;
 
 // Parameters for background transform transition.
 const float kBackgroundScale = 1.05f;
 const int kBackgroundTranslate = -50;
+
+// Parameters for browser transform transition.
+const float kBrowserScale = 1.05f;
+const int kBrowserTranslate = -50;
 
 // The delay of triggering initialization of the device policy subsystem
 // after the login screen is initialized. This makes sure that device policy
@@ -113,11 +113,9 @@ void DetermineAndSaveHardwareKeyboard(const std::string& locale,
   }
 }
 
-#if defined(USE_AURA)
 ui::Layer* GetLayer(views::Widget* widget) {
   return widget->GetNativeView()->layer();
 }
-#endif
 
 }  // namespace
 
@@ -137,6 +135,13 @@ BaseLoginDisplayHost::BaseLoginDisplayHost(const gfx::Rect& background_bounds)
   // will block the shutdown.
   registrar_.Add(this,
                  content::NOTIFICATION_APP_EXITING,
+                 content::NotificationService::AllSources());
+
+  // NOTIFICATION_BROWSER_OPENED is issued after browser is created, but
+  // not shown yet. Lock window has to be closed at this point so that
+  // a browser window exists and the window can acquire input focus.
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_BROWSER_OPENED,
                  content::NotificationService::AllSources());
   DCHECK(default_host_ == NULL);
   default_host_ = this;
@@ -163,9 +168,7 @@ void BaseLoginDisplayHost::OnSessionStart() {
   DVLOG(1) << "Session starting";
   // Display host is deleted once animation is completed
   // since sign in screen widget has to stay alive.
-#if defined(USE_AURA)
   StartAnimation();
-#endif
   ShutdownDisplayHost(false);
 }
 
@@ -264,8 +267,17 @@ void BaseLoginDisplayHost::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
-  CHECK(type == content::NOTIFICATION_APP_EXITING);
-  ShutdownDisplayHost(true);
+  registrar_.RemoveAll();
+  switch (type) {
+    case content::NOTIFICATION_APP_EXITING:
+      ShutdownDisplayHost(true);
+      break;
+    case chrome::NOTIFICATION_BROWSER_OPENED:
+      OnBrowserCreated();
+      break;
+    default:
+      LOG(FATAL) << "Unknown notification type:" << type;
+  }
 }
 
 void BaseLoginDisplayHost::ShutdownDisplayHost(bool post_quit_task) {
@@ -276,7 +288,6 @@ void BaseLoginDisplayHost::ShutdownDisplayHost(bool post_quit_task) {
 }
 
 void BaseLoginDisplayHost::StartAnimation() {
-#if defined(USE_AURA)
   if (ash::Shell::GetInstance()->GetContainer(
           ash::internal::kShellWindowId_DesktopBackgroundContainer)->
           children().empty()) {
@@ -285,69 +296,100 @@ void BaseLoginDisplayHost::StartAnimation() {
     return;
   }
 
+  // If we've been explicitly told not to do login animations, we will skip most
+  // of them. In particular, we'll avoid animating the background or animating
+  // the browser's transform.
+  const CommandLine* command_line = CommandLine::ForCurrentProcess();
+  bool disable_animations = command_line->HasSwitch(
+      switches::kDisableLoginAnimations);
+
+  const bool do_background_animation =
+      kEnableBackgroundAnimation && !disable_animations;
+
+  const bool do_browser_transform_animation =
+      kEnableBrowserWindowsTransformAnimation && !disable_animations;
+
+  const bool do_browser_opacity_animation =
+      kEnableBrowserWindowsOpacityAnimation;
+
   // Background animation.
-  if (kEnableBackgroundAnimation) {
+  if (do_background_animation) {
+    ui::Layer* background_layer =
+        ash::Shell::GetInstance()->GetContainer(
+            ash::internal::kShellWindowId_DesktopBackgroundContainer)->
+                layer();
+
     ui::Transform background_transform;
     background_transform.SetScale(kBackgroundScale, kBackgroundScale);
     background_transform.SetTranslateX(kBackgroundTranslate);
     background_transform.SetTranslateY(kBackgroundTranslate);
-    scoped_ptr<ui::LayerAnimationElement>
-        background_transform_animation_initial(
-            ui::LayerAnimationElement::CreateTransformElement(
-                background_transform,
-                base::TimeDelta()));
+    background_layer->SetTransform(background_transform);
+
+    // Pause
     ui::LayerAnimationElement::AnimatableProperties background_pause_properties;
     background_pause_properties.insert(ui::LayerAnimationElement::TRANSFORM);
-    scoped_ptr<ui::LayerAnimationElement> background_pause(
-        ui::LayerAnimationElement::CreatePauseElement(
-            background_pause_properties,
-            base::TimeDelta::FromMilliseconds(kBackgroundTransitionPauseMs)));
-    scoped_ptr<ui::LayerAnimationElement> background_transform_animation(
-        ui::LayerAnimationElement::CreateTransformElement(
-            ui::Transform(),
-            base::TimeDelta::FromMilliseconds(
-                kBackgroundTransitionDurationMs)));
-    scoped_ptr<ui::LayerAnimationSequence> background_transition(
-        new ui::LayerAnimationSequence(
-            background_transform_animation_initial.release()));
-    background_transition->AddElement(background_pause.release());
-    background_transition->AddElement(background_transform_animation.release());
-    ui::Layer* background_layer =
-        ash::Shell::GetInstance()->GetContainer(
-            ash::internal::kShellWindowId_DesktopBackgroundContainer)->
-            layer();
     background_layer->GetAnimator()->StartAnimation(
-        background_transition.release());
+        new ui::LayerAnimationSequence(
+            ui::LayerAnimationElement::CreatePauseElement(
+                background_pause_properties,
+                base::TimeDelta::FromMilliseconds(
+                    kBackgroundTransitionPauseMs))));
+
+    ui::ScopedLayerAnimationSettings settings(background_layer->GetAnimator());
+    settings.SetPreemptionStrategy(ui::LayerAnimator::ENQUEUE_NEW_ANIMATION);
+    settings.SetTransitionDuration(
+        base::TimeDelta::FromMilliseconds(kBackgroundTransitionDurationMs));
+    settings.SetTweenType(ui::Tween::EASE_OUT);
+    background_layer->SetTransform(ui::Transform());
   }
 
-  // Browser windows layer opacity animation.
-  if (kEnableBrowserWindowsOpacityAnimation) {
-    scoped_ptr<ui::LayerAnimationElement> browser_opacity_animation_initial(
-        ui::LayerAnimationElement::CreateOpacityElement(
-            0.0f,
-            base::TimeDelta()));
-    ui::LayerAnimationElement::AnimatableProperties browser_pause_properties;
-    browser_pause_properties.insert(ui::LayerAnimationElement::OPACITY);
-    scoped_ptr<ui::LayerAnimationElement> browser_pause_animation(
-        ui::LayerAnimationElement::CreatePauseElement(
-            browser_pause_properties,
-            base::TimeDelta::FromMilliseconds(kBrowserTransitionPauseMs)));
-    scoped_ptr<ui::LayerAnimationElement> browser_opacity_animation(
-        ui::LayerAnimationElement::CreateOpacityElement(
-            1.0f,
-            base::TimeDelta::FromMilliseconds(kBrowserTransitionDurationMs)));
-    scoped_ptr<ui::LayerAnimationSequence> browser_transition(
-        new ui::LayerAnimationSequence(
-            browser_opacity_animation_initial.release()));
-    browser_transition->AddElement(browser_pause_animation.release());
-    browser_transition->AddElement(browser_opacity_animation.release());
+  // Browser windows layer opacity and transform animation.
+  if (do_browser_transform_animation || do_browser_opacity_animation) {
     ui::Layer* default_container_layer =
         ash::Shell::GetInstance()->GetContainer(
-            ash::internal::kShellWindowId_DefaultContainer)->layer();
-    default_container_layer->GetAnimator()->StartAnimation(
-        browser_transition.release());
+              ash::internal::kShellWindowId_DefaultContainer)->layer();
+
+    ui::LayerAnimationElement::AnimatableProperties browser_pause_properties;
+
+    // Set the initial opacity and transform.
+    if (do_browser_transform_animation) {
+      ui::Transform browser_transform;
+      browser_transform.SetScale(kBrowserScale, kBrowserScale);
+      browser_transform.SetTranslateX(kBrowserTranslate);
+      browser_transform.SetTranslateY(kBrowserTranslate);
+      default_container_layer->SetTransform(browser_transform);
+      browser_pause_properties.insert(ui::LayerAnimationElement::TRANSFORM);
+    }
+
+    if (do_browser_opacity_animation) {
+      default_container_layer->SetOpacity(0);
+      browser_pause_properties.insert(ui::LayerAnimationElement::OPACITY);
+    }
+
+    // Pause.
+    default_container_layer->GetAnimator()->ScheduleAnimation(
+        new ui::LayerAnimationSequence(
+            ui::LayerAnimationElement::CreatePauseElement(
+                browser_pause_properties,
+                base::TimeDelta::FromMilliseconds(kBrowserTransitionPauseMs))));
+
+    ui::ScopedLayerAnimationSettings settings(
+        default_container_layer->GetAnimator());
+
+    settings.SetPreemptionStrategy(ui::LayerAnimator::ENQUEUE_NEW_ANIMATION);
+    settings.SetTransitionDuration(
+        base::TimeDelta::FromMilliseconds(kBrowserTransitionDurationMs));
+
+    if (do_browser_opacity_animation) {
+      // Should interpolate linearly.
+      default_container_layer->SetOpacity(1);
+    }
+
+    if (do_browser_transform_animation) {
+      settings.SetTweenType(ui::Tween::EASE_OUT);
+      default_container_layer->SetTransform(ui::Transform());
+    }
   }
-#endif
 }
 
 void BaseLoginDisplayHost::OnOwnershipStatusCheckDone(
@@ -411,16 +453,8 @@ void ShowLoginWizard(const std::string& first_screen_name,
 
   VLOG(1) << "Showing OOBE screen: " << first_screen_name;
 
-  // The login screen will enable alternate keyboard layouts, but we don't want
-  // to start the IME process unless one is selected.
   chromeos::input_method::InputMethodManager* manager =
       chromeos::input_method::InputMethodManager::GetInstance();
-  manager->SetDeferImeStartup(true);
-
-#if defined(TOOLKIT_USES_GTK)
-  // Tell the window manager that the user isn't logged in.
-  chromeos::WmIpc::instance()->SetLoggedInProperty(false);
-#endif
 
   // Set up keyboards. For example, when |locale| is "en-US", enable US qwerty
   // and US dvorak keyboard layouts.
@@ -435,9 +469,7 @@ void ShowLoginWizard(const std::string& first_screen_name,
       initial_input_method_id =
           manager->GetInputMethodUtil()->GetHardwareInputMethodId();
     }
-    manager->EnableInputMethods(
-        locale, chromeos::input_method::kKeyboardLayoutsOnly,
-        initial_input_method_id);
+    manager->EnableLayouts(locale, initial_input_method_id);
   }
 
   gfx::Rect screen_bounds(chromeos::CalculateScreenBounds(size));
@@ -460,9 +492,8 @@ void ShowLoginWizard(const std::string& first_screen_name,
     if (!prefs->HasPrefPath(prefs::kApplicationLocale)) {
       std::string locale = chromeos::WizardController::GetInitialLocale();
       prefs->SetString(prefs::kApplicationLocale, locale);
-      manager->EnableInputMethods(
+      manager->EnableLayouts(
           locale,
-          chromeos::input_method::kKeyboardLayoutsOnly,
           manager->GetInputMethodUtil()->GetHardwareInputMethodId());
       base::ThreadRestrictions::ScopedAllowIO allow_io;
       const std::string loaded_locale =
@@ -502,9 +533,8 @@ void ShowLoginWizard(const std::string& first_screen_name,
       // initial locale and save it in preferences.
       DetermineAndSaveHardwareKeyboard(locale, layout);
       // Then, enable the hardware keyboard.
-      manager->EnableInputMethods(
+      manager->EnableLayouts(
           locale,
-          chromeos::input_method::kKeyboardLayoutsOnly,
           manager->GetInputMethodUtil()->GetHardwareInputMethodId());
       // Reloading resource bundle causes us to do blocking IO on UI thread.
       // Temporarily allow it until we fix http://crosbug.com/11102

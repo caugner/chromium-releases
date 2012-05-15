@@ -17,12 +17,9 @@
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "content/browser/plugin_loader_posix.h"
-#include "content/browser/plugin_service_filter.h"
 #include "content/browser/ppapi_plugin_process_host.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
-#include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/resource_context.h"
-#include "content/browser/utility_process_host.h"
+#include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/common/pepper_plugin_registry.h"
 #include "content/common/plugin_messages.h"
 #include "content/common/utility_messages.h"
@@ -31,6 +28,8 @@
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/plugin_service_filter.h"
+#include "content/public/browser/resource_context.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/process_type.h"
 #include "webkit/plugins/npapi/plugin_constants_win.h"
@@ -294,7 +293,7 @@ PpapiPluginProcessHost* PluginServiceImpl::FindOrStartPpapiPluginProcess(
   // This plugin isn't loaded by any plugin process, so create a new process.
   return PpapiPluginProcessHost::CreatePluginHost(
       *info,
-      client->GetResourceContext()->host_resolver());
+      client->GetResourceContext()->GetHostResolver());
 }
 
 PpapiPluginProcessHost* PluginServiceImpl::FindOrStartPpapiBrokerProcess(
@@ -329,11 +328,11 @@ void PluginServiceImpl::OpenChannelToNpapiPlugin(
   pending_plugin_clients_.insert(client);
 
   // Make sure plugins are loaded if necessary.
-  content::PluginServiceFilterParams params = {
+  PluginServiceFilterParams params = {
     render_process_id,
     render_view_id,
     page_url,
-    &client->GetResourceContext()
+    client->GetResourceContext()
   };
   GetPlugins(base::Bind(
       &PluginServiceImpl::ForwardGetAllowedPluginForOpenChannelToPlugin,
@@ -369,7 +368,7 @@ void PluginServiceImpl::CancelOpenChannelToNpapiPlugin(
 }
 
 void PluginServiceImpl::ForwardGetAllowedPluginForOpenChannelToPlugin(
-    const content::PluginServiceFilterParams& params,
+    const PluginServiceFilterParams& params,
     const GURL& url,
     const std::string& mime_type,
     PluginProcessHost::Client* client,
@@ -386,11 +385,11 @@ void PluginServiceImpl::GetAllowedPluginForOpenChannelToPlugin(
     const GURL& page_url,
     const std::string& mime_type,
     PluginProcessHost::Client* client,
-    const content::ResourceContext* resource_context) {
+    content::ResourceContext* resource_context) {
   webkit::WebPluginInfo info;
   bool allow_wildcard = true;
   bool found = GetPluginInfo(
-      render_process_id, render_view_id, *resource_context,
+      render_process_id, render_view_id, resource_context,
       url, page_url, mime_type, allow_wildcard,
       NULL, &info, NULL);
   FilePath plugin_path;
@@ -437,7 +436,7 @@ bool PluginServiceImpl::GetPluginInfoArray(
 
 bool PluginServiceImpl::GetPluginInfo(int render_process_id,
                                       int render_view_id,
-                                      const content::ResourceContext& context,
+                                      content::ResourceContext* context,
                                       const GURL& url,
                                       const GURL& page_url,
                                       const std::string& mime_type,
@@ -455,7 +454,7 @@ bool PluginServiceImpl::GetPluginInfo(int render_process_id,
   for (size_t i = 0; i < plugins.size(); ++i) {
     if (!filter_ || filter_->ShouldUsePlugin(render_process_id,
                                              render_view_id,
-                                             &context,
+                                             context,
                                              url,
                                              page_url,
                                              &plugins[i])) {
@@ -611,6 +610,20 @@ void PluginServiceImpl::SetFilter(content::PluginServiceFilter* filter) {
 
 content::PluginServiceFilter* PluginServiceImpl::GetFilter() {
   return filter_;
+}
+
+void PluginServiceImpl::ForcePluginShutdown(const FilePath& plugin_path) {
+  if (!BrowserThread::CurrentlyOn(BrowserThread::IO)) {
+    BrowserThread::PostTask(
+        BrowserThread::IO, FROM_HERE,
+        base::Bind(&PluginServiceImpl::ForcePluginShutdown,
+                   base::Unretained(this), plugin_path));
+    return;
+  }
+
+  PluginProcessHost* plugin = FindNpapiPluginProcess(plugin_path);
+  if (plugin)
+    plugin->ForceShutdown();
 }
 
 static const unsigned int kMaxCrashesPerInterval = 3;

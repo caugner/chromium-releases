@@ -10,22 +10,24 @@
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/dom_operation_notification_details.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/renderer_host/render_widget_host_view.h"
+#include "content/public/browser/dom_operation_notification_details.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/render_view_host.h"
+#include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 #include "net/test/test_server.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 
+using content::DomOperationNotificationDetails;
 using content::NavigationController;
+using content::RenderViewHost;
 
 namespace {
 
@@ -88,7 +90,7 @@ class TestFinishObserver : public content::NotificationObserver {
  public:
   explicit TestFinishObserver(RenderViewHost* render_view_host)
       : finished_(false), waiting_(false) {
-    registrar_.Add(this, chrome::NOTIFICATION_DOM_OPERATION_RESPONSE,
+    registrar_.Add(this, content::NOTIFICATION_DOM_OPERATION_RESPONSE,
                    content::Source<RenderViewHost>(render_view_host));
   }
 
@@ -104,11 +106,11 @@ class TestFinishObserver : public content::NotificationObserver {
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) {
-    DCHECK(type == chrome::NOTIFICATION_DOM_OPERATION_RESPONSE);
+    DCHECK(type == content::NOTIFICATION_DOM_OPERATION_RESPONSE);
     content::Details<DomOperationNotificationDetails> dom_op_details(details);
     // We might receive responses for other script execution, but we only
     // care about the test finished message.
-    if (dom_op_details->json() == "\"FINISHED\"") {
+    if (dom_op_details->json == "\"FINISHED\"") {
       finished_ = true;
       if (waiting_)
         MessageLoopForUI::current()->Quit();
@@ -469,7 +471,7 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, CtrlKeyEvents) {
 }
 #elif defined(OS_MACOSX)
 // http://crbug.com/81451
-IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, FLAKY_CommandKeyEvents) {
+IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, DISABLED_CommandKeyEvents) {
   static const KeyEventTestData kTestCmdF = {
     ui::VKEY_F, false, false, false, true,
     false, false, false, false, 2,
@@ -656,7 +658,7 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, AccessKeys) {
 
 // Flaky, http://crbug.com/69475.
 #if defined(OS_LINUX)
-#define MAYBE_ReservedAccelerators FLAKY_ReservedAccelerators
+#define MAYBE_ReservedAccelerators DISABLED_ReservedAccelerators
 #else
 #define MAYBE_ReservedAccelerators ReservedAccelerators
 #endif
@@ -812,7 +814,8 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, PageUpDownKeys) {
   EXPECT_NO_FATAL_FAILURE(CheckTextBoxValue(tab_index, L"A", L""));
 }
 
-#if defined(OS_WIN) || defined(TOOLKIT_VIEWS)
+#if defined(OS_WIN)
+// AltKey is enabled only on Windows. See crbug.com/114537.
 IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, FocusMenuBarByAltKey) {
   static const KeyEventTestData kTestAltKey = {
     ui::VKEY_MENU, false, false, false, false,

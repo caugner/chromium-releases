@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,10 +15,16 @@
 #include "base/observer_list.h"
 #include "base/time.h"
 #include "base/timer.h"
-#include "chrome/browser/chromeos/input_method/ibus_controller.h"
+#include "chrome/browser/chromeos/input_method/input_method_config.h"
+#include "chrome/browser/chromeos/input_method/input_method_descriptor.h"
+#include "chrome/browser/chromeos/input_method/input_method_property.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
 
 class GURL;
+
+namespace ui {
+class Accelerator;
+}  // namespace ui
 
 namespace chromeos {
 namespace input_method {
@@ -32,6 +38,17 @@ class XKeyboard;
 // InputMethodManager::GetInstance().
 class InputMethodManager {
  public:
+  enum State {
+    STATE_LOGIN_SCREEN = 0,
+    // The user entered the correct password (= NOTIFICATION_LOGIN_USER_CHANGED
+    // has been sent), but NOTIFICATION_SESSION_STARTED has not.
+    STATE_LOGGING_IN,
+    // The browser window for user session is ready.
+    STATE_BROWSER_SCREEN,
+    STATE_LOCK_SCREEN,
+    STATE_TERMINATING,
+  };
+
   class Observer {
    public:
     virtual ~Observer() {}
@@ -51,7 +68,7 @@ class InputMethodManager {
     // Called when the list of properties is changed.
     virtual void PropertyListChanged(
         InputMethodManager* manager,
-        const ImePropertyList& current_ime_properties) = 0;
+        const InputMethodPropertyList& current_ime_properties) = 0;
   };
 
   // CandidateWindowObserver is notified of events related to the candidate
@@ -123,7 +140,8 @@ class InputMethodManager {
 
   // Returns the list of input methods we can select (i.e. active). If the cros
   // library is not found or IBus/DBus daemon is not alive, this function
-  // returns a fallback input method list (and never returns NULL).
+  // returns a fallback input method list (and never returns NULL). Caller has
+  // to delete the returned list.
   virtual InputMethodDescriptors* GetActiveInputMethods() = 0;
 
   // Returns the number of active input methods.
@@ -138,18 +156,12 @@ class InputMethodManager {
   // empty. For example, if |language_code| is "en-US", US qwerty and US dvorak
   // layouts would be enabled. Likewise, for Germany locale, US qwerty layout
   // and several keyboard layouts for Germany would be enabled.
-  // If |type| is kAllInputMethods, all keyboard layouts and all input methods
-  // are enabled. If it's kKeyboardLayoutsOnly, only keyboard layouts are
-  // enabled. For example, for Japanese, xkb:jp::jpn is enabled when
-  // kKeyboardLayoutsOnly, and xkb:jp::jpn, mozc, mozc-jp, mozc-dv are enabled
-  // when kAllInputMethods.
   //
   // Note that this function does not save the input methods in the user's
   // preferences, as this function is designed for the login screen and the
   // screen locker, where we shouldn't change the user's preferences.
-  virtual void EnableInputMethods(
+  virtual void EnableLayouts(
       const std::string& language_code,
-      InputMethodType type,
       const std::string& initial_input_method_id) = 0;
 
   // Sets whether the input method property specified by |key| is activated. If
@@ -172,11 +184,11 @@ class InputMethodManager {
   // When you would like to set 'panel/custom_font', |section| should
   // be "panel", and |config_name| should be "custom_font".
   // Notice: This function might call the Observer::ActiveInputMethodsChanged()
-  // callback function immediately, before returning from the SetImeConfig
-  // function. See also http://crosbug.com/5217.
-  virtual bool SetImeConfig(const std::string& section,
-                            const std::string& config_name,
-                            const ImeConfigValue& value) = 0;
+  // callback function immediately, before returning from the
+  // SetInputMethodConfig function. See also http://crosbug.com/5217.
+  virtual bool SetInputMethodConfig(const std::string& section,
+                                    const std::string& config_name,
+                                    const InputMethodConfigValue& value) = 0;
 
   // Add an input method to insert into the language menu.
   virtual void AddActiveIme(const std::string& id,
@@ -200,13 +212,13 @@ class InputMethodManager {
   // already stopped, returns false.
   virtual bool StopInputMethodDaemon() = 0;
 
-  // Controls whether the IME process is started when preload engines are
-  // specificed, or defered until a non-default method is activated.
-  virtual void SetDeferImeStartup(bool defer) = 0;
-
   // Controls whether the IME process is stopped when all non-default preload
   // engines are removed.
   virtual void SetEnableAutoImeShutdown(bool enable) = 0;
+
+  // Controls whether extension IME are displayed in the language menu, and can
+  // be selected.
+  virtual void SetEnableExtensionIMEs(bool enable) = 0;
 
   // Sends a handwriting stroke to libcros. See chromeos::SendHandwritingStroke
   // for details.
@@ -251,21 +263,23 @@ class InputMethodManager {
   // Returns a InputMethodUtil object.
   virtual InputMethodUtil* GetInputMethodUtil() = 0;
 
-  // Returns a hotkey manager object which could be used to detect Control+space
-  // and Shift+Alt key presses.
-  virtual HotkeyManager* GetHotkeyManager() = 0;
-  // Register all global input method hotkeys: Control+space and Shift+Alt.
-  virtual void AddHotkeys() = 0;
-  // Removes all global input method hotkeys.
-  virtual void RemoveHotkeys() = 0;
+  // Enable all input method hotkeys.
+  virtual void EnableHotkeys() = 0;
+  // Disable all input method hotkeys.
+  virtual void DisableHotkeys() = 0;
 
   // Switches the current input method (or keyboard layout) to the next one.
-  virtual void SwitchToNextInputMethod() = 0;
+  virtual bool SwitchToNextInputMethod() = 0;
+  // Switches the current input method (or keyboard layout) to the previous one.
+  virtual bool SwitchToPreviousInputMethod() = 0;
+  // Switches to an input method (or keyboard layout) which is associated with
+  // the |accelerator|.
+  virtual bool SwitchInputMethod(const ui::Accelerator& accelerator) = 0;
 
-  virtual InputMethodDescriptor previous_input_method() const = 0;
-  virtual InputMethodDescriptor current_input_method() const = 0;
+  virtual InputMethodDescriptor GetPreviousInputMethod() const = 0;
+  virtual InputMethodDescriptor GetCurrentInputMethod() const = 0;
 
-  virtual const ImePropertyList& current_ime_properties() const = 0;
+  virtual InputMethodPropertyList GetCurrentInputMethodProperties() const = 0;
 };
 
 }  // namespace input_method

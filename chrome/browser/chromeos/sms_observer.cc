@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,8 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/notifications/system_notification.h"
-#include "chrome/browser/profiles/profile.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "third_party/cros/chromeos_network.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace chromeos {
@@ -46,7 +44,7 @@ void SmsObserver::UpdateObservers(NetworkLibrary* library) {
     }
     if (!found) {
       VLOG(1) << "Remove SMS monitor for " << it_observer->first;
-      chromeos::DisconnectSMSMonitor(it_observer->second);
+      CrosDisconnectSMSMonitor(it_observer->second);
       observers_.erase(it_observer++);
     } else {
       ++it_observer;
@@ -66,7 +64,7 @@ void SmsObserver::UpdateObservers(NetworkLibrary* library) {
     if (it_observer == observers_.end()) {
       VLOG(1) << "Add SMS monitor for " << device_path;
       chromeos::SMSMonitor monitor =
-          chromeos::MonitorSMS(device_path.c_str(), &StaticCallback, this);
+          CrosMonitorSMS(device_path.c_str(), &StaticCallback, this);
       observers_.insert(ObserversMap::value_type(device_path, monitor));
     } else {
       VLOG(1) << "Already has SMS monitor for " << device_path;
@@ -82,7 +80,7 @@ void SmsObserver::DisconnectAll() {
   for (ObserversMap::iterator it = observers_.begin();
        it != observers_.end(); ++it) {
     VLOG(1) << "Remove SMS monitor for " << it->first;
-    chromeos::DisconnectSMSMonitor(it->second);
+    CrosDisconnectSMSMonitor(it->second);
   }
   observers_.clear();
 }
@@ -103,6 +101,14 @@ void SmsObserver::OnNewMessage(const char* modem_device_path,
                                const SMS* message) {
   VLOG(1) << "New message notification from " << message->number
           << " text: " << message->text;
+
+  // Don't show empty messages. Such messages most probably "Message Waiting
+  // Indication" and it should be determined by data-coding-scheme,
+  // see crosbug.com/27883. But this field is not exposed from libcros.
+  // TODO(dpokuhin): when libcros refactoring done, implement check for
+  // "Message Waiting Indication" to filter out such messages.
+  if (!*message->text)
+    return;
 
   SystemNotification note(
       profile_,

@@ -5,17 +5,20 @@
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 
 #include <signal.h>
+#include <stdlib.h>
 #include <sys/types.h>
 
 #include <string>
 #include <vector>
 
 #include "base/bind.h"
+#include "base/chromeos/chromeos_version.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/threading/thread_restrictions.h"
+#include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/cryptohome_library.h"
@@ -36,11 +39,12 @@
 #include "chrome/browser/chromeos/login/update_screen.h"
 #include "chrome/browser/chromeos/login/user_image_screen.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
-#include "chrome/browser/chromeos/login/wizard_accessibility_helper.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/options/options_util.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
+#include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "ui/base/accelerators/accelerator.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -64,9 +68,6 @@ const char kOobeComplete[] = "OobeComplete";
 
 // A boolean pref of the device registered flag (second part after first login).
 const char kDeviceRegistered[] = "DeviceRegistered";
-
-// Path to flag file indicating that both parts of OOBE were completed.
-const char kOobeCompleteFlagFilePath[] = "/home/chronos/.oobe_completed";
 
 // Time in seconds that we wait for the device to reboot.
 // If reboot didn't happen, ask user to reboot device manually.
@@ -145,13 +146,10 @@ WizardController::~WizardController() {
   } else {
     NOTREACHED() << "More than one controller are alive.";
   }
-
-  chromeos::WizardAccessibilityHelper::GetInstance()->
-      UnregisterNotifications();
 }
 
 void WizardController::Init(const std::string& first_screen_name,
-                            DictionaryValue* screen_parameters) {
+                            base::DictionaryValue* screen_parameters) {
   VLOG(1) << "Starting OOBE wizard with screen: " << first_screen_name;
   first_screen_name_ = first_screen_name;
   screen_parameters_.reset(screen_parameters);
@@ -161,14 +159,11 @@ void WizardController::Init(const std::string& first_screen_name,
     is_out_of_box_ = true;
   }
 
-  ShowFirstScreen(first_screen_name);
-}
-
-void WizardController::CancelOOBEUpdate() {
-  if (update_screen_.get() &&
-      update_screen_.get() == current_screen_) {
-    GetUpdateScreen()->CancelUpdate();
-  }
+  AdvanceToScreen(first_screen_name);
+  content::NotificationService::current()->Notify(
+      chrome::NOTIFICATION_WIZARD_FIRST_SCREEN_SHOWN,
+      content::NotificationService::AllSources(),
+      content::NotificationService::NoDetails());
 }
 
 chromeos::NetworkScreen* WizardController::GetNetworkScreen() {
@@ -274,6 +269,11 @@ void WizardController::ShowUpdateScreen() {
 }
 
 void WizardController::ShowUserImageScreen() {
+  // Skip image selection for ephemeral users.
+  if (chromeos::UserManager::Get()->IsCurrentUserEphemeral()) {
+    OnUserImageSkipped();
+    return;
+  }
   VLOG(1) << "Showing user image screen.";
   SetStatusAreaVisible(false);
   SetCurrentScreen(GetUserImageScreen());
@@ -439,6 +439,7 @@ void WizardController::OnUserImageSelected() {
       BrowserThread::UI,
       FROM_HERE,
       base::Bind(&chromeos::LoginUtils::DoBrowserLaunch,
+                 base::Unretained(chromeos::LoginUtils::Get()),
                  ProfileManager::GetDefaultProfile(), host_));
   host_ = NULL;
   // TODO(avayvod): Sync image with Google Sync.
@@ -483,6 +484,10 @@ void WizardController::OnOOBECompleted() {
 }
 
 void WizardController::InitiateOOBEUpdate() {
+  // Now that EULA has been accepted (for official builds), enable portal check.
+  // ChromiumOS builds would go though this code path too.
+  chromeos::CrosLibrary::Get()->GetNetworkLibrary()->
+      SetDefaultCheckPortalList();
   host_->CheckForAutoEnrollment();
   GetUpdateScreen()->StartUpdate();
   SetCurrentScreenSmooth(GetUpdateScreen(), true);
@@ -534,29 +539,29 @@ void WizardController::SetStatusAreaVisible(bool visible) {
   host_->SetStatusAreaVisible(visible);
 }
 
-void WizardController::ShowFirstScreen(const std::string& first_screen_name) {
-  if (first_screen_name == kNetworkScreenName) {
+void WizardController::AdvanceToScreen(const std::string& screen_name) {
+  if (screen_name == kNetworkScreenName) {
     ShowNetworkScreen();
-  } else if (first_screen_name == kLoginScreenName) {
+  } else if (screen_name == kLoginScreenName) {
     ShowLoginScreen();
-  } else if (first_screen_name == kUpdateScreenName) {
+  } else if (screen_name == kUpdateScreenName) {
     InitiateOOBEUpdate();
-  } else if (first_screen_name == kUserImageScreenName) {
+  } else if (screen_name == kUserImageScreenName) {
     ShowUserImageScreen();
-  } else if (first_screen_name == kEulaScreenName) {
+  } else if (screen_name == kEulaScreenName) {
     ShowEulaScreen();
-  } else if (first_screen_name == kRegistrationScreenName) {
+  } else if (screen_name == kRegistrationScreenName) {
     if (is_official_build_) {
       ShowRegistrationScreen();
     } else {
       // Just proceed to image screen.
       OnRegistrationSuccess();
     }
-  } else if (first_screen_name == kHTMLPageScreenName) {
+  } else if (screen_name == kHTMLPageScreenName) {
     ShowHTMLPageScreen();
-  } else if (first_screen_name == kEnterpriseEnrollmentScreenName) {
+  } else if (screen_name == kEnterpriseEnrollmentScreenName) {
     ShowEnterpriseEnrollmentScreen();
-  } else if (first_screen_name != kTestNoScreenName) {
+  } else if (screen_name != kTestNoScreenName) {
     if (is_out_of_box_) {
       ShowNetworkScreen();
     } else {
@@ -585,13 +590,32 @@ void WizardController::MarkOobeCompleted() {
   SaveBoolPreferenceForced(kOobeComplete, true);
 }
 
+// Returns the path to flag file indicating that both parts of OOBE were
+// completed.
+// On chrome device, returns /home/chronos/.oobe_completed.
+// On Linux desktop, returns $HOME/.oobe_completed.
+static FilePath GetOobeCompleteFlagPath() {
+  // The constant is defined here so it won't be referenced directly.
+  const char kOobeCompleteFlagFilePath[] = "/home/chronos/.oobe_completed";
+
+  if (base::chromeos::IsRunningOnChromeOS()) {
+    return FilePath(kOobeCompleteFlagFilePath);
+  } else {
+    const char* home = getenv("HOME");
+    // Unlikely but if HOME is not defined, use the current directory.
+    if (!home)
+      home = "";
+    return FilePath(home).AppendASCII(".oobe_completed");
+  }
+}
+
 static void CreateOobeCompleteFlagFile() {
   // Create flag file for boot-time init scripts.
-  FilePath oobe_complete_path(kOobeCompleteFlagFilePath);
+  FilePath oobe_complete_path = GetOobeCompleteFlagPath();
   if (!file_util::PathExists(oobe_complete_path)) {
     FILE* oobe_flag_file = file_util::OpenFile(oobe_complete_path, "w+b");
     if (oobe_flag_file == NULL)
-      DLOG(WARNING) << kOobeCompleteFlagFilePath << " doesn't exist.";
+      DLOG(WARNING) << oobe_complete_path.value() << " doesn't exist.";
     else
       file_util::CloseFile(oobe_flag_file);
   }
@@ -613,7 +637,8 @@ bool WizardController::IsDeviceRegistered() {
     // Pref is not set. For compatibility check flag file. It causes blocking
     // IO on UI thread. But it's required for update from old versions.
     base::ThreadRestrictions::ScopedAllowIO allow_io;
-    FilePath oobe_complete_flag_file_path(kOobeCompleteFlagFilePath);
+    FilePath oobe_complete_flag_file_path = GetOobeCompleteFlagPath();
+    DVLOG(1) << "Checking " << oobe_complete_flag_file_path.value();
     bool file_exists = file_util::PathExists(oobe_complete_flag_file_path);
     SaveIntegerPreferenceForced(kDeviceRegistered, file_exists ? 1 : 0);
     return file_exists;

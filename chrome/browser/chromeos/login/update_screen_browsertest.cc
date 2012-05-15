@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -62,6 +62,8 @@ class UpdateScreenTest : public WizardInProcessBrowserTest {
         .WillOnce(Invoke(RequestUpdateCheckSuccess));
 
     mock_network_library_ = cros_mock_->mock_network_library();
+    EXPECT_CALL(*mock_network_library_, SetDefaultCheckPortalList())
+        .Times(1);
     EXPECT_CALL(*mock_network_library_, Connected())
         .Times(1)  // also called by NetworkMenu::InitMenuItems()
         .WillRepeatedly((Return(false)))
@@ -77,15 +79,15 @@ class UpdateScreenTest : public WizardInProcessBrowserTest {
 
   virtual void SetUpOnMainThread() {
     mock_screen_observer_.reset(new MockScreenObserver());
-    ASSERT_TRUE(controller() != NULL);
-    update_screen_ = controller()->GetUpdateScreen();
+    ASSERT_TRUE(WizardController::default_controller() != NULL);
+    update_screen_ = WizardController::default_controller()->GetUpdateScreen();
     ASSERT_TRUE(update_screen_ != NULL);
-    ASSERT_EQ(controller()->current_screen(), update_screen_);
+    ASSERT_EQ(WizardController::default_controller()->current_screen(),
+              update_screen_);
     update_screen_->screen_observer_ = mock_screen_observer_.get();
   }
 
   virtual void TearDownInProcessBrowserTestFixture() {
-    update_screen_->screen_observer_ = (controller());
     WizardInProcessBrowserTest::TearDownInProcessBrowserTestFixture();
     DBusThreadManager::Shutdown();
   }

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebPoint.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebVector.h"
 #include "webkit/glue/glue_serialize.h"
+#include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/web_io_operators.h"
 
 using WebKit::WebData;
@@ -37,6 +38,12 @@ class GlueSerializeTest : public testing::Test {
     const char d2[] = "data the second";
     http_body.appendData(WebData(d2, sizeof(d2)-1));
 
+    return http_body;
+  }
+
+  WebHTTPBody MakeFormDataWithPasswords() {
+    WebHTTPBody http_body = MakeFormData();
+    http_body.setContainsPasswordData(true);
     return http_body;
   }
 
@@ -80,9 +87,23 @@ class GlueSerializeTest : public testing::Test {
     return item;
   }
 
+  WebHistoryItem MakeHistoryItemWithPasswordData(bool pregnant) {
+    WebHistoryItem item = MakeHistoryItem(false, pregnant);
+    item.setHTTPBody(MakeFormDataWithPasswords());
+    item.setHTTPContentType(WebString::fromUTF8("formContentType"));
+    return item;
+  }
+
   // Checks that a == b.
   void HistoryItemExpectEqual(const WebHistoryItem& a,
                               const WebHistoryItem& b) {
+    HistoryItemExpectBaseDataEqual(a, b);
+    HistoryItemExpectFormDataEqual(a, b);
+    HistoryItemExpectChildrenEqual(a, b);
+  }
+
+  void HistoryItemExpectBaseDataEqual(const WebHistoryItem& a,
+                                      const WebHistoryItem& b) {
     EXPECT_EQ(string16(a.urlString()), string16(b.urlString()));
     EXPECT_EQ(string16(a.originalURLString()), string16(b.originalURLString()));
     EXPECT_EQ(string16(a.target()), string16(b.target()));
@@ -101,12 +122,15 @@ class GlueSerializeTest : public testing::Test {
     EXPECT_EQ(a_docstate.size(), b_docstate.size());
     for (size_t i = 0, c = a_docstate.size(); i < c; ++i)
       EXPECT_EQ(string16(a_docstate[i]), string16(b_docstate[i]));
+  }
 
-    // Form Data
+  void HistoryItemExpectFormDataEqual(const WebHistoryItem& a,
+                                      const WebHistoryItem& b) {
     const WebHTTPBody& a_body = a.httpBody();
     const WebHTTPBody& b_body = b.httpBody();
     EXPECT_EQ(!a_body.isNull(), !b_body.isNull());
     if (!a_body.isNull() && !b_body.isNull()) {
+      EXPECT_EQ(a_body.containsPasswordData(), b_body.containsPasswordData());
       EXPECT_EQ(a_body.elementCount(), b_body.elementCount());
       WebHTTPBody::Element a_elem, b_elem;
       for (size_t i = 0; a_body.elementAt(i, a_elem) &&
@@ -121,8 +145,10 @@ class GlueSerializeTest : public testing::Test {
       }
     }
     EXPECT_EQ(string16(a.httpContentType()), string16(b.httpContentType()));
+  }
 
-    // Children
+  void HistoryItemExpectChildrenEqual(const WebHistoryItem& a,
+                                      const WebHistoryItem& b) {
     const WebVector<WebHistoryItem>& a_children = a.children();
     const WebVector<WebHistoryItem>& b_children = b.children();
     EXPECT_EQ(a_children.size(), b_children.size());
@@ -136,8 +162,8 @@ class GlueSerializeTest : public testing::Test {
 TEST_F(GlueSerializeTest, BackwardsCompatibleTest) {
   const WebHistoryItem& item = MakeHistoryItem(false, false);
 
-  // Make sure version 11 (current version) can read versions 1 through 10.
-  for (int i = 1; i <= 10; i++) {
+  // Make sure version 12 (current version) can read versions 1 through 11.
+  for (int i = 1; i <= 11; i++) {
     std::string serialized_item;
     webkit_glue::HistoryItemToVersionedString(item, i, &serialized_item);
     const WebHistoryItem& deserialized_item =
@@ -197,6 +223,102 @@ TEST_F(GlueSerializeTest, BadMessagesTest) {
     std::string s(static_cast<const char*>(p.data()), p.size());
     webkit_glue::HistoryItemFromString(s);
   }
+}
+
+TEST_F(GlueSerializeTest, RemoveFormData) {
+  const WebHistoryItem& item1 = MakeHistoryItem(true, true);
+  std::string serialized_item = webkit_glue::HistoryItemToString(item1);
+  serialized_item =
+      webkit_glue::RemoveFormDataFromHistoryState(serialized_item);
+  const WebHistoryItem& item2 =
+      webkit_glue::HistoryItemFromString(serialized_item);
+
+  ASSERT_FALSE(item1.isNull());
+  ASSERT_FALSE(item2.isNull());
+
+  HistoryItemExpectBaseDataEqual(item1, item2);
+  HistoryItemExpectChildrenEqual(item1, item2);
+
+  // Form data was removed, but the identifier was kept.
+  const WebHTTPBody& body1 = item1.httpBody();
+  const WebHTTPBody& body2 = item2.httpBody();
+  EXPECT_FALSE(body1.isNull());
+  EXPECT_FALSE(body2.isNull());
+  EXPECT_GT(body1.elementCount(), 0U);
+  EXPECT_EQ(0U, body2.elementCount());
+  EXPECT_EQ(body1.identifier(), body2.identifier());
+}
+
+TEST_F(GlueSerializeTest, FilePathsFromHistoryState) {
+  WebHistoryItem item = MakeHistoryItem(false, true);
+
+  // Append file paths to item.
+  FilePath file_path1(FILE_PATH_LITERAL("file.txt"));
+  FilePath file_path2(FILE_PATH_LITERAL("another_file"));
+  WebHTTPBody http_body;
+  http_body.initialize();
+  http_body.appendFile(webkit_glue::FilePathToWebString(file_path1));
+  http_body.appendFile(webkit_glue::FilePathToWebString(file_path2));
+  item.setHTTPBody(http_body);
+
+  std::string serialized_item = webkit_glue::HistoryItemToString(item);
+  const std::vector<FilePath>& file_paths =
+      webkit_glue::FilePathsFromHistoryState(serialized_item);
+  ASSERT_EQ(2U, file_paths.size());
+  EXPECT_EQ(file_path1, file_paths[0]);
+  EXPECT_EQ(file_path2, file_paths[1]);
+}
+
+// Makes sure that a HistoryItem containing password data remains intact after
+// being serialized and deserialized.
+TEST_F(GlueSerializeTest, HistoryItemWithPasswordsSerializeTest) {
+  const WebHistoryItem& item = MakeHistoryItemWithPasswordData(true);
+  const std::string& serialized_item = webkit_glue::HistoryItemToString(item);
+  const WebHistoryItem& deserialized_item =
+      webkit_glue::HistoryItemFromString(serialized_item);
+
+  ASSERT_FALSE(item.isNull());
+  ASSERT_FALSE(deserialized_item.isNull());
+  HistoryItemExpectEqual(item, deserialized_item);
+}
+
+TEST_F(GlueSerializeTest, RemovePasswordData) {
+  const WebHistoryItem& item1 = MakeHistoryItemWithPasswordData(true);
+  std::string serialized_item = webkit_glue::HistoryItemToString(item1);
+  serialized_item =
+      webkit_glue::RemovePasswordDataFromHistoryState(serialized_item);
+  const WebHistoryItem& item2 =
+      webkit_glue::HistoryItemFromString(serialized_item);
+
+  ASSERT_FALSE(item1.isNull());
+  ASSERT_FALSE(item2.isNull());
+
+  HistoryItemExpectBaseDataEqual(item1, item2);
+  HistoryItemExpectChildrenEqual(item1, item2);
+
+  // Form data was removed, but the identifier was kept.
+  const WebHTTPBody& body1 = item1.httpBody();
+  const WebHTTPBody& body2 = item2.httpBody();
+  EXPECT_FALSE(body1.isNull());
+  EXPECT_FALSE(body2.isNull());
+  EXPECT_GT(body1.elementCount(), 0U);
+  EXPECT_EQ(0U, body2.elementCount());
+  EXPECT_EQ(body1.identifier(), body2.identifier());
+}
+
+TEST_F(GlueSerializeTest, RemovePasswordDataWithNoPasswordData) {
+  const WebHistoryItem& item1 = MakeHistoryItem(true, true);
+  std::string serialized_item = webkit_glue::HistoryItemToString(item1);
+  serialized_item =
+      webkit_glue::RemovePasswordDataFromHistoryState(serialized_item);
+  const WebHistoryItem& item2 =
+      webkit_glue::HistoryItemFromString(serialized_item);
+
+  ASSERT_FALSE(item1.isNull());
+  ASSERT_FALSE(item2.isNull());
+
+  // Form data was not removed.
+  HistoryItemExpectEqual(item1, item2);
 }
 
 }  // namespace

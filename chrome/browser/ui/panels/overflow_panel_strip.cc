@@ -5,7 +5,6 @@
 #include "chrome/browser/ui/panels/overflow_panel_strip.h"
 
 #include "base/logging.h"
-#include "chrome/browser/ui/panels/docked_panel_strip.h"
 #include "chrome/browser/ui/panels/panel_manager.h"
 #include "chrome/browser/ui/panels/panel_mouse_watcher.h"
 #include "chrome/browser/ui/panels/panel_overflow_indicator.h"
@@ -32,7 +31,8 @@ const int kOverflowHoverAnimationMs = 180;
 }
 
 OverflowPanelStrip::OverflowPanelStrip(PanelManager* panel_manager)
-    : panel_manager_(panel_manager),
+    : PanelStrip(PanelStrip::IN_OVERFLOW),
+      panel_manager_(panel_manager),
       current_display_width_(0),
       max_visible_panels_(kMaxVisibleOverflowPanels),
       max_visible_panels_on_hover_(0),
@@ -59,7 +59,7 @@ void OverflowPanelStrip::SetDisplayArea(const gfx::Rect& display_area) {
   if (overflow_indicator_.get())
     UpdateOverflowIndicatorCount();
 
-  Refresh();
+  RefreshLayout();
 }
 
 void OverflowPanelStrip::UpdateMaxVisiblePanelsOnHover() {
@@ -78,10 +78,13 @@ void OverflowPanelStrip::UpdateCurrentWidth() {
                                                       : display_area_.width();
 }
 
-void OverflowPanelStrip::AddPanel(Panel* panel) {
+void OverflowPanelStrip::AddPanel(Panel* panel,
+                                  PositioningMask positioning_mask) {
   // TODO(jianli): consider using other container to improve the perf for
   // inserting to the front. http://crbug.com/106222
-  DCHECK_EQ(Panel::IN_OVERFLOW, panel->expansion_state());
+  DCHECK_NE(this, panel->panel_strip());
+  panel->SetPanelStrip(this);
+
   // Newly created panels that were temporarily in the panel strip
   // are added to the back of the overflow, whereas panels that are
   // bumped from the panel strip by other panels go to the front
@@ -92,11 +95,12 @@ void OverflowPanelStrip::AddPanel(Panel* panel) {
     DoRefresh(panels_.size() - 1, panels_.size() - 1);
   } else {
     panels_.insert(panels_.begin(), panel);
-    Refresh();
+    RefreshLayout();
   }
 
   if (num_panels() == 1) {
-    panel_manager_->mouse_watcher()->AddObserver(this);
+    if (!panel_manager_->is_full_screen())
+      panel_manager_->mouse_watcher()->AddObserver(this);
     UpdateMaxVisiblePanelsOnHover();
   }
 
@@ -110,20 +114,21 @@ void OverflowPanelStrip::AddPanel(Panel* panel) {
   }
 }
 
-bool OverflowPanelStrip::Remove(Panel* panel) {
+void OverflowPanelStrip::RemovePanel(Panel* panel) {
+  DCHECK_EQ(this, panel->panel_strip());
+  panel->SetPanelStrip(NULL);
+
   size_t index = 0;
   Panels::iterator iter = panels_.begin();
   for (; iter != panels_.end(); ++iter, ++index)
     if (*iter == panel)
       break;
-  if (iter == panels_.end())
-    return false;
+  DCHECK(iter != panels_.end());
 
   panels_.erase(iter);
   DoRefresh(index, panels_.size() - 1);
-  panel_manager_->OnPanelRemoved(panel);
 
-  if (panels_.empty())
+  if (panels_.empty() && !panel_manager_->is_full_screen())
     panel_manager_->mouse_watcher()->RemoveObserver(this);
 
   // Update the overflow indicator. If the number of overflow panels fall below
@@ -132,11 +137,9 @@ bool OverflowPanelStrip::Remove(Panel* panel) {
     overflow_indicator_.reset();
   else
     UpdateOverflowIndicatorCount();
-
-  return true;
 }
 
-void OverflowPanelStrip::RemoveAll() {
+void OverflowPanelStrip::CloseAll() {
   // Make a copy of the iterator as closing panels can modify the vector.
   Panels panels_copy = panels_;
 
@@ -146,23 +149,99 @@ void OverflowPanelStrip::RemoveAll() {
     (*iter)->Close();
 }
 
-void OverflowPanelStrip::OnPanelExpansionStateChanged(Panel* panel) {
-  // Only care about new state being overflow.
-  if (panel->expansion_state() != Panel::IN_OVERFLOW)
-    return;
-
-  panel_manager_->docked_strip()->Remove(panel);
-  AddPanel(panel);
-  panel->SetAppIconVisibility(false);
-  panel->set_draggable(false);
+void OverflowPanelStrip::ResizePanelWindow(
+    Panel* panel,
+    const gfx::Size& preferred_window_size) {
+  // Overflow uses its own panel window sizes.
 }
 
 void OverflowPanelStrip::OnPanelAttentionStateChanged(Panel* panel) {
-  DCHECK(panel->expansion_state() == Panel::IN_OVERFLOW);
+  DCHECK_EQ(this, panel->panel_strip());
   UpdateOverflowIndicatorAttention();
 }
 
-void OverflowPanelStrip::Refresh() {
+void OverflowPanelStrip::OnPanelTitlebarClicked(Panel* panel,
+                                                panel::ClickModifier modifier) {
+  DCHECK_EQ(this, panel->panel_strip());
+  // Modifier is ignored in overflow.
+  panel->Activate();
+}
+
+void OverflowPanelStrip::ActivatePanel(Panel* panel) {
+  DCHECK_EQ(this, panel->panel_strip());
+  // Activating an overflow panel moves it to the docked panel strip.
+  panel_manager_->MovePanelToStrip(panel,
+                                   PanelStrip::DOCKED,
+                                   PanelStrip::DEFAULT_POSITION);
+  panel->panel_strip()->ActivatePanel(panel);
+}
+
+void OverflowPanelStrip::MinimizePanel(Panel* panel) {
+  DCHECK_EQ(this, panel->panel_strip());
+  // Overflow is already a minimized mode for a panel. Nothing more to do.
+}
+
+void OverflowPanelStrip::RestorePanel(Panel* panel) {
+  DCHECK_EQ(this, panel->panel_strip());
+  panel_manager_->MovePanelToStrip(panel,
+                                   PanelStrip::DOCKED,
+                                   PanelStrip::DEFAULT_POSITION);
+  panel->panel_strip()->RestorePanel(panel);
+}
+
+bool OverflowPanelStrip::IsPanelMinimized(const Panel* panel) const {
+  // All overflow panels are considered minimized.
+  return true;
+}
+
+bool OverflowPanelStrip::CanShowPanelAsActive(const Panel* panel) const {
+  // All overflow panels cannot be shown as active.
+  return false;
+}
+
+void OverflowPanelStrip::SavePanelPlacement(Panel* panel) {
+  NOTREACHED();
+}
+
+void OverflowPanelStrip::RestorePanelToSavedPlacement() {
+  NOTREACHED();
+}
+
+void OverflowPanelStrip::DiscardSavedPanelPlacement() {
+  NOTREACHED();
+}
+
+bool OverflowPanelStrip::CanDragPanel(const Panel* panel) const {
+  // All overflow panels are not draggable.
+  return false;
+}
+
+void OverflowPanelStrip::StartDraggingPanelWithinStrip(Panel* panel) {
+  NOTREACHED();
+}
+
+void OverflowPanelStrip::DragPanelWithinStrip(Panel* panel,
+                                              int delta_x,
+                                              int delta_y) {
+  NOTREACHED();
+}
+
+void OverflowPanelStrip::EndDraggingPanelWithinStrip(Panel* panel,
+                                                     bool aborted) {
+  NOTREACHED();
+}
+
+bool OverflowPanelStrip::CanResizePanel(const Panel* panel) const {
+  return false;
+}
+
+void OverflowPanelStrip::SetPanelBounds(Panel* panel,
+                                        const gfx::Rect& new_bounds) {
+  DCHECK_EQ(this, panel->panel_strip());
+  NOTREACHED();
+}
+
+void OverflowPanelStrip::RefreshLayout() {
   if (panels_.empty())
     return;
   DoRefresh(0, panels_.size() - 1);
@@ -234,20 +313,25 @@ gfx::Rect OverflowPanelStrip::ComputeLayout(
   DCHECK(index != kInvalidPanelIndex);
 
   gfx::Rect bounds;
-  int bottom = (index == 0) ? display_area_.bottom() :
-      panels_[index - 1]->GetBounds().y();
   bounds.set_x(display_area_.x());
-  bounds.set_y(bottom - iconified_size.height());
 
+  int bottom;
   if (static_cast<int>(index) < max_visible_panels()) {
     bounds.set_width(current_display_width_);
     bounds.set_height(iconified_size.height());
+    bottom = (index == 0) ? display_area_.bottom() :
+        panels_[index - 1]->GetBounds().y();
   } else {
     // Invisible for overflow-on-overflow.
+    // Hidden panels are positioned at the top of the overflow area.
+    // This makes the panel look like it "minimizes" to the top of the
+    // visible overflow panels.
     bounds.set_width(0);
     bounds.set_height(0);
+    bottom = panels_[max_visible_panels() - 1]->GetBounds().y();
   }
 
+  bounds.set_y(bottom - iconified_size.height());
   return bounds;
 }
 
@@ -258,7 +342,7 @@ void OverflowPanelStrip::OnMouseMove(const gfx::Point& mouse_position) {
 
 bool OverflowPanelStrip::ShouldShowOverflowTitles(
     const gfx::Point& mouse_position) const {
-  if (panels_.empty())
+  if (panels_.empty() || panel_manager_->is_full_screen())
     return false;
 
   Panel* top_visible_panel = num_panels() >= max_visible_panels() ?
@@ -332,7 +416,11 @@ void OverflowPanelStrip::AnimationProgressed(const ui::Animation* animation) {
       bounds.set_height(0);
     } else {
       bounds.set_width(current_display_width);
-      bounds.set_height(overflow_panel->IconOnlySize().height());
+      // Height and position needs update if panel was previously hidden.
+      if (!bounds.height()) {
+        bounds.set_height(overflow_panel->IconOnlySize().height());
+        bounds.set_y(panels_[i - 1]->GetBounds().y() - bounds.height());
+      }
     }
 
     overflow_panel->SetPanelBoundsInstantly(bounds);
@@ -348,6 +436,25 @@ void OverflowPanelStrip::AnimationProgressed(const ui::Animation* animation) {
 }
 
 void OverflowPanelStrip::OnFullScreenModeChanged(bool is_full_screen) {
+  if (panels_.empty())
+    return;
+
+  // Only watch mouse events if not full screen. Cannot show
+  // expanded overflow panels when in full screen mode so no need
+  // to detect when mouse hovers over the overflow strip.
+  if (is_full_screen)
+    panel_manager_->mouse_watcher()->RemoveObserver(this);
+  else
+    panel_manager_->mouse_watcher()->AddObserver(this);
+
   for (size_t i = 0; i < panels_.size(); ++i)
     panels_[i]->FullScreenModeChanged(is_full_screen);
+}
+
+void OverflowPanelStrip::UpdatePanelOnStripChange(Panel* panel) {
+  // Set panel properties for this strip.
+  panel->set_attention_mode(Panel::USE_PANEL_ATTENTION);
+  panel->SetAppIconVisibility(false);
+  panel->SetAlwaysOnTop(true);
+  panel->EnableResizeByMouse(false);
 }

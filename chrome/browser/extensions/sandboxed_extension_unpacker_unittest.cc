@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,7 @@
 #include "chrome/browser/extensions/sandboxed_extension_unpacker.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/extension_constants.h"
+#include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/extension_unpacker.h"
 #include "content/test/test_browser_thread.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -93,7 +93,7 @@ class SandboxedExtensionUnpackerTest : public testing::Test {
         ", Crx path: " << crx_path.value();
 
     unpacker_.reset(new ExtensionUnpacker(
-        crx_path, Extension::INTERNAL, Extension::NO_FLAGS));
+        crx_path, std::string(), Extension::INTERNAL, Extension::NO_FLAGS));
 
     // Build a temp area where the extension will be unpacked.
     temp_path_ =
@@ -101,7 +101,7 @@ class SandboxedExtensionUnpackerTest : public testing::Test {
     ASSERT_TRUE(file_util::CreateDirectory(temp_path_));
 
     sandboxed_unpacker_ =
-        new SandboxedExtensionUnpacker(crx_path, NULL, Extension::INTERNAL,
+        new SandboxedExtensionUnpacker(crx_path, false, Extension::INTERNAL,
                                        Extension::NO_FLAGS, client_);
 
     // Hack since SandboxedExtensionUnpacker gets its background thread id from

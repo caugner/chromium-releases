@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,9 +30,9 @@ FakeSignalStrategy::FakeSignalStrategy(const std::string& jid)
 }
 
 FakeSignalStrategy::~FakeSignalStrategy() {
-  while (!pending_messages_.empty()) {
-    delete pending_messages_.front();
-    pending_messages_.pop();
+  while (!received_messages_.empty()) {
+    delete received_messages_.front();
+    received_messages_.pop_front();
   }
 }
 
@@ -67,16 +67,15 @@ void FakeSignalStrategy::RemoveListener(Listener* listener) {
   listeners_.RemoveObserver(listener);
 }
 
-bool FakeSignalStrategy::SendStanza(buzz::XmlElement* stanza) {
+bool FakeSignalStrategy::SendStanza(scoped_ptr<buzz::XmlElement> stanza) {
   DCHECK(CalledOnValidThread());
 
   stanza->SetAttr(buzz::QN_FROM, jid_);
 
   if (peer_) {
-    peer_->OnIncomingMessage(stanza);
+    peer_->OnIncomingMessage(stanza.Pass());
     return true;
   } else {
-    delete stanza;
     return false;
   }
 }
@@ -86,8 +85,10 @@ std::string FakeSignalStrategy::GetNextId() {
   return base::IntToString(last_id_);
 }
 
-void FakeSignalStrategy::OnIncomingMessage(buzz::XmlElement* stanza) {
-  pending_messages_.push(stanza);
+void FakeSignalStrategy::OnIncomingMessage(
+    scoped_ptr<buzz::XmlElement> stanza) {
+  pending_messages_.push(stanza.get());
+  received_messages_.push_back(stanza.release());
   MessageLoop::current()->PostTask(
       FROM_HERE, base::Bind(&FakeSignalStrategy::DeliverIncomingMessages,
                             weak_factory_.GetWeakPtr()));
@@ -112,7 +113,6 @@ void FakeSignalStrategy::DeliverIncomingMessages() {
     }
 
     pending_messages_.pop();
-    delete stanza;
   }
 }
 

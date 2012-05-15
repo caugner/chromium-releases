@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,8 +15,8 @@
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_types.h"
 #include "ui/base/models/menu_model.h"
+#include "ui/views/controls/button/menu_button_listener.h"
 #include "ui/views/controls/menu/menu_item_view.h"
-#include "ui/views/controls/menu/view_menu_delegate.h"
 
 class PrefService;
 class SkBitmap;
@@ -34,18 +34,17 @@ class MenuRunner;
 namespace chromeos {
 
 // A class for the dropdown menu for switching input method and keyboard layout.
-// Since the class provides the views::ViewMenuDelegate interface, it's easy to
-// create a button widget (e.g. views::MenuButton, StatusAreaButton)
-// which shows the dropdown menu on click.
+// Since the class provides the views::MenuButtonListener interface, it's easy
+// to create a button widget (e.g. views::MenuButton, StatusAreaButton) which
+// shows the dropdown menu on click.
 class InputMethodMenu
-    : public views::ViewMenuDelegate,
+    : public views::MenuButtonListener,
       public ui::MenuModel,
       public input_method::InputMethodManager::Observer,
       public input_method::InputMethodManager::PreferenceObserver,
       public content::NotificationObserver {
  public:
-  InputMethodMenu(PrefService* pref_service,
-                  bool for_out_of_box_experience_dialog);
+  InputMethodMenu();
   virtual ~InputMethodMenu();
 
   // ui::MenuModel implementation.
@@ -69,9 +68,9 @@ class InputMethodMenu
   virtual void MenuWillShow() OVERRIDE;
   virtual void SetMenuModelDelegate(ui::MenuModelDelegate* delegate) OVERRIDE;
 
-  // views::ViewMenuDelegate implementation. Sub classes can override the method
-  // to adjust the position of the menu.
-  virtual void RunMenu(views::View* source, const gfx::Point& pt) OVERRIDE;
+  // views::MenuButtonListener implementation.
+  virtual void OnMenuButtonClicked(views::View* source,
+                                   const gfx::Point& point) OVERRIDE;
 
   // InputMethodManager::Observer implementation.
   virtual void InputMethodChanged(
@@ -84,7 +83,7 @@ class InputMethodMenu
       size_t num_active_input_methods) OVERRIDE;
   virtual void PropertyListChanged(
       input_method::InputMethodManager* manager,
-      const input_method::ImePropertyList& current_ime_properties) OVERRIDE;
+      const input_method::InputMethodPropertyList& properties) OVERRIDE;
 
   // InputMethodManager::PreferenceObserver implementation.
   virtual void PreferenceUpdateNeeded(
@@ -112,11 +111,6 @@ class InputMethodMenu
 
   // Registers input method preferences for the login screen.
   static void RegisterPrefs(PrefService* local_state);
-
-  // Returns a string for the indicator on top right corner of the Chrome
-  // window. The method is public for unit tests.
-  static string16 GetTextForIndicator(
-      const input_method::InputMethodDescriptor& input_method);
 
   // Returns a string for the drop-down menu and the tooltip for the indicator.
   // The method is public for unit tests.
@@ -197,12 +191,7 @@ class InputMethodMenu
   // Menu alignment (default TOPRIGHT).
   views::MenuItemView::AnchorPosition menu_alignment_;
 
-  PrefService* pref_service_;
   content::NotificationRegistrar registrar_;
-
-  // true if the menu is for a dialog in OOBE screen. In the dialog, we don't
-  // use radio buttons.
-  const bool for_out_of_box_experience_dialog_;
 
   DISALLOW_COPY_AND_ASSIGN(InputMethodMenu);
 };

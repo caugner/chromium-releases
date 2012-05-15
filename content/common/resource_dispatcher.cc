@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -293,7 +293,7 @@ bool ResourceDispatcher::OnMessageReceived(const IPC::Message& message) {
 
   int request_id;
 
-  void* iter = NULL;
+  PickleIterator iter(message);
   if (!message.ReadInt(&iter, &request_id)) {
     NOTREACHED() << "malformed resource message";
     return true;
@@ -515,7 +515,7 @@ void ResourceDispatcher::CancelPendingRequest(int routing_id,
                                               int request_id) {
   PendingRequestList::iterator it = pending_requests_.find(request_id);
   if (it == pending_requests_.end()) {
-    DLOG(WARNING) << "unknown request";
+    DVLOG(1) << "unknown request";
     return;
   }
 
@@ -677,7 +677,7 @@ bool ResourceDispatcher::IsResourceDispatcherMessage(
 // static
 void ResourceDispatcher::ReleaseResourcesInDataMessage(
     const IPC::Message& message) {
-  void* iter = NULL;
+  PickleIterator iter(message);
   int request_id;
   if (!message.ReadInt(&iter, &request_id)) {
     NOTREACHED() << "malformed resource message";

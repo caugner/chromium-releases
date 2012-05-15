@@ -6,6 +6,9 @@
 #define ASH_LAUNCHER_LAUNCHER_BUTTON_HOST_H_
 #pragma once
 
+#include "ash/ash_export.h"
+#include "base/string16.h"
+
 namespace views {
 class MouseEvent;
 class View;
@@ -16,7 +19,7 @@ namespace internal {
 
 // The launcher buttons communicate back to the host by way of this interface.
 // This interface is used to enable reordering the items on the launcher.
-class LauncherButtonHost {
+class ASH_EXPORT LauncherButtonHost {
  public:
   // Invoked when the mose is pressed on a view.
   virtual void MousePressedOnButton(views::View* view,
@@ -32,6 +35,9 @@ class LauncherButtonHost {
 
   // Invoked when the mouse exits the item.
   virtual void MouseExitedButton(views::View* view) = 0;
+
+  // Invoked to get the accessible name of the item.
+  virtual string16 GetAccessibleName(const views::View* view) = 0;
 
  protected:
   virtual ~LauncherButtonHost() {}

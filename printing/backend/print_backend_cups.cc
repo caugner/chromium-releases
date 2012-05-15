@@ -98,6 +98,7 @@ namespace printing {
 static const char kCUPSPrinterInfoOpt[] = "printer-info";
 static const char kCUPSPrinterStateOpt[] = "printer-state";
 static const char kCUPSPrinterTypeOpt[] = "printer-type";
+static const char kCUPSPrinterMakeModelOpt[] = "printer-make-and-model";
 
 class PrintBackendCUPS : public PrintBackend {
  public:
@@ -112,6 +113,9 @@ class PrintBackendCUPS : public PrintBackend {
   virtual bool GetPrinterCapsAndDefaults(
       const std::string& printer_name,
       PrinterCapsAndDefaults* printer_info) OVERRIDE;
+
+  virtual std::string GetPrinterDriverInfo(
+      const std::string& printer_name) OVERRIDE;
 
   virtual bool IsValidPrinter(const std::string& printer_name) OVERRIDE;
 
@@ -172,6 +176,12 @@ bool PrintBackendCUPS::EnumeratePrinters(PrinterList* printer_list) {
     if (state != NULL)
       base::StringToInt(state, &printer_info.printer_status);
 
+    const char* drv_info = cupsGetOption(kCUPSPrinterMakeModelOpt,
+                                         printer.num_options,
+                                         printer.options);
+    if (drv_info)
+      printer_info.options[kDriverInfoTagName] = *drv_info;
+
     // Store printer options.
     for (int opt_index = 0; opt_index < printer.num_options; opt_index++) {
       printer_info.options[printer.options[opt_index].name] =
@@ -223,6 +233,26 @@ bool PrintBackendCUPS::GetPrinterCapsAndDefaults(
   }
 
   return res;
+}
+
+std::string PrintBackendCUPS::GetPrinterDriverInfo(
+    const std::string& printer_name) {
+  cups_dest_t* destinations = NULL;
+  int num_dests = GetDests(&destinations);
+  std::string result;
+  for (int printer_index = 0; printer_index < num_dests; printer_index++) {
+    const cups_dest_t& printer = destinations[printer_index];
+    if (printer_name == printer.name) {
+      const char* info = cupsGetOption(kCUPSPrinterMakeModelOpt,
+                                       printer.num_options,
+                                       printer.options);
+      if (info)
+        result = *info;
+    }
+  }
+
+  cupsFreeDests(num_dests, destinations);
+  return result;
 }
 
 bool PrintBackendCUPS::IsValidPrinter(const std::string& printer_name) {

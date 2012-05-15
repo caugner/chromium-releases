@@ -29,8 +29,8 @@
 
 namespace {
 
-const int kVideoCaptureWidth = 352;
-const int kVideoCaptureHeight = 288;
+const int kVideoCaptureWidth = 640;
+const int kVideoCaptureHeight = 480;
 const int kVideoCaptureFramePerSecond = 30;
 
 }  // namespace
@@ -98,6 +98,10 @@ MediaStreamImpl::~MediaStreamImpl() {
       chrome_worker_thread_.message_loop()->PostTask(FROM_HERE, base::Bind(
           &MediaStreamImpl::DeleteIpcNetworkManager,
           base::Unretained(this)));
+      // Stopping the thread will wait until all tasks have been
+      // processed before returning. We wait for the above task to finish before
+      // letting the destructor continue to avoid any potential race issues.
+      chrome_worker_thread_.Stop();
     } else {
       NOTREACHED() << "Worker thread not running.";
     }
@@ -111,7 +115,8 @@ WebKit::WebPeerConnectionHandler* MediaStreamImpl::CreatePeerConnectionHandler(
     DVLOG(1) << "A PeerConnection already exists";
     return NULL;
   }
-  EnsurePeerConnectionFactory();
+  if (!EnsurePeerConnectionFactory())
+    return NULL;
 
   peer_connection_handler_ = new PeerConnectionHandler(
       client,
@@ -144,8 +149,8 @@ webrtc::MediaStreamTrackInterface* MediaStreamImpl::GetLocalMediaStreamTrack(
 
 void MediaStreamImpl::requestUserMedia(
     const WebKit::WebUserMediaRequest& user_media_request,
-    const WebKit::WebVector<WebKit::WebMediaStreamSource>&
-        media_stream_source_vector) {
+    const WebKit::WebVector<WebKit::WebMediaStreamSource>& audio_sources,
+    const WebKit::WebVector<WebKit::WebMediaStreamSource>& video_sources) {
   DCHECK(CalledOnValidThread());
   DCHECK(!user_media_request.isNull());
 
@@ -154,26 +159,15 @@ void MediaStreamImpl::requestUserMedia(
   bool audio = user_media_request.audio();
   media_stream::StreamOptions::VideoOption video_option =
       media_stream::StreamOptions::kNoCamera;
-  if (user_media_request.video()) {
-    // If no preference is set, use user facing camera.
-    video_option = media_stream::StreamOptions::kFacingUser;
-    if (user_media_request.cameraPreferenceUser() &&
-        user_media_request.cameraPreferenceEnvironment()) {
-      video_option = media_stream::StreamOptions::kFacingBoth;
-    } else if (user_media_request.cameraPreferenceEnvironment()) {
-      video_option = media_stream::StreamOptions::kFacingEnvironment;
-    }
-  }
+  if (user_media_request.video())
+    video_option = media_stream::StreamOptions::kFacingBoth;
 
   std::string security_origin = UTF16ToUTF8(
       user_media_request.securityOrigin().toString());
 
   DVLOG(1) << "MediaStreamImpl::generateStream(" << request_id << ", [ "
-           << (audio ? "audio " : "")
-           << ((user_media_request.cameraPreferenceUser()) ?
-               "video_facing_user " : "")
-           << ((user_media_request.cameraPreferenceEnvironment()) ?
-               "video_facing_environment " : "") << "], "
+           << (audio ? "audio" : "")
+           << (user_media_request.video() ? " video" : "") << "], "
            << security_origin << ")";
 
   user_media_requests_.insert(
@@ -272,38 +266,56 @@ void MediaStreamImpl::OnStreamGenerated(
     const media_stream::StreamDeviceInfoArray& audio_array,
     const media_stream::StreamDeviceInfoArray& video_array) {
   DCHECK(CalledOnValidThread());
+
+  // Creating the peer connection factory can fail if for example the audio
+  // (input or output) or video device cannot be opened. Handling such cases
+  // better is a higher level design discussion which involves the media
+  // manager, webrtc and libjingle. We should still continue and fire a
+  // succeeded callback here, to maintain the same states in WebKit as in the
+  // media manager in terms of streams and tracks. We cannot create any native
+  // track objects however, so we'll just have to skip that. Furthermore,
+  // creating a peer connection later on will fail if we don't have a factory.
   EnsurePeerConnectionFactory();
 
-  WebKit::WebVector<WebKit::WebMediaStreamSource> source_vector(
-      audio_array.size() + video_array.size());
-
   // Add audio tracks.
+  WebKit::WebVector<WebKit::WebMediaStreamSource> audio_source_vector(
+      audio_array.size());
   std::string track_label;
   for (size_t i = 0; i < audio_array.size(); ++i) {
     track_label = CreateTrackLabel(label, audio_array[i].session_id, false);
-    MediaStreamTrackPtr audio_track(
-        dependency_factory_->CreateLocalAudioTrack(audio_array[i].name, NULL));
-    local_tracks_.insert(
-        std::pair<std::string, MediaStreamTrackPtr>(track_label, audio_track));
-    source_vector[i].initialize(
+    if (dependency_factory_->PeerConnectionFactoryCreated()) {
+      MediaStreamTrackPtr audio_track(
+          dependency_factory_->CreateLocalAudioTrack(audio_array[i].name,
+                                                     NULL));
+      local_tracks_.insert(
+          std::pair<std::string, MediaStreamTrackPtr>(track_label,
+                                                      audio_track));
+    }
+    audio_source_vector[i].initialize(
           UTF8ToUTF16(track_label),
           WebKit::WebMediaStreamSource::TypeAudio,
           UTF8ToUTF16(audio_array[i].name));
   }
 
   // Add video tracks.
+  WebKit::WebVector<WebKit::WebMediaStreamSource> video_source_vector(
+      video_array.size());
   for (size_t i = 0; i < video_array.size(); ++i) {
     track_label = CreateTrackLabel(label, video_array[i].session_id, true);
-    webrtc::VideoCaptureModule* vcm =
-        new VideoCaptureModuleImpl(video_array[i].session_id,
-                                   vc_manager_.get());
-    MediaStreamTrackPtr video_track(dependency_factory_->CreateLocalVideoTrack(
-            video_array[i].name,
-            // The video capturer takes ownership of |vcm|.
-            webrtc::CreateVideoCapturer(vcm)));
-    local_tracks_.insert(
-        std::pair<std::string, MediaStreamTrackPtr>(track_label, video_track));
-    source_vector[audio_array.size() + i].initialize(
+    if (dependency_factory_->PeerConnectionFactoryCreated()) {
+      webrtc::VideoCaptureModule* vcm = new VideoCaptureModuleImpl(
+          video_array[i].session_id,
+          vc_manager_.get());
+      MediaStreamTrackPtr video_track(
+          dependency_factory_->CreateLocalVideoTrack(
+              video_array[i].name,
+              // The video capturer takes ownership of |vcm|.
+              webrtc::CreateVideoCapturer(vcm)));
+      local_tracks_.insert(
+          std::pair<std::string, MediaStreamTrackPtr>(track_label,
+                                                      video_track));
+    }
+    video_source_vector[i].initialize(
           UTF8ToUTF16(track_label),
           WebKit::WebMediaStreamSource::TypeVideo,
           UTF8ToUTF16(video_array[i].name));
@@ -320,7 +332,7 @@ void MediaStreamImpl::OnStreamGenerated(
   WebKit::WebUserMediaRequest user_media_request = it->second;
   user_media_requests_.erase(it);
 
-  user_media_request.requestSucceeded(source_vector);
+  user_media_request.requestSucceeded(audio_source_vector, video_source_vector);
 }
 
 void MediaStreamImpl::OnStreamGenerationFailed(int request_id) {
@@ -393,6 +405,13 @@ void MediaStreamImpl::InitializeWorkerThread(talk_base::Thread** thread,
   event->Signal();
 }
 
+void MediaStreamImpl::CreateIpcNetworkManagerOnWorkerThread(
+    base::WaitableEvent* event) {
+  DCHECK_EQ(MessageLoop::current(), chrome_worker_thread_.message_loop());
+  network_manager_ = new content::IpcNetworkManager(p2p_socket_dispatcher_);
+  event->Signal();
+}
+
 void MediaStreamImpl::DeleteIpcNetworkManager() {
   DCHECK_EQ(MessageLoop::current(), chrome_worker_thread_.message_loop());
   delete network_manager_;
@@ -425,8 +444,14 @@ bool MediaStreamImpl::EnsurePeerConnectionFactory() {
     DCHECK(worker_thread_);
   }
 
-  if (!network_manager_)
-    network_manager_ = new content::IpcNetworkManager(p2p_socket_dispatcher_);
+  if (!network_manager_) {
+    base::WaitableEvent event(true, false);
+    chrome_worker_thread_.message_loop()->PostTask(FROM_HERE, base::Bind(
+          &MediaStreamImpl::CreateIpcNetworkManagerOnWorkerThread,
+          this,
+          &event));
+    event.Wait();
+  }
 
   if (!socket_factory_.get()) {
     socket_factory_.reset(
@@ -440,7 +465,7 @@ bool MediaStreamImpl::EnsurePeerConnectionFactory() {
             p2p_socket_dispatcher_,
             network_manager_,
             socket_factory_.get())) {
-      LOG(ERROR) << "Could not initialize PeerConnection factory";
+      LOG(ERROR) << "Could not create PeerConnection factory";
       return false;
     }
   }

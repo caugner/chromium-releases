@@ -10,15 +10,15 @@
 #include "base/logging.h"
 #include "base/message_loop_proxy.h"
 #include "base/platform_file.h"
-#include "content/browser/renderer_host/resource_dispatcher_host.h"
+#include "content/browser/renderer_host/resource_dispatcher_host_impl.h"
 #include "content/public/common/resource_response.h"
 #include "net/base/file_stream.h"
 #include "net/base/io_buffer.h"
 #include "net/base/mime_sniffer.h"
 #include "net/base/net_errors.h"
-#include "webkit/blob/deletable_file_reference.h"
+#include "webkit/blob/shareable_file_reference.h"
 
-using webkit_blob::DeletableFileReference;
+using webkit_blob::ShareableFileReference;
 
 namespace content {
 
@@ -28,7 +28,7 @@ static const int kReadBufSize = 32768;
 RedirectToFileResourceHandler::RedirectToFileResourceHandler(
     ResourceHandler* next_handler,
     int process_id,
-    ResourceDispatcherHost* host)
+    ResourceDispatcherHostImpl* host)
     : LayeredResourceHandler(next_handler),
       ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)),
       host_(host),
@@ -139,7 +139,9 @@ void RedirectToFileResourceHandler::OnRequestClosed() {
   if (file_stream_.get()) {
     // We require this explicit call to Close since file_stream_ was constructed
     // directly from a PlatformFile.
-    file_stream_->Close();
+    // Close() performs file IO. crbug.com/112474.
+    base::ThreadRestrictions::ScopedAllowIO allow_io;
+    file_stream_->CloseSync();
     file_stream_.reset();
   }
   deletable_file_ = NULL;
@@ -159,12 +161,13 @@ void RedirectToFileResourceHandler::DidCreateTemporaryFile(
     // file_stream_ (otherwise we will leak it).
     return;
   }
-  deletable_file_ = DeletableFileReference::GetOrCreate(
-      file_path,
+  deletable_file_ = ShareableFileReference::GetOrCreate(
+      file_path, ShareableFileReference::DELETE_ON_FINAL_RELEASE,
       BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE));
   file_stream_.reset(new net::FileStream(file_handle.ReleaseValue(),
                                          base::PLATFORM_FILE_WRITE |
-                                         base::PLATFORM_FILE_ASYNC));
+                                         base::PLATFORM_FILE_ASYNC,
+                                         NULL));
   host_->RegisterDownloadedTempFile(
       process_id_, request_id_, deletable_file_.get());
   host_->StartDeferredRequest(process_id_, request_id_);
@@ -208,9 +211,20 @@ bool RedirectToFileResourceHandler::WriteMore() {
     if (write_callback_pending_)
       return true;
     DCHECK(write_cursor_ < buf_->offset());
+
+    // Create a temporary drainable buffer that can be passed to
+    // Write(). Temporarily reset the buf_ offset to 0 so that the
+    // drainable buffer can point to the the beginning of the buf_.
+    int offset = buf_->offset();
+    buf_->set_offset(0);
+    scoped_refptr<net::DrainableIOBuffer>
+        drainable = new net::DrainableIOBuffer(buf_, offset);
+    drainable->DidConsume(write_cursor_);
+    buf_->set_offset(offset);
+
     int rv = file_stream_->Write(
-        buf_->StartOfBuffer() + write_cursor_,
-        buf_->offset() - write_cursor_,
+        drainable,
+        drainable->BytesRemaining(),
         base::Bind(&RedirectToFileResourceHandler::DidWriteToFile,
                    base::Unretained(this)));
     if (rv == net::ERR_IO_PENDING) {

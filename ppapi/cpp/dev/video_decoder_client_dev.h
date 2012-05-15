@@ -7,6 +7,7 @@
 
 #include "ppapi/c/pp_stdint.h"
 #include "ppapi/c/dev/pp_video_dev.h"
+#include "ppapi/cpp/instance_handle.h"
 
 namespace pp {
 
@@ -41,7 +42,7 @@ class VideoDecoderClient_Dev {
                            PP_VideoDecodeError_Dev error) = 0;
 
  private:
-  Instance* associated_instance_;
+  InstanceHandle associated_instance_;
 };
 
 }  // namespace pp

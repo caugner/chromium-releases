@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,13 @@
 #define CHROME_BROWSER_UI_WEBUI_OPTIONS2_FONT_SETTINGS_HANDLER2_H_
 #pragma once
 
+#include "base/memory/scoped_ptr.h"
 #include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/ui/webui/options2/options_ui2.h"
-#include "content/browser/font_list_async.h"
+
+namespace base {
+class ListValue;
+}
 
 namespace options2 {
 
@@ -20,7 +24,7 @@ class FontSettingsHandler : public OptionsPageUIHandler {
 
   // OptionsPageUIHandler implementation.
   virtual void GetLocalizedValues(DictionaryValue* localized_strings) OVERRIDE;
-  virtual void Initialize() OVERRIDE;
+  virtual void InitializePage() OVERRIDE;
 
   // WebUIMessageHandler implementation.
   virtual void RegisterMessages() OVERRIDE;
@@ -33,7 +37,7 @@ class FontSettingsHandler : public OptionsPageUIHandler {
  private:
   void HandleFetchFontsData(const ListValue* args);
 
-  void FontsListHasLoaded(scoped_refptr<content::FontListResult> list);
+  void FontsListHasLoaded(scoped_ptr<base::ListValue> list);
 
   void SetUpStandardFontSample();
   void SetUpSerifFontSample();

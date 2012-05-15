@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,11 +10,16 @@
 #include "base/message_loop_helpers.h"
 #include "base/process.h"
 #include "content/browser/in_process_webkit/dom_storage_area.h"
-#include "content/browser/in_process_webkit/webkit_context.h"
 #include "content/common/dom_storage_common.h"
 #include "content/public/browser/browser_message_filter.h"
+#include "webkit/dom_storage/dom_storage_types.h"
 
-class DOMStorageContext;
+#ifdef ENABLE_NEW_DOM_STORAGE_BACKEND
+// This class is replaced by a new implementation in
+#include "content/browser/dom_storage/dom_storage_message_filter_new.h"
+#else
+
+class DOMStorageContextImpl;
 class GURL;
 struct DOMStorageMsg_Event_Params;
 
@@ -24,7 +29,8 @@ struct DOMStorageMsg_Event_Params;
 class DOMStorageMessageFilter : public content::BrowserMessageFilter {
  public:
   // Only call the constructor from the UI thread.
-  DOMStorageMessageFilter(int process_id, WebKitContext* webkit_context);
+  DOMStorageMessageFilter(int process_id,
+                          DOMStorageContextImpl* dom_storage_context);
 
   // content::BrowserMessageFilter implementation
   virtual void OnChannelConnected(int32 peer_pid) OVERRIDE;
@@ -46,8 +52,9 @@ class DOMStorageMessageFilter : public content::BrowserMessageFilter {
   virtual ~DOMStorageMessageFilter();
 
   // Message Handlers.
-  void OnStorageAreaId(int64 namespace_id, const string16& origin,
-                       int64* storage_area_id);
+  void OnOpenStorageArea(int64 namespace_id, const string16& origin,
+                         int64* storage_area_id);
+  void OnCloseStorageArea(int64 storage_area_id);
   void OnLength(int64 storage_area_id, unsigned* length);
   void OnKey(int64 storage_area_id, unsigned index, NullableString16* key);
   void OnGetItem(int64 storage_area_id, const string16& key,
@@ -64,9 +71,7 @@ class DOMStorageMessageFilter : public content::BrowserMessageFilter {
   void OnStorageEvent(const DOMStorageMsg_Event_Params& params);
 
   // A shortcut for accessing our context.
-  DOMStorageContext* Context() {
-    return webkit_context_->dom_storage_context();
-  }
+  DOMStorageContextImpl* Context() { return dom_storage_context_; }
 
   // Use whenever there's a chance OnStorageEvent will be called.
   class ScopedStorageEventContext {
@@ -81,8 +86,7 @@ class DOMStorageMessageFilter : public content::BrowserMessageFilter {
   static DOMStorageMessageFilter* storage_event_message_filter;
   static const GURL* storage_event_url_;
 
-  // Data shared between renderer processes with the same browser context.
-  scoped_refptr<WebKitContext> webkit_context_;
+  scoped_refptr<DOMStorageContextImpl> dom_storage_context_;
 
   // Used to dispatch messages to the correct view host.
   int process_id_;
@@ -90,4 +94,6 @@ class DOMStorageMessageFilter : public content::BrowserMessageFilter {
   DISALLOW_IMPLICIT_CONSTRUCTORS(DOMStorageMessageFilter);
 };
 
+#endif  // ENABLE_NEW_DOM_STORAGE_BACKEND
 #endif  // CONTENT_BROWSER_IN_PROCESS_WEBKIT_DOM_STORAGE_MESSAGE_FILTER_H_
+

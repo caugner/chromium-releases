@@ -5,7 +5,7 @@
 #include "chrome/browser/sessions/base_session_service.h"
 
 #include "base/bind.h"
-#include "base/metrics/histogram.h"
+#include "base/command_line.h"
 #include "base/pickle.h"
 #include "base/stl_util.h"
 #include "base/threading/thread.h"
@@ -13,6 +13,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_backend.h"
 #include "chrome/browser/sessions/session_types.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_entry.h"
@@ -75,24 +76,21 @@ BaseSessionService::BaseSessionService(SessionType type,
       path_(path),
       ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)),
       pending_reset_(false),
-      commands_since_reset_(0) {
+      commands_since_reset_(0),
+      save_post_data_(false) {
   if (profile) {
     // We should never be created when incognito.
     DCHECK(!profile->IsOffTheRecord());
+    const CommandLine* command_line = CommandLine::ForCurrentProcess();
+    save_post_data_ =
+        !command_line->HasSwitch(switches::kDisableRestoreSessionState);
   }
   backend_ = new SessionBackend(type,
       profile_ ? profile_->GetPath() : path_);
   DCHECK(backend_.get());
 
-  if (!RunningInProduction()) {
-    // We seem to be running as part of a test, in which case we need
-    // to explicitly initialize the backend.  In production, the
-    // backend will automatically initialize itself just in time.
-    //
-    // Note that it's important not to initialize too early in
-    // production; this can cause e.g. http://crbug.com/110785.
-    backend_->Init();
-  }
+  RunTaskOnBackendThread(FROM_HERE,
+                         base::Bind(&SessionBackend::Init, backend_));
 }
 
 BaseSessionService::~BaseSessionService() {
@@ -170,18 +168,17 @@ SessionCommand* BaseSessionService::CreateUpdateTabNavigationCommand(
   WriteString16ToPickle(pickle, &bytes_written, max_state_size,
                         entry.GetTitle());
 
+  std::string content_state = entry.GetContentState();
   if (entry.GetHasPostData()) {
-    UMA_HISTOGRAM_MEMORY_KB("SessionService.ContentStateSizeWithPost",
-                            entry.GetContentState().size() / 1024);
-    // Remove the form data, it may contain sensitive information.
-    WriteStringToPickle(pickle, &bytes_written, max_state_size,
-        webkit_glue::RemoveFormDataFromHistoryState(entry.GetContentState()));
-  } else {
-    UMA_HISTOGRAM_MEMORY_KB("SessionService.ContentStateSize",
-                            entry.GetContentState().size() / 1024);
-    WriteStringToPickle(pickle, &bytes_written, max_state_size,
-                        entry.GetContentState());
+    if (save_post_data_) {
+      content_state =
+          webkit_glue::RemovePasswordDataFromHistoryState(content_state);
+    } else {
+      content_state =
+          webkit_glue::RemoveFormDataFromHistoryState(content_state);
+    }
   }
+  WriteStringToPickle(pickle, &bytes_written, max_state_size, content_state);
 
   pickle.WriteInt(entry.GetTransitionType());
   int type_mask = entry.GetHasPostData() ? TabNavigation::HAS_POST_DATA : 0;
@@ -215,6 +212,25 @@ SessionCommand* BaseSessionService::CreateSetTabExtensionAppIDCommand(
   return new SessionCommand(command_id, pickle);
 }
 
+SessionCommand* BaseSessionService::CreateSetWindowAppNameCommand(
+    SessionID::id_type command_id,
+    SessionID::id_type window_id,
+    const std::string& app_name) {
+  // Use pickle to handle marshalling.
+  Pickle pickle;
+  pickle.WriteInt(window_id);
+
+  // Enforce a max for ids. They should never be anywhere near this size.
+  static const SessionCommand::size_type max_id_size =
+      std::numeric_limits<SessionCommand::size_type>::max() - 1024;
+
+  int bytes_written = 0;
+
+  WriteStringToPickle(pickle, &bytes_written, max_id_size, app_name);
+
+  return new SessionCommand(command_id, pickle);
+}
+
 bool BaseSessionService::RestoreUpdateTabNavigationCommand(
     const SessionCommand& command,
     TabNavigation* navigation,
@@ -222,7 +238,7 @@ bool BaseSessionService::RestoreUpdateTabNavigationCommand(
   scoped_ptr<Pickle> pickle(command.PayloadAsPickle());
   if (!pickle.get())
     return false;
-  void* iterator = NULL;
+  PickleIterator iterator(*pickle);
   std::string url_spec;
   if (!pickle->ReadInt(&iterator, tab_id) ||
       !pickle->ReadInt(&iterator, &(navigation->index_)) ||
@@ -266,9 +282,22 @@ bool BaseSessionService::RestoreSetTabExtensionAppIDCommand(
   if (!pickle.get())
     return false;
 
-  void* iterator = NULL;
+  PickleIterator iterator(*pickle);
   return pickle->ReadInt(&iterator, tab_id) &&
       pickle->ReadString(&iterator, extension_app_id);
+}
+
+bool BaseSessionService::RestoreSetWindowAppNameCommand(
+    const SessionCommand& command,
+    SessionID::id_type* window_id,
+    std::string* app_name) {
+  scoped_ptr<Pickle> pickle(command.PayloadAsPickle());
+  if (!pickle.get())
+    return false;
+
+  PickleIterator iterator(*pickle);
+  return pickle->ReadInt(&iterator, window_id) &&
+      pickle->ReadString(&iterator, app_name);
 }
 
 bool BaseSessionService::ShouldTrackEntry(const GURL& url) {
@@ -289,14 +318,10 @@ BaseSessionService::Handle BaseSessionService::ScheduleGetLastSessionCommands(
   return request->handle();
 }
 
-bool BaseSessionService::RunningInProduction() const {
-  return profile_ && BrowserThread::IsMessageLoopValid(BrowserThread::FILE);
-}
-
 bool BaseSessionService::RunTaskOnBackendThread(
     const tracked_objects::Location& from_here,
     const base::Closure& task) {
-  if (RunningInProduction()) {
+  if (profile_ && BrowserThread::IsMessageLoopValid(BrowserThread::FILE)) {
     return BrowserThread::PostTask(BrowserThread::FILE, from_here, task);
   } else {
     // Fall back to executing on the main thread if the file thread

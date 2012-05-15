@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,11 +8,13 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/api/sync_error.h"
 #include "chrome/browser/sync/glue/change_processor.h"
+#include "chrome/browser/sync/glue/chrome_report_unrecoverable_error.h"
 #include "chrome/browser/sync/glue/model_associator.h"
 #include "chrome/browser/sync/profile_sync_components_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
-#include "chrome/browser/sync/syncable/model_type.h"
 #include "content/public/browser/browser_thread.h"
+#include "sync/syncable/model_type.h"
+#include "sync/util/data_type_histogram.h"
 
 using content::BrowserThread;
 
@@ -120,6 +122,9 @@ bool FrontendDataTypeController::Associate() {
 void FrontendDataTypeController::StartFailed(StartResult result,
                                              const SyncError& error) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  if (IsUnrecoverableResult(result))
+    RecordUnrecoverableError(FROM_HERE, "StartFailed");
   CleanUpState();
   set_model_associator(NULL);
   change_processor_.reset();
@@ -196,9 +201,9 @@ DataTypeController::State FrontendDataTypeController::state() const {
 
 void FrontendDataTypeController::OnUnrecoverableError(
     const tracked_objects::Location& from_here, const std::string& message) {
-  // The ProfileSyncService will invoke our Stop() method in response to this.
   RecordUnrecoverableError(from_here, message);
 
+  // The ProfileSyncService will invoke our Stop() method in response to this.
   // We dont know the current state of the caller. Posting a task will allow
   // the caller to unwind the stack before we process unrecoverable error.
   MessageLoop::current()->PostTask(from_here,
@@ -206,6 +211,30 @@ void FrontendDataTypeController::OnUnrecoverableError(
                  sync_service_->AsWeakPtr(),
                  from_here,
                  message));
+}
+
+void FrontendDataTypeController::OnSingleDatatypeUnrecoverableError(
+    const tracked_objects::Location& from_here, const std::string& message) {
+  RecordUnrecoverableError(from_here, message);
+  sync_service_->OnDisableDatatype(type(), from_here, message);
+}
+
+void FrontendDataTypeController::RecordAssociationTime(base::TimeDelta time) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+#define PER_DATA_TYPE_MACRO(type_str) \
+    UMA_HISTOGRAM_TIMES("Sync." type_str "AssociationTime", time);
+  SYNC_DATA_TYPE_HISTOGRAM(type());
+#undef PER_DATA_TYPE_MACRO
+}
+void FrontendDataTypeController::RecordStartFailure(StartResult result) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  UMA_HISTOGRAM_ENUMERATION("Sync.DataTypeStartFailures", type(),
+                            syncable::MODEL_TYPE_COUNT);
+#define PER_DATA_TYPE_MACRO(type_str) \
+    UMA_HISTOGRAM_ENUMERATION("Sync." type_str "StartFailure", result, \
+                              MAX_START_RESULT);
+  SYNC_DATA_TYPE_HISTOGRAM(type());
+#undef PER_DATA_TYPE_MACRO
 }
 
 AssociatorInterface* FrontendDataTypeController::model_associator() const {

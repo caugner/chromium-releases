@@ -1,8 +1,10 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/browser/ppapi_plugin_process_host.h"
+
+#include <string>
 
 #include "base/base_switches.h"
 #include "base/command_line.h"
@@ -70,7 +72,7 @@ PpapiPluginProcessHost* PpapiPluginProcessHost::CreatePluginHost(
     net::HostResolver* host_resolver) {
   PpapiPluginProcessHost* plugin_host =
       new PpapiPluginProcessHost(host_resolver);
-  if(plugin_host->Init(info))
+  if (plugin_host->Init(info))
     return plugin_host;
 
   NOTREACHED();  // Init is not expected to fail.
@@ -81,7 +83,7 @@ PpapiPluginProcessHost* PpapiPluginProcessHost::CreateBrokerHost(
     const content::PepperPluginInfo& info) {
   PpapiPluginProcessHost* plugin_host =
       new PpapiPluginProcessHost();
-  if(plugin_host->Init(info))
+  if (plugin_host->Init(info))
     return plugin_host;
 
   NOTREACHED();  // Init is not expected to fail.
@@ -106,7 +108,8 @@ void PpapiPluginProcessHost::OpenChannelToPlugin(Client* client) {
 }
 
 PpapiPluginProcessHost::PpapiPluginProcessHost(net::HostResolver* host_resolver)
-    : filter_(new PepperMessageFilter(host_resolver)),
+    : filter_(new PepperMessageFilter(PepperMessageFilter::PLUGIN,
+                                      host_resolver)),
       network_observer_(new PluginNetworkObserver(this)),
       is_broker_(false),
       process_id_(ChildProcessHostImpl::GenerateChildProcessUniqueId()) {
@@ -188,7 +191,7 @@ bool PpapiPluginProcessHost::Init(const content::PepperPluginInfo& info) {
       FilePath(),
 #elif defined(OS_POSIX)
       use_zygote,
-      base::environment_vector(),
+      base::EnvironmentVector(),
 #endif
       cmd_line);
   return true;

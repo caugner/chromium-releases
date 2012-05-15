@@ -115,12 +115,46 @@
       ],
     },
     {
+      'target_name': 'base_jni_headers',
+      'type': 'none',
+      'actions': [
+        {
+          'action_name': 'generate_jni_headers',
+          'inputs': [
+            'android/jni_generator/jni_generator.py',
+            'android/java/org/chromium/base/PathUtils.java',
+            'android/java/org/chromium/base/SystemMessageHandler.java',
+          ],
+          'outputs': [
+            '<(SHARED_INTERMEDIATE_DIR)/base/jni/path_utils_jni.h',
+            '<(SHARED_INTERMEDIATE_DIR)/base/jni/system_message_handler_jni.h',
+          ],
+          'action': [
+            'python',
+            'android/jni_generator/jni_generator.py',
+            '-o',
+            '<@(_inputs)',
+            '<@(_outputs)',
+          ],
+        }
+      ],
+    },
+    # Include this target for a main() function that simply instantiates
+    # and runs a base::TestSuite.
+    {
+      'target_name': 'run_all_unittests',
+      'type': 'static_library',
+      'dependencies': [
+        'test_support_base',
+      ],
+      'sources': [
+        'test/run_all_unittests.cc',
+      ],
+    },
+    {
       'target_name': 'base_unittests',
       'type': 'executable',
       'sources': [
-        # Infrastructure files.
-        'test/run_all_unittests.cc',
-
         # Tests.
         'android/jni_android_unittest.cc',
         'android/scoped_java_ref_unittest.cc',
@@ -166,15 +200,18 @@
         'lazy_instance_unittest.cc',
         'linked_list_unittest.cc',
         'logging_unittest.cc',
+        'mac/closure_blocks_leopard_compat_unittest.cc',
         'mac/foundation_util_unittest.mm',
         'mac/mac_util_unittest.mm',
         'mac/objc_property_releaser_unittest.mm',
         'mac/scoped_sending_event_unittest.mm',
         'md5_unittest.cc',
+        'memory/aligned_memory_unittest.cc',
         'memory/linked_ptr_unittest.cc',
         'memory/mru_cache_unittest.cc',
         'memory/ref_counted_memory_unittest.cc',
         'memory/ref_counted_unittest.cc',
+        'memory/scoped_nsobject_unittest.mm',
         'memory/scoped_ptr_unittest.cc',
         'memory/scoped_ptr_unittest.nc',
         'memory/scoped_vector_unittest.cc',
@@ -267,6 +304,7 @@
         'base',
         'base_i18n',
         'base_static',
+        'run_all_unittests',
         'test_support_base',
         'third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
         '../testing/gmock.gyp:gmock',
@@ -291,6 +329,9 @@
             'android/jni_android_unittest.cc',
             'android/scoped_java_ref_unittest.cc',
             'debug/stack_trace_unittest.cc',
+          ],
+          'dependencies': [
+            'android/jni_generator/jni_generator.gyp:jni_generator_tests',
           ],
         }],
         ['use_glib==1', {
@@ -348,6 +389,11 @@
             'win/win_util_unittest.cc',
           ],
         }],
+        ['OS=="mac"', {
+          'dependencies': [
+            'closure_blocks_leopard_compat',
+          ],
+        }],
       ],
     },
     {
@@ -396,6 +442,8 @@
         'perftimer.cc',
         'test/mock_chrome_application_mac.h',
         'test/mock_chrome_application_mac.mm',
+        'test/mock_devices_changed_observer.cc',
+        'test/mock_devices_changed_observer.h',
         'test/mock_time_provider.cc',
         'test/mock_time_provider.h',
         'test/multiprocess_test.cc',
@@ -404,6 +452,8 @@
         'test/perf_test_suite.h',
         'test/scoped_locale.cc',
         'test/scoped_locale.h',
+        'test/task_runner_test_template.cc',
+        'test/task_runner_test_template.h',
         'test/test_file_util.h',
         'test/test_file_util_linux.cc',
         'test/test_file_util_mac.cc',
@@ -422,6 +472,78 @@
         'test/thread_test_helper.h',
         'test/trace_event_analyzer.cc',
         'test/trace_event_analyzer.h',
+        'test/values_test_util.cc',
+        'test/values_test_util.h',
+      ],
+    },
+    {
+      'target_name': 'base_unittests_run',
+      'type': 'none',
+      'dependencies': [
+        'base_unittests',
+      ],
+      'actions': [
+        {
+          'action_name': 'response_file',
+          'inputs': [
+            '<(PRODUCT_DIR)/base_unittests<(EXECUTABLE_SUFFIX)',
+            '<(DEPTH)/testing/test_env.py',
+            '<(DEPTH)/testing/xvfb.py',
+          ],
+          'conditions': [
+            ['OS=="linux"', {
+              'inputs': [
+                '<(PRODUCT_DIR)/xdisplaycheck<(EXECUTABLE_SUFFIX)',
+              ],
+            }],
+            ['OS == "win"', {
+              'inputs': [
+                'data/file_version_info_unittest/FileVersionInfoTest1.dll',
+                'data/file_version_info_unittest/FileVersionInfoTest2.dll',
+              ],
+            }],
+          ],
+          'outputs': [
+            '<(PRODUCT_DIR)/base_unittests.inputs',
+          ],
+          'action': [
+            'python',
+            '-c',
+            'import sys; '
+                'open(sys.argv[1], \'w\').write(\'\\n\'.join(sys.argv[2:]))',
+            '<@(_outputs)',
+            '<@(_inputs)',
+          ],
+        },
+        {
+          'action_name': 'isolate',
+          'inputs': [
+            '<(PRODUCT_DIR)/base_unittests.inputs',
+          ],
+          'outputs': [
+            '<(PRODUCT_DIR)/base_unittests.results',
+          ],
+          'action': [
+            'python',
+            '<(DEPTH)/tools/isolate/isolate.py',
+            '--mode=<(tests_run)',
+            '--root', '<(DEPTH)',
+            '--result', '<@(_outputs)',
+            '--files', '<@(_inputs)',
+            # Directories can't be tracked by build tools (make, msbuild, xcode,
+            # etc) so we just put it on the command line without specifying it
+            # as an input.
+            # TODO(maruel): Revisit the support for this at all and list each
+            # individual test files instead.
+            'data/file_util_unittest/',
+            'data/json/bom_feff.json',
+            '--',
+            # Wraps base_unittests under xvfb.
+            '<(DEPTH)/testing/xvfb.py',
+            '<(PRODUCT_DIR)',
+            '<(PRODUCT_DIR)/base_unittests<(EXECUTABLE_SUFFIX)',
+          ],
+        },
       ],
     },
     {
@@ -454,7 +576,7 @@
     },
   ],
   'conditions': [
-    [ 'OS == "win"', {
+    ['OS == "win"', {
       'targets': [
         {
           'target_name': 'debug_message',
@@ -470,5 +592,68 @@
         },
       ],
     }],
+    ['OS=="mac"', {
+     'targets': [
+       {
+         'target_name': 'closure_blocks_leopard_compat',
+         'sources': [
+           'mac/closure_blocks_leopard_compat.h',
+         ],
+         'conditions': [
+           ['mac_sdk == "10.5"', {
+             'type': 'shared_library',
+             'product_name': 'closure_blocks_leopard_compat_stub',
+             'variables': {
+               # This target controls stripping directly. See below.
+               'mac_strip': 0,
+             },
+             'sources': [
+               'mac/closure_blocks_leopard_compat.S',
+             ],
+             'xcode_settings': {
+               # These values are taken from libSystem.dylib in the 10.5
+               # SDK. Setting LD_DYLIB_INSTALL_NAME causes anything linked
+               # against this stub library to look for the symbols it
+               # provides in the real libSystem at runtime. When using ld
+               # from Xcode 4 or later (ld64-123.2 and up), giving two
+               # libraries with the same "install name" to the linker will
+               # cause it to print "ld: warning: dylibs with same install
+               # name". This is harmless, and ld will behave as intended
+               # here.
+               #
+               # The real library's compatibility version is used, and the
+               # value of the current version from the SDK is used to make
+               # it appear as though anything linked against this stub was
+               # linked against the real thing.
+               'LD_DYLIB_INSTALL_NAME': '/usr/lib/libSystem.B.dylib',
+               'DYLIB_COMPATIBILITY_VERSION': '1.0.0',
+               'DYLIB_CURRENT_VERSION': '111.1.4',
+
+               # Turn on stripping (yes, even in debug mode), and add the -c
+               # flag. This is what produces a stub library (MH_DYLIB_STUB)
+               # as opposed to a dylib (MH_DYLIB). MH_DYLIB_STUB files
+               # contain symbol tables and everything else needed for
+               # linking, but are stripped of section contents. This is the
+               # same way that the stub libraries in Mac OS X SDKs are
+               # created. dyld will refuse to load a stub library, so this
+               # provides some insurance in case anyone tries to load the
+               # stub at runtime.
+               'DEPLOYMENT_POSTPROCESSING': 'YES',
+               'STRIP_STYLE': 'non-global',
+               'STRIPFLAGS': '-c',
+             },
+           }, {  # else: mac_sdk != "10.5"
+             # When using the 10.6 SDK or newer, the necessary definitions
+             # are already present in libSystem.dylib. There is no need to
+             # build a stub dylib to provide these symbols at link time.
+             # This target is still useful to cause those symbols to be
+             # treated as weak imports in dependents, who still must
+             # #include closure_blocks_leopard_compat.h to get weak imports.
+             'type': 'none',
+           }],
+         ],
+       },
+     ],
+   }],
   ],
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_content_setting_bubble_model_delegate.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/global_error_service.h"
 #include "chrome/browser/ui/global_error_service_factory.h"
@@ -17,12 +18,13 @@
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/browser_actions_container.h"
 #include "chrome/browser/ui/views/event_utils.h"
+#include "chrome/browser/ui/views/location_bar/page_action_image_view.h"
 #include "chrome/browser/ui/views/window.h"
 #include "chrome/browser/ui/views/wrench_menu.h"
 #include "chrome/browser/upgrade_detector.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
-#include "content/browser/accessibility/browser_accessibility_state.h"
+#include "content/public/browser/browser_accessibility_state.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/user_metrics.h"
 #include "grit/chromium_strings.h"
@@ -34,7 +36,6 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/theme_provider.h"
 #include "ui/gfx/canvas.h"
-#include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/skbitmap_operations.h"
 #include "ui/views/controls/button/button_dropdown.h"
 #include "ui/views/controls/menu/menu_listener.h"
@@ -56,24 +57,41 @@ using content::WebContents;
 // static
 const char ToolbarView::kViewClassName[] = "browser/ui/views/ToolbarView";
 // The space between items is 4 px in general.
+// TODO(jamescook): Update all Chrome platforms to use the new art and metrics
+// from Ash, crbug.com/118228
+#if defined(USE_ASH)
+const int ToolbarView::kStandardSpacing = 3;
+#else
 const int ToolbarView::kStandardSpacing = 4;
+#endif
+
 // The top of the toolbar has an edge we have to skip over in addition to the 4
 // px of spacing.
-const int ToolbarView::kVertSpacing = kStandardSpacing + 1;
+const int ToolbarView::kVertSpacing = 5;
 // The edge graphics have some built-in spacing/shadowing, so we have to adjust
 // our spacing to make it still appear to be 4 px.
-static const int kEdgeSpacing = ToolbarView::kStandardSpacing - 1;
+#if defined(USE_ASH)
+static const int kLeftEdgeSpacing = 3;
+static const int kRightEdgeSpacing = 2;
+#else
+static const int kLeftEdgeSpacing = 3;
+static const int kRightEdgeSpacing = 3;
+#endif
+
 // The buttons to the left of the omnibox are close together.
+#if defined(USE_ASH)
+static const int kButtonSpacing = 0;
+#else
 static const int kButtonSpacing = 1;
+#endif
 
-static const int kStatusBubbleWidth = 480;
-
-// The length of time to run the upgrade notification animation (the time it
-// takes one pulse to run its course and go back to its original brightness).
-static const int kPulseDuration = 2000;
-
-// How long to wait between pulsating the upgrade notifier.
-static const int kPulsateEveryMs = 8000;
+// The content area line has a shadow that extends a couple of pixels above
+// the toolbar bounds.
+#if defined(USE_ASH)
+const int kContentShadowHeight = 2;
+#else
+const int kContentShadowHeight = 0;
+#endif
 
 static const int kPopupTopSpacingNonGlass = 3;
 static const int kPopupBottomSpacingNonGlass = 2;
@@ -156,11 +174,15 @@ void ToolbarView::Init() {
   forward_->set_id(VIEW_ID_FORWARD_BUTTON);
 
   // Have to create this before |reload_| as |reload_|'s constructor needs it.
-  location_bar_ = new LocationBarView(browser_, model_, this,
+  location_bar_ = new LocationBarView(
+      browser_->profile(),
+      browser_->command_updater(),
+      model_,
+      this,
       (display_mode_ == DISPLAYMODE_LOCATION) ?
           LocationBarView::POPUP : LocationBarView::NORMAL);
 
-  reload_ = new ReloadButton(location_bar_, browser_);
+  reload_ = new ReloadButton(location_bar_, browser_->command_updater());
   reload_->set_triggerable_event_flags(ui::EF_LEFT_MOUSE_BUTTON |
                                        ui::EF_MIDDLE_MOUSE_BUTTON);
   reload_->set_tag(IDC_RELOAD);
@@ -192,7 +214,7 @@ void ToolbarView::Init() {
   app_menu_->set_id(VIEW_ID_APP_MENU);
 
   // Add any necessary badges to the menu item based on the system state.
-  if (IsUpgradeRecommended() || ShouldShowIncompatibilityWarning()) {
+  if (ShouldShowUpgradeRecommended() || ShouldShowIncompatibilityWarning()) {
     UpdateAppMenuState();
   }
   LoadImages();
@@ -268,18 +290,18 @@ SkBitmap ToolbarView::GetAppMenuIcon(views::CustomButton::ButtonState state) {
   int error_badge_id = GlobalErrorServiceFactory::GetForProfile(
       browser_->profile())->GetFirstBadgeResourceID();
 
-  bool add_badge = IsUpgradeRecommended() ||
+  bool add_badge = ShouldShowUpgradeRecommended() ||
                    ShouldShowIncompatibilityWarning() || error_badge_id;
   if (!add_badge)
     return icon;
 
   // Draw the chrome app menu icon onto the canvas.
-  scoped_ptr<gfx::CanvasSkia> canvas(new gfx::CanvasSkia(icon, false));
+  scoped_ptr<gfx::Canvas> canvas(new gfx::Canvas(icon, false));
 
   SkBitmap badge;
   // Only one badge can be active at any given time. The Upgrade notification
   // is deemed most important, then the DLL conflict badge.
-  if (IsUpgradeRecommended()) {
+  if (ShouldShowUpgradeRecommended()) {
     badge = *tp->GetBitmapNamed(
         UpgradeDetector::GetInstance()->GetIconResourceID(
             UpgradeDetector::UPGRADE_ICON_TYPE_BADGE));
@@ -327,9 +349,10 @@ bool ToolbarView::GetAcceleratorInfo(int id, ui::Accelerator* accel) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// ToolbarView, views::ViewMenuDelegate implementation:
+// ToolbarView, views::MenuButtonListener implementation:
 
-void ToolbarView::RunMenu(views::View* source, const gfx::Point& /* pt */) {
+void ToolbarView::OnMenuButtonClicked(views::View* source,
+                                      const gfx::Point& point) {
   DCHECK_EQ(VIEW_ID_APP_MENU, source->id());
 
   wrench_menu_.reset(new WrenchMenu(browser_));
@@ -350,6 +373,28 @@ TabContentsWrapper* ToolbarView::GetTabContentsWrapper() const {
 
 InstantController* ToolbarView::GetInstant() {
   return browser_->instant();
+}
+
+ContentSettingBubbleModelDelegate*
+ToolbarView::GetContentSettingBubbleModelDelegate() {
+  return browser_->content_setting_bubble_model_delegate();
+}
+
+void ToolbarView::ShowPageInfo(content::WebContents* web_contents,
+                          const GURL& url,
+                          const content::SSLStatus& ssl,
+                          bool show_history) {
+  browser_->ShowPageInfo(web_contents, url, ssl, show_history);
+}
+
+views::Widget* ToolbarView::CreateViewsBubble(
+    views::BubbleDelegateView* bubble_delegate) {
+  return browser::CreateViewsBubble(bubble_delegate);
+}
+
+PageActionImageView* ToolbarView::CreatePageActionImageView(
+    LocationBarView* owner, ExtensionAction* action) {
+  return new PageActionImageView(owner, action, browser_);
 }
 
 void ToolbarView::OnInputInProgress(bool in_progress) {
@@ -456,7 +501,7 @@ bool ToolbarView::GetAcceleratorForCommandId(int command_id,
 
 gfx::Size ToolbarView::GetPreferredSize() {
   if (IsDisplayModeNormal()) {
-    int min_width = kEdgeSpacing +
+    int min_width = kLeftEdgeSpacing +
         back_->GetPreferredSize().width() + kButtonSpacing +
         forward_->GetPreferredSize().width() + kButtonSpacing +
         reload_->GetPreferredSize().width() + kStandardSpacing +
@@ -464,7 +509,7 @@ gfx::Size ToolbarView::GetPreferredSize() {
             (home_->GetPreferredSize().width() + kButtonSpacing) : 0) +
         location_bar_->GetPreferredSize().width() +
         browser_actions_->GetPreferredSize().width() +
-        app_menu_->GetPreferredSize().width() + kEdgeSpacing;
+        app_menu_->GetPreferredSize().width() + kRightEdgeSpacing;
 
     CR_DEFINE_STATIC_LOCAL(SkBitmap, normal_background, ());
     if (normal_background.isNull()) {
@@ -472,7 +517,8 @@ gfx::Size ToolbarView::GetPreferredSize() {
       normal_background = *rb.GetBitmapNamed(IDR_CONTENT_TOP_CENTER);
     }
 
-    return gfx::Size(min_width, normal_background.height());
+    return gfx::Size(min_width,
+                     normal_background.height() - kContentShadowHeight);
   }
 
   int vertical_spacing = PopupTopSpacing() +
@@ -510,9 +556,9 @@ void ToolbarView::Layout() {
   //                http://crbug.com/5540
   int back_width = back_->GetPreferredSize().width();
   if (maximized)
-    back_->SetBounds(0, child_y, back_width + kEdgeSpacing, child_height);
+    back_->SetBounds(0, child_y, back_width + kLeftEdgeSpacing, child_height);
   else
-    back_->SetBounds(kEdgeSpacing, child_y, back_width, child_height);
+    back_->SetBounds(kLeftEdgeSpacing, child_y, back_width, child_height);
 
   forward_->SetBounds(back_->x() + back_->width() + kButtonSpacing,
       child_y, forward_->GetPreferredSize().width(), child_height);
@@ -532,7 +578,7 @@ void ToolbarView::Layout() {
   int browser_actions_width = browser_actions_->GetPreferredSize().width();
   int app_menu_width = app_menu_->GetPreferredSize().width();
   int location_x = home_->x() + home_->width() + kStandardSpacing;
-  int available_width = width() - kEdgeSpacing - app_menu_width -
+  int available_width = width() - kRightEdgeSpacing - app_menu_width -
       browser_actions_width - location_x;
   int location_y = child_y;
   int location_bar_height = child_height;
@@ -554,7 +600,7 @@ void ToolbarView::Layout() {
   // Extend the app menu to the screen's right edge in maximized mode just like
   // we extend the back button to the left edge.
   if (maximized)
-    app_menu_width += kEdgeSpacing;
+    app_menu_width += kRightEdgeSpacing;
   app_menu_->SetBounds(browser_actions_->x() + browser_actions_width, child_y,
                        app_menu_width, child_height);
 }
@@ -579,7 +625,7 @@ void ToolbarView::OnPaint(gfx::Canvas* canvas) {
   // toolbar background below the location bar for us.
   // NOTE: Keep this in sync with BrowserView::GetInfoBarSeparatorColor()!
   if (GetWidget()->ShouldUseNativeFrame())
-    canvas->FillRect(SK_ColorBLACK, gfx::Rect(0, height() - 1, width(), 1));
+    canvas->FillRect(gfx::Rect(0, height() - 1, width(), 1), SK_ColorBLACK);
 }
 
 // Note this method is ignored on Windows, but needs to be implemented for
@@ -647,8 +693,14 @@ void ToolbarView::RemovePaneFocus() {
 ////////////////////////////////////////////////////////////////////////////////
 // ToolbarView, private:
 
-bool ToolbarView::IsUpgradeRecommended() {
+bool ToolbarView::ShouldShowUpgradeRecommended() {
+#if defined(OS_CHROMEOS)
+  // In chromeos, the update recommendation is shown in the system tray. So it
+  // should not be displayed in the wrench menu.
+  return false;
+#else
   return (UpgradeDetector::GetInstance()->notify_upgrade());
+#endif
 }
 
 bool ToolbarView::ShouldShowIncompatibilityWarning() {
@@ -729,7 +781,7 @@ void ToolbarView::ShowCriticalNotification() {
 
 void ToolbarView::UpdateAppMenuState() {
   string16 accname_app = l10n_util::GetStringUTF16(IDS_ACCNAME_APP);
-  if (IsUpgradeRecommended()) {
+  if (ShouldShowUpgradeRecommended()) {
     accname_app = l10n_util::GetStringFUTF16(
         IDS_ACCNAME_APP_UPGRADE_RECOMMENDED, accname_app);
   }

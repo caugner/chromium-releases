@@ -13,8 +13,11 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_tab_helper.h"
 #include "chrome/browser/google/google_url_tracker.h"
+#include "chrome/browser/google/google_util.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/prerender/prerender_manager.h"
+#include "chrome/browser/prerender/prerender_manager_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/rlz/rlz.h"
 #include "chrome/browser/tab_contents/tab_util.h"
@@ -30,9 +33,9 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/browser_url_handler.h"
-#include "content/browser/renderer_host/render_view_host.h"
+#include "content/public/browser/browser_url_handler.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_view_host_delegate.h"
 #include "content/public/browser/web_contents.h"
 #include "net/http/http_util.h"
@@ -202,6 +205,8 @@ void NormalizeDisposition(browser::NavigateParams* params) {
       params->disposition == OFF_THE_RECORD) {
     params->disposition = NEW_FOREGROUND_TAB;
   }
+  if (!params->source_contents && params->disposition == CURRENT_TAB)
+    params->disposition = NEW_FOREGROUND_TAB;
 
   switch (params->disposition) {
     case NEW_BACKGROUND_TAB:
@@ -342,7 +347,7 @@ void InitializeExtraHeaders(browser::NavigateParams* params,
     if (pref_service) {
       if (!pref_service->GetBoolean(prefs::kHomePageChanged)) {
         std::string homepage = pref_service->GetString(prefs::kHomePage);
-        if (homepage == GoogleURLTracker::kDefaultGoogleHomepage) {
+        if (google_util::IsGoogleHomePageUrl(homepage)) {
           std::wstring rlz_string;
           RLZTracker::GetAccessPointRlz(rlz_lib::CHROME_HOME_PAGE, &rlz_string);
           if (!rlz_string.empty()) {
@@ -356,6 +361,18 @@ void InitializeExtraHeaders(browser::NavigateParams* params,
   }
 #endif
 #endif
+}
+
+// If a prerendered page exists for |url|, replace the page at |target_contents|
+// with it.
+bool SwapInPrerender(TabContentsWrapper* target_contents, const GURL& url) {
+  prerender::PrerenderManager* prerender_manager =
+      prerender::PrerenderManagerFactory::GetForProfile(
+          target_contents->profile());
+  if (!prerender_manager)
+    return false;
+  return prerender_manager->MaybeUsePrerenderedPage(
+      target_contents->web_contents(), url);
 }
 
 }  // namespace
@@ -526,11 +543,14 @@ void Navigate(NavigateParams* params) {
 
     if (user_initiated) {
       params->target_contents->web_contents()->GetRenderViewHost()->
-          delegate()->OnUserGesture();
+          GetDelegate()->OnUserGesture();
     }
 
     InitializeExtraHeaders(params, params->target_contents->profile(),
                            &extra_headers);
+
+    if (SwapInPrerender(params->target_contents, url))
+      return;
 
     // Try to handle non-navigational URLs that popup dialogs and such, these
     // should not actually navigate.
@@ -614,7 +634,7 @@ int GetIndexOfSingletonTab(browser::NavigateParams* params) {
   // URL.
   GURL rewritten_url(params->url);
   bool reverse_on_redirect = false;
-  BrowserURLHandler::GetInstance()->RewriteURLIfNecessary(
+  content::BrowserURLHandler::GetInstance()->RewriteURLIfNecessary(
       &rewritten_url,
       params->browser->profile(),
       &reverse_on_redirect);
@@ -658,7 +678,8 @@ bool IsURLAllowedInIncognito(const GURL& url) {
        url.host() == chrome::kChromeUISettingsFrameHost ||
        url.host() == chrome::kChromeUIExtensionsHost ||
        url.host() == chrome::kChromeUIBookmarksHost ||
-       url.host() == chrome::kChromeUISyncPromoHost));
+       url.host() == chrome::kChromeUISyncPromoHost ||
+       url.host() == chrome::kChromeUIUberHost));
 }
 
 #if defined(OS_CHROMEOS) || defined(USE_AURA)

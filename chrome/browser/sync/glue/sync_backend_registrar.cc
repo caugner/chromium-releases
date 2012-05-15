@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,14 +9,16 @@
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
+#include "chrome/browser/password_manager/password_store.h"
+#include "chrome/browser/password_manager/password_store_factory.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sync/engine/passive_model_worker.h"
 #include "chrome/browser/sync/glue/browser_thread_model_worker.h"
 #include "chrome/browser/sync/glue/change_processor.h"
 #include "chrome/browser/sync/glue/history_model_worker.h"
 #include "chrome/browser/sync/glue/password_model_worker.h"
 #include "chrome/browser/sync/glue/ui_model_worker.h"
 #include "content/public/browser/browser_thread.h"
+#include "sync/engine/passive_model_worker.h"
 
 using content::BrowserThread;
 
@@ -86,9 +88,9 @@ SyncBackendRegistrar::SyncBackendRegistrar(
     routing_info_.erase(syncable::TYPED_URLS);
   }
 
-  PasswordStore* password_store =
-      profile->GetPasswordStore(Profile::IMPLICIT_ACCESS);
-  if (password_store) {
+  scoped_refptr<PasswordStore> password_store =
+      PasswordStoreFactory::GetForProfile(profile, Profile::IMPLICIT_ACCESS);
+  if (password_store.get()) {
     workers_[GROUP_PASSWORD] = new PasswordModelWorker(password_store);
   } else {
     LOG_IF(WARNING, initial_types.Has(syncable::PASSWORDS))

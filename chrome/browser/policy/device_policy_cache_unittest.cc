@@ -91,7 +91,10 @@ class DevicePolicyCacheTest : public testing::Test {
 
   void MakeEnterpriseDevice(const char* registration_user) {
     ASSERT_EQ(EnterpriseInstallAttributes::LOCK_SUCCESS,
-              install_attributes_.LockDevice(registration_user));
+              install_attributes_.LockDevice(
+                  registration_user,
+                  DEVICE_MODE_ENTERPRISE,
+                  std::string()));
   }
 
   const Value* GetPolicy(const char* policy_name) {
@@ -150,7 +153,7 @@ TEST_F(DevicePolicyCacheTest, SetPolicy) {
   EXPECT_CALL(signed_settings_helper_, StartRetrievePolicyOp(_)).WillOnce(
       MockSignedSettingsHelperRetrievePolicy(SignedSettings::SUCCESS,
                                              new_policy));
-  cache_->SetPolicy(new_policy);
+  EXPECT_TRUE(cache_->SetPolicy(new_policy));
   testing::Mock::VerifyAndClearExpectations(&signed_settings_helper_);
   base::FundamentalValue updated_expected(300);
   EXPECT_TRUE(Value::Equals(&updated_expected,
@@ -175,7 +178,7 @@ TEST_F(DevicePolicyCacheTest, SetPolicyWrongUser) {
   em::PolicyFetchResponse new_policy;
   CreateRefreshRatePolicy(&new_policy, "foreign_user@example.com", 300);
   EXPECT_CALL(signed_settings_helper_, StartStorePolicyOp(_, _)).Times(0);
-  cache_->SetPolicy(new_policy);
+  EXPECT_FALSE(cache_->SetPolicy(new_policy));
   testing::Mock::VerifyAndClearExpectations(&signed_settings_helper_);
 
   base::FundamentalValue expected(120);
@@ -199,7 +202,7 @@ TEST_F(DevicePolicyCacheTest, SetPolicyNonEnterpriseDevice) {
   em::PolicyFetchResponse new_policy;
   CreateRefreshRatePolicy(&new_policy, kTestUser, 120);
   EXPECT_CALL(signed_settings_helper_, StartStorePolicyOp(_, _)).Times(0);
-  cache_->SetPolicy(new_policy);
+  EXPECT_FALSE(cache_->SetPolicy(new_policy));
   testing::Mock::VerifyAndClearExpectations(&signed_settings_helper_);
 
   base::FundamentalValue expected(120);

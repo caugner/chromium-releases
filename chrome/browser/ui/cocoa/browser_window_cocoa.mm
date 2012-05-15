@@ -7,6 +7,7 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "base/mac/mac_util.h"
 #include "base/message_loop.h"
 #include "base/sys_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
@@ -22,7 +23,6 @@
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #import "chrome/browser/ui/cocoa/browser_window_utils.h"
 #import "chrome/browser/ui/cocoa/chrome_event_processing_window.h"
-#import "chrome/browser/ui/cocoa/content_settings/collected_cookies_mac.h"
 #import "chrome/browser/ui/cocoa/download/download_shelf_controller.h"
 #include "chrome/browser/ui/cocoa/find_bar/find_bar_bridge.h"
 #import "chrome/browser/ui/cocoa/html_dialog_window_controller.h"
@@ -35,8 +35,7 @@
 #import "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
 #include "chrome/browser/ui/page_info_bubble.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
-#include "chrome/browser/ui/webui/chrome_web_ui.h"
-#include "chrome/browser/ui/webui/task_manager_dialog.h"
+#include "chrome/browser/ui/webui/task_manager/task_manager_dialog.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_source.h"
@@ -117,6 +116,8 @@ void BrowserWindowCocoa::Show() {
   if (initial_show_state_ == ui::SHOW_STATE_MINIMIZED) {
     [window() orderOut:controller_];
     [window() miniaturize:controller_];
+  } else if (initial_show_state_ == ui::SHOW_STATE_FULLSCREEN) {
+    browser_->ToggleFullscreenMode();
   }
   initial_show_state_ = ui::SHOW_STATE_DEFAULT;
 
@@ -185,6 +186,10 @@ void BrowserWindowCocoa::FlashFrame(bool flash) {
     [NSApp cancelUserAttentionRequest:attention_request_id_];
     attention_request_id_ = 0;
   }
+}
+
+bool BrowserWindowCocoa::IsAlwaysOnTop() const {
+  return false;
 }
 
 bool BrowserWindowCocoa::IsActive() const {
@@ -413,7 +418,7 @@ void BrowserWindowCocoa::ShowTaskManager() {
   TaskManagerDialog::Show();
 #else
   // Uses WebUI TaskManager when swiches is set. It is beta feature.
-  if (chrome_web_ui::IsMoreWebUI()) {
+  if (TaskManagerDialog::UseWebUITaskManager()) {
     TaskManagerDialog::Show();
   } else {
     TaskManagerMac::Show(false);
@@ -426,7 +431,7 @@ void BrowserWindowCocoa::ShowBackgroundPages() {
   TaskManagerDialog::ShowBackgroundPages();
 #else
   // Uses WebUI TaskManager when swiches is set. It is beta feature.
-  if (chrome_web_ui::IsMoreWebUI()) {
+  if (TaskManagerDialog::UseWebUITaskManager()) {
     TaskManagerDialog::ShowBackgroundPages();
   } else {
     TaskManagerMac::Show(true);
@@ -440,6 +445,16 @@ void BrowserWindowCocoa::ShowBookmarkBubble(const GURL& url,
                       alreadyBookmarked:(already_bookmarked ? YES : NO)];
 }
 
+void BrowserWindowCocoa::ShowChromeToMobileBubble() {
+  [controller_ showChromeToMobileBubble];
+}
+
+#if defined(ENABLE_ONE_CLICK_SIGNIN)
+void BrowserWindowCocoa::ShowOneClickSigninBubble() {
+  NOTIMPLEMENTED();
+}
+#endif
+
 bool BrowserWindowCocoa::IsDownloadShelfVisible() const {
   return [controller_ isDownloadShelfVisible] != NO;
 }
@@ -447,12 +462,6 @@ bool BrowserWindowCocoa::IsDownloadShelfVisible() const {
 DownloadShelf* BrowserWindowCocoa::GetDownloadShelf() {
   DownloadShelfController* shelfController = [controller_ downloadShelf];
   return [shelfController bridge];
-}
-
-void BrowserWindowCocoa::ShowCollectedCookiesDialog(
-    TabContentsWrapper* wrapper) {
-  // Deletes itself on close.
-  new CollectedCookiesMac(GetNativeHandle(), wrapper);
 }
 
 // We allow closing the window here since the real quit decision on Mac is made
@@ -483,6 +492,14 @@ void BrowserWindowCocoa::ShowPageInfo(Profile* profile,
                                       const SSLStatus& ssl,
                                       bool show_history) {
   browser::ShowPageInfoBubble(window(), profile, url, ssl, show_history);
+}
+
+void BrowserWindowCocoa::ShowWebsiteSettings(
+    Profile* profile,
+    TabContentsWrapper* tab_contents_wrapper,
+    const GURL& url,
+    const content::SSLStatus& ssl,
+    bool show_history) {
 }
 
 void BrowserWindowCocoa::ShowAppMenu() {
@@ -575,6 +592,9 @@ gfx::Rect BrowserWindowCocoa::GetInstantBounds() {
 
 WindowOpenDisposition BrowserWindowCocoa::GetDispositionForPopupBounds(
     const gfx::Rect& bounds) {
+  // In Lion fullscreen mode, convert popups into tabs.
+  if (base::mac::IsOSLionOrLater() && IsFullscreen())
+    return NEW_FOREGROUND_TAB;
   return NEW_POPUP;
 }
 

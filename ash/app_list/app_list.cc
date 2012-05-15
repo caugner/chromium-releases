@@ -4,37 +4,36 @@
 
 #include "ash/app_list/app_list.h"
 
-#include "ash/app_list/app_list_model.h"
 #include "ash/app_list/app_list_view.h"
-#include "ash/ash_switches.h"
 #include "ash/shell_delegate.h"
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
-#include "base/bind.h"
-#include "base/command_line.h"
 #include "ui/aura/event.h"
+#include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
+#include "ui/gfx/compositor/layer.h"
 #include "ui/gfx/compositor/scoped_layer_animation_settings.h"
 #include "ui/gfx/screen.h"
+#include "ui/gfx/transform_util.h"
 
 namespace ash {
 namespace internal {
 
 namespace {
 
-// Gets preferred bounds of app list window in show/hide state.
-gfx::Rect GetPreferredBounds(bool show) {
-  // The y-axis offset used at the beginning of showing animation.
-  static const int kMoveUpAnimationOffset = 50;
+const float kContainerAnimationScaleFactor = 1.05f;
 
+// Duration for both default container and app list animation in milliseconds.
+const int kAnimationDurationMs = 130;
+
+// Delayed time of 2nd animation in milliseconds.
+const int kSecondAnimationStartDelay = kAnimationDurationMs - 20;
+
+// Gets preferred bounds of app list window.
+gfx::Rect GetPreferredBounds() {
   gfx::Point cursor = gfx::Screen::GetCursorScreenPoint();
-  gfx::Rect work_area = gfx::Screen::GetMonitorWorkAreaNearestPoint(cursor);
-  gfx::Rect widget_bounds(work_area);
-  widget_bounds.Inset(100, 100);
-  if (!show)
-    widget_bounds.Offset(0, kMoveUpAnimationOffset);
-
-  return widget_bounds;
+  // Use full monitor rect so that the app list shade goes behind the launcher.
+  return gfx::Screen::GetMonitorAreaNearestPoint(cursor);
 }
 
 ui::Layer* GetLayer(views::Widget* widget) {
@@ -46,14 +45,11 @@ ui::Layer* GetLayer(views::Widget* widget) {
 ////////////////////////////////////////////////////////////////////////////////
 // AppList, public:
 
-AppList::AppList()
-    : aura::EventFilter(NULL),
-      is_visible_(false),
-      widget_(NULL) {
+AppList::AppList() : is_visible_(false), view_(NULL) {
 }
 
 AppList::~AppList() {
-  ResetWidget();
+  ResetView();
 }
 
 void AppList::SetVisible(bool visible) {
@@ -62,74 +58,131 @@ void AppList::SetVisible(bool visible) {
 
   is_visible_ = visible;
 
-  if (widget_) {
+  if (view_) {
     ScheduleAnimation();
   } else if (is_visible_) {
-    scoped_ptr<AppListModel> model(new AppListModel);
-    Shell::GetInstance()->delegate()->BuildAppListModel(model.get());
-
     // AppListModel and AppListViewDelegate are owned by AppListView. They
     // will be released with AppListView on close.
-    AppListView* app_list_view = new AppListView(
-        model.release(),
+    SetView(new AppListView(
         Shell::GetInstance()->delegate()->CreateAppListViewDelegate(),
-        GetPreferredBounds(false));
-    SetWidget(app_list_view->GetWidget());
+        GetPreferredBounds()));
   }
 }
 
 bool AppList::IsVisible() {
-  return widget_ && widget_->IsVisible();
+  return view_ && view_->GetWidget()->IsVisible();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // AppList, private:
 
-void AppList::SetWidget(views::Widget* widget) {
-  DCHECK(widget_ == NULL);
+void AppList::SetView(AppListView* view) {
+  DCHECK(view_ == NULL);
 
   if (is_visible_) {
-    widget_ = widget;
-    widget_->AddObserver(this);
-    GetLayer(widget_)->GetAnimator()->AddObserver(this);
+    view_ = view;
+    views::Widget* widget = view_->GetWidget();
+    widget->AddObserver(this);
     Shell::GetInstance()->AddRootWindowEventFilter(this);
+    widget->GetNativeView()->GetRootWindow()->AddRootWindowObserver(this);
 
-    widget_->SetBounds(GetPreferredBounds(false));
-    widget_->SetOpacity(0);
+    widget->SetOpacity(0);
     ScheduleAnimation();
 
-    widget_->Show();
+    view_->GetWidget()->Show();
   } else {
-    widget->Close();
+    view->GetWidget()->Close();
   }
 }
 
-void AppList::ResetWidget() {
-  if (!widget_)
+void AppList::ResetView() {
+  if (!view_)
     return;
 
-  widget_->RemoveObserver(this);
-  GetLayer(widget_)->GetAnimator()->RemoveObserver(this);
+  views::Widget* widget = view_->GetWidget();
+  widget->RemoveObserver(this);
+  GetLayer(widget)->GetAnimator()->RemoveObserver(this);
   Shell::GetInstance()->RemoveRootWindowEventFilter(this);
-  widget_ = NULL;
+  widget->GetNativeView()->GetRootWindow()->RemoveRootWindowObserver(this);
+  view_ = NULL;
 }
 
 void AppList::ScheduleAnimation() {
+  second_animation_timer_.Stop();
+
+  // Stop observing previous animation.
+  StopObservingImplicitAnimations();
+
+  ScheduleDimmingAnimation();
+
+  if (is_visible_) {
+    ScheduleBrowserWindowsAnimation();
+    second_animation_timer_.Start(
+        FROM_HERE,
+        base::TimeDelta::FromMilliseconds(kSecondAnimationStartDelay),
+        this,
+        &AppList::ScheduleAppListAnimation);
+  } else {
+    ScheduleAppListAnimation();
+    second_animation_timer_.Start(
+        FROM_HERE,
+        base::TimeDelta::FromMilliseconds(kSecondAnimationStartDelay),
+        this,
+        &AppList::ScheduleBrowserWindowsAnimation);
+  }
+
+}
+
+void AppList::ScheduleBrowserWindowsAnimationForContainer(
+    aura::Window* container) {
+  DCHECK(container);
+  ui::Layer* layer = container->layer();
+  layer->GetAnimator()->StopAnimating();
+
+  ui::ScopedLayerAnimationSettings animation(layer->GetAnimator());
+  animation.SetTransitionDuration(
+      base::TimeDelta::FromMilliseconds(kAnimationDurationMs));
+  animation.SetTweenType(
+      is_visible_ ? ui::Tween::EASE_IN : ui::Tween::EASE_OUT);
+
+  layer->SetOpacity(is_visible_ ? 0.0 : 1.0);
+  layer->SetTransform(is_visible_ ?
+      ui::GetScaleTransform(
+          gfx::Point(layer->bounds().width() / 2,
+                     layer->bounds().height() / 2),
+          kContainerAnimationScaleFactor) :
+      ui::Transform());
+}
+
+void AppList::ScheduleBrowserWindowsAnimation() {
+  // Note: containers could be NULL during Shell shutdown.
   aura::Window* default_container = Shell::GetInstance()->GetContainer(
       internal::kShellWindowId_DefaultContainer);
-  // |default_container| could be NULL during Shell shutdown.
-  if (!default_container)
-    return;
+  if (default_container)
+    ScheduleBrowserWindowsAnimationForContainer(default_container);
+  aura::Window* always_on_top_container = Shell::GetInstance()->GetContainer(
+      internal::kShellWindowId_AlwaysOnTopContainer);
+  if (always_on_top_container)
+    ScheduleBrowserWindowsAnimationForContainer(always_on_top_container);
+}
 
-  ui::Layer* layer = GetLayer(widget_);
-  ui::ScopedLayerAnimationSettings app_list_animation(layer->GetAnimator());
-  layer->SetBounds(GetPreferredBounds(is_visible_));
+void AppList::ScheduleDimmingAnimation() {
+  ui::Layer* layer = GetLayer(view_->GetWidget());
+  layer->GetAnimator()->StopAnimating();
+
+  ui::ScopedLayerAnimationSettings animation(layer->GetAnimator());
+  animation.SetTransitionDuration(
+      base::TimeDelta::FromMilliseconds(2 * kAnimationDurationMs));
+  animation.AddObserver(this);
+
   layer->SetOpacity(is_visible_ ? 1.0 : 0.0);
+}
 
-  ui::Layer* default_container_layer = default_container->layer();
-  ui::ScopedLayerAnimationSettings default_container_animation(
-      default_container_layer->GetAnimator());
-  default_container_layer->SetOpacity(is_visible_ ? 0.0 : 1.0);
+void AppList::ScheduleAppListAnimation() {
+  if (is_visible_)
+    view_->AnimateShow(kAnimationDurationMs);
+  else
+    view_->AnimateHide(kAnimationDurationMs);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -141,10 +194,11 @@ bool AppList::PreHandleKeyEvent(aura::Window* target,
 }
 
 bool AppList::PreHandleMouseEvent(aura::Window* target,
-                                 aura::MouseEvent* event) {
-  if (widget_ && is_visible_ && event->type() == ui::ET_MOUSE_PRESSED) {
-    aura::MouseEvent translated(*event, target, widget_->GetNativeView());
-    if (!widget_->GetNativeView()->ContainsPoint(translated.location()))
+                                  aura::MouseEvent* event) {
+  if (view_ && is_visible_ && event->type() == ui::ET_MOUSE_PRESSED) {
+    views::Widget* widget = view_->GetWidget();
+    aura::MouseEvent translated(*event, target, widget->GetNativeView());
+    if (!widget->GetNativeView()->ContainsPoint(translated.location()))
       SetVisible(false);
   }
   return false;
@@ -162,35 +216,36 @@ ui::GestureStatus AppList::PreHandleGestureEvent(
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// AppList, ui::LayerAnimationObserver implementation:
-
-void AppList::OnLayerAnimationEnded(
-    const ui::LayerAnimationSequence* sequence) {
-  if (!is_visible_ )
-    widget_->Close();
+// AppList,  ura::RootWindowObserver implementation:
+void AppList::OnRootWindowResized(const aura::RootWindow* root,
+                                  const gfx::Size& old_size) {
+  if (view_&& is_visible_)
+    view_->GetWidget()->SetBounds(gfx::Rect(root->bounds().size()));
 }
 
-void AppList::OnLayerAnimationAborted(
-    const ui::LayerAnimationSequence* sequence) {
-}
+////////////////////////////////////////////////////////////////////////////////
+// AppList, ui::ImplicitAnimationObserver implementation:
 
-void AppList::OnLayerAnimationScheduled(
-    const ui::LayerAnimationSequence* sequence) {
+void AppList::OnImplicitAnimationsCompleted() {
+  if (is_visible_ )
+    view_->GetWidget()->Activate();
+  else
+    view_->GetWidget()->Close();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // AppList, views::Widget::Observer implementation:
 
 void AppList::OnWidgetClosing(views::Widget* widget) {
-  DCHECK(widget_ == widget);
+  DCHECK(view_->GetWidget() == widget);
   if (is_visible_)
     SetVisible(false);
-  ResetWidget();
+  ResetView();
 }
 
 void AppList::OnWidgetActivationChanged(views::Widget* widget, bool active) {
-  DCHECK(widget_ == widget);
-  if (widget_ && is_visible_ && !active)
+  DCHECK(view_->GetWidget() == widget);
+  if (view_ && is_visible_ && !active)
     SetVisible(false);
 }
 

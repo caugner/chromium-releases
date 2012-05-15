@@ -19,8 +19,8 @@
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/logging_chrome.h"
-#include "content/browser/renderer_host/render_view_host.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/result_codes.h"
 #include "grit/chromium_strings.h"
@@ -46,6 +46,7 @@
 
 class HungRendererDialogView;
 
+using content::RenderViewHost;
 using content::WebContents;
 
 namespace {
@@ -568,7 +569,7 @@ static HungRendererDialogView* CreateHungRendererDialogView() {
 
 namespace browser {
 
-void ShowNativeHungRendererDialog(WebContents* contents) {
+void ShowHungRendererDialog(WebContents* contents) {
   if (!logging::DialogsAreSuppressed()) {
     if (!g_instance)
       g_instance = CreateHungRendererDialogView();
@@ -576,7 +577,7 @@ void ShowNativeHungRendererDialog(WebContents* contents) {
   }
 }
 
-void HideNativeHungRendererDialog(WebContents* contents) {
+void HideHungRendererDialog(WebContents* contents) {
   if (!logging::DialogsAreSuppressed() && g_instance)
     g_instance->EndForWebContents(contents);
 }

@@ -140,20 +140,21 @@ HttpServerPropertiesManager::alternate_protocol_map() const {
   return http_server_properties_impl_->alternate_protocol_map();
 }
 
-const spdy::SpdySettings&
+const net::SettingsMap&
 HttpServerPropertiesManager::GetSpdySettings(
     const net::HostPortPair& host_port_pair) const {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   return http_server_properties_impl_->GetSpdySettings(host_port_pair);
 }
 
-// Saves settings for a host.
-bool HttpServerPropertiesManager::SetSpdySettings(
+bool HttpServerPropertiesManager::SetSpdySetting(
     const net::HostPortPair& host_port_pair,
-    const spdy::SpdySettings& settings) {
+    net::SpdySettingsIds id,
+    net::SpdySettingsFlags flags,
+    uint32 value) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  bool persist = http_server_properties_impl_->SetSpdySettings(
-      host_port_pair, settings);
+  bool persist = http_server_properties_impl_->SetSpdySetting(
+      host_port_pair, id, flags, value);
   if (persist)
     ScheduleUpdatePrefsOnIO();
   return persist;
@@ -272,14 +273,14 @@ void HttpServerPropertiesManager::UpdateCacheFromPrefsOnUI() {
     base::ListValue* spdy_settings_list = NULL;
     if (server_pref_dict->GetListWithoutPathExpansion(
         "settings", &spdy_settings_list)) {
-      spdy::SpdySettings spdy_settings;
+      net::SettingsMap settings_map;
 
       for (base::ListValue::const_iterator list_it =
            spdy_settings_list->begin();
            list_it != spdy_settings_list->end(); ++list_it) {
         if ((*list_it)->GetType() != Value::TYPE_DICTIONARY) {
           DVLOG(1) << "Malformed SpdySettingsList for server: " << server_str;
-          detected_corrupted_prefs = true;
+          NOTREACHED();
           continue;
         }
 
@@ -289,7 +290,7 @@ void HttpServerPropertiesManager::UpdateCacheFromPrefsOnUI() {
         int id = 0;
         if (!spdy_setting_dict->GetIntegerWithoutPathExpansion("id", &id)) {
           DVLOG(1) << "Malformed id in SpdySettings for server: " << server_str;
-          detected_corrupted_prefs = true;
+          NOTREACHED();
           continue;
         }
 
@@ -298,18 +299,16 @@ void HttpServerPropertiesManager::UpdateCacheFromPrefsOnUI() {
                                                                &value)) {
           DVLOG(1) << "Malformed value in SpdySettings for server: " <<
               server_str;
-          detected_corrupted_prefs = true;
+          NOTREACHED();
           continue;
         }
 
-        spdy::SettingsFlagsAndId flags_and_id(0);
-        flags_and_id.set_id(id);
-        flags_and_id.set_flags(spdy::SETTINGS_FLAG_PERSISTED);
-
-        spdy_settings.push_back(spdy::SpdySetting(flags_and_id, value));
+        net::SettingsFlagsAndValue flags_and_value(
+            net::SETTINGS_FLAG_PERSISTED, value);
+        settings_map[static_cast<net::SpdySettingsIds>(id)] = flags_and_value;
       }
 
-      (*spdy_settings_map)[server] = spdy_settings;
+      (*spdy_settings_map)[server] = settings_map;
     }
 
     int pipeline_capability = net::PIPELINE_UNKNOWN;
@@ -454,20 +453,20 @@ void HttpServerPropertiesManager::UpdatePrefsFromCacheOnIO() {
 struct ServerPref {
   ServerPref()
       : supports_spdy(false),
-        settings(NULL),
+        settings_map(NULL),
         alternate_protocol(NULL),
         pipeline_capability(net::PIPELINE_UNKNOWN) {
   }
   ServerPref(bool supports_spdy,
-             const spdy::SpdySettings* settings,
+             const net::SettingsMap* settings_map,
              const net::PortAlternateProtocolPair* alternate_protocol)
       : supports_spdy(supports_spdy),
-        settings(settings),
+        settings_map(settings_map),
         alternate_protocol(alternate_protocol),
         pipeline_capability(net::PIPELINE_UNKNOWN) {
   }
   bool supports_spdy;
-  const spdy::SpdySettings* settings;
+  const net::SettingsMap* settings_map;
   const net::PortAlternateProtocolPair* alternate_protocol;
   net::HttpPipelinedHostCapability pipeline_capability;
 };
@@ -511,7 +510,7 @@ void HttpServerPropertiesManager::UpdatePrefsOnUI(
       ServerPref server_pref(false, &map_it->second, NULL);
       server_pref_map[server] = server_pref;
     } else {
-      it->second.settings = &map_it->second;
+      it->second.settings_map = &map_it->second;
     }
   }
 
@@ -566,14 +565,14 @@ void HttpServerPropertiesManager::UpdatePrefsOnUI(
     // Save supports_spdy.
     server_pref_dict->SetBoolean("supports_spdy", server_pref.supports_spdy);
 
-    // Save SpdySettings.
-    if (server_pref.settings) {
+    // Save SPDY settings.
+    if (server_pref.settings_map) {
       base::ListValue* spdy_settings_list = new ListValue();
-      for (spdy::SpdySettings::const_iterator it =
-           server_pref.settings->begin();
-           it != server_pref.settings->end(); ++it) {
-        uint32 id = it->first.id();
-        uint32 value = it->second;
+      for (net::SettingsMap::const_iterator it =
+           server_pref.settings_map->begin();
+           it != server_pref.settings_map->end(); ++it) {
+        net::SpdySettingsIds id = it->first;
+        uint32 value = it->second.second;
         base::DictionaryValue* spdy_setting_dict = new base::DictionaryValue;
         spdy_setting_dict->SetInteger("id", id);
         spdy_setting_dict->SetInteger("value", value);

@@ -15,6 +15,7 @@
 #include "base/i18n/file_util_icu.h"
 #include "base/i18n/number_formatting.h"
 #include "base/json/json_reader.h"
+#include "base/lazy_instance.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/metrics/histogram.h"
 #include "base/path_service.h"
@@ -36,13 +37,14 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/webui/print_preview/print_preview_ui.h"
+#include "chrome/browser/ui/webui/print_preview/sticky_settings.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/print_messages.h"
-#include "content/browser/renderer_host/render_view_host.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_view_host_delegate.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
@@ -62,6 +64,7 @@
 using content::BrowserThread;
 using content::NavigationEntry;
 using content::OpenURLParams;
+using content::RenderViewHost;
 using content::Referrer;
 using content::WebContents;
 using printing::Metafile;
@@ -193,19 +196,15 @@ void PrintToPdfCallback(Metafile* metafile, const FilePath& path) {
       base::Bind(&base::DeletePointer<Metafile>, metafile));
 }
 
+static base::LazyInstance<printing::StickySettings> sticky_settings =
+    LAZY_INSTANCE_INITIALIZER;
+
 }  // namespace
 
 // static
-FilePath* PrintPreviewHandler::last_saved_path_ = NULL;
-std::string* PrintPreviewHandler::last_used_printer_cloud_print_data_ = NULL;
-std::string* PrintPreviewHandler::last_used_printer_name_ = NULL;
-printing::ColorModels PrintPreviewHandler::last_used_color_model_ =
-    printing::UNKNOWN_COLOR_MODEL;
-printing::MarginType PrintPreviewHandler::last_used_margins_type_ =
-    printing::DEFAULT_MARGINS;
-printing::PageSizeMargins*
-    PrintPreviewHandler::last_used_page_size_margins_ = NULL;
-bool PrintPreviewHandler::last_used_headers_footers_ = true;
+printing::StickySettings* PrintPreviewHandler::GetStickySettings() {
+  return sticky_settings.Pointer();
+}
 
 PrintPreviewHandler::PrintPreviewHandler()
     : print_backend_(printing::PrintBackend::CreateInstance(NULL)),
@@ -352,7 +351,7 @@ void PrintPreviewHandler::HandleGetPreview(const ListValue* args) {
 
   VLOG(1) << "Print preview request start";
   RenderViewHost* rvh = initiator_tab->web_contents()->GetRenderViewHost();
-  rvh->Send(new PrintMsg_PrintPreview(rvh->routing_id(), *settings));
+  rvh->Send(new PrintMsg_PrintPreview(rvh->GetRoutingID(), *settings));
 }
 
 void PrintPreviewHandler::HandlePrint(const ListValue* args) {
@@ -366,36 +365,15 @@ void PrintPreviewHandler::HandlePrint(const ListValue* args) {
   TabContentsWrapper* initiator_tab = GetInitiatorTab();
   if (initiator_tab) {
     RenderViewHost* rvh = initiator_tab->web_contents()->GetRenderViewHost();
-    rvh->Send(new PrintMsg_ResetScriptedPrintCount(rvh->routing_id()));
+    rvh->Send(new PrintMsg_ResetScriptedPrintCount(rvh->GetRoutingID()));
   }
 
   scoped_ptr<DictionaryValue> settings(GetSettingsDictionary(args));
   if (!settings.get())
     return;
 
-  // Storing last used color model.
-  int color_model;
-  if (!settings->GetInteger(printing::kSettingColor, &color_model))
-    color_model = printing::GRAY;
-  last_used_color_model_ = static_cast<printing::ColorModels>(color_model);
-
-  bool is_modifiable;
-  settings->GetBoolean(printing::kSettingPreviewModifiable, &is_modifiable);
-  if (is_modifiable) {
-    // Storing last used margin settings.
-    int margin_type;
-    if (!settings->GetInteger(printing::kSettingMarginsType, &margin_type))
-      margin_type = printing::DEFAULT_MARGINS;
-    last_used_margins_type_ = static_cast<printing::MarginType>(margin_type);
-    if (last_used_margins_type_ == printing::CUSTOM_MARGINS) {
-      if (!last_used_page_size_margins_)
-        last_used_page_size_margins_ = new printing::PageSizeMargins();
-      GetCustomMarginsFromJobSettings(*settings, last_used_page_size_margins_);
-    }
-    // Storing last used header and footer setting.
-    settings->GetBoolean(
-        printing::kSettingHeaderFooterEnabled, &last_used_headers_footers_);
-  }
+  // Storing last used settings.
+  GetStickySettings()->Store(*settings);
 
   // Never try to add headers/footers here. It's already in the generated PDF.
   settings->SetBoolean(printing::kSettingHeaderFooterEnabled, false);
@@ -443,7 +421,8 @@ void PrintPreviewHandler::HandlePrint(const ListValue* args) {
     // so ignore the page range and print all pages.
     settings->Remove(printing::kSettingPageRange, NULL);
     RenderViewHost* rvh = web_ui()->GetWebContents()->GetRenderViewHost();
-    rvh->Send(new PrintMsg_PrintForPrintPreview(rvh->routing_id(), *settings));
+    rvh->Send(
+        new PrintMsg_PrintForPrintPreview(rvh->GetRoutingID(), *settings));
 
     // For all other cases above, the tab will stay open until the printing has
     // finished. Then the tab closes and PrintPreviewDone() gets called. Here,
@@ -513,16 +492,11 @@ void PrintPreviewHandler::HandleCancelPendingPrintRequest(
 
 void PrintPreviewHandler::HandleSaveLastPrinter(const ListValue* args) {
   std::string data_to_save;
-  if (args->GetString(0, &data_to_save) && !data_to_save.empty()) {
-    if (last_used_printer_name_ == NULL)
-      last_used_printer_name_ = new std::string();
-    *last_used_printer_name_ = data_to_save;
-  }
-  if (args->GetString(1, &data_to_save) && !data_to_save.empty()) {
-    if (last_used_printer_cloud_print_data_ == NULL)
-      last_used_printer_cloud_print_data_ = new std::string();
-    *last_used_printer_cloud_print_data_ = data_to_save;
-  }
+  if (args->GetString(0, &data_to_save) && !data_to_save.empty())
+    GetStickySettings()->StorePrinterName(data_to_save);
+
+  if (args->GetString(1, &data_to_save) && !data_to_save.empty())
+    GetStickySettings()->StoreCloudPrintData(data_to_save);
 }
 
 void PrintPreviewHandler::HandleGetPrinterCapabilities(const ListValue* args) {
@@ -649,22 +623,6 @@ void PrintPreviewHandler::GetNumberFormatAndMeasurementSystem(
   settings->SetInteger(kMeasurementSystem, system);
 }
 
-void PrintPreviewHandler::GetLastUsedMarginSettings(
-    base::DictionaryValue* custom_margins) {
-  custom_margins->SetInteger(printing::kSettingMarginsType,
-                             PrintPreviewHandler::last_used_margins_type_);
-  if (last_used_page_size_margins_) {
-    custom_margins->SetDouble(printing::kSettingMarginTop,
-                              last_used_page_size_margins_->margin_top);
-    custom_margins->SetDouble(printing::kSettingMarginBottom,
-                              last_used_page_size_margins_->margin_bottom);
-    custom_margins->SetDouble(printing::kSettingMarginLeft,
-                              last_used_page_size_margins_->margin_left);
-    custom_margins->SetDouble(printing::kSettingMarginRight,
-                              last_used_page_size_margins_->margin_right);
-  }
-}
-
 void PrintPreviewHandler::HandleGetInitialSettings(const ListValue* /*args*/) {
   scoped_refptr<PrintSystemTaskProxy> task =
       new PrintSystemTaskProxy(AsWeakPtr(),
@@ -690,7 +648,9 @@ void PrintPreviewHandler::SendInitialSettings(
                              default_printer);
   initial_settings.SetString(kCloudPrintData, cloud_print_data);
   initial_settings.SetBoolean(printing::kSettingHeaderFooterEnabled,
-                              last_used_headers_footers_);
+                              GetStickySettings()->headers_footers());
+  initial_settings.SetInteger(printing::kSettingDuplexMode,
+                              GetStickySettings()->duplex_mode());
 
 
 #if defined(OS_MACOSX)
@@ -703,7 +663,7 @@ void PrintPreviewHandler::SendInitialSettings(
   initial_settings.SetBoolean(kPrintAutomaticallyInKioskMode, kiosk_mode);
 
   if (print_preview_ui->source_is_modifiable()) {
-    GetLastUsedMarginSettings(&initial_settings);
+    GetStickySettings()->GetLastUsedMarginSettings(&initial_settings);
     GetNumberFormatAndMeasurementSystem(&initial_settings);
   }
   web_ui()->CallJavascriptFunction("setInitialSettings", initial_settings);
@@ -712,7 +672,8 @@ void PrintPreviewHandler::SendInitialSettings(
 void PrintPreviewHandler::ActivateInitiatorTabAndClosePreviewTab() {
   TabContentsWrapper* initiator_tab = GetInitiatorTab();
   if (initiator_tab)
-    initiator_tab->web_contents()->GetRenderViewHost()->delegate()->Activate();
+    initiator_tab->web_contents()->GetRenderViewHost()->
+        GetDelegate()->Activate();
   PrintPreviewUI* print_preview_ui = static_cast<PrintPreviewUI*>(
       web_ui()->GetController());
   print_preview_ui->OnClosePrintPreviewTab();
@@ -750,54 +711,56 @@ void PrintPreviewHandler::SendCloudPrintJob(const DictionaryValue& settings,
       web_ui()->GetController());
   print_preview_ui->GetPrintPreviewDataForIndex(
       printing::COMPLETE_PREVIEW_DOCUMENT_INDEX, &data);
-  DCHECK_GT(data->size(), 0U);
+  if (data->size() > 0U && data->front()) {
+    string16 print_job_title_utf16 =
+        preview_tab_wrapper()->print_view_manager()->RenderSourceName();
+    std::string print_job_title = UTF16ToUTF8(print_job_title_utf16);
+    std::string printer_id;
+    settings.GetString(printing::kSettingCloudPrintId, &printer_id);
+    // BASE64 encode the job data.
+    std::string raw_data(reinterpret_cast<const char*>(data->front()),
+                         data->size());
+    std::string base64_data;
+    if (!base::Base64Encode(raw_data, &base64_data)) {
+      NOTREACHED() << "Base64 encoding PDF data.";
+    }
 
-  string16 print_job_title_utf16 =
-      preview_tab_wrapper()->print_view_manager()->RenderSourceName();
-  std::string print_job_title = UTF16ToUTF8(print_job_title_utf16);
-  std::string printer_id;
-  settings.GetString(printing::kSettingCloudPrintId, &printer_id);
-  // BASE64 encode the job data.
-  std::string raw_data(reinterpret_cast<const char*>(data->front()),
-                       data->size());
-  std::string base64_data;
-  if (!base::Base64Encode(raw_data, &base64_data)) {
-    NOTREACHED() << "Base64 encoding PDF data.";
+    const char boundary[] = "----CloudPrintFormBoundaryjc9wuprokl8i";
+    const char prolog[] = "--%s\r\n"
+      "Content-Disposition: form-data; name=\"capabilities\"\r\n\r\n%s\r\n"
+      "--%s\r\n"
+      "Content-Disposition: form-data; name=\"contentType\"\r\n\r\ndataUrl\r\n"
+      "--%s\r\n"
+      "Content-Disposition: form-data; name=\"title\"\r\n\r\n%s\r\n"
+      "--%s\r\n"
+      "Content-Disposition: form-data; name=\"printerid\"\r\n\r\n%s\r\n"
+      "--%s\r\n"
+      "Content-Disposition: form-data; name=\"content\"\r\n\r\n"
+      "data:application/pdf;base64,%s\r\n"
+      "--%s\r\n";
+
+    // TODO(abodenha@chromium.org) This implies a large copy operation.
+    // Profile this and optimize if necessary.
+    std::string final_data;
+    base::SStringPrintf(&final_data,
+                        prolog,
+                        boundary,
+                        print_ticket.c_str(),
+                        boundary,
+                        boundary,
+                        print_job_title.c_str(),
+                        boundary,
+                        printer_id.c_str(),
+                        boundary,
+                        base64_data.c_str(),
+                        boundary);
+
+    StringValue data_value(final_data);
+
+    web_ui()->CallJavascriptFunction("printToCloud", data_value);
+  } else {
+    NOTREACHED();
   }
-
-  const char boundary[] = "----CloudPrintFormBoundaryjc9wuprokl8i";
-  const char prolog[] = "--%s\r\n"
-    "Content-Disposition: form-data; name=\"capabilities\"\r\n\r\n%s\r\n"
-    "--%s\r\n"
-    "Content-Disposition: form-data; name=\"contentType\"\r\n\r\ndataUrl\r\n"
-    "--%s\r\n"
-    "Content-Disposition: form-data; name=\"title\"\r\n\r\n%s\r\n"
-    "--%s\r\n"
-    "Content-Disposition: form-data; name=\"printerid\"\r\n\r\n%s\r\n"
-    "--%s\r\n"
-    "Content-Disposition: form-data; name=\"content\"\r\n\r\n"
-    "data:application/pdf;base64,%s\r\n"
-    "--%s\r\n";
-
-  // TODO(abodenha@chromium.org) This implies a large copy operation.
-  // Profile this and optimize if necessary.
-  std::string final_data;
-  base::SStringPrintf(&final_data,
-                      prolog,
-                      boundary,
-                      print_ticket.c_str(),
-                      boundary,
-                      boundary,
-                      print_job_title.c_str(),
-                      boundary,
-                      printer_id.c_str(),
-                      boundary,
-                      base64_data.c_str(),
-                      boundary);
-
-  StringValue data_value(final_data);
-
-  web_ui()->CallJavascriptFunction("printToCloud", data_value);
 }
 
 TabContentsWrapper* PrintPreviewHandler::GetInitiatorTab() const {
@@ -817,14 +780,15 @@ void PrintPreviewHandler::SelectFile(const FilePath& default_filename) {
   file_type_info.extensions.resize(1);
   file_type_info.extensions[0].push_back(FILE_PATH_LITERAL("pdf"));
 
-  // Initializing last_saved_path_ if it is not already initialized.
-  if (!last_saved_path_) {
-    last_saved_path_ = new FilePath();
+  // Initializing save_path_ if it is not already initialized.
+  if (!GetStickySettings()->save_path()) {
     // Allowing IO operation temporarily. It is ok to do so here because
     // the select file dialog performs IO anyway in order to display the
     // folders and also it is modal.
     base::ThreadRestrictions::ScopedAllowIO allow_io;
-    PathService::Get(chrome::DIR_USER_DOCUMENTS, last_saved_path_);
+    FilePath file_path;
+    PathService::Get(chrome::DIR_USER_DOCUMENTS, &file_path);
+    GetStickySettings()->StoreSavePath(file_path);
   }
 
   if (!select_file_dialog_.get())
@@ -833,7 +797,7 @@ void PrintPreviewHandler::SelectFile(const FilePath& default_filename) {
   select_file_dialog_->SelectFile(
       SelectFileDialog::SELECT_SAVEAS_FILE,
       string16(),
-      last_saved_path_->Append(default_filename),
+      GetStickySettings()->save_path()->Append(default_filename),
       &file_type_info,
       0,
       FILE_PATH_LITERAL(""),
@@ -863,8 +827,8 @@ void PrintPreviewHandler::ShowSystemDialog() {
 
 void PrintPreviewHandler::FileSelected(const FilePath& path,
                                        int index, void* params) {
-  // Updating |last_saved_path_| to the newly selected folder.
-  *last_saved_path_ = path.DirName();
+  // Updating |save_path_| to the newly selected folder.
+  GetStickySettings()->StoreSavePath(path.DirName());
 
   PrintPreviewUI* print_preview_ui = static_cast<PrintPreviewUI*>(
       web_ui()->GetController());

@@ -354,7 +354,7 @@ var keyboardOverlayData = {
           "label": "full screen"
         },
         "3F": {
-          "label": "maximize"
+          "label": "switch window"
         },
         "40": {
           "label": "bright down"
@@ -670,7 +670,7 @@ var keyboardOverlayData = {
           "label": "full screen"
         },
         "3F": {
-          "label": "maximize"
+          "label": "switch window"
         },
         "40": {
           "label": "bright down"
@@ -947,7 +947,7 @@ var keyboardOverlayData = {
           "label": "full screen"
         },
         "3F": {
-          "label": "maximize"
+          "label": "switch window"
         },
         "40": {
           "label": "bright down"
@@ -1255,7 +1255,7 @@ var keyboardOverlayData = {
           "label": "full screen"
         },
         "3F": {
-          "label": "maximize"
+          "label": "switch window"
         },
         "40": {
           "label": "bright down"
@@ -1535,7 +1535,7 @@ var keyboardOverlayData = {
           "label": "full screen"
         },
         "3F": {
-          "label": "maximize"
+          "label": "switch window"
         },
         "40": {
           "label": "bright down"
@@ -1815,7 +1815,7 @@ var keyboardOverlayData = {
           "label": "full screen"
         },
         "3F": {
-          "label": "maximize"
+          "label": "switch window"
         },
         "40": {
           "label": "bright down"
@@ -2118,7 +2118,7 @@ var keyboardOverlayData = {
           "label": "full screen"
         },
         "3F": {
-          "label": "maximize"
+          "label": "switch window"
         },
         "40": {
           "label": "bright down"
@@ -2397,7 +2397,7 @@ var keyboardOverlayData = {
           "label": "full screen"
         },
         "3F": {
-          "label": "maximize"
+          "label": "switch window"
         },
         "40": {
           "label": "bright down"
@@ -2667,7 +2667,7 @@ var keyboardOverlayData = {
           "label": "full screen"
         },
         "3F": {
-          "label": "maximize"
+          "label": "switch window"
         },
         "40": {
           "label": "bright down"
@@ -2932,7 +2932,7 @@ var keyboardOverlayData = {
           "label": "full screen"
         },
         "3F": {
-          "label": "maximize"
+          "label": "switch window"
         },
         "40": {
           "label": "bright down"
@@ -3195,7 +3195,7 @@ var keyboardOverlayData = {
           "label": "full screen"
         },
         "3F": {
-          "label": "maximize"
+          "label": "switch window"
         },
         "40": {
           "label": "bright down"
@@ -3454,7 +3454,7 @@ var keyboardOverlayData = {
           "label": "full screen"
         },
         "3F": {
-          "label": "maximize"
+          "label": "switch window"
         },
         "40": {
           "label": "bright down"
@@ -3714,7 +3714,7 @@ var keyboardOverlayData = {
           "label": "full screen"
         },
         "3F": {
-          "label": "maximize"
+          "label": "switch window"
         },
         "40": {
           "label": "bright down"
@@ -3982,7 +3982,7 @@ var keyboardOverlayData = {
           "label": "full screen"
         },
         "3F": {
-          "label": "maximize"
+          "label": "switch window"
         },
         "40": {
           "label": "bright down"
@@ -4249,7 +4249,7 @@ var keyboardOverlayData = {
           "label": "full screen"
         },
         "3F": {
-          "label": "maximize"
+          "label": "switch window"
         },
         "40": {
           "label": "bright down"
@@ -4518,7 +4518,7 @@ var keyboardOverlayData = {
           "label": "full screen"
         },
         "3F": {
-          "label": "maximize"
+          "label": "switch window"
         },
         "40": {
           "label": "bright down"
@@ -4786,7 +4786,7 @@ var keyboardOverlayData = {
           "label": "full screen"
         },
         "3F": {
-          "label": "maximize"
+          "label": "switch window"
         },
         "40": {
           "label": "bright down"
@@ -5057,7 +5057,7 @@ var keyboardOverlayData = {
           "label": "full screen"
         },
         "3F": {
-          "label": "maximize"
+          "label": "switch window"
         },
         "40": {
           "label": "bright down"
@@ -5336,7 +5336,7 @@ var keyboardOverlayData = {
           "label": "full screen"
         },
         "3F": {
-          "label": "maximize"
+          "label": "switch window"
         },
         "40": {
           "label": "bright down"
@@ -5620,7 +5620,7 @@ var keyboardOverlayData = {
           "label": "full screen"
         },
         "3F": {
-          "label": "maximize"
+          "label": "switch window"
         },
         "40": {
           "label": "bright down"
@@ -5907,7 +5907,7 @@ var keyboardOverlayData = {
           "label": "full screen"
         },
         "3F": {
-          "label": "maximize"
+          "label": "switch window"
         },
         "40": {
           "label": "bright down"
@@ -6265,7 +6265,7 @@ var keyboardOverlayData = {
           "label": "full screen"
         },
         "3F": {
-          "label": "maximize"
+          "label": "switch window"
         },
         "40": {
           "label": "bright down"
@@ -6554,7 +6554,7 @@ var keyboardOverlayData = {
           "label": "full screen"
         },
         "3F": {
-          "label": "maximize"
+          "label": "switch window"
         },
         "40": {
           "label": "bright down"
@@ -6849,7 +6849,7 @@ var keyboardOverlayData = {
           "label": "full screen"
         },
         "3F": {
-          "label": "maximize"
+          "label": "switch window"
         },
         "40": {
           "label": "bright down"
@@ -7124,7 +7124,7 @@ var keyboardOverlayData = {
           "label": "full screen"
         },
         "3F": {
-          "label": "maximize"
+          "label": "switch window"
         },
         "40": {
           "label": "bright down"
@@ -7420,7 +7420,7 @@ var keyboardOverlayData = {
           "label": "full screen"
         },
         "3F": {
-          "label": "maximize"
+          "label": "switch window"
         },
         "40": {
           "label": "bright down"
@@ -7737,7 +7737,7 @@ var keyboardOverlayData = {
           "label": "full screen"
         },
         "3F": {
-          "label": "maximize"
+          "label": "switch window"
         },
         "40": {
           "label": "bright down"
@@ -8049,7 +8049,7 @@ var keyboardOverlayData = {
           "label": "full screen"
         },
         "3F": {
-          "label": "maximize"
+          "label": "switch window"
         },
         "40": {
           "label": "bright down"
@@ -8331,7 +8331,7 @@ var keyboardOverlayData = {
           "label": "full screen"
         },
         "3F": {
-          "label": "maximize"
+          "label": "switch window"
         },
         "40": {
           "label": "bright down"
@@ -8596,7 +8596,7 @@ var keyboardOverlayData = {
           "label": "full screen"
         },
         "3F": {
-          "label": "maximize"
+          "label": "switch window"
         },
         "40": {
           "label": "bright down"
@@ -8868,7 +8868,7 @@ var keyboardOverlayData = {
           "label": "full screen"
         },
         "3F": {
-          "label": "maximize"
+          "label": "switch window"
         },
         "40": {
           "label": "bright down"
@@ -9135,7 +9135,7 @@ var keyboardOverlayData = {
           "label": "full screen"
         },
         "3F": {
-          "label": "maximize"
+          "label": "switch window"
         },
         "40": {
           "label": "bright down"
@@ -9432,7 +9432,7 @@ var keyboardOverlayData = {
           "label": "full screen"
         },
         "3F": {
-          "label": "maximize"
+          "label": "switch window"
         },
         "40": {
           "label": "bright down"
@@ -9704,7 +9704,7 @@ var keyboardOverlayData = {
           "label": "full screen"
         },
         "3F": {
-          "label": "maximize"
+          "label": "switch window"
         },
         "40": {
           "label": "bright down"
@@ -9986,7 +9986,7 @@ var keyboardOverlayData = {
           "label": "full screen"
         },
         "3F": {
-          "label": "maximize"
+          "label": "switch window"
         },
         "40": {
           "label": "bright down"
@@ -10279,7 +10279,7 @@ var keyboardOverlayData = {
           "label": "full screen"
         },
         "3F": {
-          "label": "maximize"
+          "label": "switch window"
         },
         "40": {
           "label": "bright down"
@@ -10594,7 +10594,7 @@ var keyboardOverlayData = {
           "label": "full screen"
         },
         "3F": {
-          "label": "maximize"
+          "label": "switch window"
         },
         "40": {
           "label": "bright down"
@@ -10902,7 +10902,7 @@ var keyboardOverlayData = {
           "label": "full screen"
         },
         "3F": {
-          "label": "maximize"
+          "label": "switch window"
         },
         "40": {
           "label": "bright down"
@@ -11197,7 +11197,7 @@ var keyboardOverlayData = {
           "label": "full screen"
         },
         "3F": {
-          "label": "maximize"
+          "label": "switch window"
         },
         "40": {
           "label": "bright down"
@@ -11481,7 +11481,7 @@ var keyboardOverlayData = {
           "label": "full screen"
         },
         "3F": {
-          "label": "maximize"
+          "label": "switch window"
         },
         "40": {
           "label": "bright down"
@@ -11759,7 +11759,7 @@ var keyboardOverlayData = {
           "label": "full screen"
         },
         "3F": {
-          "label": "maximize"
+          "label": "switch window"
         },
         "40": {
           "label": "bright down"
@@ -12125,7 +12125,7 @@ var keyboardOverlayData = {
           "label": "full screen"
         },
         "3F": {
-          "label": "maximize"
+          "label": "switch window"
         },
         "40": {
           "label": "bright down"
@@ -12391,7 +12391,7 @@ var keyboardOverlayData = {
           "label": "full screen"
         },
         "3F": {
-          "label": "maximize"
+          "label": "switch window"
         },
         "40": {
           "label": "bright down"
@@ -12710,7 +12710,7 @@ var keyboardOverlayData = {
           "label": "full screen"
         },
         "3F": {
-          "label": "maximize"
+          "label": "switch window"
         },
         "40": {
           "label": "bright down"
@@ -12963,7 +12963,7 @@ var keyboardOverlayData = {
           "label": "full screen"
         },
         "3F": {
-          "label": "maximize"
+          "label": "switch window"
         },
         "40": {
           "label": "bright down"
@@ -13233,7 +13233,7 @@ var keyboardOverlayData = {
           "label": "full screen"
         },
         "3F": {
-          "label": "maximize"
+          "label": "switch window"
         },
         "40": {
           "label": "bright down"
@@ -13559,7 +13559,7 @@ var keyboardOverlayData = {
           "label": "full screen"
         },
         "3F": {
-          "label": "maximize"
+          "label": "switch window"
         },
         "40": {
           "label": "bright down"
@@ -15759,10 +15759,8 @@ var keyboardOverlayData = {
   "shortcut": {
     "+<>CTRL": "keyboardOverlayZoomIn",
     "+<>CTRL<>SHIFT": "keyboardOverlayZoomIn",
-    ",<>ALT": "keyboardOverlayResizeLeft",
     "-<>CTRL": "keyboardOverlayZoomOut",
     "-<>CTRL<>SHIFT": "keyboardOverlayZoomOut",
-    ".<>ALT": "keyboardOverlayResizeRight",
     ".<>CTRL<>SHIFT": "keyboardOverlayToggleSpeechInput",
     "/<>ALT<>CTRL": "keyboardOverlayViewKeyboardOverlay",
     "/<>ALT<>CTRL<>SHIFT": "keyboardOverlayViewKeyboardOverlay",
@@ -15787,7 +15785,6 @@ var keyboardOverlayData = {
     "8<>CTRL": "keyboardOverlayActivateTab8",
     "9<>ALT": "keyboardOverlayActivateLastWindow",
     "9<>CTRL": "keyboardOverlayActivateLastTab",
-    "ALT": "keyboardOverlayFocusWrenchMenu",
     "ALT<>SHIFT": "keyboardOverlayCycleThroughInputMethods",
     "a<>CTRL": "keyboardOverlaySelectAll",
     "arrowkeys<>CTRL": "keyboardOverlayWordMove",
@@ -15815,9 +15812,11 @@ var keyboardOverlayData = {
     "f<>ALT": "keyboardOverlayShowWrenchMenu",
     "f<>CTRL": "keyboardOverlayFindText",
     "forward<>CTRL": "keyboardOverlayFocusNextPane",
+    "full screen<>CTRL": "keyboardOverlayCycleMonitor",
     "g<>CTRL": "keyboardOverlayFindTextAgain",
     "g<>CTRL<>SHIFT": "keyboardOverlayFindPreviousText",
     "h<>CTRL": "keyboardOverlayHistory",
+    "i<>ALT<>SHIFT": "keyboardOverlayReportIssue",
     "i<>CTRL<>SHIFT": "keyboardOverlayDeveloperTools",
     "j<>CTRL": "keyboardOverlayDownloads",
     "j<>CTRL<>SHIFT": "keyboardOverlayJavascriptConsole",
@@ -15828,8 +15827,6 @@ var keyboardOverlayData = {
     "left<>CTRL": "keyboardOverlayPreviousWord",
     "left<>CTRL<>SHIFT": "keyboardOverlaySelectWordAtATime",
     "m<>CTRL": "keyboardOverlayOpenFileManager",
-    "maximize<>CTRL": "keyboardOverlayTakeScreenshot",
-    "maximize<>CTRL<>SHIFT": "keyboardOverlayScreenshotRegion",
     "n<>CTRL": "keyboardOverlayNewWindow",
     "n<>CTRL<>SHIFT": "keyboardOverlayNewIncognitoWindow",
     "o<>CTRL": "keyboardOverlayContentBrowser",
@@ -15844,9 +15841,12 @@ var keyboardOverlayData = {
     "right<>CTRL<>SHIFT": "keyboardOverlaySelectWordAtATime",
     "s<>ALT<>SHIFT": "keyboardOverlayFocusStatusIcon",
     "s<>CTRL": "keyboardOverlaySave",
+    "search<>CTRL": "keyboardOverlayToggleAppList",
     "search<>SHIFT": "keyboardOverlayToggleCapsLock",
     "space<>CTRL": "keyboardOverlaySelectPreviousInputMethod",
     "space<>SHIFT": "keyboardOverlayScrollUpOnePage",
+    "switch window<>CTRL": "keyboardOverlayTakeScreenshot",
+    "switch window<>CTRL<>SHIFT": "keyboardOverlayScreenshotRegion",
     "t<>ALT<>SHIFT": "keyboardOverlayFocusToolbar",
     "t<>CTRL": "keyboardOverlayNewTab",
     "t<>CTRL<>SHIFT": "keyboardOverlayReopenLastClosedTab",

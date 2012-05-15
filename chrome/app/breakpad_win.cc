@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -54,6 +54,8 @@ const MINIDUMP_TYPE kFullDumpType = static_cast<MINIDUMP_TYPE>(
     MiniDumpWithHandleData |  // Get all handle information.
     MiniDumpWithUnloadedModules);  // Get unloaded modules when available.
 
+const char kPipeNameVar[] = "CHROME_BREAKPAD_PIPE_NAME";
+
 const wchar_t kGoogleUpdatePipeName[] = L"\\\\.\\pipe\\GoogleCrashServices\\";
 const wchar_t kChromePipeName[] = L"\\\\.\\pipe\\ChromeCrashServices";
 
@@ -72,6 +74,7 @@ static size_t g_num_of_extensions_offset;
 static size_t g_extension_ids_offset;
 static size_t g_client_id_offset;
 static size_t g_gpu_info_offset;
+static size_t g_printer_info_offset;
 static size_t g_num_of_views_offset;
 static size_t g_num_switches_offset;
 static size_t g_switches_offset;
@@ -197,11 +200,11 @@ void SetPluginPath(const std::wstring& path) {
 
 // Returns the custom info structure based on the dll in parameter and the
 // process type.
-google_breakpad::CustomClientInfo* GetCustomInfo(const std::wstring& dll_path,
+google_breakpad::CustomClientInfo* GetCustomInfo(const std::wstring& exe_path,
                                                  const std::wstring& type,
                                                  const std::wstring& channel) {
   scoped_ptr<FileVersionInfo>
-      version_info(FileVersionInfo::CreateFileVersionInfo(FilePath(dll_path)));
+      version_info(FileVersionInfo::CreateFileVersionInfo(FilePath(exe_path)));
 
   std::wstring version, product;
   std::wstring special_build;
@@ -255,19 +258,29 @@ google_breakpad::CustomClientInfo* GetCustomInfo(const std::wstring& dll_path,
         base::StringPrintf(L"extension-%i", i + 1).c_str(), L""));
   }
 
-  // Add empty values for the gpu_info. We'll put the actual values
-  // when we collect them at this location.
+  // Add empty values for the gpu_info. We'll put the actual values when we
+  // collect them at this location.
   g_gpu_info_offset = g_custom_entries->size();
-  g_custom_entries->push_back(
-      google_breakpad::CustomInfoEntry(L"gpu-venid", L""));
-  g_custom_entries->push_back(
-      google_breakpad::CustomInfoEntry(L"gpu-devid", L""));
-  g_custom_entries->push_back(
-      google_breakpad::CustomInfoEntry(L"gpu-driver", L""));
-  g_custom_entries->push_back(
-      google_breakpad::CustomInfoEntry(L"gpu-psver", L""));
-  g_custom_entries->push_back(
-      google_breakpad::CustomInfoEntry(L"gpu-vsver", L""));
+  static const wchar_t* const kGpuEntries[] = {
+    L"gpu-venid",
+    L"gpu-devid",
+    L"gpu-driver",
+    L"gpu-psver",
+    L"gpu-vsver",
+  };
+  for (size_t i = 0; i < arraysize(kGpuEntries); ++i) {
+    g_custom_entries->push_back(
+        google_breakpad::CustomInfoEntry(kGpuEntries[i], L""));
+  }
+
+  // Add empty values for the prn_info-*. We'll put the actual values when we
+  // collect them at this location.
+  g_printer_info_offset = g_custom_entries->size();
+  for (size_t i = 0; i < kMaxReportedPrinterRecords; ++i) {
+    g_custom_entries->push_back(
+        google_breakpad::CustomInfoEntry(
+            base::StringPrintf(L"prn-info-%d", i + 1).c_str(), L""));
+  }
 
   // Read the id from registry. If reporting has never been enabled
   // the result will be empty string. Its OK since when user enables reporting
@@ -325,13 +338,6 @@ google_breakpad::CustomClientInfo* GetCustomInfo(const std::wstring& dll_path,
 
   return &custom_client_info;
 }
-
-// Contains the information needed by the worker thread.
-struct CrashReporterInfo {
-  google_breakpad::CustomClientInfo* custom_info;
-  std::wstring dll_path;
-  std::wstring process_type;
-};
 
 // This callback is used when we want to get a dump without crashing the
 // process.
@@ -492,21 +498,34 @@ extern "C" void __declspec(dllexport) __cdecl SetGpuInfo(
   if (!g_custom_entries)
     return;
 
-  base::wcslcpy((*g_custom_entries)[g_gpu_info_offset].value,
-                vendor_id,
+  const wchar_t* info[] = {
+    vendor_id,
+    device_id,
+    driver_version,
+    pixel_shader_version,
+    vertex_shader_version
+  };
+
+  for (size_t i = 0; i < arraysize(info); ++i) {
+    base::wcslcpy((*g_custom_entries)[g_gpu_info_offset + i].value,
+                  info[i],
+                  google_breakpad::CustomInfoEntry::kValueMaxLength);
+  }
+}
+
+extern "C" void __declspec(dllexport) __cdecl SetPrinterInfo(
+    const wchar_t* printer_info) {
+  if (!g_custom_entries)
+    return;
+  std::vector<string16> info;
+  base::SplitString(printer_info, L';', &info);
+  DCHECK_LE(info.size(), kMaxReportedPrinterRecords);
+  info.resize(kMaxReportedPrinterRecords);
+  for (size_t i = 0; i < info.size(); ++i) {
+    base::wcslcpy((*g_custom_entries)[g_printer_info_offset + i].value,
+                info[i].c_str(),
                 google_breakpad::CustomInfoEntry::kValueMaxLength);
-  base::wcslcpy((*g_custom_entries)[g_gpu_info_offset+1].value,
-                device_id,
-                google_breakpad::CustomInfoEntry::kValueMaxLength);
-  base::wcslcpy((*g_custom_entries)[g_gpu_info_offset+2].value,
-                driver_version,
-                google_breakpad::CustomInfoEntry::kValueMaxLength);
-  base::wcslcpy((*g_custom_entries)[g_gpu_info_offset+3].value,
-                pixel_shader_version,
-                google_breakpad::CustomInfoEntry::kValueMaxLength);
-  base::wcslcpy((*g_custom_entries)[g_gpu_info_offset+4].value,
-                vertex_shader_version,
-                google_breakpad::CustomInfoEntry::kValueMaxLength);
+  }
 }
 
 extern "C" void __declspec(dllexport) __cdecl SetNumberOfViews(
@@ -525,7 +544,8 @@ bool WrapMessageBoxWithSEH(const wchar_t* text, const wchar_t* caption,
     *exit_now = (IDOK != ::MessageBoxW(NULL, text, caption, flags));
   } __except(EXCEPTION_EXECUTE_HANDLER) {
     // Its not safe to continue executing, exit silently here.
-    ::ExitProcess(chrome::RESULT_CODE_RESPAWN_FAILED);
+    ::TerminateProcess(::GetCurrentProcess(),
+                       chrome::RESULT_CODE_RESPAWN_FAILED);
   }
 
   return true;
@@ -575,7 +595,7 @@ extern "C" int __declspec(dllexport) CrashForException(
     EXCEPTION_POINTERS* info) {
   if (g_breakpad) {
     g_breakpad->WriteMinidumpForException(info);
-    ::ExitProcess(content::RESULT_CODE_KILLED);
+    ::TerminateProcess(::GetCurrentProcess(), content::RESULT_CODE_KILLED);
   }
   return EXCEPTION_CONTINUE_SEARCH;
 }
@@ -605,32 +625,11 @@ static bool MetricsReportingControlledByPolicy(bool* result) {
   return false;
 }
 
-static DWORD __stdcall InitCrashReporterThread(void* param) {
-  scoped_ptr<CrashReporterInfo> info(
-      reinterpret_cast<CrashReporterInfo*>(param));
-
-  bool is_per_user_install =
-      InstallUtil::IsPerUserInstall(info->dll_path.c_str());
-
-  std::wstring channel_string;
-  GoogleUpdateSettings::GetChromeChannelAndModifiers(!is_per_user_install,
-                                                     &channel_string);
-
-  // GetCustomInfo can take a few milliseconds to get the file information, so
-  // we do it here so it can run in a separate thread.
-  info->custom_info = GetCustomInfo(info->dll_path, info->process_type,
-                                    channel_string);
-
-  google_breakpad::ExceptionHandler::MinidumpCallback callback = NULL;
-  LPTOP_LEVEL_EXCEPTION_FILTER default_filter = NULL;
-  // We install the post-dump callback only for the browser and service
-  // processes. It spawns a new browser/service process.
-  if (info->process_type == L"browser") {
-    callback = &DumpDoneCallback;
-    default_filter = &ChromeExceptionFilter;
-  } else if (info->process_type == L"service") {
-    callback = &DumpDoneCallback;
-    default_filter = &ServiceExceptionFilter;
+static void InitPipeNameEnvVar(bool is_per_user_install) {
+  scoped_ptr<base::Environment> env(base::Environment::Create());
+  if (env->HasVar(kPipeNameVar)) {
+    // The Breakpad pipe name is already configured: nothing to do.
+    return;
   }
 
   // Check whether configuration management controls crash reporting.
@@ -647,15 +646,7 @@ static DWORD __stdcall InitCrashReporterThread(void* param) {
   std::wstring pipe_name;
   if (use_crash_service) {
     // Crash reporting is done by crash_service.exe.
-    const wchar_t* var_name = L"CHROME_BREAKPAD_PIPE_NAME";
-    DWORD value_length = ::GetEnvironmentVariableW(var_name, NULL, 0);
-    if (value_length == 0) {
-      pipe_name = kChromePipeName;
-    } else {
-      scoped_array<wchar_t> value(new wchar_t[value_length]);
-      ::GetEnvironmentVariableW(var_name, value.get(), value_length);
-      pipe_name = value.get();
-    }
+    pipe_name = kChromePipeName;
   } else {
     // We want to use the Google Update crash reporting. We need to check if the
     // user allows it first (in case the administrator didn't already decide
@@ -664,12 +655,7 @@ static DWORD __stdcall InitCrashReporterThread(void* param) {
       crash_reporting_enabled = GoogleUpdateSettings::GetCollectStatsConsent();
 
     if (!crash_reporting_enabled) {
-      // Configuration managed or the user did not allow Google Update to send
-      // crashes, we need to use our default crash handler instead, but only
-      // for the browser/service processes.
-      if (default_filter)
-        InitDefaultCrashCallback(default_filter);
-      return 0;
+      return;
     }
 
     // Build the pipe name. It can be either:
@@ -678,9 +664,7 @@ static DWORD __stdcall InitCrashReporterThread(void* param) {
     std::wstring user_sid;
     if (is_per_user_install) {
       if (!base::win::GetUserSidString(&user_sid)) {
-        if (default_filter)
-          InitDefaultCrashCallback(default_filter);
-        return -1;
+        return;
       }
     } else {
       user_sid = kSystemPrincipalSid;
@@ -689,7 +673,70 @@ static DWORD __stdcall InitCrashReporterThread(void* param) {
     pipe_name = kGoogleUpdatePipeName;
     pipe_name += user_sid;
   }
+  env->SetVar(kPipeNameVar, WideToASCII(pipe_name));
+}
+
+void InitCrashReporter() {
+  const CommandLine& command = *CommandLine::ForCurrentProcess();
+  if (command.HasSwitch(switches::kDisableBreakpad))
+    return;
+
+  // Disable the message box for assertions.
+  _CrtSetReportMode(_CRT_ASSERT, 0);
+
+  std::wstring process_type =
+    command.GetSwitchValueNative(switches::kProcessType);
+  if (process_type.empty())
+    process_type = L"browser";
+
+  wchar_t exe_path[MAX_PATH];
+  exe_path[0] = 0;
+  GetModuleFileNameW(NULL, exe_path, MAX_PATH);
+
+  bool is_per_user_install = InstallUtil::IsPerUserInstall(exe_path);
+
+  std::wstring channel_string;
+  GoogleUpdateSettings::GetChromeChannelAndModifiers(!is_per_user_install,
+                                                     &channel_string);
+
+  google_breakpad::CustomClientInfo* custom_info =
+    GetCustomInfo(exe_path, process_type, channel_string);
+
+  google_breakpad::ExceptionHandler::MinidumpCallback callback = NULL;
+  LPTOP_LEVEL_EXCEPTION_FILTER default_filter = NULL;
+  // We install the post-dump callback only for the browser and service
+  // processes. It spawns a new browser/service process.
+  if (process_type == L"browser") {
+    callback = &DumpDoneCallback;
+    default_filter = &ChromeExceptionFilter;
+  } else if (process_type == L"service") {
+    callback = &DumpDoneCallback;
+    default_filter = &ServiceExceptionFilter;
+  }
+
+  if (process_type == L"browser") {
+    InitPipeNameEnvVar(is_per_user_install);
+  }
+
+  scoped_ptr<base::Environment> env(base::Environment::Create());
+  std::string pipe_name_ascii;
+  if (!env->GetVar(kPipeNameVar, &pipe_name_ascii)) {
+    // Breakpad is not enabled.  Configuration is managed or the user
+    // did not allow Google Update to send crashes.  We need to use
+    // our default crash handler instead, but only for the
+    // browser/service processes.
+    if (default_filter)
+      InitDefaultCrashCallback(default_filter);
+    return;
+  }
+  std::wstring pipe_name = ASCIIToWide(pipe_name_ascii);
+
 #ifdef _WIN64
+  // The protocol for connecting to the out-of-process Breakpad crash
+  // reporter is different for x86-32 and x86-64: the message sizes
+  // are different because the message struct contains a pointer.  As
+  // a result, there are two different named pipes to connect to.  The
+  // 64-bit one is distinguished with an "-x64" suffix.
   pipe_name += L"-x64";
 #endif
 
@@ -714,7 +761,7 @@ static DWORD __stdcall InitCrashReporterThread(void* param) {
   g_breakpad = new google_breakpad::ExceptionHandler(temp_dir, &FilterCallback,
                    callback, NULL,
                    google_breakpad::ExceptionHandler::HANDLER_ALL,
-                   dump_type, pipe_name.c_str(), info->custom_info);
+                   dump_type, pipe_name.c_str(), custom_info);
 
   // Now initialize the non crash dump handler.
   g_dumphandler_no_crash = new google_breakpad::ExceptionHandler(temp_dir,
@@ -725,56 +772,16 @@ static DWORD __stdcall InitCrashReporterThread(void* param) {
       // |handler_stack_| in |ExceptionHandler| which is a list of exception
       // handlers.
       google_breakpad::ExceptionHandler::HANDLER_NONE,
-      dump_type, pipe_name.c_str(), info->custom_info);
+      dump_type, pipe_name.c_str(), custom_info);
 
-  if (!g_breakpad->IsOutOfProcess()) {
-    // The out-of-process handler is unavailable.
-    scoped_ptr<base::Environment> env(base::Environment::Create());
-    env->SetVar(env_vars::kNoOOBreakpad, WideToUTF8(info->process_type));
-  } else {
+  if (g_breakpad->IsOutOfProcess()) {
     // Tells breakpad to handle breakpoint and single step exceptions.
     // This might break JIT debuggers, but at least it will always
     // generate a crashdump for these exceptions.
     g_breakpad->set_handle_debug_exceptions(true);
   }
-
-  return 0;
 }
 
 void InitDefaultCrashCallback(LPTOP_LEVEL_EXCEPTION_FILTER filter) {
   previous_filter = SetUnhandledExceptionFilter(filter);
-}
-
-void InitCrashReporterWithDllPath(const std::wstring& dll_path) {
-  const CommandLine& command = *CommandLine::ForCurrentProcess();
-  if (!command.HasSwitch(switches::kDisableBreakpad)) {
-    // Disable the message box for assertions.
-    _CrtSetReportMode(_CRT_ASSERT, 0);
-
-    // Query the custom_info now because if we do it in the thread it's going to
-    // fail in the sandbox. The thread will delete this object.
-    CrashReporterInfo* info(new CrashReporterInfo);
-    info->process_type = command.GetSwitchValueNative(switches::kProcessType);
-    if (info->process_type.empty())
-      info->process_type = L"browser";
-
-    info->dll_path = dll_path;
-
-    // If this is not the browser, we can't be sure that we will be able to
-    // initialize the crash_handler in another thread, so we run it right away.
-    // This is important to keep the thread for the browser process because
-    // it may take some times to initialize the crash_service process.  We use
-    // the Windows worker pool to make better reuse of the thread.
-    if (info->process_type != L"browser") {
-      InitCrashReporterThread(info);
-    } else {
-      if (QueueUserWorkItem(
-              &InitCrashReporterThread,
-              info,
-              WT_EXECUTELONGFUNCTION) == 0) {
-        // We failed to queue to the worker pool, initialize in this thread.
-        InitCrashReporterThread(info);
-      }
-    }
-  }
 }

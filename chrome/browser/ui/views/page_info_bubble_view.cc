@@ -13,13 +13,13 @@
 #include "chrome/browser/ui/views/toolbar_view.h"
 #include "chrome/browser/ui/views/window.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/cert_store.h"
-#include "content/public/browser/ssl_status.h"
+#include "content/public/browser/cert_store.h"
+#include "content/public/common/ssl_status.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
+#include "net/base/x509_certificate.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/canvas.h"
-#include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/image/image.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
@@ -117,7 +117,7 @@ PageInfoBubbleView::PageInfoBubbleView(views::View* anchor_view,
 
   if (cert_id_ > 0) {
     scoped_refptr<net::X509Certificate> cert;
-    CertStore::GetInstance()->RetrieveCert(cert_id_, &cert);
+    content::CertStore::GetInstance()->RetrieveCert(cert_id_, &cert);
     // When running with fake certificate (Chrome Frame), we have no os
     // certificate, so there is no cert to show. Don't bother showing the cert
     // info link in that case.
@@ -196,7 +196,7 @@ void PageInfoBubbleView::LayoutSections() {
     if (count == 1 && info.type == PageInfoModel::SECTION_INFO_INTERNAL_PAGE)
       only_internal_section = true;
     layout->StartRow(0, 0);
-    const SkBitmap* icon = *model_.GetIconImage(info.icon_id);
+    const SkBitmap* icon = model_.GetIconImage(info.icon_id)->ToSkBitmap();
     Section* section = new Section(this, info, icon, cert_id_ > 0);
     if (info.type == PageInfoModel::SECTION_INFO_FIRST_VISIT) {
       // This section is animated into view, so we need to set the height of it
@@ -244,7 +244,7 @@ gfx::Size PageInfoBubbleView::GetPreferredSize() {
   int count = model_.GetSectionCount();
   for (int i = 0; i < count; ++i) {
     PageInfoModel::SectionInfo info = model_.GetSectionInfo(i);
-    const SkBitmap* icon = *model_.GetIconImage(info.icon_id);
+    const SkBitmap* icon = model_.GetIconImage(info.icon_id)->ToSkBitmap();
     Section section(this, info, icon, cert_id_ > 0);
     size.Enlarge(0, section.GetHeightForWidth(size.width()));
   }

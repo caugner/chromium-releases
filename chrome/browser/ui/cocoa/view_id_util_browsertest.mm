@@ -73,6 +73,10 @@ class ViewIDTest : public InProcessBrowserTest {
         continue;
       }
 
+      // Chrome To Mobile is disabled by default.
+      if (i == VIEW_ID_CHROME_TO_MOBILE_BUTTON)
+        continue;
+
       CheckViewID(static_cast<ViewID>(i), true);
     }
 
@@ -90,7 +94,7 @@ IN_PROC_BROWSER_TEST_F(ViewIDTest, Basic) {
 }
 
 // Flaky on Mac: http://crbug.com/90557.
-IN_PROC_BROWSER_TEST_F(ViewIDTest, FLAKY_Fullscreen) {
+IN_PROC_BROWSER_TEST_F(ViewIDTest, DISABLED_Fullscreen) {
   browser()->window()->EnterFullscreen(
       GURL(), FEB_TYPE_BROWSER_FULLSCREEN_EXIT_INSTRUCTION);
   ASSERT_NO_FATAL_FAILURE(DoTest());

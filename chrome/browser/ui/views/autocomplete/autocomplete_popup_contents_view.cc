@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,6 +16,7 @@
 #include "chrome/browser/instant/instant_confirm_dialog.h"
 #include "chrome/browser/instant/promo_counter.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/browser/ui/views/autocomplete/autocomplete_result_view.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
@@ -26,7 +27,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/theme_provider.h"
-#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/canvas.h"
 #include "ui/gfx/insets.h"
 #include "ui/gfx/path.h"
 #include "ui/views/bubble/bubble_border.h"
@@ -44,7 +45,7 @@
 #include "ui/views/widget/native_widget_win.h"
 #endif
 #endif
-#if defined(USE_AURA)
+#if defined(USE_ASH)
 #include "ash/wm/window_animations.h"
 #endif
 
@@ -52,6 +53,7 @@ namespace {
 
 const SkAlpha kGlassPopupAlpha = 240;
 const SkAlpha kOpaquePopupAlpha = 255;
+
 // The size delta between the font used for the edit and the result rows. Passed
 // to gfx::Font::DeriveFont.
 #if defined(OS_CHROMEOS)
@@ -91,7 +93,7 @@ class OptInButtonBorder : public views::Border {
     } else {
       painter = border_painter_.get();
     }
-    painter->Paint(view.width(), view.height(), canvas);
+    painter->Paint(canvas, view.size());
   }
 
   virtual void GetInsets(gfx::Insets* insets) const {
@@ -102,7 +104,7 @@ class OptInButtonBorder : public views::Border {
   // Creates 9 patch painter from the image with the id |image_id|.
   views::Painter* CreatePainter(int image_id) {
     SkBitmap* image =
-        ResourceBundle::GetSharedInstance().GetBitmapNamed(image_id);
+        ui::ResourceBundle::GetSharedInstance().GetBitmapNamed(image_id);
     int w = image->width() / 2;
     if (image->width() % 2 == 0)
       w--;
@@ -176,14 +178,13 @@ class AutocompletePopupContentsView::InstantOptInView
   }
 
   virtual void OnPaint(gfx::Canvas* canvas) {
+    gfx::Rect paint_rect(GetLocalBounds());
+    paint_rect.Inset(kOptInBackgroundHInset, kOptInBackgroundVInset);
     canvas->Save();
-    canvas->Translate(gfx::Point(kOptInBackgroundHInset,
-                                 kOptInBackgroundVInset));
-    bg_painter_->Paint(width() - kOptInBackgroundHInset * 2,
-                       height() - kOptInBackgroundVInset * 2, canvas);
-    canvas->DrawRect(gfx::Rect(0, 0, width() - kOptInBackgroundHInset * 2,
-                               height() - kOptInBackgroundVInset * 2),
-                     ResourceBundle::toolbar_separator_color);
+    canvas->Translate(paint_rect.origin());
+    bg_painter_->Paint(canvas, paint_rect.size());
+    canvas->DrawRect(gfx::Rect(paint_rect.size()),
+        ThemeService::GetDefaultColor(ThemeService::COLOR_TOOLBAR_SEPARATOR));
     canvas->Restore();
   }
 
@@ -235,6 +236,13 @@ AutocompletePopupContentsView::AutocompletePopupContentsView(
   set_border(bubble_border);
   // The contents is owned by the LocationBarView.
   set_parent_owned(false);
+
+  for (size_t i = 0; i < AutocompleteResult::kMaxMatches; ++i) {
+    AutocompleteResultView* result_view =
+        CreateResultView(this, i, result_font_, result_bold_font_);
+    result_view->SetVisible(false);
+    AddChildViewAt(result_view, static_cast<int>(i));
+  }
 }
 
 AutocompletePopupContentsView::~AutocompletePopupContentsView() {
@@ -280,7 +288,14 @@ bool AutocompletePopupContentsView::IsOpen() const {
 }
 
 void AutocompletePopupContentsView::InvalidateLine(size_t line) {
-  child_at(static_cast<int>(line))->SchedulePaint();
+  AutocompleteResultView* result = static_cast<AutocompleteResultView*>(
+      child_at(static_cast<int>(line)));
+  result->Invalidate();
+
+  if (HasMatchAt(line) && GetMatchAtIndex(line).associated_keyword.get()) {
+    result->ShowKeyword(IsSelectedIndex(line) &&
+        model_->selected_line_state() == AutocompletePopupModel::KEYWORD);
+  }
 }
 
 void AutocompletePopupContentsView::UpdatePopupAppearance() {
@@ -288,6 +303,7 @@ void AutocompletePopupContentsView::UpdatePopupAppearance() {
     // No matches, close any existing popup.
     if (popup_ != NULL) {
       size_animation_.Stop();
+
       // NOTE: Do NOT use CloseNow() here, as we may be deep in a callstack
       // triggered by the popup receiving a message (e.g. LBUTTONUP), and
       // destroying the popup would cause us to read garbage when we unwind back
@@ -305,19 +321,14 @@ void AutocompletePopupContentsView::UpdatePopupAppearance() {
     DCHECK_GT(child_rv_count, 0u);
     child_rv_count--;
   }
-  for (size_t i = 0; i < model_->result().size(); ++i) {
-    AutocompleteResultView* result_view;
-    if (i >= child_rv_count) {
-      result_view =
-          CreateResultView(this, i, result_font_, result_bold_font_);
-      AddChildViewAt(result_view, static_cast<int>(i));
-    } else {
-      result_view = static_cast<AutocompleteResultView*>(child_at(i));
-      result_view->SetVisible(true);
-    }
-    result_view->SetMatch(GetMatchAtIndex(i));
+  const size_t result_size = model_->result().size();
+  for (size_t i = 0; i < result_size; ++i) {
+    AutocompleteResultView* view = static_cast<AutocompleteResultView*>(
+        child_at(i));
+    view->SetMatch(GetMatchAtIndex(i));
+    view->SetVisible(true);
   }
-  for (size_t i = model_->result().size(); i < child_rv_count; ++i)
+  for (size_t i = result_size; i < child_rv_count; ++i)
     child_at(i)->SetVisible(false);
 
   PromoCounter* counter = profile_->GetInstantPromoCounter();
@@ -349,8 +360,7 @@ void AutocompletePopupContentsView::UpdatePopupAppearance() {
     params.parent_widget = location_bar_->GetWidget();
     params.bounds = GetPopupBounds();
     popup_->Init(params);
-#if defined(USE_AURA)
-    // TODO(beng): This should be if defined(USE_ASH)
+#if defined(USE_ASH)
     ash::SetWindowVisibilityAnimationType(
         popup_->GetNativeView(),
         ash::WINDOW_VISIBILITY_ANIMATION_TYPE_VERTICAL);
@@ -395,11 +405,11 @@ void AutocompletePopupContentsView::OnDragCanceled() {
 // AutocompletePopupContentsView, AutocompleteResultViewModel implementation:
 
 bool AutocompletePopupContentsView::IsSelectedIndex(size_t index) const {
-  return HasMatchAt(index) ? index == model_->selected_line() : false;
+  return index == model_->selected_line();
 }
 
 bool AutocompletePopupContentsView::IsHoveredIndex(size_t index) const {
-  return HasMatchAt(index) ? index == model_->hovered_line() : false;
+  return index == model_->hovered_line();
 }
 
 const SkBitmap* AutocompletePopupContentsView::GetIconIfExtensionMatch(
@@ -435,7 +445,7 @@ void AutocompletePopupContentsView::Layout() {
 
 views::View* AutocompletePopupContentsView::GetEventHandlerForPoint(
     const gfx::Point& point) {
-  // If there is no opt in view, then we want all mouse events. Otherwise let
+  // If there is no opt in view then we want all mouse events. Otherwise, let
   // any descendants of the opt-in view get mouse events.
   if (!opt_in_view_)
     return this;
@@ -506,7 +516,7 @@ void AutocompletePopupContentsView::OnMouseExited(
 ////////////////////////////////////////////////////////////////////////////////
 // AutocompletePopupContentsView, protected:
 
-void AutocompletePopupContentsView::PaintResultViews(gfx::CanvasSkia* canvas) {
+void AutocompletePopupContentsView::PaintResultViews(gfx::Canvas* canvas) {
   canvas->sk_canvas()->drawColor(AutocompleteResultView::GetColor(
       AutocompleteResultView::NORMAL, AutocompleteResultView::BACKGROUND));
   View::PaintChildren(canvas);
@@ -543,7 +553,7 @@ void AutocompletePopupContentsView::OnPaint(gfx::Canvas* canvas) {
   // Instead, we paint all our children into a second canvas and use that as a
   // shader to fill a path representing the round-rect clipping region. This
   // yields a nice anti-aliased edge.
-  gfx::CanvasSkia contents_canvas(size(), true);
+  gfx::Canvas contents_canvas(size(), true);
   PaintResultViews(&contents_canvas);
 
   // We want the contents background to be slightly transparent so we can see
@@ -565,7 +575,7 @@ void AutocompletePopupContentsView::OnPaint(gfx::Canvas* canvas) {
 
   gfx::Path path;
   MakeContentsPath(&path, GetContentsBounds());
-  canvas->GetSkCanvas()->drawPath(path, paint);
+  canvas->sk_canvas()->drawPath(path, paint);
 
   // Now we paint the border, so it will be alpha-blended atop the contents.
   // This looks slightly better in the corners than drawing the contents atop
@@ -631,7 +641,7 @@ void AutocompletePopupContentsView::MakeCanvasTransparent(
   // Allow the window blur effect to show through the popup background.
   SkAlpha alpha = GetThemeProvider()->ShouldUseNativeFrame() ?
       kGlassPopupAlpha : kOpaquePopupAlpha;
-  canvas->GetSkCanvas()->drawColor(SkColorSetA(
+  canvas->sk_canvas()->drawColor(SkColorSetA(
       AutocompleteResultView::GetColor(AutocompleteResultView::NORMAL,
       AutocompleteResultView::BACKGROUND), alpha), SkXfermode::kDstIn_Mode);
 }
@@ -646,10 +656,7 @@ void AutocompletePopupContentsView::OpenIndex(
   // extension, |match| and its contents.  So copy the relevant match out to
   // make sure it stays alive until the call completes.
   AutocompleteMatch match = model_->result().match_at(index);
-  string16 keyword;
-  const bool is_keyword_hint = model_->GetKeywordForMatch(match, &keyword);
-  omnibox_view_->OpenMatch(match, disposition, GURL(), index,
-                         is_keyword_hint ? string16() : keyword);
+  omnibox_view_->OpenMatch(match, disposition, GURL(), index);
 }
 
 size_t AutocompletePopupContentsView::GetIndexForPoint(

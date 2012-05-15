@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,12 +10,13 @@
 #include "base/mac/mac_util.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
-#include "content/browser/renderer_host/render_widget_host.h"
-#include "content/browser/renderer_host/render_widget_host_view.h"
+#include "content/browser/renderer_host/render_widget_host_impl.h"
+#include "content/public/browser/render_widget_host_view.h"
 #include "skia/ext/platform_canvas.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "ui/gfx/rect.h"
+#include "ui/gfx/scoped_cg_context_save_gstate_mac.h"
 #include "ui/gfx/surface/transport_dib.h"
 
 // Mac Backing Stores:
@@ -25,7 +26,7 @@
 // allows acclerated drawing into the layer and lets scrolling and such happen
 // all or mostly on the GPU, which is good for performance.
 
-BackingStoreMac::BackingStoreMac(RenderWidgetHost* widget,
+BackingStoreMac::BackingStoreMac(content::RenderWidgetHost* widget,
                                  const gfx::Size& size)
     : BackingStore(widget, size) {
   cg_layer_.reset(CreateCGLayer());
@@ -191,11 +192,24 @@ void BackingStoreMac::ScrollBackingStore(int dx, int dy,
   }
 }
 
+void BackingStoreMac::CopyFromBackingStoreToCGContext(const CGRect& dest_rect,
+                                                      CGContextRef context) {
+  gfx::ScopedCGContextSaveGState CGContextSaveGState(context);
+  CGContextSetInterpolationQuality(context, kCGInterpolationHigh);
+  if (cg_layer_) {
+    CGContextDrawLayerInRect(context, dest_rect, cg_layer_);
+  } else {
+    base::mac::ScopedCFTypeRef<CGImageRef> image(
+        CGBitmapContextCreateImage(cg_bitmap_));
+    CGContextDrawImage(context, dest_rect, image);
+  }
+}
+
 CGLayerRef BackingStoreMac::CreateCGLayer() {
   // The CGLayer should be optimized for drawing into the containing window,
   // so extract a CGContext corresponding to the window to be passed to
   // CGLayerCreateWithContext.
-  NSWindow* window = [render_widget_host()->view()->GetNativeView() window];
+  NSWindow* window = [render_widget_host()->GetView()->GetNativeView() window];
   if ([window windowNumber] <= 0) {
     // This catches a nil |window|, as well as windows that exist but that
     // aren't yet connected to WindowServer.

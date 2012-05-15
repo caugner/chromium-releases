@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include <string>
 
+#include "base/command_line.h"
 #include "base/memory/singleton.h"
 #include "base/threading/thread_restrictions.h"
 #include "chrome/browser/io_thread.h"
@@ -18,6 +19,7 @@
 #include "grit/ui_resources.h"
 #include "net/base/mime_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/base/ui_base_switches.h"
 
 namespace {
 
@@ -33,8 +35,6 @@ int PathToIDR(const std::string& path) {
     idr = IDR_FOLDER_OPEN_RTL;
   } else if (path == "ui/resources/throbber.png") {
     idr = IDR_THROBBER;
-  } else if (path == "fonts/open_sans.woff") {
-    idr = IDR_THIRD_PARTY_FONTS_OPEN_SANS;
   } else {
     // The name of the files in the grd list are prefixed with the following
     // directory:
@@ -46,6 +46,12 @@ int PathToIDR(const std::string& path) {
         idr = kSharedResources[i].value;
         break;
       }
+    }
+
+    if (idr == IDR_SHARED_CSS_CHROME2 &&
+        CommandLine::ForCurrentProcess()->HasSwitch(
+            switches::kTouchOptimizedUI)) {
+      idr = IDR_SHARED_CSS_CHROME2_TOUCH;
     }
   }
 
@@ -68,6 +74,7 @@ void SharedResourcesDataSource::StartDataRequest(const std::string& path,
   DCHECK_NE(-1, idr) << " path: " << path;
   const ResourceBundle& rb = ResourceBundle::GetSharedInstance();
   scoped_refptr<RefCountedStaticMemory> bytes(rb.LoadDataResourceBytes(idr));
+
   SendResponse(request_id, bytes);
 }
 

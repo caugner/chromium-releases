@@ -19,7 +19,6 @@
 
 class ChromeRenderProcessObserver;
 class ContentSettingsObserver;
-class DomAutomationController;
 class ExtensionDispatcher;
 class ExternalHostBindings;
 class SkBitmap;
@@ -137,7 +136,6 @@ class ChromeRenderViewObserver : public content::RenderViewObserver,
   void OnStartFrameSniffer(const string16& frame_name);
   void OnGetFPS();
   void OnAddStrictSecurityHost(const std::string& host);
-  void OnSetAsInterstitial();
 
   // Captures the thumbnail and text contents for indexing for the given load
   // ID. If the view's load ID is different than the parameter, this call is
@@ -160,10 +158,6 @@ class ChromeRenderViewObserver : public content::RenderViewObserver,
   // Capture a snapshot of a view.  This is used to allow an extension
   // to get a snapshot of a tab using chrome.tabs.captureVisibleTab().
   bool CaptureSnapshot(WebKit::WebView* view, SkBitmap* snapshot);
-
-  // Exposes the DOMAutomationController object that allows JS to send
-  // information to the browser process.
-  void BindDOMAutomationController(WebKit::WebFrame* webframe);
 
   ExternalHostBindings* GetExternalHostBindings();
 
@@ -212,10 +206,6 @@ class ChromeRenderViewObserver : public content::RenderViewObserver,
   bool allow_displaying_insecure_content_;
   bool allow_running_insecure_content_;
   std::set<std::string> strict_security_hosts_;
-
-  // Allows JS to access DOM automation. The JS object is only exposed when the
-  // DOM automation bindings are enabled.
-  scoped_ptr<DomAutomationController> dom_automation_controller_;
 
   // External host exposed through automation controller.
   scoped_ptr<ExternalHostBindings> external_host_bindings_;

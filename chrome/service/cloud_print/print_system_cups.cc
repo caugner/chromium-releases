@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,6 +25,7 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
+#include "chrome/common/child_process_logging.h"
 #include "chrome/service/cloud_print/cloud_print_consts.h"
 #include "chrome/service/cloud_print/cloud_print_helpers.h"
 #include "googleurl/src/gurl.h"
@@ -49,10 +50,10 @@ const char kCUPSNotifyDelete[] = "notify_delete";
 const int kDefaultIPPServerPort = 631;
 
 // Time interval to check for printer's updates.
-const int kCheckForPrinterUpdatesMs = 5*60*1000;
+const int kCheckForPrinterUpdatesMinutes = 5;
 
 // Job update timeout
-const int kJobUpdateTimeoutMs = 5000;
+const int kJobUpdateTimeoutSeconds = 5;
 
 // Job id for dry run (it should not affect CUPS job ids, since 0 job-id is
 // invalid in CUPS.
@@ -115,7 +116,7 @@ class PrintSystemCUPS : public PrintSystem {
       const std::string& printer_name,
       printing::PrinterCapsAndDefaults* printer_info);
 
-  int GetUpdateTimeoutMs() const {
+  base::TimeDelta GetUpdateTimeout() const {
     return update_timeout_;
   }
 
@@ -159,7 +160,7 @@ class PrintSystemCUPS : public PrintSystem {
   typedef std::list<PrintServerInfoCUPS> PrintServerList;
   PrintServerList print_servers_;
 
-  int update_timeout_;
+  base::TimeDelta update_timeout_;
   bool initialized_;
   bool printer_enum_succeeded_;
   bool notify_delete_;
@@ -184,7 +185,7 @@ class PrintServerWatcherCUPS
     MessageLoop::current()->PostDelayedTask(
         FROM_HERE,
         base::Bind(&PrintServerWatcherCUPS::CheckForUpdates, this),
-        print_system_->GetUpdateTimeoutMs());
+        print_system_->GetUpdateTimeout());
     return true;
   }
 
@@ -205,7 +206,7 @@ class PrintServerWatcherCUPS
     MessageLoop::current()->PostDelayedTask(
         FROM_HERE,
         base::Bind(&PrintServerWatcherCUPS::CheckForUpdates, this),
-        print_system_->GetUpdateTimeoutMs());
+        print_system_->GetUpdateTimeout());
   }
 
  private:
@@ -240,8 +241,8 @@ class PrinterWatcherCUPS
   PrinterWatcherCUPS(PrintSystemCUPS* print_system,
                      const std::string& printer_name)
       : printer_name_(printer_name),
-    delegate_(NULL),
-    print_system_(print_system) {
+        delegate_(NULL),
+        print_system_(print_system) {
   }
 
   ~PrinterWatcherCUPS() {
@@ -251,6 +252,10 @@ class PrinterWatcherCUPS
   // PrintSystem::PrinterWatcher implementation.
   virtual bool StartWatching(
       PrintSystem::PrinterWatcher::Delegate* delegate) OVERRIDE{
+    scoped_refptr<printing::PrintBackend> print_backend(
+        printing::PrintBackend::CreateInstance(NULL));
+    child_process_logging::ScopedPrinterInfoSetter prn_info(
+        print_backend->GetPrinterDriverInfo(printer_name_));
     if (delegate_ != NULL)
       StopWatching();
     delegate_ = delegate;
@@ -259,13 +264,13 @@ class PrinterWatcherCUPS
     MessageLoop::current()->PostDelayedTask(
         FROM_HERE,
         base::Bind(&PrinterWatcherCUPS::JobStatusUpdate, this),
-        kJobUpdateTimeoutMs);
+        base::TimeDelta::FromSeconds(kJobUpdateTimeoutSeconds));
     // Schedule next printer check.
     // TODO(gene): Randomize time for the next printer update.
     MessageLoop::current()->PostDelayedTask(
         FROM_HERE,
         base::Bind(&PrinterWatcherCUPS::PrinterUpdate, this),
-        print_system_->GetUpdateTimeoutMs());
+        print_system_->GetUpdateTimeout());
     return true;
   }
 
@@ -290,7 +295,7 @@ class PrinterWatcherCUPS
     MessageLoop::current()->PostDelayedTask(
         FROM_HERE,
         base::Bind(&PrinterWatcherCUPS::JobStatusUpdate, this),
-        kJobUpdateTimeoutMs);
+        base::TimeDelta::FromSeconds(kJobUpdateTimeoutSeconds));
   }
 
   void PrinterUpdate() {
@@ -312,7 +317,7 @@ class PrinterWatcherCUPS
     MessageLoop::current()->PostDelayedTask(
         FROM_HERE,
         base::Bind(&PrinterWatcherCUPS::PrinterUpdate, this),
-        print_system_->GetUpdateTimeoutMs());
+        print_system_->GetUpdateTimeout());
   }
 
  private:
@@ -340,7 +345,6 @@ class PrinterWatcherCUPS
 
     return base::MD5String(to_hash);
   }
-
   std::string printer_name_;
   PrintSystem::PrinterWatcher::Delegate* delegate_;
   scoped_refptr<PrintSystemCUPS> print_system_;
@@ -390,14 +394,15 @@ class JobSpoolerCUPS : public PrintSystem::JobSpooler {
 };
 
 PrintSystemCUPS::PrintSystemCUPS(const DictionaryValue* print_system_settings)
-    : update_timeout_(kCheckForPrinterUpdatesMs),
+    : update_timeout_(base::TimeDelta::FromMinutes(
+        kCheckForPrinterUpdatesMinutes)),
       initialized_(false),
       printer_enum_succeeded_(false),
       notify_delete_(true) {
   if (print_system_settings) {
     int timeout;
     if (print_system_settings->GetInteger(kCUPSUpdateTimeoutMs, &timeout))
-      update_timeout_ = timeout;
+      update_timeout_ = base::TimeDelta::FromMilliseconds(timeout);
 
     bool notify_delete = true;
     if (print_system_settings->GetBoolean(kCUPSNotifyDelete, &notify_delete))
@@ -469,7 +474,7 @@ void PrintSystemCUPS::UpdatePrinters() {
   // Schedule next update.
   MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
-      base::Bind(&PrintSystemCUPS::UpdatePrinters, this), GetUpdateTimeoutMs());
+      base::Bind(&PrintSystemCUPS::UpdatePrinters, this), GetUpdateTimeout());
 }
 
 PrintSystem::PrintSystemResult PrintSystemCUPS::EnumeratePrinters(
@@ -511,8 +516,9 @@ bool PrintSystemCUPS::ValidatePrintTicket(const std::string& printer_name,
 }
 
 // Print ticket on linux is a JSON string containing only one dictionary.
-bool PrintSystemCUPS::ParsePrintTicket(const std::string& print_ticket,
-                                  std::map<std::string, std::string>* options) {
+bool PrintSystemCUPS::ParsePrintTicket(
+    const std::string& print_ticket,
+    std::map<std::string, std::string>* options) {
   DCHECK(options);
   scoped_ptr<Value> ticket_value(base::JSONReader::Read(print_ticket, false));
   if (ticket_value == NULL || !ticket_value->IsType(Value::TYPE_DICTIONARY))
@@ -551,6 +557,8 @@ bool PrintSystemCUPS::GetPrinterCapsAndDefaults(
   }
 
   // TODO(gene): Retry multiple times in case of error.
+  child_process_logging::ScopedPrinterInfoSetter prn_info(
+      server_info->backend->GetPrinterDriverInfo(short_printer_name));
   if (!server_info->backend->GetPrinterCapsAndDefaults(short_printer_name,
                                                        printer_info) ) {
     return false;
@@ -572,6 +580,8 @@ bool PrintSystemCUPS::GetJobDetails(const std::string& printer_name,
   if (!server_info)
     return false;
 
+  child_process_logging::ScopedPrinterInfoSetter prn_info(
+      server_info->backend->GetPrinterDriverInfo(short_printer_name));
   cups_job_t* jobs = NULL;
   int num_jobs = GetJobs(&jobs, server_info->url,
                          short_printer_name.c_str(), 1, -1);
@@ -736,6 +746,9 @@ PlatformJobId PrintSystemCUPS::SpoolPrintJob(
       FindServerByFullName(printer_name, &short_printer_name);
   if (!server_info)
     return false;
+
+  child_process_logging::ScopedPrinterInfoSetter prn_info(
+      server_info->backend->GetPrinterDriverInfo(printer_name));
 
   // We need to store options as char* string for the duration of the
   // cupsPrintFile2 call. We'll use map here to store options, since

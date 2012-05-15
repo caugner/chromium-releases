@@ -10,19 +10,22 @@
 
 #include "base/basictypes.h"
 #include "base/callback_forward.h"
-#include "base/time.h"
+#include "base/file_path.h"
+#include "base/memory/ref_counted.h"
+#include "base/task_runner.h"
 #include "base/threading/thread_checker.h"
-#include "chrome/browser/sync/internal_api/includes/unrecoverable_error_handler.h"
+#include "base/time.h"
 #include "chrome/browser/sync/internal_api/change_record.h"
 #include "chrome/browser/sync/internal_api/configure_reason.h"
-#include "chrome/browser/sync/protocol/sync_protocol_error.h"
-#include "chrome/browser/sync/syncable/model_type.h"
-#include "chrome/browser/sync/util/weak_handle.h"
-#include "chrome/common/net/gaia/google_service_auth_error.h"
-
-class FilePath;
+#include "sync/protocol/sync_protocol_error.h"
+#include "sync/syncable/model_type.h"
+#include "sync/util/report_unrecoverable_error_function.h"
+#include "sync/util/unrecoverable_error_handler.h"
+#include "sync/util/weak_handle.h"
 
 namespace browser_sync {
+class Encryptor;
+class ExtensionsActivityMonitor;
 class JsBackend;
 class JsEventHandler;
 class ModelSafeWorkerRegistrar;
@@ -46,6 +49,13 @@ class BaseTransaction;
 class HttpPostProviderFactory;
 struct UserShare;
 
+// Used by SyncManager::OnConnectionStatusChange().
+enum ConnectionStatus {
+  CONNECTION_OK,
+  CONNECTION_AUTH_ERROR,
+  CONNECTION_SERVER_ERROR
+};
+
 // Reasons due to which browser_sync::Cryptographer might require a passphrase.
 enum PassphraseRequiredReason {
   REASON_PASSPHRASE_NOT_REQUIRED = 0,  // Initial value.
@@ -56,10 +66,6 @@ enum PassphraseRequiredReason {
   REASON_DECRYPTION = 2,               // The cryptographer requires a
                                        // passphrase for its first attempt at
                                        // decryption.
-  REASON_SET_PASSPHRASE_FAILED = 3,    // The cryptographer requires a new
-                                       // passphrase because its attempt at
-                                       // decryption with the cached passphrase
-                                       // was unsuccessful.
 };
 
 
@@ -69,15 +75,14 @@ struct SyncCredentials {
   std::string sync_token;
 };
 
-// SyncManager encapsulates syncable::DirectoryManager and serves as
-// the parent of all other objects in the sync API.  If multiple
-// threads interact with the same local sync repository (i.e. the same
-// sqlite database), they should share a single SyncManager instance.
-// The caller should typically create one SyncManager for the lifetime
-// of a user session.
+// SyncManager encapsulates syncable::Directory and serves as the parent of all
+// other objects in the sync API.  If multiple threads interact with the same
+// local sync repository (i.e. the same sqlite database), they should share a
+// single SyncManager instance.  The caller should typically create one
+// SyncManager for the lifetime of a user session.
 //
-// Unless stated otherwise, all methods of SyncManager should be
-// called on the same thread.
+// Unless stated otherwise, all methods of SyncManager should be called on the
+// same thread.
 class SyncManager {
  public:
   // SyncInternal contains the implementation of SyncManager, while abstracting
@@ -86,55 +91,34 @@ class SyncManager {
 
   // Status encapsulates detailed state about the internals of the SyncManager.
   struct Status {
-    // Summary is a distilled set of important information that the end-user may
-    // wish to be informed about (through UI, for example). Note that if a
-    // summary state requires user interaction (such as auth failures), more
-    // detailed information may be contained in additional status fields.
-    enum Summary {
-      // The internal instance is in an unrecognizable state. This should not
-      // happen.
-      INVALID = 0,
-      // Can't connect to server, but there are no pending changes in
-      // our local cache.
-      OFFLINE,
-      // Can't connect to server, and there are pending changes in our
-      // local cache.
-      OFFLINE_UNSYNCED,
-      // Connected and syncing.
-      SYNCING,
-      // Connected, no pending changes.
-      READY,
-      // Can't connect to server, and we haven't completed the initial
-      // sync yet.  So there's nothing we can do but wait for the server.
-      OFFLINE_UNUSABLE,
-
-      SUMMARY_STATUS_COUNT,
-    };
-
     Status();
     ~Status();
 
-    Summary summary;
-    bool authenticated;      // Successfully authenticated via GAIA.
-    bool server_up;          // True if we have received at least one good
-                             // reply from the server.
-    bool server_reachable;   // True if we received any reply from the server.
     bool notifications_enabled;  // True only if subscribed for notifications.
 
     // Notifications counters updated by the actions in synapi.
     int notifications_received;
-    int notifiable_commits;
-
-    // The max number of consecutive errors from any component.
-    int max_consecutive_errors;
 
     browser_sync::SyncProtocolError sync_protocol_error;
 
     // Number of unsynced items counted at the start of most recent sync cycle.
     int unsynced_count;
 
-    // Number of conflicting items counted during most recent sync cycle.
-    int conflicting_count;
+    // Number of encryption conflicts counted during most recent sync cycle.
+    int encryption_conflicts;
+
+    // Number of hierarchy conflicts counted during most recent sync cycle.
+    int hierarchy_conflicts;
+
+    // Number of simple conflicts counted during most recent sync cycle.
+    int simple_conflicts;
+
+    // Number of items the server refused to commit due to conflict during most
+    // recent sync cycle.
+    int server_conflicts;
+
+    // Number of items successfully committed during most recent sync cycle.
+    int committed_count;
 
     bool syncing;
     // True after a client has done a first sync.
@@ -144,6 +128,8 @@ class SyncManager {
     int64 updates_available;
     // Total updates received by the syncer since browser start.
     int updates_received;
+    // Total updates received that are echoes of our own changes.
+    int reflected_updates_received;
 
     // Of updates_received, how many were tombstones.
     int tombstone_updates_received;
@@ -155,6 +141,10 @@ class SyncManager {
     // Count of empty and non empty getupdates;
     int nonempty_get_updates;
     int empty_get_updates;
+
+    // Count of sync cycles that successfully committed items;
+    int sync_cycles_with_commits;
+    int sync_cycles_without_commits;
 
     // Count of useless and useful syncs we perform.
     int useless_sync_cycles;
@@ -264,8 +254,9 @@ class SyncManager {
     virtual void OnSyncCycleCompleted(
         const browser_sync::sessions::SyncSessionSnapshot* snapshot) = 0;
 
-    // Called when user interaction may be required due to an auth problem.
-    virtual void OnAuthError(const GoogleServiceAuthError& auth_error) = 0;
+    // Called when the status of the connection to the sync server has
+    // changed.
+    virtual void OnConnectionStatusChange(ConnectionStatus status) = 0;
 
     // Called when a new auth token is provided by the sync server.
     virtual void OnUpdatedToken(const std::string& token) = 0;
@@ -422,6 +413,12 @@ class SyncManager {
     virtual ~Observer();
   };
 
+  enum TestingMode {
+    NON_TEST,
+    TEST_ON_DISK,
+    TEST_IN_MEMORY,
+  };
+
   // Create an uninitialized SyncManager.  Callers must Init() before using.
   explicit SyncManager(const std::string& name);
   virtual ~SyncManager();
@@ -435,31 +432,42 @@ class SyncManager {
   // |sync_server_and_path| and |sync_server_port| represent the Chrome sync
   // server to use, and |use_ssl| specifies whether to communicate securely;
   // the default is false.
+  // |blocking_task_runner| is a TaskRunner to be used for tasks that
+  // may block on disk I/O.
   // |post_factory| will be owned internally and used to create
   // instances of an HttpPostProvider.
   // |model_safe_worker| ownership is given to the SyncManager.
   // |user_agent| is a 7-bit ASCII string suitable for use as the User-Agent
   // HTTP header. Used internally when collecting stats to classify clients.
   // |sync_notifier| is owned and used to listen for notifications.
+  // |report_unrecoverable_error_function| may be NULL.
   bool Init(const FilePath& database_location,
             const browser_sync::WeakHandle<browser_sync::JsEventHandler>&
                 event_handler,
             const std::string& sync_server_and_path,
             int sync_server_port,
             bool use_ssl,
+            const scoped_refptr<base::TaskRunner>& blocking_task_runner,
             HttpPostProviderFactory* post_factory,
             browser_sync::ModelSafeWorkerRegistrar* registrar,
+            browser_sync::ExtensionsActivityMonitor*
+                extensions_activity_monitor,
             ChangeDelegate* change_delegate,
             const std::string& user_agent,
             const SyncCredentials& credentials,
+            bool enable_sync_tabs_for_other_clients,
             sync_notifier::SyncNotifier* sync_notifier,
             const std::string& restored_key_for_bootstrapping,
-            bool setup_for_test_mode,
+            TestingMode testing_mode,
+            browser_sync::Encryptor* encryptor,
             browser_sync::UnrecoverableErrorHandler*
-                unrecoverbale_error_handler);
+                unrecoverable_error_handler,
+            browser_sync::ReportUnrecoverableErrorFunction
+                report_unrecoverable_error_function);
 
-  // Checks if the sync server is reachable.
-  void CheckServerReachable();
+  // Throw an unrecoverable error from a transaction (mostly used for
+  // testing).
+  void ThrowUnrecoverableError();
 
   // Check if the database has been populated with a full "initial" download of
   // sync items for each data type currently present in the routing info.
@@ -480,25 +488,22 @@ class SyncManager {
   // Put the syncer in normal mode ready to perform nudges and polls.
   void StartSyncingNormally();
 
-  // Attempt to set the passphrase. If the passphrase is valid,
-  // OnPassphraseAccepted will be fired to notify the ProfileSyncService and the
-  // syncer will be nudged so that any update that was waiting for this
-  // passphrase gets applied as soon as possible.
-  // If the passphrase in invalid, OnPassphraseRequired will be fired.
-  // Calling this metdod again is the appropriate course of action to "retry"
-  // with a new passphrase.
-  // |is_explicit| is true if the call is in response to the user setting a
-  // custom explicit passphrase as opposed to implicitly (from the users'
-  // perspective) using their Google Account password. An implicit SetPassphrase
-  // will *not* override an explicit passphrase set previously. Note that
-  // if the data is encrypted with an old Google Account password, the user
-  // may still have to provide a "implicit" passphrase.
-  // |user_provided| corresponds to the user having manually provided this
-  // passphrase. It should only be false for passphrases intercepted from the
-  // Google Sign-in Success notification and true otherwise.
-  void SetPassphrase(const std::string& passphrase,
-                     bool is_explicit,
-                     bool user_provided);
+  // Attempts to re-encrypt encrypted data types using the passphrase provided.
+  // Notifies observers of the result of the operation via OnPassphraseAccepted
+  // or OnPassphraseRequired, updates the nigori node, and does re-encryption as
+  // appropriate. If an explicit password has been set previously, we drop
+  // subsequent requests to set a passphrase. If the cryptographer has pending
+  // keys, and a new implicit passphrase is provided, we try decrypting the
+  // pending keys with it, and if that fails, we cache the passphrase for
+  // re-encryption once the pending keys are decrypted.
+  void SetEncryptionPassphrase(const std::string& passphrase, bool is_explicit);
+
+  // Provides a passphrase for decrypting the user's existing sync data.
+  // Notifies observers of the result of the operation via OnPassphraseAccepted
+  // or OnPassphraseRequired, updates the nigori node, and does re-encryption as
+  // appropriate if there is a previously cached encryption passphrase. It is an
+  // error to call this when we don't have pending keys.
+  void SetDecryptionPassphrase(const std::string& passphrase);
 
   // Puts the SyncScheduler into a mode where no normal nudge or poll traffic
   // will occur, but calls to RequestConfig will be supported.  If |callback|
@@ -526,10 +531,7 @@ class SyncManager {
   // potentially dereference garbage.
   void RemoveObserver(Observer* observer);
 
-  // Status-related getters. Typically GetStatusSummary will suffice, but
-  // GetDetailedSyncStatus can be useful for gathering debug-level details of
-  // the internals of the sync engine.  May be called on any thread.
-  Status::Summary GetStatusSummary() const;
+  // Status-related getter.  May be called on any thread.
   Status GetDetailedStatus() const;
 
   // Whether or not the Nigori node is encrypted using an explicit passphrase.
@@ -569,7 +571,8 @@ class SyncManager {
   //
   // Note: opens a transaction, so must only be called after syncapi
   // has been initialized.
-  void RefreshNigori(const base::Closure& done_callback);
+  void RefreshNigori(const std::string& chrome_version,
+                     const base::Closure& done_callback);
 
   // Enable encryption of all sync data. Once enabled, it can never be
   // disabled without clearing the server data.
@@ -609,6 +612,8 @@ class SyncManager {
   static const int kPreferencesNudgeDelayMilliseconds;
   static const int kPiggybackNudgeDelay;
 
+  static const FilePath::CharType kSyncDatabaseFilename[];
+
  private:
   FRIEND_TEST_ALL_PREFIXES(SyncManagerTest, NudgeDelayTest);
 
@@ -616,10 +621,6 @@ class SyncManager {
   base::TimeDelta GetNudgeDelayTimeDelta(const syncable::ModelType& model_type);
 
   base::ThreadChecker thread_checker_;
-
-  // Internal callback of RefreshNigori.
-  void DoneRefreshNigori(const base::Closure& done_callback,
-                         bool is_ready);
 
   // An opaque pointer to the nested private class.
   SyncInternal* data_;
@@ -633,8 +634,10 @@ syncable::ModelTypeSet GetTypesWithEmptyProgressMarkerToken(
     syncable::ModelTypeSet types,
     sync_api::UserShare* share);
 
+const char* ConnectionStatusToString(ConnectionStatus status);
+
 // Returns the string representation of a PassphraseRequiredReason value.
-std::string PassphraseRequiredReasonToString(PassphraseRequiredReason reason);
+const char* PassphraseRequiredReasonToString(PassphraseRequiredReason reason);
 
 }  // namespace sync_api
 

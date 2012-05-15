@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,10 +6,11 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/chromeos/chromeos_version.h"
 #include "base/string_util.h"
-#include "chrome/browser/chromeos/system/runtime_environment.h"
 #include "dbus/bus.h"
 #include "dbus/message.h"
+#include "dbus/object_path.h"
 #include "dbus/object_proxy.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
@@ -54,7 +55,7 @@ class UpdateEngineClientImpl : public UpdateEngineClient {
         last_status_() {
     update_engine_proxy_ = bus->GetObjectProxy(
         update_engine::kUpdateEngineServiceName,
-        update_engine::kUpdateEngineServicePath);
+        dbus::ObjectPath(update_engine::kUpdateEngineServicePath));
 
     // Monitor the D-Bus signal for brightness changes. Only the power
     // manager knows the actual brightness level. We don't cache the
@@ -255,7 +256,7 @@ class UpdateEngineClientStubImpl : public UpdateEngineClient {
   virtual bool HasObserver(Observer* observer) OVERRIDE { return false; }
 
   virtual void RequestUpdateCheck(UpdateCheckCallback callback) OVERRIDE {
-    callback.Run(UPDATE_RESULT_FAILED);
+    callback.Run(UPDATE_RESULT_NOTIMPLEMENTED);
   }
   virtual void RebootAfterUpdate() OVERRIDE {}
   virtual void SetReleaseTrack(const std::string& track) OVERRIDE {}
@@ -279,7 +280,7 @@ UpdateEngineClient::EmptyUpdateCheckCallback() {
 
 // static
 UpdateEngineClient* UpdateEngineClient::Create(dbus::Bus* bus) {
-  if (system::runtime_environment::IsRunningOnChromeOS()) {
+  if (base::chromeos::IsRunningOnChromeOS()) {
     return new UpdateEngineClientImpl(bus);
   } else {
     return new UpdateEngineClientStubImpl();

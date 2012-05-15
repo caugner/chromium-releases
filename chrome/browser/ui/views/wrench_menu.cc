@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,6 +17,7 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/views/bookmarks/bookmark_menu_delegate.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "content/public/browser/host_zoom_map.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_source.h"
@@ -30,7 +31,6 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
-#include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/skia_util.h"
 #include "ui/views/background.h"
 #include "ui/views/controls/button/image_button.h"
@@ -146,49 +146,49 @@ class MenuButtonBackground : public views::Background {
     int h = view->height();
     switch (TypeAdjustedForRTL()) {
       case LEFT_BUTTON:
-        canvas->FillRect(background_color(state), gfx::Rect(1, 1, w, h - 2));
-        canvas->FillRect(border_color(state), gfx::Rect(2, 0, w, 1));
-        canvas->FillRect(border_color(state), gfx::Rect(1, 1, 1, 1));
-        canvas->FillRect(border_color(state), gfx::Rect(0, 2, 1, h - 4));
-        canvas->FillRect(border_color(state), gfx::Rect(1, h - 2, 1, 1));
-        canvas->FillRect(border_color(state), gfx::Rect(2, h - 1, w, 1));
+        canvas->FillRect(gfx::Rect(1, 1, w, h - 2), background_color(state));
+        canvas->FillRect(gfx::Rect(2, 0, w, 1), border_color(state));
+        canvas->FillRect(gfx::Rect(1, 1, 1, 1), border_color(state));
+        canvas->FillRect(gfx::Rect(0, 2, 1, h - 4), border_color(state));
+        canvas->FillRect(gfx::Rect(1, h - 2, 1, 1), border_color(state));
+        canvas->FillRect(gfx::Rect(2, h - 1, w, 1), border_color(state));
         break;
 
       case CENTER_BUTTON: {
-        canvas->FillRect(background_color(state),
-                         gfx::Rect(1, 1, w - 2, h - 2));
+        canvas->FillRect(gfx::Rect(1, 1, w - 2, h - 2),
+                         background_color(state));
         SkColor left_color = state != CustomButton::BS_NORMAL ?
             border_color(state) : border_color(left_button_->state());
-        canvas->FillRect(left_color, gfx::Rect(0, 0, 1, h));
-        canvas->FillRect(border_color(state), gfx::Rect(1, 0, w - 2, 1));
-        canvas->FillRect(border_color(state), gfx::Rect(1, h - 1, w - 2, 1));
+        canvas->FillRect(gfx::Rect(0, 0, 1, h), left_color);
+        canvas->FillRect(gfx::Rect(1, 0, w - 2, 1), border_color(state));
+        canvas->FillRect(gfx::Rect(1, h - 1, w - 2, 1), border_color(state));
         SkColor right_color = state != CustomButton::BS_NORMAL ?
             border_color(state) : border_color(right_button_->state());
-        canvas->FillRect(right_color, gfx::Rect(w - 1, 0, 1, h));
+        canvas->FillRect(gfx::Rect(w - 1, 0, 1, h), right_color);
         break;
       }
 
       case RIGHT_BUTTON:
-        canvas->FillRect(background_color(state),
-                         gfx::Rect(0, 1, w - 1, h - 2));
-        canvas->FillRect(border_color(state), gfx::Rect(0, 0, w - 2, 1));
-        canvas->FillRect(border_color(state), gfx::Rect(w - 2, 1, 1, 1));
-        canvas->FillRect(border_color(state), gfx::Rect(w - 1, 2, 1, h - 4));
-        canvas->FillRect(border_color(state), gfx::Rect(w - 2, h - 2, 1, 1));
-        canvas->FillRect(border_color(state), gfx::Rect(0, h - 1, w - 2, 1));
+        canvas->FillRect(gfx::Rect(0, 1, w - 1, h - 2),
+                         background_color(state));
+        canvas->FillRect(gfx::Rect(0, 0, w - 2, 1), border_color(state));
+        canvas->FillRect(gfx::Rect(w - 2, 1, 1, 1), border_color(state));
+        canvas->FillRect(gfx::Rect(w - 1, 2, 1, h - 4), border_color(state));
+        canvas->FillRect(gfx::Rect(w - 2, h - 2, 1, 1), border_color(state));
+        canvas->FillRect(gfx::Rect(0, h - 1, w - 2, 1), border_color(state));
         break;
 
       case SINGLE_BUTTON:
-        canvas->FillRect(background_color(state),
-                         gfx::Rect(1, 1, w - 2, h - 2));
-        canvas->FillRect(border_color(state), gfx::Rect(2, 0, w - 4, 1));
-        canvas->FillRect(border_color(state), gfx::Rect(1, 1, 1, 1));
-        canvas->FillRect(border_color(state), gfx::Rect(0, 2, 1, h - 4));
-        canvas->FillRect(border_color(state), gfx::Rect(1, h - 2, 1, 1));
-        canvas->FillRect(border_color(state), gfx::Rect(2, h - 1, w - 4, 1));
-        canvas->FillRect(border_color(state), gfx::Rect(w - 2, 1, 1, 1));
-        canvas->FillRect(border_color(state), gfx::Rect(w - 1, 2, 1, h - 4));
-        canvas->FillRect(border_color(state), gfx::Rect(w - 2, h - 2, 1, 1));
+        canvas->FillRect(gfx::Rect(1, 1, w - 2, h - 2),
+                         background_color(state));
+        canvas->FillRect(gfx::Rect(2, 0, w - 4, 1), border_color(state));
+        canvas->FillRect(gfx::Rect(1, 1, 1, 1), border_color(state));
+        canvas->FillRect(gfx::Rect(0, 2, 1, h - 4), border_color(state));
+        canvas->FillRect(gfx::Rect(1, h - 2, 1, 1), border_color(state));
+        canvas->FillRect(gfx::Rect(2, h - 1, w - 4, 1), border_color(state));
+        canvas->FillRect(gfx::Rect(w - 2, 1, 1, 1), border_color(state));
+        canvas->FillRect(gfx::Rect(w - 1, 2, 1, h - 4), border_color(state));
+        canvas->FillRect(gfx::Rect(w - 2, h - 2, 1, 1), border_color(state));
         break;
 
       default:
@@ -447,7 +447,7 @@ class WrenchMenu::ZoomView : public WrenchMenuView,
     registrar_.Add(
         this, content::NOTIFICATION_ZOOM_LEVEL_CHANGED,
         content::Source<HostZoomMap>(
-            menu->browser_->profile()->GetHostZoomMap()));
+            HostZoomMap::GetForBrowserContext(menu->browser_->profile())));
   }
 
   gfx::Size GetPreferredSize() {
@@ -577,6 +577,7 @@ WrenchMenu::WrenchMenu(Browser* browser)
       selected_menu_model_(NULL),
       selected_index_(0),
       bookmark_menu_(NULL),
+      feedback_menu_item_(NULL),
       first_bookmark_command_id_(0) {
   registrar_.Add(this, chrome::NOTIFICATION_GLOBAL_ERRORS_CHANGED,
                  content::Source<Profile>(browser_->profile()));
@@ -780,6 +781,20 @@ void WrenchMenu::WillShowMenu(MenuItemView* menu) {
     CreateBookmarkMenu();
 }
 
+void WrenchMenu::WillHideMenu(MenuItemView* menu) {
+  // Turns off the fade out animation of the wrench menus if
+  // |feedback_menu_item_| is selected.  This excludes the wrench menu itself
+  // from the snapshot in the feedback UI.
+  if (menu->HasSubmenu() && feedback_menu_item_ &&
+      feedback_menu_item_->IsSelected()) {
+    // It's okay to just turn off the animation and no to take care the
+    // animation back because the menu widget will be recreated next time
+    // it's opened. See ToolbarView::RunMenu() and Init() of this class.
+    menu->GetSubmenu()->GetWidget()->
+        SetVisibilityChangedAnimationsEnabled(false);
+  }
+}
+
 void WrenchMenu::BookmarkModelChanged() {
   DCHECK(bookmark_menu_delegate_.get());
   if (!bookmark_menu_delegate_->is_mutating_model())
@@ -839,6 +854,11 @@ void WrenchMenu::PopulateMenu(MenuItemView* parent,
       case IDC_BOOKMARKS_MENU:
         DCHECK(!bookmark_menu_);
         bookmark_menu_ = item;
+        break;
+
+      case IDC_FEEDBACK:
+        DCHECK(!feedback_menu_item_);
+        feedback_menu_item_ = item;
         break;
 
       default:

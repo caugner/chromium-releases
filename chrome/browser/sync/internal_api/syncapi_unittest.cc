@@ -16,54 +16,57 @@
 #include "base/location.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
+#include "base/message_loop_proxy.h"
 #include "base/scoped_temp_dir.h"
 #include "base/string_number_conversions.h"
 #include "base/stringprintf.h"
-#include "base/test/thread_test_helper.h"
+#include "base/test/values_test_util.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/password_manager/encryptor.h"
-#include "chrome/browser/sync/engine/model_safe_worker.h"
-#include "chrome/browser/sync/engine/nigori_util.h"
-#include "chrome/browser/sync/engine/polling_constants.h"
-#include "chrome/browser/sync/engine/syncapi_internal.h"
+#include "chrome/browser/sync/internal_api/syncapi_internal.h"
 #include "chrome/browser/sync/internal_api/change_record.h"
 #include "chrome/browser/sync/internal_api/http_post_provider_factory.h"
 #include "chrome/browser/sync/internal_api/http_post_provider_interface.h"
-#include "chrome/browser/sync/internal_api/includes/unrecoverable_error_handler_mock.h"
 #include "chrome/browser/sync/internal_api/read_node.h"
 #include "chrome/browser/sync/internal_api/read_transaction.h"
 #include "chrome/browser/sync/internal_api/sync_manager.h"
 #include "chrome/browser/sync/internal_api/write_node.h"
 #include "chrome/browser/sync/internal_api/write_transaction.h"
-#include "chrome/browser/sync/js/js_arg_list.h"
-#include "chrome/browser/sync/js/js_backend.h"
-#include "chrome/browser/sync/js/js_event_handler.h"
-#include "chrome/browser/sync/js/js_reply_handler.h"
-#include "chrome/browser/sync/js/js_test_util.h"
 #include "chrome/browser/sync/notifier/sync_notifier.h"
 #include "chrome/browser/sync/notifier/sync_notifier_observer.h"
-#include "chrome/browser/sync/protocol/bookmark_specifics.pb.h"
-#include "chrome/browser/sync/protocol/encryption.pb.h"
-#include "chrome/browser/sync/protocol/extension_specifics.pb.h"
-#include "chrome/browser/sync/protocol/password_specifics.pb.h"
-#include "chrome/browser/sync/protocol/preference_specifics.pb.h"
-#include "chrome/browser/sync/protocol/proto_value_conversions.h"
-#include "chrome/browser/sync/protocol/sync.pb.h"
-#include "chrome/browser/sync/sessions/sync_session.h"
-#include "chrome/browser/sync/syncable/directory_manager.h"
-#include "chrome/browser/sync/syncable/model_type_test_util.h"
-#include "chrome/browser/sync/syncable/syncable.h"
-#include "chrome/browser/sync/syncable/syncable_id.h"
 #include "chrome/browser/sync/test/engine/test_user_share.h"
-#include "chrome/browser/sync/util/cryptographer.h"
-#include "chrome/browser/sync/util/time.h"
-#include "chrome/test/base/values_test_util.h"
-#include "content/test/test_browser_thread.h"
+#include "sync/engine/model_safe_worker.h"
+#include "sync/engine/nigori_util.h"
+#include "sync/engine/polling_constants.h"
+#include "sync/js/js_arg_list.h"
+#include "sync/js/js_backend.h"
+#include "sync/js/js_event_handler.h"
+#include "sync/js/js_reply_handler.h"
+#include "sync/js/js_test_util.h"
+#include "sync/protocol/bookmark_specifics.pb.h"
+#include "sync/protocol/encryption.pb.h"
+#include "sync/protocol/extension_specifics.pb.h"
+#include "sync/protocol/password_specifics.pb.h"
+#include "sync/protocol/preference_specifics.pb.h"
+#include "sync/protocol/proto_value_conversions.h"
+#include "sync/protocol/sync.pb.h"
+#include "sync/sessions/sync_session.h"
+#include "sync/syncable/model_type_test_util.h"
+#include "sync/syncable/syncable.h"
+#include "sync/syncable/syncable_id.h"
+#include "sync/test/fake_encryptor.h"
+#include "sync/test/fake_extensions_activity_monitor.h"
+#include "sync/util/cryptographer.h"
+#include "sync/util/extensions_activity_monitor.h"
+#include "sync/util/test_unrecoverable_error_handler.h"
+#include "sync/util/time.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+using base::ExpectDictStringValue;
 using browser_sync::Cryptographer;
+using browser_sync::FakeEncryptor;
+using browser_sync::FakeExtensionsActivityMonitor;
 using browser_sync::HasArgsAsList;
 using browser_sync::HasDetailsAsDictionary;
 using browser_sync::KeyParams;
@@ -78,8 +81,8 @@ using browser_sync::ModelSafeRoutingInfo;
 using browser_sync::ModelSafeWorker;
 using browser_sync::ModelSafeWorkerRegistrar;
 using browser_sync::sessions::SyncSessionSnapshot;
+using browser_sync::TestUnrecoverableErrorHandler;
 using browser_sync::WeakHandle;
-using content::BrowserThread;
 using syncable::IS_DEL;
 using syncable::IS_UNSYNCED;
 using syncable::kEncryptedString;
@@ -87,7 +90,6 @@ using syncable::ModelTypeSet;
 using syncable::ModelType;
 using syncable::NON_UNIQUE_NAME;
 using syncable::SPECIFICS;
-using test::ExpectDictStringValue;
 using testing::_;
 using testing::AnyNumber;
 using testing::AtLeast;
@@ -99,6 +101,10 @@ using testing::StrictMock;
 namespace sync_api {
 
 namespace {
+
+const char kTestChromeVersion[] = "test chrome version";
+
+void DoNothing() {}
 
 void ExpectInt64Value(int64 expected_value,
                       const DictionaryValue& value, const std::string& key) {
@@ -166,10 +172,9 @@ int64 MakeFolderWithParent(UserShare* share,
 int64 MakeServerNodeForType(UserShare* share,
                             ModelType model_type) {
   sync_pb::EntitySpecifics specifics;
-  syncable::AddDefaultExtensionValue(model_type, &specifics);
-  syncable::ScopedDirLookup dir(share->dir_manager.get(), share->name);
-  EXPECT_TRUE(dir.good());
-  syncable::WriteTransaction trans(FROM_HERE, syncable::UNITTEST, dir);
+  syncable::AddDefaultFieldValue(model_type, &specifics);
+  syncable::WriteTransaction trans(
+      FROM_HERE, syncable::UNITTEST, share->directory.get());
   // Attempt to lookup by nigori tag.
   std::string type_tag = syncable::ModelTypeToRootTag(model_type);
   syncable::Id node_id = syncable::Id::CreateFromServerId(type_tag);
@@ -195,9 +200,8 @@ int64 MakeServerNode(UserShare* share, ModelType model_type,
                      const std::string& client_tag,
                      const std::string& hashed_tag,
                      const sync_pb::EntitySpecifics& specifics) {
-  syncable::ScopedDirLookup dir(share->dir_manager.get(), share->name);
-  EXPECT_TRUE(dir.good());
-  syncable::WriteTransaction trans(FROM_HERE, syncable::UNITTEST, dir);
+  syncable::WriteTransaction trans(
+      FROM_HERE, syncable::UNITTEST, share->directory.get());
   syncable::Entry root_entry(&trans, syncable::GET_BY_SERVER_TAG,
                              syncable::ModelTypeToRootTag(model_type));
   EXPECT_TRUE(root_entry.good());
@@ -506,8 +510,7 @@ TEST_F(SyncApiTest, BaseNodeSetSpecifics) {
   EXPECT_TRUE(node.InitByIdLookup(child_id));
 
   sync_pb::EntitySpecifics entity_specifics;
-  entity_specifics.MutableExtension(sync_pb::bookmark)->
-      set_url("http://www.google.com");
+  entity_specifics.mutable_bookmark()->set_url("http://www.google.com");
 
   EXPECT_NE(entity_specifics.SerializeAsString(),
             node.GetEntitySpecifics().SerializeAsString());
@@ -525,8 +528,7 @@ TEST_F(SyncApiTest, BaseNodeSetSpecificsPreservesUnknownFields) {
   EXPECT_TRUE(node.GetEntitySpecifics().unknown_fields().empty());
 
   sync_pb::EntitySpecifics entity_specifics;
-  entity_specifics.MutableExtension(sync_pb::bookmark)->
-      set_url("http://www.google.com");
+  entity_specifics.mutable_bookmark()->set_url("http://www.google.com");
   entity_specifics.mutable_unknown_fields()->AddFixed32(5, 100);
   node.SetEntitySpecifics(entity_specifics);
   EXPECT_FALSE(node.GetEntitySpecifics().unknown_fields().empty());
@@ -665,7 +667,7 @@ class SyncManagerObserverMock : public SyncManager::Observer {
                void(const SyncSessionSnapshot*));  // NOLINT
   MOCK_METHOD2(OnInitializationComplete,
                void(const WeakHandle<JsBackend>&, bool));  // NOLINT
-  MOCK_METHOD1(OnAuthError, void(const GoogleServiceAuthError&));  // NOLINT
+  MOCK_METHOD1(OnConnectionStatusChange, void(ConnectionStatus));  // NOLINT
   MOCK_METHOD2(OnPassphraseRequired,
                void(sync_api::PassphraseRequiredReason,
                     const sync_pb::EncryptedData&));  // NOLINT
@@ -700,9 +702,6 @@ class SyncNotifierMock : public sync_notifier::SyncNotifier {
 class SyncManagerTest : public testing::Test,
                         public ModelSafeWorkerRegistrar,
                         public SyncManager::ChangeDelegate {
- public:
-  void EmptyClosure() {}
-
  protected:
   enum NigoriStatus {
     DONT_WRITE_NIGORI,
@@ -716,9 +715,7 @@ class SyncManagerTest : public testing::Test,
   };
 
   SyncManagerTest()
-      : ui_thread_(BrowserThread::UI, &ui_loop_),
-        file_thread_(BrowserThread::FILE),
-        sync_notifier_mock_(NULL),
+      : sync_notifier_mock_(NULL),
         sync_manager_("Test sync manager"),
         sync_notifier_observer_(NULL),
         update_enabled_types_call_count_(0) {}
@@ -730,8 +727,6 @@ class SyncManagerTest : public testing::Test,
   // Test implementation.
   void SetUp() {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
-
-    file_thread_.Start();
 
     SyncCredentials credentials;
     credentials.email = "foo@bar.com";
@@ -758,15 +753,20 @@ class SyncManagerTest : public testing::Test,
     EXPECT_FALSE(sync_notifier_observer_);
     EXPECT_FALSE(js_backend_.IsInitialized());
 
-    browser_sync::MockUnrecoverableErrorHandler handler_mock;
     // Takes ownership of |sync_notifier_mock_|.
     sync_manager_.Init(temp_dir_.path(),
                        WeakHandle<JsEventHandler>(),
                        "bogus", 0, false,
-                       new TestHttpPostProviderFactory(), this, this, "bogus",
-                       credentials, sync_notifier_mock_, "",
-                       true /* setup_for_test_mode */,
-                       &handler_mock);
+                       base::MessageLoopProxy::current(),
+                       new TestHttpPostProviderFactory(), this,
+                       &extensions_activity_monitor_, this, "bogus",
+                       credentials,
+                       false /* enable_sync_tabs_for_other_clients */,
+                       sync_notifier_mock_, "",
+                       sync_api::SyncManager::TEST_IN_MEMORY,
+                       &encryptor_,
+                       &handler_,
+                       NULL);
 
     EXPECT_TRUE(sync_notifier_observer_);
     EXPECT_TRUE(js_backend_.IsInitialized());
@@ -815,18 +815,8 @@ class SyncManagerTest : public testing::Test,
   // Helper methods.
   bool SetUpEncryption(NigoriStatus nigori_status,
                        EncryptionStatus encryption_status) {
-    // Mock the Mac Keychain service. The real Keychain can block on user input.
-    #if defined(OS_MACOSX)
-      Encryptor::UseMockKeychain(true);
-    #endif
-
     UserShare* share = sync_manager_.GetUserShare();
-    {
-      syncable::ScopedDirLookup dir(share->dir_manager.get(), share->name);
-      if (!dir.good())
-        return false;
-      dir->set_initial_sync_ended_for_type(syncable::NIGORI, true);
-    }
+    share->directory->set_initial_sync_ended_for_type(syncable::NIGORI, true);
 
     // We need to create the nigori node as if it were an applied server update.
     int64 nigori_id = GetIdForDataType(syncable::NIGORI);
@@ -885,7 +875,7 @@ class SyncManagerTest : public testing::Test,
   }
 
   void PumpLoop() {
-    ui_loop_.RunAllPending();
+    message_loop_.RunAllPending();
   }
 
   void SendJsMessage(const std::string& name, const JsArgList& args,
@@ -907,9 +897,8 @@ class SyncManagerTest : public testing::Test,
   bool ResetUnsyncedEntry(syncable::ModelType type,
                           const std::string& client_tag) {
     UserShare* share = sync_manager_.GetUserShare();
-    syncable::ScopedDirLookup dir(share->dir_manager.get(), share->name);
-    EXPECT_TRUE(dir.good());
-    syncable::WriteTransaction trans(FROM_HERE, syncable::UNITTEST, dir);
+    syncable::WriteTransaction trans(
+        FROM_HERE, syncable::UNITTEST, share->directory.get());
     const std::string hash = BaseNode::GenerateSyncableHash(type, client_tag);
     syncable::MutableEntry entry(&trans, syncable::GET_BY_CLIENT_TAG,
                                  hash);
@@ -921,19 +910,18 @@ class SyncManagerTest : public testing::Test,
   }
 
  private:
-  // Needed by |ui_thread_|.
-  MessageLoopForUI ui_loop_;
   // Needed by |sync_manager_|.
-  content::TestBrowserThread ui_thread_;
-  // Needed by |sync_manager_|.
-  content::TestBrowserThread file_thread_;
+  MessageLoop message_loop_;
   // Needed by |sync_manager_|.
   ScopedTempDir temp_dir_;
   // Sync Id's for the roots of the enabled datatypes.
   std::map<ModelType, int64> type_roots_;
+  FakeExtensionsActivityMonitor extensions_activity_monitor_;
   StrictMock<SyncNotifierMock>* sync_notifier_mock_;
 
  protected:
+  FakeEncryptor encryptor_;
+  TestUnrecoverableErrorHandler handler_;
   SyncManager sync_manager_;
   WeakHandle<JsBackend> js_backend_;
   StrictMock<SyncManagerObserverMock> observer_;
@@ -1294,12 +1282,7 @@ TEST_F(SyncManagerTest, RefreshEncryptionReady) {
   EXPECT_TRUE(SetUpEncryption(WRITE_TO_NIGORI, DEFAULT_ENCRYPTION));
   EXPECT_CALL(observer_, OnEncryptionComplete());
 
-  sync_manager_.RefreshNigori(base::Bind(&SyncManagerTest::EmptyClosure,
-                                         base::Unretained(this)));
-  scoped_refptr<base::ThreadTestHelper> helper(
-      new base::ThreadTestHelper(
-          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE)));
-  ASSERT_TRUE(helper->Run());
+  sync_manager_.RefreshNigori(kTestChromeVersion, base::Bind(&DoNothing));
   PumpLoop();
 
   const syncable::ModelTypeSet encrypted_types =
@@ -1324,12 +1307,7 @@ TEST_F(SyncManagerTest, RefreshEncryptionNotReady) {
   // Don't set up encryption (no nigori node created).
 
   // Should fail.
-  sync_manager_.RefreshNigori(base::Bind(&SyncManagerTest::EmptyClosure,
-                                         base::Unretained(this)));
-  scoped_refptr<base::ThreadTestHelper> helper(
-      new base::ThreadTestHelper(
-          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE)));
-  ASSERT_TRUE(helper->Run());
+  sync_manager_.RefreshNigori(kTestChromeVersion, base::Bind(&DoNothing));
   PumpLoop();
 
   const syncable::ModelTypeSet encrypted_types =
@@ -1344,12 +1322,7 @@ TEST_F(SyncManagerTest, RefreshEncryptionEmptyNigori) {
   EXPECT_CALL(observer_, OnEncryptionComplete());
 
   // Should write to nigori.
-  sync_manager_.RefreshNigori(base::Bind(&SyncManagerTest::EmptyClosure,
-                                         base::Unretained(this)));
-  scoped_refptr<base::ThreadTestHelper> helper(
-      new base::ThreadTestHelper(
-          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE)));
-  ASSERT_TRUE(helper->Run());
+  sync_manager_.RefreshNigori(kTestChromeVersion, base::Bind(&DoNothing));
   PumpLoop();
 
   const syncable::ModelTypeSet encrypted_types =
@@ -1460,7 +1433,7 @@ TEST_F(SyncManagerTest, EncryptDataTypesWithData) {
   EXPECT_CALL(observer_, OnBootstrapTokenUpdated(_));
   EXPECT_CALL(observer_, OnPassphraseAccepted());
   EXPECT_CALL(observer_, OnEncryptionComplete());
-  sync_manager_.SetPassphrase("new_passphrase", true, true);
+  sync_manager_.SetEncryptionPassphrase("new_passphrase", true);
   EXPECT_TRUE(sync_manager_.EncryptEverythingEnabledForTest());
   {
     ReadTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
@@ -1494,13 +1467,13 @@ TEST_F(SyncManagerTest, EncryptDataTypesWithData) {
 
 // Test that when there are no pending keys and the cryptographer is not
 // initialized, we add a key based on the current GAIA password.
-// (case 1 in SyncManager::SyncInternalSetPassphrase)
+// (case 1 in SyncManager::SyncInternal::SetEncryptionPassphrase)
 TEST_F(SyncManagerTest, SetInitialGaiaPass) {
   EXPECT_FALSE(SetUpEncryption(DONT_WRITE_NIGORI, UNINITIALIZED));
   EXPECT_CALL(observer_, OnBootstrapTokenUpdated(_));
   EXPECT_CALL(observer_, OnPassphraseAccepted());
   EXPECT_CALL(observer_, OnEncryptionComplete());
-  sync_manager_.SetPassphrase("new_passphrase", false, false);
+  sync_manager_.SetEncryptionPassphrase("new_passphrase", false);
   EXPECT_FALSE(sync_manager_.EncryptEverythingEnabledForTest());
   {
     ReadTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
@@ -1515,10 +1488,10 @@ TEST_F(SyncManagerTest, SetInitialGaiaPass) {
 
 // Test that when there are no pending keys and we have on the old GAIA
 // password, we update and re-encrypt everything with the new GAIA password.
-// (case 1 in SyncManager::SyncInternalSetPassphrase)
+// (case 1 in SyncManager::SyncInternal::SetEncryptionPassphrase)
 TEST_F(SyncManagerTest, UpdateGaiaPass) {
   EXPECT_TRUE(SetUpEncryption(WRITE_TO_NIGORI, DEFAULT_ENCRYPTION));
-  Cryptographer verifier;
+  Cryptographer verifier(&encryptor_);
   {
     ReadTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
     Cryptographer* cryptographer = trans.GetCryptographer();
@@ -1529,7 +1502,7 @@ TEST_F(SyncManagerTest, UpdateGaiaPass) {
   EXPECT_CALL(observer_, OnBootstrapTokenUpdated(_));
   EXPECT_CALL(observer_, OnPassphraseAccepted());
   EXPECT_CALL(observer_, OnEncryptionComplete());
-  sync_manager_.SetPassphrase("new_passphrase", false, false);
+  sync_manager_.SetEncryptionPassphrase("new_passphrase", false);
   EXPECT_FALSE(sync_manager_.EncryptEverythingEnabledForTest());
   {
     ReadTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
@@ -1544,9 +1517,9 @@ TEST_F(SyncManagerTest, UpdateGaiaPass) {
 
 // Sets a new explicit passphrase. This should update the bootstrap token
 // and re-encrypt everything.
-// (case 2 in SyncManager::SyncInternalSetPassphrase)
+// (case 2 in SyncManager::SyncInternal::SetEncryptionPassphrase)
 TEST_F(SyncManagerTest, SetPassphraseWithPassword) {
-  Cryptographer verifier;
+  Cryptographer verifier(&encryptor_);
   EXPECT_TRUE(SetUpEncryption(WRITE_TO_NIGORI, DEFAULT_ENCRYPTION));
   {
     WriteTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
@@ -1569,7 +1542,7 @@ TEST_F(SyncManagerTest, SetPassphraseWithPassword) {
   EXPECT_CALL(observer_, OnBootstrapTokenUpdated(_));
   EXPECT_CALL(observer_, OnPassphraseAccepted());
   EXPECT_CALL(observer_, OnEncryptionComplete());
-  sync_manager_.SetPassphrase("new_passphrase", true, true);
+  sync_manager_.SetEncryptionPassphrase("new_passphrase", true);
   EXPECT_FALSE(sync_manager_.EncryptEverythingEnabledForTest());
   {
     ReadTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
@@ -1592,10 +1565,10 @@ TEST_F(SyncManagerTest, SetPassphraseWithPassword) {
 // Manually set the pending keys in the cryptographer/nigori to reflect the data
 // being encrypted with a new (unprovided) GAIA password, then supply the
 // password.
-// (case 3 in SyncManager::SyncInternalSetPassphrase)
+// (case 7 in SyncManager::SyncInternal::SetDecryptionPassphrase)
 TEST_F(SyncManagerTest, SupplyPendingGAIAPass) {
   EXPECT_TRUE(SetUpEncryption(WRITE_TO_NIGORI, DEFAULT_ENCRYPTION));
-  Cryptographer other_cryptographer;
+  Cryptographer other_cryptographer(&encryptor_);
   {
     WriteTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
     Cryptographer* cryptographer = trans.GetCryptographer();
@@ -1618,7 +1591,7 @@ TEST_F(SyncManagerTest, SupplyPendingGAIAPass) {
   EXPECT_CALL(observer_, OnBootstrapTokenUpdated(_));
   EXPECT_CALL(observer_, OnPassphraseAccepted());
   EXPECT_CALL(observer_, OnEncryptionComplete());
-  sync_manager_.SetPassphrase("passphrase2", false, false);
+  sync_manager_.SetDecryptionPassphrase("passphrase2");
   EXPECT_FALSE(sync_manager_.EncryptEverythingEnabledForTest());
   {
     ReadTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
@@ -1636,10 +1609,10 @@ TEST_F(SyncManagerTest, SupplyPendingGAIAPass) {
 // the current GAIA password and verify the bootstrap token is updated. Then
 // supply the old GAIA password, and verify we re-encrypt all data with the
 // new GAIA password.
-// (case 4 in SyncManager::SyncInternalSetPassphrase)
+// (cases 4 and 5 in SyncManager::SyncInternal::SetEncryptionPassphrase)
 TEST_F(SyncManagerTest, SupplyPendingOldGAIAPass) {
   EXPECT_TRUE(SetUpEncryption(WRITE_TO_NIGORI, DEFAULT_ENCRYPTION));
-  Cryptographer other_cryptographer;
+  Cryptographer other_cryptographer(&encryptor_);
   {
     WriteTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
     Cryptographer* cryptographer = trans.GetCryptographer();
@@ -1669,7 +1642,7 @@ TEST_F(SyncManagerTest, SupplyPendingOldGAIAPass) {
   EXPECT_CALL(observer_, OnBootstrapTokenUpdated(_))
       .WillOnce(SaveArg<0>(&bootstrap_token));
   EXPECT_CALL(observer_, OnPassphraseRequired(_,_));
-  sync_manager_.SetPassphrase("new_gaia", false, false);
+  sync_manager_.SetEncryptionPassphrase("new_gaia", false);
   EXPECT_FALSE(sync_manager_.EncryptEverythingEnabledForTest());
   testing::Mock::VerifyAndClearExpectations(&observer_);
   {
@@ -1683,9 +1656,10 @@ TEST_F(SyncManagerTest, SupplyPendingOldGAIAPass) {
     other_cryptographer.GetKeys(&encrypted);
     EXPECT_TRUE(cryptographer->CanDecrypt(encrypted));
   }
+  EXPECT_CALL(observer_, OnBootstrapTokenUpdated(_));
   EXPECT_CALL(observer_, OnPassphraseAccepted());
   EXPECT_CALL(observer_, OnEncryptionComplete());
-  sync_manager_.SetPassphrase("old_gaia", false, true);
+  sync_manager_.SetEncryptionPassphrase("old_gaia", false);
   {
     ReadTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
     Cryptographer* cryptographer = trans.GetCryptographer();
@@ -1697,7 +1671,7 @@ TEST_F(SyncManagerTest, SupplyPendingOldGAIAPass) {
     EXPECT_TRUE(cryptographer->CanDecrypt(encrypted));
 
     // Verify the saved bootstrap token is based on the new gaia password.
-    Cryptographer temp_cryptographer;
+    Cryptographer temp_cryptographer(&encryptor_);
     temp_cryptographer.Bootstrap(bootstrap_token);
     EXPECT_TRUE(temp_cryptographer.CanDecrypt(encrypted));
   }
@@ -1706,10 +1680,10 @@ TEST_F(SyncManagerTest, SupplyPendingOldGAIAPass) {
 // Manually set the pending keys in the cryptographer/nigori to reflect the data
 // being encrypted with an explicit (unprovided) passphrase, then supply the
 // passphrase.
-// (case 5 in SyncManager::SyncInternalSetPassphrase)
+// (case 9 in SyncManager::SyncInternal::SetDecryptionPassphrase)
 TEST_F(SyncManagerTest, SupplyPendingExplicitPass) {
   EXPECT_TRUE(SetUpEncryption(WRITE_TO_NIGORI, DEFAULT_ENCRYPTION));
-  Cryptographer other_cryptographer;
+  Cryptographer other_cryptographer(&encryptor_);
   {
     WriteTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
     Cryptographer* cryptographer = trans.GetCryptographer();
@@ -1733,7 +1707,7 @@ TEST_F(SyncManagerTest, SupplyPendingExplicitPass) {
   EXPECT_CALL(observer_, OnBootstrapTokenUpdated(_));
   EXPECT_CALL(observer_, OnPassphraseAccepted());
   EXPECT_CALL(observer_, OnEncryptionComplete());
-  sync_manager_.SetPassphrase("explicit", true, true);
+  sync_manager_.SetDecryptionPassphrase("explicit");
   EXPECT_FALSE(sync_manager_.EncryptEverythingEnabledForTest());
   {
     ReadTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
@@ -1743,6 +1717,40 @@ TEST_F(SyncManagerTest, SupplyPendingExplicitPass) {
     sync_pb::EncryptedData encrypted;
     cryptographer->GetKeys(&encrypted);
     EXPECT_TRUE(other_cryptographer.CanDecrypt(encrypted));
+  }
+}
+
+// Manually set the pending keys in the cryptographer/nigori to reflect the data
+// being encrypted with a new (unprovided) GAIA password, then supply the
+// password as a user-provided password.
+// This is the android case 7/8.
+TEST_F(SyncManagerTest, SupplyPendingGAIAPassUserProvided) {
+  EXPECT_FALSE(SetUpEncryption(DONT_WRITE_NIGORI, UNINITIALIZED));
+  Cryptographer other_cryptographer(&encryptor_);
+  {
+    WriteTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
+    Cryptographer* cryptographer = trans.GetCryptographer();
+    // Now update the nigori to reflect the new keys, and update the
+    // cryptographer to have pending keys.
+    KeyParams params = {"localhost", "dummy", "passphrase"};
+    other_cryptographer.AddKey(params);
+    WriteNode node(&trans);
+    EXPECT_TRUE(node.InitByTagLookup(kNigoriTag));
+    sync_pb::NigoriSpecifics nigori;
+    other_cryptographer.GetKeys(nigori.mutable_encrypted());
+    node.SetNigoriSpecifics(nigori);
+    cryptographer->Update(nigori);
+    EXPECT_FALSE(cryptographer->is_ready());
+  }
+  EXPECT_CALL(observer_, OnBootstrapTokenUpdated(_));
+  EXPECT_CALL(observer_, OnPassphraseAccepted());
+  EXPECT_CALL(observer_, OnEncryptionComplete());
+  sync_manager_.SetEncryptionPassphrase("passphrase", false);
+  EXPECT_FALSE(sync_manager_.EncryptEverythingEnabledForTest());
+  {
+    ReadTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
+    Cryptographer* cryptographer = trans.GetCryptographer();
+    EXPECT_TRUE(cryptographer->is_ready());
   }
 }
 
@@ -1763,7 +1771,7 @@ TEST_F(SyncManagerTest, SetPassphraseWithEmptyPasswordNode) {
   EXPECT_CALL(observer_, OnBootstrapTokenUpdated(_));
   EXPECT_CALL(observer_, OnPassphraseAccepted());
   EXPECT_CALL(observer_, OnEncryptionComplete());
-  sync_manager_.SetPassphrase("new_passphrase", true, true);
+  sync_manager_.SetEncryptionPassphrase("new_passphrase", true);
   EXPECT_FALSE(sync_manager_.EncryptEverythingEnabledForTest());
   {
     ReadTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
@@ -1816,7 +1824,7 @@ TEST_F(SyncManagerTest, EncryptBookmarksWithLegacyData) {
     EXPECT_TRUE(node.InitByIdLookup(node_id1));
 
     sync_pb::EntitySpecifics entity_specifics;
-    entity_specifics.MutableExtension(sync_pb::bookmark)->set_url(url);
+    entity_specifics.mutable_bookmark()->set_url(url);
     node.SetEntitySpecifics(entity_specifics);
 
     // Set the old style title.
@@ -1827,7 +1835,7 @@ TEST_F(SyncManagerTest, EncryptBookmarksWithLegacyData) {
     EXPECT_TRUE(node2.InitByIdLookup(node_id2));
 
     sync_pb::EntitySpecifics entity_specifics2;
-    entity_specifics2.MutableExtension(sync_pb::bookmark)->set_url(url2);
+    entity_specifics2.mutable_bookmark()->set_url(url2);
     node2.SetEntitySpecifics(entity_specifics2);
 
     // Set the old style title.
@@ -1933,8 +1941,8 @@ TEST_F(SyncManagerTest, CreateLocalBookmark) {
 TEST_F(SyncManagerTest, UpdateEntryWithEncryption) {
   std::string client_tag = "title";
   sync_pb::EntitySpecifics entity_specifics;
-  entity_specifics.MutableExtension(sync_pb::bookmark)->set_url("url");
-  entity_specifics.MutableExtension(sync_pb::bookmark)->set_title("title");
+  entity_specifics.mutable_bookmark()->set_url("url");
+  entity_specifics.mutable_bookmark()->set_title("title");
   MakeServerNode(sync_manager_.GetUserShare(), syncable::BOOKMARKS, client_tag,
                  BaseNode::GenerateSyncableHash(syncable::BOOKMARKS,
                                                 client_tag),
@@ -1957,12 +1965,7 @@ TEST_F(SyncManagerTest, UpdateEntryWithEncryption) {
   EXPECT_CALL(observer_, OnEncryptionComplete());
   EXPECT_TRUE(SetUpEncryption(WRITE_TO_NIGORI, FULL_ENCRYPTION));
 
-  sync_manager_.RefreshNigori(base::Bind(&SyncManagerTest::EmptyClosure,
-                                         base::Unretained(this)));
-  scoped_refptr<base::ThreadTestHelper> helper(
-      new base::ThreadTestHelper(
-          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE)));
-  ASSERT_TRUE(helper->Run());
+  sync_manager_.RefreshNigori(kTestChromeVersion, base::Bind(&DoNothing));
   PumpLoop();
   {
     ReadTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
@@ -1984,7 +1987,7 @@ TEST_F(SyncManagerTest, UpdateEntryWithEncryption) {
   EXPECT_CALL(observer_, OnBootstrapTokenUpdated(_));
   EXPECT_CALL(observer_, OnPassphraseAccepted());
   EXPECT_CALL(observer_, OnEncryptionComplete());
-  sync_manager_.SetPassphrase("new_passphrase", true, true);
+  sync_manager_.SetEncryptionPassphrase("new_passphrase", true);
   {
     ReadTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
     ReadNode node(&trans);
@@ -2004,9 +2007,7 @@ TEST_F(SyncManagerTest, UpdateEntryWithEncryption) {
   testing::Mock::VerifyAndClearExpectations(&observer_);
   EXPECT_CALL(observer_, OnEncryptionComplete());
 
-  sync_manager_.RefreshNigori(base::Bind(&SyncManagerTest::EmptyClosure,
-                                         base::Unretained(this)));
-  ASSERT_TRUE(helper->Run());
+  sync_manager_.RefreshNigori(kTestChromeVersion, base::Bind(&DoNothing));
   PumpLoop();
 
   {
@@ -2042,8 +2043,8 @@ TEST_F(SyncManagerTest, UpdateEntryWithEncryption) {
 
   // Manually change to different data. Should set is_unsynced.
   {
-    entity_specifics.MutableExtension(sync_pb::bookmark)->set_url("url2");
-    entity_specifics.MutableExtension(sync_pb::bookmark)->set_title("title2");
+    entity_specifics.mutable_bookmark()->set_url("url2");
+    entity_specifics.mutable_bookmark()->set_title("title2");
     WriteTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
     WriteNode node(&trans);
     EXPECT_TRUE(node.InitByClientTagLookup(syncable::BOOKMARKS, client_tag));
@@ -2072,7 +2073,7 @@ TEST_F(SyncManagerTest, UpdatePasswordSetEntitySpecificsNoChange) {
     data.set_password_value("secret");
     cryptographer->Encrypt(
         data,
-        entity_specifics.MutableExtension(sync_pb::password)->
+        entity_specifics.mutable_password()->
             mutable_encrypted());
   }
   MakeServerNode(sync_manager_.GetUserShare(), syncable::PASSWORDS, client_tag,
@@ -2106,7 +2107,7 @@ TEST_F(SyncManagerTest, UpdatePasswordSetPasswordSpecifics) {
     data.set_password_value("secret");
     cryptographer->Encrypt(
         data,
-        entity_specifics.MutableExtension(sync_pb::password)->
+        entity_specifics.mutable_password()->
             mutable_encrypted());
   }
   MakeServerNode(sync_manager_.GetUserShare(), syncable::PASSWORDS, client_tag,
@@ -2136,8 +2137,7 @@ TEST_F(SyncManagerTest, UpdatePasswordSetPasswordSpecifics) {
     data.set_password_value("secret2");
     cryptographer->Encrypt(
         data,
-        entity_specifics.MutableExtension(sync_pb::password)->
-            mutable_encrypted());
+        entity_specifics.mutable_password()->mutable_encrypted());
     node.SetPasswordSpecifics(data);
     const syncable::Entry* node_entry = node.GetEntry();
     EXPECT_TRUE(node_entry->Get(IS_UNSYNCED));
@@ -2157,8 +2157,7 @@ TEST_F(SyncManagerTest, UpdatePasswordNewPassphrase) {
     data.set_password_value("secret");
     cryptographer->Encrypt(
         data,
-        entity_specifics.MutableExtension(sync_pb::password)->
-            mutable_encrypted());
+        entity_specifics.mutable_password()->mutable_encrypted());
   }
   MakeServerNode(sync_manager_.GetUserShare(), syncable::PASSWORDS, client_tag,
                  BaseNode::GenerateSyncableHash(syncable::PASSWORDS,
@@ -2172,7 +2171,7 @@ TEST_F(SyncManagerTest, UpdatePasswordNewPassphrase) {
   EXPECT_CALL(observer_, OnBootstrapTokenUpdated(_));
   EXPECT_CALL(observer_, OnPassphraseAccepted());
   EXPECT_CALL(observer_, OnEncryptionComplete());
-  sync_manager_.SetPassphrase("new_passphrase", true, true);
+  sync_manager_.SetEncryptionPassphrase("new_passphrase", true);
   EXPECT_TRUE(ResetUnsyncedEntry(syncable::PASSWORDS, client_tag));
 }
 
@@ -2189,8 +2188,7 @@ TEST_F(SyncManagerTest, UpdatePasswordReencryptEverything) {
     data.set_password_value("secret");
     cryptographer->Encrypt(
         data,
-        entity_specifics.MutableExtension(sync_pb::password)->
-            mutable_encrypted());
+        entity_specifics.mutable_password()->mutable_encrypted());
   }
   MakeServerNode(sync_manager_.GetUserShare(), syncable::PASSWORDS, client_tag,
                  BaseNode::GenerateSyncableHash(syncable::PASSWORDS,
@@ -2202,12 +2200,7 @@ TEST_F(SyncManagerTest, UpdatePasswordReencryptEverything) {
   // Force a re-encrypt everything. Should not set is_unsynced.
   testing::Mock::VerifyAndClearExpectations(&observer_);
   EXPECT_CALL(observer_, OnEncryptionComplete());
-  sync_manager_.RefreshNigori(base::Bind(&SyncManagerTest::EmptyClosure,
-                                         base::Unretained(this)));
-  scoped_refptr<base::ThreadTestHelper> helper(
-      new base::ThreadTestHelper(
-          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE)));
-  ASSERT_TRUE(helper->Run());
+  sync_manager_.RefreshNigori(kTestChromeVersion, base::Bind(&DoNothing));
   PumpLoop();
   EXPECT_FALSE(ResetUnsyncedEntry(syncable::PASSWORDS, client_tag));
 }
@@ -2217,8 +2210,8 @@ TEST_F(SyncManagerTest, UpdatePasswordReencryptEverything) {
 TEST_F(SyncManagerTest, SetBookmarkTitle) {
   std::string client_tag = "title";
   sync_pb::EntitySpecifics entity_specifics;
-  entity_specifics.MutableExtension(sync_pb::bookmark)->set_url("url");
-  entity_specifics.MutableExtension(sync_pb::bookmark)->set_title("title");
+  entity_specifics.mutable_bookmark()->set_url("url");
+  entity_specifics.mutable_bookmark()->set_title("title");
   MakeServerNode(sync_manager_.GetUserShare(), syncable::BOOKMARKS, client_tag,
                  BaseNode::GenerateSyncableHash(syncable::BOOKMARKS,
                                                 client_tag),
@@ -2251,8 +2244,8 @@ TEST_F(SyncManagerTest, SetBookmarkTitle) {
 TEST_F(SyncManagerTest, SetBookmarkTitleWithEncryption) {
   std::string client_tag = "title";
   sync_pb::EntitySpecifics entity_specifics;
-  entity_specifics.MutableExtension(sync_pb::bookmark)->set_url("url");
-  entity_specifics.MutableExtension(sync_pb::bookmark)->set_title("title");
+  entity_specifics.mutable_bookmark()->set_url("url");
+  entity_specifics.mutable_bookmark()->set_title("title");
   MakeServerNode(sync_manager_.GetUserShare(), syncable::BOOKMARKS, client_tag,
                  BaseNode::GenerateSyncableHash(syncable::BOOKMARKS,
                                                 client_tag),
@@ -2266,12 +2259,7 @@ TEST_F(SyncManagerTest, SetBookmarkTitleWithEncryption) {
                   HasModelTypes(syncable::ModelTypeSet::All()), true));
   EXPECT_CALL(observer_, OnEncryptionComplete());
   EXPECT_TRUE(SetUpEncryption(WRITE_TO_NIGORI, FULL_ENCRYPTION));
-  sync_manager_.RefreshNigori(base::Bind(&SyncManagerTest::EmptyClosure,
-                                         base::Unretained(this)));
-  scoped_refptr<base::ThreadTestHelper> helper(
-      new base::ThreadTestHelper(
-          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE)));
-  ASSERT_TRUE(helper->Run());
+  sync_manager_.RefreshNigori(kTestChromeVersion, base::Bind(&DoNothing));
   PumpLoop();
   EXPECT_TRUE(ResetUnsyncedEntry(syncable::BOOKMARKS, client_tag));
 
@@ -2309,8 +2297,8 @@ TEST_F(SyncManagerTest, SetBookmarkTitleWithEncryption) {
 TEST_F(SyncManagerTest, SetNonBookmarkTitle) {
   std::string client_tag = "title";
   sync_pb::EntitySpecifics entity_specifics;
-  entity_specifics.MutableExtension(sync_pb::preference)->set_name("name");
-  entity_specifics.MutableExtension(sync_pb::preference)->set_value("value");
+  entity_specifics.mutable_preference()->set_name("name");
+  entity_specifics.mutable_preference()->set_value("value");
   MakeServerNode(sync_manager_.GetUserShare(),
                  syncable::PREFERENCES,
                  client_tag,
@@ -2345,8 +2333,8 @@ TEST_F(SyncManagerTest, SetNonBookmarkTitle) {
 TEST_F(SyncManagerTest, SetNonBookmarkTitleWithEncryption) {
   std::string client_tag = "title";
   sync_pb::EntitySpecifics entity_specifics;
-  entity_specifics.MutableExtension(sync_pb::preference)->set_name("name");
-  entity_specifics.MutableExtension(sync_pb::preference)->set_value("value");
+  entity_specifics.mutable_preference()->set_name("name");
+  entity_specifics.mutable_preference()->set_value("value");
   MakeServerNode(sync_manager_.GetUserShare(),
                  syncable::PREFERENCES,
                  client_tag,
@@ -2362,12 +2350,7 @@ TEST_F(SyncManagerTest, SetNonBookmarkTitleWithEncryption) {
                   HasModelTypes(syncable::ModelTypeSet::All()), true));
   EXPECT_CALL(observer_, OnEncryptionComplete());
   EXPECT_TRUE(SetUpEncryption(WRITE_TO_NIGORI, FULL_ENCRYPTION));
-  sync_manager_.RefreshNigori(base::Bind(&SyncManagerTest::EmptyClosure,
-                                         base::Unretained(this)));
-  scoped_refptr<base::ThreadTestHelper> helper(
-      new base::ThreadTestHelper(
-          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE)));
-  ASSERT_TRUE(helper->Run());
+  sync_manager_.RefreshNigori(kTestChromeVersion, base::Bind(&DoNothing));
   PumpLoop();
   EXPECT_TRUE(ResetUnsyncedEntry(syncable::PREFERENCES, client_tag));
 
@@ -2397,6 +2380,63 @@ TEST_F(SyncManagerTest, SetNonBookmarkTitleWithEncryption) {
     EXPECT_TRUE(specifics.has_encrypted());
     EXPECT_EQ(kEncryptedString, node_entry->Get(NON_UNIQUE_NAME));
     EXPECT_FALSE(node_entry->Get(IS_UNSYNCED));
+  }
+}
+
+// Create an encrypted entry when the cryptographer doesn't think the type is
+// marked for encryption. Ensure reads/writes don't break and don't unencrypt
+// the data.
+TEST_F(SyncManagerTest, SetPreviouslyEncryptedSpecifics) {
+  std::string client_tag = "tag";
+  std::string url = "url";
+  std::string url2 = "new_url";
+  std::string title = "title";
+  sync_pb::EntitySpecifics entity_specifics;
+  EXPECT_TRUE(SetUpEncryption(WRITE_TO_NIGORI, DEFAULT_ENCRYPTION));
+  {
+    ReadTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
+    browser_sync::Cryptographer* crypto = trans.GetCryptographer();
+    sync_pb::EntitySpecifics bm_specifics;
+    bm_specifics.mutable_bookmark()->set_title("title");
+    bm_specifics.mutable_bookmark()->set_url("url");
+    sync_pb::EncryptedData encrypted;
+    crypto->Encrypt(bm_specifics, &encrypted);
+    entity_specifics.mutable_encrypted()->CopyFrom(encrypted);
+    syncable::AddDefaultFieldValue(syncable::BOOKMARKS, &entity_specifics);
+  }
+  MakeServerNode(sync_manager_.GetUserShare(), syncable::BOOKMARKS, client_tag,
+                 BaseNode::GenerateSyncableHash(syncable::BOOKMARKS,
+                                                client_tag),
+                 entity_specifics);
+
+  {
+    // Verify the data.
+    ReadTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
+    ReadNode node(&trans);
+    EXPECT_TRUE(node.InitByClientTagLookup(syncable::BOOKMARKS, client_tag));
+    EXPECT_EQ(title, node.GetTitle());
+    EXPECT_EQ(GURL(url), node.GetURL());
+  }
+
+  {
+    // Overwrite the url (which overwrites the specifics).
+    WriteTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
+    WriteNode node(&trans);
+    EXPECT_TRUE(node.InitByClientTagLookup(syncable::BOOKMARKS, client_tag));
+    node.SetURL(GURL(url2));
+  }
+
+  {
+    // Verify it's still encrypted and it has the most recent url.
+    ReadTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
+    ReadNode node(&trans);
+    EXPECT_TRUE(node.InitByClientTagLookup(syncable::BOOKMARKS, client_tag));
+    EXPECT_EQ(title, node.GetTitle());
+    EXPECT_EQ(GURL(url2), node.GetURL());
+    const syncable::Entry* node_entry = node.GetEntry();
+    EXPECT_EQ(kEncryptedString, node_entry->Get(NON_UNIQUE_NAME));
+    const sync_pb::EntitySpecifics& specifics = node_entry->Get(SPECIFICS);
+    EXPECT_TRUE(specifics.has_encrypted());
   }
 }
 

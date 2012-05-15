@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -49,9 +49,15 @@ bool AllProfilesHaveSameExtensions() {
 }
 
 
-void InstallExtension(Profile* profile, int index) {
+std::string InstallExtension(Profile* profile, int index) {
   return SyncExtensionHelper::GetInstance()->InstallExtension(
       profile, CreateFakeExtensionName(index), Extension::TYPE_EXTENSION);
+}
+
+std::string InstallExtensionForAllProfiles(int index) {
+  for (int i = 0; i < test()->num_clients(); ++i)
+    InstallExtension(test()->GetProfile(i), index);
+  return InstallExtension(test()->verifier(), index);
 }
 
 void UninstallExtension(Profile* profile, int index) {

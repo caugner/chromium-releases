@@ -1,22 +1,20 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 /**
  * ImageEditor is the top level object that holds together and connects
  * everything needed for image editing.
- * @param {HTMLElement} rootContainer
- * @param {HTMLElement} galleryContainer
- * @param {HTMLElement} mainToolbarContainer
- * @param {HTMLElement} modeToolbarContainer
+ * @param {Viewport} viewport
+ * @param {ImageView} imageView
+ * @param {Object} DOMContainers
  * @param {Array.<ImageEditor.Mode>} modes
  * @param {Object} displayStringFunction
  */
 function ImageEditor(
-    rootContainer, galleryContainer, mainToolbarContainer, modeToolbarContainer,
-    modes, displayStringFunction) {
-  this.rootContainer_ = rootContainer;
-  this.container_ = galleryContainer;
+    viewport, imageView, DOMContainers, modes, displayStringFunction) {
+  this.rootContainer_ = DOMContainers.root;
+  this.container_ = DOMContainers.image;
   this.modes_ = modes;
   this.displayStringFunction_ = displayStringFunction;
 
@@ -24,13 +22,13 @@ function ImageEditor(
 
   var document = this.container_.ownerDocument;
 
-  this.viewport_ = new Viewport();
+  this.viewport_ = viewport;
   this.viewport_.sizeByFrame(this.container_);
 
   this.buffer_ = new ImageBuffer();
   this.viewport_.addRepaintCallback(this.buffer_.draw.bind(this.buffer_));
 
-  this.imageView_ = new ImageView(this.container_, this.viewport_);
+  this.imageView_ = imageView;
   this.imageView_.addContentCallback(this.onContentUpdate_.bind(this));
   this.buffer_.addOverlay(this.imageView_);
 
@@ -38,10 +36,10 @@ function ImageEditor(
       this.rootContainer_, this.container_, this.getBuffer());
 
   this.mainToolbar_ = new ImageEditor.Toolbar(
-      mainToolbarContainer, displayStringFunction);
+      DOMContainers.toolbar, displayStringFunction);
 
   this.modeToolbar_ = new ImageEditor.Toolbar(
-      modeToolbarContainer, displayStringFunction,
+      DOMContainers.mode, displayStringFunction,
       this.onOptionsChange.bind(this));
 
   this.prompt_ = new ImageEditor.Prompt(
@@ -414,7 +412,7 @@ ImageEditor.prototype.leaveModeGently = function() {
 };
 
 ImageEditor.prototype.onKeyDown = function(event) {
-  switch(event.keyIdentifier) {
+  switch(util.getKeyModifiers(event) + event.keyIdentifier) {
     case 'U+001B': // Escape
     case 'Enter':
       if (this.getMode()) {
@@ -423,19 +421,17 @@ ImageEditor.prototype.onKeyDown = function(event) {
       }
       break;
 
-    case 'U+005A':  // 'z'
-      if (event.ctrlKey) {
-        if (event.shiftKey) {
-          if (this.commandQueue_.canRedo()) {
-            this.redo();
-            return true;
-          }
-        } else {
-          if (this.commandQueue_.canUndo()) {
-            this.undo();
-            return true;
-          }
-        }
+    case 'Ctrl-U+005A':  // Ctrl+Z
+      if (this.commandQueue_.canUndo()) {
+        this.undo();
+        return true;
+      }
+      break;
+
+    case 'Ctrl-Shift-U+005A':  // Ctrl+Shift-Z
+      if (this.commandQueue_.canRedo()) {
+        this.redo();
+        return true;
       }
       break;
   }
@@ -833,13 +829,19 @@ ImageEditor.Prompt.prototype.setTimer = function(callback, timeout) {
   }, timeout);
 };
 
-ImageEditor.Prompt.prototype.show = function(text, timeout) {
+ImageEditor.Prompt.prototype.show = function(text, timeout, formatArgs) {
+  this.showAt.apply(this,
+      ['center'].concat(Array.prototype.slice.call(arguments)));
+};
+
+ImageEditor.Prompt.prototype.showAt = function(pos, text, timeout, formatArgs) {
   this.reset();
   if (!text) return;
 
   var document = this.container_.ownerDocument;
   this.wrapper_ = document.createElement('div');
   this.wrapper_.className = 'prompt-wrapper';
+  this.wrapper_.setAttribute('pos', pos);
   this.container_.appendChild(this.wrapper_);
 
   this.prompt_ = document.createElement('div');
@@ -851,7 +853,13 @@ ImageEditor.Prompt.prototype.show = function(text, timeout) {
   this.wrapper_.appendChild(tool);
   tool.appendChild(this.prompt_);
 
-  this.prompt_.textContent = this.displayStringFunction_(text);
+  var args = [text].concat(Array.prototype.slice.call(arguments, 3));
+  this.prompt_.textContent = this.displayStringFunction_.apply(null, args);
+
+  var close = document.createElement('div');
+  close.className = 'close';
+  close.addEventListener('click', this.hide.bind(this));
+  this.prompt_.appendChild(close);
 
   setTimeout(
       this.prompt_.setAttribute.bind(this.prompt_, 'state', 'fadein'), 0);

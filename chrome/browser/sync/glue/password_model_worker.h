@@ -6,7 +6,7 @@
 #define CHROME_BROWSER_SYNC_GLUE_PASSWORD_MODEL_WORKER_H_
 #pragma once
 
-#include "chrome/browser/sync/engine/model_safe_worker.h"
+#include "sync/engine/model_safe_worker.h"
 
 #include "base/basictypes.h"
 #include "base/callback_forward.h"
@@ -26,7 +26,8 @@ namespace browser_sync {
 // which is the DB thread on Linux and Windows.
 class PasswordModelWorker : public browser_sync::ModelSafeWorker {
  public:
-  explicit PasswordModelWorker(PasswordStore* password_store);
+  explicit PasswordModelWorker(
+      const scoped_refptr<PasswordStore>& password_store);
   virtual ~PasswordModelWorker();
 
   // ModelSafeWorker implementation. Called on syncapi SyncerThread.

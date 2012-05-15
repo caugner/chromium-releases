@@ -93,12 +93,6 @@ const char kPrefAllowFileAccess[] = "newAllowFileAccess";
 // the old flag and possibly go back to that name.
 // const char kPrefAllowFileAccessOld[] = "allowFileAccess";
 
-// A preference indicating that the extension wants to delay network requests
-// on browser launch until it indicates it's ready. For example, an extension
-// using the webRequest API might want to ensure that no requests are sent
-// before it has registered its event handlers.
-const char kPrefDelayNetworkRequests[] = "delayNetworkRequests";
-
 // A preference set by the web store to indicate login information for
 // purchased apps.
 const char kWebStoreLogin[] = "extensions.webstore_login";
@@ -156,6 +150,10 @@ const char kPrefContentSettings[] = "content_settings";
 
 // A preference that contains extension-set content settings.
 const char kPrefIncognitoContentSettings[] = "incognito_content_settings";
+
+// A list of event names that this extension has registered from its lazy
+// background page.
+const char kRegisteredEvents[] = "events";
 
 // Provider of write access to a dictionary storing extension prefs.
 class ScopedExtensionPrefUpdate : public DictionaryPrefUpdate {
@@ -701,13 +699,14 @@ void ExtensionPrefs::UpdateBlacklist(
             remove_pref_ids.push_back(id);
           } else {
             // Remove the blacklist bit.
-            ext->Remove(kPrefBlacklist, NULL);
+            UpdateExtensionPref(id, kPrefBlacklist, NULL);
           }
         }
       } else {
         if (!IsBlacklistBitSet(ext)) {
           // Only set the blacklist if it was not set.
-          ext->SetBoolean(kPrefBlacklist, true);
+          UpdateExtensionPref(id, kPrefBlacklist,
+                              Value::CreateBooleanValue(true));
         }
         // Keep the record if this extension is already processed.
         used_id_set.insert(id);
@@ -894,6 +893,35 @@ void ExtensionPrefs::SetActivePermissions(
       extension_id, kPrefActivePermissions, permissions);
 }
 
+std::set<std::string> ExtensionPrefs::GetRegisteredEvents(
+    const std::string& extension_id) {
+  std::set<std::string> events;
+  const DictionaryValue* extension = GetExtensionPref(extension_id);
+  if (!extension)
+    return events;
+
+  ListValue* value = NULL;
+  if (!extension->GetList(kRegisteredEvents, &value))
+    return events;
+
+  for (size_t i = 0; i < value->GetSize(); ++i) {
+    std::string event;
+    if (value->GetString(i, &event))
+      events.insert(event);
+  }
+  return events;
+}
+
+void ExtensionPrefs::SetRegisteredEvents(
+    const std::string& extension_id, const std::set<std::string>& events) {
+  ListValue* value = new ListValue();
+  for (std::set<std::string>::const_iterator it = events.begin();
+       it != events.end(); ++it) {
+    value->Append(new StringValue(*it));
+  }
+  UpdateExtensionPref(extension_id, kRegisteredEvents, value);
+}
+
 bool ExtensionPrefs::IsIncognitoEnabled(const std::string& extension_id) {
   return ReadExtensionPrefBoolean(extension_id, kPrefIncognitoEnabled);
 }
@@ -918,21 +946,6 @@ bool ExtensionPrefs::HasAllowFileAccessSetting(
     const std::string& extension_id) const {
   const DictionaryValue* ext = GetExtensionPref(extension_id);
   return ext && ext->HasKey(kPrefAllowFileAccess);
-}
-
-void ExtensionPrefs::SetDelaysNetworkRequests(const std::string& extension_id,
-                                              bool does_delay) {
-  if (does_delay) {
-    UpdateExtensionPref(extension_id, kPrefDelayNetworkRequests,
-                        Value::CreateBooleanValue(true));
-  } else {
-    // Remove the pref.
-    UpdateExtensionPref(extension_id, kPrefDelayNetworkRequests, NULL);
-  }
-}
-
-bool ExtensionPrefs::DelaysNetworkRequests(const std::string& extension_id) {
-  return ReadExtensionPrefBoolean(extension_id, kPrefDelayNetworkRequests);
 }
 
 ExtensionPrefs::LaunchType ExtensionPrefs::GetLaunchType(
@@ -990,7 +1003,11 @@ extension_misc::LaunchContainer ExtensionPrefs::GetLaunchContainer(
       // If the pref is set to launch a window (or no pref is set, and
       // window opening is the default), make the container a window.
       result = extension_misc::LAUNCH_WINDOW;
-
+#if defined(USE_ASH)
+    } else if (prefs_launch_type == ExtensionPrefs::LAUNCH_FULLSCREEN) {
+      // LAUNCH_FULLSCREEN launches in a maximized app window in ash.
+      result = extension_misc::LAUNCH_WINDOW;
+#endif
     } else {
       // All other launch types (tab, pinned, fullscreen) are
       // implemented as tabs in a window.
@@ -1531,6 +1548,23 @@ void ExtensionPrefs::GetExtensions(ExtensionIdSet* out) {
   }
 }
 
+// static
+ExtensionPrefs::ExtensionIdSet ExtensionPrefs::GetExtensionsFrom(
+    const base::DictionaryValue* extension_prefs) {
+  ExtensionIdSet result;
+  for (base::DictionaryValue::key_iterator it = extension_prefs->begin_keys();
+       it != extension_prefs->end_keys(); ++it) {
+    DictionaryValue* ext;
+    if (!extension_prefs->GetDictionaryWithoutPathExpansion(*it, &ext)) {
+      NOTREACHED() << "Invalid pref for extension " << *it;
+      continue;
+    }
+    if (!IsBlacklistBitSet(ext))
+      result.push_back(*it);
+  }
+  return result;
+}
+
 void ExtensionPrefs::FixMissingPrefs(const ExtensionIdSet& extension_ids) {
   // Fix old entries that did not get an installation time entry when they
   // were installed or don't have a preferences field.
@@ -1740,7 +1774,7 @@ void ExtensionPrefs::RegisterUserPrefs(PrefService* prefs) {
   prefs->RegisterDictionaryPref(kExtensionsPref, PrefService::UNSYNCABLE_PREF);
   prefs->RegisterListPref(kExtensionToolbar, PrefService::UNSYNCABLE_PREF);
   prefs->RegisterIntegerPref(prefs::kExtensionToolbarSize,
-                             -1,
+                             -1,  // default value
                              PrefService::UNSYNCABLE_PREF);
   prefs->RegisterDictionaryPref(kExtensionsBlacklistUpdate,
                                 PrefService::UNSYNCABLE_PREF);
@@ -1751,6 +1785,15 @@ void ExtensionPrefs::RegisterUserPrefs(PrefService* prefs) {
   prefs->RegisterListPref(prefs::kExtensionInstallForceList,
                           PrefService::UNSYNCABLE_PREF);
   prefs->RegisterStringPref(kWebStoreLogin,
-                            std::string() /* default_value */,
+                            std::string(),  // default value
                             PrefService::UNSYNCABLE_PREF);
+  prefs->RegisterStringPref(prefs::kExtensionBlacklistUpdateVersion,
+                            "0",  // default value
+                            PrefService::UNSYNCABLE_PREF);
+  prefs->RegisterInt64Pref(prefs::kLastExtensionsUpdateCheck,
+                           0,  // default value
+                           PrefService::UNSYNCABLE_PREF);
+  prefs->RegisterInt64Pref(prefs::kNextExtensionsUpdateCheck,
+                           0,  // default value
+                           PrefService::UNSYNCABLE_PREF);
 }

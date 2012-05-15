@@ -13,7 +13,11 @@
 #include "base/scoped_temp_dir.h"
 #include "base/timer.h"
 #include "chrome/browser/profiles/profile.h"
-#include "content/browser/appcache/chrome_appcache_service.h"
+
+namespace content {
+class MockResourceContext;
+class SpeechRecognitionPreferences;
+}
 
 namespace history {
 class TopSites;
@@ -21,6 +25,7 @@ class TopSites;
 
 namespace net {
 class CookieMonster;
+class URLRequestContextGetter;
 }
 
 namespace quota {
@@ -39,14 +44,8 @@ class HostContentSettingsMap;
 class PrefService;
 class ProfileDependencyManager;
 class ProfileSyncService;
-class SpeechInputPreferences;
 class TemplateURLService;
 class TestingPrefService;
-class WebKitContext;
-
-namespace net {
-class URLRequestContextGetter;
-}
 
 class TestingProfile : public Profile {
  public:
@@ -147,59 +146,10 @@ class TestingProfile : public Profile {
 
   TestingPrefService* GetTestingPrefService();
 
-  virtual TestingProfile* AsTestingProfile() OVERRIDE;
-  virtual std::string GetProfileName() OVERRIDE;
+  // content::BrowserContext
   virtual FilePath GetPath() OVERRIDE;
-  void set_incognito(bool incognito) { incognito_ = incognito; }
-  virtual bool IsOffTheRecord() OVERRIDE;
-  // Assumes ownership.
-  virtual void SetOffTheRecordProfile(Profile* profile);
-  virtual Profile* GetOffTheRecordProfile() OVERRIDE;
-  virtual void DestroyOffTheRecordProfile() OVERRIDE {}
-  virtual GAIAInfoUpdateService* GetGAIAInfoUpdateService() OVERRIDE;
-  virtual bool HasOffTheRecordProfile() OVERRIDE;
-  virtual Profile* GetOriginalProfile() OVERRIDE;
-  void SetAppCacheService(ChromeAppCacheService* appcache_service);
-  virtual ChromeAppCacheService* GetAppCacheService() OVERRIDE;
-  virtual webkit_database::DatabaseTracker* GetDatabaseTracker() OVERRIDE;
-  virtual VisitedLinkMaster* GetVisitedLinkMaster() OVERRIDE;
-  virtual ExtensionService* GetExtensionService() OVERRIDE;
-  virtual UserScriptMaster* GetUserScriptMaster() OVERRIDE;
-  virtual ExtensionDevToolsManager* GetExtensionDevToolsManager() OVERRIDE;
-  virtual ExtensionProcessManager* GetExtensionProcessManager() OVERRIDE;
-  virtual ExtensionMessageService* GetExtensionMessageService() OVERRIDE;
-  virtual ExtensionEventRouter* GetExtensionEventRouter() OVERRIDE;
-  void SetExtensionSpecialStoragePolicy(
-      ExtensionSpecialStoragePolicy* extension_special_storage_policy);
-  virtual ExtensionSpecialStoragePolicy*
-      GetExtensionSpecialStoragePolicy() OVERRIDE;
-  virtual SSLHostState* GetSSLHostState() OVERRIDE;
-  virtual FaviconService* GetFaviconService(ServiceAccessType access) OVERRIDE;
-  virtual HistoryService* GetHistoryService(ServiceAccessType access) OVERRIDE;
-  virtual HistoryService* GetHistoryServiceWithoutCreating() OVERRIDE;
-  // The CookieMonster will only be returned if a Context has been created. Do
-  // this by calling CreateRequestContext(). See the note at GetRequestContext
-  // for more information.
-  net::CookieMonster* GetCookieMonster();
-  virtual AutocompleteClassifier* GetAutocompleteClassifier() OVERRIDE;
-  virtual history::ShortcutsBackend* GetShortcutsBackend() OVERRIDE;
-  virtual WebDataService* GetWebDataService(ServiceAccessType access) OVERRIDE;
-  virtual WebDataService* GetWebDataServiceWithoutCreating() OVERRIDE;
-  virtual PasswordStore* GetPasswordStore(ServiceAccessType access) OVERRIDE;
-  // Sets the profile's PrefService. If a pref service hasn't been explicitly
-  // set GetPrefs creates one, so normally you need not invoke this. If you need
-  // to set a pref service you must invoke this before GetPrefs.
-  // TestingPrefService takes ownership of |prefs|.
-  void SetPrefService(PrefService* prefs);
-  virtual PrefService* GetPrefs() OVERRIDE;
-  virtual TemplateURLFetcher* GetTemplateURLFetcher() OVERRIDE;
-  virtual history::TopSites* GetTopSites() OVERRIDE;
-  virtual history::TopSites* GetTopSitesWithoutCreating() OVERRIDE;
+  virtual bool IsOffTheRecord() const OVERRIDE;
   virtual content::DownloadManager* GetDownloadManager() OVERRIDE;
-  virtual fileapi::FileSystemContext* GetFileSystemContext() OVERRIDE;
-  virtual void SetQuotaManager(quota::QuotaManager* manager);
-  virtual quota::QuotaManager* GetQuotaManager() OVERRIDE;
-
   // Returns a testing ContextGetter (if one has been created via
   // CreateRequestContext) or NULL. This is not done on-demand for two reasons:
   // (1) Some tests depend on GetRequestContext() returning NULL. (2) Because
@@ -211,6 +161,57 @@ class TestingProfile : public Profile {
   virtual net::URLRequestContextGetter* GetRequestContext() OVERRIDE;
   virtual net::URLRequestContextGetter* GetRequestContextForRenderProcess(
       int renderer_child_id) OVERRIDE;
+  virtual content::ResourceContext* GetResourceContext() OVERRIDE;
+  virtual content::GeolocationPermissionContext*
+      GetGeolocationPermissionContext() OVERRIDE;
+  virtual content::SpeechRecognitionPreferences*
+      GetSpeechRecognitionPreferences() OVERRIDE;
+  virtual bool DidLastSessionExitCleanly() OVERRIDE;
+  virtual quota::SpecialStoragePolicy* GetSpecialStoragePolicy() OVERRIDE;
+
+  virtual TestingProfile* AsTestingProfile() OVERRIDE;
+  virtual std::string GetProfileName() OVERRIDE;
+  void set_incognito(bool incognito) { incognito_ = incognito; }
+  // Assumes ownership.
+  virtual void SetOffTheRecordProfile(Profile* profile);
+  virtual Profile* GetOffTheRecordProfile() OVERRIDE;
+  virtual void DestroyOffTheRecordProfile() OVERRIDE {}
+  virtual GAIAInfoUpdateService* GetGAIAInfoUpdateService() OVERRIDE;
+  virtual bool HasOffTheRecordProfile() OVERRIDE;
+  virtual Profile* GetOriginalProfile() OVERRIDE;
+  virtual VisitedLinkMaster* GetVisitedLinkMaster() OVERRIDE;
+  virtual ExtensionService* GetExtensionService() OVERRIDE;
+  virtual UserScriptMaster* GetUserScriptMaster() OVERRIDE;
+  virtual ExtensionDevToolsManager* GetExtensionDevToolsManager() OVERRIDE;
+  virtual ExtensionProcessManager* GetExtensionProcessManager() OVERRIDE;
+  virtual ExtensionMessageService* GetExtensionMessageService() OVERRIDE;
+  virtual ExtensionEventRouter* GetExtensionEventRouter() OVERRIDE;
+  void SetExtensionSpecialStoragePolicy(
+      ExtensionSpecialStoragePolicy* extension_special_storage_policy);
+  virtual ExtensionSpecialStoragePolicy*
+      GetExtensionSpecialStoragePolicy() OVERRIDE;
+  virtual LazyBackgroundTaskQueue* GetLazyBackgroundTaskQueue() OVERRIDE;
+  virtual FaviconService* GetFaviconService(ServiceAccessType access) OVERRIDE;
+  virtual HistoryService* GetHistoryService(ServiceAccessType access) OVERRIDE;
+  virtual HistoryService* GetHistoryServiceWithoutCreating() OVERRIDE;
+  // The CookieMonster will only be returned if a Context has been created. Do
+  // this by calling CreateRequestContext(). See the note at GetRequestContext
+  // for more information.
+  net::CookieMonster* GetCookieMonster();
+  virtual AutocompleteClassifier* GetAutocompleteClassifier() OVERRIDE;
+  virtual history::ShortcutsBackend* GetShortcutsBackend() OVERRIDE;
+  virtual WebDataService* GetWebDataService(ServiceAccessType access) OVERRIDE;
+  virtual WebDataService* GetWebDataServiceWithoutCreating() OVERRIDE;
+  // Sets the profile's PrefService. If a pref service hasn't been explicitly
+  // set GetPrefs creates one, so normally you need not invoke this. If you need
+  // to set a pref service you must invoke this before GetPrefs.
+  // TestingPrefService takes ownership of |prefs|.
+  void SetPrefService(PrefService* prefs);
+  virtual PrefService* GetPrefs() OVERRIDE;
+  virtual TemplateURLFetcher* GetTemplateURLFetcher() OVERRIDE;
+  virtual history::TopSites* GetTopSites() OVERRIDE;
+  virtual history::TopSites* GetTopSitesWithoutCreating() OVERRIDE;
+
   void CreateRequestContext();
   // Clears out the created request context (which must be done before shutting
   // down the IO thread to avoid leaks).
@@ -221,17 +222,9 @@ class TestingProfile : public Profile {
       GetRequestContextForExtensions() OVERRIDE;
   virtual net::URLRequestContextGetter* GetRequestContextForIsolatedApp(
       const std::string& app_id) OVERRIDE;
-
-  virtual const content::ResourceContext& GetResourceContext() OVERRIDE;
-
   virtual net::SSLConfigService* GetSSLConfigService() OVERRIDE;
   virtual UserStyleSheetWatcher* GetUserStyleSheetWatcher() OVERRIDE;
   virtual HostContentSettingsMap* GetHostContentSettingsMap() OVERRIDE;
-  virtual content::GeolocationPermissionContext*
-      GetGeolocationPermissionContext() OVERRIDE;
-  virtual SpeechInputPreferences* GetSpeechInputPreferences() OVERRIDE;
-  virtual content::HostZoomMap* GetHostZoomMap() OVERRIDE;
-  virtual bool HasProfileSyncService() OVERRIDE;
   virtual std::wstring GetName();
   virtual void SetName(const std::wstring& name) {}
   virtual std::wstring GetID();
@@ -239,7 +232,6 @@ class TestingProfile : public Profile {
   void set_last_session_exited_cleanly(bool value) {
     last_session_exited_cleanly_ = value;
   }
-  virtual bool DidLastSessionExitCleanly() OVERRIDE;
   virtual void MergeResourceString(int message_id,
                                    std::wstring* output_string) {}
   virtual void MergeResourceInteger(int message_id, int* output_value) {}
@@ -248,8 +240,6 @@ class TestingProfile : public Profile {
   virtual bool IsSameProfile(Profile *p) OVERRIDE;
   virtual base::Time GetStartTime() const OVERRIDE;
   virtual ProtocolHandlerRegistry* GetProtocolHandlerRegistry() OVERRIDE;
-  virtual WebKitContext* GetWebKitContext() OVERRIDE;
-  virtual WebKitContext* GetOffTheRecordWebKitContext();
   virtual void MarkAsCleanShutdown() OVERRIDE {}
   virtual void InitExtensions(bool extensions_enabled) OVERRIDE {}
   virtual void InitPromoResources() OVERRIDE {}
@@ -257,6 +247,7 @@ class TestingProfile : public Profile {
 
   virtual FilePath last_selected_directory() OVERRIDE;
   virtual void set_last_selected_directory(const FilePath& path) OVERRIDE;
+  virtual bool WasCreatedByVersionOrLater(const std::string& version) OVERRIDE;
 #if defined(OS_CHROMEOS)
   virtual void SetupChromeOSEnterpriseExtensionObserver() OVERRIDE {
   }
@@ -276,10 +267,6 @@ class TestingProfile : public Profile {
   // history service processes all pending requests.
   void BlockUntilHistoryProcessesPendingRequests();
 
-  virtual TokenService* GetTokenService() OVERRIDE;
-  // Creates and initializes a profile sync service if the tests require one.
-  virtual ProfileSyncService* GetProfileSyncService() OVERRIDE;
-  virtual ChromeBlobStorageContext* GetBlobStorageContext() OVERRIDE;
   virtual ExtensionInfoMap* GetExtensionInfoMap() OVERRIDE;
   virtual PromoCounter* GetInstantPromoCounter() OVERRIDE;
   virtual ChromeURLDataManager* GetChromeURLDataManager() OVERRIDE;
@@ -288,11 +275,6 @@ class TestingProfile : public Profile {
   virtual GURL GetHomePage() OVERRIDE;
 
   virtual PrefService* GetOffTheRecordPrefs() OVERRIDE;
-
-  // TODO(jam): remove me once webkit_context_unittest.cc doesn't use Profile
-  // and gets the quota::SpecialStoragePolicy* from whatever ends up replacing
-  // it in the content module.
-  quota::SpecialStoragePolicy* GetSpecialStoragePolicy();
 
  protected:
   base::Time start_time_;
@@ -330,9 +312,6 @@ class TestingProfile : public Profile {
   // is invoked.
   scoped_refptr<ProtocolHandlerRegistry> protocol_handler_registry_;
 
-  // The TokenService. Created by CreateTokenService. Filled with dummy data.
-  scoped_ptr<TokenService> token_service_;
-
   // The ProfileSyncService.  Created by CreateProfileSyncService.
   scoped_ptr<ProfileSyncService> profile_sync_service_;
 
@@ -360,21 +339,12 @@ class TestingProfile : public Profile {
   // Did the last session exit cleanly? Default is true.
   bool last_session_exited_cleanly_;
 
-  // FileSystemContext.  Created lazily by GetFileSystemContext().
-  scoped_refptr<fileapi::FileSystemContext> file_system_context_;
-
-  // WebKitContext, lazily initialized by GetWebKitContext().
-  scoped_refptr<WebKitContext> webkit_context_;
-
-  // The main database tracker for this profile.
-  // Should be used only on the file thread.
-  scoped_refptr<webkit_database::DatabaseTracker> db_tracker_;
-
   scoped_refptr<HostContentSettingsMap> host_content_settings_map_;
   scoped_refptr<content::GeolocationPermissionContext>
       geolocation_permission_context_;
 
-  scoped_refptr<SpeechInputPreferences> speech_input_preferences_;
+  scoped_refptr<content::SpeechRecognitionPreferences>
+      speech_recognition_preferences_;
 
   FilePath last_selected_directory_;
   scoped_refptr<history::TopSites> top_sites_;  // For history and thumbnails.
@@ -410,10 +380,7 @@ class TestingProfile : public Profile {
   // testing.
   ProfileDependencyManager* profile_dependency_manager_;
 
-  scoped_refptr<ChromeAppCacheService> appcache_service_;
-
-  // The QuotaManager, only available if set explicitly via SetQuotaManager.
-  scoped_refptr<quota::QuotaManager> quota_manager_;
+  scoped_ptr<content::MockResourceContext> resource_context_;
 
   // Weak pointer to a delegate for indicating that a profile was created.
   Delegate* delegate_;

@@ -49,6 +49,8 @@ class OCSPIOLoop {
   void StartUsing() {
     base::AutoLock autolock(lock_);
     used_ = true;
+    io_loop_ = MessageLoopForIO::current();
+    DCHECK(io_loop_);
   }
 
   // Called on IO loop.
@@ -456,8 +458,7 @@ class OCSPServerSession {
 OCSPIOLoop::OCSPIOLoop()
     : shutdown_(false),
       used_(false),
-      io_loop_(MessageLoopForIO::current()) {
-  DCHECK(io_loop_);
+      io_loop_(NULL) {
 }
 
 OCSPIOLoop::~OCSPIOLoop() {
@@ -512,13 +513,6 @@ void OCSPIOLoop::AddRequest(OCSPRequestSession* request) {
 }
 
 void OCSPIOLoop::RemoveRequest(OCSPRequestSession* request) {
-  {
-    // Ignore if we've already shutdown.
-    base::AutoLock auto_lock(lock_);
-    if (shutdown_)
-      return;
-  }
-
   DCHECK(ContainsKey(requests_, request));
   requests_.erase(request);
 }
@@ -915,7 +909,7 @@ char* GetAlternateOCSPAIAInfo(CERTCertificate *cert) {
 
 namespace net {
 
-void SetMessageLoopForOCSP() {
+void SetMessageLoopForNSSHttpIO() {
   // Must have a MessageLoopForIO.
   DCHECK(MessageLoopForIO::current());
 
@@ -925,17 +919,17 @@ void SetMessageLoopForOCSP() {
   DCHECK(!used);
 }
 
-void EnsureOCSPInit() {
+void EnsureNSSHttpIOInit() {
   g_ocsp_io_loop.Get().StartUsing();
   g_ocsp_nss_initialization.Get();
 }
 
-void ShutdownOCSP() {
+void ShutdownNSSHttpIO() {
   g_ocsp_io_loop.Get().Shutdown();
 }
 
 // This function would be called before NSS initialization.
-void SetURLRequestContextForOCSP(URLRequestContext* request_context) {
+void SetURLRequestContextForNSSHttpIO(URLRequestContext* request_context) {
   pthread_mutex_lock(&g_request_context_lock);
   if (request_context) {
     DCHECK(!g_request_context);

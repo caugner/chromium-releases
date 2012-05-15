@@ -39,13 +39,7 @@ namespace ui {
 class MultiAnimation;
 }
 
-namespace views {
-class View;
-}
-
-#if !defined(TOOLKIT_VIEWS)
-class GtkThemeService;
-#endif
+class ThemeServiceGtk;
 
 class OmniboxViewGtk : public OmniboxView,
                        public content::NotificationObserver,
@@ -72,12 +66,7 @@ class OmniboxViewGtk : public OmniboxView,
                  Profile* profile,
                  CommandUpdater* command_updater,
                  bool popup_window_mode,
-#if defined(TOOLKIT_VIEWS)
-                 views::View* location_bar
-#else
-                 GtkWidget* location_bar
-#endif
-                          );
+                 GtkWidget* location_bar);
   virtual ~OmniboxViewGtk();
 
   // Initialize, create the underlying widgets, etc.
@@ -96,8 +85,7 @@ class OmniboxViewGtk : public OmniboxView,
   virtual void OpenMatch(const AutocompleteMatch& match,
                          WindowOpenDisposition disposition,
                          const GURL& alternate_nav_url,
-                         size_t index,
-                         const string16& keyword) OVERRIDE;
+                         size_t index) OVERRIDE;
   virtual string16 GetText() const OVERRIDE;
   virtual bool IsEditingOrEmpty() const OVERRIDE;
   virtual int GetIcon() const OVERRIDE;
@@ -106,7 +94,9 @@ class OmniboxViewGtk : public OmniboxView,
                            const string16& display_text,
                            bool update_popup) OVERRIDE;
   virtual void SetWindowTextAndCaretPos(const string16& text,
-                                        size_t caret_pos) OVERRIDE;
+                                        size_t caret_pos,
+                                        bool update_popup,
+                                        bool notify_text_changed) OVERRIDE;
   virtual void SetForcedQuery() OVERRIDE;
   virtual bool IsSelectAll() OVERRIDE;
   virtual bool DeleteAtEndPressed() OVERRIDE;
@@ -133,12 +123,6 @@ class OmniboxViewGtk : public OmniboxView,
   virtual string16 GetInstantSuggestion() const OVERRIDE;
   virtual int TextWidth() const OVERRIDE;
   virtual bool IsImeComposing() const OVERRIDE;
-
-#if defined(TOOLKIT_VIEWS)
-  virtual int GetMaxEditWidth(int entry_width) const OVERRIDE;
-  virtual views::View* AddToView(views::View* parent) OVERRIDE;
-  virtual int OnPerformDrop(const views::DropTargetEvent& event) OVERRIDE;
-#endif
 
   // Overridden from content::NotificationObserver:
   virtual void Observe(int type,
@@ -423,30 +407,10 @@ class OmniboxViewGtk : public OmniboxView,
   // -- if so, we avoid selecting all the text on mouse-up.
   bool button_1_pressed_;
 
-#if defined(OS_CHROMEOS)
-  // The following variables are used to implement select-all-on-mouse-up, which
-  // is disabled in the standard Linux build due to poor interaction with the
-  // PRIMARY X selection.
-
-  // Did the user change the selected text in the middle of the current click?
-  // If so, we don't select all of the text when the button is released -- we
-  // don't want to blow away their selection.
-  bool text_selected_during_click_;
-
-  // Was the text view already focused before the user clicked in it?  We use
-  // this to figure out whether we should select all of the text when the button
-  // is released (we only do so if the view was initially unfocused).
-  bool text_view_focused_before_button_press_;
-#endif
-
-#if defined(TOOLKIT_VIEWS)
-  views::View* location_bar_view_;
-#else
   // Supplies colors, et cetera.
-  GtkThemeService* theme_service_;
+  ThemeServiceGtk* theme_service_;
 
   content::NotificationRegistrar registrar_;
-#endif
 
   // Indicates if Enter key was pressed.
   //
@@ -460,6 +424,11 @@ class OmniboxViewGtk : public OmniboxView,
   // It's only used in the key press handler to detect a Tab key press event
   // during sync dispatch of "move-focus" signal.
   bool tab_was_pressed_;
+
+  // Indicates if Shift key was pressed.
+  // Used in conjunction with the Tab key to determine if either traversal
+  // needs to move up the results or if the keyword needs to be cleared.
+  bool shift_was_pressed_;
 
   // Indicates that user requested to paste clipboard.
   // The actual paste clipboard action might be performed later if the

@@ -32,3 +32,9 @@ NPAPITesterBase.ScheduleTimer
 NPAPIVisiblePluginTester.DeletePluginInDeallocate
 NPAPIVisiblePluginTester.GetURLRequestFailWrite
 NPAPIVisiblePluginTester.PluginReferrerTest
+
+# Flaky under TSan, see http://crbug.com/118365
+AudioUILayoutTest.AudioConstructor
+AudioUILayoutTest.AudioConstructorSrc
+AudioUILayoutTest.AudioPlayEvent
+AudioUILayoutTest.MediaDocumentAudioSize

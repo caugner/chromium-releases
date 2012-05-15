@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -17,8 +17,9 @@
 %module(docstring="Python interface to Automation Proxy.") pyautolib
 %feature("autodoc", "1");
 
-%include <std_wstring.i>
+%include <cpointer.i>
 %include <std_string.i>
+%include <std_wstring.i>
 
 %include "chrome/test/pyautolib/argc_argv.i"
 
@@ -30,6 +31,12 @@
 %include "chrome/app/chrome_dll_resource.h"
 %include "chrome/common/automation_constants.h"
 %include "chrome/common/pref_names.h"
+%include "content/public/common/page_type.h"
+%include "content/public/common/security_style.h"
+// Must come before cert_status_flags.h
+%include "net/base/net_export.h"
+%ignore net::MapNetErrorToCertStatus(int);
+%include "net/base/cert_status_flags.h"
 
 %{
 #include "chrome/common/automation_constants.h"
@@ -142,6 +149,47 @@ class TabProxy {
   %feature("docstring", "Blocks until tab is completely restored.")
       WaitForTabToBeRestored;
   bool WaitForTabToBeRestored(uint32 timeout_ms);
+  %feature("docstring", "Simulates user action on the SSL blocking page."
+          "if |proceed| is true, this is equivalent to clicking the 'Proceed' "
+          "button, if false to 'Take me out of there' button.")
+      TakeActionOnSSLBlockingPage;
+  bool TakeActionOnSSLBlockingPage(bool proceed);
+  %extend {
+    %feature("docstring", "Retrieves the different security states for the "
+             "current tab.")
+        GetSecurityState;
+    PyObject* GetSecurityState() {
+      content::SecurityStyle security_style;
+      net::CertStatus ssl_cert_status;
+      int insecure_content_status;
+      PyObject* result_dict = PyDict_New();
+      if ($self->GetSecurityState(
+          &security_style, &ssl_cert_status, &insecure_content_status)) {
+        PyDict_SetItem(result_dict, PyString_FromString("security_style"),
+                       PyInt_FromLong(security_style));
+        PyDict_SetItem(result_dict, PyString_FromString("ssl_cert_status"),
+                       PyInt_FromLong(ssl_cert_status));
+        PyDict_SetItem(result_dict,
+                       PyString_FromString("insecure_content_status"),
+                       PyInt_FromLong(insecure_content_status));
+      }
+      return result_dict;
+    }
+  };
+  %extend {
+    %feature("docstring", "Returns the type of page currently showing "
+             "(normal, interstitial, error.")
+        GetPageType;
+    PyObject* GetPageType() {
+      content::PageType page_type;
+      PyObject* result_dict = PyDict_New();
+      if ($self->GetPageType(&page_type)) {
+        PyDict_SetItem(result_dict, PyString_FromString("page_type"),
+                       PyInt_FromLong(page_type));
+      }
+      return result_dict;
+    }
+  };
 
   // HTTP Auth
   %feature("docstring",
@@ -413,7 +461,11 @@ class TestServer {
     TYPE_SYNC,
   };
 
-  TestServer(Type type, const FilePath& document_root);
+  // Initialize a TestServer listening on the specified host (IP or hostname).
+  TestServer(Type type, const std::string& host, const FilePath& document_root);
+  // Initialize a HTTPS TestServer with a specific set of HTTPSOptions.
+  TestServer(const HTTPSOptions& https_options,
+             const FilePath& document_root);
 
   %feature("docstring", "Start TestServer over an ephemeral port") Start;
   bool Start();
@@ -448,4 +500,24 @@ class TestServer {
 };
 
 }
+// HTTPSOptions
+%feature("docstring",
+         "HTTPSOptions. Sets one of three types of a cert")
+    HTTPSOptions;
+struct HTTPSOptions {
+  enum ServerCertificate {
+    CERT_OK,
+    CERT_MISMATCHED_NAME,
+    CERT_EXPIRED,
+  };
 
+  // Initialize a new HTTPSOptions that will use the specified certificate.
+  explicit HTTPSOptions(ServerCertificate cert);
+};
+
+%{
+typedef net::TestServer::HTTPSOptions HTTPSOptions;
+%}
+
+%pointer_class(int, int_ptr);
+%pointer_class(uint32, uint32_ptr);

@@ -8,6 +8,7 @@
 
 #include <map>
 #include <queue>
+#include <string>
 
 #include "base/callback.h"
 #include "base/memory/linked_ptr.h"
@@ -22,6 +23,8 @@
 
 class GpuMainThread;
 struct GPUCreateCommandBufferConfig;
+struct GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params;
+struct GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params;
 
 class BrowserChildProcessHostImpl;
 
@@ -29,21 +32,32 @@ class GpuProcessHost : public content::BrowserChildProcessHostDelegate,
                        public IPC::Message::Sender,
                        public base::NonThreadSafe {
  public:
+  enum GpuProcessKind {
+    GPU_PROCESS_KIND_UNSANDBOXED,
+    GPU_PROCESS_KIND_SANDBOXED
+  };
+
+  typedef base::Callback<void(const IPC::ChannelHandle&,
+                              base::ProcessHandle,
+                              const content::GPUInfo&)>
+      EstablishChannelCallback;
+
+  typedef base::Callback<void(int32)> CreateCommandBufferCallback;
+
   static bool gpu_enabled() { return gpu_enabled_; }
 
-  // Creates a new GpuProcessHost or gets one for a particular
-  // renderer process, resulting in the launching of a GPU process if required.
-  // Returns null on failure. It is not safe to store the pointer once control
-  // has returned to the message loop as it can be destroyed. Instead store the
-  // associated GPU host ID. A renderer ID of zero means the browser process.
+  // Creates a new GpuProcessHost or gets an existing one, resulting in the
+  // launching of a GPU process if required.  Returns null on failure. It
+  // is not safe to store the pointer once control has returned to the message
+  // loop as it can be destroyed. Instead store the associated GPU host ID.
   // This could return NULL if GPU access is not allowed (blacklisted).
-  static GpuProcessHost* GetForRenderer(int client_id,
-                                        content::CauseForGpuLaunch cause);
+  static GpuProcessHost* Get(GpuProcessKind kind,
+                             content::CauseForGpuLaunch cause);
 
   // Helper function to send the given message to the GPU process on the IO
-  // thread.  Calls GetForRenderer and if a host is returned, sends it.
-  // Can be called from any thread.
-  CONTENT_EXPORT static void SendOnIO(int client_id,
+  // thread.  Calls Get and if a host is returned, sends it.  Can be called from
+  // any thread.
+  CONTENT_EXPORT static void SendOnIO(GpuProcessKind kind,
                                       content::CauseForGpuLaunch cause,
                                       IPC::Message* message);
 
@@ -52,26 +66,20 @@ class GpuProcessHost : public content::BrowserChildProcessHostDelegate,
   static GpuProcessHost* FromID(int host_id);
   int host_id() const { return host_id_; }
 
-  // IPC::Message::Sender implementation:
+  // IPC::Message::Sender implementation.
   virtual bool Send(IPC::Message* msg) OVERRIDE;
 
-  typedef base::Callback<void(const IPC::ChannelHandle&,
-                              base::ProcessHandle,
-                              const content::GPUInfo&)>
-      EstablishChannelCallback;
-
   // Tells the GPU process to create a new channel for communication with a
-  // renderer. Once the GPU process responds asynchronously with the IPC handle
+  // client. Once the GPU process responds asynchronously with the IPC handle
   // and GPUInfo, we call the callback.
-  void EstablishGpuChannel(
-      int client_id, const EstablishChannelCallback& callback);
-
-  typedef base::Callback<void(int32)> CreateCommandBufferCallback;
+  void EstablishGpuChannel(int client_id,
+                           bool share_context,
+                           const EstablishChannelCallback& callback);
 
   // Tells the GPU process to create a new command buffer that draws into the
-  // window associated with the given renderer.
+  // given surface.
   void CreateViewCommandBuffer(
-      gfx::PluginWindowHandle compositing_surface,
+      const gfx::GLSurfaceHandle& compositing_surface,
       int surface_id,
       int client_id,
       const GPUCreateCommandBufferConfig& init_params,
@@ -80,15 +88,15 @@ class GpuProcessHost : public content::BrowserChildProcessHostDelegate,
   // Whether this GPU process is set up to use software rendering.
   bool software_rendering();
 
-  // Whether this GPU process is sandboxed.
-  bool sandboxed();
+  // What kind of GPU process, e.g. sandboxed or unsandboxed.
+  GpuProcessKind kind();
 
   void ForceShutdown();
 
  private:
   static bool HostIsValid(GpuProcessHost* host);
 
-  GpuProcessHost(int host_id, bool sandboxed);
+  GpuProcessHost(int host_id, GpuProcessKind kind);
   virtual ~GpuProcessHost();
 
   bool Init();
@@ -107,13 +115,21 @@ class GpuProcessHost : public content::BrowserChildProcessHostDelegate,
   void OnCommandBufferCreated(const int32 route_id);
   void OnDestroyCommandBuffer(int32 surface_id);
 
+#if defined(OS_WIN) && !defined(USE_AURA)
+  void OnAcceleratedSurfaceBuffersSwapped(
+      const GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params& params);
+  void OnAcceleratedSurfacePostSubBuffer(
+      const GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params& params);
+  void OnAcceleratedSurfaceSuspend(int32 surface_id);
+#endif
+
   bool LaunchGpuProcess(const std::string& channel_id);
 
   void SendOutstandingReplies();
   void EstablishChannelError(
       const EstablishChannelCallback& callback,
       const IPC::ChannelHandle& channel_handle,
-      base::ProcessHandle renderer_process_for_gpu,
+      base::ProcessHandle client_process_for_gpu,
       const content::GPUInfo& gpu_info);
   void CreateCommandBufferError(const CreateCommandBufferCallback& callback,
                                 int32 route_id);
@@ -152,14 +168,19 @@ class GpuProcessHost : public content::BrowserChildProcessHostDelegate,
   bool in_process_;
 
   bool software_rendering_;
-  bool sandboxed_;
+  GpuProcessKind kind_;
 
   scoped_ptr<GpuMainThread> in_process_gpu_thread_;
+
+  // Whether we actually launched a GPU process.
+  bool process_launched_;
 
   // Master switch for enabling/disabling GPU acceleration for the current
   // browser session. It does not change the acceleration settings for
   // existing tabs, just the future ones.
-  CONTENT_EXPORT static bool gpu_enabled_;
+  static bool gpu_enabled_;
+
+  static bool hardware_gpu_enabled_;
 
   scoped_ptr<BrowserChildProcessHostImpl> process_;
 

@@ -31,22 +31,40 @@ import pyauto
 import pyauto_paths
 import pyauto_utils
 
-# Settings for each network constraint.
-_BANDWIDTH_SETTINGS_KBPS = {'None': 0, 'Low': 256, 'Medium': 2000, 'High': 5000}
-_LATENCY_SETTINGS_MS = {'None': 0, 'Low': 43, 'Medium': 105, 'High': 180}
-_PACKET_LOSS_SETTINGS_PERCENT = {'None': 0, 'Medium': 2, 'High': 5}
-
-# Test constraints are all possible combination of the above settings.  Each
-# tuple must be of the form (Bandwidth, Latency, Packet Loss).
-_TEST_CONSTRAINTS = itertools.product(
-    _BANDWIDTH_SETTINGS_KBPS.values(),
-    _LATENCY_SETTINGS_MS.values(),
-    _PACKET_LOSS_SETTINGS_PERCENT.values())
-
-_TEST_CONSTRAINT_NAMES = itertools.product(
-    _BANDWIDTH_SETTINGS_KBPS.keys(),
-    _LATENCY_SETTINGS_MS.keys(),
-    _PACKET_LOSS_SETTINGS_PERCENT.keys())
+# The list of tests to run. Each entry is of the form:
+#    'TEST_NAME' : [BANDWIDTH_Kbps, LATENCY_ms, PACKET_LOSS_%]
+#
+# The first five tests were manually selected to cover a range of bad network
+# constraints to good ones. Those tests resulted in stable results and are
+# suitable for regression testing.
+#
+# The WiFi, DSL, and Cable settings were taken from webpagetest.org as
+# approximations of their respective real world networks. The settings were
+# based on 2011 FCC Broadband Data report (http://www.fcc.gov/document/
+# measuring-broadband-america-report-consumer-broadband-performance-us).
+#
+# Previous tests with 2% and 5% packet loss resulted in unstable data. Thus
+# packet loss is not used often for perf graphs. Tests with very low bandwidth,
+# such as 56K Dial-up resulted in very slow tests (about 8 mins to run each
+# test iteration). In addition, metrics for Dial-up would be out of range of the
+# other tests metrics, making the graphs hard to read.
+#
+# Note: The test name should satisfy the regex [\w\.-]+ (check
+# tools/perf_expectations/tests/perf_expectations_unittest.py for details).
+#
+# TODO(shadi): After recording metrics and getting stable results, remove the
+# first 5 settings if the last five are enough for regression testing.
+_TESTS_TO_RUN = {
+    'LowHighMedium': [256, 180, 2],
+    'LowMediumNone': [256, 105, 0],
+    'MediumMediumNone': [2000, 105, 0],
+    'HighMediumNone': [5000, 105, 0],
+    'HighLowNone': [5000, 43, 0],
+    'Wifi_1Mbps_60ms': [1024, 60, 0],
+    'DSL_1.5Mbps_50ms': [1541, 50, 0],
+    'Cable_5Mbps_28ms': [5120, 28, 0],
+    'NoConstraints': [0, 0, 0]
+}
 
 # HTML test path; relative to src/chrome/test/data.  Loads a test video and
 # records metrics in JavaScript.
@@ -55,6 +73,9 @@ _TEST_HTML_PATH = os.path.join(
 
 # Number of threads to use during testing.
 _TEST_THREADS = 3
+
+# Number of times we run the same test to eliminate outliers.
+_TEST_ITERATIONS = 3
 
 # File name of video to collect metrics for and its duration (used for timeout).
 # TODO(dalecurtis): Should be set on the command line.
@@ -71,6 +92,19 @@ _CNS_PORT = 9000
 
 # Base CNS URL, only requires & separated parameter names appended.
 _CNS_BASE_URL = 'http://127.0.0.1:%d/ServeConstrained?' % _CNS_PORT
+
+
+def Median(values):
+  """Returns the median for a list of values."""
+  if not values:
+    return None
+  values = sorted(values)
+  if len(values) % 2 == 1:
+    return values[len(values) / 2]
+  else:
+    lower = values[(len(values) / 2) - 1]
+    upper = values[len(values) / 2]
+    return (float(lower + upper)) / 2
 
 
 class TestWorker(threading.Thread):
@@ -94,6 +128,7 @@ class TestWorker(threading.Thread):
     self._pyauto = pyauto_test
     self._url = url
     self._metrics = {}
+    self.fail_count = 0
     self.start()
 
   def _FindTabLocked(self, url):
@@ -121,10 +156,19 @@ class TestWorker(threading.Thread):
       tab = self._FindTabLocked(unique_url)
       self._metrics[var_name] = int(self._pyauto.GetDOMValue(var_name,
                                                              tab_index=tab))
-      self._metrics['errorMsg'] = self._pyauto.GetDOMValue('errorMsg',
-                                                           tab_index=tab)
+      end_test = self._pyauto.GetDOMValue('endTest', tab_index=tab)
 
-    return self._metrics[var_name] >= 0 or self._metrics['errorMsg'] != ''
+    return self._metrics[var_name] >= 0 or end_test
+
+  def _GetEventsLog(self, unique_url):
+    """Returns the log of video events fired while running the test.
+
+    Args:
+      unique_url: The url of the page identifying the test.
+    """
+    with self._automation_lock:
+      tab = self._FindTabLocked(unique_url)
+      return self._pyauto.GetDOMValue('eventsMsg', tab_index=tab)
 
   def _GetVideoProgress(self, unique_url):
     """Gets the video's current play progress percentage.
@@ -146,10 +190,10 @@ class TestWorker(threading.Thread):
     For a clean shutdown, put the magic exit value (None, None) in the queue.
     """
     while True:
-      settings, name = self._tasks.get()
+      series_name, settings = self._tasks.get()
 
       # Check for magic exit values.
-      if (settings, name) == (None, None):
+      if (series_name, settings) == (None, None):
         break
 
       # Build video source URL.  Values <= 0 mean the setting is disabled.
@@ -160,50 +204,61 @@ class TestWorker(threading.Thread):
         video_url.append('latency=%d' % settings[1])
       if settings[2] > 0:
         video_url.append('loss=%d' % settings[2])
+      video_url.append('new_port=true')
       video_url = '&'.join(video_url)
 
-      # Make the test URL unique so we can figure out our tab index later.
-      unique_url = '%s?%d' % (self._url, TestWorker._task_id.next())
+      ttp_results = []
+      epp_results = []
+      for iter_num in xrange(_TEST_ITERATIONS):
+        # Make the test URL unique so we can figure out our tab index later.
+        unique_url = '%s?%d' % (self._url, TestWorker._task_id.next())
+        # Start the test!
+        with self._automation_lock:
+          self._pyauto.AppendTab(pyauto.GURL(unique_url))
+          self._pyauto.CallJavascriptFunc(
+              'startTest', [video_url],
+              tab_index=self._FindTabLocked(unique_url))
 
-      # Start the test!
-      with self._automation_lock:
-        self._pyauto.AppendTab(pyauto.GURL(unique_url))
-        self._pyauto.CallJavascriptFunc(
-            'startTest', [video_url], tab_index=self._FindTabLocked(unique_url))
-
-      # Wait until the necessary metrics have been collected.  Okay to not lock
-      # here since pyauto.WaitUntil doesn't call into Chrome.
-      self._metrics['epp'] = self._metrics['ttp'] = -1
-      self._pyauto.WaitUntil(
-          self._HaveMetricOrError, args=['ttp', unique_url], retry_sleep=1,
-          timeout=10, debug=False)
-
-      # Do not wait for epp if ttp is not available.
-      series_name = ''.join(name)
-      if self._metrics['ttp'] >= 0:
+        # Wait until the necessary metrics have been collected. Okay to not lock
+        # here since pyauto.WaitUntil doesn't call into Chrome.
+        self._metrics['epp'] = self._metrics['ttp'] = -1
         self._pyauto.WaitUntil(
-            self._HaveMetricOrError, args=['epp', unique_url], retry_sleep=2,
-            timeout=_TEST_VIDEO_DURATION_SEC * 10, debug=False)
+            self._HaveMetricOrError, args=['ttp', unique_url], retry_sleep=1,
+            timeout=10, debug=False)
 
-        # Record results.
-        # TODO(dalecurtis): Support reference builds.
-        pyauto_utils.PrintPerfResult('epp', series_name, self._metrics['epp'],
-                                     '%')
-        pyauto_utils.PrintPerfResult('ttp', series_name, self._metrics['ttp'],
-                                     'ms')
-        logging.debug('Test %s ended with %d%% of the video played.',
-                      series_name, self._GetVideoProgress(unique_url))
-      elif self._metrics['errorMsg'] == '':
-        logging.error('Test %s timed-out.', series_name)
+        # Do not wait for epp if ttp is not available.
+        if self._metrics['ttp'] >= 0:
+          ttp_results.append(self._metrics['ttp'])
+          self._pyauto.WaitUntil(
+              self._HaveMetricOrError, args=['epp', unique_url], retry_sleep=2,
+              timeout=_TEST_VIDEO_DURATION_SEC * 10, debug=False)
 
-      if self._metrics['errorMsg'] != '':
-        logging.debug('Test %s ended with error: %s', series_name,
-                      self._metrics['errorMsg'])
+          if self._metrics['epp'] >= 0:
+            epp_results.append(self._metrics['epp'])
 
-      # Close the tab.
-      with self._automation_lock:
-        self._pyauto.GetBrowserWindow(0).GetTab(
-            self._FindTabLocked(unique_url)).Close(True)
+          logging.debug('Iteration:%d - Test %s ended with %d%% of the video '
+                        'played.', iter_num, series_name,
+                        self._GetVideoProgress(unique_url),)
+
+        if self._metrics['ttp'] < 0 or self._metrics['epp'] < 0:
+          logging.error('Iteration:%d - Test %s failed to end gracefully due '
+                        'to time-out or error.\nVideo events fired:\n%s',
+                        iter_num, series_name, self._GetEventsLog(unique_url))
+
+        # Close the tab.
+        with self._automation_lock:
+          self._pyauto.GetBrowserWindow(0).GetTab(
+              self._FindTabLocked(unique_url)).Close(True)
+
+      # Check if any of the tests failed to report the metrics.
+      if not len(ttp_results) == len(epp_results) == _TEST_ITERATIONS:
+        self.fail_count += 1
+      # End of iterations, print results,
+      logging.debug('TTP results: %s', ttp_results)
+      logging.debug('EPP results: %s', epp_results)
+      pyauto_utils.PrintPerfResult('epp', series_name, max(epp_results), '%')
+      pyauto_utils.PrintPerfResult('ttp', series_name,
+                                   Median(ttp_results), 'ms')
 
       # TODO(dalecurtis): Check results for regressions.
       self._tasks.task_done()
@@ -240,7 +295,8 @@ class MediaConstrainedNetworkPerfTest(pyauto.PyUITest):
            '--interface', 'lo',
            '--www-root', os.path.join(
                self.DataDir(), 'pyauto_private', 'media'),
-           '-v']
+           '-v',
+           '--expiry-time', '0']
 
     process = subprocess.Popen(cmd, stderr=subprocess.PIPE)
 
@@ -273,6 +329,24 @@ class MediaConstrainedNetworkPerfTest(pyauto.PyUITest):
     pyauto.PyUITest.tearDown(self)
     self.Kill(self._server_pid)
 
+  def _RunDummyTest(self, automation_lock, test_url):
+    """Runs a dummy test with high bandwidth and no latency or packet loss.
+
+    Fails the unit test if the dummy test does not end.
+
+    Args:
+      automation_lock: Global automation lock for pyauto calls.
+      test_url: File URL to HTML/JavaScript test code.
+    """
+    tasks = Queue.Queue()
+    tasks.put(('Dummy Test', [5000, 0, 0]))
+    tasks.put((None, None))
+    dummy_test = TestWorker(self, tasks, automation_lock, test_url)
+    dummy_test.join()
+    # Dummy test should successfully finish by storing epp results.
+    if dummy_test.fail_count:
+      self.fail('Failed to run dummy test.')
+
   def testConstrainedNetworkPerf(self):
     """Starts CNS, spins up worker threads to run through _TEST_CONSTRAINTS."""
     # Convert relative test path into an absolute path.
@@ -281,14 +355,20 @@ class MediaConstrainedNetworkPerfTest(pyauto.PyUITest):
     # PyAuto doesn't support threads, so we synchronize all automation calls.
     automation_lock = threading.Lock()
 
+    # Run a dummy test to avoid Chrome/CNS startup overhead.
+    logging.debug('Starting a dummy test to avoid Chrome/CNS startup overhead.')
+    self._RunDummyTest(automation_lock, test_url)
+    logging.debug('Dummy test has finished. Starting real perf tests.')
+
     # Spin up worker threads.
     tasks = Queue.Queue()
     threads = []
     for _ in xrange(_TEST_THREADS):
       threads.append(TestWorker(self, tasks, automation_lock, test_url))
 
-    for settings, name in zip(_TEST_CONSTRAINTS, _TEST_CONSTRAINT_NAMES):
-      tasks.put((settings, name))
+    for series_name, settings in _TESTS_TO_RUN.iteritems():
+      logging.debug('Add test: %s\tSettings: %s', series_name, settings)
+      tasks.put((series_name, settings))
 
     # Add shutdown magic to end of queue.
     for thread in threads:

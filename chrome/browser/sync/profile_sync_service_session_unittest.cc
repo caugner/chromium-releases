@@ -15,8 +15,9 @@
 #include "base/scoped_temp_dir.h"
 #include "base/stl_util.h"
 #include "base/time.h"
-#include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/signin/signin_manager.h"
+#include "chrome/browser/signin/signin_manager_factory.h"
+#include "chrome/browser/signin/token_service_factory.h"
 #include "chrome/browser/sync/abstract_profile_sync_service_test.h"
 #include "chrome/browser/sync/glue/session_change_processor.h"
 #include "chrome/browser/sync/glue/session_data_type_controller.h"
@@ -25,15 +26,11 @@
 #include "chrome/browser/sync/internal_api/change_record.h"
 #include "chrome/browser/sync/internal_api/read_node.h"
 #include "chrome/browser/sync/internal_api/read_transaction.h"
+#include "chrome/browser/sync/internal_api/write_node.h"
 #include "chrome/browser/sync/internal_api/write_transaction.h"
 #include "chrome/browser/sync/profile_sync_components_factory_mock.h"
+#include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/sync/profile_sync_test_util.h"
-#include "chrome/browser/sync/protocol/session_specifics.pb.h"
-#include "chrome/browser/sync/protocol/sync.pb.h"
-#include "chrome/browser/sync/syncable/directory_manager.h"
-#include "chrome/browser/sync/syncable/model_type.h"
-#include "chrome/browser/sync/syncable/syncable.h"
-#include "chrome/browser/sync/test/engine/test_id_factory.h"
 #include "chrome/browser/sync/test_profile_sync_service.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/net/gaia/gaia_constants.h"
@@ -46,6 +43,11 @@
 #include "content/public/browser/notification_service.h"
 #include "content/test/test_browser_thread.h"
 #include "googleurl/src/gurl.h"
+#include "sync/protocol/session_specifics.pb.h"
+#include "sync/protocol/sync.pb.h"
+#include "sync/syncable/model_type.h"
+#include "sync/syncable/syncable.h"
+#include "sync/test/engine/test_id_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/ui_base_types.h"
@@ -165,6 +167,14 @@ class ProfileSyncServiceSessionTest
   TestIdFactory* ids() { return sync_service_->id_factory(); }
 
  protected:
+  virtual TestingProfile* CreateProfile() OVERRIDE {
+    TestingProfile* profile = new TestingProfile();
+    // Don't want the profile to create a real ProfileSyncService.
+    ProfileSyncServiceFactory::GetInstance()->SetTestingFactory(profile,
+                                                                NULL);
+    return profile;
+  }
+
   virtual void SetUp() {
     // BrowserWithTestWindowTest implementation.
     BrowserWithTestWindowTest::SetUp();
@@ -228,22 +238,24 @@ class ProfileSyncServiceSessionTest
         callback));
 
     // Register the session data type.
+    SessionDataTypeController *dtc = new SessionDataTypeController(factory,
+                                         profile(),
+                                         sync_service_.get());
+    sync_service_->RegisterDataTypeController(dtc);
+
     model_associator_ =
         new SessionModelAssociator(sync_service_.get(),
                                    true /* setup_for_test */);
     change_processor_ = new SessionChangeProcessor(
-        sync_service_.get(), model_associator_,
+        dtc, model_associator_,
         true /* setup_for_test */);
     EXPECT_CALL(*factory, CreateSessionSyncComponents(_, _)).
         WillOnce(Return(ProfileSyncComponentsFactory::SyncComponents(
             model_associator_, change_processor_)));
     EXPECT_CALL(*factory, CreateDataTypeManager(_, _)).
         WillOnce(ReturnNewDataTypeManager());
-    sync_service_->RegisterDataTypeController(
-        new SessionDataTypeController(factory,
-                                      profile(),
-                                      sync_service_.get()));
-    profile()->GetTokenService()->IssueAuthTokenForTest(
+
+    TokenServiceFactory::GetForProfile(profile())->IssueAuthTokenForTest(
         GaiaConstants::kSyncService, "token");
     sync_service_->Initialize();
     MessageLoop::current()->Run();
@@ -316,7 +328,13 @@ TEST_F(ProfileSyncServiceSessionTest, WriteSessionToNode) {
 
 // Test that we can fill this machine's session, write it to a node,
 // and then retrieve it.
-TEST_F(ProfileSyncServiceSessionTest, WriteFilledSessionToNode) {
+#if defined(OS_WIN)
+// This test is failing on windows occasionally: http://crbug.com/81104
+#define MAYBE_WriteFilledSessionToNode DISABLED_WriteFilledSessionToNode
+#else
+#define MAYBE_WriteFilledSessionToNode WriteFilledSessionToNode
+#endif
+TEST_F(ProfileSyncServiceSessionTest, MAYBE_WriteFilledSessionToNode) {
   CreateRootHelper create_root(this);
   ASSERT_TRUE(StartSyncService(create_root.callback(), false));
   ASSERT_TRUE(create_root.success());
@@ -675,7 +693,7 @@ TEST_F(ProfileSyncServiceSessionTest, UpdatedSyncNodeActionDelete) {
   int64 node_id = model_associator_->GetSyncIdFromSessionTag(
       model_associator_->GetCurrentMachineTag());
   sync_pb::EntitySpecifics deleted_specifics;
-  deleted_specifics.MutableExtension(sync_pb::session)->set_session_tag("tag");
+  deleted_specifics.mutable_session()->set_session_tag("tag");
   ASSERT_FALSE(notified_of_update_);
   {
     sync_api::WriteTransaction trans(FROM_HERE, sync_service_->GetUserShare());
@@ -908,7 +926,13 @@ TEST_F(ProfileSyncServiceSessionTest, StaleSessionRefresh) {
 
 // Test that tabs with nothing but "chrome://*" and "file://*" navigations are
 // not be synced.
-TEST_F(ProfileSyncServiceSessionTest, ValidTabs) {
+#if defined(OS_WIN)
+// This test is crashing on windows occasionally: http://crbug.com/116097
+#define MAYBE_ValidTabs DISABLED_ValidTabs
+#else
+#define MAYBE_ValidTabs ValidTabs
+#endif
+TEST_F(ProfileSyncServiceSessionTest, MAYBE_ValidTabs) {
   CreateRootHelper create_root(this);
   ASSERT_TRUE(StartSyncService(create_root.callback(), false));
   ASSERT_TRUE(create_root.success());
@@ -990,6 +1014,89 @@ TEST_F(ProfileSyncServiceSessionTest, ExistingTabs) {
       GetEntryAtIndex(0)->GetVirtualURL());
   ASSERT_EQ(GURL("http://bar2"), iter->second.tab()->
       GetEntryAtIndex(1)->GetVirtualURL());
+}
+
+TEST_F(ProfileSyncServiceSessionTest, MissingHeaderAndTab) {
+  AddTab(browser(), GURL("http://foo1"));
+  NavigateAndCommitActiveTab(GURL("http://foo2"));
+  AddTab(browser(), GURL("http://bar1"));
+  NavigateAndCommitActiveTab(GURL("http://bar2"));
+  CreateRootHelper create_root(this);
+  ASSERT_TRUE(StartSyncService(create_root.callback(), false));
+  SyncError error;
+  std::string local_tag = model_associator_->GetCurrentMachineTag();
+
+  ASSERT_TRUE(model_associator_->DisassociateModels(&error));
+  {
+    // Create a sync node with the local tag but neither header nor tab field.
+    sync_api::WriteTransaction trans(FROM_HERE, sync_service_->GetUserShare());
+    sync_api::ReadNode root(&trans);
+    root.InitByTagLookup(syncable::ModelTypeToRootTag(syncable::SESSIONS));
+    sync_api::WriteNode extra_header(&trans);
+    ASSERT_TRUE(extra_header.InitUniqueByCreation(syncable::SESSIONS,
+                                                  root, "new_tag"));
+    sync_pb::SessionSpecifics specifics;
+    specifics.set_session_tag(local_tag);
+    extra_header.SetSessionSpecifics(specifics);
+  }
+  ASSERT_TRUE(model_associator_->AssociateModels(&error));
+  ASSERT_FALSE(error.IsSet());
+}
+
+TEST_F(ProfileSyncServiceSessionTest, MultipleHeaders) {
+  AddTab(browser(), GURL("http://foo1"));
+  NavigateAndCommitActiveTab(GURL("http://foo2"));
+  AddTab(browser(), GURL("http://bar1"));
+  NavigateAndCommitActiveTab(GURL("http://bar2"));
+  CreateRootHelper create_root(this);
+  ASSERT_TRUE(StartSyncService(create_root.callback(), false));
+  SyncError error;
+  std::string local_tag = model_associator_->GetCurrentMachineTag();
+
+  ASSERT_TRUE(model_associator_->DisassociateModels(&error));
+  {
+    // Create another sync node with a header field and the local tag.
+    sync_api::WriteTransaction trans(FROM_HERE, sync_service_->GetUserShare());
+    sync_api::ReadNode root(&trans);
+    root.InitByTagLookup(syncable::ModelTypeToRootTag(syncable::SESSIONS));
+    sync_api::WriteNode extra_header(&trans);
+    ASSERT_TRUE(extra_header.InitUniqueByCreation(syncable::SESSIONS,
+                                                  root, local_tag + "_"));
+    sync_pb::SessionSpecifics specifics;
+    specifics.set_session_tag(local_tag);
+    specifics.mutable_header();
+    extra_header.SetSessionSpecifics(specifics);
+  }
+  ASSERT_TRUE(model_associator_->AssociateModels(&error));
+  ASSERT_FALSE(error.IsSet());
+}
+
+TEST_F(ProfileSyncServiceSessionTest, CorruptedForeign) {
+  AddTab(browser(), GURL("http://foo1"));
+  NavigateAndCommitActiveTab(GURL("http://foo2"));
+  AddTab(browser(), GURL("http://bar1"));
+  NavigateAndCommitActiveTab(GURL("http://bar2"));
+  CreateRootHelper create_root(this);
+  ASSERT_TRUE(StartSyncService(create_root.callback(), false));
+  SyncError error;
+
+  ASSERT_TRUE(model_associator_->DisassociateModels(&error));
+  {
+    // Create another sync node with neither header nor tab field and a foreign
+    // tag.
+    std::string foreign_tag = "foreign_tag";
+    sync_api::WriteTransaction trans(FROM_HERE, sync_service_->GetUserShare());
+    sync_api::ReadNode root(&trans);
+    root.InitByTagLookup(syncable::ModelTypeToRootTag(syncable::SESSIONS));
+    sync_api::WriteNode extra_header(&trans);
+    ASSERT_TRUE(extra_header.InitUniqueByCreation(syncable::SESSIONS,
+                                                  root, foreign_tag));
+    sync_pb::SessionSpecifics specifics;
+    specifics.set_session_tag(foreign_tag);
+    extra_header.SetSessionSpecifics(specifics);
+  }
+  ASSERT_TRUE(model_associator_->AssociateModels(&error));
+  ASSERT_FALSE(error.IsSet());
 }
 
 }  // namespace browser_sync

@@ -14,11 +14,12 @@
 #include "webkit/glue/resource_type.h"
 
 class GURL;
-class ResourceHandler;
+template <class T> class ScopedVector;
 
 namespace content {
-struct Referrer;
 class ResourceContext;
+class ResourceThrottle;
+struct Referrer;
 struct ResourceResponse;
 }
 
@@ -43,21 +44,21 @@ class CONTENT_EXPORT ResourceDispatcherHostDelegate {
       const std::string& method,
       const GURL& url,
       ResourceType::Type resource_type,
-      const ResourceContext& resource_context,
+      ResourceContext* resource_context,
       const Referrer& referrer);
 
   // Called after ShouldBeginRequest when all the resource handlers from the
   // content layer have been added.  To add new handlers to the front, return
   // a new handler that is chained to the given one, otherwise just reutrn the
   // given handler.
-  virtual ResourceHandler* RequestBeginning(
-      ResourceHandler* handler,
+  virtual void RequestBeginning(
       net::URLRequest* request,
-      const ResourceContext& resource_context,
-      bool is_subresource,
+      ResourceContext* resource_context,
+      ResourceType::Type resource_type,
       int child_id,
       int route_id,
-      bool is_continuation_of_transferred_request);
+      bool is_continuation_of_transferred_request,
+      ScopedVector<ResourceThrottle>* throttles);
 
   // Allows an embedder to add additional resource handlers for a download.
   // |is_new_request| is true if this is a request that is just starting, i.e.
@@ -65,22 +66,14 @@ class CONTENT_EXPORT ResourceDispatcherHostDelegate {
   // this was originally a non-download request that had some resource handlers
   // applied already and now we found out it's a download.
   // |in_complete| is true if this is invoked from |OnResponseCompleted|.
-  virtual ResourceHandler* DownloadStarting(
-      ResourceHandler* handler,
-      const ResourceContext& resource_context,
+  virtual void DownloadStarting(
       net::URLRequest* request,
+      ResourceContext* resource_context,
       int child_id,
       int route_id,
       int request_id,
-      bool is_new_request);
-
-  // Called to determine whether a request's start should be deferred. This
-  // is only called if the ResourceHandler associated with the request does
-  // not ask for a deferral. A return value of true will defer the start of
-  // the request, false will continue the request.
-  virtual bool ShouldDeferStart(
-      net::URLRequest* request,
-      const ResourceContext& resource_context);
+      bool is_new_request,
+      ScopedVector<ResourceThrottle>* throttles);
 
   // Called when an SSL Client Certificate is requested. If false is returned,
   // the request is canceled. Otherwise, the certificate is chosen.

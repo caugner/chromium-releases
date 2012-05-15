@@ -26,10 +26,16 @@
 
 namespace {
 const char kAutofillQueryServerRequestUrl[] =
-    "https://clients1.google.com/tbproxy/af/query";
+    "https://clients1.google.com/tbproxy/af/query?client=";
 const char kAutofillUploadServerRequestUrl[] =
-    "https://clients1.google.com/tbproxy/af/upload";
+    "https://clients1.google.com/tbproxy/af/upload?client=";
 const char kAutofillQueryServerNameStartInHeader[] = "GFE/";
+
+#if defined(GOOGLE_CHROME_BUILD)
+const char kClientName[] = "Google Chrome";
+#else
+const char kClientName[] = "Chromium";
+#endif  // defined(GOOGLE_CHROME_BUILD)
 
 const size_t kMaxFormCacheSize = 16;
 };
@@ -161,6 +167,7 @@ bool AutofillDownloadManager::StartRequest(
     request_url = kAutofillQueryServerRequestUrl;
   else
     request_url = kAutofillUploadServerRequestUrl;
+  request_url += kClientName;
 
   // Id is ignored for regular chrome, in unit test id's for fake fetcher
   // factory will be 0, 1, 2, ...
@@ -171,7 +178,8 @@ bool AutofillDownloadManager::StartRequest(
   fetcher->SetAutomaticallyRetryOn5xx(false);
   fetcher->SetRequestContext(request_context);
   fetcher->SetUploadData("text/plain", form_xml);
-  fetcher->SetLoadFlags(net::LOAD_DO_NOT_SAVE_COOKIES);
+  fetcher->SetLoadFlags(net::LOAD_DO_NOT_SAVE_COOKIES |
+                        net::LOAD_DO_NOT_SEND_COOKIES);
   fetcher->Start();
   return true;
 }

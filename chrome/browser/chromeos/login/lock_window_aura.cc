@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
+#include "ash/wm/window_animations.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
 
@@ -40,13 +41,15 @@ LockWindowAura::~LockWindowAura() {
 void LockWindowAura::Init() {
   views::Widget::InitParams params(
       views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
-  params.bounds = gfx::Rect(aura::RootWindow::GetInstance()->GetHostSize());
-  views::Widget::Init(params);
+  params.show_state = ui::SHOW_STATE_FULLSCREEN;
   // TODO(flackr): Use a property to specify this container rather than
   // depending on shell implementation.
-  ash::Shell::GetInstance()->GetContainer(
-      ash::internal::kShellWindowId_LockScreenContainer)->
-      AddChild(GetNativeView());
+  params.parent =
+      ash::Shell::GetInstance()->GetContainer(
+          ash::internal::kShellWindowId_LockScreenContainer);
+  views::Widget::Init(params);
+  ash::SetWindowVisibilityAnimationTransition(GetNativeView(),
+                                              ash::ANIMATE_NONE);
 }
 
 }  // namespace chromeos

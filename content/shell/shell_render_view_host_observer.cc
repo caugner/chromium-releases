@@ -7,7 +7,7 @@
 #include <iostream>
 
 #include "base/message_loop.h"
-#include "content/browser/renderer_host/render_view_host.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/shell/shell.h"
 #include "content/shell/shell_messages.h"
 
@@ -44,7 +44,7 @@ void ShellRenderViewHostObserver::OnTextDump(const std::string& dump) {
 
 void ShellRenderViewHostObserver::OnNotifyDone() {
   render_view_host()->Send(
-      new ShellViewMsg_CaptureTextDump(render_view_host()->routing_id(),
+      new ShellViewMsg_CaptureTextDump(render_view_host()->GetRoutingID(),
                                        dump_child_frames_));
 }
 

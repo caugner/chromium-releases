@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -718,7 +718,16 @@ void oom_killer_new() {
 // === Core Foundation CFAllocators ===
 
 bool CanGetContextForCFAllocator() {
-  return !base::mac::IsOSLaterThanLion();
+  // TODO(avi): remove at final release; http://crbug.com/117476
+  if (base::mac::IsOSMountainLion()) {
+    NSLog(@"Unsure about the internals of CFAllocator but going to patch them "
+           "anyway. If there is a crash inside of CFAllocatorAllocate, please "
+           "report it at http://crbug.com/117476 . If there is a crash and it "
+           "is NOT inside of CFAllocatorAllocate, it is NOT RELATED. DO NOT "
+           "REPORT IT THERE but rather FILE A NEW BUG.");
+  }
+  return !base::mac::
+      IsOSDangerouslyLaterThanMountainLionForUseByCFAllocatorReplacement();
 }
 
 CFAllocatorContext* ContextForCFAllocator(CFAllocatorRef allocator) {
@@ -727,10 +736,10 @@ CFAllocatorContext* ContextForCFAllocator(CFAllocatorRef allocator) {
         const_cast<ChromeCFAllocatorLeopards*>(
             reinterpret_cast<const ChromeCFAllocatorLeopards*>(allocator));
     return &our_allocator->_context;
-  } else if (base::mac::IsOSLion()) {
-    ChromeCFAllocatorLion* our_allocator =
-        const_cast<ChromeCFAllocatorLion*>(
-            reinterpret_cast<const ChromeCFAllocatorLion*>(allocator));
+  } else if (base::mac::IsOSLion() || base::mac::IsOSMountainLion()) {
+    ChromeCFAllocatorLions* our_allocator =
+        const_cast<ChromeCFAllocatorLions*>(
+            reinterpret_cast<const ChromeCFAllocatorLions*>(allocator));
     return &our_allocator->_context;
   } else {
     return NULL;
@@ -825,8 +834,8 @@ void EnableTerminationOnOutOfMemory() {
   ChromeMallocZone* purgeable_zone =
       reinterpret_cast<ChromeMallocZone*>(GetPurgeableZone());
 
-  vm_address_t page_start_default = NULL;
-  vm_address_t page_start_purgeable = NULL;
+  vm_address_t page_start_default = 0;
+  vm_address_t page_start_purgeable = 0;
   vm_size_t len_default = 0;
   vm_size_t len_purgeable = 0;
   if (zone_allocators_protected) {

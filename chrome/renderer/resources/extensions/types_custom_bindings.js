@@ -4,14 +4,10 @@
 
 // Custom bindings for the types API.
 
-(function() {
+var chromeHidden = requireNative('chrome_hidden').GetChromeHidden();
+var sendRequest = require('sendRequest').sendRequest;
 
-native function GetChromeHidden();
-
-var chromeHidden = GetChromeHidden();
-
-chromeHidden.registerCustomType('ChromeSetting', function(typesAPI) {
-  var sendRequest = typesAPI.sendRequest;
+chromeHidden.registerCustomType('ChromeSetting', function() {
 
   function extendSchema(schema) {
     var extendedSchema = schema.slice();
@@ -48,5 +44,3 @@ chromeHidden.registerCustomType('ChromeSetting', function(typesAPI) {
 
   return ChromeSetting;
 });
-
-})();

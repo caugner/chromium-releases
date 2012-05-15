@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,12 +12,9 @@
 #include "base/tracked_objects.h"
 #include "base/values.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sync/js/js_arg_list.h"
-#include "chrome/browser/sync/js/js_controller.h"
-#include "chrome/browser/sync/js/js_event_details.h"
 #include "chrome/browser/sync/profile_sync_service.h"
+#include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/sync/sync_ui_util.h"
-#include "chrome/browser/sync/util/weak_handle.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
@@ -26,6 +23,10 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "grit/sync_internals_resources.h"
+#include "sync/js/js_arg_list.h"
+#include "sync/js/js_controller.h"
+#include "sync/js/js_event_details.h"
+#include "sync/util/weak_handle.h"
 #include "ui/base/resource/resource_bundle.h"
 
 using browser_sync::JsArgList;
@@ -68,7 +69,8 @@ namespace {
 // Gets the ProfileSyncService of the underlying original profile.
 // May return NULL (e.g., if sync is disabled on the command line).
 ProfileSyncService* GetProfileSyncService(Profile* profile) {
-  return profile->GetOriginalProfile()->GetProfileSyncService();
+  return ProfileSyncServiceFactory::GetInstance()->GetForProfile(
+      profile->GetOriginalProfile());
 }
 
 }  // namespace

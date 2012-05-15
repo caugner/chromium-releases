@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,16 @@
 #pragma once
 
 #include <string>
+#include <map>
+#include <vector>
 
 class GoogleServiceAuthError;
+
+namespace net {
+typedef std::vector<std::string> ResponseCookies;
+}
+
+typedef std::map<std::string, std::string> UserInfoMap;
 
 // An interface that defines the callbacks for objects that
 // GaiaAuthFetcher can return data to.
@@ -47,13 +55,15 @@ class GaiaAuthConsumer {
                                         int expires_in_secs) {}
   virtual void OnOAuthLoginTokenFailure(const GoogleServiceAuthError& error) {}
 
-  virtual void OnGetUserInfoSuccess(const std::string& key,
-                                    const std::string& value) {}
-  virtual void OnGetUserInfoKeyNotFound(const std::string& key) {}
+  virtual void OnGetUserInfoSuccess(const UserInfoMap& data) {}
   virtual void OnGetUserInfoFailure(const GoogleServiceAuthError& error) {}
 
-  virtual void OnTokenAuthSuccess(const std::string& data) {}
+  virtual void OnTokenAuthSuccess(const net::ResponseCookies& cookies,
+                                  const std::string& data) {}
   virtual void OnTokenAuthFailure(const GoogleServiceAuthError& error) {}
+
+  virtual void OnUberAuthTokenSuccess(const std::string& token) {}
+  virtual void OnUberAuthTokenFailure(const GoogleServiceAuthError& error) {}
 
   virtual void OnMergeSessionSuccess(const std::string& data) {}
   virtual void OnMergeSessionFailure(const GoogleServiceAuthError& error) {}

@@ -270,9 +270,8 @@ IN_PROC_BROWSER_TEST_F(MigrationSingleClientTest, AllTypesIndividually) {
   RunSingleClientMigrationTest(GetPreferredDataTypesList(), MODIFY_BOOKMARK);
 }
 
-// This test is crashing on Win and Linux sync bots. http://crbug.com/107743
 IN_PROC_BROWSER_TEST_F(MigrationSingleClientTest,
-                       DISABLED_AllTypesIndividuallyTriggerNotification) {
+                       AllTypesIndividuallyTriggerNotification) {
   ASSERT_TRUE(SetupClients());
   RunSingleClientMigrationTest(GetPreferredDataTypesList(),
                                TRIGGER_NOTIFICATION);
@@ -342,31 +341,31 @@ class MigrationTwoClientTest : public MigrationTest {
   DISALLOW_COPY_AND_ASSIGN(MigrationTwoClientTest);
 };
 
+#if defined(OS_MACOSX)
+#define MAYBE_MigratePrefsThenModifyBookmark DISABLED_MigratePrefsThenModifyBookmark
+#else
+#define MAYBE_MigratePrefsThenModifyBookmark MigratePrefsThenModifyBookmark
+#endif
 // Easiest possible test of migration errors: triggers a server
 // migration on one datatype, then modifies some other datatype.
-// Crashy. crbug.com/100382.
 IN_PROC_BROWSER_TEST_F(MigrationTwoClientTest,
-                       DISABLED_MigratePrefsThenModifyBookmark) {
+                       MAYBE_MigratePrefsThenModifyBookmark) {
   RunTwoClientMigrationTest(MakeList(syncable::PREFERENCES),
                             MODIFY_BOOKMARK);
 }
 
 // Triggers a server migration on two datatypes, then makes a local
 // modification to one of them.
-// Crashy. crbug.com/100382.
 IN_PROC_BROWSER_TEST_F(MigrationTwoClientTest,
-                       DISABLED_MigratePrefsAndBookmarksThenModifyBookmark) {
+                       MigratePrefsAndBookmarksThenModifyBookmark) {
   RunTwoClientMigrationTest(
       MakeList(syncable::PREFERENCES, syncable::BOOKMARKS),
       MODIFY_BOOKMARK);
 }
 
-// Flaky on Mac 10.6 Sync bot and crashes on Win7 sync bot:
-// http://crbug.com/107205.
 // Migrate every datatype in sequence; the catch being that the server
 // will only tell the client about the migrations one at a time.
-IN_PROC_BROWSER_TEST_F(MigrationTwoClientTest,
-                       DISABLED_MigrationHellWithoutNigori) {
+IN_PROC_BROWSER_TEST_F(MigrationTwoClientTest, MigrationHellWithoutNigori) {
   ASSERT_TRUE(SetupClients());
   MigrationList migration_list = GetPreferredDataTypesList();
   // Let the first nudge be a datatype that's neither prefs nor
@@ -375,10 +374,7 @@ IN_PROC_BROWSER_TEST_F(MigrationTwoClientTest,
   RunTwoClientMigrationTest(migration_list, MODIFY_BOOKMARK);
 }
 
-// Flaky on Mac 10.6 Sync bot and crashes on Win7 sync bot:
-// http://crbug.com/107205.
-IN_PROC_BROWSER_TEST_F(MigrationTwoClientTest,
-                       DISABLED_MigrationHellWithNigori) {
+IN_PROC_BROWSER_TEST_F(MigrationTwoClientTest, MigrationHellWithNigori) {
   ASSERT_TRUE(SetupClients());
   MigrationList migration_list = GetPreferredDataTypesList();
   // Let the first nudge be a datatype that's neither prefs nor
@@ -407,7 +403,7 @@ class MigrationReconfigureTest : public MigrationTwoClientTest {
   DISALLOW_COPY_AND_ASSIGN(MigrationReconfigureTest);
 };
 
-IN_PROC_BROWSER_TEST_F(MigrationReconfigureTest, SetSyncTabs) {
+IN_PROC_BROWSER_TEST_F(MigrationReconfigureTest, DISABLED_SetSyncTabs) {
   if (!ServerSupportsErrorTriggering()) {
     LOG(WARNING) << "Test skipped in this server environment.";
     return;
@@ -435,7 +431,6 @@ IN_PROC_BROWSER_TEST_F(MigrationReconfigureTest, SetSyncTabs) {
   ASSERT_TRUE(GetClient(0)->IsTypePreferred(syncable::SESSIONS));
 }
 
-// Crashy. crbug.com/100382.
 IN_PROC_BROWSER_TEST_F(MigrationReconfigureTest,
                        DISABLED_SetSyncTabsAndMigrate) {
   if (!ServerSupportsErrorTriggering()) {

@@ -250,6 +250,32 @@ WebKit::WebMouseWheelEvent MakeWebMouseWheelEventFromAuraEvent(
   return webkit_event;
 }
 
+WebKit::WebGestureEvent MakeWebGestureEventFromAuraEvent(
+    aura::ScrollEvent* event) {
+  WebKit::WebGestureEvent webkit_event;
+
+  switch (event->type()) {
+    case ui::ET_SCROLL:
+      webkit_event.type = WebKit::WebInputEvent::GestureScrollUpdate;
+      break;
+    case ui::ET_SCROLL_FLING_START:
+      webkit_event.type = WebKit::WebInputEvent::GestureFlingStart;
+      break;
+    case ui::ET_SCROLL_FLING_CANCEL:
+      webkit_event.type = WebKit::WebInputEvent::GestureFlingCancel;
+      break;
+    default:
+      NOTREACHED() << "Unknown gesture type: " << event->type();
+  }
+
+  webkit_event.modifiers = EventFlagsToWebEventModifiers(event->flags());
+  webkit_event.timeStampSeconds = event->time_stamp().InSecondsF();
+  webkit_event.deltaX = event->x_offset();
+  webkit_event.deltaY = event->y_offset();
+
+  return webkit_event;
+}
+
 WebKit::WebKeyboardEvent MakeWebKeyboardEventFromAuraEvent(
     aura::KeyEvent* event) {
   base::NativeEvent native_event = event->native_event();
@@ -321,12 +347,25 @@ WebKit::WebGestureEvent MakeWebGestureEventFromAuraEvent(
     case ui::ET_GESTURE_SCROLL_END:
       gesture_event.type = WebKit::WebInputEvent::GestureScrollEnd;
       break;
+    case ui::ET_GESTURE_PINCH_BEGIN:
+      gesture_event.type = WebKit::WebInputEvent::GesturePinchBegin;
+      break;
+    case ui::ET_GESTURE_PINCH_UPDATE:
+      gesture_event.type = WebKit::WebInputEvent::GesturePinchUpdate;
+      break;
+    case ui::ET_GESTURE_PINCH_END:
+      gesture_event.type = WebKit::WebInputEvent::GesturePinchEnd;
+      break;
+    case ui::ET_GESTURE_LONG_PRESS:
+      // TODO(tdresser): Integrate long press with WebKit
+      break;
     default:
       NOTREACHED() << "Unknown gesture type: " << event->type();
   }
 
   gesture_event.deltaX = event->delta_x();
   gesture_event.deltaY = event->delta_y();
+  gesture_event.modifiers = EventFlagsToWebEventModifiers(event->flags());
 
   return gesture_event;
 }
@@ -382,9 +421,9 @@ WebKit::WebTouchPoint* UpdateWebTouchEventFromAuraEvent(
   point->position.x = event->x();
   point->position.y = event->y();
 
-  // TODO(sad): Convert to screen coordinates.
-  point->screenPosition.x = point->position.x;
-  point->screenPosition.y = point->position.y;
+  const gfx::Point root_point = event->root_location();
+  point->screenPosition.x = root_point.x();
+  point->screenPosition.y = root_point.y();
 
   // Mark the rest of the points as stationary.
   for (unsigned i = 0; i < web_event->touchesLength; ++i) {

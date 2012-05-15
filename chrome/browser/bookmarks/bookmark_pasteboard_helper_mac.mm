@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,6 @@
 #include "base/sys_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/tab_contents/moving_to_content/tab_contents_view_mac.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_controller.h"
 #include "skia/ext/skia_utils_mac.h"
 #include "ui/gfx/mac/nsimage_cache.h"
@@ -40,7 +39,7 @@ NSString* const kChromiumBookmarkId =
 
 // Mac WebKit uses this type, declared in
 // WebKit/mac/History/WebURLsWithTitles.h.
-NSString* const kWebURLsWithTitlesPboardType =
+NSString* const kCrWebURLsWithTitlesPboardType =
     @"WebURLsWithTitlesPboardType";
 
 // Keys for the type of node in BookmarkDictionaryListPboardType.
@@ -100,7 +99,7 @@ bool ReadWebURLsWithTitlesPboardType(
     NSPasteboard* pb,
     std::vector<BookmarkNodeData::Element>& elements) {
   NSArray* bookmarkPairs =
-      [pb propertyListForType:kWebURLsWithTitlesPboardType];
+      [pb propertyListForType:kCrWebURLsWithTitlesPboardType];
   if (![bookmarkPairs isKindOfClass:[NSArray class]])
     return false;
 
@@ -216,7 +215,7 @@ void WriteSimplifiedBookmarkTypes(NSPasteboard* pb,
 
   // Write WebURLsWithTitlesPboardType.
   [pb setPropertyList:[NSArray arrayWithObjects:urls, titles, nil]
-              forType:kWebURLsWithTitlesPboardType];
+              forType:kCrWebURLsWithTitlesPboardType];
 
   // Write NSStringPboardType.
   [pb setString:[urls componentsJoinedByString:@"\n"]
@@ -309,7 +308,7 @@ void WriteToPasteboard(PasteboardType type,
   NSPasteboard* pb = PasteboardFromType(type);
 
   NSArray* types = [NSArray arrayWithObjects:kBookmarkDictionaryListPboardType,
-                                             kWebURLsWithTitlesPboardType,
+                                             kCrWebURLsWithTitlesPboardType,
                                              NSStringPboardType,
                                              NSURLPboardType,
                                              kNSURLTitlePboardType,
@@ -340,7 +339,7 @@ bool PasteboardContainsBookmarks(PasteboardType type) {
 
   NSArray* availableTypes =
       [NSArray arrayWithObjects:kBookmarkDictionaryListPboardType,
-                                kWebURLsWithTitlesPboardType,
+                                kCrWebURLsWithTitlesPboardType,
                                 NSURLPboardType,
                                 nil];
   return [pb availableTypeFromArray:availableTypes] != nil;

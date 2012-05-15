@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,8 +10,6 @@
 #include <windows.h>
 #include <uxtheme.h>
 #include <vsstyle.h>
-#elif defined(TOOLKIT_USES_GTK)
-#include <gtk/gtk.h>
 #endif
 
 #include <algorithm>
@@ -22,22 +20,34 @@
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/canvas.h"
 #include "ui/gfx/font.h"
+#include "ui/gfx/native_theme.h"
 #include "ui/views/controls/button/text_button.h"
 #include "ui/views/layout/layout_constants.h"
 #include "ui/views/widget/root_view.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/dialog_delegate.h"
 
-#if defined(OS_WIN)
-#include "ui/gfx/native_theme.h"
-#else
-#include "ui/gfx/skia_utils_gtk.h"
-#endif
-
 namespace views {
 namespace {
+
+const int kDialogMinButtonWidth = 75;
+const int kDialogButtonLabelSpacing = 16;
+const int kDialogButtonContentSpacing = 5;
+
+// The group used by the buttons.  This name is chosen voluntarily big not to
+// conflict with other groups that could be in the dialog content.
+const int kButtonGroup = 6666;
+
+const gfx::Font& GetDialogButtonFont() {
+  static gfx::Font* font = NULL;
+  if (!font) {
+    ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+    font = new gfx::Font(rb.GetFont(ui::ResourceBundle::BaseFont));
+  }
+  return *font;
+}
 
 // Updates any of the standard buttons according to the delegate.
 void UpdateButtonHelper(NativeTextButton* button_view,
@@ -86,16 +96,6 @@ class DialogButton : public NativeTextButton {
 
 }  // namespace
 
-// static
-gfx::Font* DialogClientView::dialog_button_font_ = NULL;
-static const int kDialogMinButtonWidth = 75;
-static const int kDialogButtonLabelSpacing = 16;
-static const int kDialogButtonContentSpacing = 5;
-
-// The group used by the buttons.  This name is chosen voluntarily big not to
-// conflict with other groups that could be in the dialog content.
-static const int kButtonGroup = 6666;
-
 ///////////////////////////////////////////////////////////////////////////////
 // DialogClientView, public:
 
@@ -110,7 +110,6 @@ DialogClientView::DialogClientView(Widget* owner, View* contents_view)
       listening_to_focus_(false),
       saved_focus_manager_(NULL),
       bottom_view_(NULL) {
-  InitClass();
 }
 
 DialogClientView::~DialogClientView() {
@@ -306,20 +305,9 @@ const DialogClientView* DialogClientView::AsDialogClientView() const {
 // DialogClientView, View overrides:
 
 void DialogClientView::OnPaint(gfx::Canvas* canvas) {
-#if defined(TOOLKIT_USES_GTK)
-  // TODO(benrg): Unfortunately, GetSystemColor often returns the wrong color
-  // under GTK right now. This is meant to be a temporary fix. See related TODO
-  // in ui/gfx/native_theme_gtk.cc.
-  GtkWidget* widget = GetWidget()->GetNativeView();
-  if (!GTK_IS_WINDOW(widget))
-    return;
-  SkColor bg_color = gfx::GdkColorToSkColor(
-                         gtk_widget_get_style(widget)->bg[GTK_STATE_NORMAL]);
-#else
   SkColor bg_color = gfx::NativeTheme::instance()->GetSystemColor(
-                         gfx::NativeTheme::kColorId_DialogBackground);
-#endif
-  canvas->FillRect(bg_color, GetLocalBounds());
+      gfx::NativeTheme::kColorId_DialogBackground);
+  canvas->FillRect(GetLocalBounds(), bg_color);
 }
 
 void DialogClientView::PaintChildren(gfx::Canvas* canvas) {
@@ -445,7 +433,7 @@ void DialogClientView::PaintSizeBox(gfx::Canvas* canvas) {
     size_box_bounds_.set_x(size_box_bounds_.right() - gripper_size.width());
     size_box_bounds_.set_y(size_box_bounds_.bottom() - gripper_size.height());
 
-    gfx::NativeTheme::instance()->Paint(canvas->GetSkCanvas(),
+    gfx::NativeTheme::instance()->Paint(canvas->sk_canvas(),
                                         gfx::NativeTheme::kWindowResizeGripper,
                                         gfx::NativeTheme::kNormal,
                                         size_box_bounds_,
@@ -461,7 +449,7 @@ int DialogClientView::GetButtonWidth(int button) const {
   DialogDelegate* dd = GetDialogDelegate();
   string16 button_label = dd->GetDialogButtonLabel(
       static_cast<ui::DialogButton>(button));
-  int string_width = dialog_button_font_->GetStringWidth(button_label);
+  int string_width = GetDialogButtonFont().GetStringWidth(button_label);
   return std::max(string_width + kDialogButtonLabelSpacing,
                   kDialogMinButtonWidth);
 }
@@ -568,16 +556,6 @@ void DialogClientView::UpdateFocusListener() {
   if (focus_manager) {
     focus_manager->AddFocusChangeListener(this);
     listening_to_focus_ = true;
-  }
-}
-
-// static
-void DialogClientView::InitClass() {
-  static bool initialized = false;
-  if (!initialized) {
-    ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-    dialog_button_font_ = new gfx::Font(rb.GetFont(ResourceBundle::BaseFont));
-    initialized = true;
   }
 }
 

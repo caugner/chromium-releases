@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -43,7 +43,7 @@ class CONTENT_EXPORT DownloadManagerDelegate {
   // give the answer.
   virtual void ChooseDownloadPath(WebContents* web_contents,
                                   const FilePath& suggested_path,
-                                  void* data) {}
+                                  int32 download_id) {}
 
   // Allows the embedder to set an intermediate name for the download until it's
   // complete. If the embedder doesn't want this return the suggested path.
@@ -109,15 +109,14 @@ class CONTENT_EXPORT DownloadManagerDelegate {
                           FilePath* download_save_dir) {}
 
   // Asks the user for the path to save a page. The delegate calls the callback
-  // to give the answer.
+  // to give the answer, except on ChromeOS, where the saving is done by
+  // SavePackageFilePickerChromeOS. TODO(achuith): Move ChromeOS save
+  // functionality to SavePackage.
   virtual void ChooseSavePath(WebContents* web_contents,
                               const FilePath& suggested_path,
                               const FilePath::StringType& default_extension,
                               bool can_save_as_complete,
                               SaveFilePathPickedCallback callback) {}
-
-  // Informs the delegate that the progress of downloads has changed.
-  virtual void DownloadProgressUpdated() {}
 };
 
 }  // namespace content

@@ -1,11 +1,15 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/common/net/url_fetcher_impl.h"
 
+#include <string>
+
 #include "base/bind.h"
+#include "base/file_util.h"
 #include "base/message_loop_proxy.h"
+#include "base/scoped_temp_dir.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
 #include "build/build_config.h"
@@ -32,30 +36,6 @@ namespace {
 const FilePath::CharType kDocRoot[] = FILE_PATH_LITERAL("chrome/test/data");
 const char kTestServerFilePrefix[] = "files/";
 
-class TestURLRequestContextGetter : public net::URLRequestContextGetter {
- public:
-  explicit TestURLRequestContextGetter(
-      base::MessageLoopProxy* io_message_loop_proxy)
-          : io_message_loop_proxy_(io_message_loop_proxy) {
-  }
-  virtual net::URLRequestContext* GetURLRequestContext() {
-    if (!context_)
-      context_ = new TestURLRequestContext();
-    return context_;
-  }
-  virtual scoped_refptr<base::MessageLoopProxy> GetIOMessageLoopProxy() const {
-    return io_message_loop_proxy_;
-  }
-
- protected:
-  scoped_refptr<base::MessageLoopProxy> io_message_loop_proxy_;
-
- private:
-  virtual ~TestURLRequestContextGetter() {}
-
-  scoped_refptr<net::URLRequestContext> context_;
-};
-
 }  // namespace
 
 class URLFetcherTest : public testing::Test,
@@ -71,27 +51,27 @@ class URLFetcherTest : public testing::Test,
   virtual void CreateFetcher(const GURL& url);
 
   // content::URLFetcherDelegate
-  virtual void OnURLFetchComplete(const content::URLFetcher* source);
+  virtual void OnURLFetchComplete(const content::URLFetcher* source) OVERRIDE;
 
   scoped_refptr<base::MessageLoopProxy> io_message_loop_proxy() {
     return io_message_loop_proxy_;
   }
 
  protected:
-  virtual void SetUp() {
+  virtual void SetUp() OVERRIDE {
     testing::Test::SetUp();
 
     io_message_loop_proxy_ = base::MessageLoopProxy::current();
 
 #if defined(USE_NSS)
     crypto::EnsureNSSInit();
-    net::EnsureOCSPInit();
+    net::EnsureNSSHttpIOInit();
 #endif
   }
 
-  virtual void TearDown() {
+  virtual void TearDown() OVERRIDE {
 #if defined(USE_NSS)
-    net::ShutdownOCSP();
+    net::ShutdownNSSHttpIO();
 #endif
   }
 
@@ -134,24 +114,67 @@ namespace {
 // Version of URLFetcherTest that does a POST instead
 class URLFetcherPostTest : public URLFetcherTest {
  public:
+  // URLFetcherTest override.
+  virtual void CreateFetcher(const GURL& url) OVERRIDE;
+
+  // content::URLFetcherDelegate
+  virtual void OnURLFetchComplete(const content::URLFetcher* source) OVERRIDE;
+};
+
+// Version of URLFetcherTest that tests download progress reports.
+class URLFetcherDownloadProgressTest : public URLFetcherTest {
+ public:
+  // URLFetcherTest override.
+  virtual void CreateFetcher(const GURL& url) OVERRIDE;
+
+  // content::URLFetcherDelegate
+  virtual void OnURLFetchDownloadProgress(const content::URLFetcher* source,
+                                          int64 current, int64 total) OVERRIDE;
+ protected:
+  int64 previous_progress_;
+  int64 expected_total_;
+};
+
+/// Version of URLFetcherTest that tests progress reports at cancellation.
+class URLFetcherDownloadProgressCancelTest : public URLFetcherTest {
+ public:
+  // URLFetcherTest override.
+  virtual void CreateFetcher(const GURL& url) OVERRIDE;
+
+  // content::URLFetcherDelegate
+  virtual void OnURLFetchComplete(const content::URLFetcher* source) OVERRIDE;
+  virtual void OnURLFetchDownloadProgress(const content::URLFetcher* source,
+                                          int64 current, int64 total) OVERRIDE;
+ protected:
+  bool cancelled_;
+};
+
+// Version of URLFetcherTest that tests upload progress reports.
+class URLFetcherUploadProgressTest : public URLFetcherTest {
+ public:
   virtual void CreateFetcher(const GURL& url);
 
   // content::URLFetcherDelegate
-  virtual void OnURLFetchComplete(const content::URLFetcher* source);
+  virtual void OnURLFetchUploadProgress(const content::URLFetcher* source,
+                                        int64 current, int64 total);
+ protected:
+  int64 previous_progress_;
+  std::string chunk_;
+  int64 number_of_chunks_added_;
 };
 
 // Version of URLFetcherTest that tests headers.
 class URLFetcherHeadersTest : public URLFetcherTest {
  public:
   // content::URLFetcherDelegate
-  virtual void OnURLFetchComplete(const content::URLFetcher* source);
+  virtual void OnURLFetchComplete(const content::URLFetcher* source) OVERRIDE;
 };
 
 // Version of URLFetcherTest that tests SocketAddress.
 class URLFetcherSocketAddressTest : public URLFetcherTest {
  public:
   // content::URLFetcherDelegate
-  virtual void OnURLFetchComplete(const content::URLFetcher* source);
+  virtual void OnURLFetchComplete(const content::URLFetcher* source) OVERRIDE;
  protected:
   std::string expected_host_;
   uint16 expected_port_;
@@ -160,9 +183,10 @@ class URLFetcherSocketAddressTest : public URLFetcherTest {
 // Version of URLFetcherTest that tests overload protection.
 class URLFetcherProtectTest : public URLFetcherTest {
  public:
-  virtual void CreateFetcher(const GURL& url);
+  // URLFetcherTest override.
+  virtual void CreateFetcher(const GURL& url) OVERRIDE;
   // content::URLFetcherDelegate
-  virtual void OnURLFetchComplete(const content::URLFetcher* source);
+  virtual void OnURLFetchComplete(const content::URLFetcher* source) OVERRIDE;
  private:
   Time start_time_;
 };
@@ -171,9 +195,10 @@ class URLFetcherProtectTest : public URLFetcherTest {
 // passed through.
 class URLFetcherProtectTestPassedThrough : public URLFetcherTest {
  public:
-  virtual void CreateFetcher(const GURL& url);
+  // URLFetcherTest override.
+  virtual void CreateFetcher(const GURL& url) OVERRIDE;
   // content::URLFetcherDelegate
-  virtual void OnURLFetchComplete(const content::URLFetcher* source);
+  virtual void OnURLFetchComplete(const content::URLFetcher* source) OVERRIDE;
  private:
   Time start_time_;
 };
@@ -184,7 +209,7 @@ class URLFetcherBadHTTPSTest : public URLFetcherTest {
   URLFetcherBadHTTPSTest();
 
   // content::URLFetcherDelegate
-  virtual void OnURLFetchComplete(const content::URLFetcher* source);
+  virtual void OnURLFetchComplete(const content::URLFetcher* source) OVERRIDE;
 
  private:
   FilePath cert_dir_;
@@ -193,9 +218,10 @@ class URLFetcherBadHTTPSTest : public URLFetcherTest {
 // Version of URLFetcherTest that tests request cancellation on shutdown.
 class URLFetcherCancelTest : public URLFetcherTest {
  public:
-  virtual void CreateFetcher(const GURL& url);
+  // URLFetcherTest override.
+  virtual void CreateFetcher(const GURL& url) OVERRIDE;
   // content::URLFetcherDelegate
-  virtual void OnURLFetchComplete(const content::URLFetcher* source);
+  virtual void OnURLFetchComplete(const content::URLFetcher* source) OVERRIDE;
 
   void CancelRequest();
 };
@@ -243,88 +269,35 @@ class CancelTestURLRequestContextGetter : public net::URLRequestContextGetter {
 class URLFetcherMultipleAttemptTest : public URLFetcherTest {
  public:
   // content::URLFetcherDelegate
-  virtual void OnURLFetchComplete(const content::URLFetcher* source);
+  virtual void OnURLFetchComplete(const content::URLFetcher* source) OVERRIDE;
  private:
   std::string data_;
 };
 
-class URLFetcherTempFileTest : public URLFetcherTest {
+class URLFetcherFileTest : public URLFetcherTest {
  public:
-  URLFetcherTempFileTest()
-      : take_ownership_of_temp_file_(false) {
-  }
+  URLFetcherFileTest() : take_ownership_of_file_(false),
+                         expected_file_error_(base::PLATFORM_FILE_OK) {}
+
+  void CreateFetcherForFile(const GURL& url, const FilePath& file_path);
+  void CreateFetcherForTempFile(const GURL& url);
 
   // content::URLFetcherDelegate
-  virtual void OnURLFetchComplete(const content::URLFetcher* source);
-
-  virtual void CreateFetcher(const GURL& url);
+  virtual void OnURLFetchComplete(const content::URLFetcher* source) OVERRIDE;
 
  protected:
   FilePath expected_file_;
-  FilePath temp_file_;
+  FilePath file_path_;
 
   // Set by the test. Used in OnURLFetchComplete() to decide if
   // the URLFetcher should own the temp file, so that we can test
   // disowning prevents the file from being deleted.
-  bool take_ownership_of_temp_file_;
+  bool take_ownership_of_file_;
+
+  // Expected file error code for the test.
+  // PLATFORM_FILE_OK when expecting success.
+  base::PlatformFileError expected_file_error_;
 };
-
-void URLFetcherTempFileTest::CreateFetcher(const GURL& url) {
-  fetcher_ = new URLFetcherImpl(url, content::URLFetcher::GET, this);
-  fetcher_->SetRequestContext(new TestURLRequestContextGetter(
-      io_message_loop_proxy()));
-
-  // Use the IO message loop to do the file operations in this test.
-  fetcher_->SaveResponseToTemporaryFile(io_message_loop_proxy());
-  fetcher_->Start();
-}
-
-TEST_F(URLFetcherTempFileTest, SmallGet) {
-  net::TestServer test_server(net::TestServer::TYPE_HTTP, FilePath(kDocRoot));
-  ASSERT_TRUE(test_server.Start());
-
-  // Get a small file.
-  const char* kFileToFetch = "simple.html";
-  expected_file_ = test_server.document_root().AppendASCII(kFileToFetch);
-  CreateFetcher(
-      test_server.GetURL(std::string(kTestServerFilePrefix) + kFileToFetch));
-
-  MessageLoop::current()->Run();  // OnURLFetchComplete() will Quit().
-
-  ASSERT_FALSE(file_util::PathExists(temp_file_))
-      << temp_file_.value() << " not removed.";
-}
-
-TEST_F(URLFetcherTempFileTest, LargeGet) {
-  net::TestServer test_server(net::TestServer::TYPE_HTTP, FilePath(kDocRoot));
-  ASSERT_TRUE(test_server.Start());
-
-  // Get a file large enough to require more than one read into
-  // URLFetcher::Core's IOBuffer.
-  const char* kFileToFetch = "animate1.gif";
-  expected_file_ = test_server.document_root().AppendASCII(kFileToFetch);
-  CreateFetcher(test_server.GetURL(
-      std::string(kTestServerFilePrefix) + kFileToFetch));
-
-  MessageLoop::current()->Run();  // OnURLFetchComplete() will Quit().
-}
-
-TEST_F(URLFetcherTempFileTest, CanTakeOwnershipOfFile) {
-  net::TestServer test_server(net::TestServer::TYPE_HTTP, FilePath(kDocRoot));
-  ASSERT_TRUE(test_server.Start());
-
-  // Get a small file.
-  const char* kFileToFetch = "simple.html";
-  expected_file_ = test_server.document_root().AppendASCII(kFileToFetch);
-  CreateFetcher(test_server.GetURL(
-      std::string(kTestServerFilePrefix) + kFileToFetch));
-
-  MessageLoop::current()->Run();  // OnURLFetchComplete() will Quit().
-
-  MessageLoop::current()->RunAllPending();
-  ASSERT_FALSE(file_util::PathExists(temp_file_))
-      << temp_file_.value() << " not removed.";
-}
 
 void URLFetcherPostTest::CreateFetcher(const GURL& url) {
   fetcher_ = new URLFetcherImpl(url, content::URLFetcher::POST, this);
@@ -340,6 +313,80 @@ void URLFetcherPostTest::OnURLFetchComplete(const content::URLFetcher* source) {
   EXPECT_TRUE(source->GetResponseAsString(&data));
   EXPECT_EQ(std::string("bobsyeruncle"), data);
   URLFetcherTest::OnURLFetchComplete(source);
+}
+
+void URLFetcherDownloadProgressTest::CreateFetcher(const GURL& url) {
+  fetcher_ = new URLFetcherImpl(url, content::URLFetcher::GET, this);
+  fetcher_->SetRequestContext(new TestURLRequestContextGetter(
+      io_message_loop_proxy()));
+  previous_progress_ = 0;
+  fetcher_->Start();
+}
+
+void URLFetcherDownloadProgressTest::OnURLFetchDownloadProgress(
+    const content::URLFetcher* source, int64 current, int64 total) {
+  // Increasing between 0 and total.
+  EXPECT_LE(0, current);
+  EXPECT_GE(total, current);
+  EXPECT_LE(previous_progress_, current);
+  previous_progress_ = current;
+  EXPECT_EQ(expected_total_, total);
+}
+
+void URLFetcherDownloadProgressCancelTest::CreateFetcher(const GURL& url) {
+  fetcher_ = new URLFetcherImpl(url, content::URLFetcher::GET, this);
+  fetcher_->SetRequestContext(new TestURLRequestContextGetter(
+      io_message_loop_proxy()));
+  cancelled_ = false;
+  fetcher_->Start();
+}
+
+void URLFetcherDownloadProgressCancelTest::OnURLFetchDownloadProgress(
+    const content::URLFetcher* source, int64 current, int64 total) {
+  EXPECT_FALSE(cancelled_);
+  if (!cancelled_) {
+    delete fetcher_;
+    cancelled_ = true;
+    io_message_loop_proxy()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
+  }
+}
+
+void URLFetcherDownloadProgressCancelTest::OnURLFetchComplete(
+    const content::URLFetcher* source) {
+  // Should have been cancelled.
+  ADD_FAILURE();
+  delete fetcher_;
+  io_message_loop_proxy()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
+}
+
+void URLFetcherUploadProgressTest::CreateFetcher(const GURL& url) {
+  fetcher_ = new URLFetcherImpl(url, content::URLFetcher::POST, this);
+  fetcher_->SetRequestContext(new TestURLRequestContextGetter(
+      io_message_loop_proxy()));
+  previous_progress_ = 0;
+  // Large enough data to require more than one read from UploadDataStream.
+  chunk_.assign(1<<16, 'a');
+  // Use chunked upload to wait for a timer event of progress notification.
+  fetcher_->SetChunkedUpload("application/x-www-form-urlencoded");
+  fetcher_->Start();
+  number_of_chunks_added_ = 1;
+  fetcher_->AppendChunkToUpload(chunk_, false);
+}
+
+void URLFetcherUploadProgressTest::OnURLFetchUploadProgress(
+    const content::URLFetcher* source, int64 current, int64 total) {
+  // Increasing between 0 and total.
+  EXPECT_LE(0, current);
+  EXPECT_GE(static_cast<int64>(chunk_.size()) * number_of_chunks_added_,
+            current);
+  EXPECT_LE(previous_progress_, current);
+  previous_progress_ = current;
+  EXPECT_EQ(-1, total);
+
+  if (number_of_chunks_added_ < 2) {
+    number_of_chunks_added_ += 1;
+    fetcher_->AppendChunkToUpload(chunk_, true);
+  }
 }
 
 void URLFetcherHeadersTest::OnURLFetchComplete(
@@ -385,8 +432,9 @@ void URLFetcherProtectTest::OnURLFetchComplete(
     static int count = 0;
     count++;
     if (count < 20) {
-      fetcher_->StartWithRequestContextGetter(new TestURLRequestContextGetter(
-          io_message_loop_proxy()));
+      fetcher_->SetRequestContext(
+          new TestURLRequestContextGetter(io_message_loop_proxy()));
+      fetcher_->Start();
     } else {
       // We have already sent 20 requests continuously. And we expect that
       // it takes more than 1 second due to the overload protection settings.
@@ -496,8 +544,9 @@ void URLFetcherMultipleAttemptTest::OnURLFetchComplete(
   EXPECT_FALSE(data.empty());
   if (!data.empty() && data_.empty()) {
     data_ = data;
-    fetcher_->StartWithRequestContextGetter(
+    fetcher_->SetRequestContext(
         new TestURLRequestContextGetter(io_message_loop_proxy()));
+    fetcher_->Start();
   } else {
     EXPECT_EQ(data, data_);
     delete fetcher_;  // Have to delete this here and not in the destructor,
@@ -510,23 +559,53 @@ void URLFetcherMultipleAttemptTest::OnURLFetchComplete(
   }
 }
 
-void URLFetcherTempFileTest::OnURLFetchComplete(
-    const content::URLFetcher* source) {
-  EXPECT_TRUE(source->GetStatus().is_success());
-  EXPECT_EQ(source->GetResponseCode(), 200);
+void URLFetcherFileTest::CreateFetcherForFile(const GURL& url,
+                                              const FilePath& file_path) {
+  fetcher_ = new URLFetcherImpl(url, content::URLFetcher::GET, this);
+  fetcher_->SetRequestContext(new TestURLRequestContextGetter(
+      io_message_loop_proxy()));
 
-  EXPECT_TRUE(source->GetResponseAsFilePath(
-      take_ownership_of_temp_file_, &temp_file_));
+  // Use the IO message loop to do the file operations in this test.
+  fetcher_->SaveResponseToFileAtPath(file_path, io_message_loop_proxy());
+  fetcher_->Start();
+}
 
-  EXPECT_TRUE(file_util::ContentsEqual(expected_file_, temp_file_));
+void URLFetcherFileTest::CreateFetcherForTempFile(const GURL& url) {
+  fetcher_ = new URLFetcherImpl(url, content::URLFetcher::GET, this);
+  fetcher_->SetRequestContext(new TestURLRequestContextGetter(
+      io_message_loop_proxy()));
 
+  // Use the IO message loop to do the file operations in this test.
+  fetcher_->SaveResponseToTemporaryFile(io_message_loop_proxy());
+  fetcher_->Start();
+}
+
+void URLFetcherFileTest::OnURLFetchComplete(const content::URLFetcher* source) {
+  if (expected_file_error_ == base::PLATFORM_FILE_OK) {
+    EXPECT_TRUE(source->GetStatus().is_success());
+    EXPECT_EQ(source->GetResponseCode(), 200);
+
+    base::PlatformFileError error_code = base::PLATFORM_FILE_OK;
+    EXPECT_FALSE(fetcher_->FileErrorOccurred(&error_code));
+
+    EXPECT_TRUE(source->GetResponseAsFilePath(
+        take_ownership_of_file_, &file_path_));
+
+    EXPECT_TRUE(file_util::ContentsEqual(expected_file_, file_path_));
+  } else {
+    base::PlatformFileError error_code = base::PLATFORM_FILE_OK;
+    EXPECT_TRUE(fetcher_->FileErrorOccurred(&error_code));
+    EXPECT_EQ(expected_file_error_, error_code);
+  }
   delete fetcher_;
 
   io_message_loop_proxy()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
 }
 
 TEST_F(URLFetcherTest, SameThreadsTest) {
-  net::TestServer test_server(net::TestServer::TYPE_HTTP, FilePath(kDocRoot));
+  net::TestServer test_server(net::TestServer::TYPE_HTTP,
+                              net::TestServer::kLocalhost,
+                              FilePath(kDocRoot));
   ASSERT_TRUE(test_server.Start());
 
   // Create the fetcher on the main thread.  Since IO will happen on the main
@@ -543,7 +622,9 @@ TEST_F(URLFetcherTest, DISABLED_DifferentThreadsTest) {
 #else
 TEST_F(URLFetcherTest, DifferentThreadsTest) {
 #endif
-  net::TestServer test_server(net::TestServer::TYPE_HTTP, FilePath(kDocRoot));
+  net::TestServer test_server(net::TestServer::TYPE_HTTP,
+                              net::TestServer::kLocalhost,
+                              FilePath(kDocRoot));
   ASSERT_TRUE(test_server.Start());
 
   // Create a separate thread that will create the URLFetcher.  The current
@@ -562,21 +643,96 @@ TEST_F(URLFetcherTest, DifferentThreadsTest) {
   MessageLoop::current()->Run();
 }
 
+void CancelAllOnIO() {
+  EXPECT_EQ(1, URLFetcherTest::GetNumFetcherCores());
+  URLFetcherImpl::CancelAll();
+  EXPECT_EQ(0, URLFetcherTest::GetNumFetcherCores());
+}
+
+// Tests to make sure CancelAll() will successfully cancel existing URLFetchers.
+TEST_F(URLFetcherTest, CancelAll) {
+  net::TestServer test_server(net::TestServer::TYPE_HTTP,
+                              net::TestServer::kLocalhost,
+                              FilePath(kDocRoot));
+  ASSERT_TRUE(test_server.Start());
+  EXPECT_EQ(0, GetNumFetcherCores());
+
+  CreateFetcher(test_server.GetURL("defaultresponse"));
+  io_message_loop_proxy()->PostTaskAndReply(
+      FROM_HERE,
+      base::Bind(&CancelAllOnIO),
+      MessageLoop::QuitClosure());
+  MessageLoop::current()->Run();
+  EXPECT_EQ(0, GetNumFetcherCores());
+  delete fetcher_;
+}
+
 #if defined(OS_MACOSX)
 // SIGSEGV on Mac: http://crbug.com/60426
 TEST_F(URLFetcherPostTest, DISABLED_Basic) {
 #else
 TEST_F(URLFetcherPostTest, Basic) {
 #endif
-  net::TestServer test_server(net::TestServer::TYPE_HTTP, FilePath(kDocRoot));
+  net::TestServer test_server(net::TestServer::TYPE_HTTP,
+                              net::TestServer::kLocalhost,
+                              FilePath(kDocRoot));
   ASSERT_TRUE(test_server.Start());
 
   CreateFetcher(test_server.GetURL("echo"));
   MessageLoop::current()->Run();
 }
 
-TEST_F(URLFetcherHeadersTest, Headers) {
+#if defined(OS_MACOSX)
+// SIGSEGV on Mac: http://crbug.com/60426
+TEST_F(URLFetcherUploadProgressTest, DISABLED_Basic) {
+#else
+TEST_F(URLFetcherUploadProgressTest, Basic) {
+#endif
   net::TestServer test_server(net::TestServer::TYPE_HTTP,
+                              net::TestServer::kLocalhost,
+                              FilePath(kDocRoot));
+  ASSERT_TRUE(test_server.Start());
+
+  CreateFetcher(test_server.GetURL("echo"));
+  MessageLoop::current()->Run();
+}
+
+TEST_F(URLFetcherDownloadProgressTest, Basic) {
+  net::TestServer test_server(net::TestServer::TYPE_HTTP,
+                              net::TestServer::kLocalhost,
+                              FilePath(kDocRoot));
+  ASSERT_TRUE(test_server.Start());
+
+  // Get a file large enough to require more than one read into
+  // URLFetcher::Core's IOBuffer.
+  static const char kFileToFetch[] = "animate1.gif";
+  file_util::GetFileSize(test_server.document_root().AppendASCII(kFileToFetch),
+                         &expected_total_);
+  CreateFetcher(test_server.GetURL(
+      std::string(kTestServerFilePrefix) + kFileToFetch));
+
+  MessageLoop::current()->Run();
+}
+
+TEST_F(URLFetcherDownloadProgressCancelTest, CancelWhileProgressReport) {
+  net::TestServer test_server(net::TestServer::TYPE_HTTP,
+                              net::TestServer::kLocalhost,
+                              FilePath(kDocRoot));
+  ASSERT_TRUE(test_server.Start());
+
+  // Get a file large enough to require more than one read into
+  // URLFetcher::Core's IOBuffer.
+  static const char kFileToFetch[] = "animate1.gif";
+  CreateFetcher(test_server.GetURL(
+      std::string(kTestServerFilePrefix) + kFileToFetch));
+
+  MessageLoop::current()->Run();
+}
+
+TEST_F(URLFetcherHeadersTest, Headers) {
+  net::TestServer test_server(
+      net::TestServer::TYPE_HTTP,
+      net::TestServer::kLocalhost,
       FilePath(FILE_PATH_LITERAL("net/data/url_request_unittest")));
   ASSERT_TRUE(test_server.Start());
 
@@ -586,7 +742,9 @@ TEST_F(URLFetcherHeadersTest, Headers) {
 }
 
 TEST_F(URLFetcherSocketAddressTest, SocketAddress) {
-  net::TestServer test_server(net::TestServer::TYPE_HTTP,
+  net::TestServer test_server(
+      net::TestServer::TYPE_HTTP,
+      net::TestServer::kLocalhost,
       FilePath(FILE_PATH_LITERAL("net/data/url_request_unittest")));
   ASSERT_TRUE(test_server.Start());
   expected_port_ = test_server.host_port_pair().port();
@@ -598,7 +756,9 @@ TEST_F(URLFetcherSocketAddressTest, SocketAddress) {
 }
 
 TEST_F(URLFetcherProtectTest, Overload) {
-  net::TestServer test_server(net::TestServer::TYPE_HTTP, FilePath(kDocRoot));
+  net::TestServer test_server(net::TestServer::TYPE_HTTP,
+                              net::TestServer::kLocalhost,
+                              FilePath(kDocRoot));
   ASSERT_TRUE(test_server.Start());
 
   GURL url(test_server.GetURL("defaultresponse"));
@@ -619,7 +779,9 @@ TEST_F(URLFetcherProtectTest, Overload) {
 }
 
 TEST_F(URLFetcherProtectTest, ServerUnavailable) {
-  net::TestServer test_server(net::TestServer::TYPE_HTTP, FilePath(kDocRoot));
+  net::TestServer test_server(net::TestServer::TYPE_HTTP,
+                              net::TestServer::kLocalhost,
+                              FilePath(kDocRoot));
   ASSERT_TRUE(test_server.Start());
 
   GURL url(test_server.GetURL("files/server-unavailable.html"));
@@ -642,7 +804,9 @@ TEST_F(URLFetcherProtectTest, ServerUnavailable) {
 }
 
 TEST_F(URLFetcherProtectTestPassedThrough, ServerUnavailablePropagateResponse) {
-  net::TestServer test_server(net::TestServer::TYPE_HTTP, FilePath(kDocRoot));
+  net::TestServer test_server(net::TestServer::TYPE_HTTP,
+                              net::TestServer::kLocalhost,
+                              FilePath(kDocRoot));
   ASSERT_TRUE(test_server.Start());
 
   GURL url(test_server.GetURL("files/server-unavailable.html"));
@@ -688,13 +852,15 @@ TEST_F(URLFetcherCancelTest, DISABLED_ReleasesContext) {
 #else
 TEST_F(URLFetcherCancelTest, ReleasesContext) {
 #endif
-  net::TestServer test_server(net::TestServer::TYPE_HTTP, FilePath(kDocRoot));
+  net::TestServer test_server(net::TestServer::TYPE_HTTP,
+                              net::TestServer::kLocalhost,
+                              FilePath(kDocRoot));
   ASSERT_TRUE(test_server.Start());
 
   GURL url(test_server.GetURL("files/server-unavailable.html"));
 
   // Registers an entry for test url. The backoff time is calculated by:
-  //     new_backoff = 2.0 * old_backoff +0
+  //     new_backoff = 2.0 * old_backoff + 0
   // The initial backoff is 2 seconds and maximum backoff is 4 seconds.
   // Maximum retries allowed is set to 2.
   net::URLRequestThrottlerManager* manager =
@@ -721,7 +887,9 @@ TEST_F(URLFetcherCancelTest, ReleasesContext) {
 }
 
 TEST_F(URLFetcherCancelTest, CancelWhileDelayedStartTaskPending) {
-  net::TestServer test_server(net::TestServer::TYPE_HTTP, FilePath(kDocRoot));
+  net::TestServer test_server(net::TestServer::TYPE_HTTP,
+                              net::TestServer::kLocalhost,
+                              FilePath(kDocRoot));
   ASSERT_TRUE(test_server.Start());
 
   GURL url(test_server.GetURL("files/server-unavailable.html"));
@@ -754,7 +922,9 @@ TEST_F(URLFetcherCancelTest, CancelWhileDelayedStartTaskPending) {
 }
 
 TEST_F(URLFetcherMultipleAttemptTest, SameData) {
-  net::TestServer test_server(net::TestServer::TYPE_HTTP, FilePath(kDocRoot));
+  net::TestServer test_server(net::TestServer::TYPE_HTTP,
+                              net::TestServer::kLocalhost,
+                              FilePath(kDocRoot));
   ASSERT_TRUE(test_server.Start());
 
   // Create the fetcher on the main thread.  Since IO will happen on the main
@@ -765,26 +935,177 @@ TEST_F(URLFetcherMultipleAttemptTest, SameData) {
   MessageLoop::current()->Run();
 }
 
-void CancelAllOnIO() {
-  EXPECT_EQ(1, URLFetcherTest::GetNumFetcherCores());
-  URLFetcherImpl::CancelAll();
-  EXPECT_EQ(0, URLFetcherTest::GetNumFetcherCores());
+TEST_F(URLFetcherFileTest, SmallGet) {
+  net::TestServer test_server(net::TestServer::TYPE_HTTP,
+                              net::TestServer::kLocalhost,
+                              FilePath(kDocRoot));
+  ASSERT_TRUE(test_server.Start());
+
+  ScopedTempDir temp_dir;
+  ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
+
+  // Get a small file.
+  static const char kFileToFetch[] = "simple.html";
+  expected_file_ = test_server.document_root().AppendASCII(kFileToFetch);
+  CreateFetcherForFile(
+      test_server.GetURL(std::string(kTestServerFilePrefix) + kFileToFetch),
+      temp_dir.path().AppendASCII(kFileToFetch));
+
+  MessageLoop::current()->Run();  // OnURLFetchComplete() will Quit().
+
+  ASSERT_FALSE(file_util::PathExists(file_path_))
+      << file_path_.value() << " not removed.";
 }
 
-// Tests to make sure CancelAll() will successfully cancel existing URLFetchers.
-TEST_F(URLFetcherTest, CancelAll) {
-  net::TestServer test_server(net::TestServer::TYPE_HTTP, FilePath(kDocRoot));
+TEST_F(URLFetcherFileTest, LargeGet) {
+  net::TestServer test_server(net::TestServer::TYPE_HTTP,
+                              net::TestServer::kLocalhost,
+                              FilePath(kDocRoot));
   ASSERT_TRUE(test_server.Start());
-  EXPECT_EQ(0, GetNumFetcherCores());
 
-  CreateFetcher(test_server.GetURL("defaultresponse"));
-  io_message_loop_proxy()->PostTaskAndReply(
-      FROM_HERE,
-      base::Bind(&CancelAllOnIO),
-      MessageLoop::QuitClosure());
-  MessageLoop::current()->Run();
-  EXPECT_EQ(0, GetNumFetcherCores());
-  delete fetcher_;
+  ScopedTempDir temp_dir;
+  ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
+
+  // Get a file large enough to require more than one read into
+  // URLFetcher::Core's IOBuffer.
+  static const char kFileToFetch[] = "animate1.gif";
+  expected_file_ = test_server.document_root().AppendASCII(kFileToFetch);
+  CreateFetcherForFile(
+      test_server.GetURL(std::string(kTestServerFilePrefix) + kFileToFetch),
+      temp_dir.path().AppendASCII(kFileToFetch));
+
+  MessageLoop::current()->Run();  // OnURLFetchComplete() will Quit().
+}
+
+TEST_F(URLFetcherFileTest, CanTakeOwnershipOfFile) {
+  net::TestServer test_server(net::TestServer::TYPE_HTTP,
+                              net::TestServer::kLocalhost,
+                              FilePath(kDocRoot));
+  ASSERT_TRUE(test_server.Start());
+
+  ScopedTempDir temp_dir;
+  ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
+
+  // Get a small file.
+  static const char kFileToFetch[] = "simple.html";
+  expected_file_ = test_server.document_root().AppendASCII(kFileToFetch);
+  CreateFetcherForFile(
+      test_server.GetURL(std::string(kTestServerFilePrefix) + kFileToFetch),
+      temp_dir.path().AppendASCII(kFileToFetch));
+
+  MessageLoop::current()->Run();  // OnURLFetchComplete() will Quit().
+
+  MessageLoop::current()->RunAllPending();
+  ASSERT_FALSE(file_util::PathExists(file_path_))
+      << file_path_.value() << " not removed.";
+}
+
+
+TEST_F(URLFetcherFileTest, OverwriteExistingFile) {
+  net::TestServer test_server(net::TestServer::TYPE_HTTP,
+                              net::TestServer::kLocalhost,
+                              FilePath(kDocRoot));
+  ASSERT_TRUE(test_server.Start());
+
+  ScopedTempDir temp_dir;
+  ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
+
+  // Create a file before trying to fetch.
+  static const char kFileToFetch[] = "simple.html";
+  static const char kData[] = "abcdefghijklmnopqrstuvwxyz";
+  file_path_ = temp_dir.path().AppendASCII(kFileToFetch);
+  const int data_size = arraysize(kData);
+  ASSERT_EQ(file_util::WriteFile(file_path_, kData, data_size), data_size);
+  ASSERT_TRUE(file_util::PathExists(file_path_));
+  expected_file_ = test_server.document_root().AppendASCII(kFileToFetch);
+  ASSERT_FALSE(file_util::ContentsEqual(file_path_, expected_file_));
+
+  // Get a small file.
+  CreateFetcherForFile(
+      test_server.GetURL(std::string(kTestServerFilePrefix) + kFileToFetch),
+      file_path_);
+
+  MessageLoop::current()->Run();  // OnURLFetchComplete() will Quit().
+}
+
+TEST_F(URLFetcherFileTest, TryToOverwriteDirectory) {
+  net::TestServer test_server(net::TestServer::TYPE_HTTP,
+                              net::TestServer::kLocalhost,
+                              FilePath(kDocRoot));
+  ASSERT_TRUE(test_server.Start());
+
+  ScopedTempDir temp_dir;
+  ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
+
+  // Create a directory before trying to fetch.
+  static const char kFileToFetch[] = "simple.html";
+  file_path_ = temp_dir.path().AppendASCII(kFileToFetch);
+  ASSERT_TRUE(file_util::CreateDirectory(file_path_));
+  ASSERT_TRUE(file_util::PathExists(file_path_));
+
+  // Get a small file.
+  expected_file_error_ = base::PLATFORM_FILE_ERROR_ACCESS_DENIED;
+  expected_file_ = test_server.document_root().AppendASCII(kFileToFetch);
+  CreateFetcherForFile(
+      test_server.GetURL(std::string(kTestServerFilePrefix) + kFileToFetch),
+      file_path_);
+
+  MessageLoop::current()->Run();  // OnURLFetchComplete() will Quit().
+
+  MessageLoop::current()->RunAllPending();
+}
+
+TEST_F(URLFetcherFileTest, SmallGetToTempFile) {
+  net::TestServer test_server(net::TestServer::TYPE_HTTP,
+                              net::TestServer::kLocalhost,
+                              FilePath(kDocRoot));
+  ASSERT_TRUE(test_server.Start());
+
+  // Get a small file.
+  static const char kFileToFetch[] = "simple.html";
+  expected_file_ = test_server.document_root().AppendASCII(kFileToFetch);
+  CreateFetcherForTempFile(
+      test_server.GetURL(std::string(kTestServerFilePrefix) + kFileToFetch));
+
+  MessageLoop::current()->Run();  // OnURLFetchComplete() will Quit().
+
+  ASSERT_FALSE(file_util::PathExists(file_path_))
+      << file_path_.value() << " not removed.";
+}
+
+TEST_F(URLFetcherFileTest, LargeGetToTempFile) {
+  net::TestServer test_server(net::TestServer::TYPE_HTTP,
+                              net::TestServer::kLocalhost,
+                              FilePath(kDocRoot));
+  ASSERT_TRUE(test_server.Start());
+
+  // Get a file large enough to require more than one read into
+  // URLFetcher::Core's IOBuffer.
+  static const char kFileToFetch[] = "animate1.gif";
+  expected_file_ = test_server.document_root().AppendASCII(kFileToFetch);
+  CreateFetcherForTempFile(test_server.GetURL(
+      std::string(kTestServerFilePrefix) + kFileToFetch));
+
+  MessageLoop::current()->Run();  // OnURLFetchComplete() will Quit().
+}
+
+TEST_F(URLFetcherFileTest, CanTakeOwnershipOfTempFile) {
+  net::TestServer test_server(net::TestServer::TYPE_HTTP,
+                              net::TestServer::kLocalhost,
+                              FilePath(kDocRoot));
+  ASSERT_TRUE(test_server.Start());
+
+  // Get a small file.
+  static const char kFileToFetch[] = "simple.html";
+  expected_file_ = test_server.document_root().AppendASCII(kFileToFetch);
+  CreateFetcherForTempFile(test_server.GetURL(
+      std::string(kTestServerFilePrefix) + kFileToFetch));
+
+  MessageLoop::current()->Run();  // OnURLFetchComplete() will Quit().
+
+  MessageLoop::current()->RunAllPending();
+  ASSERT_FALSE(file_util::PathExists(file_path_))
+      << file_path_.value() << " not removed.";
 }
 
 }  // namespace.

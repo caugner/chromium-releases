@@ -10,6 +10,7 @@
 #include "base/callback.h"
 #include "base/threading/non_thread_safe.h"
 #include "remoting/protocol/buffered_socket_writer.h"
+#include "remoting/protocol/errors.h"
 #include "remoting/protocol/session_config.h"
 
 namespace net {
@@ -20,6 +21,8 @@ class StreamSocket;
 
 namespace remoting {
 namespace protocol {
+
+struct TransportRoute;
 
 // Generic interface for Chromotocol connection used by both client and host.
 // Provides access to the connection channels, but doesn't depend on the
@@ -53,17 +56,6 @@ class Session : public base::NonThreadSafe {
     FAILED,
   };
 
-  // TODO(sergeyu): Move error codes to a separate file.
-  enum Error {
-    OK = 0,
-    PEER_IS_OFFLINE,
-    SESSION_REJECTED,
-    INCOMPATIBLE_PROTOCOL,
-    AUTHENTICATION_FAILED,
-    CHANNEL_CONNECTION_ERROR,
-    UNKNOWN_ERROR,
-  };
-
   // State change callbacks are called after session state has
   // changed. It is not safe to destroy the session from within the
   // handler unless |state| is CLOSED or FAILED.
@@ -73,12 +65,14 @@ class Session : public base::NonThreadSafe {
   // single interface.
   typedef base::Callback<void(
       const std::string& channel_name,
-      const net::IPEndPoint& end_point)> RouteChangeCallback;
+      const TransportRoute& route)> RouteChangeCallback;
 
   // TODO(sergeyu): Specify connection error code when channel
   // connection fails.
-  typedef base::Callback<void(net::StreamSocket*)> StreamChannelCallback;
-  typedef base::Callback<void(net::Socket*)> DatagramChannelCallback;
+  typedef base::Callback<void(scoped_ptr<net::StreamSocket>)>
+      StreamChannelCallback;
+  typedef base::Callback<void(scoped_ptr<net::Socket>)>
+      DatagramChannelCallback;
 
   Session() { }
   virtual ~Session() { }
@@ -92,15 +86,14 @@ class Session : public base::NonThreadSafe {
   virtual void SetRouteChangeCallback(const RouteChangeCallback& callback) = 0;
 
   // Returns error code for a failed session.
-  virtual Error error() = 0;
+  virtual ErrorCode error() = 0;
 
   // Creates new channels for this connection. The specified callback
   // is called when then new channel is created and connected. The
   // callback is called with NULL if connection failed for any reason.
-  // Ownership of the channel socket is given to the caller when the
-  // callback is called. All channels must be destroyed before the
-  // session is destroyed. Can be called only when in CONNECTING,
-  // CONNECTED or AUTHENTICATED states.
+  // All channels must be destroyed before the session is
+  // destroyed. Can be called only when in CONNECTING, CONNECTED or
+  // AUTHENTICATED states.
   virtual void CreateStreamChannel(
       const std::string& name, const StreamChannelCallback& callback) = 0;
   virtual void CreateDatagramChannel(

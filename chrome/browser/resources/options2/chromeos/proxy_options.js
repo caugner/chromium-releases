@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -61,13 +61,15 @@ cr.define('options', function() {
       observePrefsUI($('manualProxy'));
       observePrefsUI($('autoProxy'));
       observePrefsUI($('proxyAllProtocols'));
+
+      $('proxy-overlay-confirm').onclick =
+          OptionsPage.closeOverlay.bind(OptionsPage);
     },
 
     proxyListInitialized_: false,
 
     /**
      * Update controls state.
-     * @public
      */
     updateControls: function() {
       this.updateBannerVisibility_();
@@ -101,7 +103,7 @@ cr.define('options', function() {
       var bannerDiv = $('info-banner');
       // Remove class and listener for click event in case they were added
       // before and updateBannerVisibility_ is called repeatedly.
-      bannerDiv.classList.remove("clickable");
+      bannerDiv.classList.remove('clickable');
       bannerDiv.removeEventListener('click', this.handleSharedProxiesHint_);
 
       // Show banner and determine its message if necessary.
@@ -113,8 +115,8 @@ cr.define('options', function() {
         // controlledBy must match strings loaded in proxy_handler.cc and
         // set in proxy_cros_settings_provider.cc.
         $('banner-text').textContent = localStrings.getString(controlledBy);
-        if (controlledBy == "enableSharedProxiesBannerText") {
-          bannerDiv.classList.add("clickable");
+        if (controlledBy == 'enableSharedProxiesBannerText') {
+          bannerDiv.classList.add('clickable');
           bannerDiv.addEventListener('click', this.handleSharedProxiesHint_);
         }
       }
@@ -127,7 +129,7 @@ cr.define('options', function() {
      * @param {Event} e Click event fired from info-banner.
      */
     handleSharedProxiesHint_: function(e) {
-      OptionsPage.navigateToPage("internet");
+      OptionsPage.navigateToPage('internet');
     },
 
     /**
@@ -224,7 +226,6 @@ cr.define('options', function() {
     /**
      * Sets proxy page title using given network name.
      * @param {string} network The network name to use in page title.
-     * @public
      */
     setNetworkName: function(network) {
       $('proxy-page-title').textContent =

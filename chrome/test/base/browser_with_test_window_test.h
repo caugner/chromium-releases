@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,20 +10,22 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/test/base/test_browser_window.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/browser/renderer_host/test_render_view_host.h"
 #include "content/test/test_browser_thread.h"
+#include "content/test/test_renderer_host.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if defined(USE_AURA)
-#include "ui/aura/test/test_activation_client.h"
+#if defined(OS_WIN)
+#include "ui/base/win/scoped_ole_initializer.h"
 #endif
 
 class GURL;
 
 #if defined(USE_AURA)
 namespace aura {
+class RootWindow;
 namespace test {
 class TestActivationClient;
+class TestStackingClient;
 }
 }
 #endif
@@ -61,11 +63,7 @@ class BrowserWithTestWindowTest : public testing::Test {
   virtual ~BrowserWithTestWindowTest();
 
   virtual void SetUp() OVERRIDE;
-
-  // Returns the current RenderViewHost for the current tab as a
-  // TestRenderViewHost.
-  TestRenderViewHost* TestRenderViewHostForTab(
-      content::WebContents* web_contents);
+  virtual void TearDown() OVERRIDE;
 
  protected:
   TestBrowserWindow* window() const { return window_.get(); }
@@ -116,16 +114,24 @@ class BrowserWithTestWindowTest : public testing::Test {
   MessageLoopForUI ui_loop_;
   content::TestBrowserThread ui_thread_;
   content::TestBrowserThread file_thread_;
+  content::TestBrowserThread file_user_blocking_thread_;
 
   scoped_ptr<TestingProfile> profile_;
   scoped_ptr<TestBrowserWindow> window_;
   scoped_ptr<Browser> browser_;
 
-  MockRenderProcessHostFactory rph_factory_;
-  TestRenderViewHostFactory rvh_factory_;
+  // The existence of this object enables tests via
+  // RenderViewHostTester.
+  content::RenderViewHostTestEnabler rvh_test_enabler_;
 
 #if defined(USE_AURA)
+  scoped_ptr<aura::RootWindow> root_window_;
   scoped_ptr<aura::test::TestActivationClient> test_activation_client_;
+  scoped_ptr<aura::test::TestStackingClient> test_stacking_client_;
+#endif
+
+#if defined(OS_WIN)
+  ui::ScopedOleInitializer ole_initializer_;
 #endif
 
   DISALLOW_COPY_AND_ASSIGN(BrowserWithTestWindowTest);

@@ -1,3 +1,7 @@
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
 [
   {
     "namespace": "windows",
@@ -18,13 +22,14 @@
           "type": {
             "type": "string",
             "description": "The type of browser window this is.",
-            "enum": ["normal", "popup", "panel", "app"]
+            "enum": ["normal", "popup", "panel", "app", "shell"]
           },
           "state": {
             "type": "string",
             "description": "The state of this browser window.",
-            "enum": ["normal", "minimized", "maximized"]
-            }
+            "enum": ["normal", "minimized", "maximized", "fullscreen"]
+          },
+          "alwaysOnTop": {"type": "boolean", "description": "Whether the window is set to be always on top."}
         }
       }
     ],
@@ -161,8 +166,8 @@
                 ]
               },
               "tabId": {"type": "integer", "minimum": 0, "optional": true, "description": "The id of the tab for which you want to adopt to the new window."},
-              "left": {"type": "integer", "optional": true, "description": "The number of pixels to position the new window from the left edge of the screen. If not specified, the new window is offset naturally from the last focusd window. This value is ignored for panels."},
-              "top": {"type": "integer", "optional": true, "description": "The number of pixels to position the new window from the top edge of the screen. If not specified, the new window is offset naturally from the last focusd window. This value is ignored for panels."},
+              "left": {"type": "integer", "optional": true, "description": "The number of pixels to position the new window from the left edge of the screen. If not specified, the new window is offset naturally from the last focused window. This value is ignored for panels."},
+              "top": {"type": "integer", "optional": true, "description": "The number of pixels to position the new window from the top edge of the screen. If not specified, the new window is offset naturally from the last focused window. This value is ignored for panels."},
               "width": {"type": "integer", "minimum": 0, "optional": true, "description": "The width in pixels of the new window. If not specified defaults to a natural width."},
               "height": {"type": "integer", "minimum": 0, "optional": true, "description": "The height in pixels of the new window. If not specified defaults to a natural height."},
               "focused": {"type": "boolean", "optional": true, "description": "If true, opens an active window. If false, opens an inactive window."},
@@ -171,7 +176,7 @@
                 "type": "string",
                 "optional": true,
                 "description": "Specifies what type of browser window to create. The 'panel' type creates a popup unless the '--enable-panels' flag is set.",
-                "enum": ["normal", "popup", "panel"]
+                "enum": ["normal", "popup", "panel", "shell"]
               }
             },
             "optional": true
@@ -208,8 +213,8 @@
               "state": {
                 "type": "string",
                 "optional": true,
-                "description": "The new state of the window. The 'minimized' and 'maximized' states cannot be combined with 'left', 'top', 'width' or 'height'.",
-                "enum": ["normal", "minimized", "maximized"]
+                "description": "The new state of the window. The 'minimized', 'maximized' and 'fullscreen' states cannot be combined with 'left', 'top', 'width' or 'height'.",
+                "enum": ["normal", "minimized", "maximized", "fullscreen"]
               }
             }
           },

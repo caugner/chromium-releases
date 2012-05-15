@@ -14,9 +14,11 @@
 #include "base/time.h"
 #include "base/timer.h"
 #include "build/build_config.h"
+#include "content/common/child_process.h"
 #include "content/common/child_thread.h"
 #include "content/common/content_export.h"
 #include "content/common/css_colors.h"
+#include "content/common/gpu/client/gpu_channel_host.h"
 #include "content/common/gpu/gpu_process_launch_causes.h"
 #include "content/public/renderer/render_thread.h"
 #include "ipc/ipc_channel_proxy.h"
@@ -38,6 +40,8 @@ struct ViewMsg_New_Params;
 class WebDatabaseObserverImpl;
 
 namespace WebKit {
+class WebMediaStreamCenter;
+class WebMediaStreamCenterClient;
 class WebStorageEventDispatcher;
 }
 
@@ -50,6 +54,7 @@ class ScopedCOMInitializer;
 }
 
 namespace content {
+class MediaStreamCenter;
 class RenderProcessObserver;
 }
 
@@ -67,7 +72,8 @@ class Extension;
 // routed to the RenderThread according to the routing IDs of the messages.
 // The routing IDs correspond to RenderView instances.
 class CONTENT_EXPORT RenderThreadImpl : public content::RenderThread,
-                                        public ChildThread {
+                                        public ChildThread,
+                                        public GpuChannelHostFactory {
  public:
   static RenderThreadImpl* current();
 
@@ -79,6 +85,10 @@ class CONTENT_EXPORT RenderThreadImpl : public content::RenderThread,
   // Returns the routing ID of the RenderWidget containing the current script
   // execution context (corresponding to WebFrame::frameForCurrentContext).
   static int32 RoutingIDForCurrentContext();
+
+  // When initializing WebKit, ensure that any schemes needed for the content
+  // module are registered properly.  Static to allow sharing with tests.
+  static void RegisterSchemes();
 
   // content::RenderThread implementation:
   virtual bool Send(IPC::Message* msg) OVERRIDE;
@@ -118,6 +128,29 @@ class CONTENT_EXPORT RenderThreadImpl : public content::RenderThread,
   virtual void ReleaseCachedFonts() OVERRIDE;
 #endif
 
+  // content::ChildThread:
+  virtual bool IsWebFrameValid(WebKit::WebFrame* frame) OVERRIDE;
+
+  // GpuChannelHostFactory implementation:
+  virtual bool IsMainThread() OVERRIDE;
+  virtual bool IsIOThread() OVERRIDE;
+  virtual MessageLoop* GetMainLoop() OVERRIDE;
+  virtual scoped_refptr<base::MessageLoopProxy> GetIOLoopProxy() OVERRIDE;
+  virtual base::WaitableEvent* GetShutDownEvent() OVERRIDE;
+  virtual scoped_ptr<base::SharedMemory> AllocateSharedMemory(
+      uint32 size) OVERRIDE;
+  virtual int32 CreateViewCommandBuffer(
+      int32 surface_id,
+      const GPUCreateCommandBufferConfig& init_params) OVERRIDE;
+
+  // Synchronously establish a channel to the GPU plugin if not previously
+  // established or if it has been lost (for example if the GPU plugin crashed).
+  // If there is a pending asynchronous request, it will be completed by the
+  // time this routine returns.
+  virtual GpuChannelHost* EstablishGpuChannelSync(
+      content::CauseForGpuLaunch) OVERRIDE;
+
+
   // These methods modify how the next message is sent.  Normally, when sending
   // a synchronous message that runs a nested message loop, we need to suspend
   // callbacks into WebKit.  This involves disabling timers and deferring
@@ -143,17 +176,16 @@ class CONTENT_EXPORT RenderThreadImpl : public content::RenderThread,
     return audio_message_filter_.get();
   }
 
+  // Creates the embedder implementation of WebMediaStreamCenter.
+  // The resulting object is owned by WebKit and deleted by WebKit at tear-down.
+  WebKit::WebMediaStreamCenter* CreateMediaStreamCenter(
+      WebKit::WebMediaStreamCenterClient* client);
+
   VideoCaptureImplManager* video_capture_impl_manager() const {
     return vc_manager_.get();
   }
 
   bool plugin_refresh_allowed() const { return plugin_refresh_allowed_; }
-
-  // Synchronously establish a channel to the GPU plugin if not previously
-  // established or if it has been lost (for example if the GPU plugin crashed).
-  // If there is a pending asynchronous request, it will be completed by the
-  // time this routine returns.
-  GpuChannelHost* EstablishGpuChannelSync(content::CauseForGpuLaunch);
 
   // Get the GPU channel. Returns NULL if the channel is not established or
   // has been lost.
@@ -191,6 +223,9 @@ class CONTENT_EXPORT RenderThreadImpl : public content::RenderThread,
   scoped_ptr<IndexedDBDispatcher> main_thread_indexed_db_dispatcher_;
   scoped_ptr<RendererWebKitPlatformSupportImpl> webkit_platform_support_;
   scoped_ptr<WebKit::WebStorageEventDispatcher> dom_storage_event_dispatcher_;
+
+  // Used on the render thread and deleted by WebKit at shutdown.
+  content::MediaStreamCenter* media_stream_center_;
 
   // Used on the renderer and IPC threads.
   scoped_refptr<DBMessageFilter> db_message_filter_;

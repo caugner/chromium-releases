@@ -12,6 +12,9 @@
 #include "base/basictypes.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 
+// The demo user is represented by a domainless username.
+const char kDemoUser[] = "demouser";
+
 namespace chromeos {
 
 // A class representing information about a previously logged in user.
@@ -64,10 +67,13 @@ class User {
   // The displayed (non-canonical) user email.
   std::string display_email() const { return display_email_; }
 
+  bool is_demo_user() const { return is_demo_user_; }
   bool is_guest() const { return is_guest_; }
 
  private:
-  friend class UserManager;
+  friend class UserManagerImpl;
+  friend class MockUserManager;
+  friend class UserManagerTest;
 
   // Do not allow anyone else to create new User instances.
   User(const std::string& email, bool is_guest);
@@ -102,6 +108,9 @@ class User {
 
   // Is this a guest account?
   bool is_guest_;
+
+  // Is this a demo user account?
+  bool is_demo_user_;
 
   DISALLOW_COPY_AND_ASSIGN(User);
 };

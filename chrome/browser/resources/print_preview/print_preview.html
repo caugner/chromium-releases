@@ -7,11 +7,9 @@
 
 <link rel="stylesheet" href="margins.css">
 <link rel="stylesheet" href="print_preview.css">
-<link rel="stylesheet" href="../shared/css/button.css">
-<link rel="stylesheet" href="../shared/css/checkbox.css">
 <link rel="stylesheet" href="../shared/css/chrome_shared.css">
-<link rel="stylesheet" href="../shared/css/select.css">
 <link rel="stylesheet" href="../shared/css/throbber.css">
+<link rel="stylesheet" href="../shared/css/widgets.css">
 
 <script src="chrome://resources/js/cr.js"></script>
 <script src="chrome://resources/js/event_tracker.js"></script>
@@ -20,7 +18,7 @@
 <script src="chrome://print/print_preview.js"></script>
 <script src="chrome://print/strings.js"></script>
 </head>
-<body i18n-values=".style.fontFamily:fontfamily">
+<body i18n-values=".style.fontFamily:fontfamily;.style.fontSize:fontsize">
   <div id="navbar-container">
     <header>
       <h1 id="navbar-content-title" i18n-content="title"></h1>
@@ -59,7 +57,7 @@
         </if>
         <div id="system-dialog-throbber" class="throbber" hidden></div>
       </div>
-      <if expr="os == 'darwin'">
+      <if expr="is_macosx">
         <div>
           <button id="open-pdf-in-preview-link"
               class="link-button preview-link-button"

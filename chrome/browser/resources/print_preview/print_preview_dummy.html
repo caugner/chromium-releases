@@ -7,15 +7,12 @@
 
 <link rel="stylesheet" href="margins.css">
 <link rel="stylesheet" href="print_preview.css">
-<link rel="stylesheet" href="../shared/css/button.css">
-<link rel="stylesheet" href="../shared/css/checkbox.css">
 <link rel="stylesheet" href="../shared/css/chrome_shared.css">
-<link rel="stylesheet" href="../shared/css/select.css">
 <link rel="stylesheet" href="../shared/css/throbber.css">
+<link rel="stylesheet" href="../shared/css/widgets.css">
 
 <script src="chrome://resources/js/cr.js"></script>
 <script src="chrome://resources/js/local_strings.js"></script>
-<script src="chrome://print/print_preview_dummy.js"></script>
 <script src="chrome://print/strings.js"></script>
 </head>
 <body i18n-values=".style.fontFamily:fontfamily">
@@ -60,7 +57,7 @@
               i18n-content="systemDialogOption"></button>
         </if>
       </div>
-      <if expr="os == 'darwin'">
+      <if expr="is_macosx">
         <div>
           <button id="open-pdf-in-preview-link"
               class="link-button preview-link-button"

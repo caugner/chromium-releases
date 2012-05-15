@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -31,10 +31,12 @@ class ConnectionToClientTest : public testing::Test {
 
     // Allocate a ClientConnection object with the mock objects.
     viewer_.reset(new ConnectionToClient(session_));
+    viewer_->set_clipboard_stub(&clipboard_stub_);
     viewer_->set_host_stub(&host_stub_);
     viewer_->set_input_stub(&input_stub_);
     viewer_->SetEventHandler(&handler_);
-    EXPECT_CALL(handler_, OnConnectionOpened(viewer_.get()));
+    EXPECT_CALL(handler_, OnConnectionAuthenticated(viewer_.get()));
+    EXPECT_CALL(handler_, OnConnectionChannelsConnected(viewer_.get()));
     session_->state_change_callback().Run(
         protocol::Session::CONNECTED);
     session_->state_change_callback().Run(
@@ -49,6 +51,7 @@ class ConnectionToClientTest : public testing::Test {
 
   MessageLoop message_loop_;
   MockConnectionToClientEventHandler handler_;
+  MockClipboardStub clipboard_stub_;
   MockHostStub host_stub_;
   MockInputStub input_stub_;
   scoped_ptr<ConnectionToClient> viewer_;
@@ -61,10 +64,8 @@ class ConnectionToClientTest : public testing::Test {
 };
 
 TEST_F(ConnectionToClientTest, SendUpdateStream) {
-  // Then send the actual data.
-  VideoPacket* packet = new VideoPacket();
-  viewer_->video_stub()->ProcessVideoPacket(
-      packet, base::Bind(&base::DeletePointer<VideoPacket>, packet));
+  scoped_ptr<VideoPacket> packet(new VideoPacket());
+  viewer_->video_stub()->ProcessVideoPacket(packet.Pass(), base::Closure());
 
   message_loop_.RunAllPending();
 
@@ -81,10 +82,8 @@ TEST_F(ConnectionToClientTest, SendUpdateStream) {
 }
 
 TEST_F(ConnectionToClientTest, NoWriteAfterDisconnect) {
-  // Then send the actual data.
-  VideoPacket* packet = new VideoPacket();
-  viewer_->video_stub()->ProcessVideoPacket(
-      packet, base::Bind(&base::DeletePointer<VideoPacket>, packet));
+  scoped_ptr<VideoPacket> packet(new VideoPacket());
+  viewer_->video_stub()->ProcessVideoPacket(packet.Pass(), base::Closure());
 
   // And then close the connection to ConnectionToClient.
   viewer_->Disconnect();
@@ -96,13 +95,12 @@ TEST_F(ConnectionToClientTest, NoWriteAfterDisconnect) {
 }
 
 TEST_F(ConnectionToClientTest, StateChange) {
-  EXPECT_CALL(handler_, OnConnectionClosed(viewer_.get()));
+  EXPECT_CALL(handler_, OnConnectionClosed(viewer_.get(), OK));
   session_->state_change_callback().Run(protocol::Session::CLOSED);
   message_loop_.RunAllPending();
 
-  EXPECT_CALL(handler_, OnConnectionFailed(
-      viewer_.get(), Session::SESSION_REJECTED));
-  session_->set_error(Session::SESSION_REJECTED);
+  EXPECT_CALL(handler_, OnConnectionClosed(viewer_.get(), SESSION_REJECTED));
+  session_->set_error(SESSION_REJECTED);
   session_->state_change_callback().Run(protocol::Session::FAILED);
   message_loop_.RunAllPending();
 }

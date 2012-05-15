@@ -41,6 +41,7 @@
 #include "chrome/browser/ui/select_file_dialog.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper_delegate.h"
 #include "chrome/browser/ui/toolbar/toolbar_model.h"
+#include "chrome/browser/ui/webui/sync_promo/sync_promo_ui.h"
 #include "chrome/common/content_settings.h"
 #include "chrome/common/content_settings_types.h"
 #include "chrome/common/extensions/extension_constants.h"
@@ -52,10 +53,13 @@
 #include "ui/base/ui_base_types.h"
 #include "ui/gfx/rect.h"
 
+class BrowserContentSettingBubbleModelDelegate;
 class BrowserSyncedWindowDelegate;
+class BrowserToolbarModelDelegate;
 class BrowserTabRestoreServiceDelegate;
 class BrowserWindow;
 class Extension;
+class ExtensionWindowController;
 class FindBarController;
 class FullscreenController;
 class HtmlDialogUIDelegate;
@@ -63,7 +67,6 @@ class InstantController;
 class InstantUnloadHandler;
 class PrefService;
 class Profile;
-class SessionStorageNamespace;
 class SkBitmap;
 class StatusBubble;
 class TabNavigation;
@@ -72,6 +75,7 @@ struct WebApplicationInfo;
 
 namespace content {
 class NavigationController;
+class SessionStorageNamespace;
 }
 
 namespace gfx {
@@ -103,6 +107,17 @@ class Browser : public TabHandlerDelegate,
     TYPE_TABBED = 1,
     TYPE_POPUP = 2,
     TYPE_PANEL = 3
+  };
+
+  // Distinguishes between browsers that host an app (opened from
+  // Browser::OpenApplication), and child browsers created by an app from
+  // Browser::CreateForApp (e.g. by windows.open or the extension API).
+  // TODO(stevenjb): This is currently only needed by the ash Launcher for
+  // identifying child panels. Remove this once panels are no longer
+  // implemented as Browsers, crbug.com/112198.
+  enum AppType {
+    APP_TYPE_HOST = 1,
+    APP_TYPE_CHILD = 2
   };
 
   // Possible elements of the Browser window.
@@ -147,8 +162,15 @@ class Browser : public TabHandlerDelegate,
     // 2) we launch an undocked devtool window.
     std::string app_name;
 
+    // Type of app (host or child). See description of AppType.
+    AppType app_type;
+
     // The bounds of the window to open.
     gfx::Rect initial_bounds;
+
+    ui::WindowShowState initial_show_state;
+
+    bool is_session_restore;
   };
 
   // Constructors, Creation, Showing //////////////////////////////////////////
@@ -219,6 +241,7 @@ class Browser : public TabHandlerDelegate,
 
   Type type() const { return type_; }
   const std::string& app_name() const { return app_name_; }
+  AppType app_type() const { return app_type_; }
   Profile* profile() const { return profile_; }
   gfx::Rect override_bounds() const { return override_bounds_; }
 
@@ -229,10 +252,14 @@ class Browser : public TabHandlerDelegate,
   // |window()| will return NULL if called before |CreateBrowserWindow()|
   // is done.
   BrowserWindow* window() const { return window_; }
-  ToolbarModel* toolbar_model() { return &toolbar_model_; }
+  ToolbarModel* toolbar_model() { return toolbar_model_.get(); }
   const SessionID& session_id() const { return session_id_; }
   CommandUpdater* command_updater() { return &command_updater_; }
   bool block_command_execution() const { return block_command_execution_; }
+  BrowserContentSettingBubbleModelDelegate*
+      content_setting_bubble_model_delegate() {
+    return content_setting_bubble_model_delegate_.get();
+  }
   BrowserTabRestoreServiceDelegate* tab_restore_service_delegate() {
     return tab_restore_service_delegate_.get();
   }
@@ -253,7 +280,11 @@ class Browser : public TabHandlerDelegate,
   // Browser Creation Helpers /////////////////////////////////////////////////
 
   // Opens a new window with the default blank tab.
-  static void OpenEmptyWindow(Profile* profile);
+  static void  NewEmptyWindow(Profile* profile);
+
+  // Opens a new window with the default blank tab. This bypasses metrics and
+  // various internal bookkeeping; NewEmptyWindow (above) is preferred.
+  static Browser* OpenEmptyWindow(Profile* profile);
 
   // Opens a new window with the tabs from |profile|'s TabRestoreService.
   static void OpenWindowWithRestoredTabs(Profile* profile);
@@ -272,6 +303,14 @@ class Browser : public TabHandlerDelegate,
       extension_misc::LaunchContainer container,
       const GURL& override_url,
       WindowOpenDisposition disposition);
+
+#if defined(USE_ASH)
+  // Opens |url| in a new application panel window for the specified url.
+  static content::WebContents* OpenApplicationPanel(
+      Profile* profile,
+      const Extension* extension,
+      const GURL& url);
+#endif
 
   // Opens a new application window for the specified url. If |as_panel|
   // is true, the application will be opened as a Browser::Type::APP_PANEL in
@@ -312,10 +351,13 @@ class Browser : public TabHandlerDelegate,
 #if defined(OS_MACOSX)
   // Open a new window with history/downloads/help/options (needed on Mac when
   // there are no windows).
+  static void OpenAboutWindow(Profile* profile);
   static void OpenHistoryWindow(Profile* profile);
   static void OpenDownloadsWindow(Profile* profile);
   static void OpenHelpWindow(Profile* profile);
   static void OpenOptionsWindow(Profile* profile);
+  static void OpenSyncSetupWindow(Profile* profile,
+                                  SyncPromoUI::Source source);
   static void OpenClearBrowsingDataDialogWindow(Profile* profile);
   static void OpenImportSettingsDialogWindow(Profile* profile);
   static void OpenInstantConfirmDialogWindow(Profile* profile);
@@ -440,7 +482,7 @@ class Browser : public TabHandlerDelegate,
       bool select,
       bool pin,
       bool from_last_session,
-      SessionStorageNamespace* storage_namespace);
+      content::SessionStorageNamespace* storage_namespace);
   // Creates a new tab with the already-created WebContents 'new_contents'.
   // The window for the added contents will be reparented correctly when this
   // method returns.  If |disposition| is NEW_POPUP, |pos| should hold the
@@ -478,7 +520,7 @@ class Browser : public TabHandlerDelegate,
       int selected_navigation,
       bool from_last_session,
       const std::string& extension_app_id,
-      SessionStorageNamespace* session_storage_namespace);
+      content::SessionStorageNamespace* session_storage_namespace);
 
   // Navigate to an index in the tab history, opening a new tab depending on the
   // disposition.
@@ -536,9 +578,12 @@ class Browser : public TabHandlerDelegate,
   void WriteCurrentURLToClipboard();
   void ConvertPopupToTabbedBrowser();
   // In kiosk mode, the first toggle is valid, the rest is discarded.
-  void ToggleFullscreenMode(bool from_tab);
+  void ToggleFullscreenMode();
+  // See the description of
+  // FullscreenController::ToggleFullscreenModeWithExtension.
+  void ToggleFullscreenModeWithExtension(const GURL& extension_url);
 #if defined(OS_MACOSX)
-  void TogglePresentationMode(bool from_tab);
+  void TogglePresentationMode();
 #endif
   void Exit();
 #if defined(OS_CHROMEOS)
@@ -551,6 +596,11 @@ class Browser : public TabHandlerDelegate,
   void SavePage();
   void ViewSelectedSource();
   void ShowFindBar();
+  void ShowPageInfo(content::WebContents* web_contents,
+                    const GURL& url,
+                    const content::SSLStatus& ssl,
+                    bool show_history);
+  void ShowChromeToMobileBubble();
 
   // Returns true if the Browser supports the specified feature. The value of
   // this varies during the lifetime of the browser. For example, if the window
@@ -635,14 +685,18 @@ class Browser : public TabHandlerDelegate,
 #if defined(OS_CHROMEOS)
   void LockScreen();
   void Shutdown();
-  void OpenSystemOptionsDialog();
+  void ShowDateOptions();
   void OpenInternetOptionsDialog();
   void OpenLanguageOptionsDialog();
   void OpenSystemTabAndActivate();
   void OpenMobilePlanTabAndActivate();
+  void OpenAddBluetoothDeviceDialog();
+#endif
+#if defined(OS_CHROMEOS) && defined(USE_AURA)
+  void OpenCrosh();
 #endif
   void OpenPluginsTabAndActivate();
-  void ShowSyncSetup();
+  void ShowSyncSetup(SyncPromoUI::Source source);
   void ToggleSpeechInput();
 
   virtual void UpdateDownloadShelfVisibility(bool visible);
@@ -720,8 +774,8 @@ class Browser : public TabHandlerDelegate,
   static void UpdateTargetURLHelper(content::WebContents* tab, int32 page_id,
                                     const GURL& url);
 
-  // Calls ExecuteCommandWithDisposition with the given disposition.
-  void ExecuteCommandWithDisposition(int id, WindowOpenDisposition);
+  // Calls ExecuteCommandWithDisposition with CURRENT_TAB disposition.
+  void ExecuteCommand(int id);
 
   // Calls ExecuteCommandWithDisposition with the given event flags.
   void ExecuteCommand(int id, int event_flags);
@@ -764,7 +818,9 @@ class Browser : public TabHandlerDelegate,
       const content::OpenURLParams& params) OVERRIDE;
 
   // Overridden from CommandUpdater::CommandUpdaterDelegate:
-  virtual void ExecuteCommand(int id) OVERRIDE;
+  virtual void ExecuteCommandWithDisposition(
+      int id,
+      WindowOpenDisposition disposition) OVERRIDE;
 
   // Overridden from TabRestoreServiceObserver:
   virtual void TabRestoreServiceChanged(TabRestoreService* service) OVERRIDE;
@@ -772,12 +828,12 @@ class Browser : public TabHandlerDelegate,
 
   // Centralized method for creating a TabContents, configuring and installing
   // all its supporting objects and observers.
-  static TabContentsWrapper*
-      TabContentsFactory(Profile* profile,
-                         content::SiteInstance* site_instance,
-                         int routing_id,
-                         const content::WebContents* base_web_contents,
-                         SessionStorageNamespace* session_storage_namespace);
+  static TabContentsWrapper* TabContentsFactory(
+      Profile* profile,
+      content::SiteInstance* site_instance,
+      int routing_id,
+      const content::WebContents* base_web_contents,
+      content::SessionStorageNamespace* session_storage_namespace);
 
   // Overridden from TabHandlerDelegate:
   virtual Profile* GetProfile() const OVERRIDE;
@@ -862,6 +918,10 @@ class Browser : public TabHandlerDelegate,
 
   // Show the first run search engine bubble on the location bar.
   void ShowFirstRunBubble();
+
+  ExtensionWindowController* extension_window_controller() const {
+    return extension_window_controller_.get();
+  }
 
  protected:
   // Wrapper for the factory method in BrowserWindow. This allows subclasses to
@@ -957,10 +1017,6 @@ class Browser : public TabHandlerDelegate,
   virtual int GetExtraRenderViewHeight() const OVERRIDE;
   virtual void OnStartDownload(content::WebContents* source,
                                content::DownloadItem* download) OVERRIDE;
-  virtual void ShowPageInfo(content::BrowserContext* browser_context,
-                            const GURL& url,
-                            const content::SSLStatus& ssl,
-                            bool show_history) OVERRIDE;
   virtual void ViewSourceForTab(content::WebContents* source,
                                 const GURL& page_url) OVERRIDE;
   virtual void ViewSourceForFrame(
@@ -995,6 +1051,11 @@ class Browser : public TabHandlerDelegate,
   virtual void DidNavigateToPendingEntry(content::WebContents* tab) OVERRIDE;
   virtual content::JavaScriptDialogCreator*
       GetJavaScriptDialogCreator() OVERRIDE;
+  virtual content::ColorChooser* OpenColorChooser(
+      content::WebContents* tab,
+      int color_chooser_id,
+      const SkColor& color) OVERRIDE;
+  virtual void DidEndColorChooser() OVERRIDE;
   virtual void RunFileChooser(
       content::WebContents* tab,
       const content::FileChooserParams& params) OVERRIDE;
@@ -1020,6 +1081,8 @@ class Browser : public TabHandlerDelegate,
       content::WebIntentsDispatcher* intents_dispatcher) OVERRIDE;
   virtual void UpdatePreferredSize(content::WebContents* source,
                                    const gfx::Size& pref_size) OVERRIDE;
+  virtual void ResizeDueToAutoResize(content::WebContents* source,
+                                     const gfx::Size& new_size) OVERRIDE;
 
   virtual void FindReply(content::WebContents* tab,
                          int request_id,
@@ -1040,10 +1103,6 @@ class Browser : public TabHandlerDelegate,
                                TabContentsWrapper* new_tab_contents) OVERRIDE;
 
   // Overridden from SearchEngineTabHelperDelegate:
-  virtual void ConfirmSetDefaultSearchProvider(
-      content::WebContents* web_contents,
-      TemplateURL* template_url,
-      Profile* profile) OVERRIDE;
   virtual void ConfirmAddSearchProvider(const TemplateURL* template_url,
                                         Profile* profile) OVERRIDE;
 
@@ -1086,6 +1145,7 @@ class Browser : public TabHandlerDelegate,
   virtual void SetSuggestedText(const string16& text,
                                 InstantCompleteBehavior behavior) OVERRIDE;
   virtual gfx::Rect GetInstantBounds() OVERRIDE;
+  virtual void InstantPreviewFocused() OVERRIDE;
 
   // Command and state updating ///////////////////////////////////////////////
 
@@ -1329,13 +1389,16 @@ class Browser : public TabHandlerDelegate,
   // 2) we launch an undocked devtool window.
   std::string app_name_;
 
+  // Type of app (host or child). See description of AppType.
+  AppType app_type_;
+
   // Unique identifier of this browser for session restore. This id is only
   // unique within the current session, and is not guaranteed to be unique
   // across sessions.
   const SessionID session_id_;
 
   // The model for the toolbar view.
-  ToolbarModel toolbar_model_;
+  scoped_ptr<ToolbarModel> toolbar_model_;
 
   // UI update coalescing and handling ////////////////////////////////////////
 
@@ -1429,6 +1492,13 @@ class Browser : public TabHandlerDelegate,
   // and we install ourselves as an observer.
   TabRestoreService* tab_restore_service_;
 
+  // Helper which implements the ContentSettingBubbleModel interface.
+  scoped_ptr<BrowserContentSettingBubbleModelDelegate>
+      content_setting_bubble_model_delegate_;
+
+  // Helper which implements the ToolbarModelDelegate interface.
+  scoped_ptr<BrowserToolbarModelDelegate> toolbar_model_delegate_;
+
   // Helper which implements the TabRestoreServiceDelegate interface.
   scoped_ptr<BrowserTabRestoreServiceDelegate> tab_restore_service_delegate_;
 
@@ -1442,8 +1512,14 @@ class Browser : public TabHandlerDelegate,
 
   scoped_refptr<FullscreenController> fullscreen_controller_;
 
+  scoped_ptr<ExtensionWindowController> extension_window_controller_;
+
   // True if the browser window has been shown at least once.
   bool window_has_shown_;
+
+  // Currently open color chooser. Non-NULL after OpenColorChooser is called and
+  // before DidEndColorChooser is called.
+  scoped_ptr<content::ColorChooser> color_chooser_;
 
   DISALLOW_COPY_AND_ASSIGN(Browser);
 };

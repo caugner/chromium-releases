@@ -137,10 +137,6 @@ enum NotificationType {
 
   // Stuff inside the tabs ---------------------------------------------------
 
-  // Notification from TabContents that we have received a response from the
-  // renderer in response to a dom automation controller action.
-  NOTIFICATION_DOM_OPERATION_RESPONSE,
-
   // Sent when the bookmark bubble hides. The source is the profile, the
   // details unused.
   NOTIFICATION_BOOKMARK_BUBBLE_HIDDEN,
@@ -249,6 +245,10 @@ enum NotificationType {
   // The details are none and the source is the new profile.
   NOTIFICATION_PROFILE_CREATED,
 
+  // Sent after a Profile has been added to ProfileManager.
+  // The details are none and the source is the new profile.
+  NOTIFICATION_PROFILE_ADDED,
+
   // Sent before a Profile is destroyed. This notification is sent both for
   // normal and OTR profiles.
   // The details are none and the source is a Profile*.
@@ -292,6 +292,16 @@ enum NotificationType {
 
   // Sent when WebUI TaskManager opens and is ready for showing tasks.
   NOTIFICATION_TASK_MANAGER_WINDOW_READY,
+
+  // Sent when a renderer process is notified of new v8 heap statistics. The
+  // source is the ID of the renderer process, and the details are a
+  // V8HeapStatsDetails object.
+  NOTIFICATION_RENDERER_V8_HEAP_STATS_COMPUTED,
+
+  // Sent when a renderer process is notified of a new FPS value. The source
+  // is the ID of the renderer process, and the details are an FPSDetails
+  // object.
+  NOTIFICATION_RENDERER_FPS_COMPUTED,
 
   // Non-history storage services --------------------------------------------
 
@@ -778,6 +788,10 @@ enum NotificationType {
   // Sent when a chromium os user logs in.
   NOTIFICATION_LOGIN_USER_CHANGED,
 
+  // Sent immediately after the logged-in user's profile is ready.
+  // The details are a Profile object.
+  NOTIFICATION_LOGIN_USER_PROFILE_PREPARED,
+
   // Sent when the chromium session is first started. If this is a new user this
   // will not be sent until a profile picture has been selected, unlike
   // NOTIFICATION_LOGIN_USER_CHANGED which is sent immediately after the user
@@ -804,14 +818,24 @@ enum NotificationType {
   // Sent when webui login screen is ready and gaia iframe has loaded.
   NOTIFICATION_LOGIN_WEBUI_READY,
 
+  // Sent when the user images on the WebUI login screen have all been loaded.
+  NOTIFICATION_LOGIN_USER_IMAGES_LOADED,
+
   // Sent when proxy dialog is closed.
   NOTIFICATION_LOGIN_PROXY_CHANGED,
+
+  // Sent when a network error message is displayed on the WebUI login screen.
+  NOTIFICATION_LOGIN_NETWORK_ERROR_SHOWN,
 
   // Sent when a panel state changed.
   NOTIFICATION_PANEL_STATE_CHANGED,
 
   // Sent when the window manager's layout mode has changed.
   NOTIFICATION_LAYOUT_MODE_CHANGED,
+
+  // Sent when the first OOBE screen has been displayed.  Note that the screen
+  // may not be fully rendered at this point.
+  NOTIFICATION_WIZARD_FIRST_SCREEN_SHOWN,
 
   // Sent when the wizard's content view is destroyed. The source and details
   // are not used.
@@ -897,12 +921,21 @@ enum NotificationType {
   NOTIFICATION_IMPORT_FINISHED,
 
   // Sent when the applications in the NTP app launcher have been reordered.
+  // The details, if not NoDetails, is the std::string ID of the extension that
+  // was moved.
   NOTIFICATION_EXTENSION_LAUNCHER_REORDERED,
 
   // Sent when an app is installed and an NTP has been shown. Source is the
   // WebContents that was shown, and Details is the string ID of the extension
   // which was installed.
   NOTIFICATION_APP_INSTALLED_TO_NTP,
+
+#if defined(USE_ASH)
+  // Similar to NOTIFICATION_APP_INSTALLED_TO_NTP but used to nofity ash AppList
+  // about installed app. Source is the profile in which the app is installed
+  // and Details is the string ID of the extension.
+  NOTIFICATION_APP_INSTALLED_TO_APPLIST,
+#endif
 
 #if defined(OS_CHROMEOS)
   // Sent when WebSocketProxy started accepting connections; details is integer
@@ -961,9 +994,14 @@ enum NotificationType {
   // Used only in unit testing.
   NOTIFICATION_PANEL_CHANGED_ACTIVE_STATUS,
 
-  // Sent when panel is minimized/restored/shows title only etc.
+  // Sent when panel is switched between different layout modes, such
+  // as docked vs overflow, etc.
   // The source is the Panel, no details.
   // Used only in unit testing.
+  NOTIFICATION_PANEL_CHANGED_LAYOUT_MODE,
+
+  // Sent when panel is minimized/restored/shows title only etc.
+  // The source is the Panel, no details.
   NOTIFICATION_PANEL_CHANGED_EXPANSION_STATE,
 
   // Sent when panel window size is known. This is for platforms where the
@@ -981,10 +1019,10 @@ enum NotificationType {
   // Used only in coordination with notification balloons.
   NOTIFICATION_PANEL_ADDED,
 
-  // Sent when panel is removed from the panel manager.
+  // Sent when panel is closed.
   // The source is the Panel, no details.
   // Used only in coordination with notification balloons.
-  NOTIFICATION_PANEL_REMOVED,
+  NOTIFICATION_PANEL_CLOSED,
 
   // Sent when a global error has changed and the error UI should update it
   // self. The source is a Source<Profile> containing the profile for the
@@ -1000,6 +1038,19 @@ enum NotificationType {
   // removal mask and the start of the removal timeframe with which
   // BrowsingDataRemove::Remove was called.
   NOTIFICATION_BROWSING_DATA_REMOVED,
+
+  // The user accepted or dismissed a SSL client authentication request.
+  // The source is a Source<net::HttpNetworkSession>.  Details is a
+  // (std::pair<net::SSLCertRequestInfo*, net::X509Certificate*>).
+  NOTIFICATION_SSL_CLIENT_AUTH_CERT_SELECTED,
+
+  // Blocked content.
+  // Sent when content changes to or from the blocked state in
+  // BlockedContentTabHelper.
+  // The source is the TabContentsWrapper of the blocked content and details
+  // is a boolean: true if the content is entering the blocked state, false
+  // if it is leaving.
+  NOTIFICATION_CONTENT_BLOCKED_STATE_CHANGED,
 
   // Note:-
   // Currently only Content and Chrome define and use notifications.

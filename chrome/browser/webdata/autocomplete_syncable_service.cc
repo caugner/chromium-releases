@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,6 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/api/sync_error.h"
-#include "chrome/browser/sync/protocol/autofill_specifics.pb.h"
 #include "chrome/browser/webdata/autofill_table.h"
 #include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/browser/webdata/web_database.h"
@@ -18,6 +17,8 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "net/base/escape.h"
+#include "sync/protocol/autofill_specifics.pb.h"
+#include "sync/protocol/sync.pb.h"
 
 using content::BrowserThread;
 
@@ -78,9 +79,10 @@ AutocompleteSyncableService::AutocompleteSyncableService()
 SyncError AutocompleteSyncableService::MergeDataAndStartSyncing(
     syncable::ModelType type,
     const SyncDataList& initial_sync_data,
-    SyncChangeProcessor* sync_processor) {
+    scoped_ptr<SyncChangeProcessor> sync_processor) {
   DCHECK(CalledOnValidThread());
   DCHECK(!sync_processor_.get());
+  DCHECK(sync_processor.get());
   VLOG(1) << "Associating Autocomplete: MergeDataAndStartSyncing";
 
   std::vector<AutofillEntry> entries;
@@ -96,7 +98,7 @@ SyncError AutocompleteSyncableService::MergeDataAndStartSyncing(
     new_db_entries[it->key()] = std::make_pair(SyncChange::ACTION_ADD, it);
   }
 
-  sync_processor_.reset(sync_processor);
+  sync_processor_ = sync_processor.Pass();
 
   std::vector<AutofillEntry> new_synced_entries;
   // Go through and check for all the entries that sync already knows about.
@@ -193,10 +195,10 @@ SyncError AutocompleteSyncableService::ProcessSyncChanges(
         CreateOrUpdateEntry(i->sync_data(), db_entries.get(), &new_entries);
         break;
       case SyncChange::ACTION_DELETE: {
-        DCHECK(i->sync_data().GetSpecifics().HasExtension(sync_pb::autofill))
+        DCHECK(i->sync_data().GetSpecifics().has_autofill())
             << "Autofill specifics data not present on delete!";
         const sync_pb::AutofillSpecifics& autofill =
-            i->sync_data().GetSpecifics().GetExtension(sync_pb::autofill);
+            i->sync_data().GetSpecifics().autofill();
         if (autofill.has_value()) {
           list_processing_error = AutofillEntryDelete(autofill);
         } else {
@@ -265,7 +267,7 @@ void AutocompleteSyncableService::CreateOrUpdateEntry(
     std::vector<AutofillEntry>* new_entries) {
   const sync_pb::EntitySpecifics& specifics = data.GetSpecifics();
   const sync_pb::AutofillSpecifics& autofill_specifics(
-      specifics.GetExtension(sync_pb::autofill));
+      specifics.autofill());
 
   if (!autofill_specifics.has_value()) {
     DLOG(WARNING)
@@ -308,7 +310,7 @@ void AutocompleteSyncableService::CreateOrUpdateEntry(
 void AutocompleteSyncableService::WriteAutofillEntry(
     const AutofillEntry& entry, sync_pb::EntitySpecifics* autofill_specifics) {
   sync_pb::AutofillSpecifics* autofill =
-      autofill_specifics->MutableExtension(sync_pb::autofill);
+      autofill_specifics->mutable_autofill();
   autofill->set_name(UTF16ToUTF8(entry.key().name()));
   autofill->set_value(UTF16ToUTF8(entry.key().value()));
   const std::vector<base::Time>& ts(entry.timestamps());

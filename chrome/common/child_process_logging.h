@@ -24,6 +24,9 @@ struct GPUInfo;
 // dependency.
 static const int kMaxReportedActiveExtensions = 10;
 
+// The maximum number of prn-info-* records.
+static const size_t kMaxReportedPrinterRecords = 4;
+
 // The maximum number of command line switches to include in the crash
 // report's metadata. Note that the mini-dump itself will also contain the
 // (original) command line arguments within the PEB.
@@ -33,7 +36,7 @@ static const size_t kMaxSwitches = 15;
 
 namespace child_process_logging {
 
-#if defined(OS_LINUX) || defined(OS_OPENBSD)
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
 // These are declared here so the crash reporter can access them directly in
 // compromised context without going through the standard library.
 extern char g_active_url[];
@@ -48,6 +51,7 @@ extern char g_gpu_vs_ver[];
 extern char g_num_extensions[];
 extern char g_num_switches[];
 extern char g_num_views[];
+extern char g_printer_info[];
 extern char g_switches[];
 
 // Assume IDs are 32 bytes long.
@@ -55,6 +59,9 @@ static const size_t kExtensionLen = 32;
 
 // Assume command line switches are less than 64 chars.
 static const size_t kSwitchLen = 64;
+
+// Assume printer info strings are less than 64 chars.
+static const size_t kPrinterInfoStrLen = 64;
 #endif
 
 // Sets the URL that is logged if the child process crashes. Use GURL() to clear
@@ -82,11 +89,16 @@ void SetNumberOfViews(int number_of_views);
 // Sets the data on the gpu to send along with crash reports.
 void SetGpuInfo(const content::GPUInfo& gpu_info);
 
+// Sets the data on the printer to send along with crash reports. Data may be
+// separated by ';' up to kMaxReportedPrinterRecords strings. Each substring
+// would be cut to 63 chars.
+void SetPrinterInfo(const char* printer_info);
+
 // Sets the command line arguments to send along with crash reports to the
 // values in |command_line|.
 void SetCommandLine(const CommandLine* command_line);
 
-#if defined(OS_LINUX) || defined(OS_OPENBSD)
+#if defined(OS_LINUX) || defined(OS_OPENBSD) || defined(OS_MACOSX)
 // Sets the product channel data to send along with crash reports to |channel|.
 void SetChannel(const std::string& channel);
 #endif
@@ -105,6 +117,21 @@ class ScopedActiveURLSetter {
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ScopedActiveURLSetter);
+};
+
+// Set/clear information about currently accessed printer.
+class ScopedPrinterInfoSetter {
+ public:
+  explicit ScopedPrinterInfoSetter(const std::string& printer_info) {
+    SetPrinterInfo(printer_info.c_str());
+  }
+
+  ~ScopedPrinterInfoSetter() {
+    SetPrinterInfo("");
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(ScopedPrinterInfoSetter);
 };
 
 }  // namespace child_process_logging

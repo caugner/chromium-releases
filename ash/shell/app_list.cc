@@ -2,12 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ash/app_list/app_list_item_group_model.h"
 #include "ash/app_list/app_list_item_model.h"
 #include "ash/app_list/app_list_item_view.h"
 #include "ash/app_list/app_list_model.h"
 #include "ash/app_list/app_list_view_delegate.h"
 #include "ash/app_list/app_list_view.h"
+#include "ash/shell.h"
+#include "ash/shell_delegate.h"
 #include "ash/shell/example_factory.h"
 #include "ash/shell/toplevel_window.h"
 #include "base/basictypes.h"
@@ -36,17 +37,16 @@ class WindowTypeLauncherItem : public ash::AppListItemModel {
 
   static SkBitmap GetIcon(Type type) {
     static const SkColor kColors[] = {
-        SkColorSetA(SK_ColorRED, 0x4F),
-        SkColorSetA(SK_ColorGREEN, 0x4F),
-        SkColorSetA(SK_ColorBLUE, 0x4F),
-        SkColorSetA(SK_ColorYELLOW, 0x4F),
-        SkColorSetA(SK_ColorCYAN, 0x4F),
+        SK_ColorRED,
+        SK_ColorGREEN,
+        SK_ColorBLUE,
+        SK_ColorYELLOW,
+        SK_ColorCYAN,
     };
 
+    const int kIconSize = 128;
     SkBitmap icon;
-    icon.setConfig(SkBitmap::kARGB_8888_Config,
-                   ash::AppListItemView::kIconSize,
-                   ash::AppListItemView::kIconSize);
+    icon.setConfig(SkBitmap::kARGB_8888_Config, kIconSize, kIconSize);
     icon.allocPixels();
     icon.eraseColor(kColors[static_cast<int>(type) % arraysize(kColors)]);
     return icon;
@@ -82,7 +82,7 @@ class WindowTypeLauncherItem : public ash::AppListItemModel {
         break;
       }
       case LOCK_SCREEN: {
-        CreateLockScreen();
+        Shell::GetInstance()->delegate()->LockScreen();
         break;
       }
       case WIDGETS_WINDOW: {
@@ -108,43 +108,40 @@ class WindowTypeLauncherItem : public ash::AppListItemModel {
 
 class ExampleAppListViewDelegate : public ash::AppListViewDelegate {
  public:
-  ExampleAppListViewDelegate() {}
+  ExampleAppListViewDelegate() : model_(NULL) {}
 
  private:
+  // Overridden from ash::AppListViewDelegate:
+  virtual void SetModel(AppListModel* model) OVERRIDE {
+    model_ = model;
+  }
+
+  virtual void UpdateModel(const std::string& query) OVERRIDE {
+    DCHECK(model_ && model_->item_count() == 0);
+
+    for (int i = 0;
+         i < static_cast<int>(WindowTypeLauncherItem::LAST_TYPE);
+         ++i) {
+      WindowTypeLauncherItem::Type type =
+          static_cast<WindowTypeLauncherItem::Type>(i);
+
+      std::string title = WindowTypeLauncherItem::GetTitle(type);
+      if (title.find(query) != std::string::npos)
+        model_->AddItem(new WindowTypeLauncherItem(type));
+    }
+  }
+
   virtual void OnAppListItemActivated(ash::AppListItemModel* item,
                                       int event_flags) OVERRIDE {
     static_cast<WindowTypeLauncherItem*>(item)->Activate(event_flags);
   }
 
+  AppListModel* model_;
+
   DISALLOW_COPY_AND_ASSIGN(ExampleAppListViewDelegate);
 };
 
-ash::AppListItemGroupModel* CreateGroup(
-    const std::string& title,
-    WindowTypeLauncherItem::Type start_type,
-    WindowTypeLauncherItem::Type end_type) {
-  ash::AppListItemGroupModel* group =
-      new ash::AppListItemGroupModel(title);
-  for (int i = static_cast<int>(start_type);
-       i < static_cast<int>(end_type);
-       ++i) {
-    WindowTypeLauncherItem::Type type =
-      static_cast<WindowTypeLauncherItem::Type>(i);
-    group->AddItem(new WindowTypeLauncherItem(type));
-  }
-  return group;
-}
-
 }  // namespace
-
-void BuildAppListModel(ash::AppListModel* model) {
-  model->AddGroup(CreateGroup("Windows",
-      WindowTypeLauncherItem::TOPLEVEL_WINDOW,
-      WindowTypeLauncherItem::WIDGETS_WINDOW));
-  model->AddGroup(CreateGroup("Samples",
-      WindowTypeLauncherItem::WIDGETS_WINDOW,
-      WindowTypeLauncherItem::LAST_TYPE));
-}
 
 ash::AppListViewDelegate* CreateAppListViewDelegate() {
   return new ExampleAppListViewDelegate;

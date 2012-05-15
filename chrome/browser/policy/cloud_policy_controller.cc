@@ -145,13 +145,13 @@ void CloudPolicyController::Reset() {
   SetState(STATE_TOKEN_UNAVAILABLE);
 }
 
-void CloudPolicyController::RefreshPolicies() {
+void CloudPolicyController::RefreshPolicies(bool wait_for_auth_token) {
   // This call must eventually trigger a notification to the cache.
   if (data_store_->device_token().empty()) {
     // The DMToken has to be fetched.
     if (ReadyToFetchToken()) {
       SetState(STATE_TOKEN_UNAVAILABLE);
-    } else {
+    } else if (!wait_for_auth_token) {
       // The controller doesn't have enough material to start a token fetch,
       // but observers of the cache are waiting for the refresh.
       SetState(STATE_TOKEN_UNMANAGED);
@@ -185,8 +185,10 @@ void CloudPolicyController::OnPolicyFetchCompleted(
             policy_response.response(0));
         if (!fetch_response.has_error_code() ||
             fetch_response.error_code() == dm_protocol::POLICY_FETCH_SUCCESS) {
-          cache_->SetPolicy(fetch_response);
-          SetState(STATE_POLICY_VALID);
+          if (cache_->SetPolicy(fetch_response))
+            SetState(STATE_POLICY_VALID);
+          else
+            SetState(STATE_POLICY_ERROR);
         } else {
           UMA_HISTOGRAM_ENUMERATION(kMetricPolicy,
                                     kMetricPolicyFetchBadResponse,
@@ -335,7 +337,6 @@ void CloudPolicyController::SendPolicyRequest() {
   em::DeviceManagementRequest* request = request_job_->GetRequest();
   em::PolicyFetchRequest* fetch_request =
       request->mutable_policy_request()->add_request();
-  em::DeviceStatusReportRequest device_status;
   fetch_request->set_signature_type(em::PolicyFetchRequest::SHA1_RSA);
   fetch_request->set_policy_type(data_store_->policy_type());
   if (cache_->machine_id_missing() && !data_store_->machine_id().empty())

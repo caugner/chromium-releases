@@ -4,6 +4,7 @@
 
 #include "chrome/test/base/in_process_browser_test.h"
 
+#include "base/auto_reset.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/debug/stack_trace.h"
@@ -29,7 +30,6 @@
 #include "chrome/test/base/test_launcher_utils.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_process_host.h"
@@ -44,11 +44,6 @@
 #include "base/mac/scoped_nsautorelease_pool.h"
 #endif
 
-#if defined(USE_AURA)
-#include "ui/aura/root_window.h"
-#include "ui/views/widget/widget.h"
-#endif
-
 namespace {
 
 // Passed as value of kTestType.
@@ -59,8 +54,13 @@ const char kBrowserTestType[] = "browser";
 InProcessBrowserTest::InProcessBrowserTest()
     : browser_(NULL),
       show_window_(false),
+      initial_window_required_(true),
       dom_automation_enabled_(false),
-      tab_closeable_state_watcher_enabled_(false) {
+      tab_closeable_state_watcher_enabled_(false)
+#if defined(OS_MACOSX)
+    , autorelease_pool_(NULL)
+#endif  // OS_MACOSX
+    {
 #if defined(OS_MACOSX)
   // TODO(phajdan.jr): Make browser_tests self-contained on Mac, remove this.
   // Before we run the browser, we have to hack the path to the exe to match
@@ -76,6 +76,7 @@ InProcessBrowserTest::InProcessBrowserTest()
 
   test_server_.reset(new net::TestServer(
       net::TestServer::TYPE_HTTP,
+      net::TestServer::kLocalhost,
       FilePath(FILE_PATH_LITERAL("chrome/test/data"))));
 }
 
@@ -172,6 +173,9 @@ void InProcessBrowserTest::PrepareTestCommandLine(CommandLine* command_line) {
   // If neccessary, disable TabCloseableStateWatcher.
   if (!tab_closeable_state_watcher_enabled_)
     command_line->AppendSwitch(switches::kDisableTabCloseableStateWatcher);
+
+  // TODO(pkotwicz): Investigate if we can remove this switch.
+  command_line->AppendSwitch(switches::kDisableZeroBrowsersOpenForTests);
 }
 
 bool InProcessBrowserTest::CreateUserDataDirectory() {
@@ -196,7 +200,7 @@ void InProcessBrowserTest::TearDown() {
   BrowserTestBase::TearDown();
 }
 
-const content::ResourceContext& InProcessBrowserTest::GetResourceContext() {
+content::ResourceContext* InProcessBrowserTest::GetResourceContext() {
   return browser_->profile()->GetResourceContext();
 }
 
@@ -244,6 +248,18 @@ Browser* InProcessBrowserTest::CreateBrowserForPopup(Profile* profile) {
   return browser;
 }
 
+Browser* InProcessBrowserTest::CreateBrowserForApp(
+    const std::string& app_name,
+    Profile* profile) {
+  Browser* browser = Browser::CreateForApp(
+      Browser::TYPE_POPUP,
+      app_name,
+      gfx::Rect(),
+      profile);
+  AddBlankTabAndShow(browser);
+  return browser;
+}
+
 void InProcessBrowserTest::AddBlankTabAndShow(Browser* browser) {
   ui_test_utils::WindowedNotificationObserver observer(
       content::NOTIFICATION_LOAD_STOP,
@@ -251,14 +267,6 @@ void InProcessBrowserTest::AddBlankTabAndShow(Browser* browser) {
   browser->AddSelectedTabWithURL(
       GURL(chrome::kAboutBlankURL), content::PAGE_TRANSITION_START_PAGE);
   observer.Wait();
-
-#if defined(USE_AURA)
-  // Disable animations on aura, otherwise any code that gets the bounds may get
-  // the wrong thing.
-  views::Widget* widget = views::Widget::GetWidgetForNativeView(
-      browser->window()->GetNativeHandle());
-  widget->SetVisibilityChangedAnimationsEnabled(false);
-#endif
 
   browser->window()->Show();
 }
@@ -287,6 +295,8 @@ void InProcessBrowserTest::RunTestOnMainThreadLoop() {
   // browser shutdown). To avoid this, the following pool is recycled after each
   // time code is directly executed.
   base::mac::ScopedNSAutoreleasePool pool;
+  AutoReset<base::mac::ScopedNSAutoreleasePool*> autorelease_pool_reset(
+      &autorelease_pool_, &pool);
 #endif
 
   // Pump startup related events.
@@ -296,10 +306,12 @@ void InProcessBrowserTest::RunTestOnMainThreadLoop() {
   pool.Recycle();
 #endif
 
-  browser_ = CreateBrowser(ProfileManager::GetDefaultProfile());
+  if (initial_window_required_) {
+    browser_ = CreateBrowser(ProfileManager::GetDefaultProfile());
 #if defined(OS_MACOSX)
-  pool.Recycle();
+    pool.Recycle();
 #endif
+  }
 
   // Pump any pending events that were created as a result of creating a
   // browser.

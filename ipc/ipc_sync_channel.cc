@@ -103,8 +103,9 @@ class SyncChannel::ReceivedSyncMsgQueue :
           first_time = false;
         }
         for (; it != message_queue_.end(); it++) {
-          if (!it->context->restrict_dispatch() ||
-              it->context == dispatching_context) {
+          int message_group = it->context->restrict_dispatch_group();
+          if (message_group == kRestrictDispatchGroup_None ||
+              message_group == dispatching_context->restrict_dispatch_group()) {
             message = it->message;
             context = it->context;
             it = message_queue_.erase(it);
@@ -228,7 +229,7 @@ SyncChannel::SyncContext::SyncContext(
     : ChannelProxy::Context(listener, ipc_thread),
       received_sync_msgs_(ReceivedSyncMsgQueue::AddContext()),
       shutdown_event_(shutdown_event),
-      restrict_dispatch_(false) {
+      restrict_dispatch_group_(kRestrictDispatchGroup_None) {
 }
 
 SyncChannel::SyncContext::~SyncContext() {
@@ -408,8 +409,8 @@ SyncChannel::SyncChannel(
 SyncChannel::~SyncChannel() {
 }
 
-void SyncChannel::SetRestrictDispatchToSameChannel(bool value) {
-  sync_context()->set_restrict_dispatch(value);
+void SyncChannel::SetRestrictDispatchChannelGroup(int group) {
+  sync_context()->set_restrict_dispatch_group(group);
 }
 
 bool SyncChannel::Send(Message* message) {
@@ -445,7 +446,7 @@ bool SyncChannel::SendWithTimeout(Message* message, int timeout_ms) {
     context->ipc_message_loop()->PostDelayedTask(
         FROM_HERE,
         base::Bind(&SyncContext::OnSendTimeout, context.get(), message_id),
-        timeout_ms);
+        base::TimeDelta::FromMilliseconds(timeout_ms));
   }
 
   // Wait for reply, or for any other incoming synchronous messages.
@@ -506,11 +507,11 @@ void SyncChannel::WaitForReplyWithNestedMessageLoop(SyncContext* context) {
   sync_msg_queue->set_top_send_done_watcher(&send_done_watcher);
 
   send_done_watcher.StartWatching(context->GetSendDoneEvent(), context);
-  bool old_state = MessageLoop::current()->NestableTasksAllowed();
 
-  MessageLoop::current()->SetNestableTasksAllowed(true);
-  MessageLoop::current()->Run();
-  MessageLoop::current()->SetNestableTasksAllowed(old_state);
+  {
+    MessageLoop::ScopedNestableTaskAllower allow(MessageLoop::current());
+    MessageLoop::current()->Run();
+  }
 
   sync_msg_queue->set_top_send_done_watcher(old_send_done_event_watcher);
   if (old_send_done_event_watcher && old_event) {

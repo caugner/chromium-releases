@@ -1,39 +1,117 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 // This file contains a list of defective WebGL conformance tests. The expected
 // format is:
-//  {BUG#} {MAC,WIN,LINUX,RELEASE,DEBUG} : {TEST_NAME} = {PASS,FAIL,TIMEOUT}
+//  {BUG#} {MODIFIERS} : {TEST_NAME} = {PASS,FAIL,FLAKY,TIMEOUT}
+//
+// MODIFIERS can be a combination of the below list:
+//  WIN XP VISTA WIN7 MAC LEOPARD SNOWLEOPARD LION LINUX CHROMEOS
+//  NVIDIA AMD INTEL
+//  0x**** (this is a gpu's PCI device ID)
+//  DEBUG RELEASE
+//
+// Any tests whose expectations are not PASS will be skipped on the bots.
 //
 // Examples:
 //  91530 MAC WIN LINUX : context_lost_restored = TIMEOUT
-//    This will mark the test as DISABLED_*.
-//
 //  91533 WIN : gl_min_uniforms = FAIL
-//    This will mark the test as FAILS_*.
-//
-//  91532 MAC : tex_image_and_sub_image_2d_with_video = PASS FAIL
-//    This will mark the test as FLAKY_*.
+//  91532 MAC NVIDIA 0x0640 : tex_image_and_sub_image_2d_with_video = PASS FAIL
 
-// -----------------------------------------------------------------------------
-// TIMEOUT TESTS
-// -----------------------------------------------------------------------------
-
-// The following two tests TIMEOUT on GPU Linux Tests (dbg)(1), with ATI card.
-WONTFIX LINUX DEBUG : conformance_more_conformance_quickCheckAPI_B1 = TIMEOUT
-WONTFIX LINUX DEBUG : conformance_more_conformance_quickCheckAPI_G_I = TIMEOUT
-
-// -----------------------------------------------------------------------------
-// FAILING TESTS
-// -----------------------------------------------------------------------------
+115122 LINUX WIN7 NVIDIA DEBUG : conformance_textures_tex_image_and_sub_image_2d_with_video = TIMEOUT
 
 103759 MAC WIN LINUX : conformance_more_functions_readPixelsBadArgs = FAIL
 103759 MAC WIN LINUX : conformance_more_functions_texImage2DHTML = FAIL
 103759 MAC WIN LINUX : conformance_more_functions_texSubImage2DHTML = FAIL
 
-// -----------------------------------------------------------------------------
-// FLAKY TESTS
-// -----------------------------------------------------------------------------
+113695 MAC WIN LINUX : conformance_misc_instanceof_test = FAIL
 
+UNFILED MAC WIN LINUX : conformance_textures_origin_clean_conformance = FAIL
+
+UNFILED WIN : conformance_glsl_functions_glsl_function_atan = FAIL
+UNFILED WIN : conformance_glsl_functions_glsl_function_atan_xy = FAIL
+UNFILED WIN : conformance_glsl_misc_struct_nesting_under_maximum = FAIL
+
+UNFILED XP NVIDIA : conformance_textures_texture_mips = FAIL
+
+113731 WIN7 INTEL : conformance_more_conformance_webGLArrays = FAIL
+113731 WIN7 INTEL : conformance_more_functions_copyTexImage2D = FAIL
+113731 WIN7 INTEL : conformance_more_functions_copyTexSubImage2D = FAIL
+113731 WIN7 INTEL : conformance_more_functions_uniformf = FAIL
+113731 WIN7 INTEL : conformance_more_functions_uniformfBadArgs = FAIL
+113731 WIN7 INTEL : conformance_more_functions_uniformfArrayLen1 = FAIL
+113731 WIN7 INTEL : conformance_more_functions_uniformi = FAIL
+113731 WIN7 INTEL : conformance_more_functions_uniformiBadArgs = FAIL
+113731 WIN7 INTEL : conformance_more_functions_uniformMatrix = FAIL
+113731 WIN7 INTEL : conformance_more_functions_uniformMatrixBadArgs = FAIL
+
+UNFILED WIN7 INTEL : conformance_context_context_attributes_alpha_depth_stencil_antialias = FAIL
+UNFILED WIN7 INTEL : conformance_context_context_lost_restored = FAIL
+UNFILED WIN7 INTEL : conformance_context_premultiplyalpha_test = FAIL
+UNFILED WIN7 INTEL : conformance_extensions_oes_standard_derivatives = FAIL
+UNFILED WIN7 INTEL : conformance_extensions_oes_texture_float = FAIL
+UNFILED WIN7 INTEL : conformance_limits_gl_min_attribs = FAIL
+UNFILED WIN7 INTEL : conformance_limits_gl_max_texture_dimensions = FAIL
+UNFILED WIN7 INTEL : conformance_limits_gl_min_textures = FAIL
+UNFILED WIN7 INTEL : conformance_limits_gl_min_uniforms = FAIL
+UNFILED WIN7 INTEL : conformance_rendering_gl_clear = FAIL
+UNFILED WIN7 INTEL : conformance_textures_copy_tex_image_and_sub_image_2d = FAIL
+UNFILED WIN7 INTEL : conformance_textures_gl_teximage = FAIL
+UNFILED WIN7 INTEL : conformance_textures_tex_image_and_sub_image_2d_with_array_buffer_view = FAIL
+UNFILED WIN7 INTEL : conformance_textures_tex_image_and_sub_image_2d_with_image_data = FAIL
+UNFILED WIN7 INTEL : conformance_textures_tex_image_with_format_and_type = FAIL
+UNFILED WIN7 INTEL : conformance_textures_tex_sub_image_2d = FAIL
+UNFILED WIN7 INTEL : conformance_textures_texparameter_test = FAIL
+UNFILED WIN7 INTEL : conformance_textures_texture_active_bind_2 = FAIL
+UNFILED WIN7 INTEL : conformance_textures_texture_active_bind = FAIL
+UNFILED WIN7 INTEL : conformance_textures_texture_complete = FAIL
+UNFILED WIN7 INTEL : conformance_textures_texture_formats_test = FAIL
+UNFILED WIN7 INTEL : conformance_textures_texture_mips = FAIL
+UNFILED WIN7 INTEL : conformance_textures_texture_npot = FAIL
+UNFILED WIN7 INTEL : conformance_textures_texture_size = FAIL
+UNFILED WIN7 INTEL : conformance_textures_texture_size_cube_maps = FAIL
+UNFILED WIN7 INTEL : conformance_glsl_functions_glsl_function_asin = FAIL
+UNFILED WIN7 INTEL : conformance_glsl_variables_gl_fragcoord = FAIL
+UNFILED WIN7 INTEL : conformance_glsl_variables_gl_pointcoord = FAIL
+
+UNFILED MAC INTEL : conformance_glsl_functions_glsl_function_asin = FAIL
+UNFILED MAC INTEL : conformance_glsl_functions_glsl_function_dot = FAIL
+UNFILED MAC INTEL : conformance_glsl_functions_glsl_function_faceforward = FAIL
+UNFILED MAC INTEL : conformance_glsl_functions_glsl_function_length = FAIL
+UNFILED MAC INTEL : conformance_glsl_functions_glsl_function_normalize = FAIL
+UNFILED MAC INTEL : conformance_glsl_functions_glsl_function_reflect = FAIL
+UNFILED MAC INTEL : conformance_glsl_functions_glsl_function_smoothstep_gentype = FAIL
+UNFILED MAC INTEL : conformance_glsl_variables_gl_pointcoord = FAIL
+UNFILED MAC INTEL : conformance_limits_gl_max_texture_dimensions = FAIL
+UNFILED MAC INTEL : conformance_rendering_line_loop_tri_fan = FAIL
+UNFILED MAC INTEL : conformance_textures_texture_size = FAIL
+
+UNFILED MAC AMD : conformance_attribs_gl_vertex_attrib = FAIL
+UNFILED MAC AMD : conformance_attribs_gl_vertexattribpointer_offsets = FAIL
+UNFILED MAC AMD : conformance_attribs_gl_vertexattribpointer = FAIL
+UNFILED MAC AMD : conformance_misc_type_conversion_test = FAIL
+UNFILED MAC AMD : conformance_renderbuffers_framebuffer_object_attachment = FAIL
+UNFILED MAC AMD : conformance_textures_copy_tex_image_and_sub_image_2d = FAIL
+UNFILED MAC AMD : conformance_typedarrays_array_unit_tests = FAIL
+UNFILED MAC AMD : conformance_glsl_functions_glsl_function_distance = FAIL
+UNFILED MAC AMD : conformance_glsl_functions_glsl_function_dot = FAIL
+UNFILED MAC AMD : conformance_glsl_functions_glsl_function_length = FAIL
+UNFILED MAC AMD : conformance_glsl_variables_gl_pointcoord = FAIL
+UNFILED MAC AMD : conformance_reading_read_pixels_test = TIMEOUT
+
+WONTFIX LINUX DEBUG : conformance_more_conformance_quickCheckAPI_B1 = TIMEOUT
+WONTFIX LINUX DEBUG : conformance_more_conformance_quickCheckAPI_G_I = TIMEOUT
+
+UNFILED LINUX NVIDIA : conformance_uniforms_uniform_location = FAIL
+UNFILED LINUX NVIDIA : conformance_textures_texture_mips = FAIL
+
+UNFILED LINUX INTEL : conformance_renderbuffers_framebuffer_object_attachment = FAIL
+UNFILED LINUX INTEL : conformance_state_gl_object_get_calls = FAIL
+UNFILED LINUX INTEL : conformance_textures_texture_npot = FAIL
+UNFILED LINUX INTEL : conformance_glsl_variables_gl_pointcoord = FAIL
+
+UNFILED LINUX AMD : conformance_misc_object_deletion_behaviour = FAIL
+UNFILED LINUX AMD : conformance_textures_texture_mips = FAIL
+UNFILED LINUX AMD : conformance_textures_texture_size = FAIL
 

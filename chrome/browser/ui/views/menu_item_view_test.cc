@@ -1,17 +1,18 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/callback.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/automation/ui_controls.h"
 #include "chrome/test/base/view_event_test_base.h"
+#include "chrome/test/base/ui_test_utils.h"
+#include "ui/ui_controls/ui_controls.h"
 #include "ui/views/controls/button/menu_button.h"
+#include "ui/views/controls/button/menu_button_listener.h"
 #include "ui/views/controls/menu/menu_controller.h"
 #include "ui/views/controls/menu/menu_item_view.h"
 #include "ui/views/controls/menu/menu_runner.h"
 #include "ui/views/controls/menu/submenu_view.h"
-#include "ui/views/controls/menu/view_menu_delegate.h"
 #include "ui/views/widget/root_view.h"
 #include "ui/views/widget/widget.h"
 
@@ -30,7 +31,7 @@
 // MenuItemView prevents repeated activation of a menu by clicks too
 // close in time.
 class MenuItemViewTestBase : public ViewEventTestBase,
-                             public views::ViewMenuDelegate,
+                             public views::MenuButtonListener,
                              public views::MenuDelegate {
  public:
   MenuItemViewTestBase()
@@ -68,8 +69,9 @@ class MenuItemViewTestBase : public ViewEventTestBase,
     return button_->GetPreferredSize();
   }
 
-  // views::ViewMenuDelegate implementation.
-  virtual void RunMenu(views::View* source, const gfx::Point& pt) OVERRIDE {
+  // views::MenuButtonListener implementation.
+  virtual void OnMenuButtonClicked(views::View* source,
+                                   const gfx::Point& point) OVERRIDE {
     gfx::Point screen_location;
     views::View::ConvertPointToScreen(source, &screen_location);
     gfx::Rect bounds(screen_location, source->size());
@@ -84,7 +86,7 @@ class MenuItemViewTestBase : public ViewEventTestBase,
  protected:
   // Generate a mouse click on the specified view and post a new task.
   virtual void Click(views::View* view, const base::Closure& next) {
-    ui_controls::MoveMouseToCenterAndPress(
+    ui_test_utils::MoveMouseToCenterAndPress(
         view,
         ui_controls::LEFT,
         ui_controls::DOWN | ui_controls::UP,

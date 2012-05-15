@@ -16,11 +16,11 @@
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
 #include "chrome/browser/ui/gtk/bubble/bubble_gtk.h"
 #include "chrome/browser/ui/gtk/gtk_chrome_link_button.h"
-#include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/location_bar_view_gtk.h"
+#include "chrome/browser/ui/gtk/theme_service_gtk.h"
 #include "chrome/common/url_constants.h"
-#include "content/public/browser/ssl_status.h"
+#include "content/public/common/ssl_status.h"
 #include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
@@ -79,7 +79,7 @@ class PageInfoBubbleGtk : public PageInfoModelObserver,
   GtkWidget* anchor_;
 
   // Provides colors and stuff.
-  GtkThemeService* theme_service_;
+  ThemeServiceGtk* theme_service_;
 
   BubbleGtk* bubble_;
 
@@ -99,7 +99,7 @@ PageInfoBubbleGtk::PageInfoBubbleGtk(gfx::NativeWindow parent,
       cert_id_(ssl.cert_id),
       parent_(parent),
       contents_(NULL),
-      theme_service_(GtkThemeService::GetFrom(profile)),
+      theme_service_(ThemeServiceGtk::GetFrom(profile)),
       profile_(profile) {
   BrowserWindowGtk* browser_window =
       BrowserWindowGtk::GetBrowserWindowForNativeWindow(parent);
@@ -172,7 +172,7 @@ GtkWidget* PageInfoBubbleGtk::CreateSection(
     const PageInfoModel::SectionInfo& section) {
   GtkWidget* section_box = gtk_hbox_new(FALSE, ui::kControlSpacing);
 
-  GdkPixbuf* pixbuf = *model_.GetIconImage(section.icon_id);
+  GdkPixbuf* pixbuf = model_.GetIconImage(section.icon_id)->ToGdkPixbuf();
   if (pixbuf) {
     GtkWidget* image = gtk_image_new_from_pixbuf(pixbuf);
     gtk_box_pack_start(GTK_BOX(section_box), image, FALSE, FALSE, 0);

@@ -137,7 +137,7 @@ class CONTENT_EXPORT SavePackage
   // content::WebContentsObserver implementation.
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
-  // DownloadItem::Observer implementation.
+  // content::DownloadItem::Observer implementation.
   virtual void OnDownloadUpdated(content::DownloadItem* download) OVERRIDE;
   virtual void OnDownloadOpened(content::DownloadItem* download) OVERRIDE {}
 
@@ -301,6 +301,11 @@ class CONTENT_EXPORT SavePackage
 
   // Unique ID for this SavePackage.
   const int unique_id_;
+
+  // Variables to record errors that happened so we can record them via
+  // UMA statistics.
+  bool wrote_to_completed_file_;
+  bool wrote_to_failed_file_;
 
   friend class SavePackageTest;
   FRIEND_TEST_ALL_PREFIXES(SavePackageTest, TestSuggestedSaveNames);

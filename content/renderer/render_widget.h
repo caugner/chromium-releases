@@ -14,6 +14,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/time.h"
+#include "base/timer.h"
 #include "content/common/content_export.h"
 #include "content/renderer/paint_aggregator.h"
 #include "ipc/ipc_channel.h"
@@ -76,7 +77,8 @@ class CONTENT_EXPORT RenderWidget
   // Creates a new RenderWidget.  The opener_id is the routing ID of the
   // RenderView that this widget lives inside.
   static RenderWidget* Create(int32 opener_id,
-                              WebKit::WebPopupType popup_type);
+                              WebKit::WebPopupType popup_type,
+                              const WebKit::WebScreenInfo& screen_info);
 
   // Creates a WebWidget based on the popup type.
   static WebKit::WebWidget* CreateWebWidget(RenderWidget* render_widget);
@@ -111,11 +113,13 @@ class CONTENT_EXPORT RenderWidget
   virtual bool Send(IPC::Message* msg) OVERRIDE;
 
   // WebKit::WebWidgetClient
+  virtual void willBeginCompositorFrame();
   virtual void didInvalidateRect(const WebKit::WebRect&);
   virtual void didScrollRect(int dx, int dy, const WebKit::WebRect& clipRect);
   virtual void didAutoResize(const WebKit::WebSize& new_size);
-  virtual void didActivateCompositor(int compositorIdentifier);
+  virtual void didActivateCompositor(int input_handler_identifier);
   virtual void didDeactivateCompositor();
+  virtual void didBecomeReadyForAdditionalInput();
   virtual void didCommitAndDrawCompositorFrame();
   virtual void didCompleteSwapBuffers();
   virtual void scheduleComposite();
@@ -157,7 +161,13 @@ class CONTENT_EXPORT RenderWidget
   // For unit tests.
   friend class RenderWidgetTest;
 
-  explicit RenderWidget(WebKit::WebPopupType popup_type);
+  enum ResizeAck {
+    SEND_RESIZE_ACK,
+    NO_RESIZE_ACK,
+  };
+
+  RenderWidget(WebKit::WebPopupType popup_type,
+               const WebKit::WebScreenInfo& screen_info);
   virtual ~RenderWidget();
 
   // Initializes this view with the given opener.  CompleteInit must be called
@@ -201,6 +211,12 @@ class CONTENT_EXPORT RenderWidget
   // mainly intended to be used in conjuction with WebView::SetIsTransparent().
   virtual void SetBackground(const SkBitmap& bitmap);
 
+  // Resizes the render widget.
+  void Resize(const gfx::Size& new_size,
+              const gfx::Rect& resizer_rect,
+              bool is_fullscreen,
+              ResizeAck resize_ack);
+
   // RenderWidget IPC message handlers
   void OnClose();
   void OnCreatingNewAck(gfx::NativeViewId parent);
@@ -233,6 +249,7 @@ class CONTENT_EXPORT RenderWidget
   void OnMsgRepaint(const gfx::Size& size_to_paint);
   void OnSetTextDirection(WebKit::WebTextDirection direction);
   void OnGetFPS();
+  void OnInvertWebContent(bool invert);
 
   // Override points to notify derived classes that a paint has happened.
   // WillInitiatePaint happens when we're about to generate a new bitmap and
@@ -366,6 +383,7 @@ class CONTENT_EXPORT RenderWidget
 
   // The window we are embedded within.  TODO(darin): kill this.
   gfx::NativeViewId host_window_;
+  bool host_window_set_;
 
   // We store the current cursor object so we can avoid spamming SetCursor
   // messages.
@@ -475,9 +493,9 @@ class CONTENT_EXPORT RenderWidget
   // compositor.
   bool is_accelerated_compositing_active_;
 
+  base::OneShotTimer<RenderWidget> animation_timer_;
   base::Time animation_floor_time_;
   bool animation_update_pending_;
-  bool animation_task_posted_;
   bool invalidation_task_posted_;
 
   bool has_disable_gpu_vsync_switch_;
@@ -493,6 +511,15 @@ class CONTENT_EXPORT RenderWidget
   // queue. Note: some SwapBuffers may not correspond to an update, in which
   // case NULL is added to the queue.
   std::deque<ViewHostMsg_UpdateRect*> updates_pending_swap_;
+
+  // Properties of the screen hosting this RenderWidget instance.
+  WebKit::WebScreenInfo screen_info_;
+
+  // Set to true if we should invert all pixels.
+  bool invert_;
+
+  // The Skia paint object for inverting.
+  scoped_ptr<SkPaint> invert_paint_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidget);
 };

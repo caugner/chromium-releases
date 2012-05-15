@@ -1,12 +1,8 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/test/base/browser_with_test_window_test.h"
-
-#if defined(OS_WIN)
-#include <ole2.h>
-#endif  // defined(OS_WIN)
 
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/browser_navigator.h"
@@ -17,22 +13,29 @@
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/page_transition_types.h"
+#include "content/test/test_renderer_host.h"
+
+#if defined(USE_AURA)
+#include "ui/aura/env.h"
+#include "ui/aura/monitor_manager.h"
+#include "ui/aura/root_window.h"
+#include "ui/aura/test/single_monitor_manager.h"
+#include "ui/aura/test/test_activation_client.h"
+#include "ui/aura/test/test_screen.h"
+#include "ui/aura/test/test_stacking_client.h"
+#endif
 
 using content::BrowserThread;
 using content::NavigationController;
+using content::RenderViewHost;
+using content::RenderViewHostTester;
 using content::WebContents;
 
 BrowserWithTestWindowTest::BrowserWithTestWindowTest()
     : ui_thread_(BrowserThread::UI, message_loop()),
       file_thread_(BrowserThread::FILE, message_loop()),
-      rph_factory_(),
-      rvh_factory_(&rph_factory_) {
-#if defined(OS_WIN)
-  OleInitialize(NULL);
-#endif
-#if defined(USE_AURA)
-  test_activation_client_.reset(new aura::test::TestActivationClient);
-#endif
+      file_user_blocking_thread_(
+          BrowserThread::FILE_USER_BLOCKING, message_loop()) {
 }
 
 void BrowserWithTestWindowTest::SetUp() {
@@ -42,6 +45,25 @@ void BrowserWithTestWindowTest::SetUp() {
   browser_.reset(new Browser(Browser::TYPE_TABBED, profile()));
   window_.reset(new TestBrowserWindow(browser()));
   browser_->SetWindowForTesting(window_.get());
+#if defined(USE_AURA)
+  aura::Env::GetInstance()->SetMonitorManager(
+      new aura::test::SingleMonitorManager);
+  root_window_.reset(aura::MonitorManager::CreateRootWindowForPrimaryMonitor());
+  gfx::Screen::SetInstance(new aura::TestScreen(root_window_.get()));
+  test_activation_client_.reset(
+      new aura::test::TestActivationClient(root_window_.get()));
+  test_stacking_client_.reset(
+      new aura::test::TestStackingClient(root_window_.get()));
+#endif
+}
+
+void BrowserWithTestWindowTest::TearDown() {
+  testing::Test::TearDown();
+#if defined(USE_AURA)
+  test_activation_client_.reset();
+  test_stacking_client_.reset();
+  root_window_.reset();
+#endif
 }
 
 BrowserWithTestWindowTest::~BrowserWithTestWindowTest() {
@@ -52,15 +74,6 @@ BrowserWithTestWindowTest::~BrowserWithTestWindowTest() {
 
   MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
   MessageLoop::current()->Run();
-
-#if defined(OS_WIN)
-  OleUninitialize();
-#endif
-}
-
-TestRenderViewHost* BrowserWithTestWindowTest::TestRenderViewHostForTab(
-    WebContents* web_contents) {
-  return static_cast<TestRenderViewHost*>(web_contents->GetRenderViewHost());
 }
 
 void BrowserWithTestWindowTest::AddTab(Browser* browser, const GURL& url) {
@@ -76,41 +89,40 @@ void BrowserWithTestWindowTest::CommitPendingLoad(
   if (!controller->GetPendingEntry())
     return;  // Nothing to commit.
 
-  TestRenderViewHost* old_rvh =
-      TestRenderViewHostForTab(controller->GetWebContents());
+  RenderViewHost* old_rvh =
+      controller->GetWebContents()->GetRenderViewHost();
 
-  TestRenderViewHost* pending_rvh = TestRenderViewHost::GetPendingForController(
+  RenderViewHost* pending_rvh = RenderViewHostTester::GetPendingForController(
       controller);
   if (pending_rvh) {
     // Simulate the ShouldClose_ACK that is received from the current renderer
     // for a cross-site navigation.
     DCHECK_NE(old_rvh, pending_rvh);
-    old_rvh->SendShouldCloseACK(true);
+    RenderViewHostTester::For(old_rvh)->SendShouldCloseACK(true);
   }
   // Commit on the pending_rvh, if one exists.
-  TestRenderViewHost* test_rvh = pending_rvh ? pending_rvh : old_rvh;
+  RenderViewHost* test_rvh = pending_rvh ? pending_rvh : old_rvh;
+  RenderViewHostTester* test_rvh_tester = RenderViewHostTester::For(test_rvh);
 
   // For new navigations, we need to send a larger page ID. For renavigations,
   // we need to send the preexisting page ID. We can tell these apart because
   // renavigations will have a pending_entry_index while new ones won't (they'll
   // just have a standalong pending_entry that isn't in the list already).
   if (controller->GetPendingEntryIndex() >= 0) {
-    test_rvh->SendNavigateWithTransition(
+    test_rvh_tester->SendNavigateWithTransition(
         controller->GetPendingEntry()->GetPageID(),
         controller->GetPendingEntry()->GetURL(),
         controller->GetPendingEntry()->GetTransitionType());
   } else {
-    test_rvh->SendNavigateWithTransition(
+    test_rvh_tester->SendNavigateWithTransition(
         controller->GetWebContents()->
-            GetMaxPageIDForSiteInstance(test_rvh->site_instance()) + 1,
+            GetMaxPageIDForSiteInstance(test_rvh->GetSiteInstance()) + 1,
         controller->GetPendingEntry()->GetURL(),
         controller->GetPendingEntry()->GetTransitionType());
   }
 
-  // Simulate the SwapOut_ACK that fires if you commit a cross-site navigation
-  // without making any network requests.
   if (pending_rvh)
-    old_rvh->OnSwapOutACK();
+    RenderViewHostTester::For(old_rvh)->SimulateSwapOutACK();
 }
 
 void BrowserWithTestWindowTest::NavigateAndCommit(

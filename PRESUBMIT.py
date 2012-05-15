@@ -19,6 +19,7 @@ _EXCLUDED_PATHS = (
     r"^skia[\\\/].*",
     r"^v8[\\\/].*",
     r".*MakeFile$",
+    r".+_autogen\.h$",
 )
 
 
@@ -64,7 +65,7 @@ def _CheckNoProductionCodeUsingTestOnlyFunctions(input_api, output_api):
   file_inclusion_pattern = r'.+%s' % source_extensions
   file_exclusion_patterns = (
       r'.*[/\\](test_|mock_).+%s' % source_extensions,
-      r'.+_test_(support|base)%s' % source_extensions,
+      r'.+_test_(base|support|util)%s' % source_extensions,
       r'.+_(api|browser|perf|unit|ui)?test%s' % source_extensions,
       r'.+profile_sync_service_harness%s' % source_extensions,
       )
@@ -182,33 +183,21 @@ def _CheckNoFRIEND_TEST(input_api, output_api):
       'FRIEND_TEST_ALL_PREFIXES() instead.\n' + '\n'.join(problems))]
 
 
-def _CheckNoNewOldCallback(input_api, output_api):
-  """Checks to make sure we don't introduce new uses of old callbacks."""
-
-  def HasOldCallbackKeywords(line):
-    """Returns True if a line of text contains keywords that indicate the use
-    of the old callback system.
-    """
-    return ('NewRunnableMethod' in line or
-            'NewCallback' in line or
-            input_api.re.search(r'\bCallback\d<', line) or
-            input_api.re.search(r'\bpublic Task\b', line) or
-            'public CancelableTask' in line)
-
+def _CheckNoScopedAllowIO(input_api, output_api):
+  """Make sure that ScopedAllowIO is not used."""
   problems = []
+
   file_filter = lambda f: f.LocalPath().endswith(('.cc', '.h'))
   for f in input_api.AffectedFiles(file_filter=file_filter):
-    if not any(HasOldCallbackKeywords(line) for line in f.NewContents()):
-      continue
     for line_num, line in f.ChangedContents():
-      if HasOldCallbackKeywords(line):
+      if 'ScopedAllowIO' in line:
         problems.append('    %s:%d' % (f.LocalPath(), line_num))
 
   if not problems:
     return []
-  return [output_api.PresubmitPromptWarning('The old callback system is '
-      'deprecated. If possible, use base::Bind and base::Callback instead.\n' +
-      '\n'.join(problems))]
+  return [output_api.PresubmitPromptWarning('New code should not use '
+      'ScopedAllowIO. Post a task to the blocking pool or the FILE thread '
+      'instead.\n' + '\n'.join(problems))]
 
 
 def _CommonChecks(input_api, output_api):
@@ -224,7 +213,7 @@ def _CommonChecks(input_api, output_api):
   results.extend(_CheckNoNewWStrings(input_api, output_api))
   results.extend(_CheckNoDEPSGIT(input_api, output_api))
   results.extend(_CheckNoFRIEND_TEST(input_api, output_api))
-  results.extend(_CheckNoNewOldCallback(input_api, output_api))
+  results.extend(_CheckNoScopedAllowIO(input_api, output_api))
   return results
 
 
@@ -321,7 +310,8 @@ def CheckChangeOnCommit(input_api, output_api):
       json_url='http://chromium-status.appspot.com/current?format=json'))
   results.extend(input_api.canned_checks.CheckRietveldTryJobExecution(input_api,
       output_api, 'http://codereview.chromium.org',
-      ('win_rel', 'linux_rel', 'mac_rel'), 'tryserver@chromium.org'))
+      ('win_rel', 'linux_rel', 'mac_rel, win:compile'),
+      'tryserver@chromium.org'))
 
   results.extend(input_api.canned_checks.CheckChangeHasBugField(
       input_api, output_api))
@@ -334,12 +324,36 @@ def CheckChangeOnCommit(input_api, output_api):
 
 
 def GetPreferredTrySlaves(project, change):
-  only_objc_files = all(
-      f.LocalPath().endswith(('.mm', '.m')) for f in change.AffectedFiles())
+  affected_files = change.LocalPaths()
+  only_objc_files = all(f.endswith(('.mm', '.m')) for f in affected_files)
   if only_objc_files:
     return ['mac_rel']
   preferred = ['win_rel', 'linux_rel', 'mac_rel']
+  preferred = ['win_rel', 'linux_rel', 'mac_rel', 'linux_clang']
+  if any(f.endswith(('.h', '.cc', '.cpp', '.cxx')) for f in affected_files):
+    preferred.append('linux_clang')
   aura_re = '_aura[^/]*[.][^/]*'
-  if any(re.search(aura_re, f.LocalPath()) for f in change.AffectedFiles()):
-    preferred.append('linux_chromeos_aura:compile')
+  if any(re.search(aura_re, f) for f in affected_files):
+    preferred.append('linux_chromeos')
+  # Nothing in chrome/
+  android_re_list = ('^base/',
+                     '^build/common.gypi$',
+                     '^content/',
+                     '^ipc/',
+                     '^jingle/',
+                     '^media/',
+                     '^net/',
+                     '^sql/')
+  # Nothing that looks like win-only or aura-only
+  win_re = '_win\.(cc|h)$'
+  possibly_android = True
+  for non_android_re in (aura_re, win_re):
+    if all(re.search(non_android_re, f) for f in affected_files):
+      possibly_android = False
+      break
+  if possibly_android:
+    for f in change.AffectedFiles():
+      if any(re.search(r, f.LocalPath()) for r in android_re_list):
+        preferred.append('android')
+        break
   return preferred

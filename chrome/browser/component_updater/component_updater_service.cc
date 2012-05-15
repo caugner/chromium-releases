@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,8 +25,9 @@
 #include "chrome/common/chrome_utility_messages.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/extensions/extension.h"
-#include "content/browser/utility_process_host.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/utility_process_host.h"
+#include "content/public/browser/utility_process_host_client.h"
 #include "content/public/common/url_fetcher_delegate.h"
 #include "content/public/common/url_fetcher.h"
 #include "googleurl/src/gurl.h"
@@ -34,6 +35,8 @@
 #include "net/base/load_flags.h"
 
 using content::BrowserThread;
+using content::UtilityProcessHost;
+using content::UtilityProcessHostClient;
 
 // The component updater is designed to live until process shutdown, so
 // base::Bind() calls are not refcounted.
@@ -106,7 +109,7 @@ bool IsVersionNewer(const Version& current, const std::string& proposed) {
 }
 
 // Helper template class that allows our main class to have separate
-// OnURLFetchComplete() callbacks for diffent types of url requests
+// OnURLFetchComplete() callbacks for different types of url requests
 // they are differentiated by the |Ctx| type.
 template <typename Del, typename Ctx>
 class DelegateWithContext : public content::URLFetcherDelegate {
@@ -218,7 +221,7 @@ CrxComponent::~CrxComponent() {}
 // is called periodically to do the updgrades/installs or the update checks.
 // An important consideration here is to be as "low impact" as we can to the
 // rest of the browser, so even if we have many components registered and
-// elegible for update, we only do one thing at a time with pauses in between
+// eligible for update, we only do one thing at a time with pauses in between
 // the tasks. Also when we do network requests there is only one |url_fetcher_|
 // in flight at at a time.
 // There are no locks in this code, the main structure |work_items_| is mutated
@@ -237,9 +240,9 @@ class CrxUpdateService : public ComponentUpdateService {
   virtual Status RegisterComponent(const CrxComponent& component) OVERRIDE;
 
   // The only purpose of this class is to forward the
-  // UtilityProcessHost::Client callbacks so CrxUpdateService does
+  // UtilityProcessHostClient callbacks so CrxUpdateService does
   // not have to derive from it because that is refcounted.
-  class ManifestParserBridge : public UtilityProcessHost::Client {
+  class ManifestParserBridge : public UtilityProcessHostClient {
    public:
     explicit ManifestParserBridge(CrxUpdateService* service)
         : service_(service) {}
@@ -257,7 +260,7 @@ class CrxUpdateService : public ComponentUpdateService {
     }
 
    private:
-    // Omaha update response XML was succesfuly parsed.
+    // Omaha update response XML was successfully parsed.
     void OnParseUpdateManifestSucceeded(const UpdateManifest::Results& r) {
       service_->OnParseUpdateManifestSucceeded(r);
     }
@@ -597,10 +600,9 @@ void CrxUpdateService::ParseManifest(const std::string& xml) {
        CrxUpdateService::OnParseUpdateManifestSucceeded(manifest.results());
     }
   } else {
-    UtilityProcessHost* host =
-        new UtilityProcessHost(new ManifestParserBridge(this),
-                               BrowserThread::UI);
-    host->set_use_linux_zygote(true);
+    UtilityProcessHost* host = UtilityProcessHost::Create(
+        new ManifestParserBridge(this), BrowserThread::UI);
+    host->EnableZygote();
     host->Send(new ChromeUtilityMsg_ParseUpdateManifest(xml));
   }
 }
@@ -701,12 +703,14 @@ void CrxUpdateService::OnURLFetchComplete(const content::URLFetcher* source,
         content::NotificationService::NoDetails());
 
     // Why unretained? See comment at top of file.
-    BrowserThread::PostDelayedTask(BrowserThread::FILE, FROM_HERE,
+    BrowserThread::PostDelayedTask(
+        BrowserThread::FILE,
+        FROM_HERE,
         base::Bind(&CrxUpdateService::Install,
                    base::Unretained(this),
                    context,
                    temp_crx_path),
-        config_->StepDelay());
+        base::TimeDelta::FromMilliseconds(config_->StepDelay()));
   }
 }
 
@@ -724,10 +728,12 @@ void CrxUpdateService::Install(const CRXContext* context,
     NOTREACHED() << crx_path.value();
   }
   // Why unretained? See comment at top of file.
-  BrowserThread::PostDelayedTask(BrowserThread::UI, FROM_HERE,
+  BrowserThread::PostDelayedTask(
+      BrowserThread::UI,
+      FROM_HERE,
       base::Bind(&CrxUpdateService::DoneInstalling, base::Unretained(this),
                  context->id, unpacker.error()),
-      config_->StepDelay());
+      base::TimeDelta::FromMilliseconds(config_->StepDelay()));
   delete context;
 }
 

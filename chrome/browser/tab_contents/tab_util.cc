@@ -8,12 +8,13 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_controller_factory.h"
 #include "chrome/common/chrome_switches.h"
-#include "content/browser/renderer_host/render_view_host.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_view_host_delegate.h"
 #include "content/public/browser/site_instance.h"
 #include "content/public/browser/web_contents.h"
 #include "googleurl/src/gurl.h"
 
+using content::RenderViewHost;
 using content::SiteInstance;
 using content::WebContents;
 
@@ -26,7 +27,7 @@ content::WebContents* GetWebContentsByID(int render_process_id,
   if (!render_view_host)
     return NULL;
 
-  return render_view_host->delegate()->GetAsWebContents();
+  return render_view_host->GetDelegate()->GetAsWebContents();
 }
 
 SiteInstance* GetSiteInstanceForNewTab(WebContents* source_contents,

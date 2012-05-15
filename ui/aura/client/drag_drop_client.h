@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,12 +14,9 @@ class OSExchangeData;
 }
 
 namespace aura {
+class RootWindow;
 class Window;
 namespace client {
-
-// A property key to store the drag and drop client for the root window. The
-// type of the value is |aura::DragDropClient*|.
-AURA_EXPORT extern const char kRootWindowDragDropClientKey[];
 
 // An interface implemented by an object that controls a drag and drop session.
 class AURA_EXPORT DragDropClient {
@@ -27,15 +24,17 @@ class AURA_EXPORT DragDropClient {
   virtual ~DragDropClient() {}
 
   // Initiates a drag and drop session. Returns the drag operation that was
-  // applied at the end of the drag drop session.
+  // applied at the end of the drag drop session. |root_location| is in the
+  // RootWindow's coordinate system.
   virtual int StartDragAndDrop(const ui::OSExchangeData& data,
-                                int operation) = 0;
+                               const gfx::Point& root_location,
+                               int operation) = 0;
 
   // Called when mouse is dragged during a drag and drop.
-  virtual void DragUpdate(aura::Window* target, const MouseEvent& event) = 0;
+  virtual void DragUpdate(aura::Window* target, const LocatedEvent& event) = 0;
 
   // Called when mouse is released during a drag and drop.
-  virtual void Drop(aura::Window* target, const MouseEvent& event) = 0;
+  virtual void Drop(aura::Window* target, const LocatedEvent& event) = 0;
 
   // Called when a drag and drop session is cancelled.
   virtual void DragCancel() = 0;
@@ -44,8 +43,9 @@ class AURA_EXPORT DragDropClient {
   virtual bool IsDragDropInProgress() = 0;
 };
 
-AURA_EXPORT void SetDragDropClient(DragDropClient* client);
-AURA_EXPORT DragDropClient* GetDragDropClient();
+AURA_EXPORT void SetDragDropClient(RootWindow* root_window,
+                                   DragDropClient* client);
+AURA_EXPORT DragDropClient* GetDragDropClient(RootWindow* root_window);
 
 }  // namespace client
 }  // namespace aura

@@ -27,8 +27,6 @@ const FilePath::CharType* kTestDir =
     FILE_PATH_LITERAL("workers");
 const FilePath::CharType* kManySharedWorkersFile =
     FILE_PATH_LITERAL("many_shared_workers.html");
-const FilePath::CharType* kManyWorkersFile =
-    FILE_PATH_LITERAL("many_workers.html");
 const FilePath::CharType* kQuerySharedWorkerShutdownFile =
     FILE_PATH_LITERAL("queued_shared_worker_shutdown.html");
 const FilePath::CharType* kShutdownSharedWorkerFile =
@@ -87,7 +85,7 @@ class WorkerTest : public UILayoutTest {
     ASSERT_STREQ(kTestCompleteSuccess, value.c_str());
   }
 
-  bool WaitForProcessCountToBe(int tabs, int workers) {
+  bool WaitForProcessCountToBeAtLeast(int tabs, int workers) {
     // The 1 is for the browser process.
     int number_of_processes = 1 + workers + tabs;
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
@@ -100,7 +98,7 @@ class WorkerTest : public UILayoutTest {
       cur_process_count = 0;
       if (!GetBrowserProcessCount(&cur_process_count))
         return false;
-      if (cur_process_count == number_of_processes)
+      if (cur_process_count >= number_of_processes)
         return true;
 
       // Sometimes the worker processes can take a while to shut down on the
@@ -108,7 +106,7 @@ class WorkerTest : public UILayoutTest {
       base::PlatformThread::Sleep(TestTimeouts::action_max_timeout() / 100);
     }
 
-    EXPECT_EQ(number_of_processes, cur_process_count);
+    EXPECT_GE(cur_process_count, number_of_processes);
     return false;
   }
 
@@ -185,7 +183,7 @@ TEST_F(WorkerTest, SingleSharedWorker) {
 
 // Flaky on Win XP only.  http://crbug.com/96435
 #if defined(OS_WIN)
-#define MultipleSharedWorkers FLAKY_MultipleSharedWorkers
+#define MultipleSharedWorkers DISABLED_MultipleSharedWorkers
 #endif
 TEST_F(WorkerTest, MultipleSharedWorkers) {
   RunTest(FilePath(FILE_PATH_LITERAL("multi_worker.html")), "shared=true");
@@ -193,18 +191,18 @@ TEST_F(WorkerTest, MultipleSharedWorkers) {
 
 #if defined(OS_LINUX) || defined(OS_CHROMEOS)
 // http://crbug.com/80446
-#define DISABLED_TerminateQueuedWorkers FLAKY_TerminateQueuedWorkers
+#define DISABLED_TerminateQueuedWorkers DISABLED_TerminateQueuedWorkers
 #endif
 TEST_F(WorkerTest, DISABLED_TerminateQueuedWorkers) {
-  ASSERT_TRUE(WaitForProcessCountToBe(1, 0));
+  ASSERT_TRUE(WaitForProcessCountToBeAtLeast(1, 0));
   RunTest(FilePath(FILE_PATH_LITERAL("terminate_queued_workers.html")), "");
   // Make sure all workers exit.
-  ASSERT_TRUE(WaitForProcessCountToBe(1, 0));
+  ASSERT_TRUE(WaitForProcessCountToBeAtLeast(1, 0));
 }
 
 #if defined(OS_LINUX)
 // http://crbug.com/30021
-#define IncognitoSharedWorkers FLAKY_IncognitoSharedWorkers
+#define IncognitoSharedWorkers DISABLED_IncognitoSharedWorkers
 #endif
 // Incognito windows should not share workers with non-incognito windows
 TEST_F(WorkerTest, IncognitoSharedWorkers) {
@@ -224,7 +222,9 @@ const FilePath::CharType kDocRoot[] =
 #endif
 // Make sure that auth dialog is displayed from worker context.
 TEST_F(WorkerTest, WorkerHttpAuth) {
-  net::TestServer test_server(net::TestServer::TYPE_HTTP, FilePath(kDocRoot));
+  net::TestServer test_server(net::TestServer::TYPE_HTTP,
+                              net::TestServer::kLocalhost,
+                              FilePath(kDocRoot));
   ASSERT_TRUE(test_server.Start());
 
   scoped_refptr<TabProxy> tab(GetActiveTab());
@@ -241,7 +241,9 @@ TEST_F(WorkerTest, WorkerHttpAuth) {
 #endif
 // Make sure that auth dialog is displayed from shared worker context.
 TEST_F(WorkerTest, DISABLED_SharedWorkerHttpAuth) {
-  net::TestServer test_server(net::TestServer::TYPE_HTTP, FilePath(kDocRoot));
+  net::TestServer test_server(net::TestServer::TYPE_HTTP,
+                              net::TestServer::kLocalhost,
+                              FilePath(kDocRoot));
   ASSERT_TRUE(test_server.Start());
 
   scoped_refptr<TabProxy> tab(GetActiveTab());
@@ -253,193 +255,90 @@ TEST_F(WorkerTest, DISABLED_SharedWorkerHttpAuth) {
   // dialogs displayed by non-navigating tabs.
 }
 
-// http://crbug.com/101996
-TEST_F(WorkerTest, FLAKY_StressJSExecution) {
-  RunWorkerFastLayoutTest("stress-js-execution.html");
-}
-
-// http://crbug.com/101996
-TEST_F(WorkerTest, FLAKY_UseMachineStack) {
-  RunWorkerFastLayoutTest("use-machine-stack.html");
-}
-
-// http://crbug.com/101996
-TEST_F(WorkerTest, FLAKY_WorkerCall) {
-  RunWorkerFastLayoutTest("worker-call.html");
-}
-
 // Crashy, http://crbug.com/35965.
 // Flaky, http://crbug.com/36555.
 TEST_F(WorkerTest, DISABLED_WorkerClonePort) {
   RunWorkerFastLayoutTest("worker-cloneport.html");
 }
 
-// http://crbug.com/101996
-TEST_F(WorkerTest, FLAKY_WorkerCloseFast) {
-  RunWorkerFastLayoutTest("worker-close.html");
-}
-
-// http://crbug.com/84203.
-TEST_F(WorkerTest, FLAKY_WorkerConstructor) {
-  RunWorkerFastLayoutTest("worker-constructor.html");
-}
-
-// http://crbug.com/101996
-TEST_F(WorkerTest, FLAKY_WorkerContextGc) {
-  RunWorkerFastLayoutTest("worker-context-gc.html");
-}
-
 // http://crbug.com/101996 (started flaking with WebKit roll 98537:98582).
-TEST_F(WorkerTest, FLAKY_WorkerContextMultiPort) {
+TEST_F(WorkerTest, DISABLED_WorkerContextMultiPort) {
   RunWorkerFastLayoutTest("worker-context-multi-port.html");
 }
 
-// http://crbug.com/101996
-TEST_F(WorkerTest, FLAKY_WorkerEventListener) {
-  RunWorkerFastLayoutTest("worker-event-listener.html");
-}
-
-// http://crbug.com/101996 (started flaking with WebKit roll 98537:98582).
-TEST_F(WorkerTest, FLAKY_WorkerGC) {
-  RunWorkerFastLayoutTest("worker-gc.html");
-}
-
-// http://crbug.com/101996 (started flaking with WebKit roll 98537:98582).
-TEST_F(WorkerTest, FLAKY_WorkerInit) {
-  RunWorkerFastLayoutTest("worker-init.html");
-}
-
-// worker-lifecycle.html relies on layoutTestController.workerThreadCount
-// which is not currently implemented. http://crbug.com/45168
-TEST_F(WorkerTest, DISABLED_WorkerLifecycle) {
-  RunWorkerFastLayoutTest("worker-lifecycle.html");
-}
-
-#if defined(OS_WIN) || defined(OS_LINUX)
-// http://crbug.com/101996 (started flaking with WebKit roll 98537:98582).
-#define WorkerLocation FLAKY_WorkerLocation
-#endif
-TEST_F(WorkerTest, WorkerLocation) {
-  RunWorkerFastLayoutTest("worker-location.html");
-}
-
-// Flaky, http://crbug.com/71518.
-TEST_F(WorkerTest, FLAKY_WorkerMapGc) {
-  RunWorkerFastLayoutTest("wrapper-map-gc.html");
-}
-
-// http://crbug.com/101996 (started flaking with WebKit roll 98537:98582).
-TEST_F(WorkerTest, FLAKY_WorkerMessagePort) {
+TEST_F(WorkerTest, WorkerMessagePort) {
   RunWorkerFastLayoutTest("worker-messageport.html");
 }
 
-// http://crbug.com/101996 (started flaking with WebKit roll 98537:98582).
-TEST_F(WorkerTest, FLAKY_WorkerMessagePortGC) {
+TEST_F(WorkerTest, WorkerMessagePortGC) {
   RunWorkerFastLayoutTest("worker-messageport-gc.html");
 }
 
 // http://crbug.com/101996 (started flaking with WebKit roll 98537:98582).
-TEST_F(WorkerTest, FLAKY_WorkerMultiPort) {
+TEST_F(WorkerTest, DISABLED_WorkerMultiPort) {
   RunWorkerFastLayoutTest("worker-multi-port.html");
-}
-
-// Flaky, http://crbug.com/76426.
-TEST_F(WorkerTest, FLAKY_WorkerNavigator) {
-  RunWorkerFastLayoutTest("worker-navigator.html");
-}
-
-#if defined(OS_WIN) || defined(OS_LINUX)
-// http://crbug.com/101996 (started flaking with WebKit roll 98537:98582).
-#define WorkerReplaceGlobalConstructor FLAKY_WorkerReplaceGlobalConstructor
-#endif
-TEST_F(WorkerTest, WorkerReplaceGlobalConstructor) {
-  RunWorkerFastLayoutTest("worker-replace-global-constructor.html");
-}
-
-// http://crbug.com/101996 (started flaking with WebKit roll 98537:98582).
-TEST_F(WorkerTest, FLAKY_WorkerReplaceSelf) {
-  RunWorkerFastLayoutTest("worker-replace-self.html");
-}
-
-// Mac: http://crbug.com/44457
-// Others: http://crbug.com/101996
-TEST_F(WorkerTest, FLAKY_WorkerScriptError) {
-  RunWorkerFastLayoutTest("worker-script-error.html");
-}
-
-// http://crbug.com/101996 (started flaking with WebKit roll 98537:98582).
-TEST_F(WorkerTest, FLAKY_WorkerTerminate) {
-  RunWorkerFastLayoutTest("worker-terminate.html");
-}
-
-// http://crbug.com/101996 (started flaking with WebKit roll 98537:98582).
-TEST_F(WorkerTest, FLAKY_WorkerTimeout) {
-  RunWorkerFastLayoutTest("worker-timeout.html");
 }
 
 //
 // SharedWorkerFastLayoutTests
 //
-// http://crbug.com/27636 - incorrect URL_MISMATCH exceptions sometimes get
-// generated on the windows try bots. FLAKY on Win.
-// http://crbug.com/28445 - flakiness on mac
-TEST_F(WorkerTest, FLAKY_SharedWorkerFastConstructor) {
+TEST_F(WorkerTest, SharedWorkerFastConstructor) {
   RunWorkerFastLayoutTest("shared-worker-constructor.html");
 }
 
-TEST_F(WorkerTest, FLAKY_SharedWorkerFastContextGC) {
+TEST_F(WorkerTest, SharedWorkerFastContextGC) {
   RunWorkerFastLayoutTest("shared-worker-context-gc.html");
 }
 
-TEST_F(WorkerTest, FLAKY_SharedWorkerFastEventListener) {
+TEST_F(WorkerTest, SharedWorkerFastEventListener) {
   RunWorkerFastLayoutTest("shared-worker-event-listener.html");
 }
 
-TEST_F(WorkerTest, FLAKY_SharedWorkerFastException) {
+TEST_F(WorkerTest, SharedWorkerFastException) {
   RunWorkerFastLayoutTest("shared-worker-exception.html");
 }
 
-TEST_F(WorkerTest, FLAKY_SharedWorkerFastGC) {
+TEST_F(WorkerTest, SharedWorkerFastGC) {
   RunWorkerFastLayoutTest("shared-worker-gc.html");
 }
 
-TEST_F(WorkerTest, FLAKY_SharedWorkerFastInIframe) {
+TEST_F(WorkerTest, SharedWorkerFastInIframe) {
   RunWorkerFastLayoutTest("shared-worker-in-iframe.html");
 }
 
-TEST_F(WorkerTest, FLAKY_SharedWorkerFastLoadError) {
+TEST_F(WorkerTest, SharedWorkerFastLoadError) {
   RunWorkerFastLayoutTest("shared-worker-load-error.html");
 }
 
-TEST_F(WorkerTest, FLAKY_SharedWorkerFastLocation) {
+TEST_F(WorkerTest, SharedWorkerFastLocation) {
   RunWorkerFastLayoutTest("shared-worker-location.html");
 }
 
-TEST_F(WorkerTest, FLAKY_SharedWorkerFastName) {
+TEST_F(WorkerTest, SharedWorkerFastName) {
   RunWorkerFastLayoutTest("shared-worker-name.html");
 }
 
-TEST_F(WorkerTest, FLAKY_SharedWorkerFastNavigator) {
+TEST_F(WorkerTest, SharedWorkerFastNavigator) {
   RunWorkerFastLayoutTest("shared-worker-navigator.html");
 }
 
-TEST_F(WorkerTest, FLAKY_SharedWorkerFastReplaceGlobalConstructor) {
+TEST_F(WorkerTest, SharedWorkerFastReplaceGlobalConstructor) {
   RunWorkerFastLayoutTest("shared-worker-replace-global-constructor.html");
 }
 
-TEST_F(WorkerTest, FLAKY_SharedWorkerFastReplaceSelf) {
+TEST_F(WorkerTest, SharedWorkerFastReplaceSelf) {
   RunWorkerFastLayoutTest("shared-worker-replace-self.html");
 }
 
-TEST_F(WorkerTest, FLAKY_SharedWorkerFastScriptError) {
+TEST_F(WorkerTest, SharedWorkerFastScriptError) {
   RunWorkerFastLayoutTest("shared-worker-script-error.html");
 }
 
-TEST_F(WorkerTest, FLAKY_SharedWorkerFastShared) {
+TEST_F(WorkerTest, SharedWorkerFastShared) {
   RunWorkerFastLayoutTest("shared-worker-shared.html");
 }
 
-TEST_F(WorkerTest, FLAKY_SharedWorkerFastSimple) {
+TEST_F(WorkerTest, SharedWorkerFastSimple) {
   RunWorkerFastLayoutTest("shared-worker-simple.html");
 }
 
@@ -545,7 +444,7 @@ TEST_F(WorkerTest, DISABLED_WorkerXhrHttpLayoutTests) {
 }
 
 // Flaky, http://crbug.com/34996.
-TEST_F(WorkerTest, FLAKY_MessagePorts) {
+TEST_F(WorkerTest, DISABLED_MessagePorts) {
   static const char* kLayoutTestFiles[] = {
     "message-channel-gc.html",
     "message-channel-gc-2.html",
@@ -580,47 +479,45 @@ TEST_F(WorkerTest, FLAKY_MessagePorts) {
     RunLayoutTest(kLayoutTestFiles[i], kNoHttpPort);
 }
 
-#if defined(OS_MACOSX)
-// See http://crbug.com/48664
-#define MAYBE_LimitPerPage DISABLED_LimitPerPage
-#else
-// See http://crbug.com/36800 for Windows/Linux
-#define MAYBE_LimitPerPage FLAKY_LimitPerPage
-#endif
-TEST_F(WorkerTest, MAYBE_LimitPerPage) {
+TEST_F(WorkerTest, LimitPerPage) {
   int max_workers_per_tab = WorkerServiceImpl::kMaxWorkersPerTabWhenSeparate;
   GURL url = ui_test_utils::GetTestUrl(FilePath(kTestDir),
-                                       FilePath(kManyWorkersFile));
+                                       FilePath(kManySharedWorkersFile));
   url = GURL(url.spec() + StringPrintf("?count=%d", max_workers_per_tab + 1));
 
   NavigateToURL(url);
-  ASSERT_TRUE(WaitForProcessCountToBe(1, max_workers_per_tab));
+  ASSERT_TRUE(WaitForProcessCountToBeAtLeast(1, max_workers_per_tab));
 }
 
-// Doesn't crash, but on all platforms, it sometimes fails.
-// Flaky on all platforms: http://crbug.com/28445
-// Hangs on Linux: http://crbug.com/30332
-// Possibly causing ui_tests to hang on Mac: http://crbug.com/88958
-// Times out consistently on all platforms.
-TEST_F(WorkerTest, DISABLED_LimitTotal) {
+// http://crbug.com/36800
+#if defined(OS_WIN)
+#define MAYBE_LimitTotal DISABLED_LimitTotal
+#else
+#define MAYBE_LimitTotal LimitTotal
+#endif  // defined(OS_WIN)
+TEST_F(WorkerTest, MAYBE_LimitTotal) {
   int max_workers_per_tab = WorkerServiceImpl::kMaxWorkersPerTabWhenSeparate;
   int total_workers = WorkerServiceImpl::kMaxWorkersWhenSeparate;
 
+  // Adding 1 so that we cause some workers to be queued.
   int tab_count = (total_workers / max_workers_per_tab) + 1;
   GURL url = ui_test_utils::GetTestUrl(FilePath(kTestDir),
-                                       FilePath(kManyWorkersFile));
+                                       FilePath(kManySharedWorkersFile));
   url = GURL(url.spec() + StringPrintf("?count=%d", max_workers_per_tab));
 
   scoped_refptr<TabProxy> tab(GetActiveTab());
   ASSERT_TRUE(tab.get());
-  ASSERT_TRUE(tab->NavigateToURL(url));
+  ASSERT_TRUE(tab->NavigateToURL(
+      GURL(url.spec() + StringPrintf("&client_id=%d", 0))));
   scoped_refptr<BrowserProxy> window(automation()->GetBrowserWindow(0));
   ASSERT_TRUE(window.get());
-  for (int i = 1; i < tab_count; ++i)
-    ASSERT_TRUE(window->AppendTab(url));
+  for (int i = 1; i < tab_count; ++i) {
+    ASSERT_TRUE(window->AppendTab(GURL(
+        url.spec() + StringPrintf("&client_id=%d", i))));
+  }
 
   // Check that we didn't create more than the max number of workers.
-  ASSERT_TRUE(WaitForProcessCountToBe(tab_count, total_workers));
+  ASSERT_TRUE(WaitForProcessCountToBeAtLeast(tab_count, total_workers));
 
   // Now close a page and check that the queued workers were started.
   const FilePath::CharType* kGoogleDir = FILE_PATH_LITERAL("google");
@@ -629,11 +526,11 @@ TEST_F(WorkerTest, DISABLED_LimitTotal) {
       tab->NavigateToURL(ui_test_utils::GetTestUrl(FilePath(kGoogleDir),
                                                    FilePath(kGoogleFile))));
 
-  ASSERT_TRUE(WaitForProcessCountToBe(tab_count, total_workers));
+  ASSERT_TRUE(WaitForProcessCountToBeAtLeast(tab_count, total_workers));
 }
 
 // Flaky, http://crbug.com/59786.
-TEST_F(WorkerTest, FLAKY_WorkerClose) {
+TEST_F(WorkerTest, DISABLED_WorkerClose) {
   scoped_refptr<TabProxy> tab(GetActiveTab());
   ASSERT_TRUE(tab.get());
   GURL url = ui_test_utils::GetTestUrl(FilePath(kTestDir),
@@ -642,11 +539,11 @@ TEST_F(WorkerTest, FLAKY_WorkerClose) {
   std::string value = WaitUntilCookieNonEmpty(tab.get(), url,
       kTestCompleteCookie, TestTimeouts::action_max_timeout_ms());
   ASSERT_STREQ(kTestCompleteSuccess, value.c_str());
-  ASSERT_TRUE(WaitForProcessCountToBe(1, 0));
+  ASSERT_TRUE(WaitForProcessCountToBeAtLeast(1, 0));
 }
 
 // Flaky, http://crbug.com/70861.
-TEST_F(WorkerTest, FLAKY_QueuedSharedWorkerShutdown) {
+TEST_F(WorkerTest, DISABLED_QueuedSharedWorkerShutdown) {
   // Tests to make sure that queued shared workers are started up when
   // shared workers shut down.
   int max_workers_per_tab = WorkerServiceImpl::kMaxWorkersPerTabWhenSeparate;
@@ -660,11 +557,11 @@ TEST_F(WorkerTest, FLAKY_QueuedSharedWorkerShutdown) {
   std::string value = WaitUntilCookieNonEmpty(tab.get(), url,
       kTestCompleteCookie, TestTimeouts::action_max_timeout_ms());
   ASSERT_STREQ(kTestCompleteSuccess, value.c_str());
-  ASSERT_TRUE(WaitForProcessCountToBe(1, max_workers_per_tab));
+  ASSERT_TRUE(WaitForProcessCountToBeAtLeast(1, max_workers_per_tab));
 }
 
 // Flaky, http://crbug.com/69881.
-TEST_F(WorkerTest, FLAKY_MultipleTabsQueuedSharedWorker) {
+TEST_F(WorkerTest, DISABLED_MultipleTabsQueuedSharedWorker) {
   // Tests to make sure that only one instance of queued shared workers are
   // started up even when those instances are on multiple tabs.
   int max_workers_per_tab = WorkerServiceImpl::kMaxWorkersPerTabWhenSeparate;
@@ -675,14 +572,14 @@ TEST_F(WorkerTest, FLAKY_MultipleTabsQueuedSharedWorker) {
   scoped_refptr<TabProxy> tab(GetActiveTab());
   ASSERT_TRUE(tab.get());
   ASSERT_TRUE(tab->NavigateToURL(url));
-  ASSERT_TRUE(WaitForProcessCountToBe(1, max_workers_per_tab));
+  ASSERT_TRUE(WaitForProcessCountToBeAtLeast(1, max_workers_per_tab));
 
   // Create same set of workers in new tab (leaves one worker queued from this
   // tab).
   scoped_refptr<BrowserProxy> window(automation()->GetBrowserWindow(0));
   ASSERT_TRUE(window.get());
   ASSERT_TRUE(window->AppendTab(url));
-  ASSERT_TRUE(WaitForProcessCountToBe(2, max_workers_per_tab));
+  ASSERT_TRUE(WaitForProcessCountToBeAtLeast(2, max_workers_per_tab));
 
   // Now shutdown one of the shared workers - this will fire both queued
   // workers, but only one instance should be started
@@ -694,11 +591,11 @@ TEST_F(WorkerTest, FLAKY_MultipleTabsQueuedSharedWorker) {
   std::string value = WaitUntilCookieNonEmpty(tab.get(), url,
       kTestCompleteCookie, TestTimeouts::action_max_timeout_ms());
   ASSERT_STREQ(kTestCompleteSuccess, value.c_str());
-  ASSERT_TRUE(WaitForProcessCountToBe(3, max_workers_per_tab));
+  ASSERT_TRUE(WaitForProcessCountToBeAtLeast(3, max_workers_per_tab));
 }
 
 // Flaky: http://crbug.com/48148
-TEST_F(WorkerTest, FLAKY_QueuedSharedWorkerStartedFromOtherTab) {
+TEST_F(WorkerTest, DISABLED_QueuedSharedWorkerStartedFromOtherTab) {
   // Tests to make sure that queued shared workers are started up when
   // an instance is launched from another tab.
   int max_workers_per_tab = WorkerServiceImpl::kMaxWorkersPerTabWhenSeparate;
@@ -709,7 +606,7 @@ TEST_F(WorkerTest, FLAKY_QueuedSharedWorkerStartedFromOtherTab) {
   scoped_refptr<TabProxy> tab(GetActiveTab());
   ASSERT_TRUE(tab.get());
   ASSERT_TRUE(tab->NavigateToURL(url));
-  ASSERT_TRUE(WaitForProcessCountToBe(1, max_workers_per_tab));
+  ASSERT_TRUE(WaitForProcessCountToBeAtLeast(1, max_workers_per_tab));
   // First window has hit its limit. Now launch second window which creates
   // the same worker that was queued in the first window, to ensure it gets
   // connected to the first window too.
@@ -723,172 +620,5 @@ TEST_F(WorkerTest, FLAKY_QueuedSharedWorkerStartedFromOtherTab) {
   std::string value = WaitUntilCookieNonEmpty(tab.get(), url,
       kTestCompleteCookie, TestTimeouts::action_max_timeout_ms());
   ASSERT_STREQ(kTestCompleteSuccess, value.c_str());
-  ASSERT_TRUE(WaitForProcessCountToBe(2, max_workers_per_tab+1));
-}
-
-class WorkerFileSystemTest : public WorkerTest {
- protected:
-  void RunWorkerFileSystemLayoutTest(const std::string& test_case_file_name) {
-    FilePath worker_test_dir;
-    worker_test_dir = worker_test_dir.AppendASCII("fast");
-
-    FilePath filesystem_test_dir;
-    filesystem_test_dir = filesystem_test_dir.AppendASCII("filesystem");
-    filesystem_test_dir = filesystem_test_dir.AppendASCII("workers");
-    InitializeForLayoutTest(worker_test_dir, filesystem_test_dir, kNoHttpPort);
-
-    FilePath resource_dir;
-    resource_dir = resource_dir.AppendASCII("resources");
-    AddResourceForLayoutTest(worker_test_dir.AppendASCII("filesystem"),
-                             resource_dir);
-
-    // FS tests also rely on common files in js/resources.
-    FilePath js_dir = worker_test_dir.AppendASCII("js");
-    FilePath js_resource_dir;
-    js_resource_dir = js_resource_dir.AppendASCII("resources");
-    AddResourceForLayoutTest(js_dir, js_resource_dir);
-
-    RunLayoutTest(test_case_file_name, kNoHttpPort);
-
-    // Navigate to a blank page so that any workers are cleaned up.
-    // This helps leaks trackers do a better job of reporting.
-    scoped_refptr<TabProxy> tab(GetActiveTab());
-    ASSERT_TRUE(tab.get());
-    GURL about_url(chrome::kAboutBlankURL);
-    EXPECT_EQ(AUTOMATION_MSG_NAVIGATION_SUCCESS, tab->NavigateToURL(about_url));
-  }
-
-  void RunWorkerFileSystemLayoutHttpTests(const char* tests[], int num_tests) {
-    FilePath worker_test_dir = FilePath().AppendASCII("http")
-                                         .AppendASCII("tests");
-
-    FilePath filesystem_test_dir = FilePath().AppendASCII("filesystem")
-                                             .AppendASCII("workers");
-    InitializeForLayoutTest(worker_test_dir, filesystem_test_dir, kHttpPort);
-
-    AddResourceForLayoutTest(worker_test_dir.AppendASCII("filesystem"),
-                             FilePath().AppendASCII("resources"));
-
-    AddResourceForLayoutTest(worker_test_dir.AppendASCII("filesystem"),
-                             FilePath().AppendASCII("script-tests"));
-
-    AddResourceForLayoutTest(worker_test_dir.AppendASCII("filesystem"),
-                             FilePath().AppendASCII("workers")
-                                       .AppendASCII("script-tests"));
-
-    LayoutTestHttpServer http_server(new_http_root_dir_, 8000);
-    ASSERT_TRUE(http_server.Start());
-    for (int i = 0; i < num_tests; ++i)
-      RunLayoutTest(tests[i], 8000);
-    ASSERT_TRUE(http_server.Stop());
-
-    // Navigate to a blank page so that any workers are cleaned up.
-    // This helps leaks trackers do a better job of reporting.
-    scoped_refptr<TabProxy> tab(GetActiveTab());
-    ASSERT_TRUE(tab.get());
-    GURL about_url(chrome::kAboutBlankURL);
-    EXPECT_EQ(AUTOMATION_MSG_NAVIGATION_SUCCESS, tab->NavigateToURL(about_url));
-  }
-};
-
-// http://crbug.com/101996 (started flaking with WebKit roll 98537:98582).
-TEST_F(WorkerFileSystemTest, FLAKY_Temporary) {
-  RunWorkerFileSystemLayoutTest("simple-temporary.html");
-}
-
-// http://crbug.com/101996 (started flaking with WebKit roll 98537:98582).
-TEST_F(WorkerFileSystemTest, FLAKY_Persistent) {
-  RunWorkerFileSystemLayoutTest("simple-persistent.html");
-}
-
-#if defined(OS_LINUX)
-// http://crbug.com/101996 (started flaking with WebKit roll 98537:98582).
-#define SyncTemporary FLAKY_SyncTemporary
-#endif
-TEST_F(WorkerFileSystemTest, SyncTemporary) {
-  RunWorkerFileSystemLayoutTest("simple-temporary-sync.html");
-}
-
-// TODO(dpranke): This started failing in the webkit roll 84046:84325.
-// The upstream expectation needs to be updated.
-TEST_F(WorkerFileSystemTest, FAILS_SyncPersistent) {
-  RunWorkerFileSystemLayoutTest("simple-persistent-sync.html");
-}
-
-// http://crbug.com/101996 (started flaking with WebKit roll 98537:98582).
-TEST_F(WorkerFileSystemTest, FLAKY_AsyncOperations) {
-  RunWorkerFileSystemLayoutTest("async-operations.html");
-}
-
-#if defined(OS_LINUX) || defined(OS_MACOSX)
-// http://crbug.com/101996 (started flaking with WebKit roll 98537:98582).
-#define SyncOperations FLAKY_SyncOperations
-#endif
-TEST_F(WorkerFileSystemTest, SyncOperations) {
-  RunWorkerFileSystemLayoutTest("sync-operations.html");
-}
-
-// http://crbug.com/101996 (started flaking with WebKit roll 98537:98582).
-TEST_F(WorkerFileSystemTest, FLAKY_FileEntryToURISync) {
-  RunWorkerFileSystemLayoutTest("file-entry-to-uri-sync.html");
-}
-
-// http://crbug.com/77442
-TEST_F(WorkerFileSystemTest, FLAKY_ResolveURLHttpTests) {
-  static const char* kLayoutTests[] = {
-    "resolve-url.html",
-    "resolve-url-sync.html"
-  };
-  RunWorkerFileSystemLayoutHttpTests(kLayoutTests, arraysize(kLayoutTests));
-}
-
-#if defined(OS_LINUX)
-// Fails on Linux due to an assert in WebKit's RNG.
-// See http://webkit.org/b/55728.
-#define FileFromFileEntry DISABLED_FileFromFileEntry
-#else
-// http://crbug.com/101996
-#define FileFromFileEntry FLAKY_FileFromFileEntry
-#endif
-TEST_F(WorkerFileSystemTest, FileFromFileEntry) {
-  RunWorkerFileSystemLayoutTest("file-from-file-entry.html");
-}
-
-#if defined(OS_LINUX)
-// Fails on Linux due to an assert in WebKit's RNG.
-// See http://webkit.org/b/55728.
-#define FileFromFileEntrySync DISABLED_FileFromFileEntrySync
-#else
-// http://crbug.com/101996 (started flaking with WebKit roll 98537:98582).
-#define FileFromFileEntrySync FLAKY_FileFromFileEntrySync
-#endif
-TEST_F(WorkerFileSystemTest, FileFromFileEntrySync) {
-  RunWorkerFileSystemLayoutTest("file-from-file-entry-sync.html");
-}
-
-#if defined(OS_LINUX)
-// Fails on Linux due to an assert in WebKit's RNG.
-// See http://webkit.org/b/55728.
-#define FileWriterTruncateExtend DISABLED_FileWriterTruncateExtend
-#endif
-TEST_F(WorkerFileSystemTest, FileWriterTruncateExtend) {
-  RunWorkerFileSystemLayoutTest("file-writer-truncate-extend.html");
-}
-
-#if defined(OS_LINUX)
-// Fails on Linux due to an assert in WebKit's RNG.
-// See http://webkit.org/b/55728.
-#define FileWriterSyncTruncateExtend DISABLED_FileWriterSyncTruncateExtend
-#endif
-TEST_F(WorkerFileSystemTest, FileWriterSyncTruncateExtend) {
-  RunWorkerFileSystemLayoutTest("file-writer-sync-truncate-extend.html");
-}
-
-#if defined(OS_LINUX)
-// Fails on Linux due to an assert in WebKit's RNG.
-// See http://webkit.org/b/55728.
-#define FileWriterSyncWriteOverlapped DISABLED_FileWriterSyncWriteOverlapped
-#endif
-TEST_F(WorkerFileSystemTest, FileWriterSyncWriteOverlapped) {
-  RunWorkerFileSystemLayoutTest("file-writer-sync-write-overlapped.html");
+  ASSERT_TRUE(WaitForProcessCountToBeAtLeast(2, max_workers_per_tab+1));
 }

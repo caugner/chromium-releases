@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,10 +17,41 @@ class MockBluetoothAdapterClient : public BluetoothAdapterClient {
   MockBluetoothAdapterClient();
   virtual ~MockBluetoothAdapterClient();
 
-  MOCK_METHOD2(AddObserver, void(Observer*, const std::string&));
-  MOCK_METHOD2(RemoveObserver, void(Observer*, const std::string&));
-  MOCK_METHOD1(StartDiscovery, void(const std::string&));
-  MOCK_METHOD1(StopDiscovery, void(const std::string&));
+  MOCK_METHOD1(AddObserver, void(Observer*));
+  MOCK_METHOD1(RemoveObserver, void(Observer*));
+  MOCK_METHOD1(GetProperties, Properties*(const dbus::ObjectPath&));
+  MOCK_METHOD2(RequestSession, void(const dbus::ObjectPath&,
+                                    const AdapterCallback&));
+  MOCK_METHOD2(ReleaseSession, void(const dbus::ObjectPath&,
+                                    const AdapterCallback&));
+  MOCK_METHOD2(StartDiscovery, void(const dbus::ObjectPath&,
+                                    const AdapterCallback&));
+  MOCK_METHOD2(StopDiscovery, void(const dbus::ObjectPath&,
+                                    const AdapterCallback&));
+  MOCK_METHOD3(FindDevice, void(const dbus::ObjectPath&,
+                                const std::string&,
+                                const DeviceCallback&));
+  MOCK_METHOD3(CreateDevice, void(const dbus::ObjectPath&,
+                                  const std::string&,
+                                  const DeviceCallback&));
+  MOCK_METHOD5(CreatePairedDevice, void(const dbus::ObjectPath&,
+                                        const std::string&,
+                                        const dbus::ObjectPath&,
+                                        const std::string&,
+                                        const DeviceCallback&));
+  MOCK_METHOD3(CancelDeviceCreation, void(const dbus::ObjectPath&,
+                                          const std::string&,
+                                          const AdapterCallback&));
+  MOCK_METHOD3(RemoveDevice, void(const dbus::ObjectPath&,
+                                  const dbus::ObjectPath&,
+                                  const AdapterCallback&));
+  MOCK_METHOD4(RegisterAgent, void(const dbus::ObjectPath&,
+                                   const dbus::ObjectPath&,
+                                   const std::string&,
+                                   const AdapterCallback&));
+  MOCK_METHOD3(UnregisterAgent, void(const dbus::ObjectPath&,
+                                     const dbus::ObjectPath&,
+                                     const AdapterCallback&));
 };
 
 }  // namespace chromeos

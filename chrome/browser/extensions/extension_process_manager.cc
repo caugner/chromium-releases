@@ -4,38 +4,68 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "chrome/browser/extensions/extension_process_manager.h"
-
+#include "base/lazy_instance.h"
 #include "chrome/browser/extensions/extension_event_router.h"
-#include "chrome/browser/ui/browser_window.h"
-#if defined(OS_MACOSX)
-#include "chrome/browser/extensions/extension_host_mac.h"
-#endif
+#include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_info_map.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_window.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_view_type.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/renderer_host/render_view_host.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_view_host_delegate.h"
 #include "content/public/browser/site_instance.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/renderer_preferences.h"
 
+#if defined(OS_MACOSX)
+#include "chrome/browser/extensions/extension_host_mac.h"
+#endif
+
 using content::BrowserThread;
 using content::OpenURLParams;
 using content::Referrer;
+using content::RenderViewHost;
 using content::SiteInstance;
 
 namespace {
+
+// Accessors for an extension's lazy_keepalive_count - one for each virtual
+// profile.
+static base::LazyInstance<base::PropertyAccessor<int> >
+    g_property_accessor = LAZY_INSTANCE_INITIALIZER;
+static base::LazyInstance<base::PropertyAccessor<int> >
+    g_property_accessor_incognito = LAZY_INSTANCE_INITIALIZER;
+
+int& GetLazyKeepaliveCount(Profile* profile, const Extension* extension) {
+  base::PropertyBag* bag =
+      profile->GetExtensionService()->GetPropertyBag(extension);
+
+  base::LazyInstance<base::PropertyAccessor<int> >& accessor =
+      profile->IsOffTheRecord() ?
+          g_property_accessor_incognito : g_property_accessor;
+  int* count = accessor.Get().GetProperty(bag);
+  if (!count) {
+    accessor.Get().SetProperty(bag, 0);
+    count = accessor.Get().GetProperty(bag);
+  }
+  return *count;
+}
+
+std::string GetExtensionID(RenderViewHost* render_view_host) {
+  // This works for both apps and extensions because the site has been
+  // normalized to the extension URL for apps.
+  return render_view_host->GetSiteInstance()->GetSite().host();
+}
 
 // Incognito profiles use this process manager. It is mostly a shim that decides
 // whether to fall back on the original profile's ExtensionProcessManager based
@@ -67,8 +97,7 @@ class IncognitoExtensionProcessManager : public ExtensionProcessManager {
 
 static void CreateBackgroundHostForExtensionLoad(
     ExtensionProcessManager* manager, const Extension* extension) {
-  if (extension->has_background_page() &&
-      extension->background_page_persists()) {
+  if (extension->has_persistent_background_page()) {
     manager->CreateBackgroundHost(extension, extension->GetBackgroundURL());
   }
 }
@@ -107,8 +136,14 @@ ExtensionProcessManager::ExtensionProcessManager(Profile* profile)
                  content::Source<Profile>(profile));
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_HOST_VIEW_SHOULD_CLOSE,
                  content::Source<Profile>(profile));
+  registrar_.Add(this, content::NOTIFICATION_WEB_CONTENTS_CONNECTED,
+                 content::NotificationService::AllSources());
   registrar_.Add(this, content::NOTIFICATION_APP_TERMINATING,
                  content::NotificationService::AllSources());
+  registrar_.Add(this, content::NOTIFICATION_DEVTOOLS_WINDOW_OPENING,
+                 content::Source<content::BrowserContext>(profile));
+  registrar_.Add(this, content::NOTIFICATION_DEVTOOLS_WINDOW_CLOSING,
+                 content::Source<content::BrowserContext>(profile));
 }
 
 ExtensionProcessManager::~ExtensionProcessManager() {
@@ -132,15 +167,32 @@ ExtensionHost* ExtensionProcessManager::CreateShellHost(
   return host;
 }
 
+void ExtensionProcessManager::EnsureBrowserWhenRequired(
+    Browser* browser,
+    content::ViewType view_type) {
+  if (!browser) {
+#if defined (OS_CHROMEOS)
+  // On ChromeOS we'll only use ExtensionView, which
+  // does not use the browser parameter.
+  // TODO(rkc): Remove all this once we create a new host for
+  // screensaver extensions (crosbug.com/28211).
+  DCHECK(view_type == chrome::VIEW_TYPE_EXTENSION_POPUP ||
+         view_type == chrome::VIEW_TYPE_EXTENSION_DIALOG);
+#else
+  // A NULL browser may only be given for pop-up views.
+  DCHECK(view_type == chrome::VIEW_TYPE_EXTENSION_POPUP);
+#endif
+  }
+}
+
+
 ExtensionHost* ExtensionProcessManager::CreateViewHost(
     const Extension* extension,
     const GURL& url,
     Browser* browser,
     content::ViewType view_type) {
   DCHECK(extension);
-  // A NULL browser may only be given for pop-up views.
-  DCHECK(browser ||
-         (!browser && view_type == chrome::VIEW_TYPE_EXTENSION_POPUP));
+  EnsureBrowserWhenRequired(browser, view_type);
   ExtensionHost* host =
 #if defined(OS_MACOSX)
       new ExtensionHostMac(extension, GetSiteInstanceForURL(url), url,
@@ -155,9 +207,7 @@ ExtensionHost* ExtensionProcessManager::CreateViewHost(
 
 ExtensionHost* ExtensionProcessManager::CreateViewHost(
     const GURL& url, Browser* browser, content::ViewType view_type) {
-  // A NULL browser may only be given for pop-up views.
-  DCHECK(browser ||
-         (!browser && view_type == chrome::VIEW_TYPE_EXTENSION_POPUP));
+  EnsureBrowserWhenRequired(browser, view_type);
   ExtensionService* service = GetProfile()->GetExtensionService();
   if (service) {
     const Extension* extension =
@@ -234,7 +284,7 @@ void ExtensionProcessManager::OpenOptionsPage(const Extension* extension,
                        content::PAGE_TRANSITION_LINK, false);
   browser->OpenURL(params);
   browser->window()->Show();
-  browser->GetSelectedWebContents()->GetRenderViewHost()->delegate()->
+  browser->GetSelectedWebContents()->GetRenderViewHost()->GetDelegate()->
       Activate();
 }
 
@@ -247,7 +297,6 @@ ExtensionHost* ExtensionProcessManager::GetBackgroundHostForExtension(
       return host;
   }
   return NULL;
-
 }
 
 std::set<RenderViewHost*>
@@ -261,10 +310,10 @@ std::set<RenderViewHost*>
     return result;
 
   // Gather up all the views for that site.
-  for (RenderViewHostSet::iterator view = all_extension_views_.begin();
+  for (ExtensionRenderViews::iterator view = all_extension_views_.begin();
        view != all_extension_views_.end(); ++view) {
-    if ((*view)->site_instance() == site_instance)
-      result.insert(*view);
+    if (view->first->GetSiteInstance() == site_instance)
+      result.insert(view->first);
   }
 
   return result;
@@ -273,16 +322,53 @@ std::set<RenderViewHost*>
 void ExtensionProcessManager::RegisterRenderViewHost(
     RenderViewHost* render_view_host,
     const Extension* extension) {
-  all_extension_views_.insert(render_view_host);
+  all_extension_views_[render_view_host] = content::VIEW_TYPE_INVALID;
 }
 
 void ExtensionProcessManager::UnregisterRenderViewHost(
     RenderViewHost* render_view_host) {
-  all_extension_views_.erase(render_view_host);
+  ExtensionRenderViews::iterator view =
+      all_extension_views_.find(render_view_host);
+  if (view == all_extension_views_.end())
+    return;
+
+  content::ViewType view_type = view->second;
+  all_extension_views_.erase(view);
+
+  // Keepalive count, balanced in UpdateRegisteredRenderView.
+  if (view_type != content::VIEW_TYPE_INVALID &&
+      view_type != chrome::VIEW_TYPE_EXTENSION_BACKGROUND_PAGE) {
+    const Extension* extension =
+        GetProfile()->GetExtensionService()->extensions()->GetByID(
+            GetExtensionID(render_view_host));
+    if (extension)
+      DecrementLazyKeepaliveCount(extension);
+  }
 }
 
-SiteInstance* ExtensionProcessManager::GetSiteInstanceForURL(
-    const GURL& url) {
+void ExtensionProcessManager::UpdateRegisteredRenderView(
+    RenderViewHost* render_view_host) {
+  ExtensionRenderViews::iterator view =
+      all_extension_views_.find(render_view_host);
+  if (view == all_extension_views_.end())
+    return;
+
+  view->second = render_view_host->GetDelegate()->GetRenderViewType();
+
+  // Keep the lazy background page alive as long as any non-background-page
+  // extension views are visible. Keepalive count balanced in
+  // UnregisterRenderViewHost.
+  if (view->second != content::VIEW_TYPE_INVALID &&
+      view->second != chrome::VIEW_TYPE_EXTENSION_BACKGROUND_PAGE) {
+    const Extension* extension =
+        GetProfile()->GetExtensionService()->extensions()->GetByID(
+            GetExtensionID(render_view_host));
+    if (extension)
+      IncrementLazyKeepaliveCount(extension);
+  }
+}
+
+SiteInstance* ExtensionProcessManager::GetSiteInstanceForURL(const GURL& url) {
   return site_instance_->GetRelatedSiteInstance(url);
 }
 
@@ -290,28 +376,73 @@ bool ExtensionProcessManager::HasExtensionHost(ExtensionHost* host) const {
   return all_hosts_.find(host) != all_hosts_.end();
 }
 
-void ExtensionProcessManager::OnExtensionIdle(const std::string& extension_id) {
-  ExtensionHost* host = GetBackgroundHostForExtension(extension_id);
-  if (host && !HasVisibleViews(extension_id)) {
-    Profile* profile = GetProfile();
-    if (!profile->GetExtensionEventRouter()->HasInFlightEvents(extension_id))
-      CloseBackgroundHost(host);
-  }
+int ExtensionProcessManager::GetLazyKeepaliveCount(const Extension* extension) {
+  if (!extension->has_lazy_background_page())
+    return 0;
+
+  return ::GetLazyKeepaliveCount(GetProfile(), extension);
 }
 
-bool ExtensionProcessManager::HasVisibleViews(const std::string& extension_id) {
-  const std::set<RenderViewHost*>& views =
-      GetRenderViewHostsForExtension(extension_id);
-  for (std::set<RenderViewHost*>::const_iterator it = views.begin();
-       it != views.end(); ++it) {
-    const RenderViewHost* host = *it;
-    if (host->site_instance()->GetSite().host() == extension_id &&
-        host->delegate()->GetRenderViewType() !=
-        chrome::VIEW_TYPE_EXTENSION_BACKGROUND_PAGE) {
-      return true;
-    }
-  }
-  return false;
+int ExtensionProcessManager::IncrementLazyKeepaliveCount(
+     const Extension* extension) {
+  if (!extension->has_lazy_background_page())
+    return 0;
+
+  int& count = ::GetLazyKeepaliveCount(GetProfile(), extension);
+  if (++count == 1)
+    OnLazyBackgroundPageActive(extension->id());
+
+  return count;
+}
+
+int ExtensionProcessManager::DecrementLazyKeepaliveCount(
+     const Extension* extension) {
+  if (!extension->has_lazy_background_page())
+    return 0;
+
+  int& count = ::GetLazyKeepaliveCount(GetProfile(), extension);
+  DCHECK_GT(count, 0);
+  if (--count == 0)
+    OnLazyBackgroundPageIdle(extension->id());
+
+  return count;
+}
+
+void ExtensionProcessManager::OnLazyBackgroundPageIdle(
+    const std::string& extension_id) {
+  ExtensionHost* host = GetBackgroundHostForExtension(extension_id);
+  if (host)
+    host->SendShouldClose();
+}
+
+void ExtensionProcessManager::OnLazyBackgroundPageActive(
+    const std::string& extension_id) {
+  ExtensionHost* host = GetBackgroundHostForExtension(extension_id);
+  if (host)
+    host->CancelShouldClose();
+}
+
+void ExtensionProcessManager::OnShouldCloseAck(
+     const std::string& extension_id, int sequence_id) {
+  ExtensionHost* host = GetBackgroundHostForExtension(extension_id);
+  if (host)
+    host->OnShouldCloseAck(sequence_id);
+}
+
+void ExtensionProcessManager::OnNetworkRequestStarted(
+    RenderViewHost* render_view_host) {
+  ExtensionHost* host = GetBackgroundHostForExtension(
+      GetExtensionID(render_view_host));
+  if (host)
+    IncrementLazyKeepaliveCount(host->extension());
+}
+
+void ExtensionProcessManager::OnNetworkRequestDone(
+    RenderViewHost* render_view_host) {
+  ExtensionHost* host = GetBackgroundHostForExtension(
+      GetExtensionID(render_view_host));
+  if (host)
+    DecrementLazyKeepaliveCount(host->extension());
 }
 
 void ExtensionProcessManager::Observe(
@@ -367,11 +498,49 @@ void ExtensionProcessManager::Observe(
       break;
     }
 
+    case content::NOTIFICATION_WEB_CONTENTS_CONNECTED: {
+      content::WebContents* contents =
+          content::Source<content::WebContents>(source).ptr();
+      UpdateRegisteredRenderView(contents->GetRenderViewHost());
+      break;
+    }
+
     case content::NOTIFICATION_APP_TERMINATING: {
       // Close background hosts when the last browser is closed so that they
       // have time to shutdown various objects on different threads. Our
       // destructor is called too late in the shutdown sequence.
       CloseBackgroundHosts();
+      break;
+    }
+
+    case content::NOTIFICATION_DEVTOOLS_WINDOW_OPENING: {
+      RenderViewHost* render_view_host =
+          content::Details<RenderViewHost>(details).ptr();
+      // Keep the lazy background page alive while it's being inspected.
+      // Balanced in response to the CLOSING notification.
+      if (render_view_host->GetDelegate()->GetRenderViewType() ==
+              chrome::VIEW_TYPE_EXTENSION_BACKGROUND_PAGE) {
+        const Extension* extension =
+            GetProfile()->GetExtensionService()->extensions()->GetByID(
+                GetExtensionID(render_view_host));
+        if (extension)
+          IncrementLazyKeepaliveCount(extension);
+      }
+      break;
+    }
+
+    case content::NOTIFICATION_DEVTOOLS_WINDOW_CLOSING: {
+      RenderViewHost* render_view_host =
+          content::Details<RenderViewHost>(details).ptr();
+      // Balanced in response to the OPENING notification.
+      if (render_view_host->GetDelegate()->GetRenderViewType() ==
+              chrome::VIEW_TYPE_EXTENSION_BACKGROUND_PAGE) {
+        const Extension* extension =
+            GetProfile()->GetExtensionService()->extensions()->GetByID(
+                GetExtensionID(render_view_host));
+        if (extension)
+          DecrementLazyKeepaliveCount(extension);
+      }
       break;
     }
 

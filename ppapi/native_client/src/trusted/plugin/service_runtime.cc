@@ -9,15 +9,15 @@
 #include "native_client/src/trusted/plugin/service_runtime.h"
 
 #include <string.h>
-#include <map>
 #include <set>
 #include <string>
 #include <utility>
-#include <vector>
 
 #include "base/compiler_specific.h"
 
+#include "native_client/src/include/checked_cast.h"
 #include "native_client/src/include/portability_io.h"
+#include "native_client/src/include/portability_string.h"
 #include "native_client/src/include/nacl_macros.h"
 #include "native_client/src/include/nacl_scoped_ptr.h"
 #include "native_client/src/include/nacl_string.h"
@@ -29,16 +29,12 @@
 #include "native_client/src/shared/platform/nacl_sync_raii.h"
 #include "native_client/src/shared/platform/scoped_ptr_refcount.h"
 #include "native_client/src/trusted/desc/nacl_desc_imc.h"
+// remove when we no longer need to cast the DescWrapper below.
+#include "native_client/src/trusted/desc/nacl_desc_io.h"
 #include "native_client/src/trusted/desc/nrd_xfer.h"
 #include "native_client/src/trusted/desc/nrd_xfer_effector.h"
 #include "native_client/src/trusted/handle_pass/browser_handle.h"
 #include "native_client/src/trusted/nonnacl_util/sel_ldr_launcher.h"
-
-// browser_interface includes portability.h for uintptr_t etc, but it
-// also transitively includes windows.h, where PostMessage gets
-// defined as a preprocessor symbol
-#include "native_client/src/trusted/plugin/browser_interface.h"
-
 #include "native_client/src/trusted/plugin/manifest.h"
 
 // This is here due to a Windows API collision; plugin.h through
@@ -49,7 +45,7 @@
 #endif
 #include "native_client/src/trusted/plugin/plugin.h"
 #include "native_client/src/trusted/plugin/plugin_error.h"
-#include "native_client/src/trusted/plugin/scriptable_handle.h"
+#include "native_client/src/trusted/plugin/pnacl_coordinator.h"
 #include "native_client/src/trusted/plugin/srpc_client.h"
 #include "native_client/src/trusted/plugin/utility.h"
 
@@ -59,10 +55,10 @@
 #include "native_client/src/trusted/service_runtime/include/sys/nacl_imc_api.h"
 
 #include "ppapi/c/pp_errors.h"
+#include "ppapi/c/trusted/ppb_file_io_trusted.h"
 #include "ppapi/cpp/core.h"
 #include "ppapi/cpp/completion_callback.h"
-
-using std::vector;
+#include "ppapi/cpp/file_io.h"
 
 namespace plugin {
 
@@ -143,8 +139,7 @@ void PluginReverseInterface::Log_MainThreadContinuation(
   NaClLog(4,
           "PluginReverseInterface::Log_MainThreadContinuation(%s)\n",
           p->message.c_str());
-  plugin_->browser_interface()->AddToConsole(static_cast<Plugin*>(plugin_),
-                                             p->message);
+  plugin_->AddToConsole(p->message);
 }
 void PluginReverseInterface::PostMessage_MainThreadContinuation(
     PostMessageResource* p,
@@ -173,11 +168,10 @@ bool PluginReverseInterface::EnumerateManifestKeys(
 bool PluginReverseInterface::OpenManifestEntry(nacl::string url_key,
                                                int32_t* out_desc) {
   ErrorInfo error_info;
-  bool is_portable = false;
   bool op_complete = false;  // NB: mu_ and cv_ also controls access to this!
   OpenManifestEntryResource* to_open =
       new OpenManifestEntryResource(url_key, out_desc,
-                                    &error_info, &is_portable, &op_complete);
+                                    &error_info, &op_complete);
   CHECK(to_open != NULL);
   NaClLog(4, "PluginReverseInterface::OpenManifestEntry: %s\n",
           url_key.c_str());
@@ -253,9 +247,9 @@ void PluginReverseInterface::OpenManifestEntry_MainThreadContinuation(
   NaClLog(4, "Entered OpenManifestEntry_MainThreadContinuation\n");
 
   std::string mapped_url;
-  bool permit_extension_url = false;
-  if (!manifest_->ResolveKey(p->url, &mapped_url, &permit_extension_url,
-                             p->error_info, p->is_portable)) {
+  std::string cache_identity;
+  if (!manifest_->ResolveKey(p->url, &mapped_url, &cache_identity,
+                             p->error_info, &p->pnacl_translate)) {
     NaClLog(4, "OpenManifestEntry_MainThreadContinuation: ResolveKey failed\n");
     // Failed, and error_info has the details on what happened.  Wake
     // up requesting thread -- we are done.
@@ -266,32 +260,51 @@ void PluginReverseInterface::OpenManifestEntry_MainThreadContinuation(
     return;
   }
   NaClLog(4,
-          "OpenManifestEntry_MainThreadContinuation: ResolveKey: %s -> %s\n",
-          p->url.c_str(), mapped_url.c_str());
+          "OpenManifestEntry_MainThreadContinuation: "
+          "ResolveKey: %s -> %s (pnacl_translate(%d))\n",
+          p->url.c_str(), mapped_url.c_str(), p->pnacl_translate);
 
   open_cont = new OpenManifestEntryResource(*p);  // copy ctor!
   CHECK(open_cont != NULL);
   open_cont->url = mapped_url;
-  pp::CompletionCallback stream_cc = WeakRefNewCallback(
-      anchor_,
-      this,
-      &PluginReverseInterface::StreamAsFile_MainThreadContinuation,
-      open_cont);
-  if (!plugin_->StreamAsFile(mapped_url,
-                             permit_extension_url,
-                             stream_cc.pp_completion_callback())) {
+  if (!open_cont->pnacl_translate) {
+    pp::CompletionCallback stream_cc = WeakRefNewCallback(
+        anchor_,
+        this,
+        &PluginReverseInterface::StreamAsFile_MainThreadContinuation,
+        open_cont);
+    if (!plugin_->StreamAsFile(mapped_url,
+                               stream_cc.pp_completion_callback())) {
+      NaClLog(4,
+              "OpenManifestEntry_MainThreadContinuation: "
+              "StreamAsFile failed\n");
+      nacl::MutexLocker take(&mu_);
+      *p->op_complete_ptr = true;  // done...
+      *p->out_desc = -1;       // but failed.
+      p->error_info->SetReport(ERROR_MANIFEST_OPEN,
+                               "ServiceRuntime: StreamAsFile failed");
+      NaClXCondVarBroadcast(&cv_);
+      return;
+    }
     NaClLog(4,
-            "OpenManifestEntry_MainThreadContinuation: StreamAsFile failed\n");
-    nacl::MutexLocker take(&mu_);
-    *p->op_complete_ptr = true;  // done...
-    *p->out_desc = -1;       // but failed.
-    p->error_info->SetReport(ERROR_MANIFEST_OPEN,
-                             "ServiceRuntime: StreamAsFile failed");
-    NaClXCondVarBroadcast(&cv_);
-    return;
+            "OpenManifestEntry_MainThreadContinuation: StreamAsFile okay\n");
+  } else {
+    NaClLog(4,
+            "OpenManifestEntry_MainThreadContinuation: "
+            "pulling down and translating.\n");
+    pp::CompletionCallback translate_callback =
+        WeakRefNewCallback(
+            anchor_,
+            this,
+            &PluginReverseInterface::BitcodeTranslate_MainThreadContinuation,
+            open_cont);
+    // Will always call the callback on success or failure.
+    pnacl_coordinator_.reset(
+        PnaclCoordinator::BitcodeToNative(plugin_,
+                                          mapped_url,
+                                          cache_identity,
+                                          translate_callback));
   }
-  NaClLog(4,
-          "OpenManifestEntry_MainThreadContinuation: StreamAsFile okay\n");
   // p is deleted automatically
 }
 
@@ -320,8 +333,40 @@ void PluginReverseInterface::StreamAsFile_MainThreadContinuation(
   NaClXCondVarBroadcast(&cv_);
 }
 
+
+void PluginReverseInterface::BitcodeTranslate_MainThreadContinuation(
+    OpenManifestEntryResource* p,
+    int32_t result) {
+  NaClLog(4,
+          "Entered BitcodeTranslate_MainThreadContinuation\n");
+
+  nacl::MutexLocker take(&mu_);
+  if (result == PP_OK) {
+    // TODO(jvoung): clean this up. We are assuming that the NaClDesc is
+    // a host IO desc and doing a downcast. Once the ReverseInterface
+    // accepts NaClDescs we can avoid this downcast.
+    NaClDesc* desc = pnacl_coordinator_->ReleaseTranslatedFD()->desc();
+    struct NaClDescIoDesc* ndiodp = (struct NaClDescIoDesc*)desc;
+    *p->out_desc = ndiodp->hd->d;
+    pnacl_coordinator_.reset(NULL);
+    NaClLog(4,
+            "BitcodeTranslate_MainThreadContinuation: PP_OK, desc %d\n",
+            *p->out_desc);
+  } else {
+    NaClLog(4,
+            "BitcodeTranslate_MainThreadContinuation: !PP_OK, "
+            "setting desc -1\n");
+    *p->out_desc = -1;
+    // Error should have been reported by pnacl coordinator.
+    PLUGIN_PRINTF(("PluginReverseInterface::BitcodeTranslate error.\n"));
+  }
+  *p->op_complete_ptr = true;
+  NaClXCondVarBroadcast(&cv_);
+}
+
+
 bool PluginReverseInterface::CloseManifestEntry(int32_t desc) {
-  bool op_complete;
+  bool op_complete = false;
   bool op_result;
   CloseManifestEntryResource* to_close =
       new CloseManifestEntryResource(desc, &op_complete, &op_result);
@@ -382,6 +427,111 @@ void PluginReverseInterface::ReportExitStatus(int exit_status) {
   service_runtime_->set_exit_status(exit_status);
 }
 
+void PluginReverseInterface::QuotaRequest_MainThreadContinuation(
+    QuotaRequest* request,
+    int32_t err) {
+  if (err != PP_OK) {
+    return;
+  }
+  const PPB_FileIOTrusted* file_io_trusted =
+      static_cast<const PPB_FileIOTrusted*>(
+          pp::Module::Get()->GetBrowserInterface(PPB_FILEIOTRUSTED_INTERFACE));
+  // Copy the request object because this one will be deleted on return.
+  QuotaRequest* cont_for_response = new QuotaRequest(*request);  // copy ctor!
+  pp::CompletionCallback quota_cc = WeakRefNewCallback(
+      anchor_,
+      this,
+      &PluginReverseInterface::QuotaRequest_MainThreadResponse,
+      cont_for_response);
+  file_io_trusted->WillWrite(request->resource,
+                             request->offset,
+                             // TODO(sehr): remove need for cast.
+                             // Unify WillWrite interface vs Quota request.
+                             nacl::assert_cast<int32_t>(
+                                 request->bytes_requested),
+                             quota_cc.pp_completion_callback());
+  // request automatically deleted
+}
+
+void PluginReverseInterface::QuotaRequest_MainThreadResponse(
+    QuotaRequest* request,
+    int32_t err) {
+  NaClLog(4,
+          "PluginReverseInterface::QuotaRequest_MainThreadResponse:"
+          " (resource=%"NACL_PRIx32", offset=%"NACL_PRId64", requested=%"
+          NACL_PRId64", err=%"NACL_PRId32")\n",
+          request->resource, request->offset, request->bytes_requested, err);
+  nacl::MutexLocker take(&mu_);
+  if (err >= PP_OK) {
+    *request->bytes_granted = err;
+  } else {
+    *request->bytes_granted = 0;
+  }
+  *request->op_complete_ptr = true;
+  NaClXCondVarBroadcast(&cv_);
+  // request automatically deleted
+}
+
+int64_t PluginReverseInterface::RequestQuotaForWrite(
+    nacl::string file_id, int64_t offset, int64_t bytes_to_write) {
+  NaClLog(4,
+          "PluginReverseInterface::RequestQuotaForWrite:"
+          " (file_id='%s', offset=%"NACL_PRId64", bytes_to_write=%"
+          NACL_PRId64")\n", file_id.c_str(), offset, bytes_to_write);
+  PP_Resource resource;
+  {
+    nacl::MutexLocker take(&mu_);
+    uint64_t file_key = STRTOULL(file_id.c_str(), NULL, 10);
+    if (quota_map_.find(file_key) == quota_map_.end()) {
+      // Look up failed to find the requested quota managed resource.
+      NaClLog(4, "PluginReverseInterface::RequestQuotaForWrite: failed...\n");
+      return 0;
+    }
+    resource = quota_map_[file_key];
+  }
+  // Variables set by requesting quota.
+  int64_t quota_granted = 0;
+  bool op_complete = false;
+  QuotaRequest* continuation =
+      new QuotaRequest(resource, offset, bytes_to_write, &quota_granted,
+                       &op_complete);
+  // The reverse service is running on a background thread and the PPAPI quota
+  // methods must be invoked only from the main thread.
+  plugin::WeakRefCallOnMainThread(
+      anchor_,
+      0,  /* delay in ms */
+      ALLOW_THIS_IN_INITIALIZER_LIST(this),
+      &plugin::PluginReverseInterface::QuotaRequest_MainThreadContinuation,
+      continuation);
+  // Wait for the main thread to request quota and signal completion.
+  // It is also possible that the main thread will signal shut down.
+  bool shutting_down;
+  do {
+    nacl::MutexLocker take(&mu_);
+    for (;;) {
+      shutting_down = shutting_down_;
+      if (op_complete || shutting_down) {
+        break;
+      }
+      NaClXCondVarWait(&cv_, &mu_);
+    }
+  } while (0);
+  if (shutting_down) return 0;
+  return quota_granted;
+}
+
+void PluginReverseInterface::AddQuotaManagedFile(const nacl::string& file_id,
+                                                 const pp::FileIO& file_io) {
+  PP_Resource resource = file_io.pp_resource();
+  NaClLog(4,
+          "PluginReverseInterface::AddQuotaManagedFile: "
+          "(file_id='%s', file_io_ref=%"NACL_PRIx32")\n",
+          file_id.c_str(), resource);
+  nacl::MutexLocker take(&mu_);
+  uint64_t file_key = STRTOULL(file_id.c_str(), NULL, 10);
+  quota_map_[file_key] = resource;
+}
+
 ServiceRuntime::ServiceRuntime(Plugin* plugin,
                                const Manifest* manifest,
                                bool should_report_uma,
@@ -389,11 +539,8 @@ ServiceRuntime::ServiceRuntime(Plugin* plugin,
                                pp::CompletionCallback crash_cb)
     : plugin_(plugin),
       should_report_uma_(should_report_uma),
-      browser_interface_(plugin->browser_interface()),
       reverse_service_(NULL),
       subprocess_(NULL),
-      async_receive_desc_(NULL),
-      async_send_desc_(NULL),
       anchor_(new nacl::WeakRefAnchor()),
       rev_interface_(new PluginReverseInterface(anchor_, plugin,
                                                 manifest,
@@ -510,29 +657,24 @@ bool ServiceRuntime::InitCommunication(nacl::DescWrapper* nacl_desc,
 }
 
 bool ServiceRuntime::Start(nacl::DescWrapper* nacl_desc,
-                           ErrorInfo* error_info) {
+                           ErrorInfo* error_info, const nacl::string& url) {
   PLUGIN_PRINTF(("ServiceRuntime::Start (nacl_desc=%p)\n",
                  reinterpret_cast<void*>(nacl_desc)));
 
   nacl::scoped_ptr<nacl::SelLdrLauncher>
-      tmp_subprocess(new(std::nothrow) nacl::SelLdrLauncher());
+      tmp_subprocess(new nacl::SelLdrLauncher());
   if (NULL == tmp_subprocess.get()) {
     PLUGIN_PRINTF(("ServiceRuntime::Start (subprocess create failed)\n"));
     error_info->SetReport(ERROR_SEL_LDR_CREATE_LAUNCHER,
                           "ServiceRuntime: failed to create sel_ldr launcher");
     return false;
   }
-  nacl::Handle sockets[3];
-  if (!tmp_subprocess->Start(NACL_ARRAY_SIZE(sockets), sockets)) {
+  if (!tmp_subprocess->Start(url.c_str())) {
     PLUGIN_PRINTF(("ServiceRuntime::Start (start failed)\n"));
     error_info->SetReport(ERROR_SEL_LDR_LAUNCH,
                           "ServiceRuntime: failed to start");
     return false;
   }
-
-  async_receive_desc_.reset(
-      plugin()->wrapper_factory()->MakeImcSock(sockets[1]));
-  async_send_desc_.reset(plugin()->wrapper_factory()->MakeImcSock(sockets[2]));
 
   subprocess_.reset(tmp_subprocess.release());
   if (!InitCommunication(nacl_desc, error_info)) {
@@ -554,7 +696,7 @@ SrpcClient* ServiceRuntime::SetupAppChannel() {
   } else {
     PLUGIN_PRINTF(("ServiceRuntime::SetupAppChannel (conect_desc=%p)\n",
                    static_cast<void*>(connect_desc)));
-    SrpcClient* srpc_client = SrpcClient::New(plugin(), connect_desc);
+    SrpcClient* srpc_client = SrpcClient::New(connect_desc);
     PLUGIN_PRINTF(("ServiceRuntime::SetupAppChannel (srpc_client=%p)\n",
                    static_cast<void*>(srpc_client)));
     delete connect_desc;

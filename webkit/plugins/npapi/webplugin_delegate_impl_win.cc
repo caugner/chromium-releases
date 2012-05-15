@@ -644,7 +644,7 @@ void WebPluginDelegateImpl::PlatformDestroyInstance() {
 
 void WebPluginDelegateImpl::Paint(WebKit::WebCanvas* canvas,
                                   const gfx::Rect& rect) {
-  if (windowless_) {
+  if (windowless_ && skia::SupportsPlatformPaint(canvas)) {
     skia::ScopedPlatformPaint scoped_platform_paint(canvas);
     HDC hdc = scoped_platform_paint.GetPlatformSurface();
     WindowlessPaint(hdc, rect);
@@ -1428,6 +1428,14 @@ bool WebPluginDelegateImpl::PlatformHandleInputEvent(
     else if (np_event.event == WM_KEYUP)
       UnsetSavedKeyState(np_event.wParam);
   }
+
+  // Allow this plug-in to access this IME emulator through IMM32 API while the
+  // plug-in is processing this event.
+  if (GetQuirks() & PLUGIN_QUIRK_EMULATE_IME) {
+    if (!plugin_ime_.get())
+      plugin_ime_.reset(new WebPluginIMEWin);
+  }
+  WebPluginIMEWin::ScopedLock lock(plugin_ime_.get());
 
   HWND last_focus_window = NULL;
 

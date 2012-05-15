@@ -103,6 +103,9 @@ var currentPreviewUid = '';
 // True if we need to generate draft preview data.
 var generateDraftData = true;
 
+// The last element clicked with the mouse.
+var lastClickedElement = null;
+
 // A dictionary of cloud printers that have been added to the printer
 // dropdown.
 var addedCloudPrinters = {};
@@ -123,8 +126,6 @@ var customEvents = {
   MARGIN_TEXTBOX_FOCUSED: 'marginTextboxFocused',
   // Fired when a new preview might be needed because of margin changes.
   MARGINS_MAY_HAVE_CHANGED: 'marginsMayHaveChanged',
-  // Fired when the margins selection in the dropdown changes.
-  MARGINS_SELECTION_CHANGED: 'marginsSelectionChanged',
   // Fired when a pdf generation related error occurs.
   PDF_GENERATION_ERROR: 'PDFGenerationError',
   // Fired once the first page of the pdf document is loaded in the plugin.
@@ -142,7 +143,6 @@ var customEvents = {
  * the printer list.
  */
 function onLoad() {
-  cr.enablePlatformSpecificCSSRules();
   initialPreviewRequestID = randomInteger(MIN_REQUEST_ID, MAX_REQUEST_ID);
   lastPreviewRequestID = initialPreviewRequestID;
 
@@ -150,6 +150,7 @@ function onLoad() {
   printHeader = print_preview.PrintHeader.getInstance();
   document.addEventListener(customEvents.PDF_GENERATION_ERROR,
                             cancelPendingPrintRequest);
+  document.addEventListener('click', setLastClickedElement);
 
   if (!checkCompatiblePluginExists()) {
     disableInputElementsInSidebar();
@@ -199,6 +200,7 @@ function setInitialSettings(initialSettings) {
   printAutomaticallyInKioskMode =
       initialSettings['printAutomaticallyInKioskMode'];
   headerFooterSettings.setChecked(initialSettings['headerFooterEnabled']);
+  copiesSettings.previousDuplexMode = initialSettings['duplex'];
   setDefaultPrinter(initialSettings['printerName'],
                     initialSettings['cloudPrintData']);
 }
@@ -222,6 +224,14 @@ function enableInputElementsInSidebar() {
   var els = $('navbar-container').querySelectorAll('input, button, select');
   for (var i = 0; i < els.length; i++)
     els[i].disabled = false;
+}
+
+/**
+ * Keep track of the last element to receive a click.
+ * @param {Event} e The click event.
+ */
+function setLastClickedElement(e) {
+  lastClickedElement = e.target;
 }
 
 /**
@@ -855,10 +865,13 @@ function onDidGetPreviewPageCount(pageCount, previewResponseId) {
 }
 
 /**
- * @param {printing::PageSizeMargins} pageLayout The default layout of the page
- *     in points.
+ * @param {{contentWidth: number, contentHeight: number, marginLeft: number,
+ *          marginRight: number, marginTop: number, marginBottom: number,
+ *          printableAreaX: number, printableAreaY: number,
+ *          printableAreaWidth: number, printableAreaHeight: number}} pageLayout
+ *          Specifies default page layout details in points.
  * @param {boolean} hasCustomPageSizeStyle Indicates whether the previewed
- *      document has a custom page size style.
+ *     document has a custom page size style.
  */
 function onDidGetDefaultPageLayout(pageLayout, hasCustomPageSizeStyle) {
   hasPageSizeStyle = hasCustomPageSizeStyle;
@@ -869,6 +882,8 @@ function onDidGetDefaultPageLayout(pageLayout, hasCustomPageSizeStyle) {
       pageLayout.marginTop,
       pageLayout.marginRight,
       pageLayout.marginBottom);
+  headerFooterSettings.checkAndHideHeaderFooterOption(
+      pageLayout, marginSettings.selectedMarginsValue);
 }
 
 /**
@@ -1103,8 +1118,54 @@ function setInitiatorTabTitle(initiatorTabTitle) {
  * Closes this print preview tab.
  */
 function closePrintPreviewTab() {
+  window.removeEventListener('keydown', onKeyDown);
   chrome.send('closePrintPreviewTab');
   chrome.send('DialogClose');
+}
+
+/**
+ * Pass certain directional keyboard events to the PDF viewer.
+ * @param {Event} e The keydown event.
+ */
+function tryToHandleDirectionKeyDown(e) {
+  // Make sure the PDF plugin is there.
+  if (!previewArea.pdfPlugin)
+    return;
+
+  // We only care about: PageUp, PageDown, Left, Up, Right, Down.
+  if (!(e.keyCode == 33 || e.keyCode == 34 ||
+        (e.keyCode >= 37 && e.keyCode <= 40))) {
+    return;
+  }
+
+  // If the user is holding a modifier key, ignore.
+  if (e.metaKey || e.altKey || e.shiftKey || e.ctrlKey)
+    return;
+
+  // Don't handle the key event for these elements.
+  var tagName = document.activeElement.tagName;
+  if (tagName == 'INPUT' || tagName == 'SELECT' || tagName == 'EMBED')
+    return;
+
+  // For the most part, if any div of header was the last clicked element,
+  // then the active element is the body. Starting with the last clicked
+  // element, and work up the DOM tree to see if any element has a scrollbar.
+  // If there exists a scrollbar, do not handle the key event here.
+  var element = document.activeElement;
+  if (element == document.body) {
+    if (lastClickedElement)
+      element = lastClickedElement;
+    while (element) {
+      if (element.scrollHeight > element.clientHeight)
+        return;
+      element = element.parentElement;
+    }
+  }
+
+  // No scroll bar anywhere, or the active element is something else, like a
+  // button. Note: buttons have a bigger scrollHeight than clientHeight.
+  previewArea.pdfPlugin.sendKeyEvent(e.keyCode);
+  e.preventDefault();
 }
 
 /**
@@ -1116,18 +1177,23 @@ function onKeyDown(e) {
   if (e.keyCode == 27 && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
     printHeader.disableCancelButton();
     closePrintPreviewTab();
+    e.preventDefault();
   }
+  // Ctrl + Shift + p / Mac equivalent.
   if (e.keyCode == 80) {
     if ((cr.isMac && e.metaKey && e.altKey && !e.shiftKey && !e.ctrlKey) ||
         (!cr.isMac && e.shiftKey && e.ctrlKey && !e.altKey && !e.metaKey)) {
-      window.onkeydown = null;
+      window.removeEventListener('keydown', onKeyDown);
       onSystemDialogLinkClicked();
+      e.preventDefault();
     }
   }
+
+  tryToHandleDirectionKeyDown(e);
 }
 
 window.addEventListener('DOMContentLoaded', onLoad);
-window.onkeydown = onKeyDown;
+window.addEventListener('keydown', onKeyDown);
 
 /// Pull in all other scripts in a single shot.
 <include src="print_preview_animations.js"/>

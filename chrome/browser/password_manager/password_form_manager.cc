@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include "base/string_util.h"
 #include "chrome/browser/password_manager/password_manager.h"
 #include "chrome/browser/password_manager/password_store.h"
+#include "chrome/browser/password_manager/password_store_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "webkit/forms/password_form_dom_manager.h"
 
@@ -114,8 +115,8 @@ void PasswordFormManager::PermanentlyBlacklist() {
   // autofill it again.
   if (!best_matches_.empty()) {
     PasswordFormMap::const_iterator iter;
-    PasswordStore* password_store =
-        profile_->GetPasswordStore(Profile::EXPLICIT_ACCESS);
+    PasswordStore* password_store = PasswordStoreFactory::GetForProfile(
+        profile_, Profile::EXPLICIT_ACCESS);
     if (!password_store) {
       NOTREACHED();
       return;
@@ -199,8 +200,8 @@ void PasswordFormManager::FetchMatchingLoginsFromPasswordStore() {
   DCHECK_EQ(state_, PRE_MATCHING_PHASE);
   DCHECK(!pending_login_query_);
   state_ = MATCHING_PHASE;
-  PasswordStore* password_store =
-      profile_->GetPasswordStore(Profile::EXPLICIT_ACCESS);
+  PasswordStore* password_store = PasswordStoreFactory::GetForProfile(
+      profile_, Profile::EXPLICIT_ACCESS);
   if (!password_store) {
     NOTREACHED();
     return;
@@ -305,7 +306,7 @@ void PasswordFormManager::OnRequestDone(int handle,
   else
     manager_action_ = kManagerActionAutofilled;
   password_manager_->Autofill(observed_form_, best_matches_,
-                              preferred_match_, wait_for_username);
+                              *preferred_match_, wait_for_username);
 }
 
 void PasswordFormManager::OnPasswordStoreRequestDone(
@@ -347,8 +348,8 @@ void PasswordFormManager::SaveAsNewLogin(bool reset_preferred_login) {
 
   DCHECK(!profile_->IsOffTheRecord());
 
-  PasswordStore* password_store =
-      profile_->GetPasswordStore(Profile::IMPLICIT_ACCESS);
+  PasswordStore* password_store = PasswordStoreFactory::GetForProfile(
+      profile_, Profile::IMPLICIT_ACCESS);
   if (!password_store) {
     NOTREACHED();
     return;
@@ -388,8 +389,8 @@ void PasswordFormManager::UpdateLogin() {
   DCHECK(!IsNewLogin() && pending_credentials_.preferred);
   DCHECK(!profile_->IsOffTheRecord());
 
-  PasswordStore* password_store =
-      profile_->GetPasswordStore(Profile::IMPLICIT_ACCESS);
+  PasswordStore* password_store = PasswordStoreFactory::GetForProfile(
+      profile_, Profile::IMPLICIT_ACCESS);
   if (!password_store) {
     NOTREACHED();
     return;

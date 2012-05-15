@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 #pragma once
 
 #include <map>
-#include <string>
 #include <utility>
 #include <vector>
 
@@ -70,7 +69,7 @@ class TaskManager {
     virtual SkBitmap GetIcon() const = 0;
     virtual base::ProcessHandle GetProcess() const = 0;
     virtual Type GetType() const = 0;
-    virtual int GetRoutingId() const { return 0; }
+    virtual int GetRoutingID() const { return 0; }
 
     virtual bool ReportsCacheStats() const { return false; }
     virtual WebKit::WebCache::ResourceTypeStats GetWebCoreCacheStats() const {
@@ -136,6 +135,7 @@ class TaskManager {
     // Returns resource identifier that is unique within single task manager
     // session (between StartUpdating and StopUpdating).
     int get_unique_id() { return unique_id_; }
+
    protected:
     Resource() : unique_id_(0) {}
 
@@ -253,11 +253,19 @@ class TaskManagerModelObserver {
 
   // Invoked when a range of items has been removed.
   virtual void OnItemsRemoved(int start, int length) = 0;
+
+  // Invoked when the initialization of the model has been finished and
+  // periodical updates is started. The first periodical update will be done
+  // in a few seconds. (depending on platform)
+  virtual void OnReadyPeriodicalUpdate() {}
 };
 
 // The model that the TaskManager is using.
 class TaskManagerModel : public base::RefCountedThreadSafe<TaskManagerModel> {
  public:
+  // (start, length)
+  typedef std::pair<int, int> GroupRange;
+
   explicit TaskManagerModel(TaskManager* task_manager);
 
   void AddObserver(TaskManagerModelObserver* observer);
@@ -350,8 +358,8 @@ class TaskManagerModel : public base::RefCountedThreadSafe<TaskManagerModel> {
   // Returns icon to be used for resource (for example a favicon).
   SkBitmap GetResourceIcon(int index) const;
 
-  // Returns a pair (start, length) of the group range of resource.
-  std::pair<int, int> GetGroupRangeForResource(int index) const;
+  // Returns the group range of resource.
+  GroupRange GetGroupRangeForResource(int index) const;
 
   // Returns an index of groups to which the resource belongs.
   int GetGroupIndexForResource(int index) const;
@@ -445,8 +453,9 @@ class TaskManagerModel : public base::RefCountedThreadSafe<TaskManagerModel> {
   typedef std::map<base::ProcessHandle, base::ProcessMetrics*> MetricsMap;
   typedef std::map<base::ProcessHandle, double> CPUUsageMap;
   typedef std::map<TaskManager::Resource*, int64> ResourceValueMap;
-  typedef std::map<base::ProcessHandle,
-                   std::pair<size_t, size_t> > MemoryUsageMap;
+  // Private memory in bytes, shared memory in bytes.
+  typedef std::pair<size_t, size_t> MemoryUsageEntry;
+  typedef std::map<base::ProcessHandle, MemoryUsageEntry> MemoryUsageMap;
 
   // Updates the values for all rows.
   void Refresh();
@@ -482,7 +491,7 @@ class TaskManagerModel : public base::RefCountedThreadSafe<TaskManagerModel> {
   // Looks up the data for |handle| and puts it in the mutable cache
   // |memory_usage_map_|.
   bool GetAndCacheMemoryMetrics(base::ProcessHandle handle,
-                                std::pair<size_t, size_t>* usage) const;
+                                MemoryUsageEntry* usage) const;
 
   // Adds a resource provider to be managed.
   void AddResourceProvider(TaskManager::ResourceProvider* provider);
@@ -531,7 +540,7 @@ class TaskManagerModel : public base::RefCountedThreadSafe<TaskManagerModel> {
   UpdateState update_state_;
 
   // A salt lick for the goats.
-  int goat_salt_;
+  uint64 goat_salt_;
 
   // Resource identifier that is unique within single session.
   int last_unique_id_;

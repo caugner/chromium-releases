@@ -7,6 +7,7 @@
 #include "ash/ash_switches.h"
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
+#include "ash/wm/root_window_event_filter.h"
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/time.h"
@@ -59,45 +60,19 @@ const int kFastCloseAnimMs = 150;
 // locked.
 const int kLockFadeInAnimMs = 500;
 
+// Additional time (beyond kFastCloseAnimMs) to wait after starting the
+// fast-close shutdown animation before actually requesting shutdown, to give
+// the animation time to finish.
+const int kShutdownRequestDelayMs = 50;
+
 // Slightly-smaller size that we scale the screen down to for the pre-lock and
 // pre-shutdown states.
 const float kSlowCloseSizeRatio = 0.95f;
 
-// Containers holding screen locker windows.
-const int kScreenLockerContainerIds[] = {
-  internal::kShellWindowId_LockScreenContainer,
-  internal::kShellWindowId_LockSystemModalContainer,
-};
-
-// Containers holding additional windows that should be shown while the screen
-// is locked.
-const int kRelatedContainerIds[] = {
-  internal::kShellWindowId_StatusContainer,
-  internal::kShellWindowId_MenuAndTooltipContainer,
-  internal::kShellWindowId_SettingBubbleContainer,
-};
-
-// Is |window| a container that holds screen locker windows?
-bool IsScreenLockerContainer(aura::Window* window) {
-  for (size_t i = 0; i < arraysize(kScreenLockerContainerIds); ++i)
-    if (window->id() == kScreenLockerContainerIds[i])
-      return true;
-  return false;
-}
-
-// Is |window| a container that holds other windows that should be shown while
-// the screen is locked?
-bool IsRelatedContainer(aura::Window* window) {
-  for (size_t i = 0; i < arraysize(kRelatedContainerIds); ++i)
-    if (window->id() == kRelatedContainerIds[i])
-      return true;
-  return false;
-}
-
 // Returns the transform that should be applied to containers for the slow-close
 // animation.
 ui::Transform GetSlowCloseTransform() {
-  gfx::Size root_size = aura::RootWindow::GetInstance()->bounds().size();
+  gfx::Size root_size = Shell::GetRootWindow()->bounds().size();
   ui::Transform transform;
   transform.SetScale(kSlowCloseSizeRatio, kSlowCloseSizeRatio);
   transform.ConcatTranslate(
@@ -109,7 +84,7 @@ ui::Transform GetSlowCloseTransform() {
 // Returns the transform that should be applied to containers for the fast-close
 // animation.
 ui::Transform GetFastCloseTransform() {
-  gfx::Size root_size = aura::RootWindow::GetInstance()->bounds().size();
+  gfx::Size root_size = Shell::GetRootWindow()->bounds().size();
   ui::Transform transform;
   transform.SetScale(0.0, 0.0);
   transform.ConcatTranslate(floor(0.5 * root_size.width() + 0.5),
@@ -184,36 +159,35 @@ void RestoreWindow(aura::Window* window) {
 // Fills |containers| with the containers described by |group|.
 void GetContainers(PowerButtonController::ContainerGroup group,
                    aura::Window::Windows* containers) {
+  aura::Window* non_lock_screen_containers =
+      Shell::GetInstance()->GetContainer(
+          internal::kShellWindowId_NonLockScreenContainersContainer);
+  aura::Window* lock_screen_containers =
+      Shell::GetInstance()->GetContainer(
+          internal::kShellWindowId_LockScreenContainersContainer);
+  aura::Window* lock_screen_related_containers =
+      Shell::GetInstance()->GetContainer(
+          internal::kShellWindowId_LockScreenRelatedContainersContainer);
+
   containers->clear();
-
-  aura::Window* root = aura::RootWindow::GetInstance();
-  for (aura::Window::Windows::const_iterator it = root->children().begin();
-       it != root->children().end(); ++it) {
-    aura::Window* window = *it;
-
-    bool matched = true;
-    if (group != PowerButtonController::ALL_CONTAINERS) {
-      bool is_screen_locker = IsScreenLockerContainer(window);
-      bool is_related = IsRelatedContainer(window);
-
-      switch (group) {
-        case PowerButtonController::SCREEN_LOCKER_CONTAINERS:
-          matched = is_screen_locker;
-          break;
-        case PowerButtonController::SCREEN_LOCKER_AND_RELATED_CONTAINERS:
-          matched = is_screen_locker || is_related;
-          break;
-        case PowerButtonController::
-            ALL_BUT_SCREEN_LOCKER_AND_RELATED_CONTAINERS:
-          matched = !is_screen_locker && !is_related;
-          break;
-        default:
-          NOTREACHED() << "Unhandled container group " << group;
-      }
-    }
-
-    if (matched)
-      containers->push_back(window);
+  switch (group) {
+    case PowerButtonController::ALL_CONTAINERS:
+      containers->push_back(non_lock_screen_containers);
+      containers->push_back(lock_screen_containers);
+      containers->push_back(lock_screen_related_containers);
+      break;
+    case PowerButtonController::SCREEN_LOCKER_CONTAINERS:
+      containers->push_back(lock_screen_containers);
+      break;
+    case PowerButtonController::SCREEN_LOCKER_AND_RELATED_CONTAINERS:
+      containers->push_back(lock_screen_containers);
+      containers->push_back(lock_screen_related_containers);
+      break;
+    case PowerButtonController::ALL_BUT_SCREEN_LOCKER_AND_RELATED_CONTAINERS:
+      containers->push_back(non_lock_screen_containers);
+      break;
+    default:
+      NOTREACHED() << "Unhandled container group " << group;
   }
 }
 
@@ -302,7 +276,8 @@ bool PowerButtonController::TestApi::BackgroundLayerIsVisible() const {
 }
 
 PowerButtonController::PowerButtonController()
-    : logged_in_as_non_guest_(false),
+    : logged_in_(false),
+      is_guest_(false),
       locked_(false),
       power_button_down_(false),
       lock_button_down_(false),
@@ -316,7 +291,21 @@ PowerButtonController::~PowerButtonController() {
 }
 
 void PowerButtonController::OnLoginStateChange(bool logged_in, bool is_guest) {
-  logged_in_as_non_guest_ = logged_in && !is_guest;
+  logged_in_ = logged_in;
+  is_guest_ = is_guest;
+}
+
+void PowerButtonController::OnExit() {
+  // If we hear that Chrome is exiting but didn't request it ourselves, all we
+  // can really hope for is that we'll have time to clear the screen.
+  if (!shutting_down_) {
+    shutting_down_ = true;
+    ash::Shell::GetInstance()->root_filter()->
+        set_update_cursor_visibility(false);
+    Shell::GetRootWindow()->ShowCursor(false);
+    ShowBackgroundLayer();
+    StartAnimation(ALL_CONTAINERS, ANIMATION_HIDE);
+  }
 }
 
 void PowerButtonController::OnLockStateChange(bool locked) {
@@ -347,6 +336,11 @@ void PowerButtonController::OnStartingLock() {
   if (shutting_down_ || locked_)
     return;
 
+  // Ensure that the background layer is visible -- if the screen was locked via
+  // the wrench menu, we won't have already shown the background as part of the
+  // slow-close animation.
+  ShowBackgroundLayer();
+
   StartAnimation(ALL_BUT_SCREEN_LOCKER_AND_RELATED_CONTAINERS,
                  ANIMATION_FAST_CLOSE);
 
@@ -367,7 +361,7 @@ void PowerButtonController::OnPowerButtonEvent(
     // immediately.
     if (down) {
       ShowBackgroundLayer();
-      if (logged_in_as_non_guest_ && !locked_) {
+      if (logged_in_as_non_guest() && !locked_) {
         StartAnimation(ALL_BUT_SCREEN_LOCKER_AND_RELATED_CONTAINERS,
                        ANIMATION_SLOW_CLOSE);
         OnLockTimeout();
@@ -381,7 +375,7 @@ void PowerButtonController::OnPowerButtonEvent(
       if (lock_fail_timer_.IsRunning())
         return;
 
-      if (logged_in_as_non_guest_ && !locked_)
+      if (logged_in_as_non_guest() && !locked_)
         StartLockTimer();
       else
         StartShutdownTimer();
@@ -393,7 +387,7 @@ void PowerButtonController::OnPowerButtonEvent(
 
       // Drop the background layer after the undo animation finishes.
       if (lock_timer_.IsRunning() ||
-          (shutdown_timer_.IsRunning() && !logged_in_as_non_guest_)) {
+          (shutdown_timer_.IsRunning() && !logged_in_as_non_guest())) {
         hide_background_layer_timer_.Stop();
         hide_background_layer_timer_.Start(
             FROM_HERE,
@@ -412,7 +406,7 @@ void PowerButtonController::OnLockButtonEvent(
     bool down, const base::TimeTicks& timestamp) {
   lock_button_down_ = down;
 
-  if (shutting_down_ || !logged_in_as_non_guest_)
+  if (shutting_down_ || !logged_in_as_non_guest())
     return;
 
   // Bail if we're already locked or are in the process of locking.  Also give
@@ -438,9 +432,15 @@ void PowerButtonController::OnLockButtonEvent(
   }
 }
 
-void PowerButtonController::OnRootWindowResized(const gfx::Size& new_size) {
+void PowerButtonController::RequestShutdown() {
+  if (!shutting_down_)
+    StartShutdownAnimationAndRequestShutdown();
+}
+
+void PowerButtonController::OnRootWindowResized(const aura::RootWindow* root,
+                                                const gfx::Size& new_size) {
   if (background_layer_.get())
-    background_layer_->SetBounds(gfx::Rect(new_size));
+    background_layer_->SetBounds(gfx::Rect(root->bounds().size()));
 }
 
 void PowerButtonController::OnLockTimeout() {
@@ -465,14 +465,8 @@ void PowerButtonController::OnLockToShutdownTimeout() {
 }
 
 void PowerButtonController::OnShutdownTimeout() {
-  DCHECK(!shutting_down_);
-  shutting_down_ = true;
-  aura::RootWindow::GetInstance()->ShowCursor(false);
-  StartAnimation(ALL_CONTAINERS, ANIMATION_FAST_CLOSE);
-  real_shutdown_timer_.Start(
-      FROM_HERE,
-      base::TimeDelta::FromMilliseconds(kFastCloseAnimMs),
-      this, &PowerButtonController::OnRealShutdownTimeout);
+  if (!shutting_down_)
+    StartShutdownAnimationAndRequestShutdown();
 }
 
 void PowerButtonController::OnRealShutdownTimeout() {
@@ -500,15 +494,41 @@ void PowerButtonController::StartShutdownTimer() {
       this, &PowerButtonController::OnShutdownTimeout);
 }
 
+void PowerButtonController::StartShutdownAnimationAndRequestShutdown() {
+  DCHECK(!shutting_down_);
+  shutting_down_ = true;
+
+  ash::Shell::GetInstance()->root_filter()->set_update_cursor_visibility(false);
+  Shell::GetRootWindow()->ShowCursor(false);
+
+  ShowBackgroundLayer();
+  if (!logged_in_ || locked_) {
+    // Hide the other containers before starting the animation.
+    // ANIMATION_FAST_CLOSE will make the screen locker windows partially
+    // transparent, and we don't want the other windows to show through.
+    StartAnimation(ALL_BUT_SCREEN_LOCKER_AND_RELATED_CONTAINERS,
+                   ANIMATION_HIDE);
+    StartAnimation(SCREEN_LOCKER_AND_RELATED_CONTAINERS, ANIMATION_FAST_CLOSE);
+  } else {
+    StartAnimation(ALL_CONTAINERS, ANIMATION_FAST_CLOSE);
+  }
+
+  real_shutdown_timer_.Start(
+      FROM_HERE,
+      base::TimeDelta::FromMilliseconds(
+          kFastCloseAnimMs + kShutdownRequestDelayMs),
+      this, &PowerButtonController::OnRealShutdownTimeout);
+}
+
 void PowerButtonController::ShowBackgroundLayer() {
   if (hide_background_layer_timer_.IsRunning())
     hide_background_layer_timer_.Stop();
 
   if (!background_layer_.get()) {
-    background_layer_.reset(new ui::Layer(ui::Layer::LAYER_SOLID_COLOR));
+    background_layer_.reset(new ui::Layer(ui::LAYER_SOLID_COLOR));
     background_layer_->SetColor(SK_ColorBLACK);
 
-    ui::Layer* root_layer = aura::RootWindow::GetInstance()->layer();
+    ui::Layer* root_layer = Shell::GetRootWindow()->layer();
     background_layer_->SetBounds(root_layer->bounds());
     root_layer->Add(background_layer_.get());
     root_layer->StackAtBottom(background_layer_.get());

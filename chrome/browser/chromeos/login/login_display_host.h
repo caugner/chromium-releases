@@ -77,9 +77,6 @@ class LoginDisplayHost {
   // Resumes a previously started sign in screen.
   virtual void ResumeSignInScreen() = 0;
 
-  // Closes the login window.
-  virtual void CloseWindow() = 0;
-
   // Invoked when system preferences that affect the signin screen have changed.
   virtual void OnPreferencesChanged() = 0;
 };

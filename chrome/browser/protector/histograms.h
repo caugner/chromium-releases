@@ -14,6 +14,9 @@ namespace protector {
 // provider. Values are below.
 extern const char kProtectorHistogramDefaultSearchProvider[];
 
+// Histogram name to report protection errors for preferences. Values are below.
+extern const char kProtectorHistogramPrefs[];
+
 // Protector histogram values.
 enum ProtectorError {
   kProtectorErrorBackupInvalid,
@@ -47,12 +50,22 @@ extern const char kProtectorHistogramSearchProviderRestored[];
 // Histogram name to report when user ignores search provider change.
 extern const char kProtectorHistogramSearchProviderTimeout[];
 
-// Returns index to be used in histograms for given search provider (which may
-// be NULL, in which case a special index will be returned).
-int GetSearchProviderHistogramID(const TemplateURL* turl);
+// Histogram name to report when user accepts new startup settings.
+extern const char kProtectorHistogramStartupSettingsApplied[];
+// Histogram name to report the new startup settings when the backup is
+// valid and a change is detected.
+extern const char kProtectorHistogramStartupSettingsChanged[];
+// Histogram name to report when keeps previous startup settings.
+extern const char kProtectorHistogramStartupSettingsDiscarded[];
+// Histogram name to report when user ignores startup settings change.
+extern const char kProtectorHistogramStartupSettingsTimeout[];
 
 // Maximum value of search provider index in histogram enums.
 extern const int kProtectorMaxSearchProviderID;
+
+// Returns index to be used in histograms for given search provider (which may
+// be NULL, in which case a special index will be returned).
+int GetSearchProviderHistogramID(const TemplateURL* turl);
 
 }  // namespace protector
 

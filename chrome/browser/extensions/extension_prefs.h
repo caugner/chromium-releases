@@ -121,6 +121,12 @@ class ExtensionPrefs : public ExtensionContentSettingsStore::Observer,
   // Returns all installed extensions
   void GetExtensions(ExtensionIdSet* out);
 
+  // Returns all installed extensions from |extension_prefs|. This is exposed
+  // for ProtectedPrefsWatcher because it needs access to the extension ID list
+  // before the ExtensionService is initialized.
+  static ExtensionIdSet GetExtensionsFrom(
+      const base::DictionaryValue* extension_prefs);
+
   // Getter and setter for browser action visibility.
   bool GetBrowserActionVisibility(const Extension* extension);
   void SetBrowserActionVisibility(const Extension* extension, bool visible);
@@ -236,6 +242,11 @@ class ExtensionPrefs : public ExtensionContentSettingsStore::Observer,
   void SetActivePermissions(const std::string& extension_id,
                             const ExtensionPermissionSet* permissions);
 
+  // Returns the list of events that the given extension has registered for.
+  std::set<std::string> GetRegisteredEvents(const std::string& extension_id);
+  void SetRegisteredEvents(const std::string& extension_id,
+                           const std::set<std::string>& events);
+
   // Returns true if the user enabled this extension to be loaded in incognito
   // mode.
   bool IsIncognitoEnabled(const std::string& extension_id);
@@ -246,15 +257,6 @@ class ExtensionPrefs : public ExtensionContentSettingsStore::Observer,
   bool AllowFileAccess(const std::string& extension_id);
   void SetAllowFileAccess(const std::string& extension_id, bool allow);
   bool HasAllowFileAccessSetting(const std::string& extension_id) const;
-
-  // Sets the extension preference indicating that an extension wants to delay
-  // network requests on browser startup.
-  void SetDelaysNetworkRequests(const std::string& extension_id,
-                                bool does_delay);
-
-  // Returns true if an extension has registered to delay network requests on
-  // browser startup.
-  bool DelaysNetworkRequests(const std::string& extension_id);
 
   // Get the launch type preference.  If no preference is set, return
   // |default_pref_value|.

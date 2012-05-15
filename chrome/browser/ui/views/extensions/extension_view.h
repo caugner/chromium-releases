@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,7 +15,10 @@ class Browser;
 class Extension;
 class ExtensionHost;
 class ExtensionView;
+
+namespace content {
 class RenderViewHost;
+}
 
 // This handles the display portion of an ExtensionHost.
 class ExtensionView : public views::NativeViewHost {
@@ -28,18 +31,19 @@ class ExtensionView : public views::NativeViewHost {
   class Container {
    public:
     virtual ~Container() {}
-    virtual void OnExtensionPreferredSizeChanged(ExtensionView* view) {}
+    virtual void OnExtensionSizeChanged(ExtensionView* view) {}
+    virtual void OnViewWasResized() {}
   };
 
   ExtensionHost* host() const { return host_; }
   Browser* browser() const { return browser_; }
   const Extension* extension() const;
-  RenderViewHost* render_view_host() const;
+  content::RenderViewHost* render_view_host() const;
   void DidStopLoading();
   void SetIsClipped(bool is_clipped);
 
   // Notification from ExtensionHost.
-  void UpdatePreferredSize(const gfx::Size& new_size);
+  void ResizeDueToAutoResize(const gfx::Size& new_size);
 
   // Method for the ExtensionHost to notify us when the RenderViewHost has a
   // connection.

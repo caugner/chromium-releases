@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,12 +7,9 @@
 
 #include "base/memory/ref_counted.h"
 #include "remoting/protocol/channel_dispatcher_base.h"
+#include "remoting/protocol/clipboard_stub.h"
 #include "remoting/protocol/host_stub.h"
 #include "remoting/protocol/message_reader.h"
-
-namespace base {
-class MessageLoopProxy;
-}  // namespace base
 
 namespace remoting {
 namespace protocol {
@@ -23,12 +20,17 @@ class BufferedSocketWriter;
 class Session;
 
 // ClientControlDispatcher dispatches incoming messages on the control
-// channel to ClientStub, and also implements HostStub for outgoing
-// messages.
-class ClientControlDispatcher : public ChannelDispatcherBase, public HostStub {
+// channel to ClientStub, and also implements ClipboardStub and HostStub for
+// outgoing messages.
+class ClientControlDispatcher : public ChannelDispatcherBase,
+                                public ClipboardStub,
+                                public HostStub {
  public:
   ClientControlDispatcher();
   virtual ~ClientControlDispatcher();
+
+  // ClipboardStub implementation.
+  virtual void InjectClipboardEvent(const ClipboardEvent& event) OVERRIDE;
 
   // Sets ClientStub that will be called for each incoming control
   // message. Doesn't take ownership of |client_stub|. It must outlive
@@ -40,7 +42,7 @@ class ClientControlDispatcher : public ChannelDispatcherBase, public HostStub {
   virtual void OnInitialized() OVERRIDE;
 
  private:
-  void OnMessageReceived(ControlMessage* message,
+  void OnMessageReceived(scoped_ptr<ControlMessage> message,
                          const base::Closure& done_task);
 
   ClientStub* client_stub_;

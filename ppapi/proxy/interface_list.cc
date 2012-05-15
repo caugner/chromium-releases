@@ -16,8 +16,10 @@
 #include "ppapi/c/dev/ppb_fullscreen_dev.h"
 #include "ppapi/c/dev/ppb_gles_chromium_texture_mapping_dev.h"
 #include "ppapi/c/dev/ppb_ime_input_event_dev.h"
+#include "ppapi/c/dev/ppb_keyboard_input_event_dev.h"
 #include "ppapi/c/dev/ppb_memory_dev.h"
 #include "ppapi/c/dev/ppb_message_loop_dev.h"
+#include "ppapi/c/dev/ppb_opengles2ext_dev.h"
 #include "ppapi/c/dev/ppb_resource_array_dev.h"
 #include "ppapi/c/dev/ppb_testing_dev.h"
 #include "ppapi/c/dev/ppb_text_input_dev.h"
@@ -42,6 +44,7 @@
 #include "ppapi/c/ppb_url_request_info.h"
 #include "ppapi/c/ppb_url_response_info.h"
 #include "ppapi/c/ppb_var.h"
+#include "ppapi/c/ppb_var_array_buffer.h"
 #include "ppapi/c/ppb_view.h"
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/c/ppp_instance.h"
@@ -51,13 +54,19 @@
 #include "ppapi/c/private/ppb_flash_fullscreen.h"
 #include "ppapi/c/private/ppb_flash.h"
 #include "ppapi/c/private/ppb_flash_menu.h"
+#include "ppapi/c/private/ppb_flash_message_loop.h"
 #include "ppapi/c/private/ppb_flash_net_connector.h"
 #include "ppapi/c/private/ppb_flash_tcp_socket.h"
 #include "ppapi/c/private/ppb_net_address_private.h"
+#include "ppapi/c/private/ppb_network_list_private.h"
+#include "ppapi/c/private/ppb_network_monitor_private.h"
 #include "ppapi/c/private/ppb_pdf.h"
+#include "ppapi/c/private/ppb_talk_private.h"
 #include "ppapi/c/private/ppb_tcp_socket_private.h"
 #include "ppapi/c/private/ppb_udp_socket_private.h"
 #include "ppapi/c/trusted/ppb_broker_trusted.h"
+#include "ppapi/c/trusted/ppb_browser_font_trusted.h"
+#include "ppapi/c/trusted/ppb_char_set_trusted.h"
 #include "ppapi/c/trusted/ppb_file_io_trusted.h"
 #include "ppapi/c/trusted/ppb_url_loader_trusted.h"
 #include "ppapi/proxy/interface_proxy.h"
@@ -74,15 +83,19 @@
 #include "ppapi/proxy/ppb_flash_clipboard_proxy.h"
 #include "ppapi/proxy/ppb_flash_file_proxy.h"
 #include "ppapi/proxy/ppb_flash_menu_proxy.h"
+#include "ppapi/proxy/ppb_flash_message_loop_proxy.h"
 #include "ppapi/proxy/ppb_flash_net_connector_proxy.h"
 #include "ppapi/proxy/ppb_flash_proxy.h"
-#include "ppapi/proxy/ppb_font_proxy.h"
 #include "ppapi/proxy/ppb_graphics_2d_proxy.h"
 #include "ppapi/proxy/ppb_graphics_3d_proxy.h"
+#include "ppapi/proxy/ppb_host_resolver_private_proxy.h"
 #include "ppapi/proxy/ppb_image_data_proxy.h"
 #include "ppapi/proxy/ppb_instance_proxy.h"
 #include "ppapi/proxy/ppb_message_loop_proxy.h"
+#include "ppapi/proxy/ppb_network_monitor_private_proxy.h"
 #include "ppapi/proxy/ppb_pdf_proxy.h"
+#include "ppapi/proxy/ppb_talk_private_proxy.h"
+#include "ppapi/proxy/ppb_tcp_server_socket_private_proxy.h"
 #include "ppapi/proxy/ppb_tcp_socket_private_proxy.h"
 #include "ppapi/proxy/ppb_testing_proxy.h"
 #include "ppapi/proxy/ppb_text_input_proxy.h"
@@ -99,6 +112,8 @@
 #include "ppapi/proxy/ppp_instance_proxy.h"
 #include "ppapi/proxy/ppp_messaging_proxy.h"
 #include "ppapi/proxy/ppp_mouse_lock_proxy.h"
+#include "ppapi/proxy/ppp_printing_proxy.h"
+#include "ppapi/proxy/ppp_text_input_proxy.h"
 #include "ppapi/proxy/ppp_video_decoder_proxy.h"
 #include "ppapi/proxy/resource_creation_proxy.h"
 #include "ppapi/shared_impl/ppb_opengles2_shared.h"
@@ -175,6 +190,20 @@ InterfaceList::InterfaceList() {
          PPB_MessageLoop_Proxy::GetInterface());
   AddPPB(PPB_OPENGLES2_INTERFACE_1_0, API_ID_NONE,
          PPB_OpenGLES2_Shared::GetInterface());
+  AddPPB(PPB_OPENGLES2_INSTANCEDARRAYS_DEV_INTERFACE_1_0, API_ID_NONE,
+         PPB_OpenGLES2_Shared::GetInstancedArraysInterface());
+  AddPPB(PPB_OPENGLES2_FRAMEBUFFERBLIT_DEV_INTERFACE_1_0, API_ID_NONE,
+         PPB_OpenGLES2_Shared::GetFramebufferBlitInterface());
+  AddPPB(PPB_OPENGLES2_FRAMEBUFFERMULTISAMPLE_DEV_INTERFACE_1_0, API_ID_NONE,
+         PPB_OpenGLES2_Shared::GetFramebufferMultisampleInterface());
+  AddPPB(PPB_OPENGLES2_CHROMIUMENABLEFEATURE_DEV_INTERFACE_1_0, API_ID_NONE,
+         PPB_OpenGLES2_Shared::GetChromiumEnableFeatureInterface());
+  AddPPB(PPB_OPENGLES2_CHROMIUMMAPSUB_DEV_INTERFACE_1_0, API_ID_NONE,
+         PPB_OpenGLES2_Shared::GetChromiumMapSubInterface());
+  AddPPB(PPB_OPENGLES2_QUERY_DEV_INTERFACE_1_0, API_ID_NONE,
+         PPB_OpenGLES2_Shared::GetQueryInterface());
+  AddPPB(PPB_VAR_ARRAY_BUFFER_INTERFACE_1_0, API_ID_NONE,
+         PPB_Var_Shared::GetVarArrayBufferInterface1_0());
   AddPPB(PPB_VAR_INTERFACE_1_1, API_ID_NONE,
          PPB_Var_Shared::GetVarInterface1_1());
   AddPPB(PPB_VAR_INTERFACE_1_0, API_ID_NONE,
@@ -197,6 +226,12 @@ InterfaceList::InterfaceList() {
   AddProxy(API_ID_PPP_INSTANCE, &ProxyFactory<PPP_Instance_Proxy>);
   AddPPP(PPP_INSTANCE_INTERFACE_1_1, API_ID_PPP_INSTANCE,
          PPP_Instance_Proxy::GetInstanceInterface());
+  AddProxy(API_ID_PPP_PRINTING, &ProxyFactory<PPP_Printing_Proxy>);
+  AddPPP(PPP_PRINTING_DEV_INTERFACE, API_ID_PPP_PRINTING,
+         PPP_Printing_Proxy::GetProxyInterface());
+  AddProxy(API_ID_PPP_TEXT_INPUT, &ProxyFactory<PPP_TextInput_Proxy>);
+  AddPPP(PPP_TEXTINPUT_DEV_INTERFACE, API_ID_PPP_TEXT_INPUT,
+         PPP_TextInput_Proxy::GetProxyInterface());
 
   // Old-style GetInfo PPP interfaces.
   // Do not add more stuff here, they should be added to interface_list*.h
@@ -259,14 +294,19 @@ const void* InterfaceList::GetInterfaceForPPP(const std::string& name) const {
 }
 
 void InterfaceList::AddFlashInterfaces() {
+#if !defined(OS_NACL)
   AddProxy(API_ID_PPB_FLASH, &ProxyFactory<PPB_Flash_Proxy>);
   AddPPB(PPB_FLASH_INTERFACE_11_0, API_ID_PPB_FLASH,
          PPB_Flash_Proxy::GetInterface11());
   AddPPB(PPB_FLASH_INTERFACE_12_0, API_ID_PPB_FLASH,
          PPB_Flash_Proxy::GetInterface12_0());
+  AddPPB(PPB_FLASH_INTERFACE_12_1, API_ID_PPB_FLASH,
+         PPB_Flash_Proxy::GetInterface12_1());
 
   AddProxy(API_ID_PPB_FLASH_CLIPBOARD,
            &ProxyFactory<PPB_Flash_Clipboard_Proxy>);
+  AddPPB(PPB_FLASH_CLIPBOARD_INTERFACE_4_0, API_ID_PPB_FLASH_CLIPBOARD,
+         thunk::GetPPB_Flash_Clipboard_4_0_Thunk());
   AddPPB(PPB_FLASH_CLIPBOARD_INTERFACE_3_0, API_ID_PPB_FLASH_CLIPBOARD,
          thunk::GetPPB_Flash_Clipboard_3_0_Thunk());
   AddPPB(PPB_FLASH_CLIPBOARD_INTERFACE_3_LEGACY, API_ID_PPB_FLASH_CLIPBOARD,
@@ -287,6 +327,11 @@ void InterfaceList::AddFlashInterfaces() {
   AddPPB(PPB_FLASH_MENU_INTERFACE_0_2, API_ID_PPB_FLASH_MENU,
          thunk::GetPPB_Flash_Menu_0_2_Thunk());
 
+  AddProxy(API_ID_PPB_FLASH_MESSAGELOOP,
+           &ProxyFactory<PPB_Flash_MessageLoop_Proxy>);
+  AddPPB(PPB_FLASH_MESSAGELOOP_INTERFACE_0_1, API_ID_PPB_FLASH_MESSAGELOOP,
+         thunk::GetPPB_Flash_MessageLoop_0_1_Thunk());
+
   // Only add the interface; PPB_TCPSocket_Private provides the API ID's proxy.
   AddPPB(PPB_FLASH_TCPSOCKET_INTERFACE_0_2, API_ID_PPB_TCPSOCKET_PRIVATE,
          thunk::GetPPB_TCPSocket_Private_0_3_Thunk());
@@ -297,6 +342,7 @@ void InterfaceList::AddFlashInterfaces() {
   AddPPB(PPB_FLASH_NETCONNECTOR_INTERFACE_0_2, API_ID_PPB_FLASH_NETCONNECTOR,
          thunk::GetPPB_Flash_NetConnector_0_2_Thunk());
 #endif
+#endif  // !defined(OS_NACL)
 }
 
 void InterfaceList::AddProxy(ApiID id,

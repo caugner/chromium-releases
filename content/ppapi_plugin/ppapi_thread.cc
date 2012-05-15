@@ -83,6 +83,10 @@ bool PpapiThread::OnMessageReceived(const IPC::Message& msg) {
   IPC_BEGIN_MESSAGE_MAP(PpapiThread, msg)
     IPC_MESSAGE_HANDLER(PpapiMsg_LoadPlugin, OnMsgLoadPlugin)
     IPC_MESSAGE_HANDLER(PpapiMsg_CreateChannel, OnMsgCreateChannel)
+    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBTCPServerSocket_ListenACK,
+                                OnPluginDispatcherMessageReceived(msg))
+    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBTCPServerSocket_AcceptACK,
+                                OnPluginDispatcherMessageReceived(msg))
     IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBTCPSocket_ConnectACK,
                                 OnPluginDispatcherMessageReceived(msg))
     IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBTCPSocket_SSLHandshakeACK,
@@ -96,6 +100,12 @@ bool PpapiThread::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBUDPSocket_SendToACK,
                                 OnPluginDispatcherMessageReceived(msg))
     IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBUDPSocket_BindACK,
+                                OnPluginDispatcherMessageReceived(msg))
+    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBTalk_GetPermissionACK,
+                                OnPluginDispatcherMessageReceived(msg))
+    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBHostResolver_ResolveACK,
+                                OnPluginDispatcherMessageReceived(msg))
+    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBNetworkMonitor_NetworkList,
                                 OnPluginDispatcherMessageReceived(msg))
     IPC_MESSAGE_HANDLER(PpapiMsg_SetNetworkState, OnMsgSetNetworkState)
   IPC_END_MESSAGE_MAP()
@@ -238,9 +248,6 @@ void PpapiThread::OnMsgCreateChannel(base::ProcessHandle host_process_handle,
   if (!library_.is_valid() ||  // Plugin couldn't be loaded.
       !SetupRendererChannel(host_process_handle, renderer_id,
                             &channel_handle)) {
-    // TODO(xhwang): Add CHECK to investigate the root cause of
-    // crbug.com/103957.  Will remove after the bug is fixed.
-    CHECK(!is_broker_ || library_.is_valid());
     Send(new PpapiHostMsg_ChannelCreated(IPC::ChannelHandle()));
     return;
   }
@@ -259,7 +266,7 @@ void PpapiThread::OnMsgSetNetworkState(bool online) {
 
 void PpapiThread::OnPluginDispatcherMessageReceived(const IPC::Message& msg) {
   // The first parameter should be a plugin dispatcher ID.
-  void* iter = NULL;
+  PickleIterator iter(msg);
   uint32 id = 0;
   if (!msg.ReadUInt32(&iter, &id)) {
     NOTREACHED();
@@ -277,8 +284,8 @@ bool PpapiThread::SetupRendererChannel(base::ProcessHandle host_process_handle,
   DCHECK(is_broker_ == (connect_instance_func_ != NULL));
   DCHECK(is_broker_ == (get_plugin_interface_ == NULL));
   IPC::ChannelHandle plugin_handle;
-  plugin_handle.name = StringPrintf("%d.r%d", base::GetCurrentProcId(),
-                                    renderer_id);
+  plugin_handle.name = IPC::Channel::GenerateVerifiedChannelID(
+      StringPrintf("%d.r%d", base::GetCurrentProcId(), renderer_id));
 
   ppapi::proxy::ProxyChannel* dispatcher = NULL;
   bool init_result = false;
@@ -310,9 +317,6 @@ bool PpapiThread::SetupRendererChannel(base::ProcessHandle host_process_handle,
   // This ensures this process will be notified when it is closed even if a
   // connection is not established.
   handle->socket = base::FileDescriptor(dispatcher->TakeRendererFD(), true);
-  // Check the validity of fd for bug investigation. Remove after fixed.
-  // See for details: crbug.com/103957.
-  CHECK_NE(-1, handle->socket.fd);
   if (handle->socket.fd == -1)
     return false;
 #endif

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,10 @@
 #include "base/memory/mru_cache.h"
 #include "base/sys_info.h"
 #include "content/browser/renderer_host/backing_store.h"
-#include "content/browser/renderer_host/render_widget_host.h"
+#include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/public/common/content_switches.h"
+
+using content::RenderWidgetHost;
 
 namespace {
 
@@ -145,7 +147,8 @@ BackingStore* CreateBackingStore(RenderWidgetHost* host,
   } else {
     cache = small_cache;
   }
-  BackingStore* backing_store = host->AllocBackingStore(backing_store_size);
+  BackingStore* backing_store = content::RenderWidgetHostImpl::From(
+      host)->AllocBackingStore(backing_store_size);
   if (backing_store)
     cache->Put(host, backing_store);
   return backing_store;
@@ -215,7 +218,7 @@ void BackingStoreManager::PrepareBackingStore(
     }
   }
 
-  backing_store->PaintToBackingStore(host->process(), bitmap,
+  backing_store->PaintToBackingStore(host->GetProcess(), bitmap,
                                      bitmap_rect, copy_rects,
                                      completion_callback,
                                      scheduled_completion_callback);
@@ -258,21 +261,6 @@ void BackingStoreManager::RemoveAllBackingStores() {
     large_cache->Clear();
     small_cache->Clear();
   }
-}
-
-// static
-bool BackingStoreManager::ExpireBackingStoreForTest(RenderWidgetHost* host) {
-  BackingStoreCache* cache = large_cache;
-
-  BackingStoreCache::iterator it = cache->Peek(host);
-  if (it == cache->end()) {
-    cache = small_cache;
-    it = cache->Peek(host);
-    if (it == cache->end())
-      return false;
-  }
-  ExpireBackingStoreAt(cache, it);
-  return true;
 }
 
 // static

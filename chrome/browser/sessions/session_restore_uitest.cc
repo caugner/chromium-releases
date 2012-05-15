@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -34,12 +34,15 @@ class SessionRestoreUITest : public UITest {
   }
 
   virtual void QuitBrowserAndRestore(int expected_tab_count) {
-#if defined(OS_MACOSX)
+#if defined(OS_CHROMEOS) || defined(OS_MACOSX)
     set_shutdown_type(ProxyLauncher::USER_QUIT);
 #endif
     UITest::TearDown();
 
     clear_profile_ = false;
+
+    // Clear launch_arguments so that the URL arg doesn't get added on restart.
+    launch_arguments_ = CommandLine(launch_arguments_.GetProgram());
 
     launch_arguments_.AppendSwitchASCII(switches::kRestoreLastSession,
                                         base::IntToString(expected_tab_count));
@@ -154,6 +157,7 @@ TEST_F(SessionRestoreUITest, RestoresForwardAndBackwardNavs) {
 // cross-site page and then forward again works.  (Bug 1204135)
 TEST_F(SessionRestoreUITest, RestoresCrossSiteForwardAndBackwardNavs) {
   net::TestServer test_server(net::TestServer::TYPE_HTTP,
+                              net::TestServer::kLocalhost,
                               FilePath(FILE_PATH_LITERAL("chrome/test/data")));
   ASSERT_TRUE(test_server.Start());
 
@@ -377,7 +381,7 @@ TEST_F(SessionRestoreUITest, NormalAndPopup) {
 // we restore the tabbed browser url.
 // Flaky: http://crbug.com/29110
 TEST_F(SessionRestoreUITest,
-       FLAKY_RestoreAfterClosingTabbedBrowserWithAppAndLaunching) {
+       DISABLED_RestoreAfterClosingTabbedBrowserWithAppAndLaunching) {
   NavigateToURL(url1_);
 
   // Launch an app.
@@ -444,7 +448,7 @@ TEST_F(SessionRestoreUITest, TwoWindowsCloseOneRestoreOnlyOne) {
 // Unfortunately, the fix at http://codereview.chromium.org/6546078
 // breaks NTP background image refreshing, so ThemeSource had to revert to
 // replacing the existing data source.
-TEST_F(SessionRestoreUITest, FLAKY_ShareProcessesOnRestore) {
+TEST_F(SessionRestoreUITest, DISABLED_ShareProcessesOnRestore) {
   scoped_refptr<BrowserProxy> browser_proxy(automation()->GetBrowserWindow(0));
   ASSERT_TRUE(browser_proxy.get() != NULL);
   int tab_count;

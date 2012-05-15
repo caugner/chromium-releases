@@ -38,9 +38,10 @@
 #include "chrome/browser/ui/intents/web_intent_picker_controller.h"
 #include "chrome/browser/ui/pdf/pdf_tab_observer.h"
 #include "chrome/browser/ui/prefs/prefs_tab_helper.h"
-#include "chrome/browser/ui/sad_tab_observer.h"
+#include "chrome/browser/ui/sad_tab_helper.h"
 #include "chrome/browser/ui/search_engines/search_engine_tab_helper.h"
 #include "chrome/browser/ui/snapshot_tab_helper.h"
+#include "chrome/browser/ui/sync/one_click_signin_helper.h"
 #include "chrome/browser/ui/sync/tab_contents_wrapper_synced_tab_delegate.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
 #include "chrome/common/chrome_switches.h"
@@ -80,7 +81,9 @@ TabContentsWrapper::TabContentsWrapper(WebContents* contents)
     autocomplete_history_manager_->SetExternalDelegate(
         autofill_external_delegate_.get());
   }
+#if defined(ENABLE_AUTOMATION)
   automation_tab_helper_.reset(new AutomationTabHelper(contents));
+#endif
   blocked_content_tab_helper_.reset(new BlockedContentTabHelper(this));
   bookmark_tab_helper_.reset(new BookmarkTabHelper(this));
   constrained_window_tab_helper_.reset(new ConstrainedWindowTabHelper(this));
@@ -95,7 +98,6 @@ TabContentsWrapper::TabContentsWrapper(WebContents* contents)
       new PasswordManager(contents, password_manager_delegate_.get()));
   prefs_tab_helper_.reset(new PrefsTabHelper(contents));
   prerender_tab_helper_.reset(new prerender::PrerenderTabHelper(this));
-  print_view_manager_.reset(new printing::PrintViewManager(this));
   restore_tab_helper_.reset(new RestoreTabHelper(contents));
   search_engine_tab_helper_.reset(new SearchEngineTabHelper(contents));
   snapshot_tab_helper_.reset(new SnapshotTabHelper(contents));
@@ -103,7 +105,15 @@ TabContentsWrapper::TabContentsWrapper(WebContents* contents)
   synced_tab_delegate_.reset(new TabContentsWrapperSyncedTabDelegate(this));
   content_settings_.reset(new TabSpecificContentSettings(contents));
   translate_tab_helper_.reset(new TranslateTabHelper(contents));
+
+#if defined(ENABLE_WEB_INTENTS)
   web_intent_picker_controller_.reset(new WebIntentPickerController(this));
+#endif
+
+#if !defined(OS_ANDROID)
+  print_view_manager_.reset(new printing::PrintViewManager(this));
+  sad_tab_helper_.reset(new SadTabHelper(contents));
+#endif
 
   // Create the per-tab observers.
   alternate_error_page_tab_observer_.reset(
@@ -117,10 +127,12 @@ TabContentsWrapper::TabContentsWrapper(WebContents* contents)
     omnibox_search_hint_.reset(new OmniboxSearchHint(this));
   pdf_tab_observer_.reset(new PDFTabObserver(this));
   plugin_observer_.reset(new PluginObserver(this));
-  print_preview_.reset(new printing::PrintPreviewMessageHandler(contents));
-  sad_tab_observer_.reset(new SadTabObserver(contents));
   safe_browsing_tab_observer_.reset(
       new safe_browsing::SafeBrowsingTabObserver(this));
+
+#if !defined(OS_ANDROID)
+  print_preview_.reset(new printing::PrintPreviewMessageHandler(contents));
+#endif
 
   // Start the in-browser thumbnailing if the feature is enabled.
   if (CommandLine::ForCurrentProcess()->HasSwitch(
@@ -128,6 +140,16 @@ TabContentsWrapper::TabContentsWrapper(WebContents* contents)
     thumbnail_generation_observer_.reset(new ThumbnailGenerator);
     thumbnail_generation_observer_->StartThumbnailing(web_contents_.get());
   }
+
+  // If this is not an incognito window, setup to handle one-click login.
+  // We don't want to check that the profile is already connected at this time
+  // because the connected state may change while this tab is open.  Having a
+  // one-click signin helper attached does not cause problems if the profile
+  // happens to be already connected.
+#if defined(ENABLE_ONE_CLICK_SIGNIN)
+  if (OneClickSigninHelper::CanOffer(contents, false))
+      one_click_signin_helper_.reset(new OneClickSigninHelper(contents));
+#endif
 }
 
 TabContentsWrapper::~TabContentsWrapper() {

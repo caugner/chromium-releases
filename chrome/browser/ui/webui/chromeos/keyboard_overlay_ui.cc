@@ -95,6 +95,7 @@ struct I18nContentToMessage {
   { "keyboardOverlayContentBrowser", IDS_KEYBOARD_OVERLAY_CONTENT_BROWSER },
   { "keyboardOverlayCopy", IDS_KEYBOARD_OVERLAY_COPY },
   { "keyboardOverlayCut", IDS_KEYBOARD_OVERLAY_CUT },
+  { "keyboardOverlayCycleMonitor", IDS_KEYBOARD_OVERLAY_CYCLE_MONITOR },
   { "keyboardOverlayCycleThroughInputMethods",
     IDS_KEYBOARD_OVERLAY_CYCLE_THROUGH_INPUT_METHODS },
   { "keyboardOverlayDelete", IDS_KEYBOARD_OVERLAY_DELETE },
@@ -116,7 +117,6 @@ struct I18nContentToMessage {
     IDS_KEYBOARD_OVERLAY_FOCUS_PREVIOUS_PANE },
   { "keyboardOverlayFocusStatusIcon", IDS_KEYBOARD_OVERLAY_FOCUS_STATUS_ICON },
   { "keyboardOverlayFocusToolbar", IDS_KEYBOARD_OVERLAY_FOCUS_TOOLBAR },
-  { "keyboardOverlayFocusWrenchMenu", IDS_KEYBOARD_OVERLAY_FOCUS_WRENCH_MENU },
   { "keyboardOverlayGoBack", IDS_KEYBOARD_OVERLAY_GO_BACK },
   { "keyboardOverlayGoForward", IDS_KEYBOARD_OVERLAY_GO_FORWARD },
   { "keyboardOverlayHelp", IDS_KEYBOARD_OVERLAY_HELP },
@@ -152,9 +152,8 @@ struct I18nContentToMessage {
     IDS_KEYBOARD_OVERLAY_RELOAD_IGNORING_CACHE },
   { "keyboardOverlayReopenLastClosedTab",
     IDS_KEYBOARD_OVERLAY_REOPEN_LAST_CLOSED_TAB },
+  { "keyboardOverlayReportIssue", IDS_KEYBOARD_OVERLAY_REPORT_ISSUE },
   { "keyboardOverlayResetZoom", IDS_KEYBOARD_OVERLAY_RESET_ZOOM },
-  { "keyboardOverlayResizeLeft", IDS_KEYBOARD_OVERLAY_RESIZE_LEFT },
-  { "keyboardOverlayResizeRight", IDS_KEYBOARD_OVERLAY_RESIZE_RIGHT },
   { "keyboardOverlaySave", IDS_KEYBOARD_OVERLAY_SAVE },
   { "keyboardOverlayScreenshotRegion",
     IDS_KEYBOARD_OVERLAY_SCREENSHOT_REGION },
@@ -171,6 +170,7 @@ struct I18nContentToMessage {
   { "keyboardOverlayTaskManager", IDS_KEYBOARD_OVERLAY_TASK_MANAGER },
   { "keyboardOverlayToggleAccessibilityFeatures",
     IDS_KEYBOARD_OVERLAY_TOGGLE_ACCESSIBILITY_FEATURES },
+  { "keyboardOverlayToggleAppList", IDS_KEYBOARD_OVERLAY_TOGGLE_APP_LIST },
   { "keyboardOverlayToggleBookmarkBar",
     IDS_KEYBOARD_OVERLAY_TOGGLE_BOOKMARK_BAR },
   { "keyboardOverlayToggleCapsLock", IDS_KEYBOARD_OVERLAY_TOGGLE_CAPS_LOCK },
@@ -268,7 +268,7 @@ void KeyboardOverlayHandler::GetInputMethodId(const ListValue* args) {
   chromeos::input_method::InputMethodManager* manager =
       chromeos::input_method::InputMethodManager::GetInstance();
   const chromeos::input_method::InputMethodDescriptor& descriptor =
-      manager->current_input_method();
+      manager->GetCurrentInputMethod();
   StringValue param(descriptor.id());
   web_ui()->CallJavascriptFunction("initKeyboardOverlayId", param);
 }

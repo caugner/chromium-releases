@@ -18,7 +18,7 @@
 #include "chrome/browser/ui/webui/web_ui_browsertest.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/browser/renderer_host/render_view_host.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui_message_handler.h"
 #include "googleurl/src/gurl.h"
@@ -244,7 +244,8 @@ void NetInternalsTest::MessageHandler::PrerenderPage(
 
 void NetInternalsTest::MessageHandler::NavigateToPrerender(
     const ListValue* list_value) {
-  RenderViewHost* host = browser()->GetWebContentsAt(1)->GetRenderViewHost();
+  content::RenderViewHost* host =
+      browser()->GetWebContentsAt(1)->GetRenderViewHost();
   host->ExecuteJavascriptInWebFrame(string16(), ASCIIToUTF16("Click()"));
 }
 
@@ -339,6 +340,8 @@ GURL NetInternalsTest::CreatePrerenderLoaderUrl(
   std::vector<net::TestServer::StringPair> replacement_text;
   replacement_text.push_back(
       make_pair("REPLACE_WITH_PRERENDER_URL", prerender_url.spec()));
+  replacement_text.push_back(
+      make_pair("REPLACE_WITH_DESTINATION_URL", prerender_url.spec()));
   std::string replacement_path;
   EXPECT_TRUE(net::TestServer::GetFilePathWithReplacements(
       "files/prerender/prerender_loader.html",

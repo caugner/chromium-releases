@@ -1,73 +1,81 @@
 /* Copyright (c) 2012 The Chromium Authors. All rights reserved.
  * Use of this source code is governed by a BSD-style license that can be
- * found in the LICENSE file.
- */
+ * found in the LICENSE file. */
 
-/* Dev */
-
-.dev-open {
-  border-bottom: 1px solid rgb(205, 205, 205);
-  height: 32px;
-  padding-bottom: 7px;
-  padding-top: 13px;
-  -webkit-padding-start: 4px;
-  -webkit-padding-end: 3px;
-  -webkit-transition: padding 300ms, height 300ms, opacity 700ms;
+html.loading * {
+  -webkit-transition-duration: 0 !important;
 }
 
-.dev-closed {
+/* Developer mode */
+
+#dev-controls {
+  -webkit-padding-end: 3px;
+  -webkit-padding-start: 4px;
+  -webkit-transition: padding 100ms, height 100ms, opacity 100ms;
+  border-bottom: 1px solid #eee;
+  display: -webkit-box;
   height: 0;
   opacity: 0;
-  -webkit-padding-start: 4px;
-  -webkit-padding-end: 3px;
-  -webkit-transition: padding 200ms, height 200ms, opacity 200ms;
+  overflow: hidden;
 }
 
-.dev-button-visible {
-  display: inherit;
+#extension-settings.dev-mode #dev-controls {
+  -webkit-transition-duration: 250ms;
+  height: 32px;
   opacity: 1;
-  -webkit-transition: opacity 200ms;
+  padding-bottom: 7px;
+  padding-top: 13px;
 }
 
-.dev-button-hidden {
+#dev-controls-spacer {
+  -webkit-box-flex: 1;
+}
+
+#dev-toggle {
+  margin-top: 0;
+  text-align: end;
+}
+
+#extension-settings:not(.dev-mode) .developer-extras {
   display: none;
+}
+
+.developer-extras > div {
+  margin: 5px 0;
+}
+
+/* Contents */
+
+#extension-settings {
+  max-width: 718px;
+}
+
+#no-extensions-message {
+  font-weight: bold;
 }
 
 #suggest-gallery {
   -webkit-padding-start: 10px;
 }
 
-#dev-toggle {
-  display: block;
-  text-align: end;
-  margin-top: 5px;
-  -webkit-margin-end: 8px;
-}
-
-#get-more-extensions-container {
-  display: -webkit-box;
-}
-
 #get-more-extensions {
-  padding-top: 5px;
-  font-size: 15px;
-  -webkit-padding-start: 10px;
+  background: url('chrome://theme/IDR_WEBSTORE_ICON_32') no-repeat left center;
+  font-size: 1.25em;
 }
 
-#dev-table tr {
-  white-space: nowrap;
+#get-more-extensions > a {
+  -webkit-margin-start: 42px;
+  line-height: 32px;
 }
 
-/* Support full keyboard accessibility without making things ugly
-   for users who click, by hiding some focus outlines when the user
-   clicks anywhere, but showing them when the user presses any key. */
-body.hide-some-focus-outlines .extension-zippy-container {
-  outline: none;
+.empty-extension-list {
+  height: 3em;
 }
 
-/**************************************************************************/
-/* TODO(estade): rules above this line are old and should probably be
- * retired.*/
+#extension-settings-list:not(.empty-extension-list) ~ #no-extensions,
+.empty-extension-list ~ #get-more-extensions {
+  display: none;
+}
 
 .extension-list-item-wrapper {
   margin: 23px 0;
@@ -79,7 +87,7 @@ body.hide-some-focus-outlines .extension-zippy-container {
   min-height: 48px;
 }
 
-html[dir="rtl"] .extension-list-item {
+html[dir='rtl'] .extension-list-item {
   background-position: right;
 }
 
@@ -98,7 +106,6 @@ html[dir="rtl"] .extension-list-item {
 
 .extension-description {
   -webkit-padding-end: 5px;
-  color: rgb(151, 156, 160);
   font-size: 13px;
   margin: 5px 0;
   white-space: normal;
@@ -109,7 +116,17 @@ html[dir="rtl"] .extension-list-item {
   -webkit-padding-start: 55px;
 }
 
+.extension-description,
+.extension-list-item-wrapper.disabled-extension .extension-details,
+.enable-checkbox input:disabled + .enable-checkbox-text {
+  color: rgb(151, 156, 160);
+}
+
 .enable-checkbox-text {
+  -webkit-margin-start: 0.4em;
+}
+
+.checkbox {
   display: inline-block;
 }
 
@@ -117,12 +134,15 @@ html[dir="rtl"] .extension-list-item {
   font-weight: bold;
 }
 
-.extension-list-item-wrapper.disabled-extension .enabled-text {
+.extension-list-item-wrapper.disabled-extension .enabled-text,
+.extension-list-item-wrapper:not(.disabled-extension) .enable-text,
+.extension-list-item-wrapper.disabled-extension .optional-controls,
+.extension-list-item-wrapper.disabled-extension .butter-bar {
   display: none;
 }
 
-.extension-list-item-wrapper:not(.disabled-extension) .enable-text {
-  display: none;
+.load-path > span {
+  word-wrap: break-word;
 }
 
 .terminated-reload-link {
@@ -132,6 +152,13 @@ html[dir="rtl"] .extension-list-item {
 .extension-list-item a {
   -webkit-margin-start: 0.5em;
   display: inline-block;
+}
+
+.butter-bar {
+  background: rgb(255, 242, 153);
+  border-radius: 3px;
+  margin-top: 5px;
+  padding: 2px 5px;
 }
 
 /* Overlays */
@@ -155,4 +182,8 @@ html[dir="rtl"] .extension-list-item {
 
 .extension-list-item:not(:hover) .trash:not(:focus) {
   opacity: 0;
+}
+
+.extension-list-item-wrapper.may-not-disable .trash {
+  visibility: hidden;
 }

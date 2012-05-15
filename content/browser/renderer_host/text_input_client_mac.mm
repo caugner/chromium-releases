@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,11 @@
 #include "base/memory/singleton.h"
 #include "base/metrics/histogram.h"
 #include "base/time.h"
-#include "content/browser/renderer_host/render_widget_host.h"
+#include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/common/text_input_client_messages.h"
+
+using content::RenderWidgetHost;
+using content::RenderWidgetHostImpl;
 
 // The amount of time in milliseconds that the browser process will wait for a
 // response from the renderer.
@@ -35,8 +38,9 @@ NSUInteger TextInputClientMac::GetCharacterIndexAtPoint(RenderWidgetHost* rwh,
   base::TimeTicks start = base::TimeTicks::Now();
 
   BeforeRequest();
-  rwh->Send(new TextInputClientMsg_CharacterIndexForPoint(rwh->routing_id(),
-      point));
+  RenderWidgetHostImpl* rwhi = RenderWidgetHostImpl::From(rwh);
+  rwhi->Send(new TextInputClientMsg_CharacterIndexForPoint(rwhi->GetRoutingID(),
+                                                          point));
   condition_.TimedWait(base::TimeDelta::FromMilliseconds(kWaitTimeout));
   AfterRequest();
 
@@ -52,8 +56,10 @@ NSRect TextInputClientMac::GetFirstRectForRange(RenderWidgetHost* rwh,
   base::TimeTicks start = base::TimeTicks::Now();
 
   BeforeRequest();
-  rwh->Send(new TextInputClientMsg_FirstRectForCharacterRange(rwh->routing_id(),
-      ui::Range(range)));
+  RenderWidgetHostImpl* rwhi = RenderWidgetHostImpl::From(rwh);
+  rwhi->Send(
+      new TextInputClientMsg_FirstRectForCharacterRange(rwhi->GetRoutingID(),
+                                                        ui::Range(range)));
   condition_.TimedWait(base::TimeDelta::FromMilliseconds(kWaitTimeout));
   AfterRequest();
 
@@ -70,8 +76,9 @@ NSAttributedString* TextInputClientMac::GetAttributedSubstringFromRange(
   base::TimeTicks start = base::TimeTicks::Now();
 
   BeforeRequest();
-  rwh->Send(new TextInputClientMsg_StringForRange(rwh->routing_id(),
-      ui::Range(range)));
+  RenderWidgetHostImpl* rwhi = RenderWidgetHostImpl::From(rwh);
+  rwhi->Send(new TextInputClientMsg_StringForRange(rwhi->GetRoutingID(),
+                                                   ui::Range(range)));
   condition_.TimedWait(base::TimeDelta::FromMilliseconds(kWaitTimeout));
   AfterRequest();
 

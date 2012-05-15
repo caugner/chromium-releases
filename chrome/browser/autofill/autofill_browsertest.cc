@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,15 +26,18 @@
 #include "chrome/renderer/translate_helper.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/browser/renderer_host/mock_render_process_host.h"
-#include "content/browser/renderer_host/render_view_host.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/test/mock_render_process_host.h"
+#include "content/test/test_renderer_host.h"
 #include "content/test/test_url_fetcher_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 
+using content::RenderViewHost;
+using content::RenderViewHostTester;
 using content::WebContents;
 
 static const char* kDataURIPrefix = "data:text/html;charset=utf-8,";
@@ -474,7 +477,7 @@ IN_PROC_BROWSER_TEST_F(AutofillTest, AutofillFormWithRepeatedField) {
 #if defined(OS_WIN)
 // Has been observed to fail on windows.  crbug.com/100062
 #define MAYBE_AutofillFormWithNonAutofillableField \
-    FLAKY_AutofillFormWithNonAutofillableField
+    DISABLED_AutofillFormWithNonAutofillableField
 #else
 #define MAYBE_AutofillFormWithNonAutofillableField \
     AutofillFormWithNonAutofillableField
@@ -690,7 +693,8 @@ IN_PROC_BROWSER_TEST_F(AutofillTest, AutofillAfterTranslate) {
   ASSERT_NO_FATAL_FAILURE(ui_test_utils::NavigateToURL(browser(), url));
 
   // Get translation bar.
-  render_view_host()->OnMessageReceived(
+  RenderViewHostTester::TestOnMessageReceived(
+      render_view_host(),
       ChromeViewHostMsg_TranslateLanguageDetermined(0, "ja", true));
   TranslateInfoBarDelegate* infobar =
       browser()->GetSelectedTabContentsWrapper()->infobar_tab_helper()->

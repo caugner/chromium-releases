@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,13 +7,16 @@
 #import <Cocoa/Cocoa.h>
 
 #include "base/message_loop.h"
-#include "content/browser/renderer_host/mock_render_process_host.h"
-#include "content/browser/renderer_host/render_widget_host.h"
+#include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/common/view_messages.h"
+#include "content/test/mock_render_process_host.h"
 #include "content/test/test_browser_context.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
+
+using content::MockRenderProcessHost;
+using content::RenderWidgetHostImpl;
 
 class RenderWidgetHostViewMacEditCommandHelperTest : public PlatformTest {
 };
@@ -69,18 +72,18 @@ namespace {
 }  // namespace
 
 // Create a RenderWidget for which we can filter messages.
-class RenderWidgetHostEditCommandCounter : public RenderWidgetHost {
+class RenderWidgetHostEditCommandCounter : public RenderWidgetHostImpl {
  public:
   RenderWidgetHostEditCommandCounter(content::RenderProcessHost* process,
                                      int routing_id)
-    : RenderWidgetHost(process, routing_id),
+    : RenderWidgetHostImpl(process, routing_id),
       edit_command_message_count_(0) {
   }
 
   virtual bool Send(IPC::Message* message) {
     if (message->type() == ViewMsg_ExecuteEditCommand::ID)
       edit_command_message_count_++;
-    return RenderWidgetHost::Send(message);
+    return RenderWidgetHostImpl::Send(message);
   }
 
   unsigned int edit_command_message_count_;
@@ -103,7 +106,8 @@ TEST_F(RenderWidgetHostViewMacEditCommandHelperTest,
 
   // RenderWidgetHostViewMac self destructs (RenderWidgetHostViewMacCocoa
   // takes ownership) so no need to delete it ourselves.
-  RenderWidgetHostViewMac* rwhvm = new RenderWidgetHostViewMac(&render_widget);
+  RenderWidgetHostViewMac* rwhvm = static_cast<RenderWidgetHostViewMac*>(
+      content::RenderWidgetHostView::CreateViewForWidget(&render_widget));
 
   RenderWidgetHostViewMacOwner* rwhwvm_owner =
       [[[RenderWidgetHostViewMacOwner alloc]

@@ -1,15 +1,21 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/path_service.h"
 #include "base/test/test_timeouts.h"
 #include "chrome/test/automation/tab_proxy.h"
-#include "chrome/test/base/ui_test_utils.h"
 #include "chrome/test/ui/ui_layout_test.h"
+#include "content/public/common/content_paths.h"
 #include "content/public/common/content_switches.h"
 #include "net/base/net_util.h"
+#include "webkit/dom_storage/dom_storage_types.h"
+
+#ifdef ENABLE_NEW_DOM_STORAGE_BACKEND
+// No longer applicable.
+#else
 
 static const char* kRootFiles[] = {
   "clear.html",
@@ -73,9 +79,11 @@ class DOMStorageTest : public UILayoutTest {
     scoped_refptr<TabProxy> tab(GetActiveTab());
     ASSERT_TRUE(tab.get());
 
-    const FilePath dir(FILE_PATH_LITERAL("layout_tests"));
-    const FilePath file(FILE_PATH_LITERAL("clear_dom_storage.html"));
-    GURL url = ui_test_utils::GetTestUrl(dir, file);
+    FilePath dir;
+    PathService::Get(content::DIR_TEST_DATA, &dir);
+    GURL url = net::FilePathToFileURL(
+        dir.AppendASCII("layout_tests").AppendASCII("clear_dom_storage.html"));
+
     ASSERT_TRUE(tab->SetCookie(url, ""));
     ASSERT_TRUE(tab->NavigateToURL(url));
 
@@ -96,11 +104,8 @@ class DOMStorageTest : public UILayoutTest {
 };
 
 
-#if defined(OS_WIN)
-// http://crbug.com/101996
-#define RootLayoutTests FLAKY_RootLayoutTests
-#endif
-TEST_F(DOMStorageTest, RootLayoutTests) {
+// http://crbug.com/113611
+TEST_F(DOMStorageTest, FAILS_RootLayoutTests) {
   InitializeForLayoutTest(test_dir_, FilePath(), kNoHttpPort);
   AddJSTestResources();
   AddResourceForLayoutTest(test_dir_, FilePath().AppendASCII("script-tests"));
@@ -108,7 +113,7 @@ TEST_F(DOMStorageTest, RootLayoutTests) {
 }
 
 // Flakily fails on all platforms.  http://crbug.com/102641
-TEST_F(DOMStorageTest, FLAKY_EventLayoutTests) {
+TEST_F(DOMStorageTest, DISABLED_EventLayoutTests) {
   InitializeForLayoutTest(test_dir_, FilePath().AppendASCII("events"),
                           kNoHttpPort);
   AddJSTestResources();
@@ -193,8 +198,13 @@ TEST_F(DomStorageEmptyDatabaseTest, EmptyDirAfterGet) {
   EXPECT_TRUE(StorageDirIsEmpty());
 }
 
+#if defined(OS_WIN)
 // Flaky, see http://crbug.com/73776
-TEST_F(DomStorageEmptyDatabaseTest, FLAKY_NonEmptyDirAfterSet) {
+#define MAYBE_NonEmptyDirAfterSet DISABLED_NonEmptyDirAfterSet
+#else
+#define MAYBE_NonEmptyDirAfterSet NonEmptyDirAfterSet
+#endif
+TEST_F(DomStorageEmptyDatabaseTest, MAYBE_NonEmptyDirAfterSet) {
   NavigateToURL(TestUrl());
   ASSERT_TRUE(StorageDirIsEmpty());
 
@@ -208,3 +218,5 @@ TEST_F(DomStorageEmptyDatabaseTest, FLAKY_NonEmptyDirAfterSet) {
   QuitBrowser();
   EXPECT_TRUE(StorageDirIsEmpty());
 }
+
+#endif  // ENABLE_NEW_DOM_STORAGE_BACKEND

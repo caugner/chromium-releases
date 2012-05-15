@@ -18,10 +18,11 @@
 #include "ui/base/l10n/l10n_util_win.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/win/hwnd_util.h"
-#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/canvas.h"
 #include "ui/gfx/canvas_skia_paint.h"
 #include "ui/gfx/favicon_size.h"
 #include "ui/gfx/icon_util.h"
+#include "ui/gfx/image/image.h"
 #include "ui/gfx/point.h"
 #include "ui/views/controls/tree/tree_view_controller.h"
 #include "ui/views/focus/focus_manager.h"
@@ -662,14 +663,13 @@ HIMAGELIST TreeView::CreateImageList() {
   std::vector<SkBitmap> model_images;
   model_->GetIcons(&model_images);
 
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   bool rtl = base::i18n::IsRTL();
   // Creates the default image list used for trees.
-  SkBitmap* closed_icon =
-      ResourceBundle::GetSharedInstance().GetBitmapNamed(
-          (rtl ? IDR_FOLDER_CLOSED_RTL : IDR_FOLDER_CLOSED));
-  SkBitmap* opened_icon =
-      ResourceBundle::GetSharedInstance().GetBitmapNamed(
-          (rtl ? IDR_FOLDER_OPEN_RTL : IDR_FOLDER_OPEN));
+  const SkBitmap* closed_icon = rb.GetImageNamed(
+      (rtl ? IDR_FOLDER_CLOSED_RTL : IDR_FOLDER_CLOSED)).ToSkBitmap();
+  const SkBitmap* opened_icon = rb.GetImageNamed(
+      (rtl ? IDR_FOLDER_OPEN_RTL : IDR_FOLDER_OPEN)).ToSkBitmap();
   int width = closed_icon->width();
   int height = closed_icon->height();
   DCHECK(opened_icon->width() == width && opened_icon->height() == height);
@@ -694,7 +694,7 @@ HIMAGELIST TreeView::CreateImageList() {
       // IDR_FOLDER_CLOSED if they aren't already.
       if (model_images[i].width() != width ||
           model_images[i].height() != height) {
-        gfx::CanvasSkia canvas(gfx::Size(width, height), false);
+        gfx::Canvas canvas(gfx::Size(width, height), false);
 
         // Draw our icons into this canvas.
         int height_offset = (height - model_images[i].height()) / 2;
@@ -749,7 +749,7 @@ LRESULT CALLBACK TreeView::TreeWndProc(HWND window,
 
       HDC dc = skia::BeginPlatformPaint(canvas.sk_canvas());
       if (base::i18n::IsRTL()) {
-        // gfx::CanvasSkia ends up configuring the DC with a mode of
+        // gfx::Canvas ends up configuring the DC with a mode of
         // GM_ADVANCED. For some reason a graphics mode of ADVANCED triggers
         // all the text to be mirrored when RTL. Set the mode back to COMPATIBLE
         // and explicitly set the layout. Additionally SetWorldTransform and

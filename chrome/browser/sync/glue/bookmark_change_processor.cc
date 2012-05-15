@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,9 +28,11 @@ using content::BrowserThread;
 
 namespace browser_sync {
 
+static const char kMobileBookmarksTag[] = "synced_bookmarks";
+
 BookmarkChangeProcessor::BookmarkChangeProcessor(
     BookmarkModelAssociator* model_associator,
-    UnrecoverableErrorHandler* error_handler)
+    DataTypeErrorHandler* error_handler)
     : ChangeProcessor(error_handler),
       bookmark_model_(NULL),
       model_associator_(model_associator) {
@@ -88,7 +90,8 @@ void BookmarkChangeProcessor::RemoveOneSyncNode(
     sync_api::WriteTransaction* trans, const BookmarkNode* node) {
   sync_api::WriteNode sync_node(trans);
   if (!model_associator_->InitSyncNodeFromChromeId(node->id(), &sync_node)) {
-    error_handler()->OnUnrecoverableError(FROM_HERE, std::string());
+    error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
+                                                        std::string());
     return;
   }
   // This node should have no children.
@@ -164,7 +167,7 @@ void BookmarkChangeProcessor::BookmarkNodeAdded(BookmarkModel* model,
 int64 BookmarkChangeProcessor::CreateSyncNode(const BookmarkNode* parent,
     BookmarkModel* model, int index, sync_api::WriteTransaction* trans,
     BookmarkModelAssociator* associator,
-    UnrecoverableErrorHandler* error_handler) {
+    DataTypeErrorHandler* error_handler) {
   const BookmarkNode* child = parent->GetChild(index);
   DCHECK(child);
 
@@ -211,7 +214,8 @@ void BookmarkChangeProcessor::BookmarkNodeChanged(BookmarkModel* model,
   // Lookup the sync node that's associated with |node|.
   sync_api::WriteNode sync_node(&trans);
   if (!model_associator_->InitSyncNodeFromChromeId(node->id(), &sync_node)) {
-    error_handler()->OnUnrecoverableError(FROM_HERE, std::string());
+    error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
+                                                        std::string());
     return;
   }
 
@@ -245,7 +249,8 @@ void BookmarkChangeProcessor::BookmarkNodeMoved(BookmarkModel* model,
   // Lookup the sync node that's associated with |child|.
   sync_api::WriteNode sync_node(&trans);
   if (!model_associator_->InitSyncNodeFromChromeId(child->id(), &sync_node)) {
-    error_handler()->OnUnrecoverableError(FROM_HERE, std::string());
+    error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
+                                                        std::string());
     return;
   }
 
@@ -275,7 +280,8 @@ void BookmarkChangeProcessor::BookmarkNodeChildrenReordered(
     sync_api::WriteNode sync_child(&trans);
     if (!model_associator_->InitSyncNodeFromChromeId(node->GetChild(i)->id(),
                                                      &sync_child)) {
-      error_handler()->OnUnrecoverableError(FROM_HERE, std::string());
+      error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
+                                                          std::string());
       return;
     }
     DCHECK_EQ(sync_child.GetParentId(),
@@ -414,6 +420,11 @@ void BookmarkChangeProcessor::ApplyChangesFromSyncModel(
           foster_parent = model->AddFolder(model->other_node(),
                                            model->other_node()->child_count(),
                                            string16());
+          if (!foster_parent) {
+            error_handler()->OnUnrecoverableError(FROM_HERE,
+                "Failed to create foster parent.");
+            return;
+          }
         }
         for (int i = dst->child_count() - 1; i >= 0; --i) {
           model->Move(dst->GetChild(i), foster_parent,
@@ -434,12 +445,32 @@ void BookmarkChangeProcessor::ApplyChangesFromSyncModel(
 
       sync_api::ReadNode src(trans);
       if (!src.InitByIdLookup(it->id)) {
-        error_handler()->OnUnrecoverableError(FROM_HERE,
+        error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
             "ApplyModelChanges was passed a bad ID");
         return;
       }
 
-      CreateOrUpdateBookmarkNode(&src, model);
+      if (!CreateOrUpdateBookmarkNode(&src, model)) {
+        // Because the Synced Bookmarks node can be created server side, it's
+        // possible it'll arrive at the client as an update. In that case it
+        // won't have been associated at startup, the GetChromeNodeFromSyncId
+        // call above will return NULL, and we won't detect it as a permanent
+        // node, resulting in us trying to create it here (which will
+        // fail). Therefore, we add special logic here just to detect the
+        // Synced Bookmarks folder.
+        sync_api::ReadNode synced_bookmarks(trans);
+        if (synced_bookmarks.InitByTagLookup(kMobileBookmarksTag) &&
+            synced_bookmarks.GetId() == it->id) {
+          // This is a newly created Synced Bookmarks node. Associate it.
+          model_associator_->Associate(model->mobile_node(), it->id);
+        } else {
+          // We ignore bookmarks we can't add. Chances are this is caused by
+          // a bookmark that was not fully associated.
+          LOG(ERROR) << "Failed to create bookmark node with title "
+                     << src.GetTitle() + " and url "
+                     << src.GetURL().possibly_invalid_spec();
+        }
+      }
     }
   }
   // Clean up the temporary node.
@@ -477,7 +508,8 @@ const BookmarkNode* BookmarkChangeProcessor::CreateOrUpdateBookmarkNode(
       src->GetId());
   if (!dst) {
     dst = CreateBookmarkNode(src, parent, model, index);
-    model_associator_->Associate(dst, src->GetId());
+    if (dst)
+      model_associator_->Associate(dst, src->GetId());
   } else {
     // URL and is_folder are not expected to change.
     // TODO(ncarter): Determine if such changes should be legal or not.
@@ -515,7 +547,8 @@ const BookmarkNode* BookmarkChangeProcessor::CreateBookmarkNode(
     node = model->AddURL(parent, index,
                          UTF8ToUTF16(sync_node->GetTitle()),
                          sync_node->GetURL());
-    SetBookmarkFavicon(sync_node, node, model);
+    if (node)
+      SetBookmarkFavicon(sync_node, node, model);
   }
   return node;
 }

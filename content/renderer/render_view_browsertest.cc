@@ -10,6 +10,7 @@
 #include "content/common/intents_messages.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/native_web_keyboard_event.h"
+#include "content/public/common/bindings_policy.h"
 #include "content/renderer/render_view_impl.h"
 #include "content/test/render_view_test.h"
 #include "net/base/net_errors.h"
@@ -18,12 +19,15 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLError.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIntentServiceInfo.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebWindowFeatures.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/range/range.h"
 #include "ui/gfx/codec/jpeg_codec.h"
 #include "webkit/glue/web_io_operators.h"
 
 using WebKit::WebFrame;
+using WebKit::WebInputEvent;
+using WebKit::WebMouseEvent;
 using WebKit::WebString;
 using WebKit::WebTextDirection;
 using WebKit::WebURLError;
@@ -57,9 +61,106 @@ TEST_F(RenderViewImplTest, OnNavStateChanged) {
       ViewHostMsg_UpdateState::ID));
 }
 
+TEST_F(RenderViewImplTest, DecideNavigationPolicy) {
+  // Navigations to normal HTTP URLs can be handled locally.
+  WebKit::WebURLRequest request(GURL("http://foo.com"));
+  WebKit::WebNavigationPolicy policy = view()->decidePolicyForNavigation(
+      GetMainFrame(),
+      request,
+      WebKit::WebNavigationTypeLinkClicked,
+      WebKit::WebNode(),
+      WebKit::WebNavigationPolicyCurrentTab,
+      false);
+  EXPECT_EQ(WebKit::WebNavigationPolicyCurrentTab, policy);
+
+  // Verify that form posts to WebUI URLs will be sent to the browser process.
+  WebKit::WebURLRequest form_request(GURL("chrome://foo"));
+  form_request.setHTTPMethod("POST");
+  policy = view()->decidePolicyForNavigation(
+      GetMainFrame(),
+      form_request,
+      WebKit::WebNavigationTypeFormSubmitted,
+      WebKit::WebNode(),
+      WebKit::WebNavigationPolicyCurrentTab,
+      false);
+  EXPECT_EQ(WebKit::WebNavigationPolicyIgnore, policy);
+
+  // Verify that popup links to WebUI URLs also are sent to browser.
+  WebKit::WebURLRequest popup_request(GURL("chrome://foo"));
+  policy = view()->decidePolicyForNavigation(
+      GetMainFrame(),
+      popup_request,
+      WebKit::WebNavigationTypeLinkClicked,
+      WebKit::WebNode(),
+      WebKit::WebNavigationPolicyNewForegroundTab,
+      false);
+  EXPECT_EQ(WebKit::WebNavigationPolicyIgnore, policy);
+}
+
+TEST_F(RenderViewImplTest, DecideNavigationPolicyForWebUI) {
+  // Enable bindings to simulate a WebUI view.
+  view()->OnAllowBindings(content::BINDINGS_POLICY_WEB_UI);
+
+  // Navigations to normal HTTP URLs will be sent to browser process.
+  WebKit::WebURLRequest request(GURL("http://foo.com"));
+  WebKit::WebNavigationPolicy policy = view()->decidePolicyForNavigation(
+      GetMainFrame(),
+      request,
+      WebKit::WebNavigationTypeLinkClicked,
+      WebKit::WebNode(),
+      WebKit::WebNavigationPolicyCurrentTab,
+      false);
+  EXPECT_EQ(WebKit::WebNavigationPolicyIgnore, policy);
+
+  // Navigations to WebUI URLs will also be sent to browser process.
+  WebKit::WebURLRequest webui_request(GURL("chrome://foo"));
+  policy = view()->decidePolicyForNavigation(
+      GetMainFrame(),
+      webui_request,
+      WebKit::WebNavigationTypeLinkClicked,
+      WebKit::WebNode(),
+      WebKit::WebNavigationPolicyCurrentTab,
+      false);
+  EXPECT_EQ(WebKit::WebNavigationPolicyIgnore, policy);
+
+  // Verify that form posts to data URLs will be sent to the browser process.
+  WebKit::WebURLRequest data_request(GURL("data:text/html,foo"));
+  data_request.setHTTPMethod("POST");
+  policy = view()->decidePolicyForNavigation(
+      GetMainFrame(),
+      data_request,
+      WebKit::WebNavigationTypeFormSubmitted,
+      WebKit::WebNode(),
+      WebKit::WebNavigationPolicyCurrentTab,
+      false);
+  EXPECT_EQ(WebKit::WebNavigationPolicyIgnore, policy);
+
+  // Verify that a popup that creates a view first and then navigates to a
+  // normal HTTP URL will be sent to the browser process, even though the
+  // new view does not have any enabled_bindings_.
+  WebKit::WebURLRequest popup_request(GURL("http://foo.com"));
+  WebKit::WebView* new_web_view = view()->createView(
+      GetMainFrame(), popup_request, WebKit::WebWindowFeatures(), "foo",
+      WebKit::WebNavigationPolicyNewForegroundTab);
+  RenderViewImpl* new_view = RenderViewImpl::FromWebView(new_web_view);
+  policy = new_view->decidePolicyForNavigation(
+      new_web_view->mainFrame(),
+      popup_request,
+      WebKit::WebNavigationTypeLinkClicked,
+      WebKit::WebNode(),
+      WebKit::WebNavigationPolicyNewForegroundTab,
+      false);
+  EXPECT_EQ(WebKit::WebNavigationPolicyIgnore, policy);
+
+  // Clean up after the new view so we don't leak it.
+  new_view->Close();
+  new_view->Release();
+}
+
 // Ensure the RenderViewImpl sends an ACK to a SwapOut request, even if it is
 // already swapped out.  http://crbug.com/93427.
 TEST_F(RenderViewImplTest, SendSwapOutACK) {
+  LoadHTML("<div>Page A</div>");
   int initial_page_id = view()->GetPageId();
 
   // Respond to a swap out request.
@@ -92,6 +193,22 @@ TEST_F(RenderViewImplTest, SendSwapOutACK) {
   const IPC::Message* msg2 = render_thread_->sink().GetUniqueMessageMatching(
       ViewHostMsg_SwapOut_ACK::ID);
   ASSERT_TRUE(msg2);
+
+  // If we navigate back to this RenderView, ensure we don't send a state
+  // update for the swapped out URL.  (http://crbug.com/72235)
+  ViewMsg_Navigate_Params nav_params;
+  nav_params.url = GURL("data:text/html,<div>Page B</div>");
+  nav_params.navigation_type = ViewMsg_Navigate_Type::NORMAL;
+  nav_params.transition = content::PAGE_TRANSITION_TYPED;
+  nav_params.current_history_list_length = 1;
+  nav_params.current_history_list_offset = 0;
+  nav_params.pending_history_list_offset = 1;
+  nav_params.page_id = -1;
+  view()->OnNavigate(nav_params);
+  ProcessPendingMessages();
+  const IPC::Message* msg3 = render_thread_->sink().GetUniqueMessageMatching(
+      ViewHostMsg_UpdateState::ID);
+  EXPECT_FALSE(msg3);
 }
 
 // Test that we get the correct UpdateState message when we go back twice
@@ -1149,4 +1266,27 @@ TEST_F(RenderViewImplTest, FindTitleForIntentsPage) {
   EXPECT_EQ(ASCIIToUTF16("a"), action);
   EXPECT_EQ(ASCIIToUTF16("t"), type);
   EXPECT_EQ(ASCIIToUTF16("title"), title);
+}
+
+TEST_F(RenderViewImplTest, ContextMenu) {
+  LoadHTML("<div>Page A</div>");
+
+  // Create a right click in the center of the iframe. (I'm hoping this will
+  // make this a bit more robust in case of some other formatting or other bug.)
+  WebMouseEvent mouse_event;
+  mouse_event.type = WebInputEvent::MouseDown;
+  mouse_event.button = WebMouseEvent::ButtonRight;
+  mouse_event.x = 250;
+  mouse_event.y = 250;
+  mouse_event.globalX = 250;
+  mouse_event.globalY = 250;
+
+  SendWebMouseEvent(mouse_event);
+
+  // Now simulate the corresponding up event which should display the menu
+  mouse_event.type = WebInputEvent::MouseUp;
+  SendWebMouseEvent(mouse_event);
+
+  EXPECT_TRUE(render_thread_->sink().GetUniqueMessageMatching(
+      ViewHostMsg_ContextMenu::ID));
 }

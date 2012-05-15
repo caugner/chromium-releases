@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -178,43 +178,3 @@ void InitAndroidTestStub() {
 
   MessageLoop::InitMessagePumpForUIFactory(&CreateMessagePumpForUIStub);
 }
-
-// TODO(michaelbai): The below DetachFromVM was added because we excluded the
-// jni_android.{h|cc} which require JNI to compile. Remove them when those 2
-// files added.
-namespace base {
-
-namespace android {
-
-void DetachFromVM() {}
-
-}  // namespace android
-
-// TODO(michaelbai): The below MessagePumpForUI were added because we excluded
-// message_pump_android.{h|cc} which require JNI to compile. Remove them when
-// those 2 files added.
-MessagePumpForUI::MessagePumpForUI()
-    : state_(NULL) {
-}
-
-MessagePumpForUI::~MessagePumpForUI() {}
-
-void MessagePumpForUI::Run(Delegate* delegate) {}
-
-void MessagePumpForUI::Start(Delegate* delegate) {}
-
-void MessagePumpForUI::Quit() {}
-
-void MessagePumpForUI::ScheduleWork() {}
-
-void MessagePumpForUI::ScheduleDelayedWork(const TimeTicks& delayed_work_time) {
-}
-
-// TODO(michaelbai): The below PathProviderAndroid was added because we
-// excluded base_paths_android.cc which requires JNI to compile. Remove them
-// when this file added.
-bool PathProviderAndroid(int key, FilePath* result) {
-  return false;
-}
-
-}  // namespace base

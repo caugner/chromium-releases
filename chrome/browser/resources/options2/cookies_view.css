@@ -1,10 +1,14 @@
-/*
-Copyright (c) 2011 The Chromium Authors. All rights reserved.
-Use of this source code is governed by a BSD-style license that can be
-found in the LICENSE file.
-*/
+/* Copyright (c) 2012 The Chromium Authors. All rights reserved.
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file. */
 
-/* styles for the cookies list elements in cookies_view.html */
+/* Styles for the cookies list page. */
+#cookiesViewPage {
+  margin-left: -15px;
+  min-width: 700px;
+}
+
+/* Styles for the cookies list elements in cookies_view.html. */
 #remove-all-cookies-search-column {
   bottom: 10px;
   position: absolute;
@@ -27,7 +31,7 @@ html[dir=rtl] #remove-all-cookies-search-column {
   margin: 10px 0;
 }
 
-/* notice the width and padding for these columns match up with those below */
+/* Notice the width and padding for these columns match up with those below. */
 #cookies-site-column {
   display: inline-block;
   font-weight: bold;
@@ -45,18 +49,17 @@ html[dir=rtl] #remove-all-cookies-search-column {
   margin: 0;
 }
 
-
-/* enable animating the height of items */
+/* Enable animating the height of items. */
 list.cookie-list .deletable-item {
-  -webkit-transition: height .15s ease-in-out;
+  -webkit-transition: height 150ms ease-in-out;
 }
 
-/* disable webkit-box display */
+/* Disable webkit-box display. */
 list.cookie-list .deletable-item > :first-child {
   display: block;
 }
 
-/* force the X for deleting an origin to stay at the top */
+/* Force the X for deleting an origin to stay at the top. */
 list.cookie-list > .deletable-item > .close-button {
   position: absolute;
   right: 2px;
@@ -68,10 +71,9 @@ html[dir=rtl] list.cookie-list > .deletable-item > .close-button {
   right: auto;
 }
 
-
-/* styles for the site (aka origin) and its summary */
+/* Styles for the site (aka origin) and its summary. */
 .cookie-site {
-  /* notice that the width, margin, and padding match up with those above */
+  /* Notice that the width, margin, and padding match up with those above. */
   -webkit-margin-end: 2px;
   -webkit-padding-start: 5px;
   display: inline-block;
@@ -99,15 +101,15 @@ list.cookie-list > .deletable-item[selected] .cookie-data {
 }
 
 
-/* styles for the individual items (cookies, etc.) */
+/* Styles for the individual items (cookies, etc.). */
 .cookie-items {
-  /* notice that the margin and padding match up with those above */
+  /* Notice that the margin and padding match up with those above. */
   -webkit-margin-start: 11em;
   -webkit-padding-start: 7px;
-  -webkit-transition: .15s ease-in-out;
+  -webkit-transition: 150ms ease-in-out;
   height: 0;
   opacity: 0;
-  /* make the cookie items wrap correctly */
+  /* Make the cookie items wrap correctly. */
   white-space: normal;
 }
 
@@ -122,9 +124,9 @@ list.cookie-list > .deletable-item[selected] .cookie-data {
 }
 
 .cookie-items .cookie-item {
-  background: #E0E9F5;
+  background: rgb(224, 233, 245);
+  border: 1px solid rgb(131, 146, 174);
   border-radius: 5px;
-  border: 1px solid #8392AE;
   display: inline-block;
   font-size: 85%;
   height: auto;
@@ -138,26 +140,25 @@ list.cookie-list > .deletable-item[selected] .cookie-data {
 }
 
 .cookie-items .cookie-item:hover {
-  background: #EEF3F9;
-  border-color: #647187;
+  background: rgb(238, 243, 249);
+  border-color: rgb(100, 113, 135);
 }
 
 .cookie-items .cookie-item[selected] {
-  background: #F5F8F8;
+  background: rgb(245, 248, 248);
   border-color: #B2B2B2;
 }
 
 .cookie-items .cookie-item[selected]:hover {
-  background: #F5F8F8;
-  border-color: #647187;
+  background: rgb(245, 248, 248);
+  border-color: rgb(100, 113, 135);
 }
 
-
-/* styles for the cookie details box */
+/* Styles for the cookie details box. */
 .cookie-details {
-  background: #F5F8F8;
-  border-radius: 5px;
+  background: rgb(245, 248, 248);
   border: 1px solid #B2B2B2;
+  border-radius: 5px;
   margin-top: 2px;
   padding: 5px;
 }

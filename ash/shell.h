@@ -10,23 +10,30 @@
 #include <vector>
 
 #include "ash/ash_export.h"
+#include "ash/wm/shelf_auto_hide_behavior.h"
 #include "base/basictypes.h"
+#include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/compiler_specific.h"
-#include "base/memory/weak_ptr.h"
+#include "base/observer_list.h"
+#include "ui/gfx/size.h"
+#include "ui/gfx/insets.h"
 
 class CommandLine;
+class SkBitmap;
 
 namespace aura {
 class EventFilter;
+class Monitor;
 class RootWindow;
 class Window;
 }
 namespace gfx {
 class Point;
 class Rect;
-class Size;
+}
+namespace ui {
+class Layer;
 }
 namespace views {
 class NonClientFrameView;
@@ -36,9 +43,16 @@ class Widget;
 namespace ash {
 
 class AcceleratorController;
+class DesktopBackgroundController;
 class Launcher;
+class NestedDispatcherController;
 class PowerButtonController;
+class ScreenAsh;
 class ShellDelegate;
+class ShellObserver;
+class SystemTrayDelegate;
+class SystemTray;
+class UserWallpaperDelegate;
 class VideoDetector;
 class WindowCycleController;
 
@@ -47,9 +61,17 @@ class ActivationController;
 class AcceleratorFilter;
 class AppList;
 class DragDropController;
+class EventClientImpl;
+class FocusCycler;
 class InputMethodEventFilter;
+class KeyRewriterEventFilter;
+class MonitorController;
+class PartialScreenshotEventFilter;
+class ResizeShadowController;
+class RootWindowEventFilter;
 class RootWindowLayoutManager;
 class ShadowController;
+class ShelfLayoutManager;
 class StackingController;
 class TooltipController;
 class VisibilityController;
@@ -64,12 +86,24 @@ class WorkspaceController;
 // takes ownership of the Shell.
 class ASH_EXPORT Shell {
  public:
-  // In compact window mode we fill the screen with a single maximized window,
-  // similar to ChromeOS R17 and earlier.  In normal mode we have draggable
-  // windows.
-  enum WindowMode {
-    NORMAL_MODE,
-    COMPACT_MODE
+  enum Direction {
+    FORWARD,
+    BACKWARD
+  };
+
+  // Accesses private data from a Shell for testing.
+  class ASH_EXPORT TestApi {
+   public:
+    explicit TestApi(Shell* shell);
+
+    internal::RootWindowLayoutManager* root_window_layout();
+    internal::InputMethodEventFilter* input_method_event_filter();
+    internal::WorkspaceController* workspace_controller();
+
+   private:
+    Shell* shell_;  // not owned
+
+    DISALLOW_COPY_AND_ASSIGN(TestApi);
   };
 
   // A shell must be explicitly created so that it can call |Init()| with the
@@ -79,7 +113,17 @@ class ASH_EXPORT Shell {
   // Should never be called before |CreateInstance()|.
   static Shell* GetInstance();
 
+  // Returns true if the ash shell has been instantiated.
+  static bool HasInstance();
+
   static void DeleteInstance();
+
+  // Gets the singleton RootWindow used by the Shell.
+  static aura::RootWindow* GetRootWindow();
+
+  internal::RootWindowLayoutManager* root_window_layout() const {
+    return root_window_layout_;
+  }
 
   aura::Window* GetContainer(int container_id);
   const aura::Window* GetContainer(int container_id) const;
@@ -95,30 +139,54 @@ class ASH_EXPORT Shell {
   // Toggles app list.
   void ToggleAppList();
 
-  // Changes the current window mode, which will cause all the open windows
-  // to be laid out in the new mode and layout managers and event filters to be
-  // installed or removed.
-  void ChangeWindowMode(WindowMode mode);
-
   // Returns true if the screen is locked.
   bool IsScreenLocked() const;
 
   // Returns true if a modal dialog window is currently open.
   bool IsModalWindowOpen() const;
 
-  // See enum WindowMode for details.
-  bool IsWindowModeCompact() const { return window_mode_ == COMPACT_MODE; }
-
   // Creates a default views::NonClientFrameView for use by windows in the
   // Ash environment.
   views::NonClientFrameView* CreateDefaultNonClientFrameView(
       views::Widget* widget);
 
+  // Rotates focus through containers that can receive focus.
+  void RotateFocus(Direction direction);
+
+  // Sets the work area insets of the monitor that contains |window|,
+  // this notifies observers too.
+  // TODO(sky): this no longer really replicates what happens and is unreliable.
+  // Remove this.
+  void SetMonitorWorkAreaInsets(aura::Window* window,
+                                const gfx::Insets& insets);
+
+  // Initializes |launcher_|.  Does nothing if it's already initialized.
+  void CreateLauncher();
+
+  // Adds/removes observer.
+  void AddShellObserver(ShellObserver* observer);
+  void RemoveShellObserver(ShellObserver* observer);
+
+#if !defined(OS_MACOSX)
   AcceleratorController* accelerator_controller() {
     return accelerator_controller_.get();
   }
+#endif  // !defined(OS_MACOSX)
+
+  internal::RootWindowEventFilter* root_filter() {
+    return root_filter_;
+  }
   internal::TooltipController* tooltip_controller() {
     return tooltip_controller_.get();
+  }
+  internal::KeyRewriterEventFilter* key_rewriter_filter() {
+    return key_rewriter_filter_.get();
+  }
+  internal::PartialScreenshotEventFilter* partial_screenshot_filter() {
+    return partial_screenshot_filter_.get();
+  }
+  DesktopBackgroundController* desktop_background_controller() {
+    return desktop_background_controller_.get();
   }
   PowerButtonController* power_button_controller() {
     return power_button_controller_.get();
@@ -129,10 +197,42 @@ class ASH_EXPORT Shell {
   WindowCycleController* window_cycle_controller() {
     return window_cycle_controller_.get();
   }
+  internal::FocusCycler* focus_cycler() {
+    return focus_cycler_.get();
+  }
 
   ShellDelegate* delegate() { return delegate_.get(); }
+  SystemTrayDelegate* tray_delegate() { return tray_delegate_.get(); }
+  UserWallpaperDelegate* user_wallpaper_delegate() {
+    return user_wallpaper_delegate_.get();
+  }
 
   Launcher* launcher() { return launcher_.get(); }
+
+  const ScreenAsh* screen() { return screen_; }
+
+  // Force the shelf to query for it's current visibility state.
+  void UpdateShelfVisibility();
+
+  // Sets/gets the shelf auto-hide behavior.
+  void SetShelfAutoHideBehavior(ShelfAutoHideBehavior behavior);
+  ShelfAutoHideBehavior GetShelfAutoHideBehavior() const;
+
+  // TODO(sky): don't expose this!
+  internal::ShelfLayoutManager* shelf() const { return shelf_; }
+
+  SystemTray* tray() const { return tray_.get(); }
+
+  // Returns the size of the grid.
+  int GetGridSize() const;
+
+  static void set_initially_hide_cursor(bool hide) {
+    initially_hide_cursor_ = hide;
+  }
+
+  internal::ResizeShadowController* resize_shadow_controller() {
+    return resize_shadow_controller_.get();
+  }
 
   // Made available for tests.
   internal::ShadowController* shadow_controller() {
@@ -140,8 +240,8 @@ class ASH_EXPORT Shell {
   }
 
  private:
-  FRIEND_TEST_ALL_PREFIXES(ShellTest, ComputeWindowMode);
-  FRIEND_TEST_ALL_PREFIXES(ShellTest, ChangeWindowMode);
+  FRIEND_TEST_ALL_PREFIXES(RootWindowEventFilterTest, MouseEventCursors);
+  FRIEND_TEST_ALL_PREFIXES(RootWindowEventFilterTest, TransformActivate);
 
   typedef std::pair<aura::Window*, gfx::Rect> WindowAndBoundsPair;
 
@@ -150,29 +250,34 @@ class ASH_EXPORT Shell {
 
   void Init();
 
-  // Returns the appropriate window mode to use based on the primary monitor's
-  // |monitor_size| and the user's |command_line|.
-  WindowMode ComputeWindowMode(const gfx::Size& monitor_size,
-                               CommandLine* command_line) const;
+  // Initializes the layout managers and event filters.
+  void InitLayoutManagers();
 
-  // Initializes or re-initializes the layout managers and event filters needed
-  // to support a given window mode and cleans up the unneeded ones.
-  void SetupCompactWindowMode();
-  void SetupNormalWindowMode();
-
-  // Sets the LayoutManager of the container with the specified id to NULL. This
-  // has the effect of deleting the current LayoutManager.
-  void ResetLayoutManager(int container_id);
+  // Disables the workspace grid layout.
+  void DisableWorkspaceGridLayout();
 
   static Shell* instance_;
 
+  // If set before the Shell is initialized, the mouse cursor will be hidden
+  // when the screen is initially created.
+  static bool initially_hide_cursor_;
+
+  scoped_ptr<aura::RootWindow> root_window_;
+  ScreenAsh* screen_;
+
+  internal::RootWindowEventFilter* root_filter_;  // not owned
+
   std::vector<WindowAndBoundsPair> to_restore_;
 
-  base::WeakPtrFactory<Shell> method_factory_;
+#if !defined(OS_MACOSX)
+  scoped_ptr<NestedDispatcherController> nested_dispatcher_controller_;
 
   scoped_ptr<AcceleratorController> accelerator_controller_;
+#endif  // !defined(OS_MACOSX)
 
   scoped_ptr<ShellDelegate> delegate_;
+  scoped_ptr<SystemTrayDelegate> tray_delegate_;
+  scoped_ptr<UserWallpaperDelegate> user_wallpaper_delegate_;
 
   scoped_ptr<Launcher> launcher_;
 
@@ -183,26 +288,49 @@ class ASH_EXPORT Shell {
   scoped_ptr<internal::WindowModalityController> window_modality_controller_;
   scoped_ptr<internal::DragDropController> drag_drop_controller_;
   scoped_ptr<internal::WorkspaceController> workspace_controller_;
+  scoped_ptr<internal::ResizeShadowController> resize_shadow_controller_;
   scoped_ptr<internal::ShadowController> shadow_controller_;
   scoped_ptr<internal::TooltipController> tooltip_controller_;
   scoped_ptr<internal::VisibilityController> visibility_controller_;
+  scoped_ptr<DesktopBackgroundController> desktop_background_controller_;
   scoped_ptr<PowerButtonController> power_button_controller_;
   scoped_ptr<VideoDetector> video_detector_;
   scoped_ptr<WindowCycleController> window_cycle_controller_;
+  scoped_ptr<internal::FocusCycler> focus_cycler_;
+  scoped_ptr<internal::EventClientImpl> event_client_;
+  scoped_ptr<internal::MonitorController> monitor_controller_;
+
+  // An event filter that rewrites or drops a key event.
+  scoped_ptr<internal::KeyRewriterEventFilter> key_rewriter_filter_;
+
+  // An event filter that pre-handles key events while the partial
+  // screenshot UI is active.
+  scoped_ptr<internal::PartialScreenshotEventFilter> partial_screenshot_filter_;
+
+#if !defined(OS_MACOSX)
+  // An event filter that pre-handles global accelerators.
+  scoped_ptr<internal::AcceleratorFilter> accelerator_filter_;
+#endif
 
   // An event filter that pre-handles all key events to send them to an IME.
   scoped_ptr<internal::InputMethodEventFilter> input_method_filter_;
-  // An event filter that pre-handles global accelerators.
-  scoped_ptr<internal::AcceleratorFilter> accelerator_filter_;
 
-  // Can change at runtime.
-  WindowMode window_mode_;
+  // The shelf for managing the launcher and the status widget in non-compact
+  // mode. Shell does not own the shelf. Instead, it is owned by container of
+  // the status area.
+  internal::ShelfLayoutManager* shelf_;
+
+  ObserverList<ShellObserver> observers_;
 
   // Owned by aura::RootWindow, cached here for type safety.
   internal::RootWindowLayoutManager* root_window_layout_;
 
   // Status area with clock, Wi-Fi signal, etc.
   views::Widget* status_widget_;
+
+  // System tray with clock, Wi-Fi signal, etc. (a replacement in progress for
+  // |status_widget_|).
+  scoped_ptr<SystemTray> tray_;
 
   DISALLOW_COPY_AND_ASSIGN(Shell);
 };

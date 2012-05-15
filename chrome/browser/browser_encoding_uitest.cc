@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 #include <string>
@@ -11,7 +11,7 @@
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "chrome/test/ui/ui_test.h"
-#include "content/browser/net/url_request_mock_http_job.h"
+#include "content/test/net/url_request_mock_http_job.h"
 
 static const FilePath::CharType* kTestDir = FILE_PATH_LITERAL("encoding_tests");
 
@@ -53,8 +53,9 @@ class BrowserEncodingTest : public UITest {
 // encoding name). Webkit layout tests cover some, but testing in the UI test is
 // also necessary.
 
+// http://crbug.com/82616
 #if defined(OS_MACOSX)
-#define TestEncodingAliasMapping FLAKY_TestEncodingAliasMapping
+#define TestEncodingAliasMapping DISABLED_TestEncodingAliasMapping
 #endif
 TEST_F(BrowserEncodingTest, TestEncodingAliasMapping) {
   struct EncodingTestData {
@@ -115,7 +116,7 @@ TEST_F(BrowserEncodingTest, TestEncodingAliasMapping) {
 }
 
 // Marked as flaky: see  http://crbug.com/44668
-TEST_F(BrowserEncodingTest, FLAKY_TestOverrideEncoding) {
+TEST_F(BrowserEncodingTest, DISABLED_TestOverrideEncoding) {
   const char* const kTestFileName = "gb18030_with_iso88591_meta.html";
   const char* const kExpectedFileName =
       "expected_gb18030_saved_from_iso88591_meta.html";
@@ -178,7 +179,7 @@ TEST_F(BrowserEncodingTest, FLAKY_TestOverrideEncoding) {
 #if defined(OS_CHROMEOS)
 #define MAYBE_TestEncodingAutoDetect DISABLED_TestEncodingAutoDetect
 #else
-#define MAYBE_TestEncodingAutoDetect FLAKY_TestEncodingAutoDetect
+#define MAYBE_TestEncodingAutoDetect DISABLED_TestEncodingAutoDetect
 #endif
 
 TEST_F(BrowserEncodingTest, MAYBE_TestEncodingAutoDetect) {

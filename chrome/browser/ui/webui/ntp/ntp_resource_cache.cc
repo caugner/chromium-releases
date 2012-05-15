@@ -49,12 +49,13 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/theme_provider.h"
 #include "ui/gfx/color_utils.h"
+#include "ui/gfx/sys_color_change_listener.h"
 
 #if defined(OS_WIN) || defined(TOOLKIT_VIEWS)
 #include "chrome/browser/ui/views/bookmarks/bookmark_bar_view.h"
 #elif defined(OS_MACOSX)
 #include "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_constants.h"
-#elif defined(OS_POSIX)
+#elif defined(TOOLKIT_GTK)
 #include "chrome/browser/ui/gtk/bookmarks/bookmark_bar_gtk.h"
 #endif
 
@@ -108,6 +109,14 @@ std::string SkColorToRGBComponents(SkColor color) {
       SkColorGetB(color));
 }
 
+SkColor GetThemeColor(ui::ThemeProvider* tp, int id) {
+  SkColor color = tp->GetColor(id);
+  // If web contents are being inverted because the system is in high-contrast
+  // mode, any system theme colors we use must be inverted too to cancel out.
+  return gfx::IsInvertedColorScheme() ?
+      color_utils::InvertColor(color) : color;
+}
+
 // Get the CSS string for the background position on the new tab page for the
 // states when the bar is attached or detached.
 std::string GetNewTabBackgroundCSS(const ui::ThemeProvider* theme_provider,
@@ -133,7 +142,7 @@ std::string GetNewTabBackgroundCSS(const ui::ThemeProvider* theme_provider,
   int offset = browser_defaults::kNewtabBookmarkBarHeight;
 #elif defined(OS_MACOSX)
   int offset = bookmarks::kNTPBookmarkBarHeight;
-#elif defined(OS_POSIX)
+#elif defined(TOOLKIT_GTK)
   int offset = BookmarkBarGtk::kBookmarkBarNTPHeight;
 #else
   int offset = 0;
@@ -141,9 +150,9 @@ std::string GetNewTabBackgroundCSS(const ui::ThemeProvider* theme_provider,
 
   if (alignment & ThemeService::ALIGN_TOP) {
     if (alignment & ThemeService::ALIGN_LEFT)
-      return "0% " + base::IntToString(-offset) + "px";
+      return "left " + base::IntToString(-offset) + "px";
     else if (alignment & ThemeService::ALIGN_RIGHT)
-      return "100% " + base::IntToString(-offset) + "px";
+      return "right " + base::IntToString(-offset) + "px";
     return "center " + base::IntToString(-offset) + "px";
   }
   return ThemeService::AlignmentToString(alignment);
@@ -181,7 +190,7 @@ NTPResourceCache::NTPResourceCache(Profile* profile) : profile_(profile) {
   pref_change_registrar_.Init(profile_->GetPrefs());
   pref_change_registrar_.Add(prefs::kSyncAcknowledgedSyncTypes, this);
   pref_change_registrar_.Add(prefs::kShowBookmarkBar, this);
-  pref_change_registrar_.Add(prefs::kNTPShownPage, this);
+  pref_change_registrar_.Add(prefs::kNtpShownPage, this);
   pref_change_registrar_.Add(prefs::kSyncPromoShowNTPBubble, this);
 }
 
@@ -196,8 +205,8 @@ RefCountedMemory* NTPResourceCache::GetNewTabHTML(bool is_incognito) {
     if (!new_tab_html_.get())
       CreateNewTabHTML();
   }
-  return is_incognito ? new_tab_incognito_html_.get()
-                      : new_tab_html_.get();
+  return is_incognito ? new_tab_incognito_html_.get() :
+                        new_tab_html_.get();
 }
 
 RefCountedMemory* NTPResourceCache::GetNewTabCSS(bool is_incognito) {
@@ -209,8 +218,8 @@ RefCountedMemory* NTPResourceCache::GetNewTabCSS(bool is_incognito) {
     if (!new_tab_css_.get())
       CreateNewTabCSS();
   }
-  return is_incognito ? new_tab_incognito_css_.get()
-                      : new_tab_css_.get();
+  return is_incognito ? new_tab_incognito_css_.get() :
+                        new_tab_css_.get();
 }
 
 void NTPResourceCache::Observe(int type,
@@ -292,12 +301,16 @@ void NTPResourceCache::CreateNewTabHTML() {
       l10n_util::GetStringUTF16(IDS_NEW_TAB_TITLE));
   localized_strings.SetString("mostvisited",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_MOST_VISITED));
+  localized_strings.SetString("suggestions",
+      l10n_util::GetStringUTF16(IDS_NEW_TAB_SUGGESTIONS));
   localized_strings.SetString("restoreThumbnailsShort",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_RESTORE_THUMBNAILS_SHORT_LINK));
   localized_strings.SetString("recentlyclosed",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_RECENTLY_CLOSED));
   localized_strings.SetString("webStoreTitle",
       l10n_util::GetStringUTF16(IDS_EXTENSION_WEB_STORE_TITLE));
+  localized_strings.SetString("webStoreTitleShort",
+      l10n_util::GetStringUTF16(IDS_EXTENSION_WEB_STORE_TITLE_SHORT));
   localized_strings.SetString("closedwindowsingle",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_RECENTLY_CLOSED_WINDOW_SINGLE));
   localized_strings.SetString("closedwindowmultiple",
@@ -332,10 +345,21 @@ void NTPResourceCache::CreateNewTabHTML() {
       l10n_util::GetStringUTF16(IDS_SYNC_START_SYNC_BUTTON_LABEL));
   localized_strings.SetString("syncLinkText",
       l10n_util::GetStringUTF16(IDS_SYNC_ADVANCED_OPTIONS));
+  localized_strings.SetString("otherSessions",
+      l10n_util::GetStringUTF16(IDS_NEW_TAB_OTHER_SESSIONS_LABEL));
+  localized_strings.SetString("otherSessionsEmpty",
+      l10n_util::GetStringUTF16(IDS_NEW_TAB_OTHER_SESSIONS_EMPTY));
   localized_strings.SetString("webStoreLink",
       GetUrlWithLang(GURL(extension_urls::GetWebstoreLaunchURL())));
   localized_strings.SetBoolean("isWebStoreExperimentEnabled",
-      NewTabUI::IsWebStoreExperimentEnabled());
+      NewTabUI::ShouldShowWebStoreFooterLink());
+  localized_strings.SetBoolean("appInstallHintEnabled",
+      NewTabUI::ShouldShowAppInstallHint());
+  localized_strings.SetString("appInstallHintText",
+      l10n_util::GetStringUTF16(IDS_NEW_TAB_APP_INSTALL_HINT_LABEL));
+  localized_strings.SetBoolean("isSuggestionsPageEnabled",
+      NewTabUI::IsSuggestionsPageEnabled());
+  localized_strings.SetBoolean("showApps", NewTabUI::ShouldShowApps());
 
 #if defined(OS_CHROMEOS)
   localized_strings.SetString("expandMenu",
@@ -367,11 +391,11 @@ void NTPResourceCache::CreateNewTabHTML() {
 
   // If the user has preferences for a start and end time for a custom logo,
   // and the time now is between these two times, show the custom logo.
-  if (profile_->GetPrefs()->FindPreference(prefs::kNTPCustomLogoStart) &&
-      profile_->GetPrefs()->FindPreference(prefs::kNTPCustomLogoEnd)) {
+  if (profile_->GetPrefs()->FindPreference(prefs::kNtpCustomLogoStart) &&
+      profile_->GetPrefs()->FindPreference(prefs::kNtpCustomLogoEnd)) {
     localized_strings.SetString("customlogo",
-        InDateRange(profile_->GetPrefs()->GetDouble(prefs::kNTPCustomLogoStart),
-                    profile_->GetPrefs()->GetDouble(prefs::kNTPCustomLogoEnd)) ?
+        InDateRange(profile_->GetPrefs()->GetDouble(prefs::kNtpCustomLogoStart),
+                    profile_->GetPrefs()->GetDouble(prefs::kNtpCustomLogoEnd)) ?
         "true" : "false");
   } else {
     localized_strings.SetString("customlogo", "false");
@@ -381,8 +405,14 @@ void NTPResourceCache::CreateNewTabHTML() {
   // the server, and this promo string exists, set the localized string.
   if (PromoResourceService::CanShowNotificationPromo(profile_)) {
     localized_strings.SetString("serverpromo",
-        profile_->GetPrefs()->GetString(prefs::kNTPPromoLine));
+        profile_->GetPrefs()->GetString(prefs::kNtpPromoLine));
   }
+
+  // Determine whether to show the menu for accessing tabs on other devices.
+  bool show_other_sessions_menu = !CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kDisableNTPOtherSessionsMenu);
+  localized_strings.SetBoolean("showOtherSessionsMenu",
+                               show_other_sessions_menu);
 
   // Load the new tab page appropriate for this build
   std::string full_html;
@@ -399,7 +429,7 @@ void NTPResourceCache::CreateNewTabIncognitoCSS() {
 
   // Get our theme colors
   SkColor color_background =
-      tp->GetColor(ThemeService::COLOR_NTP_BACKGROUND);
+      GetThemeColor(tp, ThemeService::COLOR_NTP_BACKGROUND);
 
   // Generate the replacements.
   std::vector<std::string> subst;
@@ -432,33 +462,33 @@ void NTPResourceCache::CreateNewTabCSS() {
 
   // Get our theme colors
   SkColor color_background =
-      tp->GetColor(ThemeService::COLOR_NTP_BACKGROUND);
-  SkColor color_text = tp->GetColor(ThemeService::COLOR_NTP_TEXT);
-  SkColor color_link = tp->GetColor(ThemeService::COLOR_NTP_LINK);
+      GetThemeColor(tp, ThemeService::COLOR_NTP_BACKGROUND);
+  SkColor color_text = GetThemeColor(tp, ThemeService::COLOR_NTP_TEXT);
+  SkColor color_link = GetThemeColor(tp, ThemeService::COLOR_NTP_LINK);
   SkColor color_link_underline =
-      tp->GetColor(ThemeService::COLOR_NTP_LINK_UNDERLINE);
+      GetThemeColor(tp, ThemeService::COLOR_NTP_LINK_UNDERLINE);
 
   SkColor color_section =
-      tp->GetColor(ThemeService::COLOR_NTP_SECTION);
+      GetThemeColor(tp, ThemeService::COLOR_NTP_SECTION);
   SkColor color_section_text =
-      tp->GetColor(ThemeService::COLOR_NTP_SECTION_TEXT);
+      GetThemeColor(tp, ThemeService::COLOR_NTP_SECTION_TEXT);
   SkColor color_section_link =
-      tp->GetColor(ThemeService::COLOR_NTP_SECTION_LINK);
+      GetThemeColor(tp, ThemeService::COLOR_NTP_SECTION_LINK);
   SkColor color_section_link_underline =
-      tp->GetColor(ThemeService::COLOR_NTP_SECTION_LINK_UNDERLINE);
+      GetThemeColor(tp, ThemeService::COLOR_NTP_SECTION_LINK_UNDERLINE);
   SkColor color_section_header_text =
-      tp->GetColor(ThemeService::COLOR_NTP_SECTION_HEADER_TEXT);
+      GetThemeColor(tp, ThemeService::COLOR_NTP_SECTION_HEADER_TEXT);
   SkColor color_section_header_text_hover =
-      tp->GetColor(ThemeService::COLOR_NTP_SECTION_HEADER_TEXT_HOVER);
+      GetThemeColor(tp, ThemeService::COLOR_NTP_SECTION_HEADER_TEXT_HOVER);
   SkColor color_section_header_rule =
-      tp->GetColor(ThemeService::COLOR_NTP_SECTION_HEADER_RULE);
+      GetThemeColor(tp, ThemeService::COLOR_NTP_SECTION_HEADER_RULE);
   SkColor color_section_header_rule_light =
-      tp->GetColor(ThemeService::COLOR_NTP_SECTION_HEADER_RULE_LIGHT);
+      GetThemeColor(tp, ThemeService::COLOR_NTP_SECTION_HEADER_RULE_LIGHT);
   SkColor color_text_light =
-      tp->GetColor(ThemeService::COLOR_NTP_TEXT_LIGHT);
+      GetThemeColor(tp, ThemeService::COLOR_NTP_TEXT_LIGHT);
 
   SkColor color_header =
-      tp->GetColor(ThemeService::COLOR_NTP_HEADER);
+      GetThemeColor(tp, ThemeService::COLOR_NTP_HEADER);
   // Generate a lighter color for the header gradients.
   color_utils::HSL header_lighter;
   color_utils::SkColorToHSL(color_header, &header_lighter);

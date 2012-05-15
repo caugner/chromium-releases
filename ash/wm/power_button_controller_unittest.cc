@@ -5,7 +5,7 @@
 #include "ash/wm/power_button_controller.h"
 
 #include "ash/shell.h"
-#include "ash/test/aura_shell_test_base.h"
+#include "ash/test/ash_test_base.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/time.h"
 #include "ui/aura/root_window.h"
@@ -39,13 +39,13 @@ class TestPowerButtonControllerDelegate : public PowerButtonControllerDelegate {
   DISALLOW_COPY_AND_ASSIGN(TestPowerButtonControllerDelegate);
 };
 
-class PowerButtonControllerTest : public AuraShellTestBase {
+class PowerButtonControllerTest : public AshTestBase {
  public:
   PowerButtonControllerTest() : controller_(NULL), delegate_(NULL) {}
   virtual ~PowerButtonControllerTest() {}
 
   void SetUp() OVERRIDE {
-    AuraShellTestBase::SetUp();
+    AshTestBase::SetUp();
     delegate_ = new TestPowerButtonControllerDelegate;
     controller_ = Shell::GetInstance()->power_button_controller();
     controller_->set_delegate(delegate_);  // transfers ownership
@@ -112,6 +112,7 @@ TEST_F(PowerButtonControllerTest, LegacyLockAndShutDown) {
       test_api_->ContainerGroupIsAnimated(
           PowerButtonController::ALL_CONTAINERS,
           PowerButtonController::ANIMATION_FAST_CLOSE));
+  EXPECT_FALSE(Shell::GetRootWindow()->cursor_shown());
   EXPECT_TRUE(test_api_->real_shutdown_timer_is_running());
   test_api_->trigger_real_shutdown_timeout();
   EXPECT_EQ(1, delegate_->num_shutdown_requests());
@@ -179,7 +180,11 @@ TEST_F(PowerButtonControllerTest, ShutdownWhenNotLoggedIn) {
   EXPECT_EQ(0, delegate_->num_shutdown_requests());
   EXPECT_TRUE(
       test_api_->ContainerGroupIsAnimated(
-          PowerButtonController::ALL_CONTAINERS,
+          PowerButtonController::ALL_BUT_SCREEN_LOCKER_AND_RELATED_CONTAINERS,
+          PowerButtonController::ANIMATION_HIDE));
+  EXPECT_TRUE(
+      test_api_->ContainerGroupIsAnimated(
+          PowerButtonController::SCREEN_LOCKER_AND_RELATED_CONTAINERS,
           PowerButtonController::ANIMATION_FAST_CLOSE));
 
   // When the timout fires, we should request a shutdown.
@@ -307,6 +312,9 @@ TEST_F(PowerButtonControllerTest, LockToShutdown) {
 
 // Test that we handle the case where lock requests are ignored.
 TEST_F(PowerButtonControllerTest, LockFail) {
+  // We require animations to have a duration for this test.
+  ui::LayerAnimator::set_disable_animations_for_test(false);
+
   controller_->set_has_legacy_power_button_for_test(false);
   controller_->OnLoginStateChange(true /*logged_in*/, false /*is_guest*/);
   controller_->OnLockStateChange(false);
@@ -446,6 +454,75 @@ TEST_F(PowerButtonControllerTest, PowerButtonPreemptsLockButton) {
   EXPECT_FALSE(test_api_->lock_timer_is_running());
   controller_->OnLockButtonEvent(false, base::TimeTicks::Now());
   EXPECT_FALSE(test_api_->lock_timer_is_running());
+}
+
+// When the screen is locked without going through the usual power-button
+// slow-close path (e.g. via the wrench menu), test that we still show the
+// fast-close animation and display the background layer.
+TEST_F(PowerButtonControllerTest, LockWithoutButton) {
+  controller_->OnLoginStateChange(true /*logged_in*/, false /*is_guest*/);
+  controller_->OnStartingLock();
+  EXPECT_TRUE(
+      test_api_->ContainerGroupIsAnimated(
+          PowerButtonController::ALL_BUT_SCREEN_LOCKER_AND_RELATED_CONTAINERS,
+          PowerButtonController::ANIMATION_FAST_CLOSE));
+  EXPECT_TRUE(test_api_->BackgroundLayerIsVisible());
+}
+
+// When we hear that the process is exiting but we haven't had a chance to
+// display an animation, we should just blank the screen.
+TEST_F(PowerButtonControllerTest, ShutdownWithoutButton) {
+  controller_->OnLoginStateChange(true /*logged_in*/, false /*is_guest*/);
+  controller_->OnExit();
+  EXPECT_TRUE(
+      test_api_->ContainerGroupIsAnimated(
+          PowerButtonController::ALL_CONTAINERS,
+          PowerButtonController::ANIMATION_HIDE));
+  EXPECT_TRUE(test_api_->BackgroundLayerIsVisible());
+  EXPECT_FALSE(Shell::GetRootWindow()->cursor_shown());
+}
+
+// Test that we display the fast-close animation and shut down when we get an
+// outside request to shut down (e.g. from the login or lock screen).
+TEST_F(PowerButtonControllerTest, RequestShutdownFromLoginScreen) {
+  controller_->OnLoginStateChange(false /*logged_in*/, false /*is_guest*/);
+  controller_->RequestShutdown();
+  EXPECT_TRUE(
+      test_api_->ContainerGroupIsAnimated(
+          PowerButtonController::ALL_BUT_SCREEN_LOCKER_AND_RELATED_CONTAINERS,
+          PowerButtonController::ANIMATION_HIDE));
+  EXPECT_TRUE(
+      test_api_->ContainerGroupIsAnimated(
+          PowerButtonController::SCREEN_LOCKER_AND_RELATED_CONTAINERS,
+          PowerButtonController::ANIMATION_FAST_CLOSE));
+  EXPECT_TRUE(test_api_->BackgroundLayerIsVisible());
+  EXPECT_FALSE(Shell::GetRootWindow()->cursor_shown());
+
+  EXPECT_EQ(0, delegate_->num_shutdown_requests());
+  EXPECT_TRUE(test_api_->real_shutdown_timer_is_running());
+  test_api_->trigger_real_shutdown_timeout();
+  EXPECT_EQ(1, delegate_->num_shutdown_requests());
+}
+
+TEST_F(PowerButtonControllerTest, RequestShutdownFromLockScreen) {
+  controller_->OnLoginStateChange(true /*logged_in*/, false /*is_guest*/);
+  controller_->OnLockStateChange(true);
+  controller_->RequestShutdown();
+  EXPECT_TRUE(
+      test_api_->ContainerGroupIsAnimated(
+          PowerButtonController::ALL_BUT_SCREEN_LOCKER_AND_RELATED_CONTAINERS,
+          PowerButtonController::ANIMATION_HIDE));
+  EXPECT_TRUE(
+      test_api_->ContainerGroupIsAnimated(
+          PowerButtonController::SCREEN_LOCKER_AND_RELATED_CONTAINERS,
+          PowerButtonController::ANIMATION_FAST_CLOSE));
+  EXPECT_TRUE(test_api_->BackgroundLayerIsVisible());
+  EXPECT_FALSE(Shell::GetRootWindow()->cursor_shown());
+
+  EXPECT_EQ(0, delegate_->num_shutdown_requests());
+  EXPECT_TRUE(test_api_->real_shutdown_timer_is_running());
+  test_api_->trigger_real_shutdown_timeout();
+  EXPECT_EQ(1, delegate_->num_shutdown_requests());
 }
 
 }  // namespace test

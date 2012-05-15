@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -152,10 +152,8 @@ void ChangePictureOptionsHandler::HandleChooseFile(const ListValue* args) {
 
 void ChangePictureOptionsHandler::HandleTakePhoto(const ListValue* args) {
   DCHECK(args && args->empty());
-  views::Widget* window = browser::CreateViewsWindow(
-      GetBrowserWindow(),
-      new TakePhotoDialog(this),
-      STYLE_GENERIC);
+  views::Widget* window = views::Widget::CreateWindowWithParent(
+      new TakePhotoDialog(this), GetBrowserWindow());
   window->SetAlwaysOnTop(true);
   window->Show();
 }
@@ -189,7 +187,7 @@ void ChangePictureOptionsHandler::HandlePageShown(const base::ListValue* args) {
 }
 
 void ChangePictureOptionsHandler::SendSelectedImage() {
-  const User& user = UserManager::Get()->logged_in_user();
+  const User& user = UserManager::Get()->GetLoggedInUser();
   DCHECK(!user.email().empty());
 
   previous_image_index_ = user.image_index();
@@ -231,8 +229,8 @@ void ChangePictureOptionsHandler::UpdateProfileImage() {
   // If we have a downloaded profile image and haven't sent it in
   // |SendSelectedImage|, send it now (without selecting).
   if (previous_image_index_ != User::kProfileImageIndex &&
-      !user_manager->downloaded_profile_image().empty())
-    SendProfileImage(user_manager->downloaded_profile_image(), false);
+      !user_manager->DownloadedProfileImage().empty())
+    SendProfileImage(user_manager->DownloadedProfileImage(), false);
 
   user_manager->DownloadProfileImage(kProfileDownloadReason);
 }
@@ -248,7 +246,7 @@ void ChangePictureOptionsHandler::HandleSelectImage(const ListValue* args) {
   DCHECK(!image_url.empty());
 
   UserManager* user_manager = UserManager::Get();
-  const User& user = user_manager->logged_in_user();
+  const User& user = user_manager->GetLoggedInUser();
   int image_index = User::kInvalidImageIndex;
 
   if (StartsWithASCII(image_url, chrome::kChromeUIUserImageURL, false)) {
@@ -294,7 +292,7 @@ void ChangePictureOptionsHandler::FileSelected(const FilePath& path,
                                                int index,
                                                void* params) {
   UserManager* user_manager = UserManager::Get();
-  user_manager->SaveUserImageFromFile(user_manager->logged_in_user().email(),
+  user_manager->SaveUserImageFromFile(user_manager->GetLoggedInUser().email(),
                                       path);
   UMA_HISTOGRAM_ENUMERATION("UserImage.ChangeChoice",
                             kHistogramImageFromFile,
@@ -303,7 +301,7 @@ void ChangePictureOptionsHandler::FileSelected(const FilePath& path,
 
 void ChangePictureOptionsHandler::OnPhotoAccepted(const SkBitmap& photo) {
   UserManager* user_manager = UserManager::Get();
-  user_manager->SaveUserImage(user_manager->logged_in_user().email(), photo);
+  user_manager->SaveUserImage(user_manager->GetLoggedInUser().email(), photo);
   UMA_HISTOGRAM_ENUMERATION("UserImage.ChangeChoice",
                             kHistogramImageFromCamera,
                             kHistogramImagesCount);
@@ -330,7 +328,7 @@ void ChangePictureOptionsHandler::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
-  ::options2::OptionsPageUIHandler::Observe(type, source, details);
+  OptionsPageUIHandler::Observe(type, source, details);
   if (type == chrome::NOTIFICATION_PROFILE_IMAGE_UPDATED) {
     // User profile image has been updated.
     SendProfileImage(*content::Details<const SkBitmap>(details).ptr(), false);

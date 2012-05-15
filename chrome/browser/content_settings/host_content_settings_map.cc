@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,12 +15,14 @@
 #include "chrome/browser/content_settings/content_settings_details.h"
 #include "chrome/browser/content_settings/content_settings_extension_provider.h"
 #include "chrome/browser/content_settings/content_settings_observable_provider.h"
+#include "chrome/browser/content_settings/content_settings_platform_app_provider.h"
 #include "chrome/browser/content_settings/content_settings_policy_provider.h"
 #include "chrome/browser/content_settings/content_settings_pref_provider.h"
 #include "chrome/browser/content_settings/content_settings_provider.h"
 #include "chrome/browser/content_settings/content_settings_rule.h"
 #include "chrome/browser/content_settings/content_settings_utils.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/intents/web_intents_util.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
@@ -46,6 +48,7 @@ typedef std::vector<content_settings::Rule> Rules;
 typedef std::pair<std::string, std::string> StringPair;
 
 const char* kProviderNames[] = {
+  "platform_app",
   "policy",
   "extension",
   "preference",
@@ -53,6 +56,7 @@ const char* kProviderNames[] = {
 };
 
 content_settings::SettingSource kProviderSourceMap[] = {
+  content_settings::SETTING_SOURCE_EXTENSION,
   content_settings::SETTING_SOURCE_POLICY,
   content_settings::SETTING_SOURCE_EXTENSION,
   content_settings::SETTING_SOURCE_USER,
@@ -83,6 +87,13 @@ HostContentSettingsMap::HostContentSettingsMap(
     bool incognito)
     : prefs_(prefs),
       is_off_the_record_(incognito) {
+  if (extension_service) {
+    content_settings::PlatformAppProvider* platform_app_provider =
+        new content_settings::PlatformAppProvider(extension_service);
+    platform_app_provider->AddObserver(this);
+    content_settings_providers_[PLATFORM_APP_PROVIDER] = platform_app_provider;
+  }
+
   content_settings::ObservableProvider* policy_provider =
       new content_settings::PolicyProvider(prefs_);
   policy_provider->AddObserver(this);
@@ -312,10 +323,14 @@ bool HostContentSettingsMap::IsValueAllowedForType(
 bool HostContentSettingsMap::IsSettingAllowedForType(
     ContentSetting setting, ContentSettingsType content_type) {
   // Intents content settings are hidden behind a switch for now.
-  if (content_type == CONTENT_SETTINGS_TYPE_INTENTS &&
-      !CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableWebIntents))
+  if (content_type == CONTENT_SETTINGS_TYPE_INTENTS) {
+#if defined(ENABLE_WEB_INTENTS)
+    if (!web_intents::IsWebIntentsEnabled())
+      return false;
+#else
     return false;
+#endif
+  }
 
   // BLOCK semantics are not implemented for fullscreen.
   if (content_type == CONTENT_SETTINGS_TYPE_FULLSCREEN &&
@@ -344,8 +359,8 @@ bool HostContentSettingsMap::IsSettingAllowedForType(
 }
 
 void HostContentSettingsMap::OnContentSettingChanged(
-    ContentSettingsPattern primary_pattern,
-    ContentSettingsPattern secondary_pattern,
+    const ContentSettingsPattern& primary_pattern,
+    const ContentSettingsPattern& secondary_pattern,
     ContentSettingsType content_type,
     std::string resource_identifier) {
   const ContentSettingsDetails details(primary_pattern,
@@ -405,8 +420,9 @@ bool HostContentSettingsMap::ShouldAllowAllContent(
     return false;
   }
   if (primary_url.SchemeIs(chrome::kExtensionScheme)) {
-    return content_type != CONTENT_SETTINGS_TYPE_COOKIES ||
-        secondary_url.SchemeIs(chrome::kExtensionScheme);
+    return content_type != CONTENT_SETTINGS_TYPE_PLUGINS &&
+        (content_type != CONTENT_SETTINGS_TYPE_COOKIES ||
+            secondary_url.SchemeIs(chrome::kExtensionScheme));
   }
   return primary_url.SchemeIs(chrome::kChromeDevToolsScheme) ||
          primary_url.SchemeIs(chrome::kChromeInternalScheme) ||

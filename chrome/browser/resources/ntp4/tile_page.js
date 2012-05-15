@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-cr.define('ntp4', function() {
+cr.define('ntp', function() {
   'use strict';
 
   // We can't pass the currently dragging tile via dataTransfer because of
@@ -14,9 +14,9 @@ cr.define('ntp4', function() {
   function setCurrentlyDraggingTile(tile) {
     currentlyDraggingTile = tile;
     if (tile)
-      ntp4.enterRearrangeMode();
+      ntp.enterRearrangeMode();
     else
-      ntp4.leaveRearrangeMode();
+      ntp.leaveRearrangeMode();
   }
 
   /**
@@ -66,7 +66,7 @@ cr.define('ntp4', function() {
     },
 
     get index() {
-      return Array.prototype.indexOf.call(this.parentNode.children, this);
+      return Array.prototype.indexOf.call(this.tilePage.tileElements_, this);
     },
 
     get tilePage() {
@@ -472,7 +472,7 @@ cr.define('ntp4', function() {
 
     get selected() {
       return Array.prototype.indexOf.call(this.parentNode.children, this) ==
-          ntp4.getCardSlider().currentCard;
+          ntp.getCardSlider().currentCard;
     },
 
     /**
@@ -500,6 +500,25 @@ cr.define('ntp4', function() {
      */
     get extraBottomPadding() {
       return 0;
+    },
+
+    /**
+     * The notification content of this tile (if any, otherwise null).
+     * @type {!HTMLElement}
+     */
+    get notification() {
+      return this.topMargin_.nextElementSibling.id == 'notification-container' ?
+          this.topMargin_.nextElementSibling : null;
+    },
+    /**
+     * The notification content of this tile (if any, otherwise null).
+     * @type {!HTMLElement}
+     */
+    set notification(node) {
+      assert(node instanceof HTMLElement, '|node| isn\'t an HTMLElement!');
+      // NOTE: Implicitly removes from DOM if |node| is inside it.
+      this.content_.insertBefore(node, this.topMargin_.nextElementSibling);
+      this.positionNotification_();
     },
 
     /**
@@ -559,7 +578,7 @@ cr.define('ntp4', function() {
       this.calculateLayoutValues_();
       this.heightChanged_();
 
-      this.positionTile_(index);
+      this.repositionTiles_();
       this.fireAddedEvent(wrapperDiv, index, !!opt_animate);
     },
 
@@ -706,7 +725,7 @@ cr.define('ntp4', function() {
           var currentIndex =
               Array.prototype.indexOf.call(this.focusableElements_,
                                            this.currentFocusElement_);
-          var newFocusIdx = wrap(currentIndex + direction)
+          var newFocusIdx = wrap(currentIndex + direction);
           var tile = this.currentFocusElement_.parentNode;
           for (;; newFocusIdx = wrap(newFocusIdx + direction)) {
             var newTile = this.focusableElements_[newFocusIdx].parentNode;
@@ -910,6 +929,7 @@ cr.define('ntp4', function() {
       this.classList.add('animating-tile-page');
       this.heightChanged_();
 
+      this.positionNotification_();
       this.repositionTiles_();
     },
 
@@ -984,6 +1004,17 @@ cr.define('ntp4', function() {
     },
 
     /**
+     * Position the notification if there's one showing.
+     */
+    positionNotification_: function() {
+      if (this.notification && !this.notification.hidden) {
+        this.notification.style.margin =
+            -this.notification.offsetHeight + 'px ' +
+            this.layoutValues_.leftMargin + 'px 0';
+      }
+    },
+
+    /**
      * Handles final setup that can only happen after |this| is inserted into
      * the page.
      * @private
@@ -1005,7 +1036,18 @@ cr.define('ntp4', function() {
       // bug where repositioning tiles will cause the scroll position to reset.
       this.tileGrid_.style.minHeight = (this.clientHeight -
           this.tileGrid_.offsetTop - this.content_.offsetTop -
-          this.extraBottomPadding) + 'px';
+          this.extraBottomPadding -
+          (this.footerNode_ ? this.footerNode_.clientHeight : 0)) + 'px';
+    },
+
+     /**
+      * Places an element at the bottom of the content div. Used in bare-minimum
+      * mode to hold #footer.
+      * @param {HTMLElement} footerNode The node to append to content.
+      */
+    appendFooter: function(footerNode) {
+      this.footerNode_ = footerNode;
+      this.content_.appendChild(footerNode);
     },
 
     /**

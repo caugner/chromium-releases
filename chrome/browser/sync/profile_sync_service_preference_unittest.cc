@@ -9,7 +9,7 @@
 #include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/json/json_reader.h"
-#include "base/json/json_value_serializer.h"
+#include "base/json/json_string_value_serializer.h"
 #include "base/location.h"
 #include "base/stl_util.h"
 #include "base/string_piece.h"
@@ -17,34 +17,32 @@
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
-#include "chrome/browser/signin/token_service.h"
+#include "chrome/browser/signin/token_service_factory.h"
 #include "chrome/browser/sync/abstract_profile_sync_service_test.h"
 #include "chrome/browser/sync/api/sync_data.h"
 #include "chrome/browser/sync/glue/generic_change_processor.h"
-#include "chrome/browser/sync/glue/preference_data_type_controller.h"
-#include "chrome/browser/sync/glue/syncable_service_adapter.h"
 #include "chrome/browser/sync/glue/sync_backend_host.h"
+#include "chrome/browser/sync/glue/ui_data_type_controller.h"
 #include "chrome/browser/sync/internal_api/change_record.h"
 #include "chrome/browser/sync/internal_api/read_node.h"
 #include "chrome/browser/sync/internal_api/read_transaction.h"
 #include "chrome/browser/sync/internal_api/write_node.h"
 #include "chrome/browser/sync/internal_api/write_transaction.h"
 #include "chrome/browser/sync/profile_sync_test_util.h"
-#include "chrome/browser/sync/protocol/preference_specifics.pb.h"
-#include "chrome/browser/sync/syncable/model_type.h"
 #include "chrome/browser/sync/test_profile_sync_service.h"
 #include "chrome/common/net/gaia/gaia_constants.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_pref_service.h"
 #include "chrome/test/base/testing_profile.h"
+#include "sync/protocol/preference_specifics.pb.h"
+#include "sync/syncable/model_type.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::JSONReader;
 using browser_sync::GenericChangeProcessor;
-using browser_sync::PreferenceDataTypeController;
-using browser_sync::SyncBackendHost;
-using browser_sync::SyncableServiceAdapter;
+using browser_sync::SharedChangeProcessor;
+using browser_sync::UIDataTypeController;
 using sync_api::ChangeRecord;
 using testing::_;
 using testing::Invoke;
@@ -52,19 +50,10 @@ using testing::Return;
 
 typedef std::map<const std::string, const Value*> PreferenceValues;
 
-ACTION_P4(BuildPrefSyncComponents, profile_sync_service, pref_sync_service,
-    model_associator_ptr, change_processor_ptr) {
-  sync_api::UserShare* user_share = profile_sync_service->GetUserShare();
-  *change_processor_ptr = new GenericChangeProcessor(
-      profile_sync_service,
-      pref_sync_service->AsWeakPtr(),
-      user_share);
-  *model_associator_ptr = new browser_sync::SyncableServiceAdapter(
-      syncable::PREFERENCES,
-      pref_sync_service,
-      *change_processor_ptr);
-  return ProfileSyncComponentsFactory::SyncComponents(*model_associator_ptr,
-                                                      *change_processor_ptr);
+ACTION_P(CreateAndSaveChangeProcessor, change_processor) {
+  sync_api::UserShare* user_share = arg0->GetUserShare();
+  *change_processor = new GenericChangeProcessor(arg1, arg2, user_share);
+  return *change_processor;
 }
 
 // TODO(zea): Refactor to remove the ProfileSyncService usage.
@@ -136,20 +125,21 @@ class ProfileSyncServicePreferenceTest
         prefs_->GetSyncableService());
     if (!pref_sync_service_)
       return false;
-    EXPECT_CALL(*factory, CreatePreferenceSyncComponents(_, _)).
-        WillOnce(BuildPrefSyncComponents(service_.get(),
-                                         pref_sync_service_,
-                                         &model_associator_,
-                                         &change_processor_));
+    EXPECT_CALL(*factory, GetSyncableServiceForType(syncable::PREFERENCES)).
+        WillOnce(Return(pref_sync_service_->AsWeakPtr()));
 
     EXPECT_CALL(*factory, CreateDataTypeManager(_, _)).
         WillOnce(ReturnNewDataTypeManager());
-
-    dtc_ = new PreferenceDataTypeController(factory,
-                                            profile_.get(),
-                                            service_.get());
+    dtc_ = new UIDataTypeController(syncable::PREFERENCES,
+                                    factory,
+                                    profile_.get(),
+                                    service_.get());
+    EXPECT_CALL(*factory, CreateSharedChangeProcessor()).
+        WillOnce(Return(new SharedChangeProcessor()));
+    EXPECT_CALL(*factory, CreateGenericChangeProcessor(_, _, _)).
+        WillOnce(CreateAndSaveChangeProcessor(&change_processor_));
     service_->RegisterDataTypeController(dtc_);
-    profile_->GetTokenService()->IssueAuthTokenForTest(
+    TokenServiceFactory::GetForProfile(profile_.get())->IssueAuthTokenForTest(
         GaiaConstants::kSyncService, "token");
 
     service_->Initialize();
@@ -172,7 +162,7 @@ class ProfileSyncServicePreferenceTest
       return NULL;
 
     const sync_pb::PreferenceSpecifics& specifics(
-        node.GetEntitySpecifics().GetExtension(sync_pb::preference));
+        node.GetEntitySpecifics().preference());
 
     JSONReader reader;
     return reader.JsonToValue(specifics.value(), false, false);
@@ -205,9 +195,8 @@ class ProfileSyncServicePreferenceTest
   scoped_ptr<TestingProfile> profile_;
   TestingPrefService* prefs_;
 
-  PreferenceDataTypeController* dtc_;
+  UIDataTypeController* dtc_;
   PrefModelAssociator* pref_sync_service_;
-  SyncableServiceAdapter* model_associator_;
   GenericChangeProcessor* change_processor_;
 
   std::string example_url0_;
@@ -263,7 +252,7 @@ TEST_F(ProfileSyncServicePreferenceTest, CreatePrefSyncData) {
       *pref->GetValue(), &sync_data));
   EXPECT_EQ(std::string(prefs::kHomePage), sync_data.GetTag());
   const sync_pb::PreferenceSpecifics& specifics(sync_data.GetSpecifics().
-      GetExtension(sync_pb::preference));
+      preference());
   EXPECT_EQ(std::string(prefs::kHomePage), specifics.name());
 
   base::JSONReader reader;

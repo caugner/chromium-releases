@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -84,15 +84,15 @@ void ExternalProcessImporterBridge::SetFavicons(
 }
 
 void ExternalProcessImporterBridge::SetHistoryItems(
-    const std::vector<history::URLRow>& rows,
+    const history::URLRows& rows,
     history::VisitSource visit_source) {
   Send(new ProfileImportProcessHostMsg_NotifyHistoryImportStart(rows.size()));
 
-  std::vector<history::URLRow>::const_iterator it;
+  history::URLRows::const_iterator it;
   for (it = rows.begin(); it < rows.end();
        it = it + kNumHistoryRowsToSend) {
-    std::vector<history::URLRow> row_group;
-    std::vector<history::URLRow>::const_iterator end_group =
+    history::URLRows row_group;
+    history::URLRows::const_iterator end_group =
         it + kNumHistoryRowsToSend < rows.end() ?
         it + kNumHistoryRowsToSend : rows.end();
     row_group.assign(it, end_group);
@@ -104,14 +104,10 @@ void ExternalProcessImporterBridge::SetHistoryItems(
 
 void ExternalProcessImporterBridge::SetKeywords(
     const std::vector<TemplateURL*>& template_urls,
-    int default_keyword_index,
     bool unique_on_host_and_path) {
-  std::vector<TemplateURL> urls;
-  for (size_t i = 0; i < template_urls.size(); ++i) {
-    urls.push_back(*template_urls[i]);
-  }
-  Send(new ProfileImportProcessHostMsg_NotifyKeywordsReady(urls,
-      default_keyword_index, unique_on_host_and_path));
+  Send(new ProfileImportProcessHostMsg_NotifyKeywordsReady(template_urls,
+      unique_on_host_and_path));
+  STLDeleteContainerPointers(template_urls.begin(), template_urls.end());
 }
 
 void ExternalProcessImporterBridge::SetPasswordForm(

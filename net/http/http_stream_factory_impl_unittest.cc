@@ -118,7 +118,7 @@ struct SessionDependencies {
   // Custom proxy service dependency.
   explicit SessionDependencies(ProxyService* proxy_service)
       : host_resolver(new MockHostResolver),
-        cert_verifier(new CertVerifier),
+        cert_verifier(CertVerifier::CreateDefault()),
         proxy_service(proxy_service),
         ssl_config_service(new SSLConfigServiceDefaults),
         http_auth_handler_factory(
@@ -424,12 +424,12 @@ TEST(HttpStreamFactoryTest, JobNotifiesProxy) {
 
   // First connection attempt fails
   StaticSocketDataProvider socket_data1;
-  socket_data1.set_connect_data(MockConnect(true, ERR_ADDRESS_UNREACHABLE));
+  socket_data1.set_connect_data(MockConnect(ASYNC, ERR_ADDRESS_UNREACHABLE));
   session_deps.socket_factory.AddSocketDataProvider(&socket_data1);
 
   // Second connection attempt succeeds
   StaticSocketDataProvider socket_data2;
-  socket_data2.set_connect_data(MockConnect(true, OK));
+  socket_data2.set_connect_data(MockConnect(ASYNC, OK));
   session_deps.socket_factory.AddSocketDataProvider(&socket_data2);
 
   scoped_refptr<HttpNetworkSession> session(CreateSession(&session_deps));

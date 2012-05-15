@@ -9,23 +9,25 @@
 #include "base/logging.h"
 #include "chrome/browser/accessibility/accessibility_extension_api.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/extensions/extension_tts_api_platform.h"
 #include "chrome/browser/extensions/component_loader.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/file_reader.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/speech/extension_api/tts_extension_api_platform.h"
 #include "chrome/common/extensions/extension_messages.h"
 #include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/pref_names.h"
-#include "content/browser/accessibility/browser_accessibility_state.h"
-#include "content/browser/renderer_host/render_view_host.h"
+#include "content/public/browser/browser_accessibility_state.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+
+using content::RenderViewHost;
 
 namespace chromeos {
 namespace accessibility {
@@ -73,7 +75,7 @@ class ContentScriptLoader {
       params.all_frames = true;
       params.in_main_world = false;
       render_view_host_->Send(new ExtensionMsg_ExecuteCode(
-          render_view_host_->routing_id(), params));
+          render_view_host_->GetRoutingID(), params));
     }
     Run();
   }
@@ -83,12 +85,12 @@ class ContentScriptLoader {
   std::queue<ExtensionResource> resources_;
 };
 
-void EnableAccessibility(bool enabled, content::WebUI* login_web_ui) {
-  bool accessibility_enabled = g_browser_process &&
+void EnableSpokenFeedback(bool enabled, content::WebUI* login_web_ui) {
+  bool spoken_feedback_enabled = g_browser_process &&
       g_browser_process->local_state()->GetBoolean(
           prefs::kSpokenFeedbackEnabled);
-  if (accessibility_enabled == enabled) {
-    LOG(INFO) << "Accessibility is already " <<
+  if (spoken_feedback_enabled == enabled) {
+    DLOG(INFO) << "Spoken feedback is already " <<
         (enabled ? "enabled" : "disabled") << ".  Going to do nothing.";
     return;
   }
@@ -100,9 +102,9 @@ void EnableAccessibility(bool enabled, content::WebUI* login_web_ui) {
       SetAccessibilityEnabled(enabled);
   BrowserAccessibilityState::GetInstance()->OnAccessibilityEnabledManually();
 
-  Speak(enabled ?
-        l10n_util::GetStringUTF8(IDS_CHROMEOS_ACC_ACCESS_ENABLED).c_str() :
-        l10n_util::GetStringUTF8(IDS_CHROMEOS_ACC_ACCESS_DISABLED).c_str());
+  Speak(l10n_util::GetStringUTF8(
+      enabled ? IDS_CHROMEOS_ACC_SPOKEN_FEEDBACK_ENABLED :
+      IDS_CHROMEOS_ACC_SPOKEN_FEEDBACK_DISABLED).c_str());
 
   // Load/Unload ChromeVox
   Profile* profile = ProfileManager::GetDefaultProfile();
@@ -128,7 +130,7 @@ void EnableAccessibility(bool enabled, content::WebUI* login_web_ui) {
       params.all_frames = true;
       params.in_main_world = false;
       render_view_host->Send(new ExtensionMsg_ExecuteCode(
-          render_view_host->routing_id(), params));
+          render_view_host->GetRoutingID(), params));
 
       // Inject ChromeVox' content scripts.
       ContentScriptLoader* loader = new ContentScriptLoader(
@@ -146,10 +148,10 @@ void EnableAccessibility(bool enabled, content::WebUI* login_web_ui) {
       loader->Run();  // It cleans itself up when done.
     }
 
-    LOG(INFO) << "ChromeVox was Loaded.";
+    DLOG(INFO) << "ChromeVox was Loaded.";
   } else { // Unload ChromeVox
     extension_service->component_loader()->Remove(path);
-    LOG(INFO) << "ChromeVox was Unloaded.";
+    DLOG(INFO) << "ChromeVox was Unloaded.";
   }
 }
 
@@ -171,31 +173,36 @@ void EnableVirtualKeyboard(bool enabled) {
   pref_service->CommitPendingWrite();
 }
 
-void ToggleAccessibility(content::WebUI* login_web_ui) {
-  bool accessibility_enabled = g_browser_process &&
+void ToggleSpokenFeedback(content::WebUI* login_web_ui) {
+  bool spoken_feedback_enabled = g_browser_process &&
       g_browser_process->local_state()->GetBoolean(
           prefs::kSpokenFeedbackEnabled);
-  accessibility_enabled = !accessibility_enabled;
-  EnableAccessibility(accessibility_enabled, login_web_ui);
+  spoken_feedback_enabled = !spoken_feedback_enabled;
+  EnableSpokenFeedback(spoken_feedback_enabled, login_web_ui);
 };
 
-void Speak(const char* utterance) {
+void Speak(const std::string& utterance) {
   UtteranceContinuousParameters params;
   ExtensionTtsPlatformImpl::GetInstance()->Speak(
       -1,  // No utterance ID because we don't need a callback when it finishes.
-      utterance,
+      utterance.c_str(),
       g_browser_process->GetApplicationLocale(),
       params);
 }
 
-bool IsAccessibilityEnabled() {
+bool IsSpokenFeedbackEnabled() {
   if (!g_browser_process) {
     return false;
   }
   PrefService* prefs = g_browser_process->local_state();
-  bool accessibility_enabled = prefs &&
+  bool spoken_feedback_enabled = prefs &&
       prefs->GetBoolean(prefs::kSpokenFeedbackEnabled);
-  return accessibility_enabled;
+  return spoken_feedback_enabled;
+}
+
+void MaybeSpeak(const std::string& utterance) {
+  if (IsSpokenFeedbackEnabled())
+    Speak(utterance);
 }
 
 }  // namespace accessibility

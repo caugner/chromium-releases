@@ -19,6 +19,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
+#include "sync/protocol/sync.pb.h"
 
 using content::BrowserThread;
 
@@ -58,9 +59,10 @@ AutofillProfileSyncableService::AutofillProfileSyncableService()
 SyncError AutofillProfileSyncableService::MergeDataAndStartSyncing(
     syncable::ModelType type,
     const SyncDataList& initial_sync_data,
-    SyncChangeProcessor* sync_processor) {
+    scoped_ptr<SyncChangeProcessor> sync_processor) {
   DCHECK(CalledOnValidThread());
   DCHECK(!sync_processor_.get());
+  DCHECK(sync_processor.get());
   DVLOG(1) << "Associating Autofill: MergeDataAndStartSyncing";
 
   if (!LoadAutofillData(&profiles_.get())) {
@@ -83,7 +85,7 @@ SyncError AutofillProfileSyncableService::MergeDataAndStartSyncing(
     }
   }
 
-  sync_processor_.reset(sync_processor);
+  sync_processor_ = sync_processor.Pass();
 
   GUIDToProfileMap remaining_profiles;
   CreateGUIDToProfileMap(profiles_.get(), &remaining_profiles);
@@ -196,7 +198,7 @@ SyncError AutofillProfileSyncableService::ProcessSyncChanges(
         break;
       case SyncChange::ACTION_DELETE: {
         std::string guid = i->sync_data().GetSpecifics().
-             GetExtension(sync_pb::autofill_profile).guid();
+             autofill_profile().guid();
         bundle.profiles_to_delete.push_back(guid);
         profiles_map_.erase(guid);
       } break;
@@ -300,7 +302,7 @@ void AutofillProfileSyncableService::WriteAutofillProfile(
     const AutofillProfile& profile,
     sync_pb::EntitySpecifics* profile_specifics) {
   sync_pb::AutofillProfileSpecifics* specifics =
-      profile_specifics->MutableExtension(sync_pb::autofill_profile);
+      profile_specifics->mutable_autofill_profile();
 
   DCHECK(guid::IsValidGUID(profile.guid()));
 
@@ -363,7 +365,7 @@ AutofillProfileSyncableService::CreateOrUpdateProfile(
 
   const sync_pb::EntitySpecifics& specifics = data.GetSpecifics();
   const sync_pb::AutofillProfileSpecifics& autofill_specifics(
-      specifics.GetExtension(sync_pb::autofill_profile));
+      specifics.autofill_profile());
 
   GUIDToProfileMap::iterator it = profile_map->find(
         autofill_specifics.guid());

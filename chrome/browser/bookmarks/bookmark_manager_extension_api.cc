@@ -23,7 +23,7 @@
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/common/chrome_view_type.h"
 #include "chrome/common/pref_names.h"
-#include "content/browser/renderer_host/render_view_host.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_view_host_delegate.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
@@ -168,7 +168,7 @@ void BookmarkManagerExtensionEventRouter::DispatchEvent(const char* event_name,
     return;
 
   std::string json_args;
-  base::JSONWriter::Write(args, false, &json_args);
+  base::JSONWriter::Write(args, &json_args);
   profile_->GetExtensionEventRouter()->DispatchEventToRenderers(
       event_name, json_args, NULL, GURL());
 }
@@ -383,7 +383,7 @@ bool StartDragBookmarkManagerFunction::RunImpl() {
   EXTENSION_FUNCTION_VALIDATE(
       GetNodesFromArguments(model, args_.get(), 0, &nodes));
 
-  if (render_view_host_->delegate()->GetRenderViewType() ==
+  if (render_view_host_->GetDelegate()->GetRenderViewType() ==
       content::VIEW_TYPE_TAB_CONTENTS) {
     WebContents* web_contents =
         dispatcher()->delegate()->GetAssociatedWebContents();
@@ -420,12 +420,12 @@ bool DropBookmarkManagerFunction::RunImpl() {
   }
 
   int drop_index;
-  if (args_->GetSize() == 2)
+  if (HasOptionalArgument(1))
     EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(1, &drop_index));
   else
     drop_index = drop_parent->child_count();
 
-  if (render_view_host_->delegate()->GetRenderViewType() ==
+  if (render_view_host_->GetDelegate()->GetRenderViewType() ==
       content::VIEW_TYPE_TAB_CONTENTS) {
     WebContents* web_contents =
         dispatcher()->delegate()->GetAssociatedWebContents();

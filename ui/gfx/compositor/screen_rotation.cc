@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,11 +17,14 @@ namespace {
 
 const int k90DegreeTransitionDurationMs = 350;
 const int k180DegreeTransitionDurationMs = 550;
+const int k360DegreeTransitionDurationMs = 750;
 
 base::TimeDelta GetTransitionDuration(int degrees) {
+  if (degrees == 360)
+    return base::TimeDelta::FromMilliseconds(k360DegreeTransitionDurationMs);
   if (degrees == 180)
     return base::TimeDelta::FromMilliseconds(k180DegreeTransitionDurationMs);
-  else if (degrees == 0)
+  if (degrees == 0)
     return base::TimeDelta::FromMilliseconds(0);
   return base::TimeDelta::FromMilliseconds(k90DegreeTransitionDurationMs);
 }
@@ -58,6 +61,7 @@ void ScreenRotation::OnStart(LayerAnimationDelegate* delegate) {
       new_origin_ = new_pivot = gfx::Point(0, height);
       break;
     case 180:
+    case 360:
       new_pivot = old_pivot = gfx::Point(width / 2, height / 2);
       new_origin_.SetPoint(width, height);
       break;
@@ -95,10 +99,10 @@ void ScreenRotation::OnStart(LayerAnimationDelegate* delegate) {
   interpolated_transform_->SetChild(rotation.release());
 }
 
-void ScreenRotation::OnProgress(double t,
+bool ScreenRotation::OnProgress(double t,
                                 LayerAnimationDelegate* delegate) {
   delegate->SetTransformFromAnimation(interpolated_transform_->Interpolate(t));
-  delegate->ScheduleDrawForAnimation();
+  return true;
 }
 
 void ScreenRotation::OnGetTarget(TargetValue* target) const {

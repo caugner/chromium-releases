@@ -22,8 +22,7 @@
 #include "chrome/common/extensions/extension_file_util.h"
 #include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/renderer_host/resource_dispatcher_host.h"
-#include "content/browser/renderer_host/resource_dispatcher_host_request_info.h"
+#include "content/public/browser/resource_request_info.h"
 #include "googleurl/src/url_util.h"
 #include "grit/component_extension_resources_map.h"
 #include "net/base/mime_util.h"
@@ -34,6 +33,8 @@
 #include "net/url_request/url_request_file_job.h"
 #include "net/url_request/url_request_simple_job.h"
 #include "ui/base/resource/resource_bundle.h"
+
+using content::ResourceRequestInfo;
 
 namespace {
 
@@ -164,12 +165,22 @@ class URLRequestExtensionJob : public net::URLRequestFileJob {
   net::HttpResponseInfo response_info_;
 };
 
-bool ExtensionCanLoadInIncognito(const std::string& extension_id,
+bool ExtensionCanLoadInIncognito(const ResourceRequestInfo* info,
+                                 const std::string& extension_id,
                                  ExtensionInfoMap* extension_info_map) {
-  const Extension* extension =
-      extension_info_map->extensions().GetByID(extension_id);
-  // Only split-mode extensions can load in incognito profiles.
-  return extension && extension->incognito_split_mode();
+  if (!extension_info_map->IsIncognitoEnabled(extension_id))
+    return false;
+
+  // Only allow incognito toplevel navigations to extension resources in
+  // split mode. In spanning mode, the extension must run in a single process,
+  // and an incognito tab prevents that.
+  if (info->GetResourceType() == ResourceType::MAIN_FRAME) {
+    const Extension* extension =
+        extension_info_map->extensions().GetByID(extension_id);
+    return extension && extension->incognito_split_mode();
+  }
+
+  return true;
 }
 
 // Returns true if an chrome-extension:// resource should be allowed to load.
@@ -178,8 +189,7 @@ bool ExtensionCanLoadInIncognito(const std::string& extension_id,
 bool AllowExtensionResourceLoad(net::URLRequest* request,
                                 bool is_incognito,
                                 ExtensionInfoMap* extension_info_map) {
-  const ResourceDispatcherHostRequestInfo* info =
-      ResourceDispatcherHost::InfoForRequest(request);
+  const ResourceRequestInfo* info = ResourceRequestInfo::ForRequest(request);
 
   // We have seen crashes where info is NULL: crbug.com/52374.
   if (!info) {
@@ -189,14 +199,8 @@ bool AllowExtensionResourceLoad(net::URLRequest* request,
     return true;
   }
 
-  // Don't allow toplevel navigations to extension resources in incognito mode.
-  // This is because an extension must run in a single process, and an
-  // incognito tab prevents that.
-  if (is_incognito &&
-      info->resource_type() == ResourceType::MAIN_FRAME &&
-      !ExtensionCanLoadInIncognito(request->url().host(), extension_info_map)) {
-    LOG(ERROR) << "Denying load of " << request->url().spec() << " from "
-               << "incognito tab.";
+  if (is_incognito && !ExtensionCanLoadInIncognito(info, request->url().host(),
+                                                   extension_info_map)) {
     return false;
   }
 
@@ -242,7 +246,6 @@ ExtensionProtocolHandler::MaybeCreateJob(net::URLRequest* request) const {
   // TODO(mpcomplete): better error code.
   if (!AllowExtensionResourceLoad(
            request, is_incognito_, extension_info_map_)) {
-    LOG(ERROR) << "disallowed in extension protocols";
     return new net::URLRequestErrorJob(request, net::ERR_ADDRESS_UNREACHABLE);
   }
 
@@ -286,9 +289,7 @@ ExtensionProtocolHandler::MaybeCreateJob(net::URLRequest* request) const {
       directory_path.DirName() == resources_path) {
     FilePath relative_path = directory_path.BaseName().Append(
         extension_file_util::ExtensionURLToRelativeFilePath(request->url()));
-#if defined(OS_WIN)
-    relative_path = relative_path.NormalizeWindowsPathSeparators();
-#endif
+    relative_path = relative_path.NormalizePathSeparators();
 
     // TODO(tc): Make a map of FilePath -> resource ids so we don't have to
     // covert to FilePaths all the time.  This will be more useful as we add
@@ -296,9 +297,7 @@ ExtensionProtocolHandler::MaybeCreateJob(net::URLRequest* request) const {
     for (size_t i = 0; i < kComponentExtensionResourcesSize; ++i) {
       FilePath bm_resource_path =
           FilePath().AppendASCII(kComponentExtensionResources[i].name);
-#if defined(OS_WIN)
-      bm_resource_path = bm_resource_path.NormalizeWindowsPathSeparators();
-#endif
+      bm_resource_path = bm_resource_path.NormalizePathSeparators();
       if (relative_path == bm_resource_path) {
         return new URLRequestResourceBundleJob(request, relative_path,
             kComponentExtensionResources[i].value, content_security_policy,

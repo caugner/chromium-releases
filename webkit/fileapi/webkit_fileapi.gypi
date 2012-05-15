@@ -1,4 +1,4 @@
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -37,6 +37,8 @@
         'file_system_options.h',
         'file_system_origin_database.cc',
         'file_system_origin_database.h',
+        'file_system_path.cc',
+        'file_system_path.h',
         'file_system_quota_client.cc',
         'file_system_quota_client.h',
         'file_system_quota_util.cc',
@@ -50,8 +52,12 @@
         'file_system_usage_cache.h',
         'file_system_util.cc',
         'file_system_util.h',
+        'file_util_helper.cc',
+        'file_util_helper.h',
         'file_writer_delegate.cc',
         'file_writer_delegate.h',
+        'isolated_context.cc',
+        'isolated_context.h',
         'local_file_util.cc',
         'local_file_util.h',
         'native_file_util.cc',
@@ -79,6 +85,9 @@
             '../chromeos/fileapi/file_access_permissions.cc',
             '../chromeos/fileapi/file_access_permissions.h',
             '../chromeos/fileapi/file_util_async.h',
+            '../chromeos/fileapi/remote_file_system_operation.cc',
+            '../chromeos/fileapi/remote_file_system_operation.h',
+            '../chromeos/fileapi/remote_file_system_proxy.h',
           ],
         }],
       ],

@@ -20,7 +20,6 @@
 #include "chrome/browser/profiles/profile_metrics.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
-#include "chrome/browser/sync/sync_setup_flow.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
@@ -40,8 +39,9 @@
 #include "grit/generated_resources.h"
 #include "net/base/escape.h"
 #include "skia/ext/image_operations.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/canvas.h"
 #include "ui/gfx/image/image.h"
 
 using content::OpenURLParams;
@@ -52,16 +52,16 @@ namespace {
 SkBitmap GetGAIAPictureForNTP(const gfx::Image& image) {
   // This value must match the width and height value of login-status-icon
   // in new_tab.css.
-  const int length = 27;
-  SkBitmap bmp = skia::ImageOperations::Resize(
-      image, skia::ImageOperations::RESIZE_BEST, length, length);
+  const int kLength = 27;
+  SkBitmap bmp = skia::ImageOperations::Resize(*image.ToSkBitmap(),
+      skia::ImageOperations::RESIZE_BEST, kLength, kLength);
 
-  gfx::CanvasSkia canvas(gfx::Size(length, length), false);
+  gfx::Canvas canvas(gfx::Size(kLength, kLength), false);
   canvas.DrawBitmapInt(bmp, 0, 0);
 
   // Draw a gray border on the inside of the icon.
   SkColor color = SkColorSetARGB(83, 0, 0, 0);
-  canvas.DrawRect(gfx::Rect(0, 0, length - 1, length - 1), color);
+  canvas.DrawRect(gfx::Rect(0, 0, kLength - 1, kLength - 1), color);
 
   return canvas.ExtractBitmap();
 }
@@ -124,22 +124,21 @@ void NTPLoginHandler::HandleShowSyncLoginUI(const ListValue* args) {
   Profile* profile = Profile::FromWebUI(web_ui());
   std::string username = profile->GetPrefs()->GetString(
       prefs::kGoogleServicesUsername);
+  content::WebContents* web_contents = web_ui()->GetWebContents();
+  Browser* browser = BrowserList::FindBrowserWithWebContents(web_contents);
+  if (!browser)
+    return;
 
   if (username.empty()) {
+#if !defined(OS_ANDROID)
     // The user isn't signed in, show the sync promo.
     if (SyncPromoUI::ShouldShowSyncPromo(profile)) {
-      OpenURLParams params(
-          GURL(chrome::kChromeUISyncPromoURL), Referrer(), CURRENT_TAB,
-          content::PAGE_TRANSITION_LINK, false);
-      web_ui()->GetWebContents()->OpenURL(params);
+      browser->ShowSyncSetup(SyncPromoUI::SOURCE_NTP_LINK);
       RecordInHistogram(NTP_SIGN_IN_PROMO_CLICKED);
     }
+#endif
   } else if (args->GetSize() == 4) {
     // The user is signed in, show the profiles menu.
-    Browser* browser =
-        BrowserList::FindBrowserWithWebContents(web_ui()->GetWebContents());
-    if (!browser)
-      return;
     double x = 0;
     double y = 0;
     double width = 0;
@@ -152,7 +151,11 @@ void NTPLoginHandler::HandleShowSyncLoginUI(const ListValue* args) {
     DCHECK(success);
     success = args->GetDouble(3, &height);
     DCHECK(success);
-    gfx::Rect rect(x, y, width, height);
+
+    double zoom =
+        WebKit::WebView::zoomLevelToZoomFactor(web_contents->GetZoomLevel());
+    gfx::Rect rect(x * zoom, y * zoom, width * zoom, height * zoom);
+
     browser->window()->ShowAvatarBubble(web_ui()->GetWebContents(), rect);
     ProfileMetrics::LogProfileOpenMethod(ProfileMetrics::NTP_AVATAR_BUBBLE);
   }
@@ -177,8 +180,10 @@ void NTPLoginHandler::HandleLoginMessageSeen(const ListValue* args) {
 }
 
 void NTPLoginHandler::HandleShowAdvancedLoginUI(const ListValue* args) {
-  ProfileSyncServiceFactory::GetInstance()->GetForProfile(
-      Profile::FromWebUI(web_ui()))->ShowConfigure(false);
+  Browser* browser =
+      BrowserList::FindBrowserWithWebContents(web_ui()->GetWebContents());
+  if (browser)
+    browser->ShowSyncSetup(SyncPromoUI::SOURCE_NTP_LINK);
 }
 
 void NTPLoginHandler::UpdateLogin() {
@@ -208,26 +213,29 @@ void NTPLoginHandler::UpdateLogin() {
       if (header.empty())
         header = CreateSpanWithClass(UTF8ToUTF16(username), "profile-name");
     }
-  } else if (SyncPromoUI::ShouldShowSyncPromo(profile) &&
-             (SyncPromoUI::UserHasSeenSyncPromoAtStartup(profile) ||
-              PromoResourceService::CanShowNTPSignInPromo(profile))) {
-    string16 signed_in_link = l10n_util::GetStringUTF16(
-        IDS_SYNC_PROMO_NOT_SIGNED_IN_STATUS_LINK);
-    signed_in_link = CreateSpanWithClass(signed_in_link, "link-span");
-    header = l10n_util::GetStringFUTF16(
-        IDS_SYNC_PROMO_NOT_SIGNED_IN_STATUS_HEADER,
-        l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME));
-    sub_header = l10n_util::GetStringFUTF16(
-        IDS_SYNC_PROMO_NOT_SIGNED_IN_STATUS_SUB_HEADER, signed_in_link);
-    // Record that the user was shown the promo.
-    RecordInHistogram(NTP_SIGN_IN_PROMO_VIEWED);
+  } else {
+#if !defined(OS_ANDROID)
+    // Android uses a custom sync promo
+    if (SyncPromoUI::ShouldShowSyncPromo(profile)) {
+      string16 signed_in_link = l10n_util::GetStringUTF16(
+          IDS_SYNC_PROMO_NOT_SIGNED_IN_STATUS_LINK);
+      signed_in_link = CreateSpanWithClass(signed_in_link, "link-span");
+      header = l10n_util::GetStringFUTF16(
+          IDS_SYNC_PROMO_NOT_SIGNED_IN_STATUS_HEADER,
+          l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME));
+      sub_header = l10n_util::GetStringFUTF16(
+          IDS_SYNC_PROMO_NOT_SIGNED_IN_STATUS_SUB_HEADER, signed_in_link);
+      // Record that the user was shown the promo.
+      RecordInHistogram(NTP_SIGN_IN_PROMO_VIEWED);
+    }
+#endif
   }
 
   StringValue header_value(header);
   StringValue sub_header_value(sub_header);
   StringValue icon_url_value(icon_url);
   web_ui()->CallJavascriptFunction(
-      "updateLogin", header_value, sub_header_value, icon_url_value);
+      "ntp.updateLogin", header_value, sub_header_value, icon_url_value);
 }
 
 // static

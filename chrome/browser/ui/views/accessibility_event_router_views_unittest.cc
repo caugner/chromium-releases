@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,6 +23,15 @@
 #include "ui/views/widget/root_view.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
+
+#if defined(USE_AURA)
+#include "ui/aura/env.h"
+#include "ui/aura/monitor_manager.h"
+#include "ui/aura/root_window.h"
+#include "ui/aura/test/single_monitor_manager.h"
+#include "ui/aura/test/test_screen.h"
+#include "ui/aura/test/test_stacking_client.h"
+#endif
 
 #if defined(TOOLKIT_VIEWS)
 
@@ -62,6 +71,9 @@ class AccessibilityViewsDelegate : public views::ViewsDelegate {
   virtual views::NonClientFrameView* CreateDefaultNonClientFrameView(
       views::Widget* widget) OVERRIDE {
     return NULL;
+  }
+  virtual bool UseTransparentWindows() const OVERRIDE {
+    return false;
   }
   virtual void AddRef() OVERRIDE {}
   virtual void ReleaseRef() OVERRIDE {}
@@ -115,9 +127,22 @@ class AccessibilityEventRouterViewsTest
  public:
   virtual void SetUp() {
     views::ViewsDelegate::views_delegate = new AccessibilityViewsDelegate();
+#if defined(USE_AURA)
+    aura::Env::GetInstance()->SetMonitorManager(
+        new aura::test::SingleMonitorManager);
+    root_window_.reset(
+        aura::MonitorManager::CreateRootWindowForPrimaryMonitor());
+    gfx::Screen::SetInstance(new aura::TestScreen(root_window_.get()));
+    test_stacking_client_.reset(
+        new aura::test::TestStackingClient(root_window_.get()));
+#endif
   }
 
   virtual void TearDown() {
+#if defined(USE_AURA)
+    test_stacking_client_.reset();
+    root_window_.reset();
+#endif
     delete views::ViewsDelegate::views_delegate;
     views::ViewsDelegate::views_delegate = NULL;
 
@@ -151,6 +176,10 @@ class AccessibilityEventRouterViewsTest
   int focus_event_count_;
   std::string last_control_name_;
   std::string last_control_context_;
+#if defined(USE_AURA)
+  scoped_ptr<aura::RootWindow> root_window_;
+  scoped_ptr<aura::test::TestStackingClient> test_stacking_client_;
+#endif
 };
 
 TEST_F(AccessibilityEventRouterViewsTest, TestFocusNotification) {

@@ -5,9 +5,9 @@
 #include "ui/views/controls/focusable_border.h"
 
 #include "ui/gfx/canvas.h"
-#include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/insets.h"
 #include "ui/gfx/native_theme.h"
+#include "ui/gfx/skia_util.h"
 
 namespace {
 
@@ -28,11 +28,8 @@ FocusableBorder::FocusableBorder()
 }
 
 void FocusableBorder::Paint(const View& view, gfx::Canvas* canvas) const {
-  SkRect rect;
-  rect.set(SkIntToScalar(0), SkIntToScalar(0),
-           SkIntToScalar(view.width()), SkIntToScalar(view.height()));
   SkPath path;
-  path.addRect(rect, SkPath::kCW_Direction);
+  path.addRect(gfx::RectToSkRect(view.GetLocalBounds()), SkPath::kCW_Direction);
   SkPaint paint;
   paint.setStyle(SkPaint::kStroke_Style);
   SkColor focus_color = gfx::NativeTheme::instance()->GetSystemColor(
@@ -41,7 +38,7 @@ void FocusableBorder::Paint(const View& view, gfx::Canvas* canvas) const {
   paint.setColor(focus_color);
   paint.setStrokeWidth(SkIntToScalar(2));
 
-  canvas->GetSkCanvas()->drawPath(path, paint);
+  canvas->sk_canvas()->drawPath(path, paint);
 }
 
 void FocusableBorder::GetInsets(gfx::Insets* insets) const {

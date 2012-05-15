@@ -1,4 +1,4 @@
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -14,11 +14,14 @@
           'file_descriptor_set_posix.cc',
           'file_descriptor_set_posix.h',
           'ipc_channel.h',
+          'ipc_channel.cc',
           'ipc_channel_handle.h',
           'ipc_channel_posix.cc',
           'ipc_channel_posix.h',
           'ipc_channel_proxy.cc',
           'ipc_channel_proxy.h',
+          'ipc_channel_reader.cc',
+          'ipc_channel_reader.h',
           'ipc_channel_win.cc',
           'ipc_channel_win.h',
           'ipc_descriptors.h',

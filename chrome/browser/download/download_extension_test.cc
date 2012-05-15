@@ -20,10 +20,10 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/browser/download/download_persistent_store_info.h"
-#include "content/browser/net/url_request_slow_download_job.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_manager.h"
+#include "content/public/browser/download_persistent_store_info.h"
+#include "content/test/net/url_request_slow_download_job.h"
 #include "net/base/data_url.h"
 #include "net/base/net_util.h"
 #include "ui/gfx/codec/png_codec.h"
@@ -31,6 +31,7 @@
 using content::BrowserThread;
 using content::DownloadItem;
 using content::DownloadManager;
+using content::DownloadPersistentStoreInfo;
 
 namespace {
 
@@ -58,12 +59,14 @@ class DownloadExtensionTest : public InProcessBrowserTest {
       size_t count, DownloadManager::DownloadVector* items) {
     for (size_t i = 0; i < count; ++i) {
       scoped_ptr<DownloadTestObserver> observer(
-          CreateDownloadObserver(1, DownloadItem::IN_PROGRESS));
+          CreateInProgressDownloadObserver(1));
       GURL slow_download_url(URLRequestSlowDownloadJob::kUnknownSizeUrl);
       ui_test_utils::NavigateToURLWithDisposition(
           browser(), slow_download_url, CURRENT_TAB,
           ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
       observer->WaitForFinished();
+      EXPECT_EQ(
+          1u, observer->NumDownloadsSeenInState(DownloadItem::IN_PROGRESS));
       // We don't expect a select file dialog.
       CHECK(!observer->select_file_dialog_seen());
     }
@@ -73,7 +76,7 @@ class DownloadExtensionTest : public InProcessBrowserTest {
 
   DownloadItem* CreateSlowTestDownload() {
     scoped_ptr<DownloadTestObserver> observer(
-        CreateDownloadObserver(1, DownloadItem::IN_PROGRESS));
+        CreateInProgressDownloadObserver(1));
     GURL slow_download_url(URLRequestSlowDownloadJob::kUnknownSizeUrl);
     DownloadManager* manager = GetDownloadManager();
 
@@ -86,6 +89,7 @@ class DownloadExtensionTest : public InProcessBrowserTest {
         ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
 
     observer->WaitForFinished();
+    EXPECT_EQ(1u, observer->NumDownloadsSeenInState(DownloadItem::IN_PROGRESS));
     // We don't expect a select file dialog.
     if (observer->select_file_dialog_seen())
       return NULL;
@@ -107,20 +111,26 @@ class DownloadExtensionTest : public InProcessBrowserTest {
 
   void FinishPendingSlowDownloads() {
     scoped_ptr<DownloadTestObserver> observer(
-        CreateDownloadObserver(1, DownloadItem::COMPLETE));
+        CreateDownloadObserver(1));
     GURL finish_url(URLRequestSlowDownloadJob::kFinishDownloadUrl);
     ui_test_utils::NavigateToURLWithDisposition(
         browser(), finish_url, NEW_FOREGROUND_TAB,
         ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
     observer->WaitForFinished();
+    EXPECT_EQ(1u, observer->NumDownloadsSeenInState(DownloadItem::COMPLETE));
   }
 
-  DownloadTestObserver* CreateDownloadObserver(
-      size_t download_count,
-      DownloadItem::DownloadState finished_state) {
-    return new DownloadTestObserver(
-        GetDownloadManager(), download_count, finished_state, true,
+  DownloadTestObserver* CreateDownloadObserver(size_t download_count) {
+    return new DownloadTestObserverTerminal(
+        GetDownloadManager(), download_count, true,
         DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_FAIL);
+  }
+
+  DownloadTestObserver* CreateInProgressDownloadObserver(
+      size_t download_count) {
+    return new DownloadTestObserverInProgress(GetDownloadManager(),
+                                              download_count,
+                                              true);
   }
 
   bool RunFunction(UIThreadExtensionFunction* function,
@@ -332,15 +342,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest, DownloadsApi_PauseResumeCancel) {
 
 // Test downloads.getFileIcon() on in-progress, finished, cancelled and deleted
 // download items.
-// TODO(asanka): Fails on ChromeOS (http://crbug.com/109677)
-#if defined(OS_CHROMEOS)
-#define MAYBE_DownloadsApi_FileIcon_Active \
-        FAILS_DownloadsApi_FileIcon_Active
-#else
-#define MAYBE_DownloadsApi_FileIcon_Active DownloadsApi_FileIcon_Active
-#endif
-IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
-                       MAYBE_DownloadsApi_FileIcon_Active) {
+IN_PROC_BROWSER_TEST_F(DownloadExtensionTest, DownloadsApi_FileIcon_Active) {
   DownloadItem* download_item = CreateSlowTestDownload();
   ASSERT_TRUE(download_item);
 
@@ -439,15 +441,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
 // whether they exist or not.  If the file doesn't exist we should receive a
 // generic icon from the OS/toolkit that may or may not be specific to the file
 // type.
-// TODO(asanka): Fails on ChromeOS (http://crbug.com/109677)
-#if defined(OS_CHROMEOS)
-#define MAYBE_DownloadsApi_FileIcon_History \
-        FAILS_DownloadsApi_FileIcon_History
-#else
-#define MAYBE_DownloadsApi_FileIcon_History DownloadsApi_FileIcon_History
-#endif
-IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
-                       MAYBE_DownloadsApi_FileIcon_History) {
+IN_PROC_BROWSER_TEST_F(DownloadExtensionTest, DownloadsApi_FileIcon_History) {
   base::Time current(base::Time::Now());
   FilePath real_path(
       downloads_directory().Append(FILE_PATH_LITERAL("real.txt")));
@@ -638,7 +632,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest, DownloadsApi_SearchDanger) {
   CreateSlowTestDownloads(2, &items);
   ScopedItemVectorCanceller delete_items(&items);
 
-  items[0]->MarkContentDangerous();
+  items[0]->SetDangerType(content::DOWNLOAD_DANGER_TYPE_DANGEROUS_CONTENT);
 
   scoped_ptr<base::Value> result(RunFunctionAndReturnResult(
       new DownloadsSearchFunction(), "[{\"danger\": \"content\"}]"));
@@ -705,8 +699,8 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest, DownloadsApi_SearchPlural) {
   ScopedItemVectorCanceller delete_items(&items);
 
   items[0]->Cancel(true);
-  items[1]->MarkContentDangerous();
-  items[2]->MarkContentDangerous();
+  items[1]->SetDangerType(content::DOWNLOAD_DANGER_TYPE_DANGEROUS_CONTENT);
+  items[2]->SetDangerType(content::DOWNLOAD_DANGER_TYPE_DANGEROUS_CONTENT);
   items[1]->Rename(items[1]->GetFullPath().DirName().Append(
       FILE_PATH_LITERAL("zzz")));
 

@@ -10,16 +10,17 @@
 #include "base/file_path.h"
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
-#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/tab_contents/drag_utils_gtk.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/tab_contents/web_drag_dest_delegate.h"
+#include "content/public/browser/web_drag_dest_delegate.h"
 #include "content/public/common/url_constants.h"
 #include "net/base/net_util.h"
 #include "ui/base/clipboard/custom_data_helper.h"
 #include "ui/base/dragdrop/gtk_dnd_util.h"
-#include "ui/base/gtk/gtk_screen_utils.h"
+#include "ui/base/gtk/gtk_screen_util.h"
 
+using content::RenderViewHostImpl;
 using WebKit::WebDragOperation;
 using WebKit::WebDragOperationNone;
 
@@ -68,7 +69,7 @@ void WebDragDestGtk::UpdateDragStatus(WebDragOperation operation) {
 }
 
 void WebDragDestGtk::DragLeave() {
-  web_contents_->GetRenderViewHost()->DragTargetDragLeave();
+  GetRenderViewHost()->DragTargetDragLeave();
 
   if (delegate())
     delegate()->OnDragLeave();
@@ -115,11 +116,10 @@ gboolean WebDragDestGtk::OnDragMotion(GtkWidget* sender,
                         time);
     }
   } else if (data_requests_ == 0) {
-    web_contents_->GetRenderViewHost()->
-        DragTargetDragOver(
-            ui::ClientPoint(widget_),
-            ui::ScreenPoint(widget_),
-            content::GdkDragActionToWebDragOp(context->actions));
+    GetRenderViewHost()->DragTargetDragOver(
+        ui::ClientPoint(widget_),
+        ui::ScreenPoint(widget_),
+        content::GdkDragActionToWebDragOp(context->actions));
 
     if (delegate())
       delegate()->OnDragOver();
@@ -221,11 +221,11 @@ void WebDragDestGtk::OnDragDataReceived(
   if (data_requests_ == 0) {
     // Tell the renderer about the drag.
     // |x| and |y| are seemingly arbitrary at this point.
-    web_contents_->GetRenderViewHost()->
-        DragTargetDragEnter(*drop_data_.get(),
-            ui::ClientPoint(widget_),
-            ui::ScreenPoint(widget_),
-            content::GdkDragActionToWebDragOp(context->actions));
+    GetRenderViewHost()->DragTargetDragEnter(
+        *drop_data_.get(),
+        ui::ClientPoint(widget_),
+        ui::ScreenPoint(widget_),
+        content::GdkDragActionToWebDragOp(context->actions));
 
     if (delegate())
       delegate()->OnDragEnter();
@@ -255,7 +255,7 @@ gboolean WebDragDestGtk::OnDragDrop(GtkWidget* sender, GdkDragContext* context,
   // Cancel that drag leave!
   method_factory_.InvalidateWeakPtrs();
 
-  web_contents_->GetRenderViewHost()->
+  GetRenderViewHost()->
       DragTargetDrop(ui::ClientPoint(widget_), ui::ScreenPoint(widget_));
 
   if (delegate())
@@ -267,6 +267,10 @@ gboolean WebDragDestGtk::OnDragDrop(GtkWidget* sender, GdkDragContext* context,
   gtk_drag_finish(context, is_drop_target_, FALSE, time);
 
   return TRUE;
+}
+
+RenderViewHostImpl* WebDragDestGtk::GetRenderViewHost() const {
+  return static_cast<RenderViewHostImpl*>(web_contents_->GetRenderViewHost());
 }
 
 }  // namespace content

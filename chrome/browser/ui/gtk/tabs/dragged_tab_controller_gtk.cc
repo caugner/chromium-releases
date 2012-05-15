@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,6 +21,7 @@
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/web_contents.h"
+#include "ui/base/gtk/gtk_screen_util.h"
 #include "ui/gfx/screen.h"
 
 using content::OpenURLParams;
@@ -262,12 +263,7 @@ void DraggedTabControllerGtk::ContinueDragging() {
   // Determine whether or not we have dragged over a compatible TabStrip in
   // another browser window. If we have, we should attach to it and start
   // dragging within it.
-#if defined(OS_CHROMEOS)
-  // We don't allow detaching on chrome os.
-  TabStripGtk* target_tabstrip = source_tabstrip_;
-#else
   TabStripGtk* target_tabstrip = GetTabStripForPoint(screen_point);
-#endif
   if (target_tabstrip != attached_tabstrip_) {
     // Make sure we're fully detached from whatever TabStrip we're attached to
     // (if any).
@@ -292,8 +288,14 @@ void DraggedTabControllerGtk::ContinueDragging() {
 
 void DraggedTabControllerGtk::RestoreSelection(TabStripModel* model) {
   for (size_t i = 0; i < drag_data_->size(); ++i) {
-    int index = model->GetIndexOfTabContents(drag_data_->get(i)->contents_);
-    model->AddTabAtToSelection(index);
+    TabContentsWrapper* contents = drag_data_->get(i)->contents_;
+    // If a tab is destroyed while dragging contents might be null. See
+    // http://crbug.com/115409.
+    if (contents != NULL) {
+      int index = model->GetIndexOfTabContents(contents);
+      CHECK(index != TabStripModel::kNoTab);
+      model->AddTabAtToSelection(index);
+    }
   }
 }
 
@@ -370,7 +372,7 @@ TabStripGtk* DraggedTabControllerGtk::GetTabStripIfItContains(
   // Make sure the specified screen point is actually within the bounds of the
   // specified tabstrip...
   gfx::Rect tabstrip_bounds =
-      gtk_util::GetWidgetScreenBounds(tabstrip->tabstrip_.get());
+      ui::GetWidgetScreenBounds(tabstrip->tabstrip_.get());
   if (screen_point.x() < tabstrip_bounds.right() &&
       screen_point.x() >= tabstrip_bounds.x()) {
     // TODO(beng): make this be relative to the start position of the mouse for
@@ -415,7 +417,7 @@ void DraggedTabControllerGtk::Attach(TabStripGtk* attached_tabstrip,
 
   GtkWidget* parent_window = gtk_widget_get_parent(
       gtk_widget_get_parent(attached_tabstrip_->tabstrip_.get()));
-  gfx::Rect window_bounds = gtk_util::GetWidgetScreenBounds(parent_window);
+  gfx::Rect window_bounds = ui::GetWidgetScreenBounds(parent_window);
   dragged_view_->Attach(static_cast<int>(floor(selected_width + 0.5)),
                         TabGtk::GetMiniWidth(), window_bounds.width());
 
@@ -498,7 +500,7 @@ void DraggedTabControllerGtk::Detach() {
 gfx::Point DraggedTabControllerGtk::ConvertScreenPointToTabStripPoint(
     TabStripGtk* tabstrip, const gfx::Point& screen_point) {
   gfx::Point tabstrip_screen_point =
-      gtk_util::GetWidgetScreenPosition(tabstrip->tabstrip_.get());
+      ui::GetWidgetScreenPosition(tabstrip->tabstrip_.get());
   return screen_point.Subtract(tabstrip_screen_point);
 }
 
@@ -570,7 +572,7 @@ gfx::Point DraggedTabControllerGtk::GetDraggedViewPoint(
   // If we're not attached, we just use x and y from above.
   if (attached_tabstrip_) {
     gfx::Rect tabstrip_bounds =
-        gtk_util::GetWidgetScreenBounds(attached_tabstrip_->tabstrip_.get());
+        ui::GetWidgetScreenBounds(attached_tabstrip_->tabstrip_.get());
     // Snap the dragged tab to the tabstrip if we are attached, detaching
     // only when the mouse position (screen_point) exceeds the screen bounds
     // of the tabstrip.
@@ -597,12 +599,6 @@ gfx::Point DraggedTabControllerGtk::GetDraggedViewPoint(
         (tabstrip_bounds.bottom() + vertical_drag_magnetism)) {
       y = max_y;
     }
-#if defined(OS_CHROMEOS)
-    // We don't allow detaching on chromeos. This restricts dragging to the
-    // source window.
-    x = std::min(std::max(x, tabstrip_bounds.x()), max_x);
-    y = tabstrip_bounds.y();
-#endif
   }
   return gfx::Point(x, y);
 }
@@ -814,7 +810,7 @@ gfx::Rect DraggedTabControllerGtk::GetAnimateBounds() {
   gfx::Rect bounds = tab->GetRequisition();
   GtkWidget* widget = tab->widget();
   GtkWidget* parent = gtk_widget_get_parent(widget);
-  gfx::Point point = gtk_util::GetWidgetScreenPosition(parent);
+  gfx::Point point = ui::GetWidgetScreenPosition(parent);
   bounds.Offset(point);
 
   return gfx::Rect(bounds.x(), bounds.y(),

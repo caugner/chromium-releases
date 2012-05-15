@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -74,7 +74,7 @@ void AppNotificationListToJSON(const AppNotificationList& list,
     (*i)->ToDictionaryValue(dictionary);
     list_value.Append(dictionary);
   }
-  JSONWriter::Write(&list_value, false /* pretty_print */, result);
+  JSONWriter::Write(&list_value, result);
 }
 
 bool JSONToAppNotificationList(const std::string& json,
@@ -101,7 +101,7 @@ bool JSONToAppNotificationList(const std::string& json,
   return true;
 }
 
-void LogLevelDbError(tracked_objects::Location location,
+void LogLevelDbError(const tracked_objects::Location& location,
                      const leveldb::Status& status) {
   LOG(ERROR) << "AppNotificationStorage database error at "
              << location.ToString() << " status:" << status.ToString();

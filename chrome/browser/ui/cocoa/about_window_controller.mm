@@ -654,7 +654,7 @@ static BOOL recentShownUserActionFailedStatus = NO;
       l10n_util::GetNSStringWithFixup(IDS_ABOUT_VERSION_COPYRIGHT);
   AttributedStringAppendString(legal_block, copyright);
 
-  // These are the markers directly in IDS_ABOUT_VERSION_LICENSE
+  // These are the markers directly in IDS_ABOUT_OLD_VERSION_LICENSE
   NSString* kBeginLinkChr = @"BEGIN_LINK_CHR";
   NSString* kBeginLinkOss = @"BEGIN_LINK_OSS";
   NSString* kEndLinkChr = @"END_LINK_CHR";
@@ -670,7 +670,7 @@ static BOOL recentShownUserActionFailedStatus = NO;
   // Now fetch the license string and deal with the markers
 
   NSString* license =
-      l10n_util::GetNSStringWithFixup(IDS_ABOUT_VERSION_LICENSE);
+      l10n_util::GetNSStringWithFixup(IDS_ABOUT_OLD_VERSION_LICENSE);
 
   NSRange begin_chr = [license rangeOfString:kBeginLinkChr];
   NSRange begin_oss = [license rangeOfString:kBeginLinkOss];
@@ -733,10 +733,11 @@ static BOOL recentShownUserActionFailedStatus = NO;
   // Following Windows. There is one marker in the string for where the terms
   // link goes, but the text of the link comes from a second string resources.
   std::vector<size_t> url_offsets;
-  NSString* about_terms = l10n_util::GetNSStringF(IDS_ABOUT_TERMS_OF_SERVICE,
-                                                  string16(),
-                                                  string16(),
-                                                  &url_offsets);
+  NSString* about_terms = l10n_util::GetNSStringF(
+      IDS_ABOUT_OLD_TERMS_OF_SERVICE,
+      string16(),
+      string16(),
+      &url_offsets);
   DCHECK_EQ(url_offsets.size(), 1U);
   NSString* terms_link_text =
       l10n_util::GetNSStringWithFixup(IDS_TERMS_OF_SERVICE);

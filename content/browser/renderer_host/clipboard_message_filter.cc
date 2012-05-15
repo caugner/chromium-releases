@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,7 +29,7 @@ namespace {
 // must be called on the UI thread.
 void WriteObjectsHelper(const ui::Clipboard::ObjectMap* objects) {
   content::GetContentClient()->browser()->GetClipboard()->WriteObjects(
-      *objects);
+      ui::Clipboard::BUFFER_STANDARD, *objects);
 }
 
 }  // namespace
@@ -39,12 +39,23 @@ ClipboardMessageFilter::ClipboardMessageFilter() {
 
 void ClipboardMessageFilter::OverrideThreadForMessage(
     const IPC::Message& message, BrowserThread::ID* thread) {
+  // Clipboard writes should always occur on the UI thread due the restrictions
+  // of various platform APIs. In general, the clipboard is not thread-safe, so
+  // all clipboard calls should be serviced from the UI thread.
+  //
+  // Windows needs clipboard reads to be serviced from the IO thread because
+  // these are sync IPCs which can result in deadlocks with NPAPI plugins if
+  // serviced from the UI thread. Note that Windows clipboard calls ARE
+  // thread-safe so it is ok for reads and writes to be serviced from different
+  // threads.
+#if !defined(OS_WIN)
+  if (IPC_MESSAGE_CLASS(message) == ClipboardMsgStart)
+    *thread = BrowserThread::UI;
+#endif
+
 #if defined(OS_WIN)
   if (message.type() == ClipboardHostMsg_ReadImage::ID)
     *thread = BrowserThread::FILE;
-#elif defined(USE_X11)
-  if (IPC_MESSAGE_CLASS(message) == ClipboardMsgStart)
-    *thread = BrowserThread::UI;
 #endif
 }
 
@@ -56,6 +67,7 @@ bool ClipboardMessageFilter::OnMessageReceived(const IPC::Message& message,
     IPC_MESSAGE_HANDLER(ClipboardHostMsg_WriteObjectsSync, OnWriteObjectsSync)
     IPC_MESSAGE_HANDLER(ClipboardHostMsg_GetSequenceNumber, OnGetSequenceNumber)
     IPC_MESSAGE_HANDLER(ClipboardHostMsg_IsFormatAvailable, OnIsFormatAvailable)
+    IPC_MESSAGE_HANDLER(ClipboardHostMsg_Clear, OnClear)
     IPC_MESSAGE_HANDLER(ClipboardHostMsg_ReadAvailableTypes,
                         OnReadAvailableTypes)
     IPC_MESSAGE_HANDLER(ClipboardHostMsg_ReadText, OnReadText)
@@ -80,6 +92,7 @@ void ClipboardMessageFilter::OnWriteObjectsSync(
     base::SharedMemoryHandle bitmap_handle) {
   DCHECK(base::SharedMemory::IsHandleValid(bitmap_handle))
       << "Bad bitmap handle";
+#if defined(OS_WIN)
   // We cannot write directly from the IO thread, and cannot service the IPC
   // on the UI thread. We'll copy the relevant data and get a handle to any
   // shared memory so it doesn't go away when we resume the renderer, and post
@@ -95,10 +108,18 @@ void ClipboardMessageFilter::OnWriteObjectsSync(
       BrowserThread::UI,
       FROM_HERE,
       base::Bind(&WriteObjectsHelper, base::Owned(long_living_objects)));
+#else
+  // Splice the shared memory handle into the clipboard data.
+  ui::Clipboard::ObjectMap objects_copy(objects);
+  ui::Clipboard::ReplaceSharedMemHandle(&objects_copy,
+      bitmap_handle, peer_handle());
+  GetClipboard()->WriteObjects(ui::Clipboard::BUFFER_STANDARD, objects_copy);
+#endif
 }
 
 void ClipboardMessageFilter::OnWriteObjectsAsync(
     const ui::Clipboard::ObjectMap& objects) {
+#if defined(OS_WIN)
   // We cannot write directly from the IO thread, and cannot service the IPC
   // on the UI thread. We'll copy the relevant data and post a task to preform
   // the write on the UI thread.
@@ -113,6 +134,9 @@ void ClipboardMessageFilter::OnWriteObjectsAsync(
       BrowserThread::UI,
       FROM_HERE,
       base::Bind(&WriteObjectsHelper, base::Owned(long_living_objects)));
+#else
+  GetClipboard()->WriteObjects(ui::Clipboard::BUFFER_STANDARD, objects);
+#endif
 }
 
 void ClipboardMessageFilter::OnGetSequenceNumber(
@@ -130,6 +154,10 @@ void ClipboardMessageFilter::OnIsFormatAvailable(
     const ui::Clipboard::FormatType& format, ui::Clipboard::Buffer buffer,
     bool* result) {
   *result = GetClipboard()->IsFormatAvailable(format, buffer);
+}
+
+void ClipboardMessageFilter::OnClear(ui::Clipboard::Buffer buffer) {
+  GetClipboard()->Clear(buffer);
 }
 
 void ClipboardMessageFilter::OnReadText(

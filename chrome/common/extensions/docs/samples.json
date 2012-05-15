@@ -1,13 +1,11 @@
 {
   "api": {
     "chrome.bookmarks.create": "bookmarks.html#method-create",
-    "chrome.bookmarks.export": "bookmarks.html#method-export",
     "chrome.bookmarks.get": "bookmarks.html#method-get",
     "chrome.bookmarks.getChildren": "bookmarks.html#method-getChildren",
     "chrome.bookmarks.getRecent": "bookmarks.html#method-getRecent",
     "chrome.bookmarks.getSubTree": "bookmarks.html#method-getSubTree",
     "chrome.bookmarks.getTree": "bookmarks.html#method-getTree",
-    "chrome.bookmarks.import": "bookmarks.html#method-import",
     "chrome.bookmarks.move": "bookmarks.html#method-move",
     "chrome.bookmarks.onChanged": "bookmarks.html#event-onChanged",
     "chrome.bookmarks.onChildrenReordered": "bookmarks.html#event-onChildrenReordered",
@@ -20,12 +18,33 @@
     "chrome.bookmarks.removeTree": "bookmarks.html#method-removeTree",
     "chrome.bookmarks.search": "bookmarks.html#method-search",
     "chrome.bookmarks.update": "bookmarks.html#method-update",
+    "chrome.browserAction.getBadgeBackgroundColor": "browserAction.html#method-getBadgeBackgroundColor",
+    "chrome.browserAction.getBadgeText": "browserAction.html#method-getBadgeText",
+    "chrome.browserAction.getPopup": "browserAction.html#method-getPopup",
+    "chrome.browserAction.getTitle": "browserAction.html#method-getTitle",
     "chrome.browserAction.onClicked": "browserAction.html#event-onClicked",
     "chrome.browserAction.setBadgeBackgroundColor": "browserAction.html#method-setBadgeBackgroundColor",
     "chrome.browserAction.setBadgeText": "browserAction.html#method-setBadgeText",
     "chrome.browserAction.setIcon": "browserAction.html#method-setIcon",
     "chrome.browserAction.setPopup": "browserAction.html#method-setPopup",
     "chrome.browserAction.setTitle": "browserAction.html#method-setTitle",
+    "chrome.browsingData.remove": "browsingData.html#method-remove",
+    "chrome.browsingData.removeAppcache": "browsingData.html#method-removeAppcache",
+    "chrome.browsingData.removeCache": "browsingData.html#method-removeCache",
+    "chrome.browsingData.removeCookies": "browsingData.html#method-removeCookies",
+    "chrome.browsingData.removeDownloads": "browsingData.html#method-removeDownloads",
+    "chrome.browsingData.removeFileSystems": "browsingData.html#method-removeFileSystems",
+    "chrome.browsingData.removeFormData": "browsingData.html#method-removeFormData",
+    "chrome.browsingData.removeHistory": "browsingData.html#method-removeHistory",
+    "chrome.browsingData.removeIndexedDB": "browsingData.html#method-removeIndexedDB",
+    "chrome.browsingData.removeLocalStorage": "browsingData.html#method-removeLocalStorage",
+    "chrome.browsingData.removePasswords": "browsingData.html#method-removePasswords",
+    "chrome.browsingData.removePluginData": "browsingData.html#method-removePluginData",
+    "chrome.browsingData.removeWebSQL": "browsingData.html#method-removeWebSQL",
+    "chrome.contentSettings.ContentSetting.clear": "contentSettings.html#method-ContentSetting-clear",
+    "chrome.contentSettings.ContentSetting.get": "contentSettings.html#method-ContentSetting-get",
+    "chrome.contentSettings.ContentSetting.getResourceIdentifiers": "contentSettings.html#method-ContentSetting-getResourceIdentifiers",
+    "chrome.contentSettings.ContentSetting.set": "contentSettings.html#method-ContentSetting-set",
     "chrome.contextMenus.create": "contextMenus.html#method-create",
     "chrome.contextMenus.remove": "contextMenus.html#method-remove",
     "chrome.contextMenus.removeAll": "contextMenus.html#method-removeAll",
@@ -41,39 +60,70 @@
     "chrome.debugger.onDetach": "debugger.html#event-onDetach",
     "chrome.debugger.onEvent": "debugger.html#event-onEvent",
     "chrome.debugger.sendCommand": "debugger.html#method-sendCommand",
+    "chrome.devtools.inspectedWindow.Resource.getContent": "devtools.inspectedWindow.html#method-Resource-getContent",
+    "chrome.devtools.inspectedWindow.Resource.setContent": "devtools.inspectedWindow.html#method-Resource-setContent",
     "chrome.devtools.inspectedWindow.eval": "devtools.inspectedWindow.html#method-eval",
     "chrome.devtools.inspectedWindow.getResources": "devtools.inspectedWindow.html#method-getResources",
     "chrome.devtools.inspectedWindow.onResourceAdded": "devtools.inspectedWindow.html#event-onResourceAdded",
     "chrome.devtools.inspectedWindow.onResourceContentCommitted": "devtools.inspectedWindow.html#event-onResourceContentCommitted",
     "chrome.devtools.inspectedWindow.reload": "devtools.inspectedWindow.html#method-reload",
+    "chrome.devtools.network.Request.getContent": "devtools.network.html#method-Request-getContent",
     "chrome.devtools.network.getHAR": "devtools.network.html#method-getHAR",
     "chrome.devtools.network.onNavigated": "devtools.network.html#event-onNavigated",
     "chrome.devtools.network.onRequestFinished": "devtools.network.html#event-onRequestFinished",
+    "chrome.devtools.panels.Button.onClicked": "devtools.panels.html#event-Button-onClicked",
+    "chrome.devtools.panels.Button.update": "devtools.panels.html#method-Button-update",
+    "chrome.devtools.panels.ElementsPanel.createSidebarPane": "devtools.panels.html#method-ElementsPanel-createSidebarPane",
+    "chrome.devtools.panels.ElementsPanel.onSelectionChanged": "devtools.panels.html#event-ElementsPanel-onSelectionChanged",
+    "chrome.devtools.panels.ExtensionPanel.createStatusBarButton": "devtools.panels.html#method-ExtensionPanel-createStatusBarButton",
+    "chrome.devtools.panels.ExtensionPanel.onHidden": "devtools.panels.html#event-ExtensionPanel-onHidden",
+    "chrome.devtools.panels.ExtensionPanel.onSearch": "devtools.panels.html#event-ExtensionPanel-onSearch",
+    "chrome.devtools.panels.ExtensionPanel.onShown": "devtools.panels.html#event-ExtensionPanel-onShown",
+    "chrome.devtools.panels.ExtensionSidebarPane.onHidden": "devtools.panels.html#event-ExtensionSidebarPane-onHidden",
+    "chrome.devtools.panels.ExtensionSidebarPane.onShown": "devtools.panels.html#event-ExtensionSidebarPane-onShown",
+    "chrome.devtools.panels.ExtensionSidebarPane.setExpression": "devtools.panels.html#method-ExtensionSidebarPane-setExpression",
+    "chrome.devtools.panels.ExtensionSidebarPane.setHeight": "devtools.panels.html#method-ExtensionSidebarPane-setHeight",
+    "chrome.devtools.panels.ExtensionSidebarPane.setObject": "devtools.panels.html#method-ExtensionSidebarPane-setObject",
+    "chrome.devtools.panels.ExtensionSidebarPane.setPage": "devtools.panels.html#method-ExtensionSidebarPane-setPage",
     "chrome.devtools.panels.create": "devtools.panels.html#method-create",
     "chrome.devtools.panels.setOpenResourceHandler": "devtools.panels.html#method-setOpenResourceHandler",
     "chrome.experimental.app.clearAllNotifications": "experimental.app.html#method-clearAllNotifications",
     "chrome.experimental.app.notify": "experimental.app.html#method-notify",
-    "chrome.experimental.app.resetLaunchIcon": "experimental.app.html#method-resetLaunchIcon",
-    "chrome.experimental.app.setLaunchIcon": "experimental.app.html#method-setLaunchIcon",
-    "chrome.experimental.clear.appcache": "experimental.clear.html#method-appcache",
-    "chrome.experimental.clear.browsingData": "experimental.clear.html#method-browsingData",
-    "chrome.experimental.clear.cache": "experimental.clear.html#method-cache",
-    "chrome.experimental.clear.cookies": "experimental.clear.html#method-cookies",
-    "chrome.experimental.clear.downloads": "experimental.clear.html#method-downloads",
-    "chrome.experimental.clear.fileSystems": "experimental.clear.html#method-fileSystems",
-    "chrome.experimental.clear.formData": "experimental.clear.html#method-formData",
-    "chrome.experimental.clear.history": "experimental.clear.html#method-history",
-    "chrome.experimental.clear.indexedDB": "experimental.clear.html#method-indexedDB",
-    "chrome.experimental.clear.localStorage": "experimental.clear.html#method-localStorage",
-    "chrome.experimental.clear.passwords": "experimental.clear.html#method-passwords",
-    "chrome.experimental.clear.pluginData": "experimental.clear.html#method-pluginData",
-    "chrome.experimental.clear.webSQL": "experimental.clear.html#method-webSQL",
+    "chrome.experimental.devtools.audits.AuditCategory.onAuditStarted": "experimental.devtools.audits.html#event-AuditCategory-onAuditStarted",
+    "chrome.experimental.devtools.audits.AuditResultNode.addChild": "experimental.devtools.audits.html#method-AuditResultNode-addChild",
+    "chrome.experimental.devtools.audits.AuditResults.addResult": "experimental.devtools.audits.html#method-AuditResults-addResult",
+    "chrome.experimental.devtools.audits.AuditResults.createResult": "experimental.devtools.audits.html#method-AuditResults-createResult",
+    "chrome.experimental.devtools.audits.AuditResults.createSnippet": "experimental.devtools.audits.html#method-AuditResults-createSnippet",
+    "chrome.experimental.devtools.audits.AuditResults.createURL": "experimental.devtools.audits.html#method-AuditResults-createURL",
+    "chrome.experimental.devtools.audits.AuditResults.done": "experimental.devtools.audits.html#method-AuditResults-done",
     "chrome.experimental.devtools.audits.addCategory": "experimental.devtools.audits.html#method-addCategory",
     "chrome.experimental.devtools.console.addMessage": "experimental.devtools.console.html#method-addMessage",
     "chrome.experimental.devtools.console.getMessages": "experimental.devtools.console.html#method-getMessages",
     "chrome.experimental.devtools.console.onMessageAdded": "experimental.devtools.console.html#event-onMessageAdded",
+    "chrome.experimental.downloads.download": "experimental.downloads.html#method-download",
     "chrome.experimental.extension.onInstalled": "experimental.extension.html#event-onInstalled",
+    "chrome.experimental.fontSettings.getDefaultFixedFontSize": "experimental.fontSettings.html#method-getDefaultFixedFontSize",
+    "chrome.experimental.fontSettings.getDefaultFontSize": "experimental.fontSettings.html#method-getDefaultFontSize",
+    "chrome.experimental.fontSettings.getFontList": "experimental.fontSettings.html#method-getFontList",
+    "chrome.experimental.fontSettings.getFontName": "experimental.fontSettings.html#method-getFontName",
+    "chrome.experimental.fontSettings.getMinimumFontSize": "experimental.fontSettings.html#method-getMinimumFontSize",
+    "chrome.experimental.fontSettings.setDefaultFixedFontSize": "experimental.fontSettings.html#method-setDefaultFixedFontSize",
+    "chrome.experimental.fontSettings.setDefaultFontSize": "experimental.fontSettings.html#method-setDefaultFontSize",
+    "chrome.experimental.fontSettings.setFontName": "experimental.fontSettings.html#method-setFontName",
+    "chrome.experimental.fontSettings.setMinimumFontSize": "experimental.fontSettings.html#method-setMinimumFontSize",
     "chrome.experimental.infobars.show": "experimental.infobars.html#method-show",
+    "chrome.experimental.keybinding.onCommand": "experimental.keybinding.html#event-onCommand",
+    "chrome.experimental.managedMode.enter": "experimental.managedMode.html#method-enter",
+    "chrome.experimental.managedMode.get": "experimental.managedMode.html#method-get",
+    "chrome.experimental.offscreenTabs.create": "experimental.offscreenTabs.html#method-create",
+    "chrome.experimental.offscreenTabs.get": "experimental.offscreenTabs.html#method-get",
+    "chrome.experimental.offscreenTabs.getAll": "experimental.offscreenTabs.html#method-getAll",
+    "chrome.experimental.offscreenTabs.onUpdated": "experimental.offscreenTabs.html#event-onUpdated",
+    "chrome.experimental.offscreenTabs.remove": "experimental.offscreenTabs.html#method-remove",
+    "chrome.experimental.offscreenTabs.sendKeyboardEvent": "experimental.offscreenTabs.html#method-sendKeyboardEvent",
+    "chrome.experimental.offscreenTabs.sendMouseEvent": "experimental.offscreenTabs.html#method-sendMouseEvent",
+    "chrome.experimental.offscreenTabs.toDataUrl": "experimental.offscreenTabs.html#method-toDataUrl",
+    "chrome.experimental.offscreenTabs.update": "experimental.offscreenTabs.html#method-update",
     "chrome.experimental.speechInput.isRecording": "experimental.speechInput.html#method-isRecording",
     "chrome.experimental.speechInput.onError": "experimental.speechInput.html#event-onError",
     "chrome.experimental.speechInput.onResult": "experimental.speechInput.html#event-onResult",
@@ -81,10 +131,9 @@
     "chrome.experimental.speechInput.onSoundStart": "experimental.speechInput.html#event-onSoundStart",
     "chrome.experimental.speechInput.start": "experimental.speechInput.html#method-start",
     "chrome.experimental.speechInput.stop": "experimental.speechInput.html#method-stop",
-    "chrome.experimental.storage.onChanged": "experimental.storage.html#event-onChanged",
+    "chrome.experimental.webRequest.onRequest": "experimental.webRequest.html#event-onRequest",
     "chrome.extension.connect": "extension.html#method-connect",
     "chrome.extension.getBackgroundPage": "extension.html#method-getBackgroundPage",
-    "chrome.extension.getExtensionTabs": "extension.html#method-getExtensionTabs",
     "chrome.extension.getURL": "extension.html#method-getURL",
     "chrome.extension.getViews": "extension.html#method-getViews",
     "chrome.extension.isAllowedFileSchemeAccess": "extension.html#method-isAllowedFileSchemeAccess",
@@ -110,7 +159,6 @@
     "chrome.idle.queryState": "idle.html#method-queryState",
     "chrome.input.ime.clearComposition": "input.ime.html#method-clearComposition",
     "chrome.input.ime.commitText": "input.ime.html#method-commitText",
-    "chrome.input.ime.eventHandled": "input.ime.html#method-eventHandled",
     "chrome.input.ime.onActivate": "input.ime.html#event-onActivate",
     "chrome.input.ime.onBlur": "input.ime.html#event-onBlur",
     "chrome.input.ime.onCandidateClicked": "input.ime.html#event-onCandidateClicked",
@@ -140,8 +188,9 @@
     "chrome.omnibox.onInputChanged": "omnibox.html#event-onInputChanged",
     "chrome.omnibox.onInputEntered": "omnibox.html#event-onInputEntered",
     "chrome.omnibox.onInputStarted": "omnibox.html#event-onInputStarted",
-    "chrome.omnibox.sendSuggestions": "omnibox.html#method-sendSuggestions",
     "chrome.omnibox.setDefaultSuggestion": "omnibox.html#method-setDefaultSuggestion",
+    "chrome.pageAction.getPopup": "pageAction.html#method-getPopup",
+    "chrome.pageAction.getTitle": "pageAction.html#method-getTitle",
     "chrome.pageAction.hide": "pageAction.html#method-hide",
     "chrome.pageAction.onClicked": "pageAction.html#event-onClicked",
     "chrome.pageAction.setIcon": "pageAction.html#method-setIcon",
@@ -156,42 +205,46 @@
     "chrome.permissions.remove": "permissions.html#method-remove",
     "chrome.permissions.request": "permissions.html#method-request",
     "chrome.proxy.onProxyError": "proxy.html#event-onProxyError",
+    "chrome.storage.StorageArea.clear": "storage.html#method-StorageArea-clear",
+    "chrome.storage.StorageArea.get": "storage.html#method-StorageArea-get",
+    "chrome.storage.StorageArea.getBytesInUse": "storage.html#method-StorageArea-getBytesInUse",
+    "chrome.storage.StorageArea.remove": "storage.html#method-StorageArea-remove",
+    "chrome.storage.StorageArea.set": "storage.html#method-StorageArea-set",
+    "chrome.storage.onChanged": "storage.html#event-onChanged",
     "chrome.tabs.captureVisibleTab": "tabs.html#method-captureVisibleTab",
     "chrome.tabs.connect": "tabs.html#method-connect",
     "chrome.tabs.create": "tabs.html#method-create",
     "chrome.tabs.detectLanguage": "tabs.html#method-detectLanguage",
     "chrome.tabs.executeScript": "tabs.html#method-executeScript",
     "chrome.tabs.get": "tabs.html#method-get",
-    "chrome.tabs.getAllInWindow": "tabs.html#method-getAllInWindow",
     "chrome.tabs.getCurrent": "tabs.html#method-getCurrent",
-    "chrome.tabs.getSelected": "tabs.html#method-getSelected",
     "chrome.tabs.highlight": "tabs.html#method-highlight",
     "chrome.tabs.insertCSS": "tabs.html#method-insertCSS",
     "chrome.tabs.move": "tabs.html#method-move",
     "chrome.tabs.onActivated": "tabs.html#event-onActivated",
-    "chrome.tabs.onActiveChanged": "tabs.html#event-onActiveChanged",
     "chrome.tabs.onAttached": "tabs.html#event-onAttached",
     "chrome.tabs.onCreated": "tabs.html#event-onCreated",
     "chrome.tabs.onDetached": "tabs.html#event-onDetached",
-    "chrome.tabs.onHighlightChanged": "tabs.html#event-onHighlightChanged",
     "chrome.tabs.onHighlighted": "tabs.html#event-onHighlighted",
     "chrome.tabs.onMoved": "tabs.html#event-onMoved",
     "chrome.tabs.onRemoved": "tabs.html#event-onRemoved",
-    "chrome.tabs.onSelectionChanged": "tabs.html#event-onSelectionChanged",
     "chrome.tabs.onUpdated": "tabs.html#event-onUpdated",
     "chrome.tabs.query": "tabs.html#method-query",
     "chrome.tabs.reload": "tabs.html#method-reload",
     "chrome.tabs.remove": "tabs.html#method-remove",
     "chrome.tabs.sendRequest": "tabs.html#method-sendRequest",
     "chrome.tabs.update": "tabs.html#method-update",
+    "chrome.topSites.get": "topSites.html#method-get",
     "chrome.tts.getVoices": "tts.html#method-getVoices",
     "chrome.tts.isSpeaking": "tts.html#method-isSpeaking",
-    "chrome.tts.onEvent": "tts.html#event-onEvent",
     "chrome.tts.speak": "tts.html#method-speak",
     "chrome.tts.stop": "tts.html#method-stop",
     "chrome.ttsEngine.onSpeak": "ttsEngine.html#event-onSpeak",
     "chrome.ttsEngine.onStop": "ttsEngine.html#event-onStop",
-    "chrome.ttsEngine.sendTtsEvent": "ttsEngine.html#method-sendTtsEvent",
+    "chrome.types.ChromeSetting.clear": "types.html#method-ChromeSetting-clear",
+    "chrome.types.ChromeSetting.get": "types.html#method-ChromeSetting-get",
+    "chrome.types.ChromeSetting.onChange": "types.html#event-ChromeSetting-onChange",
+    "chrome.types.ChromeSetting.set": "types.html#method-ChromeSetting-set",
     "chrome.webNavigation.getAllFrames": "webNavigation.html#method-getAllFrames",
     "chrome.webNavigation.getFrame": "webNavigation.html#method-getFrame",
     "chrome.webNavigation.onBeforeNavigate": "webNavigation.html#event-onBeforeNavigate",
@@ -201,8 +254,6 @@
     "chrome.webNavigation.onDOMContentLoaded": "webNavigation.html#event-onDOMContentLoaded",
     "chrome.webNavigation.onErrorOccurred": "webNavigation.html#event-onErrorOccurred",
     "chrome.webNavigation.onReferenceFragmentUpdated": "webNavigation.html#event-onReferenceFragmentUpdated",
-    "chrome.webRequest.addEventListener": "webRequest.html#method-addEventListener",
-    "chrome.webRequest.eventHandled": "webRequest.html#method-eventHandled",
     "chrome.webRequest.handlerBehaviorChanged": "webRequest.html#method-handlerBehaviorChanged",
     "chrome.webRequest.onAuthRequired": "webRequest.html#event-onAuthRequired",
     "chrome.webRequest.onBeforeRedirect": "webRequest.html#event-onBeforeRedirect",
@@ -213,6 +264,7 @@
     "chrome.webRequest.onHeadersReceived": "webRequest.html#event-onHeadersReceived",
     "chrome.webRequest.onResponseStarted": "webRequest.html#event-onResponseStarted",
     "chrome.webRequest.onSendHeaders": "webRequest.html#event-onSendHeaders",
+    "chrome.webstore.install": "webstore.html#method-install",
     "chrome.windows.create": "windows.html#method-create",
     "chrome.windows.get": "windows.html#method-get",
     "chrome.windows.getAll": "windows.html#method-getAll",
@@ -346,9 +398,7 @@
         "chrome.pageAction.setIcon",
         "chrome.pageAction.setTitle",
         "chrome.pageAction.show",
-        "chrome.tabs.get",
-        "chrome.tabs.getSelected",
-        "chrome.tabs.onSelectionChanged"
+        "chrome.tabs.get"
       ],
       "crx_path": null,
       "description": "This extension adds an animated browser action to the toolbar.",
@@ -363,7 +413,7 @@
       "packaged_app": false,
       "path": "examples\/api\/pageAction\/set_icon\/",
       "protocols": [],
-      "search_string": "ANIMATED PAGE ACTION THIS EXTENSION ADDS AN ANIMATED BROWSER ACTION TO THE TOOLBAR. BACKGROUND_PAGE PAGE_ACTION TABS CHROME.PAGEACTION.HIDE CHROME.PAGEACTION.ONCLICKED CHROME.PAGEACTION.SETICON CHROME.PAGEACTION.SETTITLE CHROME.PAGEACTION.SHOW CHROME.TABS.GET CHROME.TABS.GETSELECTED CHROME.TABS.ONSELECTIONCHANGED",
+      "search_string": "ANIMATED PAGE ACTION THIS EXTENSION ADDS AN ANIMATED BROWSER ACTION TO THE TOOLBAR. BACKGROUND_PAGE PAGE_ACTION TABS CHROME.PAGEACTION.HIDE CHROME.PAGEACTION.ONCLICKED CHROME.PAGEACTION.SETICON CHROME.PAGEACTION.SETTITLE CHROME.PAGEACTION.SHOW CHROME.TABS.GET",
       "source_files": [
         "background.html",
         "manifest.json"
@@ -512,6 +562,57 @@
     },
     {
       "api_calls": [
+        "chrome.browsingData.remove"
+      ],
+      "crx_path": null,
+      "description": "A trivial usage example.",
+      "features": [
+        "browser_action",
+        "browsingData",
+        "popup"
+      ],
+      "icon": null,
+      "id": "e7e4284e3b5484b0c1eae7f724768945ad0121e4",
+      "name": "BrowsingData API: Basics",
+      "packaged_app": false,
+      "path": "examples\/api\/browsingData\/basic\/",
+      "protocols": [],
+      "search_string": "BROWSINGDATA API: BASICS A TRIVIAL USAGE EXAMPLE. BROWSER_ACTION BROWSINGDATA POPUP CHROME.BROWSINGDATA.REMOVE",
+      "source_files": [
+        "manifest.json",
+        "popup.css",
+        "popup.html",
+        "popup.js"
+      ],
+      "source_hash": "6e227746c25a1b9765dbd27e3eb0e7403dee2c65",
+      "zip_path": "examples\/api\/browsingData\/basic.zip"
+    },
+    {
+      "api_calls": [],
+      "crx_path": null,
+      "description": "Add numbers. Now includes subtraction!",
+      "features": [],
+      "icon": "icon_128.png",
+      "id": "3fb3045783163c0eaaf0d0ce139f254502192a92",
+      "name": "Calculator (Platform App)",
+      "packaged_app": true,
+      "path": "examples\/extensions\/calculator\/",
+      "protocols": [],
+      "search_string": "CALCULATOR (PLATFORM APP) ADD NUMBERS. NOW INCLUDES SUBTRACTION!",
+      "source_files": [
+        "calculator.html",
+        "controller.js",
+        "jquery\/jquery.min.js",
+        "manifest.json",
+        "model.js",
+        "style.css",
+        "view.js"
+      ],
+      "source_hash": "d0f67b54f087636494dbdfc85b778dc8b2969803",
+      "zip_path": "examples\/extensions\/calculator.zip"
+    },
+    {
+      "api_calls": [
         "chrome.webRequest.onBeforeRequest"
       ],
       "crx_path": null,
@@ -575,7 +676,6 @@
         "chrome.tabs.onDetached",
         "chrome.tabs.onMoved",
         "chrome.tabs.onRemoved",
-        "chrome.tabs.onSelectionChanged",
         "chrome.tabs.onUpdated",
         "chrome.windows.onCreated",
         "chrome.windows.onFocusChanged",
@@ -598,7 +698,7 @@
         "http:\/\/",
         "https:\/\/"
       ],
-      "search_string": "CHROME SOUNDS ENJOY A MORE MAGICAL AND IMMERSIVE EXPERIENCE WHEN BROWSING THE WEB USING THE POWER OF SOUND. BACKGROUND_PAGE BOOKMARKS OPTIONS_PAGE TABS CHROME.BOOKMARKS.ONCREATED CHROME.BOOKMARKS.ONMOVED CHROME.BOOKMARKS.ONREMOVED CHROME.EXTENSION.GETBACKGROUNDPAGE CHROME.EXTENSION.ONREQUEST CHROME.EXTENSION.SENDREQUEST CHROME.TABS.GET CHROME.TABS.ONATTACHED CHROME.TABS.ONCREATED CHROME.TABS.ONDETACHED CHROME.TABS.ONMOVED CHROME.TABS.ONREMOVED CHROME.TABS.ONSELECTIONCHANGED CHROME.TABS.ONUPDATED CHROME.WINDOWS.ONCREATED CHROME.WINDOWS.ONFOCUSCHANGED CHROME.WINDOWS.ONREMOVED",
+      "search_string": "CHROME SOUNDS ENJOY A MORE MAGICAL AND IMMERSIVE EXPERIENCE WHEN BROWSING THE WEB USING THE POWER OF SOUND. BACKGROUND_PAGE BOOKMARKS OPTIONS_PAGE TABS CHROME.BOOKMARKS.ONCREATED CHROME.BOOKMARKS.ONMOVED CHROME.BOOKMARKS.ONREMOVED CHROME.EXTENSION.GETBACKGROUNDPAGE CHROME.EXTENSION.ONREQUEST CHROME.EXTENSION.SENDREQUEST CHROME.TABS.GET CHROME.TABS.ONATTACHED CHROME.TABS.ONCREATED CHROME.TABS.ONDETACHED CHROME.TABS.ONMOVED CHROME.TABS.ONREMOVED CHROME.TABS.ONUPDATED CHROME.WINDOWS.ONCREATED CHROME.WINDOWS.ONFOCUSCHANGED CHROME.WINDOWS.ONREMOVED",
       "source_files": [
         "bg.js",
         "content.js",
@@ -653,7 +753,6 @@
         "chrome.omnibox.onInputStarted",
         "chrome.omnibox.setDefaultSuggestion",
         "chrome.tabs.get",
-        "chrome.tabs.getSelected",
         "chrome.tabs.update"
       ],
       "crx_path": null,
@@ -670,7 +769,7 @@
       "protocols": [
         "http:\/\/"
       ],
-      "search_string": "CHROMIUM SEARCH ADD SUPPORT TO THE OMNIBOX TO SEARCH THE CHROMIUM SOURCE CODE. BACKGROUND_PAGE TABS CHROME.OMNIBOX.ONINPUTCANCELLED CHROME.OMNIBOX.ONINPUTCHANGED CHROME.OMNIBOX.ONINPUTENTERED CHROME.OMNIBOX.ONINPUTSTARTED CHROME.OMNIBOX.SETDEFAULTSUGGESTION CHROME.TABS.GET CHROME.TABS.GETSELECTED CHROME.TABS.UPDATE",
+      "search_string": "CHROMIUM SEARCH ADD SUPPORT TO THE OMNIBOX TO SEARCH THE CHROMIUM SOURCE CODE. BACKGROUND_PAGE TABS CHROME.OMNIBOX.ONINPUTCANCELLED CHROME.OMNIBOX.ONINPUTCHANGED CHROME.OMNIBOX.ONINPUTENTERED CHROME.OMNIBOX.ONINPUTSTARTED CHROME.OMNIBOX.SETDEFAULTSUGGESTION CHROME.TABS.GET CHROME.TABS.UPDATE",
       "source_files": [
         "background.js",
         "manifest.json"
@@ -683,8 +782,6 @@
         "chrome.browserAction.setBadgeText",
         "chrome.tabs.detectLanguage",
         "chrome.tabs.get",
-        "chrome.tabs.getSelected",
-        "chrome.tabs.onSelectionChanged",
         "chrome.tabs.onUpdated"
       ],
       "crx_path": null,
@@ -700,41 +797,13 @@
       "packaged_app": false,
       "path": "examples\/api\/i18n\/cld\/",
       "protocols": [],
-      "search_string": "CLD DISPLAYS THE LANGUAGE OF A TAB BACKGROUND_PAGE BROWSER_ACTION TABS CHROME.BROWSERACTION.SETBADGETEXT CHROME.TABS.DETECTLANGUAGE CHROME.TABS.GET CHROME.TABS.GETSELECTED CHROME.TABS.ONSELECTIONCHANGED CHROME.TABS.ONUPDATED",
+      "search_string": "CLD DISPLAYS THE LANGUAGE OF A TAB BACKGROUND_PAGE BROWSER_ACTION TABS CHROME.BROWSERACTION.SETBADGETEXT CHROME.TABS.DETECTLANGUAGE CHROME.TABS.GET CHROME.TABS.ONUPDATED",
       "source_files": [
         "background.js",
         "manifest.json"
       ],
       "source_hash": "ca3ac66fbffe38050b6d8e0d7ce32c9a89940ee7",
       "zip_path": "examples\/api\/i18n\/cld.zip"
-    },
-    {
-      "api_calls": [
-        "chrome.experimental.clear.browsingData"
-      ],
-      "crx_path": null,
-      "description": "A trivial usage example.",
-      "features": [
-        "browser_action",
-        "clear",
-        "experimental",
-        "popup"
-      ],
-      "icon": null,
-      "id": "b745d48df80e88222d7344efe7c19e03fd8202f4",
-      "name": "Clear API: Basics",
-      "packaged_app": false,
-      "path": "examples\/api\/clear\/basic\/",
-      "protocols": [],
-      "search_string": "CLEAR API: BASICS A TRIVIAL USAGE EXAMPLE. BROWSER_ACTION CLEAR EXPERIMENTAL POPUP CHROME.EXPERIMENTAL.CLEAR.BROWSINGDATA",
-      "source_files": [
-        "manifest.json",
-        "popup.css",
-        "popup.html",
-        "popup.js"
-      ],
-      "source_hash": "d2edfcb8636c176c4c8508bcbc5f45f56b574464",
-      "zip_path": "examples\/api\/clear\/basic.zip"
     },
     {
       "api_calls": [],
@@ -759,8 +828,7 @@
     },
     {
       "api_calls": [
-        "chrome.tabs.get",
-        "chrome.tabs.getSelected"
+        "chrome.tabs.get"
       ],
       "crx_path": null,
       "description": "Shows the content settings for the current site.",
@@ -775,7 +843,7 @@
       "packaged_app": false,
       "path": "examples\/api\/contentSettings\/",
       "protocols": [],
-      "search_string": "CONTENT SETTINGS SHOWS THE CONTENT SETTINGS FOR THE CURRENT SITE. BROWSER_ACTION CONTENTSETTINGS TABS CHROME.TABS.GET CHROME.TABS.GETSELECTED",
+      "search_string": "CONTENT SETTINGS SHOWS THE CONTENT SETTINGS FOR THE CURRENT SITE. BROWSER_ACTION CONTENTSETTINGS TABS CHROME.TABS.GET",
       "source_files": [
         "manifest.json",
         "popup.html",
@@ -847,6 +915,42 @@
       ],
       "source_hash": "699c4bffce6b427dec806441036bbb2fe83076c7",
       "zip_path": "examples\/api\/cookies.zip"
+    },
+    {
+      "api_calls": [
+        "chrome.experimental.downloads.download",
+        "chrome.extension.onRequest",
+        "chrome.extension.sendRequest",
+        "chrome.tabs.executeScript",
+        "chrome.tabs.query",
+        "chrome.windows.get",
+        "chrome.windows.getCurrent"
+      ],
+      "crx_path": null,
+      "description": "Select links on a page and download them.",
+      "features": [
+        "browser_action",
+        "experimental",
+        "tabs"
+      ],
+      "icon": null,
+      "id": "9e4fd06300ee2b3a171e1f30d1b70f8f10152c2b",
+      "name": "Download Selected Links",
+      "packaged_app": false,
+      "path": "examples\/api\/downloads\/download_links\/",
+      "protocols": [
+        "http:\/\/",
+        "https:\/\/"
+      ],
+      "search_string": "DOWNLOAD SELECTED LINKS SELECT LINKS ON A PAGE AND DOWNLOAD THEM. BROWSER_ACTION EXPERIMENTAL TABS CHROME.EXPERIMENTAL.DOWNLOADS.DOWNLOAD CHROME.EXTENSION.ONREQUEST CHROME.EXTENSION.SENDREQUEST CHROME.TABS.EXECUTESCRIPT CHROME.TABS.QUERY CHROME.WINDOWS.GET CHROME.WINDOWS.GETCURRENT",
+      "source_files": [
+        "manifest.json",
+        "popup.html",
+        "popup.js",
+        "send_links.js"
+      ],
+      "source_hash": "9e80e668e1605243ca746022842e5d33b7d467ba",
+      "zip_path": "examples\/api\/downloads\/download_links.zip"
     },
     {
       "api_calls": [
@@ -943,6 +1047,36 @@
     },
     {
       "api_calls": [
+        "chrome.experimental.fontSettings.getDefaultFontSize",
+        "chrome.experimental.fontSettings.getFontList",
+        "chrome.experimental.fontSettings.getFontName",
+        "chrome.experimental.fontSettings.setDefaultFontSize",
+        "chrome.experimental.fontSettings.setFontName"
+      ],
+      "crx_path": null,
+      "description": "Sample extension for Font Settings API",
+      "features": [
+        "browser_action",
+        "experimental",
+        "popup"
+      ],
+      "icon": "fonts128.png",
+      "id": "31d10fd5e61ca51eb59073b358d4ab5267cbf318",
+      "name": "Font Settings",
+      "packaged_app": false,
+      "path": "examples\/api\/fontSettings\/",
+      "protocols": [],
+      "search_string": "FONT SETTINGS SAMPLE EXTENSION FOR FONT SETTINGS API BROWSER_ACTION EXPERIMENTAL POPUP CHROME.EXPERIMENTAL.FONTSETTINGS.GETDEFAULTFONTSIZE CHROME.EXPERIMENTAL.FONTSETTINGS.GETFONTLIST CHROME.EXPERIMENTAL.FONTSETTINGS.GETFONTNAME CHROME.EXPERIMENTAL.FONTSETTINGS.SETDEFAULTFONTSIZE CHROME.EXPERIMENTAL.FONTSETTINGS.SETFONTNAME",
+      "source_files": [
+        "manifest.json",
+        "popup.html",
+        "popup.js"
+      ],
+      "source_hash": "b5febada226fcd2d38461121c039c55ebcb3decf",
+      "zip_path": "examples\/api\/fontSettings.zip"
+    },
+    {
+      "api_calls": [
         "chrome.browserAction.onClicked",
         "chrome.browserAction.setBadgeBackgroundColor",
         "chrome.browserAction.setBadgeText",
@@ -954,7 +1088,6 @@
         "chrome.i18n.getMessage",
         "chrome.tabs.create",
         "chrome.tabs.get",
-        "chrome.tabs.getAllInWindow",
         "chrome.tabs.onUpdated",
         "chrome.tabs.update"
       ],
@@ -975,7 +1108,7 @@
         "http:\/\/",
         "https:\/\/"
       ],
-      "search_string": "GOOGLE CALENDAR CHECKER (BY GOOGLE) QUICKLY SEE THE TIME UNTIL YOUR NEXT MEETING FROM ANY OF YOUR CALENDARS. CLICK ON THE BUTTON TO BE TAKEN TO YOUR CALENDAR. BACKGROUND_PAGE BROWSER_ACTION OPTIONS_PAGE TABS CHROME.BROWSERACTION.ONCLICKED CHROME.BROWSERACTION.SETBADGEBACKGROUNDCOLOR CHROME.BROWSERACTION.SETBADGETEXT CHROME.BROWSERACTION.SETICON CHROME.BROWSERACTION.SETTITLE CHROME.EXTENSION.GETBACKGROUNDPAGE CHROME.EXTENSION.ONREQUEST CHROME.EXTENSION.SENDREQUEST CHROME.I18N.GETMESSAGE CHROME.TABS.CREATE CHROME.TABS.GET CHROME.TABS.GETALLINWINDOW CHROME.TABS.ONUPDATED CHROME.TABS.UPDATE",
+      "search_string": "GOOGLE CALENDAR CHECKER (BY GOOGLE) QUICKLY SEE THE TIME UNTIL YOUR NEXT MEETING FROM ANY OF YOUR CALENDARS. CLICK ON THE BUTTON TO BE TAKEN TO YOUR CALENDAR. BACKGROUND_PAGE BROWSER_ACTION OPTIONS_PAGE TABS CHROME.BROWSERACTION.ONCLICKED CHROME.BROWSERACTION.SETBADGEBACKGROUNDCOLOR CHROME.BROWSERACTION.SETBADGETEXT CHROME.BROWSERACTION.SETICON CHROME.BROWSERACTION.SETTITLE CHROME.EXTENSION.GETBACKGROUNDPAGE CHROME.EXTENSION.ONREQUEST CHROME.EXTENSION.SENDREQUEST CHROME.I18N.GETMESSAGE CHROME.TABS.CREATE CHROME.TABS.GET CHROME.TABS.ONUPDATED CHROME.TABS.UPDATE",
       "source_files": [
         "_locales\/ar\/messages.json",
         "_locales\/bg\/messages.json",
@@ -1036,7 +1169,6 @@
         "chrome.extension.getURL",
         "chrome.tabs.create",
         "chrome.tabs.get",
-        "chrome.tabs.getSelected",
         "chrome.tabs.onUpdated",
         "chrome.tabs.remove"
       ],
@@ -1059,7 +1191,7 @@
         "https:\/\/",
         "https:\/\/"
       ],
-      "search_string": "GOOGLE DOCUMENT LIST VIEWER DEMONSTRATES HOW TO USE OAUTH TO CONNECT THE GOOGLE DOCUMENTS LIST DATA API. BACKGROUND_PAGE BROWSER_ACTION OPTIONS_PAGE TABS CHROME.BROWSERACTION.SETBADGETEXT CHROME.EXTENSION.GETBACKGROUNDPAGE CHROME.EXTENSION.GETURL CHROME.TABS.CREATE CHROME.TABS.GET CHROME.TABS.GETSELECTED CHROME.TABS.ONUPDATED CHROME.TABS.REMOVE",
+      "search_string": "GOOGLE DOCUMENT LIST VIEWER DEMONSTRATES HOW TO USE OAUTH TO CONNECT THE GOOGLE DOCUMENTS LIST DATA API. BACKGROUND_PAGE BROWSER_ACTION OPTIONS_PAGE TABS CHROME.BROWSERACTION.SETBADGETEXT CHROME.EXTENSION.GETBACKGROUNDPAGE CHROME.EXTENSION.GETURL CHROME.TABS.CREATE CHROME.TABS.GET CHROME.TABS.ONUPDATED CHROME.TABS.REMOVE",
       "source_files": [
         "background.html",
         "chrome_ex_oauth.html",
@@ -1083,7 +1215,6 @@
         "chrome.i18n.getMessage",
         "chrome.tabs.create",
         "chrome.tabs.get",
-        "chrome.tabs.getAllInWindow",
         "chrome.tabs.onUpdated",
         "chrome.tabs.update"
       ],
@@ -1104,7 +1235,7 @@
         "http:\/\/",
         "https:\/\/"
       ],
-      "search_string": "GOOGLE MAIL CHECKER DISPLAYS THE NUMBER OF UNREAD MESSAGES IN YOUR GOOGLE MAIL INBOX. YOU CAN ALSO CLICK THE BUTTON TO OPEN YOUR INBOX. BACKGROUND_PAGE BROWSER_ACTION OPTIONS_PAGE TABS CHROME.BROWSERACTION.ONCLICKED CHROME.BROWSERACTION.SETBADGEBACKGROUNDCOLOR CHROME.BROWSERACTION.SETBADGETEXT CHROME.BROWSERACTION.SETICON CHROME.EXTENSION.GETBACKGROUNDPAGE CHROME.I18N.GETMESSAGE CHROME.TABS.CREATE CHROME.TABS.GET CHROME.TABS.GETALLINWINDOW CHROME.TABS.ONUPDATED CHROME.TABS.UPDATE",
+      "search_string": "GOOGLE MAIL CHECKER DISPLAYS THE NUMBER OF UNREAD MESSAGES IN YOUR GOOGLE MAIL INBOX. YOU CAN ALSO CLICK THE BUTTON TO OPEN YOUR INBOX. BACKGROUND_PAGE BROWSER_ACTION OPTIONS_PAGE TABS CHROME.BROWSERACTION.ONCLICKED CHROME.BROWSERACTION.SETBADGEBACKGROUNDCOLOR CHROME.BROWSERACTION.SETBADGETEXT CHROME.BROWSERACTION.SETICON CHROME.EXTENSION.GETBACKGROUNDPAGE CHROME.I18N.GETMESSAGE CHROME.TABS.CREATE CHROME.TABS.GET CHROME.TABS.ONUPDATED CHROME.TABS.UPDATE",
       "source_files": [
         "_locales\/ar\/messages.json",
         "_locales\/bg\/messages.json",
@@ -1281,7 +1412,6 @@
         "chrome.debugger.onEvent",
         "chrome.debugger.sendCommand",
         "chrome.tabs.get",
-        "chrome.tabs.getSelected",
         "chrome.windows.get",
         "chrome.windows.getCurrent"
       ],
@@ -1299,7 +1429,7 @@
       "packaged_app": false,
       "path": "examples\/api\/debugger\/pause-resume\/",
       "protocols": [],
-      "search_string": "JAVASCRIPT PAUSE\/RESUME PAUSES \/ RESUMES JAVASCRIPT EXECUTION BACKGROUND_PAGE BROWSER_ACTION DEBUGGER TABS CHROME.BROWSERACTION.ONCLICKED CHROME.BROWSERACTION.SETICON CHROME.BROWSERACTION.SETTITLE CHROME.DEBUGGER.ATTACH CHROME.DEBUGGER.DETACH CHROME.DEBUGGER.ONDETACH CHROME.DEBUGGER.ONEVENT CHROME.DEBUGGER.SENDCOMMAND CHROME.TABS.GET CHROME.TABS.GETSELECTED CHROME.WINDOWS.GET CHROME.WINDOWS.GETCURRENT",
+      "search_string": "JAVASCRIPT PAUSE\/RESUME PAUSES \/ RESUMES JAVASCRIPT EXECUTION BACKGROUND_PAGE BROWSER_ACTION DEBUGGER TABS CHROME.BROWSERACTION.ONCLICKED CHROME.BROWSERACTION.SETICON CHROME.BROWSERACTION.SETTITLE CHROME.DEBUGGER.ATTACH CHROME.DEBUGGER.DETACH CHROME.DEBUGGER.ONDETACH CHROME.DEBUGGER.ONEVENT CHROME.DEBUGGER.SENDCOMMAND CHROME.TABS.GET CHROME.WINDOWS.GET CHROME.WINDOWS.GETCURRENT",
       "source_files": [
         "background.js",
         "manifest.json"
@@ -1312,7 +1442,6 @@
         "chrome.extension.onRequest",
         "chrome.extension.sendRequest",
         "chrome.tabs.get",
-        "chrome.tabs.getSelected",
         "chrome.tabs.update"
       ],
       "crx_path": null,
@@ -1327,7 +1456,7 @@
       "packaged_app": false,
       "path": "examples\/api\/tabs\/pin\/",
       "protocols": [],
-      "search_string": "KEYBOARD PIN CREATES A KEYBOARD SHORTCUT (C + SHIFT + P) TO TOGGLE THE PINNED STATE OF THE CURRENTLY SELECTED TAB BACKGROUND_PAGE TABS CHROME.EXTENSION.ONREQUEST CHROME.EXTENSION.SENDREQUEST CHROME.TABS.GET CHROME.TABS.GETSELECTED CHROME.TABS.UPDATE",
+      "search_string": "KEYBOARD PIN CREATES A KEYBOARD SHORTCUT (C + SHIFT + P) TO TOGGLE THE PINNED STATE OF THE CURRENTLY SELECTED TAB BACKGROUND_PAGE TABS CHROME.EXTENSION.ONREQUEST CHROME.EXTENSION.SENDREQUEST CHROME.TABS.GET CHROME.TABS.UPDATE",
       "source_files": [
         "background.js",
         "inject.js",
@@ -1344,7 +1473,6 @@
         "chrome.debugger.onEvent",
         "chrome.debugger.sendCommand",
         "chrome.tabs.get",
-        "chrome.tabs.getSelected",
         "chrome.windows.create",
         "chrome.windows.get",
         "chrome.windows.getCurrent"
@@ -1363,7 +1491,7 @@
       "packaged_app": false,
       "path": "examples\/api\/debugger\/live-headers\/",
       "protocols": [],
-      "search_string": "LIVE HTTP HEADERS DISPLAYS THE LIVE LOG WITH THE HTTP REQUESTS HEADERS BACKGROUND_PAGE BROWSER_ACTION DEBUGGER TABS CHROME.BROWSERACTION.ONCLICKED CHROME.DEBUGGER.ATTACH CHROME.DEBUGGER.DETACH CHROME.DEBUGGER.ONEVENT CHROME.DEBUGGER.SENDCOMMAND CHROME.TABS.GET CHROME.TABS.GETSELECTED CHROME.WINDOWS.CREATE CHROME.WINDOWS.GET CHROME.WINDOWS.GETCURRENT",
+      "search_string": "LIVE HTTP HEADERS DISPLAYS THE LIVE LOG WITH THE HTTP REQUESTS HEADERS BACKGROUND_PAGE BROWSER_ACTION DEBUGGER TABS CHROME.BROWSERACTION.ONCLICKED CHROME.DEBUGGER.ATTACH CHROME.DEBUGGER.DETACH CHROME.DEBUGGER.ONEVENT CHROME.DEBUGGER.SENDCOMMAND CHROME.TABS.GET CHROME.WINDOWS.CREATE CHROME.WINDOWS.GET CHROME.WINDOWS.GETCURRENT",
       "source_files": [
         "background.js",
         "headers.html",
@@ -1381,8 +1509,6 @@
         "chrome.pageAction.setTitle",
         "chrome.pageAction.show",
         "chrome.tabs.get",
-        "chrome.tabs.getSelected",
-        "chrome.tabs.onSelectionChanged",
         "chrome.tabs.onUpdated",
         "chrome.tabs.sendRequest"
       ],
@@ -1402,7 +1528,7 @@
         "https:\/\/",
         "https:\/\/"
       ],
-      "search_string": "MAPPY FINDS ADDRESSES IN THE WEB PAGE YOURE ON AND POPS UP A MAP WINDOW. BACKGROUND_PAGE PAGE_ACTION TABS CHROME.EXTENSION.GETBACKGROUNDPAGE CHROME.EXTENSION.ONREQUEST CHROME.PAGEACTION.HIDE CHROME.PAGEACTION.SETTITLE CHROME.PAGEACTION.SHOW CHROME.TABS.GET CHROME.TABS.GETSELECTED CHROME.TABS.ONSELECTIONCHANGED CHROME.TABS.ONUPDATED CHROME.TABS.SENDREQUEST",
+      "search_string": "MAPPY FINDS ADDRESSES IN THE WEB PAGE YOURE ON AND POPS UP A MAP WINDOW. BACKGROUND_PAGE PAGE_ACTION TABS CHROME.EXTENSION.GETBACKGROUNDPAGE CHROME.EXTENSION.ONREQUEST CHROME.PAGEACTION.HIDE CHROME.PAGEACTION.SETTITLE CHROME.PAGEACTION.SHOW CHROME.TABS.GET CHROME.TABS.ONUPDATED CHROME.TABS.SENDREQUEST",
       "source_files": [
         "background.js",
         "manifest.json",
@@ -1418,7 +1544,6 @@
       "api_calls": [
         "chrome.browserAction.onClicked",
         "chrome.tabs.get",
-        "chrome.tabs.getAllInWindow",
         "chrome.tabs.move",
         "chrome.windows.get",
         "chrome.windows.getAll",
@@ -1437,7 +1562,7 @@
       "packaged_app": false,
       "path": "examples\/api\/windows\/merge_windows\/",
       "protocols": [],
-      "search_string": "MERGE WINDOWS MERGES ALL OF THE BROWSERS WINDOWS INTO THE CURRENT WINDOW BACKGROUND_PAGE BROWSER_ACTION TABS CHROME.BROWSERACTION.ONCLICKED CHROME.TABS.GET CHROME.TABS.GETALLINWINDOW CHROME.TABS.MOVE CHROME.WINDOWS.GET CHROME.WINDOWS.GETALL CHROME.WINDOWS.GETCURRENT",
+      "search_string": "MERGE WINDOWS MERGES ALL OF THE BROWSERS WINDOWS INTO THE CURRENT WINDOW BACKGROUND_PAGE BROWSER_ACTION TABS CHROME.BROWSERACTION.ONCLICKED CHROME.TABS.GET CHROME.TABS.MOVE CHROME.WINDOWS.GET CHROME.WINDOWS.GETALL CHROME.WINDOWS.GETCURRENT",
       "source_files": [
         "background.js",
         "manifest.json"
@@ -1451,7 +1576,6 @@
         "chrome.extension.onRequest",
         "chrome.tabs.connect",
         "chrome.tabs.get",
-        "chrome.tabs.getSelected",
         "chrome.tabs.sendRequest"
       ],
       "crx_path": null,
@@ -1466,7 +1590,7 @@
       "packaged_app": false,
       "path": "examples\/api\/messaging\/timer\/",
       "protocols": [],
-      "search_string": "MESSAGE TIMER TIMES HOW LONG IT TAKES TO SEND A MESSAGE TO A CONTENT SCRIPT AND BACK. BROWSER_ACTION TABS CHROME.EXTENSION.ONCONNECT CHROME.EXTENSION.ONREQUEST CHROME.TABS.CONNECT CHROME.TABS.GET CHROME.TABS.GETSELECTED CHROME.TABS.SENDREQUEST",
+      "search_string": "MESSAGE TIMER TIMES HOW LONG IT TAKES TO SEND A MESSAGE TO A CONTENT SCRIPT AND BACK. BROWSER_ACTION TABS CHROME.EXTENSION.ONCONNECT CHROME.EXTENSION.ONREQUEST CHROME.TABS.CONNECT CHROME.TABS.GET CHROME.TABS.SENDREQUEST",
       "source_files": [
         "manifest.json",
         "page.js",
@@ -1634,12 +1758,14 @@
       "zip_path": "examples\/api\/notifications.zip"
     },
     {
-      "api_calls": [],
+      "api_calls": [
+        "chrome.topSites.get"
+      ],
       "crx_path": null,
       "description": "extension to prototype new NTP designs",
       "features": [
         "chrome_url_overrides",
-        "experimental"
+        "topSites"
       ],
       "icon": null,
       "id": "2df34c9db20549bd52f2dec3d59d564853bdefac",
@@ -1647,17 +1773,16 @@
       "packaged_app": false,
       "path": "examples\/api\/topsites\/magic8ball\/",
       "protocols": [
-        "chrome:\/\/",
         "chrome:\/\/"
       ],
-      "search_string": "NTP PROTOTYPING EXTENSION EXTENSION TO PROTOTYPE NEW NTP DESIGNS CHROME_URL_OVERRIDES EXPERIMENTAL",
+      "search_string": "NTP PROTOTYPING EXTENSION EXTENSION TO PROTOTYPE NEW NTP DESIGNS CHROME_URL_OVERRIDES TOPSITES CHROME.TOPSITES.GET",
       "source_files": [
         "manifest.json",
         "newTab.css",
         "newTab.html",
         "newTab.js"
       ],
-      "source_hash": "4d7cc6f66c8bee44ae3857b7dcb7bdae7c3e60f5",
+      "source_hash": "43b22b2ab3cb1e3ec7f6862377a76cb2746bd82b",
       "zip_path": "examples\/api\/topsites\/magic8ball.zip"
     },
     {
@@ -1745,14 +1870,11 @@
         "chrome.browserAction.setTitle",
         "chrome.extension.connect",
         "chrome.extension.getBackgroundPage",
-        "chrome.extension.getExtensionTabs",
         "chrome.extension.getURL",
         "chrome.extension.onConnect",
         "chrome.tabs.create",
         "chrome.tabs.executeScript",
         "chrome.tabs.get",
-        "chrome.tabs.getAllInWindow",
-        "chrome.tabs.getSelected",
         "chrome.tabs.remove",
         "chrome.tabs.update",
         "chrome.windows.get",
@@ -1775,7 +1897,7 @@
         "https:\/\/",
         "http:\/\/"
       ],
-      "search_string": "PAGE BENCHMARKER CHROMIUM PAGE BENCHMARKER. BACKGROUND_PAGE BROWSER_ACTION OPTIONS_PAGE TABS CHROME.BROWSERACTION.ONCLICKED CHROME.BROWSERACTION.SETBADGEBACKGROUNDCOLOR CHROME.BROWSERACTION.SETBADGETEXT CHROME.BROWSERACTION.SETTITLE CHROME.EXTENSION.CONNECT CHROME.EXTENSION.GETBACKGROUNDPAGE CHROME.EXTENSION.GETEXTENSIONTABS CHROME.EXTENSION.GETURL CHROME.EXTENSION.ONCONNECT CHROME.TABS.CREATE CHROME.TABS.EXECUTESCRIPT CHROME.TABS.GET CHROME.TABS.GETALLINWINDOW CHROME.TABS.GETSELECTED CHROME.TABS.REMOVE CHROME.TABS.UPDATE CHROME.WINDOWS.GET CHROME.WINDOWS.GETCURRENT",
+      "search_string": "PAGE BENCHMARKER CHROMIUM PAGE BENCHMARKER. BACKGROUND_PAGE BROWSER_ACTION OPTIONS_PAGE TABS CHROME.BROWSERACTION.ONCLICKED CHROME.BROWSERACTION.SETBADGEBACKGROUNDCOLOR CHROME.BROWSERACTION.SETBADGETEXT CHROME.BROWSERACTION.SETTITLE CHROME.EXTENSION.CONNECT CHROME.EXTENSION.GETBACKGROUNDPAGE CHROME.EXTENSION.GETURL CHROME.EXTENSION.ONCONNECT CHROME.TABS.CREATE CHROME.TABS.EXECUTESCRIPT CHROME.TABS.GET CHROME.TABS.REMOVE CHROME.TABS.UPDATE CHROME.WINDOWS.GET CHROME.WINDOWS.GETCURRENT",
       "source_files": [
         "background.html",
         "jquery\/jquery-1.4.2.min.js",
@@ -1796,7 +1918,7 @@
         "util\/sorttable.js",
         "util\/table2CSV.js"
       ],
-      "source_hash": "27f84f0c3cc8f61a4b1c60bd88656f6d9e660d54",
+      "source_hash": "c570c40b63675b8a8718cb843aabab4ed0ea575a",
       "zip_path": "examples\/extensions\/benchmark.zip"
     },
     {
@@ -1954,7 +2076,6 @@
         "chrome.extension.getURL",
         "chrome.tabs.create",
         "chrome.tabs.get",
-        "chrome.tabs.getSelected",
         "chrome.tabs.onUpdated",
         "chrome.tabs.remove"
       ],
@@ -1976,7 +2097,7 @@
         "https:\/\/",
         "https:\/\/"
       ],
-      "search_string": "SAMPLE - OAUTH CONTACTS USES OAUTH TO CONNECT TO GOOGLES CONTACTS SERVICE AND DISPLAY A LIST OF YOUR CONTACTS. BACKGROUND_PAGE BROWSER_ACTION TABS CHROME.BROWSERACTION.ONCLICKED CHROME.BROWSERACTION.SETICON CHROME.EXTENSION.GETBACKGROUNDPAGE CHROME.EXTENSION.GETURL CHROME.TABS.CREATE CHROME.TABS.GET CHROME.TABS.GETSELECTED CHROME.TABS.ONUPDATED CHROME.TABS.REMOVE",
+      "search_string": "SAMPLE - OAUTH CONTACTS USES OAUTH TO CONNECT TO GOOGLES CONTACTS SERVICE AND DISPLAY A LIST OF YOUR CONTACTS. BACKGROUND_PAGE BROWSER_ACTION TABS CHROME.BROWSERACTION.ONCLICKED CHROME.BROWSERACTION.SETICON CHROME.EXTENSION.GETBACKGROUNDPAGE CHROME.EXTENSION.GETURL CHROME.TABS.CREATE CHROME.TABS.GET CHROME.TABS.ONUPDATED CHROME.TABS.REMOVE",
       "source_files": [
         "background.js",
         "chrome_ex_oauth.html",
@@ -2021,7 +2142,6 @@
     {
       "api_calls": [
         "chrome.tabs.get",
-        "chrome.tabs.getSelected",
         "chrome.tabs.update",
         "chrome.windows.get",
         "chrome.windows.getAll",
@@ -2043,7 +2163,7 @@
       "protocols": [
         "chrome:\/\/"
       ],
-      "search_string": "SHOW TABS IN PROCESS ADDS A BROWSER ACTION SHOWING WHICH TABS SHARE THE CURRENT TABS PROCESS. BROWSER_ACTION EXPERIMENTAL TABS CHROME.TABS.GET CHROME.TABS.GETSELECTED CHROME.TABS.UPDATE CHROME.WINDOWS.GET CHROME.WINDOWS.GETALL CHROME.WINDOWS.GETCURRENT CHROME.WINDOWS.UPDATE",
+      "search_string": "SHOW TABS IN PROCESS ADDS A BROWSER ACTION SHOWING WHICH TABS SHARE THE CURRENT TABS PROCESS. BROWSER_ACTION EXPERIMENTAL TABS CHROME.TABS.GET CHROME.TABS.UPDATE CHROME.WINDOWS.GET CHROME.WINDOWS.GETALL CHROME.WINDOWS.GETCURRENT CHROME.WINDOWS.UPDATE",
       "source_files": [
         "manifest.json",
         "popup.css",
@@ -2139,8 +2259,8 @@
       "features": [
         "<all_urls>",
         "browser_action",
-        "experimental",
         "options_page",
+        "storage",
         "tabs"
       ],
       "icon": null,
@@ -2149,7 +2269,7 @@
       "packaged_app": false,
       "path": "examples\/api\/storage\/stylizr\/",
       "protocols": [],
-      "search_string": "STYLIZR SPRUCE UP YOUR PAGES WITH CUSTOM CSS. <ALL_URLS> BROWSER_ACTION EXPERIMENTAL OPTIONS_PAGE TABS CHROME.EXTENSION.GETURL CHROME.TABS.INSERTCSS",
+      "search_string": "STYLIZR SPRUCE UP YOUR PAGES WITH CUSTOM CSS. <ALL_URLS> BROWSER_ACTION OPTIONS_PAGE STORAGE TABS CHROME.EXTENSION.GETURL CHROME.TABS.INSERTCSS",
       "source_files": [
         "manifest.json",
         "options.html",
@@ -2157,7 +2277,7 @@
         "popup.html",
         "popup.js"
       ],
-      "source_hash": "f27c79a92606352e039c5d6e61c0b99f770bf941",
+      "source_hash": "70d9c5f3e56fb17c0ee9f0582c9b817d95cdc772",
       "zip_path": "examples\/api\/storage\/stylizr.zip"
     },
     {
@@ -2166,15 +2286,12 @@
         "chrome.extension.getURL",
         "chrome.tabs.create",
         "chrome.tabs.get",
-        "chrome.tabs.getAllInWindow",
-        "chrome.tabs.getSelected",
         "chrome.tabs.move",
         "chrome.tabs.onAttached",
         "chrome.tabs.onCreated",
         "chrome.tabs.onDetached",
         "chrome.tabs.onMoved",
         "chrome.tabs.onRemoved",
-        "chrome.tabs.onSelectionChanged",
         "chrome.tabs.onUpdated",
         "chrome.tabs.remove",
         "chrome.tabs.update",
@@ -2202,7 +2319,7 @@
       "packaged_app": false,
       "path": "examples\/api\/tabs\/inspector\/",
       "protocols": [],
-      "search_string": "TAB INSPECTOR UTILITY FOR WORKING WITH THE EXTENSION TABS API BACKGROUND_PAGE BROWSER_ACTION TABS CHROME.BROWSERACTION.ONCLICKED CHROME.EXTENSION.GETURL CHROME.TABS.CREATE CHROME.TABS.GET CHROME.TABS.GETALLINWINDOW CHROME.TABS.GETSELECTED CHROME.TABS.MOVE CHROME.TABS.ONATTACHED CHROME.TABS.ONCREATED CHROME.TABS.ONDETACHED CHROME.TABS.ONMOVED CHROME.TABS.ONREMOVED CHROME.TABS.ONSELECTIONCHANGED CHROME.TABS.ONUPDATED CHROME.TABS.REMOVE CHROME.TABS.UPDATE CHROME.WINDOWS.CREATE CHROME.WINDOWS.GET CHROME.WINDOWS.GETALL CHROME.WINDOWS.GETCURRENT CHROME.WINDOWS.GETLASTFOCUSED CHROME.WINDOWS.ONCREATED CHROME.WINDOWS.ONFOCUSCHANGED CHROME.WINDOWS.ONREMOVED CHROME.WINDOWS.REMOVE CHROME.WINDOWS.UPDATE",
+      "search_string": "TAB INSPECTOR UTILITY FOR WORKING WITH THE EXTENSION TABS API BACKGROUND_PAGE BROWSER_ACTION TABS CHROME.BROWSERACTION.ONCLICKED CHROME.EXTENSION.GETURL CHROME.TABS.CREATE CHROME.TABS.GET CHROME.TABS.MOVE CHROME.TABS.ONATTACHED CHROME.TABS.ONCREATED CHROME.TABS.ONDETACHED CHROME.TABS.ONMOVED CHROME.TABS.ONREMOVED CHROME.TABS.ONUPDATED CHROME.TABS.REMOVE CHROME.TABS.UPDATE CHROME.WINDOWS.CREATE CHROME.WINDOWS.GET CHROME.WINDOWS.GETALL CHROME.WINDOWS.GETCURRENT CHROME.WINDOWS.GETLASTFOCUSED CHROME.WINDOWS.ONCREATED CHROME.WINDOWS.ONFOCUSCHANGED CHROME.WINDOWS.ONREMOVED CHROME.WINDOWS.REMOVE CHROME.WINDOWS.UPDATE",
       "source_files": [
         "background.js",
         "jstemplate_compiled.js",

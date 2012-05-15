@@ -15,16 +15,16 @@
 #include "chrome/browser/sync/internal_api/change_record.h"
 #include "chrome/browser/sync/internal_api/read_node.h"
 #include "chrome/browser/sync/profile_sync_service.h"
-#include "chrome/browser/sync/protocol/session_specifics.pb.h"
 #include "chrome/browser/ui/sync/tab_contents_wrapper_synced_tab_delegate.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
-#include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/web_contents.h"
+#include "sync/protocol/session_specifics.pb.h"
 
 using content::BrowserThread;
 using content::NavigationController;
@@ -52,7 +52,7 @@ SyncedTabDelegate* ExtractSyncedTabDelegate(
 }  // namespace
 
 SessionChangeProcessor::SessionChangeProcessor(
-    UnrecoverableErrorHandler* error_handler,
+    DataTypeErrorHandler* error_handler,
     SessionModelAssociator* session_model_associator)
     : ChangeProcessor(error_handler),
       session_model_associator_(session_model_associator),
@@ -64,7 +64,7 @@ SessionChangeProcessor::SessionChangeProcessor(
 }
 
 SessionChangeProcessor::SessionChangeProcessor(
-    UnrecoverableErrorHandler* error_handler,
+    DataTypeErrorHandler* error_handler,
     SessionModelAssociator* session_model_associator,
     bool setup_for_test)
     : ChangeProcessor(error_handler),
@@ -214,24 +214,26 @@ void SessionChangeProcessor::Observe(
   // Note that if we fail to associate, it means something has gone wrong,
   // such as our local session being deleted, so we disassociate and associate
   // again.
+  SyncError error;
   bool reassociation_needed = !modified_tabs.empty() &&
-      !session_model_associator_->AssociateTabs(modified_tabs);
+      !session_model_associator_->AssociateTabs(modified_tabs, &error);
 
   // Note, we always associate windows because it's possible a tab became
   // "interesting" by going to a valid URL, in which case it needs to be added
   // to the window's tab information.
   if (!reassociation_needed) {
     reassociation_needed =
-        !session_model_associator_->AssociateWindows(false);
+        !session_model_associator_->AssociateWindows(false, &error);
   }
 
   if (reassociation_needed) {
-    DVLOG(1) << "Reassociation of local models triggered.";
-    SyncError error;
+    LOG(WARNING) << "Reassociation of local models triggered.";
+    // Needing to reassociate would have set the error already so clear it.
+    error = SyncError();
     session_model_associator_->DisassociateModels(&error);
     session_model_associator_->AssociateModels(&error);
     if (error.IsSet()) {
-      error_handler()->OnUnrecoverableError(FROM_HERE,
+      error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
           "Sessions reassociation failed.");
     }
   }
@@ -254,6 +256,7 @@ void SessionChangeProcessor::ApplyChangesFromSyncModel(
     return;
   }
 
+  std::string local_tag = session_model_associator_->GetCurrentMachineTag();
   for (sync_api::ChangeRecordList::const_iterator it =
            changes.Get().begin(); it != changes.Get().end(); ++it) {
     const sync_api::ChangeRecord& change = *it;
@@ -264,17 +267,24 @@ void SessionChangeProcessor::ApplyChangesFromSyncModel(
       // and just ensure we've disassociated.
       DCHECK_EQ(syncable::GetModelTypeFromSpecifics(it->specifics),
                 syncable::SESSIONS);
-      const sync_pb::SessionSpecifics& specifics =
-          it->specifics.GetExtension(sync_pb::session);
-      session_model_associator_->DisassociateForeignSession(
-          specifics.session_tag());
+      const sync_pb::SessionSpecifics& specifics = it->specifics.session();
+      if (specifics.session_tag() == local_tag) {
+        // Another client has attempted to delete our local data (possibly by
+        // error or their/our clock is inaccurate). Just ignore the deletion
+        // for now to avoid any possible ping-pong delete/reassociate sequence.
+        LOG(WARNING) << "Local session data deleted. Ignoring until next local "
+                     << "navigation event.";
+      } else {
+        session_model_associator_->DisassociateForeignSession(
+            specifics.session_tag());
+      }
       continue;
     }
 
     // Handle an update or add.
     sync_api::ReadNode sync_node(trans);
     if (!sync_node.InitByIdLookup(change.id)) {
-      error_handler()->OnUnrecoverableError(FROM_HERE,
+      error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
           "Session node lookup failed.");
       return;
     }
@@ -285,8 +295,7 @@ void SessionChangeProcessor::ApplyChangesFromSyncModel(
 
     const sync_pb::SessionSpecifics& specifics(
         sync_node.GetSessionSpecifics());
-    if (specifics.session_tag() ==
-            session_model_associator_->GetCurrentMachineTag() &&
+    if (specifics.session_tag() == local_tag &&
         !setup_for_test_) {
       // We should only ever receive a change to our own machine's session info
       // if encryption was turned on. In that case, the data is still the same,
@@ -322,7 +331,8 @@ void SessionChangeProcessor::StopImpl() {
 
 void SessionChangeProcessor::StartObserving() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  DCHECK(profile_);
+  if (!profile_)
+    return;
   notification_registrar_.Add(this, content::NOTIFICATION_TAB_PARENTED,
       content::NotificationService::AllSources());
   notification_registrar_.Add(this, content::NOTIFICATION_TAB_CLOSED,
@@ -345,7 +355,6 @@ void SessionChangeProcessor::StartObserving() {
 
 void SessionChangeProcessor::StopObserving() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  DCHECK(profile_);
   notification_registrar_.RemoveAll();
 }
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,12 +14,14 @@
 #include "base/observer_list.h"
 #include "base/time.h"
 #include "base/timer.h"
+#include "content/browser/download/download_net_log_parameters.h"
 #include "content/browser/download/download_request_handle.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/download_id.h"
 #include "content/public/browser/download_item.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_errors.h"
+#include "net/base/net_log.h"
 
 
 // See download_item.h for usage.
@@ -81,23 +83,29 @@ class CONTENT_EXPORT DownloadItemImpl : public content::DownloadItem {
   // outlives the DownloadItemImpl.
 
   // Constructing from persistent store:
+  // |bound_net_log| is constructed externally for our use.
   DownloadItemImpl(Delegate* delegate,
                    content::DownloadId download_id,
-                   const DownloadPersistentStoreInfo& info);
+                   const content::DownloadPersistentStoreInfo& info,
+                   const net::BoundNetLog& bound_net_log);
 
   // Constructing for a regular download.
   // Takes ownership of the object pointed to by |request_handle|.
+  // |bound_net_log| is constructed externally for our use.
   DownloadItemImpl(Delegate* delegate,
                    const DownloadCreateInfo& info,
                    DownloadRequestHandleInterface* request_handle,
-                   bool is_otr);
+                   bool is_otr,
+                   const net::BoundNetLog& bound_net_log);
 
   // Constructing for the "Save Page As..." feature:
+  // |bound_net_log| is constructed externally for our use.
   DownloadItemImpl(Delegate* delegate,
                    const FilePath& path,
                    const GURL& url,
                    bool is_otr,
-                   content::DownloadId download_id);
+                   content::DownloadId download_id,
+                   const net::BoundNetLog& bound_net_log);
 
   virtual ~DownloadItemImpl();
 
@@ -123,7 +131,7 @@ class CONTENT_EXPORT DownloadItemImpl : public content::DownloadItem {
   virtual void MaybeCompleteDownload() OVERRIDE;
   virtual void Interrupted(int64 size,
                            const std::string& hash_state,
-                           InterruptReason reason) OVERRIDE;
+                           content::DownloadInterruptReason reason) OVERRIDE;
   virtual void Delete(DeleteReason reason) OVERRIDE;
   virtual void Remove() OVERRIDE;
   virtual bool TimeRemaining(base::TimeDelta* remaining) const OVERRIDE;
@@ -164,6 +172,8 @@ class CONTENT_EXPORT DownloadItemImpl : public content::DownloadItem {
   virtual content::DownloadId GetGlobalId() const OVERRIDE;
   virtual base::Time GetStartTime() const OVERRIDE;
   virtual base::Time GetEndTime() const OVERRIDE;
+  virtual void SetIsPersisted() OVERRIDE;
+  virtual bool IsPersisted() const OVERRIDE;
   virtual void SetDbHandle(int64 handle) OVERRIDE;
   virtual int64 GetDbHandle() const OVERRIDE;
   virtual bool IsPaused() const OVERRIDE;
@@ -172,39 +182,43 @@ class CONTENT_EXPORT DownloadItemImpl : public content::DownloadItem {
   virtual bool GetFileExternallyRemoved() const OVERRIDE;
   virtual SafetyState GetSafetyState() const OVERRIDE;
   virtual content::DownloadDangerType GetDangerType() const OVERRIDE;
+  virtual void SetDangerType(content::DownloadDangerType danger_type) OVERRIDE;
   virtual bool IsDangerous() const OVERRIDE;
-  virtual void MarkFileDangerous() OVERRIDE;
-  virtual void MarkUrlDangerous() OVERRIDE;
-  virtual void MarkContentDangerous() OVERRIDE;
   virtual bool GetAutoOpened() OVERRIDE;
   virtual const FilePath& GetTargetName() const OVERRIDE;
   virtual bool PromptUserForSaveLocation() const OVERRIDE;
   virtual bool IsOtr() const OVERRIDE;
   virtual const FilePath& GetSuggestedPath() const OVERRIDE;
   virtual bool IsTemporary() const OVERRIDE;
+  virtual void SetIsTemporary(bool temporary) OVERRIDE;
   virtual void SetOpened(bool opened) OVERRIDE;
   virtual bool GetOpened() const OVERRIDE;
   virtual const std::string& GetLastModifiedTime() const OVERRIDE;
   virtual const std::string& GetETag() const OVERRIDE;
-  virtual InterruptReason GetLastReason() const OVERRIDE;
-  virtual DownloadPersistentStoreInfo GetPersistentStoreInfo() const OVERRIDE;
+  virtual content::DownloadInterruptReason GetLastReason() const OVERRIDE;
+  virtual content::DownloadPersistentStoreInfo
+      GetPersistentStoreInfo() const OVERRIDE;
   virtual DownloadStateInfo GetStateInfo() const OVERRIDE;
   virtual content::BrowserContext* GetBrowserContext() const OVERRIDE;
   virtual content::WebContents* GetWebContents() const OVERRIDE;
   virtual FilePath GetTargetFilePath() const OVERRIDE;
   virtual FilePath GetFileNameToReportUser() const OVERRIDE;
+  virtual void SetDisplayName(const FilePath& name) OVERRIDE;
   virtual FilePath GetUserVerifiedFilePath() const OVERRIDE;
   virtual bool NeedsRename() const OVERRIDE;
   virtual void OffThreadCancel(DownloadFileManager* file_manager) OVERRIDE;
   virtual std::string DebugString(bool verbose) const OVERRIDE;
   virtual void MockDownloadOpenForTesting() OVERRIDE;
   virtual ExternalData* GetExternalData(const void* key) OVERRIDE;
+  virtual const ExternalData* GetExternalData(const void* key) const OVERRIDE;
   virtual void SetExternalData(const void* key, ExternalData* data) OVERRIDE;
 
  private:
   // Construction common to all constructors. |active| should be true for new
   // downloads and false for downloads from the history.
-  void Init(bool active);
+  // |download_type| indicates to the net log system what kind of download
+  // this is.
+  void Init(bool active, download_net_logs::DownloadType download_type);
 
   // Internal helper for maintaining consistent received and total sizes, and
   // hash state.
@@ -235,6 +249,9 @@ class CONTENT_EXPORT DownloadItemImpl : public content::DownloadItem {
   // State information used by the download manager.
   DownloadStateInfo state_info_;
 
+  // Display name for the download if different from the target filename.
+  FilePath display_name_;
+
   // The handle to the request information.  Used for operations outside the
   // download system.
   scoped_ptr<DownloadRequestHandleInterface> request_handle_;
@@ -245,17 +262,14 @@ class CONTENT_EXPORT DownloadItemImpl : public content::DownloadItem {
   // Full path to the downloaded or downloading file.
   FilePath full_path_;
 
-  // A number that should be appended to the path to make it unique, or 0 if the
-  // path should be used as is.
-  int path_uniquifier_;
-
   // The chain of redirects that leading up to and including the final URL.
   std::vector<GURL> url_chain_;
 
   // The URL of the page that initiated the download.
   GURL referrer_url_;
 
-  // Suggested filename in 'download' attribute of an anchor. Details:
+  // Filename suggestion from DownloadSaveInfo. It could, among others, be the
+  // suggested filename in 'download' attribute of an anchor. Details:
   // http://www.whatwg.org/specs/web-apps/current-work/#downloading-hyperlinks
   std::string suggested_filename_;
 
@@ -304,7 +318,7 @@ class CONTENT_EXPORT DownloadItemImpl : public content::DownloadItem {
   std::string etag_;
 
   // Last reason.
-  InterruptReason last_reason_;
+  content::DownloadInterruptReason last_reason_;
 
   // Start time for recording statistics.
   base::TimeTicks start_tick_;
@@ -345,6 +359,8 @@ class CONTENT_EXPORT DownloadItemImpl : public content::DownloadItem {
   // before the observer is added.
   bool auto_opened_;
 
+  bool is_persisted_;
+
   // True if the download was initiated in an incognito window.
   bool is_otr_;
 
@@ -360,8 +376,7 @@ class CONTENT_EXPORT DownloadItemImpl : public content::DownloadItem {
   // be treated as though the user opened it.
   bool opened_;
 
-  // Do we actual open downloads when requested?  For testing purposes
-  // only.
+  // Do we actually open downloads when requested?  For testing purposes only.
   bool open_enabled_;
 
   // Did the delegate delay calling Complete on this download?
@@ -370,6 +385,9 @@ class CONTENT_EXPORT DownloadItemImpl : public content::DownloadItem {
   // External Data storage.  All objects in the store
   // are owned by the DownloadItemImpl.
   std::map<const void*, ExternalData*> external_data_map_;
+
+  // Net log to use for this download.
+  const net::BoundNetLog bound_net_log_;
 
   DISALLOW_COPY_AND_ASSIGN(DownloadItemImpl);
 };

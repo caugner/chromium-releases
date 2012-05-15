@@ -5,8 +5,6 @@
 #include "chrome/browser/chromeos/login/login_html_dialog.h"
 
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/chromeos/frame/bubble_frame_view.h"
-#include "chrome/browser/chromeos/frame/bubble_window.h"
 #include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/views/html_dialog_view.h"
@@ -60,29 +58,8 @@ LoginHtmlDialog::~LoginHtmlDialog() {
 void LoginHtmlDialog::Show() {
   HtmlDialogView* html_view =
       new HtmlDialogView(ProfileManager::GetDefaultProfile(), NULL, this);
-#if defined(USE_AURA)
-  // TODO(saintlou): Until the new Bubble have been landed.
   views::Widget::CreateWindowWithParent(html_view, parent_window_);
   html_view->InitDialog();
-#else
-  if (style_ & STYLE_BUBBLE) {
-    views::Widget* bubble_window = BubbleWindow::Create(parent_window_,
-        static_cast<DialogStyle>(STYLE_XBAR | STYLE_THROBBER),
-        html_view);
-    bubble_frame_view_ = static_cast<BubbleFrameView*>(
-        bubble_window->non_client_view()->frame_view());
-  } else {
-    views::Widget::CreateWindowWithParent(html_view, parent_window_);
-  }
-  html_view->InitDialog();
-  if (bubble_frame_view_) {
-    bubble_frame_view_->StartThrobber();
-    notification_registrar_.Add(
-        this, content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME,
-        content::Source<WebContents>(
-            html_view->dom_contents()->web_contents()));
-  }
-#endif
   html_view->GetWidget()->Show();
   is_open_ = true;
 }
@@ -141,7 +118,8 @@ bool LoginHtmlDialog::ShouldShowDialogTitle() const {
   return true;
 }
 
-bool LoginHtmlDialog::HandleContextMenu(const ContextMenuParams& params) {
+bool LoginHtmlDialog::HandleContextMenu(
+    const content::ContextMenuParams& params) {
   // Disable context menu.
   return true;
 }
@@ -150,13 +128,8 @@ void LoginHtmlDialog::Observe(int type,
                               const content::NotificationSource& source,
                               const content::NotificationDetails& details) {
   DCHECK(type == content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME);
-#if defined(USE_AURA)
   // TODO(saintlou): Do we need a throbber for Aura?
   NOTIMPLEMENTED();
-#else
-  if (bubble_frame_view_)
-    bubble_frame_view_->StopThrobber();
-#endif
 }
 
 }  // namespace chromeos

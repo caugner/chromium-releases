@@ -59,6 +59,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/threading/non_thread_safe.h"
 #include "remoting/protocol/session.h"
+#include "remoting/protocol/transport_config.h"
 
 namespace remoting {
 
@@ -69,20 +70,29 @@ namespace protocol {
 class Authenticator;
 class AuthenticatorFactory;
 
+// TODO(sergeyu): Remove this struct and use TransportConfig instead.
 struct NetworkSettings {
   NetworkSettings()
-      : allow_nat_traversal(false),
+      : nat_traversal_mode(TransportConfig::NAT_TRAVERSAL_DISABLED),
         min_port(0),
         max_port(0) {
   }
 
-  explicit NetworkSettings(bool allow_nat_traversal_value)
-      : allow_nat_traversal(allow_nat_traversal_value),
+  explicit NetworkSettings(bool allow_nat_traversal)
+      : nat_traversal_mode(allow_nat_traversal ?
+                           TransportConfig::NAT_TRAVERSAL_ENABLED :
+                           TransportConfig::NAT_TRAVERSAL_DISABLED),
         min_port(0),
         max_port(0) {
   }
 
-  bool allow_nat_traversal;
+  explicit NetworkSettings(TransportConfig::NatTraversalMode nat_traversal_mode)
+      : nat_traversal_mode(nat_traversal_mode),
+        min_port(0),
+        max_port(0) {
+  }
+
+  TransportConfig::NatTraversalMode nat_traversal_mode;
 
   // |min_port| and |max_port| specify range (inclusive) of ports used by
   // P2P sessions. Any port can be used when both values are set to 0.
@@ -100,8 +110,18 @@ class SessionManager : public base::NonThreadSafe {
   virtual ~SessionManager() { }
 
   enum IncomingSessionResponse {
+    // Accept the session.
     ACCEPT,
+
+    // Reject the session due to incompatible session configuration.
     INCOMPATIBLE,
+
+    // Reject the session because the host is currently disabled due
+    // to previous login attempts.
+    OVERLOAD,
+
+    // Reject the session because the client is not allowed to connect
+    // to the host.
     DECLINE,
   };
 

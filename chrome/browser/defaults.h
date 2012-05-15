@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,9 +26,6 @@ extern const int kAutocompleteEditFontPixelSizeInPopup;
 extern const bool kCanToggleSystemTitleBar;
 
 #endif
-
-// The default value for session startup.
-extern const SessionStartupPref::Type kDefaultSessionStartupType;
 
 // Width of mini-tabs.
 extern const int kMiniTabWidth;
@@ -81,6 +78,9 @@ extern const ui::ResourceBundle::FontStyle kAssociatedNetworkFontStyle;
 
 // Preferred infobar border padding in pixels.
 extern const int kInfoBarBorderPaddingVertical;
+
+// Last character display for passwords.
+extern const bool kPasswordEchoEnabled;
 
 //=============================================================================
 // Runtime "const" - set only once after parsing command line option and should

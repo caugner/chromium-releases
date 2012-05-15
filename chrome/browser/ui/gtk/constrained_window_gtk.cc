@@ -14,16 +14,11 @@
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
+#include "ui/base/gtk/focus_store_gtk.h"
 #include "ui/base/gtk/gtk_compat.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
 
-#if defined(TOOLKIT_VIEWS)
-#include "chrome/browser/ui/views/tab_contents/native_tab_contents_view_gtk.h"
-#include "chrome/browser/ui/views/tab_contents/tab_contents_view_views.h"
-#else
-#include "chrome/browser/tab_contents/chrome_tab_contents_view_wrapper_gtk.h"
-#include "content/browser/tab_contents/tab_contents_view_gtk.h"
-#endif
+#include "chrome/browser/tab_contents/chrome_web_contents_view_delegate_gtk.h"
 
 using content::BrowserThread;
 
@@ -123,26 +118,13 @@ void ConstrainedWindowGtk::FocusConstrainedWindow() {
       gtk_util::IsWidgetAncestryVisible(focus_widget)) {
     gtk_widget_grab_focus(focus_widget);
   } else {
-  // TODO(estade): this define should not need to be here because this class
-  // should not be used on linux/views.
-#if defined(TOOLKIT_GTK)
-    static_cast<content::TabContentsViewGtk*>(
-        wrapper_->web_contents()->GetView())->SetFocusedWidget(focus_widget);
-#endif
+    ContainingView()->focus_store()->SetWidget(focus_widget);
   }
 }
 
 ConstrainedWindowGtk::TabContentsViewType*
     ConstrainedWindowGtk::ContainingView() {
-#if defined(TOOLKIT_VIEWS)
-  return static_cast<NativeTabContentsViewGtk*>(
-      static_cast<TabContentsViewViews*>(wrapper_->web_contents()->GetView())->
-          native_tab_contents_view());
-#else
-  return static_cast<TabContentsViewType*>(
-      static_cast<content::TabContentsViewGtk*>(
-          wrapper_->web_contents()->GetView())->wrapper());
-#endif
+  return ChromeWebContentsViewDelegateGtk::GetFor(wrapper_->web_contents());
 }
 
 gboolean ConstrainedWindowGtk::OnKeyPress(GtkWidget* sender,

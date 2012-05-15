@@ -57,6 +57,9 @@ EditSearchEngineDialog::EditSearchEngineDialog(
   Init();
 }
 
+EditSearchEngineDialog::~EditSearchEngineDialog() {
+}
+
 // static
 void EditSearchEngineDialog::Show(gfx::NativeWindow parent,
                                   const TemplateURL* template_url,
@@ -123,11 +126,11 @@ bool EditSearchEngineDialog::HandleKeyEvent(
 void EditSearchEngineDialog::Init() {
   // Create the views we'll need.
   if (controller_->template_url()) {
-    title_tf_ =
-        CreateTextfield(controller_->template_url()->short_name(), false);
+    title_tf_ = CreateTextfield(controller_->template_url()->short_name(),
+                                false);
     keyword_tf_ = CreateTextfield(controller_->template_url()->keyword(), true);
-    url_tf_ =
-        CreateTextfield(GetDisplayURL(*controller_->template_url()), false);
+    url_tf_ = CreateTextfield(GetDisplayURL(*controller_->template_url()),
+                              false);
     // We don't allow users to edit prepopulate URLs. This is done as
     // occasionally we need to update the URL of prepopulated TemplateURLs.
     url_tf_->SetReadOnly(controller_->template_url()->prepopulate_id() != 0);

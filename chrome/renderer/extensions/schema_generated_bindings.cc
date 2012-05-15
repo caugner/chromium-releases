@@ -31,6 +31,7 @@
 #include "chrome/renderer/extensions/extension_dispatcher.h"
 #include "chrome/renderer/extensions/miscellaneous_bindings.h"
 #include "chrome/renderer/extensions/user_script_slave.h"
+#include "content/public/renderer/render_thread.h"
 #include "content/public/renderer/render_view.h"
 #include "content/public/renderer/v8_value_converter.h"
 #include "grit/common_resources.h"
@@ -44,19 +45,14 @@
 #include "v8/include/v8.h"
 #include "webkit/glue/webkit_glue.h"
 
+using content::RenderThread;
 using content::V8ValueConverter;
 using extensions::ExtensionAPI;
+using extensions::Feature;
 using WebKit::WebFrame;
 using WebKit::WebSecurityOrigin;
 
 namespace {
-
-const char* kExtensionDeps[] = {
-  "extensions/event.js",
-  "extensions/json_schema.js",
-  "extensions/miscellaneous_bindings.js",
-  "extensions/apitest.js"
-};
 
 // Contains info relevant to a pending API request.
 struct PendingRequest {
@@ -74,66 +70,20 @@ typedef std::map<int, linked_ptr<PendingRequest> > PendingRequestMap;
 base::LazyInstance<PendingRequestMap> g_pending_requests =
     LAZY_INSTANCE_INITIALIZER;
 
+// TODO(koz): Split these native handlers up so that
+// GetNextRequestId/StartRequest are in one and SetIconCommon is in the other.
 class ExtensionImpl : public ChromeV8Extension {
  public:
   explicit ExtensionImpl(ExtensionDispatcher* extension_dispatcher)
-      : ChromeV8Extension("extensions/schema_generated_bindings.js",
-                          IDR_SCHEMA_GENERATED_BINDINGS_JS,
-                          arraysize(kExtensionDeps),
-                          kExtensionDeps,
-                          extension_dispatcher) {
-  }
-
-  ~ExtensionImpl() {
-    // TODO(aa): It seems that v8 never deletes us, so this doesn't get called.
-    // Leaving this in here in case v8's implementation ever changes.
-    for (CachedSchemaMap::iterator it = schemas_.begin(); it != schemas_.end();
-        ++it) {
-      if (!it->second.IsEmpty())
-        it->second.Dispose();
-    }
-  }
-
-  virtual v8::Handle<v8::FunctionTemplate> GetNativeFunction(
-      v8::Handle<v8::String> name) OVERRIDE {
-    if (name->Equals(v8::String::New("GetExtensionAPIDefinition"))) {
-      return v8::FunctionTemplate::New(GetExtensionAPIDefinition,
-                                       v8::External::New(this));
-    } else if (name->Equals(v8::String::New("GetNextRequestId"))) {
-      return v8::FunctionTemplate::New(GetNextRequestId);
-    } else if (name->Equals(v8::String::New("StartRequest"))) {
-      return v8::FunctionTemplate::New(StartRequest,
-                                       v8::External::New(this));
-    } else if (name->Equals(v8::String::New("SetIconCommon"))) {
-      return v8::FunctionTemplate::New(SetIconCommon,
-                                       v8::External::New(this));
-    }
-
-    return ChromeV8Extension::GetNativeFunction(name);
+      : ChromeV8Extension(extension_dispatcher) {
+    RouteStaticFunction("GetExtensionAPIDefinition",
+                        &GetExtensionAPIDefinition);
+    RouteStaticFunction("GetNextRequestId", &GetNextRequestId);
+    RouteStaticFunction("StartRequest", &StartRequest);
+    RouteStaticFunction("SetIconCommon", &SetIconCommon);
   }
 
  private:
-  static v8::Handle<v8::Value> GetV8SchemaForAPI(
-      ExtensionImpl* self,
-      v8::Handle<v8::Context> context,
-      const std::string& api_name) {
-    CachedSchemaMap::iterator maybe_api = self->schemas_.find(api_name);
-    if (maybe_api != self->schemas_.end())
-      return maybe_api->second;
-
-    scoped_ptr<V8ValueConverter> v8_value_converter(V8ValueConverter::create());
-    const base::DictionaryValue* schema =
-        ExtensionAPI::GetInstance()->GetSchema(api_name);
-    CHECK(schema) << api_name;
-
-    self->schemas_[api_name] =
-        v8::Persistent<v8::Object>::New(v8::Handle<v8::Object>::Cast(
-            v8_value_converter->ToV8Value(schema, context)));
-    CHECK(!self->schemas_[api_name].IsEmpty());
-
-    return self->schemas_[api_name];
-  }
-
   static v8::Handle<v8::Value> GetExtensionAPIDefinition(
       const v8::Arguments& args) {
     ExtensionImpl* self = GetFromArguments<ExtensionImpl>(args);
@@ -141,33 +91,28 @@ class ExtensionImpl : public ChromeV8Extension {
 
     ChromeV8Context* v8_context = dispatcher->v8_context_set().GetCurrent();
     CHECK(v8_context);
-    std::string extension_id = v8_context->extension_id();
-    const ::Extension* extension = NULL;
-    if (!extension_id.empty())
-      extension = dispatcher->extensions()->GetByID(extension_id);
 
-    ExtensionAPI::SchemaMap schemas;
-    if (!extension) {
-      LOG(WARNING) << "Extension " << extension_id << " not found";
-      ExtensionAPI::GetInstance()->GetDefaultSchemas(&schemas);
+    // TODO(kalman): This is being calculated twice, first in
+    // ExtensionDispatcher then again here. It might as well be a property of
+    // ChromeV8Context, however, this would require making ChromeV8Context take
+    // an Extension rather than an extension ID.  In itself this is fine,
+    // however it does not play correctly with the "IsTestExtensionId" checks.
+    // We need to remove that first.
+    scoped_ptr<std::set<std::string> > apis;
+
+    const std::string& extension_id = v8_context->extension_id();
+    if (dispatcher->IsTestExtensionId(extension_id)) {
+      apis.reset(new std::set<std::string>());
+      // The minimal set of APIs that tests need.
+      apis->insert("extension");
     } else {
-      ExtensionAPI::GetInstance()->GetSchemasForExtension(*extension, &schemas);
+      apis = ExtensionAPI::GetInstance()->GetAPIsForContext(
+          v8_context->context_type(),
+          dispatcher->extensions()->GetByID(extension_id),
+          UserScriptSlave::GetDataSourceURLForFrame(v8_context->web_frame()));
     }
 
-    v8::Persistent<v8::Context> context(v8::Context::New());
-    v8::Context::Scope context_scope(context);
-    v8::Handle<v8::Array> api(v8::Array::New(schemas.size()));
-    size_t api_index = 0;
-    for (ExtensionAPI::SchemaMap::iterator it = schemas.begin();
-        it != schemas.end(); ++it) {
-      api->Set(api_index, GetV8SchemaForAPI(self, context, it->first));
-      ++api_index;
-    }
-
-    // The persistent extension_api_ will keep the context alive.
-    context.Dispose();
-
-    return api;
+    return dispatcher->v8_schema_registry()->GetSchemas(*apis);
   }
 
   static v8::Handle<v8::Value> GetNextRequestId(const v8::Arguments& args) {
@@ -235,10 +180,10 @@ class ExtensionImpl : public ChromeV8Extension {
         webframe ? webframe->isProcessingUserGesture() : false;
     if (for_io_thread) {
       renderview->Send(new ExtensionHostMsg_RequestForIOThread(
-          renderview->GetRoutingId(), params));
+          renderview->GetRoutingID(), params));
     } else {
       renderview->Send(new ExtensionHostMsg_Request(
-          renderview->GetRoutingId(), params));
+          renderview->GetRoutingID(), params));
     }
 
     return v8::Undefined();
@@ -330,24 +275,16 @@ class ExtensionImpl : public ChromeV8Extension {
 
     return StartRequestCommon(args, &list_value);
   }
-
-  // Cached JS Array representation of each namespace in extension_api.json.
-  // We store this so that we don't have to parse it over and over again for
-  // every context that uses it.
-  typedef std::map<std::string, v8::Persistent<v8::Object> > CachedSchemaMap;
-  CachedSchemaMap schemas_;
 };
 
 }  // namespace
 
 namespace extensions {
 
-v8::Extension* SchemaGeneratedBindings::Get(
+// static
+ChromeV8Extension* SchemaGeneratedBindings::Get(
     ExtensionDispatcher* extension_dispatcher) {
-  static v8::Extension* extension = new ExtensionImpl(extension_dispatcher);
-  CHECK_EQ(extension_dispatcher,
-           static_cast<ExtensionImpl*>(extension)->extension_dispatcher());
-  return extension;
+  return new ExtensionImpl(extension_dispatcher);
 }
 
 // static

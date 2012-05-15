@@ -3318,6 +3318,108 @@ TEST_F(GLES2FormatTest, TexStorage2DEXT) {
       next_cmd, sizeof(cmd));
 }
 
+TEST_F(GLES2FormatTest, GenQueriesEXT) {
+  GenQueriesEXT& cmd = *GetBufferAs<GenQueriesEXT>();
+  void* next_cmd = cmd.Set(
+      &cmd,
+      static_cast<GLsizei>(11),
+      static_cast<uint32>(12),
+      static_cast<uint32>(13));
+  EXPECT_EQ(static_cast<uint32>(GenQueriesEXT::kCmdId),
+            cmd.header.command);
+  EXPECT_EQ(sizeof(cmd), cmd.header.size * 4u);
+  EXPECT_EQ(static_cast<GLsizei>(11), cmd.n);
+  EXPECT_EQ(static_cast<uint32>(12), cmd.queries_shm_id);
+  EXPECT_EQ(static_cast<uint32>(13), cmd.queries_shm_offset);
+  CheckBytesWrittenMatchesExpectedSize(
+      next_cmd, sizeof(cmd));
+}
+
+TEST_F(GLES2FormatTest, GenQueriesEXTImmediate) {
+  static GLuint ids[] = { 12, 23, 34, };
+  GenQueriesEXTImmediate& cmd = *GetBufferAs<GenQueriesEXTImmediate>();
+  void* next_cmd = cmd.Set(
+      &cmd, static_cast<GLsizei>(arraysize(ids)), ids);
+  EXPECT_EQ(static_cast<uint32>(GenQueriesEXTImmediate::kCmdId),
+            cmd.header.command);
+  EXPECT_EQ(sizeof(cmd) +
+            RoundSizeToMultipleOfEntries(cmd.n * 4u),
+            cmd.header.size * 4u);
+  EXPECT_EQ(static_cast<GLsizei>(arraysize(ids)), cmd.n);
+  CheckBytesWrittenMatchesExpectedSize(
+      next_cmd, sizeof(cmd) +
+      RoundSizeToMultipleOfEntries(arraysize(ids) * 4u));
+  // TODO(gman): Check that ids were inserted;
+}
+
+TEST_F(GLES2FormatTest, DeleteQueriesEXT) {
+  DeleteQueriesEXT& cmd = *GetBufferAs<DeleteQueriesEXT>();
+  void* next_cmd = cmd.Set(
+      &cmd,
+      static_cast<GLsizei>(11),
+      static_cast<uint32>(12),
+      static_cast<uint32>(13));
+  EXPECT_EQ(static_cast<uint32>(DeleteQueriesEXT::kCmdId),
+            cmd.header.command);
+  EXPECT_EQ(sizeof(cmd), cmd.header.size * 4u);
+  EXPECT_EQ(static_cast<GLsizei>(11), cmd.n);
+  EXPECT_EQ(static_cast<uint32>(12), cmd.queries_shm_id);
+  EXPECT_EQ(static_cast<uint32>(13), cmd.queries_shm_offset);
+  CheckBytesWrittenMatchesExpectedSize(
+      next_cmd, sizeof(cmd));
+}
+
+TEST_F(GLES2FormatTest, DeleteQueriesEXTImmediate) {
+  static GLuint ids[] = { 12, 23, 34, };
+  DeleteQueriesEXTImmediate& cmd = *GetBufferAs<DeleteQueriesEXTImmediate>();
+  void* next_cmd = cmd.Set(
+      &cmd, static_cast<GLsizei>(arraysize(ids)), ids);
+  EXPECT_EQ(static_cast<uint32>(DeleteQueriesEXTImmediate::kCmdId),
+            cmd.header.command);
+  EXPECT_EQ(sizeof(cmd) +
+            RoundSizeToMultipleOfEntries(cmd.n * 4u),
+            cmd.header.size * 4u);
+  EXPECT_EQ(static_cast<GLsizei>(arraysize(ids)), cmd.n);
+  CheckBytesWrittenMatchesExpectedSize(
+      next_cmd, sizeof(cmd) +
+      RoundSizeToMultipleOfEntries(arraysize(ids) * 4u));
+  // TODO(gman): Check that ids were inserted;
+}
+
+TEST_F(GLES2FormatTest, BeginQueryEXT) {
+  BeginQueryEXT& cmd = *GetBufferAs<BeginQueryEXT>();
+  void* next_cmd = cmd.Set(
+      &cmd,
+      static_cast<GLenum>(11),
+      static_cast<GLuint>(12),
+      static_cast<uint32>(13),
+      static_cast<uint32>(14));
+  EXPECT_EQ(static_cast<uint32>(BeginQueryEXT::kCmdId),
+            cmd.header.command);
+  EXPECT_EQ(sizeof(cmd), cmd.header.size * 4u);
+  EXPECT_EQ(static_cast<GLenum>(11), cmd.target);
+  EXPECT_EQ(static_cast<GLuint>(12), cmd.id);
+  EXPECT_EQ(static_cast<uint32>(13), cmd.sync_data_shm_id);
+  EXPECT_EQ(static_cast<uint32>(14), cmd.sync_data_shm_offset);
+  CheckBytesWrittenMatchesExpectedSize(
+      next_cmd, sizeof(cmd));
+}
+
+TEST_F(GLES2FormatTest, EndQueryEXT) {
+  EndQueryEXT& cmd = *GetBufferAs<EndQueryEXT>();
+  void* next_cmd = cmd.Set(
+      &cmd,
+      static_cast<GLenum>(11),
+      static_cast<GLuint>(12));
+  EXPECT_EQ(static_cast<uint32>(EndQueryEXT::kCmdId),
+            cmd.header.command);
+  EXPECT_EQ(sizeof(cmd), cmd.header.size * 4u);
+  EXPECT_EQ(static_cast<GLenum>(11), cmd.target);
+  EXPECT_EQ(static_cast<GLuint>(12), cmd.submit_count);
+  CheckBytesWrittenMatchesExpectedSize(
+      next_cmd, sizeof(cmd));
+}
+
 TEST_F(GLES2FormatTest, SwapBuffers) {
   SwapBuffers& cmd = *GetBufferAs<SwapBuffers>();
   void* next_cmd = cmd.Set(
@@ -3595,6 +3697,61 @@ TEST_F(GLES2FormatTest, TexImageIOSurface2DCHROMIUM) {
   EXPECT_EQ(static_cast<GLsizei>(13), cmd.height);
   EXPECT_EQ(static_cast<GLuint>(14), cmd.ioSurfaceId);
   EXPECT_EQ(static_cast<GLuint>(15), cmd.plane);
+  CheckBytesWrittenMatchesExpectedSize(
+      next_cmd, sizeof(cmd));
+}
+
+TEST_F(GLES2FormatTest, DrawArraysInstancedANGLE) {
+  DrawArraysInstancedANGLE& cmd = *GetBufferAs<DrawArraysInstancedANGLE>();
+  void* next_cmd = cmd.Set(
+      &cmd,
+      static_cast<GLenum>(11),
+      static_cast<GLint>(12),
+      static_cast<GLsizei>(13),
+      static_cast<GLsizei>(14));
+  EXPECT_EQ(static_cast<uint32>(DrawArraysInstancedANGLE::kCmdId),
+            cmd.header.command);
+  EXPECT_EQ(sizeof(cmd), cmd.header.size * 4u);
+  EXPECT_EQ(static_cast<GLenum>(11), cmd.mode);
+  EXPECT_EQ(static_cast<GLint>(12), cmd.first);
+  EXPECT_EQ(static_cast<GLsizei>(13), cmd.count);
+  EXPECT_EQ(static_cast<GLsizei>(14), cmd.primcount);
+  CheckBytesWrittenMatchesExpectedSize(
+      next_cmd, sizeof(cmd));
+}
+
+TEST_F(GLES2FormatTest, DrawElementsInstancedANGLE) {
+  DrawElementsInstancedANGLE& cmd = *GetBufferAs<DrawElementsInstancedANGLE>();
+  void* next_cmd = cmd.Set(
+      &cmd,
+      static_cast<GLenum>(11),
+      static_cast<GLsizei>(12),
+      static_cast<GLenum>(13),
+      static_cast<GLuint>(14),
+      static_cast<GLsizei>(15));
+  EXPECT_EQ(static_cast<uint32>(DrawElementsInstancedANGLE::kCmdId),
+            cmd.header.command);
+  EXPECT_EQ(sizeof(cmd), cmd.header.size * 4u);
+  EXPECT_EQ(static_cast<GLenum>(11), cmd.mode);
+  EXPECT_EQ(static_cast<GLsizei>(12), cmd.count);
+  EXPECT_EQ(static_cast<GLenum>(13), cmd.type);
+  EXPECT_EQ(static_cast<GLuint>(14), cmd.index_offset);
+  EXPECT_EQ(static_cast<GLsizei>(15), cmd.primcount);
+  CheckBytesWrittenMatchesExpectedSize(
+      next_cmd, sizeof(cmd));
+}
+
+TEST_F(GLES2FormatTest, VertexAttribDivisorANGLE) {
+  VertexAttribDivisorANGLE& cmd = *GetBufferAs<VertexAttribDivisorANGLE>();
+  void* next_cmd = cmd.Set(
+      &cmd,
+      static_cast<GLuint>(11),
+      static_cast<GLuint>(12));
+  EXPECT_EQ(static_cast<uint32>(VertexAttribDivisorANGLE::kCmdId),
+            cmd.header.command);
+  EXPECT_EQ(sizeof(cmd), cmd.header.size * 4u);
+  EXPECT_EQ(static_cast<GLuint>(11), cmd.index);
+  EXPECT_EQ(static_cast<GLuint>(12), cmd.divisor);
   CheckBytesWrittenMatchesExpectedSize(
       next_cmd, sizeof(cmd));
 }

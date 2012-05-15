@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,9 +25,7 @@ class TestWebGraphicsContext3D : public WebKit::WebGraphicsContext3D {
   TestWebGraphicsContext3D();
   virtual ~TestWebGraphicsContext3D();
 
-  virtual bool initialize(Attributes attributes,
-                          WebKit::WebView* view,
-                          bool render_directly_to_web_view);
+  void Initialize();
   virtual bool makeContextCurrent();
   virtual int width();
   virtual int height();
@@ -59,6 +57,12 @@ class TestWebGraphicsContext3D : public WebKit::WebGraphicsContext3D {
                                          WebKit::WGC3Denum access);
   virtual void unmapTexSubImage2DCHROMIUM(const void* data) {}
   virtual void setVisibilityCHROMIUM(bool visible) {}
+  virtual void discardFramebufferEXT(WebKit::WGC3Denum target,
+                                     WebKit::WGC3Dsizei numAttachments,
+                                     const WebKit::WGC3Denum* attachments) {}
+  virtual void ensureFramebufferCHROMIUM() {}
+  virtual void setMemoryAllocationChangedCallbackCHROMIUM(
+      WebGraphicsMemoryAllocationChangedCallbackCHROMIUM*) { }
   virtual WebKit::WebString getRequestableExtensionsCHROMIUM();
   virtual void requestExtensionCHROMIUM(const char*) {}
   virtual void blitFramebufferCHROMIUM(WebKit::WGC3Dint src_x0,
@@ -425,6 +429,17 @@ class TestWebGraphicsContext3D : public WebKit::WebGraphicsContext3D {
   virtual void deleteRenderbuffer(WebKit::WebGLId) {}
   virtual void deleteShader(WebKit::WebGLId) {}
   virtual void deleteTexture(WebKit::WebGLId) {}
+  virtual WebKit::WebGLId createQueryEXT();
+  virtual void deleteQueryEXT(WebKit::WebGLId) {};
+  virtual WebKit::WGC3Dboolean isQueryEXT(WebKit::WebGLId query);
+  virtual void beginQueryEXT(WebKit::WGC3Denum, WebKit::WebGLId) {}
+  virtual void endQueryEXT(WebKit::WGC3Denum) {}
+  virtual void getQueryivEXT(WebKit::WGC3Denum,
+                             WebKit::WGC3Denum,
+                             WebKit::WGC3Dint*) {}
+  virtual void getQueryObjectuivEXT(WebKit::WebGLId,
+                                    WebKit::WGC3Denum,
+                                    WebKit::WGC3Duint*) {}
 
  private:
   scoped_refptr<gfx::GLContext> gl_context_;

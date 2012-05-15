@@ -11,14 +11,15 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_host/chrome_render_message_filter.h"
 #include "chrome/common/extensions/extension_messages.h"
-#include "content/browser/renderer_host/render_view_host.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/common/result_codes.h"
 
 using content::BrowserThread;
+using content::RenderViewHost;
 using content::UserMetricsAction;
 
 // static
@@ -93,7 +94,7 @@ const std::string ExtensionFunction::GetResult() {
   std::string json;
   // Some functions might not need to return any results.
   if (result_.get())
-    base::JSONWriter::Write(result_.get(), false, &json);
+    base::JSONWriter::Write(result_.get(), &json);
   return json;
 }
 
@@ -151,6 +152,8 @@ UIThreadExtensionFunction::UIThreadExtensionFunction()
 }
 
 UIThreadExtensionFunction::~UIThreadExtensionFunction() {
+  if (dispatcher())
+    dispatcher()->OnExtensionFunctionCompleted(GetExtension());
 }
 
 UIThreadExtensionFunction*
@@ -185,9 +188,9 @@ void UIThreadExtensionFunction::SendResponse(bool success) {
     if (!render_view_host_ || !dispatcher())
       return;
 
-    SendResponseImpl(render_view_host_->process()->GetHandle(),
+    SendResponseImpl(render_view_host_->GetProcess()->GetHandle(),
                      render_view_host_,
-                     render_view_host_->routing_id(),
+                     render_view_host_->GetRoutingID(),
                      success);
   }
 }

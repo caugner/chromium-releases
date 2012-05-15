@@ -21,11 +21,14 @@
 #include "chrome/browser/ui/select_file_dialog.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/browser/renderer_host/render_view_host.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/render_view_host.h"
+#include "content/public/common/selected_file_info.h"
 #include "webkit/fileapi/file_system_context.h"
 #include "webkit/fileapi/file_system_mount_point_provider.h"
+
+using content::BrowserContext;
 
 // Mock listener used by test below.
 class MockSelectFileDialogListener : public SelectFileDialog::Listener {
@@ -46,6 +49,12 @@ class MockSelectFileDialogListener : public SelectFileDialog::Listener {
     file_selected_ = true;
     path_ = path;
     params_ = params;
+  }
+  virtual void FileSelectedWithExtraInfo(
+      const content::SelectedFileInfo& selected_file_info,
+      int index,
+      void* params) {
+    FileSelected(selected_file_info.path, index, params);
   }
   virtual void MultiFilesSelected(
       const std::vector<FilePath>& files, void* params) {}
@@ -101,8 +110,9 @@ class SelectFileDialogExtensionBrowserTest : public ExtensionBrowserTest {
   // Creates a file system mount point for a directory.
   void AddMountPoint(const FilePath& path) {
     fileapi::ExternalFileSystemMountPointProvider* provider =
-        browser()->profile()->GetFileSystemContext()->external_provider();
-    provider->AddMountPoint(path);
+        BrowserContext::GetFileSystemContext(browser()->profile())->
+            external_provider();
+    provider->AddLocalMountPoint(path);
   }
 
   void OpenDialog(SelectFileDialog::Type dialog_type,
@@ -169,7 +179,7 @@ class SelectFileDialogExtensionBrowserTest : public ExtensionBrowserTest {
     ui_test_utils::WindowedNotificationObserver host_destroyed(
         content::NOTIFICATION_RENDER_WIDGET_HOST_DESTROYED,
         content::NotificationService::AllSources());
-    RenderViewHost* host = dialog_->GetRenderViewHost();
+    content::RenderViewHost* host = dialog_->GetRenderViewHost();
     string16 main_frame;
     std::string button_class =
         (button_type == DIALOG_BTN_OK) ? ".ok" : ".cancel";

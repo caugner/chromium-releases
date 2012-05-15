@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,7 +15,8 @@
 #include "grit/theme_resources.h"
 #include "ui/base/animation/slide_animation.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/canvas.h"
+#include "ui/gfx/image/image.h"
 #include "ui/views/controls/button/menu_button.h"
 #include "ui/views/controls/menu/menu_item_view.h"
 #include "ui/views/widget/widget.h"
@@ -67,8 +68,8 @@ void ExtensionInfoBar::Layout() {
 }
 
 void ExtensionInfoBar::ViewHierarchyChanged(bool is_add,
-                                            View* parent,
-                                            View* child) {
+                                            views::View* parent,
+                                            views::View* child) {
   if (!is_add || (child != this) || (menu_ != NULL)) {
     InfoBarView::ViewHierarchyChanged(is_add, parent, child);
     return;
@@ -90,42 +91,39 @@ void ExtensionInfoBar::ViewHierarchyChanged(bool is_add,
   // which assumes that particular children (e.g. the close button) have already
   // been added.
   const Extension* extension = extension_host->extension();
-  int image_size = Extension::EXTENSION_ICON_BITTY;
+  ExtensionIconSet::Icons image_size = ExtensionIconSet::EXTENSION_ICON_BITTY;
   ExtensionResource icon_resource = extension->GetIconResource(
       image_size, ExtensionIconSet::MATCH_EXACTLY);
-  if (!icon_resource.relative_path().empty()) {
-    tracker_.LoadImage(extension, icon_resource,
-        gfx::Size(image_size, image_size), ImageLoadingTracker::DONT_CACHE);
-  } else {
-    OnImageLoaded(NULL, icon_resource, 0);
-  }
+  tracker_.LoadImage(extension, icon_resource,
+      gfx::Size(image_size, image_size), ImageLoadingTracker::DONT_CACHE);
 }
 
 int ExtensionInfoBar::ContentMinimumWidth() const {
   return menu_->GetPreferredSize().width() + kMenuHorizontalMargin;
 }
 
-void ExtensionInfoBar::OnImageLoaded(SkBitmap* image,
-                                     const ExtensionResource& resource,
+void ExtensionInfoBar::OnImageLoaded(const gfx::Image& image,
+                                     const std::string& extension_id,
                                      int index) {
   if (!GetDelegate())
     return;  // The delegate can go away while we asynchronously load images.
 
-  SkBitmap* icon = image;
+  const SkBitmap* icon = NULL;
   // Fall back on the default extension icon on failure.
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  if (!image || image->empty())
+  if (image.IsEmpty())
     icon = rb.GetBitmapNamed(IDR_EXTENSIONS_SECTION);
+  else
+    icon = image.ToSkBitmap();
 
   SkBitmap* drop_image = rb.GetBitmapNamed(IDR_APP_DROPARROW);
 
-  int image_size = Extension::EXTENSION_ICON_BITTY;
+  int image_size = ExtensionIconSet::EXTENSION_ICON_BITTY;
   // The margin between the extension icon and the drop-down arrow bitmap.
   static const int kDropArrowLeftMargin = 3;
-  scoped_ptr<gfx::CanvasSkia> canvas(new gfx::CanvasSkia(
+  scoped_ptr<gfx::Canvas> canvas(new gfx::Canvas(
       gfx::Size(image_size + kDropArrowLeftMargin + drop_image->width(),
-                image_size),
-      false));
+                image_size), false));
   canvas->DrawBitmapInt(*icon, 0, 0, icon->width(), icon->height(), 0, 0,
                         image_size, image_size, false);
   canvas->DrawBitmapInt(*drop_image, image_size + kDropArrowLeftMargin,
@@ -140,7 +138,8 @@ void ExtensionInfoBar::OnDelegateDeleted() {
   delegate_ = NULL;
 }
 
-void ExtensionInfoBar::RunMenu(View* source, const gfx::Point& pt) {
+void ExtensionInfoBar::OnMenuButtonClicked(views::View* source,
+                                           const gfx::Point& point) {
   if (!owned())
     return;  // We're closing; don't call anything, it might access the owner.
   const Extension* extension = GetDelegate()->extension_host()->extension();

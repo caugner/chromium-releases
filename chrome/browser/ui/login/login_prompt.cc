@@ -15,13 +15,13 @@
 #include "chrome/browser/ui/constrained_window.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/renderer_host/resource_dispatcher_host.h"
-#include "content/browser/renderer_host/resource_dispatcher_host_request_info.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_view_host_delegate.h"
+#include "content/public/browser/resource_dispatcher_host.h"
+#include "content/public/browser/resource_request_info.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "net/base/auth.h"
@@ -34,7 +34,10 @@
 
 using content::BrowserThread;
 using content::NavigationController;
+using content::RenderViewHost;
 using content::RenderViewHostDelegate;
+using content::ResourceDispatcherHost;
+using content::ResourceRequestInfo;
 using content::WebContents;
 using webkit::forms::PasswordForm;
 
@@ -44,12 +47,7 @@ class LoginHandlerImpl;
 // Should only be called from the IO thread, since it accesses an
 // net::URLRequest.
 void ResetLoginHandlerForRequest(net::URLRequest* request) {
-  ResourceDispatcherHostRequestInfo* info =
-      ResourceDispatcherHost::InfoForRequest(request);
-  if (!info)
-    return;
-
-  info->set_login_delegate(NULL);
+  ResourceDispatcherHost::Get()->ClearLoginDelegateForRequest(request);
 }
 
 // Get the signon_realm under which this auth info should be stored.
@@ -101,8 +99,8 @@ LoginHandler::LoginHandler(net::AuthChallengeInfo* auth_info,
       BrowserThread::UI, FROM_HERE,
       base::Bind(&LoginHandler::AddObservers, this));
 
-  if (!ResourceDispatcherHost::RenderViewForRequest(
-          request_, &render_process_host_id_,  &tab_contents_id_)) {
+  if (!ResourceRequestInfo::ForRequest(request_)->GetAssociatedRenderView(
+          &render_process_host_id_,  &tab_contents_id_)) {
     NOTREACHED();
   }
 }
@@ -132,7 +130,7 @@ RenderViewHostDelegate* LoginHandler::GetRenderViewHostDelegate() const {
   if (!rvh)
     return NULL;
 
-  return rvh->delegate();
+  return rvh->GetDelegate();
 }
 
 void LoginHandler::SetAuth(const string16& username,
@@ -395,7 +393,7 @@ void LoginHandler::CloseContentsDeferred() {
 }
 
 // Helper to create a PasswordForm and stuff it into a vector as input
-// for PasswordManager::PasswordFormsFound, the hook into PasswordManager.
+// for PasswordManager::PasswordFormsParsed, the hook into PasswordManager.
 void MakeInputForPasswordManager(
     const GURL& request_url,
     net::AuthChallengeInfo* auth_info,
@@ -456,7 +454,7 @@ void LoginDialogCallback(const GURL& request_url,
   PasswordManager* password_manager = wrapper->password_manager();
   std::vector<PasswordForm> v;
   MakeInputForPasswordManager(request_url, auth_info, handler, &v);
-  password_manager->OnPasswordFormsFound(v);
+  password_manager->OnPasswordFormsParsed(v);
   handler->SetPasswordManager(password_manager);
 
   // The realm is controlled by the remote server, so there is no reason

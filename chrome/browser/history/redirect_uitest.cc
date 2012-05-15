@@ -31,6 +31,7 @@ class RedirectTest : public UITest {
  public:
   RedirectTest()
       : test_server_(net::TestServer::TYPE_HTTP,
+                     net::TestServer::kLocalhost,
                      FilePath(FILE_PATH_LITERAL("chrome/test/data"))) {
   }
 
@@ -92,7 +93,7 @@ TEST_F(RedirectTest, Client) {
 }
 
 // http://code.google.com/p/chromium/issues/detail?id=62772
-TEST_F(RedirectTest, FLAKY_ClientEmptyReferer) {
+TEST_F(RedirectTest, DISABLED_ClientEmptyReferer) {
   ASSERT_TRUE(test_server_.Start());
 
   // Create the file contents, which will do a redirect to the
@@ -132,20 +133,7 @@ TEST_F(RedirectTest, FLAKY_ClientEmptyReferer) {
 
 // Tests to make sure a location change when a pending redirect exists isn't
 // flagged as a redirect.
-#if defined(USE_AURA)
-// http://crbug.com/104396
-#define MAYBE_ClientCancelled FAILS_ClientCancelled
-#elif defined(OS_MACOSX)
-// SimulateOSClick is broken on the Mac: http://crbug.com/45162
-#define MAYBE_ClientCancelled DISABLED_ClientCancelled
-#elif defined(OS_WIN)
-// http://crbug.com/53091
-#define MAYBE_ClientCancelled FAILS_ClientCancelled
-#else
-#define MAYBE_ClientCancelled ClientCancelled
-#endif
-
-TEST_F(RedirectTest, MAYBE_ClientCancelled) {
+TEST_F(RedirectTest, ClientCancelled) {
   FilePath first_path(test_data_directory_);
   first_path = first_path.AppendASCII("cancelled_redirect_test.html");
   ASSERT_TRUE(file_util::AbsolutePath(&first_path));
@@ -249,7 +237,7 @@ TEST_F(RedirectTest, ServerReference) {
 // B) does not take place.
 //
 // Flaky on XP and Vista, http://crbug.com/69390.
-TEST_F(RedirectTest, FLAKY_NoHttpToFile) {
+TEST_F(RedirectTest, DISABLED_NoHttpToFile) {
   ASSERT_TRUE(test_server_.Start());
   FilePath test_file(test_data_directory_);
   test_file = test_file.AppendASCII("http_to_file.html");

@@ -31,6 +31,28 @@ class MockVideoRendererWrapper : public VideoRendererWrapperInterface {
 
 }  // namespace webrtc
 
+TEST(PeerConnectionHandlerTest, WebMediaStreamDescriptorMemoryTest) {
+  std::string stream_label("stream-label");
+  std::string video_track_id("video-label");
+  const size_t kSizeOne = 1;
+
+  WebKit::WebMediaStreamSource source;
+  source.initialize(WebKit::WebString::fromUTF8(video_track_id),
+                    WebKit::WebMediaStreamSource::TypeVideo,
+                    WebKit::WebString::fromUTF8("RemoteVideo"));
+
+  WebKit::WebVector<WebKit::WebMediaStreamSource> source_vector(kSizeOne);
+  source_vector[0] = source;
+
+  WebKit::WebMediaStreamDescriptor local_stream;
+  local_stream.initialize(UTF8ToUTF16(stream_label), source_vector);
+
+  WebKit::WebMediaStreamDescriptor copy_1(local_stream);
+  {
+    WebKit::WebMediaStreamDescriptor copy_2(copy_1);
+  }
+}
+
 TEST(PeerConnectionHandlerTest, Basic) {
   MessageLoop loop;
 
@@ -51,8 +73,8 @@ TEST(PeerConnectionHandlerTest, Basic) {
 
   WebKit::WebString server_config(
       WebKit::WebString::fromUTF8("STUN stun.l.google.com:19302"));
-  WebKit::WebSecurityOrigin security_origin;
-  pc_handler->initialize(server_config, security_origin);
+  WebKit::WebString username;
+  pc_handler->initialize(server_config, username);
   EXPECT_TRUE(pc_handler->native_peer_connection_.get());
   webrtc::MockPeerConnectionImpl* mock_peer_connection =
       static_cast<webrtc::MockPeerConnectionImpl*>(

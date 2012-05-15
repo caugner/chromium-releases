@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -390,9 +390,19 @@ COMPILE_ASSERT(kNumMozcIntegerPrefs == arraysize(kMozcIntegerPrefs),
 // ---------------------------------------------------------------------------
 // For keyboard stuff
 // ---------------------------------------------------------------------------
-const int kXkbAutoRepeatDelayInMs = 750;
+const int kXkbAutoRepeatDelayInMs = 500;
 const int kXkbAutoRepeatIntervalInMs = 50;
 const char kPreferredKeyboardLayout[] = "PreferredKeyboardLayout";
+
+void RegisterPrefs(PrefService* local_state) {
+  // We use an empty string here rather than a hardware keyboard layout name
+  // since input_method::GetHardwareInputMethodId() might return a fallback
+  // layout name if local_state->RegisterStringPref(kHardwareKeyboardLayout)
+  // is not called yet.
+  local_state->RegisterStringPref(kPreferredKeyboardLayout,
+                                  "",
+                                  PrefService::UNSYNCABLE_PREF);
+}
 
 }  // namespace language_prefs
 }  // namespace chromeos

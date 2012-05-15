@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,6 @@
 #include "chrome/browser/automation/automation_browser_tracker.h"
 #include "chrome/browser/automation/automation_tab_tracker.h"
 #include "chrome/browser/automation/automation_window_tracker.h"
-#include "chrome/browser/automation/ui_controls.h"
 #include "chrome/browser/external_tab_container_win.h"
 #include "chrome/browser/printing/print_view_manager.h"
 #include "chrome/browser/profiles/profile.h"
@@ -23,15 +22,17 @@
 #include "chrome/browser/ui/views/bookmarks/bookmark_bar_view.h"
 #include "chrome/common/automation_messages.h"
 #include "chrome/common/render_messages.h"
-#include "content/browser/renderer_host/render_view_host.h"
 #include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/page_zoom.h"
 #include "ui/base/keycodes/keyboard_codes.h"
+#include "ui/ui_controls/ui_controls.h"
 #include "ui/views/focus/accelerator_handler.h"
 #include "ui/views/widget/root_view.h"
 
 using content::NavigationController;
+using content::RenderViewHost;
 using content::WebContents;
 
 namespace {
@@ -149,11 +150,9 @@ void AutomationProvider::WindowSimulateDrag(
           false,
           MessageLoop::QuitClosure());
       MessageLoopForUI* loop = MessageLoopForUI::current();
-      bool did_allow_task_nesting = loop->NestableTasksAllowed();
-      loop->SetNestableTasksAllowed(true);
       views::AcceleratorHandler handler;
+      MessageLoop::ScopedNestableTaskAllower allow(loop);
       loop->RunWithDispatcher(&handler);
-      loop->SetNestableTasksAllowed(did_allow_task_nesting);
     }
     SendMessage(top_level_hwnd, up_message, wparam_flags,
                 MAKELPARAM(end.x, end.y));
@@ -363,7 +362,7 @@ void AutomationProvider::OnMessageFromExternalHost(int handle,
     return;
 
   view_host->Send(new ChromeViewMsg_HandleMessageFromExternalHost(
-      view_host->routing_id(), message, origin, target));
+      view_host->GetRoutingID(), message, origin, target));
 }
 
 void AutomationProvider::NavigateInExternalTab(

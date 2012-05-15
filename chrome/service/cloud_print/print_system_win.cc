@@ -17,6 +17,7 @@
 #include "base/win/scoped_bstr.h"
 #include "base/win/scoped_comptr.h"
 #include "base/win/scoped_hdc.h"
+#include "chrome/common/child_process_logging.h"
 #include "chrome/service/service_process.h"
 #include "chrome/service/service_utility_process_host.h"
 #include "grit/generated_resources.h"
@@ -32,6 +33,29 @@
 #pragma comment(lib, "rpcrt4.lib")  // for UuidToString & Co.
 
 namespace {
+
+class PrinterChangeHandleTraits {
+ public:
+  typedef HANDLE Handle;
+
+  static bool CloseHandle(HANDLE handle) {
+    return ::FindClosePrinterChangeNotification(handle) != FALSE;
+  }
+
+  static bool IsHandleValid(HANDLE handle) {
+    return handle != NULL;
+  }
+
+  static HANDLE NullHandle() {
+    return NULL;
+  }
+
+ private:
+  DISALLOW_IMPLICIT_CONSTRUCTORS(PrinterChangeHandleTraits);
+};
+
+typedef base::win::GenericScopedHandle<PrinterChangeHandleTraits>
+    ScopedPrinterChangeHandle;
 
 class DevMode {
  public:
@@ -122,9 +146,7 @@ namespace cloud_print {
 class PrintSystemWatcherWin : public base::win::ObjectWatcher::Delegate {
  public:
   PrintSystemWatcherWin()
-      : printer_(NULL),
-        printer_change_(NULL),
-        delegate_(NULL),
+      : delegate_(NULL),
         did_signal_(false) {
   }
   ~PrintSystemWatcherWin() {
@@ -141,6 +163,11 @@ class PrintSystemWatcherWin : public base::win::ObjectWatcher::Delegate {
   };
 
   bool Start(const std::string& printer_name, Delegate* delegate) {
+    scoped_refptr<printing::PrintBackend> print_backend(
+        printing::PrintBackend::CreateInstance(NULL));
+    printer_info_ = print_backend->GetPrinterDriverInfo(printer_name);
+    child_process_logging::ScopedPrinterInfoSetter prn_info(printer_info_);
+
     delegate_ = delegate;
     // An empty printer name means watch the current server, we need to pass
     // NULL to OpenPrinter.
@@ -151,11 +178,11 @@ class PrintSystemWatcherWin : public base::win::ObjectWatcher::Delegate {
       printer_name_to_use = const_cast<LPTSTR>(printer_name_wide.c_str());
     }
     bool ret = false;
-    OpenPrinter(printer_name_to_use, &printer_, NULL);
-    if (printer_) {
-      printer_change_ = FindFirstPrinterChangeNotification(
-          printer_, PRINTER_CHANGE_PRINTER|PRINTER_CHANGE_JOB, 0, NULL);
-      if (printer_change_) {
+    OpenPrinter(printer_name_to_use, printer_.Receive(), NULL);
+    if (printer_.IsValid()) {
+      printer_change_.Set(FindFirstPrinterChangeNotification(
+          printer_, PRINTER_CHANGE_PRINTER|PRINTER_CHANGE_JOB, 0, NULL));
+      if (printer_change_.IsValid()) {
         ret = watcher_.StartWatching(printer_change_, this);
       }
     }
@@ -166,19 +193,14 @@ class PrintSystemWatcherWin : public base::win::ObjectWatcher::Delegate {
   }
   bool Stop() {
     watcher_.StopWatching();
-    if (printer_) {
-      ClosePrinter(printer_);
-      printer_ = NULL;
-    }
-    if (printer_change_) {
-      FindClosePrinterChangeNotification(printer_change_);
-      printer_change_ = NULL;
-    }
+    printer_.Close();
+    printer_change_.Close();
     return true;
   }
 
   // base::ObjectWatcher::Delegate method
   virtual void OnObjectSignaled(HANDLE object) {
+    child_process_logging::ScopedPrinterInfoSetter prn_info(printer_info_);
     DWORD change = 0;
     FindNextPrinterChangeNotification(object, &change, NULL, NULL);
 
@@ -203,41 +225,17 @@ class PrintSystemWatcherWin : public base::win::ObjectWatcher::Delegate {
 
   bool GetCurrentPrinterInfo(printing::PrinterBasicInfo* printer_info) {
     DCHECK(printer_info);
-    if (!printer_)
-      return false;
-
-    DWORD bytes_needed = 0;
-    bool ret = false;
-    GetPrinter(printer_, 2, NULL, 0, &bytes_needed);
-    if (0 != bytes_needed) {
-      scoped_array<BYTE> printer_info_buffer(new BYTE[bytes_needed]);
-      if (GetPrinter(printer_, 2, printer_info_buffer.get(),
-                     bytes_needed, &bytes_needed)) {
-        PRINTER_INFO_2* printer_info_win =
-            reinterpret_cast<PRINTER_INFO_2*>(printer_info_buffer.get());
-        printer_info->printer_name = WideToUTF8(printer_info_win->pPrinterName);
-        if (printer_info_win->pComment)
-          printer_info->printer_description =
-              WideToUTF8(printer_info_win->pComment);
-        if (printer_info_win->pLocation)
-          printer_info->options[kLocationTagName] =
-              WideToUTF8(printer_info_win->pLocation);
-        if (printer_info_win->pDriverName)
-          printer_info->options[kDriverNameTagName] =
-              WideToUTF8(printer_info_win->pDriverName);
-        printer_info->printer_status = printer_info_win->Status;
-        ret = true;
-      }
-    }
-    return ret;
+    return InitBasicPrinterInfo(printer_, printer_info);
   }
 
  private:
   base::win::ObjectWatcher watcher_;
-  HANDLE printer_;            // The printer being watched
-  HANDLE printer_change_;     // Returned by FindFirstPrinterChangeNotifier
-  Delegate* delegate_;        // Delegate to notify
-  bool did_signal_;           // DoneWaiting was called
+  printing::ScopedPrinterHandle printer_;  // The printer being watched
+  // Returned by FindFirstPrinterChangeNotifier.
+  ScopedPrinterChangeHandle printer_change_;
+  Delegate* delegate_;           // Delegate to notify
+  bool did_signal_;              // DoneWaiting was called
+  std::string printer_info_;     // For crash reporting.
 };
 
 // This typedef is to workaround the issue with certain versions of
@@ -361,6 +359,10 @@ class PrintSystemWin : public PrintSystem {
                        const std::vector<std::string>& tags,
                        JobSpooler::Delegate* delegate) OVERRIDE {
       // TODO(gene): add tags handling.
+      scoped_refptr<printing::PrintBackend> print_backend(
+          printing::PrintBackend::CreateInstance(NULL));
+      child_process_logging::ScopedPrinterInfoSetter prn_info(
+          print_backend->GetPrinterDriverInfo(printer_name));
       return core_->Spool(print_ticket, print_data_file_path,
                           print_data_mime_type, printer_name, job_title,
                           delegate);
@@ -388,6 +390,10 @@ class PrintSystemWin : public PrintSystem {
                  const std::string& printer_name,
                  const std::string& job_title,
                  JobSpooler::Delegate* delegate) {
+        scoped_refptr<printing::PrintBackend> print_backend(
+            printing::PrintBackend::CreateInstance(NULL));
+        child_process_logging::ScopedPrinterInfoSetter prn_info(
+            print_backend->GetPrinterDriverInfo(printer_name));
         if (delegate_) {
           // We are already in the process of printing.
           NOTREACHED();
@@ -764,6 +770,8 @@ bool PrintSystemWin::IsValidPrinter(const std::string& printer_name) {
 bool PrintSystemWin::ValidatePrintTicket(
     const std::string& printer_name,
     const std::string& print_ticket_data) {
+  child_process_logging::ScopedPrinterInfoSetter prn_info(
+      print_backend_->GetPrinterDriverInfo(printer_name));
   printing::ScopedXPSInitializer xps_initializer;
   if (!xps_initializer.initialized()) {
     // TODO(sanjeevr): Handle legacy proxy case (with no prntvpt.dll)
@@ -803,14 +811,16 @@ bool PrintSystemWin::ValidatePrintTicket(
 bool PrintSystemWin::GetJobDetails(const std::string& printer_name,
                                    PlatformJobId job_id,
                                    PrintJobDetails *job_details) {
+  child_process_logging::ScopedPrinterInfoSetter prn_info(
+      print_backend_->GetPrinterDriverInfo(printer_name));
   DCHECK(job_details);
-  HANDLE printer_handle = NULL;
+  printing::ScopedPrinterHandle printer_handle;
   std::wstring printer_name_wide = UTF8ToWide(printer_name);
-  OpenPrinter(const_cast<LPTSTR>(printer_name_wide.c_str()), &printer_handle,
-              NULL);
-  DCHECK(printer_handle);
+  OpenPrinter(const_cast<LPTSTR>(printer_name_wide.c_str()),
+              printer_handle.Receive(), NULL);
+  DCHECK(printer_handle.IsValid());
   bool ret = false;
-  if (printer_handle) {
+  if (printer_handle.IsValid()) {
     DWORD bytes_needed = 0;
     GetJob(printer_handle, job_id, 1, NULL, 0, &bytes_needed);
     DWORD last_error = GetLastError();
@@ -840,7 +850,6 @@ bool PrintSystemWin::GetJobDetails(const std::string& printer_name,
         ret = true;
       }
     }
-    ClosePrinter(printer_handle);
   }
   return ret;
 }

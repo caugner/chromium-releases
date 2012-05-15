@@ -10,6 +10,7 @@
 #include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/mac/mac_util.h"
+#include "base/mac/closure_blocks_leopard_compat.h"
 #include "base/mac/scoped_cftyperef.h"
 #import "base/mac/scoped_nsautorelease_pool.h"
 #import "base/memory/scoped_nsobject.h"
@@ -20,21 +21,21 @@
 #include "base/utf_string_conversions.h"
 #import "content/browser/accessibility/browser_accessibility_cocoa.h"
 #include "content/browser/accessibility/browser_accessibility_manager.h"
-#include "content/browser/mac/closure_blocks_leopard_compat.h"
 #include "content/browser/plugin_process_host.h"
 #import "content/browser/renderer_host/accelerated_plugin_view_mac.h"
 #include "content/browser/renderer_host/backing_store_mac.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
-#include "content/browser/renderer_host/render_view_host.h"
-#import "content/browser/renderer_host/render_widget_host_view_mac_delegate.h"
+#include "content/browser/renderer_host/render_view_host_impl.h"
 #import "content/browser/renderer_host/render_widget_host_view_mac_editcommand_helper.h"
 #import "content/browser/renderer_host/text_input_client_mac.h"
+#include "content/common/accessibility_messages.h"
 #include "content/common/edit_command.h"
 #include "content/common/gpu/gpu_messages.h"
 #include "content/common/plugin_messages.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/native_web_keyboard_event.h"
+#import "content/public/browser/render_widget_host_view_mac_delegate.h"
 #include "skia/ext/platform_canvas.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScreenInfo.h"
@@ -49,6 +50,10 @@
 #include "webkit/plugins/npapi/webplugin.h"
 
 using content::BrowserThread;
+using content::RenderViewHostImpl;
+using content::RenderWidgetHost;
+using content::RenderWidgetHostImpl;
+using content::RenderWidgetHostView;
 using WebKit::WebInputEvent;
 using WebKit::WebInputEventFactory;
 using WebKit::WebMouseEvent;
@@ -102,7 +107,7 @@ static inline int ToWebKitModifiers(NSUInteger flags) {
 
 + (BOOL)shouldAutohideCursorForEvent:(NSEvent*)event;
 - (id)initWithRenderWidgetHostViewMac:(RenderWidgetHostViewMac*)r;
-- (void)setRWHVDelegate:(RenderWidgetHostViewMacDelegate*)delegate;
+- (void)setRWHVDelegate:(NSObject<RenderWidgetHostViewMacDelegate>*)delegate;
 - (void)gotUnhandledWheelEvent;
 - (void)scrollOffsetPinnedToLeft:(BOOL)left toRight:(BOOL)right;
 - (void)setHasHorizontalScrollbar:(BOOL)has_horizontal_scrollbar;
@@ -219,7 +224,7 @@ RenderWidgetHostView* RenderWidgetHostView::CreateViewForWidget(
 }
 
 // static
-void RenderWidgetHostView::GetDefaultScreenInfo(
+void content::RenderWidgetHostViewPort::GetDefaultScreenInfo(
     WebKit::WebScreenInfo* results) {
   *results = WebKit::WebScreenInfoFactory::screenInfo(NULL);
 }
@@ -228,14 +233,14 @@ void RenderWidgetHostView::GetDefaultScreenInfo(
 // RenderWidgetHostViewMac, public:
 
 RenderWidgetHostViewMac::RenderWidgetHostViewMac(RenderWidgetHost* widget)
-    : render_widget_host_(widget),
+    : render_widget_host_(RenderWidgetHostImpl::From(widget)),
       about_to_validate_and_paint_(false),
       call_set_needs_display_in_rect_pending_(false),
       last_frame_was_accelerated_(false),
       text_input_type_(ui::TEXT_INPUT_TYPE_NONE),
+      can_compose_inline_(true),
       is_loading_(false),
       is_hidden_(false),
-      is_showing_context_menu_(false),
       weak_factory_(this),
       accelerated_compositing_active_(false),
       needs_gpu_visibility_update_after_repaint_(false),
@@ -253,14 +258,8 @@ RenderWidgetHostViewMac::~RenderWidgetHostViewMac() {
 }
 
 void RenderWidgetHostViewMac::SetDelegate(
-    RenderWidgetHostViewMacDelegate* delegate) {
+    NSObject<RenderWidgetHostViewMacDelegate>* delegate) {
   [cocoa_view_ setRWHVDelegate:delegate];
-}
-
-namespace render_widget_host_view_mac {
-RenderWidgetHostView *CreateRenderWidgetHostView(RenderWidgetHost *widget) {
-    return new RenderWidgetHostViewMac(widget);
-}
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -497,7 +496,7 @@ void RenderWidgetHostViewMac::UpdateCursorIfNecessary() {
   // a page? TODO(avi): decide
 
   // Don't update the cursor if a context menu is being shown.
-  if (is_showing_context_menu_)
+  if (IsShowingContextMenu())
     return;
 
   // Can we synchronize to the event stream? Switch to -[NSWindow
@@ -519,18 +518,16 @@ void RenderWidgetHostViewMac::SetIsLoading(bool is_loading) {
 void RenderWidgetHostViewMac::TextInputStateChanged(
     ui::TextInputType type,
     bool can_compose_inline) {
-  // TODO(kinaba): currently, can_compose_inline is ignored and always treated
-  // as true. We need to support "can_compose_inline=false" for PPAPI plugins
-  // that may want to avoid drawing composition-text by themselves and pass
-  // the responsibility to the browser.
-  if (text_input_type_ != type) {
+  if (text_input_type_ != type || can_compose_inline_ != can_compose_inline) {
     text_input_type_ = type;
+    can_compose_inline_ = can_compose_inline;
     if (HasFocus()) {
       SetTextInputActive(true);
 
       // Let AppKit cache the new input context to make IMEs happy.
       // See http://crbug.com/73039.
       [NSApp updateWindows];
+      UseInputWindow(TSMGetActiveDocument(), !can_compose_inline_);
     }
   }
 }
@@ -638,7 +635,7 @@ void RenderWidgetHostViewMac::Destroy() {
 
   // We get this call just before |render_widget_host_| deletes
   // itself.  But we are owned by |cocoa_view_|, which may be retained
-  // by some other code.  Examples are TabContentsViewMac's
+  // by some other code.  Examples are WebContentsViewMac's
   // |latent_focus_view_| and TabWindowController's
   // |cachedContentView_|.
   render_widget_host_ = NULL;
@@ -694,9 +691,8 @@ void RenderWidgetHostViewMac::SelectionChanged(const string16& text,
   }
 }
 
-void RenderWidgetHostViewMac::ShowingContextMenu(bool showing) {
-  DCHECK_NE(is_showing_context_menu_, showing);
-  is_showing_context_menu_ = showing;
+void RenderWidgetHostViewMac::SetShowingContextMenu(bool showing) {
+  content::RenderWidgetHostViewBase::SetShowingContextMenu(showing);
 
   // If the menu was closed, restore the cursor to the saved version initially,
   // as the renderer will not re-send it if there was no change.
@@ -725,7 +721,7 @@ void RenderWidgetHostViewMac::ShowingContextMenu(bool showing) {
       WebInputEventFactory::mouseEvent(event, cocoa_view_);
   if (showing)
     web_event.type = WebInputEvent::MouseLeave;
-  render_widget_host_->ForwardMouseEvent(web_event);
+  ForwardMouseEvent(web_event);
 }
 
 bool RenderWidgetHostViewMac::IsPopup() const {
@@ -740,6 +736,16 @@ BackingStore* RenderWidgetHostViewMac::AllocBackingStore(
 // Sets whether or not to accept first responder status.
 void RenderWidgetHostViewMac::SetTakesFocusOnlyOnMouseDown(bool flag) {
   [cocoa_view_ setTakesFocusOnlyOnMouseDown:flag];
+}
+
+void RenderWidgetHostViewMac::ForwardMouseEvent(const WebMouseEvent& event) {
+  if (render_widget_host_)
+    render_widget_host_->ForwardMouseEvent(event);
+
+  if (event.type == WebInputEvent::MouseLeave) {
+    [cocoa_view_ setToolTipAtMousePoint:nil];
+    tooltip_text_.clear();
+  }
 }
 
 void RenderWidgetHostViewMac::KillSelf() {
@@ -776,7 +782,7 @@ void RenderWidgetHostViewMac::PluginImeCompositionCompleted(
     const string16& text, int plugin_id) {
   if (render_widget_host_) {
     render_widget_host_->Send(new ViewMsg_PluginImeCompositionCompleted(
-        render_widget_host_->routing_id(), text, plugin_id));
+        render_widget_host_->GetRoutingID(), text, plugin_id));
   }
 }
 
@@ -903,7 +909,7 @@ void RenderWidgetHostViewMac::AcceleratedSurfaceBuffersSwapped(
   }
 
   if (params.route_id != 0) {
-    RenderWidgetHost::AcknowledgeSwapBuffers(params.route_id, gpu_host_id);
+    RenderWidgetHostImpl::AcknowledgeSwapBuffers(params.route_id, gpu_host_id);
   }
 }
 
@@ -930,8 +936,12 @@ void RenderWidgetHostViewMac::AcceleratedSurfacePostSubBuffer(
   }
 
   if (params.route_id != 0) {
-    RenderWidgetHost::AcknowledgePostSubBuffer(params.route_id, gpu_host_id);
+    RenderWidgetHostImpl::AcknowledgePostSubBuffer(
+        params.route_id, gpu_host_id);
   }
+}
+
+void RenderWidgetHostViewMac::AcceleratedSurfaceSuspend() {
 }
 
 void RenderWidgetHostViewMac::UpdateRootGpuViewVisibility(
@@ -970,7 +980,8 @@ void RenderWidgetHostViewMac::HandleDelayedGpuViewHiding() {
 
 void RenderWidgetHostViewMac::OnAcceleratedCompositingStateChange() {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  bool activated = GetRenderWidgetHost()->is_accelerated_compositing_active();
+  bool activated = RenderWidgetHostImpl::From(
+      GetRenderWidgetHost())->is_accelerated_compositing_active();
   bool changed = accelerated_compositing_active_ != activated;
   accelerated_compositing_active_ = activated;
   if (!changed)
@@ -1002,11 +1013,11 @@ gfx::Rect RenderWidgetHostViewMac::GetRootWindowBounds() {
   return FlipNSRectToRectScreen(bounds);
 }
 
-gfx::PluginWindowHandle RenderWidgetHostViewMac::GetCompositingSurface() {
+gfx::GLSurfaceHandle RenderWidgetHostViewMac::GetCompositingSurface() {
   if (compositing_surface_ == gfx::kNullPluginWindow)
     compositing_surface_ = AllocateFakePluginWindowHandle(
         /*opaque=*/true, /*root=*/true);
-  return compositing_surface_;
+  return gfx::GLSurfaceHandle(compositing_surface_, true);
 }
 
 void RenderWidgetHostViewMac::DrawAcceleratedSurfaceInstance(
@@ -1033,12 +1044,8 @@ void RenderWidgetHostViewMac::ForceTextureReload() {
   plugin_container_manager_.ForceTextureReload();
 }
 
-void RenderWidgetHostViewMac::UnhandledWheelEvent(
-    const WebKit::WebMouseWheelEvent& event) {
-  [cocoa_view_ gotUnhandledWheelEvent];
-}
-
-void RenderWidgetHostViewMac::ProcessTouchAck(bool processed) {
+void RenderWidgetHostViewMac::ProcessTouchAck(
+    WebKit::WebInputEvent::Type type, bool processed) {
 }
 
 void RenderWidgetHostViewMac::SetHasHorizontalScrollbar(
@@ -1081,6 +1088,11 @@ void RenderWidgetHostViewMac::UnlockMouse() {
     render_widget_host_->LostMouseLock();
 }
 
+void RenderWidgetHostViewMac::UnhandledWheelEvent(
+    const WebKit::WebMouseWheelEvent& event) {
+  [cocoa_view_ gotUnhandledWheelEvent];
+}
+
 void RenderWidgetHostViewMac::ShutdownHost() {
   weak_factory_.InvalidateWeakPtrs();
   render_widget_host_->Shutdown();
@@ -1105,27 +1117,35 @@ void RenderWidgetHostViewMac::SetActive(bool active) {
 void RenderWidgetHostViewMac::SetWindowVisibility(bool visible) {
   if (render_widget_host_) {
     render_widget_host_->Send(new ViewMsg_SetWindowVisibility(
-        render_widget_host_->routing_id(), visible));
+        render_widget_host_->GetRoutingID(), visible));
   }
 }
 
 void RenderWidgetHostViewMac::WindowFrameChanged() {
   if (render_widget_host_) {
     render_widget_host_->Send(new ViewMsg_WindowFrameChanged(
-        render_widget_host_->routing_id(), GetRootWindowBounds(),
+        render_widget_host_->GetRoutingID(), GetRootWindowBounds(),
         GetViewBounds()));
   }
 }
 
 void RenderWidgetHostViewMac::SetBackground(const SkBitmap& background) {
-  RenderWidgetHostView::SetBackground(background);
+  content::RenderWidgetHostViewBase::SetBackground(background);
   if (render_widget_host_)
     render_widget_host_->Send(new ViewMsg_SetBackground(
-        render_widget_host_->routing_id(), background));
+        render_widget_host_->GetRoutingID(), background));
+}
+
+bool RenderWidgetHostViewMac::CopyFromCompositingSurface(
+      const gfx::Size& size,
+      skia::PlatformCanvas* output) {
+  // TODO(mazda): Implement this.
+  NOTIMPLEMENTED();
+  return false;
 }
 
 void RenderWidgetHostViewMac::OnAccessibilityNotifications(
-    const std::vector<ViewHostMsg_AccessibilityNotification_Params>& params) {
+    const std::vector<AccessibilityHostMsg_NotificationParams>& params) {
   if (!GetBrowserAccessibilityManager()) {
     SetBrowserAccessibilityManager(
         BrowserAccessibilityManager::CreateEmptyDocument(
@@ -1173,7 +1193,7 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
   [super dealloc];
 }
 
-- (void)setRWHVDelegate:(RenderWidgetHostViewMacDelegate*)delegate {
+- (void)setRWHVDelegate:(NSObject<RenderWidgetHostViewMacDelegate>*)delegate {
   delegate_ = delegate;
 }
 
@@ -1300,7 +1320,7 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
           WebInputEventFactory::mouseEvent(theEvent, self);
       exitEvent.type = WebInputEvent::MouseLeave;
       exitEvent.button = WebMouseEvent::ButtonNone;
-      renderWidgetHostView_->render_widget_host_->ForwardMouseEvent(exitEvent);
+      renderWidgetHostView_->ForwardMouseEvent(exitEvent);
     }
     mouseEventWasIgnored_ = YES;
     return;
@@ -1314,7 +1334,7 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
           WebInputEventFactory::mouseEvent(theEvent, self);
       enterEvent.type = WebInputEvent::MouseMove;
       enterEvent.button = WebMouseEvent::ButtonNone;
-      renderWidgetHostView_->render_widget_host_->ForwardMouseEvent(enterEvent);
+      renderWidgetHostView_->ForwardMouseEvent(enterEvent);
     }
   }
   mouseEventWasIgnored_ = NO;
@@ -1352,11 +1372,9 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
     [self confirmComposition];
   }
 
-  const WebMouseEvent& event =
+  const WebMouseEvent event =
       WebInputEventFactory::mouseEvent(theEvent, self);
-
-  if (renderWidgetHostView_->render_widget_host_)
-    renderWidgetHostView_->render_widget_host_->ForwardMouseEvent(event);
+  renderWidgetHostView_->ForwardMouseEvent(event);
 }
 
 - (void)shortCircuitEndGestureWithEvent:(NSEvent*)event {
@@ -1464,7 +1482,7 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
   // Don't cancel child popups; the key events are probably what's triggering
   // the popup in the first place.
 
-  RenderWidgetHost* widgetHost = renderWidgetHostView_->render_widget_host_;
+  RenderWidgetHostImpl* widgetHost = renderWidgetHostView_->render_widget_host_;
   DCHECK(widgetHost);
 
   NativeWebKeyboardEvent event(theEvent);
@@ -1545,7 +1563,7 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
   } else {
     if (!editCommands_.empty()) {
       widgetHost->Send(new ViewMsg_SetEditCommandsForNextKeyEvent(
-          widgetHost->routing_id(), editCommands_));
+          widgetHost->GetRoutingID(), editCommands_));
     }
     widgetHost->ForwardKeyboardEvent(event);
   }
@@ -1611,7 +1629,7 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
 
     if (!editCommands_.empty()) {
       widgetHost->Send(new ViewMsg_SetEditCommandsForNextKeyEvent(
-        widgetHost->routing_id(), editCommands_));
+          widgetHost->GetRoutingID(), editCommands_));
     }
     widgetHost->ForwardKeyboardEvent(event);
 
@@ -2037,9 +2055,9 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
 }
 
 - (void)doDefaultAction:(int32)accessibilityObjectId {
-  RenderWidgetHost* rwh = renderWidgetHostView_->render_widget_host_;
-  rwh->Send(new ViewMsg_AccessibilityDoDefaultAction(
-      rwh->routing_id(), accessibilityObjectId));
+  RenderWidgetHostImpl* rwh = renderWidgetHostView_->render_widget_host_;
+  rwh->Send(new AccessibilityMsg_DoDefaultAction(
+      rwh->GetRoutingID(), accessibilityObjectId));
 }
 
 // Convert a web accessibility's location in web coordinates into a cocoa
@@ -2058,9 +2076,9 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
 - (void)setAccessibilityFocus:(BOOL)focus
               accessibilityId:(int32)accessibilityObjectId {
   if (focus) {
-    RenderWidgetHost* rwh = renderWidgetHostView_->render_widget_host_;
-    rwh->Send(new ViewMsg_SetAccessibilityFocus(
-        rwh->routing_id(), accessibilityObjectId));
+    RenderWidgetHostImpl* rwh = renderWidgetHostView_->render_widget_host_;
+    rwh->Send(new AccessibilityMsg_SetFocus(
+        rwh->GetRoutingID(), accessibilityObjectId));
   }
 }
 
@@ -2076,7 +2094,7 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
   NSEvent* fakeRightClick = [NSEvent
                            mouseEventWithType:NSRightMouseDown
                                      location:location
-                                modifierFlags:nil
+                                modifierFlags:0
                                     timestamp:0
                                  windowNumber:[[self window] windowNumber]
                                       context:[NSGraphicsContext currentContext]
@@ -2510,8 +2528,8 @@ extern NSString *NSTextInputReplacementRangeAttributeName;
     if (!StartsWithASCII(command, "insert", false))
       editCommands_.push_back(EditCommand(command, ""));
   } else {
-    RenderWidgetHost* rwh = renderWidgetHostView_->render_widget_host_;
-    rwh->Send(new ViewMsg_ExecuteEditCommand(rwh->routing_id(), command, ""));
+    RenderWidgetHostImpl* rwh = renderWidgetHostView_->render_widget_host_;
+    rwh->Send(new ViewMsg_ExecuteEditCommand(rwh->GetRoutingID(), command, ""));
   }
 }
 
@@ -2575,8 +2593,7 @@ extern NSString *NSTextInputReplacementRangeAttributeName;
     WebMouseEvent event;
     event.type = WebInputEvent::MouseUp;
     event.button = WebMouseEvent::ButtonLeft;
-    if (renderWidgetHostView_->render_widget_host_)
-      renderWidgetHostView_->render_widget_host_->ForwardMouseEvent(event);
+    renderWidgetHostView_->ForwardMouseEvent(event);
 
     hasOpenMouseDown_ = NO;
   }
@@ -2584,50 +2601,50 @@ extern NSString *NSTextInputReplacementRangeAttributeName;
 
 - (void)undo:(id)sender {
   if (renderWidgetHostView_->render_widget_host_->IsRenderView()) {
-    static_cast<RenderViewHost*>(renderWidgetHostView_->render_widget_host_)->
-        Undo();
+    static_cast<RenderViewHostImpl*>(
+        renderWidgetHostView_->render_widget_host_)->Undo();
   }
 }
 
 - (void)redo:(id)sender {
   if (renderWidgetHostView_->render_widget_host_->IsRenderView()) {
-    static_cast<RenderViewHost*>(renderWidgetHostView_->render_widget_host_)->
-        Redo();
+    static_cast<RenderViewHostImpl*>(
+        renderWidgetHostView_->render_widget_host_)->Redo();
   }
 }
 
 - (void)cut:(id)sender {
   if (renderWidgetHostView_->render_widget_host_->IsRenderView()) {
-    static_cast<RenderViewHost*>(renderWidgetHostView_->render_widget_host_)->
-        Cut();
+    static_cast<RenderViewHostImpl*>(
+        renderWidgetHostView_->render_widget_host_)->Cut();
   }
 }
 
 - (void)copy:(id)sender {
   if (renderWidgetHostView_->render_widget_host_->IsRenderView()) {
-    static_cast<RenderViewHost*>(renderWidgetHostView_->render_widget_host_)->
-        Copy();
+    static_cast<RenderViewHostImpl*>(
+        renderWidgetHostView_->render_widget_host_)->Copy();
   }
 }
 
 - (void)copyToFindPboard:(id)sender {
   if (renderWidgetHostView_->render_widget_host_->IsRenderView()) {
-    static_cast<RenderViewHost*>(renderWidgetHostView_->render_widget_host_)->
-        CopyToFindPboard();
+    static_cast<RenderViewHostImpl*>(
+        renderWidgetHostView_->render_widget_host_)->CopyToFindPboard();
   }
 }
 
 - (void)paste:(id)sender {
   if (renderWidgetHostView_->render_widget_host_->IsRenderView()) {
-    static_cast<RenderViewHost*>(renderWidgetHostView_->render_widget_host_)->
-        Paste();
+    static_cast<RenderViewHostImpl*>(
+        renderWidgetHostView_->render_widget_host_)->Paste();
   }
 }
 
 - (void)pasteAndMatchStyle:(id)sender {
   if (renderWidgetHostView_->render_widget_host_->IsRenderView()) {
-    static_cast<RenderViewHost*>(renderWidgetHostView_->render_widget_host_)->
-        PasteAndMatchStyle();
+    static_cast<RenderViewHostImpl*>(
+        renderWidgetHostView_->render_widget_host_)->PasteAndMatchStyle();
   }
 }
 
@@ -2731,16 +2748,16 @@ extern NSString *NSTextInputReplacementRangeAttributeName;
 
 - (void)viewWillStartLiveResize {
   [super viewWillStartLiveResize];
-  RenderWidgetHost* widget = renderWidgetHostView_->render_widget_host_;
+  RenderWidgetHostImpl* widget = renderWidgetHostView_->render_widget_host_;
   if (widget)
-    widget->Send(new ViewMsg_SetInLiveResize(widget->routing_id(), true));
+    widget->Send(new ViewMsg_SetInLiveResize(widget->GetRoutingID(), true));
 }
 
 - (void)viewDidEndLiveResize {
   [super viewDidEndLiveResize];
-  RenderWidgetHost* widget = renderWidgetHostView_->render_widget_host_;
+  RenderWidgetHostImpl* widget = renderWidgetHostView_->render_widget_host_;
   if (widget)
-    widget->Send(new ViewMsg_SetInLiveResize(widget->routing_id(), false));
+    widget->Send(new ViewMsg_SetInLiveResize(widget->GetRoutingID(), false));
 }
 
 @end

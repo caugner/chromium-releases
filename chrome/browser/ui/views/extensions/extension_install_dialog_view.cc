@@ -2,10 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <vector>
+
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "base/i18n/rtl.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/extensions/bundle_installer.h"
 #include "chrome/browser/extensions/extension_install_dialog.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_list.h"
@@ -31,6 +35,7 @@
 
 using content::OpenURLParams;
 using content::Referrer;
+using extensions::BundleInstaller;
 
 namespace {
 
@@ -44,6 +49,10 @@ const int kPermissionsLeftColumnWidth = 250;
 // Width of the left column of the dialog when the extension requests no
 // permissions.
 const int kNoPermissionsLeftColumnWidth = 200;
+
+// Width of the left column for bundle install prompts. There's only one column
+// in this case, so make it wider than normal.
+const int kBundleLeftColumnWidth = 300;
 
 // Heading font size correction.
 #if defined(CROS_FONTS_USING_BCI)
@@ -68,8 +77,6 @@ class ExtensionInstallDialogView : public views::DialogDelegateView,
                                    public views::LinkListener {
  public:
   ExtensionInstallDialogView(ExtensionInstallUI::Delegate* delegate,
-                             const Extension* extension,
-                             SkBitmap* skia_icon,
                              const ExtensionInstallUI::Prompt& prompt);
   virtual ~ExtensionInstallDialogView();
 
@@ -92,8 +99,11 @@ class ExtensionInstallDialogView : public views::DialogDelegateView,
     return prompt_.type() == ExtensionInstallUI::INLINE_INSTALL_PROMPT;
   }
 
+  bool is_bundle_install() {
+    return prompt_.type() == ExtensionInstallUI::BUNDLE_INSTALL_PROMPT;
+  }
+
   ExtensionInstallUI::Delegate* delegate_;
-  const Extension* extension_;
   ExtensionInstallUI::Prompt prompt_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionInstallDialogView);
@@ -101,11 +111,8 @@ class ExtensionInstallDialogView : public views::DialogDelegateView,
 
 ExtensionInstallDialogView::ExtensionInstallDialogView(
     ExtensionInstallUI::Delegate* delegate,
-    const Extension* extension,
-    SkBitmap* skia_icon,
     const ExtensionInstallUI::Prompt& prompt)
     : delegate_(delegate),
-      extension_(extension),
       prompt_(prompt) {
   // Possible grid layouts:
   // Inline install
@@ -147,6 +154,8 @@ ExtensionInstallDialogView::ExtensionInstallDialogView(
   views::ColumnSet* column_set = layout->AddColumnSet(column_set_id);
   int left_column_width = prompt.GetPermissionCount() > 0 ?
       kPermissionsLeftColumnWidth : kNoPermissionsLeftColumnWidth;
+  if (is_bundle_install())
+    left_column_width = kBundleLeftColumnWidth;
 
   column_set->AddColumn(views::GridLayout::LEADING,
                         views::GridLayout::FILL,
@@ -154,18 +163,19 @@ ExtensionInstallDialogView::ExtensionInstallDialogView(
                         views::GridLayout::USE_PREF,
                         0,  // no fixed with
                         left_column_width);
-  column_set->AddPaddingColumn(0, views::kPanelHorizMargin);
-  column_set->AddColumn(views::GridLayout::LEADING,
-                        views::GridLayout::LEADING,
-                        0,  // no resizing
-                        views::GridLayout::USE_PREF,
-                        0,  // no fixed width
-                        kIconSize);
+  if (!is_bundle_install()) {
+    column_set->AddPaddingColumn(0, views::kPanelHorizMargin);
+    column_set->AddColumn(views::GridLayout::LEADING,
+                          views::GridLayout::LEADING,
+                          0,  // no resizing
+                          views::GridLayout::USE_PREF,
+                          0,  // no fixed width
+                          kIconSize);
+  }
 
   layout->StartRow(0, column_set_id);
 
-  views::Label* heading = new views::Label(
-      prompt.GetHeading(extension->name()));
+  views::Label* heading = new views::Label(prompt.GetHeading());
   heading->SetFont(heading->font().DeriveFont(kHeadingFontSizeDelta,
                                               gfx::Font::BOLD));
   heading->SetMultiLine(true);
@@ -173,25 +183,28 @@ ExtensionInstallDialogView::ExtensionInstallDialogView(
   heading->SizeToFit(left_column_width);
   layout->AddView(heading);
 
-  // Scale down to icon size, but allow smaller icons (don't scale up).
-  gfx::Size size(skia_icon->width(), skia_icon->height());
-  if (size.width() > kIconSize || size.height() > kIconSize)
-    size = gfx::Size(kIconSize, kIconSize);
-  views::ImageView* icon = new views::ImageView();
-  icon->SetImageSize(size);
-  icon->SetImage(*skia_icon);
-  icon->SetHorizontalAlignment(views::ImageView::CENTER);
-  icon->SetVerticalAlignment(views::ImageView::CENTER);
-  int icon_row_span = 1;
-  if (is_inline_install()) {
-    // Also span the rating, user_count and store_link rows.
-    icon_row_span = 4;
-  } else if (prompt.GetPermissionCount()) {
-    // Also span the permission header and each of the permission rows (all have
-    // a padding row above it).
-    icon_row_span = 3 + prompt.GetPermissionCount() * 2;
+  if (!is_bundle_install()) {
+    // Scale down to icon size, but allow smaller icons (don't scale up).
+    const SkBitmap* bitmap = prompt.icon().ToSkBitmap();
+    gfx::Size size(bitmap->width(), bitmap->height());
+    if (size.width() > kIconSize || size.height() > kIconSize)
+      size = gfx::Size(kIconSize, kIconSize);
+    views::ImageView* icon = new views::ImageView();
+    icon->SetImageSize(size);
+    icon->SetImage(*bitmap);
+    icon->SetHorizontalAlignment(views::ImageView::CENTER);
+    icon->SetVerticalAlignment(views::ImageView::CENTER);
+    int icon_row_span = 1;
+    if (is_inline_install()) {
+      // Also span the rating, user_count and store_link rows.
+      icon_row_span = 4;
+    } else if (prompt.GetPermissionCount()) {
+      // Also span the permission header and each of the permission rows (all
+      // have a padding row above it).
+      icon_row_span = 3 + prompt.GetPermissionCount() * 2;
+    }
+    layout->AddView(icon, 1, icon_row_span);
   }
-  layout->AddView(icon, 1, icon_row_span);
 
   if (is_inline_install()) {
     layout->StartRow(0, column_set_id);
@@ -223,6 +236,24 @@ ExtensionInstallDialogView::ExtensionInstallDialogView(
     layout->AddView(store_link);
   }
 
+  if (is_bundle_install()) {
+    BundleInstaller::ItemList items = prompt_.bundle()->GetItemsWithState(
+        BundleInstaller::Item::STATE_PENDING);
+    for (size_t i = 0; i < items.size(); ++i) {
+      string16 extension_name = UTF8ToUTF16(items[i].localized_name);
+      base::i18n::AdjustStringForLocaleDirection(&extension_name);
+      layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
+      layout->StartRow(0, column_set_id);
+      views::Label* extension_label = new views::Label(
+          l10n_util::GetStringFUTF16(
+              IDS_EXTENSION_PERMISSION_LINE, extension_name));
+      extension_label->SetMultiLine(true);
+      extension_label->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+      extension_label->SizeToFit(left_column_width);
+      layout->AddView(extension_label);
+    }
+  }
+
   if (prompt.GetPermissionCount()) {
     layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
 
@@ -234,8 +265,18 @@ ExtensionInstallDialogView::ExtensionInstallDialogView(
     }
 
     layout->StartRow(0, column_set_id);
-    views::Label* permissions_header = new views::Label(
-        prompt.GetPermissionsHeader());
+    views::Label* permissions_header = NULL;
+    if (is_bundle_install()) {
+      // We need to make the font bold like this, rather than using SetFont,
+      // because otherwise SizeToFit mis-judges the width of the line.
+      gfx::Font bold_font = ResourceBundle::GetSharedInstance().GetFont(
+          ResourceBundle::BaseFont).DeriveFont(
+              kHeadingFontSizeDelta, gfx::Font::BOLD);
+      permissions_header = new views::Label(
+          prompt.GetPermissionsHeading(), bold_font);
+    } else {
+      permissions_header = new views::Label(prompt.GetPermissionsHeading());
+    }
     permissions_header->SetMultiLine(true);
     permissions_header->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
     permissions_header->SizeToFit(left_column_width);
@@ -291,7 +332,7 @@ ui::ModalType ExtensionInstallDialogView::GetModalType() const {
 }
 
 string16 ExtensionInstallDialogView::GetWindowTitle() const {
-  return prompt_.GetDialogTitle(extension_);
+  return prompt_.GetDialogTitle();
 }
 
 views::View* ExtensionInstallDialogView::GetContentsView() {
@@ -300,8 +341,8 @@ views::View* ExtensionInstallDialogView::GetContentsView() {
 
 void ExtensionInstallDialogView::LinkClicked(views::Link* source,
                                              int event_flags) {
-  GURL store_url(
-      extension_urls::GetWebstoreItemDetailURLPrefix() + extension_->id());
+  GURL store_url(extension_urls::GetWebstoreItemDetailURLPrefix() +
+                 prompt_.extension()->id());
   OpenURLParams params(
       store_url, Referrer(), NEW_FOREGROUND_TAB, content::PAGE_TRANSITION_LINK,
       false);
@@ -312,8 +353,6 @@ void ExtensionInstallDialogView::LinkClicked(views::Link* source,
 void ShowExtensionInstallDialogImpl(
     Profile* profile,
     ExtensionInstallUI::Delegate* delegate,
-    const Extension* extension,
-    SkBitmap* icon,
     const ExtensionInstallUI::Prompt& prompt) {
 #if defined(OS_CHROMEOS)
   // Use a tabbed browser window as parent on ChromeOS.
@@ -333,10 +372,9 @@ void ShowExtensionInstallDialogImpl(
   }
 
   ExtensionInstallDialogView* dialog = new ExtensionInstallDialogView(
-      delegate, extension, icon, prompt);
+      delegate, prompt);
 
-  views::Widget* window =  browser::CreateViewsWindow(
-      browser_window->GetNativeHandle(), dialog, STYLE_GENERIC);
-
+  views::Widget* window =  views::Widget::CreateWindowWithParent(
+      dialog, browser_window->GetNativeHandle());
   window->Show();
 }

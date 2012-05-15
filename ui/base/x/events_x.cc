@@ -27,21 +27,27 @@
 #define AXIS_LABEL_PROP_ABS_START_TIME "Abs Start Timestamp"
 #define AXIS_LABEL_PROP_ABS_END_TIME "Abs End Timestamp"
 
+// Fling properties
+#define AXIS_LABEL_PROP_ABS_FLING_X       "Abs Fling X Velocity"
+#define AXIS_LABEL_PROP_ABS_FLING_Y       "Abs Fling Y Velocity"
+#define AXIS_LABEL_PROP_ABS_FLING_STATE   "Abs Fling State"
+
 namespace {
 
 // Scroll amount for each wheelscroll event. 53 is also the value used for GTK+.
-static const int kWheelScrollAmount = 53;
+const int kWheelScrollAmount = 53;
 
-static const int kMinWheelButton = 4;
+const int kMinWheelButton = 4;
 #if defined(OS_CHROMEOS)
 // TODO(davemoore) For now use the button to decide how much to scroll by.
 // When we go to XI2 scroll events this won't be necessary. If this doesn't
 // happen for some reason we can better detect which devices are touchpads.
-static const int kTouchpadScrollAmount = 3;
+const int kTouchpadScrollAmount = 3;
+
 // Chrome OS also uses buttons 8 and 9 for scrolling.
-static const int kMaxWheelButton = 9;
+const int kMaxWheelButton = 9;
 #else
-static const int kMaxWheelButton = 7;
+const int kMaxWheelButton = 7;
 #endif
 
 // A class to support the detection of scroll events, using X11 valuators.
@@ -55,15 +61,18 @@ class UI_EXPORT CMTEventData {
   // Updates the list of devices.
   void UpdateDeviceList(Display* display) {
     cmt_devices_.reset();
+    touchpads_.reset();
     device_to_valuators_.clear();
 
     int count = 0;
+
+    // Find all the touchpad devices.
     XDeviceInfo* dev_list = XListInputDevices(display, &count);
     Atom xi_touchpad = XInternAtom(display, XI_TOUCHPAD, false);
     for (int i = 0; i < count; ++i) {
       XDeviceInfo* dev = dev_list + i;
       if (dev->type == xi_touchpad)
-        cmt_devices_[dev_list[i].id] = true;
+        touchpads_[dev_list[i].id] = true;
     }
     if (dev_list)
       XFreeDeviceList(dev_list);
@@ -74,18 +83,19 @@ class UI_EXPORT CMTEventData {
     Atom start_time =
         XInternAtom(display, AXIS_LABEL_PROP_ABS_START_TIME, false);
     Atom end_time = XInternAtom(display, AXIS_LABEL_PROP_ABS_END_TIME, false);
+    Atom fling_vx = XInternAtom(display, AXIS_LABEL_PROP_ABS_FLING_X, false);
+    Atom fling_vy = XInternAtom(display, AXIS_LABEL_PROP_ABS_FLING_Y, false);
+    Atom fling_state =
+        XInternAtom(display, AXIS_LABEL_PROP_ABS_FLING_STATE, false);
+
     for (int i = 0; i < count; ++i) {
       XIDeviceInfo* info = info_list + i;
 
-      if (!cmt_devices_[info->deviceid])
+      if (info->use != XISlavePointer && info->use != XIFloatingSlave)
         continue;
-
-      if (info->use != XISlavePointer && info->use != XIFloatingSlave) {
-        cmt_devices_[info->deviceid] = false;
-        continue;
-      }
 
       Valuators valuators;
+      bool is_cmt = false;
       for (int j = 0; j < info->num_classes; ++j) {
         if (info->classes[j]->type != XIValuatorClass)
           continue;
@@ -95,21 +105,47 @@ class UI_EXPORT CMTEventData {
         int number = v->number;
         if (number > valuators.max)
           valuators.max = number;
-        if (v->label == x_axis)
-          valuators.x_scroll = number;
-        else if (v->label == y_axis)
-          valuators.y_scroll = number;
-        else if (v->label == start_time)
+        if (v->label == x_axis) {
+          valuators.scroll_x = number;
+          is_cmt = true;
+        } else if (v->label == y_axis) {
+          valuators.scroll_y = number;
+          is_cmt = true;
+        } else if (v->label == start_time) {
           valuators.start_time = number;
-        else if (v->label == end_time)
+          is_cmt = true;
+        } else if (v->label == end_time) {
           valuators.end_time = number;
+          is_cmt = true;
+        } else if (v->label == fling_vx) {
+          valuators.fling_vx = number;
+          is_cmt = true;
+        } else if (v->label == fling_vy) {
+          valuators.fling_vy = number;
+          is_cmt = true;
+        } else if (v->label == fling_state) {
+          valuators.fling_state = number;
+          is_cmt = true;
+        }
       }
-      if (valuators.x_scroll >= 0 && valuators.y_scroll >= 0)
+      if (is_cmt) {
         device_to_valuators_[info->deviceid] = valuators;
-      else
-        cmt_devices_[info->deviceid] = false;
+        cmt_devices_[info->deviceid] = true;
+      }
     }
     XIFreeDeviceInfo(info_list);
+  }
+
+  void set_natural_scroll_enabled(bool enabled) {
+    natural_scroll_enabled_ = enabled;
+  }
+
+  float GetNaturalScrollFactor(int deviceid) {
+    // Natural scroll is touchpad-only.
+    if (!touchpads_[deviceid])
+      return -1.0f;
+
+    return natural_scroll_enabled_ ? 1.0f : -1.0f;
   }
 
   // Returns true if this is a scroll event (a motion event with the necessary
@@ -123,29 +159,71 @@ class UI_EXPORT CMTEventData {
     if (y_offset)
       *y_offset = 0;
 
-    if (!cmt_devices_[xiev->deviceid])
+    const int deviceid = xiev->deviceid;
+    if (!cmt_devices_[deviceid])
       return false;
 
-    const Valuators v = device_to_valuators_[xiev->deviceid];
-    bool has_x_offset = XIMaskIsSet(xiev->valuators.mask, v.x_scroll);
-    bool has_y_offset = XIMaskIsSet(xiev->valuators.mask, v.y_scroll);
-    bool is_scroll = has_x_offset || has_y_offset;
+    const float natural_scroll_factor = GetNaturalScrollFactor(deviceid);
+    const Valuators v = device_to_valuators_[deviceid];
+    const bool has_x_offset = XIMaskIsSet(xiev->valuators.mask, v.scroll_x);
+    const bool has_y_offset = XIMaskIsSet(xiev->valuators.mask, v.scroll_y);
+    const bool is_scroll = has_x_offset || has_y_offset;
 
-    if (!x_offset && !y_offset)
+    if (!is_scroll || (!x_offset && !y_offset))
       return is_scroll;
 
     double* valuators = xiev->valuators.values;
     for (int i = 0; i <= v.max; ++i) {
       if (XIMaskIsSet(xiev->valuators.mask, i)) {
-        if (x_offset && v.x_scroll == i)
-          *x_offset = -(*valuators);
-        else if (y_offset && v.y_scroll == i)
-          *y_offset = -(*valuators);
+        if (x_offset && v.scroll_x == i)
+          *x_offset = *valuators * natural_scroll_factor;
+        else if (y_offset && v.scroll_y == i)
+          *y_offset = *valuators * natural_scroll_factor;
         valuators++;
       }
     }
 
-    return is_scroll;
+    return true;
+  }
+
+  bool GetFlingData(const XEvent& xev,
+                    float* vx, float* vy,
+                    bool* is_cancel) {
+    XIDeviceEvent* xiev = static_cast<XIDeviceEvent*>(xev.xcookie.data);
+
+    *vx = 0;
+    *vy = 0;
+    *is_cancel = false;
+
+    const int deviceid = xiev->deviceid;
+    if (!cmt_devices_[deviceid])
+      return false;
+
+    const float natural_scroll_factor = GetNaturalScrollFactor(deviceid);
+    const Valuators v = device_to_valuators_[deviceid];
+    if (!XIMaskIsSet(xiev->valuators.mask, v.fling_vx) ||
+        !XIMaskIsSet(xiev->valuators.mask, v.fling_vy) ||
+        !XIMaskIsSet(xiev->valuators.mask, v.fling_state))
+      return false;
+
+    double* valuators = xiev->valuators.values;
+    for (int i = 0; i <= v.max; ++i) {
+      if (XIMaskIsSet(xiev->valuators.mask, i)) {
+        // Convert values to unsigned ints represending ms before storing them,
+        // as that is how they were encoded before conversion to doubles.
+        if (v.fling_vx == i)
+          *vx = natural_scroll_factor *
+                (static_cast<int>(*valuators)) / 1000.0f;
+        else if (v.fling_vy == i)
+          *vy = natural_scroll_factor *
+                (static_cast<int>(*valuators)) / 1000.0f;
+        else if (v.fling_state == i)
+          *is_cancel = !!static_cast<unsigned int>(*valuators);
+        valuators++;
+      }
+    }
+
+    return true;
   }
 
   bool GetGestureTimes(const XEvent& xev,
@@ -187,17 +265,29 @@ class UI_EXPORT CMTEventData {
 
   struct Valuators {
     int max;
-    int x_scroll;
-    int y_scroll;
+    int scroll_x;
+    int scroll_y;
     int start_time;
     int end_time;
+    int fling_vx;
+    int fling_vy;
+    int fling_state;
 
     Valuators()
-        : max(-1), x_scroll(-1), y_scroll(-1), start_time(-1), end_time(-1) {}
+        : max(-1),
+          scroll_x(-1),
+          scroll_y(-1),
+          start_time(-1),
+          end_time(-1),
+          fling_vx(-1),
+          fling_vy(-1),
+          fling_state(-1) {
+
+    }
 
   };
 
-  CMTEventData() {
+  CMTEventData() : natural_scroll_enabled_(true) {
     UpdateDeviceList(ui::GetXDisplay());
   }
 
@@ -206,7 +296,9 @@ class UI_EXPORT CMTEventData {
   // A quick lookup table for determining if events from the pointer device
   // should be processed.
   static const int kMaxDeviceNum = 128;
+  bool natural_scroll_enabled_;
   std::bitset<kMaxDeviceNum> cmt_devices_;
+  std::bitset<kMaxDeviceNum> touchpads_;
   std::map<int, Valuators> device_to_valuators_;
 
   DISALLOW_COPY_AND_ASSIGN(CMTEventData);
@@ -314,6 +406,23 @@ int GetEventFlagsForButton(int button) {
   }
 }
 
+void DetectAltClick(XIDeviceEvent* xievent) {
+  if ((xievent->evtype == XI_ButtonPress ||
+      xievent->evtype == XI_ButtonRelease) &&
+        (xievent->mods.effective & Mod1Mask) &&
+        xievent->detail == 1) {
+    xievent->mods.effective &= ~Mod1Mask;
+    xievent->detail = 3;
+    if (xievent->evtype == XI_ButtonRelease) {
+      // On the release clear the left button from the existing state and the
+      // mods, and set the right button.
+      XISetMask(xievent->buttons.mask, 3);
+      XIClearMask(xievent->buttons.mask, 1);
+      xievent->mods.effective &= ~Button1Mask;
+    }
+  }
+}
+
 int GetButtonMaskForX2Event(XIDeviceEvent* xievent) {
   int buttonflags = 0;
   for (int i = 0; i < 8 * xievent->buttons.mask_len; i++) {
@@ -354,7 +463,9 @@ ui::EventType GetTouchEventType(const base::NativeEvent& native_event) {
       case XI_ButtonRelease:
         return ui::ET_TOUCH_RELEASED;
       case XI_Motion:
-        return ui::ET_TOUCH_MOVED;
+        if (GetButtonMaskForX2Event(event))
+          return ui::ET_TOUCH_MOVED;
+        return ui::ET_UNKNOWN;
       default:
         NOTREACHED();
     }
@@ -397,6 +508,14 @@ float GetTouchParamFromXEvent(XEvent* xev,
   return default_value;
 }
 
+#if !defined(TOOLKIT_USES_GTK)
+Atom GetNoopEventAtom() {
+  return XInternAtom(
+      base::MessagePumpX::GetDefaultXDisplay(),
+      "noop", False);
+}
+#endif
+
 }  // namespace
 
 namespace ui {
@@ -413,9 +532,10 @@ EventType EventTypeFromNative(const base::NativeEvent& native_event) {
         return ET_MOUSEWHEEL;
       return ET_MOUSE_PRESSED;
     case ButtonRelease:
+      // Drop wheel events; we should've already scrolled on the press.
       if (static_cast<int>(native_event->xbutton.button) >= kMinWheelButton &&
           static_cast<int>(native_event->xbutton.button) <= kMaxWheelButton)
-        return ET_MOUSEWHEEL;
+        return ET_UNKNOWN;
       return ET_MOUSE_RELEASED;
     case MotionNotify:
       if (native_event->xmotion.state &
@@ -427,26 +547,45 @@ EventType EventTypeFromNative(const base::NativeEvent& native_event) {
     case LeaveNotify:
       return ET_MOUSE_EXITED;
     case GenericEvent: {
+      TouchFactory* factory = TouchFactory::GetInstance();
+      if (!factory->ShouldProcessXI2Event(native_event))
+        return ET_UNKNOWN;
+
       XIDeviceEvent* xievent =
           static_cast<XIDeviceEvent*>(native_event->xcookie.data);
-      if (TouchFactory::GetInstance()->IsTouchDevice(xievent->sourceid))
+
+      // Map Alt+Button1 to Button3
+      DetectAltClick(xievent);
+
+      if (factory->IsTouchDevice(xievent->sourceid))
         return GetTouchEventType(native_event);
+
       switch (xievent->evtype) {
-        case XI_ButtonPress:
-        case XI_ButtonRelease: {
+        case XI_ButtonPress: {
           int button = EventButtonFromNative(native_event);
           if (button >= kMinWheelButton && button <= kMaxWheelButton)
             return ET_MOUSEWHEEL;
-          return xievent->evtype == XI_ButtonPress ?
-              ET_MOUSE_PRESSED : ET_MOUSE_RELEASED;
+          return ET_MOUSE_PRESSED;
         }
-        case XI_Motion:
-          if (GetScrollOffsets(native_event, NULL, NULL))
+        case XI_ButtonRelease: {
+          int button = EventButtonFromNative(native_event);
+          // Drop wheel events; we should've already scrolled on the press.
+          if (button >= kMinWheelButton && button <= kMaxWheelButton)
+            return ET_UNKNOWN;
+          return ET_MOUSE_RELEASED;
+        }
+        case XI_Motion: {
+          float vx, vy;
+          bool is_cancel;
+          if (GetFlingData(native_event, &vx, &vy, &is_cancel)) {
+            return is_cancel ? ET_SCROLL_FLING_CANCEL : ET_SCROLL_FLING_START;
+          } else if (GetScrollOffsets(native_event, NULL, NULL))
             return ET_SCROLL;
           else if (GetButtonMaskForX2Event(xievent)) {
             return ET_MOUSE_DRAGGED;
           } else
             return ET_MOUSE_MOVED;
+        }
       }
     }
     default:
@@ -475,6 +614,10 @@ int EventFlagsFromNative(const base::NativeEvent& native_event) {
     case GenericEvent: {
       XIDeviceEvent* xievent =
           static_cast<XIDeviceEvent*>(native_event->xcookie.data);
+
+      // Map Alt+Button1 to Button3.
+      DetectAltClick(xievent);
+
       const bool touch =
           TouchFactory::GetInstance()->IsTouchDevice(xievent->sourceid);
       switch (xievent->evtype) {
@@ -605,11 +748,9 @@ bool IsMouseEvent(const base::NativeEvent& native_event) {
 }
 
 int GetMouseWheelOffset(const base::NativeEvent& native_event) {
-  int button;
-  if (native_event->type == GenericEvent)
-    button = EventButtonFromNative(native_event);
-  else
-    button = native_event->xbutton.button;
+  int button = native_event->type == GenericEvent
+    ? EventButtonFromNative(native_event) : native_event->xbutton.button;
+
   switch (button) {
     case 4:
 #if defined(OS_CHROMEOS)
@@ -697,6 +838,14 @@ bool GetScrollOffsets(const base::NativeEvent& native_event,
       *native_event, x_offset, y_offset);
 }
 
+bool GetFlingData(const base::NativeEvent& native_event,
+                  float* vx,
+                  float* vy,
+                  bool* is_cancel) {
+  return CMTEventData::GetInstance()->GetFlingData(
+      *native_event, vx, vy, is_cancel);
+}
+
 bool GetGestureTimes(const base::NativeEvent& native_event,
                      double* start_time,
                      double* end_time) {
@@ -704,10 +853,24 @@ bool GetGestureTimes(const base::NativeEvent& native_event,
       *native_event, start_time, end_time);
 }
 
+void SetNaturalScroll(bool enabled) {
+  CMTEventData::GetInstance()->set_natural_scroll_enabled(enabled);
+}
+
 void UpdateDeviceList() {
   Display* display = GetXDisplay();
   CMTEventData::GetInstance()->UpdateDeviceList(display);
   TouchFactory::GetInstance()->UpdateDeviceList(display);
+}
+
+bool IsNoopEvent(const base::NativeEvent& event) {
+#if defined(TOOLKIT_USES_GTK)
+  NOTREACHED();
+  return false;
+#else
+  return (event->type == ClientMessage &&
+      event->xclient.message_type == GetNoopEventAtom());
+#endif
 }
 
 base::NativeEvent CreateNoopEvent() {
@@ -726,9 +889,7 @@ base::NativeEvent CreateNoopEvent() {
 #else
   // Make sure we use atom from current xdisplay, which may
   // change during the test.
-  noop->xclient.message_type = XInternAtom(
-      base::MessagePumpX::GetDefaultXDisplay(),
-      "noop", False);
+  noop->xclient.message_type = GetNoopEventAtom();
 #endif
   return noop;
 }

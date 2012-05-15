@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/string16.h"
+#include "content/common/content_export.h"
 #include "content/common/mac/font_descriptor.h"
 #include "ipc/ipc_message_utils.h"
 #include "ui/base/range/range.h"
@@ -30,7 +31,7 @@ namespace mac {
 // friends to send objects from the renderer to the browser could lead to
 // deserialization of arbitrary objects. This class restricts serialization to
 // a specific object class and specific attributes of that object.
-class AttributedStringCoder {
+class CONTENT_EXPORT AttributedStringCoder {
  public:
   // A C++ IPC-friendly representation of the NSFontAttributeName attribute
   // set.
@@ -102,7 +103,7 @@ template <>
 struct ParamTraits<mac::AttributedStringCoder::EncodedString> {
   typedef mac::AttributedStringCoder::EncodedString param_type;
   static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, void** iter, param_type* r);
+  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
   static void Log(const param_type& p, std::string* l);
 };
 
@@ -110,7 +111,7 @@ template <>
 struct ParamTraits<mac::AttributedStringCoder::FontAttribute> {
   typedef mac::AttributedStringCoder::FontAttribute param_type;
   static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, void** iter, param_type* r);
+  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
   static void Log(const param_type& p, std::string* l);
 };
 

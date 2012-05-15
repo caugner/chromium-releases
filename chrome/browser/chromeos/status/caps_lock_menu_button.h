@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,8 +14,9 @@
 #include "chrome/browser/chromeos/system_key_event_listener.h"
 #include "chrome/browser/prefs/pref_member.h"
 #include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
+#include "ui/views/controls/button/menu_button_listener.h"
 #include "ui/views/controls/menu/menu_delegate.h"
-#include "ui/views/controls/menu/view_menu_delegate.h"
 
 class Bubble;
 
@@ -33,7 +34,7 @@ class StatusAreaBubbleController;
 class CapsLockMenuButton : public content::NotificationObserver,
                            public StatusAreaButton,
                            public views::MenuDelegate,
-                           public views::ViewMenuDelegate,
+                           public views::MenuButtonListener,
                            public SystemKeyEventListener::CapsLockObserver {
  public:
   explicit CapsLockMenuButton(StatusAreaButton::Delegate* delegate);
@@ -45,9 +46,9 @@ class CapsLockMenuButton : public content::NotificationObserver,
   // views::MenuDelegate implementation.
   virtual string16 GetLabel(int id) const OVERRIDE;
 
-  // views::ViewMenuDelegate implementation.
-  virtual void RunMenu(views::View* unused_source,
-                       const gfx::Point& pt) OVERRIDE;
+  // views::MenuButtonListener implementation.
+  virtual void OnMenuButtonClicked(views::View* source,
+                                   const gfx::Point& point) OVERRIDE;
 
   // SystemKeyEventListener::CapsLockObserver implementation
   virtual void OnCapsLockChange(bool enabled) OVERRIDE;
@@ -78,7 +79,12 @@ class CapsLockMenuButton : public content::NotificationObserver,
   // Updates the button from the current state.
   void UpdateUIFromCurrentCapsLock(bool enabled);
 
-  PrefService* prefs_;
+  // Initializes |remap_search_key_to_|.
+  void InitializePrefMember();
+
+  bool initialized_prefs_;
+  content::NotificationRegistrar registrar_;
+
   IntegerPrefMember remap_search_key_to_;
 
   // The currently showing status view. NULL if menu is not being displayed.

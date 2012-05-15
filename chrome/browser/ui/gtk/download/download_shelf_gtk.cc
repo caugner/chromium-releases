@@ -15,8 +15,8 @@
 #include "chrome/browser/ui/gtk/download/download_item_gtk.h"
 #include "chrome/browser/ui/gtk/gtk_chrome_link_button.h"
 #include "chrome/browser/ui/gtk/gtk_chrome_shrinkable_hbox.h"
-#include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
+#include "chrome/browser/ui/gtk/theme_service_gtk.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/notification_source.h"
@@ -24,6 +24,7 @@
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
 #include "grit/ui_resources_standard.h"
+#include "ui/base/gtk/gtk_screen_util.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/gtk_util.h"
@@ -67,7 +68,7 @@ using content::DownloadItem;
 DownloadShelfGtk::DownloadShelfGtk(Browser* browser, GtkWidget* parent)
     : browser_(browser),
       is_showing_(false),
-      theme_service_(GtkThemeService::GetFrom(browser->profile())),
+      theme_service_(ThemeServiceGtk::GetFrom(browser->profile())),
       close_on_mouse_out_(false),
       mouse_in_shelf_(false),
       weak_factory_(this) {
@@ -134,8 +135,8 @@ DownloadShelfGtk::DownloadShelfGtk(Browser* browser, GtkWidget* parent)
 
   // Make the download arrow icon.
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-  GdkPixbuf* download_pixbuf = rb.GetNativeImageNamed(IDR_DOWNLOADS_FAVICON);
-  GtkWidget* download_image = gtk_image_new_from_pixbuf(download_pixbuf);
+  GtkWidget* download_image = gtk_image_new_from_pixbuf(
+      rb.GetNativeImageNamed(IDR_DOWNLOADS_FAVICON).ToGdkPixbuf());
 
   // Pack the link and the icon in outer hbox.
   gtk_util::CenterWidgetInHBox(outer_hbox, link_button_, true, 0);
@@ -372,7 +373,7 @@ bool DownloadShelfGtk::IsCursorInShelfZone(
   GtkAllocation allocation;
   gtk_widget_get_allocation(shelf_.get(), &allocation);
 
-  gfx::Rect bounds(gtk_util::GetWidgetScreenPosition(shelf_.get()),
+  gfx::Rect bounds(ui::GetWidgetScreenPosition(shelf_.get()),
                    gfx::Size(allocation.width, allocation.height));
 
   // Negative insets expand the rectangle. We only expand the top.

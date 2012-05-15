@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,11 +11,13 @@
 #include "base/i18n/break_iterator.h"
 #include "base/i18n/case_conversion.h"
 #include "base/i18n/icu_string_conversions.h"
-#include "base/json/json_value_serializer.h"
+#include "base/json/json_string_value_serializer.h"
 #include "base/message_loop.h"
+#include "base/metrics/histogram.h"
 #include "base/string16.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier.h"
+#include "chrome/browser/autocomplete/autocomplete_field_trial.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/autocomplete/keyword_provider.h"
 #include "chrome/browser/history/history.h"
@@ -59,11 +61,13 @@ bool HasMultipleWords(const string16& text) {
 
 };
 
+
+// SearchProvider -------------------------------------------------------------
+
 // static
 const int SearchProvider::kDefaultProviderURLFetcherID = 1;
 // static
 const int SearchProvider::kKeywordProviderURLFetcherID = 2;
-
 // static
 bool SearchProvider::query_suggest_immediately_ = false;
 
@@ -85,6 +89,23 @@ SearchProvider::SearchProvider(ACProviderListener* listener, Profile* profile)
       suggest_results_pending_(0),
       have_suggest_results_(false),
       instant_finalized_(false) {
+  // We use GetSuggestNumberOfGroups() as the group ID to mean "not in field
+  // trial."  Field trial groups run from 0 to GetSuggestNumberOfGroups() - 1
+  // (inclusive).
+  int suggest_field_trial_group_number =
+      AutocompleteFieldTrial::GetSuggestNumberOfGroups();
+  if (AutocompleteFieldTrial::InSuggestFieldTrial()) {
+    suggest_field_trial_group_number =
+        AutocompleteFieldTrial::GetSuggestGroupNameAsNumber();
+  }
+  // Add a beacon to the logs that'll allow us to identify later what
+  // suggest field trial group a user is in.  Do this by incrementing a
+  // bucket in a histogram, where the bucket represents the user's
+  // suggest group id.
+  UMA_HISTOGRAM_ENUMERATION(
+      "Omnibox.SuggestFieldTrialBeacon",
+      suggest_field_trial_group_number,
+      AutocompleteFieldTrial::GetSuggestNumberOfGroups() + 1);
 }
 
 void SearchProvider::FinalizeInstantQuery(const string16& input_text,
@@ -223,16 +244,13 @@ void SearchProvider::Run() {
   suggest_results_pending_ = 0;
   if (providers_.valid_suggest_for_keyword_provider()) {
     suggest_results_pending_++;
-    keyword_fetcher_.reset(
-        CreateSuggestFetcher(kKeywordProviderURLFetcherID,
-                             providers_.keyword_provider(),
-                             keyword_input_text_));
+    keyword_fetcher_.reset(CreateSuggestFetcher(kKeywordProviderURLFetcherID,
+        providers_.keyword_provider(), keyword_input_text_));
   }
   if (providers_.valid_suggest_for_default_provider()) {
     suggest_results_pending_++;
-    default_fetcher_.reset(
-        CreateSuggestFetcher(kDefaultProviderURLFetcherID,
-                             providers_.default_provider(), input_.text()));
+    default_fetcher_.reset(CreateSuggestFetcher(kDefaultProviderURLFetcherID,
+        providers_.default_provider(), input_.text()));
   }
   // We should only get here if we have a suggest url for the keyword or default
   // providers.
@@ -439,13 +457,11 @@ content::URLFetcher* SearchProvider::CreateSuggestFetcher(
     const string16& text) {
   const TemplateURLRef* const suggestions_url = provider.suggestions_url();
   DCHECK(suggestions_url->SupportsReplacement());
-  content::URLFetcher* fetcher = content::URLFetcher::Create(
-      id,
+  content::URLFetcher* fetcher = content::URLFetcher::Create(id,
       GURL(suggestions_url->ReplaceSearchTermsUsingProfile(
           profile_, provider, text, TemplateURLRef::NO_SUGGESTIONS_AVAILABLE,
           string16())),
-      content::URLFetcher::GET,
-      this);
+      content::URLFetcher::GET, this);
   fetcher->SetRequestContext(profile_->GetRequestContext());
   fetcher->SetLoadFlags(net::LOAD_DO_NOT_SAVE_COOKIES);
   fetcher->Start();
@@ -874,9 +890,9 @@ void SearchProvider::AddMatchToMap(const string16& query_string,
     ++search_start;
   }
   if (is_keyword) {
-    match.fill_into_edit.append(
-        providers_.keyword_provider().keyword() + char16(' '));
-    search_start += providers_.keyword_provider().keyword().size() + 1;
+    match.keyword = providers_.keyword_provider().keyword();
+    match.fill_into_edit.append(match.keyword + char16(' '));
+    search_start += match.keyword.length() + 1;
   }
   match.fill_into_edit.append(query_string);
   // Not all suggestions start with the original input.

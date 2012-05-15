@@ -42,7 +42,7 @@ class PrefService;
 class PrefsTabHelper;
 class Profile;
 class RestoreTabHelper;
-class SadTabObserver;
+class SadTabHelper;
 class SearchEngineTabHelper;
 class SnapshotTabHelper;
 class TabContentsSSLHelper;
@@ -50,6 +50,10 @@ class TabSpecificContentSettings;
 class ThumbnailGenerator;
 class TranslateTabHelper;
 class WebIntentPickerController;
+
+#if defined(ENABLE_ONE_CLICK_SIGNIN)
+class OneClickSigninHelper;
+#endif
 
 namespace browser_sync {
 class SyncedTabDelegate;
@@ -142,6 +146,13 @@ class TabContentsWrapper : public content::WebContentsObserver {
   FindTabHelper* find_tab_helper() { return find_tab_helper_.get(); }
   HistoryTabHelper* history_tab_helper() { return history_tab_helper_.get(); }
   InfoBarTabHelper* infobar_tab_helper() { return infobar_tab_helper_.get(); }
+
+#if defined(ENABLE_ONE_CLICK_SIGNIN)
+  OneClickSigninHelper* one_click_signin_helper() {
+    return one_click_signin_helper_.get();
+  }
+#endif
+
   PasswordManager* password_manager() { return password_manager_.get(); }
   PrefsTabHelper* prefs_tab_helper() { return prefs_tab_helper_.get(); }
 
@@ -160,6 +171,8 @@ class TabContentsWrapper : public content::WebContentsObserver {
   const RestoreTabHelper* restore_tab_helper() const {
     return restore_tab_helper_.get();
   }
+
+  SadTabHelper* sad_tab_helper() { return sad_tab_helper_.get(); }
 
   SearchEngineTabHelper* search_engine_tab_helper() {
     return search_engine_tab_helper_.get();
@@ -193,8 +206,6 @@ class TabContentsWrapper : public content::WebContentsObserver {
   virtual void WebContentsDestroyed(content::WebContents* tab) OVERRIDE;
 
  private:
-  friend class PrefsTabHelperTest;
-
   // Used to retrieve this object from |web_contents_|, which is placed in
   // its property bag to avoid adding additional interfaces.
   static base::PropertyAccessor<TabContentsWrapper*>* property_accessor();
@@ -229,7 +240,7 @@ class TabContentsWrapper : public content::WebContentsObserver {
   scoped_ptr<printing::PrintViewManager> print_view_manager_;
 
   scoped_ptr<RestoreTabHelper> restore_tab_helper_;
-
+  scoped_ptr<SadTabHelper> sad_tab_helper_;
   scoped_ptr<SearchEngineTabHelper> search_engine_tab_helper_;
   scoped_ptr<SnapshotTabHelper> snapshot_tab_helper_;
   scoped_ptr<TabContentsSSLHelper> ssl_helper_;
@@ -253,10 +264,12 @@ class TabContentsWrapper : public content::WebContentsObserver {
   scoped_ptr<ExtensionWebNavigationTabObserver> webnavigation_observer_;
   scoped_ptr<ExternalProtocolObserver> external_protocol_observer_;
   scoped_ptr<OmniboxSearchHint> omnibox_search_hint_;
+#if defined(ENABLE_ONE_CLICK_SIGNIN)
+  scoped_ptr<OneClickSigninHelper> one_click_signin_helper_;
+#endif
   scoped_ptr<PDFTabObserver> pdf_tab_observer_;
   scoped_ptr<PluginObserver> plugin_observer_;
   scoped_ptr<printing::PrintPreviewMessageHandler> print_preview_;
-  scoped_ptr<SadTabObserver> sad_tab_observer_;
   scoped_ptr<safe_browsing::SafeBrowsingTabObserver>
       safe_browsing_tab_observer_;
   scoped_ptr<ThumbnailGenerator> thumbnail_generation_observer_;

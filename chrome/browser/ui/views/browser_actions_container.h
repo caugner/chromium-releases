@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,13 +18,15 @@
 #include "chrome/browser/extensions/extension_toolbar_model.h"
 #include "chrome/browser/extensions/image_loading_tracker.h"
 #include "chrome/browser/ui/views/extensions/browser_action_overflow_menu_controller.h"
+#include "chrome/browser/ui/views/extensions/extension_keybinding_registry_views.h"
 #include "chrome/browser/ui/views/extensions/extension_popup.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "ui/base/accelerators/accelerator.h"
 #include "ui/base/animation/animation_delegate.h"
 #include "ui/base/animation/tween.h"
 #include "ui/views/controls/button/menu_button.h"
-#include "ui/views/controls/menu/view_menu_delegate.h"
+#include "ui/views/controls/button/menu_button_listener.h"
 #include "ui/views/controls/resize_area_delegate.h"
 #include "ui/views/drag_controller.h"
 #include "ui/views/view.h"
@@ -82,8 +84,8 @@ class BrowserActionButton : public views::MenuButton,
                              const views::Event& event) OVERRIDE;
 
   // Overridden from ImageLoadingTracker.
-  virtual void OnImageLoaded(SkBitmap* image,
-                             const ExtensionResource& resource,
+  virtual void OnImageLoaded(const gfx::Image& image,
+                             const std::string& extension_id,
                              int index) OVERRIDE;
 
   // Overridden from content::NotificationObserver:
@@ -103,6 +105,9 @@ class BrowserActionButton : public views::MenuButton,
   virtual bool OnKeyReleased(const views::KeyEvent& event) OVERRIDE;
   virtual void ShowContextMenu(const gfx::Point& p,
                                bool is_mouse_gesture) OVERRIDE;
+
+  // Overridden from ui::AcceleratorTarget.
+  virtual bool AcceleratorPressed(const ui::Accelerator& accelerator) OVERRIDE;
 
   // Notifications when to set button state to pushed/not pushed (for when the
   // popup/context menu is hidden or shown by the container).
@@ -140,6 +145,10 @@ class BrowserActionButton : public views::MenuButton,
   views::MenuItemView* context_menu_;
 
   content::NotificationRegistrar registrar_;
+
+  // The extension keybinding accelerator this browser action is listening for
+  // (to show the popup).
+  scoped_ptr<ui::Accelerator> keybinding_;
 
   friend class base::DeleteHelper<BrowserActionButton>;
 
@@ -256,7 +265,7 @@ class BrowserActionView : public views::View {
 ////////////////////////////////////////////////////////////////////////////////
 class BrowserActionsContainer
     : public views::View,
-      public views::ViewMenuDelegate,
+      public views::MenuButtonListener,
       public views::DragController,
       public views::ResizeAreaDelegate,
       public ui::AnimationDelegate,
@@ -331,8 +340,9 @@ class BrowserActionsContainer
   virtual int OnPerformDrop(const views::DropTargetEvent& event) OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
 
-  // Overridden from views::ViewMenuDelegate:
-  virtual void RunMenu(View* source, const gfx::Point& pt) OVERRIDE;
+  // Overridden from views::MenuButtonListener:
+  virtual void OnMenuButtonClicked(views::View* source,
+                                   const gfx::Point& point) OVERRIDE;
 
   // Overridden from views::DragController:
   virtual void WriteDragDataForView(View* sender,
@@ -494,6 +504,9 @@ class BrowserActionsContainer
   // The menu to show for the overflow button (chevron). This class manages its
   // own lifetime so that it can stay alive during drag and drop operations.
   BrowserActionOverflowMenuController* overflow_menu_;
+
+  // The class that registers for keyboard shortcuts for extension commands.
+  ExtensionKeybindingRegistryViews extension_keybinding_registry_;
 
   // The animation that happens when the container snaps to place.
   scoped_ptr<ui::SlideAnimation> resize_animation_;

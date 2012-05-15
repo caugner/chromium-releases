@@ -14,7 +14,11 @@
 #include "net/base/asn1_util.h"
 #include "net/base/cert_test_util.h"
 #include "net/base/cert_verifier.h"
+#include "net/base/cert_verify_result.h"
+#include "net/base/net_errors.h"
+#include "net/base/net_log.h"
 #include "net/base/ssl_info.h"
+#include "net/base/test_completion_callback.h"
 #include "net/base/test_root_certs.h"
 #include "net/base/x509_certificate.h"
 #include "net/http/http_util.h"
@@ -281,14 +285,20 @@ TEST_F(TransportSecurityStateTest, ValidPinsHeaders) {
   scoped_refptr<X509Certificate> root_cert =
       ImportCertFromFile(certs_dir, "2048-rsa-root.pem");
   ASSERT_NE(static_cast<X509Certificate*>(NULL), root_cert);
-  TestRootCerts::GetInstance()->Add(root_cert.get());
+  ScopedTestRoot scoped_root(root_cert);
 
   // Verify has the side-effect of populating public_key_hashes, which
   // ParsePinsHeader needs. (It wants to check pins against the validated
   // chain, not just the presented chain.)
+  int rv = ERR_FAILED;
   CertVerifyResult result;
-  int rv = ssl_info.cert->Verify("127.0.0.1", 0, NULL, &result);
-  ASSERT_EQ(0, rv);
+  scoped_ptr<CertVerifier> verifier(CertVerifier::CreateDefault());
+  TestCompletionCallback callback;
+  CertVerifier::RequestHandle handle = NULL;
+  rv = verifier->Verify(ssl_info.cert, "127.0.0.1", 0, NULL, &result,
+                        callback.callback(), &handle, BoundNetLog());
+  rv = callback.GetResult(rv);
+  ASSERT_EQ(OK, rv);
   // Normally, ssl_client_socket_nss would do this, but for a unit test we
   // fake it.
   ssl_info.public_key_hashes = result.public_key_hashes;
@@ -347,8 +357,6 @@ TEST_F(TransportSecurityStateTest, ValidPinsHeaders) {
           backup_pin + ";" + good_pin + ";   ",
       ssl_info, &state));
   EXPECT_EQ(state.max_age, TransportSecurityState::kMaxHSTSAgeSecs);
-
-  TestRootCerts::GetInstance()->Clear();
 }
 
 TEST_F(TransportSecurityStateTest, SimpleMatches) {
@@ -606,7 +614,9 @@ TEST_F(TransportSecurityStateTest, Preloaded) {
   EXPECT_TRUE(ShouldRedirect("hostedtalkgadget.google.com"));
   EXPECT_TRUE(ShouldRedirect("talk.google.com"));
   EXPECT_TRUE(ShouldRedirect("plus.google.com"));
-  EXPECT_FALSE(ShouldRedirect("groups.google.com"));
+  EXPECT_TRUE(ShouldRedirect("groups.google.com"));
+  EXPECT_TRUE(ShouldRedirect("apis.google.com"));
+  EXPECT_FALSE(ShouldRedirect("chart.apis.google.com"));
   EXPECT_TRUE(ShouldRedirect("ssl.google-analytics.com"));
   EXPECT_TRUE(ShouldRedirect("gmail.com"));
   EXPECT_TRUE(ShouldRedirect("www.gmail.com"));
@@ -798,6 +808,31 @@ TEST_F(TransportSecurityStateTest, Preloaded) {
   EXPECT_TRUE(ShouldRedirect("pixi.me"));
   EXPECT_TRUE(ShouldRedirect("www.pixi.me"));
 
+  EXPECT_TRUE(ShouldRedirect("grepular.com"));
+  EXPECT_TRUE(ShouldRedirect("www.grepular.com"));
+
+  EXPECT_TRUE(ShouldRedirect("mydigipass.com"));
+  EXPECT_FALSE(ShouldRedirect("foo.mydigipass.com"));
+  EXPECT_TRUE(ShouldRedirect("www.mydigipass.com"));
+  EXPECT_FALSE(ShouldRedirect("foo.www.mydigipass.com"));
+  EXPECT_TRUE(ShouldRedirect("developer.mydigipass.com"));
+  EXPECT_FALSE(ShouldRedirect("foo.developer.mydigipass.com"));
+  EXPECT_TRUE(ShouldRedirect("www.developer.mydigipass.com"));
+  EXPECT_FALSE(ShouldRedirect("foo.www.developer.mydigipass.com"));
+  EXPECT_TRUE(ShouldRedirect("sandbox.mydigipass.com"));
+  EXPECT_FALSE(ShouldRedirect("foo.sandbox.mydigipass.com"));
+  EXPECT_TRUE(ShouldRedirect("www.sandbox.mydigipass.com"));
+  EXPECT_FALSE(ShouldRedirect("foo.www.sandbox.mydigipass.com"));
+
+  EXPECT_TRUE(ShouldRedirect("crypto.cat"));
+  EXPECT_TRUE(ShouldRedirect("foo.crypto.cat"));
+
+  EXPECT_TRUE(ShouldRedirect("bigshinylock.minazo.net"));
+  EXPECT_TRUE(ShouldRedirect("foo.bigshinylock.minazo.net"));
+
+  EXPECT_TRUE(ShouldRedirect("crate.io"));
+  EXPECT_TRUE(ShouldRedirect("foo.crate.io"));
+
 #if defined(OS_CHROMEOS)
   static const bool kTwitterHSTS = true;
 #else
@@ -899,6 +934,7 @@ TEST_F(TransportSecurityStateTest, BuiltinCertPins) {
   EXPECT_TRUE(state.HasPinsForHost(&domain_state, "talk.google.com", true));
   EXPECT_TRUE(state.HasPinsForHost(&domain_state, "plus.google.com", true));
   EXPECT_TRUE(state.HasPinsForHost(&domain_state, "groups.google.com", true));
+  EXPECT_TRUE(state.HasPinsForHost(&domain_state, "apis.google.com", true));
 
   EXPECT_TRUE(state.HasPinsForHost(&domain_state, "ssl.gstatic.com", true));
   EXPECT_FALSE(state.HasPinsForHost(&domain_state, "www.gstatic.com", true));

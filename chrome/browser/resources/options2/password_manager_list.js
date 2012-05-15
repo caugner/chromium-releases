@@ -1,12 +1,12 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 cr.define('options.passwordManager', function() {
-  const ArrayDataModel = cr.ui.ArrayDataModel;
-  const DeletableItemList = options.DeletableItemList;
-  const DeletableItem = options.DeletableItem;
-  const List = cr.ui.List;
+  /** @const */ var ArrayDataModel = cr.ui.ArrayDataModel;
+  /** @const */ var DeletableItemList = options.DeletableItemList;
+  /** @const */ var DeletableItem = options.DeletableItem;
+  /** @const */ var List = cr.ui.List;
 
   /**
    * Creates a new passwords list item.
@@ -63,7 +63,7 @@ cr.define('options.passwordManager', function() {
       if (showPasswords) {
         var button = this.ownerDocument.createElement('button');
         button.hidden = true;
-        button.classList.add('password-button');
+        button.className = 'list-inline-button custom-appearance';
         button.textContent = localStrings.getString('passwordShowButton');
         button.addEventListener('click', this.onClick_, true);
         passwordInputDiv.appendChild(button);
@@ -209,7 +209,7 @@ cr.define('options.passwordManager', function() {
     decorate: function() {
       DeletableItemList.prototype.decorate.call(this);
       Preferences.getInstance().addEventListener(
-          "profile.password_manager_allow_show_passwords",
+          'profile.password_manager_allow_show_passwords',
           this.onPreferenceChanged_.bind(this));
     },
 

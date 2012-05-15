@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,7 @@
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/canvas.h"
 #include "ui/gfx/screen.h"
 #include "ui/views/bubble/bubble_border.h"
 #include "ui/views/controls/button/text_button.h"
@@ -218,7 +218,8 @@ void FullscreenExitBubbleViews::FullscreenExitView::UpdateContent(
   } else {
     bool link_visible = true;
     string16 accelerator;
-    if (bubble_type == FEB_TYPE_BROWSER_FULLSCREEN_EXIT_INSTRUCTION) {
+    if (bubble_type == FEB_TYPE_BROWSER_FULLSCREEN_EXIT_INSTRUCTION ||
+        bubble_type == FEB_TYPE_BROWSER_EXTENSION_FULLSCREEN_EXIT_INSTRUCTION) {
       accelerator = browser_fullscreen_exit_accelerator_;
     } else if (bubble_type == FEB_TYPE_FULLSCREEN_EXIT_INSTRUCTION) {
       accelerator = l10n_util::GetStringUTF16(IDS_APP_ESC_KEY);

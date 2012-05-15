@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,9 +28,9 @@
 #include "chrome/browser/cancelable_request.h"
 #include "chrome/common/automation_constants.h"
 #include "chrome/common/content_settings.h"
-#include "content/browser/trace_controller.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_observer.h"
+#include "content/public/browser/trace_subscriber.h"
 #include "ipc/ipc_channel.h"
 
 #if defined(OS_WIN) && !defined(USE_AURA)
@@ -53,8 +53,6 @@ class LoginHandler;
 class MetricEventDurationObserver;
 class NavigationControllerRestoredObserver;
 class Profile;
-class RenderViewHost;
-class TabContents;
 struct AutomationMsg_Find_Params;
 struct Reposition_Params;
 struct ExternalTabSettings;
@@ -65,6 +63,7 @@ class ChannelProxy;
 
 namespace content {
 class NavigationController;
+class RenderViewHost;
 }
 
 namespace base {
@@ -86,7 +85,7 @@ class AutomationProvider
       public base::SupportsWeakPtr<AutomationProvider>,
       public base::RefCountedThreadSafe<
           AutomationProvider, content::BrowserThread::DeleteOnUIThread>,
-      public TraceSubscriber {
+      public content::TraceSubscriber {
  public:
   explicit AutomationProvider(Profile* profile);
 
@@ -116,6 +115,15 @@ class AutomationProvider
 
   // Called when the chromeos WebUI login is ready.
   void OnLoginWebuiReady();
+
+  // Checks all of the initial load conditions, then sends the
+  // InitialLoadsComplete message over the automation channel.
+  void SendInitialLoadMessage();
+
+  // Call this before calling InitializeChannel. If called, send the
+  // InitialLoadsComplete message immediately when the automation channel is
+  // connected, without waiting for the initial load conditions to be met.
+  void DisableInitialLoadObservers();
 
   // Get the index of a particular NavigationController object
   // in the given parent window.  This method uses
@@ -185,7 +193,7 @@ class AutomationProvider
 
   // Returns the associated view for the tab handle passed in.
   // Returns NULL on failure.
-  RenderViewHost* GetViewForTab(int tab_handle);
+  content::RenderViewHost* GetViewForTab(int tab_handle);
 
   // Called on IPC message deserialization failure. Prints an error message
   // and closes the IPC channel.
@@ -237,7 +245,8 @@ class AutomationProvider
 
   // TraceSubscriber:
   virtual void OnEndTracingComplete() OVERRIDE;
-  virtual void OnTraceDataCollected(const std::string& trace_fragment) OVERRIDE;
+  virtual void OnTraceDataCollected(
+      const scoped_refptr<base::RefCountedString>& trace_fragment) OVERRIDE;
 
   void OnUnhandledMessage(const IPC::Message& message);
 
@@ -400,6 +409,9 @@ class AutomationProvider
   scoped_ptr<ExtensionTestResultNotificationObserver>
       extension_test_result_observer_;
   scoped_ptr<AutomationExtensionTracker> extension_tracker_;
+
+  // True iff we should enable observers that check for initial load conditions.
+  bool use_initial_load_observers_;
 
   // True iff connected to an AutomationProxy.
   bool is_connected_;

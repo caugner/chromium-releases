@@ -9,8 +9,10 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
+#include "base/time.h"
 #include "net/base/network_delegate.h"
 
+class CookieSettings;
 class ExtensionEventRouterForwarder;
 class ExtensionInfoMap;
 class PrefService;
@@ -22,20 +24,26 @@ namespace policy {
 class URLBlacklistManager;
 }
 
+namespace net {
+class DnsRRResolver;
+}
+
 // ChromeNetworkDelegate is the central point from within the chrome code to
 // add hooks into the network stack.
 class ChromeNetworkDelegate : public net::NetworkDelegate {
  public:
-  // If |profile| is NULL, events will be broadcasted to all profiles, otherwise
-  // they will only be sent to the specified profile.
+  // If |profile| is NULL, events will be broadcasted to all profiles,
+  // otherwise they will only be sent to the specified profile.
   // |enable_referrers| should be initialized on the UI thread (see below)
-  // beforehand. This object's owner is responsible for cleaning it up
-  // at shutdown.
+  // beforehand. This object's owner is responsible for cleaning it up at
+  // shutdown. If |cookie_settings| is NULL, all cookies are enabled,
+  // otherwise, the settings are enforced on all observed network requests.
   ChromeNetworkDelegate(
       ExtensionEventRouterForwarder* event_router,
       ExtensionInfoMap* extension_info_map,
       const policy::URLBlacklistManager* url_blacklist_manager,
       void* profile,
+      CookieSettings* cookie_settings,
       BooleanPrefMember* enable_referrers);
   virtual ~ChromeNetworkDelegate();
 
@@ -43,6 +51,8 @@ class ChromeNetworkDelegate : public net::NetworkDelegate {
   // This method should be called on the UI thread.
   static void InitializeReferrersEnabled(BooleanPrefMember* enable_referrers,
                                          PrefService* pref_service);
+
+  static void EnableComodoDNSExperiment();
 
  private:
   // NetworkDelegate implementation.
@@ -74,9 +84,15 @@ class ChromeNetworkDelegate : public net::NetworkDelegate {
       const net::AuthChallengeInfo& auth_info,
       const AuthCallback& callback,
       net::AuthCredentials* credentials) OVERRIDE;
+  virtual bool CanGetCookies(const net::URLRequest* request,
+                             const net::CookieList& cookie_list) OVERRIDE;
+  virtual bool CanSetCookie(const net::URLRequest* request,
+                            const std::string& cookie_line,
+                            net::CookieOptions* options) OVERRIDE;
 
   scoped_refptr<ExtensionEventRouterForwarder> event_router_;
   void* profile_;
+  scoped_refptr<CookieSettings> cookie_settings_;
 
   scoped_refptr<ExtensionInfoMap> extension_info_map_;
 
@@ -85,6 +101,9 @@ class ChromeNetworkDelegate : public net::NetworkDelegate {
 
   // Weak, owned by our owner.
   const policy::URLBlacklistManager* url_blacklist_manager_;
+
+  scoped_ptr<net::DnsRRResolver> dnsrr_resolver_;
+  base::TimeTicks last_comodo_resolution_time_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeNetworkDelegate);
 };

@@ -29,14 +29,11 @@
 #include "chrome/plugin/chrome_content_plugin_client.h"
 #include "chrome/renderer/chrome_content_renderer_client.h"
 #include "chrome/utility/chrome_content_utility_client.h"
-#include "content/app/content_main.h"
 #include "content/common/content_counters.h"
-#include "content/public/app/content_main_delegate.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_paths.h"
 #include "content/public/common/content_switches.h"
-#include "media/base/media.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_switches.h"
 
@@ -62,7 +59,6 @@
 #include "chrome/common/mac/cfbundle_blocker.h"
 #include "chrome/common/mac/objc_zombie.h"
 #include "grit/chromium_strings.h"
-#include "third_party/WebKit/Source/WebKit/mac/WebCoreSupport/WebSystemInterface.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #endif
 
@@ -589,15 +585,6 @@ void ChromeMainDelegate::PreSandboxStartup() {
 #if !defined(GOOGLE_CHROME_BUILD)
   if (command_line.HasSwitch(switches::kSingleProcess)) {
     content::RenderProcessHost::set_run_renderer_in_process(true);
-#if defined(OS_MACOSX)
-    // TODO(port-mac): This is from renderer_main_platform_delegate.cc.
-    // shess tried to refactor things appropriately, but it sprawled out
-    // of control because different platforms needed different styles of
-    // initialization.  Try again once we understand the process
-    // architecture needed and where it should live.
-    InitWebCoreSystemInterface();
-#endif
-
     InitializeChromeContentRendererClient();
   }
 #endif  // GOOGLE_CHROME_BUILD
@@ -699,8 +686,7 @@ int ChromeMainDelegate::RunProcess(
       return kMainFunctions[i].function(main_function_params);
   }
 
-  NOTREACHED() << "Unknown process type: " << process_type;
-  return 1;
+  return -1;
 }
 
 void ChromeMainDelegate::ProcessExiting(const std::string& process_type) {
@@ -730,12 +716,6 @@ bool ChromeMainDelegate::DelaySandboxInitialization(
 }
 #elif defined(OS_POSIX)
 content::ZygoteForkDelegate* ChromeMainDelegate::ZygoteStarting() {
-  // Each Renderer we spawn will re-attempt initialization of the media
-  // libraries, at which point failure will be detected and handled, so
-  // we do not need to cope with initialization failures here.
-  FilePath media_path;
-  if (PathService::Get(chrome::DIR_MEDIA_LIBS, &media_path))
-    media::InitializeMediaLibrary(media_path);
 #if defined(DISABLE_NACL)
   return NULL;
 #else

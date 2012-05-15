@@ -2,22 +2,28 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "content/browser/child_process_security_policy_impl.h"
 #include "content/browser/renderer_host/test_render_view_host.h"
 #include "content/browser/tab_contents/navigation_controller_impl.h"
-#include "content/browser/tab_contents/test_tab_contents.h"
+#include "content/browser/tab_contents/test_web_contents.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/navigation_entry.h"
+#include "content/public/common/bindings_policy.h"
 #include "content/public/common/page_transition_types.h"
+#include "content/test/mock_render_process_host.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDragOperation.h"
 #include "webkit/glue/webdropdata.h"
 
-class RenderViewHostTest : public RenderViewHostTestHarness {
+using content::RenderViewHostImplTestHarness;
+using content::TestWebContents;
+
+class RenderViewHostTest : public RenderViewHostImplTestHarness {
 };
 
 // All about URLs reported by the renderer should get rewritten to about:blank.
 // See RenderViewHost::OnMsgNavigate for a discussion.
 TEST_F(RenderViewHostTest, FilterAbout) {
-  rvh()->SendNavigate(1, GURL("about:cache"));
+  test_rvh()->SendNavigate(1, GURL("about:cache"));
   ASSERT_TRUE(controller().GetActiveEntry());
   EXPECT_EQ(GURL("about:blank"), controller().GetActiveEntry()->GetURL());
 }
@@ -25,7 +31,7 @@ TEST_F(RenderViewHostTest, FilterAbout) {
 // Create a full screen popup RenderWidgetHost and View.
 TEST_F(RenderViewHostTest, CreateFullscreenWidget) {
   int routing_id = process()->GetNextRoutingID();
-  rvh()->CreateNewFullscreenWidget(routing_id);
+  test_rvh()->CreateNewFullscreenWidget(routing_id);
 }
 
 // Makes sure that RenderViewHost::is_waiting_for_unload_ack_ is false when
@@ -53,10 +59,20 @@ TEST_F(RenderViewHostTest, ResetUnloadOnReload) {
   // Simulate the ClosePage call which is normally sent by the net::URLRequest.
   rvh()->ClosePage();
   // Needed so that navigations are not suspended on the RVH.
-  rvh()->SendShouldCloseACK(true);
+  test_rvh()->SendShouldCloseACK(true);
   contents()->Stop();
   controller().Reload(false);
-  EXPECT_FALSE(rvh()->is_waiting_for_unload_ack_for_testing());
+  EXPECT_FALSE(test_rvh()->is_waiting_for_unload_ack_for_testing());
+}
+
+// Ensure we do not grant bindings to a process shared with unprivileged views.
+TEST_F(RenderViewHostTest, DontGrantBindingsToSharedProcess) {
+  // Create another view in the same process.
+  scoped_ptr<TestWebContents> new_tab(
+      new TestWebContents(browser_context(), rvh()->GetSiteInstance()));
+
+  rvh()->AllowBindings(content::BINDINGS_POLICY_WEB_UI);
+  EXPECT_FALSE(rvh()->GetEnabledBindings() & content::BINDINGS_POLICY_WEB_UI);
 }
 
 class MockDraggingRenderViewHostDelegateView
@@ -76,7 +92,7 @@ class MockDraggingRenderViewHostDelegateView
   virtual void ShowCreatedWidget(int route_id,
                                  const gfx::Rect& initial_pos) {}
   virtual void ShowCreatedFullscreenWidget(int route_id) {}
-  virtual void ShowContextMenu(const ContextMenuParams& params) {}
+  virtual void ShowContextMenu(const content::ContextMenuParams& params) {}
   virtual void ShowPopupMenu(const gfx::Rect& bounds,
                              int item_height,
                              double item_font_size,
@@ -109,38 +125,50 @@ class MockDraggingRenderViewHostDelegateView
 };
 
 TEST_F(RenderViewHostTest, StartDragging) {
-  TestTabContents* tab_contents = contents();
+  TestWebContents* web_contents = contents();
   MockDraggingRenderViewHostDelegateView view_delegate;
-  tab_contents->set_view_delegate(&view_delegate);
+  web_contents->set_view_delegate(&view_delegate);
 
   WebDropData drop_data;
   GURL file_url = GURL("file:///home/user/secrets.txt");
   drop_data.url = file_url;
   drop_data.html_base_url = file_url;
-  rvh()->TestOnMsgStartDragging(drop_data);
-  EXPECT_TRUE(view_delegate.drag_url().is_empty());
-  EXPECT_TRUE(view_delegate.html_base_url().is_empty());
+  test_rvh()->TestOnMsgStartDragging(drop_data);
+  EXPECT_EQ(GURL("about:blank"), view_delegate.drag_url());
+  EXPECT_EQ(GURL("about:blank"), view_delegate.html_base_url());
 
   GURL http_url = GURL("http://www.domain.com/index.html");
   drop_data.url = http_url;
   drop_data.html_base_url = http_url;
-  rvh()->TestOnMsgStartDragging(drop_data);
+  test_rvh()->TestOnMsgStartDragging(drop_data);
   EXPECT_EQ(http_url, view_delegate.drag_url());
   EXPECT_EQ(http_url, view_delegate.html_base_url());
 
   GURL https_url = GURL("https://www.domain.com/index.html");
   drop_data.url = https_url;
   drop_data.html_base_url = https_url;
-  rvh()->TestOnMsgStartDragging(drop_data);
+  test_rvh()->TestOnMsgStartDragging(drop_data);
   EXPECT_EQ(https_url, view_delegate.drag_url());
   EXPECT_EQ(https_url, view_delegate.html_base_url());
 
   GURL javascript_url = GURL("javascript:alert('I am a bookmarklet')");
   drop_data.url = javascript_url;
   drop_data.html_base_url = http_url;
-  rvh()->TestOnMsgStartDragging(drop_data);
+  test_rvh()->TestOnMsgStartDragging(drop_data);
   EXPECT_EQ(javascript_url, view_delegate.drag_url());
   EXPECT_EQ(http_url, view_delegate.html_base_url());
+}
+
+TEST_F(RenderViewHostTest, DragEnteredFileURLsStillBlocked) {
+  WebDropData dropped_data;
+  gfx::Point client_point;
+  gfx::Point screen_point;
+  GURL file_url = GURL("file:///etc/passwd");
+  dropped_data.url = file_url;
+  rvh()->DragTargetDragEnter(dropped_data, client_point, screen_point,
+                             WebKit::WebDragOperationNone);
+  EXPECT_FALSE(ChildProcessSecurityPolicyImpl::GetInstance()->CanRequestURL(
+      process()->GetID(), file_url));
 }
 
 // The test that follow trigger DCHECKS in debug build.
@@ -154,7 +182,7 @@ TEST_F(RenderViewHostTest, BadMessageHandlerRenderViewHost) {
   // two payload items but the one we construct has none.
   IPC::Message message(0, ViewHostMsg_UpdateTargetURL::ID,
                        IPC::Message::PRIORITY_NORMAL);
-  rvh()->TestOnMessageReceived(message);
+  test_rvh()->OnMessageReceived(message);
   EXPECT_EQ(1, process()->bad_msg_count());
 }
 
@@ -166,7 +194,7 @@ TEST_F(RenderViewHostTest, BadMessageHandlerRenderWidgetHost) {
   // one payload item but the one we construct has none.
   IPC::Message message(0, ViewHostMsg_UpdateRect::ID,
                        IPC::Message::PRIORITY_NORMAL);
-  rvh()->TestOnMessageReceived(message);
+  test_rvh()->OnMessageReceived(message);
   EXPECT_EQ(1, process()->bad_msg_count());
 }
 
@@ -179,7 +207,7 @@ TEST_F(RenderViewHostTest, BadMessageHandlerInputEventAck) {
   // OnMsgInputEventAck() processing.
   IPC::Message message(0, ViewHostMsg_HandleInputEvent_ACK::ID,
                        IPC::Message::PRIORITY_NORMAL);
-  rvh()->TestOnMessageReceived(message);
+  test_rvh()->OnMessageReceived(message);
   EXPECT_EQ(1, process()->bad_msg_count());
 }
 

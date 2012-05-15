@@ -9,16 +9,22 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
+#include "base/i18n/time_formatting.h"
 #include "base/string_number_conversions.h"
 #include "base/stringprintf.h"
 #include "base/sys_info.h"
 #include "base/values.h"
+#include "chrome/browser/crash_upload_list.h"
+#include "chrome/browser/gpu_blacklist.h"
+#include "chrome/browser/gpu_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
+#include "chrome/browser/ui/webui/crashes_ui.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/gpu/gpu_data_manager.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/gpu_data_manager.h"
+#include "content/public/browser/gpu_data_manager_observer.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_message_handler.h"
@@ -28,6 +34,7 @@
 #include "ui/base/l10n/l10n_util.h"
 
 using content::BrowserThread;
+using content::GpuDataManager;
 using content::WebContents;
 using content::WebUIMessageHandler;
 
@@ -49,7 +56,8 @@ ChromeWebUIDataSource* CreateGpuHTMLSource() {
 class GpuMessageHandler
     : public WebUIMessageHandler,
       public base::SupportsWeakPtr<GpuMessageHandler>,
-      public GpuDataManager::Observer {
+      public content::GpuDataManagerObserver,
+      public CrashUploadList::Delegate {
  public:
   GpuMessageHandler();
   virtual ~GpuMessageHandler();
@@ -57,8 +65,11 @@ class GpuMessageHandler
   // WebUIMessageHandler implementation.
   virtual void RegisterMessages() OVERRIDE;
 
-  // GpuDataManager::Observer implementation.
+  // GpuDataManagerObserver implementation.
   virtual void OnGpuInfoUpdate() OVERRIDE;
+
+  // CrashUploadList::Delegate implemenation.
+  virtual void OnCrashListAvailable() OVERRIDE;
 
   // Messages
   void OnBrowserBridgeInitialized(const ListValue* list);
@@ -67,6 +78,7 @@ class GpuMessageHandler
   // Submessages dispatched from OnCallAsync
   Value* OnRequestClientInfo(const ListValue* list);
   Value* OnRequestLogMessages(const ListValue* list);
+  Value* OnRequestCrashList(const ListValue* list);
 
   // Executes the javascript function |function_name| in the renderer, passing
   // it the argument |value|.
@@ -74,8 +86,8 @@ class GpuMessageHandler
                               const Value* value);
 
  private:
-  // Cache the Singleton for efficiency.
-  GpuDataManager* gpu_data_manager_;
+  scoped_refptr<CrashUploadList> crash_list_;
+  bool crash_list_available_;
 
   DISALLOW_COPY_AND_ASSIGN(GpuMessageHandler);
 };
@@ -86,18 +98,21 @@ class GpuMessageHandler
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-GpuMessageHandler::GpuMessageHandler() {
-  gpu_data_manager_ = GpuDataManager::GetInstance();
-  DCHECK(gpu_data_manager_);
+GpuMessageHandler::GpuMessageHandler()
+    : crash_list_available_(false) {
+  crash_list_ = CrashUploadList::Create(this);
 }
 
 GpuMessageHandler::~GpuMessageHandler() {
-  gpu_data_manager_->RemoveObserver(this);
+  GpuDataManager::GetInstance()->RemoveObserver(this);
+  crash_list_->ClearDelegate();
 }
 
 /* BrowserBridge.callAsync prepends a requestID to these messages. */
 void GpuMessageHandler::RegisterMessages() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  crash_list_->LoadCrashListAsynchronously();
 
   web_ui()->RegisterMessageCallback("browserBridgeInitialized",
       base::Bind(&GpuMessageHandler::OnBrowserBridgeInitialized,
@@ -135,6 +150,8 @@ void GpuMessageHandler::OnCallAsync(const ListValue* args) {
     ret = OnRequestClientInfo(submessageArgs);
   } else if (submessage == "requestLogMessages") {
     ret = OnRequestLogMessages(submessageArgs);
+  } else if (submessage == "requestCrashList") {
+    ret = OnRequestCrashList(submessageArgs);
   } else {  // unrecognized submessage
     NOTREACHED();
     delete submessageArgs;
@@ -158,11 +175,11 @@ void GpuMessageHandler::OnBrowserBridgeInitialized(const ListValue* args) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   // Watch for changes in GPUInfo
-  gpu_data_manager_->AddObserver(this);
+  GpuDataManager::GetInstance()->AddObserver(this);
 
   // Tell GpuDataManager it should have full GpuInfo. If the
   // Gpu process has not run yet, this will trigger its launch.
-  gpu_data_manager_->RequestCompleteGpuInfoIfNeeded();
+  GpuDataManager::GetInstance()->RequestCompleteGpuInfoIfNeeded();
 
   // Run callback immediately in case the info is ready and no update in the
   // future.
@@ -204,11 +221,7 @@ Value* GpuMessageHandler::OnRequestClientInfo(const ListValue* list) {
   dict->SetString("graphics_backend", "Core Graphics");
 #endif
   dict->SetString("blacklist_version",
-      GpuDataManager::GetInstance()->GetBlacklistVersion());
-
-  GpuPerformanceStats stats =
-      GpuDataManager::GetInstance()->GetPerformanceStats();
-  dict->Set("performance", stats.ToValue());
+      GpuBlacklist::GetInstance()->GetVersion());
 
   return dict;
 }
@@ -216,22 +229,53 @@ Value* GpuMessageHandler::OnRequestClientInfo(const ListValue* list) {
 Value* GpuMessageHandler::OnRequestLogMessages(const ListValue*) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  return gpu_data_manager_->log_messages().DeepCopy();
+  return GpuDataManager::GetInstance()->GetLogMessages().DeepCopy();
+}
+
+Value* GpuMessageHandler::OnRequestCrashList(const ListValue*) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  if (!CrashesUI::CrashReportingEnabled()) {
+    // We need to return an empty list instead of NULL.
+    return new ListValue;
+  }
+  if (!crash_list_available_) {
+    // If we are still obtaining crash list, then return null so another
+    // request will be scheduled.
+    return NULL;
+  }
+
+  ListValue* list_value = new ListValue;
+  std::vector<CrashUploadList::CrashInfo> crashes;
+  crash_list_->GetUploadedCrashes(50, &crashes);
+  for (std::vector<CrashUploadList::CrashInfo>::iterator i = crashes.begin();
+       i != crashes.end(); ++i) {
+    DictionaryValue* crash = new DictionaryValue();
+    crash->SetString("id", i->crash_id);
+    crash->SetString("time",
+                     base::TimeFormatFriendlyDateAndTime(i->crash_time));
+    list_value->Append(crash);
+  }
+  return list_value;
 }
 
 void GpuMessageHandler::OnGpuInfoUpdate() {
   // Get GPU Info.
   scoped_ptr<base::DictionaryValue> gpu_info_val(
-      gpu_data_manager_->GpuInfoAsDictionaryValue());
+      gpu_util::GpuInfoAsDictionaryValue());
 
   // Add in blacklisting features
-  Value* feature_status = gpu_data_manager_->GetFeatureStatus();
+  Value* feature_status = gpu_util::GetFeatureStatus();
   if (feature_status)
     gpu_info_val->Set("featureStatus", feature_status);
 
   // Send GPU Info to javascript.
   web_ui()->CallJavascriptFunction("browserBridge.onGpuInfoUpdate",
       *(gpu_info_val.get()));
+}
+
+void GpuMessageHandler::OnCrashListAvailable() {
+  crash_list_available_ = true;
 }
 
 }  // namespace

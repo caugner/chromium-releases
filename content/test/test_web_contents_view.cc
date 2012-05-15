@@ -37,7 +37,8 @@ void TestWebContentsView::ShowCreatedWidget(int route_id,
 void TestWebContentsView::ShowCreatedFullscreenWidget(int route_id) {
 }
 
-void TestWebContentsView::ShowContextMenu(const ContextMenuParams& params) {
+void TestWebContentsView::ShowContextMenu(
+    const ContextMenuParams& params) {
 }
 
 void TestWebContentsView::ShowPopupMenu(const gfx::Rect& bounds,
@@ -127,12 +128,6 @@ void TestWebContentsView::CloseTabAfterEventTracking() {
 }
 
 void TestWebContentsView::GetViewBounds(gfx::Rect* out) const {
-}
-
-void TestWebContentsView::InstallOverlayView(gfx::NativeView view) {
-}
-
-void TestWebContentsView::RemoveOverlayView() {
 }
 
 }  // namespace content

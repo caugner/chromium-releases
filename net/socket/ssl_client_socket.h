@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,13 +11,14 @@
 #include "net/base/completion_callback.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
+#include "net/base/ssl_client_cert_type.h"
 #include "net/socket/ssl_socket.h"
 #include "net/socket/stream_socket.h"
 
 namespace net {
 
 class CertVerifier;
-class OriginBoundCertService;
+class ServerBoundCertService;
 class SSLCertRequestInfo;
 class SSLHostInfo;
 class SSLHostInfoFactory;
@@ -29,23 +30,23 @@ class TransportSecurityState;
 struct SSLClientSocketContext {
   SSLClientSocketContext()
       : cert_verifier(NULL),
-        origin_bound_cert_service(NULL),
+        server_bound_cert_service(NULL),
         transport_security_state(NULL),
         ssl_host_info_factory(NULL) {}
 
   SSLClientSocketContext(CertVerifier* cert_verifier_arg,
-                         OriginBoundCertService* origin_bound_cert_service_arg,
+                         ServerBoundCertService* server_bound_cert_service_arg,
                          TransportSecurityState* transport_security_state_arg,
                          SSLHostInfoFactory* ssl_host_info_factory_arg,
                          const std::string& ssl_session_cache_shard_arg)
       : cert_verifier(cert_verifier_arg),
-        origin_bound_cert_service(origin_bound_cert_service_arg),
+        server_bound_cert_service(server_bound_cert_service_arg),
         transport_security_state(transport_security_state_arg),
         ssl_host_info_factory(ssl_host_info_factory_arg),
         ssl_session_cache_shard(ssl_session_cache_shard_arg) {}
 
   CertVerifier* cert_verifier;
-  OriginBoundCertService* origin_bound_cert_service;
+  ServerBoundCertService* server_bound_cert_service;
   TransportSecurityState* transport_security_state;
   SSLHostInfoFactory* ssl_host_info_factory;
   // ssl_session_cache_shard is an opaque string that identifies a shard of the
@@ -86,6 +87,7 @@ class NET_EXPORT SSLClientSocket : public SSLSocket {
     kProtoSPDY1 = 2,
     kProtoSPDY2 = 3,
     kProtoSPDY21 = 4,
+    kProtoSPDY3 = 5,
   };
 
   // Gets the SSL connection information of the socket.
@@ -140,13 +142,21 @@ class NET_EXPORT SSLClientSocket : public SSLSocket {
   virtual void set_protocol_negotiated(
       SSLClientSocket::NextProto protocol_negotiated);
 
-  // Returns true if an origin bound certificate was sent on this connection.
-  // This may be useful for protocols, like SPDY, which allow the same
-  // connection to be shared between multiple origins, each of which need
-  // an origin bound certificate.
-  virtual bool was_origin_bound_cert_sent() const;
+  // Returns the ServerBoundCertService used by this socket, or NULL if
+  // server bound certificates are not supported.
+  virtual ServerBoundCertService* GetServerBoundCertService() const = 0;
 
-  virtual bool set_was_origin_bound_cert_sent(bool sent);
+  // Returns true if a domain bound certificate was sent on this connection.
+  // This may be useful for protocols, like SPDY, which allow the same
+  // connection to be shared between multiple domains, each of which need
+  // a domain bound certificate.
+  virtual bool WasDomainBoundCertSent() const;
+
+  // Returns the type of the domain bound cert that was sent, or
+  // CLIENT_CERT_INVALID_TYPE if none was sent.
+  virtual SSLClientCertType domain_bound_cert_type() const;
+
+  virtual SSLClientCertType set_domain_bound_cert_type(SSLClientCertType type);
 
  private:
   // True if NPN was responded to, independent of selecting SPDY or HTTP.
@@ -155,8 +165,9 @@ class NET_EXPORT SSLClientSocket : public SSLSocket {
   bool was_spdy_negotiated_;
   // Protocol that we negotiated with the server.
   SSLClientSocket::NextProto protocol_negotiated_;
-  // True if an origin bound certificate was sent.
-  bool was_origin_bound_cert_sent_;
+  // Type of the domain bound cert that was sent, or CLIENT_CERT_INVALID_TYPE
+  // if none was sent.
+  SSLClientCertType domain_bound_cert_type_;
 };
 
 }  // namespace net

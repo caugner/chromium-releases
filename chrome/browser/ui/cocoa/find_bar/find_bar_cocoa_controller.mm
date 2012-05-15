@@ -12,17 +12,17 @@
 #import "chrome/browser/ui/cocoa/find_bar/find_bar_cocoa_controller.h"
 #import "chrome/browser/ui/cocoa/find_bar/find_bar_text_field.h"
 #import "chrome/browser/ui/cocoa/find_bar/find_bar_text_field_cell.h"
-#import "chrome/browser/ui/cocoa/focus_tracker.h"
 #import "chrome/browser/ui/cocoa/nsview_additions.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_controller.h"
 #include "chrome/browser/ui/find_bar/find_bar_controller.h"
 #include "chrome/browser/ui/find_bar/find_tab_helper.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
-#import "content/browser/find_pasteboard.h"
-#include "content/browser/renderer_host/render_view_host.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 #import "third_party/GTM/AppKit/GTMNSAnimation+Duration.h"
+#import "ui/base/cocoa/find_pasteboard.h"
+#import "ui/base/cocoa/focus_tracker.h"
 
 const float kFindBarOpenDuration = 0.2;
 const float kFindBarCloseDuration = 0.15;
@@ -234,7 +234,7 @@ const float kRightEdgeOffset = 25;
     // |ForwardKeyboardEvent()| directly ignores edit commands, which breaks
     // cmd-up/down if we ever decide to include |moveToBeginningOfDocument:| in
     // the list above.
-    RenderViewHost* render_view_host =
+    content::RenderViewHost* render_view_host =
         contents->web_contents()->GetRenderViewHost();
     render_view_host->ForwardKeyboardEvent(NativeWebKeyboardEvent(event));
     return YES;

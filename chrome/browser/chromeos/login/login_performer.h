@@ -75,15 +75,14 @@ class LoginPerformer : public LoginStatusConsumer,
 
   // LoginStatusConsumer implementation:
   virtual void OnLoginFailure(const LoginFailure& error) OVERRIDE;
+  virtual void OnDemoUserLoginSuccess() OVERRIDE;
   virtual void OnLoginSuccess(
       const std::string& username,
       const std::string& password,
-      const GaiaAuthConsumer::ClientLoginResult& credentials,
       bool pending_requests,
       bool using_oauth) OVERRIDE;
   virtual void OnOffTheRecordLoginSuccess() OVERRIDE;
-  virtual void OnPasswordChangeDetected(
-      const GaiaAuthConsumer::ClientLoginResult& credentials) OVERRIDE;
+  virtual void OnPasswordChangeDetected() OVERRIDE;
 
   // Completes login process that has already been authenticated with
   // provided |username| and |password|.
@@ -91,6 +90,9 @@ class LoginPerformer : public LoginStatusConsumer,
 
   // Performs login with the |username| and |password| specified.
   void Login(const std::string& username, const std::string& password);
+
+  // Performs login for the demo user.
+  void LoginDemoUser();
 
   // Performs actions to prepare Guest mode login.
   void LoginOffTheRecord();
@@ -175,9 +177,6 @@ class LoginPerformer : public LoginStatusConsumer,
   // sign-in server. LoginFailure.None() by default.
   LoginFailure last_login_failure_;
 
-  // Cached credentials data when password change is detected.
-  GaiaAuthConsumer::ClientLoginResult cached_credentials_;
-
   // Username and password for the current login attempt.
   std::string username_;
   std::string password_;
@@ -200,8 +199,6 @@ class LoginPerformer : public LoginStatusConsumer,
   // online authentication response. Used to distinguish cases when screen
   // is locked during that stage. No need to resolve screen lock action then.
   bool initial_online_auth_pending_;
-
-  GaiaAuthConsumer::ClientLoginResult credentials_;
 
   // Authorization mode type.
   AuthorizationMode auth_mode_;

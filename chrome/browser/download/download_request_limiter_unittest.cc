@@ -2,10 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/bind.h"
 #include "chrome/browser/download/download_request_limiter.h"
 #include "chrome/browser/ui/tab_contents/test_tab_contents_wrapper.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/browser/tab_contents/test_tab_contents.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -16,6 +16,8 @@ class DownloadRequestLimiterTest : public TabContentsWrapperTestHarness {
  public:
   DownloadRequestLimiterTest()
       : ui_thread_(BrowserThread::UI, &message_loop_),
+        file_user_blocking_thread_(
+            BrowserThread::FILE_USER_BLOCKING, &message_loop_),
         io_thread_(BrowserThread::IO, &message_loop_) {
   }
 
@@ -39,7 +41,8 @@ class DownloadRequestLimiterTest : public TabContentsWrapperTestHarness {
   void CanDownload() {
     download_request_limiter_->CanDownloadImpl(
         contents_wrapper(),
-        -1,
+        -1,  // request id
+        "GET",  // request method
         base::Bind(&DownloadRequestLimiterTest::ContinueDownload,
                    base::Unretained(this)));
     message_loop_.RunAllPending();
@@ -90,6 +93,7 @@ class DownloadRequestLimiterTest : public TabContentsWrapperTestHarness {
   int ask_allow_count_;
 
   content::TestBrowserThread ui_thread_;
+  content::TestBrowserThread file_user_blocking_thread_;
   content::TestBrowserThread io_thread_;
 };
 

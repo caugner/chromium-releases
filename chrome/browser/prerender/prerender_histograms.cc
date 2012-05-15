@@ -8,8 +8,11 @@
 
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
-#include "chrome/browser/prerender/prerender_util.h"
+#include "base/stringprintf.h"
+#include "chrome/browser/autocomplete/network_action_predictor.h"
 #include "chrome/browser/prerender/prerender_field_trial.h"
+#include "chrome/browser/prerender/prerender_manager.h"
+#include "chrome/browser/prerender/prerender_util.h"
 
 namespace prerender {
 
@@ -43,7 +46,10 @@ std::string GetHistogramName(Origin origin, uint8 experiment_id,
 
   switch (origin) {
     case ORIGIN_OMNIBOX:
-      return ComposeHistogramName("omnibox", name);
+      return ComposeHistogramName(
+          StringPrintf("omnibox_%.1f",
+                       NetworkActionPredictor::get_hit_weight()).c_str(),
+          name);
     case ORIGIN_LINK_REL_PRERENDER:
       return ComposeHistogramName("web", name);
     case ORIGIN_GWS_PRERENDER:  // Handled above.
@@ -144,13 +150,30 @@ void PrerenderHistograms::RecordPrerender(Origin origin, const GURL& url) {
 }
 
 void PrerenderHistograms::RecordPrerenderStarted(Origin origin) const {
-  if (OriginIsOmnibox(origin))
-    UMA_HISTOGRAM_COUNTS("Prerender.OmniboxPrerenderCount", 1);
+  if (OriginIsOmnibox(origin)) {
+    UMA_HISTOGRAM_COUNTS(
+        StringPrintf("Prerender.OmniboxPrerenderCount_%.1f%s",
+                     NetworkActionPredictor::get_hit_weight(),
+                     PrerenderManager::GetModeString()).c_str(),
+        1);
+  }
 }
 
 void PrerenderHistograms::RecordUsedPrerender(Origin origin) const {
-  if (OriginIsOmnibox(origin))
-    UMA_HISTOGRAM_COUNTS("Prerender.OmniboxNavigationsUsedPrerenderCount", 1);
+  if (OriginIsOmnibox(origin)) {
+    UMA_HISTOGRAM_COUNTS(
+        StringPrintf("Prerender.OmniboxNavigationsUsedPrerenderCount_%.1f%s",
+                     NetworkActionPredictor::get_hit_weight(),
+                     PrerenderManager::GetModeString()).c_str(),
+        1);
+  }
+}
+
+void PrerenderHistograms::RecordTimeSinceLastRecentVisit(
+    base::TimeDelta delta) const {
+  PREFIXED_HISTOGRAM(
+      "TimeSinceLastRecentVisit",
+      UMA_HISTOGRAM_TIMES(name, delta));
 }
 
 base::TimeTicks PrerenderHistograms::GetCurrentTimeTicks() const {
@@ -240,6 +263,27 @@ void PrerenderHistograms::RecordPerceivedPageLoadTime(
       }
     }
   }
+}
+
+void PrerenderHistograms::RecordPageLoadTimeNotSwappedIn(
+    base::TimeDelta page_load_time, const GURL& url) const {
+  // If the URL to be prerendered is not a http[s] URL, or is a Google URL,
+  // do not record.
+  if (!IsWebURL(url) || IsGoogleDomain(url))
+    return;
+  RECORD_PLT("PrerenderNotSwappedInPLT", page_load_time);
+}
+
+void PrerenderHistograms::RecordPercentLoadDoneAtSwapin(double fraction)
+    const {
+  if (fraction < 0.0 || fraction > 1.0)
+    return;
+  int percentage = static_cast<int>(fraction * 100);
+  if (percentage < 0 || percentage > 100)
+    return;
+  PREFIXED_HISTOGRAM(
+      base::FieldTrial::MakeName("PercentLoadDoneAtSwapin", "Prerender"),
+      UMA_HISTOGRAM_PERCENTAGE(name, percentage));
 }
 
 base::TimeDelta PrerenderHistograms::GetTimeSinceLastPrerender() const {

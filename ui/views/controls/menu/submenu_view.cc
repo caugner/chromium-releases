@@ -281,7 +281,7 @@ void SubmenuView::ShowAt(Widget* parent,
     // Force construction of the scroll view container.
     GetScrollViewContainer();
     // Make sure the first row is visible.
-    ScrollRectToVisible(gfx::Rect(gfx::Point(), gfx::Size(1, 1)));
+    ScrollRectToVisible(gfx::Rect(gfx::Size(1, 1)));
     host_->InitMenuHost(parent, bounds, scroll_view_container_, do_capture);
   }
 
@@ -382,7 +382,7 @@ void SubmenuView::PaintDropIndicator(gfx::Canvas* canvas,
     return;
 
   gfx::Rect bounds = CalculateDropIndicatorBounds(item, position);
-  canvas->FillRect(kDropIndicatorColor, bounds);
+  canvas->FillRect(bounds, kDropIndicatorColor);
 }
 
 void SubmenuView::SchedulePaintForDropIndicator(

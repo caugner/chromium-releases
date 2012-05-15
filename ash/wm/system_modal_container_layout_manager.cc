@@ -35,7 +35,7 @@ class ScreenView : public views::View {
 
   // Overridden from views::View:
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE {
-    canvas->FillRect(GetOverlayColor(), GetLocalBounds());
+    canvas->FillRect(GetLocalBounds(), GetOverlayColor());
   }
 
  private:
@@ -60,7 +60,7 @@ SystemModalContainerLayoutManager::SystemModalContainerLayoutManager(
     : container_(container),
       modal_screen_(NULL),
       ALLOW_THIS_IN_INITIALIZER_LIST(modality_filter_(
-          new SystemModalContainerEventFilter(container, this))) {
+          new SystemModalContainerEventFilter(this))) {
 }
 
 SystemModalContainerLayoutManager::~SystemModalContainerLayoutManager() {
@@ -82,14 +82,14 @@ void SystemModalContainerLayoutManager::OnWindowAddedToLayout(
          child->type() == aura::client::WINDOW_TYPE_NORMAL ||
          child->type() == aura::client::WINDOW_TYPE_POPUP);
   child->AddObserver(this);
-  if (child->GetIntProperty(aura::client::kModalKey))
+  if (child->GetProperty(aura::client::kModalKey) != ui::MODAL_TYPE_NONE)
     AddModalWindow(child);
 }
 
 void SystemModalContainerLayoutManager::OnWillRemoveWindowFromLayout(
     aura::Window* child) {
   child->RemoveObserver(this);
-  if (child->GetIntProperty(aura::client::kModalKey))
+  if (child->GetProperty(aura::client::kModalKey) != ui::MODAL_TYPE_NONE)
     RemoveModalWindow(child);
 }
 
@@ -109,33 +109,32 @@ void SystemModalContainerLayoutManager::SetChildBounds(
 
 void SystemModalContainerLayoutManager::OnWindowPropertyChanged(
     aura::Window* window,
-    const char* key,
-    void* old) {
+    const void* key,
+    intptr_t old) {
   if (key != aura::client::kModalKey)
     return;
 
-  if (window->GetIntProperty(aura::client::kModalKey)) {
+  if (window->GetProperty(aura::client::kModalKey) != ui::MODAL_TYPE_NONE) {
     AddModalWindow(window);
-  } else if (static_cast<int>(reinterpret_cast<intptr_t>(old))) {
+  } else if (static_cast<ui::ModalType>(old) != ui::MODAL_TYPE_NONE) {
     RemoveModalWindow(window);
   }
 }
 
-////////////////////////////////////////////////////////////////////////////////
-// SystemModalContainerLayoutManager, ui::LayerAnimationObserver implementation:
+void SystemModalContainerLayoutManager::OnWindowDestroying(
+    aura::Window* window) {
+  if (modal_screen_ && modal_screen_->GetNativeView() == window)
+    modal_screen_ = NULL;
+}
 
-void SystemModalContainerLayoutManager::OnLayerAnimationEnded(
-    const ui::LayerAnimationSequence* sequence) {
+
+////////////////////////////////////////////////////////////////////////////////
+// SystemModalContainerLayoutManager,
+//     ui::ImplicitAnimationObserver implementation:
+
+void SystemModalContainerLayoutManager::OnImplicitAnimationsCompleted() {
   if (modal_screen_ && !modal_screen_->GetNativeView()->layer()->ShouldDraw())
     DestroyModalScreen();
-}
-
-void SystemModalContainerLayoutManager::OnLayerAnimationAborted(
-    const ui::LayerAnimationSequence* sequence) {
-}
-
-void SystemModalContainerLayoutManager::OnLayerAnimationScheduled(
-    const ui::LayerAnimationSequence* sequence) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -149,7 +148,7 @@ bool SystemModalContainerLayoutManager::CanWindowReceiveEvents(
   if (ash::Shell::GetInstance()->IsScreenLocked() &&
       container_->id() < ash::internal::kShellWindowId_LockScreenContainer)
     return true;
-  return GetActivatableWindow(window) == modal_window();
+  return wm::GetActivatableWindow(window) == modal_window();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -170,43 +169,49 @@ void SystemModalContainerLayoutManager::RemoveModalWindow(
   if (modal_windows_.empty())
     HideModalScreen();
   else
-    ash::ActivateWindow(modal_window());
+    wm::ActivateWindow(modal_window());
 }
 
 void SystemModalContainerLayoutManager::CreateModalScreen() {
-  if (modal_screen_)
-    return;
-  modal_screen_ = new views::Widget;
-  views::Widget::InitParams params(views::Widget::InitParams::TYPE_CONTROL);
-  params.parent = container_;
-  params.bounds = gfx::Rect(0, 0, container_->bounds().width(),
-                            container_->bounds().height());
-  modal_screen_->Init(params);
-  modal_screen_->GetNativeView()->SetName(
-      "SystemModalContainerLayoutManager.ModalScreen");
-  modal_screen_->SetContentsView(new ScreenView);
-  modal_screen_->GetNativeView()->layer()->SetOpacity(0.0f);
-  modal_screen_->GetNativeView()->layer()->GetAnimator()->AddObserver(this);
+  if (!modal_screen_) {
+    modal_screen_ = new views::Widget;
+    views::Widget::InitParams params(views::Widget::InitParams::TYPE_CONTROL);
+    params.parent = container_;
+    params.bounds = gfx::Rect(0, 0, container_->bounds().width(),
+        container_->bounds().height());
+    modal_screen_->Init(params);
+    modal_screen_->GetNativeView()->SetName(
+        "SystemModalContainerLayoutManager.ModalScreen");
+    modal_screen_->SetContentsView(new ScreenView);
+    modal_screen_->GetNativeView()->layer()->SetOpacity(0.0f);
 
-  Shell::GetInstance()->AddRootWindowEventFilter(modality_filter_.get());
+    Shell::GetInstance()->AddRootWindowEventFilter(modality_filter_.get());
+  }
+
+  StopObservingImplicitAnimations();
 
   ui::ScopedLayerAnimationSettings settings(
       modal_screen_->GetNativeView()->layer()->GetAnimator());
+  settings.AddObserver(this);
   modal_screen_->Show();
   modal_screen_->GetNativeView()->layer()->SetOpacity(0.5f);
   container_->StackChildAtTop(modal_screen_->GetNativeView());
 }
 
 void SystemModalContainerLayoutManager::DestroyModalScreen() {
-  modal_screen_->GetNativeView()->layer()->GetAnimator()->RemoveObserver(this);
+  // Stop observing the modal screen's animations.
+  StopObservingImplicitAnimations();
   modal_screen_->Close();
   modal_screen_ = NULL;
 }
 
 void SystemModalContainerLayoutManager::HideModalScreen() {
+  StopObservingImplicitAnimations();
+
   Shell::GetInstance()->RemoveRootWindowEventFilter(modality_filter_.get());
   ui::ScopedLayerAnimationSettings settings(
       modal_screen_->GetNativeView()->layer()->GetAnimator());
+  settings.AddObserver(this);
   modal_screen_->GetNativeView()->layer()->SetOpacity(0.0f);
 }
 

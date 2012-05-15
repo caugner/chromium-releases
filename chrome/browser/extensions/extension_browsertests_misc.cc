@@ -13,7 +13,6 @@
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
-#include "chrome/browser/extensions/extension_updater.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/browser.h"
@@ -24,9 +23,9 @@
 #include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/browser/renderer_host/render_view_host.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_view_host_delegate.h"
 #include "content/public/browser/web_contents.h"
 #include "net/base/net_util.h"
@@ -127,10 +126,11 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, WebKitPrefsBackgroundPage) {
   ExtensionProcessManager* manager =
         browser()->profile()->GetExtensionProcessManager();
   ExtensionHost* host = FindHostWithPath(manager, "/backgroundpage.html", 1);
-  WebPreferences prefs = host->render_view_host()->delegate()->GetWebkitPrefs();
-  ASSERT_FALSE(prefs.experimental_webgl_enabled);
-  ASSERT_FALSE(prefs.accelerated_compositing_enabled);
-  ASSERT_FALSE(prefs.accelerated_2d_canvas_enabled);
+  WebPreferences prefs =
+      host->render_view_host()->GetDelegate()->GetWebkitPrefs();
+  ASSERT_TRUE(prefs.experimental_webgl_enabled);
+  ASSERT_TRUE(prefs.accelerated_compositing_enabled);
+  ASSERT_TRUE(prefs.accelerated_2d_canvas_enabled);
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, PageActionCrash25562) {
@@ -780,12 +780,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, WindowOpenNoPrivileges) {
 }
 
 #if defined(OS_WIN)
-#if defined(COMPONENT_BUILD)
-// http://crbug.com/107735
-#define MAYBE_PluginLoadUnload DISABLED_PluginLoadUnload
-#else
 #define MAYBE_PluginLoadUnload PluginLoadUnload
-#endif  // COMPONENT_BUILD
 #elif defined(OS_LINUX)
 // http://crbug.com/47598
 #define MAYBE_PluginLoadUnload DISABLED_PluginLoadUnload

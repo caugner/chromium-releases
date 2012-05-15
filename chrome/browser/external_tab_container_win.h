@@ -147,10 +147,12 @@ class ExternalTabContainer : public content::WebContentsDelegate,
   virtual void HandleKeyboardEvent(
       const NativeWebKeyboardEvent& event) OVERRIDE;
   virtual bool TakeFocus(bool reverse) OVERRIDE;
-  virtual bool CanDownload(content::WebContents* source,
-                           int request_id) OVERRIDE;
+  virtual bool CanDownload(content::RenderViewHost* render_view_host,
+                           int request_id,
+                           const std::string& request_method) OVERRIDE;
   virtual bool OnGoToEntryOffset(int offset) OVERRIDE;
-  virtual bool HandleContextMenu(const ContextMenuParams& params) OVERRIDE;
+  virtual bool HandleContextMenu(
+      const content::ContextMenuParams& params) OVERRIDE;
   virtual bool ExecuteContextMenuCommand(int command) OVERRIDE;
   virtual void BeforeUnloadFired(content::WebContents* tab,
                                  bool proceed,
@@ -188,11 +190,17 @@ class ExternalTabContainer : public content::WebContentsDelegate,
   virtual void CrashedPlugin(content::WebContents* tab,
                              const FilePath& plugin_path) OVERRIDE;
 
-  void RegisterRenderViewHost(RenderViewHost* render_view_host);
-  void UnregisterRenderViewHost(RenderViewHost* render_view_host);
+  void RegisterRenderViewHost(content::RenderViewHost* render_view_host);
+  void UnregisterRenderViewHost(content::RenderViewHost* render_view_host);
 
   // Overridden from content::WebContentsObserver:
   virtual bool OnMessageReceived(const IPC::Message& message);
+  virtual void DidFailProvisionalLoad(
+      int64 frame_id,
+      bool is_main_frame,
+      const GURL& validated_url,
+      int error_code,
+      const string16& error_description) OVERRIDE;
 
   // Message handlers
   void OnForwardMessageToExternalHost(const std::string& message,
@@ -252,8 +260,9 @@ class ExternalTabContainer : public content::WebContentsDelegate,
 
   // Helper resource automation registration method, allowing registration of
   // pending RenderViewHosts.
-  void RegisterRenderViewHostForAutomation(RenderViewHost* render_view_host,
-                                           bool pending_view);
+  void RegisterRenderViewHostForAutomation(
+      content::RenderViewHost* render_view_host,
+      bool pending_view);
 
   // Helper function for processing keystokes coming back from the renderer
   // process.
@@ -382,7 +391,7 @@ class TemporaryPopupExternalTabContainer : public ExternalTabContainer {
     NOTREACHED();
   }
 
-  virtual void CloseContents(TabContents* source) {
+  virtual void CloseContents(content::WebContents* source) {
     NOTREACHED();
   }
 
@@ -402,7 +411,7 @@ class TemporaryPopupExternalTabContainer : public ExternalTabContainer {
     return false;
   }
 
-  virtual bool HandleContextMenu(const ContextMenuParams& params) {
+  virtual bool HandleContextMenu(const content::ContextMenuParams& params) {
     NOTREACHED();
     return false;
   }

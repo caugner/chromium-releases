@@ -20,8 +20,8 @@
 #endif
 
 // Window resizes are not completed by the time the callback happens,
-// so these tests fail on linux. http://crbug.com/72369
-#if defined(OS_LINUX)
+// so these tests fail on linux/gtk. http://crbug.com/72369
+#if defined(OS_LINUX) && !defined(USE_AURA)
 #define MAYBE_FocusWindowDoesNotExitFullscreen \
   DISABLED_FocusWindowDoesNotExitFullscreen
 #define MAYBE_UpdateWindowSizeExitsFullscreen \
@@ -29,20 +29,21 @@
 #define MAYBE_UpdateWindowResize DISABLED_UpdateWindowResize
 #define MAYBE_UpdateWindowShowState DISABLED_UpdateWindowShowState
 #else
+
+#if defined(USE_AURA)
+// Maximizing/fullscreen popup window doesn't work on aura's managed mode.
+// See bug crbug.com/116305.
+#define MAYBE_UpdateWindowShowState DISABLED_UpdateWindowShowState
+#else
+#define MAYBE_UpdateWindowShowState UpdateWindowShowState
+#endif  // defined(USE_AURA)
+
 #define MAYBE_FocusWindowDoesNotExitFullscreen FocusWindowDoesNotExitFullscreen
 #define MAYBE_UpdateWindowSizeExitsFullscreen UpdateWindowSizeExitsFullscreen
 #define MAYBE_UpdateWindowResize UpdateWindowResize
-#define MAYBE_UpdateWindowShowState UpdateWindowShowState
-#endif
+#endif  // defined(OS_LINUX) && !defined(USE_AURA)
 
-// See crbug.com/108492.
-#if defined(USE_AURA) && defined(OS_CHROMEOS)
-#define MAYBE_Tabs DISABLED_Tabs
-#else
-#define MAYBE_Tabs Tabs
-#endif
-
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MAYBE_Tabs) {
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, Tabs) {
   // The test creates a tab and checks that the URL of the new tab
   // is that of the new tab page.  Make sure the pref that controls
   // this is set.
@@ -72,7 +73,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, TabEvents) {
   ASSERT_TRUE(RunExtensionSubtest("tabs/basics", "events.html")) << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, TabRelativeURLs) {
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, DISABLED_TabRelativeURLs) {
   ASSERT_TRUE(RunExtensionSubtest("tabs/basics", "relative_urls.html"))
       << message_;
 }
@@ -97,12 +98,12 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, TabCurrentWindow) {
   ASSERT_TRUE(RunExtensionTest("tabs/current_window")) << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, TabGetCurrent) {
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, DISABLED_TabGetCurrent) {
   ASSERT_TRUE(RunExtensionTest("tabs/get_current")) << message_;
 }
 
 // Flaky on the trybots. See http://crbug.com/96725.
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, FLAKY_TabConnect) {
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, DISABLED_TabConnect) {
   ASSERT_TRUE(StartTestServer());
   ASSERT_TRUE(RunExtensionTest("tabs/connect")) << message_;
 }
@@ -111,18 +112,11 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MAYBE_TabOnRemoved) {
   ASSERT_TRUE(RunExtensionTest("tabs/on_removed")) << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, TabReload) {
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, DISABLED_TabReload) {
   ASSERT_TRUE(RunExtensionTest("tabs/reload")) << message_;
 }
 
-// Test is timing out on linux and cros and flaky on others.
-// See http://crbug.com/83876
-#if defined(OS_LINUX)
-#define MAYBE_CaptureVisibleTabJpeg DISABLED_CaptureVisibleTabJpeg
-#else
-#define MAYBE_CaptureVisibleTabJpeg FLAKY_CaptureVisibleTabJpeg
-#endif
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MAYBE_CaptureVisibleTabJpeg) {
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, CaptureVisibleTabJpeg) {
   host_resolver()->AddRule("a.com", "127.0.0.1");
   host_resolver()->AddRule("b.com", "127.0.0.1");
   ASSERT_TRUE(StartTestServer());
@@ -130,14 +124,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MAYBE_CaptureVisibleTabJpeg) {
                                   "test_jpeg.html")) << message_;
 }
 
-// Test is timing out on linux and cros and flaky on others.
-// See http://crbug.com/83876
-#if defined(OS_LINUX)
-#define MAYBE_CaptureVisibleTabPng DISABLED_CaptureVisibleTabPng
-#else
-#define MAYBE_CaptureVisibleTabPng FLAKY_CaptureVisibleTabPng
-#endif
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MAYBE_CaptureVisibleTabPng) {
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, DISABLED_CaptureVisibleTabPng) {
   host_resolver()->AddRule("a.com", "127.0.0.1");
   host_resolver()->AddRule("b.com", "127.0.0.1");
   ASSERT_TRUE(StartTestServer());
@@ -145,13 +132,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MAYBE_CaptureVisibleTabPng) {
                                   "test_png.html")) << message_;
 }
 
-// Times out on non-Windows. See http://crbug.com/80212
-#if defined(OS_WIN)
-#define MAYBE_CaptureVisibleTabRace DISABLED_CaptureVisibleTabRace
-#else
-#define MAYBE_CaptureVisibleTabRace DISABLED_CaptureVisibleTabRace
-#endif
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MAYBE_CaptureVisibleTabRace) {
+// Times out on non-Windows.
+// See http://crbug.com/80212
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, DISABLED_CaptureVisibleTabRace) {
   ASSERT_TRUE(RunExtensionSubtest("tabs/capture_visible_tab",
                                   "test_race.html")) << message_;
 }
@@ -162,8 +145,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, CaptureVisibleFile) {
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, CaptureVisibleNoFile) {
-  ASSERT_TRUE(RunExtensionSubtestNoFileAccess("tabs/capture_visible_tab",
-                                              "test_nofile.html")) << message_;
+  ASSERT_TRUE(RunExtensionSubtest(
+      "tabs/capture_visible_tab", "test_nofile.html",
+      ExtensionApiTest::kFlagNone)) << message_;
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, TabsOnUpdated) {
@@ -214,11 +198,11 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, IncognitoDisabledByPref) {
   ASSERT_TRUE(RunExtensionTest("tabs/incognito_disabled")) << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, GetViewsOfCreatedPopup) {
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, DISABLED_GetViewsOfCreatedPopup) {
   ASSERT_TRUE(RunExtensionSubtest("tabs/basics", "get_views_popup.html"))
       << message_;
 }
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, GetViewsOfCreatedWindow) {
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, DISABLED_GetViewsOfCreatedWindow) {
   ASSERT_TRUE(RunExtensionSubtest("tabs/basics", "get_views_window.html"))
       << message_;
 }

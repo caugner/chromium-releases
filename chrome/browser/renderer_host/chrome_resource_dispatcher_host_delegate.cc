@@ -8,40 +8,46 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/download/download_request_limiter.h"
-#include "chrome/browser/download/download_throttling_resource_handler.h"
+#include "chrome/browser/download/download_resource_throttle.h"
 #include "chrome/browser/download/download_util.h"
+#include "chrome/browser/extensions/user_script_listener.h"
 #include "chrome/browser/external_protocol/external_protocol_handler.h"
 #include "chrome/browser/instant/instant_loader.h"
 #include "chrome/browser/net/load_timing_observer.h"
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/prerender/prerender_manager_factory.h"
+#include "chrome/browser/prerender/prerender_resource_throttle.h"
 #include "chrome/browser/prerender/prerender_tracker.h"
 #include "chrome/browser/profiles/profile_io_data.h"
 #include "chrome/browser/renderer_host/chrome_url_request_user_data.h"
-#include "chrome/browser/renderer_host/safe_browsing_resource_handler.h"
-#include "chrome/browser/renderer_host/transfer_navigation_resource_handler.h"
+#include "chrome/browser/renderer_host/safe_browsing_resource_throttle.h"
+#include "chrome/browser/renderer_host/transfer_navigation_resource_throttle.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/ui/auto_login_prompter.h"
 #include "chrome/browser/ui/login/login_prompt.h"
+#include "chrome/browser/ui/sync/one_click_signin_helper.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/user_script.h"
 #include "chrome/common/render_messages.h"
-#include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/renderer_host/resource_dispatcher_host.h"
-#include "content/browser/renderer_host/resource_dispatcher_host_request_info.h"
-#include "content/browser/resource_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/render_view_host.h"
+#include "content/public/browser/resource_context.h"
+#include "content/public/browser/resource_dispatcher_host.h"
+#include "content/public/browser/resource_request_info.h"
 #include "net/base/load_flags.h"
 #include "net/base/ssl_config_service.h"
+#include "net/url_request/url_request.h"
 
 // TODO(oshima): Enable this for other platforms.
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/renderer_host/offline_resource_handler.h"
+#include "chrome/browser/renderer_host/offline_resource_throttle.h"
 #endif
 
 using content::BrowserThread;
+using content::RenderViewHost;
 using content::ResourceDispatcherHostLoginDelegate;
+using content::ResourceRequestInfo;
 
 namespace {
 
@@ -51,7 +57,7 @@ void AddPrerenderOnUI(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   prerender::PrerenderManager* prerender_manager =
       prerender::FindPrerenderManagerUsingRenderProcessId(render_process_id);
-  if (!prerender_manager || !prerender_manager->is_enabled())
+  if (!prerender_manager)
     return;
 
   prerender_manager->AddPrerenderFromLinkRelPrerender(render_process_id,
@@ -75,11 +81,10 @@ void NotifyDownloadInitiatedOnUI(int render_process_id, int render_view_id) {
 }  // end namespace
 
 ChromeResourceDispatcherHostDelegate::ChromeResourceDispatcherHostDelegate(
-    ResourceDispatcherHost* resource_dispatcher_host,
     prerender::PrerenderTracker* prerender_tracker)
-    : resource_dispatcher_host_(resource_dispatcher_host),
-      download_request_limiter_(g_browser_process->download_request_limiter()),
+    : download_request_limiter_(g_browser_process->download_request_limiter()),
       safe_browsing_(g_browser_process->safe_browsing_service()),
+      user_script_listener_(new UserScriptListener()),
       prerender_tracker_(prerender_tracker) {
 }
 
@@ -92,7 +97,7 @@ bool ChromeResourceDispatcherHostDelegate::ShouldBeginRequest(
     const std::string& method,
     const GURL& url,
     ResourceType::Type resource_type,
-    const content::ResourceContext& resource_context,
+    content::ResourceContext* resource_context,
     const content::Referrer& referrer) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
@@ -104,7 +109,7 @@ bool ChromeResourceDispatcherHostDelegate::ShouldBeginRequest(
       return false;
 
     // If prefetch is disabled, kill the request.
-    if (!ResourceDispatcherHost::is_prefetch_enabled())
+    if (!prerender::PrerenderManager::IsPrefetchEnabled())
       return false;
   }
 
@@ -130,14 +135,14 @@ bool ChromeResourceDispatcherHostDelegate::ShouldBeginRequest(
   return true;
 }
 
-ResourceHandler* ChromeResourceDispatcherHostDelegate::RequestBeginning(
-    ResourceHandler* handler,
+void ChromeResourceDispatcherHostDelegate::RequestBeginning(
     net::URLRequest* request,
-    const content::ResourceContext& resource_context,
-    bool is_subresource,
+    content::ResourceContext* resource_context,
+    ResourceType::Type resource_type,
     int child_id,
     int route_id,
-    bool is_continuation_of_transferred_request) {
+    bool is_continuation_of_transferred_request,
+    ScopedVector<content::ResourceThrottle>* throttles) {
   if (is_continuation_of_transferred_request)
     ChromeURLRequestUserData::Delete(request);
 
@@ -148,74 +153,59 @@ ResourceHandler* ChromeResourceDispatcherHostDelegate::RequestBeginning(
     request->set_priority(net::IDLE);
   }
 
-#if defined(ENABLE_SAFE_BROWSING)
-  // Insert safe browsing at the front of the chain, so it gets to decide
-  // on policies first.
-  ProfileIOData* io_data = reinterpret_cast<ProfileIOData*>(
-      resource_context.GetUserData(NULL));
-  if (io_data->safe_browsing_enabled()->GetValue()) {
-    handler = CreateSafeBrowsingResourceHandler(
-        handler, child_id, route_id, is_subresource);
-  }
-#endif
+  if (resource_type == ResourceType::MAIN_FRAME) {
+    throttles->push_back(new TransferNavigationResourceThrottle(request));
 
 #if defined(OS_CHROMEOS)
-  // We check offline first, then check safe browsing so that we still can block
-  // unsafe site after we remove offline page.
-  handler = new OfflineResourceHandler(
-      handler, child_id, route_id, resource_dispatcher_host_, request,
-      resource_context.appcache_service());
+    // We check offline first, then check safe browsing so that we still can
+    // block unsafe site after we remove offline page.
+    throttles->push_back(new OfflineResourceThrottle(
+        child_id, route_id, request, resource_context));
 #endif
 
-  handler = new TransferNavigationResourceHandler(
-      handler, resource_dispatcher_host_, request);
+    throttles->push_back(
+        new prerender::PrerenderResourceThrottle(prerender_tracker_,
+                                                 request,
+                                                 child_id,
+                                                 route_id));
+  }
 
-  return handler;
+  AppendStandardResourceThrottles(request,
+                                  resource_context,
+                                  child_id,
+                                  route_id,
+                                  resource_type,
+                                  throttles);
 }
 
-ResourceHandler* ChromeResourceDispatcherHostDelegate::DownloadStarting(
-      ResourceHandler* handler,
-      const content::ResourceContext& resource_context,
-      net::URLRequest* request,
-      int child_id,
-      int route_id,
-      int request_id,
-      bool is_new_request) {
-
+void ChromeResourceDispatcherHostDelegate::DownloadStarting(
+    net::URLRequest* request,
+    content::ResourceContext* resource_context,
+    int child_id,
+    int route_id,
+    int request_id,
+    bool is_new_request,
+    ScopedVector<content::ResourceThrottle>* throttles) {
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
       base::Bind(&NotifyDownloadInitiatedOnUI, child_id, route_id));
 
   // If this isn't a new request, we've seen this before and added the safe
-  // browsing resource handler already so no need to add it again. This code
+  // browsing resource throttle already so no need to add it again. This code
   // path is only hit for requests initiated through the browser, and not the
-  // web, so no need to add the throttling handler.
+  // web, so no need to add the download throttle.
   if (is_new_request) {
-#if defined(ENABLE_SAFE_BROWSING)
-    ProfileIOData* io_data = reinterpret_cast<ProfileIOData*>(
-        resource_context.GetUserData(NULL));
-    if (!io_data->safe_browsing_enabled()->GetValue())
-      return handler;
-
-    return CreateSafeBrowsingResourceHandler(
-        handler, child_id, route_id, false);
-#else
-    return handler;
-#endif
+    AppendStandardResourceThrottles(request,
+                                    resource_context,
+                                    child_id,
+                                    route_id,
+                                    ResourceType::MAIN_FRAME,
+                                    throttles);
+  } else {
+    throttles->push_back(new DownloadResourceThrottle(
+        download_request_limiter_, child_id, route_id, request_id,
+        request->method()));
   }
-
-  return new DownloadThrottlingResourceHandler(
-      handler, resource_dispatcher_host_, download_request_limiter_, request,
-      child_id, route_id, request_id);
-}
-
-bool ChromeResourceDispatcherHostDelegate::ShouldDeferStart(
-    net::URLRequest* request,
-    const content::ResourceContext& resource_context) {
-  ResourceDispatcherHostRequestInfo* info =
-      resource_dispatcher_host_->InfoForRequest(request);
-  return prerender_tracker_->PotentiallyDelayRequestOnIOThread(
-      request->url(), info->child_id(), info->route_id(), info->request_id());
 }
 
 bool ChromeResourceDispatcherHostDelegate::AcceptSSLClientCertificateRequest(
@@ -226,8 +216,8 @@ bool ChromeResourceDispatcherHostDelegate::AcceptSSLClientCertificateRequest(
   ChromeURLRequestUserData* user_data = ChromeURLRequestUserData::Get(request);
   if (user_data && user_data->is_prerender()) {
     int child_id, route_id;
-    if (ResourceDispatcherHost::RenderViewForRequest(
-            request, &child_id, &route_id)) {
+    if (ResourceRequestInfo::ForRequest(request)->GetAssociatedRenderView(
+            &child_id, &route_id)) {
       if (prerender_tracker_->TryCancel(
               child_id, route_id,
               prerender::FINAL_STATUS_SSL_CLIENT_CERTIFICATE_REQUESTED)) {
@@ -247,8 +237,8 @@ bool ChromeResourceDispatcherHostDelegate::AcceptAuthRequest(
     return true;
 
   int child_id, route_id;
-  if (!ResourceDispatcherHost::RenderViewForRequest(
-          request, &child_id, &route_id)) {
+  if (!ResourceRequestInfo::ForRequest(request)->GetAssociatedRenderView(
+          &child_id, &route_id)) {
     NOTREACHED();
     return true;
   }
@@ -285,16 +275,30 @@ void ChromeResourceDispatcherHostDelegate::HandleExternalProtocol(
       base::Bind(&ExternalProtocolHandler::LaunchUrl, url, child_id, route_id));
 }
 
+void ChromeResourceDispatcherHostDelegate::AppendStandardResourceThrottles(
+    const net::URLRequest* request,
+    content::ResourceContext* resource_context,
+    int child_id,
+    int route_id,
+    ResourceType::Type resource_type,
+    ScopedVector<content::ResourceThrottle>* throttles) {
 #if defined(ENABLE_SAFE_BROWSING)
-ResourceHandler*
-    ChromeResourceDispatcherHostDelegate::CreateSafeBrowsingResourceHandler(
-        ResourceHandler* handler, int child_id, int route_id,
-        bool subresource) {
-  return SafeBrowsingResourceHandler::Create(
-      handler, child_id, route_id, subresource, safe_browsing_,
-      resource_dispatcher_host_);
-}
+  // Insert safe browsing at the front of the list, so it gets to decide on
+  // policies first.
+  bool is_subresource_request = resource_type != ResourceType::MAIN_FRAME;
+  ProfileIOData* io_data = ProfileIOData::FromResourceContext(resource_context);
+  if (io_data->safe_browsing_enabled()->GetValue()) {
+    throttles->push_back(SafeBrowsingResourceThrottle::Create(
+        request, child_id, route_id, is_subresource_request, safe_browsing_));
+  }
 #endif
+
+  content::ResourceThrottle* throttle =
+      user_script_listener_->CreateResourceThrottle(request->url(),
+                                                    resource_type);
+  if (throttle)
+    throttles->push_back(throttle);
+}
 
 bool ChromeResourceDispatcherHostDelegate::ShouldForceDownloadResource(
     const GURL& url, const std::string& mime_type) {
@@ -308,8 +312,7 @@ void ChromeResourceDispatcherHostDelegate::OnResponseStarted(
     IPC::Message::Sender* sender) {
   LoadTimingObserver::PopulateTimingInfo(request, response);
 
-  ResourceDispatcherHostRequestInfo* info =
-      resource_dispatcher_host_->InfoForRequest(request);
+  const ResourceRequestInfo* info = ResourceRequestInfo::ForRequest(request);
 
   if (request->url().SchemeIsSecure()) {
     const net::URLRequestContext* context = request->context();
@@ -321,7 +324,7 @@ void ChromeResourceDispatcherHostDelegate::OnResponseStarted(
       if (state->GetDomainState(
               &domain_state, request->url().host(), has_sni)) {
         sender->Send(new ChromeViewMsg_AddStrictSecurityHost(
-            info->route_id(), request->url().host()));
+            info->GetRouteID(), request->url().host()));
       }
     }
   }
@@ -329,12 +332,22 @@ void ChromeResourceDispatcherHostDelegate::OnResponseStarted(
   // See if the response contains the X-Auto-Login header.  If so, this was
   // a request for a login page, and the server is allowing the browser to
   // suggest auto-login, if available.
-  AutoLoginPrompter::ShowInfoBarIfPossible(request, info->child_id(),
-                                           info->route_id());
+  AutoLoginPrompter::ShowInfoBarIfPossible(request, info->GetChildID(),
+                                           info->GetRouteID());
 }
 
 void ChromeResourceDispatcherHostDelegate::OnRequestRedirected(
     net::URLRequest* request,
     content::ResourceResponse* response) {
   LoadTimingObserver::PopulateTimingInfo(request, response);
+
+#if defined(ENABLE_ONE_CLICK_SIGNIN)
+  const ResourceRequestInfo* info = ResourceRequestInfo::ForRequest(request);
+
+  // See if the response contains the Google-Accounts-SignIn header.  If so,
+  // then the user has just finished signing in, and the server is allowing the
+  // browser to suggest connecting the user's profile to the account.
+  OneClickSigninHelper::ShowInfoBarIfPossible(request, info->GetChildID(),
+                                              info->GetRouteID());
+#endif
 }

@@ -11,8 +11,9 @@ cr.define('options', function() {
   /**
    * Array of button URLs used on this page.
    * @type {Array.<string>}
+   * @const
    */
-  const ButtonImageUrls = [
+  var ButtonImageUrls = [
     ButtonImages.TAKE_PHOTO,
     ButtonImages.CHOOSE_FILE
   ];
@@ -68,6 +69,8 @@ cr.define('options', function() {
       // Old user image data (if present).
       this.oldImage_ = null;
 
+      $('change-picture-overlay-confirm').onclick = this.closePage_;
+
       chrome.send('onChangePicturePageInitialized');
     },
 
@@ -92,11 +95,20 @@ cr.define('options', function() {
     },
 
     /**
+     * Called right after the page has been hidden.
+     */
+    // TODO(ivankr): both callbacks are required as only one of them is called
+    // depending on the way the page was closed, see http://crbug.com/118923.
+    didClosePage: function() {
+      this.willHidePage();
+    },
+
+    /**
      * Closes current page, returning back to Personal Stuff page.
      * @private
      */
     closePage_: function() {
-      OptionsPage.navigateToPage('personal');
+      OptionsPage.closeOverlay();
     },
 
     /**
@@ -168,7 +180,7 @@ cr.define('options', function() {
      * @type {string}
      */
     get currentUserImageUrl() {
-      return 'chrome://userimage/' + PersonalOptions.getLoggedInUsername() +
+      return 'chrome://userimage/' + BrowserOptions.getLoggedInUsername() +
           '?id=' + (new Date()).getTime();
     },
 

@@ -18,7 +18,6 @@
 #include "base/memory/ref_counted.h"
 #include "ipc/ipc_message.h"
 
-class AudioManager;
 class AutomationProviderList;
 class BackgroundModeManager;
 class ChromeNetLog;
@@ -32,12 +31,10 @@ class IconManager;
 class IntranetRedirectDetector;
 class IOThread;
 class MetricsService;
-class MHTMLGenerationManager;
 class NotificationUIManager;
 class PrefService;
 class Profile;
 class ProfileManager;
-class ResourceDispatcherHost;
 class SafeBrowsingService;
 class StatusTray;
 class TabCloseableStateWatcher;
@@ -66,6 +63,7 @@ class PrintPreviewTabController;
 
 namespace policy {
 class BrowserPolicyConnector;
+class PolicyService;
 }
 
 namespace safe_browsing {
@@ -123,7 +121,12 @@ class BrowserProcess {
   // Returns the thread that is used for health check of all browser threads.
   virtual WatchDogThread* watchdog_thread() = 0;
 
+  // Starts and manages the policy system.
   virtual policy::BrowserPolicyConnector* browser_policy_connector() = 0;
+
+  // This is the main interface for chromium components to retrieve policy
+  // information from the policy system.
+  virtual policy::PolicyService* policy_service() = 0;
 
   virtual IconManager* icon_manager() = 0;
 
@@ -196,13 +199,9 @@ class BrowserProcess {
 
   virtual prerender::PrerenderTracker* prerender_tracker() = 0;
 
-  virtual MHTMLGenerationManager* mhtml_generation_manager() = 0;
-
   virtual ComponentUpdateService* component_updater() = 0;
 
   virtual CRLSetFetcher* crl_set_fetcher() = 0;
-
-  virtual AudioManager* audio_manager() = 0;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(BrowserProcess);

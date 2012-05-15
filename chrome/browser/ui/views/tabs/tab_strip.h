@@ -138,6 +138,9 @@ class TabStrip : public AbstractTabStripView,
   // Returns true if a tab is being dragged into this tab strip.
   bool IsActiveDropTarget() const;
 
+  // Returns true if this tab strip is in stacking mode.
+  bool IsStacking() const;
+
   // TabController overrides:
   virtual const TabStripSelectionModel& GetSelectionModel() OVERRIDE;
   virtual void SelectTab(BaseTab* tab) OVERRIDE;
@@ -162,7 +165,7 @@ class TabStrip : public AbstractTabStripView,
   virtual void ClickActiveTab(const BaseTab* tab) const OVERRIDE;
 
   // MouseWatcherListener overrides:
-  virtual void MouseMovedOutOfView() OVERRIDE;
+  virtual void MouseMovedOutOfHost() OVERRIDE;
 
   // AbstractTabStripView implementation:
   virtual bool IsTabStripEditable() const OVERRIDE;
@@ -307,6 +310,11 @@ class TabStrip : public AbstractTabStripView,
                            const gfx::Point& location,
                            bool initial_drag);
 
+  // Invoked during drag to layout all tabs when in stacking mode, with
+  // |active_tab| positioned at |location|.
+  void LayoutDraggedTabsAtWithStacking(BaseTab* active_tab,
+                                       const gfx::Point& location);
+
   // Calculates the bounds needed for each of the tabs, placing the result in
   // |bounds|.
   void CalculateBoundsForDraggedTabs(
@@ -343,6 +351,19 @@ class TabStrip : public AbstractTabStripView,
 
   // Releases ownership of the current TabDragController.
   TabDragController* ReleaseDragController();
+
+  // Returns the number of non-closing tabs between |index1| and |index2|.
+  int NumNonClosingTabs(int index1, int index2) const;
+
+  // Updates |num_visible_tabs_| based on |width| and the specified tab size.
+  // Additionally updates |first_visible_tab_index_|.
+  void UpdateNumVisibleTabs(int non_closing_tab_count,
+                            int width,
+                            double tab_size);
+
+  // Makes sure |model_index| is within the set of visible tabs. Only does
+  // something if stacking.
+  void EnsureModelIndexIsVisible(int model_index);
 
   // -- Tab Resize Layout -----------------------------------------------------
 
@@ -402,11 +423,17 @@ class TabStrip : public AbstractTabStripView,
   // Invoked prior to starting a new animation.
   void PrepareForAnimation();
 
-  // Generates the ideal bounds of the TabStrip when all Tabs have finished
-  // animating to their desired position/bounds. This is used by the standard
-  // Layout method and other callers like the TabDragController that need
-  // stable representations of Tab positions.
+  // Generates the ideal bounds for each of the tabs as well as the new tab
+  // button.
   void GenerateIdealBounds();
+
+  // Same as GenerateIdealBounds, except used with in stacking mode. Only
+  // intended to be called by GenerateIdealBounds. Returns location for
+  // new tab button.
+  double GenerateIdealBoundsWithStacking(int mini_tab_count,
+                                         int non_closing_tab_count,
+                                         double new_tab_x,
+                                         double selected_size);
 
   // Starts various types of TabStrip animations.
   void StartResizeLayoutAnimation();
@@ -457,7 +484,11 @@ class TabStrip : public AbstractTabStripView,
   // able to lay it out before we are able to get its image from the
   // ui::ThemeProvider.  It also makes sense to do this, because the size of the
   // new tab button should not need to be calculated dynamically.
+#if defined(USE_ASH)
+  static const int kNewTabButtonWidth = 34;
+#else
   static const int kNewTabButtonWidth = 28;
+#endif
   static const int kNewTabButtonHeight = 18;
 
   // Valid for the lifetime of a drag over us.
@@ -485,6 +516,17 @@ class TabStrip : public AbstractTabStripView,
 
   // Size we last layed out at.
   gfx::Size last_layout_size_;
+
+  // If |stacking_| is true this is the index (into tab_data_) of the first
+  // tab completely shown.
+  int first_visible_tab_index_;
+
+  // If |stacking_| is true this is the number of tabs totally visible, the
+  // rest are compresses on the left/right edge.
+  int num_visible_tabs_;
+
+  // Are we in stacking/scrolling mode?
+  bool stacking_;
 
   DISALLOW_COPY_AND_ASSIGN(TabStrip);
 };

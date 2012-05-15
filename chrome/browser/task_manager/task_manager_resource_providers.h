@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,8 +23,11 @@ class BackgroundContents;
 class BalloonHost;
 class Extension;
 class ExtensionHost;
-class RenderViewHost;
 class TabContentsWrapper;
+
+namespace content {
+class RenderViewHost;
+}
 
 // These file contains the resource providers used in the task manager.
 
@@ -33,13 +36,13 @@ class TabContentsWrapper;
 class TaskManagerRendererResource : public TaskManager::Resource {
  public:
   TaskManagerRendererResource(base::ProcessHandle process,
-                              RenderViewHost* render_view_host);
+                              content::RenderViewHost* render_view_host);
   virtual ~TaskManagerRendererResource();
 
   // TaskManager::Resource methods:
   virtual base::ProcessHandle GetProcess() const OVERRIDE;
   virtual Type GetType() const OVERRIDE;
-  virtual int GetRoutingId() const OVERRIDE;
+  virtual int GetRoutingID() const OVERRIDE;
 
   virtual bool ReportsCacheStats() const OVERRIDE;
   virtual WebKit::WebCache::ResourceTypeStats GetWebCoreCacheStats() const
@@ -73,7 +76,7 @@ class TaskManagerRendererResource : public TaskManager::Resource {
   int pid_;
 
   // RenderViewHost we use to fetch stats.
-  RenderViewHost* render_view_host_;
+  content::RenderViewHost* render_view_host_;
   // The stats_ field holds information about resource usage in the renderer
   // process and so it is updated asynchronously by the Refresh() call.
   WebKit::WebCache::ResourceTypeStats stats_;

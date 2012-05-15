@@ -73,9 +73,6 @@ class AppLauncherHandler : public content::WebUIMessageHandler,
   // Callback for the "uninstallApp" message.
   void HandleUninstallApp(const base::ListValue* args);
 
-  // Callback for the "hideAppPromo" message.
-  void HandleHideAppsPromo(const base::ListValue* args);
-
   // Callback for the "createAppShortcut" message.
   void HandleCreateAppShortcut(const base::ListValue* args);
 
@@ -107,6 +104,9 @@ class AppLauncherHandler : public content::WebUIMessageHandler,
 
   // Register app launcher preferences.
   static void RegisterUserPrefs(PrefService* pref_service);
+
+  // Records the given type of app launch for UMA.
+  static void RecordAppLaunchType(extension_misc::AppLaunchBucket bucket);
 
  private:
   struct AppInstallInfo {

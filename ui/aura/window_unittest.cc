@@ -17,16 +17,20 @@
 #include "ui/aura/root_window_observer.h"
 #include "ui/aura/test/aura_test_base.h"
 #include "ui/aura/test/event_generator.h"
-#include "ui/aura/test/test_windows.h"
 #include "ui/aura/test/test_window_delegate.h"
+#include "ui/aura/test/test_windows.h"
 #include "ui/aura/window_delegate.h"
 #include "ui/aura/window_observer.h"
+#include "ui/aura/window_property.h"
 #include "ui/base/hit_test.h"
 #include "ui/base/keycodes/keyboard_codes.h"
-#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/canvas.h"
 #include "ui/gfx/compositor/layer.h"
 #include "ui/gfx/compositor/scoped_layer_animation_settings.h"
 #include "ui/gfx/screen.h"
+
+DECLARE_WINDOW_PROPERTY_TYPE(const char*)
+DECLARE_WINDOW_PROPERTY_TYPE(int)
 
 namespace aura {
 namespace test {
@@ -112,20 +116,27 @@ class DestroyOrphanDelegate : public TestWindowDelegate {
 // Used in verifying mouse capture.
 class CaptureWindowDelegateImpl : public TestWindowDelegate {
  public:
-  explicit CaptureWindowDelegateImpl()
-      : capture_lost_count_(0),
-        mouse_event_count_(0),
-        touch_event_count_(0) {
+  CaptureWindowDelegateImpl() {
+    ResetCounts();
   }
 
+  void ResetCounts() {
+    capture_changed_event_count_ = 0;
+    capture_lost_count_ = 0;
+    mouse_event_count_ = 0;
+    touch_event_count_ = 0;
+  }
+
+  int capture_changed_event_count() const {
+    return capture_changed_event_count_;
+  }
   int capture_lost_count() const { return capture_lost_count_; }
-  void set_capture_lost_count(int value) { capture_lost_count_ = value; }
   int mouse_event_count() const { return mouse_event_count_; }
-  void set_mouse_event_count(int value) { mouse_event_count_ = value; }
   int touch_event_count() const { return touch_event_count_; }
-  void set_touch_event_count(int value) { touch_event_count_ = value; }
 
   virtual bool OnMouseEvent(MouseEvent* event) OVERRIDE {
+    if (event->type() == ui::ET_MOUSE_CAPTURE_CHANGED)
+      capture_changed_event_count_++;
     mouse_event_count_++;
     return false;
   }
@@ -141,6 +152,7 @@ class CaptureWindowDelegateImpl : public TestWindowDelegate {
   }
 
  private:
+  int capture_changed_event_count_;
   int capture_lost_count_;
   int mouse_event_count_;
   int touch_event_count_;
@@ -228,11 +240,11 @@ TEST_F(WindowTest, GetChildById) {
 // and not containing NULL or parents.
 TEST_F(WindowTest, Contains) {
   Window parent(NULL);
-  parent.Init(ui::Layer::LAYER_NOT_DRAWN);
+  parent.Init(ui::LAYER_NOT_DRAWN);
   Window child1(NULL);
-  child1.Init(ui::Layer::LAYER_NOT_DRAWN);
+  child1.Init(ui::LAYER_NOT_DRAWN);
   Window child2(NULL);
-  child2.Init(ui::Layer::LAYER_NOT_DRAWN);
+  child2.Init(ui::LAYER_NOT_DRAWN);
 
   child1.SetParent(&parent);
   child2.SetParent(&child1);
@@ -260,14 +272,19 @@ TEST_F(WindowTest, ConvertPointToWindow) {
 TEST_F(WindowTest, HitTest) {
   Window w1(new ColorTestWindowDelegate(SK_ColorWHITE));
   w1.set_id(1);
-  w1.Init(ui::Layer::LAYER_TEXTURED);
-  w1.SetBounds(gfx::Rect(10, 10, 50, 50));
+  w1.Init(ui::LAYER_TEXTURED);
+  w1.SetBounds(gfx::Rect(10, 20, 50, 60));
   w1.Show();
   w1.SetParent(NULL);
 
   // Points are in the Window's coordinates.
   EXPECT_TRUE(w1.HitTest(gfx::Point(1, 1)));
   EXPECT_FALSE(w1.HitTest(gfx::Point(-1, -1)));
+
+  // We can expand the bounds slightly to track events outside our border.
+  w1.set_hit_test_bounds_override_outer(gfx::Insets(-1, -1, -1, -1));
+  EXPECT_TRUE(w1.HitTest(gfx::Point(-1, -1)));
+  EXPECT_FALSE(w1.HitTest(gfx::Point(-2, -2)));
 
   // TODO(beng): clip Window to parent.
 }
@@ -289,7 +306,7 @@ TEST_F(WindowTest, GetEventHandlerForPoint) {
   scoped_ptr<Window> w13(
       CreateTestWindow(SK_ColorGRAY, 13, gfx::Rect(5, 470, 50, 50), w1.get()));
 
-  Window* root = RootWindow::GetInstance();
+  Window* root = root_window();
   w1->parent()->SetBounds(gfx::Rect(500, 500));
   EXPECT_EQ(NULL, root->GetEventHandlerForPoint(gfx::Point(5, 5)));
   EXPECT_EQ(w1.get(), root->GetEventHandlerForPoint(gfx::Point(11, 11)));
@@ -301,8 +318,25 @@ TEST_F(WindowTest, GetEventHandlerForPoint) {
   EXPECT_EQ(w13.get(), root->GetEventHandlerForPoint(gfx::Point(26, 481)));
 }
 
+TEST_F(WindowTest, GetEventHandlerForPointWithOverride) {
+  // If our child is flush to our top-left corner he gets events just inside the
+  // window edges.
+  scoped_ptr<Window> parent(
+      CreateTestWindow(SK_ColorWHITE, 1, gfx::Rect(10, 20, 400, 500), NULL));
+  scoped_ptr<Window> child(
+      CreateTestWindow(SK_ColorRED, 2, gfx::Rect(0, 0, 60, 70), parent.get()));
+  EXPECT_EQ(child.get(), parent->GetEventHandlerForPoint(gfx::Point(0, 0)));
+  EXPECT_EQ(child.get(), parent->GetEventHandlerForPoint(gfx::Point(1, 1)));
+
+  // We can override the hit test bounds of the parent to make the parent grab
+  // events along that edge.
+  parent->set_hit_test_bounds_override_inner(gfx::Insets(1, 1, 1, 1));
+  EXPECT_EQ(parent.get(), parent->GetEventHandlerForPoint(gfx::Point(0, 0)));
+  EXPECT_EQ(child.get(),  parent->GetEventHandlerForPoint(gfx::Point(1, 1)));
+}
+
 TEST_F(WindowTest, GetTopWindowContainingPoint) {
-  Window* root = RootWindow::GetInstance();
+  Window* root = root_window();
   root->SetBounds(gfx::Rect(0, 0, 300, 300));
 
   scoped_ptr<Window> w1(
@@ -321,10 +355,6 @@ TEST_F(WindowTest, GetTopWindowContainingPoint) {
   scoped_ptr<Window> w311(
       CreateTestWindow(SK_ColorBLUE, 311, gfx::Rect(0, 0, 10, 10), w31.get()));
 
-  // The stop-event-propagation flag shouldn't have any effect on the behavior
-  // of this method.
-  w3->set_stops_event_propagation(true);
-
   EXPECT_EQ(NULL, root->GetTopWindowContainingPoint(gfx::Point(0, 0)));
   EXPECT_EQ(w2.get(), root->GetTopWindowContainingPoint(gfx::Point(5, 5)));
   EXPECT_EQ(w2.get(), root->GetTopWindowContainingPoint(gfx::Point(10, 10)));
@@ -341,15 +371,14 @@ TEST_F(WindowTest, GetToplevelWindow) {
   const gfx::Rect kBounds(0, 0, 10, 10);
   TestWindowDelegate delegate;
 
-  Window* root = aura::RootWindow::GetInstance();
-  scoped_ptr<Window> w1(CreateTestWindowWithId(1, root));
+  scoped_ptr<Window> w1(CreateTestWindowWithId(1, root_window()));
   scoped_ptr<Window> w11(
       CreateTestWindowWithDelegate(&delegate, 11, kBounds, w1.get()));
   scoped_ptr<Window> w111(CreateTestWindowWithId(111, w11.get()));
   scoped_ptr<Window> w1111(
       CreateTestWindowWithDelegate(&delegate, 1111, kBounds, w111.get()));
 
-  EXPECT_TRUE(root->GetToplevelWindow() == NULL);
+  EXPECT_TRUE(root_window()->GetToplevelWindow() == NULL);
   EXPECT_TRUE(w1->GetToplevelWindow() == NULL);
   EXPECT_EQ(w11.get(), w11->GetToplevelWindow());
   EXPECT_EQ(w11.get(), w111->GetToplevelWindow());
@@ -388,11 +417,11 @@ TEST_F(WindowTest, OrphanedBeforeOnDestroyed) {
 // Make sure StackChildAtTop moves both the window and layer to the front.
 TEST_F(WindowTest, StackChildAtTop) {
   Window parent(NULL);
-  parent.Init(ui::Layer::LAYER_NOT_DRAWN);
+  parent.Init(ui::LAYER_NOT_DRAWN);
   Window child1(NULL);
-  child1.Init(ui::Layer::LAYER_NOT_DRAWN);
+  child1.Init(ui::LAYER_NOT_DRAWN);
   Window child2(NULL);
-  child2.Init(ui::Layer::LAYER_NOT_DRAWN);
+  child2.Init(ui::LAYER_NOT_DRAWN);
 
   child1.SetParent(&parent);
   child2.SetParent(&parent);
@@ -412,16 +441,48 @@ TEST_F(WindowTest, StackChildAtTop) {
   EXPECT_EQ(child2.layer(), parent.layer()->children()[0]);
 }
 
+// Make sure StackChildBelow works.
+TEST_F(WindowTest, StackChildBelow) {
+  Window parent(NULL);
+  parent.Init(ui::LAYER_NOT_DRAWN);
+  Window child1(NULL);
+  child1.Init(ui::LAYER_NOT_DRAWN);
+  child1.set_id(1);
+  Window child2(NULL);
+  child2.Init(ui::LAYER_NOT_DRAWN);
+  child2.set_id(2);
+  Window child3(NULL);
+  child3.Init(ui::LAYER_NOT_DRAWN);
+  child3.set_id(3);
+
+  child1.SetParent(&parent);
+  child2.SetParent(&parent);
+  child3.SetParent(&parent);
+  EXPECT_EQ("1 2 3", ChildWindowIDsAsString(&parent));
+
+  parent.StackChildBelow(&child1, &child2);
+  EXPECT_EQ("1 2 3", ChildWindowIDsAsString(&parent));
+
+  parent.StackChildBelow(&child2, &child1);
+  EXPECT_EQ("2 1 3", ChildWindowIDsAsString(&parent));
+
+  parent.StackChildBelow(&child3, &child2);
+  EXPECT_EQ("3 2 1", ChildWindowIDsAsString(&parent));
+
+  parent.StackChildBelow(&child3, &child1);
+  EXPECT_EQ("2 3 1", ChildWindowIDsAsString(&parent));
+}
+
 // Various assertions for StackChildAbove.
 TEST_F(WindowTest, StackChildAbove) {
   Window parent(NULL);
-  parent.Init(ui::Layer::LAYER_NOT_DRAWN);
+  parent.Init(ui::LAYER_NOT_DRAWN);
   Window child1(NULL);
-  child1.Init(ui::Layer::LAYER_NOT_DRAWN);
+  child1.Init(ui::LAYER_NOT_DRAWN);
   Window child2(NULL);
-  child2.Init(ui::Layer::LAYER_NOT_DRAWN);
+  child2.Init(ui::LAYER_NOT_DRAWN);
   Window child3(NULL);
-  child3.Init(ui::Layer::LAYER_NOT_DRAWN);
+  child3.Init(ui::LAYER_NOT_DRAWN);
 
   child1.SetParent(&parent);
   child2.SetParent(&parent);
@@ -473,46 +534,51 @@ TEST_F(WindowTest, StackChildAbove) {
 
 // Various capture assertions.
 TEST_F(WindowTest, CaptureTests) {
-  aura::RootWindow* root_window = aura::RootWindow::GetInstance();
   CaptureWindowDelegateImpl delegate;
   scoped_ptr<Window> window(CreateTestWindowWithDelegate(
       &delegate, 0, gfx::Rect(0, 0, 20, 20), NULL));
   EXPECT_FALSE(window->HasCapture());
 
+  delegate.ResetCounts();
+
   // Do a capture.
   window->SetCapture();
   EXPECT_TRUE(window->HasCapture());
   EXPECT_EQ(0, delegate.capture_lost_count());
-  EventGenerator generator(gfx::Point(50, 50));
+  EXPECT_EQ(0, delegate.capture_changed_event_count());
+  EventGenerator generator(root_window(), gfx::Point(50, 50));
   generator.PressLeftButton();
   EXPECT_EQ(1, delegate.mouse_event_count());
   generator.ReleaseLeftButton();
 
   EXPECT_EQ(2, delegate.mouse_event_count());
-  delegate.set_mouse_event_count(0);
+  delegate.ResetCounts();
 
   TouchEvent touchev(ui::ET_TOUCH_PRESSED, gfx::Point(50, 50), 0);
-  root_window->DispatchTouchEvent(&touchev);
+  root_window()->DispatchTouchEvent(&touchev);
   EXPECT_EQ(1, delegate.touch_event_count());
-  delegate.set_touch_event_count(0);
+  delegate.ResetCounts();
 
   window->ReleaseCapture();
   EXPECT_FALSE(window->HasCapture());
   EXPECT_EQ(1, delegate.capture_lost_count());
+  EXPECT_EQ(1, delegate.capture_changed_event_count());
+  EXPECT_EQ(1, delegate.mouse_event_count());
 
   generator.PressLeftButton();
-  EXPECT_EQ(0, delegate.mouse_event_count());
+  EXPECT_EQ(1, delegate.mouse_event_count());
 
-  root_window->DispatchTouchEvent(&touchev);
+  TouchEvent touchev2(ui::ET_TOUCH_PRESSED, gfx::Point(250, 250), 1);
+  root_window()->DispatchTouchEvent(&touchev2);
   EXPECT_EQ(0, delegate.touch_event_count());
 
   // Removing the capture window from parent should reset the capture window
   // in the root window.
   window->SetCapture();
-  EXPECT_EQ(window.get(), root_window->capture_window());
+  EXPECT_EQ(window.get(), root_window()->capture_window());
   window->parent()->RemoveChild(window.get());
   EXPECT_FALSE(window->HasCapture());
-  EXPECT_EQ(NULL, root_window->capture_window());
+  EXPECT_EQ(NULL, root_window()->capture_window());
 }
 
 // Changes capture while capture is already ongoing.
@@ -523,30 +589,39 @@ TEST_F(WindowTest, ChangeCaptureWhileMouseDown) {
   CaptureWindowDelegateImpl delegate2;
   scoped_ptr<Window> w2(CreateTestWindowWithDelegate(
       &delegate2, 0, gfx::Rect(20, 20, 20, 20), NULL));
+
+  // Execute the scheduled draws so that mouse events are not
+  // aggregated.
+  RunAllPendingInMessageLoop();
+
   EXPECT_FALSE(window->HasCapture());
 
   // Do a capture.
+  delegate.ResetCounts();
   window->SetCapture();
-  delegate.set_mouse_event_count(0);
   EXPECT_TRUE(window->HasCapture());
   EXPECT_EQ(0, delegate.capture_lost_count());
-  EventGenerator generator(gfx::Point(50, 50));
+  EXPECT_EQ(0, delegate.capture_changed_event_count());
+  EventGenerator generator(root_window(), gfx::Point(50, 50));
   generator.PressLeftButton();
+  EXPECT_EQ(0, delegate.capture_lost_count());
+  EXPECT_EQ(0, delegate.capture_changed_event_count());
   EXPECT_EQ(1, delegate.mouse_event_count());
-  delegate.set_mouse_event_count(0);
 
-  // Reset the capture.
-  window->ReleaseCapture();
+  // Set capture to |w2|, should implicitly unset capture for |window|.
+  delegate.ResetCounts();
+  delegate2.ResetCounts();
   w2->SetCapture();
-  delegate2.set_mouse_event_count(0);
+
   generator.MoveMouseTo(gfx::Point(40, 40), 2);
-  EXPECT_EQ(0, delegate.mouse_event_count());
+  EXPECT_EQ(1, delegate.capture_lost_count());
+  EXPECT_EQ(1, delegate.capture_changed_event_count());
+  EXPECT_EQ(1, delegate.mouse_event_count());
   EXPECT_EQ(2, delegate2.mouse_event_count());
 }
 
 // Verifies capture is reset when a window is destroyed.
 TEST_F(WindowTest, ReleaseCaptureOnDestroy) {
-  RootWindow* root_window = RootWindow::GetInstance();
   CaptureWindowDelegateImpl delegate;
   scoped_ptr<Window> window(CreateTestWindowWithDelegate(
       &delegate, 0, gfx::Rect(0, 0, 20, 20), NULL));
@@ -560,8 +635,8 @@ TEST_F(WindowTest, ReleaseCaptureOnDestroy) {
   window.reset();
 
   // Make sure the root window doesn't reference the window anymore.
-  EXPECT_EQ(NULL, root_window->mouse_pressed_handler());
-  EXPECT_EQ(NULL, root_window->capture_window());
+  EXPECT_EQ(NULL, root_window()->mouse_pressed_handler());
+  EXPECT_EQ(NULL, root_window()->capture_window());
 }
 
 TEST_F(WindowTest, GetScreenBounds) {
@@ -621,7 +696,7 @@ TEST_F(WindowTest, MouseEnterExit) {
   scoped_ptr<Window> w2(
       CreateTestWindowWithDelegate(&d2, 2, gfx::Rect(70, 70, 50, 50), NULL));
 
-  test::EventGenerator generator;
+  test::EventGenerator generator(root_window());
   generator.MoveMouseToCenterOf(w1.get());
   EXPECT_TRUE(d1.entered());
   EXPECT_FALSE(d1.exited());
@@ -729,58 +804,6 @@ TEST_F(WindowTest, Visibility) {
   EXPECT_TRUE(w3->IsVisible());
 }
 
-// When set_consume_events() is called with |true| for a Window, that Window
-// should make sure that none behind it in the z-order see events if it has
-// children. If it does not have children, event targeting works as usual.
-TEST_F(WindowTest, StopsEventPropagation) {
-  TestWindowDelegate d11;
-  TestWindowDelegate d111;
-  TestWindowDelegate d121;
-  scoped_ptr<Window> w1(CreateTestWindowWithDelegate(NULL, 1,
-      gfx::Rect(0, 0, 500, 500), NULL));
-  scoped_ptr<Window> w11(CreateTestWindowWithDelegate(&d11, 11,
-      gfx::Rect(0, 0, 500, 500), w1.get()));
-  scoped_ptr<Window> w111(CreateTestWindowWithDelegate(&d111, 111,
-      gfx::Rect(50, 50, 450, 450), w11.get()));
-  scoped_ptr<Window> w12(CreateTestWindowWithDelegate(NULL, 12,
-      gfx::Rect(0, 0, 500, 500), w1.get()));
-  scoped_ptr<Window> w121(CreateTestWindowWithDelegate(&d121, 121,
-      gfx::Rect(150, 150, 50, 50), NULL));
-
-  w12->set_stops_event_propagation(true);
-  EXPECT_EQ(w11.get(), w1->GetEventHandlerForPoint(gfx::Point(10, 10)));
-
-  EXPECT_TRUE(w111->CanFocus());
-  EXPECT_TRUE(w111->CanReceiveEvents());
-  w111->Focus();
-  EXPECT_EQ(w111.get(), w1->GetFocusManager()->GetFocusedWindow());
-
-  w12->AddChild(w121.get());
-
-  EXPECT_EQ(NULL, w1->GetEventHandlerForPoint(gfx::Point(10, 10)));
-  EXPECT_EQ(w121.get(), w1->GetEventHandlerForPoint(gfx::Point(175, 175)));
-
-  // It should be possible to focus w121 since it is at or above the
-  // consumes_events_ window.
-  EXPECT_TRUE(w121->CanFocus());
-  EXPECT_TRUE(w121->CanReceiveEvents());
-  w121->Focus();
-  EXPECT_EQ(w121.get(), w1->GetFocusManager()->GetFocusedWindow());
-
-  // An attempt to focus 111 should be ignored and w121 should retain focus,
-  // since a consumes_events_ window with a child is in the z-index above w111.
-  EXPECT_FALSE(w111->CanReceiveEvents());
-  w111->Focus();
-  EXPECT_EQ(w121.get(), w1->GetFocusManager()->GetFocusedWindow());
-
-  // Hiding w121 should make 111 focusable.
-  w121->Hide();
-  EXPECT_TRUE(w111->CanFocus());
-  EXPECT_TRUE(w111->CanReceiveEvents());
-  w111->Focus();
-  EXPECT_EQ(w111.get(), w1->GetFocusManager()->GetFocusedWindow());
-}
-
 TEST_F(WindowTest, IgnoreEventsTest) {
   TestWindowDelegate d11;
   TestWindowDelegate d12;
@@ -813,36 +836,30 @@ TEST_F(WindowTest, IgnoreEventsTest) {
 
 // Tests transformation on the root window.
 TEST_F(WindowTest, Transform) {
-  RootWindow* root_window = RootWindow::GetInstance();
-  gfx::Size size = root_window->GetHostSize();
+  gfx::Size size = root_window()->GetHostSize();
   EXPECT_EQ(gfx::Rect(size),
             gfx::Screen::GetMonitorAreaNearestPoint(gfx::Point()));
 
   // Rotate it clock-wise 90 degrees.
   ui::Transform transform;
   transform.SetRotate(90.0f);
-  transform.ConcatTranslate(size.width(), 0);
-  root_window->SetTransform(transform);
+  transform.ConcatTranslate(size.height(), 0);
+  root_window()->SetTransform(transform);
 
   // The size should be the transformed size.
   gfx::Size transformed_size(size.height(), size.width());
-  EXPECT_EQ(transformed_size.ToString(), root_window->GetHostSize().ToString());
-  EXPECT_EQ(gfx::Rect(transformed_size).ToString(),
-            root_window->bounds().ToString());
+  EXPECT_EQ(transformed_size.ToString(),
+            root_window()->bounds().size().ToString());
   EXPECT_EQ(gfx::Rect(transformed_size).ToString(),
             gfx::Screen::GetMonitorAreaNearestPoint(gfx::Point()).ToString());
+
+  // Host size shouldn't change.
+  EXPECT_EQ(size.ToString(),
+            root_window()->GetHostSize().ToString());
 }
 
-// Tests that gesture events are transformed correctly.
-// See http://crbug.com/111262
-#if defined(OS_WIN)
-#define MAYBE_TransformGesture FAILS_TransformGesture
-#else
-#define MAYBE_TransformGesture TransformGesture
-#endif
-TEST_F(WindowTest, MAYBE_TransformGesture) {
-  RootWindow* root_window = RootWindow::GetInstance();
-  gfx::Size size = root_window->GetHostSize();
+TEST_F(WindowTest, TransformGesture) {
+  gfx::Size size = root_window()->GetHostSize();
 
   scoped_ptr<GestureTrackPositionDelegate> delegate(
       new GestureTrackPositionDelegate);
@@ -852,12 +869,12 @@ TEST_F(WindowTest, MAYBE_TransformGesture) {
   // Rotate the root-window clock-wise 90 degrees.
   ui::Transform transform;
   transform.SetRotate(90.0f);
-  transform.ConcatTranslate(size.width(), 0);
-  root_window->SetTransform(transform);
+  transform.ConcatTranslate(size.height(), 0);
+  root_window()->SetTransform(transform);
 
   TouchEvent press(ui::ET_TOUCH_PRESSED,
       gfx::Point(size.height() - 10, 10), 0);
-  root_window->DispatchTouchEvent(&press);
+  root_window()->DispatchTouchEvent(&press);
   EXPECT_EQ(gfx::Point(10, 10).ToString(), delegate->position().ToString());
 }
 
@@ -906,33 +923,99 @@ TEST_F(WindowTest, FocusedWindowTest) {
   EXPECT_TRUE(parent->HasFocus());
 }
 
+namespace {
+DEFINE_WINDOW_PROPERTY_KEY(int, kIntKey, -2);
+DEFINE_WINDOW_PROPERTY_KEY(const char*, kStringKey, "squeamish");
+}
+
 TEST_F(WindowTest, Property) {
   scoped_ptr<Window> w(CreateTestWindowWithId(0, NULL));
-  const char* key = "test";
-  EXPECT_EQ(NULL, w->GetProperty(key));
-  EXPECT_EQ(0, w->GetIntProperty(key));
 
-  w->SetIntProperty(key, 1);
-  EXPECT_EQ(1, w->GetIntProperty(key));
-  EXPECT_EQ(reinterpret_cast<void*>(static_cast<intptr_t>(1)),
-            w->GetProperty(key));
+  static const char native_prop_key[] = "fnord";
 
-  // Overwrite the property with different value type.
-  w->SetProperty(key, static_cast<void*>(const_cast<char*>("string")));
-  std::string expected("string");
-  EXPECT_EQ(expected, static_cast<const char*>(w->GetProperty(key)));
+  // Non-existent properties should return the default values.
+  EXPECT_EQ(-2, w->GetProperty(kIntKey));
+  EXPECT_EQ(std::string("squeamish"), w->GetProperty(kStringKey));
+  EXPECT_EQ(NULL, w->GetNativeWindowProperty(native_prop_key));
 
-  // Non-existent property.
-  EXPECT_EQ(NULL, w->GetProperty("foo"));
-  EXPECT_EQ(0, w->GetIntProperty("foo"));
+  // A set property value should be returned again (even if it's the default
+  // value).
+  w->SetProperty(kIntKey, INT_MAX);
+  EXPECT_EQ(INT_MAX, w->GetProperty(kIntKey));
+  w->SetProperty(kIntKey, -2);
+  EXPECT_EQ(-2, w->GetProperty(kIntKey));
+  w->SetProperty(kIntKey, INT_MIN);
+  EXPECT_EQ(INT_MIN, w->GetProperty(kIntKey));
 
-  // Set NULL and make sure the property is gone.
-  w->SetProperty(key, NULL);
-  EXPECT_EQ(NULL, w->GetProperty(key));
-  EXPECT_EQ(0, w->GetIntProperty(key));
+  w->SetProperty(kStringKey, static_cast<const char*>(NULL));
+  EXPECT_EQ(NULL, w->GetProperty(kStringKey));
+  w->SetProperty(kStringKey, "squeamish");
+  EXPECT_EQ(std::string("squeamish"), w->GetProperty(kStringKey));
+  w->SetProperty(kStringKey, "ossifrage");
+  EXPECT_EQ(std::string("ossifrage"), w->GetProperty(kStringKey));
+
+  w->SetNativeWindowProperty(native_prop_key, &*w);
+  EXPECT_EQ(&*w, w->GetNativeWindowProperty(native_prop_key));
+  w->SetNativeWindowProperty(native_prop_key, NULL);
+  EXPECT_EQ(NULL, w->GetNativeWindowProperty(native_prop_key));
+
+  // ClearProperty should restore the default value.
+  w->ClearProperty(kIntKey);
+  EXPECT_EQ(-2, w->GetProperty(kIntKey));
+  w->ClearProperty(kStringKey);
+  EXPECT_EQ(std::string("squeamish"), w->GetProperty(kStringKey));
+}
+
+namespace {
+
+class TestProperty {
+ public:
+  TestProperty() {}
+  virtual ~TestProperty() {
+    last_deleted_ = this;
+  }
+  static TestProperty* last_deleted() { return last_deleted_; }
+
+ private:
+  static TestProperty* last_deleted_;
+  DISALLOW_COPY_AND_ASSIGN(TestProperty);
+};
+
+TestProperty* TestProperty::last_deleted_ = NULL;
+
+DEFINE_OWNED_WINDOW_PROPERTY_KEY(TestProperty, kOwnedKey, NULL);
+
+}  // namespace
+
+TEST_F(WindowTest, OwnedProperty) {
+  scoped_ptr<Window> w(CreateTestWindowWithId(0, NULL));
+  EXPECT_EQ(NULL, w->GetProperty(kOwnedKey));
+  TestProperty* p1 = new TestProperty();
+  w->SetProperty(kOwnedKey, p1);
+  EXPECT_EQ(p1, w->GetProperty(kOwnedKey));
+  EXPECT_EQ(NULL, TestProperty::last_deleted());
+
+  TestProperty* p2 = new TestProperty();
+  w->SetProperty(kOwnedKey, p2);
+  EXPECT_EQ(p2, w->GetProperty(kOwnedKey));
+  EXPECT_EQ(p1, TestProperty::last_deleted());
+
+  w->ClearProperty(kOwnedKey);
+  EXPECT_EQ(NULL, w->GetProperty(kOwnedKey));
+  EXPECT_EQ(p2, TestProperty::last_deleted());
+
+  TestProperty* p3 = new TestProperty();
+  w->SetProperty(kOwnedKey, p3);
+  EXPECT_EQ(p3, w->GetProperty(kOwnedKey));
+  EXPECT_EQ(p2, TestProperty::last_deleted());
+  w.reset();
+  EXPECT_EQ(p3, TestProperty::last_deleted());
 }
 
 TEST_F(WindowTest, SetBoundsInternalShouldCheckTargetBounds) {
+  // We cannot short-circuit animations in this test.
+  ui::LayerAnimator::set_disable_animations_for_test(false);
+
   scoped_ptr<Window> w1(
       CreateTestWindowWithBounds(gfx::Rect(0, 0, 100, 100), NULL));
 
@@ -966,13 +1049,15 @@ TEST_F(WindowTest, SetBoundsInternalShouldCheckTargetBounds) {
 
   // Confirm that the target bounds are reached.
   base::TimeTicks start_time =
-      w1->layer()->GetAnimator()->get_last_step_time_for_test();
+      w1->layer()->GetAnimator()->last_step_time();
 
   element->Step(start_time + base::TimeDelta::FromMilliseconds(1000));
 
   EXPECT_EQ("0,0 100x100", w1->bounds().ToString());
 }
 
+
+typedef std::pair<const void*, intptr_t> PropertyChangeInfo;
 
 class WindowObserverTest : public WindowTest,
                            public WindowObserver {
@@ -986,8 +1071,7 @@ class WindowObserverTest : public WindowTest,
       : added_count_(0),
         removed_count_(0),
         destroyed_count_(0),
-        old_property_value_(0),
-        new_property_value_(0) {
+        old_property_value_(-3) {
   }
 
   virtual ~WindowObserverTest() {}
@@ -1015,17 +1099,11 @@ class WindowObserverTest : public WindowTest,
     return result;
   }
 
-  // Return a string representation of the arguments passed in
-  // OnWindowPropertyChanged callback.
-  std::string PropertyChangeInfoAndClear() {
-    std::string result(
-        base::StringPrintf("name=%s old=%ld new=%ld",
-                           property_name_.c_str(),
-                           static_cast<long>(old_property_value_),
-                           static_cast<long>(new_property_value_)));
-    property_name_.clear();
-    old_property_value_ = 0;
-    new_property_value_ = 0;
+  // Return a tuple of the arguments passed in OnPropertyChanged callback.
+  PropertyChangeInfo PropertyChangeInfoAndClear() {
+    PropertyChangeInfo result(property_key_, old_property_value_);
+    property_key_ = NULL;
+    old_property_value_ = -3;
     return result;
   }
 
@@ -1051,20 +1129,18 @@ class WindowObserverTest : public WindowTest,
   }
 
   virtual void OnWindowPropertyChanged(Window* window,
-                                       const char* name,
-                                       void* old) OVERRIDE {
-    property_name_ = std::string(name);
-    old_property_value_ = reinterpret_cast<intptr_t>(old);
-    new_property_value_ = reinterpret_cast<intptr_t>(window->GetProperty(name));
+                                       const void* key,
+                                       intptr_t old) OVERRIDE {
+    property_key_ = key;
+    old_property_value_ = old;
   }
 
   int added_count_;
   int removed_count_;
   int destroyed_count_;
   scoped_ptr<VisibilityInfo> visibility_info_;
-  std::string property_name_;
+  const void* property_key_;
   intptr_t old_property_value_;
-  intptr_t new_property_value_;
 
   DISALLOW_COPY_AND_ASSIGN(WindowObserverTest);
 };
@@ -1154,20 +1230,30 @@ TEST_F(WindowObserverTest, WindowDestroyed) {
 TEST_F(WindowObserverTest, PropertyChanged) {
   // Setting property should fire a property change notification.
   scoped_ptr<Window> w1(CreateTestWindowWithId(1, NULL));
-  const char* key = "test";
-
   w1->AddObserver(this);
-  w1->SetIntProperty(key, 1);
-  EXPECT_EQ("name=test old=0 new=1", PropertyChangeInfoAndClear());
-  w1->SetIntProperty(key, 2);
-  EXPECT_EQ(2, w1->GetIntProperty(key));
-  EXPECT_EQ(reinterpret_cast<void*>(2), w1->GetProperty(key));
-  EXPECT_EQ("name=test old=1 new=2", PropertyChangeInfoAndClear());
-  w1->SetProperty(key, NULL);
-  EXPECT_EQ("name=test old=2 new=0", PropertyChangeInfoAndClear());
+
+  static const WindowProperty<int> prop = {-2};
+  static const char native_prop_key[] = "fnord";
+
+  w1->SetProperty(&prop, 1);
+  EXPECT_EQ(PropertyChangeInfo(&prop, -2), PropertyChangeInfoAndClear());
+  w1->SetProperty(&prop, -2);
+  EXPECT_EQ(PropertyChangeInfo(&prop, 1), PropertyChangeInfoAndClear());
+  w1->SetProperty(&prop, 3);
+  EXPECT_EQ(PropertyChangeInfo(&prop, -2), PropertyChangeInfoAndClear());
+  w1->ClearProperty(&prop);
+  EXPECT_EQ(PropertyChangeInfo(&prop, 3), PropertyChangeInfoAndClear());
+
+  w1->SetNativeWindowProperty(native_prop_key, &*w1);
+  EXPECT_EQ(PropertyChangeInfo(native_prop_key, 0),
+            PropertyChangeInfoAndClear());
+  w1->SetNativeWindowProperty(native_prop_key, NULL);
+  EXPECT_EQ(PropertyChangeInfo(native_prop_key,
+                               reinterpret_cast<intptr_t>(&*w1)),
+            PropertyChangeInfoAndClear());
 
   // Sanity check to see if |PropertyChangeInfoAndClear| really clears.
-  EXPECT_EQ("name= old=0 new=0", PropertyChangeInfoAndClear());
+  EXPECT_EQ(PropertyChangeInfo(NULL, -3), PropertyChangeInfoAndClear());
 }
 
 TEST_F(WindowTest, AcquireLayer) {
@@ -1198,37 +1284,59 @@ TEST_F(WindowTest, AcquireLayer) {
   EXPECT_EQ(1U, parent->children().size());
 }
 
-TEST_F(WindowTest, DontRestackWindowsWhoseLayersHaveNoDelegate) {
+TEST_F(WindowTest, StackWindowsWhoseLayersHaveNoDelegate) {
   scoped_ptr<Window> window1(CreateTestWindowWithId(1, NULL));
   scoped_ptr<Window> window2(CreateTestWindowWithId(2, NULL));
 
   // This brings window1 (and its layer) to the front.
-  RootWindow::GetInstance()->StackChildAbove(window1.get(), window2.get());
-  EXPECT_EQ(RootWindow::GetInstance()->children().front(), window2.get());
-  EXPECT_EQ(RootWindow::GetInstance()->children().back(), window1.get());
-  EXPECT_EQ(RootWindow::GetInstance()->layer()->children().front(),
-            window2->layer());
-  EXPECT_EQ(RootWindow::GetInstance()->layer()->children().back(),
-            window1->layer());
+  root_window()->StackChildAbove(window1.get(), window2.get());
+  EXPECT_EQ(root_window()->children().front(), window2.get());
+  EXPECT_EQ(root_window()->children().back(), window1.get());
+  EXPECT_EQ(root_window()->layer()->children().front(), window2->layer());
+  EXPECT_EQ(root_window()->layer()->children().back(), window1->layer());
 
-  // This brings window2 (but NOT its layer) to the front.
+  // Since window1 does not have a delegate, window2 should not move in
+  // front of it, nor should its layer.
   window1->layer()->set_delegate(NULL);
-  RootWindow::GetInstance()->StackChildAbove(window2.get(), window1.get());
-  EXPECT_EQ(RootWindow::GetInstance()->children().front(), window1.get());
-  EXPECT_EQ(RootWindow::GetInstance()->children().back(), window2.get());
-  EXPECT_EQ(RootWindow::GetInstance()->layer()->children().front(),
-            window2->layer());
-  EXPECT_EQ(RootWindow::GetInstance()->layer()->children().back(),
-            window1->layer());
+  root_window()->StackChildAbove(window2.get(), window1.get());
+  EXPECT_EQ(root_window()->children().front(), window2.get());
+  EXPECT_EQ(root_window()->children().back(), window1.get());
+  EXPECT_EQ(root_window()->layer()->children().front(), window2->layer());
+  EXPECT_EQ(root_window()->layer()->children().back(), window1->layer());
+}
+
+TEST_F(WindowTest, StackTransientsWhoseLayersHaveNoDelegate) {
+  RootWindow* root = root_window();
+
+  // Create a window with several transients, then a couple windows on top.
+  scoped_ptr<Window> window1(CreateTestWindowWithId(1, NULL));
+  scoped_ptr<Window> window11(CreateTransientChild(11, window1.get()));
+  scoped_ptr<Window> window12(CreateTransientChild(12, window1.get()));
+  scoped_ptr<Window> window13(CreateTransientChild(13, window1.get()));
+  scoped_ptr<Window> window2(CreateTestWindowWithId(2, NULL));
+  scoped_ptr<Window> window3(CreateTestWindowWithId(3, NULL));
+
+  EXPECT_EQ("1 11 12 13 2 3", ChildWindowIDsAsString(root));
+
+  // Remove the delegates of a couple of transients, as if they are closing
+  // and animating out.
+  window11->layer()->set_delegate(NULL);
+  window13->layer()->set_delegate(NULL);
+
+  // Move window1 to the front.  All transients should move with it, and their
+  // order should be preserved.
+  root->StackChildAtTop(window1.get());
+
+  EXPECT_EQ("2 3 1 11 12 13", ChildWindowIDsAsString(root));
 }
 
 class TestVisibilityClient : public client::VisibilityClient {
 public:
-  TestVisibilityClient() : ignore_visibility_changes_(false) {
-    client::SetVisibilityClient(this);
+  explicit TestVisibilityClient(RootWindow* root_window)
+      : ignore_visibility_changes_(false) {
+    client::SetVisibilityClient(root_window, this);
   }
   virtual ~TestVisibilityClient() {
-    client::SetVisibilityClient(NULL);
   }
 
   void set_ignore_visibility_changes(bool ignore_visibility_changes) {
@@ -1248,7 +1356,7 @@ public:
 };
 
 TEST_F(WindowTest, VisibilityClientIsVisible) {
-  TestVisibilityClient client;
+  TestVisibilityClient client(root_window());
 
   scoped_ptr<Window> window(CreateTestWindowWithId(1, NULL));
   EXPECT_TRUE(window->IsVisible());
@@ -1265,17 +1373,19 @@ TEST_F(WindowTest, VisibilityClientIsVisible) {
   EXPECT_TRUE(window->layer()->visible());
 }
 
+#if !defined(OS_WIN)
+// Temporarily disabled for windows. See crbug.com/112222.
+
 // Tests mouse events on window change.
 TEST_F(WindowTest, MouseEventsOnWindowChange) {
-  RootWindow* root_window = RootWindow::GetInstance();
-  gfx::Size size = root_window->GetHostSize();
+  gfx::Size size = root_window()->GetHostSize();
 
-  EventGenerator generator;
+  EventGenerator generator(root_window());
   generator.MoveMouseTo(50, 50);
 
   MouseTrackingDelegate d1;
   scoped_ptr<Window> w1(CreateTestWindowWithDelegate(&d1, 1,
-      gfx::Rect(0, 0, 100, 100), root_window));
+      gfx::Rect(0, 0, 100, 100), root_window()));
   RunAllPendingInMessageLoop();
   // The format of result is "Enter/Mouse/Leave".
   EXPECT_EQ("1 1 0", d1.GetMouseCountsAndReset());
@@ -1341,11 +1451,13 @@ TEST_F(WindowTest, MouseEventsOnWindowChange) {
   RunAllPendingInMessageLoop();
   EXPECT_EQ("1 1 0", d1.GetMouseCountsAndReset());
 }
+#endif
 
 class StackingMadrigalLayoutManager : public LayoutManager {
  public:
-  StackingMadrigalLayoutManager() {
-    RootWindow::GetInstance()->SetLayoutManager(this);
+  explicit StackingMadrigalLayoutManager(RootWindow* root_window)
+      : root_window_(root_window) {
+    root_window_->SetLayoutManager(this);
   }
   virtual ~StackingMadrigalLayoutManager() {
   }
@@ -1357,15 +1469,14 @@ class StackingMadrigalLayoutManager : public LayoutManager {
   virtual void OnWillRemoveWindowFromLayout(Window* child) OVERRIDE {}
   virtual void OnChildWindowVisibilityChanged(Window* child,
                                               bool visible) OVERRIDE {
-    Window::Windows::const_iterator it =
-        RootWindow::GetInstance()->children().begin();
+    Window::Windows::const_iterator it = root_window_->children().begin();
     Window* last_window = NULL;
-    for (; it != RootWindow::GetInstance()->children().end(); ++it) {
+    for (; it != root_window_->children().end(); ++it) {
       if (*it == child && last_window) {
         if (!visible)
-          RootWindow::GetInstance()->StackChildAbove(last_window, *it);
+          root_window_->StackChildAbove(last_window, *it);
         else
-          RootWindow::GetInstance()->StackChildAbove(*it, last_window);
+          root_window_->StackChildAbove(*it, last_window);
         break;
       }
       last_window = *it;
@@ -1376,16 +1487,18 @@ class StackingMadrigalLayoutManager : public LayoutManager {
     SetChildBoundsDirect(child, requested_bounds);
   }
 
+  RootWindow* root_window_;
+
   DISALLOW_COPY_AND_ASSIGN(StackingMadrigalLayoutManager);
 };
 
 class StackingMadrigalVisibilityClient : public client::VisibilityClient {
  public:
-  StackingMadrigalVisibilityClient() : ignored_window_(NULL) {
-    client::SetVisibilityClient(this);
+  explicit StackingMadrigalVisibilityClient(RootWindow* root_window)
+      : ignored_window_(NULL) {
+    client::SetVisibilityClient(root_window, this);
   }
   virtual ~StackingMadrigalVisibilityClient() {
-    client::SetVisibilityClient(NULL);
   }
 
   void set_ignored_window(Window* ignored_window) {
@@ -1413,7 +1526,7 @@ class StackingMadrigalVisibilityClient : public client::VisibilityClient {
 // This test attempts to reconstruct a circumstance that can happen when the
 // aura client attempts to manipulate the visibility and delegate of a layer
 // independent of window visibility.
-// A use case is where the client attempts to keep a window's visible onscreen
+// A use case is where the client attempts to keep a window visible onscreen
 // even after code has called Hide() on the window. The use case for this would
 // be that window hides are animated (e.g. the window fades out). To prevent
 // spurious updating the client code may also clear window's layer's delegate,
@@ -1427,8 +1540,8 @@ class StackingMadrigalVisibilityClient : public client::VisibilityClient {
 // child. A fix is made to Window::StackAbove to prevent this, and this test
 // verifies this fix.
 TEST_F(WindowTest, StackingMadrigal) {
-  new StackingMadrigalLayoutManager;
-  StackingMadrigalVisibilityClient visibility_client;
+  new StackingMadrigalLayoutManager(root_window());
+  StackingMadrigalVisibilityClient visibility_client(root_window());
 
   scoped_ptr<Window> window1(CreateTestWindowWithId(1, NULL));
   scoped_ptr<Window> window11(CreateTransientChild(11, window1.get()));
@@ -1443,23 +1556,226 @@ TEST_F(WindowTest, StackingMadrigal) {
   EXPECT_TRUE(WindowIsAbove(window11.get(), window1.get()));
   EXPECT_TRUE(LayerIsAbove(window11.get(), window1.get()));
 
+  // A new transient should still be above window1.  It will appear behind
+  // window11 because we don't stack windows on top of targets with NULL
+  // delegates.
   scoped_ptr<Window> window12(CreateTransientChild(12, window1.get()));
   window12->Show();
 
-  EXPECT_TRUE(WindowIsAbove(window12.get(), window11.get()));
-  EXPECT_TRUE(LayerIsAbove(window12.get(), window11.get()));
+  EXPECT_TRUE(WindowIsAbove(window12.get(), window1.get()));
+  EXPECT_TRUE(LayerIsAbove(window12.get(), window1.get()));
 
-  // Prior to the NULL check in the transient restacking loop in
-  // Window::StackChildAbove() introduced with this change, attempting to stack
+  // In earlier versions of the StackChildAbove() method, attempting to stack
   // window1 above window12 at this point would actually restack the layers
   // resulting in window12's layer being below window1's layer (though the
   // windows themselves would still be correctly stacked, so events would pass
   // through.)
-  RootWindow::GetInstance()->StackChildAbove(window1.get(), window12.get());
+  root_window()->StackChildAbove(window1.get(), window12.get());
 
   // Both window12 and its layer should be stacked above window1.
   EXPECT_TRUE(WindowIsAbove(window12.get(), window1.get()));
   EXPECT_TRUE(LayerIsAbove(window12.get(), window1.get()));
+}
+
+// Test for an issue where attempting to stack a primary window on top of a
+// transient with a NULL layer delegate causes that primary window to be moved,
+// but the layer order not changed to match.  http://crbug.com/112562
+TEST_F(WindowTest, StackOverClosingTransient) {
+  scoped_ptr<Window> window1(CreateTestWindowWithId(1, NULL));
+  scoped_ptr<Window> transient1(CreateTransientChild(11, window1.get()));
+  scoped_ptr<Window> window2(CreateTestWindowWithId(2, NULL));
+  scoped_ptr<Window> transient2(CreateTransientChild(21, window2.get()));
+
+  // Both windows and layers are stacked in creation order.
+  RootWindow* root = root_window();
+  ASSERT_EQ(4u, root->children().size());
+  EXPECT_EQ(root->children()[0], window1.get());
+  EXPECT_EQ(root->children()[1], transient1.get());
+  EXPECT_EQ(root->children()[2], window2.get());
+  EXPECT_EQ(root->children()[3], transient2.get());
+  ASSERT_EQ(4u, root->layer()->children().size());
+  EXPECT_EQ(root->layer()->children()[0], window1->layer());
+  EXPECT_EQ(root->layer()->children()[1], transient1->layer());
+  EXPECT_EQ(root->layer()->children()[2], window2->layer());
+  EXPECT_EQ(root->layer()->children()[3], transient2->layer());
+
+  // This brings window1 and its transient to the front.
+  // root_window()->StackChildAbove(window1.get(), window2.get());
+  root->StackChildAtTop(window1.get());
+
+  EXPECT_EQ(root->children()[0], window2.get());
+  EXPECT_EQ(root->children()[1], transient2.get());
+  EXPECT_EQ(root->children()[2], window1.get());
+  EXPECT_EQ(root->children()[3], transient1.get());
+  EXPECT_EQ(root->layer()->children()[0], window2->layer());
+  EXPECT_EQ(root->layer()->children()[1], transient2->layer());
+  EXPECT_EQ(root->layer()->children()[2], window1->layer());
+  EXPECT_EQ(root->layer()->children()[3], transient1->layer());
+
+  // Pretend we're closing the top-most transient, then bring window2 to the
+  // front.  This mimics activating a browser window while the status bubble
+  // is fading out.  The transient should stay topmost.
+  transient1->layer()->set_delegate(NULL);
+  root->StackChildAtTop(window2.get());
+
+  EXPECT_EQ(root->children()[0], window1.get());
+  EXPECT_EQ(root->children()[1], window2.get());
+  EXPECT_EQ(root->children()[2], transient2.get());
+  EXPECT_EQ(root->children()[3], transient1.get());
+  EXPECT_EQ(root->layer()->children()[0], window1->layer());
+  EXPECT_EQ(root->layer()->children()[1], window2->layer());
+  EXPECT_EQ(root->layer()->children()[2], transient2->layer());
+  EXPECT_EQ(root->layer()->children()[3], transient1->layer());
+
+  // Close the transient.  Remaining windows are stable.
+  transient1.reset();
+
+  ASSERT_EQ(3u, root->children().size());
+  EXPECT_EQ(root->children()[0], window1.get());
+  EXPECT_EQ(root->children()[1], window2.get());
+  EXPECT_EQ(root->children()[2], transient2.get());
+  ASSERT_EQ(3u, root->layer()->children().size());
+  EXPECT_EQ(root->layer()->children()[0], window1->layer());
+  EXPECT_EQ(root->layer()->children()[1], window2->layer());
+  EXPECT_EQ(root->layer()->children()[2], transient2->layer());
+
+  // Open another window on top.
+  scoped_ptr<Window> window3(CreateTestWindowWithId(3, NULL));
+
+  ASSERT_EQ(4u, root->children().size());
+  EXPECT_EQ(root->children()[0], window1.get());
+  EXPECT_EQ(root->children()[1], window2.get());
+  EXPECT_EQ(root->children()[2], transient2.get());
+  EXPECT_EQ(root->children()[3], window3.get());
+  ASSERT_EQ(4u, root->layer()->children().size());
+  EXPECT_EQ(root->layer()->children()[0], window1->layer());
+  EXPECT_EQ(root->layer()->children()[1], window2->layer());
+  EXPECT_EQ(root->layer()->children()[2], transient2->layer());
+  EXPECT_EQ(root->layer()->children()[3], window3->layer());
+
+  // Pretend we're closing the topmost non-transient window, then bring
+  // window2 to the top.  It should not move.
+  window3->layer()->set_delegate(NULL);
+  root->StackChildAtTop(window2.get());
+
+  ASSERT_EQ(4u, root->children().size());
+  EXPECT_EQ(root->children()[0], window1.get());
+  EXPECT_EQ(root->children()[1], window2.get());
+  EXPECT_EQ(root->children()[2], transient2.get());
+  EXPECT_EQ(root->children()[3], window3.get());
+  ASSERT_EQ(4u, root->layer()->children().size());
+  EXPECT_EQ(root->layer()->children()[0], window1->layer());
+  EXPECT_EQ(root->layer()->children()[1], window2->layer());
+  EXPECT_EQ(root->layer()->children()[2], transient2->layer());
+  EXPECT_EQ(root->layer()->children()[3], window3->layer());
+
+  // Bring window1 to the top.  It should move ahead of window2, but not
+  // ahead of window3 (with NULL delegate).
+  root->StackChildAtTop(window1.get());
+
+  ASSERT_EQ(4u, root->children().size());
+  EXPECT_EQ(root->children()[0], window2.get());
+  EXPECT_EQ(root->children()[1], transient2.get());
+  EXPECT_EQ(root->children()[2], window1.get());
+  EXPECT_EQ(root->children()[3], window3.get());
+  ASSERT_EQ(4u, root->layer()->children().size());
+  EXPECT_EQ(root->layer()->children()[0], window2->layer());
+  EXPECT_EQ(root->layer()->children()[1], transient2->layer());
+  EXPECT_EQ(root->layer()->children()[2], window1->layer());
+  EXPECT_EQ(root->layer()->children()[3], window3->layer());
+}
+
+class RootWindowAttachmentObserver : public WindowObserver {
+ public:
+  RootWindowAttachmentObserver() : added_count_(0), removed_count_(0) {}
+  virtual ~RootWindowAttachmentObserver() {}
+
+  int added_count() const { return added_count_; }
+  int removed_count() const { return removed_count_; }
+
+  void Clear() {
+    added_count_ = 0;
+    removed_count_ = 0;
+  }
+
+  // Overridden from WindowObserver:
+  virtual void OnWindowAddedToRootWindow(Window* window) OVERRIDE {
+    ++added_count_;
+  }
+  virtual void OnWindowRemovingFromRootWindow(Window* window) OVERRIDE {
+    ++removed_count_;
+  }
+
+ private:
+  int added_count_;
+  int removed_count_;
+
+  DISALLOW_COPY_AND_ASSIGN(RootWindowAttachmentObserver);
+};
+
+TEST_F(WindowTest, RootWindowAttachment) {
+  RootWindowAttachmentObserver observer;
+
+  // Test a direct add/remove from the RootWindow.
+  scoped_ptr<Window> w1(new Window(NULL));
+  w1->Init(ui::LAYER_NOT_DRAWN);
+  w1->AddObserver(&observer);
+
+  w1->SetParent(NULL);
+  EXPECT_EQ(1, observer.added_count());
+  EXPECT_EQ(0, observer.removed_count());
+
+  w1.reset();
+  EXPECT_EQ(1, observer.added_count());
+  EXPECT_EQ(1, observer.removed_count());
+
+  observer.Clear();
+
+  // Test an indirect add/remove from the RootWindow.
+  w1.reset(new Window(NULL));
+  w1->Init(ui::LAYER_NOT_DRAWN);
+  Window* w11 = new Window(NULL);
+  w11->Init(ui::LAYER_NOT_DRAWN);
+  w11->AddObserver(&observer);
+  w11->SetParent(w1.get());
+  EXPECT_EQ(0, observer.added_count());
+  EXPECT_EQ(0, observer.removed_count());
+
+  w1->SetParent(NULL);
+  EXPECT_EQ(1, observer.added_count());
+  EXPECT_EQ(0, observer.removed_count());
+
+  w1.reset();  // Deletes w11.
+  w11 = NULL;
+  EXPECT_EQ(1, observer.added_count());
+  EXPECT_EQ(1, observer.removed_count());
+
+  observer.Clear();
+
+  // Test an indirect add/remove with nested observers.
+  w1.reset(new Window(NULL));
+  w1->Init(ui::LAYER_NOT_DRAWN);
+  w11 = new Window(NULL);
+  w11->Init(ui::LAYER_NOT_DRAWN);
+  w11->AddObserver(&observer);
+  w11->SetParent(w1.get());
+  Window* w111 = new Window(NULL);
+  w111->Init(ui::LAYER_NOT_DRAWN);
+  w111->AddObserver(&observer);
+  w111->SetParent(w11);
+
+  EXPECT_EQ(0, observer.added_count());
+  EXPECT_EQ(0, observer.removed_count());
+
+  w1->SetParent(NULL);
+  EXPECT_EQ(2, observer.added_count());
+  EXPECT_EQ(0, observer.removed_count());
+
+  w1.reset();  // Deletes w11 and w111.
+  w11 = NULL;
+  w111 = NULL;
+  EXPECT_EQ(2, observer.added_count());
+  EXPECT_EQ(2, observer.removed_count());
 }
 
 }  // namespace test

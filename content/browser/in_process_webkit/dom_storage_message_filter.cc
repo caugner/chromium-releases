@@ -1,13 +1,18 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/browser/in_process_webkit/dom_storage_message_filter.h"
 
+#ifdef ENABLE_NEW_DOM_STORAGE_BACKEND
+// This class is replaced by a new implementation in
+// content/browser/dom_storage/dom_storage_message_filter_new.h
+#else
+
 #include "base/bind.h"
 #include "base/nullable_string16.h"
 #include "content/browser/in_process_webkit/dom_storage_area.h"
-#include "content/browser/in_process_webkit/dom_storage_context.h"
+#include "content/browser/in_process_webkit/dom_storage_context_impl.h"
 #include "content/browser/in_process_webkit/dom_storage_namespace.h"
 #include "content/common/dom_storage_messages.h"
 #include "content/public/browser/browser_thread.h"
@@ -43,8 +48,8 @@ ScopedStorageEventContext::~ScopedStorageEventContext() {
 }
 
 DOMStorageMessageFilter::DOMStorageMessageFilter(
-    int process_id, WebKitContext* webkit_context)
-    : webkit_context_(webkit_context),
+    int process_id, DOMStorageContextImpl* dom_storage_context)
+    : dom_storage_context_(dom_storage_context),
       process_id_(process_id) {
 }
 
@@ -86,7 +91,8 @@ bool DOMStorageMessageFilter::OnMessageReceived(const IPC::Message& message,
                                                 bool* message_was_ok) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP_EX(DOMStorageMessageFilter, message, *message_was_ok)
-    IPC_MESSAGE_HANDLER(DOMStorageHostMsg_StorageAreaId, OnStorageAreaId)
+    IPC_MESSAGE_HANDLER(DOMStorageHostMsg_OpenStorageArea, OnOpenStorageArea)
+    IPC_MESSAGE_HANDLER(DOMStorageHostMsg_CloseStorageArea, OnCloseStorageArea)
     IPC_MESSAGE_HANDLER(DOMStorageHostMsg_Length, OnLength)
     IPC_MESSAGE_HANDLER(DOMStorageHostMsg_Key, OnKey)
     IPC_MESSAGE_HANDLER(DOMStorageHostMsg_GetItem, OnGetItem)
@@ -110,19 +116,24 @@ void DOMStorageMessageFilter::OverrideThreadForMessage(
     *thread = BrowserThread::WEBKIT_DEPRECATED;
 }
 
-void DOMStorageMessageFilter::OnStorageAreaId(int64 namespace_id,
-                                              const string16& origin,
-                                              int64* storage_area_id) {
+void DOMStorageMessageFilter::OnOpenStorageArea(int64 namespace_id,
+                                                const string16& origin,
+                                                int64* storage_area_id) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::WEBKIT_DEPRECATED));
 
   DOMStorageNamespace* storage_namespace =
       Context()->GetStorageNamespace(namespace_id, true);
   if (!storage_namespace) {
-    *storage_area_id = DOMStorageContext::kInvalidStorageId;
+    *storage_area_id = DOMStorageContextImpl::kInvalidStorageId;
     return;
   }
   DOMStorageArea* storage_area = storage_namespace->GetStorageArea(origin);
   *storage_area_id = storage_area->id();
+}
+
+void DOMStorageMessageFilter::OnCloseStorageArea(int64 storage_area_id) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::WEBKIT_DEPRECATED));
+  // TODO(michaeln): make use of this message in the new backend.
 }
 
 void DOMStorageMessageFilter::OnLength(int64 storage_area_id,
@@ -205,9 +216,9 @@ void DOMStorageMessageFilter::OnClear(int64 storage_area_id, const GURL& url,
 void DOMStorageMessageFilter::OnStorageEvent(
     const DOMStorageMsg_Event_Params& params) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  const DOMStorageContext::MessageFilterSet* set =
+  const DOMStorageContextImpl::MessageFilterSet* set =
       Context()->GetMessageFilterSet();
-  DOMStorageContext::MessageFilterSet::const_iterator cur = set->begin();
+  DOMStorageContextImpl::MessageFilterSet::const_iterator cur = set->begin();
   while (cur != set->end()) {
     // The renderer that generates the event handles it itself.
     if (*cur != this)
@@ -215,3 +226,6 @@ void DOMStorageMessageFilter::OnStorageEvent(
     ++cur;
   }
 }
+
+#endif  // ENABLE_NEW_DOM_STORAGE_BACKEND
+

@@ -19,11 +19,11 @@
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/renderer_host/resource_request_details.h"
+#include "content/public/browser/resource_request_details.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_view_host_delegate.h"
 #include "content/public/browser/web_contents.h"
 #include "net/base/net_errors.h"
@@ -31,6 +31,7 @@
 namespace keys = extension_webnavigation_api_constants;
 
 using content::BrowserContext;
+using content::ResourceRedirectDetails;
 using content::WebContents;
 
 namespace {
@@ -89,7 +90,7 @@ void DispatchOnBeforeNavigate(WebContents* web_contents,
   args.Append(dict);
 
   std::string json_args;
-  base::JSONWriter::Write(&args, false, &json_args);
+  base::JSONWriter::Write(&args, &json_args);
   DispatchEvent(web_contents->GetBrowserContext(),
                 keys::kOnBeforeNavigate,
                 json_args);
@@ -125,7 +126,7 @@ void DispatchOnCommitted(const char* event_name,
   args.Append(dict);
 
   std::string json_args;
-  base::JSONWriter::Write(&args, false, &json_args);
+  base::JSONWriter::Write(&args, &json_args);
   DispatchEvent(web_contents->GetBrowserContext(), event_name, json_args);
 }
 
@@ -144,7 +145,7 @@ void DispatchOnDOMContentLoaded(WebContents* web_contents,
   args.Append(dict);
 
   std::string json_args;
-  base::JSONWriter::Write(&args, false, &json_args);
+  base::JSONWriter::Write(&args, &json_args);
   DispatchEvent(web_contents->GetBrowserContext(),
                 keys::kOnDOMContentLoaded,
                 json_args);
@@ -165,7 +166,7 @@ void DispatchOnCompleted(WebContents* web_contents,
   args.Append(dict);
 
   std::string json_args;
-  base::JSONWriter::Write(&args, false, &json_args);
+  base::JSONWriter::Write(&args, &json_args);
   DispatchEvent(web_contents->GetBrowserContext(),
                 keys::kOnCompleted, json_args);
 }
@@ -198,7 +199,7 @@ void DispatchOnCreatedNavigationTarget(
   args.Append(dict);
 
   std::string json_args;
-  base::JSONWriter::Write(&args, false, &json_args);
+  base::JSONWriter::Write(&args, &json_args);
   DispatchEvent(
       browser_context, keys::kOnCreatedNavigationTarget, json_args);
 }
@@ -219,7 +220,7 @@ void DispatchOnErrorOccurred(WebContents* web_contents,
   args.Append(dict);
 
   std::string json_args;
-  base::JSONWriter::Write(&args, false, &json_args);
+  base::JSONWriter::Write(&args, &json_args);
   DispatchEvent(web_contents->GetBrowserContext(),
                 keys::kOnErrorOccurred,
                 json_args);
@@ -536,10 +537,10 @@ void ExtensionWebNavigationTabObserver::Observe(
       ResourceRedirectDetails* resource_redirect_details =
           content::Details<ResourceRedirectDetails>(details).ptr();
       ResourceType::Type resource_type =
-          resource_redirect_details->resource_type();
+          resource_redirect_details->resource_type;
       if (resource_type == ResourceType::MAIN_FRAME ||
           resource_type == ResourceType::SUB_FRAME) {
-        int64 frame_id = resource_redirect_details->frame_id();
+        int64 frame_id = resource_redirect_details->frame_id;
         if (!navigation_state_.CanSendEvents(frame_id))
           return;
         navigation_state_.SetIsServerRedirected(frame_id);
@@ -557,7 +558,7 @@ void ExtensionWebNavigationTabObserver::DidStartProvisionalLoadForFrame(
     bool is_main_frame,
     const GURL& validated_url,
     bool is_error_page,
-    RenderViewHost* render_view_host) {
+    content::RenderViewHost* render_view_host) {
   // Ignore navigations of sub frames, if the main frame isn't committed yet.
   // This might happen if a sub frame triggers a navigation for both the main
   // frame and itself. Since the sub frame is about to be deleted, and there's

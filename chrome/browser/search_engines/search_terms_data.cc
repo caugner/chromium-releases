@@ -13,7 +13,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "googleurl/src/gurl.h"
 
-#if defined(OS_WIN) && defined(GOOGLE_CHROME_BUILD)
+#if defined(ENABLE_RLZ)
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/rlz/rlz.h"
 #endif
@@ -24,6 +24,10 @@ SearchTermsData::SearchTermsData() {
 }
 
 SearchTermsData::~SearchTermsData() {
+}
+
+std::string SearchTermsData::GoogleBaseURLValue() const {
+  return GoogleURLTracker::kDefaultGoogleHomepage;
 }
 
 std::string SearchTermsData::GoogleBaseSuggestURLValue() const {
@@ -46,6 +50,16 @@ std::string SearchTermsData::GoogleBaseSuggestURLValue() const {
   return base_url.ReplaceComponents(repl).spec();
 }
 
+std::string SearchTermsData::GetApplicationLocale() const {
+  return "en";
+}
+
+#if defined(ENABLE_RLZ)
+string16 SearchTermsData::GetRlzParameterValue() const {
+  return string16();
+}
+#endif
+
 std::string SearchTermsData::InstantEnabledParam() const {
   return std::string();
 }
@@ -58,8 +72,6 @@ std::string SearchTermsData::InstantFieldTrialUrlParam() const {
 std::string* UIThreadSearchTermsData::google_base_url_ = NULL;
 
 UIThreadSearchTermsData::UIThreadSearchTermsData() : profile_(NULL) {
-  // GoogleURLTracker::GoogleURL() DCHECKs this also, but adding it here helps
-  // us catch bad behavior at a more common place in this code.
   DCHECK(!BrowserThread::IsWellKnownThread(BrowserThread::UI) ||
          BrowserThread::CurrentlyOn(BrowserThread::UI));
 }
@@ -77,7 +89,7 @@ std::string UIThreadSearchTermsData::GetApplicationLocale() const {
   return g_browser_process->GetApplicationLocale();
 }
 
-#if defined(OS_WIN) && defined(GOOGLE_CHROME_BUILD)
+#if defined(ENABLE_RLZ)
 string16 UIThreadSearchTermsData::GetRlzParameterValue() const {
   DCHECK(!BrowserThread::IsWellKnownThread(BrowserThread::UI) ||
          BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -99,11 +111,9 @@ string16 UIThreadSearchTermsData::GetRlzParameterValue() const {
 std::string UIThreadSearchTermsData::InstantEnabledParam() const {
   DCHECK(!BrowserThread::IsWellKnownThread(BrowserThread::UI) ||
          BrowserThread::CurrentlyOn(BrowserThread::UI));
-  if (profile_ && InstantController::IsEnabled(profile_) &&
-      !InstantFieldTrial::IsHiddenExperiment(profile_)) {
-    return "&ion=1";
-  }
-  return std::string();
+  return (profile_ && InstantController::IsEnabled(profile_) &&
+      !InstantFieldTrial::IsHiddenExperiment(profile_)) ?
+      "&ion=1" : std::string();
 }
 
 std::string UIThreadSearchTermsData::InstantFieldTrialUrlParam() const {

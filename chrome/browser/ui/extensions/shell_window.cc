@@ -4,40 +4,93 @@
 
 #include "chrome/browser/ui/extensions/shell_window.h"
 
-#include "chrome/browser/chrome_plugin_service_filter.h"
+#include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
+#include "chrome/browser/extensions/extension_tabs_module_constants.h"
+#include "chrome/browser/extensions/extension_window_controller.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
-#include "content/browser/renderer_host/render_view_host.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
-#include "content/public/browser/render_process_host.h"
+
+namespace internal {
+
+class ShellWindowController : public ExtensionWindowController {
+ public:
+  ShellWindowController(ShellWindow* shell_window, Profile* profile);
+
+  // Overriden from ExtensionWindowController
+  virtual const SessionID& GetSessionId() const OVERRIDE;
+  virtual base::DictionaryValue* CreateWindowValue() const OVERRIDE;
+  virtual base::DictionaryValue* CreateWindowValueWithTabs() const OVERRIDE;
+  virtual bool CanClose(Reason* reason) const OVERRIDE;
+  virtual void SetFullscreenMode(bool is_fullscreen,
+                                 const GURL& extension_url) const OVERRIDE;
+
+ private:
+  ShellWindow* shell_window_;
+
+  DISALLOW_COPY_AND_ASSIGN(ShellWindowController);
+};
+
+ShellWindowController::ShellWindowController(
+    ShellWindow* shell_window,
+    Profile* profile)
+    : ExtensionWindowController(shell_window, profile),
+      shell_window_(shell_window) {
+}
+
+const SessionID& ShellWindowController::GetSessionId() const {
+  return shell_window_->session_id();
+}
+
+namespace keys = extension_tabs_module_constants;
+
+base::DictionaryValue* ShellWindowController::CreateWindowValue() const {
+  DictionaryValue* result = ExtensionWindowController::CreateWindowValue();
+
+  result->SetString(keys::kWindowTypeKey, keys::kWindowTypeValueShell);
+  std::string window_state;
+  if (window()->IsMinimized()) {
+    window_state = keys::kShowStateValueMinimized;
+  } else if (window()->IsMaximized()) {
+    window_state = keys::kShowStateValueMaximized;
+  } else {
+    window_state = keys::kShowStateValueNormal;
+  }
+  result->SetString(keys::kShowStateKey, window_state);
+
+  return result;
+}
+
+base::DictionaryValue* ShellWindowController::CreateWindowValueWithTabs()
+    const {
+  return CreateWindowValue();
+}
+
+bool ShellWindowController::CanClose(Reason* reason) const {
+  return true;
+}
+
+void ShellWindowController::SetFullscreenMode(bool is_fullscreen,
+                                              const GURL& extension_url) const {
+  // TODO(mihaip): implement
+}
+
+}  // namespace internal
 
 ShellWindow* ShellWindow::Create(Profile* profile,
                                  const Extension* extension,
                                  const GURL& url) {
   ExtensionProcessManager* manager = profile->GetExtensionProcessManager();
   DCHECK(manager);
-  if (!manager)
-    return NULL;
 
-  ExtensionHost* host = manager->CreateShellHost(extension, url);
-  // CHECK host so that non-GTK platform compilers don't complain about unused
-  // variables.
-  // TODO(mihaip): remove when ShellWindow has been implemented everywhere.
-  CHECK(host);
-
-#if defined(TOOLKIT_GTK) || defined(TOOLKIT_VIEWS)
   // This object will delete itself when the window is closed.
-  // TODO(mihaip): remove the #if block when ShellWindow has been implemented
-  // everywhere.
-  return ShellWindow::CreateShellWindow(host);
-#endif
-
-  return NULL;
+  return ShellWindow::CreateShellWindow(
+      manager->CreateShellHost(extension, url));
 }
 
 void ShellWindow::Observe(int type,
@@ -65,10 +118,6 @@ void ShellWindow::Observe(int type,
   }
 }
 
-void ShellWindow::RenderViewCreated(RenderViewHost* render_view_host) {
-  DisableNPAPIPlugins();
-}
-
 ShellWindow::ShellWindow(ExtensionHost* host)
     : host_(host) {
   // Close the window in response to window.close() and the like.
@@ -83,27 +132,20 @@ ShellWindow::ShellWindow(ExtensionHost* host)
   // apps are no longer tied to the browser process).
   registrar_.Add(this, content::NOTIFICATION_APP_TERMINATING,
                  content::NotificationService::AllSources());
-  content::WebContentsObserver::Observe(web_contents());
+
+  // Prevent the browser process from shutting down while this window is open.
+  BrowserList::StartKeepAlive();
+
+  // Make this window available to the extension API.
+  extension_window_controller_.reset(
+      new internal::ShellWindowController(this, host->profile()));
 }
 
 ShellWindow::~ShellWindow() {
-  ClearDisabledNPAPIPlugins();
-}
+  // Unregister now to prevent getting NOTIFICATION_APP_TERMINATING if we're the
+  // last window open.
+  registrar_.RemoveAll();
 
-void ShellWindow::DisableNPAPIPlugins() {
-  int render_process_id = host_->render_process_host()->GetID();
-  int render_view_id = host_->render_view_host()->routing_id();
-  ChromePluginServiceFilter* filter =
-      ChromePluginServiceFilter::GetInstance();
-  filter->DisableNPAPIForRenderView(render_process_id,
-                                    render_view_id);
-}
-
-void ShellWindow::ClearDisabledNPAPIPlugins() {
-  int render_process_id = host_->render_process_host()->GetID();
-  int render_view_id = host_->render_view_host()->routing_id();
-  ChromePluginServiceFilter* filter =
-      ChromePluginServiceFilter::GetInstance();
-  filter->ClearDisabledNPAPIForRenderView(render_process_id,
-                                          render_view_id);
+  // Remove shutdown prevention.
+  BrowserList::EndKeepAlive();
 }

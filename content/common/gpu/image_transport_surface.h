@@ -8,6 +8,8 @@
 
 #if defined(ENABLE_GPU)
 
+#include <vector>
+
 #include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
@@ -16,8 +18,9 @@
 #include "ipc/ipc_channel.h"
 #include "ipc/ipc_message.h"
 #include "ui/gfx/gl/gl_surface.h"
-#include "ui/gfx/size.h"
 #include "ui/gfx/native_widget_types.h"
+#include "ui/gfx/rect.h"
+#include "ui/gfx/size.h"
 #include "ui/gfx/surface/transport_dib.h"
 
 class GpuChannelManager;
@@ -69,7 +72,14 @@ class ImageTransportSurface {
   static scoped_refptr<gfx::GLSurface>
       CreateSurface(GpuChannelManager* manager,
                     GpuCommandBufferStub* stub,
-                    gfx::PluginWindowHandle handle);
+                    const gfx::GLSurfaceHandle& handle);
+ protected:
+  // Used by certain implements of PostSubBuffer to determine
+  // how much needs to be copied between frames.
+  void GetRegionsToCopy(const gfx::Rect& previous_damage_rect,
+                        const gfx::Rect& new_damage_rect,
+                        std::vector<gfx::Rect>* regions);
+
  private:
   DISALLOW_COPY_AND_ASSIGN(ImageTransportSurface);
 };
@@ -109,6 +119,11 @@ class ImageTransportHelper : public IPC::Channel::Listener {
   // Make the surface's context current.
   bool MakeCurrent();
 
+  // Set the default swap interval on the surface.
+  void SetSwapInterval();
+
+  void Suspend();
+
  private:
   gpu::GpuScheduler* Scheduler();
   gpu::gles2::GLES2Decoder* Decoder();
@@ -121,9 +136,6 @@ class ImageTransportHelper : public IPC::Channel::Listener {
 
   // Backbuffer resize callback.
   void Resize(gfx::Size size);
-
-  // Set the default swap interval on the surface.
-  void SetSwapInterval();
 
   // Weak pointers that point to objects that outlive this helper.
   ImageTransportSurface* surface_;
@@ -144,7 +156,8 @@ class PassThroughImageTransportSurface
  public:
   PassThroughImageTransportSurface(GpuChannelManager* manager,
                                    GpuCommandBufferStub* stub,
-                                   gfx::GLSurface* surface);
+                                   gfx::GLSurface* surface,
+                                   bool transport);
   virtual ~PassThroughImageTransportSurface();
 
   // GLSurface implementation.
@@ -152,6 +165,7 @@ class PassThroughImageTransportSurface
   virtual void Destroy() OVERRIDE;
   virtual bool SwapBuffers() OVERRIDE;
   virtual bool PostSubBuffer(int x, int y, int width, int height) OVERRIDE;
+  virtual bool OnMakeCurrent(gfx::GLContext* context) OVERRIDE;
 
   // ImageTransportSurface implementation.
   virtual void OnNewSurfaceACK(
@@ -164,6 +178,8 @@ class PassThroughImageTransportSurface
  private:
   scoped_ptr<ImageTransportHelper> helper_;
   gfx::Size new_size_;
+  bool transport_;
+  bool did_set_swap_interval_;
 
   DISALLOW_COPY_AND_ASSIGN(PassThroughImageTransportSurface);
 };

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,12 +23,14 @@
 #include "chrome/browser/ui/views/extensions/extension_popup.h"
 #include "chrome/browser/ui/views/toolbar_view.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_action.h"
+#include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/pref_names.h"
-#include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/browser/render_view_host.h"
+#include "content/public/browser/render_widget_host_view.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
@@ -37,18 +39,17 @@
 #include "third_party/skia/include/effects/SkGradientShader.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/animation/slide_animation.h"
+#include "ui/base/dragdrop/drag_utils.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/theme_provider.h"
 #include "ui/gfx/canvas.h"
-#include "ui/gfx/canvas_skia.h"
 #include "ui/views/controls/button/menu_button.h"
 #include "ui/views/controls/button/text_button.h"
 #include "ui/views/controls/menu/menu_item_view.h"
 #include "ui/views/controls/menu/menu_model_adapter.h"
 #include "ui/views/controls/menu/menu_runner.h"
 #include "ui/views/controls/resize_area.h"
-#include "ui/views/drag_utils.h"
 #include "ui/views/metrics.h"
 
 // Horizontal spacing between most items in the container, as well as after the
@@ -83,6 +84,9 @@ BrowserActionButton::BrowserActionButton(const Extension* extension,
 }
 
 void BrowserActionButton::Destroy() {
+  if (keybinding_.get() && panel_->GetFocusManager())
+    panel_->GetFocusManager()->UnregisterAccelerator(*keybinding_.get(), this);
+
   if (context_menu_) {
     context_menu_->Cancel();
     MessageLoop::current()->DeleteSoon(FROM_HERE, this);
@@ -97,17 +101,35 @@ void BrowserActionButton::ViewHierarchyChanged(
     // The Browser Action API does not allow the default icon path to be
     // changed at runtime, so we can load this now and cache it.
     std::string relative_path = browser_action_->default_icon_path();
-    if (relative_path.empty())
-      return;
+    if (!relative_path.empty()) {
+      // LoadImage is not guaranteed to be synchronous, so we might see the
+      // callback OnImageLoaded execute immediately. It (through UpdateState)
+      // expects parent() to return the owner for this button, so this
+      // function is as early as we can start this request.
+      tracker_.LoadImage(extension_, extension_->GetResource(relative_path),
+                         gfx::Size(Extension::kBrowserActionIconMaxSize,
+                                   Extension::kBrowserActionIconMaxSize),
+                         ImageLoadingTracker::DONT_CACHE);
+    } else {
+      // Set the icon to be the default extensions icon.
+      default_icon_ = *ui::ResourceBundle::GetSharedInstance().GetImageNamed(
+          IDR_EXTENSIONS_FAVICON).ToSkBitmap();
+      UpdateState();
+    }
 
-    // LoadImage is not guaranteed to be synchronous, so we might see the
-    // callback OnImageLoaded execute immediately. It (through UpdateState)
-    // expects parent() to return the owner for this button, so this
-    // function is as early as we can start this request.
-    tracker_.LoadImage(extension_, extension_->GetResource(relative_path),
-                       gfx::Size(Extension::kBrowserActionIconMaxSize,
-                                 Extension::kBrowserActionIconMaxSize),
-                       ImageLoadingTracker::DONT_CACHE);
+    // Iterate through all the keybindings and see if one is assigned to the
+    // browserAction.
+    const std::vector<Extension::ExtensionKeybinding>& commands =
+        extension_->keybindings();
+    for (size_t i = 0; i < commands.size(); ++i) {
+      if (commands[i].command_name() ==
+          extension_manifest_values::kBrowserActionKeybindingEvent) {
+        keybinding_.reset(new ui::Accelerator(commands[i].accelerator()));
+        panel_->GetFocusManager()->RegisterAccelerator(
+            *keybinding_.get(), ui::AcceleratorManager::kHighPriority, this);
+        break;
+      }
+    }
   }
 
   MenuButton::ViewHierarchyChanged(is_add, parent, child);
@@ -118,11 +140,11 @@ void BrowserActionButton::ButtonPressed(views::Button* sender,
   panel_->OnBrowserActionExecuted(this, false);
 }
 
-void BrowserActionButton::OnImageLoaded(SkBitmap* image,
-                                        const ExtensionResource& resource,
+void BrowserActionButton::OnImageLoaded(const gfx::Image& image,
+                                        const std::string& extension_id,
                                         int index) {
-  if (image)
-    default_icon_ = *image;
+  if (!image.IsEmpty())
+    default_icon_ = *image.ToSkBitmap();
 
   // Call back to UpdateState() because a more specific icon might have been set
   // while the load was outstanding.
@@ -271,6 +293,12 @@ void BrowserActionButton::ShowContextMenu(const gfx::Point& p,
   context_menu_ = NULL;
 }
 
+bool BrowserActionButton::AcceleratorPressed(
+    const ui::Accelerator& accelerator) {
+  panel_->OnBrowserActionExecuted(this, false);
+  return true;
+}
+
 void BrowserActionButton::SetButtonPushed() {
   SetState(views::CustomButton::BS_PUSHED);
   menu_visible_ = true;
@@ -309,7 +337,7 @@ gfx::Canvas* BrowserActionView::GetIconWithBadge() {
   if (icon.isNull())
     icon = button_->default_icon();
 
-  gfx::Canvas* canvas = new gfx::CanvasSkia(icon, false);
+  gfx::Canvas* canvas = new gfx::Canvas(icon, false);
 
   if (tab_id >= 0) {
     gfx::Rect bounds(icon.width(), icon.height() + ToolbarView::kVertSpacing);
@@ -359,6 +387,8 @@ BrowserActionsContainer::BrowserActionsContainer(Browser* browser,
       container_width_(0),
       chevron_(NULL),
       overflow_menu_(NULL),
+      extension_keybinding_registry_(browser->profile(),
+                                     owner_view->GetFocusManager()),
       suppress_chevron_(false),
       resize_amount_(0),
       animation_target_size_(0),
@@ -700,7 +730,8 @@ void BrowserActionsContainer::GetAccessibleState(
   state->name = l10n_util::GetStringUTF16(IDS_ACCNAME_EXTENSIONS);
 }
 
-void BrowserActionsContainer::RunMenu(View* source, const gfx::Point& pt) {
+void BrowserActionsContainer::OnMenuButtonClicked(views::View* source,
+                                                  const gfx::Point& point) {
   if (source == chevron_) {
     overflow_menu_ = new BrowserActionOverflowMenuController(
         this, chevron_, browser_action_views_, VisibleBrowserActions());
@@ -808,9 +839,15 @@ void BrowserActionsContainer::MoveBrowserAction(const std::string& extension_id,
 }
 
 void BrowserActionsContainer::HidePopup() {
+  // Remove this as an observer and clear |popup_| and |popup_button_| here,
+  // since we might change them before OnWidgetClosing() gets called.
   if (popup_) {
+    popup_->GetWidget()->RemoveObserver(this);
     popup_->GetWidget()->Close();
-    // NULL out popup_button_ in case it's being deleted.
+    popup_ = NULL;
+  }
+  if (popup_button_) {
+    popup_button_->SetButtonNotPushed();
     popup_button_ = NULL;
   }
 }
@@ -840,7 +877,7 @@ void BrowserActionsContainer::OnPaint(gfx::Canvas* canvas) {
 
     // Color of the drop indicator.
     static const SkColor kDropIndicatorColor = SK_ColorBLACK;
-    canvas->FillRect(kDropIndicatorColor, indicator_bounds);
+    canvas->FillRect(indicator_bounds, kDropIndicatorColor);
   }
 }
 

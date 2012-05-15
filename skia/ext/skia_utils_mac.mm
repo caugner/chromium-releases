@@ -14,7 +14,6 @@
 #include "skia/ext/bitmap_platform_device_mac.h"
 #include "third_party/skia/include/core/SkRegion.h"
 #include "third_party/skia/include/utils/mac/SkCGUtils.h"
-#include "ui/gfx/scoped_ns_graphics_context_save_gstate_mac.h"
 
 // 10.6 API that we use if available.
 #if !defined(MAC_OS_X_VERSION_10_6) || \
@@ -76,7 +75,8 @@ SkBitmap NSImageOrNSImageRepToSkBitmap(
   DCHECK(context);
 
   // Save the current graphics context so that we can restore it later.
-  gfx::ScopedNSGraphicsContextSaveGState scoped_g_state;
+  NSGraphicsContext* old_context = [NSGraphicsContext currentContext];
+  [NSGraphicsContext saveGraphicsState];
 
   // Dummy context that we will draw into.
   NSGraphicsContext* context_cocoa =
@@ -110,6 +110,10 @@ SkBitmap NSImageOrNSImageRepToSkBitmap(
     }
   }
 
+  [NSGraphicsContext restoreGraphicsState];
+  if (!old_context && base::mac::IsOSLeopardOrEarlier())
+    [NSGraphicsContext setCurrentContext:nil];
+
   return bitmap;
 }
 
@@ -130,16 +134,6 @@ CGAffineTransform SkMatrixToCGAffineTransform(const SkMatrix& matrix) {
                                matrix[SkMatrix::kMScaleY],
                                matrix[SkMatrix::kMTransX],
                                matrix[SkMatrix::kMTransY]);
-}
-
-SkIRect CGRectToSkIRect(const CGRect& rect) {
-  SkIRect sk_rect = {
-    SkScalarRound(rect.origin.x),
-    SkScalarRound(rect.origin.y),
-    SkScalarRound(rect.origin.x + rect.size.width),
-    SkScalarRound(rect.origin.y + rect.size.height)
-  };
-  return sk_rect;
 }
 
 SkRect CGRectToSkRect(const CGRect& rect) {
@@ -186,12 +180,32 @@ CGColorRef SkColorToCGColorRef(SkColor color) {
                                  SkColorGetA(color) / 255.0);
 }
 
+// Converts NSColor to ARGB
+SkColor NSDeviceColorToSkColor(NSColor* color) {
+  DCHECK([color colorSpace] == [NSColorSpace genericRGBColorSpace] ||
+         [color colorSpace] == [NSColorSpace deviceRGBColorSpace]);
+  CGFloat red, green, blue, alpha;
+  color = [color colorUsingColorSpace:[NSColorSpace deviceRGBColorSpace]];
+  [color getRed:&red green:&green blue:&blue alpha:&alpha];
+  return SkColorSetARGB(SkScalarRound(255.0 * alpha),
+                        SkScalarRound(255.0 * red),
+                        SkScalarRound(255.0 * green),
+                        SkScalarRound(255.0 * blue));
+}
+
 // Converts ARGB to NSColor.
 NSColor* SkColorToCalibratedNSColor(SkColor color) {
   return [NSColor colorWithCalibratedRed:SkColorGetR(color) / 255.0
                                    green:SkColorGetG(color) / 255.0
                                     blue:SkColorGetB(color) / 255.0
                                    alpha:SkColorGetA(color) / 255.0];
+}
+
+NSColor* SkColorToDeviceNSColor(SkColor color) {
+  return [NSColor colorWithDeviceRed:SkColorGetR(color) / 255.0
+                               green:SkColorGetG(color) / 255.0
+                                blue:SkColorGetB(color) / 255.0
+                               alpha:SkColorGetA(color) / 255.0];
 }
 
 SkBitmap CGImageToSkBitmap(CGImageRef image) {
@@ -333,7 +347,15 @@ CGContextRef SkiaBitLocker::cgContext() {
 
   // Apply clip in device coordinates.
   CGMutablePathRef clipPath = CGPathCreateMutable();
-  SkRegion::Iterator iter(canvas_->getTotalClip());
+  const SkRegion& clipRgn = canvas_->getTotalClip();
+  if (clipRgn.isEmpty()) {
+    // CoreGraphics does not consider a newly created path to be empty.
+    // Explicitly set it to empty so the subsequent drawing is clipped out.
+    // It would be better to make the CGContext hidden if there was a CG call
+    // that does that.
+    CGPathAddRect(clipPath, 0, CGRectMake(0, 0, 0, 0));
+  }
+  SkRegion::Iterator iter(clipRgn);
   const SkIPoint& pt = device->getOrigin();
   for (; !iter.done(); iter.next()) {
     SkIRect skRect = iter.rect();

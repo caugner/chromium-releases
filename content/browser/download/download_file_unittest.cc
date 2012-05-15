@@ -9,12 +9,18 @@
 #include "content/browser/download/download_create_info.h"
 #include "content/browser/download/download_file_impl.h"
 #include "content/browser/download/download_request_handle.h"
-#include "content/browser/download/download_status_updater.h"
-#include "content/browser/download/mock_download_manager.h"
 #include "content/public/browser/download_manager.h"
+#include "content/test/mock_download_manager.h"
 #include "net/base/file_stream.h"
 #include "net/base/net_errors.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+#if defined(OS_LINUX)
+// http://crbug.com/110886 for Linux
+#define MAYBE_RenameFileFinal DISABLED_RenameFileFinal
+#else
+#define MAYBE_RenameFileFinal RenameFileFinal
+#endif
 
 using content::BrowserThread;
 using content::BrowserThreadImpl;
@@ -48,7 +54,7 @@ class DownloadFileTest : public testing::Test {
   }
 
   virtual void SetUp() {
-    download_manager_ = new MockDownloadManager;
+    download_manager_ = new content::MockDownloadManager;
   }
 
   virtual void TearDown() {
@@ -70,7 +76,8 @@ class DownloadFileTest : public testing::Test {
     info.save_info.file_stream = file_stream_;
     file->reset(
         new DownloadFileImpl(&info, new DownloadRequestHandle(),
-                             download_manager_, calculate_hash));
+                             download_manager_, calculate_hash,
+                             net::BoundNetLog()));
   }
 
   virtual void DestroyDownloadFile(scoped_ptr<DownloadFile>* file, int offset) {
@@ -132,7 +139,7 @@ const int DownloadFileTest::kDummyRequestId = 67;
 
 // Rename the file before any data is downloaded, after some has, after it all
 // has, and after it's closed.
-TEST_F(DownloadFileTest, RenameFileFinal) {
+TEST_F(DownloadFileTest, MAYBE_RenameFileFinal) {
   CreateDownloadFile(&download_file_, 0, true);
   ASSERT_EQ(net::OK, download_file_->Initialize());
   FilePath initial_path(download_file_->FullPath());

@@ -8,12 +8,14 @@
 #include "content/common/view_messages.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/common/renderer_preferences.h"
+#include "content/renderer/render_thread_impl.h"
 #include "content/renderer/render_view_impl.h"
 #include "content/renderer/renderer_main_platform_delegate.h"
 #include "content/test/mock_render_process.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebScreenInfo.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScriptController.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScriptSource.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLRequest.h"
@@ -46,6 +48,7 @@ using WebKit::WebURLRequest;
 namespace {
 const int32 kOpenerId = 7;
 const int32 kRouteId = 5;
+const int32 kNewWindowRouteId = 6;
 const int32 kSurfaceId = 42;
 
 #if defined(USE_AURA) && defined(USE_X11)
@@ -132,6 +135,7 @@ void RenderViewTest::SetUp() {
     render_thread_.reset(new MockRenderThread());
   render_thread_->set_routing_id(kRouteId);
   render_thread_->set_surface_id(kSurfaceId);
+  render_thread_->set_new_window_routing_id(kNewWindowRouteId);
 
   command_line_.reset(new CommandLine(CommandLine::NO_PROGRAM));
   params_.reset(new content::MainFunctionParams(*command_line_));
@@ -142,6 +146,10 @@ void RenderViewTest::SetUp() {
   // hacky, but this is the world we live in...
   webkit_glue::SetJavaScriptFlags(" --expose-gc");
   WebKit::initialize(&webkit_platform_support_);
+
+  // Ensure that we register any necessary schemes when initializing WebKit,
+  // since we are using a MockRenderThread.
+  RenderThreadImpl::RegisterSchemes();
 
   mock_process_.reset(new MockRenderProcess);
 
@@ -156,7 +164,9 @@ void RenderViewTest::SetUp() {
       kSurfaceId,
       kInvalidSessionStorageNamespaceId,
       string16(),
-      1);
+      1,
+      WebKit::WebScreenInfo(),
+      false);
   view->AddRef();
   view_ = view;
 
@@ -331,6 +341,15 @@ void RenderViewTest::SendWebKeyboardEvent(
   impl->OnMessageReceived(*input_message);
 }
 
+void RenderViewTest::SendWebMouseEvent(
+    const WebKit::WebMouseEvent& mouse_event) {
+  scoped_ptr<IPC::Message> input_message(new ViewMsg_HandleInputEvent(0));
+  input_message->WriteData(reinterpret_cast<const char*>(&mouse_event),
+                           sizeof(WebKit::WebMouseEvent));
+  RenderViewImpl* impl = static_cast<RenderViewImpl*>(view_);
+  impl->OnMessageReceived(*input_message);
+}
+
 const char* const kGetCoordinatesScript =
     "(function() {"
     "  function GetCoordinates(elem) {"
@@ -393,6 +412,11 @@ bool RenderViewTest::SimulateElementClick(const std::string& element_id) {
   RenderViewImpl* impl = static_cast<RenderViewImpl*>(view_);
   impl->OnMessageReceived(*input_message);
   return true;
+}
+
+void RenderViewTest::SetFocused(const WebKit::WebNode& node) {
+  RenderViewImpl* impl = static_cast<RenderViewImpl*>(view_);
+  impl->focusedNodeChanged(node);
 }
 
 void RenderViewTest::ClearHistory() {

@@ -66,6 +66,9 @@ class ExtensionTabHelper
   // specified id.
   void SetExtensionAppById(const std::string& extension_app_id);
 
+  // Set just the app icon, used by panels created by an extension.
+  void SetExtensionAppIconById(const std::string& extension_app_id);
+
   const Extension* extension_app() const { return extension_app_; }
   bool is_app() const { return extension_app_ != NULL; }
   const WebApplicationInfo& web_app_info() const {
@@ -106,6 +109,7 @@ class ExtensionTabHelper
   void OnDidGetApplicationInfo(int32 page_id, const WebApplicationInfo& info);
   void OnInstallApplication(const WebApplicationInfo& info);
   void OnInlineWebstoreInstall(int install_id,
+                               int return_route_id,
                                const std::string& webstore_item_id,
                                const GURL& requestor_url);
   void OnGetAppNotifyChannel(const GURL& requestor_url,
@@ -120,13 +124,18 @@ class ExtensionTabHelper
   // ImageLoadingTracker to load the extension's image.
   void UpdateExtensionAppIcon(const Extension* extension);
 
+  const Extension* GetExtension(const std::string& extension_app_id);
+
   // ImageLoadingTracker::Observer.
-  virtual void OnImageLoaded(SkBitmap* image, const ExtensionResource& resource,
+  virtual void OnImageLoaded(const gfx::Image& image,
+                             const std::string& extension_id,
                              int index) OVERRIDE;
 
   // WebstoreInlineInstaller::Delegate.
-  virtual void OnInlineInstallSuccess(int install_id) OVERRIDE;
+  virtual void OnInlineInstallSuccess(int install_id,
+                                      int return_route_id) OVERRIDE;
   virtual void OnInlineInstallFailure(int install_id,
+                                      int return_route_id,
                                       const std::string& error) OVERRIDE;
 
   // AppNotifyChannelSetup::Delegate.

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -39,7 +39,6 @@ enum {
                                 // should check that the path exists before
                                 // using it.
   DIR_INTERNAL_PLUGINS,         // Directory where internal plugins reside.
-  DIR_MEDIA_LIBS,               // Directory where the Media libraries reside.
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
   DIR_POLICY_FILES,             // Directory for system-wide read-only
                                 // policy files that allow sys-admins
@@ -67,6 +66,8 @@ enum {
 
   DIR_DEFAULT_APPS,             // Directory where installer places .crx files
                                 // to be installed when chrome is first run.
+  DIR_PEPPER_FLASH_PLUGIN,      // Directory to the Pepper Flash plugin,
+                                // containing the plugin and the manifest.
   FILE_RESOURCE_MODULE,         // Full path and filename of the module that
                                 // contains embedded resources (version,
                                 // strings, images, etc.).
@@ -76,7 +77,7 @@ enum {
                                 // contains recorded browser events for
                                 // playback.
   FILE_FLASH_PLUGIN,            // Full path to the internal Flash plugin file.
-  FILE_PEPPER_FLASH_PLUGIN,     // Full path to the pepper Flash plugin file.
+  FILE_PEPPER_FLASH_PLUGIN,     // Full path to the Pepper Flash plugin file.
   FILE_PDF_PLUGIN,              // Full path to the internal PDF plugin file.
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
@@ -103,14 +104,6 @@ enum {
   DIR_GEN_TEST_DATA,            // Directory where generated test data resides.
   DIR_TEST_DATA,                // Directory where unit test data resides.
   DIR_TEST_TOOLS,               // Directory where unit test tools reside.
-  DIR_LAYOUT_TESTS,             // Returns the LayoutTests path for layout
-                                // tests. For the current git workflow, it
-                                // returns
-                                //   third_party/WebKit/LayoutTests
-                                // On svn workflow (including build machines)
-                                // and older git workflow, it returns
-                                //   chrome/test/data/layout_tests/LayoutTests
-                                // See, http://crbug.com/105104.
 
   PATH_END
 };

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 #include "content/browser/debugger/render_view_devtools_agent_host.h"
 #include "content/browser/mock_content_browser_client.h"
 #include "content/browser/renderer_host/test_render_view_host.h"
-#include "content/browser/tab_contents/test_tab_contents.h"
+#include "content/browser/tab_contents/test_web_contents.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/devtools_agent_host_registry.h"
@@ -22,6 +22,7 @@ using content::DevToolsAgentHostRegistry;
 using content::DevToolsClientHost;
 using content::DevToolsManager;
 using content::DevToolsManagerImpl;
+using content::RenderViewHostImplTestHarness;
 using content::WebContents;
 
 namespace {
@@ -111,9 +112,9 @@ class DevToolsManagerTestBrowserClient
 
 }  // namespace
 
-class DevToolsManagerTest : public RenderViewHostTestHarness {
+class DevToolsManagerTest : public RenderViewHostImplTestHarness {
  public:
-  DevToolsManagerTest() : RenderViewHostTestHarness() {
+  DevToolsManagerTest() {
   }
 
  protected:
@@ -121,12 +122,12 @@ class DevToolsManagerTest : public RenderViewHostTestHarness {
     original_browser_client_ = content::GetContentClient()->browser();
     content::GetContentClient()->set_browser(&browser_client_);
 
-    RenderViewHostTestHarness::SetUp();
+    RenderViewHostImplTestHarness::SetUp();
     TestDevToolsClientHost::ResetCounters();
   }
 
   virtual void TearDown() OVERRIDE {
-    RenderViewHostTestHarness::TearDown();
+    RenderViewHostImplTestHarness::TearDown();
     content::GetContentClient()->set_browser(original_browser_client_);
   }
 
@@ -180,7 +181,7 @@ TEST_F(DevToolsManagerTest, ForwardMessageToClient) {
 }
 
 TEST_F(DevToolsManagerTest, NoUnresponsiveDialogInInspectedTab) {
-  TestRenderViewHost* inspected_rvh = rvh();
+  content::TestRenderViewHost* inspected_rvh = test_rvh();
   inspected_rvh->set_render_view_created(true);
   EXPECT_FALSE(contents()->GetDelegate());
   TestWebContentsDelegate delegate;
@@ -195,8 +196,8 @@ TEST_F(DevToolsManagerTest, NoUnresponsiveDialogInInspectedTab) {
   // Start with a short timeout.
   inspected_rvh->StartHangMonitorTimeout(TimeDelta::FromMilliseconds(10));
   // Wait long enough for first timeout and see if it fired.
-  MessageLoop::current()->PostDelayedTask(FROM_HERE,
-                                          MessageLoop::QuitClosure(), 10);
+  MessageLoop::current()->PostDelayedTask(
+      FROM_HERE, MessageLoop::QuitClosure(), TimeDelta::FromMilliseconds(10));
   MessageLoop::current()->Run();
   EXPECT_FALSE(delegate.renderer_unresponsive_received());
 
@@ -205,8 +206,8 @@ TEST_F(DevToolsManagerTest, NoUnresponsiveDialogInInspectedTab) {
   // Start with a short timeout.
   inspected_rvh->StartHangMonitorTimeout(TimeDelta::FromMilliseconds(10));
   // Wait long enough for first timeout and see if it fired.
-  MessageLoop::current()->PostDelayedTask(FROM_HERE,
-                                          MessageLoop::QuitClosure(), 10);
+  MessageLoop::current()->PostDelayedTask(
+      FROM_HERE, MessageLoop::QuitClosure(), TimeDelta::FromMilliseconds(10));
   MessageLoop::current()->Run();
   EXPECT_TRUE(delegate.renderer_unresponsive_received());
 

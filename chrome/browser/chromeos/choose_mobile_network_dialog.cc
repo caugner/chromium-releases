@@ -29,19 +29,13 @@ namespace chromeos {
 
 // static
 void ChooseMobileNetworkDialog::ShowDialog(gfx::NativeWindow owning_window) {
-  Profile* profile;
-  Browser* browser = NULL;
-  if (UserManager::Get()->user_is_logged_in()) {
-    browser = BrowserList::GetLastActive();
-    DCHECK(browser);
-    profile = browser->profile();
-  } else {
-    profile = ProfileManager::GetDefaultProfile();
-  }
+  Profile* profile = ProfileManager::GetDefaultProfileOrOffTheRecord();
   HtmlDialogView* html_view =
-      new HtmlDialogView(profile, browser, new ChooseMobileNetworkDialog);
+      new HtmlDialogView(profile,
+                         BrowserList::GetLastActive(),
+                         new ChooseMobileNetworkDialog);
   html_view->InitDialog();
-  browser::CreateViewsWindow(owning_window, html_view, STYLE_FLUSH);
+  views::Widget::CreateWindowWithParent(html_view, owning_window);
   html_view->GetWidget()->Show();
 }
 
@@ -87,7 +81,7 @@ bool ChooseMobileNetworkDialog::ShouldShowDialogTitle() const {
 }
 
 bool ChooseMobileNetworkDialog::HandleContextMenu(
-    const ContextMenuParams& params) {
+    const content::ContextMenuParams& params) {
   // Disable context menu.
   return true;
 }

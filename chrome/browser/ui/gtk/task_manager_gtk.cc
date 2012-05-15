@@ -21,9 +21,10 @@
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/ui/gtk/gtk_chrome_link_button.h"
-#include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_tree.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
+#include "chrome/browser/ui/gtk/menu_gtk.h"
+#include "chrome/browser/ui/gtk/theme_service_gtk.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "grit/chromium_strings.h"
@@ -35,12 +36,7 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/gtk_util.h"
 #include "ui/gfx/image/image.h"
-
-#if defined(TOOLKIT_VIEWS)
-#include "ui/views/controls/menu/menu_2.h"
-#else
-#include "chrome/browser/ui/gtk/menu_gtk.h"
-#endif
+#include "ui/gfx/linux_util.h"
 
 namespace {
 
@@ -229,17 +225,6 @@ void TreeViewInsertColumn(GtkWidget* treeview, int resid) {
                                l10n_util::GetStringUTF8(resid).c_str());
 }
 
-// Set the current width of the column without forcing a minimum width as
-// gtk_tree_view_column_set_fixed_width() would. This would basically be
-// gtk_tree_view_column_set_width() except that there is no such function.
-void TreeViewColumnSetWidth(GtkTreeViewColumn* column, gint width) {
-  column->width = width;
-  column->resized_width = width;
-  column->use_resized_width = TRUE;
-  // Needed for use_resized_width to be effective.
-  gtk_widget_queue_resize(column->tree_view);
-}
-
 }  // namespace
 
 class TaskManagerGtk::ContextMenuController
@@ -252,30 +237,18 @@ class TaskManagerGtk::ContextMenuController
       menu_model_->AddCheckItemWithStringId(
           i, TaskManagerColumnIDToResourceID(i));
     }
-#if defined(TOOLKIT_VIEWS)
-    menu_.reset(new views::Menu2(menu_model_.get()));
-#else
     menu_.reset(new MenuGtk(NULL, menu_model_.get()));
-#endif
   }
 
   virtual ~ContextMenuController() {}
 
   void RunMenu(const gfx::Point& point, guint32 event_time) {
-#if defined(TOOLKIT_VIEWS)
-    menu_->RunContextMenuAt(point);
-#else
     menu_->PopupAsContext(point, event_time);
-#endif
   }
 
   void Cancel() {
     task_manager_ = NULL;
-#if defined(TOOLKIT_VIEWS)
-    menu_->CancelMenu();
-#else
     menu_->Cancel();
-#endif
   }
 
  private:
@@ -312,11 +285,7 @@ class TaskManagerGtk::ContextMenuController
 
   // The model and view for the right click context menu.
   scoped_ptr<ui::SimpleMenuModel> menu_model_;
-#if defined(TOOLKIT_VIEWS)
-  scoped_ptr<views::Menu2> menu_;
-#else
   scoped_ptr<MenuGtk> menu_;
-#endif
 
   // The TaskManager the context menu was brought up for. Set to NULL when the
   // menu is canceled.
@@ -510,15 +479,8 @@ void TaskManagerGtk::Init() {
   destroy_handler_id_ = g_signal_connect(dialog_, "destroy",
                                          G_CALLBACK(OnDestroyThunk), this);
   g_signal_connect(dialog_, "response", G_CALLBACK(OnResponseThunk), this);
-  // GTK does menu on mouse-up while views does menu on mouse-down,
-  // so connect to different handlers.
-#if defined(TOOLKIT_VIEWS)
-  g_signal_connect(dialog_, "button-release-event",
-                   G_CALLBACK(OnButtonEventThunk), this);
-#else
   g_signal_connect(dialog_, "button-press-event",
                    G_CALLBACK(OnButtonEventThunk), this);
-#endif
   gtk_widget_add_events(dialog_,
                         GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK);
 
@@ -529,16 +491,14 @@ void TaskManagerGtk::Init() {
   gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled),
                                  GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
 
-  gtk_container_add(GTK_CONTAINER(GTK_DIALOG(dialog_)->vbox), scrolled);
+  gtk_container_add(GTK_CONTAINER(content_area), scrolled);
 
   CreateTaskManagerTreeview();
   gtk_tree_view_set_headers_clickable(GTK_TREE_VIEW(treeview_), TRUE);
   g_signal_connect(treeview_, "row-activated",
                    G_CALLBACK(OnRowActivatedThunk), this);
-#if defined(TOOLKIT_GTK)
   g_signal_connect(treeview_, "button-press-event",
                    G_CALLBACK(OnButtonEventThunk), this);
-#endif
 
   // |selection| is owned by |treeview_|.
   GtkTreeSelection* selection = gtk_tree_view_get_selection(
@@ -561,10 +521,6 @@ void TaskManagerGtk::Init() {
 }
 
 void TaskManagerGtk::SetInitialDialogSize() {
-  // Hook up to the realize event so we can size the page column to the
-  // size of the leftover space after packing the other columns.
-  g_signal_connect(treeview_, "realize",
-                   G_CALLBACK(OnTreeViewRealizeThunk), this);
   // If we previously saved the dialog's bounds, use them.
   if (g_browser_process->local_state()) {
     const DictionaryValue* placement_pref =
@@ -762,7 +718,7 @@ GdkPixbuf* TaskManagerGtk::GetModelIcon(int row) {
       ui::ResourceBundle::GetSharedInstance().GetBitmapNamed(
           IDR_DEFAULT_FAVICON)->pixelRef()) {
     return static_cast<GdkPixbuf*>(g_object_ref(
-        GtkThemeService::GetDefaultFavicon(true)->ToGdkPixbuf()));
+        ThemeServiceGtk::GetDefaultFavicon(true)->ToGdkPixbuf()));
   }
 
   return gfx::GdkPixbufFromSkBitmap(&icon);
@@ -881,8 +837,10 @@ gint TaskManagerGtk::CompareImpl(GtkTreeModel* model, GtkTreeIter* a,
     return model_->CompareValues(row1, row2, id);
 
   // Otherwise, make sure grouped resources are shown together.
-  std::pair<int, int> group_range1 = model_->GetGroupRangeForResource(row1);
-  std::pair<int, int> group_range2 = model_->GetGroupRangeForResource(row2);
+  TaskManagerModel::GroupRange group_range1 =
+      model_->GetGroupRangeForResource(row1);
+  TaskManagerModel::GroupRange group_range2 =
+      model_->GetGroupRangeForResource(row2);
 
   if (group_range1 == group_range2) {
     // Sort within groups.
@@ -938,42 +896,13 @@ void TaskManagerGtk::OnResponse(GtkWidget* dialog, int response_id) {
   }
 }
 
-void TaskManagerGtk::OnTreeViewRealize(GtkTreeView* treeview) {
-  // Four columns show by default: the page column, the memory column, the
-  // CPU column, and the network column. Initially we set the page column to
-  // take all the extra space, with the other columns being sized to fit the
-  // column names. Here we turn off the expand property of the first column
-  // (to make the table behave sanely when the user resizes columns) and set
-  // the effective sizes of all four default columns to the automatically
-  // chosen size before any rows are added. This causes them to stay at that
-  // size even if the data would overflow, preventing a horizontal scroll
-  // bar from appearing due to the row data.
-  const TaskManagerColumn dfl_columns[] = {kTaskManagerNetwork, kTaskManagerCPU,
-                                           kTaskManagerPrivateMem};
-  GtkTreeViewColumn* column = NULL;
-  gint width;
-  for (size_t i = 0; i < arraysize(dfl_columns); ++i) {
-    column = gtk_tree_view_get_column(treeview,
-        TreeViewColumnIndexFromID(dfl_columns[i]));
-    width = gtk_tree_view_column_get_width(column);
-    TreeViewColumnSetWidth(column, width);
-  }
-  // Do the page column separately since it's a little different.
-  column = gtk_tree_view_get_column(treeview,
-      TreeViewColumnIndexFromID(kTaskManagerPage));
-  width = gtk_tree_view_column_get_width(column);
-  // Turn expanding back off to make resizing columns behave sanely.
-  gtk_tree_view_column_set_expand(column, FALSE);
-  TreeViewColumnSetWidth(column, width);
-}
-
 void TaskManagerGtk::OnSelectionChanged(GtkTreeSelection* selection) {
   if (ignore_selection_changed_)
     return;
   AutoReset<bool> autoreset(&ignore_selection_changed_, true);
 
   // The set of groups that should be selected.
-  std::set<std::pair<int, int> > ranges;
+  std::set<TaskManagerModel::GroupRange> ranges;
   bool selection_contains_browser_process = false;
 
   GtkTreeModel* model;
@@ -991,7 +920,7 @@ void TaskManagerGtk::OnSelectionChanged(GtkTreeSelection* selection) {
   g_list_foreach(paths, reinterpret_cast<GFunc>(gtk_tree_path_free), NULL);
   g_list_free(paths);
 
-  for (std::set<std::pair<int, int> >::iterator iter = ranges.begin();
+  for (std::set<TaskManagerModel::GroupRange>::iterator iter = ranges.begin();
        iter != ranges.end(); ++iter) {
     for (int i = 0; i < iter->second; ++i) {
       GtkTreePath* child_path = gtk_tree_path_new_from_indices(iter->first + i,

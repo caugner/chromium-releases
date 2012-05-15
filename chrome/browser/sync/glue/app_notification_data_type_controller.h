@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 #include <string>
 
 #include "base/compiler_specific.h"
-#include "chrome/browser/sync/glue/frontend_data_type_controller.h"
+#include "chrome/browser/sync/glue/ui_data_type_controller.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 
@@ -18,7 +18,7 @@ class AppNotificationManager;
 namespace browser_sync {
 
 class AppNotificationDataTypeController
-    : public FrontendDataTypeController,
+    : public UIDataTypeController,
       public content::NotificationObserver {
  public:
   AppNotificationDataTypeController(
@@ -26,9 +26,6 @@ class AppNotificationDataTypeController
       Profile* profile,
       ProfileSyncService* sync_service);
   virtual ~AppNotificationDataTypeController();
-
-  // FrontendDataTypeController implementation.
-  virtual syncable::ModelType type() const OVERRIDE;
 
   // NotificationObserver interface.
   virtual void Observe(int type,
@@ -41,13 +38,7 @@ class AppNotificationDataTypeController
  private:
   // FrontendDataTypeController implementations.
   virtual bool StartModels() OVERRIDE;
-  virtual void CleanUpState() OVERRIDE;
-  virtual void CreateSyncComponents() OVERRIDE;
-  virtual void RecordUnrecoverableError(
-      const tracked_objects::Location& from_here,
-      const std::string& message) OVERRIDE;
-  virtual void RecordAssociationTime(base::TimeDelta time) OVERRIDE;
-  virtual void RecordStartFailure(StartResult result) OVERRIDE;
+  virtual void StopModels() OVERRIDE;
 
   content::NotificationRegistrar registrar_;
 

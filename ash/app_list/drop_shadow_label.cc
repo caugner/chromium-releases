@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@
 
 #include "base/utf_string_conversions.h"
 #include "third_party/skia/include/effects/SkGradientShader.h"
-#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/canvas.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/skbitmap_operations.h"
 
@@ -40,7 +40,7 @@ void DropShadowLabel::PaintText(gfx::Canvas* canvas,
     // when transfering contents on this canvas to target canvas.
     gfx::Size canvas_size(text_bounds.width() + drop_shadow_size_,
                           text_bounds.height() + drop_shadow_size_);
-    gfx::CanvasSkia text_canvas(canvas_size, false);
+    gfx::Canvas text_canvas(canvas_size, false);
 
     const double kShadowOpacity = 0.2;
     const SkColor shadow_color =
@@ -84,7 +84,7 @@ void DropShadowLabel::PaintText(gfx::Canvas* canvas,
       SkPaint paint;
       paint.setShader(s)->unref();
 
-      gfx::CanvasSkia alpha_canvas(canvas_size, false);
+      gfx::Canvas alpha_canvas(canvas_size, false);
       alpha_canvas.DrawRect(gfx::Rect(canvas_size), paint);
 
       const SkBitmap& alpha_bitmap = const_cast<SkBitmap&>(

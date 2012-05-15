@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -299,8 +299,10 @@ const gfx::Image& ProfileInfoCache::GetAvatarIconOfProfileAtIndex(
 bool ProfileInfoCache::GetBackgroundStatusOfProfileAtIndex(
     size_t index) const {
   bool background_app_status;
-  GetInfoForProfileAtIndex(index)->GetBoolean(kBackgroundAppsKey,
-                                              &background_app_status);
+  if (!GetInfoForProfileAtIndex(index)->GetBoolean(kBackgroundAppsKey,
+                                                   &background_app_status)) {
+    return false;
+  }
   return background_app_status;
 }
 
@@ -322,8 +324,11 @@ const gfx::Image* ProfileInfoCache::GetGAIAPictureOfProfileAtIndex(
   std::string key = CacheKeyFromProfilePath(path);
 
   // If the picture is already loaded then use it.
-  if (gaia_pictures_.count(key))
+  if (gaia_pictures_.count(key)) {
+    if (gaia_pictures_[key]->IsEmpty())
+      return NULL;
     return gaia_pictures_[key];
+  }
 
   std::string file_name;
   GetInfoForProfileAtIndex(index)->GetString(
@@ -355,6 +360,9 @@ void ProfileInfoCache::OnGAIAPictureLoaded(const FilePath& path,
   if (*image) {
     delete gaia_pictures_[key];
     gaia_pictures_[key] = *image;
+  } else {
+    // Place an empty image in the cache to avoid reloading it again.
+    gaia_pictures_[key] = new gfx::Image();
   }
   delete image;
 

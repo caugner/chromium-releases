@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -95,6 +95,27 @@ IPC_MESSAGE_ROUTED1(
 IPC_MESSAGE_ROUTED1(AutofillMsg_SelectAutofillSuggestionAtIndex,
                     int /* listIndex */)
 
+// Tells the renderer that the next form will be filled for real.
+IPC_MESSAGE_ROUTED0(AutofillMsg_SetAutofillActionFill)
+
+// Clears the currently displayed Autofill results.
+IPC_MESSAGE_ROUTED0(AutofillMsg_ClearForm)
+
+// Tells the renderer that the next form will be filled as a preview.
+IPC_MESSAGE_ROUTED0(AutofillMsg_SetAutofillActionPreview)
+
+// Tells the renderer that the Autofill previewed form should be cleared.
+IPC_MESSAGE_ROUTED0(AutofillMsg_ClearPreviewedForm)
+
+// Sets the currently selected nodes value.
+IPC_MESSAGE_ROUTED1(AutofillMsg_SetNodeText,
+                    string16)
+
+// Tells the renderer to populate the correct password fields with this
+// generated password.
+IPC_MESSAGE_ROUTED1(AutofillMsg_GeneratedPasswordAccepted,
+                    string16 /* generated_password */)
+
 // Autofill messages sent from the renderer to the browser.
 
 // Notification that forms have been seen that are candidates for
@@ -105,12 +126,12 @@ IPC_MESSAGE_ROUTED2(AutofillHostMsg_FormsSeen,
 
 // Notification that password forms have been seen that are candidates for
 // filling/submitting by the password manager.
-IPC_MESSAGE_ROUTED1(AutofillHostMsg_PasswordFormsFound,
+IPC_MESSAGE_ROUTED1(AutofillHostMsg_PasswordFormsParsed,
                     std::vector<webkit::forms::PasswordForm> /* forms */)
 
 // Notification that initial layout has occurred and the following password
 // forms are visible on the page (e.g. not set to display:none.)
-IPC_MESSAGE_ROUTED1(AutofillHostMsg_PasswordFormsVisible,
+IPC_MESSAGE_ROUTED1(AutofillHostMsg_PasswordFormsRendered,
                     std::vector<webkit::forms::PasswordForm> /* forms */)
 
 // Notification that a form has been submitted.  The user hit the button.
@@ -165,3 +186,9 @@ IPC_MESSAGE_ROUTED0(AutofillHostMsg_DidEndTextFieldEditing)
 
 // Instructs the browser to hide the Autofill popup.
 IPC_MESSAGE_ROUTED0(AutofillHostMsg_HideAutofillPopup)
+
+// Instructs the browser to show the password generation bubble at the
+// specified location. This location should be specified in the renderers
+// coordinate system.
+IPC_MESSAGE_ROUTED1(AutofillHostMsg_ShowPasswordGenerationPopup,
+                    gfx::Rect /* source location */)

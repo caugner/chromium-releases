@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -63,6 +63,7 @@ class VIEWS_EXPORT BaseScrollBar : public ScrollBar,
   virtual void OnMouseReleased(const MouseEvent& event) OVERRIDE;
   virtual void OnMouseCaptureLost() OVERRIDE;
   virtual bool OnKeyPressed(const KeyEvent& event) OVERRIDE;
+  virtual ui::GestureStatus OnGestureEvent(const GestureEvent& event) OVERRIDE;
   virtual bool OnMouseWheel(const MouseWheelEvent& event) OVERRIDE;
 
   // ScrollBar overrides:
@@ -74,8 +75,7 @@ class VIEWS_EXPORT BaseScrollBar : public ScrollBar,
 
   // ContextMenuController overrides.
   virtual void ShowContextMenuForView(View* source,
-                                      const gfx::Point& p,
-                                      bool is_mouse_gesture) OVERRIDE;
+                                      const gfx::Point& point) OVERRIDE;
 
   // Menu::Delegate overrides:
   virtual string16 GetLabel(int id) const OVERRIDE;

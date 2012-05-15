@@ -1,10 +1,10 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/public/browser/web_contents_observer.h"
 
-#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/navigation_details.h"
 
@@ -47,14 +47,15 @@ bool WebContentsObserver::Send(IPC::Message* message) {
     return false;
   }
 
-  return tab_contents_->GetRenderViewHost()->Send(message);
+  return static_cast<RenderViewHostImpl*>(
+      tab_contents_->GetRenderViewHost())->Send(message);
 }
 
 int WebContentsObserver::routing_id() const {
   if (!tab_contents_ || !tab_contents_->GetRenderViewHost())
     return MSG_ROUTING_NONE;
 
-  return tab_contents_->GetRenderViewHost()->routing_id();
+  return tab_contents_->GetRenderViewHost()->GetRoutingID();
 }
 
 void WebContentsObserver::TabContentsDestroyed() {

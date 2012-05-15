@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,12 +8,19 @@
 #include "ui/gfx/canvas.h"
 #include "ui/views/controls/menu/menu_config.h"
 
+namespace {
+
+const int kSeparatorHeight = 1;
+
+const SkColor kSeparatorColor = SkColorSetARGB(50, 0, 0, 0);
+
+}  // namespace
+
 namespace views {
 
-static const SkColor kSeparatorColor = SkColorSetARGB(50, 00, 00, 00);
-
 void MenuSeparator::OnPaint(gfx::Canvas* canvas) {
-  canvas->DrawLineInt(kSeparatorColor, 0, height() / 2, width(), height() / 2);
+  canvas->FillRect(gfx::Rect(0, height() / 2, width(), kSeparatorHeight),
+                   kSeparatorColor);
 }
 
 gfx::Size MenuSeparator::GetPreferredSize() {

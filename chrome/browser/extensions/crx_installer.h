@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,6 +21,10 @@
 
 class ExtensionService;
 class SkBitmap;
+
+namespace extensions {
+class ExtensionUpdaterTest;
+}
 
 // This class installs a crx file into a profile.
 //
@@ -56,16 +60,6 @@ class CrxInstaller
       ExtensionService* frontend,
       ExtensionInstallUI* client);
 
-  // This is pretty lame, but given the difficulty of connecting a particular
-  // ExtensionFunction to a resulting download in the download manager, it's
-  // currently necessary. This is the |id| of an extension to be installed
-  // *by the web store only* which should not get the permissions install
-  // prompt. This should only be called on the UI thread.
-  // crbug.com/54916
-  // TODO(asargent): This should be removed now that SetWhitelistEntry exists
-  // http://crbug.com/100584
-  static void SetWhitelistedInstallId(const std::string& id);
-
   struct WhitelistEntry {
     WhitelistEntry();
     ~WhitelistEntry();
@@ -95,13 +89,6 @@ class CrxInstaller
   // Removes any whitelist data for |id| and returns it. The caller owns
   // the return value and is responsible for deleting it.
   static WhitelistEntry* RemoveWhitelistEntry(const std::string& id);
-
-  // Returns whether |id| is whitelisted - only call this on the UI thread.
-  static bool IsIdWhitelisted(const std::string& id);
-
-  // Returns whether |id| was found and removed (was whitelisted). This should
-  // only be called on the UI thread.
-  static bool ClearWhitelistedInstallId(const std::string& id);
 
   // Install the crx in |source_file|.
   void InstallCrx(const FilePath& source_file);
@@ -185,7 +172,7 @@ class CrxInstaller
   Profile* profile() { return profile_; }
 
  private:
-  friend class ExtensionUpdaterTest;
+  friend class extensions::ExtensionUpdaterTest;
 
   CrxInstaller(base::WeakPtr<ExtensionService> frontend_weak,
                ExtensionInstallUI* client);

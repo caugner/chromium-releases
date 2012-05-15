@@ -34,6 +34,7 @@ LayerAnimator::LayerAnimator(base::TimeDelta transition_duration)
     : delegate_(NULL),
       preemption_strategy_(IMMEDIATELY_SET_NEW_TARGET),
       transition_duration_(transition_duration),
+      tween_type_(Tween::LINEAR),
       is_started_(false),
       disable_timer_for_test_(false) {
 }
@@ -43,6 +44,9 @@ LayerAnimator::~LayerAnimator() {
     running_animations_[i].sequence->OnAnimatorDestroyed();
   ClearAnimations();
 }
+
+// static
+bool LayerAnimator::disable_animations_for_test_ = false;
 
 // static
 LayerAnimator* LayerAnimator::CreateDefaultAnimator() {
@@ -55,9 +59,11 @@ LayerAnimator* LayerAnimator::CreateImplicitAnimator() {
 }
 
 void LayerAnimator::SetTransform(const Transform& transform) {
-  StartAnimation(new LayerAnimationSequence(
-      LayerAnimationElement::CreateTransformElement(
-          transform, transition_duration_)));
+  base::TimeDelta duration = transition_duration_;
+  scoped_ptr<LayerAnimationElement> element(
+      LayerAnimationElement::CreateTransformElement(transform, duration));
+  element->set_tween_type(tween_type_);
+  StartAnimation(new LayerAnimationSequence(element.release()));
 }
 
 Transform LayerAnimator::GetTargetTransform() const {
@@ -67,9 +73,11 @@ Transform LayerAnimator::GetTargetTransform() const {
 }
 
 void LayerAnimator::SetBounds(const gfx::Rect& bounds) {
-  StartAnimation(new LayerAnimationSequence(
-      LayerAnimationElement::CreateBoundsElement(
-          bounds, transition_duration_)));
+  base::TimeDelta duration = transition_duration_;
+  scoped_ptr<LayerAnimationElement> element(
+      LayerAnimationElement::CreateBoundsElement(bounds, duration));
+  element->set_tween_type(tween_type_);
+  StartAnimation(new LayerAnimationSequence(element.release()));
 }
 
 gfx::Rect LayerAnimator::GetTargetBounds() const {
@@ -79,15 +87,32 @@ gfx::Rect LayerAnimator::GetTargetBounds() const {
 }
 
 void LayerAnimator::SetOpacity(float opacity) {
-  StartAnimation(new LayerAnimationSequence(
-      LayerAnimationElement::CreateOpacityElement(
-          opacity, transition_duration_)));
+  base::TimeDelta duration = transition_duration_;
+  scoped_ptr<LayerAnimationElement> element(
+      LayerAnimationElement::CreateOpacityElement(opacity, duration));
+  element->set_tween_type(tween_type_);
+  StartAnimation(new LayerAnimationSequence(element.release()));
 }
 
 float LayerAnimator::GetTargetOpacity() const {
   LayerAnimationElement::TargetValue target(delegate());
   GetTargetValue(&target);
   return target.opacity;
+}
+
+void LayerAnimator::SetVisibility(bool visibility) {
+  base::TimeDelta duration = transition_duration_;
+
+  // Tween type doesn't matter for visibility.
+  StartAnimation(new LayerAnimationSequence(
+      LayerAnimationElement::CreateVisibilityElement(
+          visibility, duration)));
+}
+
+bool LayerAnimator::GetTargetVisibility() const {
+  LayerAnimationElement::TargetValue target(delegate());
+  GetTargetValue(&target);
+  return target.visibility;
 }
 
 void LayerAnimator::SetDelegate(LayerAnimationDelegate* delegate) {
@@ -147,10 +172,9 @@ void LayerAnimator::ScheduleTogether(
   // Scheduling a zero duration pause that affects all the animated properties
   // will prevent any of the sequences from animating until there are no
   // running animations that affect any of these properties.
-  ScheduleAnimation(
-      new LayerAnimationSequence(
-          LayerAnimationElement::CreatePauseElement(animated_properties,
-                                                    base::TimeDelta())));
+  ScheduleAnimation(new LayerAnimationSequence(
+      LayerAnimationElement::CreatePauseElement(animated_properties,
+                                                base::TimeDelta())));
 
   // These animations (provided they don't animate any common properties) will
   // now animate together if trivially scheduled.
@@ -205,20 +229,27 @@ void LayerAnimator::RemoveObserver(LayerAnimationObserver* observer) {
 // LayerAnimator private -------------------------------------------------------
 
 void LayerAnimator::Step(base::TimeTicks now) {
+  TRACE_EVENT0("ui", "LayerAnimator::Step");
+
   last_step_time_ = now;
   // We need to make a copy of the running animations because progressing them
   // and finishing them may indirectly affect the collection of running
   // animations.
   RunningAnimations running_animations_copy = running_animations_;
+  bool needs_redraw = false;
   for (size_t i = 0; i < running_animations_copy.size(); ++i) {
     base::TimeDelta delta = now - running_animations_copy[i].start_time;
     if (delta >= running_animations_copy[i].sequence->duration() &&
         !running_animations_copy[i].sequence->is_cyclic()) {
       FinishAnimation(running_animations_copy[i].sequence);
     } else {
-      running_animations_copy[i].sequence->Progress(delta, delegate());
+      if (running_animations_copy[i].sequence->Progress(delta, delegate()))
+        needs_redraw = true;
     }
   }
+
+  if (needs_redraw)
+    delegate()->ScheduleDrawForAnimation();
 }
 
 void LayerAnimator::SetStartTime(base::TimeTicks start_time) {
@@ -381,9 +412,12 @@ void LayerAnimator::RemoveAllAnimationsWithACommonProperty(
 }
 
 void LayerAnimator::ImmediatelySetNewTarget(LayerAnimationSequence* sequence) {
+  // Ensure that sequence is disposed of when this function completes.
+  scoped_ptr<LayerAnimationSequence> to_dispose(sequence);
   const bool abort = false;
   RemoveAllAnimationsWithACommonProperty(sequence, abort);
-  scoped_ptr<LayerAnimationSequence> removed(RemoveAnimation(sequence));
+  LayerAnimationSequence* removed = RemoveAnimation(sequence);
+  DCHECK(removed == NULL || removed == sequence);
   sequence->Progress(sequence->duration(), delegate());
 }
 
@@ -500,9 +534,9 @@ bool LayerAnimator::StartSequenceImmediately(LayerAnimationSequence* sequence) {
 
 void LayerAnimator::GetTargetValue(
     LayerAnimationElement::TargetValue* target) const {
-  for (RunningAnimations::const_iterator iter = running_animations_.begin();
-       iter != running_animations_.end(); ++iter) {
-    (*iter).sequence->GetTargetValue(target);
+  for (AnimationQueue::const_iterator iter = animation_queue_.begin();
+       iter != animation_queue_.end(); ++iter) {
+    (*iter)->GetTargetValue(target);
   }
 }
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,6 @@
 #include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/file_util.h"
-#include "base/json/json_value_serializer.h"
 #include "base/json/json_writer.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/stl_util.h"
@@ -29,13 +28,11 @@
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
-#include "chrome/browser/dom_operation_notification_details.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
-#include "chrome/browser/extensions/extension_updater.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/history/top_sites.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
@@ -49,6 +46,7 @@
 #include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/browser/printing/print_job.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/renderer_host/chrome_render_message_filter.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/sessions/restore_tab_helper.h"
@@ -74,10 +72,11 @@
 #include "chrome/common/chrome_view_type.h"
 #include "chrome/common/content_settings_types.h"
 #include "chrome/common/extensions/extension.h"
-#include "content/browser/renderer_host/render_view_host.h"
+#include "content/public/browser/dom_operation_notification_details.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/process_type.h"
 #include "googleurl/src/gurl.h"
@@ -86,9 +85,11 @@
 #include "ui/gfx/rect.h"
 
 using content::BrowserThread;
+using content::DomOperationNotificationDetails;
 using content::DownloadItem;
 using content::DownloadManager;
 using content::NavigationController;
+using content::RenderViewHost;
 using content::WebContents;
 
 // Holds onto start and stop timestamps for a particular tab
@@ -1205,7 +1206,7 @@ void FindInPageNotificationObserver::Observe(
 const int FindInPageNotificationObserver::kFindInPageRequestId = -1;
 
 DomOperationObserver::DomOperationObserver() {
-  registrar_.Add(this, chrome::NOTIFICATION_DOM_OPERATION_RESPONSE,
+  registrar_.Add(this, content::NOTIFICATION_DOM_OPERATION_RESPONSE,
                  content::NotificationService::AllSources());
   registrar_.Add(this, chrome::NOTIFICATION_APP_MODAL_DIALOG_SHOWN,
                  content::NotificationService::AllSources());
@@ -1218,9 +1219,9 @@ DomOperationObserver::~DomOperationObserver() {}
 void DomOperationObserver::Observe(
     int type, const content::NotificationSource& source,
     const content::NotificationDetails& details) {
-  if (type == chrome::NOTIFICATION_DOM_OPERATION_RESPONSE) {
+  if (type == content::NOTIFICATION_DOM_OPERATION_RESPONSE) {
     content::Details<DomOperationNotificationDetails> dom_op_details(details);
-    OnDomOperationCompleted(dom_op_details->json());
+    OnDomOperationCompleted(dom_op_details->json);
   } else if (type == chrome::NOTIFICATION_APP_MODAL_DIALOG_SHOWN) {
     OnModalDialogShown();
   } else if (type == chrome::NOTIFICATION_WEB_CONTENT_SETTINGS_CHANGED) {
@@ -1590,7 +1591,10 @@ AutomationProviderDownloadModelChangedObserver(
 AutomationProviderDownloadModelChangedObserver::
     ~AutomationProviderDownloadModelChangedObserver() {}
 
-void AutomationProviderDownloadModelChangedObserver::ModelChanged() {
+void AutomationProviderDownloadModelChangedObserver::ModelChanged(
+    DownloadManager* manager) {
+  DCHECK_EQ(manager, download_manager_);
+
   download_manager_->RemoveObserver(this);
 
   if (provider_)
@@ -1623,7 +1627,8 @@ AllDownloadsCompleteObserver::AllDownloadsCompleteObserver(
 
 AllDownloadsCompleteObserver::~AllDownloadsCompleteObserver() {}
 
-void AllDownloadsCompleteObserver::ModelChanged() {
+void AllDownloadsCompleteObserver::ModelChanged(DownloadManager* manager) {
+  DCHECK_EQ(manager, download_manager_);
   // The set of downloads in the download manager has changed.  If there are
   // any new downloads that are still in progress, add them to the pending list.
   std::vector<DownloadItem*> downloads;
@@ -1639,8 +1644,7 @@ void AllDownloadsCompleteObserver::ModelChanged() {
   ReplyIfNecessary();
 }
 
-void AllDownloadsCompleteObserver::OnDownloadUpdated(
-    content::DownloadItem* download) {
+void AllDownloadsCompleteObserver::OnDownloadUpdated(DownloadItem* download) {
   // If the current download's status has changed to a final state (not state
   // "in progress"), remove it from the pending list.
   if (download->GetState() != DownloadItem::IN_PROGRESS) {
@@ -2503,7 +2507,7 @@ void GetAllNotificationsObserver::SendMessage() {
     note->SetInteger(
         "pid",
         base::GetProcId(view->GetHost()->web_contents()->GetRenderViewHost()->
-            process()-> GetHandle()));
+            GetProcess()-> GetHandle()));
     list->Append(note);
   }
   std::vector<const Notification*> queued_notes;
@@ -2925,6 +2929,97 @@ void ProcessInfoObserver::OnDetailsAvailable() {
     AutomationJSONReply(automation_, reply_message_.release())
         .SendSuccess(return_value.get());
   }
+}
+
+V8HeapStatsObserver::V8HeapStatsObserver(
+    AutomationProvider* automation,
+    IPC::Message* reply_message,
+    base::ProcessId renderer_id)
+    : automation_(automation->AsWeakPtr()),
+      reply_message_(reply_message),
+      renderer_id_(renderer_id) {
+  registrar_.Add(
+      this,
+      chrome::NOTIFICATION_RENDERER_V8_HEAP_STATS_COMPUTED,
+      content::NotificationService::AllSources());
+}
+
+V8HeapStatsObserver::~V8HeapStatsObserver() {}
+
+void V8HeapStatsObserver::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
+  DCHECK(type == chrome::NOTIFICATION_RENDERER_V8_HEAP_STATS_COMPUTED);
+
+  base::ProcessId updated_renderer_id =
+      *(content::Source<base::ProcessId>(source).ptr());
+  // Only return information for the renderer ID we're interested in.
+  if (renderer_id_ != updated_renderer_id)
+    return;
+
+  ChromeRenderMessageFilter::V8HeapStatsDetails* v8_heap_details =
+      content::Details<ChromeRenderMessageFilter::V8HeapStatsDetails>(details)
+          .ptr();
+  scoped_ptr<DictionaryValue> return_value(new DictionaryValue);
+  return_value->SetInteger("renderer_id", updated_renderer_id);
+  return_value->SetInteger("v8_memory_allocated",
+                           v8_heap_details->v8_memory_allocated());
+  return_value->SetInteger("v8_memory_used",
+                           v8_heap_details->v8_memory_used());
+
+  if (automation_) {
+    AutomationJSONReply(automation_, reply_message_.release())
+        .SendSuccess(return_value.get());
+  }
+  delete this;
+}
+
+FPSObserver::FPSObserver(
+    AutomationProvider* automation,
+    IPC::Message* reply_message,
+    base::ProcessId renderer_id,
+    int routing_id)
+    : automation_(automation->AsWeakPtr()),
+      reply_message_(reply_message),
+      renderer_id_(renderer_id),
+      routing_id_(routing_id) {
+  registrar_.Add(
+      this,
+      chrome::NOTIFICATION_RENDERER_FPS_COMPUTED,
+      content::NotificationService::AllSources());
+}
+
+FPSObserver::~FPSObserver() {}
+
+void FPSObserver::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
+  DCHECK(type == chrome::NOTIFICATION_RENDERER_FPS_COMPUTED);
+
+  base::ProcessId updated_renderer_id =
+      *(content::Source<base::ProcessId>(source).ptr());
+  // Only return information for the renderer ID we're interested in.
+  if (renderer_id_ != updated_renderer_id)
+    return;
+
+  ChromeRenderMessageFilter::FPSDetails* fps_details =
+      content::Details<ChromeRenderMessageFilter::FPSDetails>(details).ptr();
+  // Only return information for the routing id of the host render view we're
+  // interested in.
+  if (routing_id_ != fps_details->routing_id())
+    return;
+
+  scoped_ptr<DictionaryValue> return_value(new DictionaryValue);
+  return_value->SetInteger("renderer_id", updated_renderer_id);
+  return_value->SetInteger("routing_id", fps_details->routing_id());
+  return_value->SetDouble("fps", fps_details->fps());
+  if (automation_) {
+    AutomationJSONReply(automation_, reply_message_.release())
+        .SendSuccess(return_value.get());
+  }
+  delete this;
 }
 
 BrowserOpenedWithNewProfileNotificationObserver::

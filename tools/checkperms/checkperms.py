@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -31,12 +31,14 @@ import sys
 WHITELIST_EXTENSIONS = [
     'bash',
     'bat',
+    'dll',
     'dylib',
+    'exe',
     'pl',
     'py',
     'rb',
-    'sh',
     'sed',
+    'sh',
 ]
 
 # Files that end the following paths are whitelisted too.
@@ -50,16 +52,18 @@ WHITELIST_FILES = [
     '/chrome/tools/build/linux/chrome-wrapper',
     '/chrome/tools/build/mac/build_app_dmg',
     '/chrome/tools/build/mac/clean_up_old_versions',
-    '/chrome/tools/build/mac/copy_framework_unversioned',
     '/chrome/tools/build/mac/dump_product_syms',
     '/chrome/tools/build/mac/generate_localizer',
     '/chrome/tools/build/mac/make_sign_sh',
-    '/chrome/tools/build/mac/tweak_info_plist',
     '/chrome/tools/build/mac/verify_order',
     '/o3d/build/gyp_o3d',
     '/o3d/gypbuild',
     '/o3d/installer/linux/debian.in/rules',
     '/third_party/icu/source/runconfigureicu',
+    '/third_party/gold/gold32',
+    '/third_party/gold/gold64',
+    '/third_party/gold/ld',
+    '/third_party/gold/ld.bfd',
     '/third_party/lcov/bin/gendesc',
     '/third_party/lcov/bin/genhtml',
     '/third_party/lcov/bin/geninfo',
@@ -99,7 +103,7 @@ WHITELIST_REGEX = [
     re.compile('/third_party/sqlite/'),
     re.compile('/third_party/xdg-utils/'),
     re.compile('/third_party/yasm/source/patched-yasm/config'),
-    re.compile('/third_party/ffmpeg/patched-ffmpeg/tools'),
+    re.compile('/third_party/ffmpeg/tools'),
 ]
 
 #### USER EDITABLE SECTION ENDS HERE ####

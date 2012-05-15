@@ -234,22 +234,6 @@ const struct append_case {
 #endif
 };
 
-#if defined(OS_WIN)
-// This function is deprecated, but still used on Windows.
-TEST_F(FileUtilTest, AppendToPath) {
-  for (unsigned int i = 0; i < arraysize(append_cases); ++i) {
-    const append_case& value = append_cases[i];
-    std::wstring result = value.path;
-    file_util::AppendToPath(&result, value.ending);
-    EXPECT_EQ(value.result, result);
-  }
-
-#if defined(NDEBUG) && !defined(DCHECK_ALWAYS_ON)
-  file_util::AppendToPath(NULL, L"path");  // asserts in debug mode
-#endif
-}
-#endif  // defined(OS_WIN)
-
 static const struct filename_case {
   const wchar_t* path;
   const wchar_t* filename;
@@ -302,17 +286,6 @@ static const struct extension_case {
 #endif
 };
 
-#if defined(OS_WIN)
-// This function has been deprecated on non-Windows.
-TEST_F(FileUtilTest, GetFileExtensionFromPath) {
-  for (unsigned int i = 0; i < arraysize(extension_cases); ++i) {
-    const extension_case& ext = extension_cases[i];
-    const std::wstring fext = file_util::GetFileExtensionFromPath(ext.path);
-    EXPECT_EQ(ext.extension, fext);
-  }
-}
-#endif
-
 // Test finding the directory component of a path
 static const struct dir_case {
   const wchar_t* full_path;
@@ -339,37 +312,26 @@ static const struct dir_case {
 #endif
 };
 
-// Flaky, http://crbug.com/46246
-TEST_F(FileUtilTest, FLAKY_CountFilesCreatedAfter) {
-  // Create old file (that we don't want to count)
-  FilePath old_file_name =
-      temp_dir_.path().Append(FILE_PATH_LITERAL("Old File.txt"));
-  CreateTextFile(old_file_name, L"Just call me Mr. Creakybits");
+TEST_F(FileUtilTest, CountFilesCreatedAfter) {
+  FilePath file_name =
+      temp_dir_.path().Append(FILE_PATH_LITERAL("f.txt"));
+  CreateTextFile(file_name, L"test");
 
-  // Age to perfection
-#if defined(OS_WIN)
-  base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(100));
-#elif defined(OS_POSIX)
-  // We need to wait at least one second here because the precision of
-  // file creation time is one second.
-  base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(1500));
-#endif
+  base::PlatformFileInfo info;
+  file_util::GetFileInfo(file_name, &info);
+  base::Time file_time = info.creation_time;
 
-  // Establish our cutoff time
-  base::Time now(base::Time::NowFromSystemTime());
-  EXPECT_EQ(0, file_util::CountFilesCreatedAfter(temp_dir_.path(), now));
+  base::TimeDelta two_secs = base::TimeDelta::FromSeconds(2);
+  base::Time after = file_time + two_secs;
+  EXPECT_EQ(0, file_util::CountFilesCreatedAfter(temp_dir_.path(), after));
 
-  // Create a new file (that we do want to count)
-  FilePath new_file_name =
-      temp_dir_.path().Append(FILE_PATH_LITERAL("New File.txt"));
-  CreateTextFile(new_file_name, L"Waaaaaaaaaaaaaah.");
+  base::Time before = file_time - two_secs;
+  EXPECT_EQ(1, file_util::CountFilesCreatedAfter(temp_dir_.path(), before));
 
-  // We should see only the new file.
-  EXPECT_EQ(1, file_util::CountFilesCreatedAfter(temp_dir_.path(), now));
-
-  // Delete new file, we should see no files after cutoff now
-  EXPECT_TRUE(file_util::Delete(new_file_name, false));
-  EXPECT_EQ(0, file_util::CountFilesCreatedAfter(temp_dir_.path(), now));
+  // After deleting the file, shouldn't find it any more.
+  EXPECT_TRUE(file_util::Delete(file_name, false));
+  EXPECT_EQ(0, file_util::CountFilesCreatedAfter(temp_dir_.path(), before));
+  EXPECT_EQ(0, file_util::CountFilesCreatedAfter(temp_dir_.path(), after));
 }
 
 TEST_F(FileUtilTest, FileAndDirectorySize) {
@@ -1459,8 +1421,8 @@ TEST_F(FileUtilTest, ResolveShortcutTest) {
   FilePath link_file = temp_dir_.path().Append(L"Link.lnk");
 
   HRESULT result;
-  IShellLink *shell = NULL;
-  IPersistFile *persist = NULL;
+  IShellLink* shell = NULL;
+  IPersistFile* persist = NULL;
 
   CoInitialize(NULL);
   // Temporarily create a shortcut for test
@@ -1590,7 +1552,7 @@ TEST_F(FileUtilTest, CreateTemporaryFileTest) {
 
 TEST_F(FileUtilTest, CreateAndOpenTemporaryFileTest) {
   FilePath names[3];
-  FILE *fps[3];
+  FILE* fps[3];
   int i;
 
   // Create; make sure they are open and exist.
@@ -1965,10 +1927,10 @@ class VerifyPathControlledByUserTest : public FileUtilTest {
     // set permissions on the directories we create.
     // Make all files and directories non-world-writable.
     mode_t enabled_permissions =
-        S_IRWXU | // User can read, write, traverse
-        S_IRWXG;  // Group can read, write, traverse
+        S_IRWXU |  // User can read, write, traverse
+        S_IRWXG;   // Group can read, write, traverse
     mode_t disabled_permissions =
-        S_IRWXO;  // Other users can't read, write, traverse.
+        S_IRWXO;   // Other users can't read, write, traverse.
 
     ASSERT_NO_FATAL_FAILURE(
         ChangePosixFilePermissions(
@@ -2187,7 +2149,6 @@ TEST_F(VerifyPathControlledByUserTest, GroupWriteTest) {
   EXPECT_TRUE(
       file_util::VerifyPathControlledByUser(
           sub_dir_, text_file_, uid_, multiple_gids));
-
 }
 
 TEST_F(VerifyPathControlledByUserTest, WriteBitChecks) {
@@ -2210,7 +2171,7 @@ TEST_F(VerifyPathControlledByUserTest, WriteBitChecks) {
       file_util::VerifyPathControlledByUser(
           sub_dir_, text_file_, uid_, ok_gids_));
 
-   // Make base_dir_ world-writable.
+  // Make base_dir_ world-writable.
   ASSERT_NO_FATAL_FAILURE(
       ChangePosixFilePermissions(base_dir_, S_IWOTH, 0u));
   EXPECT_FALSE(

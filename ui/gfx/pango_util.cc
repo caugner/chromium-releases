@@ -5,6 +5,7 @@
 #include "ui/gfx/pango_util.h"
 
 #include <cairo/cairo.h>
+#include <fontconfig/fontconfig.h>
 #include <pango/pango.h>
 #include <pango/pangocairo.h>
 
@@ -16,10 +17,9 @@
 #include "ui/gfx/rect.h"
 
 #if !defined(USE_WAYLAND) && defined(TOOLKIT_USES_GTK)
+#include <gdk/gdk.h>
 #include <gtk/gtk.h>
 #include "ui/gfx/gtk_util.h"
-#else
-#include "ui/gfx/linux_util.h"
 #endif
 
 #include "ui/gfx/skia_util.h"
@@ -36,8 +36,7 @@ const double kFadeWidthFactor = 1.5;
 // End state of the elliding fade.
 const double kFadeFinalAlpha = 0.15;
 
-// Return |cairo_font_options|. If needed, allocate and update it based on
-// GtkSettings.
+// Return |cairo_font_options|. If needed, allocate and update it.
 cairo_font_options_t* GetCairoFontOptions() {
   // Font settings that we initialize once and then use when drawing text.
   static cairo_font_options_t* cairo_font_options = NULL;
@@ -47,13 +46,12 @@ cairo_font_options_t* GetCairoFontOptions() {
 
   cairo_font_options = cairo_font_options_create();
 
+#if defined(TOOLKIT_USES_GTK)
   gint antialias = 0;
   gint hinting = 0;
   gchar* hint_style = NULL;
   gchar* rgba_style = NULL;
 
-#if !defined(USE_WAYLAND) && defined(TOOLKIT_USES_GTK)
-  // TODO(xji): still has gtk dependency.
   GtkSettings* gtk_settings = gtk_settings_get_default();
   g_object_get(gtk_settings,
                "gtk-xft-antialias", &antialias,
@@ -61,7 +59,6 @@ cairo_font_options_t* GetCairoFontOptions() {
                "gtk-xft-hintstyle", &hint_style,
                "gtk-xft-rgba", &rgba_style,
                NULL);
-#endif
 
   // g_object_get() doesn't tell us whether the properties were present or not,
   // but if they aren't (because gnome-settings-daemon isn't running), we'll get
@@ -108,6 +105,46 @@ cairo_font_options_t* GetCairoFontOptions() {
     g_free(hint_style);
   if (rgba_style)
     g_free(rgba_style);
+#else
+  // For non-GTK builds (read: Aura), use light hinting and fetch
+  // subpixel-rendering settings from FontConfig.  We should really be getting
+  // per-font settings here, but this path will be made obsolete by
+  // http://crbug.com/105550.
+  // TODO(derat): Create font_config_util.h/cc and move this there.
+  FcPattern* pattern = FcPatternCreate();
+  FcResult result;
+  FcPattern* match = FcFontMatch(0, pattern, &result);
+  DCHECK(match);
+  int fc_rgba = FC_RGBA_RGB;
+  FcPatternGetInteger(match, FC_RGBA, 0, &fc_rgba);
+  FcPatternDestroy(pattern);
+  FcPatternDestroy(match);
+
+  cairo_antialias_t cairo_antialias = (fc_rgba != FC_RGBA_NONE) ?
+      CAIRO_ANTIALIAS_SUBPIXEL : CAIRO_ANTIALIAS_GRAY;
+
+  cairo_subpixel_order_t cairo_subpixel_order = CAIRO_SUBPIXEL_ORDER_RGB;
+  switch (fc_rgba) {
+    case FC_RGBA_RGB:
+      cairo_subpixel_order = CAIRO_SUBPIXEL_ORDER_RGB;
+      break;
+    case FC_RGBA_BGR:
+      cairo_subpixel_order = CAIRO_SUBPIXEL_ORDER_BGR;
+      break;
+    case FC_RGBA_VRGB:
+      cairo_subpixel_order = CAIRO_SUBPIXEL_ORDER_VRGB;
+      break;
+    case FC_RGBA_VBGR:
+      cairo_subpixel_order = CAIRO_SUBPIXEL_ORDER_VBGR;
+      break;
+  }
+
+  cairo_font_options_set_antialias(cairo_font_options, cairo_antialias);
+  cairo_font_options_set_subpixel_order(cairo_font_options,
+                                        cairo_subpixel_order);
+  cairo_font_options_set_hint_style(cairo_font_options,
+                                    CAIRO_HINT_STYLE_SLIGHT);
+#endif
 
   return cairo_font_options;
 }
@@ -137,12 +174,33 @@ float GetPixelsInPoint() {
 
 namespace gfx {
 
+PangoContext* GetPangoContext() {
+#if defined(USE_WAYLAND) || defined(USE_AURA)
+  PangoFontMap* font_map = pango_cairo_font_map_get_default();
+  return pango_font_map_create_context(font_map);
+#else
+  return gdk_pango_context_get();
+#endif
+}
+
+double GetPangoResolution() {
+  static double resolution;
+  static bool determined_resolution = false;
+  if (!determined_resolution) {
+    determined_resolution = true;
+    PangoContext* default_context = GetPangoContext();
+    resolution = pango_cairo_context_get_resolution(default_context);
+    g_object_unref(default_context);
+  }
+  return resolution;
+}
+
 void DrawTextOntoCairoSurface(cairo_t* cr,
                               const string16& text,
                               const gfx::Font& font,
                               const gfx::Rect& bounds,
                               const gfx::Rect& clip,
-                              const SkColor& text_color,
+                              SkColor text_color,
                               int flags) {
   PangoLayout* layout = pango_cairo_create_layout(cr);
   base::i18n::TextDirection text_direction =
@@ -176,10 +234,27 @@ static void SetupPangoLayoutWithoutFont(
     base::i18n::TextDirection text_direction,
     int flags) {
   cairo_font_options_t* cairo_font_options = GetCairoFontOptions();
+
+  // If we got an explicit request to turn off subpixel rendering, disable it on
+  // a copy of the static font options object.
+  bool copied_cairo_font_options = false;
+  if ((flags & Canvas::NO_SUBPIXEL_RENDERING) &&
+      (cairo_font_options_get_antialias(cairo_font_options) ==
+       CAIRO_ANTIALIAS_SUBPIXEL)) {
+    cairo_font_options = cairo_font_options_copy(cairo_font_options);
+    copied_cairo_font_options = true;
+    cairo_font_options_set_antialias(cairo_font_options, CAIRO_ANTIALIAS_GRAY);
+  }
+
   // This needs to be done early on; it has no effect when called just before
   // pango_cairo_show_layout().
   pango_cairo_context_set_font_options(
       pango_layout_get_context(layout), cairo_font_options);
+
+  if (copied_cairo_font_options) {
+    cairo_font_options_destroy(cairo_font_options);
+    cairo_font_options = NULL;
+  }
 
   // Callers of DrawStringInt handle RTL layout themselves, so tell pango to not
   // scope out RTL characters.
@@ -303,7 +378,7 @@ void DrawPangoLayout(cairo_t* cr,
                      const Font& font,
                      const gfx::Rect& bounds,
                      const gfx::Rect& text_rect,
-                     const SkColor& text_color,
+                     SkColor text_color,
                      base::i18n::TextDirection text_direction,
                      int flags) {
   double r = SkColorGetR(text_color) / 255.0,

@@ -7,24 +7,18 @@
 #pragma once
 
 #include "base/basictypes.h"
+#include "ui/aura/gestures/velocity_calculator.h"
 #include "ui/gfx/point.h"
 
 namespace aura {
 class TouchEvent;
-
-// Gesture state.
-enum GestureState {
-  GS_NO_GESTURE,
-  GS_PENDING_SYNTHETIC_CLICK,
-  GS_SCROLL,
-};
 
 // A GesturePoint represents a single touch-point/finger during a gesture
 // recognition process.
 class GesturePoint {
  public:
   GesturePoint();
-  virtual ~GesturePoint() {}
+  ~GesturePoint();
 
   // Resets various states.
   void Reset();
@@ -37,14 +31,20 @@ class GesturePoint {
   void UpdateForScroll();
 
   // Updates states depending on the event and the gesture-state.
-  void UpdateValues(const TouchEvent& event, GestureState state);
+  void UpdateValues(const TouchEvent& event);
 
   // Responds according to the state of the gesture point (i.e. the point can
   // represent a click or scroll etc.)
   bool IsInClickWindow(const TouchEvent& event) const;
   bool IsInDoubleClickWindow(const TouchEvent& event) const;
   bool IsInScrollWindow(const TouchEvent& event) const;
-  bool IsInFlickWindow(const TouchEvent& event) const;
+  bool IsInFlickWindow(const TouchEvent& event);
+  bool IsInHorizontalRailWindow() const;
+  bool IsInVerticalRailWindow() const;
+  bool HasEnoughDataToEstablishRail() const;
+  bool BreaksHorizontalRail();
+  bool BreaksVerticalRail();
+  bool DidScroll(const TouchEvent& event, int distance) const;
 
   const gfx::Point& first_touch_position() const {
     return first_touch_position_;
@@ -52,6 +52,20 @@ class GesturePoint {
 
   double last_touch_time() const { return last_touch_time_; }
   const gfx::Point& last_touch_position() const { return last_touch_position_; }
+
+  // point_id_ is used to drive GestureSequence::ProcessTouchEventForGesture.
+  // point_ids are maintained such that the set of point_ids is always
+  // contiguous, from 0 to the number of current touches.
+  // A lower point_id indicates that a touch occurred first.
+  // A negative point_id indicates that the GesturePoint is not currently
+  // associated with a touch.
+  void set_point_id(int point_id) { point_id_ = point_id; }
+  int point_id() const { return point_id_; }
+
+  void set_touch_id(int touch_id) { touch_id_ = touch_id; }
+  int touch_id() const { return touch_id_; }
+
+  bool in_use() const { return point_id_ >= 0; }
 
   double x_delta() const {
     return last_touch_position_.x() - first_touch_position_.x();
@@ -61,8 +75,10 @@ class GesturePoint {
     return last_touch_position_.y() - first_touch_position_.y();
   }
 
-  float x_velocity() const { return x_velocity_; }
-  float y_velocity() const { return y_velocity_; }
+  float XVelocity() { return velocity_calculator_.XVelocity(); }
+  float YVelocity() { return velocity_calculator_.YVelocity(); }
+
+  float Distance(const GesturePoint& point) const;
 
  private:
   // Various statistical functions to manipulate gestures.
@@ -70,7 +86,7 @@ class GesturePoint {
   bool IsInSecondClickTimeWindow() const;
   bool IsInsideManhattanSquare(const TouchEvent& event) const;
   bool IsSecondClickInsideManhattanSquare(const TouchEvent& event) const;
-  bool IsOverMinFlickSpeed() const;
+  bool IsOverMinFlickSpeed();
 
   gfx::Point first_touch_position_;
   double first_touch_time_;
@@ -80,9 +96,10 @@ class GesturePoint {
   double last_tap_time_;
   gfx::Point last_tap_position_;
 
-  float x_velocity_;
-  float y_velocity_;
+  VelocityCalculator velocity_calculator_;
 
+  int point_id_;
+  int touch_id_;
   DISALLOW_COPY_AND_ASSIGN(GesturePoint);
 };
 

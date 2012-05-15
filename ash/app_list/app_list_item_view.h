@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,61 +8,98 @@
 
 #include "ash/app_list/app_list_item_model_observer.h"
 #include "ash/ash_export.h"
-#include "ui/views/view.h"
+#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
+#include "ui/views/context_menu_controller.h"
+#include "ui/views/controls/button/custom_button.h"
 
 class SkBitmap;
 
 namespace views {
 class ImageView;
-class Label;
+class MenuRunner;
 }
 
 namespace ash {
 
 class AppListItemModel;
-class AppListItemViewListener;
+class AppListModelView;
+class DropShadowLabel;
 
-class ASH_EXPORT AppListItemView : public views::View,
-                                          public AppListItemModelObserver {
+class ASH_EXPORT AppListItemView : public views::CustomButton,
+                                   public views::ContextMenuController,
+                                   public AppListItemModelObserver {
  public:
-  AppListItemView(AppListItemModel* model,
-                  AppListItemViewListener* listener);
+  AppListItemView(AppListModelView* list_model_view,
+                  AppListItemModel* model,
+                  views::ButtonListener* listener);
   virtual ~AppListItemView();
+
+  static gfx::Size GetPreferredSizeForIconSize(const gfx::Size& icon_size);
+
+  // For testing. Testing calls this function to set minimum title width in
+  // pixels to get rid dependency on default font width.
+  static void SetMinTitleWidth(int width);
+
+  void SetSelected(bool selected);
+  bool selected() const {
+    return selected_;
+  }
+
+  void SetIconSize(const gfx::Size& size);
 
   AppListItemModel* model() const {
     return model_;
   }
 
-  // Tile size
-  static const int kTileSize = 180;
+  // Internal class name.
+  static const char kViewClassName[];
 
-  // Preferred icon size.
-  static const int kIconSize = 128;
+ private:
+  class IconOperation;
 
- protected:
-  // Notifies listener when activated.
-  void NotifyActivated(int event_flags);
+  // Get icon from model and schedule background processing.
+  void UpdateIcon();
+
+  // Cancel pending icon operation and reply callback.
+  void CancelPendingIconOperation();
+
+  // Reply callback from background shadow generation. |op| is the finished
+  // operation and holds the result image.
+  void ApplyShadow(scoped_refptr<IconOperation> op);
 
   // AppListItemModelObserver overrides:
   virtual void ItemIconChanged() OVERRIDE;
   virtual void ItemTitleChanged() OVERRIDE;
+  virtual void ItemHighlightedChanged() OVERRIDE;
 
   // views::View overrides:
+  virtual std::string GetClassName() const OVERRIDE;
   virtual gfx::Size GetPreferredSize() OVERRIDE;
   virtual void Layout() OVERRIDE;
-  virtual void OnFocus() OVERRIDE;
-  virtual void OnBlur() OVERRIDE;
-  virtual bool OnKeyPressed(const views::KeyEvent& event) OVERRIDE;
-  virtual bool OnMousePressed(const views::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseReleased(const views::MouseEvent& event) OVERRIDE;
-  virtual void OnPaintFocusBorder(gfx::Canvas* canvas) OVERRIDE;
+  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
 
- private:
+  // views::ContextMenuController overrides:
+  virtual void ShowContextMenuForView(views::View* source,
+                                      const gfx::Point& point) OVERRIDE;
+
+  // views::CustomButton overrides:
+  virtual void StateChanged() OVERRIDE;
+
   AppListItemModel* model_;
-  AppListItemViewListener* listener_;
 
+  AppListModelView* list_model_view_;
   views::ImageView* icon_;
-  views::Label* title_;
+  DropShadowLabel* title_;
+
+  scoped_ptr<views::MenuRunner> context_menu_runner_;
+
+  gfx::Size icon_size_;
+  bool selected_;
+
+  scoped_refptr<IconOperation> icon_op_;
+  base::WeakPtrFactory<AppListItemView> apply_shadow_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(AppListItemView);
 };

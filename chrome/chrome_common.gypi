@@ -15,6 +15,7 @@
       },
       'include_dirs': [
           '..',
+          '<(SHARED_INTERMEDIATE_DIR)',  # Needed by chrome_content_client.cc.
         ],
       'direct_dependent_settings': {
         'include_dirs': [
@@ -37,11 +38,13 @@
         '<(DEPTH)/chrome/chrome_resources.gyp:chrome_resources',
         '<(DEPTH)/chrome/chrome_resources.gyp:chrome_strings',
         '<(DEPTH)/chrome/chrome_resources.gyp:theme_resources',
+        '<(DEPTH)/chrome/common/extensions/api/api.gyp:api',
         '<(DEPTH)/content/content.gyp:content_common',
         '<(DEPTH)/ipc/ipc.gyp:ipc',
         '<(DEPTH)/net/net.gyp:net',
         '<(DEPTH)/printing/printing.gyp:printing',
         '<(DEPTH)/skia/skia.gyp:skia',
+        '<(DEPTH)/third_party/adobe/flash/flash_player.gyp:flapper_version_h',
         '<(DEPTH)/third_party/bzip2/bzip2.gyp:bzip2',
         '<(DEPTH)/third_party/icu/icu.gyp:icui18n',
         '<(DEPTH)/third_party/icu/icu.gyp:icuuc',
@@ -53,8 +56,6 @@
         '<(DEPTH)/webkit/support/webkit_support.gyp:glue',
       ],
       'sources': [
-        'common/about_handler.cc',
-        'common/about_handler.h',
         'common/all_messages.h',
         'common/attrition_experiments.h',
         'common/auto_start_linux.cc',
@@ -71,24 +72,25 @@
         'common/badge_util.h',
         'common/bzip2_error_handler.cc',
         'common/child_process_logging.h',
-        'common/child_process_logging_linux.cc',
         'common/child_process_logging_mac.mm',
+        'common/child_process_logging_posix.cc',
         'common/child_process_logging_win.cc',
         'common/chrome_content_client.cc',
         'common/chrome_content_client.h',
         'common/chrome_notification_types.h',
-        'common/chrome_plugin_messages.h',
         'common/chrome_result_codes.h',
         'common/chrome_sandbox_type_mac.h',
         'common/chrome_utility_messages.h',
         'common/chrome_version_info.cc',
         'common/chrome_version_info_chromeos.cc',
-        'common/chrome_version_info_linux.cc',
+        'common/chrome_version_info_posix.cc',
         'common/chrome_version_info_mac.mm',
         'common/chrome_version_info_win.cc',
         'common/chrome_version_info.h',
         'common/cloud_print/cloud_print_class_mac.h',
         'common/cloud_print/cloud_print_class_mac.mm',
+        'common/cloud_print/cloud_print_helpers.cc',
+        'common/cloud_print/cloud_print_helpers.h',
         'common/cloud_print/cloud_print_proxy_info.cc',
         'common/cloud_print/cloud_print_proxy_info.h',
         'common/common_api.h',
@@ -125,6 +127,8 @@
         'common/extensions/extension_l10n_util.h',
         'common/extensions/extension_localization_peer.cc',
         'common/extensions/extension_localization_peer.h',
+        'common/extensions/extension_manifest_constants.cc',
+        'common/extensions/extension_manifest_constants.h',
         'common/extensions/extension_message_bundle.cc',
         'common/extensions/extension_message_bundle.h',
         'common/extensions/extension_messages.cc',
@@ -139,10 +143,14 @@
         'common/extensions/extension_set.h',
         'common/extensions/extension_unpacker.cc',
         'common/extensions/extension_unpacker.h',
+        'common/extensions/feature.cc',
+        'common/extensions/feature.h',
         'common/extensions/file_browser_handler.cc',
         'common/extensions/file_browser_handler.h',
         'common/extensions/manifest.cc',
         'common/extensions/manifest.h',
+        'common/extensions/simple_feature_provider.cc',
+        'common/extensions/simple_feature_provider.h',
         'common/extensions/update_manifest.cc',
         'common/extensions/update_manifest.h',
         'common/extensions/url_pattern.cc',
@@ -209,8 +217,6 @@
         'common/print_messages.h',
         'common/profiling.cc',
         'common/profiling.h',
-        'common/random.cc',
-        'common/random.h',
         'common/ref_counted_util.h',
         'common/render_messages.cc',
         'common/render_messages.h',
@@ -227,6 +233,7 @@
         'common/spellcheck_common.cc',
         'common/spellcheck_common.h',
         'common/spellcheck_messages.h',
+        'common/spellcheck_result.h',
         'common/string_ordinal.cc',
         'common/string_ordinal.h',
         'common/switch_utils.cc',
@@ -255,6 +262,11 @@
         'common/zip_reader.h',
       ],
       'conditions': [
+        ['OS=="android"', {
+          'sources/': [
+            ['exclude', '^common/service_'],
+          ],
+        }],
         ['OS=="win"', {
           'include_dirs': [
             '<(DEPTH)/third_party/wtl/include',
@@ -285,7 +297,7 @@
           'sources!': [
             'common/chrome_version_info_chromeos.cc',
           ],
-        }, {
+        }, {  # chromeos==1
           'sources!': [
             'common/chrome_version_info_linux.cc',
           ],
@@ -297,6 +309,10 @@
           'include_dirs': [
             '../third_party/GTM',
           ],
+          'sources!': [
+            'common/child_process_logging_posix.cc',
+            'common/chrome_version_info_posix.cc',
+          ],
         }],
         ['remoting==1', {
           'dependencies': [
@@ -306,6 +322,7 @@
       ],
       'export_dependent_settings': [
         '../base/base.gyp:base',
+        'metrics_proto',
       ],
     },
     {
@@ -326,7 +343,7 @@
               'action_name': 'posix_version',
               'variables': {
                 'lastchange_path':
-                  '<(SHARED_INTERMEDIATE_DIR)/build/LASTCHANGE',
+                  '<(DEPTH)/build/util/LASTCHANGE',
                 'version_py_path': 'tools/build/version.py',
                 'version_path': 'VERSION',
                 'template_input_path': 'common/chrome_version_info_posix.h.version',
@@ -372,7 +389,6 @@
       'target_name': 'common_net',
       'type': 'static_library',
       'sources': [
-        'common/net/http_return.h',
         'common/net/net_resource_provider.cc',
         'common/net/net_resource_provider.h',
         'common/net/predictor_common.h',
@@ -393,6 +409,11 @@
         'common/net/gaia/oauth2_access_token_consumer.h',
         'common/net/gaia/oauth2_access_token_fetcher.cc',
         'common/net/gaia/oauth2_access_token_fetcher.h',
+        'common/net/gaia/oauth2_mint_token_consumer.h',
+        'common/net/gaia/oauth2_mint_token_fetcher.cc',
+        'common/net/gaia/oauth2_mint_token_fetcher.h',
+        'common/net/gaia/oauth2_mint_token_flow.cc',
+        'common/net/gaia/oauth2_mint_token_flow.h',
         'common/net/gaia/oauth2_revocation_consumer.h',
         'common/net/gaia/oauth2_revocation_fetcher.cc',
         'common/net/gaia/oauth2_revocation_fetcher.h',
@@ -436,7 +457,7 @@
             ],
           },
         ],
-       ],
+      ],
     },
     {
       # Protobuf compiler / generator for the safebrowsing client
@@ -462,6 +483,7 @@
         'common/metrics/proto/chrome_user_metrics_extension.proto',
         'common/metrics/proto/histogram_event.proto',
         'common/metrics/proto/omnibox_event.proto',
+        'common/metrics/proto/profiler_event.proto',
         'common/metrics/proto/system_profile.proto',
         'common/metrics/proto/user_action_event.proto',
       ],

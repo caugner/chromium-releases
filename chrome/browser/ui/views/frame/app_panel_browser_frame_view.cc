@@ -20,6 +20,7 @@
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/path.h"
+#include "ui/views/color_constants.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
@@ -335,26 +336,23 @@ void AppPanelBrowserFrameView::PaintRestoredFrameBorder(gfx::Canvas* canvas) {
 
   // Fill with the frame color first so we have a constant background for
   // areas not covered by the theme image.
-  canvas->FillRect(frame_color,
-                   gfx::Rect(0, 0, width(), theme_frame->height()));
+  canvas->FillRect(gfx::Rect(0, 0, width(), theme_frame->height()),
+                   frame_color);
 
   int remaining_height = height() - theme_frame->height();
   if (remaining_height > 0) {
     // Now fill down the sides.
-    canvas->FillRect(frame_color,
-                     gfx::Rect(0, theme_frame->height(), left_edge->width(),
-                               remaining_height));
-    canvas->FillRect(frame_color,
-                     gfx::Rect(width() - right_edge->width(),
+    canvas->FillRect(gfx::Rect(0, theme_frame->height(), left_edge->width(),
+                               remaining_height), frame_color);
+    canvas->FillRect(gfx::Rect(width() - right_edge->width(),
                                theme_frame->height(), right_edge->width(),
-                               remaining_height));
+                               remaining_height), frame_color);
     int center_width = width() - left_edge->width() - right_edge->width();
     if (center_width > 0) {
       // Now fill the bottom area.
-      canvas->FillRect(frame_color,
-                       gfx::Rect(left_edge->width(),
-                                 height() - bottom_edge->height(),
-                                 center_width, bottom_edge->height()));
+      canvas->FillRect(gfx::Rect(left_edge->width(),
+                                 height() - bottom_edge->height(), center_width,
+                                 bottom_edge->height()), frame_color);
     }
   }
 
@@ -457,13 +455,13 @@ void AppPanelBrowserFrameView::PaintRestoredClientEdge(gfx::Canvas* canvas) {
   canvas->TileImageInt(*left, client_area_bounds.x() - left->width(),
       client_area_top, left->width(), client_area_height);
 
-  // Draw the toolbar color to fill in the edges.
+  // Draw the color to fill in the edges.
   canvas->DrawRect(gfx::Rect(
       client_area_bounds.x() - kClientEdgeThickness,
       client_area_top - kClientEdgeThickness,
       client_area_bounds.width() + kClientEdgeThickness,
       client_area_bottom - client_area_top + kClientEdgeThickness),
-      ResourceBundle::toolbar_color);
+      views::kClientEdgeColor);
 }
 
 void AppPanelBrowserFrameView::LayoutWindowControls() {

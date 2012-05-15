@@ -13,7 +13,9 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/metrics/field_trial.h"
 #include "chrome/common/metrics/metrics_log_base.h"
+#include "ui/gfx/size.h"
 
 struct AutocompleteLog;
 class PrefService;
@@ -58,6 +60,14 @@ class MetricsLog : public MetricsLogBase {
       const std::vector<webkit::WebPluginInfo>& plugin_list,
       const base::DictionaryValue* profile_metrics);
 
+  // Records the current operating environment.  Takes the list of installed
+  // plugins as a parameter because that can't be obtained synchronously from
+  // the UI thread.  This is exposed as a separate method from the
+  // |RecordEnvironment()| method above because we record the environment with
+  // *each* protobuf upload, but only with the initial XML upload.
+  void RecordEnvironmentProto(
+      const std::vector<webkit::WebPluginInfo>& plugin_list);
+
   // Records the input text, available choices, and selected entry when the
   // user uses the Omnibox to open a URL.
   void RecordOmniboxOpenedURL(const AutocompleteLog& log);
@@ -65,18 +75,42 @@ class MetricsLog : public MetricsLogBase {
   // Record recent delta for critical stability metrics.  We can't wait for a
   // restart to gather these, as that delay biases our observation away from
   // users that run happily for a looooong time.  We send increments with each
-  // uma log upload, just as we send histogram data.
-  void RecordIncrementalStabilityElements();
+  // uma log upload, just as we send histogram data.  Takes the list of
+  // installed plugins as a parameter because that can't be obtained
+  // synchronously from the UI thread.
+  void RecordIncrementalStabilityElements(
+      const std::vector<webkit::WebPluginInfo>& plugin_list);
+
+ protected:
+  // Exposed for the sake of mocking in test code.
+
+  // Returns the PrefService from which to log metrics data.
+  virtual PrefService* GetPrefService();
+
+  // Returns the screen size for the primary monitor.
+  virtual gfx::Size GetScreenSize() const;
+
+  // Returns the number of monitors the user is using.
+  virtual int GetScreenCount() const;
+
+  // Fills |field_trial_ids| with the list of initialized field trials name and
+  // group ids.
+  virtual void GetFieldTrialIds(
+    std::vector<base::FieldTrial::NameGroupId>* field_trial_ids) const;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(MetricsLogTest, ChromeOSStabilityData);
 
   // Writes application stability metrics (as part of the profile log).
   // NOTE: Has the side-effect of clearing those counts.
-  void WriteStabilityElement(PrefService* pref);
+  void WriteStabilityElement(
+      const std::vector<webkit::WebPluginInfo>& plugin_list,
+      PrefService* pref);
 
   // Within stability group, write plugin crash stats.
-  void WritePluginStabilityElements(PrefService* pref);
+  void WritePluginStabilityElements(
+      const std::vector<webkit::WebPluginInfo>& plugin_list,
+      PrefService* pref);
 
   // Within the stability group, write required attributes.
   void WriteRequiredStabilityAttributes(PrefService* pref);
@@ -87,9 +121,11 @@ class MetricsLog : public MetricsLogBase {
   // chromium processes (ones that don't crash, and keep on running).
   void WriteRealtimeStabilityAttributes(PrefService* pref);
 
-  // Writes the list of installed plugins.
+  // Writes the list of installed plugins.  If |write_as_xml| is true, writes
+  // the XML version.  Otherwise, writes the protobuf version.
   void WritePluginList(
-      const std::vector<webkit::WebPluginInfo>& plugin_list);
+      const std::vector<webkit::WebPluginInfo>& plugin_list,
+      bool write_as_xml);
 
   // Within the profile group, write basic install info including appversion.
   void WriteInstallElement();

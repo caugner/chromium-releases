@@ -8,7 +8,7 @@
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "content/browser/accessibility/browser_accessibility_manager.h"
-#include "content/common/view_messages.h"
+#include "content/common/accessibility_messages.h"
 
 typedef WebAccessibility::BoolAttribute BoolAttribute;
 typedef WebAccessibility::FloatAttribute FloatAttribute;
@@ -184,13 +184,13 @@ void BrowserAccessibility::InternalReleaseReference(bool recursive) {
 
   ref_count_--;
   if (ref_count_ == 0) {
-    // Allow the object to fire a TEXT_REMOVED notification.
+    // Allow the object to fire a TextRemoved notification.
     name_.clear();
     value_.clear();
     PostInitialize();
 
     manager_->NotifyAccessibilityEvent(
-        ViewHostMsg_AccEvent::OBJECT_HIDE, this);
+        AccessibilityNotificationObjectHide, this);
 
     instance_active_ = false;
     manager_->Remove(child_id_, renderer_id_);
@@ -258,6 +258,31 @@ bool BrowserAccessibility::GetHtmlAttribute(
   }
 
   return false;
+}
+
+bool BrowserAccessibility::GetAriaTristate(
+    const char* html_attr,
+    bool* is_defined,
+    bool* is_mixed) const {
+  *is_defined = false;
+  *is_mixed = false;
+
+  string16 value;
+  if (!GetHtmlAttribute(html_attr, &value) ||
+      value.empty() ||
+      EqualsASCII(value, "undefined")) {
+    return false;  // Not set (and *is_defined is also false)
+  }
+
+  *is_defined = true;
+
+  if (EqualsASCII(value, "true"))
+    return true;
+
+  if (EqualsASCII(value, "mixed"))
+    *is_mixed = true;
+
+  return false;  // Not set
 }
 
 bool BrowserAccessibility::HasState(WebAccessibility::State state_enum) const {

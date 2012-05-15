@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,7 +26,6 @@
 #include "sql/init_status.h"
 
 class BookmarkService;
-struct DownloadPersistentStoreInfo;
 class FilePath;
 class GURL;
 class HistoryURLProvider;
@@ -40,14 +39,20 @@ class Thread;
 class Time;
 }
 
+namespace content {
+struct DownloadPersistentStoreInfo;
+}
+
 namespace history {
 class InMemoryHistoryBackend;
 class InMemoryURLIndex;
+class InMemoryURLIndexTest;
 class HistoryAddPageArgs;
 class HistoryBackend;
 class HistoryDatabase;
 struct HistoryDetails;
 class HistoryQueryTest;
+class VisitFilter;
 class URLDatabase;
 }  // namespace history
 
@@ -67,7 +72,7 @@ class HistoryDBTask : public base::RefCountedThreadSafe<HistoryDBTask> {
   virtual bool RunOnDBThread(history::HistoryBackend* backend,
                              history::HistoryDatabase* db) = 0;
 
-  // Invoked on the main thread once RunOnDBThread has returned false. This is
+  // Invoked on the main thread once RunOnDBThread has returned true. This is
   // only invoked if the request was not canceled and returned true from
   // RunOnDBThread.
   virtual void DoneRunOnMainThread() = 0;
@@ -105,7 +110,8 @@ class HistoryService : public CancelableRequestProvider,
 
   // Triggers the backend to load if it hasn't already, and then returns whether
   // it's finished loading.
-  bool BackendLoaded();
+  // Note: Virtual needed for mocking.
+  virtual bool BackendLoaded();
 
   // Returns true if the backend has finished loading.
   bool backend_loaded() const { return backend_loaded_; }
@@ -143,7 +149,9 @@ class HistoryService : public CancelableRequestProvider,
   history::URLDatabase* InMemoryDatabase();
 
   // Return the quick history index.
-  history::InMemoryURLIndex* InMemoryIndex();
+  history::InMemoryURLIndex* InMemoryIndex() const {
+    return in_memory_url_index_.get();
+  }
 
   // Navigation ----------------------------------------------------------------
 
@@ -358,6 +366,13 @@ class HistoryService : public CancelableRequestProvider,
                               CancelableRequestConsumerBase* consumer,
                               const QueryMostVisitedURLsCallback& callback);
 
+  // Request the |result_count| URLs filtered and sorted based on the |filter|.
+  Handle QueryFilteredURLs(
+      int result_count,
+      const history::VisitFilter& filter,
+      CancelableRequestConsumerBase* consumer,
+      const QueryMostVisitedURLsCallback& callback);
+
   // Thumbnails ----------------------------------------------------------------
 
   // Implemented by consumers to get thumbnail data. Called when a request for
@@ -406,7 +421,7 @@ class HistoryService : public CancelableRequestProvider,
   // 'info' contains all the download's creation state, and 'callback' runs
   // when the history service request is complete.
   Handle CreateDownload(int32 id,
-                        const DownloadPersistentStoreInfo& info,
+                        const content::DownloadPersistentStoreInfo& info,
                         CancelableRequestConsumerBase* consumer,
                         const DownloadCreateCallback& callback);
 
@@ -419,8 +434,9 @@ class HistoryService : public CancelableRequestProvider,
 
   // Implemented by the caller of 'QueryDownloads' below, and is called when the
   // history service has retrieved a list of all download state. The call
-  typedef base::Callback<void(std::vector<DownloadPersistentStoreInfo>*)>
-      DownloadQueryCallback;
+  typedef base::Callback<void(
+      std::vector<content::DownloadPersistentStoreInfo>*)>
+          DownloadQueryCallback;
 
   // Begins a history request to retrieve the state of all downloads in the
   // history db. 'callback' runs when the history service request is complete,
@@ -436,7 +452,7 @@ class HistoryService : public CancelableRequestProvider,
   // Called to update the history service about the current state of a download.
   // This is a 'fire and forget' query, so just pass the relevant state info to
   // the database with no need for a callback.
-  void UpdateDownload(const DownloadPersistentStoreInfo& data);
+  void UpdateDownload(const content::DownloadPersistentStoreInfo& data);
 
   // Called to update the history service about the path of a download.
   // This is a 'fire and forget' query.
@@ -554,7 +570,7 @@ class HistoryService : public CancelableRequestProvider,
                           history::VisitSource visit_source);
 
   // The same as AddPageWithDetails() but takes a vector.
-  void AddPagesWithDetails(const std::vector<history::URLRow>& info,
+  void AddPagesWithDetails(const history::URLRows& info,
                            history::VisitSource visit_source);
 
   // Starts the TopSites migration in the HistoryThread. Called by the
@@ -590,6 +606,7 @@ class HistoryService : public CancelableRequestProvider,
   friend class HistoryOperation;
   friend class HistoryURLProvider;
   friend class HistoryURLProviderTest;
+  friend class history::InMemoryURLIndexTest;
   template<typename Info, typename Callback> friend class DownloadRequest;
   friend class PageUsageRequest;
   friend class RedirectRequest;
@@ -864,6 +881,9 @@ class HistoryService : public CancelableRequestProvider,
 
   // True if needs top site migration.
   bool needs_top_sites_migration_;
+
+  // The index used for quick history lookups.
+  scoped_ptr<history::InMemoryURLIndex> in_memory_url_index_;
 
   DISALLOW_COPY_AND_ASSIGN(HistoryService);
 };

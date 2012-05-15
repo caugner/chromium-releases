@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,7 +17,7 @@
 namespace views {
 
 class MouseEvent;
-class ViewMenuDelegate;
+class MenuButtonListener;
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -34,7 +34,7 @@ class VIEWS_EXPORT MenuButton : public TextButton {
   // Create a Button.
   MenuButton(ButtonListener* listener,
              const string16& text,
-             ViewMenuDelegate* menu_delegate,
+             MenuButtonListener* menu_button_listener,
              bool show_menu_marker);
   virtual ~MenuButton();
 
@@ -83,8 +83,8 @@ class VIEWS_EXPORT MenuButton : public TextButton {
   // the button is not part of the displayed menu.
   base::Time menu_closed_time_;
 
-  // The associated menu's resource identifier.
-  ViewMenuDelegate* menu_delegate_;
+  // Our listener. Not owned.
+  MenuButtonListener* listener_;
 
   // Whether or not we're showing a drop marker.
   bool show_menu_marker_;

@@ -7,13 +7,13 @@
 #include "base/logging.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/ui/views/tab_contents/tab_contents_view_views.h"
-#include "content/browser/renderer_host/render_widget_host_view.h"
+#include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 #include "grit/generated_resources.h"
 #include "ui/base/accelerators/accelerator.h"
 #include "ui/base/keycodes/keyboard_codes.h"
+#include "ui/gfx/point.h"
 #include "ui/views/controls/menu/menu_item_view.h"
 #include "ui/views/controls/menu/menu_model_adapter.h"
 #include "ui/views/controls/menu/menu_runner.h"
@@ -25,7 +25,7 @@ using content::WebContents;
 
 RenderViewContextMenuViews::RenderViewContextMenuViews(
     WebContents* web_contents,
-    const ContextMenuParams& params)
+    const content::ContextMenuParams& params)
     : RenderViewContextMenu(web_contents, params),
       menu_(NULL) {
 }
@@ -33,12 +33,9 @@ RenderViewContextMenuViews::RenderViewContextMenuViews(
 RenderViewContextMenuViews::~RenderViewContextMenuViews() {
 }
 
-void RenderViewContextMenuViews::RunMenuAt(int x, int y) {
-  TabContentsViewViews* tab =
-      static_cast<TabContentsViewViews*>(source_web_contents_->GetView());
-  views::Widget* parent = tab->GetTopLevelWidget();
-  if (menu_runner_->RunMenuAt(parent, NULL,
-          gfx::Rect(gfx::Point(x, y), gfx::Size()),
+void RenderViewContextMenuViews::RunMenuAt(views::Widget* parent,
+                                           const gfx::Point& point) {
+  if (menu_runner_->RunMenuAt(parent, NULL, gfx::Rect(point, gfx::Size()),
           views::MenuItemView::TOPLEFT, views::MenuRunner::HAS_MNEMONICS) ==
       views::MenuRunner::MENU_DELETED)
     return;

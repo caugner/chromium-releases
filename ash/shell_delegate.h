@@ -9,15 +9,12 @@
 #include <vector>
 
 #include "ash/ash_export.h"
+#include "ash/shell.h"
 #include "base/callback.h"
 #include "base/string16.h"
 
 namespace aura {
 class Window;
-}
-
-namespace gfx {
-class Rect;
 }
 
 namespace views {
@@ -26,18 +23,18 @@ class Widget;
 
 namespace ash {
 
-class AppListModel;
 class AppListViewDelegate;
+class LauncherDelegate;
+class LauncherModel;
 struct LauncherItem;
+class ScreenshotDelegate;
+class SystemTray;
+class SystemTrayDelegate;
+class UserWallpaperDelegate;
 
 // Delegate of the Shell.
 class ASH_EXPORT ShellDelegate {
  public:
-  enum CycleOrder {
-    ORDER_MRU,  // Most recently used
-    ORDER_LINEAR
-  };
-
   // Source requesting the window list.
   enum CycleSource {
     // Windows are going to be used for alt-tab (or F5).
@@ -53,16 +50,23 @@ class ASH_EXPORT ShellDelegate {
   // Invoked to create a new status area. Can return NULL.
   virtual views::Widget* CreateStatusArea() = 0;
 
-#if defined(OS_CHROMEOS)
-  // Invoked when a user uses Ctrl-Shift-L to lock the screen.
+  // Returns true if user has logged in.
+  virtual bool IsUserLoggedIn() = 0;
+
+  // Invoked when a user locks the screen.
   virtual void LockScreen() = 0;
-#endif
+
+  // Unlock the screen. Currently used only for tests.
+  virtual void UnlockScreen() = 0;
+
+  // Returns true if the screen is currently locked.
+  virtual bool IsScreenLocked() const = 0;
 
   // Invoked when a user uses Ctrl-Shift-Q to close chrome.
   virtual void Exit() = 0;
 
-  // Invoked to ask the delegate to populate the |model|.
-  virtual void BuildAppListModel(AppListModel* model) = 0;
+  // Invoked when a user uses Ctrl-N or Ctrl-Shift-N to open a new window.
+  virtual void NewWindow(bool incognito) = 0;
 
   // Invoked to create an AppListViewDelegate. Shell takes the ownership of
   // the created delegate.
@@ -74,24 +78,22 @@ class ASH_EXPORT ShellDelegate {
   // at the front of the list.  Otherwise any order may be returned.  The list
   // does not contain NULL pointers.
   virtual std::vector<aura::Window*> GetCycleWindowList(
-      CycleSource source,
-      CycleOrder order) const = 0;
+      CycleSource source) const = 0;
 
-  // Launcher related methods --------------------------------------------------
+  // Invoked to start taking partial screenshot.
+  virtual void StartPartialScreenshot(
+      ScreenshotDelegate* screenshot_delegate) = 0;
 
-  // Invoked when the user clicks on button in the launcher to create a new
-  // window.
-  virtual void CreateNewWindow() = 0;
+  // Creates a new LauncherDelegate. Shell takes ownership of the returned
+  // value.
+  virtual LauncherDelegate* CreateLauncherDelegate(
+      ash::LauncherModel* model) = 0;
 
-  // Invoked when the user clicks on a window entry in the launcher.
-  virtual void LauncherItemClicked(const LauncherItem& item) = 0;
+  // Creates a system-tray delegate. Shell takes ownership of the delegate.
+  virtual SystemTrayDelegate* CreateSystemTrayDelegate(SystemTray* tray) = 0;
 
-  // Returns the resource id of the image to show on the browser shortcut
-  // button.
-  virtual int GetBrowserShortcutResourceId() = 0;
-
-  // Returns the title to display for the specified launcher item.
-  virtual string16 GetLauncherItemTitle(const LauncherItem& item) = 0;
+  // Creates a user wallpaper delegate. Shell takes ownership of the delegate.
+  virtual UserWallpaperDelegate* CreateUserWallpaperDelegate() = 0;
 };
 
 }  // namespace ash

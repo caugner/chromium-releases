@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,10 +11,7 @@
 #include "content/browser/renderer_host/media/audio_input_device_manager.h"
 #include "content/browser/renderer_host/media/audio_input_sync_writer.h"
 #include "content/browser/renderer_host/media/media_stream_manager.h"
-#include "content/browser/resource_context.h"
 #include "content/common/media/audio_messages.h"
-#include "ipc/ipc_logging.h"
-#include "media/audio/audio_util.h"
 
 using content::BrowserMessageFilter;
 using content::BrowserThread;
@@ -27,8 +24,10 @@ AudioInputRendererHost::AudioEntry::AudioEntry()
 AudioInputRendererHost::AudioEntry::~AudioEntry() {}
 
 AudioInputRendererHost::AudioInputRendererHost(
-    const content::ResourceContext* resource_context)
-    : resource_context_(resource_context) {
+    content::ResourceContext* resource_context,
+    AudioManager* audio_manager)
+    : resource_context_(resource_context),
+      audio_manager_(audio_manager) {
 }
 
 AudioInputRendererHost::~AudioInputRendererHost() {
@@ -74,9 +73,8 @@ void AudioInputRendererHost::OnError(
   BrowserThread::PostTask(
       BrowserThread::IO,
       FROM_HERE,
-      base::Bind(&AudioInputRendererHost::DoHandleError, this,
-                 make_scoped_refptr(controller),
-                        error_code));
+      base::Bind(&AudioInputRendererHost::DoHandleError,
+          this, make_scoped_refptr(controller), error_code));
 }
 
 void AudioInputRendererHost::OnData(media::AudioInputController* controller,
@@ -116,29 +114,26 @@ void AudioInputRendererHost::DoCompleteCreation(
     return;
   }
 
-  if (entry->controller->LowLatencyMode()) {
-    AudioInputSyncWriter* writer =
-        static_cast<AudioInputSyncWriter*>(entry->writer.get());
+  AudioInputSyncWriter* writer =
+      static_cast<AudioInputSyncWriter*>(entry->writer.get());
 
 #if defined(OS_WIN)
-    base::SyncSocket::Handle foreign_socket_handle;
+  base::SyncSocket::Handle foreign_socket_handle;
 #else
-    base::FileDescriptor foreign_socket_handle;
+  base::FileDescriptor foreign_socket_handle;
 #endif
 
-    // If we failed to prepare the sync socket for the renderer then we fail
-    // the construction of audio input stream.
-    if (!writer->PrepareForeignSocketHandle(peer_handle(),
-                                            &foreign_socket_handle)) {
-      DeleteEntryOnError(entry);
-      return;
-    }
-
-    Send(new AudioInputMsg_NotifyLowLatencyStreamCreated(
-             entry->stream_id, foreign_memory_handle,
-             foreign_socket_handle, entry->shared_memory.created_size()));
+  // If we failed to prepare the sync socket for the renderer then we fail
+  // the construction of audio input stream.
+  if (!writer->PrepareForeignSocketHandle(peer_handle(),
+                                          &foreign_socket_handle)) {
+    DeleteEntryOnError(entry);
     return;
   }
+
+  Send(new AudioInputMsg_NotifyStreamCreated(entry->stream_id,
+      foreign_memory_handle, foreign_socket_handle,
+      entry->shared_memory.created_size()));
 }
 
 void AudioInputRendererHost::DoSendRecordingMessage(
@@ -192,7 +187,8 @@ void AudioInputRendererHost::OnStartDevice(int stream_id, int session_id) {
 
   // Get access to the AudioInputDeviceManager to start the device.
   media_stream::AudioInputDeviceManager* audio_input_man =
-      resource_context_->media_stream_manager()->audio_input_device_manager();
+      media_stream::MediaStreamManager::GetForResourceContext(
+          resource_context_, audio_manager_)->audio_input_device_manager();
 
   // Add the session entry to the map.
   session_entries_[session_id] = stream_id;
@@ -202,43 +198,33 @@ void AudioInputRendererHost::OnStartDevice(int stream_id, int session_id) {
   audio_input_man->Start(session_id, this);
 }
 
-void AudioInputRendererHost::OnCreateStream(
-    int stream_id, const AudioParameters& params, bool low_latency,
-    const std::string& device_id) {
+void AudioInputRendererHost::OnCreateStream(int stream_id,
+                                            const AudioParameters& params,
+                                            const std::string& device_id) {
   VLOG(1) << "AudioInputRendererHost::OnCreateStream(stream_id="
           << stream_id << ")";
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   DCHECK(LookupById(stream_id) == NULL);
 
-  // Prevent the renderer process from asking for a normal-latency
-  // input stream.
-  if (!low_latency) {
-    NOTREACHED() << "Current implementation only supports low-latency mode.";
-    return;
-  }
-
   AudioParameters audio_params(params);
 
-  // Select the hardware packet size if not specified.
-  if (!audio_params.samples_per_packet) {
-    audio_params.samples_per_packet =
-        media::SelectSamplesPerPacket(audio_params.sample_rate);
-  }
-  uint32 packet_size = audio_params.GetPacketSize();
+  DCHECK_GT(audio_params.frames_per_buffer(), 0);
+  uint32 buffer_size = audio_params.GetBytesPerBuffer();
 
+  // Create a new AudioEntry structure.
   scoped_ptr<AudioEntry> entry(new AudioEntry());
-  // Create the shared memory and share with the renderer process.
-  if (!entry->shared_memory.CreateAndMapAnonymous(packet_size)) {
+
+  // Create the shared memory and share it with the renderer process
+  // using a new SyncWriter object.
+  if (!entry->shared_memory.CreateAndMapAnonymous(buffer_size)) {
     // If creation of shared memory failed then send an error message.
     SendErrorMessage(stream_id);
     return;
   }
 
-  // This is a low latency mode, hence we need to construct a SyncWriter first.
   scoped_ptr<AudioInputSyncWriter> writer(
       new AudioInputSyncWriter(&entry->shared_memory));
 
-  // Then try to initialize the sync writer.
   if (!writer->Init()) {
     SendErrorMessage(stream_id);
     return;
@@ -246,9 +232,12 @@ void AudioInputRendererHost::OnCreateStream(
 
   // If we have successfully created the SyncWriter then assign it to the
   // entry and construct an AudioInputController.
+  // TODO(henrika): replace CreateLowLatency() with Create() as soon
+  // as satish has ensured that Speech Input also uses the default low-
+  // latency path. See crbug.com/112472 for details.
   entry->writer.reset(writer.release());
   entry->controller = media::AudioInputController::CreateLowLatency(
-      resource_context_->audio_manager(),
+      audio_manager_,
       this,
       audio_params,
       device_id,
@@ -319,9 +308,8 @@ void AudioInputRendererHost::OnGetVolume(int stream_id) {
 }
 
 void AudioInputRendererHost::SendErrorMessage(int stream_id) {
-  // TODO(henrika): error state for audio input is not unique
-  Send(new AudioMsg_NotifyStreamStateChanged(stream_id,
-                                             kAudioStreamError));
+  Send(new AudioInputMsg_NotifyStreamStateChanged(stream_id,
+                                                  kAudioStreamError));
 }
 
 void AudioInputRendererHost::DeleteEntries() {
@@ -374,7 +362,8 @@ void AudioInputRendererHost::StopAndDeleteDevice(int session_id) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   media_stream::AudioInputDeviceManager* audio_input_man =
-      resource_context_->media_stream_manager()->audio_input_device_manager();
+      media_stream::MediaStreamManager::GetForResourceContext(
+          resource_context_, audio_manager_)->audio_input_device_manager();
   audio_input_man->Stop(session_id);
 
   // Delete the session entry.
@@ -382,17 +371,19 @@ void AudioInputRendererHost::StopAndDeleteDevice(int session_id) {
 }
 
 void AudioInputRendererHost::CloseAndDeleteStream(AudioEntry* entry) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+
   if (!entry->pending_close) {
+    entry->controller->Close(base::Bind(&AudioInputRendererHost::OnStreamClosed,
+                                        this, entry));
     entry->pending_close = true;
-    // TODO(henrika): AudioRendererHost uses an alternative method
-    // to close down the AudioController. Try to refactor and merge
-    // the implementations.
-    entry->controller->Close();
-    OnStreamClosed(entry);
   }
 }
 
 void AudioInputRendererHost::OnStreamClosed(AudioEntry* entry) {
+  // We should be on the the audio-manager thread now.
+  DCHECK(entry->controller->message_loop()->BelongsToCurrentThread());
+
   // Delete the entry after we've closed the stream.
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,

@@ -14,14 +14,13 @@
 #include "chrome/browser/tab_contents/render_view_context_menu.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
-#include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/context_menu_params.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/models/menu_model.h"
-#include "webkit/glue/context_menu.h"
 
 using content::WebContents;
 
@@ -30,7 +29,7 @@ namespace {
 class PlatformAppContextMenu : public RenderViewContextMenu {
  public:
   PlatformAppContextMenu(WebContents* web_contents,
-                         const ContextMenuParams& params)
+                         const content::ContextMenuParams& params)
       : RenderViewContextMenu(web_contents, params) {}
 
  protected:
@@ -58,7 +57,6 @@ class PlatformAppBrowserTest : public ExtensionApiTest {
         content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME,
         content::NotificationService::AllSources());
 
-    web_app::SetDisableShortcutCreationForTests(true);
     EXPECT_TRUE(LoadExtension(test_data_dir_.AppendASCII("platform_apps").
         AppendASCII(name)));
 
@@ -116,13 +114,7 @@ class PlatformAppBrowserTest : public ExtensionApiTest {
   }
 };
 
-// Disabled until shell windows are implemented for non-GTK, non-Views toolkits.
-#if defined(TOOLKIT_GTK) || defined(TOOLKIT_VIEWS)
-#define MAYBE_OpenAppInShellContainer OpenAppInShellContainer
-#else
-#define MAYBE_OpenAppInShellContainer DISABLED_OpenAppInShellContainer
-#endif
-IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, MAYBE_OpenAppInShellContainer) {
+IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, OpenAppInShellContainer) {
   ASSERT_EQ(0u, GetPlatformAppCount());
   LoadAndLaunchPlatformApp("empty");
   ASSERT_EQ(1u, GetPlatformAppCount());
@@ -131,59 +123,42 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, MAYBE_OpenAppInShellContainer) {
   ASSERT_EQ(0u, GetPlatformAppCount());
 }
 
-// Disabled until shell windows are implemented for non-GTK, non-Views toolkits.
-#if defined(TOOLKIT_GTK) || defined(TOOLKIT_VIEWS)
-#define MAYBE_EmptyContextMenu EmptyContextMenu
-#else
-#define MAYBE_EmptyContextMenu DISABLED_EmptyContextMenu
-#endif
-IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, MAYBE_EmptyContextMenu) {
+IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, EmptyContextMenu) {
   LoadAndLaunchPlatformApp("empty");
 
   // The empty app doesn't add any context menu items, so its menu should
-  // be empty.
+  // only include the developer tools.
   WebContents* web_contents = GetFirstPlatformAppWebContents();
   ASSERT_TRUE(web_contents);
   WebKit::WebContextMenuData data;
-  ContextMenuParams params(data);
+  content::ContextMenuParams params(data);
   PlatformAppContextMenu* menu = new PlatformAppContextMenu(web_contents,
       params);
   menu->Init();
-  ASSERT_FALSE(menu->menu_model().GetItemCount());
+  // 3 including separator
+  ASSERT_EQ(3, menu->menu_model().GetItemCount());
 }
 
-// Disabled until shell windows are implemented for non-GTK, non-Views toolkits.
-#if defined(TOOLKIT_GTK) || defined(TOOLKIT_VIEWS)
-#define MAYBE_AppWithContextMenu AppWithContextMenu
-#else
-#define MAYBE_AppWithContextMenu DISABLED_AppWithContextMenu
-#endif
-IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, MAYBE_AppWithContextMenu) {
+IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, AppWithContextMenu) {
   ExtensionTestMessageListener listener1("created item", false);
   LoadAndLaunchPlatformApp("context_menu");
 
   // Wait for the extension to tell us it's created an item.
   ASSERT_TRUE(listener1.WaitUntilSatisfied());
 
-  // The context_menu app has one context menu item. This is all that should
-  // be in the menu, there should be no seperator.
+  // The context_menu app has one context menu item. This, along with a
+  // separator and the developer tools, is all that should be in the menu.
   WebContents* web_contents = GetFirstPlatformAppWebContents();
   ASSERT_TRUE(web_contents);
   WebKit::WebContextMenuData data;
-  ContextMenuParams params(data);
+  content::ContextMenuParams params(data);
   PlatformAppContextMenu* menu = new PlatformAppContextMenu(web_contents,
       params);
   menu->Init();
-  ASSERT_EQ(1, menu->menu_model().GetItemCount());
+  ASSERT_EQ(4, menu->menu_model().GetItemCount());
 }
 
-// Disabled until shell windows are implemented for non-GTK, non-Views toolkits.
-#if defined(TOOLKIT_GTK) || defined(TOOLKIT_VIEWS)
-#define MAYBE_DisallowNavigation DisallowNavigation
-#else
-#define MAYBE_DisallowNavigation DISABLED_DisallowNavigation
-#endif
-IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, MAYBE_DisallowNavigation) {
+IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, DisallowNavigation) {
   ASSERT_TRUE(test_server()->Start());
 
   LoadAndLaunchPlatformApp("navigation");
@@ -201,23 +176,23 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, MAYBE_DisallowNavigation) {
   EXPECT_TRUE(result);
 }
 
-// Disabled until shell windows are implemented for non-GTK, non-Views toolkits.
-#if defined(TOOLKIT_GTK) || defined(TOOLKIT_VIEWS)
-#define MAYBE_DisallowModalDialogs DisallowModalDialogs
-#else
-#define MAYBE_DisallowModalDialogs DISABLED_DisallowModalDialogs
-#endif
-IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, MAYBE_DisallowModalDialogs) {
+IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, DisallowModalDialogs) {
   ASSERT_TRUE(RunPlatformAppTest("platform_apps/modal_dialogs")) << message_;
 }
 
 // Tests that localStorage and WebSQL are disabled for platform apps.
-// Disabled until shell windows are implemented for non-GTK, non-Views toolkits.
-#if defined(TOOLKIT_GTK) || defined(TOOLKIT_VIEWS)
-#define MAYBE_DisallowStorage DisallowStorage
-#else
-#define MAYBE_DisallowStorage DISABLED_DisallowStorage
-#endif
-IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, MAYBE_DisallowStorage) {
+IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, DisallowStorage) {
   ASSERT_TRUE(RunPlatformAppTest("platform_apps/storage")) << message_;
+}
+
+// Tests that platform apps can use the chrome.windows.* API.
+#if defined(USE_AURA)
+// On Aura, this currently fails because the window width is returned as 256
+// instead of 250. See http://crbug.com/119410.
+#define MAYBE_WindowsApi FAILS_WindowsApi
+#else
+#define MAYBE_WindowsApi WindowsApi
+#endif
+IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, MAYBE_WindowsApi) {
+  ASSERT_TRUE(RunPlatformAppTest("platform_apps/windows_api")) << message_;
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -148,7 +148,7 @@ void AddUninstallShortcutWorkItems(const InstallerState& installer_state,
     for (size_t i = 0; i < products.size(); ++i) {
       const Product& p = *products[i];
       if (!p.is_chrome() && !p.ShouldCreateUninstallEntry())
-        p.AppendUninstallFlags(&uninstall_arguments);
+        p.AppendProductFlags(&uninstall_arguments);
     }
   }
 
@@ -210,6 +210,15 @@ void AddUninstallShortcutWorkItems(const InstallerState& installer_state,
                                          L"InstallDate",
                                          InstallUtil::GetCurrentDate(),
                                          false);
+
+    const std::vector<uint16>& version_components = new_version.components();
+    if (version_components.size() == 4) {
+      // Our version should be in major.minor.build.rev.
+      install_list->AddSetRegValueWorkItem(reg_root, uninstall_reg,
+          L"VersionMajor", static_cast<DWORD>(version_components[2]), true);
+      install_list->AddSetRegValueWorkItem(reg_root, uninstall_reg,
+          L"VersionMinor", static_cast<DWORD>(version_components[3]), true);
+    }
   }
 }
 
@@ -753,8 +762,10 @@ void AddInstallWorkItems(const InstallationState& original_state,
   // Extra executable for 64 bit systems.
   // NOTE: We check for "not disabled" so that if the API call fails, we play it
   // safe and copy the executable anyway.
+  // NOTE: the file wow_helper.exe is only needed for Vista and below.
   if (base::win::OSInfo::GetInstance()->wow64_status() !=
-      base::win::OSInfo::WOW64_DISABLED) {
+      base::win::OSInfo::WOW64_DISABLED &&
+      base::win::GetVersion() <= base::win::VERSION_VISTA) {
     install_list->AddMoveTreeWorkItem(
         src_path.Append(installer::kWowHelperExe).value(),
         target_path.Append(installer::kWowHelperExe).value(),
@@ -1090,7 +1101,7 @@ void AppendUninstallCommandLineFlags(const InstallerState& installer_state,
   uninstall_cmd->AppendSwitch(installer::switches::kUninstall);
 
   // Append the product-specific uninstall flags.
-  product.AppendUninstallFlags(uninstall_cmd);
+  product.AppendProductFlags(uninstall_cmd);
   if (installer_state.is_msi()) {
     uninstall_cmd->AppendSwitch(installer::switches::kMsi);
     // See comment in uninstall.cc where we check for the kDeleteProfile switch.

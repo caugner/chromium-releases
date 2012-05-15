@@ -27,15 +27,16 @@ using protocol::MouseEvent;
 
 ClientSession::ClientSession(
     EventHandler* event_handler,
-    protocol::ConnectionToClient* connection,
-    protocol::InputStub* input_stub,
+    scoped_ptr<protocol::ConnectionToClient> connection,
+    protocol::HostEventStub* host_event_stub,
     Capturer* capturer)
     : event_handler_(event_handler),
-      connection_(connection),
-      client_jid_(connection->session()->jid()),
-      input_stub_(input_stub),
+      connection_(connection.Pass()),
+      client_jid_(connection_->session()->jid()),
+      host_event_stub_(host_event_stub),
       capturer_(capturer),
       authenticated_(false),
+      connected_(false),
       awaiting_continue_approval_(false),
       remote_mouse_button_state_(0) {
   connection_->SetEventHandler(this);
@@ -43,6 +44,7 @@ ClientSession::ClientSession(
   // TODO(sergeyu): Currently ConnectionToClient expects stubs to be
   // set before channels are connected. Make it possible to set stubs
   // later and set them only when connection is authenticated.
+  connection_->set_clipboard_stub(this);
   connection_->set_host_stub(this);
   connection_->set_input_stub(this);
 }
@@ -50,19 +52,28 @@ ClientSession::ClientSession(
 ClientSession::~ClientSession() {
 }
 
+void ClientSession::InjectClipboardEvent(
+    const protocol::ClipboardEvent& event) {
+  DCHECK(CalledOnValidThread());
+
+  if (connected_) {
+    host_event_stub_->InjectClipboardEvent(event);
+  }
+}
+
 void ClientSession::InjectKeyEvent(const KeyEvent& event) {
   DCHECK(CalledOnValidThread());
 
-  if (authenticated_ && !ShouldIgnoreRemoteKeyboardInput(event)) {
+  if (connected_ && !ShouldIgnoreRemoteKeyboardInput(event)) {
     RecordKeyEvent(event);
-    input_stub_->InjectKeyEvent(event);
+    host_event_stub_->InjectKeyEvent(event);
   }
 }
 
 void ClientSession::InjectMouseEvent(const MouseEvent& event) {
   DCHECK(CalledOnValidThread());
 
-  if (authenticated_ && !ShouldIgnoreRemoteMouseInput(event)) {
+  if (connected_ && !ShouldIgnoreRemoteMouseInput(event)) {
     RecordMouseButtonState(event);
     MouseEvent event_to_inject = event;
     if (event.has_x() && event.has_y()) {
@@ -88,31 +99,30 @@ void ClientSession::InjectMouseEvent(const MouseEvent& event) {
         injected_mouse_positions_.pop_front();
       }
     }
-    input_stub_->InjectMouseEvent(event_to_inject);
+    host_event_stub_->InjectMouseEvent(event_to_inject);
   }
 }
 
-void ClientSession::OnConnectionOpened(
+void ClientSession::OnConnectionAuthenticated(
     protocol::ConnectionToClient* connection) {
-  DCHECK(CalledOnValidThread());
-  DCHECK_EQ(connection_.get(), connection);
   authenticated_ = true;
   event_handler_->OnSessionAuthenticated(this);
 }
 
-void ClientSession::OnConnectionClosed(
+void ClientSession::OnConnectionChannelsConnected(
     protocol::ConnectionToClient* connection) {
   DCHECK(CalledOnValidThread());
   DCHECK_EQ(connection_.get(), connection);
-  event_handler_->OnSessionClosed(this);
+  connected_ = true;
+  event_handler_->OnSessionChannelsConnected(this);
 }
 
-void ClientSession::OnConnectionFailed(
+void ClientSession::OnConnectionClosed(
     protocol::ConnectionToClient* connection,
-    protocol::Session::Error error) {
+    protocol::ErrorCode error) {
   DCHECK(CalledOnValidThread());
   DCHECK_EQ(connection_.get(), connection);
-  if (error == protocol::Session::AUTHENTICATION_FAILED)
+  if (!authenticated_)
     event_handler_->OnSessionAuthenticationFailed(this);
   // TODO(sergeyu): Log failure reason?
   event_handler_->OnSessionClosed(this);
@@ -125,18 +135,19 @@ void ClientSession::OnSequenceNumberUpdated(
   event_handler_->OnSessionSequenceNumber(this, sequence_number);
 }
 
-void ClientSession::OnClientIpAddress(protocol::ConnectionToClient* connection,
-                                      const std::string& channel_name,
-                                      const net::IPEndPoint& end_point) {
+void ClientSession::OnRouteChange(
+    protocol::ConnectionToClient* connection,
+    const std::string& channel_name,
+    const protocol::TransportRoute& route) {
   DCHECK(CalledOnValidThread());
   DCHECK_EQ(connection_.get(), connection);
-  event_handler_->OnSessionIpAddress(this, channel_name, end_point);
+  event_handler_->OnSessionRouteChange(this, channel_name, route);
 }
 
 void ClientSession::Disconnect() {
   DCHECK(CalledOnValidThread());
   DCHECK(connection_.get());
-  authenticated_ = false;
+  connected_ = false;
   RestoreEventState();
 
   // This triggers OnSessionClosed() and the session may be destroyed
@@ -239,7 +250,7 @@ void ClientSession::RestoreEventState() {
     KeyEvent key;
     key.set_keycode(*i);
     key.set_pressed(false);
-    input_stub_->InjectKeyEvent(key);
+    host_event_stub_->InjectKeyEvent(key);
   }
   pressed_keys_.clear();
 
@@ -252,7 +263,7 @@ void ClientSession::RestoreEventState() {
       mouse.set_y(remote_mouse_pos_.y());
       mouse.set_button((MouseEvent::MouseButton)i);
       mouse.set_button_down(false);
-      input_stub_->InjectMouseEvent(mouse);
+      host_event_stub_->InjectMouseEvent(mouse);
     }
   }
   remote_mouse_button_state_ = 0;

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -32,14 +32,16 @@ class AudioUtil : public AudioUtilInterface {
  public:
   AudioUtil() {}
 
-  virtual double GetAudioHardwareSampleRate() OVERRIDE {
+  virtual int GetAudioHardwareSampleRate() OVERRIDE {
     return media::GetAudioHardwareSampleRate();
   }
-  virtual double GetAudioInputHardwareSampleRate() OVERRIDE {
-    return media::GetAudioInputHardwareSampleRate();
+  virtual int GetAudioInputHardwareSampleRate(
+      const std::string& device_id) OVERRIDE {
+    return media::GetAudioInputHardwareSampleRate(device_id);
   }
-  virtual uint32 GetAudioInputHardwareChannelCount() OVERRIDE {
-    return media::GetAudioInputHardwareChannelCount();
+  virtual ChannelLayout GetAudioInputHardwareChannelLayout(
+      const std::string& device_id) OVERRIDE {
+    return media::GetAudioInputHardwareChannelLayout(device_id);
   }
  private:
   DISALLOW_COPY_AND_ASSIGN(AudioUtil);
@@ -47,27 +49,29 @@ class AudioUtil : public AudioUtilInterface {
 
 class AudioUtilNoHardware : public AudioUtilInterface {
  public:
-  AudioUtilNoHardware(double output_rate, double input_rate,
-                      uint32 input_channels)
+  AudioUtilNoHardware(int output_rate, int input_rate,
+                      ChannelLayout input_channel_layout)
       : output_rate_(output_rate),
         input_rate_(input_rate),
-        input_channels_(input_channels) {
+        input_channel_layout_(input_channel_layout) {
   }
 
-  virtual double GetAudioHardwareSampleRate() OVERRIDE {
+  virtual int GetAudioHardwareSampleRate() OVERRIDE {
     return output_rate_;
   }
-  virtual double GetAudioInputHardwareSampleRate() OVERRIDE {
+  virtual int GetAudioInputHardwareSampleRate(
+      const std::string& device_id) OVERRIDE {
     return input_rate_;
   }
-  virtual uint32 GetAudioInputHardwareChannelCount() OVERRIDE {
-    return input_channels_;
+  virtual ChannelLayout GetAudioInputHardwareChannelLayout(
+      const std::string& device_id) OVERRIDE {
+    return input_channel_layout_;
   }
 
  private:
-  double output_rate_;
-  double input_rate_;
-  uint32 input_channels_;
+  int output_rate_;
+  int input_rate_;
+  ChannelLayout input_channel_layout_;
   DISALLOW_COPY_AND_ASSIGN(AudioUtilNoHardware);
 };
 
@@ -78,7 +82,11 @@ bool IsRunningHeadless() {
   return false;
 }
 
-// The WebRTC audio client only supports 44.1 and 48.0 kHz.
+// Return true if at least one element in the array matches |value|.
+bool FindElementInArray(int* array, int size, int value) {
+  return (std::find(&array[0], &array[0] + size, value) != &array[size]);
+}
+
 // This method returns false if a non-supported rate is detected on the
 // input or output side.
 // TODO(henrika): add support for automatic fallback to Windows Wave audio
@@ -86,16 +94,32 @@ bool IsRunningHeadless() {
 // invalid audio settings by actually trying to open the audio streams instead
 // of relying on hard coded conditions.
 bool HardwareSampleRatesAreValid() {
-  int output_sample_rate =
-      static_cast<int>(audio_hardware::GetOutputSampleRate());
+  // These are the currently supported hardware sample rates in both directions.
+  // The actual WebRTC client can limit these ranges further depending on
+  // platform but this is the maximum range we support today.
+  int valid_input_rates[] = {16000, 32000, 44100, 48000, 96000};
+  int valid_output_rates[] = {44100, 48000, 96000};
+
+  // Verify the input sample rate.
   int input_sample_rate =
       static_cast<int>(audio_hardware::GetInputSampleRate());
-  bool rates_are_valid =
-      ((output_sample_rate == 44100 || output_sample_rate == 48000) &&
-       (input_sample_rate == 44100 || input_sample_rate == 48000 ||
-        input_sample_rate == 16000 || input_sample_rate == 32000));
-  DLOG_IF(WARNING, !rates_are_valid) << "Non-supported sample rate detected.";
-  return rates_are_valid;
+
+  if (!FindElementInArray(valid_input_rates, arraysize(valid_input_rates),
+                          input_sample_rate)) {
+    DLOG(WARNING) << "Non-supported input sample rate detected.";
+    return false;
+  }
+
+  // Given that the input rate was OK, verify the output rate as well.
+  int output_sample_rate =
+      static_cast<int>(audio_hardware::GetOutputSampleRate());
+  if (!FindElementInArray(valid_output_rates, arraysize(valid_output_rates),
+                          output_sample_rate)) {
+    DLOG(WARNING) << "Non-supported output sample rate detected.";
+    return false;
+  }
+
+  return true;
 }
 
 
@@ -168,10 +192,52 @@ class WebRTCMediaProcessImpl : public webrtc::VoEMediaProcess {
 
 }  // end namespace
 
+// Trivial test which verifies that one part of the test harness
+// (HardwareSampleRatesAreValid()) works as intended for all supported
+// hardware input sample rates.
+TEST_F(WebRTCAudioDeviceTest, TestValidInputRates) {
+  int valid_rates[] = {16000, 32000, 44100, 48000, 96000};
+
+  // Verify that we will approve all rates listed in |valid_rates|.
+  for (size_t i = 0; i < arraysize(valid_rates); ++i) {
+    EXPECT_TRUE(FindElementInArray(valid_rates, arraysize(valid_rates),
+        valid_rates[i]));
+  }
+
+  // Verify that any value outside the valid range results in negative
+  // find results.
+  int invalid_rates[] = {-1, 0, 8000, 11025, 22050, 192000};
+  for (size_t i = 0; i < arraysize(invalid_rates); ++i) {
+    EXPECT_FALSE(FindElementInArray(valid_rates, arraysize(valid_rates),
+        invalid_rates[i]));
+  }
+}
+
+// Trivial test which verifies that one part of the test harness
+// (HardwareSampleRatesAreValid()) works as intended for all supported
+// hardware output sample rates.
+TEST_F(WebRTCAudioDeviceTest, TestValidOutputRates) {
+  int valid_rates[] = {44100, 48000, 96000};
+
+  // Verify that we will approve all rates listed in |valid_rates|.
+  for (size_t i = 0; i < arraysize(valid_rates); ++i) {
+    EXPECT_TRUE(FindElementInArray(valid_rates, arraysize(valid_rates),
+        valid_rates[i]));
+  }
+
+  // Verify that any value outside the valid range results in negative
+  // find results.
+  int invalid_rates[] = {-1, 0, 8000, 11025, 22050, 32000, 192000};
+  for (size_t i = 0; i < arraysize(invalid_rates); ++i) {
+    EXPECT_FALSE(FindElementInArray(valid_rates, arraysize(valid_rates),
+        invalid_rates[i]));
+  }
+}
+
 // Basic test that instantiates and initializes an instance of
 // WebRtcAudioDeviceImpl.
 TEST_F(WebRTCAudioDeviceTest, Construct) {
-  AudioUtilNoHardware audio_util(48000.0, 48000.0, 1);
+  AudioUtilNoHardware audio_util(48000, 48000, CHANNEL_LAYOUT_MONO);
   SetAudioUtilCallback(&audio_util);
   scoped_refptr<WebRtcAudioDeviceImpl> audio_device(
       new WebRtcAudioDeviceImpl());
@@ -382,7 +448,7 @@ TEST_F(WebRTCAudioDeviceTest, PlayLocalFile) {
   // Play 2 seconds worth of audio and then quit.
   message_loop_.PostDelayedTask(FROM_HERE,
                                 MessageLoop::QuitClosure(),
-                                2000);
+                                base::TimeDelta::FromSeconds(2));
   message_loop_.Run();
 
 
@@ -443,7 +509,7 @@ TEST_F(WebRTCAudioDeviceTest, FullDuplexAudio) {
   LOG(INFO) << ">> You should now be able to hear yourself in loopback...";
   message_loop_.PostDelayedTask(FROM_HERE,
                                 MessageLoop::QuitClosure(),
-                                TestTimeouts::action_timeout_ms());
+                                TestTimeouts::action_timeout());
   message_loop_.Run();
 
   EXPECT_EQ(0, base->StopSend(ch));

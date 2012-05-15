@@ -35,6 +35,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/profiling.h"
+#include "content/public/browser/host_zoom_map.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
@@ -160,12 +161,8 @@ ToolsMenuModel::ToolsMenuModel(ui::SimpleMenuModel::Delegate* delegate,
 ToolsMenuModel::~ToolsMenuModel() {}
 
 void ToolsMenuModel::Build(Browser* browser) {
-#if !defined(OS_CHROMEOS)
-#if defined(OS_MACOSX)
-  AddItemWithStringId(IDC_CREATE_SHORTCUTS, IDS_CREATE_APPLICATION_MAC);
-#else
+#if !defined(OS_CHROMEOS) && !defined(OS_MACOSX)
   AddItemWithStringId(IDC_CREATE_SHORTCUTS, IDS_CREATE_SHORTCUTS);
-#endif
   AddSeparator();
 #endif
 
@@ -213,7 +210,8 @@ WrenchMenuModel::WrenchMenuModel(ui::AcceleratorProvider* provider,
 
   registrar_.Add(
       this, content::NOTIFICATION_ZOOM_LEVEL_CHANGED,
-      content::Source<HostZoomMap>(browser_->profile()->GetHostZoomMap()));
+      content::Source<HostZoomMap>(
+          HostZoomMap::GetForBrowserContext(browser_->profile())));
   registrar_.Add(this, content::NOTIFICATION_NAV_ENTRY_COMMITTED,
                  content::NotificationService::AllSources());
 }
@@ -232,7 +230,6 @@ bool WrenchMenuModel::IsItemForCommandIdDynamic(int command_id) const {
 #if defined(OS_MACOSX)
          command_id == IDC_FULLSCREEN ||
 #endif
-         command_id == IDC_SYNC_BOOKMARKS ||
          command_id == IDC_VIEW_BACKGROUND_PAGES ||
          command_id == IDC_UPGRADE_DIALOG ||
          command_id == IDC_SHOW_SYNC_SETUP;
@@ -240,8 +237,6 @@ bool WrenchMenuModel::IsItemForCommandIdDynamic(int command_id) const {
 
 string16 WrenchMenuModel::GetLabelForCommandId(int command_id) const {
   switch (command_id) {
-    case IDC_SYNC_BOOKMARKS:
-      return GetSyncMenuLabel();
     case IDC_ZOOM_PERCENT_DISPLAY:
       return zoom_label_;
 #if defined(OS_MACOSX)
@@ -287,13 +282,13 @@ string16 WrenchMenuModel::GetLabelForCommandId(int command_id) const {
 
 bool WrenchMenuModel::GetIconForCommandId(int command_id,
                                           SkBitmap* icon) const {
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   switch (command_id) {
     case IDC_UPGRADE_DIALOG: {
       if (UpgradeDetector::GetInstance()->notify_upgrade()) {
-        *icon = rb.GetNativeImageNamed(
+        *icon = *rb.GetNativeImageNamed(
             UpgradeDetector::GetInstance()->GetIconResourceID(
-                UpgradeDetector::UPGRADE_ICON_TYPE_MENU_ICON));
+                UpgradeDetector::UPGRADE_ICON_TYPE_MENU_ICON)).ToSkBitmap();
         return true;
       }
       return false;
@@ -306,7 +301,7 @@ bool WrenchMenuModel::GetIconForCommandId(int command_id,
       if (error && error->HasCustomizedSyncMenuItem()) {
         int icon_id = error->MenuItemIconResourceID();
         if (icon_id) {
-          *icon = rb.GetNativeImageNamed(icon_id);
+          *icon = *rb.GetNativeImageNamed(icon_id).ToSkBitmap();
           return true;
         }
       }
@@ -511,7 +506,7 @@ void WrenchMenuModel::Build() {
       IDS_VIEW_INCOMPATIBILITIES));
 
 #if defined(OS_WIN)
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   SetIcon(GetIndexOfCommandId(IDC_VIEW_INCOMPATIBILITIES),
           *rb.GetBitmapNamed(IDR_CONFLICT_MENU));
 #endif
@@ -532,7 +527,7 @@ void WrenchMenuModel::AddGlobalErrorMenuItems() {
   // window. This means that if a new error is added after the menu is built
   // it won't show in the existing wrench menu. To fix this we need to some
   // how update the menu if new errors are added.
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   const GlobalErrorService::GlobalErrorList& errors =
       GlobalErrorServiceFactory::GetForProfile(browser_->profile())->errors();
   for (GlobalErrorService::GlobalErrorList::const_iterator

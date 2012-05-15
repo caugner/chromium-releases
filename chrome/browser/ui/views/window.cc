@@ -8,21 +8,13 @@
 #include "ui/views/widget/widget.h"
 
 #if defined(USE_AURA)
+#include "ash/ash_switches.h"
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
+#include "base/command_line.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
 #endif
-
-#if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/frame/bubble_window.h"
-
-#if defined(TOOLKIT_USES_GTK)
-#include "chrome/browser/chromeos/legacy_window_manager/wm_ipc.h"
-#include "third_party/cros_system_api/window_manager/chromeos_wm_ipc_enums.h"
-#endif  // TOOLKIT_USES_GTK
-
-#endif  // OS_CHROMEOS
 
 // Note: This file should be removed after the old ChromeOS frontend is removed.
 //       It is not needed for Aura.
@@ -35,49 +27,45 @@
 
 namespace browser {
 
-views::Widget* CreateViewsWindow(gfx::NativeWindow parent,
-                                 views::WidgetDelegate* delegate,
-                                 DialogStyle style) {
-#if defined(OS_CHROMEOS) && !defined(USE_AURA)
-  return chromeos::BubbleWindow::Create(parent, style, delegate);
-#else
-  return views::Widget::CreateWindowWithParent(delegate, parent);
+views::Widget* CreateFramelessViewsWindow(gfx::NativeWindow parent,
+                                          views::WidgetDelegate* delegate) {
+  return CreateFramelessWindowWithParentAndBounds(delegate,
+      parent, gfx::Rect());
+}
+
+views::Widget* CreateFramelessWindowWithParentAndBounds(
+    views::WidgetDelegate* delegate,
+    gfx::NativeWindow parent,
+    const gfx::Rect& bounds) {
+  views::Widget* widget = new views::Widget;
+  views::Widget::InitParams params(
+      views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
+  params.delegate = delegate;
+  // Will this function be called if !defined(USE_AURA)?
+#if defined(OS_WIN) || defined(USE_AURA)
+  params.parent = parent;
 #endif
+  // No frame so does not need params.transparent = true
+  params.bounds = bounds;
+  widget->Init(params);
+  return widget;
 }
 
 views::Widget* CreateViewsBubble(views::BubbleDelegateView* delegate) {
   views::Widget* bubble_widget =
       views::BubbleDelegateView::CreateBubble(delegate);
-#if defined(OS_CHROMEOS) && defined(TOOLKIT_USES_GTK)
-  {
-    std::vector<int> params;
-    params.push_back(0);  // Do not show when screen is locked.
-    chromeos::WmIpc::instance()->SetWindowType(
-        bubble_widget->GetNativeView(),
-        chromeos::WM_IPC_WINDOW_CHROME_INFO_BUBBLE,
-        &params);
-  }
-#endif
   return bubble_widget;
 }
 
 views::Widget* CreateViewsBubbleAboveLockScreen(
     views::BubbleDelegateView* delegate) {
+#if defined(USE_AURA)
+  delegate->set_parent_window(
+      ash::Shell::GetInstance()->GetContainer(
+          ash::internal::kShellWindowId_SettingBubbleContainer));
+#endif
   views::Widget* bubble_widget =
       views::BubbleDelegateView::CreateBubble(delegate);
-#if defined(USE_AURA)
-  ash::Shell::GetInstance()->GetContainer(
-      ash::internal::kShellWindowId_SettingBubbleContainer)->
-          AddChild(bubble_widget->GetNativeView());
-#endif
-#if defined(OS_CHROMEOS) && defined(TOOLKIT_USES_GTK)
-  std::vector<int> params;
-  params.push_back(1);  // Show while screen is locked.
-  chromeos::WmIpc::instance()->SetWindowType(
-      bubble_widget->GetNativeView(),
-      chromeos::WM_IPC_WINDOW_CHROME_INFO_BUBBLE,
-      &params);
-#endif
   return bubble_widget;
 }
 

@@ -4,12 +4,16 @@
 
 #include "chrome/browser/ui/views/select_file_dialog_extension.h"
 
+#include "base/bind.h"
+#include "base/callback.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/singleton.h"
-#include "chrome/browser/extensions/extension_file_browser_private_api.h"
+#include "base/message_loop.h"
+#include "chrome/browser/chromeos/extensions/file_browser_private_api.h"
+#include "chrome/browser/chromeos/extensions/file_manager_util.h"
 #include "chrome/browser/extensions/extension_host.h"
-#include "chrome/browser/extensions/file_manager_util.h"
+#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/sessions/restore_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
@@ -18,13 +22,14 @@
 #include "chrome/browser/ui/views/extensions/extension_dialog.h"
 #include "chrome/browser/ui/views/window.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/common/selected_file_info.h"
 
 using content::BrowserThread;
 
 namespace {
 
-const int kFileManagerWidth = 720;  // pixels
-const int kFileManagerHeight = 580;  // pixels
+const int kFileManagerWidth = 954;  // pixels
+const int kFileManagerHeight = 640;  // pixels
 
 // Holds references to file manager dialogs that have callbacks pending
 // to their listeners.
@@ -91,7 +96,8 @@ SelectFileDialogExtension::SelectFileDialogExtension(Listener* listener)
     : SelectFileDialog(listener),
       has_multiple_file_type_choices_(false),
       tab_id_(0),
-      owner_window_(0),
+      owner_browser_(NULL),
+      owner_window_(NULL),
       selection_type_(CANCEL),
       selection_index_(0),
       params_(NULL) {
@@ -115,6 +121,7 @@ void SelectFileDialogExtension::ListenerDestroyed() {
 
 void SelectFileDialogExtension::ExtensionDialogClosing(
     ExtensionDialog* dialog) {
+  owner_browser_ = NULL;
   owner_window_ = NULL;
   // Release our reference to the dialog to allow it to close.
   extension_dialog_ = NULL;
@@ -123,22 +130,49 @@ void SelectFileDialogExtension::ExtensionDialogClosing(
   NotifyListener();
 }
 
+void SelectFileDialogExtension::ExtensionTerminated(
+    ExtensionDialog* dialog) {
+  // The extension would have been unloaded because of the termination,
+  // reload it.
+  std::string extension_id = dialog->host()->extension()->id();
+  // Reload the extension after a bit; the extension may not have been unloaded
+  // yet. We don't want to try to reload the extension only to have the Unload
+  // code execute after us and re-unload the extension.
+  //
+  // TODO(rkc): This is ugly. The ideal solution is that we shouldn't need to
+  // reload the extension at all - when we try to open the extension the next
+  // time, the extension subsystem would automatically reload it for us. At
+  // this time though this is broken because of some faulty wiring in
+  // ExtensionProcessManager::CreateViewHost. Once that is fixed, remove this.
+  if (owner_browser_) {
+    MessageLoop::current()->PostTask(FROM_HERE,
+        base::Bind(&ExtensionService::ReloadExtension,
+            base::Unretained(owner_browser_->profile()->GetExtensionService()),
+        extension_id));
+  }
+
+  dialog->Close();
+}
+
 // static
 void SelectFileDialogExtension::OnFileSelected(
-    int32 tab_id, const FilePath& path, int index) {
+    int32 tab_id,
+    const content::SelectedFileInfo& file,
+    int index) {
   scoped_refptr<SelectFileDialogExtension> dialog =
       PendingDialog::GetInstance()->Find(tab_id);
   if (!dialog)
     return;
   dialog->selection_type_ = SINGLE_FILE;
   dialog->selection_files_.clear();
-  dialog->selection_files_.push_back(path);
+  dialog->selection_files_.push_back(file);
   dialog->selection_index_ = index;
 }
 
 // static
 void SelectFileDialogExtension::OnMultiFilesSelected(
-    int32 tab_id, const std::vector<FilePath>& files) {
+    int32 tab_id,
+    const std::vector<content::SelectedFileInfo>& files) {
   scoped_refptr<SelectFileDialogExtension> dialog =
       PendingDialog::GetInstance()->Find(tab_id);
   if (!dialog)
@@ -159,7 +193,7 @@ void SelectFileDialogExtension::OnFileSelectionCanceled(int32 tab_id) {
   dialog->selection_index_ = 0;
 }
 
-RenderViewHost* SelectFileDialogExtension::GetRenderViewHost() {
+content::RenderViewHost* SelectFileDialogExtension::GetRenderViewHost() {
   if (extension_dialog_)
     return extension_dialog_->host()->render_view_host();
   return NULL;
@@ -173,10 +207,12 @@ void SelectFileDialogExtension::NotifyListener() {
       listener_->FileSelectionCanceled(params_);
       break;
     case SINGLE_FILE:
-      listener_->FileSelected(selection_files_[0], selection_index_, params_);
+      listener_->FileSelectedWithExtraInfo(selection_files_[0],
+                                           selection_index_,
+                                           params_);
       break;
     case MULTIPLE_FILES:
-      listener_->MultiFilesSelected(selection_files_, params_);
+      listener_->MultiFilesSelectedWithExtraInfo(selection_files_, params_);
       break;
     default:
       NOTREACHED();
@@ -211,15 +247,15 @@ void SelectFileDialogExtension::SelectFileImpl(
     return;
   }
   // Extension background pages may not supply an owner_window.
-  Browser* owner_browser = (owner_window ?
+  owner_browser_ = (owner_window ?
       BrowserList::FindBrowserWithWindow(owner_window) :
       BrowserList::GetLastActive());
-  if (!owner_browser) {
+  if (!owner_browser_) {
     NOTREACHED() << "Can't find owning browser";
     return;
   }
 
-  TabContentsWrapper* tab = owner_browser->GetSelectedTabContentsWrapper();
+  TabContentsWrapper* tab = owner_browser_->GetSelectedTabContentsWrapper();
 
   // Check if we have another dialog opened in the tab. It's unlikely, but
   // possible.
@@ -231,7 +267,7 @@ void SelectFileDialogExtension::SelectFileImpl(
 
   FilePath virtual_path;
   if (!file_manager_util::ConvertFileToRelativeFileSystemPath(
-          owner_browser->profile(), default_path, &virtual_path)) {
+          owner_browser_->profile(), default_path, &virtual_path)) {
     virtual_path = default_path.BaseName();
   }
 
@@ -243,7 +279,7 @@ void SelectFileDialogExtension::SelectFileImpl(
       default_extension);
 
   ExtensionDialog* dialog = ExtensionDialog::Show(file_browser_url,
-      owner_browser, tab->web_contents(),
+      owner_browser_, tab->web_contents(),
       kFileManagerWidth, kFileManagerHeight,
 #if defined(USE_AURA)
       file_manager_util::GetTitleFromType(type),

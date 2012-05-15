@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -37,6 +37,8 @@ class MockRenderProcess : public RenderProcess {
       const gfx::Rect& rect) { return NULL; }
   virtual void ReleaseTransportDIB(TransportDIB* memory) {}
   virtual bool UseInProcessPlugins() const { return false; }
+  virtual void AddBindings(int bindings) {}
+  virtual int GetEnabledBindings() const { return 0; }
   virtual bool HasInitializedMediaLibrary() const { return false; }
 
  private:
@@ -88,7 +90,6 @@ class AudioRendererImplTest
 
     mock_process_.reset(new MockRenderProcess);
     render_thread_ = new RenderThreadImpl(kThreadName);
-    mock_process_->set_main_thread(render_thread_);
 
     // Setup expectations for initialization.
     decoder_ = new media::MockAudioDecoder();
@@ -106,8 +107,9 @@ class AudioRendererImplTest
 
     // Create and initialize the audio renderer.
     renderer_ = new TestAudioRendererImpl(default_sink.get());
-    renderer_->Initialize(decoder_, media::NewExpectedClosure(),
-                          NewUnderflowClosure());
+    renderer_->Initialize(decoder_,
+                          media::NewExpectedStatusCB(media::PIPELINE_OK),
+                          NewUnderflowClosure(), NewTimeClosure());
 
     // We need an event to verify that all tasks are done before leaving
     // our tests.
@@ -122,6 +124,16 @@ class AudioRendererImplTest
 
   base::Closure NewUnderflowClosure() {
     return base::Bind(&AudioRendererImplTest::OnUnderflow,
+                      base::Unretained(this));
+  }
+
+  void OnTimeCallback(
+      base::TimeDelta current_time, base::TimeDelta max_time) {
+    CHECK(current_time <= max_time);
+  }
+
+  media::AudioRenderer::TimeCB NewTimeClosure() {
+    return base::Bind(&AudioRendererImplTest::OnTimeCallback,
                       base::Unretained(this));
   }
 

@@ -8,12 +8,9 @@
 
 #include "base/compiler_specific.h"
 #include "base/string16.h"
+#include "ui/gfx/font.h"
 #include "ui/views/controls/button/menu_button.h"
-#include "ui/views/controls/menu/view_menu_delegate.h"
-
-namespace gfx {
-class Font;
-}
+#include "ui/views/controls/button/menu_button_listener.h"
 
 // Button to be used to represent status and allow menus to be popped up.
 // Shows current button state by drawing a border around the current icon.
@@ -21,10 +18,10 @@ class StatusAreaButton : public views::MenuButton {
  public:
   // Different text styles for different types of backgrounds.
   enum TextStyle {
-    WHITE_PLAIN,
-    GRAY_PLAIN,
-    WHITE_HALOED,
-    GRAY_EMBOSSED
+    WHITE_PLAIN_BOLD,
+    GRAY_PLAIN_LIGHT,
+    WHITE_HALOED_BOLD,
+    GRAY_EMBOSSED_BOLD
   };
 
   class Delegate {
@@ -33,7 +30,7 @@ class StatusAreaButton : public views::MenuButton {
     enum Command {
       SHOW_LANGUAGE_OPTIONS,
       SHOW_NETWORK_OPTIONS,
-      SHOW_SYSTEM_OPTIONS
+      SHOW_DATE_OPTIONS
     };
 
     // |command_id| can be any int, passed from the button to the delegate.
@@ -43,9 +40,8 @@ class StatusAreaButton : public views::MenuButton {
     virtual void ExecuteStatusAreaCommand(
         const views::View* button_view, int command_id) = 0;
 
-    // Return the button font. |font| is set to the default button font.
-    virtual gfx::Font GetStatusAreaFont(const gfx::Font& font) const = 0;
-
+    // Get the style that should currently be used in rendering the button's
+    // text.
     virtual TextStyle GetStatusAreaTextStyle() const = 0;
 
     // Handle visibility changes (e.g. resize the status area).
@@ -56,7 +52,7 @@ class StatusAreaButton : public views::MenuButton {
   };
 
   StatusAreaButton(Delegate* button_delegate,
-                   views::ViewMenuDelegate* menu_delegate);
+                   views::MenuButtonListener* menu_button_listener);
   virtual ~StatusAreaButton() {}
   virtual void PaintButton(gfx::Canvas* canvas, PaintButtonMode mode) OVERRIDE;
 
@@ -105,6 +101,10 @@ class StatusAreaButton : public views::MenuButton {
 
  private:
   Delegate* delegate_;
+
+  // Fonts used to render the button's text.
+  gfx::Font light_font_;
+  gfx::Font bold_font_;
 
   DISALLOW_COPY_AND_ASSIGN(StatusAreaButton);
 };

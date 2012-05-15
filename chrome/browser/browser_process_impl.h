@@ -14,6 +14,7 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "base/debug/stack_trace.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/threading/non_thread_safe.h"
@@ -23,10 +24,8 @@
 #include "chrome/browser/prefs/pref_member.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
 #include "ipc/ipc_message.h"
 
-class BrowserOnlineStateObserver;
 class ChromeNetLog;
 class ChromeResourceDispatcherHostDelegate;
 class CommandLine;
@@ -35,6 +34,7 @@ class TabCloseableStateWatcher;
 
 namespace policy {
 class BrowserPolicyConnector;
+class PolicyService;
 };
 
 // Real implementation of BrowserProcess that creates and returns the services.
@@ -77,6 +77,7 @@ class BrowserProcessImpl : public BrowserProcess,
         extension_event_router_forwarder() OVERRIDE;
   virtual NotificationUIManager* notification_ui_manager() OVERRIDE;
   virtual policy::BrowserPolicyConnector* browser_policy_connector() OVERRIDE;
+  virtual policy::PolicyService* policy_service() OVERRIDE;
   virtual IconManager* icon_manager() OVERRIDE;
   virtual ThumbnailGenerator* GetThumbnailGenerator() OVERRIDE;
   virtual AutomationProviderList* GetAutomationProviderList() OVERRIDE;
@@ -118,10 +119,8 @@ class BrowserProcessImpl : public BrowserProcess,
 
   virtual ChromeNetLog* net_log() OVERRIDE;
   virtual prerender::PrerenderTracker* prerender_tracker() OVERRIDE;
-  virtual MHTMLGenerationManager* mhtml_generation_manager() OVERRIDE;
   virtual ComponentUpdateService* component_updater() OVERRIDE;
   virtual CRLSetFetcher* crl_set_fetcher() OVERRIDE;
-  virtual AudioManager* audio_manager() OVERRIDE;
 
  private:
   void CreateMetricsService();
@@ -175,6 +174,7 @@ class BrowserProcessImpl : public BrowserProcess,
 
   bool created_browser_policy_connector_;
   scoped_ptr<policy::BrowserPolicyConnector> browser_policy_connector_;
+  scoped_ptr<policy::PolicyService> policy_service_;
 
   scoped_refptr<printing::PrintPreviewTabController>
       print_preview_tab_controller_;
@@ -187,7 +187,9 @@ class BrowserProcessImpl : public BrowserProcess,
   bool created_notification_ui_manager_;
   scoped_ptr<NotificationUIManager> notification_ui_manager_;
 
+#if defined(ENABLE_AUTOMATION)
   scoped_ptr<AutomationProviderList> automation_provider_list_;
+#endif
 
   scoped_ptr<GoogleURLTracker> google_url_tracker_;
   scoped_ptr<IntranetRedirectDetector> intranet_redirect_detector_;
@@ -237,10 +239,6 @@ class BrowserProcessImpl : public BrowserProcess,
   scoped_ptr<ChromeResourceDispatcherHostDelegate>
       resource_dispatcher_host_delegate_;
 
-  content::NotificationRegistrar notification_registrar_;
-
-  scoped_refptr<MHTMLGenerationManager> mhtml_generation_manager_;
-
   // Monitors the state of the 'DisablePluginFinder' policy.
   scoped_ptr<BooleanPrefMember> plugin_finder_disabled_pref_;
 
@@ -258,16 +256,15 @@ class BrowserProcessImpl : public BrowserProcess,
   scoped_ptr<browser::OomPriorityManager> oom_priority_manager_;
 #endif
 
-  // Per-process listener for online state changes.
-  scoped_ptr<BrowserOnlineStateObserver> online_state_observer_;
-
 #if !defined(OS_CHROMEOS)
   scoped_ptr<ComponentUpdateService> component_updater_;
 
   scoped_refptr<CRLSetFetcher> crl_set_fetcher_;
 #endif
 
-  scoped_refptr<AudioManager> audio_manager_;
+  // TODO(eroman): Remove this when done debugging 113031. This tracks
+  // the callstack which released the final module reference count.
+  base::debug::StackTrace release_last_reference_callstack_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserProcessImpl);
 };

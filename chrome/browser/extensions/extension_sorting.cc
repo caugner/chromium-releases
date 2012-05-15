@@ -28,10 +28,16 @@ const char kPrefPageOrdinal[] = "page_ordinal";
 ExtensionSorting::ExtensionSorting(ExtensionScopedPrefs* extension_scoped_prefs,
                                    PrefService* pref_service)
     : extension_scoped_prefs_(extension_scoped_prefs),
-      pref_service_(pref_service) {
+      pref_service_(pref_service),
+      extension_service_(NULL) {
 }
 
 ExtensionSorting::~ExtensionSorting() {
+}
+
+void ExtensionSorting::SetExtensionService(
+    ExtensionServiceInterface* extension_service) {
+  extension_service_ = extension_service;
 }
 
 void ExtensionSorting::Initialize(
@@ -241,7 +247,7 @@ void ExtensionSorting::OnExtensionMoved(
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_EXTENSION_LAUNCHER_REORDERED,
       content::Source<ExtensionSorting>(this),
-      content::NotificationService::NoDetails());
+      content::Details<const std::string>(&moved_extension_id));
 }
 
 
@@ -259,6 +265,11 @@ StringOrdinal ExtensionSorting::GetAppLaunchOrdinal(
 void ExtensionSorting::SetAppLaunchOrdinal(
     const std::string& extension_id,
     const StringOrdinal& new_app_launch_ordinal) {
+  // No work is required if the old and new values are the same.
+  if (new_app_launch_ordinal.EqualOrBothInvalid(
+          GetAppLaunchOrdinal(extension_id)))
+    return;
+
   StringOrdinal page_ordinal = GetPageOrdinal(extension_id);
   RemoveOrdinalMapping(
       extension_id, page_ordinal, GetAppLaunchOrdinal(extension_id));
@@ -272,6 +283,7 @@ void ExtensionSorting::SetAppLaunchOrdinal(
       extension_id,
       kPrefAppLaunchOrdinal,
       new_value);
+  SyncIfNeeded(extension_id);
 }
 
 StringOrdinal ExtensionSorting::CreateFirstAppLaunchOrdinal(
@@ -339,7 +351,11 @@ StringOrdinal ExtensionSorting::GetPageOrdinal(const std::string& extension_id)
 }
 
 void ExtensionSorting::SetPageOrdinal(const std::string& extension_id,
-                                    const StringOrdinal& new_page_ordinal) {
+                                      const StringOrdinal& new_page_ordinal) {
+  // No work is required if the old and new values are the same.
+  if (new_page_ordinal.EqualOrBothInvalid(GetPageOrdinal(extension_id)))
+    return;
+
   StringOrdinal app_launch_ordinal = GetAppLaunchOrdinal(extension_id);
   RemoveOrdinalMapping(
       extension_id, GetPageOrdinal(extension_id), app_launch_ordinal);
@@ -353,6 +369,7 @@ void ExtensionSorting::SetPageOrdinal(const std::string& extension_id,
       extension_id,
       kPrefPageOrdinal,
       new_value);
+  SyncIfNeeded(extension_id);
 }
 
 void ExtensionSorting::ClearOrdinals(const std::string& extension_id) {
@@ -372,11 +389,8 @@ int ExtensionSorting::PageStringOrdinalAsInteger(
     return -1;
 
   PageOrdinalMap::const_iterator it = ntp_ordinal_map_.find(page_ordinal);
-  if (it != ntp_ordinal_map_.end()) {
-    return std::distance(ntp_ordinal_map_.begin(), it);
-  } else {
-    return -1;
-  }
+  return it != ntp_ordinal_map_.end() ?
+      std::distance(ntp_ordinal_map_.begin(), it) : -1;
 }
 
 StringOrdinal ExtensionSorting::PageIntegerAsStringOrdinal(size_t page_index)
@@ -481,6 +495,22 @@ void ExtensionSorting::RemoveOrdinalMapping(
     if (it->second == extension_id) {
       page_map->second.erase(it);
       break;
+    }
+  }
+}
+
+void ExtensionSorting::SyncIfNeeded(const std::string& extension_id) {
+  if (extension_service_) {
+    const Extension* ext =
+        extension_service_->GetInstalledExtension(extension_id);
+
+    if (ext) {
+      // It is possible for old extension to have ordinal values, but they
+      // shouldn't so we clear them.
+      if (!ext->is_app())
+        ClearOrdinals(extension_id);
+
+      extension_service_->SyncExtensionChangeIfNeeded(*ext);
     }
   }
 }

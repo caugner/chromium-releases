@@ -5,6 +5,7 @@
 #include "ash/wm/root_window_layout_manager.h"
 
 #include "ui/aura/window.h"
+#include "ui/gfx/compositor/layer.h"
 #include "ui/views/widget/widget.h"
 
 namespace ash {
@@ -24,9 +25,14 @@ RootWindowLayoutManager::~RootWindowLayoutManager() {
 void RootWindowLayoutManager::SetBackgroundWidget(views::Widget* widget) {
   if (widget == background_widget_)
     return;
+  // Close now so that the focus manager will be deleted before shutdown.
   if (background_widget_)
-    background_widget_->Close();
+    background_widget_->CloseNow();
   background_widget_ = widget;
+}
+
+void RootWindowLayoutManager::SetBackgroundLayer(ui::Layer* layer) {
+  background_layer_.reset(layer);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -36,12 +42,20 @@ void RootWindowLayoutManager::OnWindowResized() {
   gfx::Rect fullscreen_bounds =
       gfx::Rect(owner_->bounds().width(), owner_->bounds().height());
 
+  // Resize both our immediate children (the containers-of-containers animated
+  // by PowerButtonController) and their children (the actual containers).
   aura::Window::Windows::const_iterator i;
-  for (i = owner_->children().begin(); i != owner_->children().end(); ++i)
+  for (i = owner_->children().begin(); i != owner_->children().end(); ++i) {
     (*i)->SetBounds(fullscreen_bounds);
+    aura::Window::Windows::const_iterator j;
+    for (j = (*i)->children().begin(); j != (*i)->children().end(); ++j)
+      (*j)->SetBounds(fullscreen_bounds);
+  }
 
   if (background_widget_)
     background_widget_->SetBounds(fullscreen_bounds);
+  if (background_layer_.get())
+    background_layer_->SetBounds(fullscreen_bounds);
 }
 
 void RootWindowLayoutManager::OnWindowAddedToLayout(aura::Window* child) {

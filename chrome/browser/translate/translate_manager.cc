@@ -34,7 +34,6 @@
 #include "chrome/common/render_messages.h"
 #include "chrome/common/translate_errors.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/renderer_host/render_view_host.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/navigation_entry.h"
@@ -43,12 +42,17 @@
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/url_fetcher.h"
 #include "grit/browser_resources.h"
 #include "net/base/escape.h"
 #include "net/url_request/url_request_status.h"
 #include "ui/base/resource/resource_bundle.h"
+
+#ifdef FILE_MANAGER_EXTENSION
+#include "chrome/browser/chromeos/extensions/file_manager_util.h"
+#endif
 
 using content::NavigationController;
 using content::NavigationEntry;
@@ -339,7 +343,8 @@ void TranslateManager::Observe(int type,
               &TranslateManager::InitiateTranslationPosted,
               weak_method_factory_.GetWeakPtr(),
               controller->GetWebContents()->GetRenderProcessHost()->GetID(),
-              controller->GetWebContents()->GetRenderViewHost()->routing_id(),
+              controller->GetWebContents()->
+                  GetRenderViewHost()->GetRoutingID(),
               helper->language_state().original_language()));
       break;
     }
@@ -501,6 +506,13 @@ TranslateManager::TranslateManager()
 
 void TranslateManager::InitiateTranslation(WebContents* tab,
                                            const std::string& page_lang) {
+#ifdef FILE_MANAGER_EXTENSION
+  const GURL& page_url = tab->GetURL();
+  if (page_url.SchemeIs("chrome-extension") &&
+      page_url.DomainIs(kFileBrowserDomain))
+    return;
+#endif
+
   Profile* profile = Profile::FromBrowserContext(tab->GetBrowserContext());
   PrefService* prefs = profile->GetOriginalProfile()->GetPrefs();
   if (!prefs->GetBoolean(prefs::kEnableTranslate))
@@ -616,10 +628,10 @@ void TranslateManager::TranslatePage(WebContents* web_contents,
 
   // The script is not available yet.  Queue that request and query for the
   // script.  Once it is downloaded we'll do the translate.
-  RenderViewHost* rvh = web_contents->GetRenderViewHost();
+  content::RenderViewHost* rvh = web_contents->GetRenderViewHost();
   PendingRequest request;
-  request.render_process_id = rvh->process()->GetID();
-  request.render_view_id = rvh->routing_id();
+  request.render_process_id = rvh->GetProcess()->GetID();
+  request.render_view_id = rvh->GetRoutingID();
   request.page_id = entry->GetPageID();
   request.source_lang = source_lang;
   request.target_lang = target_lang;
@@ -634,7 +646,7 @@ void TranslateManager::RevertTranslation(WebContents* web_contents) {
     return;
   }
   web_contents->GetRenderViewHost()->Send(new ChromeViewMsg_RevertTranslation(
-      web_contents->GetRenderViewHost()->routing_id(), entry->GetPageID()));
+      web_contents->GetRenderViewHost()->GetRoutingID(), entry->GetPageID()));
 
   TranslateTabHelper* helper = TabContentsWrapper::GetCurrentWrapperForContents(
       web_contents)->translate_tab_helper();
@@ -688,7 +700,7 @@ void TranslateManager::DoTranslatePage(WebContents* tab,
   wrapper->translate_tab_helper()->language_state().set_translation_pending(
       true);
   tab->GetRenderViewHost()->Send(new ChromeViewMsg_TranslatePage(
-      tab->GetRenderViewHost()->routing_id(), entry->GetPageID(),
+      tab->GetRenderViewHost()->GetRoutingID(), entry->GetPageID(),
       translate_script, source_lang, target_lang));
 }
 

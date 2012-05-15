@@ -7,6 +7,7 @@
 #pragma once
 
 #include "base/memory/ref_counted.h"
+#include "base/logging.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "ui/views/widget/widget_delegate.h"
@@ -15,6 +16,7 @@ class Browser;
 class ExtensionDialogObserver;
 class ExtensionHost;
 class GURL;
+class Profile;
 
 namespace content {
 class WebContents;
@@ -33,12 +35,31 @@ class ExtensionDialog : public views::WidgetDelegate,
   // |browser| is the browser to which the pop-up will be attached.
   // |web_contents| is the tab that spawned the dialog.
   // |width| and |height| are the size of the dialog in pixels.
-  static ExtensionDialog* Show(const GURL& url, Browser* browser,
+  static ExtensionDialog* Show(const GURL& url,
+                               Browser* browser,
                                content::WebContents* web_contents,
                                int width,
                                int height,
                                const string16& title,
                                ExtensionDialogObserver* observer);
+
+#if defined(USE_AURA)
+  // Create and show a fullscreen dialog with |url|.
+  // |profile| is the profile that the extension is registered with.
+  // |web_contents| is the tab that spawned the dialog.
+  static ExtensionDialog* ShowFullscreen(const GURL& url,
+                                         Profile* profile,
+                                         const string16& title,
+                                         ExtensionDialogObserver* observer);
+#else
+  static ExtensionDialog* ShowFullscreen(const GURL& url,
+                                         Profile* profile,
+                                         const string16& title,
+                                         ExtensionDialogObserver* observer) {
+    NOTIMPLEMENTED();
+    return NULL;
+  }
+#endif
 
   // Notifies the dialog that the observer has been destroyed and should not
   // be sent notifications.
@@ -46,6 +67,9 @@ class ExtensionDialog : public views::WidgetDelegate,
 
   // Closes the ExtensionDialog.
   void Close();
+
+  // Focus to the render view if possible.
+  void MaybeFocusRenderView();
 
   // Sets the window title.
   void set_title(const string16& title) { window_title_ = title; }
@@ -72,10 +96,21 @@ class ExtensionDialog : public views::WidgetDelegate,
   // Use Show() to create instances.
   ExtensionDialog(ExtensionHost* host, ExtensionDialogObserver* observer);
 
+  static ExtensionDialog* ShowInternal(const GURL& url,
+                                       Browser* browser,
+                                       ExtensionHost* host,
+                                       int width,
+                                       int height,
+                                       bool fullscreen,
+                                       const string16& title,
+                                       ExtensionDialogObserver* observer);
+
   static ExtensionHost* CreateExtensionHost(const GURL& url,
-                                            Browser* browser);
+                                            Browser* browser,
+                                            Profile* profile);
 
   void InitWindow(Browser* browser, int width, int height);
+  void InitWindowFullscreen();
 
   // Window that holds the extension host view.
   views::Widget* window_;

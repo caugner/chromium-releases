@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,10 +16,10 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/browser/renderer_host/render_view_host.h"
 #include "content/public/browser/devtools_agent_host_registry.h"
 #include "content/public/browser/devtools_client_host.h"
 #include "content/public/browser/devtools_manager.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "net/base/net_util.h"
 
@@ -50,8 +50,7 @@ static ExtensionHost* FindHostWithPath(ExtensionProcessManager* manager,
 }
 
 // Tests for the experimental timeline extensions API.
-// TODO(johnnyg): crbug.com/52544 Test was broken by webkit r65510.
-IN_PROC_BROWSER_TEST_F(ExtensionDevToolsBrowserTest, FLAKY_TimelineApi) {
+IN_PROC_BROWSER_TEST_F(ExtensionDevToolsBrowserTest, TimelineApi) {
   ASSERT_TRUE(LoadExtension(
       test_data_dir_.AppendASCII("devtools").AppendASCII("timeline_api")));
 

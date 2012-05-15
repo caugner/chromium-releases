@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,16 +11,15 @@
 #include "base/string_piece.h"
 #include "base/string_util.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
-#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/site_instance_impl.h"
 #include "content/browser/ssl/ssl_cert_error_handler.h"
 #include "content/browser/ssl/ssl_request_info.h"
 #include "content/browser/tab_contents/navigation_entry_impl.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/content_browser_client.h"
-#include "content/public/browser/ssl_status.h"
+#include "content/public/common/ssl_status.h"
 #include "content/public/common/url_constants.h"
-#include "net/base/cert_status_flags.h"
 #include "net/base/ssl_info.h"
 #include "webkit/glue/resource_type.h"
 
@@ -163,7 +162,8 @@ void SSLPolicy::UpdateEntry(NavigationEntryImpl* entry,
     entry->GetSSL().content_status |= SSLStatus::DISPLAYED_INSECURE_CONTENT;
 }
 
-void SSLPolicy::OnAllowCertificate(SSLCertErrorHandler* handler, bool allow) {
+void SSLPolicy::OnAllowCertificate(scoped_refptr<SSLCertErrorHandler> handler,
+                                   bool allow) {
   if (allow) {
     // Default behavior for accepting a certificate.
     // Note that we should not call SetMaxSecurityStyle here, because the active
@@ -204,10 +204,19 @@ void SSLPolicy::OnCertErrorInternal(SSLCertErrorHandler* handler,
     return;
   }
 
+  bool cancel_request = false;
   content::GetContentClient()->browser()->AllowCertificateError(
-      handler,
+      handler->render_process_id(),
+      handler->render_view_id(),
+      handler->cert_error(),
+      handler->ssl_info(),
+      handler->request_url(),
       overridable,
-      base::Bind(&SSLPolicy::OnAllowCertificate, base::Unretained(this)));
+      base::Bind(&SSLPolicy::OnAllowCertificate, base::Unretained(this),
+                 make_scoped_refptr(handler)),
+      &cancel_request);
+  if (cancel_request)
+    handler->CancelRequest();
 }
 
 void SSLPolicy::InitializeEntryIfNeeded(NavigationEntryImpl* entry) {

@@ -20,9 +20,9 @@
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
+#include "chrome/browser/signin/token_service_factory.h"
 #include "chrome/browser/sync/abstract_profile_sync_service_test.h"
 #include "chrome/browser/sync/glue/sync_backend_host.h"
-#include "chrome/browser/sync/glue/sync_backend_host_mock.h"
 #include "chrome/browser/sync/glue/typed_url_change_processor.h"
 #include "chrome/browser/sync/glue/typed_url_data_type_controller.h"
 #include "chrome/browser/sync/glue/typed_url_model_associator.h"
@@ -34,22 +34,21 @@
 #include "chrome/browser/sync/profile_sync_components_factory_mock.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_test_util.h"
-#include "chrome/browser/sync/protocol/typed_url_specifics.pb.h"
-#include "chrome/browser/sync/syncable/directory_manager.h"
 #include "chrome/browser/sync/test_profile_sync_service.h"
-#include "chrome/browser/sync/test/engine/test_id_factory.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/net/gaia/gaia_constants.h"
 #include "chrome/test/base/profile_mock.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/browser/notification_service.h"
 #include "googleurl/src/gurl.h"
+#include "sync/protocol/typed_url_specifics.pb.h"
+#include "sync/syncable/syncable.h"
+#include "sync/test/engine/test_id_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 using base::Time;
 using base::Thread;
 using browser_sync::SyncBackendHost;
-using browser_sync::SyncBackendHostMock;
 using browser_sync::TestIdFactory;
 using browser_sync::TypedUrlChangeProcessor;
 using browser_sync::TypedUrlDataTypeController;
@@ -62,7 +61,6 @@ using sync_api::SyncManager;
 using sync_api::UserShare;
 using syncable::BASE_VERSION;
 using syncable::CREATE;
-using syncable::DirectoryManager;
 using syncable::IS_DEL;
 using syncable::IS_DIR;
 using syncable::IS_UNAPPLIED_UPDATE;
@@ -71,7 +69,6 @@ using syncable::MutableEntry;
 using syncable::SERVER_IS_DIR;
 using syncable::SERVER_VERSION;
 using syncable::SPECIFICS;
-using syncable::ScopedDirLookup;
 using syncable::UNIQUE_SERVER_TAG;
 using syncable::UNITTEST;
 using syncable::WriteTransaction;
@@ -92,7 +89,7 @@ class HistoryBackendMock : public HistoryBackend {
   virtual bool IsExpiredVisitTime(const base::Time& time) OVERRIDE {
     return time.ToInternalValue() == EXPIRED_VISIT;
   }
-  MOCK_METHOD1(GetAllTypedURLs, bool(std::vector<history::URLRow>* entries));
+  MOCK_METHOD1(GetAllTypedURLs, bool(history::URLRows* entries));
   MOCK_METHOD3(GetMostRecentVisitsForURL, bool(history::URLID id,
                                                int max_visits,
                                                history::VisitVector* visits));
@@ -119,16 +116,19 @@ void RunOnDBThreadCallback(HistoryBackend* backend,
 }
 
 ACTION_P2(RunTaskOnDBThread, thread, backend) {
- thread->message_loop()->PostTask(
-    FROM_HERE, base::Bind(&RunOnDBThreadCallback, base::Unretained(backend),
-                          base::Unretained(arg0)));
+  // ScheduleDBTask takes ownership of its task argument, so we
+  // should, too.
+  scoped_refptr<HistoryDBTask> task(arg0);
+  thread->message_loop()->PostTask(
+      FROM_HERE, base::Bind(&RunOnDBThreadCallback, base::Unretained(backend),
+                            task));
 }
 
 ACTION_P4(MakeTypedUrlSyncComponents, profile, service, hb, dtc) {
   TypedUrlModelAssociator* model_associator =
       new TypedUrlModelAssociator(service, hb);
   TypedUrlChangeProcessor* change_processor =
-      new TypedUrlChangeProcessor(profile, model_associator, hb, service);
+      new TypedUrlChangeProcessor(profile, model_associator, hb, dtc);
   return ProfileSyncComponentsFactory::SyncComponents(model_associator,
                                                       change_processor);
 }
@@ -163,17 +163,12 @@ class ProfileSyncServiceTypedUrlTest : public AbstractProfileSyncServiceTest {
         .WillRepeatedly(RunTaskOnDBThread(&history_thread_,
                                           history_backend_.get()));
     history_thread_.Start();
-
-    notification_service_ =
-      new ThreadNotificationService(&history_thread_);
-    notification_service_->Init();
   }
 
   virtual void TearDown() {
     history_backend_ = NULL;
     history_service_ = NULL;
     service_.reset();
-    notification_service_->TearDown();
     history_thread_.Stop();
     profile_.ResetRequestContext();
     AbstractProfileSyncServiceTest::TearDown();
@@ -183,6 +178,9 @@ class ProfileSyncServiceTypedUrlTest : public AbstractProfileSyncServiceTest {
     if (!service_.get()) {
       SigninManager* signin = SigninManagerFactory::GetForProfile(&profile_);
       signin->SetAuthenticatedUsername("test");
+      token_service_ = static_cast<TokenService*>(
+          TokenServiceFactory::GetInstance()->SetTestingFactoryAndUse(
+              &profile_, BuildTokenService));
       ProfileSyncComponentsFactoryMock* factory =
           new ProfileSyncComponentsFactoryMock();
       service_.reset(
@@ -192,8 +190,6 @@ class ProfileSyncServiceTypedUrlTest : public AbstractProfileSyncServiceTest {
                                      ProfileSyncService::AUTO_START,
                                      false,
                                      callback));
-      EXPECT_CALL(profile_, GetProfileSyncService()).WillRepeatedly(
-          Return(service_.get()));
       TypedUrlDataTypeController* data_type_controller =
           new TypedUrlDataTypeController(factory,
                                          &profile_,
@@ -210,17 +206,11 @@ class ProfileSyncServiceTypedUrlTest : public AbstractProfileSyncServiceTest {
       EXPECT_CALL(profile_, GetHistoryServiceWithoutCreating()).
           WillRepeatedly(Return(history_service_.get()));
 
-      EXPECT_CALL(profile_, GetPasswordStore(_)).
-          WillOnce(Return(static_cast<PasswordStore*>(NULL)));
-
       EXPECT_CALL(profile_, GetHistoryService(_)).
           WillRepeatedly(Return(history_service_.get()));
 
       token_service_->IssueAuthTokenForTest(
           GaiaConstants::kSyncService, "token");
-
-      EXPECT_CALL(profile_, GetTokenService()).
-          WillRepeatedly(Return(token_service_.get()));
 
       service_->RegisterDataTypeController(data_type_controller);
 
@@ -229,7 +219,7 @@ class ProfileSyncServiceTypedUrlTest : public AbstractProfileSyncServiceTest {
     }
   }
 
-  void GetTypedUrlsFromSyncDB(std::vector<history::URLRow>* urls) {
+  void GetTypedUrlsFromSyncDB(history::URLRows* urls) {
     urls->clear();
     sync_api::ReadTransaction trans(FROM_HERE, service_->GetUserShare());
     sync_api::ReadNode typed_url_root(&trans);
@@ -298,7 +288,6 @@ class ProfileSyncServiceTypedUrlTest : public AbstractProfileSyncServiceTest {
   }
 
   Thread history_thread_;
-  scoped_refptr<ThreadNotificationService> notification_service_;
 
   ProfileMock profile_;
   scoped_refptr<HistoryBackendMock> history_backend_;
@@ -306,7 +295,7 @@ class ProfileSyncServiceTypedUrlTest : public AbstractProfileSyncServiceTest {
 };
 
 void AddTypedUrlEntries(ProfileSyncServiceTypedUrlTest* test,
-                        const std::vector<history::URLRow>& entries) {
+                        const history::URLRows& entries) {
   test->CreateRoot(syncable::TYPED_URLS);
   for (size_t i = 0; i < entries.size(); ++i) {
     history::VisitVector visits;
@@ -323,13 +312,13 @@ TEST_F(ProfileSyncServiceTypedUrlTest, EmptyNativeEmptySync) {
   SetIdleChangeProcessorExpectations();
   CreateRootHelper create_root(this, syncable::TYPED_URLS);
   StartSyncService(create_root.callback());
-  std::vector<history::URLRow> sync_entries;
+  history::URLRows sync_entries;
   GetTypedUrlsFromSyncDB(&sync_entries);
   EXPECT_EQ(0U, sync_entries.size());
 }
 
 TEST_F(ProfileSyncServiceTypedUrlTest, HasNativeEmptySync) {
-  std::vector<history::URLRow> entries;
+  history::URLRows entries;
   history::VisitVector visits;
   entries.push_back(MakeTypedUrlEntry("http://foo.com", "bar",
                                       2, 15, false, &visits));
@@ -341,12 +330,33 @@ TEST_F(ProfileSyncServiceTypedUrlTest, HasNativeEmptySync) {
   SetIdleChangeProcessorExpectations();
   CreateRootHelper create_root(this, syncable::TYPED_URLS);
   StartSyncService(create_root.callback());
-  std::vector<history::URLRow> sync_entries;
+  history::URLRows sync_entries;
   GetTypedUrlsFromSyncDB(&sync_entries);
   ASSERT_EQ(1U, sync_entries.size());
   EXPECT_TRUE(URLsEqual(entries[0], sync_entries[0]));
 }
 
+TEST_F(ProfileSyncServiceTypedUrlTest, HasNativeWithBlankEmptySync) {
+  std::vector<history::URLRow> entries;
+  history::VisitVector visits;
+  // Add an empty URL.
+  entries.push_back(MakeTypedUrlEntry("", "bar",
+                                      2, 15, false, &visits));
+  entries.push_back(MakeTypedUrlEntry("http://foo.com", "bar",
+                                      2, 15, false, &visits));
+  EXPECT_CALL((*history_backend_.get()), GetAllTypedURLs(_)).
+      WillOnce(DoAll(SetArgumentPointee<0>(entries), Return(true)));
+  EXPECT_CALL((*history_backend_.get()), GetMostRecentVisitsForURL(_, _, _)).
+      WillRepeatedly(DoAll(SetArgumentPointee<2>(visits), Return(true)));
+  SetIdleChangeProcessorExpectations();
+  CreateRootHelper create_root(this, syncable::TYPED_URLS);
+  StartSyncService(create_root.callback());
+  std::vector<history::URLRow> sync_entries;
+  GetTypedUrlsFromSyncDB(&sync_entries);
+  // The empty URL should be ignored.
+  ASSERT_EQ(1U, sync_entries.size());
+  EXPECT_TRUE(URLsEqual(entries[1], sync_entries[0]));
+}
 
 TEST_F(ProfileSyncServiceTypedUrlTest, HasNativeHasSyncNoMerge) {
   history::VisitVector native_visits;
@@ -356,7 +366,7 @@ TEST_F(ProfileSyncServiceTypedUrlTest, HasNativeHasSyncNoMerge) {
   history::URLRow sync_entry(MakeTypedUrlEntry("http://sync.com", "entry",
                                                3, 16, false, &sync_visits));
 
-  std::vector<history::URLRow> native_entries;
+  history::URLRows native_entries;
   native_entries.push_back(native_entry);
   EXPECT_CALL((*history_backend_.get()), GetAllTypedURLs(_)).
       WillOnce(DoAll(SetArgumentPointee<0>(native_entries), Return(true)));
@@ -365,7 +375,7 @@ TEST_F(ProfileSyncServiceTypedUrlTest, HasNativeHasSyncNoMerge) {
   EXPECT_CALL((*history_backend_.get()),
       AddVisits(_, _, history::SOURCE_SYNCED)).WillRepeatedly(Return(true));
 
-  std::vector<history::URLRow> sync_entries;
+  history::URLRows sync_entries;
   sync_entries.push_back(sync_entry);
 
   EXPECT_CALL((*history_backend_.get()), UpdateURL(_, _)).
@@ -376,11 +386,11 @@ TEST_F(ProfileSyncServiceTypedUrlTest, HasNativeHasSyncNoMerge) {
   expected[native_entry.url().spec()] = native_entry;
   expected[sync_entry.url().spec()] = sync_entry;
 
-  std::vector<history::URLRow> new_sync_entries;
+  history::URLRows new_sync_entries;
   GetTypedUrlsFromSyncDB(&new_sync_entries);
 
   EXPECT_TRUE(new_sync_entries.size() == expected.size());
-  for (std::vector<history::URLRow>::iterator entry = new_sync_entries.begin();
+  for (history::URLRows::iterator entry = new_sync_entries.begin();
        entry != new_sync_entries.end(); ++entry) {
     EXPECT_TRUE(URLsEqual(expected[entry->url().spec()], *entry));
   }
@@ -391,7 +401,7 @@ TEST_F(ProfileSyncServiceTypedUrlTest, EmptyNativeExpiredSync) {
   history::URLRow sync_entry(MakeTypedUrlEntry("http://sync.com", "entry",
                                                3, EXPIRED_VISIT, false,
                                                &sync_visits));
-  std::vector<history::URLRow> sync_entries;
+  history::URLRows sync_entries;
   sync_entries.push_back(sync_entry);
 
   // Since all our URLs are expired, no backend calls to add new URLs will be
@@ -418,7 +428,7 @@ TEST_F(ProfileSyncServiceTypedUrlTest, HasNativeHasSyncMerge) {
   history::URLRow merged_entry(MakeTypedUrlEntry("http://native.com", "name",
                                                  2, 17, false, &merged_visits));
 
-  std::vector<history::URLRow> native_entries;
+  history::URLRows native_entries;
   native_entries.push_back(native_entry);
   EXPECT_CALL((*history_backend_.get()), GetAllTypedURLs(_)).
       WillOnce(DoAll(SetArgumentPointee<0>(native_entries), Return(true)));
@@ -427,7 +437,7 @@ TEST_F(ProfileSyncServiceTypedUrlTest, HasNativeHasSyncMerge) {
   EXPECT_CALL((*history_backend_.get()),
       AddVisits(_, _, history::SOURCE_SYNCED)). WillRepeatedly(Return(true));
 
-  std::vector<history::URLRow> sync_entries;
+  history::URLRows sync_entries;
   sync_entries.push_back(sync_entry);
 
   EXPECT_CALL((*history_backend_.get()), UpdateURL(_, _)).
@@ -436,7 +446,7 @@ TEST_F(ProfileSyncServiceTypedUrlTest, HasNativeHasSyncMerge) {
       WillRepeatedly(Return());
   StartSyncService(base::Bind(&AddTypedUrlEntries, this, sync_entries));
 
-  std::vector<history::URLRow> new_sync_entries;
+  history::URLRows new_sync_entries;
   GetTypedUrlsFromSyncDB(&new_sync_entries);
   ASSERT_EQ(1U, new_sync_entries.size());
   EXPECT_TRUE(URLsEqual(merged_entry, new_sync_entries[0]));
@@ -463,6 +473,36 @@ TEST_F(ProfileSyncServiceTypedUrlTest, ProcessUserChangeAdd) {
                    content::Source<Profile>(&profile_),
                    content::Details<history::URLsModifiedDetails>(&details));
 
+  history::URLRows new_sync_entries;
+  GetTypedUrlsFromSyncDB(&new_sync_entries);
+  ASSERT_EQ(1U, new_sync_entries.size());
+  EXPECT_TRUE(URLsEqual(added_entry, new_sync_entries[0]));
+}
+
+TEST_F(ProfileSyncServiceTypedUrlTest, ProcessUserChangeAddWithBlank) {
+  history::VisitVector added_visits;
+  history::URLRow empty_entry(MakeTypedUrlEntry("", "entry",
+                                                2, 15, false, &added_visits));
+  history::URLRow added_entry(MakeTypedUrlEntry("http://added.com", "entry",
+                                                2, 15, false, &added_visits));
+
+  EXPECT_CALL((*history_backend_.get()), GetAllTypedURLs(_)).
+      WillOnce(Return(true));
+  EXPECT_CALL((*history_backend_.get()), GetMostRecentVisitsForURL(_, _, _)).
+      WillRepeatedly(DoAll(SetArgumentPointee<2>(added_visits), Return(true)));
+
+  SetIdleChangeProcessorExpectations();
+  CreateRootHelper create_root(this, syncable::TYPED_URLS);
+  StartSyncService(create_root.callback());
+
+  history::URLsModifiedDetails details;
+  details.changed_urls.push_back(empty_entry);
+  details.changed_urls.push_back(added_entry);
+  scoped_refptr<ThreadNotifier> notifier(new ThreadNotifier(&history_thread_));
+  notifier->Notify(chrome::NOTIFICATION_HISTORY_TYPED_URLS_MODIFIED,
+                   content::Source<Profile>(&profile_),
+                   content::Details<history::URLsModifiedDetails>(&details));
+
   std::vector<history::URLRow> new_sync_entries;
   GetTypedUrlsFromSyncDB(&new_sync_entries);
   ASSERT_EQ(1U, new_sync_entries.size());
@@ -474,7 +514,7 @@ TEST_F(ProfileSyncServiceTypedUrlTest, ProcessUserChangeUpdate) {
   history::URLRow original_entry(MakeTypedUrlEntry("http://mine.com", "entry",
                                                    2, 15, false,
                                                    &original_visits));
-  std::vector<history::URLRow> original_entries;
+  history::URLRows original_entries;
   original_entries.push_back(original_entry);
 
   EXPECT_CALL((*history_backend_.get()), GetAllTypedURLs(_)).
@@ -500,7 +540,7 @@ TEST_F(ProfileSyncServiceTypedUrlTest, ProcessUserChangeUpdate) {
                    content::Source<Profile>(&profile_),
                    content::Details<history::URLsModifiedDetails>(&details));
 
-  std::vector<history::URLRow> new_sync_entries;
+  history::URLRows new_sync_entries;
   GetTypedUrlsFromSyncDB(&new_sync_entries);
   ASSERT_EQ(1U, new_sync_entries.size());
   EXPECT_TRUE(URLsEqual(updated_entry, new_sync_entries[0]));
@@ -528,7 +568,7 @@ TEST_F(ProfileSyncServiceTypedUrlTest, ProcessUserChangeAddFromVisit) {
                    content::Source<Profile>(&profile_),
                    content::Details<history::URLVisitedDetails>(&details));
 
-  std::vector<history::URLRow> new_sync_entries;
+  history::URLRows new_sync_entries;
   GetTypedUrlsFromSyncDB(&new_sync_entries);
   ASSERT_EQ(1U, new_sync_entries.size());
   EXPECT_TRUE(URLsEqual(added_entry, new_sync_entries[0]));
@@ -539,7 +579,7 @@ TEST_F(ProfileSyncServiceTypedUrlTest, ProcessUserChangeUpdateFromVisit) {
   history::URLRow original_entry(MakeTypedUrlEntry("http://mine.com", "entry",
                                                    2, 15, false,
                                                    &original_visits));
-  std::vector<history::URLRow> original_entries;
+  history::URLRows original_entries;
   original_entries.push_back(original_entry);
 
   EXPECT_CALL((*history_backend_.get()), GetAllTypedURLs(_)).
@@ -566,7 +606,7 @@ TEST_F(ProfileSyncServiceTypedUrlTest, ProcessUserChangeUpdateFromVisit) {
                    content::Source<Profile>(&profile_),
                    content::Details<history::URLVisitedDetails>(&details));
 
-  std::vector<history::URLRow> new_sync_entries;
+  history::URLRows new_sync_entries;
   GetTypedUrlsFromSyncDB(&new_sync_entries);
   ASSERT_EQ(1U, new_sync_entries.size());
   EXPECT_TRUE(URLsEqual(updated_entry, new_sync_entries[0]));
@@ -577,7 +617,7 @@ TEST_F(ProfileSyncServiceTypedUrlTest, ProcessUserIgnoreChangeUpdateFromVisit) {
   history::URLRow original_entry(MakeTypedUrlEntry("http://mine.com", "entry",
                                                    2, 15, false,
                                                    &original_visits));
-  std::vector<history::URLRow> original_entries;
+  history::URLRows original_entries;
   original_entries.push_back(original_entry);
 
   EXPECT_CALL((*history_backend_.get()), GetAllTypedURLs(_)).
@@ -587,7 +627,7 @@ TEST_F(ProfileSyncServiceTypedUrlTest, ProcessUserIgnoreChangeUpdateFromVisit) {
                            Return(true)));
   CreateRootHelper create_root(this, syncable::TYPED_URLS);
   StartSyncService(create_root.callback());
-  std::vector<history::URLRow> new_sync_entries;
+  history::URLRows new_sync_entries;
   GetTypedUrlsFromSyncDB(&new_sync_entries);
   ASSERT_EQ(1U, new_sync_entries.size());
   EXPECT_TRUE(URLsEqual(original_entry, new_sync_entries[0]));
@@ -652,7 +692,7 @@ TEST_F(ProfileSyncServiceTypedUrlTest, ProcessUserChangeRemove) {
                                                     "entry2",
                                                     3, 15, false,
                                                     &original_visits2));
-  std::vector<history::URLRow> original_entries;
+  history::URLRows original_entries;
   original_entries.push_back(original_entry1);
   original_entries.push_back(original_entry2);
 
@@ -672,7 +712,7 @@ TEST_F(ProfileSyncServiceTypedUrlTest, ProcessUserChangeRemove) {
                    content::Source<Profile>(&profile_),
                    content::Details<history::URLsDeletedDetails>(&changes));
 
-  std::vector<history::URLRow> new_sync_entries;
+  history::URLRows new_sync_entries;
   GetTypedUrlsFromSyncDB(&new_sync_entries);
   ASSERT_EQ(1U, new_sync_entries.size());
   EXPECT_TRUE(URLsEqual(original_entry2, new_sync_entries[0]));
@@ -688,7 +728,7 @@ TEST_F(ProfileSyncServiceTypedUrlTest, ProcessUserChangeRemoveAll) {
                                                     "entry2",
                                                     3, 15, false,
                                                     &original_visits2));
-  std::vector<history::URLRow> original_entries;
+  history::URLRows original_entries;
   original_entries.push_back(original_entry1);
   original_entries.push_back(original_entry2);
 
@@ -700,6 +740,10 @@ TEST_F(ProfileSyncServiceTypedUrlTest, ProcessUserChangeRemoveAll) {
   CreateRootHelper create_root(this, syncable::TYPED_URLS);
   StartSyncService(create_root.callback());
 
+  history::URLRows new_sync_entries;
+  GetTypedUrlsFromSyncDB(&new_sync_entries);
+  ASSERT_EQ(2U, new_sync_entries.size());
+
   history::URLsDeletedDetails changes;
   changes.all_history = true;
   scoped_refptr<ThreadNotifier> notifier(new ThreadNotifier(&history_thread_));
@@ -707,7 +751,6 @@ TEST_F(ProfileSyncServiceTypedUrlTest, ProcessUserChangeRemoveAll) {
                    content::Source<Profile>(&profile_),
                    content::Details<history::URLsDeletedDetails>(&changes));
 
-  std::vector<history::URLRow> new_sync_entries;
   GetTypedUrlsFromSyncDB(&new_sync_entries);
   ASSERT_EQ(0U, new_sync_entries.size());
 }
@@ -720,7 +763,7 @@ TEST_F(ProfileSyncServiceTypedUrlTest, FailWriteToHistoryBackend) {
   history::URLRow sync_entry(MakeTypedUrlEntry("http://sync.com", "entry",
                                                3, 16, false, &sync_visits));
 
-  std::vector<history::URLRow> native_entries;
+  history::URLRows native_entries;
   native_entries.push_back(native_entry);
   EXPECT_CALL((*history_backend_.get()), GetAllTypedURLs(_)).
       WillOnce(DoAll(SetArgumentPointee<0>(native_entries), Return(true)));
@@ -729,7 +772,7 @@ TEST_F(ProfileSyncServiceTypedUrlTest, FailWriteToHistoryBackend) {
   EXPECT_CALL((*history_backend_.get()),
       AddVisits(_, _, history::SOURCE_SYNCED)).WillRepeatedly(Return(false));
 
-  std::vector<history::URLRow> sync_entries;
+  history::URLRows sync_entries;
   sync_entries.push_back(sync_entry);
 
   EXPECT_CALL((*history_backend_.get()), UpdateURL(_, _)).

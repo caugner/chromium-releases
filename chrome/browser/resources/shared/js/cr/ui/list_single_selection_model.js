@@ -1,10 +1,10 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 cr.define('cr.ui', function() {
-  const Event = cr.Event;
-  const EventTarget = cr.EventTarget;
+  /** @const */ var Event = cr.Event;
+  /** @const */ var EventTarget = cr.EventTarget;
 
   /**
    * Creates a new selection model that is to be used with lists. This only
@@ -41,6 +41,7 @@ cr.define('cr.ui', function() {
 
     /**
      * Convenience getter which returns the first selected index.
+     * Setter also changes lead and anchor indexes if value is nonegative.
      * @type {number}
      */
     get selectedIndex() {
@@ -52,7 +53,9 @@ cr.define('cr.ui', function() {
 
       if (i != oldSelectedIndex) {
         this.beginChange();
-        this.selectedIndex_ = i
+        this.selectedIndex_ = i;
+        if (i >= 0)
+          this.leadIndex = i;
         this.endChange();
       }
     },

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/ui/tabs/tab_resources.h"
+#include "chrome/browser/ui/views/tabs/tab_controller.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
@@ -18,31 +19,60 @@
 #include "ui/base/animation/multi_animation.h"
 #include "ui/base/animation/throb_animation.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/canvas.h"
 #include "ui/gfx/favicon_size.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/path.h"
 #include "ui/gfx/skbitmap_operations.h"
 #include "ui/views/controls/button/image_button.h"
+#include "ui/views/touchui/touch_mode_support.h"
 #include "ui/views/widget/tooltip_manager.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/non_client_view.h"
 
+// Padding around the "content" of a tab, occupied by the tab border graphics.
+#if defined(USE_ASH)
+static const int kLeftPadding = 21;
+static const int kTopPadding = 8;
+static const int kRightPadding = 20;
+static const int kBottomPadding = 5;
+#else
 static const int kLeftPadding = 16;
 static const int kTopPadding = 6;
 static const int kRightPadding = 15;
 static const int kBottomPadding = 5;
+#endif
+
+// Height of the shadow at the top of the tab image assets.
+#if defined(USE_ASH)
+static const int kDropShadowHeight = 4;
+#else
 static const int kDropShadowHeight = 2;
+#endif
 static const int kToolbarOverlap = 1;
 static const int kFaviconTitleSpacing = 4;
+// Additional vertical offset for title text relative to top of tab.
+#if defined(USE_ASH)
+static const int kTitleTextOffsetY = 1;
+#else
+static const int kTitleTextOffsetY = 0;
+#endif
 static const int kTitleCloseButtonSpacing = 3;
 static const int kStandardTitleWidth = 175;
+// Additional vertical offset for close button relative to top of tab.
+#if defined(USE_ASH)
+static const int kCloseButtonVertFuzz = 1;
+#else
 static const int kCloseButtonVertFuzz = 0;
+#endif
 static const int kTabIconSize = gfx::kFaviconSize;
+// Additional horizontal offset for close button relative to title text.
+#if defined(USE_ASH)
+static const int kCloseButtonHorzFuzz = 7;
+#else
 static const int kCloseButtonHorzFuzz = 5;
-
-// Vertical adjustment to the favicon when the tab has a large icon.
-static const int kAppTapFaviconVerticalAdjustment = 2;
+#endif
+static const int kTouchModeMinimumWidth = 160;
 
 // When a non-mini-tab becomes a mini-tab the width of the tab animates. If
 // the width of a mini-tab is >= kMiniTabRendererAsNormalTabWidth then the tab
@@ -53,7 +83,6 @@ static const int kMiniTabRendererAsNormalTabWidth =
 
 // How opaque to make the hover state (out of 1).
 static const double kHoverOpacity = 0.33;
-static const double kHoverSlideOpacity = 0.5;
 
 // Opacity for non-active selected tabs.
 static const double kSelectedTabOpacity = .45;
@@ -131,7 +160,7 @@ void Tab::StopMiniTabTitleAnimation() {
 }
 
 // static
-gfx::Size Tab::GetMinimumUnselectedSize() {
+gfx::Size Tab::GetBasicMinimumUnselectedSize() {
   InitTabResources();
 
   gfx::Size minimum_size;
@@ -142,16 +171,24 @@ gfx::Size Tab::GetMinimumUnselectedSize() {
   return minimum_size;
 }
 
+gfx::Size Tab::GetMinimumUnselectedSize() {
+  if (TouchModeSupport::IsTouchOptimized())
+    return GetTouchModeMinimumSize();
+  return GetBasicMinimumUnselectedSize();
+}
+
 // static
 gfx::Size Tab::GetMinimumSelectedSize() {
-  gfx::Size minimum_size = GetMinimumUnselectedSize();
+  if (TouchModeSupport::IsTouchOptimized())
+    return GetTouchModeMinimumSize();
+  gfx::Size minimum_size = GetBasicMinimumUnselectedSize();
   minimum_size.set_width(kLeftPadding + gfx::kFaviconSize + kRightPadding);
   return minimum_size;
 }
 
 // static
 gfx::Size Tab::GetStandardSize() {
-  gfx::Size standard_size = GetMinimumUnselectedSize();
+  gfx::Size standard_size = GetBasicMinimumUnselectedSize();
   standard_size.set_width(
       standard_size.width() + kFaviconTitleSpacing + kStandardTitleWidth);
   return standard_size;
@@ -160,6 +197,15 @@ gfx::Size Tab::GetStandardSize() {
 // static
 int Tab::GetMiniWidth() {
   return browser_defaults::kMiniTabWidth;
+}
+
+// static
+gfx::Size Tab::GetTouchModeMinimumSize() {
+  InitTabResources();
+  gfx::Size size;
+  size.set_width(kTouchModeMinimumWidth);
+  size.set_height(tab_active_.image_l->height());
+  return size;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -275,7 +321,8 @@ void Tab::Layout() {
   }
 
   int title_left = favicon_bounds_.right() + kFaviconTitleSpacing;
-  int title_top = kTopPadding + (content_height - font_height()) / 2;
+  int title_top =
+      kTopPadding + kTitleTextOffsetY + (content_height - font_height()) / 2;
   // Size the Title text to fill the remaining space.
   if (!data().mini || width() >= kMiniTabRendererAsNormalTabWidth) {
     // If the user has big fonts, the title will appear rendered too far down
@@ -350,8 +397,7 @@ void Tab::PaintTabBackground(gfx::Canvas* canvas) {
     if (throb_value > 0) {
       canvas->SaveLayerAlpha(static_cast<int>(throb_value * 0xff),
                              gfx::Rect(width(), height()));
-      canvas->GetSkCanvas()->drawARGB(0, 255, 255, 255,
-                                      SkXfermode::kClear_Mode);
+      canvas->sk_canvas()->drawARGB(0, 255, 255, 255, SkXfermode::kClear_Mode);
       PaintActiveTabBackground(canvas);
       canvas->Restore();
     }
@@ -360,13 +406,13 @@ void Tab::PaintTabBackground(gfx::Canvas* canvas) {
 
 void Tab::PaintInactiveTabBackgroundWithTitleChange(gfx::Canvas* canvas) {
   // Render the inactive tab background. We'll use this for clipping.
-  gfx::CanvasSkia background_canvas(size(), false);
+  gfx::Canvas background_canvas(size(), false);
   PaintInactiveTabBackground(&background_canvas);
 
   SkBitmap background_image = background_canvas.ExtractBitmap();
 
   // Draw a radial gradient to hover_canvas.
-  gfx::CanvasSkia hover_canvas(size(), false);
+  gfx::Canvas hover_canvas(size(), false);
   int radius = kMiniTitleChangeGradientRadius;
   int x0 = width() + radius - kMiniTitleChangeInitialXOffset;
   int x1 = radius;
@@ -379,18 +425,13 @@ void Tab::PaintInactiveTabBackgroundWithTitleChange(gfx::Canvas* canvas) {
   } else {
     x = mini_title_animation_->CurrentValueBetween(x1, x2);
   }
+  SkPoint center_point;
+  center_point.iset(x, 0);
+  SkColor colors[2] = { kMiniTitleChangeGradientColor1,
+                        kMiniTitleChangeGradientColor2 };
+  SkShader* shader = SkGradientShader::CreateRadial(center_point,
+      SkIntToScalar(radius), colors, NULL, 2, SkShader::kClamp_TileMode);
   SkPaint paint;
-  SkPoint loc = { SkIntToScalar(x), SkIntToScalar(0) };
-  SkColor colors[2];
-  colors[0] = kMiniTitleChangeGradientColor1;
-  colors[1] = kMiniTitleChangeGradientColor2;
-  SkShader* shader = SkGradientShader::CreateRadial(
-      loc,
-      SkIntToScalar(radius),
-      colors,
-      NULL,
-      2,
-      SkShader::kClamp_TileMode);
   paint.setShader(shader);
   shader->unref();
   hover_canvas.DrawRect(gfx::Rect(x - radius, -radius, radius * 2, radius * 2),
@@ -439,10 +480,10 @@ void Tab::PaintInactiveTabBackground(gfx::Canvas* canvas) {
   int bg_offset_y = GetThemeProvider()->HasCustomImage(tab_id) ?
       0 : background_offset_.y();
 
-  // We need a CanvasSkia object to be able to extract the bitmap from.
+  // We need a gfx::Canvas object to be able to extract the bitmap from.
   // We draw everything to this canvas and then output it to the canvas
   // parameter in addition to using it to mask the hover glow if needed.
-  gfx::CanvasSkia background_canvas(size(), false);
+  gfx::Canvas background_canvas(size(), false);
 
   // Draw left edge.  Don't draw over the toolbar, as we're not the foreground
   // tab.

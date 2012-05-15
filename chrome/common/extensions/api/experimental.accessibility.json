@@ -1,3 +1,7 @@
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
 [
   {
     "namespace": "experimental.accessibility",
@@ -11,7 +15,7 @@
           "type": {
             "type": "string",
             "description": "The type of this object, which determines the contents of 'details'.",
-            "enum": ["button", "checkbox", "combobox", "link", "menu", "menuitem", "radiobutton", "tab", "textbox", "window"]
+            "enum": ["button", "checkbox", "combobox", "link", "menu", "menuitem", "radiobutton", "slider", "tab", "textbox", "window"]
           },
           "name": {
             "type": "string",
@@ -31,6 +35,7 @@
               { "$ref": "MenuDetails" },
               { "$ref": "MenuItemDetails" },
               { "$ref": "RadioButtonDetails" },
+              { "$ref": "SliderDetails" },
               { "$ref": "TabDetails" },
               { "$ref": "TextBoxDetails" }
             ]
@@ -93,6 +98,14 @@
         }
       },
       {
+        "id": "SliderDetails",
+        "type": "object",
+        "description": "Information about the state of a slider.",
+        "properties": {
+          "stringValue": {"type": "string", "description": "The value of the slider as a string."}
+        }
+      },
+      {
         "id": "TabDetails",
         "type": "object",
         "description": "Additional accessibility information about a tab.",
@@ -149,10 +162,8 @@
               {
                 "name": "control",
                 "description": "Details of the currently focused control, or null if nothing is focused.",
-                "choices": [
-                  { "$ref": "AccessibilityObject" },
-                  { "type": "null" }
-                ]
+                "$ref": "AccessibilityObject",
+                "optional": true
               }
             ]
           }

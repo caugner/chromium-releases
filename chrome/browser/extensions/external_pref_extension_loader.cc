@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,8 @@
 #include "base/bind.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/json/json_value_serializer.h"
+#include "base/json/json_file_value_serializer.h"
+#include "base/json/json_string_value_serializer.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/path_service.h"
@@ -99,7 +100,26 @@ DictionaryValue* ExternalPrefExtensionLoader::ReadJsonPrefsFile() {
   }
 
   JSONFileValueSerializer serializer(json_file);
-  return ExtractPrefs(json_file, &serializer);
+  DictionaryValue* parsed_json_prefs = ExtractPrefs(json_file, &serializer);
+
+#if defined(OS_MACOSX)
+  if (base_path_key_ == chrome::DIR_DEPRECATED_EXTERNAL_EXTENSIONS &&
+      parsed_json_prefs->size() > 0) {
+    LOG(WARNING) << "Deprecated external extension source " << json_file.value()
+                 << " is used to install some CRX files.  This source will be "
+                 << "removed in version 19.  See http://code.google.com/chrome"
+                 << "/extensions/external_extensions.html#preferences for "
+                 << "documentation of other supported paths.";
+
+    for (DictionaryValue::key_iterator crx_id = parsed_json_prefs->begin_keys();
+         crx_id != parsed_json_prefs->end_keys(); ++crx_id) {
+      LOG(WARNING) << "External CRX install for ID " << *crx_id
+                   << " is from a deprecated source.";
+    }
+  }
+#endif  // defined(OS_MACOSX)
+
+  return parsed_json_prefs;
 }
 
 void ExternalPrefExtensionLoader::LoadOnFileThread() {

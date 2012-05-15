@@ -146,6 +146,10 @@ void HistoryDatabase::CommitTransaction() {
   db_.CommitTransaction();
 }
 
+void HistoryDatabase::RollbackTransaction() {
+  db_.RollbackTransaction();
+}
+
 bool HistoryDatabase::RecreateAllTablesButURL() {
   if (!DropVisitTable())
     return false;
@@ -232,6 +236,10 @@ void HistoryDatabase::UpdateEarlyExpirationThreshold(base::Time threshold) {
 
 sql::Connection& HistoryDatabase::GetDB() {
   return db_;
+}
+
+sql::MetaTable& HistoryDatabase::GetMetaTable() {
+  return meta_table_;
 }
 
 // Migration -------------------------------------------------------------------

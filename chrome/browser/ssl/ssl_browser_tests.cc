@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,23 +14,59 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/tab_contents/interstitial_page.h"
+#include "content/public/browser/interstitial_page.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
-#include "content/public/browser/ssl_status.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/security_style.h"
+#include "content/public/common/ssl_status.h"
+#include "content/test/test_renderer_host.h"
 #include "net/base/cert_status_flags.h"
 #include "net/test/test_server.h"
 
+using content::InterstitialPage;
 using content::NavigationController;
 using content::NavigationEntry;
 using content::SSLStatus;
 using content::WebContents;
 
 const FilePath::CharType kDocRoot[] = FILE_PATH_LITERAL("chrome/test/data");
+
+namespace {
+
+class ProvisionalLoadWaiter : public content::WebContentsObserver {
+ public:
+  explicit ProvisionalLoadWaiter(WebContents* tab)
+    : WebContentsObserver(tab), waiting_(false), seen_(false) {}
+
+  void Wait() {
+    if (seen_)
+      return;
+
+    waiting_ = true;
+    ui_test_utils::RunMessageLoop();
+  }
+
+  void DidFailProvisionalLoad(
+      int64 frame_id,
+      bool is_main_frame,
+      const GURL& validated_url,
+      int error_code,
+      const string16& error_description) OVERRIDE {
+    seen_ = true;
+    if (waiting_)
+      MessageLoopForUI::current()->Quit();
+  }
+
+ private:
+  bool waiting_;
+  bool seen_;
+};
+
+}  // namespace
 
 class SSLUITest : public InProcessBrowserTest {
   typedef net::TestServer::HTTPSOptions HTTPSOptions;
@@ -97,12 +133,15 @@ class SSLUITest : public InProcessBrowserTest {
     // CERT_STATUS_UNABLE_TO_CHECK_REVOCATION doesn't lower the security style
     // to SECURITY_STYLE_AUTHENTICATION_BROKEN.
     ASSERT_NE(net::CERT_STATUS_UNABLE_TO_CHECK_REVOCATION, error);
-    EXPECT_EQ(error,
-              entry->GetSSL().cert_status & net::CERT_STATUS_ALL_ERRORS);
+    EXPECT_EQ(error, entry->GetSSL().cert_status & error);
     EXPECT_FALSE(!!(entry->GetSSL().content_status &
                     SSLStatus::DISPLAYED_INSECURE_CONTENT));
-    EXPECT_EQ(ran_insecure_content, 
+    EXPECT_EQ(ran_insecure_content,
         !!(entry->GetSSL().content_status & SSLStatus::RAN_INSECURE_CONTENT));
+    net::CertStatus extra_cert_errors = error ^ (entry->GetSSL().cert_status &
+                                                 net::CERT_STATUS_ALL_ERRORS);
+    if (extra_cert_errors)
+      LOG(WARNING) << "Got unexpected cert error: " << extra_cert_errors;
   }
 
   void CheckWorkerLoadResult(WebContents* tab, bool expectLoaded) {
@@ -125,7 +164,9 @@ class SSLUITest : public InProcessBrowserTest {
 
       // Wait a bit.
       MessageLoop::current()->PostDelayedTask(
-          FROM_HERE, MessageLoop::QuitClosure(), timeout_ms);
+          FROM_HERE,
+          MessageLoop::QuitClosure(),
+          base::TimeDelta::FromMilliseconds(timeout_ms));
       ui_test_utils::RunMessageLoop();
     }
 
@@ -137,7 +178,7 @@ class SSLUITest : public InProcessBrowserTest {
     EXPECT_EQ(expectLoaded, actuallyLoadedContent);
   }
 
-  void ProceedThroughInterstitial(content::WebContents* tab) {
+  void ProceedThroughInterstitial(WebContents* tab) {
     InterstitialPage* interstitial_page = tab->GetInterstitialPage();
     ASSERT_TRUE(interstitial_page);
     ui_test_utils::WindowedNotificationObserver observer(
@@ -279,7 +320,7 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, TestHTTPWithBrokenHTTPSResource) {
 
 // http://crbug.com/91745
 #if defined(OS_CHROMEOS)
-#define MAYBE_TestOKHTTPS FLAKY_TestOKHTTPS
+#define MAYBE_TestOKHTTPS DISABLED_TestOKHTTPS
 #else
 #define MAYBE_TestOKHTTPS TestOKHTTPS
 #endif
@@ -313,16 +354,7 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, TestHTTPSExpiredCertAndProceed) {
 
 // Visits a page with https error and don't proceed (and ensure we can still
 // navigate at that point):
-#if defined(OS_WIN)
-// Disabled, flakily exceeds test timeout, http://crbug.com/43575.
-#define MAYBE_TestHTTPSExpiredCertAndDontProceed \
-    DISABLED_TestHTTPSExpiredCertAndDontProceed
-#else
-// Marked as flaky, see bug 40932.
-#define MAYBE_TestHTTPSExpiredCertAndDontProceed \
-    FLAKY_TestHTTPSExpiredCertAndDontProceed
-#endif
-IN_PROC_BROWSER_TEST_F(SSLUITest, MAYBE_TestHTTPSExpiredCertAndDontProceed) {
+IN_PROC_BROWSER_TEST_F(SSLUITest, TestHTTPSExpiredCertAndDontProceed) {
   ASSERT_TRUE(test_server()->Start());
   ASSERT_TRUE(https_server_.Start());
   ASSERT_TRUE(https_server_expired_.Start());
@@ -367,9 +399,8 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, MAYBE_TestHTTPSExpiredCertAndDontProceed) {
 }
 
 // Visits a page with https error and then goes back using Browser::GoBack.
-// Marked as flaky, see bug 40932.
 IN_PROC_BROWSER_TEST_F(SSLUITest,
-                       FLAKY_TestHTTPSExpiredCertAndGoBackViaButton) {
+                       TestHTTPSExpiredCertAndGoBackViaButton) {
   ASSERT_TRUE(test_server()->Start());
   ASSERT_TRUE(https_server_expired_.Start());
 
@@ -386,9 +417,7 @@ IN_PROC_BROWSER_TEST_F(SSLUITest,
   CheckAuthenticationBrokenState(tab, net::CERT_STATUS_DATE_INVALID, false,
                                  true);  // Interstitial showing
 
-  ui_test_utils::WindowedNotificationObserver load_failed_observer(
-      content::NOTIFICATION_FAIL_PROVISIONAL_LOAD_WITH_ERROR,
-      content::NotificationService::AllSources());
+  ProvisionalLoadWaiter load_failed_observer(tab);
 
   // Simulate user clicking on back button (crbug.com/39248).
   browser()->GoBack(CURRENT_TAB);
@@ -396,7 +425,8 @@ IN_PROC_BROWSER_TEST_F(SSLUITest,
   // Wait until we hear the load failure, and make sure we haven't swapped out
   // the previous page.  Prevents regression of http://crbug.com/82667.
   load_failed_observer.Wait();
-  EXPECT_FALSE(tab->GetRenderViewHost()->is_swapped_out());
+  EXPECT_FALSE(content::RenderViewHostTester::IsRenderViewHostSwappedOut(
+      tab->GetRenderViewHost()));
 
   // We should be back at the original good page.
   EXPECT_FALSE(browser()->GetSelectedWebContents()->GetInterstitialPage());
@@ -404,8 +434,9 @@ IN_PROC_BROWSER_TEST_F(SSLUITest,
 }
 
 // Visits a page with https error and then goes back using GoToOffset.
-// Marked as flaky, see bug 40932.
-IN_PROC_BROWSER_TEST_F(SSLUITest, FLAKY_TestHTTPSExpiredCertAndGoBackViaMenu) {
+// Disabled because its flaky: http://crbug.com/40932, http://crbug.com/43575.
+IN_PROC_BROWSER_TEST_F(SSLUITest,
+                       TestHTTPSExpiredCertAndGoBackViaMenu) {
   ASSERT_TRUE(test_server()->Start());
   ASSERT_TRUE(https_server_expired_.Start());
 
@@ -431,8 +462,7 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, FLAKY_TestHTTPSExpiredCertAndGoBackViaMenu) {
 }
 
 // Visits a page with https error and then goes forward using GoToOffset.
-// Marked as flaky, see bug 40932.
-IN_PROC_BROWSER_TEST_F(SSLUITest, FLAKY_TestHTTPSExpiredCertAndGoForward) {
+IN_PROC_BROWSER_TEST_F(SSLUITest, TestHTTPSExpiredCertAndGoForward) {
   ASSERT_TRUE(test_server()->Start());
   ASSERT_TRUE(https_server_expired_.Start());
 
@@ -594,8 +624,7 @@ IN_PROC_BROWSER_TEST_F(SSLUITest,
 // Visits a page with unsafe content and make sure that:
 // - frames content is replaced with warning
 // - images and scripts are filtered out entirely
-// Marked as flaky, see bug 40932.
-IN_PROC_BROWSER_TEST_F(SSLUITest, FLAKY_TestUnsafeContents) {
+IN_PROC_BROWSER_TEST_F(SSLUITest, TestUnsafeContents) {
   ASSERT_TRUE(https_server_.Start());
   ASSERT_TRUE(https_server_expired_.Start());
 
@@ -898,8 +927,8 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, DISABLED_TestCloseTabWithUnsafePopup) {
   for (int i = 0; i < 10; i++) {
     if (GetConstrainedWindowCount() > 0)
       break;
-    MessageLoop::current()->PostDelayedTask(FROM_HERE,
-                                            MessageLoop::QuitClosure(), 1000);
+    MessageLoop::current()->PostDelayedTask(
+        FROM_HERE, MessageLoop::QuitClosure(), base::TimeDelta::FromSeconds(1));
     ui_test_utils::RunMessageLoop();
   }
   ASSERT_EQ(1, GetConstrainedWindowCount());
@@ -939,8 +968,7 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, TestRedirectBadToGoodHTTPS) {
 }
 
 // Visit a page over good https that is a redirect to a page with bad https.
-// Marked as flaky, see bug 40932.
-IN_PROC_BROWSER_TEST_F(SSLUITest, FLAKY_TestRedirectGoodToBadHTTPS) {
+IN_PROC_BROWSER_TEST_F(SSLUITest, TestRedirectGoodToBadHTTPS) {
   ASSERT_TRUE(https_server_.Start());
   ASSERT_TRUE(https_server_expired_.Start());
 
@@ -976,7 +1004,7 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, TestRedirectHTTPToGoodHTTPS) {
 }
 
 // Visit a page over http that is a redirect to a page with bad HTTPS.
-IN_PROC_BROWSER_TEST_F(SSLUITest, FLAKY_TestRedirectHTTPToBadHTTPS) {
+IN_PROC_BROWSER_TEST_F(SSLUITest, TestRedirectHTTPToBadHTTPS) {
   ASSERT_TRUE(test_server()->Start());
   ASSERT_TRUE(https_server_expired_.Start());
 
@@ -998,8 +1026,7 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, FLAKY_TestRedirectHTTPToBadHTTPS) {
 
 // Visit a page over https that is a redirect to a page with http (to make sure
 // we don't keep the secure state).
-// Marked as flaky, see bug 40932.
-IN_PROC_BROWSER_TEST_F(SSLUITest, FLAKY_TestRedirectHTTPSToHTTP) {
+IN_PROC_BROWSER_TEST_F(SSLUITest, TestRedirectHTTPSToHTTP) {
   ASSERT_TRUE(test_server()->Start());
   ASSERT_TRUE(https_server_.Start());
 
@@ -1130,8 +1157,7 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, TestGoodFrameNavigation) {
 
 // From a bad HTTPS top frame:
 // - navigate to an OK HTTPS frame (expected to be still authentication broken).
-// Marked as flaky, see bug 40932.
-IN_PROC_BROWSER_TEST_F(SSLUITest, FLAKY_TestBadFrameNavigation) {
+IN_PROC_BROWSER_TEST_F(SSLUITest, TestBadFrameNavigation) {
   ASSERT_TRUE(https_server_.Start());
   ASSERT_TRUE(https_server_expired_.Start());
 
@@ -1230,8 +1256,7 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, DISABLED_TestUnauthenticatedFrameNavigation) {
   EXPECT_FALSE(is_content_evil);
 }
 
-// Marked as flaky, see bug 40932.
-IN_PROC_BROWSER_TEST_F(SSLUITest, FLAKY_TestUnsafeContentsInWorkerFiltered) {
+IN_PROC_BROWSER_TEST_F(SSLUITest, TestUnsafeContentsInWorkerFiltered) {
   ASSERT_TRUE(https_server_.Start());
   ASSERT_TRUE(https_server_expired_.Start());
 
@@ -1249,8 +1274,7 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, FLAKY_TestUnsafeContentsInWorkerFiltered) {
   CheckAuthenticatedState(tab, false);
 }
 
-// Marked as flaky, see bug 40932.
-IN_PROC_BROWSER_TEST_F(SSLUITest, FLAKY_TestUnsafeContentsInWorker) {
+IN_PROC_BROWSER_TEST_F(SSLUITest, TestUnsafeContentsInWorker) {
   ASSERT_TRUE(https_server_.Start());
   ASSERT_TRUE(https_server_expired_.Start());
 

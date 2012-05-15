@@ -18,7 +18,6 @@
 #include "base/message_loop_proxy.h"
 #include "base/process.h"
 #include "base/process_util.h"
-#include "base/scoped_temp_dir.h"
 #include "base/string_number_conversions.h"
 #include "base/string_split.h"
 #include "base/string_util.h"
@@ -88,8 +87,7 @@ Error* Session::Init(const DictionaryValue* capabilities_dict) {
     delete this;
     return new Error(kUnknownError, "Cannot start session thread");
   }
-  ScopedTempDir temp_dir;
-  if (!temp_dir.CreateUniqueTempDir()) {
+  if (!temp_dir_.CreateUniqueTempDir()) {
     delete this;
     return new Error(
         kUnknownError, "Unable to create temp directory for unpacking");
@@ -98,7 +96,7 @@ Error* Session::Init(const DictionaryValue* capabilities_dict) {
               "Initializing session with capabilities " +
                   JsonStringifyForDisplay(capabilities_dict));
   CapabilitiesParser parser(
-      capabilities_dict, temp_dir.path(), logger_, &capabilities_);
+      capabilities_dict, temp_dir_.path(), logger_, &capabilities_);
   Error* error = parser.Parse();
   if (error) {
     delete this;
@@ -166,7 +164,6 @@ Error* Session::ExecuteScript(const FrameId& frame_id,
                               Value** value) {
   std::string args_as_json;
   base::JSONWriter::Write(static_cast<const Value* const>(args),
-                          /*pretty_print=*/false,
                           &args_as_json);
 
   // Every injected script is fed through the executeScript atom. This atom
@@ -219,7 +216,6 @@ Error* Session::ExecuteAsyncScript(const FrameId& frame_id,
                                    Value** value) {
   std::string args_as_json;
   base::JSONWriter::Write(static_cast<const Value* const>(args),
-                          /*pretty_print=*/false,
                           &args_as_json);
 
   int timeout_ms = async_script_timeout();
@@ -1262,6 +1258,8 @@ Error* Session::SetPreference(
         pref,
         value,
         &error));
+    if (error)
+      error->AddDetails("Failed to set user pref '" + pref + "'");
   } else {
     RunSessionTask(base::Bind(
         &Automation::SetLocalStatePreference,
@@ -1269,6 +1267,8 @@ Error* Session::SetPreference(
         pref,
         value,
         &error));
+    if (error)
+      error->AddDetails("Failed to set local state pref '" + pref + "'");
   }
   return error;
 }
@@ -1403,6 +1403,10 @@ const Point& Session::get_mouse_position() const {
 
 const Logger& Session::logger() const {
   return logger_;
+}
+
+const FilePath& Session::temp_dir() const {
+  return temp_dir_.path();
 }
 
 const Capabilities& Session::capabilities() const {
@@ -1824,6 +1828,8 @@ Error* Session::PostBrowserStartInit() {
   Error* error = NULL;
   if (!capabilities_.no_website_testing_defaults)
     error = InitForWebsiteTesting();
+  if (!error)
+    error = SetPrefs();
   if (error)
     return error;
 
@@ -1861,6 +1867,28 @@ Error* Session::InitForWebsiteTesting() {
       "profile.default_content_settings",
       true /* is_user_pref */,
       default_content_settings);
+}
+
+Error* Session::SetPrefs() {
+  DictionaryValue::key_iterator iter = capabilities_.prefs->begin_keys();
+  for (; iter != capabilities_.prefs->end_keys(); ++iter) {
+    Value* value;
+    capabilities_.prefs->GetWithoutPathExpansion(*iter, &value);
+    Error* error = SetPreference(*iter, true /* is_user_pref */,
+                                 value->DeepCopy());
+    if (error)
+      return error;
+  }
+  iter = capabilities_.local_state->begin_keys();
+  for (; iter != capabilities_.local_state->end_keys(); ++iter) {
+    Value* value;
+    capabilities_.local_state->GetWithoutPathExpansion(*iter, &value);
+    Error* error = SetPreference(*iter, false /* is_user_pref */,
+                                 value->DeepCopy());
+    if (error)
+      return error;
+  }
+  return NULL;
 }
 
 }  // namespace webdriver

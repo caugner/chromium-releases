@@ -7,6 +7,8 @@
     'chromium_code': 1,
     # Override to dynamically link the PulseAudio library.
     'use_pulseaudio%': 0,
+    # Override to dynamically link the cras (ChromeOS audio) library.
+    'use_cras%': 0,
   },
   'targets': [
     {
@@ -17,6 +19,7 @@
         '../base/base.gyp:base',
         '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
         '../build/temp_gyp/googleurl.gyp:googleurl',
+        '../crypto/crypto.gyp:crypto',
         '../third_party/openmax/openmax.gyp:il',
         '../ui/ui.gyp:ui',
       ],
@@ -66,6 +69,8 @@
         'audio/linux/alsa_util.h',
         'audio/linux/alsa_wrapper.cc',
         'audio/linux/alsa_wrapper.h',
+        'audio/linux/cras_output.cc',
+        'audio/linux/cras_output.h',
         'audio/openbsd/audio_manager_openbsd.cc',
         'audio/openbsd/audio_manager_openbsd.h',
         'audio/mac/audio_input_mac.cc',
@@ -96,6 +101,8 @@
         'audio/win/wavein_input_win.h',
         'audio/win/waveout_output_win.cc',
         'audio/win/waveout_output_win.h',
+        'base/audio_decoder.cc',
+        'base/audio_decoder.h',
         'base/audio_decoder_config.cc',
         'base/audio_decoder_config.h',
         'base/bitstream_buffer.h',
@@ -113,6 +120,8 @@
         'base/data_buffer.h',
         'base/data_source.cc',
         'base/data_source.h',
+        'base/decrypt_config.cc',
+        'base/decrypt_config.h',
         'base/demuxer.cc',
         'base/demuxer.h',
         'base/demuxer_factory.cc',
@@ -142,8 +151,6 @@
         'base/media_win.cc',
         'base/message_loop_factory.cc',
         'base/message_loop_factory.h',
-        'base/message_loop_factory_impl.cc',
-        'base/message_loop_factory_impl.h',
         'base/pipeline.cc',
         'base/pipeline.h',
         'base/pipeline_status.h',
@@ -160,6 +167,8 @@
         'base/video_frame.h',
         'base/video_util.cc',
         'base/video_util.h',
+        'crypto/aes_decryptor.cc',
+        'crypto/aes_decryptor.h',
         'ffmpeg/ffmpeg_common.cc',
         'ffmpeg/ffmpeg_common.h',
         'ffmpeg/file_protocol.cc',
@@ -201,8 +210,6 @@
         'filters/in_memory_url_protocol.h',
         'filters/null_audio_renderer.cc',
         'filters/null_audio_renderer.h',
-        'filters/reference_audio_renderer.cc',
-        'filters/reference_audio_renderer.h',
         'filters/video_frame_generator.cc',
         'filters/video_frame_generator.h',
         'filters/video_renderer_base.cc',
@@ -240,6 +247,10 @@
         'webm/webm_constants.h',
         'webm/webm_cluster_parser.cc',
         'webm/webm_cluster_parser.h',
+        'webm/webm_content_encodings.cc',
+        'webm/webm_content_encodings.h',
+        'webm/webm_content_encodings_client.cc',
+        'webm/webm_content_encodings_client.h',
         'webm/webm_info_parser.cc',
         'webm/webm_info_parser.h',
         'webm/webm_parser.cc',
@@ -292,6 +303,8 @@
             'filters/ffmpeg_video_decoder.h',
             'filters/gpu_video_decoder.cc',
             'filters/gpu_video_decoder.h',
+            'webm/webm_cluster_parser.cc',
+            'webm/webm_cluster_parser.h',
             'webm/webm_stream_parser.cc',
             'webm/webm_stream_parser.h',
           ],
@@ -326,6 +339,37 @@
           'sources!': [
             'audio/openbsd/audio_manager_openbsd.cc',
             'audio/openbsd/audio_manager_openbsd.h',
+          ],
+        }],
+        ['OS=="linux"', {
+          'variables': {
+            'conditions': [
+              ['sysroot!=""', {
+                'pkg-config': '../build/linux/pkg-config-wrapper "<(sysroot)" "<(target_arch)"',
+              }, {
+                'pkg-config': 'pkg-config'
+              }],
+            ],
+          },
+          'conditions': [
+            ['use_cras == 1', {
+              'cflags': [
+                '<!@(<(pkg-config) --cflags libcras)',
+              ],
+              'link_settings': {
+                'libraries': [
+                  '<!@(<(pkg-config) --libs libcras)',
+                ],
+              },
+              'defines': [
+                'USE_CRAS',
+              ],
+            }, {  # else: use_cras == 0
+              'sources!': [
+                'audio/linux/cras_output.cc',
+                'audio/linux/cras_output.h',
+              ],
+            }],
           ],
         }],
         ['os_posix == 1', {
@@ -467,14 +511,6 @@
         [ 'os_posix == 1 and OS != "mac" and OS != "android"', {
           'cflags': [
             '-msse2',
-            '-msse3',
-            '-mssse3',
-          ],
-        }],
-        [ 'OS == "openbsd"', {
-          # OpenBSD's gcc (4.2.1) does not support -mssse3
-          'cflags!': [
-            '-mssse3',
           ],
         }],
         [ 'OS == "mac"', {
@@ -575,6 +611,7 @@
         'audio/audio_input_controller_unittest.cc',
         'audio/audio_input_device_unittest.cc',
         'audio/audio_input_unittest.cc',
+        'audio/audio_input_volume_unittest.cc',
         'audio/audio_low_latency_input_output_unittest.cc',
         'audio/audio_output_controller_unittest.cc',
         'audio/audio_output_proxy_unittest.cc',
@@ -587,6 +624,7 @@
         'audio/win/audio_low_latency_input_win_unittest.cc',
         'audio/win/audio_low_latency_output_win_unittest.cc',
         'audio/win/audio_output_win_unittest.cc',
+        'base/buffers_unittest.cc',
         'base/clock_unittest.cc',
         'base/composite_filter_unittest.cc',
         'base/data_buffer_unittest.cc',
@@ -604,23 +642,27 @@
         'base/video_frame_unittest.cc',
         'base/video_util_unittest.cc',
         'base/yuv_convert_unittest.cc',
+        'crypto/aes_decryptor_unittest.cc',
         'ffmpeg/ffmpeg_common_unittest.cc',
         'filters/audio_renderer_algorithm_base_unittest.cc',
         'filters/audio_renderer_base_unittest.cc',
         'filters/bitstream_converter_unittest.cc',
         'filters/chunk_demuxer_unittest.cc',
         'filters/ffmpeg_audio_decoder_unittest.cc',
+        'filters/ffmpeg_decoder_unittest.h',
         'filters/ffmpeg_demuxer_unittest.cc',
         'filters/ffmpeg_glue_unittest.cc',
         'filters/ffmpeg_h264_bitstream_converter_unittest.cc',
         'filters/ffmpeg_video_decoder_unittest.cc',
         'filters/file_data_source_unittest.cc',
         'filters/pipeline_integration_test.cc',
+        'filters/pipeline_integration_test_base.cc',
         'filters/video_renderer_base_unittest.cc',
         'video/capture/video_capture_device_unittest.cc',
         'webm/cluster_builder.cc',
         'webm/cluster_builder.h',
         'webm/webm_parser_unittest.cc',
+        'webm/webm_content_encodings_client_unittest.cc',
       ],
       'conditions': [
         ['os_posix==1 and OS!="mac"', {
@@ -639,6 +681,7 @@
         }],
         ['OS == "android"', {
           'sources!': [
+            'audio/audio_input_volume_unittest.cc',
             'base/test_data_util.cc',
             'base/test_data_util.h',
             'ffmpeg/ffmpeg_common_unittest.cc',
@@ -649,6 +692,20 @@
             'filters/ffmpeg_glue_unittest.cc',
             'filters/ffmpeg_h264_bitstream_converter_unittest.cc',
             'filters/ffmpeg_video_decoder_unittest.cc',
+            'filters/pipeline_integration_test.cc',
+            'filters/pipeline_integration_test_base.cc',
+          ],
+        }],
+        ['OS == "linux"', {
+          'conditions': [
+            ['use_cras == 1', {
+              'sources': [
+                'audio/linux/cras_output_unittest.cc',
+              ],
+              'defines': [
+                'USE_CRAS',
+              ],
+            }],
           ],
         }],
         [ 'target_arch=="ia32" or target_arch=="x64"', {
@@ -700,6 +757,17 @@
       'type': 'executable',
       'sources': [
         'tools/qt_faststart/qt_faststart.c'
+      ],
+    },
+    {
+      'target_name': 'seek_tester',
+      'type': 'executable',
+      'dependencies': [
+        'media',
+        '../base/base.gyp:base',
+      ],
+      'sources': [
+        'tools/seek_tester/seek_tester.cc',
       ],
     },
   ],
@@ -829,6 +897,8 @@
             ],
           },
           'sources': [
+            'tools/player_x11/data_source_logger.cc',
+            'tools/player_x11/data_source_logger.h',
             'tools/player_x11/gl_video_renderer.cc',
             'tools/player_x11/gl_video_renderer.h',
             'tools/player_x11/player_x11.cc',
@@ -866,6 +936,35 @@
                 #   gtk/gtk.h
                 '../build/linux/system.gyp:gtk',
               ],
+              'conditions': [
+                ['linux_use_tcmalloc==1', {
+                  'dependencies': [
+                    '../base/allocator/allocator.gyp:allocator',
+                  ],
+                }],
+              ],
+            }],
+          ],
+        },
+        {
+          'target_name': 'ffmpeg_regression_tests',
+          'type': 'executable',
+          'dependencies': [
+            'media',
+            'media_test_support',
+            '../base/base.gyp:test_support_base',
+            '../testing/gmock.gyp:gmock',
+            '../testing/gtest.gyp:gtest',
+            '../third_party/ffmpeg/ffmpeg.gyp:ffmpeg',
+          ],
+          'sources': [
+            'base/test_data_util.cc',
+            'base/run_all_unittests.cc',
+            'ffmpeg/ffmpeg_regression_tests.cc',
+            'filters/pipeline_integration_test_base.cc',
+          ],
+          'conditions': [
+            ['os_posix==1 and OS!="mac"', {
               'conditions': [
                 ['linux_use_tcmalloc==1', {
                   'dependencies': [

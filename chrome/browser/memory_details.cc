@@ -17,13 +17,12 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_child_process_host_iterator.h"
-#include "content/public/browser/child_process_data.h"
-#include "content/browser/renderer_host/backing_store_manager.h"
-#include "content/browser/renderer_host/render_view_host.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/child_process_data.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_view_host_delegate.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/bindings_policy.h"
@@ -32,14 +31,15 @@
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
-#include "content/browser/renderer_host/render_sandbox_host_linux.h"
-#include "content/browser/zygote_host_linux.h"
+#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
+#include "content/public/browser/zygote_host_linux.h"
 #endif
 
 using content::BrowserChildProcessHostIterator;
 using content::BrowserThread;
 using content::NavigationEntry;
+using content::RenderViewHost;
+using content::RenderWidgetHost;
 using content::WebContents;
 
 // static
@@ -156,9 +156,10 @@ void MemoryDetails::CollectChildInfoOnIOThread() {
 void MemoryDetails::CollectChildInfoOnUIThread() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
-  const pid_t zygote_pid = ZygoteHost::GetInstance()->pid();
-  const pid_t sandbox_helper_pid = RenderSandboxHostLinux::GetInstance()->pid();
+#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
+  const pid_t zygote_pid = content::ZygoteHost::GetInstance()->GetPid();
+  const pid_t sandbox_helper_pid =
+      content::ZygoteHost::GetInstance()->GetSandboxHelperPid();
 #endif
 
   ProcessData* const chrome_browser = ChromeBrowser();
@@ -193,37 +194,34 @@ void MemoryDetails::CollectChildInfoOnUIThread() {
       // The RenderProcessHost may host multiple TabContents.  Any
       // of them which contain diagnostics information make the whole
       // process be considered a diagnostics process.
-      //
-      // NOTE: This is a bit dangerous.  We know that for now, listeners
-      //       are always RenderWidgetHosts.  But in theory, they don't
-      //       have to be.
-      content::RenderProcessHost::listeners_iterator iter(
-          render_process_host->ListenersIterator());
+      content::RenderProcessHost::RenderWidgetHostsIterator iter(
+          render_process_host->GetRenderWidgetHostsIterator());
       for (; !iter.IsAtEnd(); iter.Advance()) {
-        const RenderWidgetHost* widget =
-            static_cast<const RenderWidgetHost*>(iter.GetCurrentValue());
+        const RenderWidgetHost* widget = iter.GetCurrentValue();
         DCHECK(widget);
         if (!widget || !widget->IsRenderView())
           continue;
 
-        const RenderViewHost* host = static_cast<const RenderViewHost*>(widget);
-        content::RenderViewHostDelegate* host_delegate = host->delegate();
+        const RenderViewHost* host =
+            RenderViewHost::From(const_cast<RenderWidgetHost*>(widget));
+        content::RenderViewHostDelegate* host_delegate = host->GetDelegate();
         DCHECK(host_delegate);
         GURL url = host_delegate->GetURL();
         content::ViewType type = host_delegate->GetRenderViewType();
-        if (host->enabled_bindings() & content::BINDINGS_POLICY_WEB_UI) {
+        if (host->GetEnabledBindings() & content::BINDINGS_POLICY_WEB_UI) {
           // TODO(erikkay) the type for devtools doesn't actually appear to
           // be set.
           if (type == content::VIEW_TYPE_DEV_TOOLS_UI)
             process.renderer_type = ProcessMemoryInformation::RENDERER_DEVTOOLS;
           else
             process.renderer_type = ProcessMemoryInformation::RENDERER_CHROME;
-        } else if (extension_process_map->Contains(host->process()->GetID())) {
+        } else if (extension_process_map->Contains(
+            host->GetProcess()->GetID())) {
           // For our purposes, don't count processes containing only hosted apps
           // as extension processes. See also: crbug.com/102533.
           std::set<std::string> extension_ids =
               extension_process_map->GetExtensionsInProcess(
-                  host->process()->GetID());
+                  host->GetProcess()->GetID());
           for (std::set<std::string>::iterator iter = extension_ids.begin();
                iter != extension_ids.end(); ++iter) {
             const Extension* extension =
@@ -237,7 +235,7 @@ void MemoryDetails::CollectChildInfoOnUIThread() {
         }
         WebContents* contents = host_delegate->GetAsWebContents();
         if (!contents) {
-          if (extension_process_map->Contains(host->process()->GetID())) {
+          if (extension_process_map->Contains(host->GetProcess()->GetID())) {
             const Extension* extension =
                 extension_service->extensions()->GetByID(url.host());
             if (extension) {
@@ -304,7 +302,7 @@ void MemoryDetails::CollectChildInfoOnUIThread() {
       }
     }
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
+#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
     if (process.pid == zygote_pid) {
       process.type = content::PROCESS_TYPE_ZYGOTE;
     } else if (process.pid == sandbox_helper_pid) {
@@ -415,7 +413,7 @@ void MemoryDetails::UpdateHistograms() {
     }
   }
   UMA_HISTOGRAM_MEMORY_KB("Memory.BackingStore",
-                          BackingStoreManager::MemorySize() / 1024);
+                          RenderWidgetHost::BackingStoreMemorySize() / 1024);
 
   UMA_HISTOGRAM_COUNTS_100("Memory.ProcessCount",
       static_cast<int>(browser.processes.size()));

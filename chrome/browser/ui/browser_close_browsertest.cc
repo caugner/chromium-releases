@@ -16,15 +16,15 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/webui/active_downloads_ui.h"
+#include "chrome/browser/ui/webui/chromeos/active_downloads_ui.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/browser/net/url_request_slow_download_job.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/common/page_transition_types.h"
+#include "content/test/net/url_request_slow_download_job.h"
 
 using content::BrowserThread;
 using content::DownloadItem;
@@ -115,13 +115,12 @@ class BrowserCloseTest : public InProcessBrowserTest {
     DownloadManager* download_manager =
         browser->profile()->GetDownloadManager();
     scoped_ptr<DownloadTestObserver> observer(
-        new DownloadTestObserver(
-            download_manager, num_downloads,
-            DownloadItem::IN_PROGRESS,
-            true,  // Bail on select file.
-            DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_FAIL));
+        new DownloadTestObserverInProgress(download_manager,
+                                           num_downloads,
+                                           true));  // Bail on select file.
 
     // Set of that number of downloads.
+    size_t count_downloads = num_downloads;
     while (num_downloads--)
       ui_test_utils::NavigateToURLWithDisposition(
           browser, url, NEW_BACKGROUND_TAB,
@@ -129,6 +128,8 @@ class BrowserCloseTest : public InProcessBrowserTest {
 
     // Wait for them.
     observer->WaitForFinished();
+    EXPECT_EQ(count_downloads,
+              observer->NumDownloadsSeenInState(DownloadItem::IN_PROGRESS));
   }
 
   // All all downloads created in CreateStalledDownloads() to
@@ -518,7 +519,7 @@ IN_PROC_BROWSER_TEST_F(BrowserCloseTest, DownloadsCloseCheck_1) {
 
 // Timing out on XP debug. http://crbug.com/111914
 #if defined(OS_WIN)
-#define MAYBE_DownloadsCloseCheck_2 FLAKY_DownloadsCloseCheck_2
+#define MAYBE_DownloadsCloseCheck_2 DISABLED_DownloadsCloseCheck_2
 #else
 #define MAYBE_DownloadsCloseCheck_2 DownloadsCloseCheck_2
 #endif
@@ -549,7 +550,7 @@ IN_PROC_BROWSER_TEST_F(BrowserCloseTest, DownloadsCloseCheck_4) {
 
 // Timing out on XP debug. http://crbug.com/111914
 #if defined(OS_WIN)
-#define MAYBE_DownloadsCloseCheck_5 FLAKY_DownloadsCloseCheck_5
+#define MAYBE_DownloadsCloseCheck_5 DISABLED_DownloadsCloseCheck_5
 #else
 #define MAYBE_DownloadsCloseCheck_5 DownloadsCloseCheck_5
 #endif

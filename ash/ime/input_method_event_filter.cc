@@ -19,14 +19,13 @@ namespace internal {
 // InputMethodEventFilter, public:
 
 InputMethodEventFilter::InputMethodEventFilter()
-    : EventFilter(aura::RootWindow::GetInstance()),
-      ALLOW_THIS_IN_INITIALIZER_LIST(
+    : ALLOW_THIS_IN_INITIALIZER_LIST(
           input_method_(ui::CreateInputMethod(this))) {
   // TODO(yusukes): Check if the root window is currently focused and pass the
   // result to Init().
   input_method_->Init(true);
-  aura::RootWindow::GetInstance()->SetProperty(
-      aura::client::kRootWindowInputMethod,
+  Shell::GetRootWindow()->SetProperty(
+      aura::client::kRootWindowInputMethodKey,
       input_method_.get());
 }
 
@@ -77,7 +76,7 @@ void InputMethodEventFilter::DispatchKeyEventPostIME(
   DCHECK(event.message != WM_CHAR);
 #endif
   TranslatedKeyEvent aura_event(event, false /* is_char */);
-  aura::RootWindow::GetInstance()->DispatchKeyEvent(&aura_event);
+  Shell::GetRootWindow()->DispatchKeyEvent(&aura_event);
 }
 
 void InputMethodEventFilter::DispatchFabricatedKeyEventPostIME(
@@ -85,7 +84,7 @@ void InputMethodEventFilter::DispatchFabricatedKeyEventPostIME(
     ui::KeyboardCode key_code,
     int flags) {
   TranslatedKeyEvent aura_event(type == ui::ET_KEY_PRESSED, key_code, flags);
-  aura::RootWindow::GetInstance()->DispatchKeyEvent(&aura_event);
+  Shell::GetRootWindow()->DispatchKeyEvent(&aura_event);
 }
 
 }  // namespace internal

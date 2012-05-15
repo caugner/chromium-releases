@@ -14,11 +14,13 @@
 #include "base/utf_string_conversions.h"
 #include "grit/app_locale_settings.h"
 #include "grit/ui_strings.h"
+#include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/range/range.h"
 #include "ui/gfx/canvas.h"
+#include "ui/gfx/compositor/layer.h"
 #include "ui/gfx/insets.h"
 #include "ui/gfx/render_text.h"
 #include "ui/views/background.h"
@@ -36,10 +38,6 @@
 #include "ui/views/views_delegate.h"
 #include "ui/views/widget/widget.h"
 
-#if defined(OS_LINUX)
-#include "ui/gfx/gtk_util.h"
-#endif
-
 #if defined(USE_AURA)
 #include "ui/aura/cursor.h"
 #endif
@@ -48,6 +46,9 @@ namespace {
 
 // Text color for read only.
 const SkColor kReadonlyTextColor = SK_ColorDKGRAY;
+
+// Default "system" color for text cursor.
+const SkColor kDefaultCursorColor = SK_ColorBLACK;
 
 // Parameters to control cursor blinking.
 const int kCursorVisibleTimeMs = 800;
@@ -115,9 +116,16 @@ bool NativeTextfieldViews::OnMousePressed(const MouseEvent& event) {
   return true;
 }
 
+bool NativeTextfieldViews::ExceededDragThresholdFromLastClickLocation(
+    const MouseEvent& event) {
+  gfx::Point location_delta = event.location().Subtract(last_click_location_);
+  return ExceededDragThreshold(location_delta.x(), location_delta.y());
+}
+
 bool NativeTextfieldViews::OnMouseDragged(const MouseEvent& event) {
-  // Don't adjust the cursor on a potential drag and drop.
-  if (initiating_drag_)
+  // Don't adjust the cursor on a potential drag and drop, or if the mouse
+  // movement from the last mouse click does not exceed the drag threshold.
+  if (initiating_drag_ || !ExceededDragThresholdFromLastClickLocation(event))
     return true;
 
   OnBeforeUserAction();
@@ -186,8 +194,7 @@ int NativeTextfieldViews::OnPerformDrop(const DropTargetEvent& event) {
   OnBeforeUserAction();
   skip_input_method_cancel_composition_ = true;
 
-  // TODO(msw): Remove final reference to FindCursorPosition.
-  gfx::SelectionModel drop_destination =
+  gfx::SelectionModel drop_destination_model =
       GetRenderText()->FindCursorPosition(event.location());
   string16 text;
   event.data().GetString(&text);
@@ -199,20 +206,12 @@ int NativeTextfieldViews::OnPerformDrop(const DropTargetEvent& event) {
     gfx::SelectionModel selected;
     model_->GetSelectionModel(&selected);
     // Adjust the drop destination if it is on or after the current selection.
-    size_t max_of_selected_range = std::max(selected.selection_start(),
-                                            selected.selection_end());
-    size_t min_of_selected_range = std::min(selected.selection_start(),
-                                            selected.selection_end());
-    size_t selected_range_length = max_of_selected_range -
-                                   min_of_selected_range;
-    size_t drop_destination_end = drop_destination.selection_end();
-    if (max_of_selected_range <= drop_destination_end)
-      drop_destination_end -= selected_range_length;
-    else if (min_of_selected_range <= drop_destination_end)
-      drop_destination_end = min_of_selected_range;
-    model_->DeleteSelectionAndInsertTextAt(text, drop_destination_end);
+    size_t drop_destination = drop_destination_model.caret_pos();
+    drop_destination -=
+        selected.selection().Intersect(ui::Range(0, drop_destination)).length();
+    model_->DeleteSelectionAndInsertTextAt(text, drop_destination);
   } else {
-    model_->MoveCursorTo(drop_destination);
+    model_->MoveCursorTo(drop_destination_model);
     // Drop always inserts text even if the textfield is not in insert mode.
     model_->InsertText(text);
   }
@@ -248,19 +247,14 @@ void NativeTextfieldViews::SelectRect(const gfx::Point& start,
   if (GetTextInputType() == ui::TEXT_INPUT_TYPE_NONE)
     return;
 
-  gfx::SelectionModel start_pos = GetRenderText()->FindCursorPosition(start);
-  gfx::SelectionModel end_pos = GetRenderText()->FindCursorPosition(end);
+  gfx::SelectionModel start_caret = GetRenderText()->FindCursorPosition(start);
+  gfx::SelectionModel end_caret = GetRenderText()->FindCursorPosition(end);
+  gfx::SelectionModel selection(
+      ui::Range(start_caret.caret_pos(), end_caret.caret_pos()),
+      end_caret.caret_affinity());
 
   OnBeforeUserAction();
-  // Merge selection models of "start_pos" and "end_pos" so that
-  // selection start is the value from "start_pos", while selection end,
-  // caret position, and caret placement are values from "end_pos".
-  if (start_pos.selection_start() == end_pos.selection_end())
-    model_->SelectSelectionModel(end_pos);
-  else
-    model_->SelectRange(ui::Range(start_pos.selection_start(),
-                                  end_pos.selection_end()));
-
+  model_->SelectSelectionModel(selection);
   OnCaretBoundsChanged();
   SchedulePaint();
   OnAfterUserAction();
@@ -276,21 +270,17 @@ gfx::NativeCursor NativeTextfieldViews::GetCursor(const MouseEvent& event) {
   static HCURSOR ibeam = LoadCursor(NULL, IDC_IBEAM);
   static HCURSOR arrow = LoadCursor(NULL, IDC_ARROW);
   return text_cursor ? ibeam : arrow;
-#else
-  return text_cursor ? gfx::GetCursor(GDK_XTERM) : NULL;
 #endif
 }
 
 /////////////////////////////////////////////////////////////////
 // NativeTextfieldViews, ContextMenuController overrides:
 void NativeTextfieldViews::ShowContextMenuForView(View* source,
-                                                  const gfx::Point& p,
-                                                  bool is_mouse_gesture) {
+                                                  const gfx::Point& point) {
   UpdateContextMenu();
-  if (context_menu_runner_->RunMenuAt(
-          GetWidget(), NULL, gfx::Rect(p, gfx::Size()),
-          views::MenuItemView::TOPLEFT, MenuRunner::HAS_MNEMONICS) ==
-      MenuRunner::MENU_DELETED)
+  if (context_menu_runner_->RunMenuAt(GetWidget(), NULL,
+          gfx::Rect(point, gfx::Size()), views::MenuItemView::TOPLEFT,
+          MenuRunner::HAS_MNEMONICS) == MenuRunner::MENU_DELETED)
     return;
 }
 
@@ -309,7 +299,8 @@ void NativeTextfieldViews::WriteDragDataForView(views::View* sender,
 
 int NativeTextfieldViews::GetDragOperationsForView(views::View* sender,
                                                    const gfx::Point& p) {
-  if (!textfield_->enabled() || !GetRenderText()->IsPointInSelection(p))
+  if (!textfield_->enabled() || textfield_->IsObscured() ||
+      !GetRenderText()->IsPointInSelection(p))
     return ui::DragDropTypes::DRAG_NONE;
   if (sender == this && !textfield_->read_only())
     return ui::DragDropTypes::DRAG_MOVE | ui::DragDropTypes::DRAG_COPY;
@@ -387,6 +378,10 @@ void NativeTextfieldViews::UpdateBackgroundColor() {
   SchedulePaint();
 }
 
+void NativeTextfieldViews::UpdateCursorColor() {
+  SchedulePaint();
+}
+
 void NativeTextfieldViews::UpdateReadOnly() {
   // Update the default text style.
   gfx::StyleRange default_style(GetRenderText()->default_style());
@@ -411,7 +406,7 @@ void NativeTextfieldViews::UpdateFont() {
 }
 
 void NativeTextfieldViews::UpdateIsObscured() {
-  // TODO(benrg): GetRenderText()->SetObscured(textfield_->IsObscured());
+  GetRenderText()->SetObscured(textfield_->IsObscured());
   OnCaretBoundsChanged();
   SchedulePaint();
   OnTextInputTypeChanged();
@@ -464,7 +459,7 @@ bool NativeTextfieldViews::IsIMEComposing() const {
 }
 
 void NativeTextfieldViews::GetSelectedRange(ui::Range* range) const {
-  model_->GetSelectedRange(range);
+  *range = GetRenderText()->selection();
 }
 
 void NativeTextfieldViews::SelectRange(const ui::Range& range) {
@@ -552,9 +547,9 @@ bool NativeTextfieldViews::IsCommandIdEnabled(int command_id) const {
   string16 result;
   switch (command_id) {
     case IDS_APP_CUT:
-      return editable && model_->HasSelection();
+      return editable && model_->HasSelection() && !textfield_->IsObscured();
     case IDS_APP_COPY:
-      return model_->HasSelection();
+      return model_->HasSelection() && !textfield_->IsObscured();
     case IDS_APP_PASTE:
       ViewsDelegate::views_delegate->GetClipboard()
           ->ReadText(ui::Clipboard::BUFFER_STANDARD, &result);
@@ -574,24 +569,23 @@ bool NativeTextfieldViews::GetAcceleratorForCommandId(int command_id,
 }
 
 void NativeTextfieldViews::ExecuteCommand(int command_id) {
+  if (!IsCommandIdEnabled(command_id))
+    return;
+
   bool text_changed = false;
-  bool editable = !textfield_->read_only();
   OnBeforeUserAction();
   switch (command_id) {
     case IDS_APP_CUT:
-      if (editable)
-        text_changed = Cut();
+      text_changed = Cut();
       break;
     case IDS_APP_COPY:
       Copy();
       break;
     case IDS_APP_PASTE:
-      if (editable)
-        text_changed = Paste();
+      text_changed = Paste();
       break;
     case IDS_APP_DELETE:
-      if (editable)
-        text_changed = model_->Delete();
+      text_changed = model_->Delete();
       break;
     case IDS_APP_SELECT_ALL:
       SelectAll();
@@ -735,11 +729,7 @@ bool NativeTextfieldViews::GetCompositionTextRange(ui::Range* range) {
 bool NativeTextfieldViews::GetSelectionRange(ui::Range* range) {
   if (!ImeEditingAllowed())
     return false;
-
-  gfx::SelectionModel sel;
-  model_->GetSelectionModel(&sel);
-  range->set_start(sel.selection_start());
-  range->set_end(sel.selection_end());
+  GetSelectedRange(range);
   return true;
 }
 
@@ -821,8 +811,15 @@ void NativeTextfieldViews::RepaintCursor() {
 void NativeTextfieldViews::PaintTextAndCursor(gfx::Canvas* canvas) {
   TRACE_EVENT0("views", "NativeTextfieldViews::PaintTextAndCursor");
   canvas->Save();
+  GetRenderText()->set_background_is_transparent(
+      !textfield_->use_default_background_color() &&
+      SkColorGetA(textfield_->background_color()) != 0xFF);
   GetRenderText()->set_cursor_visible(is_drop_cursor_visible_ ||
       (is_cursor_visible_ && !model_->HasSelection()));
+  GetRenderText()->set_cursor_color(
+      textfield_->use_default_cursor_color() ?
+          kDefaultCursorColor :
+          textfield_->cursor_color());
   // Draw the text, cursor, and selection.
   GetRenderText()->Draw(canvas);
   canvas->Restore();
@@ -838,6 +835,7 @@ bool NativeTextfieldViews::HandleKeyEvent(const KeyEvent& key_event) {
 
     OnBeforeUserAction();
     bool editable = !textfield_->read_only();
+    bool readable = !textfield_->IsObscured();
     bool selection = key_event.IsShiftDown();
     bool control = key_event.IsControlDown();
     bool text_changed = false;
@@ -858,11 +856,11 @@ bool NativeTextfieldViews::HandleKeyEvent(const KeyEvent& key_event) {
         }
         break;
       case ui::VKEY_X:
-        if (control && editable)
+        if (control && editable && readable)
           cursor_changed = text_changed = Cut();
         break;
       case ui::VKEY_C:
-        if (control)
+        if (control && readable)
           Copy();
         break;
       case ui::VKEY_V:
@@ -971,8 +969,9 @@ void NativeTextfieldViews::UpdateContextMenu() {
     context_menu_contents_->AddSeparator();
     context_menu_contents_->AddItemWithStringId(IDS_APP_SELECT_ALL,
                                                 IDS_APP_SELECT_ALL);
-    textfield_->GetController()->UpdateContextMenu(
-        context_menu_contents_.get());
+    TextfieldController* controller = textfield_->GetController();
+    if (controller)
+      controller->UpdateContextMenu(context_menu_contents_.get());
 
     context_menu_delegate_.reset(
         new views::MenuModelAdapter(context_menu_contents_.get()));
@@ -1056,9 +1055,8 @@ bool NativeTextfieldViews::Paste() {
 void NativeTextfieldViews::TrackMouseClicks(const MouseEvent& event) {
   if (event.IsOnlyLeftMouseButton()) {
     base::TimeDelta time_delta = event.time_stamp() - last_click_time_;
-    gfx::Point location_delta = event.location().Subtract(last_click_location_);
     if (time_delta.InMilliseconds() <= GetDoubleClickInterval() &&
-        !ExceededDragThreshold(location_delta.x(), location_delta.y())) {
+        !ExceededDragThresholdFromLastClickLocation(event)) {
       aggregated_clicks_ = (aggregated_clicks_ + 1) % 3;
     } else {
       aggregated_clicks_ = 0;

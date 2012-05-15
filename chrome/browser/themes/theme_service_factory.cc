@@ -6,12 +6,14 @@
 
 #include "base/logging.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_dependency_manager.h"
 #include "chrome/browser/themes/theme_service.h"
+#include "chrome/common/pref_names.h"
 
 #if defined(TOOLKIT_USES_GTK)
-#include "chrome/browser/ui/gtk/gtk_theme_service.h"
+#include "chrome/browser/ui/gtk/theme_service_gtk.h"
 #endif
 
 // static
@@ -45,13 +47,35 @@ ProfileKeyedService* ThemeServiceFactory::BuildServiceInstanceFor(
     Profile* profile) const {
   ThemeService* provider = NULL;
 #if defined(TOOLKIT_USES_GTK)
-  provider = new GtkThemeService;
+  provider = new ThemeServiceGtk;
 #else
   provider = new ThemeService;
 #endif
   provider->Init(profile);
 
   return provider;
+}
+
+void ThemeServiceFactory::RegisterUserPrefs(PrefService* prefs) {
+#if defined(TOOLKIT_USES_GTK)
+  prefs->RegisterBooleanPref(prefs::kUsesSystemTheme,
+                             ThemeServiceGtk::DefaultUsesSystemTheme(),
+                             PrefService::UNSYNCABLE_PREF);
+#endif
+  prefs->RegisterFilePathPref(prefs::kCurrentThemePackFilename,
+                              FilePath(),
+                              PrefService::UNSYNCABLE_PREF);
+  prefs->RegisterStringPref(prefs::kCurrentThemeID,
+                            ThemeService::kDefaultThemeID,
+                            PrefService::UNSYNCABLE_PREF);
+  prefs->RegisterDictionaryPref(prefs::kCurrentThemeImages,
+                                PrefService::UNSYNCABLE_PREF);
+  prefs->RegisterDictionaryPref(prefs::kCurrentThemeColors,
+                                PrefService::UNSYNCABLE_PREF);
+  prefs->RegisterDictionaryPref(prefs::kCurrentThemeTints,
+                                PrefService::UNSYNCABLE_PREF);
+  prefs->RegisterDictionaryPref(prefs::kCurrentThemeDisplayProperties,
+                                PrefService::UNSYNCABLE_PREF);
 }
 
 bool ThemeServiceFactory::ServiceRedirectedInIncognito() {

@@ -17,7 +17,6 @@
 #include "base/process.h"
 #include "base/scoped_temp_dir.h"
 #include "base/string16.h"
-#include "chrome/browser/automation/ui_controls.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/test/automation/dom_element_proxy.h"
 #include "content/public/browser/browser_thread.h"
@@ -28,10 +27,15 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/gfx/native_widget_types.h"
+#include "ui/ui_controls/ui_controls.h"
 #include "webkit/glue/window_open_disposition.h"
 
 #if defined(OS_WIN)
 #include "base/win/scoped_handle.h"
+#endif
+
+#if defined(TOOLKIT_VIEWS)
+#include "ui/views/view.h"
 #endif
 
 class AppModalDialog;
@@ -43,8 +47,6 @@ class FilePath;
 class GURL;
 class MessageLoop;
 class Profile;
-class RenderViewHost;
-class RenderWidgetHost;
 class ScopedTempDir;
 class SkBitmap;
 class TabContents;
@@ -56,6 +58,8 @@ struct NavigateParams;
 }
 
 namespace content {
+class RenderViewHost;
+class RenderWidgetHost;
 class WebContents;
 }
 
@@ -115,6 +119,8 @@ void WaitForBrowserActionUpdated(ExtensionAction* browser_action);
 void WaitForLoadStop(content::WebContents* tab);
 
 // Waits for a new browser to be created, returning the browser.
+// TODO(dubroy): Remove this race hazard (http://crbug.com/119521).
+// Use BrowserAddedObserver instead.
 Browser* WaitForNewBrowser();
 
 // Opens |url| in an incognito browser window with the incognito profile of
@@ -155,7 +161,7 @@ DOMElementProxyRef GetActiveDOMDocument(Browser* browser);
 // domAutomationController.send(); otherwise, your test will hang or be flaky.
 // If you want to extract a result, use one of the below functions.
 // Returns true on success.
-bool ExecuteJavaScript(RenderViewHost* render_view_host,
+bool ExecuteJavaScript(content::RenderViewHost* render_view_host,
                        const std::wstring& frame_xpath,
                        const std::wstring& script) WARN_UNUSED_RESULT;
 
@@ -166,18 +172,19 @@ bool ExecuteJavaScript(RenderViewHost* render_view_host,
 // evaluate to the expected type.
 // Note: In order for the domAutomationController to work, you must call
 // EnableDOMAutomation() in your test first.
-bool ExecuteJavaScriptAndExtractInt(RenderViewHost* render_view_host,
+bool ExecuteJavaScriptAndExtractInt(content::RenderViewHost* render_view_host,
                                     const std::wstring& frame_xpath,
                                     const std::wstring& script,
                                     int* result) WARN_UNUSED_RESULT;
-bool ExecuteJavaScriptAndExtractBool(RenderViewHost* render_view_host,
+bool ExecuteJavaScriptAndExtractBool(content::RenderViewHost* render_view_host,
                                      const std::wstring& frame_xpath,
                                      const std::wstring& script,
                                      bool* result) WARN_UNUSED_RESULT;
-bool ExecuteJavaScriptAndExtractString(RenderViewHost* render_view_host,
-                                       const std::wstring& frame_xpath,
-                                       const std::wstring& script,
-                                       std::string* result) WARN_UNUSED_RESULT;
+bool ExecuteJavaScriptAndExtractString(
+    content::RenderViewHost* render_view_host,
+    const std::wstring& frame_xpath,
+    const std::wstring& script,
+    std::string* result) WARN_UNUSED_RESULT;
 
 // Generate the file path for testing a particular test.
 // The file for the tests is all located in
@@ -267,8 +274,8 @@ bool SendKeyPressAndWait(const Browser* browser,
                              WARN_UNUSED_RESULT;
 
 // Sends a move event blocking until received. Returns true if the event was
-// successfully received. This uses ui_controls::SendMouse***NotifyWhenDone, see
-// it for details.
+// successfully received. This uses ui_controls::SendMouse***NotifyWhenDone,
+// see it for details.
 bool SendMouseMoveSync(const gfx::Point& location) WARN_UNUSED_RESULT;
 bool SendMouseEventsSync(ui_controls::MouseButton type,
                          int state) WARN_UNUSED_RESULT;
@@ -323,6 +330,9 @@ class TestWebSocketServer {
   // Stops the python websocket server if it was already started.
   ~TestWebSocketServer();
 
+  // Use a random port, useful for tests that are sharded. Returns the port.
+  int UseRandomPort();
+
   // Starts the python websocket server using |root_directory|. Returns whether
   // the server was successfully started.
   bool Start(const FilePath& root_directory);
@@ -349,11 +359,13 @@ class TestWebSocketServer {
 
 #if defined(OS_POSIX)
   // ProcessHandle used to terminate child process.
-  base::ProcessHandle process_handle_;
+  base::ProcessHandle process_group_id_;
 #elif defined(OS_WIN)
   // JobObject used to clean up orphaned child process.
   base::win::ScopedHandle job_handle_;
 #endif
+
+  int port_;
 
   DISALLOW_COPY_AND_ASSIGN(TestWebSocketServer);
 };
@@ -402,6 +414,7 @@ class WindowedNotificationObserver : public content::NotificationObserver {
   // NotificationService::AllSources().
   WindowedNotificationObserver(int notification_type,
                                const content::NotificationSource& source);
+
   virtual ~WindowedNotificationObserver();
 
   // Wait until the specified notification occurs.  If the notification was
@@ -499,6 +512,24 @@ class TitleWatcher : public content::NotificationObserver {
   DISALLOW_COPY_AND_ASSIGN(TitleWatcher);
 };
 
+// Convenience class for waiting for a new browser to be created.
+// Like WindowedNotificationObserver, this class provides a safe, non-racey
+// way to wait for a new browser to be created.
+class BrowserAddedObserver {
+ public:
+  BrowserAddedObserver();
+  ~BrowserAddedObserver();
+
+  // Wait for a new browser to be created, and return a pointer to it.
+  Browser* WaitForSingleNewBrowser();
+
+ private:
+  WindowedNotificationObserver notification_observer_;
+  std::set<Browser*> original_browsers_;
+
+  DISALLOW_COPY_AND_ASSIGN(BrowserAddedObserver);
+};
+
 // See SendKeyPressAndWait.  This function additionally performs a check on the
 // NotificationDetails using the provided Details<U>.
 template <class U>
@@ -554,6 +585,9 @@ class DOMMessageQueue : public content::NotificationObserver {
   DOMMessageQueue();
   virtual ~DOMMessageQueue();
 
+  // Removes all messages in the message queue.
+  void ClearQueue();
+
   // Wait for the next message to arrive. |message| will be set to the next
   // message, if not null. Returns true on success.
   bool WaitForMessage(std::string* message) WARN_UNUSED_RESULT;
@@ -573,15 +607,39 @@ class DOMMessageQueue : public content::NotificationObserver {
 
 // Takes a snapshot of the given render widget, rendered at |page_size|. The
 // snapshot is set to |bitmap|. Returns true on success.
-bool TakeRenderWidgetSnapshot(RenderWidgetHost* rwh,
+bool TakeRenderWidgetSnapshot(content::RenderWidgetHost* rwh,
                               const gfx::Size& page_size,
                               SkBitmap* bitmap) WARN_UNUSED_RESULT;
 
 // Takes a snapshot of the entire page, according to the width and height
 // properties of the DOM's document. Returns true on success. DOMAutomation
 // must be enabled.
-bool TakeEntirePageSnapshot(RenderViewHost* rvh,
+bool TakeEntirePageSnapshot(content::RenderViewHost* rvh,
                             SkBitmap* bitmap) WARN_UNUSED_RESULT;
+
+// A combination of SendMouseMove to the middle of the view followed by
+// SendMouseEvents.
+void MoveMouseToCenterAndPress(
+#if defined(TOOLKIT_VIEWS)
+    views::View* view,
+#elif defined(TOOLKIT_GTK)
+    GtkWidget* widget,
+#elif defined(OS_MACOSX)
+    NSView* view,
+#endif
+    ui_controls::MouseButton button,
+    int state,
+    const base::Closure& task);
+
+namespace internal {
+
+// A utility function to send a mouse click event in a closure. It's shared by
+// ui_controls_linux.cc and ui_controls_mac.cc
+void ClickTask(ui_controls::MouseButton button,
+               int state,
+               const base::Closure& followup);
+
+}  // namespace internal
 
 }  // namespace ui_test_utils
 

@@ -63,27 +63,94 @@ input[type='submit'][disabled]:hover {
   color: #888;
 }
 
+/* Drop opacity of selected rows to give a visual feedback on copy/cut
+ * operation.*/
+.blink{
+  opacity: 0.8;
+}
+
 .butter-bar {
-  -webkit-transition-property: opacity, top;
+  -webkit-box-align: end;
+  -webkit-box-orient: horizontal;
+  -webkit-transform: translate3d(0, 1px, 0);
+  -webkit-transition-property: opacity, -webkit-transform;
   -webkit-transition-duration: 300ms;
-  padding-top: 2px;
-  padding-bottom: 2px;
+  background-color: rgba(95, 95, 95, 0.17);
+  color: #222;
+  display: -webkit-box;
   padding-left: 1em;
   padding-right: 1em;
+  padding-top: 2px;
   position: absolute;
-  background-color: rgba(255, 249, 149, 0.5);
-  border-radius: 3px;
-  border: 1px gold solid;
+  top: 0;
 }
 
-.butter-bar a {
-  -webkit-margin-start: 1em;
+.butter-bar.before-show {
+  -webkit-transform: translate3d(0, -30px, 0);
+  opacity: 0;
 }
 
-.butter-error {
-  color: rgb(100, 0, 0);
-  background-color: rgba(255, 100, 100, 0.5);
-  border: 1px red solid;
+.butter-bar.after-show {
+  -webkit-transform: translate3d(0, 50px, 0);
+  opacity: 0;
+}
+
+.butter-bar .content {
+  padding-bottom: 8px;
+  padding-right: 5px;
+}
+
+.hide-in-butter {
+  display: none;
+}
+
+.butter-bar .actions {
+  -webkit-box-orient: horizontal;
+  -webkit-box-pack: end;
+  display: -webkit-box;
+}
+
+.butter-bar .actions a {
+  background: center center no-repeat;
+  background-image: url('../images/close_bar.png');
+  display: inline-block;
+  height: 12px;
+  padding: 4px;
+  width: 12px;
+}
+
+.butter-bar.error {
+  background-color: rgba(221, 75, 57, 0.2);
+  border: 1px solid rgba(221, 75, 57, 0.5);
+  border-radius: 2px;
+  padding: 2px 1em;
+}
+
+.progress-bar {
+  border: 1px solid #999;
+  margin-top: 3px;
+  padding: 1px;
+  width: 320px;
+}
+
+.progress-track {
+  -webkit-animation-name: bg;
+  -webkit-animation-duration: 0.8s;
+  -webkit-animation-iteration-count: infinite;
+  -webkit-animation-timing-function: linear;
+  background-color:#ccc;
+  background-image: -webkit-linear-gradient(315deg, transparent,
+      transparent 33%, rgba(0,0,0,0.12) 33%, rgba(0,0,0,0.12) 66%,
+      transparent 66%, transparent);
+  background-position: 0 0;
+  background-repeat: repeat-x;
+  background-size: 16px 8px;
+  height: 5px;
+}
+
+@-webkit-keyframes bg {
+  0% { background-position:0 0; }
+  100% { background-position:-16px 0; }
 }
 
 /* The top title of the dialog. */
@@ -102,6 +169,7 @@ input[type='submit'][disabled]:hover {
 
 /* Main part of the dialog between header and footer. */
 .dialog-container {
+  position: relative;
   display: -webkit-box;
   -webkit-box-orient: horizontal;
   -webkit-box-align: stretch;
@@ -121,52 +189,58 @@ input[type='submit'][disabled]:hover {
 .dialog-sidebar {
   position: relative;
   -webkit-box-flex: 0;
-  width: 200px;
-  margin-left: -200px;
-  background-color: rgba(240, 240, 240, 1);
-  margin-bottom: 15px;
-  margin-top: 15px;
-  -webkit-border-top-right-radius: 4px;
-  -webkit-border-top-left-radius: 4px;
-  -webkit-border-bottom-left-radius: 4px;
+  width: 168px;
+  margin-left: -168px;
+  background-color: #e6e6e6;
   -webkit-transition: margin-left 180ms ease;
   overflow: hidden;
 }
 
 .dialog-container[sidebar] .dialog-sidebar {
-  margin-left: 15px;
+  margin-left: 0;
 }
 
 /* Roots list at the left. */
 list.roots-list {
-  width: 100%;
+  border-right: 1px solid #d2d2d2;
 }
 
 list.roots-list > * {
   border: none;
   border-radius: 0;
-  height: 35px;
+  height: 39px;
   margin: 0;
   padding: 0 5px;
-  background-color: rgba(240,240,240,1);
+  background-color: #e6e6e6;
 }
 
+list.roots-list > [lead][selected],
 list.roots-list > [lead],
 list.roots-list > [selected],
 list.roots-list > [anchor] {
-  background-color: hsl(214,91%,89%);
+  background-color: #ccdbf3;
+  background-image: none;
+  height: 37px;
+  border-top: 1px solid #c3d2e9;
+  border-bottom: 1px solid #c3d2e9;
 }
 
 list.roots-list > [lead]:hover,
+list.roots-list > [lead][selected]:hover,
 list.roots-list > [selected]:hover,
 list.roots-list > [anchor]:hover {
-  background-color: hsl(214,91%,87%);
+  height: 37px !important;
+  background-color: rgba(0, 0, 0, 0.5) !important;
+  border-top: 1px solid transparent !important;
+  border-bottom: 1px solid transparent !important;
 }
+
+
 
 list.roots-list li.root-item {
   display: -webkit-box;
   -webkit-box-align: center;
-  -webkit-box-pack: start;
+  padding-left: 11px;
 }
 
 li.root-item > * {
@@ -175,7 +249,7 @@ li.root-item > * {
 }
 
 li.root-item > .root-label {
-  max-width: 130px;
+  max-width: 90px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -186,38 +260,51 @@ li.root-item > .spacer {
 }
 
 .root-label {
-  -webkit-padding-start: 21px;
+  -webkit-padding-start: 38px;
   background-repeat: no-repeat;
-  background-position: 0 2px;
+  background-position: left center;
 }
 
 .breadcrumbs .root-label {
-  background-position: 0 3px;
+  background-position: left center;
+  -webkit-padding-start: 34px;
 }
 
-.root-label[icon=chromebook] {
-  -webkit-padding-start: 29px;
-  background-image: url('../images/chromebook_24x24.png');
-  background-position: 0 -2px;
+.root-label[icon=downloads] {
+  background-image: url('../images/downloads_28x28.png');
 }
 
-.breadcrumbs .root-label[icon=chromebook] {
-  -webkit-padding-start: 33px;
-  background-image: url('../images/chromebook_28x28.png');
-  background-position: 0 -3px;
+.breadcrumbs .root-label[icon=downloads] {
+  background-image: url('../images/downloads_24x24.png');
+}
+
+.root-label[icon=gdata] {
+  background-image: url('../images/gdata_28x28.png');
+}
+
+.breadcrumbs .root-label[icon=gdata] {
+  background-image: url('../images/gdata_24x24.png');
 }
 
 .root-label[icon=archive] {
-  background-image: url('../images/icon_mount_archive_16x16.png');
-  background-position: 0 0;
+  background-image: url('../images/archive_28x28.png');
 }
 
 .breadcrumbs .root-label[icon=archive] {
-  background-position: 0 1px;
+  background-image: url('../images/archive_24x24.png');
 }
 
 .root-label[icon=removable] {
-  background-image: url('../images/filetype_device.png');
+  background-image: url('../images/usb_source_28x28.png');
+}
+
+.breadcrumbs .root-label[icon=removable] {
+  background-image: url('../images/usb_source_24x24.png');
+}
+
+.root-label[icon=unreadable] {
+  background-image: url('../images/usb_source_28x28.png');
+  background-position: 0 0;
 }
 
 .dialog-container[sidebar] .breadcrumbs .root-label {
@@ -225,14 +312,21 @@ li.root-item > .spacer {
   background-image: none;
 }
 
-img.root-eject {
+div.root-eject {
   opacity: 0.5;
   cursor: pointer;
-  width: 15px;
-  height: 12px;
+  width: 20px;
+  height: 20px;
+  margin-right: 3px;
+  margin-bottom: 2px;
+  background-image: url('../images/eject.png');
+  background-position: center center;
+  background-repeat: no-repeat;
+  background-size: 10px 8px;
+  -webkit-transition: opacity 70ms linear;
 }
 
-img.root-eject:hover {
+div.root-eject:hover {
   opacity: 1;
 }
 
@@ -241,10 +335,9 @@ img.root-eject:hover {
   -webkit-box-orient: horizontal;
   -webkit-box-align: center;
   display: -webkit-box;
-  margin-top: 15px;
-  margin-right: 15px;
-  margin-bottom: 4px;
-  margin-left: 15px;
+  margin-right: 10px;
+  margin-bottom: 7px;
+  margin-top: 5px;
   -webkit-transition: all 180ms ease;
  }
 
@@ -258,13 +351,17 @@ div.close-sidebar {
   cursor: pointer;
   position: absolute;
   right: 0;
-  top: 2px;
+  top: 6px;
   display: none;
   z-index: 10;
   background-color: white;
-  border: 1px solid rgba(200,200,200,1);
-  width: 13px;
-  height: 24px;
+  border: 1px solid #d2d2d2;
+  border-right: none;
+  width: 14px;
+  height: 26px;
+  background-image: url('../images/close_sidebar.png');
+  background-position: center center;
+  background-repeat: no-repeat;
 }
 
 div.close-sidebar:hover {
@@ -276,8 +373,12 @@ div.open-sidebar {
   cursor: pointer;
   margin-right: 10px;
   background-color: white;
-  width: 13px;
-  height: 24px;
+  margin-top: 1px;
+  width: 15px;
+  height: 28px;
+  background-image: url('../images/open_sidebar.png');
+  background-position: center center;
+  background-repeat: no-repeat;
 }
 
 div.open-sidebar:hover {
@@ -285,7 +386,7 @@ div.open-sidebar:hover {
 }
 
 .dialog-container[sidebar] div.open-sidebar {
-  display: none;;
+  display: none;
 }
 
 .dialog-container[sidebar] div.close-sidebar {
@@ -296,12 +397,8 @@ div.open-sidebar:hover {
 .dialog-body {
   -webkit-box-orient: vertical;
   -webkit-box-flex: 1;
-  border: 1px #aaa solid;
-  border-radius: 4px;
+  border-top: 1px solid #d4d4d4;
   display: -webkit-box;
-  margin-right: 15px;
-  margin-bottom: 15px;
-  margin-left: 15px;
   overflow: hidden;
   -webkit-transition: all 180ms ease;
 }
@@ -309,15 +406,31 @@ div.open-sidebar:hover {
 .dialog-container[sidebar] .dialog-body {
   -webkit-border-top-left-radius: 0;
   -webkit-border-bottom-left-radius: 0;
-  margin-left: 0;
 }
 
 /* Container for the ok/cancel buttons. */
 .dialog-footer {
   -webkit-box-orient: horizontal;
+  -webkit-box-align: center;
   display: -webkit-box;
   margin: 15px;
   margin-top: 0;
+}
+
+.dialog-footer:not([progress]) .progress-bar,
+.dialog-footer:not([progress]) .preparing-label {
+  display: none;
+}
+
+.dialog-footer[progress] .ok,
+.dialog-footer[progress] .filename-label,
+.dialog-footer[progress] .filename-input {
+  display: none;
+}
+
+.dialog-footer .progress-bar {
+  -webkit-margin-start: 20px;
+  -webkit-margin-end: 20px;
 }
 
 /* The container for breadcrumb elements. */
@@ -327,11 +440,8 @@ div.open-sidebar:hover {
   -webkit-margin-end: 5px;
   display: -webkit-box;
   -webkit-box-align: center;
-  font-size: 15px;
-  /* Root list line-height is 20px but font is taller.
-     Adjusted to align icons accordingly. */
   line-height: 20px;
-  height: 20px;
+  padding-top: 1px;
   overflow: hidden;
 }
 
@@ -351,7 +461,6 @@ div.open-sidebar:hover {
 .breadcrumb-path {
   color: #265692;
   cursor: pointer;
-  font-size: 14px;
   text-overflow: ellipsis;
   white-space: nowrap;
   overflow: hidden;
@@ -359,31 +468,29 @@ div.open-sidebar:hover {
 
 /* The final breadcrumb, representing the current directory. */
 .breadcrumb-last {
-  color: #666;
-  cursor: inherit;
-  font-weight: bold;
+  color: black;
+  cursor: default;
 }
 
 /* The > arrow between breadcrumbs. */
-.breadcrumbs .separator:before{
-  -webkit-padding-start: 7px;
-  -webkit-padding-end: 4px;
-  color: #aaa;
-  font-size: 12px;
-  content: '\025b8';  /* Arrow symbol. */
-}
 
 .breadcrumbs .separator {
   overflow: hidden;
+  width: 25px;
+  background-image: url('../images/breadcrumb-separator.png');
+  background-position: center center;
+  background-repeat: no-repeat;
+  height: 10px;
 }
 
-.dialog-header > div > button {
+.dialog-header button {
   -webkit-border-radius: 0;
   border: none;
   height: 28px;
   min-width: 0;
   padding: 0;
-  width: 28px;
+  background-position: left top;
+  background-repeat: no-repeat;
 }
 
 /* button:hover and button[disabled]:hover rules must be override by placing
@@ -391,10 +498,13 @@ div.open-sidebar:hover {
  */
 button.detail-view {
   background-image: url('../images/icon_list_view_off.png');
+  width: 29px;
+  border-right: 1px solid #9d9d9d;
 }
 
 button.thumbnail-view {
   background-image: url('../images/icon_thumb_view_off.png');
+  width: 28px;
 }
 
 button.detail-view[disabled] {
@@ -415,6 +525,19 @@ button.thumbnail-view[disabled] {
   display: -webkit-box;
   -webkit-box-flex: 1;
   position: relative;
+}
+
+.spinner {
+  width: 22px;
+  height: 22px;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  margin-left: -11px;
+  margin-top: -11px;
+  background-image: url(../images/spinner.svg);
+  background-size: 100%;
+  opacity: 0.5;
 }
 
 .downloads-warning {
@@ -478,6 +601,31 @@ div.img-container {
 
 div.img-container > img {
   position: absolute;
+  -webkit-user-drag: none;
+}
+
+.list-container list > *,
+.list-container grid > * {
+  background-image: none;
+  border-radius: 0;
+  line-height: 30px;
+}
+
+.list-container list > [selected],
+.list-container grid > [selected] {
+  background-color: #cbdbf1;
+  border-color: #e0e9f7;
+}
+
+.list-container list > [selected]:hover,
+.list-container grid > [selected]:hover {
+  background-color: #c1d3ec;
+}
+
+.list-container list > :hover,
+.list-container grid > :hover {
+  background-color: #f2f6fa;
+  border-color: #f2f6fa;
 }
 
 .table-row-cell .filename-label,
@@ -493,13 +641,22 @@ div.img-container > img {
 
 /* Text box used for renaming in the detail list. */
 .table-row-cell input.rename {
+  line-height: 20px;
   -webkit-margin-start: -3px;
+}
+
+/* Elements that need to be LTR even in an RTL context, but should align
+ * left. Display size in Hebrew is such a case.
+ */
+html[dir='rtl'] .align-end-weakrtl {
+  direction: ltr;
+  text-align: left;
 }
 
 input.rename {
   font: inherit;
   text-align: inherit;
-  height: 16px;
+  line-height: 1;
 }
 
 .table-row-cell .filename-label,
@@ -517,6 +674,11 @@ input.rename {
   width: 114px;
   height: 20px;
   -webkit-box-sizing: border-box;
+}
+
+.thumbnail-grid li,
+.detail-table list li {
+  -webkit-user-drag: element;
 }
 
 /* The cr.ui.Table representing the detailed file list. */
@@ -573,13 +735,15 @@ input.rename {
 
 .preview-thumbnails > div {
   border: 1px solid #fff;
-  -webkit-box-shadow: 2px 2px 6px rgba(0, 0, 0, 0.2);
+  -webkit-box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
   background-color: #F2F2F2;
 }
 
 .preview-thumbnails > div > div.popup {
   border: 2px solid #fff;
-  -webkit-box-shadow: 3px 3px 9px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 0 0 1px #F0F0F0,
+              0 0 0 2px #D0D0D0,
+              2px 2px 6px rgba(0, 0, 0, 0.2);
   background-color: #F2F2F2;
   margin: 0;
   z-index: 1;
@@ -608,20 +772,39 @@ input.rename {
 .table-header-splitter {
   -webkit-border-start: 1px #aaa solid;
   background-color: inherit;
-  height: 28px;
+  height: 27px;
 }
 
 /* Container for a table header. */
 .table-header {
   -webkit-box-sizing: border-box;
-  border-bottom: 1px #aaa solid;
+  border-bottom: 1px #d2d2d2 solid;
   background-image: -webkit-linear-gradient(top, #f9f9f9, #e8e8e8);
-  height: 28px;
+  height: 27px;
 }
 
-.list-container .table-header {
-  border-radius: 4px 0 0 0;
+.table-header-sort-image-desc::after {
+  -webkit-padding-start: 13px;
+  color: #888;
+  background-image: url(../images/sort_desc.png);
+  background-position: center center;
+  background-repeat: no-repeat;
+  content: '\00a0';
+  position: relative;
+  top: 0px;
 }
+
+.table-header-sort-image-asc::after {
+  -webkit-padding-start: 13px;
+  color: #888;
+  background-image: url(../images/sort_asc.png);
+  background-position: center center;
+  background-repeat: no-repeat;
+  content: '\00a0';
+  position: relative;
+  top: 0px;
+}
+
 
 .preview-container .table-header {
   border-radius: 0 4px 0 0;
@@ -629,23 +812,15 @@ input.rename {
 
 /* Text label in a table header. */
 .table-header-label {
-  margin-top: 6px;
+  margin: 5px 10px 0 10px;
 }
 
-/* First column has no label, so we want the sort indicator to take up the
- * whole space.
- */
-.table-header-cell:first-child .table-header-sort-image-desc:after,
-.table-header-cell:first-child .table-header-sort-image-asc:after {
-  -webkit-padding-start: 0;
-}
-
-/* The first child of a list cell. */
 .table-row-cell > * {
-  -webkit-margin-start: 5px;
   -webkit-box-align: center;
-  -webkit-box-orient: horizontal;
   -webkit-box-flex: 1;
+  -webkit-box-orient: horizontal;
+  margin: 0;
+  padding: 0 10px;
 }
 
 .table-row-cell > .detail-name {
@@ -653,10 +828,15 @@ input.rename {
 }
 
 .file-checkbox {
+  -webkit-margin-end: 0;
+  -webkit-margin-start: 0;
   position: relative;
   z-index: 2;
-  -webkit-margin-end: 0;
-  opacity: 0.1;
+}
+
+.file-checkbox,
+.pin {
+  opacity: 0.3;
 }
 
 #select-all-checkbox {
@@ -677,17 +857,22 @@ li.thumbnail-item .file-checkbox {
 }
 
 li.table-row:hover .file-checkbox,
+li.table-row:hover .pin,
 li.thumbnail-item:hover .file-checkbox {
   opacity: 0.5;
 }
 
 .file-checkbox:hover,
+.pin:hover,
 li.table-row[selected] .file-checkbox,
+li.table-row[selected] .pin,
+li.table-row .pin:checked,
 li.thumbnail-item[selected] .file-checkbox {
   opacity: 1 !important;
 }
 
 li.table-row {
+  line-height: 38px;
   padding-top: 1px;
   padding-bottom: 1px;
 }
@@ -702,6 +887,10 @@ li.table-row {
 }
 
 /* Icon for files in the detail list. */
+.detail-icon[iconType="archive"] {
+  background-image: url(../images/filetype_archive.png);
+}
+
 .detail-icon[iconType="audio"] {
   background-image: url(../images/filetype_audio.png);
 }
@@ -712,6 +901,10 @@ li.table-row {
 
 .detail-icon[iconType="doc"] {
   background-image: url(../images/filetype_doc.png);
+}
+
+.detail-icon[iconType="excel"] {
+  background-image: url(../images/filetype_excel.png);
 }
 
 .detail-icon[iconType="folder"] {
@@ -728,6 +921,10 @@ li.table-row {
 
 .detail-icon[iconType="pdf"] {
   background-image: url(../images/filetype_pdf.png);
+}
+
+.detail-icon[iconType="ppt"] {
+  background-image: url(../images/filetype_ppt.png);
 }
 
 .detail-icon[iconType="presentation"] {
@@ -748,6 +945,30 @@ li.table-row {
 
 .detail-icon[iconType="video"] {
   background-image: url(../images/filetype_video.png);
+}
+
+.detail-icon[iconType="word"] {
+  background-image: url(../images/filetype_word.png);
+}
+
+.detail-icon[iconType="gdoc"] {
+  background-image: url(../images/filetype_doc.png);
+}
+
+.detail-icon[iconType="gsheet"] {
+  background-image: url(../images/filetype_spreadsheet.png);
+}
+
+.detail-icon[iconType="gslides"] {
+  background-image: url(../images/filetype_presentation.png);
+}
+
+.detail-icon[iconType="gdraw"] {
+  background-image: url(../images/filetype_drawing.png);
+}
+
+.detail-icon[iconType="gtable"] {
+  background-image: url(../images/filetype_table.png);
 }
 
 /* The filename text in the preview pane. */
@@ -804,8 +1025,8 @@ li.table-row {
 }
 
 .delete-button {
-  -webkit-margin-start: 4px;
-  -webkit-margin-end: 4px;
+  -webkit-margin-start: 8px;
+  -webkit-margin-end: 8px;
 }
 
 .task-item {
@@ -814,6 +1035,8 @@ li.table-row {
   -webkit-box-align: center;
   text-align: left;
   padding: 5px;
+  -webkit-padding-end: 10px;
+  -webkit-padding-start: 10px;
 }
 
 .task-item > div {
@@ -829,6 +1052,7 @@ li.table-row {
 
 /* The selection summary text at the bottom of the preview pane. */
 .preview-summary {
+  -webkit-box-flex: 1;
   color: #666666;
   overflow: hidden;
   padding: 5px;
@@ -839,6 +1063,7 @@ li.table-row {
 
 .dialog-footer .filename-label {
   -webkit-box-orient: horizontal;
+  background-color: white;
   color: #666;
   display: -webkit-box;
   font-weight: bold;
@@ -871,6 +1096,13 @@ li.table-row {
   display: -webkit-box;
 }
 
+/* GData-specfic styles */
+
+[gdata][offline] .table-row-cell > :not(.gdata-present),
+[gdata][offline] .thumbnail-item > :not(.gdata-present) {
+  color: #808080;
+}
+
 /* Overlay pane covering the entire file manager window (e.g. image editor)*/
 .overlay-pane {
   position: absolute;
@@ -880,4 +1112,70 @@ li.table-row {
   height: 100%;
   border: none;
   z-index: 100;
+}
+
+/* Invisible container for elements representing files while dragging. */
+#drag-image-container {
+  position: fixed;
+  /* Only nodes in visible viewport will be rendered. */
+  top: 0;
+  left: 0;
+  display: -webkit-box;
+  -webkit-box-orient: horizontal;
+  padding-left: 100px;
+  z-index: -1;  /* below .dialog-container */
+}
+
+#drag-image-container > * {
+  display: inline-block;
+  background-color: #CBDBF1;
+  border-color: #E0E9F7;
+  border: 1px solid white; /* transparent white */
+  cursor: default;
+  line-height: 20px;
+  margin: 0 0 0 -100px;
+  overflow: hidden;
+  padding: 0 3px;
+  position: relative; /* to allow overlap */
+  text-overflow: ellipsis;
+  white-space: pre;
+}
+
+#drag-image-container > li input[type=checkbox] {
+  display: none;
+}
+
+menu.file-context-menu {
+  z-index: 4;
+}
+
+input.common.pin[type="checkbox"]:checked::after {
+  content: url('../images/pin.png');
+  left: 3px;
+  top: -4px;
+}
+
+div.offline {
+  -webkit-box-pack: center;
+  display: -webkit-box;
+}
+
+div.offline > * {
+  -webkit-box-align: center;
+  display: -webkit-box;
+}
+
+div.shade {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  background-color: rgba(255, 255, 255, 0.8);
+  opacity: 0;
+  webkit-transition: opacity 1000ms linear;
+}
+
+div.shade[fadein] {
+  opacity: 1;
 }

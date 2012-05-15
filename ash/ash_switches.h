@@ -11,16 +11,18 @@
 namespace ash {
 namespace switches {
 
+// Note: If you add a switch, consider if it needs to be copied to a subsequent
+// command line if the process executes a new copy of itself.  (For example,
+// see chromeos::LoginUtil::GetOffTheRecordCommandLine().)
+
 // Please keep alphabetized.
-ASH_EXPORT extern const char kAuraForceCompactWindowMode[];
+ASH_EXPORT extern const char kDisableAshUberTray[];
+ASH_EXPORT extern const char kAshEnableOak[];
 ASH_EXPORT extern const char kAuraGoogleDialogFrames[];
 ASH_EXPORT extern const char kAuraLegacyPowerButton[];
 ASH_EXPORT extern const char kAuraNoShadows[];
-ASH_EXPORT extern const char kAuraTranslucentFrames[];
-ASH_EXPORT extern const char kAuraWindowMode[];
-ASH_EXPORT extern const char kAuraWindowModeCompact[];
-ASH_EXPORT extern const char kAuraWindowModeNormal[];
-ASH_EXPORT extern const char kAuraWorkspaceManager[];
+ASH_EXPORT extern const char kAuraWindowAnimationsDisabled[];
+ASH_EXPORT extern const char kAuraPanelManager[];
 
 }  // namespace switches
 }  // namespace ash

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,10 +21,6 @@ class AutocompleteEditModel;
 struct AutocompleteMatch;
 class AutocompleteResultView;
 class Profile;
-
-namespace gfx {
-class CanvasSkia;
-}
 
 namespace views {
 class BubbleBorder;
@@ -77,7 +73,7 @@ class AutocompletePopupContentsView : public views::View,
   virtual void OnMouseExited(const views::MouseEvent& event) OVERRIDE;
 
  protected:
-  virtual void PaintResultViews(gfx::CanvasSkia* canvas);
+  virtual void PaintResultViews(gfx::Canvas* canvas);
 
   // Calculates the height needed to show all the results in the model.
   virtual int CalculatePopupHeight();

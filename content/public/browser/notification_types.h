@@ -102,12 +102,6 @@ enum NotificationType {
   // are provided.
   NOTIFICATION_LOAD_FROM_MEMORY_CACHE,
 
-  // A provisional content load has failed with an error.  The source will be
-  // a Source<NavigationController> corresponding to the tab in which the
-  // load occurred.  Details in the form of a ProvisionalLoadDetails object
-  // are provided.
-  NOTIFICATION_FAIL_PROVISIONAL_LOAD_WITH_ERROR,
-
   // A response has been received for a resource request.  The source will be
   // a Source<WebContents> corresponding to the tab in which the request was
   // issued.  Details in the form of a ResourceRequestDetails object are
@@ -153,13 +147,6 @@ enum NotificationType {
   // controller associated with the state change.
   NOTIFICATION_SSL_INTERNAL_STATE_CHANGED,
 
-  // The user accepted or dismissed a SSL client authentication request.
-  // The source is a Source<SSLClientAuthHandler>.  Details is a
-  // SSLClientAuthNotificationDetails which records specifies which
-  // SSLCertRequestInfo the request was for and which X509Certificate was
-  // selected (if any).
-  NOTIFICATION_SSL_CLIENT_AUTH_CERT_SELECTED,
-
 #if defined(OS_MACOSX)
   // This message is sent when the application is made active (Mac OS X only
   // at present). No source or details are passed.
@@ -191,14 +178,18 @@ enum NotificationType {
   //  The source and details are unspecified.
   NOTIFICATION_APP_EXITING,
 
+  // Indicates that a devtools window is opening. The source is the
+  // BrowserContext* and the details is the inspected RenderViewHost*.
+  NOTIFICATION_DEVTOOLS_WINDOW_OPENING,
+
   // Indicates that a devtools window is closing. The source is the
-  // content::BrowserContext* and the details is the inspected RenderViewHost*.
+  // BrowserContext* and the details is the inspected RenderViewHost*.
   NOTIFICATION_DEVTOOLS_WINDOW_CLOSING,
 
   // Tabs --------------------------------------------------------------------
 
   // Sent when a tab is added to a WebContentsDelegate. The source is the
-  // WebContentsDelegate and the details is the added content::WebContents.
+  // WebContentsDelegate and the details is the added WebContents.
   NOTIFICATION_TAB_ADDED,
 
   // This notification is sent after a tab has been appended to the tab_strip.
@@ -238,7 +229,7 @@ enum NotificationType {
 
   // This notification is sent after TabContents' title is updated. The source
   // is a Source<WebContents> with a pointer to the WebContents. The details
-  // is a Details<TitleUpdatedDetails> that contains more information.
+  // is a std::pair<NavigationEntry*, bool> that contains more information.
   NOTIFICATION_WEB_CONTENTS_TITLE_UPDATED,
 
   // This notification is sent when a WebContents is being hidden, e.g. due
@@ -310,7 +301,7 @@ enum NotificationType {
 
   // This notifies the observer that a PaintAtSizeACK was received. The source
   // is the RenderWidgetHost, the details are an instance of
-  // RenderWidgetHost::PaintAtSizeAckDetails.
+  // std::pair<int, gfx::Size>.
   NOTIFICATION_RENDER_WIDGET_HOST_DID_RECEIVE_PAINT_AT_SIZE_ACK,
 
   // This notifies the observer that a HandleInputEventACK was received. The
@@ -359,25 +350,30 @@ enum NotificationType {
   // RenderViewHost and may be a Null Value.
   NOTIFICATION_EXECUTE_JAVASCRIPT_RESULT,
 
+  // Notification from WebContents that we have received a response from the
+  // renderer in response to a dom automation controller action. The source is
+  // the RenderViewHost, and hte details is a DomOperationNotificationDetails.
+  NOTIFICATION_DOM_OPERATION_RESPONSE,
+
   // Child Processes ---------------------------------------------------------
 
   // This notification is sent when a child process host has connected to a
   // child process.  There is no usable source, since it is sent from an
   // ephemeral task; register for AllSources() to receive this notification.
-  // The details are in a Details<content::ChildProcessData>.
+  // The details are in a Details<ChildProcessData>.
   NOTIFICATION_CHILD_PROCESS_HOST_CONNECTED,
 
   // This message is sent after a ChildProcessHost is disconnected from the
   // child process.  There is no usable source, since it is sent from an
   // ephemeral task; register for AllSources() to receive this notification.
-  // The details are in a Details<content::ChildProcessData>.
+  // The details are in a Details<ChildProcessData>.
   NOTIFICATION_CHILD_PROCESS_HOST_DISCONNECTED,
 
   // This message is sent when a child process disappears
   // unexpectedly as a result of a crash.  There is no usable
   // source, since it is sent from an ephemeral task; register for
   // AllSources() to receive this notification.  The details are in
-  // a Details<content::ChildProcessData>.
+  // a Details<ChildProcessData>.
   NOTIFICATION_CHILD_PROCESS_CRASHED,
 
   // This message indicates that an instance of a particular child was
@@ -387,7 +383,7 @@ enum NotificationType {
   //
   // There is no usable source, since it is sent from an ephemeral task;
   // register for AllSources() to receive this notification.  The details are
-  // in a Details<content::ChildProcessData>.
+  // in a Details<ChildProcessData>.
   NOTIFICATION_CHILD_INSTANCE_CREATED,
 
   // Saved Pages -------------------------------------------------------------
@@ -396,12 +392,6 @@ enum NotificationType {
   // SavePackage, and Details are a GURL containing address of downloaded
   // page.
   NOTIFICATION_SAVE_PACKAGE_SUCCESSFULLY_FINISHED,
-
-  // Purge Memory ------------------------------------------------------------
-
-  // Sent on the IO thread when the system should try to reduce the amount of
-  // memory in use, no source or details are passed. See memory_purger.h .cc.
-  NOTIFICATION_PURGE_MEMORY,
 
   // Sent before the repost form warning is brought up.
   // The source is a NavigationController.

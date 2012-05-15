@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -41,13 +41,15 @@ SearchEngineManagerHandler::~SearchEngineManagerHandler() {
     list_controller_->table_model()->SetObserver(NULL);
 }
 
-void SearchEngineManagerHandler::Initialize() {
+void SearchEngineManagerHandler::InitializeHandler() {
   list_controller_.reset(
       new KeywordEditorController(Profile::FromWebUI(web_ui())));
-  if (list_controller_.get()) {
-    list_controller_->table_model()->SetObserver(this);
-    OnModelChanged();
-  }
+  DCHECK(list_controller_.get());
+  list_controller_->table_model()->SetObserver(this);
+}
+
+void SearchEngineManagerHandler::InitializePage() {
+  OnModelChanged();
 }
 
 void SearchEngineManagerHandler::GetLocalizedValues(
@@ -115,6 +117,7 @@ void SearchEngineManagerHandler::RegisterMessages() {
 }
 
 void SearchEngineManagerHandler::OnModelChanged() {
+  DCHECK(list_controller_.get());
   if (!list_controller_->loaded())
     return;
 
@@ -247,11 +250,9 @@ void SearchEngineManagerHandler::EditSearchEngine(const ListValue* args) {
   if (index < -1 || index >= list_controller_->table_model()->RowCount())
     return;
 
-  const TemplateURL* edit_url = NULL;
-  if (index != -1)
-    edit_url = list_controller_->GetTemplateURL(index);
   edit_controller_.reset(new EditSearchEngineController(
-      edit_url, this, Profile::FromWebUI(web_ui())));
+      (index == -1) ? NULL : list_controller_->GetTemplateURL(index), this,
+      Profile::FromWebUI(web_ui())));
 }
 
 void SearchEngineManagerHandler::OnEditedKeyword(
@@ -259,11 +260,10 @@ void SearchEngineManagerHandler::OnEditedKeyword(
     const string16& title,
     const string16& keyword,
     const std::string& url) {
-  if (template_url) {
+  if (template_url)
     list_controller_->ModifyTemplateURL(template_url, title, keyword, url);
-  } else {
+  else
     list_controller_->AddTemplateURL(title, keyword, url);
-  }
   edit_controller_.reset();
 }
 

@@ -17,7 +17,8 @@ namespace chromeos {
 // chromeos::SystemNotification.
 class BalloonCollectionImplAura : public ::BalloonCollectionImpl {
  public:
-  BalloonCollectionImplAura() {}
+  BalloonCollectionImplAura();
+  virtual ~BalloonCollectionImplAura();
 
   // Adds a callback for WebUI message. Returns true if the callback
   // is succssfully registered, or false otherwise. It fails to add if
@@ -50,7 +51,7 @@ class BalloonCollectionImplAura : public ::BalloonCollectionImpl {
   // Creates a new balloon. Overridable by unit tests.  The caller is
   // responsible for freeing the pointer returned.
   virtual Balloon* MakeBalloon(const Notification& notification,
-                               Profile* profile);
+                               Profile* profile) OVERRIDE;
 
  private:
   // Set of unique ids associated with system notifications, used by

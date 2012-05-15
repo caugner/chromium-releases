@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/time.h"
 #include "base/timer.h"
 #include "chrome/browser/icon_manager.h"
@@ -26,7 +27,7 @@
 class BaseDownloadItemModel;
 class DownloadShelfContextMenuGtk;
 class DownloadShelfGtk;
-class GtkThemeService;
+class ThemeServiceGtk;
 class NineBox;
 
 namespace gfx {
@@ -48,9 +49,9 @@ class DownloadItemGtk : public content::DownloadItem::Observer,
   // Destroys all widgets belonging to this DownloadItemGtk.
   virtual ~DownloadItemGtk();
 
-  // DownloadItem::Observer implementation.
+  // content::DownloadItem::Observer implementation.
   virtual void OnDownloadUpdated(content::DownloadItem* download) OVERRIDE;
-  virtual void OnDownloadOpened(content::DownloadItem* download) OVERRIDE { }
+  virtual void OnDownloadOpened(content::DownloadItem* download) OVERRIDE;
 
   // ui::AnimationDelegate implementation.
   virtual void AnimationProgressed(const ui::Animation* animation) OVERRIDE;
@@ -72,9 +73,6 @@ class DownloadItemGtk : public content::DownloadItem::Observer,
 
  private:
   friend class DownloadShelfContextMenuGtk;
-
-  // Returns true IFF the download is dangerous and unconfirmed.
-  bool IsDangerous();
 
   // Functions for controlling the progress animation.
   // Repaint the download progress.
@@ -103,6 +101,9 @@ class DownloadItemGtk : public content::DownloadItem::Observer,
 
   // Sets the icon for the danger warning dialog.
   void UpdateDangerIcon();
+
+  // Reenables the download button after it has been clicked.
+  void ReenableHbox();
 
   static void InitNineBoxes();
 
@@ -185,7 +186,7 @@ class DownloadItemGtk : public content::DownloadItem::Observer,
   bool menu_showing_;
 
   // Whether we should use the GTK text color
-  GtkThemeService* theme_service_;
+  ThemeServiceGtk* theme_service_;
 
   // The widget that contains the animation progress and the file's icon
   // (as well as the complete animation).
@@ -240,6 +241,13 @@ class DownloadItemGtk : public content::DownloadItem::Observer,
   // Indicates when the download has completed, so we don't redo
   // on-completion actions.
   bool download_complete_;
+
+  // Whether we are currently disabled as part of opening the downloaded file.
+  bool disabled_while_opening_;
+
+  // Method factory used to delay reenabling of the item when opening the
+  // downloaded file.
+  base::WeakPtrFactory<DownloadItemGtk> weak_ptr_factory_;
 };
 
 #endif  // CHROME_BROWSER_UI_GTK_DOWNLOAD_DOWNLOAD_ITEM_GTK_H_

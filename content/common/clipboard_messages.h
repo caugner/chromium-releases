@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,7 +24,7 @@ template<>
 struct ParamTraits<ui::Clipboard::FormatType> {
   typedef ui::Clipboard::FormatType param_type;
   static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, void** iter, param_type* r);
+  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
   static void Log(const param_type& p, std::string* l);
 };
 
@@ -52,6 +52,8 @@ IPC_SYNC_MESSAGE_CONTROL2_1(ClipboardHostMsg_IsFormatAvailable,
                             ui::Clipboard::FormatType /* format */,
                             ui::Clipboard::Buffer /* buffer */,
                             bool /* result */)
+IPC_MESSAGE_CONTROL1(ClipboardHostMsg_Clear,
+                     ui::Clipboard::Buffer /* buffer */)
 IPC_SYNC_MESSAGE_CONTROL1_2(ClipboardHostMsg_ReadAvailableTypes,
                             ui::Clipboard::Buffer /* buffer */,
                             std::vector<string16> /* types */,

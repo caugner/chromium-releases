@@ -11,21 +11,22 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/common/render_messages.h"
-#include "content/browser/in_process_webkit/webkit_context.h"
-#include "content/browser/renderer_host/backing_store_manager.h"
-#include "content/public/browser/notification_service.h"
-#include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/render_widget_host.h"
+#include "content/public/browser/resource_context.h"
 #include "net/proxy/proxy_resolver.h"
 #include "net/proxy/proxy_service.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
-#include "third_party/tcmalloc/chromium/src/google/malloc_extension.h"
+#include "third_party/tcmalloc/chromium/src/gperftools/malloc_extension.h"
 
+using content::BrowserContext;
 using content::BrowserThread;
+using content::ResourceContext;
 
 // PurgeMemoryHelper -----------------------------------------------------------
 
@@ -36,6 +37,7 @@ class PurgeMemoryIOHelper
     : public base::RefCountedThreadSafe<PurgeMemoryIOHelper> {
  public:
   PurgeMemoryIOHelper() {
+    safe_browsing_service_ = g_browser_process->safe_browsing_service();
   }
 
   void AddRequestContextGetter(
@@ -45,31 +47,27 @@ class PurgeMemoryIOHelper
 
  private:
   typedef scoped_refptr<net::URLRequestContextGetter> RequestContextGetter;
-  typedef std::set<RequestContextGetter> RequestContextGetters;
 
-  RequestContextGetters request_context_getters_;
+  std::vector<RequestContextGetter> request_context_getters_;
+  scoped_refptr<SafeBrowsingService> safe_browsing_service_;
 
   DISALLOW_COPY_AND_ASSIGN(PurgeMemoryIOHelper);
 };
 
 void PurgeMemoryIOHelper::AddRequestContextGetter(
     scoped_refptr<net::URLRequestContextGetter> request_context_getter) {
-  request_context_getters_.insert(request_context_getter);
+  request_context_getters_.push_back(request_context_getter);
 }
 
 void PurgeMemoryIOHelper::PurgeMemoryOnIOThread() {
   // Ask ProxyServices to purge any memory they can (generally garbage in the
   // wrapped ProxyResolver's JS engine).
-  for (RequestContextGetters::const_iterator i(
-           request_context_getters_.begin());
-       i != request_context_getters_.end(); ++i)
-    (*i)->GetURLRequestContext()->proxy_service()->PurgeMemory();
+  for (size_t i = 0; i < request_context_getters_.size(); ++i) {
+    request_context_getters_[i]->GetURLRequestContext()->proxy_service()->
+        PurgeMemory();
+  }
 
-  // The appcache and safe browsing services listen for this notification.
-  content::NotificationService::current()->Notify(
-      content::NOTIFICATION_PURGE_MEMORY,
-      content::Source<void>(NULL),
-      content::NotificationService::NoDetails());
+  safe_browsing_service_->PurgeMemory();
 }
 
 // -----------------------------------------------------------------------------
@@ -87,7 +85,7 @@ void MemoryPurger::PurgeAll() {
 // static
 void MemoryPurger::PurgeBrowser() {
   // Dump the backing stores.
-  BackingStoreManager::RemoveAllBackingStores();
+  content::RenderWidgetHost::RemoveAllBackingStores();
 
   // Per-profile cleanup.
   scoped_refptr<PurgeMemoryIOHelper> purge_memory_io_helper(
@@ -115,10 +113,7 @@ void MemoryPurger::PurgeBrowser() {
     if (web_data_service)
       web_data_service->UnloadDatabase();
 
-    // Ask all WebKitContexts to purge memory (freeing memory used to cache
-    // the LocalStorage sqlite DB).  WebKitContext creation is basically free so
-    // we don't bother with a "...WithoutCreating()" function.
-    profiles[i]->GetWebKitContext()->PurgeMemory();
+    BrowserContext::PurgeMemory(profiles[i]);
   }
 
   BrowserThread::PostTask(

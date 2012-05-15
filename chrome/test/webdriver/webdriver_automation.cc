@@ -202,6 +202,9 @@ void Automation::Init(
     Error** error) {
   // Prepare Chrome's command line.
   CommandLine command(CommandLine::NO_PROGRAM);
+  if (CommandLine::ForCurrentProcess()->HasSwitch("no-sandbox")) {
+    command.AppendSwitch(switches::kNoSandbox);
+  }
   command.AppendSwitch(switches::kDisableHangMonitor);
   command.AppendSwitch(switches::kDisablePromptOnRepost);
   command.AppendSwitch(switches::kDomAutomationController);
@@ -876,7 +879,7 @@ void Automation::SetLocalStatePreference(const std::string& pref,
     request_dict.SetString("command", "SetLocalStatePrefs");
     request_dict.SetString("path", pref);
     request_dict.Set("value", scoped_value.release());
-    base::JSONWriter::Write(&request_dict, false, &request);
+    base::JSONWriter::Write(&request_dict, &request);
     if (!automation()->GetBrowserWindow(0)->SendJSONRequest(
             request, -1, &response)) {
       *error = new Error(kUnknownError, base::StringPrintf(
@@ -903,7 +906,7 @@ void Automation::SetPreference(const std::string& pref,
     request_dict.SetInteger("windex", 0);
     request_dict.SetString("path", pref);
     request_dict.Set("value", scoped_value.release());
-    base::JSONWriter::Write(&request_dict, false, &request);
+    base::JSONWriter::Write(&request_dict, &request);
     if (!automation()->GetBrowserWindow(0)->SendJSONRequest(
             request, -1, &response)) {
       *error = new Error(kUnknownError, base::StringPrintf(

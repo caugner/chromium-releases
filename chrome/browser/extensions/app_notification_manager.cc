@@ -13,10 +13,11 @@
 #include "base/stl_util.h"
 #include "base/time.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sync/protocol/app_notification_specifics.pb.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "content/public/browser/notification_service.h"
+#include "sync/protocol/app_notification_specifics.pb.h"
+#include "sync/protocol/sync.pb.h"
 
 using content::BrowserThread;
 
@@ -56,8 +57,7 @@ void PopulateGuidToSyncDataMap(const SyncDataList& sync_data,
                                SyncDataMap* data_map) {
   for (SyncDataList::const_iterator iter = sync_data.begin();
        iter != sync_data.end(); ++iter) {
-    (*data_map)[iter->GetSpecifics().GetExtension(
-        sync_pb::app_notification).guid()] = *iter;
+    (*data_map)[iter->GetSpecifics().app_notification().guid()] = *iter;
   }
 }
 }  // namespace
@@ -66,7 +66,6 @@ const unsigned int AppNotificationManager::kMaxNotificationPerApp = 5;
 
 AppNotificationManager::AppNotificationManager(Profile* profile)
     : profile_(profile),
-      sync_processor_(NULL),
       models_associated_(false),
       processing_syncer_changes_(false) {
   registrar_.Add(this,
@@ -109,7 +108,7 @@ bool AppNotificationManager::Add(AppNotification* item) {
 
   SyncAddChange(*linked_item);
 
-  sort(list.begin(), list.end(), AppNotificationSortPredicate);
+  std::sort(list.begin(), list.end(), AppNotificationSortPredicate);
 
   if (list.size() > AppNotificationManager::kMaxNotificationPerApp) {
     AppNotification* removed = list.begin()->get();
@@ -336,28 +335,44 @@ SyncError AppNotificationManager::ProcessSyncChanges(
       continue;
     }
 
-    if (change_type == SyncChange::ACTION_ADD && !existing_notif) {
-      Add(new_notif.release());
-    } else if (change_type == SyncChange::ACTION_DELETE && existing_notif) {
-      Remove(new_notif->extension_id(), new_notif->guid());
-    } else if (change_type == SyncChange::ACTION_DELETE && !existing_notif) {
-      // This should never happen. But we are seeting this sometimes, and it
-      // stops all of sync. See bug http://crbug.com/108088
-      // So until we figure out the root cause, just log an error and ignore.
-      NOTREACHED() << "ERROR: Got delete change for non-existing item.";
-      LOG(ERROR) << "ERROR: Got delete change for non-existing item.";
-      continue;
-    } else {
-      // Something really unexpected happened. Either we received an
-      // ACTION_INVALID, or Sync is in a crazy state:
-      // - Trying to UPDATE: notifications are immutable.
-      // . Trying to DELETE a non-existent item.
-      // - Trying to ADD an item that already exists.
-      NOTREACHED() << "Unexpected sync change state.";
-      error = SyncError(FROM_HERE, "ProcessSyncChanges failed on ChangeType " +
-          SyncChange::ChangeTypeToString(change_type),
-          syncable::APP_NOTIFICATIONS);
-      continue;
+    switch (change_type) {
+      case SyncChange::ACTION_ADD:
+        if (!existing_notif) {
+          Add(new_notif.release());
+        } else {
+          DLOG(ERROR) << "Got ADD change for an existing item.\n"
+                      << "Existing item: " << existing_notif->ToString()
+                      << "\nItem in ADD change: " << new_notif->ToString();
+        }
+        break;
+      case SyncChange::ACTION_DELETE:
+        if (existing_notif) {
+          Remove(new_notif->extension_id(), new_notif->guid());
+        } else {
+          // This should never happen. But we are seeting this sometimes, and
+          // it stops all of sync. See bug http://crbug.com/108088
+          // So until we figure out the root cause, log an error and ignore.
+          DLOG(ERROR) << "Got DELETE change for non-existing item.\n"
+                      << "Item in DELETE change: " << new_notif->ToString();
+        }
+        break;
+      case SyncChange::ACTION_UPDATE:
+        // Although app notifications are immutable from the model perspective,
+        // sync can send UPDATE changes due to encryption / meta-data changes.
+        // So ignore UPDATE changes when the exitsing and new notification
+        // objects are the same. Log an error otherwise.
+        if (!existing_notif) {
+          DLOG(ERROR) << "Got UPDATE change for non-existing item."
+                      << "Item in UPDATE change: " << new_notif->ToString();
+        } else if (!existing_notif->Equals(*new_notif)) {
+          DLOG(ERROR) << "Got invalid UPDATE change:"
+                      << "New and existing notifications should be the same.\n"
+                      << "Existing item: " << existing_notif->ToString() << "\n"
+                      << "Item in UPDATE change: " << new_notif->ToString();
+        }
+        break;
+      default:
+        break;
     }
   }
 
@@ -367,15 +382,16 @@ SyncError AppNotificationManager::ProcessSyncChanges(
 SyncError AppNotificationManager::MergeDataAndStartSyncing(
     syncable::ModelType type,
     const SyncDataList& initial_sync_data,
-    SyncChangeProcessor* sync_processor) {
+    scoped_ptr<SyncChangeProcessor> sync_processor) {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   // AppNotificationDataTypeController ensures that modei is fully should before
   // this method is called by waiting until the load notification is received
   // from AppNotificationManager.
   DCHECK(loaded());
   DCHECK_EQ(type, syncable::APP_NOTIFICATIONS);
-  DCHECK(!sync_processor_);
-  sync_processor_ = sync_processor;
+  DCHECK(!sync_processor_.get());
+  DCHECK(sync_processor.get());
+  sync_processor_ = sync_processor.Pass();
 
   // We may add, or remove notifications here, so ensure we don't step on
   // our own toes.
@@ -427,7 +443,7 @@ SyncError AppNotificationManager::MergeDataAndStartSyncing(
 void AppNotificationManager::StopSyncing(syncable::ModelType type) {
   DCHECK_EQ(type, syncable::APP_NOTIFICATIONS);
   models_associated_ = false;
-  sync_processor_ = NULL;
+  sync_processor_.reset();
 }
 
 void AppNotificationManager::SyncAddChange(const AppNotification& notif) {
@@ -515,7 +531,7 @@ SyncData AppNotificationManager::CreateSyncDataFromNotification(
   DCHECK(!notification.is_local());
   sync_pb::EntitySpecifics specifics;
   sync_pb::AppNotification* notif_specifics =
-      specifics.MutableExtension(sync_pb::app_notification);
+      specifics.mutable_app_notification();
   notif_specifics->set_app_id(notification.extension_id());
   notif_specifics->set_creation_timestamp_ms(
       notification.creation_time().ToInternalValue());
@@ -532,7 +548,7 @@ SyncData AppNotificationManager::CreateSyncDataFromNotification(
 AppNotification* AppNotificationManager::CreateNotificationFromSyncData(
     const SyncData& sync_data) {
   sync_pb::AppNotification specifics =
-      sync_data.GetSpecifics().GetExtension(sync_pb::app_notification);
+      sync_data.GetSpecifics().app_notification();
 
   // Check for mandatory fields.
   if (!specifics.has_app_id() || !specifics.has_guid() ||

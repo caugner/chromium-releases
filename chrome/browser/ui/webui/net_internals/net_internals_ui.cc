@@ -29,7 +29,6 @@
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/net/chrome_net_log.h"
 #include "chrome/browser/net/connection_tester.h"
-#include "chrome/browser/net/passive_log_collector.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/prerender/prerender_manager.h"
@@ -252,11 +251,6 @@ class NetInternalsMessageHandler
   // be accessed on the UI thread.
   BooleanPrefMember http_throttling_enabled_;
 
-  // The pref member that determines whether experimentation on HTTP throttling
-  // is allowed (this becomes false once the user explicitly sets the
-  // feature to on or off).
-  BooleanPrefMember http_throttling_may_experiment_;
-
   // This is the "real" message handler, which lives on the IO thread.
   scoped_refptr<IOThreadImpl> proxy_;
 
@@ -279,7 +273,7 @@ class NetInternalsMessageHandler::IOThreadImpl
     : public base::RefCountedThreadSafe<
           NetInternalsMessageHandler::IOThreadImpl,
           BrowserThread::DeleteOnUIThread>,
-      public ChromeNetLog::ThreadSafeObserverImpl,
+      public net::NetLog::ThreadSafeObserver,
       public ConnectionTester::Delegate {
  public:
   // Type for methods that can be used as MessageHandler callbacks.
@@ -303,10 +297,6 @@ class NetInternalsMessageHandler::IOThreadImpl
   // Called once the WebUI has been deleted (i.e. renderer went away), on the
   // IO thread.
   void Detach();
-
-  // Sends all passive log entries in |passive_entries| to the Javascript
-  // handler, called on the IO thread.
-  void SendPassiveLogEntries(const ChromeNetLog::EntryList& passive_entries);
 
   // Called when the WebUI is deleted.  Prevents calling Javascript functions
   // afterwards.  Called on UI thread.
@@ -404,9 +394,6 @@ class NetInternalsMessageHandler::IOThreadImpl
   // This is only read and written to on the UI thread.
   bool was_webui_deleted_;
 
-  // True if we have attached an observer to the NetLog already.
-  bool is_observing_log_;
-
   // Log entries that have yet to be passed along to Javascript page.  Non-NULL
   // when and only when there is a pending delayed task to call
   // PostPendingEntries.  Read and written to exclusively on the IO Thread.
@@ -437,8 +424,6 @@ void NetInternalsMessageHandler::RegisterMessages() {
   PrefService* pref_service = profile->GetPrefs();
   http_throttling_enabled_.Init(
       prefs::kHttpThrottlingEnabled, pref_service, this);
-  http_throttling_may_experiment_.Init(
-      prefs::kHttpThrottlingMayExperiment, pref_service, NULL);
 
   proxy_ = new IOThreadImpl(this->AsWeakPtr(), g_browser_process->io_thread(),
                             profile->GetRequestContext());
@@ -623,14 +608,6 @@ void NetInternalsMessageHandler::OnEnableHttpThrottling(const ListValue* list) {
   }
 
   http_throttling_enabled_.SetValue(enable);
-
-  // We never receive OnEnableHttpThrottling unless the user has modified
-  // the value of the checkbox on the about:net-internals page.  Once the
-  // user does that, we no longer change its value automatically (e.g.
-  // by changing the default or running an experiment).
-  if (http_throttling_may_experiment_.GetValue()) {
-    http_throttling_may_experiment_.SetValue(false);
-  }
 }
 
 void NetInternalsMessageHandler::OnClearBrowserCache(const ListValue* list) {
@@ -763,12 +740,10 @@ NetInternalsMessageHandler::IOThreadImpl::IOThreadImpl(
     const base::WeakPtr<NetInternalsMessageHandler>& handler,
     IOThread* io_thread,
     net::URLRequestContextGetter* context_getter)
-    : ThreadSafeObserverImpl(net::NetLog::LOG_ALL_BUT_BYTES),
-      handler_(handler),
+    : handler_(handler),
       io_thread_(io_thread),
       context_getter_(context_getter),
-      was_webui_deleted_(false),
-      is_observing_log_(false) {
+      was_webui_deleted_(false) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 }
 
@@ -798,30 +773,11 @@ void NetInternalsMessageHandler::IOThreadImpl::CallbackHelper(
 void NetInternalsMessageHandler::IOThreadImpl::Detach() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   // Unregister with network stack to observe events.
-  if (is_observing_log_) {
-    is_observing_log_ = false;
-    RemoveAsObserver();
-  }
+  if (net_log())
+    net_log()->RemoveThreadSafeObserver(this);
 
   // Cancel any in-progress connection tests.
   connection_tester_.reset();
-}
-
-void NetInternalsMessageHandler::IOThreadImpl::SendPassiveLogEntries(
-    const ChromeNetLog::EntryList& passive_entries) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  ListValue* dict_list = new ListValue();
-  for (size_t i = 0; i < passive_entries.size(); ++i) {
-    const ChromeNetLog::Entry& e = passive_entries[i];
-    dict_list->Append(net::NetLog::EntryToDictionaryValue(e.type,
-                                                          e.time,
-                                                          e.source,
-                                                          e.phase,
-                                                          e.params,
-                                                          false));
-  }
-
-  SendJavascriptCommand("receivedPassiveLogEntries", dict_list);
 }
 
 void NetInternalsMessageHandler::IOThreadImpl::OnWebUIDeleted() {
@@ -832,17 +788,14 @@ void NetInternalsMessageHandler::IOThreadImpl::OnWebUIDeleted() {
 void NetInternalsMessageHandler::IOThreadImpl::OnRendererReady(
     const ListValue* list) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  DCHECK(!is_observing_log_) << "notifyReady called twice";
+  DCHECK(!net_log()) << "notifyReady called twice";
 
   SendJavascriptCommand("receivedConstants",
                         NetInternalsUI::GetConstants());
 
   // Register with network stack to observe events.
-  is_observing_log_ = true;
-  ChromeNetLog::EntryList entries;
-  AddAsObserverAndGetAllPassivelyCapturedEvents(io_thread_->net_log(),
-                                                &entries);
-  SendPassiveLogEntries(entries);
+  io_thread_->net_log()->AddThreadSafeObserver(this,
+                                               net::NetLog::LOG_ALL_BUT_BYTES);
 }
 
 void NetInternalsMessageHandler::IOThreadImpl::OnGetProxySettings(
@@ -926,12 +879,10 @@ void NetInternalsMessageHandler::IOThreadImpl::OnGetHostResolverInfo(
 
   ListValue* entry_list = new ListValue();
 
-  for (net::HostCache::EntryMap::const_iterator it =
-       cache->entries().begin();
-       it != cache->entries().end();
-       ++it) {
-    const net::HostCache::Key& key = it->first;
-    const net::HostCache::Entry* entry = it->second.get();
+  net::HostCache::EntryMap::Iterator it(cache->entries());
+  for (; it.HasNext(); it.Advance()) {
+    const net::HostCache::Key& key = it.key();
+    const net::HostCache::Entry& entry = it.value();
 
     DictionaryValue* entry_dict = new DictionaryValue();
 
@@ -939,14 +890,14 @@ void NetInternalsMessageHandler::IOThreadImpl::OnGetHostResolverInfo(
     entry_dict->SetInteger("address_family",
         static_cast<int>(key.address_family));
     entry_dict->SetString("expiration",
-                          net::NetLog::TickCountToString(entry->expiration));
+                          net::NetLog::TickCountToString(it.expiration()));
 
-    if (entry->error != net::OK) {
-      entry_dict->SetInteger("error", entry->error);
+    if (entry.error != net::OK) {
+      entry_dict->SetInteger("error", entry.error);
     } else {
       // Append all of the resolved addresses.
       ListValue* address_list = new ListValue();
-      const struct addrinfo* current_address = entry->addrlist.head();
+      const struct addrinfo* current_address = entry.addrlist.head();
       while (current_address) {
         address_list->Append(Value::CreateStringValue(
             net::NetAddressToStringWithPort(current_address)));
@@ -1374,7 +1325,8 @@ void NetInternalsMessageHandler::IOThreadImpl::OnSetLogLevel(
 
   DCHECK_GE(log_level, net::NetLog::LOG_ALL);
   DCHECK_LE(log_level, net::NetLog::LOG_BASIC);
-  SetLogLevel(static_cast<net::NetLog::LogLevel>(log_level));
+  net_log()->SetObserverLogLevel(
+      this, static_cast<net::NetLog::LogLevel>(log_level));
 }
 
 // Note that unlike other methods of IOThreadImpl, this function
@@ -1399,7 +1351,7 @@ void NetInternalsMessageHandler::IOThreadImpl::AddEntryToQueue(Value* entry) {
     BrowserThread::PostDelayedTask(
         BrowserThread::IO, FROM_HERE,
         base::Bind(&IOThreadImpl::PostPendingEntries, this),
-        kNetLogEventDelayMilliseconds);
+        base::TimeDelta::FromMilliseconds(kNetLogEventDelayMilliseconds));
   }
   pending_entries_->Append(entry);
 }
@@ -1489,18 +1441,7 @@ Value* NetInternalsUI::GetConstants() {
 
   // Add a dictionary with information on the relationship between event type
   // enums and their symbolic names.
-  {
-    std::vector<net::NetLog::EventType> event_types =
-        net::NetLog::GetAllEventTypes();
-
-    DictionaryValue* dict = new DictionaryValue();
-
-    for (size_t i = 0; i < event_types.size(); ++i) {
-      const char* name = net::NetLog::EventTypeToString(event_types[i]);
-      dict->SetInteger(name, static_cast<int>(event_types[i]));
-    }
-    constants_dict->Set("logEventTypes", dict);
-  }
+  constants_dict->Set("logEventTypes", net::NetLog::GetEventTypesAsValue());
 
   // Add a dictionary with the version of the client and its command line
   // arguments.
@@ -1569,15 +1510,7 @@ Value* NetInternalsUI::GetConstants() {
 
   // Information about the relationship between source type enums and
   // their symbolic names.
-  {
-    DictionaryValue* dict = new DictionaryValue();
-
-#define SOURCE_TYPE(label, value) dict->SetInteger(# label, value);
-#include "net/base/net_log_source_type_list.h"
-#undef SOURCE_TYPE
-
-    constants_dict->Set("logSourceType", dict);
-  }
+  constants_dict->Set("logSourceType", net::NetLog::GetSourceTypesAsValue());
 
   // Information about the relationship between LogLevel enums and their
   // symbolic names.

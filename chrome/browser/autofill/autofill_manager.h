@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -31,14 +31,17 @@ class AutofillMetrics;
 class CreditCard;
 class PersonalDataManager;
 class PrefService;
-class RenderViewHost;
 class TabContentsWrapper;
 
 struct ViewHostMsg_FrameNavigate_Params;
 
+namespace content {
+class RenderViewHost;
+}
+
 namespace gfx {
 class Rect;
-};
+}
 
 namespace IPC {
 class Message;
@@ -71,12 +74,15 @@ class AutofillManager : public content::WebContentsObserver,
   }
 
   // Called from our external delegate so they cannot be private.
-  void OnFillAutofillFormData(int query_id,
-                              const webkit::forms::FormData& form,
-                              const webkit::forms::FormField& field,
-                              int unique_id);
+  virtual void OnFillAutofillFormData(int query_id,
+                                      const webkit::forms::FormData& form,
+                                      const webkit::forms::FormField& field,
+                                      int unique_id);
   void OnDidShowAutofillSuggestions(bool is_new_popup);
   void OnDidFillAutofillFormData(const base::TimeTicks& timestamp);
+  void OnShowAutofillDialog();
+  void OnDidPreviewAutofillFormData();
+  void OnShowPasswordGenerationPopup(const gfx::Rect& bounds);
 
  protected:
   // Only test code should subclass AutofillManager.
@@ -158,8 +164,6 @@ class AutofillManager : public content::WebContentsObserver,
                                 const webkit::forms::FormField& field,
                                 const gfx::Rect& bounding_box,
                                 bool display_warning);
-  void OnShowAutofillDialog();
-  void OnDidPreviewAutofillFormData();
   void OnDidEndTextFieldEditing();
   void OnHideAutofillPopup();
 
@@ -167,7 +171,7 @@ class AutofillManager : public content::WebContentsObserver,
   // Returns false if Autofill is disabled or if the host is unavailable.
   bool GetHost(const std::vector<AutofillProfile*>& profiles,
                const std::vector<CreditCard*>& credit_cards,
-               RenderViewHost** host) const WARN_UNUSED_RESULT;
+               content::RenderViewHost** host) const WARN_UNUSED_RESULT;
 
   // Unpacks |unique_id| and fills |profile| or |credit_card| with the
   // appropriate data source.  Returns false if the unpacked id cannot be found.

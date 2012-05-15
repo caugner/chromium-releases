@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -182,7 +182,7 @@ GdkCursor* WebCursor::GetCustomCursor() {
                                                  hotspot_.x(),
                                                  hotspot_.y());
 
-  gdk_pixbuf_unref(pixbuf);
+  g_object_unref(pixbuf);
 
   if (unref_)
     gdk_cursor_unref(unref_);
@@ -199,7 +199,7 @@ bool WebCursor::SerializePlatformData(Pickle* pickle) const {
   return true;
 }
 
-bool WebCursor::DeserializePlatformData(const Pickle* pickle, void** iter) {
+bool WebCursor::DeserializePlatformData(PickleIterator* iter) {
   return true;
 }
 

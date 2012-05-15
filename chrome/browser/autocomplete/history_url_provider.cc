@@ -26,6 +26,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "content/public/browser/browser_thread.h"
 #include "googleurl/src/gurl.h"
 #include "googleurl/src/url_parse.h"
 #include "googleurl/src/url_util.h"
@@ -347,6 +348,17 @@ HistoryURLProvider::HistoryURLProvider(ACProviderListener* listener,
       LOG(ERROR) << "Making automatic.";
     }
     // Automatic means eligible for the field trial.
+    // For the field trial stuff to work correctly, we must be running
+    // on the same thread as the thread that created the field trial,
+    // which happens via a call to AutocompleteFieldTrial::Active in
+    // chrome_browser_main.cc on the main thread.  Let's check this to
+    // be sure.  We check "if we've heard of the UI thread then we'd better
+    // be on it."  The first part is necessary so unit tests pass.  (Many
+    // unit tests don't set up the threading naming system; hence
+    // CurrentlyOn(UI thread) will fail.)
+    DCHECK(!content::BrowserThread::IsWellKnownThread(
+               content::BrowserThread::UI) ||
+           content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
     if (AutocompleteFieldTrial::InAggressiveHUPFieldTrial()) {
       if (AutocompleteFieldTrial::InAggressiveHUPFieldTrialExperimentGroup()) {
         enable_aggressive_scoring_ = true;
@@ -442,8 +454,7 @@ void HistoryURLProvider::DoAutocomplete(history::HistoryBackend* backend,
                                                            params->trim_http));
 
   // Get the matching URLs from the DB
-  typedef std::vector<history::URLRow> URLRowVector;
-  URLRowVector url_matches;
+  history::URLRows url_matches;
   history::HistoryMatches history_matches;
 
   for (history::Prefixes::const_iterator i(prefixes_.begin());
@@ -458,7 +469,7 @@ void HistoryURLProvider::DoAutocomplete(history::HistoryBackend* backend,
     // reduce the list to the best kMaxMatches results.
     db->AutocompleteForPrefix(UTF16ToUTF8(i->prefix + params->input.text()),
                               kMaxMatches * 2, (backend == NULL), &url_matches);
-    for (URLRowVector::const_iterator j(url_matches.begin());
+    for (history::URLRows::const_iterator j(url_matches.begin());
          j != url_matches.end(); ++j) {
       const history::Prefix* best_prefix = BestPrefix(j->url(), string16());
       DCHECK(best_prefix != NULL);
@@ -933,16 +944,18 @@ size_t HistoryURLProvider::RemoveSubsequentMatchesOf(
   // Find the first occurrence of any URL in the redirect chain. We want to
   // keep this one since it is rated the highest.
   history::HistoryMatches::iterator first(std::find_first_of(
-      matches->begin(), matches->end(), remove.begin(), remove.end()));
+      matches->begin(), matches->end(), remove.begin(), remove.end(),
+      history::HistoryMatch::EqualsGURL));
   DCHECK(first != matches->end()) << "We should have always found at least the "
       "original URL.";
 
   // Find any following occurrences of any URL in the redirect chain, these
   // should be deleted.
   for (history::HistoryMatches::iterator next(std::find_first_of(first + 1,
-           matches->end(), remove.begin(), remove.end()));
+           matches->end(), remove.begin(), remove.end(),
+           history::HistoryMatch::EqualsGURL));
        next != matches->end(); next = std::find_first_of(next, matches->end(),
-           remove.begin(), remove.end())) {
+           remove.begin(), remove.end(), history::HistoryMatch::EqualsGURL)) {
     // Remove this item. When we remove an item before the source index, we
     // need to shift it to the right and remember that so we can return it.
     next = matches->erase(next);

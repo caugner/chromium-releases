@@ -9,8 +9,14 @@
 #include <vector>
 
 #include "base/compiler_specific.h"
+#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/string16.h"
+#include "chrome/browser/extensions/webstore_installer.h"
+#include "chrome/browser/favicon/favicon_service.h"
+#include "chrome/browser/intents/web_intents_registry.h"
+#include "chrome/browser/intents/cws_intents_registry.h"
 #include "chrome/browser/ui/intents/web_intent_picker_delegate.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -18,8 +24,8 @@
 #include "webkit/glue/web_intent_reply_data.h"
 
 class Browser;
+struct DefaultWebIntentService;
 class GURL;
-class TabContents;
 class TabContentsWrapper;
 class WebIntentPicker;
 class WebIntentPickerModel;
@@ -29,10 +35,6 @@ class WebContents;
 class WebIntentsDispatcher;
 }
 
-namespace gfx {
-class Image;
-}
-
 namespace webkit_glue {
 struct WebIntentServiceData;
 }
@@ -40,7 +42,8 @@ struct WebIntentServiceData;
 // Controls the creation of the WebIntentPicker UI and forwards the user's
 // intent handler choice back to the TabContents object.
 class WebIntentPickerController : public content::NotificationObserver,
-                                  public WebIntentPickerDelegate {
+                                  public WebIntentPickerDelegate,
+                                  public WebstoreInstaller::Delegate {
  public:
   // Takes ownership of |factory|.
   explicit WebIntentPickerController(TabContentsWrapper* wrapper);
@@ -64,18 +67,24 @@ class WebIntentPickerController : public content::NotificationObserver,
                        const content::NotificationDetails& details) OVERRIDE;
 
   // WebIntentPickerDelegate implementation.
-  virtual void OnServiceChosen(size_t index, Disposition disposition) OVERRIDE;
+  virtual void OnServiceChosen(const GURL& url,
+                               Disposition disposition) OVERRIDE;
   virtual void OnInlineDispositionWebContentsCreated(
       content::WebContents* web_contents) OVERRIDE;
+  virtual void OnExtensionInstallRequested(const std::string& id) OVERRIDE;
   virtual void OnCancelled() OVERRIDE;
   virtual void OnClosing() OVERRIDE;
+
+  // WebstoreInstaller::Delegate implementation.
+  virtual void OnExtensionInstallSuccess(const std::string& id) OVERRIDE;
+  virtual void OnExtensionInstallFailure(const std::string& id,
+                                         const std::string& error) OVERRIDE;
 
  private:
   friend class WebIntentPickerControllerTest;
   friend class WebIntentPickerControllerBrowserTest;
+  friend class WebIntentPickerControllerIncognitoBrowserTest;
   friend class InvokingTabObserver;
-  class WebIntentDataFetcher;
-  class FaviconFetcher;
 
   // Gets a notification when the return message is sent to the source tab,
   // so we can close the picker dialog or service tab.
@@ -89,15 +98,42 @@ class WebIntentPickerController : public content::NotificationObserver,
     picker_model_->set_observer(observer);
   }
 
-  // Called from the WebIntentDataFetcher when intent data is available.
-  void OnWebIntentDataAvailable(
+  // Called when WebIntentServiceData is returned from the WebIntentsRegistry.
+  void OnWebIntentServicesAvailable(
       const std::vector<webkit_glue::WebIntentServiceData>& services);
 
-  // Called from the FaviconDataFetcher when a favicon is available.
-  void OnFaviconDataAvailable(size_t index, const gfx::Image& icon);
+  // Called when FaviconData is returned from the FaviconService.
+  void OnFaviconDataAvailable(FaviconService::Handle handle,
+                              history::FaviconData favicon_data);
 
-  // Called from the FaviconDataFetcher when a favicon is not available.
-  void OnFaviconDataUnavailable(size_t index);
+  // Called when IntentExtensionInfo is returned from the CWSIntentsRegistry.
+  void OnCWSIntentServicesAvailable(
+      const CWSIntentsRegistry::IntentExtensionList& extensions);
+
+  // Called when a suggested extension's icon is fetched.
+  void OnExtensionIconURLFetchComplete(const string16& extension_id,
+                                       const content::URLFetcher* source);
+
+  typedef base::Callback<void(const gfx::Image&)>
+      ExtensionIconAvailableCallback;
+  // Called on a worker thread to decode and resize the extension's icon.
+  static void DecodeExtensionIconAndResize(
+      scoped_ptr<std::string> icon_response,
+      const ExtensionIconAvailableCallback& callback,
+      const base::Closure& unavailable_callback);
+
+  // Called when an extension's icon is successfully decoded and resized.
+  void OnExtensionIconAvailable(const string16& extension_id,
+                                const gfx::Image& icon_image);
+
+  // Called when an extension's icon failed to be decoded or resized.
+  void OnExtensionIconUnavailable(const string16& extension_id);
+
+  // When an extension is installed, all that is known is the extension id.
+  // This callback receives the intent service data for that extension.
+  // |services| must be a non-empty list.
+  void OnExtensionInstallServiceAvailable(
+      const std::vector<webkit_glue::WebIntentServiceData>& services);
 
   // Decrements the |pending_async_count_| and notifies the picker if it
   // reaches zero.
@@ -112,12 +148,6 @@ class WebIntentPickerController : public content::NotificationObserver,
   // A notification registrar, listening for notifications when the tab closes
   // to close the picker ui.
   content::NotificationRegistrar registrar_;
-
-  // A helper class to fetch web intent data asynchronously.
-  scoped_ptr<WebIntentDataFetcher> web_intent_data_fetcher_;
-
-  // A helper class to fetch favicon data asynchronously.
-  scoped_ptr<FaviconFetcher> favicon_fetcher_;
 
   // A weak pointer to the picker this controller controls.
   WebIntentPicker* picker_;
@@ -142,6 +172,11 @@ class WebIntentPickerController : public content::NotificationObserver,
   // Weak pointer to the tab servicing the intent. Remembered in order to
   // close it when a reply is sent.
   content::WebContents* service_tab_;
+
+  // Request consumer used when asynchronously loading favicons.
+  CancelableRequestConsumerTSimple<size_t> favicon_consumer_;
+
+  base::WeakPtrFactory<WebIntentPickerController> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(WebIntentPickerController);
 };

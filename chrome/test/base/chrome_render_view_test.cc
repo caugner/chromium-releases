@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,14 +12,13 @@
 #include "chrome/renderer/extensions/chrome_v8_context_set.h"
 #include "chrome/renderer/extensions/chrome_v8_extension.h"
 #include "chrome/renderer/extensions/event_bindings.h"
+#include "chrome/renderer/extensions/extension_custom_bindings.h"
 #include "chrome/renderer/extensions/extension_dispatcher.h"
 #include "chrome/renderer/extensions/miscellaneous_bindings.h"
 #include "chrome/renderer/extensions/schema_generated_bindings.h"
-#include "content/common/dom_storage_common.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/common/renderer_preferences.h"
-#include "content/renderer/render_view_impl.h"
-#include "content/renderer/renderer_main_platform_delegate.h"
+#include "content/public/renderer/render_view.h"
 #include "content/test/mock_render_process.h"
 #include "content/test/mock_render_thread.h"
 #include "grit/renderer_resources.h"
@@ -36,6 +35,7 @@
 #include "ui/base/gtk/event_synthesis_gtk.h"
 #endif
 
+using extensions::ExtensionCustomBindings;
 using extensions::MiscellaneousBindings;
 using extensions::SchemaGeneratedBindings;
 using WebKit::WebFrame;
@@ -62,17 +62,6 @@ void ChromeRenderViewTest::SetUp() {
   chrome_render_thread_ = new ChromeMockRenderThread();
   render_thread_.reset(chrome_render_thread_);
   content::RenderViewTest::SetUp();
-
-  WebScriptController::registerExtension(new ChromeV8Extension(
-      "extensions/json_schema.js", IDR_JSON_SCHEMA_JS, NULL));
-  WebScriptController::registerExtension(EventBindings::Get(
-      extension_dispatcher_));
-  WebScriptController::registerExtension(MiscellaneousBindings::Get(
-      extension_dispatcher_));
-  WebScriptController::registerExtension(SchemaGeneratedBindings::Get(
-      extension_dispatcher_));
-  WebScriptController::registerExtension(new ChromeV8Extension(
-      "extensions/apitest.js", IDR_EXTENSION_APITEST_JS, NULL));
 
   // RenderView doesn't expose it's PasswordAutofillManager or
   // AutofillAgent objects, because it has no need to store them directly

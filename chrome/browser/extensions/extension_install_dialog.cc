@@ -12,6 +12,9 @@
 #include "base/values.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/extension_manifest_constants.h"
+#include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/gfx/image/image.h"
 
 namespace {
 
@@ -59,19 +62,17 @@ AutoConfirmForTest CheckAutoConfirmCommandLineSwitch() {
 
 void ShowExtensionInstallDialog(Profile* profile,
                                 ExtensionInstallUI::Delegate* delegate,
-                                const Extension* extension,
-                                SkBitmap* icon,
                                 const ExtensionInstallUI::Prompt& prompt) {
   AutoConfirmForTest auto_confirm = CheckAutoConfirmCommandLineSwitch();
   if (auto_confirm != DO_NOT_SKIP) {
     DoAutoConfirm(auto_confirm, delegate);
     return;
   }
-  ShowExtensionInstallDialogImpl(profile, delegate, extension, icon, prompt);
+  ShowExtensionInstallDialogImpl(profile, delegate, prompt);
 }
 
 bool ShowExtensionInstallDialogForManifest(
-    Profile *profile,
+    Profile* profile,
     ExtensionInstallUI::Delegate* delegate,
     const DictionaryValue* manifest,
     const std::string& id,
@@ -94,7 +95,7 @@ bool ShowExtensionInstallDialogForManifest(
   }
 
   std::string init_errors;
-  *dummy_extension = Extension::CreateWithId(
+  *dummy_extension = Extension::Create(
       FilePath(),
       Extension::INTERNAL,
       localized_manifest.get() ? *localized_manifest.get() : *manifest,
@@ -120,11 +121,9 @@ bool ShowExtensionInstallDialogForManifest(
   ExtensionInstallUI::Prompt filled_out_prompt = prompt;
   filled_out_prompt.SetPermissions(
       (*dummy_extension)->GetPermissionMessageStrings());
+  filled_out_prompt.set_extension(*dummy_extension);
+  filled_out_prompt.set_icon(gfx::Image(new SkBitmap(*icon)));
 
-  ShowExtensionInstallDialog(profile,
-                             delegate,
-                             dummy_extension->get(),
-                             icon,
-                             filled_out_prompt);
+  ShowExtensionInstallDialog(profile, delegate, filled_out_prompt);
   return true;
 }

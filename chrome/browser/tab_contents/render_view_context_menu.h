@@ -17,19 +17,19 @@
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
 #include "chrome/browser/extensions/extension_menu_manager.h"
 #include "chrome/browser/tab_contents/render_view_context_menu_observer.h"
+#include "content/public/common/context_menu_params.h"
 #include "content/public/common/page_transition_types.h"
 #include "ui/base/models/simple_menu_model.h"
-#include "webkit/glue/context_menu.h"
 #include "webkit/glue/window_open_disposition.h"
 
 class ExtensionMenuItem;
 class PrintPreviewContextMenuObserver;
 class Profile;
-class RenderViewHost;
 class SpellingMenuObserver;
 class SpellCheckerSubMenuObserver;
 
 namespace content {
+class RenderViewHost;
 class WebContents;
 }
 
@@ -73,6 +73,10 @@ struct WebPluginAction;
 //     void Start(const GURL* url, net::URLRequestContextGetter* context) {
 //       fetcher_.reset(new URLFetcher(url, URLFetcher::GET, this));
 //       fetcher_->SetRequestContext(context);
+//       fetcher_->AssociateWithRenderView(
+//           proxy_->GetRenderViewHost()->GetSiteInstance()->GetSite(),
+//           proxy_->GetRenderViewHost()->GetProcess()->GetID(),
+//           proxy_->GetRenderViewHost()->GetRoutingID());
 //       fetcher_->Start();
 //     }
 //
@@ -96,6 +100,7 @@ class RenderViewContextMenuProxy {
  public:
   // Add a menu item to a context menu.
   virtual void AddMenuItem(int command_id, const string16& title) = 0;
+  virtual void AddCheckItem(int command_id, const string16& title) = 0;
   virtual void AddSeparator() = 0;
 
   // Add a submenu item to a context menu.
@@ -111,7 +116,7 @@ class RenderViewContextMenuProxy {
 
   // Retrieve the RenderViewHost (or Profile) instance associated with a context
   // menu, respectively.
-  virtual RenderViewHost* GetRenderViewHost() const = 0;
+  virtual content::RenderViewHost* GetRenderViewHost() const = 0;
   virtual Profile* GetProfile() const = 0;
 };
 
@@ -122,7 +127,7 @@ class RenderViewContextMenu : public ui::SimpleMenuModel::Delegate,
   static const size_t kMaxSelectionTextLength;
 
   RenderViewContextMenu(content::WebContents* web_contents,
-                        const ContextMenuParams& params);
+                        const content::ContextMenuParams& params);
 
   virtual ~RenderViewContextMenu();
 
@@ -142,6 +147,7 @@ class RenderViewContextMenu : public ui::SimpleMenuModel::Delegate,
 
   // RenderViewContextMenuDelegate implementation.
   virtual void AddMenuItem(int command_id, const string16& title) OVERRIDE;
+  virtual void AddCheckItem(int command_id, const string16& title) OVERRIDE;
   virtual void AddSeparator() OVERRIDE;
   virtual void AddSubMenu(int command_id,
                           const string16& label,
@@ -150,7 +156,7 @@ class RenderViewContextMenu : public ui::SimpleMenuModel::Delegate,
                               bool enabled,
                               bool hidden,
                               const string16& title) OVERRIDE;
-  virtual RenderViewHost* GetRenderViewHost() const OVERRIDE;
+  virtual content::RenderViewHost* GetRenderViewHost() const OVERRIDE;
   virtual Profile* GetProfile() const OVERRIDE;
 
  protected:
@@ -161,12 +167,11 @@ class RenderViewContextMenu : public ui::SimpleMenuModel::Delegate,
   virtual bool GetAcceleratorForCommandId(
       int command_id,
       ui::Accelerator* accelerator) = 0;
-  virtual void LookUpInDictionary();
 
   // Attempts to get an ExtensionMenuItem given the id of a context menu item.
   ExtensionMenuItem* GetExtensionMenuItem(int id) const;
 
-  ContextMenuParams params_;
+  content::ContextMenuParams params_;
   content::WebContents* source_web_contents_;
   Profile* profile_;
 
@@ -174,7 +179,6 @@ class RenderViewContextMenu : public ui::SimpleMenuModel::Delegate,
 
   // True if we are showing for an external tab contents. The default is false.
   bool external_;
-
 
   // Maps the id from a context menu item to the ExtensionMenuItem's internal
   // id.
@@ -186,19 +190,19 @@ class RenderViewContextMenu : public ui::SimpleMenuModel::Delegate,
   static bool IsDevToolsURL(const GURL& url);
   static bool IsInternalResourcesURL(const GURL& url);
   static bool ExtensionContextAndPatternMatch(
-      const ContextMenuParams& params,
+      const content::ContextMenuParams& params,
       ExtensionMenuItem::ContextList contexts,
       const URLPatternSet& target_url_patterns);
   static ExtensionMenuItem::List GetRelevantExtensionItems(
       const ExtensionMenuItem::List& items,
-      const ContextMenuParams& params,
+      const content::ContextMenuParams& params,
       Profile* profile,
       bool can_cross_incognito);
 
-  // Gets the platform app (if any) associated with the TabContents that we're
-  // in.
-  const Extension* GetPlatformApp() const;
-  void AppendPlatformAppItems();
+  // Gets the extension (if any) associated with the TabContents that we're in.
+  const Extension* GetExtension() const;
+  void AppendPlatformAppItems(const Extension* platform_app);
+  void AppendPopupExtensionItems();
   bool AppendCustomItems();
   void AppendDeveloperItems();
   void AppendLinkItems();
@@ -213,6 +217,7 @@ class RenderViewContextMenu : public ui::SimpleMenuModel::Delegate,
   void AppendEditableItems();
   void AppendSearchProvider();
   void AppendAllExtensionItems();
+  void AppendSpellingSuggestionsSubMenu();
   void AppendSpellcheckOptionsSubMenu();
   void AppendSpeechInputOptionsSubMenu();
   // Add writing direction sub menu (only used on Mac).
@@ -229,7 +234,7 @@ class RenderViewContextMenu : public ui::SimpleMenuModel::Delegate,
       const std::vector<ExtensionMenuItem*>& items,
       bool can_cross_incognito,
       ui::SimpleMenuModel* menu_model,
-      int *index);
+      int* index);
   // This will set the icon on the most recently-added item in the menu_model_.
   void SetExtensionIcon(const std::string& extension_id);
 

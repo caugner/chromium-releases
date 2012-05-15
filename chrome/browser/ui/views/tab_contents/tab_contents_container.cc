@@ -8,16 +8,16 @@
 
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/tab_contents/native_tab_contents_container.h"
-#include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/tab_contents/interstitial_page.h"
-#include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/render_view_host.h"
+#include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 
 using content::NavigationController;
+using content::RenderViewHost;
 using content::WebContents;
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -37,7 +37,6 @@ TabContentsContainer::~TabContentsContainer() {
 void TabContentsContainer::ChangeWebContents(WebContents* contents) {
   if (web_contents_) {
     native_container_->DetachContents(web_contents_);
-    web_contents_->WasHidden();
     RemoveObservers();
   }
   web_contents_ = contents;

@@ -46,13 +46,16 @@ class ResourceCreationProxy : public InterfaceProxy,
                                         PP_AudioSampleRate sample_rate,
                                         uint32_t sample_frame_count) OVERRIDE;
   virtual PP_Resource CreateAudioTrusted(PP_Instance instance) OVERRIDE;
-  virtual PP_Resource CreateAudioInput(
+  virtual PP_Resource CreateAudioInput0_1(
       PP_Instance instance,
       PP_Resource config_id,
       PPB_AudioInput_Callback audio_input_callback,
       void* user_data) OVERRIDE;
-  virtual PP_Resource CreateAudioInputTrusted(PP_Instance instance) OVERRIDE;
+  virtual PP_Resource CreateAudioInput(PP_Instance instance) OVERRIDE;
   virtual PP_Resource CreateBroker(PP_Instance instance) OVERRIDE;
+  virtual PP_Resource CreateBrowserFont(
+      PP_Instance instance,
+      const PP_BrowserFont_Trusted_Description* description) OVERRIDE;
   virtual PP_Resource CreateBuffer(PP_Instance instance,
                                    uint32_t size) OVERRIDE;
   virtual PP_Resource CreateDirectoryReader(PP_Resource directory_ref) OVERRIDE;
@@ -67,10 +70,8 @@ class ResourceCreationProxy : public InterfaceProxy,
                                        PP_FileSystemType type) OVERRIDE;
   virtual PP_Resource CreateFlashMenu(PP_Instance instance,
                                       const PP_Flash_Menu* menu_data) OVERRIDE;
+  virtual PP_Resource CreateFlashMessageLoop(PP_Instance instance) OVERRIDE;
   virtual PP_Resource CreateFlashNetConnector(PP_Instance instance) OVERRIDE;
-  virtual PP_Resource CreateFontObject(
-      PP_Instance instance,
-      const PP_FontDescription_Dev* description) OVERRIDE;
   virtual PP_Resource CreateGraphics2D(PP_Instance pp_instance,
                                        const PP_Size& size,
                                        PP_Bool is_always_opaque) OVERRIDE;
@@ -80,6 +81,7 @@ class ResourceCreationProxy : public InterfaceProxy,
   virtual PP_Resource CreateGraphics3DRaw(PP_Instance instance,
                                           PP_Resource share_context,
                                           const int32_t* attrib_list) OVERRIDE;
+  virtual PP_Resource CreateHostResolverPrivate(PP_Instance instance) OVERRIDE;
   virtual PP_Resource CreateImageData(PP_Instance instance,
                                       PP_ImageDataFormat format,
                                       const PP_Size& size,
@@ -100,11 +102,18 @@ class ResourceCreationProxy : public InterfaceProxy,
       const PP_Point* mouse_position,
       int32_t click_count,
       const PP_Point* mouse_movement) OVERRIDE;
+  virtual PP_Resource CreateNetworkMonitor(
+      PP_Instance instance,
+      PPB_NetworkMonitor_Callback callback,
+      void* user_data) OVERRIDE;
   virtual PP_Resource CreateResourceArray(PP_Instance instance,
                                           const PP_Resource elements[],
                                           uint32_t size) OVERRIDE;
   virtual PP_Resource CreateScrollbar(PP_Instance instance,
                                       PP_Bool vertical) OVERRIDE;
+  virtual PP_Resource CreateTalk(PP_Instance instance) OVERRIDE;
+  virtual PP_Resource CreateTCPServerSocketPrivate(
+      PP_Instance instance) OVERRIDE;
   virtual PP_Resource CreateTCPSocketPrivate(PP_Instance instance) OVERRIDE;
   virtual PP_Resource CreateTransport(PP_Instance instance,
                                       const char* name,

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -88,15 +88,6 @@ TEST(SyncAPIServerConnectionManagerTest, EarlyAbortPost) {
             params.response.server_status);
 }
 
-TEST(SyncAPIServerConnectionManagerTest, EarlyAbortCheckTime) {
-  SyncAPIServerConnectionManager server(
-      "server", 0, true, "1", new BlockingHttpPostFactory());
-  int32 time = 0;
-  server.TerminateAllIO();
-  bool result = server.CheckTime(&time);
-  EXPECT_FALSE(result);
-}
-
 TEST(SyncAPIServerConnectionManagerTest, AbortPost) {
   SyncAPIServerConnectionManager server(
       "server", 0, true, "1", new BlockingHttpPostFactory());
@@ -110,7 +101,7 @@ TEST(SyncAPIServerConnectionManagerTest, AbortPost) {
       FROM_HERE,
       base::Bind(&ServerConnectionManager::TerminateAllIO,
                  base::Unretained(&server)),
-      TestTimeouts::tiny_timeout_ms());
+      TestTimeouts::tiny_timeout());
 
   bool result = server.PostBufferToPath(
       &params, "/testpath", "testauth", &watcher);
@@ -118,24 +109,6 @@ TEST(SyncAPIServerConnectionManagerTest, AbortPost) {
   EXPECT_FALSE(result);
   EXPECT_EQ(HttpResponse::CONNECTION_UNAVAILABLE,
             params.response.server_status);
-  abort_thread.Stop();
-}
-
-TEST(SyncAPIServerConnectionManagerTest, AbortCheckTime) {
-  SyncAPIServerConnectionManager server(
-      "server", 0, true, "1", new BlockingHttpPostFactory());
-
-  base::Thread abort_thread("Test_AbortThread");
-  ASSERT_TRUE(abort_thread.Start());
-  abort_thread.message_loop()->PostDelayedTask(
-      FROM_HERE,
-      base::Bind(&ServerConnectionManager::TerminateAllIO,
-                 base::Unretained(&server)),
-      TestTimeouts::tiny_timeout_ms());
-
-  int32 time = 0;
-  bool result = server.CheckTime(&time);
-  EXPECT_FALSE(result);
   abort_thread.Stop();
 }
 

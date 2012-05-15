@@ -10,6 +10,7 @@
 #include <set>
 #include <utility>
 
+#include "base/chromeos/chromeos_version.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/process_util.h"
@@ -17,7 +18,6 @@
 #include "base/stringprintf.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chrome/browser/chromeos/input_method/xkeyboard_data.h"
-#include "chrome/browser/chromeos/system/runtime_environment.h"
 #include "content/public/browser/browser_thread.h"
 #include "ui/base/x/x11_util.h"
 
@@ -95,6 +95,10 @@ class XKeyboardImpl : public XKeyboard {
   // KeepCapsLock("us(colemak)") would return true.
   bool KeepCapsLock(const std::string& xkb_layout_name) const;
 
+  // Returns true if the current thread is the UI thread, or the process is
+  // running on Linux.
+  bool CurrentlyOnUIThread() const;
+
   // Converts |key| to a modifier key name which is used in
   // /usr/share/X11/xkb/symbols/chromeos.
   static std::string ModifierKeyToString(ModifierKey key);
@@ -123,18 +127,14 @@ class XKeyboardImpl : public XKeyboard {
 };
 
 XKeyboardImpl::XKeyboardImpl(const InputMethodUtil& util)
-    : is_running_on_chrome_os_(
-        system::runtime_environment::IsRunningOnChromeOS()) {
+    : is_running_on_chrome_os_(base::chromeos::IsRunningOnChromeOS()) {
   num_lock_mask_ = GetNumLockMask();
 
-#if defined(USE_AURA)
   // web_input_event_aurax11.cc seems to assume that Mod2Mask is always assigned
   // to Num Lock.
   // TODO(yusukes): Check the assumption is really okay. If not, modify the Aura
   // code, and then remove the CHECK below.
   CHECK(!is_running_on_chrome_os_ || (num_lock_mask_ == Mod2Mask));
-#endif
-
   GetLockedModifiers(&current_caps_lock_status_, &current_num_lock_status_);
 
   for (size_t i = 0; i < arraysize(kCustomizableKeys); ++i) {
@@ -251,6 +251,7 @@ bool XKeyboardImpl::CapsLockIsEnabled() {
 }
 
 unsigned int XKeyboardImpl::GetNumLockMask() {
+  CHECK(CurrentlyOnUIThread());
   static const unsigned int kBadMask = 0;
 
   unsigned int real_mask = kBadMask;
@@ -264,20 +265,17 @@ unsigned int XKeyboardImpl::GetNumLockMask() {
     const std::string string_to_find(kNumLockVirtualModifierString);
     for (size_t i = 0; i < XkbNumVirtualMods; ++i) {
       const unsigned int virtual_mod_mask = 1U << i;
-      char* virtual_mod_str =
-          XGetAtomName(xkb_desc->dpy, xkb_desc->names->vmods[i]);
-      if (!virtual_mod_str) {
+      ui::XScopedString virtual_mod_str(
+          XGetAtomName(xkb_desc->dpy, xkb_desc->names->vmods[i]));
+      if (!virtual_mod_str.string())
         continue;
-      }
-      if (string_to_find == virtual_mod_str) {
+      if (string_to_find == virtual_mod_str.string()) {
         if (!XkbVirtualModsToReal(xkb_desc, virtual_mod_mask, &real_mask)) {
           LOG(ERROR) << "XkbVirtualModsToReal failed";
           real_mask = kBadMask;  // reset the return value, just in case.
         }
-        XFree(virtual_mod_str);
         break;
       }
-      XFree(virtual_mod_str);
     }
   }
   XkbFreeKeyboard(xkb_desc, 0, True /* free all components */);
@@ -286,14 +284,10 @@ unsigned int XKeyboardImpl::GetNumLockMask() {
 
 void XKeyboardImpl::GetLockedModifiers(bool* out_caps_lock_enabled,
                                        bool* out_num_lock_enabled) {
-  // For now, don't call CHECK() here to make
-  // TabRestoreServiceTest.DontRestorePrintPreviewTab test happy.
-  // TODO(yusukes): Fix the test, then fix the if(!BrowserThread...) line below.
-  // CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  CHECK(CurrentlyOnUIThread());
 
-  if (!BrowserThread::CurrentlyOn(BrowserThread::UI) ||
-      (out_num_lock_enabled && !num_lock_mask_)) {
-    LOG(ERROR) << "Cannot get locked modifiers.";
+  if (out_num_lock_enabled && !num_lock_mask_) {
+    VLOG(1) << "Cannot get locked modifiers. Num Lock mask unknown.";
     if (out_caps_lock_enabled) {
       *out_caps_lock_enabled = false;
     }
@@ -381,17 +375,12 @@ std::string XKeyboardImpl::CreateFullXkbLayoutName(
                          use_left_alt_key_as_str.c_str(),
                          (KeepRightAlt(layout_name) ? "_keepralt" : ""));
 
-  if ((full_xkb_layout_name.substr(0, 3) != "us+") &&
-      (full_xkb_layout_name.substr(0, 3) != "us(")) {
-    full_xkb_layout_name += ",us";
-  }
-
   return full_xkb_layout_name;
 }
 
 void XKeyboardImpl::SetLockedModifiers(ModifierLockStatus new_caps_lock_status,
                                        ModifierLockStatus new_num_lock_status) {
-  CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  CHECK(CurrentlyOnUIThread());
   if (!num_lock_mask_) {
     LOG(ERROR) << "Cannot set locked modifiers. Num Lock mask unknown.";
     return;
@@ -465,6 +454,19 @@ bool XKeyboardImpl::KeepRightAlt(const std::string& xkb_layout_name) const {
 
 bool XKeyboardImpl::KeepCapsLock(const std::string& xkb_layout_name) const {
   return caps_lock_remapped_xkb_layout_names_.count(xkb_layout_name) > 0;
+}
+
+bool XKeyboardImpl::CurrentlyOnUIThread() const {
+  // It seems that the tot Chrome (as of Mar 7 2012) does not allow browser
+  // tests to call BrowserThread::CurrentlyOn(). It ends up a CHECK failure:
+  //   FATAL:sequenced_worker_pool.cc
+  //   Check failed: constructor_message_loop_.get().
+  // For now, just allow unit/browser tests to call any functions in this class.
+  // TODO(yusukes): Stop special-casing browser_tests and remove this function.
+  if (!is_running_on_chrome_os_) {
+    return true;
+  }
+  return BrowserThread::CurrentlyOn(BrowserThread::UI);
 }
 
 // static

@@ -14,6 +14,8 @@ const char kAccountsPrefAllowNewUser[] = "cros.accounts.allowGuest";
 const char kAccountsPrefShowUserNamesOnSignIn[]
     = "cros.accounts.showUserNamesOnSignIn";
 const char kAccountsPrefUsers[] = "cros.accounts.users";
+const char kAccountsPrefEphemeralUsersEnabled[] =
+    "cros.accounts.ephemeralUsersEnabled";
 
 // Name of signed setting persisted on device, writeable only by owner.
 const char kSettingProxyEverywhere[] = "cros.proxy.everywhere";
@@ -28,6 +30,7 @@ const char kDeviceOwner[] = "cros.device.owner";
 const char kStatsReportingPref[] = "cros.metrics.reportingEnabled";
 
 const char kReleaseChannel[] = "cros.system.releaseChannel";
+const char kReleaseChannelDelegated[] = "cros.system.releaseChannelDelegated";
 
 // A boolean pref that indicates whether OS & firmware version info should be
 // reported along with device policy requests.
@@ -43,4 +46,30 @@ const char kReportDeviceActivityTimes[] =
 // at boot mode should be reported along with device policy requests.
 const char kReportDeviceBootMode[] = "cros.device_status.report_boot_mode";
 
+// A list of dictionaries, each detailing one extension to install as part of
+// the AppPack and including the following fields:
+// "extension-id": ID of the extension to install
+// "update-url": URL to check the extension's version and download location
+// "key-checksum": checksum of the extension's CRX public key, encoded in hex.
+const char kAppPack[] = "cros.app_pack";
+
+// Values from the ScreenSaver proto. Defines the extension ID of the screen
+// saver extension and the timeout before the screen saver should be started.
+const char kScreenSaverExtensionId[] = "cros.screen_saver.extension_id";
+const char kScreenSaverTimeout[] = "cros.screen_saver.timeout";
+
+// Values from the ForcedLogoutTimeouts proto. Defines the timeouts before a
+// user is logged out after some period of inactivity as well as the duration of
+// a warning message informing the user about the pending logout.
+const char kIdleLogoutTimeout[] = "cros.idle_logout.timeout";
+const char kIdleLogoutWarningDuration[] = "cros.idle_logout.warning_duration";
+
+// Defines the set of URLs to be opened on login to the anonymous account used
+// if the device is in KIOSK mode.
+const char kStartUpUrls[] = "cros.start_up_urls";
+
+// This policy should not appear in the protobuf ever but is used internally to
+// signal that we are running in a "safe-mode" for policy recovery.
+const char kPolicyMissingMitigationMode[] =
+    "cros.internal.policy_mitigation_mode";
 }  // namespace chromeos

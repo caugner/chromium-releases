@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,14 +10,18 @@
 #include "chrome/browser/password_manager/password_form_manager.h"
 #include "chrome/browser/password_manager/password_manager.h"
 #include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
+#include "chrome/browser/ui/sync/one_click_signin_helper.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/autofill_messages.h"
-#include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/ssl/ssl_manager.h"
+#include "chrome/common/net/gaia/gaia_urls.h"
+#include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/ssl_status.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources_standard.h"
+#include "net/base/cert_status_flags.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "webkit/forms/password_form.h"
@@ -50,6 +54,9 @@ class SavePasswordInfoBarDelegate : public ConfirmInfoBarDelegate {
   virtual string16 GetButtonLabel(InfoBarButton button) const OVERRIDE;
   virtual bool Accept() OVERRIDE;
   virtual bool Cancel() OVERRIDE;
+
+  virtual SavePasswordInfoBarDelegate*
+      AsSavePasswordInfoBarDelegate() OVERRIDE;
 
   // The PasswordFormManager managing the form we're asking the user about,
   // and should update as per her decision.
@@ -107,6 +114,10 @@ bool SavePasswordInfoBarDelegate::Cancel() {
   return true;
 }
 
+SavePasswordInfoBarDelegate*
+SavePasswordInfoBarDelegate::AsSavePasswordInfoBarDelegate() {
+  return this;
+}
 
 // PasswordManagerDelegateImpl ------------------------------------------------
 
@@ -114,12 +125,23 @@ void PasswordManagerDelegateImpl::FillPasswordForm(
     const webkit::forms::PasswordFormFillData& form_data) {
   tab_contents_->web_contents()->GetRenderViewHost()->Send(
       new AutofillMsg_FillPasswordForm(
-          tab_contents_->web_contents()->GetRenderViewHost()->routing_id(),
+          tab_contents_->web_contents()->GetRenderViewHost()->GetRoutingID(),
           form_data));
 }
 
-void PasswordManagerDelegateImpl::AddSavePasswordInfoBar(
+void PasswordManagerDelegateImpl::AddSavePasswordInfoBarIfPermitted(
     PasswordFormManager* form_to_save) {
+  // Don't show the password manager infobar if this form is for a google
+  // account and we are going to show the one-click singin infobar.
+  // For now, one-click signin is fully implemented only on windows.
+#if defined(ENABLE_ONE_CLICK_SIGNIN)
+  GURL realm(form_to_save->realm());
+  if (realm == GURL(GaiaUrls::GetInstance()->gaia_login_form_realm()) &&
+      OneClickSigninHelper::CanOffer(tab_contents_->web_contents(), true)) {
+    return;
+  }
+#endif
+
   tab_contents_->infobar_tab_helper()->AddInfoBar(
       new SavePasswordInfoBarDelegate(
           tab_contents_->infobar_tab_helper(), form_to_save));
@@ -130,6 +152,12 @@ Profile* PasswordManagerDelegateImpl::GetProfileForPasswordManager() {
 }
 
 bool PasswordManagerDelegateImpl::DidLastPageLoadEncounterSSLErrors() {
-  return tab_contents_->web_contents()->GetController().GetSSLManager()->
-      ProcessedSSLErrorFromRequest();
+  content::NavigationEntry* entry =
+      tab_contents_->web_contents()->GetController().GetActiveEntry();
+  if (!entry) {
+    NOTREACHED();
+    return false;
+  }
+
+  return net::IsCertStatusError(entry->GetSSL().cert_status);
 }

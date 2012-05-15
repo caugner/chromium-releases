@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,7 +27,7 @@ bool NaClBrokerService::StartBroker() {
 }
 
 bool NaClBrokerService::LaunchLoader(NaClProcessHost* nacl_process_host,
-                                     const std::wstring& loader_channel_id) {
+                                     const std::string& loader_channel_id) {
   // Add task to the list
   pending_launches_[loader_channel_id] = nacl_process_host;
   NaClBrokerHost* broker_host = GetBrokerHost();
@@ -42,7 +42,7 @@ bool NaClBrokerService::LaunchLoader(NaClProcessHost* nacl_process_host,
   return true;
 }
 
-void NaClBrokerService::OnLoaderLaunched(const std::wstring& channel_id,
+void NaClBrokerService::OnLoaderLaunched(const std::string& channel_id,
                                          base::ProcessHandle handle) {
   NaClProcessHost* client;
   PendingLaunchesMap::iterator it = pending_launches_.find(channel_id);
@@ -56,12 +56,32 @@ void NaClBrokerService::OnLoaderLaunched(const std::wstring& channel_id,
 }
 
 void NaClBrokerService::OnLoaderDied() {
+  DCHECK(loaders_running_ > 0);
   --loaders_running_;
   // Stop the broker only if there are no loaders running or being launched.
   NaClBrokerHost* broker_host = GetBrokerHost();
   if (loaders_running_ + pending_launches_.size() == 0 && broker_host != NULL) {
     broker_host->StopBroker();
   }
+}
+
+bool NaClBrokerService::LaunchDebugExceptionHandler(
+    NaClProcessHost* nacl_process_host, int32 pid) {
+  pending_debuggers_[pid] = nacl_process_host;
+  NaClBrokerHost* broker_host = GetBrokerHost();
+  if (!broker_host)
+    return false;
+  return broker_host->LaunchDebugExceptionHandler(pid);
+}
+
+void NaClBrokerService::OnDebugExceptionHandlerLaunched(int32 pid) {
+  PendingDebugExceptionHandlersMap::iterator it = pending_debuggers_.find(pid);
+  if (pending_debuggers_.end() == it)
+    NOTREACHED();
+
+  NaClProcessHost* client = it->second;
+  client->OnDebugExceptionHandlerLaunchedByBroker();
+  pending_debuggers_.erase(it);
 }
 
 NaClBrokerHost* NaClBrokerService::GetBrokerHost() {

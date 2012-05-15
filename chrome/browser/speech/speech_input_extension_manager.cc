@@ -19,13 +19,17 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/pref_names.h"
-#include "content/browser/resource_context.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
-#include "content/public/common/speech_input_result.h"
+#include "content/public/browser/speech_recognition_manager.h"
+#include "content/public/browser/speech_recognizer.h"
+#include "content/public/common/speech_recognition_error.h"
+#include "content/public/common/speech_recognition_result.h"
 
 using content::BrowserThread;
-using speech_input::SpeechRecognizer;
+using content::SpeechRecognitionHypothesis;
+using content::SpeechRecognitionManager;
 
 namespace {
 
@@ -94,6 +98,7 @@ class SpeechInputExtensionManager::Factory : public ProfileKeyedServiceFactory {
   // ProfileKeyedServiceFactory methods:
   virtual ProfileKeyedService* BuildServiceInstanceFor(
       Profile* profile) const OVERRIDE;
+  virtual void RegisterUserPrefs(PrefService* prefs) OVERRIDE;
   virtual bool ServiceRedirectedInIncognito() OVERRIDE { return false; }
   virtual bool ServiceIsNULLWhileTesting() OVERRIDE { return true; }
   virtual bool ServiceIsCreatedWithProfile() OVERRIDE { return true; }
@@ -133,6 +138,13 @@ ProfileKeyedService*
   return new SpeechInputExtensionManagerWrapper(manager);
 }
 
+void SpeechInputExtensionManager::Factory::RegisterUserPrefs(
+    PrefService* prefs) {
+  prefs->RegisterBooleanPref(prefs::kSpeechInputTrayNotificationShown,
+                             false,
+                             PrefService::UNSYNCABLE_PREF);
+}
+
 SpeechInputExtensionInterface::SpeechInputExtensionInterface() {
 }
 
@@ -142,9 +154,10 @@ SpeechInputExtensionInterface::~SpeechInputExtensionInterface() {
 SpeechInputExtensionManager::SpeechInputExtensionManager(Profile* profile)
     : profile_(profile),
       state_(kIdle),
+      registrar_(new content::NotificationRegistrar),
       speech_interface_(NULL) {
-  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
-                 content::Source<Profile>(profile_));
+  registrar_->Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
+                  content::Source<Profile>(profile_));
 }
 
 SpeechInputExtensionManager::~SpeechInputExtensionManager() {
@@ -188,7 +201,7 @@ void SpeechInputExtensionManager::ShutdownOnUIThread() {
   }
   state_ = kShutdown;
   VLOG(1) << "Entering the shutdown sink state.";
-  registrar_.RemoveAll();
+  registrar_.reset();
   profile_ = NULL;
 }
 
@@ -225,9 +238,9 @@ void SpeechInputExtensionManager::ResetToIdleState() {
   extension_id_in_use_.clear();
 }
 
-void SpeechInputExtensionManager::SetRecognitionResult(
+void SpeechInputExtensionManager::OnRecognitionResult(
     int caller_id,
-    const content::SpeechInputResult& result) {
+    const content::SpeechRecognitionResult& result) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   DCHECK_EQ(caller_id, kSpeechCallerId);
 
@@ -242,7 +255,8 @@ void SpeechInputExtensionManager::SetRecognitionResult(
 }
 
 void SpeechInputExtensionManager::SetRecognitionResultOnUIThread(
-    const content::SpeechInputResult& result, const std::string& extension_id) {
+    const content::SpeechRecognitionResult& result,
+    const std::string& extension_id) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   ListValue args;
@@ -253,7 +267,7 @@ void SpeechInputExtensionManager::SetRecognitionResultOnUIThread(
   js_event->Set(kHypothesesKey, js_hypothesis_array);
 
   for (size_t i = 0; i < result.hypotheses.size(); ++i) {
-    const content::SpeechInputHypothesis& hypothesis = result.hypotheses[i];
+    const SpeechRecognitionHypothesis& hypothesis = result.hypotheses[i];
 
     DictionaryValue* js_hypothesis_object = new DictionaryValue();
     js_hypothesis_array->Append(js_hypothesis_object);
@@ -265,13 +279,17 @@ void SpeechInputExtensionManager::SetRecognitionResultOnUIThread(
   }
 
   std::string json_args;
-  base::JSONWriter::Write(&args, false, &json_args);
+  base::JSONWriter::Write(&args, &json_args);
   VLOG(1) << "Results: " << json_args;
   DispatchEventToExtension(extension_id, kOnResultEvent, json_args);
 }
 
-void SpeechInputExtensionManager::DidStartReceivingAudio(int caller_id) {
-  VLOG(1) << "DidStartReceivingAudio";
+void SpeechInputExtensionManager::OnRecognitionStart(int caller_id) {
+  DCHECK_EQ(caller_id, kSpeechCallerId);
+}
+
+void SpeechInputExtensionManager::OnAudioStart(int caller_id) {
+  VLOG(1) << "OnAudioStart";
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   DCHECK_EQ(caller_id, kSpeechCallerId);
 
@@ -280,11 +298,11 @@ void SpeechInputExtensionManager::DidStartReceivingAudio(int caller_id) {
       this));
 }
 
-void SpeechInputExtensionManager::DidCompleteRecording(int caller_id) {
+void SpeechInputExtensionManager::OnAudioEnd(int caller_id) {
   DCHECK_EQ(caller_id, kSpeechCallerId);
 }
 
-void SpeechInputExtensionManager::DidCompleteRecognition(int caller_id) {
+void SpeechInputExtensionManager::OnRecognitionEnd(int caller_id) {
   DCHECK_EQ(caller_id, kSpeechCallerId);
 }
 
@@ -322,11 +340,11 @@ void SpeechInputExtensionManager::DidStartReceivingAudioOnUIThread() {
       content::Details<std::string>(&extension_id_in_use_));
 }
 
-void SpeechInputExtensionManager::OnRecognizerError(
-    int caller_id, content::SpeechInputError error) {
+void SpeechInputExtensionManager::OnRecognitionError(
+    int caller_id, const content::SpeechRecognitionError& error) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   DCHECK_EQ(caller_id, kSpeechCallerId);
-  VLOG(1) << "OnRecognizerError: " << error;
+  VLOG(1) << "OnRecognitionError: " << error.code;
 
   base::AutoLock auto_lock(state_lock_);
   if (state_ == kShutdown)
@@ -338,11 +356,11 @@ void SpeechInputExtensionManager::OnRecognizerError(
   std::string event_error_code;
   bool report_to_event = true;
 
-  switch (error) {
-    case content::SPEECH_INPUT_ERROR_NONE:
+  switch (error.code) {
+    case content::SPEECH_RECOGNITION_ERROR_NONE:
       break;
 
-    case content::SPEECH_INPUT_ERROR_AUDIO:
+    case content::SPEECH_RECOGNITION_ERROR_AUDIO:
       if (state_ == kStarting) {
         event_error_code = kErrorUnableToStart;
         report_to_event = false;
@@ -351,22 +369,22 @@ void SpeechInputExtensionManager::OnRecognizerError(
       }
       break;
 
-    case content::SPEECH_INPUT_ERROR_NETWORK:
+    case content::SPEECH_RECOGNITION_ERROR_NETWORK:
       event_error_code = kErrorNetworkError;
       break;
 
-    case content::SPEECH_INPUT_ERROR_BAD_GRAMMAR:
+    case content::SPEECH_RECOGNITION_ERROR_BAD_GRAMMAR:
       // No error is returned on invalid language, for example.
       // To avoid confusion about when this is would be fired, the invalid
       // params error is not being exposed to the onError event.
       event_error_code = kErrorUnableToStart;
       break;
 
-    case content::SPEECH_INPUT_ERROR_NO_SPEECH:
+    case content::SPEECH_RECOGNITION_ERROR_NO_SPEECH:
       event_error_code = kErrorNoSpeechHeard;
       break;
 
-    case content::SPEECH_INPUT_ERROR_NO_MATCH:
+    case content::SPEECH_RECOGNITION_ERROR_NO_MATCH:
       event_error_code = kErrorNoResults;
       break;
 
@@ -382,15 +400,15 @@ void SpeechInputExtensionManager::OnRecognizerError(
   }
 }
 
-void SpeechInputExtensionManager::DidCompleteEnvironmentEstimation(
+void SpeechInputExtensionManager::OnEnvironmentEstimationComplete(
     int caller_id) {
   DCHECK_EQ(caller_id, kSpeechCallerId);
 }
 
-void SpeechInputExtensionManager::DidStartReceivingSpeech(int caller_id) {
+void SpeechInputExtensionManager::OnSoundStart(int caller_id) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   DCHECK_EQ(caller_id, kSpeechCallerId);
-  VLOG(1) << "DidStartReceivingSpeech";
+  VLOG(1) << "OnSoundStart";
 
   std::string json_args;
   BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
@@ -399,10 +417,10 @@ void SpeechInputExtensionManager::DidStartReceivingSpeech(int caller_id) {
       json_args));
 }
 
-void SpeechInputExtensionManager::DidStopReceivingSpeech(int caller_id) {
+void SpeechInputExtensionManager::OnSoundEnd(int caller_id) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   DCHECK_EQ(caller_id, kSpeechCallerId);
-  VLOG(1) << "DidStopReceivingSpeech";
+  VLOG(1) << "OnSoundEnd";
 
   std::string json_args;
   BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
@@ -424,7 +442,7 @@ void SpeechInputExtensionManager::DispatchEventToExtension(
     std::string final_args;
     if (json_args.empty()) {
       ListValue args;
-      base::JSONWriter::Write(&args, false, &final_args);
+      base::JSONWriter::Write(&args, &final_args);
     } else {
       final_args = json_args;
     }
@@ -467,15 +485,15 @@ void SpeechInputExtensionManager::DispatchError(
     args.Append(js_error);
     js_error->SetString(kErrorCodeKey, error);
     std::string json_args;
-    base::JSONWriter::Write(&args, false, &json_args);
+    base::JSONWriter::Write(&args, &json_args);
     DispatchEventToExtension(extension_id,
         kOnErrorEvent, json_args);
   }
 }
 
-bool SpeechInputExtensionManager::Start(const std::string& extension_id,
-    const std::string& language, const std::string& grammar,
-    bool filter_profanities, std::string* error) {
+bool SpeechInputExtensionManager::Start(
+    const std::string& extension_id, const std::string& language,
+    const std::string& grammar, bool filter_profanities, std::string* error) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(error);
   VLOG(1) << "Requesting start (UI thread)";
@@ -508,15 +526,18 @@ bool SpeechInputExtensionManager::Start(const std::string& extension_id,
   VLOG(1) << "State changed to starting";
   state_ = kStarting;
 
-  BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
+  BrowserThread::PostTask(
+      BrowserThread::IO, FROM_HERE,
       base::Bind(&SpeechInputExtensionManager::StartOnIOThread, this,
-      profile_->GetRequestContext(), language, grammar, filter_profanities));
+                 profile_->GetRequestContext(), language, grammar,
+                 filter_profanities));
   return true;
 }
 
 void SpeechInputExtensionManager::StartOnIOThread(
     net::URLRequestContextGetter* context_getter,
-    const std::string& language, const std::string& grammar,
+    const std::string& language,
+    const std::string& grammar,
     bool filter_profanities) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   VLOG(1) << "Requesting start (IO thread)";
@@ -529,51 +550,79 @@ void SpeechInputExtensionManager::StartOnIOThread(
     return;
 
   if (!GetSpeechInputExtensionInterface()->HasAudioInputDevices()) {
-    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+    BrowserThread::PostTask(
+        BrowserThread::UI, FROM_HERE,
         base::Bind(&SpeechInputExtensionManager::DispatchError, this,
-        std::string(kErrorNoRecordingDeviceFound), false));
+                   std::string(kErrorNoRecordingDeviceFound), false));
     return;
   }
 
-  if (GetSpeechInputExtensionInterface()->IsRecordingInProcess()) {
+  if (GetSpeechInputExtensionInterface()->IsCapturingAudio()) {
     BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
         base::Bind(&SpeechInputExtensionManager::DispatchError, this,
         std::string(kErrorRecordingDeviceInUse), false));
     return;
   }
 
-  GetSpeechInputExtensionInterface()->StartRecording(this, context_getter,
-      kSpeechCallerId, language, grammar, filter_profanities);
+  GetSpeechInputExtensionInterface()->StartRecording(
+      this, context_getter, kSpeechCallerId, language, grammar,
+      filter_profanities);
 }
 
 bool SpeechInputExtensionManager::HasAudioInputDevices() {
-  return profile_->GetResourceContext().audio_manager()->HasAudioInputDevices();
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  return SpeechRecognitionManager::GetInstance()->HasAudioInputDevices();
 }
 
-bool SpeechInputExtensionManager::IsRecordingInProcess() {
-  // Thread-safe query.
-  return profile_->GetResourceContext().audio_manager()->IsRecordingInProcess();
+bool SpeechInputExtensionManager::IsCapturingAudio() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  return SpeechRecognitionManager::GetInstance()->IsCapturingAudio();
 }
 
-bool SpeechInputExtensionManager::IsRecording() {
-  return GetSpeechInputExtensionInterface()->IsRecordingInProcess();
+void SpeechInputExtensionManager::IsRecording(
+    const IsRecordingCallback& callback) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  BrowserThread::PostTask(
+      BrowserThread::IO, FROM_HERE,
+      base::Bind(&SpeechInputExtensionManager::IsRecordingOnIOThread,
+                 this, callback));
+}
+
+void SpeechInputExtensionManager::IsRecordingOnIOThread(
+    const IsRecordingCallback& callback) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+
+  bool result = GetSpeechInputExtensionInterface()->IsCapturingAudio();
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
+      base::Bind(&SpeechInputExtensionManager::IsRecordingOnUIThread,
+                 this, callback, result));
+}
+
+void SpeechInputExtensionManager::IsRecordingOnUIThread(
+    const IsRecordingCallback& callback,
+    bool result) {
+  BrowserThread::CurrentlyOn(BrowserThread::UI);
+  callback.Run(result);
 }
 
 void SpeechInputExtensionManager::StartRecording(
-    speech_input::SpeechRecognizerDelegate* delegate,
-    net::URLRequestContextGetter* context_getter, int caller_id,
-    const std::string& language, const std::string& grammar,
+    content::SpeechRecognitionEventListener* listener,
+    net::URLRequestContextGetter* context_getter,
+    int caller_id,
+    const std::string& language,
+    const std::string& grammar,
     bool filter_profanities) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   DCHECK(!recognizer_);
-  recognizer_ = new SpeechRecognizer(delegate, caller_id, language, grammar,
-      context_getter, profile_->GetResourceContext().audio_manager(),
+  recognizer_ = content::SpeechRecognizer::Create(
+      listener, caller_id, language, grammar, context_getter,
       filter_profanities, "", "");
-  recognizer_->StartRecording();
+  recognizer_->StartRecognition();
 }
 
 bool SpeechInputExtensionManager::HasValidRecognizer() {
-  // Conditional expression used to avoid a performance warning on windows.
-  return recognizer_ ? true : false;
+  return !!recognizer_;
 }
 
 bool SpeechInputExtensionManager::Stop(const std::string& extension_id,
@@ -638,7 +687,7 @@ void SpeechInputExtensionManager::StopRecording(bool recognition_failed) {
     // Recognition is already cancelled in case of failure.
     // Double-cancelling leads to assertion failures.
     if (!recognition_failed)
-      recognizer_->CancelRecognition();
+      recognizer_->AbortRecognition();
     recognizer_.release();
   }
 }
@@ -664,9 +713,9 @@ void SpeechInputExtensionManager::StopSucceededOnUIThread() {
       content::Details<std::string>(&extension_id));
 }
 
-void SpeechInputExtensionManager::SetInputVolume(int caller_id,
-                                                 float volume,
-                                                 float noise_volume) {
+void SpeechInputExtensionManager::OnAudioLevelsChange(int caller_id,
+                                                      float volume,
+                                                      float noise_volume) {
   DCHECK_EQ(caller_id, kSpeechCallerId);
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,

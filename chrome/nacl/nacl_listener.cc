@@ -1,19 +1,23 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/nacl/nacl_listener.h"
 
 #include <errno.h>
+#include <stdlib.h>
 
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "chrome/common/nacl_messages.h"
-#include "ipc/ipc_channel.h"
+#include "chrome/nacl/nacl_validation_db.h"
+#include "chrome/nacl/nacl_validation_query.h"
+#include "ipc/ipc_sync_channel.h"
+#include "ipc/ipc_sync_message_filter.h"
 #include "ipc/ipc_switches.h"
-#include "native_client/src/shared/imc/nacl_imc.h"
+#include "native_client/src/trusted/service_runtime/sel_main_chrome.h"
 
 #if defined(OS_LINUX)
 #include "content/public/common/child_process_sandbox_support_linux.h"
@@ -24,17 +28,8 @@
 #include <io.h>
 #endif
 
-// This is ugly.  We need an interface header file for the exported
-// sel_ldr interfaces.
-// TODO(gregoryd,sehr): Add an interface header.
-#if defined(OS_WIN)
-typedef HANDLE NaClHandle;
-#else
-typedef int NaClHandle;
-#endif  // NaClHandle
-
-#if defined(OS_MACOSX)
 namespace {
+#if defined(OS_MACOSX)
 
 // On Mac OS X, shm_open() works in the sandbox but does not give us
 // an FD that we can map as PROT_EXEC.  Rather than doing an IPC to
@@ -44,7 +39,7 @@ namespace {
 
 base::subtle::Atomic32 g_shm_fd = -1;
 
-int CreateMemoryObject(size_t size, bool executable) {
+int CreateMemoryObject(size_t size, int executable) {
   if (executable && size > 0) {
     int result_fd = base::subtle::NoBarrier_AtomicExchange(&g_shm_fd, -1);
     if (result_fd != -1) {
@@ -66,25 +61,92 @@ int CreateMemoryObject(size_t size, bool executable) {
   return -1;
 }
 
+#elif defined(OS_LINUX)
+
+int CreateMemoryObject(size_t size, int executable) {
+  return content::MakeSharedMemorySegmentViaIPC(size, executable);
+}
+
+#endif
+
+// Use an env var because command line args are eaten by nacl_helper.
+bool CheckEnvVar(const char* name, bool default_value) {
+  bool result = default_value;
+  const char* var = getenv(name);
+  if (var && strlen(var) > 0) {
+    result = var[0] != '0';
+  }
+  return result;
+}
+
 }  // namespace
-#endif  // defined(OS_MACOSX)
 
-extern "C" void NaClMainForChromium(int handle_count,
-                                    const NaClHandle* handles,
-                                    int debug);
-extern "C" void NaClSetIrtFileDesc(int fd);
+class BrowserValidationDBProxy : public NaClValidationDB {
+ public:
+  explicit BrowserValidationDBProxy(NaClListener* listener)
+      : listener_(listener) {
+  }
 
-NaClListener::NaClListener() : debug_enabled_(false) {}
+  bool QueryKnownToValidate(const std::string& signature) {
+    // Initialize to false so that if the Send fails to write to the return
+    // value we're safe.  For example if the message is (for some reason)
+    // dispatched as an async message the return parameter will not be written.
+    bool result = false;
+    if (!listener_->Send(new NaClProcessMsg_QueryKnownToValidate(signature,
+                                                                 &result))) {
+      LOG(ERROR) << "Failed to query NaCl validation cache.";
+      result = false;
+    }
+    return result;
+  }
 
-NaClListener::~NaClListener() {}
+  void SetKnownToValidate(const std::string& signature) {
+    // Caching is optional: NaCl will still work correctly if the IPC fails.
+    if (!listener_->Send(new NaClProcessMsg_SetKnownToValidate(signature))) {
+      LOG(ERROR) << "Failed to update NaCl validation cache.";
+    }
+  }
+
+ private:
+  // The listener never dies, otherwise this might be a dangling reference.
+  NaClListener* listener_;
+};
+
+
+NaClListener::NaClListener() : shutdown_event_(true, false),
+                               io_thread_("NaCl_IOThread"),
+                               main_loop_(NULL),
+                               debug_enabled_(false) {
+  io_thread_.StartWithOptions(base::Thread::Options(MessageLoop::TYPE_IO, 0));
+}
+
+NaClListener::~NaClListener() {
+  NOTREACHED();
+  shutdown_event_.Signal();
+}
+
+bool NaClListener::Send(IPC::Message* msg) {
+  DCHECK(main_loop_ != NULL);
+  if (MessageLoop::current() == main_loop_) {
+    // This thread owns the channel.
+    return channel_->Send(msg);
+  } else {
+    // This thread does not own the channel.
+    return filter_->Send(msg);
+  }
+}
 
 void NaClListener::Listen() {
   std::string channel_name =
       CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
           switches::kProcessChannelID);
-  IPC::Channel channel(channel_name, IPC::Channel::MODE_CLIENT, this);
-  CHECK(channel.Connect());
-  MessageLoop::current()->Run();
+  channel_.reset(new IPC::SyncChannel(this, io_thread_.message_loop_proxy(),
+                                      &shutdown_event_));
+  filter_.reset(new IPC::SyncMessageFilter(&shutdown_event_));
+  channel_->AddFilter(filter_.get());
+  channel_->Init(channel_name, IPC::Channel::MODE_CLIENT, true);
+  main_loop_ = MessageLoop::current();
+  main_loop_->Run();
 }
 
 bool NaClListener::OnMessageReceived(const IPC::Message& msg) {
@@ -96,14 +158,21 @@ bool NaClListener::OnMessageReceived(const IPC::Message& msg) {
   return handled;
 }
 
-void NaClListener::OnStartSelLdr(std::vector<nacl::FileDescriptor> handles) {
-#if defined(OS_LINUX)
-  nacl::SetCreateMemoryObjectFunc(content::MakeSharedMemorySegmentViaIPC);
-#elif defined(OS_MACOSX)
-  nacl::SetCreateMemoryObjectFunc(CreateMemoryObject);
+void NaClListener::OnStartSelLdr(std::vector<nacl::FileDescriptor> handles,
+                                 bool enable_exception_handling) {
+  struct NaClChromeMainArgs *args = NaClChromeMainArgsCreate();
+  if (args == NULL) {
+    LOG(ERROR) << "NaClChromeMainArgsCreate() failed";
+    return;
+  }
+
+#if defined(OS_LINUX) || defined(OS_MACOSX)
+  args->create_memory_object_func = CreateMemoryObject;
+# if defined(OS_MACOSX)
   CHECK(handles.size() >= 1);
   g_shm_fd = nacl::ToNativeHandle(handles[handles.size() - 1]);
   handles.pop_back();
+# endif
 #endif
 
   CHECK(handles.size() >= 1);
@@ -111,23 +180,29 @@ void NaClListener::OnStartSelLdr(std::vector<nacl::FileDescriptor> handles) {
   handles.pop_back();
 
 #if defined(OS_WIN)
-  int irt_desc = _open_osfhandle(reinterpret_cast<intptr_t>(irt_handle),
+  args->irt_fd = _open_osfhandle(reinterpret_cast<intptr_t>(irt_handle),
                                  _O_RDONLY | _O_BINARY);
-  if (irt_desc < 0) {
+  if (args->irt_fd < 0) {
     LOG(ERROR) << "_open_osfhandle() failed";
     return;
   }
 #else
-  int irt_desc = irt_handle;
+  args->irt_fd = irt_handle;
 #endif
 
-  NaClSetIrtFileDesc(irt_desc);
-
-  scoped_array<NaClHandle> array(new NaClHandle[handles.size()]);
-  for (size_t i = 0; i < handles.size(); i++) {
-    array[i] = nacl::ToNativeHandle(handles[i]);
+  if (CheckEnvVar("NACL_VALIDATION_CACHE", false)) {
+    LOG(INFO) << "NaCl validation cache enabled.";
+    // The cache structure is not freed and exists until the NaCl process exits.
+    args->validation_cache = CreateValidationCache(
+        new BrowserValidationDBProxy(this),
+        // TODO(ncbray) plumb through real keys and versions.
+        "bogus key for HMAC....", "bogus version");
   }
-  NaClMainForChromium(static_cast<int>(handles.size()), array.get(),
-                      debug_enabled_);
+
+  CHECK(handles.size() == 1);
+  args->imc_bootstrap_handle = nacl::ToNativeHandle(handles[0]);
+  args->enable_exception_handling = enable_exception_handling;
+  args->enable_debug_stub = debug_enabled_;
+  NaClChromeMainStart(args);
   NOTREACHED();
 }

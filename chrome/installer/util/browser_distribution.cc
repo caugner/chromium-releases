@@ -193,6 +193,10 @@ std::string BrowserDistribution::GetNetworkStatsServer() const {
   return "";
 }
 
+std::string BrowserDistribution::GetHttpPipeliningTestServer() const {
+  return "";
+}
+
 std::wstring BrowserDistribution::GetDistributionData(HKEY root_key) {
   return L"";
 }
@@ -237,7 +241,7 @@ bool BrowserDistribution::GetExperimentDetails(
 
 void BrowserDistribution::LaunchUserExperiment(
     const FilePath& setup_path, installer::InstallStatus status,
-    const Version& version, const installer::Product& installation,
+    const Version& version, const installer::Product& product,
     bool system_level) {
 }
 

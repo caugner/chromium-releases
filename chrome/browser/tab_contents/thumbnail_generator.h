@@ -11,17 +11,24 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/callback_forward.h"
 #include "base/memory/linked_ptr.h"
 #include "base/timer.h"
-#include "content/browser/renderer_host/backing_store.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_contents_observer.h"
 
 class GURL;
 class Profile;
-class RenderWidgetHost;
 class SkBitmap;
+
+namespace content {
+class RenderWidgetHost;
+}
+
+namespace gfx {
+class Size;
+}
 
 namespace history {
 class TopSites;
@@ -36,6 +43,8 @@ class ThumbnailGenerator : public content::NotificationObserver,
   enum ClipResult {
     // The source image is smaller.
     kSourceIsSmaller,
+    // Wider than tall by twice or more, clip horizontally.
+    kTooWiderThanTall,
     // Wider than tall, clip horizontally.
     kWiderThanTall,
     // Taller than wide, clip vertically.
@@ -76,7 +85,7 @@ class ThumbnailGenerator : public content::NotificationObserver,
   // set, and the backing store is used, then the resulting image will
   // be less then twice the size of the |desired_size| in both
   // dimensions, but might not be the exact size requested.
-  void AskForSnapshot(RenderWidgetHost* renderer,
+  void AskForSnapshot(content::RenderWidgetHost* renderer,
                       bool prefer_backing_store,
                       const ThumbnailReadyCallback& callback,
                       gfx::Size page_size,
@@ -84,24 +93,25 @@ class ThumbnailGenerator : public content::NotificationObserver,
 
   // This returns a thumbnail of a fixed, small size for the given
   // renderer.
-  SkBitmap GetThumbnailForRenderer(RenderWidgetHost* renderer) const;
+  SkBitmap GetThumbnailForRenderer(content::RenderWidgetHost* renderer) const;
 
   // This returns a thumbnail of a fixed, small size for the given
   // renderer. |options| is a bitmask of ThumbnailOptions. If
   // |clip_result| is non-NULL, the result of clipping will be written.
-  SkBitmap GetThumbnailForRendererWithOptions(RenderWidgetHost* renderer,
-                                              int options,
-                                              ClipResult* clip_result) const;
+  SkBitmap GetThumbnailForRendererWithOptions(
+      content::RenderWidgetHost* renderer,
+      int options,
+      ClipResult* clip_result) const;
 
   // Start or stop monitoring notifications for |renderer| based on the value
   // of |monitor|.
-  void MonitorRenderer(RenderWidgetHost* renderer, bool monitor);
+  void MonitorRenderer(content::RenderWidgetHost* renderer, bool monitor);
 
   // Calculates how "boring" a thumbnail is. The boring score is the
   // 0,1 ranged percentage of pixels that are the most common
   // luma. Higher boring scores indicate that a higher percentage of a
   // bitmap are all the same brightness.
-  static double CalculateBoringScore(SkBitmap* bitmap);
+  static double CalculateBoringScore(const SkBitmap& bitmap);
 
   // Gets the clipped bitmap from |bitmap| per the aspect ratio of the
   // desired width and the desired height. For instance, if the input
@@ -116,6 +126,11 @@ class ThumbnailGenerator : public content::NotificationObserver,
   // Update the thumbnail of the given tab contents if necessary.
   void UpdateThumbnailIfNecessary(content::WebContents* webb_contents);
 
+  // Update the thumbnail of the given tab.
+  void UpdateThumbnail(content::WebContents* web_contents,
+                       const SkBitmap& bitmap,
+                       const ThumbnailGenerator::ClipResult& clip_result);
+
   // Returns true if we should update the thumbnail of the given URL.
   static bool ShouldUpdateThumbnail(Profile* profile,
                                     history::TopSites* top_sites,
@@ -127,7 +142,7 @@ class ThumbnailGenerator : public content::NotificationObserver,
 
  private:
   virtual void WidgetDidReceivePaintAtSizeAck(
-      RenderWidgetHost* widget,
+      content::RenderWidgetHost* widget,
       int tag,
       const gfx::Size& size);
 
@@ -137,7 +152,7 @@ class ThumbnailGenerator : public content::NotificationObserver,
                        const content::NotificationDetails& details) OVERRIDE;
 
   // Indicates that the given widget has changed is visibility.
-  void WidgetHidden(RenderWidgetHost* widget);
+  void WidgetHidden(content::RenderWidgetHost* widget);
 
   // Called when the given web contents are disconnected (either
   // through being closed, or because the renderer is no longer there).

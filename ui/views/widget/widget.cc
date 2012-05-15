@@ -113,20 +113,22 @@ Widget::InitParams::InitParams()
       delegate(NULL),
       child(false),
       transient(false),
-      transparent(false),
+      transparent(ViewsDelegate::views_delegate &&
+                  ViewsDelegate::views_delegate->UseTransparentWindows()),
       accept_events(true),
       can_activate(true),
       keep_on_top(false),
       ownership(NATIVE_WIDGET_OWNS_WIDGET),
       mirror_origin_in_rtl(false),
       has_dropshadow(false),
+      remove_standard_frame(false),
       show_state(ui::SHOW_STATE_DEFAULT),
       double_buffer(false),
       parent(NULL),
       parent_widget(NULL),
       native_widget(NULL),
       top_level(false),
-      create_texture_for_layer(true) {
+      layer_type(ui::LAYER_TEXTURED) {
 }
 
 Widget::InitParams::InitParams(Type type)
@@ -134,7 +136,9 @@ Widget::InitParams::InitParams(Type type)
       delegate(NULL),
       child(type == TYPE_CONTROL),
       transient(type == TYPE_BUBBLE || type == TYPE_POPUP || type == TYPE_MENU),
-      transparent(false),
+      transparent(type == TYPE_WINDOW &&
+                  ViewsDelegate::views_delegate &&
+                  ViewsDelegate::views_delegate->UseTransparentWindows()),
       accept_events(true),
       can_activate(
           type != TYPE_POPUP && type != TYPE_MENU && type != TYPE_CONTROL),
@@ -142,13 +146,14 @@ Widget::InitParams::InitParams(Type type)
       ownership(NATIVE_WIDGET_OWNS_WIDGET),
       mirror_origin_in_rtl(false),
       has_dropshadow(false),
+      remove_standard_frame(false),
       show_state(ui::SHOW_STATE_DEFAULT),
       double_buffer(false),
       parent(NULL),
       parent_widget(NULL),
       native_widget(NULL),
       top_level(false),
-      create_texture_for_layer(true) {
+      layer_type(ui::LAYER_TEXTURED) {
 }
 
 gfx::NativeView Widget::InitParams::GetParent() const {
@@ -173,6 +178,7 @@ Widget::Widget()
       focus_on_creation_(true),
       is_top_level_(false),
       native_widget_initialized_(false),
+      native_widget_destroyed_(false),
       is_mouse_button_pressed_(false),
       last_mouse_event_was_move_(false) {
 }
@@ -184,8 +190,13 @@ Widget::~Widget() {
   }
 
   DestroyRootView();
-  if (ownership_ == InitParams::WIDGET_OWNS_NATIVE_WIDGET)
+  if (ownership_ == InitParams::WIDGET_OWNS_NATIVE_WIDGET) {
     delete native_widget_;
+  } else {
+    DCHECK(native_widget_destroyed_)
+        << "Destroying a widget with a live native widget. "
+        << "Widget probably should use WIDGET_OWNS_NATIVE_WIDGET ownership.";
+  }
 }
 
 // static
@@ -336,6 +347,9 @@ void Widget::Init(const InitParams& params) {
     else if (params.show_state == ui::SHOW_STATE_MINIMIZED)
       Minimize();
     UpdateWindowTitle();
+  } else if (params.delegate) {
+    SetContentsView(params.delegate->GetContentsView());
+    SetInitialBoundsForFramelessWindow(params.bounds);
   }
   native_widget_initialized_ = true;
 }
@@ -406,6 +420,9 @@ const Widget* Widget::GetTopLevelWidget() const {
 }
 
 void Widget::SetContentsView(View* view) {
+  // Do not SetContentsView() again if it is already set to the same view.
+  if (view == GetContentsView())
+    return;
   root_view_->SetContentsView(view);
   if (non_client_view_ != view)
     non_client_view_ = NULL;
@@ -433,6 +450,10 @@ void Widget::SetBounds(const gfx::Rect& bounds) {
 
 void Widget::SetSize(const gfx::Size& size) {
   native_widget_->SetSize(size);
+}
+
+void Widget::CenterWindow(const gfx::Size& size) {
+  native_widget_->CenterWindow(size);
 }
 
 void Widget::SetBoundsConstrained(const gfx::Rect& bounds) {
@@ -469,6 +490,10 @@ void Widget::StackAbove(gfx::NativeView native_view) {
 
 void Widget::StackAtTop() {
   native_widget_->StackAtTop();
+}
+
+void Widget::StackBelow(gfx::NativeView native_view) {
+  native_widget_->StackBelow(native_view);
 }
 
 void Widget::SetShape(gfx::NativeRegion shape) {
@@ -596,6 +621,10 @@ void Widget::SetUseDragFrame(bool use_drag_frame) {
   native_widget_->SetUseDragFrame(use_drag_frame);
 }
 
+void Widget::FlashFrame(bool flash) {
+  native_widget_->FlashFrame(flash);
+}
+
 View* Widget::GetRootView() {
   if (!root_view_.get()) {
     // First time the root view is being asked for, create it now.
@@ -658,10 +687,12 @@ InputMethod* Widget::GetInputMethod() {
   }
 }
 
-void Widget::RunShellDrag(View* view, const ui::OSExchangeData& data,
+void Widget::RunShellDrag(View* view,
+                          const ui::OSExchangeData& data,
+                          const gfx::Point& location,
                           int operation) {
   dragged_view_ = view;
-  native_widget_->RunShellDrag(view, data, operation);
+  native_widget_->RunShellDrag(view, data, location, operation);
   // If the view is removed during the drag operation, dragged_view_ is set to
   // NULL.
   if (view && dragged_view_ == view) {
@@ -750,14 +781,20 @@ void Widget::UpdateFrameAfterFrameChange() {
 }
 
 NonClientFrameView* Widget::CreateNonClientFrameView() {
-  NonClientFrameView* frame_view = widget_delegate_->CreateNonClientFrameView();
+  NonClientFrameView* frame_view =
+      widget_delegate_->CreateNonClientFrameView(this);
   if (!frame_view)
     frame_view = native_widget_->CreateNonClientFrameView();
   if (!frame_view && ViewsDelegate::views_delegate) {
     frame_view =
         ViewsDelegate::views_delegate->CreateDefaultNonClientFrameView(this);
   }
-  return frame_view ? frame_view : new CustomFrameView(this);
+  if (frame_view)
+    return frame_view;
+
+  CustomFrameView* custom_frame_view = new CustomFrameView;
+  custom_frame_view->Init(this);
+  return custom_frame_view;
 }
 
 bool Widget::ShouldUseNativeFrame() const {
@@ -945,10 +982,15 @@ void Widget::OnNativeWidgetDestroying() {
 void Widget::OnNativeWidgetDestroyed() {
   widget_delegate_->DeleteDelegate();
   widget_delegate_ = NULL;
+  native_widget_destroyed_ = true;
 }
 
 gfx::Size Widget::GetMinimumSize() {
   return non_client_view_ ? non_client_view_->GetMinimumSize() : gfx::Size();
+}
+
+gfx::Size Widget::GetMaximumSize() {
+  return non_client_view_ ? non_client_view_->GetMaximumSize() : gfx::Size();
 }
 
 void Widget::OnNativeWidgetSizeChanged(const gfx::Size& new_size) {
@@ -1136,16 +1178,6 @@ void Widget::DestroyRootView() {
   root_view_.reset();
   // Input method has to be destroyed before focus manager.
   input_method_.reset();
-  // Defer focus manager's destruction. This is for the case when the
-  // focus manager is referenced by a child NativeWidgetGtk (e.g. TabbedPane in
-  // a dialog). When gtk_widget_destroy is called on the parent, the destroy
-  // signal reaches parent first and then the child. Thus causing the parent
-  // NativeWidgetGtk's dtor executed before the child's. If child's view
-  // hierarchy references this focus manager, it crashes. This will defer focus
-  // manager's destruction after child NativeWidgetGtk's dtor.
-  FocusManager* focus_manager = focus_manager_.release();
-  if (focus_manager)
-    MessageLoop::current()->DeleteSoon(FROM_HERE, focus_manager);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1201,6 +1233,21 @@ void Widget::SetInitialBounds(const gfx::Rect& bounds) {
       // Use the supplied initial bounds.
       SetBoundsConstrained(bounds);
     }
+  }
+}
+
+void Widget::SetInitialBoundsForFramelessWindow(const gfx::Rect& bounds) {
+  if (bounds.IsEmpty()) {
+    View* contents_view = GetContentsView();
+    DCHECK(contents_view);
+    // No initial bounds supplied, so size the window to its content and
+    // center over its parent if preferred size is provided.
+    gfx::Size size = contents_view->GetPreferredSize();
+    if (!size.IsEmpty())
+      native_widget_->CenterWindow(size);
+  } else {
+    // Use the supplied initial bounds.
+    SetBoundsConstrained(bounds);
   }
 }
 

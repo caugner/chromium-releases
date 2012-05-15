@@ -9,6 +9,7 @@
 #include <vector>
 #include <string>
 
+#include "base/memory/scoped_ptr.h"
 #include "content/public/common/page_transition_types.h"
 #include "googleurl/src/gurl.h"
 
@@ -90,9 +91,13 @@ struct AutocompleteMatch {
                     int relevance,
                     bool deletable,
                     Type type);
+  AutocompleteMatch(const AutocompleteMatch& match);
   ~AutocompleteMatch();
 
   // Converts |type| to a string representation.  Used in logging and debugging.
+  AutocompleteMatch& operator=(const AutocompleteMatch& match);
+
+  // Converts |type| to a string representation.  Used in logging.
   static std::string TypeToString(Type type);
 
   // Converts |type| to a resource identifier for the appropriate icon for this
@@ -104,6 +109,7 @@ struct AutocompleteMatch {
                            const AutocompleteMatch& elem2);
 
   // Comparison functions for removing matches with duplicate destinations.
+  // Destinations are compared using |stripped_destination_url|.
   static bool DestinationSortFunc(const AutocompleteMatch& elem1,
                                   const AutocompleteMatch& elem2);
   static bool DestinationsEqual(const AutocompleteMatch& elem1,
@@ -128,10 +134,54 @@ struct AutocompleteMatch {
                                        int style,
                                        ACMatchClassifications* classifications);
 
+  // Converts classifications to and from a serialized string representation
+  // (using comma-separated integers to sequentially list positions and styles).
+  static std::string ClassificationsToString(
+      const ACMatchClassifications& classifications);
+  static ACMatchClassifications ClassificationsFromString(
+      const std::string& serialized_classifications);
+
+  // Adds a classification to the end of |classifications| iff its style is
+  // different from the last existing classification.  |offset| must be larger
+  // than the offset of the last classification in |classifications|.
+  static void AddLastClassificationIfNecessary(
+      ACMatchClassifications* classifications,
+      size_t offset,
+      int style);
+
   // Removes invalid characters from |text|. Should be called on strings coming
   // from external sources (such as extensions) before assigning to |contents|
   // or |description|.
   static string16 SanitizeString(const string16& text);
+
+  // Copies the destination_url with "www." stripped off to
+  // |stripped_destination_url|.  This method is invoked internally by the
+  // AutocompleteController and does not normally need to be invoked.
+  void ComputeStrippedDestinationURL();
+
+  // Gets data relevant to whether there should be any special keyword-related
+  // UI shown for this match.  If this match represents a selected keyword, i.e.
+  // the UI should be "in keyword mode", |keyword| will be set to the keyword
+  // and |is_keyword_hint| will be set to false.  If this match has a non-NULL
+  // |associated_keyword|, i.e. we should show a "Press [tab] to search ___"
+  // hint and allow the user to toggle into keyword mode, |keyword| will be set
+  // to the associated keyword and |is_keyword_hint| will be set to true.  Note
+  // that only one of these states can be in effect at once.  In all other
+  // cases, |keyword| will be cleared, even when our member variable |keyword|
+  // is non-empty.  See also GetSubstitutingExplicitlyInvokedKeyword().
+  void GetKeywordUIState(string16* keyword,
+                         bool* is_keyword_hint) const;
+
+  // Returns |keyword|, but only if it represents a substituting keyword that
+  // the user has explicitly invoked.  If for example this match represents a
+  // search with the default search engine (and the user didn't explicitly
+  // invoke its keyword), this returns the empty string.  The result is that
+  // this function returns a non-empty string in the same cases as when the UI
+  // should show up as being "in keyword mode".
+  string16 GetSubstitutingExplicitlyInvokedKeyword() const;
+
+  // Returns the TemplateURL associated with this match.
+  const TemplateURL* GetTemplateURL() const;
 
   // The provider of this match, used to remember which provider the user had
   // selected when the input changes. This may be NULL, in which case there is
@@ -165,6 +215,9 @@ struct AutocompleteMatch {
   // It may be empty if there is no possible navigation.
   GURL destination_url;
 
+  // The destination URL with "www." stripped off for better dupe finding.
+  GURL stripped_destination_url;
+
   // The main text displayed in the address bar dropdown.
   string16 contents;
   ACMatchClassifications contents_class;
@@ -184,6 +237,22 @@ struct AutocompleteMatch {
 
   // Type of this match.
   Type type;
+
+  // Set with a keyword provider match if this match can show a keyword hint.
+  // For example, if this is a SearchProvider match for "www.amazon.com",
+  // |associated_keyword| could be a KeywordProvider match for "amazon.com".
+  scoped_ptr<AutocompleteMatch> associated_keyword;
+
+  // For matches that correspond to valid substituting keywords ("search
+  // engines" that aren't the default engine, or extension keywords), this
+  // is the keyword.  If this is set, then when displaying this match, the
+  // edit will use the "keyword mode" UI that shows a blue
+  // "Search <engine name>" chit before the user's typing.  This should be
+  // set for any match that's an |associated_keyword| of a match in the main
+  // result list, as well as any other matches in the main result list that
+  // are direct keyword matches (e.g. if the user types in a keyword name and
+  // some search terms directly).
+  string16 keyword;
 
   // Indicates the TemplateURL the match originated from. This is set for
   // keywords as well as matches for the default search provider.

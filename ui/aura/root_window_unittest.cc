@@ -5,21 +5,24 @@
 #include "ui/aura/root_window.h"
 
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/aura/client/event_client.h"
+#include "ui/aura/env.h"
 #include "ui/aura/event.h"
+#include "ui/aura/event_filter.h"
 #include "ui/aura/test/aura_test_base.h"
+#include "ui/aura/test/event_generator.h"
 #include "ui/aura/test/test_window_delegate.h"
 #include "ui/aura/test/test_windows.h"
 #include "ui/base/hit_test.h"
+#include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/gfx/point.h"
 #include "ui/gfx/rect.h"
 
 namespace aura {
-namespace test {
-
 namespace {
 
 // A delegate that always returns a non-client component for hit tests.
-class NonClientDelegate : public TestWindowDelegate {
+class NonClientDelegate : public test::TestWindowDelegate {
  public:
   NonClientDelegate()
       : non_client_count_(0),
@@ -53,11 +56,56 @@ class NonClientDelegate : public TestWindowDelegate {
   int mouse_event_count_;
   gfx::Point mouse_event_location_;
   int mouse_event_flags_;
+
+  DISALLOW_COPY_AND_ASSIGN(NonClientDelegate);
+};
+
+// A simple EventFilter that keeps track of the number of key events that it's
+// seen.
+class EventCountFilter : public EventFilter {
+ public:
+  EventCountFilter() : num_key_events_(0), num_mouse_events_(0) {}
+  virtual ~EventCountFilter() {}
+
+  int num_key_events() const { return num_key_events_; }
+  int num_mouse_events() const { return num_mouse_events_; }
+
+  void Reset() {
+    num_key_events_ = 0;
+    num_mouse_events_ = 0;
+  }
+
+  // EventFilter overrides:
+  virtual bool PreHandleKeyEvent(Window* target, KeyEvent* event) OVERRIDE {
+    num_key_events_++;
+    return true;
+  }
+  virtual bool PreHandleMouseEvent(Window* target, MouseEvent* event) OVERRIDE {
+    num_mouse_events_++;
+    return true;
+  }
+  virtual ui::TouchStatus PreHandleTouchEvent(
+      Window* target, TouchEvent* event) OVERRIDE {
+    return ui::TOUCH_STATUS_UNKNOWN;
+  }
+  virtual ui::GestureStatus PreHandleGestureEvent(
+      Window* target, GestureEvent* event) OVERRIDE {
+    return ui::GESTURE_STATUS_UNKNOWN;
+  }
+
+ private:
+  // How many key events have been received?
+  int num_key_events_;
+
+  // How many mouse events have been received?
+  int num_mouse_events_;
+
+  DISALLOW_COPY_AND_ASSIGN(EventCountFilter);
 };
 
 }  // namespace
 
-typedef AuraTestBase RootWindowTest;
+typedef test::AuraTestBase RootWindowTest;
 
 TEST_F(RootWindowTest, DispatchMouseEvent) {
   // Create two non-overlapping windows so we don't have to worry about which
@@ -77,7 +125,7 @@ TEST_F(RootWindowTest, DispatchMouseEvent) {
   gfx::Point point(101, 201);
   MouseEvent event1(
       ui::ET_MOUSE_PRESSED, point, point, ui::EF_LEFT_MOUSE_BUTTON);
-  RootWindow::GetInstance()->DispatchMouseEvent(&event1);
+  root_window()->DispatchMouseEvent(&event1);
 
   // Event was tested for non-client area for the target window.
   EXPECT_EQ(1, delegate1->non_client_count());
@@ -96,8 +144,7 @@ TEST_F(RootWindowTest, DispatchMouseEvent) {
 // Check that we correctly track the state of the mouse buttons in response to
 // button press and release events.
 TEST_F(RootWindowTest, MouseButtonState) {
-  RootWindow* root_window = RootWindow::GetInstance();
-  EXPECT_FALSE(root_window->IsMouseButtonDown());
+  EXPECT_FALSE(Env::GetInstance()->is_mouse_button_down());
 
   gfx::Point location;
   scoped_ptr<MouseEvent> event;
@@ -108,8 +155,8 @@ TEST_F(RootWindowTest, MouseButtonState) {
       location,
       location,
       ui::EF_LEFT_MOUSE_BUTTON));
-  root_window->DispatchMouseEvent(event.get());
-  EXPECT_TRUE(root_window->IsMouseButtonDown());
+  root_window()->DispatchMouseEvent(event.get());
+  EXPECT_TRUE(Env::GetInstance()->is_mouse_button_down());
 
   // Additionally press the right.
   event.reset(new MouseEvent(
@@ -117,8 +164,8 @@ TEST_F(RootWindowTest, MouseButtonState) {
       location,
       location,
       ui::EF_LEFT_MOUSE_BUTTON | ui::EF_RIGHT_MOUSE_BUTTON));
-  root_window->DispatchMouseEvent(event.get());
-  EXPECT_TRUE(root_window->IsMouseButtonDown());
+  root_window()->DispatchMouseEvent(event.get());
+  EXPECT_TRUE(Env::GetInstance()->is_mouse_button_down());
 
   // Release the left button.
   event.reset(new MouseEvent(
@@ -126,8 +173,8 @@ TEST_F(RootWindowTest, MouseButtonState) {
       location,
       location,
       ui::EF_RIGHT_MOUSE_BUTTON));
-  root_window->DispatchMouseEvent(event.get());
-  EXPECT_TRUE(root_window->IsMouseButtonDown());
+  root_window()->DispatchMouseEvent(event.get());
+  EXPECT_TRUE(Env::GetInstance()->is_mouse_button_down());
 
   // Release the right button.  We should ignore the Shift-is-down flag.
   event.reset(new MouseEvent(
@@ -135,8 +182,8 @@ TEST_F(RootWindowTest, MouseButtonState) {
       location,
       location,
       ui::EF_SHIFT_DOWN));
-  root_window->DispatchMouseEvent(event.get());
-  EXPECT_FALSE(root_window->IsMouseButtonDown());
+  root_window()->DispatchMouseEvent(event.get());
+  EXPECT_FALSE(Env::GetInstance()->is_mouse_button_down());
 
   // Press the middle button.
   event.reset(new MouseEvent(
@@ -144,13 +191,12 @@ TEST_F(RootWindowTest, MouseButtonState) {
       location,
       location,
       ui::EF_MIDDLE_MOUSE_BUTTON));
-  root_window->DispatchMouseEvent(event.get());
-  EXPECT_TRUE(root_window->IsMouseButtonDown());
+  root_window()->DispatchMouseEvent(event.get());
+  EXPECT_TRUE(Env::GetInstance()->is_mouse_button_down());
 }
 
 TEST_F(RootWindowTest, TranslatedEvent) {
-  RootWindow* root_window = RootWindow::GetInstance();
-  scoped_ptr<Window> w1(CreateTestWindowWithDelegate(NULL, 1,
+  scoped_ptr<Window> w1(test::CreateTestWindowWithDelegate(NULL, 1,
       gfx::Rect(50, 50, 100, 100), NULL));
 
   gfx::Point origin(100, 100);
@@ -160,11 +206,135 @@ TEST_F(RootWindowTest, TranslatedEvent) {
   EXPECT_EQ("100,100", root.root_location().ToString());
 
   MouseEvent translated_event(
-      root, root_window, w1.get(),
+      root, root_window(), w1.get(),
       ui::ET_MOUSE_ENTERED, root.flags());
   EXPECT_EQ("50,50", translated_event.location().ToString());
   EXPECT_EQ("100,100", translated_event.root_location().ToString());
 }
 
-}  // namespace test
+namespace {
+
+class TestEventClient : public client::EventClient {
+ public:
+  static const int kNonLockWindowId = 100;
+  static const int kLockWindowId = 200;
+
+  explicit TestEventClient(RootWindow* root_window)
+      : root_window_(root_window),
+        lock_(false) {
+    client::SetEventClient(root_window_, this);
+    Window* lock_window =
+        test::CreateTestWindowWithBounds(root_window_->bounds(), root_window_);
+    lock_window->set_id(kLockWindowId);
+    Window* non_lock_window =
+        test::CreateTestWindowWithBounds(root_window_->bounds(), root_window_);
+    non_lock_window->set_id(kNonLockWindowId);
+  }
+  virtual ~TestEventClient() {
+    client::SetEventClient(root_window_, NULL);
+  }
+
+  // Starts/stops locking. Locking prevents windows other than those inside
+  // the lock container from receiving events, getting focus etc.
+  void Lock() {
+    lock_ = true;
+  }
+  void Unlock() {
+    lock_ = false;
+  }
+
+  Window* GetLockWindow() {
+    return const_cast<Window*>(
+        static_cast<const TestEventClient*>(this)->GetLockWindow());
+  }
+  const Window* GetLockWindow() const {
+    return root_window_->GetChildById(kLockWindowId);
+  }
+  Window* GetNonLockWindow() {
+    return root_window_->GetChildById(kNonLockWindowId);
+  }
+
+ private:
+  // Overridden from client::EventClient:
+  virtual bool CanProcessEventsWithinSubtree(
+      const Window* window) const OVERRIDE {
+    return lock_ ? GetLockWindow()->Contains(window) : true;
+  }
+
+  RootWindow* root_window_;
+  bool lock_;
+
+  DISALLOW_COPY_AND_ASSIGN(TestEventClient);
+};
+
+}  // namespace
+
+TEST_F(RootWindowTest, CanProcessEventsWithinSubtree) {
+  TestEventClient client(root_window());
+  test::TestWindowDelegate d;
+
+  EventCountFilter* nonlock_ef = new EventCountFilter;
+  EventCountFilter* lock_ef = new EventCountFilter;
+  client.GetNonLockWindow()->SetEventFilter(nonlock_ef);
+  client.GetLockWindow()->SetEventFilter(lock_ef);
+
+  Window* w1 = test::CreateTestWindowWithBounds(gfx::Rect(10, 10, 20, 20),
+                                                client.GetNonLockWindow());
+  w1->set_id(1);
+  Window* w2 = test::CreateTestWindowWithBounds(gfx::Rect(30, 30, 20, 20),
+                                                client.GetNonLockWindow());
+  w2->set_id(2);
+  scoped_ptr<Window> w3(
+      test::CreateTestWindowWithDelegate(&d, 3, gfx::Rect(20, 20, 20, 20),
+                                         client.GetLockWindow()));
+
+  w1->Focus();
+  EXPECT_TRUE(w1->GetFocusManager()->IsFocusedWindow(w1));
+
+  client.Lock();
+
+  // Since we're locked, the attempt to focus w2 will be ignored.
+  w2->Focus();
+  EXPECT_TRUE(w1->GetFocusManager()->IsFocusedWindow(w1));
+  EXPECT_FALSE(w1->GetFocusManager()->IsFocusedWindow(w2));
+
+  {
+    // Attempting to send a key event to w1 (not in the lock container) should
+    // cause focus to be reset.
+    test::EventGenerator generator(root_window());
+    generator.PressKey(ui::VKEY_SPACE, 0);
+    EXPECT_EQ(NULL, w1->GetFocusManager()->GetFocusedWindow());
+  }
+
+  {
+    // Events sent to a window not in the lock container will not be processed.
+    // i.e. never sent to the non-lock container's event filter.
+    test::EventGenerator generator(root_window(), w1);
+    generator.PressLeftButton();
+    EXPECT_EQ(0, nonlock_ef->num_mouse_events());
+
+    // Events sent to a window in the lock container will be processed.
+    test::EventGenerator generator3(root_window(), w3.get());
+    generator3.PressLeftButton();
+    EXPECT_EQ(1, lock_ef->num_mouse_events());
+  }
+
+  // Prevent w3 from being deleted by the hierarchy since its delegate is owned
+  // by this scope.
+  w3->parent()->RemoveChild(w3.get());
+}
+
+TEST_F(RootWindowTest, IgnoreUnknownKeys) {
+  EventCountFilter* filter = new EventCountFilter;
+  root_window()->SetEventFilter(filter);  // passes ownership
+
+  KeyEvent unknown_event(ui::ET_KEY_PRESSED, ui::VKEY_UNKNOWN, 0);
+  EXPECT_FALSE(root_window()->DispatchKeyEvent(&unknown_event));
+  EXPECT_EQ(0, filter->num_key_events());
+
+  KeyEvent known_event(ui::ET_KEY_PRESSED, ui::VKEY_A, 0);
+  EXPECT_TRUE(root_window()->DispatchKeyEvent(&known_event));
+  EXPECT_EQ(1, filter->num_key_events());
+}
+
 }  // namespace aura

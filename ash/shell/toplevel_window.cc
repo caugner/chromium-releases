@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ash/shell/toplevel_window.h"
 
-#include "ash/wm/toplevel_frame_view.h"
 #include "base/utf_string_conversions.h"
 #include "ui/aura/window.h"
 #include "ui/gfx/canvas.h"
@@ -20,9 +19,12 @@ ToplevelWindow::CreateParams::CreateParams()
 
 // static
 void ToplevelWindow::CreateToplevelWindow(const CreateParams& params) {
+  static int count = 0;
+  int x = count == 0 ? 50 : 350;
+  count = (count + 1) % 2;
   views::Widget* widget =
       views::Widget::CreateWindowWithBounds(new ToplevelWindow(params),
-                                            gfx::Rect(120, 150, 400, 300));
+                                            gfx::Rect(x, 150, 300, 300));
   widget->GetNativeView()->SetName("Examples:ToplevelWindow");
   widget->Show();
 }
@@ -34,7 +36,7 @@ ToplevelWindow::~ToplevelWindow() {
 }
 
 void ToplevelWindow::OnPaint(gfx::Canvas* canvas) {
-  canvas->FillRect(SK_ColorDKGRAY, GetLocalBounds());
+  canvas->FillRect(GetLocalBounds(), SK_ColorDKGRAY);
 }
 
 string16 ToplevelWindow::GetWindowTitle() const {
@@ -51,10 +53,6 @@ bool ToplevelWindow::CanResize() const {
 
 bool ToplevelWindow::CanMaximize() const {
   return params_.can_maximize;
-}
-
-views::NonClientFrameView* ToplevelWindow::CreateNonClientFrameView() {
-  return new ash::internal::ToplevelFrameView;
 }
 
 }  // namespace shell

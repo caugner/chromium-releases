@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,7 +27,7 @@
 class BrowserWindowGtk;
 class CustomDrawButton;
 class DraggedTabControllerGtk;
-class GtkThemeService;
+class ThemeServiceGtk;
 
 namespace gfx {
 class Image;
@@ -157,7 +157,7 @@ class TabStripGtk : public TabStripModelObserver,
   virtual void ContinueDrag(GdkDragContext* context) OVERRIDE;
   virtual bool EndDrag(bool canceled) OVERRIDE;
   virtual bool HasAvailableDragActions() const OVERRIDE;
-  virtual GtkThemeService* GetThemeProvider() OVERRIDE;
+  virtual ThemeServiceGtk* GetThemeProvider() OVERRIDE;
   virtual TabStripMenuController* GetTabStripMenuControllerForTab(
       TabGtk* tab) OVERRIDE;
 
@@ -394,7 +394,7 @@ class TabStripGtk : public TabStripModelObserver,
   // Determines whether the data is acceptable by the tabstrip and opens a new
   // tab with the data as URL if it is.  Returns true if the drop was
   // successful.
-  bool CompleteDrop(guchar* data, bool is_plain_text);
+  bool CompleteDrop(const guchar* data, bool is_plain_text);
 
   // Returns the image to use for indicating a drop on a tab. If is_down is
   // true, this returns an arrow pointing down.
@@ -463,7 +463,7 @@ class TabStripGtk : public TabStripModelObserver,
   BrowserWindowGtk* window_;
 
   // Theme resources.
-  GtkThemeService* theme_service_;
+  ThemeServiceGtk* theme_service_;
 
   // The currently running animation.
   scoped_ptr<TabAnimation> active_animation_;

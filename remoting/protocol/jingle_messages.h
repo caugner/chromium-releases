@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -35,11 +35,10 @@ struct JingleMessage {
   };
 
   enum Reason {
-    // Currently only termination reasons that can be sent by the host
-    // are understood. All others are converted to UNKNOWN_REASON.
     UNKNOWN_REASON,
     SUCCESS,
     DECLINE,
+    CANCEL,
     GENERAL_ERROR,
     INCOMPATIBLE_PARAMETERS,
   };
@@ -52,12 +51,13 @@ struct JingleMessage {
 
   // Caller keeps ownership of |stanza|.
   static bool IsJingleMessage(const buzz::XmlElement* stanza);
+  static std::string GetActionName(ActionType action);
 
   // Caller keeps ownership of |stanza|. |error| is set to debug error
   // message when parsing fails.
   bool ParseXml(const buzz::XmlElement* stanza, std::string* error);
 
-  buzz::XmlElement* ToXml();
+  scoped_ptr<buzz::XmlElement> ToXml() const;
 
   std::string from;
   std::string to;
@@ -98,7 +98,8 @@ struct JingleMessageReply {
   // Formats reply stanza for the specified |request_stanza|. Id and
   // recepient as well as other information needed to generate a valid
   // reply are taken from |request_stanza|.
-  buzz::XmlElement* ToXml(const buzz::XmlElement* request_stanza) const;
+  scoped_ptr<buzz::XmlElement> ToXml(
+      const buzz::XmlElement* request_stanza) const;
 
   ReplyType type;
   ErrorType error_type;

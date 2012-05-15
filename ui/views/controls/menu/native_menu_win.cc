@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,7 +18,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_win.h"
 #include "ui/base/win/hwnd_util.h"
-#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/canvas.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/native_theme.h"
 #include "ui/gfx/rect.h"
@@ -248,7 +248,7 @@ class NativeMenuWin::MenuHostWindow {
       if (data->native_menu_win->model_->GetIconAt(data->model_index, &icon)) {
         // We currently don't support items with both icons and checkboxes.
         DCHECK(type != ui::MenuModel::TYPE_CHECK);
-        gfx::CanvasSkia canvas(icon, false);
+        gfx::Canvas canvas(icon, false);
         skia::DrawToNativeContext(
             canvas.sk_canvas(), dc,
             draw_item_struct->rcItem.left + kItemLeftMargin,
@@ -271,8 +271,8 @@ class NativeMenuWin::MenuHostWindow {
         int icon_y = kItemTopMargin +
             (height - kItemTopMargin - kItemBottomMargin -
              config.check_height) / 2;
-        gfx::CanvasSkia canvas(gfx::Size(config.check_width,
-                                         config.check_height), false);
+        gfx::Canvas canvas(gfx::Size(config.check_width, config.check_height),
+                           false);
         NativeTheme::ExtraParams extra;
         extra.menu_check.is_radio = false;
         gfx::Rect bounds(0, 0, config.check_width, config.check_height);

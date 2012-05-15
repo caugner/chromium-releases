@@ -1,15 +1,17 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "chrome/browser/ui/cocoa/extensions/extension_install_dialog_controller.h"
 
+#include "base/i18n/rtl.h"
 #include "base/mac/bundle_locations.h"
 #include "base/mac/mac_util.h"
 #include "base/memory/scoped_nsobject.h"
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/extensions/bundle_installer.h"
 #include "chrome/browser/extensions/extension_install_dialog.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
@@ -23,9 +25,11 @@
 
 using content::OpenURLParams;
 using content::Referrer;
+using extensions::BundleInstaller;
 
 @interface ExtensionInstallDialogController ()
-- (bool)isInlineInstall;
+- (BOOL)isBundleInstall;
+- (BOOL)isInlineInstall;
 - (void)appendRatingStar:(const SkBitmap*)skiaImage;
 @end
 
@@ -39,9 +43,12 @@ const CGFloat kWarningsSeparatorPadding = 14;
 // contents.
 const CGFloat kMaxControlHeight = 400;
 
-// Adjust a control's height so that its content its not clipped. Returns the
-// amount the control's height had to be adjusted.
-CGFloat AdjustControlHeightToFitContent(NSControl* control) {
+// Adjust the |control|'s height so that its content is not clipped.
+// This also adds the change in height to the |totalOffset| and shifts the
+// control down by that amount.
+void OffsetControlVerticallyToFitContent(NSControl* control,
+                                         CGFloat* totalOffset) {
+  // Adjust the control's height so that its content is not clipped.
   NSRect currentRect = [control frame];
   NSRect fitRect = currentRect;
   fitRect.size.height = kMaxControlHeight;
@@ -50,13 +57,12 @@ CGFloat AdjustControlHeightToFitContent(NSControl* control) {
 
   [control setFrameSize:NSMakeSize(currentRect.size.width,
                                    currentRect.size.height + offset)];
-  return offset;
-}
 
-// Moves the control vertically by the specified amount.
-void OffsetControlVertically(NSControl* control, CGFloat amount) {
+  *totalOffset += offset;
+
+  // Move the control vertically by the new total offset.
   NSPoint origin = [control frame].origin;
-  origin.y += amount;
+  origin.y -= *totalOffset;
   [control setFrameOrigin:origin];
 }
 
@@ -72,6 +78,7 @@ void AppendRatingStarsShim(const SkBitmap* skiaImage, void* data) {
 
 @synthesize iconView = iconView_;
 @synthesize titleField = titleField_;
+@synthesize itemsField = itemsField_;
 @synthesize subtitleField = subtitleField_;
 @synthesize warningsField = warningsField_;
 @synthesize cancelButton = cancelButton_;
@@ -83,16 +90,18 @@ void AppendRatingStarsShim(const SkBitmap* skiaImage, void* data) {
 
 - (id)initWithParentWindow:(NSWindow*)window
                    profile:(Profile*)profile
-                 extension:(const Extension*)extension
                   delegate:(ExtensionInstallUI::Delegate*)delegate
-                      icon:(SkBitmap*)icon
                     prompt:(const ExtensionInstallUI::Prompt&)prompt {
   NSString* nibpath = nil;
 
-  // We use a different XIB in the case of inline installs or no permission
-  // warnings, that respectively show webstore ratings data and are a more
-  // nicely laid out.
-  if (prompt.type() == ExtensionInstallUI::INLINE_INSTALL_PROMPT) {
+  // We use a different XIB in the case of bundle installs, inline installs or
+  // no permission warnings. These are laid out nicely for the data they
+  // display.
+  if (prompt.type() == ExtensionInstallUI::BUNDLE_INSTALL_PROMPT) {
+    nibpath = [base::mac::FrameworkBundle()
+               pathForResource:@"ExtensionInstallPromptBundle"
+                        ofType:@"nib"];
+  } else if (prompt.type() == ExtensionInstallUI::INLINE_INSTALL_PROMPT) {
     nibpath = [base::mac::FrameworkBundle()
                pathForResource:@"ExtensionInstallPromptInline"
                         ofType:@"nib"];
@@ -109,9 +118,7 @@ void AppendRatingStarsShim(const SkBitmap* skiaImage, void* data) {
   if ((self = [super initWithWindowNibPath:nibpath owner:self])) {
     parentWindow_ = window;
     profile_ = profile;
-    icon_ = *icon;
     delegate_ = delegate;
-    extension_ = extension;
     prompt_.reset(new ExtensionInstallUI::Prompt(prompt));
   }
   return self;
@@ -126,8 +133,8 @@ void AppendRatingStarsShim(const SkBitmap* skiaImage, void* data) {
 }
 
 - (IBAction)storeLinkClicked:(id)sender {
-  GURL store_url(
-      extension_urls::GetWebstoreItemDetailURLPrefix() + extension_->id());
+  GURL store_url(extension_urls::GetWebstoreItemDetailURLPrefix() +
+                 prompt_->extension()->id());
   BrowserList::GetLastActiveWithProfile(profile_)->OpenURL(OpenURLParams(
       store_url, Referrer(), NEW_FOREGROUND_TAB, content::PAGE_TRANSITION_LINK,
       false));
@@ -152,8 +159,7 @@ void AppendRatingStarsShim(const SkBitmap* skiaImage, void* data) {
                       [[self window] delegate]));
 
   // Set control labels.
-  [titleField_ setStringValue:base::SysUTF16ToNSString(
-      prompt_->GetHeading(extension_->name()))];
+  [titleField_ setStringValue:base::SysUTF16ToNSString(prompt_->GetHeading())];
   [okButton_ setTitle:base::SysUTF16ToNSString(
       prompt_->GetAcceptButtonLabel())];
   [cancelButton_ setTitle:prompt_->HasAbortButtonLabel() ?
@@ -167,18 +173,19 @@ void AppendRatingStarsShim(const SkBitmap* skiaImage, void* data) {
         prompt_->GetUserCount())];
   }
 
-  NSImage* image = gfx::SkBitmapToNSImage(icon_);
-  [iconView_ setImage:image];
+  // The bundle install dialog has no icon.
+  if (![self isBundleInstall])
+    [iconView_ setImage:prompt_->icon().ToNSImage()];
 
-  // Resize |titleField_| to fit the title.
-  CGFloat originalTitleWidth = [titleField_ frame].size.width;
-  [titleField_ sizeToFit];
-  CGFloat newTitleWidth = [titleField_ frame].size.width;
-  if (newTitleWidth > originalTitleWidth) {
-    NSRect frame = [[self window] frame];
-    frame.size.width += newTitleWidth - originalTitleWidth;
-    [[self window] setFrame:frame display:NO];
-  }
+  // The dialog is laid out in the NIB exactly how we want it assuming that
+  // each label fits on one line. However, for each label, we want to allow
+  // wrapping onto multiple lines. So we accumulate an offset by measuring how
+  // big each label wants to be, and comparing it to how big it actually is.
+  // Then we shift each label down and resize by the appropriate amount, then
+  // finally resize the window.
+  CGFloat totalOffset = 0.0;
+
+  OffsetControlVerticallyToFitContent(titleField_, &totalOffset);
 
   // Resize |okButton_| and |cancelButton_| to fit the button labels, but keep
   // them right-aligned.
@@ -194,11 +201,32 @@ void AppendRatingStarsShim(const SkBitmap* skiaImage, void* data) {
                                          -buttonDelta.width, 0)];
   }
 
-  CGFloat totalOffset = 0.0;
+  if ([self isBundleInstall]) {
+    [subtitleField_ setStringValue:base::SysUTF16ToNSString(
+        prompt_->GetPermissionsHeading())];
+
+    // We display the list of extension names as a simple text string, seperated
+    // by newlines.
+    BundleInstaller::ItemList items = prompt_->bundle()->GetItemsWithState(
+        BundleInstaller::Item::STATE_PENDING);
+
+    NSMutableString* joinedItems = [NSMutableString string];
+    for (size_t i = 0; i < items.size(); ++i) {
+      if (i > 0)
+        [joinedItems appendString:@"\n"];
+      [joinedItems appendString:base::SysUTF16ToNSString(
+          items[i].GetNameForDisplay())];
+    }
+    [itemsField_ setStringValue:joinedItems];
+
+    // Adjust the controls to fit the list of extensions.
+    OffsetControlVerticallyToFitContent(itemsField_, &totalOffset);
+  }
+
   // If there are any warnings, then we have to do some special layout.
   if (prompt_->GetPermissionCount() > 0) {
     [subtitleField_ setStringValue:base::SysUTF16ToNSString(
-        prompt_->GetPermissionsHeader())];
+        prompt_->GetPermissionsHeading())];
 
     // We display the permission warnings as a simple text string, separated by
     // newlines.
@@ -211,33 +239,26 @@ void AppendRatingStarsShim(const SkBitmap* skiaImage, void* data) {
     }
     [warningsField_ setStringValue:joinedWarnings];
 
-    // The dialog is laid out in the NIB exactly how we want it assuming that
-    // each label fits on one line. However, for each label, we want to allow
-    // wrapping onto multiple lines. So we accumulate an offset by measuring how
-    // big each label wants to be, and comparing it to how big it actually is.
-    // Then we shift each label down and resize by the appropriate amount, then
-    // finally resize the window.
-
-    // Additionally, in the store version of the dialog the icon extends past
-    // the one-line version of the permission field. Therefore when increasing
-    // the window size for multi-line permissions we don't have to add the full
-    // offset, only the part that extends past the icon.
+    // In the store version of the dialog the icon extends past the one-line
+    // version of the permission field. Therefore when increasing the window
+    // size for multi-line permissions we don't have to add the full offset,
+    // only the part that extends past the icon.
     CGFloat warningsGrowthSlack = 0;
-    if ([warningsField_ frame].origin.y > [iconView_ frame].origin.y) {
+    if (![self isBundleInstall] &&
+        [warningsField_ frame].origin.y > [iconView_ frame].origin.y) {
       warningsGrowthSlack =
           [warningsField_ frame].origin.y - [iconView_ frame].origin.y;
     }
 
-    totalOffset += AdjustControlHeightToFitContent(subtitleField_);
-    OffsetControlVertically(subtitleField_, -totalOffset);
+    // Adjust the controls to fit the permission warnings.
+    OffsetControlVerticallyToFitContent(subtitleField_, &totalOffset);
+    OffsetControlVerticallyToFitContent(warningsField_, &totalOffset);
 
-    totalOffset += AdjustControlHeightToFitContent(warningsField_);
-    OffsetControlVertically(warningsField_, -totalOffset);
     totalOffset = MAX(totalOffset - warningsGrowthSlack, 0);
-  } else if ([self isInlineInstall]) {
-    // Inline installs that don't have a permissions section need to hide
-    // controls related to that and shrink the window by the space they take
-    // up.
+  } else if ([self isInlineInstall] || [self isBundleInstall]) {
+    // Inline and bundle installs that don't have a permissions section need to
+    // hide controls related to that and shrink the window by the space they
+    // take up.
     NSRect hiddenRect = NSUnionRect([warningsSeparator_ frame],
                                     [subtitleField_ frame]);
     hiddenRect = NSUnionRect(hiddenRect, [warningsField_ frame]);
@@ -254,7 +275,7 @@ void AppendRatingStarsShim(const SkBitmap* skiaImage, void* data) {
                                        currentRect.origin.y - totalOffset,
                                        currentRect.size.width,
                                        currentRect.size.height + totalOffset)
-                   display:NO];
+                    display:NO];
   }
 }
 
@@ -268,7 +289,11 @@ void AppendRatingStarsShim(const SkBitmap* skiaImage, void* data) {
   [self autorelease];
 }
 
-- (bool)isInlineInstall {
+- (BOOL)isBundleInstall {
+  return prompt_->type() == ExtensionInstallUI::BUNDLE_INSTALL_PROMPT;
+}
+
+- (BOOL)isInlineInstall {
   return prompt_->type() == ExtensionInstallUI::INLINE_INSTALL_PROMPT;
 }
 
@@ -295,8 +320,6 @@ void AppendRatingStarsShim(const SkBitmap* skiaImage, void* data) {
 void ShowExtensionInstallDialogImpl(
     Profile* profile,
     ExtensionInstallUI::Delegate* delegate,
-    const Extension* extension,
-    SkBitmap* icon,
     const ExtensionInstallUI::Prompt& prompt) {
   Browser* browser = BrowserList::GetLastActiveWithProfile(profile);
   if (!browser) {
@@ -316,9 +339,7 @@ void ShowExtensionInstallDialogImpl(
       [[ExtensionInstallDialogController alloc]
         initWithParentWindow:native_window
                      profile:profile
-                   extension:extension
                     delegate:delegate
-                        icon:icon
                       prompt:prompt];
 
   // TODO(mihaip): Switch this to be tab-modal (http://crbug.com/95455)

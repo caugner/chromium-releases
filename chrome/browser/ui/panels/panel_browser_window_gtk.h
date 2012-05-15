@@ -38,8 +38,15 @@ class PanelBrowserWindowGtk : public BrowserWindowGtk,
                                 GdkEventButton* event) OVERRIDE;
   virtual TitleDecoration GetWindowTitle(std::string* title) const OVERRIDE;
 
+  virtual bool ShouldShowCloseButton() const OVERRIDE;
+
   // ui::WorkAreaWatcherXObserver override
   virtual void WorkAreaChanged() OVERRIDE;
+
+  // Overrides BrowserWindowGtk::NotificationObserver::Observe
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
  protected:
   // BrowserWindowGtk overrides
@@ -54,6 +61,8 @@ class PanelBrowserWindowGtk : public BrowserWindowGtk,
   virtual void OnSizeChanged(int width, int height) OVERRIDE;
   virtual void DrawCustomFrame(cairo_t* cr, GtkWidget* widget,
                                GdkEventExpose* event) OVERRIDE;
+  virtual void DrawPopupFrame(cairo_t* cr, GtkWidget* widget,
+                              GdkEventExpose* event) OVERRIDE;
   virtual void ActiveWindowChanged(GdkWindow* active_window) OVERRIDE;
   // 'focus-in-event' handler.
   virtual void HandleFocusIn(GtkWidget* widget,
@@ -69,6 +78,7 @@ class PanelBrowserWindowGtk : public BrowserWindowGtk,
   virtual void ActivatePanel() OVERRIDE;
   virtual void DeactivatePanel() OVERRIDE;
   virtual bool IsPanelActive() const OVERRIDE;
+  virtual void PreventActivationByOS(bool prevent_activation) OVERRIDE;
   virtual gfx::NativeWindow GetNativePanelHandle() OVERRIDE;
   virtual void UpdatePanelTitleBar() OVERRIDE;
   virtual void UpdatePanelLoadingAnimations(bool should_animate) OVERRIDE;
@@ -97,6 +107,8 @@ class PanelBrowserWindowGtk : public BrowserWindowGtk,
   virtual gfx::Size IconOnlySize() const OVERRIDE;
   virtual void EnsurePanelFullyVisible() OVERRIDE;
   virtual void SetPanelAppIconVisibility(bool visible) OVERRIDE;
+  virtual void SetPanelAlwaysOnTop(bool on_top) OVERRIDE;
+  virtual void EnableResizeByMouse(bool enable) OVERRIDE;
 
  private:
   friend class NativePanelTestingGtk;
@@ -119,8 +131,10 @@ class PanelBrowserWindowGtk : public BrowserWindowGtk,
   void CleanupDragDrop();
 
   void SetBoundsInternal(const gfx::Rect& bounds, bool animate);
+  void ResizeWindow(int width, int height);
 
-  void UpdateAttention(bool draw_attention);
+  void DrawAttentionFrame(cairo_t* cr, GtkWidget* widget,
+                          GdkEventExpose* event);
   GdkRectangle GetTitlebarRectForDrawAttention() const;
 
   CHROMEGTK_CALLBACK_1(PanelBrowserWindowGtk, gboolean,
@@ -145,6 +159,12 @@ class PanelBrowserWindowGtk : public BrowserWindowGtk,
   // user presses space or return.
   CHROMEGTK_CALLBACK_1(PanelBrowserWindowGtk, gboolean, OnDragButtonReleased,
                        GdkEventButton*);
+
+  // Callbacks for mouse enter leave events.
+  CHROMEGTK_CALLBACK_1(PanelBrowserWindowGtk, gboolean, OnEnterNotify,
+                       GdkEventCrossing*);
+  CHROMEGTK_CALLBACK_1(PanelBrowserWindowGtk, gboolean, OnLeaveNotify,
+                       GdkEventCrossing*);
 
   // Tests will set this to false to prevent actual GTK drags from being
   // triggered as that generates extra unwanted signals and focus grabs.
@@ -195,6 +215,15 @@ class PanelBrowserWindowGtk : public BrowserWindowGtk,
   // current one completes. In this case, we want to start the new animation
   // from where the last one left.
   gfx::Rect last_animation_progressed_bounds_;
+
+  // Whether mouse is in the window. We show the wrench icon when a panel
+  // window has focus or mouse is in a panel window.
+  bool window_has_mouse_;
+
+  // The close button is not shown when panel is in icon only mode in overflow.
+  bool show_close_button_;
+
+  content::NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(PanelBrowserWindowGtk);
 };

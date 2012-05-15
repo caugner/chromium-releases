@@ -1563,6 +1563,37 @@ TEST_F(GLES2ImplementationTest, TexStorage2DEXT) {
   gl_->TexStorage2DEXT(GL_TEXTURE_2D, 2, GL_RGB565, 4, 5);
   EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
 }
+
+TEST_F(GLES2ImplementationTest, GenQueriesEXT) {
+  GLuint ids[2] = { 0, };
+  struct Cmds {
+    GenQueriesEXTImmediate gen;
+    GLuint data[2];
+  };
+  Cmds expected;
+  expected.gen.Init(arraysize(ids), &ids[0]);
+  expected.data[0] = kQueriesStartId;
+  expected.data[1] = kQueriesStartId + 1;
+  gl_->GenQueriesEXT(arraysize(ids), &ids[0]);
+  EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
+  EXPECT_EQ(kQueriesStartId, ids[0]);
+  EXPECT_EQ(kQueriesStartId + 1, ids[1]);
+}
+
+TEST_F(GLES2ImplementationTest, DeleteQueriesEXT) {
+  GLuint ids[2] = { kQueriesStartId, kQueriesStartId + 1 };
+  struct Cmds {
+    DeleteQueriesEXTImmediate del;
+    GLuint data[2];
+  };
+  Cmds expected;
+  expected.del.Init(arraysize(ids), &ids[0]);
+  expected.data[0] = kQueriesStartId;
+  expected.data[1] = kQueriesStartId + 1;
+  gl_->DeleteQueriesEXT(arraysize(ids), &ids[0]);
+  EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
+}
+// TODO: Implement unit test for BeginQueryEXT
 // TODO: Implement unit test for GenSharedIdsCHROMIUM
 // TODO: Implement unit test for DeleteSharedIdsCHROMIUM
 // TODO: Implement unit test for RegisterSharedIdsCHROMIUM
@@ -1600,6 +1631,28 @@ TEST_F(GLES2ImplementationTest, TexImageIOSurface2DCHROMIUM) {
   expected.cmd.Init(GL_TEXTURE_2D, 2, 3, 4, 5);
 
   gl_->TexImageIOSurface2DCHROMIUM(GL_TEXTURE_2D, 2, 3, 4, 5);
+  EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
+}
+
+TEST_F(GLES2ImplementationTest, DrawArraysInstancedANGLE) {
+  struct Cmds {
+    DrawArraysInstancedANGLE cmd;
+  };
+  Cmds expected;
+  expected.cmd.Init(GL_POINTS, 2, 3, 4);
+
+  gl_->DrawArraysInstancedANGLE(GL_POINTS, 2, 3, 4);
+  EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
+}
+
+TEST_F(GLES2ImplementationTest, VertexAttribDivisorANGLE) {
+  struct Cmds {
+    VertexAttribDivisorANGLE cmd;
+  };
+  Cmds expected;
+  expected.cmd.Init(1, 2);
+
+  gl_->VertexAttribDivisorANGLE(1, 2);
   EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
 }
 #endif  // GPU_COMMAND_BUFFER_CLIENT_GLES2_IMPLEMENTATION_UNITTEST_AUTOGEN_H_

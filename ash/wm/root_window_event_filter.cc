@@ -4,8 +4,6 @@
 
 #include "ash/wm/root_window_event_filter.h"
 
-#include "ash/shell.h"
-#include "ash/wm/activation_controller.h"
 #include "ash/wm/window_util.h"
 #include "ui/aura/event.h"
 #include "ui/aura/focus_manager.h"
@@ -16,8 +14,36 @@
 namespace ash {
 namespace internal {
 
-// Returns the default cursor for a window component.
-gfx::NativeCursor CursorForWindowComponent(int window_component) {
+namespace {
+
+aura::Window* FindFocusableWindowFor(aura::Window* window) {
+  while (window && !window->CanFocus())
+    window = window->parent();
+  return window;
+}
+
+}  // namespace
+
+////////////////////////////////////////////////////////////////////////////////
+// RootWindowEventFilter, public:
+
+RootWindowEventFilter::RootWindowEventFilter(aura::RootWindow* root_window)
+    : root_window_(root_window),
+      cursor_lock_count_(0),
+      did_cursor_change_(false),
+      cursor_to_set_on_unlock_(0),
+      update_cursor_visibility_(true) {
+}
+
+RootWindowEventFilter::~RootWindowEventFilter() {
+  // Additional filters are not owned by RootWindowEventFilter and they
+  // should all be removed when running here. |filters_| has
+  // check_empty == true and will DCHECK failure if it is not empty.
+}
+
+// static
+gfx::NativeCursor RootWindowEventFilter::CursorForWindowComponent(
+    int window_component) {
   switch (window_component) {
     case HTBOTTOM:
       return aura::kCursorSouthResize;
@@ -40,17 +66,21 @@ gfx::NativeCursor CursorForWindowComponent(int window_component) {
   }
 }
 
-////////////////////////////////////////////////////////////////////////////////
-// RootWindowEventFilter, public:
-
-RootWindowEventFilter::RootWindowEventFilter()
-    : EventFilter(aura::RootWindow::GetInstance()) {
+void RootWindowEventFilter::LockCursor() {
+  cursor_lock_count_++;
 }
 
-RootWindowEventFilter::~RootWindowEventFilter() {
-  // Additional filters are not owned by RootWindowEventFilter and they
-  // should all be removed when running here. |filters_| has
-  // check_empty == true and will DCHECK failure if it is not empty.
+void RootWindowEventFilter::UnlockCursor() {
+  cursor_lock_count_--;
+  DCHECK_GE(cursor_lock_count_, 0);
+  if (cursor_lock_count_ == 0) {
+    if (did_cursor_change_) {
+      did_cursor_change_ = false;
+      root_window_->SetCursor(cursor_to_set_on_unlock_);
+    }
+    did_cursor_change_ = false;
+    cursor_to_set_on_unlock_ = 0;
+  }
 }
 
 void RootWindowEventFilter::AddFilter(aura::EventFilter* filter) {
@@ -77,9 +107,14 @@ bool RootWindowEventFilter::PreHandleMouseEvent(aura::Window* target,
                                                 aura::MouseEvent* event) {
   // We must always update the cursor, otherwise the cursor can get stuck if an
   // event filter registered with us consumes the event.
-  if (event->type() == ui::ET_MOUSE_MOVED) {
-    // Shows the cursor when mouse moved.
-    SetCursorVisible(target, event, true);
+  // It should also update the cursor for clicking and wheels for ChromeOS boot.
+  // When ChromeOS is booted, it hides the mouse cursor but immediate mouse
+  // operation will show the cursor.
+  if (event->type() == ui::ET_MOUSE_MOVED ||
+      event->type() == ui::ET_MOUSE_PRESSED ||
+      event->type() == ui::ET_MOUSEWHEEL) {
+    if (update_cursor_visibility_)
+      SetCursorVisible(target, event, true);
 
     UpdateCursor(target, event);
   }
@@ -87,8 +122,9 @@ bool RootWindowEventFilter::PreHandleMouseEvent(aura::Window* target,
   if (FilterMouseEvent(target, event))
     return true;
 
-  if (event->type() == ui::ET_MOUSE_PRESSED && GetActiveWindow() != target)
-    target->GetFocusManager()->SetFocusedWindow(target);
+  if (event->type() == ui::ET_MOUSE_PRESSED && wm::GetActiveWindow() != target)
+    target->GetFocusManager()->SetFocusedWindow(
+        FindFocusableWindowFor(target), event);
 
   return false;
 }
@@ -101,10 +137,11 @@ ui::TouchStatus RootWindowEventFilter::PreHandleTouchEvent(
     return status;
 
   if (event->type() == ui::ET_TOUCH_PRESSED) {
-    // Hides the cursor when touch pressed.
-    SetCursorVisible(target, event, false);
+    if (update_cursor_visibility_)
+      SetCursorVisible(target, event, false);
 
-    target->GetFocusManager()->SetFocusedWindow(target);
+    target->GetFocusManager()->SetFocusedWindow(
+        FindFocusableWindowFor(target), event);
   }
   return ui::TOUCH_STATUS_UNKNOWN;
 }
@@ -127,13 +164,19 @@ void RootWindowEventFilter::UpdateCursor(aura::Window* target,
         target->delegate()->GetNonClientComponent(event->location());
     cursor = CursorForWindowComponent(window_component);
   }
-  aura::RootWindow::GetInstance()->SetCursor(cursor);
+  if (cursor_lock_count_ == 0) {
+    root_window_->SetCursor(cursor);
+  } else {
+    cursor_to_set_on_unlock_ = cursor;
+    did_cursor_change_ = true;
+  }
 }
 
 void RootWindowEventFilter::SetCursorVisible(aura::Window* target,
                                              aura::LocatedEvent* event,
                                              bool show) {
-  aura::RootWindow::GetInstance()->ShowCursor(show);
+  if (!(event->flags() & ui::EF_IS_SYNTHESIZED))
+    root_window_->ShowCursor(show);
 }
 
 bool RootWindowEventFilter::FilterKeyEvent(aura::Window* target,

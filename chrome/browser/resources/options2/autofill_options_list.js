@@ -1,18 +1,17 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 cr.define('options.autofillOptions', function() {
-  const DeletableItem = options.DeletableItem;
-  const DeletableItemList = options.DeletableItemList;
-  const InlineEditableItem = options.InlineEditableItem;
-  const InlineEditableItemList = options.InlineEditableItemList;
+  /** @const */ var DeletableItem = options.DeletableItem;
+  /** @const */ var DeletableItemList = options.DeletableItemList;
+  /** @const */ var InlineEditableItem = options.InlineEditableItem;
+  /** @const */ var InlineEditableItemList = options.InlineEditableItemList;
 
   function AutofillEditProfileButton(guid, edit) {
     var editButtonEl = document.createElement('button');
-    editButtonEl.className = 'raw-button custom-appearance';
-    editButtonEl.textContent =
-        templateData.autofillEditProfileButton;
+    editButtonEl.className = 'list-inline-button custom-appearance';
+    editButtonEl.textContent = templateData.autofillEditProfileButton;
     editButtonEl.onclick = function(e) { edit(guid); };
 
     // Don't select the row when clicking the button.
@@ -146,7 +145,7 @@ cr.define('options.autofillOptions', function() {
     },
 
     /**
-     * @return This item's value.
+     * @return {string} This item's value.
      * @protected
      */
     value_: function() {
@@ -155,7 +154,7 @@ cr.define('options.autofillOptions', function() {
 
     /**
      * @param {Object} value The value to test.
-     * @return true if the given value is non-empty.
+     * @return {boolean} True if the given value is non-empty.
      * @protected
      */
     valueIsNonEmpty_: function(value) {
@@ -163,7 +162,7 @@ cr.define('options.autofillOptions', function() {
     },
 
     /**
-     * @return true if value1 is logically equal to value2.
+     * @return {boolean} True if value1 is logically equal to value2.
      */
     valuesAreEqual_: function(value1, value2) {
       return value1 === value2;
@@ -275,9 +274,9 @@ cr.define('options.autofillOptions', function() {
 
     /** @inheritDoc */
     value_: function() {
-      return [ this.firstNameInput.value,
-               this.middleNameInput.value,
-               this.lastNameInput.value ];
+      return [this.firstNameInput.value,
+              this.middleNameInput.value,
+              this.lastNameInput.value];
     },
 
     /** @inheritDoc */
@@ -314,7 +313,7 @@ cr.define('options.autofillOptions', function() {
   AutofillProfileList.prototype = {
     __proto__: DeletableItemList.prototype,
 
-    decorate:  function() {
+    decorate: function() {
       DeletableItemList.prototype.decorate.call(this);
 
       this.addEventListener('blur', this.onBlur_);

@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/perftimer.h"
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
@@ -25,16 +26,17 @@
 #include "chrome/browser/ui/cocoa/extensions/extension_view_mac.h"
 #elif defined(TOOLKIT_GTK)
 #include "chrome/browser/ui/gtk/extensions/extension_view_gtk.h"
+#elif defined(OS_ANDROID)
+#include "chrome/browser/ui/android/extensions/extension_view_android.h"
 #endif
 
 class Browser;
 class Extension;
 class PrefsTabHelper;
-class RenderWidgetHostView;
-struct WebPreferences;
 
 namespace content {
 class RenderProcessHost;
+class RenderWidgetHostView;
 class SiteInstance;
 }
 
@@ -49,22 +51,39 @@ class ExtensionHost : public content::WebContentsDelegate,
  public:
   class ProcessCreationQueue;
 
+#if defined(TOOLKIT_VIEWS)
+  typedef ExtensionView PlatformExtensionView;
+#elif defined(OS_MACOSX)
+  typedef ExtensionViewMac PlatformExtensionView;
+#elif defined(TOOLKIT_GTK)
+  typedef ExtensionViewGtk PlatformExtensionView;
+#elif defined(OS_ANDROID)
+  // Android does not support extensions.
+  typedef ExtensionViewAndroid PlatformExtensionView;
+#endif
+
   ExtensionHost(const Extension* extension,
                 content::SiteInstance* site_instance,
                 const GURL& url, content::ViewType host_type);
   virtual ~ExtensionHost();
 
 #if defined(TOOLKIT_VIEWS)
-  void set_view(ExtensionView* view) { view_.reset(view); }
-  const ExtensionView* view() const { return view_.get(); }
-  ExtensionView* view() { return view_.get(); }
-#elif defined(OS_MACOSX)
-  const ExtensionViewMac* view() const { return view_.get(); }
-  ExtensionViewMac* view() { return view_.get(); }
-#elif defined(TOOLKIT_GTK)
-  const ExtensionViewGtk* view() const { return view_.get(); }
-  ExtensionViewGtk* view() { return view_.get(); }
+  void set_view(PlatformExtensionView* view) { view_.reset(view); }
 #endif
+
+  const PlatformExtensionView* view() const {
+#if defined(OS_ANDROID)
+    NOTREACHED();
+#endif
+    return view_.get();
+  }
+
+  PlatformExtensionView* view() {
+#if defined(OS_ANDROID)
+    NOTREACHED();
+#endif
+    return view_.get();
+  }
 
   // Create an ExtensionView and tie it to this host and |browser|.  Note NULL
   // is a valid argument for |browser|.  Extension views may be bound to
@@ -75,10 +94,25 @@ class ExtensionHost : public content::WebContentsDelegate,
   // Helper variant of the above for cases where no Browser is present.
   void CreateViewWithoutBrowser();
 
+  // Send a message to the renderer to notify it we are about to close.
+  // This is a simple ping that the renderer will respond to. The purpose
+  // is to control sequencing: if the extension remains idle until the renderer
+  // responds with an ACK, then we know that the extension process is ready to
+  // shut down.
+  void SendShouldClose();
+
+  // Cancels the current close sequence. Any future Close ACKs will be ignored
+  // (unless SendShouldClose is called again).
+  void CancelShouldClose();
+
+  // Handles the close ACK. The sequence ID lets us identify whether we have
+  // cancelled this close sequence.
+  void OnShouldCloseAck(int sequence_id);
+
   const Extension* extension() const { return extension_; }
   const std::string& extension_id() const { return extension_id_; }
   content::WebContents* host_contents() const { return host_contents_.get(); }
-  RenderViewHost* render_view_host() const;
+  content::RenderViewHost* render_view_host() const;
   content::RenderProcessHost* render_process_host() const;
   bool did_stop_loading() const { return did_stop_loading_; }
   bool document_element_available() const {
@@ -107,14 +141,12 @@ class ExtensionHost : public content::WebContentsDelegate,
   // Insert a default style sheet for Extension Infobars.
   void InsertInfobarCSS();
 
-  // Tell the renderer not to draw scrollbars on windows smaller than
-  // |size_limit| in both width and height.
-  void DisableScrollbarsForSmallWindows(const gfx::Size& size_limit);
-
   // content::WebContentsObserver
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
-  virtual void RenderViewCreated(RenderViewHost* render_view_host) OVERRIDE;
-  virtual void RenderViewDeleted(RenderViewHost* render_view_host) OVERRIDE;
+  virtual void RenderViewCreated(
+      content::RenderViewHost* render_view_host) OVERRIDE;
+  virtual void RenderViewDeleted(
+      content::RenderViewHost* render_view_host) OVERRIDE;
   virtual void RenderViewReady() OVERRIDE;
   virtual void RenderViewGone(base::TerminationStatus status) OVERRIDE;
   virtual void DocumentAvailableInMainFrame() OVERRIDE;
@@ -125,13 +157,12 @@ class ExtensionHost : public content::WebContentsDelegate,
   virtual content::WebContents* OpenURLFromTab(
       content::WebContents* source,
       const content::OpenURLParams& params) OVERRIDE;
-  virtual bool HandleContextMenu(const ContextMenuParams& params) OVERRIDE;
   virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
                                       bool* is_keyboard_shortcut) OVERRIDE;
   virtual void HandleKeyboardEvent(const NativeWebKeyboardEvent& event)
       OVERRIDE;
-  virtual void UpdatePreferredSize(content::WebContents* source,
-                                   const gfx::Size& pref_size) OVERRIDE;
+  virtual void ResizeDueToAutoResize(content::WebContents* source,
+                                     const gfx::Size& new_size) OVERRIDE;
   virtual content::JavaScriptDialogCreator* GetJavaScriptDialogCreator()
       OVERRIDE;
   virtual void RunFileChooser(
@@ -150,10 +181,6 @@ class ExtensionHost : public content::WebContentsDelegate,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
- protected:
-  // This should only be used by unit tests.
-  ExtensionHost(const Extension* extension, content::ViewType host_type);
-
  private:
   friend class ProcessCreationQueue;
 
@@ -162,6 +189,9 @@ class ExtensionHost : public content::WebContentsDelegate,
 
   // Navigates to the initial page.
   void LoadInitialURL();
+
+  // Closes this host (results in deletion).
+  void Close();
 
   // Const version of below function.
   const Browser* GetBrowser() const;
@@ -191,13 +221,12 @@ class ExtensionHost : public content::WebContentsDelegate,
   Profile* profile_;
 
   // Optional view that shows the rendered content in the UI.
-#if defined(TOOLKIT_VIEWS)
-  scoped_ptr<ExtensionView> view_;
-#elif defined(OS_MACOSX)
-  scoped_ptr<ExtensionViewMac> view_;
-#elif defined(TOOLKIT_GTK)
-  scoped_ptr<ExtensionViewGtk> view_;
-#endif
+  scoped_ptr<PlatformExtensionView> view_;
+
+  // Used to create dialog boxes.
+  // It must outlive host_contents_ as host_contents_ will access it
+  // during destruction.
+  scoped_ptr<content::JavaScriptDialogCreator> dialog_creator_;
 
   // The host for our HTML content.
   scoped_ptr<content::WebContents> host_contents_;
@@ -208,7 +237,7 @@ class ExtensionHost : public content::WebContentsDelegate,
   // A weak pointer to the current or pending RenderViewHost. We don't access
   // this through the host_contents because we want to deal with the pending
   // host, so we can send messages to it before it finishes loading.
-  RenderViewHost* render_view_host_;
+  content::RenderViewHost* render_view_host_;
 
   // Whether the RenderWidget has reported that it has stopped loading.
   bool did_stop_loading_;
@@ -223,8 +252,7 @@ class ExtensionHost : public content::WebContentsDelegate,
 
   ExtensionFunctionDispatcher extension_function_dispatcher_;
 
-  // Only EXTENSION_INFOBAR, EXTENSION_POPUP, and EXTENSION_BACKGROUND_PAGE
-  // are used here, others are not hosted by ExtensionHost.
+  // The type of view being hosted.
   content::ViewType extension_host_type_;
 
   // The relevant WebContents associated with this ExtensionHost, if any.
@@ -232,6 +260,10 @@ class ExtensionHost : public content::WebContentsDelegate,
 
   // Used to measure how long it's been since the host was created.
   PerfTimer since_created_;
+
+  // A unique ID associated with each call to ShouldClose. This allows us
+  // to differentiate which ShouldClose message the renderer is responding to.
+  int close_sequence_id_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionHost);
 };

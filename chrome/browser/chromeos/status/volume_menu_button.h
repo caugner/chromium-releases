@@ -7,16 +7,18 @@
 #pragma once
 
 #include "base/compiler_specific.h"
+#include "chrome/browser/chromeos/audio/audio_handler.h"
 #include "chrome/browser/chromeos/status/status_area_button.h"
+#include "ui/views/controls/button/menu_button_listener.h"
 #include "ui/views/controls/menu/menu_delegate.h"
-#include "ui/views/controls/menu/view_menu_delegate.h"
 
 namespace chromeos {
 
 // The volume button in the status area.
 class VolumeMenuButton : public StatusAreaButton,
                          public views::MenuDelegate,
-                         public views::ViewMenuDelegate {
+                         public views::MenuButtonListener,
+                         public AudioHandler::VolumeObserver {
  public:
   explicit VolumeMenuButton(StatusAreaButton::Delegate* delegate);
   virtual ~VolumeMenuButton();
@@ -32,8 +34,12 @@ class VolumeMenuButton : public StatusAreaButton,
   // views::View implementation.
   virtual void OnLocaleChanged() OVERRIDE;
 
-  // views::ViewMenuDelegate implementation.
-  virtual void RunMenu(views::View* source, const gfx::Point& pt) OVERRIDE;
+  // views::MenuButtonListener implementation.
+  virtual void OnMenuButtonClicked(views::View* source,
+                                   const gfx::Point& point) OVERRIDE;
+
+  // AudioHandler::VolumeObserver implementation.
+  virtual void OnVolumeChanged() OVERRIDE;
 
   DISALLOW_COPY_AND_ASSIGN(VolumeMenuButton);
 };

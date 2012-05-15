@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,6 +15,7 @@
 #include "chrome/browser/ui/views/extensions/extension_popup.h"
 #include "ui/views/controls/image_view.h"
 
+class Browser;
 class LocationBarView;
 
 namespace content {
@@ -33,7 +34,8 @@ class PageActionImageView : public views::ImageView,
                             public content::NotificationObserver {
  public:
   PageActionImageView(LocationBarView* owner,
-                      ExtensionAction* page_action);
+                      ExtensionAction* page_action,
+                      Browser* browser);
   virtual ~PageActionImageView();
 
   ExtensionAction* page_action() { return page_action_; }
@@ -53,8 +55,8 @@ class PageActionImageView : public views::ImageView,
                                bool is_mouse_gesture) OVERRIDE;
 
   // Overridden from ImageLoadingTracker.
-  virtual void OnImageLoaded(SkBitmap* image,
-                             const ExtensionResource& resource,
+  virtual void OnImageLoaded(const gfx::Image& image,
+                             const std::string& extension_id,
                              int index) OVERRIDE;
 
   // Overridden from ExtensionContextMenuModelModel::Delegate
@@ -67,6 +69,10 @@ class PageActionImageView : public views::ImageView,
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
+
+  // Overridden from ui::AcceleratorTarget.
+  virtual bool AcceleratorPressed(const ui::Accelerator& accelerator) OVERRIDE;
+  virtual bool CanHandleAccelerators() const OVERRIDE;
 
   // Called to notify the PageAction that it should determine whether to be
   // visible or hidden. |contents| is the TabContents that is active, |url| is
@@ -86,6 +92,9 @@ class PageActionImageView : public views::ImageView,
   // The PageAction that this view represents. The PageAction is not owned by
   // us, it resides in the extension of this particular profile.
   ExtensionAction* page_action_;
+
+  // The corresponding browser.
+  Browser* browser_;
 
   // A cache of bitmaps the page actions might need to show, mapped by path.
   typedef std::map<std::string, SkBitmap> PageActionMap;
@@ -112,6 +121,10 @@ class PageActionImageView : public views::ImageView,
   ExtensionPopup* popup_;
 
   content::NotificationRegistrar registrar_;
+
+  // The extension keybinding accelerator this page action is listening for (to
+  // show the popup).
+  scoped_ptr<ui::Accelerator> keybinding_;
 
   scoped_ptr<views::MenuRunner> menu_runner_;
 

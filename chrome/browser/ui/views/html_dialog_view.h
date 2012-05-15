@@ -11,7 +11,7 @@
 
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/tab_first_render_watcher.h"
+#include "chrome/browser/tab_render_watcher.h"
 #include "chrome/browser/ui/views/dom_view.h"
 #include "chrome/browser/ui/webui/html_dialog_tab_contents_delegate.h"
 #include "chrome/browser/ui/webui/html_dialog_ui.h"
@@ -40,7 +40,7 @@ class HtmlDialogView
       public HtmlDialogTabContentsDelegate,
       public HtmlDialogUIDelegate,
       public views::WidgetDelegate,
-      public TabFirstRenderWatcher::Delegate {
+      public TabRenderWatcher::Delegate {
  public:
   HtmlDialogView(Profile* profile,
                  Browser* browser,
@@ -61,6 +61,7 @@ class HtmlDialogView
   virtual bool CanResize() const OVERRIDE;
   virtual ui::ModalType GetModalType() const OVERRIDE;
   virtual string16 GetWindowTitle() const OVERRIDE;
+  virtual std::string GetWindowName() const OVERRIDE;
   virtual void WindowClosing() OVERRIDE;
   virtual views::View* GetContentsView() OVERRIDE;
   virtual views::View* GetInitiallyFocusedView() OVERRIDE;
@@ -75,12 +76,14 @@ class HtmlDialogView
   virtual void GetWebUIMessageHandlers(
       std::vector<content::WebUIMessageHandler*>* handlers) const OVERRIDE;
   virtual void GetDialogSize(gfx::Size* size) const OVERRIDE;
+  virtual void GetMinimumDialogSize(gfx::Size* size) const OVERRIDE;
   virtual std::string GetDialogArgs() const OVERRIDE;
   virtual void OnDialogClosed(const std::string& json_retval) OVERRIDE;
   virtual void OnCloseContents(content::WebContents* source,
                                bool* out_close_dialog) OVERRIDE;
   virtual bool ShouldShowDialogTitle() const OVERRIDE;
-  virtual bool HandleContextMenu(const ContextMenuParams& params) OVERRIDE;
+  virtual bool HandleContextMenu(
+      const content::ContextMenuParams& params) OVERRIDE;
 
   // Overridden from content::WebContentsDelegate:
   virtual void MoveContents(content::WebContents* source,
@@ -102,10 +105,10 @@ class HtmlDialogView
   // Register accelerators for this dialog.
   virtual void RegisterDialogAccelerators();
 
-  // TabFirstRenderWatcher::Delegate implementation.
-  virtual void OnRenderHostCreated(RenderViewHost* host) OVERRIDE;
+  // TabRenderWatcher::Delegate implementation.
+  virtual void OnRenderHostCreated(content::RenderViewHost* host) OVERRIDE;
   virtual void OnTabMainFrameLoaded() OVERRIDE;
-  virtual void OnTabMainFrameFirstRender() OVERRIDE;
+  virtual void OnTabMainFrameRender() OVERRIDE;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(HtmlDialogBrowserTest, WebContentRendered);
@@ -116,7 +119,7 @@ class HtmlDialogView
   bool initialized_;
 
   // Watches for TabContents rendering.
-  scoped_ptr<TabFirstRenderWatcher> tab_watcher_;
+  scoped_ptr<TabRenderWatcher> tab_watcher_;
 
   // This view is a delegate to the HTML content since it needs to get notified
   // about when the dialog is closing. For all other actions (besides dialog

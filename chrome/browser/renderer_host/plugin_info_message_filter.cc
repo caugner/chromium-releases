@@ -10,13 +10,13 @@
 #include "chrome/browser/content_settings/content_settings_utils.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/content_settings.h"
 #include "chrome/common/chrome_content_client.h"
+#include "chrome/common/content_settings.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
-#include "content/browser/plugin_service_filter.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/plugin_service.h"
+#include "content/public/browser/plugin_service_filter.h"
 #include "googleurl/src/gurl.h"
 #include "webkit/plugins/npapi/plugin_group.h"
 #include "webkit/plugins/npapi/plugin_list.h"
@@ -63,7 +63,7 @@ void PluginInfobarExperiment(bool* allow_outdated,
 PluginInfoMessageFilter::Context::Context(int render_process_id,
                                           Profile* profile)
     : render_process_id_(render_process_id),
-      resource_context_(&profile->GetResourceContext()),
+      resource_context_(profile->GetResourceContext()),
       host_content_settings_map_(profile->GetHostContentSettingsMap()) {
   allow_outdated_plugins_.Init(prefs::kPluginsAllowOutdated,
                                profile->GetPrefs(), NULL);

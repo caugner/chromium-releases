@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -103,7 +103,7 @@ class FFmpegDemuxerTest : public testing::Test {
   // This makes it easier to track down where test failures occur.
   void ValidateBuffer(const tracked_objects::Location& location,
                       const scoped_refptr<Buffer>& buffer,
-                      size_t size, int64 timestampInMicroseconds) {
+                      int size, int64 timestampInMicroseconds) {
     std::string location_str;
     location.Write(true, false, &location_str);
     location_str += "\n";
@@ -144,7 +144,7 @@ class FFmpegDemuxerTest : public testing::Test {
 };
 
 TEST_F(FFmpegDemuxerTest, Initialize_OpenFails) {
-  // Simulate av_open_input_file() failing.
+  // Simulate avformat_open_input() failing.
   EXPECT_CALL(host_, SetCurrentReadPosition(_));
   demuxer_->Initialize(CreateDataSource("ten_byte_file"),
                        NewExpectedStatusCB(DEMUXER_ERROR_COULD_NOT_OPEN));
@@ -153,7 +153,7 @@ TEST_F(FFmpegDemuxerTest, Initialize_OpenFails) {
 }
 
 // TODO(acolwell): Uncomment this test when we discover a file that passes
-// av_open_input_file(), but has av_find_stream_info() fail.
+// avformat_open_input(), but has avformat_find_stream_info() fail.
 //
 //TEST_F(FFmpegDemuxerTest, Initialize_ParseFails) {
 //  demuxer_->Initialize(
@@ -341,12 +341,12 @@ TEST_F(FFmpegDemuxerTest, Read_EndOfStream) {
     if (reader->buffer()->IsEndOfStream()) {
       got_eos_buffer = true;
       EXPECT_TRUE(reader->buffer()->GetData() == NULL);
-      EXPECT_EQ(0u, reader->buffer()->GetDataSize());
+      EXPECT_EQ(0, reader->buffer()->GetDataSize());
       break;
     }
 
     EXPECT_TRUE(reader->buffer()->GetData() != NULL);
-    EXPECT_GT(reader->buffer()->GetDataSize(), 0u);
+    EXPECT_GT(reader->buffer()->GetDataSize(), 0);
     reader->Reset();
   }
 
@@ -416,11 +416,11 @@ TEST_F(FFmpegDemuxerTest, Seek) {
 
 // A mocked callback specialization for calling Read().  Since RunWithParams()
 // is mocked we don't need to pass in object or method pointers.
-class MockReadCallback : public base::RefCountedThreadSafe<MockReadCallback> {
+class MockReadCB : public base::RefCountedThreadSafe<MockReadCB> {
  public:
-  MockReadCallback() {}
+  MockReadCB() {}
 
-  virtual ~MockReadCallback() {
+  virtual ~MockReadCB() {
     OnDelete();
   }
 
@@ -428,7 +428,7 @@ class MockReadCallback : public base::RefCountedThreadSafe<MockReadCallback> {
   MOCK_METHOD1(Run, void(const scoped_refptr<Buffer>& buffer));
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(MockReadCallback);
+  DISALLOW_COPY_AND_ASSIGN(MockReadCB);
 };
 
 TEST_F(FFmpegDemuxerTest, Stop) {
@@ -448,7 +448,7 @@ TEST_F(FFmpegDemuxerTest, Stop) {
 
   // Create our mocked callback. The Callback created by base::Bind() will take
   // ownership of this pointer.
-  StrictMock<MockReadCallback>* callback = new StrictMock<MockReadCallback>();
+  StrictMock<MockReadCB>* callback = new StrictMock<MockReadCB>();
 
   // The callback should be immediately deleted.  We'll use a checkpoint to
   // verify that it has indeed been deleted.
@@ -457,7 +457,7 @@ TEST_F(FFmpegDemuxerTest, Stop) {
   EXPECT_CALL(*this, CheckPoint(1));
 
   // Attempt the read...
-  audio->Read(base::Bind(&MockReadCallback::Run, callback));
+  audio->Read(base::Bind(&MockReadCB::Run, callback));
 
   message_loop_.RunAllPending();
 
@@ -487,7 +487,7 @@ TEST_F(FFmpegDemuxerTest, StreamReadAfterStopAndDemuxerDestruction) {
 
   // Create our mocked callback. The Callback created by base::Bind() will take
   // ownership of this pointer.
-  StrictMock<MockReadCallback>* callback = new StrictMock<MockReadCallback>();
+  StrictMock<MockReadCB>* callback = new StrictMock<MockReadCB>();
 
   // The callback should be immediately deleted.  We'll use a checkpoint to
   // verify that it has indeed been deleted.
@@ -500,7 +500,7 @@ TEST_F(FFmpegDemuxerTest, StreamReadAfterStopAndDemuxerDestruction) {
   // |audio| now has a demuxer_ pointer to invalid memory.
 
   // Attempt the read...
-  audio->Read(base::Bind(&MockReadCallback::Run, callback));
+  audio->Read(base::Bind(&MockReadCB::Run, callback));
 
   message_loop_.RunAllPending();
 
@@ -553,15 +553,15 @@ class MockFFmpegDemuxer : public FFmpegDemuxer {
   }
   virtual ~MockFFmpegDemuxer() {}
 
-  MOCK_METHOD0(WaitForRead, size_t());
-  MOCK_METHOD1(SignalReadCompleted, void(size_t size));
+  MOCK_METHOD0(WaitForRead, int());
+  MOCK_METHOD1(SignalReadCompleted, void(int size));
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockFFmpegDemuxer);
 };
 
 // A gmock helper method to execute the callback and deletes it.
-void RunCallback(size_t size, const DataSource::ReadCallback& callback) {
+void RunCallback(int size, const DataSource::ReadCB& callback) {
   DCHECK(!callback.is_null());
   callback.Run(size);
 }
@@ -639,7 +639,7 @@ TEST_F(FFmpegDemuxerTest, GetBitrate_SetInContainer_NoFileSize) {
 }
 
 TEST_F(FFmpegDemuxerTest, GetBitrate_UnsetInContainer_NoFileSize) {
-  EXPECT_FALSE(VideoHasValidBitrate("bear-320x240.webm", true));
+  EXPECT_TRUE(VideoHasValidBitrate("bear-320x240.webm", true));
 }
 
 TEST_F(FFmpegDemuxerTest, ProtocolGetSetPosition) {

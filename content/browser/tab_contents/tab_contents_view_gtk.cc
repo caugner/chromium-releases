@@ -13,15 +13,15 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "build/build_config.h"
-#include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_view_host_factory.h"
+#include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_view_gtk.h"
-#include "content/browser/tab_contents/interstitial_page.h"
+#include "content/browser/tab_contents/interstitial_page_impl.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/tab_contents/tab_contents_view_wrapper_gtk.h"
 #include "content/browser/tab_contents/web_drag_dest_gtk.h"
 #include "content/browser/tab_contents/web_drag_source_gtk.h"
 #include "content/public/browser/web_contents_delegate.h"
+#include "content/public/browser/web_contents_view_delegate.h"
 #include "ui/base/gtk/gtk_expanded_container.h"
 #include "ui/gfx/point.h"
 #include "ui/gfx/rect.h"
@@ -30,6 +30,7 @@
 
 using WebKit::WebDragOperation;
 using WebKit::WebDragOperationsMask;
+using content::RenderWidgetHost;
 using content::WebContents;
 
 namespace {
@@ -78,12 +79,11 @@ gboolean OnMouseScroll(GtkWidget* widget, GdkEventScroll* event,
 namespace content {
 
 TabContentsViewGtk::TabContentsViewGtk(
-    content::WebContents* web_contents,
-    content::TabContentsViewWrapperGtk* view_wrapper)
-    : tab_contents_(static_cast<TabContents*>(web_contents)),
+    TabContents* tab_contents,
+    content::WebContentsViewDelegate* delegate)
+    : tab_contents_(tab_contents),
       expanded_(gtk_expanded_container_new()),
-      view_wrapper_(view_wrapper),
-      overlaid_view_(NULL) {
+      delegate_(delegate) {
   gtk_widget_set_name(expanded_.get(), "chrome-tab-contents-view");
   g_signal_connect(expanded_.get(), "size-allocate",
                    G_CALLBACK(OnSizeAllocateThunk), this);
@@ -91,10 +91,10 @@ TabContentsViewGtk::TabContentsViewGtk(
                    G_CALLBACK(OnChildSizeRequestThunk), this);
 
   gtk_widget_show(expanded_.get());
-  drag_source_.reset(new content::WebDragSourceGtk(web_contents));
+  drag_source_.reset(new content::WebDragSourceGtk(tab_contents));
 
-  if (view_wrapper_.get())
-    view_wrapper_->WrapView(this);
+  if (delegate_.get())
+    delegate_->Initialize(expanded_.get(), &focus_store_);
 }
 
 TabContentsViewGtk::~TabContentsViewGtk() {
@@ -107,14 +107,14 @@ void TabContentsViewGtk::CreateView(const gfx::Size& initial_size) {
 
 RenderWidgetHostView* TabContentsViewGtk::CreateViewForWidget(
     RenderWidgetHost* render_widget_host) {
-  if (render_widget_host->view()) {
+  if (render_widget_host->GetView()) {
     // During testing, the view will already be set up in most cases to the
     // test view, so we don't want to clobber it with a real one. To verify that
     // this actually is happening (and somebody isn't accidentally creating the
     // view twice), we check for the RVH Factory, which will be set when we're
     // making special ones (which go along with the special views).
     DCHECK(RenderViewHostFactory::has_factory());
-    return render_widget_host->view();
+    return render_widget_host->GetView();
   }
 
   RenderWidgetHostView* view =
@@ -135,15 +135,15 @@ RenderWidgetHostView* TabContentsViewGtk::CreateViewForWidget(
   // Renderer target DnD.
   drag_dest_.reset(new content::WebDragDestGtk(tab_contents_, content_view));
 
-  if (view_wrapper_.get())
-    view_wrapper_->OnCreateViewForWidget();
+  if (delegate_.get())
+    drag_dest_->set_delegate(delegate_->GetDragDestDelegate());
 
   return view;
 }
 
 gfx::NativeView TabContentsViewGtk::GetNativeView() const {
-  if (view_wrapper_.get())
-    return view_wrapper_->GetNativeView();
+  if (delegate_.get())
+    return delegate_->GetNativeView();
 
   return expanded_.get();
 }
@@ -203,14 +203,14 @@ void TabContentsViewGtk::SizeContents(const gfx::Size& size) {
     rwhv->SetSize(size);
 }
 
-void TabContentsViewGtk::RenderViewCreated(RenderViewHost* host) {
+void TabContentsViewGtk::RenderViewCreated(content::RenderViewHost* host) {
 }
 
 void TabContentsViewGtk::Focus() {
   if (tab_contents_->ShowingInterstitialPage()) {
     tab_contents_->GetInterstitialPage()->Focus();
-  } else if (wrapper()) {
-    wrapper()->Focus();
+  } else if (delegate_.get()) {
+    delegate_->Focus();
   }
 }
 
@@ -257,23 +257,6 @@ void TabContentsViewGtk::GetViewBounds(gfx::Rect* out) const {
   out->SetRect(x, y, w, h);
 }
 
-void TabContentsViewGtk::InstallOverlayView(gfx::NativeView view) {
-  DCHECK(!overlaid_view_);
-  overlaid_view_ = view;
-  InsertIntoContentArea(view);
-  gtk_widget_show(view);
-}
-
-void TabContentsViewGtk::RemoveOverlayView() {
-  DCHECK(overlaid_view_);
-  gtk_container_remove(GTK_CONTAINER(expanded_.get()), overlaid_view_);
-  overlaid_view_ = NULL;
-}
-
-void TabContentsViewGtk::SetFocusedWidget(GtkWidget* widget) {
-  focus_store_.SetWidget(widget);
-}
-
 WebContents* TabContentsViewGtk::web_contents() {
   return tab_contents_;
 }
@@ -298,11 +281,6 @@ void TabContentsViewGtk::TakeFocus(bool reverse) {
   }
 }
 
-void TabContentsViewGtk::SetDragDestDelegate(
-    content::WebDragDestDelegate* delegate) {
-  drag_dest_->set_delegate(delegate);
-}
-
 void TabContentsViewGtk::InsertIntoContentArea(GtkWidget* widget) {
   gtk_container_add(GTK_CONTAINER(expanded_.get()), widget);
 }
@@ -315,9 +293,9 @@ void TabContentsViewGtk::InsertIntoContentArea(GtkWidget* widget) {
 gboolean TabContentsViewGtk::OnFocus(GtkWidget* widget,
                                      GtkDirectionType focus) {
   // Give our view wrapper first chance at this event.
-  if (view_wrapper_.get()) {
+  if (delegate_.get()) {
     gboolean return_value = FALSE;
-    if (view_wrapper_->OnNativeViewFocusEvent(widget, focus, &return_value))
+    if (delegate_->OnNativeViewFocusEvent(widget, focus, &return_value))
       return return_value;
   }
 
@@ -377,17 +355,18 @@ void TabContentsViewGtk::ShowCreatedFullscreenWidget(int route_id) {
                                               gfx::Rect());
 }
 
-void TabContentsViewGtk::ShowContextMenu(const ContextMenuParams& params) {
+void TabContentsViewGtk::ShowContextMenu(
+    const content::ContextMenuParams& params) {
   // Allow delegates to handle the context menu operation first.
   if (web_contents()->GetDelegate() &&
       web_contents()->GetDelegate()->HandleContextMenu(params)) {
     return;
   }
 
-  if (wrapper())
-    wrapper()->ShowContextMenu(params);
+  if (delegate_.get())
+    delegate_->ShowContextMenu(params);
   else
-    DLOG(ERROR) << "Implement context menus without chrome/ code";
+    DLOG(ERROR) << "Cannot show context menus without a delegate.";
 }
 
 void TabContentsViewGtk::ShowPopupMenu(const gfx::Rect& bounds,
@@ -411,10 +390,10 @@ void TabContentsViewGtk::StartDragging(const WebDropData& drop_data,
 
   RenderWidgetHostViewGtk* view_gtk = static_cast<RenderWidgetHostViewGtk*>(
       tab_contents_->GetRenderWidgetHostView());
-  if (!view_gtk || !view_gtk->last_mouse_down())
+  if (!view_gtk || !view_gtk->GetLastMouseDown())
     return;
 
-  drag_source_->StartDragging(drop_data, ops, view_gtk->last_mouse_down(),
+  drag_source_->StartDragging(drop_data, ops, view_gtk->GetLastMouseDown(),
                               image, image_offset);
 }
 

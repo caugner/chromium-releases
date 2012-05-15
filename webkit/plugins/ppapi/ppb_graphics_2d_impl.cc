@@ -7,6 +7,7 @@
 #include <iterator>
 
 #include "base/bind.h"
+#include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "skia/ext/platform_canvas.h"
@@ -154,7 +155,7 @@ struct PPB_Graphics2D_Impl::QueuedOperation {
 };
 
 PPB_Graphics2D_Impl::PPB_Graphics2D_Impl(PP_Instance instance)
-    : Resource(instance),
+    : Resource(::ppapi::OBJECT_IS_IMPL, instance),
       bound_instance_(NULL),
       offscreen_flush_pending_(false),
       is_always_opaque_(false),
@@ -314,6 +315,7 @@ void PPB_Graphics2D_Impl::ReplaceContents(PP_Resource image_data) {
 }
 
 int32_t PPB_Graphics2D_Impl::Flush(PP_CompletionCallback callback) {
+  TRACE_EVENT0("pepper", "PPB_Graphics2D_Impl::Flush");
   if (!callback.func)
     return PP_ERROR_BLOCKS_MAIN_THREAD;
 
@@ -462,6 +464,7 @@ bool PPB_Graphics2D_Impl::BindToInstance(PluginInstance* new_instance) {
 void PPB_Graphics2D_Impl::Paint(WebKit::WebCanvas* canvas,
                                 const gfx::Rect& plugin_rect,
                                 const gfx::Rect& paint_rect) {
+  TRACE_EVENT0("pepper", "PPB_Graphics2D_Impl::Paint");
   ImageDataAutoMapper auto_mapper(image_data_);
   const SkBitmap& backing_bitmap = *image_data_->GetMappedBitmap();
 
@@ -572,6 +575,7 @@ void PPB_Graphics2D_Impl::ViewInitiatedPaint() {
 }
 
 void PPB_Graphics2D_Impl::ViewFlushedPaint() {
+  TRACE_EVENT0("pepper", "PPB_Graphics2D_Impl::ViewFlushedPaint");
   // Notify any "painted" callback. See |unpainted_flush_callback_| in the
   // header for more.
   if (!painted_flush_callback_.is_null())

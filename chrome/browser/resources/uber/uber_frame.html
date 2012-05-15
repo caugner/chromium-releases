@@ -3,26 +3,30 @@
 <head>
 <meta charset="utf-8">
 
-<link rel="stylesheet" href="../shared/css/chrome_shared2.css">
+<link rel="stylesheet" href="chrome://resources/css/chrome_shared2.css">
 <link rel="stylesheet" href="uber_frame.css">
 
 <script src="chrome://resources/js/cr.js"></script>
 <script src="chrome://uber-frame/uber_frame.js"></script>
 </head>
 
-<body>
+<body i18n-values=".style.fontFamily:fontfamily;.style.fontSize:fontsize">
 
 <h1 i18n-content="shortProductName"></h1>
-<ol>
-  <li i18n-content="settingsDisplayName"
-      i18n-values="controls:settingsHost"></li>
+<ul>
+  <li i18n-content="historyDisplayName"
+      i18n-values="controls:historyHost">
+  </li>
   <li i18n-content="extensionsDisplayName"
-      i18n-values="controls:extensionsHost"></li>
-<if expr="pp_ifdef('chromeos')">
-  <li i18n-content="aboutPageDisplayName" id="aboutPageNavItem"
-      i18n-values="controls:aboutPageHost"></li>
-</if>
-</ol>
+      i18n-values="controls:extensionsHost">
+  </li>
+  <li i18n-content="settingsDisplayName"
+      i18n-values="controls:settingsHost">
+  </li>
+  <li id="helpNavItem" i18n-content="helpDisplayName"
+      i18n-values="controls:helpHost">
+  </li>
+</ul>
 
 <script src="chrome://uber-frame/strings.js"></script>
 <script src="chrome://resources/js/i18n_template.js"></script>

@@ -17,7 +17,6 @@
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/autocomplete/autocomplete_popup_contents_view.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/web_contents.h"
 #include "googleurl/src/gurl.h"
 #include "grit/app_locale_settings.h"
@@ -38,8 +37,13 @@
 #include "ui/views/border.h"
 #include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/events/event.h"
+#include "ui/views/ime/input_method.h"
 #include "ui/views/layout/fill_layout.h"
 #include "ui/views/views_delegate.h"
+
+#if defined(USE_AURA)
+#include "ui/aura/root_window.h"
+#endif
 
 #if defined(OS_WIN)
 #include "chrome/browser/ui/views/omnibox/omnibox_view_win.h"
@@ -222,15 +226,6 @@ void OmniboxViewViews::Init() {
   chromeos::input_method::InputMethodManager::GetInstance()->
       AddCandidateWindowObserver(this);
 #endif
-
-  // Manually invoke SetBaseColor() because TOOLKIT_VIEWS doesn't observe
-  // themes.
-  SetBaseColor();
-}
-
-void OmniboxViewViews::SetBaseColor() {
-  // TODO(oshima): Implement style change.
-  NOTIMPLEMENTED();
 }
 
 bool OmniboxViewViews::HandleAfterKeyEvent(const views::KeyEvent& event,
@@ -264,10 +259,18 @@ bool OmniboxViewViews::HandleAfterKeyEvent(const views::KeyEvent& event,
     handled = true;
   } else if (!handled &&
              event.key_code() == ui::VKEY_TAB &&
-             !event.IsShiftDown() &&
              !event.IsControlDown()) {
-    if (model_->is_keyword_hint()) {
+    if (model_->is_keyword_hint() && !event.IsShiftDown()) {
       handled = model_->AcceptKeyword();
+    } else if (model_->popup_model()->IsOpen()) {
+      if (event.IsShiftDown() &&
+          model_->popup_model()->selected_line_state() ==
+              AutocompletePopupModel::KEYWORD) {
+        model_->ClearKeyword(GetText());
+      } else {
+        model_->OnUpOrDownKeyPressed(event.IsShiftDown() ? -1 : 1);
+      }
+      handled = true;
     } else {
       string16::size_type start = 0;
       string16::size_type end = 0;
@@ -294,7 +297,7 @@ bool OmniboxViewViews::HandleKeyReleaseEvent(const views::KeyEvent& event) {
   // the control-key state is changed.
   if (event.key_code() == ui::VKEY_CONTROL) {
     // TODO(oshima): investigate if we need to support keyboard with two
-    // controls. See omnibox_view_gtk.cc.
+    // controls.
     model_->OnControlKeyChanged(false);
     return true;
   }
@@ -319,9 +322,16 @@ void OmniboxViewViews::HandleFocusIn() {
 }
 
 void OmniboxViewViews::HandleFocusOut() {
-  // TODO(oshima): we don't have native view. This requires
-  // further refactoring.
-  model_->OnWillKillFocus(NULL);
+  gfx::NativeView native_view = NULL;
+#if defined(USE_AURA)
+  views::Widget* widget = GetWidget();
+  if (widget) {
+    aura::RootWindow* root = widget->GetNativeView()->GetRootWindow();
+    if (root)
+      native_view = root->focused_window();
+  }
+#endif
+  model_->OnWillKillFocus(native_view);
   // Close the popup.
   ClosePopup();
   // Tell the model to reset itself.
@@ -376,13 +386,10 @@ void OmniboxViewViews::SaveStateToTab(WebContents* tab) {
   // We don't want to keep the IME status, so force quit the current
   // session here.  It may affect the selection status, so order is
   // also important.
-  // This actually doesn't notify any events to the input method, but
-  // further call of SetText() will notify the current status, so
-  // that's fine.
-  // TODO(mukai): Add a method to InputMethod class to deal with such
-  // situation.  http://crbug.com/111578
-  if (textfield_->IsIMEComposing())
+  if (textfield_->IsIMEComposing()) {
     textfield_->GetTextInputClient()->ConfirmCompositionText();
+    textfield_->GetInputMethod()->CancelComposition(textfield_);
+  }
 
   // NOTE: GetStateForTabSwitch may affect GetSelection, so order is important.
   AutocompleteEditModel::State model_state = model_->GetStateForTabSwitch();
@@ -429,13 +436,11 @@ void OmniboxViewViews::Update(const WebContents* contents) {
 void OmniboxViewViews::OpenMatch(const AutocompleteMatch& match,
                                  WindowOpenDisposition disposition,
                                  const GURL& alternate_nav_url,
-                                 size_t selected_line,
-                                 const string16& keyword) {
+                                 size_t selected_line) {
   if (!match.destination_url.is_valid())
     return;
 
-  model_->OpenMatch(match, disposition, alternate_nav_url,
-                    selected_line, keyword);
+  model_->OpenMatch(match, disposition, alternate_nav_url, selected_line);
 }
 
 string16 OmniboxViewViews::GetText() const {
@@ -461,16 +466,22 @@ void OmniboxViewViews::SetUserText(const string16& text,
                                    const string16& display_text,
                                    bool update_popup) {
   model_->SetUserText(text);
-  SetWindowTextAndCaretPos(display_text, display_text.length());
-  if (update_popup)
-    UpdatePopup();
-  TextChanged();
+  SetWindowTextAndCaretPos(display_text, display_text.length(), update_popup,
+      true);
 }
 
 void OmniboxViewViews::SetWindowTextAndCaretPos(const string16& text,
-                                                size_t caret_pos) {
+                                                size_t caret_pos,
+                                                bool update_popup,
+                                                bool notify_text_changed) {
   const ui::Range range(caret_pos, caret_pos);
   SetTextAndSelectedRange(text, range);
+
+  if (update_popup)
+    UpdatePopup();
+
+  if (notify_text_changed)
+    TextChanged();
 }
 
 void OmniboxViewViews::SetForcedQuery() {
@@ -544,8 +555,7 @@ void OmniboxViewViews::OnTemporaryTextMaybeChanged(
   if (save_original_selection)
     textfield_->GetSelectedRange(&saved_temporary_selection_);
 
-  SetWindowTextAndCaretPos(display_text, display_text.length());
-  TextChanged();
+  SetWindowTextAndCaretPos(display_text, display_text.length(), false, true);
 }
 
 bool OmniboxViewViews::OnInlineAutocompleteTextMaybeChanged(
@@ -593,8 +603,9 @@ bool OmniboxViewViews::OnAfterPossibleChange() {
       (new_sel.start() <= sel_before_change_.GetMin());
 
   const bool something_changed = model_->OnAfterPossibleChange(
-      new_text, new_sel.start(), new_sel.end(), selection_differs,
-      text_changed, just_deleted_text, !textfield_->IsIMEComposing());
+      text_before_change_, new_text, new_sel.start(), new_sel.end(),
+      selection_differs, text_changed, just_deleted_text,
+      !textfield_->IsIMEComposing());
 
   // If only selection was changed, we don't need to call |model_|'s
   // OnChanged() method, which is called in TextChanged().
@@ -666,16 +677,6 @@ int OmniboxViewViews::OnPerformDrop(const views::DropTargetEvent& event) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// OmniboxViewViews, content::NotificationObserver implementation:
-
-void OmniboxViewViews::Observe(int type,
-                               const content::NotificationSource& source,
-                               const content::NotificationDetails& details) {
-  DCHECK(type == chrome::NOTIFICATION_BROWSER_THEME_CHANGED);
-  SetBaseColor();
-}
-
-////////////////////////////////////////////////////////////////////////////////
 // OmniboxViewViews, views::TextfieldController implementation:
 
 void OmniboxViewViews::ContentsChanged(views::Textfield* sender,
@@ -728,7 +729,7 @@ void OmniboxViewViews::OnAfterCutOrCopy() {
   bool write_url;
   model_->AdjustTextForCopy(selection_range.start(), selected_text == text,
       &selected_text, &url, &write_url);
-  ui::ScopedClipboardWriter scw(cb);
+  ui::ScopedClipboardWriter scw(cb, ui::Clipboard::BUFFER_STANDARD);
   scw.WriteText(selected_text);
   if (write_url) {
     BookmarkNodeData data;

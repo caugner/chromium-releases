@@ -110,7 +110,7 @@ TEST_F(AssertionTest, Assertion) {
 }
 #endif  // !defined(NDEBUG)
 
-#if !defined(OFFICIAL_BUILD)
+#if !defined(GOOGLE_CHROME_BUILD)
 // Only works on Linux in Release mode with CHROME_HEADLESS=1
 class CheckFalseTest : public UITest {
  protected:
@@ -125,7 +125,7 @@ class CheckFalseTest : public UITest {
 
 #if defined(OS_WIN)
 // http://crbug.com/38497
-#define CheckFails FLAKY_CheckFails
+#define CheckFails DISABLED_CheckFails
 #elif defined(OS_MACOSX)
 // Crash service doesn't exist for the Mac yet: http://crbug.com/45243
 #define CheckFails DISABLED_CheckFails
@@ -135,7 +135,7 @@ TEST_F(CheckFalseTest, CheckFails) {
   expected_errors_ = EXPECTED_ASSERT_ERRORS;
   expected_crashes_ = EXPECTED_ASSERT_CRASHES;
 }
-#endif  // !defined(OFFICIAL_BUILD)
+#endif  // !defined(GOOGLE_CHROME_BUILD)
 
 // Tests whether we correctly fail on browser crashes during UI Tests.
 class RendererCrashTest : public UITest {
@@ -159,8 +159,8 @@ class RendererCrashTest : public UITest {
 #if defined(OS_MACOSX)
 // Crash service doesn't exist for the Mac yet: http://crbug.com/45243
 #define MAYBE_Crash DISABLED_Crash
-#elif defined(OS_CHROME)
-#define MAYBE_Crash FLAKY_Crash
+#elif defined(OS_CHROMEOS)
+#define MAYBE_Crash DISABLED_Crash
 #else
 #define MAYBE_Crash Crash
 #endif

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,9 @@
 
 #include "base/callback.h"
 #include "base/memory/ref_counted.h"
+#include "base/string_piece.h"
 #include "base/time.h"
+#include "dbus/object_path.h"
 
 namespace dbus {
 
@@ -27,14 +29,25 @@ class Signal;
 // calling methods of these objects.
 //
 // ObjectProxy is a ref counted object, to ensure that |this| of the
-// object is is alive when callbacks referencing |this| are called.
+// object is is alive when callbacks referencing |this| are called; the
+// bus always holds at least one of those references so object proxies
+// always last as long as the bus that created them.
 class ObjectProxy : public base::RefCountedThreadSafe<ObjectProxy> {
  public:
-  // Client code should use Bus::GetObjectProxy() instead of this
-  // constructor.
+  // Client code should use Bus::GetObjectProxy() or
+  // Bus::GetObjectProxyWithOptions() instead of this constructor.
   ObjectProxy(Bus* bus,
               const std::string& service_name,
-              const std::string& object_path);
+              const ObjectPath& object_path,
+              int options);
+
+  // Options to be OR-ed together when calling Bus::GetObjectProxyWithOptions().
+  // Set the IGNORE_SERVICE_UNKNOWN_ERRORS option to silence logging of
+  // org.freedesktop.DBus.Error.ServiceUnknown errors.
+  enum Options {
+    DEFAULT_OPTIONS = 0,
+    IGNORE_SERVICE_UNKNOWN_ERRORS = 1 << 0
+  };
 
   // Special timeout constants.
   //
@@ -85,7 +98,8 @@ class ObjectProxy : public base::RefCountedThreadSafe<ObjectProxy> {
                           int timeout_ms,
                           ResponseCallback callback);
 
-  // Requests to connect to the signal from the remote object.
+  // Requests to connect to the signal from the remote object, replacing
+  // any previous |signal_callback| connected to that signal.
   //
   // |signal_callback| will be called in the origin thread, when the
   // signal is received from the remote object. As it's called in the
@@ -180,9 +194,13 @@ class ObjectProxy : public base::RefCountedThreadSafe<ObjectProxy> {
                                               DBusMessage* raw_message,
                                               void* user_data);
 
+  // Helper method for logging response errors appropriately.
+  void LogMethodCallFailure(const base::StringPiece& error_name,
+                            const base::StringPiece& error_message) const;
+
   scoped_refptr<Bus> bus_;
   std::string service_name_;
-  std::string object_path_;
+  ObjectPath object_path_;
 
   // True if the message filter was added.
   bool filter_added_;
@@ -193,6 +211,8 @@ class ObjectProxy : public base::RefCountedThreadSafe<ObjectProxy> {
   MethodTable method_table_;
 
   std::set<std::string> match_rules_;
+
+  const bool ignore_service_unknown_errors_;
 
   DISALLOW_COPY_AND_ASSIGN(ObjectProxy);
 };

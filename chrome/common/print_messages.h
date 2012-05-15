@@ -279,6 +279,10 @@ IPC_MESSAGE_ROUTED1(PrintMsg_PrintingDone,
 // Tells the render view that preview printing request has been cancelled.
 IPC_MESSAGE_ROUTED0(PrintMsg_PreviewPrintingRequestCancelled)
 
+// Tells the render view whether scripted printing is blocked or not.
+IPC_MESSAGE_ROUTED1(PrintMsg_SetScriptedPrintingBlocked,
+                    bool /* blocked */)
+
 // Tells the render view to switch the CSS to print media type, renders every
 // requested pages for print preview using the given |settings|. This gets
 // called multiple times as the user updates settings.
@@ -365,10 +369,12 @@ IPC_MESSAGE_ROUTED1(PrintHostMsg_DidGetPreviewPageCount,
 
 // Notify the browser of the default page layout according to the currently
 // selected printer and page size.
+// |printable_area_in_points| Specifies the printable area in points.
 // |has_custom_page_size_style| is true when the printing frame has a custom
 // page size css otherwise false.
-IPC_MESSAGE_ROUTED2(PrintHostMsg_DidGetDefaultPageLayout,
+IPC_MESSAGE_ROUTED3(PrintHostMsg_DidGetDefaultPageLayout,
                     printing::PageSizeMargins /* page layout in points */,
+                    gfx::Rect /* printable area in points */,
                     bool /* has custom page size style */)
 
 // Notify the browser a print preview page has been rendered.

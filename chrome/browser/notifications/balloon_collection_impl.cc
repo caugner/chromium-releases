@@ -47,7 +47,7 @@ BalloonCollectionImpl::BalloonCollectionImpl()
 {
   registrar_.Add(this, chrome::NOTIFICATION_PANEL_ADDED,
                  content::NotificationService::AllSources());
-  registrar_.Add(this, chrome::NOTIFICATION_PANEL_REMOVED,
+  registrar_.Add(this, chrome::NOTIFICATION_PANEL_CLOSED,
                  content::NotificationService::AllSources());
   registrar_.Add(this, chrome::NOTIFICATION_PANEL_CHANGED_BOUNDS,
                  content::NotificationService::AllSources());
@@ -56,6 +56,9 @@ BalloonCollectionImpl::BalloonCollectionImpl()
 }
 
 BalloonCollectionImpl::~BalloonCollectionImpl() {
+#if USE_OFFSETS
+  RemoveMessageLoopObserver();
+#endif
 }
 
 void BalloonCollectionImpl::AddImpl(const Notification& notification,
@@ -185,7 +188,7 @@ void BalloonCollectionImpl::Observe(
       bounds = content::Source<Panel>(source).ptr()->GetBounds();
       // Fall through.
     case chrome::NOTIFICATION_PANEL_ADDED:
-    case chrome::NOTIFICATION_PANEL_REMOVED:
+    case chrome::NOTIFICATION_PANEL_CLOSED:
       layout_.enable_computing_panel_offset();
       if (layout_.ComputeOffsetToMoveAbovePanels(bounds))
         PositionBalloons(true);

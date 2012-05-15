@@ -8,8 +8,13 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/aura/env.h"
 #include "ui/aura/layout_manager.h"
+#include "ui/aura/monitor_manager.h"
 #include "ui/aura/root_window.h"
+#include "ui/aura/test/single_monitor_manager.h"
+#include "ui/aura/test/test_screen.h"
+#include "ui/aura/test/test_stacking_client.h"
 #include "ui/aura/window.h"
 #include "ui/views/widget/root_view.h"
 #include "ui/views/widget/widget_delegate.h"
@@ -32,15 +37,29 @@ class NativeWidgetAuraTest : public testing::Test {
 
   // testing::Test overrides:
   virtual void SetUp() OVERRIDE {
-    aura::RootWindow::GetInstance()->SetBounds(gfx::Rect(0, 0, 640, 480));
+    aura::Env::GetInstance()->SetMonitorManager(
+        new aura::test::SingleMonitorManager);
+    root_window_.reset(
+        aura::MonitorManager::CreateRootWindowForPrimaryMonitor());
+    gfx::Screen::SetInstance(new aura::TestScreen(root_window_.get()));
+    root_window_->SetBounds(gfx::Rect(0, 0, 640, 480));
+    root_window_->SetHostSize(gfx::Size(640, 480));
+    test_stacking_client_.reset(
+        new aura::test::TestStackingClient(root_window_.get()));
   }
   virtual void TearDown() OVERRIDE {
-    aura::RootWindow::DeleteInstance();
     message_loop_.RunAllPending();
+    test_stacking_client_.reset();
+    root_window_.reset();
   }
+
+ protected:
+  aura::RootWindow* root_window() { return root_window_.get(); }
 
  private:
   MessageLoopForUI message_loop_;
+  scoped_ptr<aura::RootWindow> root_window_;
+  scoped_ptr<aura::test::TestStackingClient> test_stacking_client_;
 
   DISALLOW_COPY_AND_ASSIGN(NativeWidgetAuraTest);
 };
@@ -48,7 +67,7 @@ class NativeWidgetAuraTest : public testing::Test {
 TEST_F(NativeWidgetAuraTest, CenterWindowLargeParent) {
   // Make a parent window larger than the host represented by rootwindow.
   scoped_ptr<aura::Window> parent(new aura::Window(NULL));
-  parent->Init(ui::Layer::LAYER_NOT_DRAWN);
+  parent->Init(ui::LAYER_NOT_DRAWN);
   parent->SetBounds(gfx::Rect(0, 0, 1024, 800));
   scoped_ptr<Widget>  widget(new Widget());
   NativeWidgetAura* window = Init(parent.get(), widget.get());
@@ -64,7 +83,7 @@ TEST_F(NativeWidgetAuraTest, CenterWindowLargeParent) {
 TEST_F(NativeWidgetAuraTest, CenterWindowSmallParent) {
   // Make a parent window smaller than the host represented by rootwindow.
   scoped_ptr<aura::Window> parent(new aura::Window(NULL));
-  parent->Init(ui::Layer::LAYER_NOT_DRAWN);
+  parent->Init(ui::LAYER_NOT_DRAWN);
   parent->SetBounds(gfx::Rect(0, 0, 480, 320));
   scoped_ptr<Widget> widget(new Widget());
   NativeWidgetAura* window  = Init(parent.get(), widget.get());
@@ -134,8 +153,8 @@ class TestWidget : public views::Widget {
 // RenderWidgetHostViewAura ends up getting resized during construction, which
 // leads to noticable flashes.
 TEST_F(NativeWidgetAuraTest, ShowMaximizedDoesntBounceAround) {
-  aura::RootWindow::GetInstance()->SetBounds(gfx::Rect(0, 0, 640, 480));
-  aura::RootWindow::GetInstance()->SetLayoutManager(new TestLayoutManager);
+  root_window()->SetBounds(gfx::Rect(0, 0, 640, 480));
+  root_window()->SetLayoutManager(new TestLayoutManager);
   scoped_ptr<TestWidget> widget(new TestWidget());
   Widget::InitParams params(Widget::InitParams::TYPE_WINDOW);
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
@@ -143,7 +162,6 @@ TEST_F(NativeWidgetAuraTest, ShowMaximizedDoesntBounceAround) {
   params.show_state = ui::SHOW_STATE_MAXIMIZED;
   params.bounds = gfx::Rect(10, 10, 100, 200);
   widget->Init(params);
-  aura::RootWindow::DeleteInstance();
   EXPECT_FALSE(widget->did_size_change_more_than_once());
   widget->CloseNow();
 }
@@ -153,7 +171,7 @@ TEST_F(NativeWidgetAuraTest, GetClientAreaScreenBounds) {
   Widget::InitParams params(Widget::InitParams::TYPE_WINDOW);
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   params.bounds.SetRect(10, 20, 300, 400);
-  Widget* widget = new Widget();
+  scoped_ptr<Widget> widget(new Widget());
   widget->Init(params);
 
   // For Aura, client area bounds match window bounds.

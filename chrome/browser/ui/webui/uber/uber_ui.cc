@@ -13,12 +13,17 @@
 #include "chrome/browser/ui/webui/extensions/extensions_ui.h"
 #include "chrome/browser/ui/webui/options2/options_ui2.h"
 #include "chrome/common/url_constants.h"
+#include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 
+using content::NavigationController;
+using content::NavigationEntry;
+using content::RenderViewHost;
 using content::WebContents;
 
 namespace {
@@ -35,15 +40,23 @@ ChromeWebUIDataSource* CreateUberHTMLSource() {
   // Hack alert: continue showing "Loading..." until a real title is set.
   source->AddLocalizedString("pageTitle", IDS_TAB_LOADING_TITLE);
 
-  source->AddString("settingsHost",
-                    ASCIIToUTF16(chrome::kChromeUISettingsHost));
+  source->AddString("extensionsFrameURL",
+                    ASCIIToUTF16(chrome::kChromeUIExtensionsFrameURL));
   source->AddString("extensionsHost",
                     ASCIIToUTF16(chrome::kChromeUIExtensionsHost));
+  source->AddString("helpFrameURL",
+                    ASCIIToUTF16(chrome::kChromeUIHelpFrameURL));
+  source->AddString("helpHost",
+                    ASCIIToUTF16(chrome::kChromeUIHelpHost));
+  source->AddString("historyFrameURL",
+                    ASCIIToUTF16(chrome::kChromeUIHistoryFrameURL));
+  source->AddString("historyHost",
+                    ASCIIToUTF16(chrome::kChromeUIHistoryHost));
+  source->AddString("settingsFrameURL",
+                    ASCIIToUTF16(chrome::kChromeUISettingsFrameURL));
+  source->AddString("settingsHost",
+                    ASCIIToUTF16(chrome::kChromeUISettingsHost));
 
-#if defined(OS_CHROMEOS)
-  source->AddString("aboutPageHost",
-                    ASCIIToUTF16(chrome::kAboutOptionsSubPage));
-#endif
   return source;
 }
 
@@ -55,20 +68,26 @@ ChromeWebUIDataSource* CreateUberFrameHTMLSource() {
   source->add_resource_path("uber_frame.js", IDR_UBER_FRAME_JS);
   source->set_default_resource(IDR_UBER_FRAME_HTML);
 
+  // TODO(jhawkins): Attempt to get rid of IDS_PRODUCT_OS_NAME.
+#if defined(OS_CHROMEOS)
+  source->AddLocalizedString("shortProductName", IDS_PRODUCT_OS_NAME);
+#else
   source->AddLocalizedString("shortProductName", IDS_SHORT_PRODUCT_NAME);
+#endif  // defined(OS_CHROMEOS)
 
-  source->AddString("settingsHost",
-                    ASCIIToUTF16(chrome::kChromeUISettingsHost));
-  source->AddLocalizedString("settingsDisplayName", IDS_SETTINGS_TITLE);
   source->AddString("extensionsHost",
                     ASCIIToUTF16(chrome::kChromeUIExtensionsHost));
   source->AddLocalizedString("extensionsDisplayName",
                              IDS_MANAGE_EXTENSIONS_SETTING_WINDOWS_TITLE);
-#if defined(OS_CHROMEOS)
-  source->AddString("aboutPageHost",
-                    ASCIIToUTF16(chrome::kAboutOptionsSubPage));
-  source->AddLocalizedString("aboutPageDisplayName", IDS_ABOUT_TAB_TITLE);
-#endif
+  source->AddString("helpHost",
+                    ASCIIToUTF16(chrome::kChromeUIHelpHost));
+  source->AddLocalizedString("helpDisplayName", IDS_HELP_TITLE);
+  source->AddString("historyHost",
+                    ASCIIToUTF16(chrome::kChromeUIHistoryHost));
+  source->AddLocalizedString("historyDisplayName", IDS_HISTORY_TITLE);
+  source->AddString("settingsHost",
+                    ASCIIToUTF16(chrome::kChromeUISettingsHost));
+  source->AddLocalizedString("settingsDisplayName", IDS_SETTINGS_TITLE);
 
   return source;
 }
@@ -79,12 +98,19 @@ UberUI::UberUI(content::WebUI* web_ui) : WebUIController(web_ui) {
   Profile* profile = Profile::FromWebUI(web_ui);
   profile->GetChromeURLDataManager()->AddDataSource(CreateUberHTMLSource());
 
-  RegisterSubpage(chrome::kChromeUIUberFrameURL);
-  RegisterSubpage(chrome::kChromeUISettingsFrameURL);
+  // The user may use a virtual (short) URL to get to the page. To avoid
+  // duplicate uber tabs, clear the virtual URL so that the omnibox will show
+  // the real URL. http://crbug.com/111878.
+  NavigationController* controller = &web_ui->GetWebContents()->GetController();
+  NavigationEntry* pending_entry = controller->GetPendingEntry();
+  if (pending_entry)
+    pending_entry->SetVirtualURL(GURL());
+
   RegisterSubpage(chrome::kChromeUIExtensionsFrameURL);
-#if defined(OS_CHROMEOS)
-  RegisterSubpage(chrome::kChromeUIAboutPageFrameURL);
-#endif
+  RegisterSubpage(chrome::kChromeUIHelpFrameURL);
+  RegisterSubpage(chrome::kChromeUIHistoryFrameURL);
+  RegisterSubpage(chrome::kChromeUISettingsFrameURL);
+  RegisterSubpage(chrome::kChromeUIUberFrameURL);
 }
 
 UberUI::~UberUI() {
@@ -95,7 +121,7 @@ void UberUI::RegisterSubpage(const std::string& page_url) {
   content::WebUI* webui =
       web_ui()->GetWebContents()->CreateWebUI(GURL(page_url));
 
-  webui->SetFrameXPath("//iframe[@src='" + page_url + "']");
+  webui->SetFrameXPath("//iframe[starts-with(@src,'" + page_url + "')]");
   sub_uis_[page_url] = webui;
 }
 
@@ -133,8 +159,8 @@ bool UberUI::OverrideHandleWebUIMessage(const GURL& source_url,
 
   // The message was sent from a subpage.
   // TODO(jam) fix this to use interface
-  //return subpage->second->GetController()->OverrideHandleWebUIMessage(
-    //  source_url, message, args);
+  // return subpage->second->GetController()->OverrideHandleWebUIMessage(
+  //     source_url, message, args);
   subpage->second->ProcessWebUIMessage(source_url, message, args);
   return true;
 }

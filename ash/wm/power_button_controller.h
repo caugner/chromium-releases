@@ -138,6 +138,9 @@ class ASH_EXPORT PowerButtonController : public aura::RootWindowObserver {
   // Called when the user logs in.
   void OnLoginStateChange(bool logged_in, bool is_guest);
 
+  // Called when the application is exiting.
+  void OnExit();
+
   // Called when the screen is locked (after the lock window is visible) or
   // unlocked.
   void OnLockStateChange(bool locked);
@@ -149,10 +152,16 @@ class ASH_EXPORT PowerButtonController : public aura::RootWindowObserver {
   void OnPowerButtonEvent(bool down, const base::TimeTicks& timestamp);
   void OnLockButtonEvent(bool down, const base::TimeTicks& timestamp);
 
+  // Displays the shutdown animation and requests shutdown when it's done.
+  void RequestShutdown();
+
   // aura::RootWindowObserver overrides:
-  virtual void OnRootWindowResized(const gfx::Size& new_size) OVERRIDE;
+  virtual void OnRootWindowResized(const aura::RootWindow* root,
+                                   const gfx::Size& old_size) OVERRIDE;
 
  private:
+  bool logged_in_as_non_guest() const { return logged_in_ && !is_guest_; }
+
   // Requests that the screen be locked and starts |lock_fail_timer_|.
   void OnLockTimeout();
 
@@ -162,7 +171,7 @@ class ASH_EXPORT PowerButtonController : public aura::RootWindowObserver {
   // Displays the pre-shutdown animation and starts |shutdown_timer_|.
   void OnLockToShutdownTimeout();
 
-  // Displays the shutdown animation and starts |real_shutdown_timer_|.
+  // Calls StartShutdownAnimationAndRequestShutdown().
   void OnShutdownTimeout();
 
   // Requests that the machine be shut down.
@@ -172,6 +181,9 @@ class ASH_EXPORT PowerButtonController : public aura::RootWindowObserver {
   void StartLockTimer();
   void StartShutdownTimer();
 
+  // Displays the shutdown animation and starts |real_shutdown_timer_|.
+  void StartShutdownAnimationAndRequestShutdown();
+
   // Shows or hides |background_layer_|.  The show method creates and
   // initializes the layer if it doesn't already exist.
   void ShowBackgroundLayer();
@@ -179,8 +191,12 @@ class ASH_EXPORT PowerButtonController : public aura::RootWindowObserver {
 
   scoped_ptr<PowerButtonControllerDelegate> delegate_;
 
-  // True if a non-guest user is currently logged in.
-  bool logged_in_as_non_guest_;
+  // True if the user is currently logged in.
+  bool logged_in_;
+
+  // True if a guest user is currently logged in.  Unused if |logged_in_| is
+  // false.
+  bool is_guest_;
 
   // True if the screen is currently locked.
   bool locked_;
@@ -202,6 +218,9 @@ class ASH_EXPORT PowerButtonController : public aura::RootWindowObserver {
 
   // Layer that's stacked under all of the root window's children to provide a
   // black background when we're scaling all of the other windows down.
+  // TODO(derat): Remove this in favor of having the compositor only clear the
+  // viewport when there are regions not covered by a layer:
+  // http://crbug.com/113445
   scoped_ptr<ui::Layer> background_layer_;
 
   // Started when the user first presses the power button while in a

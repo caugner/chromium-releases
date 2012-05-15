@@ -378,7 +378,22 @@
       ],
       'sources': [
         'examples/gles2/gles2.cc',
-        'examples/gles2/testdata.h',
+      ],
+    },
+    {
+      'target_name': 'ppapi_example_video_decode',
+      'dependencies': [
+        'ppapi_example_skeleton',
+        'ppapi.gyp:ppapi_cpp',
+        'ppapi.gyp:ppapi_gles2',
+        'ppapi.gyp:ppapi_egl',
+      ],
+      'include_dirs': [
+        'lib/gl/include',
+      ],
+      'sources': [
+        'examples/video_decode/video_decode.cc',
+        'examples/video_decode/testdata.h',
       ],
     },
     {
@@ -394,6 +409,26 @@
       ],
       'sources': [
         'examples/video_capture/video_capture.cc',
+      ],
+    },
+    {
+      'target_name': 'ppapi_example_flash_topmost',
+      'dependencies': [
+        'ppapi_example_skeleton',
+        'ppapi.gyp:ppapi_cpp',
+      ],
+      'sources': [
+        'examples/flash_topmost/flash_topmost.cc',
+      ],
+    },
+    {
+      'target_name': 'ppapi_example_printing',
+      'dependencies': [
+        'ppapi_example_skeleton',
+        'ppapi.gyp:ppapi_cpp',
+      ],
+      'sources': [
+        'examples/printing/printing.cc',
       ],
     },
   ],

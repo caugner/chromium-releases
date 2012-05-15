@@ -5,6 +5,7 @@
 #include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/process_util.h"
 #include "base/string_util.h"
 #include "base/test/test_file_util.h"
 #include "base/threading/simple_thread.h"
@@ -59,18 +60,14 @@ class PrintingLayoutTest : public PrintingTest<UITest> {
       return 100.;
     }
 
-    std::wstring verification_file(test_data_directory_.value());
-    file_util::AppendToPath(&verification_file, L"printing");
-    file_util::AppendToPath(&verification_file, verification_name);
-    FilePath emf(verification_file + L".emf");
-    FilePath png(verification_file + L".png");
+    FilePath base_path(test_data_directory_.AppendASCII("printing"));
+    FilePath emf(base_path.Append(verification_name + L".emf"));
+    FilePath png(base_path.Append(verification_name + L".png"));
 
+    FilePath cleartype(base_path.Append(verification_name + L"_cleartype.png"));
     // Looks for Cleartype override.
-    if (file_util::PathExists(
-            FilePath::FromWStringHack(verification_file + L"_cleartype.png")) &&
-        IsClearTypeEnabled()) {
-      png = FilePath(verification_file + L"_cleartype.png");
-    }
+    if (file_util::PathExists(cleartype) && IsClearTypeEnabled())
+      png = cleartype;
 
     if (GenerateFiles()) {
       // Copy the .emf and generate an .png.
@@ -91,8 +88,8 @@ class PrintingLayoutTest : public PrintingTest<UITest> {
           " result size:" << test_content.size().ToString();
       if (diff_emf) {
         // Backup the result emf file.
-        file_util::CopyFile(test_result, FilePath(
-              verification_file + L"_failed.emf"));
+        FilePath failed(base_path.Append(verification_name + L"_failed.emf"));
+        file_util::CopyFile(test_result, failed);
       }
 
       // This verification is only to know that the EMF rendering stays
@@ -103,7 +100,9 @@ class PrintingLayoutTest : public PrintingTest<UITest> {
           " result size:" << test_content.size().ToString();
       if (diff_png) {
         // Backup the rendered emf file to detect the rendering difference.
-        emf_content.SaveToPng(FilePath(verification_file + L"_rendering.png"));
+        FilePath rendering(
+            base_path.Append(verification_name + L"_rendering.png"));
+        emf_content.SaveToPng(rendering);
       }
       return std::max(diff_png, diff_emf);
     }
@@ -287,7 +286,9 @@ TEST_F(PrintingLayoutTextTest, DISABLED_Complex) {
                                                    "close_printdlg_thread");
 
   // Print a document, check its output.
-  net::TestServer test_server(net::TestServer::TYPE_HTTP, FilePath(kDocRoot));
+  net::TestServer test_server(net::TestServer::TYPE_HTTP,
+                              net::TestServer::kLocalhost,
+                              FilePath(kDocRoot));
   ASSERT_TRUE(test_server.Start());
 
   NavigateToURL(test_server.GetURL("files/printing/test1.html"));
@@ -316,7 +317,9 @@ TEST_F(PrintingLayoutTestHidden, DISABLED_ManyTimes) {
   if (IsTestCaseDisabled())
     return;
 
-  net::TestServer test_server(net::TestServer::TYPE_HTTP, FilePath(kDocRoot));
+  net::TestServer test_server(net::TestServer::TYPE_HTTP,
+                              net::TestServer::kLocalhost,
+                              FilePath(kDocRoot));
   ASSERT_TRUE(test_server.Start());
 
   DismissTheWindow dismisser(base::GetProcId(process()));
@@ -366,7 +369,9 @@ TEST_F(PrintingLayoutTest, DISABLED_Delayed) {
   if (IsTestCaseDisabled())
     return;
 
-  net::TestServer test_server(net::TestServer::TYPE_HTTP, FilePath(kDocRoot));
+  net::TestServer test_server(net::TestServer::TYPE_HTTP,
+                              net::TestServer::kLocalhost,
+                              FilePath(kDocRoot));
   ASSERT_TRUE(test_server.Start());
 
   {
@@ -399,7 +404,9 @@ TEST_F(PrintingLayoutTest, DISABLED_IFrame) {
   if (IsTestCaseDisabled())
     return;
 
-  net::TestServer test_server(net::TestServer::TYPE_HTTP, FilePath(kDocRoot));
+  net::TestServer test_server(net::TestServer::TYPE_HTTP,
+                              net::TestServer::kLocalhost,
+                              FilePath(kDocRoot));
   ASSERT_TRUE(test_server.Start());
 
   {

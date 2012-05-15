@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,14 +6,20 @@
 #define UI_GFX_COMPOSITOR_COMPOSITOR_OBSERVER_H_
 #pragma once
 
+#include "ui/gfx/compositor/compositor_export.h"
+
 namespace ui {
 
 class Compositor;
 
 // A compositor observer is notified when compositing completes.
-class CompositorObserver {
+class COMPOSITOR_EXPORT CompositorObserver {
  public:
-  // Called when compositing completes.
+  // Called when compositing started: it has taken all the layer changes into
+  // account and has issued the graphics commands.
+  virtual void OnCompositingStarted(Compositor* compositor) = 0;
+
+  // Called when compositing completes: the present to screen has completed.
   virtual void OnCompositingEnded(Compositor* compositor) = 0;
 
  protected:

@@ -171,6 +171,7 @@ class VIEWS_EXPORT NativeWidgetPrivate : public NativeWidget,
   virtual void SetSize(const gfx::Size& size) = 0;
   virtual void StackAbove(gfx::NativeView native_view) = 0;
   virtual void StackAtTop() = 0;
+  virtual void StackBelow(gfx::NativeView native_view) = 0;
   virtual void SetShape(gfx::NativeRegion shape) = 0;
   virtual void Close() = 0;
   virtual void CloseNow() = 0;
@@ -194,9 +195,11 @@ class VIEWS_EXPORT NativeWidgetPrivate : public NativeWidget,
   virtual bool IsFullscreen() const = 0;
   virtual void SetOpacity(unsigned char opacity) = 0;
   virtual void SetUseDragFrame(bool use_drag_frame) = 0;
+  virtual void FlashFrame(bool flash) = 0;
   virtual bool IsAccessibleWidget() const = 0;
   virtual void RunShellDrag(View* view,
                             const ui::OSExchangeData& data,
+                            const gfx::Point& location,
                             int operation) = 0;
   virtual void SchedulePaintInRect(const gfx::Rect& rect) = 0;
   virtual void SetCursor(gfx::NativeCursor cursor) = 0;

@@ -1,10 +1,10 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 cr.define('cr.ui', function() {
-  const Event = cr.Event;
-  const EventTarget = cr.EventTarget;
+  /** @const */ var Event = cr.Event;
+  /** @const */ var EventTarget = cr.EventTarget;
 
   /**
    * Creates a new selection model that is to be used with lists.
@@ -33,17 +33,35 @@ cr.define('cr.ui', function() {
     },
 
     /**
-     * @type {!Array} The selected indexes.
+     * The selected indexes.
+     * Setter also changes lead and anchor indexes if value list is nonempty.
+     * @type {!Array}
      */
     get selectedIndexes() {
       return Object.keys(this.selectedIndexes_).map(Number);
     },
     set selectedIndexes(selectedIndexes) {
       this.beginChange();
-      this.unselectAll();
-      for (var i = 0; i < selectedIndexes.length; i++) {
-        this.setIndexSelected(selectedIndexes[i], true);
+      var unselected = {};
+      for (var index in this.selectedIndexes_) {
+        unselected[index] = true;
       }
+
+      for (var i = 0; i < selectedIndexes.length; i++) {
+        var index = selectedIndexes[i];
+        if (index in this.selectedIndexes_) {
+          delete unselected[index];
+        } else {
+          this.selectedIndexes_[index] = true;
+          this.changedIndexes_[index] = true;
+        }
+      }
+
+      for (var index in unselected) {
+        delete this.selectedIndexes_[index];
+        this.changedIndexes_[index] = false;
+      }
+
       if (selectedIndexes.length) {
         this.leadIndex = this.anchorIndex = selectedIndexes[0];
       } else {
@@ -54,6 +72,7 @@ cr.define('cr.ui', function() {
 
     /**
      * Convenience getter which returns the first selected index.
+     * Setter also changes lead and anchor indexes if value is nonnegative.
      * @type {number}
      */
     get selectedIndex() {
@@ -63,14 +82,7 @@ cr.define('cr.ui', function() {
       return -1;
     },
     set selectedIndex(selectedIndex) {
-      this.beginChange();
-      this.unselectAll();
-      if (selectedIndex != -1) {
-        this.selectedIndexes = [selectedIndex];
-      } else {
-        this.leadIndex = this.anchorIndex = -1;
-      }
-      this.endChange();
+      this.selectedIndexes = selectedIndex != -1 ? [selectedIndex] : [];
     },
 
     /**

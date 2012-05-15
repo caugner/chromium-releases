@@ -52,20 +52,16 @@ base::LazyInstance<std::map<FilePath, bool> > g_default_plugin_state =
 #define kPluginUpdateDelayMs (60 * 1000)
 
 // static
-PluginPrefs* PluginPrefs::GetForProfile(Profile* profile) {
-  PluginPrefsWrapper* wrapper =
-      PluginPrefsFactory::GetInstance()->GetWrapperForProfile(profile);
-  if (!wrapper)
-    return NULL;
-  return wrapper->plugin_prefs();
+scoped_refptr<PluginPrefs> PluginPrefs::GetForProfile(Profile* profile) {
+  return PluginPrefsFactory::GetPrefsForProfile(profile);
 }
 
 // static
-PluginPrefs* PluginPrefs::GetForTestingProfile(Profile* profile) {
-  ProfileKeyedService* wrapper =
+scoped_refptr<PluginPrefs> PluginPrefs::GetForTestingProfile(
+    Profile* profile) {
+  return static_cast<PluginPrefs*>(
       PluginPrefsFactory::GetInstance()->SetTestingFactoryAndUse(
-          profile, &PluginPrefsFactory::CreateWrapperForProfile);
-  return static_cast<PluginPrefsWrapper*>(wrapper)->plugin_prefs();
+          profile, &PluginPrefsFactory::CreateForTestingProfile).get());
 }
 
 void PluginPrefs::SetPluginListForTesting(
@@ -441,7 +437,7 @@ void PluginPrefs::SetPrefs(PrefService* prefs) {
         BrowserThread::FILE,
         FROM_HERE,
         base::Bind(&PluginPrefs::GetPreferencesDataOnFileThread, this),
-        kPluginUpdateDelayMs);
+        base::TimeDelta::FromMilliseconds(kPluginUpdateDelayMs));
   }
 
   NotifyPluginStatusChanged();

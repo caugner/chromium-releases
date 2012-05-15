@@ -23,12 +23,40 @@
 #include "remoting/protocol/host_stub.h"
 #include "remoting/protocol/input_stub.h"
 #include "remoting/protocol/jingle_session_manager.h"
+#include "remoting/protocol/libjingle_transport_factory.h"
 #include "remoting/protocol/session_config.h"
 
 using remoting::protocol::ConnectionToClient;
 using remoting::protocol::InputStub;
 
 namespace remoting {
+
+namespace {
+
+const net::BackoffEntry::Policy kDefaultBackoffPolicy = {
+  // Number of initial errors (in sequence) to ignore before applying
+  // exponential back-off rules.
+  0,
+
+  // Initial delay for exponential back-off in ms.
+  2000,
+
+  // Factor by which the waiting time will be multiplied.
+  2,
+
+  // Fuzzing percentage. ex: 10% will spread requests randomly
+  // between 90%-100% of the calculated time.
+  0,
+
+  // Maximum amount of time we are willing to delay our request in ms.
+  -1,
+
+  // Time to keep an entry from being discarded even when it
+  // has no significant state, -1 to never discard.
+  -1,
+};
+
+}  // namespace
 
 ChromotingHost::ChromotingHost(
     ChromotingHostContext* context,
@@ -38,11 +66,11 @@ ChromotingHost::ChromotingHost(
     : context_(context),
       desktop_environment_(environment),
       network_settings_(network_settings),
-      have_shared_secret_(false),
       signal_strategy_(signal_strategy),
       stopping_recorders_(0),
       state_(kInitial),
       protocol_config_(protocol::CandidateSessionConfig::CreateDefault()),
+      login_backoff_(&kDefaultBackoffPolicy),
       authenticating_client_(false),
       reject_authenticating_client_(false) {
   DCHECK(context_);
@@ -67,8 +95,10 @@ void ChromotingHost::Start() {
   state_ = kStarted;
 
   // Create and start session manager.
+  scoped_ptr<protocol::TransportFactory> transport_factory(
+      new protocol::LibjingleTransportFactory());
   session_manager_.reset(
-      new protocol::JingleSessionManager(context_->network_message_loop()));
+      new protocol::JingleSessionManager(transport_factory.Pass()));
   session_manager_->Init(signal_strategy_, this, network_settings_);
 }
 
@@ -98,18 +128,10 @@ void ChromotingHost::Shutdown(const base::Closure& shutdown_task) {
     clients_.front()->Disconnect();
   }
 
-  // Stop session manager.
-  if (session_manager_.get()) {
-    session_manager_->Close();
-    // It may not be safe to delete |session_manager_| here becase
-    // this method may be invoked in response to a libjingle event and
-    // libjingle's sigslot doesn't handle it properly, so postpone the
-    // deletion.
-    context_->network_message_loop()->DeleteSoon(
-        FROM_HERE, session_manager_.release());
-    have_shared_secret_ = false;
-  }
+  // Destroy session manager.
+  session_manager_.reset();
 
+  // Stop screen recorder
   if (recorder_.get()) {
     StopScreenRecorder();
   } else if (!stopping_recorders_) {
@@ -141,6 +163,12 @@ void ChromotingHost::SetAuthenticatorFactory(
 ////////////////////////////////////////////////////////////////////////////
 // protocol::ClientSession::EventHandler implementation.
 void ChromotingHost::OnSessionAuthenticated(ClientSession* client) {
+  DCHECK(context_->network_message_loop()->BelongsToCurrentThread());
+
+  login_backoff_.Reset();
+}
+
+void ChromotingHost::OnSessionChannelsConnected(ClientSession* client) {
   DCHECK(context_->network_message_loop()->BelongsToCurrentThread());
 
   // Disconnect all other clients.
@@ -225,13 +253,14 @@ void ChromotingHost::OnSessionSequenceNumber(ClientSession* session,
     recorder_->UpdateSequenceNumber(sequence_number);
 }
 
-void ChromotingHost::OnSessionIpAddress(ClientSession* session,
-                                        const std::string& channel_name,
-                                        const net::IPEndPoint& end_point) {
+void ChromotingHost::OnSessionRouteChange(
+    ClientSession* session,
+    const std::string& channel_name,
+    const protocol::TransportRoute& route) {
   DCHECK(context_->network_message_loop()->BelongsToCurrentThread());
   FOR_EACH_OBSERVER(HostStatusObserver, status_observers_,
-                    OnClientIpAddress(session->client_jid(), channel_name,
-                                      end_point));
+                    OnClientRouteChange(session->client_jid(), channel_name,
+                                        route));
 }
 
 void ChromotingHost::OnSessionManagerReady() {
@@ -250,6 +279,17 @@ void ChromotingHost::OnIncomingSession(
     return;
   }
 
+  if (login_backoff_.ShouldRejectRequest()) {
+    *response = protocol::SessionManager::OVERLOAD;
+    return;
+  }
+
+  // We treat each incoming connection as a failure to authenticate,
+  // and clear the backoff when a connection successfully
+  // authenticates. This allows the backoff to protect from parallel
+  // connection attempts as well as sequential ones.
+  login_backoff_.InformOfRequest(false);
+
   protocol::SessionConfig config;
   if (!protocol_config_->Select(session->candidate_config(), &config)) {
     LOG(WARNING) << "Rejecting connection from " << session->jid()
@@ -265,10 +305,10 @@ void ChromotingHost::OnIncomingSession(
   LOG(INFO) << "Client connected: " << session->jid();
 
   // Create a client object.
-  protocol::ConnectionToClient* connection =
-      new protocol::ConnectionToClient(session);
+  scoped_ptr<protocol::ConnectionToClient> connection(
+      new protocol::ConnectionToClient(session));
   ClientSession* client = new ClientSession(
-      this, connection, desktop_environment_->event_executor(),
+      this, connection.Pass(), desktop_environment_->event_executor(),
       desktop_environment_->capturer());
   clients_.push_back(client);
 }

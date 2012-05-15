@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,24 +18,40 @@ namespace remoting {
 class Capturer;
 class ChromotingHost;
 class ChromotingHostContext;
-class EventExecutor;
+
+namespace protocol {
+class HostEventStub;
+};
 
 class DesktopEnvironment {
  public:
-  static DesktopEnvironment* Create(ChromotingHostContext* context);
+  // Creates a DesktopEnvironment used in a host plugin.
+  static scoped_ptr<DesktopEnvironment> Create(
+      ChromotingHostContext* context);
 
-  // DesktopEnvironment takes ownership of all the objects passed in.
-  DesktopEnvironment(ChromotingHostContext* context,
-                     Capturer* capturer,
-                     EventExecutor* event_executor);
+  // Creates a DesktopEnvironment used in a service process.
+  static scoped_ptr<DesktopEnvironment> CreateForService(
+      ChromotingHostContext* context);
+
+  static scoped_ptr<DesktopEnvironment> CreateFake(
+      ChromotingHostContext* context,
+      scoped_ptr<Capturer> capturer,
+      scoped_ptr<protocol::HostEventStub> event_executor);
+
   virtual ~DesktopEnvironment();
 
   void set_host(ChromotingHost* host) { host_ = host; }
 
   Capturer* capturer() const { return capturer_.get(); }
-  EventExecutor* event_executor() const { return event_executor_.get(); }
+  protocol::HostEventStub* event_executor() const {
+    return event_executor_.get();
+  }
 
  private:
+  DesktopEnvironment(ChromotingHostContext* context,
+                     scoped_ptr<Capturer> capturer,
+                     scoped_ptr<protocol::HostEventStub> event_executor);
+
   // The host that owns this DesktopEnvironment.
   ChromotingHost* host_;
 
@@ -46,8 +62,8 @@ class DesktopEnvironment {
   // Capturer to be used by ScreenRecorder.
   scoped_ptr<Capturer> capturer_;
 
-  // Executes input events received from the client.
-  scoped_ptr<EventExecutor> event_executor_;
+  // Executes input and clipboard events received from the client.
+  scoped_ptr<protocol::HostEventStub> event_executor_;
 
   DISALLOW_COPY_AND_ASSIGN(DesktopEnvironment);
 };

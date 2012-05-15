@@ -10,7 +10,7 @@
 
 // Use an anonymous function to enable strict mode just for this file (which
 // will be concatenated with other files when embedded in Chrome
-cr.define('ntp4', function() {
+cr.define('ntp', function() {
   'use strict';
 
   /**
@@ -68,20 +68,25 @@ cr.define('ntp4', function() {
    * @extends {PageListView}
    */
   function NewTabView() {
+    var pageSwitcherStart = null;
+    var pageSwitcherEnd = null;
+    if (templateData.showApps) {
+      pageSwitcherStart = getRequiredElement('page-switcher-start');
+      pageSwitcherEnd = getRequiredElement('page-switcher-end');
+    }
     this.initialize(getRequiredElement('page-list'),
                     getRequiredElement('dot-list'),
                     getRequiredElement('card-slider-frame'),
                     getRequiredElement('trash'),
-                    getRequiredElement('page-switcher-start'),
-                    getRequiredElement('page-switcher-end'));
+                    pageSwitcherStart, pageSwitcherEnd);
   }
 
   NewTabView.prototype = {
-    __proto__: ntp4.PageListView.prototype,
+    __proto__: ntp.PageListView.prototype,
 
     /** @inheritDoc */
     appendTilePage: function(page, title, titleIsEditable, opt_refNode) {
-      ntp4.PageListView.prototype.appendTilePage.apply(this, arguments);
+      ntp.PageListView.prototype.appendTilePage.apply(this, arguments);
 
       if (infoBubble)
         window.setTimeout(infoBubble.reposition.bind(infoBubble), 0);
@@ -92,8 +97,7 @@ cr.define('ntp4', function() {
    * Invoked at startup once the DOM is available to initialize the app.
    */
   function onLoad() {
-    cr.enablePlatformSpecificCSSRules();
-
+    sectionsToWaitFor = templateData.showApps ? 2 : 1;
     measureNavDots();
 
     // Load the current theme colors.
@@ -105,23 +109,51 @@ cr.define('ntp4', function() {
     notificationContainer.addEventListener(
         'webkitTransitionEnd', onNotificationTransitionEnd);
 
-    cr.ui.decorate($('recently-closed-menu-button'), ntp4.RecentMenuButton);
+    cr.ui.decorate($('recently-closed-menu-button'), ntp.RecentMenuButton);
     chrome.send('getRecentlyClosedTabs');
 
-    newTabView.appendTilePage(new ntp4.MostVisitedPage(),
+    if (templateData.showOtherSessionsMenu) {
+      cr.ui.decorate($('other-sessions-menu-button'),
+                     ntp.OtherSessionsMenuButton);
+    }
+
+    var mostVisited = new ntp.MostVisitedPage();
+    // Move the footer into the most visited page if we are in "bare minimum"
+    // mode.
+    if (document.body.classList.contains('bare-minimum'))
+      mostVisited.appendFooter(getRequiredElement('footer'));
+    newTabView.appendTilePage(mostVisited,
                               localStrings.getString('mostvisited'),
                               false);
     chrome.send('getMostVisited');
 
+    if (templateData.isSuggestionsPageEnabled) {
+      var suggestions_script = document.createElement('script');
+      suggestions_script.src = 'suggestions_page.js';
+      suggestions_script.onload = function() {
+         newTabView.appendTilePage(new ntp.SuggestionsPage(),
+                                   localStrings.getString('suggestions'),
+                                   false,
+                                   (newTabView.appsPages.length > 0) ?
+                                       newTabView.appsPages[0] : null);
+         chrome.send('getSuggestions');
+      };
+      document.querySelector('head').appendChild(suggestions_script);
+    }
+
+    var webstoreLink = localStrings.getString('webStoreLink');
     if (templateData.isWebStoreExperimentEnabled) {
-      var webstoreLink = localStrings.getString('webStoreLink');
       var url = appendParam(webstoreLink, 'utm_source', 'chrome-ntp-launcher');
       $('chrome-web-store-href').href = url;
-
       $('chrome-web-store-href').addEventListener('click',
           onChromeWebStoreButtonClick);
 
       $('footer-content').classList.add('enable-cws-experiment');
+    }
+
+    if (templateData.appInstallHintEnabled) {
+      var url = appendParam(webstoreLink, 'utm_source', 'chrome-ntp-plus-icon');
+      $('app-install-hint-template').href = url;
     }
 
     if (localStrings.getString('login_status_message')) {
@@ -137,7 +169,7 @@ cr.define('ntp4', function() {
           localStrings.getString('login_status_url');
       $('login-status-advanced').onclick = function() {
         chrome.send('showAdvancedLoginUI');
-      }
+      };
       $('login-status-dismiss').onclick = loginBubble.hide.bind(loginBubble);
 
       var bubbleContent = $('login-status-bubble-contents');
@@ -153,7 +185,7 @@ cr.define('ntp4', function() {
       infoBubble.handleCloseEvent = function() {
         this.hide();
         chrome.send('introMessageDismissed');
-      }
+      };
 
       var bubbleContent = $('ntp4-intro-bubble-contents');
       infoBubble.content = bubbleContent;
@@ -166,14 +198,6 @@ cr.define('ntp4', function() {
       chrome.send('introMessageSeen');
     }
 
-    var serverpromo = localStrings.getString('serverpromo');
-    if (serverpromo) {
-      showNotification(parseHtmlSubset(serverpromo), [], function() {
-        chrome.send('closeNotificationPromo');
-      }, 60000);
-      chrome.send('notificationPromoViewed');
-    }
-
     var loginContainer = getRequiredElement('login-container');
     loginContainer.addEventListener('click', function() {
       var rect = loginContainer.getBoundingClientRect();
@@ -181,6 +205,31 @@ cr.define('ntp4', function() {
                   [rect.left, rect.top, rect.width, rect.height]);
     });
     chrome.send('initializeSyncLogin');
+
+    doWhenAllSectionsReady(function() {
+      // Tell the slider about the pages.
+      newTabView.updateSliderCards();
+      // Mark the current page.
+      newTabView.cardSlider.currentCardValue.navigationDot.classList.add(
+          'selected');
+
+      var promo = localStrings.getString('serverpromo');
+      if (promo) {
+        var tags = ['IMG'];
+        var attrs = {
+          src: function(node, value) {
+            return node.tagName == 'IMG' &&
+                   /^data\:image\/(?:png|gif|jpe?g)/.test(value);
+          },
+        };
+        showNotification(parseHtmlSubset(promo, tags, attrs), [], function() {
+          chrome.send('closeNotificationPromo');
+        }, 60000);
+        chrome.send('notificationPromoViewed');
+      }
+
+      document.documentElement.classList.remove('starting-up');
+    });
   }
 
   /**
@@ -191,7 +240,46 @@ cr.define('ntp4', function() {
   function onChromeWebStoreButtonClick(e) {
     chrome.send('recordAppLaunchByURL',
                 [encodeURIComponent(this.href),
-                 ntp4.APP_LAUNCH.NTP_WEBSTORE_FOOTER]);
+                 ntp.APP_LAUNCH.NTP_WEBSTORE_FOOTER]);
+  }
+
+  /*
+   * The number of sections to wait on.
+   * @type {number}
+   */
+  var sectionsToWaitFor = -1;
+
+  /**
+   * Queued callbacks which lie in wait for all sections to be ready.
+   * @type {array}
+   */
+  var readyCallbacks = [];
+
+  /**
+   * Fired as each section of pages becomes ready.
+   * @param {Event} e Each page's synthetic DOM event.
+   */
+  document.addEventListener('sectionready', function(e) {
+    if (--sectionsToWaitFor <= 0) {
+      while (readyCallbacks.length) {
+        readyCallbacks.shift()();
+      }
+    }
+  });
+
+  /**
+   * This is used to simulate a fire-once event (i.e. $(document).ready() in
+   * jQuery or Y.on('domready') in YUI. If all sections are ready, the callback
+   * is fired right away. If all pages are not ready yet, the function is queued
+   * for later execution.
+   * @param {function} callback The work to be done when ready.
+   */
+  function doWhenAllSectionsReady(callback) {
+    assert(typeof callback == 'function');
+    if (sectionsToWaitFor > 0)
+      readyCallbacks.push(callback);
+    else
+      window.setTimeout(callback, 0);  // Do soon after, but asynchronously.
   }
 
   /**
@@ -201,7 +289,8 @@ cr.define('ntp4', function() {
   function measureNavDots() {
     var measuringDiv = $('fontMeasuringDiv');
     measuringDiv.textContent = localStrings.getString('mostvisited');
-    var pxWidth = Math.max(measuringDiv.clientWidth * 1.15, 80);
+    // The 4 is for border and padding.
+    var pxWidth = Math.max(measuringDiv.clientWidth * 1.15 + 4, 80);
 
     var styleElement = document.createElement('style');
     styleElement.type = 'text/css';
@@ -211,13 +300,20 @@ cr.define('ntp4', function() {
     document.querySelector('head').appendChild(styleElement);
   }
 
-  // TODO(estade): rename newtab.css to new_tab_theme.css
-  function themeChanged(hasAttribution) {
-    $('themecss').href = 'chrome://theme/css/newtab.css?' + Date.now();
-    if (typeof hasAttribution != 'undefined')
-      document.documentElement.setAttribute('hasattribution', hasAttribution);
+  function themeChanged(opt_hasAttribution) {
+    $('themecss').href = 'chrome://theme/css/new_tab_theme.css?' + Date.now();
+
+    if (typeof opt_hasAttribution != 'undefined') {
+      document.documentElement.setAttribute('hasattribution',
+                                            opt_hasAttribution);
+    }
+
     updateLogo();
     updateAttribution();
+  }
+
+  function setBookmarkBarAttached(attached) {
+    document.documentElement.setAttribute('bookmarkbarattached', attached);
   }
 
   /**
@@ -249,7 +345,7 @@ cr.define('ntp4', function() {
    * Timeout ID.
    * @type {number}
    */
-  var notificationTimeout_ = 0;
+  var notificationTimeout = 0;
 
   /**
    * Shows the notification bubble.
@@ -263,7 +359,7 @@ cr.define('ntp4', function() {
    *     manually dismisses the notification.
    */
   function showNotification(message, links, opt_closeHandler, opt_timeout) {
-    window.clearTimeout(notificationTimeout_);
+    window.clearTimeout(notificationTimeout);
 
     var span = document.querySelector('#notification > span');
     if (typeof message == 'string') {
@@ -282,23 +378,30 @@ cr.define('ntp4', function() {
       link.onclick = function() {
         this.action();
         hideNotification();
-      }
+      };
       link.setAttribute('role', 'button');
       link.setAttribute('tabindex', 0);
-      link.className = 'linkButton';
+      link.className = 'link-button';
       linksBin.appendChild(link);
     }
 
-    document.querySelector('#notification button').onclick = function(e) {
+    function closeFunc(e) {
       if (opt_closeHandler)
         opt_closeHandler();
       hideNotification();
-    };
+    }
+
+    document.querySelector('#notification button').onclick = closeFunc;
+    document.addEventListener('dragstart', closeFunc);
+
+    notificationContainer.hidden = false;
+    showNotificationOnCurrentPage();
+
+    newTabView.cardSlider.frame.addEventListener(
+        'cardSlider:card_change_ended', onCardChangeEnded);
 
     var timeout = opt_timeout || 10000;
-    notificationContainer.hidden = false;
-    notificationContainer.classList.remove('inactive');
-    notificationTimeout_ = window.setTimeout(hideNotification, timeout);
+    notificationTimeout = window.setTimeout(hideNotification, timeout);
   }
 
   /**
@@ -306,14 +409,56 @@ cr.define('ntp4', function() {
    */
   function hideNotification() {
     notificationContainer.classList.add('inactive');
+
+    newTabView.cardSlider.frame.removeEventListener(
+        'cardSlider:card_change_ended', onCardChangeEnded);
+  }
+
+  /**
+   * Happens when 1 or more consecutive card changes end.
+   * @param {Event} e The cardSlider:card_change_ended event.
+   */
+  function onCardChangeEnded(e) {
+    // If we ended on the same page as we started, ignore.
+    if (newTabView.cardSlider.currentCardValue.notification)
+      return;
+
+    // Hide the notification the old page.
+    notificationContainer.classList.add('card-changed');
+
+    showNotificationOnCurrentPage();
+  }
+
+  /**
+   * Move and show the notification on the current page.
+   */
+  function showNotificationOnCurrentPage() {
+    var page = newTabView.cardSlider.currentCardValue;
+    doWhenAllSectionsReady(function() {
+      if (page != newTabView.cardSlider.currentCardValue)
+        return;
+
+      // NOTE: This moves the notification to inside of the current page.
+      page.notification = notificationContainer;
+
+      // Reveal the notification and instruct it to hide itself if ignored.
+      notificationContainer.classList.remove('inactive');
+
+      // Gives the browser time to apply this rule before we remove it (causing
+      // a transition).
+      window.setTimeout(function() {
+        notificationContainer.classList.remove('card-changed');
+      }, 0);
+    });
   }
 
   /**
    * When done fading out, set hidden to true so the notification can't be
    * tabbed to or clicked.
+   * @param {Event} e The webkitTransitionEnd event.
    */
   function onNotificationTransitionEnd(e) {
-    if (notificationContainer.classList.contains('inactive'));
+    if (notificationContainer.classList.contains('inactive'))
       notificationContainer.hidden = true;
   }
 
@@ -323,6 +468,11 @@ cr.define('ntp4', function() {
 
   function setMostVisitedPages(data, hasBlacklistedUrls) {
     newTabView.mostVisitedPage.data = data;
+    cr.dispatchSimpleEvent(document, 'sectionready', true, true);
+  }
+
+  function setSuggestionsPages(data, hasBlacklistedUrls) {
+    newTabView.suggestionsPage.data = data;
   }
 
   /**
@@ -381,6 +531,10 @@ cr.define('ntp4', function() {
     return newTabView.appAdded.apply(newTabView, arguments);
   }
 
+  function appMoved() {
+    return newTabView.appMoved.apply(newTabView, arguments);
+  }
+
   function appRemoved() {
     return newTabView.appRemoved.apply(newTabView, arguments);
   }
@@ -395,6 +549,10 @@ cr.define('ntp4', function() {
 
   function enterRearrangeMode() {
     return newTabView.enterRearrangeMode.apply(newTabView, arguments);
+  }
+
+  function foreignSessions(sessionList) {
+    $('other-sessions-menu-button').sessions = sessionList;
   }
 
   function getAppsCallback() {
@@ -424,9 +582,11 @@ cr.define('ntp4', function() {
   // Return an object with all the exports
   return {
     appAdded: appAdded,
+    appMoved: appMoved,
     appRemoved: appRemoved,
     appsPrefChangeCallback: appsPrefChangeCallback,
     enterRearrangeMode: enterRearrangeMode,
+    foreignSessions: foreignSessions,
     getAppsCallback: getAppsCallback,
     getAppsPageIndex: getAppsPageIndex,
     getCardSlider: getCardSlider,
@@ -434,7 +594,9 @@ cr.define('ntp4', function() {
     leaveRearrangeMode: leaveRearrangeMode,
     saveAppPageName: saveAppPageName,
     setAppToBeHighlighted: setAppToBeHighlighted,
+    setBookmarkBarAttached: setBookmarkBarAttached,
     setMostVisitedPages: setMostVisitedPages,
+    setSuggestionsPages: setSuggestionsPages,
     setRecentlyClosedTabs: setRecentlyClosedTabs,
     setStripeColor: setStripeColor,
     showNotification: showNotification,
@@ -443,14 +605,4 @@ cr.define('ntp4', function() {
   };
 });
 
-// publish ntp globals
-// TODO(estade): update the content handlers to use ntp namespace instead of
-// making these global.
-var getAppsCallback = ntp4.getAppsCallback;
-var appsPrefChangeCallback = ntp4.appsPrefChangeCallback;
-var themeChanged = ntp4.themeChanged;
-var recentlyClosedTabs = ntp4.setRecentlyClosedTabs;
-var setMostVisitedPages = ntp4.setMostVisitedPages;
-var updateLogin = ntp4.updateLogin;
-
-document.addEventListener('DOMContentLoaded', ntp4.onLoad);
+document.addEventListener('DOMContentLoaded', ntp.onLoad);

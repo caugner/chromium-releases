@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -49,24 +49,22 @@ class ChromotingClient : public protocol::ConnectionToHost::HostEventCallback,
   // Return the stats recorded by this client.
   ChromotingStats* GetStats();
 
-  // Signals that the associated view may need updating.
-  virtual void Repaint();
-
   // ConnectionToHost::HostEventCallback implementation.
   virtual void OnConnectionState(
       protocol::ConnectionToHost::State state,
-      protocol::ConnectionToHost::Error error) OVERRIDE;
+      protocol::ErrorCode error) OVERRIDE;
 
   // VideoStub implementation.
-  virtual void ProcessVideoPacket(const VideoPacket* packet,
+  virtual void ProcessVideoPacket(scoped_ptr<VideoPacket> packet,
                                   const base::Closure& done) OVERRIDE;
   virtual int GetPendingPackets() OVERRIDE;
 
  private:
   struct QueuedVideoPacket {
-    QueuedVideoPacket(const VideoPacket* packet, const base::Closure& done);
+    QueuedVideoPacket(scoped_ptr<VideoPacket> packet,
+                      const base::Closure& done);
     ~QueuedVideoPacket();
-    const VideoPacket* packet;
+    VideoPacket* packet;
     base::Closure done;
   };
 

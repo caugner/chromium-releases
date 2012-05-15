@@ -1,38 +1,32 @@
-
 // Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "content/browser/browser_url_handler.h"
 #include "content/browser/renderer_host/test_backing_store.h"
 #include "content/browser/renderer_host/test_render_view_host.h"
 #include "content/browser/site_instance_impl.h"
 #include "content/browser/tab_contents/navigation_controller_impl.h"
-#include "content/browser/tab_contents/navigation_entry_impl.h"
-#include "content/browser/tab_contents/test_tab_contents.h"
+#include "content/browser/tab_contents/test_web_contents.h"
 #include "content/common/dom_storage_common.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/common/content_client.h"
-#include "content/test/test_browser_context.h"
 #include "ui/gfx/rect.h"
 #include "webkit/forms/password_form.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/webpreferences.h"
 
-using content::NavigationController;
-using content::NavigationEntry;
-using content::RenderViewHostDelegate;
-using content::SiteInstance;
 using webkit::forms::PasswordForm;
+
+namespace content {
 
 void InitNavigateParams(ViewHostMsg_FrameNavigate_Params* params,
                         int page_id,
                         const GURL& url,
-                        content::PageTransition transition) {
+                        PageTransition transition) {
   params->page_id = page_id;
   params->url = url;
-  params->referrer = content::Referrer();
+  params->referrer = Referrer();
   params->transition = transition;
   params->redirects = std::vector<GURL>();
   params->should_update_history = false;
@@ -46,117 +40,8 @@ void InitNavigateParams(ViewHostMsg_FrameNavigate_Params* params,
   params->content_state = webkit_glue::CreateHistoryStateForURL(GURL(url));
 }
 
-void SimulateUpdateRect(RenderWidgetHost* widget,
-                        TransportDIB::Id bitmap,
-                        const gfx::Rect& rect) {
-  ViewHostMsg_UpdateRect_Params params;
-  params.bitmap_rect = rect;
-  params.view_size = params.bitmap_rect.size();
-  params.copy_rects.push_back(params.bitmap_rect);
-  params.flags = 0;
-  params.bitmap = bitmap;
-
-  ViewHostMsg_UpdateRect msg(1, params);
-  widget->OnMessageReceived(msg);
-}
-
-TestRenderViewHost* TestRenderViewHost::GetPendingForController(
-    content::NavigationController* controller) {
-  TabContents* tab_contents = static_cast<TabContents*>(
-      controller->GetWebContents());
-  return static_cast<TestRenderViewHost*>(
-      tab_contents->GetRenderManagerForTesting()->pending_render_view_host());
-}
-
-TestRenderViewHost::TestRenderViewHost(SiteInstance* instance,
-                                       RenderViewHostDelegate* delegate,
-                                       int routing_id)
-    : RenderViewHost(instance, delegate, routing_id,
-                     kInvalidSessionStorageNamespaceId),
-      render_view_created_(false),
-      delete_counter_(NULL),
-      simulate_fetch_via_proxy_(false),
-      contents_mime_type_("text/html") {
-  // For normal RenderViewHosts, this is freed when |Shutdown()| is called.
-  // For TestRenderViewHost, the view is explicitly deleted in the destructor
-  // below, because TestRenderWidgetHostView::Destroy() doesn't |delete this|.
-  SetView(new TestRenderWidgetHostView(this));
-}
-
-TestRenderViewHost::~TestRenderViewHost() {
-  if (delete_counter_)
-    ++*delete_counter_;
-
-  // Since this isn't a traditional view, we have to delete it.
-  delete view();
-}
-
-bool TestRenderViewHost::CreateRenderView(const string16& frame_name,
-                                          int32 max_page_id) {
-  DCHECK(!render_view_created_);
-  render_view_created_ = true;
-  return true;
-}
-
-bool TestRenderViewHost::IsRenderViewLive() const {
-  return render_view_created_;
-}
-
-bool TestRenderViewHost::TestOnMessageReceived(const IPC::Message& msg) {
-  return OnMessageReceived(msg);
-}
-
-void TestRenderViewHost::SendNavigate(int page_id, const GURL& url) {
-  SendNavigateWithTransition(page_id, url, content::PAGE_TRANSITION_LINK);
-}
-
-void TestRenderViewHost::SendNavigateWithTransition(
-    int page_id, const GURL& url, content::PageTransition transition) {
-  ViewHostMsg_FrameNavigate_Params params;
-
-  params.page_id = page_id;
-  params.url = url;
-  params.referrer = content::Referrer();
-  params.transition = transition;
-  params.redirects = std::vector<GURL>();
-  params.should_update_history = true;
-  params.searchable_form_url = GURL();
-  params.searchable_form_encoding = std::string();
-  params.password_form = PasswordForm();
-  params.security_info = std::string();
-  params.gesture = NavigationGestureUser;
-  params.contents_mime_type = contents_mime_type_;
-  params.is_post = false;
-  params.was_within_same_page = false;
-  params.http_status_code = 0;
-  params.socket_address.set_host("2001:db8::1");
-  params.socket_address.set_port(80);
-  params.was_fetched_via_proxy = simulate_fetch_via_proxy_;
-  params.content_state = webkit_glue::CreateHistoryStateForURL(GURL(url));
-
-  ViewHostMsg_FrameNavigate msg(1, params);
-  OnMsgNavigate(msg);
-}
-
-void TestRenderViewHost::SendShouldCloseACK(bool proceed) {
-  OnMsgShouldCloseACK(proceed);
-}
-
-void TestRenderViewHost::TestOnMsgStartDragging(const WebDropData& drop_data) {
-  WebKit::WebDragOperationsMask drag_operation = WebKit::WebDragOperationEvery;
-  OnMsgStartDragging(drop_data, drag_operation, SkBitmap(), gfx::Point());
-}
-
-void TestRenderViewHost::set_simulate_fetch_via_proxy(bool proxy) {
-  simulate_fetch_via_proxy_ = proxy;
-}
-
-void TestRenderViewHost::set_contents_mime_type(const std::string& mime_type) {
-  contents_mime_type_ = mime_type;
-}
-
 TestRenderWidgetHostView::TestRenderWidgetHostView(RenderWidgetHost* rwh)
-    : rwh_(rwh),
+    : rwh_(RenderWidgetHostImpl::From(rwh)),
       is_showing_(false) {
 }
 
@@ -222,6 +107,9 @@ void TestRenderWidgetHostView::AcceleratedSurfacePostSubBuffer(
     int gpu_host_id) {
 }
 
+void TestRenderWidgetHostView::AcceleratedSurfaceSuspend() {
+}
+
 #if defined(OS_MACOSX)
 
 gfx::Rect TestRenderWidgetHostView::GetViewCocoaBounds() const {
@@ -248,7 +136,7 @@ gfx::PluginWindowHandle
 TestRenderWidgetHostView::AllocateFakePluginWindowHandle(
     bool opaque,
     bool root) {
-  return NULL;
+  return gfx::kNullPluginWindow;
 }
 
 void TestRenderWidgetHostView::DestroyFakePluginWindowHandle(
@@ -281,8 +169,26 @@ gfx::Rect TestRenderWidgetHostView::GetRootWindowBounds() {
 }
 #endif
 
-gfx::PluginWindowHandle TestRenderWidgetHostView::GetCompositingSurface() {
-  return gfx::kNullPluginWindow;
+#if defined(TOOLKIT_USES_GTK)
+GdkEventButton* TestRenderWidgetHostView::GetLastMouseDown() {
+  return NULL;
+}
+
+#if !defined(TOOLKIT_VIEWS)
+gfx::NativeView TestRenderWidgetHostView::BuildInputMethodsGtkMenu() {
+  return NULL;
+}
+#endif  // !defined(TOOLKIT_VIEWS)
+#endif  // defined(TOOLKIT_USES_GTK)
+
+bool TestRenderWidgetHostView::CopyFromCompositingSurface(
+    const gfx::Size& size,
+    skia::PlatformCanvas* output) {
+  return false;
+}
+
+gfx::GLSurfaceHandle TestRenderWidgetHostView::GetCompositingSurface() {
+  return gfx::GLSurfaceHandle();
 }
 
 bool TestRenderWidgetHostView::LockMouse() {
@@ -292,114 +198,125 @@ bool TestRenderWidgetHostView::LockMouse() {
 void TestRenderWidgetHostView::UnlockMouse() {
 }
 
-TestRenderViewHostFactory::TestRenderViewHostFactory(
-    content::RenderProcessHostFactory* rph_factory)
-    : render_process_host_factory_(rph_factory) {
-  RenderViewHostFactory::RegisterFactory(this);
+TestRenderViewHost::TestRenderViewHost(SiteInstance* instance,
+                                       RenderViewHostDelegate* delegate,
+                                       int routing_id)
+    : RenderViewHostImpl(instance,
+                         delegate,
+                         routing_id,
+                         kInvalidSessionStorageNamespaceId),
+      render_view_created_(false),
+      delete_counter_(NULL),
+      simulate_fetch_via_proxy_(false),
+      contents_mime_type_("text/html") {
+  // For normal RenderViewHosts, this is freed when |Shutdown()| is
+  // called.  For TestRenderViewHost, the view is explicitly
+  // deleted in the destructor below, because
+  // TestRenderWidgetHostView::Destroy() doesn't |delete this|.
+  SetView(new TestRenderWidgetHostView(this));
 }
 
-TestRenderViewHostFactory::~TestRenderViewHostFactory() {
-  RenderViewHostFactory::UnregisterFactory();
+TestRenderViewHost::~TestRenderViewHost() {
+  if (delete_counter_)
+    ++*delete_counter_;
+
+  // Since this isn't a traditional view, we have to delete it.
+  delete GetView();
 }
 
-void TestRenderViewHostFactory::set_render_process_host_factory(
-    content::RenderProcessHostFactory* rph_factory) {
-  render_process_host_factory_ = rph_factory;
+bool TestRenderViewHost::CreateRenderView(const string16& frame_name,
+                                          int32 max_page_id) {
+  DCHECK(!render_view_created_);
+  render_view_created_ = true;
+  return true;
 }
 
-RenderViewHost* TestRenderViewHostFactory::CreateRenderViewHost(
-    SiteInstance* instance,
-    RenderViewHostDelegate* delegate,
-    int routing_id,
-    SessionStorageNamespace* session_storage) {
-  // See declaration of render_process_host_factory_ below.
-  static_cast<SiteInstanceImpl*>(instance)->
-      set_render_process_host_factory(render_process_host_factory_);
-  return new TestRenderViewHost(instance, delegate, routing_id);
+bool TestRenderViewHost::IsRenderViewLive() const {
+  return render_view_created_;
 }
 
-RenderViewHostTestHarness::RenderViewHostTestHarness()
-    : rph_factory_(),
-      rvh_factory_(&rph_factory_),
-      contents_(NULL) {
+void TestRenderViewHost::SendNavigate(int page_id, const GURL& url) {
+  SendNavigateWithTransition(page_id, url, PAGE_TRANSITION_LINK);
 }
 
-RenderViewHostTestHarness::~RenderViewHostTestHarness() {
+void TestRenderViewHost::SendNavigateWithTransition(
+    int page_id, const GURL& url, PageTransition transition) {
+  ViewHostMsg_FrameNavigate_Params params;
+
+  params.page_id = page_id;
+  params.url = url;
+  params.referrer = Referrer();
+  params.transition = transition;
+  params.redirects = std::vector<GURL>();
+  params.should_update_history = true;
+  params.searchable_form_url = GURL();
+  params.searchable_form_encoding = std::string();
+  params.password_form = PasswordForm();
+  params.security_info = std::string();
+  params.gesture = NavigationGestureUser;
+  params.contents_mime_type = contents_mime_type_;
+  params.is_post = false;
+  params.was_within_same_page = false;
+  params.http_status_code = 0;
+  params.socket_address.set_host("2001:db8::1");
+  params.socket_address.set_port(80);
+  params.was_fetched_via_proxy = simulate_fetch_via_proxy_;
+  params.content_state = webkit_glue::CreateHistoryStateForURL(GURL(url));
+
+  ViewHostMsg_FrameNavigate msg(1, params);
+  OnMsgNavigate(msg);
 }
 
-NavigationController& RenderViewHostTestHarness::controller() {
-  return contents()->GetController();
+void TestRenderViewHost::SendShouldCloseACK(bool proceed) {
+  OnMsgShouldCloseACK(proceed, base::TimeTicks(), base::TimeTicks());
 }
 
-TestTabContents* RenderViewHostTestHarness::contents() {
-  return contents_.get();
+void TestRenderViewHost::SetContentsMimeType(const std::string& mime_type) {
+  contents_mime_type_ = mime_type;
 }
 
-TestRenderViewHost* RenderViewHostTestHarness::rvh() {
-  return static_cast<TestRenderViewHost*>(contents()->GetRenderViewHost());
+void TestRenderViewHost::SimulateSwapOutACK() {
+  OnSwapOutACK();
 }
 
-TestRenderViewHost* RenderViewHostTestHarness::pending_rvh() {
-  return static_cast<TestRenderViewHost*>(
-      contents()->GetRenderManagerForTesting()->pending_render_view_host());
+void TestRenderViewHost::SimulateWasHidden() {
+  WasHidden();
 }
 
-TestRenderViewHost* RenderViewHostTestHarness::active_rvh() {
-  return pending_rvh() ? pending_rvh() : rvh();
+void TestRenderViewHost::SimulateWasRestored() {
+  WasRestored();
 }
 
-content::BrowserContext* RenderViewHostTestHarness::browser_context() {
-  return browser_context_.get();
+void TestRenderViewHost::TestOnMsgStartDragging(
+    const WebDropData& drop_data) {
+  WebKit::WebDragOperationsMask drag_operation = WebKit::WebDragOperationEvery;
+  OnMsgStartDragging(drop_data, drag_operation, SkBitmap(), gfx::Point());
 }
 
-MockRenderProcessHost* RenderViewHostTestHarness::process() {
-  if (pending_rvh())
-    return static_cast<MockRenderProcessHost*>(pending_rvh()->process());
-  return static_cast<MockRenderProcessHost*>(rvh()->process());
+void TestRenderViewHost::set_simulate_fetch_via_proxy(bool proxy) {
+  simulate_fetch_via_proxy_ = proxy;
 }
 
-void RenderViewHostTestHarness::DeleteContents() {
-  SetContents(NULL);
+RenderViewHostImplTestHarness::RenderViewHostImplTestHarness() {
 }
 
-void RenderViewHostTestHarness::SetContents(TestTabContents* contents) {
-  contents_.reset(contents);
+RenderViewHostImplTestHarness::~RenderViewHostImplTestHarness() {
 }
 
-TestTabContents* RenderViewHostTestHarness::CreateTestTabContents() {
-  // See comment above browser_context_ decl for why we check for NULL here.
-  if (!browser_context_.get())
-    browser_context_.reset(new TestBrowserContext());
-
-  // This will be deleted when the TabContents goes away.
-  SiteInstance* instance = SiteInstance::Create(browser_context_.get());
-
-  return new TestTabContents(browser_context_.get(), instance);
+TestRenderViewHost* RenderViewHostImplTestHarness::test_rvh() {
+  return static_cast<TestRenderViewHost*>(rvh());
 }
 
-void RenderViewHostTestHarness::NavigateAndCommit(const GURL& url) {
-  contents()->NavigateAndCommit(url);
+TestRenderViewHost* RenderViewHostImplTestHarness::pending_test_rvh() {
+  return static_cast<TestRenderViewHost*>(pending_rvh());
 }
 
-void RenderViewHostTestHarness::Reload() {
-  NavigationEntry* entry = controller().GetLastCommittedEntry();
-  DCHECK(entry);
-  controller().Reload(false);
-  rvh()->SendNavigate(entry->GetPageID(), entry->GetURL());
+TestRenderViewHost* RenderViewHostImplTestHarness::active_test_rvh() {
+  return static_cast<TestRenderViewHost*>(active_rvh());
 }
 
-void RenderViewHostTestHarness::SetUp() {
-  SetContents(CreateTestTabContents());
+TestWebContents* RenderViewHostImplTestHarness::contents() {
+  return static_cast<TestWebContents*>(web_contents());
 }
 
-void RenderViewHostTestHarness::TearDown() {
-  SetContents(NULL);
-
-  // Make sure that we flush any messages related to TabContents destruction
-  // before we destroy the browser context.
-  MessageLoop::current()->RunAllPending();
-
-  // Release the browser context on the UI thread.
-  message_loop_.DeleteSoon(FROM_HERE, browser_context_.release());
-  message_loop_.RunAllPending();
-}
+}  // namespace content

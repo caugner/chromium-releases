@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,13 +20,13 @@
 #include "content/browser/download/download_create_info.h"
 #include "content/browser/download/download_file.h"
 #include "content/browser/download/download_file_manager.h"
-#include "content/browser/download/download_persistent_store_info.h"
+#include "content/browser/download/download_interrupt_reasons_impl.h"
 #include "content/browser/download/download_request_handle.h"
 #include "content/browser/download/download_stats.h"
-#include "content/browser/download/interrupt_reasons.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
+#include "content/public/browser/download_persistent_store_info.h"
 #include "net/base/net_util.h"
 
 using content::BrowserThread;
@@ -34,6 +34,7 @@ using content::DownloadFile;
 using content::DownloadId;
 using content::DownloadItem;
 using content::DownloadManager;
+using content::DownloadPersistentStoreInfo;
 using content::WebContents;
 
 // A DownloadItem normally goes through the following states:
@@ -160,7 +161,8 @@ void DownloadItemImpl::Delegate::Detach() {
 // Constructor for reading from the history service.
 DownloadItemImpl::DownloadItemImpl(Delegate* delegate,
                                    DownloadId download_id,
-                                   const DownloadPersistentStoreInfo& info)
+                                   const DownloadPersistentStoreInfo& info,
+                                   const net::BoundNetLog& bound_net_log)
     : download_id_(download_id),
       full_path_(info.path),
       url_chain_(1, info.url),
@@ -168,7 +170,7 @@ DownloadItemImpl::DownloadItemImpl(Delegate* delegate,
       total_bytes_(info.total_bytes),
       received_bytes_(info.received_bytes),
       bytes_per_sec_(0),
-      last_reason_(DOWNLOAD_INTERRUPT_REASON_NONE),
+      last_reason_(content::DOWNLOAD_INTERRUPT_REASON_NONE),
       start_tick_(base::TimeTicks()),
       state_(static_cast<DownloadState>(info.state)),
       start_time_(info.start_time),
@@ -180,18 +182,21 @@ DownloadItemImpl::DownloadItemImpl(Delegate* delegate,
       file_externally_removed_(false),
       safety_state_(SAFE),
       auto_opened_(false),
+      is_persisted_(true),
       is_otr_(false),
       is_temporary_(false),
       all_data_saved_(false),
       opened_(info.opened),
       open_enabled_(true),
-      delegate_delayed_complete_(false) {
+      delegate_delayed_complete_(false),
+      bound_net_log_(bound_net_log) {
   delegate_->Attach();
   if (IsInProgress())
     state_ = CANCELLED;
   if (IsComplete())
     all_data_saved_ = true;
-  Init(false /* not actively downloading */);
+  Init(false /* not actively downloading */,
+       download_net_logs::SRC_HISTORY_IMPORT);
 }
 
 // Constructing for a regular download:
@@ -199,13 +204,13 @@ DownloadItemImpl::DownloadItemImpl(
     Delegate* delegate,
     const DownloadCreateInfo& info,
     DownloadRequestHandleInterface* request_handle,
-    bool is_otr)
-    : state_info_(info.original_name, info.save_info.file_path,
+    bool is_otr,
+    const net::BoundNetLog& bound_net_log)
+    : state_info_(info.save_info.file_path,
                   info.has_user_gesture, info.transition_type,
                   info.prompt_user_for_save_location),
       request_handle_(request_handle),
       download_id_(info.download_id),
-      full_path_(info.path),
       url_chain_(info.url_chain),
       referrer_url_(info.referrer_url),
       suggested_filename_(UTF16ToUTF8(info.save_info.suggested_name)),
@@ -217,7 +222,7 @@ DownloadItemImpl::DownloadItemImpl(
       total_bytes_(info.total_bytes),
       received_bytes_(0),
       bytes_per_sec_(0),
-      last_reason_(DOWNLOAD_INTERRUPT_REASON_NONE),
+      last_reason_(content::DOWNLOAD_INTERRUPT_REASON_NONE),
       start_tick_(base::TimeTicks::Now()),
       state_(IN_PROGRESS),
       start_time_(info.start_time),
@@ -228,14 +233,30 @@ DownloadItemImpl::DownloadItemImpl(
       file_externally_removed_(false),
       safety_state_(SAFE),
       auto_opened_(false),
+      is_persisted_(false),
       is_otr_(is_otr),
       is_temporary_(!info.save_info.file_path.empty()),
       all_data_saved_(false),
       opened_(false),
       open_enabled_(true),
-      delegate_delayed_complete_(false) {
+      delegate_delayed_complete_(false),
+      bound_net_log_(bound_net_log) {
   delegate_->Attach();
-  Init(true /* actively downloading */);
+  Init(true /* actively downloading */,
+       download_net_logs::SRC_NEW_DOWNLOAD);
+
+  // Link the event sources.
+  bound_net_log_.AddEvent(
+      net::NetLog::TYPE_DOWNLOAD_URL_REQUEST,
+      make_scoped_refptr(new net::NetLogSourceParameter(
+          "source_dependency",
+          info.request_bound_net_log.source())));
+
+  info.request_bound_net_log.AddEvent(
+      net::NetLog::TYPE_DOWNLOAD_STARTED,
+      make_scoped_refptr(new net::NetLogSourceParameter(
+          "source_dependency",
+          bound_net_log_.source())));
 }
 
 // Constructing for the "Save Page As..." feature:
@@ -243,7 +264,8 @@ DownloadItemImpl::DownloadItemImpl(Delegate* delegate,
                                    const FilePath& path,
                                    const GURL& url,
                                    bool is_otr,
-                                   DownloadId download_id)
+                                   DownloadId download_id,
+                                   const net::BoundNetLog& bound_net_log)
     : request_handle_(new NullDownloadRequestHandle()),
       download_id_(download_id),
       full_path_(path),
@@ -252,7 +274,7 @@ DownloadItemImpl::DownloadItemImpl(Delegate* delegate,
       total_bytes_(0),
       received_bytes_(0),
       bytes_per_sec_(0),
-      last_reason_(DOWNLOAD_INTERRUPT_REASON_NONE),
+      last_reason_(content::DOWNLOAD_INTERRUPT_REASON_NONE),
       start_tick_(base::TimeTicks::Now()),
       state_(IN_PROGRESS),
       start_time_(base::Time::Now()),
@@ -263,14 +285,17 @@ DownloadItemImpl::DownloadItemImpl(Delegate* delegate,
       file_externally_removed_(false),
       safety_state_(SAFE),
       auto_opened_(false),
+      is_persisted_(false),
       is_otr_(is_otr),
       is_temporary_(false),
       all_data_saved_(false),
       opened_(false),
       open_enabled_(true),
-      delegate_delayed_complete_(false) {
+      delegate_delayed_complete_(false),
+      bound_net_log_(bound_net_log) {
   delegate_->Attach();
-  Init(true /* actively downloading */);
+  Init(true /* actively downloading */,
+       download_net_logs::SRC_SAVE_PAGE_AS);
 }
 
 DownloadItemImpl::~DownloadItemImpl() {
@@ -322,7 +347,10 @@ void DownloadItemImpl::OpenDownload() {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   if (IsPartialDownload()) {
-    open_when_complete_ = !open_when_complete_;
+    // We don't honor the open_when_complete_ flag for temporary
+    // downloads. Don't set it because it shows up in the UI.
+    if (!IsTemporary())
+      open_when_complete_ = !open_when_complete_;
     return;
   }
 
@@ -363,6 +391,12 @@ void DownloadItemImpl::DangerousDownloadValidated() {
                             content::DOWNLOAD_DANGER_TYPE_MAX);
 
   safety_state_ = DANGEROUS_BUT_VALIDATED;
+
+  bound_net_log_.AddEvent(
+      net::NetLog::TYPE_DOWNLOAD_ITEM_SAFETY_STATE_UPDATED,
+      make_scoped_refptr(new download_net_logs::ItemCheckedParameters(
+          GetDangerType(), GetSafetyState())));
+
   UpdateObservers();
 
   delegate_->MaybeCompleteDownload(this);
@@ -394,6 +428,13 @@ void DownloadItemImpl::UpdateProgress(int64 bytes_so_far,
   // revert to 'unknown size mode'.
   if (received_bytes_ > total_bytes_)
     total_bytes_ = 0;
+
+  if (bound_net_log_.IsLoggingAllEvents()) {
+    bound_net_log_.AddEvent(
+        net::NetLog::TYPE_DOWNLOAD_ITEM_UPDATED,
+        make_scoped_refptr(
+            new download_net_logs::ItemUpdatedParameters(received_bytes_)));
+  }
 }
 
 // Updates from the download thread may have been posted while this download
@@ -420,8 +461,8 @@ void DownloadItemImpl::Cancel(bool user_cancel) {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   last_reason_ = user_cancel ?
-      DOWNLOAD_INTERRUPT_REASON_USER_CANCELED :
-      DOWNLOAD_INTERRUPT_REASON_USER_SHUTDOWN;
+      content::DOWNLOAD_INTERRUPT_REASON_USER_CANCELED :
+      content::DOWNLOAD_INTERRUPT_REASON_USER_SHUTDOWN;
 
   VLOG(20) << __FUNCTION__ << "() download = " << DebugString(true);
   if (!IsPartialDownload()) {
@@ -459,6 +500,7 @@ void DownloadItemImpl::OnAllDataSaved(
   DCHECK(!all_data_saved_);
   all_data_saved_ = true;
   ProgressComplete(size, final_hash);
+  UpdateObservers();
 }
 
 void DownloadItemImpl::OnDownloadedFileRemoved() {
@@ -503,8 +545,44 @@ void DownloadItemImpl::TransitionTo(DownloadState new_state) {
   if (state_ == new_state)
     return;
 
+  DownloadState old_state = state_;
   state_ = new_state;
+
+  switch (state_) {
+    case COMPLETE:
+      bound_net_log_.AddEvent(
+          net::NetLog::TYPE_DOWNLOAD_ITEM_FINISHED,
+          make_scoped_refptr(
+              new download_net_logs::ItemFinishedParameters(received_bytes_,
+                                                            hash_)));
+      break;
+    case INTERRUPTED:
+      bound_net_log_.AddEvent(
+          net::NetLog::TYPE_DOWNLOAD_ITEM_INTERRUPTED,
+          make_scoped_refptr(
+              new download_net_logs::ItemInterruptedParameters(last_reason_,
+                                                               received_bytes_,
+                                                               hash_state_)));
+      break;
+    case CANCELLED:
+      bound_net_log_.AddEvent(
+          net::NetLog::TYPE_DOWNLOAD_ITEM_CANCELED,
+          make_scoped_refptr(
+              new download_net_logs::ItemCanceledParameters(received_bytes_,
+                                                            hash_state_)));
+      break;
+    default:
+      break;
+  }
+
+  VLOG(20) << " " << __FUNCTION__ << "()" << " this = " << DebugString(true);
+
   UpdateObservers();
+
+  bool is_done = (state_ != IN_PROGRESS);
+  bool was_done = (old_state != IN_PROGRESS);
+  if (is_done && !was_done)
+    bound_net_log_.EndEvent(net::NetLog::TYPE_DOWNLOAD_ITEM_ACTIVE, NULL);
 }
 
 void DownloadItemImpl::UpdateSafetyState() {
@@ -512,6 +590,12 @@ void DownloadItemImpl::UpdateSafetyState() {
     DownloadItem::DANGEROUS : DownloadItem::SAFE;
   if (updated_value != safety_state_) {
     safety_state_ = updated_value;
+
+    bound_net_log_.AddEvent(
+        net::NetLog::TYPE_DOWNLOAD_ITEM_SAFETY_STATE_UPDATED,
+        make_scoped_refptr(new download_net_logs::ItemCheckedParameters(
+            GetDangerType(), GetSafetyState())));
+
     UpdateObservers();
   }
 }
@@ -526,7 +610,7 @@ void DownloadItemImpl::UpdateTarget() {
 
 void DownloadItemImpl::Interrupted(int64 size,
                                    const std::string& hash_state,
-                                   InterruptReason reason) {
+                                   content::DownloadInterruptReason reason) {
   // TODO(rdsmith): Change to DCHECK after http://crbug.com/85408 resolved.
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
@@ -624,6 +708,13 @@ void DownloadItemImpl::Rename(const FilePath& full_path) {
            << " full_path = \"" << full_path.value() << "\""
            << " " << DebugString(true);
   DCHECK(!full_path.empty());
+
+  bound_net_log_.AddEvent(
+      net::NetLog::TYPE_DOWNLOAD_ITEM_RENAMED,
+      make_scoped_refptr(
+          new download_net_logs::ItemRenamedParameters(
+              full_path_.AsUTF8Unsafe(), full_path.AsUTF8Unsafe())));
+
   full_path_ = full_path;
 }
 
@@ -732,29 +823,15 @@ content::DownloadDangerType DownloadItemImpl::GetDangerType() const {
   return state_info_.danger;
 }
 
+void DownloadItemImpl::SetDangerType(content::DownloadDangerType danger_type) {
+  // TODO(rdsmith): Change to DCHECK after http://crbug.com/85408 resolved.
+  CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  state_info_.danger = danger_type;
+  UpdateSafetyState();
+}
+
 bool DownloadItemImpl::IsDangerous() const {
   return state_info_.IsDangerous();
-}
-
-void DownloadItemImpl::MarkFileDangerous() {
-  // TODO(rdsmith): Change to DCHECK after http://crbug.com/85408 resolved.
-  CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  state_info_.danger = content::DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE;
-  UpdateSafetyState();
-}
-
-void DownloadItemImpl::MarkUrlDangerous() {
-  // TODO(rdsmith): Change to DCHECK after http://crbug.com/85408 resolved.
-  CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  state_info_.danger = content::DOWNLOAD_DANGER_TYPE_DANGEROUS_URL;
-  UpdateSafetyState();
-}
-
-void DownloadItemImpl::MarkContentDangerous() {
-  // TODO(rdsmith): Change to DCHECK after http://crbug.com/85408 resolved.
-  CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  state_info_.danger = content::DOWNLOAD_DANGER_TYPE_DANGEROUS_CONTENT;
-  UpdateSafetyState();
 }
 
 DownloadPersistentStoreInfo DownloadItemImpl::GetPersistentStoreInfo() const {
@@ -789,12 +866,17 @@ FilePath DownloadItemImpl::GetTargetFilePath() const {
 }
 
 FilePath DownloadItemImpl::GetFileNameToReportUser() const {
+  if (!display_name_.empty())
+    return display_name_;
   if (state_info_.path_uniquifier > 0) {
-    FilePath name(state_info_.target_name);
-    DownloadFile::AppendNumberToPath(&name, state_info_.path_uniquifier);
-    return name;
+    return state_info_.target_name.InsertBeforeExtensionASCII(
+        StringPrintf(" (%d)", state_info_.path_uniquifier));
   }
   return state_info_.target_name;
+}
+
+void DownloadItemImpl::SetDisplayName(const FilePath& name) {
+  display_name_ = name;
 }
 
 FilePath DownloadItemImpl::GetUserVerifiedFilePath() const {
@@ -812,13 +894,52 @@ void DownloadItemImpl::OffThreadCancel(DownloadFileManager* file_manager) {
                  file_manager, download_id_));
 }
 
-void DownloadItemImpl::Init(bool active) {
+void DownloadItemImpl::Init(bool active,
+                            download_net_logs::DownloadType download_type) {
   // TODO(rdsmith): Change to DCHECK after http://crbug.com/85408 resolved.
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   UpdateTarget();
   if (active)
     download_stats::RecordDownloadCount(download_stats::START_COUNT);
+
+  std::string file_name;
+  if (download_type == download_net_logs::SRC_HISTORY_IMPORT) {
+    // full_path_ works for History and Save As versions.
+    file_name = full_path_.AsUTF8Unsafe();
+  } else {
+    // See if it's set programmatically.
+    file_name = state_info_.force_file_name.AsUTF8Unsafe();
+    // Possibly has a 'download' attribute for the anchor.
+    if (file_name.empty())
+      file_name = suggested_filename_;
+    // From the URL file name.
+    if (file_name.empty())
+      file_name = GetURL().ExtractFileName();
+  }
+
+  bound_net_log_.BeginEvent(
+      net::NetLog::TYPE_DOWNLOAD_ITEM_ACTIVE,
+      make_scoped_refptr(new download_net_logs::ItemActivatedParameters(
+          download_type,
+          download_id_.local(),
+          GetOriginalUrl().spec(),
+          GetURL().spec(),
+          file_name,
+          GetDangerType(),
+          GetSafetyState(),
+          received_bytes_)));
+
+  // If this is not an active download, end the ACTIVE event now.
+  if (!active) {
+    bound_net_log_.AddEvent(
+        net::NetLog::TYPE_DOWNLOAD_ITEM_IN_HISTORY,
+        make_scoped_refptr(
+            new download_net_logs::ItemInHistoryParameters(db_handle_)));
+
+    bound_net_log_.EndEvent(net::NetLog::TYPE_DOWNLOAD_ITEM_ACTIVE, NULL);
+  }
+
   VLOG(20) << __FUNCTION__ << "() " << DebugString(true);
 }
 
@@ -874,19 +995,21 @@ std::string DownloadItemImpl::DebugString(bool verbose) const {
   if (verbose) {
     description += base::StringPrintf(
         " db_handle = %" PRId64
-        " total_bytes = %" PRId64
-        " received_bytes = %" PRId64
-        " is_paused = %c"
-        " is_otr = %c"
-        " safety_state = %s"
+        " total = %" PRId64
+        " received = %" PRId64
+        " reason = %s"
+        " paused = %c"
+        " otr = %c"
+        " safety = %s"
         " last_modified = '%s'"
         " etag = '%s'"
         " url_chain = \n\t\"%s\"\n\t"
-        " target_name = \"%" PRFilePath "\""
+        " target = \"%" PRFilePath "\""
         " full_path = \"%" PRFilePath "\"",
         GetDbHandle(),
         GetTotalBytes(),
         GetReceivedBytes(),
+        InterruptReasonDebugString(last_reason_).c_str(),
         IsPaused() ? 'T' : 'F',
         IsOtr() ? 'T' : 'F',
         DebugSafetyStateString(GetSafetyState()),
@@ -948,7 +1071,24 @@ int32 DownloadItemImpl::GetId() const { return download_id_.local(); }
 DownloadId DownloadItemImpl::GetGlobalId() const { return download_id_; }
 base::Time DownloadItemImpl::GetStartTime() const { return start_time_; }
 base::Time DownloadItemImpl::GetEndTime() const { return end_time_; }
-void DownloadItemImpl::SetDbHandle(int64 handle) { db_handle_ = handle; }
+
+void DownloadItemImpl::SetIsPersisted() {
+  is_persisted_ = true;
+}
+
+bool DownloadItemImpl::IsPersisted() const {
+  return is_persisted_;
+}
+
+void DownloadItemImpl::SetDbHandle(int64 handle) {
+  db_handle_ = handle;
+
+  bound_net_log_.AddEvent(
+      net::NetLog::TYPE_DOWNLOAD_ITEM_IN_HISTORY,
+      make_scoped_refptr(
+          new download_net_logs::ItemInHistoryParameters(db_handle_)));
+}
+
 int64 DownloadItemImpl::GetDbHandle() const { return db_handle_; }
 bool DownloadItemImpl::IsPaused() const { return is_paused_; }
 bool DownloadItemImpl::GetOpenWhenComplete() const {
@@ -975,13 +1115,16 @@ const FilePath& DownloadItemImpl::GetSuggestedPath() const {
   return state_info_.suggested_path;
 }
 bool DownloadItemImpl::IsTemporary() const { return is_temporary_; }
+void DownloadItemImpl::SetIsTemporary(bool temporary) {
+  is_temporary_ = temporary;
+}
 void DownloadItemImpl::SetOpened(bool opened) { opened_ = opened; }
 bool DownloadItemImpl::GetOpened() const { return opened_; }
 const std::string& DownloadItemImpl::GetLastModifiedTime() const {
   return last_modified_time_;
 }
 const std::string& DownloadItemImpl::GetETag() const { return etag_; }
-InterruptReason DownloadItemImpl::GetLastReason() const {
+content::DownloadInterruptReason DownloadItemImpl::GetLastReason() const {
   return last_reason_;
 }
 DownloadStateInfo DownloadItemImpl::GetStateInfo() const { return state_info_; }
@@ -992,9 +1135,17 @@ void DownloadItemImpl::MockDownloadOpenForTesting() { open_enabled_ = false; }
 
 DownloadItem::ExternalData*
 DownloadItemImpl::GetExternalData(const void* key) {
-  if (!ContainsKey(external_data_map_, key))
-    return NULL;
-  return external_data_map_[key];
+  // The behavior of the const overload is identical with the exception of the
+  // constness of |this| and the return value.
+  return const_cast<DownloadItem::ExternalData*>(
+      static_cast<const DownloadItemImpl&>(*this).GetExternalData(key));
+}
+
+const DownloadItem::ExternalData*
+DownloadItemImpl::GetExternalData(const void* key) const {
+  std::map<const void*, ExternalData*>::const_iterator it =
+      external_data_map_.find(key);
+  return (it == external_data_map_.end()) ? NULL : it->second;
 }
 
 void DownloadItemImpl::SetExternalData(

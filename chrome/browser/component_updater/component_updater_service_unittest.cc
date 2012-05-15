@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,22 +7,21 @@
 #include "base/compiler_specific.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/memory/scoped_vector.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/values.h"
 #include "chrome/browser/component_updater/component_updater_interceptor.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/test/base/test_url_request_context_getter.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_service.h"
 #include "content/test/test_browser_thread.h"
 #include "content/public/common/url_fetcher.h"
 #include "content/test/test_notification_tracker.h"
-
 #include "googleurl/src/gurl.h"
 #include "libxml/globals.h"
-
+#include "net/url_request/url_request_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using content::BrowserThread;
@@ -64,7 +63,8 @@ class TestConfigurator : public ComponentUpdateService::Configurator {
   virtual size_t UrlSizeLimit() OVERRIDE { return 256; }
 
   virtual net::URLRequestContextGetter* RequestContext() OVERRIDE {
-    return new TestURLRequestContextGetter();
+    return new TestURLRequestContextGetter(
+        BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO));
   }
 
   // Don't use the utility process to decode files.
@@ -164,6 +164,10 @@ class ComponentUpdaterTest : public testing::Test {
     content::URLFetcher::SetEnableInterceptionForTests(false);
   }
 
+  void TearDown() {
+    xmlCleanupGlobals();
+  }
+
   ComponentUpdateService* component_updater() {
     return component_updater_.get();
   }
@@ -193,6 +197,7 @@ class ComponentUpdaterTest : public testing::Test {
     }
     com->version = version;
     com->installer = new TestInstaller;
+    test_installers_.push_back(com->installer);
     component_updater_->RegisterComponent(*com);
   }
 
@@ -201,6 +206,8 @@ class ComponentUpdaterTest : public testing::Test {
   FilePath test_data_dir_;
   TestNotificationTracker notification_tracker_;
   TestConfigurator* test_config_;
+  // ComponentInstaller objects to delete after each test.
+  ScopedVector<ComponentInstaller> test_installers_;
 };
 
 // Verify that our test fixture work and the component updater can
@@ -298,15 +305,12 @@ TEST_F(ComponentUpdaterTest, CheckCrxSleep) {
   EXPECT_EQ(0, static_cast<TestInstaller*>(com.installer)->install_count());
 
   component_updater()->Stop();
-
-  delete com.installer;
-  xmlCleanupGlobals();
 }
 
 // Verify that we can check for updates and install one component. Besides
 // the notifications above NOTIFICATION_COMPONENT_UPDATE_FOUND and
 // NOTIFICATION_COMPONENT_UPDATE_READY should have been fired. We do two loops
-// so the second time arround there should be nothing left to do.
+// so the second time around there should be nothing left to do.
 // We also check that only 3 network requests are issued:
 // 1- manifest check
 // 2- download crx
@@ -369,13 +373,10 @@ TEST_F(ComponentUpdaterTest, InstallCrx) {
   EXPECT_EQ(chrome::NOTIFICATION_COMPONENT_UPDATER_SLEEPING, ev3.type);
 
   component_updater()->Stop();
-  delete com1.installer;
-  delete com2.installer;
-  xmlCleanupGlobals();
 }
 
 // This test checks that the "prodversionmin" value is handled correctly. In
-// particular there should not be an install because the minimun product
+// particular there should not be an install because the minimum product
 // version is much higher than of chrome.
 TEST_F(ComponentUpdaterTest, ProdVersionCheck) {
   MessageLoop message_loop;

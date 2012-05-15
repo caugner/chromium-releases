@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,6 +18,7 @@ class ViewSourceTest : public UITest {
  protected:
   ViewSourceTest()
       : test_server_(net::TestServer::TYPE_HTTP,
+                     net::TestServer::kLocalhost,
                      FilePath(FILE_PATH_LITERAL("chrome/test/data"))) {
   }
 
@@ -40,7 +41,7 @@ class ViewSourceTest : public UITest {
 // set in the html was set successfully (it shouldn't because we rendered the
 // page in view source).
 // Flaky; see http://crbug.com/72201.
-TEST_F(ViewSourceTest, FLAKY_DoesBrowserRenderInViewSource) {
+TEST_F(ViewSourceTest, DISABLED_DoesBrowserRenderInViewSource) {
   ASSERT_TRUE(test_server_.Start());
 
   std::string cookie = "viewsource_cookie";
@@ -95,7 +96,7 @@ TEST_F(ViewSourceTest, ViewSourceInMenuEnabledOnANormalPage) {
 // from the menu.
 //
 // Occasionally crashes on all platforms, see http://crbug.com/69249
-TEST_F(ViewSourceTest, FLAKY_ViewSourceInMenuDisabledWhileViewingSource) {
+TEST_F(ViewSourceTest, DISABLED_ViewSourceInMenuDisabledWhileViewingSource) {
   ASSERT_TRUE(test_server_.Start());
 
   GURL url_viewsource(chrome::kViewSourceScheme + std::string(":") +

@@ -7,10 +7,8 @@
 namespace chrome {
 
 const char kTestCacheURL[] = "about:cache";
-const char kTestHangURL[] = "about:hang";
-const char kTestGpuCleanURL[] = "about:gpuclean";
 const char kTestNewTabURL[] = "chrome://newtab";
-const char kTestHistoryURL[] = "chrome://history/";
+const char kTestHistoryURL[] = "chrome://chrome/history/";
 const char kTestBookmarksURL[] = "chrome://bookmarks/";
 
 }  // namespace chrome

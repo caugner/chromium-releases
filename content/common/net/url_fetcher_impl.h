@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -46,22 +46,27 @@ class CONTENT_EXPORT URLFetcherImpl : public content::URLFetcher{
   virtual void SetReferrer(const std::string& referrer) OVERRIDE;
   virtual void SetExtraRequestHeaders(
       const std::string& extra_request_headers) OVERRIDE;
+  virtual void AddExtraRequestHeader(const std::string& header_line) OVERRIDE;
   virtual void GetExtraRequestHeaders(
       net::HttpRequestHeaders* headers) OVERRIDE;
   virtual void SetRequestContext(
       net::URLRequestContextGetter* request_context_getter) OVERRIDE;
+  virtual void AssociateWithRenderView(const GURL& first_party_for_cookies,
+                                       int render_process_id,
+                                       int render_view_id) OVERRIDE;
   virtual void SetAutomaticallyRetryOn5xx(bool retry) OVERRIDE;
   virtual void SetMaxRetries(int max_retries) OVERRIDE;
   virtual int GetMaxRetries() const OVERRIDE;
   virtual base::TimeDelta GetBackoffDelay() const OVERRIDE;
+  virtual void SaveResponseToFileAtPath(
+      const FilePath& file_path,
+      scoped_refptr<base::MessageLoopProxy> file_message_loop_proxy) OVERRIDE;
   virtual void SaveResponseToTemporaryFile(
       scoped_refptr<base::MessageLoopProxy> file_message_loop_proxy) OVERRIDE;
   virtual net::HttpResponseHeaders* GetResponseHeaders() const OVERRIDE;
   virtual net::HostPortPair GetSocketAddress() const OVERRIDE;
   virtual bool WasFetchedViaProxy() const OVERRIDE;
   virtual void Start() OVERRIDE;
-  virtual void StartWithRequestContextGetter(
-      net::URLRequestContextGetter* request_context_getter) OVERRIDE;
   virtual const GURL& GetOriginalURL() const OVERRIDE;
   virtual const GURL& GetURL() const OVERRIDE;
   virtual const net::URLRequestStatus& GetStatus() const OVERRIDE;
@@ -82,7 +87,8 @@ class CONTENT_EXPORT URLFetcherImpl : public content::URLFetcher{
   // How should the response be stored?
   enum ResponseDestinationType {
     STRING,  // Default: In a std::string
-    TEMP_FILE  // Write to a temp file
+    PERMANENT_FILE,  // Write to a permanent file.
+    TEMP_FILE,  // Write to a temporary file.
   };
 
   // Returns the delegate.

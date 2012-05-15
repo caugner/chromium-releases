@@ -3,6 +3,9 @@
 // found in the LICENSE file.
 
 #include "ash/wm/toplevel_window_event_filter.h"
+
+#include "ash/shell.h"
+#include "ash/test/ash_test_base.h"
 #include "ash/wm/window_util.h"
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -11,6 +14,7 @@
 #include "ui/aura/root_window.h"
 #include "ui/aura/test/aura_test_base.h"
 #include "ui/aura/test/event_generator.h"
+#include "ui/aura/test/test_activation_client.h"
 #include "ui/aura/test/test_window_delegate.h"
 #include "ui/base/hit_test.h"
 #include "ui/gfx/screen.h"
@@ -21,7 +25,6 @@
 #undef CreateWindow
 #endif
 #endif
-
 
 namespace ash {
 namespace test {
@@ -59,20 +62,26 @@ class TestWindowDelegate : public aura::test::TestWindowDelegate {
   DISALLOW_COPY_AND_ASSIGN(TestWindowDelegate);
 };
 
-class ToplevelWindowEventFilterTest : public aura::test::AuraTestBase {
+class ToplevelWindowEventFilterTest : public AshTestBase {
  public:
-  ToplevelWindowEventFilterTest() : filter_(NULL) {}
+  ToplevelWindowEventFilterTest() : filter_(NULL), parent_(NULL) {}
   virtual ~ToplevelWindowEventFilterTest() {}
 
   virtual void SetUp() OVERRIDE {
-    aura::test::AuraTestBase::SetUp();
-    filter_ = new ToplevelWindowEventFilter(aura::RootWindow::GetInstance());
-    aura::RootWindow::GetInstance()->SetEventFilter(filter_);
+    AshTestBase::SetUp();
+    parent_ = new aura::Window(NULL);
+    parent_->Init(ui::LAYER_NOT_DRAWN);
+    parent_->Show();
+    Shell::GetRootWindow()->AddChild(parent_);
+    parent_->SetBounds(Shell::GetRootWindow()->bounds());
+    filter_ = new ToplevelWindowEventFilter(parent_);
+    parent_->SetEventFilter(filter_);
   }
 
   virtual void TearDown() OVERRIDE {
     filter_ = NULL;
-    aura::test::AuraTestBase::TearDown();
+    parent_ = NULL;
+    AshTestBase::TearDown();
   }
 
  protected:
@@ -80,26 +89,29 @@ class ToplevelWindowEventFilterTest : public aura::test::AuraTestBase {
     TestWindowDelegate* d1 = new TestWindowDelegate(hittest_code);
     aura::Window* w1 = new aura::Window(d1);
     w1->set_id(1);
-    w1->Init(ui::Layer::LAYER_TEXTURED);
-    w1->SetParent(NULL);
+    w1->Init(ui::LAYER_TEXTURED);
+    w1->SetParent(parent_);
     w1->SetBounds(gfx::Rect(0, 0, 100, 100));
     w1->Show();
     return w1;
   }
 
   void DragFromCenterBy(aura::Window* window, int dx, int dy) {
-    aura::test::EventGenerator generator(window);
+    aura::test::EventGenerator generator(Shell::GetRootWindow(), window);
     generator.DragMouseBy(dx, dy);
   }
 
   void TouchDragFromCenterBy(aura::Window* window, int dx, int dy) {
-    aura::test::EventGenerator generator(window);
+    aura::test::EventGenerator generator(Shell::GetRootWindow(), window);
     generator.PressMoveAndReleaseTouchBy(dx, dy);
   }
 
   ToplevelWindowEventFilter* filter_;
 
  private:
+  // Window |filter_| is installed on. Owned by RootWindow.
+  aura::Window* parent_;
+
   DISALLOW_COPY_AND_ASSIGN(ToplevelWindowEventFilterTest);
 };
 
@@ -110,15 +122,15 @@ TEST_F(ToplevelWindowEventFilterTest, Caption) {
   gfx::Size size = w1->bounds().size();
   DragFromCenterBy(w1.get(), 100, 100);
   // Position should have been offset by 100,100.
-  EXPECT_EQ(gfx::Point(100, 100), w1->bounds().origin());
+  EXPECT_EQ("100,100", w1->bounds().origin().ToString());
   // Size should not have.
-  EXPECT_EQ(size, w1->bounds().size());
+  EXPECT_EQ(size.ToString(), w1->bounds().size().ToString());
 
   TouchDragFromCenterBy(w1.get(), 100, 100);
   // Position should have been offset by 100,100.
-  EXPECT_EQ(gfx::Point(200, 200), w1->bounds().origin());
+  EXPECT_EQ("200,200", w1->bounds().origin().ToString());
   // Size should not have.
-  EXPECT_EQ(size, w1->bounds().size());
+  EXPECT_EQ(size.ToString(), w1->bounds().size().ToString());
 }
 
 TEST_F(ToplevelWindowEventFilterTest, BottomRight) {
@@ -138,7 +150,7 @@ TEST_F(ToplevelWindowEventFilterTest, GrowBox) {
   window_delegate->set_min_size(gfx::Size(40, 40));
 
   gfx::Point position = w1->bounds().origin();
-  aura::test::EventGenerator generator;
+  aura::test::EventGenerator generator(Shell::GetRootWindow());
   generator.MoveMouseToCenterOf(w1.get());
   generator.DragMouseBy(100, 100);
   // Position should not have changed.
@@ -316,15 +328,15 @@ TEST_F(ToplevelWindowEventFilterTest, BottomRightPastMinimum) {
 
 TEST_F(ToplevelWindowEventFilterTest, DoubleClickCaptionTogglesMaximize) {
   scoped_ptr<aura::Window> w1(CreateWindow(HTCAPTION));
-  EXPECT_FALSE(window_util::IsWindowMaximized(w1.get()));
+  EXPECT_FALSE(wm::IsWindowMaximized(w1.get()));
 
-  aura::test::EventGenerator generator(w1.get());
+  aura::test::EventGenerator generator(Shell::GetRootWindow(), w1.get());
   generator.DoubleClickLeftButton();
 
-  EXPECT_TRUE(window_util::IsWindowMaximized(w1.get()));
+  EXPECT_TRUE(wm::IsWindowMaximized(w1.get()));
   generator.DoubleClickLeftButton();
 
-  EXPECT_FALSE(window_util::IsWindowMaximized(w1.get()));
+  EXPECT_FALSE(wm::IsWindowMaximized(w1.get()));
 }
 
 TEST_F(ToplevelWindowEventFilterTest, BottomRightWorkArea) {
@@ -373,7 +385,7 @@ TEST_F(ToplevelWindowEventFilterTest, BottomWorkArea) {
 // Verifies we don't let windows drag to a -y location.
 TEST_F(ToplevelWindowEventFilterTest, DontDragToNegativeY) {
   scoped_ptr<aura::Window> target(CreateWindow(HTTOP));
-  aura::test::EventGenerator generator(target.get());
+  aura::test::EventGenerator generator(Shell::GetRootWindow(), target.get());
   generator.MoveMouseTo(0, 5);
   generator.DragMouseBy(0, -5);
   // The y location and height should not have changed.
@@ -397,8 +409,6 @@ TEST_F(ToplevelWindowEventFilterTest, ResizeSnaps) {
   DragFromCenterBy(target.get(), 11, 21);
   EXPECT_EQ(112, target->bounds().width());
   EXPECT_EQ(120, target->bounds().height());
-  // TODO(sky): enable when test animations complete immediately.
-  /*
   target.reset(CreateWindow(HTTOPLEFT));
   target->SetBounds(gfx::Rect(48, 96, 100, 100));
   DragFromCenterBy(target.get(), -11, -21);
@@ -406,26 +416,53 @@ TEST_F(ToplevelWindowEventFilterTest, ResizeSnaps) {
   EXPECT_EQ(80, target->bounds().y());
   EXPECT_EQ(112, target->bounds().width());
   EXPECT_EQ(120, target->bounds().height());
-  */
 }
 
 // Verifies that when a grid size is set dragging snaps to the grid.
 TEST_F(ToplevelWindowEventFilterTest, DragSnaps) {
   filter_->set_grid_size(8);
   scoped_ptr<aura::Window> target(CreateWindow(HTCAPTION));
-  aura::test::EventGenerator generator(target.get());
+  aura::test::EventGenerator generator(Shell::GetRootWindow(), target.get());
   generator.PressLeftButton();
   generator.MoveMouseTo(generator.current_location().Add(gfx::Point(11, 21)));
+
+  // Execute any scheduled draws so that pending mouse events are processed.
+  RunAllPendingInMessageLoop();
+
   EXPECT_EQ(11, target->bounds().x());
   EXPECT_EQ(21, target->bounds().y());
-  // TODO(sky): enable when test animations complete immediately.
-  /*
   // We only snap moves to the grid on release.
   generator.ReleaseLeftButton();
   EXPECT_EQ(8, target->bounds().x());
   EXPECT_EQ(24, target->bounds().y());
-  */
+}
+
+// Verifies pressing escape resets the bounds to the original bounds.
+#if defined(OS_MACOSX)
+#define MAYBE_EscapeReverts FAILS_EscapeReverts
+#else
+#define MAYBE_EscapeReverts EscapeReverts
+#endif
+TEST_F(ToplevelWindowEventFilterTest, MAYBE_EscapeReverts) {
+  aura::RootWindow* root = Shell::GetRootWindow();
+  aura::client::ActivationClient* original_client =
+      aura::client::GetActivationClient(root);
+  aura::test::TestActivationClient activation_client(root);
+  scoped_ptr<aura::Window> target(CreateWindow(HTBOTTOMRIGHT));
+  target->Focus();
+  aura::test::EventGenerator generator(Shell::GetRootWindow(), target.get());
+  generator.PressLeftButton();
+  generator.MoveMouseTo(generator.current_location().Add(gfx::Point(10, 11)));
+
+  // Execute any scheduled draws so that pending mouse events are processed.
+  RunAllPendingInMessageLoop();
+
+  EXPECT_EQ("0,0 110x111", target->bounds().ToString());
+  generator.PressKey(ui::VKEY_ESCAPE, 0);
+  generator.ReleaseKey(ui::VKEY_ESCAPE, 0);
+  EXPECT_EQ("0,0 100x100", target->bounds().ToString());
+  aura::client::SetActivationClient(root, original_client);
 }
 
 }  // namespace test
-}  // namespace aura
+}  // namespace ash

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 
 namespace ash {
 
-AppListItemModel::AppListItemModel() {
+AppListItemModel::AppListItemModel() : highlighted_(false) {
 }
 
 AppListItemModel::~AppListItemModel() {
@@ -26,12 +26,25 @@ void AppListItemModel::SetTitle(const std::string& title) {
                     ItemTitleChanged());
 }
 
+void AppListItemModel::SetHighlighted(bool highlighted) {
+  if (highlighted_ == highlighted)
+    return;
+
+  highlighted_ = highlighted;
+  FOR_EACH_OBSERVER(AppListItemModelObserver, observers_,
+                    ItemHighlightedChanged());
+}
+
 void AppListItemModel::AddObserver(AppListItemModelObserver* observer) {
   observers_.AddObserver(observer);
 }
 
 void AppListItemModel::RemoveObserver(AppListItemModelObserver* observer) {
   observers_.RemoveObserver(observer);
+}
+
+ui::MenuModel* AppListItemModel::GetContextMenuModel() {
+  return NULL;
 }
 
 }  // namespace ash

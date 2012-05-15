@@ -13,10 +13,11 @@
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
 #include "chrome/browser/ui/gtk/custom_button.h"
 #include "chrome/browser/ui/gtk/gtk_chrome_link_button.h"
-#include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
+#include "chrome/browser/ui/gtk/theme_service_gtk.h"
 #include "grit/theme_resources.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
+#include "ui/base/gtk/gtk_screen_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
 
@@ -50,7 +51,8 @@ void ConfirmBubbleModel::Show(gfx::NativeView view,
 ConfirmBubbleView::ConfirmBubbleView(gfx::NativeView anchor,
                                      const gfx::Point& anchor_point,
                                      ConfirmBubbleModel* model)
-    : anchor_(anchor),
+    : bubble_(NULL),
+      anchor_(anchor),
       anchor_point_(anchor_point),
       model_(model) {
   DCHECK(model);
@@ -67,7 +69,7 @@ void ConfirmBubbleView::Show() {
   GtkWidget* toplevel = gtk_widget_get_toplevel(anchor_);
   BrowserWindowGtk* browser_window =
       BrowserWindowGtk::GetBrowserWindowForNativeWindow(GTK_WINDOW(toplevel));
-  GtkThemeService* theme_service = GtkThemeService::GetFrom(
+  ThemeServiceGtk* theme_service = ThemeServiceGtk::GetFrom(
       browser_window->browser()->profile());
 
   GtkWidget* content = gtk_vbox_new(FALSE, kInterLineSpacing);
@@ -135,7 +137,7 @@ void ConfirmBubbleView::Show() {
   }
 
   // Show a bubble consisting of the above widgets under the anchor point.
-  gfx::Rect rect = gtk_util::GetWidgetScreenBounds(anchor_);
+  gfx::Rect rect = ui::GetWidgetScreenBounds(anchor_);
   rect.set_x(anchor_point_.x() - rect.x());
   rect.set_y(anchor_point_.y() - rect.y());
   rect.set_width(0);

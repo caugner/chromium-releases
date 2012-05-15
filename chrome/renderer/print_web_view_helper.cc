@@ -35,6 +35,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLResponse.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/gfx/rect.h"
 #include "webkit/glue/webpreferences.h"
 
 #if defined(OS_POSIX)
@@ -98,12 +99,11 @@ int GetDPI(const PrintMsg_Print_Params* print_params) {
 #endif  // defined(OS_MACOSX)
 }
 
-bool PrintMsg_Print_Params_IsEmpty(const PrintMsg_Print_Params& params) {
-  return !params.document_cookie && !params.desired_dpi && !params.max_shrink &&
-         !params.min_shrink && !params.dpi && params.content_size.IsEmpty() &&
-         !params.selection_only && params.page_size.IsEmpty() &&
-         !params.margin_top && !params.margin_left &&
-         !params.supports_alpha_blend;
+bool PrintMsg_Print_Params_IsValid(const PrintMsg_Print_Params& params) {
+  return !params.content_size.IsEmpty() && !params.page_size.IsEmpty() &&
+         !params.printable_area.IsEmpty() && params.document_cookie &&
+         params.desired_dpi && params.max_shrink && params.min_shrink &&
+         params.dpi && (params.margin_top >= 0) && (params.margin_left >= 0);
 }
 
 bool PageLayoutIsEqual(const PrintMsg_PrintPages_Params& oldParams,
@@ -163,6 +163,8 @@ PrintMsg_Print_Params GetCssPrintParams(
       page_params.margin_left,
       dpi, printing::kPixelsPerInch);
 
+  WebSize original_page_size_in_pixels = page_size_in_pixels;
+
   if (frame) {
     frame->pageSizeAndMarginsInPixels(page_index,
                                       page_size_in_pixels,
@@ -190,11 +192,18 @@ PrintMsg_Print_Params GetCssPrintParams(
       static_cast<int>(ConvertUnit(new_content_height,
           printing::kPixelsPerInch, dpi)));
 
-  page_css_params.page_size = gfx::Size(
-      static_cast<int>(ConvertUnit(page_size_in_pixels.width,
-          printing::kPixelsPerInch, dpi)),
-      static_cast<int>(ConvertUnit(page_size_in_pixels.height,
-          printing::kPixelsPerInch, dpi)));
+  if (original_page_size_in_pixels != page_size_in_pixels) {
+    page_css_params.page_size = gfx::Size(
+        static_cast<int>(ConvertUnit(page_size_in_pixels.width,
+            printing::kPixelsPerInch, dpi)),
+        static_cast<int>(ConvertUnit(page_size_in_pixels.height,
+            printing::kPixelsPerInch, dpi)));
+  } else {
+    // Printing frame doesn't have any page size css. Pixels to dpi conversion
+    // causes rounding off errors. Therefore use the default page size values
+    // directly.
+    page_css_params.page_size = page_params.page_size;
+  }
 
   page_css_params.margin_top =
       static_cast<int>(ConvertUnit(margin_top_in_pixels,
@@ -224,11 +233,9 @@ double FitPrintParamsToPage(const PrintMsg_Print_Params& page_params,
   if (default_page_size_width < css_page_size_width ||
       default_page_size_height < css_page_size_height) {
     double ratio_width =
-        static_cast<double>(page_params.printable_area.width()) /
-            css_page_size_width;
+        static_cast<double>(default_page_size_width) / css_page_size_width;
     double ratio_height =
-        static_cast<double>(page_params.printable_area.height()) /
-            css_page_size_height;
+        static_cast<double>(default_page_size_height) / css_page_size_height;
     scale_factor = ratio_width < ratio_height ? ratio_width : ratio_height;
     content_width *= scale_factor;
     content_height *= scale_factor;
@@ -381,7 +388,7 @@ SkPoint GetHeaderFooterPosition(
 // Given a text, the positions, and the paint object, this method gets the
 // coordinates and prints the text at those coordinates on the canvas.
 void PrintHeaderFooterText(
-    string16 text,
+    const string16& text,
     WebKit::WebCanvas* canvas,
     HeaderFooterPaint paint,
     float webkit_scale_factor,
@@ -657,10 +664,18 @@ PrintWebViewHelper::PrintWebViewHelper(content::RenderView* render_view)
       ignore_css_margins_(false),
       fit_to_page_(true),
       user_cancelled_scripted_print_count_(0),
+      is_scripted_printing_blocked_(false),
       notify_browser_of_print_failure_(true) {
 }
 
 PrintWebViewHelper::~PrintWebViewHelper() {}
+
+bool PrintWebViewHelper::IsScriptInitiatedPrintAllowed(
+    WebKit::WebFrame* frame) {
+  if (is_scripted_printing_blocked_)
+    return false;
+  return !IsScriptInitiatedPrintTooFrequent(frame);
+}
 
 // Prints |frame| which called window.print().
 void PrintWebViewHelper::PrintPage(WebKit::WebFrame* frame) {
@@ -672,13 +687,12 @@ void PrintWebViewHelper::PrintPage(WebKit::WebFrame* frame) {
     return;
   }
 
-  if (IsScriptInitiatedPrintTooFrequent(frame))
+  if (!IsScriptInitiatedPrintAllowed(frame))
     return;
   IncrementScriptedPrintCount();
 
   if (is_preview_enabled_) {
     print_preview_context_.InitWithFrame(frame);
-
     RequestPrintPreview(PRINT_PREVIEW_SCRIPTED);
   } else {
     Print(frame, WebNode());
@@ -700,6 +714,8 @@ bool PrintWebViewHelper::OnMessageReceived(const IPC::Message& message) {
                         ResetScriptedPrintCount)
     IPC_MESSAGE_HANDLER(PrintMsg_PreviewPrintingRequestCancelled,
                         DisplayPrintJobError)
+    IPC_MESSAGE_HANDLER(PrintMsg_SetScriptedPrintingBlocked,
+                        SetScriptedPrintBlocked)
     IPC_MESSAGE_UNHANDLED(handled = false)
     IPC_END_MESSAGE_MAP()
   return handled;
@@ -874,14 +890,27 @@ bool PrintWebViewHelper::CreatePreviewDocument() {
   ComputePageLayoutInPointsForCss(print_preview_context_.frame(), 0,
                                   print_params, ignore_css_margins_,
                                   fit_to_page_, NULL, &default_page_layout);
+
   if (!old_print_pages_params_.get() ||
       !PageLayoutIsEqual(*old_print_pages_params_, *print_pages_params_)) {
     bool has_page_size_style = PrintingFrameHasPageSizeStyle(
         print_preview_context_.frame(),
         print_preview_context_.total_page_count());
+    int dpi = GetDPI(&print_params);
+    gfx::Rect printable_area_in_points(
+      ConvertUnit(print_pages_params_->params.printable_area.x(),
+          dpi, printing::kPointsPerInch),
+      ConvertUnit(print_pages_params_->params.printable_area.y(),
+          dpi, printing::kPointsPerInch),
+      ConvertUnit(print_pages_params_->params.printable_area.width(),
+          dpi, printing::kPointsPerInch),
+      ConvertUnit(print_pages_params_->params.printable_area.height(),
+          dpi, printing::kPointsPerInch));
+
     // Margins: Send default page layout to browser process.
     Send(new PrintHostMsg_DidGetDefaultPageLayout(routing_id(),
                                                   default_page_layout,
+                                                  printable_area_in_points,
                                                   has_page_size_style));
   }
 
@@ -964,6 +993,10 @@ void PrintWebViewHelper::OnPrintingDone(bool success) {
   DidFinishPrinting(success ? OK : FAIL_PRINT);
 }
 
+void PrintWebViewHelper::SetScriptedPrintBlocked(bool blocked) {
+  is_scripted_printing_blocked_ = blocked;
+}
+
 void PrintWebViewHelper::OnPrintNodeUnderContextMenu() {
   const WebNode& context_menu_node = render_view()->GetContextMenuNode();
   PrintNode(context_menu_node);
@@ -975,12 +1008,19 @@ void PrintWebViewHelper::OnInitiatePrintPreview() {
   if (GetPrintFrame(&frame)) {
     print_preview_context_.InitWithFrame(frame);
     RequestPrintPreview(PRINT_PREVIEW_USER_INITIATED_ENTIRE_FRAME);
+  } else {
+    // This should not happen. Let's add a CHECK here to see how often this
+    // gets hit.
+    // TODO(thestig) Remove this later when we have sufficient usage of this
+    // code on the M19 stable channel.
+    CHECK(false);
   }
 }
 
 void PrintWebViewHelper::PrintNode(const WebNode& node) {
-  if (node.isNull()) {
-    NOTREACHED();
+  if (node.isNull() || !node.document().frame()) {
+    // This can occur when the context menu refers to an invalid WebNode.
+    // See http://crbug.com/100890#c17 for a repro case.
     return;
   }
 
@@ -1004,7 +1044,7 @@ void PrintWebViewHelper::Print(WebKit::WebFrame* frame,
   // Initialize print settings.
   scoped_ptr<PrepareFrameAndViewForPrint> prepare;
   if (!InitPrintSettingsAndPrepareFrame(frame, node, &prepare)) {
-    DidFinishPrinting(FAIL_PRINT);
+    DidFinishPrinting(FAIL_PRINT_INIT);
     return;  // Failed to init print page settings.
   }
 
@@ -1021,7 +1061,7 @@ void PrintWebViewHelper::Print(WebKit::WebFrame* frame,
 
   // Some full screen plugins can say they don't want to print.
   if (!expected_page_count) {
-    DidFinishPrinting(OK);  // Release resources and fail silently.
+    DidFinishPrinting(FAIL_PRINT);
     return;
   }
 
@@ -1042,23 +1082,34 @@ void PrintWebViewHelper::Print(WebKit::WebFrame* frame,
 
 void PrintWebViewHelper::DidFinishPrinting(PrintingResult result) {
   bool store_print_pages_params = true;
-  if (result == FAIL_PRINT) {
-    DisplayPrintJobError();
+  switch (result) {
+    case OK:
+      break;
 
-    if (notify_browser_of_print_failure_ && print_pages_params_.get()) {
-      int cookie = print_pages_params_->params.document_cookie;
-      Send(new PrintHostMsg_PrintingFailed(routing_id(), cookie));
-    }
-  } else if (result == FAIL_PREVIEW) {
-    DCHECK(is_preview_enabled_);
-    store_print_pages_params = false;
-    int cookie = print_pages_params_.get() ?
-                     print_pages_params_->params.document_cookie : 0;
-    if (notify_browser_of_print_failure_)
-      Send(new PrintHostMsg_PrintPreviewFailed(routing_id(), cookie));
-    else
-      Send(new PrintHostMsg_PrintPreviewCancelled(routing_id(), cookie));
-    print_preview_context_.Failed(notify_browser_of_print_failure_);
+    case FAIL_PRINT_INIT:
+      DCHECK(!notify_browser_of_print_failure_);
+      break;
+
+    case FAIL_PRINT:
+      DisplayPrintJobError();
+
+      if (notify_browser_of_print_failure_ && print_pages_params_.get()) {
+        int cookie = print_pages_params_->params.document_cookie;
+        Send(new PrintHostMsg_PrintingFailed(routing_id(), cookie));
+      }
+      break;
+
+    case FAIL_PREVIEW:
+      DCHECK(is_preview_enabled_);
+      store_print_pages_params = false;
+      int cookie = print_pages_params_.get() ?
+          print_pages_params_->params.document_cookie : 0;
+      if (notify_browser_of_print_failure_)
+        Send(new PrintHostMsg_PrintPreviewFailed(routing_id(), cookie));
+      else
+        Send(new PrintHostMsg_PrintPreviewCancelled(routing_id(), cookie));
+      print_preview_context_.Failed(notify_browser_of_print_failure_);
+      break;
   }
 
   if (print_web_view_) {
@@ -1095,7 +1146,7 @@ bool PrintWebViewHelper::CopyAndPrint(WebKit::WebFrame* web_frame) {
   url_str.append(html);
   GURL url(url_str);
 
-  // When loading is done this will call DidStopLoading that will do the
+  // When loading is done this will call didStopLoading() and that will do the
   // actual printing.
   print_web_view_->mainFrame()->loadRequest(WebURLRequest(url));
 
@@ -1103,10 +1154,9 @@ bool PrintWebViewHelper::CopyAndPrint(WebKit::WebFrame* web_frame) {
 }
 
 #if defined(OS_MACOSX) || defined(OS_WIN)
-bool PrintWebViewHelper::PrintPages(const PrintMsg_PrintPages_Params& params,
-                                    WebFrame* frame,
-                                    const WebNode& node) {
-  PrintMsg_Print_Params print_params = params.params;
+bool PrintWebViewHelper::PrintPages(WebFrame* frame, const WebNode& node) {
+  const PrintMsg_PrintPages_Params& params = *print_pages_params_;
+  const PrintMsg_Print_Params& print_params = params.params;
   PrepareFrameAndViewForPrint prep_frame_view(print_params, frame, node);
   UpdateFrameAndViewFromCssPageLayout(frame, node, &prep_frame_view,
                                       print_params, ignore_css_margins_,
@@ -1140,9 +1190,7 @@ bool PrintWebViewHelper::PrintPages(const PrintMsg_PrintPages_Params& params,
 #endif  // OS_MACOSX || OS_WIN
 
 void PrintWebViewHelper::didStopLoading() {
-  PrintMsg_PrintPages_Params* params = print_pages_params_.get();
-  DCHECK(params != NULL);
-  PrintPages(*params, print_web_view_->mainFrame(), WebNode());
+  PrintPages(print_web_view_->mainFrame(), WebNode());
 }
 
 // static - Not anonymous so that platform implementations can use it.
@@ -1178,28 +1226,16 @@ void PrintWebViewHelper::UpdateFrameAndViewFromCssPageLayout(
   prepare->UpdatePrintParams(print_params);
 }
 
-bool PrintWebViewHelper::InitPrintSettings(WebKit::WebFrame* frame,
-                                           const WebKit::WebNode& node) {
-  DCHECK(frame);
+bool PrintWebViewHelper::InitPrintSettings() {
   PrintMsg_PrintPages_Params settings;
-
-  // Reset to default values.
-  ignore_css_margins_ = false;
-  fit_to_page_ = true;
-
   Send(new PrintHostMsg_GetDefaultPrintSettings(routing_id(),
                                                 &settings.params));
   // Check if the printer returned any settings, if the settings is empty, we
   // can safely assume there are no printer drivers configured. So we safely
   // terminate.
   bool result = true;
-  if (PrintMsg_Print_Params_IsEmpty(settings.params)) {
-    render_view()->RunModalAlertDialog(
-        frame,
-        l10n_util::GetStringUTF16(
-            IDS_PRINT_PREVIEW_INVALID_PRINTER_SETTINGS));
+  if (!PrintMsg_Print_Params_IsValid(settings.params))
     result = false;
-  }
 
   if (result &&
       (settings.params.dpi < kMinDpi || settings.params.document_cookie == 0)) {
@@ -1208,7 +1244,11 @@ bool PrintWebViewHelper::InitPrintSettings(WebKit::WebFrame* frame,
     result = false;
   }
 
+  // Reset to default values.
+  ignore_css_margins_ = false;
+  fit_to_page_ = true;
   settings.pages.clear();
+
   print_pages_params_.reset(new PrintMsg_PrintPages_Params(settings));
   return result;
 }
@@ -1216,8 +1256,14 @@ bool PrintWebViewHelper::InitPrintSettings(WebKit::WebFrame* frame,
 bool PrintWebViewHelper::InitPrintSettingsAndPrepareFrame(
     WebKit::WebFrame* frame, const WebKit::WebNode& node,
     scoped_ptr<PrepareFrameAndViewForPrint>* prepare) {
-  if (!InitPrintSettings(frame, node))
+  DCHECK(frame);
+  if (!InitPrintSettings()) {
+    notify_browser_of_print_failure_ = false;
+    render_view()->RunModalAlertDialog(
+        frame,
+        l10n_util::GetStringUTF16(IDS_PRINT_PREVIEW_INVALID_PRINTER_SETTINGS));
     return false;
+  }
 
   DCHECK(!prepare->get());
   prepare->reset(new PrepareFrameAndViewForPrint(print_pages_params_->params,
@@ -1288,7 +1334,7 @@ bool PrintWebViewHelper::UpdatePrintSettings(
       cookie, *job_settings, &settings));
   print_pages_params_.reset(new PrintMsg_PrintPages_Params(settings));
 
-  if (PrintMsg_Print_Params_IsEmpty(settings.params)) {
+  if (!PrintMsg_Print_Params_IsValid(settings.params)) {
     if (!print_for_preview) {
       print_preview_context_.set_error(PREVIEW_ERROR_INVALID_PRINTER_SETTINGS);
     } else {
@@ -1380,13 +1426,9 @@ bool PrintWebViewHelper::GetPrintSettingsFromUser(WebKit::WebFrame* frame,
 bool PrintWebViewHelper::RenderPagesForPrint(
     WebKit::WebFrame* frame,
     const WebKit::WebNode& node) {
-  PrintMsg_PrintPages_Params print_settings = *print_pages_params_;
-  if (print_settings.params.selection_only) {
+  if (print_pages_params_->params.selection_only)
     return CopyAndPrint(frame);
-  } else {
-    // TODO: Always copy before printing.
-    return PrintPages(print_settings, frame, node);
-  }
+  return PrintPages(frame, node);
 }
 
 #if defined(OS_POSIX)
@@ -1564,19 +1606,16 @@ void PrintWebViewHelper::PrintPreviewContext::InitWithFrame(
   DCHECK(!IsRendering());
   state_ = INITIALIZED;
   frame_ = web_frame;
-  // TODO(vandebo) Remove when http://crbug.com/100890 is resolved.
-  CHECK(frame_ != NULL);
   node_.reset();
 }
 
 void PrintWebViewHelper::PrintPreviewContext::InitWithNode(
     const WebKit::WebNode& web_node) {
   DCHECK(!web_node.isNull());
+  DCHECK(web_node.document().frame());
   DCHECK(!IsRendering());
   state_ = INITIALIZED;
   frame_ = web_node.document().frame();
-  // TODO(vandebo) Remove when http://crbug.com/100890 is resolved.
-  CHECK(frame_ != NULL);
   node_ = web_node;
 }
 
@@ -1707,7 +1746,7 @@ bool PrintWebViewHelper::PrintPreviewContext::IsRendering() const {
 
 bool PrintWebViewHelper::PrintPreviewContext::IsModifiable() const {
   // The only kind of node we can print right now is a PDF node.
-  return !PrintingNodeOrPdfFrame(frame(), node());
+  return !PrintingNodeOrPdfFrame(frame_, node_);
 }
 
 bool PrintWebViewHelper::PrintPreviewContext::IsLastPageOfPrintReadyMetafile()
@@ -1732,8 +1771,8 @@ void PrintWebViewHelper::PrintPreviewContext::set_error(
   error_ = error;
 }
 
-WebKit::WebFrame* PrintWebViewHelper::PrintPreviewContext::frame() const {
-  // TODO(vandebo) turn this back into a DCHECK when http://crbug.com/100890 is
+WebKit::WebFrame* PrintWebViewHelper::PrintPreviewContext::frame() {
+  // TODO(thestig) turn this back into a DCHECK when http://crbug.com/118303 is
   // resolved.
   CHECK(state_ != UNINITIALIZED);
   return frame_;
@@ -1749,12 +1788,11 @@ int PrintWebViewHelper::PrintPreviewContext::total_page_count() const {
   return total_page_count_;
 }
 
-bool PrintWebViewHelper::PrintPreviewContext::generate_draft_pages() {
+bool PrintWebViewHelper::PrintPreviewContext::generate_draft_pages() const {
   return generate_draft_pages_;
 }
 
-printing::PreviewMetafile*
-PrintWebViewHelper::PrintPreviewContext::metafile() const {
+printing::PreviewMetafile* PrintWebViewHelper::PrintPreviewContext::metafile() {
   DCHECK(IsRendering());
   return metafile_.get();
 }

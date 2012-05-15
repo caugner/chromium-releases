@@ -82,9 +82,7 @@ class CONTENT_EXPORT RendererWebKitPlatformSupportImpl
       const WebKit::WebString& keyPath) OVERRIDE;
   virtual WebKit::WebFileSystem* fileSystem() OVERRIDE;
   virtual WebKit::WebSharedWorkerRepository* sharedWorkerRepository() OVERRIDE;
-  virtual WebKit::WebGraphicsContext3D* createGraphicsContext3D() OVERRIDE;
-  virtual WebKit::WebGraphicsContext3D* createOffscreenGraphicsContext3D(
-      const WebKit::WebGraphicsContext3D::Attributes& attributes);
+  virtual bool canAccelerate2dCanvas();
   virtual double audioHardwareSampleRate() OVERRIDE;
   virtual size_t audioHardwareBufferSize() OVERRIDE;
   virtual WebKit::WebAudioDevice* createAudioDevice(
@@ -97,6 +95,11 @@ class CONTENT_EXPORT RendererWebKitPlatformSupportImpl
                           std::vector<webkit::WebPluginInfo>* plugins) OVERRIDE;
   virtual WebKit::WebPeerConnectionHandler* createPeerConnectionHandler(
       WebKit::WebPeerConnectionHandlerClient* client) OVERRIDE;
+  virtual WebKit::WebMediaStreamCenter* createMediaStreamCenter(
+      WebKit::WebMediaStreamCenterClient* client) OVERRIDE;
+
+ protected:
+  virtual GpuChannelHostFactory* GetGpuChannelHostFactory() OVERRIDE;
 
  private:
   bool CheckPreparsedJsCachingEnabled() const;

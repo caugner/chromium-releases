@@ -26,6 +26,7 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_service.h"
@@ -100,18 +101,20 @@ class CrashNotificationDelegate : public NotificationDelegate {
 };
 
 void ShowBalloon(const Extension* extension, Profile* profile) {
+#if defined(ENABLE_NOTIFICATIONS)
   string16 message = l10n_util::GetStringFUTF16(
       extension->is_app() ?  IDS_BACKGROUND_CRASHED_APP_BALLOON_MESSAGE :
       IDS_BACKGROUND_CRASHED_EXTENSION_BALLOON_MESSAGE,
       UTF8ToUTF16(extension->name()));
   string16 content_url = DesktopNotificationService::CreateDataUrl(
-      extension->GetIconURL(Extension::EXTENSION_ICON_SMALLISH,
+      extension->GetIconURL(ExtensionIconSet::EXTENSION_ICON_SMALLISH,
                             ExtensionIconSet::MATCH_BIGGER),
       string16(), message, WebKit::WebTextDirectionDefault);
   Notification notification(
       extension->url(), GURL(content_url), string16(), string16(),
       new CrashNotificationDelegate(profile, extension));
   g_browser_process->notification_ui_manager()->Add(notification, profile);
+#endif
 }
 
 }

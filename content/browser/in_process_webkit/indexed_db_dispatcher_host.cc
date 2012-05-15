@@ -8,6 +8,7 @@
 #include "base/command_line.h"
 #include "base/utf_string_conversions.h"
 #include "content/browser/in_process_webkit/indexed_db_callbacks.h"
+#include "content/browser/in_process_webkit/indexed_db_context_impl.h"
 #include "content/browser/in_process_webkit/indexed_db_database_callbacks.h"
 #include "content/browser/in_process_webkit/indexed_db_transaction_callbacks.h"
 #include "content/browser/renderer_host/render_message_filter.h"
@@ -28,11 +29,13 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBTransaction.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebVector.h"
+#include "webkit/database/database_util.h"
 #include "webkit/glue/webkit_glue.h"
 
 using content::BrowserMessageFilter;
 using content::BrowserThread;
 using content::UserMetricsAction;
+using webkit_database::DatabaseUtil;
 using WebKit::WebDOMStringList;
 using WebKit::WebExceptionCode;
 using WebKit::WebIDBCallbacks;
@@ -60,8 +63,8 @@ void DeleteOnWebKitThread(T* obj) {
 }
 
 IndexedDBDispatcherHost::IndexedDBDispatcherHost(
-    int process_id, WebKitContext* webkit_context)
-    : webkit_context_(webkit_context),
+    int process_id, IndexedDBContextImpl* indexed_db_context)
+    : indexed_db_context_(indexed_db_context),
       ALLOW_THIS_IN_INITIALIZER_LIST(database_dispatcher_host_(
           new DatabaseDispatcherHost(this))),
       ALLOW_THIS_IN_INITIALIZER_LIST(index_dispatcher_host_(
@@ -73,7 +76,7 @@ IndexedDBDispatcherHost::IndexedDBDispatcherHost(
       ALLOW_THIS_IN_INITIALIZER_LIST(transaction_dispatcher_host_(
           new TransactionDispatcherHost(this))),
       process_id_(process_id) {
-  DCHECK(webkit_context_.get());
+  DCHECK(indexed_db_context_.get());
 }
 
 IndexedDBDispatcherHost::~IndexedDBDispatcherHost() {
@@ -205,22 +208,10 @@ WebIDBCursor* IndexedDBDispatcherHost::GetCursorFromId(int32 cursor_id) {
 void IndexedDBDispatcherHost::OnIDBFactoryGetDatabaseNames(
     const IndexedDBHostMsg_FactoryGetDatabaseNames_Params& params) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::WEBKIT_DEPRECATED));
-  FilePath base_path = webkit_context_->data_path();
-  FilePath indexed_db_path;
-  if (!base_path.empty()) {
-    indexed_db_path = base_path.Append(
-        IndexedDBContext::kIndexedDBDirectory);
-  }
+  FilePath indexed_db_path = indexed_db_context_->data_path();
 
-  // TODO(jorlow): This doesn't support file:/// urls properly. We probably need
-  //               to add some toString method to WebSecurityOrigin that doesn't
-  //               return null for them.  Look at
-  //               DatabaseUtil::GetOriginFromIdentifier.
   WebSecurityOrigin origin(
       WebSecurityOrigin::createFromDatabaseIdentifier(params.origin));
-  GURL origin_url(origin.toString());
-
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::WEBKIT_DEPRECATED));
 
   Context()->GetIDBFactory()->getDatabaseNames(
       new IndexedDBCallbacks<WebDOMStringList>(this, params.thread_id,
@@ -231,20 +222,11 @@ void IndexedDBDispatcherHost::OnIDBFactoryGetDatabaseNames(
 void IndexedDBDispatcherHost::OnIDBFactoryOpen(
     const IndexedDBHostMsg_FactoryOpen_Params& params) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::WEBKIT_DEPRECATED));
-  FilePath base_path = webkit_context_->data_path();
-  FilePath indexed_db_path;
-  if (!base_path.empty()) {
-    indexed_db_path = base_path.Append(
-        IndexedDBContext::kIndexedDBDirectory);
-  }
+  FilePath indexed_db_path = indexed_db_context_->data_path();
 
-  // TODO(jorlow): This doesn't support file:/// urls properly. We probably need
-  //               to add some toString method to WebSecurityOrigin that doesn't
-  //               return null for them.  Look at
-  //               DatabaseUtil::GetOriginFromIdentifier.
+  GURL origin_url = DatabaseUtil::GetOriginFromIdentifier(params.origin);
   WebSecurityOrigin origin(
       WebSecurityOrigin::createFromDatabaseIdentifier(params.origin));
-  GURL origin_url(origin.toString());
 
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::WEBKIT_DEPRECATED));
 
@@ -259,12 +241,7 @@ void IndexedDBDispatcherHost::OnIDBFactoryOpen(
 
 void IndexedDBDispatcherHost::OnIDBFactoryDeleteDatabase(
     const IndexedDBHostMsg_FactoryDeleteDatabase_Params& params) {
-  FilePath base_path = webkit_context_->data_path();
-  FilePath indexed_db_path;
-  if (!base_path.empty()) {
-    indexed_db_path = base_path.Append(
-        IndexedDBContext::kIndexedDBDirectory);
-  }
+  FilePath indexed_db_path = indexed_db_context_->data_path();
 
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::WEBKIT_DEPRECATED));
   Context()->GetIDBFactory()->deleteDatabase(
@@ -706,6 +683,7 @@ bool IndexedDBDispatcherHost::ObjectStoreDispatcherHost::OnMessageReceived(
     IPC_MESSAGE_HANDLER(IndexedDBHostMsg_ObjectStoreGet, OnGet)
     IPC_MESSAGE_HANDLER(IndexedDBHostMsg_ObjectStorePut, OnPut)
     IPC_MESSAGE_HANDLER(IndexedDBHostMsg_ObjectStoreDelete, OnDelete)
+    IPC_MESSAGE_HANDLER(IndexedDBHostMsg_ObjectStoreDeleteRange, OnDeleteRange)
     IPC_MESSAGE_HANDLER(IndexedDBHostMsg_ObjectStoreClear, OnClear)
     IPC_MESSAGE_HANDLER(IndexedDBHostMsg_ObjectStoreCreateIndex, OnCreateIndex)
     IPC_MESSAGE_HANDLER(IndexedDBHostMsg_ObjectStoreIndex, OnIndex)
@@ -816,6 +794,29 @@ void IndexedDBDispatcherHost::ObjectStoreDispatcherHost::OnDelete(
                                                        response_id));
   idb_object_store->deleteFunction(
       key, callbacks.release(), *idb_transaction, *ec);
+}
+
+void IndexedDBDispatcherHost::ObjectStoreDispatcherHost::OnDeleteRange(
+    int idb_object_store_id,
+    int32 thread_id,
+    int32 response_id,
+    const IndexedDBKeyRange& key_range,
+    int32 transaction_id,
+    WebKit::WebExceptionCode* ec) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::WEBKIT_DEPRECATED));
+  WebIDBObjectStore* idb_object_store = parent_->GetOrTerminateProcess(
+      &map_, idb_object_store_id);
+  WebIDBTransaction* idb_transaction = parent_->GetOrTerminateProcess(
+      &parent_->transaction_dispatcher_host_->map_, transaction_id);
+  if (!idb_transaction || !idb_object_store)
+    return;
+
+  *ec = 0;
+  scoped_ptr<WebIDBCallbacks> callbacks(
+      new IndexedDBCallbacks<WebSerializedScriptValue>(parent_, thread_id,
+                                                       response_id));
+  idb_object_store->deleteFunction(
+      key_range, callbacks.release(), *idb_transaction, *ec);
 }
 
 void IndexedDBDispatcherHost::ObjectStoreDispatcherHost::OnClear(
@@ -1183,6 +1184,7 @@ void IndexedDBDispatcherHost::
     return;
 
   // TODO(dgrogan): Tell the page the transaction aborted because of quota.
+  // http://crbug.com/113118
   if (parent_->Context()->WouldBeOverQuota(
       transaction_url_map_[transaction_id],
       transaction_size_map_[transaction_id])) {

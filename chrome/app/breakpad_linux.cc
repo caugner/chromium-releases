@@ -9,10 +9,12 @@
 #include "chrome/app/breakpad_linux.h"
 
 #include <fcntl.h>
+#include <poll.h>
 #include <stdlib.h>
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <sys/uio.h>
 #include <time.h>
 #include <unistd.h>
@@ -26,16 +28,19 @@
 #include "base/global_descriptors_posix.h"
 #include "base/linux_util.h"
 #include "base/path_service.h"
+#include "base/process_util.h"
 #include "base/string_util.h"
 #include "breakpad/src/client/linux/handler/exception_handler.h"
 #include "breakpad/src/client/linux/minidump_writer/directory_reader.h"
 #include "breakpad/src/common/linux/linux_libc_support.h"
 #include "breakpad/src/common/memory.h"
+#include "chrome/browser/crash_upload_list.h"
 #include "chrome/common/child_process_logging.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info_posix.h"
 #include "chrome/common/env_vars.h"
+#include "chrome/common/logging_chrome.h"
 #include "content/common/chrome_descriptors.h"
 #include "seccompsandbox/linux_syscall_support.h"
 
@@ -52,9 +57,10 @@
 static const char kUploadURL[] =
     "https://clients2.google.com/cr/report";
 
-static bool is_crash_reporter_enabled = false;
-static uint64_t process_start_time = 0;
-static char* crash_log_path = NULL;
+static bool g_is_crash_reporter_enabled = false;
+static uint64_t g_process_start_time = 0;
+static char* g_crash_log_path = NULL;
+static google_breakpad::ExceptionHandler* g_breakpad = NULL;
 
 // Writes the value |v| as 16 hex characters to the memory pointed at by
 // |output|.
@@ -84,6 +90,9 @@ static uint64_t kernel_timeval_to_ms(struct kernel_timeval *tv) {
   ret += tv->tv_usec / 1000;
   return ret;
 }
+
+// String buffer size to use to convert a uint64_t to string.
+static size_t kUint64StringSize = 21;
 
 // uint64_t version of my_int_len() from
 // breakpad/src/common/linux/linux_libc_support.h. Return the length of the
@@ -291,9 +300,14 @@ void MimeWriter::AddItemWithoutTrailingSpaces(const void* base, size_t size) {
   AddItem(base, size);
 }
 
+void DumpProcess() {
+  if (g_breakpad)
+    g_breakpad->WriteMinidump();
+}
+
 }  // namespace
 
-pid_t HandleCrashDump(const BreakpadInfo& info) {
+void HandleCrashDump(const BreakpadInfo& info) {
   // WARNING: this code runs in a compromised context. It may not call into
   // libc nor allocate memory normally.
 
@@ -301,14 +315,14 @@ pid_t HandleCrashDump(const BreakpadInfo& info) {
   if (dumpfd < 0) {
     static const char msg[] = "Cannot upload crash dump: failed to open\n";
     sys_write(2, msg, sizeof(msg));
-    return -1;
+    return;
   }
   struct kernel_stat st;
   if (sys_fstat(dumpfd, &st) != 0) {
     static const char msg[] = "Cannot upload crash dump: stat failed\n";
     sys_write(2, msg, sizeof(msg));
     IGNORE_RET(sys_close(dumpfd));
-    return -1;
+    return;
   }
 
   google_breakpad::PageAllocator allocator;
@@ -318,7 +332,7 @@ pid_t HandleCrashDump(const BreakpadInfo& info) {
     static const char msg[] = "Cannot upload crash dump: cannot alloc\n";
     sys_write(2, msg, sizeof(msg));
     IGNORE_RET(sys_close(dumpfd));
-    return -1;
+    return;
   }
 
   sys_read(dumpfd, dump_data, st.st_size);
@@ -332,13 +346,13 @@ pid_t HandleCrashDump(const BreakpadInfo& info) {
     static const char msg[] = "Cannot upload crash dump because /dev/urandom"
                               " is missing\n";
     sys_write(2, msg, sizeof(msg) - 1);
-    return -1;
+    return;
   }
 
   static const char temp_file_template[] =
       "/tmp/chromium-upload-XXXXXXXXXXXXXXXX";
   char temp_file[sizeof(temp_file_template)];
-  int fd = -1;
+  int temp_file_fd = -1;
   if (info.upload) {
     memcpy(temp_file, temp_file_template, sizeof(temp_file_template));
 
@@ -347,25 +361,25 @@ pid_t HandleCrashDump(const BreakpadInfo& info) {
       sys_read(ufd, &t, sizeof(t));
       write_uint64_hex(temp_file + sizeof(temp_file) - (16 + 1), t);
 
-      fd = sys_open(temp_file, O_WRONLY | O_CREAT | O_EXCL, 0600);
-      if (fd >= 0)
+      temp_file_fd = sys_open(temp_file, O_WRONLY | O_CREAT | O_EXCL, 0600);
+      if (temp_file_fd >= 0)
         break;
     }
 
-    if (fd < 0) {
+    if (temp_file_fd < 0) {
       static const char msg[] = "Failed to create temporary file in /tmp: "
           "cannot upload crash dump\n";
       sys_write(2, msg, sizeof(msg) - 1);
       IGNORE_RET(sys_close(ufd));
-      return -1;
+      return;
     }
   } else {
-    fd = sys_open(info.filename, O_WRONLY, 0600);
-    if (fd < 0) {
+    temp_file_fd = sys_open(info.filename, O_WRONLY, 0600);
+    if (temp_file_fd < 0) {
       static const char msg[] = "Failed to save crash dump: failed to open\n";
       sys_write(2, msg, sizeof(msg) - 1);
       IGNORE_RET(sys_close(ufd));
-      return -1;
+      return;
     }
   }
 
@@ -435,6 +449,11 @@ pid_t HandleCrashDump(const BreakpadInfo& info) {
   //   abcdefghijklmnopqrstuvwxyzabcdef \r\n
   //   BOUNDARY \r\n
   //
+  //   zero to 4:
+  //   Content-Disposition: form-data; name="prn-info-1" \r\n \r\n
+  //   abcdefghijklmnopqrstuvwxyzabcdef \r\n
+  //   BOUNDARY \r\n
+  //
   //   zero or one:
   //   Content-Disposition: form-data; name="num-switches" \r\n \r\n
   //   5 \r\n
@@ -445,12 +464,17 @@ pid_t HandleCrashDump(const BreakpadInfo& info) {
   //   --foo \r\n
   //   BOUNDARY \r\n
   //
+  //   zero or one:
+  //   Content-Disposition: form-data; name="oom-size" \r\n \r\n
+  //   1234567890 \r\n
+  //   BOUNDARY \r\n
+  //
   //   Content-Disposition: form-data; name="dump"; filename="dump" \r\n
   //   Content-Type: application/octet-stream \r\n \r\n
   //   <dump contents>
   //   \r\n BOUNDARY -- \r\n
 
-  MimeWriter writer(fd, mime_boundary);
+  MimeWriter writer(temp_file_fd, mime_boundary);
   {
 #if defined(OS_CHROMEOS)
     static const char chrome_product_msg[] = "Chrome_ChromeOS";
@@ -475,7 +499,7 @@ pid_t HandleCrashDump(const BreakpadInfo& info) {
       uint64_t time = kernel_timeval_to_ms(&tv);
       if (time > info.process_start_time) {
         time -= info.process_start_time;
-        char time_str[21];
+        char time_str[kUint64StringSize];
         const unsigned time_len = my_uint64_len(time);
         my_uint64tos(time_str, time, time_len);
 
@@ -564,6 +588,19 @@ pid_t HandleCrashDump(const BreakpadInfo& info) {
         false /* Don't strip whitespace. */);
   }
 
+  unsigned printer_info_len =
+      my_strlen(child_process_logging::g_printer_info);
+  if (printer_info_len) {
+    static const char printer_info_msg[] = "prn-info-";
+    static const unsigned kMaxPrnInfoLen =
+        kMaxReportedPrinterRecords * child_process_logging::kPrinterInfoStrLen;
+    writer.AddPairDataInChunks(printer_info_msg, sizeof(printer_info_msg) - 1,
+        child_process_logging::g_printer_info,
+        std::min(printer_info_len, kMaxPrnInfoLen),
+        child_process_logging::kPrinterInfoStrLen,
+        true);
+  }
+
   if (my_strlen(child_process_logging::g_num_switches)) {
     writer.AddPairString("num-switches",
                          child_process_logging::g_num_switches);
@@ -584,14 +621,25 @@ pid_t HandleCrashDump(const BreakpadInfo& info) {
         true /* Strip whitespace since switches are padded to kSwitchLen. */);
   }
 
+  if (info.oom_size) {
+    char oom_size_str[kUint64StringSize];
+    const unsigned oom_size_len = my_uint64_len(info.oom_size);
+    my_uint64tos(oom_size_str, info.oom_size, oom_size_len);
+    static const char oom_size_msg[] = "oom-size";
+    writer.AddPairData(oom_size_msg, sizeof(oom_size_msg) - 1,
+                       oom_size_str, oom_size_len);
+    writer.AddBoundary();
+    writer.Flush();
+  }
+
   writer.AddFileDump(dump_data, st.st_size);
   writer.AddEnd();
   writer.Flush();
 
-  IGNORE_RET(sys_close(fd));
+  IGNORE_RET(sys_close(temp_file_fd));
 
   if (!info.upload)
-    return 0;
+    return;
 
   // The --header argument to wget looks like:
   //   --header=Content-Type: multipart/form-data; boundary=XYZ
@@ -615,6 +663,8 @@ pid_t HandleCrashDump(const BreakpadInfo& info) {
 
   const pid_t child = sys_fork();
   if (!child) {
+    // Spawned helper process.
+    //
     // This code is called both when a browser is crashing (in which case,
     // nothing really matters any more) and when a renderer/plugin crashes, in
     // which case we need to continue.
@@ -646,70 +696,99 @@ pid_t HandleCrashDump(const BreakpadInfo& info) {
     // Leave one end of a pipe in the wget process and watch for it getting
     // closed by the wget process exiting.
     int fds[2];
-    IGNORE_RET(sys_pipe(fds));
+    if (sys_pipe(fds) >= 0) {
+      const pid_t wget_child = sys_fork();
+      if (!wget_child) {
+        // Wget process.
+        IGNORE_RET(sys_close(fds[0]));
+        IGNORE_RET(sys_dup2(fds[1], 3));
+        static const char* const kWgetBinary = "/usr/bin/wget";
+        const char* args[] = {
+          kWgetBinary,
+          header,
+          post_file,
+          kUploadURL,
+          "--timeout=10",  // Set a timeout so we don't hang forever.
+          "--tries=1",     // Don't retry if the upload fails.
+          "-O",  // output reply to fd 3
+          "/dev/fd/3",
+          NULL,
+        };
 
-    const pid_t child = sys_fork();
-    if (child) {
-      IGNORE_RET(sys_close(fds[1]));
-      char id_buf[17];
-      const int len = HANDLE_EINTR(sys_read(fds[0], id_buf,
-                                   sizeof(id_buf) - 1));
-      if (len > 0) {
-        // Write crash dump id to stderr.
-        id_buf[len] = 0;
-        static const char msg[] = "\nCrash dump id: ";
+        execve(kWgetBinary, const_cast<char**>(args), environ);
+        static const char msg[] = "Cannot upload crash dump: cannot exec "
+                                  "/usr/bin/wget\n";
         sys_write(2, msg, sizeof(msg) - 1);
-        sys_write(2, id_buf, my_strlen(id_buf));
-        sys_write(2, "\n", 1);
+        sys__exit(1);
+      }
 
-        // Write crash dump id to crash log as: seconds_since_epoch,crash_id
-        struct kernel_timeval tv;
-        if (crash_log_path && !sys_gettimeofday(&tv, NULL)) {
-          uint64_t time = kernel_timeval_to_ms(&tv) / 1000;
-          char time_str[21];
-          const unsigned time_len = my_uint64_len(time);
-          my_uint64tos(time_str, time, time_len);
+      // Helper process.
+      if (wget_child > 0) {
+        IGNORE_RET(sys_close(fds[1]));
+        char id_buf[17];  // Crash report IDs are expected to be 16 chars.
+        ssize_t len = -1;
+        // Wget should finish in about 10 seconds. Add a few more 500 ms
+        // internals to account for process startup time.
+        for (size_t wait_count = 0; wait_count < 24; ++wait_count) {
+          struct kernel_pollfd poll_fd;
+          poll_fd.fd = fds[0];
+          poll_fd.events = POLLIN | POLLPRI | POLLERR;
+          int ret = sys_poll(&poll_fd, 1, 500);
+          if (ret < 0) {
+            // Error
+            break;
+          } else if (ret > 0) {
+            // There is data to read.
+            len = HANDLE_EINTR(sys_read(fds[0], id_buf, sizeof(id_buf) - 1));
+            break;
+          }
+          // ret == 0 -> timed out, continue waiting.
+        }
+        if (len > 0) {
+          // Write crash dump id to stderr.
+          id_buf[len] = 0;
+          static const char msg[] = "\nCrash dump id: ";
+          sys_write(2, msg, sizeof(msg) - 1);
+          sys_write(2, id_buf, my_strlen(id_buf));
+          sys_write(2, "\n", 1);
 
-          int log_fd = sys_open(crash_log_path, O_CREAT | O_WRONLY | O_APPEND,
-                                0600);
-          if (log_fd > 0) {
-            sys_write(log_fd, time_str, time_len);
-            sys_write(log_fd, ",", 1);
-            sys_write(log_fd, id_buf, my_strlen(id_buf));
-            sys_write(log_fd, "\n", 1);
-            IGNORE_RET(sys_close(log_fd));
+          // Write crash dump id to crash log as: seconds_since_epoch,crash_id
+          struct kernel_timeval tv;
+          if (g_crash_log_path && !sys_gettimeofday(&tv, NULL)) {
+            uint64_t time = kernel_timeval_to_ms(&tv) / 1000;
+            char time_str[kUint64StringSize];
+            const unsigned time_len = my_uint64_len(time);
+            my_uint64tos(time_str, time, time_len);
+
+            int log_fd = sys_open(g_crash_log_path,
+                                  O_CREAT | O_WRONLY | O_APPEND,
+                                  0600);
+            if (log_fd > 0) {
+              sys_write(log_fd, time_str, time_len);
+              sys_write(log_fd, ",", 1);
+              sys_write(log_fd, id_buf, my_strlen(id_buf));
+              sys_write(log_fd, "\n", 1);
+              IGNORE_RET(sys_close(log_fd));
+            }
           }
         }
+        if (sys_waitpid(wget_child, NULL, WNOHANG) == 0) {
+          // Wget process is still around, kill it.
+          sys_kill(wget_child, SIGKILL);
+        }
       }
-      IGNORE_RET(sys_unlink(info.filename));
-      IGNORE_RET(sys_unlink(temp_file));
-      sys__exit(0);
     }
 
-    IGNORE_RET(sys_close(fds[0]));
-    IGNORE_RET(sys_dup2(fds[1], 3));
-    static const char* const kWgetBinary = "/usr/bin/wget";
-    const char* args[] = {
-      kWgetBinary,
-      header,
-      post_file,
-      kUploadURL,
-      "--timeout=10",  // Set a timeout so we don't hang forever.
-      "--tries=1",     // Don't retry if the upload fails.
-      "-O",  // output reply to fd 3
-      "/dev/fd/3",
-      NULL,
-    };
-
-    execve(kWgetBinary, const_cast<char**>(args), environ);
-    static const char msg[] = "Cannot upload crash dump: cannot exec "
-                              "/usr/bin/wget\n";
-    sys_write(2, msg, sizeof(msg) - 1);
-    sys__exit(1);
+    // Helper process.
+    IGNORE_RET(sys_unlink(info.filename));
+    IGNORE_RET(sys_unlink(temp_file));
+    sys__exit(0);
   }
 
+  // Main browser process.
+  if (child <= 0)
+    return;
   HANDLE_EINTR(sys_waitpid(child, NULL, 0));
-  return child;
 }
 
 static bool CrashDone(const char* dump_path,
@@ -744,13 +823,13 @@ static bool CrashDone(const char* dump_path,
   info.distro = base::g_linux_distro;
   info.distro_length = my_strlen(base::g_linux_distro);
   info.upload = upload;
-  info.process_start_time = process_start_time;
+  info.process_start_time = g_process_start_time;
+  info.oom_size = base::g_oom_size;
   HandleCrashDump(info);
-
   return true;
 }
 
-// Wrapper script, do not add more code here.
+// Wrapper function, do not add more code here.
 static bool CrashDoneNoUpload(const char* dump_path,
                       const char* minidump_id,
                       void* context,
@@ -758,7 +837,7 @@ static bool CrashDoneNoUpload(const char* dump_path,
   return CrashDone(dump_path, minidump_id, false, succeeded);
 }
 
-// Wrapper script, do not add more code here.
+// Wrapper function, do not add more code here.
 static bool CrashDoneUpload(const char* dump_path,
                       const char* minidump_id,
                       void* context,
@@ -767,28 +846,36 @@ static bool CrashDoneUpload(const char* dump_path,
 }
 
 void EnableCrashDumping(const bool unattended) {
-  is_crash_reporter_enabled = true;
+  g_is_crash_reporter_enabled = true;
 
   FilePath tmp_path("/tmp");
   PathService::Get(base::DIR_TEMP, &tmp_path);
 
   FilePath dumps_path(tmp_path);
   if (PathService::Get(chrome::DIR_CRASH_DUMPS, &dumps_path)) {
-    FilePath logfile = dumps_path.AppendASCII("uploads.log");
+    FilePath logfile =
+        dumps_path.AppendASCII(CrashUploadList::kReporterLogFilename);
     std::string logfile_str = logfile.value();
     const size_t crash_log_path_len = logfile_str.size() + 1;
-    crash_log_path = new char[crash_log_path_len];
-    strncpy(crash_log_path, logfile_str.c_str(), crash_log_path_len);
+    g_crash_log_path = new char[crash_log_path_len];
+    strncpy(g_crash_log_path, logfile_str.c_str(), crash_log_path_len);
   }
 
+  DCHECK(!g_breakpad);
   if (unattended) {
-    new google_breakpad::ExceptionHandler(dumps_path.value().c_str(), NULL,
-                                          CrashDoneNoUpload, NULL,
-                                          true /* install handlers */);
+    g_breakpad = new google_breakpad::ExceptionHandler(
+        dumps_path.value().c_str(),
+        NULL,
+        CrashDoneNoUpload,
+        NULL,
+        true /* install handlers */);
   } else {
-    new google_breakpad::ExceptionHandler(tmp_path.value().c_str(), NULL,
-                                          CrashDoneUpload, NULL,
-                                          true /* install handlers */);
+    g_breakpad = new google_breakpad::ExceptionHandler(
+        tmp_path.value().c_str(),
+        NULL,
+        CrashDoneUpload,
+        NULL,
+        true /* install handlers */);
   }
 }
 
@@ -840,7 +927,7 @@ static bool NonBrowserCrashHandler(const void* crash_context,
   static const unsigned kControlMsgSpaceSize = CMSG_SPACE(kControlMsgSize);
   static const unsigned kControlMsgLenSize = CMSG_LEN(kControlMsgSize);
 
-  const size_t kIovSize = 7;
+  const size_t kIovSize = 8;
   struct kernel_msghdr msg;
   my_memset(&msg, 0, sizeof(struct kernel_msghdr));
   struct kernel_iovec iov[kIovSize];
@@ -856,8 +943,10 @@ static bool NonBrowserCrashHandler(const void* crash_context,
   iov[4].iov_len = sizeof(b_addr);
   iov[5].iov_base = &fds[0];
   iov[5].iov_len = sizeof(fds[0]);
-  iov[6].iov_base = &process_start_time;
-  iov[6].iov_len = sizeof(process_start_time);
+  iov[6].iov_base = &g_process_start_time;
+  iov[6].iov_len = sizeof(g_process_start_time);
+  iov[7].iov_base = &base::g_oom_size;
+  iov[7].iov_len = sizeof(base::g_oom_size);
 
   msg.msg_iov = iov;
   msg.msg_iovlen = kIovSize;
@@ -874,16 +963,16 @@ static bool NonBrowserCrashHandler(const void* crash_context,
   ((int*) CMSG_DATA(hdr))[1] = fds[1];
 
   if (HANDLE_EINTR(sys_sendmsg(fd, &msg, 0)) < 0) {
-    static const char msg[] = "Failed to tell parent about crash.\n";
-    sys_write(2, msg, sizeof(msg)-1);
+    static const char errmsg[] = "Failed to tell parent about crash.\n";
+    sys_write(2, errmsg, sizeof(errmsg)-1);
     IGNORE_RET(sys_close(fds[1]));
     return false;
   }
   IGNORE_RET(sys_close(fds[1]));
 
   if (HANDLE_EINTR(sys_read(fds[0], &b, 1)) != 1) {
-    static const char msg[] = "Parent failed to complete crash dump.\n";
-    sys_write(2, msg, sizeof(msg)-1);
+    static const char errmsg[] = "Parent failed to complete crash dump.\n";
+    sys_write(2, errmsg, sizeof(errmsg)-1);
   }
 
   return true;
@@ -891,12 +980,12 @@ static bool NonBrowserCrashHandler(const void* crash_context,
 
 void EnableNonBrowserCrashDumping() {
   const int fd = base::GlobalDescriptors::GetInstance()->Get(kCrashDumpSignal);
-  is_crash_reporter_enabled = true;
+  g_is_crash_reporter_enabled = true;
   // We deliberately leak this object.
-  google_breakpad::ExceptionHandler* handler =
-      new google_breakpad::ExceptionHandler("" /* unused */, NULL, NULL,
-                                            reinterpret_cast<void*>(fd), true);
-  handler->set_crash_handler(NonBrowserCrashHandler);
+  DCHECK(!g_breakpad);
+  g_breakpad = new google_breakpad::ExceptionHandler(
+      "" /* unused */, NULL, NULL, reinterpret_cast<void*>(fd), true);
+  g_breakpad->set_crash_handler(NonBrowserCrashHandler);
 }
 
 void InitCrashReporter() {
@@ -937,11 +1026,13 @@ void InitCrashReporter() {
   // Set the base process start time value.
   struct timeval tv;
   if (!gettimeofday(&tv, NULL))
-    process_start_time = timeval_to_ms(&tv);
+    g_process_start_time = timeval_to_ms(&tv);
   else
-    process_start_time = 0;
+    g_process_start_time = 0;
+
+  logging::SetDumpWithoutCrashingFunction(&DumpProcess);
 }
 
 bool IsCrashReporterEnabled() {
-  return is_crash_reporter_enabled;
+  return g_is_crash_reporter_enabled;
 }

@@ -10,7 +10,7 @@
 #include "base/path_service.h"
 #include "base/string_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/canvas.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/compositor/compositor_observer.h"
 #include "ui/gfx/compositor/layer.h"
@@ -118,7 +118,7 @@ std::string GetLayerChildrenNames(const Layer& layer) {
 class ColoredLayer : public Layer, public LayerDelegate {
  public:
   explicit ColoredLayer(SkColor color)
-      : Layer(Layer::LAYER_TEXTURED),
+      : Layer(LAYER_TEXTURED),
         color_(color) {
     set_delegate(this);
   }
@@ -127,7 +127,7 @@ class ColoredLayer : public Layer, public LayerDelegate {
 
   // Overridden from LayerDelegate:
   virtual void OnPaintLayer(gfx::Canvas* canvas) OVERRIDE {
-    canvas->GetSkCanvas()->drawColor(color_);
+    canvas->sk_canvas()->drawColor(color_);
   }
 
  private:
@@ -147,7 +147,7 @@ class LayerWithRealCompositorTest : public testing::Test {
 
   // Overridden from testing::Test:
   virtual void SetUp() OVERRIDE {
-    ui::DisableTestCompositor();
+    DisableTestCompositor();
     const gfx::Rect host_bounds(10, 10, 500, 500);
     window_.reset(TestCompositorHost::Create(host_bounds));
     window_->Show();
@@ -160,7 +160,7 @@ class LayerWithRealCompositorTest : public testing::Test {
     return window_->GetCompositor();
   }
 
-  Layer* CreateLayer(Layer::LayerType type) {
+  Layer* CreateLayer(LayerType type) {
     return new Layer(type);
   }
 
@@ -171,13 +171,9 @@ class LayerWithRealCompositorTest : public testing::Test {
   }
 
   Layer* CreateNoTextureLayer(const gfx::Rect& bounds) {
-    Layer* layer = CreateLayer(Layer::LAYER_NOT_DRAWN);
+    Layer* layer = CreateLayer(LAYER_NOT_DRAWN);
     layer->SetBounds(bounds);
     return layer;
-  }
-
-  gfx::Canvas* CreateCanvasForLayer(const Layer* layer) {
-    return gfx::Canvas::CreateCanvas(layer->bounds().size(), false);
   }
 
   void DrawTree(Layer* root) {
@@ -221,15 +217,14 @@ class TestLayerDelegate : public LayerDelegate {
     colors_.push_back(color);
   }
 
-  gfx::Size paint_size() const { return paint_size_; }
+  const gfx::Size& paint_size() const { return paint_size_; }
   int color_index() const { return color_index_; }
 
   // Overridden from LayerDelegate:
   virtual void OnPaintLayer(gfx::Canvas* canvas) OVERRIDE {
-    SkBitmap contents = canvas->AsCanvasSkia()->ExtractBitmap();
+    SkBitmap contents = canvas->ExtractBitmap();
     paint_size_ = gfx::Size(contents.width(), contents.height());
-    canvas->FillRect(colors_[color_index_],
-                     gfx::Rect(gfx::Point(), paint_size_));
+    canvas->FillRect(gfx::Rect(paint_size_), colors_[color_index_]);
     color_index_ = (color_index_ + 1) % static_cast<int>(colors_.size());
   }
 
@@ -281,18 +276,26 @@ class NullLayerDelegate : public LayerDelegate {
 // Remembers if it has been notified.
 class TestCompositorObserver : public CompositorObserver {
  public:
-  TestCompositorObserver() : notified_(false) {}
+  TestCompositorObserver() : started_(false), ended_(false) {}
 
-  bool notified() const { return notified_; }
+  bool notified() const { return started_ && ended_; }
 
-  void Reset() { notified_ = false; }
-
- private:
-  virtual void OnCompositingEnded(Compositor* compositor) OVERRIDE {
-    notified_ = true;
+  void Reset() {
+    started_ = false;
+    ended_ = false;
   }
 
-  bool notified_;
+ private:
+  virtual void OnCompositingStarted(Compositor* compositor) OVERRIDE {
+    started_ = true;
+  }
+
+  virtual void OnCompositingEnded(Compositor* compositor) OVERRIDE {
+    ended_ = true;
+  }
+
+  bool started_;
+  bool ended_;
 
   DISALLOW_COPY_AND_ASSIGN(TestCompositorObserver);
 };
@@ -362,7 +365,8 @@ class LayerWithDelegateTest : public testing::Test, public CompositorDelegate {
   // Overridden from testing::Test:
   virtual void SetUp() OVERRIDE {
     ui::SetupTestCompositor();
-    compositor_ = new ui::Compositor(this, NULL, gfx::Size(1000, 1000));
+    compositor_.reset(new Compositor(
+          this, gfx::kNullAcceleratedWidget, gfx::Size(1000, 1000)));
   }
 
   virtual void TearDown() OVERRIDE {
@@ -370,7 +374,7 @@ class LayerWithDelegateTest : public testing::Test, public CompositorDelegate {
 
   Compositor* compositor() { return compositor_.get(); }
 
-  virtual Layer* CreateLayer(Layer::LayerType type) {
+  virtual Layer* CreateLayer(LayerType type) {
     return new Layer(type);
   }
 
@@ -381,13 +385,9 @@ class LayerWithDelegateTest : public testing::Test, public CompositorDelegate {
   }
 
   virtual Layer* CreateNoTextureLayer(const gfx::Rect& bounds) {
-    Layer* layer = CreateLayer(Layer::LAYER_NOT_DRAWN);
+    Layer* layer = CreateLayer(LAYER_NOT_DRAWN);
     layer->SetBounds(bounds);
     return layer;
-  }
-
-  gfx::Canvas* CreateCanvasForLayer(const Layer* layer) {
-    return gfx::Canvas::CreateCanvas(layer->bounds().size(), false);
   }
 
   void DrawTree(Layer* root) {
@@ -416,7 +416,7 @@ class LayerWithDelegateTest : public testing::Test, public CompositorDelegate {
   bool schedule_draw_invoked_;
 
  private:
-  scoped_refptr<ui::Compositor> compositor_;
+  scoped_ptr<Compositor> compositor_;
 
   DISALLOW_COPY_AND_ASSIGN(LayerWithDelegateTest);
 };
@@ -574,7 +574,7 @@ class LayerWithNullDelegateTest : public LayerWithDelegateTest {
   virtual void TearDown() OVERRIDE {
   }
 
-  Layer* CreateLayer(Layer::LayerType type) OVERRIDE {
+  Layer* CreateLayer(LayerType type) OVERRIDE {
     Layer* layer = new Layer(type);
     layer->set_delegate(default_layer_delegate_.get());
     return layer;
@@ -587,13 +587,13 @@ class LayerWithNullDelegateTest : public LayerWithDelegateTest {
   }
 
   Layer* CreateTextureLayer(const gfx::Rect& bounds) {
-    Layer* layer = CreateLayer(Layer::LAYER_TEXTURED);
+    Layer* layer = CreateLayer(LAYER_TEXTURED);
     layer->SetBounds(bounds);
     return layer;
   }
 
   Layer* CreateNoTextureLayer(const gfx::Rect& bounds) OVERRIDE {
-    Layer* layer = CreateLayer(Layer::LAYER_NOT_DRAWN);
+    Layer* layer = CreateLayer(LAYER_NOT_DRAWN);
     layer->SetBounds(bounds);
     return layer;
   }
@@ -610,9 +610,9 @@ class LayerWithNullDelegateTest : public LayerWithDelegateTest {
 
 // Various visibile/drawn assertions.
 TEST_F(LayerWithNullDelegateTest, Visibility) {
-  scoped_ptr<Layer> l1(new Layer(Layer::LAYER_TEXTURED));
-  scoped_ptr<Layer> l2(new Layer(Layer::LAYER_TEXTURED));
-  scoped_ptr<Layer> l3(new Layer(Layer::LAYER_TEXTURED));
+  scoped_ptr<Layer> l1(new Layer(LAYER_TEXTURED));
+  scoped_ptr<Layer> l2(new Layer(LAYER_TEXTURED));
+  scoped_ptr<Layer> l3(new Layer(LAYER_TEXTURED));
   l1->Add(l2.get());
   l2->Add(l3.get());
 
@@ -654,10 +654,10 @@ TEST_F(LayerWithNullDelegateTest, Visibility) {
 
 // Checks that stacking-related methods behave as advertised.
 TEST_F(LayerWithNullDelegateTest, Stacking) {
-  scoped_ptr<Layer> root(new Layer(Layer::LAYER_NOT_DRAWN));
-  scoped_ptr<Layer> l1(new Layer(Layer::LAYER_TEXTURED));
-  scoped_ptr<Layer> l2(new Layer(Layer::LAYER_TEXTURED));
-  scoped_ptr<Layer> l3(new Layer(Layer::LAYER_TEXTURED));
+  scoped_ptr<Layer> root(new Layer(LAYER_NOT_DRAWN));
+  scoped_ptr<Layer> l1(new Layer(LAYER_TEXTURED));
+  scoped_ptr<Layer> l2(new Layer(LAYER_TEXTURED));
+  scoped_ptr<Layer> l3(new Layer(LAYER_TEXTURED));
   l1->set_name("1");
   l2->set_name("2");
   l3->set_name("3");
@@ -972,7 +972,7 @@ class SchedulePaintLayerDelegate : public LayerDelegate {
       schedule_paint_rect_ = gfx::Rect();
     }
     SkRect sk_clip_rect;
-    if (canvas->GetSkCanvas()->getClipBounds(&sk_clip_rect))
+    if (canvas->sk_canvas()->getClipBounds(&sk_clip_rect))
       last_clip_rect_ = gfx::SkRectToRect(sk_clip_rect);
   }
 

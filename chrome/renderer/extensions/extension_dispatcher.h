@@ -14,9 +14,14 @@
 #include "base/timer.h"
 #include "content/public/renderer/render_process_observer.h"
 #include "chrome/common/extensions/extension_set.h"
+#include "chrome/common/extensions/feature.h"
+#include "chrome/renderer/extensions/chrome_v8_context.h"
 #include "chrome/renderer/extensions/chrome_v8_context_set.h"
+#include "chrome/renderer/extensions/v8_schema_registry.h"
+#include "chrome/renderer/resource_bundle_source_map.h"
 #include "v8/include/v8.h"
 
+class ModuleSystem;
 class GURL;
 class URLPattern;
 class UserScriptSlave;
@@ -51,9 +56,17 @@ class ExtensionDispatcher : public content::RenderProcessObserver {
     return v8_context_set_;
   }
   UserScriptSlave* user_script_slave() { return user_script_slave_.get(); }
+  extensions::V8SchemaRegistry* v8_schema_registry() {
+    return &v8_schema_registry_;
+  }
 
-  bool IsApplicationActive(const std::string& extension_id) const;
   bool IsExtensionActive(const std::string& extension_id) const;
+
+  // Finds the extension ID for the JavaScript context associated with the
+  // specified |frame| and isolated world. If |world_id| is zero, finds the
+  // extension ID associated with the main world's JavaScript context. If the
+  // JavaScript context isn't from an extension, returns empty string.
+  std::string GetExtensionID(WebKit::WebFrame* frame, int world_id);
 
   // See WebKit::WebPermissionClient::allowScriptExtension
   // TODO(koz): Remove once WebKit no longer calls this.
@@ -61,6 +74,7 @@ class ExtensionDispatcher : public content::RenderProcessObserver {
                             const std::string& v8_extension_name,
                             int extension_group);
 
+  // TODO(koz): Remove once WebKit no longer calls this.
   bool AllowScriptExtension(WebKit::WebFrame* frame,
                             const std::string& v8_extension_name,
                             int extension_group,
@@ -68,12 +82,14 @@ class ExtensionDispatcher : public content::RenderProcessObserver {
 
   void DidCreateScriptContext(WebKit::WebFrame* frame,
                               v8::Handle<v8::Context> context,
+                              int extension_group,
                               int world_id);
   void WillReleaseScriptContext(WebKit::WebFrame* frame,
                                 v8::Handle<v8::Context> context,
                                 int world_id);
 
   void SetTestExtensionId(const std::string& extension_id);
+  bool IsTestExtensionId(const std::string& id);
 
   // TODO(mpcomplete): remove. http://crbug.com/100411
   bool IsAdblockWithWebRequestInstalled() const {
@@ -86,12 +102,11 @@ class ExtensionDispatcher : public content::RenderProcessObserver {
     return webrequest_other_;
   }
 
-  // If the extension is in fact idle, tell the browser process to close
-  // the background page.
-  void CheckIdleStatus(const std::string& extension_id);
-
  private:
   friend class RenderViewTest;
+  typedef void (*BindingInstaller)(ModuleSystem* module_system,
+                                  v8::Handle<v8::Object> chrome,
+                                  v8::Handle<v8::Object> chrome_hidden);
 
   // RenderProcessObserver implementation:
   virtual bool OnControlMessageReceived(const IPC::Message& message) OVERRIDE;
@@ -101,7 +116,8 @@ class ExtensionDispatcher : public content::RenderProcessObserver {
   void OnMessageInvoke(const std::string& extension_id,
                        const std::string& function_name,
                        const base::ListValue& args,
-                       const GURL& event_url);
+                       const GURL& event_url,
+                       bool user_gesture);
   void OnDeliverMessage(int target_port_id, const std::string& message);
   void OnSetFunctionNames(const std::vector<std::string>& names);
   void OnLoaded(
@@ -111,7 +127,6 @@ class ExtensionDispatcher : public content::RenderProcessObserver {
       const Extension::ScriptingWhitelist& extension_ids);
   void OnPageActionsUpdated(const std::string& extension_id,
       const std::vector<std::string>& page_actions);
-  void OnActivateApplication(const std::string& extension_id);
   void OnActivateExtension(const std::string& extension_id);
   void OnUpdatePermissions(int reason_id,
                            const std::string& extension_id,
@@ -123,6 +138,7 @@ class ExtensionDispatcher : public content::RenderProcessObserver {
       bool adblock,
       bool adblock_plus,
       bool other_webrequest);
+  void OnShouldClose(const std::string& extension_id, int sequence_id);
 
   // Update the list of active extensions that will be reported when we crash.
   void UpdateActiveExtensions();
@@ -137,9 +153,25 @@ class ExtensionDispatcher : public content::RenderProcessObserver {
                                const Extension* extension,
                                const URLPatternSet& origins);
 
-  // Finds the extension ID for the current context. This is determined from
-  // |world_id| if it's non-zero, or the URL in |frame| if it is.
-  std::string GetExtensionID(WebKit::WebFrame* frame, int world_id);
+  void RegisterNativeHandlers(ModuleSystem* module_system,
+                              ChromeV8Context* context);
+
+  // Inserts static source code into |source_map_|.
+  void PopulateSourceMap();
+
+  // Inserts BindingInstallers into |lazy_bindings_map_|.
+  void PopulateLazyBindingsMap();
+
+  // Sets up the bindings for the given api.
+  void InstallBindings(ModuleSystem* module_system,
+                       v8::Handle<v8::Context> v8_context,
+                       const std::string& api);
+
+  // Returns the Feature::Context type of context for a JavaScript context.
+  extensions::Feature::Context ClassifyJavaScriptContext(
+      const std::string& extension_id,
+      int extension_group,
+      const ExtensionURLInfo& url_info);
 
   // True if this renderer is running extensions.
   bool is_extension_process_;
@@ -165,11 +197,8 @@ class ExtensionDispatcher : public content::RenderProcessObserver {
   // All declared function names.
   std::set<std::string> function_names_;
 
-  // The extensions that are active in this process.
+  // The extensions and apps that are active in this process.
   std::set<std::string> active_extension_ids_;
-
-  // The applications that are active in this process.
-  std::set<std::string> active_application_ids_;
 
   // True once WebKit has been initialized (and it is therefore safe to poke).
   bool is_webkit_initialized_;
@@ -181,6 +210,15 @@ class ExtensionDispatcher : public content::RenderProcessObserver {
   bool webrequest_adblock_;
   bool webrequest_adblock_plus_;
   bool webrequest_other_;
+
+  ResourceBundleSourceMap source_map_;
+
+  // Cache for the v8 representation of extension API schemas.
+  extensions::V8SchemaRegistry v8_schema_registry_;
+
+  // Bindings that are defined lazily and have BindingInstallers to install
+  // them.
+  std::map<std::string, BindingInstaller> lazy_bindings_map_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionDispatcher);
 };

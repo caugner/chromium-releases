@@ -10,12 +10,14 @@
 #include "base/threading/thread.h"
 #include "content/browser/gpu/gpu_surface_tracker.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
-#include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/renderer_host/resource_dispatcher_host.h"
+#include "content/browser/renderer_host/render_view_host_impl.h"
+#include "content/browser/renderer_host/resource_dispatcher_host_impl.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/browser_thread.h"
 
 using content::BrowserThread;
+using content::RenderViewHostImpl;
+using content::ResourceDispatcherHostImpl;
 
 // A helper used with DidReceiveUpdateMsg that we hold a pointer to in
 // pending_paints_.
@@ -79,7 +81,7 @@ RenderWidgetHelper::~RenderWidgetHelper() {
 
 void RenderWidgetHelper::Init(
     int render_process_id,
-    ResourceDispatcherHost* resource_dispatcher_host) {
+    ResourceDispatcherHostImpl* resource_dispatcher_host) {
   render_process_id_ = render_process_id;
   resource_dispatcher_host_ = resource_dispatcher_host;
 }
@@ -215,13 +217,23 @@ void RenderWidgetHelper::CreateNewWindow(
     base::ProcessHandle render_process,
     int* route_id,
     int* surface_id) {
-  *route_id = GetNextRoutingID();
-  *surface_id = GpuSurfaceTracker::Get()->AddSurfaceForRenderer(
-      render_process_id_, *route_id);
-  // Block resource requests until the view is created, since the HWND might be
-  // needed if a response ends up creating a plugin.
-  resource_dispatcher_host_->BlockRequestsForRoute(
-      render_process_id_, *route_id);
+  if (params.opener_suppressed) {
+    // If the opener is supppressed, we should open the window in a new
+    // BrowsingInstance, and thus a new process.  That means the current
+    // renderer process will not be able to route messages to it.  Because of
+    // this, we will immediately show and navigate the window in
+    // OnCreateWindowOnUI, using the params provided here.
+    *route_id = MSG_ROUTING_NONE;
+    *surface_id = 0;
+  } else {
+    *route_id = GetNextRoutingID();
+    *surface_id = GpuSurfaceTracker::Get()->AddSurfaceForRenderer(
+        render_process_id_, *route_id);
+    // Block resource requests until the view is created, since the HWND might
+    // be needed if a response ends up creating a plugin.
+    resource_dispatcher_host_->BlockRequestsForRoute(
+        render_process_id_, *route_id);
+  }
 
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
@@ -232,14 +244,18 @@ void RenderWidgetHelper::CreateNewWindow(
 void RenderWidgetHelper::OnCreateWindowOnUI(
     const ViewHostMsg_CreateWindow_Params& params,
     int route_id) {
-  RenderViewHost* host =
-      RenderViewHost::FromID(render_process_id_, params.opener_id);
+  RenderViewHostImpl* host =
+      RenderViewHostImpl::FromID(render_process_id_, params.opener_id);
   if (host)
     host->CreateNewWindow(route_id, params);
 
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
-      base::Bind(&RenderWidgetHelper::OnCreateWindowOnIO, this, route_id));
+  // We only need to resume blocked requests if we used a valid route_id.
+  // See CreateNewWindow.
+  if (route_id != MSG_ROUTING_NONE) {
+    BrowserThread::PostTask(
+        BrowserThread::IO, FROM_HERE,
+        base::Bind(&RenderWidgetHelper::OnCreateWindowOnIO, this, route_id));
+  }
 }
 
 void RenderWidgetHelper::OnCreateWindowOnIO(int route_id) {
@@ -276,14 +292,16 @@ void RenderWidgetHelper::CreateNewFullscreenWidget(int opener_id,
 
 void RenderWidgetHelper::OnCreateWidgetOnUI(
     int opener_id, int route_id, WebKit::WebPopupType popup_type) {
-  RenderViewHost* host = RenderViewHost::FromID(render_process_id_, opener_id);
+  RenderViewHostImpl* host = RenderViewHostImpl::FromID(
+      render_process_id_, opener_id);
   if (host)
     host->CreateNewWidget(route_id, popup_type);
 }
 
 void RenderWidgetHelper::OnCreateFullscreenWidgetOnUI(int opener_id,
                                                       int route_id) {
-  RenderViewHost* host = RenderViewHost::FromID(render_process_id_, opener_id);
+  RenderViewHostImpl* host = RenderViewHostImpl::FromID(
+      render_process_id_, opener_id);
   if (host)
     host->CreateNewFullscreenWidget(route_id);
 }

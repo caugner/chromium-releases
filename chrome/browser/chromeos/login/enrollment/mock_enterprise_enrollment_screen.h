@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -35,8 +35,10 @@ class MockEnterpriseEnrollmentScreenActor
   MOCK_METHOD1(ShowAuthError, void(const GoogleServiceAuthError& error));
   MOCK_METHOD0(ShowAccountError, void());
   MOCK_METHOD0(ShowSerialNumberError, void());
+  MOCK_METHOD0(ShowEnrollmentModeError, void());
   MOCK_METHOD0(ShowFatalAuthError, void());
   MOCK_METHOD0(ShowFatalEnrollmentError, void());
+  MOCK_METHOD0(ShowAutoEnrollmentError, void());
   MOCK_METHOD0(ShowNetworkEnrollmentError, void());
   MOCK_METHOD2(SubmitTestCredentials, void(const std::string& email,
                                            const std::string& password));

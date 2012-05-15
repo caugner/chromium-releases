@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/mock_cryptohome_library.h"
 #include "chrome/browser/chromeos/cros/mock_library_loader.h"
+#include "chrome/browser/chromeos/cryptohome/mock_async_method_caller.h"
 #include "chrome/browser/chromeos/dbus/mock_dbus_thread_manager.h"
 #include "chrome/browser/chromeos/dbus/mock_session_manager_client.h"
 #include "chrome/browser/chromeos/login/authenticator.h"
@@ -21,6 +22,7 @@
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/net/predictor.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
+#include "chrome/browser/policy/cloud_policy_data_store.h"
 #include "chrome/browser/policy/proto/device_management_backend.pb.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_paths.h"
@@ -54,9 +56,14 @@ using content::BrowserThread;
 const char kTrue[] = "true";
 const char kDomain[] = "domain.com";
 const char kUsername[] = "user@domain.com";
+const char kMode[] = "enterprise";
+const char kDeviceId[] = "100200300";
 const char kUsernameOtherDomain[] = "user@other.com";
 const char kAttributeOwned[] = "enterprise.owned";
 const char kAttributeOwner[] = "enterprise.user";
+const char kAttrEnterpriseDomain[] = "enterprise.domain";
+const char kAttrEnterpriseMode[] = "enterprise.mode";
+const char kAttrEnterpriseDeviceId[] = "enterprise.device_id";
 
 const char kOAuthTokenCookie[] = "oauth_token=1234";
 const char kOAuthGetAccessTokenData[] =
@@ -97,6 +104,9 @@ class LoginUtilsTestBase : public TESTBASE,
         ui_thread_(content::BrowserThread::UI, &loop_),
         file_thread_(content::BrowserThread::FILE, &loop_),
         io_thread_(content::BrowserThread::IO),
+        mock_async_method_caller_(NULL),
+        connector_(NULL),
+        cryptohome_(NULL),
         prepared_profile_(NULL) {}
 
   virtual void SetUp() OVERRIDE {
@@ -124,6 +134,10 @@ class LoginUtilsTestBase : public TESTBASE,
     EXPECT_CALL(*session_managed_client, RetrievePolicy(_))
         .WillRepeatedly(MockSessionManagerClientPolicyCallback(""));
 
+    mock_async_method_caller_ = new cryptohome::MockAsyncMethodCaller;
+    cryptohome::AsyncMethodCaller::InitializeForTesting(
+        mock_async_method_caller_);
+
     io_thread_state_.reset(new IOThread(local_state_.Get(), NULL, NULL));
     browser_process_->SetIOThread(io_thread_state_.get());
 
@@ -150,6 +164,15 @@ class LoginUtilsTestBase : public TESTBASE,
     EXPECT_CALL(*cryptohome_, InstallAttributesSet(kAttributeOwner,
                                                    kUsername))
         .WillRepeatedly(Return(true));
+    EXPECT_CALL(*cryptohome_, InstallAttributesSet(kAttrEnterpriseDomain,
+                                                   kDomain))
+        .WillRepeatedly(Return(true));
+    EXPECT_CALL(*cryptohome_, InstallAttributesSet(kAttrEnterpriseMode,
+                                                   kMode))
+        .WillRepeatedly(Return(true));
+    EXPECT_CALL(*cryptohome_, InstallAttributesSet(kAttrEnterpriseDeviceId,
+                                                   kDeviceId))
+        .WillRepeatedly(Return(true));
     EXPECT_CALL(*cryptohome_, InstallAttributesFinalize())
         .WillRepeatedly(Return(true));
     EXPECT_CALL(*cryptohome_, InstallAttributesGet(kAttributeOwned, _))
@@ -157,6 +180,15 @@ class LoginUtilsTestBase : public TESTBASE,
                               Return(true)));
     EXPECT_CALL(*cryptohome_, InstallAttributesGet(kAttributeOwner, _))
         .WillRepeatedly(DoAll(SetArgPointee<1>(kUsername),
+                              Return(true)));
+    EXPECT_CALL(*cryptohome_, InstallAttributesGet(kAttrEnterpriseDomain, _))
+        .WillRepeatedly(DoAll(SetArgPointee<1>(kDomain),
+                              Return(true)));
+    EXPECT_CALL(*cryptohome_, InstallAttributesGet(kAttrEnterpriseMode, _))
+        .WillRepeatedly(DoAll(SetArgPointee<1>(kMode),
+                              Return(true)));
+    EXPECT_CALL(*cryptohome_, InstallAttributesGet(kAttrEnterpriseDeviceId, _))
+        .WillRepeatedly(DoAll(SetArgPointee<1>(kDeviceId),
                               Return(true)));
     test_api->SetCryptohomeLibrary(cryptohome_, true);
 
@@ -169,6 +201,9 @@ class LoginUtilsTestBase : public TESTBASE,
   }
 
   virtual void TearDown() OVERRIDE {
+    cryptohome::AsyncMethodCaller::Shutdown();
+    mock_async_method_caller_ = NULL;
+
     loop_.RunAllPending();
     {
       // chrome_browser_net::Predictor usually skips its shutdown routines on
@@ -220,7 +255,6 @@ class LoginUtilsTestBase : public TESTBASE,
 
   virtual void OnLoginSuccess(const std::string& username,
                               const std::string& password,
-                              const GaiaAuthConsumer::ClientLoginResult& creds,
                               bool pending_requests,
                               bool using_oauth) OVERRIDE {
     FAIL() << "OnLoginSuccess not expected";
@@ -230,6 +264,10 @@ class LoginUtilsTestBase : public TESTBASE,
     EXPECT_CALL(*cryptohome_, InstallAttributesIsFirstInstall())
         .WillOnce(Return(true))
         .WillRepeatedly(Return(false));
+    policy::CloudPolicyDataStore* device_data_store =
+        connector_->GetDeviceCloudPolicyDataStore();
+    device_data_store->set_device_mode(policy::DEVICE_MODE_ENTERPRISE);
+    device_data_store->set_device_id(kDeviceId);
     EXPECT_EQ(policy::EnterpriseInstallAttributes::LOCK_SUCCESS,
               connector_->LockDevice(username));
     loop_.RunAllPending();
@@ -241,8 +279,8 @@ class LoginUtilsTestBase : public TESTBASE,
     EXPECT_CALL(*session_managed_client, StartSession(_));
     EXPECT_CALL(*cryptohome_, GetSystemSalt())
         .WillRepeatedly(Return(std::string("stub_system_salt")));
-    EXPECT_CALL(*cryptohome_, AsyncMount(_, _, _, _))
-        .WillRepeatedly(Return(true));
+    EXPECT_CALL(*mock_async_method_caller_, AsyncMount(_, _, _, _))
+        .WillRepeatedly(Return());
 
     scoped_refptr<Authenticator> authenticator =
         LoginUtils::Get()->CreateAuthenticator(this);
@@ -250,9 +288,8 @@ class LoginUtilsTestBase : public TESTBASE,
                                  username,
                                  "password");
 
-    GaiaAuthConsumer::ClientLoginResult credentials;
     LoginUtils::Get()->PrepareProfile(username, std::string(), "password",
-                                      credentials, false, true, false, this);
+                                      false, true, false, this);
     loop_.RunAllPending();
   }
 
@@ -292,6 +329,8 @@ class LoginUtilsTestBase : public TESTBASE,
     em::DeviceRegisterResponse* register_response =
         response.mutable_register_response();
     register_response->set_device_management_token(kDMToken);
+    register_response->set_enrollment_type(
+        em::DeviceRegisterResponse::ENTERPRISE);
     return PrepareDMServiceFetcher(kDMRegisterRequest, response);
   }
 
@@ -316,6 +355,8 @@ class LoginUtilsTestBase : public TESTBASE,
   MockDBusThreadManager mock_dbus_thread_manager_;
   TestURLFetcherFactory test_url_fetcher_factory_;
 
+  cryptohome::MockAsyncMethodCaller* mock_async_method_caller_;
+
   policy::BrowserPolicyConnector* connector_;
   MockCryptohomeLibrary* cryptohome_;
   Profile* prepared_profile_;
@@ -335,7 +376,8 @@ class LoginUtilsBlockingLoginTest
 
 TEST_F(LoginUtilsTest, NormalLoginDoesntBlock) {
   UserManager* user_manager = UserManager::Get();
-  EXPECT_FALSE(user_manager->user_is_logged_in());
+  ASSERT_TRUE(!user_manager->IsUserLoggedIn() ||
+              user_manager->IsLoggedInAsStub());
   EXPECT_FALSE(connector_->IsEnterpriseManaged());
   EXPECT_FALSE(prepared_profile_);
 
@@ -343,20 +385,23 @@ TEST_F(LoginUtilsTest, NormalLoginDoesntBlock) {
   PrepareProfile(kUsername);
 
   EXPECT_TRUE(prepared_profile_);
-  EXPECT_TRUE(user_manager->user_is_logged_in());
-  EXPECT_EQ(kUsername, user_manager->logged_in_user().email());
+  ASSERT_TRUE(user_manager->IsUserLoggedIn() &&
+              !user_manager->IsLoggedInAsStub());
+  EXPECT_EQ(kUsername, user_manager->GetLoggedInUser().email());
 }
 
 TEST_F(LoginUtilsTest, EnterpriseLoginDoesntBlockForNormalUser) {
   UserManager* user_manager = UserManager::Get();
-  EXPECT_FALSE(user_manager->user_is_logged_in());
+  ASSERT_TRUE(!user_manager->IsUserLoggedIn() ||
+              user_manager->IsLoggedInAsStub());
   EXPECT_FALSE(connector_->IsEnterpriseManaged());
   EXPECT_FALSE(prepared_profile_);
 
   // Enroll the device.
   LockDevice(kUsername);
 
-  EXPECT_FALSE(user_manager->user_is_logged_in());
+  ASSERT_TRUE(!user_manager->IsUserLoggedIn() ||
+              user_manager->IsLoggedInAsStub());
   EXPECT_TRUE(connector_->IsEnterpriseManaged());
   EXPECT_EQ(kDomain, connector_->GetEnterpriseDomain());
   EXPECT_FALSE(prepared_profile_);
@@ -365,20 +410,23 @@ TEST_F(LoginUtilsTest, EnterpriseLoginDoesntBlockForNormalUser) {
   PrepareProfile(kUsernameOtherDomain);
 
   EXPECT_TRUE(prepared_profile_);
-  EXPECT_TRUE(user_manager->user_is_logged_in());
-  EXPECT_EQ(kUsernameOtherDomain, user_manager->logged_in_user().email());
+  ASSERT_TRUE(user_manager->IsUserLoggedIn() &&
+              !user_manager->IsLoggedInAsStub());
+  EXPECT_EQ(kUsernameOtherDomain, user_manager->GetLoggedInUser().email());
 }
 
 TEST_P(LoginUtilsBlockingLoginTest, EnterpriseLoginBlocksForEnterpriseUser) {
   UserManager* user_manager = UserManager::Get();
-  EXPECT_FALSE(user_manager->user_is_logged_in());
+  ASSERT_TRUE(!user_manager->IsUserLoggedIn() ||
+              user_manager->IsLoggedInAsStub());
   EXPECT_FALSE(connector_->IsEnterpriseManaged());
   EXPECT_FALSE(prepared_profile_);
 
   // Enroll the device.
   LockDevice(kUsername);
 
-  EXPECT_FALSE(user_manager->user_is_logged_in());
+  ASSERT_TRUE(!user_manager->IsUserLoggedIn() ||
+              user_manager->IsLoggedInAsStub());
   EXPECT_TRUE(connector_->IsEnterpriseManaged());
   EXPECT_EQ(kDomain, connector_->GetEnterpriseDomain());
   EXPECT_FALSE(prepared_profile_);
@@ -387,7 +435,8 @@ TEST_P(LoginUtilsBlockingLoginTest, EnterpriseLoginBlocksForEnterpriseUser) {
   PrepareProfile(kUsername);
 
   EXPECT_FALSE(prepared_profile_);
-  EXPECT_TRUE(user_manager->user_is_logged_in());
+  ASSERT_TRUE(user_manager->IsUserLoggedIn() &&
+              !user_manager->IsLoggedInAsStub());
 
   GaiaUrls* gaia_urls = GaiaUrls::GetInstance();
   TestURLFetcher* fetcher;

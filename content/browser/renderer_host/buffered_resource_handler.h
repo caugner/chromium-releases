@@ -7,10 +7,9 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 #include "content/browser/renderer_host/layered_resource_handler.h"
-
-class ResourceDispatcherHost;
 
 namespace net {
 class URLRequest;
@@ -21,17 +20,18 @@ struct WebPluginInfo;
 }
 
 namespace content {
+class ResourceDispatcherHostImpl;
 
 // Used to buffer a request until enough data has been received.
 class BufferedResourceHandler : public LayeredResourceHandler {
  public:
   BufferedResourceHandler(ResourceHandler* handler,
-                          ResourceDispatcherHost* host,
+                          ResourceDispatcherHostImpl* host,
                           net::URLRequest* request);
 
   // ResourceHandler implementation:
   virtual bool OnResponseStarted(int request_id,
-                                 content::ResourceResponse* response) OVERRIDE;
+                                 ResourceResponse* response) OVERRIDE;
   virtual bool OnWillRead(int request_id,
                           net::IOBuffer** buf,
                           int* buf_size,
@@ -80,8 +80,8 @@ class BufferedResourceHandler : public LayeredResourceHandler {
   // Called on the IO thread once the list of plugins has been loaded.
   void OnPluginsLoaded(const std::vector<webkit::WebPluginInfo>& plugins);
 
-  scoped_refptr<content::ResourceResponse> response_;
-  ResourceDispatcherHost* host_;
+  scoped_refptr<ResourceResponse> response_;
+  ResourceDispatcherHostImpl* host_;
   net::URLRequest* request_;
   scoped_refptr<net::IOBuffer> read_buffer_;
   scoped_refptr<net::IOBuffer> my_buffer_;

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,12 +10,14 @@
 #include "base/values.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/browser/renderer_host/render_view_host.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
+
+using content::RenderViewHost;
 
 WebUITestHandler::WebUITestHandler()
     : test_done_(false),
@@ -29,7 +31,7 @@ void WebUITestHandler::PreloadJavaScript(const string16& js_text,
                                          RenderViewHost* preload_host) {
   DCHECK(preload_host);
   preload_host->Send(new ChromeViewMsg_WebUIJavaScript(
-      preload_host->routing_id(), string16(), js_text, 0,
+      preload_host->GetRoutingID(), string16(), js_text, 0,
       false));
 }
 

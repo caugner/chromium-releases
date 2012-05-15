@@ -19,19 +19,26 @@ class TestShellDelegate : public ShellDelegate {
 
   // Overridden from ShellDelegate:
   virtual views::Widget* CreateStatusArea() OVERRIDE;
-#if defined(OS_CHROMEOS)
+  virtual bool IsUserLoggedIn() OVERRIDE;
   virtual void LockScreen() OVERRIDE;
-#endif
+  virtual void UnlockScreen() OVERRIDE;
+  virtual bool IsScreenLocked() const OVERRIDE;
   virtual void Exit() OVERRIDE;
-  virtual void BuildAppListModel(AppListModel* model) OVERRIDE;
+  virtual void NewWindow(bool incognito) OVERRIDE;
   virtual AppListViewDelegate* CreateAppListViewDelegate() OVERRIDE;
   virtual std::vector<aura::Window*> GetCycleWindowList(
-      CycleSource source,
-      CycleOrder order) const OVERRIDE;
-  virtual void CreateNewWindow() OVERRIDE;
-  virtual void LauncherItemClicked(const LauncherItem& item) OVERRIDE;
-  virtual int GetBrowserShortcutResourceId() OVERRIDE;
-  virtual string16 GetLauncherItemTitle(const LauncherItem& item) OVERRIDE;
+      CycleSource source) const OVERRIDE;
+  virtual void StartPartialScreenshot(
+      ScreenshotDelegate* screenshot_delegate) OVERRIDE;
+  virtual LauncherDelegate* CreateLauncherDelegate(
+      ash::LauncherModel* model) OVERRIDE;
+  virtual SystemTrayDelegate* CreateSystemTrayDelegate(SystemTray* t) OVERRIDE;
+  virtual UserWallpaperDelegate* CreateUserWallpaperDelegate() OVERRIDE;
+
+ private:
+  bool locked_;
+
+  DISALLOW_COPY_AND_ASSIGN(TestShellDelegate);
 };
 
 }  // namespace test

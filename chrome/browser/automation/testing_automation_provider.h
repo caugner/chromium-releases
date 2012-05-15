@@ -13,6 +13,8 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
+#include "chrome/browser/automation/automation_event_observer.h"
+#include "chrome/browser/automation/automation_event_queue.h"
 #include "chrome/browser/automation/automation_provider.h"
 #include "chrome/browser/automation/automation_provider_json.h"
 #include "chrome/browser/history/history.h"
@@ -677,6 +679,14 @@ class TestingAutomationProvider : public AutomationProvider,
   void TriggerBrowserActionById(base::DictionaryValue* args,
                                 IPC::Message* reply_message);
 
+#if !defined(NO_TCMALLOC) && (defined(OS_LINUX) || defined(OS_CHROMEOS))
+  // Dumps a heap profile.
+  // It also checks whether the heap profiler is running, or not.
+  // Uses the JSON interface for input/output.
+  void HeapProfilerDump(base::DictionaryValue* args,
+                        IPC::Message* reply_message);
+#endif  // !defined(NO_TCMALLOC) && (defined(OS_LINUX) || defined(OS_CHROMEOS))
+
   // Responds to the Find request and returns the match count.
   void FindInPage(Browser* browser,
                   base::DictionaryValue* args,
@@ -882,6 +892,16 @@ class TestingAutomationProvider : public AutomationProvider,
                         base::DictionaryValue* args,
                         IPC::Message* reply_message);
 
+  // Gets statistics about the v8 heap in a renderer process.
+  void GetV8HeapStats(Browser* browser,
+                      base::DictionaryValue* args,
+                      IPC::Message* reply_message);
+
+  // Gets the current FPS associated with a renderer process view.
+  void GetFPS(Browser* browser,
+              base::DictionaryValue* args,
+              IPC::Message* reply_message);
+
   // Waits for all views to stop loading or a modal dialog to become active.
   void WaitForAllViewsToStopLoading(base::DictionaryValue* args,
                                     IPC::Message* reply_message);
@@ -932,6 +952,43 @@ class TestingAutomationProvider : public AutomationProvider,
   // dropped.
   // TODO(kkania): Replace the non-JSON counterparts and drop the JSON suffix.
   void ExecuteJavascriptJSON(
+      base::DictionaryValue* args, IPC::Message* reply_message);
+
+  // Creates a DomRaisedEventObserver associated with the AutomationEventQueue.
+  // Example:
+  //   input: { "event_name": "login complete",
+  //            "windex": 1,
+  //            "tab_index": 1,
+  //            "frame_xpath": "//frames[1]",
+  //          }
+  //   output: { "observer_id": 1 }
+  void AddDomRaisedEventObserver(
+      base::DictionaryValue* args, IPC::Message* reply_message);
+
+  // Removes an event observer associated with the AutomationEventQueue.
+  // Example:
+  //   input: { "observer_id": 1 }
+  //   output: none
+  void RemoveEventObserver(
+      base::DictionaryValue* args, IPC::Message* reply_message);
+
+  // Retrieves an event from the AutomationEventQueue.
+  // Blocks if 'blocking' is true, otherwise returns immediately.
+  // Example:
+  //   input: { "observer_id": 1,
+  //            "blocking": true,
+  //          }
+  //   output: { "type": "raised",
+  //             "name": "login complete"
+  //             "id": 1,
+  //           }
+  void GetNextEvent(base::DictionaryValue* args, IPC::Message* reply_message);
+
+  // Removes all events and observers attached to the AutomationEventQueue.
+  // Example:
+  //   input: none
+  //   output: none
+  void ClearEventQueue(
       base::DictionaryValue* args, IPC::Message* reply_message);
 
   // Executes javascript in the specified frame of a render view.
@@ -1444,6 +1501,12 @@ class TestingAutomationProvider : public AutomationProvider,
   void GetEnterprisePolicyInfo(DictionaryValue* args,
                                IPC::Message* reply_message);
 
+  // Accessibility.
+  void EnableSpokenFeedback(DictionaryValue* args, IPC::Message* reply_message);
+
+  void IsSpokenFeedbackEnabled(DictionaryValue* args,
+                               IPC::Message* reply_message);
+
   // Time.
   void GetTimeInfo(Browser* browser, base::DictionaryValue* args,
                    IPC::Message* reply_message);
@@ -1546,6 +1609,10 @@ class TestingAutomationProvider : public AutomationProvider,
 
   // The stored data for the ImportSettings operation.
   ImportSettingsData import_settings_data_;
+
+  // The automation event observer queue. It is lazily created when an observer
+  // is added to avoid overhead when not needed.
+  scoped_ptr<AutomationEventQueue> automation_event_queue_;
 
   DISALLOW_COPY_AND_ASSIGN(TestingAutomationProvider);
 };

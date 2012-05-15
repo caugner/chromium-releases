@@ -1,3 +1,7 @@
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
 [
   {
     "namespace": "terminalPrivate",
@@ -68,6 +72,40 @@
             "name": "input",
             "type": "string",
             "description": "Input we are sending to the process."
+          },
+          {
+            "name": "callback",
+            "type": "function",
+            "optional": true,
+            "description": "Callback that will be called when sendInput method ends. Returns success.",
+            "parameters": [
+              {
+                "name": "success",
+                "type": "boolean"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "onTerminalResize",
+        "type": "function",
+        "description": "Notify the process with the id pid that terminal window size has changed.",
+        "parameters": [
+          {
+            "name": "pid",
+            "type": "integer",
+            "description": "The pid of the process."
+          },
+          {
+            "name": "width",
+            "type": "integer",
+            "description": "New window width (as column count)."
+          },
+          {
+            "name": "height",
+            "type": "integer",
+            "description": "New window height (as row count)."
           },
           {
             "name": "callback",

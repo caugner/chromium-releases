@@ -4,18 +4,23 @@
 
 #include "content/browser/tab_contents/tab_contents_view_helper.h"
 
-#include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/renderer_host/render_widget_host.h"
-#include "content/browser/renderer_host/render_widget_host_view.h"
+#include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/common/view_messages.h"
+#include "content/port/browser/render_widget_host_view_port.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/site_instance.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_contents_view.h"
 
+using content::RenderViewHostImpl;
+using content::RenderWidgetHost;
+using content::RenderWidgetHostImpl;
+using content::RenderWidgetHostView;
+using content::RenderWidgetHostViewPort;
 using content::WebContents;
 
 TabContentsViewHelper::TabContentsViewHelper() {
@@ -34,7 +39,7 @@ void TabContentsViewHelper::Observe(
   RenderWidgetHost* host = content::Source<RenderWidgetHost>(source).ptr();
   for (PendingWidgetViews::iterator i = pending_widget_views_.begin();
        i != pending_widget_views_.end(); ++i) {
-    if (host->view() == i->second) {
+    if (host->GetView() == i->second) {
       pending_widget_views_.erase(i);
       break;
     }
@@ -57,30 +62,61 @@ TabContents* TabContentsViewHelper::CreateNewWindow(
   if (!should_create)
     return NULL;
 
+  // We usually create the new window in the same BrowsingInstance (group of
+  // script-related windows), by passing in the current SiteInstance.  However,
+  // if the opener is being suppressed, we create a new SiteInstance in its own
+  // BrowsingInstance.
+  scoped_refptr<content::SiteInstance> site_instance =
+      params.opener_suppressed ?
+      content::SiteInstance::Create(web_contents->GetBrowserContext()) :
+      web_contents->GetSiteInstance();
+
   // Create the new web contents. This will automatically create the new
   // WebContentsView. In the future, we may want to create the view separately.
   TabContents* new_contents =
       new TabContents(web_contents->GetBrowserContext(),
-                      web_contents->GetSiteInstance(),
+                      site_instance,
                       route_id,
                       static_cast<TabContents*>(web_contents),
                       NULL);
   new_contents->set_opener_web_ui_type(
       web_contents->GetWebUITypeForCurrentState());
-  content::WebContentsView* new_view = new_contents->GetView();
+  new_contents->set_has_opener(!params.opener_url.is_empty());
 
-  // TODO(brettw): It seems bogus that we have to call this function on the
-  // newly created object and give it one of its own member variables.
-  new_view->CreateViewForWidget(new_contents->GetRenderViewHost());
+  if (!params.opener_suppressed) {
+    content::WebContentsView* new_view = new_contents->GetView();
 
-  // Save the created window associated with the route so we can show it later.
-  pending_contents_[route_id] = new_contents;
+    // TODO(brettw): It seems bogus that we have to call this function on the
+    // newly created object and give it one of its own member variables.
+    new_view->CreateViewForWidget(new_contents->GetRenderViewHost());
+
+    // Save the created window associated with the route so we can show it
+    // later.
+    DCHECK_NE(MSG_ROUTING_NONE, route_id);
+    pending_contents_[route_id] = new_contents;
+  }
 
   if (web_contents->GetDelegate())
     web_contents->GetDelegate()->WebContentsCreated(web_contents,
                                                     params.opener_frame_id,
                                                     params.target_url,
                                                     new_contents);
+
+  if (params.opener_suppressed) {
+    // When the opener is suppressed, the original renderer cannot access the
+    // new window.  As a result, we need to show and navigate the window here.
+    gfx::Rect initial_pos;
+    web_contents->AddNewContents(new_contents,
+                                 params.disposition,
+                                 initial_pos,
+                                 params.user_gesture);
+
+    content::OpenURLParams open_params(params.target_url, content::Referrer(),
+                                       CURRENT_TAB,
+                                       content::PAGE_TRANSITION_LINK,
+                                       true /* is_renderer_initiated */);
+    new_contents->OpenURL(open_params);
+  }
 
   return new_contents;
 }
@@ -91,12 +127,13 @@ RenderWidgetHostView* TabContentsViewHelper::CreateNewWidget(
     bool is_fullscreen,
     WebKit::WebPopupType popup_type) {
   content::RenderProcessHost* process = web_contents->GetRenderProcessHost();
-  RenderWidgetHost* widget_host = new RenderWidgetHost(process, route_id);
-  RenderWidgetHostView* widget_view =
-      RenderWidgetHostView::CreateViewForWidget(widget_host);
+  RenderWidgetHostImpl* widget_host =
+      new RenderWidgetHostImpl(process, route_id);
+  RenderWidgetHostViewPort* widget_view =
+      RenderWidgetHostViewPort::CreateViewForWidget(widget_host);
   if (!is_fullscreen) {
     // Popups should not get activated.
-    widget_view->set_popup_type(popup_type);
+    widget_view->SetPopupType(popup_type);
   }
   // Save the created widget associated with the route so we can show it later.
   pending_widget_views_[route_id] = widget_view;
@@ -116,11 +153,11 @@ TabContents* TabContentsViewHelper::GetCreatedWindow(int route_id) {
   pending_contents_.erase(route_id);
 
   if (!new_contents->GetRenderProcessHost()->HasConnection() ||
-      !new_contents->GetRenderViewHost()->view())
+      !new_contents->GetRenderViewHost()->GetView())
     return NULL;
 
   // TODO(brettw): It seems bogus to reach into here and initialize the host.
-  new_contents->GetRenderViewHost()->Init();
+  static_cast<RenderViewHostImpl*>(new_contents->GetRenderViewHost())->Init();
   return new_contents;
 }
 
@@ -135,7 +172,7 @@ RenderWidgetHostView* TabContentsViewHelper::GetCreatedWidget(int route_id) {
   pending_widget_views_.erase(route_id);
 
   RenderWidgetHost* widget_host = widget_host_view->GetRenderWidgetHost();
-  if (!widget_host->process()->HasConnection()) {
+  if (!widget_host->GetProcess()->HasConnection()) {
     // The view has gone away or the renderer crashed. Nothing to do.
     return NULL;
   }
@@ -167,13 +204,14 @@ RenderWidgetHostView* TabContentsViewHelper::ShowCreatedWidget(
   if (web_contents->GetDelegate())
     web_contents->GetDelegate()->RenderWidgetShowing();
 
-  RenderWidgetHostView* widget_host_view = GetCreatedWidget(route_id);
+  RenderWidgetHostViewPort* widget_host_view =
+      RenderWidgetHostViewPort::FromRWHV(GetCreatedWidget(route_id));
   if (is_fullscreen) {
     widget_host_view->InitAsFullscreen(web_contents->GetRenderWidgetHostView());
   } else {
     widget_host_view->InitAsPopup(web_contents->GetRenderWidgetHostView(),
                                   initial_pos);
   }
-  widget_host_view->GetRenderWidgetHost()->Init();
+  RenderWidgetHostImpl::From(widget_host_view->GetRenderWidgetHost())->Init();
   return widget_host_view;
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,15 +13,15 @@
 #include "content/common/child_process.h"
 #include "content/common/child_process_messages.h"
 #include "content/common/child_trace_message_filter.h"
-#include "content/common/file_system/file_system_dispatcher.h"
+#include "content/common/fileapi/file_system_dispatcher.h"
 #include "content/common/quota_dispatcher.h"
 #include "content/common/resource_dispatcher.h"
 #include "content/common/socket_stream_dispatcher.h"
 #include "content/public/common/content_switches.h"
 #include "ipc/ipc_logging.h"
+#include "ipc/ipc_switches.h"
 #include "ipc/ipc_sync_channel.h"
 #include "ipc/ipc_sync_message_filter.h"
-#include "ipc/ipc_switches.h"
 #include "webkit/glue/webkit_glue.h"
 
 #if defined(OS_WIN)
@@ -90,6 +90,7 @@ void ChildThread::OnChannelError() {
 }
 
 bool ChildThread::Send(IPC::Message* msg) {
+  DCHECK(MessageLoop::current() == message_loop());
   if (!channel_.get()) {
     delete msg;
     return false;
@@ -218,8 +219,9 @@ void ChildThread::OnSetIPCLoggingEnabled(bool enable) {
 }
 #endif  //  IPC_MESSAGE_LOG_ENABLED
 
-void ChildThread::OnSetProfilerStatus(bool enable) {
-  tracked_objects::ThreadData::InitializeAndSetTrackingStatus(enable);
+void ChildThread::OnSetProfilerStatus(
+    tracked_objects::ThreadData::Status status) {
+  tracked_objects::ThreadData::InitializeAndSetTrackingStatus(status);
 }
 
 void ChildThread::OnGetChildProfilerData(
@@ -250,6 +252,11 @@ void ChildThread::OnDumpHandles() {
 
 ChildThread* ChildThread::current() {
   return ChildProcess::current()->main_thread();
+}
+
+bool ChildThread::IsWebFrameValid(WebKit::WebFrame* frame) {
+  // Return false so that it is overridden in any process in which it is used.
+  return false;
 }
 
 void ChildThread::OnProcessFinalRelease() {

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,6 +16,8 @@
 #include "chrome/browser/chromeos/language_preferences.h"
 #include "chrome/browser/chromeos/status/status_area_view_chromeos.h"
 #include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_service.h"
@@ -82,47 +84,18 @@ enum {
 const int kRadioGroupLanguage = 1 << 16;
 const int kRadioGroupNone = -1;
 
-// A mapping from an input method id to a string for the language indicator. The
-// mapping is necessary since some input methods belong to the same language.
-// For example, both "xkb:us::eng" and "xkb:us:dvorak:eng" are for US English.
-const struct {
-  const char* input_method_id;
-  const char* indicator_text;
-} kMappingFromIdToIndicatorText[] = {
-  // To distinguish from "xkb:us::eng"
-  { "xkb:us:altgr-intl:eng", "EXTD" },
-  { "xkb:us:dvorak:eng", "DV" },
-  { "xkb:us:intl:eng", "INTL" },
-  { "xkb:us:colemak:eng", "CO" },
-  { "english-m", "??" },
-  { "xkb:de:neo:ger", "NEO" },
-  // To distinguish from "xkb:es::spa"
-  { "xkb:es:cat:cat", "CAS" },
-  // To distinguish from "xkb:gb::eng"
-  { "xkb:gb:dvorak:eng", "DV" },
-  // To distinguish from "xkb:jp::jpn"
-  { "mozc", "\xe3\x81\x82" },  // U+3042, Japanese Hiragana letter A in UTF-8.
-  { "mozc-dv", "\xe3\x81\x82" },
-  { "mozc-jp", "\xe3\x81\x82" },
-  { "zinnia-japanese", "\xe6\x89\x8b" },  // U+624B, "hand"
-  // For simplified Chinese input methods
-  { "pinyin", "\xe6\x8b\xbc" },  // U+62FC
-  { "pinyin-dv", "\xe6\x8b\xbc" },
-  // For traditional Chinese input methods
-  { "mozc-chewing", "\xe9\x85\xb7" },  // U+9177
-  { "m17n:zh:cangjie", "\xe5\x80\x89" },  // U+5009
-  { "m17n:zh:quick", "\xe9\x80\x9f" },  // U+901F
-  // For Hangul input method.
-  { "mozc-hangul", "\xed\x95\x9c" },  // U+D55C
-};
-const size_t kMappingFromIdToIndicatorTextLen =
-    ARRAYSIZE_UNSAFE(kMappingFromIdToIndicatorText);
-
 // Returns the language name for the given |language_code|.
 string16 GetLanguageName(const std::string& language_code) {
   const string16 language_name = l10n_util::GetDisplayNameForLocale(
       language_code, g_browser_process->GetApplicationLocale(), true);
   return language_name;
+}
+
+PrefService* GetPrefService() {
+  Profile* profile = ProfileManager::GetDefaultProfile();
+  if (profile)
+    return profile->GetPrefs();
+  return NULL;
 }
 
 }  // namespace
@@ -134,8 +107,7 @@ using input_method::InputMethodManager;
 ////////////////////////////////////////////////////////////////////////////////
 // InputMethodMenu
 
-InputMethodMenu::InputMethodMenu(PrefService* pref_service,
-                                 bool for_out_of_box_experience_dialog)
+InputMethodMenu::InputMethodMenu()
     : initialized_prefs_(false),
       initialized_observers_(false),
       input_method_descriptors_(InputMethodManager::GetInstance()->
@@ -147,30 +119,28 @@ InputMethodMenu::InputMethodMenu(PrefService* pref_service,
           new views::MenuItemView(input_method_menu_delegate_.get())),
       input_method_menu_runner_(new views::MenuRunner(input_method_menu_)),
       minimum_input_method_menu_width_(0),
-      menu_alignment_(views::MenuItemView::TOPRIGHT),
-      pref_service_(pref_service),
-      for_out_of_box_experience_dialog_(for_out_of_box_experience_dialog) {
+      menu_alignment_(views::MenuItemView::TOPRIGHT) {
   DCHECK(input_method_descriptors_.get() &&
          !input_method_descriptors_->empty());
 
   // Sync current and previous input methods on Chrome prefs with ibus-daemon.
-  if (pref_service_ && StatusAreaViewChromeos::IsBrowserMode()) {
+  if (StatusAreaViewChromeos::IsBrowserMode())
     InitializePrefMembers();
-  }
 
   if (StatusAreaViewChromeos::IsLoginMode()) {
     registrar_.Add(this,
                    chrome::NOTIFICATION_LOGIN_USER_CHANGED,
                    content::NotificationService::AllSources());
-#if defined(USE_AURA)
-    // On Aura status area is not recreated on sign in.
+    // On Aura status area is not recreated on sign in. Instead, 2 notifications
+    // are sent to Chrome on sign in: NOTIFICATION_LOGIN_USER_CHANGED with
+    // StatusAreaViewChromeos::IsLoginMode() and NOTIFICATION_SESSION_STARTED
+    // with StatusAreaViewChromeos::IsBrowserMode().
     // In case of Chrome crash, Chrome will be reloaded but IsLoginMode() will
-    // return false at this point so NOTIFICATION_PROFILE_CREATED will be
+    // return false at this point so NOTIFICATION_SESSION_STARTED will be
     // ignored and all initialization will happen in ctor.
     registrar_.Add(this,
-                   chrome::NOTIFICATION_PROFILE_CREATED,
+                   chrome::NOTIFICATION_SESSION_STARTED,
                    content::NotificationService::AllSources());
-#endif
   }
   AddObservers();
 }
@@ -207,12 +177,12 @@ bool InputMethodMenu::IsItemCheckedAt(int index) const {
     const input_method::InputMethodDescriptor& input_method
         = input_method_descriptors_->at(index);
     return input_method == InputMethodManager::GetInstance()->
-          current_input_method();
+          GetCurrentInputMethod();
   }
 
   if (GetPropertyIndex(index, &index)) {
-    const input_method::ImePropertyList& property_list
-        = InputMethodManager::GetInstance()->current_ime_properties();
+    const input_method::InputMethodPropertyList& property_list
+        = InputMethodManager::GetInstance()->GetCurrentInputMethodProperties();
     return property_list.at(index).is_selection_item_checked;
   }
 
@@ -223,14 +193,12 @@ bool InputMethodMenu::IsItemCheckedAt(int index) const {
 int InputMethodMenu::GetGroupIdAt(int index) const {
   DCHECK_GE(index, 0);
 
-  if (IndexIsInInputMethodList(index)) {
-    return for_out_of_box_experience_dialog_ ?
-        kRadioGroupNone : kRadioGroupLanguage;
-  }
+  if (IndexIsInInputMethodList(index))
+    return kRadioGroupLanguage;
 
   if (GetPropertyIndex(index, &index)) {
-    const input_method::ImePropertyList& property_list
-        = InputMethodManager::GetInstance()->current_ime_properties();
+    const input_method::InputMethodPropertyList& property_list
+        = InputMethodManager::GetInstance()->GetCurrentInputMethodProperties();
     return property_list.at(index).selection_item_id;
   }
 
@@ -290,14 +258,12 @@ ui::MenuModel::ItemType InputMethodMenu::GetTypeAt(int index) const {
     return ui::MenuModel::TYPE_COMMAND;  // "Customize language and input"
   }
 
-  if (IndexIsInInputMethodList(index)) {
-    return for_out_of_box_experience_dialog_ ?
-        ui::MenuModel::TYPE_COMMAND : ui::MenuModel::TYPE_RADIO;
-  }
+  if (IndexIsInInputMethodList(index))
+    return ui::MenuModel::TYPE_RADIO;
 
   if (GetPropertyIndex(index, &index)) {
-    const input_method::ImePropertyList& property_list
-        = InputMethodManager::GetInstance()->current_ime_properties();
+    const input_method::InputMethodPropertyList& property_list
+        = InputMethodManager::GetInstance()->GetCurrentInputMethodProperties();
     if (property_list.at(index).is_selection_item) {
       return ui::MenuModel::TYPE_RADIO;
     }
@@ -322,8 +288,8 @@ string16 InputMethodMenu::GetLabelAt(int index) const {
     name = GetTextForMenu(input_method_descriptors_->at(index));
   } else if (GetPropertyIndex(index, &index)) {
     InputMethodManager* manager = InputMethodManager::GetInstance();
-    const input_method::ImePropertyList& property_list =
-        manager->current_ime_properties();
+    const input_method::InputMethodPropertyList& property_list =
+        manager->GetCurrentInputMethodProperties();
     return manager->GetInputMethodUtil()->TranslateString(
         property_list.at(index).label);
   }
@@ -353,8 +319,8 @@ void InputMethodMenu::ActivatedAt(int index) {
 
   if (GetPropertyIndex(index, &index)) {
     // Intra-IME switching (e.g. Japanese-Hiragana to Japanese-Katakana).
-    const input_method::ImePropertyList& property_list
-        = InputMethodManager::GetInstance()->current_ime_properties();
+    const input_method::InputMethodPropertyList& property_list
+        = InputMethodManager::GetInstance()->GetCurrentInputMethodProperties();
     const std::string key = property_list.at(index).key;
     if (property_list.at(index).is_selection_item) {
       // Radio button is clicked.
@@ -382,9 +348,10 @@ void InputMethodMenu::ActivatedAt(int index) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// views::ViewMenuDelegate implementation:
+// views::MenuButtonListener implementation:
 
-void InputMethodMenu::RunMenu(views::View* source, const gfx::Point& pt) {
+void InputMethodMenu::OnMenuButtonClicked(views::View* source,
+                                          const gfx::Point& point) {
   PrepareForMenuOpen();
 
   if (minimum_input_method_menu_width_ > 0) {
@@ -413,12 +380,13 @@ void InputMethodMenu::InputMethodChanged(
   UpdateUIFromInputMethod(current_input_method, num_active_input_methods);
 }
 
+// TODO(yusukes): Move code for handling preferences to chromeos/input_method/.
 void InputMethodMenu::PreferenceUpdateNeeded(
     InputMethodManager* manager,
     const input_method::InputMethodDescriptor& previous_input_method,
     const input_method::InputMethodDescriptor& current_input_method) {
   if (StatusAreaViewChromeos::IsBrowserMode()) {
-    if (pref_service_) {  // make sure we're not in unit tests.
+    if (initialized_prefs_) {  // make sure we're not in unit tests.
       // Sometimes (e.g. initial boot) |previous_input_method.id()| is empty.
       previous_input_method_pref_.SetValue(previous_input_method.id());
       current_input_method_pref_.SetValue(current_input_method.id());
@@ -433,7 +401,7 @@ void InputMethodMenu::PreferenceUpdateNeeded(
 
 void InputMethodMenu::PropertyListChanged(
     InputMethodManager* manager,
-    const input_method::ImePropertyList& current_ime_properties) {
+    const input_method::InputMethodPropertyList& current_ime_properties) {
   // Usual order of notifications of input method change is:
   // 1. RegisterProperties(empty)
   // 2. RegisterProperties(list-of-new-properties)
@@ -448,7 +416,7 @@ void InputMethodMenu::PropertyListChanged(
   // awkward clear-then-register behavior.
   if (!current_ime_properties.empty()) {
     const input_method::InputMethodDescriptor& input_method =
-        manager->current_input_method();
+        manager->GetCurrentInputMethod();
     size_t num_active_input_methods = manager->GetNumActiveInputMethods();
     UpdateUIFromInputMethod(input_method, num_active_input_methods);
   }
@@ -458,7 +426,7 @@ void InputMethodMenu::FirstObserverIsAdded(InputMethodManager* manager) {
   // NOTICE: Since this function might be called from the constructor of this
   // class, it's better to avoid calling virtual functions.
 
-  if (pref_service_ && (StatusAreaViewChromeos::IsBrowserMode())) {
+  if (initialized_prefs_ && StatusAreaViewChromeos::IsBrowserMode()) {
     // Get the input method name in the Preferences file which was in use last
     // time, and switch to the method. We remember two input method names in the
     // preference so that the Control+space hot-key could work fine from the
@@ -500,7 +468,9 @@ void InputMethodMenu::ActiveInputMethodsChanged(
 void InputMethodMenu::UpdateUIFromInputMethod(
     const input_method::InputMethodDescriptor& input_method,
     size_t num_active_input_methods) {
-  const string16 name = GetTextForIndicator(input_method);
+  InputMethodManager* manager = InputMethodManager::GetInstance();
+  const string16 name = manager->GetInputMethodUtil()->
+      GetInputMethodShortName(input_method);
   const string16 tooltip = GetTextForMenu(input_method);
   UpdateUI(input_method.id(), name, tooltip, num_active_input_methods);
 }
@@ -522,8 +492,8 @@ void InputMethodMenu::RebuildModel() {
     need_separator = true;
   }
 
-  const input_method::ImePropertyList& property_list
-      = InputMethodManager::GetInstance()->current_ime_properties();
+  const input_method::InputMethodPropertyList& property_list
+      = InputMethodManager::GetInstance()->GetCurrentInputMethodProperties();
   if (!property_list.empty()) {
     if (need_separator) {
       model_->AddSeparator();
@@ -572,8 +542,8 @@ bool InputMethodMenu::GetPropertyIndex(int index, int* property_index) const {
   if ((model_->GetTypeAt(index) == ui::MenuModel::TYPE_RADIO) &&
       (model_->GetCommandIdAt(index) == COMMAND_ID_IME_PROPERTIES)) {
     const int tmp_property_index = model_->GetGroupIdAt(index);
-    const input_method::ImePropertyList& property_list
-        = InputMethodManager::GetInstance()->current_ime_properties();
+    const input_method::InputMethodPropertyList& property_list
+        = InputMethodManager::GetInstance()->GetCurrentInputMethodProperties();
     if (tmp_property_index < static_cast<int>(property_list.size())) {
       *property_index = tmp_property_index;
       return true;
@@ -591,63 +561,6 @@ bool InputMethodMenu::IndexPointsToConfigureImeMenuItem(int index) const {
 
   return ((model_->GetTypeAt(index) == ui::MenuModel::TYPE_RADIO) &&
           (model_->GetCommandIdAt(index) == COMMAND_ID_CUSTOMIZE_LANGUAGE));
-}
-
-string16 InputMethodMenu::GetTextForIndicator(
-    const input_method::InputMethodDescriptor& input_method) {
-  input_method::InputMethodManager* manager =
-      input_method::InputMethodManager::GetInstance();
-
-  // For the status area, we use two-letter, upper-case language code like
-  // "US" and "JP".
-  string16 text;
-
-  // Check special cases first.
-  for (size_t i = 0; i < kMappingFromIdToIndicatorTextLen; ++i) {
-    if (kMappingFromIdToIndicatorText[i].input_method_id == input_method.id()) {
-      text = UTF8ToUTF16(kMappingFromIdToIndicatorText[i].indicator_text);
-      break;
-    }
-  }
-
-  // Display the keyboard layout name when using a keyboard layout.
-  if (text.empty() &&
-      input_method::InputMethodUtil::IsKeyboardLayout(input_method.id())) {
-    const size_t kMaxKeyboardLayoutNameLen = 2;
-    const string16 keyboard_layout =
-        UTF8ToUTF16(manager->GetInputMethodUtil()->GetKeyboardLayoutName(
-            input_method.id()));
-    text = StringToUpperASCII(keyboard_layout).substr(
-        0, kMaxKeyboardLayoutNameLen);
-  }
-
-  // TODO(yusukes): Some languages have two or more input methods. For example,
-  // Thai has 3, Vietnamese has 4. If these input methods could be activated at
-  // the same time, we should do either of the following:
-  //   (1) Add mappings to |kMappingFromIdToIndicatorText|
-  //   (2) Add suffix (1, 2, ...) to |text| when ambiguous.
-
-  if (text.empty()) {
-    const size_t kMaxLanguageNameLen = 2;
-    std::string language_code =
-        manager->GetInputMethodUtil()->GetLanguageCodeFromDescriptor(
-            input_method);
-
-    // Use "CN" for simplified Chinese and "TW" for traditonal Chinese,
-    // rather than "ZH".
-    if (StartsWithASCII(language_code, "zh-", false)) {
-      std::vector<std::string> portions;
-      base::SplitString(language_code, '-', &portions);
-      if (portions.size() >= 2 && !portions[1].empty()) {
-        language_code = portions[1];
-      }
-    }
-
-    text = StringToUpperASCII(UTF8ToUTF16(language_code)).substr(
-        0, kMaxLanguageNameLen);
-  }
-  DCHECK(!text.empty());
-  return text;
 }
 
 string16 InputMethodMenu::GetTextForMenu(
@@ -669,9 +582,7 @@ string16 InputMethodMenu::GetTextForMenu(
   // Indic languages: they share "Standard Input Method".
   const string16 standard_input_method_text = l10n_util::GetStringUTF16(
       IDS_OPTIONS_SETTINGS_LANGUAGES_M17N_STANDARD_INPUT_METHOD);
-  const std::string language_code =
-      manager->GetInputMethodUtil()->GetLanguageCodeFromDescriptor(
-          input_method);
+  const std::string language_code = input_method.language_code();
 
   string16 text =
       manager->GetInputMethodUtil()->TranslateString(input_method.id());
@@ -705,14 +616,13 @@ void InputMethodMenu::Observe(int type,
     // anymore.
     RemoveObservers();
   }
-#if defined(USE_AURA)
-  if (type == chrome::NOTIFICATION_PROFILE_CREATED) {
-    // On Aura status area is not recreated on login for normal user sign in.
-    // NOTIFICATION_LOGIN_USER_CHANGED has been notified early in login process.
+  if (type == chrome::NOTIFICATION_SESSION_STARTED) {
     InitializePrefMembers();
     AddObservers();
+    InputMethodManager* manager = InputMethodManager::GetInstance();
+    UpdateUIFromInputMethod(manager->GetCurrentInputMethod(),
+                            manager->GetNumActiveInputMethods());
   }
-#endif
 }
 
 void InputMethodMenu::SetMinimumWidth(int width) {
@@ -752,11 +662,14 @@ void InputMethodMenu::RemoveObservers() {
 
 void InputMethodMenu::InitializePrefMembers() {
   if (!initialized_prefs_) {
-    initialized_prefs_ = true;
-    previous_input_method_pref_.Init(
-        prefs::kLanguagePreviousInputMethod, pref_service_, this);
-    current_input_method_pref_.Init(
-        prefs::kLanguageCurrentInputMethod, pref_service_, this);
+    PrefService* pref_service = GetPrefService();
+    if (pref_service) {
+      initialized_prefs_ = true;
+      previous_input_method_pref_.Init(
+          prefs::kLanguagePreviousInputMethod, pref_service, this);
+      current_input_method_pref_.Init(
+          prefs::kLanguageCurrentInputMethod, pref_service, this);
+    }
   }
 }
 

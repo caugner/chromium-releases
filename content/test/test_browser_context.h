@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,45 +10,47 @@
 #include "base/file_path.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/scoped_temp_dir.h"
 #include "content/public/browser/browser_context.h"
 
-class WebKitContext;
+namespace content {
+class MockResourceContext;
+}
 
 class TestBrowserContext : public content::BrowserContext {
  public:
   TestBrowserContext();
   virtual ~TestBrowserContext();
 
+  // Takes ownership of the temporary directory so that it's not deleted when
+  // this object is destructed.
+  FilePath TakePath();
+
+  void SetSpecialStoragePolicy(quota::SpecialStoragePolicy* policy);
+
   virtual FilePath GetPath() OVERRIDE;
-  virtual bool IsOffTheRecord() OVERRIDE;
-  virtual SSLHostState* GetSSLHostState() OVERRIDE;
+  virtual bool IsOffTheRecord() const OVERRIDE;
   virtual content::DownloadManager* GetDownloadManager() OVERRIDE;
   virtual net::URLRequestContextGetter* GetRequestContext() OVERRIDE;
   virtual net::URLRequestContextGetter* GetRequestContextForRenderProcess(
       int renderer_child_id) OVERRIDE;
   virtual net::URLRequestContextGetter* GetRequestContextForMedia() OVERRIDE;
-  virtual const content::ResourceContext& GetResourceContext() OVERRIDE;
-  virtual content::HostZoomMap* GetHostZoomMap() OVERRIDE;
+  virtual content::ResourceContext* GetResourceContext() OVERRIDE;
   virtual content::GeolocationPermissionContext*
       GetGeolocationPermissionContext() OVERRIDE;
-  virtual SpeechInputPreferences* GetSpeechInputPreferences() OVERRIDE;
+  virtual content::SpeechRecognitionPreferences*
+      GetSpeechRecognitionPreferences() OVERRIDE;
   virtual bool DidLastSessionExitCleanly() OVERRIDE;
-  virtual quota::QuotaManager* GetQuotaManager() OVERRIDE;
-  virtual WebKitContext* GetWebKitContext() OVERRIDE;
-  virtual webkit_database::DatabaseTracker* GetDatabaseTracker() OVERRIDE;
-  virtual ChromeBlobStorageContext* GetBlobStorageContext() OVERRIDE;
-  virtual ChromeAppCacheService* GetAppCacheService() OVERRIDE;
-  virtual fileapi::FileSystemContext* GetFileSystemContext() OVERRIDE;
+  virtual quota::SpecialStoragePolicy* GetSpecialStoragePolicy() OVERRIDE;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(DOMStorageTest, SessionOnly);
   FRIEND_TEST_ALL_PREFIXES(DOMStorageTest, SaveSessionState);
 
-  // WebKitContext, lazily initialized by GetWebKitContext().
-  scoped_refptr<WebKitContext> webkit_context_;
-
+  scoped_ptr<content::MockResourceContext> resource_context_;
   ScopedTempDir browser_context_dir_;
+  scoped_refptr<quota::SpecialStoragePolicy> special_storage_policy_;
 
   DISALLOW_COPY_AND_ASSIGN(TestBrowserContext);
 };

@@ -11,12 +11,17 @@
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop_proxy.h"
 #include "build/build_config.h"
+#include "content/common/gpu/gpu_memory_manager.h"
 #include "ipc/ipc_channel.h"
 #include "ipc/ipc_message.h"
 #include "ui/gfx/native_widget_types.h"
 
 namespace base {
 class WaitableEvent;
+}
+
+namespace gfx {
+class GLShareGroup;
 }
 
 namespace IPC {
@@ -39,7 +44,8 @@ struct GPUCreateCommandBufferConfig;
 // to send IPC messages to the browser process IO thread on the
 // GpuChannelManager's behalf.
 class GpuChannelManager : public IPC::Channel::Listener,
-                          public IPC::Message::Sender {
+                          public IPC::Message::Sender,
+                          public GpuMemoryManagerClient {
  public:
   GpuChannelManager(ChildThread* gpu_child_thread,
                     GpuWatchdog* watchdog,
@@ -56,6 +62,10 @@ class GpuChannelManager : public IPC::Channel::Listener,
   // Sender overrides.
   virtual bool Send(IPC::Message* msg) OVERRIDE;
 
+  // GpuMemoryManagerClient overrides.
+  virtual void AppendAllCommandBufferStubs(
+      std::vector<GpuCommandBufferStubBase*>& stubs) OVERRIDE;
+
   void LoseAllContexts();
 
   base::WeakPtrFactory<GpuChannelManager> weak_factory_;
@@ -64,16 +74,18 @@ class GpuChannelManager : public IPC::Channel::Listener,
   void AddRoute(int32 routing_id, IPC::Channel::Listener* listener);
   void RemoveRoute(int32 routing_id);
 
+  GpuMemoryManager* gpu_memory_manager() { return &gpu_memory_manager_; }
+
   GpuChannel* LookupChannel(int32 client_id);
 
  private:
   // Message handlers.
-  void OnEstablishChannel(int client_id, int share_client_id);
+  void OnEstablishChannel(int client_id, bool share_context);
   void OnCloseChannel(const IPC::ChannelHandle& channel_handle);
   void OnVisibilityChanged(
       int32 render_view_id, int32 client_id, bool visible);
   void OnCreateViewCommandBuffer(
-      gfx::PluginWindowHandle window,
+      const gfx::GLSurfaceHandle& window,
       int32 render_view_id,
       int32 client_id,
       const GPUCreateCommandBufferConfig& init_params);
@@ -91,6 +103,8 @@ class GpuChannelManager : public IPC::Channel::Listener,
   // process.
   typedef base::hash_map<int, scoped_refptr<GpuChannel> > GpuChannelMap;
   GpuChannelMap gpu_channels_;
+  scoped_refptr<gfx::GLShareGroup> share_group_;
+  GpuMemoryManager gpu_memory_manager_;
   GpuWatchdog* watchdog_;
 
   DISALLOW_COPY_AND_ASSIGN(GpuChannelManager);

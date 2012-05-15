@@ -59,8 +59,8 @@ class BalloonHost : public content::WebContentsDelegate,
   // content::WebContentsDelegate implementation:
   virtual void CloseContents(content::WebContents* source) OVERRIDE;
   virtual void HandleMouseDown() OVERRIDE;
-  virtual void UpdatePreferredSize(content::WebContents* source,
-                                   const gfx::Size& pref_size) OVERRIDE;
+  virtual void ResizeDueToAutoResize(content::WebContents* source,
+                                     const gfx::Size& pref_size) OVERRIDE;
   virtual void AddNewContents(content::WebContents* source,
                               content::WebContents* new_contents,
                               WindowOpenDisposition disposition,
@@ -68,7 +68,8 @@ class BalloonHost : public content::WebContentsDelegate,
                               bool user_gesture) OVERRIDE;
 
   // content::WebContentsObserver implementation:
-  virtual void RenderViewCreated(RenderViewHost* render_view_host) OVERRIDE;
+  virtual void RenderViewCreated(
+      content::RenderViewHost* render_view_host) OVERRIDE;
   virtual void RenderViewReady() OVERRIDE;
   virtual void RenderViewGone(base::TerminationStatus status) OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;

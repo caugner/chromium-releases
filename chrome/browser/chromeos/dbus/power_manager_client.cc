@@ -8,21 +8,24 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/chromeos/chromeos_version.h"
 #include "base/format_macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
 #include "base/stringprintf.h"
 #include "base/time.h"
 #include "base/timer.h"
-#include "chrome/browser/chromeos/login/screen_locker.h"
-#include "chrome/browser/chromeos/system/runtime_environment.h"
+#include "chrome/browser/chromeos/dbus/power_supply_properties.pb.h"
+#include "chrome/browser/chromeos/dbus/power_state_control.pb.h"
 #include "dbus/bus.h"
 #include "dbus/message.h"
+#include "dbus/object_path.h"
 #include "dbus/object_proxy.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
 namespace chromeos {
 
+#if !defined(USE_ASH)
 PowerSupplyStatus::PowerSupplyStatus()
     : line_power_on(false),
       battery_is_present(false),
@@ -54,6 +57,7 @@ std::string PowerSupplyStatus::ToString() const {
                       battery_seconds_to_full);
   return result;
 }
+#endif  // !defined(USE_ASH)
 
 // The PowerManagerClient implementation used in production.
 class PowerManagerClientImpl : public PowerManagerClient {
@@ -63,7 +67,11 @@ class PowerManagerClientImpl : public PowerManagerClient {
         weak_ptr_factory_(this) {
     power_manager_proxy_ = bus->GetObjectProxy(
         power_manager::kPowerManagerServiceName,
-        power_manager::kPowerManagerServicePath);
+        dbus::ObjectPath(power_manager::kPowerManagerServicePath));
+
+    session_manager_proxy_ = bus->GetObjectProxy(
+        login_manager::kSessionManagerServiceName,
+        dbus::ObjectPath(login_manager::kSessionManagerServicePath));
 
     // Monitor the D-Bus signal for brightness changes. Only the power
     // manager knows the actual brightness level. We don't cache the
@@ -100,7 +108,7 @@ class PowerManagerClientImpl : public PowerManagerClient {
         base::Bind(&PowerManagerClientImpl::SignalConnected,
                    weak_ptr_factory_.GetWeakPtr()));
 
-    power_manager_proxy_->ConnectToSignal(
+    session_manager_proxy_->ConnectToSignal(
         chromium::kChromiumInterface,
         chromium::kLockScreenSignal,
         base::Bind(&PowerManagerClientImpl::ScreenLockSignalReceived,
@@ -108,17 +116,33 @@ class PowerManagerClientImpl : public PowerManagerClient {
         base::Bind(&PowerManagerClientImpl::SignalConnected,
                    weak_ptr_factory_.GetWeakPtr()));
 
-    power_manager_proxy_->ConnectToSignal(
+    session_manager_proxy_->ConnectToSignal(
         chromium::kChromiumInterface,
         chromium::kUnlockScreenSignal,
         base::Bind(&PowerManagerClientImpl::ScreenUnlockSignalReceived,
                    weak_ptr_factory_.GetWeakPtr()),
         base::Bind(&PowerManagerClientImpl::SignalConnected,
                    weak_ptr_factory_.GetWeakPtr()));
-    power_manager_proxy_->ConnectToSignal(
+    session_manager_proxy_->ConnectToSignal(
         chromium::kChromiumInterface,
         chromium::kUnlockScreenFailedSignal,
         base::Bind(&PowerManagerClientImpl::ScreenUnlockFailedSignalReceived,
+                   weak_ptr_factory_.GetWeakPtr()),
+        base::Bind(&PowerManagerClientImpl::SignalConnected,
+                   weak_ptr_factory_.GetWeakPtr()));
+
+    power_manager_proxy_->ConnectToSignal(
+        power_manager::kPowerManagerInterface,
+        power_manager::kIdleNotifySignal,
+        base::Bind(&PowerManagerClientImpl::IdleNotifySignalReceived,
+                   weak_ptr_factory_.GetWeakPtr()),
+        base::Bind(&PowerManagerClientImpl::SignalConnected,
+                   weak_ptr_factory_.GetWeakPtr()));
+
+    power_manager_proxy_->ConnectToSignal(
+        power_manager::kPowerManagerInterface,
+        power_manager::kActiveNotifySignal,
+        base::Bind(&PowerManagerClientImpl::ActiveNotifySignalReceived,
                    weak_ptr_factory_.GetWeakPtr()),
         base::Bind(&PowerManagerClientImpl::SignalConnected,
                    weak_ptr_factory_.GetWeakPtr()));
@@ -130,6 +154,7 @@ class PowerManagerClientImpl : public PowerManagerClient {
   // PowerManagerClient overrides:
 
   virtual void AddObserver(Observer* observer) OVERRIDE {
+    CHECK(observer);  // http://crbug.com/119976
     observers_.AddObserver(observer);
   }
 
@@ -147,53 +172,60 @@ class PowerManagerClientImpl : public PowerManagerClient {
         power_manager::kDecreaseScreenBrightness);
     dbus::MessageWriter writer(&method_call);
     writer.AppendBool(allow_off);
-
     power_manager_proxy_->CallMethod(
         &method_call,
         dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
-        base::Bind(&PowerManagerClientImpl::OnDecreaseScreenBrightness,
-                   weak_ptr_factory_.GetWeakPtr()));
+        dbus::ObjectProxy::EmptyResponseCallback());
   }
 
   virtual void IncreaseScreenBrightness() OVERRIDE {
+    SimpleMethodCallToPowerManager(power_manager::kIncreaseScreenBrightness);
+  }
+
+  virtual void SetScreenBrightnessPercent(double percent, bool gradual) {
     dbus::MethodCall method_call(
         power_manager::kPowerManagerInterface,
-        power_manager::kIncreaseScreenBrightness);
-    power_manager_proxy_->CallMethod(
-        &method_call,
-        dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
-        base::Bind(&PowerManagerClientImpl::OnIncreaseScreenBrightness,
-                   weak_ptr_factory_.GetWeakPtr()));
-  }
-
-  virtual void RequestStatusUpdate() OVERRIDE {
-    dbus::MethodCall method_call(power_manager::kPowerManagerInterface,
-                                 power_manager::kGetAllPropertiesMethod);
-    power_manager_proxy_->CallMethod(
-        &method_call,
-        dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
-        base::Bind(&PowerManagerClientImpl::OnGetAllPropertiesMethod,
-                   weak_ptr_factory_.GetWeakPtr()));
-  }
-
-  // Requests restart of the system.
-  virtual void RequestRestart() OVERRIDE {
-    dbus::MethodCall method_call(power_manager::kPowerManagerInterface,
-                                 power_manager::kRequestRestartMethod);
+        power_manager::kSetScreenBrightnessPercent);
+    dbus::MessageWriter writer(&method_call);
+    writer.AppendDouble(percent);
+    writer.AppendInt32(
+        gradual ?
+        power_manager::kBrightnessTransitionGradual :
+        power_manager::kBrightnessTransitionInstant);
     power_manager_proxy_->CallMethod(
         &method_call,
         dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
         dbus::ObjectProxy::EmptyResponseCallback());
+  }
+
+  virtual void GetScreenBrightnessPercent(
+      const GetScreenBrightnessPercentCallback& callback) OVERRIDE {
+    dbus::MethodCall method_call(power_manager::kPowerManagerInterface,
+                                 power_manager::kGetScreenBrightnessPercent);
+    power_manager_proxy_->CallMethod(
+        &method_call,
+        dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
+        base::Bind(&PowerManagerClientImpl::OnGetScreenBrightnessPercent,
+                   weak_ptr_factory_.GetWeakPtr(), callback));
+  }
+
+  virtual void RequestStatusUpdate(UpdateRequestType update_type) OVERRIDE {
+    dbus::MethodCall method_call(
+        power_manager::kPowerManagerInterface,
+        power_manager::kGetPowerSupplyPropertiesMethod);
+    power_manager_proxy_->CallMethod(
+        &method_call,
+        dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
+        base::Bind(&PowerManagerClientImpl::OnGetPowerSupplyPropertiesMethod,
+                   weak_ptr_factory_.GetWeakPtr()));
+  }
+
+  virtual void RequestRestart() OVERRIDE {
+    SimpleMethodCallToPowerManager(power_manager::kRequestRestartMethod);
   };
 
-  // Requests shutdown of the system.
   virtual void RequestShutdown() OVERRIDE {
-    dbus::MethodCall method_call(power_manager::kPowerManagerInterface,
-                                 power_manager::kRequestShutdownMethod);
-    power_manager_proxy_->CallMethod(
-        &method_call,
-        dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
-        dbus::ObjectProxy::EmptyResponseCallback());
+    SimpleMethodCallToPowerManager(power_manager::kRequestShutdownMethod);
   }
 
   virtual void CalculateIdleTime(const CalculateIdleTimeCallback& callback)
@@ -204,6 +236,47 @@ class PowerManagerClientImpl : public PowerManagerClient {
         &method_call,
         dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
         base::Bind(&PowerManagerClientImpl::OnGetIdleTime,
+                   weak_ptr_factory_.GetWeakPtr(), callback));
+  }
+
+  virtual void RequestIdleNotification(int64 threshold) OVERRIDE {
+    dbus::MethodCall method_call(power_manager::kPowerManagerInterface,
+                                 power_manager::kRequestIdleNotification);
+    dbus::MessageWriter writer(&method_call);
+    writer.AppendInt64(threshold);
+
+    power_manager_proxy_->CallMethod(
+        &method_call,
+        dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
+        dbus::ObjectProxy::EmptyResponseCallback());
+  }
+
+  virtual void RequestActiveNotification() OVERRIDE {
+    RequestIdleNotification(0);
+  }
+
+  virtual void RequestPowerStateOverrides(
+      uint32 request_id,
+      uint32 duration,
+      int overrides,
+      PowerStateRequestIdCallback callback) OVERRIDE {
+    dbus::MethodCall method_call(power_manager::kPowerManagerInterface,
+                                 power_manager::kStateOverrideRequest);
+    dbus::MessageWriter writer(&method_call);
+
+    PowerStateControl protobuf;
+    protobuf.set_request_id(request_id);
+    protobuf.set_duration(duration);
+    protobuf.set_disable_idle_dim(overrides & DISABLE_IDLE_DIM);
+    protobuf.set_disable_idle_blank(overrides & DISABLE_IDLE_BLANK);
+    protobuf.set_disable_idle_suspend(overrides & DISABLE_IDLE_SUSPEND);
+    protobuf.set_disable_lid_suspend(overrides & DISABLE_IDLE_LID_SUSPEND);
+
+    writer.AppendProtoAsArrayOfBytes(protobuf);
+    power_manager_proxy_->CallMethod(
+        &method_call,
+        dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
+        base::Bind(&PowerManagerClientImpl::OnPowerStateOverride,
                    weak_ptr_factory_.GetWeakPtr(), callback));
   }
 
@@ -258,22 +331,6 @@ class PowerManagerClientImpl : public PowerManagerClient {
                       BrightnessChanged(brightness_level, user_initiated));
   }
 
-  void OnDecreaseScreenBrightness(dbus::Response* response) {
-    if (!response) {
-      LOG(ERROR) << "Failed to decrease screen brightness";
-      return;
-    }
-    VLOG(1) << "screen brightness increased: " << response->ToString();
-  }
-
-  void OnIncreaseScreenBrightness(dbus::Response* response) {
-    if (!response) {
-      LOG(ERROR) << "Failed to increase screen brightness";
-      return;
-    }
-    VLOG(1) << "screen brightness increased: " << response->ToString();
-  }
-
   void PowerStateChangedSignalReceived(dbus::Signal* signal) {
     VLOG(1) << "Received power state changed signal.";
     dbus::MessageReader reader(signal);
@@ -313,32 +370,27 @@ class PowerManagerClientImpl : public PowerManagerClient {
 
   void PowerSupplyPollReceived(dbus::Signal* unused_signal) {
     VLOG(1) << "Received power supply poll signal.";
-    RequestStatusUpdate();
+    RequestStatusUpdate(UPDATE_POLL);
   }
 
-  void OnGetAllPropertiesMethod(dbus::Response* response) {
+  void OnGetPowerSupplyPropertiesMethod(dbus::Response* response) {
     if (!response) {
-      LOG(ERROR) << "Error calling " << power_manager::kGetAllPropertiesMethod;
+      LOG(ERROR) << "Error calling "
+                 << power_manager::kGetPowerSupplyPropertiesMethod;
       return;
     }
+
     dbus::MessageReader reader(response);
+    PowerSupplyProperties protobuf;
+    reader.PopArrayOfBytesAsProto(&protobuf);
+
     PowerSupplyStatus status;
-    double unused_battery_voltage = 0.0;
-    double unused_battery_energy = 0.0;
-    double unused_battery_energy_rate = 0.0;
-    if (!reader.PopBool(&status.line_power_on) ||
-        !reader.PopDouble(&unused_battery_energy) ||
-        !reader.PopDouble(&unused_battery_energy_rate) ||
-        !reader.PopDouble(&unused_battery_voltage) ||
-        !reader.PopInt64(&status.battery_seconds_to_empty) ||
-        !reader.PopInt64(&status.battery_seconds_to_full) ||
-        !reader.PopDouble(&status.battery_percentage) ||
-        !reader.PopBool(&status.battery_is_present) ||
-        !reader.PopBool(&status.battery_is_full)) {
-      LOG(ERROR) << "Error reading response from powerd: "
-                 << response->ToString();
-      return;
-    }
+    status.line_power_on = protobuf.line_power_on();
+    status.battery_seconds_to_empty = protobuf.battery_time_to_empty();
+    status.battery_seconds_to_full = protobuf.battery_time_to_full();
+    status.battery_percentage = protobuf.battery_percentage();
+    status.battery_is_present = protobuf.battery_is_present();
+    status.battery_is_full = protobuf.battery_is_charged();
 
     VLOG(1) << "Power status: " << status.ToString();
     FOR_EACH_OBSERVER(Observer, observers_, PowerChanged(status));
@@ -366,6 +418,41 @@ class PowerManagerClientImpl : public PowerManagerClient {
     callback.Run(idle_time_ms/1000);
   }
 
+  void OnPowerStateOverride(const PowerStateRequestIdCallback& callback,
+                            dbus::Response* response) {
+    if (!response) {
+      LOG(ERROR) << "Error calling " << power_manager::kStateOverrideRequest;
+      return;
+    }
+
+    dbus::MessageReader reader(response);
+    uint32 request_id = 0;
+    if (!reader.PopUint32(&request_id)) {
+      LOG(ERROR) << "Error reading response from powerd: "
+                 << response->ToString();
+      callback.Run(0);
+      return;
+    }
+
+    callback.Run(request_id);
+  }
+
+  void OnGetScreenBrightnessPercent(
+      const GetScreenBrightnessPercentCallback& callback,
+      dbus::Response* response) {
+    if (!response) {
+      LOG(ERROR) << "Error calling "
+                 << power_manager::kGetScreenBrightnessPercent;
+      return;
+    }
+    dbus::MessageReader reader(response);
+    double percent = 0.0;
+    if (!reader.PopDouble(&percent))
+      LOG(ERROR) << "Error reading response from powerd: "
+                 << response->ToString();
+    callback.Run(percent);
+  }
+
   void ScreenLockSignalReceived(dbus::Signal* signal) {
     FOR_EACH_OBSERVER(Observer, observers_, LockScreen());
   }
@@ -378,7 +465,38 @@ class PowerManagerClientImpl : public PowerManagerClient {
     FOR_EACH_OBSERVER(Observer, observers_, UnlockScreenFailed());
   }
 
+
+  void IdleNotifySignalReceived(dbus::Signal* signal) {
+    dbus::MessageReader reader(signal);
+    int64 threshold = 0;
+    if (!reader.PopInt64(&threshold)) {
+      LOG(ERROR) << "Idle Notify signal had incorrect parameters: "
+                 << signal->ToString();
+      return;
+    }
+    DCHECK_GT(threshold, 0);
+
+    VLOG(1) << "Idle Notify: " << threshold;
+    FOR_EACH_OBSERVER(Observer, observers_, IdleNotify(threshold));
+  }
+
+  void ActiveNotifySignalReceived(dbus::Signal* signal) {
+    dbus::MessageReader reader(signal);
+    int64 threshold = 0;
+    if (!reader.PopInt64(&threshold)) {
+      LOG(ERROR) << "Active Notify signal had incorrect parameters: "
+                 << signal->ToString();
+      return;
+    }
+    DCHECK_EQ(threshold, 0);
+
+    VLOG(1) << "Active Notify.";
+    FOR_EACH_OBSERVER(Observer, observers_, ActiveNotify());
+  }
+
+
   dbus::ObjectProxy* power_manager_proxy_;
+  dbus::ObjectProxy* session_manager_proxy_;
   ObserverList<Observer> observers_;
   base::WeakPtrFactory<PowerManagerClientImpl> weak_ptr_factory_;
 
@@ -391,7 +509,7 @@ class PowerManagerClientStubImpl : public PowerManagerClient {
  public:
   PowerManagerClientStubImpl()
       : discharging_(true),
-        battery_percentage_(80),
+        battery_percentage_(81),
         pause_count_(0) {
   }
 
@@ -419,8 +537,23 @@ class PowerManagerClientStubImpl : public PowerManagerClient {
     VLOG(1) << "Requested to increase screen brightness";
   }
 
-  virtual void RequestStatusUpdate() OVERRIDE {
-    if (!timer_.IsRunning()) {
+  virtual void SetScreenBrightnessPercent(double percent,
+                                          bool gradual) OVERRIDE {
+    VLOG(1) << "Requested to set screen brightness to " << percent << "% "
+            << (gradual ? "gradually" : "instantaneously");
+  }
+
+  virtual void GetScreenBrightnessPercent(
+      const GetScreenBrightnessPercentCallback& callback) OVERRIDE {
+    callback.Run(100.0);
+  }
+
+  virtual void RequestStatusUpdate(UpdateRequestType update_type) OVERRIDE {
+    if (update_type == UPDATE_INITIAL) {
+      Update();
+      return;
+    }
+    if (!timer_.IsRunning() && update_type == UPDATE_USER) {
       timer_.Start(
           FROM_HERE,
           base::TimeDelta::FromMilliseconds(1000),
@@ -439,14 +572,20 @@ class PowerManagerClientStubImpl : public PowerManagerClient {
     callback.Run(0);
   }
 
+  virtual void RequestIdleNotification(int64 threshold) OVERRIDE {}
+  virtual void RequestActiveNotification() OVERRIDE {}
+  virtual void RequestPowerStateOverrides(
+      uint32 request_id,
+      uint32 duration,
+      int overrides,
+      PowerStateRequestIdCallback callback) OVERRIDE {}
+
   virtual void NotifyScreenLockRequested() OVERRIDE {
-    ScreenLocker::Show();
+    FOR_EACH_OBSERVER(Observer, observers_, LockScreen());
   }
-
   virtual void NotifyScreenLockCompleted() OVERRIDE {}
-
   virtual void NotifyScreenUnlockRequested() OVERRIDE {
-    ScreenLocker::Hide();
+    FOR_EACH_OBSERVER(Observer, observers_, UnlockScreen());
   }
 
   virtual void NotifyScreenUnlockCompleted() OVERRIDE {}
@@ -501,7 +640,7 @@ PowerManagerClient::~PowerManagerClient() {
 }
 
 PowerManagerClient* PowerManagerClient::Create(dbus::Bus* bus) {
-  if (system::runtime_environment::IsRunningOnChromeOS()) {
+  if (base::chromeos::IsRunningOnChromeOS()) {
     return new PowerManagerClientImpl(bus);
   } else {
     return new PowerManagerClientStubImpl();

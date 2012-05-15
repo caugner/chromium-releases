@@ -1,0 +1,447 @@
+<!doctype html>
+<!--
+Copyright (c) 2012 The Chromium Authors. All rights reserved.
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+-->
+
+<html>
+  <head>
+    <meta charset="utf-8">
+    <link href="http://fonts.googleapis.com/css?family=Open+Sans&amp;v1"
+          rel="stylesheet" type="text/css">
+    <link rel="icon" type="image/png" href="chromoting16.png">
+    <link rel="stylesheet" href="connection_stats.css">
+    <link rel="stylesheet" href="connection_history.css">
+    <link rel="stylesheet" href="main.css">
+    <link rel="stylesheet" href="toolbar.css">
+    <script src="ask_pin_dialog.js"></script>
+    <script src="client_plugin_async.js"></script>
+    <script src="client_plugin_v1.js"></script>
+    <script src="client_screen.js"></script>
+    <script src="client_session.js"></script>
+    <script src="clipboard.js"></script>
+    <script src="connection_history.js"></script>
+    <script src="connection_stats.js"></script>
+    <script src="daemon_plugin.js"></script>
+    <script src="event_handlers.js"></script>
+    <script src="format_iq.js"></script>
+    <script src="host_list.js"></script>
+    <script src="host_screen.js"></script>
+    <script src="host_session.js"></script>
+    <script src="host_table_entry.js"></script>
+    <script src="l10n.js"></script>
+    <script src="log_to_server.js"></script>
+    <script src="oauth2.js"></script>
+    <script src="plugin_settings.js"></script>
+    <script src="remoting.js"></script>
+    <script src="server_log_entry.js"></script>
+    <script src="stats_accumulator.js"></script>
+    <script src="toolbar.js"></script>
+    <script src="ui_mode.js"></script>
+    <script src="xhr.js"></script>
+    <script src="wcs.js"></script>
+    <script src="wcs_loader.js"></script>
+    <title i18n-content="PRODUCT_NAME"></title>
+  </head>
+
+  <body>
+
+    <!-- loading-mode is initially visible, but becomes hidden as soon as an
+         AppMode is selected by remoting.init. All other divs are initially
+         hidden, but are shown appropriately when the mode changes. -->
+    <section id="loading-mode" data-ui-mode="">
+      <em>Loading&hellip;</em>
+    </section> <!-- loading-mode -->
+
+    <div id="daemon-plugin-container"></div>
+
+    <header data-ui-mode="home" hidden>
+      <div>
+        <img src="chromoting48.png">
+        <h1 class="icon-label" i18n-content="PRODUCT_NAME"></h1>
+      </div>
+      <div class="box-spacer"></div>
+      <div id="top-secondary">
+        <span id="current-email"></span>
+        <span data-ui-mode="home">
+          <a id="clear-oauth" i18n-content="SIGN_OUT_BUTTON"></a> |
+          <!-- TODO(jamiewalch): Add this back in when we support it.
+          <a id="connection-history"
+             i18n-content="CONNECTION_HISTORY_BUTTON"></a> |
+          -->
+        </span>
+        <a href="https://www.google.com/support/chrome/bin/answer.py?answer=1649523"
+           target="_blank" i18n-content="HELP"></a>
+      </div>
+    </header>
+
+    <div data-ui-mode="home" hidden>
+      <section>
+        <div i18n-content="DESCRIPTION_HOME"
+             i18n-value-1="<a href='https://chrome.google.com/remotedesktop'>chrome.google.com/remotedesktop</a>"></div>
+      </section>
+
+      <section>
+        <h2 i18n-content="MODE_IT2ME"></h2>
+        <div>
+          <div class="section-row">
+            <div class="box-spacer">
+              <div i18n-content="HOME_SHARE_DESCRIPTION"></div>
+              <div id="chrome-os-no-share"
+                   i18n-content="HOME_SHARE_DESCRIPTION_CHROME_OS"
+                   class="small-print"></div>
+            </div>
+            <div>
+              <button id="share-button"
+                      i18n-content="HOME_SHARE_BUTTON"
+                      class="kd-button-share"
+                      type="button">
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="section-row">
+          <div i18n-content="HOME_ACCESS_DESCRIPTION" class="box-spacer"></div>
+          <div>
+            <button id="access-mode-button"
+                    i18n-content="HOME_ACCESS_BUTTON"
+                    type="button">
+            </button>
+          </div>
+        </div>
+      </section> <!-- Remote Assistance -->
+
+      <section id="host-list-div" class="host-list-container" hidden>
+        <h2 i18n-content="MODE_ME2ME"></h2>
+        <div id="host-list"></div>
+        <div id="host-list-error" class="error-state"></div>
+        <div id="daemon-control" data-daemon-state="enabled disabled" hidden>
+          <table class="host-list-table">
+            <!-- TODO(jamiewalch): Rewrite this using flex boxes and apply the
+                 host-offline style if the daemon is not running -->
+            <tr>
+              <td class="host-list-main-icon">
+                <img src="icon_host.png">
+              </td>
+              <td class="host-list-label">
+                <span id="this-computer-name"
+                      data-daemon-state="enabled">
+                  My computer <!-- Placeholder until daemon mode is finished -->
+                </span>
+                <span i18n-content="HOME_DAEMON_START_MESSAGE"
+                      data-daemon-state="disabled">
+                </span>
+              </td>
+              <td class="mode-select-button-column">
+                <button type="button"
+                        id="stop-daemon"
+                        i18n-content="HOME_DAEMON_STOP_BUTTON"
+                        data-daemon-state="enabled">
+                </button>
+                <button type="button"
+                        id="start-daemon"
+                        i18n-content="HOME_DAEMON_START_BUTTON"
+                        data-daemon-state="disabled">
+                </button>
+              </td>
+            </tr>
+          </table>
+          <div data-daemon-state="enabled">
+            <span i18n-content="HOME_DAEMON_ACTIVE_MESSAGE"></span>
+            <a id="change-daemon-pin"
+               href="#"
+               i18n-content="HOME_DAEMON_CHANGE_PIN_LINK"></a>
+          </div>
+        </div> <!-- daemon-control -->
+      </section> <!-- host-list-div -->
+    </div> <!-- home -->
+
+    <div id="dialog-screen"
+         data-ui-mode="home.host home.client home.auth home.history home.confirm-host-delete home.ask-pin"
+         hidden></div>
+
+    <div id="dialog-container"
+         data-ui-mode="home.host home.client home.auth home.history home.confirm-host-delete home.ask-pin"
+         hidden>
+
+      <div class="box-spacer"></div>
+
+      <div id="ask-pin-dialog" data-ui-mode="home.ask-pin" hidden>
+        <p i18n-content="ASK_PIN_DIALOG_DESCRIPTION"></p>
+        <form id="ask-pin-form" action="">
+          <label for="daemon-pin-input"
+                 i18n-content="ASK_PIN_DIALOG_LABEL"></label>
+          <input id="daemon-pin-entry" type="password">
+          <br>
+          <label for="daemon-pin-confirm"
+                 i18n-content="ASK_PIN_DIALOG_CONFIRM_LABEL"></label>
+          <input id="daemon-pin-confirm" type="password">
+          <button id="daemon-pin-ok" type="submit" i18n-content="OK"></button>
+          <img id="start-daemon-spinner" src="spinner.gif" hidden>
+        </form>
+      </div> <!-- ask-pin-dialog -->
+
+      <div id="auth-dialog"
+           data-ui-mode="home.auth"
+           class="kd-modaldialog">
+        <h2 i18n-content="MODE_AUTHORIZE"></h2>
+        <p i18n-content="DESCRIPTION_AUTHORIZE" class="message"></p>
+        <div class="centered">
+          <button id="auth-button"
+                  type="button"
+                  i18n-content="CONTINUE_BUTTON">
+          </button>
+        </div>
+      </div> <!-- auth-dialog -->
+
+      <div id="host-dialog"
+           class="kd-modaldialog"
+           data-ui-mode="home.host">
+
+        <div data-ui-mode="home.host.waiting-for-code" class="message centered"
+             i18n-content="MESSAGE_GENERATING">
+        </div> <!-- host.waiting-for-code -->
+
+        <div data-ui-mode="home.host.waiting-for-connection">
+          <div i18n-content="INSTRUCTIONS_SHARE_ABOVE"></div>
+          <div id="access-code-display" dir="ltr" class="selectable"></div>
+          <div id="access-code-countdown-container">
+            <div id="access-code-countdown" class="expiring" hidden>
+              <span id="seconds-remaining"
+                    i18n-content="ACCESS_CODE_TIMER"></span>
+            </div>
+          </div>
+          <div i18n-content="INSTRUCTIONS_SHARE_BELOW"></div>
+        </div> <!-- host.waiting-for-connection -->
+
+        <div data-ui-mode="home.host.shared">
+          <div id="host-shared-message" class="message centered"
+               i18n-content="MESSAGE_SHARED"></div>
+          <div class="centered">
+            <button id="stop-sharing-button"
+                    type="button"
+                    i18n-content="STOP_SHARING_BUTTON">
+            </button>
+          </div>
+        </div> <!-- host.shared -->
+
+        <div data-ui-mode="home.host.share-failed" class="message centered">
+          <span id="host-plugin-error" class="error-state"></span>
+        </div> <!-- host.share-failed -->
+
+        <div data-ui-mode="home.host.share-finished" class="message centered"
+             i18n-content="MESSAGE_SESSION_FINISHED">
+        </div> <!-- host.share-finished -->
+
+        <div class="centered"
+             data-ui-mode="home.host.share-failed home.host.share-finished">
+          <button id="host-finished-button"
+                  type="button"
+                  autofocus="autofocus"
+                  i18n-content="OK">
+          </button>
+        </div>
+
+        <div id="nat-box"
+             class="information-box"
+             data-ui-mode="home.host.waiting-for-connection"
+             i18n-content="WARNING_NAT_DISABLED">
+        </div> <!-- nat-box -->
+
+        <div data-ui-mode="home.host.waiting-for-connection home.host.waiting-for-code"
+             class="waiting-container space-before">
+          <span class="waiting"
+                i18n-content="FOOTER_WAITING"></span>
+          <button id="cancel-share-button"
+                  i18n-content="CANCEL">
+          </button>
+        </div>
+
+        <div id="host-plugin-container"></div>
+
+      </div> <!-- host dialog -->
+
+      <div id="client-dialog"
+           class="kd-modaldialog"
+           data-ui-mode="home.client">
+
+        <div data-ui-mode="home.client.unconnected">
+          <div i18n-content="DESCRIPTION_CONNECT"></div>
+          <div id="access-code-entry-row">
+            <form id="access-code-form" action="">
+              <label for="access-code-entry" i18n-content="ACCESS_CODE"></label>
+              <input id="access-code-entry"
+                     type="text"
+                     autofocus="autofocus"
+                     autocomplete="off"/>
+              <button id="connect-button"
+                      type="submit"
+                      i18n-content="CONNECT_BUTTON">
+              </button>
+              <button id="cancel-access-code-button"
+                      type="button"
+                      i18n-content="CANCEL">
+              </button>
+            </form>
+          </div> <!-- code-entry-row -->
+        </div> <!-- client.unconnected -->
+
+        <div data-ui-mode="home.client.connecting" class="waiting-container">
+          <span class="waiting" i18n-content="FOOTER_WAITING"></span>
+          <button id="cancel-connect-button"
+                  i18n-content="CANCEL">
+          </button>
+        </div> <!-- client.connecting -->
+
+        <div data-ui-mode="home.client.pin-prompt" class="centered">
+          <div id="pin-message"
+               i18n-content="PIN_MESSAGE"
+               class="message"></div>
+          <div>
+            <form id="pin-form" action="">
+              <label for="pin-entry" i18n-content="PIN"></label>
+              <input id="pin-entry"
+                     type="password"
+                     autofocus="autofocus"
+                     autocomplete="off"/>
+              <button id="connect-button"
+                      type="submit"
+                      i18n-content="CONNECT_BUTTON">
+              </button>
+              <button id="cancel-pin-entry-button"
+                      type="button"
+                      i18n-content="CANCEL">
+              </button>
+            </form>
+          </div>
+        </div> <!-- client.pin-prompt -->
+
+        <div data-ui-mode="home.client.connect-failed"
+             class="message centered">
+          <span id="connect-error-message" class="error-state"></span>
+        </div> <!-- client.connect-failed -->
+
+        <div data-ui-mode="home.client.session-finished"
+             class="message centered" i18n-content="MESSAGE_SESSION_FINISHED">
+        </div> <!-- client.session-finished -->
+
+        <div data-ui-mode="home.client.connect-failed.it2me home.client.session-finished.it2me"
+             class="centered">
+          <button id="client-finished-it2me-button"
+                  type="button"
+                  i18n-content="OK"
+                  autofocus="autofocus">
+          </button>
+        </div> <!-- connect-failed.it2me session-finished.it2me -->
+
+        <div data-ui-mode="home.client.connect-failed.me2me home.client.session-finished.me2me"
+             class="centered">
+          <button id="client-reconnect-button"
+                  type="button"
+                  i18n-content="RETRY"
+                  autofocus="autofocus">
+          </button>
+          <button id="client-finished-me2me-button"
+                  type="button"
+                  i18n-content="CANCEL">
+          </button>
+        </div> <!-- connect-failed.me2me session-finished.me2me -->
+
+      </div> <!-- client-dialog -->
+
+      <div id="connection-history-dialog"
+           class="kd-modaldialog"
+           data-ui-mode="home.history"
+           hidden>
+        <div class="internal-frame-of-reference">
+          <h2 i18n-content="CONNECTION_HISTORY_TITLE"></h2>
+          <div id="connection-history-options">
+            <div class="link-list">
+              <a id="history-view-all"
+                 i18n-content="ALL_CONNECTIONS"
+                 class="no-link"></a>
+              <a id="history-view-outgoing"
+                 i18n-content="OUTGOING_CONNECTIONS"></a>
+              <a id="history-view-incoming"
+                 i18n-content="INCOMING_CONNECTIONS"></a>
+            </div>
+            <div class="box-spacer"></div>
+            <a id="clear-connection-history" i18n-content="CLEAR_HISTORY"></a>
+          </div>
+          <div id="connection-history-scroller">
+            <table id="connection-history-table">
+              <thead>
+                <tr>
+                  <td></td>
+                  <td i18n-content="TIME_HEADER"></td>
+                  <td></td>
+                  <td i18n-content="CONNECTION_FROM_HEADER"></td>
+                  <td i18n-content="CONNECTION_TO_HEADER"></td>
+                  <td i18n-content="DURATION_HEADER"></td>
+                </tr>
+              </thead>
+              <tbody id="connection-history-entries" class="selectable">
+              </tbody>
+            </table>
+          </div>
+          <button id="close-connection-history"
+                  i18n-content="CLOSE"
+                  type="button"></button>
+        </div>
+      </div> <!-- connection-history-dialog -->
+
+      <div id="confirm-host-delete-dialog"
+           class="kd-modaldialog"
+           data-ui-mode="home.confirm-host-delete"
+           hidden>
+        <p id="confirm-host-delete-message"
+           i18n-content="CONFIRM_HOST_DELETE"
+           class="message">
+        </p>
+        <div class="centered">
+          <button id="confirm-host-delete"
+                  i18n-content="DISABLE_HOST"
+                  type="button">
+          </button>
+          <button id="cancel-host-delete"
+                  i18n-content="CANCEL"
+                  type="button">
+          </button>
+        </div>
+      </div> <!-- home.confirm-host-delete -->
+
+      <div class="box-spacer"></div>
+
+    </div> <!-- dialog-container -->
+
+    <div id="session-mode" data-ui-mode="in-session home.client" hidden>
+      <div id="session-toolbar"
+           data-ui-mode="in-session"
+           class="toolbar-container"
+           hidden>
+        <div class="toolbar-border">
+          <span id="session-status-message"
+                i18n-content="LABEL_CONNECTED"></span>
+          <strong id="connected-to"></strong>
+          <button id="toolbar-disconnect"
+                  type="button"
+                  i18n-content="DISCONNECT_MYSELF_BUTTON">
+          </button>
+          <span class="end-align">
+            <button id="toggle-scaling">
+              <img src="scale-to-fit.png">
+            </button>
+          </span>
+        </div>
+        <div class="toolbar-stub" id="toolbar-stub">
+          <div class="arrow-down"></div>
+        </div>
+      </div> <!-- session-toolbar -->
+    </div> <!-- session-mode -->
+
+    <div id="statistics" dir="ltr" class="selectable" hidden>
+    </div> <!-- statistics -->
+
+  </body>
+</html>

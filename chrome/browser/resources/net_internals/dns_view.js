@@ -81,7 +81,7 @@ var DnsView = (function() {
 
       var family = hostResolverInfo.default_address_family;
       addTextNode($(DnsView.DEFAULT_FAMILY_SPAN_ID),
-                  getKeyWithValue(AddressFamily, family));
+                  addressFamilyToString(family));
 
       var ipv6Disabled = (family == AddressFamily.ADDRESS_FAMILY_IPV4);
       setNodeDisplay($(DnsView.IPV6_DISABLED_SPAN_ID), ipv6Disabled);
@@ -95,14 +95,7 @@ var DnsView = (function() {
       // logging data, or the date the log dump was created.
       var logDate;
       if (MainView.isViewingLoadedLog()) {
-        if (typeof ClientInfo.numericDate == 'number') {
-          logDate = new Date(ClientInfo.numericDate);
-        } else {
-          // This is to prevent displaying entries as expired when loading
-          // old logs.
-          // TODO(mmenke):  Remove when Chrome 17 hits stable.
-          logDate = new Date(0);
-        }
+        logDate = new Date(ClientInfo.numericDate);
       } else {
         logDate = new Date();
       }
@@ -117,15 +110,15 @@ var DnsView = (function() {
 
         var familyCell = addNode(tr, 'td');
         addTextNode(familyCell,
-                    getKeyWithValue(AddressFamily, e.address_family));
+                    addressFamilyToString(e.address_family));
 
         var addressesCell = addNode(tr, 'td');
 
         if (e.error != undefined) {
           var errorText =
-              e.error + ' (' + getKeyWithValue(NetError, e.error) + ')';
+              e.error + ' (' + netErrorToString(e.error) + ')';
           var errorNode = addTextNode(addressesCell, 'error: ' + errorText);
-          changeClassName(addressesCell, 'warningText', true);
+          addressesCell.classList.add('warning-text');
         } else {
           for (var j = 0; j < e.addresses.length; ++j) {
             var address = e.addresses[j];
@@ -137,11 +130,11 @@ var DnsView = (function() {
 
         var expiresDate = timeutil.convertTimeTicksToDate(e.expiration);
         var expiresCell = addNode(tr, 'td');
-        addTextNode(expiresCell, expiresDate.toLocaleString());
+        timeutil.addNodeWithDate(expiresCell, expiresDate);
         if (logDate > timeutil.convertTimeTicksToDate(e.expiration)) {
           ++expiredEntries;
           var expiredSpan = addNode(expiresCell, 'span');
-          changeClassName(expiredSpan, 'warningText', true);
+          expiredSpan.classList.add('warning-text');
           addTextNode(expiredSpan, ' [Expired]');
         }
       }

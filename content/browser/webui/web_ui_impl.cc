@@ -9,17 +9,18 @@
 #include "base/stl_util.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "content/browser/child_process_security_policy.h"
+#include "content/browser/child_process_security_policy_impl.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
-#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/webui/generic_handler.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/web_contents_view.h"
 #include "content/public/browser/web_ui_controller.h"
+#include "content/public/browser/web_ui_message_handler.h"
 #include "content/public/common/bindings_policy.h"
-#include "content/public/common/content_switches.h"
+#include "ui/base/ui_base_switches.h"
 
+using content::RenderViewHostImpl;
 using content::WebContents;
 using content::WebUIController;
 using content::WebUIMessageHandler;
@@ -38,7 +39,7 @@ string16 WebUI::GetJavascriptCall(
     if (i > 0)
       parameters += char16(',');
 
-    base::JSONWriter::Write(arg_list[i], false, &json);
+    base::JSONWriter::Write(arg_list[i], &json);
     parameters += UTF8ToUTF16(json);
   }
   return ASCIIToUTF16(function_name) +
@@ -55,7 +56,6 @@ WebUIImpl::WebUIImpl(WebContents* contents)
       bindings_(content::BINDINGS_POLICY_WEB_UI),
       web_contents_(contents) {
   DCHECK(contents);
-  AddMessageHandler(new GenericHandler());
 }
 
 WebUIImpl::~WebUIImpl() {
@@ -79,7 +79,7 @@ bool WebUIImpl::OnMessageReceived(const IPC::Message& message) {
 void WebUIImpl::OnWebUISend(const GURL& source_url,
                             const std::string& message,
                             const ListValue& args) {
-  if (!ChildProcessSecurityPolicy::GetInstance()->
+  if (!ChildProcessSecurityPolicyImpl::GetInstance()->
           HasWebUIBindings(web_contents_->GetRenderProcessHost()->GetID())) {
     NOTREACHED() << "Blocked unauthorized use of WebUIBindings.";
     return;
@@ -97,7 +97,7 @@ void WebUIImpl::OnWebUISend(const GURL& source_url,
   }
 }
 
-void WebUIImpl::RenderViewCreated(RenderViewHost* render_view_host) {
+void WebUIImpl::RenderViewCreated(content::RenderViewHost* render_view_host) {
   controller_->RenderViewCreated(render_view_host);
 
   // Do not attempt to set the toolkit property if WebUI is not enabled, e.g.,
@@ -261,6 +261,7 @@ void WebUIImpl::AddMessageHandler(WebUIMessageHandler* handler) {
 }
 
 void WebUIImpl::ExecuteJavascript(const string16& javascript) {
-  web_contents_->GetRenderViewHost()->ExecuteJavascriptInWebFrame(
+  static_cast<RenderViewHostImpl*>(
+      web_contents_->GetRenderViewHost())->ExecuteJavascriptInWebFrame(
       ASCIIToUTF16(frame_xpath_), javascript);
 }

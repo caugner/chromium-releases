@@ -22,7 +22,7 @@ class PluginMessageLoopProxy : public base::MessageLoopProxy {
     virtual ~Delegate() { }
 
     virtual bool RunOnPluginThread(
-        int delay_ms, void(function)(void*), void* data) = 0;
+        base::TimeDelta delay, void(function)(void*), void* data) = 0;
   };
 
   // Caller keeps ownership of delegate.
@@ -32,22 +32,24 @@ class PluginMessageLoopProxy : public base::MessageLoopProxy {
   void Detach();
 
   // base::MessageLoopProxy implementation.
-  virtual bool PostTask(
-      const tracked_objects::Location& from_here,
-      const base::Closure& task) OVERRIDE;
   virtual bool PostDelayedTask(
       const tracked_objects::Location& from_here,
       const base::Closure& task,
       int64 delay_ms) OVERRIDE;
-  virtual bool PostNonNestableTask(
+  virtual bool PostDelayedTask(
       const tracked_objects::Location& from_here,
-      const base::Closure& task) OVERRIDE;
+      const base::Closure& task,
+      base::TimeDelta delay) OVERRIDE;
   virtual bool PostNonNestableDelayedTask(
       const tracked_objects::Location& from_here,
       const base::Closure& task,
       int64 delay_ms) OVERRIDE;
+  virtual bool PostNonNestableDelayedTask(
+      const tracked_objects::Location& from_here,
+      const base::Closure& task,
+      base::TimeDelta delay) OVERRIDE;
 
-  virtual bool BelongsToCurrentThread() OVERRIDE;
+  virtual bool RunsTasksOnCurrentThread() const OVERRIDE;
 
  private:
   static void TaskSpringboard(void* data);

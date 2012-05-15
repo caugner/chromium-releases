@@ -39,7 +39,7 @@ class CONTENT_EXPORT BrowserChildProcessHost : public IPC::Message::Sender {
       const FilePath& exposed_dir,
 #elif defined(OS_POSIX)
       bool use_zygote,
-      const base::environment_vector& environ,
+      const base::EnvironmentVector& environ,
 #endif
       CommandLine* cmd_line) = 0;
 
@@ -63,6 +63,11 @@ class CONTENT_EXPORT BrowserChildProcessHost : public IPC::Message::Sender {
   // they need to call this method so that the process handle is associated with
   // this object.
   virtual void SetHandle(base::ProcessHandle handle) = 0;
+
+#if defined(OS_MACOSX)
+  // Returns a PortProvider used to get process metrics for child processes.
+  static base::ProcessMetrics::PortProvider* GetPortProvider();
+#endif
 };
 
 };  // namespace content

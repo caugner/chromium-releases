@@ -12,26 +12,28 @@
 #include "base/utf_string_conversions.h"
 #include "content/browser/download/drag_download_file.h"
 #include "content/browser/download/drag_download_util.h"
-#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/tab_contents/drag_utils_gtk.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/render_view_host_delegate.h"
 #include "content/public/browser/web_contents_view.h"
+#include "content/public/common/content_client.h"
 #include "net/base/file_stream.h"
 #include "net/base/net_util.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/clipboard/custom_data_helper.h"
 #include "ui/base/dragdrop/gtk_dnd_util.h"
 #include "ui/base/gtk/gtk_compat.h"
-#include "ui/base/gtk/gtk_screen_utils.h"
+#include "ui/base/gtk/gtk_screen_util.h"
 #include "ui/gfx/gtk_util.h"
 #include "webkit/glue/webdropdata.h"
 
+using content::RenderViewHostImpl;
+using content::WebContents;
 using WebKit::WebDragOperation;
 using WebKit::WebDragOperationsMask;
 using WebKit::WebDragOperationNone;
-using content::WebContents;
 
 namespace content {
 
@@ -164,8 +166,8 @@ void WebDragSourceGtk::DidProcessEvent(GdkEvent* event) {
   GdkEventMotion* event_motion = reinterpret_cast<GdkEventMotion*>(event);
   gfx::Point client = ui::ClientPoint(GetContentNativeView());
 
-  if (web_contents_->GetRenderViewHost()) {
-    web_contents_->GetRenderViewHost()->DragSourceMovedTo(
+  if (GetRenderViewHost()) {
+    GetRenderViewHost()->DragSourceMovedTo(
         client.x(), client.y(),
         static_cast<int>(event_motion->x_root),
         static_cast<int>(event_motion->y_root));
@@ -243,7 +245,9 @@ void WebDragSourceGtk::OnDragDataGet(GtkWidget* sender,
         if (net::FileURLToFilePath(file_url, &file_path)) {
           // Open the file as a stream.
           net::FileStream* file_stream =
-              drag_download_util::CreateFileStreamForDrop(&file_path);
+              drag_download_util::CreateFileStreamForDrop(
+                  &file_path,
+                  content::GetContentClient()->browser()->GetNetLog());
           if (file_stream) {
             // Start downloading the file to the stream.
             scoped_refptr<DragDownloadFile> drag_file_downloader =
@@ -297,8 +301,8 @@ gboolean WebDragSourceGtk::OnDragFailed(GtkWidget* sender,
   gfx::Point root = ui::ScreenPoint(GetContentNativeView());
   gfx::Point client = ui::ClientPoint(GetContentNativeView());
 
-  if (web_contents_->GetRenderViewHost()) {
-    web_contents_->GetRenderViewHost()->DragSourceEndedAt(
+  if (GetRenderViewHost()) {
+    GetRenderViewHost()->DragSourceEndedAt(
         client.x(), client.y(), root.x(), root.y(),
         WebDragOperationNone);
   }
@@ -369,8 +373,8 @@ void WebDragSourceGtk::OnDragEnd(GtkWidget* sender,
     gfx::Point root = ui::ScreenPoint(GetContentNativeView());
     gfx::Point client = ui::ClientPoint(GetContentNativeView());
 
-    if (web_contents_->GetRenderViewHost()) {
-      web_contents_->GetRenderViewHost()->DragSourceEndedAt(
+    if (GetRenderViewHost()) {
+      GetRenderViewHost()->DragSourceEndedAt(
           client.x(), client.y(), root.x(), root.y(),
           content::GdkDragActionToWebDragOp(drag_context->action));
     }
@@ -380,6 +384,10 @@ void WebDragSourceGtk::OnDragEnd(GtkWidget* sender,
 
   drop_data_.reset();
   drag_context_ = NULL;
+}
+
+RenderViewHostImpl* WebDragSourceGtk::GetRenderViewHost() const {
+  return static_cast<RenderViewHostImpl*>(web_contents_->GetRenderViewHost());
 }
 
 gfx::NativeView WebDragSourceGtk::GetContentNativeView() const {

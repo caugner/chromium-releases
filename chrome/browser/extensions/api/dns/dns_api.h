@@ -19,13 +19,10 @@ class IOThread;
 
 namespace extensions {
 
-extern const char kAddressKey[];
-extern const char kResultCodeKey[];
-
-class DNSResolveFunction : public AsyncExtensionFunction {
+class DnsResolveFunction : public AsyncExtensionFunction {
  public:
-  DNSResolveFunction();
-  virtual ~DNSResolveFunction();
+  DnsResolveFunction();
+  virtual ~DnsResolveFunction();
 
   virtual bool RunImpl() OVERRIDE;
 

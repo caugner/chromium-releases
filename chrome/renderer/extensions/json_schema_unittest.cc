@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,15 +25,14 @@ class JsonSchemaTest : public V8UnitTest {
     std::string code = ResourceBundle::GetSharedInstance().GetRawDataResource(
         IDR_JSON_SCHEMA_JS).as_string();
 
-    // This is a nasty hack, but it is easier to test the code if we don't use
-    // it as a v8 extension. So replace the only bit that relies on that with a
-    // more easily testable implementation.
-    ReplaceFirstSubstringAfterOffset(&code, 0,
-        "native function GetChromeHidden();",
-        "function GetChromeHidden() {\n"
-        "  if (!this.chromeHidden) this.chromeHidden = {};\n"
-        "  return this.chromeHidden;\n"
-        "}");
+    // json_schema.js expects to have requireNative() defined.
+    ExecuteScriptInContext(
+        "function requireNative(id) {"
+        "  return {"
+        "    GetChromeHidden: function() { return {}; },"
+        "  };"
+        "}",
+        "test-code");
     ExecuteScriptInContext(code, kJsonSchema);
 
     // Add the test functions to the context.
@@ -93,4 +92,16 @@ TEST_F(JsonSchemaTest, TestType) {
 
 TEST_F(JsonSchemaTest, TestTypeReference) {
   TestFunction("testTypeReference");
+}
+
+TEST_F(JsonSchemaTest, TestGetAllTypesForSchema) {
+  TestFunction("testGetAllTypesForSchema");
+}
+
+TEST_F(JsonSchemaTest, TestIsValidSchemaType) {
+  TestFunction("testIsValidSchemaType");
+}
+
+TEST_F(JsonSchemaTest, TestCheckSchemaOverlap) {
+  TestFunction("testCheckSchemaOverlap");
 }

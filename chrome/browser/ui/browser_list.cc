@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,6 +23,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_shutdown.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
@@ -34,14 +35,11 @@
 #endif
 
 #if defined(OS_CHROMEOS)
+#include "base/chromeos/chromeos_version.h"
 #include "chrome/browser/chromeos/boot_times_loader.h"
 #include "chrome/browser/chromeos/dbus/dbus_thread_manager.h"
 #include "chrome/browser/chromeos/dbus/session_manager_client.h"
 #include "chrome/browser/chromeos/dbus/update_engine_client.h"
-#include "chrome/browser/chromeos/system/runtime_environment.h"
-#if defined(TOOLKIT_USES_GTK)
-#include "chrome/browser/chromeos/legacy_window_manager/wm_ipc.h"
-#endif
 #endif
 
 using content::WebContents;
@@ -250,8 +248,7 @@ bool g_session_manager_requested_shutdown = true;
 // shutdown process when closing browser windows won't be canceled.
 // Returns true if fast shutdown is successfully started.
 bool FastShutdown() {
-  if (chromeos::system::runtime_environment::IsRunningOnChromeOS()
-      && AreAllBrowsersCloseable()) {
+  if (AreAllBrowsersCloseable()) {
     BrowserList::NotifyAndTerminate(true);
     return true;
   }
@@ -259,15 +256,6 @@ bool FastShutdown() {
 }
 
 void NotifyWindowManagerAboutSignout() {
-#if defined(TOOLKIT_USES_GTK)
-  static bool notified = false;
-  if (!notified) {
-    // Let the window manager know that we're going away before we start closing
-    // windows so it can display a graceful transition to a black screen.
-    chromeos::WmIpc::instance()->NotifyAboutSignout();
-    notified = true;
-  }
-#endif
 }
 
 #endif
@@ -338,10 +326,11 @@ void BrowserList::NotifyAndTerminate(bool fast_path) {
 
 #if defined(OS_CHROMEOS)
   NotifyWindowManagerAboutSignout();
-  if (chromeos::system::runtime_environment::IsRunningOnChromeOS()) {
+  if (base::chromeos::IsRunningOnChromeOS()) {
+    // If we're on a ChromeOS device, reboot if an update has been applied,
+    // or else signal the session manager to log out.
     chromeos::UpdateEngineClient* update_engine_client
         = chromeos::DBusThreadManager::Get()->GetUpdateEngineClient();
-    // If update has been installed, reboot, otherwise, sign out.
     if (update_engine_client->GetLastStatus().status ==
         chromeos::UpdateEngineClient::UPDATE_STATUS_UPDATED_NEED_REBOOT) {
       update_engine_client->RebootAfterUpdate();
@@ -349,26 +338,52 @@ void BrowserList::NotifyAndTerminate(bool fast_path) {
       chromeos::DBusThreadManager::Get()->GetSessionManagerClient()
           ->StopSession();
     }
-    return;
+  } else {
+    // If running the Chrome OS build, but we're not on the device, act
+    // as if we received signal from SessionManager.
+    content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
+                                     base::Bind(&BrowserList::ExitCleanly));
   }
-  // If running the Chrome OS build, but we're not on the device, fall through
 #endif
-  AllBrowsersClosedAndAppExiting();
+}
+
+void BrowserList::OnAppExiting() {
+  static bool notified = false;
+  if (notified)
+    return;
+  notified = true;
+
+  delete activity_observer;
+  activity_observer = NULL;
+  HandleAppExitingForPlatform();
 }
 
 // static
 void BrowserList::RemoveBrowser(Browser* browser) {
   RemoveBrowserFrom(browser, &last_active_browsers());
 
-  // Closing all windows does not indicate quitting the application on the Mac,
-  // however, many UI tests rely on this behavior so leave it be for now and
-  // simply ignore the behavior on the Mac outside of unit tests.
-  // TODO(andybons): Fix the UI tests to Do The Right Thing.
-  bool closing_last_browser = (browsers().size() == 1);
+  // Many UI tests rely on closing the last browser window quitting the
+  // application.
+  // Mac: Closing all windows does not indicate quitting the application. Lie
+  // for now and ignore behavior outside of unit tests.
+  // ChromeOS: Force closing last window to close app with flag.
+  // TODO(andybons | pkotwicz): Fix the UI tests to Do The Right Thing.
+#if defined(OS_CHROMEOS)
+  bool closing_app;
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kDisableZeroBrowsersOpenForTests))
+    closing_app = (browsers().size() == 1);
+  else
+    closing_app = (browsers().size() == 1 &&
+        browser_shutdown::IsTryingToQuit());
+#else
+  bool closing_app = (browsers().size() == 1);
+#endif  // OS_CHROMEOS
+
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_BROWSER_CLOSED,
       content::Source<Browser>(browser),
-      content::Details<bool>(&closing_last_browser));
+      content::Details<bool>(&closing_app));
 
   RemoveBrowserFrom(browser, &browsers());
 
@@ -378,13 +393,6 @@ void BrowserList::RemoveBrowser(Browser* browser) {
   FOR_EACH_OBSERVER(Observer, observers(), OnBrowserRemoved(browser));
   DCHECK_EQ(original_count, observers().size())
       << "observer list modified during notification";
-
-  // If the last Browser object was destroyed, make sure we try to close any
-  // remaining dependent windows too.
-  if (browsers().empty()) {
-    delete activity_observer;
-    activity_observer = NULL;
-  }
 
   g_browser_process->ReleaseModule();
 
@@ -399,7 +407,7 @@ void BrowserList::RemoveBrowser(Browser* browser) {
     // shutdown, because Browser::WindowClosing() already makes sure that the
     // SessionService is created and notified.
     NotifyAppTerminating();
-    AllBrowsersClosedAndAppExiting();
+    OnAppExiting();
   }
 }
 
@@ -429,6 +437,7 @@ void BrowserList::CloseAllBrowsers() {
   if (browser_shutdown::ShuttingDownWithoutClosingBrowsers() ||
       browsers().empty()) {
     NotifyAndTerminate(true);
+    OnAppExiting();
     return;
   }
 
@@ -513,11 +522,11 @@ void BrowserList::AttemptUserExit() {
 
 // static
 void BrowserList::AttemptRestart() {
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableRestoreSessionState)) {
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableRestoreSessionState)) {
     BrowserVector::const_iterator it;
     for (it = begin(); it != end(); ++it)
-      (*it)->profile()->SaveSessionState();
+      content::BrowserContext::SaveSessionState((*it)->profile());
   }
 
   PrefService* pref_service = g_browser_process->local_state();

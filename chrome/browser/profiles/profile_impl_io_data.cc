@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,17 +15,17 @@
 #include "chrome/browser/net/connect_interceptor.h"
 #include "chrome/browser/net/http_server_properties_manager.h"
 #include "chrome/browser/net/predictor.h"
-#include "chrome/browser/net/sqlite_origin_bound_cert_store.h"
 #include "chrome/browser/net/sqlite_persistent_cookie_store.h"
+#include "chrome/browser/net/sqlite_server_bound_cert_store.h"
 #include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/resource_context.h"
 #include "content/public/browser/browser_thread.h"
-#include "net/base/origin_bound_cert_service.h"
+#include "content/public/browser/resource_context.h"
+#include "net/base/server_bound_cert_service.h"
 #include "net/ftp/ftp_network_layer.h"
 #include "net/http/http_cache.h"
 #include "net/url_request/url_request_job_factory.h"
@@ -82,7 +82,7 @@ ProfileImplIOData::Handle::~Handle() {
 
 void ProfileImplIOData::Handle::Init(
       const FilePath& cookie_path,
-      const FilePath& origin_bound_cert_path,
+      const FilePath& server_bound_cert_path,
       const FilePath& cache_path,
       int cache_max_size,
       const FilePath& media_cache_path,
@@ -100,7 +100,7 @@ void ProfileImplIOData::Handle::Init(
   LazyParams* lazy_params = new LazyParams;
 
   lazy_params->cookie_path = cookie_path;
-  lazy_params->origin_bound_cert_path = origin_bound_cert_path;
+  lazy_params->server_bound_cert_path = server_bound_cert_path;
   lazy_params->cache_path = cache_path;
   lazy_params->cache_max_size = cache_max_size;
   lazy_params->media_cache_path = media_cache_path;
@@ -134,14 +134,14 @@ ProfileImplIOData::Handle::GetChromeURLDataManagerBackendGetter() const {
                     base::Unretained(io_data_));
 }
 
-const content::ResourceContext&
-ProfileImplIOData::Handle::GetResourceContext() const {
+content::ResourceContext*
+    ProfileImplIOData::Handle::GetResourceContext() const {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   LazyInitialize();
   return GetResourceContextNoInit();
 }
 
-const content::ResourceContext&
+content::ResourceContext*
 ProfileImplIOData::Handle::GetResourceContextNoInit() const {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   // Don't call LazyInitialize here, since the resource context is created at
@@ -222,23 +222,29 @@ void ProfileImplIOData::Handle::ClearNetworkingHistorySince(
 }
 
 void ProfileImplIOData::Handle::LazyInitialize() const {
-  if (!initialized_) {
-    io_data_->InitializeOnUIThread(profile_);
-    PrefService* pref_service = profile_->GetPrefs();
-    io_data_->http_server_properties_manager_.reset(
-        new chrome_browser_net::HttpServerPropertiesManager(pref_service));
-    ChromeNetworkDelegate::InitializeReferrersEnabled(
-        io_data_->enable_referrers(), pref_service);
-    io_data_->clear_local_state_on_exit()->Init(
-        prefs::kClearSiteDataOnExit, pref_service, NULL);
-    io_data_->clear_local_state_on_exit()->MoveToThread(BrowserThread::IO);
+  if (initialized_)
+    return;
+
+  // Set initialized_ to true at the beginning in case any of the objects
+  // below try to get the ResourceContext pointer.
+  initialized_ = true;
+  PrefService* pref_service = profile_->GetPrefs();
+  io_data_->http_server_properties_manager_.reset(
+      new chrome_browser_net::HttpServerPropertiesManager(pref_service));
+  ChromeNetworkDelegate::InitializeReferrersEnabled(
+      io_data_->enable_referrers(), pref_service);
+  io_data_->clear_local_state_on_exit()->Init(
+      prefs::kClearSiteDataOnExit, pref_service, NULL);
+  io_data_->clear_local_state_on_exit()->MoveToThread(BrowserThread::IO);
+  io_data_->session_startup_pref()->Init(
+      prefs::kRestoreOnStartup, pref_service, NULL);
+  io_data_->session_startup_pref()->MoveToThread(BrowserThread::IO);
 #if defined(ENABLE_SAFE_BROWSING)
-    io_data_->safe_browsing_enabled()->Init(prefs::kSafeBrowsingEnabled,
-        pref_service, NULL);
-    io_data_->safe_browsing_enabled()->MoveToThread(BrowserThread::IO);
+  io_data_->safe_browsing_enabled()->Init(prefs::kSafeBrowsingEnabled,
+      pref_service, NULL);
+  io_data_->safe_browsing_enabled()->MoveToThread(BrowserThread::IO);
 #endif
-    initialized_ = true;
-  }
+  io_data_->InitializeOnUIThread(profile_);
 }
 
 ProfileImplIOData::LazyParams::LazyParams()
@@ -313,14 +319,14 @@ void ProfileImplIOData::LazyInitializeInternal(
   media_request_context_->set_proxy_service(proxy_service());
 
   scoped_refptr<net::CookieStore> cookie_store = NULL;
-  net::OriginBoundCertService* origin_bound_cert_service = NULL;
+  net::ServerBoundCertService* server_bound_cert_service = NULL;
   if (record_mode || playback_mode) {
     // Don't use existing cookies and use an in-memory store.
     cookie_store = new net::CookieMonster(
         NULL, profile_params->cookie_monster_delegate);
-    // Don't use existing origin-bound certs and use an in-memory store.
-    origin_bound_cert_service = new net::OriginBoundCertService(
-        new net::DefaultOriginBoundCertStore(NULL));
+    // Don't use existing server-bound certs and use an in-memory store.
+    server_bound_cert_service = new net::ServerBoundCertService(
+        new net::DefaultServerBoundCertStore(NULL));
   }
 
   // setup cookie store
@@ -336,7 +342,7 @@ void ProfileImplIOData::LazyInitializeInternal(
     cookie_store =
         new net::CookieMonster(cookie_db.get(),
                                profile_params->cookie_monster_delegate);
-    if (command_line.HasSwitch(switches::kEnableRestoreSessionState))
+    if (!command_line.HasSwitch(switches::kDisableRestoreSessionState))
       cookie_store->GetCookieMonster()->SetPersistSessionCookies(true);
   }
 
@@ -354,22 +360,22 @@ void ProfileImplIOData::LazyInitializeInternal(
   media_request_context_->set_cookie_store(cookie_store);
   extensions_context->set_cookie_store(extensions_cookie_store);
 
-  // Setup origin bound cert service.
-  if (!origin_bound_cert_service) {
-    DCHECK(!lazy_params_->origin_bound_cert_path.empty());
+  // Setup server bound cert service.
+  if (!server_bound_cert_service) {
+    DCHECK(!lazy_params_->server_bound_cert_path.empty());
 
-    scoped_refptr<SQLiteOriginBoundCertStore> origin_bound_cert_db =
-        new SQLiteOriginBoundCertStore(lazy_params_->origin_bound_cert_path);
-    origin_bound_cert_db->SetClearLocalStateOnExit(
+    scoped_refptr<SQLiteServerBoundCertStore> server_bound_cert_db =
+        new SQLiteServerBoundCertStore(lazy_params_->server_bound_cert_path);
+    server_bound_cert_db->SetClearLocalStateOnExit(
         profile_params->clear_local_state_on_exit);
-    origin_bound_cert_service = new net::OriginBoundCertService(
-        new net::DefaultOriginBoundCertStore(origin_bound_cert_db.get()));
+    server_bound_cert_service = new net::ServerBoundCertService(
+        new net::DefaultServerBoundCertStore(server_bound_cert_db.get()));
   }
 
-  set_origin_bound_cert_service(origin_bound_cert_service);
-  main_context->set_origin_bound_cert_service(origin_bound_cert_service);
-  media_request_context_->set_origin_bound_cert_service(
-      origin_bound_cert_service);
+  set_server_bound_cert_service(server_bound_cert_service);
+  main_context->set_server_bound_cert_service(server_bound_cert_service);
+  media_request_context_->set_server_bound_cert_service(
+      server_bound_cert_service);
 
   net::HttpCache::DefaultBackend* main_backend =
       new net::HttpCache::DefaultBackend(
@@ -380,11 +386,10 @@ void ProfileImplIOData::LazyInitializeInternal(
   net::HttpCache* main_cache = new net::HttpCache(
       main_context->host_resolver(),
       main_context->cert_verifier(),
-      main_context->origin_bound_cert_service(),
+      main_context->server_bound_cert_service(),
       main_context->transport_security_state(),
       main_context->proxy_service(),
-      "", // pass empty ssl_session_cache_shard to share the SSL session cache
-          // with everything that doesn't explicitly want a different one.
+      GetSSLSessionCacheShard(),
       main_context->ssl_config_service(),
       main_context->http_auth_handler_factory(),
       main_context->network_delegate(),
@@ -414,6 +419,7 @@ void ProfileImplIOData::LazyInitializeInternal(
   ftp_factory_.reset(
       new net::FtpNetworkLayer(io_thread_globals->host_resolver.get()));
   main_context->set_ftp_transaction_factory(ftp_factory_.get());
+  media_request_context_->set_ftp_transaction_factory(ftp_factory_.get());
 
   main_context->set_chrome_url_data_manager_backend(
       chrome_url_data_manager_backend());

@@ -224,13 +224,10 @@ class DesiredCapabilitiesTest(ChromeDriverTest):
   """Tests for webdriver desired capabilities."""
 
   def testCustomSwitches(self):
-    switches = ['enable-file-cookie', 'homepage=about:memory']
+    switches = ['enable-file-cookie']
     capabilities = {'chrome.switches': switches}
 
     driver = self.GetNewDriver(capabilities)
-    url = driver.current_url
-    self.assertTrue('memory' in url,
-                    'URL does not contain with "memory":' + url)
     driver.get('about:version')
     self.assertNotEqual(-1, driver.page_source.find('enable-file-cookie'))
     driver.quit()
@@ -293,6 +290,21 @@ class DesiredCapabilitiesTest(ChromeDriverTest):
   def testUseWebsiteTestingDefaults(self):
     """Test that chromedriver initializes options for website testing."""
     driver = self.GetNewDriver()
+    driver.get(self.GetTestDataUrl() + '/content_setting_test.html')
+    driver.set_script_timeout(10)
+    # Will timeout if infobar appears.
+    driver.execute_async_script('waitForGeo(arguments[0])')
+
+  def testPrefs(self):
+    """Test that chromedriver can set user preferences."""
+    driver = self.GetNewDriver({
+      'chrome.noWebsiteTestingDefaults': True,
+      'chrome.prefs': {
+        'profile.default_content_settings': {
+          'geolocation': 1
+        },
+      }
+    })
     driver.get(self.GetTestDataUrl() + '/content_setting_test.html')
     driver.set_script_timeout(10)
     # Will timeout if infobar appears.

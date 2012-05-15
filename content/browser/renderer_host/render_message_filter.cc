@@ -16,17 +16,15 @@
 #include "base/threading/thread.h"
 #include "base/threading/worker_pool.h"
 #include "base/utf_string_conversions.h"
-#include "content/browser/child_process_security_policy.h"
+#include "content/browser/child_process_security_policy_impl.h"
 #include "content/browser/download/download_stats.h"
-#include "content/browser/download/download_types.h"
+#include "content/browser/in_process_webkit/dom_storage_context_impl.h"
 #include "content/browser/plugin_process_host.h"
-#include "content/browser/plugin_service_filter.h"
 #include "content/browser/plugin_service_impl.h"
 #include "content/browser/ppapi_plugin_process_host.h"
-#include "content/browser/renderer_host/media/media_observer.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/renderer_host/render_widget_helper.h"
-#include "content/browser/resource_context.h"
+#include "content/browser/renderer_host/resource_dispatcher_host_impl.h"
 #include "content/common/child_process_host_impl.h"
 #include "content/common/child_process_messages.h"
 #include "content/common/desktop_notification_messages.h"
@@ -34,24 +32,28 @@
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
+#include "content/public/browser/download_save_info.h"
+#include "content/public/browser/media_observer.h"
+#include "content/public/browser/plugin_service_filter.h"
 #include "content/public/browser/render_view_host_delegate.h"
+#include "content/public/browser/resource_context.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/common/context_menu_params.h"
 #include "content/public/common/url_constants.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_platform_file.h"
+#include "media/audio/audio_manager_base.h"
 #include "media/audio/audio_util.h"
 #include "media/base/media_log_event.h"
-#include "net/base/cookie_monster.h"
-#include "net/base/host_resolver_impl.h"
 #include "net/base/io_buffer.h"
 #include "net/base/keygen_handler.h"
 #include "net/base/mime_util.h"
+#include "net/cookies/cookie_monster.h"
 #include "net/http/http_cache.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebNotificationPresenter.h"
-#include "webkit/glue/context_menu.h"
 #include "webkit/glue/webcookie.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/plugins/npapi/plugin_group.h"
@@ -67,10 +69,12 @@
 #include "base/file_descriptor_posix.h"
 #endif
 
+using content::BrowserContext;
 using content::BrowserMessageFilter;
 using content::BrowserThread;
 using content::ChildProcessHostImpl;
 using content::PluginServiceFilter;
+using content::ResourceDispatcherHostImpl;
 using content::UserMetricsAction;
 using net::CookieStore;
 
@@ -115,7 +119,7 @@ class OpenChannelToPpapiPluginCallback
       public PpapiPluginProcessHost::PluginClient {
  public:
   OpenChannelToPpapiPluginCallback(RenderMessageFilter* filter,
-                                   const content::ResourceContext* context,
+                                   content::ResourceContext* context,
                                    IPC::Message* reply_msg)
       : RenderMessageCompletionCallback(filter, reply_msg),
         context_(context) {
@@ -134,12 +138,12 @@ class OpenChannelToPpapiPluginCallback
     SendReplyAndDeleteThis();
   }
 
-  virtual const content::ResourceContext* GetResourceContext() {
+  virtual content::ResourceContext* GetResourceContext() {
     return context_;
   }
 
  private:
-  const content::ResourceContext* context_;
+  content::ResourceContext* context_;
 };
 
 class OpenChannelToPpapiBrokerCallback
@@ -163,11 +167,6 @@ class OpenChannelToPpapiBrokerCallback
 
   virtual void OnChannelOpened(base::ProcessHandle broker_process_handle,
                                const IPC::ChannelHandle& channel_handle) {
-#if defined(OS_POSIX)
-    // Check the validity of fd for bug investigation. Remove after fixed.
-    // See for details: crbug.com/103957.
-    CHECK_NE(-1, channel_handle.socket.fd);
-#endif
     filter_->Send(new ViewMsg_PpapiBrokerChannelCreated(routing_id_,
                                                         request_id_,
                                                         broker_process_handle,
@@ -188,7 +187,7 @@ class RenderMessageFilter::OpenChannelToNpapiPluginCallback
       public PluginProcessHost::Client {
  public:
   OpenChannelToNpapiPluginCallback(RenderMessageFilter* filter,
-                                   const content::ResourceContext& context,
+                                   content::ResourceContext* context,
                                    IPC::Message* reply_msg)
       : RenderMessageCompletionCallback(filter, reply_msg),
         context_(context),
@@ -200,7 +199,7 @@ class RenderMessageFilter::OpenChannelToNpapiPluginCallback
     return filter()->render_process_id();
   }
 
-  virtual const content::ResourceContext& GetResourceContext() OVERRIDE {
+  virtual content::ResourceContext* GetResourceContext() OVERRIDE {
     return context_;
   }
 
@@ -259,7 +258,7 @@ class RenderMessageFilter::OpenChannelToNpapiPluginCallback
     SendReplyAndDeleteThis();
   }
 
-  const content::ResourceContext& context_;
+  content::ResourceContext* context_;
   webkit::WebPluginInfo info_;
   PluginProcessHost* host_;
   bool sent_plugin_channel_request_;
@@ -270,17 +269,20 @@ RenderMessageFilter::RenderMessageFilter(
     PluginServiceImpl* plugin_service,
     content::BrowserContext* browser_context,
     net::URLRequestContextGetter* request_context,
-    RenderWidgetHelper* render_widget_helper)
-    : resource_dispatcher_host_(ResourceDispatcherHost::Get()),
+    RenderWidgetHelper* render_widget_helper,
+    content::MediaObserver* media_observer)
+    : resource_dispatcher_host_(ResourceDispatcherHostImpl::Get()),
       plugin_service_(plugin_service),
       browser_context_(browser_context),
       request_context_(request_context),
       resource_context_(browser_context->GetResourceContext()),
       render_widget_helper_(render_widget_helper),
       incognito_(browser_context->IsOffTheRecord()),
-      webkit_context_(browser_context->GetWebKitContext()),
+      dom_storage_context_(static_cast<DOMStorageContextImpl*>(
+          BrowserContext::GetDOMStorageContext(browser_context))),
       render_process_id_(render_process_id),
-      cpu_usage_(0) {
+      cpu_usage_(0),
+      media_observer_(media_observer) {
   DCHECK(request_context_);
 
   render_widget_helper_->Init(render_process_id_, resource_dispatcher_host_);
@@ -332,7 +334,6 @@ bool RenderMessageFilter::OnMessageReceived(const IPC::Message& message,
     // On Windows, we handle these on the IO thread to avoid a deadlock with
     // plugins.  On non-Windows systems, we need to handle them on the UI
     // thread.
-    IPC_MESSAGE_HANDLER(ViewHostMsg_GetScreenInfo, OnGetScreenInfo)
     IPC_MESSAGE_HANDLER(ViewHostMsg_GetWindowRect, OnGetWindowRect)
     IPC_MESSAGE_HANDLER(ViewHostMsg_GetRootWindowRect, OnGetRootWindowRect)
 #endif
@@ -380,8 +381,8 @@ bool RenderMessageFilter::OnMessageReceived(const IPC::Message& message,
                         OnGetHardwareInputSampleRate)
     IPC_MESSAGE_HANDLER(ViewHostMsg_GetHardwareSampleRate,
                         OnGetHardwareSampleRate)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_GetHardwareInputChannelCount,
-                        OnGetHardwareInputChannelCount)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_GetHardwareInputChannelLayout,
+                        OnGetHardwareInputChannelLayout)
     IPC_MESSAGE_HANDLER(ViewHostMsg_MediaLogEvent, OnMediaLogEvent)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP_EX()
@@ -403,16 +404,29 @@ void RenderMessageFilter::OnMsgCreateWindow(
     int* surface_id,
     int64* cloned_session_storage_namespace_id) {
   if (!content::GetContentClient()->browser()->CanCreateWindow(
-          GURL(params.opener_security_origin), params.window_container_type,
-          resource_context_, render_process_id_)) {
+          GURL(params.opener_url), GURL(params.opener_security_origin),
+          params.window_container_type, resource_context_,
+          render_process_id_)) {
     *route_id = MSG_ROUTING_NONE;
     *surface_id = 0;
     return;
   }
 
+#ifdef ENABLE_NEW_DOM_STORAGE_BACKEND
+  // TODO(michaeln): Fix this.
+  // This is a bug in the existing impl, session storage is effectively
+  // leaked when created thru this code path (window.open()) since there
+  // is no balancing DeleteSessionStorage() for this Clone() call anywhere
+  // in the codebase. I'm replicating the bug for now.
   *cloned_session_storage_namespace_id =
-      webkit_context_->dom_storage_context()->CloneSessionStorage(
+      dom_storage_context_->LeakyCloneSessionStorage(
           params.session_storage_namespace_id);
+#else
+  *cloned_session_storage_namespace_id =
+      dom_storage_context_->CloneSessionStorage(
+          params.session_storage_namespace_id);
+#endif
+
   render_widget_helper_->CreateNewWindow(params,
                                          peer_handle(),
                                          route_id,
@@ -438,8 +452,8 @@ void RenderMessageFilter::OnSetCookie(const IPC::Message& message,
                                       const GURL& url,
                                       const GURL& first_party_for_cookies,
                                       const std::string& cookie) {
-  ChildProcessSecurityPolicy* policy =
-      ChildProcessSecurityPolicy::GetInstance();
+  ChildProcessSecurityPolicyImpl* policy =
+      ChildProcessSecurityPolicyImpl::GetInstance();
   if (!policy->CanUseCookiesForOrigin(render_process_id_, url))
     return;
 
@@ -458,8 +472,8 @@ void RenderMessageFilter::OnSetCookie(const IPC::Message& message,
 void RenderMessageFilter::OnGetCookies(const GURL& url,
                                        const GURL& first_party_for_cookies,
                                        IPC::Message* reply_msg) {
-  ChildProcessSecurityPolicy* policy =
-      ChildProcessSecurityPolicy::GetInstance();
+  ChildProcessSecurityPolicyImpl* policy =
+      ChildProcessSecurityPolicyImpl::GetInstance();
   if (!policy->CanUseCookiesForOrigin(render_process_id_, url)) {
     SendGetCookiesResponse(reply_msg, std::string());
     return;
@@ -483,8 +497,8 @@ void RenderMessageFilter::OnGetRawCookies(
     const GURL& url,
     const GURL& first_party_for_cookies,
     IPC::Message* reply_msg) {
-  ChildProcessSecurityPolicy* policy =
-      ChildProcessSecurityPolicy::GetInstance();
+  ChildProcessSecurityPolicyImpl* policy =
+      ChildProcessSecurityPolicyImpl::GetInstance();
   // Only return raw cookies to trusted renderers or if this request is
   // not targeted to an an external host like ChromeFrame.
   // TODO(ananta) We need to support retreiving raw cookies from external
@@ -508,8 +522,8 @@ void RenderMessageFilter::OnGetRawCookies(
 
 void RenderMessageFilter::OnDeleteCookie(const GURL& url,
                                          const std::string& cookie_name) {
-  ChildProcessSecurityPolicy* policy =
-      ChildProcessSecurityPolicy::GetInstance();
+  ChildProcessSecurityPolicyImpl* policy =
+      ChildProcessSecurityPolicyImpl::GetInstance();
   if (!policy->CanUseCookiesForOrigin(render_process_id_, url))
     return;
 
@@ -592,7 +606,7 @@ void RenderMessageFilter::GetPluginsCallback(
     webkit::WebPluginInfo plugin(all_plugins[i]);
     if (!filter || filter->ShouldUsePlugin(child_process_id,
                                            routing_id,
-                                           &resource_context_,
+                                           resource_context_,
                                            GURL(),
                                            GURL(),
                                            &plugin)) {
@@ -639,7 +653,7 @@ void RenderMessageFilter::OnOpenChannelToPepperPlugin(
   plugin_service_->OpenChannelToPpapiPlugin(
       path,
       new OpenChannelToPpapiPluginCallback(
-          this, &resource_context_, reply_msg));
+          this, resource_context_, reply_msg));
 }
 
 void RenderMessageFilter::OnOpenChannelToPpapiBroker(int routing_id,
@@ -667,37 +681,40 @@ void RenderMessageFilter::OnGetHardwareBufferSize(uint32* buffer_size) {
   *buffer_size = static_cast<uint32>(media::GetAudioHardwareBufferSize());
 }
 
-void RenderMessageFilter::OnGetHardwareInputSampleRate(double* sample_rate) {
-  *sample_rate = media::GetAudioInputHardwareSampleRate();
+void RenderMessageFilter::OnGetHardwareInputSampleRate(int* sample_rate) {
+  // TODO(henrika): add support for all available input devices.
+  *sample_rate = media::GetAudioInputHardwareSampleRate(
+      AudioManagerBase::kDefaultDeviceId);
 }
 
-void RenderMessageFilter::OnGetHardwareSampleRate(double* sample_rate) {
+void RenderMessageFilter::OnGetHardwareSampleRate(int* sample_rate) {
   *sample_rate = media::GetAudioHardwareSampleRate();
 }
 
-void RenderMessageFilter::OnGetHardwareInputChannelCount(uint32* channels) {
-  *channels = static_cast<uint32>(media::GetAudioInputHardwareChannelCount());
+void RenderMessageFilter::OnGetHardwareInputChannelLayout(
+    ChannelLayout* layout) {
+  // TODO(henrika): add support for all available input devices.
+  *layout = media::GetAudioInputHardwareChannelLayout(
+      AudioManagerBase::kDefaultDeviceId);
 }
 
 void RenderMessageFilter::OnDownloadUrl(const IPC::Message& message,
                                         const GURL& url,
                                         const GURL& referrer,
                                         const string16& suggested_name) {
-  DownloadSaveInfo save_info;
+  content::DownloadSaveInfo save_info;
   save_info.suggested_name = suggested_name;
-  scoped_ptr<net::URLRequest> request(
-      new net::URLRequest(url, resource_dispatcher_host_));
+  scoped_ptr<net::URLRequest> request(new net::URLRequest(url, NULL));
   request->set_referrer(referrer.spec());
+  download_stats::RecordDownloadSource(download_stats::INITIATED_BY_RENDERER);
   resource_dispatcher_host_->BeginDownload(
       request.Pass(),
-      false,
-      save_info,
-      DownloadResourceHandler::OnStartedCallback(),
+      resource_context_,
       render_process_id_,
       message.routing_id(),
-      resource_context_);
-  download_stats::RecordDownloadCount(
-      download_stats::INITIATED_BY_RENDERER_COUNT);
+      false,
+      save_info,
+      ResourceDispatcherHostImpl::DownloadStartedCallback());
 }
 
 void RenderMessageFilter::OnCheckNotificationPermission(
@@ -831,7 +848,7 @@ void RenderMessageFilter::OnAsyncOpenFile(const IPC::Message& msg,
                                           int message_id) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
-  if (!ChildProcessSecurityPolicy::GetInstance()->HasPermissionsForFile(
+  if (!ChildProcessSecurityPolicyImpl::GetInstance()->HasPermissionsForFile(
           render_process_id_, path, flags)) {
     DLOG(ERROR) << "Bad flags in ViewMsgHost_AsyncOpenFile message: " << flags;
     content::RecordAction(UserMetricsAction("BadMessageTerminate_AOF"));
@@ -866,7 +883,8 @@ void RenderMessageFilter::AsyncOpenFileOnFileThread(const FilePath& path,
 }
 
 void RenderMessageFilter::OnMediaLogEvent(const media::MediaLogEvent& event) {
-  resource_context_.media_observer()->OnMediaEvent(render_process_id_, event);
+  if (media_observer_)
+    media_observer_->OnMediaEvent(render_process_id_, event);
 }
 
 void RenderMessageFilter::CheckPolicyForCookies(

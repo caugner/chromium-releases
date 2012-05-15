@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -162,7 +162,7 @@ void UpdateShortcutWorker::OnIconDownloaded(int download_id,
 
   if (!errored && !image.isNull()) {
     // Update icon with download image and update shortcut.
-    shortcut_info_.favicon = image;
+    shortcut_info_.favicon = gfx::Image(image);
     tab_contents_->extension_tab_helper()->SetAppIcon(image);
     UpdateShortcuts();
   } else {
@@ -228,8 +228,8 @@ void UpdateShortcutWorker::UpdateShortcuts() {
 void UpdateShortcutWorker::UpdateShortcutsOnFileThread() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
 
-  FilePath web_app_path = web_app::internals::GetWebAppDataDirectory(
-      web_app::GetDataDir(profile_path_), shortcut_info_);
+  FilePath web_app_path = web_app::GetWebAppDataDirectory(
+      profile_path_, shortcut_info_.extension_id, shortcut_info_.url);
 
   // Ensure web_app_path exists. web_app_path could be missing for a legacy
   // shortcut created by Gears.
@@ -241,7 +241,8 @@ void UpdateShortcutWorker::UpdateShortcutsOnFileThread() {
 
   FilePath icon_file = web_app_path.Append(file_name_).ReplaceExtension(
       FILE_PATH_LITERAL(".ico"));
-  web_app::internals::CheckAndSaveIcon(icon_file, shortcut_info_.favicon);
+  web_app::internals::CheckAndSaveIcon(icon_file,
+                                       *shortcut_info_.favicon.ToSkBitmap());
 
   // Update existing shortcuts' description, icon and app id.
   CheckExistingShortcuts();
@@ -309,7 +310,8 @@ void GetShortcutInfoForTab(TabContentsWrapper* tab_contents_wrapper,
                                           web_contents->GetTitle()) :
       app_info.title;
   info->description = app_info.description;
-  info->favicon = tab_contents_wrapper->favicon_tab_helper()->GetFavicon();
+  info->favicon =
+      gfx::Image(tab_contents_wrapper->favicon_tab_helper()->GetFavicon());
 }
 
 void UpdateShortcutForTabContents(TabContentsWrapper* tab_contents) {

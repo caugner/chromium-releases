@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,9 +12,11 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDragOperation.h"
 #include "ui/gfx/native_widget_types.h"
 
+struct WebDropData;
+namespace content {
 class RenderWidgetHost;
 class RenderWidgetHostView;
-struct WebDropData;
+}
 namespace gfx {
 class Point;
 }
@@ -34,10 +36,8 @@ class NativeTabContentsView {
 
   virtual void InitNativeTabContentsView() = 0;
 
-  virtual void Unparent() = 0;
-
-  virtual RenderWidgetHostView* CreateRenderWidgetHostView(
-      RenderWidgetHost* render_widget_host) = 0;
+  virtual content::RenderWidgetHostView* CreateRenderWidgetHostView(
+      content::RenderWidgetHost* render_widget_host) = 0;
 
   virtual gfx::NativeWindow GetTopLevelNativeWindow() const = 0;
 

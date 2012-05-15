@@ -7,11 +7,11 @@
 using WebKit::WebAudioDevice;
 using WebKit::WebVector;
 
-RendererWebAudioDeviceImpl::RendererWebAudioDeviceImpl(size_t buffer_size,
-    int channels, double sample_rate, WebAudioDevice::RenderCallback* callback)
+RendererWebAudioDeviceImpl::RendererWebAudioDeviceImpl(
+    const AudioParameters& params, WebAudioDevice::RenderCallback* callback)
     : is_running_(false),
       client_callback_(callback) {
-  audio_device_ = new AudioDevice(buffer_size, channels, sample_rate, this);
+  audio_device_ = new AudioDevice(params, this);
 }
 
 RendererWebAudioDeviceImpl::~RendererWebAudioDeviceImpl() {
@@ -52,6 +52,6 @@ size_t RendererWebAudioDeviceImpl::Render(const std::vector<float*>& audio_data,
   return number_of_frames;
 }
 
-void RendererWebAudioDeviceImpl::OnError() {
+void RendererWebAudioDeviceImpl::OnRenderError() {
   // TODO(crogers): implement error handling.
 }

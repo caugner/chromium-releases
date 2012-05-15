@@ -22,6 +22,7 @@
 #include "base/property_bag.h"
 #include "base/time.h"
 #include "base/tuple.h"
+#include "chrome/browser/extensions/app_shortcut_manager.h"
 #include "chrome/browser/extensions/apps_promo.h"
 #include "chrome/browser/extensions/extension_icon_manager.h"
 #include "chrome/browser/extensions/extension_menu_manager.h"
@@ -36,7 +37,6 @@
 #include "chrome/browser/extensions/process_map.h"
 #include "chrome/browser/extensions/sandboxed_extension_unpacker.h"
 #include "chrome/browser/prefs/pref_change_registrar.h"
-#include "chrome/browser/shell_integration.h"
 #include "chrome/browser/sync/api/sync_change.h"
 #include "chrome/browser/sync/api/syncable_service.h"
 #include "chrome/common/extensions/extension.h"
@@ -53,13 +53,11 @@ class ExtensionBrowserEventRouter;
 class ExtensionContentSettingsStore;
 class ExtensionCookiesEventRouter;
 class ExtensionDownloadsEventRouter;
-class ExtensionFileBrowserEventRouter;
 class ExtensionGlobalError;
 class ExtensionManagementEventRouter;
 class ExtensionPreferenceEventRouter;
 class ExtensionSyncData;
 class ExtensionToolbarModel;
-class ExtensionUpdater;
 class ExtensionWebNavigationEventRouter;
 class HistoryExtensionEventRouter;
 class GURL;
@@ -69,13 +67,16 @@ class SyncData;
 class Version;
 
 namespace chromeos {
+class ExtensionBluetoothEventRouter;
 class ExtensionInputMethodEventRouter;
 }
 
 namespace extensions {
+class APIResourceController;
 class ComponentLoader;
+class ExtensionUpdater;
+class RulesRegistryService;
 class SettingsFrontend;
-class SocketController;
 }
 
 // This is an interface class to encapsulate the dependencies that
@@ -89,6 +90,7 @@ class ExtensionServiceInterface : public SyncableService {
 
   virtual ~ExtensionServiceInterface() {}
   virtual const ExtensionSet* extensions() const = 0;
+  virtual const ExtensionSet* disabled_extensions() const = 0;
   virtual PendingExtensionManager* pending_extension_manager() = 0;
 
   // Install an update.  Return true if the install can be started.
@@ -117,11 +119,14 @@ class ExtensionServiceInterface : public SyncableService {
   // themes sync to not use it directly.
   virtual void CheckForUpdatesSoon() = 0;
 
-  virtual void AddExtension(const Extension* extension) = 0;
+  // Returns true if the extension was successfully added.
+  virtual bool AddExtension(const Extension* extension) = 0;
 
   virtual void UnloadExtension(
       const std::string& extension_id,
       extension_misc::UnloadedExtensionReason reason) = 0;
+
+  virtual void SyncExtensionChangeIfNeeded(const Extension& extension) = 0;
 
   virtual bool is_ready() = 0;
 };
@@ -131,8 +136,7 @@ class ExtensionService
     : public ExtensionServiceInterface,
       public ExternalExtensionProviderInterface::VisitorInterface,
       public base::SupportsWeakPtr<ExtensionService>,
-      public content::NotificationObserver,
-      public ImageLoadingTracker::Observer {
+      public content::NotificationObserver {
  public:
   using base::SupportsWeakPtr<ExtensionService>::AsWeakPtr;
 
@@ -196,7 +200,7 @@ class ExtensionService
 
   // Gets the list of currently installed extensions.
   virtual const ExtensionSet* extensions() const OVERRIDE;
-  const ExtensionSet* disabled_extensions() const;
+  virtual const ExtensionSet* disabled_extensions() const OVERRIDE;
   const ExtensionSet* terminated_extensions() const;
 
   // Retuns a set of all installed, disabled, and terminated extensions and
@@ -226,17 +230,6 @@ class ExtensionService
   virtual void SetAppNotificationDisabled(const std::string& extension_id,
       bool value);
 
-  // Getters and setters for the position of Apps in the NTP. The setters
-  // will trigger a sync if needed.
-  // The getters return invalid StringOridinals for non-app extensions and
-  // setting ordinals for non-apps is an error.
-  StringOrdinal GetAppLaunchOrdinal(const std::string& extension_id) const;
-  void SetAppLaunchOrdinal(const std::string& extension_id,
-                           const StringOrdinal& app_launch_ordinal);
-  StringOrdinal GetPageOrdinal(const std::string& extension_id) const;
-  void SetPageOrdinal(const std::string& extension_id,
-                      const StringOrdinal& page_ordinal);
-
   // Updates the app launcher value for the moved extension so that it is now
   // located after the given predecessor and before the successor. This will
   // trigger a sync if needed. Empty strings are used to indicate no successor
@@ -262,9 +255,9 @@ class ExtensionService
   bool GetBrowserActionVisibility(const Extension* extension);
   void SetBrowserActionVisibility(const Extension* extension, bool visible);
 
-  // Whether the background page, if any, is ready. We don't load other
-  // components until then. If there is no background page, we consider it to
-  // be ready.
+  // Whether the persistent background page, if any, is ready. We don't load
+  // other components until then. If there is no background page, or if it is
+  // non-persistent (lazy), we consider it to be ready.
   bool IsBackgroundPageReady(const Extension* extension);
   void SetBackgroundPageReady(const Extension* extension);
 
@@ -374,6 +367,10 @@ class ExtensionService
   // Scan the extension directory and clean up the cruft.
   void GarbageCollectExtensions();
 
+  // Notifies Sync (if needed) of a newly-installed extension or a change to
+  // an existing extension.
+  virtual void SyncExtensionChangeIfNeeded(const Extension& extension) OVERRIDE;
+
   // The App that represents the web store.
   const Extension* GetWebStoreApp();
 
@@ -395,7 +392,7 @@ class ExtensionService
   // Adds |extension| to this ExtensionService and notifies observers than an
   // extension has been loaded.  Called by the backend after an extension has
   // been loaded from a file and installed.
-  virtual void AddExtension(const Extension* extension) OVERRIDE;
+  virtual bool AddExtension(const Extension* extension) OVERRIDE;
 
   // Called by the backend when an extension has been installed.
   void OnExtensionInstalled(
@@ -423,7 +420,7 @@ class ExtensionService
   virtual SyncError MergeDataAndStartSyncing(
       syncable::ModelType type,
       const SyncDataList& initial_sync_data,
-      SyncChangeProcessor* sync_processor) OVERRIDE;
+      scoped_ptr<SyncChangeProcessor> sync_processor) OVERRIDE;
   virtual void StopSyncing(syncable::ModelType type) OVERRIDE;
   virtual SyncDataList GetAllSyncData(syncable::ModelType type) const OVERRIDE;
   virtual SyncError ProcessSyncChanges(
@@ -459,7 +456,7 @@ class ExtensionService
   }
 
   // Note that this may return NULL if autoupdate is not turned on.
-  ExtensionUpdater* updater();
+  extensions::ExtensionUpdater* updater();
 
   ExtensionToolbarModel* toolbar_model() { return &toolbar_model_; }
 
@@ -476,8 +473,8 @@ class ExtensionService
   }
 
 #if defined(OS_CHROMEOS)
-  ExtensionFileBrowserEventRouter* file_browser_event_router() {
-    return file_browser_event_router_.get();
+  chromeos::ExtensionBluetoothEventRouter* bluetooth_event_router() {
+    return bluetooth_event_router_.get();
   }
   chromeos::ExtensionInputMethodEventRouter* input_method_event_router() {
     return input_method_event_router_.get();
@@ -531,6 +528,14 @@ class ExtensionService
   // extensions.
   void IdentifyAlertableExtensions();
 
+  // Given an ExtensionGlobalError alert, populates it with any extensions that
+  // need alerting. Returns true if the alert should be displayed at all.
+  //
+  // This method takes the extension_global_error argument rather than using
+  // the member variable to make it easier to test the method in isolation.
+  bool PopulateExtensionGlobalError(
+      ExtensionGlobalError* extension_global_error);
+
   // Marks alertable extensions as acknowledged, after the user presses the
   // accept button.
   void HandleExtensionAlertAccept();
@@ -575,28 +580,28 @@ class ExtensionService
   }
 
   // Call only from IO thread.
-  extensions::SocketController* socket_controller();
+  extensions::APIResourceController* api_resource_controller();
 
-  // Implement ImageLoadingTracker::Observer. |tracker_| is used to
-  // load the application's icon, which is done when we start creating an
-  // application's shortcuts. This method receives the icon, and completes
-  // the process of installing the shortcuts.
-  virtual void OnImageLoaded(SkBitmap* image,
-                             const ExtensionResource& resource,
-                             int index) OVERRIDE;
+  extensions::RulesRegistryService* GetRulesRegistryService();
+
+  AppShortcutManager* app_shortcut_manager() { return &app_shortcut_manager_; }
+
  private:
   // Bundle of type (app or extension)-specific sync stuff.
   struct SyncBundle {
     SyncBundle();
     ~SyncBundle();
 
+    void Reset();
+
     bool HasExtensionId(const std::string& id) const;
     bool HasPendingExtensionId(const std::string& id) const;
 
+    // Note: all members of the struct need to be explicitly cleared in Reset().
     ExtensionFilter filter;
     std::set<std::string> synced_extensions;
     std::map<std::string, ExtensionSyncData> pending_sync_data;
-    SyncChangeProcessor* sync_processor;
+    scoped_ptr<SyncChangeProcessor> sync_processor;
   };
 
   // Contains Extension data that can change during the life of the process,
@@ -627,10 +632,6 @@ class ExtensionService
     std::string mime_type;
   };
   typedef std::list<NaClModuleInfo> NaClModuleInfoList;
-
-  // Notifies Sync (if needed) of a newly-installed extension or a change to
-  // an existing extension.
-  void SyncExtensionChangeIfNeeded(const Extension& extension);
 
   // Get the appropriate SyncBundle, given some representation of Sync data.
   SyncBundle* GetSyncBundleForExtension(const Extension& extension);
@@ -698,10 +699,6 @@ class ExtensionService
   // a NaCl module to see those changes reflected in the PluginList.
   void UpdatePluginListWithNaClModules();
 
-  // Start the process of installing an application shortcut.
-  // The process is finished when OnImageLoaded is called.
-  void StartInstallApplicationShortcut(const Extension* extension);
-
   NaClModuleInfoList::iterator FindNaClModule(const GURL& url);
 
   // The profile this ExtensionService is part of.
@@ -751,7 +748,7 @@ class ExtensionService
   bool ready_;
 
   // Our extension updater, if updates are turned on.
-  scoped_ptr<ExtensionUpdater> updater_;
+  scoped_ptr<extensions::ExtensionUpdater> updater_;
 
   // The model that tracks extensions with BrowserAction buttons.
   ExtensionToolbarModel toolbar_model_;
@@ -812,10 +809,12 @@ class ExtensionService
   scoped_ptr<ExtensionWebNavigationEventRouter> web_navigation_event_router_;
 
 #if defined(OS_CHROMEOS)
-  scoped_ptr<ExtensionFileBrowserEventRouter> file_browser_event_router_;
+  scoped_ptr<chromeos::ExtensionBluetoothEventRouter> bluetooth_event_router_;
   scoped_ptr<chromeos::ExtensionInputMethodEventRouter>
       input_method_event_router_;
 #endif
+
+  scoped_ptr<extensions::RulesRegistryService> rules_registry_service_;
 
   // A collection of external extension providers.  Each provider reads
   // a source of external extension information.  Examples include the
@@ -837,13 +836,11 @@ class ExtensionService
 
   // We need to control destruction of this object (it needs to happen on the
   // IO thread), so we don't get to use any RAII devices with it.
-  extensions::SocketController* socket_controller_;
+  extensions::APIResourceController* api_resource_controller_;
 
   extensions::ProcessMap process_map_;
 
-  // Fields used when installing application shortcuts.
-  ShellIntegration::ShortcutInfo shortcut_info_;
-  ImageLoadingTracker tracker_;
+  AppShortcutManager app_shortcut_manager_;
 
   scoped_ptr<ExtensionGlobalError> extension_global_error_;
 

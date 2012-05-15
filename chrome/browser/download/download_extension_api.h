@@ -12,6 +12,7 @@
 
 #include "base/file_path.h"
 #include "base/memory/singleton.h"
+#include "base/stl_util.h"
 #include "base/string16.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/extension_function.h"
@@ -20,11 +21,11 @@
 #include "content/public/browser/download_manager.h"
 
 class DownloadFileIconExtractor;
-class ResourceDispatcherHost;
+class DownloadQuery;
 
 namespace content {
 class ResourceContext;
-class DownloadQuery;
+class ResourceDispatcherHost;
 }
 
 // Functions in the chrome.experimental.downloads namespace facilitate
@@ -134,8 +135,8 @@ class DownloadsDownloadFunction : public AsyncDownloadsFunction {
     base::ListValue* extra_headers;
     std::string method;
     std::string post_body;
-    ResourceDispatcherHost* rdh;
-    const content::ResourceContext* resource_context;
+    content::ResourceDispatcherHost* rdh;
+    content::ResourceContext* resource_context;
     int render_process_host_id;
     int render_view_host_routing_id;
   };
@@ -160,7 +161,7 @@ class DownloadsSearchFunction : public SyncDownloadsFunction {
  private:
   bool ParseOrderBy(const base::Value& order_by_value);
 
-  scoped_ptr<content::DownloadQuery> query_;
+  scoped_ptr<DownloadQuery> query_;
   int get_id_;
   bool has_get_id_;
 
@@ -301,24 +302,41 @@ class DownloadsGetFileIconFunction : public AsyncDownloadsFunction {
   DISALLOW_COPY_AND_ASSIGN(DownloadsGetFileIconFunction);
 };
 
-class ExtensionDownloadsEventRouter
-    : public content::DownloadManager::Observer {
+// Observes a single DownloadManager and many DownloadItems and dispatches
+// onCreated and onErased events.
+class ExtensionDownloadsEventRouter : public content::DownloadManager::Observer,
+                                      public content::DownloadItem::Observer {
  public:
   explicit ExtensionDownloadsEventRouter(Profile* profile);
   virtual ~ExtensionDownloadsEventRouter();
 
-  virtual void ModelChanged() OVERRIDE;
-  virtual void ManagerGoingDown() OVERRIDE;
+  virtual void ModelChanged(content::DownloadManager* manager) OVERRIDE;
+  virtual void ManagerGoingDown(content::DownloadManager* manager) OVERRIDE;
+  virtual void OnDownloadUpdated(content::DownloadItem* download) OVERRIDE;
+  virtual void OnDownloadOpened(content::DownloadItem* download) OVERRIDE;
 
  private:
+  struct OnChangedStat {
+    OnChangedStat();
+    ~OnChangedStat();
+    int fires;
+    int total;
+  };
+
+  typedef std::map<int, content::DownloadItem*> ItemMap;
+  typedef std::map<int, base::DictionaryValue*> ItemJsonMap;
+  typedef std::map<int, OnChangedStat*> OnChangedStatMap;
+
   void Init(content::DownloadManager* manager);
   void DispatchEvent(const char* event_name, base::Value* json_arg);
-  typedef base::hash_map<int, content::DownloadItem*> ItemMap;
-  typedef std::set<int> DownloadIdSet;
 
   Profile* profile_;
   content::DownloadManager* manager_;
-  DownloadIdSet downloads_;
+  ItemMap downloads_;
+  ItemJsonMap item_jsons_;
+  STLValueDeleter<ItemJsonMap> delete_item_jsons_;
+  OnChangedStatMap on_changed_stats_;
+  STLValueDeleter<OnChangedStatMap> delete_on_changed_stats_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionDownloadsEventRouter);
 };

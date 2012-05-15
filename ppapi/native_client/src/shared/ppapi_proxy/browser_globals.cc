@@ -19,6 +19,7 @@
 #include "native_client/src/trusted/plugin/plugin.h"
 #include "ppapi/c/dev/ppb_gles_chromium_texture_mapping_dev.h"
 #include "ppapi/c/dev/ppb_layer_compositor_dev.h"
+#include "ppapi/c/dev/ppb_opengles2ext_dev.h"
 #include "ppapi/c/ppb_graphics_3d.h"
 #include "ppapi/c/ppb_opengles2.h"
 #include "ppapi/c/trusted/ppb_graphics_3d_trusted.h"
@@ -188,6 +189,12 @@ const void* GetBrowserInterface(const char* interface_name) {
       PPB_GRAPHICS_3D_TRUSTED_INTERFACE,
       PPB_GLES_CHROMIUM_TEXTURE_MAPPING_DEV_INTERFACE,
       PPB_OPENGLES2_INTERFACE,
+      PPB_OPENGLES2_INSTANCEDARRAYS_DEV_INTERFACE,
+      PPB_OPENGLES2_FRAMEBUFFERBLIT_DEV_INTERFACE,
+      PPB_OPENGLES2_FRAMEBUFFERMULTISAMPLE_DEV_INTERFACE,
+      PPB_OPENGLES2_CHROMIUMENABLEFEATURE_DEV_INTERFACE,
+      PPB_OPENGLES2_CHROMIUMMAPSUB_DEV_INTERFACE,
+      PPB_OPENGLES2_QUERY_DEV_INTERFACE,
       PPB_LAYER_COMPOSITOR_DEV_INTERFACE
     };
     for (size_t i = 0; i < NACL_ARRAY_SIZE(disabled_interface_names); i++) {
@@ -228,6 +235,13 @@ const PPB_Graphics3DTrusted* PPBGraphics3DTrustedInterface() {
   static const PPB_Graphics3DTrusted* ppb =
       static_cast<const PPB_Graphics3DTrusted*>(
           GetBrowserInterfaceSafe(PPB_GRAPHICS_3D_TRUSTED_INTERFACE));
+  return ppb;
+}
+
+const PPB_HostResolver_Private* PPBHostResolverPrivateInterface() {
+  static const PPB_HostResolver_Private* ppb =
+      static_cast<const PPB_HostResolver_Private*>(
+          GetBrowserInterfaceSafe(PPB_HOSTRESOLVER_PRIVATE_INTERFACE));
   return ppb;
 }
 
@@ -382,10 +396,10 @@ const PPB_Fullscreen* PPBFullscreenInterface() {
   return ppb;
 }
 
-const PPB_Gamepad_Dev* PPBGamepadInterface() {
-  static const PPB_Gamepad_Dev* ppb =
-      static_cast<const PPB_Gamepad_Dev*>(
-          GetBrowserInterfaceSafe(PPB_GAMEPAD_DEV_INTERFACE));
+const PPB_Gamepad* PPBGamepadInterface() {
+  static const PPB_Gamepad* ppb =
+      static_cast<const PPB_Gamepad*>(
+          GetBrowserInterfaceSafe(PPB_GAMEPAD_INTERFACE));
   return ppb;
 }
 
@@ -442,6 +456,13 @@ const PPB_PDF* PPBPDFInterface() {
   static const PPB_PDF* ppb =
       static_cast<const PPB_PDF*>(
           GetBrowserInterfaceSafe(PPB_PDF_INTERFACE));
+  return ppb;
+}
+
+const PPB_TCPServerSocket_Private* PPBTCPServerSocketPrivateInterface() {
+  static const PPB_TCPServerSocket_Private* ppb =
+      static_cast<const PPB_TCPServerSocket_Private*>(
+          GetBrowserInterfaceSafe(PPB_TCPSERVERSOCKET_PRIVATE_INTERFACE));
   return ppb;
 }
 

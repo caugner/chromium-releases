@@ -20,10 +20,10 @@
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/common/context_menu_params.h"
 #include "content/test/test_browser_thread.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "webkit/glue/context_menu.h"
 
 using content::BrowserThread;
 using testing::_;
@@ -352,11 +352,13 @@ class MockExtensionEventRouter : public ExtensionEventRouter {
   explicit MockExtensionEventRouter(Profile* profile) :
       ExtensionEventRouter(profile) {}
 
-  MOCK_METHOD5(DispatchEventToExtension, void(const std::string& extension_id,
-                                              const std::string& event_name,
-                                              const std::string& event_args,
-                                              Profile* source_profile,
-                                              const GURL& event_url));
+  MOCK_METHOD6(DispatchEventToExtension,
+               void(const std::string& extension_id,
+                    const std::string& event_name,
+                    const std::string& event_args,
+                    Profile* source_profile,
+                    const GURL& event_url,
+                    ExtensionEventRouter::UserGestureState state));
 
 
  private:
@@ -368,7 +370,7 @@ class MockTestingProfile : public TestingProfile {
  public:
   MockTestingProfile() {}
   MOCK_METHOD0(GetExtensionEventRouter, ExtensionEventRouter*());
-  MOCK_METHOD0(IsOffTheRecord, bool());
+  MOCK_CONST_METHOD0(IsOffTheRecord, bool());
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockTestingProfile);
@@ -429,7 +431,7 @@ TEST_F(ExtensionMenuManagerTest, ExecuteCommand) {
   scoped_ptr<MockExtensionEventRouter> mock_event_router(
       new MockExtensionEventRouter(&profile));
 
-  ContextMenuParams params;
+  content::ContextMenuParams params;
   params.media_type = WebKit::WebContextMenuData::MediaTypeImage;
   params.src_url = GURL("http://foo.bar/image.png");
   params.page_url = GURL("http://foo.bar");
@@ -450,11 +452,13 @@ TEST_F(ExtensionMenuManagerTest, ExecuteCommand) {
   std::string event_args;
   std::string expected_event_name = "contextMenus";
   EXPECT_CALL(*mock_event_router.get(),
-              DispatchEventToExtension(item->extension_id(),
-                                       expected_event_name,
-                                       _,
-                                       &profile,
-                                       GURL()))
+              DispatchEventToExtension(
+                  item->extension_id(),
+                  expected_event_name,
+                  _,
+                  &profile,
+                  GURL(),
+                  ExtensionEventRouter::USER_GESTURE_ENABLED))
       .Times(1)
       .WillOnce(SaveArg<2>(&event_args));
 
@@ -584,4 +588,3 @@ TEST_F(ExtensionMenuManagerTest, SanitizeRadioButtons) {
   ASSERT_FALSE(new_item->checked());
   ASSERT_TRUE(child1->checked());
 }
-

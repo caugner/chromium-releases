@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,16 +28,14 @@ class DownloadManager;
 }
 
 #if defined(COMPILER_GCC)
-namespace __gnu_cxx {
-
+namespace BASE_HASH_NAMESPACE {
 template<>
 struct hash<CrxInstaller*> {
   std::size_t operator()(CrxInstaller* const& p) const {
     return reinterpret_cast<std::size_t>(p);
   }
 };
-
-}  // namespace __gnu_cxx
+}  // namespace BASE_HASH_NAMESPACE
 #endif
 
 // This is the Chrome side helper for the download system.
@@ -58,7 +56,7 @@ class ChromeDownloadManagerDelegate
   virtual bool ShouldStartDownload(int32 download_id) OVERRIDE;
   virtual void ChooseDownloadPath(content::WebContents* web_contents,
                                   const FilePath& suggested_path,
-                                  void* data) OVERRIDE;
+                                  int32 download_id) OVERRIDE;
   virtual FilePath GetIntermediatePath(const FilePath& suggested_path) OVERRIDE;
   virtual content::WebContents*
       GetAlternativeWebContentsToNotifyForDownload() OVERRIDE;
@@ -86,7 +84,6 @@ class ChromeDownloadManagerDelegate
       const FilePath::StringType& default_extension,
       bool can_save_as_complete,
       content::SaveFilePathPickedCallback callback) OVERRIDE;
-  virtual void DownloadProgressUpdated() OVERRIDE;
 
   DownloadPrefs* download_prefs() { return download_prefs_.get(); }
   DownloadHistory* download_history() { return download_history_.get(); }

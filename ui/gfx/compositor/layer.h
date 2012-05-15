@@ -14,6 +14,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "third_party/skia/include/core/SkColor.h"
+#include "third_party/skia/include/core/SkRegion.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebContentLayerClient.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebLayer.h"
 #include "ui/gfx/rect.h"
@@ -21,6 +22,7 @@
 #include "ui/gfx/compositor/compositor.h"
 #include "ui/gfx/compositor/layer_animation_delegate.h"
 #include "ui/gfx/compositor/layer_delegate.h"
+#include "ui/gfx/compositor/layer_type.h"
 
 class SkCanvas;
 
@@ -42,18 +44,6 @@ class COMPOSITOR_EXPORT Layer :
     public LayerAnimationDelegate,
     NON_EXPORTED_BASE(public WebKit::WebContentLayerClient) {
  public:
-  enum LayerType {
-    // A layer that has no onscreen representation (note that its children will
-    // still be drawn, though).
-    LAYER_NOT_DRAWN = 0,
-
-    // A layer that has a texture.
-    LAYER_TEXTURED = 1,
-
-    // A layer that's drawn as a single color.
-    LAYER_SOLID_COLOR = 2,
-  };
-
   Layer();
   explicit Layer(LayerType type);
   virtual ~Layer();
@@ -127,6 +117,11 @@ class COMPOSITOR_EXPORT Layer :
   // otherwise.
   gfx::Rect GetTargetBounds() const;
 
+  // Sets/gets whether or not drawing of child layers should be clipped to the
+  // bounds of this layer.
+  void SetMasksToBounds(bool masks_to_bounds);
+  bool GetMasksToBounds() const;
+
   // The opacity of the layer. The opacity is applied to each pixel of the
   // texture (resulting alpha = opacity * alpha).
   float opacity() const { return opacity_; }
@@ -140,6 +135,10 @@ class COMPOSITOR_EXPORT Layer :
   // drawn. This happens if any ancestor of a Layer is not visible.
   void SetVisible(bool visible);
   bool visible() const { return visible_; }
+
+  // Returns the target visibility if the animator is running. Otherwise, it
+  // returns the current visibility.
+  bool GetTargetVisibility() const;
 
   // Returns true if this Layer is drawn. A Layer is drawn only if all ancestors
   // are visible.
@@ -167,19 +166,27 @@ class COMPOSITOR_EXPORT Layer :
 
   // Assigns a new external texture.  |texture| can be NULL to disable external
   // updates.
-  // TODO(beng): This can be removed from the API when we are in a
-  //             single-compositor world.
   void SetExternalTexture(ui::Texture* texture);
 
   // Sets the layer's fill color.  May only be called for LAYER_SOLID_COLOR.
   void SetColor(SkColor color);
 
   // Adds |invalid_rect| to the Layer's pending invalid rect and calls
-  // ScheduleDraw().
-  void SchedulePaint(const gfx::Rect& invalid_rect);
+  // ScheduleDraw(). Returns false if the paint request is ignored.
+  bool SchedulePaint(const gfx::Rect& invalid_rect);
 
   // Schedules a redraw of the layer tree at the compositor.
+  // Note that this _does not_ invalidate any region of this layer; use
+  // SchedulePaint() for that.
   void ScheduleDraw();
+
+  // Sends damaged rectangles recorded in |damaged_region_| to
+  // |compostior_| to repaint the content.
+  void SendDamagedRects();
+
+  // Suppresses painting the content by disgarding damaged region and ignoring
+  // new paint requests.
+  void SuppressPaint();
 
   // Sometimes the Layer is being updated by something other than SetCanvas
   // (e.g. the GPU process on UI_COMPOSITOR_IMAGE_TRANSPORT).
@@ -207,12 +214,6 @@ class COMPOSITOR_EXPORT Layer :
   // StackBelow().
   void StackRelativeTo(Layer* child, Layer* other, bool above);
 
-  // Does a preorder traversal of layers starting with this layer. Omits layers
-  // which cannot punch a hole in another layer such as non visible layers
-  // and layers which don't fill their bounds opaquely.
-  void GetLayerProperties(const ui::Transform& current_transform,
-                          std::vector<LayerProperties>* traverasal);
-
   bool ConvertPointForAncestor(const Layer* ancestor, gfx::Point* point) const;
   bool ConvertPointFromAncestor(const Layer* ancestor, gfx::Point* point) const;
 
@@ -229,15 +230,18 @@ class COMPOSITOR_EXPORT Layer :
   void SetBoundsImmediately(const gfx::Rect& bounds);
   void SetTransformImmediately(const ui::Transform& transform);
   void SetOpacityImmediately(float opacity);
+  void SetVisibilityImmediately(bool visibility);
 
   // Implementation of LayerAnimatorDelegate
   virtual void SetBoundsFromAnimation(const gfx::Rect& bounds) OVERRIDE;
   virtual void SetTransformFromAnimation(const Transform& transform) OVERRIDE;
   virtual void SetOpacityFromAnimation(float opacity) OVERRIDE;
+  virtual void SetVisibilityFromAnimation(bool visibility) OVERRIDE;
   virtual void ScheduleDrawForAnimation() OVERRIDE;
   virtual const gfx::Rect& GetBoundsForAnimation() const OVERRIDE;
   virtual const Transform& GetTransformForAnimation() const OVERRIDE;
   virtual float GetOpacityForAnimation() const OVERRIDE;
+  virtual bool GetVisibilityForAnimation() const OVERRIDE;
 
   void CreateWebLayer();
   void RecomputeTransform();
@@ -266,6 +270,10 @@ class COMPOSITOR_EXPORT Layer :
 
   // If true the layer is always up to date.
   bool layer_updated_externally_;
+
+  // Union of damaged rects to be used when compositor is ready to
+  // paint the content.
+  SkRegion damaged_region_;
 
   float opacity_;
 
