@@ -18,6 +18,7 @@
 #include "chrome/browser/extensions/extension_debugger_api_constants.h"
 #include "chrome/browser/extensions/extension_event_router.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
+#include "chrome/browser/infobars/infobar.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
@@ -52,11 +53,8 @@ class ExtensionDevToolsInfoBarDelegate : public ConfirmInfoBarDelegate {
  public:
   ExtensionDevToolsInfoBarDelegate(
       InfoBarTabHelper* infobar_helper,
-      const std::string& client_name,
-      ExtensionDevToolsClientHost* client_host);
+      const std::string& client_name);
   virtual ~ExtensionDevToolsInfoBarDelegate();
-
-  void ClearClientHost();
 
  private:
   // ConfirmInfoBarDelegate:
@@ -67,7 +65,6 @@ class ExtensionDevToolsInfoBarDelegate : public ConfirmInfoBarDelegate {
   virtual string16 GetMessageText() const OVERRIDE;
 
   std::string client_name_;
-  ExtensionDevToolsClientHost* client_host_;
   DISALLOW_COPY_AND_ASSIGN(ExtensionDevToolsInfoBarDelegate);
 };
 
@@ -84,16 +81,15 @@ class ExtensionDevToolsClientHost : public DevToolsClientHost,
   bool MatchesContentsAndExtensionId(WebContents* web_contents,
                                      const std::string& extension_id);
   void Close();
-  void InfoBarDestroyed();
   void SendMessageToBackend(SendCommandDebuggerFunction* function,
                             const std::string& method,
                             Value* params);
 
   // DevToolsClientHost interface
-  virtual void InspectedTabClosing();
-  virtual void DispatchOnInspectorFrontend(const std::string& message);
-  virtual void TabReplaced(WebContents* web_contents);
-  virtual void FrameNavigating(const std::string& url) {}
+  virtual void InspectedContentsClosing() OVERRIDE;
+  virtual void DispatchOnInspectorFrontend(const std::string& message) OVERRIDE;
+  virtual void ContentsReplaced(WebContents* web_contents) OVERRIDE;
+  virtual void FrameNavigating(const std::string& url) OVERRIDE {}
 
  private:
   void SendDetachedEvent();
@@ -186,16 +182,25 @@ ExtensionDevToolsClientHost::ExtensionDevToolsClientHost(
       web_contents_->GetRenderViewHost());
   DevToolsManager::GetInstance()->RegisterDevToolsClientHostFor(agent, this);
 
-  TabContentsWrapper* wrapper =
-      TabContentsWrapper::GetCurrentWrapperForContents(web_contents_);
-  infobar_delegate_ = new ExtensionDevToolsInfoBarDelegate(
-      wrapper->infobar_tab_helper(), extension_name, this);
-  wrapper->infobar_tab_helper()->AddInfoBar(infobar_delegate_);
+  InfoBarTabHelper* infobar_helper =
+      TabContentsWrapper::GetCurrentWrapperForContents(web_contents_)->
+          infobar_tab_helper();
+  infobar_delegate_ =
+      new ExtensionDevToolsInfoBarDelegate(infobar_helper, extension_name);
+  if (infobar_helper->AddInfoBar(infobar_delegate_)) {
+    registrar_.Add(this, chrome::NOTIFICATION_TAB_CONTENTS_INFOBAR_REMOVED,
+                   content::Source<InfoBarTabHelper>(infobar_helper));
+  } else {
+    infobar_delegate_ = NULL;
+  }
 }
 
 ExtensionDevToolsClientHost::~ExtensionDevToolsClientHost() {
+  // Ensure calling RemoveInfoBar() below won't result in Observe() trying to
+  // Close() us.
+  registrar_.RemoveAll();
+
   if (infobar_delegate_) {
-    infobar_delegate_->ClearClientHost();
     TabContentsWrapper* wrapper =
         TabContentsWrapper::GetCurrentWrapperForContents(web_contents_);
     InfoBarTabHelper* helper = wrapper->infobar_tab_helper();
@@ -212,25 +217,18 @@ bool ExtensionDevToolsClientHost::MatchesContentsAndExtensionId(
 }
 
 // DevToolsClientHost interface
-void ExtensionDevToolsClientHost::InspectedTabClosing() {
+void ExtensionDevToolsClientHost::InspectedContentsClosing() {
   SendDetachedEvent();
   delete this;
 }
 
-void ExtensionDevToolsClientHost::TabReplaced(
-    WebContents* web_contents) {
+void ExtensionDevToolsClientHost::ContentsReplaced(WebContents* web_contents) {
   web_contents_ = web_contents;
 }
 
 void ExtensionDevToolsClientHost::Close() {
   DevToolsManager::GetInstance()->ClientHostClosing(this);
   delete this;
-}
-
-void ExtensionDevToolsClientHost::InfoBarDestroyed() {
-  infobar_delegate_ = NULL;
-  SendDetachedEvent();
-  Close();
 }
 
 void ExtensionDevToolsClientHost::SendMessageToBackend(
@@ -269,11 +267,20 @@ void ExtensionDevToolsClientHost::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
-  DCHECK(type == chrome::NOTIFICATION_EXTENSION_UNLOADED);
-  std::string id =
-      content::Details<UnloadedExtensionInfo>(details)->extension->id();
-  if (id == extension_id_)
+  if (type == chrome::NOTIFICATION_EXTENSION_UNLOADED) {
+    std::string id =
+        content::Details<UnloadedExtensionInfo>(details)->extension->id();
+    if (id == extension_id_)
+        Close();
+  } else {
+    DCHECK_EQ(chrome::NOTIFICATION_TAB_CONTENTS_INFOBAR_REMOVED, type);
+    if (content::Details<InfoBarRemovedDetails>(details)->first ==
+        infobar_delegate_) {
+      infobar_delegate_ = NULL;
+      SendDetachedEvent();
       Close();
+    }
+  }
 }
 
 void ExtensionDevToolsClientHost::DispatchOnInspectorFrontend(
@@ -283,7 +290,7 @@ void ExtensionDevToolsClientHost::DispatchOnInspectorFrontend(
   if (profile == NULL || !profile->GetExtensionEventRouter())
     return;
 
-  scoped_ptr<Value> result(base::JSONReader::Read(message, false));
+  scoped_ptr<Value> result(base::JSONReader::Read(message));
   if (!result->IsType(Value::TYPE_DICTIONARY))
     return;
   DictionaryValue* dictionary = static_cast<DictionaryValue*>(result.get());
@@ -318,20 +325,12 @@ void ExtensionDevToolsClientHost::DispatchOnInspectorFrontend(
 
 ExtensionDevToolsInfoBarDelegate::ExtensionDevToolsInfoBarDelegate(
     InfoBarTabHelper* infobar_helper,
-    const std::string& client_name,
-    ExtensionDevToolsClientHost* client_host)
+    const std::string& client_name)
     : ConfirmInfoBarDelegate(infobar_helper),
-      client_name_(client_name),
-      client_host_(client_host) {
+      client_name_(client_name) {
 }
 
 ExtensionDevToolsInfoBarDelegate::~ExtensionDevToolsInfoBarDelegate() {
-  if (client_host_)
-      client_host_->InfoBarDestroyed();
-}
-
-void ExtensionDevToolsInfoBarDelegate::ClearClientHost() {
-    client_host_ = NULL;
 }
 
 bool ExtensionDevToolsInfoBarDelegate::ShouldExpire(
@@ -365,7 +364,7 @@ bool DebuggerFunction::InitTabContents() {
   DictionaryValue* dict = static_cast<DictionaryValue*>(debuggee);
   EXTENSION_FUNCTION_VALIDATE(dict->GetInteger(keys::kTabIdKey, &tab_id_));
 
-  // Find the TabContents that contains this tab id.
+  // Find the TabContentsWrapper that contains this tab id.
   contents_ = NULL;
   TabContentsWrapper* wrapper = NULL;
   bool result = ExtensionTabUtil::GetTabById(

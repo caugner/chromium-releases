@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "ash/ash_export.h"
+#include "ash/system/user/login_status.h"
 #include "ash/wm/shelf_auto_hide_behavior.h"
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -28,6 +29,10 @@ class Monitor;
 class RootWindow;
 class Window;
 }
+namespace content {
+class BrowserContext;
+}
+
 namespace gfx {
 class Point;
 class Rect;
@@ -65,13 +70,18 @@ class EventClientImpl;
 class FocusCycler;
 class InputMethodEventFilter;
 class KeyRewriterEventFilter;
+class MagnificationController;
 class MonitorController;
+class PanelLayoutManager;
 class PartialScreenshotEventFilter;
 class ResizeShadowController;
 class RootWindowEventFilter;
 class RootWindowLayoutManager;
+class ScreenDimmer;
 class ShadowController;
 class ShelfLayoutManager;
+class ShellContextMenu;
+class SystemGestureEventFilter;
 class StackingController;
 class TooltipController;
 class VisibilityController;
@@ -98,6 +108,7 @@ class ASH_EXPORT Shell {
 
     internal::RootWindowLayoutManager* root_window_layout();
     internal::InputMethodEventFilter* input_method_event_filter();
+    internal::SystemGestureEventFilter* system_gesture_event_filter();
     internal::WorkspaceController* workspace_controller();
 
    private:
@@ -139,6 +150,12 @@ class ASH_EXPORT Shell {
   // Toggles app list.
   void ToggleAppList();
 
+  // Returns app list target visibility.
+  bool GetAppListTargetVisibility() const;
+
+  // Returns app list window or NULL if it is not visible.
+  aura::Window* GetAppListWindow();
+
   // Returns true if the screen is locked.
   bool IsScreenLocked() const;
 
@@ -159,6 +176,16 @@ class ASH_EXPORT Shell {
   // Remove this.
   void SetMonitorWorkAreaInsets(aura::Window* window,
                                 const gfx::Insets& insets);
+
+  // Called when the user logs in.
+  void OnLoginStateChanged(user::LoginStatus status);
+
+  // Called when the application is exiting.
+  void OnAppTerminating();
+
+  // Called when the screen is locked (after the lock window is visible) or
+  // unlocked.
+  void OnLockStateChanged(bool locked);
 
   // Initializes |launcher_|.  Does nothing if it's already initialized.
   void CreateLauncher();
@@ -207,6 +234,13 @@ class ASH_EXPORT Shell {
     return user_wallpaper_delegate_.get();
   }
 
+  internal::MagnificationController* magnification_controller() {
+    return magnification_controller_.get();
+  }
+  internal::ScreenDimmer* screen_dimmer() {
+    return screen_dimmer_.get();
+  }
+
   Launcher* launcher() { return launcher_.get(); }
 
   const ScreenAsh* screen() { return screen_; }
@@ -226,6 +260,9 @@ class ASH_EXPORT Shell {
   // Returns the size of the grid.
   int GetGridSize() const;
 
+  // Returns true if in maximized or fullscreen mode.
+  bool IsInMaximizedMode() const;
+
   static void set_initially_hide_cursor(bool hide) {
     initially_hide_cursor_ = hide;
   }
@@ -237,6 +274,11 @@ class ASH_EXPORT Shell {
   // Made available for tests.
   internal::ShadowController* shadow_controller() {
     return shadow_controller_.get();
+  }
+
+  content::BrowserContext* browser_context() { return browser_context_; }
+  void set_browser_context(content::BrowserContext* browser_context) {
+    browser_context_ = browser_context;
   }
 
  private:
@@ -283,6 +325,7 @@ class ASH_EXPORT Shell {
 
   scoped_ptr<internal::AppList> app_list_;
 
+  scoped_ptr<internal::ShellContextMenu> shell_context_menu_;
   scoped_ptr<internal::StackingController> stacking_controller_;
   scoped_ptr<internal::ActivationController> activation_controller_;
   scoped_ptr<internal::WindowModalityController> window_modality_controller_;
@@ -299,6 +342,8 @@ class ASH_EXPORT Shell {
   scoped_ptr<internal::FocusCycler> focus_cycler_;
   scoped_ptr<internal::EventClientImpl> event_client_;
   scoped_ptr<internal::MonitorController> monitor_controller_;
+  scoped_ptr<internal::MagnificationController> magnification_controller_;
+  scoped_ptr<internal::ScreenDimmer> screen_dimmer_;
 
   // An event filter that rewrites or drops a key event.
   scoped_ptr<internal::KeyRewriterEventFilter> key_rewriter_filter_;
@@ -306,6 +351,9 @@ class ASH_EXPORT Shell {
   // An event filter that pre-handles key events while the partial
   // screenshot UI is active.
   scoped_ptr<internal::PartialScreenshotEventFilter> partial_screenshot_filter_;
+
+  // An event filter which handles system level gestures
+  scoped_ptr<internal::SystemGestureEventFilter> system_gesture_filter_;
 
 #if !defined(OS_MACOSX)
   // An event filter that pre-handles global accelerators.
@@ -320,17 +368,19 @@ class ASH_EXPORT Shell {
   // the status area.
   internal::ShelfLayoutManager* shelf_;
 
+  // Manages layout of panels. Owned by PanelContainer.
+  internal::PanelLayoutManager* panel_layout_manager_;
+
   ObserverList<ShellObserver> observers_;
 
   // Owned by aura::RootWindow, cached here for type safety.
   internal::RootWindowLayoutManager* root_window_layout_;
 
-  // Status area with clock, Wi-Fi signal, etc.
-  views::Widget* status_widget_;
-
-  // System tray with clock, Wi-Fi signal, etc. (a replacement in progress for
-  // |status_widget_|).
+  // System tray with clock, Wi-Fi signal, etc.
   scoped_ptr<SystemTray> tray_;
+
+  // Used by ash/shell.
+  content::BrowserContext* browser_context_;
 
   DISALLOW_COPY_AND_ASSIGN(Shell);
 };

@@ -17,13 +17,16 @@
 #include "base/scoped_native_library.h"
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
+#include "base/win/metro.h"
 #include "base/win/windows_version.h"
 #include "base/win/wrapped_window_proc.h"
 #include "chrome/browser/browser_util_win.h"
 #include "chrome/browser/first_run/first_run.h"
+#include "chrome/browser/media_gallery/media_device_notifications_window_win.h"
 #include "chrome/browser/metrics/metrics_service.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_shortcut_manager_win.h"
+#include "chrome/browser/simple_message_box.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/views/uninstall_view.h"
 #include "chrome/common/chrome_constants.h"
@@ -40,6 +43,7 @@
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_win.h"
+#include "ui/base/ui_base_switches.h"
 #include "ui/base/win/message_box_win.h"
 #include "ui/gfx/platform_font_win.h"
 #include "ui/views/focus/accelerator_handler.h"
@@ -82,11 +86,10 @@ void RecordBreakpadStatusUMA(MetricsService* metrics) {
 
 void WarnAboutMinimumSystemRequirements() {
   if (base::win::GetVersion() < base::win::VERSION_XP) {
-    // Display a warning message if the user is running chrome on Windows 2000.
-    const string16 text =
+    const string16 title = l10n_util::GetStringUTF16(IDS_PRODUCT_NAME);
+    const string16 message =
         l10n_util::GetStringUTF16(IDS_UNSUPPORTED_OS_PRE_WIN_XP);
-    const string16 caption = l10n_util::GetStringUTF16(IDS_PRODUCT_NAME);
-    ui::MessageBox(NULL, text, caption, MB_OK | MB_ICONWARNING | MB_TOPMOST);
+    browser::ShowWarningMessageBox(NULL, title, message);
   }
 }
 
@@ -110,10 +113,9 @@ int AskForUninstallConfirmation() {
 }
 
 void ShowCloseBrowserFirstMessageBox() {
-  const string16 text = l10n_util::GetStringUTF16(IDS_UNINSTALL_CLOSE_APP);
-  const string16 caption = l10n_util::GetStringUTF16(IDS_PRODUCT_NAME);
-  const UINT flags = MB_OK | MB_ICONWARNING | MB_TOPMOST;
-  ui::MessageBox(NULL, text, caption, flags);
+  const string16 title = l10n_util::GetStringUTF16(IDS_PRODUCT_NAME);
+  const string16 message = l10n_util::GetStringUTF16(IDS_UNINSTALL_CLOSE_APP);
+  browser::ShowWarningMessageBox(NULL, title, message);
 }
 
 int DoUninstallTasks(bool chrome_still_running) {
@@ -139,8 +141,8 @@ int DoUninstallTasks(bool chrome_still_running) {
     // We want to remove user level shortcuts and we only care about the ones
     // created by us and not by the installer so |alternate| is false.
     BrowserDistribution* dist = BrowserDistribution::GetDistribution();
-    if (!ShellUtil::RemoveChromeDesktopShortcut(dist, ShellUtil::CURRENT_USER,
-                                                false)) {
+    if (!ShellUtil::RemoveChromeDesktopShortcut(
+            dist, ShellUtil::CURRENT_USER, ShellUtil::SHORTCUT_NO_OPTIONS)) {
       VLOG(1) << "Failed to delete desktop shortcut.";
     }
     if (!ShellUtil::RemoveChromeDesktopShortcutsWithAppendedNames(
@@ -161,6 +163,13 @@ int DoUninstallTasks(bool chrome_still_running) {
 ChromeBrowserMainPartsWin::ChromeBrowserMainPartsWin(
     const content::MainFunctionParams& parameters)
     : ChromeBrowserMainParts(parameters) {
+  if (base::win::GetMetroModule()) {
+    CommandLine::ForCurrentProcess()->AppendSwitch(
+        switches::kTouchOptimizedUI);
+  }
+}
+
+ChromeBrowserMainPartsWin::~ChromeBrowserMainPartsWin() {
 }
 
 void ChromeBrowserMainPartsWin::ToolkitInitialized() {
@@ -175,6 +184,8 @@ void ChromeBrowserMainPartsWin::PreMainMessageLoopStart() {
     // Make sure that we know how to handle exceptions from the message loop.
     InitializeWindowProcExceptions();
   }
+  media_device_notifications_window_.reset(
+      new chrome::MediaDeviceNotificationsWindowWin());
 }
 
 // static

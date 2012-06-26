@@ -19,11 +19,10 @@ class BasePanelBrowserTest : public InProcessBrowserTest {
  public:
   class MockDisplaySettingsProvider : public DisplaySettingsProvider {
    public:
-    explicit MockDisplaySettingsProvider(Observer* observer)
-        : DisplaySettingsProvider(observer) {
-    }
+    MockDisplaySettingsProvider() { }
     virtual ~MockDisplaySettingsProvider() { }
 
+    virtual void SetPrimaryScreenArea(const gfx::Rect& primary_screen_area) = 0;
     virtual void SetWorkArea(const gfx::Rect& work_area) = 0;
     virtual void EnableAutoHidingDesktopBar(DesktopBarAlignment alignment,
                                             bool enabled,
@@ -82,16 +81,12 @@ class BasePanelBrowserTest : public InProcessBrowserTest {
 
   Panel* CreateDockedPanel(const std::string& name, const gfx::Rect& bounds);
   Panel* CreateDetachedPanel(const std::string& name, const gfx::Rect& bounds);
-  // The caller should have already created enough docked panels to trigger
-  // overflow.
-  Panel* CreateOverflowPanel(const std::string& name, const gfx::Rect& bounds);
 
   void WaitForPanelAdded(Panel* panel);
   void WaitForPanelRemoved(Panel* panel);
   void WaitForPanelActiveState(Panel* panel, ActiveState state);
   void WaitForWindowSizeAvailable(Panel* panel);
   void WaitForBoundsAnimationFinished(Panel* panel);
-  void WaitForLayoutModeChanged(Panel* panel, PanelStrip::Type layout_type);
   void WaitForExpansionStateChanged(Panel* panel,
                                     Panel::ExpansionState expansion_state);
 
@@ -105,17 +100,27 @@ class BasePanelBrowserTest : public InProcessBrowserTest {
   void CloseWindowAndWait(Browser* browser);
   static std::string MakePanelName(int index);
 
-  gfx::Rect GetTestingWorkArea() const;
-  void SetTestingWorkArea(const gfx::Rect& work_area);
+  // |primary_screen_area| must contain |work_area|. If empty rect is passed
+  // to |work_area|, it will be set to same as |primary_screen_area|.
+  void SetTestingAreas(const gfx::Rect& primary_screen_area,
+                       const gfx::Rect& work_area);
 
   MockDisplaySettingsProvider* mock_display_settings_provider() const {
     return mock_display_settings_provider_;
   }
 
+  // Some tests might not want to use the mock version.
+  void disable_display_settings_mock() {
+    mock_display_settings_enabled_ = false;
+  }
+
   static const FilePath::CharType* kTestDir;
+
  private:
   // Passed to and owned by PanelManager.
   MockDisplaySettingsProvider* mock_display_settings_provider_;
+
+  bool mock_display_settings_enabled_;
 };
 
 #endif  // CHROME_BROWSER_UI_PANELS_BASE_PANEL_BROWSER_TEST_H_

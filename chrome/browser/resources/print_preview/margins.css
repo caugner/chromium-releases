@@ -1,9 +1,8 @@
 /* Copyright (c) 2012 The Chromium Authors. All rights reserved.
  * Use of this source code is governed by a BSD-style license that can be
- * found in the LICENSE file.
- */
+ * found in the LICENSE file. */
 
-.margin-box {
+#print-preview .margin-box {
   background-color: #2a2a2a;
   border: 1px solid #888;
   box-sizing: border-box;
@@ -43,7 +42,7 @@
 }
 
 .margin-box.invalid {
-  background-color: #c11b17;
+  background-color: rgb(193, 27, 23);
 }
 
 .margins-ui-pair {
@@ -67,7 +66,7 @@
 }
 
 .margin-line {
-  border-color: #4080FA;
+  border-color: rgb(64, 128, 250);
   border-style: dashed;
   border-width: 1px;
   pointer-events: none;
@@ -96,6 +95,6 @@
 }
 
 #customized-margins.invisible {
-  pointer-events: none;
   opacity: 0;
+  pointer-events: none;
 }

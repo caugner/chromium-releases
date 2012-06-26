@@ -6,6 +6,8 @@
 #include "build/build_config.h"
 #include "chrome/browser/extensions/app_notification_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_system.h"
+#include "chrome/browser/extensions/extension_system_factory.h"
 #include "chrome/browser/extensions/settings/settings_frontend.h"
 #include "chrome/browser/prefs/pref_model_associator.h"
 #include "chrome/browser/profiles/profile.h"
@@ -83,7 +85,9 @@ using content::BrowserThread;
 ProfileSyncComponentsFactoryImpl::ProfileSyncComponentsFactoryImpl(
     Profile* profile, CommandLine* command_line)
     : profile_(profile),
-      command_line_(command_line) {
+      command_line_(command_line),
+      extension_system_(
+          ExtensionSystem::Get(profile)) {
 }
 
 void ProfileSyncComponentsFactoryImpl::RegisterDataTypes(
@@ -234,16 +238,16 @@ base::WeakPtr<SyncableService> ProfileSyncComponentsFactoryImpl::
     }
     case syncable::APPS:
     case syncable::EXTENSIONS:
-      return profile_->GetExtensionService()->AsWeakPtr();
+      return extension_system_->extension_service()->AsWeakPtr();
     case syncable::SEARCH_ENGINES:
       return TemplateURLServiceFactory::GetForProfile(profile_)->AsWeakPtr();
     case syncable::APP_SETTINGS:
     case syncable::EXTENSION_SETTINGS:
-      return profile_->GetExtensionService()->settings_frontend()->
+      return extension_system_->extension_service()->settings_frontend()->
           GetBackendForSync(type)->AsWeakPtr();
     case syncable::APP_NOTIFICATIONS:
-      return profile_->GetExtensionService()->app_notification_manager()->
-          AsWeakPtr();
+      return extension_system_->extension_service()->
+          app_notification_manager()->AsWeakPtr();
     default:
       // The following datatypes still need to be transitioned to the
       // SyncableService API:
@@ -288,7 +292,8 @@ ProfileSyncComponentsFactory::SyncComponents
         DataTypeErrorHandler* error_handler) {
   PasswordModelAssociator* model_associator =
       new PasswordModelAssociator(profile_sync_service,
-                                  password_store);
+                                  password_store,
+                                  error_handler);
   PasswordChangeProcessor* change_processor =
       new PasswordChangeProcessor(model_associator,
                                   password_store,
@@ -302,7 +307,7 @@ ProfileSyncComponentsFactory::SyncComponents
         ProfileSyncService* profile_sync_service,
         DataTypeErrorHandler* error_handler) {
   ThemeModelAssociator* model_associator =
-      new ThemeModelAssociator(profile_sync_service);
+      new ThemeModelAssociator(profile_sync_service, error_handler);
   ThemeChangeProcessor* change_processor =
       new ThemeChangeProcessor(error_handler);
   return SyncComponents(model_associator, change_processor);
@@ -316,7 +321,8 @@ ProfileSyncComponentsFactory::SyncComponents
         browser_sync::DataTypeErrorHandler* error_handler) {
   TypedUrlModelAssociator* model_associator =
       new TypedUrlModelAssociator(profile_sync_service,
-                                  history_backend);
+                                  history_backend,
+                                  error_handler);
   TypedUrlChangeProcessor* change_processor =
       new TypedUrlChangeProcessor(profile_,
                                   model_associator,
@@ -330,7 +336,7 @@ ProfileSyncComponentsFactory::SyncComponents
        ProfileSyncService* profile_sync_service,
         DataTypeErrorHandler* error_handler) {
   SessionModelAssociator* model_associator =
-      new SessionModelAssociator(profile_sync_service);
+      new SessionModelAssociator(profile_sync_service, error_handler);
   SessionChangeProcessor* change_processor =
       new SessionChangeProcessor(error_handler, model_associator);
   return SyncComponents(model_associator, change_processor);

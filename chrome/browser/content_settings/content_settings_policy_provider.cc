@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -229,7 +229,11 @@ void PolicyProvider::GetContentSettingsFromPreferences(
 
     for (size_t j = 0; j < pattern_str_list->GetSize(); ++j) {
       std::string original_pattern_str;
-      pattern_str_list->GetString(j, &original_pattern_str);
+      if (!pattern_str_list->GetString(j, &original_pattern_str)) {
+        NOTREACHED();
+        continue;
+      }
+
       PatternPair pattern_pair = ParsePatternString(original_pattern_str);
       // Ignore invalid patterns.
       if (!pattern_pair.first.IsValid()) {
@@ -294,10 +298,13 @@ void PolicyProvider::GetAutoSelectCertificateSettingsFromPreferences(
   // }
   for (size_t j = 0; j < pattern_filter_str_list->GetSize(); ++j) {
     std::string pattern_filter_json;
-    pattern_filter_str_list->GetString(j, &pattern_filter_json);
+    if (!pattern_filter_str_list->GetString(j, &pattern_filter_json)) {
+      NOTREACHED();
+      continue;
+    }
 
-    scoped_ptr<base::Value> value(
-        base::JSONReader::Read(pattern_filter_json, true));
+    scoped_ptr<base::Value> value(base::JSONReader::Read(pattern_filter_json,
+        base::JSON_ALLOW_TRAILING_COMMAS));
     if (!value.get()) {
       VLOG(1) << "Ignoring invalid certificate auto select setting. Reason:"
                  " Invalid JSON format: " << pattern_filter_json;

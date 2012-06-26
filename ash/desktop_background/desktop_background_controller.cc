@@ -12,9 +12,9 @@
 #include "base/logging.h"
 #include "grit/ui_resources.h"
 #include "ui/aura/window.h"
-#include "ui/gfx/compositor/layer.h"
-#include "ui/gfx/image/image.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/compositor/layer.h"
+#include "ui/gfx/image/image.h"
 #include "ui/views/widget/widget.h"
 
 namespace ash {
@@ -26,27 +26,18 @@ DesktopBackgroundController::DesktopBackgroundController() :
 DesktopBackgroundController::~DesktopBackgroundController() {
 }
 
-void DesktopBackgroundController::OnDesktopBackgroundChanged() {
+void DesktopBackgroundController::SetDesktopBackgroundImageMode() {
   internal::RootWindowLayoutManager* root_window_layout =
       Shell::GetInstance()->root_window_layout();
-  if (desktop_background_mode_ == BACKGROUND_SOLID_COLOR)
-    return;
-
   int index = Shell::GetInstance()->user_wallpaper_delegate()->
       GetUserWallpaperIndex();
-  DCHECK(root_window_layout->background_widget()->widget_delegate());
-  static_cast<internal::DesktopBackgroundView*>(
-      root_window_layout->background_widget()->widget_delegate())->
-          SetWallpaper(GetWallpaper(index), GetWallpaperInfo(index).layout);
-}
-
-void DesktopBackgroundController::SetDesktopBackgroundImageMode(
-    const SkBitmap& wallpaper, ImageLayout layout) {
-  internal::RootWindowLayoutManager* root_window_layout =
-      Shell::GetInstance()->root_window_layout();
+  // We should not change background when index is invalid. For instance, at
+  // login screen.
+  if (index == ash::GetInvalidWallpaperIndex())
+    return;
   root_window_layout->SetBackgroundLayer(NULL);
-  root_window_layout->SetBackgroundWidget(
-      internal::CreateDesktopBackground(wallpaper, layout));
+  internal::CreateDesktopBackground(GetWallpaper(index),
+                                    GetWallpaperInfo(index).layout);
   desktop_background_mode_ = BACKGROUND_IMAGE;
 }
 

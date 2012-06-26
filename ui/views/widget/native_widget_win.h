@@ -194,9 +194,10 @@ class VIEWS_EXPORT NativeWidgetWin : public ui::WindowImpl,
   virtual void SendNativeAccessibilityEvent(
       View* view,
       ui::AccessibilityTypes::Event event_type) OVERRIDE;
-  virtual void SetMouseCapture() OVERRIDE;
-  virtual void ReleaseMouseCapture() OVERRIDE;
-  virtual bool HasMouseCapture() const OVERRIDE;
+  // NativeWidgetWin ignores touch captures.
+  virtual void SetCapture(unsigned int flags) OVERRIDE;
+  virtual void ReleaseCapture() OVERRIDE;
+  virtual bool HasCapture(unsigned int flags) const OVERRIDE;
   virtual InputMethod* CreateInputMethod() OVERRIDE;
   virtual void CenterWindow(const gfx::Size& size) OVERRIDE;
   virtual void GetWindowPlacement(
@@ -486,8 +487,8 @@ class VIEWS_EXPORT NativeWidgetWin : public ui::WindowImpl,
   // Lock or unlock the window from being able to redraw itself in response to
   // updates to its invalid region.
   class ScopedRedrawLock;
-  void LockUpdates();
-  void UnlockUpdates();
+  void LockUpdates(bool force);
+  void UnlockUpdates(bool force);
 
   // Determines whether the delegate expects the client size or the window size.
   bool WidgetSizeIsClientSize() const;
@@ -518,6 +519,9 @@ class VIEWS_EXPORT NativeWidgetWin : public ui::WindowImpl,
   void RestoreEnabledIfNecessary();
 
   void SetInitialFocus();
+
+  // Notifies any owned windows that we're closing.
+  void NotifyOwnedWindowsParentClosing();
 
   // Overridden from internal::InputMethodDelegate
   virtual void DispatchKeyEventPostIME(const KeyEvent& key) OVERRIDE;

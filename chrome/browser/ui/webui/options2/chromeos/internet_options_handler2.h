@@ -14,7 +14,9 @@
 #include "content/public/browser/notification_registrar.h"
 #include "ui/gfx/native_widget_types.h"
 
+class Browser;
 class SkBitmap;
+
 namespace views {
 class WidgetDelegate;
 }
@@ -59,19 +61,28 @@ class InternetOptionsHandler
   void CreateModalPopup(views::WidgetDelegate* view);
   gfx::NativeWindow GetNativeWindow() const;
 
-  // Passes data needed to show details overlay for network.
+  // Returns the last active browser. If there is no such browser, creates a new
+  // browser window with an empty tab and returns it.
+  Browser* GetAppropriateBrowser();
+
+  // Passes data needed to show the details overlay for a network.
   // |args| will be [ network_type, service_path, command ]
   // And command is one of 'options', 'connect', disconnect', 'activate' or
   // 'forget'
-  // Handle{Wifi,Cellular}ButtonClick handles button click on a wireless
-  // network item and a cellular network item respectively.
-  void ButtonClickCallback(const base::ListValue* args);
+  void NetworkCommandCallback(const base::ListValue* args);
+
+  // Handle{Wifi,Cellular,VPN}ButtonClick handles button click on a wireless,
+  // cellular or VPN network item, respectively.
   void HandleWifiButtonClick(const std::string& service_path,
                              const std::string& command);
   void HandleCellularButtonClick(const std::string& service_path,
                                  const std::string& command);
   void HandleVPNButtonClick(const std::string& service_path,
                             const std::string& command);
+
+  // Used to finish up async connection to the |network|.  |network| cannot
+  // be NULL.
+  void DoConnect(chromeos::Network* network);
 
   // Initiates cellular plan data refresh. The results from libcros will be
   // passed through CellularDataPlanChanged() callback method.
@@ -95,7 +106,8 @@ class InternetOptionsHandler
   void SetSimCardLockCallback(const base::ListValue* args);
   void ChangePinCallback(const base::ListValue* args);
   void ShareNetworkCallback(const base::ListValue* args);
-  void ShowMorePlanInfoCallback(const ListValue* args);
+  void ShowMorePlanInfoCallback(const base::ListValue* args);
+  void RefreshNetworksCallback(const base::ListValue* args);
 
   /**
    * Toggle airplane mode.  Disables all wireless networks when activated.
@@ -152,6 +164,11 @@ class InternetOptionsHandler
   chromeos::NetworkLibrary* cros_;
 
   content::NotificationRegistrar registrar_;
+
+  // Weak pointer factory so we can start connections at a later time
+  // without worrying that they will actually try to happen after the lifetime
+  // of this object.
+  base::WeakPtrFactory<InternetOptionsHandler> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(InternetOptionsHandler);
 };

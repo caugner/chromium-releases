@@ -8,13 +8,13 @@
 #include "base/message_loop.h"
 #include "chrome/browser/sync/glue/backend_data_type_configurer.h"
 #include "chrome/browser/sync/glue/data_type_controller.h"
-#include "chrome/browser/sync/internal_api/configure_reason.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
 #include "content/test/notification_observer_mock.h"
 #include "content/test/test_browser_thread.h"
+#include "sync/internal_api/configure_reason.h"
 #include "sync/syncable/model_type.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -75,8 +75,6 @@ class FakeDataTypeController : public DataTypeController {
  public:
   explicit FakeDataTypeController(ModelType type)
       : state_(NOT_RUNNING), type_(type) {}
-
-  virtual ~FakeDataTypeController() {}
 
   // NOT_RUNNING -> MODEL_STARTING
   virtual void Start(const StartCallback& start_callback) {
@@ -176,6 +174,8 @@ class FakeDataTypeController : public DataTypeController {
  }
 
  private:
+  virtual ~FakeDataTypeController() {}
+
   State state_;
   ModelType type_;
   StartCallback last_start_callback_;

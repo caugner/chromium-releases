@@ -6,7 +6,7 @@
 #define CONTENT_PUBLIC_BROWSER_RENDER_WIDGET_HOST_VIEW_H_
 #pragma once
 
-#if defined(TOOLKIT_USES_GTK)
+#if defined(TOOLKIT_GTK)
 #include <gdk/gdk.h>
 #endif
 
@@ -34,6 +34,12 @@ class RenderWidgetHost;
 // the surrounding environment and passing them to the RenderWidgetHost, and
 // for actually displaying the content of the RenderWidgetHost when it
 // changes.
+//
+// RenderWidgetHostView Class Hierarchy:
+//   RenderWidgetHostView - Public interface.
+//   RenderWidgetHostViewPort - Private interface for content/ and ports.
+//   RenderWidgetHostViewBase - Common implementation between platforms.
+//   RenderWidgetHostViewWin, ... - Platform specific implementations.
 class CONTENT_EXPORT RenderWidgetHostView {
  public:
   virtual ~RenderWidgetHostView() {}
@@ -116,14 +122,12 @@ class CONTENT_EXPORT RenderWidgetHostView {
   virtual void WindowFrameChanged() = 0;
 #endif  // defined(OS_MACOSX)
 
-#if defined(TOOLKIT_USES_GTK)
+#if defined(TOOLKIT_GTK)
   // Gets the event for the last mouse down.
   virtual GdkEventButton* GetLastMouseDown() = 0;
-#if !defined(TOOLKIT_VIEWS)
   // Builds a submenu containing all the gtk input method commands.
   virtual gfx::NativeView BuildInputMethodsGtkMenu() = 0;
-#endif  // !defined(TOOLKIT_VIEWS)
-#endif  // defined(TOOLKIT_USES_GTK)
+#endif  // defined(TOOLKIT_GTK)
 
   // Subclasses should override this method to do what is appropriate to set
   // the custom background for their platform.
@@ -134,10 +138,14 @@ class CONTENT_EXPORT RenderWidgetHostView {
   // The region specified will be transparent to mouse clicks.
   virtual void SetClickthroughRegion(SkRegion* region) {}
 #endif
+
+  // Return value indicates whether the mouse is locked successfully or not.
+  virtual bool LockMouse() = 0;
+  virtual void UnlockMouse() = 0;
+  // Returns true if the mouse pointer is currently locked.
+  virtual bool IsMouseLocked() = 0;
 };
 
 }  // namespace content
 
 #endif  // CONTENT_PUBLIC_BROWSER_RENDER_WIDGET_HOST_VIEW_H_
-
-

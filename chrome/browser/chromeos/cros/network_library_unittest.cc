@@ -37,9 +37,9 @@ int32 GetPrefixLength(std::string netmask) {
 }
 
 // Have to do a stub here because MOCK can't handle closure arguments.
-class StubEnrollmentHandler : public Network::EnrollmentHandler {
+class StubEnrollmentDelegate : public EnrollmentDelegate {
  public:
-  explicit StubEnrollmentHandler(OncNetworkParser* parser)
+  explicit StubEnrollmentDelegate(OncNetworkParser* parser)
     : did_enroll(false), correct_args(false), parser_(parser) {}
 
   void Enroll(const std::vector<std::string>& uri_list,
@@ -65,6 +65,14 @@ class StubEnrollmentHandler : public Network::EnrollmentHandler {
   bool correct_args;
   OncNetworkParser* parser_;
 };
+
+void WifiNetworkConnectCallback(NetworkLibrary* cros, WifiNetwork* wifi) {
+  cros->ConnectToWifiNetwork(wifi);
+}
+
+void VirtualNetworkConnectCallback(NetworkLibrary* cros, VirtualNetwork* vpn) {
+  cros->ConnectToVirtualNetwork(vpn);
+}
 
 }  // namespace
 
@@ -143,7 +151,8 @@ TEST(NetworkLibraryTest, DecodeNonAsciiSSID) {
     std::string wifi_utf8 = "UTF-8 \u3042\u3044\u3046";
     std::string wifi_utf8_result = "UTF-8 \xE3\x81\x82\xE3\x81\x84\xE3\x81\x86";
     WifiNetwork* wifi = new WifiNetwork("fw");
-    wifi->SetSsid(wifi_utf8);
+    WifiNetwork::TestApi test_wifi(wifi);
+    test_wifi.SetSsid(wifi_utf8);
     EXPECT_EQ(wifi->name(), wifi_utf8_result);
     delete wifi;
   }
@@ -153,7 +162,8 @@ TEST(NetworkLibraryTest, DecodeNonAsciiSSID) {
     std::string wifi_latin1 = "latin-1 \xc0\xcb\xcc\xd6\xfb";
     std::string wifi_latin1_result = "latin-1 \u00c0\u00cb\u00cc\u00d6\u00fb";
     WifiNetwork* wifi = new WifiNetwork("fw");
-    wifi->SetSsid(wifi_latin1);
+    WifiNetwork::TestApi test_wifi(wifi);
+    test_wifi.SetSsid(wifi_latin1);
     EXPECT_EQ(wifi->name(), wifi_latin1_result);
     delete wifi;
   }
@@ -163,7 +173,8 @@ TEST(NetworkLibraryTest, DecodeNonAsciiSSID) {
     std::string wifi_hex = "5468697320697320484558205353494421";
     std::string wifi_hex_result = "This is HEX SSID!";
     WifiNetwork* wifi = new WifiNetwork("fw");
-    wifi->SetHexSsid(wifi_hex);
+    WifiNetwork::TestApi test_wifi(wifi);
+    test_wifi.SetHexSsid(wifi_hex);
     EXPECT_EQ(wifi->name(), wifi_hex_result);
     delete wifi;
   }
@@ -346,23 +357,25 @@ TEST_F(NetworkLibraryStubTest, NetworkConnectOncWifi) {
   EXPECT_EQ(2, parser.GetCertificatesSize());
   scoped_ptr<Network> network(parser.ParseNetwork(0));
   ASSERT_TRUE(network.get());
+  EXPECT_EQ(CLIENT_CERT_TYPE_PATTERN, network->client_cert_type());
 
-  StubEnrollmentHandler* enrollment_handler =
-      new StubEnrollmentHandler(&parser);
+  StubEnrollmentDelegate* enrollment_delegate =
+      new StubEnrollmentDelegate(&parser);
 
-  network->SetEnrollmentHandler(enrollment_handler);
-  EXPECT_FALSE(enrollment_handler->did_enroll);
-  EXPECT_FALSE(enrollment_handler->correct_args);
+  network->SetEnrollmentDelegate(enrollment_delegate);
+  EXPECT_FALSE(enrollment_delegate->did_enroll);
+  EXPECT_FALSE(enrollment_delegate->correct_args);
   WifiNetwork* wifi1 = static_cast<WifiNetwork*>(network.get());
 
   ASSERT_NE(static_cast<const WifiNetwork*>(NULL), wifi1);
   EXPECT_FALSE(wifi1->connected());
   EXPECT_TRUE(cros_->CanConnectToNetwork(wifi1));
   EXPECT_FALSE(wifi1->connected());
-  cros_->ConnectToWifiNetwork(wifi1);
+  wifi1->AttemptConnection(
+      base::Bind(&WifiNetworkConnectCallback, cros_, wifi1));
   EXPECT_TRUE(wifi1->connected());
-  EXPECT_TRUE(enrollment_handler->did_enroll);
-  EXPECT_TRUE(enrollment_handler->correct_args);
+  EXPECT_TRUE(enrollment_delegate->did_enroll);
+  EXPECT_TRUE(enrollment_delegate->correct_args);
 }
 
 TEST_F(NetworkLibraryStubTest, NetworkConnectOncVPN) {
@@ -375,23 +388,25 @@ TEST_F(NetworkLibraryStubTest, NetworkConnectOncVPN) {
   EXPECT_EQ(2, parser.GetCertificatesSize());
   scoped_ptr<Network> network(parser.ParseNetwork(0));
   ASSERT_TRUE(network.get());
+  EXPECT_EQ(CLIENT_CERT_TYPE_PATTERN, network->client_cert_type());
 
-  StubEnrollmentHandler* enrollment_handler =
-      new StubEnrollmentHandler(&parser);
+  StubEnrollmentDelegate* enrollment_delegate =
+      new StubEnrollmentDelegate(&parser);
 
-  network->SetEnrollmentHandler(enrollment_handler);
-  EXPECT_FALSE(enrollment_handler->did_enroll);
-  EXPECT_FALSE(enrollment_handler->correct_args);
+  network->SetEnrollmentDelegate(enrollment_delegate);
+  EXPECT_FALSE(enrollment_delegate->did_enroll);
+  EXPECT_FALSE(enrollment_delegate->correct_args);
   VirtualNetwork* vpn1 = static_cast<VirtualNetwork*>(network.get());
 
   ASSERT_NE(static_cast<const VirtualNetwork*>(NULL), vpn1);
   EXPECT_FALSE(vpn1->connected());
   EXPECT_TRUE(cros_->CanConnectToNetwork(vpn1));
   EXPECT_FALSE(vpn1->connected());
-  cros_->ConnectToVirtualNetwork(vpn1);
+  vpn1->AttemptConnection(
+      base::Bind(&VirtualNetworkConnectCallback, cros_, vpn1));
   EXPECT_TRUE(vpn1->connected());
-  EXPECT_TRUE(enrollment_handler->did_enroll);
-  EXPECT_TRUE(enrollment_handler->correct_args);
+  EXPECT_TRUE(enrollment_delegate->did_enroll);
+  EXPECT_TRUE(enrollment_delegate->correct_args);
 }
 
 TEST_F(NetworkLibraryStubTest, NetworkConnectVPN) {

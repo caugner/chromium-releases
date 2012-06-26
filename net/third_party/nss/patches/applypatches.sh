@@ -1,3 +1,4 @@
+#!/bin/sh
 # Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -32,3 +33,9 @@ patch -p6 < $patches_dir/getrequestedclientcerttypes.patch
 patch -p6 < $patches_dir/restartclientauth.patch
 
 patch -p6 < $patches_dir/encryptedclientcerts.patch
+
+patch -p4 < $patches_dir/dtls.patch
+
+patch -p5 < $patches_dir/falsestartnpn.patch
+
+patch -p5 < $patches_dir/dhvalues.patch

@@ -22,27 +22,29 @@
 #include "ui/base/gtk/gtk_signal.h"
 #include "ui/base/gtk/owned_widget_gtk.h"
 
-class Browser;
 class CustomDrawButton;
 class GURL;
 class TabContentsContainerGtk;
 class TabContentsWrapper;
+class ThrobberGtk;
 class WebIntentPickerDelegate;
 
-// Gtk implementation of WebIntentPicker.
+// GTK implementation of WebIntentPicker.
 class WebIntentPickerGtk : public WebIntentPicker,
                            public WebIntentPickerModelObserver,
                            public ConstrainedWindowGtkDelegate,
                            public content::NotificationObserver {
  public:
-  WebIntentPickerGtk(Browser* browser,
-                     TabContentsWrapper* tab_contents,
+  WebIntentPickerGtk(TabContentsWrapper* tab_contents,
                      WebIntentPickerDelegate* delegate,
                      WebIntentPickerModel* model);
   virtual ~WebIntentPickerGtk();
 
   // WebIntentPicker implementation.
   virtual void Close() OVERRIDE;
+  virtual void SetActionString(const string16& action) OVERRIDE;
+  virtual void OnExtensionInstallSuccess(const std::string& id) OVERRIDE;
+  virtual void OnExtensionInstallFailure(const std::string& id) OVERRIDE;
 
   // WebIntentPickerModelObserver implementation.
   virtual void OnModelChanged(WebIntentPickerModel* model) OVERRIDE;
@@ -57,6 +59,7 @@ class WebIntentPickerGtk : public WebIntentPicker,
   virtual GtkWidget* GetWidgetRoot() OVERRIDE;
   virtual GtkWidget* GetFocusWidget() OVERRIDE;
   virtual void DeleteDelegate() OVERRIDE;
+  virtual bool ShouldHaveBorderPadding() const OVERRIDE;
 
    // content::NotificationObserver implementation.
    virtual void Observe(int type,
@@ -90,9 +93,15 @@ class WebIntentPickerGtk : public WebIntentPicker,
   // Update the suggested extension table from |model_|.
   void UpdateSuggestedExtensions();
 
-  // Create a new widget displaying |rating| as 5 star images. Rating should be
-  // in the range [0, 5].
-  GtkWidget* CreateStarsWidget(double rating);
+  // Enables/disables all service buttons and extension suggestions.
+  void SetWidgetsEnabled(bool enabled);
+
+  // Adds a throbber to the extension at |index|. Returns the alignment widget
+  // containing the throbber.
+  GtkWidget* AddThrobberToExtensionAt(size_t index);
+
+  // Removes the added throbber.
+  void RemoveThrobber();
 
   // A weak pointer to the tab contents on which to display the picker UI.
   TabContentsWrapper* wrapper_;
@@ -124,11 +133,11 @@ class WebIntentPickerGtk : public WebIntentPicker,
   // A button to close the picker.
   scoped_ptr<CustomDrawButton> close_button_;
 
+  // The throbber to display when installing an extension.
+  scoped_ptr<ThrobberGtk> throbber_;
+
   // A weak pointer to the constrained window.
   ConstrainedWindowGtk* window_;
-
-  // The browser we're in.
-  Browser* browser_;
 
   // Container for the HTML in the inline disposition case.
   scoped_ptr<TabContentsWrapper> inline_disposition_tab_contents_;

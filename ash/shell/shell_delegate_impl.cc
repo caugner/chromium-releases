@@ -30,10 +30,6 @@ void ShellDelegateImpl::SetWatcher(WindowWatcher* watcher) {
     launcher_delegate_->set_watcher(watcher);
 }
 
-views::Widget* ShellDelegateImpl::CreateStatusArea() {
-  return NULL;
-}
-
 bool ShellDelegateImpl::IsUserLoggedIn() {
   return true;
 }
@@ -53,6 +49,9 @@ bool ShellDelegateImpl::IsScreenLocked() const {
   return locked_;
 }
 
+void ShellDelegateImpl::Shutdown() {
+}
+
 void ShellDelegateImpl::Exit() {
   MessageLoopForUI::current()->Quit();
 }
@@ -64,18 +63,27 @@ void ShellDelegateImpl::NewWindow(bool incognito) {
   ash::shell::ToplevelWindow::CreateToplevelWindow(create_params);
 }
 
-ash::AppListViewDelegate* ShellDelegateImpl::CreateAppListViewDelegate() {
-  return ash::shell::CreateAppListViewDelegate();
+void ShellDelegateImpl::Search() {
 }
 
-std::vector<aura::Window*> ShellDelegateImpl::GetCycleWindowList(
-    CycleSource source) const {
-  aura::Window* default_container = ash::Shell::GetInstance()->GetContainer(
-      ash::internal::kShellWindowId_DefaultContainer);
-  std::vector<aura::Window*> windows = default_container->children();
-  // Window cycling expects the topmost window at the front of the list.
-  std::reverse(windows.begin(), windows.end());
-  return windows;
+void ShellDelegateImpl::OpenFileManager() {
+}
+
+void ShellDelegateImpl::OpenCrosh() {
+}
+
+void ShellDelegateImpl::OpenMobileSetup() {
+}
+
+content::BrowserContext* ShellDelegateImpl::GetCurrentBrowserContext() {
+  return Shell::GetInstance()->browser_context();
+}
+
+void ShellDelegateImpl::ToggleSpokenFeedback() {
+}
+
+ash::AppListViewDelegate* ShellDelegateImpl::CreateAppListViewDelegate() {
+  return ash::shell::CreateAppListViewDelegate();
 }
 
 void ShellDelegateImpl::StartPartialScreenshot(

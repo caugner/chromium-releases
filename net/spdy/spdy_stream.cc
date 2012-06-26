@@ -9,6 +9,7 @@
 #include "base/message_loop.h"
 #include "base/stringprintf.h"
 #include "base/values.h"
+#include "net/spdy/spdy_http_utils.h"
 #include "net/spdy/spdy_session.h"
 
 namespace net {
@@ -41,6 +42,7 @@ class NetLogSpdyStreamWindowUpdateParameter : public NetLog::EventParameters {
                                         int32 delta,
                                         int32 window_size)
       : stream_id_(stream_id), delta_(delta), window_size_(window_size) {}
+
   virtual Value* ToValue() const {
     DictionaryValue* dict = new DictionaryValue();
     dict->SetInteger("id", static_cast<int>(stream_id_));
@@ -48,7 +50,10 @@ class NetLogSpdyStreamWindowUpdateParameter : public NetLog::EventParameters {
     dict->SetInteger("window_size", window_size_);
     return dict;
   }
+
  private:
+  virtual ~NetLogSpdyStreamWindowUpdateParameter() {}
+
   const SpdyStreamId stream_id_;
   const int32 delta_;
   const int32 window_size_;
@@ -72,7 +77,7 @@ SpdyStream::SpdyStream(SpdySession* session,
                        const BoundNetLog& net_log)
     : continue_buffering_data_(true),
       stream_id_(stream_id),
-      priority_(0),
+      priority_(HIGHEST),
       slot_(0),
       stalled_by_flow_control_(false),
       send_window_size_(kSpdyStreamInitialWindowSize),
@@ -165,8 +170,17 @@ void SpdyStream::set_initial_recv_window_size(int32 window_size) {
   session_->set_initial_recv_window_size(window_size);
 }
 
+void SpdyStream::PossiblyResumeIfStalled() {
+  if (send_window_size_ > 0 && stalled_by_flow_control_) {
+    stalled_by_flow_control_ = false;
+    io_state_ = STATE_SEND_BODY;
+    DoLoop(OK);
+  }
+}
+
 void SpdyStream::AdjustSendWindowSize(int32 delta_window_size) {
   send_window_size_ += delta_window_size;
+  PossiblyResumeIfStalled();
 }
 
 void SpdyStream::IncreaseSendWindowSize(int32 delta_window_size) {
@@ -200,11 +214,7 @@ void SpdyStream::IncreaseSendWindowSize(int32 delta_window_size) {
       NetLog::TYPE_SPDY_STREAM_UPDATE_SEND_WINDOW,
       make_scoped_refptr(new NetLogSpdyStreamWindowUpdateParameter(
           stream_id_, delta_window_size, send_window_size_)));
-  if (send_window_size_ > 0 && stalled_by_flow_control_) {
-    stalled_by_flow_control_ = false;
-    io_state_ = STATE_SEND_BODY;
-    DoLoop(OK);
-  }
+  PossiblyResumeIfStalled();
 }
 
 void SpdyStream::DecreaseSendWindowSize(int32 delta_window_size) {
@@ -514,7 +524,7 @@ int SpdyStream::WriteStreamData(IOBuffer* data, int length,
 
 bool SpdyStream::GetSSLInfo(SSLInfo* ssl_info,
                             bool* was_npn_negotiated,
-                            SSLClientSocket::NextProto* protocol_negotiated) {
+                            NextProto* protocol_negotiated) {
   return session_->GetSSLInfo(
       ssl_info, was_npn_negotiated, protocol_negotiated);
 }
@@ -532,44 +542,8 @@ bool SpdyStream::HasUrl() const {
 GURL SpdyStream::GetUrl() const {
   DCHECK(HasUrl());
 
-  if (pushed_) {
-    if (GetProtocolVersion() >= 3) {
-      return GetUrlFromHeaderBlock(response_);
-    } else {
-      // assemble from the response
-      std::string url;
-      SpdyHeaderBlock::const_iterator it;
-      it = response_->find("url");
-      if (it != (*response_).end())
-        url = it->second;
-      return GURL(url);
-    }
-  }
-
-  return GetUrlFromHeaderBlock(request_);
-}
-
-GURL SpdyStream::GetUrlFromHeaderBlock(
-    const linked_ptr<SpdyHeaderBlock>& headers) const {
-  const char* scheme_header = GetProtocolVersion() >= 3 ? ":scheme" : "scheme";
-  const char* host_header = GetProtocolVersion() >= 3 ? ":host" : "host";
-  const char* path_header = GetProtocolVersion() >= 3 ? ":path" : "path";
-
-  std::string scheme;
-  std::string host_port;
-  std::string path;
-  SpdyHeaderBlock::const_iterator it;
-  it = headers->find(scheme_header);
-  if (it != (*headers).end())
-    scheme = it->second;
-  it = headers->find(host_header);
-  if (it != (*headers).end())
-    host_port = it->second;
-  it = headers->find(path_header);
-  if (it != (*headers).end())
-    path = it->second;
-  std::string url = scheme + "://" + host_port + path;
-  return GURL(url);
+  const SpdyHeaderBlock& headers = (pushed_) ? *response_ : *request_;
+  return GetUrlFromHeaderBlock(headers, GetProtocolVersion(), pushed_);
 }
 
 void SpdyStream::OnGetDomainBoundCertComplete(int result) {
@@ -693,7 +667,7 @@ int SpdyStream::DoSendDomainBoundCert() {
   origin.erase(origin.length() - 1);  // trim trailing slash
   int rv =  session_->WriteCredentialFrame(
       origin, domain_bound_cert_type_, domain_bound_private_key_,
-      domain_bound_cert_, static_cast<RequestPriority>(priority_));
+      domain_bound_cert_, priority_);
   if (rv != ERR_IO_PENDING)
     return rv;
   return OK;
@@ -716,7 +690,7 @@ int SpdyStream::DoSendHeaders() {
 
   CHECK(request_.get());
   int result = session_->WriteSynStream(
-      stream_id_, static_cast<RequestPriority>(priority_), slot_, flags,
+      stream_id_, priority_, slot_, flags,
       request_);
   if (result != ERR_IO_PENDING)
     return result;

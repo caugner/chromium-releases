@@ -35,18 +35,16 @@ ComboboxExample::~ComboboxExample() {
 void ComboboxExample::CreateExampleView(View* container) {
   combobox_ = new Combobox(&combobox_model_);
   combobox_->set_listener(this);
-  combobox_->SetSelectedItem(3);
+  combobox_->SetSelectedIndex(3);
 
   container->SetLayoutManager(new FillLayout);
   container->AddChildView(combobox_);
 }
 
-void ComboboxExample::ItemChanged(Combobox* combo_box,
-                                  int prev_index,
-                                  int new_index) {
-  DCHECK_EQ(combobox_, combo_box);
-  PrintStatus("Selected: %s",
-              UTF16ToUTF8(combobox_model_.GetItemAt(new_index)).c_str());
+void ComboboxExample::OnSelectedIndexChanged(Combobox* combobox) {
+  DCHECK_EQ(combobox_, combobox);
+  PrintStatus("Selected: %s", UTF16ToUTF8(combobox_model_.GetItemAt(
+      combobox->selected_index())).c_str());
 }
 
 }  // namespace examples

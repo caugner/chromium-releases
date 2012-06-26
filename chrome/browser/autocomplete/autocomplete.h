@@ -17,6 +17,7 @@
 #include "base/time.h"
 #include "base/timer.h"
 #include "chrome/browser/sessions/session_id.h"
+#include "chrome/common/metrics/proto/omnibox_event.pb.h"
 #include "googleurl/src/gurl.h"
 #include "googleurl/src/url_parse.h"
 
@@ -38,10 +39,21 @@
 // happen on the same thread.  AutocompleteProviders are responsible for doing
 // their own thread management when they need to return matches asynchronously.
 //
-// The AutocompleteProviders each return different kinds of matches, such as
-// history or search matches.  These matches are given "relevance" scores.
-// Higher scores are better matches than lower scores.  The relevance scores and
-// classes providing the respective matches are as follows:
+// The AutocompleteProviders each return different kinds of matches,
+// such as history or search matches.  These matches are given
+// "relevance" scores.  Higher scores are better matches than lower
+// scores.  The relevance scores and classes providing the respective
+// matches are as listed below.
+//
+// IMPORTANT CAVEAT: The tables below are NOT COMPLETE.  Developers
+// often forget to keep these tables in sync with the code when they
+// change scoring algorithms or add new providers.  For example,
+// neither the HistoryQuickProvider (which is a provider that appears
+// often) nor the ShortcutsProvider are listed here.  For the best
+// idea of how scoring works and what providers are affecting which
+// queries, play with chrome://omnibox/ for a while.  While the tables
+// below may have some utility, nothing compares with first-hand
+// investigation and experience.
 //
 // UNKNOWN input type:
 // --------------------------------------------------------------------|-----
@@ -762,14 +774,20 @@ class AutocompleteController : public ACProviderListener {
 struct AutocompleteLog {
   AutocompleteLog(
       const string16& text,
+      bool just_deleted_text,
       AutocompleteInput::Type input_type,
       size_t selected_index,
       SessionID::id_type tab_id,
+      metrics::OmniboxEventProto::PageClassification
+          current_page_classification,
       base::TimeDelta elapsed_time_since_user_first_modified_omnibox,
       size_t inline_autocompleted_length,
       const AutocompleteResult& result);
   // The user's input text in the omnibox.
   string16 text;
+  // Whether the user deleted text immediately before selecting an omnibox
+  // suggestion.  This is usually the result of pressing backspace or delete.
+  bool just_deleted_text;
   // The detected type of the user's input.
   AutocompleteInput::Type input_type;
   // Selected index (if selected) or -1 (AutocompletePopupModel::kNoMatch).
@@ -777,6 +795,9 @@ struct AutocompleteLog {
   // ID of the tab the selected autocomplete suggestion was opened in.
   // Set to -1 if we haven't yet determined the destination tab.
   SessionID::id_type tab_id;
+  // The type of page (e.g., new tab page, regular web page) that the
+  // user was viewing before going somewhere with the omnibox.
+  metrics::OmniboxEventProto::PageClassification current_page_classification;
   // The amount of time since the user first began modifying the text
   // in the omnibox.  If at some point after modifying the text, the
   // user reverts the modifications (thus seeing the current web

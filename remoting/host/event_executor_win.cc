@@ -15,15 +15,14 @@
 
 namespace remoting {
 
+namespace {
+
 using protocol::ClipboardEvent;
 using protocol::KeyEvent;
 using protocol::MouseEvent;
 
-namespace {
-
 // USB to XKB keycode map table.
 #define USB_KEYMAP(usb, xkb, win, mac) {usb, win}
-#define INVALID_KEYCODE 0x0000
 #include "remoting/host/usb_keycode_map.h"
 #undef USB_KEYMAP
 
@@ -41,6 +40,7 @@ class EventExecutorWin : public EventExecutor {
   virtual void InjectMouseEvent(const MouseEvent& event) OVERRIDE;
 
  private:
+  HKL GetForegroundKeyboardLayout();
   void HandleKey(const KeyEvent& event);
   void HandleMouse(const MouseEvent& event);
 
@@ -84,52 +84,74 @@ void EventExecutorWin::InjectMouseEvent(const MouseEvent& event) {
   HandleMouse(event);
 }
 
-uint16_t UsbKeycodeToWinScancode(uint32_t usb_keycode) {
-  for (int i = 0; i < arraysize(usb_keycode_map); i++) {
-    if (usb_keycode_map[i].usb_keycode == usb_keycode)
-      return usb_keycode_map[i].native_keycode;
+HKL EventExecutorWin::GetForegroundKeyboardLayout() {
+  HKL layout = 0;
+
+  // Can return NULL if a window is losing focus.
+  HWND foreground = GetForegroundWindow();
+  if (foreground) {
+    // Can return 0 if the window no longer exists.
+    DWORD thread_id = GetWindowThreadProcessId(foreground, 0);
+    if (thread_id) {
+      // Can return 0 if the thread no longer exists, or if we're
+      // running on Windows Vista and the window is a command-prompt.
+      layout = GetKeyboardLayout(thread_id);
+    }
   }
 
-  return INVALID_KEYCODE;
+  // If we couldn't determine a layout then use the system default.
+  if (!layout) {
+    SystemParametersInfo(SPI_GETDEFAULTINPUTLANG, 0, &layout, 0);
+  }
+
+  return layout;
 }
 
 void EventExecutorWin::HandleKey(const KeyEvent& event) {
-  int key = event.keycode();
-  bool down = event.pressed();
+  // HostEventDispatcher should filter events missing the pressed field.
+  DCHECK(event.has_pressed());
 
-  // Calculate scan code from key event.
-  int scancode = INVALID_KEYCODE;
-  if (event.has_usb_keycode() && event.usb_keycode() != 0) {
-    scancode = UsbKeycodeToWinScancode(event.usb_keycode());
-    LOG(INFO) << std::hex << "Host received keycode: " << event.keycode()
-            << " usb_keycode: " << event.usb_keycode()
-            << " to scancode: " << scancode
-            << std::dec;
-  } else {
-    HKL hkl = GetKeyboardLayout(0);
-    scancode = MapVirtualKeyEx(key, MAPVK_VK_TO_VSC_EX, hkl);
-  }
+  // Reset the system idle suspend timeout.
+  SetThreadExecutionState(ES_SYSTEM_REQUIRED);
 
-  if (scancode == INVALID_KEYCODE)
-    return;
+  // The mapping between scancodes and VKEY values depends on the foreground
+  // window's current keyboard layout.
+  HKL layout = GetForegroundKeyboardLayout();
 
+  // Populate the a Windows INPUT structure for the event.
   INPUT input;
   memset(&input, 0, sizeof(input));
-
   input.type = INPUT_KEYBOARD;
   input.ki.time = 0;
-  input.ki.wVk = key;
-  input.ki.wScan = scancode;
+  input.ki.dwFlags = event.pressed() ? 0 : KEYEVENTF_KEYUP;
 
-  // Flag to mark extended 'e0' key scancodes. Without this, the left and
-  // right windows keys will not be handled properly (on US keyboard).
-  if ((scancode & 0xFF00) == 0xE000) {
-    input.ki.dwFlags |= KEYEVENTF_EXTENDEDKEY;
+  int scancode = kInvalidKeycode;
+  if (event.has_usb_keycode()) {
+    // If the event contains a USB-style code, map to a Windows scancode, and
+    // set a flag to have Windows look up the corresponding VK code.
+    input.ki.dwFlags |= KEYEVENTF_SCANCODE;
+    scancode = UsbKeycodeToNativeKeycode(event.usb_keycode());
+    VLOG(3) << "Converting USB keycode: " << std::hex << event.usb_keycode()
+            << " to scancode: " << scancode << std::dec;
+  } else {
+    // If the event provides only a VKEY then use it, and map to the scancode.
+    input.ki.wVk = event.keycode();
+    scancode = MapVirtualKeyEx(event.keycode(), MAPVK_VK_TO_VSC_EX, layout);
+    VLOG(3) << "Converting VKEY: " << std::hex << event.keycode()
+            << " to scancode: " << scancode << std::dec;
   }
 
-  // Flag to mark keyup events. Default is keydown.
-  if (!down) {
-    input.ki.dwFlags |= KEYEVENTF_KEYUP;
+  // Ignore events with no VK- or USB-keycode, or which can't be mapped.
+  if (scancode == kInvalidKeycode)
+    return;
+
+  // Windows scancodes are only 8-bit, so store the low-order byte into the
+  // event and set the extended flag if any high-order bits are set. The only
+  // high-order values we should see are 0xE0 or 0xE1. The extended bit usually
+  // distinguishes keys with the same meaning, e.g. left & right shift.
+  input.ki.wScan = scancode & 0xFF;
+  if ((scancode & 0xFF00) != 0x0000) {
+    input.ki.dwFlags |= KEYEVENTF_EXTENDEDKEY;
   }
 
   if (SendInput(1, &input, sizeof(INPUT)) == 0) {
@@ -138,6 +160,9 @@ void EventExecutorWin::HandleKey(const KeyEvent& event) {
 }
 
 void EventExecutorWin::HandleMouse(const MouseEvent& event) {
+  // Reset the system idle suspend timeout.
+  SetThreadExecutionState(ES_SYSTEM_REQUIRED);
+
   // TODO(garykac) Collapse mouse (x,y) and button events into a single
   // input event when possible.
   if (event.has_x() && event.has_y()) {

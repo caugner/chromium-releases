@@ -7,6 +7,7 @@
 
 #include "base/basictypes.h"
 #include "content/common/content_export.h"
+#include "content/common/view_message_enums.h"
 #include "content/public/common/common_param_traits.h"
 #include "ipc/ipc_message_macros.h"
 #include "ipc/ipc_message_utils.h"
@@ -31,6 +32,9 @@ enum AccessibilityNotification {
   // An alert appeared.
   AccessibilityNotificationAlert,
 
+  // A node has lost focus.
+  AccessibilityNotificationBlur,
+
   // The node checked state has changed.
   AccessibilityNotificationCheckStateChanged,
 
@@ -48,6 +52,9 @@ enum AccessibilityNotification {
 
   // The document node has loaded.
   AccessibilityNotificationLoadComplete,
+
+  // A menu list selection changed.
+  AccessibilityNotificationMenuListItemSelected,
 
   // A menu list value changed.
   AccessibilityNotificationMenuListValueChanged,
@@ -83,11 +90,12 @@ enum AccessibilityNotification {
   AccessibilityNotificationTextRemoved,
 
   // The node value has changed.
-  AccessibilityNotificationValueChangedD,
+  AccessibilityNotificationValueChanged,
 };
 
 #endif  // CONTENT_COMMON_ACCESSIBILITY_MESSAGES_H_
 
+IPC_ENUM_TRAITS(AccessibilityMode)
 IPC_ENUM_TRAITS(AccessibilityNotification)
 
 IPC_ENUM_TRAITS(webkit_glue::WebAccessibility::BoolAttribute)
@@ -133,8 +141,9 @@ IPC_STRUCT_END()
 
 // Messages sent from the browser to the renderer.
 
-// Enable accessibility in the renderer process.
-IPC_MESSAGE_ROUTED0(AccessibilityMsg_Enable)
+// Change the accessibility mode in the renderer process.
+IPC_MESSAGE_ROUTED1(AccessibilityMsg_SetMode,
+                    AccessibilityMode)
 
 // Relay a request from assistive technology to set focus to a given node.
 IPC_MESSAGE_ROUTED1(AccessibilityMsg_SetFocus,
@@ -155,8 +164,8 @@ IPC_MESSAGE_ROUTED2(AccessibilityMsg_ScrollToMakeVisible,
                     gfx::Rect /* subfocus */)
 
 // Relay a request from assistive technology to move a given object
-// to a specific location, in the tab content area coordinate space, i.e.
-// (0, 0) is the top-left corner of the tab contents.
+// to a specific location, in the WebContents area coordinate space, i.e.
+// (0, 0) is the top-left corner of the WebContents.
 IPC_MESSAGE_ROUTED2(AccessibilityMsg_ScrollToPoint,
                     int /* object id */,
                     gfx::Point /* new location */)

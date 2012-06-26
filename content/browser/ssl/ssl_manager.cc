@@ -13,8 +13,8 @@
 #include "content/browser/ssl/ssl_cert_error_handler.h"
 #include "content/browser/ssl/ssl_policy.h"
 #include "content/browser/ssl/ssl_request_info.h"
-#include "content/browser/tab_contents/navigation_entry_impl.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/browser/web_contents/navigation_entry_impl.h"
+#include "content/browser/web_contents/web_contents_impl.h"
 #include "content/common/ssl_status_serialization.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_details.h"
@@ -86,10 +86,10 @@ SSLManager::SSLManager(NavigationControllerImpl* controller)
   // Subscribe to various notifications.
   registrar_.Add(
       this, content::NOTIFICATION_RESOURCE_RESPONSE_STARTED,
-      content::Source<WebContents>(controller_->tab_contents()));
+      content::Source<WebContents>(controller_->web_contents()));
   registrar_.Add(
       this, content::NOTIFICATION_RESOURCE_RECEIVED_REDIRECT,
-      content::Source<WebContents>(controller_->tab_contents()));
+      content::Source<WebContents>(controller_->web_contents()));
   registrar_.Add(
       this, content::NOTIFICATION_LOAD_FROM_MEMORY_CACHE,
       content::Source<NavigationController>(controller_));
@@ -219,7 +219,7 @@ void SSLManager::UpdateEntry(NavigationEntryImpl* entry) {
 
   SSLStatus original_ssl_status = entry->GetSSL();  // Copy!
 
-  policy()->UpdateEntry(entry, controller_->tab_contents());
+  policy()->UpdateEntry(entry, controller_->web_contents());
 
   if (!entry->GetSSL().Equals(original_ssl_status)) {
     content::NotificationService::current()->Notify(

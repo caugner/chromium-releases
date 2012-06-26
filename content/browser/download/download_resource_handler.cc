@@ -98,11 +98,6 @@ bool DownloadResourceHandler::OnResponseStarted(
            << " request_id = " << request_id;
   download_start_time_ = base::TimeTicks::Now();
 
-  if (request_->url().scheme() == "data") {
-    CallStartedCB(download_id_, net::ERR_DISALLOWED_URL_SCHEME);
-    return false;
-  }
-
   // If it's a download, we don't want to poison the cache with it.
   request_->StopCaching();
 
@@ -259,8 +254,9 @@ bool DownloadResourceHandler::OnResponseCompleted(
            << " request_id = " << request_id
            << " status.status() = " << status.status()
            << " status.error() = " << status.error();
+  int response = status.is_success() ? request_->GetResponseCode() : 0;
   if (download_id_.IsValid()) {
-    OnResponseCompletedInternal(request_id, status, security_info);
+    OnResponseCompletedInternal(request_id, status, security_info, response);
   } else {
     // We got cancelled before the task which sets the id ran on the IO thread.
     // Wait for it.
@@ -268,15 +264,18 @@ bool DownloadResourceHandler::OnResponseCompleted(
         BrowserThread::UI, FROM_HERE,
         base::Bind(&base::DoNothing),
         base::Bind(&DownloadResourceHandler::OnResponseCompletedInternal, this,
-                   request_id, status, security_info));
+                   request_id, status, security_info, response));
   }
+  // Can't trust request_ being value after this point.
+  request_ = NULL;
   return true;
 }
 
 void DownloadResourceHandler::OnResponseCompletedInternal(
     int request_id,
     const net::URLRequestStatus& status,
-    const std::string& security_info) {
+    const std::string& security_info,
+    int response_code) {
   // NOTE: |request_| may be a dangling pointer at this point.
   VLOG(20) << __FUNCTION__ << "()"
            << " request_id = " << request_id
@@ -285,13 +284,14 @@ void DownloadResourceHandler::OnResponseCompletedInternal(
   net::Error error_code = net::OK;
   if (status.status() == net::URLRequestStatus::FAILED)
     error_code = static_cast<net::Error>(status.error());  // Normal case.
-  // ERR_CONNECTION_CLOSED is allowed since a number of servers in the wild
-  // advertise a larger Content-Length than the amount of bytes in the message
-  // body, and then close the connection. Other browsers - IE8, Firefox 4.0.1,
-  // and Safari 5.0.4 - treat the download as complete in this case, so we
-  // follow their lead.
-  if (error_code == net::ERR_CONNECTION_CLOSED)
+  // ERR_CONTENT_LENGTH_MISMATCH and ERR_INCOMPLETE_CHUNKED_ENCODING are
+  // allowed since a number of servers in the wild close the connection too
+  // early by mistake. Other browsers - IE9, Firefox 11.0, and Safari 5.1.4 -
+  // treat downloads as complete in both cases, so we follow their lead.
+  if (error_code == net::ERR_CONTENT_LENGTH_MISMATCH ||
+      error_code == net::ERR_INCOMPLETE_CHUNKED_ENCODING) {
     error_code = net::OK;
+  }
   content::DownloadInterruptReason reason =
       content::ConvertNetErrorToInterruptReason(
         error_code, content::DOWNLOAD_INTERRUPT_FROM_NETWORK);
@@ -304,7 +304,6 @@ void DownloadResourceHandler::OnResponseCompletedInternal(
   }
 
   if (status.is_success()) {
-    int response_code = request_->GetResponseCode();
     if (response_code >= 400) {
       switch(response_code) {
         case 404:  // File Not Found.

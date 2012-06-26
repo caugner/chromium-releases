@@ -67,6 +67,9 @@ IPC_STRUCT_BEGIN(ExtensionMsg_ExecuteCode_Params)
   // Whether to inject into all frames, or only the root frame.
   IPC_STRUCT_MEMBER(bool, all_frames)
 
+  // When to inject the code.
+  IPC_STRUCT_MEMBER(int, run_at)
+
   // Whether to execute code in the main world (as opposed to an isolated
   // world).
   IPC_STRUCT_MEMBER(bool, in_main_world)
@@ -115,6 +118,11 @@ struct ExtensionMsg_Loaded_Params {
   // to generate the extension ID for extensions that are loaded unpacked.
   FilePath path;
 
+  // The extension's active permissions.
+  ExtensionAPIPermissionSet apis;
+  URLPatternSet explicit_hosts;
+  URLPatternSet scriptable_hosts;
+
   // We keep this separate so that it can be used in logging.
   std::string id;
 
@@ -162,11 +170,13 @@ struct ParamTraits<ExtensionMsg_Loaded_Params> {
 
 // Messages sent from the browser to the renderer.
 
-// The browser sends this message in response to all extension api calls.
+// The browser sends this message in response to all extension api calls. The
+// response data (if any) is one of the base::Value subclasses, wrapped as the
+// first element in a ListValue.
 IPC_MESSAGE_ROUTED4(ExtensionMsg_Response,
                     int /* request_id */,
                     bool /* success */,
-                    std::string /* response */,
+                    ListValue /* response wrapper (see comment above) */,
                     std::string /* error */)
 
 // This message is optionally routed.  If used as a control message, it
@@ -243,12 +253,53 @@ IPC_MESSAGE_CONTROL3(ExtensionMsg_UsingWebRequestAPI,
                      bool /* adblock_plus */,
                      bool /* other_webrequest */)
 
-// Ask the renderer if it is ready to shutdown. Used for lazy background pages
-// when they are considered idle. The renderer will reply with the same
-// sequence_id so that we can tell which message it is responding to.
-IPC_MESSAGE_CONTROL2(ExtensionMsg_ShouldClose,
+// Ask the lazy background page if it is ready to unload. This is sent when the
+// page is considered idle. The renderer will reply with the same sequence_id
+// so that we can tell which message it is responding to.
+IPC_MESSAGE_CONTROL2(ExtensionMsg_ShouldUnload,
                      std::string /* extension_id */,
                      int /* sequence_id */)
+
+// If we complete a round of ShouldUnload->ShouldUnloadAck messages without the
+// lazy background page becoming active again, we are ready to unload. This
+// message tells the page to dispatch the unload event.
+IPC_MESSAGE_CONTROL1(ExtensionMsg_Unload,
+                     std::string /* extension_id */)
+
+// Send to renderer once the installation mentioned on
+// ExtensionHostMsg_InlineWebstoreInstall is complete.
+IPC_MESSAGE_ROUTED3(ExtensionMsg_InlineWebstoreInstallResponse,
+                    int32 /* install id */,
+                    bool /* whether the install was successful */,
+                    std::string /* error */)
+
+// Response to the renderer for ExtensionHostMsg_GetAppNotifyChannel.
+IPC_MESSAGE_ROUTED3(ExtensionMsg_GetAppNotifyChannelResponse,
+                    std::string /* channel_id */,
+                    std::string /* error */,
+                    int32 /* callback_id */)
+
+// Response to the renderer for ExtensionHostMsg_GetAppInstallState.
+IPC_MESSAGE_ROUTED2(ExtensionMsg_GetAppInstallStateResponse,
+                    std::string /* state */,
+                    int32 /* callback_id */)
+
+// Dispatch the Port.onConnect event for message channels.
+IPC_MESSAGE_ROUTED5(ExtensionMsg_DispatchOnConnect,
+                    int /* target_port_id */,
+                    std::string /* channel_name */,
+                    std::string /* tab_json */,
+                    std::string /* source_extension_id */,
+                    std::string /* target_extension_id */)
+
+// Deliver a message sent with ExtensionHostMsg_PostMessage.
+IPC_MESSAGE_ROUTED2(ExtensionMsg_DeliverMessage,
+                    int /* target_port_id */,
+                    std::string /* message */)
+
+IPC_MESSAGE_ROUTED2(ExtensionMsg_DispatchOnDisconnect,
+                    int /* port_id */,
+                    bool /* connection_error */)
 
 // Messages sent from the renderer to the browser.
 
@@ -287,9 +338,7 @@ IPC_MESSAGE_CONTROL2(ExtensionHostMsg_RemoveLazyListener,
                      std::string /* name */)
 
 // Notify the browser that an event has finished being dispatched.
-IPC_MESSAGE_CONTROL1(ExtensionHostMsg_ExtensionEventAck,
-                     std::string /* extension_id */)
-
+IPC_MESSAGE_ROUTED0(ExtensionHostMsg_EventAck)
 
 // Open a channel to all listening contexts owned by the extension with
 // the given ID.  This always returns a valid port ID which can be used for
@@ -319,8 +368,9 @@ IPC_MESSAGE_ROUTED2(ExtensionHostMsg_PostMessage,
 
 // Send a message to an extension process.  The handle is the value returned
 // by ViewHostMsg_OpenChannelTo*.
-IPC_MESSAGE_CONTROL1(ExtensionHostMsg_CloseChannel,
-                     int /* port_id */)
+IPC_MESSAGE_CONTROL2(ExtensionHostMsg_CloseChannel,
+                     int /* port_id */,
+                     bool /* connection_error */)
 
 // Used to get the extension message bundle.
 IPC_SYNC_MESSAGE_CONTROL1_1(ExtensionHostMsg_GetMessageBundle,
@@ -348,12 +398,6 @@ IPC_MESSAGE_ROUTED4(ExtensionHostMsg_InlineWebstoreInstall,
                     std::string /* Web Store item ID */,
                     GURL /* requestor URL */)
 
-// Send to renderer once the installation mentioned above is complete.
-IPC_MESSAGE_ROUTED3(ExtensionMsg_InlineWebstoreInstallResponse,
-                    int32 /* install id */,
-                    bool /* whether the install was successful */,
-                    std::string /* error */)
-
 // Sent by the renderer when an App is requesting permission to send server
 // pushed notifications.
 IPC_MESSAGE_ROUTED4(ExtensionHostMsg_GetAppNotifyChannel,
@@ -362,23 +406,35 @@ IPC_MESSAGE_ROUTED4(ExtensionHostMsg_GetAppNotifyChannel,
                     int32 /* return_route_id */,
                     int32 /* callback_id */)
 
+// Sent by the renderer when a web page is checking if its app is installed.
+IPC_MESSAGE_ROUTED3(ExtensionHostMsg_GetAppInstallState,
+                    GURL /* requestor_url */,
+                    int32 /* return_route_id */,
+                    int32 /* callback_id */)
+
 // Optional Ack message sent to the browser to notify that the response to a
 // function has been processed.
 IPC_MESSAGE_ROUTED1(ExtensionHostMsg_ResponseAck,
                     int /* request_id */)
 
-// Response to ExtensionMsg_ShouldClose.
-IPC_MESSAGE_CONTROL2(ExtensionHostMsg_ShouldCloseAck,
+// Response to ExtensionMsg_ShouldUnload.
+IPC_MESSAGE_CONTROL2(ExtensionHostMsg_ShouldUnloadAck,
                      std::string /* extension_id */,
                      int /* sequence_id */)
 
-// Response to the renderer for the above message.
-IPC_MESSAGE_ROUTED3(ExtensionMsg_GetAppNotifyChannelResponse,
-                    std::string /* channel_id */,
-                    std::string /* error */,
-                    int32 /* callback_id */)
+// Response to ExtensionMsg_Unload, after we dispatch the unload event.
+IPC_MESSAGE_CONTROL1(ExtensionHostMsg_UnloadAck,
+                     std::string /* extension_id */)
 
-// Deliver a message sent with ExtensionHostMsg_PostMessage.
-IPC_MESSAGE_ROUTED2(ExtensionMsg_DeliverMessage,
-                    int /* target_port_id */,
-                    std::string /* message */)
+// Informs the browser to increment the keepalive count for the lazy background
+// page, keeping it alive.
+IPC_MESSAGE_ROUTED0(ExtensionHostMsg_IncrementLazyKeepaliveCount)
+
+// Informs the browser there is one less thing keeping the lazy background page
+// alive.
+IPC_MESSAGE_ROUTED0(ExtensionHostMsg_DecrementLazyKeepaliveCount)
+
+// Fetches a globally unique ID (for the lifetime of the browser) from the
+// browser process.
+IPC_SYNC_MESSAGE_CONTROL0_1(ExtensionHostMsg_GenerateUniqueID,
+                            int /* unique_id */)

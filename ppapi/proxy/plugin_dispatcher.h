@@ -18,7 +18,6 @@
 #include "ppapi/c/pp_rect.h"
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/proxy/dispatcher.h"
-#include "ppapi/shared_impl/function_group_base.h"
 #include "ppapi/shared_impl/ppapi_preferences.h"
 #include "ppapi/shared_impl/ppb_view_shared.h"
 
@@ -26,6 +25,11 @@ namespace ppapi {
 
 struct Preferences;
 class Resource;
+
+namespace thunk {
+class PPB_Instance_API;
+class ResourceCreationAPI;
+}
 
 namespace proxy {
 
@@ -67,7 +71,8 @@ class PPAPI_PROXY_EXPORT PluginDispatcher
   //
   // You must call InitPluginWithChannel after the constructor.
   PluginDispatcher(base::ProcessHandle remote_process_handle,
-                   GetInterfaceFunc get_interface);
+                   PP_GetInterface_Func get_interface,
+                   bool incognito);
   virtual ~PluginDispatcher();
 
   // The plugin side maintains a mapping from PP_Instance to Dispatcher so
@@ -118,16 +123,16 @@ class PPAPI_PROXY_EXPORT PluginDispatcher
   // correspond to a known instance.
   InstanceData* GetInstanceData(PP_Instance instance);
 
+  // Returns the corresponding API. These are APIs not associated with a
+  // resource. Guaranteed non-NULL.
+  thunk::PPB_Instance_API* GetInstanceAPI();
+  thunk::ResourceCreationAPI* GetResourceCreationAPI();
+
   // Returns the Preferences.
   const Preferences& preferences() const { return preferences_; }
 
-  // Returns the "new-style" function API for the given interface ID, creating
-  // it if necessary.
-  // TODO(brettw) this is in progress. It should be merged with the target
-  // proxies so there is one list to consult.
-  FunctionGroupBase* GetFunctionAPI(ApiID id);
-
   uint32 plugin_dispatcher_id() const { return plugin_dispatcher_id_; }
+  bool incognito() const { return incognito_; }
 
  private:
   friend class PluginDispatcherTest;
@@ -158,6 +163,10 @@ class PPAPI_PROXY_EXPORT PluginDispatcher
   Preferences preferences_;
 
   uint32 plugin_dispatcher_id_;
+
+  // Set to true when the instances associated with this dispatcher are
+  // incognito mode.
+  bool incognito_;
 
   DISALLOW_COPY_AND_ASSIGN(PluginDispatcher);
 };

@@ -10,6 +10,8 @@
 #include <string>
 #include <vector>
 
+#include "ash/shell.h"
+#include "ash/shell_delegate.h"
 #include "base/base64.h"
 #include "base/basictypes.h"
 #include "base/bind.h"
@@ -28,6 +30,7 @@
 #include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/chromeos/cros/onc_constants.h"
 #include "chrome/browser/chromeos/cros_settings.h"
+#include "chrome/browser/chromeos/enrollment_dialog_view.h"
 #include "chrome/browser/chromeos/mobile_config.h"
 #include "chrome/browser/chromeos/options/network_config_view.h"
 #include "chrome/browser/chromeos/proxy_config_service_impl.h"
@@ -35,11 +38,10 @@
 #include "chrome/browser/chromeos/status/network_menu_icon.h"
 #include "chrome/browser/net/pref_proxy_config_tracker.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/dialog_style.h"
-#include "chrome/browser/ui/views/window.h"
 #include "chrome/browser/ui/webui/web_ui_util.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
@@ -246,7 +248,8 @@ DictionaryValue* NetworkInfoDictionary::BuildDictionary() {
 
 namespace options2 {
 
-InternetOptionsHandler::InternetOptionsHandler() {
+InternetOptionsHandler::InternetOptionsHandler()
+  : ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
   registrar_.Add(this, chrome::NOTIFICATION_REQUIRE_PIN_SETTING_CHANGE_ENDED,
       content::NotificationService::AllSources());
   registrar_.Add(this, chrome::NOTIFICATION_ENTER_PIN_ENDED,
@@ -304,34 +307,12 @@ void InternetOptionsHandler::GetLocalizedValues(
       IDS_OPTIONS_SETTINGS_TOGGLE_DATA_ROAMING_RESTRICTION },
     { "activateNetwork", IDS_STATUSBAR_NETWORK_DEVICE_ACTIVATE },
 
-    // Network options dialog labels.
-    // TODO(kevers): Remove once dialog is deprecated.
-
-    { "wired_title", IDS_OPTIONS_SETTINGS_SECTION_TITLE_WIRED_NETWORK },
-    { "wireless_title", IDS_OPTIONS_SETTINGS_SECTION_TITLE_WIRELESS_NETWORK },
-    { "vpn_title", IDS_OPTIONS_SETTINGS_SECTION_TITLE_VIRTUAL_NETWORK },
-    { "remembered_title",
-      IDS_OPTIONS_SETTINGS_SECTION_TITLE_REMEMBERED_NETWORK },
-    { "connect_button", IDS_OPTIONS_SETTINGS_CONNECT },
-    { "disconnect_button", IDS_OPTIONS_SETTINGS_DISCONNECT },
-    { "options_button", IDS_OPTIONS_SETTINGS_OPTIONS },
-    { "forget_button", IDS_OPTIONS_SETTINGS_FORGET },
-    { "activate_button", IDS_OPTIONS_SETTINGS_ACTIVATE },
-    { "buyplan_button", IDS_OPTIONS_SETTINGS_BUY_PLAN },
-    { "view_account_button", IDS_STATUSBAR_NETWORK_VIEW_ACCOUNT },
-    { "enableWifi", IDS_STATUSBAR_NETWORK_DEVICE_WIFI },
-    { "disableWifi", IDS_STATUSBAR_NETWORK_DEVICE_WIFI },
-    { "enableCellular", IDS_STATUSBAR_NETWORK_DEVICE_CELLULAR },
-    { "disableCellular", IDS_STATUSBAR_NETWORK_DEVICE_CELLULAR },
-    { "ownerOnly", IDS_OPTIONS_ACCOUNTS_OWNER_ONLY },
-    { "generalNetworkingTitle", IDS_OPTIONS_SETTINGS_INTERNET_CONTROL_TITLE },
-
     // Internet details dialog.
 
     { "changeProxyButton",
       IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_CHANGE_PROXY_BUTTON },
     { "managedNetwork", IDS_OPTIONS_SETTINGS_MANAGED_NETWORK },
-    { "wifiNetworkTabLabel", IDS_OPTIONS_SETTINGS_INTERNET_TAB_WIFI },
+    { "wifiNetworkTabLabel", IDS_OPTIONS_SETTINGS_INTERNET_TAB_CONNECTION },
     { "vpnTabLabel", IDS_OPTIONS_SETTINGS_INTERNET_TAB_VPN },
     { "cellularPlanTabLabel", IDS_OPTIONS_SETTINGS_INTERNET_TAB_PLAN },
     { "cellularConnTabLabel", IDS_OPTIONS_SETTINGS_INTERNET_TAB_CONNECTION },
@@ -349,13 +330,29 @@ void InternetOptionsHandler::GetLocalizedValues(
     { "hardwareAddress",
       IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_HARDWARE_ADDRESS },
     { "detailsInternetDismiss", IDS_CLOSE },
+    { "activateButton", IDS_OPTIONS_SETTINGS_ACTIVATE },
+    { "buyplanButton", IDS_OPTIONS_SETTINGS_BUY_PLAN },
+    { "connectButton", IDS_OPTIONS_SETTINGS_CONNECT },
+    { "disconnectButton", IDS_OPTIONS_SETTINGS_DISCONNECT },
+    { "viewAccountButton", IDS_STATUSBAR_NETWORK_VIEW_ACCOUNT },
 
     // Wifi Tab.
 
     { "accessLockedMsg", IDS_STATUSBAR_NETWORK_LOCKED },
     { "inetSsid", IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_NETWORK_ID },
+    { "inetBssid", IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_NETWORK_BSSID },
+    { "inetEncryption",
+      IDS_OPTIONS_SETTIGNS_INTERNET_OPTIONS_NETWORK_ENCRYPTION },
+    { "inetFrequency",
+      IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_NETWORK_FREQUENCY },
+    { "inetFrequencyFormat",
+      IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_NETWORK_FREQUENCY_MHZ },
+    { "inetSignalStrength",
+      IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_NETWORK_STRENGTH },
+    { "inetSignalStrengthFormat",
+      IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_NETWORK_STRENGTH_PERCENTAGE },
     { "inetPassProtected",
-       IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_NET_PROTECTED },
+      IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_NET_PROTECTED },
     { "inetNetworkShared",
       IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_NETWORK_SHARED },
     { "inetPreferredNetwork",
@@ -434,10 +431,6 @@ void InternetOptionsHandler::GetLocalizedValues(
 
   RegisterStrings(localized_strings, resources, arraysize(resources));
 
-  // TODO(kevers): Remove once dialog is deprecated.
-  RegisterTitle(localized_strings, "internetPage",
-                IDS_OPTIONS_INTERNET_TAB_LABEL);
-
   std::string owner;
   chromeos::CrosSettings::Get()->GetString(chromeos::kDeviceOwner, &owner);
   localized_strings->SetString("ownerUserId", UTF8ToUTF16(owner));
@@ -451,8 +444,11 @@ void InternetOptionsHandler::InitializePage() {
 
 void InternetOptionsHandler::RegisterMessages() {
   // Setup handlers specific to this panel.
-  web_ui()->RegisterMessageCallback("buttonClickCallback",
-      base::Bind(&InternetOptionsHandler::ButtonClickCallback,
+  web_ui()->RegisterMessageCallback("networkCommand",
+      base::Bind(&InternetOptionsHandler::NetworkCommandCallback,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback("refreshNetworks",
+      base::Bind(&InternetOptionsHandler::RefreshNetworksCallback,
                  base::Unretained(this)));
   web_ui()->RegisterMessageCallback("refreshCellularPlan",
       base::Bind(&InternetOptionsHandler::RefreshCellularPlanCallback,
@@ -507,13 +503,29 @@ void InternetOptionsHandler::DisableWifiCallback(const ListValue* args) {
 }
 
 void InternetOptionsHandler::EnableCellularCallback(const ListValue* args) {
+  // TODO(nkostylev): Code duplication, see NetworkMenu::ToggleCellular().
   const chromeos::NetworkDevice* cellular = cros_->FindCellularDevice();
   if (!cellular) {
     LOG(ERROR) << "Didn't find cellular device, it should have been available.";
     cros_->EnableCellularNetworkDevice(true);
-  } else if (cellular->sim_lock_state() == chromeos::SIM_UNLOCKED ||
-             cellular->sim_lock_state() == chromeos::SIM_UNKNOWN) {
+  } else if (!cellular->is_sim_locked()) {
+    if (cellular->is_sim_absent()) {
+      std::string setup_url;
+      chromeos::MobileConfig* config = chromeos::MobileConfig::GetInstance();
+      if (config->IsReady()) {
+        const chromeos::MobileConfig::LocaleConfig* locale_config =
+            config->GetLocaleConfig();
+        if (locale_config)
+          setup_url = locale_config->setup_url();
+      }
+      if (!setup_url.empty()) {
+        GetAppropriateBrowser()->ShowSingletonTab(GURL(setup_url));
+      } else {
+        // TODO(nkostylev): Show generic error message. http://crosbug.com/15444
+      }
+    } else {
       cros_->EnableCellularNetworkDevice(true);
+    }
   } else {
     chromeos::SimDialogDelegate::ShowDialog(GetNativeWindow(),
         chromeos::SimDialogDelegate::SIM_DIALOG_UNLOCK);
@@ -545,10 +557,7 @@ void InternetOptionsHandler::ShowMorePlanInfoCallback(const ListValue* args) {
 void InternetOptionsHandler::BuyDataPlanCallback(const ListValue* args) {
   if (!web_ui())
     return;
-  Browser* browser = BrowserList::FindBrowserWithFeature(
-      Profile::FromWebUI(web_ui()), Browser::FEATURE_TABSTRIP);
-  if (browser)
-    browser->OpenMobilePlanTabAndActivate();
+  ash::Shell::GetInstance()->delegate()->OpenMobileSetup();
 }
 
 void InternetOptionsHandler::SetApnCallback(const ListValue* args) {
@@ -595,6 +604,10 @@ void InternetOptionsHandler::SetSimCardLockCallback(const ListValue* args) {
 void InternetOptionsHandler::ChangePinCallback(const ListValue* args) {
   chromeos::SimDialogDelegate::ShowDialog(GetNativeWindow(),
       chromeos::SimDialogDelegate::SIM_DIALOG_CHANGE_PIN);
+}
+
+void InternetOptionsHandler::RefreshNetworksCallback(const ListValue* args) {
+  cros_->RequestNetworkScan();
 }
 
 void InternetOptionsHandler::RefreshNetworkData() {
@@ -672,7 +685,8 @@ void InternetOptionsHandler::OnCellularDataPlanChanged(
                                 &connection_plans,
                                 cros_->GetCellularHomeCarrierId());
   web_ui()->CallJavascriptFunction(
-      "options.InternetOptions.updateCellularPlans", connection_plans);
+      "options.internet.DetailsInternetPage.updateCellularPlans",
+      connection_plans);
 }
 
 
@@ -684,18 +698,14 @@ void InternetOptionsHandler::Observe(
   if (type == chrome::NOTIFICATION_REQUIRE_PIN_SETTING_CHANGE_ENDED) {
     base::FundamentalValue require_pin(*content::Details<bool>(details).ptr());
     web_ui()->CallJavascriptFunction(
-        "options.InternetOptions.updateSecurityTab", require_pin);
+        "options.internet.DetailsInternetPage.updateSecurityTab", require_pin);
   } else if (type == chrome::NOTIFICATION_ENTER_PIN_ENDED) {
     // We make an assumption (which is valid for now) that the SIM
     // unlock dialog is put up only when the user is trying to enable
     // mobile data.
     bool cancelled = *content::Details<bool>(details).ptr();
-    if (cancelled) {
-      base::DictionaryValue dictionary;
-      FillNetworkInfo(&dictionary);
-      web_ui()->CallJavascriptFunction(
-          "options.InternetOptions.setupAttributes", dictionary);
-    }
+    if (cancelled)
+      RefreshNetworkData();
     // The case in which the correct PIN was entered and the SIM is
     // now unlocked is handled in NetworkMenuButton.
   }
@@ -901,7 +911,7 @@ void InternetOptionsHandler::PopulateDictionaryDetails(
   }
 
   web_ui()->CallJavascriptFunction(
-      "options.InternetOptions.showDetailedInfo", dictionary);
+      "options.internet.DetailsInternetPage.showDetailedInfo", dictionary);
 }
 
 void InternetOptionsHandler::PopulateWifiDetails(
@@ -912,6 +922,10 @@ void InternetOptionsHandler::PopulateWifiDetails(
   dictionary->SetBoolean("remembered", remembered);
   bool shared = wifi->profile_type() == chromeos::PROFILE_SHARED;
   dictionary->SetBoolean("shared", shared);
+  dictionary->SetString("encryption", wifi->GetEncryptionString());
+  dictionary->SetString("bssid", wifi->bssid());
+  dictionary->SetInteger("frequency", wifi->frequency());
+  dictionary->SetInteger("strength", wifi->strength());
 }
 
 DictionaryValue* InternetOptionsHandler::CreateDictionaryFromCellularApn(
@@ -1052,7 +1066,12 @@ gfx::NativeWindow InternetOptionsHandler::GetNativeWindow() const {
   return browser->window()->GetNativeHandle();
 }
 
-void InternetOptionsHandler::ButtonClickCallback(const ListValue* args) {
+Browser* InternetOptionsHandler::GetAppropriateBrowser() {
+  return Browser::GetOrCreateTabbedBrowser(
+      ProfileManager::GetDefaultProfileOrOffTheRecord());
+}
+
+void InternetOptionsHandler::NetworkCommandCallback(const ListValue* args) {
   std::string str_type;
   std::string service_path;
   std::string command;
@@ -1097,12 +1116,12 @@ void InternetOptionsHandler::HandleWifiButtonClick(
     CreateModalPopup(new chromeos::NetworkConfigView(chromeos::TYPE_WIFI));
   } else if ((wifi = cros_->FindWifiNetworkByPath(service_path))) {
     if (command == "connect") {
-      // Connect to wifi here. Open password page if appropriate.
-      if (wifi->IsPassphraseRequired()) {
-        CreateModalPopup(new chromeos::NetworkConfigView(wifi));
-      } else {
-        cros_->ConnectToWifiNetwork(wifi);
-      }
+      wifi->SetEnrollmentDelegate(
+          chromeos::CreateEnrollmentDelegate(GetNativeWindow(), wifi->name(),
+              ProfileManager::GetLastUsedProfile()));
+      wifi->AttemptConnection(base::Bind(&InternetOptionsHandler::DoConnect,
+                                         weak_factory_.GetWeakPtr(),
+                                         wifi));
     } else if (command == "disconnect") {
       cros_->DisconnectFromNetwork(wifi);
     } else if (command == "options") {
@@ -1123,9 +1142,7 @@ void InternetOptionsHandler::HandleCellularButtonClick(
     } else if (command == "disconnect") {
       cros_->DisconnectFromNetwork(cellular);
     } else if (command == "activate") {
-      Browser* browser = BrowserList::GetLastActive();
-      if (browser)
-        browser->OpenMobilePlanTabAndActivate();
+      ash::Shell::GetInstance()->delegate()->OpenMobileSetup();
     } else if (command == "options") {
       PopulateDictionaryDetails(cellular);
     }
@@ -1144,16 +1161,43 @@ void InternetOptionsHandler::HandleVPNButtonClick(
     CreateModalPopup(new chromeos::NetworkConfigView(chromeos::TYPE_VPN));
   } else if ((network = cros_->FindVirtualNetworkByPath(service_path))) {
     if (command == "connect") {
-      // Connect to VPN here. Open password page if appropriate.
-      if (network->NeedMoreInfoToConnect()) {
-        CreateModalPopup(new chromeos::NetworkConfigView(network));
-      } else {
-        cros_->ConnectToVirtualNetwork(network);
-      }
+      network->SetEnrollmentDelegate(
+          chromeos::CreateEnrollmentDelegate(
+              GetNativeWindow(),
+              network->name(),
+              ProfileManager::GetLastUsedProfile()));
+      network->AttemptConnection(base::Bind(&InternetOptionsHandler::DoConnect,
+                                            weak_factory_.GetWeakPtr(),
+                                            network));
     } else if (command == "disconnect") {
       cros_->DisconnectFromNetwork(network);
     } else if (command == "options") {
       PopulateDictionaryDetails(network);
+    }
+  }
+}
+
+void InternetOptionsHandler::DoConnect(chromeos::Network* network) {
+  if (network->type() == chromeos::TYPE_VPN) {
+    chromeos::VirtualNetwork* vpn =
+        static_cast<chromeos::VirtualNetwork*>(network);
+    if (vpn->NeedMoreInfoToConnect()) {
+      CreateModalPopup(new chromeos::NetworkConfigView(network));
+    } else {
+      cros_->ConnectToVirtualNetwork(vpn);
+      // Connection failures are responsible for updating the UI, including
+      // reopening dialogs.
+    }
+  }
+  if (network->type() == chromeos::TYPE_WIFI) {
+    chromeos::WifiNetwork* wifi = static_cast<chromeos::WifiNetwork*>(network);
+    if (wifi->IsPassphraseRequired()) {
+      // Show the connection UI if we require a passphrase.
+      CreateModalPopup(new chromeos::NetworkConfigView(wifi));
+    } else {
+      cros_->ConnectToWifiNetwork(wifi);
+      // Connection failures are responsible for updating the UI, including
+      // reopening dialogs.
     }
   }
 }

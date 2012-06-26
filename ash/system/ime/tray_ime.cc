@@ -11,6 +11,7 @@
 #include "ash/system/tray/system_tray_delegate.h"
 #include "ash/system/tray/tray_constants.h"
 #include "ash/system/tray/tray_item_more.h"
+#include "ash/system/tray/tray_item_view.h"
 #include "ash/system/tray/tray_views.h"
 #include "base/logging.h"
 #include "base/utf_string_conversions.h"
@@ -21,6 +22,7 @@
 #include "ui/gfx/image/image.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/layout/box_layout.h"
+#include "ui/views/widget/widget.h"
 
 namespace ash {
 namespace internal {
@@ -59,7 +61,7 @@ class IMEDetailedView : public views::View,
       : login_(login),
         header_(NULL) {
     SetLayoutManager(new views::BoxLayout(
-        views::BoxLayout::kVertical, 1, 1, 1));
+        views::BoxLayout::kVertical, 0, 0, 0));
     set_background(views::Background::CreateSolidBackground(kBackgroundColor));
     SystemTrayDelegate* delegate = Shell::GetInstance()->tray_delegate();
     IMEInfoList list;
@@ -95,11 +97,13 @@ class IMEDetailedView : public views::View,
   }
 
   void AppendIMEList(const IMEInfoList& list) {
+    ime_map_.clear();
     views::View* imes = new views::View;
     imes->SetLayoutManager(new views::BoxLayout(
         views::BoxLayout::kVertical, 0, 0, 1));
     for (size_t i = 0; i < list.size(); i++) {
       HoverHighlightView* container = new HoverHighlightView(this);
+      container->set_fixed_height(kTrayPopupItemHeight);
       container->AddLabel(list[i].name,
           list[i].selected ? gfx::Font::BOLD : gfx::Font::NORMAL);
       imes->AddChildView(container);
@@ -111,11 +115,13 @@ class IMEDetailedView : public views::View,
   }
 
   void AppendIMEProperties(const IMEPropertyInfoList& property_list) {
+    property_map_.clear();
     views::View* properties = new views::View;
     properties->SetLayoutManager(new views::BoxLayout(
         views::BoxLayout::kVertical, 0, 0, 1));
     for (size_t i = 0; i < property_list.size(); i++) {
       HoverHighlightView* container = new HoverHighlightView(this);
+      container->set_fixed_height(kTrayPopupItemHeight);
       container->AddLabel(
           property_list[i].name,
           property_list[i].selected ? gfx::Font::BOLD : gfx::Font::NORMAL);
@@ -129,6 +135,7 @@ class IMEDetailedView : public views::View,
 
   void AppendSettings() {
     HoverHighlightView* container = new HoverHighlightView(this);
+    container->set_fixed_height(kTrayPopupItemHeight);
     container->AddLabel(ui::ResourceBundle::GetSharedInstance().
         GetLocalizedString(IDS_ASH_STATUS_TRAY_IME_SETTINGS),
         gfx::Font::NORMAL);
@@ -154,8 +161,9 @@ class IMEDetailedView : public views::View,
         std::map<views::View*, std::string>::const_iterator prop_find;
         prop_find = property_map_.find(sender);
         if (prop_find != property_map_.end()) {
-          std::string key = prop_find->second;
+          const std::string key = prop_find->second;
           delegate->ActivateIMEProperty(key);
+          GetWidget()->Close();
         }
       }
     }
@@ -173,45 +181,64 @@ class IMEDetailedView : public views::View,
 
 }  // namespace tray
 
-TrayIME::TrayIME() {
+TrayIME::TrayIME()
+    : tray_label_(NULL),
+      default_(NULL),
+      detailed_(NULL) {
 }
 
 TrayIME::~TrayIME() {
 }
 
 void TrayIME::UpdateTrayLabel(const IMEInfo& current, size_t count) {
-  tray_label_->SetText(current.short_name);
-  tray_label_->SetVisible(count > 1);
+  if (tray_label_) {
+    tray_label_->label()->SetText(current.short_name);
+    tray_label_->SetVisible(count > 1);
+  }
 }
 
 views::View* TrayIME::CreateTrayView(user::LoginStatus status) {
-  tray_label_.reset(new views::Label);
-  SetupLabelForTray(tray_label_.get());
-  tray_label_->set_border(
+  CHECK(tray_label_ == NULL);
+  tray_label_ = new TrayItemView;
+  tray_label_->CreateLabel();
+  SetupLabelForTray(tray_label_->label());
+  tray_label_->label()->set_border(
       views::Border::CreateEmptyBorder(0, 2, 0, 2));
-  return tray_label_.get();
+  return tray_label_;
 }
 
 views::View* TrayIME::CreateDefaultView(user::LoginStatus status) {
-  default_.reset(new tray::IMEDefaultView(this));
-  return default_.get();
+  SystemTrayDelegate* delegate = Shell::GetInstance()->tray_delegate();
+  IMEInfoList list;
+  IMEPropertyInfoList property_list;
+  delegate->GetAvailableIMEList(&list);
+  delegate->GetCurrentIMEProperties(&property_list);
+  if (list.size() <= 1 && property_list.size() <= 1)
+    return NULL;
+  CHECK(default_ == NULL);
+  default_ = new tray::IMEDefaultView(this);
+  return default_;
 }
 
 views::View* TrayIME::CreateDetailedView(user::LoginStatus status) {
-  detailed_.reset(new tray::IMEDetailedView(this, status));
-  return detailed_.get();
+  CHECK(detailed_ == NULL);
+  detailed_ = new tray::IMEDetailedView(this, status);
+  return detailed_;
 }
 
 void TrayIME::DestroyTrayView() {
-  tray_label_.reset();
+  tray_label_ = NULL;
 }
 
 void TrayIME::DestroyDefaultView() {
-  default_.reset();
+  default_ = NULL;
 }
 
 void TrayIME::DestroyDetailedView() {
-  detailed_.reset();
+  detailed_ = NULL;
+}
+
+void TrayIME::UpdateAfterLoginStatusChange(user::LoginStatus status) {
 }
 
 void TrayIME::OnIMERefresh() {
@@ -225,9 +252,9 @@ void TrayIME::OnIMERefresh() {
 
   UpdateTrayLabel(current, list.size());
 
-  if (default_.get())
+  if (default_)
     default_->UpdateLabel(current);
-  if (detailed_.get())
+  if (detailed_)
     detailed_->Update(list, property_list);
 }
 

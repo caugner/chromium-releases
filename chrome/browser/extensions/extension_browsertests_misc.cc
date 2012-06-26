@@ -72,8 +72,10 @@ static ExtensionHost* FindHostWithPath(ExtensionProcessManager* manager,
                                        int expected_hosts) {
   ExtensionHost* host = NULL;
   int num_hosts = 0;
-  for (ExtensionProcessManager::const_iterator iter = manager->begin();
-       iter != manager->end(); ++iter) {
+  ExtensionProcessManager::ExtensionHostSet background_hosts =
+      manager->background_hosts();
+  for (ExtensionProcessManager::const_iterator iter = background_hosts.begin();
+       iter != background_hosts.end(); ++iter) {
     if ((*iter)->GetURL().path() == path) {
       EXPECT_FALSE(host);
       host = *iter;
@@ -86,7 +88,7 @@ static ExtensionHost* FindHostWithPath(ExtensionProcessManager* manager,
 
 // Tests that we can load extension pages into the tab area and they can call
 // extension APIs.
-IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, TabContents) {
+IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, WebContents) {
   ASSERT_TRUE(LoadExtension(
       test_data_dir_.AppendASCII("good").AppendASCII("Extensions")
                     .AppendASCII("behllobkkfkfnphdnhnkndlbkcpglgmj")
@@ -354,7 +356,7 @@ GURL GetFeedUrl(net::TestServer* server, const std::string& feed_page,
     // We navigate directly to the subscribe page for feeds where the feed
     // sniffing won't work, in other words, as is the case for malformed feeds.
     return GURL(std::string(chrome::kExtensionScheme) +
-        chrome::kStandardSchemeSeparator +
+        content::kStandardSchemeSeparator +
         extension_id + std::string(kSubscribePage) + std::string("?") +
         feed_url.spec() + std::string("&synchronous"));
   } else {
@@ -779,8 +781,11 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, WindowOpenNoPrivileges) {
   EXPECT_TRUE(result);
 }
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) && defined(NDEBUG)
 #define MAYBE_PluginLoadUnload PluginLoadUnload
+#elif defined(OS_WIN) && !defined(NDEBUG)
+// http://crbug.com/123851 Debug builds are flaky.
+#define MAYBE_PluginLoadUnload FLAKY_PluginLoadUnload
 #elif defined(OS_LINUX)
 // http://crbug.com/47598
 #define MAYBE_PluginLoadUnload DISABLED_PluginLoadUnload
@@ -907,9 +912,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, DISABLED_OptionsPage) {
   ASSERT_EQ(1u, service->extensions()->size());
 
   // Go to the Extension Settings page and click the Options button.
-  ui_test_utils::NavigateToURL(
-      browser(), GURL(std::string(chrome::kChromeUISettingsURL) +
-                      chrome::kExtensionsSubPage));
+  ui_test_utils::NavigateToURL(browser(), GURL(chrome::kChromeUIExtensionsURL));
   TabStripModel* tab_strip = browser()->tabstrip_model();
   ASSERT_TRUE(ui_test_utils::ExecuteJavaScript(
       browser()->GetSelectedWebContents()->GetRenderViewHost(), L"",

@@ -21,7 +21,7 @@
 
 class FilePath;
 class GURL;
-class TabContents;
+class WebContentsImpl;
 struct NativeWebKeyboardEvent;
 
 namespace base {
@@ -77,7 +77,7 @@ class CONTENT_EXPORT WebContentsDelegate {
   virtual WebContents* OpenURLFromTab(WebContents* source,
                                       const OpenURLParams& params);
 
-  // Called to inform the delegate that the tab content's navigation state
+  // Called to inform the delegate that the WebContents's navigation state
   // changed. The |changed_flags| indicates the parts of the navigation state
   // that have been updated, and is any combination of the
   // |WebContents::InvalidateTypes| bits.
@@ -125,7 +125,7 @@ class CONTENT_EXPORT WebContentsDelegate {
   // out so it can perform any cleanup necessary.
   virtual void SwappedOut(WebContents* source) {}
 
-  // Request the delegate to move this tab contents to the specified position
+  // Request the delegate to move this WebContents to the specified position
   // in screen coordinates.
   virtual void MoveContents(WebContents* source, const gfx::Rect& pos) {}
 
@@ -157,6 +157,10 @@ class CONTENT_EXPORT WebContentsDelegate {
   // application.
   virtual bool IsApplication() const;
 
+  // Check whether this contents is permitted to load data URLs in WebUI mode.
+  // This is normally disallowed for security.
+  virtual bool CanLoadDataURLsInWebUI() const;
+
   // Detach the given tab and convert it to a "webapp" view.  The tab must be
   // a WebContents with a valid WebApp set.
   virtual void ConvertContentsToApplication(WebContents* source) {}
@@ -178,7 +182,7 @@ class CONTENT_EXPORT WebContentsDelegate {
 
   // Tells us that we've finished firing this tab's beforeunload event.
   // The proceed bool tells us whether the user chose to proceed closing the
-  // tab. Returns true if the tab can continue on firing it's unload event.
+  // tab. Returns true if the tab can continue on firing its unload event.
   // If we're closing the entire browser, then we'll want to delay firing
   // unload events until all the beforeunload events have fired.
   virtual void BeforeUnloadFired(WebContents* tab,
@@ -229,7 +233,7 @@ class CONTENT_EXPORT WebContentsDelegate {
   // Returns true if the context menu command was handled
   virtual bool ExecuteContextMenuCommand(int command);
 
-  // Opens source view for given tab contents that is navigated to the given
+  // Opens source view for given WebContents that is navigated to the given
   // page url.
   virtual void ViewSourceForTab(WebContents* source, const GURL& page_url);
 
@@ -263,22 +267,24 @@ class CONTENT_EXPORT WebContentsDelegate {
   // Returns true to allow WebContents to continue with the default processing.
   virtual bool OnGoToEntryOffset(int offset);
 
-  // Returns whether this tab contents should add the specified navigation to
+  // Returns whether this WebContents should add the specified navigation to
   // history.
   virtual bool ShouldAddNavigationToHistory(
       const history::HistoryAddPageArgs& add_page_args,
       NavigationType navigation_type);
 
-  // Returns the native window framing the view containing the tab contents.
+  // Returns the native window framing the view containing the WebContents.
   virtual gfx::NativeWindow GetFrameNativeWindow();
 
   // Allows delegate to control whether a WebContents will be created. Returns
-  // true to allow the creation. Default is to allow it.
+  // true to allow the creation. Default is to allow it. In cases where the
+  // delegate handles the creation/navigation itself, it will use |target_url|.
   virtual bool ShouldCreateWebContents(
       WebContents* web_contents,
       int route_id,
       WindowContainerType window_container_type,
-      const string16& frame_name);
+      const string16& frame_name,
+      const GURL& target_url);
 
   // Notifies the delegate about the creation of a new WebContents. This
   // typically happens when popups are created.
@@ -301,51 +307,52 @@ class CONTENT_EXPORT WebContentsDelegate {
   virtual void WorkerCrashed(WebContents* source) {}
 
   // Invoked when a main fram navigation occurs.
-  virtual void DidNavigateMainFramePostCommit(WebContents* tab) {}
+  virtual void DidNavigateMainFramePostCommit(WebContents* source) {}
 
   // Invoked when navigating to a pending entry. When invoked the
   // NavigationController has configured its pending entry, but it has not yet
   // been committed.
-  virtual void DidNavigateToPendingEntry(WebContents* tab) {}
+  virtual void DidNavigateToPendingEntry(WebContents* source) {}
 
   // Returns a pointer to a service to create JavaScript dialogs. May return
   // NULL in which case dialogs aren't shown.
   virtual JavaScriptDialogCreator* GetJavaScriptDialogCreator();
 
   // Called when color chooser should open. Returns the opened color chooser.
-  virtual content::ColorChooser* OpenColorChooser(WebContents* tab,
+  virtual content::ColorChooser* OpenColorChooser(WebContents* web_contents,
                                                   int color_chooser_id,
-                                                  const SkColor& color);
+                                                  SkColor color);
 
   virtual void DidEndColorChooser() {}
 
   // Called when a file selection is to be done.
-  virtual void RunFileChooser(WebContents* tab,
+  virtual void RunFileChooser(WebContents* web_contents,
                               const FileChooserParams& params) {}
 
   // Request to enumerate a directory.  This is equivalent to running the file
   // chooser in directory-enumeration mode and having the user select the given
   // directory.
-  virtual void EnumerateDirectory(WebContents* tab,
+  virtual void EnumerateDirectory(WebContents* web_contents,
                                   int request_id,
                                   const FilePath& path) {}
 
   // Called when the renderer puts a tab into or out of fullscreen mode.
-  virtual void ToggleFullscreenModeForTab(WebContents* tab,
+  virtual void ToggleFullscreenModeForTab(WebContents* web_contents,
                                           bool enter_fullscreen) {}
-  virtual bool IsFullscreenForTab(const WebContents* tab) const;
+  virtual bool IsFullscreenForTabOrPending(
+      const WebContents* web_contents) const;
 
   // Called when a Javascript out of memory notification is received.
-  virtual void JSOutOfMemory(WebContents* tab) {}
+  virtual void JSOutOfMemory(WebContents* web_contents) {}
 
   // Register a new handler for URL requests with the given scheme.
-  virtual void RegisterProtocolHandler(WebContents* tab,
+  virtual void RegisterProtocolHandler(WebContents* web_contents,
                                        const std::string& protocol,
                                        const GURL& url,
                                        const string16& title) {}
 
   // Register a new handler for Intents with the given action and type filter.
-  virtual void RegisterIntentHandler(WebContents* tab,
+  virtual void RegisterIntentHandler(WebContents* web_contents,
                                      const string16& action,
                                      const string16& type,
                                      const string16& href,
@@ -354,32 +361,29 @@ class CONTENT_EXPORT WebContentsDelegate {
 
   // Web Intents notification handler. See WebIntentsDispatcher for
   // documentation of callee responsibility for the dispatcher.
-  virtual void WebIntentDispatch(WebContents* tab,
+  virtual void WebIntentDispatch(WebContents* web_contents,
                                  WebIntentsDispatcher* intents_dispatcher);
 
   // Result of string search in the page. This includes the number of matches
   // found and the selection rect (in screen coordinates) for the string found.
   // If |final_update| is false, it indicates that more results follow.
-  virtual void FindReply(WebContents* tab,
+  virtual void FindReply(WebContents* web_contents,
                          int request_id,
                          int number_of_matches,
                          const gfx::Rect& selection_rect,
                          int active_match_ordinal,
                          bool final_update) {}
 
-  // Notification that a plugin has crashed.
-  virtual void CrashedPlugin(WebContents* tab, const FilePath& plugin_path) {}
-
   // Invoked when the preferred size of the contents has been changed.
-  virtual void UpdatePreferredSize(WebContents* tab,
+  virtual void UpdatePreferredSize(WebContents* web_contents,
                                    const gfx::Size& pref_size) {}
 
   // Invoked when the contents auto-resized and the container should match it.
-  virtual void ResizeDueToAutoResize(WebContents* tab,
+  virtual void ResizeDueToAutoResize(WebContents* web_contents,
                                      const gfx::Size& new_size) {}
 
   // Notification message from HTML UI.
-  virtual void WebUISend(WebContents* tab,
+  virtual void WebUISend(WebContents* web_contents,
                          const GURL& source_url,
                          const std::string& name,
                          const base::ListValue& args) {}
@@ -387,7 +391,8 @@ class CONTENT_EXPORT WebContentsDelegate {
   // Requests to lock the mouse. Once the request is approved or rejected,
   // GotResponseToLockMouseRequest() will be called on the requesting tab
   // contents.
-  virtual void RequestToLockMouse(WebContents* tab) {}
+  virtual void RequestToLockMouse(WebContents* web_contents,
+                                  bool user_gesture) {}
 
   // Notification that the page has lost the mouse lock.
   virtual void LostMouseLock() {}
@@ -396,7 +401,7 @@ class CONTENT_EXPORT WebContentsDelegate {
   virtual ~WebContentsDelegate();
 
  private:
-  friend class ::TabContents;
+  friend class ::WebContentsImpl;
 
   // Called when |this| becomes the WebContentsDelegate for |source|.
   void Attach(WebContents* source);

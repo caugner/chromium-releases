@@ -8,9 +8,8 @@
 
 #include "base/basictypes.h"
 #include "base/synchronization/lock.h"
+#include "chrome/browser/sync/api/sync_error.h"
 #include "sync/syncable/model_type.h"
-
-class SyncError;
 
 namespace sync_api {
 class BaseNode;
@@ -30,12 +29,10 @@ class AssociatorInterface {
   // should be identical and corresponding. Returns true on
   // success. On failure of this step, we should abort the sync
   // operation and report an error to the user.
-  // TODO(zea): return a SyncError instead of passing one in.
-  virtual bool AssociateModels(SyncError* error) = 0;
+  virtual SyncError AssociateModels() = 0;
 
   // Clears all the associations between the chrome and sync models.
-  // TODO(zea): return a SyncError instead of passing one in.
-  virtual bool DisassociateModels(SyncError* error) = 0;
+  virtual SyncError DisassociateModels() = 0;
 
   // The has_nodes out parameter is set to true if the sync model has
   // nodes other than the permanent tagged nodes.  The method may
@@ -80,8 +77,9 @@ class PerDataTypeAssociatorInterface : public AssociatorInterface {
   // Initializes the given sync node from the given chrome node id.
   // Returns false if no sync node was found for the given chrome node id or
   // if the initialization of sync node fails.
-  virtual bool InitSyncNodeFromChromeId(const IDType& node_id,
-                                        sync_api::BaseNode* sync_node) = 0;
+  virtual bool InitSyncNodeFromChromeId(
+      const IDType& node_id,
+      sync_api::BaseNode* sync_node) = 0;
 
   // Associates the given chrome node with the given sync id.
   virtual void Associate(const Node* node, int64 sync_id) = 0;

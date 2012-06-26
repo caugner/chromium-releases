@@ -19,12 +19,13 @@
 #include "chrome/browser/chromeos/cros/certificate_pattern.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
-#include "chrome/browser/chromeos/dbus/dbus_thread_manager.h"
 #include "chrome/browser/chromeos/login/mock_user_manager.h"
 #include "chrome/browser/net/pref_proxy_config_tracker_impl.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/net/x509_certificate_model.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_pref_service.h"
+#include "chromeos/dbus/dbus_thread_manager.h"
 #include "content/test/test_browser_thread.h"
 #include "crypto/nss_util.h"
 #include "net/base/cert_database.h"
@@ -48,14 +49,7 @@ const char g_token_name[] = "OncNetworkParserTest token";
 
 net::CertType GetCertType(const net::X509Certificate* cert) {
   DCHECK(cert);
-  msm::nsNSSCertTrust trust(cert->os_cert_handle()->trust);
-  if (trust.HasAnyUser())
-    return net::USER_CERT;
-  if (trust.HasPeer(PR_TRUE, PR_FALSE, PR_FALSE))
-    return net::SERVER_CERT;
-  if (trust.HasAnyCA() || CERT_IsCACert(cert->os_cert_handle(), NULL))
-    return net::CA_CERT;
-  return net::UNKNOWN_CERT;
+  return x509_certificate_model::GetType(cert->os_cert_handle());
 }
 
 }  // namespace
@@ -208,6 +202,29 @@ void OncNetworkParserTest::TestProxySettings(const std::string test_blob,
   ProxyConfigDictionary proxy_dict(dict);
   EXPECT_TRUE(PrefProxyConfigTrackerImpl::PrefConfigToNetConfig(proxy_dict,
                                                                 net_config));
+}
+
+TEST_F(OncNetworkParserTest, TestLoadingBrokenEncryption) {
+  {
+    std::string test_blob;
+    GetTestData("broken-encrypted-iterations.onc", &test_blob);
+    OncNetworkParser parser(test_blob,
+                            "test0000",
+                            NetworkUIData::ONC_SOURCE_USER_IMPORT);
+    EXPECT_FALSE(parser.parse_error().empty());
+    EXPECT_EQ(0, parser.GetNetworkConfigsSize());
+    EXPECT_EQ(0, parser.GetCertificatesSize());
+  }
+  {
+    std::string test_blob;
+    GetTestData("broken-encrypted-zero-iterations.onc", &test_blob);
+    OncNetworkParser parser(test_blob,
+                            "test0000",
+                            NetworkUIData::ONC_SOURCE_USER_IMPORT);
+    EXPECT_FALSE(parser.parse_error().empty());
+    EXPECT_EQ(0, parser.GetNetworkConfigsSize());
+    EXPECT_EQ(0, parser.GetCertificatesSize());
+  }
 }
 
 TEST_F(OncNetworkParserTest, TestCreateNetworkWifi) {

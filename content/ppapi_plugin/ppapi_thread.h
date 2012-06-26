@@ -7,6 +7,7 @@
 #pragma once
 
 #include <map>
+#include <string>
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -21,6 +22,7 @@
 #include "ppapi/proxy/plugin_globals.h"
 #include "ppapi/proxy/plugin_proxy_delegate.h"
 
+class CommandLine;
 class FilePath;
 class PpapiWebKitPlatformSupportImpl;
 
@@ -32,7 +34,7 @@ class PpapiThread : public ChildThread,
                     public ppapi::proxy::PluginDispatcher::PluginDelegate,
                     public ppapi::proxy::PluginProxyDelegate {
  public:
-  explicit PpapiThread(bool is_broker);
+  PpapiThread(const CommandLine& command_line, bool is_broker);
   virtual ~PpapiThread();
 
  private:
@@ -54,7 +56,8 @@ class PpapiThread : public ChildThread,
   // Message handlers.
   void OnMsgLoadPlugin(const FilePath& path);
   void OnMsgCreateChannel(base::ProcessHandle host_process_handle,
-                          int renderer_id);
+                          int renderer_id,
+                          bool incognito);
   void OnMsgSetNetworkState(bool online);
   void OnPluginDispatcherMessageReceived(const IPC::Message& msg);
 
@@ -62,6 +65,7 @@ class PpapiThread : public ChildThread,
   // fills the given ChannelHandle with the information from the new channel.
   bool SetupRendererChannel(base::ProcessHandle host_process_handle,
                             int renderer_id,
+                            bool incognito,
                             IPC::ChannelHandle* handle);
 
   // Sets up the name of the plugin for logging using the given path.
@@ -75,7 +79,7 @@ class PpapiThread : public ChildThread,
   // Global state tracking for the proxy.
   ppapi::proxy::PluginGlobals plugin_globals_;
 
-  ppapi::proxy::Dispatcher::GetInterfaceFunc get_plugin_interface_;
+  PP_GetInterface_Func get_plugin_interface_;
 
   // Callback to call when a new instance connects to the broker.
   // Used only when is_broker_.

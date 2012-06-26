@@ -11,6 +11,7 @@
 #include "chrome/browser/extensions/settings/settings_api.h"
 #include "chrome/browser/extensions/settings/settings_frontend.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/common/extensions/api/storage.h"
 #include "content/public/browser/browser_thread.h"
 
 namespace extensions {
@@ -27,6 +28,17 @@ SettingsFunction::SettingsFunction()
     : settings_namespace_(settings_namespace::INVALID) {}
 
 SettingsFunction::~SettingsFunction() {}
+
+bool SettingsFunction::ShouldSkipQuotaLimiting() const {
+  // Only apply quota if this is for sync storage.
+  std::string settings_namespace_string;
+  if (!args_->GetString(0, &settings_namespace_string)) {
+    // This is an error but it will be caught in RunImpl(), there is no
+    // mechanism to signify an error from this function.
+    return false;
+  }
+  return settings_namespace_string != "sync";
+}
 
 bool SettingsFunction::RunImpl() {
   {
@@ -118,10 +130,10 @@ std::vector<std::string> GetKeys(const DictionaryValue& dict) {
 // Creates quota heuristics for settings modification.
 static void GetModificationQuotaLimitHeuristics(
     QuotaLimitHeuristics* heuristics) {
-  // A max of 1000 operations per hour.
   QuotaLimitHeuristic::Config longLimitConfig = {
-      1000,
-      base::TimeDelta::FromHours(1)
+    // See storage.json for current value.
+    api::storage::sync::MAX_WRITE_OPERATIONS_PER_HOUR,
+    base::TimeDelta::FromHours(1)
   };
   heuristics->push_back(
       new ExtensionsQuotaService::TimedLimit(
@@ -129,8 +141,9 @@ static void GetModificationQuotaLimitHeuristics(
 
   // A max of 10 operations per minute, sustained over 10 minutes.
   QuotaLimitHeuristic::Config shortLimitConfig = {
-      10,
-      base::TimeDelta::FromMinutes(1)
+    // See storage.json for current value.
+    api::storage::sync::MAX_SUSTAINED_WRITE_OPERATIONS_PER_MINUTE,
+    base::TimeDelta::FromMinutes(1)
   };
   heuristics->push_back(
       new ExtensionsQuotaService::SustainedLimit(

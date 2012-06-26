@@ -20,6 +20,7 @@
 #include "chrome/common/extensions/extension_error_utils.h"
 #include "chrome/common/extensions/extension_file_util.h"
 #include "chrome/common/extensions/extension_l10n_util.h"
+#include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/extension_message_bundle.h"
 #include "chrome/common/extensions/extension_messages.h"
 #include "content/public/browser/render_view_host.h"
@@ -31,11 +32,11 @@ namespace keys = extension_tabs_module_constants;
 
 ExecuteCodeInTabFunction::ExecuteCodeInTabFunction()
     : execute_tab_id_(-1),
-      all_frames_(false) {
+      all_frames_(false),
+      run_at_(UserScript::DOCUMENT_IDLE) {
 }
 
-ExecuteCodeInTabFunction::~ExecuteCodeInTabFunction() {
-}
+ExecuteCodeInTabFunction::~ExecuteCodeInTabFunction() {}
 
 bool ExecuteCodeInTabFunction::RunImpl() {
   DictionaryValue* script_info;
@@ -95,6 +96,21 @@ bool ExecuteCodeInTabFunction::RunImpl() {
       return false;
   }
 
+  if (script_info->HasKey(keys::kRunAtKey)) {
+    std::string run_string;
+    EXTENSION_FUNCTION_VALIDATE(script_info->GetString(
+          keys::kRunAtKey, &run_string));
+
+    if (run_string == extension_manifest_values::kRunAtDocumentStart)
+      run_at_ = UserScript::DOCUMENT_START;
+    else if (run_string == extension_manifest_values::kRunAtDocumentEnd)
+      run_at_ = UserScript::DOCUMENT_END;
+    else if (run_string == extension_manifest_values::kRunAtDocumentIdle)
+      run_at_ = UserScript::DOCUMENT_IDLE;
+    else
+      EXTENSION_FUNCTION_VALIDATE(false);
+  }
+
   std::string code_string;
   if (script_info->HasKey(keys::kCodeKey)) {
     if (!script_info->GetString(keys::kCodeKey, &code_string))
@@ -123,6 +139,41 @@ bool ExecuteCodeInTabFunction::RunImpl() {
   file_reader->Start();
 
   return true;
+}
+
+bool ExecuteCodeInTabFunction::OnMessageReceived(const IPC::Message& message) {
+  if (message.type() != ExtensionHostMsg_ExecuteCodeFinished::ID)
+    return false;
+
+  int message_request_id;
+  PickleIterator iter(message);
+  if (!message.ReadInt(&iter, &message_request_id)) {
+    NOTREACHED() << "malformed extension message";
+    return true;
+  }
+
+  if (message_request_id != request_id())
+    return false;
+
+  IPC_BEGIN_MESSAGE_MAP(ExecuteCodeInTabFunction, message)
+    IPC_MESSAGE_HANDLER(ExtensionHostMsg_ExecuteCodeFinished,
+                        OnExecuteCodeFinished)
+  IPC_END_MESSAGE_MAP()
+  return true;
+}
+
+void ExecuteCodeInTabFunction::OnExecuteCodeFinished(int request_id,
+                                                     bool success,
+                                                     const std::string& error) {
+  if (!error.empty()) {
+    CHECK(!success);
+    error_ = error;
+  }
+
+  SendResponse(success);
+
+  Observe(NULL);
+  Release();  // balanced in Execute()
 }
 
 void ExecuteCodeInTabFunction::DidLoadFile(bool success,
@@ -222,6 +273,7 @@ bool ExecuteCodeInTabFunction::Execute(const std::string& code_string) {
   params.is_javascript = is_js_code;
   params.code = code_string;
   params.all_frames = all_frames_;
+  params.run_at = run_at_;
   params.in_main_world = false;
   contents->web_contents()->GetRenderViewHost()->Send(
       new ExtensionMsg_ExecuteCode(
@@ -231,39 +283,4 @@ bool ExecuteCodeInTabFunction::Execute(const std::string& code_string) {
   Observe(contents->web_contents());
   AddRef();  // balanced in OnExecuteCodeFinished()
   return true;
-}
-
-bool ExecuteCodeInTabFunction::OnMessageReceived(const IPC::Message& message) {
-  if (message.type() != ExtensionHostMsg_ExecuteCodeFinished::ID)
-    return false;
-
-  int message_request_id;
-  PickleIterator iter(message);
-  if (!message.ReadInt(&iter, &message_request_id)) {
-    NOTREACHED() << "malformed extension message";
-    return true;
-  }
-
-  if (message_request_id != request_id())
-    return false;
-
-  IPC_BEGIN_MESSAGE_MAP(ExecuteCodeInTabFunction, message)
-    IPC_MESSAGE_HANDLER(ExtensionHostMsg_ExecuteCodeFinished,
-                        OnExecuteCodeFinished)
-  IPC_END_MESSAGE_MAP()
-  return true;
-}
-
-void ExecuteCodeInTabFunction::OnExecuteCodeFinished(int request_id,
-                                                     bool success,
-                                                     const std::string& error) {
-  if (!error.empty()) {
-    CHECK(!success);
-    error_ = error;
-  }
-
-  SendResponse(success);
-
-  Observe(NULL);
-  Release();  // balanced in Execute()
 }

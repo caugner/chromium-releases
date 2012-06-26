@@ -8,6 +8,7 @@
 #include "chrome/browser/download/download_service.h"
 #include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/net/url_request_mock_util.h"
+#include "chrome/browser/notifications/balloon.h"
 #include "chrome/browser/notifications/balloon_collection_impl.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/notifications/notification.h"
@@ -27,7 +28,6 @@
 #include "chrome/browser/ui/panels/native_panel.h"
 #include "chrome/browser/ui/panels/panel.h"
 #include "chrome/browser/ui/panels/panel_manager.h"
-#include "chrome/browser/ui/panels/panel_settings_menu_model.h"
 #include "chrome/browser/ui/panels/test_panel_mouse_watcher.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -132,79 +132,6 @@ class PanelBrowserTest : public BasePanelBrowserTest {
     }
   }
 
-  struct MenuItem {
-    int id;
-    bool enabled;
-  };
-
-  void ValidateSettingsMenuItems(ui::SimpleMenuModel* settings_menu_contents,
-                                 size_t num_expected_menu_items,
-                                 const MenuItem* expected_menu_items) {
-    ASSERT_TRUE(settings_menu_contents);
-    EXPECT_EQ(static_cast<int>(num_expected_menu_items),
-              settings_menu_contents->GetItemCount());
-    for (size_t i = 0; i < num_expected_menu_items; ++i) {
-      if (expected_menu_items[i].id == -1) {
-        EXPECT_EQ(ui::MenuModel::TYPE_SEPARATOR,
-                  settings_menu_contents->GetTypeAt(i));
-      } else {
-        EXPECT_EQ(expected_menu_items[i].id,
-                  settings_menu_contents->GetCommandIdAt(i));
-        EXPECT_EQ(expected_menu_items[i].enabled,
-                  settings_menu_contents->IsEnabledAt(i));
-      }
-    }
-  }
-
-  void TestCreateSettingsMenuForExtension(const FilePath::StringType& path,
-                                          Extension::Location location,
-                                          const std::string& homepage_url,
-                                          const std::string& options_page) {
-    // Creates a testing extension.
-    DictionaryValue extra_value;
-    if (!homepage_url.empty()) {
-      extra_value.SetString(extension_manifest_keys::kHomepageURL,
-                            homepage_url);
-    }
-    if (!options_page.empty()) {
-      extra_value.SetString(extension_manifest_keys::kOptionsPage,
-                            options_page);
-    }
-    scoped_refptr<Extension> extension = CreateExtension(
-        path, location, extra_value);
-
-    // Creates a panel with the app name that comes from the extension ID.
-    Panel* panel = CreatePanel(
-        web_app::GenerateApplicationNameFromExtensionId(extension->id()));
-
-    scoped_ptr<PanelSettingsMenuModel> settings_menu_model(
-        new PanelSettingsMenuModel(panel));
-
-    // Validates the settings menu items.
-    MenuItem expected_panel_menu_items[] = {
-        { PanelSettingsMenuModel::COMMAND_NAME, false },
-        { -1, false },  // Separator
-        { PanelSettingsMenuModel::COMMAND_CONFIGURE, false },
-        { PanelSettingsMenuModel::COMMAND_DISABLE, false },
-        { PanelSettingsMenuModel::COMMAND_UNINSTALL, false },
-        { -1, false },  // Separator
-        { PanelSettingsMenuModel::COMMAND_MANAGE, true }
-    };
-    if (!homepage_url.empty())
-      expected_panel_menu_items[0].enabled = true;
-    if (!options_page.empty())
-      expected_panel_menu_items[2].enabled = true;
-    if (location != Extension::EXTERNAL_POLICY_DOWNLOAD) {
-      expected_panel_menu_items[3].enabled = true;
-      expected_panel_menu_items[4].enabled = true;
-    }
-    ValidateSettingsMenuItems(settings_menu_model.get(),
-                              arraysize(expected_panel_menu_items),
-                              expected_panel_menu_items);
-
-    panel->Close();
-  }
-
   void TestMinimizeRestore() {
     // This constant is used to generate a point 'sufficiently higher then
     // top edge of the panel'. On some platforms (Mac) we extend hover area
@@ -224,7 +151,7 @@ class PanelBrowserTest : public BasePanelBrowserTest {
           NativePanelTesting::Create(panels[i]->native_panel());
     }
 
-    // Test minimize.
+    // Verify titlebar click does not minimize.
     for (size_t index = 0; index < panels.size(); ++index) {
       // Press left mouse button.  Verify nothing changed.
       native_panels_testing[index]->PressLeftMouseButtonTitlebar(
@@ -232,8 +159,15 @@ class PanelBrowserTest : public BasePanelBrowserTest {
       EXPECT_EQ(expected_bounds, GetAllPanelBounds());
       EXPECT_EQ(expected_expansion_states, GetAllPanelExpansionStates());
 
-      // Release mouse button.  Verify minimized.
+      // Release mouse button.  Verify nothing changed.
       native_panels_testing[index]->ReleaseMouseButtonTitlebar();
+      EXPECT_EQ(expected_bounds, GetAllPanelBounds());
+      EXPECT_EQ(expected_expansion_states, GetAllPanelExpansionStates());
+    }
+
+    // Minimize all panels for next stage in test.
+    for (size_t index = 0; index < panels.size(); ++index) {
+      panels[index]->Minimize();
       expected_bounds[index].set_height(Panel::kMinimizedPanelHeight);
       expected_bounds[index].set_y(
           test_begin_bounds[index].y() +
@@ -334,6 +268,76 @@ class PanelBrowserTest : public BasePanelBrowserTest {
   }
 };
 
+IN_PROC_BROWSER_TEST_F(PanelBrowserTest, CheckDockedPanelProperties) {
+  PanelManager* panel_manager = PanelManager::GetInstance();
+  DockedPanelStrip* docked_strip = panel_manager->docked_strip();
+
+  // Create 3 docked panels that are in expanded, title-only or minimized states
+  // respectively.
+  Panel* panel1 = CreatePanelWithBounds("1", gfx::Rect(0, 0, 100, 100));
+  Panel* panel2 = CreatePanelWithBounds("2", gfx::Rect(0, 0, 100, 100));
+  panel2->SetExpansionState(Panel::TITLE_ONLY);
+  WaitForExpansionStateChanged(panel2, Panel::TITLE_ONLY);
+  Panel* panel3 = CreatePanelWithBounds("3", gfx::Rect(0, 0, 100, 100));
+  panel3->SetExpansionState(Panel::MINIMIZED);
+  WaitForExpansionStateChanged(panel3, Panel::MINIMIZED);
+  scoped_ptr<NativePanelTesting> panel1_testing(
+      NativePanelTesting::Create(panel1->native_panel()));
+  scoped_ptr<NativePanelTesting> panel2_testing(
+      NativePanelTesting::Create(panel2->native_panel()));
+  scoped_ptr<NativePanelTesting> panel3_testing(
+      NativePanelTesting::Create(panel3->native_panel()));
+
+  // Ensure that the layout message can get a chance to be processed so that
+  // the button visibility can be updated.
+  MessageLoop::current()->RunAllPending();
+
+  EXPECT_EQ(3, panel_manager->num_panels());
+  EXPECT_TRUE(docked_strip->HasPanel(panel1));
+  EXPECT_TRUE(docked_strip->HasPanel(panel2));
+  EXPECT_TRUE(docked_strip->HasPanel(panel3));
+
+  EXPECT_EQ(Panel::EXPANDED, panel1->expansion_state());
+  EXPECT_EQ(Panel::TITLE_ONLY, panel2->expansion_state());
+  EXPECT_EQ(Panel::MINIMIZED, panel3->expansion_state());
+
+  EXPECT_TRUE(panel1->always_on_top());
+  EXPECT_TRUE(panel2->always_on_top());
+  EXPECT_TRUE(panel3->always_on_top());
+
+  EXPECT_TRUE(panel1_testing->IsButtonVisible(
+      NativePanelTesting::CLOSE_BUTTON));
+  EXPECT_TRUE(panel2_testing->IsButtonVisible(
+      NativePanelTesting::CLOSE_BUTTON));
+  EXPECT_TRUE(panel3_testing->IsButtonVisible(
+      NativePanelTesting::CLOSE_BUTTON));
+
+  EXPECT_TRUE(panel1_testing->IsButtonVisible(
+      NativePanelTesting::MINIMIZE_BUTTON));
+  EXPECT_FALSE(panel2_testing->IsButtonVisible(
+      NativePanelTesting::MINIMIZE_BUTTON));
+  EXPECT_FALSE(panel3_testing->IsButtonVisible(
+      NativePanelTesting::MINIMIZE_BUTTON));
+
+  EXPECT_FALSE(panel1_testing->IsButtonVisible(
+      NativePanelTesting::RESTORE_BUTTON));
+  EXPECT_TRUE(panel2_testing->IsButtonVisible(
+      NativePanelTesting::RESTORE_BUTTON));
+  EXPECT_TRUE(panel3_testing->IsButtonVisible(
+      NativePanelTesting::RESTORE_BUTTON));
+
+  EXPECT_EQ(panel::RESIZABLE_ALL_SIDES_EXCEPT_BOTTOM,
+            panel1->CanResizeByMouse());
+  EXPECT_EQ(panel::NOT_RESIZABLE, panel2->CanResizeByMouse());
+  EXPECT_EQ(panel::NOT_RESIZABLE, panel3->CanResizeByMouse());
+
+  EXPECT_EQ(Panel::USE_PANEL_ATTENTION, panel1->attention_mode());
+  EXPECT_EQ(Panel::USE_PANEL_ATTENTION, panel2->attention_mode());
+  EXPECT_EQ(Panel::USE_PANEL_ATTENTION, panel3->attention_mode());
+
+  panel_manager->CloseAll();
+}
+
 IN_PROC_BROWSER_TEST_F(PanelBrowserTest, CreatePanel) {
   PanelManager* panel_manager = PanelManager::GetInstance();
   EXPECT_EQ(0, panel_manager->num_panels()); // No panels initially.
@@ -347,7 +351,8 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, CreatePanel) {
   EXPECT_GT(bounds.width(), 0);
   EXPECT_GT(bounds.height(), 0);
 
-  EXPECT_EQ(bounds.right(), panel_manager->StartingRightPosition());
+  EXPECT_EQ(bounds.right(),
+            panel_manager->docked_strip()->StartingRightPosition());
 
   CloseWindowAndWait(panel->browser());
 
@@ -355,7 +360,8 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, CreatePanel) {
 }
 
 IN_PROC_BROWSER_TEST_F(PanelBrowserTest, CreateBigPanel) {
-  gfx::Rect work_area = GetTestingWorkArea();
+  gfx::Rect work_area = PanelManager::GetInstance()->
+      display_settings_provider()->GetDisplayArea();
   Panel* panel = CreatePanelWithBounds("BigPanel", work_area);
   gfx::Rect bounds = panel->GetBounds();
   EXPECT_EQ(panel->max_size().width(), bounds.width());
@@ -375,21 +381,12 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, FindBar) {
   panel->Close();
 }
 
-IN_PROC_BROWSER_TEST_F(PanelBrowserTest, CreateSettingsMenu) {
-  TestCreateSettingsMenuForExtension(
-      FILE_PATH_LITERAL("extension1"), Extension::EXTERNAL_POLICY_DOWNLOAD,
-      "", "");
-  TestCreateSettingsMenuForExtension(
-      FILE_PATH_LITERAL("extension2"), Extension::INVALID,
-      "http://home", "options.html");
-}
-
 // Flaky: http://crbug.com/105445
 IN_PROC_BROWSER_TEST_F(PanelBrowserTest, DISABLED_AutoResize) {
   PanelManager* panel_manager = PanelManager::GetInstance();
   panel_manager->enable_auto_sizing(true);
   // Bigger space is needed by this test.
-  SetTestingWorkArea(gfx::Rect(0, 0, 1200, 900));
+  SetTestingAreas(gfx::Rect(0, 0, 1200, 900), gfx::Rect());
 
   // Create a test panel with tab contents loaded.
   CreatePanelParams params("PanelTest1", gfx::Rect(), SHOW_AS_ACTIVE);
@@ -543,8 +540,7 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, RestoredBounds) {
   panel->SetExpansionState(Panel::EXPANDED);
   EXPECT_EQ(panel->GetBounds(), panel->GetRestoredBounds());
 
-  // Verify that changing the panel bounds only affects restored height
-  // when panel is expanded.
+  // Verify that changing the panel bounds does not affect the restored height.
   int saved_restored_height = restored.height();
   panel->SetExpansionState(Panel::MINIMIZED);
   bounds = gfx::Rect(10, 20, 300, 400);
@@ -559,6 +555,8 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, RestoredBounds) {
   panel->SetExpansionState(Panel::EXPANDED);
   bounds = gfx::Rect(40, 60, 300, 400);
   panel->SetPanelBounds(bounds);
+  EXPECT_EQ(saved_restored_height, panel->GetRestoredBounds().height());
+  panel->set_full_size(bounds.size());
   EXPECT_NE(saved_restored_height, panel->GetRestoredBounds().height());
 
   panel->Close();
@@ -603,7 +601,54 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, MinimizeRestoreThreePanels) {
   PanelManager::GetInstance()->CloseAll();
 }
 
-IN_PROC_BROWSER_TEST_F(PanelBrowserTest, ToggleMinimizeAll) {
+IN_PROC_BROWSER_TEST_F(PanelBrowserTest, MinimizeRestoreButtonClick) {
+  // Test with three panels.
+  Panel* panel1 = CreatePanel("PanelTest1");
+  Panel* panel2 = CreatePanel("PanelTest2");
+  Panel* panel3 = CreatePanel("PanelTest3");
+  EXPECT_FALSE(panel1->IsMinimized());
+  EXPECT_FALSE(panel2->IsMinimized());
+  EXPECT_FALSE(panel3->IsMinimized());
+
+  // Click restore button on an expanded panel. Expect no change.
+  panel1->OnRestoreButtonClicked(panel::NO_MODIFIER);
+  EXPECT_FALSE(panel1->IsMinimized());
+  EXPECT_FALSE(panel2->IsMinimized());
+  EXPECT_FALSE(panel3->IsMinimized());
+
+  // Click minimize button on an expanded panel. Only that panel will minimize.
+  panel1->OnMinimizeButtonClicked(panel::NO_MODIFIER);
+  EXPECT_TRUE(panel1->IsMinimized());
+  EXPECT_FALSE(panel2->IsMinimized());
+  EXPECT_FALSE(panel3->IsMinimized());
+
+  // Click minimize button on a minimized panel. Expect no change.
+  panel1->OnMinimizeButtonClicked(panel::NO_MODIFIER);
+  EXPECT_TRUE(panel1->IsMinimized());
+  EXPECT_FALSE(panel2->IsMinimized());
+  EXPECT_FALSE(panel3->IsMinimized());
+
+  // Minimize all panels by clicking minimize button on an expanded panel
+  // with the apply-all modifier.
+  panel2->OnMinimizeButtonClicked(panel::APPLY_TO_ALL);
+  EXPECT_TRUE(panel1->IsMinimized());
+  EXPECT_TRUE(panel2->IsMinimized());
+  EXPECT_TRUE(panel3->IsMinimized());
+
+  // Click restore button on a minimized panel. Only that panel will restore.
+  panel2->OnRestoreButtonClicked(panel::NO_MODIFIER);
+  EXPECT_TRUE(panel1->IsMinimized());
+  EXPECT_FALSE(panel2->IsMinimized());
+  EXPECT_TRUE(panel3->IsMinimized());
+
+  // Restore all panels by clicking restore button on a minimized panel.
+  panel3->OnRestoreButtonClicked(panel::APPLY_TO_ALL);
+  EXPECT_FALSE(panel1->IsMinimized());
+  EXPECT_FALSE(panel2->IsMinimized());
+  EXPECT_FALSE(panel3->IsMinimized());
+}
+
+IN_PROC_BROWSER_TEST_F(PanelBrowserTest, RestoreAllWithTitlebarClick) {
   // We'll simulate mouse movements for test.
   PanelMouseWatcher* mouse_watcher = new TestPanelMouseWatcher();
   PanelManager::GetInstance()->SetMouseWatcherForTesting(mouse_watcher);
@@ -623,48 +668,56 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, ToggleMinimizeAll) {
   scoped_ptr<NativePanelTesting> test_panel3(
       NativePanelTesting::Create(panel3->native_panel()));
 
-  // Press and release mouse button on one panel's titlebar using a modifier
-  // to minimize all panels. Nothing changes until mouse is released.
+  // Click on an expanded panel's titlebar using the apply-all modifier.
+  // Verify expansion state is unchanged.
   test_panel2->PressLeftMouseButtonTitlebar(panel2->GetBounds().origin(),
                                             panel::APPLY_TO_ALL);
+  test_panel2->ReleaseMouseButtonTitlebar(panel::APPLY_TO_ALL);
   EXPECT_FALSE(panel1->IsMinimized());
   EXPECT_FALSE(panel2->IsMinimized());
   EXPECT_FALSE(panel3->IsMinimized());
-  test_panel2->ReleaseMouseButtonTitlebar(panel::APPLY_TO_ALL);
+
+  // Click on a minimized panel's titlebar using the apply-all modifier.
+  panel1->Minimize();
+  panel2->Minimize();
+  panel3->Minimize();
   EXPECT_TRUE(panel1->IsMinimized());
   EXPECT_TRUE(panel2->IsMinimized());
   EXPECT_TRUE(panel3->IsMinimized());
 
-  // Press and release on a panel titlebar to restore all panels.
   // Nothing changes until mouse is released.
   test_panel1->PressLeftMouseButtonTitlebar(panel1->GetBounds().origin(),
                                             panel::APPLY_TO_ALL);
   EXPECT_TRUE(panel1->IsMinimized());
   EXPECT_TRUE(panel2->IsMinimized());
   EXPECT_TRUE(panel3->IsMinimized());
+  // Verify all panels restored when mouse is released.
   test_panel1->ReleaseMouseButtonTitlebar(panel::APPLY_TO_ALL);
   EXPECT_FALSE(panel1->IsMinimized());
   EXPECT_FALSE(panel2->IsMinimized());
   EXPECT_FALSE(panel3->IsMinimized());
 
-  // Minimize a single panel. Then minimize all panels to verify that apply-all
-  // logic works even if not all panels have the same expansion state.
+  // Minimize a single panel. Then click on expanded panel with apply-all
+  // modifier. Verify nothing changes.
   panel1->Minimize();
   EXPECT_TRUE(panel1->IsMinimized());
   EXPECT_FALSE(panel2->IsMinimized());
   EXPECT_FALSE(panel3->IsMinimized());
+
   test_panel2->PressLeftMouseButtonTitlebar(panel2->GetBounds().origin(),
                                             panel::APPLY_TO_ALL);
   test_panel2->ReleaseMouseButtonTitlebar(panel::APPLY_TO_ALL);
   EXPECT_TRUE(panel1->IsMinimized());
-  EXPECT_TRUE(panel2->IsMinimized());
-  EXPECT_TRUE(panel3->IsMinimized());
+  EXPECT_FALSE(panel2->IsMinimized());
+  EXPECT_FALSE(panel3->IsMinimized());
 
-  // Expand a single panel. Then restore all panels.
-  panel3->Restore();
+  // Minimize another panel. Then click on a minimized panel with apply-all
+  // modifier to restore all panels.
+  panel2->Minimize();
   EXPECT_TRUE(panel1->IsMinimized());
   EXPECT_TRUE(panel2->IsMinimized());
   EXPECT_FALSE(panel3->IsMinimized());
+
   test_panel2->PressLeftMouseButtonTitlebar(panel2->GetBounds().origin(),
                                             panel::APPLY_TO_ALL);
   test_panel2->ReleaseMouseButtonTitlebar(panel::APPLY_TO_ALL);
@@ -677,6 +730,7 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, ToggleMinimizeAll) {
   EXPECT_TRUE(panel1->IsMinimized());
   EXPECT_FALSE(panel2->IsMinimized());
   EXPECT_FALSE(panel3->IsMinimized());
+
   test_panel1->PressLeftMouseButtonTitlebar(panel1->GetBounds().origin(),
                                             panel::APPLY_TO_ALL);
   test_panel1->ReleaseMouseButtonTitlebar(panel::APPLY_TO_ALL);
@@ -684,25 +738,32 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, ToggleMinimizeAll) {
   EXPECT_FALSE(panel2->IsMinimized());
   EXPECT_FALSE(panel3->IsMinimized());
 
-  // Click on the single expanded panel. Verify all are minimized.
+  // Click on the single expanded panel. Verify nothing changes.
   panel1->Minimize();
   panel3->Minimize();
   EXPECT_TRUE(panel1->IsMinimized());
   EXPECT_FALSE(panel2->IsMinimized());
   EXPECT_TRUE(panel3->IsMinimized());
+
   test_panel2->PressLeftMouseButtonTitlebar(panel2->GetBounds().origin(),
                                             panel::APPLY_TO_ALL);
   test_panel2->ReleaseMouseButtonTitlebar(panel::APPLY_TO_ALL);
   EXPECT_TRUE(panel1->IsMinimized());
-  EXPECT_TRUE(panel2->IsMinimized());
+  EXPECT_FALSE(panel2->IsMinimized());
   EXPECT_TRUE(panel3->IsMinimized());
 
   // Hover over a minimized panel and click on the titlebar while it is in
   // title-only mode. Should restore all panels.
+  panel2->Minimize();
+  EXPECT_TRUE(panel1->IsMinimized());
+  EXPECT_TRUE(panel2->IsMinimized());
+  EXPECT_TRUE(panel3->IsMinimized());
+
   MoveMouseAndWaitForExpansionStateChange(panel2, panel2->GetBounds().origin());
   EXPECT_EQ(Panel::TITLE_ONLY, panel1->expansion_state());
   EXPECT_EQ(Panel::TITLE_ONLY, panel2->expansion_state());
   EXPECT_EQ(Panel::TITLE_ONLY, panel3->expansion_state());
+
   test_panel3->PressLeftMouseButtonTitlebar(panel3->GetBounds().origin(),
                                             panel::APPLY_TO_ALL);
   test_panel3->ReleaseMouseButtonTitlebar(panel::APPLY_TO_ALL);
@@ -710,29 +771,43 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, ToggleMinimizeAll) {
   EXPECT_FALSE(panel2->IsMinimized());
   EXPECT_FALSE(panel3->IsMinimized());
 
-  // Draw attention to a panel. Verify minimize all applies without
-  // affecting draw attention state.
-  panel1->FlashFrame(true);
-  EXPECT_TRUE(panel1->IsDrawingAttention());
-  test_panel3->PressLeftMouseButtonTitlebar(panel3->GetBounds().origin(),
-                                            panel::APPLY_TO_ALL);
-  test_panel3->ReleaseMouseButtonTitlebar(panel::APPLY_TO_ALL);
+  // Draw attention to a minimized panel. Click on a minimized panel that is
+  // not drawing attention. Verify restore all applies without affecting
+  // draw attention.
+  panel1->Minimize();
+  panel2->Minimize();
+  panel3->Minimize();
   EXPECT_TRUE(panel1->IsMinimized());
   EXPECT_TRUE(panel2->IsMinimized());
   EXPECT_TRUE(panel3->IsMinimized());
+
+  panel1->FlashFrame(true);
   EXPECT_TRUE(panel1->IsDrawingAttention());
-  EXPECT_EQ(Panel::TITLE_ONLY, panel1->expansion_state());
+
+  test_panel2->PressLeftMouseButtonTitlebar(panel3->GetBounds().origin(),
+                                            panel::APPLY_TO_ALL);
+  test_panel2->ReleaseMouseButtonTitlebar(panel::APPLY_TO_ALL);
+  EXPECT_FALSE(panel1->IsMinimized());
+  EXPECT_FALSE(panel2->IsMinimized());
+  EXPECT_FALSE(panel3->IsMinimized());
+  EXPECT_TRUE(panel1->IsDrawingAttention());
 
   // Restore all panels by clicking on the minimized panel that is drawing
-  // attention. Verify restore all applies without affecting draw attention
-  // state.
+  // attention. Verify restore all applies and clears draw attention.
+  panel1->Minimize();
+  panel2->Minimize();
+  panel3->Minimize();
+  EXPECT_TRUE(panel1->IsMinimized());
+  EXPECT_TRUE(panel2->IsMinimized());
+  EXPECT_TRUE(panel3->IsMinimized());
+
   test_panel1->PressLeftMouseButtonTitlebar(panel1->GetBounds().origin(),
                                             panel::APPLY_TO_ALL);
   test_panel1->ReleaseMouseButtonTitlebar(panel::APPLY_TO_ALL);
   EXPECT_FALSE(panel1->IsMinimized());
   EXPECT_FALSE(panel2->IsMinimized());
   EXPECT_FALSE(panel3->IsMinimized());
-  EXPECT_TRUE(panel1->IsDrawingAttention());
+  EXPECT_FALSE(panel1->IsDrawingAttention());
 
   PanelManager::GetInstance()->CloseAll();
 }
@@ -1031,7 +1106,7 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, DrawAttentionResetOnActivate) {
   scoped_ptr<NativePanelTesting> native_panel_testing(
       NativePanelTesting::Create(panel->native_panel()));
 
-  // Activate the panel.
+  // Deactivate the panel.
   panel->Deactivate();
   WaitForPanelActiveState(panel, SHOW_AS_INACTIVE);
 
@@ -1050,14 +1125,37 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, DrawAttentionResetOnActivate) {
   panel->Close();
 }
 
-// TODO(dimich): try/enable on other platforms.
-#if defined(OS_MACOSX)
-#define MAYBE_DrawAttentionResetOnClick DrawAttentionResetOnClick
-#else
-#define MAYBE_DrawAttentionResetOnClick DISABLED_DrawAttentionResetOnClick
-#endif
+IN_PROC_BROWSER_TEST_F(PanelBrowserTest,
+                       DrawAttentionMinimizedNotResetOnActivate) {
+  // Create 2 panels so we end up with an inactive panel that can
+  // be made to draw attention.
+  Panel* panel1 = CreatePanel("test panel1");
+  Panel* panel2 = CreatePanel("test panel2");
 
-IN_PROC_BROWSER_TEST_F(PanelBrowserTest, MAYBE_DrawAttentionResetOnClick) {
+  panel1->Minimize();
+  EXPECT_TRUE(panel1->IsMinimized());
+  panel1->FlashFrame(true);
+  EXPECT_TRUE(panel1->IsDrawingAttention());
+
+  // Simulate panel being activated while minimized. Cannot call
+  // Activate() as that expands the panel.
+  panel1->OnActiveStateChanged(true);
+  EXPECT_TRUE(panel1->IsDrawingAttention());  // Unchanged.
+
+  // Unminimize panel to show that attention would have been cleared
+  // if panel had not been minimized.
+  panel1->Restore();
+  EXPECT_FALSE(panel1->IsMinimized());
+  EXPECT_TRUE(panel1->IsDrawingAttention());  // Unchanged.
+
+  panel1->OnActiveStateChanged(true);
+  EXPECT_FALSE(panel1->IsDrawingAttention());  // Attention cleared.
+
+  panel1->Close();
+  panel2->Close();
+}
+
+IN_PROC_BROWSER_TEST_F(PanelBrowserTest, DrawAttentionResetOnClick) {
   CreatePanelParams params("Initially Inactive", gfx::Rect(), SHOW_AS_INACTIVE);
   Panel* panel = CreatePanelWithParams(params);
   scoped_ptr<NativePanelTesting> native_panel_testing(
@@ -1081,9 +1179,6 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, MAYBE_DrawAttentionResetOnClick) {
   panel->Close();
 }
 
-// There was a bug when it was not possible to minimize the panel by clicking
-// on the titlebar right after it was restored and activated. This test verifies
-// it's possible.
 IN_PROC_BROWSER_TEST_F(PanelBrowserTest,
                        MinimizeImmediatelyAfterRestore) {
   CreatePanelParams params("Initially Inactive", gfx::Rect(), SHOW_AS_ACTIVE);
@@ -1091,7 +1186,7 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest,
   scoped_ptr<NativePanelTesting> native_panel_testing(
       NativePanelTesting::Create(panel->native_panel()));
 
-  panel->SetExpansionState(Panel::MINIMIZED);  // this should deactivate.
+  panel->Minimize();  // this should deactivate.
   MessageLoop::current()->RunAllPending();
   WaitForPanelActiveState(panel, SHOW_AS_INACTIVE);
   EXPECT_EQ(Panel::MINIMIZED, panel->expansion_state());
@@ -1101,10 +1196,8 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest,
   WaitForPanelActiveState(panel, SHOW_AS_ACTIVE);
   EXPECT_EQ(Panel::EXPANDED, panel->expansion_state());
 
-  // Test that click on the titlebar right after expansion minimizes the Panel.
-  native_panel_testing->PressLeftMouseButtonTitlebar(
-      panel->GetBounds().origin());
-  native_panel_testing->ReleaseMouseButtonTitlebar();
+  // Verify that minimizing a panel right after expansion works.
+  panel->Minimize();
   MessageLoop::current()->RunAllPending();
   EXPECT_EQ(Panel::MINIMIZED, panel->expansion_state());
   panel->Close();
@@ -1407,6 +1500,67 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, TightAutosizeAroundSingleLine) {
   panel->Close();
 }
 
+IN_PROC_BROWSER_TEST_F(PanelBrowserTest,
+                       DefaultMaxSizeOnDisplaySettingsChange) {
+  Panel* panel = CreatePanelWithBounds("1", gfx::Rect(0, 0, 240, 220));
+
+  gfx::Size old_max_size = panel->max_size();
+  gfx::Size old_full_size = panel->full_size();
+
+  // Shrink the work area. Expect max size and full size become smaller.
+  gfx::Size smaller_work_area_size = gfx::Size(500, 300);
+  SetTestingAreas(gfx::Rect(gfx::Point(0, 0), smaller_work_area_size),
+                  gfx::Rect());
+  EXPECT_GT(old_max_size.width(), panel->max_size().width());
+  EXPECT_GT(old_max_size.height(), panel->max_size().height());
+  EXPECT_GT(smaller_work_area_size.width(), panel->max_size().width());
+  EXPECT_GT(smaller_work_area_size.height(), panel->max_size().height());
+  EXPECT_GT(old_full_size.width(), panel->full_size().width());
+  EXPECT_GT(old_full_size.height(), panel->full_size().height());
+  EXPECT_GE(panel->max_size().width(), panel->full_size().width());
+  EXPECT_GE(panel->max_size().height(), panel->full_size().height());
+
+  panel->Close();
+}
+
+IN_PROC_BROWSER_TEST_F(PanelBrowserTest,
+                       CustomMaxSizeOnDisplaySettingsChange) {
+  PanelManager* panel_manager = PanelManager::GetInstance();
+  Panel* panel = CreatePanelWithBounds("1", gfx::Rect(0, 0, 240, 220));
+
+  // Trigger custom max size by user resizing.
+  gfx::Size bigger_size = gfx::Size(550, 400);
+  gfx::Point mouse_location = panel->GetBounds().origin();
+  panel_manager->StartResizingByMouse(panel,
+                                      mouse_location,
+                                      panel::RESIZE_TOP_LEFT);
+  mouse_location.Offset(panel->GetBounds().width() - bigger_size.width(),
+                        panel->GetBounds().height() - bigger_size.height());
+  panel_manager->ResizeByMouse(mouse_location);
+  panel_manager->EndResizingByMouse(false);
+
+  gfx::Size old_max_size = panel->max_size();
+  EXPECT_EQ(bigger_size, old_max_size);
+  gfx::Size old_full_size = panel->full_size();
+  EXPECT_EQ(bigger_size, old_full_size);
+
+  // Shrink the work area. Expect max size and full size become smaller.
+  gfx::Size smaller_work_area_size = gfx::Size(500, 300);
+  SetTestingAreas(gfx::Rect(gfx::Point(0, 0), smaller_work_area_size),
+                  gfx::Rect());
+  EXPECT_GT(old_max_size.width(), panel->max_size().width());
+  EXPECT_GT(old_max_size.height(), panel->max_size().height());
+  EXPECT_GE(smaller_work_area_size.width(), panel->max_size().width());
+  EXPECT_EQ(smaller_work_area_size.height(), panel->max_size().height());
+  EXPECT_GT(old_full_size.width(), panel->full_size().width());
+  EXPECT_GT(old_full_size.height(), panel->full_size().height());
+  EXPECT_GE(panel->max_size().width(), panel->full_size().width());
+  EXPECT_GE(panel->max_size().height(), panel->full_size().height());
+  EXPECT_EQ(smaller_work_area_size.height(), panel->full_size().height());
+
+  panel->Close();
+}
+
 class PanelDownloadTest : public PanelBrowserTest {
  public:
   PanelDownloadTest() : PanelBrowserTest() { }
@@ -1488,10 +1642,9 @@ class DownloadObserver : public content::DownloadManager::Observer {
 IN_PROC_BROWSER_TEST_F(PanelDownloadTest, Download) {
   Profile* profile = browser()->profile();
   ASSERT_TRUE(CreateDownloadDirectory(profile));
-  Browser* panel_browser = Browser::CreateForApp(Browser::TYPE_PANEL,
-                                                 "PanelTest",
-                                                 gfx::Rect(),
-                                                 profile);
+  Browser* panel_browser = Browser::CreateWithParams(
+      Browser::CreateParams::CreateForApp(
+          Browser::TYPE_PANEL, "PanelTest", gfx::Rect(), profile));
   EXPECT_EQ(2U, BrowserList::size());
   ASSERT_FALSE(browser()->window()->IsDownloadShelfVisible());
   ASSERT_FALSE(panel_browser->window()->IsDownloadShelfVisible());
@@ -1542,10 +1695,9 @@ IN_PROC_BROWSER_TEST_F(PanelDownloadTest, Download) {
 IN_PROC_BROWSER_TEST_F(PanelDownloadTest, MAYBE_DownloadNoTabbedBrowser) {
   Profile* profile = browser()->profile();
   ASSERT_TRUE(CreateDownloadDirectory(profile));
-  Browser* panel_browser = Browser::CreateForApp(Browser::TYPE_PANEL,
-                                                 "PanelTest",
-                                                 gfx::Rect(),
-                                                 profile);
+  Browser* panel_browser = Browser::CreateWithParams(
+      Browser::CreateParams::CreateForApp(
+          Browser::TYPE_PANEL, "PanelTest", gfx::Rect(), profile));
   EXPECT_EQ(2U, BrowserList::size());
   ASSERT_FALSE(browser()->window()->IsDownloadShelfVisible());
   ASSERT_FALSE(panel_browser->window()->IsDownloadShelfVisible());
@@ -1599,11 +1751,11 @@ class PanelAndNotificationTest : public PanelBrowserTest {
   }
 
   virtual void SetUpOnMainThread() OVERRIDE {
-    PanelBrowserTest::SetUpOnMainThread();
-
     // Do not use our own testing work area since desktop notification code
     // does not have the hook up for testing work area.
-    SetTestingWorkArea(gfx::Rect());
+    disable_display_settings_mock();
+
+    PanelBrowserTest::SetUpOnMainThread();
 
     g_browser_process->local_state()->SetInteger(
         prefs::kDesktopNotificationPosition, BalloonCollection::LOWER_RIGHT);
@@ -1641,7 +1793,7 @@ class PanelAndNotificationTest : public PanelBrowserTest {
     // The position returned by the notification balloon is based on Mac's
     // vertically inverted orientation. We need to flip it so that it can
     // be compared against the position returned by the panel.
-    gfx::Size screen_size = gfx::Screen::GetPrimaryMonitorSize();
+    gfx::Size screen_size = gfx::Screen::GetPrimaryMonitor().size();
     return screen_size.height() - balloon->GetPosition().y();
 #else
     return balloon->GetPosition().y() + balloon->GetViewSize().height();

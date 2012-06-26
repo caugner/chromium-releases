@@ -88,8 +88,7 @@ void BrowserActionOverflowMenuController::CancelMenu() {
 
 void BrowserActionOverflowMenuController::ExecuteCommand(int id) {
   BrowserActionView* view = (*views_)[start_index_ + id - 1];
-  owner_->OnBrowserActionExecuted(view->button(),
-                                  false);  // inspect_with_devtools
+  owner_->OnBrowserActionExecuted(view->button());
 }
 
 bool BrowserActionOverflowMenuController::ShowContextMenu(
@@ -103,7 +102,7 @@ bool BrowserActionOverflowMenuController::ShowContextMenu(
     return false;
 
   scoped_refptr<ExtensionContextMenuModel> context_menu_contents =
-      new ExtensionContextMenuModel(extension, owner_->browser(), owner_);
+      new ExtensionContextMenuModel(extension, owner_->browser());
   views::MenuModelAdapter context_menu_model_adapter(
       context_menu_contents.get());
   views::MenuRunner context_menu_runner(

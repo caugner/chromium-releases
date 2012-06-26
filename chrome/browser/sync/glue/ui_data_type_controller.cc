@@ -131,6 +131,8 @@ void UIDataTypeController::Associate() {
       type(),
       initial_sync_data,
       scoped_ptr<SyncChangeProcessor>(
+          new SharedChangeProcessorRef(shared_change_processor_)),
+      scoped_ptr<SyncErrorFactory>(
           new SharedChangeProcessorRef(shared_change_processor_)));
   RecordAssociationTime(base::TimeTicks::Now() - start_time);
   if (error.IsSet()) {
@@ -184,6 +186,9 @@ void UIDataTypeController::Stop() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(syncable::IsRealDataType(type_));
 
+  State prev_state = state_;
+  state_ = STOPPING;
+
   if (shared_change_processor_.get()) {
     shared_change_processor_->Disconnect();
     shared_change_processor_ = NULL;
@@ -191,7 +196,7 @@ void UIDataTypeController::Stop() {
 
   // If Stop() is called while Start() is waiting for the datatype model to
   // load, abort the start.
-  if (state_ == MODEL_STARTING) {
+  if (prev_state == MODEL_STARTING) {
     StartFailed(ABORTED, SyncError());
     // We can just return here since we haven't performed association if we're
     // still in MODEL_STARTING.

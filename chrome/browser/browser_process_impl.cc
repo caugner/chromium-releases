@@ -30,7 +30,6 @@
 #include "chrome/browser/extensions/extension_event_router_forwarder.h"
 #include "chrome/browser/extensions/extension_tab_id_map.h"
 #include "chrome/browser/first_run/upgrade_util.h"
-#include "chrome/browser/google/google_url_tracker.h"
 #include "chrome/browser/icon_manager.h"
 #include "chrome/browser/intranet_redirect_detector.h"
 #include "chrome/browser/io_thread.h"
@@ -41,6 +40,7 @@
 #include "chrome/browser/net/sdch_dictionary_fetcher.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
+#include "chrome/browser/policy/policy_service_impl.h"
 #include "chrome/browser/policy/policy_service_stub.h"
 #include "chrome/browser/prefs/browser_prefs.h"
 #include "chrome/browser/prefs/pref_service.h"
@@ -57,6 +57,7 @@
 #include "chrome/browser/tab_contents/thumbnail_generator.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/common/chrome_constants.h"
+#include "chrome/common/chrome_content_client.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -73,6 +74,7 @@
 #include "content/public/browser/plugin_service.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/resource_dispatcher_host.h"
+#include "content/public/common/pepper_plugin_info.h"
 #include "net/socket/client_socket_pool_manager.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "ui/base/clipboard/clipboard.h"
@@ -182,14 +184,13 @@ void BrowserProcessImpl::StartTearDown() {
   BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
                           base::Bind(&SdchDictionaryFetcher::Shutdown));
 
-  // We need to destroy the MetricsService, GoogleURLTracker,
-  // IntranetRedirectDetector, and SafeBrowsing ClientSideDetectionService
-  // (owned by the SafeBrowsingService) before the io_thread_ gets destroyed,
-  // since their destructors can call the URLFetcher destructor, which does a
-  // PostDelayedTask operation on the IO thread.
-  // (The IO thread will handle that URLFetcher operation before going away.)
+  // We need to destroy the MetricsService, IntranetRedirectDetector, and
+  // SafeBrowsing ClientSideDetectionService (owned by the SafeBrowsingService)
+  // before the io_thread_ gets destroyed, since their destructors can call the
+  // URLFetcher destructor, which does a PostDelayedTask operation on the IO
+  // thread. (The IO thread will handle that URLFetcher operation before going
+  // away.)
   metrics_service_.reset();
-  google_url_tracker_.reset();
   intranet_redirect_detector_.reset();
 #if defined(ENABLE_SAFE_BROWSING)
   if (safe_browsing_service_.get()) {
@@ -314,6 +315,9 @@ void BrowserProcessImpl::EndSession() {
     local_state()->CommitPendingWrite();
   }
 
+  // http://crbug.com/125207
+  base::ThreadRestrictions::ScopedAllowWait allow_wait;
+
   // We must write that the profile and metrics service shutdown cleanly,
   // otherwise on startup we'll think we crashed. So we block until done and
   // then proceed with normal shutdown.
@@ -425,13 +429,14 @@ policy::BrowserPolicyConnector* BrowserProcessImpl::browser_policy_connector() {
 }
 
 policy::PolicyService* BrowserProcessImpl::policy_service() {
+  if (!policy_service_.get()) {
 #if defined(ENABLE_CONFIGURATION_POLICY)
-  return browser_policy_connector()->GetPolicyService();
+    policy_service_.reset(browser_policy_connector()->CreatePolicyService());
 #else
-  if (!policy_service_.get())
     policy_service_.reset(new policy::PolicyServiceStub());
-  return policy_service_.get();
 #endif
+  }
+  return policy_service_.get();
 }
 
 IconManager* BrowserProcessImpl::icon_manager() {
@@ -504,13 +509,6 @@ printing::BackgroundPrintingManager*
     CreateBackgroundPrintingManager();
   return background_printing_manager_.get();
 #endif
-}
-
-GoogleURLTracker* BrowserProcessImpl::google_url_tracker() {
-  DCHECK(CalledOnValidThread());
-  if (!google_url_tracker_.get())
-    CreateGoogleURLTracker();
-  return google_url_tracker_.get();
 }
 
 IntranetRedirectDetector* BrowserProcessImpl::intranet_redirect_detector() {
@@ -757,6 +755,17 @@ void BrowserProcessImpl::PreMainMessageLoopRun() {
     plugin_service->AddExtraPluginPath(path);
   }
 
+  // Register bundled Pepper Flash if available.
+  content::PepperPluginInfo plugin;
+  bool add_at_beginning = false;
+  chrome::ChromeContentClient* content_client =
+      static_cast<chrome::ChromeContentClient*>(content::GetContentClient());
+  if (content_client->GetBundledFieldTrialPepperFlash(&plugin,
+                                                      &add_at_beginning)) {
+    plugin_service->RegisterInternalPlugin(plugin.ToWebPluginInfo(),
+                                           add_at_beginning);
+  }
+
 #if defined(OS_POSIX)
   // Also find plugins in a user-specific plugins dir,
   // e.g. ~/.config/chromium/Plugins.
@@ -774,13 +783,6 @@ void BrowserProcessImpl::CreateIconManager() {
   DCHECK(!created_icon_manager_ && icon_manager_.get() == NULL);
   created_icon_manager_ = true;
   icon_manager_.reset(new IconManager);
-}
-
-void BrowserProcessImpl::CreateGoogleURLTracker() {
-  DCHECK(google_url_tracker_.get() == NULL);
-  scoped_ptr<GoogleURLTracker> google_url_tracker(
-      new GoogleURLTracker(GoogleURLTracker::NORMAL_MODE));
-  google_url_tracker_.swap(google_url_tracker);
 }
 
 void BrowserProcessImpl::CreateIntranetRedirectDetector() {

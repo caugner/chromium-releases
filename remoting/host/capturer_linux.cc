@@ -75,6 +75,8 @@ class CapturerLinux : public Capturer {
   bool Init();  // TODO(ajwong): Do we really want this to be synchronous?
 
   // Capturer interface.
+  virtual void Start() OVERRIDE;
+  virtual void Stop() OVERRIDE;
   virtual void ScreenConfigurationChanged() OVERRIDE;
   virtual media::VideoFrame::Format pixel_format() const OVERRIDE;
   virtual void ClearInvalidRegion() OVERRIDE;
@@ -256,6 +258,12 @@ void CapturerLinux::InitXDamage() {
   LOG(INFO) << "Using XDamage extension.";
 }
 
+void CapturerLinux::Start() {
+}
+
+void CapturerLinux::Stop() {
+}
+
 void CapturerLinux::ScreenConfigurationChanged() {
   last_buffer_ = NULL;
   for (int i = 0; i < kNumBuffers; ++i) {
@@ -425,6 +433,8 @@ void CapturerLinux::DeinitXlib() {
     XFreeGC(display_, gc_);
     gc_ = NULL;
   }
+
+  x_server_pixel_buffer_.Release();
 
   if (display_) {
     if (damage_handle_)

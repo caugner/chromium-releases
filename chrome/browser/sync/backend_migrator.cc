@@ -7,12 +7,12 @@
 #include "base/message_loop.h"
 #include "base/string_number_conversions.h"
 #include "base/tracked_objects.h"
-#include "chrome/browser/sync/internal_api/configure_reason.h"
-#include "chrome/browser/sync/internal_api/read_transaction.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
+#include "sync/internal_api/configure_reason.h"
+#include "sync/internal_api/read_transaction.h"
 #include "sync/protocol/sync.pb.h"
 #include "sync/sessions/session_state.h"
 
@@ -20,7 +20,6 @@ using syncable::ModelTypeSet;
 
 namespace browser_sync {
 
-using sessions::SyncSessionSnapshot;
 using syncable::ModelTypeToString;
 
 MigrationObserver::~MigrationObserver() {}
@@ -28,12 +27,12 @@ MigrationObserver::~MigrationObserver() {}
 BackendMigrator::BackendMigrator(const std::string& name,
                                  sync_api::UserShare* user_share,
                                  ProfileSyncService* service,
-                                 DataTypeManager* manager)
+                                 DataTypeManager* manager,
+                                 const base::Closure &migration_done_callback)
     : name_(name), user_share_(user_share), service_(service),
       manager_(manager), state_(IDLE),
-      weak_ptr_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
-  registrar_.Add(this, chrome::NOTIFICATION_SYNC_CONFIGURE_DONE,
-                 content::Source<DataTypeManager>(manager_));
+      weak_ptr_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
+      migration_done_callback_(migration_done_callback) {
 }
 
 BackendMigrator::~BackendMigrator() {
@@ -120,22 +119,18 @@ void BackendMigrator::RestartMigration() {
   }
 }
 
-void BackendMigrator::Observe(int type,
-                              const content::NotificationSource& source,
-                              const content::NotificationDetails& details) {
-  DCHECK_EQ(chrome::NOTIFICATION_SYNC_CONFIGURE_DONE, type);
+void BackendMigrator::OnConfigureDone(
+    const DataTypeManager::ConfigureResult& result) {
   if (state_ == IDLE)
     return;
 
   // |manager_|'s methods aren't re-entrant, and we're notified from
   // them, so post a task to avoid problems.
-  SDVLOG(1) << "Posting OnConfigureDone from Observer";
+  SDVLOG(1) << "Posting OnConfigureDoneImpl";
   MessageLoop::current()->PostTask(
       FROM_HERE,
-      base::Bind(&BackendMigrator::OnConfigureDone,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 *content::Details<DataTypeManager::ConfigureResult>(
-                     details).ptr()));
+      base::Bind(&BackendMigrator::OnConfigureDoneImpl,
+                 weak_ptr_factory_.GetWeakPtr(), result));
 }
 
 namespace {
@@ -157,7 +152,7 @@ syncable::ModelTypeSet GetUnsyncedDataTypes(sync_api::UserShare* user_share) {
 
 }  // namespace
 
-void BackendMigrator::OnConfigureDone(
+void BackendMigrator::OnConfigureDoneImpl(
     const DataTypeManager::ConfigureResult& result) {
   SDVLOG(1) << "OnConfigureDone with requested types "
             << ModelTypeSetToString(result.requested_types)
@@ -221,6 +216,9 @@ void BackendMigrator::OnConfigureDone(
     SDVLOG(1) << "BackendMigrator: Migration complete for: "
               << syncable::ModelTypeSetToString(to_migrate_);
     to_migrate_.Clear();
+
+    if (!migration_done_callback_.is_null())
+      migration_done_callback_.Run();
   }
 }
 

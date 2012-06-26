@@ -71,19 +71,15 @@ class TestWebKitPlatformSupport :
   virtual WebKit::WebStorageNamespace* createLocalStorageNamespace(
       const WebKit::WebString& path, unsigned quota) OVERRIDE;
 
-  virtual void dispatchStorageEvent(const WebKit::WebString& key,
-      const WebKit::WebString& old_value, const WebKit::WebString& new_value,
-      const WebKit::WebString& origin, const WebKit::WebURL& url,
-      bool is_local_storage) OVERRIDE;
   virtual WebKit::WebIDBFactory* idbFactory() OVERRIDE;
   virtual void createIDBKeysFromSerializedValuesAndKeyPath(
       const WebKit::WebVector<WebKit::WebSerializedScriptValue>& values,
-      const WebKit::WebString& keyPath,
+      const WebKit::WebIDBKeyPath& keyPath,
       WebKit::WebVector<WebKit::WebIDBKey>& keys_out) OVERRIDE;
   virtual WebKit::WebSerializedScriptValue injectIDBKeyIntoSerializedValue(
       const WebKit::WebIDBKey& key,
       const WebKit::WebSerializedScriptValue& value,
-      const WebKit::WebString& keyPath) OVERRIDE;
+      const WebKit::WebIDBKeyPath& keyPath) OVERRIDE;
 
 #if defined(OS_WIN) || defined(OS_MACOSX)
   void SetThemeEngine(WebKit::WebThemeEngine* engine);

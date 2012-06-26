@@ -4,6 +4,7 @@
 
 #include "net/spdy/spdy_http_stream.h"
 
+#include "base/threading/sequenced_worker_pool.h"
 #include "crypto/ec_private_key.h"
 #include "crypto/ec_signature_creator.h"
 #include "crypto/signature_creator.h"
@@ -27,7 +28,7 @@ class SpdyHttpStreamSpdy3Test : public testing::Test {
   SpdyHttpStreamSpdy3Test() {}
 
   virtual void SetUp() {
-    SpdySession::set_default_protocol(SSLClientSocket::kProtoSPDY3);
+    SpdySession::set_default_protocol(kProtoSPDY3);
   }
 
   virtual void TearDown() {
@@ -289,7 +290,7 @@ SpdyFrame* ConstructCredentialRequestFrame(int slot, const GURL& url,
     SYN_STREAM,
     stream_id,
     0,
-    ConvertRequestPriorityToSpdyPriority(LOWEST),
+    ConvertRequestPriorityToSpdyPriority(LOWEST, 3),
     slot,
     CONTROL_FLAG_FIN,
     false,
@@ -383,7 +384,7 @@ void SpdyHttpStreamSpdy3Test::TestSendCredentials(
   SSLSocketDataProvider ssl(SYNCHRONOUS, OK);
   ssl.domain_bound_cert_type = type;
   ssl.server_bound_cert_service = server_bound_cert_service;
-  ssl.protocol_negotiated = SSLClientSocket::kProtoSPDY3;
+  ssl.protocol_negotiated = kProtoSPDY3;
   socket_factory->AddSSLSocketDataProvider(&ssl);
   http_session_ = SpdySessionDependencies::SpdyCreateSessionDeterministic(
       &session_deps_);
@@ -506,8 +507,11 @@ TEST_F(SpdyHttpStreamSpdy3Test, SendCredentialsEC) {
   crypto::ECSignatureCreator::SetFactoryForTesting(
       ec_signature_creator_factory.get());
 
+  scoped_refptr<base::SequencedWorkerPool> sequenced_worker_pool =
+      new base::SequencedWorkerPool(1, "SpdyHttpStreamSpdy3Test");
   scoped_ptr<ServerBoundCertService> server_bound_cert_service(
-      new ServerBoundCertService(new DefaultServerBoundCertStore(NULL)));
+      new ServerBoundCertService(new DefaultServerBoundCertStore(NULL),
+                                 sequenced_worker_pool));
   std::string cert;
   std::string proof;
   GetECServerBoundCertAndProof("http://www.gmail.com/",
@@ -516,6 +520,8 @@ TEST_F(SpdyHttpStreamSpdy3Test, SendCredentialsEC) {
 
   TestSendCredentials(server_bound_cert_service.get(), cert, proof,
                       CLIENT_CERT_ECDSA_SIGN);
+
+  sequenced_worker_pool->Shutdown();
 }
 
 #endif  // !defined(USE_OPENSSL)

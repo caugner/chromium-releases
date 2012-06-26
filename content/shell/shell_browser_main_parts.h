@@ -29,10 +29,10 @@ class ShellBrowserMainParts : public BrowserMainParts {
   explicit ShellBrowserMainParts(const content::MainFunctionParams& parameters);
   virtual ~ShellBrowserMainParts();
 
-  virtual void PreEarlyInitialization() OVERRIDE {}
+  // content::BrowserMainParts overrides.
+  virtual void PreEarlyInitialization() OVERRIDE;
   virtual void PostEarlyInitialization() OVERRIDE {}
   virtual void PreMainMessageLoopStart() OVERRIDE;
-  virtual MessageLoop* GetMainMessageLoop() OVERRIDE;
   virtual void PostMainMessageLoopStart() OVERRIDE {}
   virtual void ToolkitInitialized() OVERRIDE {}
   virtual int PreCreateThreads() OVERRIDE;

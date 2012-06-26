@@ -9,6 +9,7 @@
 #include <set>
 #include <vector>
 
+#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "chrome/browser/extensions/api/declarative/substring_set_matcher.h"
@@ -148,6 +149,9 @@ class URLMatcherConditionFactory {
   void ForgetUnusedPatterns(
       const std::set<SubstringPattern::ID>& used_patterns);
 
+  // Returns true if this object retains no allocated data. Only for debugging.
+  bool IsEmpty() const;
+
  private:
   // Creates a URLMatcherCondition according to the parameters passed.
   // The URLMatcherCondition will refer to a SubstringPattern that is
@@ -175,18 +179,59 @@ class URLMatcherConditionFactory {
   DISALLOW_COPY_AND_ASSIGN(URLMatcherConditionFactory);
 };
 
+// This class represents a filter for the URL scheme to be hooked up into a
+// URLMatcherConditionSet.
+class URLMatcherSchemeFilter {
+ public:
+  explicit URLMatcherSchemeFilter(const std::string& filter);
+  explicit URLMatcherSchemeFilter(const std::vector<std::string>& filters);
+  ~URLMatcherSchemeFilter();
+  bool IsMatch(const GURL& url) const;
+
+ private:
+  std::vector<std::string> filters_;
+
+  DISALLOW_COPY_AND_ASSIGN(URLMatcherSchemeFilter);
+};
+
+// This class represents a filter for port numbers to be hooked up into a
+// URLMatcherConditionSet.
+class URLMatcherPortFilter {
+ public:
+  // Boundaries of a port range (both ends are included).
+  typedef std::pair<int, int> Range;
+  explicit URLMatcherPortFilter(const std::vector<Range>& ranges);
+  ~URLMatcherPortFilter();
+  bool IsMatch(const GURL& url) const;
+
+  // Creates a port range [from, to]; both ends are included.
+  static Range CreateRange(int from, int to);
+  // Creates a port range containing a single port.
+  static Range CreateRange(int port);
+
+ private:
+  std::vector<Range> ranges_;
+
+  DISALLOW_COPY_AND_ASSIGN(URLMatcherPortFilter);
+};
+
 // This class represents a set of conditions that all need to match on a
 // given URL in order to be considered a match.
-class URLMatcherConditionSet {
+class URLMatcherConditionSet : public base::RefCounted<URLMatcherConditionSet> {
  public:
   typedef int ID;
   typedef std::set<URLMatcherCondition> Conditions;
+  typedef std::vector<scoped_refptr<URLMatcherConditionSet> > Vector;
 
-  URLMatcherConditionSet();
-  ~URLMatcherConditionSet();
+  // Matches if all conditions in |conditions| are fulfilled.
   URLMatcherConditionSet(ID id, const Conditions& conditions);
-  URLMatcherConditionSet(const URLMatcherConditionSet& rhs);
-  URLMatcherConditionSet& operator=(const URLMatcherConditionSet& rhs);
+
+  // Matches if all conditions in |conditions|, |scheme_filter| and
+  // |port_filter| are fulfilled. |scheme_filter| and |port_filter| may be NULL,
+  // in which case, no restrictions are imposed on the scheme/port of a URL.
+  URLMatcherConditionSet(ID id, const Conditions& conditions,
+                         scoped_ptr<URLMatcherSchemeFilter> scheme_filter,
+                         scoped_ptr<URLMatcherPortFilter> port_filter);
 
   ID id() const { return id_; }
   const Conditions& conditions() const { return conditions_; }
@@ -196,8 +241,14 @@ class URLMatcherConditionSet {
       const GURL& url) const;
 
  private:
+  friend class base::RefCounted<URLMatcherConditionSet>;
+  ~URLMatcherConditionSet();
   ID id_;
   Conditions conditions_;
+  scoped_ptr<URLMatcherSchemeFilter> scheme_filter_;
+  scoped_ptr<URLMatcherPortFilter> port_filter_;
+
+  DISALLOW_COPY_AND_ASSIGN(URLMatcherConditionSet);
 };
 
 // This class allows matching one URL against a large set of
@@ -212,14 +263,16 @@ class URLMatcher {
   // This is an expensive operation as it triggers pre-calculations on the
   // currently registered condition sets. Do not call this operation many
   // times with a single condition set in each call.
-  void AddConditionSets(
-      const std::vector<URLMatcherConditionSet>& condition_sets);
+  void AddConditionSets(const URLMatcherConditionSet::Vector& condition_sets);
 
   // Removes the listed condition sets. All |condition_set_ids| must be
   // currently registered. This function should be called with large batches
   // of |condition_set_ids| at a time to improve performance.
   void RemoveConditionSets(
       const std::vector<URLMatcherConditionSet::ID>& condition_set_ids);
+
+  // Removes all unused condition sets from the ConditionFactory.
+  void ClearUnusedConditionSets();
 
   // Returns the IDs of all URLMatcherConditionSet that match to this |url|.
   std::set<URLMatcherConditionSet::ID> MatchURL(const GURL& url);
@@ -229,6 +282,9 @@ class URLMatcher {
   URLMatcherConditionFactory* condition_factory() {
     return &condition_factory_;
   }
+
+  // Returns true if this object retains no allocated data. Only for debugging.
+  bool IsEmpty() const;
 
  private:
   void UpdateSubstringSetMatcher(bool full_url_conditions);
@@ -240,7 +296,8 @@ class URLMatcher {
 
   // Maps the ID of a URLMatcherConditionSet to the respective
   // URLMatcherConditionSet.
-  typedef std::map<URLMatcherConditionSet::ID, URLMatcherConditionSet>
+  typedef std::map<URLMatcherConditionSet::ID,
+                   scoped_refptr<URLMatcherConditionSet> >
       URLMatcherConditionSets;
   URLMatcherConditionSets url_matcher_condition_sets_;
 

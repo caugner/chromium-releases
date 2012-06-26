@@ -7,6 +7,7 @@
 #include <map>
 
 #include "base/lazy_instance.h"
+#include "base/memory/ref_counted_memory.h"
 #include "base/metrics/histogram.h"
 #include "base/string_util.h"
 #include "base/synchronization/lock.h"
@@ -17,7 +18,9 @@
 #include "chrome/browser/printing/print_preview_tab_controller.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
-#include "chrome/browser/ui/webui/html_dialog_ui.h"
+#include "chrome/browser/ui/webui/chrome_url_data_manager.h"
+#include "chrome/browser/ui/webui/web_dialog_delegate.h"
+#include "chrome/browser/ui/webui/web_dialog_ui.h"
 #include "chrome/browser/ui/webui/print_preview/print_preview_data_source.h"
 #include "chrome/browser/ui/webui/print_preview/print_preview_handler.h"
 #include "chrome/common/print_messages.h"
@@ -74,7 +77,7 @@ base::LazyInstance<PrintPreviewRequestIdMapWithLock>
 }  // namespace
 
 PrintPreviewUI::PrintPreviewUI(content::WebUI* web_ui)
-    : ConstrainedHtmlUI(web_ui),
+    : ConstrainedWebDialogUI(web_ui),
       initial_preview_start_time_(base::TimeTicks::Now()),
       handler_(NULL),
       source_is_modifiable_(true),
@@ -85,7 +88,7 @@ PrintPreviewUI::PrintPreviewUI(content::WebUI* web_ui)
 
   // Set up the chrome://print/ data source.
   Profile* profile = Profile::FromWebUI(web_ui);
-  profile->GetChromeURLDataManager()->AddDataSource(
+  ChromeURLDataManager::AddDataSource(profile,
       new PrintPreviewDataSource(is_dummy_));
   if (is_dummy_)
     return;
@@ -108,12 +111,13 @@ PrintPreviewUI::~PrintPreviewUI() {
 
 void PrintPreviewUI::GetPrintPreviewDataForIndex(
     int index,
-    scoped_refptr<RefCountedBytes>* data) {
+    scoped_refptr<base::RefCountedBytes>* data) {
   print_preview_data_service()->GetDataEntry(preview_ui_addr_str_, index, data);
 }
 
-void PrintPreviewUI::SetPrintPreviewDataForIndex(int index,
-                                                 const RefCountedBytes* data) {
+void PrintPreviewUI::SetPrintPreviewDataForIndex(
+    int index,
+    const base::RefCountedBytes* data) {
   print_preview_data_service()->SetDataEntry(preview_ui_addr_str_, index, data);
 }
 
@@ -305,7 +309,7 @@ void PrintPreviewUI::OnHidePreviewTab() {
   if (background_printing_manager->HasPrintPreviewTab(preview_tab))
     return;
 
-  ConstrainedHtmlUIDelegate* delegate = GetConstrainedDelegate();
+  ConstrainedWebDialogDelegate* delegate = GetConstrainedDelegate();
   if (!delegate)
     return;
   delegate->ReleaseTabContentsOnDialogClose();
@@ -317,10 +321,10 @@ void PrintPreviewUI::OnClosePrintPreviewTab() {
   if (tab_closed_)
     return;
   tab_closed_ = true;
-  ConstrainedHtmlUIDelegate* delegate = GetConstrainedDelegate();
+  ConstrainedWebDialogDelegate* delegate = GetConstrainedDelegate();
   if (!delegate)
     return;
-  delegate->GetHtmlDialogUIDelegate()->OnDialogClosed("");
+  delegate->GetWebDialogDelegate()->OnDialogClosed("");
   delegate->OnDialogCloseFromWebUI();
 }
 

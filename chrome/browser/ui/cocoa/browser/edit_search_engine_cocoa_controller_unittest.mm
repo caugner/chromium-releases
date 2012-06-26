@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -206,12 +206,13 @@ TEST_F(EditSearchEngineControllerTest, ValidateFields) {
 
 // Tests editing an existing TemplateURL.
 TEST_F(EditSearchEngineControllerTest, EditTemplateURL) {
-  TemplateURL url;
-  url.set_short_name(ASCIIToUTF16("Foobar"));
-  url.set_keyword(ASCIIToUTF16("keyword"));
+  TemplateURLData data;
+  data.short_name = ASCIIToUTF16("Foobar");
+  data.SetKeyword(ASCIIToUTF16("keyword"));
   std::string urlString = TemplateURLRef::DisplayURLToURLRef(
       ASCIIToUTF16("http://foo-bar.com"));
-  url.SetURL(urlString, 0, 1);
+  data.SetURL(urlString);
+  TemplateURL url(profile(), data);
   FakeEditSearchEngineController *controller =
       [[FakeEditSearchEngineController alloc] initWithProfile:profile()
                                                      delegate:nil

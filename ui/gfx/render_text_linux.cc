@@ -359,7 +359,10 @@ void RenderTextLinux::SetupPangoAttributes(PangoLayout* layout) {
 void RenderTextLinux::DrawVisualText(Canvas* canvas) {
   DCHECK(layout_);
 
-  Point offset(GetOriginForSkiaDrawing());
+  Point offset(GetOriginForDrawing());
+  // Skia will draw glyphs with respect to the baseline.
+  offset.Offset(0, PANGO_PIXELS(pango_layout_get_baseline(layout_)));
+
   SkScalar x = SkIntToScalar(offset.x());
   SkScalar y = SkIntToScalar(offset.y());
 
@@ -382,6 +385,7 @@ void RenderTextLinux::DrawVisualText(Canvas* canvas) {
 
   internal::SkiaTextRenderer renderer(canvas);
   ApplyFadeEffects(&renderer);
+  ApplyTextShadows(&renderer);
   renderer.SetFontSmoothingSettings(
       true /* enable_smoothing */,
       IsSubpixelRenderingEnabledInFontConfig() && !background_is_transparent());

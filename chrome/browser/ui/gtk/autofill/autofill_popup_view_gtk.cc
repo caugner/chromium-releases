@@ -4,10 +4,14 @@
 
 #include "autofill_popup_view_gtk.h"
 
+#include <gdk/gdkkeysyms.h>
+
 #include "base/logging.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autofill/autofill_external_delegate.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
+#include "content/public/browser/render_view_host.h"
+#include "content/public/browser/web_contents.h"
 #include "ui/base/gtk/gtk_compat.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/gtk/gtk_windowing.h"
@@ -43,7 +47,8 @@ AutofillPopupViewGtk::AutofillPopupViewGtk(
     GtkWidget* parent)
     : AutofillPopupView(web_contents, external_delegate),
       parent_(parent),
-      window_(gtk_window_new(GTK_WINDOW_POPUP)) {
+      window_(gtk_window_new(GTK_WINDOW_POPUP)),
+      render_view_host_(web_contents->GetRenderViewHost()) {
   CHECK(parent != NULL);
   gtk_window_set_resizable(GTK_WINDOW(window_), FALSE);
   gtk_widget_set_app_paintable(window_, TRUE);
@@ -74,34 +79,12 @@ AutofillPopupViewGtk::~AutofillPopupViewGtk() {
 }
 
 void AutofillPopupViewGtk::ShowInternal() {
-  // Find out the maximum bounds required by the popup.
-  // TODO(csharp): Once the icon is also displayed it will affect the required
-  // size so it will need to be included in the calculation.
-  int popup_width = element_bounds().width();
-  DCHECK_EQ(autofill_values().size(), autofill_labels().size());
-  for (size_t i = 0; i < autofill_values().size(); ++i) {
-    popup_width = std::max(popup_width,
-                           font_.GetStringWidth(autofill_values()[i]) +
-                           kMiddlePadding +
-                           font_.GetStringWidth(autofill_labels()[i]));
-  }
-
-  gint origin_x, origin_y;
-  gdk_window_get_origin(gtk_widget_get_window(parent_), &origin_x, &origin_y);
-
-  // Move the popup to appear right below the text field it is using.
-  bounds_.SetRect(
-      origin_x + element_bounds().x(),
-      origin_y + element_bounds().y() + element_bounds().height(),
-      popup_width,
-      row_height_ * autofill_values().size());
-
+  SetBounds();
   gtk_window_move(GTK_WINDOW(window_), bounds_.x(), bounds_.y());
 
-  gtk_widget_set_size_request(
-      window_,
-      popup_width,
-      row_height_ * autofill_values().size());
+  ResizePopup();
+
+  render_view_host_->AddKeyboardListener(this);
 
   gtk_widget_show(window_);
 
@@ -111,6 +94,8 @@ void AutofillPopupViewGtk::ShowInternal() {
 }
 
 void AutofillPopupViewGtk::HideInternal() {
+  render_view_host_->RemoveKeyboardListener(this);
+
   gtk_widget_hide(window_);
 }
 
@@ -121,19 +106,22 @@ void AutofillPopupViewGtk::InvalidateRow(size_t row) {
   gdk_window_invalidate_rect(gdk_window, &row_rect, FALSE);
 }
 
+void AutofillPopupViewGtk::ResizePopup() {
+  gtk_widget_set_size_request(
+      window_,
+      GetPopupRequiredWidth(),
+      row_height_ * autofill_values().size());
+}
+
 gboolean AutofillPopupViewGtk::HandleButtonRelease(GtkWidget* widget,
                                                    GdkEventButton* event) {
   // We only care about the left click.
   if (event->button != 1)
     return FALSE;
 
-  size_t line = LineFromY(event->y);
-  DCHECK_LT(line, autofill_values().size());
+  DCHECK_EQ(selected_line(), LineFromY(event->y));
 
-  external_delegate()->DidAcceptAutofillSuggestions(
-      autofill_values()[line],
-      autofill_unique_ids()[line],
-      line);
+  AcceptSelectedLine();
 
   return TRUE;
 }
@@ -169,7 +157,7 @@ gboolean AutofillPopupViewGtk::HandleExpose(GtkWidget* widget,
     if (!line_rect.Intersects(damage_rect))
       continue;
 
-    if (separator_index() == static_cast<int>(i)) {
+    if (IsSeparatorIndex(i)) {
       int line_y = i * row_height_;
 
       cairo_save(cr);
@@ -224,6 +212,37 @@ gboolean AutofillPopupViewGtk::HandleMotion(GtkWidget* widget,
   return TRUE;
 }
 
+bool AutofillPopupViewGtk::HandleKeyPressEvent(GdkEventKey* event) {
+  // Filter modifier to only include accelerator modifiers.
+  guint modifier = event->state & gtk_accelerator_get_default_mod_mask();
+
+  switch (event->keyval) {
+    case GDK_Up:
+      SelectPreviousLine();
+      return true;
+    case GDK_Down:
+      SelectNextLine();
+      return true;
+    case GDK_Page_Up:
+      SetSelectedLine(0);
+      return true;
+    case GDK_Page_Down:
+      SetSelectedLine(autofill_values().size() - 1);
+      return true;
+    case GDK_Escape:
+      Hide();
+      return true;
+    case GDK_Delete:
+    case GDK_KP_Delete:
+      return (modifier == GDK_SHIFT_MASK) && RemoveSelectedLine();
+    case GDK_Return:
+    case GDK_KP_Enter:
+      return AcceptSelectedLine();
+  }
+
+  return false;
+}
+
 void AutofillPopupViewGtk::SetupLayout(const gfx::Rect& window_rect,
                                        const GdkColor& text_color) {
   int allocated_content_width = window_rect.width();
@@ -240,6 +259,50 @@ void AutofillPopupViewGtk::SetupLayout(const gfx::Rect& window_rect,
 
   pango_layout_set_attributes(layout_, attrs);  // Ref taken.
   pango_attr_list_unref(attrs);
+}
+
+void AutofillPopupViewGtk::SetBounds() {
+  gint origin_x, origin_y;
+  gdk_window_get_origin(gtk_widget_get_window(parent_), &origin_x, &origin_y);
+
+  GdkScreen* screen = gtk_widget_get_screen(parent_);
+  gint screen_height = gdk_screen_get_height(screen);
+
+  int bottom_of_field = origin_y + element_bounds().y() +
+      element_bounds().height();
+  int popup_size =  row_height_ * autofill_values().size();
+
+  // Find the correct top position of the popup so that is doesn't go off
+  // the screen.
+  int top_of_popup = 0;
+  if (screen_height < bottom_of_field + popup_size) {
+    // The popup must appear above the field.
+    top_of_popup = origin_y + element_bounds().y() - popup_size;
+  } else {
+    // The popup can appear below the field.
+    top_of_popup = bottom_of_field;
+  }
+
+  bounds_.SetRect(
+      origin_x + element_bounds().x(),
+      top_of_popup,
+      GetPopupRequiredWidth(),
+      popup_size);
+}
+
+int AutofillPopupViewGtk::GetPopupRequiredWidth() {
+  // TODO(csharp): Once the icon is also displayed it will affect the required
+  // size so it will need to be included in the calculation.
+  int popup_width = element_bounds().width();
+  DCHECK_EQ(autofill_values().size(), autofill_labels().size());
+  for (size_t i = 0; i < autofill_values().size(); ++i) {
+    popup_width = std::max(popup_width,
+                           font_.GetStringWidth(autofill_values()[i]) +
+                           kMiddlePadding +
+                           font_.GetStringWidth(autofill_labels()[i]));
+  }
+
+  return popup_width;
 }
 
 int AutofillPopupViewGtk::LineFromY(int y) {

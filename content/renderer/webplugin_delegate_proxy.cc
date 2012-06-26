@@ -4,7 +4,7 @@
 
 #include "content/renderer/webplugin_delegate_proxy.h"
 
-#if defined(TOOLKIT_USES_GTK)
+#if defined(TOOLKIT_GTK)
 #include <gtk/gtk.h>
 #elif defined(USE_X11)
 #include <cairo/cairo.h>
@@ -18,6 +18,7 @@
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/process.h"
 #include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
@@ -49,6 +50,7 @@
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/plugins/npapi/plugin_group.h"
 #include "webkit/plugins/npapi/webplugin.h"
+#include "webkit/plugins/plugin_constants.h"
 #include "webkit/plugins/sad_plugin.h"
 
 #if defined(OS_POSIX)
@@ -57,6 +59,10 @@
 
 #if defined(OS_MACOSX)
 #include "base/mac/mac_util.h"
+#endif
+
+#if defined(OS_WIN)
+#include "content/public/common/sandbox_init.h"
 #endif
 
 using WebKit::WebBindings;
@@ -483,7 +489,8 @@ void WebPluginDelegateProxy::OnChannelError() {
 
 static void CopyTransportDIBHandleForMessage(
     const TransportDIB::Handle& handle_in,
-    TransportDIB::Handle* handle_out) {
+    TransportDIB::Handle* handle_out,
+    base::ProcessId peer_pid) {
 #if defined(OS_MACOSX)
   // On Mac, TransportDIB::Handle is typedef'ed to FileDescriptor, and
   // FileDescriptor message fields needs to remain valid until the message is
@@ -493,6 +500,12 @@ static void CopyTransportDIBHandleForMessage(
     return;
   }
   handle_out->auto_close = true;
+#elif defined(OS_WIN)
+  // On Windows we need to duplicate the handle for the plugin process.
+  *handle_out = NULL;
+  content::BrokerDuplicateHandle(handle_in, peer_pid, handle_out,
+                                 FILE_MAP_READ | FILE_MAP_WRITE, 0);
+  DCHECK(*handle_out != NULL);
 #else
   // Don't need to do anything special for other platforms.
   *handle_out = handle_in;
@@ -519,15 +532,18 @@ void WebPluginDelegateProxy::SendUpdateGeometry(
   {
     if (transport_stores_[0].dib.get())
       CopyTransportDIBHandleForMessage(transport_stores_[0].dib->handle(),
-                                       &param.windowless_buffer0);
+                                       &param.windowless_buffer0,
+                                       channel_host_->peer_pid());
 
     if (transport_stores_[1].dib.get())
       CopyTransportDIBHandleForMessage(transport_stores_[1].dib->handle(),
-                                       &param.windowless_buffer1);
+                                       &param.windowless_buffer1,
+                                       channel_host_->peer_pid());
 
     if (background_store_.dib.get())
       CopyTransportDIBHandleForMessage(background_store_.dib->handle(),
-                                       &param.background_buffer);
+                                       &param.background_buffer,
+                                       channel_host_->peer_pid());
   }
 
   IPC::Message* msg;
@@ -549,10 +565,11 @@ void WebPluginDelegateProxy::UpdateGeometry(const gfx::Rect& window_rect,
   // window_rect becomes either a window in native windowing system
   // coords, or a backing buffer.  In either case things will go bad
   // if the rectangle is very large.
-  if (window_rect.width() < 0  || window_rect.width() > (1<<15) ||
-      window_rect.height() < 0 || window_rect.height() > (1<<15) ||
-      // Clip to 8m pixels; we know this won't overflow due to above checks.
-      window_rect.width() * window_rect.height() > (8<<20)) {
+  if (window_rect.width() < 0  || window_rect.width() > kMaxPluginSideLength ||
+      window_rect.height() < 0 || window_rect.height() > kMaxPluginSideLength ||
+      // We know this won't overflow due to above checks.
+      static_cast<uint32>(window_rect.width()) *
+          static_cast<uint32>(window_rect.height()) > kMaxPluginSize) {
     return;
   }
 

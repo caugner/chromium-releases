@@ -8,11 +8,15 @@
 #include "content/common/indexed_db/indexed_db_messages.h"
 #include "content/common/indexed_db/proxy_webidbtransaction_impl.h"
 #include "content/common/child_thread.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBKeyPath.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebVector.h"
 
+using content::IndexedDBKeyPath;
+using content::IndexedDBKeyRange;
 using WebKit::WebExceptionCode;
 using WebKit::WebDOMStringList;
+using WebKit::WebIDBKeyPath;
 using WebKit::WebString;
 using WebKit::WebVector;
 
@@ -43,8 +47,8 @@ WebString RendererWebIDBIndexImpl::storeName() const {
   return result;
 }
 
-WebString RendererWebIDBIndexImpl::keyPath() const {
-  NullableString16 result;
+WebIDBKeyPath RendererWebIDBIndexImpl::keyPath() const {
+  IndexedDBKeyPath result;
   IndexedDBDispatcher::Send(
       new IndexedDBHostMsg_IndexKeyPath(idb_index_id_, &result));
   return result;
@@ -100,23 +104,25 @@ void RendererWebIDBIndexImpl::count(
 }
 
 void RendererWebIDBIndexImpl::getObject(
-    const WebKit::WebIDBKey& key,
+    const WebKit::WebIDBKeyRange& key_range,
     WebKit::WebIDBCallbacks* callbacks,
     const WebKit::WebIDBTransaction& transaction,
     WebExceptionCode& ec) {
   IndexedDBDispatcher* dispatcher =
       IndexedDBDispatcher::ThreadSpecificInstance();
   dispatcher->RequestIDBIndexGetObject(
-      IndexedDBKey(key), callbacks, idb_index_id_, transaction, &ec);
+      IndexedDBKeyRange(key_range), callbacks, idb_index_id_,
+      transaction, &ec);
 }
 
 void RendererWebIDBIndexImpl::getKey(
-    const WebKit::WebIDBKey& key,
+    const WebKit::WebIDBKeyRange& key_range,
     WebKit::WebIDBCallbacks* callbacks,
     const WebKit::WebIDBTransaction& transaction,
     WebExceptionCode& ec) {
   IndexedDBDispatcher* dispatcher =
       IndexedDBDispatcher::ThreadSpecificInstance();
   dispatcher->RequestIDBIndexGetKey(
-      IndexedDBKey(key), callbacks, idb_index_id_, transaction, &ec);
+      IndexedDBKeyRange(key_range), callbacks, idb_index_id_,
+      transaction, &ec);
 }

@@ -92,7 +92,7 @@ int TaskManagerTableModel::RowCount() {
 
 string16 TaskManagerTableModel::GetText(int row, int col_id) {
   switch (col_id) {
-    case IDS_TASK_MANAGER_PAGE_COLUMN:  // Process
+    case IDS_TASK_MANAGER_TASK_COLUMN:  // Process
       return model_->GetResourceTitle(row);
 
     case IDS_TASK_MANAGER_PROFILE_NAME_COLUMN:  // Profile Name
@@ -354,7 +354,7 @@ class TaskManagerView : public views::ButtonListener,
   bool highlight_background_resources_;
 
   // We need to own the text of the menu, the Windows API does not copy it.
-  std::wstring always_on_top_menu_text_;
+  string16 always_on_top_menu_text_;
 
   // An open Task manager window. There can only be one open at a time. This
   // is reset to NULL when the window is closed.
@@ -385,7 +385,7 @@ void TaskManagerView::Init() {
   table_model_.reset(new TaskManagerTableModel(model_));
 
   // Page column has no header label.
-  columns_.push_back(ui::TableColumn(IDS_TASK_MANAGER_PAGE_COLUMN,
+  columns_.push_back(ui::TableColumn(IDS_TASK_MANAGER_TASK_COLUMN,
                                      ui::TableColumn::LEFT, -1, 1));
   columns_.back().sortable = true;
   columns_.push_back(ui::TableColumn(IDS_TASK_MANAGER_PROFILE_NAME_COLUMN,
@@ -460,10 +460,10 @@ void TaskManagerView::Init() {
   if (CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kPurgeMemoryButton)) {
     purge_memory_button_ = new views::NativeTextButton(this,
-        UTF16ToWide(l10n_util::GetStringUTF16(IDS_TASK_MANAGER_PURGE_MEMORY)));
+        l10n_util::GetStringUTF16(IDS_TASK_MANAGER_PURGE_MEMORY));
   }
   kill_button_ = new views::NativeTextButton(
-      this, UTF16ToWide(l10n_util::GetStringUTF16(IDS_TASK_MANAGER_KILL)));
+      this, l10n_util::GetStringUTF16(IDS_TASK_MANAGER_KILL));
   kill_button_->AddAccelerator(ui::Accelerator(ui::VKEY_E, false, false,
                                                false));
   kill_button_->SetAccessibleKeyboardShortcut(L"E");
@@ -603,7 +603,7 @@ void TaskManagerView::ButtonPressed(
   if (purge_memory_button_ && (sender == purge_memory_button_)) {
     MemoryPurger::PurgeAll();
   } else {
-    DCHECK_EQ(sender, kill_button_);
+    DCHECK_EQ(kill_button_, sender);
     for (views::TableSelectionIterator iter  = tab_table_->SelectionBegin();
          iter != tab_table_->SelectionEnd(); ++iter)
       task_manager_->KillProcess(*iter);
@@ -747,8 +747,7 @@ void TaskManagerView::ActivateFocusedTab() {
 void TaskManagerView::AddAlwaysOnTopSystemMenuItem() {
 #if defined(OS_WIN) && !defined(USE_AURA)
   // The Win32 API requires that we own the text.
-  always_on_top_menu_text_ =
-      UTF16ToWide(l10n_util::GetStringUTF16(IDS_ALWAYS_ON_TOP));
+  always_on_top_menu_text_ = l10n_util::GetStringUTF16(IDS_ALWAYS_ON_TOP);
 
   // Let's insert a menu to the window.
   HMENU system_menu = ::GetSystemMenu(GetWidget()->GetNativeWindow(), FALSE);

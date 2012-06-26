@@ -6,6 +6,9 @@
 #define CONTENT_TEST_TEST_CONTENT_CLIENT_H_
 #pragma once
 
+#include <string>
+#include <vector>
+
 #include "base/compiler_specific.h"
 #include "content/public/common/content_client.h"
 #include "ui/base/resource/data_pack.h"
@@ -22,9 +25,12 @@ class TestContentClient : public content::ContentClient {
       std::vector<content::PepperPluginInfo>* plugins) OVERRIDE;
   virtual void AddNPAPIPlugins(
       webkit::npapi::PluginList* plugin_list) OVERRIDE;
+  virtual void AddAdditionalSchemes(
+      std::vector<std::string>* standard_schemes,
+      std::vector<std::string>* savable_schemes) OVERRIDE;
   virtual bool HasWebUIScheme(const GURL& url) const OVERRIDE;
   virtual bool CanHandleWhileSwappedOut(const IPC::Message& msg) OVERRIDE;
-  virtual std::string GetUserAgent(bool* overriding) const OVERRIDE;
+  virtual std::string GetUserAgent() const OVERRIDE;
   virtual string16 GetLocalizedString(int message_id) const OVERRIDE;
   virtual base::StringPiece GetDataResource(int resource_id) const OVERRIDE;
 #if defined(OS_WIN)

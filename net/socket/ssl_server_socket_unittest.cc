@@ -28,11 +28,12 @@
 #include "crypto/rsa_private_key.h"
 #include "net/base/address_list.h"
 #include "net/base/cert_status_flags.h"
-#include "net/base/cert_verifier.h"
+#include "net/base/cert_test_util.h"
 #include "net/base/completion_callback.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/io_buffer.h"
 #include "net/base/ip_endpoint.h"
+#include "net/base/mock_cert_verifier.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_log.h"
 #include "net/base/ssl_config_service.h"
@@ -56,8 +57,7 @@ class FakeDataChannel {
         ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
   }
 
-  virtual int Read(IOBuffer* buf, int buf_len,
-                   const CompletionCallback& callback) {
+  int Read(IOBuffer* buf, int buf_len, const CompletionCallback& callback) {
     if (data_.empty()) {
       read_callback_ = callback;
       read_buf_ = buf;
@@ -67,8 +67,7 @@ class FakeDataChannel {
     return PropogateData(buf, buf_len);
   }
 
-  virtual int Write(IOBuffer* buf, int buf_len,
-                    const CompletionCallback& callback) {
+  int Write(IOBuffer* buf, int buf_len, const CompletionCallback& callback) {
     data_.push(new net::DrainableIOBuffer(buf, buf_len));
     MessageLoop::current()->PostTask(
         FROM_HERE, base::Bind(&FakeDataChannel::DoReadCallback,
@@ -193,6 +192,10 @@ class FakeSocket : public StreamSocket {
     return base::TimeDelta::FromMicroseconds(-1);
   }
 
+  virtual NextProto GetNegotiatedProtocol() const {
+    return kProtoUnknown;
+  }
+
  private:
   net::BoundNetLog net_log_;
   FakeDataChannel* incoming_;
@@ -246,7 +249,8 @@ class SSLServerSocketTest : public PlatformTest {
  public:
   SSLServerSocketTest()
       : socket_factory_(net::ClientSocketFactory::GetDefaultFactory()),
-        cert_verifier_(net::CertVerifier::CreateDefault()) {
+        cert_verifier_(new MockCertVerifier()) {
+    cert_verifier_->set_default_result(net::CERT_STATUS_AUTHORITY_INVALID);
   }
 
  protected:
@@ -254,12 +258,7 @@ class SSLServerSocketTest : public PlatformTest {
     FakeSocket* fake_client_socket = new FakeSocket(&channel_1_, &channel_2_);
     FakeSocket* fake_server_socket = new FakeSocket(&channel_2_, &channel_1_);
 
-    FilePath certs_dir;
-    PathService::Get(base::DIR_SOURCE_ROOT, &certs_dir);
-    certs_dir = certs_dir.AppendASCII("net");
-    certs_dir = certs_dir.AppendASCII("data");
-    certs_dir = certs_dir.AppendASCII("ssl");
-    certs_dir = certs_dir.AppendASCII("certificates");
+    FilePath certs_dir(GetTestCertsDirectory());
 
     FilePath cert_path = certs_dir.AppendASCII("unittest.selfsigned.der");
     std::string cert_der;
@@ -308,7 +307,7 @@ class SSLServerSocketTest : public PlatformTest {
   scoped_ptr<net::SSLClientSocket> client_socket_;
   scoped_ptr<net::SSLServerSocket> server_socket_;
   net::ClientSocketFactory* socket_factory_;
-  scoped_ptr<net::CertVerifier> cert_verifier_;
+  scoped_ptr<net::MockCertVerifier> cert_verifier_;
 };
 
 // SSLServerSocket is only implemented using NSS.
@@ -459,14 +458,14 @@ TEST_F(SSLServerSocketTest, ExportKeyingMaterial) {
   int rv = server_socket_->ExportKeyingMaterial(kKeyingLabel,
                                                 false, kKeyingContext,
                                                 server_out, sizeof(server_out));
-  ASSERT_EQ(rv, net::OK);
+  ASSERT_EQ(net::OK, rv);
 
   unsigned char client_out[kKeyingMaterialSize];
   rv = client_socket_->ExportKeyingMaterial(kKeyingLabel,
                                             false, kKeyingContext,
                                             client_out, sizeof(client_out));
-  ASSERT_EQ(rv, net::OK);
-  EXPECT_TRUE(memcmp(server_out, client_out, sizeof(server_out)) == 0);
+  ASSERT_EQ(net::OK, rv);
+  EXPECT_EQ(0, memcmp(server_out, client_out, sizeof(server_out)));
 
   const char* kKeyingLabelBad = "EXPERIMENTAL-server-socket-test-bad";
   unsigned char client_bad[kKeyingMaterialSize];
@@ -474,7 +473,7 @@ TEST_F(SSLServerSocketTest, ExportKeyingMaterial) {
                                             false, kKeyingContext,
                                             client_bad, sizeof(client_bad));
   ASSERT_EQ(rv, net::OK);
-  EXPECT_TRUE(memcmp(server_out, client_bad, sizeof(server_out)) != 0);
+  EXPECT_NE(0, memcmp(server_out, client_bad, sizeof(server_out)));
 }
 #endif
 

@@ -41,8 +41,9 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #endif  // OS_MACOSX
 
-#if defined(OS_MACOSX)
 namespace {
+
+#if defined(OS_MACOSX)
 
 CFArrayRef ChromeTISCreateInputSourceList(
    CFDictionaryRef properties,
@@ -68,37 +69,62 @@ void InstallFrameworkHacks() {
   }
 }
 
-}  // namespace
 #endif  // OS_MACOSX
+
+#if defined(OS_POSIX)
+
+class SuicideOnChannelErrorFilter : public IPC::ChannelProxy::MessageFilter {
+ public:
+  // IPC::ChannelProxy::MessageFilter
+  virtual void OnChannelError() OVERRIDE {
+    // On POSIX, at least, one can install an unload handler which loops
+    // forever and leave behind a renderer process which eats 100% CPU forever.
+    //
+    // This is because the terminate signals (ViewMsg_ShouldClose and the error
+    // from the IPC channel) are routed to the main message loop but never
+    // processed (because that message loop is stuck in V8).
+    //
+    // One could make the browser SIGKILL the renderers, but that leaves open a
+    // large window where a browser failure (or a user, manually terminating
+    // the browser because "it's stuck") will leave behind a process eating all
+    // the CPU.
+    //
+    // So, we install a filter on the channel so that we can process this event
+    // here and kill the process.
+    //
+    // We want to kill this process after giving it 30 seconds to run the exit
+    // handlers. SIGALRM has a default disposition of terminating the
+    // application.
+#if defined(OS_POSIX)
+    if (CommandLine::ForCurrentProcess()->
+        HasSwitch(switches::kRendererCleanExit))
+      alarm(30);
+    else
+#endif
+      _exit(0);
+  }
+
+ protected:
+  virtual ~SuicideOnChannelErrorFilter() {}
+};
+
+#endif  // OS(POSIX)
+
+}  // namespace
 
 // This function provides some ways to test crash and assertion handling
 // behavior of the renderer.
 static void HandleRendererErrorTestParameters(const CommandLine& command_line) {
-  // This parameter causes an assertion.
-  if (command_line.HasSwitch(switches::kRendererAssertTest)) {
-    DCHECK(false);
-  }
-
-
-#if !defined(OFFICIAL_BUILD)
-  // This parameter causes an assertion too.
-  if (command_line.HasSwitch(switches::kRendererCheckFalseTest)) {
-    CHECK(false);
-  }
-#endif  // !defined(OFFICIAL_BUILD)
-
-
-  // This parameter causes a null pointer crash (crash reporter trigger).
-  if (command_line.HasSwitch(switches::kRendererCrashTest)) {
-    int* bad_pointer = NULL;
-    *bad_pointer = 0;
-  }
-
   if (command_line.HasSwitch(switches::kWaitForDebugger))
     base::debug::WaitForDebugger(60, true);
 
   if (command_line.HasSwitch(switches::kRendererStartupDialog))
     ChildProcess::WaitForDebugger("Renderer");
+
+  // This parameter causes an assertion.
+  if (command_line.HasSwitch(switches::kRendererAssertTest)) {
+    DCHECK(false);
+  }
 }
 
 // This is a simplified version of the browser Jankometer, which measures
@@ -200,10 +226,10 @@ int RendererMain(const content::MainFunctionParams& parameters) {
   // one-time randomized trials; they should be created in the browser process.
   base::FieldTrialList field_trial(EmptyString());
   // Ensure any field trials in browser are reflected into renderer.
-  if (parsed_command_line.HasSwitch(switches::kForceFieldTestNameAndValue)) {
+  if (parsed_command_line.HasSwitch(switches::kForceFieldTrials)) {
     std::string persistent = parsed_command_line.GetSwitchValueASCII(
-        switches::kForceFieldTestNameAndValue);
-    bool ret = field_trial.CreateTrialsInChildProcess(persistent);
+        switches::kForceFieldTrials);
+    bool ret = base::FieldTrialList::CreateTrialsFromString(persistent);
     DCHECK(ret);
   }
 
@@ -226,6 +252,10 @@ int RendererMain(const content::MainFunctionParams& parameters) {
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
     RenderProcessImpl render_process;
     new RenderThreadImpl();
+#endif
+
+#if defined(OS_POSIX)
+    RenderThreadImpl::current()->AddFilter(new SuicideOnChannelErrorFilter());
 #endif
 
     platform.RunSandboxTests();

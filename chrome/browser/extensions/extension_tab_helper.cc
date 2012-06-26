@@ -137,6 +137,8 @@ bool ExtensionTabHelper::OnMessageReceived(const IPC::Message& message) {
                         OnInlineWebstoreInstall)
     IPC_MESSAGE_HANDLER(ExtensionHostMsg_GetAppNotifyChannel,
                         OnGetAppNotifyChannel)
+    IPC_MESSAGE_HANDLER(ExtensionHostMsg_GetAppInstallState,
+                        OnGetAppInstallState);
     IPC_MESSAGE_HANDLER(ExtensionHostMsg_Request, OnRequest)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
@@ -223,6 +225,28 @@ void ExtensionTabHelper::OnGetAppNotifyChannel(
   // We'll get called back in AppNotifyChannelSetupComplete.
 }
 
+void ExtensionTabHelper::OnGetAppInstallState(const GURL& requestor_url,
+                                              int return_route_id,
+                                              int callback_id) {
+  Profile* profile =
+      Profile::FromBrowserContext(web_contents()->GetBrowserContext());
+  ExtensionService* extension_service = profile->GetExtensionService();
+  const ExtensionSet* extensions = extension_service->extensions();
+  const ExtensionSet* disabled = extension_service->disabled_extensions();
+
+  ExtensionURLInfo url(requestor_url);
+  std::string state;
+  if (extensions->GetHostedAppByURL(url))
+    state = extension_misc::kAppStateInstalled;
+  else if (disabled->GetHostedAppByURL(url))
+    state = extension_misc::kAppStateDisabled;
+  else
+    state = extension_misc::kAppStateNotInstalled;
+
+  Send(new ExtensionMsg_GetAppInstallStateResponse(
+      return_route_id, state, callback_id));
+}
+
 void ExtensionTabHelper::AppNotifyChannelSetupComplete(
     const std::string& channel_id,
     const std::string& error,
@@ -296,12 +320,13 @@ void ExtensionTabHelper::OnImageLoaded(const gfx::Image& image,
   }
 }
 
-Browser* ExtensionTabHelper::GetBrowser() {
+ExtensionWindowController*
+ExtensionTabHelper::GetExtensionWindowController() const  {
   content::WebContents* contents = web_contents();
   TabContentsIterator tab_iterator;
   for (; !tab_iterator.done(); ++tab_iterator) {
     if (contents == (*tab_iterator)->web_contents())
-      return tab_iterator.browser();
+      return tab_iterator.browser()->extension_window_controller();
   }
 
   return NULL;

@@ -7,7 +7,7 @@
 #pragma once
 
 #include "base/message_loop.h"
-#include "ui/aura/cursor.h"
+#include "ui/base/cursor/cursor.h"
 #include "ui/gfx/native_widget_types.h"
 
 namespace gfx {
@@ -34,9 +34,15 @@ class RootWindowHost {
   // (gfx::Screen only reports on the virtual desktop exposed by Aura.)
   static gfx::Size GetNativeScreenSize();
 
+  // Returns the RootWindowHost for the specified accelerated widget, or NULL if
+  // there is none associated.
+  static RootWindowHost* GetForAcceleratedWidget(
+      gfx::AcceleratedWidget accelerated_widget);
+
   // Sets the RootWindow this RootWindowHost is hosting. RootWindowHost does not
   // own the RootWindow.
   virtual void SetRootWindow(RootWindow* root_window) = 0;
+  virtual RootWindow* GetRootWindow() = 0;
 
   // Returns the accelerated widget.
   virtual gfx::AcceleratedWidget GetAcceleratedWidget() = 0;

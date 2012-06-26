@@ -14,6 +14,7 @@
 #include "base/stl_util.h"
 #include "base/utf_string_conversions.h"
 #include "build/build_config.h"
+#include "content/common/pepper_file_messages.h"
 #include "content/common/swapped_out_messages.h"
 #include "content/common/view_messages.h"
 #include "content/public/common/content_switches.h"
@@ -22,31 +23,31 @@
 #include "content/renderer/renderer_webkitplatformsupport_impl.h"
 #include "ipc/ipc_sync_message.h"
 #include "skia/ext/platform_canvas.h"
-#include "third_party/skia/include/core/SkShader.h"
-#include "third_party/skia/include/effects/SkTableColorFilter.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCursorInfo.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebPoint.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPagePopup.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPopupMenu.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPopupMenuInfo.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebRange.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebRect.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScreenInfo.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebPoint.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebRect.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebSize.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
+#include "third_party/skia/include/core/SkShader.h"
+#include "third_party/skia/include/effects/SkTableColorFilter.h"
 #include "ui/gfx/gl/gl_switches.h"
 #include "ui/gfx/point.h"
 #include "ui/gfx/size.h"
 #include "ui/gfx/skia_util.h"
-#include "ui/gfx/surface/transport_dib.h"
+#include "ui/surface/transport_dib.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/plugins/npapi/webplugin.h"
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
 
 #if defined(OS_POSIX)
 #include "ipc/ipc_channel_posix.h"
-#include "third_party/skia/include/core/SkPixelRef.h"
 #include "third_party/skia/include/core/SkMallocPixelRef.h"
+#include "third_party/skia/include/core/SkPixelRef.h"
 #endif  // defined(OS_POSIX)
 
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebWidget.h"
@@ -71,8 +72,29 @@ using WebKit::WebVector;
 using WebKit::WebWidget;
 using content::RenderThread;
 
+namespace {
+
+bool CanSendMessageWhileClosing(const IPC::Message* msg) {
+  // We filter out most IPC messages when closing. However, some are
+  // important for allowing pepper plugins to update their unsaved state
+  // when the renderer removes them.
+  switch (msg->type()) {
+    case PepperFileMsg_OpenFile::ID:
+    case PepperFileMsg_RenameFile::ID:
+    case PepperFileMsg_DeleteFileOrDir::ID:
+    case PepperFileMsg_CreateDir::ID:
+      return true;
+    default:
+      break;
+  }
+  return false;
+}
+
+}  // namespace
+
 RenderWidget::RenderWidget(WebKit::WebPopupType popup_type,
-                           const WebKit::WebScreenInfo& screen_info)
+                           const WebKit::WebScreenInfo& screen_info,
+                           bool swapped_out)
     : routing_id_(MSG_ROUTING_NONE),
       surface_id_(0),
       webwidget_(NULL),
@@ -83,6 +105,7 @@ RenderWidget::RenderWidget(WebKit::WebPopupType popup_type,
       next_paint_flags_(0),
       filtered_time_per_frame_(0.0f),
       update_reply_pending_(false),
+      need_update_rect_for_auto_resize_(false),
       using_asynchronous_swapbuffers_(false),
       num_swapbuffers_complete_pending_(0),
       did_show_(false),
@@ -92,7 +115,7 @@ RenderWidget::RenderWidget(WebKit::WebPopupType popup_type,
       has_focus_(false),
       handling_input_event_(false),
       closing_(false),
-      is_swapped_out_(false),
+      is_swapped_out_(swapped_out),
       input_method_is_active_(false),
       text_input_type_(ui::TEXT_INPUT_TYPE_NONE),
       can_compose_inline_(true),
@@ -104,7 +127,8 @@ RenderWidget::RenderWidget(WebKit::WebPopupType popup_type,
       invalidation_task_posted_(false),
       screen_info_(screen_info),
       invert_(false) {
-  RenderProcess::current()->AddRefProcess();
+  if (!swapped_out)
+    RenderProcess::current()->AddRefProcess();
   DCHECK(RenderThread::Get());
   has_disable_gpu_vsync_switch_ = CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kDisableGpuVsync);
@@ -128,7 +152,7 @@ RenderWidget* RenderWidget::Create(int32 opener_id,
                                    const WebKit::WebScreenInfo& screen_info) {
   DCHECK(opener_id != MSG_ROUTING_NONE);
   scoped_refptr<RenderWidget> widget(
-      new RenderWidget(popup_type, screen_info));
+      new RenderWidget(popup_type, screen_info, false));
   widget->Init(opener_id);  // adds reference
   return widget;
 }
@@ -186,6 +210,10 @@ void RenderWidget::CompleteInit(gfx::NativeViewId parent_hwnd) {
   host_window_ = parent_hwnd;
   host_window_set_ = true;
 
+#if WEBWIDGET_HAS_SETCOMPOSITORSURFACEREADY
+  if (webwidget_)
+      webwidget_->setCompositorSurfaceReady();
+#endif
   DoDeferredUpdate();
 
   Send(new ViewHostMsg_RenderViewReady(routing_id_));
@@ -237,7 +265,7 @@ bool RenderWidget::Send(IPC::Message* message) {
   // most outgoing messages while swapped out.
   if ((is_swapped_out_ &&
        !content::SwappedOutMessages::CanSendWhileSwappedOut(message)) ||
-      closing_) {
+      (closing_ && !CanSendMessageWhileClosing(message))) {
     delete message;
     return false;
   }
@@ -272,7 +300,6 @@ void RenderWidget::Resize(const gfx::Size& new_size,
 
   if (size_ != new_size) {
     // TODO(darin): We should not need to reset this here.
-    SetHidden(false);
     needs_repainting_on_restore_ = false;
 
     size_ = new_size;
@@ -562,7 +589,7 @@ void RenderWidget::OnHandleInputEvent(const IPC::Message& message) {
       webwidget_->isInputThrottled() ||
       paint_aggregator_.HasPendingUpdate();
 
-  if (event_type_gets_rate_limited && is_input_throttled) {
+  if (event_type_gets_rate_limited && is_input_throttled && !is_hidden_) {
     // We want to rate limit the input events in this case, so we'll wait for
     // painting to finish before ACKing this message.
     if (pending_input_event_ack_.get()) {
@@ -912,6 +939,7 @@ void RenderWidget::DoDeferredUpdate() {
   pending_update_params_->scroll_offset = GetScrollOffset();
   pending_update_params_->needs_ack = true;
   next_paint_flags_ = 0;
+  need_update_rect_for_auto_resize_ = false;
 
   if (update.scroll_rect.IsEmpty() &&
       !is_accelerated_compositing_active_ &&
@@ -1072,12 +1100,16 @@ void RenderWidget::didScrollRect(int dx, int dy, const WebRect& clip_rect) {
 }
 
 void RenderWidget::didAutoResize(const WebSize& new_size) {
-  size_ = new_size;
+  if (size_.width() != new_size.width || size_.height() != new_size.height) {
+    size_ = new_size;
+    need_update_rect_for_auto_resize_ = true;
+  }
 }
 
 void RenderWidget::didActivateCompositor(int input_handler_identifier) {
   TRACE_EVENT0("gpu", "RenderWidget::didActivateCompositor");
 
+#if !defined(OS_MACOSX)
   if (!is_accelerated_compositing_active_) {
     // When not in accelerated compositing mode, in certain cases (e.g. waiting
     // for a resize or if no backing store) the RenderWidgetHost is blocking the
@@ -1086,9 +1118,11 @@ void RenderWidget::didActivateCompositor(int input_handler_identifier) {
     // round-trips to the browser's UI thread before finishing the frame,
     // causing deadlocks if we delay the UpdateRect until we receive the
     // OnSwapBuffersComplete.  So send a dummy message that will unblock the
-    // browser's UI thread.
+    // browser's UI thread. This is not necessary on Mac, because SwapBuffers
+    // now unblocks GetBackingStore on Mac.
     Send(new ViewHostMsg_UpdateIsDelayed(routing_id_));
   }
+#endif
 
   is_accelerated_compositing_active_ = true;
   Send(new ViewHostMsg_DidActivateAcceleratedCompositing(
@@ -1141,8 +1175,11 @@ void RenderWidget::didCompleteSwapBuffers() {
   if (update_reply_pending_)
     return;
 
-  if (!next_paint_flags_ && !plugin_window_moves_.size())
+  if (!next_paint_flags_ &&
+      !need_update_rect_for_auto_resize_ &&
+      !plugin_window_moves_.size()) {
     return;
+  }
 
   ViewHostMsg_UpdateRect_Params params;
   params.view_size = size_;
@@ -1153,6 +1190,7 @@ void RenderWidget::didCompleteSwapBuffers() {
 
   Send(new ViewHostMsg_UpdateRect(routing_id_, params));
   next_paint_flags_ = 0;
+  need_update_rect_for_auto_resize_ = false;
 }
 
 void RenderWidget::scheduleComposite() {
@@ -1170,13 +1208,14 @@ void RenderWidget::scheduleComposite() {
 }
 
 void RenderWidget::scheduleAnimation() {
+  if (animation_update_pending_)
+    return;
+
   TRACE_EVENT0("gpu", "RenderWidget::scheduleAnimation");
-  if (!animation_update_pending_) {
-    animation_update_pending_ = true;
-    if (!animation_timer_.IsRunning()) {
-      animation_timer_.Start(FROM_HERE, base::TimeDelta::FromSeconds(0), this,
-                             &RenderWidget::AnimationCallback);
-    }
+  animation_update_pending_ = true;
+  if (!animation_timer_.IsRunning()) {
+    animation_timer_.Start(FROM_HERE, base::TimeDelta::FromSeconds(0), this,
+                           &RenderWidget::AnimationCallback);
   }
 }
 
@@ -1225,6 +1264,14 @@ void RenderWidget::DoDeferredClose() {
 }
 
 void RenderWidget::closeWidgetSoon() {
+  if (is_swapped_out_) {
+    // This widget is currently swapped out, and the active widget is in a
+    // different process.  Have the browser route the close request to the
+    // active widget instead, so that the correct unload handlers are run.
+    Send(new ViewHostMsg_RouteCloseEvent(routing_id_));
+    return;
+  }
+
   // If a page calls window.close() twice, we'll end up here twice, but that's
   // OK.  It is safe to send multiple Close messages.
 

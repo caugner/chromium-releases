@@ -14,7 +14,6 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
 #include "base/process_util.h"
-#include "content/browser/in_process_webkit/session_storage_namespace_impl.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/browser/site_instance_impl.h"
 #include "content/public/browser/notification_observer.h"
@@ -58,6 +57,7 @@ struct WebAccessibility;
 
 namespace content {
 
+class SessionStorageNamespace;
 class RenderViewHostObserver;
 struct FileChooserParams;
 struct ContextMenuParams;
@@ -102,16 +102,16 @@ class ExecuteNotificationObserver : public NotificationObserver {
 // embedders of content, and adds things only visible to content.
 //
 // The exact API of this object needs to be more thoroughly designed. Right
-// now it mimics what TabContents exposed, which is a fairly large API and may
-// contain things that are not relevant to a common subset of views. See also
-// the comment in render_view_host_delegate.h about the size and scope of the
-// delegate API.
+// now it mimics what WebContentsImpl exposed, which is a fairly large API and
+// may contain things that are not relevant to a common subset of views. See
+// also the comment in render_view_host_delegate.h about the size and scope of
+// the delegate API.
 //
 // Right now, the concept of page navigation (both top level and frame) exists
-// in the TabContents still, so if you instantiate one of these elsewhere, you
-// will not be able to traverse pages back and forward. We need to determine
-// if we want to bring that and other functionality down into this object so
-// it can be shared by others.
+// in the WebContentsImpl still, so if you instantiate one of these elsewhere,
+// you will not be able to traverse pages back and forward. We need to determine
+// if we want to bring that and other functionality down into this object so it
+// can be shared by others.
 class CONTENT_EXPORT RenderViewHostImpl
     : public RenderViewHost,
       public RenderWidgetHostImpl {
@@ -119,17 +119,21 @@ class CONTENT_EXPORT RenderViewHostImpl
   // Convenience function, just like RenderViewHost::FromID.
   static RenderViewHostImpl* FromID(int render_process_id, int render_view_id);
 
-  // routing_id could be a valid route id, or it could be MSG_ROUTING_NONE, in
-  // which case RenderWidgetHost will create a new one.
+  // |routing_id| could be a valid route id, or it could be MSG_ROUTING_NONE, in
+  // which case RenderWidgetHost will create a new one.  |swapped_out| indicates
+  // whether the view should initially be swapped out (e.g., for an opener
+  // frame being rendered by another process).
   //
-  // The session storage namespace parameter allows multiple render views and
-  // tab contentses to share the same session storage (part of the WebStorage
-  // spec) space. This is useful when restoring tabs, but most callers should
-  // pass in NULL which will cause a new SessionStorageNamespace to be created.
+  // The |session_storage_namespace| parameter allows multiple render views and
+  // WebContentses to share the same session storage (part of the WebStorage
+  // spec) space. This is useful when restoring contentses, but most callers
+  // should pass in NULL which will cause a new SessionStorageNamespace to be
+  // created.
   RenderViewHostImpl(
       SiteInstance* instance,
       RenderViewHostDelegate* delegate,
       int routing_id,
+      bool swapped_out,
       SessionStorageNamespace* session_storage_namespace);
   virtual ~RenderViewHostImpl();
 
@@ -224,9 +228,13 @@ class CONTENT_EXPORT RenderViewHostImpl
 
   // Set up the RenderView child process. Virtual because it is overridden by
   // TestRenderViewHost. If the |frame_name| parameter is non-empty, it is used
-  // as the name of the new top-level frame.  If |max_page_id| is larger than
-  // -1, the RenderView is told to start issuing page IDs at |max_page_id| + 1.
-  virtual bool CreateRenderView(const string16& frame_name, int32 max_page_id);
+  // as the name of the new top-level frame.  The |opener_route_id| parameter
+  // indicates which RenderView created this (MSG_ROUTING_NONE if none). If
+  // |max_page_id| is larger than -1, the RenderView is told to start issuing
+  // page IDs at |max_page_id| + 1.
+  virtual bool CreateRenderView(const string16& frame_name,
+                                int opener_route_id,
+                                int32 max_page_id);
 
   base::TerminationStatus render_view_termination_status() const {
     return render_view_termination_status_;
@@ -417,7 +425,7 @@ class CONTENT_EXPORT RenderViewHostImpl
   virtual void NotifyRendererUnresponsive() OVERRIDE;
   virtual void NotifyRendererResponsive() OVERRIDE;
   virtual void OnRenderAutoResized(const gfx::Size& size) OVERRIDE;
-  virtual void RequestToLockMouse() OVERRIDE;
+  virtual void RequestToLockMouse(bool user_gesture) OVERRIDE;
   virtual bool IsFullscreen() const OVERRIDE;
   virtual void OnMsgFocus() OVERRIDE;
   virtual void OnMsgBlur() OVERRIDE;
@@ -429,7 +437,7 @@ class CONTENT_EXPORT RenderViewHostImpl
                      bool user_gesture);
   void OnMsgShowWidget(int route_id, const gfx::Rect& initial_pos);
   void OnMsgShowFullscreenWidget(int route_id);
-  void OnMsgRunModal(IPC::Message* reply_msg);
+  void OnMsgRunModal(int opener_id, IPC::Message* reply_msg);
   void OnMsgRenderViewReady();
   void OnMsgRenderViewGone(int status, int error_code);
   void OnMsgNavigate(const IPC::Message& msg);
@@ -465,6 +473,7 @@ class CONTENT_EXPORT RenderViewHostImpl
   void OnMsgSelectionBoundsChanged(const gfx::Rect& start_rect,
                                    const gfx::Rect& end_rect);
   void OnMsgPasteFromSelectionClipboard();
+  void OnMsgRouteCloseEvent();
   void OnMsgRunJavaScriptMessage(const string16& message,
                                  const string16& default_prompt,
                                  const GURL& frame_url,
@@ -507,8 +516,6 @@ class CONTENT_EXPORT RenderViewHostImpl
       const ShowDesktopNotificationHostMsgParams& params);
   void OnCancelDesktopNotification(int notification_id);
   void OnRunFileChooser(const FileChooserParams& params);
-  void OnWebUISend(const GURL& source_url, const std::string& name,
-                   const base::ListValue& args);
   void OnDomOperationResponse(const std::string& json_string,
                               int automation_id);
 
@@ -558,9 +565,9 @@ class CONTENT_EXPORT RenderViewHostImpl
   bool navigations_suspended_;
 
   // We only buffer a suspended navigation message while we a pending RVH for a
-  // TabContents.  There will only ever be one suspended navigation, because
-  // TabContents will destroy the pending RVH and create a new one if a second
-  // navigation occurs.
+  // WebContentsImpl.  There will only ever be one suspended navigation, because
+  // WebContentsImpl will destroy the pending RVH and create a new one if a
+  // second navigation occurs.
   scoped_ptr<ViewMsg_Navigate> suspended_nav_message_;
 
   // Whether this RenderViewHost is currently swapped out, such that the view is
@@ -570,6 +577,8 @@ class CONTENT_EXPORT RenderViewHostImpl
   // If we were asked to RunModal, then this will hold the reply_msg that we
   // must return to the renderer to unblock it.
   IPC::Message* run_modal_reply_msg_;
+  // This will hold the routing id of the RenderView that opened us.
+  int run_modal_opener_id_;
 
   // Set to true when there is a pending ViewMsg_ShouldClose message.  This
   // ensures we don't spam the renderer with multiple beforeunload requests.

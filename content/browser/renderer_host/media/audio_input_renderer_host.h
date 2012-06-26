@@ -68,8 +68,10 @@ namespace content {
 class ResourceContext;
 }
 
+namespace media {
 class AudioManager;
 class AudioParameters;
+}
 
 class CONTENT_EXPORT AudioInputRendererHost
     : public content::BrowserMessageFilter,
@@ -99,7 +101,7 @@ class CONTENT_EXPORT AudioInputRendererHost
 
   // Called from UI thread from the owner of this object.
   AudioInputRendererHost(content::ResourceContext* resource_context,
-                         AudioManager* audio_manager);
+                         media::AudioManager* audio_manager);
 
   // content::BrowserMessageFilter implementation.
   virtual void OnChannelClosing() OVERRIDE;
@@ -139,8 +141,9 @@ class CONTENT_EXPORT AudioInputRendererHost
   // successful this object would keep an internal entry of the stream for the
   // required properties.
   void OnCreateStream(int stream_id,
-                      const AudioParameters& params,
-                      const std::string& device_id);
+                      const media::AudioParameters& params,
+                      const std::string& device_id,
+                      bool automatic_gain_control);
 
   // Record the audio input stream referenced by |stream_id|.
   void OnRecordStream(int stream_id);
@@ -150,9 +153,6 @@ class CONTENT_EXPORT AudioInputRendererHost
 
   // Set the volume of the audio stream referenced by |stream_id|.
   void OnSetVolume(int stream_id, double volume);
-
-  // Get the volume of the audio stream referenced by |stream_id|.
-  void OnGetVolume(int stream_id);
 
   // Complete the process of creating an audio input stream. This will set up
   // the shared memory or shared socket in low latency mode.
@@ -174,9 +174,6 @@ class CONTENT_EXPORT AudioInputRendererHost
   // Closes the stream. The stream is then deleted in DeleteEntry() after it
   // is closed.
   void CloseAndDeleteStream(AudioEntry* entry);
-
-  // Called on the audio thread after the audio input stream is closed.
-  void OnStreamClosed(AudioEntry* entry);
 
   // Delete an audio entry and close the related audio stream.
   void DeleteEntry(AudioEntry* entry);
@@ -202,7 +199,7 @@ class CONTENT_EXPORT AudioInputRendererHost
 
   // Used to get an instance of AudioInputDeviceManager.
   content::ResourceContext* resource_context_;
-  AudioManager* audio_manager_;
+  media::AudioManager* audio_manager_;
 
   // A map of stream IDs to audio sources.
   typedef std::map<int, AudioEntry*> AudioEntryMap;

@@ -15,12 +15,13 @@
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sync/internal_api/change_record.h"
-#include "chrome/browser/sync/internal_api/read_node.h"
-#include "chrome/browser/sync/internal_api/write_node.h"
-#include "chrome/browser/sync/internal_api/write_transaction.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "content/public/browser/browser_thread.h"
+#include "sync/internal_api/change_record.h"
+#include "sync/internal_api/read_node.h"
+#include "sync/internal_api/write_node.h"
+#include "sync/internal_api/write_transaction.h"
+#include "sync/syncable/syncable.h"  // TODO(tim): Investigating bug 121587.
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/codec/png_codec.h"
 
@@ -214,8 +215,47 @@ void BookmarkChangeProcessor::BookmarkNodeChanged(BookmarkModel* model,
   // Lookup the sync node that's associated with |node|.
   sync_api::WriteNode sync_node(&trans);
   if (!model_associator_->InitSyncNodeFromChromeId(node->id(), &sync_node)) {
-    error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
-                                                        std::string());
+    // TODO(tim): Investigating bug 121587.
+    if (model_associator_->GetSyncIdFromChromeId(node->id()) ==
+                                                 sync_api::kInvalidId) {
+      error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
+          "Bookmark id not found in model associator on BookmarkNodeChanged");
+    } else if (!sync_node.GetEntry()->good()) {
+      error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
+          "Could not InitByIdLookup on BookmarkNodeChanged, good() failed");
+    } else if (sync_node.GetEntry()->Get(syncable::IS_DEL)) {
+      error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
+          "Could not InitByIdLookup on BookmarkNodeChanged, is_del true");
+    } else {
+      Cryptographer* crypto = trans.GetCryptographer();
+      syncable::ModelTypeSet encrypted_types(crypto->GetEncryptedTypes());
+      const sync_pb::EntitySpecifics& specifics =
+          sync_node.GetEntry()->Get(syncable::SPECIFICS);
+      CHECK(specifics.has_encrypted());
+      const bool can_decrypt = crypto->CanDecrypt(specifics.encrypted());
+      const bool agreement = encrypted_types.Has(syncable::BOOKMARKS);
+      if (!agreement && !can_decrypt) {
+        error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
+            "Could not InitByIdLookup on BookmarkNodeChanged, "
+            " Cryptographer thinks bookmarks not encrypted, and CanDecrypt"
+            " failed.");
+      } else if (agreement && can_decrypt) {
+        error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
+            "Could not InitByIdLookup on BookmarkNodeChanged, "
+            " Cryptographer thinks bookmarks are encrypted, and CanDecrypt"
+            " succeeded (?!), but DecryptIfNecessary failed.");
+      } else if (agreement) {
+        error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
+            "Could not InitByIdLookup on BookmarkNodeChanged, "
+            " Cryptographer thinks bookmarks are encrypted, but CanDecrypt"
+            " failed.");
+      } else {
+        error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
+            "Could not InitByIdLookup on BookmarkNodeChanged, "
+            " Cryptographer thinks bookmarks not encrypted, but CanDecrypt"
+            " succeeded (super weird, btw)");
+      }
+    }
     return;
   }
 
@@ -444,7 +484,7 @@ void BookmarkChangeProcessor::ApplyChangesFromSyncModel(
       passed_deletes = true;
 
       sync_api::ReadNode src(trans);
-      if (!src.InitByIdLookup(it->id)) {
+      if (src.InitByIdLookup(it->id) != sync_api::BaseNode::INIT_OK) {
         error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
             "ApplyModelChanges was passed a bad ID");
         return;
@@ -459,7 +499,8 @@ void BookmarkChangeProcessor::ApplyChangesFromSyncModel(
         // fail). Therefore, we add special logic here just to detect the
         // Synced Bookmarks folder.
         sync_api::ReadNode synced_bookmarks(trans);
-        if (synced_bookmarks.InitByTagLookup(kMobileBookmarksTag) &&
+        if (synced_bookmarks.InitByTagLookup(kMobileBookmarksTag) ==
+                sync_api::BaseNode::INIT_OK &&
             synced_bookmarks.GetId() == it->id) {
           // This is a newly created Synced Bookmarks node. Associate it.
           model_associator_->Associate(model->mobile_node(), it->id);

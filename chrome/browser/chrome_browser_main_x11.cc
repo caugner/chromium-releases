@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include "base/bind.h"
 #include "base/debug/debugger.h"
+#include "base/message_loop.h"
 #include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/metrics/metrics_service.h"
 #include "chrome/browser/ui/browser_list.h"
@@ -15,7 +16,7 @@
 #include "ui/base/x/x11_util_internal.h"
 
 #if defined(USE_LINUX_BREAKPAD)
-#include "chrome/app/breakpad_linux.h"
+#include "chrome/app/breakpad_linuxish.h"
 #endif
 
 using content::BrowserThread;

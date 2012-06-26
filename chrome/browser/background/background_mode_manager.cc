@@ -2,7 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <algorithm>
 #include <string>
+#include <vector>
 
 #include "base/base_paths.h"
 #include "base/bind.h"
@@ -15,6 +17,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -260,6 +263,10 @@ void BackgroundModeManager::LaunchBackgroundApplication(
                            NEW_FOREGROUND_TAB);
 }
 
+bool BackgroundModeManager::IsBackgroundModeActiveForTest() {
+  return in_background_mode_;
+}
+
 int BackgroundModeManager::NumberOfBackgroundModeData() {
   return background_mode_data_.size();
 }
@@ -287,10 +294,11 @@ void BackgroundModeManager::Observe(
 
     case chrome::NOTIFICATION_EXTENSION_LOADED: {
         Extension* extension = content::Details<Extension>(details).ptr();
-        if (BackgroundApplicationListModel::IsBackgroundApp(*extension)) {
+        Profile* profile = content::Source<Profile>(source).ptr();
+        if (BackgroundApplicationListModel::IsBackgroundApp(
+                *extension, profile)) {
           // Extensions loaded after the ExtensionsService is ready should be
           // treated as new installs.
-          Profile* profile = content::Source<Profile>(source).ptr();
           if (profile->GetExtensionService()->is_ready())
             OnBackgroundAppInstalled(extension);
         }
@@ -534,6 +542,11 @@ void BackgroundModeManager::StartBackgroundMode() {
 
   // Display a status icon to exit Chrome.
   InitStatusTrayIcon();
+
+  content::NotificationService::current()->Notify(
+      chrome::NOTIFICATION_BACKGROUND_MODE_CHANGED,
+      content::Source<BackgroundModeManager>(this),
+      content::Details<bool>(&in_background_mode_));
 }
 
 void BackgroundModeManager::InitStatusTrayIcon() {
@@ -553,6 +566,10 @@ void BackgroundModeManager::EndBackgroundMode() {
   BrowserList::EndKeepAlive();
 
   RemoveStatusTrayIcon();
+  content::NotificationService::current()->Notify(
+      chrome::NOTIFICATION_BACKGROUND_MODE_CHANGED,
+      content::Source<BackgroundModeManager>(this),
+      content::Details<bool>(&in_background_mode_));
 }
 
 void BackgroundModeManager::EnableBackgroundMode() {

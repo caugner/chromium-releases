@@ -1160,16 +1160,6 @@ Error* Session::WaitForAllViewsToStopLoading() {
   return error;
 }
 
-Error* Session::InstallExtensionDeprecated(const FilePath& path) {
-  Error* error = NULL;
-  RunSessionTask(base::Bind(
-      &Automation::InstallExtensionDeprecated,
-      base::Unretained(automation_.get()),
-      path,
-      &error));
-  return error;
-}
-
 Error* Session::InstallExtension(
     const FilePath& path, std::string* extension_id) {
   Error* error = NULL;
@@ -1373,6 +1363,26 @@ Error* Session::RemoveStorageItem(StorageType type,
       CreateDirectValueParser(value));
 }
 
+Error* Session::GetGeolocation(scoped_ptr<base::DictionaryValue>* geolocation) {
+  Error* error = NULL;
+  RunSessionTask(base::Bind(
+      &Automation::GetGeolocation,
+      base::Unretained(automation_.get()),
+      geolocation,
+      &error));
+  return error;
+}
+
+Error* Session::OverrideGeolocation(base::DictionaryValue* geolocation) {
+  Error* error = NULL;
+  RunSessionTask(base::Bind(
+      &Automation::OverrideGeolocation,
+      base::Unretained(automation_.get()),
+      geolocation,
+      &error));
+  return error;
+}
+
 const std::string& Session::id() const {
   return id_;
 }
@@ -1471,7 +1481,7 @@ Error* Session::ExecuteScriptAndParseValue(const FrameId& frame_id,
     return error;
 
   scoped_ptr<Value> value(base::JSONReader::ReadAndReturnError(
-      response_json, true, NULL, NULL));
+      response_json, base::JSON_ALLOW_TRAILING_COMMAS, NULL, NULL));
   if (!value.get())
     return new Error(kUnknownError, "Failed to parse script result");
   if (value->GetType() != Value::TYPE_DICTIONARY)
@@ -1835,7 +1845,8 @@ Error* Session::PostBrowserStartInit() {
 
   // Install extensions.
   for (size_t i = 0; i < capabilities_.extensions.size(); ++i) {
-    error = InstallExtensionDeprecated(capabilities_.extensions[i]);
+    std::string extension_id;
+    error = InstallExtension(capabilities_.extensions[i], &extension_id);
     if (error)
       return error;
   }

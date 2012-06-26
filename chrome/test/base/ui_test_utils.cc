@@ -23,6 +23,7 @@
 #include "base/rand_util.h"
 #include "base/string_number_conversions.h"
 #include "base/test/test_timeouts.h"
+#include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
@@ -31,6 +32,7 @@
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_test_util.h"
 #include "chrome/browser/tab_contents/thumbnail_generator.h"
+#include "chrome/browser/ui/app_modal_dialogs/app_modal_dialog.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_navigator.h"
@@ -46,6 +48,7 @@
 #include "content/public/browser/dom_operation_notification_details.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/download_manager.h"
+#include "content/public/browser/geolocation.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
@@ -54,6 +57,8 @@
 #include "content/public/browser/render_view_host_delegate.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "content/public/browser/web_contents_view.h"
+#include "content/public/common/geoposition.h"
 #include "content/test/test_navigation_observer.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_util.h"
@@ -173,7 +178,7 @@ class FindInPageNotificationObserver : public content::NotificationObserver {
   // we need to preserve it so we can send it later.
   int active_match_ordinal_;
   int number_of_matches_;
-  // The id of the current find request, obtained from TabContents. Allows us
+  // The id of the current find request, obtained from WebContents. Allows us
   // to monitor when the search completes.
   int current_find_request_id_;
 
@@ -207,6 +212,9 @@ class InProcessJavaScriptExecutionController
   }
 
  private:
+  friend class base::RefCounted<InProcessJavaScriptExecutionController>;
+  virtual ~InProcessJavaScriptExecutionController() {}
+
   // Weak pointer to the associated RenderViewHost.
   RenderViewHost* render_view_host_;
 };
@@ -246,7 +254,8 @@ bool ExecuteJavaScriptHelper(RenderViewHost* render_view_host,
   json.insert(0, "[");
   json.append("]");
 
-  scoped_ptr<Value> root_val(base::JSONReader::Read(json, true));
+  scoped_ptr<Value> root_val(
+      base::JSONReader::Read(json, base::JSON_ALLOW_TRAILING_COMMAS));
   if (!root_val->IsType(Value::TYPE_LIST)) {
     DLOG(ERROR) << "JSON result is not a list.";
     return false;
@@ -341,7 +350,7 @@ void WaitForNavigations(NavigationController* controller,
 
 void WaitForNewTab(Browser* browser) {
   TestNotificationObserver observer;
-  RegisterAndWait(&observer, content::NOTIFICATION_TAB_ADDED,
+  RegisterAndWait(&observer, chrome::NOTIFICATION_TAB_ADDED,
                   content::Source<content::WebContentsDelegate>(browser));
 }
 
@@ -432,7 +441,11 @@ static void NavigateToURLWithDispositionBlockUntilNavigationsComplete(
   }
 
   WindowedNotificationObserver tab_added_observer(
-      content::NOTIFICATION_TAB_ADDED,
+      chrome::NOTIFICATION_TAB_ADDED,
+      content::NotificationService::AllSources());
+
+  WindowedNotificationObserver auth_observer(
+      chrome::NOTIFICATION_AUTH_NEEDED,
       content::NotificationService::AllSources());
 
   browser->OpenURL(OpenURLParams(
@@ -441,6 +454,8 @@ static void NavigateToURLWithDispositionBlockUntilNavigationsComplete(
     browser = WaitForBrowserNotInSet(initial_browsers);
   if (browser_test_flags & BROWSER_TEST_WAIT_FOR_TAB)
     tab_added_observer.Wait();
+  if (browser_test_flags & BROWSER_TEST_WAIT_FOR_AUTH)
+    auth_observer.Wait();
   if (!(browser_test_flags & BROWSER_TEST_WAIT_FOR_NAVIGATION)) {
     // Some other flag caused the wait prior to this.
     return;
@@ -511,7 +526,7 @@ bool ExecuteJavaScript(RenderViewHost* render_view_host,
                        const std::wstring& frame_xpath,
                        const std::wstring& original_script) {
   std::wstring script =
-      original_script + L"window.domAutomationController.send(0);";
+      original_script + L";window.domAutomationController.send(0);";
   return ExecuteJavaScriptHelper(render_view_host, frame_xpath, script, NULL);
 }
 
@@ -582,6 +597,11 @@ AppModalDialog* WaitForAppModalDialog() {
   return content::Source<AppModalDialog>(observer.source()).ptr();
 }
 
+void WaitForAppModalDialogAndCloseIt() {
+  AppModalDialog* dialog = WaitForAppModalDialog();
+  dialog->CloseModalDialog();
+}
+
 void CrashTab(WebContents* tab) {
   content::RenderProcessHost* rph = tab->GetRenderProcessHost();
   base::KillProcess(rph->GetHandle(), 0, false);
@@ -598,6 +618,85 @@ int FindInPage(TabContentsWrapper* tab_contents, const string16& search_string,
   if (ordinal)
     *ordinal = observer.active_match_ordinal();
   return observer.number_of_matches();
+}
+
+void SimulateMouseClick(content::WebContents* tab) {
+  int x = tab->GetView()->GetContainerSize().width() / 2;
+  int y = tab->GetView()->GetContainerSize().height() / 2;
+  WebKit::WebMouseEvent mouse_event;
+  mouse_event.type = WebKit::WebInputEvent::MouseDown;
+  mouse_event.button = WebKit::WebMouseEvent::ButtonLeft;
+  mouse_event.x = x;
+  mouse_event.y = y;
+  // Mac needs globalX/globalY for events to plugins.
+  gfx::Rect offset;
+  tab->GetView()->GetContainerBounds(&offset);
+  mouse_event.globalX = x + offset.x();
+  mouse_event.globalY = y + offset.y();
+  mouse_event.clickCount = 1;
+  tab->GetRenderViewHost()->ForwardMouseEvent(mouse_event);
+  mouse_event.type = WebKit::WebInputEvent::MouseUp;
+  tab->GetRenderViewHost()->ForwardMouseEvent(mouse_event);
+}
+
+void BuildSimpleWebKeyEvent(WebKit::WebInputEvent::Type type,
+                            ui::KeyboardCode key,
+                            bool control,
+                            bool shift,
+                            bool alt,
+                            bool command,
+                            NativeWebKeyboardEvent* event) {
+  event->nativeKeyCode = 0;
+  event->windowsKeyCode = key;
+  event->setKeyIdentifierFromWindowsKeyCode();
+  event->type = type;
+  event->modifiers = 0;
+  event->isSystemKey = false;
+  event->timeStampSeconds = base::Time::Now().ToDoubleT();
+  event->skip_in_browser = true;
+
+  if (type == WebKit::WebInputEvent::Char ||
+      type == WebKit::WebInputEvent::RawKeyDown) {
+    event->text[0] = key;
+    event->unmodifiedText[0] = key;
+  }
+
+  if (control)
+    event->modifiers |= WebKit::WebInputEvent::ControlKey;
+
+  if (shift)
+    event->modifiers |= WebKit::WebInputEvent::ShiftKey;
+
+  if (alt)
+    event->modifiers |= WebKit::WebInputEvent::AltKey;
+
+  if (command)
+    event->modifiers |= WebKit::WebInputEvent::MetaKey;
+}
+
+void SimulateKeyPress(content::WebContents* tab,
+                      ui::KeyboardCode key,
+                      bool control,
+                      bool shift,
+                      bool alt,
+                      bool command) {
+  NativeWebKeyboardEvent event_down;
+  BuildSimpleWebKeyEvent(
+      WebKit::WebInputEvent::RawKeyDown, key, control, shift, alt, command,
+      &event_down);
+  tab->GetRenderViewHost()->ForwardKeyboardEvent(event_down);
+
+  NativeWebKeyboardEvent char_event;
+  BuildSimpleWebKeyEvent(
+      WebKit::WebInputEvent::Char, key, control, shift, alt, command,
+      &char_event);
+  tab->GetRenderViewHost()->ForwardKeyboardEvent(char_event);
+
+  NativeWebKeyboardEvent event_up;
+  BuildSimpleWebKeyEvent(
+      WebKit::WebInputEvent::KeyUp, key, control, shift, alt, command,
+      &event_up);
+  tab->GetRenderViewHost()->ForwardKeyboardEvent(event_up);
 }
 
 void RegisterAndWait(content::NotificationObserver* observer,
@@ -761,7 +860,9 @@ void TimedMessageLoopRunner::QuitAfter(int ms) {
 }
 
 TestWebSocketServer::TestWebSocketServer()
-    : started_(false), port_(kDefaultWsPort) {
+    : started_(false),
+      port_(kDefaultWsPort),
+      secure_(false) {
 #if defined(OS_POSIX)
   process_group_id_ = base::kNullProcessHandle;
 #endif
@@ -770,6 +871,10 @@ TestWebSocketServer::TestWebSocketServer()
 int TestWebSocketServer::UseRandomPort() {
   port_ = base::RandInt(1024, 65535);
   return port_;
+}
+
+void TestWebSocketServer::UseTLS() {
+  secure_ = true;
 }
 
 bool TestWebSocketServer::Start(const FilePath& root_directory) {
@@ -783,6 +888,8 @@ bool TestWebSocketServer::Start(const FilePath& root_directory) {
   cmd_line->AppendArgNative(FILE_PATH_LITERAL("--root=") +
                             root_directory.value());
   cmd_line->AppendArg("--port=" + base::IntToString(port_));
+  if (secure_)
+    cmd_line->AppendArg("--tls");
   if (!temp_dir_.CreateUniqueTempDir()) {
     LOG(ERROR) << "Unable to create a temporary directory.";
     return false;
@@ -947,6 +1054,20 @@ void WindowedNotificationObserver::Observe(
   }
 }
 
+WindowedTabAddedNotificationObserver::WindowedTabAddedNotificationObserver(
+    const content::NotificationSource& source)
+    : WindowedNotificationObserver(chrome::NOTIFICATION_TAB_ADDED, source),
+      added_tab_(NULL) {
+}
+
+void WindowedTabAddedNotificationObserver::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
+  added_tab_ = content::Details<content::WebContents>(details).ptr();
+  WindowedNotificationObserver::Observe(type, source, details);
+}
+
 TitleWatcher::TitleWatcher(WebContents* web_contents,
                            const string16& expected_title)
     : web_contents_(web_contents),
@@ -1099,7 +1220,8 @@ class SnapshotTaker {
 
     // Parse the JSON.
     std::vector<int> dimensions;
-    scoped_ptr<Value> value(base::JSONReader::Read(json, true));
+    scoped_ptr<Value> value(
+        base::JSONReader::Read(json, base::JSON_ALLOW_TRAILING_COMMAS));
     if (!value->IsType(Value::TYPE_LIST))
       return false;
     ListValue* list = static_cast<ListValue*>(value.get());
@@ -1140,6 +1262,18 @@ bool TakeEntirePageSnapshot(RenderViewHost* rvh, SkBitmap* bitmap) {
   DCHECK(bitmap);
   SnapshotTaker taker;
   return taker.TakeEntirePageSnapshot(rvh, bitmap);
+}
+
+void OverrideGeolocation(double latitude, double longitude) {
+  content::Geoposition position;
+  position.latitude = latitude;
+  position.longitude = longitude;
+  position.altitude = 0.;
+  position.accuracy = 0.;
+  position.timestamp = base::Time::Now();
+  content::OverrideLocationForTesting(position,
+                                      base::Bind(MessageLoop::QuitClosure()));
+  RunMessageLoop();
 }
 
 namespace internal {

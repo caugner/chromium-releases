@@ -53,10 +53,6 @@ class CONTENT_EXPORT RendererWebKitPlatformSupportImpl
   virtual void suddenTerminationChanged(bool enabled) OVERRIDE;
   virtual WebKit::WebStorageNamespace* createLocalStorageNamespace(
       const WebKit::WebString& path, unsigned quota) OVERRIDE;
-  virtual void dispatchStorageEvent(
-      const WebKit::WebString& key, const WebKit::WebString& old_value,
-      const WebKit::WebString& new_value, const WebKit::WebString& origin,
-      const WebKit::WebURL& url, bool is_local_storage) OVERRIDE;
   virtual WebKit::WebKitPlatformSupport::FileHandle databaseOpenFile(
       const WebKit::WebString& vfs_file_name, int desired_flags) OVERRIDE;
   virtual int databaseDeleteFile(const WebKit::WebString& vfs_file_name,
@@ -74,12 +70,12 @@ class CONTENT_EXPORT RendererWebKitPlatformSupportImpl
   virtual WebKit::WebIDBFactory* idbFactory() OVERRIDE;
   virtual void createIDBKeysFromSerializedValuesAndKeyPath(
       const WebKit::WebVector<WebKit::WebSerializedScriptValue>& values,
-      const WebKit::WebString& keyPath,
+      const WebKit::WebIDBKeyPath& keyPath,
       WebKit::WebVector<WebKit::WebIDBKey>& keys) OVERRIDE;
   virtual WebKit::WebSerializedScriptValue injectIDBKeyIntoSerializedValue(
       const WebKit::WebIDBKey& key,
       const WebKit::WebSerializedScriptValue& value,
-      const WebKit::WebString& keyPath) OVERRIDE;
+      const WebKit::WebIDBKeyPath& keyPath) OVERRIDE;
   virtual WebKit::WebFileSystem* fileSystem() OVERRIDE;
   virtual WebKit::WebSharedWorkerRepository* sharedWorkerRepository() OVERRIDE;
   virtual bool canAccelerate2dCanvas();
@@ -95,6 +91,8 @@ class CONTENT_EXPORT RendererWebKitPlatformSupportImpl
                           std::vector<webkit::WebPluginInfo>* plugins) OVERRIDE;
   virtual WebKit::WebPeerConnectionHandler* createPeerConnectionHandler(
       WebKit::WebPeerConnectionHandlerClient* client) OVERRIDE;
+  virtual WebKit::WebPeerConnection00Handler* createPeerConnection00Handler(
+      WebKit::WebPeerConnection00HandlerClient* client) OVERRIDE;
   virtual WebKit::WebMediaStreamCenter* createMediaStreamCenter(
       WebKit::WebMediaStreamCenterClient* client) OVERRIDE;
 

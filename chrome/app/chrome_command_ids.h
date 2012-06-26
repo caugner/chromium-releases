@@ -139,7 +139,6 @@
 #define IDC_FOCUS_NEXT_PANE             39004
 #define IDC_FOCUS_PREVIOUS_PANE         39005
 #define IDC_FOCUS_BOOKMARKS             39006
-#define IDC_FOCUS_CHROMEOS_STATUS       39007
 
 // Show various bits of UI
 #define IDC_OPEN_FILE                   40000
@@ -168,7 +167,6 @@
 #define IDC_VIEW_BACKGROUND_PAGES       40025
 #define IDC_SHOW_KEYBOARD_OVERLAY       40026
 #define IDC_PROFILING_ENABLED           40027
-#define IDC_FILE_MANAGER                40028
 #define IDC_BOOKMARKS_MENU              40029
 #define IDC_SHOW_SYNC_SETUP             40030
 #define IDC_EXTENSION_ERRORS            40031
@@ -217,11 +215,6 @@
 // Identifiers for platform-specific items.
 // Placed in a common file to help insure they never collide.
 #define IDC_VIEW_MENU                   44000     // OSX only
-#define IDC_INTERNET_OPTIONS            45100     // ChromeOS only
-#define IDC_LANGUAGE_OPTIONS            45200     // ChromeOS only
-#define IDC_LOCK_SCREEN                 45300     // ChromeOS only
-#define IDC_SHUTDOWN                    45400     // ChromeOS only
-#define IDC_NEW_CROSH_TAB               45500     // ChromeOS Aura only
 #define IDC_HISTORY_MENU                46000     // OSX only
 #define IDC_PROFILE_MAIN_MENU           46100     // OSX only
 #define IDC_INPUT_METHODS_MENU          46300     // Linux only
@@ -309,6 +302,11 @@
 #define IDC_SPEECH_INPUT_MENU 51200
 #define IDC_CONTENT_CONTEXT_SPEECH_INPUT_FILTER_PROFANITIES 51201
 #define IDC_CONTENT_CONTEXT_SPEECH_INPUT_ABOUT 51202
+
+// Context menu items for media stream status tray
+#define IDC_MEDIA_STREAM_DEVICE_STATUS_TRAY 51300
+#define IDC_MEDIA_CONTEXT_MEDIA_STREAM_CAPTURE_LIST_FIRST 51301
+#define IDC_MEDIA_CONTEXT_MEDIA_STREAM_CAPTURE_LIST_LAST 51399
 
 // Protocol handler menu entries
 #define IDC_CONTENT_CONTEXT_PROTOCOL_HANDLER_FIRST     52000

@@ -69,12 +69,15 @@ class GDataOperationRegistry {
     // -1 if no expectation is available (yet).
     int64 progress_total;
   };
+  typedef std::vector<ProgressStatus> ProgressStatusList;
 
   // Observer interface for listening changes in the active set of operations.
   class Observer {
    public:
     // Called when a GData operation started, made some progress, or finished.
-    virtual void OnProgressUpdate(const std::vector<ProgressStatus>& list) = 0;
+    virtual void OnProgressUpdate(const ProgressStatusList& list) = 0;
+    // Called when GData authentication failed.
+    virtual void OnAuthenticationFailed() {}
    protected:
     virtual ~Observer() {}
   };
@@ -111,6 +114,8 @@ class GDataOperationRegistry {
     // that it removes the existing "suspend" operation.
     void NotifySuspend();
     void NotifyResume();
+    // Notifies that authentication has failed.
+    void NotifyAuthFailed();
 
    private:
     // Does the cancellation.
@@ -128,7 +133,7 @@ class GDataOperationRegistry {
   bool CancelForFilePath(const FilePath& file_path);
 
   // Obtains the list of currently active operations.
-  std::vector<ProgressStatus> GetProgressStatusList();
+  ProgressStatusList GetProgressStatusList();
 
   // Sets the observer.
   void AddObserver(Observer* observer);
@@ -143,6 +148,7 @@ class GDataOperationRegistry {
   void OnOperationFinish(OperationID operation);
   void OnOperationSuspend(OperationID operation);
   void OnOperationResume(Operation* operation, ProgressStatus* new_status);
+  void OnOperationAuthFailed();
 
   bool IsFileTransferOperation(const Operation* operation) const;
 

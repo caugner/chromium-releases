@@ -9,8 +9,8 @@
 #include "base/bind.h"
 #include "base/debug/trace_event.h"
 #include "base/logging.h"
-#include "base/mac/mac_util.h"
 #include "base/mac/closure_blocks_leopard_compat.h"
+#include "base/mac/mac_util.h"
 #include "base/mac/scoped_cftyperef.h"
 #import "base/mac/scoped_nsautorelease_pool.h"
 #import "base/memory/scoped_nsobject.h"
@@ -24,6 +24,8 @@
 #include "content/browser/plugin_process_host.h"
 #import "content/browser/renderer_host/accelerated_plugin_view_mac.h"
 #include "content/browser/renderer_host/backing_store_mac.h"
+#include "content/browser/renderer_host/backing_store_manager.h"
+#include "content/browser/renderer_host/compositing_iosurface_mac.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #import "content/browser/renderer_host/render_widget_host_view_mac_editcommand_helper.h"
@@ -43,9 +45,11 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/mac/WebScreenInfoFactory.h"
 #import "third_party/mozilla/ComplexTextInputPanel.h"
 #include "third_party/skia/include/core/SkColor.h"
+#import "ui/base/cocoa/fullscreen_window_manager.h"
+#import "ui/base/cocoa/underlay_opengl_hosting_window.h"
 #include "ui/gfx/point.h"
 #include "ui/gfx/scoped_ns_graphics_context_save_gstate_mac.h"
-#include "ui/gfx/surface/io_surface_support_mac.h"
+#include "ui/surface/io_surface_support_mac.h"
 #include "webkit/glue/webaccessibility.h"
 #include "webkit/plugins/npapi/webplugin.h"
 
@@ -118,6 +122,25 @@ static inline int ToWebKitModifiers(NSUInteger flags) {
 
 // NSEvent subtype for scroll gestures events.
 static const short kIOHIDEventTypeScroll = 6;
+
+// A window subclass that allows the fullscreen window to become main and gain
+// keyboard focus. This is only used for pepper flash. Normal fullscreen is
+// handled by the browser.
+@interface PepperFlashFullscreenWindow : UnderlayOpenGLHostingWindow
+@end
+
+@implementation PepperFlashFullscreenWindow
+
+- (BOOL)canBecomeKeyWindow {
+  return YES;
+}
+
+- (BOOL)canBecomeMainWindow {
+  return YES;
+}
+
+@end
+
 
 namespace {
 
@@ -241,10 +264,7 @@ RenderWidgetHostViewMac::RenderWidgetHostViewMac(RenderWidgetHost* widget)
       can_compose_inline_(true),
       is_loading_(false),
       is_hidden_(false),
-      weak_factory_(this),
-      accelerated_compositing_active_(false),
-      needs_gpu_visibility_update_after_repaint_(false),
-      compositing_surface_(gfx::kNullPluginWindow) {
+      weak_factory_(this) {
   // |cocoa_view_| owns us and we will be deleted when |cocoa_view_|
   // goes away.  Since we autorelease it, our caller must put
   // |GetNativeView()| into the view hierarchy right after calling us.
@@ -293,9 +313,37 @@ void RenderWidgetHostViewMac::InitAsPopup(
   [cocoa_view_ setFrame:initial_frame];
 }
 
+// This function creates the fullscreen window and hides the dock and menubar if
+// necessary. Note, this codepath is only used for pepper flash when
+// pp::FlashFullScreen::SetFullscreen() is called. If
+// pp::FullScreen::SetFullscreen() is called then the entire browser window
+// will enter fullscreen instead.
 void RenderWidgetHostViewMac::InitAsFullscreen(
-    RenderWidgetHostView* /*reference_host_view*/) {
-  NOTIMPLEMENTED() << "Full screen not implemented on Mac";
+    RenderWidgetHostView* reference_host_view) {
+  NSWindow* parent_window = nil;
+  if (reference_host_view)
+    parent_window = [reference_host_view->GetNativeView() window];
+  NSScreen* screen = [parent_window screen];
+  if (!screen)
+    screen = [NSScreen mainScreen];
+
+  pepper_fullscreen_window_.reset([[PepperFlashFullscreenWindow alloc]
+      initWithContentRect:[screen frame]
+                styleMask:NSBorderlessWindowMask
+                  backing:NSBackingStoreBuffered
+                    defer:NO]);
+  [pepper_fullscreen_window_ setLevel:NSFloatingWindowLevel];
+  [pepper_fullscreen_window_ setReleasedWhenClosed:NO];
+  [cocoa_view_ setCanBeKeyView:YES];
+  [cocoa_view_ setFrame:[[pepper_fullscreen_window_ contentView] bounds]];
+  [cocoa_view_ setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
+  [[pepper_fullscreen_window_ contentView] addSubview:cocoa_view_];
+
+  fullscreen_window_manager_.reset([[FullscreenWindowManager alloc]
+      initWithWindow:pepper_fullscreen_window_.get()
+       desiredScreen:screen]);
+  [fullscreen_window_manager_ enterFullscreenMode];
+  [pepper_fullscreen_window_ makeKeyAndOrderFront:nil];
 }
 
 RenderWidgetHost* RenderWidgetHostViewMac::GetRenderWidgetHost() const {
@@ -306,10 +354,13 @@ void RenderWidgetHostViewMac::DidBecomeSelected() {
   if (!is_hidden_)
     return;
 
-  if (tab_switch_paint_time_.is_null())
-    tab_switch_paint_time_ = base::TimeTicks::Now();
+  if (web_contents_switch_paint_time_.is_null())
+    web_contents_switch_paint_time_ = base::TimeTicks::Now();
   is_hidden_ = false;
   render_widget_host_->WasRestored();
+
+  // We're messing with the window, so do this to ensure no flashes.
+  [[cocoa_view_ window] disableScreenUpdatesUntilFlush];
 }
 
 void RenderWidgetHostViewMac::WasHidden() {
@@ -324,6 +375,13 @@ void RenderWidgetHostViewMac::WasHidden() {
   // If we have a renderer, then inform it that we are being hidden so it can
   // reduce its resource utilization.
   render_widget_host_->WasHidden();
+
+  // There can be a transparent flash as this view is removed and the next is
+  // added, because of OSX windowing races between displaying the contents of
+  // the NSView and its corresponding OpenGL context.
+  // disableScreenUpdatesUntilFlush prevents the transparent flash by avoiding
+  // screen updates until the next tab draws.
+  [[cocoa_view_ window] disableScreenUpdatesUntilFlush];
 }
 
 void RenderWidgetHostViewMac::SetSize(const gfx::Size& size) {
@@ -339,12 +397,12 @@ void RenderWidgetHostViewMac::SetBounds(const gfx::Rect& rect) {
     return;
 
   // During the initial creation of the RenderWidgetHostView in
-  // TabContents::CreateRenderViewForRenderManager, SetSize is called with an
-  // empty size. In the Windows code flow, it is not ignored because subsequent
-  // sizing calls from the OS flow through TCVW::WasSized which calls SetSize()
-  // again. On Cocoa, we rely on the Cocoa view struture and resizer flags to
-  // keep things sized properly. On the other hand, if the size is not empty
-  // then this is a valid request for a pop-up.
+  // WebContentsImpl::CreateRenderViewForRenderManager, SetSize is called with
+  // an empty size. In the Windows code flow, it is not ignored because
+  // subsequent sizing calls from the OS flow through TCVW::WasSized which calls
+  // SetSize() again. On Cocoa, we rely on the Cocoa view struture and resizer
+  // flags to keep things sized properly. On the other hand, if the size is not
+  // empty then this is a valid request for a pop-up.
   if (rect.size().IsEmpty())
     return;
 
@@ -551,7 +609,7 @@ void RenderWidgetHostViewMac::ImeCompositionRangeChanged(
 void RenderWidgetHostViewMac::DidUpdateBackingStore(
     const gfx::Rect& scroll_rect, int scroll_dx, int scroll_dy,
     const std::vector<gfx::Rect>& copy_rects) {
-  last_frame_was_accelerated_ = false;
+  GotSoftwareFrame();
 
   if (!is_hidden_) {
     std::vector<gfx::Rect> rects(copy_rects);
@@ -593,13 +651,6 @@ void RenderWidgetHostViewMac::DidUpdateBackingStore(
     if (!about_to_validate_and_paint_)
       [cocoa_view_ displayIfNeeded];
   }
-
-  // If |about_to_validate_and_paint_| is set, then -drawRect: is on the stack
-  // and it's not allowed to call -setHidden on the accelerated view.  In that
-  // case, -callSetNeedsDisplayInRect: will hide it later.
-  // If |about_to_validate_and_paint_| is not set, do it now.
-  if (!about_to_validate_and_paint_)
-    HandleDelayedGpuViewHiding();
 }
 
 void RenderWidgetHostViewMac::RenderViewGone(base::TerminationStatus status,
@@ -632,6 +683,11 @@ void RenderWidgetHostViewMac::Destroy() {
   [cocoa_view_ retain];
   [cocoa_view_ removeFromSuperview];
   [cocoa_view_ autorelease];
+
+  [fullscreen_window_manager_ exitFullscreenMode];
+  fullscreen_window_manager_.reset();
+  [pepper_fullscreen_window_ close];
+  pepper_fullscreen_window_.reset();
 
   // We get this call just before |render_widget_host_| deletes
   // itself.  But we are owned by |cocoa_view_|, which may be retained
@@ -731,6 +787,29 @@ bool RenderWidgetHostViewMac::IsPopup() const {
 BackingStore* RenderWidgetHostViewMac::AllocBackingStore(
     const gfx::Size& size) {
   return new BackingStoreMac(render_widget_host_, size);
+}
+
+bool RenderWidgetHostViewMac::CopyFromCompositingSurface(
+      const gfx::Size& size,
+      skia::PlatformCanvas* output) {
+  if (!compositing_iosurface_.get() ||
+      !compositing_iosurface_->HasIOSurface())
+    return false;
+
+  if (!output->initialize(size.width(), size.height(), true))
+    return false;
+
+  return compositing_iosurface_->CopyTo(
+      size, output->getTopDevice()->accessBitmap(true).getPixels());
+}
+
+void RenderWidgetHostViewMac::AsyncCopyFromCompositingSurface(
+    const gfx::Size& size,
+    skia::PlatformCanvas* output,
+    base::Callback<void(bool)> callback) {
+  // TODO(mazda): Implement this.
+  NOTIMPLEMENTED();
+  callback.Run(false);
 }
 
 // Sets whether or not to accept first responder status.
@@ -843,25 +922,6 @@ AcceleratedPluginView* RenderWidgetHostViewMac::ViewForPluginWindowHandle(
   return it->second;
 }
 
-void RenderWidgetHostViewMac::UpdatePluginGeometry(
-    gfx::PluginWindowHandle window,
-    int32 width,
-    int32 height) {
-  if (plugin_container_manager_.IsRootContainer(window)) {
-    // Fake up a WebPluginGeometry for the root window to set the
-    // container's size; we will never get a notification from the
-    // browser about the root window, only plugins.
-    webkit::npapi::WebPluginGeometry geom;
-    gfx::Rect rect(0, 0, width, height);
-    geom.window = window;
-    geom.window_rect = rect;
-    geom.clip_rect = rect;
-    geom.visible = true;
-    geom.rects_valid = true;
-    MovePluginWindows(std::vector<webkit::npapi::WebPluginGeometry>(1, geom));
-  }
-}
-
 void RenderWidgetHostViewMac::AcceleratedSurfaceSetIOSurface(
     gfx::PluginWindowHandle window,
     int32 width,
@@ -872,7 +932,6 @@ void RenderWidgetHostViewMac::AcceleratedSurfaceSetIOSurface(
                                                 width,
                                                 height,
                                                 io_surface_identifier);
-  UpdatePluginGeometry(window, width, height);
 }
 
 void RenderWidgetHostViewMac::AcceleratedSurfaceSetTransportDIB(
@@ -885,7 +944,24 @@ void RenderWidgetHostViewMac::AcceleratedSurfaceSetTransportDIB(
                                                    width,
                                                    height,
                                                    transport_dib);
-  UpdatePluginGeometry(window, width, height);
+}
+
+void RenderWidgetHostViewMac::CompositorSwapBuffers(uint64 surface_handle) {
+  if (is_hidden_)
+    return;
+
+  if (!compositing_iosurface_.get())
+    compositing_iosurface_.reset(CompositingIOSurfaceMac::Create());
+
+  if (!compositing_iosurface_.get())
+    return;
+
+  compositing_iosurface_->SetIOSurface(surface_handle);
+  // No need to draw the surface if we are inside a drawRect. It will be done
+  // later.
+  if (!about_to_validate_and_paint_)
+    compositing_iosurface_->DrawIOSurface(cocoa_view_);
+  GotAcceleratedFrame();
 }
 
 void RenderWidgetHostViewMac::AcceleratedSurfaceBuffersSwapped(
@@ -894,22 +970,30 @@ void RenderWidgetHostViewMac::AcceleratedSurfaceBuffersSwapped(
   TRACE_EVENT0("browser",
       "RenderWidgetHostViewMac::AcceleratedSurfaceBuffersSwapped");
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  AcceleratedPluginView* view = ViewForPluginWindowHandle(params.window);
-  DCHECK(view);
-  if (view) {
-    last_frame_was_accelerated_ = (params.window ==
-        plugin_container_manager_.root_container_handle());
-    plugin_container_manager_.SetSurfaceWasPaintedTo(params.window,
-                                                     params.surface_handle);
 
-    // The surface is hidden until its first paint, to not show garbage.
-    if (plugin_container_manager_.SurfaceShouldBeVisible(params.window))
-      [view setHidden:NO];
-    [view drawView];
+  // Compositor window is always gfx::kNullPluginWindow.
+  // TODO(jbates) http://crbug.com/105344 This will be removed when there are no
+  // plugin windows.
+  if (params.window == gfx::kNullPluginWindow) {
+    CompositorSwapBuffers(params.surface_handle);
+  } else {
+    // Deprecated accelerated plugin code path.
+    AcceleratedPluginView* view = ViewForPluginWindowHandle(params.window);
+    DCHECK(view);
+    if (view) {
+      plugin_container_manager_.SetSurfaceWasPaintedTo(params.window,
+                                                       params.surface_handle);
+
+      // The surface is hidden until its first paint, to not show garbage.
+      if (plugin_container_manager_.SurfaceShouldBeVisible(params.window))
+        [view setHidden:NO];
+      [view drawView];
+    }
   }
 
   if (params.route_id != 0) {
-    RenderWidgetHostImpl::AcknowledgeSwapBuffers(params.route_id, gpu_host_id);
+    RenderWidgetHostImpl::AcknowledgeSwapBuffers(params.route_id,
+                                                 gpu_host_id);
   }
 }
 
@@ -919,20 +1003,27 @@ void RenderWidgetHostViewMac::AcceleratedSurfacePostSubBuffer(
   TRACE_EVENT0("browser",
       "RenderWidgetHostViewMac::AcceleratedSurfacePostSubBuffer");
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  AcceleratedPluginView* view = ViewForPluginWindowHandle(params.window);
-  DCHECK(view);
-  if (view) {
-    last_frame_was_accelerated_ = (params.window ==
-        plugin_container_manager_.root_container_handle());
-    plugin_container_manager_.SetSurfaceWasPaintedTo(
-        params.window,
-        params.surface_handle,
-        gfx::Rect(params.x, params.y, params.width, params.height));
 
-    // The surface is hidden until its first paint, to not show garbage.
-    if (plugin_container_manager_.SurfaceShouldBeVisible(params.window))
-      [view setHidden:NO];
-    [view drawView];
+  // Compositor window is always gfx::kNullPluginWindow.
+  // TODO(jbates) http://crbug.com/105344 This will be removed when there are no
+  // plugin windows.
+  if (params.window == gfx::kNullPluginWindow) {
+    CompositorSwapBuffers(params.surface_handle);
+  } else {
+    // Deprecated accelerated plugin code path.
+    AcceleratedPluginView* view = ViewForPluginWindowHandle(params.window);
+    DCHECK(view);
+    if (view) {
+      plugin_container_manager_.SetSurfaceWasPaintedTo(
+          params.window,
+          params.surface_handle,
+          gfx::Rect(params.x, params.y, params.width, params.height));
+
+      // The surface is hidden until its first paint, to not show garbage.
+      if (plugin_container_manager_.SurfaceShouldBeVisible(params.window))
+        [view setHidden:NO];
+      [view drawView];
+    }
   }
 
   if (params.route_id != 0) {
@@ -942,59 +1033,20 @@ void RenderWidgetHostViewMac::AcceleratedSurfacePostSubBuffer(
 }
 
 void RenderWidgetHostViewMac::AcceleratedSurfaceSuspend() {
+  if (compositing_iosurface_.get())
+    compositing_iosurface_->UnrefIOSurface();
 }
 
-void RenderWidgetHostViewMac::UpdateRootGpuViewVisibility(
-    bool show_gpu_widget) {
-  TRACE_EVENT1("renderer_host",
-      "RenderWidgetHostViewMac::UpdateRootGpuViewVisibility",
-      "show", show_gpu_widget);
-  // Plugins are destroyed on page navigate. The compositor layer on the other
-  // hand is created on demand and then stays alive until its renderer process
-  // dies (usually on cross-domain navigation). Instead, only a flag
-  // |is_accelerated_compositing_active()| is flipped when the compositor output
-  // should be shown/hidden.
-  // Show/hide the view belonging to the compositor here.
-  plugin_container_manager_.set_gpu_rendering_active(show_gpu_widget);
-
-  gfx::PluginWindowHandle root_handle =
-      plugin_container_manager_.root_container_handle();
-  if (root_handle != gfx::kNullPluginWindow) {
-    AcceleratedPluginView* view = ViewForPluginWindowHandle(root_handle);
-    DCHECK(view);
-    bool visible =
-        plugin_container_manager_.SurfaceShouldBeVisible(root_handle);
-    [[view window] disableScreenUpdatesUntilFlush];
-    [view setHidden:!visible];
-  }
-}
-
-void RenderWidgetHostViewMac::HandleDelayedGpuViewHiding() {
-  TRACE_EVENT0("renderer_host",
-      "RenderWidgetHostViewMac::HandleDelayedGpuViewHiding");
-  if (needs_gpu_visibility_update_after_repaint_) {
-    UpdateRootGpuViewVisibility(false);
-    needs_gpu_visibility_update_after_repaint_ = false;
-  }
+bool RenderWidgetHostViewMac::HasAcceleratedSurface(
+      const gfx::Size& desired_size) {
+  return last_frame_was_accelerated_ &&
+         compositing_iosurface_.get() &&
+         compositing_iosurface_->HasIOSurface() &&
+         (desired_size.IsEmpty() ||
+          compositing_iosurface_->io_surface_size() == desired_size);
 }
 
 void RenderWidgetHostViewMac::OnAcceleratedCompositingStateChange() {
-  CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  bool activated = RenderWidgetHostImpl::From(
-      GetRenderWidgetHost())->is_accelerated_compositing_active();
-  bool changed = accelerated_compositing_active_ != activated;
-  accelerated_compositing_active_ = activated;
-  if (!changed)
-    return;
-
-  TRACE_EVENT1("renderer_host",
-      "RenderWidgetHostViewMac::OnAcceleratedCompositingStateChange",
-      "active", accelerated_compositing_active_);
-  if (accelerated_compositing_active_) {
-    UpdateRootGpuViewVisibility(accelerated_compositing_active_);
-  } else {
-    needs_gpu_visibility_update_after_repaint_ = true;
-  }
 }
 
 void RenderWidgetHostViewMac::GetScreenInfo(WebKit::WebScreenInfo* results) {
@@ -1014,10 +1066,10 @@ gfx::Rect RenderWidgetHostViewMac::GetRootWindowBounds() {
 }
 
 gfx::GLSurfaceHandle RenderWidgetHostViewMac::GetCompositingSurface() {
-  if (compositing_surface_ == gfx::kNullPluginWindow)
-    compositing_surface_ = AllocateFakePluginWindowHandle(
-        /*opaque=*/true, /*root=*/true);
-  return gfx::GLSurfaceHandle(compositing_surface_, true);
+  // Compositor window is always gfx::kNullPluginWindow.
+  // TODO(jbates) http://crbug.com/105344 This will be removed when there are no
+  // plugin windows.
+  return gfx::GLSurfaceHandle(gfx::kNullPluginWindow, true);
 }
 
 void RenderWidgetHostViewMac::DrawAcceleratedSurfaceInstance(
@@ -1099,6 +1151,34 @@ void RenderWidgetHostViewMac::ShutdownHost() {
   // Do not touch any members at this point, |this| has been deleted.
 }
 
+void RenderWidgetHostViewMac::GotAcceleratedFrame() {
+  if (!last_frame_was_accelerated_) {
+    last_frame_was_accelerated_ = true;
+
+    // Need to wipe the software view with transparency to expose the GL
+    // underlay. Invalidate the whole window to do that.
+    if (!about_to_validate_and_paint_) {
+      [cocoa_view_ setNeedsDisplay:YES];
+      [cocoa_view_ displayIfNeeded];
+    }
+
+    // Delete software backingstore.
+    BackingStoreManager::RemoveBackingStore(render_widget_host_);
+  }
+}
+
+void RenderWidgetHostViewMac::GotSoftwareFrame() {
+  if (last_frame_was_accelerated_) {
+    last_frame_was_accelerated_ = false;
+
+    // Forget IOSurface since we are drawing a software frame now.
+    if (compositing_iosurface_.get() &&
+        compositing_iosurface_->HasIOSurface()) {
+      compositing_iosurface_->UnrefIOSurface();
+    }
+  }
+}
+
 gfx::Rect RenderWidgetHostViewMac::GetViewCocoaBounds() const {
   return gfx::Rect(NSRectToCGRect([cocoa_view_ bounds]));
 }
@@ -1134,14 +1214,6 @@ void RenderWidgetHostViewMac::SetBackground(const SkBitmap& background) {
   if (render_widget_host_)
     render_widget_host_->Send(new ViewMsg_SetBackground(
         render_widget_host_->GetRoutingID(), background));
-}
-
-bool RenderWidgetHostViewMac::CopyFromCompositingSurface(
-      const gfx::Size& size,
-      skia::PlatformCanvas* output) {
-  // TODO(mazda): Implement this.
-  NOTIMPLEMENTED();
-  return false;
 }
 
 void RenderWidgetHostViewMac::OnAccessibilityNotifications(
@@ -1182,6 +1254,14 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
     renderWidgetHostView_.reset(r);
     canBeKeyView_ = YES;
     focusedPluginIdentifier_ = -1;
+
+    // OpenGL support:
+    handlingGlobalFrameDidChange_ = NO;
+    [[NSNotificationCenter defaultCenter]
+         addObserver:self
+            selector:@selector(globalFrameDidChange:)
+                name:NSViewGlobalFrameDidChangeNotification
+              object:self];
   }
   return self;
 }
@@ -1189,6 +1269,7 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
 - (void)dealloc {
   if (delegate_ && [delegate_ respondsToSelector:@selector(viewGone:)])
     [delegate_ viewGone:self];
+  [[NSNotificationCenter defaultCenter] removeObserver:self];
 
   [super dealloc];
 }
@@ -1307,6 +1388,7 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
 }
 
 - (void)mouseEvent:(NSEvent*)theEvent {
+  TRACE_EVENT0("browser", "RenderWidgetHostViewCocoa::mouseEvent");
   if (delegate_ && [delegate_ respondsToSelector:@selector(handleEvent:)]) {
     BOOL handled = [delegate_ handleEvent:theEvent];
     if (handled)
@@ -1468,6 +1550,7 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
 }
 
 - (void)keyEvent:(NSEvent*)theEvent wasKeyEquivalent:(BOOL)equiv {
+  TRACE_EVENT0("browser", "RenderWidgetHostViewCocoa::keyEvent");
   DCHECK([theEvent type] != NSKeyDown ||
          !equiv == !([theEvent modifierFlags] & NSCommandKeyMask));
 
@@ -1486,6 +1569,15 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
   DCHECK(widgetHost);
 
   NativeWebKeyboardEvent event(theEvent);
+
+  // Force fullscreen windows to close on Escape so they won't keep the keyboard
+  // grabbed or be stuck onscreen if the renderer is hanging.
+  if (event.type == NativeWebKeyboardEvent::RawKeyDown &&
+      event.windowsKeyCode == ui::VKEY_ESCAPE &&
+      renderWidgetHostView_->pepper_fullscreen_window()) {
+    widgetHost->Shutdown();
+    return;
+  }
 
   // We only handle key down events and just simply forward other events.
   if ([theEvent type] != NSKeyDown) {
@@ -1703,6 +1795,22 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
   }
 }
 
+- (void)viewWillMoveToWindow:(NSWindow*)newWindow {
+  // We're messing with the window, so do this to ensure no flashes. This one
+  // prevents a flash when the current tab is closed.
+  [[self window] disableScreenUpdatesUntilFlush];
+}
+
+- (void)globalFrameDidChange:(NSNotification*)notification {
+  if (handlingGlobalFrameDidChange_)
+    return;
+
+  handlingGlobalFrameDidChange_ = YES;
+  if (renderWidgetHostView_->compositing_iosurface_.get())
+    renderWidgetHostView_->compositing_iosurface_->GlobalFrameDidChange();
+  handlingGlobalFrameDidChange_ = NO;
+}
+
 - (void)setFrameSize:(NSSize)newSize {
   // NB: -[NSView setFrame:] calls through -setFrameSize:, so overriding
   // -setFrame: isn't neccessary.
@@ -1717,8 +1825,6 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
   [self setNeedsDisplayInRect:renderWidgetHostView_->invalid_rect_];
   renderWidgetHostView_->call_set_needs_display_in_rect_pending_ = false;
   renderWidgetHostView_->invalid_rect_ = NSZeroRect;
-
-  renderWidgetHostView_->HandleDelayedGpuViewHiding();
 }
 
 // Fills with white the parts of the area to the right and bottom for |rect|
@@ -1770,6 +1876,7 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
 }
 
 - (void)drawRect:(NSRect)dirtyRect {
+  TRACE_EVENT0("browser", "RenderWidgetHostViewCocoa::drawRect");
   if (!renderWidgetHostView_->render_widget_host_) {
     // TODO(shess): Consider using something more noticable?
     [[NSColor whiteColor] set];
@@ -1777,32 +1884,36 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
     return;
   }
 
-  const gfx::Rect damagedRect([self flipNSRectToRect:dirtyRect]);
-
-  if (renderWidgetHostView_->last_frame_was_accelerated_) {
-    gfx::Rect gpuRect;
-
-    gfx::PluginWindowHandle root_handle =
-       renderWidgetHostView_->plugin_container_manager_.root_container_handle();
-    if (root_handle != gfx::kNullPluginWindow) {
-      AcceleratedPluginView* view =
-          renderWidgetHostView_->ViewForPluginWindowHandle(root_handle);
-      DCHECK(view);
-      if (view && ![view isHidden]) {
-        gpuRect = [self flipNSRectToRect:[view frame]];
-      }
-    }
-
-    [self fillBottomRightRemainderOfRect:gpuRect dirtyRect:damagedRect];
-    return;
-  }
-
   DCHECK(!renderWidgetHostView_->about_to_validate_and_paint_);
 
+  // GetBackingStore works for both software and accelerated frames. If a
+  // SwapBuffers occurs while GetBackingStore is blocking, we will continue to
+  // blit the IOSurface below.
   renderWidgetHostView_->about_to_validate_and_paint_ = true;
   BackingStoreMac* backingStore = static_cast<BackingStoreMac*>(
       renderWidgetHostView_->render_widget_host_->GetBackingStore(true));
   renderWidgetHostView_->about_to_validate_and_paint_ = false;
+
+  const gfx::Rect damagedRect([self flipNSRectToRect:dirtyRect]);
+
+  if (renderWidgetHostView_->last_frame_was_accelerated_ &&
+      renderWidgetHostView_->compositing_iosurface_.get()) {
+    // Note that this code path is only executed when there's window damage
+    // (when the window is foregrounded, for example). Normally, GPU frames
+    // arrive and are drawn during AcceleratedSurfaceBuffersSwapped.
+    {
+      TRACE_EVENT0("browser", "NSRectFill");
+      // Draw transparency to expose the GL underlay. NSRectFill is extremely
+      // slow (15ms for a window on a fast MacPro), so this is only done for the
+      // dirty rect. The composited swap-buffers typically happens outside of
+      // drawRect to avoid invalidating the entire NSView.
+      [[NSColor clearColor] set];
+      NSRectFill(dirtyRect);
+    }
+
+    renderWidgetHostView_->compositing_iosurface_->DrawIOSurface(self);
+    return;
+  }
 
   if (backingStore) {
     gfx::Rect bitmapRect(0, 0,
@@ -1850,14 +1961,16 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
       // time the backing store is NULL...
       renderWidgetHostView_->whiteout_start_time_ = base::TimeTicks();
     }
-    if (!renderWidgetHostView_->tab_switch_paint_time_.is_null()) {
-      base::TimeDelta tab_switch_paint_duration = base::TimeTicks::Now() -
-          renderWidgetHostView_->tab_switch_paint_time_;
+    if (!renderWidgetHostView_->web_contents_switch_paint_time_.is_null()) {
+      base::TimeDelta web_contents_switch_paint_duration =
+          base::TimeTicks::Now() -
+              renderWidgetHostView_->web_contents_switch_paint_time_;
       UMA_HISTOGRAM_TIMES("MPArch.RWH_TabSwitchPaintDuration",
-          tab_switch_paint_duration);
-      // Reset tab_switch_paint_time_ to 0 so future tab selections are
+          web_contents_switch_paint_duration);
+      // Reset contents_switch_paint_time_ to 0 so future tab selections are
       // recorded.
-      renderWidgetHostView_->tab_switch_paint_time_ = base::TimeTicks();
+      renderWidgetHostView_->web_contents_switch_paint_time_ =
+          base::TimeTicks();
     }
   } else {
     [[NSColor whiteColor] set];

@@ -1,8 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/extensions/api/permissions/permissions_api.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/ui/browser.h"
@@ -80,8 +81,14 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ContentScriptViewSource) {
   ASSERT_TRUE(RunExtensionTest("content_scripts/view_source")) << message_;
 }
 
+#if defined (OS_CHROMEOS)
+IN_PROC_BROWSER_TEST_F(
+    ExtensionApiTest,
+    FLAKY_ContentScriptStylesInjectedIntoExistingRenderers) {
+#else
 IN_PROC_BROWSER_TEST_F(
     ExtensionApiTest, ContentScriptStylesInjectedIntoExistingRenderers) {
+#endif
   ASSERT_TRUE(StartTestServer());
 
   ui_test_utils::WindowedNotificationObserver signal(
@@ -137,4 +144,12 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ContentScriptExtensionAPIs) {
       browser(), extension->GetResourceURL("fire_event.html"),
       NEW_FOREGROUND_TAB, ui_test_utils::BROWSER_TEST_NONE);
   EXPECT_TRUE(catcher.GetNextResult());
+}
+
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ContentScriptPermissionsApi) {
+  RequestPermissionsFunction::SetIgnoreUserGestureForTests(true);
+  RequestPermissionsFunction::SetAutoConfirmForTests(true);
+  host_resolver()->AddRule("*.com", "127.0.0.1");
+  ASSERT_TRUE(StartTestServer());
+  ASSERT_TRUE(RunExtensionTest("content_scripts/permissions")) << message_;
 }

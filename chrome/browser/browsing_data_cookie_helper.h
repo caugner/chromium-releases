@@ -25,8 +25,6 @@ class URLRequestContextGetter;
 // A client of this class need to call StartFetching from the UI thread to
 // initiate the flow, and it'll be notified by the callback in its UI
 // thread at some later point.
-// The client must call CancelNotification() if it's destroyed before the
-// callback is notified.
 class BrowsingDataCookieHelper
     : public base::RefCountedThreadSafe<BrowsingDataCookieHelper> {
  public:
@@ -38,11 +36,6 @@ class BrowsingDataCookieHelper
   virtual void StartFetching(
       const base::Callback<void(const net::CookieList& cookies)>& callback);
 
-  // Cancels the notification callback (i.e., the window that created it no
-  // longer exists).
-  // This must be called only in the UI thread.
-  virtual void CancelNotification();
-
   // Requests a single cookie to be deleted in the IO thread. This must be
   // called in the UI thread.
   virtual void DeleteCookie(const net::CookieMonster::CanonicalCookie& cookie);
@@ -50,6 +43,7 @@ class BrowsingDataCookieHelper
  protected:
   friend class base::RefCountedThreadSafe<BrowsingDataCookieHelper>;
   virtual ~BrowsingDataCookieHelper();
+  Profile* profile() { return profile_; }
 
  private:
   // Fetch the cookies. This must be called in the IO thread.
@@ -113,7 +107,9 @@ class CannedBrowsingDataCookieHelper : public BrowsingDataCookieHelper {
   // BrowsingDataCookieHelper methods.
   virtual void StartFetching(
       const net::CookieMonster::GetCookieListCallback& callback) OVERRIDE;
-  virtual void CancelNotification() OVERRIDE;
+
+  // Returns the currently stored number of cookies.
+  size_t GetCookieCount() const;
 
  private:
   // Check if the cookie list contains a cookie with the same name,
@@ -125,8 +121,6 @@ class CannedBrowsingDataCookieHelper : public BrowsingDataCookieHelper {
   virtual ~CannedBrowsingDataCookieHelper();
 
   net::CookieList cookie_list_;
-
-  Profile* profile_;
 
   DISALLOW_COPY_AND_ASSIGN(CannedBrowsingDataCookieHelper);
 };

@@ -23,7 +23,6 @@
 #include "chrome/browser/download/download_service.h"
 #include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/first_run/first_run.h"
-#include "chrome/browser/instant/instant_confirm_dialog.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/printing/cloud_print/virtual_driver_install_helper.h"
 #include "chrome/browser/printing/print_dialog_cloud.h"
@@ -41,7 +40,6 @@
 #include "chrome/browser/ui/browser_init.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
-#import "chrome/browser/ui/cocoa/about_window_controller.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_menu_bridge.h"
 #import "chrome/browser/ui/cocoa/browser_window_cocoa.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
@@ -53,7 +51,6 @@
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_window_controller.h"
 #include "chrome/browser/ui/cocoa/task_manager_mac.h"
-#include "chrome/browser/ui/panels/panel_manager.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/chrome_switches.h"
@@ -370,9 +367,6 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
   // browsers get dealloc'd, it will stop the RunLoop and fall back into main().
   BrowserList::EndKeepAlive();
 
-  // Close these off if they have open windows.
-  [aboutController_ close];
-
   [self unregisterEventHandlers];
 }
 
@@ -633,7 +627,7 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
 // Helper function for populating and displaying the in progress downloads at
 // exit alert panel.
 - (BOOL)userWillWaitForInProgressDownloads:(int)downloadCount {
-  NSString* warningText = nil;
+  NSString* titleText = nil;
   NSString* explanationText = nil;
   NSString* waitTitle = nil;
   NSString* exitTitle = nil;
@@ -641,37 +635,28 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
   // Set the dialog text based on whether or not there are multiple downloads.
   if (downloadCount == 1) {
     // Dialog text: warning and explanation.
-    warningText = l10n_util::GetNSString(
-        IDS_SINGLE_DOWNLOAD_REMOVE_CONFIRM_WARNING);
+    titleText = l10n_util::GetNSString(
+        IDS_SINGLE_DOWNLOAD_REMOVE_CONFIRM_TITLE);
     explanationText = l10n_util::GetNSString(
         IDS_SINGLE_DOWNLOAD_REMOVE_CONFIRM_EXPLANATION);
-
-    // Cancel download and exit button text.
-    exitTitle = l10n_util::GetNSString(
-        IDS_SINGLE_DOWNLOAD_REMOVE_CONFIRM_OK_BUTTON_LABEL);
-
-    // Wait for download button text.
-    waitTitle = l10n_util::GetNSString(
-        IDS_SINGLE_DOWNLOAD_REMOVE_CONFIRM_CANCEL_BUTTON_LABEL);
   } else {
     // Dialog text: warning and explanation.
-    warningText = l10n_util::GetNSStringF(
-        IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_WARNING,
+    titleText = l10n_util::GetNSStringF(
+        IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_TITLE,
         base::IntToString16(downloadCount));
     explanationText = l10n_util::GetNSString(
         IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_EXPLANATION);
-
-    // Cancel downloads and exit button text.
-    exitTitle = l10n_util::GetNSString(
-        IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_OK_BUTTON_LABEL);
-
-    // Wait for downloads button text.
-    waitTitle = l10n_util::GetNSString(
-        IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_CANCEL_BUTTON_LABEL);
   }
+  // Cancel download and exit button text.
+  exitTitle = l10n_util::GetNSString(
+      IDS_DOWNLOAD_REMOVE_CONFIRM_OK_BUTTON_LABEL);
+
+  // Wait for download button text.
+  waitTitle = l10n_util::GetNSString(
+      IDS_DOWNLOAD_REMOVE_CONFIRM_CANCEL_BUTTON_LABEL);
 
   // 'waitButton' is the default choice.
-  int choice = NSRunAlertPanel(warningText, explanationText,
+  int choice = NSRunAlertPanel(titleText, explanationText,
                                waitTitle, exitTitle, nil);
   return choice == NSAlertDefaultReturn ? YES : NO;
 }
@@ -1199,20 +1184,6 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
   }
 }
 
-// Called when the about window is closed. We use this to release the
-// window controller.
-- (void)aboutWindowClosed:(NSNotification*)notification {
-  NSWindow* window = [aboutController_ window];
-  DCHECK_EQ([notification object], window);
-  [[NSNotificationCenter defaultCenter]
-      removeObserver:self
-                name:NSWindowWillCloseNotification
-              object:window];
-  // AboutWindowControllers are autoreleased in
-  // -[AboutWindowController windowWillClose:].
-  aboutController_ = nil;
-}
-
 - (IBAction)orderFrontStandardAboutPanel:(id)sender {
   if (Browser* browser = ActivateBrowser([self lastProfile])) {
     // Show about tab in the active browser window.
@@ -1307,15 +1278,24 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
   return bookmarkMenuBridge_.get();
 }
 
+- (void)addObserverForWorkAreaChange:(ui::WorkAreaWatcherObserver*)observer {
+  workAreaChangeObservers_.AddObserver(observer);
+}
+
+- (void)removeObserverForWorkAreaChange:(ui::WorkAreaWatcherObserver*)observer {
+  workAreaChangeObservers_.RemoveObserver(observer);
+}
+
 - (void)applicationDidChangeScreenParameters:(NSNotification*)notification {
   // During this callback the working area is not always already updated. Defer.
-  [self performSelector:@selector(delayedPanelManagerScreenParametersUpdate)
+  [self performSelector:@selector(delayedScreenParametersUpdate)
              withObject:nil
              afterDelay:0];
 }
 
-- (void)delayedPanelManagerScreenParametersUpdate {
-  PanelManager::GetInstance()->OnDisplayChanged();
+- (void)delayedScreenParametersUpdate {
+  FOR_EACH_OBSERVER(ui::WorkAreaWatcherObserver, workAreaChangeObservers_,
+      WorkAreaChanged());
 }
 
 @end  // @implementation AppController

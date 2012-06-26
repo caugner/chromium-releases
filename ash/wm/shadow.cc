@@ -7,7 +7,7 @@
 #include "ash/wm/image_grid.h"
 #include "grit/ui_resources.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/gfx/compositor/scoped_layer_animation_settings.h"
+#include "ui/compositor/scoped_layer_animation_settings.h"
 
 namespace {
 
@@ -44,9 +44,9 @@ Shadow::Shadow() : style_(STYLE_ACTIVE) {
 Shadow::~Shadow() {
 }
 
-void Shadow::Init(Style style) {
+void Shadow::Init(aura::Window* window, Style style) {
   style_ = style;
-  image_grid_.reset(new ImageGrid);
+  image_grid_.reset(new ImageGrid(window));
   UpdateImagesForStyle();
   image_grid_->layer()->set_name("Shadow");
   image_grid_->layer()->SetOpacity(GetOpacityForStyle(style_));

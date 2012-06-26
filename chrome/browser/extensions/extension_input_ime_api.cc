@@ -124,18 +124,20 @@ bool ReadMenuItems(
   return true;
 }
 
-}
+}  // namespace
 
 namespace events {
 
-const char kOnActivate[] = "input.ime.onActivate";
-const char kOnDeactivated[] = "input.ime.onDeactivated";
-const char kOnFocus[] = "input.ime.onFocus";
-const char kOnBlur[] = "input.ime.onBlur";
-const char kOnInputContextUpdate[] = "input.ime.onInputContextUpdate";
-const char kOnKeyEvent[] = "input.ime.onKeyEvent";
-const char kOnCandidateClicked[] = "input.ime.onCandidateClicked";
-const char kOnMenuItemActivated[] = "input.ime.onMenuItemActivated";
+const char kOnActivate[] = "experimental.input.ime.onActivate";
+const char kOnDeactivated[] = "experimental.input.ime.onDeactivated";
+const char kOnFocus[] = "experimental.input.ime.onFocus";
+const char kOnBlur[] = "experimental.input.ime.onBlur";
+const char kOnInputContextUpdate[] =
+    "experimental.input.ime.onInputContextUpdate";
+const char kOnKeyEvent[] = "experimental.input.ime.onKeyEvent";
+const char kOnCandidateClicked[] = "experimental.input.ime.onCandidateClicked";
+const char kOnMenuItemActivated[] =
+    "experimental.input.ime.onMenuItemActivated";
 
 }  // namespace events
 
@@ -149,8 +151,7 @@ class ImeObserver : public chromeos::InputMethodEngine::Observer {
     engine_id_(engine_id) {
   }
 
-  virtual ~ImeObserver() {
-  }
+  virtual ~ImeObserver() {}
 
   virtual void OnActivate(const std::string& engine_id) {
     if (profile_ == NULL || extension_id_.empty())
@@ -311,23 +312,15 @@ class ImeObserver : public chromeos::InputMethodEngine::Observer {
 
   DISALLOW_COPY_AND_ASSIGN(ImeObserver);
 };
-}  // namespace chromeos
 
+}  // namespace chromeos
 
 ExtensionInputImeEventRouter*
 ExtensionInputImeEventRouter::GetInstance() {
   return Singleton<ExtensionInputImeEventRouter>::get();
 }
 
-ExtensionInputImeEventRouter::ExtensionInputImeEventRouter()
-  : next_request_id_(1) {
-}
-
-ExtensionInputImeEventRouter::~ExtensionInputImeEventRouter() {
-}
-
-void ExtensionInputImeEventRouter::Init() {
-}
+void ExtensionInputImeEventRouter::Init() {}
 
 #if defined(OS_CHROMEOS)
 bool ExtensionInputImeEventRouter::RegisterIme(
@@ -464,6 +457,12 @@ std::string ExtensionInputImeEventRouter::AddRequest(
 
   return request_id;
 }
+
+ExtensionInputImeEventRouter::ExtensionInputImeEventRouter()
+  : next_request_id_(1) {
+}
+
+ExtensionInputImeEventRouter::~ExtensionInputImeEventRouter() {}
 
 bool SetCompositionFunction::RunImpl() {
   chromeos::InputMethodEngine* engine =

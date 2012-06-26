@@ -35,20 +35,8 @@ class UserWallpaperDelegate;
 // Delegate of the Shell.
 class ASH_EXPORT ShellDelegate {
  public:
-  // Source requesting the window list.
-  enum CycleSource {
-    // Windows are going to be used for alt-tab (or F5).
-    SOURCE_KEYBOARD,
-
-    // Windows are going to be cycled from the launcher.
-    SOURCE_LAUNCHER,
-  };
-
   // The Shell owns the delegate.
   virtual ~ShellDelegate() {}
-
-  // Invoked to create a new status area. Can return NULL.
-  virtual views::Widget* CreateStatusArea() = 0;
 
   // Returns true if user has logged in.
   virtual bool IsUserLoggedIn() = 0;
@@ -62,23 +50,37 @@ class ASH_EXPORT ShellDelegate {
   // Returns true if the screen is currently locked.
   virtual bool IsScreenLocked() const = 0;
 
-  // Invoked when a user uses Ctrl-Shift-Q to close chrome.
+  // Shuts down the environment.
+  virtual void Shutdown() = 0;
+
+  // Invoked when the user uses Ctrl-Shift-Q to close chrome.
   virtual void Exit() = 0;
 
-  // Invoked when a user uses Ctrl-N or Ctrl-Shift-N to open a new window.
+  // Invoked when the user uses Ctrl-N or Ctrl-Shift-N to open a new window.
   virtual void NewWindow(bool incognito) = 0;
+
+  // Invoked when the user presses the Search key.
+  virtual void Search() = 0;
+
+  // Invoked when the user uses Ctrl-M to open file manager.
+  virtual void OpenFileManager() = 0;
+
+  // Invoked when the user opens Crosh.
+  virtual void OpenCrosh() = 0;
+
+  // Invoked when the user needs to set up mobile networking.
+  virtual void OpenMobileSetup() = 0;
+
+  // Get the current browser context. This will get us the current profile.
+  virtual content::BrowserContext* GetCurrentBrowserContext() = 0;
+
+  // Invoked when the user presses a shortcut to toggle spoken feedback
+  // for accessibility.
+  virtual void ToggleSpokenFeedback() = 0;
 
   // Invoked to create an AppListViewDelegate. Shell takes the ownership of
   // the created delegate.
   virtual AppListViewDelegate* CreateAppListViewDelegate() = 0;
-
-  // Returns a list of windows to cycle with keyboard shortcuts (e.g. alt-tab
-  // or the window switching key).  If |order_by_activity| is true then windows
-  // are returned in most-recently-used order with the currently active window
-  // at the front of the list.  Otherwise any order may be returned.  The list
-  // does not contain NULL pointers.
-  virtual std::vector<aura::Window*> GetCycleWindowList(
-      CycleSource source) const = 0;
 
   // Invoked to start taking partial screenshot.
   virtual void StartPartialScreenshot(

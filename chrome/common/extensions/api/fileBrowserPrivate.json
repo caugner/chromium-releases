@@ -55,6 +55,29 @@
         }
       },
       {
+        "id": "DriveWebApp",
+        "type": "object",
+        "description": "GData WebApp properties.",
+        "properties": {
+          "appId": {
+            "type": "string",
+            "description": "WebApp ID."
+          },
+          "appName": {
+            "type": "string",
+            "description": "WebApp name."
+          },
+          "objectType": {
+            "type": "string",
+            "description": "Object (file) type description."
+          },
+          "isPrimary": {
+            "type": "boolean",
+            "description": "True if this WebApp is the primary (default) open action for this file."
+          }
+        }
+      },
+      {
         "id": "GDataFileProperties",
         "type": "object",
         "description": "GData file properties.",
@@ -108,6 +131,12 @@
             "type": "integer",
             "optional": true,
             "description": "The error code (from base::PlatformFileError) if fetching the properties for this file had an error."
+          },
+          "driveApps" : {
+            "type": "array",
+            "optional": true,
+            "items": {"$ref": "DriveWebApp"},
+            "description": "An array of WebApps capable of opening this file."
           }
         }
       },
@@ -121,9 +150,9 @@
             "optional": true,
             "description": "Disk volume mount point path. The value corresponds to its Entry.fullPath in File API."
           },
-          "sourceUrl": {
+          "sourcePath": {
             "type": "string",
-            "description": "The path to the mounted devicem, url of the mounted archive file or network resource."
+            "description": "The path to the mounted device, archive file or network resource."
           },
           "mountType": {
             "type": "string",
@@ -242,7 +271,7 @@
                      "error_path_unmounted"],
             "description": "Event type that tells listeners if mount was successful or an error occurred. It also specifies the error."
           },
-          "sourceUrl": {
+          "sourcePath": {
             "type": "string",
             "description": "Path that has been mounted."
           },
@@ -663,8 +692,18 @@
           {
             "name": "options",
             "type": "object",
-            "description": "Name/value pairs for source specific options",
-            "optional": true
+            "description": "Name/value pairs for source specific options"
+          },
+          {
+            "name": "callback",
+            "type": "function",
+            "parameters": [
+              {
+                "name": "sourcePath",
+                "type": "string",
+                "description": "Source path of the mount."
+              }
+            ]
           }
         ]
       },
@@ -816,6 +855,83 @@
             ]
           }
         ]
+      },
+      {
+        "name": "getGDataPreferences",
+        "description": "Retrieves GData-related preferences .",
+        "parameters": [
+          {
+            "name": "callback",
+            "type": "function",
+            "parameters": [
+              {
+                "name": "result",
+                "type": "object",
+                "properties": {
+                  "driveEnabled": {"type":"boolean"},
+                  "cellularDisabled": {"type":"boolean"},
+                  "hostedFilesDisabled": {"type":"boolean"}
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "setGDataPreferences",
+        "description": "Sets GData-related preferences.",
+        "parameters": [
+          {
+            "name": "changeInfo",
+            "type": "object",
+            "properties": {
+              "cellularDisabled": {"type":"boolean", "optional":true},
+              "hostedFilesDisabled": {"type":"boolean", "optional":true}
+            }
+          }
+        ]
+      },
+      {
+        "name": "getPathForDriveSearchResult",
+        "description": "Gets file path for a given drive search result filesystem url.",
+        "parameters": [
+          {
+            "name": "fileURL",
+            "type": "string",
+            "description": "Url of the drive search result"
+          },
+          {
+            "name": "callback",
+            "type": "function",
+            "parameters": [
+              {
+                "name": "filePath",
+                "type": "string",
+                "description": "File path of the search result"
+              }  
+            ]
+          }
+        ]
+      },
+      {
+        "name": "getNetworkConnectionState",
+        "description": "Retrieves the state of the currently active network connection.",
+        "parameters": [
+          {
+            "name": "callback",
+            "type": "function",
+            "parameters": [
+              {
+                "name": "result",
+                "type": "object",
+                "properties": {
+                  "type": {"type": "string"},
+                  "online": {"type": "boolean"}
+                }
+              }
+            ]
+          }
+        ]
       }
     ],
     "events": [
@@ -867,6 +983,30 @@
             "description": "File watch event information."
           }
         ]
+      },
+      {
+        "name": "onDocumentFeedFetched",
+        "type": "function",
+        "description": "Fired when a document feed is fetched.",
+        "parameters": [
+          {
+            "type": "integer",
+            "name": "entriesFetched",
+            "description": "Number of entries fetched so far."
+          }
+        ]
+      },
+      {
+        "name": "onGDataPreferencesChanged",
+        "type": "function",
+        "description": "Fired when GData-related preferences change. The preferences can be retrieved via 'getGDataPreferences'.",
+        "parameters": []
+      },
+      {
+        "name": "onNetworkConnectionChanged",
+        "type": "function",
+        "description": "Fired when the active network connection state changes. The network connection state can be retrieved via 'getNetworkConnectionState'.",
+        "parameters": []
       }
     ]
   }

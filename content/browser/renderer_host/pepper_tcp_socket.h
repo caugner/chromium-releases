@@ -15,6 +15,10 @@
 #include "net/base/completion_callback.h"
 #include "ppapi/c/pp_stdint.h"
 
+namespace ppapi {
+class PPB_X509Certificate_Fields;
+}
+
 class PepperMessageFilter;
 struct PP_NetAddress_Private;
 
@@ -22,6 +26,7 @@ namespace net {
 class IOBuffer;
 class SingleRequestHostResolver;
 class StreamSocket;
+class X509Certificate;
 }
 
 // PepperTCPSocket is used by PepperMessageFilter to handle requests from
@@ -46,11 +51,25 @@ class PepperTCPSocket {
 
   void Connect(const std::string& host, uint16_t port);
   void ConnectWithNetAddress(const PP_NetAddress_Private& net_addr);
-  void SSLHandshake(const std::string& server_name, uint16_t server_port);
+  void SSLHandshake(
+      const std::string& server_name,
+      uint16_t server_port,
+      const std::vector<std::vector<char> >& trusted_certs,
+      const std::vector<std::vector<char> >& untrusted_certs);
   void Read(int32 bytes_to_read);
   void Write(const std::string& data);
 
   void SendConnectACKError();
+
+  // Extracts the certificate field data from a |net::X509Certificate| into
+  // |PPB_X509Certificate_Fields|.
+  static bool GetCertificateFields(const net::X509Certificate& cert,
+                                   ppapi::PPB_X509Certificate_Fields* fields);
+  // Extracts the certificate field data from the DER representation of a
+  // certificate into |PPB_X509Certificate_Fields|.
+  static bool GetCertificateFields(const char* der,
+                                   uint32_t length,
+                                   ppapi::PPB_X509Certificate_Fields* fields);
 
  private:
   enum ConnectionState {

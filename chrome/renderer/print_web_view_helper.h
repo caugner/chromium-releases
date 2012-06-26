@@ -216,8 +216,7 @@ class PrintWebViewHelper
   // copies, page range, etc.
   bool UpdatePrintSettings(WebKit::WebFrame* frame,
                            const WebKit::WebNode& node,
-                           const base::DictionaryValue& passed_job_settings,
-                           bool print_for_preview);
+                           const base::DictionaryValue& passed_job_settings);
 
   // Get final print settings from the user.
   // Return false if the user cancels or on error.
@@ -287,7 +286,6 @@ class PrintWebViewHelper
       int page_index,
       const PrintMsg_Print_Params& default_params,
       bool ignore_css_margins,
-      bool fit_to_page,
       double* scale_factor,
       printing::PageSizeMargins* page_layout_in_points);
 
@@ -298,8 +296,7 @@ class PrintWebViewHelper
       const WebKit::WebNode& node,
       PrepareFrameAndViewForPrint* prepare,
       const PrintMsg_Print_Params& params,
-      bool ignore_css_margins,
-      bool fit_to_page);
+      bool ignore_css_margins);
 
   // Given the |device| and |canvas| to draw on, prints the appropriate headers
   // and footers using strings from |header_footer_info| on to the canvas.
@@ -356,10 +353,6 @@ class PrintWebViewHelper
   bool is_print_ready_metafile_sent_;
   bool ignore_css_margins_;
 
-  // True if we need to auto fit to page else false.
-  // NOTE: When we print to pdf, we don't fit to page.
-  bool fit_to_page_;
-
   // Used for scripted initiated printing blocking.
   base::Time last_cancelled_script_print_;
   int user_cancelled_scripted_print_count_;
@@ -368,6 +361,9 @@ class PrintWebViewHelper
   // Let the browser process know of a printing failure. Only set to false when
   // the failure came from the browser in the first place.
   bool notify_browser_of_print_failure_;
+
+  // True, when printing from print preview.
+  bool print_for_preview_;
 
   scoped_ptr<PrintMsg_PrintPages_Params> old_print_pages_params_;
 
@@ -392,8 +388,7 @@ class PrintWebViewHelper
     // Create the print preview document. |pages| is empty to print all pages.
     bool CreatePreviewDocument(PrintMsg_Print_Params* params,
                                const std::vector<int>& pages,
-                               bool ignore_css_margins,
-                               bool fit_to_page);
+                               bool ignore_css_margins);
 
     // Called after a page gets rendered. |page_time| is how long the
     // rendering took.

@@ -17,11 +17,13 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
+#include "base/memory/weak_ptr.h"
 #include "base/string16.h"
 #include "base/time.h"
 #include "chrome/browser/autofill/autofill_download.h"
 #include "chrome/browser/autofill/field_types.h"
 #include "chrome/browser/autofill/form_structure.h"
+#include "chrome/browser/sync/profile_sync_service_observer.h"
 #include "content/public/browser/web_contents_observer.h"
 
 class AutofillExternalDelegate;
@@ -31,6 +33,7 @@ class AutofillMetrics;
 class CreditCard;
 class PersonalDataManager;
 class PrefService;
+class ProfileSyncService;
 class TabContentsWrapper;
 
 struct ViewHostMsg_FrameNavigate_Params;
@@ -51,6 +54,7 @@ namespace webkit {
 namespace forms {
 struct FormData;
 struct FormField;
+struct PasswordFormFillData;
 }
 }
 
@@ -58,6 +62,7 @@ struct FormField;
 // forms.
 class AutofillManager : public content::WebContentsObserver,
                         public AutofillDownloadManager::Observer,
+                        public ProfileSyncServiceObserver,
                         public base::RefCounted<AutofillManager> {
  public:
   explicit AutofillManager(TabContentsWrapper* tab_contents);
@@ -73,6 +78,9 @@ class AutofillManager : public content::WebContentsObserver,
     external_delegate_ = delegate;
   }
 
+  // Used to say if this class has an external delegate that it is using.
+  bool HasExternalDelegate();
+
   // Called from our external delegate so they cannot be private.
   virtual void OnFillAutofillFormData(int query_id,
                                       const webkit::forms::FormData& form,
@@ -83,6 +91,10 @@ class AutofillManager : public content::WebContentsObserver,
   void OnShowAutofillDialog();
   void OnDidPreviewAutofillFormData();
   void OnShowPasswordGenerationPopup(const gfx::Rect& bounds);
+
+  // Remove the credit card or Autofill profile that matches |unique_id|
+  // from the database.
+  void RemoveAutofillProfileOrCreditCard(int unique_id);
 
  protected:
   // Only test code should subclass AutofillManager.
@@ -106,6 +118,12 @@ class AutofillManager : public content::WebContentsObserver,
 
   // Reset cache.
   void Reset();
+
+  // Informs the renderer of the current password generation state. This is a
+  // separate function to aid with testing.
+  virtual void SendPasswordGenerationStateToRenderer(
+      content::RenderViewHost* host,
+      bool enabled);
 
   // Logs quality metrics for the |submitted_form| and uploads the form data
   // to the crowdsourcing server, if appropriate.
@@ -143,6 +161,7 @@ class AutofillManager : public content::WebContentsObserver,
 
  private:
   // content::WebContentsObserver:
+  virtual void RenderViewCreated(content::RenderViewHost* host) OVERRIDE;
   virtual void DidNavigateMainFrame(
       const content::LoadCommittedDetails& details,
       const content::FrameNavigateParams& params) OVERRIDE;
@@ -151,6 +170,19 @@ class AutofillManager : public content::WebContentsObserver,
   // AutofillDownloadManager::Observer:
   virtual void OnLoadedServerPredictions(
       const std::string& response_xml) OVERRIDE;
+
+  // ProfileSyncServiceObserver:
+  virtual void OnStateChanged() OVERRIDE;
+
+  // Register as an observer with the sync service.
+  void RegisterWithSyncService();
+
+  // Determines what the current state of password generation is, and if it has
+  // changed from |password_generation_enabled_|. If it has changed or if
+  // |new_renderer| is true, it notifies the renderer of this change via
+  // SendPasswordGenerationStateToRenderer.
+  void UpdatePasswordGenerationState(content::RenderViewHost* host,
+                                     bool new_renderer);
 
   void OnFormsSeen(const std::vector<webkit::forms::FormData>& forms,
                    const base::TimeTicks& timestamp);
@@ -166,6 +198,12 @@ class AutofillManager : public content::WebContentsObserver,
                                 bool display_warning);
   void OnDidEndTextFieldEditing();
   void OnHideAutofillPopup();
+  void OnAddPasswordFormMapping(
+      const webkit::forms::FormField& form,
+      const webkit::forms::PasswordFormFillData& fill_data);
+  void OnShowPasswordSuggestions(const webkit::forms::FormField& field,
+                                 const gfx::Rect& bounds,
+                                 const std::vector<string16>& suggestions);
 
   // Fills |host| with the RenderViewHost for this tab.
   // Returns false if Autofill is disabled or if the host is unavailable.
@@ -303,6 +341,13 @@ class AutofillManager : public content::WebContentsObserver,
   // When the user first interacted with a potentially fillable form on this
   // page.
   base::TimeTicks initial_interaction_timestamp_;
+  // If password generation is enabled. We cache this value so that we don't
+  // spam the renderer with messages during startup when the sync state
+  // is changing rapidly.
+  bool password_generation_enabled_;
+  // The ProfileSyncService associated with this tab. This may be NULL in
+  // testing.
+  base::WeakPtr<ProfileSyncService> sync_service_;
 
   // Our copy of the form data.
   ScopedVector<FormStructure> form_structures_;

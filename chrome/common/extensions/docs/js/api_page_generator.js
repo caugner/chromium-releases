@@ -24,7 +24,6 @@ var MODULE_SCHEMAS = [
   '../api/browserAction.json',
   '../api/browsingData.json',
   '../api/chromeAuthPrivate.json',
-  '../api/chromePrivate.json',
   '../api/chromeosInfoPrivate.json',
   '../api/contentSettings.json',
   '../api/contextMenus.json',
@@ -32,22 +31,20 @@ var MODULE_SCHEMAS = [
   '../api/debugger.json',
   '../api/devtools.json',
   '../api/experimental.accessibility.json',
+  '../api/experimental.alarms.json',
   '../api/experimental.app.json',
   '../api/experimental.bookmarkManager.json',
   '../api/experimental.downloads.json',
-  '../api/experimental.extension.json',
   '../api/experimental.fontSettings.json',
   '../api/experimental.identity.json',
   '../api/experimental.infobars.json',
   '../api/experimental.input.ui.json',
   '../api/experimental.input.virtualKeyboard.json',
   '../api/experimental.keybinding.json',
-  '../api/experimental.managedMode.json',
   '../api/experimental.offscreenTabs.json',
   '../api/experimental.processes.json',
   '../api/experimental.rlz.json',
-  '../api/experimental.serial.json',
-  '../api/experimental.socket.json',
+  '../api/experimental.runtime.json',
   '../api/experimental.speechInput.json',
   '../api/experimental.webRequest.json',
   '../api/extension.json',
@@ -58,6 +55,7 @@ var MODULE_SCHEMAS = [
   '../api/idle.json',
   '../api/input.ime.json',
   '../api/inputMethodPrivate.json',
+  '../api/managedModePrivate.json',
   '../api/management.json',
   '../api/mediaPlayerPrivate.json',
   '../api/metricsPrivate.json',
@@ -137,9 +135,9 @@ function extend(obj, obj2) {
 }
 
 /*
- * Main entry point for composing the page. It will fetch it's template,
+ * Main entry point for composing the page. It will fetch its template,
  * the extension api, and attempt to fetch the matching static content.
- * It will insert the static content, if any, prepare it's pageData then
+ * It will insert the static content, if any, prepare its pageData then
  * render the template from |pageData|.
  */
 function renderPage() {
@@ -219,7 +217,7 @@ function fetchSamples() {
 }
 
 /**
- * Fetches |url| and returns it's text contents from the xhr.responseText in
+ * Fetches |url| and returns its text contents from the xhr.responseText in
  * onSuccess(content)
  */
 function fetchContent(url, onSuccess, onError) {
@@ -648,14 +646,28 @@ function getTypeName(schema) {
 }
 
 function hasPrimitiveValue(schema) {
-  return typeof(schema.value) === 'string';
+  var type = typeof(schema.value);
+  return type === 'string' || type === 'number';
 }
 
 function getPrimitiveValue(schema) {
-  if (schema.type === 'string')
-    return '"' + schema.value + '"';
-  else
-    return schema.value;
+  switch (typeof(schema.value)) {
+    case 'string':
+      return '"' + schema.value + '"';
+
+    case 'number':
+      // Comma-separate large numbers (e.g. 5,000,000), easier to read.
+      var value = String(schema.value);
+      var groupsOfThree = [];
+      while (value.length > 3) {
+        groupsOfThree.unshift(value.slice(value.length - 3));
+        value = value.slice(0, value.length - 3);
+      }
+      groupsOfThree.unshift(value);
+      return groupsOfThree.join(',');
+  }
+
+  return undefined;
 }
 
 function getSignatureString(parameters) {

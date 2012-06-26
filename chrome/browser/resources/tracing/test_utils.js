@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -38,7 +38,35 @@ cr.define('test_utils', function() {
     };
     req.send(null);
   }
+
+  function newAsyncSlice(start, duration, startThread, endThread) {
+    return newAsyncSliceNamed('a', start, duration, startThread, endThread);
+  }
+
+  function newAsyncSliceNamed(name, start, duration, startThread, endThread) {
+    var s = new tracing.TimelineAsyncSlice(name, 0, start);
+    s.duration = duration;
+    s.startThread = startThread;
+    s.endThread = endThread;
+    var subSlice = new tracing.TimelineAsyncSlice(name, 0, start);
+    subSlice.duration = duration;
+    subSlice.startThread = startThread;
+    subSlice.endThread = endThread;
+    s.subSlices = [subSlice];
+    return s;
+  }
+
+  function assertArrayishEquals(ref, val) {
+    assertEquals(ref.length, val.length);
+    for (var i = 0; i < ref.length; i++)
+      assertEquals(ref[i], val[i]);
+  }
+
+
   return {
-    getAsync: getAsync
+    getAsync: getAsync,
+    newAsyncSlice: newAsyncSlice,
+    newAsyncSliceNamed: newAsyncSliceNamed,
+    assertArrayishEquals: assertArrayishEquals
   };
 });

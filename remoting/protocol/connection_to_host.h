@@ -12,6 +12,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "remoting/jingle_glue/signal_strategy.h"
 #include "remoting/proto/internal.pb.h"
+#include "remoting/protocol/clipboard_filter.h"
 #include "remoting/protocol/errors.h"
 #include "remoting/protocol/input_filter.h"
 #include "remoting/protocol/message_reader.h"
@@ -37,6 +38,7 @@ class Authenticator;
 class ClientControlDispatcher;
 class ClientEventDispatcher;
 class ClientStub;
+class ClipboardStub;
 class HostStub;
 class InputStub;
 class SessionConfig;
@@ -73,12 +75,15 @@ class ConnectionToHost : public SignalStrategy::Listener,
                        scoped_ptr<Authenticator> authenticator,
                        HostEventCallback* event_callback,
                        ClientStub* client_stub,
+                       ClipboardStub* clipboard_stub,
                        VideoStub* video_stub);
 
   virtual void Disconnect(const base::Closure& shutdown_task);
 
   virtual const SessionConfig& config();
 
+  virtual ClipboardStub* clipboard_stub();
+  virtual HostStub* host_stub();
   virtual InputStub* input_stub();
 
   // SignalStrategy::StatusObserver interface.
@@ -128,6 +133,7 @@ class ConnectionToHost : public SignalStrategy::Listener,
 
   // Stub for incoming messages.
   ClientStub* client_stub_;
+  ClipboardStub* clipboard_stub_;
   VideoStub* video_stub_;
 
   scoped_ptr<SignalStrategy> signal_strategy_;
@@ -137,6 +143,7 @@ class ConnectionToHost : public SignalStrategy::Listener,
   scoped_ptr<VideoReader> video_reader_;
   scoped_ptr<ClientControlDispatcher> control_dispatcher_;
   scoped_ptr<ClientEventDispatcher> event_dispatcher_;
+  ClipboardFilter clipboard_forwarder_;
   InputFilter event_forwarder_;
 
   // Internal state of the connection.

@@ -20,20 +20,21 @@
 
 namespace remoting {
 
+namespace {
+
 using protocol::ClipboardEvent;
 using protocol::KeyEvent;
 using protocol::MouseEvent;
 
-namespace {
-
 // USB to XKB keycode map table.
 #define USB_KEYMAP(usb, xkb, win, mac) {usb, xkb}
 #include "remoting/host/usb_keycode_map.h"
+#undef USB_KEYMAP
 
 // A class to generate events on Linux.
 class EventExecutorLinux : public EventExecutor {
  public:
-  EventExecutorLinux(MessageLoop* message_loop, Capturer* capturer);
+  EventExecutorLinux(MessageLoop* message_loop);
   virtual ~EventExecutorLinux();
 
   bool Init();
@@ -60,8 +61,6 @@ class EventExecutorLinux : public EventExecutor {
   // X11 graphics context.
   Display* display_;
   Window root_window_;
-  int width_;
-  int height_;
 
   int test_event_base_;
   int test_error_base_;
@@ -257,31 +256,16 @@ const int kUsVkeyToKeysym[256] = {
 };
 
 int ChromotocolKeycodeToX11Keysym(int32_t keycode) {
-  if (keycode < 0 || keycode > 255) {
-    return -1;
-  }
+  if (keycode < 0 || keycode > 255)
+    return kInvalidKeycode;
 
   return kUsVkeyToKeysym[keycode];
 }
 
-uint16_t UsbKeycodeToXkbKeycode(uint32_t usb_keycode) {
-  if (usb_keycode == 0)
-    return 0;
-
-  for (uint i = 0; i < arraysize(usb_keycode_map); i++)
-    if (usb_keycode_map[i].usb_keycode == usb_keycode)
-      return usb_keycode_map[i].native_keycode;
-
-  return 0;
-}
-
-EventExecutorLinux::EventExecutorLinux(MessageLoop* message_loop,
-                                       Capturer* capturer)
+EventExecutorLinux::EventExecutorLinux(MessageLoop* message_loop)
     : message_loop_(message_loop),
       display_(XOpenDisplay(NULL)),
-      root_window_(BadValue),
-      width_(0),
-      height_(0) {
+      root_window_(BadValue) {
 }
 
 EventExecutorLinux::~EventExecutorLinux() {
@@ -306,17 +290,6 @@ bool EventExecutorLinux::Init() {
     return false;
   }
 
-  // Grab the width and height so we can figure out if mouse moves are out of
-  // range.
-  XWindowAttributes root_attr;
-  // TODO(ajwong): Handle resolution changes.
-  if (!XGetWindowAttributes(display_, root_window_, &root_attr)) {
-    LOG(ERROR) << "Unable to get window attributes";
-    return false;
-  }
-
-  width_ = root_attr.width;
-  height_ = root_attr.height;
   return true;
 }
 
@@ -325,6 +298,9 @@ void EventExecutorLinux::InjectClipboardEvent(const ClipboardEvent& event) {
 }
 
 void EventExecutorLinux::InjectKeyEvent(const KeyEvent& event) {
+  // HostEventDispatcher should filter events missing the pressed field.
+  DCHECK(event.has_pressed());
+
   if (MessageLoop::current() != message_loop_) {
     message_loop_->PostTask(
         FROM_HERE,
@@ -333,37 +309,24 @@ void EventExecutorLinux::InjectKeyEvent(const KeyEvent& event) {
     return;
   }
 
-  int keycode = 0;
-  if (event.has_usb_keycode() && event.usb_keycode() != 0) {
-    keycode = UsbKeycodeToXkbKeycode(event.usb_keycode());
-    VLOG(3) << "Got usb keycode: " << std::hex << event.usb_keycode()
-            << " to xkb keycode: " << keycode << std::dec;
-  } else {
+  int keycode = kInvalidKeycode;
+  if (event.has_usb_keycode()) {
+    keycode = UsbKeycodeToNativeKeycode(event.usb_keycode());
+    VLOG(3) << "Converting USB keycode: " << std::hex << event.usb_keycode()
+            << " to keycode: " << keycode << std::dec;
+  } else if (event.has_keycode()) {
     // Fall back to keysym translation.
     // TODO(garykac) Remove this once we switch entirely over to USB keycodes.
     int keysym = ChromotocolKeycodeToX11Keysym(event.keycode());
-
-    VLOG(3) << "Converting Win vkey: " << std::hex << event.keycode()
-            << " to xkeysym: " << keysym << std::dec;
-    if (keysym == -1) {
-      LOG(WARNING) << "Ignoring unknown key: " << event.keycode();
-      return;
-    }
-
-    // Translate the keysym into a keycode understandable by the X display.
     keycode = XKeysymToKeycode(display_, keysym);
-    VLOG(3) << "Converting xkeysym: " << std::hex << keysym
-            << " to x11 keycode: " << keycode << std::dec;
-    if (keycode == 0) {
-      LOG(WARNING) << "Ignoring undefined keysym: " << keysym
-                   << " for key: " << event.keycode();
-      return;
-    }
-
-    VLOG(3) << "Got pepper key: " << event.keycode()
-            << " sending keysym: " << keysym
-            << " to keycode: " << keycode;
+    VLOG(3) << "Converting VKEY: " << std::hex << event.keycode()
+            << " to keysym: " << keysym
+            << " to keycode: " << keycode << std::dec;
   }
+
+  // Ignore events with no VK- or USB-keycode, or which can't be mapped.
+  if (keycode == kInvalidKeycode)
+    return;
 
   if (event.pressed()) {
     if (pressed_keys_.find(keycode) != pressed_keys_.end()) {
@@ -404,7 +367,6 @@ void EventExecutorLinux::InjectScrollWheelClicks(int button, int count) {
     XTestFakeButtonEvent(display_, button, true, CurrentTime);
     XTestFakeButtonEvent(display_, button, false, CurrentTime);
   }
-  XFlush(display_);
 }
 
 void EventExecutorLinux::InjectMouseEvent(const MouseEvent& event) {
@@ -417,20 +379,11 @@ void EventExecutorLinux::InjectMouseEvent(const MouseEvent& event) {
   }
 
   if (event.has_x() && event.has_y()) {
-    if (event.x() < 0 || event.y() < 0 ||
-        event.x() > width_ || event.y() > height_) {
-      // A misbehaving client may send these. Drop events that are out of range.
-      // TODO(ajwong): How can we log this sanely? We don't want to DOS the
-      // server with a misbehaving client by logging like crazy.
-      return;
-    }
-
     VLOG(3) << "Moving mouse to " << event.x()
             << "," << event.y();
     XTestFakeMotionEvent(display_, DefaultScreen(display_),
                          event.x(), event.y(),
                          CurrentTime);
-    XFlush(display_);
   }
 
   if (event.has_button() && event.has_button_down()) {
@@ -447,7 +400,6 @@ void EventExecutorLinux::InjectMouseEvent(const MouseEvent& event) {
             << button_number;
     XTestFakeButtonEvent(display_, button_number, event.button_down(),
                          CurrentTime);
-    XFlush(display_);
   }
 
   if (event.has_wheel_offset_y() && event.wheel_offset_y() != 0) {
@@ -459,6 +411,8 @@ void EventExecutorLinux::InjectMouseEvent(const MouseEvent& event) {
     InjectScrollWheelClicks(HorizontalScrollWheelToX11ButtonNumber(dx),
                             abs(dx));
   }
+
+  XFlush(display_);
 }
 
 }  // namespace
@@ -466,10 +420,9 @@ void EventExecutorLinux::InjectMouseEvent(const MouseEvent& event) {
 scoped_ptr<protocol::HostEventStub> EventExecutor::Create(
     MessageLoop* message_loop, Capturer* capturer) {
   scoped_ptr<EventExecutorLinux> executor(
-      new EventExecutorLinux(message_loop, capturer));
-  if (!executor->Init()) {
-    executor.reset(NULL);
-  }
+      new EventExecutorLinux(message_loop));
+  if (!executor->Init())
+    return scoped_ptr<protocol::HostEventStub>(NULL);
   return executor.PassAs<protocol::HostEventStub>();
 }
 

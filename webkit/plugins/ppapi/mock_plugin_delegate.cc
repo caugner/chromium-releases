@@ -50,6 +50,11 @@ SkBitmap* MockPluginDelegate::GetSadPluginBitmap() {
   return NULL;
 }
 
+WebKit::WebPlugin* MockPluginDelegate::CreatePluginReplacement(
+    const FilePath& file_path) {
+  return NULL;
+}
+
 MockPluginDelegate::PlatformImage2D* MockPluginDelegate::CreateImage2D(
     int width,
     int height) {
@@ -234,19 +239,6 @@ MockPluginDelegate::GetFileThreadMessageLoopProxy() {
   return scoped_refptr<base::MessageLoopProxy>();
 }
 
-int32_t MockPluginDelegate::ConnectTcp(
-    webkit::ppapi::PPB_Flash_NetConnector_Impl* connector,
-    const char* host,
-    uint16_t port) {
-  return PP_ERROR_FAILED;
-}
-
-int32_t MockPluginDelegate::ConnectTcpAddress(
-    webkit::ppapi::PPB_Flash_NetConnector_Impl* connector,
-    const PP_NetAddress_Private* addr) {
-  return PP_ERROR_FAILED;
-}
-
 uint32 MockPluginDelegate::TCPSocketCreate() {
   return 0;
 }
@@ -263,9 +255,12 @@ void MockPluginDelegate::TCPSocketConnectWithNetAddress(
     const PP_NetAddress_Private& addr) {
 }
 
-void MockPluginDelegate::TCPSocketSSLHandshake(uint32 socket_id,
-                                               const std::string& server_name,
-                                               uint16_t server_port) {
+void MockPluginDelegate::TCPSocketSSLHandshake(
+    uint32 socket_id,
+    const std::string& server_name,
+    uint16_t server_port,
+    const std::vector<std::vector<char> >& trusted_certs,
+    const std::vector<std::vector<char> >& untrusted_certs) {
 }
 
 void MockPluginDelegate::TCPSocketRead(uint32 socket_id,
@@ -341,6 +336,12 @@ void MockPluginDelegate::RemoveNetworkListObserver(
     webkit_glue::NetworkListObserver* observer) {
 }
 
+bool MockPluginDelegate::X509CertificateParseDER(
+    const std::vector<char>& der,
+    ::ppapi::PPB_X509Certificate_Fields* fields) {
+  return false;
+}
+
 int32_t MockPluginDelegate::ShowContextMenu(
     PluginInstance* instance,
     webkit::ppapi::PPB_Flash_Menu_Impl* menu,
@@ -387,10 +388,6 @@ webkit_glue::P2PTransport* MockPluginDelegate::CreateP2PTransport() {
 
 double MockPluginDelegate::GetLocalTimeZoneOffset(base::Time t) {
   return 0.0;
-}
-
-std::string MockPluginDelegate::GetFlashCommandLineArgs() {
-  return std::string();
 }
 
 base::SharedMemory* MockPluginDelegate::CreateAnonymousSharedMemory(
@@ -441,6 +438,10 @@ int MockPluginDelegate::EnumerateDevices(
 webkit_glue::ClipboardClient*
 MockPluginDelegate::CreateClipboardClient() const {
   return NULL;
+}
+
+std::string MockPluginDelegate::GetDeviceID() {
+  return std::string();
 }
 
 }  // namespace ppapi

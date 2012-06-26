@@ -45,7 +45,7 @@ class TabNavigation {
                 const std::string& state,
                 content::PageTransition transition);
   TabNavigation(const TabNavigation& tab);
-  ~TabNavigation();
+  virtual ~TabNavigation();
   TabNavigation& operator=(const TabNavigation& tab);
 
   // Converts this TabNavigation into a NavigationEntry with a page id of
@@ -89,6 +89,12 @@ class TabNavigation {
   void set_index(int index) { index_ = index; }
   int index() const { return index_; }
 
+  // The URL that initially spawned the NavigationEntry.
+  const GURL& original_request_url() const { return original_request_url_; }
+  void set_original_request_url(const GURL& url) {
+    original_request_url_ = url;
+  }
+
   // Converts a set of TabNavigations into a set of NavigationEntrys. The
   // caller owns the NavigationEntrys.
   static void CreateNavigationEntriesFromTabNavigations(
@@ -108,6 +114,7 @@ class TabNavigation {
   int64 post_id_;
 
   int index_;
+  GURL original_request_url_;
 };
 
 // SessionTab ----------------------------------------------------------------
@@ -115,7 +122,7 @@ class TabNavigation {
 // SessionTab corresponds to a NavigationController.
 struct SessionTab {
   SessionTab();
-  ~SessionTab();
+  virtual ~SessionTab();
 
   // Unique id of the window.
   SessionID window_id;

@@ -23,7 +23,6 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
-#include "chrome/browser/sync/notifier/p2p_notifier.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/sync/profile_sync_service_harness.h"
 #include "chrome/browser/sync/test/integration/sync_datatype_helper.h"
@@ -50,6 +49,7 @@
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_status.h"
+#include "sync/notifier/p2p_notifier.h"
 #include "sync/protocol/sync.pb.h"
 
 using content::BrowserThread;
@@ -120,7 +120,6 @@ SyncTest::SyncTest(TestType test_type)
       notifications_enabled_(true),
       test_server_handle_(base::kNullProcessHandle),
       number_of_default_sync_items_(0) {
-  InProcessBrowserTest::set_show_window(true);
   sync_datatype_helper::AssociateWithTest(this);
   switch (test_type_) {
     case SINGLE_CLIENT: {

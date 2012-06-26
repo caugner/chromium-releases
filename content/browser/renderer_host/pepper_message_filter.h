@@ -8,8 +8,10 @@
 
 #include <map>
 #include <string>
+#include <vector>
 
 #include "base/basictypes.h"
+#include "base/file_path.h"
 #include "base/memory/linked_ptr.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/process.h"
@@ -33,6 +35,7 @@ class ListValue;
 }
 
 namespace content {
+class BrowserContext;
 class ResourceContext;
 }
 
@@ -44,6 +47,7 @@ class HostResolver;
 
 namespace ppapi {
 struct HostPortPair;
+class PPB_X509Certificate_Fields;
 }
 
 // This class is used in two contexts, both supporting PPAPI plugins. The first
@@ -61,14 +65,11 @@ class PepperMessageFilter
   // provided for sanity checking).
   PepperMessageFilter(ProcessType type,
                       int process_id,
-                      content::ResourceContext* resource_context);
+                      content::BrowserContext* browser_context);
 
   // Constructor when used in the context of a PPAPI process (the argument is
   // provided for sanity checking).
-  explicit PepperMessageFilter(ProcessType type,
-                               net::HostResolver* host_resolver);
-
-  virtual ~PepperMessageFilter();
+  PepperMessageFilter(ProcessType type, net::HostResolver* host_resolver);
 
   // content::BrowserMessageFilter methods.
   virtual void OverrideThreadForMessage(
@@ -97,6 +98,9 @@ class PepperMessageFilter
 
   const net::SSLConfig& ssl_config() { return ssl_config_; }
 
+ protected:
+  virtual ~PepperMessageFilter();
+
  private:
   struct OnConnectTcpBoundInfo {
     int routing_id;
@@ -119,34 +123,6 @@ class PepperMessageFilter
   // notifications.
   typedef std::set<uint32> NetworkMonitorIdSet;
 
-#if defined(ENABLE_FLAPPER_HACKS)
-  // Message handlers.
-  void OnConnectTcp(int routing_id,
-                    int request_id,
-                    const std::string& host,
-                    uint16 port);
-  void OnConnectTcpAddress(int routing_id,
-                           int request_id,
-                           const PP_NetAddress_Private& address);
-
-  // |Send()| a |PepperMsg_ConnectTcpACK|, which reports an error.
-  bool SendConnectTcpACKError(int routing_id,
-                              int request_id);
-
-  // Continuation of |OnConnectTcp()|.
-  void ConnectTcpLookupFinished(int result,
-                                const net::AddressList& addresses,
-                                const OnConnectTcpBoundInfo& bound_info);
-  void ConnectTcpOnWorkerThread(int routing_id,
-                                int request_id,
-                                net::AddressList addresses);
-
-  // Continuation of |OnConnectTcpAddress()|.
-  void ConnectTcpAddressOnWorkerThread(int routing_id,
-                                       int request_id,
-                                       PP_NetAddress_Private addr);
-#endif  // ENABLE_FLAPPER_HACKS
-
   void OnGetLocalTimeZoneOffset(base::Time t, double* result);
   void OnGetFontFamilies(IPC::Message* reply);
 
@@ -160,9 +136,12 @@ class PepperMessageFilter
   void OnTCPConnectWithNetAddress(int32 routing_id,
                                   uint32 socket_id,
                                   const PP_NetAddress_Private& net_addr);
-  void OnTCPSSLHandshake(uint32 socket_id,
-                         const std::string& server_name,
-                         uint16_t server_port);
+  void OnTCPSSLHandshake(
+      uint32 socket_id,
+      const std::string& server_name,
+      uint16_t server_port,
+      const std::vector<std::vector<char> >& trusted_certs,
+      const std::vector<std::vector<char> >& untrusted_certs);
   void OnTCPRead(uint32 socket_id, int32_t bytes_to_read);
   void OnTCPWrite(uint32 socket_id, const std::string& data);
   void OnTCPDisconnect(uint32 socket_id);
@@ -230,6 +209,12 @@ class PepperMessageFilter
                              const ppapi::HostPortPair& host_port,
                              const PP_HostResolver_Private_Hint& hint);
 
+  void OnX509CertificateParseDER(const std::vector<char>& der,
+                                 bool* succeeded,
+                                 ppapi::PPB_X509Certificate_Fields* result);
+  void OnUpdateActivity();
+  void OnGetDeviceID(std::string* id);
+
   // Callback when the font list has been retrieved on a background thread.
   void GetFontFamiliesComplete(IPC::Message* reply_msg,
                                scoped_ptr<base::ListValue> result);
@@ -268,6 +253,9 @@ class PepperMessageFilter
   TCPServerSocketMap tcp_server_sockets_;
 
   NetworkMonitorIdSet network_monitor_ids_;
+
+  FilePath browser_path_;
+  bool incognito_;
 
   DISALLOW_COPY_AND_ASSIGN(PepperMessageFilter);
 };

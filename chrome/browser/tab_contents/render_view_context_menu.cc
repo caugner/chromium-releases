@@ -24,11 +24,9 @@
 #include "chrome/browser/download/download_service.h"
 #include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/download/download_util.h"
-#include "chrome/browser/extensions/extension_event_router.h"
-#include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/google/google_util.h"
-#include "chrome/browser/net/browser_url_util.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/prefs/pref_service.h"
@@ -54,7 +52,9 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/chrome_view_type.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/net/url_util.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/print_messages.h"
 #include "chrome/common/spellcheck_messages.h"
@@ -62,6 +62,7 @@
 #include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/download_save_info.h"
+#include "content/public/browser/download_url_parameters.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
@@ -74,7 +75,6 @@
 #include "content/public/common/ssl_status.h"
 #include "grit/generated_resources.h"
 #include "net/base/escape.h"
-#include "net/base/net_util.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebContextMenuData.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebMediaPlayerAction.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginAction.h"
@@ -87,8 +87,14 @@
 #include "chrome/browser/chromeos/extensions/file_manager_util.h"
 #endif
 
+using WebKit::WebContextMenuData;
+using WebKit::WebMediaPlayerAction;
+using WebKit::WebPluginAction;
+using WebKit::WebString;
+using WebKit::WebURL;
 using content::ChildProcessSecurityPolicy;
 using content::DownloadManager;
+using content::DownloadUrlParameters;
 using content::NavigationController;
 using content::NavigationEntry;
 using content::OpenURLParams;
@@ -96,11 +102,6 @@ using content::RenderViewHost;
 using content::SSLStatus;
 using content::UserMetricsAction;
 using content::WebContents;
-using WebKit::WebContextMenuData;
-using WebKit::WebMediaPlayerAction;
-using WebKit::WebPluginAction;
-using WebKit::WebURL;
-using WebKit::WebString;
 
 namespace {
 
@@ -259,6 +260,10 @@ RenderViewContextMenu::~RenderViewContextMenu() {
 void RenderViewContextMenu::Init() {
   InitMenu();
   PlatformInit();
+}
+
+void RenderViewContextMenu::Cancel() {
+  PlatformCancel();
 }
 
 static bool ExtensionPatternMatch(const URLPatternSet& patterns,
@@ -526,12 +531,12 @@ void RenderViewContextMenu::AppendAllExtensionItems() {
 }
 
 void RenderViewContextMenu::InitMenu() {
-  const Extension* extension = GetExtension();
-  if (extension) {
-    if (extension->is_platform_app())
-      AppendPlatformAppItems(extension);
-    else
-      AppendPopupExtensionItems();
+  content::ViewType view_type = source_web_contents_->GetViewType();
+  if (view_type == chrome::VIEW_TYPE_APP_SHELL) {
+    AppendPlatformAppItems();
+    return;
+  } else if (view_type == chrome::VIEW_TYPE_EXTENSION_POPUP) {
+    AppendPopupExtensionItems();
     return;
   }
 
@@ -625,27 +630,20 @@ void RenderViewContextMenu::InitMenu() {
 }
 
 const Extension* RenderViewContextMenu::GetExtension() const {
-  ExtensionProcessManager* process_manager =
-      profile_->GetExtensionProcessManager();
+  ExtensionSystem* system = ExtensionSystem::Get(profile_);
   // There is no process manager in some tests.
-  if (!process_manager) {
+  if (!system->process_manager())
     return NULL;
-  }
 
-  ExtensionProcessManager::const_iterator iter;
-  for (iter = process_manager->begin(); iter != process_manager->end();
-       ++iter) {
-    ExtensionHost* host = *iter;
-    if (host->host_contents() == source_web_contents_)
-      return host->extension();
-  }
-
-  return NULL;
+  return system->process_manager()->GetExtensionForRenderViewHost(
+      source_web_contents_->GetRenderViewHost());
 }
 
-void RenderViewContextMenu::AppendPlatformAppItems(
-    const Extension* platform_app) {
+void RenderViewContextMenu::AppendPlatformAppItems() {
+  const Extension* platform_app = GetExtension();
   DCHECK(platform_app);
+  DCHECK(platform_app->is_platform_app());
+
   int index = 0;
   AppendExtensionItems(platform_app->id(), &index);
 
@@ -1102,9 +1100,11 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
   // Extension items.
   if (id >= IDC_EXTENSIONS_CONTEXT_CUSTOM_FIRST &&
       id <= IDC_EXTENSIONS_CONTEXT_CUSTOM_LAST) {
-    // In the future we may add APIs for extensions to disable items, but for
-    // now all items are implicitly enabled.
-    return true;
+    ExtensionMenuItem* item = GetExtensionMenuItem(id);
+    // If this is the parent menu item, it is always enabled.
+    if (!item)
+      return true;
+    return item->enabled();
   }
 
   if (id >= IDC_CONTENT_CONTEXT_PROTOCOL_HANDLER_FIRST &&
@@ -1519,14 +1519,12 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
       save_info.prompt_for_save_location = true;
       DownloadManager* dlm =
           DownloadServiceFactory::GetForProfile(profile_)->GetDownloadManager();
-      dlm->DownloadUrl(url,
-                       referrer,
-                       params_.frame_charset,
-                       false,  // Don't prefer_cache
-                       -1,  // No POST id
-                       save_info,
-                       source_web_contents_,
-                       DownloadManager::OnStartedCallback());
+      scoped_ptr<DownloadUrlParameters> dl_params(
+          DownloadUrlParameters::FromWebContents(
+            source_web_contents_, url, save_info));
+      dl_params->set_referrer(referrer);
+      dl_params->set_referrer_encoding(params_.frame_charset);
+      dlm->DownloadUrl(dl_params.Pass());
       break;
     }
 
@@ -1548,14 +1546,15 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
       }
       DownloadManager* dlm =
           DownloadServiceFactory::GetForProfile(profile_)->GetDownloadManager();
-      dlm->DownloadUrl(url,
-                       referrer,
-                       "",
-                       true,  // prefer_cache
-                       post_id,
-                       save_info,
-                       source_web_contents_,
-                       DownloadManager::OnStartedCallback());
+      scoped_ptr<DownloadUrlParameters> dl_params(
+          DownloadUrlParameters::FromWebContents(
+            source_web_contents_, url, save_info));
+      dl_params->set_referrer(referrer);
+      dl_params->set_post_id(post_id);
+      dl_params->set_prefer_cache(true);
+      if (post_id >= 0)
+        dl_params->set_method("POST");
+      dlm->DownloadUrl(dl_params.Pass());
       break;
     }
 
@@ -1826,24 +1825,22 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
         return;
       model->Load();
 
-      scoped_ptr<TemplateURL> template_url(new TemplateURL);
-      string16 keyword =
-          net::StripWWW(UTF8ToUTF16((params_.page_url.host())));
-      template_url->set_short_name(keyword);
-      template_url->set_keyword(keyword);
-      template_url->SetURL(params_.keyword_url.spec(), 0, 0);
-      template_url->SetFaviconURL(TemplateURL::GenerateFaviconURL(
-          params_.page_url.GetOrigin()));
-
       TabContentsWrapper* tab_contents_wrapper =
           TabContentsWrapper::GetCurrentWrapperForContents(
               source_web_contents_);
       if (tab_contents_wrapper &&
           tab_contents_wrapper->search_engine_tab_helper() &&
           tab_contents_wrapper->search_engine_tab_helper()->delegate()) {
-        // Takes ownership of |template_url|.
+        string16 keyword(TemplateURLService::GenerateKeyword(params_.page_url));
+        TemplateURLData data;
+        data.short_name = keyword;
+        data.SetKeyword(keyword);
+        data.SetURL(params_.keyword_url.spec());
+        data.favicon_url =
+            TemplateURL::GenerateFaviconURL(params_.page_url.GetOrigin());
+        // Takes ownership of the TemplateURL.
         tab_contents_wrapper->search_engine_tab_helper()->delegate()->
-            ConfirmAddSearchProvider(template_url.release(), profile_);
+            ConfirmAddSearchProvider(new TemplateURL(profile_, data), profile_);
       }
       break;
     }
@@ -1873,7 +1870,7 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
 }
 
 ProtocolHandlerRegistry::ProtocolHandlerList
-RenderViewContextMenu::GetHandlersForLinkUrl() {
+    RenderViewContextMenu::GetHandlersForLinkUrl() {
   ProtocolHandlerRegistry::ProtocolHandlerList handlers =
       protocol_handler_registry_->GetHandlersFor(params_.link_url.scheme());
   std::sort(handlers.begin(), handlers.end());
@@ -1889,6 +1886,11 @@ void RenderViewContextMenu::MenuWillShow(ui::SimpleMenuModel* source) {
       source_web_contents_->GetRenderWidgetHostView();
   if (view)
     view->SetShowingContextMenu(true);
+
+  content::NotificationService::current()->Notify(
+      chrome::NOTIFICATION_CONTEXT_MENU_SHOWN,
+      content::Source<RenderViewContextMenu>(this),
+      content::NotificationService::NoDetails());
 }
 
 void RenderViewContextMenu::MenuClosed(ui::SimpleMenuModel* source) {
@@ -1908,27 +1910,11 @@ void RenderViewContextMenu::MenuClosed(ui::SimpleMenuModel* source) {
 
 bool RenderViewContextMenu::IsDevCommandEnabled(int id) const {
   if (id == IDC_CONTENT_CONTEXT_INSPECTELEMENT) {
-    // Don't enable the web inspector if JavaScript is disabled. We don't
-    // check this when this is the web contents of an extension (e.g.
-    // for a popup extension or a platform app) as they have JavaScript
-    // always enabled.
-    const Extension* extension = GetExtension();
-    if (!extension) {
-      const CommandLine* command_line = CommandLine::ForCurrentProcess();
-      if (!profile_->GetPrefs()->GetBoolean(
-          prefs::kWebKitGlobalJavascriptEnabled) ||
-          command_line->HasSwitch(switches::kDisableJavaScript))
-        return false;
-#if defined(OS_MACOSX)
-    } else {
-      // Disable dev tools for popup extensions for Mac OS X builds, as the
-      // extension popups for these builds do not support dynamically inspecting
-      // the popups.
-      // TODO(benwells): Add support for these builds and remove this #if.
-      if (!extension->is_platform_app())
-        return false;
-#endif
-    }
+    const CommandLine* command_line = CommandLine::ForCurrentProcess();
+    if (!profile_->GetPrefs()->GetBoolean(
+        prefs::kWebKitGlobalJavascriptEnabled) ||
+        command_line->HasSwitch(switches::kDisableJavaScript))
+      return false;
 
     // Don't enable the web inspector if the developer tools are disabled via
     // the preference dev-tools-disabled.
@@ -1980,7 +1966,7 @@ void RenderViewContextMenu::Inspect(int x, int y) {
 }
 
 void RenderViewContextMenu::WriteURLToClipboard(const GURL& url) {
-  chrome_browser_net::WriteURLToClipboard(
+  chrome_common_net::WriteURLToClipboard(
       url,
       profile_->GetPrefs()->GetString(prefs::kAcceptLanguages),
       g_browser_process->clipboard());

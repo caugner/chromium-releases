@@ -19,6 +19,11 @@
 namespace {
 
 void CloseBalloon(const std::string& id) {
+  // The browser process may have gone away during shutting down, in this case
+  // notification_ui_manager() will close the balloon in its destructor.
+  if (!g_browser_process)
+    return;
+
   g_browser_process->notification_ui_manager()->CancelById(id);
 }
 
@@ -32,7 +37,6 @@ class DummyNotificationDelegate : public NotificationDelegate {
  public:
   explicit DummyNotificationDelegate(const std::string& id)
       : id_(kNotificationPrefix + id) {}
-  virtual ~DummyNotificationDelegate() {}
 
   virtual void Display() OVERRIDE {
     MessageLoop::current()->PostDelayedTask(
@@ -46,6 +50,8 @@ class DummyNotificationDelegate : public NotificationDelegate {
   virtual std::string id() const OVERRIDE { return id_; }
 
  private:
+  virtual ~DummyNotificationDelegate() {}
+
   std::string id_;
 };
 

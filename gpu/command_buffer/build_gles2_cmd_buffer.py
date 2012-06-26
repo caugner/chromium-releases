@@ -587,6 +587,8 @@ _ENUM_LISTS = {
     'valid': [
       'GL_PACK_ALIGNMENT',
       'GL_UNPACK_ALIGNMENT',
+      'GL_UNPACK_FLIP_Y_CHROMIUM',
+      'GL_UNPACK_PREMULTIPLY_ALPHA_CHROMIUM',
     ],
     'invalid': [
       'GL_PACK_SWAP_BYTES',
@@ -860,6 +862,15 @@ _FUNCTION_INFO = {
     'gl_test_func': 'glClearDepth',
   },
   'ColorMask': {'decoder_func': 'DoColorMask', 'expectation': False},
+  'ConsumeTextureCHROMIUM': {
+    'decoder_func': 'DoConsumeTextureCHROMIUM',
+    'type': 'PUT',
+    'data_type': 'GLbyte',
+    'count': 64,
+    'unit_test': False,
+    'extension': True,
+    'chromium': True,
+  },
   'ClearStencil': {'decoder_func': 'DoClearStencil'},
   'EnableFeatureCHROMIUM': {
     'type': 'Custom',
@@ -986,6 +997,15 @@ _FUNCTION_INFO = {
     'resource_type': 'Buffer',
     'resource_types': 'Buffers',
   },
+  'GenMailboxCHROMIUM': {
+    'type': 'Manual',
+    'cmd_args': 'GLuint bucket_id',
+    'result': ['SizedResult<GLint>'],
+    'client_test': False,
+    'unit_test': False,
+    'extension': True,
+    'chromium': True,
+  },
   'GenFramebuffers': {
     'type': 'GENn',
     'gl_test_func': 'glGenFramebuffersEXT',
@@ -1105,6 +1125,7 @@ _FUNCTION_INFO = {
     'type': 'GETn',
     'decoder_func': 'DoGetProgramiv',
     'result': ['SizedResult<GLint>'],
+    'expectation': False,
   },
   'GetProgramInfoCHROMIUM': {
     'type': 'Custom',
@@ -1274,6 +1295,15 @@ _FUNCTION_INFO = {
       'client_test': False,
       'extension': True,
       'chromium': True,
+  },
+  'ProduceTextureCHROMIUM': {
+    'decoder_func': 'DoProduceTextureCHROMIUM',
+    'type': 'PUT',
+    'data_type': 'GLbyte',
+    'count': 64,
+    'unit_test': False,
+    'extension': True,
+    'chromium': True,
   },
   'RenderbufferStorage': {
     'decoder_func': 'DoRenderbufferStorage',
@@ -1509,6 +1539,9 @@ _FUNCTION_INFO = {
                   'GLsizei stride, GLuint offset',
       'client_test': False,
   },
+  'Viewport': {
+    'decoder_func': 'DoViewport',
+  },
   'ResizeCHROMIUM': {
       'type': 'Custom',
       'impl_func': False,
@@ -1559,6 +1592,12 @@ _FUNCTION_INFO = {
    },
   'TexImageIOSurface2DCHROMIUM': {
     'decoder_func': 'DoTexImageIOSurface2DCHROMIUM',
+    'unit_test': False,
+    'extension': True,
+    'chromium': True,
+  },
+  'CopyTextureCHROMIUM': {
+    'decoder_func': 'DoCopyTextureCHROMIUM',
     'unit_test': False,
     'extension': True,
     'chromium': True,
@@ -2761,8 +2800,8 @@ class GENnHandler(TypeHandler):
     for arg in func.GetOriginalArgs():
       arg.WriteClientSideValidationCode(file, func)
     code = """  GPU_CLIENT_SINGLE_THREAD_CHECK();
-  id_handlers_[id_namespaces::k%(resource_types)s]->
-      MakeIds(0, %(args)s);
+  GetIdHandler(id_namespaces::k%(resource_types)s)->
+      MakeIds(this, 0, %(args)s);
   helper_->%(name)sImmediate(%(args)s);
 %(log_code)s
 }
@@ -3011,8 +3050,9 @@ TEST_F(%(test_name)s, %(name)sInvalidArgs%(arg_index)d_%(value_index)d) {
     for arg in func.GetOriginalArgs():
       arg.WriteClientSideValidationCode(file, func)
     file.Write("  GLuint client_id;\n")
-    file.Write("  id_handlers_[id_namespaces::kProgramsAndShaders]->\n")
-    file.Write("      MakeIds(0, 1, &client_id);\n")
+    file.Write(
+        "  GetIdHandler(id_namespaces::kProgramsAndShaders)->\n")
+    file.Write("      MakeIds(this, 0, 1, &client_id);\n")
     file.Write("  helper_->%s(%s);\n" %
                (func.name, func.MakeCmdArgString("")))
     file.Write('  GPU_CLIENT_LOG("returned " << client_id);\n')
@@ -6049,6 +6089,7 @@ const size_t GLES2Util::enum_to_string_table_len_ =
     file.Write(_DO_NOT_EDIT_WARNING)
 
     file.Write("#include <GLES2/gl2.h>\n")
+    file.Write("#include <GLES2/gl2ext.h>\n")
     file.Write("#include \"ppapi/lib/gl/gles2/gl2ext_ppapi.h\"\n\n")
 
     for func in self.original_functions:

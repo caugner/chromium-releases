@@ -13,12 +13,15 @@
 #include "content/public/common/content_switches.h"
 #include "content/shell/shell.h"
 #include "content/shell/shell_browser_context.h"
-#include "content/shell/shell_content_browser_client.h"
 #include "content/shell/shell_devtools_delegate.h"
 #include "content/shell/shell_switches.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_module.h"
 #include "ui/base/clipboard/clipboard.h"
+
+#if defined(OS_ANDROID)
+#include "base/message_pump_android.h"
+#endif
 
 namespace content {
 
@@ -31,14 +34,16 @@ static GURL GetStartupURL() {
   return GURL(args[0]);
 }
 
+#if defined(OS_ANDROID)
+static base::MessagePump* CreateMessagePumpForShell() {
+  return new base::MessagePumpForUI();
+}
+#endif
+
 ShellBrowserMainParts::ShellBrowserMainParts(
     const content::MainFunctionParams& parameters)
     : BrowserMainParts(),
       devtools_delegate_(NULL) {
-  ShellContentBrowserClient* shell_browser_client =
-      static_cast<ShellContentBrowserClient*>(
-          content::GetContentClient()->browser());
-  shell_browser_client->set_shell_browser_main_parts(this);
 }
 
 ShellBrowserMainParts::~ShellBrowserMainParts() {
@@ -46,19 +51,25 @@ ShellBrowserMainParts::~ShellBrowserMainParts() {
 
 #if !defined(OS_MACOSX)
 void ShellBrowserMainParts::PreMainMessageLoopStart() {
+#if defined(OS_ANDROID)
+  MessageLoopForUI::InitMessagePumpForUIFactory(&CreateMessagePumpForShell);
+  MessageLoopForUI::current()->Start();
+#endif
 }
 #endif
-
-MessageLoop* ShellBrowserMainParts::GetMainMessageLoop() {
-  return NULL;
-}
 
 int ShellBrowserMainParts::PreCreateThreads() {
   return 0;
 }
 
+void ShellBrowserMainParts::PreEarlyInitialization() {
+#if defined(OS_ANDROID)
+  // TODO(tedchoc): Setup the NetworkChangeNotifier here.
+#endif
+}
+
 void ShellBrowserMainParts::PreMainMessageLoopRun() {
-  browser_context_.reset(new ShellBrowserContext(this));
+  browser_context_.reset(new ShellBrowserContext);
 
   Shell::PlatformInitialize();
   net::NetModule::SetResourceProvider(Shell::PlatformResourceProvider);

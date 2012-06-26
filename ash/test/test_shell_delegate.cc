@@ -9,6 +9,8 @@
 #include "ash/screenshot_delegate.h"
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
+#include "ash/test/test_launcher_delegate.h"
+#include "content/test/test_browser_context.h"
 #include "grit/ui_resources.h"
 #include "ui/aura/window.h"
 
@@ -19,10 +21,6 @@ TestShellDelegate::TestShellDelegate() : locked_(false) {
 }
 
 TestShellDelegate::~TestShellDelegate() {
-}
-
-views::Widget* TestShellDelegate::CreateStatusArea() {
-  return NULL;
 }
 
 bool TestShellDelegate::IsUserLoggedIn() {
@@ -41,26 +39,36 @@ bool TestShellDelegate::IsScreenLocked() const {
   return locked_;
 }
 
+void TestShellDelegate::Shutdown() {
+}
+
 void TestShellDelegate::Exit() {
 }
 
 void TestShellDelegate::NewWindow(bool incognito) {
 }
 
-AppListViewDelegate* TestShellDelegate::CreateAppListViewDelegate() {
-  return NULL;
+void TestShellDelegate::Search() {
 }
 
-std::vector<aura::Window*> TestShellDelegate::GetCycleWindowList(
-    CycleSource source) const {
-  // We just use the Shell's default container of windows, so tests can be
-  // written with the usual CreateTestWindowWithId() calls. But window cycling
-  // expects the topmost window at the front of the list, so reverse the order.
-  aura::Window* default_container = Shell::GetInstance()->GetContainer(
-      internal::kShellWindowId_DefaultContainer);
-  std::vector<aura::Window*> windows = default_container->children();
-  std::reverse(windows.begin(), windows.end());
-  return windows;
+void TestShellDelegate::OpenFileManager() {
+}
+
+void TestShellDelegate::OpenCrosh() {
+}
+
+void TestShellDelegate::OpenMobileSetup() {
+}
+
+content::BrowserContext* TestShellDelegate::GetCurrentBrowserContext() {
+  return new TestBrowserContext();
+}
+
+void TestShellDelegate::ToggleSpokenFeedback() {
+}
+
+AppListViewDelegate* TestShellDelegate::CreateAppListViewDelegate() {
+  return NULL;
 }
 
 void TestShellDelegate::StartPartialScreenshot(
@@ -71,7 +79,7 @@ void TestShellDelegate::StartPartialScreenshot(
 
 LauncherDelegate* TestShellDelegate::CreateLauncherDelegate(
     ash::LauncherModel* model) {
-  return NULL;
+  return new TestLauncherDelegate(model);
 }
 
 SystemTrayDelegate* TestShellDelegate::CreateSystemTrayDelegate(

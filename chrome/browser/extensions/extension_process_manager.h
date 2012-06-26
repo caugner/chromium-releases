@@ -12,6 +12,8 @@
 
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/weak_ptr.h"
+#include "base/time.h"
 #include "content/public/common/view_type.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -32,8 +34,22 @@ class SiteInstance;
 // track of split-mode extensions only.
 class ExtensionProcessManager : public content::NotificationObserver {
  public:
+  typedef std::set<ExtensionHost*> ExtensionHostSet;
+  typedef ExtensionHostSet::const_iterator const_iterator;
+
   static ExtensionProcessManager* Create(Profile* profile);
   virtual ~ExtensionProcessManager();
+
+  const ExtensionHostSet& background_hosts() const {
+    return background_hosts_;
+  }
+
+  const ExtensionHostSet& platform_app_hosts() const {
+    return platform_app_hosts_;
+  }
+
+  typedef std::set<content::RenderViewHost*> ViewSet;
+  const ViewSet GetAllViews() const;
 
   // Creates a new ExtensionHost with its associated view, grouping it in the
   // appropriate SiteInstance (and therefore process) based on the URL and
@@ -86,8 +102,14 @@ class ExtensionProcessManager : public content::NotificationObserver {
   std::set<content::RenderViewHost*> GetRenderViewHostsForExtension(
       const std::string& extension_id);
 
-  // Returns true if |host| is managed by this process manager.
-  bool HasExtensionHost(ExtensionHost* host) const;
+  // Returns the extension associated with the specified RenderViewHost, or
+  // NULL.
+  const Extension* GetExtensionForRenderViewHost(
+      content::RenderViewHost* render_view_host);
+
+  // Returns true if the (lazy) background host for the given extension has
+  // already been sent the unload event and is shutting down.
+  bool IsBackgroundHostClosing(const std::string& extension_id);
 
   // Getter and setter for the lazy background page's keepalive count. This is
   // the count of how many outstanding "things" are keeping the page alive.
@@ -97,19 +119,17 @@ class ExtensionProcessManager : public content::NotificationObserver {
   int IncrementLazyKeepaliveCount(const Extension* extension);
   int DecrementLazyKeepaliveCount(const Extension* extension);
 
-  // Handles a response to the ShouldClose message, used for lazy background
+  // Handles a response to the ShouldUnload message, used for lazy background
   // pages.
-  void OnShouldCloseAck(const std::string& extension_id, int sequence_id);
+  void OnShouldUnloadAck(const std::string& extension_id, int sequence_id);
+
+  // Same as above, for the Unload message.
+  void OnUnloadAck(const std::string& extension_id);
 
   // Tracks network requests for a given RenderViewHost, used to know
   // when network activity is idle for lazy background pages.
   void OnNetworkRequestStarted(content::RenderViewHost* render_view_host);
   void OnNetworkRequestDone(content::RenderViewHost* render_view_host);
-
-  typedef std::set<ExtensionHost*> ExtensionHostSet;
-  typedef ExtensionHostSet::const_iterator const_iterator;
-  const_iterator begin() const { return all_hosts_.begin(); }
-  const_iterator end() const { return all_hosts_.end(); }
 
  protected:
   explicit ExtensionProcessManager(Profile* profile);
@@ -131,11 +151,11 @@ class ExtensionProcessManager : public content::NotificationObserver {
 
   content::NotificationRegistrar registrar_;
 
-  // The set of all ExtensionHosts managed by this process manager.
-  ExtensionHostSet all_hosts_;
-
-  // The set of running viewless background extensions.
+  // The set of ExtensionHosts running viewless background extensions.
   ExtensionHostSet background_hosts_;
+
+  // The set of ExtensionHosts running platform apps.
+  ExtensionHostSet platform_app_hosts_;
 
   // A SiteInstance related to the SiteInstance for all extensions in
   // this profile.  We create it in such a way that a new
@@ -143,6 +163,11 @@ class ExtensionProcessManager : public content::NotificationObserver {
   scoped_refptr<content::SiteInstance> site_instance_;
 
  private:
+  // Extra information we keep for each extension's background page.
+  struct BackgroundPageData;
+  typedef std::string ExtensionId;
+  typedef std::map<ExtensionId, BackgroundPageData> BackgroundPageDataMap;
+
   // Contains all extension-related RenderViewHost instances for all extensions.
   // We also keep a cache of the host's view type, because that information
   // is not accessible at registration/deregistration time.
@@ -159,13 +184,30 @@ class ExtensionProcessManager : public content::NotificationObserver {
 
   // These are called when the extension transitions between idle and active.
   // They control the process of closing the background page when idle.
-  void OnLazyBackgroundPageIdle(const std::string& extension_id);
+  void OnLazyBackgroundPageIdle(const std::string& extension_id,
+                                int sequence_id);
   void OnLazyBackgroundPageActive(const std::string& extension_id);
+  void CloseLazyBackgroundPageNow(const std::string& extension_id);
 
   // Updates a potentially-registered RenderViewHost once it has been
   // associated with a WebContents. This allows us to gather information that
   // was not available when the host was first registered.
   void UpdateRegisteredRenderView(content::RenderViewHost* render_view_host);
+
+  // Clears background page data for this extension.
+  void ClearBackgroundPageData(const std::string& extension_id);
+
+  BackgroundPageDataMap background_page_data_;
+
+  // The time to delay between an extension becoming idle and
+  // sending a ShouldUnload message; read from command-line switch.
+  base::TimeDelta event_page_idle_time_;
+
+  // The time to delay between sending a ShouldUnload message and
+  // sending a Unload message; read from command-line switch.
+  base::TimeDelta event_page_unloading_time_;
+
+  base::WeakPtrFactory<ExtensionProcessManager> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionProcessManager);
 };

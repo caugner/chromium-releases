@@ -5,6 +5,7 @@
 #include "chrome/browser/autocomplete/autocomplete.h"
 
 #include <algorithm>
+#include <iterator>
 #include <set>
 
 #include "base/basictypes.h"
@@ -53,14 +54,6 @@
 
 using base::TimeDelta;
 
-static bool AreTemplateURLsEqual(const TemplateURL* a,
-                                 const TemplateURL* b) {
-  // We can't use equality of the pointers because SearchProvider copies the
-  // TemplateURLs. Instead we compare based on ID.
-  // a may be NULL, but never b, so we don't handle the case of a==b==NULL.
-  return a && b && (a->id() == b->id());
-}
-
 // AutocompleteInput ----------------------------------------------------------
 
 AutocompleteInput::AutocompleteInput()
@@ -95,6 +88,7 @@ AutocompleteInput::AutocompleteInput(const string16& text,
   if (((type_ == UNKNOWN) || (type_ == REQUESTED_URL) || (type_ == URL)) &&
       canonicalized_url.is_valid() &&
       (!canonicalized_url.IsStandard() || canonicalized_url.SchemeIsFile() ||
+       canonicalized_url.SchemeIsFileSystem() ||
        !canonicalized_url.host().empty()))
     canonicalized_url_ = canonicalized_url;
 
@@ -166,6 +160,14 @@ AutocompleteInput::Type AutocompleteInput::Parse(
     return URL;
   }
 
+  if (LowerCaseEqualsASCII(parsed_scheme, chrome::kFileSystemScheme)) {
+    // This could theoretically be a strange search, but let's check.
+    // If it's got an inner_url with a scheme, it's a URL, whether it's valid or
+    // not.
+    if (parts->inner_parsed() && parts->inner_parsed()->scheme.is_valid())
+      return URL;
+  }
+
   // If the user typed a scheme, and it's HTTP or HTTPS, we know how to parse it
   // well enough that we can fall through to the heuristics below.  If it's
   // something else, we can just determine our action based on what we do with
@@ -210,7 +212,7 @@ AutocompleteInput::Type AutocompleteInput::Parse(
         // URL of the form "username:password@foo.com".
         const string16 http_scheme_prefix =
             ASCIIToUTF16(std::string(chrome::kHttpScheme) +
-                         chrome::kStandardSchemeSeparator);
+                         content::kStandardSchemeSeparator);
         url_parse::Parsed http_parts;
         string16 http_scheme;
         GURL http_canonicalized_url;
@@ -455,6 +457,9 @@ void AutocompleteInput::ParseForEmphasizeComponents(
         host->reset();
       }
     }
+  } else if (LowerCaseEqualsASCII(scheme_str, chrome::kFileSystemScheme) &&
+             parts.inner_parsed() && parts.inner_parsed()->scheme.is_valid()) {
+    *host = parts.inner_parsed()->host;
   }
 }
 
@@ -833,6 +838,7 @@ AutocompleteController::AutocompleteController(
     Profile* profile,
     AutocompleteControllerDelegate* delegate)
     : delegate_(delegate),
+      keyword_provider_(NULL),
       done_(true),
       in_start_(false),
       profile_(profile) {
@@ -918,7 +924,7 @@ void AutocompleteController::Start(
       (text.length() < 6)) {
     base::TimeTicks end_time = base::TimeTicks::Now();
     std::string name = "Omnibox.QueryTime." + base::IntToString(text.length()) +
-        InstantFieldTrial::GetGroupName(profile_);
+        InstantFieldTrial::GetModeAsString(profile_);
     base::Histogram* counter = base::Histogram::FactoryGet(
         name, 1, 1000, 50, base::Histogram::kUmaTargetedHistogramFlag);
     counter->Add(static_cast<int>((end_time - start_time).InMilliseconds()));
@@ -1032,7 +1038,7 @@ void AutocompleteController::UpdateAssociatedKeywords(
   std::set<string16> keywords;
   for (ACMatches::iterator match(result->begin()); match != result->end();
        ++match) {
-    string16 keyword(match->GetSubstitutingExplicitlyInvokedKeyword());
+    string16 keyword(match->GetSubstitutingExplicitlyInvokedKeyword(profile_));
     if (!keyword.empty()) {
       keywords.insert(keyword);
     } else {
@@ -1058,27 +1064,30 @@ void AutocompleteController::UpdateAssociatedKeywords(
 
 void AutocompleteController::UpdateKeywordDescriptions(
     AutocompleteResult* result) {
-  const TemplateURL* last_template_url = NULL;
+  string16 last_keyword;
   for (AutocompleteResult::iterator i = result->begin(); i != result->end();
        ++i) {
-    if (((i->provider == keyword_provider_) && i->template_url) ||
+    if (((i->provider == keyword_provider_) && !i->keyword.empty()) ||
         ((i->provider == search_provider_) &&
          (i->type == AutocompleteMatch::SEARCH_WHAT_YOU_TYPED ||
           i->type == AutocompleteMatch::SEARCH_HISTORY ||
           i->type == AutocompleteMatch::SEARCH_SUGGEST))) {
       i->description.clear();
       i->description_class.clear();
-      DCHECK(i->template_url);
-      if (!AreTemplateURLsEqual(last_template_url, i->template_url)) {
-        i->description = l10n_util::GetStringFUTF16(
-            IDS_AUTOCOMPLETE_SEARCH_DESCRIPTION,
-            i->template_url->AdjustedShortNameForLocaleDirection());
-        i->description_class.push_back(
-            ACMatchClassification(0, ACMatchClassification::DIM));
+      DCHECK(!i->keyword.empty());
+      if (i->keyword != last_keyword) {
+        const TemplateURL* template_url = i->GetTemplateURL(profile_);
+        if (template_url) {
+          i->description = l10n_util::GetStringFUTF16(
+              IDS_AUTOCOMPLETE_SEARCH_DESCRIPTION,
+              template_url->AdjustedShortNameForLocaleDirection());
+          i->description_class.push_back(
+              ACMatchClassification(0, ACMatchClassification::DIM));
+        }
+        last_keyword = i->keyword;
       }
-      last_template_url = i->template_url;
     } else {
-      last_template_url = NULL;
+      last_keyword.clear();
     }
   }
 }
@@ -1116,16 +1125,20 @@ void AutocompleteController::StartExpireTimer() {
 
 AutocompleteLog::AutocompleteLog(
     const string16& text,
+    bool just_deleted_text,
     AutocompleteInput::Type input_type,
     size_t selected_index,
     SessionID::id_type tab_id,
+    metrics::OmniboxEventProto::PageClassification current_page_classification,
     base::TimeDelta elapsed_time_since_user_first_modified_omnibox,
     size_t inline_autocompleted_length,
     const AutocompleteResult& result)
     : text(text),
+      just_deleted_text(just_deleted_text),
       input_type(input_type),
       selected_index(selected_index),
       tab_id(tab_id),
+      current_page_classification(current_page_classification),
       elapsed_time_since_user_first_modified_omnibox(
           elapsed_time_since_user_first_modified_omnibox),
       inline_autocompleted_length(inline_autocompleted_length),

@@ -13,10 +13,10 @@
 #include <windows.h>
 
 #include <map>
-#include <string>
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/string16.h"
 #include "chrome/installer/util/work_item_list.h"
 
 class BrowserDistribution;
@@ -88,10 +88,39 @@ class ShellUtil {
   // Registry value name that is needed for ChromeHTML ProgId
   static const wchar_t* kRegUrlProtocol;
 
-  // Checks if we need Admin rights for registry cleanup by checking if any
-  // entry exists in HKLM.
-  static bool AdminNeededForRegistryCleanup(BrowserDistribution* dist,
-                                            const std::wstring& suffix);
+  // Relative registry path from \Software\Classes\ChromeHTML to the ProgId
+  // Application definitions.
+  static const wchar_t* kRegApplication;
+
+  // Registry value name for the AppUserModelId of an application.
+  static const wchar_t* kRegAppUserModelId;
+
+  // Registry value name for the description of an application.
+  static const wchar_t* kRegApplicationDescription;
+
+  // Registry value name for an application's name.
+  static const wchar_t* kRegApplicationName;
+
+  // Registry value name for the path to an application's icon.
+  static const wchar_t* kRegApplicationIcon;
+
+  // Registry value name for an application's company.
+  static const wchar_t* kRegApplicationCompany;
+
+  // Relative path of ".exe" registry key.
+  static const wchar_t* kRegExePath;
+
+  // Registry value name of the open verb.
+  static const wchar_t* kRegVerbOpen;
+
+  // Registry value name of the run verb.
+  static const wchar_t* kRegVerbRun;
+
+  // Registry value name for command entries.
+  static const wchar_t* kRegCommand;
+
+  // Registry value name for the DelegateExecute verb handler.
+  static const wchar_t* kRegDelegateExecute;
 
   // Creates Chrome shortcut on the Desktop.
   // |dist| gives the type of browser distribution currently in use.
@@ -106,20 +135,17 @@ class ShellUtil {
   //     Desktop folder of current user's profile.
   // If |shell_change| is SYSTEM_LEVEL, the shortcut is created in the
   //     Desktop folder of the "All Users" profile.
-  // If |alternate| is true, an alternate text for the shortcut is used.
-  // If |create_new| is false, an existing shortcut will be updated, but if
-  //     no shortcut exists, it will not be created.
+  // |options|: bitfield for which the options come from ChromeShortcutOptions.
   // Returns true iff the method causes a shortcut to be created / updated.
   static bool CreateChromeDesktopShortcut(BrowserDistribution* dist,
-                                          const std::wstring& chrome_exe,
-                                          const std::wstring& description,
-                                          const std::wstring& appended_name,
-                                          const std::wstring& arguments,
-                                          const std::wstring& icon_path,
+                                          const string16& chrome_exe,
+                                          const string16& description,
+                                          const string16& appended_name,
+                                          const string16& arguments,
+                                          const string16& icon_path,
                                           int icon_index,
                                           ShellChange shell_change,
-                                          bool alternate,
-                                          bool create_new);
+                                          uint32 options);
 
   // Create Chrome shortcut on Quick Launch Bar.
   // If shell_change is CURRENT_USER, the shortcut is created in the
@@ -128,24 +154,29 @@ class ShellUtil {
   // Quick Launch folder of "Default User" profile. This will make sure
   // that this shortcut will be seen by all the new users logging into the
   // system.
-  // create_new: If false, will only update the shortcut. If true, the function
-  //             will create a new shortcut if it doesn't exist already.
+  // |options|: bitfield for which the options come from ChromeShortcutOptions.
   static bool CreateChromeQuickLaunchShortcut(BrowserDistribution* dist,
-                                              const std::wstring& chrome_exe,
+                                              const string16& chrome_exe,
                                               int shell_change,
-                                              bool create_new);
+                                              uint32 options);
 
   // This method appends the Chrome icon index inside chrome.exe to the
   // chrome.exe path passed in as input, to generate the full path for
   // Chrome icon that can be used as value for Windows registry keys.
   // |chrome_exe| full path to chrome.exe.
-  static std::wstring GetChromeIcon(BrowserDistribution* dist,
-                                    const std::wstring& chrome_exe);
+  static string16 GetChromeIcon(BrowserDistribution* dist,
+                                const string16& chrome_exe);
 
   // This method returns the command to open URLs/files using chrome. Typically
   // this command is written to the registry under shell\open\command key.
-  // chrome_exe: the full path to chrome.exe
-  static std::wstring GetChromeShellOpenCmd(const std::wstring& chrome_exe);
+  // |chrome_exe|: the full path to chrome.exe
+  static string16 GetChromeShellOpenCmd(const string16& chrome_exe);
+
+  // This method returns the command to be called by the DelegateExecute verb
+  // handler to launch chrome on Windows 8. Typically this command is written to
+  // the registry under the HKCR\Chrome\.exe\shell\(open|run)\command key.
+  // |chrome_exe|: the full path to chrome.exe
+  static string16 GetChromeDelegateCommand(const string16& chrome_exe);
 
   // Returns the localized name of Chrome shortcut in |shortcut|. If
   // |appended_name| is not empty, it is included in the shortcut name. If
@@ -153,8 +184,8 @@ class ShellUtil {
   // certain scenarios is used.
   static bool GetChromeShortcutName(BrowserDistribution* dist,
                                     bool alternate,
-                                    const std::wstring& appended_name,
-                                    std::wstring* shortcut);
+                                    const string16& appended_name,
+                                    string16* shortcut);
 
   // Gets the desktop path for the current user or all users (if system_level
   // is true) and returns it in 'path' argument. Return true if successful,
@@ -171,8 +202,7 @@ class ShellUtil {
   // Gets a mapping of all registered browser (on local machine) names and
   // their reinstall command (which usually sets browser as default).
   static void GetRegisteredBrowsers(BrowserDistribution* dist,
-                                    std::map<std::wstring,
-                                    std::wstring>* browsers);
+                                    std::map<string16, string16>* browsers);
 
   // This function gets a suffix (user's login name) that can be added
   // to Chromium default browser entry in the registry to create a unique name
@@ -182,7 +212,7 @@ class ShellUtil {
   // existence of Default Browser registry key with this suffix and
   // returns true if it exists. In all other cases it returns false.
   static bool GetUserSpecificDefaultBrowserSuffix(BrowserDistribution* dist,
-                                                  std::wstring* entry);
+                                                  string16* entry);
 
   // Make Chrome the default browser. This function works by going through
   // the url protocols and file associations that are related to general
@@ -204,15 +234,15 @@ class ShellUtil {
   //                       Chrome registration.
   static bool MakeChromeDefault(BrowserDistribution* dist,
                                 int shell_change,
-                                const std::wstring& chrome_exe,
+                                const string16& chrome_exe,
                                 bool elevate_if_not_admin);
 
   // Make Chrome the default application for a protocol.
   // chrome_exe: The chrome.exe path to register as default browser.
   // protocol: The protocol to register as the default handler for.
   static bool MakeChromeDefaultProtocolClient(BrowserDistribution* dist,
-                                              const std::wstring& chrome_exe,
-                                              const std::wstring& protocol);
+                                              const string16& chrome_exe,
+                                              const string16& protocol);
 
   // This method adds Chrome to the list that shows up in Add/Remove Programs->
   // Set Program Access and Defaults and also creates Chrome ProgIds under
@@ -236,8 +266,8 @@ class ShellUtil {
   // |elevate_if_not_admin| if true will make this method try alternate methods
   // as described above.
   static bool RegisterChromeBrowser(BrowserDistribution* dist,
-                                    const std::wstring& chrome_exe,
-                                    const std::wstring& unique_suffix,
+                                    const string16& chrome_exe,
+                                    const string16& unique_suffix,
                                     bool elevate_if_not_admin);
 
   // This method declares to Windows that Chrome is capable of handling the
@@ -258,27 +288,27 @@ class ShellUtil {
   // |elevate_if_not_admin| if true will make this method try alternate methods
   // as described above.
   static bool RegisterChromeForProtocol(BrowserDistribution* dist,
-                                        const std::wstring& chrome_exe,
-                                        const std::wstring& unique_suffix,
-                                        const std::wstring& protocol,
+                                        const string16& chrome_exe,
+                                        const string16& unique_suffix,
+                                        const string16& protocol,
                                         bool elevate_if_not_admin);
 
   // Remove Chrome shortcut from Desktop.
-  // If shell_change is CURRENT_USER, the shortcut is removed from the
+  // If |shell_change| is CURRENT_USER, the shortcut is removed from the
   // Desktop folder of current user's profile.
-  // If shell_change is SYSTEM_LEVEL, the shortcut is removed from the
+  // If |shell_change| is SYSTEM_LEVEL, the shortcut is removed from the
   // Desktop folder of "All Users" profile.
-  // If alternate is true, the shortcut with the alternate name is removed. See
-  // CreateChromeDesktopShortcut() for more information.
+  // |options|: bitfield for which the options come from ChromeShortcutOptions.
+  // Only SHORTCUT_ALTERNATE is a valid option for this function.
   static bool RemoveChromeDesktopShortcut(BrowserDistribution* dist,
                                           int shell_change,
-                                          bool alternate);
+                                          uint32 options);
 
   // Removes a set of existing Chrome desktop shortcuts. |appended_names| is a
   // list of shortcut file names as obtained from
   // ShellUtil::GetChromeShortcutName.
   static bool RemoveChromeDesktopShortcutsWithAppendedNames(
-      const std::vector<std::wstring>& appended_names);
+      const std::vector<string16>& appended_names);
 
   // Remove Chrome shortcut from Quick Launch Bar.
   // If shell_change is CURRENT_USER, the shortcut is removed from
@@ -288,19 +318,32 @@ class ShellUtil {
   static bool RemoveChromeQuickLaunchShortcut(BrowserDistribution* dist,
                                               int shell_change);
 
+  enum ChromeShortcutOptions {
+    SHORTCUT_NO_OPTIONS = 0,
+    // Set DualMode property for Windows 8 Metro-enabled shortcuts.
+    SHORTCUT_DUAL_MODE = 1 << 0,
+    // Create a new shortcut (overwriting if necessary). If not specified, only
+    // specified (non-null) properties are going to be modified on the existing
+    // shortcut (which has to exist).
+    SHORTCUT_CREATE_ALWAYS = 1 << 1,
+    // Use an alternate, localized, application name for the shortcut.
+    SHORTCUT_ALTERNATE = 1 << 2,
+  };
+
   // Updates shortcut (or creates a new shortcut) at destination given by
   // shortcut to a target given by chrome_exe. The arguments are given by
   // |arguments| for the target and icon is set based on |icon_path| and
   // |icon_index|. If create_new is set to true, the function will create a new
   // shortcut if it doesn't exist.
+  // |options|: bitfield for which the options come from ChromeShortcutOptions.
   static bool UpdateChromeShortcut(BrowserDistribution* dist,
-                                   const std::wstring& chrome_exe,
-                                   const std::wstring& shortcut,
-                                   const std::wstring& arguments,
-                                   const std::wstring& description,
-                                   const std::wstring& icon_path,
+                                   const string16& chrome_exe,
+                                   const string16& shortcut,
+                                   const string16& arguments,
+                                   const string16& description,
+                                   const string16& icon_path,
                                    int icon_index,
-                                   bool create_new);
+                                   uint32 options);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ShellUtil);

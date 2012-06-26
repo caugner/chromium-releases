@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,6 +25,9 @@ class PPAPI_SHARED_EXPORT PPB_Audio_Shared
   PPB_Audio_Shared();
   virtual ~PPB_Audio_Shared();
 
+  // Keep in sync with media::AudioOutputController::kPauseMark.
+  static const int kPauseMark;
+
   bool playing() const { return playing_; }
 
   // Sets the callback information that the background thread will use. This
@@ -46,7 +49,8 @@ class PPAPI_SHARED_EXPORT PPB_Audio_Shared
 
   // Sets the shared memory and socket handles. This will automatically start
   // playback if we're currently set to play.
-  void SetStreamInfo(base::SharedMemoryHandle shared_memory_handle,
+  void SetStreamInfo(PP_Instance instance,
+                     base::SharedMemoryHandle shared_memory_handle,
                      size_t shared_memory_size,
                      base::SyncSocket::Handle socket_handle);
 

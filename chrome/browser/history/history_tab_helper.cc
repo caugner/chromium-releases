@@ -99,7 +99,7 @@ void HistoryTabHelper::DidNavigateAnyFrame(
   // Most of the time, the displayURL matches the loaded URL, but for about:
   // URLs, we use a data: URL as the real value.  We actually want to save the
   // about: URL to the history db and keep the data: URL hidden. This is what
-  // the TabContents' URL getter does.
+  // the WebContents' URL getter does.
   scoped_refptr<history::HistoryAddPageArgs> add_page_args(
       CreateHistoryAddPageArgs(web_contents()->GetURL(), details, params));
   if (!web_contents()->GetDelegate() ||
@@ -170,4 +170,22 @@ HistoryService* HistoryTabHelper::GetHistoryService() {
     return NULL;
 
   return profile->GetHistoryService(Profile::IMPLICIT_ACCESS);
+}
+
+void HistoryTabHelper::WebContentsDestroyed(WebContents* tab) {
+  // We update the history for this URL.
+  // The content returned from web_contents() has been destroyed by now.
+  // We need to use tab value directly.
+  Profile* profile = Profile::FromBrowserContext(tab->GetBrowserContext());
+  if (profile->IsOffTheRecord())
+    return;
+
+  HistoryService* hs = profile->GetHistoryService(Profile::IMPLICIT_ACCESS);
+  if (hs) {
+    NavigationEntry* entry = tab->GetController().GetLastCommittedEntry();
+    if (entry) {
+      hs->UpdateWithPageEndTime(tab, entry->GetPageID(), tab->GetURL(),
+                                base::Time::Now());
+    }
+  }
 }

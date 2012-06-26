@@ -20,8 +20,8 @@ class BufferedSocketWriter;
 class Session;
 
 // ClientControlDispatcher dispatches incoming messages on the control
-// channel to ClientStub, and also implements ClipboardStub and HostStub for
-// outgoing messages.
+// channel to ClientStub or ClipboardStub, and also implements ClipboardStub
+// and HostStub for outgoing messages.
 class ClientControlDispatcher : public ChannelDispatcherBase,
                                 public ClipboardStub,
                                 public HostStub {
@@ -32,10 +32,20 @@ class ClientControlDispatcher : public ChannelDispatcherBase,
   // ClipboardStub implementation.
   virtual void InjectClipboardEvent(const ClipboardEvent& event) OVERRIDE;
 
-  // Sets ClientStub that will be called for each incoming control
-  // message. Doesn't take ownership of |client_stub|. It must outlive
-  // this dispatcher.
+  // HostStub implementation.
+  virtual void NotifyClientDimensions(
+      const ClientDimensions& dimensions) OVERRIDE;
+  virtual void ControlVideo(const VideoControl& video_control) OVERRIDE;
+
+  // Sets the ClientStub that will be called for each incoming control
+  // message. |client_stub| must outlive this object.
   void set_client_stub(ClientStub* client_stub) { client_stub_ = client_stub; }
+
+  // Sets the ClipboardStub that will be called for each incoming clipboard
+  // message. |clipboard_stub| must outlive this object.
+  void set_clipboard_stub(ClipboardStub* clipboard_stub) {
+    clipboard_stub_ = clipboard_stub;
+  }
 
  protected:
   // ChannelDispatcherBase overrides.
@@ -46,6 +56,7 @@ class ClientControlDispatcher : public ChannelDispatcherBase,
                          const base::Closure& done_task);
 
   ClientStub* client_stub_;
+  ClipboardStub* clipboard_stub_;
 
   ProtobufMessageReader<ControlMessage> reader_;
   scoped_refptr<BufferedSocketWriter> writer_;

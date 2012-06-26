@@ -23,13 +23,12 @@ enum {
   DIR_USER_DESKTOP,             // Directory that correspond to the desktop.
   DIR_RESOURCES,                // Directory containing separate file resources
                                 // used by Chrome at runtime.
-  DIR_SHARED_RESOURCES,         // Directory containing js and css files used
-                                // by WebUI and component extensions.
   DIR_INSPECTOR,                // Directory where web inspector is located.
   DIR_APP_DICTIONARIES,         // Directory where the global dictionaries are.
   DIR_USER_DOCUMENTS,           // Directory for a user's "My Documents".
   DIR_DEFAULT_DOWNLOADS_SAFE,   // Directory for a user's
-                                // "My Documents/Downloads".
+                                // "My Documents/Downloads", (Windows) or
+                                // "Downloads". (Linux)
   DIR_DEFAULT_DOWNLOADS,        // Directory for a user's downloads.
   DIR_USER_DATA_TEMP,           // A temp directory within DIR_USER_DATA.  Use
                                 // this when a temporary file or directory will
@@ -56,13 +55,13 @@ enum {
                                  // Getting this path does not create it.
 #endif
 
-  DIR_EXTERNAL_EXTENSIONS,      // Directory where installer places .crx files.
-
-#if defined(OS_MACOSX)
-  DIR_DEPRECATED_EXTERNAL_EXTENSIONS,  // Former home of external extensions.
-                                       // We read from the old path for now,
-                                       // to give users time to migrate.
+#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+  DIR_STANDALONE_EXTERNAL_EXTENSIONS,  // Directory for 'per-extension'
+                                       // definition manifest files that
+                                       // describe extensions which are to be
+                                       // installed when chrome is run.
 #endif
+  DIR_EXTERNAL_EXTENSIONS,      // Directory where installer places .crx files.
 
   DIR_DEFAULT_APPS,             // Directory where installer places .crx files
                                 // to be installed when chrome is first run.

@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <vector>
 
+#include "base/memory/ref_counted_memory.h"
 #include "base/message_loop.h"
 #include "base/string_number_conversions.h"
 #include "base/string_piece.h"
@@ -21,7 +22,6 @@
 #include "grit/generated_resources.h"
 #include "grit/google_chrome_strings.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/resource/resource_bundle.h"
 
 namespace {
 
@@ -159,7 +159,7 @@ void PrintPreviewDataSource::StartDataRequest(const std::string& path,
   }
 
   // Print Preview data.
-  scoped_refptr<RefCountedBytes> data;
+  scoped_refptr<base::RefCountedBytes> data;
   std::vector<std::string> url_substr;
   base::SplitString(path, '/', &url_substr);
   int page_index = 0;
@@ -172,6 +172,6 @@ void PrintPreviewDataSource::StartDataRequest(const std::string& path,
     return;
   }
   // Invalid request.
-  scoped_refptr<RefCountedBytes> empty_bytes(new RefCountedBytes);
+  scoped_refptr<base::RefCountedBytes> empty_bytes(new base::RefCountedBytes);
   SendResponse(request_id, empty_bytes);
 }

@@ -27,7 +27,10 @@
 #include "ppapi/cpp/private/instance_private.h"
 #include "remoting/base/scoped_thread_proxy.h"
 #include "remoting/client/client_context.h"
+#include "remoting/client/key_event_mapper.h"
 #include "remoting/client/plugin/pepper_plugin_thread_delegate.h"
+#include "remoting/proto/event.pb.h"
+#include "remoting/protocol/clipboard_stub.h"
 #include "remoting/protocol/connection_to_host.h"
 
 namespace base {
@@ -43,7 +46,8 @@ namespace remoting {
 
 namespace protocol {
 class ConnectionToHost;
-class KeyEventTracker;
+class InputEventTracker;
+class MouseInputFilter;
 }  // namespace protocol
 
 class ChromotingClient;
@@ -51,7 +55,6 @@ class ChromotingScriptableObject;
 class ChromotingStats;
 class ClientContext;
 class FrameConsumerProxy;
-class MouseInputFilter;
 class PepperInputHandler;
 class PepperView;
 class PepperXmppProxy;
@@ -60,6 +63,7 @@ class RectangleUpdateDecoder;
 struct ClientConfig;
 
 class ChromotingInstance :
+      public protocol::ClipboardStub,
       public pp::InstancePrivate,
       public base::SupportsWeakPtr<ChromotingInstance> {
  public:
@@ -86,7 +90,11 @@ class ChromotingInstance :
 
   // Plugin API version. This should be incremented whenever the API
   // interface changes.
-  static const int kApiVersion = 5;
+  static const int kApiVersion = 7;
+
+  // Plugin API features. This allows orthogonal features to be supported
+  // without bumping the API version.
+  static const char kApiFeatures[];
 
   // Backward-compatibility version used by for the messaging
   // interface. Should be updated whenever we remove support for
@@ -116,6 +124,10 @@ class ChromotingInstance :
   // pp::InstancePrivate interface.
   virtual pp::Var GetInstanceObject() OVERRIDE;
 
+  // ClipboardStub implementation.
+  virtual void InjectClipboardEvent(const protocol::ClipboardEvent& event)
+      OVERRIDE;
+
   // Called by PepperView.
   void SetDesktopSize(int width, int height);
   void SetConnectionState(ConnectionState state, ConnectionError error);
@@ -129,6 +141,12 @@ class ChromotingInstance :
   void Disconnect();
   void OnIncomingIq(const std::string& iq);
   void ReleaseAllKeys();
+  void InjectKeyEvent(const protocol::KeyEvent& event);
+  void RemapKey(uint32 in_usb_keycode, uint32 out_usb_keycode);
+  void TrapKey(uint32 usb_keycode, bool trap);
+  void SendClipboardItem(const std::string& mime_type, const std::string& item);
+  void NotifyClientDimensions(int width, int height);
+  void PauseVideo(bool pause);
 
   // Return statistics record by ChromotingClient.
   // If no connection is currently active then NULL will be returned.
@@ -163,12 +181,18 @@ class ChromotingInstance :
   void PostChromotingMessage(const std::string& method,
                              scoped_ptr<base::DictionaryValue> data);
 
+  // Posts trapped keys to the web-app to handle.
+  void SendTrappedKey(uint32 usb_keycode, bool pressed);
+
   // Callback for PepperXmppProxy.
   void SendOutgoingIq(const std::string& iq);
 
   void SendPerfStats();
 
   void ProcessLogToUI(const std::string& message);
+
+  // Returns true if there is a ConnectionToHost and it is connected.
+  bool IsConnected();
 
   bool initialized_;
 
@@ -179,8 +203,10 @@ class ChromotingInstance :
   scoped_ptr<PepperView> view_;
 
   scoped_refptr<RectangleUpdateDecoder> rectangle_decoder_;
-  scoped_ptr<MouseInputFilter> mouse_input_filter_;
-  scoped_ptr<protocol::KeyEventTracker> key_event_tracker_;
+
+  scoped_ptr<protocol::MouseInputFilter> mouse_input_filter_;
+  scoped_ptr<protocol::InputEventTracker> input_tracker_;
+  KeyEventMapper key_mapper_;
   scoped_ptr<PepperInputHandler> input_handler_;
   scoped_ptr<ChromotingClient> client_;
 

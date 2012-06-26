@@ -35,10 +35,14 @@ SadTabHelper::~SadTabHelper() {
 }
 
 void SadTabHelper::RenderViewGone(base::TerminationStatus status) {
-  // Only show the sad tab if we're not in browser shutdown, so that TabContents
+  // Only show the sad tab if we're not in browser shutdown, so that WebContents
   // objects that are not in a browser (e.g., HTML dialogs) and thus are
   // visible do not flash a sad tab page.
   if (browser_shutdown::GetShutdownType() != browser_shutdown::NOT_VALID)
+    return;
+
+  // Don't build the sad tab view when the termination status is normal.
+  if (status == base::TERMINATION_STATUS_NORMAL_TERMINATION)
     return;
 
   if (HasSadTab())
@@ -93,6 +97,14 @@ void SadTabHelper::InstallSadTab(base::TerminationStatus status) {
   // and later re-parent it.
   // TODO(avi): This is a cheat. Can this be made cleaner?
   sad_tab_params.parent = web_contents()->GetView()->GetNativeView();
+#if defined(OS_WIN) && !defined(USE_AURA)
+  // Crash data indicates we can get here when the parent is no longer valid.
+  // Attempting to create a child window with a bogus parent crashes. So, we
+  // don't show a sad tab in this case in hopes the tab is in the process of
+  // shutting down.
+  if (!IsWindow(sad_tab_params.parent))
+    return;
+#endif
   sad_tab_params.ownership =
       views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   sad_tab_.reset(new views::Widget);

@@ -38,6 +38,9 @@ class ReceivedHeadersParameters : public NetLog::EventParameters {
     return dict;
   }
 
+ protected:
+  virtual ~ReceivedHeadersParameters() {}
+
  private:
   const NetLog::Source source_;
   const std::string feedback_;
@@ -55,6 +58,9 @@ class StreamClosedParameters : public NetLog::EventParameters {
     return dict;
   }
 
+ protected:
+  virtual ~StreamClosedParameters() {}
+
  private:
   const NetLog::Source source_;
   const bool not_reusable_;
@@ -70,7 +76,7 @@ HttpPipelinedConnectionImpl::HttpPipelinedConnectionImpl(
     const ProxyInfo& used_proxy_info,
     const BoundNetLog& net_log,
     bool was_npn_negotiated,
-    SSLClientSocket::NextProto protocol_negotiated)
+    NextProto protocol_negotiated)
     : delegate_(delegate),
       connection_(connection),
       used_ssl_config_(used_ssl_config),
@@ -129,7 +135,7 @@ void HttpPipelinedConnectionImpl::InitializeParser(
   CHECK(!stream_info_map_[pipeline_id].parser.get());
   stream_info_map_[pipeline_id].state = STREAM_BOUND;
   stream_info_map_[pipeline_id].parser.reset(new HttpStreamParser(
-      connection_.get(), request, read_buf_.get(), net_log_));
+      connection_.get(), request, read_buf_.get(), net_log));
   stream_info_map_[pipeline_id].source = net_log.source();
 
   // In case our first stream doesn't SendRequest() immediately, we should still
@@ -811,7 +817,7 @@ bool HttpPipelinedConnectionImpl::was_npn_negotiated() const {
   return was_npn_negotiated_;
 }
 
-SSLClientSocket::NextProto HttpPipelinedConnectionImpl::protocol_negotiated()
+NextProto HttpPipelinedConnectionImpl::protocol_negotiated()
     const {
   return protocol_negotiated_;
 }

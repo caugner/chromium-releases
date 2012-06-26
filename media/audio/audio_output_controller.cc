@@ -9,6 +9,7 @@
 #include "base/message_loop.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/platform_thread.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/time.h"
 
 using base::Time;
@@ -42,6 +43,8 @@ AudioOutputController::~AudioOutputController() {
   if (!message_loop_.get() || message_loop_->BelongsToCurrentThread()) {
     DoStopCloseAndClearStream(NULL);
   } else {
+    // http://crbug.com/120973
+    base::ThreadRestrictions::ScopedAllowWait allow_wait;
     WaitableEvent completion(true /* manual reset */,
                              false /* initial state */);
     message_loop_->PostTask(FROM_HERE,
@@ -78,32 +81,32 @@ scoped_refptr<AudioOutputController> AudioOutputController::Create(
 void AudioOutputController::Play() {
   DCHECK(message_loop_);
   message_loop_->PostTask(FROM_HERE, base::Bind(
-      &AudioOutputController::DoPlay, base::Unretained(this)));
+      &AudioOutputController::DoPlay, this));
 }
 
 void AudioOutputController::Pause() {
   DCHECK(message_loop_);
   message_loop_->PostTask(FROM_HERE, base::Bind(
-      &AudioOutputController::DoPause, base::Unretained(this)));
+      &AudioOutputController::DoPause, this));
 }
 
 void AudioOutputController::Flush() {
   DCHECK(message_loop_);
   message_loop_->PostTask(FROM_HERE, base::Bind(
-      &AudioOutputController::DoFlush, base::Unretained(this)));
+      &AudioOutputController::DoFlush, this));
 }
 
 void AudioOutputController::Close(const base::Closure& closed_task) {
   DCHECK(!closed_task.is_null());
   DCHECK(message_loop_);
-  message_loop_->PostTask(FROM_HERE, base::Bind(
-      &AudioOutputController::DoClose, base::Unretained(this), closed_task));
+  message_loop_->PostTaskAndReply(FROM_HERE, base::Bind(
+      &AudioOutputController::DoClose, this), closed_task);
 }
 
 void AudioOutputController::SetVolume(double volume) {
   DCHECK(message_loop_);
   message_loop_->PostTask(FROM_HERE, base::Bind(
-      &AudioOutputController::DoSetVolume, base::Unretained(this), volume));
+      &AudioOutputController::DoSetVolume, this, volume));
 }
 
 void AudioOutputController::DoCreate(AudioManager* audio_manager,
@@ -145,8 +148,13 @@ void AudioOutputController::DoPlay() {
   DCHECK(message_loop_->BelongsToCurrentThread());
 
   // We can start from created or paused state.
-  if (state_ != kCreated && state_ != kPaused)
+  if (state_ != kCreated && state_ != kPaused) {
+    // If a pause is pending drop it.  Otherwise the controller might hang since
+    // the corresponding play event has already occurred.
+    if (state_ == kPausedWhenStarting)
+      state_ = kStarting;
     return;
+  }
 
   state_ = kStarting;
 
@@ -240,7 +248,7 @@ void AudioOutputController::DoFlush() {
   // TODO(hclam): Actually flush the audio device.
 }
 
-void AudioOutputController::DoClose(const base::Closure& closed_task) {
+void AudioOutputController::DoClose() {
   DCHECK(message_loop_->BelongsToCurrentThread());
 
   if (state_ != kClosed) {
@@ -248,8 +256,6 @@ void AudioOutputController::DoClose(const base::Closure& closed_task) {
     sync_reader_->Close();
     state_ = kClosed;
   }
-
-  closed_task.Run();
 }
 
 void AudioOutputController::DoSetVolume(double volume) {
@@ -278,9 +284,9 @@ void AudioOutputController::DoReportError(int code) {
     handler_->OnError(this, code);
 }
 
-uint32 AudioOutputController::OnMoreData(
-    AudioOutputStream* stream, uint8* dest,
-    uint32 max_size, AudioBuffersState buffers_state) {
+uint32 AudioOutputController::OnMoreData(uint8* dest,
+                                         uint32 max_size,
+                                         AudioBuffersState buffers_state) {
   TRACE_EVENT0("audio", "AudioOutputController::OnMoreData");
 
   {
@@ -313,7 +319,7 @@ void AudioOutputController::WaitTillDataReady() {
 void AudioOutputController::OnError(AudioOutputStream* stream, int code) {
   // Handle error on the audio controller thread.
   message_loop_->PostTask(FROM_HERE, base::Bind(
-      &AudioOutputController::DoReportError, base::Unretained(this), code));
+      &AudioOutputController::DoReportError, this, code));
 }
 
 void AudioOutputController::DoStopCloseAndClearStream(WaitableEvent *done) {

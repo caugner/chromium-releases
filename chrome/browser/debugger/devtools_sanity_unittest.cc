@@ -12,7 +12,6 @@
 #include "base/test/test_timeouts.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/debugger/devtools_window.h"
-#include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/unpacked_installer.h"
 #include "chrome/browser/profiles/profile.h"
@@ -123,7 +122,6 @@ class DevToolsSanityTest : public InProcessBrowserTest {
   DevToolsSanityTest()
       : window_(NULL),
         inspected_rvh_(NULL) {
-    set_show_window(true);
     EnableDOMAutomation();
   }
 
@@ -213,12 +211,12 @@ class DevToolsExtensionTest : public DevToolsSanityTest,
     if (num_after != (num_before + 1))
       return false;
 
-    return WaitForExtensionHostsToLoad();
+    return WaitForExtensionViewsToLoad();
   }
 
-  bool WaitForExtensionHostsToLoad() {
-    // Wait for all the extension hosts that exist to finish loading.
-    // NOTE: This assumes that the extension host list is not changing while
+  bool WaitForExtensionViewsToLoad() {
+    // Wait for all the extension render views that exist to finish loading.
+    // NOTE: This assumes that the extension views list is not changing while
     // this method is running.
 
     content::NotificationRegistrar registrar;
@@ -231,9 +229,11 @@ class DevToolsExtensionTest : public DevToolsSanityTest,
 
     ExtensionProcessManager* manager =
           browser()->profile()->GetExtensionProcessManager();
-    for (ExtensionProcessManager::const_iterator iter = manager->begin();
-         iter != manager->end();) {
-      if ((*iter)->did_stop_loading())
+    ExtensionProcessManager::ViewSet all_views = manager->GetAllViews();
+    for (ExtensionProcessManager::ViewSet::const_iterator iter =
+             all_views.begin();
+         iter != all_views.end();) {
+      if (!(*iter)->IsLoading())
         ++iter;
       else
         ui_test_utils::RunMessageLoop();
@@ -270,15 +270,19 @@ class DevToolsExperimentalExtensionTest : public DevToolsExtensionTest {
 class WorkerDevToolsSanityTest : public InProcessBrowserTest {
  public:
   WorkerDevToolsSanityTest() : window_(NULL) {
-    set_show_window(true);
     EnableDOMAutomation();
   }
 
  protected:
-  struct WorkerData : public base::RefCountedThreadSafe<WorkerData> {
+  class WorkerData : public base::RefCountedThreadSafe<WorkerData> {
+   public:
     WorkerData() : worker_process_id(0), worker_route_id(0) {}
     int worker_process_id;
     int worker_route_id;
+
+   private:
+    friend class base::RefCountedThreadSafe<WorkerData>;
+    ~WorkerData() {}
   };
 
   class WorkerCreationObserver : public WorkerServiceObserver {
@@ -412,7 +416,8 @@ class WorkerDevToolsSanityTest : public InProcessBrowserTest {
 
 
 // Tests scripts panel showing.
-IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestShowScriptsTab) {
+// Disabled - see http://crbug.com/124300
+IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, DISABLED_TestShowScriptsTab) {
   RunTest("testShowScriptsTab", kDebuggerTestPage);
 }
 
@@ -462,8 +467,9 @@ IN_PROC_BROWSER_TEST_F(DevToolsExtensionTest,
 }
 
 // Tests that scripts are not duplicated after Scripts Panel switch.
+// Disabled - see http://crbug.com/124300
 IN_PROC_BROWSER_TEST_F(DevToolsSanityTest,
-                       TestNoScriptDuplicatesOnPanelSwitch) {
+                       DISABLED_TestNoScriptDuplicatesOnPanelSwitch) {
   RunTest("testNoScriptDuplicatesOnPanelSwitch", kDebuggerTestPage);
 }
 

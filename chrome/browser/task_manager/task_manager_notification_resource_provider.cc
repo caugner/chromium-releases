@@ -10,6 +10,7 @@
 #include "chrome/browser/debugger/devtools_window.h"
 #include "chrome/browser/notifications/balloon_collection.h"
 #include "chrome/browser/notifications/balloon_host.h"
+#include "chrome/browser/notifications/balloon.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_service.h"
@@ -38,6 +39,8 @@ TaskManagerNotificationResource::TaskManagerNotificationResource(
   }
   process_handle_ =
       balloon_host_->web_contents()->GetRenderProcessHost()->GetHandle();
+  unique_process_id_ =
+      balloon_host_->web_contents()->GetRenderProcessHost()->GetID();
   pid_ = base::GetProcId(process_handle_);
   title_ = l10n_util::GetStringFUTF16(IDS_TASK_MANAGER_NOTIFICATION_PREFIX,
                                       balloon_host_->GetSource());
@@ -60,6 +63,10 @@ SkBitmap TaskManagerNotificationResource::GetIcon() const {
 
 base::ProcessHandle TaskManagerNotificationResource::GetProcess() const {
   return process_handle_;
+}
+
+int TaskManagerNotificationResource::GetUniqueChildProcessId() const {
+  return unique_process_id_;
 }
 
 TaskManager::Resource::Type TaskManagerNotificationResource::GetType() const {

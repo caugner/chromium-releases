@@ -12,9 +12,11 @@
 #include "base/file_util_proxy.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
+#include "base/message_loop.h"
 #include "base/process.h"
 #include "chrome/common/nacl_types.h"
 #include "content/public/browser/browser_child_process_host_delegate.h"
+#include "googleurl/src/gurl.h"
 
 class ChromeRenderMessageFilter;
 class CommandLine;
@@ -32,7 +34,9 @@ class BrowserChildProcessHost;
 // running in the renderer and NaCl processes.
 class NaClProcessHost : public content::BrowserChildProcessHostDelegate {
  public:
-  explicit NaClProcessHost(const std::wstring& url);
+  // The argument is the URL of the manifest of the Native Client plugin being
+  // executed.
+  explicit NaClProcessHost(const GURL& manifest_url);
   virtual ~NaClProcessHost();
 
   // Do any minimal work that must be done at browser startup.
@@ -49,7 +53,7 @@ class NaClProcessHost : public content::BrowserChildProcessHostDelegate {
 
 #if defined(OS_WIN)
   void OnProcessLaunchedByBroker(base::ProcessHandle handle);
-  void OnDebugExceptionHandlerLaunchedByBroker();
+  void OnDebugExceptionHandlerLaunchedByBroker(bool success);
 #endif
 
   bool Send(IPC::Message* msg);
@@ -61,10 +65,16 @@ class NaClProcessHost : public content::BrowserChildProcessHostDelegate {
   // depends on chrome.gyp (circular dependency).
   struct NaClInternal;
 
+#if defined(OS_WIN)
   // Create command line for launching loader under nacl-gdb.
-  scoped_ptr<CommandLine> LaunchWithNaClGdb(const FilePath& nacl_gdb,
-                                            CommandLine* line,
-                                            const FilePath& manifest_path);
+  scoped_ptr<CommandLine> GetCommandForLaunchWithGdb(const FilePath& nacl_gdb,
+                                                     CommandLine* line);
+#elif defined(OS_LINUX)
+  bool LaunchNaClGdb(base::ProcessId pid);
+  void OnNaClGdbAttached();
+#endif
+  // Get path to manifest on local disk if possible.
+  FilePath GetManifestPath();
   bool LaunchSelLdr();
 
   // BrowserChildProcessHostDelegate implementation:
@@ -73,20 +83,46 @@ class NaClProcessHost : public content::BrowserChildProcessHostDelegate {
   virtual void OnProcessLaunched() OVERRIDE;
 
   void IrtReady();
-  void SendStart(base::PlatformFile irt_file);
+
+  // Sends the reply message to the renderer who is waiting for the plugin
+  // to load. Returns true on success.
+  bool ReplyToRenderer();
+
+  // Sends the message to the NaCl process to load the plugin. Returns true
+  // on success.
+  bool StartNaClExecution();
+
+  // Called once all initialization is complete and the NaCl process is
+  // ready to go. Returns true on success.
+  bool SendStart();
+
+  // Does post-process-launching tasks for starting the NaCl process once
+  // we have a connection.
+  //
+  // Returns false on failure.
+  bool StartWithLaunchedProcess();
 
   // Message handlers for validation caching.
   void OnQueryKnownToValidate(const std::string& signature, bool* result);
   void OnSetKnownToValidate(const std::string& signature);
+#if defined(OS_WIN)
+  // Message handler for Windows hardware exception handling.
+  void OnAttachDebugExceptionHandler(const std::string& info,
+                                     IPC::Message* reply_msg);
+  bool AttachDebugExceptionHandler(const std::string& info,
+                                   IPC::Message* reply_msg);
+#endif
+
+  GURL manifest_url_;
 
 #if defined(OS_WIN)
-  class DebugContext;
-
-  scoped_refptr<DebugContext> debug_context_;
-
   // This field becomes true when the broker successfully launched
   // the NaCl loader.
   bool process_launched_by_broker_;
+#elif defined(OS_LINUX)
+  bool wait_for_nacl_gdb_;
+  MessageLoopForIO::FileDescriptorWatcher nacl_gdb_watcher_;
+  scoped_ptr<MessageLoopForIO::Watcher> nacl_gdb_watcher_delegate_;
 #endif
   // The ChromeRenderMessageFilter that requested this NaCl process.  We use
   // this for sending the reply once the process has started.
@@ -96,6 +132,10 @@ class NaClProcessHost : public content::BrowserChildProcessHostDelegate {
   // sub-process either succeeds or fails to unblock the renderer waiting for
   // the reply. NULL when there is no reply to send.
   IPC::Message* reply_msg_;
+#if defined(OS_WIN)
+  bool debug_exception_handler_requested_;
+  scoped_ptr<IPC::Message> attach_debug_exception_handler_reply_msg_;
+#endif
 
   // Set of extensions for (NaCl) manifest auto-detection. The file path to
   // manifest is passed to nacl-gdb when it is used to debug the NaCl loader.

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,164 +6,10 @@
 
 #include <vector>
 
-// TODO(skuhne): Get these unit tests to work once the beta is out.
-#if !defined(USE_ASH)
-
 #include "base/compiler_specific.h"
 #include "base/logging.h"
+#include "chrome/browser/ui/window_sizer_common_unittest.h"
 #include "testing/gtest/include/gtest/gtest.h"
-
-// Some standard monitor sizes (no task bar).
-static const gfx::Rect tentwentyfour(0, 0, 1024, 768);
-static const gfx::Rect twelveeighty(0, 0, 1280, 1024);
-static const gfx::Rect sixteenhundred(0, 0, 1600, 1200);
-static const gfx::Rect sixteeneighty(0, 0, 1680, 1050);
-static const gfx::Rect nineteentwenty(0, 0, 1920, 1200);
-
-// Represents a 1024x768 monitor that is not the primary monitor, arranged to
-// the immediate left of the primary 1024x768 monitor.
-static const gfx::Rect left_nonprimary(-1024, 0, 1024, 768);
-
-// Represents a 1024x768 monitor that is not the primary monitor, arranged to
-// the immediate right of the primary 1024x768 monitor.
-static const gfx::Rect right_nonprimary(1024, 0, 1024, 768);
-
-// Represents a 1024x768 monitor that is not the primary monitor, arranged to
-// the immediate top of the primary 1024x768 monitor.
-static const gfx::Rect top_nonprimary(0, -768, 1024, 768);
-
-// Represents a 1024x768 monitor that is not the primary monitor, arranged to
-// the immediate bottom of the primary 1024x768 monitor.
-static const gfx::Rect bottom_nonprimary(0, 768, 1024, 768);
-
-// The work area for 1024x768 monitors with different taskbar orientations.
-static const gfx::Rect taskbar_bottom_work_area(0, 0, 1024, 734);
-static const gfx::Rect taskbar_top_work_area(0, 34, 1024, 734);
-static const gfx::Rect taskbar_left_work_area(107, 0, 917, 768);
-static const gfx::Rect taskbar_right_work_area(0, 0, 917, 768);
-
-static int kWindowTilePixels = WindowSizer::kWindowTilePixels;
-
-// Testing implementation of WindowSizer::MonitorInfoProvider that we can use
-// to fake various monitor layouts and sizes.
-class TestMonitorInfoProvider : public MonitorInfoProvider {
- public:
-  TestMonitorInfoProvider() {}
-  virtual ~TestMonitorInfoProvider() {}
-
-  void AddMonitor(const gfx::Rect& bounds, const gfx::Rect& work_area) {
-    DCHECK(bounds.Contains(work_area));
-    monitor_bounds_.push_back(bounds);
-    work_areas_.push_back(work_area);
-  }
-
-  // Overridden from WindowSizer::MonitorInfoProvider:
-  virtual gfx::Rect GetPrimaryMonitorWorkArea() const OVERRIDE {
-    return work_areas_[0];
-  }
-
-  virtual gfx::Rect GetPrimaryMonitorBounds() const OVERRIDE {
-    return monitor_bounds_[0];
-  }
-
-  virtual gfx::Rect GetMonitorWorkAreaMatching(
-      const gfx::Rect& match_rect) const OVERRIDE {
-    return work_areas_[GetMonitorIndexMatchingBounds(match_rect)];
-  }
-
- private:
-  size_t GetMonitorIndexMatchingBounds(const gfx::Rect& match_rect) const {
-    int max_area = 0;
-    size_t max_area_index = 0;
-    // Loop through all the monitors, finding the one that intersects the
-    // largest area of the supplied match rect.
-    for (size_t i = 0; i < work_areas_.size(); ++i) {
-      gfx::Rect overlap(match_rect.Intersect(work_areas_[i]));
-      int area = overlap.width() * overlap.height();
-      if (area > max_area) {
-        max_area = area;
-        max_area_index = i;
-      }
-    }
-    return max_area_index;
-  }
-
-  std::vector<gfx::Rect> monitor_bounds_;
-  std::vector<gfx::Rect> work_areas_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestMonitorInfoProvider);
-};
-
-// Testing implementation of WindowSizer::StateProvider that we use to fake
-// persistent storage and existing windows.
-class TestStateProvider : public WindowSizer::StateProvider {
- public:
-  TestStateProvider()
-    : has_persistent_data_(false),
-      has_last_active_data_(false) {
-  }
-  virtual ~TestStateProvider() {}
-
-  void SetPersistentState(const gfx::Rect& bounds,
-                          const gfx::Rect& work_area,
-                          bool has_persistent_data) {
-    persistent_bounds_ = bounds;
-    persistent_work_area_ = work_area;
-    has_persistent_data_ = has_persistent_data;
-  }
-
-  void SetLastActiveState(const gfx::Rect& bounds, bool has_last_active_data) {
-    last_active_bounds_ = bounds;
-    has_last_active_data_ = has_last_active_data;
-  }
-
-  // Overridden from WindowSizer::StateProvider:
-  virtual bool GetPersistentState(gfx::Rect* bounds,
-                                  gfx::Rect* saved_work_area) const {
-    *bounds = persistent_bounds_;
-    *saved_work_area = persistent_work_area_;
-    return has_persistent_data_;
-  }
-
-  virtual bool GetLastActiveWindowState(gfx::Rect* bounds) const {
-    *bounds = last_active_bounds_;
-    return has_last_active_data_;
-  }
-
- private:
-  gfx::Rect persistent_bounds_;
-  gfx::Rect persistent_work_area_;
-  bool has_persistent_data_;
-
-  gfx::Rect last_active_bounds_;
-  bool has_last_active_data_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestStateProvider);
-};
-
-// A convenience function to read the window bounds from the window sizer
-// according to the specified configuration.
-enum Source { DEFAULT, LAST_ACTIVE, PERSISTED };
-static void GetWindowBounds(const gfx::Rect& monitor1_bounds,
-                            const gfx::Rect& monitor1_work_area,
-                            const gfx::Rect& monitor2_bounds,
-                            const gfx::Rect& state,
-                            const gfx::Rect& work_area,
-                            Source source,
-                            gfx::Rect* out_bounds) {
-  TestMonitorInfoProvider* mip = new TestMonitorInfoProvider;
-  mip->AddMonitor(monitor1_bounds, monitor1_work_area);
-  if (!monitor2_bounds.IsEmpty())
-    mip->AddMonitor(monitor2_bounds, monitor2_bounds);
-  TestStateProvider* sp = new TestStateProvider;
-  if (source == PERSISTED)
-    sp->SetPersistentState(state, work_area, true);
-  else if (source == LAST_ACTIVE)
-    sp->SetLastActiveState(state, true);
-  // TODO(skuhne): Need to pass browser instance here.
-  WindowSizer sizer(sp, mip, NULL);
-  sizer.DetermineWindowBounds(gfx::Rect(), out_bounds);
-}
 
 // Test that the window is sized appropriately for the first run experience
 // where the default window bounds calculation is invoked.
@@ -171,7 +17,7 @@ TEST(WindowSizerTest, DefaultSizeCase) {
   { // 4:3 monitor case, 1024x768, no taskbar
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(), gfx::Rect(),
-                    gfx::Rect(), DEFAULT, &window_bounds);
+                    gfx::Rect(), DEFAULT, &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(gfx::Rect(kWindowTilePixels, kWindowTilePixels,
                         1024 - kWindowTilePixels * 2,
                         768 - kWindowTilePixels * 2),
@@ -181,7 +27,8 @@ TEST(WindowSizerTest, DefaultSizeCase) {
   { // 4:3 monitor case, 1024x768, taskbar on bottom
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, taskbar_bottom_work_area, gfx::Rect(),
-                    gfx::Rect(), gfx::Rect(), DEFAULT, &window_bounds);
+                    gfx::Rect(), gfx::Rect(), DEFAULT, &window_bounds, NULL,
+                    gfx::Rect());
     EXPECT_EQ(gfx::Rect(kWindowTilePixels, kWindowTilePixels,
                         1024 - kWindowTilePixels * 2,
                         (taskbar_bottom_work_area.height() -
@@ -192,7 +39,8 @@ TEST(WindowSizerTest, DefaultSizeCase) {
   { // 4:3 monitor case, 1024x768, taskbar on right
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, taskbar_right_work_area, gfx::Rect(),
-                    gfx::Rect(), gfx::Rect(), DEFAULT, &window_bounds);
+                    gfx::Rect(), gfx::Rect(), DEFAULT, &window_bounds, NULL,
+                    gfx::Rect());
     EXPECT_EQ(gfx::Rect(kWindowTilePixels, kWindowTilePixels,
                         taskbar_right_work_area.width() - kWindowTilePixels*2,
                         768 - kWindowTilePixels * 2),
@@ -202,7 +50,8 @@ TEST(WindowSizerTest, DefaultSizeCase) {
   { // 4:3 monitor case, 1024x768, taskbar on left
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, taskbar_left_work_area, gfx::Rect(),
-                    gfx::Rect(), gfx::Rect(), DEFAULT, &window_bounds);
+                    gfx::Rect(), gfx::Rect(), DEFAULT, &window_bounds, NULL,
+                    gfx::Rect());
     EXPECT_EQ(gfx::Rect(taskbar_left_work_area.x() + kWindowTilePixels,
                         kWindowTilePixels,
                         taskbar_left_work_area.width() - kWindowTilePixels * 2,
@@ -214,7 +63,8 @@ TEST(WindowSizerTest, DefaultSizeCase) {
   { // 4:3 monitor case, 1024x768, taskbar on top
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, taskbar_top_work_area, gfx::Rect(),
-                    gfx::Rect(), gfx::Rect(), DEFAULT, &window_bounds);
+                    gfx::Rect(), gfx::Rect(), DEFAULT, &window_bounds, NULL,
+                    gfx::Rect());
     EXPECT_EQ(gfx::Rect(kWindowTilePixels,
                         taskbar_top_work_area.y() + kWindowTilePixels,
                         1024 - kWindowTilePixels * 2,
@@ -225,7 +75,7 @@ TEST(WindowSizerTest, DefaultSizeCase) {
   { // 4:3 monitor case, 1280x1024
     gfx::Rect window_bounds;
     GetWindowBounds(twelveeighty, twelveeighty, gfx::Rect(), gfx::Rect(),
-                    gfx::Rect(), DEFAULT, &window_bounds);
+                    gfx::Rect(), DEFAULT, &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(gfx::Rect(kWindowTilePixels, kWindowTilePixels,
                         1050,
                         1024 - kWindowTilePixels * 2),
@@ -235,7 +85,7 @@ TEST(WindowSizerTest, DefaultSizeCase) {
   { // 4:3 monitor case, 1600x1200
     gfx::Rect window_bounds;
     GetWindowBounds(sixteenhundred, sixteenhundred, gfx::Rect(), gfx::Rect(),
-                    gfx::Rect(), DEFAULT, &window_bounds);
+                    gfx::Rect(), DEFAULT, &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(gfx::Rect(kWindowTilePixels, kWindowTilePixels,
                         1050,
                         1200 - kWindowTilePixels * 2),
@@ -245,7 +95,7 @@ TEST(WindowSizerTest, DefaultSizeCase) {
   { // 16:10 monitor case, 1680x1050
     gfx::Rect window_bounds;
     GetWindowBounds(sixteeneighty, sixteeneighty, gfx::Rect(), gfx::Rect(),
-                    gfx::Rect(), DEFAULT, &window_bounds);
+                    gfx::Rect(), DEFAULT, &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(gfx::Rect(kWindowTilePixels, kWindowTilePixels,
                         840 - static_cast<int>(kWindowTilePixels * 1.5),
                         1050 - kWindowTilePixels * 2),
@@ -255,7 +105,7 @@ TEST(WindowSizerTest, DefaultSizeCase) {
   { // 16:10 monitor case, 1920x1200
     gfx::Rect window_bounds;
     GetWindowBounds(nineteentwenty, nineteentwenty, gfx::Rect(), gfx::Rect(),
-                    gfx::Rect(), DEFAULT, &window_bounds);
+                    gfx::Rect(), DEFAULT, &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(gfx::Rect(kWindowTilePixels, kWindowTilePixels,
                         960 - static_cast<int>(kWindowTilePixels * 1.5),
                         1200 - kWindowTilePixels * 2),
@@ -270,7 +120,8 @@ TEST(WindowSizerTest, LastWindowBoundsCase) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(),
                     gfx::Rect(kWindowTilePixels, kWindowTilePixels, 500, 400),
-                    gfx::Rect(), LAST_ACTIVE, &window_bounds);
+                    gfx::Rect(), LAST_ACTIVE, &window_bounds, NULL,
+                    gfx::Rect());
     EXPECT_EQ(gfx::Rect(kWindowTilePixels * 2,
                         kWindowTilePixels * 2, 500, 400), window_bounds);
   }
@@ -279,7 +130,8 @@ TEST(WindowSizerTest, LastWindowBoundsCase) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, taskbar_top_work_area, gfx::Rect(),
                     gfx::Rect(kWindowTilePixels, kWindowTilePixels, 500, 400),
-                    gfx::Rect(), LAST_ACTIVE, &window_bounds);
+                    gfx::Rect(), LAST_ACTIVE, &window_bounds, NULL,
+                    gfx::Rect());
     EXPECT_EQ(gfx::Rect(kWindowTilePixels * 2,
                         std::max(kWindowTilePixels * 2,
                                  34 /* toolbar height */),
@@ -290,7 +142,8 @@ TEST(WindowSizerTest, LastWindowBoundsCase) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(),
                     gfx::Rect(kWindowTilePixels, kWindowTilePixels, 29, 29),
-                    gfx::Rect(), LAST_ACTIVE, &window_bounds);
+                    gfx::Rect(), LAST_ACTIVE, &window_bounds, NULL,
+                    gfx::Rect());
     EXPECT_EQ(gfx::Rect(kWindowTilePixels * 2,
                         kWindowTilePixels * 2,
                         30 /* not 29 */,
@@ -303,7 +156,8 @@ TEST(WindowSizerTest, LastWindowBoundsCase) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(),
                     gfx::Rect(kWindowTilePixels, kWindowTilePixels, 500, 400),
-                    gfx::Rect(), LAST_ACTIVE, &window_bounds);
+                    gfx::Rect(), LAST_ACTIVE, &window_bounds, NULL,
+                    gfx::Rect());
     EXPECT_EQ(gfx::Rect(kWindowTilePixels * 2,
                         kWindowTilePixels * 2, 500, 400), window_bounds);
   }
@@ -316,7 +170,7 @@ TEST(WindowSizerTest, PersistedBoundsCase) {
 
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(), initial_bounds,
-                    gfx::Rect(), PERSISTED, &window_bounds);
+                    gfx::Rect(), PERSISTED, &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(initial_bounds, window_bounds);
   }
 
@@ -325,7 +179,7 @@ TEST(WindowSizerTest, PersistedBoundsCase) {
 
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(), initial_bounds,
-                    gfx::Rect(), PERSISTED, &window_bounds);
+                    gfx::Rect(), PERSISTED, &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(initial_bounds, window_bounds);
   }
 
@@ -334,7 +188,8 @@ TEST(WindowSizerTest, PersistedBoundsCase) {
 
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, left_nonprimary,
-                    initial_bounds, gfx::Rect(), PERSISTED, &window_bounds);
+                    initial_bounds, gfx::Rect(), PERSISTED, &window_bounds,
+                    NULL, gfx::Rect());
     EXPECT_EQ(initial_bounds, window_bounds);
   }
 
@@ -343,7 +198,8 @@ TEST(WindowSizerTest, PersistedBoundsCase) {
 
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, left_nonprimary,
-                    initial_bounds, gfx::Rect(), PERSISTED, &window_bounds);
+                    initial_bounds, gfx::Rect(), PERSISTED, &window_bounds,
+                    NULL, gfx::Rect());
     EXPECT_EQ(initial_bounds, window_bounds);
   }
 
@@ -355,7 +211,7 @@ TEST(WindowSizerTest, PersistedBoundsCase) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(1024, 0, 800, 600),
                     initial_bounds, right_nonprimary, PERSISTED,
-                    &window_bounds);
+                    &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(initial_bounds, window_bounds);
   }
 
@@ -367,7 +223,7 @@ TEST(WindowSizerTest, PersistedBoundsCase) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(1024, 0, 800, 600),
                     initial_bounds, right_nonprimary, PERSISTED,
-                    &window_bounds);
+                    &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(gfx::Rect(1224, 50, 600, 500), window_bounds);
   }
 
@@ -379,7 +235,7 @@ TEST(WindowSizerTest, PersistedBoundsCase) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(1024, 0, 800, 600),
                     initial_bounds, right_nonprimary, PERSISTED,
-                    &window_bounds);
+                    &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(gfx::Rect(1024, 0, 800, 600), window_bounds);
   }
 
@@ -387,7 +243,7 @@ TEST(WindowSizerTest, PersistedBoundsCase) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(),
                     gfx::Rect(kWindowTilePixels, kWindowTilePixels, 29, 29),
-                    gfx::Rect(), PERSISTED, &window_bounds);
+                    gfx::Rect(), PERSISTED, &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(gfx::Rect(kWindowTilePixels, kWindowTilePixels,
                         30 /* not 29 */, 30 /* not 29 */),
               window_bounds);
@@ -401,7 +257,7 @@ TEST(WindowSizerTest, PersistedBoundsCase) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(),
                     gfx::Rect(kWindowTilePixels, kWindowTilePixels, 30, 5000),
-                    gfx::Rect(), PERSISTED, &window_bounds);
+                    gfx::Rect(), PERSISTED, &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(tentwentyfour.height(), window_bounds.height());
   }
 #endif  // defined(OS_MACOSX)
@@ -420,7 +276,8 @@ TEST(WindowSizerTest, LastWindowOffscreenWithAggressiveRepositioning) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, taskbar_left_work_area, gfx::Rect(),
                     gfx::Rect(kWindowTilePixels, kWindowTilePixels, 500, 400),
-                    gfx::Rect(), LAST_ACTIVE, &window_bounds);
+                    gfx::Rect(), LAST_ACTIVE, &window_bounds, NULL,
+                    gfx::Rect());
     EXPECT_EQ(gfx::Rect(taskbar_left_work_area.x(),
                         kWindowTilePixels * 2, 500, 400), window_bounds);
   }
@@ -429,7 +286,7 @@ TEST(WindowSizerTest, LastWindowOffscreenWithAggressiveRepositioning) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(),
                     gfx::Rect(10, 729, 500, 400), gfx::Rect(), LAST_ACTIVE,
-                    &window_bounds);
+                    &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(gfx::Rect(10 + kWindowTilePixels,
                         0 /* not 729 + kWindowTilePixels */,
                         500, 400),
@@ -440,7 +297,7 @@ TEST(WindowSizerTest, LastWindowOffscreenWithAggressiveRepositioning) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(),
                     gfx::Rect(985, 10, 500, 400), gfx::Rect(), LAST_ACTIVE,
-                    &window_bounds);
+                    &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(gfx::Rect(0 /* not 985 + kWindowTilePixels*/,
                         10 + kWindowTilePixels,
                         500, 400),
@@ -451,7 +308,7 @@ TEST(WindowSizerTest, LastWindowOffscreenWithAggressiveRepositioning) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(),
                     gfx::Rect(985, 729, 500, 400), gfx::Rect(), LAST_ACTIVE,
-                    &window_bounds);
+                    &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(gfx::Rect(0 /* not 985 + kWindowTilePixels*/,
                         0 /* not 729 + kWindowTilePixels*/,
                         500, 400),
@@ -464,7 +321,7 @@ TEST(WindowSizerTest, PersistedWindowOffscreenWithAggressiveRepositioning) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(),
                     gfx::Rect(-471, 50, 500, 400), gfx::Rect(), PERSISTED,
-                    &window_bounds);
+                    &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(gfx::Rect(0 /* not -471 */, 50, 500, 400), window_bounds);
   }
 
@@ -472,7 +329,7 @@ TEST(WindowSizerTest, PersistedWindowOffscreenWithAggressiveRepositioning) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(),
                     gfx::Rect(50, -370, 500, 400), gfx::Rect(), PERSISTED,
-                    &window_bounds);
+                    &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(gfx::Rect(50, 0, 500, 400), window_bounds);
   }
 
@@ -480,7 +337,7 @@ TEST(WindowSizerTest, PersistedWindowOffscreenWithAggressiveRepositioning) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(),
                     gfx::Rect(995, 50, 500, 400), gfx::Rect(), PERSISTED,
-                    &window_bounds);
+                    &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(gfx::Rect(0 /* not 995 */, 50, 500, 400), window_bounds);
   }
 
@@ -488,7 +345,7 @@ TEST(WindowSizerTest, PersistedWindowOffscreenWithAggressiveRepositioning) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(),
                     gfx::Rect(50, 739, 500, 400), gfx::Rect(), PERSISTED,
-                    &window_bounds);
+                    &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(gfx::Rect(50, 0 /* not 739 */, 500, 400), window_bounds);
   }
 
@@ -496,7 +353,7 @@ TEST(WindowSizerTest, PersistedWindowOffscreenWithAggressiveRepositioning) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(),
                     gfx::Rect(-471, -371, 500, 400), gfx::Rect(), PERSISTED,
-                    &window_bounds);
+                    &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(gfx::Rect(0 /* not -471 */, 0 /* not -371 */, 500, 400),
               window_bounds);
   }
@@ -505,7 +362,7 @@ TEST(WindowSizerTest, PersistedWindowOffscreenWithAggressiveRepositioning) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(),
                     gfx::Rect(995, -371, 500, 400), gfx::Rect(), PERSISTED,
-                    &window_bounds);
+                    &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(gfx::Rect(0 /* not 995 */, 0 /* not -371 */, 500, 400),
                         window_bounds);
   }
@@ -514,7 +371,7 @@ TEST(WindowSizerTest, PersistedWindowOffscreenWithAggressiveRepositioning) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(),
                     gfx::Rect(-471, 739, 500, 400), gfx::Rect(), PERSISTED,
-                    &window_bounds);
+                    &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(gfx::Rect(0 /* not -471 */, 0 /* not 739 */, 500, 400),
                         window_bounds);
   }
@@ -523,7 +380,7 @@ TEST(WindowSizerTest, PersistedWindowOffscreenWithAggressiveRepositioning) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(),
                     gfx::Rect(995, 739, 500, 400), gfx::Rect(), PERSISTED,
-                    &window_bounds);
+                    &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(gfx::Rect(0 /* not 995 */, 0 /* not 739 */, 500, 400),
                         window_bounds);
   }
@@ -532,7 +389,7 @@ TEST(WindowSizerTest, PersistedWindowOffscreenWithAggressiveRepositioning) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(),
                     gfx::Rect(-700, 50, 500, 400), gfx::Rect(), PERSISTED,
-                    &window_bounds);
+                    &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(gfx::Rect(0 /* not -700 */, 50, 500, 400), window_bounds);
   }
 
@@ -540,7 +397,7 @@ TEST(WindowSizerTest, PersistedWindowOffscreenWithAggressiveRepositioning) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(),
                     gfx::Rect(-700, 50, 500, 400), left_nonprimary,
-                    PERSISTED, &window_bounds);
+                    PERSISTED, &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(gfx::Rect(0, 50, 500, 400), window_bounds);
   }
 
@@ -548,7 +405,7 @@ TEST(WindowSizerTest, PersistedWindowOffscreenWithAggressiveRepositioning) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(),
                     gfx::Rect(50, -500, 500, 400), gfx::Rect(), PERSISTED,
-                    &window_bounds);
+                    &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(gfx::Rect(50, 0, 500, 400), window_bounds);
   }
 
@@ -556,7 +413,7 @@ TEST(WindowSizerTest, PersistedWindowOffscreenWithAggressiveRepositioning) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(),
                     gfx::Rect(50, -500, 500, 400), top_nonprimary, PERSISTED,
-                    &window_bounds);
+                    &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(gfx::Rect(50, 0, 500, 400), window_bounds);
   }
 
@@ -564,7 +421,7 @@ TEST(WindowSizerTest, PersistedWindowOffscreenWithAggressiveRepositioning) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(),
                     gfx::Rect(1200, 50, 500, 400), gfx::Rect(), PERSISTED,
-                    &window_bounds);
+                    &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(gfx::Rect(0 /* not 1200 */, 50, 500, 400), window_bounds);
   }
 
@@ -572,7 +429,7 @@ TEST(WindowSizerTest, PersistedWindowOffscreenWithAggressiveRepositioning) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(),
                     gfx::Rect(1200, 50, 500, 400), right_nonprimary, PERSISTED,
-                    &window_bounds);
+                    &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(gfx::Rect(524 /* not 1200 */, 50, 500, 400), window_bounds);
   }
 
@@ -580,7 +437,7 @@ TEST(WindowSizerTest, PersistedWindowOffscreenWithAggressiveRepositioning) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(),
                     gfx::Rect(50, 800, 500, 400), gfx::Rect(), PERSISTED,
-                    &window_bounds);
+                    &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(gfx::Rect(50, 0 /* not 800 */, 500, 400), window_bounds);
   }
 
@@ -588,7 +445,7 @@ TEST(WindowSizerTest, PersistedWindowOffscreenWithAggressiveRepositioning) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(),
                     gfx::Rect(50, 800, 500, 400), bottom_nonprimary,
-                    PERSISTED, &window_bounds);
+                    PERSISTED, &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(gfx::Rect(50, 368 /* not 800 */, 500, 400), window_bounds);
   }
 
@@ -596,7 +453,7 @@ TEST(WindowSizerTest, PersistedWindowOffscreenWithAggressiveRepositioning) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(),
                     gfx::Rect(-100, 50, 2000, 400), gfx::Rect(), PERSISTED,
-                    &window_bounds);
+                    &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(gfx::Rect(0 /* not -100 */, 50, 2000, 400), window_bounds);
   }
 }
@@ -606,7 +463,8 @@ TEST(WindowSizerTest, LastWindowOffscreenWithNonAggressiveRepositioning) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, taskbar_left_work_area, gfx::Rect(),
                     gfx::Rect(kWindowTilePixels, kWindowTilePixels, 500, 400),
-                    gfx::Rect(), LAST_ACTIVE, &window_bounds);
+                    gfx::Rect(), LAST_ACTIVE, &window_bounds, NULL,
+                    gfx::Rect());
     EXPECT_EQ(gfx::Rect(kWindowTilePixels * 2,
                         kWindowTilePixels * 2, 500, 400), window_bounds);
   }
@@ -618,7 +476,7 @@ TEST(WindowSizerTest, LastWindowOffscreenWithNonAggressiveRepositioning) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(),
                     gfx::Rect(10, 728, 500, 400), gfx::Rect(), LAST_ACTIVE,
-                    &window_bounds);
+                    &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(gfx::Rect(10 + kWindowTilePixels, 738,
                         500, 400), window_bounds);
   }
@@ -628,7 +486,7 @@ TEST(WindowSizerTest, LastWindowOffscreenWithNonAggressiveRepositioning) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(),
                     gfx::Rect(10, 729, 500, 400), gfx::Rect(), LAST_ACTIVE,
-                    &window_bounds);
+                    &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(gfx::Rect(10 + kWindowTilePixels, 738 /* not 739 */, 500, 400),
               window_bounds);
   }
@@ -638,7 +496,7 @@ TEST(WindowSizerTest, LastWindowOffscreenWithNonAggressiveRepositioning) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(),
                     gfx::Rect(984, 10, 500, 400), gfx::Rect(), LAST_ACTIVE,
-                    &window_bounds);
+                    &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(gfx::Rect(994, 10 + kWindowTilePixels, 500, 400), window_bounds);
   }
 
@@ -647,7 +505,7 @@ TEST(WindowSizerTest, LastWindowOffscreenWithNonAggressiveRepositioning) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(),
                     gfx::Rect(985, 10, 500, 400), gfx::Rect(), LAST_ACTIVE,
-                    &window_bounds);
+                    &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(gfx::Rect(994 /* not 995 */, 10 + kWindowTilePixels,
                         500, 400), window_bounds);
   }
@@ -657,7 +515,7 @@ TEST(WindowSizerTest, LastWindowOffscreenWithNonAggressiveRepositioning) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(),
                     gfx::Rect(985, 729, 500, 400), gfx::Rect(), LAST_ACTIVE,
-                    &window_bounds);
+                    &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(gfx::Rect(994 /* not 995 */, 738 /* not 739 */, 500, 400),
               window_bounds);
   }
@@ -672,7 +530,7 @@ TEST(WindowSizerTest, PersistedWindowOffscreenWithNonAggressiveRepositioning) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(),
                     initial_bounds, gfx::Rect(), PERSISTED,
-                    &window_bounds);
+                    &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(initial_bounds, window_bounds);
   }
 
@@ -681,7 +539,7 @@ TEST(WindowSizerTest, PersistedWindowOffscreenWithNonAggressiveRepositioning) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(),
                     gfx::Rect(-471, 50, 500, 400), gfx::Rect(), PERSISTED,
-                    &window_bounds);
+                    &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(gfx::Rect(-470 /* not -471 */, 50, 500, 400), window_bounds);
   }
 
@@ -691,7 +549,7 @@ TEST(WindowSizerTest, PersistedWindowOffscreenWithNonAggressiveRepositioning) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(),
                     gfx::Rect(50, -370, 500, 400), gfx::Rect(), PERSISTED,
-                    &window_bounds);
+                    &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(gfx::Rect(50, 0, 500, 400), window_bounds);
   }
 
@@ -702,7 +560,7 @@ TEST(WindowSizerTest, PersistedWindowOffscreenWithNonAggressiveRepositioning) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(),
                     initial_bounds, gfx::Rect(), PERSISTED,
-                    &window_bounds);
+                    &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(initial_bounds, window_bounds);
   }
 
@@ -711,7 +569,7 @@ TEST(WindowSizerTest, PersistedWindowOffscreenWithNonAggressiveRepositioning) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(),
                     gfx::Rect(995, 50, 500, 400), gfx::Rect(), PERSISTED,
-                    &window_bounds);
+                    &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(gfx::Rect(994 /* not 995 */, 50, 500, 400), window_bounds);
   }
 
@@ -722,7 +580,7 @@ TEST(WindowSizerTest, PersistedWindowOffscreenWithNonAggressiveRepositioning) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(),
                     initial_bounds, gfx::Rect(), PERSISTED,
-                    &window_bounds);
+                    &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(initial_bounds, window_bounds);
   }
 
@@ -731,7 +589,7 @@ TEST(WindowSizerTest, PersistedWindowOffscreenWithNonAggressiveRepositioning) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(),
                     gfx::Rect(50, 739, 500, 400), gfx::Rect(), PERSISTED,
-                    &window_bounds);
+                    &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(gfx::Rect(50, 738 /* not 739 */, 500, 400), window_bounds);
   }
 
@@ -739,7 +597,7 @@ TEST(WindowSizerTest, PersistedWindowOffscreenWithNonAggressiveRepositioning) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(),
                     gfx::Rect(-471, -371, 500, 400), gfx::Rect(), PERSISTED,
-                    &window_bounds);
+                    &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(gfx::Rect(-470 /* not -471 */, 0, 500, 400),
               window_bounds);
   }
@@ -749,7 +607,7 @@ TEST(WindowSizerTest, PersistedWindowOffscreenWithNonAggressiveRepositioning) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(),
                     gfx::Rect(995, -371, 500, 400), gfx::Rect(), PERSISTED,
-                    &window_bounds);
+                    &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(gfx::Rect(994 /* not 995 */, 0, 500, 400),
                         window_bounds);
   }
@@ -759,7 +617,7 @@ TEST(WindowSizerTest, PersistedWindowOffscreenWithNonAggressiveRepositioning) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(),
                     gfx::Rect(-471, 739, 500, 400), gfx::Rect(), PERSISTED,
-                    &window_bounds);
+                    &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(gfx::Rect(-470 /* not -471 */, 738 /* not 739 */, 500, 400),
                         window_bounds);
   }
@@ -769,7 +627,7 @@ TEST(WindowSizerTest, PersistedWindowOffscreenWithNonAggressiveRepositioning) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(),
                     gfx::Rect(995, 739, 500, 400), gfx::Rect(), PERSISTED,
-                    &window_bounds);
+                    &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(gfx::Rect(994 /* not 995 */, 738 /* not 739 */, 500, 400),
                         window_bounds);
   }
@@ -778,7 +636,7 @@ TEST(WindowSizerTest, PersistedWindowOffscreenWithNonAggressiveRepositioning) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(),
                     gfx::Rect(-700, 50, 500, 400), gfx::Rect(), PERSISTED,
-                    &window_bounds);
+                    &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(gfx::Rect(-470 /* not -700 */, 50, 500, 400), window_bounds);
   }
 
@@ -786,7 +644,7 @@ TEST(WindowSizerTest, PersistedWindowOffscreenWithNonAggressiveRepositioning) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(),
                     gfx::Rect(-700, 50, 500, 400), left_nonprimary, PERSISTED,
-                    &window_bounds);
+                    &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(gfx::Rect(0, 50, 500, 400), window_bounds);
   }
 
@@ -794,7 +652,7 @@ TEST(WindowSizerTest, PersistedWindowOffscreenWithNonAggressiveRepositioning) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(),
                     gfx::Rect(50, -500, 500, 400), gfx::Rect(), PERSISTED,
-                    &window_bounds);
+                    &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(gfx::Rect(50, 0, 500, 400), window_bounds);
   }
 
@@ -802,7 +660,7 @@ TEST(WindowSizerTest, PersistedWindowOffscreenWithNonAggressiveRepositioning) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(),
                     gfx::Rect(50, -500, 500, 400), top_nonprimary,
-                    PERSISTED, &window_bounds);
+                    PERSISTED, &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(gfx::Rect(50, 0, 500, 400), window_bounds);
   }
 
@@ -810,7 +668,7 @@ TEST(WindowSizerTest, PersistedWindowOffscreenWithNonAggressiveRepositioning) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(),
                     gfx::Rect(1200, 50, 500, 400), gfx::Rect(), PERSISTED,
-                    &window_bounds);
+                    &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(gfx::Rect(994 /* not 1200 */, 50, 500, 400), window_bounds);
   }
 
@@ -818,7 +676,7 @@ TEST(WindowSizerTest, PersistedWindowOffscreenWithNonAggressiveRepositioning) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(),
                     gfx::Rect(1200, 50, 500, 400), right_nonprimary,
-                    PERSISTED, &window_bounds);
+                    PERSISTED, &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(gfx::Rect(524, 50, 500, 400), window_bounds);
   }
 
@@ -826,7 +684,7 @@ TEST(WindowSizerTest, PersistedWindowOffscreenWithNonAggressiveRepositioning) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(),
                     gfx::Rect(50, 800, 500, 400), gfx::Rect(), PERSISTED,
-                    &window_bounds);
+                    &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(gfx::Rect(50, 738 /* not 800 */, 500, 400), window_bounds);
   }
 
@@ -834,9 +692,29 @@ TEST(WindowSizerTest, PersistedWindowOffscreenWithNonAggressiveRepositioning) {
     gfx::Rect window_bounds;
     GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(),
                     gfx::Rect(50, 800, 500, 400), bottom_nonprimary,
-                    PERSISTED, &window_bounds);
+                    PERSISTED, &window_bounds, NULL, gfx::Rect());
     EXPECT_EQ(gfx::Rect(50, 368, 500, 400), window_bounds);
   }
 }
+
+// Test that the window is sized appropriately for the first run experience
+// where the default window bounds calculation is invoked.
+TEST(WindowSizerTest, AdjustFitSize) {
+  { // Check that the window gets resized to the screen.
+    gfx::Rect window_bounds;
+    GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(), gfx::Rect(),
+                    gfx::Rect(), DEFAULT, &window_bounds, NULL,
+                    gfx::Rect(-10, -10, 1024 + 20, 768 + 20));
+    EXPECT_EQ(gfx::Rect(0, 0, 1024, 768), window_bounds);
+  }
+
+  { // Check that a window which hangs out of the screen get moved back in.
+    gfx::Rect window_bounds;
+    GetWindowBounds(tentwentyfour, tentwentyfour, gfx::Rect(), gfx::Rect(),
+                    gfx::Rect(), DEFAULT, &window_bounds, NULL,
+                    gfx::Rect(1020, 700, 100, 100));
+    EXPECT_EQ(gfx::Rect(924, 668, 100, 100), window_bounds);
+  }
+}
+
 #endif  //defined(OS_MACOSX)
-#endif  //defined(USE_ASH)

@@ -29,6 +29,12 @@
         ['exclude', '(^|/)linux/'],
       ],
     }],
+    ['OS!="android" and OS!="linux" and OS!="openbsd" and OS!="freebsd"', {
+      'sources/': [
+        ['exclude', '_linuxish(_unittest)?\\.(h|cc)$'],
+        ['exclude', '(^|/)linuxish/'],
+      ],
+    }],
     ['OS!="android"', {
       'sources/': [
         ['exclude', '_android(_unittest)?\\.cc$'],
@@ -79,13 +85,6 @@
       'sources/': [ ['exclude', '_ash(_unittest)?\\.(h|cc)$'],
                     ['exclude', '(^|/)ash/'],
       ]
-    }],
-    ['use_wayland!=1', {
-      'sources/': [
-        ['exclude', '_(wayland)(_unittest)?\\.(h|cc)$'],
-        ['exclude', '(^|/)wayland/'],
-        ['exclude', '(^|/)(wayland)_[^/]*\\.(h|cc)$'],
-      ],
     }],
   ]
 }

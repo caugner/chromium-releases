@@ -4,6 +4,8 @@
 
 #include "ui/aura/root_window_host_linux.h"
 
+#include <X11/Xatom.h>
+#include <X11/Xcursor/Xcursor.h>
 #include <X11/cursorfont.h>
 #include <X11/extensions/XInput2.h>
 #include <X11/extensions/Xfixes.h>
@@ -13,17 +15,21 @@
 #include "base/message_pump_x.h"
 #include "base/stl_util.h"
 #include "base/stringprintf.h"
-#include "ui/aura/cursor.h"
+#include "grit/ui_resources_standard.h"
+#include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/aura/client/user_gesture_client.h"
 #include "ui/aura/dispatcher_linux.h"
 #include "ui/aura/env.h"
 #include "ui/aura/event.h"
-#include "ui/aura/monitor.h"
-#include "ui/aura/monitor_manager.h"
 #include "ui/aura/root_window.h"
+#include "ui/base/cursor/cursor.h"
 #include "ui/base/keycodes/keyboard_codes.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "ui/base/touch/touch_factory.h"
+#include "ui/base/view_prop.h"
 #include "ui/base/x/x11_util.h"
-#include "ui/gfx/compositor/layer.h"
+#include "ui/compositor/layer.h"
+#include "ui/gfx/image/image.h"
 
 using std::max;
 using std::min;
@@ -32,9 +38,16 @@ namespace aura {
 
 namespace {
 
+// Standard Linux mouse buttons for going back and forward.
+const int kBackMouseButton = 8;
+const int kForwardMouseButton = 9;
+
+const char kRootWindowHostLinuxKey[] = "__AURA_ROOT_WINDOW_HOST_LINUX__";
+
 // The events reported for slave devices can have incorrect information for some
 // fields. This utility function is used to check for such inconsistencies.
 void CheckXEventForConsistency(XEvent* xevent) {
+#if defined(USE_XI2_MT)
   static bool expect_master_event = false;
   static XIDeviceEvent slave_event;
   static gfx::Point slave_location;
@@ -79,88 +92,91 @@ void CheckXEventForConsistency(XEvent* xevent) {
     CHECK_EQ(slave_event.mods.locked, xievent->mods.locked);
     CHECK_EQ(slave_event.mods.effective, xievent->mods.effective);
   }
+#endif  // defined(USE_XI2_MT)
 }
 
 // Returns X font cursor shape from an Aura cursor.
 int CursorShapeFromNative(gfx::NativeCursor native_cursor) {
-  switch (native_cursor) {
-    case aura::kCursorNull:
+  switch (native_cursor.native_type()) {
+    case ui::kCursorNull:
       return XC_left_ptr;
-    case aura::kCursorPointer:
+    case ui::kCursorPointer:
       return XC_left_ptr;
-    case aura::kCursorCross:
+    case ui::kCursorCross:
       return XC_crosshair;
-    case aura::kCursorHand:
+    case ui::kCursorHand:
       return XC_hand2;
-    case aura::kCursorIBeam:
+    case ui::kCursorIBeam:
       return XC_xterm;
-    case aura::kCursorWait:
+    case ui::kCursorWait:
       return XC_watch;
-    case aura::kCursorHelp:
+    case ui::kCursorHelp:
       return XC_question_arrow;
-    case aura::kCursorEastResize:
+    case ui::kCursorEastResize:
       return XC_right_side;
-    case aura::kCursorNorthResize:
+    case ui::kCursorNorthResize:
       return XC_top_side;
-    case aura::kCursorNorthEastResize:
+    case ui::kCursorNorthEastResize:
       return XC_top_right_corner;
-    case aura::kCursorNorthWestResize:
+    case ui::kCursorNorthWestResize:
       return XC_top_left_corner;
-    case aura::kCursorSouthResize:
+    case ui::kCursorSouthResize:
       return XC_bottom_side;
-    case aura::kCursorSouthEastResize:
+    case ui::kCursorSouthEastResize:
       return XC_bottom_right_corner;
-    case aura::kCursorSouthWestResize:
+    case ui::kCursorSouthWestResize:
       return XC_bottom_left_corner;
-    case aura::kCursorWestResize:
+    case ui::kCursorWestResize:
       return XC_left_side;
-    case aura::kCursorNorthSouthResize:
+    case ui::kCursorNorthSouthResize:
       return XC_sb_v_double_arrow;
-    case aura::kCursorEastWestResize:
+    case ui::kCursorEastWestResize:
       return XC_sb_h_double_arrow;
-    case aura::kCursorNorthEastSouthWestResize:
-    case aura::kCursorNorthWestSouthEastResize:
+    case ui::kCursorNorthEastSouthWestResize:
+    case ui::kCursorNorthWestSouthEastResize:
       // There isn't really a useful cursor available for these.
       return XC_left_ptr;
-    case aura::kCursorColumnResize:
+    case ui::kCursorColumnResize:
       return XC_sb_h_double_arrow;
-    case aura::kCursorRowResize:
+    case ui::kCursorRowResize:
       return XC_sb_v_double_arrow;
-    case aura::kCursorMiddlePanning:
+    case ui::kCursorMiddlePanning:
       return XC_fleur;
-    case aura::kCursorEastPanning:
+    case ui::kCursorEastPanning:
       return XC_sb_right_arrow;
-    case aura::kCursorNorthPanning:
+    case ui::kCursorNorthPanning:
       return XC_sb_up_arrow;
-    case aura::kCursorNorthEastPanning:
+    case ui::kCursorNorthEastPanning:
       return XC_top_right_corner;
-    case aura::kCursorNorthWestPanning:
+    case ui::kCursorNorthWestPanning:
       return XC_top_left_corner;
-    case aura::kCursorSouthPanning:
+    case ui::kCursorSouthPanning:
       return XC_sb_down_arrow;
-    case aura::kCursorSouthEastPanning:
+    case ui::kCursorSouthEastPanning:
       return XC_bottom_right_corner;
-    case aura::kCursorSouthWestPanning:
+    case ui::kCursorSouthWestPanning:
       return XC_bottom_left_corner;
-    case aura::kCursorWestPanning:
+    case ui::kCursorWestPanning:
       return XC_sb_left_arrow;
-    case aura::kCursorMove:
+    case ui::kCursorMove:
       return XC_fleur;
-    case aura::kCursorVerticalText:
-    case aura::kCursorCell:
-    case aura::kCursorContextMenu:
-    case aura::kCursorAlias:
-    case aura::kCursorProgress:
-    case aura::kCursorNoDrop:
-    case aura::kCursorCopy:
-    case aura::kCursorNone:
-    case aura::kCursorNotAllowed:
-    case aura::kCursorZoomIn:
-    case aura::kCursorZoomOut:
-    case aura::kCursorGrab:
-    case aura::kCursorGrabbing:
-    case aura::kCursorCustom:
+    case ui::kCursorVerticalText:
+    case ui::kCursorCell:
+    case ui::kCursorContextMenu:
+    case ui::kCursorAlias:
+    case ui::kCursorProgress:
+    case ui::kCursorNoDrop:
+    case ui::kCursorCopy:
+    case ui::kCursorNone:
+    case ui::kCursorNotAllowed:
+    case ui::kCursorZoomIn:
+    case ui::kCursorZoomOut:
+    case ui::kCursorGrab:
+    case ui::kCursorGrabbing:
       // TODO(jamescook): Need cursors for these.  crbug.com/111650
+      return XC_left_ptr;
+    case ui::kCursorCustom:
+      NOTREACHED();
       return XC_left_ptr;
   }
   NOTREACHED();
@@ -187,8 +203,7 @@ int CoalescePendingXIMotionEvents(const XEvent* xev, XEvent* last_event) {
     // with one from the master and one from the slave so there will
     // always be at least one pending.
     if (!ui::TouchFactory::GetInstance()->ShouldProcessXI2Event(&next_event)) {
-      // See crbug.com/109884.
-      // CheckXEventForConsistency(&next_event);
+      CheckXEventForConsistency(&next_event);
       XFreeEventData(display, &next_event.xcookie);
       XNextEvent(display, &next_event);
       continue;
@@ -218,8 +233,7 @@ int CoalescePendingXIMotionEvents(const XEvent* xev, XEvent* last_event) {
         // Get the event and its cookie data.
         XNextEvent(display, last_event);
         XGetEventData(display, &last_event->xcookie);
-        // See crbug.com/109884.
-        // CheckXEventForConsistency(last_event);
+        CheckXEventForConsistency(last_event);
         ++num_coalesed;
         continue;
       } else {
@@ -272,24 +286,79 @@ bool ShouldSendCharEventForKeyboardCode(ui::KeyboardCode keycode) {
   }
 }
 
+// A list of atoms that we'll intern on host creation to save roundtrips to the
+// X11 server. Must be kept in sync with RootWindowHostLinux::AtomList
+const char* kAtomList[] = {
+  "WM_DELETE_WINDOW",
+  "_NET_WM_PING",
+  "_NET_WM_PID",
+  "WM_S0"
+};
+
 }  // namespace
+
+// A utility class that provides X Cursor for NativeCursors for which we have
+// image resources.
+class RootWindowHostLinux::ImageCursors {
+ public:
+  ImageCursors() {
+    LoadImageCursor(ui::kCursorNoDrop, IDR_AURA_CURSOR_NO_DROP);
+    LoadImageCursor(ui::kCursorCopy, IDR_AURA_CURSOR_COPY);
+    // TODO (varunjain): add more cursors once we have assets.
+  }
+
+  ~ImageCursors() {
+    std::map<int, Cursor>::const_iterator it;
+    for (it = cursors_.begin(); it != cursors_.end(); ++it)
+      ui::UnrefCustomXCursor(it->second);
+  }
+
+  // Returns true if we have an image resource loaded for the |native_cursor|.
+  bool IsImageCursor(gfx::NativeCursor native_cursor) {
+    return cursors_.find(native_cursor.native_type()) != cursors_.end();
+  }
+
+  // Gets the X Cursor corresponding to the |native_cursor|.
+  ::Cursor ImageCursorFromNative(gfx::NativeCursor native_cursor) {
+    DCHECK(cursors_.find(native_cursor.native_type()) != cursors_.end());
+    return cursors_[native_cursor.native_type()];
+  }
+
+ private:
+  // Creates an X Cursor from an image resource and puts it in the cursor map.
+  void LoadImageCursor(int id, int resource_id) {
+    const SkBitmap* bitmap =
+        ui::ResourceBundle::GetSharedInstance().GetImageNamed(
+            resource_id).ToSkBitmap();
+
+    XcursorImage* image = ui::SkBitmapToXcursorImage(bitmap, gfx::Point(0, 0));
+    cursors_[id] = ui::CreateReffedCustomXCursor(image);
+    // |bitmap| is owned by the resource bundle. So we do not need to free it.
+  }
+
+  // A map to hold all image cursors. It maps the cursor ID to the X Cursor.
+  std::map<int, Cursor> cursors_;
+
+  DISALLOW_COPY_AND_ASSIGN(ImageCursors);
+};
 
 RootWindowHostLinux::RootWindowHostLinux(const gfx::Rect& bounds)
     : root_window_(NULL),
       xdisplay_(base::MessagePumpX::GetDefaultXDisplay()),
       xwindow_(0),
       x_root_window_(DefaultRootWindow(xdisplay_)),
-      current_cursor_(aura::kCursorNull),
+      current_cursor_(ui::kCursorNull),
       cursor_shown_(true),
       bounds_(bounds),
       focus_when_shown_(false),
-      pointer_barriers_(NULL) {
+      pointer_barriers_(NULL),
+      image_cursors_(new ImageCursors) {
   XSetWindowAttributes swa;
   memset(&swa, 0, sizeof(swa));
   swa.background_pixmap = None;
   xwindow_ = XCreateWindow(
       xdisplay_, x_root_window_,
-      bounds_.x(), bounds_.y(), bounds_.width(), bounds_.height(),
+      bounds.x(), bounds.y(), bounds.width(), bounds.height(),
       0,               // border width
       CopyFromParent,  // depth
       InputOutput,
@@ -298,6 +367,8 @@ RootWindowHostLinux::RootWindowHostLinux(const gfx::Rect& bounds)
       &swa);
   static_cast<DispatcherLinux*>(Env::GetInstance()->GetDispatcher())->
       WindowDispatcherCreated(xwindow_, this);
+
+  prop_.reset(new ui::ViewProp(xwindow_, kRootWindowHostLinuxKey, this));
 
   long event_mask = ButtonPressMask | ButtonReleaseMask | FocusChangeMask |
                     KeyPressMask | KeyReleaseMask |
@@ -319,8 +390,37 @@ RootWindowHostLinux::RootWindowHostLinux(const gfx::Rect& bounds)
                                        nodata, 8, 8);
   invisible_cursor_ = XCreatePixmapCursor(xdisplay_, blank, blank,
                                           &black, &black, 0, 0);
+  XFreePixmap(xdisplay_, blank);
+
   if (RootWindow::hide_host_cursor())
     XDefineCursor(xdisplay_, x_root_window_, invisible_cursor_);
+
+  // Grab all the atoms we need now to minimize roundtrips to the X11 server.
+  XInternAtoms(xdisplay_, const_cast<char**>(kAtomList), ATOM_COUNT, False,
+               cached_atoms_);
+
+  // TODO(erg): We currently only request window deletion events. We also
+  // should listen for activation events and anything else that GTK+ listens
+  // for, and do something useful.
+  ::Atom protocols[2];
+  protocols[0] = cached_atoms_[ATOM_WM_DELETE_WINDOW];
+  protocols[1] = cached_atoms_[ATOM__NET_WM_PING];
+  XSetWMProtocols(xdisplay_, xwindow_, protocols, 2);
+
+  // We need a WM_CLIENT_MACHINE and WM_LOCALE_NAME value so we integrate with
+  // the desktop environment.
+  XSetWMProperties(xdisplay_, xwindow_, NULL, NULL, NULL, 0, NULL, NULL, NULL);
+
+  // Likewise, the X server needs to know this window's pid so it knows which
+  // program to kill if the window hangs.
+  pid_t pid = getpid();
+  XChangeProperty(xdisplay_,
+                  xwindow_,
+                  cached_atoms_[ATOM__NET_WM_PID],
+                  XA_CARDINAL,
+                  32,
+                  PropModeReplace,
+                  reinterpret_cast<unsigned char*>(&pid), 1);
 
   // crbug.com/120229 - set the window title so gtalk can find the primary root
   // window to broadcast.
@@ -344,41 +444,58 @@ RootWindowHostLinux::~RootWindowHostLinux() {
   XFreeCursor(xdisplay_, invisible_cursor_);
 }
 
-base::MessagePumpDispatcher::DispatchStatus RootWindowHostLinux::Dispatch(
-    XEvent* xev) {
-  bool handled = false;
+bool RootWindowHostLinux::Dispatch(const base::NativeEvent& event) {
+  XEvent* xev = event;
 
-  // See crbug.com/109884.
-  // CheckXEventForConsistency(xev);
+  CheckXEventForConsistency(xev);
 
   switch (xev->type) {
     case Expose:
       root_window_->ScheduleFullDraw();
-      handled = true;
       break;
     case KeyPress: {
       KeyEvent keydown_event(xev, false);
-      handled = root_window_->DispatchKeyEvent(&keydown_event);
+      root_window_->DispatchKeyEvent(&keydown_event);
       break;
     }
     case KeyRelease: {
       KeyEvent keyup_event(xev, false);
-      handled = root_window_->DispatchKeyEvent(&keyup_event);
+      root_window_->DispatchKeyEvent(&keyup_event);
       break;
     }
-    case ButtonPress:
+    case ButtonPress: {
+      if (static_cast<int>(xev->xbutton.button) == kBackMouseButton ||
+          static_cast<int>(xev->xbutton.button) == kForwardMouseButton) {
+        client::UserGestureClient* gesture_client =
+            client::GetUserGestureClient(root_window_);
+        if (gesture_client) {
+          gesture_client->OnUserGesture(
+              static_cast<int>(xev->xbutton.button) == kBackMouseButton ?
+              client::UserGestureClient::GESTURE_BACK :
+              client::UserGestureClient::GESTURE_FORWARD);
+        }
+        break;
+      }
+    }  // fallthrough
     case ButtonRelease: {
       MouseEvent mouseev(xev);
-      handled = root_window_->DispatchMouseEvent(&mouseev);
+      root_window_->DispatchMouseEvent(&mouseev);
       break;
     }
     case FocusOut:
       if (xev->xfocus.mode != NotifyGrab)
-        root_window_->SetCapture(NULL);
+        root_window_->SetCapture(NULL, 0);
       break;
     case ConfigureNotify: {
       DCHECK_EQ(xwindow_, xev->xconfigure.window);
       DCHECK_EQ(xwindow_, xev->xconfigure.event);
+      // It's possible that the X window may be resized by some other means than
+      // from within aura (e.g. the X window manager can change the size). Make
+      // sure the root window size is maintained properly.
+      gfx::Rect bounds(xev->xconfigure.x, xev->xconfigure.y,
+                       xev->xconfigure.width, xev->xconfigure.height);
+      bool size_changed = bounds_.size() != bounds.size();
+      bounds_ = bounds;
       // Update barrier and mouse location when the root window has
       // moved/resized.
       if (pointer_barriers_.get()) {
@@ -387,16 +504,8 @@ base::MessagePumpDispatcher::DispatchStatus RootWindowHostLinux::Dispatch(
         XWarpPointer(xdisplay_, None,  xwindow_, 0, 0, 0, 0, p.x(), p.y());
         ConfineCursorToRootWindow();
       }
-      // It's possible that the X window may be resized by some other means than
-      // from within aura (e.g. the X window manager can change the size). Make
-      // sure the root window size is maintained properly.
-      gfx::Rect bounds(xev->xconfigure.x, xev->xconfigure.y,
-                       xev->xconfigure.width, xev->xconfigure.height);
-      bool size_changed = bounds_.size() != bounds.size();
-      bounds_ = bounds;
       if (size_changed)
         root_window_->OnHostResized(bounds.size());
-      handled = true;
       break;
     }
     case GenericEvent: {
@@ -405,8 +514,6 @@ base::MessagePumpDispatcher::DispatchStatus RootWindowHostLinux::Dispatch(
         break;
 
       ui::EventType type = ui::EventTypeFromNative(xev);
-      // If this is a motion event we want to coalesce all pending motion
-      // events that are at the top of the queue.
       XEvent last_event;
       int num_coalesced = 0;
 
@@ -415,35 +522,53 @@ base::MessagePumpDispatcher::DispatchStatus RootWindowHostLinux::Dispatch(
         case ui::ET_TOUCH_RELEASED:
         case ui::ET_TOUCH_MOVED: {
           TouchEvent touchev(xev);
-          handled = root_window_->DispatchTouchEvent(&touchev);
+          root_window_->DispatchTouchEvent(&touchev);
           break;
         }
         case ui::ET_MOUSE_MOVED:
-        case ui::ET_MOUSE_DRAGGED: {
-          // If this is a motion event we want to coalesce all pending motion
-          // events that are at the top of the queue.
-          num_coalesced = CoalescePendingXIMotionEvents(xev, &last_event);
-          if (num_coalesced > 0)
-            xev = &last_event;
-        }
+        case ui::ET_MOUSE_DRAGGED:
         case ui::ET_MOUSE_PRESSED:
         case ui::ET_MOUSE_RELEASED:
         case ui::ET_MOUSEWHEEL:
         case ui::ET_MOUSE_ENTERED:
         case ui::ET_MOUSE_EXITED: {
+          if (type == ui::ET_MOUSE_MOVED || type == ui::ET_MOUSE_DRAGGED) {
+            // If this is a motion event, we want to coalesce all pending motion
+            // events that are at the top of the queue.
+            num_coalesced = CoalescePendingXIMotionEvents(xev, &last_event);
+            if (num_coalesced > 0)
+              xev = &last_event;
+          } else if (type == ui::ET_MOUSE_PRESSED) {
+            XIDeviceEvent* xievent =
+                static_cast<XIDeviceEvent*>(xev->xcookie.data);
+            int button = xievent->detail;
+            if (button == kBackMouseButton || button == kForwardMouseButton) {
+              client::UserGestureClient* gesture_client =
+                  client::GetUserGestureClient(root_window_);
+              if (gesture_client) {
+                bool reverse_direction =
+                    ui::IsTouchpadEvent(xev) && ui::IsNaturalScrollEnabled();
+                gesture_client->OnUserGesture(
+                    (button == kBackMouseButton && !reverse_direction) ||
+                    (button == kForwardMouseButton && reverse_direction) ?
+                    client::UserGestureClient::GESTURE_BACK :
+                    client::UserGestureClient::GESTURE_FORWARD);
+              }
+              break;
+            }
+          }
           MouseEvent mouseev(xev);
-          handled = root_window_->DispatchMouseEvent(&mouseev);
+          root_window_->DispatchMouseEvent(&mouseev);
           break;
         }
         case ui::ET_SCROLL_FLING_START:
         case ui::ET_SCROLL_FLING_CANCEL:
         case ui::ET_SCROLL: {
           ScrollEvent scrollev(xev);
-          handled = root_window_->DispatchScrollEvent(&scrollev);
+          root_window_->DispatchScrollEvent(&scrollev);
           break;
         }
         case ui::ET_UNKNOWN:
-          handled = false;
           break;
         default:
           NOTREACHED();
@@ -459,7 +584,23 @@ base::MessagePumpDispatcher::DispatchStatus RootWindowHostLinux::Dispatch(
       // focus to our host window.
       if (!IsWindowManagerPresent() && focus_when_shown_)
         XSetInputFocus(xdisplay_, xwindow_, RevertToNone, CurrentTime);
-      handled = true;
+      break;
+    }
+    case ClientMessage: {
+      Atom message_type = static_cast<Atom>(xev->xclient.data.l[0]);
+      if (message_type == cached_atoms_[ATOM_WM_DELETE_WINDOW]) {
+        // We have received a close message from the window manager.
+        root_window_->OnRootWindowHostClosed();
+      } else if (message_type == cached_atoms_[ATOM__NET_WM_PING]) {
+        XEvent reply_event = *xev;
+        reply_event.xclient.window = x_root_window_;
+
+        XSendEvent(xdisplay_,
+                   reply_event.xclient.window,
+                   False,
+                   SubstructureRedirectMask | SubstructureNotifyMask,
+                   &reply_event);
+      }
       break;
     }
     case MappingNotify: {
@@ -467,6 +608,7 @@ base::MessagePumpDispatcher::DispatchStatus RootWindowHostLinux::Dispatch(
         case MappingModifier:
         case MappingKeyboard:
           XRefreshKeyboardMapping(&xev->xmapping);
+          root_window_->OnKeyboardMappingChanged();
           break;
         case MappingPointer:
           ui::UpdateButtonMap();
@@ -496,16 +638,19 @@ base::MessagePumpDispatcher::DispatchStatus RootWindowHostLinux::Dispatch(
       }
 
       MouseEvent mouseev(xev);
-      handled = root_window_->DispatchMouseEvent(&mouseev);
+      root_window_->DispatchMouseEvent(&mouseev);
       break;
     }
   }
-  return handled ? base::MessagePumpDispatcher::EVENT_PROCESSED :
-      base::MessagePumpDispatcher::EVENT_IGNORED;
+  return true;
 }
 
 void RootWindowHostLinux::SetRootWindow(RootWindow* root_window) {
   root_window_ = root_window;
+}
+
+RootWindow* RootWindowHostLinux::GetRootWindow() {
+  return root_window_;
 }
 
 gfx::AcceleratedWidget RootWindowHostLinux::GetAcceleratedWidget() {
@@ -513,6 +658,14 @@ gfx::AcceleratedWidget RootWindowHostLinux::GetAcceleratedWidget() {
 }
 
 void RootWindowHostLinux::Show() {
+  // Before we map the window, set size hints. Otherwise, some window managers
+  // will ignore toplevel XMoveWindow commands.
+  XSizeHints size_hints;
+  size_hints.flags = PPosition;
+  size_hints.x = bounds_.x();
+  size_hints.y = bounds_.y();
+  XSetWMNormalHints(xdisplay_, xwindow_, &size_hints);
+
   XMapWindow(xdisplay_, xwindow_);
 }
 
@@ -530,8 +683,10 @@ void RootWindowHostLinux::SetBounds(const gfx::Rect& bounds) {
     root_window_->SchedulePaintInRect(root_window_->bounds());
     return;
   }
+
   if (bounds.size() != bounds_.size())
     XResizeWindow(xdisplay_, xwindow_, bounds.width(), bounds.height());
+
   if (bounds.origin() != bounds_.origin())
     XMoveWindow(xdisplay_, xwindow_, bounds.x(), bounds.y());
 
@@ -560,10 +715,6 @@ void RootWindowHostLinux::SetCursor(gfx::NativeCursor cursor) {
     return;
   current_cursor_ = cursor;
 
-  // Custom web cursors are handled directly.
-  if (cursor == kCursorCustom)
-    return;
-
   if (cursor_shown_)
     SetCursorInternal(cursor);
 }
@@ -572,7 +723,7 @@ void RootWindowHostLinux::ShowCursor(bool show) {
   if (show == cursor_shown_)
     return;
   cursor_shown_ = show;
-  SetCursorInternal(show ? current_cursor_ : kCursorNone);
+  SetCursorInternal(show ? current_cursor_ : ui::kCursorNone);
 }
 
 gfx::Point RootWindowHostLinux::QueryMouseLocation() {
@@ -689,14 +840,17 @@ void RootWindowHostLinux::PostNativeEvent(
 bool RootWindowHostLinux::IsWindowManagerPresent() {
   // Per ICCCM 2.8, "Manager Selections", window managers should take ownership
   // of WM_Sn selections (where n is a screen number).
-  ::Atom wm_s0_atom = XInternAtom(xdisplay_, "WM_S0", False);
-  return XGetSelectionOwner(xdisplay_, wm_s0_atom) != None;
+  return XGetSelectionOwner(xdisplay_, cached_atoms_[ATOM_WM_S0]) != None;
 }
 
 void RootWindowHostLinux::SetCursorInternal(gfx::NativeCursor cursor) {
   ::Cursor xcursor =
-      cursor == kCursorNone ?
+      image_cursors_->IsImageCursor(cursor) ?
+      image_cursors_->ImageCursorFromNative(cursor) :
+      cursor == ui::kCursorNone ?
       invisible_cursor_ :
+      cursor == ui::kCursorCustom ?
+      cursor.platform() :
       ui::GetXCursor(CursorShapeFromNative(cursor));
   XDefineCursor(xdisplay_, xwindow_, xcursor);
 }
@@ -704,6 +858,13 @@ void RootWindowHostLinux::SetCursorInternal(gfx::NativeCursor cursor) {
 // static
 RootWindowHost* RootWindowHost::Create(const gfx::Rect& bounds) {
   return new RootWindowHostLinux(bounds);
+}
+
+// static
+RootWindowHost* RootWindowHost::GetForAcceleratedWidget(
+    gfx::AcceleratedWidget accelerated_widget) {
+  return reinterpret_cast<RootWindowHost*>(
+      ui::ViewProp::GetValue(accelerated_widget, kRootWindowHostLinuxKey));
 }
 
 // static

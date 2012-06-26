@@ -134,6 +134,9 @@ class RenderViewContextMenu : public ui::SimpleMenuModel::Delegate,
   // Initializes the context menu.
   void Init();
 
+  // Programmatically closes the context menu.
+  void Cancel();
+
   // Provide access to the menu model for ExternalTabContainer.
   const ui::MenuModel& menu_model() const { return menu_model_; }
 
@@ -164,6 +167,7 @@ class RenderViewContextMenu : public ui::SimpleMenuModel::Delegate,
 
   // Platform specific functions.
   virtual void PlatformInit() = 0;
+  virtual void PlatformCancel() = 0;
   virtual bool GetAcceleratorForCommandId(
       int command_id,
       ui::Accelerator* accelerator) = 0;
@@ -199,9 +203,9 @@ class RenderViewContextMenu : public ui::SimpleMenuModel::Delegate,
       Profile* profile,
       bool can_cross_incognito);
 
-  // Gets the extension (if any) associated with the TabContents that we're in.
+  // Gets the extension (if any) associated with the WebContents that we're in.
   const Extension* GetExtension() const;
-  void AppendPlatformAppItems(const Extension* platform_app);
+  void AppendPlatformAppItems();
   void AppendPopupExtensionItems();
   bool AppendCustomItems();
   void AppendDeveloperItems();

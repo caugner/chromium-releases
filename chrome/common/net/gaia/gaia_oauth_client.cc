@@ -34,8 +34,6 @@ class GaiaOAuthClient::Core
              request_context_getter_(request_context_getter),
              delegate_(NULL) {}
 
-  virtual ~Core() { }
-
   void GetTokensFromAuthCode(const OAuthClientInfo& oauth_client_info,
                              const std::string& auth_code,
                              int max_retries,
@@ -49,6 +47,9 @@ class GaiaOAuthClient::Core
   virtual void OnURLFetchComplete(const content::URLFetcher* source);
 
  private:
+  friend class base::RefCountedThreadSafe<Core>;
+  virtual ~Core() {}
+
   void MakeGaiaRequest(std::string post_body,
                        int max_retries,
                        GaiaOAuthClient::Delegate* delegate);
@@ -144,7 +145,7 @@ void GaiaOAuthClient::Core::HandleResponse(
   if (source->GetResponseCode() == net::HTTP_OK) {
     std::string data;
     source->GetResponseAsString(&data);
-    scoped_ptr<Value> message_value(base::JSONReader::Read(data, false));
+    scoped_ptr<Value> message_value(base::JSONReader::Read(data));
     if (message_value.get() &&
         message_value->IsType(Value::TYPE_DICTIONARY)) {
       scoped_ptr<DictionaryValue> response_dict(

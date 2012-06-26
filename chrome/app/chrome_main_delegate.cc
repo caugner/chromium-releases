@@ -30,11 +30,9 @@
 #include "chrome/renderer/chrome_content_renderer_client.h"
 #include "chrome/utility/chrome_content_utility_client.h"
 #include "content/common/content_counters.h"
-#include "content/public/browser/render_process_host.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_paths.h"
 #include "content/public/common/content_switches.h"
-#include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_switches.h"
 
 #if defined(OS_WIN)
@@ -47,6 +45,7 @@
 #include "policy/policy_constants.h"
 #include "sandbox/src/sandbox.h"
 #include "tools/memory_watcher/memory_watcher.h"
+#include "ui/base/resource/resource_bundle_win.h"
 #endif
 
 #if defined(OS_MACOSX)
@@ -76,7 +75,7 @@
 #include "chrome/browser/chromeos/boot_times_loader.h"
 #endif
 
-#if defined(TOOLKIT_USES_GTK)
+#if defined(TOOLKIT_GTK)
 #include <gdk/gdk.h>
 #include <glib.h>
 #include <gtk/gtk.h>
@@ -89,7 +88,7 @@
 #endif
 
 #if defined(USE_LINUX_BREAKPAD)
-#include "chrome/app/breakpad_linux.h"
+#include "chrome/app/breakpad_linuxish.h"
 #endif
 
 base::LazyInstance<chrome::ChromeContentBrowserClient>
@@ -448,6 +447,12 @@ bool ChromeMainDelegate::BasicStartupComplete(int* exit_code) {
       command_line.HasSwitch(switches::kEnableBenchmarking)) {
     base::FieldTrial::EnableBenchmarking();
   }
+
+  std::string process_type =  command_line.GetSwitchValueASCII(
+      switches::kProcessType);
+  content::SetContentClient(&chrome_content_client_);
+  InitializeChromeContentClient(process_type);
+
   return false;
 }
 
@@ -544,11 +549,6 @@ void ChromeMainDelegate::PreSandboxStartup() {
   std::string process_type =
       command_line.GetSwitchValueASCII(switches::kProcessType);
 
-  // Initialize the content client which that code uses to talk to Chrome.
-  content::SetContentClient(&chrome_content_client_);
-  InitializeChromeContentClient(process_type);
-
-  // Initialize the Chrome path provider.
   chrome::RegisterPathProvider();
 
 #if defined(OS_MACOSX)
@@ -567,8 +567,12 @@ void ChromeMainDelegate::PreSandboxStartup() {
 #if defined(OS_MACOSX) || defined(OS_WIN)
   CheckUserDataDirPolicy(&user_data_dir);
 #endif
-  if (!user_data_dir.empty())
-    CHECK(PathService::Override(chrome::DIR_USER_DATA, user_data_dir));
+  if (!user_data_dir.empty()) {
+    CHECK(PathService::OverrideAndCreateIfNeeded(
+        chrome::DIR_USER_DATA,
+        user_data_dir,
+        chrome::ProcessNeedsProfileDir(process_type)));
+  }
 
   startup_timer_.reset(new base::StatsScope<base::StatsCounterTimer>
                        (content::Counters::chrome_main()));
@@ -580,14 +584,8 @@ void ChromeMainDelegate::PreSandboxStartup() {
   if (command_line.HasSwitch(switches::kMessageLoopHistogrammer))
     MessageLoop::EnableHistogrammer(true);
 
-  // Single-process is an unsupported and not fully tested mode, so
-  // don't enable it for official Chrome builds.
-#if !defined(GOOGLE_CHROME_BUILD)
-  if (command_line.HasSwitch(switches::kSingleProcess)) {
-    content::RenderProcessHost::set_run_renderer_in_process(true);
+  if (command_line.HasSwitch(switches::kSingleProcess))
     InitializeChromeContentRendererClient();
-  }
-#endif  // GOOGLE_CHROME_BUILD
 
   logging::OldFileDeletionState file_state =
       logging::APPEND_TO_OLD_LOG_FILE;
@@ -596,15 +594,9 @@ void ChromeMainDelegate::PreSandboxStartup() {
   }
   logging::InitChromeLogging(command_line, file_state);
 
-  // Register internal Chrome schemes so they'll be parsed correctly. This
-  // must happen before we process any URLs with the affected schemes, and
-  // must be done in all processes that work with these URLs (i.e. including
-  // renderers).
-  chrome::RegisterChromeSchemes();
-
 #if defined(OS_WIN)
   // TODO(darin): Kill this once http://crbug.com/52609 is fixed.
-  ResourceBundle::SetResourcesDataDLL(_AtlBaseModule.GetResourceInstance());
+  ui::SetResourcesDataDLL(_AtlBaseModule.GetResourceInstance());
 #endif
 
   if (SubprocessNeedsResourceBundle(process_type)) {

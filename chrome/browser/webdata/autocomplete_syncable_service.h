@@ -6,6 +6,7 @@
 #pragma once
 
 #include <map>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -24,6 +25,7 @@
 #include "content/public/browser/notification_registrar.h"
 
 class ProfileSyncServiceAutofillTest;
+class SyncErrorFactory;
 
 namespace sync_pb {
 class AutofillSpecifics;
@@ -50,7 +52,8 @@ class AutocompleteSyncableService
   virtual SyncError MergeDataAndStartSyncing(
       syncable::ModelType type,
       const SyncDataList& initial_sync_data,
-      scoped_ptr<SyncChangeProcessor> sync_processor) OVERRIDE;
+      scoped_ptr<SyncChangeProcessor> sync_processor,
+      scoped_ptr<SyncErrorFactory> error_handler) OVERRIDE;
   virtual void StopSyncing(syncable::ModelType type) OVERRIDE;
   virtual SyncDataList GetAllSyncData(syncable::ModelType type) const OVERRIDE;
   virtual SyncError ProcessSyncChanges(
@@ -93,9 +96,15 @@ class AutocompleteSyncableService
       AutocompleteEntryMap;
 
   // Creates or updates an autocomplete entry based on |data|.
+  // |data| -  an entry for sync.
+  // |loaded_data| - entries that were loaded from local storage.
+  // |new_entries| - entries that came from the sync.
+  // |ignored_entries| - entries that came from the sync, but too old to be
+  // stored and immediately discarded.
   void CreateOrUpdateEntry(const SyncData& data,
                            AutocompleteEntryMap* loaded_data,
-                           std::vector<AutofillEntry>* bundle);
+                           std::vector<AutofillEntry>* new_entries,
+                           std::vector<AutofillEntry>* ignored_entries);
 
   // Writes |entry| data into supplied |autofill_specifics|.
   static void WriteAutofillEntry(const AutofillEntry& entry,
@@ -118,6 +127,9 @@ class AutocompleteSyncableService
     sync_processor_.reset(sync_processor);
   }
 
+  // Ignore deletions of the following keys as they were never synced.
+  std::set<AutofillKey> keys_to_ignore_;
+
   // Lifetime of AutocompleteSyncableService object is shorter than
   // |web_data_service_| passed to it.
   WebDataService* web_data_service_;
@@ -126,6 +138,10 @@ class AutocompleteSyncableService
   // We receive ownership of |sync_processor_| in MergeDataAndStartSyncing() and
   // destroy it in StopSyncing().
   scoped_ptr<SyncChangeProcessor> sync_processor_;
+
+  // We receive ownership of |error_handler_| in MergeDataAndStartSyncing() and
+  // destroy it in StopSyncing().
+  scoped_ptr<SyncErrorFactory> error_handler_;
 
   DISALLOW_COPY_AND_ASSIGN(AutocompleteSyncableService);
 };

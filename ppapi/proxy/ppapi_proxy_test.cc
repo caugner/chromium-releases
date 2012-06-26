@@ -5,6 +5,7 @@
 #include "ppapi/proxy/ppapi_proxy_test.h"
 
 #include "base/bind.h"
+#include "base/compiler_specific.h"
 #include "base/message_loop_proxy.h"
 #include "base/observer_list.h"
 #include "ipc/ipc_sync_channel.h"
@@ -157,7 +158,8 @@ void PluginProxyTestHarness::SetUpHarness() {
 
   plugin_dispatcher_.reset(new PluginDispatcher(
       base::Process::Current().handle(),
-      &MockGetInterface));
+      &MockGetInterface,
+      false));
   plugin_dispatcher_->InitWithTestSink(&sink());
   plugin_dispatcher_->DidCreateInstance(pp_instance());
 }
@@ -174,7 +176,8 @@ void PluginProxyTestHarness::SetUpHarnessWithChannel(
 
   plugin_dispatcher_.reset(new PluginDispatcher(
       base::Process::Current().handle(),
-      &MockGetInterface));
+      &MockGetInterface,
+      false));
   plugin_dispatcher_->InitPluginWithChannel(&plugin_delegate_mock_,
                                             channel_handle,
                                             is_client);
@@ -240,8 +243,16 @@ void PluginProxyTest::TearDown() {
 
 // HostProxyTestHarness --------------------------------------------------------
 
+class HostProxyTestHarness::MockSyncMessageStatusReceiver
+    : public HostDispatcher::SyncMessageStatusReceiver {
+ public:
+  virtual void BeginBlockOnSyncMessage() OVERRIDE {}
+  virtual void EndBlockOnSyncMessage() OVERRIDE {}
+};
+
 HostProxyTestHarness::HostProxyTestHarness()
-    : host_globals_(PpapiGlobals::ForTest()) {
+    : host_globals_(PpapiGlobals::ForTest()),
+      status_receiver_(new MockSyncMessageStatusReceiver) {
 }
 
 HostProxyTestHarness::~HostProxyTestHarness() {
@@ -257,7 +268,8 @@ void HostProxyTestHarness::SetUpHarness() {
   host_dispatcher_.reset(new HostDispatcher(
       base::Process::Current().handle(),
       pp_module(),
-      &MockGetInterface));
+      &MockGetInterface,
+      status_receiver_.get()));
   host_dispatcher_->InitWithTestSink(&sink());
   HostDispatcher::SetForInstance(pp_instance(), host_dispatcher_.get());
 }
@@ -274,7 +286,8 @@ void HostProxyTestHarness::SetUpHarnessWithChannel(
   host_dispatcher_.reset(new HostDispatcher(
       base::Process::Current().handle(),
       pp_module(),
-      &MockGetInterface));
+      &MockGetInterface,
+      status_receiver_.get()));
   ppapi::Preferences preferences;
   host_dispatcher_->InitHostWithChannel(&delegate_mock_, channel_handle,
                                         is_client, preferences);

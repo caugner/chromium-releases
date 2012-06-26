@@ -27,7 +27,7 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
-#include "chrome/browser/ui/gtk/theme_service_gtk.h"
+#include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/renderer_preferences.h"
@@ -38,13 +38,13 @@
 #include "ui/base/gtk/gtk_compat.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/gtk/gtk_screen_util.h"
+#include "ui/base/gtk/menu_label_accelerator_util.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/text/text_elider.h"
 #include "ui/base/x/x11_util.h"
 #include "ui/gfx/image/cairo_cached_surface.h"
 #include "ui/gfx/image/image.h"
-#include "ui/gfx/linux_util.h"
 
 // These conflict with base/tracked_objects.h, so need to come last.
 #include <gdk/gdkx.h>  // NOLINT
@@ -662,7 +662,7 @@ GtkWidget* AddButtonToDialog(GtkWidget* dialog, const gchar* text,
 GtkWidget* BuildDialogButton(GtkWidget* dialog, int ids_id,
                              const gchar* stock_id) {
   GtkWidget* button = gtk_button_new_with_mnemonic(
-      gfx::ConvertAcceleratorsFromWindowsStyle(
+      ui::ConvertAcceleratorsFromWindowsStyle(
           l10n_util::GetStringUTF8(ids_id)).c_str());
   gtk_button_set_image(GTK_BUTTON(button),
                        gtk_image_new_from_stock(stock_id,
@@ -855,7 +855,7 @@ void DrawThemedToolbarBackground(GtkWidget* widget,
                                  cairo_t* cr,
                                  GdkEventExpose* event,
                                  const gfx::Point& tabstrip_origin,
-                                 ThemeServiceGtk* theme_service) {
+                                 GtkThemeService* theme_service) {
   // Fill the entire region with the toolbar color.
   GdkColor color = theme_service->GetGdkColor(
       ThemeService::COLOR_TOOLBAR);
@@ -1063,10 +1063,6 @@ void PresentWindow(GtkWidget* window, int timestamp) {
     gtk_window_present_with_time(GTK_WINDOW(window), timestamp);
   else
     gtk_window_present(GTK_WINDOW(window));
-}
-
-GtkWindow* GetDialogWindow(GtkWidget* dialog) {
-  return GTK_WINDOW(dialog);
 }
 
 gfx::Rect GetDialogBounds(GtkWidget* dialog) {

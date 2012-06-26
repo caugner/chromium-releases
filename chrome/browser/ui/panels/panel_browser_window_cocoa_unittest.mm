@@ -54,10 +54,9 @@ class PanelBrowserWindowCocoaTest : public CocoaProfileTest {
     PanelManager* manager = PanelManager::GetInstance();
     int panels_count = manager->num_panels();
 
-    Browser* panel_browser = Browser::CreateForApp(Browser::TYPE_PANEL,
-                                                   panel_name,
-                                                   gfx::Rect(),
-                                                   profile());
+    Browser* panel_browser = Browser::CreateWithParams(
+        Browser::CreateParams::CreateForApp(
+            Browser::TYPE_PANEL, panel_name, gfx::Rect(), profile()));
     EXPECT_EQ(panels_count + 1, manager->num_panels());
 
     Panel* panel = static_cast<Panel*>(panel_browser->window());
@@ -67,6 +66,8 @@ class PanelBrowserWindowCocoaTest : public CocoaProfileTest {
         static_cast<PanelBrowserWindowCocoa*>(panel->native_panel());
     EXPECT_EQ(panel, native_window->panel_);  // Back pointer initialized.
 
+    PanelAnimatedBoundsObserver bounds_observer(panel);
+
     // Window should not load before Show().
     // Note: Loading the wnidow causes Cocoa to autorelease a few objects.
     // This is the reason we do this within the scope of the
@@ -75,6 +76,9 @@ class PanelBrowserWindowCocoaTest : public CocoaProfileTest {
     panel->Show();
     EXPECT_TRUE([native_window->controller_ isWindowLoaded]);
     EXPECT_TRUE([native_window->controller_ window]);
+
+    // Wait until bounds animate to their specified values.
+    bounds_observer.Wait();
 
     return panel;
   }

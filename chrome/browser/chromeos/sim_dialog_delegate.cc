@@ -9,8 +9,7 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
-#include "chrome/browser/ui/views/html_dialog_view.h"
-#include "chrome/browser/ui/views/window.h"
+#include "chrome/browser/ui/views/web_dialog_view.h"
 #include "chrome/common/url_constants.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
@@ -48,14 +47,11 @@ namespace chromeos {
 // static
 void SimDialogDelegate::ShowDialog(gfx::NativeWindow owning_window,
                                    SimDialogMode mode) {
-  Profile* profile = ProfileManager::GetDefaultProfileOrOffTheRecord();
-  HtmlDialogView* html_view =
-      new HtmlDialogView(profile,
-                         BrowserList::GetLastActive(),
-                         new SimDialogDelegate(mode));
-  html_view->InitDialog();
-  views::Widget::CreateWindowWithParent(html_view, owning_window);
-  html_view->GetWidget()->Show();
+  views::Widget::CreateWindowWithParent(
+      new WebDialogView(ProfileManager::GetDefaultProfileOrOffTheRecord(),
+                        BrowserList::GetLastActive(),
+                        new SimDialogDelegate(mode)),
+      owning_window)->Show();
 }
 
 SimDialogDelegate::SimDialogDelegate(SimDialogMode dialog_mode)

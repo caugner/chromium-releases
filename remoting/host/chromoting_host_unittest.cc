@@ -10,7 +10,6 @@
 #include "remoting/host/chromoting_host.h"
 #include "remoting/host/chromoting_host_context.h"
 #include "remoting/host/host_mock_objects.h"
-#include "remoting/host/in_memory_host_config.h"
 #include "remoting/host/it2me_host_user_interface.h"
 #include "remoting/proto/video.pb.h"
 #include "remoting/protocol/protocol_mock_objects.h"
@@ -70,7 +69,6 @@ class ChromotingHostTest : public testing::Test {
 
   virtual void SetUp() OVERRIDE {
     message_loop_proxy_ = base::MessageLoopProxy::current();
-    config_ = new InMemoryHostConfig();
     ON_CALL(context_, main_message_loop())
         .WillByDefault(Return(&message_loop_));
     ON_CALL(context_, encode_message_loop())
@@ -97,14 +95,15 @@ class ChromotingHostTest : public testing::Test {
 
     host_ = new ChromotingHost(
         &context_, &signal_strategy_, desktop_environment_.get(),
-        protocol::NetworkSettings());
+        NetworkSettings());
 
     disconnect_window_ = new MockDisconnectWindow();
     continue_window_ = new MockContinueWindow();
     local_input_monitor_ = new MockLocalInputMonitor();
-    it2me_host_user_interface_.reset(new It2MeHostUserInterface(host_,
-                                                                &context_));
-    it2me_host_user_interface_->InitFrom(
+    it2me_host_user_interface_.reset(new It2MeHostUserInterface(&context_));
+    it2me_host_user_interface_->StartForTest(
+        host_,
+        base::Bind(&ChromotingHost::Shutdown, host_, base::Closure()),
         scoped_ptr<DisconnectWindow>(disconnect_window_),
         scoped_ptr<ContinueWindow>(continue_window_),
         scoped_ptr<LocalInputMonitor>(local_input_monitor_));
@@ -233,7 +232,6 @@ class ChromotingHostTest : public testing::Test {
   scoped_ptr<DesktopEnvironment> desktop_environment_;
   scoped_ptr<It2MeHostUserInterface> it2me_host_user_interface_;
   scoped_refptr<ChromotingHost> host_;
-  scoped_refptr<InMemoryHostConfig> config_;
   MockChromotingHostContext context_;
   MockConnectionToClient* connection_;
   scoped_ptr<MockConnectionToClient> owned_connection_;
@@ -279,7 +277,7 @@ TEST_F(ChromotingHostTest, DISABLED_Connect) {
   // then execute the done task.
   {
     InSequence s;
-    EXPECT_CALL(*disconnect_window_, Show(_, _))
+    EXPECT_CALL(*disconnect_window_, Show(_, _, _))
         .Times(0);
     EXPECT_CALL(video_stub_, ProcessVideoPacketPtr(_, _))
         .WillOnce(DoAll(
@@ -302,7 +300,7 @@ TEST_F(ChromotingHostTest, DISABLED_Reconnect) {
   // connection.
   {
     InSequence s;
-    EXPECT_CALL(*disconnect_window_, Show(_, _))
+    EXPECT_CALL(*disconnect_window_, Show(_, _, _))
         .Times(0);
     EXPECT_CALL(video_stub_, ProcessVideoPacketPtr(_, _))
         .WillOnce(DoAll(
@@ -326,7 +324,7 @@ TEST_F(ChromotingHostTest, DISABLED_Reconnect) {
   // Connect the client again.
   {
     InSequence s;
-    EXPECT_CALL(*disconnect_window_, Show(_, _))
+    EXPECT_CALL(*disconnect_window_, Show(_, _, _))
         .Times(0);
     EXPECT_CALL(video_stub_, ProcessVideoPacketPtr(_, _))
         .WillOnce(DoAll(
@@ -351,7 +349,7 @@ TEST_F(ChromotingHostTest, DISABLED_ConnectTwice) {
   // connection.
   {
     InSequence s;
-    EXPECT_CALL(*disconnect_window_, Show(_, _))
+    EXPECT_CALL(*disconnect_window_, Show(_, _, _))
         .Times(0);
     EXPECT_CALL(video_stub_, ProcessVideoPacketPtr(_, _))
         .WillOnce(DoAll(
@@ -361,7 +359,7 @@ TEST_F(ChromotingHostTest, DISABLED_ConnectTwice) {
                     &ChromotingHostTest::SimulateClientConnection, 1, true)),
             RunDoneTask()))
         .RetiresOnSaturation();
-    EXPECT_CALL(*disconnect_window_, Show(_, _))
+    EXPECT_CALL(*disconnect_window_, Show(_, _, _))
         .Times(0);
     EXPECT_CALL(video_stub_, ProcessVideoPacketPtr(_, _))
         .Times(AnyNumber());

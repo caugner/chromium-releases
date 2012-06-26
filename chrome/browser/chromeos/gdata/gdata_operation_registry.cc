@@ -128,6 +128,11 @@ void GDataOperationRegistry::Operation::NotifyResume() {
   }
 }
 
+void GDataOperationRegistry::Operation::NotifyAuthFailed() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  registry_->OnOperationAuthFailed();
+}
+
 GDataOperationRegistry::GDataOperationRegistry() {
   in_flight_operations_.set_check_on_null_data(true);
 }
@@ -266,17 +271,24 @@ void GDataOperationRegistry::OnOperationSuspend(OperationID id) {
   }
 }
 
+void GDataOperationRegistry::OnOperationAuthFailed() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  DVLOG(1) << "GDataOperation authentication failed.";
+  FOR_EACH_OBSERVER(Observer, observer_list_, OnAuthenticationFailed());
+}
+
 bool GDataOperationRegistry::IsFileTransferOperation(
     const Operation* operation) const {
   OperationType type = operation->progress_status().operation_type;
   return type == OPERATION_UPLOAD || type == OPERATION_DOWNLOAD;
 }
 
-std::vector<GDataOperationRegistry::ProgressStatus>
+GDataOperationRegistry::ProgressStatusList
 GDataOperationRegistry::GetProgressStatusList() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  std::vector<ProgressStatus> status_list;
+  ProgressStatusList status_list;
   for (OperationIDMap::const_iterator iter(&in_flight_operations_);
        !iter.IsAtEnd();
        iter.Advance()) {

@@ -21,11 +21,11 @@
 // corresponding changes must happen in the unit tests, and new migration test
 // added.  See |WebDatabaseMigrationTest::kCurrentTestedVersionNumber|.
 // static
-const int WebDatabase::kCurrentVersionNumber = 44;
+const int WebDatabase::kCurrentVersionNumber = 45;
 
 namespace {
 
-const int kCompatibleVersionNumber = 44;
+const int kCompatibleVersionNumber = 45;
 
 // Change the version number and possibly the compatibility version of
 // |meta_table_|.
@@ -131,6 +131,9 @@ sql::InitStatus WebDatabase::Init(const FilePath& db_name) {
   // Create the tables.
   autofill_table_.reset(new AutofillTable(&db_, &meta_table_));
   keyword_table_.reset(new KeywordTable(&db_, &meta_table_));
+  // TODO(mdm): We only really need the LoginsTable on Windows for IE7 password
+  // access, but for now, we still create it on all platforms since it deletes
+  // the old logins table. We can remove this after a while, e.g. in M22 or so.
   logins_table_.reset(new LoginsTable(&db_, &meta_table_));
   token_service_table_.reset(new TokenServiceTable(&db_, &meta_table_));
   web_apps_table_.reset(new WebAppsTable(&db_, &meta_table_));
@@ -316,6 +319,14 @@ sql::InitStatus WebDatabase::MigrateOldVersionsAsNeeded() {
         return FailedMigrationTo(44);
 
       ChangeVersion(&meta_table_, 44, true);
+      // FALL THROUGH
+
+    case 44:
+      if (!keyword_table_->
+          MigrateToVersion45RemoveLogoIDAndAutogenerateColumns())
+        return FailedMigrationTo(45);
+
+      ChangeVersion(&meta_table_, 45, true);
       // FALL THROUGH
 
     // Add successive versions here.  Each should set the version number and

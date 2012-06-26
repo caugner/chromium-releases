@@ -14,8 +14,12 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_shutdown.h"
+#include "chrome/browser/extensions/extension_event_router.h"
+#include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
+#include "chrome/browser/extensions/extension_window_controller.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/app_modal_dialogs/message_box_handler.h"
 #include "chrome/browser/ui/browser.h"
@@ -132,8 +136,7 @@ ExtensionHost::ExtensionHost(const Extension* extension,
       ALLOW_THIS_IN_INITIALIZER_LIST(
           extension_function_dispatcher_(profile_, this)),
       extension_host_type_(host_type),
-      associated_web_contents_(NULL),
-      close_sequence_id_(0) {
+      associated_web_contents_(NULL) {
   host_contents_.reset(WebContents::Create(
       profile_, site_instance, MSG_ROUTING_NONE, NULL, NULL));
   content::WebContentsObserver::Observe(host_contents_.get());
@@ -167,7 +170,7 @@ void ExtensionHost::CreateView(Browser* browser) {
 #elif defined(OS_MACOSX)
   view_.reset(new ExtensionViewMac(this, browser));
   view_->Init();
-#elif defined(TOOLKIT_USES_GTK)
+#elif defined(TOOLKIT_GTK)
   view_.reset(new ExtensionViewGtk(this, browser));
   view_->Init();
 #else
@@ -184,6 +187,16 @@ WebContents* ExtensionHost::GetAssociatedWebContents() const {
   return associated_web_contents_;
 }
 
+void ExtensionHost::SetAssociatedWebContents(
+    content::WebContents* web_contents) {
+  associated_web_contents_ = web_contents;
+  if (web_contents) {
+    registrar_.Add(this, content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
+                   content::Source<WebContents>(associated_web_contents_));
+  }
+}
+
+
 content::RenderProcessHost* ExtensionHost::render_process_host() const {
   return render_view_host()->GetProcess();
 }
@@ -198,10 +211,13 @@ bool ExtensionHost::IsRenderViewLive() const {
 }
 
 void ExtensionHost::CreateRenderViewSoon() {
-  if (render_process_host() && render_process_host()->HasConnection()) {
+  if ((render_process_host() && render_process_host()->HasConnection()) ||
+      extension_host_type_ == chrome::VIEW_TYPE_APP_SHELL) {
     // If the process is already started, go ahead and initialize the RenderView
     // synchronously. The process creation is the real meaty part that we want
     // to defer.
+    // We also skip the ratelimiting in the shell window case. This is a hack
+    // (see crbug.com/124350 for details).
     CreateRenderViewNow();
   } else {
     ProcessCreationQueue::GetInstance()->CreateSoon(this);
@@ -216,31 +232,9 @@ void ExtensionHost::CreateRenderViewNow() {
   }
 }
 
-void ExtensionHost::SendShouldClose() {
-  CHECK(extension()->has_lazy_background_page());
-  render_view_host()->Send(new ExtensionMsg_ShouldClose(
-      extension()->id(), ++close_sequence_id_));
-  // TODO(mpcomplete): start timeout
-}
-
-void ExtensionHost::CancelShouldClose() {
-  CHECK(extension()->has_lazy_background_page());
-  ++close_sequence_id_;
-}
-
-void ExtensionHost::OnShouldCloseAck(int sequence_id) {
-  CHECK(extension()->has_lazy_background_page());
-  if (sequence_id != close_sequence_id_)
-    return;
-  Close();
-}
-
-const Browser* ExtensionHost::GetBrowser() const {
-  return view() ? view()->browser() : NULL;
-}
-
-Browser* ExtensionHost::GetBrowser() {
-  return view() ? view()->browser() : NULL;
+ExtensionWindowController* ExtensionHost::GetExtensionWindowController() const {
+  return view() && view()->browser() ?
+      view()->browser()->extension_window_controller() : NULL;
 }
 
 const GURL& ExtensionHost::GetURL() const {
@@ -285,6 +279,12 @@ void ExtensionHost::Observe(int type,
       if (extension_ ==
           content::Details<UnloadedExtensionInfo>(details)->extension) {
         extension_ = NULL;
+      }
+      break;
+    case content::NOTIFICATION_WEB_CONTENTS_DESTROYED:
+      if (content::Source<WebContents>(source).ptr() ==
+          associated_web_contents_) {
+        associated_web_contents_ = NULL;
       }
       break;
     default:
@@ -395,13 +395,6 @@ void ExtensionHost::DocumentAvailableInMainFrame() {
   }
 }
 
-void ExtensionHost::DocumentLoadedInFrame(int64 frame_id) {
-    content::NotificationService::current()->Notify(
-        chrome::NOTIFICATION_EXTENSION_HOST_DOM_CONTENT_LOADED,
-        content::Source<Profile>(profile_),
-        content::Details<ExtensionHost>(this));
-}
-
 void ExtensionHost::CloseContents(WebContents* contents) {
   // TODO(mpcomplete): is this check really necessary?
   if (extension_host_type_ == chrome::VIEW_TYPE_EXTENSION_POPUP ||
@@ -418,6 +411,20 @@ bool ExtensionHost::ShouldSuppressDialogs() {
   return extension_->is_platform_app();
 }
 
+void ExtensionHost::WillRunJavaScriptDialog() {
+  ExtensionProcessManager* pm =
+      ExtensionSystem::Get(profile_)->process_manager();
+  if (pm)
+    pm->IncrementLazyKeepaliveCount(extension());
+}
+
+void ExtensionHost::DidCloseJavaScriptDialog() {
+  ExtensionProcessManager* pm =
+      ExtensionSystem::Get(profile_)->process_manager();
+  if (pm)
+    pm->DecrementLazyKeepaliveCount(extension());
+}
+
 WebContents* ExtensionHost::OpenURLFromTab(WebContents* source,
                                            const OpenURLParams& params) {
   // Whitelist the dispositions we will allow to be opened.
@@ -431,7 +438,7 @@ WebContents* ExtensionHost::OpenURLFromTab(WebContents* source,
     case OFF_THE_RECORD: {
       // Only allow these from hosts that are bound to a browser (e.g. popups).
       // Otherwise they are not driven by a user gesture.
-      Browser* browser = GetBrowser();
+      Browser* browser = view() ? view()->browser() : NULL;
       return browser ? browser->OpenURL(params) : NULL;
     }
     default:
@@ -465,6 +472,11 @@ bool ExtensionHost::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(ExtensionHost, message)
     IPC_MESSAGE_HANDLER(ExtensionHostMsg_Request, OnRequest)
+    IPC_MESSAGE_HANDLER(ExtensionHostMsg_EventAck, OnEventAck)
+    IPC_MESSAGE_HANDLER(ExtensionHostMsg_IncrementLazyKeepaliveCount,
+                        OnIncrementLazyKeepaliveCount)
+    IPC_MESSAGE_HANDLER(ExtensionHostMsg_DecrementLazyKeepaliveCount,
+                        OnDecrementLazyKeepaliveCount)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
@@ -474,20 +486,39 @@ void ExtensionHost::OnRequest(const ExtensionHostMsg_Request_Params& params) {
   extension_function_dispatcher_.Dispatch(params, render_view_host());
 }
 
+void ExtensionHost::OnEventAck() {
+  ExtensionEventRouter* router = ExtensionSystem::Get(profile_)->event_router();
+  if (router)
+    router->OnEventAck(profile_, extension_id());
+}
+
+void ExtensionHost::OnIncrementLazyKeepaliveCount() {
+  ExtensionProcessManager* pm =
+      ExtensionSystem::Get(profile_)->process_manager();
+  if (pm)
+    pm->IncrementLazyKeepaliveCount(extension());
+}
+
+void ExtensionHost::OnDecrementLazyKeepaliveCount() {
+  ExtensionProcessManager* pm =
+      ExtensionSystem::Get(profile_)->process_manager();
+  if (pm)
+    pm->DecrementLazyKeepaliveCount(extension());
+}
+
+
 void ExtensionHost::RenderViewCreated(RenderViewHost* render_view_host) {
   render_view_host_ = render_view_host;
 
   if (view_.get())
     view_->RenderViewCreated();
 
-  // If the host is bound to a browser, then extract its window id.
-  // Extensions hosted in ExternalTabContainer objects may not have
-  // an associated browser.
-  const Browser* browser = GetBrowser();
-  if (browser) {
+  // If the host is bound to a window, then extract its id. Extensions hosted
+  // in ExternalTabContainer objects may not have an associated window.
+  ExtensionWindowController* window = GetExtensionWindowController();
+  if (window) {
     render_view_host->Send(new ExtensionMsg_UpdateBrowserWindowId(
-        render_view_host->GetRoutingID(),
-        ExtensionTabUtil::GetWindowId(browser)));
+        render_view_host->GetRoutingID(), window->GetWindowId()));
   }
 }
 

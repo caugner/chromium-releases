@@ -25,7 +25,7 @@
 class AvatarMenuButtonGtk;
 class BrowserWindowGtk;
 class CustomDrawButton;
-class ThemeServiceGtk;
+class GtkThemeService;
 class MenuGtk;
 class PopupPageMenuModel;
 
@@ -44,25 +44,30 @@ class BrowserTitlebar : public content::NotificationObserver,
   BrowserTitlebar(BrowserWindowGtk* browser_window, GtkWindow* window);
   virtual ~BrowserTitlebar();
 
+  // Updates the theme supplied background color and image.
+  virtual void UpdateButtonBackground(CustomDrawButton* button);
+
+  // Updates the title and icon when in app or popup/panel mode (no tabstrip).
+  virtual void UpdateTitleAndIcon();
+
   GtkWidget* widget() {
     return container_;
   }
 
   void set_window(GtkWindow* window) { window_ = window; }
 
+  // Build the titlebar, the space above the tab strip, and (maybe) the min,
+  // max, close buttons. |container_| is the gtk container that we put the
+  // widget into.
+  void Init();
+
   // Builds the buttons based on the metacity |button_string|.
   void BuildButtons(const std::string& button_string);
-
-  // Updates the theme supplied background color and image.
-  void UpdateButtonBackground(CustomDrawButton* button);
 
   // Update the appearance of the title bar based on whether we're showing a
   // custom frame or not.  If |use_custom_frame| is true, we show an extra
   // tall titlebar and the min/max/close buttons.
   void UpdateCustomFrame(bool use_custom_frame);
-
-  // Updates the title and icon when in app or popup mode (no tabstrip).
-  void UpdateTitleAndIcon();
 
   // Called by the browser asking us to update the loading throbber.
   // |web_contents| is the tab that is associated with the window throbber.
@@ -74,25 +79,55 @@ class BrowserTitlebar : public content::NotificationObserver,
   // add to the menu.
   void ShowContextMenu(GdkEventButton* event);
 
-  // When a panel slides into a new position and the cursor is on the close
-  // button, the close button does not become clickable. The gtk_widget_show()
-  // call on panel_wrench_button_ in OnEnterNotify on window_ prevents the
-  // close_button_ from getting the enter-notify-event, making it unclickable.
-  // This creates a bad experience when a user has multiple panels of the same
-  // size (which is typical) and tries closing them all by repeatedly clicking
-  // in the same place on the screen.
-  //
-  // Opened a gtk bug for this -
-  //   https://bugzilla.gnome.org/show_bug.cgi?id=667841
-  void SendEnterNotifyToCloseButtonIfUnderMouse();
-
-  // Returns the window width to display just the icon.
-  int IconOnlyWidth();
-
-  void ShowPanelWrenchButton();
-  void HidePanelWrenchButton();
-
   AvatarMenuButtonGtk* avatar_button() { return avatar_button_.get(); }
+
+ protected:
+  // Builds the button as denoted by |button_token|. Returns true if the button
+  // is created successfully.
+  virtual bool BuildButton(const std::string& button_token, bool left_side);
+
+  // Retrieves the 3 image ids (IDR_) and a tooltip id (IDS) for the purpose of
+  // painting a CustomDraw button.
+  virtual void GetButtonResources(const std::string& button_name,
+                                  int* normal_image_id,
+                                  int* pressed_image_id,
+                                  int* hover_image_id,
+                                  int* tooltip_id) const;
+
+  // Returns the spacing around outside of titlebar buttons.
+  virtual int GetButtonOuterPadding() const;
+
+  // Returns the spacing between buttons of the titlebar.
+  virtual int GetButtonSpacing() const;
+
+  // Called when a button is clicked.
+  virtual void HandleButtonClick(GtkWidget* button);
+
+  // Show the menu that the user gets from left-clicking the favicon.
+  virtual void ShowFaviconMenu(GdkEventButton* event);
+
+  // Updates the color of the title bar. Called whenever we have a state
+  // change in the window.
+  virtual void UpdateTextColor();
+
+  // Constructs a CustomDraw button given button name and left or right side of
+  // the titlebar where the button is placed.
+  CustomDrawButton* CreateTitlebarButton(const std::string& button_name,
+                                         bool left_side);
+
+  // Lazily builds and returns |titlebar_{left,right}_buttons_vbox_| and their
+  // subtrees. We do this lazily because in most situations, only one of them
+  // is allocated (though the user can (and do) manually mess with their gconf
+  // settings to get absolutely horrid combinations of buttons on both sides.
+  GtkWidget* GetButtonHBox(bool left_side);
+
+  CustomDrawButton* minimize_button() const { return minimize_button_.get(); }
+  CustomDrawButton* maximize_button() const { return maximize_button_.get(); }
+  CustomDrawButton* restore_button() const { return restore_button_.get(); }
+  CustomDrawButton* close_button() const { return close_button_.get(); }
+  GtkWidget* app_mode_title() const { return app_mode_title_; }
+
+  GtkThemeService* theme_service() const { return theme_service_; }
 
  private:
   // A helper class to keep track of which frame of the throbber animation
@@ -121,36 +156,12 @@ class BrowserTitlebar : public content::NotificationObserver,
     explicit ContextMenuModel(ui::SimpleMenuModel::Delegate* delegate);
   };
 
-  // Build the titlebar, the space above the tab strip, and (maybe) the min,
-  // max, close buttons. |container_| is the gtk container that we put the
-  // widget into.
-  void Init();
-
-  // Lazily builds and returns |titlebar_{left,right}_buttons_vbox_| and their
-  // subtrees. We do this lazily because in most situations, only one of them
-  // is allocated (though the user can (and do) manually mess with their gconf
-  // settings to get absolutely horrid combinations of buttons on both sides.
-  GtkWidget* GetButtonHBox(bool left_side);
-
-  // Constructs a CustomDraw button given 3 image ids (IDR_), the box to place
-  // the button into, and a tooltip id (IDS_).
-  CustomDrawButton* BuildTitlebarButton(int image, int image_pressed,
-                                        int image_hot, GtkWidget* box,
-                                        bool start, int tooltip);
-
   // Update the titlebar spacing based on the custom frame and maximized state.
   void UpdateTitlebarAlignment();
-
-  // Updates the color of the title bar. Called whenever we have a state
-  // change in the window.
-  void UpdateTextColor();
 
   // Updates the avatar image displayed, either a multi-profile avatar or the
   // incognito spy guy.
   void UpdateAvatar();
-
-  // Show the menu that the user gets from left-clicking the favicon.
-  void ShowFaviconMenu(GdkEventButton* event);
 
   // The maximize button was clicked, take an action depending on which mouse
   // button the user pressed.
@@ -175,8 +186,6 @@ class BrowserTitlebar : public content::NotificationObserver,
   // Callback for favicon/settings buttons.
   CHROMEGTK_CALLBACK_1(BrowserTitlebar, gboolean,
                        OnFaviconMenuButtonPressed, GdkEventButton*);
-  CHROMEGTK_CALLBACK_1(BrowserTitlebar, gboolean,
-                       OnPanelSettingsMenuButtonPressed, GdkEventButton*);
 
   // -- Context Menu -----------------------------------------------------------
 
@@ -196,8 +205,6 @@ class BrowserTitlebar : public content::NotificationObserver,
   // Overriden from ActiveWindowWatcherXObserver.
   virtual void ActiveWindowChanged(GdkWindow* active_window) OVERRIDE;
 
-  bool IsTypePanel();
-
   // Whether to display the avatar image.
   bool ShouldDisplayAvatar();
 
@@ -205,7 +212,7 @@ class BrowserTitlebar : public content::NotificationObserver,
   // record.
   bool IsOffTheRecord();
 
-  // Pointers to the browser window that owns us and it's GtkWindow.
+  // Pointers to the browser window that owns us and its GtkWindow.
   BrowserWindowGtk* browser_window_;
   GtkWindow* window_;
 
@@ -249,10 +256,6 @@ class BrowserTitlebar : public content::NotificationObserver,
   GtkWidget* app_mode_favicon_;
   GtkWidget* app_mode_title_;
 
-  // Wrench icon for panels. This'll only appear when a panel window has focus
-  // or mouse is in a panel window.
-  scoped_ptr<CustomDrawButton> panel_wrench_button_;
-
   // Whether we are using a custom frame.
   bool using_custom_frame_;
 
@@ -290,7 +293,7 @@ class BrowserTitlebar : public content::NotificationObserver,
   scoped_ptr<AvatarMenuButtonGtk> avatar_button_;
 
   // Theme provider for building buttons.
-  ThemeServiceGtk* theme_service_;
+  GtkThemeService* theme_service_;
 
   content::NotificationRegistrar registrar_;
 };

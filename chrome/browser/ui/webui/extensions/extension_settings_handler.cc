@@ -17,11 +17,15 @@
 #include "chrome/browser/debugger/devtools_window.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_disabled_ui.h"
+#include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_warning_set.h"
+#include "chrome/browser/extensions/lazy_background_task_queue.h"
 #include "chrome/browser/extensions/unpacked_installer.h"
 #include "chrome/browser/extensions/updater/extension_updater.h"
 #include "chrome/browser/google/google_util.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/background_contents.h"
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
@@ -30,6 +34,7 @@
 #include "chrome/common/chrome_view_type.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_icon_set.h"
+#include "chrome/common/extensions/extension_set.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/notification_service.h"
@@ -50,37 +55,6 @@
 using content::RenderViewHost;
 using content::WebContents;
 using extensions::ExtensionUpdater;
-
-namespace {
-
-bool ShouldShowExtension(const Extension* extension) {
-  // Don't show themes since this page's UI isn't really useful for themes.
-  if (extension->is_theme())
-    return false;
-
-  // Don't show component extensions because they are only extensions as an
-  // implementation detail of Chrome.
-  if (extension->location() == Extension::COMPONENT &&
-      !CommandLine::ForCurrentProcess()->HasSwitch(
-        switches::kShowComponentExtensionOptions))
-    return false;
-
-  // Always show unpacked extensions and apps.
-  if (extension->location() == Extension::LOAD)
-    return true;
-
-  // Unless they are unpacked, never show hosted apps. Note: We intentionally
-  // show packaged apps and platform apps because there are some pieces of
-  // functionality that are only available in chrome://extensions/ but which
-  // are needed for packaged and platform apps. For example, inspecting
-  // background pages. See http://crbug.com/116134.
-  if (extension->is_hosted_app())
-    return false;
-
-  return true;
-}
-
-}  // namespace
 
 ///////////////////////////////////////////////////////////////////////////////
 //
@@ -111,42 +85,44 @@ void ExtensionSettingsHandler::RegisterUserPrefs(PrefService* prefs) {
                              PrefService::SYNCABLE_PREF);
 }
 
-// Static
 DictionaryValue* ExtensionSettingsHandler::CreateExtensionDetailValue(
-    ExtensionService* service, const Extension* extension,
+    const Extension* extension,
     const std::vector<ExtensionPage>& pages,
-    const ExtensionWarningSet* warnings_set,
-    bool enabled, bool terminated) {
+    const ExtensionWarningSet* warnings_set) {
   DictionaryValue* extension_data = new DictionaryValue();
+  bool enabled = extension_service_ ?
+                 extension_service_->IsExtensionEnabled(extension->id()) :
+                 true;
+  extension->GetBasicInfo(enabled, extension_data);
+
   GURL icon =
       ExtensionIconSource::GetIconURL(extension,
                                       ExtensionIconSet::EXTENSION_ICON_MEDIUM,
                                       ExtensionIconSet::MATCH_BIGGER,
                                       !enabled, NULL);
-  extension_data->SetString("id", extension->id());
-  extension_data->SetString("name", extension->name());
-  extension_data->SetString("description", extension->description());
   if (extension->location() == Extension::LOAD)
     extension_data->SetString("path", extension->path().value());
-  extension_data->SetString("version", extension->version()->GetString());
   extension_data->SetString("icon", icon.spec());
   extension_data->SetBoolean("isUnpacked",
                              extension->location() == Extension::LOAD);
-  extension_data->SetBoolean("mayDisable",
-                             Extension::UserMayDisable(extension->location()));
-  extension_data->SetBoolean("enabled", enabled);
-  extension_data->SetBoolean("terminated", terminated);
-  extension_data->SetBoolean("enabledIncognito",
-      service ? service->IsIncognitoEnabled(extension->id()) : false);
+  extension_data->SetBoolean("terminated", extension_service_ ?
+      extension_service_->terminated_extensions()->Contains(extension->id()) :
+      false);
+  extension_data->SetBoolean("enabledIncognito", extension_service_ ?
+      extension_service_->IsIncognitoEnabled(extension->id()) :
+      false);
   extension_data->SetBoolean("wantsFileAccess", extension->wants_file_access());
-  extension_data->SetBoolean("allowFileAccess",
-      service ? service->AllowFileAccess(extension) : false);
+  extension_data->SetBoolean("allowFileAccess", extension_service_ ?
+      extension_service_->AllowFileAccess(extension) :
+      false);
   extension_data->SetBoolean("allow_activity",
       enabled && CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kEnableExtensionActivityUI));
   extension_data->SetBoolean("allow_reload",
                              extension->location() == Extension::LOAD);
   extension_data->SetBoolean("is_hosted_app", extension->is_hosted_app());
+  extension_data->SetBoolean("homepageProvided",
+                             extension->GetHomepageURL().is_valid());
 
   // Determine the sort order: Extensions loaded through --load-extensions show
   // up at the top. Disabled extensions show up at the bottom.
@@ -155,11 +131,10 @@ DictionaryValue* ExtensionSettingsHandler::CreateExtensionDetailValue(
   else
     extension_data->SetInteger("order", 2);
 
-  if (!extension->options_url().is_empty() && enabled)
-    extension_data->SetString("options_url", extension->options_url().spec());
-
-  if (service && !service->GetBrowserActionVisibility(extension))
+  if (extension_service_ &&
+      !extension_service_->GetBrowserActionVisibility(extension)) {
     extension_data->SetBoolean("enable_show_button", true);
+  }
 
   // Add views
   ListValue* views = new ListValue;
@@ -181,7 +156,6 @@ DictionaryValue* ExtensionSettingsHandler::CreateExtensionDetailValue(
   extension_data->Set("views", views);
   extension_data->SetBoolean("hasPopupAction",
       extension->browser_action() || extension->page_action());
-  extension_data->SetString("homepageUrl", extension->GetHomepageURL().spec());
 
   // Add warnings.
   ListValue* warnings_list = new ListValue;
@@ -198,6 +172,18 @@ DictionaryValue* ExtensionSettingsHandler::CreateExtensionDetailValue(
     }
   }
   extension_data->Set("warnings", warnings_list);
+
+  // Add install warnings (these are not the same as warnings!).
+  const std::vector<std::string>& install_warnings =
+      extension->install_warnings();
+  if (!install_warnings.empty()) {
+    scoped_ptr<ListValue> list(new ListValue());
+    for (std::vector<std::string>::const_iterator it = install_warnings.begin();
+         it != install_warnings.end(); ++it) {
+      list->Append(Value::CreateStringValue(*it));
+    }
+    extension_data->Set("installWarnings", list.release());
+  }
 
   return extension_data;
 }
@@ -230,8 +216,12 @@ void ExtensionSettingsHandler::GetLocalizedValues(
       l10n_util::GetStringUTF16(IDS_EXTENSIONS_PATH));
   localized_strings->SetString("extensionSettingsInspectViews",
       l10n_util::GetStringUTF16(IDS_EXTENSIONS_INSPECT_VIEWS));
+  localized_strings->SetString("extensionSettingsInstallWarnings",
+      l10n_util::GetStringUTF16(IDS_EXTENSIONS_INSTALL_WARNINGS));
   localized_strings->SetString("viewIncognito",
       l10n_util::GetStringUTF16(IDS_EXTENSIONS_VIEW_INCOGNITO));
+  localized_strings->SetString("viewInactive",
+      l10n_util::GetStringUTF16(IDS_EXTENSIONS_VIEW_INACTIVE));
   localized_strings->SetString("extensionSettingsEnable",
       l10n_util::GetStringUTF16(IDS_EXTENSIONS_ENABLE));
   localized_strings->SetString("extensionSettingsEnabled",
@@ -244,14 +234,18 @@ void ExtensionSettingsHandler::GetLocalizedValues(
       l10n_util::GetStringUTF16(IDS_EXTENSIONS_ALLOW_FILE_ACCESS));
   localized_strings->SetString("extensionSettingsIncognitoWarning",
       l10n_util::GetStringUTF16(IDS_EXTENSIONS_INCOGNITO_WARNING));
-  localized_strings->SetString("extensionSettingsReload",
-      l10n_util::GetStringUTF16(IDS_EXTENSIONS_RELOAD));
+  localized_strings->SetString("extensionSettingsReloadTerminated",
+      l10n_util::GetStringUTF16(IDS_EXTENSIONS_RELOAD_TERMINATED));
+  localized_strings->SetString("extensionSettingsReloadUnpacked",
+      l10n_util::GetStringUTF16(IDS_EXTENSIONS_RELOAD_UNPACKED));
   localized_strings->SetString("extensionSettingsOptions",
       l10n_util::GetStringUTF16(IDS_EXTENSIONS_OPTIONS_LINK));
   localized_strings->SetString("extensionSettingsActivity",
       l10n_util::GetStringUTF16(IDS_EXTENSIONS_ACTIVITY_LINK));
   localized_strings->SetString("extensionSettingsVisitWebsite",
       l10n_util::GetStringUTF16(IDS_EXTENSIONS_VISIT_WEBSITE));
+  localized_strings->SetString("extensionSettingsVisitWebStore",
+      l10n_util::GetStringUTF16(IDS_EXTENSIONS_VISIT_WEBSTORE));
   localized_strings->SetString("extensionSettingsPolicyControlled",
      l10n_util::GetStringUTF16(IDS_EXTENSIONS_POLICY_CONTROLLED));
   localized_strings->SetString("extensionSettingsShowButton",
@@ -277,6 +271,12 @@ void ExtensionSettingsHandler::GetLocalizedValues(
   // uber extensions.
   localized_strings->SetString("extensionUninstall",
       l10n_util::GetStringUTF16(IDS_EXTENSIONS_UNINSTALL));
+}
+
+void ExtensionSettingsHandler::NavigateToPendingEntry(const GURL& url,
+    content::NavigationController::ReloadType reload_type) {
+  if (reload_type != content::NavigationController::NO_RELOAD)
+    ReloadUnpackedExtensions();
 }
 
 void ExtensionSettingsHandler::RegisterMessages() {
@@ -323,6 +323,7 @@ void ExtensionSettingsHandler::RegisterMessages() {
 
 void ExtensionSettingsHandler::FileSelected(const FilePath& path, int index,
                                             void* params) {
+  last_unpacked_directory_ = FilePath(path);
   extensions::UnpackedInstaller::Create(extension_service_)->Load(path);
 }
 
@@ -374,6 +375,7 @@ void ExtensionSettingsHandler::Observe(
     case chrome::NOTIFICATION_EXTENSION_UPDATE_DISABLED:
     case chrome::NOTIFICATION_EXTENSION_WARNING_CHANGED:
     case chrome::NOTIFICATION_EXTENSION_BROWSER_ACTION_VISIBILITY_CHANGED:
+    case chrome::NOTIFICATION_PREF_CHANGED:
       MaybeUpdateAfterNotification();
       break;
     default:
@@ -413,6 +415,21 @@ void ExtensionSettingsHandler::ExtensionUninstallCanceled() {
   extension_id_prompting_ = "";
 }
 
+void ExtensionSettingsHandler::ReloadUnpackedExtensions() {
+  const ExtensionSet* extensions = extension_service_->extensions();
+  std::vector<const Extension*> unpacked_extensions;
+  for (ExtensionSet::const_iterator extension = extensions->begin();
+       extension != extensions->end(); ++extension) {
+    if ((*extension)->location() == Extension::LOAD)
+      unpacked_extensions.push_back(*extension);
+  }
+
+  for (std::vector<const Extension*>::iterator iter =
+       unpacked_extensions.begin(); iter != unpacked_extensions.end(); ++iter) {
+    extension_service_->ReloadExtension((*iter)->id());
+  }
+}
+
 void ExtensionSettingsHandler::HandleRequestExtensionsData(
     const ListValue* args) {
   DictionaryValue results;
@@ -425,38 +442,32 @@ void ExtensionSettingsHandler::HandleRequestExtensionsData(
   const ExtensionSet* extensions = extension_service_->extensions();
   for (ExtensionSet::const_iterator extension = extensions->begin();
        extension != extensions->end(); ++extension) {
-    if (ShouldShowExtension(*extension)) {
+    if ((*extension)->ShouldDisplayInExtensionSettings()) {
       extensions_list->Append(CreateExtensionDetailValue(
-          extension_service_,
           *extension,
-          GetActivePagesForExtension(*extension),
-          warnings,
-          true, false));  // enabled, terminated
+          GetInspectablePagesForExtension(*extension, true),
+          warnings));
     }
   }
   extensions = extension_service_->disabled_extensions();
   for (ExtensionSet::const_iterator extension = extensions->begin();
        extension != extensions->end(); ++extension) {
-    if (ShouldShowExtension(*extension)) {
+    if ((*extension)->ShouldDisplayInExtensionSettings()) {
       extensions_list->Append(CreateExtensionDetailValue(
-          extension_service_,
           *extension,
-          GetActivePagesForExtension(*extension),
-          warnings,
-          false, false));  // enabled, terminated
+          GetInspectablePagesForExtension(*extension, false),
+          warnings));
     }
   }
   extensions = extension_service_->terminated_extensions();
   std::vector<ExtensionPage> empty_pages;
   for (ExtensionSet::const_iterator extension = extensions->begin();
        extension != extensions->end(); ++extension) {
-    if (ShouldShowExtension(*extension)) {
+    if ((*extension)->ShouldDisplayInExtensionSettings()) {
       extensions_list->Append(CreateExtensionDetailValue(
-          extension_service_,
           *extension,
           empty_pages,  // Terminated process has no active pages.
-          warnings,
-          false, true));  // enabled, terminated
+          warnings));
     }
   }
   results.Set("extensions", extensions_list);
@@ -466,8 +477,13 @@ void ExtensionSettingsHandler::HandleRequestExtensionsData(
       profile->GetPrefs()->GetBoolean(prefs::kExtensionsUIDeveloperMode);
   results.SetBoolean("developerMode", developer_mode);
 
+  bool load_unpacked_disabled =
+      extension_service_->extension_prefs()->ExtensionsBlacklistedByDefault();
+  results.SetBoolean("loadUnpackedDisabled", load_unpacked_disabled);
+
   web_ui()->CallJavascriptFunction("ExtensionSettings.returnExtensionsData",
                                    results);
+  content::WebContentsObserver::Observe(web_ui()->GetWebContents());
 
   MaybeRegisterForNotifications();
 }
@@ -482,15 +498,47 @@ void ExtensionSettingsHandler::HandleToggleDeveloperMode(
 }
 
 void ExtensionSettingsHandler::HandleInspectMessage(const ListValue* args) {
+  std::string extension_id;
   std::string render_process_id_str;
   std::string render_view_id_str;
   int render_process_id;
   int render_view_id;
-  CHECK_EQ(2U, args->GetSize());
-  CHECK(args->GetString(0, &render_process_id_str));
-  CHECK(args->GetString(1, &render_view_id_str));
+  bool incognito;
+  CHECK_EQ(4U, args->GetSize());
+  CHECK(args->GetString(0, &extension_id));
+  CHECK(args->GetString(1, &render_process_id_str));
+  CHECK(args->GetString(2, &render_view_id_str));
+  CHECK(args->GetBoolean(3, &incognito));
   CHECK(base::StringToInt(render_process_id_str, &render_process_id));
   CHECK(base::StringToInt(render_view_id_str, &render_view_id));
+
+  if (render_process_id == -1) {
+    // This message is for a lazy background page. Start the page if necessary.
+    const Extension* extension =
+        extension_service_->extensions()->GetByID(extension_id);
+    DCHECK(extension);
+
+    Profile* profile = extension_service_->profile();
+    if (incognito)
+      profile = profile->GetOffTheRecordProfile();
+
+    ExtensionProcessManager* pm = profile->GetExtensionProcessManager();
+    extensions::LazyBackgroundTaskQueue* queue =
+        ExtensionSystem::Get(profile)->lazy_background_task_queue();
+
+    ExtensionHost* host = pm->GetBackgroundHostForExtension(extension->id());
+    if (host) {
+      InspectExtensionHost(host);
+    } else {
+      queue->AddPendingTask(
+          profile, extension->id(),
+          base::Bind(&ExtensionSettingsHandler::InspectExtensionHost,
+                     base::Unretained(this)));
+    }
+
+    return;
+  }
+
   RenderViewHost* host = RenderViewHost::FromID(render_process_id,
                                                 render_view_id);
   if (!host) {
@@ -530,7 +578,8 @@ void ExtensionSettingsHandler::HandleEnableMessage(const ListValue* args) {
       extension_service_->EnableExtension(extension_id);
     }
   } else {
-    extension_service_->DisableExtension(extension_id);
+    extension_service_->DisableExtension(
+        extension_id, Extension::DISABLE_USER_ACTION);
   }
 }
 
@@ -549,7 +598,7 @@ void ExtensionSettingsHandler::HandleEnableIncognitoMessage(
   // updated the UI to reflect the change, and b) we want the yellow warning
   // text to stay until the user has left the page.
   //
-  // TODO(aa): This creates crapiness in some cases. For example, in a main
+  // TODO(aa): This creates crappiness in some cases. For example, in a main
   // window, when toggling this, the browser action will flicker because it gets
   // unloaded, then reloaded. It would be better to have a dedicated
   // notification for this case.
@@ -634,8 +683,8 @@ void ExtensionSettingsHandler::HandleLoadUnpackedExtensionMessage(
   const SelectFileDialog::Type kSelectType = SelectFileDialog::SELECT_FOLDER;
   load_extension_dialog_ = SelectFileDialog::Create(this);
   load_extension_dialog_->SelectFile(
-      kSelectType, select_title, FilePath(), NULL, kFileTypeIndex,
-      FILE_PATH_LITERAL(""), web_ui()->GetWebContents(),
+      kSelectType, select_title, last_unpacked_directory_, NULL,
+      kFileTypeIndex, FILE_PATH_LITERAL(""), web_ui()->GetWebContents(),
       web_ui()->GetWebContents()->GetView()->GetTopLevelNativeWindow(), NULL);
 }
 
@@ -693,18 +742,29 @@ void ExtensionSettingsHandler::MaybeRegisterForNotifications() {
       chrome::NOTIFICATION_EXTENSION_BROWSER_ACTION_VISIBILITY_CHANGED,
       content::Source<ExtensionPrefs>(profile->GetExtensionService()->
                              extension_prefs()));
+
+  pref_registrar_.Init(profile->GetPrefs());
+  pref_registrar_.Add(prefs::kExtensionInstallDenyList, this);
 }
 
-std::vector<ExtensionPage> ExtensionSettingsHandler::GetActivePagesForExtension(
-    const Extension* extension) {
+std::vector<ExtensionPage>
+ExtensionSettingsHandler::GetInspectablePagesForExtension(
+    const Extension* extension, bool extension_is_enabled) {
   std::vector<ExtensionPage> result;
 
   // Get the extension process's active views.
   ExtensionProcessManager* process_manager =
       extension_service_->profile()->GetExtensionProcessManager();
-  GetActivePagesForExtensionProcess(
+  GetInspectablePagesForExtensionProcess(
       process_manager->GetRenderViewHostsForExtension(
           extension->id()), &result);
+
+  // Include a link to start the lazy background page, if applicable.
+  if (extension->has_lazy_background_page() && extension_is_enabled &&
+      !process_manager->GetBackgroundHostForExtension(extension->id())) {
+    result.push_back(
+        ExtensionPage(extension->GetBackgroundURL(), -1, -1, false));
+  }
 
   // Repeat for the incognito process, if applicable.
   if (extension_service_->profile()->HasOffTheRecordProfile() &&
@@ -712,15 +772,21 @@ std::vector<ExtensionPage> ExtensionSettingsHandler::GetActivePagesForExtension(
     ExtensionProcessManager* process_manager =
         extension_service_->profile()->GetOffTheRecordProfile()->
             GetExtensionProcessManager();
-    GetActivePagesForExtensionProcess(
+    GetInspectablePagesForExtensionProcess(
         process_manager->GetRenderViewHostsForExtension(
             extension->id()), &result);
+
+    if (extension->has_lazy_background_page() && extension_is_enabled &&
+        !process_manager->GetBackgroundHostForExtension(extension->id())) {
+      result.push_back(
+          ExtensionPage(extension->GetBackgroundURL(), -1, -1, true));
+    }
   }
 
   return result;
 }
 
-void ExtensionSettingsHandler::GetActivePagesForExtensionProcess(
+void ExtensionSettingsHandler::GetInspectablePagesForExtensionProcess(
     const std::set<RenderViewHost*>& views,
     std::vector<ExtensionPage> *result) {
   for (std::set<RenderViewHost*>::const_iterator iter = views.begin();
@@ -742,9 +808,18 @@ void ExtensionSettingsHandler::GetActivePagesForExtensionProcess(
 
 ExtensionUninstallDialog*
 ExtensionSettingsHandler::GetExtensionUninstallDialog() {
+#if !defined(OS_ANDROID)
   if (!extension_uninstall_dialog_.get()) {
     extension_uninstall_dialog_.reset(
         ExtensionUninstallDialog::Create(Profile::FromWebUI(web_ui()), this));
   }
   return extension_uninstall_dialog_.get();
+#else
+  return NULL;
+#endif  // !defined(OS_ANDROID)
+}
+
+void ExtensionSettingsHandler::InspectExtensionHost(ExtensionHost* host) {
+  if (host)
+    DevToolsWindow::OpenDevToolsWindow(host->render_view_host());
 }

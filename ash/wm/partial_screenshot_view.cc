@@ -8,9 +8,10 @@
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
 #include "ash/wm/partial_screenshot_event_filter.h"
-#include "ui/aura/cursor.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
+#include "ui/base/events.h"
+#include "ui/base/cursor/cursor.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/rect.h"
 #include "ui/views/view.h"
@@ -56,6 +57,9 @@ void PartialScreenshotView::StartPartialScreenshot(
   widget->GetNativeView()->SetName("PartialScreenshotView");
   widget->StackAtTop();
   widget->Show();
+  // Captures mouse events in case that context menu already captures the
+  // events.  This will close the context menu.
+  widget->GetNativeView()->SetCapture(ui::CW_LOCK_MOUSE | ui::CW_LOCK_TOUCH);
 
   view->set_window(widget->GetNativeWindow());
   Shell::GetInstance()->partial_screenshot_filter()->Activate(view);
@@ -71,7 +75,7 @@ void PartialScreenshotView::Cancel() {
 gfx::NativeCursor PartialScreenshotView::GetCursor(
     const views::MouseEvent& event) {
   // Always use "crosshair" cursor.
-  return aura::kCursorCross;
+  return ui::kCursorCross;
 }
 
 void PartialScreenshotView::OnPaint(gfx::Canvas* canvas) {
@@ -85,15 +89,19 @@ void PartialScreenshotView::OnPaint(gfx::Canvas* canvas) {
   }
 }
 
+void PartialScreenshotView::OnMouseCaptureLost() {
+  Cancel();
+}
+
 bool PartialScreenshotView::OnMousePressed(const views::MouseEvent& event) {
   start_position_ = event.location();
-  is_dragging_ = true;
   return true;
 }
 
 bool PartialScreenshotView::OnMouseDragged(const views::MouseEvent& event) {
   current_position_ = event.location();
   SchedulePaint();
+  is_dragging_ = true;
   return true;
 }
 
@@ -103,8 +111,11 @@ bool PartialScreenshotView::OnMouseWheel(const views::MouseWheelEvent& event) {
 }
 
 void PartialScreenshotView::OnMouseReleased(const views::MouseEvent& event) {
-  is_dragging_ = false;
   Cancel();
+  if (!is_dragging_)
+    return;
+
+  is_dragging_ = false;
   if (screenshot_delegate_) {
     aura::RootWindow *root_window = Shell::GetRootWindow();
     screenshot_delegate_->HandleTakePartialScreenshot(

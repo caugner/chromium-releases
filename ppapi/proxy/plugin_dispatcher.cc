@@ -20,7 +20,6 @@
 #include "ppapi/proxy/plugin_resource_tracker.h"
 #include "ppapi/proxy/plugin_var_serialization_rules.h"
 #include "ppapi/proxy/ppapi_messages.h"
-#include "ppapi/proxy/ppb_cursor_control_proxy.h"
 #include "ppapi/proxy/ppb_instance_proxy.h"
 #include "ppapi/proxy/ppp_class_proxy.h"
 #include "ppapi/proxy/resource_creation_proxy.h"
@@ -60,11 +59,13 @@ InstanceData::~InstanceData() {
 }
 
 PluginDispatcher::PluginDispatcher(base::ProcessHandle remote_process_handle,
-                                   GetInterfaceFunc get_interface)
+                                   PP_GetInterface_Func get_interface,
+                                   bool incognito)
     : Dispatcher(remote_process_handle, get_interface),
       plugin_delegate_(NULL),
       received_preferences_(false),
-      plugin_dispatcher_id_(0) {
+      plugin_dispatcher_id_(0),
+      incognito_(incognito) {
   SetSerializationRules(new PluginVarSerializationRules(AsWeakPtr()));
 
   if (!g_live_dispatchers)
@@ -173,7 +174,11 @@ bool PluginDispatcher::Send(IPC::Message* msg) {
   //
   // Allowing all async messages to unblock the renderer means more reentrancy
   // there but gives correct ordering.
-  msg->set_unblock(true);
+  //
+  // We don't want reply messages to unblock however, as they will potentially
+  // end up on the wrong queue - see crbug.com/122443
+  if (!msg->is_reply())
+    msg->set_unblock(true);
   if (msg->is_sync()) {
     // Synchronous messages might be re-entrant, so we need to drop the lock.
     ProxyAutoUnlock unlock;
@@ -243,8 +248,14 @@ InstanceData* PluginDispatcher::GetInstanceData(PP_Instance instance) {
   return (it == instance_map_.end()) ? NULL : &it->second;
 }
 
-FunctionGroupBase* PluginDispatcher::GetFunctionAPI(ApiID id) {
-  return GetInterfaceProxy(id);
+thunk::PPB_Instance_API* PluginDispatcher::GetInstanceAPI() {
+  return static_cast<PPB_Instance_Proxy*>(
+      GetInterfaceProxy(API_ID_PPB_INSTANCE));
+}
+
+thunk::ResourceCreationAPI* PluginDispatcher::GetResourceCreationAPI() {
+  return static_cast<ResourceCreationProxy*>(
+      GetInterfaceProxy(API_ID_RESOURCE_CREATION));
 }
 
 void PluginDispatcher::ForceFreeAllInstances() {

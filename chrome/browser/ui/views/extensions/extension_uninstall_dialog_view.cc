@@ -10,13 +10,11 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/dialog_style.h"
-#include "chrome/browser/ui/views/window.h"
 #include "chrome/common/extensions/extension.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/gfx/compositor/compositor.h"
-#include "ui/gfx/compositor/layer.h"
+#include "ui/compositor/compositor.h"
+#include "ui/compositor/layer.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/layout/layout_constants.h"
@@ -24,12 +22,36 @@
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/dialog_delegate.h"
 
+#if defined(USE_ASH)
+#include "ash/shell.h"
+#endif
+
 namespace {
 
 const int kRightColumnWidth = 210;
 const int kIconSize = 69;
 
 class ExtensionUninstallDialogDelegateView;
+
+// Returns parent window for extension uninstall dialog.
+// For ash, use app list window if it is visible.
+// For other platforms or when app list is not visible on ash,
+// use browser window of given |profile|.
+// Note this function could return NULL if ash app list is not visible and
+// there is no browser window open for |profile|.
+gfx::NativeWindow GetParent(Profile* profile) {
+#if defined(USE_ASH)
+  gfx::NativeWindow app_list = ash::Shell::GetInstance()->GetAppListWindow();
+  if (app_list)
+    return app_list;
+#endif
+
+  Browser* browser = BrowserList::GetLastActiveWithProfile(profile);
+  if (browser && browser->window())
+    return browser->window()->GetNativeHandle();
+
+  return NULL;
+}
 
 // Views implementation of the uninstall dialog.
 class ExtensionUninstallDialogViews : public ExtensionUninstallDialog {
@@ -76,7 +98,7 @@ class ExtensionUninstallDialogDelegateView : public views::DialogDelegateView {
 
   // views::WidgetDelegate:
   virtual ui::ModalType GetModalType() const OVERRIDE {
-    return ui::MODAL_TYPE_NONE;
+    return ui::MODAL_TYPE_WINDOW;
   }
   virtual views::View* GetContentsView() OVERRIDE { return this; }
   virtual string16 GetWindowTitle() const OVERRIDE;
@@ -109,21 +131,14 @@ ExtensionUninstallDialogViews::~ExtensionUninstallDialogViews() {
 }
 
 void ExtensionUninstallDialogViews::Show() {
-  Browser* browser = BrowserList::GetLastActiveWithProfile(profile_);
-  if (!browser) {
-    delegate_->ExtensionUninstallCanceled();
-    return;
-  }
-
-  BrowserWindow* window = browser->window();
-  if (!window) {
+  gfx::NativeWindow parent = GetParent(profile_);
+  if (!parent) {
     delegate_->ExtensionUninstallCanceled();
     return;
   }
 
   view_ = new ExtensionUninstallDialogDelegateView(this, extension_, &icon_);
-  views::Widget::CreateWindowWithParent(
-      view_, window->GetNativeHandle())->Show();
+  views::Widget::CreateWindowWithParent(view_, parent)->Show();
 }
 
 void ExtensionUninstallDialogViews::ExtensionUninstallAccepted() {
@@ -164,15 +179,8 @@ ExtensionUninstallDialogDelegateView::~ExtensionUninstallDialogDelegateView() {
 
 string16 ExtensionUninstallDialogDelegateView::GetDialogButtonLabel(
     ui::DialogButton button) const {
-  switch (button) {
-    case ui::DIALOG_BUTTON_OK:
-      return l10n_util::GetStringUTF16(IDS_EXTENSION_PROMPT_UNINSTALL_BUTTON);
-    case ui::DIALOG_BUTTON_CANCEL:
-      return l10n_util::GetStringUTF16(IDS_CANCEL);
-    default:
-      NOTREACHED();
-      return string16();
-  }
+  return l10n_util::GetStringUTF16((button == ui::DIALOG_BUTTON_OK) ?
+      IDS_EXTENSION_PROMPT_UNINSTALL_BUTTON : IDS_CANCEL);
 }
 
 bool ExtensionUninstallDialogDelegateView::Accept() {

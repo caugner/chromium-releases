@@ -3,12 +3,11 @@
   "platform_app": true,
   "version": "1",
   "manifest_version": 2,
-  "app": {
-    "launch": {
-      "local_path": "main.html",
-      "container": "shell",
-      "width": 250,
-      "height": 250
-    }
+  "permissions": [
+    "experimental",
+    "windows"
+  ],
+  "background": {
+    "scripts": ["test.js"]
   }
 }

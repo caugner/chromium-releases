@@ -535,7 +535,7 @@ void HungRendererDialogView::CreateKillButtonView() {
 gfx::Rect HungRendererDialogView::GetDisplayBounds(
     WebContents* contents) {
 #if defined(USE_AURA)
-  gfx::Rect contents_bounds(contents->GetNativeView()->GetScreenBounds());
+  gfx::Rect contents_bounds(contents->GetNativeView()->GetBoundsInRootWindow());
 #elif defined(OS_WIN)
   HWND contents_hwnd = contents->GetNativeView();
   RECT contents_bounds_rect;
@@ -555,7 +555,7 @@ gfx::Rect HungRendererDialogView::GetDisplayBounds(
 void HungRendererDialogView::InitClass() {
   static bool initialized = false;
   if (!initialized) {
-    ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+    ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
     frozen_icon_ = rb.GetBitmapNamed(IDR_FROZEN_TAB_ICON);
     initialized = true;
   }

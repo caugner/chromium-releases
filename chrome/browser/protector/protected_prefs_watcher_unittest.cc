@@ -4,8 +4,9 @@
 
 #include "base/message_loop.h"
 #include "base/values.h"
-#include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_pref_value_map.h"
+#include "chrome/browser/extensions/extension_pref_value_map_factory.h"
+#include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
@@ -105,12 +106,11 @@ TEST_F(ProtectedPrefsWatcherTest, ExtensionPrefChange) {
 
   FilePath extensions_install_dir =
       profile_.GetPath().AppendASCII(ExtensionService::kInstallDirectoryName);
-  scoped_ptr<ExtensionPrefValueMap> extension_pref_value_map_(
-      new ExtensionPrefValueMap);
   scoped_ptr<ExtensionPrefs> extension_prefs(
       new ExtensionPrefs(profile_.GetPrefs(),
                          extensions_install_dir,
-                         extension_pref_value_map_.get()));
+                         ExtensionPrefValueMapFactory::GetForProfile(
+                             &profile_)));
   std::string sample_id = extension_misc::kWebStoreAppId;
   extension_prefs->Init(false);
   // Flip a pref value of an extension (this will actually add it to the list).
@@ -185,6 +185,36 @@ TEST_F(ProtectedPrefsWatcherTest, MigrationToVersion2) {
   EXPECT_TRUE(pinned_tabs_copy->Equals(prefs_->GetList("backup.pinned_tabs")));
   EXPECT_TRUE(pinned_tabs_copy->Equals(prefs_->GetList(prefs::kPinnedTabs)));
   EXPECT_FALSE(prefs_watcher_->DidPrefChange(prefs::kPinnedTabs));
+  EXPECT_EQ(ProtectedPrefsWatcher::kCurrentVersionNumber,
+            prefs_->GetInteger("backup._version"));
+}
+
+// Verify that SessionStartupPref migration doesn't trigger Protector
+// (version 3 migration).
+TEST_F(ProtectedPrefsWatcherTest, MigrationToVersion3) {
+  EXPECT_TRUE(prefs_watcher_->is_backup_valid());
+
+  // Bring startup prefs to an old (pre-migration) version.
+  prefs_->SetBoolean(prefs::kHomePageIsNewTabPage, false);
+  prefs_->SetString(prefs::kHomePage, "http://example.com/");
+  prefs_->ClearPref(prefs::kRestoreOnStartupMigrated);
+
+  // Reset version to 2 and overwrite the signature.
+  prefs_->SetInteger("backup._version", 2);
+  ForceUpdateSignature();
+  EXPECT_TRUE(IsSignatureValid());
+
+  // Take down the old instance and create a new ProtectedPrefsWatcher from
+  // current prefs.
+  ProtectorServiceFactory::GetForProfile(&profile_)->
+      StopWatchingPrefsForTesting();
+  scoped_ptr<ProtectedPrefsWatcher> prefs_watcher2(
+      new ProtectedPrefsWatcher(&profile_));
+  EXPECT_TRUE(prefs_watcher2->is_backup_valid());
+
+  // Startup settings shouldn't be reported as changed.
+  EXPECT_FALSE(prefs_watcher2->DidPrefChange(prefs::kRestoreOnStartup));
+  EXPECT_FALSE(prefs_watcher2->DidPrefChange(prefs::kURLsToRestoreOnStartup));
   EXPECT_EQ(ProtectedPrefsWatcher::kCurrentVersionNumber,
             prefs_->GetInteger("backup._version"));
 }

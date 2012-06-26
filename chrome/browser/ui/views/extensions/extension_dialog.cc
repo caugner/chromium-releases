@@ -9,9 +9,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/dialog_style.h"
 #include "chrome/browser/ui/views/extensions/extension_dialog_observer.h"
-#include "chrome/browser/ui/views/window.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
@@ -62,7 +60,7 @@ ExtensionDialog* ExtensionDialog::Show(
   ExtensionHost* host = CreateExtensionHost(url, browser, NULL);
   if (!host)
     return NULL;
-  host->set_associated_web_contents(web_contents);
+  host->SetAssociatedWebContents(web_contents);
 
   return ExtensionDialog::ShowInternal(url, browser, host, width, height,
                                        false, title, observer);
@@ -134,10 +132,15 @@ ExtensionHost* ExtensionDialog::CreateExtensionHost(const GURL& url,
 void ExtensionDialog::InitWindowFullscreen() {
   aura::RootWindow* root_window = ash::Shell::GetRootWindow();
   gfx::Rect screen_rect =
-      gfx::Screen::GetMonitorAreaNearestWindow(root_window);
+      gfx::Screen::GetMonitorNearestWindow(root_window).bounds();
 
   // We want to be the fullscreen topmost child of the root window.
-  window_ = browser::CreateFramelessViewsWindow(root_window, this);
+  window_ = new views::Widget;
+  views::Widget::InitParams params(
+      views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
+  params.delegate = this;
+  params.parent = root_window;
+  window_->Init(params);
   window_->StackAtTop();
   window_->SetBounds(screen_rect);
   window_->Show();

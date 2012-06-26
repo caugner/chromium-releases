@@ -110,13 +110,13 @@ void ExtensionInfoBar::OnImageLoaded(const gfx::Image& image,
 
   const SkBitmap* icon = NULL;
   // Fall back on the default extension icon on failure.
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   if (image.IsEmpty())
-    icon = rb.GetBitmapNamed(IDR_EXTENSIONS_SECTION);
+    icon = rb.GetImageNamed(IDR_EXTENSIONS_SECTION).ToSkBitmap();
   else
     icon = image.ToSkBitmap();
 
-  SkBitmap* drop_image = rb.GetBitmapNamed(IDR_APP_DROPARROW);
+  const SkBitmap* drop_image = rb.GetImageNamed(IDR_APP_DROPARROW).ToSkBitmap();
 
   int image_size = ExtensionIconSet::EXTENSION_ICON_BITTY;
   // The margin between the extension icon and the drop-down arrow bitmap.
@@ -147,8 +147,8 @@ void ExtensionInfoBar::OnMenuButtonClicked(views::View* source,
     return;
 
   scoped_refptr<ExtensionContextMenuModel> options_menu_contents =
-      new ExtensionContextMenuModel(extension, browser_, NULL);
-  DCHECK_EQ(source, menu_);
+      new ExtensionContextMenuModel(extension, browser_);
+  DCHECK_EQ(menu_, source);
   RunMenuAt(options_menu_contents.get(), menu_, views::MenuItemView::TOPLEFT);
 }
 

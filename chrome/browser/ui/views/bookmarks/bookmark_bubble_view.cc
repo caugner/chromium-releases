@@ -14,7 +14,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
-#include "chrome/browser/ui/views/window.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/user_metrics.h"
@@ -81,7 +80,7 @@ void BookmarkBubbleView::ShowBubble(views::View* anchor_view,
 
   bookmark_bubble_ =
       new BookmarkBubbleView(anchor_view, profile, url, newly_bookmarked);
-  browser::CreateViewsBubble(bookmark_bubble_);
+  views::BubbleDelegateView::CreateBubble(bookmark_bubble_);
   bookmark_bubble_->Show();
   // Select the entire title textfield contents when the bubble is first shown.
   bookmark_bubble_->title_tf_->SelectAll();
@@ -169,7 +168,7 @@ void BookmarkBubbleView::Init() {
       l10n_util::GetStringUTF16(IDS_BOOKMARK_BUBBLE_FOLDER_TEXT));
 
   parent_combobox_ = new views::Combobox(&parent_model_);
-  parent_combobox_->SetSelectedItem(parent_model_.node_parent_index());
+  parent_combobox_->SetSelectedIndex(parent_model_.node_parent_index());
   parent_combobox_->set_listener(this);
   parent_combobox_->SetAccessibleName(combobox_label->text());
 
@@ -177,8 +176,8 @@ void BookmarkBubbleView::Init() {
       l10n_util::GetStringUTF16(
           newly_bookmarked_ ? IDS_BOOKMARK_BUBBLE_PAGE_BOOKMARKED :
                               IDS_BOOKMARK_BUBBLE_PAGE_BOOKMARK));
-  title_label->SetFont(
-      ResourceBundle::GetSharedInstance().GetFont(ResourceBundle::MediumFont));
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+  title_label->SetFont(rb.GetFont(ui::ResourceBundle::MediumFont));
   title_label->SetEnabledColor(SkColorSetRGB(6, 45, 117));
 
   GridLayout* layout = new GridLayout(this);
@@ -286,12 +285,9 @@ void BookmarkBubbleView::LinkClicked(views::Link* source, int event_flags) {
   StartFade(false);
 }
 
-void BookmarkBubbleView::ItemChanged(views::Combobox* combo_box,
-                                     int prev_index,
-                                     int new_index) {
-  if (new_index + 1 == parent_model_.GetItemCount()) {
-    content::RecordAction(
-        UserMetricsAction("BookmarkBubble_EditFromCombobox"));
+void BookmarkBubbleView::OnSelectedIndexChanged(views::Combobox* combobox) {
+  if (combobox->selected_index() + 1 == parent_model_.GetItemCount()) {
+    content::RecordAction(UserMetricsAction("BookmarkBubble_EditFromCombobox"));
     ShowEditor();
   }
 }
@@ -301,7 +297,7 @@ void BookmarkBubbleView::HandleButtonPressed(views::Button* sender) {
     content::RecordAction(UserMetricsAction("BookmarkBubble_Edit"));
     ShowEditor();
   } else {
-    DCHECK_EQ(sender, close_button_);
+    DCHECK_EQ(close_button_, sender);
     StartFade(false);
   }
 }
@@ -334,9 +330,9 @@ void BookmarkBubbleView::ApplyEdits() {
           UserMetricsAction("BookmarkBubble_ChangeTitleInBubble"));
     }
     // Last index means 'Choose another folder...'
-    if (parent_combobox_->selected_item() < parent_model_.GetItemCount() - 1) {
+    if (parent_combobox_->selected_index() < parent_model_.GetItemCount() - 1) {
       const BookmarkNode* new_parent =
-          parent_model_.GetNodeAt(parent_combobox_->selected_item());
+          parent_model_.GetNodeAt(parent_combobox_->selected_index());
       if (new_parent != node->parent()) {
         content::RecordAction(
             UserMetricsAction("BookmarkBubble_ChangeParent"));

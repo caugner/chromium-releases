@@ -30,8 +30,7 @@ class CONTENT_EXPORT MediaStreamDispatcherHost
  public:
   MediaStreamDispatcherHost(content::ResourceContext* resource_context,
                             int render_process_id,
-                            AudioManager* audio_manager);
-  virtual ~MediaStreamDispatcherHost();
+                            media::AudioManager* audio_manager);
 
   // MediaStreamRequester implementation.
   virtual void StreamGenerated(
@@ -52,6 +51,9 @@ class CONTENT_EXPORT MediaStreamDispatcherHost
   virtual bool OnMessageReceived(const IPC::Message& message,
                                  bool* message_was_ok) OVERRIDE;
   virtual void OnChannelClosing() OVERRIDE;
+
+ protected:
+  virtual ~MediaStreamDispatcherHost();
 
  private:
   friend class MockMediaStreamDispatcherHost;
@@ -80,7 +82,7 @@ class CONTENT_EXPORT MediaStreamDispatcherHost
 
   content::ResourceContext* resource_context_;
   int render_process_id_;
-  AudioManager* audio_manager_;
+  media::AudioManager* audio_manager_;
 
   struct StreamRequest;
   typedef std::map<std::string, StreamRequest> StreamMap;

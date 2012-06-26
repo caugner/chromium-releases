@@ -18,6 +18,7 @@
 #include "content/common/gpu/gpu_messages.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
+#include "gpu/command_buffer/service/mailbox_manager.h"
 #include "ui/gfx/gl/gl_context.h"
 #include "ui/gfx/gl/gl_surface.h"
 
@@ -40,9 +41,8 @@ GpuChannel::GpuChannel(GpuChannelManager* gpu_channel_manager,
                        bool software)
     : gpu_channel_manager_(gpu_channel_manager),
       client_id_(client_id),
-      renderer_process_(base::kNullProcessHandle),
-      renderer_pid_(base::kNullProcessId),
       share_group_(share_group ? share_group : new gfx::GLShareGroup),
+      mailbox_manager_(new gpu::gles2::MailboxManager),
       watchdog_(watchdog),
       software_(software),
       handle_messages_scheduled_(false),
@@ -61,12 +61,36 @@ GpuChannel::GpuChannel(GpuChannelManager* gpu_channel_manager,
       command_line->HasSwitch(switches::kDisableGpuDriverBugWorkarounds);
 }
 
-GpuChannel::~GpuChannel() {
-#if defined(OS_WIN)
-  if (renderer_process_)
-    CloseHandle(renderer_process_);
-#endif
+
+bool GpuChannel::Init(base::MessageLoopProxy* io_message_loop,
+                      base::WaitableEvent* shutdown_event) {
+  DCHECK(!channel_.get());
+
+  // Map renderer ID to a (single) channel to that process.
+  channel_.reset(new IPC::SyncChannel(
+      channel_id_,
+      IPC::Channel::MODE_SERVER,
+      this,
+      io_message_loop,
+      false,
+      shutdown_event));
+
+  return true;
 }
+
+std::string GpuChannel::GetChannelName() {
+  return channel_id_;
+}
+
+#if defined(OS_POSIX)
+int GpuChannel::TakeRendererFileDescriptor() {
+  if (!channel_.get()) {
+    NOTREACHED();
+    return -1;
+  }
+  return channel_->TakeClientFileDescriptor();
+}
+#endif  // defined(OS_POSIX)
 
 bool GpuChannel::OnMessageReceived(const IPC::Message& message) {
   if (log_messages_) {
@@ -113,10 +137,6 @@ void GpuChannel::OnChannelError() {
   gpu_channel_manager_->RemoveChannel(client_id_);
 }
 
-void GpuChannel::OnChannelConnected(int32 peer_pid) {
-  renderer_pid_ = peer_pid;
-}
-
 bool GpuChannel::Send(IPC::Message* message) {
   // The GPU process must never send a synchronous IPC message to the renderer
   // process. This could result in deadlock.
@@ -156,20 +176,6 @@ void GpuChannel::OnScheduled() {
   handle_messages_scheduled_ = true;
 }
 
-void GpuChannel::LoseAllContexts() {
-  gpu_channel_manager_->LoseAllContexts();
-}
-
-void GpuChannel::DestroySoon() {
-  MessageLoop::current()->PostTask(
-      FROM_HERE, base::Bind(&GpuChannel::OnDestroy, this));
-}
-
-void GpuChannel::OnDestroy() {
-  TRACE_EVENT0("gpu", "GpuChannel::OnDestroy");
-  gpu_channel_manager_->RemoveChannel(client_id_);
-}
-
 void GpuChannel::CreateViewCommandBuffer(
     const gfx::GLSurfaceHandle& window,
     int32 surface_id,
@@ -188,6 +194,7 @@ void GpuChannel::CreateViewCommandBuffer(
       this,
       share_group,
       window,
+      mailbox_manager_,
       gfx::Size(),
       disallowed_features_,
       init_params.allowed_extensions,
@@ -206,12 +213,44 @@ GpuCommandBufferStub* GpuChannel::LookupCommandBuffer(int32 route_id) {
   return stubs_.Lookup(route_id);
 }
 
+void GpuChannel::LoseAllContexts() {
+  gpu_channel_manager_->LoseAllContexts();
+}
+
+void GpuChannel::DestroySoon() {
+  MessageLoop::current()->PostTask(
+      FROM_HERE, base::Bind(&GpuChannel::OnDestroy, this));
+}
+
+int GpuChannel::GenerateRouteID() {
+  static int last_id = 0;
+  return ++last_id;
+}
+
+void GpuChannel::AddRoute(int32 route_id, IPC::Channel::Listener* listener) {
+  router_.AddRoute(route_id, listener);
+}
+
+void GpuChannel::RemoveRoute(int32 route_id) {
+  router_.RemoveRoute(route_id);
+}
+
+bool GpuChannel::ShouldPreferDiscreteGpu() const {
+  return num_contexts_preferring_discrete_gpu_ > 0;
+}
+
+GpuChannel::~GpuChannel() {}
+
+void GpuChannel::OnDestroy() {
+  TRACE_EVENT0("gpu", "GpuChannel::OnDestroy");
+  gpu_channel_manager_->RemoveChannel(client_id_);
+}
+
 bool GpuChannel::OnControlMessageReceived(const IPC::Message& msg) {
   // Always use IPC_MESSAGE_HANDLER_DELAY_REPLY for synchronous message handlers
   // here. This is so the reply can be delayed if the scheduler is unscheduled.
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(GpuChannel, msg)
-    IPC_MESSAGE_HANDLER(GpuChannelMsg_Initialize, OnInitialize)
     IPC_MESSAGE_HANDLER_DELAY_REPLY(GpuChannelMsg_CreateOffscreenCommandBuffer,
                                     OnCreateOffscreenCommandBuffer)
     IPC_MESSAGE_HANDLER_DELAY_REPLY(GpuChannelMsg_DestroyCommandBuffer,
@@ -295,32 +334,6 @@ void GpuChannel::ScheduleDelayedWork(GpuCommandBufferStub *stub,
   }
 }
 
-int GpuChannel::GenerateRouteID() {
-  static int last_id = 0;
-  return ++last_id;
-}
-
-void GpuChannel::AddRoute(int32 route_id, IPC::Channel::Listener* listener) {
-  router_.AddRoute(route_id, listener);
-}
-
-void GpuChannel::RemoveRoute(int32 route_id) {
-  router_.RemoveRoute(route_id);
-}
-
-bool GpuChannel::ShouldPreferDiscreteGpu() const {
-  return num_contexts_preferring_discrete_gpu_ > 0;
-}
-
-void GpuChannel::OnInitialize(base::ProcessHandle renderer_process) {
-  // Initialize should only happen once.
-  DCHECK(!renderer_process_);
-
-  // Verify that the renderer has passed its own process handle.
-  if (base::GetProcId(renderer_process) == renderer_pid_)
-    renderer_process_ = renderer_process;
-}
-
 void GpuChannel::OnCreateOffscreenCommandBuffer(
     const gfx::Size& size,
     const GPUCreateCommandBufferConfig& init_params,
@@ -339,6 +352,7 @@ void GpuChannel::OnCreateOffscreenCommandBuffer(
       this,
       share_group,
       gfx::GLSurfaceHandle(),
+      mailbox_manager_.get(),
       size,
       disallowed_features_,
       init_params.allowed_extensions,
@@ -411,22 +425,6 @@ void GpuChannel::OnCloseChannel() {
   // At this point "this" is deleted!
 }
 
-bool GpuChannel::Init(base::MessageLoopProxy* io_message_loop,
-                      base::WaitableEvent* shutdown_event) {
-  DCHECK(!channel_.get());
-
-  // Map renderer ID to a (single) channel to that process.
-  channel_.reset(new IPC::SyncChannel(
-      channel_id_,
-      IPC::Channel::MODE_SERVER,
-      this,
-      io_message_loop,
-      false,
-      shutdown_event));
-
-  return true;
-}
-
 void GpuChannel::WillCreateCommandBuffer(gfx::GpuPreference gpu_preference) {
   if (gpu_preference == gfx::PreferDiscreteGpu)
     ++num_contexts_preferring_discrete_gpu_;
@@ -437,17 +435,3 @@ void GpuChannel::DidDestroyCommandBuffer(gfx::GpuPreference gpu_preference) {
     --num_contexts_preferring_discrete_gpu_;
   DCHECK_GE(num_contexts_preferring_discrete_gpu_, 0);
 }
-
-std::string GpuChannel::GetChannelName() {
-  return channel_id_;
-}
-
-#if defined(OS_POSIX)
-int GpuChannel::TakeRendererFileDescriptor() {
-  if (!channel_.get()) {
-    NOTREACHED();
-    return -1;
-  }
-  return channel_->TakeClientFileDescriptor();
-}
-#endif  // defined(OS_POSIX)

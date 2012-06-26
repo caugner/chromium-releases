@@ -27,6 +27,7 @@ class ExtensionBrowserTest
   ExtensionBrowserTest();
   virtual ~ExtensionBrowserTest();
 
+  // InProcessBrowserTest
   virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE;
 
   const Extension* LoadExtension(const FilePath& path);
@@ -167,7 +168,7 @@ class ExtensionBrowserTest
                                             Profile* profile,
                                             bool from_webstore);
 
-  bool WaitForExtensionHostsToLoad();
+  bool WaitForExtensionViewsToLoad();
 
   // When waiting for page action count to change, we wait until it reaches this
   // value.

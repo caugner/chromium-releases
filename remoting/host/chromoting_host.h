@@ -18,6 +18,7 @@
 #include "remoting/host/desktop_environment.h"
 #include "remoting/host/host_key_pair.h"
 #include "remoting/host/host_status_observer.h"
+#include "remoting/host/network_settings.h"
 #include "remoting/host/ui_strings.h"
 #include "remoting/jingle_glue/jingle_thread.h"
 #include "remoting/jingle_glue/signal_strategy.h"
@@ -71,7 +72,7 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
   ChromotingHost(ChromotingHostContext* context,
                  SignalStrategy* signal_strategy,
                  DesktopEnvironment* environment,
-                 const protocol::NetworkSettings& network_settings);
+                 const NetworkSettings& network_settings);
 
   // Asynchronously start the host process.
   //
@@ -176,7 +177,7 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
   // Parameters specified when the host was created.
   ChromotingHostContext* context_;
   DesktopEnvironment* desktop_environment_;
-  protocol::NetworkSettings network_settings_;
+  NetworkSettings network_settings_;
 
   // Connection objects.
   SignalStrategy* signal_strategy_;

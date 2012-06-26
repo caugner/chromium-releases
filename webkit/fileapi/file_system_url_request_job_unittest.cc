@@ -10,8 +10,6 @@
 
 #include "webkit/fileapi/file_system_url_request_job.h"
 
-#include "build/build_config.h"
-
 #include <string>
 
 #include "base/bind.h"
@@ -72,7 +70,7 @@ class FileSystemURLRequestJobTest : public testing::Test {
       ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
   }
 
-  virtual void SetUp() {
+  virtual void SetUp() OVERRIDE {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
 
     special_storage_policy_ = new quota::MockSpecialStoragePolicy;
@@ -96,8 +94,15 @@ class FileSystemURLRequestJobTest : public testing::Test {
         "filesystem", &FileSystemURLRequestJobFactory);
   }
 
-  virtual void TearDown() {
+  virtual void TearDown() OVERRIDE {
     net::URLRequest::Deprecated::RegisterProtocolFactory("filesystem", NULL);
+    ClearUnusedJob();
+    if (pending_job_) {
+      pending_job_->Kill();
+      pending_job_ = NULL;
+    }
+    // FileReader posts a task to close the file in destructor.
+    MessageLoop::current()->RunAllPending();
   }
 
   void OnValidateFileSystem(base::PlatformFileError result) {
@@ -114,10 +119,12 @@ class FileSystemURLRequestJobTest : public testing::Test {
     request_.reset(new net::URLRequest(url, delegate_.get()));
     if (headers)
       request_->SetExtraRequestHeaders(*headers);
+    ASSERT_TRUE(!job_);
     job_ = new FileSystemURLRequestJob(
         request_.get(),
         file_system_context_.get(),
         base::MessageLoopProxy::current());
+    pending_job_ = job_;
 
     request_->Start();
     ASSERT_TRUE(request_->is_pending());  // verify that we're starting async
@@ -194,6 +201,13 @@ class FileSystemURLRequestJobTest : public testing::Test {
     return temp;
   }
 
+  static void ClearUnusedJob() {
+    if (job_) {
+      scoped_refptr<net::URLRequestJob> deleter = job_;
+      job_ = NULL;
+    }
+  }
+
   // Put the message loop at the top, so that it's the last thing deleted.
   MessageLoop message_loop_;
 
@@ -206,6 +220,7 @@ class FileSystemURLRequestJobTest : public testing::Test {
   scoped_ptr<TestDelegate> delegate_;
   scoped_ptr<net::URLRequest> request_;
 
+  scoped_refptr<net::URLRequestJob> pending_job_;
   static net::URLRequestJob* job_;
 };
 
@@ -360,5 +375,5 @@ TEST_F(FileSystemURLRequestJobTest, GetMimeType) {
   EXPECT_EQ(mime_type_direct, mime_type_from_job);
 }
 
-}  // namespace (anonymous)
+}  // namespace
 }  // namespace fileapi

@@ -25,6 +25,7 @@
 #include "net/base/net_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/base/resource/resource_handle.h"
 #include "ui/base/ui_base_paths.h"
 
 #if defined(OS_MACOSX)
@@ -38,7 +39,7 @@
 #include "base/shared_memory.h"
 #endif
 
-#include "ui/gfx/compositor/compositor_setup.h"
+#include "ui/compositor/compositor_setup.h"
 
 namespace {
 
@@ -57,8 +58,7 @@ void RemoveSharedMemoryFile(const std::string& filename) {
 // lookup result.
 class LocalHostResolverProc : public net::HostResolverProc {
  public:
-  LocalHostResolverProc() : HostResolverProc(NULL) {
-  }
+  LocalHostResolverProc() : HostResolverProc(NULL) {}
 
   virtual int Resolve(const std::string& host,
                       net::AddressFamily address_family,
@@ -92,6 +92,9 @@ class LocalHostResolverProc : public net::HostResolverProc {
     return ResolveUsingPrevious(host, address_family, host_resolver_flags,
                                 addrlist, os_error);
   }
+
+ private:
+  virtual ~LocalHostResolverProc() {}
 };
 
 class ChromeTestSuiteInitializer : public testing::EmptyTestEventListener {
@@ -151,6 +154,8 @@ class ChromeTestSuiteInitializer : public testing::EmptyTestEventListener {
 
 }  // namespace
 
+const char ChromeTestSuite::kLaunchAsBrowser[] = "as-browser";
+
 ChromeTestSuite::ChromeTestSuite(int argc, char** argv)
     : base::TestSuite(argc, argv) {
 }
@@ -166,7 +171,10 @@ void ChromeTestSuite::Initialize() {
 
   base::TestSuite::Initialize();
 
-  chrome::RegisterChromeSchemes();
+  chrome::ChromeContentClient client_for_init;
+  content::SetContentClient(&client_for_init);
+  content::RegisterContentSchemes(false);
+  content::SetContentClient(NULL);
 
   chrome::RegisterPathProvider();
   content::RegisterPathProvider();
@@ -192,7 +200,8 @@ void ChromeTestSuite::Initialize() {
   PathService::Get(base::DIR_MODULE, &resources_pack_path);
   resources_pack_path =
       resources_pack_path.Append(FILE_PATH_LITERAL("resources.pak"));
-  ResourceBundle::AddDataPackToSharedInstance(resources_pack_path);
+  ResourceBundle::GetSharedInstance().AddDataPack(
+      resources_pack_path, ui::ResourceHandle::kScaleFactor100x);
 
   // Mock out the compositor on platforms that use it.
   ui::SetupTestCompositor();

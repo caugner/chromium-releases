@@ -13,6 +13,8 @@
 #include "media/audio/audio_util.h"
 #include "media/audio/mac/audio_manager_mac.h"
 
+namespace media {
+
 // A custom data structure to store information an AudioQueue buffer.
 struct AudioQueueUserData {
   AudioQueueUserData() : empty_buffer(false) {}
@@ -96,8 +98,8 @@ void PCMQueueOutAudioOutputStream::HandleError(OSStatus err) {
   AudioSourceCallback* source = GetSource();
   if (source)
     source->OnError(this, static_cast<int>(err));
-  NOTREACHED() << "error " << GetMacOSStatusErrorString(err)
-               << " (" << err << ")";
+  LOG(ERROR) << "error " << GetMacOSStatusErrorString(err)
+             << " (" << err << ")";
 }
 
 bool PCMQueueOutAudioOutputStream::Open() {
@@ -405,7 +407,7 @@ void PCMQueueOutAudioOutputStream::RenderCallback(void* p_this,
   uint32 capacity = buffer->mAudioDataBytesCapacity;
   // TODO(sergeyu): Specify correct hardware delay for AudioBuffersState.
   uint32 filled = source->OnMoreData(
-      audio_stream, reinterpret_cast<uint8*>(buffer->mAudioData), capacity,
+      reinterpret_cast<uint8*>(buffer->mAudioData), capacity,
       AudioBuffersState(audio_stream->pending_bytes_, 0));
 
   // In order to keep the callback running, we need to provide a positive amount
@@ -527,3 +529,5 @@ PCMQueueOutAudioOutputStream::GetSource() {
   base::AutoLock lock(source_lock_);
   return source_;
 }
+
+}  // namespace media

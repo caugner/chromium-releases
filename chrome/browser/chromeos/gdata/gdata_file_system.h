@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_GDATA_GDATA_FILE_SYSTEM_H_
 #define CHROME_BROWSER_CHROMEOS_GDATA_GDATA_FILE_SYSTEM_H_
+#pragma once
 
 #include <sys/stat.h>
 
@@ -17,14 +18,20 @@
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
 #include "base/platform_file.h"
+#include "base/timer.h"
 #include "base/synchronization/lock.h"
+#include "base/threading/sequenced_worker_pool.h"
+#include "chrome/browser/chromeos/gdata/find_entry_delegate.h"
+#include "chrome/browser/chromeos/gdata/gdata_documents_service.h"
 #include "chrome/browser/chromeos/gdata/gdata_files.h"
 #include "chrome/browser/chromeos/gdata/gdata_operation_registry.h"
 #include "chrome/browser/chromeos/gdata/gdata_params.h"
 #include "chrome/browser/chromeos/gdata/gdata_parser.h"
 #include "chrome/browser/chromeos/gdata/gdata_uploader.h"
+#include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/browser/profiles/profile_keyed_service.h"
 #include "chrome/browser/profiles/profile_keyed_service_factory.h"
+#include "content/public/browser/notification_observer.h"
 
 namespace base {
 class WaitableEvent;
@@ -33,7 +40,12 @@ class WaitableEvent;
 namespace gdata {
 
 class DocumentsServiceInterface;
+class GDataFileProto;
 struct UploadFileInfo;
+
+namespace {
+struct LoadRootFeedParams;
+}
 
 // Used for file operations like removing files.
 typedef base::Callback<void(base::PlatformFileError error)>
@@ -44,22 +56,12 @@ typedef base::Callback<void(base::PlatformFileError error,
                             const std::string& resource_id,
                             const std::string& md5)> CacheOperationCallback;
 
-// Callback for GetFromCache.
+// Callback for GetFileFromCache.
 typedef base::Callback<void(base::PlatformFileError error,
                             const std::string& resource_id,
                             const std::string& md5,
-                            const FilePath& gdata_file_path,
                             const FilePath& cache_file_path)>
-    GetFromCacheCallback;
-
-// Used to get result of file search. Please note that |file| is a live
-// object provided to this callback under lock. It must not be used outside
-// of the callback method. This callback can be invoked on different thread
-// than one that started FileFileByPath() request.
-typedef base::Callback<void(base::PlatformFileError error,
-                            const FilePath& directory_path,
-                            GDataFileBase* file)>
-    FindFileCallback;
+    GetFileFromCacheCallback;
 
 // Used to get files from the file system.
 typedef base::Callback<void(base::PlatformFileError error,
@@ -68,6 +70,30 @@ typedef base::Callback<void(base::PlatformFileError error,
                             GDataFileType file_type)>
     GetFileCallback;
 
+// Used to get file info from the file system.
+// If |error| is not PLATFORM_FILE_OK, |file_info| is set to NULL.
+typedef base::Callback<void(base::PlatformFileError error,
+                            scoped_ptr<GDataFileProto> file_proto)>
+    GetFileInfoCallback;
+
+// Used to get entry info from the file system.
+// If |error| is not PLATFORM_FILE_OK, |entry_info| is set to NULL.
+typedef base::Callback<void(base::PlatformFileError error,
+                            const FilePath& entry_path,
+                            scoped_ptr<GDataEntryProto> entry_proto)>
+    GetEntryInfoCallback;
+
+// Used to read a directory from the file system.
+// If |error| is not PLATFORM_FILE_OK, |directory_info| is set to NULL.
+typedef base::Callback<void(base::PlatformFileError error,
+                            scoped_ptr<GDataDirectoryProto> directory_proto)>
+    ReadDirectoryCallback;
+
+// Callback for SetMountedState.
+typedef base::Callback<void(base::PlatformFileError error,
+                            const FilePath& file_path)>
+    SetMountedStateCallback;
+
 // Used for file operations like removing files.
 typedef base::Callback<void(base::PlatformFileError error,
                             base::ListValue* feed_list)>
@@ -75,8 +101,8 @@ typedef base::Callback<void(base::PlatformFileError error,
 
 // Used to get available space for the account from GData.
 typedef base::Callback<void(base::PlatformFileError error,
-                            int bytes_total,
-                            int bytes_used)>
+                            int64 bytes_total,
+                            int64 bytes_used)>
     GetAvailableSpaceCallback;
 
 // Callback type for DocumentServiceInterface::ResumeUpload.
@@ -89,37 +115,12 @@ typedef base::Callback<void(const ResumeUploadResponse& response,
 typedef base::Callback<void(const std::string& resource_id)>
     GetDocumentResourceIdCallback;
 
-// Delegate class used to deal with results synchronous read-only search
-// over virtual file system.
-class FindFileDelegate {
- public:
-  virtual ~FindFileDelegate();
-
-  // Called when FindFileByPathSync() completes search.
-  virtual void OnDone(base::PlatformFileError error,
-                      const FilePath& directory_path,
-                      GDataFileBase* file) = 0;
-};
-
-// Delegate used to find a directory element for file system updates.
-class ReadOnlyFindFileDelegate : public FindFileDelegate {
- public:
-  ReadOnlyFindFileDelegate();
-
-  // Returns found file.
-  GDataFileBase* file() { return file_; }
-
- private:
-  // FindFileDelegate overrides.
-  virtual void OnDone(base::PlatformFileError error,
-                      const FilePath& directory_path,
-                      GDataFileBase* file) OVERRIDE;
-
-  // File entry that was found.
-  GDataFileBase* file_;
-};
+// Callback for GetCacheState operation.
+typedef base::Callback<void(base::PlatformFileError error,
+                            int cache_state)> GetCacheStateCallback;
 
 // Helper structure used for extracting key properties from GDataFile object.
+// TODO(satorux): Remove this as part of crosbug.com/30066
 struct GDataFileProperties {
   GDataFileProperties();
   ~GDataFileProperties();
@@ -129,7 +130,7 @@ struct GDataFileProperties {
   std::string file_md5;
   std::string mime_type;
   GURL content_url;
-  GURL edit_url;
+  GURL alternate_url;
   bool is_hosted_document;
 };
 
@@ -161,6 +162,13 @@ class GDataFileSystemInterface {
     // changed directory.
     virtual void OnDirectoryChanged(const FilePath& directory_path) {}
 
+    // Triggered when the file system is initially loaded.
+    virtual void OnInitialLoadFinished() {}
+
+    // Triggered when a document feed is fetched. |num_accumulated_entries|
+    // tells the number of entries fetched so far.
+    virtual void OnDocumentFeedFetched(int num_accumulated_entries) {}
+
    protected:
     virtual ~Observer() {}
   };
@@ -173,10 +181,18 @@ class GDataFileSystemInterface {
   virtual void AddObserver(Observer* observer) = 0;
   virtual void RemoveObserver(Observer* observer) = 0;
 
+  // Starts and stops periodic updates.
+  virtual void StartUpdates() = 0;
+  virtual void StopUpdates() = 0;
+
+  // Checks for updates on the server.
+  virtual void CheckForUpdates() = 0;
+
   // Enum defining origin of a cached file.
   enum CachedFileOrigin {
     CACHED_FILE_FROM_SERVER = 0,
     CACHED_FILE_LOCALLY_MODIFIED,
+    CACHED_FILE_MOUNTED,
   };
 
   // Enum defining type of file operation e.g. copy or move, etc.
@@ -193,40 +209,35 @@ class GDataFileSystemInterface {
   // Must be called on UI thread.
   virtual void Authenticate(const AuthStatusCallback& callback) = 0;
 
-  // Finds file info by using virtual |file_path|. This call will also
-  // retrieve and refresh file system content from server and disk cache.
-  //
-  // Can be called from UI/IO thread. |callback| is run on the calling thread.
-  virtual void FindFileByPathAsync(const FilePath& file_path,
-                                   const FindFileCallback& callback) = 0;
-
-  // Finds file info by using virtual |file_path|. This call does not initiate
-  // content refreshing and will invoke one of |delegate| methods directly as
-  // it executes.
-  //
-  // Can be called from UI/IO thread. |delegate| is run on the calling thread
-  // synchronously.
-  virtual void FindFileByPathSync(const FilePath& file_path,
-                                  FindFileDelegate* delegate) = 0;
-
   // Finds file info by using |resource_id|. This call does not initiate
   // content refreshing and will invoke one of |delegate| methods directly as
   // it executes.
   //
   // Can be called from UI/IO thread. |delegate| is run on the calling thread
   // synchronously.
-  virtual void FindFileByResourceIdSync(const std::string& resource_id,
-                                        FindFileDelegate* delegate) = 0;
+  virtual void FindEntryByResourceIdSync(const std::string& resource_id,
+                                         FindEntryDelegate* delegate) = 0;
 
-  // Initiates transfer of |local_file_path| to |remote_dest_file_path|.
-  // |local_file_path| must be a file from the local file system,
+  // Initiates transfer of |remote_src_file_path| to |local_dest_file_path|.
+  // |remote_src_file_path| is the virtual source path on the gdata file system.
+  // |local_dest_file_path| is the destination path on the local file system.
+  //
+  // Must be called from *UI* thread. |callback| is run on the calling thread.
+  virtual void TransferFileFromRemoteToLocal(
+      const FilePath& remote_src_file_path,
+      const FilePath& local_dest_file_path,
+      const FileOperationCallback& callback) = 0;
+
+  // Initiates transfer of |local_src_file_path| to |remote_dest_file_path|.
+  // |local_src_file_path| must be a file from the local file system.
   // |remote_dest_file_path| is the virtual destination path within gdata file
   // system.
   //
   // Must be called from *UI* thread. |callback| is run on the calling thread.
-  virtual void TransferFile(const FilePath& local_file_path,
-                            const FilePath& remote_dest_file_path,
-                            const FileOperationCallback& callback) = 0;
+  virtual void TransferFileFromLocalToRemote(
+      const FilePath& local_src_file_path,
+      const FilePath& remote_dest_file_path,
+      const FileOperationCallback& callback) = 0;
 
   // Copies |src_file_path| to |dest_file_path| on the file system.
   // |src_file_path| can be a hosted document (see limitations below).
@@ -300,40 +311,26 @@ class GDataFileSystemInterface {
   // system in order to be retrieved. If the file is not cached, the file
   // will be downloaded through gdata api.
   //
-  // Can be called from UI/IO thread. |callback| is run on the calling thread.
-  virtual void GetFile(const FilePath& file_path,
-                       const GetFileCallback& callback) = 0;
+  // Can be called from UI/IO thread. |get_file_callback| and
+  // |get_download_data| are run on the calling thread.
+  virtual void GetFileByPath(
+      const FilePath& file_path,
+      const GetFileCallback& get_file_callback,
+      const GetDownloadDataCallback& get_download_data_callback) = 0;
 
-  // Gets a file for the given |resource_id| from the gdata server. Used for
+  // Gets a file by the given |resource_id| from the gdata server. Used for
   // fetching pinned-but-not-fetched files.
   //
-  // Can be called from UI/IO thread. |callback| is run on the calling thread.
-  virtual void GetFileForResourceId(
+  // Can be called from UI/IO thread. |get_file_callback| and
+  // |get_download_data_callback| are run on the calling thread.
+  virtual void GetFileByResourceId(
       const std::string& resource_id,
-      const GetFileCallback& callback) = 0;
+      const GetFileCallback& get_file_callback,
+      const GetDownloadDataCallback& get_download_data_callback) = 0;
 
-  // Gets absolute path of cache file corresponding to |gdata_file_path|.
-  // Upon completion, |callback| is invoked on the same thread where this method
-  // was called, with path if it exists and is accessible or empty FilePath
-  // otherwise.
-  virtual void GetFromCacheForPath(const FilePath& gdata_file_path,
-                                   const GetFromCacheCallback& callback) = 0;
-
-  // Obtains the list of currently active operations.
-  virtual std::vector<GDataOperationRegistry::ProgressStatus>
-  GetProgressStatusList() = 0;
-
-  // Cancels ongoing operation for a given |file_path|. Returns true if
-  // the operation was found and canceled.
-  virtual bool CancelOperation(const FilePath& file_path) = 0;
-
-  // Add operation observer.
-  virtual void AddOperationObserver(
-      GDataOperationRegistry::Observer* observer) = 0;
-
-  // Remove operation observer.
-  virtual void RemoveOperationObserver(
-      GDataOperationRegistry::Observer* observer) = 0;
+  // Gets the operation registry that manages all operations performed through
+  // the GDataFileSystem object.
+  virtual GDataOperationRegistry* GetOperationRegistry() = 0;
 
   // Gets the cache state of file corresponding to |resource_id| and |md5| if it
   // exists on disk.
@@ -345,30 +342,52 @@ class GDataFileSystemInterface {
                              const std::string& md5,
                              const GetCacheStateCallback& callback) = 0;
 
-  // Finds file object by |file_path| and returns its key |properties|.
-  // Returns true if file was found.
-  virtual bool GetFileInfoFromPath(const FilePath& gdata_file_path,
-                                   GDataFileProperties* properties) = 0;
+  // Finds an entry (a file or a directory) by |file_path|. This call will also
+  // retrieve and refresh file system content from server and disk cache.
+  //
+  // Can be called from UI/IO thread. |callback| is run on the calling thread.
+  virtual void GetEntryInfoByPathAsync(
+      const FilePath& file_path,
+      const GetEntryInfoCallback& callback) = 0;
 
-  // Returns the tmp sub-directory under gdata cache directory, i.e.
-  // <user_profile_dir>/GCache/v1/tmp
-  virtual FilePath GetGDataCacheTmpDirectory() const = 0;
+  // Finds a file (not a directory) by |file_path|. This call will also
+  // retrieve and refresh file system content from server and disk cache.
+  //
+  // Can be called from UI/IO thread. |callback| is run on the calling thread.
+  virtual void GetFileInfoByPathAsync(const FilePath& file_path,
+                                      const GetFileInfoCallback& callback) = 0;
 
-  // Returns the tmp downloads sub-directory under gdata cache directory, i.e.
-  // <user_profile_dir>/GCache/v1/tmp/downloads/
-  virtual FilePath GetGDataTempDownloadFolderPath() const = 0;
+  // Finds and reads a directory by |file_path|. This call will also retrieve
+  // and refresh file system content from server and disk cache.
+  //
+  // Can be called from UI/IO thread. |callback| is run on the calling thread.
+  virtual void ReadDirectoryByPathAsync(
+      const FilePath& file_path,
+      const ReadDirectoryCallback& callback) = 0;
 
-  // Returns the tmp documents sub-directory under gdata cache directory, i.e.
-  // <user_profile_dir>/GCache/v1/tmp/documents/
-  virtual FilePath GetGDataTempDocumentFolderPath() const = 0;
+  // Does server side content search for |search_query|. Search results will be
+  // returned as gdata entries in temp directory proto, and their
+  // title/file_name will be formatted as |<resource_id>.<original_file_name>|.
+  //
+  // Can be called from UI/IO thread. |callback| is run on the calling thread.
+  virtual void SearchAsync(const std::string& search_query,
+                           const ReadDirectoryCallback& callback) = 0;
 
-  // Returns the pinned sub-directory under gdata cache directory, i.e.
-  // <user_profile_dir>/GCache/v1/pinned
-  virtual FilePath GetGDataCachePinnedDirectory() const = 0;
 
-  // Returns the pinned sub-directory under gdata cache directory, i.e.
-  // <user_profile_dir>/GCache/v1/pinned
-  virtual FilePath GetGDataCachePersistentDirectory() const = 0;
+  // Finds a file (not a directory) by |file_path| and returns its key
+  // |properties|.  Returns true if file was found.
+  // TODO(satorux): Remove this: crosbug.com/30066.
+  virtual bool GetFileInfoByPath(const FilePath& file_path,
+                                 GDataFileProperties* properties) = 0;
+
+  // Returns true if the given path is under gdata cache directory, i.e.
+  // <user_profile_dir>/GCache/v1
+  virtual bool IsUnderGDataCacheDirectory(const FilePath& path) const = 0;
+
+  // Returns the sub-directory under gdata cache directory for the given sub
+  // directory type. Example:  <user_profile_dir>/GCache/v1/tmp
+  virtual FilePath GetCacheDirectoryPath(
+      GDataRootDirectory::CacheSubDirectoryType sub_dir_type) const = 0;
 
   // Returns absolute path of the file if it were cached or to be cached.
   virtual FilePath GetCacheFilePath(
@@ -385,40 +404,51 @@ class GDataFileSystemInterface {
   virtual void SetPinState(const FilePath& file_path, bool to_pin,
                            const FileOperationCallback& callback) = 0;
 
+  // Marks or unmarks a file as locally mounted.
+  // When marked as mounted, the file is prevented from being modified
+  // or evicted from cache.
+  virtual void SetMountedState(const FilePath& file_path, bool to_mount,
+                               const SetMountedStateCallback& callback) = 0;
+
   // Creates a new file from |entry| under |virtual_dir_path|. Stored its
   // content from |file_content_path| into the cache.
   virtual void AddUploadedFile(const FilePath& virtual_dir_path,
                                DocumentEntry* entry,
                                const FilePath& file_content_path,
                                FileOperationType cache_operation) = 0;
+
+  // Returns true if hosted documents should be hidden.
+  virtual bool hide_hosted_documents() = 0;
 };
 
 // The production implementation of GDataFileSystemInterface.
-class GDataFileSystem : public GDataFileSystemInterface {
+class GDataFileSystem : public GDataFileSystemInterface,
+                        public content::NotificationObserver {
  public:
   GDataFileSystem(Profile* profile,
                   DocumentsServiceInterface* documents_service);
   virtual ~GDataFileSystem();
 
-  // Shuts down the file system on UI thread. All pending operations are
-  // canceled. Most parts of shutdown happens here. The destructor is only
-  // used to release objects on the IO thread.
-  void ShutdownOnUIThread();
-
   // GDataFileSystem overrides.
   virtual void Initialize() OVERRIDE;
   virtual void AddObserver(Observer* observer) OVERRIDE;
   virtual void RemoveObserver(Observer* observer) OVERRIDE;
+  virtual void StartUpdates() OVERRIDE;
+  virtual void StopUpdates() OVERRIDE;
+  virtual void CheckForUpdates() OVERRIDE;
   virtual void Authenticate(const AuthStatusCallback& callback) OVERRIDE;
-  virtual void FindFileByPathAsync(const FilePath& file_path,
-                                   const FindFileCallback& callback) OVERRIDE;
-  virtual void FindFileByPathSync(const FilePath& file_path,
-                                  FindFileDelegate* delegate) OVERRIDE;
-  virtual void FindFileByResourceIdSync(const std::string& resource_id,
-                                        FindFileDelegate* delegate) OVERRIDE;
-  virtual void TransferFile(const FilePath& local_file_path,
-                            const FilePath& remote_dest_file_path,
-                            const FileOperationCallback& callback) OVERRIDE;
+  virtual void FindEntryByResourceIdSync(const std::string& resource_id,
+                                         FindEntryDelegate* delegate) OVERRIDE;
+  virtual void SearchAsync(const std::string& search_query,
+                           const ReadDirectoryCallback& callback) OVERRIDE;
+  virtual void TransferFileFromRemoteToLocal(
+      const FilePath& remote_src_file_path,
+      const FilePath& local_dest_file_path,
+      const FileOperationCallback& callback) OVERRIDE;
+  virtual void TransferFileFromLocalToRemote(
+      const FilePath& local_src_file_path,
+      const FilePath& remote_dest_file_path,
+      const FileOperationCallback& callback) OVERRIDE;
   virtual void Copy(const FilePath& src_file_path,
                     const FilePath& dest_file_path,
                     const FileOperationCallback& callback) OVERRIDE;
@@ -432,31 +462,32 @@ class GDataFileSystem : public GDataFileSystemInterface {
                                bool is_exclusive,
                                bool is_recursive,
                                const FileOperationCallback& callback) OVERRIDE;
-  virtual void GetFile(const FilePath& file_path,
-                       const GetFileCallback& callback) OVERRIDE;
-  virtual void GetFileForResourceId(
+  virtual void GetFileByPath(
+      const FilePath& file_path,
+      const GetFileCallback& get_file_callback,
+      const GetDownloadDataCallback& get_download_data_callback) OVERRIDE;
+  virtual void GetFileByResourceId(
       const std::string& resource_id,
-      const GetFileCallback& callback) OVERRIDE;
-  virtual void GetFromCacheForPath(
-      const FilePath& gdata_file_path,
-      const GetFromCacheCallback& callback) OVERRIDE;
-  virtual std::vector<GDataOperationRegistry::ProgressStatus>
-  GetProgressStatusList() OVERRIDE;
-  virtual bool CancelOperation(const FilePath& file_path) OVERRIDE;
-  virtual void AddOperationObserver(
-      GDataOperationRegistry::Observer* observer) OVERRIDE;
-  virtual void RemoveOperationObserver(
-      GDataOperationRegistry::Observer* observer) OVERRIDE;
+      const GetFileCallback& get_file_callback,
+      const GetDownloadDataCallback& get_download_data_callback) OVERRIDE;
+  virtual GDataOperationRegistry* GetOperationRegistry() OVERRIDE;
   virtual void GetCacheState(const std::string& resource_id,
                              const std::string& md5,
                              const GetCacheStateCallback& callback) OVERRIDE;
-  virtual bool GetFileInfoFromPath(const FilePath& gdata_file_path,
-                                   GDataFileProperties* properties) OVERRIDE;
-  virtual FilePath GetGDataCacheTmpDirectory() const OVERRIDE;
-  virtual FilePath GetGDataTempDownloadFolderPath() const OVERRIDE;
-  virtual FilePath GetGDataTempDocumentFolderPath() const OVERRIDE;
-  virtual FilePath GetGDataCachePinnedDirectory() const OVERRIDE;
-  virtual FilePath GetGDataCachePersistentDirectory() const OVERRIDE;
+  virtual void GetEntryInfoByPathAsync(
+      const FilePath& file_path,
+      const GetEntryInfoCallback& callback) OVERRIDE;
+  virtual void GetFileInfoByPathAsync(
+      const FilePath& file_path,
+      const GetFileInfoCallback& callback) OVERRIDE;
+  virtual void ReadDirectoryByPathAsync(
+      const FilePath& file_path,
+      const ReadDirectoryCallback& callback) OVERRIDE;
+  virtual bool GetFileInfoByPath(const FilePath& file_path,
+                                 GDataFileProperties* properties) OVERRIDE;
+  virtual bool IsUnderGDataCacheDirectory(const FilePath& path) const OVERRIDE;
+  virtual FilePath GetCacheDirectoryPath(
+      GDataRootDirectory::CacheSubDirectoryType sub_dir_type) const OVERRIDE;
   virtual FilePath GetCacheFilePath(
       const std::string& resource_id,
       const std::string& md5,
@@ -467,10 +498,30 @@ class GDataFileSystem : public GDataFileSystemInterface {
   // Calls private Pin or Unpin methods with |callback|.
   virtual void SetPinState(const FilePath& file_path, bool pin,
                            const FileOperationCallback& callback) OVERRIDE;
+  virtual void SetMountedState(
+      const FilePath& file_path,
+      bool to_mount,
+      const SetMountedStateCallback& callback) OVERRIDE;
   virtual void AddUploadedFile(const FilePath& virtual_dir_path,
                                DocumentEntry* entry,
                                const FilePath& file_content_path,
                                FileOperationType cache_operation) OVERRIDE;
+  virtual bool hide_hosted_documents() OVERRIDE;
+
+  // content::NotificationObserver implementation.
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
+
+  // Used in tests to inject mock document service.
+  void SetDocumentsServiceForTesting(DocumentsServiceInterface*
+      new_document_service) {
+    documents_service_.reset(new_document_service);
+  }
+
+  // Used in tests to set cache root path to a test directory.
+  // It should be called before cache is initialized (it will fail otherwise).
+  bool SetCacheRootPathForTesting(const FilePath& root_path);
 
  private:
   friend class GDataUploader;
@@ -478,9 +529,9 @@ class GDataFileSystem : public GDataFileSystemInterface {
   FRIEND_TEST_ALL_PREFIXES(GDataFileSystemTest,
                            FindFirstMissingParentDirectory);
   FRIEND_TEST_ALL_PREFIXES(GDataFileSystemTest,
-                           GetGDataFileInfoFromPath);
+                           GetGDataEntryByPath);
   FRIEND_TEST_ALL_PREFIXES(GDataFileSystemTest,
-                           GetFromCacheForPath);
+                           GetFileFromCacheByPath);
   FRIEND_TEST_ALL_PREFIXES(GDataFileSystemTest,
                            GetAvailableSpace);
 
@@ -492,14 +543,6 @@ class GDataFileSystem : public GDataFileSystemInterface {
     FOUND_MISSING,
     // Found target directory, it already exists.
     DIRECTORY_ALREADY_PRESENT,
-  };
-
-  // Document feed chunk type.
-  enum FeedChunkType {
-    // The very first part of content we fetch (i.e. first 200 items),
-    FEED_CHUNK_INITIAL,
-    // The rest of the feed that excludes FEED_CHUNK_INITIAL,
-    FEED_CHUNK_REST
   };
 
   // Defines set of parameters passes to intermediate callbacks during
@@ -520,7 +563,7 @@ class GDataFileSystem : public GDataFileSystemInterface {
   };
 
   // Defines set of parameters passed to intermediate callbacks during
-  // execution of GetFile() method.
+  // execution of GetFileByPath() method.
   struct GetFileFromCacheParams {
     GetFileFromCacheParams(const FilePath& virtual_file_path,
         const FilePath& local_tmp_path,
@@ -528,8 +571,8 @@ class GDataFileSystem : public GDataFileSystemInterface {
         const std::string& resource_id,
         const std::string& md5,
         const std::string& mime_type,
-        scoped_refptr<base::MessageLoopProxy> proxy,
-        const GetFileCallback& callback);
+        const GetFileCallback& get_file_callback,
+        const GetDownloadDataCallback& get_download_data_callback);
     ~GetFileFromCacheParams();
 
     FilePath virtual_file_path;
@@ -538,27 +581,63 @@ class GDataFileSystem : public GDataFileSystemInterface {
     std::string resource_id;
     std::string md5;
     std::string mime_type;
-    scoped_refptr<base::MessageLoopProxy> proxy;
-    const GetFileCallback callback;
+    const GetFileCallback get_file_callback;
+    const GetDownloadDataCallback get_download_data_callback;
   };
+
+  // Defines set of parameters sent to callback OnGetDocuments().
+  struct GetDocumentsParams {
+    GetDocumentsParams(int start_changestamp,
+                       int root_feed_changestamp,
+                       std::vector<DocumentFeed*>* feed_list,
+                       bool should_fetch_multiple_feeds,
+                       const FilePath& search_file_path,
+                       const std::string& search_query,
+                       const FindEntryCallback& callback);
+    ~GetDocumentsParams();
+
+    // Changestamps are positive numbers in increasing order. The difference
+    // between two changestamps is proportional equal to number of items in
+    // delta feed between them - bigger the difference, more likely bigger
+    // number of items in delta feeds.
+    int start_changestamp;
+    int root_feed_changestamp;
+    scoped_ptr<std::vector<DocumentFeed*> > feed_list;
+    // Should we stop after getting first feed chunk, even if there is more
+    // data.
+    bool should_fetch_multiple_feeds;
+    FilePath search_file_path;
+    std::string search_query;
+    FindEntryCallback callback;
+  };
+
+  typedef std::map<std::string /* resource_id */, GDataEntry*>
+      FileResourceIdMap;
 
   // Callback similar to FileOperationCallback but with a given |file_path|.
   typedef base::Callback<void(base::PlatformFileError error,
                               const FilePath& file_path)>
       FilePathUpdateCallback;
 
-  // Returns a WeakPtr for the current thread.
-  base::WeakPtr<GDataFileSystem> GetWeakPtrForCurrentThread();
+  // Callback run as a response to LoadFeedFromServer.
+  typedef base::Callback<void(GetDocumentsParams* params,
+                              base::PlatformFileError error)>
+      LoadDocumentFeedCallback;
 
-  // Finds file object by |file_path| and returns the file info.
-  // Returns NULL if it does not find the file.
-  GDataFileBase* GetGDataFileInfoFromPath(const FilePath& file_path);
+  // Finds entry object by |file_path| and returns the entry object.
+  // Returns NULL if it does not find the entry.
+  GDataEntry* GetGDataEntryByPath(const FilePath& file_path);
+
+  // Inits cache directory paths in the provided root.
+  // Should be called before cache is initialized.
+  void SetCachePaths(const FilePath& root_path);
 
   // Initiates upload operation of file defined with |file_name|,
   // |content_type| and |content_length|. The operation will place the newly
   // created file entity into |destination_directory|.
   //
-  // Can be called from UI/IO thread. |callback| is run on the calling thread.
+  // Can be called from *UI* thread. |callback| is run on the calling thread.
+  // TODO(satorux,achuith): Remove this: crosbug.com/29943
   void InitiateUpload(const std::string& file_name,
                       const std::string& content_type,
                       int64 content_length,
@@ -568,13 +647,10 @@ class GDataFileSystem : public GDataFileSystemInterface {
 
   // Resumes upload operation for chunk of file defined in |params..
   //
-  // Can be called from UI/IO thread. |callback| is run on the calling thread.
+  // Can be called from *UI* thread. |callback| is run on the calling thread.
+  // TODO(satorux,achuith): Remove this: crosbug.com/29943
   void ResumeUpload(const ResumeUploadParams& params,
                     const ResumeFileUploadCallback& callback);
-
-  // Unsafe (unlocked) version of FindFileByPathSync method.
-  void UnsafeFindFileByPath(const FilePath& file_path,
-                            FindFileDelegate* delegate);
 
   // Converts document feed from gdata service into DirectoryInfo. On failure,
   // returns NULL and fills in |error| with an appropriate value.
@@ -582,23 +658,14 @@ class GDataFileSystem : public GDataFileSystemInterface {
                                  base::Value* data,
                                  base::PlatformFileError *error);
 
-  // Checks if a local file at |local_file_path| is a JSON file referencing a
-  // hosted document on IO thread poll, and if so, gets the resource ID of the
-  // document.
-  static void GetDocumentResourceIdOnIOThreadPool(
-      const FilePath& local_file_path,
-      std::string* resource_id);
-
-  // Creates a temporary JSON file representing a document with |edit_url|
-  // and |resource_id| under |document_dir| on IO thread pool.
-  static void CreateDocumentJsonFileOnIOThreadPool(
-      const FilePath& document_dir,
-      const GURL& edit_url,
-      const std::string& resource_id,
-      base::PlatformFileError* error,
-      FilePath* temp_file_path,
-      std::string* mime_type,
-      GDataFileType* file_type);
+  // Callback passed to |LoadFeedFromServer| from |SearchAsync| method.
+  // |callback| is that should be run with data received from
+  // |LoadFeedFromServer|.
+  // |params| params used for getting document feed for content search.
+  // |error| error code returned by |LoadFeedFromServer|.
+  void OnSearch(const ReadDirectoryCallback& callback,
+                GetDocumentsParams* params,
+                base::PlatformFileError error);
 
   // Initiates transfer of |local_file_path| with |resource_id| to
   // |remote_dest_file_path|. |local_file_path| must be a file from the local
@@ -623,9 +690,9 @@ class GDataFileSystem : public GDataFileSystemInterface {
                            const FilePath& remote_dest_file_path,
                            const FileOperationCallback& callback);
 
-  // Invoked upon completion of GetFile initiated by Copy. If GetFile
-  // reports no error, calls TransferRegularFile to transfer |local_file_path|
-  // to |remote_dest_file_path|.
+  // Invoked upon completion of GetFileByPath initiated by Copy. If
+  // GetFileByPath reports no error, calls TransferRegularFile to transfer
+  // |local_file_path| to |remote_dest_file_path|.
   //
   // Can be called from UI/IO thread. |callback| is run on the calling thread.
   void OnGetFileCompleteForCopy(const FilePath& remote_dest_file_path,
@@ -634,6 +701,19 @@ class GDataFileSystem : public GDataFileSystemInterface {
                                 const FilePath& local_file_path,
                                 const std::string& unused_mime_type,
                                 GDataFileType file_type);
+
+  // Invoked upon completion of GetFileByPath initiated by
+  // TransferFileFromRemoteToLocal. If GetFileByPath reports no error, calls
+  // CopyLocalFileOnIOThreadPoll to copy |local_file_path| to
+  // |local_dest_file_path|.
+  //
+  // Can be called from UI/IO thread. |callback| is run on the calling thread.
+  void OnGetFileCompleteForTransferFile(const FilePath& local_dest_file_path,
+                                        const FileOperationCallback& callback,
+                                        base::PlatformFileError error,
+                                        const FilePath& local_file_path,
+                                        const std::string& unused_mime_type,
+                                        GDataFileType file_type);
 
   // Copies a document with |resource_id| to the directory at |dir_path|
   // and names the copied document as |new_name|.
@@ -654,36 +734,31 @@ class GDataFileSystem : public GDataFileSystemInterface {
   // Adds a file or directory at |file_path| to the directory at |dir_path|.
   //
   // Can be called from UI/IO thread. |callback| is run on the calling thread.
-  void AddFileToDirectory(const FilePath& dir_path,
-                          const FileOperationCallback& callback,
-                          base::PlatformFileError error,
-                          const FilePath& file_path);
+  void AddEntryToDirectory(const FilePath& dir_path,
+                           const FileOperationCallback& callback,
+                           base::PlatformFileError error,
+                           const FilePath& file_path);
 
   // Removes a file or directory at |file_path| from the directory at
   // |dir_path| and moves it to the root directory.
   //
   // Can be called from UI/IO thread. |callback| is run on the calling thread.
-  void RemoveFileFromDirectory(const FilePath& dir_path,
-                               const FilePathUpdateCallback& callback,
-                               base::PlatformFileError error,
-                               const FilePath& file_path);
+  void RemoveEntryFromDirectory(const FilePath& dir_path,
+                                const FilePathUpdateCallback& callback,
+                                base::PlatformFileError error,
+                                const FilePath& file_path);
 
   // Removes file under |file_path| from in-memory snapshot of the file system.
   // |resource_id| contains the resource id of the removed file if it was a
   // file.
   // Return PLATFORM_FILE_OK if successful.
-  base::PlatformFileError RemoveFileFromGData(const FilePath& file_path,
+  base::PlatformFileError RemoveEntryFromGData(const FilePath& file_path,
                                               std::string* resource_id);
 
-  // Callback for handling feed content fetching while searching for file info.
-  // This callback is invoked after async feed fetch operation that was
-  // invoked by StartDirectoryRefresh() completes. This callback will update
-  // the content of the refreshed directory object and continue initially
-  // started FindFileByPath() request.
-  void OnGetDocuments(const FilePath& search_file_path,
-                      FeedChunkType chunk_type,
-                      scoped_ptr<base::ListValue> feed_list,
-                      const FindFileCallback& callback,
+  // Callback for handling response from |GDataDocumentsService::GetDocuments|.
+  // Invokes |callback| when done.
+  void OnGetDocuments(const LoadDocumentFeedCallback& callback,
+                      GetDocumentsParams* params,
                       GDataErrorCode status,
                       scoped_ptr<base::Value> data);
 
@@ -707,15 +782,15 @@ class GDataFileSystem : public GDataFileSystemInterface {
 
   // Callback for handling an attempt to add a file or directory to another
   // directory.
-  void OnAddFileToDirectoryCompleted(const FileOperationCallback& callback,
-                                     const FilePath& file_path,
-                                     const FilePath& dir_path,
-                                     GDataErrorCode status,
-                                     const GURL& document_url);
+  void OnAddEntryToDirectoryCompleted(const FileOperationCallback& callback,
+                                      const FilePath& file_path,
+                                      const FilePath& dir_path,
+                                      GDataErrorCode status,
+                                      const GURL& document_url);
 
   // Callback for handling an attempt to remove a file or directory from
   // another directory.
-  void OnRemoveFileFromDirectoryCompleted(
+  void OnRemoveEntryFromDirectoryCompleted(
       const FilePathUpdateCallback& callback,
       const FilePath& file_path,
       const FilePath& dir_path,
@@ -748,25 +823,20 @@ class GDataFileSystem : public GDataFileSystemInterface {
     const GURL& content_url,
     const FilePath& downloaded_file_path);
 
+  // Similar to OnFileDownloaded() but takes |has_enough_space| so we report
+  // an error in case we don't have enough disk space.
+  void OnFileDownloadedAndSpaceChecked(
+      const GetFileFromCacheParams& params,
+      GDataErrorCode status,
+      const GURL& content_url,
+      const FilePath& downloaded_file_path,
+      bool* has_enough_space);
+
   // Callback for handling internal StoreToCache() calls after downloading
   // file content.
   void OnDownloadStoredToCache(base::PlatformFileError error,
                                const std::string& resource_id,
                                const std::string& md5);
-
-  // Callback for handling file upload initialization requests.
-  void OnUploadLocationReceived(
-      const InitiateUploadCallback& callback,
-      scoped_refptr<base::MessageLoopProxy> message_loop_proxy,
-      GDataErrorCode code,
-      const GURL& upload_location);
-
-  // Callback for handling file upload resume requests.
-  void OnResumeUpload(
-      scoped_refptr<base::MessageLoopProxy> message_loop_proxy,
-      const ResumeFileUploadCallback& callback,
-      const ResumeUploadResponse& response,
-      scoped_ptr<DocumentEntry> new_entry);
 
   // Renames a file or directory at |file_path| on in-memory snapshot
   // of the file system. Returns PLATFORM_FILE_OK if successful.
@@ -777,30 +847,51 @@ class GDataFileSystem : public GDataFileSystemInterface {
   // Adds a file or directory at |file_path| to another directory at
   // |dir_path| on in-memory snapshot of the file system.
   // Returns PLATFORM_FILE_OK if successful.
-  base::PlatformFileError AddFileToDirectoryOnFilesystem(
+  base::PlatformFileError AddEntryToDirectoryOnFilesystem(
       const FilePath& file_path, const FilePath& dir_path);
 
   // Removes a file or directory at |file_path| from another directory at
   // |dir_path| on in-memory snapshot of the file system.
   // Returns PLATFORM_FILE_OK if successful.
-  base::PlatformFileError RemoveFileFromDirectoryOnFilesystem(
+  base::PlatformFileError RemoveEntryFromDirectoryOnFilesystem(
       const FilePath& file_path, const FilePath& dir_path,
       FilePath* updated_file_path);
 
-  // Removes file under |file_path| from in-memory snapshot of the file system
-  // and the corresponding file from cache if it exists.
+  // Removes a file or directory under |file_path| from in-memory snapshot of
+  // the file system and the corresponding file from cache if it exists.
   // Return PLATFORM_FILE_OK if successful.
-  base::PlatformFileError RemoveFileFromFileSystem(const FilePath& file_path);
-
-  // Parses the content of |feed_data| and returns DocumentFeed instance
-  // represeting it.
-  DocumentFeed* ParseDocumentFeed(base::Value* feed_data);
+  base::PlatformFileError RemoveEntryFromFileSystem(const FilePath& file_path);
 
   // Updates whole directory structure feeds collected in |feed_list|.
-  // On success, returns PLATFORM_FILE_OK.
-  base::PlatformFileError UpdateDirectoryWithDocumentFeed(
-      base::ListValue* feed_list,
-      ContentOrigin origin);
+  // On success, returns PLATFORM_FILE_OK. Record file statistics as UMA
+  // histograms.
+  base::PlatformFileError UpdateFromFeed(
+      const std::vector<DocumentFeed*>& feed_list,
+      ContentOrigin origin,
+      int largest_changestamp,
+      int root_feed_changestamp);
+
+  // Applies the pre-processed feed from |file_map| map onto the file system.
+  void ApplyFeedFromFileUrlMap(bool is_delta_feed,
+                               int feed_changestamp,
+                               const FileResourceIdMap& file_map);
+
+  // Finds directory where new |file| should be added to during feed processing.
+  // |orphaned_entries_dir| collects files/dirs that don't have a parent in
+  // either locally cached file system or in this new feed.
+  GDataDirectory* FindDirectoryForNewEntry(
+      GDataEntry* new_entry,
+      const FileResourceIdMap& file_map,
+      GDataRootDirectory* orphaned_entries);
+
+  // Converts list of document feeds from collected feeds into
+  // FileResourceIdMap.
+  base::PlatformFileError FeedToFileResourceMap(
+      const std::vector<DocumentFeed*>& feed_list,
+      FileResourceIdMap* file_map,
+      int* feed_changestamp,
+      int* num_regular_files,
+      int* num_hosted_documents);
 
   // Converts |entry_value| into GFileDocument instance and adds it
   // to virtual file system at |directory_path|.
@@ -814,46 +905,79 @@ class GDataFileSystem : public GDataFileSystemInterface {
       GURL* last_dir_content_url,
       FilePath* first_missing_parent_path);
 
-  // Starts root feed load from the server. If successful, it will try to find
-  // the file upon retrieval completion.
-  void LoadFeedFromServer(const FilePath& search_file_path,
-                          const FindFileCallback& callback);
+  // Retreives account metadata and determines from the last change timestamp
+  // if the feed content loading from the server needs to be initiated.
+  void ReloadFeedFromServerIfNeeded(ContentOrigin initial_origin,
+                                    int local_changestamp,
+                                    const FilePath& search_file_path,
+                                    const FindEntryCallback& callback);
 
-  // Returns file name for cached feed given feed |chunk_type|.
-  FilePath GetCachedFeedFileName(FeedChunkType chunk_type) const;
+  // Helper callback for handling results of metadata retrieval initiated from
+  // ReloadFeedFromServerIfNeeded(). This method makes a decision about fetching
+  // the content of the root feed during the root directory refresh process.
+  void OnGetAccountMetadata(ContentOrigin initial_origin,
+                            int local_changestamp,
+                            const FilePath& search_file_path,
+                            const FindEntryCallback& callback,
+                            GDataErrorCode error,
+                            scoped_ptr<base::Value> feed_data);
+
+  // Starts root feed load from the server. Value of |start_changestamp|
+  // determines the type of feed to load - 0 means root feed, every other
+  // value would trigger delta feed.
+  // In the case of loading the root feed we use |root_feed_changestamp| as its
+  // initial changestamp value since it does not come with that info.
+  // When done |load_feed_callback| is invoked.
+  // |entry_found_callback| is used only when this is invoked while searching
+  // for file info, and is used in |load_feed_callback|. If successful, it will
+  // try to find the file upon retrieval completion.
+  // |should_fetch_multiple_feeds| is true iff don't want to stop feed loading
+  // after we retrieve first feed chunk.
+  // If invoked as a part of content search, query will be set in
+  // |search_query|.
+  void LoadFeedFromServer(int start_changestamp,
+                          int root_feed_changestamp,
+                          bool should_fetch_multiple_feeds,
+                          const FilePath& search_file_path,
+                          const std::string& search_query,
+                          const FindEntryCallback& entry_found_callback,
+                          const LoadDocumentFeedCallback& load_feed_callback);
+
+  // Callback for handling feed content fetching while searching for file info.
+  // This callback is invoked after async feed fetch operation that was
+  // invoked by StartDirectoryRefresh() completes. This callback will update
+  // the content of the refreshed directory object and continue initially
+  // started FindEntryByPath() request.
+  void OnFeedFromServerLoaded(GetDocumentsParams* params,
+                              base::PlatformFileError status);
+
+  // Callback for handling results of ReloadFeedFromServerIfNeeded() initiated
+  // from CheckForUpdates(). This callback checks whether feed is successfully
+  // reloaded, and in case of failure, restores the content origin of the root
+  // directory.
+  void OnUpdateChecked(ContentOrigin initial_origin,
+                       base::PlatformFileError error,
+                       const FilePath& directory_path,
+                       GDataEntry* entry);
 
   // Starts root feed load from the cache. If successful, it will try to find
   // the file upon retrieval completion. In addition to that, it will
   // initate retrieval of the root feed from the server if
   // |should_load_from_server| is set.
-  void LoadRootFeedFromCache(FeedChunkType chunk_type,
+  void LoadRootFeedFromCache(bool should_load_from_server,
                              const FilePath& search_file_path,
-                             bool should_load_from_server,
-                             const FindFileCallback& callback);
-
-  // Loads root feed content from |file_path| on IO thread pool. Upon
-  // completion it will invoke |callback| on thread represented by
-  // |relay_proxy|.
-  static void LoadRootFeedOnIOThreadPool(const FilePath& meta_cache_path,
-                                         base::PlatformFileError* error,
-                                         base::ListValue* feed_list);
+                             const FindEntryCallback& callback);
 
   // Callback for handling root directory refresh from the cache.
-  void OnLoadRootFeed(FeedChunkType chunk_type,
-                      const FilePath& search_file_path,
-                      bool should_load_from_server,
-                      const FindFileCallback& callback,
-                      base::PlatformFileError* error,
-                      base::ListValue* feed_list);
+  void OnProtoLoaded(LoadRootFeedParams* params);
+
+  // Save filesystem as proto file.
+  void SaveFileSystemAsProto();
 
   // Saves a collected feed in GCache directory under
   // <user_profile_dir>/GCache/v1/meta/|name| for later reloading when offline.
   void SaveFeed(scoped_ptr<base::Value> feed_vector,
                 const FilePath& name);
-  static void SaveFeedOnIOThreadPool(
-      const FilePath& meta_cache_path,
-      scoped_ptr<base::Value> feed_vector,
-      const FilePath& name);
 
   // Finds and returns upload url of a given directory. Returns empty url
   // if directory can't be found.
@@ -866,26 +990,19 @@ class GDataFileSystem : public GDataFileSystemInterface {
   void NotifyFileUnpinned(const std::string& resource_id,
                           const std::string& md5);
   void NotifyDirectoryChanged(const FilePath& directory_path);
+  void NotifyInitialLoadFinished();
+  void NotifyDocumentFeedFetched(int num_accumulated_entries);
 
   // Helper function that completes bookkeeping tasks related to
   // completed file transfer.
   void OnTransferCompleted(
-      const FilePath& local_file_path,
-      const FilePath& remote_dest_file_path,
       const FileOperationCallback& callback,
       base::PlatformFileError error,
-      DocumentEntry* entry);
+      UploadFileInfo* upload_file_info);
 
   // Kicks off file upload once it receives |upload_file_info|.
   void StartFileUploadOnUIThread(
       const FileOperationCallback& callback,
-      base::PlatformFileError* error,
-      UploadFileInfo* upload_file_info);
-
-  // Reads properties of |local_file| and fills in values of UploadFileInfo.
-  static void CreateUploadFileInfoOnIOThreadPool(
-      const FilePath& local_file,
-      const FilePath& remote_dest_file,
       base::PlatformFileError* error,
       UploadFileInfo* upload_file_info);
 
@@ -904,9 +1021,10 @@ class GDataFileSystem : public GDataFileSystemInterface {
   // Upon completion, |callback| is invoked on the thread where this method was
   // called, with the cache file path if it exists or empty otherwise.
   // otherwise.
-  void GetFromCache(const std::string& resource_id,
-                    const std::string& md5,
-                    const GetFromCacheCallback& callback);
+  void GetFileFromCacheByResourceIdAndMd5(
+      const std::string& resource_id,
+      const std::string& md5,
+      const GetFileFromCacheCallback& callback);
 
   // Stores |source_path| corresponding to |resource_id| and |md5| to cache.
   // |file_operation_type| specifies if |source_path| is to be moved or copied.
@@ -970,7 +1088,7 @@ class GDataFileSystem : public GDataFileSystemInterface {
   // called, with the absolute path of the dirty file.
   void MarkDirtyInCache(const std::string& resource_id,
                         const std::string& md5,
-                        const GetFromCacheCallback& callback);
+                        const GetFileFromCacheCallback& callback);
 
   // Commit dirty the file corresponding to |resource_id| and |md5|.
   // Must be called after MarkDirtyInCache to indicate that file modification
@@ -1030,16 +1148,15 @@ class GDataFileSystem : public GDataFileSystemInterface {
   // info into cache map.
   void InitializeCacheOnIOThreadPool();
 
-  // Task posted from GetFromCacheInternal to run on IO thread pool.
+  // Task posted from GetFileFromCacheInternal to run on IO thread pool.
   // Checks if file corresponding to |resource_id| and |md5| exists in cache
   // map.
   // Even though this task doesn't involve IO operations, it still runs on the
   // IO thread pool, to force synchronization of all tasks on IO thread pool,
   // e.g. this absolute must execute after InitailizeCacheOnIOTheadPool.
-  void GetFromCacheOnIOThreadPool(
+  void GetFileFromCacheOnIOThreadPool(
       const std::string& resource_id,
       const std::string& md5,
-      const FilePath& gdata_file_path,
       base::PlatformFileError* error,
       FilePath* cache_file_path);
 
@@ -1088,6 +1205,19 @@ class GDataFileSystem : public GDataFileSystemInterface {
                            const std::string& md5,
                            FileOperationType file_operation_type,
                            base::PlatformFileError* error);
+
+  // Task posted from SetMountedState to modify cache state on the IO thread
+  // pool, which involves the following:
+  // - moves |source_path| to |dest_path|, where
+  //   if we're mounting: |source_path| is the unmounted path and has .<md5>
+  //       extension, and |dest_path| is the mounted path in persistent dir
+  //       and has .<md5>.mounted extension;
+  //   if we're unmounting: the opposite is true for the two paths, i.e.
+  //       |dest_path| is the mounted path and |source_path| the unmounted path.
+  void SetMountedStateOnIOThreadPool(const FilePath& file_path,
+                                     bool to_mount,
+                                     base::PlatformFileError* error,
+                                     FilePath* cache_file_path);
 
   // Task posted from MarkDirtyInCache to modify cache state on the IO thread
   // pool, which involves the following:
@@ -1143,31 +1273,38 @@ class GDataFileSystem : public GDataFileSystemInterface {
                       const std::string& md5,
                       const CacheOperationCallback& callback);
 
-  // Helper function for internally handling responses from GetFromCache()
-  // calls during processing of GetFile() request.
+  // Helper function for internally handling responses from
+  // GetFileFromCacheByResourceIdAndMd5() calls during processing of
+  // GetFileByPath() request.
   void OnGetFileFromCache(const GetFileFromCacheParams& params,
                           base::PlatformFileError error,
                           const std::string& resource_id,
                           const std::string& md5,
-                          const FilePath& gdata_file_path,
                           const FilePath& cache_file_path);
 
-  // Cache internal helper functions.
+  // Frees up disk space to store the given number of bytes, while keeping
+  // kMinFreSpace bytes on the disk, if needed.  |has_enough_space| is
+  // updated to indicate if we have enough space.
+  void FreeDiskSpaceIfNeededFor(int64 num_bytes,
+                                bool* has_enough_space);
 
-  // Unsafe (unlocked) version of InitializeCacheIfnecessary method.
-  void UnsafeInitializeCacheIfNecessary();
+  // Frees up disk space if we have less than kMinFreSpace. |has_enough_space|
+  // is updated to indicate if we have enough space.
+  void FreeDiskSpaceIfNeeded(bool* has_enough_space);
+
+  // Starts downloading a file if we have enough disk space indicated by
+  // |has_enough_space|.
+  void StartDownloadFileIfEnoughSpace(const GetFileFromCacheParams& params,
+                                      const FilePath& cache_file_path,
+                                      bool* has_enough_space);
+
+  // Cache internal helper functions.
 
   // Scans cache subdirectory |sub_dir_type| and build or update |cache_map|
   // with found file blobs or symlinks.
   void ScanCacheDirectory(
       GDataRootDirectory::CacheSubDirectoryType sub_dir_type,
       GDataRootDirectory::CacheMap* cache_map);
-
-  // Called from GetFromCache and GetFromCacheForPath.
-  void GetFromCacheInternal(const std::string& resource_id,
-                            const std::string& md5,
-                            const FilePath& gdata_file_path,
-                            const GetFromCacheCallback& callback);
 
   // Wrapper task around any sequenced task that runs on IO thread pool that
   // makes sure |in_shutdown_| and |on_io_completed_| are handled properly in
@@ -1176,30 +1313,99 @@ class GDataFileSystem : public GDataFileSystemInterface {
 
   // Wrapper around BrowserThread::PostTask to post
   // RunTaskOnIOThreadPool task to the blocking thread pool.
-  // TODO(satorux): As of now, it's posting to FILE thread.
   void PostBlockingPoolSequencedTask(
-      const std::string& sequence_token_name,
       const tracked_objects::Location& from_here,
       const base::Closure& task);
 
   // Similar to PostBlockingPoolSequencedTask() but this one takes a reply
   // callback that runs on the calling thread.
-  // TODO(satorux): As of now, it's posting to FILE thread.
   void PostBlockingPoolSequencedTaskAndReply(
-    const std::string& sequence_token_name,
     const tracked_objects::Location& from_here,
     const base::Closure& request_task,
     const base::Closure& reply_task);
 
-  // Helper function used to perform file search on the calling thread of
-  // FindFileByPath() request.
-  void FindFileByPathOnCallingThread(const FilePath& search_file_path,
-                                     const FindFileCallback& callback);
+  // Helper function used to perform synchronous file search on UI thread.
+  void FindEntryByPathSyncOnUIThread(const FilePath& search_file_path,
+                                     const FindEntryCallback& callback);
 
   void OnSetPinStateCompleted(const FileOperationCallback& callback,
                               base::PlatformFileError error,
                               const std::string& resource_id,
                               const std::string& md5);
+
+  // Changes state of hosted documents visibility, triggers directory refresh.
+  void SetHideHostedDocuments(bool hide);
+
+  // Initializes preference change observer.
+  void InitializePreferenceObserver();
+
+  // Called when an entry is found for GetEntryInfoByPathAsync().
+  void OnGetEntryInfo(const GetEntryInfoCallback& callback,
+                      base::PlatformFileError error,
+                      const FilePath& entry_path,
+                      GDataEntry* entry);
+
+  // Called when an entry is found for GetFileInfoByPathAsync().
+  void OnGetFileInfo(const GetFileInfoCallback& callback,
+                     base::PlatformFileError error,
+                     const FilePath& directory_path,
+                     GDataEntry* entry);
+
+  // Called when an entry is found for ReadDirectoryByPathAsync().
+  void OnReadDirectory(const ReadDirectoryCallback& callback,
+                       base::PlatformFileError error,
+                       const FilePath& directory_path,
+                       GDataEntry* entry);
+
+  // Finds file info by using virtual |file_path|. This call will also
+  // retrieve and refresh file system content from server and disk cache.
+  void FindEntryByPathAsyncOnUIThread(const FilePath& search_file_path,
+                                      const FindEntryCallback& callback);
+
+  // The following functions are used to forward calls to asynchronous public
+  // member functions to UI thread.
+  void SearchAsyncOnUIThread(const std::string& search_query,
+                             const ReadDirectoryCallback& callback);
+  void CopyOnUIThread(const FilePath& src_file_path,
+                      const FilePath& dest_file_path,
+                      const FileOperationCallback& callback);
+  void MoveOnUIThread(const FilePath& src_file_path,
+                      const FilePath& dest_file_path,
+                      const FileOperationCallback& callback);
+  void RemoveOnUIThread(const FilePath& file_path,
+                        bool is_recursive,
+                        const FileOperationCallback& callback);
+  void CreateDirectoryOnUIThread(const FilePath& directory_path,
+                                 bool is_exclusive,
+                                 bool is_recursive,
+                                 const FileOperationCallback& callback);
+  void GetFileByPathOnUIThread(
+      const FilePath& file_path,
+      const GetFileCallback& get_file_callback,
+      const GetDownloadDataCallback& get_download_data_callback);
+  void GetFileByResourceIdOnUIThread(
+      const std::string& resource_id,
+      const GetFileCallback& get_file_callback,
+      const GetDownloadDataCallback& get_download_data_callback);
+  void GetEntryInfoByPathAsyncOnUIThread(
+      const FilePath& file_path,
+      const GetEntryInfoCallback& callback);
+  void GetFileInfoByPathAsyncOnUIThread(
+      const FilePath& file_path,
+      const GetFileInfoCallback& callback);
+  void ReadDirectoryByPathAsyncOnUIThread(
+      const FilePath& file_path,
+      const ReadDirectoryCallback& callback);
+  void GetCacheStateOnUIThread(const std::string& resource_id,
+                               const std::string& md5,
+                               const GetCacheStateCallback& callback);
+  void GetAvailableSpaceOnUIThread(const GetAvailableSpaceCallback& callback);
+  void SetPinStateOnUIThread(const FilePath& file_path, bool to_pin,
+                             const FileOperationCallback& callback);
+  void SetMountedStateOnUIThread(
+      const FilePath& file_path,
+      bool to_mount,
+      const SetMountedStateCallback& callback);
 
   scoped_ptr<GDataRootDirectory> root_;
 
@@ -1219,6 +1425,8 @@ class GDataFileSystem : public GDataFileSystemInterface {
   // GDataRootDirectory::CacheSubDirectoryType enum.
   std::vector<FilePath> cache_paths_;
 
+  // Waitable events used to block dectructor until all the tasks on blocking
+  // thread pool are run.
   scoped_ptr<base::WaitableEvent> on_io_completed_;
 
   // True if cache initialization has started, is in progress or has completed,
@@ -1229,15 +1437,43 @@ class GDataFileSystem : public GDataFileSystemInterface {
   int num_pending_tasks_;
   base::Lock num_pending_tasks_lock_;
 
+  // Periodic timer for checking updates.
+  base::Timer update_timer_;
+
+  // True if hosted documents should be hidden.
+  bool hide_hosted_docs_;
+
+  scoped_ptr<PrefChangeRegistrar> pref_registrar_;
+
   // WeakPtrFactory and WeakPtr bound to the UI thread.
   scoped_ptr<base::WeakPtrFactory<GDataFileSystem> > ui_weak_ptr_factory_;
   base::WeakPtr<GDataFileSystem> ui_weak_ptr_;
 
-  // WeakPtrFactory bound to the IO thread. Created when needed.
-  scoped_ptr<base::WeakPtrFactory<GDataFileSystem> > io_weak_ptr_factory_;
-
   ObserverList<Observer> observers_;
+
+  // The token is used to post tasks to the blocking pool in sequence.
+  const base::SequencedWorkerPool::SequenceToken sequence_token_;
 };
+
+// The minimum free space to keep. GDataFileSystem::GetFileByPath() returns
+// base::PLATFORM_FILE_ERROR_NO_SPACE if the available space is smaller than
+// this value.
+//
+// Copied from cryptohome/homedirs.h.
+// TODO(satorux): Share the constant.
+const int64 kMinFreeSpace = 512 * 1LL << 20;
+
+// Interface class used for getting the free disk space. Only for testing.
+class FreeDiskSpaceGetterInterface {
+ public:
+  virtual ~FreeDiskSpaceGetterInterface() {}
+  virtual int64 AmountOfFreeDiskSpace() const = 0;
+};
+
+// Sets the free disk space getter for testing.
+// The existing getter is deleted.
+void SetFreeDiskSpaceGetterForTesting(
+    FreeDiskSpaceGetterInterface* getter);
 
 }  // namespace gdata
 

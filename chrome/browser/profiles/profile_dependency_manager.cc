@@ -8,21 +8,25 @@
 #include <deque>
 #include <iterator>
 
-#include "chrome/browser/autocomplete/network_action_predictor_factory.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/background/background_contents_service_factory.h"
 #include "chrome/browser/content_settings/cookie_settings.h"
 #include "chrome/browser/download/download_service_factory.h"
+#include "chrome/browser/extensions/api/commands/extension_command_service_factory.h"
+#include "chrome/browser/extensions/extension_system_factory.h"
+#include "chrome/browser/google/google_url_tracker_factory.h"
 #include "chrome/browser/intents/web_intents_registry_factory.h"
 #include "chrome/browser/notifications/desktop_notification_service_factory.h"
 #include "chrome/browser/password_manager/password_store_factory.h"
 #include "chrome/browser/plugin_prefs_factory.h"
+#include "chrome/browser/predictors/autocomplete_action_predictor_factory.h"
 #include "chrome/browser/prerender/prerender_manager_factory.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_proxy_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_keyed_service.h"
 #include "chrome/browser/profiles/profile_keyed_service_factory.h"
 #include "chrome/browser/protector/protector_service_factory.h"
+#include "chrome/browser/search_engines/template_url_fetcher_factory.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/sessions/session_service_factory.h"
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
@@ -35,7 +39,13 @@
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/find_bar/find_bar_state_factory.h"
 #include "chrome/browser/ui/global_error_service_factory.h"
+#include "chrome/browser/ui/webui/chrome_url_data_manager_factory.h"
 #include "chrome/browser/ui/webui/ntp/ntp_resource_cache_factory.h"
+#include "chrome/browser/user_style_sheet_watcher_factory.h"
+
+#if defined(USE_AURA)
+#include "chrome/browser/ui/gesture_prefs_observer_factory_aura.h"
+#endif
 
 #ifndef NDEBUG
 #include "base/command_line.h"
@@ -165,7 +175,11 @@ void ProfileDependencyManager::AssertFactoriesBuilt() {
   if (built_factories_)
     return;
 
+  AutocompleteActionPredictorFactory::GetInstance();
+#if defined(ENABLE_BACKGROUND)
   BackgroundContentsServiceFactory::GetInstance();
+#endif
+  ChromeURLDataManagerFactory::GetInstance();
 #if !defined(OS_ANDROID)
   CloudPrintProxyServiceFactory::GetInstance();
 #endif
@@ -174,29 +188,42 @@ void ProfileDependencyManager::AssertFactoriesBuilt() {
   DesktopNotificationServiceFactory::GetInstance();
 #endif
   DownloadServiceFactory::GetInstance();
+  ExtensionCommandServiceFactory::GetInstance();
+  ExtensionSystemFactory::GetInstance();
   FindBarStateFactory::GetInstance();
+#if defined(USE_AURA)
+  GesturePrefsObserverFactoryAura::GetInstance();
+#endif
   GlobalErrorServiceFactory::GetInstance();
-  NetworkActionPredictorFactory::GetInstance();
+  GoogleURLTrackerFactory::GetInstance();
   NTPResourceCacheFactory::GetInstance();
   PasswordStoreFactory::GetInstance();
   PersonalDataManagerFactory::GetInstance();
+#if !defined(OS_ANDROID)
   PinnedTabServiceFactory::GetInstance();
+#endif
   PluginPrefsFactory::GetInstance();
-  protector::ProtectorServiceFactory::GetInstance();
   prerender::PrerenderManagerFactory::GetInstance();
   ProfileSyncServiceFactory::GetInstance();
+#if defined(ENABLE_PROTECTOR_SERVICE)
+  protector::ProtectorServiceFactory::GetInstance();
+#endif
+#if defined(ENABLE_SESSION_SERVICE)
   SessionServiceFactory::GetInstance();
+#endif
   SigninManagerFactory::GetInstance();
 #if defined(ENABLE_INPUT_SPEECH)
   SpeechInputExtensionManager::InitializeFactory();
 #endif
   SpellCheckFactory::GetInstance();
   TabRestoreServiceFactory::GetInstance();
+  TemplateURLFetcherFactory::GetInstance();
+  TemplateURLServiceFactory::GetInstance();
 #if defined(ENABLE_THEMES)
   ThemeServiceFactory::GetInstance();
 #endif
-  TemplateURLServiceFactory::GetInstance();
   TokenServiceFactory::GetInstance();
+  UserStyleSheetWatcherFactory::GetInstance();
 #if defined(ENABLE_WEB_INTENTS)
   WebIntentsRegistryFactory::GetInstance();
 #endif

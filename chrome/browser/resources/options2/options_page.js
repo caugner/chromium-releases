@@ -44,12 +44,6 @@ cr.define('options', function() {
   OptionsPage.registeredOverlayPages = {};
 
   /**
-   * Whether or not |initialize| has been called.
-   * @private
-   */
-  OptionsPage.initialized_ = false;
-
-  /**
    * Gets the default page (to be shown on initial load).
    */
   OptionsPage.getDefaultPage = function() {
@@ -298,6 +292,8 @@ cr.define('options', function() {
    * Cancels (closes) the overlay, due to the user pressing <Esc>.
    */
   OptionsPage.cancelOverlay = function() {
+    // Blur the active element to ensure any changed pref value is saved.
+    document.activeElement.blur();
     var overlay = this.getVisibleOverlay_();
     // Let the overlay handle the <Esc> if it wants to.
     if (overlay.handleCancel)
@@ -540,10 +536,7 @@ cr.define('options', function() {
    */
   OptionsPage.initialize = function() {
     chrome.send('coreOptionsInitialize');
-    this.initialized_ = true;
     uber.onContentFrameLoaded();
-
-    this.fixedHeaders_ = document.querySelectorAll('header');
 
     document.addEventListener('scroll', this.handleScroll_.bind(this));
 
@@ -581,9 +574,6 @@ cr.define('options', function() {
    */
   OptionsPage.handleScroll_ = function() {
     this.updateAllFrozenElementPositions_();
-    this.updateAllHeaderElementPositions_();
-
-    uber.invokeMethodOnParent('adjustToScroll', document.body.scrollLeft);
   };
 
   /**
@@ -594,17 +584,6 @@ cr.define('options', function() {
     var frozenElements = document.querySelectorAll('.frozen');
     for (var i = 0; i < frozenElements.length; i++)
       this.updateFrozenElementHorizontalPosition_(frozenElements[i]);
-  };
-
-  /**
-   * Update the start margin of all the position: fixed; header elements.
-   * @private
-   */
-  OptionsPage.updateAllHeaderElementPositions_ = function() {
-    var adjust = isRTL() ? 1 : -1;
-    var marginStart = document.body.scrollLeft * adjust + 'px';
-    for (var i = 0; i < this.fixedHeaders_.length; ++i)
-      this.fixedHeaders_[i].style.webkitMarginStart = marginStart;
   };
 
   /**
@@ -627,18 +606,6 @@ cr.define('options', function() {
       document.documentElement.removeAttribute(
           'flashPluginSupportsClearSiteData');
     }
-  };
-
-  /**
-   * Re-initializes the C++ handlers if necessary. This is called if the
-   * handlers are torn down and recreated but the DOM may not have been (in
-   * which case |initialize| won't be called again). If |initialize| hasn't been
-   * called, this does nothing (since it will be later, once the DOM has
-   * finished loading).
-   */
-  OptionsPage.reinitializeCore = function() {
-    if (!this.initialized_)
-      chrome.send('coreOptionsInitialize');
   };
 
   OptionsPage.prototype = {

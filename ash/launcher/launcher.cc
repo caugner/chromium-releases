@@ -13,8 +13,8 @@
 #include "ash/shell_window_ids.h"
 #include "ash/wm/shelf_layout_manager.h"
 #include "ui/aura/window.h"
+#include "ui/compositor/layer.h"
 #include "ui/gfx/canvas.h"
-#include "ui/gfx/compositor/layer.h"
 #include "ui/gfx/image/image.h"
 #include "ui/views/accessible_pane_view.h"
 #include "ui/views/widget/widget.h"
@@ -184,6 +184,14 @@ gfx::Rect Launcher::GetScreenBoundsOfItemIconForWindow(aura::Window* window) {
                    screen_origin.y() + bounds.y(),
                    bounds.width(),
                    bounds.height());
+}
+
+void Launcher::AddIconObserver(LauncherIconObserver* observer) {
+  launcher_view_->AddIconObserver(observer);
+}
+
+void Launcher::RemoveIconObserver(LauncherIconObserver* observer) {
+  launcher_view_->RemoveIconObserver(observer);
 }
 
 bool Launcher::IsShowingMenu() const {

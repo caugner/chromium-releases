@@ -14,8 +14,6 @@
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 
-class StatusAreaHostAura;
-class StatusAreaView;
 class WindowPositioner;
 
 namespace views {
@@ -30,25 +28,23 @@ class ChromeShellDelegate : public ash::ShellDelegate,
 
   static ChromeShellDelegate* instance() { return instance_; }
 
-  StatusAreaHostAura* status_area_host() {
-    return status_area_host_.get();
-  }
-
-  StatusAreaView* GetStatusArea();
-
   WindowPositioner* window_positioner() { return window_positioner_.get(); }
 
   // ash::ShellDelegate overrides;
-  virtual views::Widget* CreateStatusArea() OVERRIDE;
   virtual bool IsUserLoggedIn() OVERRIDE;
   virtual void LockScreen() OVERRIDE;
   virtual void UnlockScreen() OVERRIDE;
   virtual bool IsScreenLocked() const OVERRIDE;
+  virtual void Shutdown() OVERRIDE;
   virtual void Exit() OVERRIDE;
   virtual void NewWindow(bool is_incognito) OVERRIDE;
+  virtual void Search() OVERRIDE;
+  virtual void OpenFileManager() OVERRIDE;
+  virtual void OpenCrosh() OVERRIDE;
+  virtual void OpenMobileSetup() OVERRIDE;
+  virtual content::BrowserContext* GetCurrentBrowserContext() OVERRIDE;
+  virtual void ToggleSpokenFeedback() OVERRIDE;
   virtual ash::AppListViewDelegate* CreateAppListViewDelegate() OVERRIDE;
-  virtual std::vector<aura::Window*> GetCycleWindowList(
-      CycleSource source) const OVERRIDE;
   virtual void StartPartialScreenshot(
       ash::ScreenshotDelegate* screenshot_delegate) OVERRIDE;
   virtual ash::LauncherDelegate* CreateLauncherDelegate(
@@ -67,8 +63,9 @@ class ChromeShellDelegate : public ash::ShellDelegate,
 
   content::NotificationRegistrar registrar_;
 
-  scoped_ptr<StatusAreaHostAura> status_area_host_;
   scoped_ptr<WindowPositioner> window_positioner_;
+
+  base::WeakPtrFactory<ChromeShellDelegate> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeShellDelegate);
 };

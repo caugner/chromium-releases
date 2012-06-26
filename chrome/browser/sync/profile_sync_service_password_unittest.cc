@@ -23,10 +23,6 @@
 #include "chrome/browser/sync/glue/password_change_processor.h"
 #include "chrome/browser/sync/glue/password_data_type_controller.h"
 #include "chrome/browser/sync/glue/password_model_associator.h"
-#include "chrome/browser/sync/internal_api/read_node.h"
-#include "chrome/browser/sync/internal_api/read_transaction.h"
-#include "chrome/browser/sync/internal_api/write_node.h"
-#include "chrome/browser/sync/internal_api/write_transaction.h"
 #include "chrome/browser/sync/profile_sync_components_factory.h"
 #include "chrome/browser/sync/profile_sync_components_factory_mock.h"
 #include "chrome/browser/sync/profile_sync_service.h"
@@ -39,6 +35,10 @@
 #include "content/public/browser/notification_source.h"
 #include "content/test/notification_observer_mock.h"
 #include "content/test/test_browser_thread.h"
+#include "sync/internal_api/read_node.h"
+#include "sync/internal_api/read_transaction.h"
+#include "sync/internal_api/write_node.h"
+#include "sync/internal_api/write_transaction.h"
 #include "sync/protocol/password_specifics.pb.h"
 #include "sync/syncable/syncable.h"
 #include "sync/test/engine/test_id_factory.h"
@@ -83,7 +83,7 @@ using webkit::forms::PasswordForm;
 ACTION_P3(MakePasswordSyncComponents, service, ps, dtc) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
   PasswordModelAssociator* model_associator =
-      new PasswordModelAssociator(service, ps);
+      new PasswordModelAssociator(service, ps, NULL);
   PasswordChangeProcessor* change_processor =
       new PasswordChangeProcessor(model_associator, ps, dtc);
   return ProfileSyncComponentsFactory::SyncComponents(model_associator,
@@ -141,7 +141,8 @@ class ProfileSyncServicePasswordTest : public AbstractProfileSyncServiceTest {
   void AddPasswordSyncNode(const PasswordForm& entry) {
     sync_api::WriteTransaction trans(FROM_HERE, service_->GetUserShare());
     sync_api::ReadNode password_root(&trans);
-    ASSERT_TRUE(password_root.InitByTagLookup(browser_sync::kPasswordTag));
+    ASSERT_EQ(sync_api::BaseNode::INIT_OK,
+              password_root.InitByTagLookup(browser_sync::kPasswordTag));
 
     sync_api::WriteNode node(&trans);
     std::string tag = PasswordModelAssociator::MakeTag(entry);
@@ -245,12 +246,14 @@ class ProfileSyncServicePasswordTest : public AbstractProfileSyncServiceTest {
   void GetPasswordEntriesFromSyncDB(std::vector<PasswordForm>* entries) {
     sync_api::ReadTransaction trans(FROM_HERE, service_->GetUserShare());
     sync_api::ReadNode password_root(&trans);
-    ASSERT_TRUE(password_root.InitByTagLookup(browser_sync::kPasswordTag));
+    ASSERT_EQ(sync_api::BaseNode::INIT_OK,
+              password_root.InitByTagLookup(browser_sync::kPasswordTag));
 
     int64 child_id = password_root.GetFirstChildId();
     while (child_id != sync_api::kInvalidId) {
       sync_api::ReadNode child_node(&trans);
-      ASSERT_TRUE(child_node.InitByIdLookup(child_id));
+      ASSERT_EQ(sync_api::BaseNode::INIT_OK,
+                child_node.InitByIdLookup(child_id));
 
       const sync_pb::PasswordSpecificsData& password =
           child_node.GetPasswordSpecifics();

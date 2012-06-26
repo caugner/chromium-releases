@@ -6,7 +6,9 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/message_loop.h"
 #include "base/values.h"
+#include "chrome/browser/extensions/api/runtime/runtime_api.h"
 #include "chrome/browser/extensions/api/web_request/web_request_api.h"
 #include "chrome/browser/extensions/extension_devtools_manager.h"
 #include "chrome/browser/extensions/extension_host.h"
@@ -14,6 +16,7 @@
 #include "chrome/browser/extensions/extension_processes_api.h"
 #include "chrome/browser/extensions/extension_processes_api_constants.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_tabs_module.h"
 #include "chrome/browser/extensions/lazy_background_task_queue.h"
 #include "chrome/browser/extensions/process_map.h"
@@ -33,7 +36,6 @@ using extensions::ExtensionAPI;
 namespace {
 
 const char kDispatchEvent[] = "Event.dispatchJSON";
-const char kOnInstalledEvent[] = "experimental.extension.onInstalled";
 
 void NotifyEventListenerRemovedOnIOThread(
     void* profile,
@@ -101,7 +103,8 @@ void ExtensionEventRouter::DispatchEvent(IPC::Message::Sender* ipc_sender,
 
 ExtensionEventRouter::ExtensionEventRouter(Profile* profile)
     : profile_(profile),
-      extension_devtools_manager_(profile->GetExtensionDevToolsManager()) {
+      extension_devtools_manager_(
+          ExtensionSystem::Get(profile)->devtools_manager()) {
   registrar_.Add(this, content::NOTIFICATION_RENDERER_PROCESS_TERMINATED,
                  content::NotificationService::AllSources());
   registrar_.Add(this, content::NOTIFICATION_RENDERER_PROCESS_CLOSED,
@@ -112,7 +115,6 @@ ExtensionEventRouter::ExtensionEventRouter(Profile* profile)
                  content::Source<Profile>(profile_));
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_INSTALLED,
                  content::Source<Profile>(profile_));
-  // TODO(tessamac): also get notified for background page crash/failure.
 }
 
 ExtensionEventRouter::~ExtensionEventRouter() {}
@@ -314,7 +316,7 @@ void ExtensionEventRouter::DispatchEventToListener(
       listener_profile->GetExtensionService()->process_map();
   // If the event is privileged, only send to extension processes. Otherwise,
   // it's OK to send to normal renderers (e.g., for content scripts).
-  if (ExtensionAPI::GetInstance()->IsPrivileged(event->event_name) &&
+  if (ExtensionAPI::GetSharedInstance()->IsPrivileged(event->event_name) &&
       !process_map->Contains(extension->id(), listener.process->GetID())) {
     return;
   }
@@ -392,48 +394,46 @@ void ExtensionEventRouter::MaybeLoadLazyBackgroundPage(
   if (!CanDispatchEventToProfile(profile, extension, event, &event_args))
     return;
 
-  if (!CanDispatchEventNow(profile, extension)) {
-    profile->GetLazyBackgroundTaskQueue()->AddPendingTask(
+  extensions::LazyBackgroundTaskQueue* queue =
+      ExtensionSystem::Get(profile)->lazy_background_task_queue();
+  if (queue->ShouldEnqueueTask(profile, extension)) {
+    queue->AddPendingTask(
         profile, extension->id(),
         base::Bind(&ExtensionEventRouter::DispatchPendingEvent,
                    base::Unretained(this), event));
   }
 }
 
-bool ExtensionEventRouter::CanDispatchEventNow(
-     Profile* profile, const Extension* extension) {
-  DCHECK(extension);
-  if (extension->has_lazy_background_page()) {
-    ExtensionProcessManager* pm = profile->GetExtensionProcessManager();
-    ExtensionHost* background_host =
-        pm->GetBackgroundHostForExtension(extension->id());
-    if (!background_host || !background_host->did_stop_loading())
-      return false;
-  }
-
-  return true;
-}
-
 void ExtensionEventRouter::IncrementInFlightEvents(
     Profile* profile, const Extension* extension) {
+  // Only increment in-flight events if the lazy background page is active,
+  // because that's the only time we'll get an ACK.
   if (extension->has_lazy_background_page()) {
-    profile->GetExtensionProcessManager()->IncrementLazyKeepaliveCount(
-        extension);
+    ExtensionProcessManager* pm =
+        ExtensionSystem::Get(profile)->process_manager();
+    ExtensionHost* host = pm->GetBackgroundHostForExtension(extension->id());
+    if (host)
+      pm->IncrementLazyKeepaliveCount(extension);
   }
 }
 
-void ExtensionEventRouter::OnExtensionEventAck(
+void ExtensionEventRouter::OnEventAck(
     Profile* profile, const std::string& extension_id) {
-  const Extension* extension =
-      profile->GetExtensionService()->extensions()->GetByID(extension_id);
-  if (extension && extension->has_lazy_background_page()) {
-    profile->GetExtensionProcessManager()->DecrementLazyKeepaliveCount(
-        extension);
-  }
+  ExtensionProcessManager* pm =
+      ExtensionSystem::Get(profile)->process_manager();
+  ExtensionHost* host = pm->GetBackgroundHostForExtension(extension_id);
+  // The event ACK is routed to the background host, so this should never be
+  // NULL.
+  CHECK(host);
+  CHECK(host->extension()->has_lazy_background_page());
+  pm->DecrementLazyKeepaliveCount(host->extension());
 }
 
 void ExtensionEventRouter::DispatchPendingEvent(
     const linked_ptr<ExtensionEvent>& event, ExtensionHost* host) {
+  if (!host)
+    return;
+
   ListenerProcess listener(host->render_process_host(),
                            host->extension()->id());
   if (listeners_[event->event_name].count(listener) > 0u)
@@ -495,13 +495,11 @@ void ExtensionEventRouter::Observe(
       // Dispatch the onInstalled event.
       const Extension* extension =
           content::Details<const Extension>(details).ptr();
-      AddLazyEventListener(kOnInstalledEvent, extension->id());
-      DispatchEventToExtension(
-          extension->id(), kOnInstalledEvent, "[]", NULL, GURL());
+      MessageLoop::current()->PostTask(FROM_HERE,
+          base::Bind(&extensions::RuntimeEventRouter::DispatchOnInstalledEvent,
+                     profile_, extension->id()));
       break;
     }
-
-    // TODO(tessamac): if background page crashed/failed clear queue.
     default:
       NOTREACHED();
       return;

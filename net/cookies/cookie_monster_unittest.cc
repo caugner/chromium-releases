@@ -45,6 +45,9 @@ class NewMockPersistentCookieStore
   MOCK_METHOD1(DeleteCookie, void(const CookieMonster::CanonicalCookie& cc));
   MOCK_METHOD1(SetClearLocalStateOnExit, void(bool clear_local_state));
   MOCK_METHOD1(Flush, void(const base::Closure& callback));
+
+ private:
+  virtual ~NewMockPersistentCookieStore() {}
 };
 
 const char* kTopLevelDomainPlus1 = "http://www.harvard.edu";
@@ -757,6 +760,10 @@ ACTION_P(PushCallbackAction, callback_vector) {
   callback_vector->push(arg1);
 }
 
+ACTION_P2(DeleteSessionCookiesAction, cookie_monster, callback) {
+  cookie_monster->DeleteSessionCookiesAsync(callback->AsCallback());
+}
+
 }  // namespace
 
 // This test suite verifies the task deferral behaviour of the CookieMonster.
@@ -1091,6 +1098,22 @@ TEST_F(DeferredCookieTaskTest, DeferredDeleteCanonicalCookie) {
       DeleteCanonicalCookieAction(
       &cookie_monster(), cookie, &delete_cookie_callback));
   EXPECT_CALL(delete_cookie_callback, Invoke(false)).WillOnce(
+      QuitCurrentMessageLoop());
+
+  CompleteLoadingAndWait();
+}
+
+TEST_F(DeferredCookieTaskTest, DeferredDeleteSessionCookies) {
+  MockDeleteCallback delete_callback;
+
+  BeginWith(DeleteSessionCookiesAction(
+      &cookie_monster(), &delete_callback));
+
+  WaitForLoadCall();
+
+  EXPECT_CALL(delete_callback, Invoke(false)).WillOnce(
+      DeleteSessionCookiesAction(&cookie_monster(), &delete_callback));
+  EXPECT_CALL(delete_callback, Invoke(false)).WillOnce(
       QuitCurrentMessageLoop());
 
   CompleteLoadingAndWait();
@@ -2043,7 +2066,15 @@ TEST_F(CookieMonsterTest, CookieListOrdering) {
 // get rid of cookies when we should).  The perftest is probing for
 // whether garbage collection happens when it shouldn't.  See comments
 // before that test for more details.
-TEST_F(CookieMonsterTest, GarbageCollectionTriggers) {
+
+// Disabled on Windows, see crbug.com/126095
+#if defined(OS_WIN)
+#define MAYBE_GarbageCollectionTriggers DISABLED_GarbageCollectionTriggers
+#else
+#define MAYBE_GarbageCollectionTriggers GarbageCollectionTriggers
+#endif
+
+TEST_F(CookieMonsterTest, MAYBE_GarbageCollectionTriggers) {
   // First we check to make sure that a whole lot of recent cookies
   // doesn't get rid of anything after garbage collection is checked for.
   {
@@ -2202,6 +2233,8 @@ class FlushablePersistentStore : public CookieMonster::PersistentCookieStore {
   }
 
  private:
+  virtual ~FlushablePersistentStore() {}
+
   volatile int flush_count_;
 };
 
@@ -2220,6 +2253,8 @@ class CallbackCounter : public base::RefCountedThreadSafe<CallbackCounter> {
 
  private:
   friend class base::RefCountedThreadSafe<CallbackCounter>;
+  ~CallbackCounter() {}
+
   volatile int callback_count_;
 };
 

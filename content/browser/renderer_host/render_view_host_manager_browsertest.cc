@@ -10,12 +10,13 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/site_instance_impl.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host_observer.h"
 #include "content/public/common/url_constants.h"
 #include "net/base/net_util.h"
@@ -67,9 +68,8 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest, NoScriptAccessAfterSwapOut) {
   EXPECT_TRUE(orig_site_instance != NULL);
 
   // Open a same-site link in a new tab.
-  ui_test_utils::WindowedNotificationObserver new_tab_observer(
-      content::NOTIFICATION_TAB_ADDED,
-      content::Source<content::WebContentsDelegate>(browser()));
+  ui_test_utils::WindowedTabAddedNotificationObserver new_tab_observer((
+      content::Source<content::WebContentsDelegate>(browser())));
   bool success = false;
   EXPECT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
       browser()->GetSelectedWebContents()->GetRenderViewHost(), L"",
@@ -166,9 +166,9 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
 
   // Wait for the cross-site transition in the new tab to finish.
   ui_test_utils::WaitForLoadStop(browser()->GetSelectedWebContents());
-  TabContents* tab_contents = static_cast<TabContents*>(
+  WebContentsImpl* web_contents = static_cast<WebContentsImpl*>(
       browser()->GetSelectedWebContents());
-  EXPECT_FALSE(tab_contents->GetRenderManagerForTesting()->
+  EXPECT_FALSE(web_contents->GetRenderManagerForTesting()->
       pending_render_view_host());
 
   // Should have a new SiteInstance.
@@ -224,9 +224,9 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
 
   // Wait for the cross-site transition in the new tab to finish.
   ui_test_utils::WaitForLoadStop(browser()->GetSelectedWebContents());
-  TabContents* tab_contents = static_cast<TabContents*>(
+  WebContentsImpl* web_contents = static_cast<WebContentsImpl*>(
       browser()->GetSelectedWebContents());
-  EXPECT_FALSE(tab_contents->GetRenderManagerForTesting()->
+  EXPECT_FALSE(web_contents->GetRenderManagerForTesting()->
       pending_render_view_host());
 
   // Should have a new SiteInstance (in a new BrowsingInstance).
@@ -364,9 +364,8 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
   EXPECT_TRUE(orig_site_instance != NULL);
 
   // Test clicking a target=foo link.
-  ui_test_utils::WindowedNotificationObserver new_tab_observer(
-      content::NOTIFICATION_TAB_ADDED,
-      content::Source<content::WebContentsDelegate>(browser()));
+  ui_test_utils::WindowedTabAddedNotificationObserver new_tab_observer((
+      content::Source<content::WebContentsDelegate>(browser())));
   bool success = false;
   EXPECT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
       browser()->GetSelectedWebContents()->GetRenderViewHost(), L"",
@@ -391,7 +390,6 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
   EXPECT_EQ(orig_site_instance, blank_site_instance);
 
   // Now navigate the new tab to a different site.
-  //browser()->ActivateTabAt(1, true);
   content::WebContents* new_contents = browser()->GetSelectedWebContents();
   ui_test_utils::NavigateToURL(browser(),
                                https_server.GetURL("files/title1.html"));
@@ -417,6 +415,23 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
   scoped_refptr<SiteInstance> revisit_site_instance(
       browser()->GetSelectedWebContents()->GetSiteInstance());
   EXPECT_EQ(orig_site_instance, revisit_site_instance);
+
+  // If it navigates away to another process, the original window should
+  // still be able to close it (using a cross-process close message).
+  ui_test_utils::NavigateToURL(browser(),
+                               https_server.GetURL("files/title1.html"));
+  EXPECT_EQ(new_site_instance,
+            browser()->GetSelectedWebContents()->GetSiteInstance());
+  browser()->ActivateTabAt(0, true);
+  ui_test_utils::WindowedNotificationObserver close_observer(
+        content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
+        content::Source<content::WebContents>(new_contents));
+  EXPECT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
+      browser()->GetSelectedWebContents()->GetRenderViewHost(), L"",
+      L"window.domAutomationController.send(testCloseWindow());",
+      &success));
+  EXPECT_TRUE(success);
+  close_observer.Wait();
 }
 
 // Test for crbug.com/116192.  Navigations to a window's opener should
@@ -447,9 +462,8 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
   EXPECT_TRUE(orig_site_instance != NULL);
 
   // Test clicking a target=foo link.
-  ui_test_utils::WindowedNotificationObserver new_tab_observer(
-      content::NOTIFICATION_TAB_ADDED,
-      content::Source<content::WebContentsDelegate>(browser()));
+  ui_test_utils::WindowedTabAddedNotificationObserver new_tab_observer((
+      content::Source<content::WebContentsDelegate>(browser())));
   bool success = false;
   EXPECT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
       browser()->GetSelectedWebContents()->GetRenderViewHost(), L"",
@@ -502,6 +516,85 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
   scoped_refptr<SiteInstance> revisit_site_instance(
       browser()->GetSelectedWebContents()->GetSiteInstance());
   EXPECT_EQ(orig_site_instance, revisit_site_instance);
+}
+
+// Test that opening a new window in the same SiteInstance and then navigating
+// both windows to a different SiteInstance allows the first process to exit.
+// See http://crbug.com/126333.
+IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
+                       ProcessExitWithSwappedOutViews) {
+  // Start two servers with different sites.
+  ASSERT_TRUE(test_server()->Start());
+  net::TestServer https_server(
+      net::TestServer::TYPE_HTTPS,
+      net::TestServer::kLocalhost,
+      FilePath(FILE_PATH_LITERAL("chrome/test/data")));
+  ASSERT_TRUE(https_server.Start());
+
+  // Load a page with links that open in a new window.
+  std::string replacement_path;
+  ASSERT_TRUE(GetFilePathWithHostAndPortReplacement(
+      "files/click-noreferrer-links.html",
+      https_server.host_port_pair(),
+      &replacement_path));
+  ui_test_utils::NavigateToURL(browser(),
+                               test_server()->GetURL(replacement_path));
+
+  // Get the original SiteInstance for later comparison.
+  scoped_refptr<SiteInstance> orig_site_instance(
+      browser()->GetSelectedWebContents()->GetSiteInstance());
+  EXPECT_TRUE(orig_site_instance != NULL);
+
+  // Test clicking a target=foo link.
+  ui_test_utils::WindowedTabAddedNotificationObserver new_tab_observer((
+      content::Source<content::WebContentsDelegate>(browser())));
+  bool success = false;
+  EXPECT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
+      browser()->GetSelectedWebContents()->GetRenderViewHost(), L"",
+      L"window.domAutomationController.send(clickSameSiteTargetedLink());",
+      &success));
+  EXPECT_TRUE(success);
+  new_tab_observer.Wait();
+
+  // Opens in new tab.
+  EXPECT_EQ(2, browser()->tab_count());
+  EXPECT_EQ(1, browser()->active_index());
+
+  // Wait for the navigation in the new tab to finish, if it hasn't.
+  ui_test_utils::WaitForLoadStop(browser()->GetSelectedWebContents());
+  EXPECT_EQ("/files/navigate_opener.html",
+            browser()->GetSelectedWebContents()->GetURL().path());
+  EXPECT_EQ(1, browser()->active_index());
+
+  // Should have the same SiteInstance.
+  scoped_refptr<SiteInstance> opened_site_instance(
+      browser()->GetSelectedWebContents()->GetSiteInstance());
+  EXPECT_EQ(orig_site_instance, opened_site_instance);
+
+  // Now navigate the opened tab to a different site.
+  ui_test_utils::NavigateToURL(browser(),
+                               https_server.GetURL("files/title1.html"));
+  scoped_refptr<SiteInstance> new_site_instance(
+      browser()->GetSelectedWebContents()->GetSiteInstance());
+  EXPECT_NE(orig_site_instance, new_site_instance);
+
+  // The original process should still be alive, since it is still used in the
+  // first tab.
+  content::RenderProcessHost* orig_process = orig_site_instance->GetProcess();
+  EXPECT_TRUE(orig_process->HasConnection());
+
+  // Navigate the first tab to a different site as well.  The original process
+  // should exit, since all of its views are now swapped out.
+  browser()->ActivateTabAt(0, true);
+  ui_test_utils::WindowedNotificationObserver exit_observer(
+        content::NOTIFICATION_RENDERER_PROCESS_TERMINATED,
+        content::Source<content::RenderProcessHost>(orig_process));
+  ui_test_utils::NavigateToURL(browser(),
+                               https_server.GetURL("files/title1.html"));
+  exit_observer.Wait();
+  scoped_refptr<SiteInstance> new_site_instance2(
+      browser()->GetSelectedWebContents()->GetSiteInstance());
+  EXPECT_EQ(new_site_instance, new_site_instance2);
 }
 
 // Test for crbug.com/76666.  A cross-site navigation that fails with a 204
@@ -750,9 +843,12 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest, LeakingRenderViewHosts) {
   AddBlankTabAndShow(browser());
 
   // Load a random page and then navigate to view-source: of it.
-  // This is one way to cause two rvh instances for the same instance id.
+  // This used to cause two RVH instances for the same SiteInstance, which
+  // was a problem.  This is no longer the case.
   GURL navigated_url(test_server()->GetURL("files/title2.html"));
   ui_test_utils::NavigateToURL(browser(), navigated_url);
+  SiteInstance* site_instance1 = browser()->GetSelectedWebContents()->
+      GetRenderViewHost()->GetSiteInstance();
 
   // Observe the newly created render_view_host to make sure it will not leak.
   RenderViewHostObserverArray rvh_observers;
@@ -764,6 +860,11 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest, LeakingRenderViewHosts) {
   ui_test_utils::NavigateToURL(browser(), view_source_url);
   rvh_observers.AddObserverToRVH(browser()->GetSelectedWebContents()->
       GetRenderViewHost());
+  SiteInstance* site_instance2 = browser()->GetSelectedWebContents()->
+      GetRenderViewHost()->GetSiteInstance();
+
+  // Ensure that view-source navigations force a new SiteInstance.
+  EXPECT_NE(site_instance1, site_instance2);
 
   // Now navigate to a different instance so that we swap out again.
   ui_test_utils::NavigateToURL(browser(),

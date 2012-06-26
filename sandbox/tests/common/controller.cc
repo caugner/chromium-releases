@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,8 @@
 
 #include <string>
 
+#include "base/process.h"
+#include "base/process_util.h"
 #include "base/sys_string_conversions.h"
 #include "base/win/windows_version.h"
 #include "sandbox/src/sandbox_factory.h"
@@ -51,6 +53,13 @@ std::wstring MakePathToSysWow64(const wchar_t* name, bool is_obj_man_path) {
   return full_path;
 }
 
+bool IsProcessRunning(HANDLE process) {
+  DWORD exit_code = 0;
+  if (::GetExitCodeProcess(process, &exit_code))
+    return exit_code == STILL_ACTIVE;
+  return false;
+}
+
 }  // namespace
 
 namespace sandbox {
@@ -81,11 +90,15 @@ BrokerServices* GetBroker() {
 }
 
 TestRunner::TestRunner(JobLevel job_level, TokenLevel startup_token,
-                       TokenLevel main_token) : is_init_(false) {
+                       TokenLevel main_token)
+    : is_init_(false), is_async_(false), no_sandbox_(false),
+      target_process_id_(0) {
   Init(job_level, startup_token, main_token);
 }
 
-TestRunner::TestRunner() : is_init_(false) {
+TestRunner::TestRunner()
+    : is_init_(false), is_async_(false), no_sandbox_(false),
+      target_process_id_(0) {
   Init(JOB_LOCKDOWN, USER_RESTRICTED_SAME_ACCESS, USER_LOCKDOWN);
 }
 
@@ -95,6 +108,8 @@ void TestRunner::Init(JobLevel job_level, TokenLevel startup_token,
   policy_ = NULL;
   timeout_ = kDefaultTimeout;
   state_ = AFTER_REVERT;
+  is_async_= false;
+  target_process_id_ = 0;
 
   broker_ = GetBroker();
   if (!broker_)
@@ -115,6 +130,9 @@ TargetPolicy* TestRunner::GetPolicy() {
 }
 
 TestRunner::~TestRunner() {
+  if (target_process_)
+    ::TerminateProcess(target_process_, 0);
+
   if (policy_)
     policy_->Release();
 }
@@ -177,6 +195,14 @@ int TestRunner::InternalRunTest(const wchar_t* command) {
   if (!is_init_)
     return SBOX_TEST_FAILED_TO_RUN_TEST;
 
+  // For simplicity TestRunner supports only one process per instance.
+  if (target_process_) {
+    if (IsProcessRunning(target_process_))
+      return SBOX_TEST_FAILED_TO_RUN_TEST;
+    target_process_.Close();
+    target_process_id_ = 0;
+  }
+
   // Get the path to the sandboxed process.
   wchar_t prog_name[MAX_PATH];
   GetModuleFileNameW(NULL, prog_name, MAX_PATH);
@@ -187,16 +213,34 @@ int TestRunner::InternalRunTest(const wchar_t* command) {
 
   std::wstring arguments(L"\"");
   arguments += prog_name;
-  arguments += L"\" -child ";
+  arguments += L"\" -child";
+  arguments += no_sandbox_ ? L"-no-sandbox " : L" ";
   arguments += command;
 
-  result = broker_->SpawnTarget(prog_name, arguments.c_str(), policy_,
-                                &target);
+  if (no_sandbox_) {
+    STARTUPINFO startup_info = {sizeof(STARTUPINFO)};
+    if (!::CreateProcessW(prog_name, &arguments[0], NULL, NULL, FALSE, 0,
+                          NULL, NULL, &startup_info, &target)) {
+      return SBOX_ERROR_GENERIC;
+    }
+    broker_->AddTargetPeer(target.hProcess);
+  } else {
+    result = broker_->SpawnTarget(prog_name, arguments.c_str(), policy_,
+                                  &target);
+  }
 
   if (SBOX_ALL_OK != result)
     return SBOX_TEST_FAILED_TO_RUN_TEST;
 
   ::ResumeThread(target.hThread);
+
+  // For an asynchronous run we don't bother waiting.
+  if (is_async_) {
+    target_process_.Set(target.hProcess);
+    target_process_id_ = target.dwProcessId;
+    ::CloseHandle(target.hThread);
+    return SBOX_TEST_SUCCEEDED;
+  }
 
   if (::IsDebuggerPresent()) {
     // Don't kill the target process on a time-out while we are debugging.
@@ -274,18 +318,20 @@ int DispatchCall(int argc, wchar_t **argv) {
     command(argc - 4, argv + 4);
 
   TargetServices* target = SandboxFactory::GetTargetServices();
-  if (!target)
+  if (target) {
+    if (SBOX_ALL_OK != target->Init())
+      return SBOX_TEST_FAILED_TO_EXECUTE_COMMAND;
+
+    if (BEFORE_REVERT == state)
+      return command(argc - 4, argv + 4);
+    else if (EVERY_STATE == state)
+      command(argc - 4, argv + 4);
+
+    target->LowerToken();
+  } else if (0 != _wcsicmp(argv[1], L"-child-no-sandbox")) {
     return SBOX_TEST_FAILED_TO_EXECUTE_COMMAND;
+  }
 
-  if (SBOX_ALL_OK != target->Init())
-    return SBOX_TEST_FAILED_TO_EXECUTE_COMMAND;
-
-  if (BEFORE_REVERT == state)
-    return command(argc - 4, argv + 4);
-  else if (EVERY_STATE == state)
-    command(argc - 4, argv + 4);
-
-  target->LowerToken();
   return command(argc - 4, argv + 4);
 }
 

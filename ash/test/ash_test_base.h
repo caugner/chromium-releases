@@ -19,9 +19,15 @@ class AshTestBase : public testing::Test {
   AshTestBase();
   virtual ~AshTestBase();
 
+  MessageLoopForUI* message_loop() { return helper_.message_loop(); }
+
   // testing::Test:
   virtual void SetUp() OVERRIDE;
   virtual void TearDown() OVERRIDE;
+
+  // Change the primary monitor's configuration to use |bounds|
+  // and |scale|.
+  void ChangeMonitorConfig(float scale, const gfx::Rect& bounds);
 
  protected:
   void RunAllPendingInMessageLoop();

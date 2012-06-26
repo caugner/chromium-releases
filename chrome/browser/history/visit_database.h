@@ -172,6 +172,12 @@ class VisitDatabase {
   void GetVisitsSource(const VisitVector& visits,
                        VisitSourceMap* sources);
 
+  // Obtains BriefVisitInfo for the specified number of most recent visits
+  // from the visit database.
+  void GetBriefVisitInfoOfMostRecentVisits(
+      int max_visits,
+      std::vector<BriefVisitInfo>* result_vector);
+
  protected:
   // Returns the database for the functions in this interface.
   virtual sql::Connection& GetDB() = 0;
@@ -187,6 +193,10 @@ class VisitDatabase {
   // Convenience to fill a VisitVector. Assumes that statement.step()
   // hasn't happened yet.
   static bool FillVisitVector(sql::Statement& statement, VisitVector* visits);
+
+  // Called by the derived classes to migrate the older visits table which
+  // don't have visit_duration column yet.
+  bool MigrateVisitsWithoutDuration();
 
  private:
 

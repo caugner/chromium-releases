@@ -79,41 +79,21 @@ WebContents* GetWebContentsFromDelegate(LocationBarView::Delegate* delegate) {
 
 // A utility function to cast OmniboxView to OmniboxViewViews.
 OmniboxViewViews* AsViews(OmniboxView* view) {
-  DCHECK(views::Widget::IsPureViews());
   return static_cast<OmniboxViewViews*>(view);
 }
 
 // Height of the location bar's round corner region.
-// TODO(jamescook): Update all Chrome platforms to use the new art and metrics
-// from Ash, crbug.com/118228
-#if defined(USE_ASH)
 const int kBorderRoundCornerHeight = 5;
-#else
-const int kBorderRoundCornerHeight = 6;
-#endif
-
 // Width of location bar's round corner region.
-#if defined(USE_ASH)
 const int kBorderRoundCornerWidth = 4;
-#else
-const int kBorderRoundCornerWidth = 5;
-#endif
-
 // Radius of the round corners inside the location bar.
-#if defined(USE_ASH)
 const int kBorderCornerRadius = 2;
-#endif
 
 }  // namespace
 
 // static
-#if defined(USE_ASH)
 const int LocationBarView::kNormalHorizontalEdgeThickness = 2;
 const int LocationBarView::kVerticalEdgeThickness = 3;
-#else
-const int LocationBarView::kNormalHorizontalEdgeThickness = 1;
-const int LocationBarView::kVerticalEdgeThickness = 2;
-#endif  // defined(USE_ASH)
 const int LocationBarView::kItemPadding = 3;
 const int LocationBarView::kIconInternalPadding = 2;
 const int LocationBarView::kEdgeItemPadding = kItemPadding;
@@ -167,7 +147,7 @@ LocationBarView::LocationBarView(Profile* profile,
   if (mode_ == NORMAL) {
     painter_.reset(
         views::Painter::CreateImagePainter(
-            *ResourceBundle::GetSharedInstance().GetImageNamed(
+            *ui::ResourceBundle::GetSharedInstance().GetImageNamed(
                 IDR_LOCATION_BAR_BORDER).ToSkBitmap(),
             gfx::Insets(kBorderRoundCornerHeight, kBorderRoundCornerWidth,
                 kBorderRoundCornerHeight, kBorderRoundCornerWidth),
@@ -184,13 +164,12 @@ LocationBarView::~LocationBarView() {
 }
 
 void LocationBarView::Init() {
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   if (mode_ == POPUP) {
-    font_ = ResourceBundle::GetSharedInstance().GetFont(
-        ResourceBundle::BaseFont);
+    font_ = rb.GetFont(ui::ResourceBundle::BaseFont);
   } else {
     // Use a larger version of the system font.
-    font_ = ResourceBundle::GetSharedInstance().GetFont(
-        ResourceBundle::MediumFont);
+    font_ = rb.GetFont(ui::ResourceBundle::MediumFont);
   }
 
   // If this makes the font too big, try to make it smaller so it will fit.
@@ -260,7 +239,7 @@ void LocationBarView::Init() {
       ChromeToMobileService* service =
           ChromeToMobileServiceFactory::GetForProfile(profile_);
       service->RequestMobileListUpdate();
-      chrome_to_mobile_view_->SetVisible(!service->mobiles().empty());
+      chrome_to_mobile_view_->SetVisible(service->HasDevices());
     }
   }
 
@@ -340,11 +319,9 @@ void LocationBarView::Update(const WebContents* tab_for_state_restoring) {
   if (star_view_)
     star_view_->SetVisible(star_enabled);
 
-  bool chrome_to_mobile_enabled = chrome_to_mobile_view_ &&
-      !model_->input_in_progress() && profile_->IsSyncAccessible() &&
-      !ChromeToMobileServiceFactory::GetForProfile(profile_)->mobiles().empty();
-  command_updater_->UpdateCommandEnabled(IDC_CHROME_TO_MOBILE_PAGE,
-                                         chrome_to_mobile_enabled);
+  bool enabled = chrome_to_mobile_view_ && !model_->input_in_progress() &&
+      ChromeToMobileServiceFactory::GetForProfile(profile_)->HasDevices();
+  command_updater_->UpdateCommandEnabled(IDC_CHROME_TO_MOBILE_PAGE, enabled);
 
   RefreshContentSettingViews();
   RefreshPageActionViews();
@@ -443,10 +420,7 @@ void LocationBarView::ShowStarBubble(const GURL& url, bool newly_bookmarked) {
 }
 
 void LocationBarView::ShowChromeToMobileBubble() {
-  ChromeToMobileServiceFactory::GetForProfile(profile_)->
-      RequestMobileListUpdate();
-  browser::ShowChromeToMobileBubbleView(chrome_to_mobile_view_,
-                                        profile_);
+  browser::ShowChromeToMobileBubbleView(chrome_to_mobile_view_, profile_);
 }
 
 gfx::Point LocationBarView::GetLocationEntryOrigin() const {
@@ -468,11 +442,10 @@ void LocationBarView::SetInstantSuggestion(const string16& text,
     if (!suggested_text_view_) {
       suggested_text_view_ = new SuggestedTextView(location_entry_->model());
       suggested_text_view_->SetText(text);
-      if (views::Widget::IsPureViews())
-        NOTIMPLEMENTED();
-#if !defined(USE_AURA)
-      else
-        suggested_text_view_->SetFont(GetOmniboxViewWin()->GetFont());
+#if defined(USE_AURA)
+      NOTIMPLEMENTED();
+#else
+      suggested_text_view_->SetFont(GetOmniboxViewWin()->GetFont());
 #endif
       AddChildView(suggested_text_view_);
     } else if (suggested_text_view_->text() != text) {
@@ -497,16 +470,19 @@ string16 LocationBarView::GetInstantSuggestion() const {
 #endif
 
 void LocationBarView::SetLocationEntryFocusable(bool focusable) {
-  if (views::Widget::IsPureViews())
+#if defined(USE_AURA)
     AsViews(location_entry_.get())->SetLocationEntryFocusable(focusable);
-  else
+#else
     set_focusable(focusable);
+#endif
 }
 
 bool LocationBarView::IsLocationEntryFocusableInRootView() const {
-  return views::Widget::IsPureViews() ?
-      AsViews(location_entry_.get())->IsLocationEntryFocusableInRootView() :
-      views::View::IsFocusable();
+#if defined(USE_AURA)
+  return AsViews(location_entry_.get())->IsLocationEntryFocusableInRootView();
+#else
+  return views::View::IsFocusable();
+#endif
 }
 
 gfx::Size LocationBarView::GetPreferredSize() {
@@ -624,8 +600,9 @@ void LocationBarView::Layout() {
         selected_keyword_view_->SetImage(bitmap);
         selected_keyword_view_->set_is_extension_icon(true);
       } else {
-        selected_keyword_view_->SetImage(*ResourceBundle::GetSharedInstance().
-            GetBitmapNamed(IDR_OMNIBOX_SEARCH));
+        ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+        selected_keyword_view_->SetImage(
+            *rb.GetBitmapNamed(IDR_OMNIBOX_SEARCH));
         selected_keyword_view_->set_is_extension_icon(false);
       }
     }
@@ -727,30 +704,28 @@ void LocationBarView::Layout() {
   // keyword hints and suggested text is minimal and we're not confident this
   // is the right approach for suggested text.
   if (suggested_text_view_) {
-    if (views::Widget::IsPureViews()) {
-      NOTIMPLEMENTED();
+#if defined(USE_AURA)
+    NOTIMPLEMENTED();
+#else
+    // TODO(sky): need to layout when the user changes caret position.
+    int suggested_text_width =
+        suggested_text_view_->GetPreferredSize().width();
+    int vis_text_width = GetOmniboxViewWin()->WidthOfTextAfterCursor();
+    if (vis_text_width + suggested_text_width > entry_width) {
+      // Hide the suggested text if the user has scrolled or we can't fit all
+      // the suggested text.
+      suggested_text_view_->SetBounds(0, 0, 0, 0);
     } else {
-#if !defined(USE_AURA)
-      // TODO(sky): need to layout when the user changes caret position.
-      int suggested_text_width =
-          suggested_text_view_->GetPreferredSize().width();
-      int vis_text_width = GetOmniboxViewWin()->WidthOfTextAfterCursor();
-      if (vis_text_width + suggested_text_width > entry_width) {
-        // Hide the suggested text if the user has scrolled or we can't fit all
-        // the suggested text.
-        suggested_text_view_->SetBounds(0, 0, 0, 0);
-      } else {
-        int location_needed_width = location_entry_->TextWidth();
-        location_bounds.set_width(std::min(location_needed_width,
-                                           entry_width - suggested_text_width));
-        // TODO(sky): figure out why this needs the -1.
-        suggested_text_view_->SetBounds(location_bounds.right() - 1,
-                                        location_bounds.y(),
-                                        suggested_text_width,
-                                        location_bounds.height());
-      }
-#endif
+      int location_needed_width = location_entry_->TextWidth();
+      location_bounds.set_width(std::min(location_needed_width,
+                                         entry_width - suggested_text_width));
+      // TODO(sky): figure out why this needs the -1.
+      suggested_text_view_->SetBounds(location_bounds.right() - 1,
+                                      location_bounds.y(),
+                                      suggested_text_width,
+                                      location_bounds.height());
     }
+#endif
   }
 #endif
 
@@ -784,15 +759,9 @@ void LocationBarView::OnPaint(gfx::Canvas* canvas) {
     paint.setColor(color);
     paint.setStyle(SkPaint::kFill_Style);
     paint.setAntiAlias(true);
-#if defined(USE_ASH)
-    // On Ash the omnibox uses smaller corners.
+    // TODO(jamescook): Make the corners of the dropdown match the corners of
+    // the omnibox.
     const SkScalar radius(SkIntToScalar(kBorderCornerRadius));
-#else
-    // The round corners of the omnibox match the round corners of the dropdown
-    // below, and all our other bubbles.
-    const SkScalar radius(SkIntToScalar(
-        views::BubbleBorder::GetCornerRadius()));
-#endif
     bounds.Inset(kNormalHorizontalEdgeThickness, 0);
     canvas->sk_canvas()->drawRoundRect(gfx::RectToSkRect(bounds), radius,
                                        radius, paint);
@@ -802,6 +771,7 @@ void LocationBarView::OnPaint(gfx::Canvas* canvas) {
 
   if (show_focus_rect_ && HasFocus()) {
     gfx::Rect r = location_entry_view_->bounds();
+    // TODO(jamescook): Is this still needed?
 #if defined(OS_WIN)
     r.Inset(-1,  -1);
 #else
@@ -861,10 +831,7 @@ void LocationBarView::OnMouseReleased(const views::MouseEvent& event) {
 }
 
 void LocationBarView::OnMouseCaptureLost() {
-  if (views::Widget::IsPureViews())
-    NOTIMPLEMENTED();
-  else
-    GetOmniboxViewWin()->HandleExternalMsg(WM_CAPTURECHANGED, 0, CPoint());
+  GetOmniboxViewWin()->HandleExternalMsg(WM_CAPTURECHANGED, 0, CPoint());
 }
 #endif
 
@@ -906,7 +873,7 @@ void LocationBarView::OnAutocompleteAccept(
 
 void LocationBarView::OnChanged() {
   location_icon_view_->SetImage(
-      ResourceBundle::GetSharedInstance().GetBitmapNamed(
+      ui::ResourceBundle::GetSharedInstance().GetBitmapNamed(
           location_entry_->GetIcon()));
   location_icon_view_->ShowTooltip(!location_entry()->IsEditingOrEmpty());
 
@@ -1063,10 +1030,7 @@ void LocationBarView::OnMouseEvent(const views::MouseEvent& event, UINT msg) {
   UINT flags = event.native_event().wParam;
   gfx::Point screen_point(event.location());
   ConvertPointToScreen(this, &screen_point);
-  if (views::Widget::IsPureViews())
-    NOTIMPLEMENTED();
-  else
-    GetOmniboxViewWin()->HandleExternalMsg(msg, flags, screen_point.ToPOINT());
+  GetOmniboxViewWin()->HandleExternalMsg(msg, flags, screen_point.ToPOINT());
 }
 #endif
 
@@ -1101,12 +1065,13 @@ bool LocationBarView::SkipDefaultKeyEventProcessing(
       return true;
   }
 
-#if !defined(USE_AURA)
-  if (!views::Widget::IsPureViews())
-    return GetOmniboxViewWin()->SkipDefaultKeyEventProcessing(event);
-#endif
+#if defined(USE_AURA)
   NOTIMPLEMENTED();
   return false;
+#else
+  return GetOmniboxViewWin()->SkipDefaultKeyEventProcessing(event);
+#endif
+
 #else
   // This method is not used for Linux ports. See FocusManager::OnKeyEvent() in
   // src/ui/views/focus/focus_manager.cc for details.
@@ -1267,8 +1232,7 @@ void LocationBarView::TestPageActionPressed(size_t index) {
     if (page_action_views_[i]->visible()) {
       if (current == index) {
         const int kLeftMouseButton = 1;
-        page_action_views_[i]->image_view()->ExecuteAction(kLeftMouseButton,
-            false);  // inspect_with_devtools
+        page_action_views_[i]->image_view()->ExecuteAction(kLeftMouseButton);
         return;
       }
       ++current;
@@ -1305,7 +1269,6 @@ bool LocationBarView::HasValidSuggestText() const {
 
 #if !defined(USE_AURA)
 OmniboxViewWin* LocationBarView::GetOmniboxViewWin() {
-  CHECK(!views::Widget::IsPureViews());
   return static_cast<OmniboxViewWin*>(location_entry_.get());
 }
 #endif

@@ -32,8 +32,6 @@ namespace fileapi {
 
 // TODO(ericu): Safe mode, which does more checks such as the above on debug
 // builds.
-// TODO(ericu): FSCK, for a full-database check [data file validation possibly
-// done elsewhere].
 // TODO(ericu): Add a method that will give a unique filename for a data file.
 class FileSystemDirectoryDatabase {
  public:
@@ -56,7 +54,8 @@ class FileSystemDirectoryDatabase {
     base::Time modification_time;
   };
 
-  explicit FileSystemDirectoryDatabase(const FilePath& path);
+  explicit FileSystemDirectoryDatabase(
+      const FilePath& filesystem_data_directory);
   ~FileSystemDirectoryDatabase();
 
   bool GetChildWithName(
@@ -85,10 +84,22 @@ class FileSystemDirectoryDatabase {
   // creation/destruction of FileSystemDirectoryDatabase objects.
   bool GetNextInteger(int64* next);
 
+  // Returns true if the database looks consistent with local filesystem.
+  bool IsFileSystemConsistent();
+
   static bool DestroyDatabase(const FilePath& path);
 
  private:
-  bool Init();
+  enum RecoveryOption {
+    DELETE_ON_CORRUPTION,
+    REPAIR_ON_CORRUPTION,
+    FAIL_ON_CORRUPTION,
+  };
+
+  friend class FileSystemDirectoryDatabaseTest;
+
+  bool Init(RecoveryOption recovery_option);
+  bool RepairDatabase(const std::string& db_path);
   void ReportInitStatus(const leveldb::Status& status);
   bool StoreDefaultValues();
   bool GetLastFileId(FileId* file_id);
@@ -99,7 +110,7 @@ class FileSystemDirectoryDatabase {
   void HandleError(const tracked_objects::Location& from_here,
                    const leveldb::Status& status);
 
-  std::string path_;
+  FilePath filesystem_data_directory_;
   scoped_ptr<leveldb::DB> db_;
   base::Time last_reported_time_;
   DISALLOW_COPY_AND_ASSIGN(FileSystemDirectoryDatabase);

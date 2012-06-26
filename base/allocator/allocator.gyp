@@ -100,6 +100,8 @@
         '<(tcmalloc_dir)/src/common.cc',
         '<(tcmalloc_dir)/src/common.h',
         '<(tcmalloc_dir)/src/debugallocation.cc',
+        '<(tcmalloc_dir)/src/deep-heap-profile.cc',
+        '<(tcmalloc_dir)/src/deep-heap-profile.h',
         '<(tcmalloc_dir)/src/free_list.cc',
         '<(tcmalloc_dir)/src/free_list.h',
         '<(tcmalloc_dir)/src/getpc.h',
@@ -327,6 +329,8 @@
             # heap-profiler/checker/cpuprofiler
             '<(tcmalloc_dir)/src/base/thread_lister.c',
             '<(tcmalloc_dir)/src/base/thread_lister.h',
+            '<(tcmalloc_dir)/src/deep-heap-profile.cc',
+            '<(tcmalloc_dir)/src/deep-heap-profile.h',
             '<(tcmalloc_dir)/src/heap-checker-bcad.cc',
             '<(tcmalloc_dir)/src/heap-checker.cc',
             '<(tcmalloc_dir)/src/heap-profiler.cc',
@@ -423,7 +427,22 @@
         }],
       ],
     },
+    {
+      # This library is linked in to libbase and allocator_unittests.
+      # It can't depend on either and nothing else should depend on it -
+      # all other code should use the interfaced provided by libbase.
+      'target_name': 'allocator_extension_thunks',
+      'type': 'static_library',
+      'sources': [
+        'allocator_extension_thunks.cc',
+        'allocator_extension_thunks.h',
       ],
+      'toolsets': ['host', 'target'],
+      'include_dirs': [
+        '../../'
+      ],
+    },
+   ],
   'conditions': [
     ['OS=="win"', {
       'targets': [
@@ -452,6 +471,7 @@
           'type': 'executable',
           'dependencies': [
             'allocator',
+            'allocator_extension_thunks',
             '../../testing/gtest.gyp:gtest',
           ],
           'include_dirs': [
@@ -465,6 +485,23 @@
             '../profiler/alternate_timer.cc',
             '../profiler/alternate_timer.h',
           ],
+        },
+        {
+          'target_name': 'allocator_extension_thunks_win64',
+          'type': 'static_library',
+          'sources': [
+            'allocator_extension_thunks.cc',
+            'allocator_extension_thunks.h',
+          ],
+          'toolsets': ['host', 'target'],
+          'include_dirs': [
+            '../../'
+          ],
+          'configurations': {
+            'Common_Base': {
+              'msvs_target_platform': 'x64',
+            },
+          },
         },
       ],
     }],

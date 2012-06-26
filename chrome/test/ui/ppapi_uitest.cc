@@ -444,17 +444,6 @@ TEST_PPAPI_OUT_OF_PROCESS(DISABLED_Broker)
 TEST_PPAPI_IN_PROCESS(Core)
 TEST_PPAPI_OUT_OF_PROCESS(Core)
 
-// Times out on Linux. http://crbug.com/108180
-#if defined(OS_LINUX)
-#define MAYBE_CursorControl DISABLED_CursorControl
-#else
-#define MAYBE_CursorControl CursorControl
-#endif
-
-TEST_PPAPI_IN_PROCESS(MAYBE_CursorControl)
-TEST_PPAPI_OUT_OF_PROCESS(MAYBE_CursorControl)
-TEST_PPAPI_NACL_VIA_HTTP(MAYBE_CursorControl)
-
 // Times out on Linux. http://crbug.com/108859
 #if defined(OS_LINUX)
 #define MAYBE_InputEvent DISABLED_InputEvent
@@ -508,9 +497,11 @@ TEST_PPAPI_OUT_OF_PROCESS_WITH_SSL_SERVER(TCPSocketPrivate)
 TEST_PPAPI_IN_PROCESS_WITH_SSL_SERVER(TCPSocketPrivate)
 TEST_PPAPI_NACL_WITH_SSL_SERVER(TCPSocketPrivate)
 
+TEST_PPAPI_OUT_OF_PROCESS_WITH_SSL_SERVER(TCPSocketPrivateTrusted)
+TEST_PPAPI_IN_PROCESS_WITH_SSL_SERVER(TCPSocketPrivateTrusted)
+
 TEST_PPAPI_IN_PROCESS_VIA_HTTP(UDPSocketPrivate)
-// Flaky: http://crbug.com/120470
-TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(DISABLED_UDPSocketPrivate)
+TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(UDPSocketPrivate)
 TEST_PPAPI_NACL_VIA_HTTP(UDPSocketPrivate)
 
 TEST_PPAPI_NACL_VIA_HTTP_DISALLOWED_SOCKETS(TCPServerSocketPrivateDisallowed)
@@ -519,8 +510,7 @@ TEST_PPAPI_NACL_VIA_HTTP_DISALLOWED_SOCKETS(UDPSocketPrivateDisallowed)
 
 TEST_PPAPI_IN_PROCESS_VIA_HTTP(TCPServerSocketPrivate)
 TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(TCPServerSocketPrivate)
-// TODO(ygorshenin): http://crbug.com/116480.
-TEST_PPAPI_NACL_VIA_HTTP(DISABLED_TCPServerSocketPrivate)
+TEST_PPAPI_NACL_VIA_HTTP(TCPServerSocketPrivate)
 
 TEST_PPAPI_IN_PROCESS_VIA_HTTP(HostResolverPrivate_Create)
 TEST_PPAPI_IN_PROCESS_VIA_HTTP(HostResolverPrivate_Resolve)
@@ -528,27 +518,9 @@ TEST_PPAPI_IN_PROCESS_VIA_HTTP(HostResolverPrivate_ResolveIPV4)
 TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(HostResolverPrivate_Create)
 TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(HostResolverPrivate_Resolve)
 TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(HostResolverPrivate_ResolveIPV4)
-
-// Undeterministically can't be found on Windows. http://crbug.com/119260
-#if defined(OS_WIN)
-#define MAYBE_HostResolverPrivate_Create \
-  DISABLED_HostResolverPrivate_Create
-#define MAYBE_HostResolverPrivate_Resolve \
-  DISABLED_HostResolverPrivate_Resolve
-#define MAYBE_HostResolverPrivate_ResolveIPV4 \
-  DISABLED_HostResolverPrivate_ResolveIPV4
-#else
-#define MAYBE_HostResolverPrivate_Create \
-  HostResolverPrivate_Create
-#define MAYBE_HostResolverPrivate_Resolve \
-  HostResolverPrivate_Resolve
-#define MAYBE_HostResolverPrivate_ResolveIPV4 \
-  HostResolverPrivate_ResolveIPV4
-#endif
-
-TEST_PPAPI_NACL_VIA_HTTP(MAYBE_HostResolverPrivate_Create)
-TEST_PPAPI_NACL_VIA_HTTP(MAYBE_HostResolverPrivate_Resolve)
-TEST_PPAPI_NACL_VIA_HTTP(MAYBE_HostResolverPrivate_ResolveIPV4)
+TEST_PPAPI_NACL_VIA_HTTP(HostResolverPrivate_Create)
+TEST_PPAPI_NACL_VIA_HTTP(HostResolverPrivate_Resolve)
+TEST_PPAPI_NACL_VIA_HTTP(HostResolverPrivate_ResolveIPV4)
 
 // URLLoader tests.
 TEST_PPAPI_IN_PROCESS_VIA_HTTP(URLLoader_BasicGET)
@@ -662,8 +634,15 @@ TEST_PPAPI_IN_PROCESS(Var)
 TEST_PPAPI_OUT_OF_PROCESS(Var)
 TEST_PPAPI_NACL_VIA_HTTP(Var)
 
+// Flaky on mac, http://crbug.com/121107
+#if defined(OS_MACOSX)
+#define MAYBE_VarDeprecated DISABLED_VarDeprecated
+#else
+#define MAYBE_VarDeprecated VarDeprecated
+#endif
+
 TEST_PPAPI_IN_PROCESS(VarDeprecated)
-TEST_PPAPI_OUT_OF_PROCESS(VarDeprecated)
+TEST_PPAPI_OUT_OF_PROCESS(MAYBE_VarDeprecated)
 
 // Windows defines 'PostMessage', so we have to undef it.
 #ifdef PostMessage
@@ -682,8 +661,8 @@ TEST_PPAPI_OUT_OF_PROCESS(PostMessage_SendingArrayBuffer)
 TEST_PPAPI_OUT_OF_PROCESS(PostMessage_MessageEvent)
 TEST_PPAPI_OUT_OF_PROCESS(PostMessage_NoHandler)
 TEST_PPAPI_OUT_OF_PROCESS(PostMessage_ExtraParam)
-#if !defined(OS_WIN)
-// Times out on Windows XP and Windows 7: http://crbug.com/95557
+#if !defined(OS_WIN) && !(defined(OS_LINUX) && defined(ARCH_CPU_64_BITS))
+// Times out on Windows XP, Windows 7, and Linux x64: http://crbug.com/95557
 TEST_PPAPI_OUT_OF_PROCESS(PostMessage_NonMainThread)
 #endif
 TEST_PPAPI_NACL_VIA_HTTP(PostMessage_SendInInit)
@@ -742,9 +721,16 @@ TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(MAYBE_FileIO_ReadWriteSetLength)
 TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(MAYBE_FileIO_TouchQuery)
 TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(MAYBE_FileIO_WillWriteWillSetLength)
 
+// PPAPINaclTest.FileIO_ParallelReads is flaky on Mac. http://crbug.com/121104
+#if defined(OS_MACOSX)
+#define MAYBE_FileIO_ParallelReads DISABLED_FileIO_ParallelReads
+#else
+#define MAYBE_FileIO_ParallelReads FileIO_ParallelReads
+#endif
+
 TEST_PPAPI_NACL_VIA_HTTP(FileIO_Open)
 TEST_PPAPI_NACL_VIA_HTTP(FileIO_AbortCalls)
-TEST_PPAPI_NACL_VIA_HTTP(FileIO_ParallelReads)
+TEST_PPAPI_NACL_VIA_HTTP(MAYBE_FileIO_ParallelReads)
 TEST_PPAPI_NACL_VIA_HTTP(FileIO_ParallelWrites)
 TEST_PPAPI_NACL_VIA_HTTP(FileIO_NotAllowMixedReadWrite)
 TEST_PPAPI_NACL_VIA_HTTP(MAYBE_FileIO_TouchQuery)
@@ -781,11 +767,17 @@ IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, MAYBE_OutOfProcessFlashFullscreen)
   RunTestViaHTTP("FlashFullscreen");
 }
 
+//Disabling for official tests
+#if !defined(OS_LINUX)
 TEST_PPAPI_IN_PROCESS_VIA_HTTP(Fullscreen)
+#endif
 TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(Fullscreen)
 
 TEST_PPAPI_IN_PROCESS(FlashClipboard)
 TEST_PPAPI_OUT_OF_PROCESS(FlashClipboard)
+
+TEST_PPAPI_IN_PROCESS(X509CertificatePrivate)
+TEST_PPAPI_OUT_OF_PROCESS(X509CertificatePrivate)
 
 // http://crbug.com/63239
 #if defined(OS_POSIX)
@@ -877,11 +869,13 @@ TEST_PPAPI_IN_PROCESS(Flash_GetProxyForURL)
 TEST_PPAPI_IN_PROCESS(Flash_MessageLoop)
 TEST_PPAPI_IN_PROCESS(Flash_GetLocalTimeZoneOffset)
 TEST_PPAPI_IN_PROCESS(Flash_GetCommandLineArgs)
+TEST_PPAPI_IN_PROCESS(Flash_GetDeviceID)
 TEST_PPAPI_OUT_OF_PROCESS(Flash_SetInstanceAlwaysOnTop)
 TEST_PPAPI_OUT_OF_PROCESS(Flash_GetProxyForURL)
 TEST_PPAPI_OUT_OF_PROCESS(Flash_MessageLoop)
 TEST_PPAPI_OUT_OF_PROCESS(Flash_GetLocalTimeZoneOffset)
 TEST_PPAPI_OUT_OF_PROCESS(Flash_GetCommandLineArgs)
+TEST_PPAPI_OUT_OF_PROCESS(Flash_GetDeviceID)
 
 TEST_PPAPI_IN_PROCESS(WebSocket_IsWebSocket)
 TEST_PPAPI_IN_PROCESS(WebSocket_UninitializedPropertiesAccess)
@@ -896,6 +890,7 @@ TEST_PPAPI_IN_PROCESS_WITH_WS(WebSocket_TextSendReceive)
 TEST_PPAPI_IN_PROCESS_WITH_WS(WebSocket_BinarySendReceive)
 TEST_PPAPI_IN_PROCESS_WITH_WS(WebSocket_StressedSendReceive)
 TEST_PPAPI_IN_PROCESS_WITH_WS(WebSocket_BufferedAmount)
+TEST_PPAPI_IN_PROCESS_WITH_WS(WebSocket_AbortCalls)
 TEST_PPAPI_IN_PROCESS_WITH_WS(WebSocket_CcInterfaces)
 TEST_PPAPI_IN_PROCESS(WebSocket_UtilityInvalidConnect)
 TEST_PPAPI_IN_PROCESS(WebSocket_UtilityProtocols)
@@ -920,6 +915,7 @@ TEST_PPAPI_NACL_VIA_HTTP_WITH_WS(WebSocket_TextSendReceive)
 TEST_PPAPI_NACL_VIA_HTTP_WITH_WS(WebSocket_BinarySendReceive)
 TEST_PPAPI_NACL_VIA_HTTP_WITH_WS(WebSocket_StressedSendReceive)
 TEST_PPAPI_NACL_VIA_HTTP_WITH_WS(WebSocket_BufferedAmount)
+TEST_PPAPI_NACL_VIA_HTTP_WITH_WS(WebSocket_AbortCalls)
 TEST_PPAPI_NACL_VIA_HTTP_WITH_WS(WebSocket_CcInterfaces)
 TEST_PPAPI_NACL_VIA_HTTP(WebSocket_UtilityInvalidConnect)
 TEST_PPAPI_NACL_VIA_HTTP(WebSocket_UtilityProtocols)
@@ -1022,5 +1018,9 @@ TEST_PPAPI_IN_PROCESS(FlashMessageLoop_Basics)
 TEST_PPAPI_IN_PROCESS(FlashMessageLoop_RunWithoutQuit)
 TEST_PPAPI_OUT_OF_PROCESS(FlashMessageLoop_Basics)
 TEST_PPAPI_OUT_OF_PROCESS(FlashMessageLoop_RunWithoutQuit)
+
+TEST_PPAPI_IN_PROCESS(MouseCursor)
+TEST_PPAPI_OUT_OF_PROCESS(MouseCursor)
+TEST_PPAPI_NACL_VIA_HTTP(MouseCursor)
 
 #endif // ADDRESS_SANITIZER

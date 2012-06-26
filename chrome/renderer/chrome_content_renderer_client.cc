@@ -31,7 +31,6 @@
 #include "chrome/renderer/autofill/password_generation_manager.h"
 #include "chrome/renderer/automation/automation_renderer_helper.h"
 #include "chrome/renderer/benchmarking_extension.h"
-#include "chrome/renderer/chrome_ppapi_interfaces.h"
 #include "chrome/renderer/chrome_render_process_observer.h"
 #include "chrome/renderer/chrome_render_view_observer.h"
 #include "chrome/renderer/content_settings_observer.h"
@@ -41,13 +40,14 @@
 #include "chrome/renderer/extensions/extension_helper.h"
 #include "chrome/renderer/extensions/extension_resource_request_policy.h"
 #include "chrome/renderer/extensions/miscellaneous_bindings.h"
-#include "chrome/renderer/extensions/schema_generated_bindings.h"
 #include "chrome/renderer/external_extension.h"
 #include "chrome/renderer/loadtimes_extension_bindings.h"
 #include "chrome/renderer/localized_error.h"
 #include "chrome/renderer/net/renderer_net_predictor.h"
 #include "chrome/renderer/page_click_tracker.h"
 #include "chrome/renderer/page_load_histograms.h"
+#include "chrome/renderer/pepper/chrome_ppapi_interfaces.h"
+#include "chrome/renderer/playback_extension.h"
 #include "chrome/renderer/plugins/plugin_placeholder.h"
 #include "chrome/renderer/plugins/plugin_uma.h"
 #include "chrome/renderer/prerender/prerender_dispatcher.h"
@@ -180,12 +180,17 @@ void ChromeContentRendererClient::RenderThreadStarted() {
   if (search_extension)
     thread->RegisterExtension(search_extension);
 
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableBenchmarking))
+  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(switches::kEnableBenchmarking))
     thread->RegisterExtension(extensions_v8::BenchmarkingExtension::Get());
 
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableIPCFuzzing)) {
+  if (command_line->HasSwitch(switches::kPlaybackMode) ||
+      command_line->HasSwitch(switches::kRecordMode) ||
+      command_line->HasSwitch(switches::kNoJsRandomness)) {
+    thread->RegisterExtension(extensions_v8::PlaybackExtension::Get());
+  }
+
+  if (command_line->HasSwitch(switches::kEnableIPCFuzzing)) {
     thread->GetChannel()->set_outgoing_message_filter(LoadExternalIPCFuzzer());
   }
   // chrome:, chrome-devtools:, and chrome-internal: pages should not be
@@ -200,6 +205,11 @@ void ChromeContentRendererClient::RenderThreadStarted() {
 
   WebString internal_scheme(ASCIIToUTF16(chrome::kChromeInternalScheme));
   WebSecurityPolicy::registerURLSchemeAsDisplayIsolated(internal_scheme);
+
+#if defined(OS_CHROMEOS)
+  WebString drive_scheme(ASCIIToUTF16(chrome::kDriveScheme));
+  WebSecurityPolicy::registerURLSchemeAsLocal(drive_scheme);
+#endif
 
   // chrome: pages should not be accessible by bookmarklets or javascript:
   // URLs typed in the omnibox.
@@ -290,6 +300,14 @@ bool ChromeContentRendererClient::OverrideCreatePlugin(
   return true;
 }
 
+WebPlugin* ChromeContentRendererClient::CreatePluginReplacement(
+    content::RenderView* render_view,
+    const FilePath& plugin_path) {
+  PluginPlaceholder* placeholder =
+      PluginPlaceholder::CreateErrorPlugin(render_view, plugin_path);
+  return placeholder->plugin();
+}
+
 webkit_media::WebMediaPlayerImpl*
 ChromeContentRendererClient::OverrideCreateWebMediaPlayer(
     content::RenderView* render_view,
@@ -364,6 +382,14 @@ WebPlugin* ChromeContentRendererClient::CreatePlugin(
          status_value == ChromeViewHostMsg_GetPluginInfo_Status::kClickToPlay ||
          status_value == ChromeViewHostMsg_GetPluginInfo_Status::kBlocked) &&
         observer->plugins_temporarily_allowed()) {
+      status_value = ChromeViewHostMsg_GetPluginInfo_Status::kAllowed;
+    }
+
+    // Allow full-page plug-ins for click-to-play.
+    if (status_value == ChromeViewHostMsg_GetPluginInfo_Status::kClickToPlay &&
+        !frame->parent() &&
+        !frame->opener() &&
+        frame->document().isPluginDocument()) {
       status_value = ChromeViewHostMsg_GetPluginInfo_Status::kAllowed;
     }
 
@@ -642,7 +668,7 @@ bool ChromeContentRendererClient::RunIdleHandlerWhenWidgetsHidden() {
 bool ChromeContentRendererClient::AllowPopup(const GURL& creator) {
   ChromeV8Context* current_context =
       extension_dispatcher_->v8_context_set().GetCurrent();
-  return current_context && !current_context->extension_id().empty();
+  return current_context && current_context->extension();
 }
 
 bool ChromeContentRendererClient::ShouldFork(WebFrame* frame,

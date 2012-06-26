@@ -33,7 +33,6 @@
 #include "native_client/src/trusted/desc/nacl_desc_io.h"
 #include "native_client/src/trusted/desc/nrd_xfer.h"
 #include "native_client/src/trusted/desc/nrd_xfer_effector.h"
-#include "native_client/src/trusted/handle_pass/browser_handle.h"
 #include "native_client/src/trusted/nonnacl_util/sel_ldr_launcher.h"
 #include "native_client/src/trusted/plugin/manifest.h"
 
@@ -46,6 +45,7 @@
 #include "native_client/src/trusted/plugin/plugin.h"
 #include "native_client/src/trusted/plugin/plugin_error.h"
 #include "native_client/src/trusted/plugin/pnacl_coordinator.h"
+#include "native_client/src/trusted/plugin/sel_ldr_launcher_chrome.h"
 #include "native_client/src/trusted/plugin/srpc_client.h"
 #include "native_client/src/trusted/plugin/utility.h"
 
@@ -595,39 +595,6 @@ bool ServiceRuntime::InitCommunication(nacl::DescWrapper* nacl_desc,
     return false;
   }
 
-#if NACL_WINDOWS && !defined(NACL_STANDALONE)
-  // Establish the communication for handle passing protocol
-  struct NaClDesc* desc = NaClHandlePassBrowserGetSocketAddress();
-
-  DWORD my_pid = GetCurrentProcessId();
-  nacl::Handle my_handle = GetCurrentProcess();
-  nacl::Handle my_handle_in_selldr;
-
-  if (!DuplicateHandle(GetCurrentProcess(),
-                       my_handle,
-                       subprocess_->child_process(),
-                       &my_handle_in_selldr,
-                       PROCESS_DUP_HANDLE,
-                       FALSE,
-                       0)) {
-    error_info->SetReport(ERROR_SEL_LDR_HANDLE_PASSING,
-                          "ServiceRuntime: failed handle passing protocol");
-    return false;
-  }
-
-  rpc_result =
-      NaClSrpcInvokeBySignature(&command_channel_,
-                                "init_handle_passing:hii:",
-                                desc,
-                                my_pid,
-                                reinterpret_cast<int>(my_handle_in_selldr));
-
-  if (NACL_SRPC_RESULT_OK != rpc_result) {
-    error_info->SetReport(ERROR_SEL_LDR_HANDLE_PASSING,
-                          "ServiceRuntime: failed handle passing protocol");
-    return false;
-  }
-#endif
   // start the module.  otherwise we cannot connect for multimedia
   // subsystem since that is handled by user-level code (not secure!)
   // in libsrpc.
@@ -661,8 +628,12 @@ bool ServiceRuntime::Start(nacl::DescWrapper* nacl_desc,
   PLUGIN_PRINTF(("ServiceRuntime::Start (nacl_desc=%p)\n",
                  reinterpret_cast<void*>(nacl_desc)));
 
-  nacl::scoped_ptr<nacl::SelLdrLauncher>
-      tmp_subprocess(new nacl::SelLdrLauncher());
+  nacl::scoped_ptr<nacl::SelLdrLauncherBase> tmp_subprocess;
+#ifdef NACL_STANDALONE
+  tmp_subprocess.reset(new nacl::SelLdrLauncherStandalone());
+#else
+  tmp_subprocess.reset(new SelLdrLauncherChrome());
+#endif
   if (NULL == tmp_subprocess.get()) {
     PLUGIN_PRINTF(("ServiceRuntime::Start (subprocess create failed)\n"));
     error_info->SetReport(ERROR_SEL_LDR_CREATE_LAUNCHER,
@@ -704,10 +675,6 @@ SrpcClient* ServiceRuntime::SetupAppChannel() {
   }
 }
 
-bool ServiceRuntime::Kill() {
-  return subprocess_->KillChildProcess();
-}
-
 bool ServiceRuntime::Log(int severity, nacl::string msg) {
   NaClSrpcResultCodes rpc_result =
       NaClSrpcInvokeBySignature(&command_channel_,
@@ -718,9 +685,6 @@ bool ServiceRuntime::Log(int severity, nacl::string msg) {
 }
 
 void ServiceRuntime::Shutdown() {
-  if (subprocess_ != NULL) {
-    Kill();
-  }
   rev_interface_->ShutDown();
   anchor_->Abandon();
   // Abandon callbacks, tell service threads to quit if they were
@@ -735,8 +699,8 @@ void ServiceRuntime::Shutdown() {
 
   NaClSrpcDtor(&command_channel_);
 
-  // subprocess_ killed, but threads waiting on messages from the
-  // service runtime may not have noticed yet.  The low-level
+  // subprocess_ has been shut down, but threads waiting on messages
+  // from the service runtime may not have noticed yet.  The low-level
   // NaClSimpleRevService code takes care to refcount the data objects
   // that it needs, and reverse_service_ is also refcounted.  We wait
   // for the service threads to get their EOF indications.

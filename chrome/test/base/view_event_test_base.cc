@@ -10,13 +10,15 @@
 #include "base/string_number_conversions.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/browser_thread.h"
-#include "ui/gfx/compositor/test/compositor_test_support.h"
+#include "ui/compositor/test/compositor_test_support.h"
 #include "ui/ui_controls/ui_controls.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
 
-#if defined(USE_AURA)
+#if defined(USE_ASH)
 #include "ash/shell.h"
+#endif
+#if defined(USE_AURA)
 #include "ui/aura/client/event_client.h"
 #include "ui/aura/env.h"
 #include "ui/aura/root_window.h"
@@ -68,7 +70,8 @@ void ViewEventTestBase::Done() {
 #if defined(OS_WIN) && !defined(USE_AURA)
   // We need to post a message to tickle the Dispatcher getting called and
   // exiting out of the nested loop. Without this the quit never runs.
-  PostMessage(window_->GetNativeWindow(), WM_USER, 0, 0);
+  if (window_)
+    PostMessage(window_->GetNativeWindow(), WM_USER, 0, 0);
 #endif
 
   // If we're in a nested message loop, as is the case with menus, we
@@ -80,7 +83,7 @@ void ViewEventTestBase::Done() {
 
 void ViewEventTestBase::SetUp() {
   ui::CompositorTestSupport::Initialize();
-#if defined(USE_AURA)
+#if defined(USE_ASH)
   ash::Shell::CreateInstance(NULL);
   // The shell runs with a locked screen in tests, so we must clear the event
   // client so it doesn't interfere with event propagation.
@@ -100,8 +103,10 @@ void ViewEventTestBase::TearDown() {
 #endif
     window_ = NULL;
   }
-#if defined(USE_AURA)
+#if defined(USE_ASH)
   ash::Shell::DeleteInstance();
+#endif
+#if defined(USE_AURA)
   aura::Env::DeleteInstance();
 #endif
   ui::CompositorTestSupport::Terminate();
@@ -166,7 +171,7 @@ void ViewEventTestBase::ScheduleMouseMoveInBackground(int x, int y) {
   dnd_thread_->message_loop()->PostDelayedTask(
       FROM_HERE,
       base::Bind(base::IgnoreResult(&ui_controls::SendMouseMove), x, y),
-      kMouseMoveDelayMS);
+      base::TimeDelta::FromMilliseconds(kMouseMoveDelayMS));
 }
 
 void ViewEventTestBase::StopBackgroundThread() {

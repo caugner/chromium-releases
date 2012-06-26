@@ -13,6 +13,7 @@
 #include "base/path_service.h"
 #include "base/string_util.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
@@ -47,14 +48,6 @@ using content::PluginServiceFilter;
 
 namespace {
 
-// Helper function that merely runs the callback with the result. Called on the
-// thread on which the original GetPlugins() call was made.
-static void RunGetPluginsCallback(
-    const PluginService::GetPluginsCallback& callback,
-    const std::vector<webkit::WebPluginInfo>& result) {
-  callback.Run(result);
-}
-
 // A callback for GetPlugins() that then gets the freshly loaded plugin groups
 // and runs the callback for GetPluginGroups().
 static void GetPluginsForGroupsCallback(
@@ -69,7 +62,7 @@ static void GetPluginsForGroupsCallback(
 // correct thread.
 void WillLoadPluginsCallback() {
 #if defined(OS_WIN)
-  CHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+  CHECK(BrowserThread::GetBlockingPool()->RunsTasksOnCurrentThread());
 #else
   CHECK(false) << "Plugin loading should happen out-of-process.";
 #endif
@@ -103,6 +96,9 @@ class PluginDirWatcherDelegate : public FilePathWatcher::Delegate {
     // stopping the watcher would be enough. Or possibly restart it.
     NOTREACHED();
   }
+
+ protected:
+  virtual ~PluginDirWatcherDelegate() {}
 };
 #endif
 
@@ -344,20 +340,26 @@ void PluginServiceImpl::OpenChannelToPpapiPlugin(
     PpapiPluginProcessHost::PluginClient* client) {
   PpapiPluginProcessHost* plugin_host = FindOrStartPpapiPluginProcess(
       path, client);
-  if (plugin_host)
+  if (plugin_host) {
     plugin_host->OpenChannelToPlugin(client);
-  else  // Send error.
-    client->OnChannelOpened(base::kNullProcessHandle, IPC::ChannelHandle());
+  } else {
+    // Send error.
+    client->OnPpapiChannelOpened(base::kNullProcessHandle,
+                                 IPC::ChannelHandle(), 0);
+  }
 }
 
 void PluginServiceImpl::OpenChannelToPpapiBroker(
     const FilePath& path,
     PpapiPluginProcessHost::BrokerClient* client) {
   PpapiPluginProcessHost* plugin_host = FindOrStartPpapiBrokerProcess(path);
-  if (plugin_host)
+  if (plugin_host) {
     plugin_host->OpenChannelToPlugin(client);
-  else  // Send error.
-    client->OnChannelOpened(base::kNullProcessHandle, IPC::ChannelHandle());
+  } else {
+    // Send error.
+    client->OnPpapiChannelOpened(base::kNullProcessHandle,
+                                 IPC::ChannelHandle(), 0);
+  }
 }
 
 void PluginServiceImpl::CancelOpenChannelToNpapiPlugin(
@@ -484,21 +486,39 @@ bool PluginServiceImpl::GetPluginInfoByPath(const FilePath& plugin_path,
   return false;
 }
 
+string16 PluginServiceImpl::GetPluginDisplayNameByPath(const FilePath& path) {
+  string16 plugin_name = path.LossyDisplayName();
+  webkit::WebPluginInfo info;
+  if (PluginService::GetInstance()->GetPluginInfoByPath(path, &info) &&
+      !info.name.empty()) {
+    plugin_name = info.name;
+#if defined(OS_MACOSX)
+    // Many plugins on the Mac have .plugin in the actual name, which looks
+    // terrible, so look for that and strip it off if present.
+    const std::string kPluginExtension = ".plugin";
+    if (EndsWith(plugin_name, ASCIIToUTF16(kPluginExtension), true))
+      plugin_name.erase(plugin_name.length() - kPluginExtension.length());
+#endif  // OS_MACOSX
+  }
+  return plugin_name;
+}
+
 void PluginServiceImpl::GetPlugins(const GetPluginsCallback& callback) {
   scoped_refptr<base::MessageLoopProxy> target_loop(
       MessageLoop::current()->message_loop_proxy());
 
 #if defined(OS_WIN)
-  BrowserThread::PostTask(
-      BrowserThread::FILE, FROM_HERE,
+  BrowserThread::GetBlockingPool()->PostWorkerTaskWithShutdownBehavior(
+      FROM_HERE,
       base::Bind(&PluginServiceImpl::GetPluginsInternal, base::Unretained(this),
-          target_loop, callback));
+                 target_loop, callback),
+      base::SequencedWorkerPool::SKIP_ON_SHUTDOWN);
 #else
   std::vector<webkit::WebPluginInfo> cached_plugins;
   if (plugin_list_->GetPluginsIfNoRefreshNeeded(&cached_plugins)) {
     // Can't assume the caller is reentrant.
     target_loop->PostTask(FROM_HERE,
-        base::Bind(&RunGetPluginsCallback, callback, cached_plugins));
+        base::Bind(callback, cached_plugins));
   } else {
     // If we switch back to loading plugins in process, then we need to make
     // sure g_thread_init() gets called since plugins may call glib at load.
@@ -519,13 +539,13 @@ void PluginServiceImpl::GetPluginGroups(
 void PluginServiceImpl::GetPluginsInternal(
      base::MessageLoopProxy* target_loop,
      const PluginService::GetPluginsCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+  DCHECK(BrowserThread::GetBlockingPool()->RunsTasksOnCurrentThread());
 
   std::vector<webkit::WebPluginInfo> plugins;
   plugin_list_->GetPlugins(&plugins);
 
   target_loop->PostTask(FROM_HERE,
-      base::Bind(&RunGetPluginsCallback, callback, plugins));
+      base::Bind(callback, plugins));
 }
 
 void PluginServiceImpl::OnWaitableEventSignaled(

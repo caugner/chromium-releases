@@ -5,7 +5,9 @@
 #include "content/shell/shell_browser_main.h"
 
 #include "base/command_line.h"
+#include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/threading/thread_restrictions.h"
 #include "content/public/browser/browser_main_runner.h"
 #include "content/shell/shell.h"
 #include "content/shell/shell_browser_context.h"
@@ -16,6 +18,12 @@
 namespace {
 
 GURL GetURLForLayoutTest(const char* test_name) {
+#if defined(OS_ANDROID)
+  // DumpRenderTree is not currently supported for Android using the content
+  // shell.
+  NOTIMPLEMENTED();
+  return GURL::EmptyGURL();
+#else
   std::string path_or_url = test_name;
   std::string pixel_hash;
   std::string timeout;
@@ -31,8 +39,13 @@ GURL GetURLForLayoutTest(const char* test_name) {
   }
   // TODO(jochen): use pixel_hash and timeout.
   GURL test_url = webkit_support::CreateURLForPathOrURL(path_or_url);
-  webkit_support::SetCurrentDirectoryForFileURL(test_url);
+  {
+    // We're outside of the message loop here, and this is a test.
+    base::ThreadRestrictions::ScopedAllowIO allow_io;
+    webkit_support::SetCurrentDirectoryForFileURL(test_url);
+  }
   return test_url;
+#endif
 }
 
 }  // namespace
@@ -43,6 +56,14 @@ int ShellBrowserMain(const content::MainFunctionParams& parameters) {
       content::BrowserMainRunner::Create());
 
   int exit_code = main_runner_->Initialize(parameters);
+
+#if defined(OS_ANDROID)
+  DCHECK(exit_code < 0);
+
+  // Return 0 so that we do NOT trigger the default behavior. On Android, the
+  // UI message loop is managed by the Java application.
+  return 0;
+#else
   if (exit_code >= 0)
     return exit_code;
 
@@ -69,7 +90,8 @@ int ShellBrowserMain(const content::MainFunctionParams& parameters) {
                                       MSG_ROUTING_NONE,
                                       NULL);
       main_runner_->Run();
-      // TODO(jochen): Figure out a way to close shell.
+
+      content::Shell::CloseAllWindows();
     }
     exit_code = 0;
   } else {
@@ -79,4 +101,5 @@ int ShellBrowserMain(const content::MainFunctionParams& parameters) {
   main_runner_->Shutdown();
 
   return exit_code;
+#endif
 }

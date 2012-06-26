@@ -8,11 +8,13 @@
 #include "ash/shell_delegate.h"
 #include "ash/shell_window_ids.h"
 #include "ash/test/ash_test_base.h"
+#include "ash/test/capture_tracking_view.h"
 #include "ash/wm/window_util.h"
 #include "base/compiler_specific.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/test/event_generator.h"
 #include "ui/aura/window.h"
+#include "ui/compositor/layer.h"
 #include "ui/views/events/event.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
@@ -208,8 +210,7 @@ TEST_F(SystemModalContainerLayoutManagerTest,
   EXPECT_TRUE(wm::IsActiveWindow(unrelated.get()));
 }
 
-TEST_F(SystemModalContainerLayoutManagerTest,
-       EventFocusContainers) {
+TEST_F(SystemModalContainerLayoutManagerTest, EventFocusContainers) {
   // Create a normal window and attempt to receive a click event.
   EventTestWindow* main_delegate = new EventTestWindow(false);
   scoped_ptr<aura::Window> main(main_delegate->OpenTestWindow(NULL));
@@ -251,6 +252,57 @@ TEST_F(SystemModalContainerLayoutManagerTest,
   EXPECT_EQ(1, lock_modal_delegate->mouse_presses());
 
   Shell::GetInstance()->delegate()->UnlockScreen();
+}
+
+// Makes sure we don't crash if a modal window is shown while the parent window
+// is hidden.
+TEST_F(SystemModalContainerLayoutManagerTest, ShowModalWhileHidden) {
+  // Hide the lock screen.
+  Shell::GetInstance()->GetContainer(
+      internal::kShellWindowId_SystemModalContainer)->layer()->SetOpacity(0);
+
+  // Create a modal window.
+  scoped_ptr<aura::Window> parent(TestWindow::OpenTestWindow(NULL, false));
+  scoped_ptr<aura::Window> modal_window(
+      TestWindow::OpenTestWindow(parent.get(), true));
+  parent->Show();
+  modal_window->Show();
+}
+
+// Verifies we generate a capture lost when showing a modal window.
+TEST_F(SystemModalContainerLayoutManagerTest, ChangeCapture) {
+  views::Widget* widget =
+      views::Widget::CreateWindowWithParent(new TestWindow(false), NULL);
+  scoped_ptr<aura::Window> widget_window(widget->GetNativeView());
+  CaptureTrackingView* view = new CaptureTrackingView;
+  widget->GetContentsView()->AddChildView(view);
+  view->SetBoundsRect(widget->GetContentsView()->bounds());
+  widget->Show();
+
+  gfx::Point center(view->width() / 2, view->height() / 2);
+  views::View::ConvertPointToScreen(view, &center);
+  aura::test::EventGenerator generator(Shell::GetRootWindow(), center);
+  generator.PressLeftButton();
+  EXPECT_TRUE(view->got_press());
+  scoped_ptr<aura::Window> modal_window(
+      TestWindow::OpenTestWindow(widget->GetNativeView(), true));
+  modal_window->Show();
+  EXPECT_TRUE(view->got_capture_lost());
+}
+
+// Verifies that the window gets moved into the visible screen area upon screen
+// resize.
+TEST_F(SystemModalContainerLayoutManagerTest, KeepVisible) {
+  GetModalContainer()->SetBounds(gfx::Rect(0, 0, 1024, 768));
+  scoped_ptr<aura::Window> main(TestWindow::OpenTestWindow(GetModalContainer(),
+                                true));
+  main->SetBounds(gfx::Rect(924, 668, 100, 100));
+  // We set now the bounds of the root window to something new which will
+  // Then trigger the repos operation.
+  GetModalContainer()->SetBounds(gfx::Rect(0, 0, 800, 600));
+
+  gfx::Rect bounds = main->bounds();
+  EXPECT_EQ(bounds, gfx::Rect(700, 500, 100, 100));
 }
 
 }  // namespace test

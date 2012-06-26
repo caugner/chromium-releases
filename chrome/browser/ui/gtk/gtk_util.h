@@ -21,7 +21,7 @@ typedef struct _GdkColor GdkColor;
 typedef struct _GtkWidget GtkWidget;
 
 class BrowserWindow;
-class ThemeServiceGtk;
+class GtkThemeService;
 class GURL;
 class Profile;
 
@@ -221,7 +221,7 @@ void DrawThemedToolbarBackground(GtkWidget* widget,
                                  cairo_t* cr,
                                  GdkEventExpose* event,
                                  const gfx::Point& tabstrip_origin,
-                                 ThemeServiceGtk* provider);
+                                 GtkThemeService* provider);
 
 // Returns the two colors averaged together.
 GdkColor AverageColors(GdkColor color_one, GdkColor color_two);
@@ -293,13 +293,8 @@ void ShowDialogWithMinLocalizedWidth(GtkWidget* dialog,
                                      int width_id);
 
 // Wrapper to present a window. On Linux, it just calls gtk_window_present or
-// gtk_window_present_with_time for non-zero timestamp. For ChromeOS, it first
-// finds the host window of the dialog contents and then present it.
+// gtk_window_present_with_time for non-zero timestamp.
 void PresentWindow(GtkWidget* window, int timestamp);
-
-// Get real window for given dialog. On ChromeOS, this gives the native dialog
-// host window. On Linux, it merely returns the passed in dialog.
-GtkWindow* GetDialogWindow(GtkWidget* dialog);
 
 // Gets dialog window bounds.
 gfx::Rect GetDialogBounds(GtkWidget* dialog);

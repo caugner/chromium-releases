@@ -17,6 +17,8 @@
 #include "chrome/browser/extensions/extension_info_map.h"
 #include "chrome/browser/extensions/extension_message_service.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
+#include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/metrics/histogram_synchronizer.h"
 #include "chrome/browser/nacl_host/nacl_process_host.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
@@ -53,7 +55,7 @@ ChromeRenderMessageFilter::ChromeRenderMessageFilter(
     : render_process_id_(render_process_id),
       profile_(profile),
       request_context_(request_context),
-      extension_info_map_(profile->GetExtensionInfoMap()),
+      extension_info_map_(ExtensionSystem::Get(profile)->info_map()),
       cookie_settings_(CookieSettings::Factory::GetForProfile(profile)),
       weak_ptr_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
 }
@@ -89,14 +91,15 @@ bool ChromeRenderMessageFilter::OnMessageReceived(const IPC::Message& message,
                         OnExtensionAddLazyListener)
     IPC_MESSAGE_HANDLER(ExtensionHostMsg_RemoveLazyListener,
                         OnExtensionRemoveLazyListener)
-    IPC_MESSAGE_HANDLER(ExtensionHostMsg_ExtensionEventAck, OnExtensionEventAck)
     IPC_MESSAGE_HANDLER(ExtensionHostMsg_CloseChannel, OnExtensionCloseChannel)
     IPC_MESSAGE_HANDLER(ExtensionHostMsg_RequestForIOThread,
                         OnExtensionRequestForIOThread)
-    IPC_MESSAGE_HANDLER(ExtensionHostMsg_ShouldCloseAck,
-                        OnExtensionShouldCloseAck)
+    IPC_MESSAGE_HANDLER(ExtensionHostMsg_ShouldUnloadAck,
+                        OnExtensionShouldUnloadAck)
+    IPC_MESSAGE_HANDLER(ExtensionHostMsg_GenerateUniqueID,
+                        OnExtensionGenerateUniqueID)
+    IPC_MESSAGE_HANDLER(ExtensionHostMsg_UnloadAck, OnExtensionUnloadAck)
 #if defined(USE_TCMALLOC)
-    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_RendererTcmalloc, OnRendererTcmalloc)
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_WriteTcmallocHeapProfile_ACK,
                         OnWriteTcmallocHeapProfile)
 #endif
@@ -134,16 +137,13 @@ void ChromeRenderMessageFilter::OverrideThreadForMessage(
     const IPC::Message& message, BrowserThread::ID* thread) {
   switch (message.type()) {
     case ChromeViewHostMsg_ResourceTypeStats::ID:
-#if defined(USE_TCMALLOC)
-    case ChromeViewHostMsg_RendererTcmalloc::ID:
-#endif
     case ExtensionHostMsg_AddListener::ID:
     case ExtensionHostMsg_RemoveListener::ID:
     case ExtensionHostMsg_AddLazyListener::ID:
     case ExtensionHostMsg_RemoveLazyListener::ID:
-    case ExtensionHostMsg_ExtensionEventAck::ID:
     case ExtensionHostMsg_CloseChannel::ID:
-    case ExtensionHostMsg_ShouldCloseAck::ID:
+    case ExtensionHostMsg_ShouldUnloadAck::ID:
+    case ExtensionHostMsg_UnloadAck::ID:
     case ChromeViewHostMsg_UpdatedCacheStats::ID:
       *thread = BrowserThread::UI;
       break;
@@ -153,9 +153,10 @@ void ChromeRenderMessageFilter::OverrideThreadForMessage(
 }
 
 #if !defined(DISABLE_NACL)
-void ChromeRenderMessageFilter::OnLaunchNaCl(
-    const std::wstring& url, int socket_count, IPC::Message* reply_msg) {
-  NaClProcessHost* host = new NaClProcessHost(url);
+void ChromeRenderMessageFilter::OnLaunchNaCl(const GURL& manifest_url,
+                                             int socket_count,
+                                             IPC::Message* reply_msg) {
+  NaClProcessHost* host = new NaClProcessHost(manifest_url);
   host->Launch(this, socket_count, reply_msg, extension_info_map_);
 }
 #endif
@@ -186,8 +187,10 @@ void ChromeRenderMessageFilter::OnResourceTypeStats(
                    static_cast<int>(stats.fonts.size / 1024));
 
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+#if defined(ENABLE_TASK_MANAGER)
   TaskManager::GetInstance()->model()->NotifyResourceTypeStats(
       base::GetProcId(peer_handle()), stats);
+#endif  // defined(ENABLE_TASK_MANAGER)
 }
 
 void ChromeRenderMessageFilter::OnUpdatedCacheStats(
@@ -207,8 +210,10 @@ void ChromeRenderMessageFilter::OnFPS(int routing_id, float fps) {
 
   base::ProcessId renderer_id = base::GetProcId(peer_handle());
 
+#if defined(ENABLE_TASK_MANAGER)
   TaskManager::GetInstance()->model()->NotifyFPS(
       renderer_id, routing_id, fps);
+#endif  // defined(ENABLE_TASK_MANAGER)
 
   FPSDetails details(routing_id, fps);
   content::NotificationService::current()->Notify(
@@ -230,10 +235,12 @@ void ChromeRenderMessageFilter::OnV8HeapStats(int v8_memory_allocated,
 
   base::ProcessId renderer_id = base::GetProcId(peer_handle());
 
+#if defined(ENABLE_TASK_MANAGER)
   TaskManager::GetInstance()->model()->NotifyV8HeapStats(
       renderer_id,
       static_cast<size_t>(v8_memory_allocated),
       static_cast<size_t>(v8_memory_used));
+#endif  // defined(ENABLE_TASK_MANAGER)
 
   V8HeapStatsDetails details(v8_memory_allocated, v8_memory_used);
   content::NotificationService::current()->Notify(
@@ -263,9 +270,10 @@ void ChromeRenderMessageFilter::OpenChannelToExtensionOnUIThread(
     const std::string& target_extension_id,
     const std::string& channel_name) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  profile_->GetExtensionMessageService()->OpenChannelToExtension(
-      source_process_id, source_routing_id, receiver_port_id,
-      source_extension_id, target_extension_id, channel_name);
+  ExtensionSystem::Get(profile_)->message_service()->
+      OpenChannelToExtension(
+          source_process_id, source_routing_id, receiver_port_id,
+          source_extension_id, target_extension_id, channel_name);
 }
 
 void ChromeRenderMessageFilter::OnOpenChannelToTab(
@@ -288,9 +296,10 @@ void ChromeRenderMessageFilter::OpenChannelToTabOnUIThread(
     const std::string& extension_id,
     const std::string& channel_name) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  profile_->GetExtensionMessageService()->OpenChannelToTab(
-      source_process_id, source_routing_id, receiver_port_id,
-      tab_id, extension_id, channel_name);
+  ExtensionSystem::Get(profile_)->message_service()->
+      OpenChannelToTab(
+          source_process_id, source_routing_id, receiver_port_id,
+          tab_id, extension_id, channel_name);
 }
 
 void ChromeRenderMessageFilter::OnGetExtensionMessageBundle(
@@ -367,19 +376,15 @@ void ChromeRenderMessageFilter::OnExtensionRemoveLazyListener(
         event_name, extension_id);
 }
 
-void ChromeRenderMessageFilter::OnExtensionEventAck(
-    const std::string& extension_id) {
-  if (profile_->GetExtensionEventRouter())
-    profile_->GetExtensionEventRouter()->OnExtensionEventAck(
-        profile_, extension_id);
-}
-
-void ChromeRenderMessageFilter::OnExtensionCloseChannel(int port_id) {
+void ChromeRenderMessageFilter::OnExtensionCloseChannel(int port_id,
+                                                        bool connection_error) {
   if (!content::RenderProcessHost::FromID(render_process_id_))
     return;  // To guard against crash in browser_tests shutdown.
 
-  if (profile_->GetExtensionMessageService())
-    profile_->GetExtensionMessageService()->CloseChannel(port_id);
+  ExtensionMessageService* message_service =
+      ExtensionSystem::Get(profile_)->message_service();
+  if (message_service)
+    message_service->CloseChannel(port_id, connection_error);
 }
 
 void ChromeRenderMessageFilter::OnExtensionRequestForIOThread(
@@ -392,19 +397,25 @@ void ChromeRenderMessageFilter::OnExtensionRequestForIOThread(
       weak_ptr_factory_.GetWeakPtr(), routing_id, params);
 }
 
-void ChromeRenderMessageFilter::OnExtensionShouldCloseAck(
+void ChromeRenderMessageFilter::OnExtensionShouldUnloadAck(
      const std::string& extension_id, int sequence_id) {
   if (profile_->GetExtensionProcessManager())
-    profile_->GetExtensionProcessManager()->OnShouldCloseAck(
+    profile_->GetExtensionProcessManager()->OnShouldUnloadAck(
         extension_id, sequence_id);
 }
 
-#if defined(USE_TCMALLOC)
-void ChromeRenderMessageFilter::OnRendererTcmalloc(const std::string& output) {
-  base::ProcessId pid = base::GetProcId(peer_handle());
-  AboutTcmallocRendererCallback(pid, output);
+void ChromeRenderMessageFilter::OnExtensionUnloadAck(
+     const std::string& extension_id) {
+  if (profile_->GetExtensionProcessManager())
+    profile_->GetExtensionProcessManager()->OnUnloadAck(extension_id);
 }
 
+void ChromeRenderMessageFilter::OnExtensionGenerateUniqueID(int* unique_id) {
+  static int next_unique_id = 1;
+  *unique_id = next_unique_id++;
+}
+
+#if defined(USE_TCMALLOC)
 void ChromeRenderMessageFilter::OnWriteTcmallocHeapProfile(
     const FilePath::StringType& filepath,
     const std::string& output) {

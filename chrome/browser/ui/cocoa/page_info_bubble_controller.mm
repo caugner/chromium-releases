@@ -126,7 +126,7 @@ class PageInfoModelBubbleBridge : public PageInfoModelObserver {
     MessageLoop::current()->PostDelayedTask(FROM_HERE,
         base::Bind(&PageInfoModelBubbleBridge::PerformLayout,
                    weak_ptr_factory_.GetWeakPtr()),
-        1000 /* milliseconds */);
+        base::TimeDelta::FromSeconds(1));
   }
 
   // Sets the controller.
@@ -183,7 +183,7 @@ void ShowPageInfoBubble(gfx::NativeWindow parent,
   DCHECK(parentWindow);
 
   // Use an arbitrary height because it will be changed by the bridge.
-  NSRect contentRect = NSMakeRect(0, 0, kWindowWidth, 0);
+  NSRect contentRect = NSMakeRect(0, 0, kWindowWidth, 1);
   // Create an empty window into which content is placed.
   scoped_nsobject<InfoBubbleWindow> window(
       [[InfoBubbleWindow alloc] initWithContentRect:contentRect

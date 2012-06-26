@@ -24,6 +24,8 @@
 #include "content/public/common/page_transition_types.h"
 #include "googleurl/src/gurl.h"
 
+class PageUsageData;
+
 namespace history {
 
 // Forward declaration for friend statements.
@@ -132,6 +134,19 @@ class URLRow {
     hidden_ = hidden;
   }
 
+  // Helper functor that determines if an URLRow refers to a given URL.
+  class URLRowHasURL {
+   public:
+    explicit URLRowHasURL(const GURL& url) : url_(url) {}
+
+    bool operator()(const URLRow& row) {
+      return row.url() == url_;
+    }
+
+   private:
+    const GURL& url_;
+  };
+
  protected:
   // Swaps the contents of this URLRow with another, which allows it to be
   // destructively copied without memory allocations.
@@ -236,6 +251,12 @@ class VisitRow {
   // out of sync in various ways, so this flag should be false when things
   // change.
   bool is_indexed;
+
+  // Record how much time a user has this visit starting from the user
+  // opened this visit to the user closed or ended this visit.
+  // This includes both active and inactive time as long as
+  // the visit was present.
+  base::TimeDelta visit_duration;
 
   // Compares two visits based on dates, for sorting.
   bool operator<(const VisitRow& other) {
@@ -572,6 +593,19 @@ struct MostVisitedURL {
   }
 };
 
+// FilteredURL -----------------------------------------------------------------
+
+// Holds the per-URL information of the filterd url query.
+struct FilteredURL {
+  FilteredURL();
+  explicit FilteredURL(const PageUsageData& data);
+  ~FilteredURL();
+
+  GURL url;
+  string16 title;
+  double score;
+};
+
 // Navigation -----------------------------------------------------------------
 
 // Marshalling structure for AddPage.
@@ -615,17 +649,18 @@ class HistoryAddPageArgs
 // TopSites -------------------------------------------------------------------
 
 typedef std::vector<MostVisitedURL> MostVisitedURLList;
+typedef std::vector<FilteredURL> FilteredURLList;
 
 // Used by TopSites to store the thumbnails.
 struct Images {
   Images();
   ~Images();
 
-  scoped_refptr<RefCountedBytes> thumbnail;
+  scoped_refptr<base::RefCountedBytes> thumbnail;
   ThumbnailScore thumbnail_score;
 
   // TODO(brettw): this will eventually store the favicon.
-  // scoped_refptr<RefCountedBytes> favicon;
+  // scoped_refptr<base::RefCountedBytes> favicon;
 };
 
 typedef std::vector<MostVisitedURL> MostVisitedURLList;
@@ -646,7 +681,7 @@ struct TopSitesDelta {
   MostVisitedURLWithRankList moved;
 };
 
-typedef std::map<GURL, scoped_refptr<RefCountedBytes> > URLToThumbnailMap;
+typedef std::map<GURL, scoped_refptr<base::RefCountedBytes> > URLToThumbnailMap;
 
 // Used when migrating most visited thumbnails out of history and into topsites.
 struct ThumbnailMigration {
@@ -663,13 +698,13 @@ class MostVisitedThumbnails
     : public base::RefCountedThreadSafe<MostVisitedThumbnails> {
  public:
   MostVisitedThumbnails();
-  virtual ~MostVisitedThumbnails();
 
   MostVisitedURLList most_visited;
   URLToImagesMap url_to_images_map;
 
  private:
   friend class base::RefCountedThreadSafe<MostVisitedThumbnails>;
+  virtual ~MostVisitedThumbnails();
 
   DISALLOW_COPY_AND_ASSIGN(MostVisitedThumbnails);
 };
@@ -733,7 +768,7 @@ struct FaviconData {
   bool known_icon;
 
   // The bits of image.
-  scoped_refptr<RefCountedMemory> image_data;
+  scoped_refptr<base::RefCountedMemory> image_data;
 
   // Indicates whether image is expired.
   bool expired;
@@ -743,6 +778,20 @@ struct FaviconData {
 
   // The type of favicon.
   history::IconType icon_type;
+};
+
+// Abbreviated information about a visit.
+struct BriefVisitInfo {
+  URLID url_id;
+  base::Time time;
+  content::PageTransition transition;
+};
+
+// An observer of VisitDatabase.
+class VisitDatabaseObserver {
+ public:
+  virtual ~VisitDatabaseObserver() {}
+  virtual void OnAddVisit(const BriefVisitInfo& info) = 0;
 };
 
 }  // namespace history

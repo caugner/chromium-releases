@@ -5,14 +5,14 @@
 #include "ash/accelerators/accelerator_controller.h"
 
 #include "ash/accelerators/accelerator_table.h"
-#include "ash/desktop_background/desktop_background_controller.h"
 #include "ash/ash_switches.h"
 #include "ash/caps_lock_delegate.h"
+#include "ash/desktop_background/desktop_background_controller.h"
 #include "ash/focus_cycler.h"
 #include "ash/ime_control_delegate.h"
 #include "ash/launcher/launcher.h"
-#include "ash/launcher/launcher_model.h"
 #include "ash/launcher/launcher_delegate.h"
+#include "ash/launcher/launcher_model.h"
 #include "ash/monitor/multi_monitor_manager.h"
 #include "ash/screenshot_delegate.h"
 #include "ash/shell.h"
@@ -21,18 +21,20 @@
 #include "ash/system/brightness/brightness_control_delegate.h"
 #include "ash/system/tray/system_tray.h"
 #include "ash/volume_control_delegate.h"
+#include "ash/wm/property_util.h"
 #include "ash/wm/window_cycle_controller.h"
 #include "ash/wm/window_util.h"
+#include "ash/wm/workspace/snap_sizer.h"
 #include "base/command_line.h"
 #include "ui/aura/event.h"
 #include "ui/aura/root_window.h"
 #include "ui/base/accelerators/accelerator.h"
 #include "ui/base/accelerators/accelerator_manager.h"
-#include "ui/gfx/compositor/debug_utils.h"
-#include "ui/gfx/compositor/layer.h"
-#include "ui/gfx/compositor/layer_animation_sequence.h"
-#include "ui/gfx/compositor/layer_animator.h"
-#include "ui/gfx/compositor/screen_rotation.h"
+#include "ui/compositor/debug_utils.h"
+#include "ui/compositor/layer.h"
+#include "ui/compositor/layer_animation_sequence.h"
+#include "ui/compositor/layer_animator.h"
+#include "ui/compositor/screen_rotation.h"
 #include "ui/oak/oak.h"
 
 namespace {
@@ -49,7 +51,8 @@ bool HandleCycleWindowMRU(ash::WindowCycleController::Direction direction,
 void ActivateLauncherItem(int index) {
   const ash::LauncherItems& items =
       ash::Shell::GetInstance()->launcher()->model()->items();
-  ash::Shell::GetInstance()->launcher()->delegate()->ItemClicked(items[index]);
+  ash::Shell::GetInstance()->launcher()->delegate()->
+      ItemClicked(items[index], ui::EF_NONE);
 }
 
 // Returns true if accelerator processing should skip the launcher item with
@@ -110,10 +113,22 @@ void HandleCycleWindowLinear(ash::WindowCycleController::Direction direction) {
 
 #if defined(OS_CHROMEOS)
 bool HandleLock() {
-  ash::ShellDelegate* delegate = ash::Shell::GetInstance()->delegate();
-  if (!delegate)
-    return false;
-  delegate->LockScreen();
+  ash::Shell::GetInstance()->delegate()->LockScreen();
+  return true;
+}
+
+bool HandleFileManager() {
+  ash::Shell::GetInstance()->delegate()->OpenFileManager();
+  return true;
+}
+
+bool HandleCrosh() {
+  ash::Shell::GetInstance()->delegate()->OpenCrosh();
+  return true;
+}
+
+bool HandleToggleSpokenFeedback() {
+  ash::Shell::GetInstance()->delegate()->ToggleSpokenFeedback();
   return true;
 }
 #endif
@@ -184,7 +199,7 @@ bool HandleToggleDesktopBackgroundMode() {
       ash::DesktopBackgroundController::BACKGROUND_IMAGE)
     desktop_background_controller->SetDesktopBackgroundSolidColorMode();
   else
-    desktop_background_controller->OnDesktopBackgroundChanged();
+    desktop_background_controller->SetDesktopBackgroundImageMode();
   return true;
 }
 
@@ -244,7 +259,8 @@ void AcceleratorController::Init() {
                                 kAcceleratorData[i].shift,
                                 kAcceleratorData[i].ctrl,
                                 kAcceleratorData[i].alt);
-    accelerator.set_type(kAcceleratorData[i].type);
+    accelerator.set_type(kAcceleratorData[i].trigger_on_press ?
+                         ui::ET_KEY_PRESSED : ui::ET_KEY_RELEASED);
     Register(accelerator, this);
     CHECK(accelerators_.insert(
         std::make_pair(accelerator, kAcceleratorData[i].action)).second);
@@ -336,6 +352,12 @@ bool AcceleratorController::AcceleratorPressed(
 #if defined(OS_CHROMEOS)
     case LOCK_SCREEN:
       return HandleLock();
+    case OPEN_FILE_MANAGER:
+      return HandleFileManager();
+    case OPEN_CROSH:
+      return HandleCrosh();
+    case TOGGLE_SPOKEN_FEEDBACK:
+      return HandleToggleSpokenFeedback();
 #endif
     case EXIT:
       return HandleExit();
@@ -357,6 +379,9 @@ bool AcceleratorController::AcceleratorPressed(
       // Return true to prevent propagation of the key event because
       // this key combination is reserved for partial screenshot.
       return true;
+    case SEARCH_KEY:
+      ash::Shell::GetInstance()->delegate()->Search();
+      break;
     case TOGGLE_APP_LIST:
       ash::Shell::GetInstance()->ToggleAppList();
       break;
@@ -384,6 +409,10 @@ bool AcceleratorController::AcceleratorPressed(
       if (volume_control_delegate_.get())
         return volume_control_delegate_->HandleVolumeUp(accelerator);
       break;
+    case FOCUS_LAUNCHER:
+      if (shell->launcher())
+        return shell->focus_cycler()->FocusWidget(shell->launcher()->widget());
+      break;
     case FOCUS_TRAY:
       if (shell->tray())
         return shell->focus_cycler()->FocusWidget(shell->tray()->GetWidget());
@@ -393,8 +422,13 @@ bool AcceleratorController::AcceleratorPressed(
         oak::ShowOakWindow();
       break;
     case NEXT_IME:
-      if (ime_control_delegate_.get())
-        return ime_control_delegate_->HandleNextIme();
+      if (ime_control_delegate_.get()) {
+        ime_control_delegate_->HandleNextIme();
+        // We shouldn't consume Shift+Alt. crbug.com/123720
+        // TODO(yusukes): We might be able to remove the hack when issue 123856
+        // is fixed.
+        return false;
+      }
       break;
     case PREVIOUS_IME:
       if (ime_control_delegate_.get())
@@ -431,6 +465,41 @@ bool AcceleratorController::AcceleratorPressed(
     case SELECT_LAST_WIN:
       SwitchToWindow(-1);
       break;
+    case WINDOW_SNAP_LEFT:
+    case WINDOW_SNAP_RIGHT: {
+      aura::Window* window = wm::GetActiveWindow();
+      if (!window)
+        break;
+      internal::SnapSizer sizer(window,
+          gfx::Point(),
+          action == WINDOW_SNAP_LEFT ? internal::SnapSizer::LEFT_EDGE :
+                                       internal::SnapSizer::RIGHT_EDGE,
+          shell->GetGridSize());
+      window->SetBounds(sizer.GetSnapBounds(window->bounds()));
+      break;
+    }
+    case WINDOW_MINIMIZE: {
+      aura::Window* window = wm::GetActiveWindow();
+      if (window)
+        wm::MinimizeWindow(window);
+      break;
+    }
+    case WINDOW_MAXIMIZE_RESTORE: {
+      aura::Window* window = wm::GetActiveWindow();
+      if (window) {
+        if (wm::IsWindowMaximized(window))
+          wm::RestoreWindow(window);
+        else
+          wm::MaximizeWindow(window);
+      }
+      break;
+    }
+    case WINDOW_POSITION_CENTER: {
+      aura::Window* window = wm::GetActiveWindow();
+      if (window)
+        wm::CenterWindow(window);
+      break;
+    }
     case ROTATE_WINDOWS:
       return HandleRotateWindows();
 #if !defined(NDEBUG)

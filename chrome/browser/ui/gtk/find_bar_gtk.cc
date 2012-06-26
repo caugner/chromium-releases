@@ -24,12 +24,12 @@
 #include "chrome/browser/ui/find_bar/find_tab_helper.h"
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
 #include "chrome/browser/ui/gtk/custom_button.h"
+#include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/nine_box.h"
 #include "chrome/browser/ui/gtk/slide_animator_gtk.h"
 #include "chrome/browser/ui/gtk/tab_contents_container_gtk.h"
 #include "chrome/browser/ui/gtk/tabs/tab_strip_gtk.h"
-#include "chrome/browser/ui/gtk/theme_service_gtk.h"
 #include "chrome/browser/ui/gtk/view_id_util.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -178,7 +178,7 @@ void BuildBorder(GtkWidget* child,
 FindBarGtk::FindBarGtk(BrowserWindowGtk* window)
     : browser_(window->browser()),
       window_(window),
-      theme_service_(ThemeServiceGtk::GetFrom(browser_->profile())),
+      theme_service_(GtkThemeService::GetFrom(browser_->profile())),
       container_width_(-1),
       container_height_(-1),
       match_label_failure_(false),
@@ -418,7 +418,8 @@ void FindBarGtk::AudibleAlert() {
   //   gtk_widget_error_bell(widget());
 }
 
-gfx::Rect FindBarGtk::GetDialogPosition(gfx::Rect avoid_overlapping_rect) {
+gfx::Rect FindBarGtk::GetDialogPosition(
+    const gfx::Rect& avoid_overlapping_rect) {
   bool ltr = !base::i18n::IsRTL();
   // 15 is the size of the scrollbar, copied from ScrollbarThemeChromium.
   // The height is not used.
@@ -908,8 +909,10 @@ gboolean FindBarGtk::OnExpose(GtkWidget* widget, GdkEventExpose* e,
 
     // Blit the left part of the background image once on the left.
     ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-    gfx::CairoCachedSurface* background_left =
-        rb.GetRTLEnabledImageNamed(IDR_FIND_BOX_BACKGROUND_LEFT).ToCairo();
+
+    gfx::CairoCachedSurface* background_left = rb.GetNativeImageNamed(
+        IDR_FIND_BOX_BACKGROUND_LEFT,
+        ui::ResourceBundle::RTL_ENABLED).ToCairo();
     background_left->SetSource(cr, widget,
                                border_allocation.x, border_allocation.y);
     cairo_pattern_set_extend(cairo_get_source(cr), CAIRO_EXTEND_REPEAT);

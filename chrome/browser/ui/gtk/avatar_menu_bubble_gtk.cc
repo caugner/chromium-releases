@@ -14,9 +14,9 @@
 #include "chrome/browser/ui/gtk/browser_toolbar_gtk.h"
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
 #include "chrome/browser/ui/gtk/gtk_chrome_link_button.h"
+#include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/location_bar_view_gtk.h"
-#include "chrome/browser/ui/gtk/theme_service_gtk.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_source.h"
 #include "grit/generated_resources.h"
@@ -39,7 +39,7 @@ AvatarMenuBubbleGtk::AvatarMenuBubbleGtk(Browser* browser,
                                          BubbleGtk::ArrowLocationGtk arrow,
                                          const gfx::Rect* rect)
     : contents_(NULL),
-      theme_service_(ThemeServiceGtk::GetFrom(browser->profile())),
+      theme_service_(GtkThemeService::GetFrom(browser->profile())),
       new_profile_link_(NULL),
       minimum_width_(kBubbleMinWidth) {
   avatar_menu_model_.reset(new AvatarMenuModel(
@@ -90,17 +90,21 @@ void AvatarMenuBubbleGtk::OnAvatarMenuModelChanged(
 }
 
 void AvatarMenuBubbleGtk::OpenProfile(size_t profile_index) {
+  if (!bubble_)
+    return;
   GdkModifierType modifier_state;
   gtk_get_current_event_state(&modifier_state);
   guint modifier_state_uint = modifier_state;
   avatar_menu_model_->SwitchToProfile(profile_index,
       event_utils::DispositionFromGdkState(modifier_state_uint) == NEW_WINDOW);
-  bubble_->Close();
+  CloseBubble();
 }
 
 void AvatarMenuBubbleGtk::EditProfile(size_t profile_index) {
+  if (!bubble_)
+    return;
   avatar_menu_model_->EditProfile(profile_index);
-  bubble_->Close();
+  CloseBubble();
 }
 
 void AvatarMenuBubbleGtk::Observe(int type,
@@ -122,8 +126,10 @@ void AvatarMenuBubbleGtk::OnSizeRequest(GtkWidget* widget,
 }
 
 void AvatarMenuBubbleGtk::OnNewProfileLinkClicked(GtkWidget* link) {
+  if (!bubble_)
+    return;
   avatar_menu_model_->AddNewProfile();
-  bubble_->Close();
+  CloseBubble();
 }
 
 void AvatarMenuBubbleGtk::InitContents() {
@@ -165,4 +171,9 @@ void AvatarMenuBubbleGtk::InitContents() {
   gtk_container_add(GTK_CONTAINER(link_align), new_profile_link_);
 
   gtk_box_pack_start(GTK_BOX(contents_), link_align, FALSE, FALSE, 0);
+}
+
+void AvatarMenuBubbleGtk::CloseBubble() {
+  bubble_->Close();
+  bubble_ = NULL;
 }

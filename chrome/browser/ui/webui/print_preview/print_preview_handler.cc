@@ -132,7 +132,7 @@ DictionaryValue* GetSettingsDictionary(const ListValue* args) {
     return NULL;
   }
   scoped_ptr<DictionaryValue> settings(static_cast<DictionaryValue*>(
-      base::JSONReader::Read(json_str, false)));
+      base::JSONReader::Read(json_str)));
   if (!settings.get() || !settings->IsType(Value::TYPE_DICTIONARY)) {
     NOTREACHED() << "Print job settings must be a dictionary.";
     return NULL;
@@ -439,7 +439,7 @@ void PrintPreviewHandler::HandlePrintToPdf(
       web_ui()->GetController());
   if (print_to_pdf_path_.get()) {
     // User has already selected a path, no need to show the dialog again.
-    scoped_refptr<RefCountedBytes> data;
+    scoped_refptr<base::RefCountedBytes> data;
     print_preview_ui->GetPrintPreviewDataForIndex(
         printing::COMPLETE_PREVIEW_DOCUMENT_INDEX, &data);
     PostPrintToPdfTask(data);
@@ -540,10 +540,13 @@ void PrintPreviewHandler::HandlePrintWithCloudPrint() {
 
   PrintPreviewUI* print_preview_ui = static_cast<PrintPreviewUI*>(
       web_ui()->GetController());
-  scoped_refptr<RefCountedBytes> data;
+  scoped_refptr<base::RefCountedBytes> data;
   print_preview_ui->GetPrintPreviewDataForIndex(
       printing::COMPLETE_PREVIEW_DOCUMENT_INDEX, &data);
-  CHECK(data.get());
+  if (!data.get()) {
+    NOTREACHED();
+    return;
+  }
   DCHECK_GT(data->size(), 0U);
   print_dialog_cloud::CreatePrintDialogForBytes(data,
       string16(print_preview_ui->initiator_tab_title()),
@@ -706,7 +709,7 @@ void PrintPreviewHandler::SendCloudPrintEnabled() {
 
 void PrintPreviewHandler::SendCloudPrintJob(const DictionaryValue& settings,
                                             std::string print_ticket) {
-  scoped_refptr<RefCountedBytes> data;
+  scoped_refptr<base::RefCountedBytes> data;
   PrintPreviewUI* print_preview_ui = static_cast<PrintPreviewUI*>(
       web_ui()->GetController());
   print_preview_ui->GetPrintPreviewDataForIndex(
@@ -833,7 +836,7 @@ void PrintPreviewHandler::FileSelected(const FilePath& path,
   PrintPreviewUI* print_preview_ui = static_cast<PrintPreviewUI*>(
       web_ui()->GetController());
   print_preview_ui->web_ui()->CallJavascriptFunction("fileSelectionCompleted");
-  scoped_refptr<RefCountedBytes> data;
+  scoped_refptr<base::RefCountedBytes> data;
   print_preview_ui->GetPrintPreviewDataForIndex(
       printing::COMPLETE_PREVIEW_DOCUMENT_INDEX, &data);
   print_to_pdf_path_.reset(new FilePath(path));
@@ -842,7 +845,7 @@ void PrintPreviewHandler::FileSelected(const FilePath& path,
 }
 
 void PrintPreviewHandler::PostPrintToPdfTask(
-    scoped_refptr<RefCountedBytes> data) {
+    scoped_refptr<base::RefCountedBytes> data) {
   printing::PreviewMetafile* metafile = new printing::PreviewMetafile;
   metafile->InitFromData(static_cast<const void*>(data->front()), data->size());
   // PrintToPdfCallback takes ownership of |metafile|.

@@ -126,6 +126,7 @@ class ASH_EXPORT ShelfLayoutManager : public aura::LayoutManager,
   virtual void OnWindowResized() OVERRIDE;
   virtual void OnWindowAddedToLayout(aura::Window* child) OVERRIDE;
   virtual void OnWillRemoveWindowFromLayout(aura::Window* child) OVERRIDE;
+  virtual void OnWindowRemovedFromLayout(aura::Window* child) OVERRIDE;
   virtual void OnChildWindowVisibilityChanged(aura::Window* child,
                                               bool visible) OVERRIDE;
   virtual void SetChildBounds(aura::Window* child,
@@ -150,7 +151,9 @@ class ASH_EXPORT ShelfLayoutManager : public aura::LayoutManager,
   };
 
   struct State {
-    State() : visibility_state(VISIBLE), auto_hide_state(AUTO_HIDE_HIDDEN) {}
+    State() : visibility_state(VISIBLE),
+              auto_hide_state(AUTO_HIDE_HIDDEN),
+              is_screen_locked(false) {}
 
     // Returns true if the two states are considered equal. As
     // |auto_hide_state| only matters if |visibility_state| is |AUTO_HIDE|,
@@ -158,11 +161,13 @@ class ASH_EXPORT ShelfLayoutManager : public aura::LayoutManager,
     bool Equals(const State& other) const {
       return other.visibility_state == visibility_state &&
           (visibility_state != AUTO_HIDE ||
-           other.auto_hide_state == auto_hide_state);
+           other.auto_hide_state == auto_hide_state) &&
+          other.is_screen_locked == is_screen_locked;
     }
 
     VisibilityState visibility_state;
     AutoHideState auto_hide_state;
+    bool is_screen_locked;
   };
 
   // Sets the visibility of the shelf to |state|.
@@ -190,6 +195,9 @@ class ASH_EXPORT ShelfLayoutManager : public aura::LayoutManager,
 
   // Updates the hit test bounds override for launcher and status area.
   void UpdateHitTestBounds();
+
+  // Returns true if |window| is a descendant of the shelf.
+  bool IsShelfWindow(aura::Window* window);
 
   // The RootWindow is cached so that we don't invoke Shell::GetInstance() from
   // our destructor. We avoid that as at the time we're deleted Shell is being

@@ -57,14 +57,8 @@ class CONTENT_EXPORT DownloadManagerImpl
                                      base::Time remove_end) OVERRIDE;
   virtual int RemoveDownloads(base::Time remove_begin) OVERRIDE;
   virtual int RemoveAllDownloads() OVERRIDE;
-  virtual void DownloadUrl(const GURL& url,
-                           const GURL& referrer,
-                           const std::string& referrer_encoding,
-                           bool prefer_cache,
-                           int64 post_id,
-                           const content::DownloadSaveInfo& save_info,
-                           content::WebContents* web_contents,
-                           const OnStartedCallback& callback) OVERRIDE;
+  virtual void DownloadUrl(
+      scoped_ptr<content::DownloadUrlParameters> params) OVERRIDE;
   virtual void AddObserver(Observer* observer) OVERRIDE;
   virtual void RemoveObserver(Observer* observer) OVERRIDE;
   virtual void OnPersistentStoreQueryComplete(
@@ -81,6 +75,7 @@ class CONTENT_EXPORT DownloadManagerImpl
       const FilePath& main_file_path,
       const GURL& page_url,
       bool is_otr,
+      const std::string& mime_type,
       content::DownloadItem::Observer* observer) OVERRIDE;
   virtual void ClearLastDownloadPath() OVERRIDE;
   virtual void FileSelected(const FilePath& path, int32 download_id) OVERRIDE;
@@ -245,10 +240,6 @@ class CONTENT_EXPORT DownloadManagerImpl
 
   // Allows an embedder to control behavior. Guaranteed to outlive this object.
   content::DownloadManagerDelegate* delegate_;
-
-  // TODO(rdsmith): Remove when http://crbug.com/85408 is fixed.
-  // For debugging only.
-  int64 largest_db_handle_in_history_;
 
   net::NetLog* net_log_;
 

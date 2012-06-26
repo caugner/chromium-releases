@@ -20,6 +20,8 @@ namespace chromeos {
 // WebUILoginDisplay, public: --------------------------------------------------
 
 WebUILoginDisplay::~WebUILoginDisplay() {
+  if (webui_handler_)
+    webui_handler_->ResetSigninScreenHandlerDelegate();
 }
 
 // LoginDisplay implementation: ------------------------------------------------
@@ -59,24 +61,25 @@ void WebUILoginDisplay::OnBeforeUserRemoved(const std::string& username) {
 }
 
 void WebUILoginDisplay::OnUserImageChanged(const User& user) {
-  DCHECK(webui_handler_);
-  webui_handler_->OnUserImageChanged(user);
+  if (webui_handler_)
+    webui_handler_->OnUserImageChanged(user);
 }
 
 void WebUILoginDisplay::OnUserRemoved(const std::string& username) {
-  DCHECK(webui_handler_);
-  webui_handler_->OnUserRemoved(username);
+  if (webui_handler_)
+    webui_handler_->OnUserRemoved(username);
 }
 
 void WebUILoginDisplay::OnFadeOut() {
 }
 
 void WebUILoginDisplay::OnLoginSuccess(const std::string& username) {
-  webui_handler_->OnLoginSuccess(username);
+  if (webui_handler_)
+    webui_handler_->OnLoginSuccess(username);
 }
 
 void WebUILoginDisplay::SetUIEnabled(bool is_enabled) {
-  if (is_enabled)
+  if (webui_handler_ && is_enabled)
     webui_handler_->ClearAndEnablePassword();
 }
 
@@ -86,7 +89,11 @@ void WebUILoginDisplay::SelectPod(int index) {
 void WebUILoginDisplay::ShowError(int error_msg_id,
                                   int login_attempts,
                                   HelpAppLauncher::HelpTopic help_topic_id) {
-  DCHECK(webui_handler_);
+  VLOG(1) << "Show error, error_id: " << error_msg_id
+          << ", attempts:" << login_attempts
+          <<  ", help_topic_id: " << help_topic_id;
+  if (!webui_handler_)
+    return;
 
   std::string error_text;
   switch (error_msg_id) {
@@ -113,19 +120,16 @@ void WebUILoginDisplay::ShowError(int error_msg_id,
         l10n_util::GetStringUTF8(IDS_LOGIN_ERROR_CAPS_LOCK_HINT);
   }
 
-  // Display a hint to switch keyboards if there are other active input methods.
-  if (ime_manager->GetNumActiveInputMethods() > 1)
+  // Display a hint to switch keyboards if there are other active input methods
+  // and error is authentication-related.
+  if (ime_manager->GetNumActiveInputMethods() > 1 &&
+      error_msg_id != IDS_LOGIN_ERROR_WHITELIST) {
     error_text += "\n" +
         l10n_util::GetStringUTF8(IDS_LOGIN_ERROR_KEYBOARD_SWITCH_HINT);
+  }
 
   std::string help_link;
   switch (error_msg_id) {
-    case IDS_LOGIN_ERROR_CAPTIVE_PORTAL:
-      help_link = l10n_util::GetStringUTF8(IDS_LOGIN_FIX_CAPTIVE_PORTAL);
-      break;
-    case IDS_LOGIN_ERROR_CAPTIVE_PORTAL_NO_GUEST_MODE:
-      // No help link is needed.
-      break;
     case IDS_LOGIN_ERROR_AUTHENTICATING_HOSTED:
       help_link = l10n_util::GetStringUTF8(IDS_LEARN_MORE);
       break;
@@ -141,7 +145,8 @@ void WebUILoginDisplay::ShowError(int error_msg_id,
 }
 
 void WebUILoginDisplay::ShowGaiaPasswordChanged(const std::string& username) {
-  webui_handler_->ShowGaiaPasswordChanged(username);
+  if (webui_handler_)
+    webui_handler_->ShowGaiaPasswordChanged(username);
 }
 
 // WebUILoginDisplay, SigninScreenHandlerDelegate implementation: --------------
@@ -175,12 +180,6 @@ void WebUILoginDisplay::Signout() {
   delegate_->Signout();
 }
 
-void WebUILoginDisplay::FixCaptivePortal() {
-  DCHECK(delegate_);
-  if (delegate_)
-    delegate_->FixCaptivePortal();
-}
-
 void WebUILoginDisplay::CreateAccount() {
   DCHECK(delegate_);
   if (delegate_)
@@ -204,8 +203,8 @@ void WebUILoginDisplay::SetWebUIHandler(
 void WebUILoginDisplay::ShowSigninScreenForCreds(
     const std::string& username,
     const std::string& password) {
-  DCHECK(webui_handler_);
-  webui_handler_->ShowSigninScreenForCreds(username, password);
+  if (webui_handler_)
+    webui_handler_->ShowSigninScreenForCreds(username, password);
 }
 
 const UserList& WebUILoginDisplay::GetUsers() const {

@@ -21,6 +21,7 @@
 #include "content/public/renderer/render_view.h"
 #include "grit/generated_resources.h"
 #include "grit/renderer_resources.h"
+#include "grit/webkit_strings.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebData.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebPoint.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebVector.h"
@@ -39,11 +40,13 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "webkit/glue/webpreferences.h"
 #include "webkit/plugins/npapi/plugin_group.h"
+#include "webkit/plugins/npapi/plugin_list.h"
 #include "webkit/plugins/webview_plugin.h"
 
 using content::RenderThread;
 using content::RenderView;
 using WebKit::WebContextMenuData;
+using WebKit::WebDocument;
 using WebKit::WebElement;
 using WebKit::WebFrame;
 using WebKit::WebMenuItemInfo;
@@ -95,6 +98,27 @@ PluginPlaceholder* PluginPlaceholder::CreateMissingPlugin(
   missing_plugin->OnDidNotFindMissingPlugin();
 #endif
   return missing_plugin;
+}
+
+PluginPlaceholder* PluginPlaceholder::CreateErrorPlugin(
+    RenderView* render_view,
+    const FilePath& file_path) {
+  DictionaryValue values;
+  values.SetString("message",
+                   l10n_util::GetStringUTF8(IDS_PLUGIN_INITIALIZATION_ERROR));
+
+  const base::StringPiece template_html(
+      ResourceBundle::GetSharedInstance().GetRawDataResource(
+          IDR_BLOCKED_PLUGIN_HTML));
+  std::string html_data =
+      jstemplate_builder::GetI18nTemplateHtml(template_html, &values);
+
+  WebPluginParams params;
+  // |missing_plugin| will destroy itself when its WebViewPlugin is going away.
+  PluginPlaceholder* plugin = new PluginPlaceholder(
+      render_view, NULL, params, html_data, params.mimeType);
+
+  return plugin;
 }
 
 // static
@@ -228,19 +252,32 @@ bool PluginPlaceholder::OnMessageReceived(const IPC::Message& message) {
 
 void PluginPlaceholder::ReplacePlugin(WebPlugin* new_plugin) {
   CHECK(plugin_);
-  WebPluginContainer* container = plugin_->container();
-  if (new_plugin && new_plugin->initialize(container)) {
-    plugin_->RestoreTitleText();
-    container->setPlugin(new_plugin);
-    container->invalidate();
-    container->reportGeometry();
-    plugin_->ReplayReceivedData(new_plugin);
-    plugin_->destroy();
-  } else {
+  if (!new_plugin) {
     MissingPluginReporter::GetInstance()->ReportPluginMissing(
         plugin_params_.mimeType.utf8(),
         plugin_params_.url);
+    return;
   }
+
+  // Set the new plug-in on the container before initializing it.
+  WebPluginContainer* container = plugin_->container();
+  container->setPlugin(new_plugin);
+  if (!new_plugin->initialize(container)) {
+    // We couldn't initialize the new plug-in. Restore the old one and abort.
+    container->setPlugin(plugin_);
+    return;
+  }
+
+  // During initialization, the new plug-in might have replaced itself in turn
+  // with another plug-in. Make sure not to use the passed in |new_plugin| after
+  // this point.
+  new_plugin = container->plugin();
+
+  plugin_->RestoreTitleText();
+  container->invalidate();
+  container->reportGeometry();
+  plugin_->ReplayReceivedData(new_plugin);
+  plugin_->destroy();
 }
 
 void PluginPlaceholder::HidePlugin() {
@@ -333,12 +370,18 @@ void PluginPlaceholder::OnCancelledDownloadingPlugin() {
 #endif  // defined(ENABLE_PLUGIN_INSTALLATION)
 
 void PluginPlaceholder::PluginListChanged() {
+  if (!frame_)
+    return;
+  WebDocument document = frame_->top()->document();
+  if (document.isNull())
+    return;
+
   ChromeViewHostMsg_GetPluginInfo_Status status;
   webkit::WebPluginInfo plugin_info;
   std::string mime_type(plugin_params_.mimeType.utf8());
   std::string actual_mime_type;
   render_view()->Send(new ChromeViewHostMsg_GetPluginInfo(
-      routing_id(), GURL(plugin_params_.url), frame_->top()->document().url(),
+      routing_id(), GURL(plugin_params_.url), document.url(),
       mime_type, &status, &plugin_info, &actual_mime_type));
   if (status.value == status_->value)
     return;

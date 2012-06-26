@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,13 +6,23 @@
 #define SANDBOX_SRC_BROKER_SERVICES_H__
 
 #include <list>
+#include <map>
+#include <set>
 #include "base/basictypes.h"
+#include "base/win/scoped_handle.h"
 #include "sandbox/src/crosscall_server.h"
 #include "sandbox/src/job.h"
 #include "sandbox/src/sandbox.h"
 #include "sandbox/src/sharedmem_ipc_server.h"
 #include "sandbox/src/win2k_threadpool.h"
 #include "sandbox/src/win_utils.h"
+
+namespace {
+
+struct JobTracker;
+struct PeerTracker;
+
+}  // namespace
 
 namespace sandbox {
 
@@ -32,7 +42,7 @@ class BrokerServicesBase : public BrokerServices,
 
   ~BrokerServicesBase();
 
-  // The next four methods are the BrokerServices interface
+  // The next five methods are the BrokerServices interface
   virtual ResultCode Init();
 
   virtual TargetPolicy* CreatePolicy();
@@ -44,17 +54,15 @@ class BrokerServicesBase : public BrokerServices,
 
   virtual ResultCode WaitForAllTargets();
 
- private:
-  // Helper structure that allows the Broker to associate a job notification
-  // with a job object and with a policy.
-  struct JobTracker {
-    HANDLE job;
-    PolicyBase* policy;
-    JobTracker(HANDLE cjob, PolicyBase* cpolicy)
-        : job(cjob), policy(cpolicy) {
-     }
-  };
+  virtual ResultCode AddTargetPeer(HANDLE peer_process);
 
+  // Checks if the supplied process ID matches one of the broker's active
+  // target processes
+  // Returns:
+  //   true if there is an active target process for this ID, otherwise false.
+  bool IsActiveTarget(DWORD process_id);
+
+ private:
   // Releases the Job and notifies the associated Policy object to its
   // resources as well.
   static void FreeResources(JobTracker* tracker);
@@ -62,6 +70,9 @@ class BrokerServicesBase : public BrokerServices,
   // The routine that the worker thread executes. It is in charge of
   // notifications and cleanup-related tasks.
   static DWORD WINAPI TargetEventsThread(PVOID param);
+
+  // Removes a target peer from the process list if it expires.
+  static VOID CALLBACK RemovePeer(PVOID parameter, BOOLEAN);
 
   // The completion port used by the job objects to communicate events to
   // the worker thread.
@@ -84,6 +95,14 @@ class BrokerServicesBase : public BrokerServices,
   // List of the trackers for closing and cleanup purposes.
   typedef std::list<JobTracker*> JobTrackerList;
   JobTrackerList tracker_list_;
+
+  // Maps peer process IDs to the saved handle and wait event.
+  // Prevents peer callbacks from accessing the broker after destruction.
+  typedef std::map<DWORD, PeerTracker*> PeerTrackerMap;
+  PeerTrackerMap peer_map_;
+
+  // Provides a fast lookup to identify sandboxed processes.
+  std::set<DWORD> child_process_ids_;
 
   DISALLOW_COPY_AND_ASSIGN(BrokerServicesBase);
 };

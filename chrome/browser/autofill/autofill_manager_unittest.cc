@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <algorithm>
 #include <vector>
 
 #include "base/command_line.h"
@@ -23,6 +24,7 @@
 #include "chrome/browser/autofill/test_autofill_external_delegate.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/tab_contents/test_tab_contents_wrapper.h"
@@ -38,6 +40,7 @@
 #include "ipc/ipc_test_sink.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebAutofillClient.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/rect.h"
 #include "webkit/forms/form_data.h"
@@ -84,12 +87,37 @@ class TestPersonalDataManager : public PersonalDataManager {
     return NULL;
   }
 
+  CreditCard* GetCreditCardWithGUID(const char* guid) {
+    for (std::vector<CreditCard *>::iterator it = credit_cards_.begin();
+         it != credit_cards_.end(); ++it){
+      if (!(*it)->guid().compare(guid))
+        return *it;
+    }
+    return NULL;
+  }
+
   void AddProfile(AutofillProfile* profile) {
     web_profiles_->push_back(profile);
   }
 
   void AddCreditCard(CreditCard* credit_card) {
     credit_cards_->push_back(credit_card);
+  }
+
+  virtual void RemoveProfile(const std::string& guid) OVERRIDE {
+    AutofillProfile* profile = GetProfileWithGUID(guid.c_str());
+
+    web_profiles_.erase(
+        std::remove(web_profiles_.begin(), web_profiles_.end(), profile),
+        web_profiles_.end());
+  }
+
+  virtual void RemoveCreditCard(const std::string& guid) OVERRIDE {
+    CreditCard* credit_card = GetCreditCardWithGUID(guid.c_str());
+
+    credit_cards_.erase(
+        std::remove(credit_cards_.begin(), credit_cards_.end(), credit_card),
+        credit_cards_.end());
   }
 
   void ClearAutofillProfiles() {
@@ -486,12 +514,29 @@ class TestAutofillManager : public AutofillManager {
     submitted_form_signature_ = submitted_form.FormSignature();
   }
 
+  virtual void SendPasswordGenerationStateToRenderer(
+      content::RenderViewHost* host, bool enabled) OVERRIDE {
+    sent_states_.push_back(enabled);
+  }
+
+  const std::vector<bool>& GetSentStates() {
+    return sent_states_;
+  }
+
+  void ClearSentStates() {
+    sent_states_.clear();
+  }
+
   const std::string GetSubmittedFormSignature() {
     return submitted_form_signature_;
   }
 
   AutofillProfile* GetProfileWithGUID(const char* guid) {
     return personal_data_->GetProfileWithGUID(guid);
+  }
+
+  CreditCard* GetCreditCardWithGUID(const char* guid) {
+    return personal_data_->GetCreditCardWithGUID(guid);
   }
 
   void AddProfile(AutofillProfile* profile) {
@@ -527,6 +572,7 @@ class TestAutofillManager : public AutofillManager {
 
   std::string submitted_form_signature_;
   std::vector<FieldTypeSet> expected_submitted_field_types_;
+  std::vector<bool> sent_states_;
 
   DISALLOW_COPY_AND_ASSIGN(TestAutofillManager);
 };
@@ -565,6 +611,10 @@ class AutofillManagerTest : public TabContentsWrapperTestHarness {
   virtual void TearDown() OVERRIDE {
     file_thread_.Stop();
     TabContentsWrapperTestHarness::TearDown();
+  }
+
+  void UpdatePasswordGenerationState(bool new_renderer) {
+    autofill_manager_->UpdatePasswordGenerationState(NULL, new_renderer);
   }
 
   void GetAutofillSuggestions(int query_id,
@@ -653,12 +703,20 @@ class AutofillManagerTest : public TabContentsWrapperTestHarness {
     return true;
   }
 
+  ProfileSyncService* GetProfileSyncService() {
+    return autofill_manager_->sync_service_;
+  }
+
  protected:
   content::TestBrowserThread ui_thread_;
   content::TestBrowserThread file_thread_;
 
   scoped_refptr<TestAutofillManager> autofill_manager_;
   TestPersonalDataManager personal_data_;
+
+  // Used when we want an off the record profile. This will store the original
+  // profile from which the off the record profile is derived.
+  scoped_ptr<Profile> other_browser_context_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(AutofillManagerTest);
@@ -888,7 +946,8 @@ TEST_F(AutofillManagerTest, GetProfileSuggestionsMethodGet) {
   };
   string16 expected_labels[] = {string16()};
   string16 expected_icons[] = {string16()};
-  int expected_unique_ids[] = {-1};
+  int expected_unique_ids[] =
+      {WebKit::WebAutofillClient::MenuItemIDWarningMessage};
   ExpectSuggestions(page_id, values, labels, icons, unique_ids,
                     kDefaultPageID, arraysize(expected_values), expected_values,
                     expected_labels, expected_icons, expected_unique_ids);
@@ -2862,6 +2921,109 @@ TEST_F(AutofillManagerTest, DeterminePossibleFieldTypesForUpload) {
   FormSubmitted(form);
 }
 
+TEST_F(AutofillManagerTest, UpdatePasswordGenerationState) {
+  // Allow this test to control what should get synced.
+  profile()->GetPrefs()->SetBoolean(prefs::kSyncKeepEverythingSynced, false);
+
+  // Sync some things, but not passwords. Shouldn't send anything since
+  // password generation is disabled by default.
+  ProfileSyncService* sync_service = GetProfileSyncService();
+  sync_service->SetSyncSetupCompleted();
+  syncable::ModelTypeSet preferred_set;
+  preferred_set.Put(syncable::EXTENSIONS);
+  preferred_set.Put(syncable::PREFERENCES);
+  sync_service->ChangePreferredDataTypes(preferred_set);
+  syncable::ModelTypeSet new_set = sync_service->GetPreferredDataTypes();
+  UpdatePasswordGenerationState(false);
+  EXPECT_EQ(0u, autofill_manager_->GetSentStates().size());
+
+  // Now sync passwords.
+  preferred_set.Put(syncable::PASSWORDS);
+  sync_service->ChangePreferredDataTypes(preferred_set);
+  UpdatePasswordGenerationState(false);
+  EXPECT_EQ(1u, autofill_manager_->GetSentStates().size());
+  EXPECT_TRUE(autofill_manager_->GetSentStates()[0]);
+  autofill_manager_->ClearSentStates();
+
+  // Add some additional synced state. Nothing should be sent.
+  preferred_set.Put(syncable::THEMES);
+  sync_service->ChangePreferredDataTypes(preferred_set);
+  UpdatePasswordGenerationState(false);
+  EXPECT_EQ(0u, autofill_manager_->GetSentStates().size());
+
+  // Disable syncing. This should disable the feature.
+  sync_service->DisableForUser();
+  UpdatePasswordGenerationState(false);
+  EXPECT_EQ(1u, autofill_manager_->GetSentStates().size());
+  EXPECT_FALSE(autofill_manager_->GetSentStates()[0]);
+  autofill_manager_->ClearSentStates();
+
+  // Disable password manager by going incognito, and re-enable syncing. The
+  // feature should still be disabled, and nothing will be sent.
+  sync_service->SetSyncSetupCompleted();
+  profile()->set_incognito(true);
+  UpdatePasswordGenerationState(false);
+  EXPECT_EQ(0u, autofill_manager_->GetSentStates().size());
+
+  // When a new render_view is created, we send the state even if it's the
+  // same.
+  UpdatePasswordGenerationState(true);
+  EXPECT_EQ(1u, autofill_manager_->GetSentStates().size());
+  EXPECT_FALSE(autofill_manager_->GetSentStates()[0]);
+  autofill_manager_->ClearSentStates();
+}
+
+TEST_F(AutofillManagerTest, RemoveProfile) {
+  // Add and remove an Autofill profile.
+  AutofillProfile* profile = new AutofillProfile;
+  std::string guid = "00000000-0000-0000-0000-000000000102";
+  profile->set_guid(guid.c_str());
+  autofill_manager_->AddProfile(profile);
+
+  GUIDPair guid_pair(guid, 0);
+  GUIDPair empty(std::string(), 0);
+  int id = PackGUIDs(empty, guid_pair);
+
+  autofill_manager_->RemoveAutofillProfileOrCreditCard(id);
+
+  EXPECT_FALSE(autofill_manager_->GetProfileWithGUID(guid.c_str()));
+}
+
+TEST_F(AutofillManagerTest, RemoveCreditCard){
+  // Add and remove an Autofill credit card.
+  CreditCard* credit_card = new CreditCard;
+  std::string guid = "00000000-0000-0000-0000-000000100007";
+  credit_card->set_guid(guid.c_str());
+  autofill_manager_->AddCreditCard(credit_card);
+
+  GUIDPair guid_pair(guid, 0);
+  GUIDPair empty(std::string(), 0);
+  int id = PackGUIDs(guid_pair, empty);
+
+  autofill_manager_->RemoveAutofillProfileOrCreditCard(id);
+
+  EXPECT_FALSE(autofill_manager_->GetCreditCardWithGUID(guid.c_str()));
+}
+
+TEST_F(AutofillManagerTest, RemoveProfileVariant) {
+  // Add and remove an Autofill profile.
+  AutofillProfile* profile = new AutofillProfile;
+  std::string guid = "00000000-0000-0000-0000-000000000102";
+  profile->set_guid(guid.c_str());
+  autofill_manager_->AddProfile(profile);
+
+  GUIDPair guid_pair(guid, 1);
+  GUIDPair empty(std::string(), 0);
+  int id = PackGUIDs(empty, guid_pair);
+
+  autofill_manager_->RemoveAutofillProfileOrCreditCard(id);
+
+  // TODO(csharp): Currently variants should not be deleted, but once they are
+  // update these expectations.
+  // http://crbug.com/124211
+  EXPECT_TRUE(autofill_manager_->GetProfileWithGUID(guid.c_str()));
+}
+
 namespace {
 
 class MockAutofillExternalDelegate : public TestAutofillExternalDelegate {
@@ -2910,7 +3072,7 @@ TEST_F(AutofillManagerTest, TestExternalDelegate) {
 // landing autofill_external_delegate_android.cc in the Chromium tree
 // have not themselves landed.
 
-// Turn on the external delegate.  Recreate a TabContents.  Make sure
+// Turn on the external delegate.  Recreate a WebContents.  Make sure
 // an external delegate was set in the proper structures.
 TEST_F(AutofillManagerTest, TestTabContentsWithExternalDelegate) {
   CommandLine::ForCurrentProcess()->AppendSwitch(

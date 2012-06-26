@@ -38,13 +38,13 @@ const int kTcpSendBufferSize = kTcpReceiveBufferSize + 30 * 1024;
 class PepperStreamTransport : public StreamTransport,
                               public PepperTransportSocketAdapter::Observer {
  public:
-  PepperStreamTransport(pp::Instance* pp_instance);
+  PepperStreamTransport(pp::Instance* pp_instance,
+                        const TransportConfig& config);
   virtual ~PepperStreamTransport();
 
   // StreamTransport interface.
   virtual void Initialize(
       const std::string& name,
-      const TransportConfig& config,
       Transport::EventHandler* event_handler,
       scoped_ptr<ChannelAuthenticator> authenticator) OVERRIDE;
   virtual void Connect(
@@ -67,8 +67,8 @@ class PepperStreamTransport : public StreamTransport,
   void NotifyConnectFailed();
 
   pp::Instance* pp_instance_;
-  std::string name_;
   TransportConfig config_;
+  std::string name_;
   EventHandler* event_handler_;
   StreamTransport::ConnectedCallback callback_;
   scoped_ptr<ChannelAuthenticator> authenticator_;
@@ -84,8 +84,10 @@ class PepperStreamTransport : public StreamTransport,
   DISALLOW_COPY_AND_ASSIGN(PepperStreamTransport);
 };
 
-PepperStreamTransport::PepperStreamTransport(pp::Instance* pp_instance)
+PepperStreamTransport::PepperStreamTransport(pp::Instance* pp_instance,
+                                             const TransportConfig& config)
     : pp_instance_(pp_instance),
+      config_(config),
       event_handler_(NULL),
       channel_(NULL),
       connected_(false) {
@@ -100,7 +102,6 @@ PepperStreamTransport::~PepperStreamTransport() {
 
 void PepperStreamTransport::Initialize(
     const std::string& name,
-    const TransportConfig& config,
     Transport::EventHandler* event_handler,
     scoped_ptr<ChannelAuthenticator> authenticator) {
   DCHECK(CalledOnValidThread());
@@ -112,7 +113,6 @@ void PepperStreamTransport::Initialize(
   DCHECK(name_.empty());
 
   name_ = name;
-  config_ = config;
   event_handler_ = event_handler;
   authenticator_ = authenticator.Pass();
 }
@@ -149,30 +149,34 @@ void PepperStreamTransport::Connect(
     LOG(ERROR) << "Failed to set TCP ACK delay.";
   }
 
-  if (config_.nat_traversal_mode == TransportConfig::NAT_TRAVERSAL_ENABLED) {
-    if (transport->SetProperty(
-            PP_TRANSPORTPROPERTY_STUN_SERVER,
-            pp::Var(config_.stun_server)) != PP_OK) {
-      LOG(ERROR) << "Failed to set STUN server.";
-    }
+  if (transport->SetProperty(
+          PP_TRANSPORTPROPERTY_STUN_SERVER,
+          pp::Var(config_.stun_server)) != PP_OK) {
+    LOG(ERROR) << "Failed to set STUN server.";
+  }
 
-    if (transport->SetProperty(
-            PP_TRANSPORTPROPERTY_RELAY_SERVER,
-            pp::Var(config_.relay_server)) != PP_OK) {
-      LOG(ERROR) << "Failed to set relay server.";
-    }
+  if (transport->SetProperty(
+          PP_TRANSPORTPROPERTY_RELAY_SERVER,
+          pp::Var(config_.relay_server)) != PP_OK) {
+    LOG(ERROR) << "Failed to set relay server.";
+  }
 
-    if (transport->SetProperty(
-            PP_TRANSPORTPROPERTY_RELAY_PASSWORD,
-            pp::Var(config_.relay_token)) != PP_OK) {
-      LOG(ERROR) << "Failed to set relay token.";
-    }
+  if (transport->SetProperty(
+          PP_TRANSPORTPROPERTY_RELAY_USERNAME,
+          pp::Var("1")) != PP_OK) {
+    LOG(ERROR) << "Failed to set relay username.";
+  }
 
-    if (transport->SetProperty(
-            PP_TRANSPORTPROPERTY_RELAY_MODE,
-            pp::Var(PP_TRANSPORTRELAYMODE_GOOGLE)) != PP_OK) {
-      LOG(ERROR) << "Failed to set relay mode.";
-    }
+  if (transport->SetProperty(
+          PP_TRANSPORTPROPERTY_RELAY_PASSWORD,
+          pp::Var(config_.relay_token)) != PP_OK) {
+    LOG(ERROR) << "Failed to set relay token.";
+  }
+
+  if (transport->SetProperty(
+          PP_TRANSPORTPROPERTY_RELAY_MODE,
+          pp::Var(PP_TRANSPORTRELAYMODE_GOOGLE)) != PP_OK) {
+    LOG(ERROR) << "Failed to set relay mode.";
   }
 
   if (transport->SetProperty(PP_TRANSPORTPROPERTY_DISABLE_TCP_TRANSPORT,
@@ -276,8 +280,13 @@ PepperTransportFactory::PepperTransportFactory(
 PepperTransportFactory::~PepperTransportFactory() {
 }
 
+void PepperTransportFactory::SetTransportConfig(const TransportConfig& config) {
+  config_ = config;
+}
+
 scoped_ptr<StreamTransport> PepperTransportFactory::CreateStreamTransport() {
-  return scoped_ptr<StreamTransport>(new PepperStreamTransport(pp_instance_));
+  return scoped_ptr<StreamTransport>(
+      new PepperStreamTransport(pp_instance_, config_));
 }
 
 scoped_ptr<DatagramTransport>

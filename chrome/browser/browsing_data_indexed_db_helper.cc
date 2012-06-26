@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 #include "base/message_loop.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/browsing_data_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/indexed_db_context.h"
@@ -32,7 +33,6 @@ class BrowsingDataIndexedDBHelperImpl : public BrowsingDataIndexedDBHelper {
   virtual void StartFetching(
       const base::Callback<void(const std::list<IndexedDBInfo>&)>&
           callback) OVERRIDE;
-  virtual void CancelNotification() OVERRIDE;
   virtual void DeleteIndexedDB(const GURL& origin) OVERRIDE;
 
  private:
@@ -87,11 +87,6 @@ void BrowsingDataIndexedDBHelperImpl::StartFetching(
           this));
 }
 
-void BrowsingDataIndexedDBHelperImpl::CancelNotification() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  completion_callback_.Reset();
-}
-
 void BrowsingDataIndexedDBHelperImpl::DeleteIndexedDB(
     const GURL& origin) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -108,8 +103,9 @@ void BrowsingDataIndexedDBHelperImpl::FetchIndexedDBInfoInWebKitThread() {
   for (std::vector<GURL>::const_iterator iter = origins.begin();
        iter != origins.end(); ++iter) {
     const GURL& origin = *iter;
-    if (origin.SchemeIs(chrome::kExtensionScheme))
-      continue;  // Extension state is not considered browsing data.
+    if (!BrowsingDataHelper::HasValidScheme(origin))
+      continue;  // Non-websafe state is not considered browsing data.
+
     indexed_db_info_.push_back(IndexedDBInfo(
         origin,
         indexed_db_context_->GetOriginDiskUsage(origin),
@@ -124,12 +120,8 @@ void BrowsingDataIndexedDBHelperImpl::FetchIndexedDBInfoInWebKitThread() {
 void BrowsingDataIndexedDBHelperImpl::NotifyInUIThread() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(is_fetching_);
-  // Note: completion_callback_ mutates only in the UI thread, so it's safe to
-  // test it here.
-  if (!completion_callback_.is_null()) {
-    completion_callback_.Run(indexed_db_info_);
-    completion_callback_.Reset();
-  }
+  completion_callback_.Run(indexed_db_info_);
+  completion_callback_.Reset();
   is_fetching_ = false;
 }
 
@@ -190,6 +182,9 @@ CannedBrowsingDataIndexedDBHelper* CannedBrowsingDataIndexedDBHelper::Clone() {
 
 void CannedBrowsingDataIndexedDBHelper::AddIndexedDB(
     const GURL& origin, const string16& description) {
+  if (!BrowsingDataHelper::HasValidScheme(origin))
+    return;  // Non-websafe state is not considered browsing data.
+
   base::AutoLock auto_lock(lock_);
   pending_indexed_db_info_.push_back(PendingIndexedDBInfo(origin, description));
 }
@@ -203,6 +198,10 @@ void CannedBrowsingDataIndexedDBHelper::Reset() {
 bool CannedBrowsingDataIndexedDBHelper::empty() const {
   base::AutoLock auto_lock(lock_);
   return indexed_db_info_.empty() && pending_indexed_db_info_.empty();
+}
+
+size_t CannedBrowsingDataIndexedDBHelper::GetIndexedDBCount() const {
+  return pending_indexed_db_info_.size();
 }
 
 void CannedBrowsingDataIndexedDBHelper::StartFetching(
@@ -255,16 +254,7 @@ void CannedBrowsingDataIndexedDBHelper::NotifyInUIThread() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(is_fetching_);
 
-  // Completion_callback_ mutates only in the UI thread, so it's safe to test it
-  // here.
-  if (!completion_callback_.is_null()) {
-    completion_callback_.Run(indexed_db_info_);
-    completion_callback_.Reset();
-  }
-  is_fetching_ = false;
-}
-
-void CannedBrowsingDataIndexedDBHelper::CancelNotification() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  completion_callback_.Run(indexed_db_info_);
   completion_callback_.Reset();
+  is_fetching_ = false;
 }

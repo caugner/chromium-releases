@@ -157,7 +157,7 @@ class GeolocationConfirmInfoBarDelegate : public ConfirmInfoBarDelegate {
   int render_process_id_;
   int render_view_id_;
   int bridge_id_;
-  // The unique id of the committed NavigationEntry of the TabContents that we
+  // The unique id of the committed NavigationEntry of the WebContents that we
   // were opened for. Used to help expire on navigations.
   int committed_contents_unique_id_;
 
@@ -485,7 +485,14 @@ void GeolocationInfoBarQueueController::Observe(
     const content::NotificationDetails& details) {
   DCHECK_EQ(chrome::NOTIFICATION_TAB_CONTENTS_INFOBAR_REMOVED, type);
   // We will receive this notification for all infobar closures, so we need to
-  // check whether this is the geolocation infobar we're tracking.
+  // check whether this is the geolocation infobar we're tracking. Note that the
+  // InfoBarContainer (if any) may have received this notification before us and
+  // caused the delegate to be deleted, so it's not safe to dereference the
+  // contents of the delegate. The address of the delegate, however, is OK to
+  // use to find the PendingInfoBarRequest to remove because
+  // pending_infobar_requests_ will not have received any new entries between
+  // the NotificationService's call to InfoBarContainer::Observe and this
+  // method.
   InfoBarDelegate* delegate =
       content::Details<InfoBarRemovedDetails>(details)->first;
   for (PendingInfoBarRequests::iterator i = pending_infobar_requests_.begin();
@@ -617,7 +624,7 @@ void ChromeGeolocationPermissionContext::RequestGeolocationPermission(
   WebContents* web_contents =
       tab_util::GetWebContentsByID(render_process_id, render_view_id);
   if (!web_contents || web_contents->GetViewType() !=
-          content::VIEW_TYPE_TAB_CONTENTS) {
+          content::VIEW_TYPE_WEB_CONTENTS) {
     // The tab may have gone away, or the request may not be from a tab at all.
     // TODO(mpcomplete): the request could be from a background page or
     // extension popup (tab_contents will have a different ViewType). But why do
@@ -676,7 +683,7 @@ void ChromeGeolocationPermissionContext::NotifyPermissionSet(
     bool allowed) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  // TabContents may have gone away (or not exists for extension).
+  // WebContents may have gone away (or not exists for extension).
   TabSpecificContentSettings* content_settings =
       TabSpecificContentSettings::Get(render_process_id, render_view_id);
   if (content_settings) {

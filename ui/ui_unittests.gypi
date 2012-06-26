@@ -6,6 +6,7 @@
   'targets': [
     {
       'target_name': 'ui_test_support',
+      'type': 'static_library',
       'dependencies': [
         '../base/base.gyp:base',
         '../testing/gtest.gyp:gtest',
@@ -15,21 +16,16 @@
         'base/test/cocoa_test_event_utils.mm',
         'base/test/ui_cocoa_test_helper.h',
         'base/test/ui_cocoa_test_helper.mm',
+        'base/test/dummy_input_method.cc',
+        'base/test/dummy_input_method.h',
       ],
       'include_dirs': [
         '../',
       ],
-      'conditions': [
-        ['OS=="mac"', {
-          'type': 'static_library',
-        }, { # OS != "mac"
-          'type': 'none',
-        }],
-      ],
     },
     {
       'target_name': 'ui_unittests',
-      'type': 'executable',
+      'type': '<(gtest_target_type)',
       'includes': [
         'base/ime/ime_unittests.gypi',
       ],
@@ -56,10 +52,12 @@
         'base/clipboard/clipboard_unittest.cc',
         'base/clipboard/custom_data_helper_unittest.cc',
         'base/cocoa/base_view_unittest.mm',
+        'base/cocoa/fullscreen_window_manager_unittest.mm',
         'base/cocoa/events_mac_unittest.mm',
         'base/cocoa/focus_tracker_unittest.mm',
         'base/gtk/gtk_expanded_container_unittest.cc',
         'base/gtk/gtk_im_context_util_unittest.cc',
+        'base/gtk/menu_label_accelerator_util_unittest.cc',
         'base/l10n/l10n_util_mac_unittest.mm',
         'base/l10n/l10n_util_unittest.cc',
         'base/models/list_model_unittest.cc',
@@ -75,7 +73,9 @@
         'base/test/data/resource.h',
         'base/text/text_elider_unittest.cc',
         'base/text/utf16_indexing_unittest.cc',
+        'base/view_prop_unittest.cc',
         'gfx/blit_unittest.cc',
+        'gfx/canvas_unittest.cc',
         'gfx/codec/jpeg_codec_unittest.cc',
         'gfx/codec/png_codec_unittest.cc',
         'gfx/color_analysis_unittest.cc',
@@ -87,14 +87,16 @@
         'gfx/image/image_unittest_util.cc',
         'gfx/image/image_unittest_util.h',
         'gfx/insets_unittest.cc',
+        'gfx/monitor_unittest.cc',
         'gfx/rect_unittest.cc',
-        'gfx/run_all_unittests.cc',
         'gfx/screen_unittest.cc',
+        'gfx/shadow_value_unittest.cc',
         'gfx/skbitmap_operations_unittest.cc',
         'gfx/skia_util_unittest.cc',
-        'gfx/test/test_suite.cc',
-        'gfx/test/test_suite.h',
         'gfx/transform_util_unittest.cc',
+        'test/run_all_unittests.cc',
+        'test/test_suite.cc',
+        'test/test_suite.h',
         '<(SHARED_INTERMEDIATE_DIR)/ui/gfx/gfx_resources.rc',
       ],
       'include_dirs': [
@@ -104,10 +106,10 @@
         ['OS == "win"', {
           'sources': [
             'base/dragdrop/os_exchange_data_win_unittest.cc',
-            'base/view_prop_unittest.cc',
-            # TODO(brettw) re-enable this when the dependencies on WindowImpl are fixed!
+            'base/win/hwnd_subclass_unittest.cc',
             'gfx/icon_util_unittest.cc',
             'gfx/native_theme_win_unittest.cc',
+            'gfx/platform_font_win_unittest.cc',
           ],
           'include_dirs': [
             '../..',
@@ -135,7 +137,6 @@
         ['OS == "linux"', {
           'sources': [
             'gfx/platform_font_pango_unittest.cc',
-            'gfx/linux_util_unittest.cc',
           ],
         }],
         ['OS == "linux" and toolkit_views==1', {
@@ -147,6 +148,11 @@
           'sources': [
             'gfx/transform_unittest.cc',
             'gfx/interpolated_transform_unittest.cc',
+          ],
+        }],
+        ['OS=="android" and "<(gtest_target_type)"=="shared_library"', {
+          'dependencies': [
+            '../testing/android/native_test.gyp:native_test_native_code',
           ],
         }],
         ['use_glib == 1', {
@@ -181,13 +187,69 @@
             'gfx/render_text_unittest.cc',
           ],
         }],
-        ['use_aura==1', {
+        ['OS!="win" or use_aura==0', {
           'sources!': [
             'base/view_prop_unittest.cc',
+          ],
+        }],
+        ['use_aura==1', {
+          'sources!': [
             'gfx/screen_unittest.cc',
+            'gfx/native_theme_win_unittest.cc',
+            'base/dragdrop/os_exchange_data_win_unittest.cc',
+          ],
+        }],
+        ['use_aura==1 or toolkit_views==1', {
+          'sources': [
+            'base/gestures/velocity_calculator_unittest.cc',
           ],
         }],
       ],
     },
+  ],
+  'conditions': [
+    # Special target to wrap a <(gtest_target_type)==shared_library
+    # ui_unittests into an android apk for execution.
+    # See base.gyp for TODO(jrg)s about this strategy.
+    ['OS=="android" and "<(gtest_target_type)"=="shared_library"', {
+      'targets': [
+        {
+          'target_name': 'ui_unittests_apk',
+          'type': 'none',
+          'dependencies': [
+            'ui_unittests',
+          ],
+          'actions': [
+            {
+              # Generate apk files (including source and antfile) from
+              # a template, and builds them.
+              'action_name': 'generate_and_build',
+              'inputs': [
+                '../testing/android/generate_native_test.py',
+                '<(PRODUCT_DIR)/lib.target/libui_unittests.so',
+                '<(PRODUCT_DIR)/chromium_base.jar',
+              ],
+              'outputs': [
+                '<(PRODUCT_DIR)/ChromeNativeTests_ui_unittests-debug.apk',
+              ],
+              'action': [
+                '../testing/android/generate_native_test.py',
+                '--native_library',
+                '<(PRODUCT_DIR)/lib.target/libui_unittests.so',
+                # TODO(jrg): find a better way to specify jar
+                # dependencies.  Hard coding seems fragile.
+                '--jar',
+                '<(PRODUCT_DIR)/chromium_base.jar',
+                '--output',
+                '<(PRODUCT_DIR)/ui_unittests_apk',
+                '--ant-args',
+                '-DPRODUCT_DIR=<(PRODUCT_DIR)',
+                '--ant-compile'
+              ],
+            },
+          ]
+        },
+      ],
+    }],
   ],
 }

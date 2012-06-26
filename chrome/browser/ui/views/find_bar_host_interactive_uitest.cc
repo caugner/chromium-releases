@@ -47,7 +47,6 @@ class FindInPageTest : public InProcessBrowserTest {
       location_bar_focus_view_id_(VIEW_ID_LOCATION_BAR)
 #endif
   {
-    set_show_window(true);
     FindBarHost::disable_animations_during_testing_ = true;
   }
 
@@ -135,8 +134,7 @@ IN_PROC_BROWSER_TEST_F(FindInPageTest, FocusRestore) {
                             ASCIIToUTF16("a"), true, false, NULL);
   browser()->GetFindBarController()->EndFindSession(
       FindBarController::kKeepSelection);
-  EXPECT_TRUE(ui_test_utils::IsViewFocused(browser(),
-                                           VIEW_ID_TAB_CONTAINER_FOCUS_VIEW));
+  EXPECT_TRUE(ui_test_utils::IsViewFocused(browser(), VIEW_ID_TAB_CONTAINER));
 
   // Focus the location bar, open and close the find box, focus should return to
   // the location bar (same as before, just checking that http://crbug.com/23599

@@ -11,6 +11,7 @@
 #include "base/message_loop.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/browsing_data_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "content/public/browser/browser_thread.h"
 #include "webkit/fileapi/file_system_context.h"
@@ -32,7 +33,6 @@ class BrowsingDataFileSystemHelperImpl : public BrowsingDataFileSystemHelper {
   explicit BrowsingDataFileSystemHelperImpl(Profile* profile);
   virtual void StartFetching(const base::Callback<
       void(const std::list<FileSystemInfo>&)>& callback) OVERRIDE;
-  virtual void CancelNotification() OVERRIDE;
   virtual void DeleteFileSystemOrigin(const GURL& origin) OVERRIDE;
 
  private:
@@ -96,11 +96,6 @@ void BrowsingDataFileSystemHelperImpl::StartFetching(
           this));
 }
 
-void BrowsingDataFileSystemHelperImpl::CancelNotification() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  completion_callback_.Reset();
-}
-
 void BrowsingDataFileSystemHelperImpl::DeleteFileSystemOrigin(
     const GURL& origin) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -124,11 +119,11 @@ void BrowsingDataFileSystemHelperImpl::FetchFileSystemInfoInFileThread() {
           fileapi::kFileSystemTypeTemporary);
 
   GURL current;
+
   while (!(current = origin_enumerator->Next()).is_empty()) {
-    if (current.SchemeIs(chrome::kExtensionScheme)) {
-      // Extension state is not considered browsing data.
-      continue;
-    }
+    if (!BrowsingDataHelper::HasValidScheme(current))
+      continue; // Non-websafe state is not considered browsing data.
+
     // We can call these synchronous methods as we've already verified that
     // we're running on the FILE thread.
     int64 persistent_usage = quota_util->GetOriginUsageOnFileThread(current,
@@ -154,12 +149,8 @@ void BrowsingDataFileSystemHelperImpl::FetchFileSystemInfoInFileThread() {
 void BrowsingDataFileSystemHelperImpl::NotifyOnUIThread() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(is_fetching_);
-  // completion_callback_ mutates only in the UI thread, so we're safe to test
-  // it here.
-  if (!completion_callback_.is_null()) {
-    completion_callback_.Run(file_system_info_);
-    completion_callback_.Reset();
-  }
+  completion_callback_.Run(file_system_info_);
+  completion_callback_.Reset();
   is_fetching_ = false;
 }
 
@@ -242,6 +233,9 @@ void CannedBrowsingDataFileSystemHelper::AddFileSystem(
   if (duplicate_origin)
     return;
 
+  if (!BrowsingDataHelper::HasValidScheme(origin))
+    return; // Non-websafe state is not considered browsing data.
+
   file_system_info_.push_back(FileSystemInfo(
       origin,
       (type == fileapi::kFileSystemTypePersistent),
@@ -256,6 +250,10 @@ void CannedBrowsingDataFileSystemHelper::Reset() {
 
 bool CannedBrowsingDataFileSystemHelper::empty() const {
   return file_system_info_.empty();
+}
+
+size_t CannedBrowsingDataFileSystemHelper::GetFileSystemCount() const {
+  return file_system_info_.size();
 }
 
 void CannedBrowsingDataFileSystemHelper::StartFetching(
@@ -274,14 +272,7 @@ void CannedBrowsingDataFileSystemHelper::StartFetching(
 void CannedBrowsingDataFileSystemHelper::NotifyOnUIThread() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(is_fetching_);
-  if (!completion_callback_.is_null()) {
-    completion_callback_.Run(file_system_info_);
-    completion_callback_.Reset();
-  }
-  is_fetching_ = false;
-}
-
-void CannedBrowsingDataFileSystemHelper::CancelNotification() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  completion_callback_.Run(file_system_info_);
   completion_callback_.Reset();
+  is_fetching_ = false;
 }

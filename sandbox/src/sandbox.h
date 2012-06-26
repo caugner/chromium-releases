@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -84,6 +84,14 @@ class BrokerServices {
   //   If the return is ERROR_GENERIC, you can call ::GetLastError() to get
   //   more information.
   virtual ResultCode WaitForAllTargets() = 0;
+
+  // Adds an unsandboxed process as a peer for policy decisions (e.g.
+  // HANDLES_DUP_ANY policy).
+  // Returns:
+  //   ALL_OK if successful. All other return values imply failure.
+  //   If the return is ERROR_GENERIC, you can call ::GetLastError() to get
+  //   more information.
+  virtual ResultCode AddTargetPeer(HANDLE peer_process) = 0;
 };
 
 // TargetServices models the current process from the perspective
@@ -126,6 +134,20 @@ class TargetServices {
   // information about the current state of the process, such as whether
   // LowerToken has been called or not.
   virtual ProcessState* GetState() = 0;
+
+  // Requests the broker to duplicate the supplied handle into the target
+  // process. The target process must be an active sandbox child process
+  // and the source process must have a corresponding policy allowing
+  // handle duplication for this object type.
+  // Returns:
+  //   ALL_OK if successful. All other return values imply failure.
+  //   If the return is ERROR_GENERIC, you can call ::GetLastError() to get
+  //   more information.
+  virtual ResultCode DuplicateHandle(HANDLE source_handle,
+                                     DWORD target_process_id,
+                                     HANDLE* target_handle,
+                                     DWORD desired_access,
+                                     DWORD options) = 0;
 };
 
 }  // namespace sandbox

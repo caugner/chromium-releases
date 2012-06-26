@@ -9,6 +9,7 @@
 #include "base/logging.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/pending_extension_info.h"
 #include "chrome/browser/extensions/pending_extension_manager.h"
 #include "chrome/browser/profiles/profile.h"
@@ -100,7 +101,8 @@ void SyncExtensionHelper::EnableExtension(Profile* profile,
 
 void SyncExtensionHelper::DisableExtension(Profile* profile,
                                            const std::string& name) {
-  profile->GetExtensionService()->DisableExtension(NameToId(name));
+  profile->GetExtensionService()->DisableExtension(
+      NameToId(name), Extension::DISABLE_USER_ACTION);
 }
 
 bool SyncExtensionHelper::IsExtensionEnabled(
@@ -239,7 +241,7 @@ bool SyncExtensionHelper::ExtensionStatesMatch(
 }
 
 void SyncExtensionHelper::SetupProfile(Profile* profile) {
-  profile->InitExtensions(true);
+  ExtensionSystem::Get(profile)->Init(true);
   profile_extensions_.insert(make_pair(profile, ExtensionNameMap()));
 }
 

@@ -27,6 +27,8 @@
 #include "base/time.h"
 #include "sync/engine/model_safe_worker.h"
 #include "sync/engine/syncer_types.h"
+#include "sync/engine/sync_engine_event.h"
+#include "sync/engine/traffic_recorder.h"
 #include "sync/sessions/debug_info_getter.h"
 
 namespace syncable {
@@ -45,7 +47,6 @@ static const int kDefaultMaxCommitBatchSize = 25;
 
 namespace sessions {
 class ScopedSessionContextConflictResolver;
-struct SyncSessionSnapshot;
 class TestScopedSessionEventListener;
 
 class SyncSessionContext {
@@ -55,7 +56,8 @@ class SyncSessionContext {
                      ModelSafeWorkerRegistrar* model_safe_worker_registrar,
                      ExtensionsActivityMonitor* extensions_activity_monitor,
                      const std::vector<SyncEngineEventListener*>& listeners,
-                     DebugInfoGetter* debug_info_getter);
+                     DebugInfoGetter* debug_info_getter,
+                     browser_sync::TrafficRecorder* traffic_recorder);
 
   // Empty constructor for unit tests.
   SyncSessionContext();
@@ -123,6 +125,10 @@ class SyncSessionContext {
   // new throttled types this will remain constant through out the sync cycle.
   syncable::ModelTypeSet GetThrottledTypes() const;
 
+  browser_sync::TrafficRecorder* traffic_recorder() {
+    return traffic_recorder_;
+  }
+
  private:
   typedef std::map<syncable::ModelType, base::TimeTicks> UnthrottleTimes;
 
@@ -166,9 +172,6 @@ class SyncSessionContext {
   // by the user.
   ModelSafeRoutingInfo previous_session_routing_info_;
 
-  // Cache of last session snapshot information.
-  scoped_ptr<sessions::SyncSessionSnapshot> previous_session_snapshot_;
-
   // We use this to get debug info to send to the server for debugging
   // client behavior on server side.
   DebugInfoGetter* const debug_info_getter_;
@@ -176,6 +179,8 @@ class SyncSessionContext {
   // This is a map from throttled data types to the time at which they can be
   // unthrottled.
   UnthrottleTimes unthrottle_times_;
+
+  browser_sync::TrafficRecorder* traffic_recorder_;
 
   DISALLOW_COPY_AND_ASSIGN(SyncSessionContext);
 };

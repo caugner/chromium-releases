@@ -14,6 +14,7 @@
 
 #include "base/memory/singleton.h"
 #include "base/time.h"
+#include "chrome/browser/extensions/api/declarative_webrequest/request_stages.h"
 #include "chrome/browser/extensions/api/web_request/web_request_api_helpers.h"
 #include "chrome/browser/extensions/extension_function.h"
 #include "chrome/browser/profiles/profile.h"
@@ -36,6 +37,10 @@ class StringValue;
 
 namespace content {
 class RenderProcessHost;
+}
+
+namespace extensions {
+class WebRequestRulesRegistry;
 }
 
 namespace net {
@@ -69,11 +74,6 @@ class ExtensionWebRequestEventRouter {
   // Internal representation of the webRequest.RequestFilter type, used to
   // filter what network events an extension cares about.
   struct RequestFilter {
-    URLPatternSet urls;
-    std::vector<ResourceType::Type> types;
-    int tab_id;
-    int window_id;
-
     RequestFilter();
     ~RequestFilter();
 
@@ -81,6 +81,11 @@ class ExtensionWebRequestEventRouter {
     // an error message is provided, otherwise the error is internal (and
     // unexpected).
     bool InitFromValue(const base::DictionaryValue& value, std::string* error);
+
+    URLPatternSet urls;
+    std::vector<ResourceType::Type> types;
+    int tab_id;
+    int window_id;
   };
 
   // Internal representation of the extraInfoSpec parameter on webRequest
@@ -100,6 +105,10 @@ class ExtensionWebRequestEventRouter {
 
   // Contains an extension's response to a blocking event.
   struct EventResponse {
+    EventResponse(const std::string& extension_id,
+                  const base::Time& extension_install_time);
+    ~EventResponse();
+
     // ID of the extension that sent this response.
     std::string extension_id;
 
@@ -117,14 +126,13 @@ class ExtensionWebRequestEventRouter {
 
     scoped_ptr<net::AuthCredentials> auth_credentials;
 
-    EventResponse(const std::string& extension_id,
-                  const base::Time& extension_install_time);
-    ~EventResponse();
-
     DISALLOW_COPY_AND_ASSIGN(EventResponse);
   };
 
   static ExtensionWebRequestEventRouter* GetInstance();
+
+  void RegisterRulesRegistry(
+      scoped_refptr<extensions::WebRequestRulesRegistry> rules_registry);
 
   // Dispatches the OnBeforeRequest event to any extensions whose filters match
   // the given request. Returns net::ERR_IO_PENDING if an extension is
@@ -250,6 +258,7 @@ class ExtensionWebRequestEventRouter {
 
  private:
   friend struct DefaultSingletonTraits<ExtensionWebRequestEventRouter>;
+
   struct EventListener;
   typedef std::map<std::string, std::set<EventListener> > ListenerMapForProfile;
   typedef std::map<void*, ListenerMapForProfile> ListenerMap;
@@ -311,6 +320,21 @@ class ExtensionWebRequestEventRouter {
       uint64 request_id,
       EventResponse* response);
 
+  // Processes the generated deltas from blocked_requests_ on the specified
+  // request. If |call_back| is true, the callback registered in
+  // |blocked_requests_| is called.
+  // The function returns the error code for the network request. This is
+  // mostly relevant in case the caller passes |call_callback| = false
+  // and wants to return the correct network error code himself.
+  int ExecuteDeltas(void* profile, uint64 request_id, bool call_callback);
+
+  // Evaluates the rules of the declarative webrequest API and stores
+  // modifications to the request that result from WebRequestActions as
+  // deltas in |blocked_requests_|. Returns whether any deltas were
+  // generated.
+  bool ProcessDeclarativeRules(net::URLRequest* request,
+                               extensions::RequestStages request_stage);
+
   // Sets the flag that |event_type| has been signaled for |request_id|.
   // Returns the value of the flag before setting it.
   bool GetAndSetSignaled(uint64 request_id, EventTypes event_type);
@@ -346,33 +370,47 @@ class ExtensionWebRequestEventRouter {
 
   CallbacksForPageLoad callbacks_for_page_load_;
 
+  scoped_refptr<extensions::WebRequestRulesRegistry> rules_registry_;
+
   DISALLOW_COPY_AND_ASSIGN(ExtensionWebRequestEventRouter);
 };
 
 class WebRequestAddEventListener : public SyncIOThreadExtensionFunction {
  public:
-  virtual bool RunImpl() OVERRIDE;
   DECLARE_EXTENSION_FUNCTION_NAME("webRequest.addEventListener");
+
+ protected:
+  virtual ~WebRequestAddEventListener() {}
+
+  // ExtensionFunction:
+  virtual bool RunImpl() OVERRIDE;
 };
 
 class WebRequestEventHandled : public SyncIOThreadExtensionFunction {
  public:
-  virtual bool RunImpl() OVERRIDE;
   DECLARE_EXTENSION_FUNCTION_NAME("webRequest.eventHandled");
+
+ protected:
+  virtual ~WebRequestEventHandled() {}
+
+  // ExtensionFunction:
+  virtual bool RunImpl() OVERRIDE;
 };
 
 class WebRequestHandlerBehaviorChanged : public SyncIOThreadExtensionFunction {
  public:
-  virtual bool RunImpl() OVERRIDE;
-  DECLARE_EXTENSION_FUNCTION_NAME(
-      "webRequest.handlerBehaviorChanged");
+  DECLARE_EXTENSION_FUNCTION_NAME("webRequest.handlerBehaviorChanged");
 
- private:
+ protected:
+  virtual ~WebRequestHandlerBehaviorChanged() {}
+
+  // ExtensionFunction:
   virtual void GetQuotaLimitHeuristics(
       QuotaLimitHeuristics* heuristics) const OVERRIDE;
   // Handle quota exceeded gracefully: Only warn the user but still execute the
   // function.
   virtual void OnQuotaExceeded() OVERRIDE;
+  virtual bool RunImpl() OVERRIDE;
 };
 
 // Send updates to |host| with information about what webRequest-related

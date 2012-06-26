@@ -10,7 +10,15 @@
 namespace browser_sync {
 
 bool DataTypeController::IsUnrecoverableResult(StartResult result) {
-  return (result == ASSOCIATION_FAILED || result == UNRECOVERABLE_ERROR);
+  return (result == UNRECOVERABLE_ERROR);
+}
+
+SyncError DataTypeController::CreateAndUploadError(
+    const tracked_objects::Location& location,
+    const std::string& message,
+    syncable::ModelType type) {
+  ChromeReportUnrecoverableError();
+  return SyncError(location, message, type);
 }
 
 void DataTypeController::RecordUnrecoverableError(
@@ -25,4 +33,4 @@ void DataTypeController::RecordUnrecoverableError(
   ChromeReportUnrecoverableError();
 }
 
-}
+}  // namespace browser_sync

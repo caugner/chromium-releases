@@ -21,7 +21,6 @@
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/dialog_style.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/common/net/gaia/gaia_auth_fetcher.h"
 #include "chrome/common/net/gaia/gaia_constants.h"
@@ -31,6 +30,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_ui.h"
 #include "grit/chromium_strings.h"
 #include "grit/locale_settings.h"
 #include "ui/base/l10n/l10n_font_util.h"
@@ -86,7 +86,7 @@ CloudPrintSetupFlow* CloudPrintSetupFlow::OpenDialog(
   // using a browser.
   if (!parent_window && browser && browser->window())
     parent_window = browser->window()->GetNativeHandle();
-  browser::ShowHtmlDialog(parent_window, profile, browser, flow, STYLE_GENERIC);
+  browser::ShowWebDialog(parent_window, profile, browser, flow);
   return flow;
 }
 
@@ -103,7 +103,7 @@ CloudPrintSetupFlow::CloudPrintSetupFlow(
       delegate_(delegate) {
   // TODO(hclam): The data source should be added once.
   profile_ = profile;
-  profile->GetChromeURLDataManager()->AddDataSource(
+  ChromeURLDataManager::AddDataSource(profile,
       new CloudPrintSetupSource());
 }
 
@@ -116,7 +116,7 @@ void CloudPrintSetupFlow::Focus() {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// HtmlDialogUIDelegate implementation.
+// WebDialogDelegate implementation.
 GURL CloudPrintSetupFlow::GetDialogContentURL() const {
   return GURL("chrome://cloudprintsetup/setupflow");
 }

@@ -5,13 +5,13 @@
 #include "content/browser/renderer_host/test_backing_store.h"
 #include "content/browser/renderer_host/test_render_view_host.h"
 #include "content/browser/site_instance_impl.h"
-#include "content/browser/tab_contents/navigation_controller_impl.h"
-#include "content/browser/tab_contents/test_web_contents.h"
-#include "content/common/dom_storage_common.h"
+#include "content/browser/web_contents/navigation_controller_impl.h"
+#include "content/browser/web_contents/test_web_contents.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/common/content_client.h"
 #include "ui/gfx/rect.h"
+#include "webkit/dom_storage/dom_storage_types.h"
 #include "webkit/forms/password_form.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/webpreferences.h"
@@ -94,6 +94,19 @@ BackingStore* TestRenderWidgetHostView::AllocBackingStore(
   return new TestBackingStore(rwh_, size);
 }
 
+bool TestRenderWidgetHostView::CopyFromCompositingSurface(
+    const gfx::Size& size,
+    skia::PlatformCanvas* output) {
+  return false;
+}
+
+void TestRenderWidgetHostView::AsyncCopyFromCompositingSurface(
+    const gfx::Size& size,
+    skia::PlatformCanvas* output,
+    base::Callback<void(bool)> callback) {
+  callback.Run(false);
+}
+
 void TestRenderWidgetHostView::OnAcceleratedCompositingStateChange() {
 }
 
@@ -108,6 +121,11 @@ void TestRenderWidgetHostView::AcceleratedSurfacePostSubBuffer(
 }
 
 void TestRenderWidgetHostView::AcceleratedSurfaceSuspend() {
+}
+
+bool TestRenderWidgetHostView::HasAcceleratedSurface(
+      const gfx::Size& desired_size) {
+  return false;
 }
 
 #if defined(OS_MACOSX)
@@ -169,23 +187,15 @@ gfx::Rect TestRenderWidgetHostView::GetRootWindowBounds() {
 }
 #endif
 
-#if defined(TOOLKIT_USES_GTK)
+#if defined(TOOLKIT_GTK)
 GdkEventButton* TestRenderWidgetHostView::GetLastMouseDown() {
   return NULL;
 }
 
-#if !defined(TOOLKIT_VIEWS)
 gfx::NativeView TestRenderWidgetHostView::BuildInputMethodsGtkMenu() {
   return NULL;
 }
-#endif  // !defined(TOOLKIT_VIEWS)
-#endif  // defined(TOOLKIT_USES_GTK)
-
-bool TestRenderWidgetHostView::CopyFromCompositingSurface(
-    const gfx::Size& size,
-    skia::PlatformCanvas* output) {
-  return false;
-}
+#endif  // defined(TOOLKIT_GTK)
 
 gfx::GLSurfaceHandle TestRenderWidgetHostView::GetCompositingSurface() {
   return gfx::GLSurfaceHandle();
@@ -200,11 +210,13 @@ void TestRenderWidgetHostView::UnlockMouse() {
 
 TestRenderViewHost::TestRenderViewHost(SiteInstance* instance,
                                        RenderViewHostDelegate* delegate,
-                                       int routing_id)
+                                       int routing_id,
+                                       bool swapped_out)
     : RenderViewHostImpl(instance,
                          delegate,
                          routing_id,
-                         kInvalidSessionStorageNamespaceId),
+                         swapped_out,
+                         dom_storage::kInvalidSessionStorageNamespaceId),
       render_view_created_(false),
       delete_counter_(NULL),
       simulate_fetch_via_proxy_(false),
@@ -225,6 +237,7 @@ TestRenderViewHost::~TestRenderViewHost() {
 }
 
 bool TestRenderViewHost::CreateRenderView(const string16& frame_name,
+                                          int opener_route_id,
                                           int32 max_page_id) {
   DCHECK(!render_view_created_);
   render_view_created_ = true;

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,6 +15,8 @@
 #endif
 #include "media/base/data_buffer.h"
 #include "media/base/seekable_buffer.h"
+
+namespace media {
 
 static pa_sample_format_t BitsToPASampleFormat(int bits_per_sample) {
   switch (bits_per_sample) {
@@ -422,7 +424,9 @@ void PulseAudioOutputStream::GetVolume(double* volume) {
 uint32 PulseAudioOutputStream::RunDataCallback(
     uint8* dest, uint32 max_size, AudioBuffersState buffers_state) {
   if (source_callback_)
-    return source_callback_->OnMoreData(this, dest, max_size, buffers_state);
+    return source_callback_->OnMoreData(dest, max_size, buffers_state);
 
   return 0;
 }
+
+}  // namespace media

@@ -32,7 +32,7 @@ class CppTypeGenerator(object):
       if qualified_name in self._type_namespaces:
         raise ValueError('Type %s is declared in both %s and %s' %
             (qualified_name, namespace.name,
-             self._type_namespaces[qualified_type].name))
+             self._type_namespaces[qualified_name].name))
       self._type_namespaces[qualified_name] = namespace
     self._cpp_namespaces[namespace] = cpp_namespace
 
@@ -139,7 +139,7 @@ class CppTypeGenerator(object):
     elif prop.type_ == PropertyType.ENUM:
       cpp_type = cpp_util.Classname(prop.name)
     elif prop.type_ == PropertyType.ADDITIONAL_PROPERTIES:
-      cpp_type = 'DictionaryValue'
+      cpp_type = 'base::DictionaryValue'
     elif prop.type_ == PropertyType.ANY:
       cpp_type = any_helper.ANY_CLASS
     elif prop.type_ == PropertyType.OBJECT:
@@ -152,6 +152,8 @@ class CppTypeGenerator(object):
         cpp_type = 'std::vector<%s> '
       cpp_type = cpp_type % self.GetType(
           prop.item_type, pad_for_generics=True)
+    elif prop.type_ == PropertyType.BINARY:
+      cpp_type = 'base::BinaryValue'
     else:
       raise NotImplementedError(prop.type_)
 
@@ -173,11 +175,19 @@ class CppTypeGenerator(object):
     for namespace, types in sorted(self._NamespaceTypeDependencies().items()):
       c.Append('namespace %s {' % namespace.name)
       for type_ in types:
-        c.Append('struct %s;' % type_)
+        if namespace.types[type_].type_ == PropertyType.STRING:
+          c.Append('typedef std::string %s;' % type_)
+        elif namespace.types[type_].type_ == PropertyType.ARRAY:
+          c.Append('typedef std::vector<%(item_type)s> %(name)s;')
+          c.Substitute({'name': type_, 'item_type':
+              self.GetType(namespace.types[type_].item_type,
+                           wrap_optional=True)})
+        else:
+          c.Append('struct %s;' % type_)
       c.Append('}')
     c.Concat(self.GetNamespaceStart())
     for (name, type_) in self._namespace.types.items():
-      if not type_.functions:
+      if not type_.functions and type_.type_ == PropertyType.OBJECT:
         c.Append('struct %s;' % name)
     c.Concat(self.GetNamespaceEnd())
     return c
@@ -191,9 +201,6 @@ class CppTypeGenerator(object):
             dependency.source_file_dir,
             self._cpp_namespaces[dependency]))
     return c
-
-  def _QualifyName(self, namespace, name):
-    return '.'.join([namespace.name, name])
 
   def _ResolveTypeNamespace(self, ref_type):
     """Resolves a type name to its enclosing namespace.
@@ -213,7 +220,21 @@ class CppTypeGenerator(object):
       if type_name == self._QualifyName(namespace, ref_type):
         return namespace
 
-    raise ValueError('Cannot resolve %s to a type in any namespace.' % ref_type)
+    return None
+
+  def GetReferencedProperty(self, prop):
+    """Returns the property a property of type REF is referring to.
+
+    If the property passed in is not of type PropertyType.REF, it will be
+    returned unchanged.
+    """
+    if prop.type_ != PropertyType.REF:
+      return prop
+    return self._ResolveTypeNamespace(prop.ref_type).types.get(prop.ref_type,
+        None)
+
+  def _QualifyName(self, namespace, name):
+    return '.'.join([namespace.name, name])
 
   def _NamespaceTypeDependencies(self):
     """Returns a dict containing a mapping of model.Namespace to the C++ type
@@ -251,3 +272,45 @@ class CppTypeGenerator(object):
         for p in prop.properties.values():
           deps |= self._PropertyTypeDependencies(p)
     return deps
+
+  def GeneratePropertyValues(self, property, line, nodoc=False):
+    """Generates the Code to display all value-containing properties.
+    """
+    c = Code()
+    if not nodoc:
+      c.Comment(property.description)
+
+    if property.has_value:
+      c.Append(line % {
+          "type": self._GetPrimitiveType(property.type_),
+          "name": property.name,
+          "value": property.value
+        })
+    else:
+      has_child_code = False
+      c.Sblock('namespace %s {' % property.name)
+      for child_property in property.properties.values():
+        child_code = self.GeneratePropertyValues(
+            child_property,
+            line,
+            nodoc=nodoc)
+        if child_code:
+          has_child_code = True
+          c.Concat(child_code)
+      c.Eblock('}  // namespace %s' % property.name)
+      if not has_child_code:
+        c = None
+    return c
+
+  def _GetPrimitiveType(self, type_):
+    """Like |GetType| but only accepts and returns C++ primitive types.
+    """
+    if type_ == PropertyType.BOOLEAN:
+      return 'bool'
+    elif type_ == PropertyType.INTEGER:
+      return 'int'
+    elif type_ == PropertyType.DOUBLE:
+      return 'double'
+    elif type_ == PropertyType.STRING:
+      return 'char*'
+    raise Exception(type_ + ' is not primitive')

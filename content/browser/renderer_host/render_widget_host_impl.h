@@ -19,6 +19,7 @@
 #include "base/string16.h"
 #include "base/timer.h"
 #include "build/build_config.h"
+#include "content/common/view_message_enums.h"
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/common/page_zoom.h"
 #include "ui/base/ime/text_input_type.h"
@@ -81,6 +82,11 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   virtual bool CopyFromBackingStore(const gfx::Rect& src_rect,
                                     const gfx::Size& accelerated_dest_size,
                                     skia::PlatformCanvas* output) OVERRIDE;
+  virtual void AsyncCopyFromBackingStore(
+      const gfx::Rect& src_rect,
+      const gfx::Size& accelerated_dest_size,
+      skia::PlatformCanvas* output,
+      base::Callback<void(bool)> callback) OVERRIDE;
 #if defined(TOOLKIT_GTK)
   virtual bool CopyFromBackingStoreToGtkWindow(const gfx::Rect& dest_rect,
                                                GdkWindow* target) OVERRIDE;
@@ -89,7 +95,7 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   virtual bool CopyFromBackingStoreToCGContext(const CGRect& dest_rect,
                                                CGContextRef target) OVERRIDE;
 #endif
-  virtual void EnableRendererAccessibility() OVERRIDE;
+  virtual void EnableFullAccessibilityMode() OVERRIDE;
   virtual void ForwardMouseEvent(
       const WebKit::WebMouseEvent& mouse_event) OVERRIDE;
   virtual void ForwardWheelEvent(
@@ -100,6 +106,7 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   virtual RenderProcessHost* GetProcess() const OVERRIDE;
   virtual int GetRoutingID() const OVERRIDE;
   virtual RenderWidgetHostView* GetView() const OVERRIDE;
+  virtual bool IsLoading() const OVERRIDE;
   virtual bool IsRenderView() const OVERRIDE;
   virtual void PaintAtSize(TransportDIB::Handle dib_handle,
                            int tag,
@@ -118,7 +125,6 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   void SetView(RenderWidgetHostView* view);
 
   int surface_id() const { return surface_id_; }
-  bool renderer_accessible() { return renderer_accessible_; }
 
   bool empty() const { return current_size_.IsEmpty(); }
 
@@ -175,12 +181,21 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   // Indicates if the page has finished loading.
   void SetIsLoading(bool is_loading);
 
-  // Get access to the widget's backing store.  If a resize is in progress,
-  // then the current size of the backing store may be less than the size of
-  // the widget's view.  If you pass |force_create| as true, then the backing
-  // store will be created if it doesn't exist. Otherwise, NULL will be returned
-  // if the backing store doesn't already exist. It will also return NULL if the
+  // Check for the existance of a BackingStore of the given |desired_size| and
+  // return it if it exists. If the BackingStore is GPU, true is returned and
+  // |*backing_store| is set to NULL.
+  bool TryGetBackingStore(const gfx::Size& desired_size,
+                          BackingStore** backing_store);
+
+  // Get access to the widget's backing store matching the size of the widget's
+  // view. If you pass |force_create| as true, then GetBackingStore may block
+  // for the renderer to send a new frame. Otherwise, NULL will be returned if
+  // the backing store doesn't already exist. It will also return NULL if the
   // backing store could not be created.
+  //
+  // Mac only: NULL may also be returned if the last frame was GPU accelerated.
+  // Call GetView()->HasAcceleratedSurface to determine if the last frame was
+  // accelerated.
   BackingStore* GetBackingStore(bool force_create);
 
   // Allocate a new backing store of the given size. Returns NULL on failure
@@ -211,11 +226,11 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   void ForwardGestureEvent(const WebKit::WebGestureEvent& gesture_event);
   virtual void ForwardTouchEvent(const WebKit::WebTouchEvent& touch_event);
 
-#if defined(TOOLKIT_USES_GTK)
+#if defined(TOOLKIT_GTK)
   // Give key press listeners a chance to handle this key press. This allow
   // widgets that don't have focus to still handle key presses.
   bool KeyPressListenersHandleEvent(GdkEventKey* event);
-#endif  // defined(TOOLKIT_USES_GTK)
+#endif  // defined(TOOLKIT_GTK)
 
   void CancelUpdateTextDirection();
 
@@ -293,6 +308,9 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   void SetEditCommandsForNextKeyEvent(
       const std::vector<EditCommand>& commands);
 
+  // Send a message to the renderer process to change the accessibility mode.
+  void SetAccessibilityMode(AccessibilityMode mode);
+
   // Relay a request from assistive technology to perform the default action
   // on a given node.
   void AccessibilityDoDefaultAction(int object_id);
@@ -309,8 +327,8 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
       int acc_obj_id, gfx::Rect subfocus);
 
   // Relay a request from assistive technology to move a given object
-  // to a specific location, in the tab content area coordinate space, i.e.
-  // (0, 0) is the top-left corner of the tab contents.
+  // to a specific location, in the WebContents area coordinate space, i.e.
+  // (0, 0) is the top-left corner of the WebContents.
   void AccessibilityScrollToPoint(int acc_obj_id, gfx::Point point);
 
   // Relay a request from assistive technology to set text selection.
@@ -401,7 +419,7 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   // to allow mouse lock.
   // Once the request is approved or rejected, GotResponseToLockMouseRequest()
   // will be called.
-  virtual void RequestToLockMouse();
+  virtual void RequestToLockMouse(bool user_gesture);
 
   void RejectMouseLockOrUnlockIfNecessary();
   bool IsMouseLocked() const;
@@ -414,6 +432,11 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   void SetShouldAutoResize(bool enable);
 
  protected:
+  // Expose increment/decrement of the in-flight event count, so
+  // RenderViewHostImpl can account for in-flight beforeunload/unload events.
+  int increment_in_flight_event_count() { return ++in_flight_event_count_; }
+  int decrement_in_flight_event_count() { return --in_flight_event_count_; }
+
   // The View associated with the RenderViewHost. The lifetime of this object
   // is associated with the lifetime of the Render process. If the Renderer
   // crashes, its View is destroyed and this pointer becomes NULL, even though
@@ -452,6 +475,10 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   void OnMsgSetTooltipText(const string16& tooltip_text,
                            WebKit::WebTextDirection text_direction_hint);
   void OnMsgPaintAtSizeAck(int tag, const gfx::Size& size);
+  void OnCompositorSurfaceBuffersSwapped(int32 surface_id,
+                                         uint64 surface_handle,
+                                         int32 route_id,
+                                         int32 gpu_process_host_id);
   void OnMsgUpdateRect(const ViewHostMsg_UpdateRect_Params& params);
   void OnMsgUpdateIsDelayed();
   void OnMsgInputEventAck(WebKit::WebInputEvent::Type event_type,
@@ -468,7 +495,7 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
 
   void OnMsgDidActivateAcceleratedCompositing(bool activated);
 
-  void OnMsgLockMouse();
+  void OnMsgLockMouse(bool user_gesture);
   void OnMsgUnlockMouse();
 
 #if defined(OS_POSIX) || defined(USE_AURA)
@@ -493,7 +520,7 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   void OnAcceleratedSurfaceBuffersSwapped(gfx::PluginWindowHandle window,
                                           uint64 surface_handle);
 #endif
-#if defined(TOOLKIT_USES_GTK)
+#if defined(TOOLKIT_GTK)
   void OnMsgCreatePluginContainer(gfx::PluginWindowHandle id);
   void OnMsgDestroyPluginContainer(gfx::PluginWindowHandle id);
 #endif
@@ -544,10 +571,6 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
 
   // The ID of the corresponding object in the Renderer Instance.
   int routing_id_;
-
-  // True if renderer accessibility is enabled. This should only be set when a
-  // screenreader is detected as it can potentially slow down Chrome.
-  bool renderer_accessible_;
 
   // Stores random bits of data for others to associate with this object.
   base::PropertyBag property_bag_;
@@ -642,6 +665,9 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
 
   // Flag to detect recursive calls to GetBackingStore().
   bool in_get_backing_store_;
+
+  // Flag to trigger the GetBackingStore method to abort early.
+  bool abort_get_backing_store_;
 
   // Set when we call DidPaintRect/DidScrollRect on the view.
   bool view_being_painted_;

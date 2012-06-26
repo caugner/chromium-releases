@@ -147,9 +147,9 @@ void TemplateURLFetcher::RequestDelegate::OnURLFetchComplete(
     return;
   }
 
-  template_url_.reset(TemplateURLParser::Parse(fetcher_->profile(), data.data(),
-                                               data.length(), NULL));
-  if (!template_url_.get() || !template_url_->url()->SupportsReplacement()) {
+  template_url_.reset(TemplateURLParser::Parse(fetcher_->profile(), false,
+      data.data(), data.length(), NULL));
+  if (!template_url_.get() || !template_url_->url_ref().SupportsReplacement()) {
     fetcher_->RequestCompleted(this);
     // WARNING: RequestCompleted deletes us.
     return;
@@ -177,13 +177,13 @@ void TemplateURLFetcher::RequestDelegate::OnURLFetchComplete(
 void TemplateURLFetcher::RequestDelegate::AddSearchProvider() {
   DCHECK(template_url_.get());
   DCHECK(!keyword_.empty());
-  TemplateURLService* model = TemplateURLServiceFactory::GetForProfile(
-      fetcher_->profile());
+  Profile* profile = fetcher_->profile();
+  TemplateURLService* model = TemplateURLServiceFactory::GetForProfile(profile);
   DCHECK(model);
   DCHECK(model->loaded());
 
-  const TemplateURL* existing_url = NULL;
-  if (model->CanReplaceKeyword(keyword_, GURL(template_url_->url()->url()),
+  TemplateURL* existing_url = NULL;
+  if (model->CanReplaceKeyword(keyword_, GURL(template_url_->url()),
                                &existing_url)) {
     if (existing_url)
       model->Remove(existing_url);
@@ -194,29 +194,30 @@ void TemplateURLFetcher::RequestDelegate::AddSearchProvider() {
 
   // The short name is what is shown to the user. We preserve original names
   // since it is better when generated keyword in many cases.
-  template_url_->set_keyword(keyword_);
-  template_url_->set_originating_url(osdd_url_);
+  TemplateURLData data(template_url_->data());
+  data.SetKeyword(keyword_);
+  data.originating_url = osdd_url_;
 
   // The page may have specified a URL to use for favicons, if not, set it.
-  if (!template_url_->GetFaviconURL().is_valid())
-    template_url_->SetFaviconURL(favicon_url_);
+  if (!data.favicon_url.is_valid())
+    data.favicon_url = favicon_url_;
 
   switch (provider_type_) {
     case AUTODETECTED_PROVIDER:
       // Mark the keyword as replaceable so it can be removed if necessary.
-      template_url_->set_safe_for_autoreplace(true);
-      model->Add(template_url_.release());
+      data.safe_for_autoreplace = true;
+      model->Add(new TemplateURL(profile, data));
       break;
 
     case EXPLICIT_PROVIDER:
       // Confirm addition and allow user to edit default choices. It's ironic
       // that only *non*-autodetected additions get confirmed, but the user
       // expects feedback that his action did something.
-      // The source TabContents' delegate takes care of adding the URL to the
+      // The source WebContents' delegate takes care of adding the URL to the
       // model, which takes ownership, or of deleting it if the add is
       // cancelled.
-      callbacks_->ConfirmAddSearchProvider(template_url_.release(),
-                                           fetcher_->profile());
+      callbacks_->ConfirmAddSearchProvider(new TemplateURL(profile, data),
+                                           profile);
       break;
 
     default:

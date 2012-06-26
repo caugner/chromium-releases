@@ -7,6 +7,7 @@
 #include "ash/shell.h"
 #include "ash/system/tray/system_tray_delegate.h"
 #include "ash/system/tray/tray_constants.h"
+#include "ash/system/tray/tray_views.h"
 #include "base/utf_string_conversions.h"
 #include "grit/ash_strings.h"
 #include "grit/ui_resources.h"
@@ -104,6 +105,7 @@ class VolumeView : public views::View,
     ash::SystemTrayDelegate* delegate =
         ash::Shell::GetInstance()->tray_delegate();
     slider_ = new views::Slider(this, views::Slider::HORIZONTAL);
+    slider_->set_focus_border_color(kFocusBorderColor);
     slider_->SetValue(delegate->GetVolumeLevel());
     slider_->SetAccessibleName(
         ui::ResourceBundle::GetSharedInstance().GetLocalizedString(
@@ -114,11 +116,15 @@ class VolumeView : public views::View,
   virtual ~VolumeView() {}
 
   void SetVolumeLevel(float percent) {
+    // The change in volume will be reflected via accessibility system events,
+    // so we prevent the UI event from being sent here.
+    slider_->set_enable_accessibility_events(false);
     slider_->SetValue(percent);
     // It is possible that the volume was (un)muted, but the actual volume level
     // did not change. In that case, setting the value of the slider won't
     // trigger an update. So explicitly trigger an update.
     icon_->Update();
+    slider_->set_enable_accessibility_events(true);
   }
 
  private:
@@ -157,6 +163,7 @@ class VolumeView : public views::View,
 
 TrayVolume::TrayVolume()
     : TrayImageItem(IDR_AURA_UBER_TRAY_VOLUME_MUTE),
+      volume_view_(NULL),
       is_default_view_(false) {
 }
 
@@ -168,32 +175,32 @@ bool TrayVolume::GetInitialVisibility() {
 }
 
 views::View* TrayVolume::CreateDefaultView(user::LoginStatus status) {
-  volume_view_.reset(new tray::VolumeView);
+  volume_view_ = new tray::VolumeView;
   is_default_view_ = true;
-  return volume_view_.get();
+  return volume_view_;
 }
 
 views::View* TrayVolume::CreateDetailedView(user::LoginStatus status) {
-  volume_view_.reset(new tray::VolumeView);
+  volume_view_ = new tray::VolumeView;
   is_default_view_ = false;
-  return volume_view_.get();
+  return volume_view_;
 }
 
 void TrayVolume::DestroyDefaultView() {
   if (is_default_view_)
-    volume_view_.reset();
+    volume_view_ = NULL;
 }
 
 void TrayVolume::DestroyDetailedView() {
   if (!is_default_view_)
-    volume_view_.reset();
+    volume_view_ = NULL;
 }
 
 void TrayVolume::OnVolumeChanged(float percent) {
-  if (image_view())
-    image_view()->SetVisible(GetInitialVisibility());
+  if (tray_view())
+    tray_view()->SetVisible(GetInitialVisibility());
 
-  if (volume_view_.get()) {
+  if (volume_view_) {
     volume_view_->SetVolumeLevel(percent);
     SetDetailedViewCloseDelay(kTrayPopupAutoCloseDelayInSeconds);
     return;

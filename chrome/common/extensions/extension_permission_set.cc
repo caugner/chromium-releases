@@ -145,12 +145,13 @@ ExtensionPermissionMessage::ExtensionPermissionMessage(
   : id_(id), message_(message) {
 }
 
-ExtensionPermissionMessage::~ExtensionPermissionMessage() {
-}
+ExtensionPermissionMessage::~ExtensionPermissionMessage() {}
 
 //
 // ExtensionPermission
 //
+
+ExtensionAPIPermission::~ExtensionAPIPermission() {}
 
 ExtensionPermissionMessage ExtensionAPIPermission::GetMessage() const {
   return ExtensionPermissionMessage(
@@ -168,8 +169,6 @@ ExtensionAPIPermission::ExtensionAPIPermission(
       flags_(flags),
       l10n_message_id_(l10n_message_id),
       message_id_(message_id) {}
-
-ExtensionAPIPermission::~ExtensionAPIPermission() {}
 
 // static
 void ExtensionAPIPermission::RegisterAllPermissions(
@@ -237,9 +236,6 @@ void ExtensionAPIPermission::RegisterAllPermissions(
       kInput, "input", 0, ExtensionPermissionMessage::kNone,
       kFlagImpliesFullURLAccess);
   info->RegisterPermission(
-      kManagedMode, "managedMode", IDS_EXTENSION_PROMPT_WARNING_MANAGED_MODE,
-      ExtensionPermissionMessage::kManagedMode, kFlagNone);
-  info->RegisterPermission(
       kManagement, "management", IDS_EXTENSION_PROMPT_WARNING_MANAGEMENT,
       ExtensionPermissionMessage::kManagement, kFlagNone);
   info->RegisterPermission(
@@ -266,6 +262,9 @@ void ExtensionAPIPermission::RegisterAllPermissions(
       ExtensionPermissionMessage::kTtsEngine,
       kFlagCannotBeOptional);
   info->RegisterPermission(
+      kUsb, "usb", IDS_EXTENSION_PROMPT_WARNING_USB,
+      ExtensionPermissionMessage::kNone, kFlagNone);
+  info->RegisterPermission(
       kWebNavigation, "webNavigation",
       IDS_EXTENSION_PROMPT_WARNING_TABS, ExtensionPermissionMessage::kTabs,
       kFlagNone);
@@ -286,6 +285,9 @@ void ExtensionAPIPermission::RegisterAllPermissions(
       ExtensionPermissionMessage::kNone,
       kFlagCannotBeOptional);
   info->RegisterPermission(
+      kManagedModePrivate, "managedModePrivate", 0,
+      ExtensionPermissionMessage::kNone, kFlagCannotBeOptional);
+  info->RegisterPermission(
       kMediaPlayerPrivate, "mediaPlayerPrivate", 0,
       ExtensionPermissionMessage::kNone,
       kFlagCannotBeOptional);
@@ -302,13 +304,10 @@ void ExtensionAPIPermission::RegisterAllPermissions(
       ExtensionPermissionMessage::kNone,
       kFlagCannotBeOptional);
   info->RegisterPermission(
-      kChromePrivate, "chromePrivate", 0, ExtensionPermissionMessage::kNone,
-      kFlagCannotBeOptional);
-  info->RegisterPermission(
       kInputMethodPrivate, "inputMethodPrivate", 0,
       ExtensionPermissionMessage::kNone, kFlagCannotBeOptional);
   info->RegisterPermission(
-      kOffersPrivate, "offersPrivate", 0, ExtensionPermissionMessage::kNone,
+      kEchoPrivate, "echoPrivate", 0, ExtensionPermissionMessage::kNone,
       kFlagCannotBeOptional);
   info->RegisterPermission(
       kTerminalPrivate, "terminalPrivate", 0, ExtensionPermissionMessage::kNone,
@@ -408,7 +407,8 @@ ExtensionPermissionsInfo::ExtensionPermissionsInfo()
 }
 
 void ExtensionPermissionsInfo::RegisterAlias(
-    const char* name, const char* alias) {
+    const char* name,
+    const char* alias) {
   DCHECK(name_map_.find(name) != name_map_.end());
   DCHECK(name_map_.find(alias) == name_map_.end());
   name_map_[alias] = name_map_[name];
@@ -438,14 +438,15 @@ ExtensionAPIPermission* ExtensionPermissionsInfo::RegisterPermission(
 // ExtensionPermissionSet
 //
 
-ExtensionPermissionSet::ExtensionPermissionSet() {
-}
+ExtensionPermissionSet::ExtensionPermissionSet() {}
 
 ExtensionPermissionSet::ExtensionPermissionSet(
     const Extension* extension,
     const ExtensionAPIPermissionSet& apis,
-    const URLPatternSet& explicit_hosts)
-  : apis_(apis) {
+    const URLPatternSet& explicit_hosts,
+    const ExtensionOAuth2Scopes& scopes)
+    : apis_(apis),
+      scopes_(scopes) {
   DCHECK(extension);
   AddPatternsAndRemovePaths(explicit_hosts, &explicit_hosts_);
   InitImplicitExtensionPermissions(extension);
@@ -456,13 +457,29 @@ ExtensionPermissionSet::ExtensionPermissionSet(
     const ExtensionAPIPermissionSet& apis,
     const URLPatternSet& explicit_hosts,
     const URLPatternSet& scriptable_hosts)
-  : apis_(apis),
-    scriptable_hosts_(scriptable_hosts) {
+    : apis_(apis),
+      scriptable_hosts_(scriptable_hosts) {
   AddPatternsAndRemovePaths(explicit_hosts, &explicit_hosts_);
   InitEffectiveHosts();
 }
 
-ExtensionPermissionSet::~ExtensionPermissionSet() {}
+ExtensionPermissionSet::ExtensionPermissionSet(
+    const ExtensionAPIPermissionSet& apis,
+    const URLPatternSet& explicit_hosts,
+    const URLPatternSet& scriptable_hosts,
+    const ExtensionOAuth2Scopes& scopes)
+    : apis_(apis),
+      scriptable_hosts_(scriptable_hosts),
+      scopes_(scopes) {
+  AddPatternsAndRemovePaths(explicit_hosts, &explicit_hosts_);
+  InitEffectiveHosts();
+}
+
+ExtensionPermissionSet::ExtensionPermissionSet(
+    const ExtensionOAuth2Scopes& scopes)
+    : scopes_(scopes) {
+  InitEffectiveHosts();
+}
 
 // static
 ExtensionPermissionSet* ExtensionPermissionSet::CreateDifference(
@@ -487,7 +504,15 @@ ExtensionPermissionSet* ExtensionPermissionSet::CreateDifference(
   URLPatternSet::CreateDifference(set1_safe->scriptable_hosts(),
                                   set2_safe->scriptable_hosts(),
                                   &scriptable_hosts);
-  return new ExtensionPermissionSet(apis, explicit_hosts, scriptable_hosts);
+
+  ExtensionOAuth2Scopes scopes;
+  std::set_difference(set1_safe->scopes().begin(), set1_safe->scopes().end(),
+                      set2_safe->scopes().begin(), set2_safe->scopes().end(),
+                      std::insert_iterator<ExtensionOAuth2Scopes>(
+                          scopes, scopes.begin()));
+
+  return new ExtensionPermissionSet(
+      apis, explicit_hosts, scriptable_hosts, scopes);
 }
 
 // static
@@ -512,8 +537,17 @@ ExtensionPermissionSet* ExtensionPermissionSet::CreateIntersection(
   URLPatternSet::CreateIntersection(set1_safe->scriptable_hosts(),
                                     set2_safe->scriptable_hosts(),
                                     &scriptable_hosts);
-  return new ExtensionPermissionSet(apis, explicit_hosts, scriptable_hosts);
+
+  ExtensionOAuth2Scopes scopes;
+  std::set_intersection(set1_safe->scopes().begin(), set1_safe->scopes().end(),
+                        set2_safe->scopes().begin(), set2_safe->scopes().end(),
+                        std::insert_iterator<ExtensionOAuth2Scopes>(
+                            scopes, scopes.begin()));
+
+  return new ExtensionPermissionSet(
+      apis, explicit_hosts, scriptable_hosts, scopes);
 }
+
 // static
 ExtensionPermissionSet* ExtensionPermissionSet::CreateUnion(
     const ExtensionPermissionSet* set1,
@@ -538,14 +572,22 @@ ExtensionPermissionSet* ExtensionPermissionSet::CreateUnion(
                              set2_safe->scriptable_hosts(),
                              &scriptable_hosts);
 
-  return new ExtensionPermissionSet(apis, explicit_hosts, scriptable_hosts);
+  ExtensionOAuth2Scopes scopes;
+  std::set_union(set1_safe->scopes().begin(), set1_safe->scopes().end(),
+                 set2_safe->scopes().begin(), set2_safe->scopes().end(),
+                 std::insert_iterator<ExtensionOAuth2Scopes>(
+                     scopes, scopes.begin()));
+
+  return new ExtensionPermissionSet(
+      apis, explicit_hosts, scriptable_hosts, scopes);
 }
 
 bool ExtensionPermissionSet::operator==(
     const ExtensionPermissionSet& rhs) const {
   return apis_ == rhs.apis_ &&
       scriptable_hosts_ == rhs.scriptable_hosts_ &&
-      explicit_hosts_ == rhs.explicit_hosts_;
+      explicit_hosts_ == rhs.explicit_hosts_ &&
+      scopes_ == rhs.scopes_;
 }
 
 bool ExtensionPermissionSet::Contains(const ExtensionPermissionSet& set) const {
@@ -561,6 +603,10 @@ bool ExtensionPermissionSet::Contains(const ExtensionPermissionSet& set) const {
     return false;
 
   if (!scriptable_hosts().Contains(set.scriptable_hosts()))
+    return false;
+
+  if (!std::includes(scopes_.begin(), scopes_.end(),
+                     set.scopes().begin(), set.scopes().end()))
     return false;
 
   return true;
@@ -749,8 +795,13 @@ bool ExtensionPermissionSet::HasLessPrivilegesThan(
   if (HasLessAPIPrivilegesThan(permissions))
     return true;
 
+  if (HasLessScopesThan(permissions))
+    return true;
+
   return false;
 }
+
+ExtensionPermissionSet::~ExtensionPermissionSet() {}
 
 // static
 std::set<std::string> ExtensionPermissionSet::GetDistinctHosts(
@@ -806,13 +857,6 @@ std::set<std::string> ExtensionPermissionSet::GetDistinctHosts(
   return distinct_hosts;
 }
 
-void ExtensionPermissionSet::InitEffectiveHosts() {
-  effective_hosts_.ClearPatterns();
-
-  URLPatternSet::CreateUnion(
-      explicit_hosts(), scriptable_hosts(), &effective_hosts_);
-}
-
 void ExtensionPermissionSet::InitImplicitExtensionPermissions(
     const Extension* extension) {
   // Add the implied permissions.
@@ -831,6 +875,13 @@ void ExtensionPermissionSet::InitImplicitExtensionPermissions(
     for (; pattern != content_script->url_patterns().end(); ++pattern)
       scriptable_hosts_.AddPattern(*pattern);
   }
+}
+
+void ExtensionPermissionSet::InitEffectiveHosts() {
+  effective_hosts_.ClearPatterns();
+
+  URLPatternSet::CreateUnion(
+      explicit_hosts(), scriptable_hosts(), &effective_hosts_);
 }
 
 std::set<ExtensionPermissionMessage>
@@ -892,4 +943,20 @@ bool ExtensionPermissionSet::HasLessHostPrivilegesThan(
                       std::inserter(new_hosts_only, new_hosts_only.begin()));
 
   return !new_hosts_only.empty();
+}
+
+bool ExtensionPermissionSet::HasLessScopesThan(
+    const ExtensionPermissionSet* permissions) const {
+  if (permissions == NULL)
+    return false;
+
+  ExtensionOAuth2Scopes current_scopes = scopes();
+  ExtensionOAuth2Scopes new_scopes = permissions->scopes();
+  ExtensionOAuth2Scopes delta_scopes;
+  std::set_difference(new_scopes.begin(), new_scopes.end(),
+                      current_scopes.begin(), current_scopes.end(),
+                      std::inserter(delta_scopes, delta_scopes.begin()));
+
+  // We have less privileges if there are additional scopes present.
+  return !delta_scopes.empty();
 }

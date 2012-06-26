@@ -24,7 +24,7 @@
 
 namespace {
 
-class SettingsView : public views::View {
+class SettingsView : public ash::internal::ActionableView {
  public:
   SettingsView() {
     SetLayoutManager(new views::BoxLayout(views::BoxLayout::kHorizontal,
@@ -37,37 +37,20 @@ class SettingsView : public views::View {
     icon->SetImage(rb.GetImageNamed(IDR_AURA_UBER_TRAY_SETTINGS).ToSkBitmap());
     AddChildView(icon);
 
-    label_ = new views::Label(rb.GetLocalizedString(
-          IDS_ASH_STATUS_TRAY_SETTINGS_AND_HELP));
+    string16 text = rb.GetLocalizedString(
+          IDS_ASH_STATUS_TRAY_SETTINGS_AND_HELP);
+    label_ = new views::Label(text);
     AddChildView(label_);
 
-    set_focusable(true);
+    SetAccessibleName(text);
   }
 
   virtual ~SettingsView() {}
 
-  // Overridden from views::View.
-  virtual bool OnKeyPressed(const views::KeyEvent& event) OVERRIDE {
-    if (event.key_code() == ui::VKEY_SPACE ||
-        event.key_code() == ui::VKEY_RETURN) {
-      ash::Shell::GetInstance()->tray_delegate()->ShowSettings();
-      return true;
-    }
-    return false;
-  }
-
-  // Overridden from views::View.
-  virtual bool OnMousePressed(const views::MouseEvent& event) OVERRIDE {
+  // Overridden from ash::internal::ActionableView.
+  virtual bool PerformAction(const views::Event& event) OVERRIDE {
     ash::Shell::GetInstance()->tray_delegate()->ShowSettings();
     return true;
-  }
-
-  // Overridden from views::View.
-  void GetAccessibleState(ui::AccessibleViewState* state) {
-    state->role = ui::AccessibilityTypes::ROLE_PUSHBUTTON;
-    ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-    state->name = rb.GetLocalizedString(
-        IDS_ASH_STATUS_TRAY_SETTINGS_AND_HELP);
   }
 
  private:
@@ -108,6 +91,9 @@ void TraySettings::DestroyDefaultView() {
 }
 
 void TraySettings::DestroyDetailedView() {
+}
+
+void TraySettings::UpdateAfterLoginStatusChange(user::LoginStatus status) {
 }
 
 }  // namespace internal

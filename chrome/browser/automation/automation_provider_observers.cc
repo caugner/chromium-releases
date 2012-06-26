@@ -43,8 +43,6 @@
 #include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/browser/password_manager/password_store_change.h"
-#include "chrome/browser/policy/browser_policy_connector.h"
-#include "chrome/browser/printing/print_job.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_host/chrome_render_message_filter.h"
 #include "chrome/browser/search_engines/template_url_service.h"
@@ -334,20 +332,10 @@ void NavigationNotificationObserver::Observe(
     }
   } else if (type == chrome::NOTIFICATION_AUTH_SUPPLIED ||
              type == chrome::NOTIFICATION_AUTH_CANCELLED) {
-    // The LoginHandler for this tab is no longer valid.
-    automation_->RemoveLoginHandler(controller_);
-
     // Treat this as if navigation started again, since load start/stop don't
     // occur while authentication is ongoing.
     navigation_started_ = true;
   } else if (type == chrome::NOTIFICATION_AUTH_NEEDED) {
-    // Remember the login handler that wants authentication.
-    // We do this in all cases (not just when navigation_started_ == true) so
-    // tests can still wait for auth dialogs outside of navigation.
-    LoginHandler* handler =
-        content::Details<LoginNotificationDetails>(details)->handler();
-    automation_->AddLoginHandler(controller_, handler);
-
     // Respond that authentication is needed.
     navigation_started_ = false;
     ConditionMet(AUTOMATION_MSG_NAVIGATION_AUTH_NEEDED);
@@ -392,9 +380,12 @@ void TabStripNotificationObserver::Observe(
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
   if (type == notification_) {
-    if (type == content::NOTIFICATION_TAB_PARENTED) {
+    if (type == chrome::NOTIFICATION_TAB_PARENTED) {
       ObserveTab(&(content::Source<TabContentsWrapper>(source).ptr()->
                      web_contents()->GetController()));
+    } else if (type == content::NOTIFICATION_WEB_CONTENTS_DESTROYED) {
+      ObserveTab(&(content::Source<content::WebContents>(source).ptr()->
+                     GetController()));
     } else {
       ObserveTab(content::Source<NavigationController>(source).ptr());
     }
@@ -407,7 +398,7 @@ void TabStripNotificationObserver::Observe(
 TabAppendedNotificationObserver::TabAppendedNotificationObserver(
     Browser* parent, AutomationProvider* automation,
     IPC::Message* reply_message)
-    : TabStripNotificationObserver(content::NOTIFICATION_TAB_PARENTED,
+    : TabStripNotificationObserver(chrome::NOTIFICATION_TAB_PARENTED,
                                    automation),
       parent_(parent),
       reply_message_(reply_message) {
@@ -434,8 +425,10 @@ void TabAppendedNotificationObserver::ObserveTab(
 TabClosedNotificationObserver::TabClosedNotificationObserver(
     AutomationProvider* automation, bool wait_until_closed,
     IPC::Message* reply_message)
-    : TabStripNotificationObserver(wait_until_closed ?
-          content::NOTIFICATION_TAB_CLOSED : content::NOTIFICATION_TAB_CLOSING,
+    : TabStripNotificationObserver(
+      wait_until_closed
+          ? static_cast<int>(content::NOTIFICATION_WEB_CONTENTS_DESTROYED)
+          : static_cast<int>(chrome::NOTIFICATION_TAB_CLOSING),
           automation),
       reply_message_(reply_message),
       for_browser_command_(false) {
@@ -512,10 +505,12 @@ void TabCountChangeObserver::CheckTabCount() {
   delete this;
 }
 
-bool DidExtensionHostsStopLoading(ExtensionProcessManager* manager) {
-  for (ExtensionProcessManager::const_iterator iter = manager->begin();
-       iter != manager->end(); ++iter) {
-    if (!(*iter)->did_stop_loading())
+bool DidExtensionViewsStopLoading(ExtensionProcessManager* manager) {
+  ExtensionProcessManager::ViewSet all_views = manager->GetAllViews();
+  for (ExtensionProcessManager::ViewSet::const_iterator iter =
+           all_views.begin();
+       iter != all_views.end(); ++iter) {
+    if ((*iter)->IsLoading())
       return false;
   }
   return true;
@@ -579,25 +574,11 @@ void ExtensionUninstallObserver::Observe(
 
 ExtensionReadyNotificationObserver::ExtensionReadyNotificationObserver(
     ExtensionProcessManager* manager, ExtensionService* service,
-    AutomationProvider* automation, int id, IPC::Message* reply_message)
-    : manager_(manager),
-      service_(service),
-      automation_(automation->AsWeakPtr()),
-      id_(id),
-      reply_message_(reply_message),
-      use_json_(false),
-      extension_(NULL) {
-  Init();
-}
-
-ExtensionReadyNotificationObserver::ExtensionReadyNotificationObserver(
-    ExtensionProcessManager* manager, ExtensionService* service,
     AutomationProvider* automation, IPC::Message* reply_message)
     : manager_(manager),
       service_(service),
       automation_(automation->AsWeakPtr()),
       reply_message_(reply_message),
-      use_json_(true),
       extension_(NULL) {
   Init();
 }
@@ -606,7 +587,7 @@ ExtensionReadyNotificationObserver::~ExtensionReadyNotificationObserver() {
 }
 
 void ExtensionReadyNotificationObserver::Init() {
-  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_HOST_DID_STOP_LOADING,
+  registrar_.Add(this, content::NOTIFICATION_LOAD_STOP,
                  content::NotificationService::AllSources());
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
                  content::NotificationService::AllSources());
@@ -627,10 +608,10 @@ void ExtensionReadyNotificationObserver::Observe(
   }
 
   switch (type) {
-    case chrome::NOTIFICATION_EXTENSION_HOST_DID_STOP_LOADING:
+    case content::NOTIFICATION_LOAD_STOP:
       // Only continue on with this method if our extension has been loaded
-      // and all the extension hosts have stopped loading.
-      if (!extension_ || !DidExtensionHostsStopLoading(manager_))
+      // and all the extension views have stopped loading.
+      if (!extension_ || !DidExtensionViewsStopLoading(manager_))
         return;
       break;
     case chrome::NOTIFICATION_EXTENSION_LOADED: {
@@ -641,12 +622,12 @@ void ExtensionReadyNotificationObserver::Observe(
       if (location != Extension::INTERNAL && location != Extension::LOAD)
         return;
       extension_ = loaded_extension;
-      if (!DidExtensionHostsStopLoading(manager_))
+      if (!DidExtensionViewsStopLoading(manager_))
         return;
-      // For some reason, the background ExtensionHost is not yet
-      // created at this point so just checking whether all ExtensionHosts
+      // For some reason, the background extension view is not yet
+      // created at this point so just checking whether all extension views
       // are loaded is not sufficient. If background page is not ready,
-      // we wait for NOTIFICATION_EXTENSION_HOST_DID_STOP_LOADING.
+      // we wait for NOTIFICATION_LOAD_STOP.
       if (!service_->IsBackgroundPageReady(extension_))
         return;
       break;
@@ -660,30 +641,13 @@ void ExtensionReadyNotificationObserver::Observe(
       break;
   }
 
-  if (use_json_) {
-    AutomationJSONReply reply(automation_, reply_message_.release());
-    if (extension_) {
-      DictionaryValue dict;
-      dict.SetString("id", extension_->id());
-      reply.SendSuccess(&dict);
-    } else {
-      reply.SendError("Extension could not be installed");
-    }
+  AutomationJSONReply reply(automation_, reply_message_.release());
+  if (extension_) {
+    DictionaryValue dict;
+    dict.SetString("id", extension_->id());
+    reply.SendSuccess(&dict);
   } else {
-    if (id_ == AutomationMsg_InstallExtension::ID) {
-      // A handle of zero indicates an error.
-      int extension_handle = 0;
-      if (extension_)
-        extension_handle = automation_->AddExtension(extension_);
-      AutomationMsg_InstallExtension::WriteReplyParams(
-          reply_message_.get(), extension_handle);
-    } else if (id_ == AutomationMsg_EnableExtension::ID) {
-      AutomationMsg_EnableExtension::WriteReplyParams(
-          reply_message_.get(), true);
-    } else {
-      LOG(ERROR) << "Cannot write reply params for unknown message id.";
-    }
-    automation_->Send(reply_message_.release());
+    reply.SendError("Extension could not be installed");
   }
   delete this;
 }
@@ -712,7 +676,7 @@ ExtensionsUpdatedObserver::ExtensionsUpdatedObserver(
     IPC::Message* reply_message)
     : manager_(manager), automation_(automation->AsWeakPtr()),
       reply_message_(reply_message), updater_finished_(false) {
-  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_HOST_DID_STOP_LOADING,
+  registrar_.Add(this, content::NOTIFICATION_LOAD_STOP,
                  content::NotificationService::AllSources());
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_INSTALL_ERROR,
                  content::NotificationService::AllSources());
@@ -746,8 +710,8 @@ void ExtensionsUpdatedObserver::Observe(
   // asynchronously: either they will be updated and loaded, or else they will
   // not load due to (1) not being allowed; (2) having updating disabled; or
   // (3) encountering an error.  Finally, notifications are also sent whenever
-  // an extension host stops loading.  Updating is not considered complete if
-  // any extension hosts are still loading.
+  // a view stops loading.  Updating is not considered complete if any extension
+  // views are still loading.
   switch (type) {
     case chrome::NOTIFICATION_EXTENSION_UPDATE_FOUND:
       // Extension updater has identified an extension that needs to be updated.
@@ -779,8 +743,8 @@ void ExtensionsUpdatedObserver::Observe(
       break;
     }
 
-    case chrome::NOTIFICATION_EXTENSION_HOST_DID_STOP_LOADING:
-      // Break out to the conditional check below to see if all extension hosts
+    case content::NOTIFICATION_LOAD_STOP:
+      // Break out to the conditional check below to see if all extension views
       // have stopped loading.
       break;
 
@@ -791,67 +755,13 @@ void ExtensionsUpdatedObserver::Observe(
 
   // Send the reply if (1) the extension updater has finished notifying all
   // extensions to update themselves; (2) all extensions that need to be updated
-  // have completed installation and are now loaded; and (3) all extension hosts
+  // have completed installation and are now loaded; and (3) all extension views
   // have stopped loading.
   if (updater_finished_ && in_progress_updates_.empty() &&
-      DidExtensionHostsStopLoading(manager_)) {
+      DidExtensionViewsStopLoading(manager_)) {
     AutomationJSONReply reply(automation_, reply_message_.release());
     reply.SendSuccess(NULL);
     delete this;
-  }
-}
-
-ExtensionTestResultNotificationObserver::
-    ExtensionTestResultNotificationObserver(AutomationProvider* automation)
-        : automation_(automation->AsWeakPtr()) {
-  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_TEST_PASSED,
-                 content::NotificationService::AllSources());
-  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_TEST_FAILED,
-                 content::NotificationService::AllSources());
-}
-
-ExtensionTestResultNotificationObserver::
-    ~ExtensionTestResultNotificationObserver() {
-}
-
-void ExtensionTestResultNotificationObserver::Observe(
-    int type, const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
-  switch (type) {
-    case chrome::NOTIFICATION_EXTENSION_TEST_PASSED:
-      results_.push_back(true);
-      messages_.push_back("");
-      break;
-
-    case chrome::NOTIFICATION_EXTENSION_TEST_FAILED:
-      results_.push_back(false);
-      messages_.push_back(*content::Details<std::string>(details).ptr());
-      break;
-
-    default:
-      NOTREACHED();
-  }
-  // There may be a reply message waiting for this event, so check.
-  MaybeSendResult();
-}
-
-void ExtensionTestResultNotificationObserver::MaybeSendResult() {
-  if (!automation_)
-    return;
-
-  if (!results_.empty()) {
-    // This release method should return the automation's current
-    // reply message, or NULL if there is no current one. If it is not
-    // NULL, we are stating that we will handle this reply message.
-    IPC::Message* reply_message = automation_->reply_message_release();
-    // Send the result back if we have a reply message.
-    if (reply_message) {
-      AutomationMsg_WaitForExtensionTestResult::WriteReplyParams(
-          reply_message, results_.front(), messages_.front());
-      results_.pop_front();
-      messages_.pop_front();
-      automation_->Send(reply_message);
-    }
   }
 }
 
@@ -1027,11 +937,11 @@ struct CommandNotification {
 };
 
 const struct CommandNotification command_notifications[] = {
-  {IDC_DUPLICATE_TAB, content::NOTIFICATION_TAB_PARENTED},
+  {IDC_DUPLICATE_TAB, chrome::NOTIFICATION_TAB_PARENTED},
 
   // Returns as soon as the restored tab is created. To further wait until
   // the content page is loaded, use WaitForTabToBeRestored.
-  {IDC_RESTORE_TAB, content::NOTIFICATION_TAB_PARENTED},
+  {IDC_RESTORE_TAB, chrome::NOTIFICATION_TAB_PARENTED},
 
   // For the following commands, we need to wait for a new tab to be created,
   // load to finish, and title to change.
@@ -1205,7 +1115,8 @@ void FindInPageNotificationObserver::Observe(
 // static
 const int FindInPageNotificationObserver::kFindInPageRequestId = -1;
 
-DomOperationObserver::DomOperationObserver() {
+DomOperationObserver::DomOperationObserver(int automation_id)
+    : automation_id_(automation_id) {
   registrar_.Add(this, content::NOTIFICATION_DOM_OPERATION_RESPONSE,
                  content::NotificationService::AllSources());
   registrar_.Add(this, chrome::NOTIFICATION_APP_MODAL_DIALOG_SHOWN,
@@ -1221,7 +1132,8 @@ void DomOperationObserver::Observe(
     const content::NotificationDetails& details) {
   if (type == content::NOTIFICATION_DOM_OPERATION_RESPONSE) {
     content::Details<DomOperationNotificationDetails> dom_op_details(details);
-    OnDomOperationCompleted(dom_op_details->json);
+    if (dom_op_details->automation_id == automation_id_)
+      OnDomOperationCompleted(dom_op_details->json);
   } else if (type == chrome::NOTIFICATION_APP_MODAL_DIALOG_SHOWN) {
     OnModalDialogShown();
   } else if (type == chrome::NOTIFICATION_WEB_CONTENT_SETTINGS_CHANGED) {
@@ -1243,7 +1155,8 @@ DomOperationMessageSender::DomOperationMessageSender(
     AutomationProvider* automation,
     IPC::Message* reply_message,
     bool use_json_interface)
-    : automation_(automation->AsWeakPtr()),
+    : DomOperationObserver(0),
+      automation_(automation->AsWeakPtr()),
       reply_message_(reply_message),
       use_json_interface_(use_json_interface) {
 }
@@ -1279,57 +1192,6 @@ void DomOperationMessageSender::OnJavascriptBlocked() {
     AutomationJSONReply(automation_, reply_message_.release())
         .SendError("Javascript execution was blocked");
     delete this;
-  }
-}
-
-DocumentPrintedNotificationObserver::DocumentPrintedNotificationObserver(
-    AutomationProvider* automation, IPC::Message* reply_message)
-    : automation_(automation->AsWeakPtr()),
-      success_(false),
-      reply_message_(reply_message) {
-  registrar_.Add(this, chrome::NOTIFICATION_PRINT_JOB_EVENT,
-                 content::NotificationService::AllSources());
-}
-
-DocumentPrintedNotificationObserver::~DocumentPrintedNotificationObserver() {
-  if (automation_) {
-    AutomationMsg_PrintNow::WriteReplyParams(reply_message_.get(), success_);
-    automation_->Send(reply_message_.release());
-  }
-}
-
-void DocumentPrintedNotificationObserver::Observe(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
-  DCHECK(type == chrome::NOTIFICATION_PRINT_JOB_EVENT);
-  switch (content::Details<printing::JobEventDetails>(details)->type()) {
-    case printing::JobEventDetails::JOB_DONE: {
-      // Succeeded.
-      success_ = true;
-      delete this;
-      break;
-    }
-    case printing::JobEventDetails::USER_INIT_CANCELED:
-    case printing::JobEventDetails::FAILED: {
-      // Failed.
-      delete this;
-      break;
-    }
-    case printing::JobEventDetails::NEW_DOC:
-    case printing::JobEventDetails::USER_INIT_DONE:
-    case printing::JobEventDetails::DEFAULT_INIT_DONE:
-    case printing::JobEventDetails::NEW_PAGE:
-    case printing::JobEventDetails::PAGE_DONE:
-    case printing::JobEventDetails::DOC_DONE:
-    case printing::JobEventDetails::ALL_PAGES_REQUESTED: {
-      // Don't care.
-      break;
-    }
-    default: {
-      NOTREACHED();
-      break;
-    }
   }
 }
 
@@ -1666,8 +1528,10 @@ void AllDownloadsCompleteObserver::ReplyIfNecessary() {
 
 AutomationProviderSearchEngineObserver::AutomationProviderSearchEngineObserver(
     AutomationProvider* provider,
+    Profile* profile,
     IPC::Message* reply_message)
     : provider_(provider->AsWeakPtr()),
+      profile_(profile),
       reply_message_(reply_message) {
 }
 
@@ -1677,7 +1541,7 @@ AutomationProviderSearchEngineObserver::
 void AutomationProviderSearchEngineObserver::OnTemplateURLServiceChanged() {
   if (provider_) {
     TemplateURLService* url_service =
-        TemplateURLServiceFactory::GetForProfile(provider_->profile());
+        TemplateURLServiceFactory::GetForProfile(profile_);
     url_service->RemoveObserver(this);
     AutomationJSONReply(provider_, reply_message_.release()).SendSuccess(NULL);
   }
@@ -2192,7 +2056,6 @@ void NTPInfoObserver::OnTopSitesReceived(
     DictionaryValue* dict = new DictionaryValue;
     dict->SetString("url", visited.url.spec());
     dict->SetString("title", visited.title);
-    dict->SetBoolean("is_pinned", top_sites_->IsURLPinned(visited.url));
     list_value->Append(dict);
   }
   ntp_info_->Set("most_visited", list_value);
@@ -2667,7 +2530,7 @@ AllViewsStoppedLoadingObserver::AllViewsStoppedLoadingObserver(
                  chrome::NOTIFICATION_APP_MODAL_DIALOG_SHOWN,
                  content::NotificationService::AllSources());
   registrar_.Add(this,
-                 chrome::NOTIFICATION_EXTENSION_HOST_DID_STOP_LOADING,
+                 content::NOTIFICATION_LOAD_STOP,
                  content::NotificationService::AllSources());
   for (BrowserList::const_iterator iter = BrowserList::begin();
        iter != BrowserList::end();
@@ -2717,7 +2580,7 @@ void AllViewsStoppedLoadingObserver::Observe(
     delete this;
     return;
   }
-  if (type == chrome::NOTIFICATION_EXTENSION_HOST_DID_STOP_LOADING) {
+  if (type == content::NOTIFICATION_LOAD_STOP) {
     CheckIfNoMorePendingLoads();
   } else if (type == chrome::NOTIFICATION_APP_MODAL_DIALOG_SHOWN) {
     AutomationJSONReply(automation_,
@@ -2733,7 +2596,7 @@ void AllViewsStoppedLoadingObserver::CheckIfNoMorePendingLoads() {
   }
 
   if (pending_tabs_.empty() &&
-      DidExtensionHostsStopLoading(extension_process_manager_)) {
+      DidExtensionViewsStopLoading(extension_process_manager_)) {
     AutomationJSONReply(automation_,
                         reply_message_.release()).SendSuccess(NULL);
     delete this;
@@ -2746,14 +2609,14 @@ NewTabObserver::NewTabObserver(AutomationProvider* automation,
       reply_message_(reply_message) {
   // Use TAB_PARENTED to detect the new tab.
   registrar_.Add(this,
-                 content::NOTIFICATION_TAB_PARENTED,
+                 chrome::NOTIFICATION_TAB_PARENTED,
                  content::NotificationService::AllSources());
 }
 
 void NewTabObserver::Observe(int type,
                              const content::NotificationSource& source,
                              const content::NotificationDetails& details) {
-  DCHECK_EQ(content::NOTIFICATION_TAB_PARENTED, type);
+  DCHECK_EQ(chrome::NOTIFICATION_TAB_PARENTED, type);
   NavigationController* controller =
       &(content::Source<TabContentsWrapper>(source).ptr()->
           web_contents()->GetController());
@@ -3082,92 +2945,6 @@ void BrowserOpenedWithNewProfileNotificationObserver::Observe(
     NOTREACHED();
   }
 }
-
-#if defined(ENABLE_CONFIGURATION_POLICY)
-
-PolicyUpdatesObserver::PolicyUpdatesObserver(
-    AutomationProvider* automation,
-    IPC::Message* reply_message,
-    policy::BrowserPolicyConnector* browser_policy_connector)
-    : automation_(automation->AsWeakPtr()),
-      reply_message_(reply_message) {
-  policy::ConfigurationPolicyProvider* providers[] = {
-    browser_policy_connector->GetManagedCloudProvider(),
-    browser_policy_connector->GetManagedPlatformProvider(),
-    browser_policy_connector->GetRecommendedCloudProvider(),
-    browser_policy_connector->GetRecommendedPlatformProvider(),
-  };
-  for (size_t i = 0; i < arraysize(providers); ++i) {
-    if (providers[i]) {
-      registrars_.push_back(new policy::ConfigurationPolicyObserverRegistrar);
-      registrars_.back()->Init(providers[i], this);
-    }
-  }
-  MaybeReply();
-}
-
-PolicyUpdatesObserver::~PolicyUpdatesObserver() {}
-
-// static
-void PolicyUpdatesObserver::PostCallbackAfterPolicyUpdates(
-    const base::Closure& callback) {
-  // Some policies (e.g. URLBlacklist) post tasks to other message loops before
-  // they start enforcing updated policy values; make sure those tasks have
-  // finished after a policy update.
-  // Updates of the URLBlacklist are done on IO, after building the blacklist
-  // on FILE, which is initiated from IO.
-  PostTask(BrowserThread::IO,
-      base::Bind(&PostTask, BrowserThread::FILE,
-          base::Bind(&PostTask, BrowserThread::IO,
-              base::Bind(&PostTask, BrowserThread::UI, callback))));
-}
-
-void PolicyUpdatesObserver::OnUpdatePolicy(
-    policy::ConfigurationPolicyProvider* provider) {
-  std::vector<policy::ConfigurationPolicyObserverRegistrar*>::iterator it;
-  for (it = registrars_.begin(); it != registrars_.end(); ++it) {
-    if ((*it)->provider() == provider) {
-      delete *it;
-      registrars_.erase(it);
-      MaybeReply();
-      return;
-    }
-  }
-}
-
-void PolicyUpdatesObserver::OnProviderGoingAway(
-    policy::ConfigurationPolicyProvider* provider) {
-  STLDeleteElements(&registrars_);
-  if (automation_) {
-    AutomationJSONReply(automation_, reply_message_.release()).SendError(
-        "Policy provider went away.");
-  }
-  delete this;
-}
-
-void PolicyUpdatesObserver::MaybeReply() {
-  if (registrars_.empty()) {
-    PostCallbackAfterPolicyUpdates(
-        base::Bind(&PolicyUpdatesObserver::Reply, base::Owned(this)));
-  }
-}
-
-void PolicyUpdatesObserver::Reply() {
-  if (automation_) {
-    AutomationJSONReply(
-        automation_, reply_message_.release()).SendSuccess(NULL);
-  }
-  // Reply() is only called from MaybeReply(), which makes the callback own
-  // |this|; so |this| will be deleted once this method returns.
-}
-
-// static
-void PolicyUpdatesObserver::PostTask(content::BrowserThread::ID id,
-                                     const base::Closure& callback) {
-  content::BrowserThread::PostTask(id, FROM_HERE, callback);
-}
-
-#endif  // defined(ENABLE_CONFIGURATION_POLICY)
 
 ExtensionPopupObserver::ExtensionPopupObserver(
     AutomationProvider* automation,

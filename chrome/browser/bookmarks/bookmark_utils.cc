@@ -40,8 +40,8 @@
 #endif
 
 #if defined(TOOLKIT_VIEWS)
-#include "ui/base/dragdrop/drag_utils.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
+#include "ui/views/drag_utils.h"
 #include "ui/views/events/event.h"
 #include "ui/views/widget/native_widget.h"
 #include "ui/views/widget/widget.h"
@@ -181,11 +181,11 @@ bool ShouldOpenAll(gfx::NativeWindow parent,
   if (child_count < bookmark_utils::num_urls_before_prompting)
     return true;
 
-  string16 message = l10n_util::GetStringFUTF16(
+  const string16 title = l10n_util::GetStringUTF16(IDS_PRODUCT_NAME);
+  const string16 message = l10n_util::GetStringFUTF16(
       IDS_BOOKMARK_BAR_SHOULD_OPEN_ALL,
       base::IntToString16(child_count));
-  string16 title = l10n_util::GetStringUTF16(IDS_PRODUCT_NAME);
-  return browser::ShowYesNoBox(parent, title, message);
+  return browser::ShowQuestionMessageBox(parent, title, message);
 }
 
 // Comparison function that compares based on date modified of the two nodes.
@@ -354,11 +354,16 @@ void DragBookmarks(Profile* profile,
   bool was_nested = MessageLoop::current()->IsNested();
   MessageLoop::current()->SetNestableTasksAllowed(true);
 
+  int operation =
+      ui::DragDropTypes::DRAG_COPY | ui::DragDropTypes::DRAG_MOVE |
+      ui::DragDropTypes::DRAG_LINK;
   views::Widget* widget = views::Widget::GetWidgetForNativeView(view);
   if (widget) {
-    widget->RunShellDrag(NULL, data, gfx::Point(),
-        ui::DragDropTypes::DRAG_COPY | ui::DragDropTypes::DRAG_MOVE |
-        ui::DragDropTypes::DRAG_LINK);
+    widget->RunShellDrag(NULL, data, gfx::Point(), operation);
+  } else {
+    // We hit this case when we're using WebContentsViewWin or
+    // WebContentsViewAura, instead of TabContentsViewViews.
+    views::RunShellDrag(view, data, gfx::Point(), operation);
   }
 
   MessageLoop::current()->SetNestableTasksAllowed(was_nested);
@@ -720,7 +725,7 @@ bool NodeHasURLs(const BookmarkNode* node) {
 bool ConfirmDeleteBookmarkNode(const BookmarkNode* node,
                                gfx::NativeWindow window) {
   DCHECK(node && node->is_folder() && !node->empty());
-  return browser::ShowYesNoBox(window,
+  return browser::ShowQuestionMessageBox(window,
       l10n_util::GetStringUTF16(IDS_PRODUCT_NAME),
       l10n_util::GetStringFUTF16Int(IDS_BOOKMARK_EDITOR_CONFIRM_DELETE,
                                     ChildURLCountTotal(node)));

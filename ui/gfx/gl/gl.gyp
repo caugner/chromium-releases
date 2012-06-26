@@ -137,7 +137,7 @@
             '<(DEPTH)/third_party/angle/include',
           ],
         }],
-        ['use_x11 == 1 and use_wayland != 1', {
+        ['use_x11 == 1', {
           'sources': [
             'gl_context_glx.cc',
             'gl_context_glx.h',
@@ -160,6 +160,9 @@
             'gl_surface_wgl.h',
             '<(gl_binding_output_dir)/gl_bindings_autogen_wgl.cc',
             '<(gl_binding_output_dir)/gl_bindings_autogen_wgl.h',
+          ],
+          'include_dirs': [
+            '$(DXSDK_DIR)/include',
           ],
         }],
         ['OS=="mac"', {

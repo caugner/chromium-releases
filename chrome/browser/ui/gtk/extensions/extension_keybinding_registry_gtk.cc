@@ -4,10 +4,13 @@
 
 #include "chrome/browser/ui/gtk/extensions/extension_keybinding_registry_gtk.h"
 
+#include "chrome/browser/extensions/api/commands/extension_command_service.h"
+#include "chrome/browser/extensions/api/commands/extension_command_service_factory.h"
 #include "chrome/browser/extensions/extension_browser_event_router.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/extensions/extension.h"
+#include "ui/base/keycodes/keyboard_code_conversion_gtk.h"
 
 ExtensionKeybindingRegistryGtk::ExtensionKeybindingRegistryGtk(
     Profile* profile, gfx::NativeWindow window)
@@ -41,20 +44,18 @@ gboolean ExtensionKeybindingRegistryGtk::HasPriorityHandler(
 
 void ExtensionKeybindingRegistryGtk::AddExtensionKeybinding(
     const Extension* extension) {
-  // Add all the keybindings (except pageAction and browserAction, which are
-  // handled elsewhere).
-  const std::vector<Extension::ExtensionKeybinding> commands =
-      extension->keybindings();
-  for (size_t i = 0; i < commands.size(); ++i) {
-    ui::AcceleratorGtk accelerator(commands[i].accelerator().key_code(),
-                                   commands[i].accelerator().IsShiftDown(),
-                                   commands[i].accelerator().IsCtrlDown(),
-                                   commands[i].accelerator().IsAltDown());
+  ExtensionCommandService* command_service =
+      ExtensionCommandServiceFactory::GetForProfile(profile_);
+  const extensions::CommandMap& commands =
+      command_service->GetActiveNamedCommands(extension->id());
+  extensions::CommandMap::const_iterator iter = commands.begin();
+  for (; iter != commands.end(); ++iter) {
+    ui::AcceleratorGtk accelerator(iter->second.accelerator().key_code(),
+                                   iter->second.accelerator().IsShiftDown(),
+                                   iter->second.accelerator().IsCtrlDown(),
+                                   iter->second.accelerator().IsAltDown());
     event_targets_[accelerator] =
-        std::make_pair(extension->id(), commands[i].command_name());
-
-    if (ShouldIgnoreCommand(commands[i].command_name()))
-      continue;
+        std::make_pair(extension->id(), iter->second.command_name());
 
     if (!accel_group_) {
       accel_group_ = gtk_accel_group_new();
@@ -68,6 +69,31 @@ void ExtensionKeybindingRegistryGtk::AddExtensionKeybinding(
         GtkAccelFlags(0),
         g_cclosure_new(G_CALLBACK(OnGtkAcceleratorThunk), this, NULL));
   }
+
+  // Unlike on Windows, we need to explicitly add the browser action and page
+  // action to the event_targets_, even though we don't register them as
+  // handlers. See http://crbug.com/124873.
+  const extensions::Command* browser_action =
+      command_service->GetActiveBrowserActionCommand(extension->id());
+  if (browser_action) {
+    ui::AcceleratorGtk accelerator(browser_action->accelerator().key_code(),
+                                   browser_action->accelerator().IsShiftDown(),
+                                   browser_action->accelerator().IsCtrlDown(),
+                                   browser_action->accelerator().IsAltDown());
+    event_targets_[accelerator] =
+      std::make_pair(extension->id(), browser_action->command_name());
+  }
+
+  const extensions::Command* page_action =
+      command_service->GetActivePageActionCommand(extension->id());
+  if (page_action) {
+    ui::AcceleratorGtk accelerator(page_action->accelerator().key_code(),
+                                   page_action->accelerator().IsShiftDown(),
+                                   page_action->accelerator().IsCtrlDown(),
+                                   page_action->accelerator().IsAltDown());
+    event_targets_[accelerator] =
+        std::make_pair(extension->id(), page_action->command_name());
+  }
 }
 
 void ExtensionKeybindingRegistryGtk::RemoveExtensionKeybinding(
@@ -79,7 +105,8 @@ void ExtensionKeybindingRegistryGtk::RemoveExtensionKeybinding(
       continue;  // Not the extension we asked for.
     }
 
-    // On GTK, unlike Windows, the Event Targets contain all events.
+    // On GTK, unlike Windows, the Event Targets contain all events but we must
+    // only unregister the ones we own.
     if (ShouldIgnoreCommand(iter->second.second)) {
       ++iter;
       continue;

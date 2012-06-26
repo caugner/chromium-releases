@@ -10,6 +10,7 @@
 #include "ash/system/tray/system_tray_delegate.h"
 #include "ash/system/tray/tray_constants.h"
 #include "ash/system/tray/tray_item_more.h"
+#include "ash/system/tray/tray_item_view.h"
 #include "ash/system/tray/tray_views.h"
 #include "base/utf_string_conversions.h"
 #include "grit/ash_strings.h"
@@ -17,8 +18,10 @@
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/aura/window.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/canvas.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/image/image.h"
+#include "ui/gfx/skia_util.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/controls/image_view.h"
@@ -34,35 +37,30 @@
 namespace {
 
 // Height of the list of networks in the popup.
-const int kNetworkListHeight = 160;
+const int kNetworkListHeight = 203;
 
-// Creates a row of labels.
-views::View* CreateTextLabels(const string16& text_label,
-                              const std::string& text_string) {
+// Create a label with the font size and color used in the network info bubble.
+views::Label* CreateInfoBubbleLabel(const string16& text) {
   const SkColor text_color = SkColorSetARGB(127, 0, 0, 0);
+  views::Label* label = new views::Label(text);
+  label->SetFont(label->font().DeriveFont(-1));
+  label->SetEnabledColor(text_color);
+  return label;
+}
+
+// Create a row of labels for the network info bubble.
+views::View* CreateInfoBubbleLine(const string16& text_label,
+                                  const std::string& text_string) {
   views::View* view = new views::View;
-  view->SetLayoutManager(new views::BoxLayout(views::BoxLayout::kHorizontal,
-        0, 0, 1));
-
-  views::Label* label = new views::Label(text_label);
-  label->SetFont(label->font().DeriveFont(-1));
-  label->SetEnabledColor(text_color);
-  view->AddChildView(label);
-
-  label = new views::Label(UTF8ToUTF16(": "));
-  label->SetFont(label->font().DeriveFont(-1));
-  label->SetEnabledColor(text_color);
-  view->AddChildView(label);
-
-  label = new views::Label(UTF8ToUTF16(text_string));
-  label->SetFont(label->font().DeriveFont(-1));
-  label->SetEnabledColor(text_color);
-  view->AddChildView(label);
-
+  view->SetLayoutManager(
+      new views::BoxLayout(views::BoxLayout::kHorizontal, 0, 0, 1));
+  view->AddChildView(CreateInfoBubbleLabel(text_label));
+  view->AddChildView(CreateInfoBubbleLabel(UTF8ToUTF16(": ")));
+  view->AddChildView(CreateInfoBubbleLabel(UTF8ToUTF16(text_string)));
   return view;
 }
 
-// A bubble you canno activate.
+// A bubble that cannot be activated.
 class NonActivatableSettingsBubble : public views::BubbleDelegateView {
  public:
   NonActivatableSettingsBubble(views::View* anchor, views::View* content)
@@ -84,7 +82,7 @@ class NonActivatableSettingsBubble : public views::BubbleDelegateView {
   DISALLOW_COPY_AND_ASSIGN(NonActivatableSettingsBubble);
 };
 
-}
+}  // namespace
 
 namespace ash {
 namespace internal {
@@ -96,7 +94,7 @@ enum ColorTheme {
   DARK,
 };
 
-class NetworkTrayView : public views::View {
+class NetworkTrayView : public TrayItemView {
  public:
   NetworkTrayView(ColorTheme size, bool tray_icon)
       : color_theme_(size), tray_icon_(tray_icon) {
@@ -134,8 +132,6 @@ class NetworkDefaultView : public TrayItemMore {
  public:
   explicit NetworkDefaultView(SystemTrayItem* owner)
       : TrayItemMore(owner) {
-    icon_ = new NetworkTrayView(DARK, false /* tray_icon */);
-    ReplaceIcon(icon_);
     Update();
   }
 
@@ -145,14 +141,12 @@ class NetworkDefaultView : public TrayItemMore {
     NetworkIconInfo info;
     Shell::GetInstance()->tray_delegate()->
         GetMostRelevantNetworkIcon(&info, true);
-    icon_->Update(info);
+    SetImage(&info.image);
     SetLabel(info.description);
     SetAccessibleName(info.description);
   }
 
  private:
-  NetworkTrayView* icon_;
-
   DISALLOW_COPY_AND_ASSIGN(NetworkDefaultView);
 };
 
@@ -163,18 +157,27 @@ class NetworkDetailedView : public views::View,
   explicit NetworkDetailedView(user::LoginStatus login)
       : login_(login),
         header_(NULL),
+        header_text_(NULL),
+        header_buttons_(NULL),
         airplane_(NULL),
-        mobile_account_(NULL),
+        info_icon_(NULL),
+        button_wifi_(NULL),
+        button_cellular_(NULL),
+        view_mobile_account_(NULL),
+        setup_mobile_account_(NULL),
+        networks_list_(NULL),
+        scroller_(NULL),
         other_wifi_(NULL),
         other_mobile_(NULL),
-        toggle_wifi_(NULL),
-        toggle_mobile_(NULL),
         settings_(NULL),
         proxy_settings_(NULL),
         info_bubble_(NULL) {
     SetLayoutManager(new views::BoxLayout(
-        views::BoxLayout::kVertical, 1, 1, 1));
+        views::BoxLayout::kVertical, 0, 0, 0));
     set_background(views::Background::CreateSolidBackground(kBackgroundColor));
+    SystemTrayDelegate* delegate = Shell::GetInstance()->tray_delegate();
+    delegate->RequestNetworkScan();
+    CreateItems();
     Update();
   }
 
@@ -183,142 +186,205 @@ class NetworkDetailedView : public views::View,
       info_bubble_->GetWidget()->CloseNow();
   }
 
-  void Update() {
+  void CreateItems() {
     RemoveAllChildViews(true);
 
     header_ = NULL;
+    header_text_ = NULL;
+    header_buttons_ = NULL;
     airplane_ = NULL;
-    mobile_account_ = NULL;
+    info_icon_ = NULL;
+    button_wifi_ = NULL;
+    button_cellular_ = NULL;
+    view_mobile_account_ = NULL;
+    setup_mobile_account_ = NULL;
+    networks_list_ = NULL;
+    scroller_ = NULL;
     other_wifi_ = NULL;
     other_mobile_ = NULL;
-    toggle_wifi_ = NULL;
-    toggle_mobile_ = NULL;
     settings_ = NULL;
     proxy_settings_ = NULL;
 
     AppendHeaderEntry();
+    AppendHeaderButtons();
     AppendNetworkEntries();
+    AppendNetworkExtra();
 
-    if (login_ != user::LOGGED_IN_LOCKED) {
-      AppendNetworkExtra();
-      AppendNetworkToggles();
-      AppendSettingsEntry();
-   }
+    Update();
+  }
+
+  void Update() {
+    UpdateHeaderButtons();
+    UpdateNetworkEntries();
+    UpdateNetworkExtra();
 
     Layout();
   }
 
  private:
   void AppendHeaderEntry() {
-    header_ = CreateDetailedHeaderEntry(IDS_ASH_STATUS_TRAY_NETWORK, this);
-
-    ui::ResourceBundle& bundle = ui::ResourceBundle::GetSharedInstance();
-    info_icon_ = new views::ImageButton(this);
-    info_icon_->SetImage(views::CustomButton::BS_NORMAL,
-        bundle.GetImageNamed(IDR_AURA_UBER_TRAY_NETWORK_INFO).ToSkBitmap());
-    header_->AddChildView(info_icon_);
-
+    header_ = new views::View;
+    header_->SetLayoutManager(new
+        views::BoxLayout(views::BoxLayout::kHorizontal, 0, 0, 0));
+    header_text_ = CreateDetailedHeaderEntry(IDS_ASH_STATUS_TRAY_NETWORK, this);
+    header_->AddChildView(header_text_);
     AddChildView(header_);
   }
 
-  void AppendNetworkEntries() {
-    SystemTrayDelegate* delegate = Shell::GetInstance()->tray_delegate();
-    std::vector<NetworkIconInfo> list;
-    delegate->GetAvailableNetworks(&list);
-    FixedSizedScrollView* scroller = new FixedSizedScrollView;
-    views::View* networks = new views::View;
-    networks->SetLayoutManager(new views::BoxLayout(
-        views::BoxLayout::kVertical, 0, 0, 1));
-    for (size_t i = 0; i < list.size(); i++) {
-      HoverHighlightView* container = new HoverHighlightView(this);
-      container->AddIconAndLabel(list[i].image,
-          list[i].description.empty() ? list[i].name : list[i].description,
-          list[i].highlight ? gfx::Font::BOLD : gfx::Font::NORMAL);
-      networks->AddChildView(container);
-      container->set_border(views::Border::CreateEmptyBorder(0,
-          kTrayPopupDetailsIconWidth, 0, 0));
-      network_map_[container] = list[i].service_path;
-    }
+  void AppendHeaderButtons() {
+    header_buttons_ = new views::View;
+    header_buttons_->SetLayoutManager(new
+        views::BoxLayout(views::BoxLayout::kHorizontal, 0, 0, 0));
 
-    if (login_ != user::LOGGED_IN_NONE) {
-      std::string carrier_id, topup_url;
-      if (delegate->GetCellularCarrierInfo(&carrier_id, &topup_url)) {
-        if (carrier_id != carrier_id_) {
-          carrier_id_ = carrier_id;
-          if (!topup_url.empty())
-            topup_url_ = topup_url;
-        }
-        if (!topup_url_.empty()) {
-          HoverHighlightView* container = new HoverHighlightView(this);
-          container->AddLabel(ui::ResourceBundle::GetSharedInstance().
-              GetLocalizedString(IDS_ASH_STATUS_TRAY_MOBILE_VIEW_ACCOUNT),
-              gfx::Font::NORMAL);
-          AddChildView(container);
-          mobile_account_ = container;
-        }
-      }
-    }
+    button_wifi_ = new TrayPopupHeaderButton(this,
+        IDR_AURA_UBER_TRAY_WIFI_ENABLED,
+        IDR_AURA_UBER_TRAY_WIFI_DISABLED);
+    header_buttons_->AddChildView(button_wifi_);
+
+    button_cellular_ = new TrayPopupHeaderButton(this,
+        IDR_AURA_UBER_TRAY_CELLULAR_ENABLED,
+        IDR_AURA_UBER_TRAY_CELLULAR_DISABLED);
+    header_buttons_->AddChildView(button_cellular_);
+
+    info_icon_ = new TrayPopupHeaderButton(this,
+        IDR_AURA_UBER_TRAY_NETWORK_INFO,
+        IDR_AURA_UBER_TRAY_NETWORK_INFO);
+    header_buttons_->AddChildView(info_icon_);
+
+    header_->AddChildView(header_buttons_);
+  }
+
+  void UpdateHeaderButtons() {
+    SystemTrayDelegate* delegate = Shell::GetInstance()->tray_delegate();
+    button_wifi_->SetToggled(!delegate->GetWifiEnabled());
+    button_cellular_->SetToggled(!delegate->GetCellularEnabled());
+    button_cellular_->SetVisible(delegate->GetCellularAvailable());
+  }
+
+  void AppendNetworkEntries() {
+    FixedSizedScrollView* scroller = new FixedSizedScrollView;
+    networks_list_ = new views::View;
+    networks_list_->SetLayoutManager(new views::BoxLayout(
+        views::BoxLayout::kVertical, 0, 0, 1));
+
+    HoverHighlightView* container = new HoverHighlightView(this);
+    container->set_fixed_height(kTrayPopupItemHeight);
+    container->AddLabel(ui::ResourceBundle::GetSharedInstance().
+        GetLocalizedString(IDS_ASH_STATUS_TRAY_MOBILE_VIEW_ACCOUNT),
+        gfx::Font::NORMAL);
+    AddChildView(container);
+    view_mobile_account_ = container;
+
+    container = new HoverHighlightView(this);
+    container->set_fixed_height(kTrayPopupItemHeight);
+    container->AddLabel(ui::ResourceBundle::GetSharedInstance().
+        GetLocalizedString(IDS_ASH_STATUS_TRAY_SETUP_MOBILE),
+        gfx::Font::NORMAL);
+    AddChildView(container);
+    setup_mobile_account_ = container;
 
     scroller->set_border(views::Border::CreateSolidSidedBorder(1, 0, 1, 0,
         SkColorSetARGB(25, 0, 0, 0)));
     scroller->set_fixed_size(
-        gfx::Size(networks->GetPreferredSize().width() +
+        gfx::Size(networks_list_->GetPreferredSize().width() +
                   scroller->GetScrollBarWidth(),
                   kNetworkListHeight));
-    scroller->SetContentsView(networks);
+    scroller->SetContentsView(networks_list_);
     AddChildView(scroller);
+    scroller_ = scroller;
+  }
+
+  void UpdateNetworkEntries() {
+    SystemTrayDelegate* delegate = Shell::GetInstance()->tray_delegate();
+    std::vector<NetworkIconInfo> list;
+    delegate->GetAvailableNetworks(&list);
+
+    network_map_.clear();
+    networks_list_->RemoveAllChildViews(true);
+    views::View* highlighted_view = NULL;
+    for (size_t i = 0; i < list.size(); i++) {
+      HoverHighlightView* container = new HoverHighlightView(this);
+      container->set_fixed_height(kTrayPopupItemHeight);
+      container->AddIconAndLabel(list[i].image,
+          list[i].description.empty() ? list[i].name : list[i].description,
+          list[i].highlight ? gfx::Font::BOLD : gfx::Font::NORMAL);
+      networks_list_->AddChildView(container);
+      if (list[i].highlight)
+        highlighted_view = container;
+      container->set_border(views::Border::CreateEmptyBorder(0,
+          kTrayPopupDetailsIconWidth, 0, 0));
+      network_map_[container] = list[i].service_path;
+    }
+    networks_list_->SizeToPreferredSize();
+    scroller_->Layout();
+    if (highlighted_view)
+      networks_list_->ScrollRectToVisible(highlighted_view->bounds());
+
+    view_mobile_account_->SetVisible(false);
+    setup_mobile_account_->SetVisible(false);
+
+    if (login_ == user::LOGGED_IN_NONE)
+      return;
+
+    std::string carrier_id, topup_url, setup_url;
+    if (delegate->GetCellularCarrierInfo(&carrier_id,
+                                         &topup_url,
+                                         &setup_url)) {
+      if (carrier_id != carrier_id_) {
+        carrier_id_ = carrier_id;
+        if (!topup_url.empty())
+          topup_url_ = topup_url;
+      }
+
+      if (!setup_url.empty())
+        setup_url_ = setup_url;
+
+      if (!topup_url_.empty())
+        view_mobile_account_->SetVisible(true);
+      if (!setup_url_.empty())
+        setup_mobile_account_->SetVisible(true);
+    }
   }
 
   void AppendNetworkExtra() {
-    ash::SystemTrayDelegate* delegate =
-        ash::Shell::GetInstance()->tray_delegate();
-    ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-    if (delegate->GetWifiEnabled()) {
-      HoverHighlightView* container = new HoverHighlightView(this);
-      container->AddLabel(rb.GetLocalizedString(
-          IDS_ASH_STATUS_TRAY_OTHER_WIFI), gfx::Font::NORMAL);
-      AddChildView(container);
-      other_wifi_ = container;
-    }
+    if (login_ == user::LOGGED_IN_LOCKED)
+      return;
 
-    if (delegate->GetCellularEnabled()) {
-      if (delegate->GetCellularScanSupported()) {
-        HoverHighlightView* container = new HoverHighlightView(this);
-        container->AddLabel(rb.GetLocalizedString(
-            IDS_ASH_STATUS_TRAY_OTHER_MOBILE), gfx::Font::NORMAL);
-        AddChildView(container);
-        other_mobile_ = container;
-      }
-    }
+    ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+
+    TrayPopupTextButtonContainer* bottom_row =
+        new TrayPopupTextButtonContainer;
+
+    other_wifi_ = new TrayPopupTextButton(this,
+        rb.GetLocalizedString(IDS_ASH_STATUS_TRAY_OTHER_WIFI));
+    bottom_row->AddTextButton(other_wifi_);
+
+    other_mobile_ = new TrayPopupTextButton(this,
+        rb.GetLocalizedString(IDS_ASH_STATUS_TRAY_OTHER_MOBILE));
+    bottom_row->AddTextButton(other_mobile_);
+
+    CreateSettingsEntry();
+    bottom_row->AddTextButton(settings_ ? settings_ : proxy_settings_);
+
+    AddChildView(bottom_row);
   }
 
-  void AppendNetworkToggles() {
-    ash::SystemTrayDelegate* delegate =
-        ash::Shell::GetInstance()->tray_delegate();
-    ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-    if (delegate->GetWifiAvailable()) {
-      HoverHighlightView* container = new HoverHighlightView(this);
-      container->AddLabel(rb.GetLocalizedString(delegate->GetWifiEnabled() ?
-          IDS_ASH_STATUS_TRAY_DISABLE_WIFI :
-          IDS_ASH_STATUS_TRAY_ENABLE_WIFI), gfx::Font::NORMAL);
-      AddChildView(container);
-      toggle_wifi_ = container;
-    }
+  void UpdateNetworkExtra() {
+    if (login_ == user::LOGGED_IN_LOCKED)
+      return;
 
-    if (delegate->GetCellularAvailable()) {
-      HoverHighlightView* container = new HoverHighlightView(this);
-      container->AddLabel(rb.GetLocalizedString(
-          delegate->GetCellularEnabled() ?  IDS_ASH_STATUS_TRAY_DISABLE_MOBILE :
-                                            IDS_ASH_STATUS_TRAY_ENABLE_MOBILE),
-          gfx::Font::NORMAL);
-      AddChildView(container);
-      toggle_mobile_ = container;
-    }
+    SystemTrayDelegate* delegate = Shell::GetInstance()->tray_delegate();
+    other_wifi_->SetEnabled(delegate->GetWifiEnabled());
+    other_mobile_->SetVisible(delegate->GetCellularAvailable() &&
+                              delegate->GetCellularScanSupported());
+    if (other_mobile_->visible())
+      other_mobile_->SetEnabled(delegate->GetCellularEnabled());
   }
 
   void AppendAirplaneModeEntry() {
     ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
     HoverHighlightView* container = new HoverHighlightView(this);
+    container->set_fixed_height(kTrayPopupItemHeight);
     container->AddIconAndLabel(
         *rb.GetImageNamed(IDR_AURA_UBER_TRAY_NETWORK_AIRPLANE).ToSkBitmap(),
         rb.GetLocalizedString(IDS_ASH_STATUS_TRAY_AIRPLANE_MODE),
@@ -329,22 +395,15 @@ class NetworkDetailedView : public views::View,
 
   // Adds a settings entry when logged in, and an entry for changing proxy
   // settings otherwise.
-  void AppendSettingsEntry() {
+  void CreateSettingsEntry() {
     ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
     if (login_ != user::LOGGED_IN_NONE) {
       // Settings, only if logged in.
-      HoverHighlightView* container = new HoverHighlightView(this);
-      container->AddLabel(rb.GetLocalizedString(
-          IDS_ASH_STATUS_TRAY_NETWORK_SETTINGS), gfx::Font::NORMAL);
-      AddChildView(container);
-      settings_ = container;
+      settings_ = new TrayPopupTextButton(this,
+          rb.GetLocalizedString(IDS_ASH_STATUS_TRAY_NETWORK_SETTINGS));
     } else {
-      // Allow changing proxy settings in the login screen.
-      HoverHighlightView* container = new HoverHighlightView(this);
-      container->AddLabel(rb.GetLocalizedString(
-          IDS_ASH_STATUS_TRAY_NETWORK_PROXY_SETTINGS), gfx::Font::NORMAL);
-      AddChildView(container);
-      proxy_settings_ = container;
+      proxy_settings_ = new TrayPopupTextButton(this,
+          rb.GetLocalizedString(IDS_ASH_STATUS_TRAY_NETWORK_PROXY_SETTINGS));
     }
   }
 
@@ -357,28 +416,49 @@ class NetworkDetailedView : public views::View,
     views::View* container = new views::View;
     container->SetLayoutManager(new
         views::BoxLayout(views::BoxLayout::kVertical, 0, 0, 1));
-    container->set_border(views::Border::CreateEmptyBorder(0, 20, 0, 0));
+    container->set_border(views::Border::CreateEmptyBorder(0, 5, 0, 5));
 
-    container->AddChildView(CreateTextLabels(bundle.GetLocalizedString(
-        IDS_ASH_STATUS_TRAY_IP), ip_address));
-    container->AddChildView(CreateTextLabels(bundle.GetLocalizedString(
-        IDS_ASH_STATUS_TRAY_ETHERNET), ethernet_address));
-    container->AddChildView(CreateTextLabels(bundle.GetLocalizedString(
-        IDS_ASH_STATUS_TRAY_WIFI), wifi_address));
+    // GetNetworkAddresses returns empty strings if no information is available.
+    if (!ip_address.empty()) {
+      container->AddChildView(CreateInfoBubbleLine(bundle.GetLocalizedString(
+          IDS_ASH_STATUS_TRAY_IP), ip_address));
+    }
+    if (!ethernet_address.empty()) {
+      container->AddChildView(CreateInfoBubbleLine(bundle.GetLocalizedString(
+          IDS_ASH_STATUS_TRAY_ETHERNET), ethernet_address));
+    }
+    if (!wifi_address.empty()) {
+      container->AddChildView(CreateInfoBubbleLine(bundle.GetLocalizedString(
+          IDS_ASH_STATUS_TRAY_WIFI), wifi_address));
+    }
+
+    // Avoid an empty bubble in the unlikely event that there is no network
+    // information at all.
+    if (!container->has_children()) {
+      container->AddChildView(CreateInfoBubbleLabel(bundle.GetLocalizedString(
+          IDS_ASH_STATUS_TRAY_NO_NETWORKS)));
+    }
 
     return container;
   }
 
   void ToggleInfoBubble() {
-    if (info_bubble_) {
-      info_bubble_->GetWidget()->CloseNow();
-      info_bubble_ = NULL;
+    if (ResetInfoBubble())
       return;
-    }
+
     info_bubble_ = new NonActivatableSettingsBubble(
         info_icon_, CreateNetworkInfoView());
     views::BubbleDelegateView::CreateBubble(info_bubble_);
     info_bubble_->Show();
+  }
+
+  // Returns whether an existing info-bubble was closed.
+  bool ResetInfoBubble() {
+    if (!info_bubble_)
+      return false;
+    info_bubble_->GetWidget()->Close();
+    info_bubble_ = NULL;
+    return true;
   }
 
   // Overridden from views::View.
@@ -387,17 +467,42 @@ class NetworkDetailedView : public views::View,
 
     // Align the network info view and icon.
     gfx::Rect header_bounds = header_->bounds();
-    gfx::Size icon_size = info_icon_->size();
+    gfx::Size buttons_size = header_buttons_->size();
 
-    info_icon_->SetBounds(
-        header_->width() - icon_size.width() - kTrayPopupPaddingHorizontal, 3,
-        icon_size.width(), icon_size.height());
+    header_buttons_->SetBounds(
+        header_->width() - buttons_size.width(), 0,
+        buttons_size.width(), header_->height());
+    header_text_->SetBounds(0, 0,
+        header_->width() - buttons_size.width(), header_->height());
   }
 
   // Overridden from ButtonListener.
   virtual void ButtonPressed(views::Button* sender,
                              const views::Event& event) OVERRIDE {
-    ToggleInfoBubble();
+    ash::SystemTrayDelegate* delegate =
+        ash::Shell::GetInstance()->tray_delegate();
+    if (sender == info_icon_) {
+      ToggleInfoBubble();
+      return;
+    }
+
+    // If the info bubble was visible, close it when some other item is clicked
+    // on.
+    ResetInfoBubble();
+    if (sender == button_wifi_)
+      delegate->ToggleWifi();
+    else if (sender == button_cellular_)
+      delegate->ToggleCellular();
+    else if (sender == settings_)
+      delegate->ShowNetworkSettings();
+    else if (sender == proxy_settings_)
+      delegate->ChangeProxySettings();
+    else if (sender == other_mobile_)
+      delegate->ShowOtherCellular();
+    else if (sender == other_wifi_)
+      delegate->ShowOtherWifi();
+    else
+      NOTREACHED();
   }
 
   // Overridden from ViewClickListener.
@@ -406,31 +511,18 @@ class NetworkDetailedView : public views::View,
         ash::Shell::GetInstance()->tray_delegate();
     // If the info bubble was visible, close it when some other item is clicked
     // on.
-    if (info_bubble_) {
-      info_bubble_->GetWidget()->Close();
-      info_bubble_ = NULL;
-    }
+    ResetInfoBubble();
 
-    if (sender == header_)
+    if (sender == header_text_)
       Shell::GetInstance()->tray()->ShowDefaultView();
 
     if (login_ == user::LOGGED_IN_LOCKED)
       return;
 
-    if (sender == settings_) {
-      delegate->ShowNetworkSettings();
-    } else if (sender == proxy_settings_) {
-      delegate->ChangeProxySettings();
-    } else if (sender == mobile_account_) {
-      delegate->ShowCellularTopupURL(topup_url_);
-    } else if (sender == other_wifi_) {
-      delegate->ShowOtherWifi();
-    } else if (sender == other_mobile_) {
-      delegate->ShowOtherCellular();
-    } else if (sender == toggle_wifi_) {
-      delegate->ToggleWifi();
-    } else if (sender == toggle_mobile_) {
-      delegate->ToggleCellular();
+    if (sender == view_mobile_account_) {
+      delegate->ShowCellularURL(topup_url_);
+    } else if (sender == setup_mobile_account_) {
+      delegate->ShowCellularURL(setup_url_);
     } else if (sender == airplane_) {
       delegate->ToggleAirplaneMode();
     } else {
@@ -445,19 +537,25 @@ class NetworkDetailedView : public views::View,
 
   std::string carrier_id_;
   std::string topup_url_;
+  std::string setup_url_;
 
   user::LoginStatus login_;
   std::map<views::View*, std::string> network_map_;
   views::View* header_;
+  views::View* header_text_;
+  views::View* header_buttons_;
   views::View* airplane_;
   views::ImageButton* info_icon_;
-  views::View* mobile_account_;
-  views::View* other_wifi_;
-  views::View* other_mobile_;
-  views::View* toggle_wifi_;
-  views::View* toggle_mobile_;
-  views::View* settings_;
-  views::View* proxy_settings_;
+  views::ToggleImageButton* button_wifi_;
+  views::ToggleImageButton* button_cellular_;
+  views::View* view_mobile_account_;
+  views::View* setup_mobile_account_;
+  views::View* networks_list_;
+  views::View* scroller_;
+  TrayPopupTextButton* other_wifi_;
+  TrayPopupTextButton* other_mobile_;
+  TrayPopupTextButton* settings_;
+  TrayPopupTextButton* proxy_settings_;
 
   views::BubbleDelegateView* info_bubble_;
 
@@ -466,45 +564,54 @@ class NetworkDetailedView : public views::View,
 
 }  // namespace tray
 
-TrayNetwork::TrayNetwork() {
+TrayNetwork::TrayNetwork()
+    : tray_(NULL),
+      default_(NULL),
+      detailed_(NULL) {
 }
 
 TrayNetwork::~TrayNetwork() {
 }
 
 views::View* TrayNetwork::CreateTrayView(user::LoginStatus status) {
-  tray_.reset(new tray::NetworkTrayView(tray::LIGHT, true /*tray_icon*/));
-  return tray_.get();
+  CHECK(tray_ == NULL);
+  tray_ = new tray::NetworkTrayView(tray::LIGHT, true /*tray_icon*/);
+  return tray_;
 }
 
 views::View* TrayNetwork::CreateDefaultView(user::LoginStatus status) {
-  default_.reset(new tray::NetworkDefaultView(this));
-  return default_.get();
+  CHECK(default_ == NULL);
+  default_ = new tray::NetworkDefaultView(this);
+  return default_;
 }
 
 views::View* TrayNetwork::CreateDetailedView(user::LoginStatus status) {
-  detailed_.reset(new tray::NetworkDetailedView(status));
-  return detailed_.get();
+  CHECK(detailed_ == NULL);
+  detailed_ = new tray::NetworkDetailedView(status);
+  return detailed_;
 }
 
 void TrayNetwork::DestroyTrayView() {
-  tray_.reset();
+  tray_ = NULL;
 }
 
 void TrayNetwork::DestroyDefaultView() {
-  default_.reset();
+  default_ = NULL;
 }
 
 void TrayNetwork::DestroyDetailedView() {
-  detailed_.reset();
+  detailed_ = NULL;
+}
+
+void TrayNetwork::UpdateAfterLoginStatusChange(user::LoginStatus status) {
 }
 
 void TrayNetwork::OnNetworkRefresh(const NetworkIconInfo& info) {
-  if (tray_.get())
+  if (tray_)
     tray_->Update(info);
-  if (default_.get())
+  if (default_)
     default_->Update();
-  if (detailed_.get())
+  if (detailed_)
     detailed_->Update();
 }
 

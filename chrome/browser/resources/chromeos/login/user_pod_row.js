@@ -145,6 +145,12 @@ cr.define('login', function() {
      * @private
      */
     handlePasswordKeyPress_: function(e) {
+      // When tabbing from the system tray a tab key press is received. Suppress
+      // this so as not to type a tab character into the password field.
+      if (e.keyCode == 9) {
+        e.preventDefault();
+        return;
+      }
       this.passwordEmpty = false;
     },
 
@@ -231,7 +237,7 @@ cr.define('login', function() {
       this.signedInIndicatorElement.hidden = !this.user_.signedIn;
 
       if (this.isGuest) {
-        this.imageElement.title = this.user_.displayName;
+        this.imageElement.title = '';
         this.enterButtonElement.hidden = false;
         this.passwordElement.hidden = true;
         this.signinButtonElement.hidden = true;
@@ -683,6 +689,8 @@ cr.define('login', function() {
      * @param {string} email Email for signin UI.
      */
     showSigninUI: function(email) {
+      // Clear any error messages that might still be around.
+      Oobe.clearErrors();
       this.disabled = true;
       Oobe.showSigninUI(email);
     },

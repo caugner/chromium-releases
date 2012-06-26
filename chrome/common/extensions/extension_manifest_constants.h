@@ -16,7 +16,6 @@ namespace extension_manifest_keys {
   extern const char kAllFrames[];
   extern const char kAltKey[];
   extern const char kApp[];
-  extern const char kBackground[];
   extern const char kBackgroundAllowJsAccess[];
   extern const char kBackgroundPage[];
   extern const char kBackgroundPageLegacy[];
@@ -104,6 +103,7 @@ namespace extension_manifest_keys {
   extern const char kShiftKey[];
   extern const char kShortcutKey[];
   extern const char kSignature[];
+  extern const char kSuggestedKey[];
   extern const char kTheme[];
   extern const char kThemeColors[];
   extern const char kThemeDisplayProperties[];
@@ -138,8 +138,12 @@ namespace extension_manifest_values {
   extern const char kIntentDispositionWindow[];
   extern const char kIntentDispositionInline[];
   extern const char kIsolatedStorage[];
+  extern const char kKeybindingPlatformChromeOs[];
+  extern const char kKeybindingPlatformDefault[];
+  extern const char kKeybindingPlatformLinux[];
+  extern const char kKeybindingPlatformMac[];
+  extern const char kKeybindingPlatformWin[];
   extern const char kLaunchContainerPanel[];
-  extern const char kLaunchContainerShell[];
   extern const char kLaunchContainerTab[];
   extern const char kLaunchContainerWindow[];
   extern const char kPageActionKeybindingEvent[];
@@ -154,6 +158,7 @@ namespace extension_manifest_values {
 namespace extension_manifest_errors {
   extern const char kAppsNotEnabled[];
   extern const char kBackgroundPermissionNeeded[];
+  extern const char kBackgroundRequiredForPlatformApps[];
   extern const char kCannotAccessPage[];
   extern const char kCannotChangeExtensionID[];
   extern const char kCannotClaimAllHostsInExtent[];
@@ -165,11 +170,9 @@ namespace extension_manifest_errors {
   extern const char kDisabledByPolicy[];
   extern const char kExperimentalFlagRequired[];
   extern const char kExpectString[];
-  extern const char kFeatureNotAllowed[];
   extern const char kInvalidAllFrames[];
   extern const char kInvalidBackground[];
   extern const char kInvalidBackgroundAllowJsAccess[];
-  extern const char kInvalidBackgroundAllowJsAccessNoPage[];
   extern const char kInvalidBackgroundCombination[];
   extern const char kInvalidBackgroundScript[];
   extern const char kInvalidBackgroundScripts[];
@@ -228,9 +231,9 @@ namespace extension_manifest_errors {
   extern const char kInvalidKeyBinding[];
   extern const char kInvalidKeyBindingDescription[];
   extern const char kInvalidKeyBindingDictionary[];
+  extern const char kInvalidKeyBindingMissingPlatform[];
+  extern const char kInvalidKeyBindingUnknownPlatform[];
   extern const char kInvalidLaunchContainer[];
-  extern const char kInvalidLaunchContainerForNonPlatform[];
-  extern const char kInvalidLaunchContainerForPlatform[];
   extern const char kInvalidLaunchValue[];
   extern const char kInvalidLaunchValueContainer[];
   extern const char kInvalidManifest[];
@@ -306,6 +309,7 @@ namespace extension_manifest_errors {
   extern const char kNoWildCardsInPaths[];
   extern const char kPermissionNotAllowed[];
   extern const char kPlatformAppFlagRequired[];
+  extern const char kPlatformAppNeedsManifestVersion2[];
   extern const char kOneUISurfaceOnly[];
   extern const char kReservedMessageFound[];
   extern const char kWebContentMustBeEnabled[];

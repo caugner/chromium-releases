@@ -49,6 +49,8 @@ const char ExternalExtensionProviderImpl::kExternalUpdateUrl[] =
     "external_update_url";
 const char ExternalExtensionProviderImpl::kSupportedLocales[] =
     "supported_locales";
+const char ExternalExtensionProviderImpl::kIsBookmarkApp[] =
+    "is_bookmark_app";
 
 ExternalExtensionProviderImpl::ExternalExtensionProviderImpl(
     VisitorInterface* service,
@@ -168,6 +170,13 @@ void ExternalExtensionProviderImpl::SetPrefs(DictionaryValue* prefs) {
       }
     }
 
+    int creation_flags = creation_flags_;
+    bool is_bookmark_app;
+    if (extension->GetBoolean(kIsBookmarkApp, &is_bookmark_app) &&
+        is_bookmark_app) {
+      creation_flags |= Extension::FROM_BOOKMARK;
+    }
+
     if (has_external_crx) {
       if (crx_location_ == Extension::INVALID) {
         LOG(WARNING) << "This provider does not support installing external "
@@ -203,7 +212,7 @@ void ExternalExtensionProviderImpl::SetPrefs(DictionaryValue* prefs) {
         continue;
       }
       service_->OnExternalExtensionFileFound(extension_id, version.get(), path,
-                                             crx_location_, creation_flags_,
+                                             crx_location_, creation_flags,
                                              auto_acknowledge_);
     } else { // if (has_external_update_url)
       CHECK(has_external_update_url);  // Checking of keys above ensures this.
@@ -241,10 +250,6 @@ void ExternalExtensionProviderImpl::ServiceShutdown() {
 
 bool ExternalExtensionProviderImpl::IsReady() const {
   return ready_;
-}
-
-int ExternalExtensionProviderImpl::GetCreationFlags() const {
-  return creation_flags_;
 }
 
 bool ExternalExtensionProviderImpl::HasExtension(
@@ -306,31 +311,29 @@ void ExternalExtensionProviderImpl::CreateExternalProviders(
   check_admin_permissions_on_mac = ExternalPrefExtensionLoader::NONE;
 #endif
 
-  provider_list->push_back(
-      linked_ptr<ExternalExtensionProviderInterface>(
-          new ExternalExtensionProviderImpl(
-              service,
-              new ExternalPrefExtensionLoader(
-                  chrome::DIR_EXTERNAL_EXTENSIONS,
-                  check_admin_permissions_on_mac),
-              Extension::EXTERNAL_PREF,
-              Extension::EXTERNAL_PREF_DOWNLOAD,
-              Extension::NO_FLAGS)));
-
-#if defined(OS_MACOSX)
-  // Support old path to external extensions file as we migrate to the
-  // new one.  See crbug/67203.
-  provider_list->push_back(
-      linked_ptr<ExternalExtensionProviderInterface>(
-          new ExternalExtensionProviderImpl(
-              service,
-              new ExternalPrefExtensionLoader(
-                  chrome::DIR_DEPRECATED_EXTERNAL_EXTENSIONS,
-                  ExternalPrefExtensionLoader::NONE),
-              Extension::EXTERNAL_PREF,
-              Extension::EXTERNAL_PREF_DOWNLOAD,
-              Extension::NO_FLAGS)));
+  bool is_chromeos_demo_session = false;
+  int bundled_extension_creation_flags = Extension::NO_FLAGS;
+#if defined(OS_CHROMEOS)
+  chromeos::UserManager* user_manager = chromeos::UserManager::Get();
+  is_chromeos_demo_session =
+      user_manager && user_manager->IsLoggedInAsDemoUser() &&
+      g_browser_process->browser_policy_connector()->GetDeviceMode() ==
+          policy::DEVICE_MODE_KIOSK;
+  bundled_extension_creation_flags = Extension::FROM_WEBSTORE;
 #endif
+
+  if (!is_chromeos_demo_session) {
+    provider_list->push_back(
+        linked_ptr<ExternalExtensionProviderInterface>(
+            new ExternalExtensionProviderImpl(
+                service,
+                new ExternalPrefExtensionLoader(
+                    chrome::DIR_EXTERNAL_EXTENSIONS,
+                    check_admin_permissions_on_mac),
+                Extension::EXTERNAL_PREF,
+                Extension::EXTERNAL_PREF_DOWNLOAD,
+                bundled_extension_creation_flags)));
+  }
 
 #if defined(OS_CHROMEOS) || defined (OS_MACOSX)
   // Define a per-user source of external extensions.
@@ -356,6 +359,20 @@ void ExternalExtensionProviderImpl::CreateExternalProviders(
               Extension::INVALID,
               Extension::NO_FLAGS)));
 #endif
+
+#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+  provider_list->push_back(
+      linked_ptr<ExternalExtensionProviderInterface>(
+          new ExternalExtensionProviderImpl(
+              service,
+              new ExternalPrefExtensionLoader(
+                  chrome::DIR_STANDALONE_EXTERNAL_EXTENSIONS,
+                  ExternalPrefExtensionLoader::NONE),
+              Extension::EXTERNAL_PREF,
+              Extension::EXTERNAL_PREF_DOWNLOAD,
+              Extension::NO_FLAGS)));
+#endif
+
   provider_list->push_back(
       linked_ptr<ExternalExtensionProviderInterface>(
           new ExternalExtensionProviderImpl(
@@ -376,16 +393,13 @@ void ExternalExtensionProviderImpl::CreateExternalProviders(
                   ExternalPrefExtensionLoader::NONE),
               Extension::EXTERNAL_PREF,
               Extension::INVALID,
-              Extension::FROM_BOOKMARK)));
+              Extension::FROM_WEBSTORE)));
 #endif
 
 #if defined(OS_CHROMEOS)
-  chromeos::UserManager* user_manager = chromeos::UserManager::Get();
   policy::BrowserPolicyConnector* connector =
       g_browser_process->browser_policy_connector();
-  if (user_manager && user_manager->IsLoggedInAsDemoUser() &&
-      connector->GetDeviceMode() == policy::DEVICE_MODE_KIOSK &&
-      connector->GetAppPackUpdater()) {
+  if (is_chromeos_demo_session && connector->GetAppPackUpdater()) {
     provider_list->push_back(
         linked_ptr<ExternalExtensionProviderInterface>(
           new ExternalExtensionProviderImpl(

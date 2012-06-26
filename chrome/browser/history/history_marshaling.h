@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,10 @@
 #include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/history/page_usage_data.h"
+
+#if defined(OS_ANDROID)
+#include "chrome/browser/history/history_marshaling_android.h"
+#endif
 
 namespace history {
 
@@ -42,6 +46,10 @@ typedef CancelableRequest1<HistoryService::QueryTopURLsAndRedirectsCallback,
 typedef CancelableRequest1<HistoryService::QueryMostVisitedURLsCallback,
                            history::MostVisitedURLList>
     QueryMostVisitedURLsRequest;
+
+typedef CancelableRequest1<HistoryService::QueryFilteredURLsCallback,
+                           history::FilteredURLList>
+    QueryFilteredURLsRequest;
 
 // Thumbnails -----------------------------------------------------------------
 

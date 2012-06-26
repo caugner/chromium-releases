@@ -68,10 +68,6 @@ struct LanguageIntegerRangePreference {
 extern const char kGeneralSectionName[];
 extern const char kHotKeySectionName[];
 extern const char kPreloadEnginesConfigName[];
-extern const char kNextEngineInMenuConfigName[];
-extern const char kPreviousEngineConfigName[];
-extern const char kHotkeyNextEngineInMenu[];
-extern const char kHotkeyPreviousEngine[];
 
 // ---------------------------------------------------------------------------
 // For Traditional Chinese input method (ibus-mozc-chewing)
@@ -115,7 +111,7 @@ extern const HangulKeyboardNameIDPair kHangulKeyboardNameIDPairs[];
 const size_t kNumHangulKeyboardNameIDPairs = 5;
 
 // ---------------------------------------------------------------------------
-// For Simplified Chinese input method (ibus-pinyin)
+// For Simplified Chinese input method (ibus-mozc-pinyin)
 // ---------------------------------------------------------------------------
 extern const char kPinyinSectionName[];
 

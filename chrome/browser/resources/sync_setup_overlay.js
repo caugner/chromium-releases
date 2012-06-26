@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 cr.define('options', function() {
-  const OptionsPage = options.OptionsPage;
+  /** @const */ var OptionsPage = options.OptionsPage;
 
   // Variable to track if a captcha challenge was issued. If this gets set to
   // true, it stays that way until we are told about successful login from
@@ -51,14 +51,15 @@ cr.define('options', function() {
       $('choose-datatypes-cancel').onclick =
           $('sync-setup-cancel').onclick =
           $('confirm-everything-cancel').onclick =
-          $('stop-syncing-cancel').onclick =  function() {
+          $('stop-syncing-cancel').onclick =
+          $('sync-spinner-cancel').onclick = function() {
         self.closeOverlay_();
       };
       $('confirm-everything-ok').onclick = function() {
         self.sendConfiguration_();
       };
       $('stop-syncing-ok').onclick = function() {
-        chrome.send('stopSyncing');
+        chrome.send('SyncSetupStopSyncing');
         self.closeOverlay_();
       };
     },
@@ -73,7 +74,7 @@ cr.define('options', function() {
 
     /** @inheritDoc */
     didShowPage: function() {
-      var forceLogin = document.location.hash == "#forceLogin";
+      var forceLogin = document.location.hash == '#forceLogin';
       var result = JSON.stringify({'forceLogin': forceLogin});
       chrome.send('SyncSetupAttachHandler', [result]);
     },
@@ -86,9 +87,8 @@ cr.define('options', function() {
     getEncryptionRadioCheckedValue_: function() {
       var f = $('choose-data-types-form');
       for (var i = 0; i < f.encrypt.length; ++i) {
-        if (f.encrypt[i].checked) {
+        if (f.encrypt[i].checked)
           return f.encrypt[i].value;
-        }
       }
 
       return undefined;
@@ -154,8 +154,9 @@ cr.define('options', function() {
 
       var f = $('choose-data-types-form');
       if (this.getPassphraseRadioCheckedValue_() != 'explicit' ||
-          $('google-option').disabled)
+          $('google-option').disabled) {
         return true;
+      }
 
       var customPassphrase = $('custom-passphrase');
       if (customPassphrase.value.length == 0) {
@@ -220,15 +221,15 @@ cr.define('options', function() {
       // SyncSetupFlow::GetDataTypeChoiceData().
       var result = JSON.stringify({
         'syncAllDataTypes': syncAll,
-        'sync_bookmarks': syncAll || $('bookmarks-checkbox').checked,
-        'sync_preferences': syncAll || $('preferences-checkbox').checked,
-        'sync_themes': syncAll || $('themes-checkbox').checked,
-        'sync_passwords': syncAll || $('passwords-checkbox').checked,
-        'sync_autofill': syncAll || $('autofill-checkbox').checked,
-        'sync_extensions': syncAll || $('extensions-checkbox').checked,
-        'sync_typed_urls': syncAll || $('typed-urls-checkbox').checked,
-        'sync_apps': syncAll || $('apps-checkbox').checked,
-        'sync_sessions': syncAll || $('sessions-checkbox').checked,
+        'bookmarksSynced': syncAll || $('bookmarks-checkbox').checked,
+        'preferencesSynced': syncAll || $('preferences-checkbox').checked,
+        'themesSynced': syncAll || $('themes-checkbox').checked,
+        'passwordsSynced': syncAll || $('passwords-checkbox').checked,
+        'autofillSynced': syncAll || $('autofill-checkbox').checked,
+        'extensionsSynced': syncAll || $('extensions-checkbox').checked,
+        'typedUrlsSynced': syncAll || $('typed-urls-checkbox').checked,
+        'appsSynced': syncAll || $('apps-checkbox').checked,
+        'sessionsSynced': syncAll || $('sessions-checkbox').checked,
         'encryptAllData': encryptAllData,
         'usePassphrase': usePassphrase,
         'isGooglePassphrase': googlePassphrase,
@@ -242,7 +243,7 @@ cr.define('options', function() {
      * Sync Preferences' screen. This is used to prohibit the user from changing
      * the inputs after confirming the customized sync preferences, or resetting
      * the state when re-showing the dialog.
-     * @param disabled True if controls should be set to disabled.
+     * @param {boolean} disabled True if controls should be set to disabled.
      * @private
      */
     setInputElementsDisabledState_: function(disabled) {
@@ -262,9 +263,10 @@ cr.define('options', function() {
      * Animate a link being enabled/disabled. The link is hidden by animating
      * its opacity, but to ensure the user doesn't click it during that time,
      * its onclick handler is changed to null as well.
-     * @param elt The anchor element to enable/disable.
-     * @param disabled True if the link should be disabled.
-     * @param enabledFunction The onclick handler when the link is enabled.
+     * @param {HTMLElement} elt The anchor element to enable/disable.
+     * @param {boolean} disabled True if the link should be disabled.
+     * @param {function} enabledFunction The onclick handler when the link is
+     *     enabled.
      * @private
      */
     animateDisableLink_: function(elt, disabled, enabledFunction) {
@@ -284,46 +286,52 @@ cr.define('options', function() {
       }
     },
 
+    /**
+     * Shows or hides the Sync data type checkboxes in the advanced
+     * configuration screen.
+     * @param {Object} args The configuration data used to show/hide UI.
+     * @private
+     */
     setChooseDataTypesCheckboxes_: function(args) {
-      var datatypeSelect = document.getElementById('sync-select-datatypes');
+      var datatypeSelect = $('sync-select-datatypes');
       datatypeSelect.selectedIndex = args.syncAllDataTypes ? 0 : 1;
 
-      $('bookmarks-checkbox').checked = args.sync_bookmarks;
-      $('preferences-checkbox').checked = args.sync_preferences;
-      $('themes-checkbox').checked = args.sync_themes;
+      $('bookmarks-checkbox').checked = args.bookmarksSynced;
+      $('preferences-checkbox').checked = args.preferencesSynced;
+      $('themes-checkbox').checked = args.themesSynced;
 
-      if (args.passwords_registered) {
-        $('passwords-checkbox').checked = args.sync_passwords;
+      if (args.passwordsRegistered) {
+        $('passwords-checkbox').checked = args.passwordsSynced;
         $('passwords-item').hidden = false;
       } else {
         $('passwords-item').hidden = true;
       }
-      if (args.autofill_registered) {
-        $('autofill-checkbox').checked = args.sync_autofill;
+      if (args.autofillRegistered) {
+        $('autofill-checkbox').checked = args.autofillSynced;
         $('autofill-item').hidden = false;
       } else {
         $('autofill-item').hidden = true;
       }
-      if (args.extensions_registered) {
-        $('extensions-checkbox').checked = args.sync_extensions;
+      if (args.extensionsRegistered) {
+        $('extensions-checkbox').checked = args.extensionsSynced;
         $('extensions-item').hidden = false;
       } else {
         $('extensions-item').hidden = true;
       }
-      if (args.typed_urls_registered) {
-        $('typed-urls-checkbox').checked = args.sync_typed_urls;
+      if (args.typedUrlsRegistered) {
+        $('typed-urls-checkbox').checked = args.typedUrlsSynced;
         $('omnibox-item').hidden = false;
       } else {
         $('omnibox-item').hidden = true;
       }
-      if (args.apps_registered) {
-        $('apps-checkbox').checked = args.sync_apps;
+      if (args.appsRegistered) {
+        $('apps-checkbox').checked = args.appsSynced;
         $('apps-item').hidden = false;
       } else {
         $('apps-item').hidden = true;
       }
-      if (args.sessions_registered) {
-        $('sessions-checkbox').checked = args.sync_sessions;
+      if (args.sessionsRegistered) {
+        $('sessions-checkbox').checked = args.sessionsSynced;
         $('sessions-item').hidden = false;
       } else {
         $('sessions-item').hidden = true;
@@ -333,7 +341,7 @@ cr.define('options', function() {
     },
 
     setEncryptionRadios_: function(args) {
-      if (args['encryptAllData']) {
+      if (args.encryptAllData) {
         $('encrypt-all-option').checked = true;
         this.disableEncryptionRadioGroup_();
       } else {
@@ -342,7 +350,7 @@ cr.define('options', function() {
     },
 
     setPassphraseRadios_: function(args) {
-      if (args['usePassphrase']) {
+      if (args.usePassphrase) {
         $('explicit-option').checked = true;
 
         // The passphrase, once set, cannot be unset, but we show a reset link.
@@ -361,7 +369,7 @@ cr.define('options', function() {
     },
 
     showConfigure_: function(args) {
-      var datatypeSelect = document.getElementById('sync-select-datatypes');
+      var datatypeSelect = $('sync-select-datatypes');
       var self = this;
       datatypeSelect.onchange = function() {
         var syncAll = this.selectedIndex == 0;
@@ -381,19 +389,25 @@ cr.define('options', function() {
       if (args) {
         this.setCheckboxesAndErrors_(args);
 
-        this.useEncryptEverything_ = args['encryptAllData'];
+        this.useEncryptEverything_ = args.encryptAllData;
 
         // Whether to display the 'Sync everything' confirmation page or the
         // customize data types page.
-        var syncAllDataTypes = args['syncAllDataTypes'];
-        this.usePassphrase_ = args['usePassphrase'];
-        if (args['showSyncEverythingPage'] == false || this.usePassphrase_ ||
-            syncAllDataTypes == false || args['show_passphrase']) {
+        var syncAllDataTypes = args.syncAllDataTypes;
+        this.usePassphrase_ = args.usePassphrase;
+        if (args.showSyncEverythingPage == false || this.usePassphrase_ ||
+            syncAllDataTypes == false || args.showPassphrase) {
           this.showCustomizePage_(args, syncAllDataTypes);
         } else {
           this.showSyncEverythingPage_();
         }
       }
+    },
+
+    showSpinner_: function() {
+      this.resetPage_('sync-setup-spinner');
+      $('sync-setup-spinner').hidden = false;
+      this.setThrobbersVisible_(true);
     },
 
     showSyncEverythingPage_: function() {
@@ -440,7 +454,7 @@ cr.define('options', function() {
       $('google-passphrase-needed-body').hidden = true;
       // Display the correct prompt to the user depending on what type of
       // passphrase is needed.
-      if (args['usePassphrase'])
+      if (args.usePassphrase)
         $('normal-body').hidden = false;
       else
         $('google-passphrase-needed-body').hidden = false;
@@ -449,8 +463,8 @@ cr.define('options', function() {
       // Warn the user about their incorrect passphrase if we need a passphrase
       // and the passphrase field is non-empty (meaning they tried to set it
       // previously but failed).
-      $('incorrect-passphrase').hidden = !(args['usePassphrase'] &&
-          $('choose-data-types-form').passphrase.value);
+      $('incorrect-passphrase').hidden =
+          !(args.usePassphrase && args.passphraseFailed);
 
       $('sync-passphrase-warning').hidden = false;
       $('passphrase').focus();
@@ -468,14 +482,14 @@ cr.define('options', function() {
       // likely he intends to change the data types. Select the
       // 'Choose data types' option in this case.
       var index = syncEverything ? 0 : 1;
-      document.getElementById('sync-select-datatypes').selectedIndex = index;
+      $('sync-select-datatypes').selectedIndex = index;
       this.setDataTypeCheckboxesEnabled_(!syncEverything);
 
       // The passphrase input may need to take over focus from the OK button, so
       // set focus before that logic.
       $('choose-datatypes-ok').focus();
 
-      if (args && args['show_passphrase']) {
+      if (args && args.showPassphrase) {
         this.showPassphraseContainer_(args);
       } else {
         // We only show the 'Use Default' link if we're not prompting for an
@@ -491,25 +505,39 @@ cr.define('options', function() {
       chrome.send('SyncSetupAttachHandler');
     },
 
+    /**
+     * Shows the appropriate sync setup page.
+     * @param {string} page A page of the sync setup to show.
+     * @param {object} args Data from the C++ to forward on to the right
+     *     section.
+     */
     showSyncSetupPage_: function(page, args) {
       this.setThrobbersVisible_(false);
 
-      // Hide an existing visible overlay.
-      var overlay = $('sync-setup-overlay');
-      for (var i = 0; i < overlay.children.length; i++)
-        overlay.children[i].hidden = true;
+      // Hide an existing visible overlay (ensuring the close button is not
+      // hidden).
+      var children = document.querySelectorAll(
+          '#sync-setup-overlay > *:not(.close-button)');
+      for (var i = 0; i < children.length; i++)
+        children[i].hidden = true;
 
       this.setInputElementsDisabledState_(false);
+
+      // NOTE: Because both showGaiaLogin_() and showConfigure_() change the
+      // focus, we need to ensure that the overlay container and dialog aren't
+      // [hidden] (as trying to focus() nodes inside of a [hidden] DOM section
+      // doesn't work).
+      if (page == 'done')
+        this.closeOverlay_();
+      else
+        this.showOverlay_();
 
       if (page == 'login')
         this.showGaiaLogin_(args);
       else if (page == 'configure' || page == 'passphrase')
         this.showConfigure_(args);
-
-      if (page == 'done')
-        this.closeOverlay_();
-      else
-        this.showOverlay_();
+      else if (page == 'spinner')
+        this.showSpinner_();
     },
 
     /**
@@ -523,14 +551,20 @@ cr.define('options', function() {
         throbbers[i].style.visibility = visible ? 'visible' : 'hidden';
     },
 
+    /**
+     * Set the appropriate focus on the GAIA login section of the overlay.
+     * @private
+     */
     loginSetFocus_: function() {
-      var email = $('gaia-email');
-      var passwd = $('gaia-passwd');
+      var email = this.getLoginEmail_();
       if (email && !email.value) {
         email.focus();
-      } else if (passwd) {
-        passwd.focus();
+        return;
       }
+
+      var passwd = this.getLoginPasswd_();
+      if (passwd)
+        passwd.focus();
     },
 
     /**
@@ -589,7 +623,7 @@ cr.define('options', function() {
      * initial state.
      * The initial state is specified by adding a class to the descendant
      * element in sync_setup_overlay.html.
-     * @param pageElementId The root page element id.
+     * @param {HTMLElement} pageElementId The root page element id.
      * @private
      */
     resetPage_: function(pageElementId) {
@@ -629,11 +663,11 @@ cr.define('options', function() {
           email.value = args.user;
         }
 
-        if (!args.editable_user) {
-          email.hidden = true;
+        if (!args.editableUser) {
+          $('email-row').hidden = true;
           var span = $('email-readonly');
           span.textContent = email.value;
-          span.hidden = false;
+          $('email-readonly-row').hidden = false;
           $('create-account-div').hidden = true;
         }
 
@@ -641,25 +675,25 @@ cr.define('options', function() {
       }
 
       if (1 == args.error) {
-        var access_code = document.getElementById('access-code');
-        if (access_code.value) {
+        var accessCode = $('access-code');
+        if (accessCode.value) {
           $('errormsg-0-access-code').hidden = false;
           this.showAccessCodeRequired_();
         } else {
           $('errormsg-1-password').hidden = false;
         }
-        this.setBlurbError_(args.error_message);
+        this.setBlurbError_(args.errorMessage);
       } else if (3 == args.error) {
         $('errormsg-0-connection').hidden = false;
-        this.setBlurbError_(args.error_message);
+        this.setBlurbError_(args.errorMessage);
       } else if (4 == args.error) {
         this.showCaptcha_(args);
       } else if (7 == args.error) {
         this.setBlurbError_(localStrings.getString('serviceUnavailableError'));
       } else if (8 == args.error) {
         this.showAccessCodeRequired_();
-      } else if (args.error_message) {
-        this.setBlurbError_(args.error_message);
+      } else if (args.errorMessage) {
+        this.setBlurbError_(args.errorMessage);
       }
 
       if (args.fatalError) {
@@ -681,14 +715,14 @@ cr.define('options', function() {
       $('errormsg-0-access-code').hidden = true;
     },
 
-    setBlurbError_: function(error_message) {
+    setBlurbError_: function(errorMessage) {
       if (this.captchaChallengeActive_)
         return;  // No blurb in captcha challenge mode.
 
-      if (error_message) {
+      if (errorMessage) {
         $('error-signing-in').hidden = true;
         $('error-custom').hidden = false;
-        $('error-custom').textContent = error_message;
+        $('error-custom').textContent = errorMessage;
       } else {
         $('error-signing-in').hidden = false;
         $('error-custom').hidden = true;
@@ -757,7 +791,7 @@ cr.define('options', function() {
       var result = JSON.stringify({'user' : email.value,
                                    'pass' : passwd.value,
                                    'captcha' : f.captchaValue.value,
-                                   'access_code' : f.accessCode.value});
+                                   'accessCode' : f.accessCode.value});
       $('sign-in').disabled = true;
       chrome.send('SyncSetupSubmitAuth', [result]);
     },

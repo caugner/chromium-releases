@@ -52,6 +52,7 @@ KeyboardCode KeyboardCodeFromXKeysym(unsigned int keysym) {
     case XK_ISO_Enter:
       return VKEY_RETURN;
     case XK_Clear:
+    case XK_KP_Begin:  // NumPad 5 without Num Lock, for crosbug.com/29169.
       return VKEY_CLEAR;
     case XK_KP_Space:
     case XK_space:
@@ -329,7 +330,7 @@ KeyboardCode KeyboardCodeFromXKeysym(unsigned int keysym) {
     case XK_F24:
       return static_cast<KeyboardCode>(VKEY_F1 + (keysym - XK_F1));
 
-#if defined(TOOLKIT_USES_GTK)
+#if defined(TOOLKIT_GTK)
     case XF86XK_HomePage:
     case XF86XK_Search:
     case XF86XK_Back:

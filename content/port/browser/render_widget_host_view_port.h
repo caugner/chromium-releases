@@ -6,14 +6,15 @@
 #define CONTENT_PORT_BROWSER_RENDER_WIDGET_HOST_VIEW_PORT_H_
 #pragma once
 
+#include "base/callback.h"
 #include "base/process_util.h"
 #include "base/string16.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPopupType.h"
 #include "ui/base/ime/text_input_type.h"
-#include "ui/gfx/surface/transport_dib.h"
 #include "ui/base/range/range.h"
+#include "ui/surface/transport_dib.h"
 
 class BackingStore;
 class WebCursor;
@@ -39,6 +40,7 @@ namespace content {
 
 // This is the larger RenderWidgetHostView interface exposed only
 // within content/ and to embedders looking to port to new platforms.
+// RenderWidgetHostView class hierarchy described in render_widget_host_view.h.
 class CONTENT_EXPORT RenderWidgetHostViewPort : public RenderWidgetHostView {
  public:
   virtual ~RenderWidgetHostViewPort() {}
@@ -138,11 +140,20 @@ class CONTENT_EXPORT RenderWidgetHostViewPort : public RenderWidgetHostView {
   // Allocate a backing store for this view.
   virtual BackingStore* AllocBackingStore(const gfx::Size& size) = 0;
 
-  // Copies the contents of the compositing surface into the given
-  // (uninitialized) PlatformCanvas if any. Returns true on success, false
-  // otherwise.
+  // DEPRECATED: Synchronous version of AsyncCopyFromCompositingSurface.
+  // This will be removed once all the caller have been chagned to use the
+  // asynchronous version.
   virtual bool CopyFromCompositingSurface(const gfx::Size& size,
                                           skia::PlatformCanvas* output) = 0;
+
+  // Asynchrnously copies the contents of the compositing surface into the given
+  // (uninitialized) PlatformCanvas if any.
+  // |callback| is invoked with true on success, false otherwise. |output| can
+  // be initialized even on failure.
+  virtual void AsyncCopyFromCompositingSurface(
+      const gfx::Size& size,
+      skia::PlatformCanvas* output,
+      base::Callback<void(bool)> callback) = 0;
 
   // Called when accelerated compositing state changes.
   virtual void OnAcceleratedCompositingStateChange() = 0;
@@ -163,6 +174,11 @@ class CONTENT_EXPORT RenderWidgetHostViewPort : public RenderWidgetHostView {
   // Release the accelerated surface temporarily. It will be recreated on the
   // next swap buffers or post sub buffer.
   virtual void AcceleratedSurfaceSuspend() = 0;
+
+  // Return true if the view has an accelerated surface that contains the last
+  // presented frame for the view. If |desired_size| is non-empty, true is
+  // returned only if the accelerated surface size matches.
+  virtual bool HasAcceleratedSurface(const gfx::Size& desired_size) = 0;
 
 #if defined(OS_MACOSX)
   // Retrieve the bounds of the view, in cocoa view coordinates.
@@ -210,10 +226,10 @@ class CONTENT_EXPORT RenderWidgetHostViewPort : public RenderWidgetHostView {
   virtual void AcceleratedSurfaceRelease(uint64 surface_id) = 0;
 #endif
 
-#if defined(TOOLKIT_USES_GTK)
+#if defined(TOOLKIT_GTK)
   virtual void CreatePluginContainer(gfx::PluginWindowHandle id) = 0;
   virtual void DestroyPluginContainer(gfx::PluginWindowHandle id) = 0;
-#endif  // defined(TOOLKIT_USES_GTK)
+#endif  // defined(TOOLKIT_GTK)
 
 #if defined(OS_WIN) && !defined(USE_AURA)
   virtual void WillWmDestroy() = 0;
@@ -238,11 +254,6 @@ class CONTENT_EXPORT RenderWidgetHostViewPort : public RenderWidgetHostView {
   virtual void SetHasHorizontalScrollbar(bool has_horizontal_scrollbar) = 0;
   virtual void SetScrollOffsetPinning(
       bool is_pinned_to_left, bool is_pinned_to_right) = 0;
-
-  // Return value indicates whether the mouse is locked successfully or not.
-  virtual bool LockMouse() = 0;
-  virtual void UnlockMouse() = 0;
-  virtual bool IsMouseLocked() = 0;
 
   // Called when a mousewheel event was not processed by the renderer.
   virtual void UnhandledWheelEvent(const WebKit::WebMouseWheelEvent& event) = 0;

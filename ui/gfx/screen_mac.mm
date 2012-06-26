@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,13 @@
 
 #import <ApplicationServices/ApplicationServices.h>
 #import <Cocoa/Cocoa.h>
+
+@interface NSScreen (LionAPI)
+- (CGFloat)backingScaleFactor;
+@end
+
+#include "base/logging.h"
+#include "ui/gfx/monitor.h"
 
 namespace {
 
@@ -38,6 +45,31 @@ NSScreen* GetMatchingScreen(const gfx::Rect& match_rect) {
   return max_screen;
 }
 
+gfx::Monitor GetMonitorForScreen(NSScreen* screen, bool is_primary) {
+  NSRect frame = [screen frame];
+  // TODO(oshima): Implement ID and Observer.
+  gfx::Monitor monitor(0, gfx::Rect(NSRectToCGRect(frame)));
+
+  NSRect visible_frame = [screen visibleFrame];
+
+  // Convert work area's coordinate systems.
+  if (is_primary) {
+    gfx::Rect work_area = gfx::Rect(NSRectToCGRect(visible_frame));
+    work_area.set_y(frame.size.height - visible_frame.origin.y -
+                    visible_frame.size.height);
+    monitor.set_work_area(work_area);
+  } else {
+    monitor.set_work_area(ConvertCoordinateSystem(visible_frame));
+  }
+  CGFloat scale;
+  if ([screen respondsToSelector:@selector(backingScaleFactor)])
+    scale = [screen backingScaleFactor];
+  else
+    scale = [screen userSpaceScaleFactor];
+  monitor.set_device_scale_factor(scale);
+  return monitor;
+}
+
 }  // namespace
 
 namespace gfx {
@@ -52,39 +84,18 @@ gfx::Point Screen::GetCursorScreenPoint() {
 }
 
 // static
-gfx::Rect Screen::GetPrimaryMonitorWorkArea() {
+gfx::Monitor Screen::GetPrimaryMonitor() {
   // Primary monitor is defined as the monitor with the menubar,
   // which is always at index 0.
   NSScreen* primary = [[NSScreen screens] objectAtIndex:0];
-  NSRect frame = [primary frame];
-  NSRect visible_frame = [primary visibleFrame];
-
-  // Convert coordinate systems.
-  gfx::Rect rect = gfx::Rect(NSRectToCGRect(visible_frame));
-  rect.set_y(frame.size.height - visible_frame.origin.y -
-             visible_frame.size.height);
-  return rect;
+  gfx::Monitor monitor = GetMonitorForScreen(primary, true /* primary */);
+  return monitor;
 }
 
 // static
-gfx::Rect Screen::GetPrimaryMonitorBounds() {
-  // Primary monitor is defined as the monitor with the menubar,
-  // which is always at index 0.
-  NSScreen* primary = [[NSScreen screens] objectAtIndex:0];
-  return gfx::Rect(NSRectToCGRect([primary frame]));
-}
-
-// static
-gfx::Rect Screen::GetMonitorWorkAreaMatching(const gfx::Rect& match_rect) {
+gfx::Monitor Screen::GetMonitorMatching(const gfx::Rect& match_rect) {
   NSScreen* match_screen = GetMatchingScreen(match_rect);
-  return ConvertCoordinateSystem([match_screen visibleFrame]);
-}
-
-// static
-gfx::Size Screen::GetPrimaryMonitorSize() {
-  CGDirectDisplayID main_display = CGMainDisplayID();
-  return gfx::Size(CGDisplayPixelsWide(main_display),
-                   CGDisplayPixelsHigh(main_display));
+  return GetMonitorForScreen(match_screen, false /* may not be primary */);
 }
 
 // static

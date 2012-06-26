@@ -27,8 +27,7 @@
 #include "ui/base/win/ime_input.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/point.h"
-#include "ui/gfx/surface/accelerated_surface_win.h"
-#include "ui/gfx/sys_color_change_listener.h"
+#include "ui/surface/accelerated_surface_win.h"
 #include "webkit/glue/webcursor.h"
 
 class BackingStore;
@@ -86,14 +85,14 @@ CONTENT_EXPORT extern const wchar_t kRenderWidgetHostHWNDClass[];
 //     If the render process dies, the RenderWidgetHostHWND goes away and all
 //     references to it must become NULL."
 //
+// RenderWidgetHostView class hierarchy described in render_widget_host_view.h.
 class RenderWidgetHostViewWin
     : public CWindowImpl<RenderWidgetHostViewWin,
                          CWindow,
                          RenderWidgetHostHWNDTraits>,
       public content::RenderWidgetHostViewBase,
       public content::NotificationObserver,
-      public BrowserAccessibilityDelegate,
-      public gfx::SysColorChangeListener {
+      public BrowserAccessibilityDelegate {
  public:
   virtual ~RenderWidgetHostViewWin();
 
@@ -169,9 +168,6 @@ class RenderWidgetHostViewWin
   virtual bool IsShowing() OVERRIDE;
   virtual gfx::Rect GetViewBounds() const OVERRIDE;
   virtual void SetBackground(const SkBitmap& background) OVERRIDE;
-  virtual bool CopyFromCompositingSurface(
-      const gfx::Size& size,
-      skia::PlatformCanvas* output) OVERRIDE;
 
   // Implementation of RenderWidgetHostViewPort.
   virtual void InitAsPopup(content::RenderWidgetHostView* parent_host_view,
@@ -197,11 +193,18 @@ class RenderWidgetHostViewWin
       const std::vector<gfx::Rect>& copy_rects) OVERRIDE;
   virtual void RenderViewGone(base::TerminationStatus status,
                               int error_code) OVERRIDE;
-  // called by TabContents before DestroyWindow
+  // called by WebContentsImpl before DestroyWindow
   virtual void WillWmDestroy() OVERRIDE;
   virtual void Destroy() OVERRIDE;
   virtual void SetTooltipText(const string16& tooltip_text) OVERRIDE;
   virtual BackingStore* AllocBackingStore(const gfx::Size& size) OVERRIDE;
+  virtual bool CopyFromCompositingSurface(
+      const gfx::Size& size,
+      skia::PlatformCanvas* output) OVERRIDE;
+  virtual void AsyncCopyFromCompositingSurface(
+      const gfx::Size& size,
+      skia::PlatformCanvas* output,
+      base::Callback<void(bool)> callback) OVERRIDE;
   virtual void OnAcceleratedCompositingStateChange() OVERRIDE;
   virtual void ProcessTouchAck(WebKit::WebInputEvent::Type type,
                                bool processed) OVERRIDE;
@@ -217,6 +220,7 @@ class RenderWidgetHostViewWin
       const GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params& params,
       int gpu_host_id) OVERRIDE;
   virtual void AcceleratedSurfaceSuspend() OVERRIDE;
+  virtual bool HasAcceleratedSurface(const gfx::Size& desired_size) OVERRIDE;
   virtual void OnAccessibilityNotifications(
       const std::vector<AccessibilityHostMsg_NotificationParams>& params
       ) OVERRIDE;
@@ -238,9 +242,6 @@ class RenderWidgetHostViewWin
       int acc_obj_id, gfx::Point point) OVERRIDE;
   virtual void AccessibilitySetTextSelection(
       int acc_obj_id, int start_offset, int end_offset) OVERRIDE;
-
-  // Implementation of SysColorChangeListener:
-  virtual void OnSysColorChange() OVERRIDE;
 
  protected:
   friend class content::RenderWidgetHostView;
@@ -502,7 +503,7 @@ class RenderWidgetHostViewWin
   base::TimeTicks whiteout_start_time_;
 
   // The time it took after this view was selected for it to be fully painted.
-  base::TimeTicks tab_switch_paint_time_;
+  base::TimeTicks web_contents_switch_paint_time_;
 
   // Registrar so we can listen to RENDERER_PROCESS_TERMINATED events.
   content::NotificationRegistrar registrar_;
@@ -568,8 +569,6 @@ class RenderWidgetHostViewWin
 
   // Are touch events currently enabled?
   bool touch_events_enabled_;
-
-  gfx::ScopedSysColorChangeListener sys_color_change_listener_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostViewWin);
 };

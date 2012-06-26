@@ -116,6 +116,30 @@ TEST(MetricsLogManagerTest, InterjectedLog) {
   EXPECT_FALSE(log_manager.has_unsent_logs());
 }
 
+TEST(MetricsLogManagerTest, InterjectedLogPreservesType) {
+  MetricsLogManager log_manager;
+
+  MetricsLogBase* ongoing_log = new MetricsLogBase("id", 0, "version");
+  MetricsLogBase* temp_log = new MetricsLogBase("id", 0, "version");
+
+  log_manager.BeginLoggingWithLog(ongoing_log, MetricsLogManager::ONGOING_LOG);
+  log_manager.PauseCurrentLog();
+  log_manager.BeginLoggingWithLog(temp_log, MetricsLogManager::INITIAL_LOG);
+  log_manager.FinishCurrentLog();
+  log_manager.ResumePausedLog();
+  log_manager.StageNextLogForUpload();
+  log_manager.DiscardStagedLog();
+
+  // Verify that the remaining log (which is the original ongoing log) still
+  // has the right type.
+  DummyLogSerializer* serializer = new DummyLogSerializer;
+  log_manager.set_log_serializer(serializer);
+  log_manager.FinishCurrentLog();
+  log_manager.PersistUnsentLogs();
+  EXPECT_EQ(0U, serializer->TypeCount(MetricsLogManager::INITIAL_LOG));
+  EXPECT_EQ(1U, serializer->TypeCount(MetricsLogManager::ONGOING_LOG));
+}
+
 TEST(MetricsLogManagerTest, StoreAndLoad) {
   std::vector<SerializedLog> initial_logs;
   std::vector<SerializedLog> ongoing_logs;
@@ -139,7 +163,7 @@ TEST(MetricsLogManagerTest, StoreAndLoad) {
     log_manager.FinishCurrentLog();
     log_manager.BeginLoggingWithLog(log2, MetricsLogManager::ONGOING_LOG);
     log_manager.StageNextLogForUpload();
-    log_manager.StoreStagedLogAsUnsent();
+    log_manager.StoreStagedLogAsUnsent(MetricsLogManager::NORMAL_STORE);
     log_manager.FinishCurrentLog();
 
     // Nothing should be written out until PersistUnsentLogs is called.
@@ -208,7 +232,7 @@ TEST(MetricsLogManagerTest, StoreStagedLogTypes) {
     log_manager.BeginLoggingWithLog(log, MetricsLogManager::ONGOING_LOG);
     log_manager.FinishCurrentLog();
     log_manager.StageNextLogForUpload();
-    log_manager.StoreStagedLogAsUnsent();
+    log_manager.StoreStagedLogAsUnsent(MetricsLogManager::NORMAL_STORE);
     log_manager.PersistUnsentLogs();
 
     EXPECT_EQ(0U, serializer->TypeCount(MetricsLogManager::INITIAL_LOG));
@@ -224,7 +248,7 @@ TEST(MetricsLogManagerTest, StoreStagedLogTypes) {
     log_manager.BeginLoggingWithLog(log, MetricsLogManager::INITIAL_LOG);
     log_manager.FinishCurrentLog();
     log_manager.StageNextLogForUpload();
-    log_manager.StoreStagedLogAsUnsent();
+    log_manager.StoreStagedLogAsUnsent(MetricsLogManager::NORMAL_STORE);
     log_manager.PersistUnsentLogs();
 
     EXPECT_EQ(1U, serializer->TypeCount(MetricsLogManager::INITIAL_LOG));
@@ -250,4 +274,74 @@ TEST(MetricsLogManagerTest, LargeLogDiscarding) {
   log_manager.PersistUnsentLogs();
   EXPECT_EQ(1U, serializer->TypeCount(MetricsLogManager::INITIAL_LOG));
   EXPECT_EQ(0U, serializer->TypeCount(MetricsLogManager::ONGOING_LOG));
+}
+
+TEST(MetricsLogManagerTest, ProvisionalStoreStandardFlow) {
+  // Ensure that provisional store works, and discards the correct log.
+  {
+    MetricsLogManager log_manager;
+    MetricsLogBase* log1 = new MetricsLogBase("id", 0, "version");
+    MetricsLogBase* log2 = new MetricsLogBase("id", 0, "version");
+    log_manager.BeginLoggingWithLog(log1, MetricsLogManager::INITIAL_LOG);
+    log_manager.FinishCurrentLog();
+    log_manager.BeginLoggingWithLog(log2, MetricsLogManager::ONGOING_LOG);
+    log_manager.StageNextLogForUpload();
+    log_manager.StoreStagedLogAsUnsent(MetricsLogManager::PROVISIONAL_STORE);
+    log_manager.FinishCurrentLog();
+    log_manager.DiscardLastProvisionalStore();
+
+    DummyLogSerializer* serializer = new DummyLogSerializer;
+    log_manager.set_log_serializer(serializer);
+    log_manager.PersistUnsentLogs();
+    EXPECT_EQ(0U, serializer->TypeCount(MetricsLogManager::INITIAL_LOG));
+    EXPECT_EQ(1U, serializer->TypeCount(MetricsLogManager::ONGOING_LOG));
+  }
+}
+
+TEST(MetricsLogManagerTest, ProvisionalStoreNoop) {
+  // Ensure that trying to drop a sent log is a no-op, even if another log has
+  // since been staged.
+  {
+    MetricsLogManager log_manager;
+    MetricsLogBase* log1 = new MetricsLogBase("id", 0, "version");
+    MetricsLogBase* log2 = new MetricsLogBase("id", 0, "version");
+    log_manager.BeginLoggingWithLog(log1, MetricsLogManager::ONGOING_LOG);
+    log_manager.FinishCurrentLog();
+    log_manager.StageNextLogForUpload();
+    log_manager.StoreStagedLogAsUnsent(MetricsLogManager::PROVISIONAL_STORE);
+    log_manager.StageNextLogForUpload();
+    log_manager.DiscardStagedLog();
+    log_manager.BeginLoggingWithLog(log2, MetricsLogManager::ONGOING_LOG);
+    log_manager.FinishCurrentLog();
+    log_manager.StageNextLogForUpload();
+    log_manager.StoreStagedLogAsUnsent(MetricsLogManager::NORMAL_STORE);
+    log_manager.DiscardLastProvisionalStore();
+
+    DummyLogSerializer* serializer = new DummyLogSerializer;
+    log_manager.set_log_serializer(serializer);
+    log_manager.PersistUnsentLogs();
+    EXPECT_EQ(1U, serializer->TypeCount(MetricsLogManager::ONGOING_LOG));
+  }
+
+  // Ensure that trying to drop more than once is a no-op
+  {
+    MetricsLogManager log_manager;
+    MetricsLogBase* log1 = new MetricsLogBase("id", 0, "version");
+    MetricsLogBase* log2 = new MetricsLogBase("id", 0, "version");
+    log_manager.BeginLoggingWithLog(log1, MetricsLogManager::ONGOING_LOG);
+    log_manager.FinishCurrentLog();
+    log_manager.StageNextLogForUpload();
+    log_manager.StoreStagedLogAsUnsent(MetricsLogManager::NORMAL_STORE);
+    log_manager.BeginLoggingWithLog(log2, MetricsLogManager::ONGOING_LOG);
+    log_manager.FinishCurrentLog();
+    log_manager.StageNextLogForUpload();
+    log_manager.StoreStagedLogAsUnsent(MetricsLogManager::PROVISIONAL_STORE);
+    log_manager.DiscardLastProvisionalStore();
+    log_manager.DiscardLastProvisionalStore();
+
+    DummyLogSerializer* serializer = new DummyLogSerializer;
+    log_manager.set_log_serializer(serializer);
+    log_manager.PersistUnsentLogs();
+    EXPECT_EQ(1U, serializer->TypeCount(MetricsLogManager::ONGOING_LOG));
+  }
 }

@@ -9,8 +9,12 @@
 #include "content/browser/download/download_file.h"
 
 #include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
+#include "base/timer.h"
 #include "content/browser/download/base_file.h"
 #include "content/browser/download/download_request_handle.h"
+
+class PowerSaveBlocker;
 
 struct DownloadCreateInfo;
 
@@ -26,6 +30,7 @@ class CONTENT_EXPORT DownloadFileImpl : virtual public content::DownloadFile {
                    DownloadRequestHandleInterface* request_handle,
                    content::DownloadManager* download_manager,
                    bool calculate_hash,
+                   scoped_ptr<PowerSaveBlocker> power_save_blocker,
                    const net::BoundNetLog& bound_net_log);
   virtual ~DownloadFileImpl();
 
@@ -51,6 +56,9 @@ class CONTENT_EXPORT DownloadFileImpl : virtual public content::DownloadFile {
   virtual std::string DebugString() const OVERRIDE;
 
  private:
+  // Send updates on our progress.
+  void SendUpdate();
+
   // The base file instance.
   BaseFile file_;
 
@@ -58,12 +66,18 @@ class CONTENT_EXPORT DownloadFileImpl : virtual public content::DownloadFile {
   // the DownloadFileManager for its internal record keeping.
   content::DownloadId id_;
 
+  // Used to trigger progress updates.
+  scoped_ptr<base::RepeatingTimer<DownloadFileImpl> > update_timer_;
+
   // The handle to the request information.  Used for operations outside the
   // download system, specifically canceling a download.
   scoped_ptr<DownloadRequestHandleInterface> request_handle_;
 
   // DownloadManager this download belongs to.
   scoped_refptr<content::DownloadManager> download_manager_;
+
+  // RAII handle to keep the system from sleeping while we're downloading.
+  scoped_ptr<PowerSaveBlocker> power_save_blocker_;
 
   DISALLOW_COPY_AND_ASSIGN(DownloadFileImpl);
 };

@@ -76,8 +76,8 @@
       <include name="IDR_KEYBOARD_MANIFEST" file="resources\keyboard\manifest.json" type="BINDATA" />
       <include name="IDR_MEDIA_INTERNALS_HTML" file="resources\media_internals.html" flattenhtml="true" allowexternalscript="true" type="BINDATA" />
       <include name="IDR_MEDIA_INTERNALS_JS" file="resources\media_internals\media_internals.js" flattenhtml="true" type="BINDATA" />
-      <include name="IDR_NETWORK_ACTION_PREDICTOR_HTML" file="resources\network_action_predictor\network_action_predictor.html" flattenhtml="true" allowexternalscript="true" type="BINDATA" />
-      <include name="IDR_NETWORK_ACTION_PREDICTOR_JS" file="resources\network_action_predictor\network_action_predictor.js" type="BINDATA" />
+      <include name="IDR_AUTOCOMPLETE_ACTION_PREDICTOR_HTML" file="resources\predictors\autocomplete_action_predictor.html" flattenhtml="true" allowexternalscript="true" type="BINDATA" />
+      <include name="IDR_AUTOCOMPLETE_ACTION_PREDICTOR_JS" file="resources\predictors\autocomplete_action_predictor.js" type="BINDATA" />
       <include name="IDR_NEW_INCOGNITO_TAB_THEME_CSS" file="resources\new_incognito_tab_theme.css" flattenhtml="true" type="BINDATA" />
       <include name="IDR_NEW_TAB_4_HTML" file="resources\ntp4\new_tab.html" flattenhtml="true" type="BINDATA" />
       <include name="IDR_NEW_TAB_4_THEME_CSS" file="resources\ntp4\new_tab_theme.css" flattenhtml="true" type="BINDATA" />
@@ -110,6 +110,9 @@
       <include name="IDR_SAFE_BROWSING_MALWARE_BLOCK" file="resources\safe_browsing_malware_block.html" flattenhtml="true" type="BINDATA" />
       <include name="IDR_SAFE_BROWSING_MULTIPLE_THREAT_BLOCK" file="resources\safe_browsing_multiple_threat_block.html" flattenhtml="true" type="BINDATA" />
       <include name="IDR_SAFE_BROWSING_PHISHING_BLOCK" file="resources\safe_browsing_phishing_block.html" flattenhtml="true" type="BINDATA" />
+      <include name="IDR_SUGGESTIONS_INTERNALS_HTML" file="resources\suggestions_internals\suggestions_internals.html" flattenhtml="true" allowexternalscript="true" type="BINDATA" />
+      <include name="IDR_SUGGESTIONS_INTERNALS_CSS" file="resources\suggestions_internals\suggestions_internals.css" type="BINDATA" />
+      <include name="IDR_SUGGESTIONS_INTERNALS_JS" file="resources\suggestions_internals\suggestions_internals.js" type="BINDATA" />
       <include name="IDR_SUGGESTIONS_PAGE_CSS" file="resources\ntp4\suggestions_page.css" type="BINDATA" />
       <include name="IDR_SUGGESTIONS_PAGE_JS" file="resources\ntp4\suggestions_page.js" type="BINDATA" />
       <include name="IDR_SESSIONS_HTML" file="resources\sessions.html" flattenhtml="true" allowexternalscript="true" type="BINDATA" />
@@ -145,8 +148,6 @@
       </if>
       <if expr="pp_ifdef('chromeos')">
         <include name="IDR_ABOUT_SYS_HTML" file="resources\chromeos\about_sys.html" flattenhtml="true" type="BINDATA" />
-        <include name="IDR_ACTIVE_DOWNLOADS_HTML" file="resources\chromeos\active_downloads.html" flattenhtml="true" allowexternalscript="true" type="BINDATA" />
-        <include name="IDR_ACTIVE_DOWNLOADS_JS" file="resources\chromeos\active_downloads.js" type="BINDATA" />
         <include name="IDR_CHOOSE_MOBILE_NETWORK_HTML" file="resources\chromeos\choose_mobile_network.html" flattenhtml="true" allowexternalscript="true" type="BINDATA" />
         <include name="IDR_CHOOSE_MOBILE_NETWORK_JS" file="resources\chromeos\choose_mobile_network.js" type="BINDATA" />
         <include name="IDR_CROSH_BUILTIN_MANIFEST" file="resources\chromeos\crosh_builtin\manifest.json" type="BINDATA" />
@@ -169,8 +170,7 @@
         <include name="IDR_NETWORK_MENU_CSS" file="resources\chromeos\network_menu.css" flattenhtml="true" type="BINDATA" />
         <include name="IDR_NETWORK_MENU_JS" file="resources\chromeos\network_menu.js" flattenhtml="true" type="BINDATA" />
         <include name="IDR_NOTIFICATION_ICON_LINK_HTML" file="resources\chromeos\notification_icon_link.html" type="BINDATA" />
-        <include name="IDR_OFFERS_MANIFEST" file="resources\chromeos\offers\manifest.json" type="BINDATA" />
-        <include name="IDR_OFFERS_MAIN" file="resources\chromeos\offers\main.html" flattenhtml="true" type="BINDATA" />
+        <include name="IDR_ECHO_MANIFEST" file="resources\chromeos\echo\manifest.json" type="BINDATA" />
         <include name="IDR_OFFLINE_LOAD_HTML" file="resources\chromeos\offline_load.html" flattenhtml="true" type="BINDATA" />
         <include name="IDR_OOBE_HTML" file="resources\chromeos\login\oobe.html" flattenhtml="true" type="BINDATA" />
         <include name="IDR_OS_CREDITS_HTML" file="resources\chromeos\about_os_credits.html" flattenhtml="true" type="BINDATA" />

@@ -34,6 +34,7 @@ class DevicePolicyCache : public CloudPolicyCacheBase {
   virtual bool SetPolicy(
       const enterprise_management::PolicyFetchResponse& policy) OVERRIDE;
   virtual void SetUnmanaged() OVERRIDE;
+  virtual void SetFetchingDone() OVERRIDE;
 
   void OnRetrievePolicyCompleted(
       chromeos::SignedSettings::ReturnCode code,
@@ -74,24 +75,30 @@ class DevicePolicyCache : public CloudPolicyCacheBase {
   // correct reporting policy flags.
   void SetTokenAndFlagReady(const std::string& device_token);
 
+  // Checks whether a policy fetch is pending and sends out a notification if
+  // that is the case.
+  void CheckFetchingDone();
+
+  void DecodeDevicePolicy(
+      const enterprise_management::ChromeDeviceSettingsProto& policy,
+      PolicyMap* policies);
+
   // Decode the various groups of policies.
   static void DecodeLoginPolicies(
       const enterprise_management::ChromeDeviceSettingsProto& policy,
       PolicyMap* policies);
   static void DecodeKioskPolicies(
       const enterprise_management::ChromeDeviceSettingsProto& policy,
-      PolicyMap* policies);
+      PolicyMap* policies,
+      EnterpriseInstallAttributes* install_attributes);
   static void DecodeNetworkPolicies(
       const enterprise_management::ChromeDeviceSettingsProto& policy,
-      PolicyMap* policies);
+      PolicyMap* policies,
+      EnterpriseInstallAttributes* install_attributes);
   static void DecodeReportingPolicies(
       const enterprise_management::ChromeDeviceSettingsProto& policy,
       PolicyMap* policies);
   static void DecodeGenericPolicies(
-      const enterprise_management::ChromeDeviceSettingsProto& policy,
-      PolicyMap* policies);
-
-  static void DecodeDevicePolicy(
       const enterprise_management::ChromeDeviceSettingsProto& policy,
       PolicyMap* policies);
 
@@ -101,6 +108,8 @@ class DevicePolicyCache : public CloudPolicyCacheBase {
   chromeos::SignedSettingsHelper* signed_settings_helper_;
 
   base::WeakPtrFactory<DevicePolicyCache> weak_ptr_factory_;
+
+  bool policy_fetch_pending_;
 
   DISALLOW_COPY_AND_ASSIGN(DevicePolicyCache);
 };

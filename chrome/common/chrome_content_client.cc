@@ -17,7 +17,9 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
+#include "chrome/common/pepper_flash.h"
 #include "chrome/common/render_messages.h"
+#include "chrome/common/url_constants.h"
 #include "content/public/common/pepper_plugin_info.h"
 #include "content/public/common/url_constants.h"
 #include "grit/common_resources.h"
@@ -28,7 +30,7 @@
 #include "webkit/plugins/npapi/plugin_list.h"
 #include "webkit/plugins/plugin_constants.h"
 
-#include "flapper_version.h"  // In <(SHARED_INTERMEDIATE_DIR).
+#include "flapper_version.h"  // In SHARED_INTERMEDIATE_DIR.
 
 #if defined(OS_WIN)
 #include "base/win/registry.h"
@@ -192,7 +194,8 @@ void ComputeBuiltInPlugins(std::vector<content::PepperPluginInfo>* plugins) {
 #endif
 }
 
-void AddPepperFlash(std::vector<content::PepperPluginInfo>* plugins) {
+content::PepperPluginInfo CreatePepperFlashInfo(const FilePath& path,
+                                                const std::string& version) {
   content::PepperPluginInfo plugin;
 
   // Flash being out of process is handled separately than general plugins
@@ -200,46 +203,10 @@ void AddPepperFlash(std::vector<content::PepperPluginInfo>* plugins) {
   plugin.is_out_of_process = !CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kPpapiFlashInProcess);
   plugin.name = kFlashPluginName;
-
-  std::string flash_version;  // Should be something like 11.2 or 11.2.123.45.
-
-  // Prefer Pepper Flash specified from the command-line.
-  const CommandLine::StringType flash_path =
-      CommandLine::ForCurrentProcess()->GetSwitchValueNative(
-          switches::kPpapiFlashPath);
-  if (!flash_path.empty()) {
-    plugin.path = FilePath(flash_path);
-
-    // Also get the version from the command-line.
-    flash_version = CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-        switches::kPpapiFlashVersion);
-  } else {
-    // Use the bundled Pepper Flash if it's enabled and available.
-    // It's currently only enabled by default on Linux ia32 and x64.
-#if defined(FLAPPER_AVAILABLE) && defined(OS_LINUX) && \
-    (defined(ARCH_CPU_X86) || defined(ARCH_CPU_X86_64))
-    bool bundled_flapper_enabled = true;
-#else
-    bool bundled_flapper_enabled = CommandLine::ForCurrentProcess()->HasSwitch(
-        switches::kEnableBundledPpapiFlash);
-#endif
-    bundled_flapper_enabled &= !CommandLine::ForCurrentProcess()->HasSwitch(
-                                   switches::kDisableBundledPpapiFlash);
-    if (!bundled_flapper_enabled)
-      return;
-
-#if defined(FLAPPER_AVAILABLE)
-    if (!PathService::Get(chrome::FILE_PEPPER_FLASH_PLUGIN, &plugin.path))
-      return;
-    flash_version = FLAPPER_VERSION_STRING;
-#else
-    LOG(ERROR) << "PPAPI Flash not included at build time.";
-    return;
-#endif  // FLAPPER_AVAILABLE
-  }
+  plugin.path = path;
 
   std::vector<std::string> flash_version_numbers;
-  base::SplitString(flash_version, '.', &flash_version_numbers);
+  base::SplitString(version, '.', &flash_version_numbers);
   if (flash_version_numbers.size() < 1)
     flash_version_numbers.push_back("11");
   // |SplitString()| puts in an empty string given an empty string. :(
@@ -263,7 +230,58 @@ void AddPepperFlash(std::vector<content::PepperPluginInfo>* plugins) {
                                           kFlashPluginSplExtension,
                                           kFlashPluginSplDescription);
   plugin.mime_types.push_back(spl_mime_type);
-  plugins->push_back(plugin);
+
+  return plugin;
+}
+
+void AddPepperFlashFromCommandLine(
+    std::vector<content::PepperPluginInfo>* plugins) {
+  const CommandLine::StringType flash_path =
+      CommandLine::ForCurrentProcess()->GetSwitchValueNative(
+          switches::kPpapiFlashPath);
+  if (flash_path.empty())
+    return;
+
+  // Also get the version from the command-line. Should be something like 11.2
+  // or 11.2.123.45.
+  std::string flash_version =
+      CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+          switches::kPpapiFlashVersion);
+
+  plugins->push_back(
+      CreatePepperFlashInfo(FilePath(flash_path), flash_version));
+}
+
+bool GetBundledPepperFlash(content::PepperPluginInfo* plugin,
+                           bool* override_npapi_flash) {
+#if defined(FLAPPER_AVAILABLE)
+  // Ignore bundled Pepper Flash if there is Pepper Flash specified from the
+  // command-line.
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kPpapiFlashPath))
+    return false;
+
+  bool force_disable = CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kDisableBundledPpapiFlash);
+  if (force_disable)
+    return false;
+
+  FilePath flash_path;
+  if (!PathService::Get(chrome::FILE_PEPPER_FLASH_PLUGIN, &flash_path))
+    return false;
+  // It is an error to have FLAPPER_AVAILABLE defined but then not having the
+  // plugin file in place, but this happens in Chrome OS builds.
+  // Use --disable-bundled-ppapi-flash to skip this.
+  DCHECK(file_util::PathExists(flash_path));
+
+  bool force_enable = CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kEnableBundledPpapiFlash);
+
+  *plugin = CreatePepperFlashInfo(flash_path, FLAPPER_VERSION_STRING);
+  *override_npapi_flash = force_enable || IsPepperFlashEnabledByDefault();
+  return true;
+#else
+  return false;
+#endif  // FLAPPER_AVAILABLE
 }
 
 #if defined(OS_WIN)
@@ -340,11 +358,30 @@ void ChromeContentClient::SetGpuInfo(const content::GPUInfo& gpu_info) {
 void ChromeContentClient::AddPepperPlugins(
     std::vector<content::PepperPluginInfo>* plugins) {
   ComputeBuiltInPlugins(plugins);
-  AddPepperFlash(plugins);
+  AddPepperFlashFromCommandLine(plugins);
+
+  // Don't try to register Pepper Flash if there exists a Pepper Flash field
+  // trial. It will be registered separately.
+  if (!ConductingPepperFlashFieldTrial() && IsPepperFlashEnabledByDefault()) {
+    content::PepperPluginInfo plugin;
+    bool add_at_beginning = false;
+    if (GetBundledPepperFlash(&plugin, &add_at_beginning))
+      plugins->push_back(plugin);
+  }
 }
 
 void ChromeContentClient::AddNPAPIPlugins(
     webkit::npapi::PluginList* plugin_list) {
+}
+
+void ChromeContentClient::AddAdditionalSchemes(
+    std::vector<std::string>* standard_schemes,
+    std::vector<std::string>* savable_schemes) {
+  standard_schemes->push_back(kExtensionScheme);
+  savable_schemes->push_back(kExtensionScheme);
+#if defined(OS_CHROMEOS)
+  standard_schemes->push_back(kCrosScheme);
+#endif
 }
 
 bool ChromeContentClient::HasWebUIScheme(const GURL& url) const {
@@ -367,18 +404,11 @@ bool ChromeContentClient::CanHandleWhileSwappedOut(
   return false;
 }
 
-std::string ChromeContentClient::GetUserAgent(bool* overriding) const {
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kUserAgent)) {
-    *overriding = true;
-    return CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-        switches::kUserAgent);
-  } else {
-    *overriding = false;
-    chrome::VersionInfo version_info;
-    std::string product("Chrome/");
-    product += version_info.is_valid() ? version_info.Version() : "0.0.0.0";
-    return webkit_glue::BuildUserAgentFromProduct(product);
-  }
+std::string ChromeContentClient::GetUserAgent() const {
+  chrome::VersionInfo version_info;
+  std::string product("Chrome/");
+  product += version_info.is_valid() ? version_info.Version() : "0.0.0.0";
+  return webkit_glue::BuildUserAgentFromProduct(product);
 }
 
 string16 ChromeContentClient::GetLocalizedString(int message_id) const {
@@ -409,34 +439,21 @@ bool ChromeContentClient::SandboxPlugin(CommandLine* command_line,
     return false;
   }
 
+  // Add policy for the plugin proxy window pump event
+  // used by WebPluginDelegateProxy::HandleInputEvent().
+  if (policy->AddRule(sandbox::TargetPolicy::SUBSYS_HANDLES,
+                      sandbox::TargetPolicy::HANDLES_DUP_ANY,
+                      L"Event") != sandbox::SBOX_ALL_OK) {
+    NOTREACHED();
+    return false;
+  }
+
   // Add the policy for the pipes.
   if (policy->AddRule(sandbox::TargetPolicy::SUBSYS_NAMED_PIPES,
                       sandbox::TargetPolicy::NAMEDPIPES_ALLOW_ANY,
                       L"\\\\.\\pipe\\chrome.*") != sandbox::SBOX_ALL_OK) {
     NOTREACHED();
     return false;
-  }
-
-  // Allow Talk's camera control.
-  base::win::RegKey talk_key(HKEY_CURRENT_USER,
-                             L"Software\\Google\\Google Talk Plugin",
-                             KEY_READ);
-  if (talk_key.Valid()) {
-    string16 install_dir;
-    if (talk_key.ReadValue(L"install_dir", &install_dir) == ERROR_SUCCESS) {
-      if (install_dir[install_dir.size() - 1] != '\\')
-        install_dir.append(L"\\*");
-      else
-        install_dir.append(L"*");
-      // This is not a hard failure because a reparse point in the path can
-      // cause the rule to fail, but we should not abort sandboxing.
-      if (policy->AddRule(sandbox::TargetPolicy::SUBSYS_FILES,
-                          sandbox::TargetPolicy::FILES_ALLOW_READONLY,
-                          install_dir.c_str()) != sandbox::SBOX_ALL_OK) {
-        DVLOG(ERROR) << "Failed adding sandbox rule for Talk plugin";
-      }
-    }
-    talk_key.Close();
   }
 
   // Spawn the flash broker and apply sandbox policy.
@@ -478,5 +495,13 @@ bool ChromeContentClient::GetSandboxProfileForSandboxType(
   return false;
 }
 #endif
+
+bool ChromeContentClient::GetBundledFieldTrialPepperFlash(
+    content::PepperPluginInfo* plugin,
+    bool* override_npapi_flash) {
+  if (!ConductingPepperFlashFieldTrial())
+    return false;
+  return GetBundledPepperFlash(plugin, override_npapi_flash);
+}
 
 }  // namespace chrome

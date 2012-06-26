@@ -23,7 +23,7 @@ class ShellDownloadManagerDelegate;
 
 class ShellBrowserContext : public BrowserContext {
  public:
-  explicit ShellBrowserContext(ShellBrowserMainParts* shell_main_parts);
+  ShellBrowserContext();
   virtual ~ShellBrowserContext();
 
   // BrowserContext implementation.
@@ -43,6 +43,9 @@ class ShellBrowserContext : public BrowserContext {
   virtual quota::SpecialStoragePolicy* GetSpecialStoragePolicy() OVERRIDE;
 
  private:
+  // Performs initialization of the ShellBrowserContext while IO is still
+  // allowed on the current thread.
+  void InitWhileIOAllowed();
 
   FilePath path_;
   scoped_ptr<ResourceContext> resource_context_;
@@ -51,8 +54,6 @@ class ShellBrowserContext : public BrowserContext {
   scoped_refptr<net::URLRequestContextGetter> url_request_getter_;
   scoped_refptr<GeolocationPermissionContext> geolocation_permission_context_;
   scoped_refptr<SpeechRecognitionPreferences> speech_recognition_preferences_;
-
-  ShellBrowserMainParts* shell_main_parts_;
 
   DISALLOW_COPY_AND_ASSIGN(ShellBrowserContext);
 };

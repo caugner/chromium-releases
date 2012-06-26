@@ -15,10 +15,11 @@ class MockMediaStreamDispatcher : public MediaStreamDispatcher {
   MockMediaStreamDispatcher();
   virtual ~MockMediaStreamDispatcher();
 
-  virtual void GenerateStream(int request_id,
-                              MediaStreamDispatcherEventHandler* event_handler,
-                              media_stream::StreamOptions components,
-                              const std::string& security_origin) OVERRIDE;
+  virtual void GenerateStream(
+      int request_id,
+      const base::WeakPtr<MediaStreamDispatcherEventHandler>& event_handler,
+      media_stream::StreamOptions components,
+      const std::string& security_origin) OVERRIDE;
   virtual void StopStream(const std::string& label) OVERRIDE;
   virtual bool IsStream(const std::string& label) OVERRIDE;
   virtual int video_session_id(const std::string& label, int index) OVERRIDE;
@@ -28,16 +29,27 @@ class MockMediaStreamDispatcher : public MediaStreamDispatcher {
   MediaStreamDispatcherEventHandler* event_handler() const {
     return event_handler_;
   }
-  media_stream::StreamOptions* components() const { return components_; }
+  const media_stream::StreamOptions& components() const { return components_; }
   const std::string& security_origin() const { return security_origin_; }
   int stop_stream_counter() const { return stop_stream_counter_; }
+  const std::string& stream_label() const { return stream_label_;}
+  media_stream::StreamDeviceInfoArray audio_array() const {
+    return audio_array_;
+  }
+  media_stream::StreamDeviceInfoArray video_array() const {
+    return video_array_;
+  }
 
  private:
   int request_id_;
-  MediaStreamDispatcherEventHandler* event_handler_;
-  media_stream::StreamOptions* components_;
+  base::WeakPtr<MediaStreamDispatcherEventHandler> event_handler_;
+  media_stream::StreamOptions components_;
   std::string security_origin_;
   int stop_stream_counter_;
+
+  std::string stream_label_;
+  media_stream::StreamDeviceInfoArray audio_array_;
+  media_stream::StreamDeviceInfoArray video_array_;
 
   DISALLOW_COPY_AND_ASSIGN(MockMediaStreamDispatcher);
 };

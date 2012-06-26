@@ -4,10 +4,10 @@
 
 #include "content/common/child_thread.h"
 
+#include "base/allocator/allocator_extension.h"
 #include "base/command_line.h"
 #include "base/message_loop.h"
 #include "base/process.h"
-#include "base/process_util.h"
 #include "base/string_util.h"
 #include "base/tracked_objects.h"
 #include "content/common/child_process.h"
@@ -27,6 +27,8 @@
 #if defined(OS_WIN)
 #include "content/common/handle_enumerator_win.h"
 #endif
+
+using tracked_objects::ThreadData;
 
 ChildThread::ChildThread() {
   channel_name_ = CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
@@ -190,6 +192,9 @@ bool ChildThread::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(ChildProcessMsg_GetChildProfilerData,
                         OnGetChildProfilerData)
     IPC_MESSAGE_HANDLER(ChildProcessMsg_DumpHandles, OnDumpHandles)
+#if defined(USE_TCMALLOC)
+    IPC_MESSAGE_HANDLER(ChildProcessMsg_GetTcmallocStats, OnGetTcmallocStats)
+#endif
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
@@ -219,21 +224,16 @@ void ChildThread::OnSetIPCLoggingEnabled(bool enable) {
 }
 #endif  //  IPC_MESSAGE_LOG_ENABLED
 
-void ChildThread::OnSetProfilerStatus(
-    tracked_objects::ThreadData::Status status) {
-  tracked_objects::ThreadData::InitializeAndSetTrackingStatus(status);
+void ChildThread::OnSetProfilerStatus(ThreadData::Status status) {
+  ThreadData::InitializeAndSetTrackingStatus(status);
 }
 
-void ChildThread::OnGetChildProfilerData(
-    int sequence_number,
-    const std::string& process_type) {
-  scoped_ptr<base::DictionaryValue> value(
-      tracked_objects::ThreadData::ToValue(false));
-  value->SetString("process_type", process_type);
-  value->SetInteger("process_id", base::GetCurrentProcId());
+void ChildThread::OnGetChildProfilerData(int sequence_number) {
+  tracked_objects::ProcessDataSnapshot process_data;
+  ThreadData::Snapshot(false, &process_data);
 
-  Send(new ChildProcessHostMsg_ChildProfilerData(
-      sequence_number, *value.get()));
+  Send(new ChildProcessHostMsg_ChildProfilerData(sequence_number,
+                                                 process_data));
 }
 
 void ChildThread::OnDumpHandles() {
@@ -249,6 +249,16 @@ void ChildThread::OnDumpHandles() {
 
   NOTIMPLEMENTED();
 }
+
+#if defined(USE_TCMALLOC)
+void ChildThread::OnGetTcmallocStats() {
+  std::string result;
+  char buffer[1024 * 32];
+  base::allocator::GetStats(buffer, sizeof(buffer));
+  result.append(buffer);
+  Send(new ChildProcessHostMsg_TcmallocStats(result));
+}
+#endif
 
 ChildThread* ChildThread::current() {
   return ChildProcess::current()->main_thread();

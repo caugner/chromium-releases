@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,14 +23,14 @@ class DefaultMonitorInfoProvider : public MonitorInfoProvider {
  public:
   // Overridden from MonitorInfoProvider:
   virtual gfx::Rect GetPrimaryMonitorWorkArea() const OVERRIDE {
-    return gfx::Screen::GetPrimaryMonitorWorkArea();
+    return gfx::Screen::GetPrimaryMonitor().work_area();
   }
   virtual gfx::Rect GetPrimaryMonitorBounds() const OVERRIDE {
-    return gfx::Screen::GetPrimaryMonitorBounds();
+    return gfx::Screen::GetPrimaryMonitor().bounds();
   }
   virtual gfx::Rect GetMonitorWorkAreaMatching(
       const gfx::Rect& match_rect) const OVERRIDE {
-    return gfx::Screen::GetMonitorWorkAreaMatching(match_rect);
+    return gfx::Screen::GetMonitorMatching(match_rect).work_area();
   }
 };
 
@@ -124,6 +124,10 @@ class DefaultStateProvider : public WindowSizer::StateProvider {
 ///////////////////////////////////////////////////////////////////////////////
 // WindowSizer, public:
 
+// The number of pixels which are kept free top, left and right when a window
+// gets positioned to its default location.
+const int WindowSizer::kDesktopBorderSize = 16;
+
 WindowSizer::WindowSizer(StateProvider* state_provider, const Browser* browser)
     : state_provider_(state_provider),
       monitor_info_provider_(new DefaultMonitorInfoProvider),
@@ -167,6 +171,17 @@ void WindowSizer::DetermineWindowBounds(const gfx::Rect& specified_bounds,
         GetDefaultWindowBounds(bounds);
       }
     }
+  } else {
+    // In case that there was a bound given we need to make sure that it is
+    // visible and fits on the screen.
+    // Find the size of the work area of the monitor that intersects the bounds
+    // of the anchor window. Note: AdjustBoundsToBeVisibleOnMonitorContaining
+    // does not exactly what we want: It makes only sure that "a minimal part"
+    // is visible on the screen.
+    gfx::Rect work_area =
+        monitor_info_provider_->GetMonitorWorkAreaMatching(*bounds);
+    // Resize so that it fits.
+    *bounds = bounds->AdjustToFit(work_area);
   }
 }
 

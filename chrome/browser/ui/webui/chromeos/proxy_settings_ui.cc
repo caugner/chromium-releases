@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/webui/chromeos/proxy_settings_ui.h"
 
+#include "base/memory/ref_counted_memory.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/values.h"
@@ -86,7 +87,7 @@ ProxySettingsUI::ProxySettingsUI(content::WebUI* web_ui)
   ProxySettingsHTMLSource* source =
       new ProxySettingsHTMLSource(localized_strings);
   Profile* profile = Profile::FromWebUI(web_ui);
-  profile->GetChromeURLDataManager()->AddDataSource(source);
+  ChromeURLDataManager::AddDataSource(profile, source);
 }
 
 ProxySettingsUI::~ProxySettingsUI() {
@@ -106,7 +107,6 @@ void ProxySettingsUI::InitializeHandlers() {
   proxy_tracker->UIMakeActiveNetworkCurrent();
   std::string network_name;
   proxy_tracker->UIGetCurrentNetworkName(&network_name);
-  proxy_handler_->SetNetworkName(network_name);
 }
 
 }  // namespace chromeos

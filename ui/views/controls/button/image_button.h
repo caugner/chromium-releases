@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 #define UI_VIEWS_CONTROLS_BUTTON_IMAGE_BUTTON_H_
 #pragma once
 
+#include "base/gtest_prod_util.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/views/controls/button/custom_button.h"
 
@@ -19,6 +20,18 @@ namespace views {
 
 class VIEWS_EXPORT ImageButton : public CustomButton {
  public:
+  enum HorizontalAlignment {
+    ALIGN_LEFT = 0,
+    ALIGN_CENTER,
+    ALIGN_RIGHT
+  };
+
+  enum VerticalAlignment {
+    ALIGN_TOP = 0,
+    ALIGN_MIDDLE,
+    ALIGN_BOTTOM
+  };
+
   explicit ImageButton(ButtonListener* listener);
   virtual ~ImageButton();
 
@@ -30,13 +43,9 @@ class VIEWS_EXPORT ImageButton : public CustomButton {
                      const SkBitmap* image,
                      const SkBitmap* mask);
 
-  enum HorizontalAlignment { ALIGN_LEFT = 0,
-                             ALIGN_CENTER,
-                             ALIGN_RIGHT, };
-
-  enum VerticalAlignment { ALIGN_TOP = 0,
-                           ALIGN_MIDDLE,
-                           ALIGN_BOTTOM };
+  // Set an |image| to draw on top of the normal / hot / pushed image.
+  // Pass NULL for no image.
+  void SetOverlayImage(const SkBitmap* image);
 
   // Sets how the image is laid out within the button's bounds.
   void SetImageAlignment(HorizontalAlignment h_align,
@@ -63,7 +72,12 @@ class VIEWS_EXPORT ImageButton : public CustomButton {
   // The background image.
   SkBitmap background_image_;
 
+  // Image to draw on top of normal / hot / pushed image.  Usually empty.
+  SkBitmap overlay_image_;
+
  private:
+  FRIEND_TEST_ALL_PREFIXES(ImageButtonTest, Basics);
+
   // Image alignment.
   HorizontalAlignment h_alignment_;
   VerticalAlignment v_alignment_;
@@ -96,7 +110,7 @@ class VIEWS_EXPORT ToggleImageButton : public ImageButton {
   void SetToggledTooltipText(const string16& tooltip);
 
   // Overridden from ImageButton:
-  virtual void SetImage(ButtonState aState, const SkBitmap* anImage) OVERRIDE;
+  virtual void SetImage(ButtonState state, const SkBitmap* image) OVERRIDE;
 
   // Overridden from View:
   virtual bool GetTooltipText(const gfx::Point& p,

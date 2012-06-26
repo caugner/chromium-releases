@@ -10,7 +10,6 @@
 #include "chrome/browser/ui/views/accelerator_table.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/keyboard_overlay_delegate.h"
-#include "chrome/browser/ui/views/window.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "grit/generated_resources.h"
 #include "ui/base/keycodes/keyboard_codes.h"
@@ -35,10 +34,11 @@ struct Accelerator {
 
 KeyboardOverlayDialogView::KeyboardOverlayDialogView(
     Profile* profile,
-    HtmlDialogUIDelegate* delegate,
+    WebDialogDelegate* delegate,
     BrowserView* parent_view)
-    : HtmlDialogView(profile, parent_view->browser(), delegate),
+    : WebDialogView(profile, parent_view->browser(), delegate),
       parent_view_(parent_view) {
+  RegisterDialogAccelerators();
 }
 
 KeyboardOverlayDialogView::~KeyboardOverlayDialogView() {
@@ -80,31 +80,35 @@ bool KeyboardOverlayDialogView::AcceleratorPressed(
   return true;
 }
 
-void KeyboardOverlayDialogView::ShowDialog(
-    gfx::NativeWindow owning_window, BrowserView* parent_view) {
+void KeyboardOverlayDialogView::ShowDialog(gfx::NativeWindow owning_window,
+                                           BrowserView* parent_view) {
   // Temporarily disable Shift+Alt. crosbug.com/17208.
   chromeos::input_method::InputMethodManager::GetInstance()->DisableHotkeys();
 
   KeyboardOverlayDelegate* delegate = new KeyboardOverlayDelegate(
-      UTF16ToWide(l10n_util::GetStringUTF16(IDS_KEYBOARD_OVERLAY_TITLE)));
-  KeyboardOverlayDialogView* html_view =
-      new KeyboardOverlayDialogView(parent_view->browser()->profile(),
-                                    delegate,
-                                    parent_view);
-  delegate->set_view(html_view);
-  html_view->InitDialog();
-  browser::CreateFramelessViewsWindow(owning_window, html_view);
+      l10n_util::GetStringUTF16(IDS_KEYBOARD_OVERLAY_TITLE));
+  KeyboardOverlayDialogView* view = new KeyboardOverlayDialogView(
+      parent_view->browser()->profile(), delegate, parent_view);
+  delegate->set_view(view);
+
+  views::Widget* widget = new views::Widget;
+  views::Widget::InitParams params(
+      views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
+  params.delegate = view;
+  params.parent = owning_window;
+  widget->Init(params);
+
   // Show the widget at the bottom of the work area.
   gfx::Size size;
   delegate->GetDialogSize(&size);
-  gfx::Rect rect = gfx::Screen::GetMonitorWorkAreaNearestWindow(
-      html_view->native_view());
+  gfx::Rect rect = gfx::Screen::GetMonitorNearestWindow(
+      view->GetWidget()->GetNativeView()).work_area();
   gfx::Rect bounds((rect.width() - size.width()) / 2,
                    rect.height() - size.height(),
                    size.width(),
                    size.height());
-  html_view->GetWidget()->SetBounds(bounds);
-  html_view->GetWidget()->Show();
+  view->GetWidget()->SetBounds(bounds);
+  view->GetWidget()->Show();
 }
 
 bool KeyboardOverlayDialogView::IsCloseAccelerator(

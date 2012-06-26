@@ -27,6 +27,29 @@
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
+#if defined(OS_WIN)
+#include "ui/gfx/font.h"
+#include "ui/gfx/platform_font_win.h"
+#endif
+
+namespace {
+
+// Returns the localized name of a font so that settings can find it within the
+// list of system fonts. On Windows, the list of system fonts has names only
+// for the system locale, but the pref value may be in the English name.
+std::string MaybeGetLocalizedFontName(const std::string& font_name) {
+#if defined(OS_WIN)
+  gfx::Font font(font_name, 12);  // dummy font size
+  return static_cast<gfx::PlatformFontWin*>(font.platform_font())->
+      GetLocalizedFontName();
+#else
+  return font_name;
+#endif
+}
+
+}  // namespace
+
+
 namespace options2 {
 
 FontSettingsHandler::FontSettingsHandler() {
@@ -110,6 +133,18 @@ void FontSettingsHandler::HandleFetchFontsData(const ListValue* args) {
 
 void FontSettingsHandler::FontsListHasLoaded(
     scoped_ptr<base::ListValue> list) {
+  // Selects the directionality for the fonts in the given list.
+  for (size_t i = 0; i < list->GetSize(); i++) {
+    ListValue* font;
+    bool has_font = list->GetList(i, &font);
+    DCHECK(has_font);
+    string16 value;
+    bool has_value = font->GetString(1, &value);
+    DCHECK(has_value);
+    bool has_rtl_chars = base::i18n::StringContainsStrongRTLChars(value);
+    font->Append(Value::CreateStringValue(has_rtl_chars ? "rtl" : "ltr"));
+  }
+
   ListValue encoding_list;
   const std::vector<CharacterEncoding::EncodingInfo>* encodings;
   PrefService* pref_service = Profile::FromWebUI(web_ui())->GetPrefs();
@@ -128,9 +163,10 @@ void FontSettingsHandler::FontsListHasLoaded(
       std::string encoding =
       CharacterEncoding::GetCanonicalEncodingNameByCommandId(cmd_id);
       string16 name = it->encoding_display_name;
-      base::i18n::AdjustStringForLocaleDirection(&name);
+      bool has_rtl_chars = base::i18n::StringContainsStrongRTLChars(name);
       option->Append(Value::CreateStringValue(encoding));
       option->Append(Value::CreateStringValue(name));
+      option->Append(Value::CreateStringValue(has_rtl_chars ? "rtl" : "ltr"));
     } else {
       // Add empty name/value to indicate a separator item.
       option->Append(Value::CreateStringValue(""));
@@ -140,10 +176,14 @@ void FontSettingsHandler::FontsListHasLoaded(
   }
 
   ListValue selected_values;
-  selected_values.Append(Value::CreateStringValue(standard_font_.GetValue()));
-  selected_values.Append(Value::CreateStringValue(serif_font_.GetValue()));
-  selected_values.Append(Value::CreateStringValue(sans_serif_font_.GetValue()));
-  selected_values.Append(Value::CreateStringValue(fixed_font_.GetValue()));
+  selected_values.Append(Value::CreateStringValue(MaybeGetLocalizedFontName(
+      standard_font_.GetValue())));
+  selected_values.Append(Value::CreateStringValue(MaybeGetLocalizedFontName(
+      serif_font_.GetValue())));
+  selected_values.Append(Value::CreateStringValue(MaybeGetLocalizedFontName(
+      sans_serif_font_.GetValue())));
+  selected_values.Append(Value::CreateStringValue(MaybeGetLocalizedFontName(
+      fixed_font_.GetValue())));
   selected_values.Append(Value::CreateStringValue(font_encoding_.GetValue()));
 
   web_ui()->CallJavascriptFunction("FontSettings.setFontsData",

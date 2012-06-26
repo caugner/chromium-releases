@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,8 +30,6 @@ class DOMStorageContext;
 // A client of this class need to call StartFetching from the UI thread to
 // initiate the flow, and it'll be notified by the callback in its UI
 // thread at some later point.
-// The client must call CancelNotification() if it's destroyed before the
-// callback is notified.
 class BrowsingDataLocalStorageHelper
     : public base::RefCountedThreadSafe<BrowsingDataLocalStorageHelper> {
  public:
@@ -48,10 +46,6 @@ class BrowsingDataLocalStorageHelper
         int64 size,
         base::Time last_modified);
     ~LocalStorageInfo();
-
-    bool IsFileSchemeData() {
-      return protocol == chrome::kFileScheme;
-    }
 
     std::string protocol;
     std::string host;
@@ -70,10 +64,6 @@ class BrowsingDataLocalStorageHelper
   // This must be called only in the UI thread.
   virtual void StartFetching(
       const base::Callback<void(const std::list<LocalStorageInfo>&)>& callback);
-  // Cancels the notification callback (i.e., the window that created it no
-  // longer exists).
-  // This must be called only in the UI thread.
-  virtual void CancelNotification();
   // Requests a single local storage file to be deleted in the WEBKIT thread.
   virtual void DeleteLocalStorageFile(const FilePath& file_path);
 
@@ -131,11 +121,13 @@ class CannedBrowsingDataLocalStorageHelper
   // True if no local storages are currently stored.
   bool empty() const;
 
+  // Returns the number of local storages currently stored.
+  size_t GetLocalStorageCount() const;
+
   // BrowsingDataLocalStorageHelper implementation.
   virtual void StartFetching(
       const base::Callback<void(const std::list<LocalStorageInfo>&)>& callback)
           OVERRIDE;
-  virtual void CancelNotification() OVERRIDE {}
 
  private:
   virtual ~CannedBrowsingDataLocalStorageHelper();

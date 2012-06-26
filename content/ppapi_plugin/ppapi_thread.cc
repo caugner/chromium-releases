@@ -10,12 +10,12 @@
 #include "base/process_util.h"
 #include "base/rand_util.h"
 #include "base/stringprintf.h"
+#include "base/utf_string_conversions.h"
 #include "content/common/child_process.h"
 #include "content/common/child_process_messages.h"
 #include "content/ppapi_plugin/broker_process_dispatcher.h"
 #include "content/ppapi_plugin/plugin_process_dispatcher.h"
 #include "content/ppapi_plugin/ppapi_webkitplatformsupport_impl.h"
-#include "content/public/common/content_switches.h"
 #include "content/public/common/sandbox_init.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_sync_channel.h"
@@ -26,6 +26,7 @@
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/proxy/interface_list.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
+#include "webkit/plugins/plugin_switches.h"
 
 #if defined(OS_WIN)
 #include "sandbox/src/sandbox.h"
@@ -42,14 +43,18 @@ extern void* g_target_services;
 typedef int32_t (*InitializeBrokerFunc)
     (PP_ConnectInstance_Func* connect_instance_func);
 
-PpapiThread::PpapiThread(bool is_broker)
+PpapiThread::PpapiThread(const CommandLine& command_line, bool is_broker)
     : is_broker_(is_broker),
       get_plugin_interface_(NULL),
       connect_instance_func_(NULL),
       local_pp_module_(
           base::RandInt(0, std::numeric_limits<PP_Module>::max())),
       next_plugin_dispatcher_id_(1) {
-  ppapi::proxy::PluginGlobals::Get()->set_plugin_proxy_delegate(this);
+  ppapi::proxy::PluginGlobals* globals = ppapi::proxy::PluginGlobals::Get();
+  globals->set_plugin_proxy_delegate(this);
+  globals->set_command_line(
+      command_line.GetSwitchValueASCII(switches::kPpapiFlashArgs));
+
   webkit_platform_support_.reset(new PpapiWebKitPlatformSupportImpl);
   WebKit::initialize(webkit_platform_support_.get());
 }
@@ -61,11 +66,11 @@ PpapiThread::~PpapiThread() {
     return;
 
   // The ShutdownModule/ShutdownBroker function is optional.
-  ppapi::proxy::ProxyChannel::ShutdownModuleFunc shutdown_function =
+  PP_ShutdownModule_Func shutdown_function =
       is_broker_ ?
-      reinterpret_cast<ppapi::proxy::ProxyChannel::ShutdownModuleFunc>(
+      reinterpret_cast<PP_ShutdownModule_Func>(
           library_.GetFunctionPointer("PPP_ShutdownBroker")) :
-      reinterpret_cast<ppapi::proxy::ProxyChannel::ShutdownModuleFunc>(
+      reinterpret_cast<PP_ShutdownModule_Func>(
           library_.GetFunctionPointer("PPP_ShutdownModule"));
   if (shutdown_function)
     shutdown_function();
@@ -83,6 +88,7 @@ bool PpapiThread::OnMessageReceived(const IPC::Message& msg) {
   IPC_BEGIN_MESSAGE_MAP(PpapiThread, msg)
     IPC_MESSAGE_HANDLER(PpapiMsg_LoadPlugin, OnMsgLoadPlugin)
     IPC_MESSAGE_HANDLER(PpapiMsg_CreateChannel, OnMsgCreateChannel)
+
     IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBTCPServerSocket_ListenACK,
                                 OnPluginDispatcherMessageReceived(msg))
     IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBTCPServerSocket_AcceptACK,
@@ -184,6 +190,14 @@ void PpapiThread::OnMsgLoadPlugin(const FilePath& path) {
     return;
   }
 
+  // Get the GetInterface function (required).
+  get_plugin_interface_ = reinterpret_cast<PP_GetInterface_Func>(
+      library.GetFunctionPointer("PPP_GetInterface"));
+  if (!get_plugin_interface_) {
+    LOG(WARNING) << "No PPP_GetInterface in plugin library";
+    return;
+  }
+
   if (is_broker_) {
     // Get the InitializeBroker function (required).
     InitializeBrokerFunc init_broker =
@@ -204,15 +218,6 @@ void PpapiThread::OnMsgLoadPlugin(const FilePath& path) {
       return;
     }
   } else {
-    // Get the GetInterface function (required).
-    get_plugin_interface_ =
-        reinterpret_cast<ppapi::proxy::Dispatcher::GetInterfaceFunc>(
-            library.GetFunctionPointer("PPP_GetInterface"));
-    if (!get_plugin_interface_) {
-      LOG(WARNING) << "No PPP_GetInterface in plugin library";
-      return;
-    }
-
 #if defined(OS_MACOSX)
     // We need to do this after getting |PPP_GetInterface()| (or presumably
     // doing something nontrivial with the library), else the sandbox
@@ -222,9 +227,9 @@ void PpapiThread::OnMsgLoadPlugin(const FilePath& path) {
     }
 #endif
 
-    // Get the InitializeModule function (required).
-    ppapi::proxy::Dispatcher::InitModuleFunc init_module =
-        reinterpret_cast<ppapi::proxy::Dispatcher::InitModuleFunc>(
+    // Get the InitializeModule function (required for non-broker code).
+    PP_InitializeModule_Func init_module =
+        reinterpret_cast<PP_InitializeModule_Func>(
             library.GetFunctionPointer("PPP_InitializeModule"));
     if (!init_module) {
       LOG(WARNING) << "No PPP_InitializeModule in plugin library";
@@ -243,10 +248,11 @@ void PpapiThread::OnMsgLoadPlugin(const FilePath& path) {
 }
 
 void PpapiThread::OnMsgCreateChannel(base::ProcessHandle host_process_handle,
-                                     int renderer_id) {
+                                     int renderer_id,
+                                     bool incognito) {
   IPC::ChannelHandle channel_handle;
   if (!library_.is_valid() ||  // Plugin couldn't be loaded.
-      !SetupRendererChannel(host_process_handle, renderer_id,
+      !SetupRendererChannel(host_process_handle, renderer_id, incognito,
                             &channel_handle)) {
     Send(new PpapiHostMsg_ChannelCreated(IPC::ChannelHandle()));
     return;
@@ -280,9 +286,9 @@ void PpapiThread::OnPluginDispatcherMessageReceived(const IPC::Message& msg) {
 
 bool PpapiThread::SetupRendererChannel(base::ProcessHandle host_process_handle,
                                        int renderer_id,
+                                       bool incognito,
                                        IPC::ChannelHandle* handle) {
   DCHECK(is_broker_ == (connect_instance_func_ != NULL));
-  DCHECK(is_broker_ == (get_plugin_interface_ == NULL));
   IPC::ChannelHandle plugin_handle;
   plugin_handle.name = IPC::Channel::GenerateVerifiedChannelID(
       StringPrintf("%d.r%d", base::GetCurrentProcId(), renderer_id));
@@ -292,6 +298,7 @@ bool PpapiThread::SetupRendererChannel(base::ProcessHandle host_process_handle,
   if (is_broker_) {
     BrokerProcessDispatcher* broker_dispatcher =
         new BrokerProcessDispatcher(host_process_handle,
+                                    get_plugin_interface_,
                                     connect_instance_func_);
     init_result = broker_dispatcher->InitBrokerWithChannel(this,
                                                            plugin_handle,
@@ -299,7 +306,8 @@ bool PpapiThread::SetupRendererChannel(base::ProcessHandle host_process_handle,
     dispatcher = broker_dispatcher;
   } else {
     PluginProcessDispatcher* plugin_dispatcher =
-        new PluginProcessDispatcher(host_process_handle, get_plugin_interface_);
+        new PluginProcessDispatcher(host_process_handle, get_plugin_interface_,
+                                    incognito);
     init_result = plugin_dispatcher->InitPluginWithChannel(this,
                                                            plugin_handle,
                                                            false);

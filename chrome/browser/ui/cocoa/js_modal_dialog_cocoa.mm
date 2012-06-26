@@ -20,13 +20,13 @@
 // going away. Is responsible for cleaning itself up.
 @interface JavaScriptAppModalDialogHelper : NSObject<NSAlertDelegate> {
  @private
-  NSAlert* alert_;
+  scoped_nsobject<NSAlert> alert_;
   NSTextField* textField_;  // WEAK; owned by alert_
 }
 
 - (NSAlert*)alert;
 - (NSTextField*)textField;
-- (void)alertDidEnd:(NSAlert *)alert
+- (void)alertDidEnd:(NSAlert*)alert
          returnCode:(int)returnCode
         contextInfo:(void*)contextInfo;
 
@@ -35,7 +35,7 @@
 @implementation JavaScriptAppModalDialogHelper
 
 - (NSAlert*)alert {
-  alert_ = [[NSAlert alloc] init];
+  alert_.reset([[NSAlert alloc] init]);
   return alert_;
 }
 
@@ -46,11 +46,6 @@
   [textField_ release];
 
   return textField_;
-}
-
-- (void)dealloc {
-  [alert_ release];
-  [super dealloc];
 }
 
 // |contextInfo| is the JSModalDialogCocoa that owns us.
@@ -81,7 +76,7 @@
     case NSRunStoppedResponse: {  // Window was closed underneath us
       // Need to call OnCancel() because there is some cleanup that needs
       // to be done.  It won't call back to the javascript since the
-      // JavaScriptAppModalDialog knows that the TabContents was destroyed.
+      // JavaScriptAppModalDialog knows that the WebContents was destroyed.
       native_dialog->dialog()->OnCancel(shouldSuppress);
       break;
     }
@@ -90,6 +85,7 @@
     }
   }
 }
+
 @end
 
 ////////////////////////////////////////////////////////////////////////////////

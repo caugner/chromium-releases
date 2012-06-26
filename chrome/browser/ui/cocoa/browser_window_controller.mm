@@ -16,6 +16,7 @@
 #include "chrome/browser/bookmarks/bookmark_editor.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/instant/instant_controller.h"
+#include "chrome/browser/managed_mode.h"
 #include "chrome/browser/profiles/avatar_menu_model.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
@@ -233,9 +234,12 @@ enum {
     // be big enough to hold all locks that'll ever be needed.
     barVisibilityLocks_.reset([[NSMutableSet setWithCapacity:10] retain]);
 
-    // Sets the window to not have rounded corners, which prevents
-    // the resize control from being inset slightly and looking ugly.
-    if ([window respondsToSelector:@selector(setBottomCornerRounded:)])
+    // Set the window to not have rounded corners, which prevents the resize
+    // control from being inset slightly and looking ugly. Only bother to do
+    // this on Snow Leopard and earlier; on Lion and later all windows have
+    // rounded bottom corners, and this won't work anyway.
+    if (base::mac::IsOSSnowLeopardOrEarlier() &&
+        [window respondsToSelector:@selector(setBottomCornerRounded:)])
       [window setBottomCornerRounded:NO];
 
     // Lion will attempt to automagically save and restore the UI. This
@@ -1401,8 +1405,10 @@ enum {
 - (BOOL)shouldShowAvatar {
   if (![self hasTabStrip])
     return NO;
-  if (browser_->profile()->IsOffTheRecord())
+  if (browser_->profile()->IsOffTheRecord() ||
+      ManagedMode::IsInManagedMode()) {
     return YES;
+  }
 
   ProfileInfoCache& cache =
       g_browser_process->profile_manager()->GetProfileInfoCache();
@@ -2014,7 +2020,7 @@ willAnimateFromState:(bookmarks::VisualState)oldState
 
   if (presentationMode) {
     BOOL fullscreen = [self isFullscreen];
-    BOOL fullscreen_for_tab = browser_->IsFullscreenForTab();
+    BOOL fullscreen_for_tab = browser_->IsFullscreenForTabOrPending();
     if (!fullscreen_for_tab)
       [self setShouldUsePresentationModeWhenEnteringFullscreen:YES];
     enteredPresentationModeFromFullscreen_ = fullscreen;

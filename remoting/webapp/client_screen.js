@@ -115,6 +115,16 @@ remoting.onResize = function() {
 };
 
 /**
+ * Handle changes in the visibility of the window, for example by pausing video.
+ *
+ * @return {void} Nothing.
+ */
+remoting.onVisibilityChanged = function() {
+  if (remoting.clientSession)
+    remoting.clientSession.pauseVideo(document.webkitHidden);
+}
+
+/**
  * Disconnect the remoting client.
  *
  * @return {void} Nothing.
@@ -129,6 +139,18 @@ remoting.disconnect = function() {
     } else {
       remoting.setMode(remoting.AppMode.CLIENT_SESSION_FINISHED_ME2ME);
     }
+  }
+};
+
+/**
+ * Sends a Ctrl-Alt-Del sequence to the remoting client.
+ *
+ * @return {void} Nothing.
+ */
+remoting.sendCtrlAltDel = function() {
+  if (remoting.clientSession) {
+    console.log('Sending Ctrl-Alt-Del.');
+    remoting.clientSession.sendCtrlAltDel();
   }
 };
 
@@ -200,6 +222,7 @@ function onClientStateChange_(oldState, newState) {
       remoting.setMode(remoting.AppMode.IN_SESSION);
       remoting.toolbar.center();
       remoting.toolbar.preview();
+      remoting.clipboard.startSession();
       updateStatistics_();
     }
 
@@ -301,11 +324,15 @@ function startSession_() {
           /** @type {string} */ (remoting.oauth2.getCachedEmail()),
           remoting.ClientSession.Mode.IT2ME,
           onClientStateChange_);
-  /** @param {string} token The auth token. */
+  /** @param {string?} token The auth token. */
   var createPluginAndConnect = function(token) {
-    remoting.clientSession.createPluginAndConnect(
-        document.getElementById('session-mode'),
-        token);
+    if (token) {
+      remoting.clientSession.createPluginAndConnect(
+          document.getElementById('session-mode'),
+          token);
+    } else {
+      showConnectError_(remoting.Error.AUTHENTICATION_FAILED);
+    }
   };
   remoting.oauth2.callWithToken(createPluginAndConnect);
 }
@@ -358,14 +385,16 @@ function parseServerResponse_(xhr) {
   console.log('parseServerResponse: xhr = ' + xhr);
   if (xhr.status == 200) {
     var host = /** @type {{data: {jabberId: string, publicKey: string}}} */
-        JSON.parse(xhr.responseText);
-    if (host.data && host.data.jabberId && host.data.publicKey) {
+        jsonParseSafe(xhr.responseText);
+    if (host && host.data && host.data.jabberId && host.data.publicKey) {
       remoting.hostJid = host.data.jabberId;
       remoting.hostPublicKey = host.data.publicKey;
       var split = remoting.hostJid.split('/');
       document.getElementById('connected-to').innerText = split[0];
       startSession_();
       return;
+    } else {
+      console.error('Invalid "support-hosts" response from server.');
     }
   }
   var errorMsg = remoting.Error.GENERIC;
@@ -463,6 +492,12 @@ remoting.connectMe2Me = function(hostId, retryIfOffline) {
     remoting.connectMe2MeWithPin();
   } else {
     var host = remoting.hostList.getHostForId(remoting.hostId);
+    // If we're re-loading a tab for a host that has since been unregistered
+    // then the hostId may no longer resolve.
+    if (!host) {
+      showConnectError_(remoting.Error.HOST_IS_OFFLINE);
+      return;
+    }
     var message = document.getElementById('pin-message');
     l10n.localizeElement(message, host.hostName);
     remoting.setMode(remoting.AppMode.CLIENT_PIN_PROMPT);
@@ -480,14 +515,19 @@ remoting.connectMe2MeWithPin = function() {
   remoting.setMode(remoting.AppMode.CLIENT_CONNECTING);
 
   var host = remoting.hostList.getHostForId(remoting.hostId);
-  if (!host) {
+  // If the user clicked on a cached host that has since been removed then we
+  // won't find the hostId. If the user clicked on the entry for the local host
+  // immediately after having enabled it then we won't know it's JID or public
+  // key until the host heartbeats and we pull a fresh host list.
+  if (!host || !host.jabberId || !host.publicKey) {
     retryConnectOrReportOffline_();
     return;
   }
   remoting.hostJid = host.jabberId;
   remoting.hostPublicKey = host.publicKey;
   document.getElementById('connected-to').innerText = host.hostName;
-  document.title = document.title + ': ' + host.hostName;
+  document.title = chrome.i18n.getMessage('PRODUCT_NAME') + ': ' +
+      host.hostName;
 
   remoting.WcsLoader.load(connectMe2MeWithAccessToken_);
 };

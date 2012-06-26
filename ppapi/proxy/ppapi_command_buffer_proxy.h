@@ -6,10 +6,12 @@
 #define PPAPI_PROXY_COMMAND_BUFFER_PROXY_H_
 #pragma once
 
+#include "base/callback.h"
 #include "base/hash_tables.h"
 #include "gpu/command_buffer/common/command_buffer.h"
 #include "ppapi/proxy/ppapi_proxy_export.h"
 #include "ppapi/shared_impl/host_resource.h"
+#include "gpu/ipc/command_buffer_proxy.h"
 
 namespace IPC {
 class Message;
@@ -20,11 +22,29 @@ namespace proxy {
 
 class ProxyChannel;
 
-class PPAPI_PROXY_EXPORT PpapiCommandBufferProxy : public gpu::CommandBuffer {
+class PPAPI_PROXY_EXPORT PpapiCommandBufferProxy : public CommandBufferProxy {
  public:
   PpapiCommandBufferProxy(const HostResource& resource,
                           ProxyChannel* channel);
   virtual ~PpapiCommandBufferProxy();
+
+  void ReportChannelError();
+
+  // CommandBufferProxy implementation:
+  virtual int GetRouteID() const OVERRIDE;
+  virtual bool Echo(const base::Closure& callback) OVERRIDE;
+  virtual bool SetSurfaceVisible(bool visible) OVERRIDE;
+  virtual bool DiscardBackbuffer() OVERRIDE;
+  virtual bool EnsureBackbuffer() OVERRIDE;
+  virtual void SetMemoryAllocationChangedCallback(
+      const base::Callback<void(const GpuMemoryAllocationForRenderer&)>&
+          callback) OVERRIDE;
+  virtual bool SetParent(CommandBufferProxy* parent_command_buffer,
+                         uint32 parent_texture_id) OVERRIDE;
+  virtual void SetChannelErrorCallback(const base::Closure& callback) OVERRIDE;
+  virtual void SetNotifyRepaintTask(const base::Closure& callback) OVERRIDE;
+  virtual void SetOnConsoleMessageCallback(
+      const GpuConsoleMessageCallback& callback) OVERRIDE;
 
   // gpu::CommandBuffer implementation:
   virtual bool Initialize();
@@ -55,6 +75,8 @@ class PPAPI_PROXY_EXPORT PpapiCommandBufferProxy : public gpu::CommandBuffer {
 
   HostResource resource_;
   ProxyChannel* channel_;
+
+  base::Closure channel_error_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(PpapiCommandBufferProxy);
 };

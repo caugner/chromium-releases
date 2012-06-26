@@ -6,41 +6,55 @@
 
 #include "base/json/json_reader.h"
 #include "base/lazy_instance.h"
+#include "chrome/common/extensions/manifest_feature.h"
+#include "chrome/common/extensions/permission_feature.h"
 #include "grit/common_resources.h"
 #include "ui/base/resource/resource_bundle.h"
 
+namespace extensions {
+
 namespace {
 
-const bool kAllowTrailingComma = false;
+template<class FeatureClass>
+Feature* CreateFeature() {
+  return new FeatureClass();
+}
 
 struct Static {
   Static()
       : manifest_features(
-            LoadProvider("manifest", IDR_EXTENSION_MANIFEST_FEATURES)),
+            LoadProvider("manifest",
+                         &CreateFeature<ManifestFeature>,
+                         IDR_EXTENSION_MANIFEST_FEATURES)),
         permission_features(
-            LoadProvider("permissions", IDR_EXTENSION_PERMISSION_FEATURES)) {
+            LoadProvider("permissions",
+                         &CreateFeature<PermissionFeature>,
+                         IDR_EXTENSION_PERMISSION_FEATURES)) {
   }
 
-  scoped_ptr<extensions::SimpleFeatureProvider> manifest_features;
-  scoped_ptr<extensions::SimpleFeatureProvider> permission_features;
+  scoped_ptr<SimpleFeatureProvider> manifest_features;
+  scoped_ptr<SimpleFeatureProvider> permission_features;
 
  private:
-  scoped_ptr<extensions::SimpleFeatureProvider> LoadProvider(
-      const std::string& debug_string, int resource_id) {
+  scoped_ptr<SimpleFeatureProvider> LoadProvider(
+      const std::string& debug_string,
+      SimpleFeatureProvider::FeatureFactory factory,
+      int resource_id) {
     std::string manifest_features =
         ResourceBundle::GetSharedInstance().GetRawDataResource(
             resource_id).as_string();
     int error_code = 0;
     std::string error_message;
     Value* value = base::JSONReader::ReadAndReturnError(
-        manifest_features, kAllowTrailingComma, &error_code, &error_message);
+        manifest_features, base::JSON_PARSE_RFC,
+        &error_code, &error_message);
     CHECK(value) << "Could not load features: " << debug_string << " "
                  << error_message;
     CHECK(value->IsType(Value::TYPE_DICTIONARY)) << debug_string;
     scoped_ptr<DictionaryValue> dictionary_value(
         static_cast<DictionaryValue*>(value));
-    return scoped_ptr<extensions::SimpleFeatureProvider>(
-        new extensions::SimpleFeatureProvider(dictionary_value.Pass()));
+    return scoped_ptr<SimpleFeatureProvider>(
+        new SimpleFeatureProvider(dictionary_value.get(), factory));
   }
 };
 
@@ -48,11 +62,33 @@ base::LazyInstance<Static> g_static = LAZY_INSTANCE_INITIALIZER;
 
 }  // namespace
 
-namespace extensions {
+SimpleFeatureProvider::SimpleFeatureProvider(DictionaryValue* root,
+                                             FeatureFactory factory)
+    : factory_(factory ? factory :
+               static_cast<FeatureFactory>(&CreateFeature<Feature>)) {
+  for (DictionaryValue::Iterator iter(*root); iter.HasNext(); iter.Advance()) {
+    if (iter.value().GetType() != Value::TYPE_DICTIONARY) {
+      LOG(ERROR) << iter.key() << ": Feature description must be dictionary.";
+      continue;
+    }
 
-SimpleFeatureProvider::SimpleFeatureProvider(
-    scoped_ptr<DictionaryValue> root)
-    : root_(root.release()) {
+    linked_ptr<Feature> feature((*factory_)());
+    feature->set_name(iter.key());
+    feature->Parse(static_cast<const DictionaryValue*>(&iter.value()));
+
+    if (feature->extension_types()->empty()) {
+      LOG(ERROR) << iter.key() << ": Simple features must specify atleast one "
+                 << "value for extension_types.";
+      continue;
+    }
+
+    if (!feature->contexts()->empty()) {
+      LOG(ERROR) << iter.key() << ": Simple features do not support contexts.";
+      continue;
+    }
+
+    features_[iter.key()] = feature;
+  }
 }
 
 SimpleFeatureProvider::~SimpleFeatureProvider() {
@@ -70,40 +106,19 @@ SimpleFeatureProvider* SimpleFeatureProvider::GetPermissionFeatures() {
 
 std::set<std::string> SimpleFeatureProvider::GetAllFeatureNames() const {
   std::set<std::string> result;
-  for (DictionaryValue::key_iterator iter = root_->begin_keys();
-       iter != root_->end_keys(); ++iter) {
-    result.insert(*iter);
+  for (FeatureMap::const_iterator iter = features_.begin();
+       iter != features_.end(); ++iter) {
+    result.insert(iter->first);
   }
   return result;
 }
 
-scoped_ptr<Feature> SimpleFeatureProvider::GetFeature(
-    const std::string& name) const {
-  scoped_ptr<Feature> feature;
-
-  DictionaryValue* description = NULL;
-  if (root_->GetDictionary(name, &description))
-    feature = Feature::Parse(description);
-
-  if (!feature.get()) {
-    // Have to use DLOG here because this happens in a lot of unit tests that
-    // use ancient compiled crx files with unknown keys.
-    DLOG(ERROR) << name;
-    return scoped_ptr<Feature>();
-  }
-
-  if (feature->extension_types()->empty()) {
-    LOG(ERROR) << name << ": Simple features must specify atleast one value "
-               << "for extension_types.";
-    return scoped_ptr<Feature>();
-  }
-
-  if (!feature->contexts()->empty()) {
-    LOG(ERROR) << name << ": Simple features do not support contexts.";
-    return scoped_ptr<Feature>();
-  }
-
-  return feature.Pass();
+Feature* SimpleFeatureProvider::GetFeature(const std::string& name) {
+  FeatureMap::iterator iter = features_.find(name);
+  if (iter != features_.end())
+    return iter->second.get();
+  else
+    return NULL;
 }
 
 }  // namespace

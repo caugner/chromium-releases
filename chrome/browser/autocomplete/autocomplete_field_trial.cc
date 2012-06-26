@@ -7,25 +7,18 @@
 #include <string>
 
 #include "base/metrics/field_trial.h"
-#include "base/stringprintf.h"
 #include "base/string_number_conversions.h"
+#include "chrome/common/metrics/experiments_helper.h"
+#include "chrome/common/metrics/variation_ids.h"
 
 namespace {
 
 // Field trial names.
-static const char kAggressiveHUPFieldTrialName[] =
-    "OmniboxAggressiveHistoryURLProvider";
 static const char kDisallowInlineHQPFieldTrialName[] =
     "OmniboxDisallowInlineHQP";
 static const char kSuggestFieldTrialName[] = "OmniboxSearchSuggest";
 
 // Field trial experiment probabilities.
-
-// For aggressive History URL Provider field trial, put 50% ( = 50/100 )
-// of the users in the aggressive experiment group.
-const base::FieldTrial::Probability kAggressiveHUPFieldTrialDivisor = 100;
-const base::FieldTrial::Probability
-    kAggressiveHUPFieldTrialExperimentFraction = 50;
 
 // For inline History Quick Provider field trial, put 10% ( = 10/100 )
 // of the users in the disallow-inline experiment group.
@@ -41,9 +34,6 @@ const int kSuggestFieldTrialNumberOfGroups = 20;
 // Field trial IDs.
 // Though they are not literally "const", they are set only once, in
 // Activate() below.
-
-// Field trial ID for the aggressive History URL Provider experiment group.
-int aggressive_hup_experiment_group = 0;
 
 // Field trial ID for the disallow-inline History Quick Provider
 // experiment group.
@@ -62,20 +52,12 @@ void AutocompleteFieldTrial::Activate() {
   // trust the omnibox.  Hence, to create the field trials we require
   // that field trials can be made sticky.
   if (base::FieldTrialList::IsOneTimeRandomizationEnabled()) {  // sticky trials
-    // Create aggressive History URL Provider field trial.
-    // Make it expire on August 1, 2012.
-    scoped_refptr<base::FieldTrial> trial(new base::FieldTrial(
-        kAggressiveHUPFieldTrialName, kAggressiveHUPFieldTrialDivisor,
-        "Standard", 2012, 8, 1));
-    trial->UseOneTimeRandomization();
-    aggressive_hup_experiment_group = trial->AppendGroup("Aggressive",
-        kAggressiveHUPFieldTrialExperimentFraction);
-
     // Create inline History Quick Provider field trial.
     // Make it expire on November 8, 2012.
-    trial = new base::FieldTrial(
+    scoped_refptr<base::FieldTrial> trial(
+        base::FieldTrialList::FactoryGetFieldTrial(
         kDisallowInlineHQPFieldTrialName, kDisallowInlineHQPFieldTrialDivisor,
-        "Standard", 2012, 11, 8);
+        "Standard", 2012, 11, 8, NULL));
     trial->UseOneTimeRandomization();
     disallow_inline_hqp_experiment_group = trial->AppendGroup("DisallowInline",
         kDisallowInlineHQPFieldTrialExperimentFraction);
@@ -84,29 +66,30 @@ void AutocompleteFieldTrial::Activate() {
   // Create the suggest field trial (regardless of sticky-ness status, but
   // make it sticky if possible).
   // Make it expire on October 1, 2012.
-  scoped_refptr<base::FieldTrial> trial(new base::FieldTrial(
-      kSuggestFieldTrialName, kSuggestFieldTrialNumberOfGroups,
-      "0", 2012, 10, 1));
+  scoped_refptr<base::FieldTrial> trial(
+      base::FieldTrialList::FactoryGetFieldTrial(
+        kSuggestFieldTrialName, kSuggestFieldTrialNumberOfGroups,
+        "0", 2012, 10, 1, NULL));
   if (base::FieldTrialList::IsOneTimeRandomizationEnabled())
     trial->UseOneTimeRandomization();
+
+  // Mark this group in suggest requests to Google.
+  experiments_helper::AssociateGoogleExperimentID(
+      kSuggestFieldTrialName, "0", chrome_variations::kSuggestIDMin);
+  DCHECK_EQ(kSuggestFieldTrialNumberOfGroups,
+      chrome_variations::kSuggestIDMax - chrome_variations::kSuggestIDMin + 1);
+
   // We've already created one group; now just need to create
-  // kSuggestFieldTrialNumGroups - 1 more.
-  for (int i = 1; i < kSuggestFieldTrialNumberOfGroups; i++)
-    trial->AppendGroup(base::StringPrintf("%d", i), 1);
-}
-
-bool AutocompleteFieldTrial::InAggressiveHUPFieldTrial() {
-  return base::FieldTrialList::TrialExists(kAggressiveHUPFieldTrialName);
-}
-
-bool AutocompleteFieldTrial::InAggressiveHUPFieldTrialExperimentGroup() {
-  if (!base::FieldTrialList::TrialExists(kAggressiveHUPFieldTrialName))
-    return false;
-
-  // Return true if we're in the aggressive experiment group.
-  const int group = base::FieldTrialList::FindValue(
-      kAggressiveHUPFieldTrialName);
-  return group == aggressive_hup_experiment_group;
+  // kSuggestFieldTrialNumGroups - 1 more. Mark these groups in
+  // suggest requests to Google.
+  for (int i = 1; i < kSuggestFieldTrialNumberOfGroups; i++) {
+    const std::string group_name = base::IntToString(i);
+    trial->AppendGroup(group_name, 1);
+    experiments_helper::AssociateGoogleExperimentID(
+        kSuggestFieldTrialName, group_name,
+        static_cast<chrome_variations::ID>(
+            chrome_variations::kSuggestIDMin + i));
+  }
 }
 
 bool AutocompleteFieldTrial::InDisallowInlineHQPFieldTrial() {

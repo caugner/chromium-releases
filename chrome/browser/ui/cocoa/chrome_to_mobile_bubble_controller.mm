@@ -13,7 +13,6 @@
 #import "chrome/browser/ui/cocoa/location_bar/location_bar_view_mac.h"
 #include "content/public/browser/notification_service.h"
 #include "grit/generated_resources.h"
-#include "ui/base/animation/throb_animation.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/base/text/bytes_formatting.h"
@@ -27,7 +26,7 @@ const CGFloat kVerticalPadding = 10;
 const NSTimeInterval kProgressThrobDurationS = 1.2;
 
 // The seconds to delay before automatically closing the bubble after sending.
-const NSTimeInterval kAutoCloseDelayS = 3;
+const NSTimeInterval kCloseS = 3;
 
 }  // namespace
 
@@ -38,12 +37,8 @@ ChromeToMobileBubbleNotificationBridge::ChromeToMobileBubbleNotificationBridge(
       selector_(selector) {
   registrar_.Add(this, content::NOTIFICATION_WEB_CONTENTS_CONNECTED,
                  content::NotificationService::AllSources());
-  registrar_.Add(this, content::NOTIFICATION_TAB_CLOSED,
+  registrar_.Add(this, content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
                  content::NotificationService::AllSources());
-}
-
-void ChromeToMobileBubbleNotificationBridge::CloseBubble() {
-  [controller_ close];
 }
 
 // All observed notifications perform the same selector to close the bubble.
@@ -87,14 +82,21 @@ void ChromeToMobileBubbleNotificationBridge::OnSendComplete(bool success) {
 }
 
 - (void)windowWillClose:(NSNotification*)notification {
+  // Instruct the service to delete the snapshot file.
+  service_->DeleteSnapshot(snapshotPath_);
+
   // We caught a close so we don't need to observe further notifications.
   bridge_.reset(NULL);
   [progressAnimation_ stopAnimation];
+  // Cancel any delayed requests that may still be pending (close, etc.).
+  [NSObject cancelPreviousPerformRequestsWithTarget:self];
   [super windowWillClose:notification];
 }
 
 // Override -[BaseBubbleController showWindow:] to set up UI elements.
 - (void)showWindow:(id)sender {
+  service_->LogMetric(ChromeToMobileService::BUBBLE_SHOWN);
+
   // Force load the NIB.
   NSWindow* window = [self window];
 
@@ -153,6 +155,9 @@ void ChromeToMobileBubbleNotificationBridge::OnSendComplete(bool success) {
   // Generate the MHTML snapshot now to report its size in the bubble.
   service_->GenerateSnapshot(bridge_->AsWeakPtr());
 
+  // Request a mobile device list update.
+  service_->RequestMobileListUpdate();
+
   [super showWindow:sender];
 }
 
@@ -179,13 +184,15 @@ void ChromeToMobileBubbleNotificationBridge::OnSendComplete(bool success) {
 
 - (void)snapshotGenerated:(const FilePath&)path
                     bytes:(int64)bytes {
+  snapshotPath_ = path;
   NSString* text = nil;
   if (bytes > 0) {
-    snapshotPath_ = path;
+    service_->LogMetric(ChromeToMobileService::SNAPSHOT_GENERATED);
     [sendCopy_ setEnabled:YES];
     text = l10n_util::GetNSStringF(IDS_CHROME_TO_MOBILE_BUBBLE_SEND_COPY,
                                    ui::FormatBytes(bytes));
   } else {
+    service_->LogMetric(ChromeToMobileService::SNAPSHOT_ERROR);
     text = l10n_util::GetNSString(IDS_CHROME_TO_MOBILE_BUBBLE_SEND_COPY_FAILED);
   }
   [sendCopy_ setTitle:text];
@@ -199,10 +206,7 @@ void ChromeToMobileBubbleNotificationBridge::OnSendComplete(bool success) {
   NSString* text = nil;
   if (success) {
     text = l10n_util::GetNSString(IDS_CHROME_TO_MOBILE_BUBBLE_SENT);
-    MessageLoop::current()->PostDelayedTask(FROM_HERE,
-        base::Bind(&ChromeToMobileBubbleNotificationBridge::CloseBubble,
-                   bridge_->AsWeakPtr()),
-        base::TimeDelta::FromSeconds(kAutoCloseDelayS));
+    [self performSelector:@selector(cancel:) withObject:nil afterDelay:kCloseS];
   } else {
     text = l10n_util::GetNSString(IDS_CHROME_TO_MOBILE_BUBBLE_ERROR);
     [error_ setHidden:NO];

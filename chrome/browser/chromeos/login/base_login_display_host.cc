@@ -14,8 +14,6 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
-#include "chrome/browser/chromeos/dbus/dbus_thread_manager.h"
-#include "chrome/browser/chromeos/dbus/session_manager_client.h"
 #include "chrome/browser/chromeos/customization_document.h"
 #include "chrome/browser/chromeos/input_method/input_method_manager.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
@@ -35,19 +33,21 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "chromeos/dbus/dbus_thread_manager.h"
+#include "chromeos/dbus/session_manager_client.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "googleurl/src/gurl.h"
 #include "third_party/cros_system_api/window_manager/chromeos_wm_ipc_enums.h"
 #include "ui/aura/window.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/gfx/compositor/layer.h"
-#include "ui/gfx/compositor/layer_animation_element.h"
-#include "ui/gfx/compositor/layer_animation_sequence.h"
-#include "ui/gfx/compositor/layer_animator.h"
-#include "ui/gfx/compositor/scoped_layer_animation_settings.h"
-#include "ui/gfx/transform.h"
+#include "ui/compositor/layer.h"
+#include "ui/compositor/layer_animation_element.h"
+#include "ui/compositor/layer_animation_sequence.h"
+#include "ui/compositor/layer_animator.h"
+#include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/gfx/rect.h"
+#include "ui/gfx/transform.h"
 #include "ui/views/widget/widget.h"
 #include "unicode/timezone.h"
 
@@ -128,7 +128,8 @@ LoginDisplayHost* BaseLoginDisplayHost::default_host_ = NULL;
 // BaseLoginDisplayHost, public
 
 BaseLoginDisplayHost::BaseLoginDisplayHost(const gfx::Rect& background_bounds)
-    : background_bounds_(background_bounds) {
+    : background_bounds_(background_bounds),
+      ALLOW_THIS_IN_INITIALIZER_LIST(pointer_factory_(this)) {
   // We need to listen to APP_EXITING but not APP_TERMINATING because
   // APP_TERMINATING will never be fired as long as this keeps ref-count.
   // APP_EXITING is safe here because there will be no browser instance that
@@ -254,10 +255,10 @@ void BaseLoginDisplayHost::CheckForAutoEnrollment() {
   }
 
   // Start by checking if the device has already been owned.
-  ownership_status_checker_.reset(new OwnershipStatusChecker);
-  ownership_status_checker_->Check(base::Bind(
-      &BaseLoginDisplayHost::OnOwnershipStatusCheckDone,
-      base::Unretained(this)));
+  pointer_factory_.InvalidateWeakPtrs();
+  OwnershipService::GetSharedInstance()->GetStatusAsync(
+      base::Bind(&BaseLoginDisplayHost::OnOwnershipStatusCheckDone,
+                 pointer_factory_.GetWeakPtr()));
 }
 
 ////////////////////////////////////////////////////////////////////////////////

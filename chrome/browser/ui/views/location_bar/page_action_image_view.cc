@@ -5,7 +5,10 @@
 #include "chrome/browser/ui/views/location_bar/page_action_image_view.h"
 
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/extensions/api/commands/extension_command_service.h"
+#include "chrome/browser/extensions/api/commands/extension_command_service_factory.h"
 #include "chrome/browser/extensions/extension_browser_event_router.h"
+#include "chrome/browser/extensions/extension_context_menu_model.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/platform_util.h"
@@ -61,18 +64,14 @@ PageActionImageView::PageActionImageView(LocationBarView* owner,
 
   set_accessibility_focusable(true);
 
-  // Iterate through all the keybindings and see if one is assigned to the
-  // pageAction.
-  const std::vector<Extension::ExtensionKeybinding>& commands =
-      extension->keybindings();
-  for (size_t i = 0; i < commands.size(); ++i) {
-    if (commands[i].command_name() ==
-        extension_manifest_values::kPageActionKeybindingEvent) {
-      keybinding_.reset(new ui::Accelerator(commands[i].accelerator()));
-      owner_->GetFocusManager()->RegisterAccelerator(
-          *keybinding_.get(), ui::AcceleratorManager::kHighPriority, this);
-      break;
-    }
+  ExtensionCommandService* command_service =
+      ExtensionCommandServiceFactory::GetForProfile(browser_->profile());
+  const extensions::Command* page_action_command =
+      command_service->GetActivePageActionCommand(extension->id());
+  if (page_action_command) {
+    keybinding_.reset(new ui::Accelerator(page_action_command->accelerator()));
+    owner_->GetFocusManager()->RegisterAccelerator(
+        *keybinding_.get(), ui::AcceleratorManager::kHighPriority, this);
   }
 }
 
@@ -85,8 +84,7 @@ PageActionImageView::~PageActionImageView() {
   HidePopup();
 }
 
-void PageActionImageView::ExecuteAction(int button,
-                                        bool inspect_with_devtools) {
+void PageActionImageView::ExecuteAction(int button) {
   if (current_tab_id_ < 0) {
     NOTREACHED() << "No current tab.";
     return;
@@ -109,8 +107,7 @@ void PageActionImageView::ExecuteAction(int button,
         page_action_->GetPopupUrl(current_tab_id_),
         browser_,
         this,
-        arrow_location,
-        inspect_with_devtools);
+        arrow_location);
     popup_->GetWidget()->AddObserver(this);
   } else {
     Profile* profile = owner_->profile();
@@ -147,13 +144,13 @@ void PageActionImageView::OnMouseReleased(const views::MouseEvent& event) {
     return;
   }
 
-  ExecuteAction(button, false);  // inspect_with_devtools
+  ExecuteAction(button);
 }
 
 bool PageActionImageView::OnKeyPressed(const views::KeyEvent& event) {
   if (event.key_code() == ui::VKEY_SPACE ||
       event.key_code() == ui::VKEY_RETURN) {
-    ExecuteAction(1, false);
+    ExecuteAction(1);
     return true;
   }
   return false;
@@ -167,7 +164,7 @@ void PageActionImageView::ShowContextMenu(const gfx::Point& p,
     return;
 
   scoped_refptr<ExtensionContextMenuModel> context_menu_model(
-      new ExtensionContextMenuModel(extension, browser_, this));
+      new ExtensionContextMenuModel(extension, browser_));
   views::MenuModelAdapter menu_model_adapter(context_menu_model.get());
   menu_runner_.reset(new views::MenuRunner(menu_model_adapter.CreateMenu()));
   gfx::Point screen_loc;
@@ -209,7 +206,7 @@ bool PageActionImageView::AcceleratorPressed(
     const ui::Accelerator& accelerator) {
   DCHECK(visible());  // Should not have happened due to CanHandleAccelerator.
 
-  ExecuteAction(1, false);  // 1 means left-click, false means "don't inspect".
+  ExecuteAction(1);  // 1 means left-click.
   return true;
 }
 
@@ -262,11 +259,6 @@ void PageActionImageView::UpdateVisibility(WebContents* contents,
     SetImage(&icon);
 
   SetVisible(true);
-}
-
-void PageActionImageView::InspectPopup(ExtensionAction* action) {
-  ExecuteAction(1,      // Left-click.
-                true);  // |inspect_with_devtools|.
 }
 
 void PageActionImageView::OnWidgetClosing(views::Widget* widget) {

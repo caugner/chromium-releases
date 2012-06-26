@@ -6,10 +6,9 @@
 
 #include "ash/launcher/launcher_button.h"
 #include "ash/launcher/launcher_delegate.h"
+#include "ash/launcher/launcher_icon_observer.h"
 #include "ash/launcher/launcher_model.h"
 #include "ash/launcher/tabbed_launcher_button.h"
-#include "ash/launcher/view_model.h"
-#include "ash/launcher/view_model_utils.h"
 #include "ash/shell.h"
 #include "ash/shell_delegate.h"
 #include "base/auto_reset.h"
@@ -22,12 +21,15 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/simple_menu_model.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/gfx/compositor/layer.h"
+#include "ui/compositor/layer.h"
 #include "ui/gfx/image/image.h"
 #include "ui/views/animation/bounds_animator.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/controls/menu/menu_model_adapter.h"
 #include "ui/views/controls/menu/menu_runner.h"
+#include "ui/views/focus/focus_search.h"
+#include "ui/views/view_model.h"
+#include "ui/views/view_model_utils.h"
 #include "ui/views/widget/root_view.h"
 #include "ui/views/widget/widget.h"
 
@@ -49,6 +51,45 @@ static const int kButtonHeight = 48;
 static const int kButtonSpacing = 4;
 
 namespace {
+
+// Custom FocusSearch used to navigate the launcher in the order items are in
+// the ViewModel.
+class LauncherFocusSearch : public views::FocusSearch {
+ public:
+  LauncherFocusSearch(views::ViewModel* view_model)
+      : FocusSearch(NULL, true, true),
+        view_model_(view_model) {}
+  virtual ~LauncherFocusSearch() {}
+
+  // views::FocusSearch overrides:
+  virtual View* FindNextFocusableView(
+      View* starting_view,
+      bool reverse,
+      Direction direction,
+      bool check_starting_view,
+      views::FocusTraversable** focus_traversable,
+      View** focus_traversable_view) OVERRIDE {
+    int index = view_model_->GetIndexOfView(starting_view);
+    if (index == -1)
+      return view_model_->view_at(0);
+
+    if (reverse) {
+      --index;
+      if (index < 0)
+        index = view_model_->view_size() - 1;
+    } else {
+      ++index;
+      if (index >= view_model_->view_size())
+        index = 0;
+    }
+    return view_model_->view_at(index);
+  }
+
+ private:
+  views::ViewModel* view_model_;
+
+  DISALLOW_COPY_AND_ASSIGN(LauncherFocusSearch);
+};
 
 // ui::SimpleMenuModel::Delegate implementation that remembers the id of the
 // menu that was activated.
@@ -141,6 +182,7 @@ void ReflectItemStatus(const ash::LauncherItem& item,
       break;
   }
 }
+
 }  // namespace
 
 // AnimationDelegate used when inserting a new item. This steadily decreased the
@@ -185,11 +227,10 @@ class LauncherView::StartFadeAnimationDelegate :
 
   // AnimationDelegate overrides:
   virtual void AnimationEnded(const Animation* animation) OVERRIDE {
-    view_->SetVisible(true);
     launcher_view_->FadeIn(view_);
   }
   virtual void AnimationCanceled(const Animation* animation) OVERRIDE {
-    view_->SetVisible(true);
+    view_->layer()->SetOpacity(1.0f);
   }
 
  private:
@@ -199,22 +240,11 @@ class LauncherView::StartFadeAnimationDelegate :
   DISALLOW_COPY_AND_ASSIGN(StartFadeAnimationDelegate);
 };
 
-int LauncherView::TestAPI::GetButtonCount() {
-  return launcher_view_->view_model_->view_size();
-}
-
-LauncherButton* LauncherView::TestAPI::GetButton(int index) {
-  if (index == 0)
-    return NULL;
-
-  return static_cast<LauncherButton*>(
-      launcher_view_->view_model_->view_at(index));
-}
-
 LauncherView::LauncherView(LauncherModel* model, LauncherDelegate* delegate)
     : model_(model),
       delegate_(delegate),
-      view_model_(new ViewModel),
+      view_model_(new views::ViewModel),
+      last_visible_index_(-1),
       overflow_button_(NULL),
       dragging_(NULL),
       drag_view_(NULL),
@@ -224,6 +254,7 @@ LauncherView::LauncherView(LauncherModel* model, LauncherDelegate* delegate)
   DCHECK(model_);
   bounds_animator_.reset(new views::BoundsAnimator(this));
   set_context_menu_controller(this);
+  focus_search_.reset(new LauncherFocusSearch(view_model_.get()));
 }
 
 LauncherView::~LauncherView() {
@@ -264,7 +295,7 @@ void LauncherView::Init() {
 
 gfx::Rect LauncherView::GetIdealBoundsOfItemIcon(LauncherID id) {
   int index = model_->ItemIndexByID(id);
-  if (index == -1 || !view_model_->view_at(index)->visible())
+  if (index == -1 || index > last_visible_index_)
     return gfx::Rect();
   const gfx::Rect& ideal_bounds(view_model_->ideal_bounds(index));
   DCHECK_NE(TYPE_APP_LIST, model_->items()[index].type);
@@ -286,10 +317,25 @@ bool LauncherView::IsShowingMenu() const {
   return false;
 }
 
+////////////////////////////////////////////////////////////////////////////////
+// LauncherView, FocusTraversable implementation:
+
+views::FocusSearch* LauncherView::GetFocusSearch() {
+  return focus_search_.get();
+}
+
+views::FocusTraversable* LauncherView::GetFocusTraversableParent() {
+  return parent()->GetFocusTraversable();
+}
+
+View* LauncherView::GetFocusTraversableParentView() {
+  return this;
+}
+
 void LauncherView::LayoutToIdealBounds() {
   IdealBounds ideal_bounds;
   CalculateIdealBounds(&ideal_bounds);
-  ViewModelUtils::SetViewBoundsToIdealBounds(*view_model_);
+  views::ViewModelUtils::SetViewBoundsToIdealBounds(*view_model_);
   overflow_button_->SetBoundsRect(ideal_bounds.overflow_bounds);
 }
 
@@ -308,30 +354,24 @@ void LauncherView::CalculateIdealBounds(IdealBounds* bounds) {
   }
 
   bounds->overflow_bounds.set_size(gfx::Size(kButtonWidth, kButtonHeight));
-  int last_visible_index = DetermineLastVisibleIndex(
+  last_visible_index_ = DetermineLastVisibleIndex(
       available_width - kLeadingInset - bounds->overflow_bounds.width() -
       kButtonSpacing - kButtonWidth);
-  bool show_overflow =
-      (last_visible_index + 1 != view_model_->view_size());
   int app_list_index = view_model_->view_size() - 1;
-  if (overflow_button_->visible() != show_overflow) {
-    // Only change visibility of the views if the visibility of the overflow
-    // button changes. Otherwise we'll effect the insertion animation, which
-    // changes the visibility.
-    for (int i = 0; i <= last_visible_index; ++i)
-      view_model_->view_at(i)->SetVisible(true);
-    for (int i = last_visible_index + 1; i < view_model_->view_size(); ++i) {
-      if (i != app_list_index)
-        view_model_->view_at(i)->SetVisible(false);
-    }
+  bool show_overflow = (last_visible_index_ + 1 < app_list_index);
+
+  for (int i = 0; i < view_model_->view_size(); ++i) {
+    view_model_->view_at(i)->SetVisible(
+        i == app_list_index || i <= last_visible_index_);
   }
+
   overflow_button_->SetVisible(show_overflow);
   if (show_overflow) {
     DCHECK_NE(0, view_model_->view_size());
     // We always want the app list visible.
     gfx::Rect app_list_bounds = view_model_->ideal_bounds(app_list_index);
-    x = last_visible_index == -1 ?
-        kLeadingInset : view_model_->ideal_bounds(last_visible_index).right();
+    x = last_visible_index_ == -1 ?
+        kLeadingInset : view_model_->ideal_bounds(last_visible_index_).right();
     app_list_bounds.set_x(x);
     view_model_->set_ideal_bounds(app_list_index, app_list_bounds);
     x = app_list_bounds.right() + kButtonSpacing;
@@ -346,6 +386,14 @@ int LauncherView::DetermineLastVisibleIndex(int max_x) {
   while (index >= 0 && view_model_->ideal_bounds(index).right() > max_x)
     index--;
   return index;
+}
+
+void LauncherView::AddIconObserver(LauncherIconObserver* observer) {
+  observers_.AddObserver(observer);
+}
+
+void LauncherView::RemoveIconObserver(LauncherIconObserver* observer) {
+  observers_.RemoveObserver(observer);
 }
 
 void LauncherView::AnimateToIdealBounds() {
@@ -397,6 +445,8 @@ views::View* LauncherView::CreateViewForItem(const LauncherItem& item) {
       button->SetImage(
           views::CustomButton::BS_PUSHED,
           rb.GetImageNamed(IDR_AURA_LAUNCHER_ICON_APPLIST_PUSHED).ToSkBitmap());
+      button->SetAccessibleName(
+          l10n_util::GetStringUTF16(IDS_AURA_APP_LIST_TITLE));
       button->SetTooltipText(
           l10n_util::GetStringUTF16(IDS_AURA_APP_LIST_TITLE));
       view = button;
@@ -436,6 +486,14 @@ void LauncherView::PrepareForDrag(const views::MouseEvent& event) {
   DCHECK(drag_view_);
   dragging_ = true;
   start_drag_index_ = view_model_->GetIndexOfView(drag_view_);
+
+  // If the item is no longer draggable, bail out.
+  if (start_drag_index_ == -1 ||
+      !delegate_->IsDraggable(model_->items()[start_drag_index_])) {
+    CancelDrag(NULL);
+    return;
+  }
+
   // Move the view to the front so that it appears on top of other views.
   ReorderChildView(drag_view_, -1);
   bounds_animator_->StopAnimatingView(drag_view_);
@@ -447,6 +505,13 @@ void LauncherView::ContinueDrag(const views::MouseEvent& event) {
   views::View::ConvertPointToView(drag_view_, this, &drag_point);
   int current_index = view_model_->GetIndexOfView(drag_view_);
   DCHECK_NE(-1, current_index);
+
+  // If the item is no longer draggable, bail out.
+  if (current_index == -1 ||
+      !delegate_->IsDraggable(model_->items()[current_index])) {
+    CancelDrag(NULL);
+    return;
+  }
 
   // Constrain the x location to the range of valid indices for the type.
   std::pair<int,int> indices(GetDragRange(current_index));
@@ -469,7 +534,7 @@ void LauncherView::ContinueDrag(const views::MouseEvent& event) {
 
   drag_view_->SetX(x);
   int target_index =
-      ViewModelUtils::DetermineMoveIndex(*view_model_, drag_view_, x);
+      views::ViewModelUtils::DetermineMoveIndex(*view_model_, drag_view_, x);
   target_index =
       std::min(indices.second, std::max(target_index, indices.first));
   if (target_index == current_index)
@@ -483,6 +548,9 @@ void LauncherView::ContinueDrag(const views::MouseEvent& event) {
   view_model_->Move(current_index, target_index);
   AnimateToIdealBounds();
   bounds_animator_->StopAnimatingView(drag_view_);
+
+  FOR_EACH_OBSERVER(LauncherIconObserver, observers_,
+                    OnLauncherIconPositionsChanged());
 }
 
 bool LauncherView::SameDragType(LauncherItemType typea,
@@ -568,7 +636,7 @@ void LauncherView::ShowOverflowMenu() {
   LauncherItems::const_iterator window_iter = model_->ItemByID(activated_id);
   if (window_iter == model_->items().end())
     return;  // Window was deleted while menu was up.
-  delegate_->ItemClicked(*window_iter);
+  delegate_->ItemClicked(*window_iter, ui::EF_NONE);
 #endif  // !defined(OS_MACOSX)
 }
 
@@ -604,6 +672,12 @@ gfx::Size LauncherView::GetPreferredSize() {
 
 void LauncherView::OnBoundsChanged(const gfx::Rect& previous_bounds) {
   LayoutToIdealBounds();
+  FOR_EACH_OBSERVER(LauncherIconObserver, observers_,
+                    OnLauncherIconPositionsChanged());
+}
+
+views::FocusTraversable* LauncherView::GetPaneFocusTraversable() {
+  return this;
 }
 
 void LauncherView::LauncherItemAdded(int model_index) {
@@ -611,11 +685,13 @@ void LauncherView::LauncherItemAdded(int model_index) {
 
   views::View* view = CreateViewForItem(model_->items()[model_index]);
   AddChildView(view);
-  // Hide the view, it'll be made visible when the animation is done.
-  view->SetVisible(false);
+  // Hide the view, it'll be made visible when the animation is done. Using
+  // opacity 0 here to avoid messing with CalculateIdealBounds which touches
+  // the view's visibility.
+  view->layer()->SetOpacity(0);
   view_model_->Add(view, model_index);
 
-  // Give the button it's ideal bounds. That way if we end up animating the
+  // Give the button its ideal bounds. That way if we end up animating the
   // button before this animation completes it doesn't appear at some random
   // spot (because it was in the middle of animating from 0,0 0x0 to its
   // target).
@@ -623,14 +699,20 @@ void LauncherView::LauncherItemAdded(int model_index) {
   CalculateIdealBounds(&ideal_bounds);
   view->SetBoundsRect(view_model_->ideal_bounds(model_index));
 
-  // The first animation moves all the views to their target position. |view| is
-  // hidden, so it visually appears as though we are providing space for
+  // The first animation moves all the views to their target position. |view|
+  // is hidden, so it visually appears as though we are providing space for
   // it. When done we'll fade the view in.
   AnimateToIdealBounds();
-  if (!overflow_button_->visible()) {
+  if (model_index <= last_visible_index_) {
     bounds_animator_->SetAnimationDelegate(
         view, new StartFadeAnimationDelegate(this, view), true);
+  } else {
+    // Undo the hiding if animation does not run.
+    view->layer()->SetOpacity(1.0f);
   }
+
+  FOR_EACH_OBSERVER(LauncherIconObserver, observers_,
+                    OnLauncherIconPositionsChanged());
 }
 
 void LauncherView::LauncherItemRemoved(int model_index, LauncherID id) {
@@ -646,6 +728,14 @@ void LauncherView::LauncherItemRemoved(int model_index, LauncherID id) {
   bounds_animator_->AnimateViewTo(view, view->bounds());
   bounds_animator_->SetAnimationDelegate(
       view, new FadeOutAnimationDelegate(this, view), true);
+
+  // The animation will eventually update the ideal bounds, but we want to
+  // force an update immediately so we can notify launcher icon observers.
+  IdealBounds ideal_bounds;
+  CalculateIdealBounds(&ideal_bounds);
+
+  FOR_EACH_OBSERVER(LauncherIconObserver, observers_,
+                    OnLauncherIconPositionsChanged());
 }
 
 void LauncherView::LauncherItemChanged(int model_index,
@@ -695,19 +785,17 @@ void LauncherView::LauncherItemChanged(int model_index,
 void LauncherView::LauncherItemMoved(int start_index, int target_index) {
   view_model_->Move(start_index, target_index);
   AnimateToIdealBounds();
-}
-
-void LauncherView::LauncherItemWillChange(int index) {
-  const LauncherItem& item(model_->items()[index]);
-  views::View* view = view_model_->view_at(index);
-  if (item.type == TYPE_TABBED)
-    static_cast<TabbedLauncherButton*>(view)->PrepareForImageChange();
+  FOR_EACH_OBSERVER(LauncherIconObserver, observers_,
+                    OnLauncherIconPositionsChanged());
 }
 
 void LauncherView::MousePressedOnButton(views::View* view,
                                         const views::MouseEvent& event) {
-  if (view_model_->GetIndexOfView(view) == -1 || view_model_->view_size() <= 1)
-    return;  // View is being deleted, ignore request.
+  int index = view_model_->GetIndexOfView(view);
+  if (index == -1 ||
+      view_model_->view_size() <= 1 ||
+      !delegate_->IsDraggable(model_->items()[index]))
+    return;  // View is being deleted or not draggable, ignore request.
 
   drag_view_ = view;
   drag_offset_ = event.x();
@@ -780,7 +868,7 @@ void LauncherView::ButtonPressed(views::Button* sender,
     case TYPE_TABBED:
     case TYPE_APP_PANEL:
     case TYPE_APP_SHORTCUT:
-      delegate_->ItemClicked(model_->items()[view_index]);
+      delegate_->ItemClicked(model_->items()[view_index], event.flags());
       break;
 
     case TYPE_APP_LIST:
@@ -803,8 +891,7 @@ void LauncherView::ShowContextMenuForView(views::View* source,
 
   int view_index = view_model_->GetIndexOfView(source);
   if (view_index != -1 &&
-      (model_->items()[view_index].type == TYPE_BROWSER_SHORTCUT ||
-       model_->items()[view_index].type == TYPE_APP_LIST)) {
+      model_->items()[view_index].type == TYPE_APP_LIST) {
     view_index = -1;
   }
 #if !defined(OS_MACOSX)

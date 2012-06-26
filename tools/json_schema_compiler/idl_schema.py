@@ -1,9 +1,12 @@
+#! /usr/bin/env python
 # Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import json
 import os.path
 import sys
+import re
 
 # This file is a peer to json_schema.py. Each of these files understands a
 # certain format describing APIs (either JSON or IDL), reads files written
@@ -20,18 +23,45 @@ if idl_generators_path not in sys.path:
   sys.path.insert(0, idl_generators_path)
 import idl_parser
 
+def ProcessComment(comment):
+  '''
+  Given the string from a Comment node, parse it into a tuple that looks
+  like:
+    (
+      "The processed comment, minus all |parameter| mentions.",
+      {
+        'parameter_name_1': "The comment that followed |parameter_name_1|:",
+        ...
+      }
+    )
+  '''
+  # Find all the parameter comments of the form "|name|: comment".
+  parameter_comments = re.findall(r'\n *\|([^|]*)\| *: *(.*)', comment)
+  # Get the parent comment (everything before the first parameter comment.
+  parent_comment = re.sub(r'\n *\|.*', '', comment)
+  parent_comment = parent_comment.replace('\n', '').strip()
+
+  parsed = {}
+  for (name, comment) in parameter_comments:
+    parsed[name] = comment.replace('\n', '').strip()
+  return (parent_comment, parsed)
+
 class Callspec(object):
   '''
   Given a Callspec node representing an IDL function declaration, converts into
   a name/value pair where the value is a list of function parameters.
   '''
-  def __init__(self, callspec_node):
+  def __init__(self, callspec_node, comment):
     self.node = callspec_node
+    self.comment = comment
 
-  def process(self, refs):
+  def process(self, callbacks):
     parameters = []
     for node in self.node.children:
-      parameters.append(Param(node).process(refs))
+      parameter = Param(node).process(callbacks)
+      if parameter['name'] in self.comment:
+        parameter['description'] = self.comment[parameter['name']]
+      parameters.append(parameter)
     return self.node.GetName(), parameters
 
 class Param(object):
@@ -42,10 +72,10 @@ class Param(object):
   def __init__(self, param_node):
     self.node = param_node
 
-  def process(self, refs):
+  def process(self, callbacks):
     return Typeref(self.node.GetProperty( 'TYPEREF'),
                    self.node,
-                   { 'name': self.node.GetName() }).process(refs)
+                   { 'name': self.node.GetName() }).process(callbacks)
 
 class Dictionary(object):
   '''
@@ -55,11 +85,11 @@ class Dictionary(object):
   def __init__(self, dictionary_node):
     self.node = dictionary_node
 
-  def process(self, refs):
+  def process(self, callbacks):
     properties = {}
     for node in self.node.children:
       if node.cls == 'Member':
-        k, v = Member(node).process(refs)
+        k, v = Member(node).process(callbacks)
         properties[k] = v
     return { 'id': self.node.GetName(),
              'properties': properties,
@@ -74,7 +104,7 @@ class Member(object):
   def __init__(self, member_node):
     self.node = member_node
 
-  def process(self, refs):
+  def process(self, callbacks):
     properties = {}
     name = self.node.GetName()
     if self.node.GetProperty('OPTIONAL'):
@@ -82,17 +112,22 @@ class Member(object):
     if self.node.GetProperty('nodoc'):
       properties['nodoc'] = True
     is_function = False
+    parameter_comments = {}
+    for node in self.node.children:
+      if node.cls == 'Comment':
+        (parent_comment, parameter_comments) = ProcessComment(node.GetName())
+        properties['description'] = parent_comment
     for node in self.node.children:
       if node.cls == 'Callspec':
         is_function = True
-        name, parameters = Callspec(node).process(refs)
+        name, parameters = Callspec(node, parameter_comments).process(callbacks)
         properties['parameters'] = parameters
     properties['name'] = name
     if is_function:
       properties['type'] = 'function'
     else:
       properties = Typeref(self.node.GetProperty('TYPEREF'),
-                           self.node, properties).process(refs)
+                           self.node, properties).process(callbacks)
     return name, properties
 
 class Typeref(object):
@@ -106,22 +141,49 @@ class Typeref(object):
     self.parent = parent
     self.additional_properties = additional_properties
 
-  def process(self, refs):
+  def process(self, callbacks):
     properties = self.additional_properties
+    result = properties
+
+    if self.parent.GetProperty('OPTIONAL', False):
+      properties['optional'] = True
+
+    # The IDL parser denotes array types by adding a child 'Array' node onto
+    # the Param node in the Callspec.
+    for sibling in self.parent.GetChildren():
+      if sibling.cls == 'Array' and sibling.GetName() == self.parent.GetName():
+        properties['type'] = 'array'
+        properties['items'] = {}
+        properties = properties['items']
+        break
+
     if self.typeref == 'DOMString':
       properties['type'] = 'string'
     elif self.typeref == 'boolean':
       properties['type'] = 'boolean'
+    elif self.typeref == 'double':
+      properties['type'] = 'number'
     elif self.typeref == 'long':
       properties['type'] = 'integer'
+    elif self.typeref == 'any':
+      properties['type'] = 'any'
+    elif self.typeref == 'object':
+      properties['type'] = 'object'
+      if 'additionalProperties' not in properties:
+        properties['additionalProperties'] = {}
+      properties['additionalProperties']['type'] = 'any'
+      instance_of = self.parent.GetProperty('instanceOf')
+      if instance_of:
+        properties['isInstanceOf'] = instance_of
     elif self.typeref is None:
       properties['type'] = 'function'
     else:
-      try:
-        properties = refs[self.typeref]
-      except KeyError, e:
+      if self.typeref in callbacks:
+        properties.update(callbacks[self.typeref])
+      else:
         properties['$ref'] = self.typeref
-    return properties
+
+    return result
 
 class Namespace(object):
   '''
@@ -135,16 +197,16 @@ class Namespace(object):
     self.events = []
     self.functions = []
     self.types = []
-    self.refs = {}
+    self.callbacks = {}
 
   def process(self):
     for node in self.namespace.children:
       cls = node.cls
       if cls == "Dictionary":
-        self.types.append(Dictionary(node).process(self.refs))
+        self.types.append(Dictionary(node).process(self.callbacks))
       elif cls == "Callback":
-        k, v = Member(node).process(self.refs)
-        self.refs[k] = v
+        k, v = Member(node).process(self.callbacks)
+        self.callbacks[k] = v
       elif cls == "Interface" and node.GetName() == "Functions":
         self.functions = self.process_interface(node)
       elif cls == "Interface" and node.GetName() == "Events":
@@ -162,7 +224,7 @@ class Namespace(object):
     members = []
     for member in node.children:
       if member.cls == 'Member':
-        name, properties = Member(member).process(self.refs)
+        name, properties = Member(member).process(self.callbacks)
         members.append(properties)
     return members
 
@@ -209,3 +271,15 @@ def Load(filename):
   idl = idl_parser.IDLParser().ParseData(contents, filename)
   idl_schema = IDLSchema(idl)
   return idl_schema.process()
+
+def Main():
+  '''
+  Dump a json serialization of parse result for the IDL files whose names
+  were passed in on the command line.
+  '''
+  for filename in sys.argv[1:]:
+    schema = Load(filename)
+    print json.dumps(schema, indent=2)
+
+if __name__ == '__main__':
+  Main()

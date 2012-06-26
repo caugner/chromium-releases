@@ -27,6 +27,7 @@ var ManageProfileOverlay = options.ManageProfileOverlay;
 var SearchEngineManager = options.SearchEngineManager;
 var SearchPage = options.SearchPage;
 var SessionRestoreOverlay = options.SessionRestoreOverlay;
+var SpellingConfirmOverlay = options.SpellingConfirmOverlay;
 var StartupOverlay = options.StartupOverlay;
 var SyncSetupOverlay = options.SyncSetupOverlay;
 var VirtualKeyboardManager = options.VirtualKeyboardManager;
@@ -108,6 +109,8 @@ function load() {
                               [$('manage-default-search-engines')]);
   OptionsPage.registerOverlay(SessionRestoreOverlay.getInstance(),
                               BrowserOptions.getInstance());
+  OptionsPage.registerOverlay(SpellingConfirmOverlay.getInstance(),
+                              BrowserOptions.getInstance());
   OptionsPage.registerOverlay(StartupOverlay.getInstance(),
                               BrowserOptions.getInstance());
   OptionsPage.registerOverlay(SyncSetupOverlay.getInstance(),
@@ -125,8 +128,6 @@ function load() {
                                 BrowserOptions.getInstance(),
                                 [$('account-picture')]);
     OptionsPage.registerOverlay(DetailsInternetPage.getInstance(),
-                                BrowserOptions.getInstance());
-    OptionsPage.registerOverlay(InternetOptions.getInstance(),
                                 BrowserOptions.getInstance());
     OptionsPage.registerOverlay(KeyboardOverlay.getInstance(),
                                 BrowserOptions.getInstance(),
@@ -195,13 +196,6 @@ function load() {
   if (path.length > 1) {
     // Skip starting slash and remove trailing slash (if any).
     var pageName = path.slice(1).replace(/\/$/, '');
-
-    if (pageName == 'proxy') {
-      // The following page doesn't have a unique URL at the moment, so do
-      // something sensible if a user pastes this link or refreshes on this URL.
-      pageName = ProxyOptions ? ProxyOptions.getInstance().parentPage.name :
-                                AdvancedOptions.getInstance().name;
-    }
     OptionsPage.showPageByName(pageName, true, {replaceState: true});
   } else {
     OptionsPage.showDefaultPage();

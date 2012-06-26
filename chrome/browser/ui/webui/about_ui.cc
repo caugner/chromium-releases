@@ -15,6 +15,7 @@
 #include "base/file_util.h"
 #include "base/i18n/number_formatting.h"
 #include "base/json/json_writer.h"
+#include "base/memory/ref_counted_memory.h"
 #include "base/memory/singleton.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/stats_table.h"
@@ -76,11 +77,11 @@
 #include "chrome/browser/chromeos/cros/cryptohome_library.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/chromeos/customization_document.h"
-#include "chrome/browser/chromeos/dbus/cryptohome_client.h"
-#include "chrome/browser/chromeos/dbus/dbus_thread_manager.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/version_loader.h"
 #include "chrome/browser/oom_priority_manager.h"
+#include "chromeos/dbus/cryptohome_client.h"
+#include "chromeos/dbus/dbus_thread_manager.h"
 #include "content/public/browser/zygote_host_linux.h"
 #elif defined(OS_LINUX) || defined(OS_OPENBSD)
 #include "content/public/browser/zygote_host_linux.h"
@@ -89,10 +90,6 @@
 #if defined(USE_ASH)
 #include "ash/wm/frame_painter.h"
 #include "base/string_split.h"
-#endif
-
-#if defined(USE_TCMALLOC)
-#include "third_party/tcmalloc/chromium/src/gperftools/malloc_extension.h"
 #endif
 
 using base::Time;
@@ -518,9 +515,9 @@ void FinishCryptohomeDataRequestInternal(
     scoped_refptr<AboutUIHTMLSource> source,
     int refresh,
     int request_id,
-    chromeos::CryptohomeClient::CallStatus call_status,
+    chromeos::DBusMethodCallStatus call_status,
     bool is_tpm_token_ready) {
-  if (call_status != chromeos::CryptohomeClient::SUCCESS)
+  if (call_status != chromeos::DBUS_METHOD_CALL_SUCCESS)
     is_tpm_token_ready = false;
 
   chromeos::CryptohomeLibrary* cryptohome =
@@ -573,7 +570,7 @@ std::string AboutDiscardsRun() {
   output.append(StringPrintf("<meta http-equiv=\"refresh\" content=\"2;%s\">",
                              chrome::kChromeUIDiscardsURL));
   output.append(WrapWithTag("p", "Discarding a tab..."));
-  g_browser_process->oom_priority_manager()->DiscardTab();
+  g_browser_process->oom_priority_manager()->LogMemoryAndDiscardTab();
   AppendFooter(&output);
   return output;
 }
@@ -590,8 +587,8 @@ std::string AboutDiscards(const std::string& path) {
       "<p>Tabs sorted from most interesting to least interesting. The least "
       "interesting tab may be discarded if we run out of physical memory.</p>");
 
-  std::vector<string16> titles =
-      g_browser_process->oom_priority_manager()->GetTabTitles();
+  browser::OomPriorityManager* oom = g_browser_process->oom_priority_manager();
+  std::vector<string16> titles = oom->GetTabTitles();
   if (!titles.empty()) {
     output.append("<ol>");
     std::vector<string16>::iterator it = titles.begin();
@@ -603,6 +600,8 @@ std::string AboutDiscards(const std::string& path) {
   } else {
     output.append("<p>None found.  Wait 10 seconds, then refresh.</p>");
   }
+  output.append(StringPrintf("%d discards this session. ",
+                             oom->discard_count()));
   output.append(StringPrintf("<a href='%s%s'>Discard tab now</a>",
                              chrome::kChromeUIDiscardsURL,
                              kRunCommand));
@@ -743,11 +742,15 @@ class AboutDnsHandler : public base::RefCountedThreadSafe<AboutDnsHandler> {
   }
 
  private:
+  friend class base::RefCountedThreadSafe<AboutDnsHandler>;
+
   AboutDnsHandler(AboutUIHTMLSource* source, int request_id)
       : source_(source),
         request_id_(request_id) {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   }
+
+  virtual ~AboutDnsHandler() {}
 
   // Calls FinishOnUIThread() on completion.
   void StartOnUIThread() {
@@ -787,51 +790,6 @@ class AboutDnsHandler : public base::RefCountedThreadSafe<AboutDnsHandler> {
   DISALLOW_COPY_AND_ASSIGN(AboutDnsHandler);
 };
 
-#if defined(USE_TCMALLOC)
-std::string AboutTcmalloc() {
-  std::string data;
-  AboutTcmallocOutputsType* outputs =
-      AboutTcmallocOutputs::GetInstance()->outputs();
-
-  // Display any stats for which we sent off requests the last time.
-  AppendHeader(&data, 0, "About tcmalloc");
-  AppendBody(&data);
-  data.append("<p>Stats as of last page load;");
-  data.append("reload to get stats as of this page load.</p>\n");
-  data.append("<table width=\"100%\">\n");
-  for (AboutTcmallocOutputsType::const_iterator oit = outputs->begin();
-       oit != outputs->end();
-       oit++) {
-    data.append("<tr><td bgcolor=\"yellow\">");
-    data.append(oit->first);
-    data.append("</td></tr>\n");
-    data.append("<tr><td><pre>\n");
-    data.append(oit->second);
-    data.append("</pre></td></tr>\n");
-  }
-  data.append("</table>\n");
-  AppendFooter(&data);
-
-  // Reset our collector singleton.
-  outputs->clear();
-
-  // Populate the collector with stats from the local browser process
-  // and send off requests to all the renderer processes.
-  char buffer[1024 * 32];
-  MallocExtension::instance()->GetStats(buffer, sizeof(buffer));
-  std::string browser("Browser");
-  AboutTcmallocOutputs::GetInstance()->SetOutput(browser, buffer);
-  content::RenderProcessHost::iterator
-      it(content::RenderProcessHost::AllHostsIterator());
-  while (!it.IsAtEnd()) {
-    it.GetCurrentValue()->Send(new ChromeViewMsg_GetRendererTcmalloc);
-    it.Advance();
-  }
-
-  return data;
-}
-#endif
-
 std::string AboutHistograms(const std::string& query) {
   TimeDelta wait_time = TimeDelta::FromMilliseconds(10000);
 
@@ -868,7 +826,8 @@ void FinishMemoryDataRequest(const std::string& path,
     // the refcount to be greater than 0.
     scoped_refptr<AboutMemoryHandler>
         handler(new AboutMemoryHandler(source, request_id));
-    handler->StartFetch();
+    // TODO(jamescook): Maybe this shouldn't update UMA?
+    handler->StartFetch(MemoryDetails::UPDATE_USER_METRICS);
   } else {
     source->FinishDataRequest(
         ResourceBundle::GetSharedInstance().GetRawDataResource(
@@ -1460,10 +1419,6 @@ void AboutUIHTMLSource::StartDataRequest(const std::string& path,
 #endif
   } else if (host == chrome::kChromeUIStatsHost) {
     response = AboutStats(path);
-#if defined(USE_TCMALLOC)
-  } else if (host == chrome::kChromeUITCMallocHost) {
-    response = AboutTcmalloc();
-#endif
   } else if (host == chrome::kChromeUITermsHost) {
 #if defined(OS_CHROMEOS)
     ChromeOSTermsHandler::Start(this, path, request_id);
@@ -1510,6 +1465,7 @@ AboutUI::AboutUI(content::WebUI* web_ui, const std::string& name)
   Profile* profile = Profile::FromWebUI(web_ui);
   ChromeURLDataManager::DataSource* source =
       new AboutUIHTMLSource(name, profile);
-  if (source)
-    profile->GetChromeURLDataManager()->AddDataSource(source);
+  if (source) {
+    ChromeURLDataManager::AddDataSource(profile, source);
+  }
 }

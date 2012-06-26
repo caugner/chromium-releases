@@ -4,6 +4,7 @@
 
 #include "chrome/browser/chromeos/gdata/gdata_file_system_proxy.h"
 
+#include <string>
 #include <vector>
 
 #include "base/bind.h"
@@ -11,8 +12,10 @@
 #include "base/string_util.h"
 #include "base/values.h"
 #include "content/public/browser/browser_thread.h"
-#include "chrome/browser/chromeos/gdata/gdata_system_service.h"
 #include "chrome/browser/chromeos/gdata/gdata_file_system.h"
+#include "chrome/browser/chromeos/gdata/gdata.pb.h"
+#include "chrome/browser/chromeos/gdata/gdata_system_service.h"
+#include "chrome/browser/chromeos/gdata/gdata_util.h"
 #include "webkit/blob/shareable_file_reference.h"
 #include "webkit/fileapi/file_system_file_util_proxy.h"
 #include "webkit/fileapi/file_system_types.h"
@@ -25,7 +28,7 @@ using webkit_blob::ShareableFileReference;
 
 namespace {
 
-const char kGDataRootDirectory[] = "gdata";
+const char kGDataRootDirectory[] = "drive";
 const char kFeedField[] = "feed";
 
 // Helper function to run SnapshotFileCallback from
@@ -55,17 +58,16 @@ void CallSnapshotFileCallback(
 
 namespace gdata {
 
-base::FileUtilProxy::Entry GDataFileToFileUtilProxyEntry(
-    const GDataFileBase& file) {
+base::FileUtilProxy::Entry GDataEntryProtoToFileUtilProxyEntry(
+    const GDataEntryProto& proto) {
+  base::PlatformFileInfo file_info;
+  GDataEntry::ConvertProtoToPlatformFileInfo(proto.file_info(), &file_info);
+
   base::FileUtilProxy::Entry entry;
-  entry.is_directory = file.file_info().is_directory;
-
-  // TODO(zelidrag): Add file name modification logic to enforce uniquness of
-  // file paths across this file system.
-  entry.name = file.file_name();
-
-  entry.size = file.file_info().size;
-  entry.last_modified_time = file.file_info().last_modified;
+  entry.name = proto.file_name();
+  entry.is_directory = file_info.is_directory;
+  entry.size = file_info.size;
+  entry.last_modified_time = file_info.last_modified;
   return entry;
 }
 
@@ -86,24 +88,22 @@ GDataFileSystemProxy::~GDataFileSystemProxy() {
 
 void GDataFileSystemProxy::GetFileInfo(const GURL& file_url,
     const FileSystemOperationInterface::GetMetadataCallback& callback) {
-  scoped_refptr<base::MessageLoopProxy> proxy =
-      base::MessageLoopProxy::current();
   FilePath file_path;
   if (!ValidateUrl(file_url, &file_path)) {
-    proxy->PostTask(FROM_HERE,
-                    base::Bind(callback,
-                               base::PLATFORM_FILE_ERROR_NOT_FOUND,
-                               base::PlatformFileInfo(),
-                               FilePath()));
+    base::MessageLoopProxy::current()->PostTask(
+        FROM_HERE,
+        base::Bind(callback,
+                   base::PLATFORM_FILE_ERROR_NOT_FOUND,
+                   base::PlatformFileInfo(),
+                   FilePath()));
     return;
   }
 
-  file_system_->FindFileByPathAsync(
+  file_system_->GetEntryInfoByPathAsync(
       file_path,
       base::Bind(&GDataFileSystemProxy::OnGetMetadata,
                  this,
                  file_path,
-                 proxy,
                  callback));
 }
 
@@ -142,23 +142,36 @@ void DoNothing(base::PlatformFileError /*error*/,
 
 void GDataFileSystemProxy::ReadDirectory(const GURL& file_url,
     const FileSystemOperationInterface::ReadDirectoryCallback& callback) {
-  scoped_refptr<base::MessageLoopProxy> proxy =
-      base::MessageLoopProxy::current();
   FilePath file_path;
   if (!ValidateUrl(file_url, &file_path)) {
-    proxy->PostTask(FROM_HERE,
-                    base::Bind(callback,
-                               base::PLATFORM_FILE_ERROR_NOT_FOUND,
-                               std::vector<base::FileUtilProxy::Entry>(),
-                               false));
+    base::MessageLoopProxy::current()->PostTask(
+        FROM_HERE,
+        base::Bind(callback,
+                   base::PLATFORM_FILE_ERROR_NOT_FOUND,
+                   std::vector<base::FileUtilProxy::Entry>(),
+                   false));
     return;
   }
 
-  file_system_->FindFileByPathAsync(
+  // File paths with type GDATA_SEARH_PATH_QUERY are virtual path reserved for
+  // displaying gdata content search results. They are formatted so their base
+  // name equals to search query. So to get their contents, we have to kick off
+  // content search.
+  if (util::GetSearchPathStatus(file_path) == util::GDATA_SEARCH_PATH_QUERY) {
+    file_system_->SearchAsync(
+        file_path.BaseName().value(),
+        base::Bind(&GDataFileSystemProxy::OnReadDirectory,
+                   this,
+                   file_system_->hide_hosted_documents(),
+                   callback));
+    return;
+  }
+
+  file_system_->ReadDirectoryByPathAsync(
       file_path,
       base::Bind(&GDataFileSystemProxy::OnReadDirectory,
                  this,
-                 proxy,
+                 file_system_->hide_hosted_documents(),
                  callback));
 }
 
@@ -196,7 +209,7 @@ void GDataFileSystemProxy::CreateSnapshotFile(
   base::PlatformFileInfo file_info;
   GDataFileProperties file_properties;
   if (!ValidateUrl(file_url, &file_path) ||
-      !file_system_->GetFileInfoFromPath(file_path, &file_properties)) {
+      !file_system_->GetFileInfoByPath(file_path, &file_properties)) {
     MessageLoopProxy::current()->PostTask(FROM_HERE,
          base::Bind(callback,
                     base::PLATFORM_FILE_ERROR_NOT_FOUND,
@@ -206,10 +219,11 @@ void GDataFileSystemProxy::CreateSnapshotFile(
     return;
   }
 
-  file_system_->GetFile(file_path,
-                        base::Bind(&CallSnapshotFileCallback,
-                                   callback,
-                                   file_properties.file_info));
+  file_system_->GetFileByPath(file_path,
+                              base::Bind(&CallSnapshotFileCallback,
+                                         callback,
+                                         file_properties.file_info),
+                              GetDownloadDataCallback());
 }
 
 // static.
@@ -226,59 +240,50 @@ bool GDataFileSystemProxy::ValidateUrl(const GURL& url, FilePath* file_path) {
 
 void GDataFileSystemProxy::OnGetMetadata(
     const FilePath& file_path,
-    scoped_refptr<base::MessageLoopProxy> proxy,
     const FileSystemOperationInterface::GetMetadataCallback& callback,
     base::PlatformFileError error,
-    const FilePath& directory_path,
-    GDataFileBase* file) {
+    const FilePath& entry_path,
+    scoped_ptr<gdata::GDataEntryProto> entry_proto) {
   if (error != base::PLATFORM_FILE_OK) {
-    proxy->PostTask(FROM_HERE,
-                    base::Bind(callback,
-                               error,
-                               base::PlatformFileInfo(),
-                               FilePath()));
+    callback.Run(error, base::PlatformFileInfo(), FilePath());
     return;
   }
+  DCHECK(entry_proto.get());
 
-  proxy->PostTask(FROM_HERE,
-                  base::Bind(callback,
-                             base::PLATFORM_FILE_OK,
-                             file->file_info(),
-                             file_path));
+  base::PlatformFileInfo file_info;
+  GDataEntry::ConvertProtoToPlatformFileInfo(
+      entry_proto->file_info(),
+      &file_info);
+
+  callback.Run(base::PLATFORM_FILE_OK, file_info, file_path);
 }
 
 void GDataFileSystemProxy::OnReadDirectory(
-    scoped_refptr<base::MessageLoopProxy> proxy,
-    const FileSystemOperationInterface::ReadDirectoryCallback& callback,
+    bool hide_hosted_documents,
+    const FileSystemOperationInterface::ReadDirectoryCallback&
+    callback,
     base::PlatformFileError error,
-    const FilePath& directory_path,
-    GDataFileBase* file) {
-  DCHECK(file);
-  GDataDirectory* directory = file->AsGDataDirectory();
-  if (!directory)
-    error = base::PLATFORM_FILE_ERROR_NOT_A_DIRECTORY;
-
+    scoped_ptr<gdata::GDataDirectoryProto> directory_proto) {
   if (error != base::PLATFORM_FILE_OK) {
-    proxy->PostTask(FROM_HERE,
-                    base::Bind(callback,
-                               error,
-                               std::vector<base::FileUtilProxy::Entry>(),
-                               false));
+    callback.Run(error, std::vector<base::FileUtilProxy::Entry>(), false);
     return;
   }
   std::vector<base::FileUtilProxy::Entry> entries;
   // Convert gdata files to something File API stack can understand.
-  for (GDataFileCollection::const_iterator iter =
-            directory->children().begin();
-       iter != directory->children().end(); ++iter) {
-    entries.push_back(GDataFileToFileUtilProxyEntry(*(iter->second)));
+  for (int i = 0; i < directory_proto->child_directories_size(); ++i) {
+    const GDataDirectoryProto& proto = directory_proto->child_directories(i);
+    entries.push_back(
+        GDataEntryProtoToFileUtilProxyEntry(proto.gdata_entry()));
+  }
+  for (int i = 0; i < directory_proto->child_files_size(); ++i) {
+    const GDataFileProto& proto = directory_proto->child_files(i);
+    if (hide_hosted_documents && proto.is_hosted_document())
+        continue;
+    entries.push_back(
+        GDataEntryProtoToFileUtilProxyEntry(proto.gdata_entry()));
   }
 
-  proxy->PostTask(FROM_HERE,
-                  base::Bind(callback,
-                             base::PLATFORM_FILE_OK,
-                             entries,
-                             false));
+  callback.Run(base::PLATFORM_FILE_OK, entries, false);
 }
 
 }  // namespace gdata

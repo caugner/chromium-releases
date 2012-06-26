@@ -85,14 +85,12 @@ class WebstoreInstallListener : public WebstoreInstaller::Delegate {
 }  // namespace
 
 // A base class for tests below.
-class ExtensionWebstorePrivateApiTest : public ExtensionApiTest {
+class ExtensionNoConfirmWebstorePrivateApiTest : public ExtensionApiTest {
  public:
   void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     ExtensionApiTest::SetUpCommandLine(command_line);
     command_line->AppendSwitchASCII(
         switches::kAppsGalleryURL, "http://www.example.com");
-    command_line->AppendSwitchASCII(
-        switches::kAppsGalleryInstallAutoConfirmForTests, "accept");
   }
 
   void SetUpInProcessBrowserTestFixture() OVERRIDE {
@@ -101,14 +99,25 @@ class ExtensionWebstorePrivateApiTest : public ExtensionApiTest {
     host_resolver()->AddRule("www.example.com", "127.0.0.1");
     ASSERT_TRUE(test_server()->Start());
     ExtensionInstallUI::DisableFailureUIForTests();
+
+    ASSERT_TRUE(tmp_.CreateUniqueTempDirUnderPath(test_data_dir_));
+    ASSERT_TRUE(file_util::CreateDirectory(tmp_.path()));
+    ASSERT_TRUE(file_util::CopyDirectory(
+        test_data_dir_.AppendASCII("webstore_private"),
+        tmp_.path(),
+        true));
   }
 
  protected:
   // Returns a test server URL, but with host 'www.example.com' so it matches
   // the web store app's extent that we set up via command line flags.
-  GURL GetTestServerURL(const std::string& path) {
+  virtual GURL GetTestServerURL(const std::string& path) {
+    std::string basename = tmp_.path().BaseName().MaybeAsASCII();
     GURL url = test_server()->GetURL(
-        std::string("files/extensions/api_test/webstore_private/") + path);
+        std::string("files/extensions/api_test/") +
+        basename +
+        "/webstore_private/" +
+        path);
 
     // Replace the host with 'www.example.com' so it matches the web store
     // app's extent.
@@ -133,6 +142,18 @@ class ExtensionWebstorePrivateApiTest : public ExtensionApiTest {
   ExtensionService* service() {
     return browser()->profile()->GetExtensionService();
   }
+
+  ScopedTempDir tmp_;
+};
+
+class ExtensionWebstorePrivateApiTest :
+    public ExtensionNoConfirmWebstorePrivateApiTest {
+ public:
+  void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+    ExtensionNoConfirmWebstorePrivateApiTest::SetUpCommandLine(command_line);
+    command_line->AppendSwitchASCII(
+        switches::kAppsGalleryInstallAutoConfirmForTests, "accept");
+  }
 };
 
 class ExtensionWebstorePrivateBundleTest
@@ -156,7 +177,7 @@ class ExtensionWebstorePrivateBundleTest
 
  protected:
   void PackCRX(const std::string& id) {
-    FilePath dir_path = test_data_dir_
+    FilePath dir_path = tmp_.path()
         .AppendASCII("webstore_private/bundle")
         .AppendASCII(id);
 
@@ -182,7 +203,7 @@ class ExtensionWebstorePrivateBundleTest
 
   // Packs the extension at |ext_path| using |id|'s PEM key.
   void PackCRX(const std::string& id, const FilePath& ext_path) {
-    FilePath data_path = test_data_dir_.AppendASCII("webstore_private/bundle");
+    FilePath data_path = tmp_.path().AppendASCII("webstore_private/bundle");
     FilePath pem_path = data_path.AppendASCII(id + ".pem");
     FilePath crx_path = data_path.AppendASCII(id + ".crx");
     FilePath destination = PackExtensionWithOptions(
@@ -274,8 +295,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateApiTest, InstallCancelled) {
   ASSERT_TRUE(RunInstallTest("cancelled.html", "extension.crx"));
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateApiTest,
-                       IncorrectManifest1) {
+IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateApiTest, IncorrectManifest1) {
   WebstoreInstallListener listener;
   WebstorePrivateApi::SetWebstoreInstallerDelegateForTesting(&listener);
   ASSERT_TRUE(RunInstallTest("incorrect_manifest1.html", "extension.crx"));
@@ -284,8 +304,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateApiTest,
   ASSERT_EQ("Manifest file is invalid.", listener.error());
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateApiTest,
-                       IncorrectManifest2) {
+IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateApiTest, IncorrectManifest2) {
   WebstoreInstallListener listener;
   WebstorePrivateApi::SetWebstoreInstallerDelegateForTesting(&listener);
   ASSERT_TRUE(RunInstallTest("incorrect_manifest2.html", "extension.crx"));
@@ -306,9 +325,40 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateApiTest, AppInstallBubble) {
 }
 
 // Tests using the iconUrl parameter to the install function.
-IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateApiTest,
-                       IconUrl) {
+IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateApiTest, IconUrl) {
   ASSERT_TRUE(RunInstallTest("icon_url.html", "extension.crx"));
+}
+
+// Tests that the Approvals are properly created in beginInstall.
+IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateApiTest, BeginInstall) {
+  std::string appId = "iladmdjkfniedhfhcfoefgojhgaiaccc";
+  std::string extensionId = "enfkhcelefdadlmkffamgdlgplcionje";
+  ASSERT_TRUE(RunInstallTest("begin_install.html", "extension.crx"));
+
+  scoped_ptr<WebstoreInstaller::Approval> approval =
+      WebstorePrivateApi::PopApprovalForTesting(browser()->profile(), appId);
+  EXPECT_EQ(appId, approval->extension_id);
+  EXPECT_TRUE(approval->use_app_installed_bubble);
+  EXPECT_FALSE(approval->skip_post_install_ui);
+  EXPECT_EQ(browser()->profile(), approval->profile);
+
+  approval = WebstorePrivateApi::PopApprovalForTesting(
+      browser()->profile(), extensionId);
+  EXPECT_EQ(extensionId, approval->extension_id);
+  EXPECT_FALSE(approval->use_app_installed_bubble);
+  EXPECT_FALSE(approval->skip_post_install_ui);
+  EXPECT_EQ(browser()->profile(), approval->profile);
+}
+
+// Tests that themes are installed without an install prompt.
+IN_PROC_BROWSER_TEST_F(ExtensionNoConfirmWebstorePrivateApiTest,
+                       InstallTheme) {
+  WebstoreInstallListener listener;
+  WebstorePrivateApi::SetWebstoreInstallerDelegateForTesting(&listener);
+  ASSERT_TRUE(RunInstallTest("theme.html", "../../../theme.crx"));
+  listener.Wait();
+  ASSERT_TRUE(listener.received_success());
+  ASSERT_EQ("iamefpfkojoapidjnbafmgkgncegbkad", listener.id());
 }
 
 // Tests using silentlyInstall to install extensions.
@@ -332,6 +382,20 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateBundleTest, InstallBundle) {
   PackCRX("mpneghmdnmaolkljkipbhaienajcflfe", "app2.json");
 
   ASSERT_TRUE(RunPageTest(GetTestServerURL("install_bundle.html").spec()));
+}
+
+// Tests that bundles can be installed from incognito windows.
+IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateBundleTest,
+                       InstallBundleIncognito) {
+  extensions::BundleInstaller::SetAutoApproveForTesting(true);
+
+  PackCRX("bmfoocgfinpmkmlbjhcbofejhkhlbchk", "extension1.json");
+  PackCRX("pkapffpjmiilhlhbibjhamlmdhfneidj", "extension2.json");
+  PackCRX("begfmnajjkbjdgmffnjaojchoncnmngg", "app1.json");
+  PackCRX("mpneghmdnmaolkljkipbhaienajcflfe", "app2.json");
+
+  ASSERT_TRUE(RunPageTest(GetTestServerURL("install_bundle.html").spec(),
+                          ExtensionApiTest::kFlagUseIncognito));
 }
 
 // Tests the user canceling the bundle install prompt.

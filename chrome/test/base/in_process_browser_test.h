@@ -33,6 +33,7 @@ class CommandLine;
 class Profile;
 
 namespace content {
+class BrowserContext;
 class ContentRendererClient;
 class ResourceContext;
 }
@@ -97,8 +98,9 @@ class InProcessBrowserTest : public BrowserTestBase {
   // Returns the browser created by CreateBrowser.
   Browser* browser() const { return browser_; }
 
-  // Returns the ResourceContext from browser_. Needed because tests in content
-  // don't have access to Profile.
+  // Returns the Resource/BrowserContext from browser_. Needed because tests in
+  // content don't have access to Profile.
+  content::BrowserContext* GetBrowserContext();
   content::ResourceContext* GetResourceContext();
 
   // Convenience methods for adding tabs to a Browser.
@@ -141,10 +143,10 @@ class InProcessBrowserTest : public BrowserTestBase {
   // finish loading and shows the browser.
   //
   // This is invoked from Setup.
-  virtual Browser* CreateBrowser(Profile* profile);
+  Browser* CreateBrowser(Profile* profile);
 
   // Similar to |CreateBrowser|, but creates an incognito browser.
-  virtual Browser* CreateIncognitoBrowser();
+  Browser* CreateIncognitoBrowser();
 
   // Creates a browser for a popup window with a single tab (about:blank), waits
   // for the tab to finish loading, and shows the browser.
@@ -158,6 +160,16 @@ class InProcessBrowserTest : public BrowserTestBase {
   // the navigation to complete, and show the browser's window.
   void AddBlankTabAndShow(Browser* browser);
 
+#if !defined OS_MACOSX
+  // Return a CommandLine object  that is used to relaunch the browser_test binary
+  // as a browser process. This function is deliberately not defined on the Mac
+  // because re-using an existing browser process when launching from the command
+  // line isn't a concept that we support on the Mac; AppleEvents are the Mac
+  // solution for the same need. Any test based on these functions doesn't apply
+  // to the Mac.
+  CommandLine GetCommandLineForRelaunch();
+#endif
+
   // Returns the host resolver being used for the tests. Subclasses might want
   // to configure it inside tests.
   net::RuleBasedHostResolverProc* host_resolver() {
@@ -166,14 +178,14 @@ class InProcessBrowserTest : public BrowserTestBase {
 
   // Sets some test states (see below for comments).  Call this in your test
   // constructor.
-  void set_show_window(bool show) { show_window_ = show; }
-  void set_initial_window_required(bool flag) {
-    initial_window_required_= flag;
-  }
   void EnableDOMAutomation() { dom_automation_enabled_ = true; }
-  void EnableTabCloseableStateWatcher() {
-    tab_closeable_state_watcher_enabled_ = true;
+#if defined(OS_POSIX)
+  // This is only needed by a test that raises SIGTERM to ensure that a specific
+  // codepath is taken.
+  void DisableSIGTERMHandling() {
+    handle_sigterm_ = false;
   }
+#endif
 
 #if defined(OS_MACOSX)
   // Returns the autorelease pool in use inside RunTestOnMainThreadLoop().
@@ -203,19 +215,9 @@ class InProcessBrowserTest : public BrowserTestBase {
   // ContentRendererClient when running in single-process mode.
   scoped_ptr<content::ContentRendererClient> single_process_renderer_client_;
 
-  // Whether this test requires the browser windows to be shown (interactive
-  // tests for example need the windows shown).
-  bool show_window_;
-
-  // Whether this test requires an initial window.
-  bool initial_window_required_;
-
   // Whether the JavaScript can access the DOMAutomationController (a JS object
   // that can send messages back to the browser).
   bool dom_automation_enabled_;
-
-  // Whether this test requires the TabCloseableStateWatcher.
-  bool tab_closeable_state_watcher_enabled_;
 
   // Host resolver to use during the test.
   scoped_refptr<net::RuleBasedHostResolverProc> host_resolver_;
@@ -224,6 +226,10 @@ class InProcessBrowserTest : public BrowserTestBase {
   // specified in the command line.
   ScopedTempDir temp_user_data_dir_;
 
+#if defined(OS_POSIX)
+  bool handle_sigterm_;
+#endif
+  
 #if defined(OS_CHROMEOS)
   chromeos::ScopedStubCrosEnabler stub_cros_enabler_;
 #endif  // defined(OS_CHROMEOS)

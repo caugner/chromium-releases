@@ -18,6 +18,7 @@
 #include "third_party/skia/include/effects/SkGradientShader.h"
 #include "ui/base/animation/multi_animation.h"
 #include "ui/base/animation/throb_animation.h"
+#include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/favicon_size.h"
@@ -25,54 +26,127 @@
 #include "ui/gfx/path.h"
 #include "ui/gfx/skbitmap_operations.h"
 #include "ui/views/controls/button/image_button.h"
-#include "ui/views/touchui/touch_mode_support.h"
 #include "ui/views/widget/tooltip_manager.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/non_client_view.h"
 
+namespace {
+
 // Padding around the "content" of a tab, occupied by the tab border graphics.
-#if defined(USE_ASH)
-static const int kLeftPadding = 21;
-static const int kTopPadding = 8;
-static const int kRightPadding = 20;
-static const int kBottomPadding = 5;
-#else
-static const int kLeftPadding = 16;
-static const int kTopPadding = 6;
-static const int kRightPadding = 15;
-static const int kBottomPadding = 5;
-#endif
+
+int left_padding() {
+  static int value = -1;
+  if (value == -1) {
+    switch (ui::GetDisplayLayout()) {
+      case ui::LAYOUT_ASH:
+      case ui::LAYOUT_DESKTOP:
+        value = 22;
+        break;
+      case ui::LAYOUT_TOUCH:
+        value = 30;
+        break;
+      default:
+        NOTREACHED();
+    }
+  }
+  return value;
+}
+
+int top_padding() {
+  static int value = -1;
+  if (value == -1) {
+    switch (ui::GetDisplayLayout()) {
+      case ui::LAYOUT_ASH:
+      case ui::LAYOUT_DESKTOP:
+        value = 8;
+        break;
+      case ui::LAYOUT_TOUCH:
+        value = 12;
+        break;
+      default:
+        NOTREACHED();
+    }
+  }
+  return value;
+}
+
+int right_padding() {
+  static int value = -1;
+  if (value == -1) {
+    switch (ui::GetDisplayLayout()) {
+      case ui::LAYOUT_ASH:
+      case ui::LAYOUT_DESKTOP:
+        value = 19;
+        break;
+      case ui::LAYOUT_TOUCH:
+        value = 23;
+        break;
+      default:
+        NOTREACHED();
+    }
+  }
+  return value;
+}
+
+int bottom_padding() {
+  static int value = -1;
+  if (value == -1) {
+    switch (ui::GetDisplayLayout()) {
+      case ui::LAYOUT_ASH:
+      case ui::LAYOUT_DESKTOP:
+        value = 5;
+        break;
+      case ui::LAYOUT_TOUCH:
+        value = 7;
+        break;
+      default:
+        NOTREACHED();
+    }
+  }
+  return value;
+}
 
 // Height of the shadow at the top of the tab image assets.
-#if defined(USE_ASH)
-static const int kDropShadowHeight = 4;
-#else
-static const int kDropShadowHeight = 2;
-#endif
+int drop_shadow_height() {
+  static int value = -1;
+  if (value == -1) {
+    switch (ui::GetDisplayLayout()) {
+      case ui::LAYOUT_ASH:
+      case ui::LAYOUT_DESKTOP:
+        value = 4;
+        break;
+      case ui::LAYOUT_TOUCH:
+        value = 5;
+        break;
+      default:
+        NOTREACHED();
+    }
+  }
+  return value;
+}
+
 static const int kToolbarOverlap = 1;
 static const int kFaviconTitleSpacing = 4;
-// Additional vertical offset for title text relative to top of tab.
 #if defined(USE_ASH)
+// Additional vertical offset for title text relative to top of tab.
+// Ash text rendering may be different than Windows.
+// TODO(jamescook): Make this Chrome OS or Linux only?
 static const int kTitleTextOffsetY = 1;
 #else
 static const int kTitleTextOffsetY = 0;
 #endif
 static const int kTitleCloseButtonSpacing = 3;
 static const int kStandardTitleWidth = 175;
-// Additional vertical offset for close button relative to top of tab.
 #if defined(USE_ASH)
+// Additional vertical offset for close button relative to top of tab.
+// Ash needs this to match the text vertical position.
 static const int kCloseButtonVertFuzz = 1;
 #else
 static const int kCloseButtonVertFuzz = 0;
 #endif
 static const int kTabIconSize = gfx::kFaviconSize;
 // Additional horizontal offset for close button relative to title text.
-#if defined(USE_ASH)
 static const int kCloseButtonHorzFuzz = 7;
-#else
-static const int kCloseButtonHorzFuzz = 5;
-#endif
-static const int kTouchModeMinimumWidth = 160;
 
 // When a non-mini-tab becomes a mini-tab the width of the tab animates. If
 // the width of a mini-tab is >= kMiniTabRendererAsNormalTabWidth then the tab
@@ -89,10 +163,6 @@ static const double kSelectedTabOpacity = .45;
 
 // Selected (but not active) tabs have their throb value scaled down by this.
 static const double kSelectedTabThrobScale = .5;
-
-Tab::TabImage Tab::tab_alpha_ = {0};
-Tab::TabImage Tab::tab_active_ = {0};
-Tab::TabImage Tab::tab_inactive_ = {0};
 
 // Durations for the various parts of the mini tab title animation.
 static const int kMiniTitleChangeAnimationDuration1MS = 1600;
@@ -113,6 +183,12 @@ static const int kMiniTitleChangeGradientRadius = 20;
 static const SkColor kMiniTitleChangeGradientColor1 = SK_ColorWHITE;
 static const SkColor kMiniTitleChangeGradientColor2 =
     SkColorSetARGB(0, 255, 255, 255);
+
+}  // namespace
+
+Tab::TabImage Tab::tab_alpha_ = {0};
+Tab::TabImage Tab::tab_active_ = {0};
+Tab::TabImage Tab::tab_inactive_ = {0};
 
 // static
 const char Tab::kViewClassName[] = "browser/tabs/Tab";
@@ -164,7 +240,7 @@ gfx::Size Tab::GetBasicMinimumUnselectedSize() {
   InitTabResources();
 
   gfx::Size minimum_size;
-  minimum_size.set_width(kLeftPadding + kRightPadding);
+  minimum_size.set_width(left_padding() + right_padding());
   // Since we use bitmap images, the real minimum height of the image is
   // defined most accurately by the height of the end cap images.
   minimum_size.set_height(tab_active_.image_l->height());
@@ -172,17 +248,14 @@ gfx::Size Tab::GetBasicMinimumUnselectedSize() {
 }
 
 gfx::Size Tab::GetMinimumUnselectedSize() {
-  if (TouchModeSupport::IsTouchOptimized())
-    return GetTouchModeMinimumSize();
   return GetBasicMinimumUnselectedSize();
 }
 
 // static
 gfx::Size Tab::GetMinimumSelectedSize() {
-  if (TouchModeSupport::IsTouchOptimized())
-    return GetTouchModeMinimumSize();
   gfx::Size minimum_size = GetBasicMinimumUnselectedSize();
-  minimum_size.set_width(kLeftPadding + gfx::kFaviconSize + kRightPadding);
+  minimum_size.set_width(
+      left_padding() + gfx::kFaviconSize + right_padding());
   return minimum_size;
 }
 
@@ -197,15 +270,6 @@ gfx::Size Tab::GetStandardSize() {
 // static
 int Tab::GetMiniWidth() {
   return browser_defaults::kMiniTabWidth;
-}
-
-// static
-gfx::Size Tab::GetTouchModeMinimumSize() {
-  InitTabResources();
-  gfx::Size size;
-  size.set_width(kTouchModeMinimumWidth);
-  size.set_height(tab_active_.image_l->height());
-  return size;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -260,7 +324,7 @@ void Tab::OnPaint(gfx::Canvas* canvas) {
   // If the close button color has changed, generate a new one.
   if (!close_button_color_ || title_color != close_button_color_) {
     close_button_color_ = title_color;
-    ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+    ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
     close_button()->SetBackground(close_button_color_,
         rb.GetBitmapNamed(IDR_TAB_CLOSE),
         rb.GetBitmapNamed(IDR_TAB_CLOSE_MASK));
@@ -271,7 +335,8 @@ void Tab::Layout() {
   gfx::Rect lb = GetContentsBounds();
   if (lb.IsEmpty())
     return;
-  lb.Inset(kLeftPadding, kTopPadding, kRightPadding, kBottomPadding);
+  lb.Inset(
+      left_padding(), top_padding(), right_padding(), bottom_padding());
 
   // The height of the content of the Tab is the largest of the favicon,
   // the title text and the close button graphic.
@@ -283,7 +348,7 @@ void Tab::Layout() {
   showing_icon_ = ShouldShowIcon();
   if (showing_icon_) {
     // Use the size of the favicon as apps use a bigger favicon size.
-    int favicon_top = kTopPadding + content_height / 2 - kTabIconSize / 2;
+    int favicon_top = top_padding() + content_height / 2 - kTabIconSize / 2;
     int favicon_left = lb.x();
     favicon_bounds_.SetRect(favicon_left, favicon_top,
                             kTabIconSize, kTabIconSize);
@@ -308,7 +373,7 @@ void Tab::Layout() {
   // Size the Close button.
   showing_close_button_ = ShouldShowCloseBox();
   if (showing_close_button_) {
-    int close_button_top = kTopPadding + kCloseButtonVertFuzz +
+    int close_button_top = top_padding() + kCloseButtonVertFuzz +
         (content_height - close_button_size.height()) / 2;
     // If the ratio of the close button size to tab width exceeds the maximum.
     close_button()->SetBounds(lb.width() + kCloseButtonHorzFuzz,
@@ -321,15 +386,15 @@ void Tab::Layout() {
   }
 
   int title_left = favicon_bounds_.right() + kFaviconTitleSpacing;
-  int title_top =
-      kTopPadding + kTitleTextOffsetY + (content_height - font_height()) / 2;
+  int title_top = top_padding() + kTitleTextOffsetY +
+      (content_height - font_height()) / 2;
   // Size the Title text to fill the remaining space.
   if (!data().mini || width() >= kMiniTabRendererAsNormalTabWidth) {
     // If the user has big fonts, the title will appear rendered too far down
     // on the y-axis if we use the regular top padding, so we need to adjust it
     // so that the text appears centered.
     gfx::Size minimum_size = GetMinimumUnselectedSize();
-    int text_height = title_top + font_height() + kBottomPadding;
+    int text_height = title_top + font_height() + bottom_padding();
     if (text_height > minimum_size.height())
       title_top -= (text_height - minimum_size.height()) / 2;
 
@@ -368,7 +433,11 @@ bool Tab::HasHitTestMask() const {
 }
 
 void Tab::GetHitTestMask(gfx::Path* path) const {
-  TabResources::GetHitTestMask(width(), height(), path);
+  // When the window is maximized we don't want to shave off the edges or top
+  // shadow of the tab, such that the user can click anywhere along the top
+  // edge of the screen to select a tab.
+  bool include_top_shadow = GetWidget() && GetWidget()->IsMaximized();
+  TabResources::GetHitTestMask(width(), height(), include_top_shadow, path);
 }
 
 bool Tab::GetTooltipTextOrigin(const gfx::Point& p, gfx::Point* origin) const {
@@ -508,15 +577,15 @@ void Tab::PaintInactiveTabBackground(gfx::Canvas* canvas) {
       theme_r.height() - kToolbarOverlap, false);
 
   // Draw center.  Instead of masking out the top portion we simply skip over
-  // it by incrementing by kDropShadowHeight, since it's a simple rectangle.
-  // And again, don't draw over the toolbar.
+  // it by incrementing by GetDropShadowHeight(), since it's a simple
+  // rectangle. And again, don't draw over the toolbar.
   background_canvas.TileImageInt(*tab_bg,
      offset + tab_image->l_width,
-     bg_offset_y + kDropShadowHeight + tab_image->y_offset,
+     bg_offset_y + drop_shadow_height() + tab_image->y_offset,
      tab_image->l_width,
-     kDropShadowHeight + tab_image->y_offset,
+     drop_shadow_height() + tab_image->y_offset,
      width() - tab_image->l_width - tab_image->r_width,
-     height() - kDropShadowHeight - kToolbarOverlap - tab_image->y_offset);
+     height() - drop_shadow_height() - kToolbarOverlap - tab_image->y_offset);
 
   canvas->DrawBitmapInt(background_canvas.ExtractBitmap(), 0, 0);
 
@@ -561,14 +630,14 @@ void Tab::PaintActiveTabBackground(gfx::Canvas* canvas) {
   canvas->DrawBitmapInt(theme_r, width() - tab_image->r_width, 0);
 
   // Draw center.  Instead of masking out the top portion we simply skip over it
-  // by incrementing by kDropShadowHeight, since it's a simple rectangle.
+  // by incrementing by GetDropShadowHeight(), since it's a simple rectangle.
   canvas->TileImageInt(*tab_bg,
      offset + tab_image->l_width,
-     kDropShadowHeight + tab_image->y_offset,
+     drop_shadow_height() + tab_image->y_offset,
      tab_image->l_width,
-     kDropShadowHeight + tab_image->y_offset,
+     drop_shadow_height() + tab_image->y_offset,
      width() - tab_image->l_width - tab_image->r_width,
-     height() - kDropShadowHeight - tab_image->y_offset);
+     height() - drop_shadow_height() - tab_image->y_offset);
 
   // Now draw the highlights/shadows around the tab edge.
   canvas->DrawBitmapInt(*tab_image->image_l, 0, 0);
@@ -580,7 +649,7 @@ void Tab::PaintActiveTabBackground(gfx::Canvas* canvas) {
 int Tab::IconCapacity() const {
   if (height() < GetMinimumUnselectedSize().height())
     return 0;
-  return (width() - kLeftPadding - kRightPadding) / kTabIconSize;
+  return (width() - left_padding() - right_padding()) / kTabIconSize;
 }
 
 bool Tab::ShouldShowIcon() const {
@@ -635,7 +704,7 @@ void Tab::InitTabResources() {
 // static
 void Tab::LoadTabImages() {
   // We're not letting people override tab images just yet.
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
 
   tab_alpha_.image_l = rb.GetBitmapNamed(IDR_TAB_ALPHA_LEFT);
   tab_alpha_.image_r = rb.GetBitmapNamed(IDR_TAB_ALPHA_RIGHT);

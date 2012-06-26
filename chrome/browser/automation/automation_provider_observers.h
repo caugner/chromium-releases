@@ -42,7 +42,6 @@
 #include "chrome/browser/memory_details.h"
 #include "chrome/browser/password_manager/password_store_change.h"
 #include "chrome/browser/password_manager/password_store_consumer.h"
-#include "chrome/browser/policy/configuration_policy_provider.h"
 #include "chrome/browser/search_engines/template_url_service_observer.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/common/automation_constants.h"
@@ -344,12 +343,6 @@ class ExtensionUninstallObserver : public content::NotificationObserver {
 class ExtensionReadyNotificationObserver
     : public content::NotificationObserver {
  public:
-  // Creates an observer that replies using the old IPC automation method.
-  ExtensionReadyNotificationObserver(ExtensionProcessManager* manager,
-                                     ExtensionService* service,
-                                     AutomationProvider* automation,
-                                     int id,
-                                     IPC::Message* reply_message);
   // Creates an observer that replies using the JSON automation interface.
   ExtensionReadyNotificationObserver(ExtensionProcessManager* manager,
                                      ExtensionService* service,
@@ -369,9 +362,7 @@ class ExtensionReadyNotificationObserver
   ExtensionProcessManager* manager_;
   ExtensionService* service_;
   base::WeakPtr<AutomationProvider> automation_;
-  int id_;
   scoped_ptr<IPC::Message> reply_message_;
-  bool use_json_;
   const Extension* extension_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionReadyNotificationObserver);
@@ -424,38 +415,6 @@ class ExtensionsUpdatedObserver : public content::NotificationObserver {
   bool updater_finished_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionsUpdatedObserver);
-};
-
-class ExtensionTestResultNotificationObserver
-    : public content::NotificationObserver {
- public:
-  explicit ExtensionTestResultNotificationObserver(
-      AutomationProvider* automation);
-  virtual ~ExtensionTestResultNotificationObserver();
-
-  // Implementation of NotificationObserver.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details);
-
-  // Sends a test result back to the provider's client, if there is a pending
-  // provider message and there is a result in the queue.
-  void MaybeSendResult();
-
- private:
-  content::NotificationRegistrar registrar_;
-  base::WeakPtr<AutomationProvider> automation_;
-  // Two queues containing the test results. Although typically only
-  // one result will be in each queue, there are cases where a queue is
-  // needed.
-  // For example, perhaps two events occur asynchronously and their
-  // order of completion is not guaranteed. If the test wants to make sure
-  // both finish before continuing, a queue is needed. The test would then
-  // need to wait twice.
-  std::deque<bool> results_;
-  std::deque<std::string> messages_;
-
-  DISALLOW_COPY_AND_ASSIGN(ExtensionTestResultNotificationObserver);
 };
 
 // Observes when a new browser has been opened and a tab within it has stopped
@@ -608,7 +567,7 @@ class FindInPageNotificationObserver : public content::NotificationObserver {
 
 class DomOperationObserver : public content::NotificationObserver {
  public:
-  DomOperationObserver();
+  explicit DomOperationObserver(int automation_id);
   virtual ~DomOperationObserver();
 
   virtual void Observe(int type,
@@ -620,6 +579,7 @@ class DomOperationObserver : public content::NotificationObserver {
   virtual void OnJavascriptBlocked() = 0;
 
  private:
+  int automation_id_;
   content::NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(DomOperationObserver);
@@ -630,7 +590,7 @@ class DomOperationObserver : public content::NotificationObserver {
 class DomOperationMessageSender : public DomOperationObserver {
  public:
   DomOperationMessageSender(AutomationProvider* automation,
-                            IPC::Message* relpy_message,
+                            IPC::Message* reply_message,
                             bool use_json_interface);
   virtual ~DomOperationMessageSender();
 
@@ -644,25 +604,6 @@ class DomOperationMessageSender : public DomOperationObserver {
   bool use_json_interface_;
 
   DISALLOW_COPY_AND_ASSIGN(DomOperationMessageSender);
-};
-
-class DocumentPrintedNotificationObserver
-    : public content::NotificationObserver {
- public:
-  DocumentPrintedNotificationObserver(AutomationProvider* automation,
-                                      IPC::Message* reply_message);
-  virtual ~DocumentPrintedNotificationObserver();
-
-  virtual void Observe(int type, const content::NotificationSource& source,
-                       const content::NotificationDetails& details);
-
- private:
-  content::NotificationRegistrar registrar_;
-  base::WeakPtr<AutomationProvider> automation_;
-  bool success_;
-  scoped_ptr<IPC::Message> reply_message_;
-
-  DISALLOW_COPY_AND_ASSIGN(DocumentPrintedNotificationObserver);
 };
 
 // Collects METRIC_EVENT_DURATION notifications and keep track of the times.
@@ -1162,6 +1103,7 @@ class AutomationProviderSearchEngineObserver
  public:
   AutomationProviderSearchEngineObserver(
       AutomationProvider* provider,
+      Profile* profile,
       IPC::Message* reply_message);
   virtual ~AutomationProviderSearchEngineObserver();
 
@@ -1169,6 +1111,7 @@ class AutomationProviderSearchEngineObserver
 
  private:
   base::WeakPtr<AutomationProvider> provider_;
+  Profile* profile_;
   scoped_ptr<IPC::Message> reply_message_;
 
   DISALLOW_COPY_AND_ASSIGN(AutomationProviderSearchEngineObserver);
@@ -1850,45 +1793,6 @@ class BrowserOpenedWithNewProfileNotificationObserver
 
   DISALLOW_COPY_AND_ASSIGN(BrowserOpenedWithNewProfileNotificationObserver);
 };
-
-#if defined(ENABLE_CONFIGURATION_POLICY)
-
-// Waits for a policy refresh on each policy provider available. Refreshes
-// can be triggered by invoking |connector|->RefreshPolicies().
-// Deletes itself when done.
-class PolicyUpdatesObserver
-    : public policy::ConfigurationPolicyProvider::Observer {
- public:
-  PolicyUpdatesObserver(AutomationProvider* automation,
-                        IPC::Message* reply_message,
-                        policy::BrowserPolicyConnector* connector);
-  virtual ~PolicyUpdatesObserver();
-
-  // Invokes |callback| on the UI thread after policies that have changed
-  // recently are ready and being enforced.
-  static void PostCallbackAfterPolicyUpdates(const base::Closure& callback);
-
- private:
-  virtual void OnUpdatePolicy(
-      policy::ConfigurationPolicyProvider* provider) OVERRIDE;
-  virtual void OnProviderGoingAway(
-      policy::ConfigurationPolicyProvider* provider) OVERRIDE;
-  void MaybeReply();
-  void Reply();
-
-  // Helper for WaitForPoliciesToBeReadyAndThen that resolves the overloading
-  // of BrowserThread::PostTask within Bind calls.
-  static void PostTask(content::BrowserThread::ID id,
-                       const base::Closure& callback);
-
-  base::WeakPtr<AutomationProvider> automation_;
-  scoped_ptr<IPC::Message> reply_message_;
-  std::vector<policy::ConfigurationPolicyObserverRegistrar*> registrars_;
-
-  DISALLOW_COPY_AND_ASSIGN(PolicyUpdatesObserver);
-};
-
-#endif  // defined(ENABLE_CONFIGURATION_POLICY)
 
 // Waits for an extension popup to appear and load.
 class ExtensionPopupObserver : public content::NotificationObserver {

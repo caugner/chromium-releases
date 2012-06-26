@@ -171,6 +171,7 @@ const wchar_t kChromeLauncherExe[] = L"chrome_launcher.exe";
 const wchar_t kChromeNewExe[] = L"new_chrome.exe";
 const wchar_t kChromeOldExe[] = L"old_chrome.exe";
 const wchar_t kCmdQuickEnableCf[] = L"quick-enable-cf";
+const wchar_t kDelegateExecuteExe[] = L"delegate_execute.exe";
 const wchar_t kGoogleChromeInstallSubDir1[] = L"Google";
 const wchar_t kGoogleChromeInstallSubDir2[] = L"Chrome";
 const wchar_t kInstallBinaryDir[] = L"Application";
@@ -178,6 +179,9 @@ const wchar_t kInstallerDir[] = L"Installer";
 const wchar_t kInstallTempDir[] = L"Temp";
 const wchar_t kInstallUserDataDir[] = L"User Data";
 const wchar_t kNaClExe[] = L"nacl64.exe";
+// The CLSID of the proxy stub OLE Automation universal marshaler, the default
+// marshaler for all interfaces.
+const wchar_t kPSOAInterfaceUuid[] = L"{00020424-0000-0000-C000-000000000046}";
 const wchar_t kSetupExe[] = L"setup.exe";
 const wchar_t kSxSSuffix[] = L" SxS";
 const wchar_t kUninstallStringField[] = L"UninstallString";
@@ -201,10 +205,10 @@ const wchar_t kOptionMultiInstall[] = L"multi-install";
 const wchar_t kOptionReadyMode[] = L"ready-mode";
 
 // Chrome channel display names.
-extern const wchar_t kChromeChannelUnknown[] = L"unknown";
-extern const wchar_t kChromeChannelCanary[] = L"canary";
-extern const wchar_t kChromeChannelDev[] = L"dev";
-extern const wchar_t kChromeChannelBeta[] = L"beta";
-extern const wchar_t kChromeChannelStable[] = L"";
+const wchar_t kChromeChannelUnknown[] = L"unknown";
+const wchar_t kChromeChannelCanary[] = L"canary";
+const wchar_t kChromeChannelDev[] = L"dev";
+const wchar_t kChromeChannelBeta[] = L"beta";
+const wchar_t kChromeChannelStable[] = L"";
 
 }  // namespace installer

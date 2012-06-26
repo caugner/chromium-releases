@@ -121,7 +121,7 @@ class ExtensionEventRouter : public content::NotificationObserver {
       const GURL& event_url);
 
   // Record the Event Ack from the renderer. (One less event in-flight.)
-  void OnExtensionEventAck(Profile* profile, const std::string& extension_id);
+  void OnEventAck(Profile* profile, const std::string& extension_id);
 
  private:
   // The details of an event to be dispatched.
@@ -181,10 +181,6 @@ class ExtensionEventRouter : public content::NotificationObserver {
       Profile* profile,
       const Extension* extension,
       const linked_ptr<ExtensionEvent>& event);
-
-  // Dispatch may be delayed if the extension has a lazy background page.
-  bool CanDispatchEventNow(Profile* profile,
-                           const Extension* extension);
 
   // Track of the number of dispatched events that have not yet sent an
   // ACK from the renderer.

@@ -23,14 +23,15 @@
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
 #include "chrome/browser/ui/gtk/custom_button.h"
+#include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/tabs/dragged_tab_controller_gtk.h"
 #include "chrome/browser/ui/gtk/tabs/tab_strip_menu_controller.h"
-#include "chrome/browser/ui/gtk/theme_service_gtk.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/web_contents.h"
+#include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
 #include "grit/ui_resources.h"
@@ -39,6 +40,7 @@
 #include "ui/base/dragdrop/gtk_dnd_util.h"
 #include "ui/base/gtk/gtk_compat.h"
 #include "ui/base/gtk/gtk_screen_util.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/gtk_util.h"
 #include "ui/gfx/image/image.h"
@@ -714,7 +716,7 @@ TabStripGtk::TabStripGtk(TabStripModel* model, BrowserWindowGtk* window)
       tab_vertical_offset_(0),
       model_(model),
       window_(window),
-      theme_service_(ThemeServiceGtk::GetFrom(model->profile())),
+      theme_service_(GtkThemeService::GetFrom(model->profile())),
       weak_factory_(this),
       layout_factory_(this),
       added_as_message_loop_observer_(false),
@@ -1298,7 +1300,7 @@ bool TabStripGtk::HasAvailableDragActions() const {
   return model_->delegate()->GetDragActions() != 0;
 }
 
-ThemeServiceGtk* TabStripGtk::GetThemeProvider() {
+GtkThemeService* TabStripGtk::GetThemeProvider() {
   return theme_service_;
 }
 
@@ -2071,7 +2073,7 @@ gboolean TabStripGtk::OnExpose(GtkWidget* widget, GdkEventExpose* event) {
     TabGtk* tab = GetTabAt(i);
     // We must ask the _Tab's_ model, not ourselves, because in some situations
     // the model will be different to this object, e.g. when a Tab is being
-    // removed after its TabContents has been destroyed.
+    // removed after its TabContentsWrapper has been destroyed.
     if (!tab->IsActive()) {
       gtk_container_propagate_expose(GTK_CONTAINER(tabstrip_.get()),
                                      tab->widget(), event);
@@ -2240,6 +2242,9 @@ void TabStripGtk::PaintOnlyFavicons(GdkEventExpose* event,
 CustomDrawButton* TabStripGtk::MakeNewTabButton() {
   CustomDrawButton* button = new CustomDrawButton(IDR_NEWTAB_BUTTON,
       IDR_NEWTAB_BUTTON_P, IDR_NEWTAB_BUTTON_H, 0);
+
+  gtk_widget_set_tooltip_text(button->widget(),
+      l10n_util::GetStringUTF8(IDS_TOOLTIP_NEW_TAB).c_str());
 
   // Let the middle mouse button initiate clicks as well.
   gtk_util::SetButtonTriggersNavigation(button->widget());

@@ -7,8 +7,8 @@
 #include "base/file_path.h"
 #include "base/time.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/views/ash/launcher/browser_launcher_item_controller.h"
 #include "chrome/browser/ui/views/ash/launcher/launcher_favicon_loader.h"
-#include "chrome/browser/ui/views/ash/launcher/launcher_updater.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/common/favicon_url.h"
 #include "chrome/common/icon_messages.h"
@@ -77,10 +77,10 @@ class LauncherFaviconLoaderBrowsertest : public InProcessBrowserTest {
   }
 
   void CreatePanelBrowser(const char* url, Browser** result) {
-    Browser* panel_browser =  Browser::CreateForApp(Browser::TYPE_PANEL,
-                                                    "Test Panel",
-                                                    gfx::Rect(),
-                                                    browser()->profile());
+    Browser* panel_browser =  Browser::CreateWithParams(
+        Browser::CreateParams::CreateForApp(
+            Browser::TYPE_PANEL, "Test Panel", gfx::Rect(),
+            browser()->profile()));
     EXPECT_TRUE(panel_browser->is_type_panel());
     ASSERT_EQ(static_cast<void*>(NULL), contents_observer_.get());
     // Load initial tab contents before setting the observer.
@@ -93,11 +93,13 @@ class LauncherFaviconLoaderBrowsertest : public InProcessBrowserTest {
 
   LauncherFaviconLoader* GetFaviconLoader(Browser* browser) {
     BrowserView* browser_view = static_cast<BrowserView*>(browser->window());
-    LauncherUpdater* launcher_updater = browser_view->icon_updater();
-    if (!launcher_updater)
+    BrowserLauncherItemController* launcher_item_controller =
+        browser_view->launcher_item_controller();
+    if (!launcher_item_controller)
       return NULL;
-    EXPECT_EQ(LauncherUpdater::TYPE_EXTENSION_PANEL, launcher_updater->type());
-    LauncherFaviconLoader* loader = launcher_updater->favicon_loader();
+    EXPECT_EQ(BrowserLauncherItemController::TYPE_EXTENSION_PANEL,
+              launcher_item_controller->type());
+    LauncherFaviconLoader* loader = launcher_item_controller->favicon_loader();
     return loader;
   }
 
@@ -160,10 +162,11 @@ IN_PROC_BROWSER_TEST_F(LauncherFaviconLoaderBrowsertest, ManyLauncherIcons) {
       CreatePanelBrowser("launcher-manyfavicon.html", &panel_browser));
   LauncherFaviconLoader* favicon_loader = GetFaviconLoader(panel_browser);
   ASSERT_NE(static_cast<LauncherFaviconLoader*>(NULL), favicon_loader);
+
+  EXPECT_TRUE(WaitForFaviconDownlads(3));
   EXPECT_FALSE(favicon_loader->GetFavicon().empty());
   // When multiple favicons are present, the correctly sized icon should be
   // chosen. The icons are sized assuming ash::kLauncherPreferredHeight < 128.
-  EXPECT_TRUE(WaitForFaviconDownlads(3));
   EXPECT_GT(128, ash::kLauncherPreferredHeight);
   EXPECT_EQ(48, favicon_loader->GetFavicon().height());
 }

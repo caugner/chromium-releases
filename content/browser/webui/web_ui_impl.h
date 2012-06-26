@@ -9,6 +9,7 @@
 #include <map>
 
 #include "base/compiler_specific.h"
+#include "base/memory/weak_ptr.h"
 #include "content/public/browser/web_ui.h"
 #include "ipc/ipc_channel.h"
 
@@ -17,14 +18,15 @@ class RenderViewHost;
 }
 
 class CONTENT_EXPORT WebUIImpl : public content::WebUI,
-                                 public IPC::Channel::Listener {
+                                 public IPC::Channel::Listener,
+                                 public base::SupportsWeakPtr<WebUIImpl> {
  public:
   explicit WebUIImpl(content::WebContents* contents);
   virtual ~WebUIImpl();
 
-  // Called by TabContents when the RenderView is first created. This is *not*
-  // called for every page load because in some cases RenderViewHostManager will
-  // reuse RenderView instances.
+  // Called by WebContentsImpl when the RenderView is first created. This is
+  // *not* called for every page load because in some cases
+  // RenderViewHostManager will reuse RenderView instances.
   void RenderViewCreated(content::RenderViewHost* render_view_host);
 
   // WebUI implementation:

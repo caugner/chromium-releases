@@ -20,11 +20,15 @@
 #include "ui/views/controls/menu/menu_delegate.h"
 #include "ui/views/controls/menu/menu_item_view.h"
 
+#if defined(USE_AURA)
+namespace aura {
+class RootWindow;
+}
+#endif
+
 namespace ui {
 class OSExchangeData;
 }
-using ui::OSExchangeData;
-
 namespace views {
 
 class DropTargetEvent;
@@ -110,9 +114,9 @@ class VIEWS_EXPORT MenuController : public MessageLoop::Dispatcher {
   bool GetDropFormats(
       SubmenuView* source,
       int* formats,
-      std::set<OSExchangeData::CustomFormat>* custom_formats);
+      std::set<ui::OSExchangeData::CustomFormat>* custom_formats);
   bool AreDropTypesRequired(SubmenuView* source);
-  bool CanDrop(SubmenuView* source, const OSExchangeData& data);
+  bool CanDrop(SubmenuView* source, const ui::OSExchangeData& data);
   void OnDragEntered(SubmenuView* source, const DropTargetEvent& event);
   int OnDragUpdated(SubmenuView* source, const DropTargetEvent& event);
   void OnDragExited(SubmenuView* source);
@@ -238,16 +242,10 @@ class VIEWS_EXPORT MenuController : public MessageLoop::Dispatcher {
                                  const LocatedEvent& event);
   void StartDrag(SubmenuView* source, const gfx::Point& location);
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(USE_AURA)
   // Dispatcher method. This returns true if the menu was canceled, or
   // if the message is such that the menu should be closed.
-  virtual bool Dispatch(const MSG& msg) OVERRIDE;
-#elif defined(USE_WAYLAND)
-  virtual base::MessagePumpDispatcher::DispatchStatus Dispatch(
-      base::wayland::WaylandEvent* event) OVERRIDE;
-#elif defined(USE_AURA)
-  virtual base::MessagePumpDispatcher::DispatchStatus Dispatch(
-      XEvent* xevent) OVERRIDE;
+  virtual bool Dispatch(const base::NativeEvent& event) OVERRIDE;
 #endif
 
   // Key processing. The return value of this is returned from Dispatch.
@@ -501,6 +499,12 @@ class VIEWS_EXPORT MenuController : public MessageLoop::Dispatcher {
   // Owner of child windows.
   Widget* owner_;
 
+#if defined(USE_AURA)
+  // |owner_|s RootWindow. Cached as at the time we need it |owner_| may have
+  // been deleted.
+  aura::RootWindow* root_window_;
+#endif
+
   // Indicates a possible drag operation.
   bool possible_drag_;
 
@@ -530,6 +534,10 @@ class VIEWS_EXPORT MenuController : public MessageLoop::Dispatcher {
   View* active_mouse_view_;
 
   internal::MenuControllerDelegate* delegate_;
+
+  // How deep we are in nested message loops. This should be at most 2 (when
+  // showing a context menu from a menu).
+  int message_loop_depth_;
 
   DISALLOW_COPY_AND_ASSIGN(MenuController);
 };

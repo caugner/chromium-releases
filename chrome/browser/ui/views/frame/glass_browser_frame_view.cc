@@ -23,7 +23,7 @@
 #include "grit/theme_resources_standard.h"
 #include "grit/ui_resources.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/resource/resource_bundle.h"
+#include "ui/base/resource/resource_bundle_win.h"
 #include "ui/base/theme_provider.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/icon_util.h"
@@ -36,9 +36,9 @@ HICON GlassBrowserFrameView::throbber_icons_[
 namespace {
 // There are 3 px of client edge drawn inside the outer frame borders.
 const int kNonClientBorderThickness = 3;
-// Besides the frame border, there's another 11 px of empty space atop the
+// Besides the frame border, there's another 9 px of empty space atop the
 // window in restored mode, to use to drag the window around.
-const int kNonClientRestoredExtraThickness = 11;
+const int kNonClientRestoredExtraThickness = 9;
 // In the window corners, the resize areas don't actually expand bigger, but the
 // 16 px at the end of the top and bottom edges triggers diagonal resizing.
 const int kResizeAreaCornerSize = 16;
@@ -46,14 +46,15 @@ const int kResizeAreaCornerSize = 16;
 // way the tabstrip draws its bottom edge, will appear like a 1 px gap to the
 // user).
 const int kAvatarBottomSpacing = 2;
-// There are 2 px on each side of the avatar (between the frame border and
-// it on the left, and between it and the tabstrip on the right).
-const int kAvatarSideSpacing = 2;
+// Space between the frame border and the left edge of the avatar.
+const int kAvatarLeftSpacing = 2;
+// Space between the right edge of the avatar and the tabstrip.
+const int kAvatarRightSpacing = -2;
 // The content left/right images have a shadow built into them.
 const int kContentEdgeShadowThickness = 2;
-// The top 1 px of the tabstrip is shadow; in maximized mode we push this off
+// The top 3 px of the tabstrip is shadow; in maximized mode we push this off
 // the top of the screen so the tabs appear flush against the screen edge.
-const int kTabstripTopShadowThickness = 1;
+const int kTabstripTopShadowThickness = 3;
 // In restored mode, the New Tab button isn't at the same height as the caption
 // buttons, but the space will look cluttered if it actually slides under them,
 // so we stop it when the gap between the two is down to 5 px.
@@ -62,6 +63,9 @@ const int kNewTabCaptionRestoredSpacing = 5;
 // similar vertical coordinates, we need to reserve a larger, 16 px gap to avoid
 // looking too cluttered.
 const int kNewTabCaptionMaximizedSpacing = 16;
+// How far to indent the tabstrip from the left side of the screen when there
+// is no avatar icon.
+const int kTabStripIndent = -6;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -93,8 +97,8 @@ gfx::Rect GlassBrowserFrameView::GetBoundsForTabStrip(
   int minimize_button_offset =
       std::min(frame()->GetMinimizeButtonOffset(), width());
   int tabstrip_x = browser_view()->ShouldShowAvatar() ?
-      (avatar_bounds_.right() + kAvatarSideSpacing) :
-      NonClientBorderThickness();
+      (avatar_bounds_.right() + kAvatarRightSpacing) :
+      NonClientBorderThickness() + kTabStripIndent;
   // In RTL languages, we have moved an avatar icon left by the size of window
   // controls to prevent it from being rendered over them. So, we use its x
   // position to move this tab strip left when maximized. Also, we can render
@@ -142,7 +146,7 @@ gfx::Size GlassBrowserFrameView::GetMinimumSize() {
   // Ensure that the minimum width is enough to hold a tab strip with minimum
   // width at its usual insets.
   if (browser_view()->IsTabStripVisible()) {
-    AbstractTabStripView* tabstrip = browser_view()->tabstrip();
+    TabStrip* tabstrip = browser_view()->tabstrip();
     int min_tabstrip_width = tabstrip->GetMinimumSize().width();
     int min_tabstrip_area_width =
         width() - GetBoundsForTabStrip(tabstrip).width() + min_tabstrip_width;
@@ -383,7 +387,7 @@ void GlassBrowserFrameView::LayoutAvatar() {
   // can be customized so we can't depend on its size to perform layout.
   SkBitmap incognito_icon = browser_view()->GetOTRAvatarIcon();
 
-  int avatar_x = NonClientBorderThickness() + kAvatarSideSpacing;
+  int avatar_x = NonClientBorderThickness() + kAvatarLeftSpacing;
   // Move this avatar icon by the size of window controls to prevent it from
   // being rendered over them in RTL languages. This code also needs to adjust
   // the width of a tab strip to avoid decreasing this size twice. (See the
@@ -491,9 +495,9 @@ void GlassBrowserFrameView::Observe(
 void GlassBrowserFrameView::InitThrobberIcons() {
   static bool initialized = false;
   if (!initialized) {
-    ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
     for (int i = 0; i < kThrobberIconCount; ++i) {
-      throbber_icons_[i] = rb.LoadThemeIcon(IDI_THROBBER_01 + i);
+      throbber_icons_[i] =
+          ui::LoadThemeIconFromResourcesDataDLL(IDI_THROBBER_01 + i);
       DCHECK(throbber_icons_[i]);
     }
     initialized = true;

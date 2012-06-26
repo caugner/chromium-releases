@@ -23,7 +23,6 @@ CONTENT_EXPORT extern const char kBrowserCrashTest[];
 CONTENT_EXPORT extern const char kBrowserSubprocessPath[];
 // TODO(jam): this doesn't belong in content.
 CONTENT_EXPORT extern const char kChromeFrame[];
-CONTENT_EXPORT extern const char kDefaultDeviceScaleFactor[];
 CONTENT_EXPORT extern const char kDisable3DAPIs[];
 CONTENT_EXPORT extern const char kDisableAccelerated2dCanvas[];
 CONTENT_EXPORT extern const char kDisableAcceleratedCompositing[];
@@ -63,6 +62,7 @@ extern const char kDisableRemoteFonts[];
 extern const char kDisableRendererAccessibility[];
 extern const char kDisableSSLFalseStart[];
 extern const char kDisableSeccompSandbox[];
+extern const char kDisableSeccompFilterSandbox[];
 extern const char kDisableSessionStorage[];
 extern const char kDisableSharedWorkers[];
 extern const char kDisableSiteSpecificQuirks[];
@@ -74,17 +74,16 @@ extern const char kDisableWebSecurity[];
 extern const char kDisableWebSockets[];
 extern const char kDisableXSSAuditor[];
 CONTENT_EXPORT extern const char kDomAutomationController[];
-extern const char kEnableAccelerated2dCanvas[];
 CONTENT_EXPORT extern const char kEnableAcceleratedPainting[];
 CONTENT_EXPORT extern const char kEnableAcceleratedFilters[];
-extern const char kEnableAccessibility[];
 extern const char kEnableAccessibilityLogging[];
 extern const char kEnableBrowserPlugin[];
 CONTENT_EXPORT extern const char kEnableCompositingForFixedPosition[];
 extern const char kEnableCssRegions[];
+extern const char kEnableCssShaders[];
 CONTENT_EXPORT extern const char kEnableDeferred2dCanvas[];
-extern const char kEnableCompositeToTexture[];
 CONTENT_EXPORT extern const char kEnableDeviceMotion[];
+extern const char kEnableEncryptedMedia[];
 extern const char kEnableFastback[];
 CONTENT_EXPORT extern const char kEnableFixedLayout[];
 CONTENT_EXPORT extern const char kDisableFullScreen[];
@@ -93,6 +92,7 @@ extern const char kEnableGamepad[];
 CONTENT_EXPORT extern const char kEnableLogging[];
 extern const char kEnableMediaSource[];
 extern const char kEnableMediaStream[];
+extern const char kEnablePeerConnection[];
 extern const char kEnableMonitorProfile[];
 extern const char kEnableOriginBoundCerts[];
 extern const char kEnablePartialSwap[];
@@ -110,14 +110,13 @@ extern const char kEnableStrictSiteIsolation[];
 CONTENT_EXPORT extern const char kEnableThreadedCompositing[];
 CONTENT_EXPORT extern const char kDisableThreadedCompositing[];
 CONTENT_EXPORT extern const char kEnableTcpFastOpen[];
-CONTENT_EXPORT extern const char kEnableTouchEvents[];
 CONTENT_EXPORT extern const char kEnableVideoTrack[];
 extern const char kEnableViewport[];
 CONTENT_EXPORT extern const char kDisableWebIntents[];
 CONTENT_EXPORT extern const char kExperimentalLocationFeatures[];
 extern const char kExtraPluginDir[];
 CONTENT_EXPORT extern const char kForceCompositingMode[];
-extern const char kForceFieldTestNameAndValue[];
+extern const char kForceFieldTrials[];
 CONTENT_EXPORT extern const char kForceRendererAccessibility[];
 extern const char kGpuLauncher[];
 CONTENT_EXPORT extern const char kGpuProcess[];
@@ -133,16 +132,13 @@ extern const char kLogPluginMessages[];
 // TODO(jam): this doesn't belong in content.
 CONTENT_EXPORT extern const char kNaClBrokerProcess[];
 CONTENT_EXPORT extern const char kNaClLoaderProcess[];
-extern const char kNoJsRandomness[];
 CONTENT_EXPORT extern const char kNoReferrers[];
 CONTENT_EXPORT extern const char kNoSandbox[];
-CONTENT_EXPORT extern const char kPlaybackMode[];
 extern const char kPluginLauncher[];
 CONTENT_EXPORT extern const char kPluginPath[];
 CONTENT_EXPORT extern const char kPluginProcess[];
 extern const char kPluginStartupDialog[];
 CONTENT_EXPORT extern const char kPpapiBrokerProcess[];
-CONTENT_EXPORT extern const char kPpapiFlashArgs[];
 CONTENT_EXPORT extern const char kPpapiFlashPath[];
 CONTENT_EXPORT extern const char kPpapiFlashVersion[];
 CONTENT_EXPORT extern const char kPpapiOutOfProcess[];
@@ -152,12 +148,13 @@ extern const char kPpapiStartupDialog[];
 extern const char kProcessPerSite[];
 CONTENT_EXPORT extern const char kProcessPerTab[];
 CONTENT_EXPORT extern const char kProcessType[];
-CONTENT_EXPORT extern const char kRecordMode[];
 CONTENT_EXPORT extern const char kRegisterPepperPlugins[];
 CONTENT_EXPORT extern const char kRemoteDebuggingPort[];
 CONTENT_EXPORT extern const char kRendererAssertTest[];
+#if defined(OS_POSIX)
+extern const char kRendererCleanExit[];
+#endif
 extern const char kRendererCmdPrefix[];
-CONTENT_EXPORT extern const char kRendererCrashTest[];
 CONTENT_EXPORT extern const char kRendererProcess[];
 extern const char kRendererProcessLimit[];
 extern const char kRendererStartupDialog[];
@@ -195,10 +192,6 @@ extern const char kScrollPixels[];
 
 #if defined(OS_MACOSX) || defined(OS_WIN)
 extern const char kUseSystemSSL[];
-#endif
-
-#if !defined(OFFICIAL_BUILD)
-CONTENT_EXPORT extern const char kRendererCheckFalseTest[];
 #endif
 
 extern const char kEnablePerTilePainting[];

@@ -25,6 +25,7 @@ extern const char kIsGooglePlusUser[];
 extern const char kSessionExitedCleanly[];
 extern const char kRestoreOnStartup[];
 extern const char kURLsToRestoreOnStartup[];
+extern const char kRestoreOnStartupMigrated[];
 
 // For OS_CHROMEOS we maintain kApplicationLocale property in both local state
 // and user's profile.  Global property determines locale of login screen,
@@ -40,7 +41,6 @@ extern const char kGlobalDefaultCharset[];
 extern const char kDefaultCharset[];
 extern const char kAcceptLanguages[];
 extern const char kStaticEncodings[];
-extern const char kPopupWhitelistedHosts[];
 extern const char kShowBookmarkBar[];
 extern const char kBookmarkEditorExpandedNodes[];
 extern const char kWebKitGlobalStandardFontFamily[];
@@ -156,8 +156,6 @@ extern const char kUrlWhitelist[];
 extern const char kInstantConfirmDialogShown[];
 extern const char kInstantEnabled[];
 extern const char kInstantEnabledOnce[];
-extern const char kInstantEnabledTime[];
-extern const char kInstantPromo[];
 extern const char kMultipleProfilePrefMigration[];
 extern const char kNetworkPredictionEnabled[];
 extern const char kDefaultAppsInstallState[];
@@ -166,8 +164,10 @@ extern const char kAudioMute[];
 extern const char kAudioVolumeDb[];
 extern const char kAudioVolumePercent[];
 extern const char kTapToClickEnabled[];
+extern const char kEnableTouchpadThreeFingerClick[];
 extern const char kNaturalScroll[];
 extern const char kPrimaryMouseButtonRight[];
+extern const char kMouseSensitivity[];
 extern const char kTouchpadSensitivity[];
 extern const char kUse24HourClock[];
 extern const char kDisableGData[];
@@ -241,9 +241,11 @@ extern const char kLabsMediaplayerEnabled[];
 extern const char kEnableScreenLock[];
 extern const char kShowPlanNotifications[];
 extern const char kShow3gPromoNotification[];
+extern const char kChromeOSReleaseNotesVersion[];
 extern const char kUseSharedProxies[];
 extern const char kOAuth1Token[];
 extern const char kOAuth1Secret[];
+extern const char kEnableCrosDRM[];
 #endif  // defined(OS_CHROMEOS)
 extern const char kIpcDisabledMessages[];
 extern const char kShowHomeButton[];
@@ -261,7 +263,7 @@ extern const char kEnabledLabsExperiments[];
 extern const char kEnableAutoSpellCorrect[];
 extern const char kSavingBrowserHistoryDisabled[];
 extern const char kDeleteTimePeriod[];
-#if defined(TOOLKIT_USES_GTK)
+#if defined(TOOLKIT_GTK)
 extern const char kUsesSystemTheme[];
 #endif
 extern const char kCurrentThemePackFilename[];
@@ -272,6 +274,7 @@ extern const char kCurrentThemeTints[];
 extern const char kCurrentThemeDisplayProperties[];
 extern const char kExtensionsUIDeveloperMode[];
 extern const char kExtensionToolbarSize[];
+extern const char kExtensionKeybindings[];
 extern const char kPluginsLastInternalDirectory[];
 extern const char kPluginsPluginsList[];
 extern const char kPluginsDisabledPlugins[];
@@ -295,7 +298,6 @@ extern const char kDesktopNotificationAllowedOrigins[];  // OBSOLETE
 extern const char kDesktopNotificationDeniedOrigins[];  // OBSOLETE
 extern const char kDesktopNotificationPosition[];
 extern const char kDefaultContentSettings[];
-extern const char kPerHostContentSettings[];  // OBSOLETE
 extern const char kContentSettingsVersion[];
 extern const char kContentSettingsPatterns[];  // OBSOLETE
 extern const char kContentSettingsPatternPairs[];
@@ -315,7 +317,6 @@ extern const char kEditBookmarksEnabled[];
 
 extern const char kEnableTranslate[];
 extern const char kPinnedTabs[];
-extern const char kHttpThrottlingEnabled[];
 
 extern const char kDisable3DAPIs[];
 extern const char kEnableHyperlinkAuditing[];
@@ -430,6 +431,7 @@ extern const char kHungPluginDetectFrequency[];
 extern const char kPluginMessageResponseTimeout[];
 
 extern const char kSpellCheckDictionary[];
+extern const char kSpellCheckConfirmDialogShown[];
 extern const char kSpellCheckUseSpellingService[];
 
 extern const char kExcludedSchemes[];
@@ -485,8 +487,8 @@ extern const char kExtensionBlacklistUpdateVersion[];
 extern const char kNtpTipsResourceServer[];
 
 extern const char kNtp4IntroDisplayCount[];
+extern const char kNtpCollapsedForeignSessions[];
 extern const char kNtpMostVisitedURLsBlacklist[];
-extern const char kNtpMostVisitedPinnedURLs[];
 extern const char kNtpPromoResourceCache[];
 extern const char kNtpPromoResourceCacheUpdate[];
 extern const char kNtpPromoIsLoggedInToPlus[];
@@ -504,6 +506,9 @@ extern const char kNtpPromoEnd[];
 extern const char kNtpPromoLine[];
 extern const char kNtpPromoClosed[];
 extern const char kNtpPromoGroup[];
+extern const char kNtpPromoNumGroups[];
+extern const char kNtpPromoInitialSegment[];
+extern const char kNtpPromoIncrement[];
 extern const char kNtpPromoGroupTimeSlice[];
 extern const char kNtpPromoGroupMax[];
 extern const char kNtpPromoViews[];
@@ -528,6 +533,7 @@ extern const char kDevToolsOpenDocked[];
 extern const char kDevToolsDockSide[];
 extern const char kDevToolsHSplitLocation[];
 extern const char kDevToolsVSplitLocation[];
+extern const char kDevToolsEditedFiles[];
 
 extern const char kSyncLastSyncedTime[];
 extern const char kSyncHasSetupCompleted[];
@@ -571,8 +577,6 @@ extern const char kWebAppCreateInQuickLaunchBar[];
 extern const char kGeolocationAccessToken[];
 extern const char kGeolocationDefaultContentSetting[];
 extern const char kGeolocationContentSettings[];
-
-extern const char kLoginDatabaseMigrated[];
 
 extern const char kRemoteAccessHostFirewallTraversal[];
 
@@ -629,9 +633,9 @@ extern const char kHardwareKeyboardLayout[];
 extern const char kCarrierDealPromoShown[];
 extern const char kShouldAutoEnroll[];
 extern const char kAutoEnrollmentPowerLimit[];
-extern const char kReportDeviceVersionInfo[];
-extern const char kReportDeviceActivityTimes[];
 extern const char kDeviceActivityTimes[];
+extern const char kDeviceLocation[];
+extern const char kSyncSpareBootstrapToken[];
 #endif
 
 extern const char kClearPluginLSODataEnabled[];
@@ -671,19 +675,32 @@ extern const char kRestoreSessionStateDialogShown[];
 extern const char kWebIntentsEnabled[];
 
 #if defined(USE_AURA)
+extern const char kShelfAutoHideBehavior[];
+extern const char kUseDefaultPinnedApps[];
 extern const char kPinnedLauncherApps[];
 
-extern const char kMaximumSecondsBetweenDoubleClick[];
-extern const char kMaximumTouchDownDurationInSecondsForClick[];
-extern const char kMaximumTouchMoveInPixelsForClick[];
+extern const char kLongPressTimeInSeconds[];
+extern const char kMaxSecondsBetweenDoubleClick[];
+extern const char kMaxSeparationForGestureTouchesInPixels[];
+extern const char kMaxSwipeDeviationRatio[];
+extern const char kMaxTouchDownDurationInSecondsForClick[];
+extern const char kMaxTouchMoveInPixelsForClick[];
+extern const char kMinDistanceForPinchScrollInPixels[];
 extern const char kMinFlickSpeedSquared[];
-extern const char kMinimumTouchDownDurationInSecondsForClick[];
-
-extern const char kShelfAutoHideBehavior[];
-
+extern const char kMinPinchUpdateDistanceInPixels[];
+extern const char kMinRailBreakVelocity[];
+extern const char kMinScrollDeltaSquared[];
+extern const char kMinSwipeSpeed[];
+extern const char kMinTouchDownDurationInSecondsForClick[];
+extern const char kPointsBufferedForVelocity[];
+extern const char kRailBreakProportion[];
+extern const char kRailStartProportion[];
 #endif
 
 extern const char kInManagedMode[];
+
+extern const char kNetworkProfileWarningsLeft[];
+extern const char kNetworkProfileLastWarningTime[];
 
 }  // namespace prefs
 

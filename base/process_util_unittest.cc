@@ -7,6 +7,7 @@
 #include <limits>
 
 #include "base/command_line.h"
+#include "base/debug/alias.h"
 #include "base/eintr_wrapper.h"
 #include "base/file_path.h"
 #include "base/logging.h"
@@ -22,12 +23,12 @@
 #include "testing/multiprocess_func_list.h"
 
 #if defined(OS_LINUX)
-#include <errno.h>
 #include <malloc.h>
 #include <glib.h>
 #include <sched.h>
 #endif
 #if defined(OS_POSIX)
+#include <errno.h>
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <signal.h>
@@ -39,6 +40,7 @@
 #include <windows.h>
 #endif
 #if defined(OS_MACOSX)
+#include <mach/vm_param.h>
 #include <malloc/malloc.h>
 #include "base/process_util_unittest_mac.h"
 #endif
@@ -448,13 +450,39 @@ TEST_F(ProcessUtilTest, LaunchAsUser) {
 
 #if defined(OS_MACOSX)
 
-TEST_F(ProcessUtilTest, MacTerminateOnHeapCorruption) {
-  // Note that base::EnableTerminationOnHeapCorruption() is called as part of
-  // test suite setup and does not need to be done again, else mach_override
-  // will fail.
+// For the following Mac tests:
+// Note that base::EnableTerminationOnHeapCorruption() is called as part of
+// test suite setup and does not need to be done again, else mach_override
+// will fail.
 
+#if !defined(ADDRESS_SANITIZER)
+// The following code tests the system implementation of malloc() thus no need
+// to test it under AddressSanitizer.
+TEST_F(ProcessUtilTest, MacMallocFailureDoesNotTerminate) {
+  // Install the OOM killer.
+  base::EnableTerminationOnOutOfMemory();
+
+  // Test that ENOMEM doesn't crash via CrMallocErrorBreak two ways: the exit
+  // code and lack of the error string. The number of bytes is one less than
+  // MALLOC_ABSOLUTE_MAX_SIZE, more than which the system early-returns NULL and
+  // does not call through malloc_error_break(). See the comment at
+  // EnableTerminationOnOutOfMemory() for more information.
+  void* buf = NULL;
+  ASSERT_EXIT(
+      buf = malloc(std::numeric_limits<size_t>::max() - (2 * PAGE_SIZE) - 1),
+      testing::KilledBySignal(SIGTRAP),
+      "\\*\\*\\* error: can't allocate region.*"
+          "(Terminating process due to a potential for future heap "
+          "corruption){0}");
+
+  base::debug::Alias(buf);
+}
+#endif  // !defined(ADDRESS_SANITIZER)
+
+TEST_F(ProcessUtilTest, MacTerminateOnHeapCorruption) {
+  // Assert that freeing an unallocated pointer will crash the process.
   char buf[3];
-#ifndef ADDRESS_SANITIZER
+#if !defined(ADDRESS_SANITIZER)
   ASSERT_DEATH(free(buf), "being freed.*"
       "\\*\\*\\* set a breakpoint in malloc_error_break to debug.*"
       "Terminating process due to a potential for future heap corruption");
@@ -463,7 +491,7 @@ TEST_F(ProcessUtilTest, MacTerminateOnHeapCorruption) {
   // heap corruption.
   ASSERT_DEATH(free(buf), "attempting free on address which "
       "was not malloc\\(\\)-ed");
-#endif
+#endif  // !defined(ADDRESS_SANITIZER)
 }
 
 #endif  // defined(OS_MACOSX)
@@ -939,15 +967,15 @@ class OutOfMemoryDeathTest : public testing::Test {
         signed_test_size_(std::numeric_limits<ssize_t>::max()) {
   }
 
-  virtual void SetUp() {
 #if defined(USE_TCMALLOC)
+  virtual void SetUp() OVERRIDE {
     tc_set_new_mode(1);
   }
 
-  virtual void TearDown() {
+  virtual void TearDown() OVERRIDE {
     tc_set_new_mode(0);
-#endif  // defined(USE_TCMALLOC)
   }
+#endif  // defined(USE_TCMALLOC)
 
   void SetUpInDeathAssert() {
     // Must call EnableTerminationOnOutOfMemory() because that is called from

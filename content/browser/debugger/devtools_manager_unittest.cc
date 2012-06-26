@@ -8,7 +8,7 @@
 #include "content/browser/debugger/render_view_devtools_agent_host.h"
 #include "content/browser/mock_content_browser_client.h"
 #include "content/browser/renderer_host/test_render_view_host.h"
-#include "content/browser/tab_contents/test_web_contents.h"
+#include "content/browser/web_contents/test_web_contents.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/devtools_agent_host_registry.h"
@@ -44,18 +44,15 @@ class TestDevToolsClientHost : public DevToolsClientHost {
     manager->ClientHostClosing(this);
     closed_ = true;
   }
-  virtual void InspectedTabClosing() {
+  virtual void InspectedContentsClosing() {
     FAIL();
-  }
-
-  virtual void SetInspectedTabUrl(const std::string& url) {
   }
 
   virtual void DispatchOnInspectorFrontend(const std::string& message) {
     last_sent_message = &message;
   }
 
-  virtual void TabReplaced(WebContents* new_tab) {
+  virtual void ContentsReplaced(WebContents* new_contents) {
   }
 
   static void ResetCounters() {
@@ -81,7 +78,7 @@ class TestWebContentsDelegate : public content::WebContentsDelegate {
  public:
   TestWebContentsDelegate() : renderer_unresponsive_received_(false) {}
 
-  // Notification that the tab is hung.
+  // Notification that the contents is hung.
   virtual void RendererUnresponsive(WebContents* source) {
     renderer_unresponsive_received_ = true;
   }
@@ -180,7 +177,7 @@ TEST_F(DevToolsManagerTest, ForwardMessageToClient) {
   EXPECT_EQ(1, TestDevToolsClientHost::close_counter);
 }
 
-TEST_F(DevToolsManagerTest, NoUnresponsiveDialogInInspectedTab) {
+TEST_F(DevToolsManagerTest, NoUnresponsiveDialogInInspectedContents) {
   content::TestRenderViewHost* inspected_rvh = test_rvh();
   inspected_rvh->set_render_view_created(true);
   EXPECT_FALSE(contents()->GetDelegate());

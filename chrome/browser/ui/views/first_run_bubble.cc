@@ -5,9 +5,9 @@
 #include "chrome/browser/ui/views/first_run_bubble.h"
 
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/search_engines/util.h"
 #include "chrome/browser/ui/browser_list.h"
-#include "chrome/browser/ui/views/window.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -31,15 +31,17 @@ namespace first_run {
 // static
 FirstRunBubble* FirstRunBubble::ShowBubble(Profile* profile,
                                            views::View* anchor_view) {
+  first_run::LogFirstRunMetric(first_run::FIRST_RUN_BUBBLE_SHOWN);
+
   FirstRunBubble* delegate = new FirstRunBubble(profile, anchor_view);
-  browser::CreateViewsBubble(delegate);
+  views::BubbleDelegateView::CreateBubble(delegate);
   delegate->StartFade(true);
   return delegate;
 }
 
 void FirstRunBubble::Init() {
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  const gfx::Font& original_font = rb.GetFont(ResourceBundle::MediumFont);
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+  const gfx::Font& original_font = rb.GetFont(ui::ResourceBundle::MediumFont);
 
   views::Label* title = new views::Label(l10n_util::GetStringFUTF16(
       IDS_FR_BUBBLE_TITLE, GetDefaultSearchEngineName(profile_)));
@@ -90,6 +92,8 @@ FirstRunBubble::~FirstRunBubble() {
 }
 
 void FirstRunBubble::LinkClicked(views::Link* source, int event_flags) {
+  first_run::LogFirstRunMetric(first_run::FIRST_RUN_BUBBLE_CHANGE_INVOKED);
+
   // Get |profile_|'s browser before closing the bubble, which deletes |this|.
   Browser* browser = BrowserList::GetLastActiveWithProfile(profile_);
   GetWidget()->Close();

@@ -6,12 +6,10 @@
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "chrome/browser/chromeos/cros/cros_mock.h"
 #include "chrome/browser/chromeos/cros/cros_in_process_browser_test.h"
+#include "chrome/browser/chromeos/cros/cros_mock.h"
 #include "chrome/browser/chromeos/cros/mock_cryptohome_library.h"
 #include "chrome/browser/chromeos/cros/mock_network_library.h"
-#include "chrome/browser/chromeos/dbus/mock_dbus_thread_manager.h"
-#include "chrome/browser/chromeos/dbus/mock_session_manager_client.h"
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
 #include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/chromeos/login/login_display.h"
@@ -27,6 +25,8 @@
 #include "chrome/common/net/gaia/mock_url_fetcher_factory.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "chromeos/dbus/mock_dbus_thread_manager.h"
+#include "chromeos/dbus/mock_session_manager_client.h"
 #include "grit/generated_resources.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -80,7 +80,6 @@ class MockLoginDisplayHost : public LoginDisplayHost {
   MOCK_METHOD0(OpenProxySettings, void(void));
   MOCK_METHOD1(SetOobeProgressBarVisible, void(bool));
   MOCK_METHOD1(SetShutdownButtonEnabled, void(bool));
-  MOCK_METHOD1(SetStatusAreaEnabled, void(bool));
   MOCK_METHOD1(SetStatusAreaVisible, void(bool));
   MOCK_METHOD0(ShowBackground, void(void));
   MOCK_METHOD0(CheckForAutoEnrollment, void(void));
@@ -121,11 +120,13 @@ class ExistingUserControllerTest : public CrosInProcessBrowserTest {
     cros_mock_->SetStatusAreaMocksExpectations();
 
     mock_network_library_ = cros_mock_->mock_network_library();
+    EXPECT_CALL(*mock_network_library_, AddUserActionObserver(_))
+        .Times(AnyNumber());
     MockSessionManagerClient* mock_session_manager_client =
         mock_dbus_thread_manager->mock_session_manager_client();
     EXPECT_CALL(*mock_session_manager_client, EmitLoginPromptReady())
         .Times(1);
-    EXPECT_CALL(*mock_session_manager_client, RetrievePolicy(_))
+    EXPECT_CALL(*mock_session_manager_client, RetrieveDevicePolicy(_))
         .Times(AnyNumber());
 
     cros_mock_->InitMockCryptohomeLibrary();
@@ -156,6 +157,15 @@ class ExistingUserControllerTest : public CrosInProcessBrowserTest {
     EXPECT_CALL(*mock_user_manager_.user_manager(), IsLoggedInAsGuest())
         .Times(AnyNumber())
         .WillRepeatedly(Return(false));
+    EXPECT_CALL(*mock_user_manager_.user_manager(), IsLoggedInAsDemoUser())
+        .Times(AnyNumber())
+        .WillRepeatedly(Return(false));
+    EXPECT_CALL(*mock_user_manager_.user_manager(), IsSessionStarted())
+        .Times(AnyNumber())
+        .WillRepeatedly(Return(false));
+    EXPECT_CALL(*mock_user_manager_.user_manager(), GetUserWallpaperIndex())
+        .Times(AnyNumber())
+        .WillRepeatedly(Return(0));
 
     EXPECT_CALL(*mock_login_display_host_.get(), CreateLoginDisplay(_))
         .Times(1)
@@ -216,9 +226,19 @@ scoped_refptr<Authenticator> CreateAuthenticatorNewUser(
   return new MockAuthenticator(consumer, kNewUsername, kPassword);
 }
 
-IN_PROC_BROWSER_TEST_F(ExistingUserControllerTest, ExistingUserLogin) {
-  EXPECT_CALL(*mock_login_display_host_, SetStatusAreaEnabled(false))
-      .Times(1);
+// These tests are failing under ASan, but not natively.
+// See http://crbug.com/126224
+#if defined(ADDRESS_SANITIZER)
+#define MAYBE_ExistingUserLogin DISABLED_ExistingUserLogin
+#define MAYBE_AutoEnrollAfterSignIn DISABLED_AutoEnrollAfterSignIn
+#define MAYBE_NewUserDontAutoEnrollAfterSignIn \
+    DISABLED_NewUserDontAutoEnrollAfterSignIn
+#else
+#define MAYBE_ExistingUserLogin ExistingUserLogin
+#define MAYBE_AutoEnrollAfterSignIn AutoEnrollAfterSignIn
+#define MAYBE_NewUserDontAutoEnrollAfterSignIn NewUserDontAutoEnrollAfterSignIn
+#endif  // defined(ADDRESS_SANITIZER)
+IN_PROC_BROWSER_TEST_F(ExistingUserControllerTest, MAYBE_ExistingUserLogin) {
   EXPECT_CALL(*mock_login_display_, SetUIEnabled(false))
       .Times(1);
   EXPECT_CALL(*mock_login_utils_, CreateAuthenticator(_))
@@ -244,7 +264,8 @@ IN_PROC_BROWSER_TEST_F(ExistingUserControllerTest, ExistingUserLogin) {
   ui_test_utils::RunAllPendingInMessageLoop();
 }
 
-IN_PROC_BROWSER_TEST_F(ExistingUserControllerTest, AutoEnrollAfterSignIn) {
+IN_PROC_BROWSER_TEST_F(ExistingUserControllerTest,
+                       MAYBE_AutoEnrollAfterSignIn) {
   EXPECT_CALL(*mock_login_display_host_,
               StartWizard(WizardController::kEnterpriseEnrollmentScreenName, _))
       .Times(1);
@@ -258,7 +279,7 @@ IN_PROC_BROWSER_TEST_F(ExistingUserControllerTest, AutoEnrollAfterSignIn) {
 }
 
 IN_PROC_BROWSER_TEST_F(ExistingUserControllerTest,
-                       NewUserDontAutoEnrollAfterSignIn) {
+                       MAYBE_NewUserDontAutoEnrollAfterSignIn) {
   EXPECT_CALL(*mock_login_display_host_,
               StartWizard(WizardController::kEnterpriseEnrollmentScreenName, _))
       .Times(0);

@@ -7,6 +7,7 @@
 #include <OpenGL/CGLRenderers.h>
 #include <vector>
 
+#include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "ui/gfx/gl/gl_bindings.h"
 #include "ui/gfx/gl/gl_implementation.h"
@@ -20,12 +21,8 @@ GLContextCGL::GLContextCGL(GLShareGroup* share_group)
     gpu_preference_(PreferIntegratedGpu) {
 }
 
-GLContextCGL::~GLContextCGL() {
-  Destroy();
-}
-
-bool GLContextCGL::Initialize(
-    GLSurface* compatible_surface, GpuPreference gpu_preference) {
+bool GLContextCGL::Initialize(GLSurface* compatible_surface,
+                              GpuPreference gpu_preference) {
   DCHECK(compatible_surface);
 
   GLContextCGL* share_context = share_group() ?
@@ -87,6 +84,7 @@ void GLContextCGL::Destroy() {
 }
 
 bool GLContextCGL::MakeCurrent(GLSurface* surface) {
+  TRACE_EVENT0("gpu", "GLContextCGL::MakeCurrent");
   DCHECK(context_);
   if (IsCurrent(surface))
     return true;
@@ -140,6 +138,10 @@ void* GLContextCGL::GetHandle() {
 void GLContextCGL::SetSwapInterval(int interval) {
   DCHECK(IsCurrent(NULL));
   LOG(WARNING) << "GLContex: GLContextCGL::SetSwapInterval is ignored.";
+}
+
+GLContextCGL::~GLContextCGL() {
+  Destroy();
 }
 
 GpuPreference GLContextCGL::GetGpuPreference() {

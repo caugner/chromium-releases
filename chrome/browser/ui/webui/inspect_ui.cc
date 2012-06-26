@@ -20,6 +20,7 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager_backend.h"
+#include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/child_process_data.h"
@@ -382,7 +383,7 @@ InspectUI::InspectUI(content::WebUI* web_ui)
   InspectDataSource* html_source = new InspectDataSource();
 
   Profile* profile = Profile::FromWebUI(web_ui);
-  profile->GetChromeURLDataManager()->AddDataSource(html_source);
+  ChromeURLDataManager::AddDataSource(profile, html_source);
 
   registrar_.Add(this,
                  content::NOTIFICATION_WEB_CONTENTS_CONNECTED,
@@ -396,8 +397,7 @@ InspectUI::InspectUI(content::WebUI* web_ui)
 }
 
 InspectUI::~InspectUI() {
-  observer_->InspectUIDestroyed();
-  observer_ = NULL;
+  StopListeningNotifications();
 }
 
 void InspectUI::RefreshUI() {
@@ -407,5 +407,19 @@ void InspectUI::RefreshUI() {
 void InspectUI::Observe(int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
+  if (source == content::Source<WebContents>(web_ui()->GetWebContents())) {
+    if (type == content::NOTIFICATION_WEB_CONTENTS_DISCONNECTED)
+        StopListeningNotifications();
+    return;
+  }
   RefreshUI();
+}
+
+void InspectUI::StopListeningNotifications()
+{
+  if (!observer_)
+    return;
+  observer_->InspectUIDestroyed();
+  observer_ = NULL;
+  registrar_.RemoveAll();
 }

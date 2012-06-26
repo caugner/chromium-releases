@@ -14,12 +14,13 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
 #include "base/string16.h"
-#include "ui/base/events.h"
 #include "ui/aura/aura_export.h"
 #include "ui/aura/client/window_types.h"
-#include "ui/gfx/compositor/layer_animator.h"
-#include "ui/gfx/compositor/layer_delegate.h"
-#include "ui/gfx/compositor/layer_type.h"
+#include "ui/base/events.h"
+#include "ui/base/gestures/gesture_types.h"
+#include "ui/compositor/layer_animator.h"
+#include "ui/compositor/layer_delegate.h"
+#include "ui/compositor/layer_type.h"
 #include "ui/gfx/insets.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/rect.h"
@@ -51,7 +52,8 @@ struct WindowProperty;
 // Aura window implementation. Interesting events are sent to the
 // WindowDelegate.
 // TODO(beng): resolve ownership.
-class AURA_EXPORT Window : public ui::LayerDelegate {
+class AURA_EXPORT Window : public ui::LayerDelegate,
+                           public ui::GestureConsumer {
  public:
   typedef std::vector<Window*> Windows;
 
@@ -72,7 +74,12 @@ class AURA_EXPORT Window : public ui::LayerDelegate {
   explicit Window(WindowDelegate* delegate);
   virtual ~Window();
 
+  // Initializes the window. This creates the window's layer.
   void Init(ui::LayerType layer_type);
+
+  void set_owned_by_parent(bool owned_by_parent) {
+    owned_by_parent_ = owned_by_parent;
+  }
 
   // A type is used to identify a class of Windows and customize behavior such
   // as event handling and parenting.  This field should only be consumed by the
@@ -105,7 +112,8 @@ class AURA_EXPORT Window : public ui::LayerDelegate {
 
   WindowDelegate* delegate() { return delegate_; }
 
-  const gfx::Rect& bounds() const;
+  // TODO(oshima): Rename this to GetBounds().
+  gfx::Rect bounds() const;
 
   Window* parent() { return parent_; }
   const Window* parent() const { return parent_; }
@@ -129,8 +137,15 @@ class AURA_EXPORT Window : public ui::LayerDelegate {
   // whether Show() without a Hide() has been invoked.
   bool TargetVisibility() const { return visible_; }
 
-  // Returns the window's bounds in screen coordinates.
-  gfx::Rect GetScreenBounds() const;
+  // Returns the window's bounds in screen coordinates. In ash, this is
+  // effectively screen bounds.
+  //
+  // TODO(oshima): Fix this to return screen's coordinate for multi-monitor
+  // support.
+  gfx::Rect GetBoundsInRootWindow() const;
+
+  // Returns the bounds in pixel coordinates.
+  const gfx::Rect& GetBoundsInPixel() const;
 
   virtual void SetTransform(const ui::Transform& transform);
 
@@ -170,8 +185,6 @@ class AURA_EXPORT Window : public ui::LayerDelegate {
   void StackChildBelow(Window* child, Window* target);
 
   // Tree operations.
-  // TODO(beng): Child windows are currently not owned by the hierarchy. We
-  //             should change this.
   void AddChild(Window* child);
   void RemoveChild(Window* child);
 
@@ -287,15 +300,18 @@ class AURA_EXPORT Window : public ui::LayerDelegate {
   virtual internal::FocusManager* GetFocusManager();
   virtual const internal::FocusManager* GetFocusManager() const;
 
-  // Does a mouse capture on the window. This does nothing if the window isn't
-  // showing (VISIBILITY_SHOWN) or isn't contained in a valid window hierarchy.
-  void SetCapture();
+  // Sets the capture window to |window|, for events specified in
+  // |flags|. |flags| is ui::CaptureEventFlags. This does nothing if
+  // the window isn't showing (VISIBILITY_SHOWN), or isn't contained
+  // in a valid window hierarchy.
+  void SetCapture(unsigned int flags);
 
-  // Releases a mouse capture.
+  // Stop capturing all events (mouse and touch).
   void ReleaseCapture();
 
-  // Returns true if this window has a mouse capture.
-  bool HasCapture();
+  // Returns true if there is a window capturing all event types
+  // specified by |flags|. |flags| is ui::CaptureEventFlags.
+  bool HasCapture(unsigned int flags);
 
   // Suppresses painting window content by disgarding damaged rect and ignoring
   // new paint requests.
@@ -390,7 +406,17 @@ class AURA_EXPORT Window : public ui::LayerDelegate {
   // Updates the layer name with a name based on the window's name and id.
   void UpdateLayerName(const std::string& name);
 
+#ifndef NDEBUG
+  // These methods are useful when debugging.
+  std::string GetDebugInfo() const;
+  void PrintWindowHierarchy(int depth) const;
+#endif
+
   client::WindowType type_;
+
+  // True if the Window is owned by its parent - i.e. it will be deleted by its
+  // parent during its parents destruction. True is the default.
+  bool owned_by_parent_;
 
   WindowDelegate* delegate_;
 

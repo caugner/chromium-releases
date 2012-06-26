@@ -214,7 +214,7 @@
                 <ol>
                 </ol>
               </li><li>
-                <a href="#type-ModifyRequest">ModifyRequest</a>
+                <a href="#type-RedirectRequest">RedirectRequest</a>
                 <ol>
                 </ol>
               </li>
@@ -292,7 +292,7 @@ version of the WebRequest API. Please ignore this until we give notice.
                 </div>
               </em>
           </dt>
-          <dd>Matches network events by various criteria. Experimental junk, do not use!</dd>
+          <dd>Matches network events by various criteria.</dd>
           <!-- OBJECT PROPERTIES -->
           <dd>
             <dl>
@@ -307,14 +307,45 @@ version of the WebRequest API. Please ignore this until we give notice.
                     <span class="optional">optional</span>
                     <span id="typeTemplate">
                       <span>
-                        <span>string</span>
+                        <a>UrlFilter</a>
                       </span>
                     </span>
                   )
                 </div>
               </em>
           </dt>
-          <dd>Matches for a full URL</dd>
+          <dd>Matches if the condition of the UrlFilter are fulfilled for the URL of the request.</dd>
+          <!-- OBJECT PROPERTIES -->
+          <!-- OBJECT METHODS -->
+          <!-- OBJECT EVENT FIELDS -->
+          <!-- FUNCTION PARAMETERS -->
+        </div>
+              </div><div>
+                <div>
+          <dt>
+            <var>resourceType</var>
+              <em>
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="optional">optional</span>
+                    <span id="typeTemplate">
+                      <span>
+                        <span>
+                          array of <span><span>
+                      <span>
+                        <span>string</span>
+                        <span>["main_frame", "sub_frame", "stylesheet", "script", "image", "object", "xmlhttprequest", "other"]</span>
+                      </span>
+                    </span></span>
+                        </span>
+                      </span>
+                    </span>
+                  )
+                </div>
+              </em>
+          </dt>
+          <dd>Matches if the request type of a request is contained in the list. Requests that cannot match any of the types will be filtered out.</dd>
           <!-- OBJECT PROPERTIES -->
           <!-- OBJECT METHODS -->
           <!-- OBJECT EVENT FIELDS -->
@@ -372,7 +403,7 @@ version of the WebRequest API. Please ignore this until we give notice.
                 </div>
               </em>
           </dt>
-          <dd>Declarative event action that cancels a network request. Experimental junk, do not use!</dd>
+          <dd>Declarative event action that cancels a network request.</dd>
           <!-- OBJECT PROPERTIES -->
           <dd>
             <dl>
@@ -411,8 +442,8 @@ version of the WebRequest API. Please ignore this until we give notice.
           <!-- FUNCTION PARAMETERS -->
         </div>
             </div><div class="apiItem">
-              <a name="type-ModifyRequest"></a>
-              <h4>ModifyRequest</h4>
+              <a name="type-RedirectRequest"></a>
+              <h4>RedirectRequest</h4>
               <div>
           <dt>
               <em>
@@ -428,7 +459,7 @@ version of the WebRequest API. Please ignore this until we give notice.
                 </div>
               </em>
           </dt>
-          <dd>Declarative event action that modifies a network request. Experimental junk, do not use!</dd>
+          <dd>Declarative event action that redirects a network request. (TODO: add destination)</dd>
           <!-- OBJECT PROPERTIES -->
           <dd>
             <dl>
@@ -444,7 +475,7 @@ version of the WebRequest API. Please ignore this until we give notice.
                     <span id="typeTemplate">
                       <span>
                         <span>string</span>
-                        <span>["experimental.webRequest.ModifyRequest"]</span>
+                        <span>["experimental.webRequest.RedirectRequest"]</span>
                       </span>
                     </span>
                   )
@@ -454,6 +485,29 @@ version of the WebRequest API. Please ignore this until we give notice.
           <dd class="todo">
             Undocumented.
           </dd>
+          <!-- OBJECT PROPERTIES -->
+          <!-- OBJECT METHODS -->
+          <!-- OBJECT EVENT FIELDS -->
+          <!-- FUNCTION PARAMETERS -->
+        </div>
+              </div><div>
+                <div>
+          <dt>
+            <var>redirectUrl</var>
+              <em>
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span id="typeTemplate">
+                      <span>
+                        <span>string</span>
+                      </span>
+                    </span>
+                  )
+                </div>
+              </em>
+          </dt>
+          <dd>Destination to where the request is redirected.</dd>
           <!-- OBJECT PROPERTIES -->
           <!-- OBJECT METHODS -->
           <!-- OBJECT EVENT FIELDS -->

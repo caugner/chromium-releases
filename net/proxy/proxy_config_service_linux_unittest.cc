@@ -175,7 +175,7 @@ class MockSettingGetter
     values = zero_values;
   }
 
-  virtual bool Init(MessageLoop* glib_default_loop,
+  virtual bool Init(base::MessageLoopProxy* glib_default_loop,
                     MessageLoopForIO* file_loop) OVERRIDE {
     return true;
   }
@@ -187,7 +187,7 @@ class MockSettingGetter
     return true;
   }
 
-  virtual MessageLoop* GetNotificationLoop() OVERRIDE {
+  virtual base::MessageLoopProxy* GetNotificationLoop() OVERRIDE {
     return NULL;
   }
 
@@ -292,7 +292,7 @@ class SynchConfigGetter {
     DCHECK_EQ(MessageLoop::TYPE_IO, file_loop->type());
     // We pass the mock IO thread as both the IO and file threads.
     config_service_->SetupAndFetchInitialConfig(
-        MessageLoop::current(), io_thread_.message_loop(),
+        base::MessageLoopProxy::current(), io_thread_.message_loop_proxy(),
         static_cast<MessageLoopForIO*>(file_loop));
   }
   // Synchronously gets the proxy config.
@@ -1141,6 +1141,25 @@ TEST_F(ProxyConfigServiceLinuxTest, KDEConfigParser) {
       // Input.
       "[Proxy Settings]\nProxyType=1\n"
           "httpProxy=www.google.com:88\n",
+      {},                                      // env_values
+
+      // Expected result.
+      ProxyConfigService::CONFIG_VALID,
+      false,                                   // auto_detect
+      GURL(),                                  // pac_url
+      ProxyRulesExpectation::PerScheme(
+          "www.google.com:88",  // http
+          "",                   // https
+          "",                   // ftp
+          ""),                  // bypass rules
+    },
+
+    {
+      TEST_DESC("Only HTTP proxy specified, different port, space-delimited"),
+
+      // Input.
+      "[Proxy Settings]\nProxyType=1\n"
+          "httpProxy=www.google.com 88\n",
       {},                                      // env_values
 
       // Expected result.

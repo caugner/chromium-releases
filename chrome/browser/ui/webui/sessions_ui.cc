@@ -264,12 +264,11 @@ SessionsUI::SessionsUI(content::WebUI* web_ui) : WebUIController(web_ui) {
 
   // Set up the chrome://sessions/ source.
   Profile* profile = Profile::FromWebUI(web_ui);
-  profile->GetChromeURLDataManager()->AddDataSource(
-      CreateSessionsUIHTMLSource());
+  ChromeURLDataManager::AddDataSource(profile, CreateSessionsUIHTMLSource());
 }
 
 // static
-RefCountedMemory* SessionsUI::GetFaviconResourceBytes() {
+base::RefCountedMemory* SessionsUI::GetFaviconResourceBytes() {
   return ResourceBundle::GetSharedInstance().
       LoadDataResourceBytes(IDR_HISTORY_FAVICON);
 }

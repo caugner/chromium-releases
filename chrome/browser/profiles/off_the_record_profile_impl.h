@@ -42,13 +42,10 @@ class OffTheRecordProfileImpl : public Profile,
   virtual VisitedLinkMaster* GetVisitedLinkMaster() OVERRIDE;
   virtual ExtensionService* GetExtensionService() OVERRIDE;
   virtual UserScriptMaster* GetUserScriptMaster() OVERRIDE;
-  virtual ExtensionDevToolsManager* GetExtensionDevToolsManager() OVERRIDE;
   virtual ExtensionProcessManager* GetExtensionProcessManager() OVERRIDE;
-  virtual ExtensionMessageService* GetExtensionMessageService() OVERRIDE;
   virtual ExtensionEventRouter* GetExtensionEventRouter() OVERRIDE;
   virtual ExtensionSpecialStoragePolicy*
       GetExtensionSpecialStoragePolicy() OVERRIDE;
-  virtual LazyBackgroundTaskQueue* GetLazyBackgroundTaskQueue() OVERRIDE;
   virtual GAIAInfoUpdateService* GetGAIAInfoUpdateService() OVERRIDE;
   virtual HistoryService* GetHistoryService(ServiceAccessType sat) OVERRIDE;
   virtual HistoryService* GetHistoryServiceWithoutCreating() OVERRIDE;
@@ -59,14 +56,12 @@ class OffTheRecordProfileImpl : public Profile,
   virtual WebDataService* GetWebDataServiceWithoutCreating() OVERRIDE;
   virtual PrefService* GetPrefs() OVERRIDE;
   virtual PrefService* GetOffTheRecordPrefs() OVERRIDE;
-  virtual TemplateURLFetcher* GetTemplateURLFetcher() OVERRIDE;
   virtual net::URLRequestContextGetter*
       GetRequestContextForExtensions() OVERRIDE;
   virtual net::URLRequestContextGetter* GetRequestContextForIsolatedApp(
       const std::string& app_id) OVERRIDE;
   virtual net::SSLConfigService* GetSSLConfigService() OVERRIDE;
   virtual HostContentSettingsMap* GetHostContentSettingsMap() OVERRIDE;
-  virtual UserStyleSheetWatcher* GetUserStyleSheetWatcher() OVERRIDE;
   virtual BookmarkModel* GetBookmarkModel() OVERRIDE;
   virtual ProtocolHandlerRegistry* GetProtocolHandlerRegistry() OVERRIDE;
   virtual bool IsSameProfile(Profile* profile) OVERRIDE;
@@ -74,7 +69,6 @@ class OffTheRecordProfileImpl : public Profile,
   virtual history::TopSites* GetTopSitesWithoutCreating() OVERRIDE;
   virtual history::TopSites* GetTopSites() OVERRIDE;
   virtual void MarkAsCleanShutdown() OVERRIDE;
-  virtual void InitExtensions(bool extensions_enabled) OVERRIDE;
   virtual void InitPromoResources() OVERRIDE;
   virtual void InitRegisteredProtocolHandlers() OVERRIDE;
   virtual FilePath last_selected_directory() OVERRIDE;
@@ -84,13 +78,7 @@ class OffTheRecordProfileImpl : public Profile,
 #if defined(OS_CHROMEOS)
   virtual void SetupChromeOSEnterpriseExtensionObserver() OVERRIDE;
   virtual void InitChromeOSPreferences() OVERRIDE;
-#endif  // defined(OS_CHROMEOS)
 
-  virtual ExtensionInfoMap* GetExtensionInfoMap() OVERRIDE;
-  virtual ChromeURLDataManager* GetChromeURLDataManager() OVERRIDE;
-  virtual PromoCounter* GetInstantPromoCounter() OVERRIDE;
-
-#if defined(OS_CHROMEOS)
   virtual void ChangeAppLocale(const std::string& locale,
                                AppLocaleChangedVia) OVERRIDE;
   virtual void OnLogin() OVERRIDE;
@@ -127,6 +115,9 @@ class OffTheRecordProfileImpl : public Profile,
   FRIEND_TEST_ALL_PREFIXES(OffTheRecordProfileImplTest, GetHostZoomMap);
   void InitHostZoomMap();
 
+  virtual base::Callback<ChromeURLDataManagerBackend*(void)>
+      GetChromeURLDataManagerBackendGetter() const OVERRIDE;
+
   content::NotificationRegistrar registrar_;
 
   // The real underlying profile.
@@ -137,11 +128,6 @@ class OffTheRecordProfileImpl : public Profile,
 
   OffTheRecordProfileIOData::Handle io_data_;
 
-  // Must be freed before |io_data_|. While |extension_process_manager_| still
-  // lives, we handle incoming resource requests from extension processes and
-  // those require access to the ResourceContext owned by |io_data_|.
-  scoped_ptr<ExtensionProcessManager> extension_process_manager_;
-
   // We use a non-persistent content settings map for OTR.
   scoped_refptr<HostContentSettingsMap> host_content_settings_map_;
 
@@ -151,8 +137,6 @@ class OffTheRecordProfileImpl : public Profile,
   FilePath last_selected_directory_;
 
   scoped_ptr<PrefProxyConfigTracker> pref_proxy_config_tracker_;
-
-  scoped_ptr<ChromeURLDataManager> chrome_url_data_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(OffTheRecordProfileImpl);
 };

@@ -10,6 +10,7 @@
 #include "ui/base/hit_test.h"
 #include "ui/gfx/path.h"
 #include "ui/gfx/scoped_sk_region.h"
+#include "ui/views/layout/fill_layout.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/non_client_view.h"
 
@@ -19,6 +20,10 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "ui/base/win/shell.h"
+#endif
+
+#if defined(USE_ASH)
+#include "ash/wm/custom_frame_view_ash.h"
 #endif
 
 // Number of pixels around the edge of the window that can be dragged to
@@ -39,20 +44,12 @@ class ShellWindowFrameView : public views::NonClientFrameView {
                              gfx::Path* window_mask) OVERRIDE;
   virtual void ResetWindowControls() OVERRIDE {}
   virtual void UpdateWindowIcon() OVERRIDE {}
-  virtual gfx::Size GetMinimumSize() OVERRIDE;
-  virtual gfx::Size GetMaximumSize() OVERRIDE;
-
-  void set_min_size(gfx::Size size) { min_size_ = size; }
-  void set_max_size(gfx::Size size) { max_size_ = size; }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ShellWindowFrameView);
-
-  gfx::Size min_size_;
-  gfx::Size max_size_;
 };
 
-ShellWindowFrameView::ShellWindowFrameView(): min_size_() {
+ShellWindowFrameView::ShellWindowFrameView() {
 }
 
 ShellWindowFrameView::~ShellWindowFrameView() {
@@ -99,14 +96,6 @@ void ShellWindowFrameView::GetWindowMask(const gfx::Size& size,
   // Don't touch it.
 }
 
-gfx::Size ShellWindowFrameView::GetMinimumSize() {
-  return min_size_;
-}
-
-gfx::Size ShellWindowFrameView::GetMaximumSize() {
-  return max_size_;
-}
-
 ShellWindowViews::ShellWindowViews(ExtensionHost* host)
     : ShellWindow(host) {
   host_->view()->SetContainer(this);
@@ -114,10 +103,7 @@ ShellWindowViews::ShellWindowViews(ExtensionHost* host)
   views::Widget::InitParams params(views::Widget::InitParams::TYPE_WINDOW);
   params.delegate = this;
   params.remove_standard_frame = true;
-  int width = host_->extension()->launch_width();
-  int height = host_->extension()->launch_height();
-  // TODO(jeremya): we should figure out a better way to position the window.
-  gfx::Rect bounds(10, 10, width, height);
+  gfx::Rect bounds(10, 10, kDefaultWidth, kDefaultHeight);
   params.bounds = bounds;
   window_->Init(params);
 #if defined(OS_WIN) && !defined(USE_AURA)
@@ -128,6 +114,10 @@ ShellWindowViews::ShellWindowViews(ExtensionHost* host)
       host_->profile()->GetPath()),
       GetWidget()->GetTopLevelWidget()->GetNativeWindow());
 #endif
+  AddChildView(host_->view());
+  SetLayoutManager(new views::FillLayout);
+  Layout();
+
   window_->Show();
 }
 
@@ -144,6 +134,10 @@ bool ShellWindowViews::IsMaximized() const {
 
 bool ShellWindowViews::IsMinimized() const {
   return window_->IsMinimized();
+}
+
+bool ShellWindowViews::IsFullscreen() const {
+  return window_->IsFullscreen();
 }
 
 gfx::Rect ShellWindowViews::GetRestoredBounds() const {
@@ -197,6 +191,11 @@ void ShellWindowViews::SetBounds(const gfx::Rect& bounds) {
   GetWidget()->SetBounds(bounds);
 }
 
+void ShellWindowViews::SetDraggableRegion(SkRegion* region) {
+  caption_region_.Set(region);
+  OnViewWasResized();
+}
+
 void ShellWindowViews::FlashFrame(bool flash) {
   window_->FlashFrame(flash);
 }
@@ -218,19 +217,20 @@ bool ShellWindowViews::CanMaximize() const {
 }
 
 views::View* ShellWindowViews::GetContentsView() {
-  return host_->view();
+  return this;
 }
 
 views::NonClientFrameView* ShellWindowViews::CreateNonClientFrameView(
     views::Widget* widget) {
-  ShellWindowFrameView* frame_view = new ShellWindowFrameView();
-  gfx::Size min_size(host_->extension()->launch_min_width(),
-                     host_->extension()->launch_min_height());
-  gfx::Size max_size(host_->extension()->launch_max_width(),
-                     host_->extension()->launch_max_height());
-  frame_view->set_min_size(min_size);
-  frame_view->set_max_size(max_size);
-  return frame_view;
+#if defined(USE_ASH)
+  // TODO(jeremya): make this an option when we have HTTRANSPARENT handling in
+  // aura.
+  ash::CustomFrameViewAsh* frame = new ash::CustomFrameViewAsh();
+  frame->Init(widget);
+  return frame;
+#else
+  return new ShellWindowFrameView();
+#endif
 }
 
 string16 ShellWindowViews::GetWindowTitle() const {
@@ -270,8 +270,10 @@ void ShellWindowViews::OnViewWasResized() {
   SetWindowRgn(host_->view()->native_view(), path.CreateNativeRegion(), 1);
 
   SkRegion* rgn = new SkRegion;
-  rgn->op(0, 0, width, 20, SkRegion::kUnion_Op);
+  if (caption_region_.Get())
+    rgn->op(*caption_region_.Get(), SkRegion::kUnion_Op);
   if (!GetWidget()->IsMaximized()) {
+    rgn->op(0, 0, width, kResizeBorderWidth, SkRegion::kUnion_Op);
     rgn->op(0, 0, kResizeBorderWidth, height, SkRegion::kUnion_Op);
     rgn->op(width - kResizeBorderWidth, 0, width, height, SkRegion::kUnion_Op);
     rgn->op(0, height - kResizeBorderWidth, width, height, SkRegion::kUnion_Op);

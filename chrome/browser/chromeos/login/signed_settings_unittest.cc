@@ -10,13 +10,13 @@
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/mock_library_loader.h"
 #include "chrome/browser/chromeos/cros_settings_names.h"
-#include "chrome/browser/chromeos/dbus/mock_dbus_thread_manager.h"
-#include "chrome/browser/chromeos/dbus/mock_session_manager_client.h"
 #include "chrome/browser/chromeos/login/mock_owner_key_utils.h"
 #include "chrome/browser/chromeos/login/mock_ownership_service.h"
 #include "chrome/browser/chromeos/login/owner_manager_unittest.h"
 #include "chrome/browser/policy/proto/chrome_device_policy.pb.h"
 #include "chrome/browser/policy/proto/device_management_backend.pb.h"
+#include "chromeos/dbus/mock_dbus_thread_manager.h"
+#include "chromeos/dbus/mock_session_manager_client.h"
 #include "content/test/test_browser_thread.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -234,7 +234,7 @@ TEST_F(SignedSettingsTest, SignAndStorePolicy) {
                                                      &signed_serialized);
   MockSessionManagerClient* client =
       mock_dbus_thread_manager_->mock_session_manager_client();
-  EXPECT_CALL(*client, StorePolicy(signed_serialized, _))
+  EXPECT_CALL(*client, StoreDevicePolicy(signed_serialized, _))
       .WillOnce(Store(true))
       .RetiresOnSaturation();
   s->OnKeyOpComplete(OwnerManager::SUCCESS, fake_value_signature_);
@@ -255,7 +255,7 @@ TEST_F(SignedSettingsTest, StoreSignedPolicy) {
       SignedSettings::CreateStorePolicyOp(&signed_policy, &d));
   MockSessionManagerClient* client =
       mock_dbus_thread_manager_->mock_session_manager_client();
-  EXPECT_CALL(*client, StorePolicy(signed_serialized, _))
+  EXPECT_CALL(*client, StoreDevicePolicy(signed_serialized, _))
       .WillOnce(Store(true))
       .RetiresOnSaturation();
 
@@ -302,7 +302,7 @@ TEST_F(SignedSettingsTest, RetrievePolicy) {
 
   MockSessionManagerClient* client =
       mock_dbus_thread_manager_->mock_session_manager_client();
-  EXPECT_CALL(*client, RetrievePolicy(_))
+  EXPECT_CALL(*client, RetrieveDevicePolicy(_))
       .WillOnce(Retrieve(signed_serialized))
       .RetiresOnSaturation();
 
@@ -326,7 +326,7 @@ TEST_F(SignedSettingsTest, RetrieveNullPolicy) {
 
   MockSessionManagerClient* client =
       mock_dbus_thread_manager_->mock_session_manager_client();
-  EXPECT_CALL(*client, RetrievePolicy(_))
+  EXPECT_CALL(*client, RetrieveDevicePolicy(_))
       .WillOnce(Retrieve(""))
       .RetiresOnSaturation();
 
@@ -343,7 +343,7 @@ TEST_F(SignedSettingsTest, RetrieveEmptyPolicy) {
 
   MockSessionManagerClient* client =
       mock_dbus_thread_manager_->mock_session_manager_client();
-  EXPECT_CALL(*client, RetrievePolicy(_))
+  EXPECT_CALL(*client, RetrieveDevicePolicy(_))
       .WillOnce(Retrieve(""))
       .RetiresOnSaturation();
 
@@ -362,7 +362,7 @@ TEST_F(SignedSettingsTest, RetrieveUnsignedPolicy) {
 
   MockSessionManagerClient* client =
       mock_dbus_thread_manager_->mock_session_manager_client();
-  EXPECT_CALL(*client, RetrievePolicy(_))
+  EXPECT_CALL(*client, RetrieveDevicePolicy(_))
       .WillOnce(Retrieve(serialized))
       .RetiresOnSaturation();
 
@@ -381,7 +381,7 @@ TEST_F(SignedSettingsTest, RetrieveMalsignedPolicy) {
 
   MockSessionManagerClient* client =
       mock_dbus_thread_manager_->mock_session_manager_client();
-  EXPECT_CALL(*client, RetrievePolicy(_))
+  EXPECT_CALL(*client, RetrieveDevicePolicy(_))
       .WillOnce(Retrieve(signed_serialized))
       .RetiresOnSaturation();
 

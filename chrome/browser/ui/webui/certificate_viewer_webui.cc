@@ -7,23 +7,22 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/i18n/time_formatting.h"
-#include "base/utf_string_conversions.h"
+#include "base/json/json_writer.h"
 #include "base/string_number_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/certificate_viewer.h"
-#include "chrome/browser/ui/constrained_window.h"
-#include "chrome/browser/ui/dialog_style.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/certificate_dialogs.h"
-#include "chrome/browser/ui/dialog_style.h"
+#include "chrome/browser/ui/constrained_window.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
-#include "chrome/browser/ui/webui/constrained_html_ui.h"
+#include "chrome/browser/ui/webui/constrained_web_dialog_ui.h"
 #include "chrome/common/net/x509_certificate_model.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/web_contents.h"
-#include "ui/base/l10n/l10n_util.h"
 #include "grit/generated_resources.h"
+#include "ui/base/l10n/l10n_util.h"
 
 using content::WebContents;
 using content::WebUIMessageHandler;
@@ -71,8 +70,8 @@ void CertificateViewerDialog::Show(gfx::NativeWindow parent) {
   TabContentsWrapper* current_wrapper =
       browser->GetSelectedTabContentsWrapper();
   // TODO(bshe): UI tweaks needed for AURA html Dialog, such as add padding on
-  // title for AURA ConstrainedHtmlDialog.
-  window_ = ConstrainedHtmlUI::CreateConstrainedHtmlDialog(
+  // title for AURA ConstrainedWebDialogUI.
+  window_ = ConstrainedWebDialogUI::CreateConstrainedWebDialog(
       current_wrapper->profile(),
       this,
       NULL,
@@ -101,61 +100,8 @@ void CertificateViewerDialog::GetDialogSize(gfx::Size* size) const {
 }
 
 std::string CertificateViewerDialog::GetDialogArgs() const {
-  return std::string();
-}
+  std::string data;
 
-void CertificateViewerDialog::OnDialogClosed(const std::string& json_retval) {
-  delete this;
-}
-
-void CertificateViewerDialog::OnCloseContents(WebContents* source,
-                                              bool* out_close_dialog) {
-  if (out_close_dialog)
-    *out_close_dialog = true;
-}
-
-bool CertificateViewerDialog::ShouldShowDialogTitle() const {
-  return true;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// CertificateViewerDialogHandler
-
-CertificateViewerDialogHandler::CertificateViewerDialogHandler(
-    gfx::NativeWindow window,
-    net::X509Certificate* cert) : cert_(cert), window_(window) {
-  x509_certificate_model::GetCertChainFromCert(cert_->os_cert_handle(),
-      &cert_chain_);
-}
-
-CertificateViewerDialogHandler::~CertificateViewerDialogHandler() {
-}
-
-void CertificateViewerDialogHandler::RegisterMessages() {
-  web_ui()->RegisterMessageCallback("exportCertificate",
-      base::Bind(&CertificateViewerDialogHandler::ExportCertificate,
-                 base::Unretained(this)));
-  web_ui()->RegisterMessageCallback("requestCertificateInfo",
-      base::Bind(&CertificateViewerDialogHandler::RequestCertificateInfo,
-                 base::Unretained(this)));
-  web_ui()->RegisterMessageCallback("requestCertificateFields",
-      base::Bind(&CertificateViewerDialogHandler::RequestCertificateFields,
-                 base::Unretained(this)));
-}
-
-void CertificateViewerDialogHandler::ExportCertificate(
-    const base::ListValue* args) {
-  int cert_index = GetCertificateIndex(args);
-  if (cert_index < 0)
-    return;
-
-  ShowCertExportDialog(web_ui()->GetWebContents(),
-                       window_,
-                       cert_chain_[cert_index]);
-}
-
-void CertificateViewerDialogHandler::RequestCertificateInfo(
-    const base::ListValue* args) {
   // Certificate information. The keys in this dictionary's general key
   // correspond to the IDs in the Html page.
   DictionaryValue cert_info;
@@ -245,8 +191,59 @@ void CertificateViewerDialogHandler::RequestCertificateInfo(
   // Set the last node as the top of the certificate hierarchy.
   cert_info.Set("hierarchy", children);
 
-  // Send certificate information to javascript.
-  web_ui()->CallJavascriptFunction("cert_viewer.getCertificateInfo", cert_info);
+    base::JSONWriter::WriteWithOptions(
+          &cert_info,
+          base::JSONWriter::OPTIONS_DO_NOT_ESCAPE,
+          &data);
+
+  return data;
+}
+
+void CertificateViewerDialog::OnDialogClosed(const std::string& json_retval) {
+  delete this;
+}
+
+void CertificateViewerDialog::OnCloseContents(WebContents* source,
+                                              bool* out_close_dialog) {
+  if (out_close_dialog)
+    *out_close_dialog = true;
+}
+
+bool CertificateViewerDialog::ShouldShowDialogTitle() const {
+  return true;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// CertificateViewerDialogHandler
+
+CertificateViewerDialogHandler::CertificateViewerDialogHandler(
+    gfx::NativeWindow window,
+    net::X509Certificate* cert) : cert_(cert), window_(window) {
+  x509_certificate_model::GetCertChainFromCert(cert_->os_cert_handle(),
+      &cert_chain_);
+}
+
+CertificateViewerDialogHandler::~CertificateViewerDialogHandler() {
+}
+
+void CertificateViewerDialogHandler::RegisterMessages() {
+  web_ui()->RegisterMessageCallback("exportCertificate",
+      base::Bind(&CertificateViewerDialogHandler::ExportCertificate,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback("requestCertificateFields",
+      base::Bind(&CertificateViewerDialogHandler::RequestCertificateFields,
+                 base::Unretained(this)));
+}
+
+void CertificateViewerDialogHandler::ExportCertificate(
+    const base::ListValue* args) {
+  int cert_index = GetCertificateIndex(args);
+  if (cert_index < 0)
+    return;
+
+  ShowCertExportDialog(web_ui()->GetWebContents(),
+                       window_,
+                       cert_chain_[cert_index]);
 }
 
 void CertificateViewerDialogHandler::RequestCertificateFields(

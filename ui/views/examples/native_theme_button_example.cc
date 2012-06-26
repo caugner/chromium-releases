@@ -63,43 +63,43 @@ ExampleNativeThemeButton::~ExampleNativeThemeButton() {
 std::string ExampleNativeThemeButton::MessWithState() {
   const char* message = NULL;
   switch (GetThemePart()) {
-  case gfx::NativeTheme::kPushButton:
-    message = "Pressed! count:%d";
-    break;
-  case gfx::NativeTheme::kRadio:
-    is_checked_ = !is_checked_;
-    message = is_checked_ ? "Checked! count:%d" : "Unchecked! count:%d";
-    break;
-  case gfx::NativeTheme::kCheckbox:
-    if (is_indeterminate_) {
-      is_checked_ = false;
-      is_indeterminate_ = false;
-    } else if (!is_checked_) {
-      is_checked_ = true;
-    } else {
-      is_checked_ = false;
-      is_indeterminate_ = true;
-    }
-
-    message = is_checked_ ? "Checked! count:%d" :
-      is_indeterminate_ ? "Indeterminate! count:%d" : "Unchecked! count:%d";
-    break;
-  default:
-    DCHECK(false);
+    case gfx::NativeTheme::kPushButton:
+      message = "Pressed! count:%d";
+      break;
+    case gfx::NativeTheme::kRadio:
+      is_checked_ = !is_checked_;
+      message = is_checked_ ? "Checked! count:%d" : "Unchecked! count:%d";
+      break;
+    case gfx::NativeTheme::kCheckbox:
+      if (is_indeterminate_) {
+        is_checked_ = false;
+        is_indeterminate_ = false;
+      } else if (!is_checked_) {
+        is_checked_ = true;
+      } else {
+        is_checked_ = false;
+        is_indeterminate_ = true;
+      }
+      if (is_checked_)
+        message = "Checked! count:%d";
+      else if (is_indeterminate_)
+        message = "Indeterminate! count:%d";
+      else
+        message = "Unchecked! count:%d";
+      break;
+    default:
+      NOTREACHED();
   }
 
   return base::StringPrintf(message, ++count_);
 }
 
-void ExampleNativeThemeButton::ItemChanged(Combobox* combo_box,
-                                           int prev_index,
-                                           int new_index) {
+void ExampleNativeThemeButton::OnSelectedIndexChanged(Combobox* combobox) {
   SchedulePaint();
 }
 
 gfx::NativeTheme::Part ExampleNativeThemeButton::GetThemePart() const {
-  int selected = cb_part_->selected_item();
-  switch (selected) {
+  switch (cb_part_->selected_index()) {
     case 0:
       return gfx::NativeTheme::kPushButton;
     case 1:
@@ -107,7 +107,7 @@ gfx::NativeTheme::Part ExampleNativeThemeButton::GetThemePart() const {
     case 2:
       return gfx::NativeTheme::kCheckbox;
     default:
-      DCHECK(false);
+      NOTREACHED();
   }
   return gfx::NativeTheme::kPushButton;
 }
@@ -127,7 +127,7 @@ gfx::NativeTheme::State ExampleNativeThemeButton::GetThemeState(
     gfx::NativeTheme::ExtraParams* params) const {
   GetExtraParams(params);
 
-  int selected = cb_state_->selected_item();
+  int selected = cb_state_->selected_index();
   if (selected > 3) {
     switch (state()) {
       case BS_DISABLED:
@@ -139,7 +139,7 @@ gfx::NativeTheme::State ExampleNativeThemeButton::GetThemeState(
       case BS_PUSHED:
         return gfx::NativeTheme::kPressed;
       default:
-        DCHECK(false);
+        NOTREACHED();
     }
   }
 
@@ -153,7 +153,7 @@ gfx::NativeTheme::State ExampleNativeThemeButton::GetThemeState(
     case 3:
       return gfx::NativeTheme::kPressed;
     default:
-      DCHECK(false);
+      NOTREACHED();
   }
   return gfx::NativeTheme::kNormal;
 }
@@ -170,8 +170,7 @@ void ExampleNativeThemeButton::GetExtraParams(
 }
 
 const ui::Animation* ExampleNativeThemeButton::GetThemeAnimation() const {
-  int selected = cb_state_->selected_item();
-  return selected <= 3 ? NULL : hover_animation_.get();
+  return cb_state_->selected_index() <= 3 ? NULL : hover_animation_.get();
 }
 
 gfx::NativeTheme::State ExampleNativeThemeButton::GetBackgroundThemeState(
@@ -222,21 +221,23 @@ void NativeThemeButtonExample::CreateExampleView(View* container) {
 
   layout->StartRow(0, 0);
   layout->AddView(new Label(ASCIIToUTF16("Part:")));
-  Combobox* cb_part = new Combobox(
+  combobox_model_part_.reset(
       new ExampleComboboxModel(kParts, arraysize(kParts)));
-  cb_part->SetSelectedItem(0);
-  layout->AddView(cb_part);
+  Combobox* combobox_part = new Combobox(combobox_model_part_.get());
+  combobox_part->SetSelectedIndex(0);
+  layout->AddView(combobox_part);
 
   layout->StartRow(0, 0);
   layout->AddView(new Label(ASCIIToUTF16("State:")));
-  Combobox* cb_state = new Combobox(
+  combobox_model_state_.reset(
       new ExampleComboboxModel(kStates, arraysize(kStates)));
-  cb_state->SetSelectedItem(0);
-  layout->AddView(cb_state);
+  Combobox* combobox_state = new Combobox(combobox_model_state_.get());
+  combobox_state->SetSelectedIndex(0);
+  layout->AddView(combobox_state);
 
   layout->AddPaddingRow(0, 32);
 
-  button_ = new ExampleNativeThemeButton(this, cb_part, cb_state);
+  button_ = new ExampleNativeThemeButton(this, combobox_part, combobox_state);
 
   column_set = layout->AddColumnSet(1);
   column_set->AddPaddingColumn(0, 16);

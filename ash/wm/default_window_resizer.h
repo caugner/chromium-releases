@@ -20,31 +20,25 @@ class RootWindowEventFilter;
 // windows coordiantes.
 class ASH_EXPORT DefaultWindowResizer : public WindowResizer {
  public:
-  // Constants to identify the type of resize.
-  static const int kBoundsChange_None;
-  static const int kBoundsChange_Repositions;
-  static const int kBoundsChange_Resizes;
-
-  // Used to indicate which direction the resize occurs in.
-  static const int kBoundsChangeDirection_None;
-  static const int kBoundsChangeDirection_Horizontal;
-  static const int kBoundsChangeDirection_Vertical;
-
   virtual ~DefaultWindowResizer();
 
   // Creates a new DefaultWindowResizer. The caller takes ownership of the
   // returned object. Returns NULL if not resizable.
   static DefaultWindowResizer* Create(aura::Window* window,
                                       const gfx::Point& location,
-                                      int window_component,
-                                      int grid_size);
+                                      int window_component);
 
   // Returns true if the drag will result in changing the window in anyway.
   bool is_resizable() const { return details_.is_resizable; }
 
+  bool changed_size() const {
+    return !(details_.bounds_change & kBoundsChange_Repositions);
+  }
+  aura::Window* target_window() const { return details_.window; }
+
   // WindowResizer overides:
-  virtual void Drag(const gfx::Point& location) OVERRIDE;
-  virtual void CompleteDrag() OVERRIDE;
+  virtual void Drag(const gfx::Point& location, int event_flags) OVERRIDE;
+  virtual void CompleteDrag(int event_flags) OVERRIDE;
   virtual void RevertDrag() OVERRIDE;
 
  private:

@@ -50,7 +50,7 @@
           'conditions': [
             ['use_aura==1', {
               'dependencies': [
-                '../ui/gfx/compositor/compositor.gyp:compositor',
+                '../ui/compositor/compositor.gyp:compositor',
               ],
             }],
             ['OS=="win"', {
@@ -97,9 +97,9 @@
                 # resulting .res files get referenced multiple times.
                 '<(SHARED_INTERMEDIATE_DIR)/chrome/browser_resources.rc',
                 '<(SHARED_INTERMEDIATE_DIR)/chrome/common_resources.rc',
+                '<(SHARED_INTERMEDIATE_DIR)/chrome/extensions_api_resources.rc',
                 '<(SHARED_INTERMEDIATE_DIR)/chrome/renderer_resources.rc',
                 '<(SHARED_INTERMEDIATE_DIR)/chrome/theme_resources.rc',
-                '<(SHARED_INTERMEDIATE_DIR)/chrome/theme_resources_standard.rc',
                 '<(SHARED_INTERMEDIATE_DIR)/content/content_resources.rc',
                 '<(SHARED_INTERMEDIATE_DIR)/net/net_resources.rc',
                 '<(SHARED_INTERMEDIATE_DIR)/ui/gfx/gfx_resources.rc',
@@ -133,6 +133,7 @@
               },
               'msvs_settings': {
                 'VCLinkerTool': {
+                  'AdditionalLibraryDirectories': ['$(DXSDK_DIR)/lib/x86'],
                   'BaseAddress': '0x01c30000',
                   'ImportLibrary': '$(OutDir)\\lib\\chrome_dll.lib',
                   'ProgramDatabaseFile': '$(OutDir)\\chrome_dll.pdb',
@@ -232,7 +233,6 @@
                 'app/theme/<(theme_dir_name)/product_logo_32.png',
 
                 'app/framework-Info.plist',
-                'app/nibs/About.xib',
                 'app/nibs/AboutIPC.xib',
                 'app/nibs/AvatarMenuItem.xib',
                 'app/nibs/BookmarkAllTabs.xib',
@@ -270,9 +270,9 @@
                 'app/nibs/ImportProgressDialog.xib',
                 'app/nibs/InfoBar.xib',
                 'app/nibs/InfoBarContainer.xib',
-                'app/nibs/InstantOptIn.xib',
                 'app/nibs/MainMenu.xib',
                 'app/nibs/Notification.xib',
+                'app/nibs/OneClickSigninBubble.xib',
                 'app/nibs/OneClickSigninDialog.xib',
                 'app/nibs/Panel.xib',
                 'app/nibs/PreviewableContents.xib',
@@ -303,8 +303,10 @@
                 'app/theme/star.pdf',
                 'app/theme/star_lit.pdf',
                 'browser/mac/install.sh',
-                 '<(SHARED_INTERMEDIATE_DIR)/repack/chrome.pak',
-                 '<(SHARED_INTERMEDIATE_DIR)/repack/resources.pak',
+                '<(SHARED_INTERMEDIATE_DIR)/repack/chrome.pak',
+                '<(SHARED_INTERMEDIATE_DIR)/repack/resources.pak',
+                '<(grit_out_dir)/theme_resources_standard.pak',
+                '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources_standard/ui_resources_standard.pak',
                 '<!@pymod_do_main(repack_locales -o -g <(grit_out_dir) -s <(SHARED_INTERMEDIATE_DIR) -x <(SHARED_INTERMEDIATE_DIR) <(locales))',
                 # Note: pseudo_locales are generated via the packed_resources
                 # dependency but not copied to the final target.  See
@@ -353,11 +355,6 @@
                 ],
                 'repack_path': '../tools/grit/grit/format/repack.py',
               },
-              'actions': [
-                {
-                  'includes': ['chrome_repack_theme_resources_2x.gypi']
-                },
-              ],
               'postbuilds': [
                 {
                   # This step causes an error to be raised if the .order file
@@ -534,6 +531,12 @@
                 ['internal_pdf', {
                   'dependencies': [
                     '../pdf/pdf.gyp:pdf',
+                  ],
+                }],
+                ['enable_hidpi==1', {
+                  'mac_bundle_resources': [
+                    '<(grit_out_dir)/theme_resources_2x.pak',
+                    '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources_2x/ui_resources_2x.pak',
                   ],
                 }],
               ],  # conditions

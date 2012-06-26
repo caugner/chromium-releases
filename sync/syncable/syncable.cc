@@ -302,36 +302,6 @@ syncable::ModelType EntryKernel::GetServerModelType() const {
   return UNSPECIFIED;
 }
 
-bool EntryKernel::ContainsString(const std::string& lowercase_query) const {
-  // TODO(lipalani) - figure out what to do if the node is encrypted.
-  const sync_pb::EntitySpecifics& specifics = ref(SPECIFICS);
-  std::string temp;
-  // The protobuf serialized string contains the original strings. So
-  // we will just serialize it and search it.
-  specifics.SerializeToString(&temp);
-
-  // Now convert to lower case.
-  StringToLowerASCII(&temp);
-
-  if (temp.find(lowercase_query) != std::string::npos)
-    return true;
-
-  // Now go through all the string fields to see if the value is there.
-  for (int i = STRING_FIELDS_BEGIN; i < STRING_FIELDS_END; ++i) {
-    if (StringToLowerASCII(ref(static_cast<StringField>(i))).find(
-            lowercase_query) != std::string::npos)
-      return true;
-  }
-
-  for (int i = ID_FIELDS_BEGIN; i < ID_FIELDS_END; ++i) {
-    const Id& id = ref(static_cast<IdField>(i));
-    if (id.ContainsStringCaseInsensitive(lowercase_query)) {
-      return true;
-    }
-  }
-  return false;
-}
-
 namespace {
 
 // Utility function to loop through a set of enum values and add the
@@ -963,7 +933,7 @@ void Directory::PurgeEntriesWithTypeIn(ModelTypeSet types) {
         // Note the dance around incrementing |it|, since we sometimes erase().
         if ((IsRealDataType(local_type) && types.Has(local_type)) ||
             (IsRealDataType(server_type) && types.Has(server_type))) {
-          if (!UnlinkEntryFromOrder(*it, NULL, &lock))
+          if (!UnlinkEntryFromOrder(*it, &trans, &lock, DATA_TYPE_PURGE))
             return;
 
           int64 handle = (*it)->ref(META_HANDLE);
@@ -1174,7 +1144,7 @@ FullModelTypeSet Directory::GetServerTypesWithUnappliedUpdates(
 void Directory::GetUnappliedUpdateMetaHandles(
     BaseTransaction* trans,
     FullModelTypeSet server_types,
-    UnappliedUpdateMetaHandles* result) {
+    std::vector<int64>* result) {
   result->clear();
   ScopedKernelLock lock(this);
   for (int i = UNSPECIFIED; i < MODEL_TYPE_COUNT; ++i) {
@@ -1982,12 +1952,16 @@ bool MutableEntry::Put(IndexedBitField field, bool value) {
 
 bool MutableEntry::UnlinkFromOrder() {
   ScopedKernelLock lock(dir());
-  return dir()->UnlinkEntryFromOrder(kernel_, write_transaction(), &lock);
+  return dir()->UnlinkEntryFromOrder(kernel_,
+                                     write_transaction(),
+                                     &lock,
+                                     NODE_MANIPULATION);
 }
 
 bool Directory::UnlinkEntryFromOrder(EntryKernel* entry,
                                      WriteTransaction* trans,
-                                     ScopedKernelLock* lock) {
+                                     ScopedKernelLock* lock,
+                                     UnlinkReason unlink_reason) {
   if (!SyncAssert(!trans || this == trans->directory(),
                   FROM_HERE,
                   "Transaction not pointing to the right directory",
@@ -2032,7 +2006,7 @@ bool Directory::UnlinkEntryFromOrder(EntryKernel* entry,
         return false;
       }
     }
-    if (trans)
+    if (unlink_reason == NODE_MANIPULATION)
       trans->SaveOriginal(previous_entry);
     previous_entry->put(NEXT_ID, old_next);
     previous_entry->mark_dirty(kernel_->dirty_metahandles);
@@ -2046,7 +2020,7 @@ bool Directory::UnlinkEntryFromOrder(EntryKernel* entry,
                     trans)) {
       return false;
     }
-    if (trans)
+    if (unlink_reason == NODE_MANIPULATION)
       trans->SaveOriginal(next_entry);
     next_entry->put(PREV_ID, old_previous);
     next_entry->mark_dirty(kernel_->dirty_metahandles);

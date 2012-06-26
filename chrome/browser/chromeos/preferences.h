@@ -17,6 +17,9 @@
 class PrefService;
 
 namespace chromeos {
+namespace input_method {
+class InputMethodManager;
+}  // namespace input_method
 
 // The Preferences class handles Chrome OS preferences. When the class
 // is first initialized, it will initialize the OS settings to what's stored in
@@ -25,6 +28,8 @@ namespace chromeos {
 class Preferences : public content::NotificationObserver {
  public:
   Preferences();
+  explicit Preferences(
+      input_method::InputMethodManager* input_method_manager);  // for testing
   virtual ~Preferences();
 
   // This method will register the prefs associated with Chrome OS settings.
@@ -42,7 +47,13 @@ class Preferences : public content::NotificationObserver {
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
+  void InitUserPrefsForTesting(PrefService* prefs);
+  void SetInputMethodListForTesting();
+
  private:
+  // Initializes all member prefs.
+  void InitUserPrefs(PrefService* prefs);
+
   // This will set the OS settings when the preference changes.
   // If this method is called with NULL, it will set all OS settings to what's
   // stored in the preferences.
@@ -79,6 +90,9 @@ class Preferences : public content::NotificationObserver {
                                         const char* name,
                                         const std::string& value);
 
+  // Restores the user's preferred input method / keyboard layout on signing in.
+  void SetInputMethodList();
+
   // Updates the mapping of modifier keys following current prefs values.
   void UpdateModifierKeyMapping();
 
@@ -87,12 +101,16 @@ class Preferences : public content::NotificationObserver {
   // underlying XKB API requires it.
   void UpdateAutoRepeatRate();
 
+  input_method::InputMethodManager* input_method_manager_;
+
   BooleanPrefMember tap_to_click_enabled_;
+  BooleanPrefMember three_finger_click_enabled_;
   BooleanPrefMember natural_scroll_;
   BooleanPrefMember vert_edge_scroll_enabled_;
   BooleanPrefMember accessibility_enabled_;
   IntegerPrefMember speed_factor_;
-  IntegerPrefMember sensitivity_;
+  IntegerPrefMember mouse_sensitivity_;
+  IntegerPrefMember touchpad_sensitivity_;
   BooleanPrefMember primary_mouse_button_right_;
   BooleanPrefMember use_24hour_clock_;
   BooleanPrefMember disable_gdata_;
@@ -100,8 +118,6 @@ class Preferences : public content::NotificationObserver {
   BooleanPrefMember disable_gdata_hosted_files_;
 
   // Input method preferences.
-  StringPrefMember hotkey_next_engine_in_menu_;
-  StringPrefMember hotkey_previous_engine_;
   StringPrefMember preferred_languages_;
   StringPrefMember preload_engines_;
   StringPrefMember current_input_method_;
@@ -136,6 +152,8 @@ class Preferences : public content::NotificationObserver {
   IntegerPrefMember xkb_auto_repeat_interval_pref_;
 
   BooleanPrefMember enable_screen_lock_;
+
+  BooleanPrefMember enable_drm_;
 
   DISALLOW_COPY_AND_ASSIGN(Preferences);
 };

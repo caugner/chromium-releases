@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,6 +19,7 @@
 
 using ::testing::_;
 using ::testing::DoAll;
+using ::testing::NiceMock;
 using ::testing::Return;
 using ::testing::SetArgumentPointee;
 
@@ -32,7 +33,7 @@ class MockThemeProvider : public ui::ThemeProvider {
   MOCK_CONST_METHOD2(GetDisplayProperty, bool(int, int*));
   MOCK_CONST_METHOD0(ShouldUseNativeFrame, bool());
   MOCK_CONST_METHOD1(HasCustomImage, bool(int));
-  MOCK_CONST_METHOD1(GetRawData, RefCountedMemory*(int));
+  MOCK_CONST_METHOD1(GetRawData, base::RefCountedMemory*(int));
 
   // OSX stuff
   MOCK_CONST_METHOD2(GetNSImageNamed, NSImage*(int, bool));
@@ -132,7 +133,7 @@ TEST_F(BookmarkBarToolbarViewTest, DisplayAsDetachedBarWithNoImage) {
   [controller_.get() setVisualState:bookmarks::kDetachedState];
 
   // Tests where we don't have a background image, only a color.
-  MockThemeProvider provider;
+  NiceMock<MockThemeProvider> provider;
   EXPECT_CALL(provider, GetColor(ThemeService::COLOR_NTP_BACKGROUND))
       .WillRepeatedly(Return(SK_ColorWHITE));
   EXPECT_CALL(provider, HasCustomImage(IDR_THEME_NTP_BACKGROUND))
@@ -158,7 +159,7 @@ TEST_F(BookmarkBarToolbarViewTest, DisplayAsDetachedBarWithBgImage) {
   [controller_.get() setVisualState:bookmarks::kDetachedState];
 
   // Tests where we have a background image, with positioning information.
-  MockThemeProvider provider;
+  NiceMock<MockThemeProvider> provider;
 
   // Advertise having an image.
   EXPECT_CALL(provider, GetColor(ThemeService::COLOR_NTP_BACKGROUND))

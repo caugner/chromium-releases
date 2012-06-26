@@ -8,9 +8,9 @@
 #include "base/memory/scoped_ptr.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/browser_message_filter.h"
+#include "content/public/browser/speech_recognition_event_listener.h"
 #include "net/url_request/url_request_context_getter.h"
 
-class AudioManager;
 struct InputTagSpeechHostMsg_StartRecognition_Params;
 
 namespace content {
@@ -23,24 +23,32 @@ namespace speech {
 class SpeechRecognitionManagerImpl;
 
 // InputTagSpeechDispatcherHost is a delegate for Speech API messages used by
-// RenderMessageFilter.
-// It's the complement of InputTagSpeechDispatcher (owned by RenderView).
+// RenderMessageFilter. Basically it acts as a proxy, relaying the events coming
+// from the SpeechRecognitionManager to IPC messages (and vice versa).
+// It's the complement of SpeechRecognitionDispatcher (owned by RenderView).
 class CONTENT_EXPORT InputTagSpeechDispatcherHost
-    : public content::BrowserMessageFilter {
+    : public content::BrowserMessageFilter,
+      public content::SpeechRecognitionEventListener {
  public:
-  class Callers;
-
   InputTagSpeechDispatcherHost(
       int render_process_id,
-      net::URLRequestContextGetter* context_getter,
-      content::SpeechRecognitionPreferences* recognition_preferences,
-      AudioManager* audio_manager);
+      net::URLRequestContextGetter* url_request_context_getter,
+      content::SpeechRecognitionPreferences* recognition_preferences);
 
-  // Methods called by SpeechRecognitionManagerImpl.
-  void SetRecognitionResult(int caller_id,
-                            const content::SpeechRecognitionResult& result);
-  void DidCompleteRecording(int caller_id);
-  void DidCompleteRecognition(int caller_id);
+  // SpeechRecognitionEventListener methods.
+  virtual void OnRecognitionStart(int session_id) OVERRIDE;
+  virtual void OnAudioStart(int session_id) OVERRIDE;
+  virtual void OnEnvironmentEstimationComplete(int session_id) OVERRIDE;
+  virtual void OnSoundStart(int session_id) OVERRIDE;
+  virtual void OnSoundEnd(int session_id) OVERRIDE;
+  virtual void OnAudioEnd(int session_id) OVERRIDE;
+  virtual void OnRecognitionEnd(int session_id) OVERRIDE;
+  virtual void OnRecognitionResult(
+      int session_id, const content::SpeechRecognitionResult& result) OVERRIDE;
+  virtual void OnRecognitionError(
+      int session_id, const content::SpeechRecognitionError& error) OVERRIDE;
+  virtual void OnAudioLevelsChange(
+      int session_id, float volume, float noise_volume) OVERRIDE;
 
   // content::BrowserMessageFilter implementation.
   virtual bool OnMessageReceived(const IPC::Message& message,
@@ -64,9 +72,8 @@ class CONTENT_EXPORT InputTagSpeechDispatcherHost
   int render_process_id_;
   bool may_have_pending_requests_;  // Set if we received any speech IPC request
 
-  scoped_refptr<net::URLRequestContextGetter> context_getter_;
+  scoped_refptr<net::URLRequestContextGetter> url_request_context_getter_;
   scoped_refptr<content::SpeechRecognitionPreferences> recognition_preferences_;
-  AudioManager* audio_manager_;
 
   static SpeechRecognitionManagerImpl* manager_;
 

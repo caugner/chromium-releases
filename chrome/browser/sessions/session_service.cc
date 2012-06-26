@@ -51,8 +51,10 @@ static const SessionCommand::id_type kCommandSetTabWindow = 0;
 // OBSOLETE Superseded by kCommandSetWindowBounds3.
 // static const SessionCommand::id_type kCommandSetWindowBounds = 1;
 static const SessionCommand::id_type kCommandSetTabIndexInWindow = 2;
-static const SessionCommand::id_type kCommandTabClosed = 3;
-static const SessionCommand::id_type kCommandWindowClosed = 4;
+// Original kCommandTabClosed/kCommandWindowClosed. See comment in
+// MigrateClosedPayload for details on why they were replaced.
+static const SessionCommand::id_type kCommandTabClosedObsolete = 3;
+static const SessionCommand::id_type kCommandWindowClosedObsolete = 4;
 static const SessionCommand::id_type
     kCommandTabNavigationPathPrunedFromBack = 5;
 static const SessionCommand::id_type kCommandUpdateTabNavigation = 6;
@@ -67,6 +69,8 @@ static const SessionCommand::id_type kCommandSetPinnedState = 12;
 static const SessionCommand::id_type kCommandSetExtensionAppID = 13;
 static const SessionCommand::id_type kCommandSetWindowBounds3 = 14;
 static const SessionCommand::id_type kCommandSetWindowAppName = 15;
+static const SessionCommand::id_type kCommandTabClosed = 16;
+static const SessionCommand::id_type kCommandWindowClosed = 17;
 
 // Every kWritesPerReset commands triggers recreating the file.
 static const int kWritesPerReset = 250;
@@ -159,6 +163,31 @@ ui::WindowShowState AdjustShowState(ui::WindowShowState state) {
   return ui::SHOW_STATE_NORMAL;
 }
 
+// Migrates a |ClosedPayload|, returning true on success (migration was
+// necessary and happened), or false (migration was not necessary or was not
+// successful).
+bool MigrateClosedPayload(const SessionCommand& command,
+                          ClosedPayload* payload) {
+#if defined(OS_CHROMEOS)
+  // Pre M17 versions of chromeos were 32bit. Post M17 is 64 bit. Apparently the
+  // 32 bit versions of chrome on pre M17 resulted in a sizeof 12 for the
+  // ClosedPayload, where as post M17 64-bit gives a sizeof 16 (presumably the
+  // struct is padded).
+  if ((command.id() == kCommandWindowClosedObsolete ||
+       command.id() == kCommandTabClosedObsolete) &&
+      command.size() == 12 && sizeof(payload->id) == 4 &&
+      sizeof(payload->close_time) == 8) {
+    memcpy(&payload->id, command.contents(), 4);
+    memcpy(&payload->close_time, command.contents() + 4, 8);
+    return true;
+  } else {
+    return false;
+  }
+#else
+  return false;
+#endif
+}
+
 }  // namespace
 
 // SessionService -------------------------------------------------------------
@@ -169,7 +198,8 @@ SessionService::SessionService(Profile* profile)
       move_on_new_browser_(false),
       save_delay_in_millis_(base::TimeDelta::FromMilliseconds(2500)),
       save_delay_in_mins_(base::TimeDelta::FromMinutes(10)),
-      save_delay_in_hrs_(base::TimeDelta::FromHours(8)) {
+      save_delay_in_hrs_(base::TimeDelta::FromHours(8)),
+      force_browser_not_alive_with_no_windows_(false) {
   Init();
 }
 
@@ -179,7 +209,8 @@ SessionService::SessionService(const FilePath& save_path)
       move_on_new_browser_(false),
       save_delay_in_millis_(base::TimeDelta::FromMilliseconds(2500)),
       save_delay_in_mins_(base::TimeDelta::FromMinutes(10)),
-      save_delay_in_hrs_(base::TimeDelta::FromHours(8)) {
+      save_delay_in_hrs_(base::TimeDelta::FromHours(8)),
+      force_browser_not_alive_with_no_windows_(false)  {
   Init();
 }
 
@@ -474,9 +505,9 @@ void SessionService::Save() {
 
 void SessionService::Init() {
   // Register for the notifications we're interested in.
-  registrar_.Add(this, content::NOTIFICATION_TAB_PARENTED,
+  registrar_.Add(this, chrome::NOTIFICATION_TAB_PARENTED,
                  content::NotificationService::AllSources());
-  registrar_.Add(this, content::NOTIFICATION_TAB_CLOSED,
+  registrar_.Add(this, content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
                  content::NotificationService::AllSources());
   registrar_.Add(this, content::NOTIFICATION_NAV_LIST_PRUNED,
                  content::NotificationService::AllSources());
@@ -496,7 +527,10 @@ bool SessionService::ShouldNewWindowStartSession() {
   // ChromeOS and OSX have different ideas of application lifetime than
   // the other platforms.
   // On ChromeOS opening a new window should never start a new session.
-#if !defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS)
+  if (!force_browser_not_alive_with_no_windows_)
+    return false;
+#endif
   if (!has_open_trackable_browsers_ &&
       !BrowserInit::InSynchronousProfileLaunch() &&
       !SessionRestore::IsRestoring(profile())
@@ -508,7 +542,6 @@ bool SessionService::ShouldNewWindowStartSession() {
       ) {
     return true;
   }
-#endif  // !OS_CHROMEOS
   return false;
 }
 
@@ -553,7 +586,7 @@ void SessionService::Observe(int type,
       break;
     }
 
-    case content::NOTIFICATION_TAB_PARENTED: {
+    case chrome::NOTIFICATION_TAB_PARENTED: {
       TabContentsWrapper* tab =
           content::Source<TabContentsWrapper>(source).ptr();
       if (tab->profile() != profile())
@@ -569,17 +602,17 @@ void SessionService::Observe(int type,
       break;
     }
 
-    case content::NOTIFICATION_TAB_CLOSED: {
+    case content::NOTIFICATION_WEB_CONTENTS_DESTROYED: {
       TabContentsWrapper* tab =
           TabContentsWrapper::GetCurrentWrapperForContents(
-              content::Source<content::NavigationController>(
-                  source).ptr()->GetWebContents());
+              content::Source<content::WebContents>(source).ptr());
       if (!tab || tab->profile() != profile())
         return;
       TabClosed(tab->restore_tab_helper()->window_id(),
                 tab->restore_tab_helper()->session_id(),
                 tab->web_contents()->GetClosedByUserGesture());
-      RecordSessionUpdateHistogramData(content::NOTIFICATION_TAB_CLOSED,
+      RecordSessionUpdateHistogramData(
+          content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
           &last_updated_tab_closed_time_);
       break;
     }
@@ -1026,12 +1059,17 @@ bool SessionService::CreateTabsAndWindows(
         break;
       }
 
+      case kCommandTabClosedObsolete:
+      case kCommandWindowClosedObsolete:
       case kCommandTabClosed:
       case kCommandWindowClosed: {
         ClosedPayload payload;
-        if (!command->GetPayload(&payload, sizeof(payload)))
+        if (!command->GetPayload(&payload, sizeof(payload)) &&
+            !MigrateClosedPayload(*command, &payload)) {
           return true;
-        if (command->id() == kCommandTabClosed) {
+        }
+        if (command->id() == kCommandTabClosed ||
+            command->id() == kCommandTabClosedObsolete) {
           delete GetTab(payload.id, tabs);
           tabs->erase(payload.id);
         } else {
@@ -1477,7 +1515,7 @@ void SessionService::RecordSessionUpdateHistogramData(int type,
         RecordUpdatedSaveTime(delta, use_long_period);
         RecordUpdatedSessionNavigationOrTab(delta, use_long_period);
         break;
-      case content::NOTIFICATION_TAB_CLOSED:
+      case content::NOTIFICATION_WEB_CONTENTS_DESTROYED:
         RecordUpdatedTabClosed(delta, use_long_period);
         RecordUpdatedSessionNavigationOrTab(delta, use_long_period);
         break;

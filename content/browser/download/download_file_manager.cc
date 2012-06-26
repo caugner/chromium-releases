@@ -19,7 +19,8 @@
 #include "content/browser/download/download_interrupt_reasons_impl.h"
 #include "content/browser/download/download_request_handle.h"
 #include "content/browser/download/download_stats.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/browser/power_save_blocker.h"
+#include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/download_manager_delegate.h"
@@ -32,10 +33,6 @@ using content::DownloadId;
 using content::DownloadManager;
 
 namespace {
-
-// Throttle updates to the UI thread so that a fast moving download doesn't
-// cause it to become unresponsive (in milliseconds).
-const int kUpdatePeriodMs = 500;
 
 class DownloadFileFactoryImpl
     : public DownloadFileManager::DownloadFileFactory {
@@ -56,10 +53,13 @@ DownloadFile* DownloadFileFactoryImpl::CreateFile(
     DownloadManager* download_manager,
     bool calculate_hash,
     const net::BoundNetLog& bound_net_log) {
-  return new DownloadFileImpl(info,
-                              new DownloadRequestHandle(request_handle),
-                              download_manager, calculate_hash,
-                              bound_net_log);
+  return new DownloadFileImpl(
+      info, new DownloadRequestHandle(request_handle),
+      download_manager, calculate_hash,
+      scoped_ptr<PowerSaveBlocker>(
+          new PowerSaveBlocker(
+              PowerSaveBlocker::kPowerSaveBlockPreventSystemSleep)).Pass(),
+      bound_net_log);
 }
 
 }  // namespace
@@ -83,7 +83,6 @@ void DownloadFileManager::Shutdown() {
 
 void DownloadFileManager::OnShutdown() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
-  StopUpdateTimer();
   STLDeleteValues(&downloads_);
 }
 
@@ -122,8 +121,6 @@ void DownloadFileManager::CreateDownloadFile(
 
     // The file is now ready, we can un-pause the request and start saving data.
     request_handle.ResumeRequest();
-
-    StartUpdateTimer();
   }
 
   BrowserThread::PostTask(
@@ -136,20 +133,6 @@ DownloadFile* DownloadFileManager::GetDownloadFile(
     DownloadId global_id) {
   DownloadFileMap::iterator it = downloads_.find(global_id);
   return it == downloads_.end() ? NULL : it->second;
-}
-
-void DownloadFileManager::StartUpdateTimer() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
-  if (!update_timer_.IsRunning()) {
-    update_timer_.Start(FROM_HERE,
-                        base::TimeDelta::FromMilliseconds(kUpdatePeriodMs),
-                        this, &DownloadFileManager::UpdateInProgressDownloads);
-  }
-}
-
-void DownloadFileManager::StopUpdateTimer() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
-  update_timer_.Stop();
 }
 
 void DownloadFileManager::UpdateInProgressDownloads() {
@@ -487,7 +470,4 @@ void DownloadFileManager::EraseDownload(DownloadId global_id) {
   downloads_.erase(global_id);
 
   delete download_file;
-
-  if (downloads_.empty())
-    StopUpdateTimer();
 }

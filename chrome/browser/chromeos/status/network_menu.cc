@@ -6,6 +6,8 @@
 
 #include <algorithm>
 
+#include "ash/shell.h"
+#include "ash/shell_delegate.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/logging.h"
@@ -13,17 +15,15 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/choose_mobile_network_dialog.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
+#include "chrome/browser/chromeos/enrollment_dialog_view.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/mobile_config.h"
 #include "chrome/browser/chromeos/options/network_config_view.h"
 #include "chrome/browser/chromeos/sim_dialog_delegate.h"
 #include "chrome/browser/chromeos/status/network_menu_icon.h"
-#include "chrome/browser/chromeos/status/status_area_view_chromeos.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/dialog_style.h"
-#include "chrome/browser/ui/views/window.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_thread.h"
@@ -91,9 +91,10 @@ void SetMenuMargins(views::MenuItemView* menu_item_view, int top, int bottom) {
 // Activate a cellular network.
 void ActivateCellular(const chromeos::CellularNetwork* cellular) {
   DCHECK(cellular);
-  Browser* browser = Browser::GetOrCreateTabbedBrowser(
-      ProfileManager::GetDefaultProfileOrOffTheRecord());
-  browser->OpenMobilePlanTabAndActivate();
+  if (!chromeos::UserManager::Get()->IsSessionStarted())
+    return;
+
+  ash::Shell::GetInstance()->delegate()->OpenMobileSetup();
 }
 
 // Decides whether a network should be highlighted in the UI.
@@ -344,6 +345,10 @@ void NetworkMenu::ConnectToNetwork(Network* network) {
       if (wifi->connecting_or_connected()) {
         ShowTabbedNetworkSettings(wifi);
       } else {
+        wifi->SetEnrollmentDelegate(
+            CreateEnrollmentDelegate(delegate()->GetNativeWindow(),
+                                     wifi->name(),
+                                     ProfileManager::GetLastUsedProfile()));
         wifi->AttemptConnection(base::Bind(&NetworkMenu::DoConnect,
                                            weak_pointer_factory_.GetWeakPtr(),
                                            wifi));
@@ -372,6 +377,10 @@ void NetworkMenu::ConnectToNetwork(Network* network) {
       if (vpn->connecting_or_connected()) {
         ShowTabbedNetworkSettings(vpn);
       } else {
+        vpn->SetEnrollmentDelegate(
+            CreateEnrollmentDelegate(delegate()->GetNativeWindow(),
+                                     vpn->name(),
+                                     ProfileManager::GetLastUsedProfile()));
         vpn->AttemptConnection(base::Bind(&NetworkMenu::DoConnect,
                                           weak_pointer_factory_.GetWeakPtr(),
                                           vpn));
@@ -620,9 +629,9 @@ void MainMenuModel::InitMenuItems(bool should_open_button_options) {
       chromeos::ActivationState activation_state =
           cell_networks[i]->activation_state();
 
-      // If we are on the OOBE/login screen, do not show activating 3G option.
-      if (!StatusAreaViewChromeos::IsBrowserMode() &&
-          activation_state != ACTIVATION_STATE_ACTIVATED)
+      // This is currently only used in the OOBE/login screen, do not show
+      // activating 3G option.
+      if (activation_state != ACTIVATION_STATE_ACTIVATED)
         continue;
 
       // Ampersand is a valid character in a network name, but menu2 uses it
@@ -687,27 +696,8 @@ void MainMenuModel::InitMenuItems(bool should_open_button_options) {
     }
     const NetworkDevice* cellular_device = cros->FindCellularDevice();
     if (cellular_device) {
-      // Add "View Account" with top up URL if we know that.
-      MobileConfig* config = MobileConfig::GetInstance();
-      if (StatusAreaViewChromeos::IsBrowserMode() && config->IsReady()) {
-        std::string carrier_id = cros->GetCellularHomeCarrierId();
-        // If we don't have top up URL cached.
-        if (carrier_id != carrier_id_) {
-          // Mark that we've checked this carrier ID.
-          carrier_id_ = carrier_id;
-          top_up_url_.clear();
-          const MobileConfig::Carrier* carrier = config->GetCarrier(carrier_id);
-          if (carrier && !carrier->top_up_url().empty())
-            top_up_url_ = carrier->top_up_url();
-        }
-        if (!top_up_url_.empty()) {
-          menu_items_.push_back(MenuItem(
-              ui::MenuModel::TYPE_COMMAND,
-              l10n_util::GetStringUTF16(IDS_STATUSBAR_NETWORK_VIEW_ACCOUNT),
-              SkBitmap(),
-              std::string(), FLAG_VIEW_ACCOUNT));
-        }
-      }
+      // NOTE: This is currently only used in login/OOBE screen. So do not add
+      // "View Account" with top up URL.
 
       if (cellular_device->support_network_scan()) {
         // For GSM add mobile network scan.
@@ -731,20 +721,6 @@ void MainMenuModel::InitMenuItems(bool should_open_button_options) {
                 l10n_util::GetStringUTF16(IDS_STATUSBAR_NO_NETWORKS_MESSAGE));
     menu_items_.push_back(MenuItem(ui::MenuModel::TYPE_COMMAND, label,
         SkBitmap(), std::string(), FLAG_DISABLED));
-  }
-
-  // If we are logged in and there is a connected network or a connected VPN,
-  // add submenu for Private Networks.
-  if (StatusAreaViewChromeos::IsBrowserMode()) {
-    if (cros->connected_network() || cros->virtual_network_connected()) {
-      menu_items_.push_back(MenuItem());  // Separator
-      const SkBitmap icon = NetworkMenuIcon::GetVpnBitmap();
-      menu_items_.push_back(MenuItem(
-          ui::MenuModel::TYPE_SUBMENU,
-          l10n_util::GetStringUTF16(IDS_STATUSBAR_NETWORK_PRIVATE_NETWORKS),
-          icon, vpn_menu_model_.get(), FLAG_NONE));
-      vpn_menu_model_->InitMenuItems(should_open_button_options);
-    }
   }
 
   bool show_wifi_scanning = wifi_available && cros->wifi_scanning();
@@ -820,18 +796,10 @@ void MainMenuModel::InitMenuItems(bool should_open_button_options) {
   more_menu_model_->InitMenuItems(should_open_button_options);
   if (!more_menu_model_->menu_items().empty()) {
     menu_items_.push_back(MenuItem());  // Separator
-    if (StatusAreaViewChromeos::IsBrowserMode()) {
-      // In browser mode we do not want separate submenu, inline items.
-      menu_items_.insert(
-          menu_items_.end(),
-          more_menu_model_->menu_items().begin(),
-          more_menu_model_->menu_items().end());
-    } else {
-      menu_items_.push_back(MenuItem(
-          ui::MenuModel::TYPE_SUBMENU,
-          l10n_util::GetStringUTF16(IDS_STATUSBAR_NETWORK_MORE),
-          SkBitmap(), more_menu_model_.get(), FLAG_NONE));
-    }
+    menu_items_.push_back(MenuItem(
+        ui::MenuModel::TYPE_SUBMENU,
+        l10n_util::GetStringUTF16(IDS_STATUSBAR_NETWORK_MORE),
+        SkBitmap(), more_menu_model_.get(), FLAG_NONE));
   }
 }
 
@@ -917,9 +885,7 @@ void MoreMenuModel::InitMenuItems(bool should_open_button_options) {
   bool connected = cros->Connected();  // always call for test expectations.
 
   int message_id = -1;
-  if (StatusAreaViewChromeos::IsBrowserMode())
-    message_id = IDS_STATUSBAR_NETWORK_OPEN_OPTIONS_DIALOG;
-  else if (connected)
+  if (connected)
     message_id = IDS_STATUSBAR_NETWORK_OPEN_PROXY_SETTINGS_DIALOG;
   if (message_id != -1) {
     link_items.push_back(MenuItem(ui::MenuModel::TYPE_COMMAND,
@@ -936,32 +902,30 @@ void MoreMenuModel::InitMenuItems(bool should_open_button_options) {
     }
   }
 
-  if (!StatusAreaViewChromeos::IsBrowserMode()) {
-    const NetworkDevice* ether = cros->FindEthernetDevice();
-    if (ether) {
+  const NetworkDevice* ether = cros->FindEthernetDevice();
+  if (ether) {
+    std::string hardware_address;
+    cros->GetIPConfigs(ether->device_path(), &hardware_address,
+        NetworkLibrary::FORMAT_COLON_SEPARATED_HEX);
+    if (!hardware_address.empty()) {
+      std::string label = l10n_util::GetStringUTF8(
+          IDS_STATUSBAR_NETWORK_DEVICE_ETHERNET) + " " + hardware_address;
+      address_items.push_back(MenuItem(ui::MenuModel::TYPE_COMMAND,
+          UTF8ToUTF16(label), SkBitmap(), std::string(), FLAG_DISABLED));
+    }
+  }
+
+  if (cros->wifi_enabled()) {
+    const NetworkDevice* wifi = cros->FindWifiDevice();
+    if (wifi) {
       std::string hardware_address;
-      cros->GetIPConfigs(ether->device_path(), &hardware_address,
-          NetworkLibrary::FORMAT_COLON_SEPARATED_HEX);
+      cros->GetIPConfigs(wifi->device_path(),
+          &hardware_address, NetworkLibrary::FORMAT_COLON_SEPARATED_HEX);
       if (!hardware_address.empty()) {
         std::string label = l10n_util::GetStringUTF8(
-            IDS_STATUSBAR_NETWORK_DEVICE_ETHERNET) + " " + hardware_address;
+            IDS_STATUSBAR_NETWORK_DEVICE_WIFI) + " " + hardware_address;
         address_items.push_back(MenuItem(ui::MenuModel::TYPE_COMMAND,
             UTF8ToUTF16(label), SkBitmap(), std::string(), FLAG_DISABLED));
-      }
-    }
-
-    if (cros->wifi_enabled()) {
-      const NetworkDevice* wifi = cros->FindWifiDevice();
-      if (wifi) {
-        std::string hardware_address;
-        cros->GetIPConfigs(wifi->device_path(),
-            &hardware_address, NetworkLibrary::FORMAT_COLON_SEPARATED_HEX);
-        if (!hardware_address.empty()) {
-          std::string label = l10n_util::GetStringUTF8(
-              IDS_STATUSBAR_NETWORK_DEVICE_WIFI) + " " + hardware_address;
-          address_items.push_back(MenuItem(ui::MenuModel::TYPE_COMMAND,
-              UTF8ToUTF16(label), SkBitmap(), std::string(), FLAG_DISABLED));
-        }
       }
     }
   }
@@ -1035,19 +999,11 @@ void NetworkMenu::RunMenu(views::View* source) {
 }
 
 void NetworkMenu::ShowTabbedNetworkSettings(const Network* network) const {
-  if (!UserManager::Get()->IsUserLoggedIn())
+  if (!UserManager::Get()->IsSessionStarted())
     return;
 
   DCHECK(network);
-  Browser* browser = Browser::GetOrCreateTabbedBrowser(
-      ProfileManager::GetDefaultProfileOrOffTheRecord());
-
-  // In case of a VPN, show the config settings for the connected network.
-  if (network->type() == chromeos::TYPE_VPN) {
-    network = CrosLibrary::Get()->GetNetworkLibrary()->connected_network();
-    if (!network)
-      return;
-  }
+  Browser* browser = GetAppropriateBrowser();
 
   std::string network_name(network->name());
   if (network_name.empty() && network->type() == chromeos::TYPE_ETHERNET) {
@@ -1108,9 +1064,26 @@ void NetworkMenu::ToggleCellular() {
   if (!cellular) {
     LOG(ERROR) << "No cellular device found, it should be available.";
     cros->EnableCellularNetworkDevice(!cros->cellular_enabled());
-  } else if (cellular->sim_lock_state() == SIM_UNLOCKED ||
-             cellular->sim_lock_state() == SIM_UNKNOWN) {
-    cros->EnableCellularNetworkDevice(!cros->cellular_enabled());
+  } else if (!cellular->is_sim_locked()) {
+    if (cellular->is_sim_absent()) {
+      if (!chromeos::UserManager::Get()->IsSessionStarted())
+        return;
+      std::string setup_url;
+      MobileConfig* config = MobileConfig::GetInstance();
+      if (config->IsReady()) {
+        const MobileConfig::LocaleConfig* locale_config =
+            config->GetLocaleConfig();
+        if (locale_config)
+          setup_url = locale_config->setup_url();
+      }
+      if (!setup_url.empty()) {
+        GetAppropriateBrowser()->ShowSingletonTab(GURL(setup_url));
+      } else {
+        // TODO(nkostylev): Show generic error message. http://crosbug.com/15444
+      }
+    } else {
+      cros->EnableCellularNetworkDevice(!cros->cellular_enabled());
+    }
   } else {
     SimDialogDelegate::ShowDialog(delegate()->GetNativeWindow(),
                                   SimDialogDelegate::SIM_DIALOG_UNLOCK);
@@ -1131,6 +1104,12 @@ void NetworkMenu::ShowOtherCellular() {
 
 bool NetworkMenu::ShouldHighlightNetwork(const Network* network) {
   return ::ShouldHighlightNetwork(network);
+}
+
+Browser* NetworkMenu::GetAppropriateBrowser() const {
+  DCHECK(chromeos::UserManager::Get()->IsSessionStarted());
+  return Browser::GetOrCreateTabbedBrowser(
+      ProfileManager::GetDefaultProfileOrOffTheRecord());
 }
 
 }  // namespace chromeos

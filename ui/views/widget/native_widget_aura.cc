@@ -19,13 +19,16 @@
 #include "ui/aura/window_observer.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
 #include "ui/base/ui_base_types.h"
+#include "ui/compositor/layer.h"
 #include "ui/gfx/canvas.h"
-#include "ui/gfx/compositor/layer.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/screen.h"
+#include "ui/views/drag_utils.h"
 #include "ui/views/ime/input_method_bridge.h"
+#include "ui/views/views_delegate.h"
 #include "ui/views/widget/drop_helper.h"
 #include "ui/views/widget/native_widget_delegate.h"
+#include "ui/views/widget/native_widget_helper_aura.h"
 #include "ui/views/widget/root_view.h"
 #include "ui/views/widget/tooltip_manager_aura.h"
 #include "ui/views/widget/widget_delegate.h"
@@ -127,6 +130,10 @@ class NativeWidgetAura::ActiveWindowObserver : public aura::WindowObserver {
 
 NativeWidgetAura::NativeWidgetAura(internal::NativeWidgetDelegate* delegate)
     : delegate_(delegate),
+      ALLOW_THIS_IN_INITIALIZER_LIST(desktop_helper_(
+          ViewsDelegate::views_delegate ?
+          ViewsDelegate::views_delegate->CreateNativeWidgetHelper(this) :
+          NULL)),
       ALLOW_THIS_IN_INITIALIZER_LIST(window_(new aura::Window(this))),
       ownership_(Widget::InitParams::NATIVE_WIDGET_OWNS_WIDGET),
       ALLOW_THIS_IN_INITIALIZER_LIST(close_widget_factory_(this)),
@@ -160,6 +167,10 @@ gfx::Font NativeWidgetAura::GetWindowTitleFont() {
 
 void NativeWidgetAura::InitNativeWidget(const Widget::InitParams& params) {
   ownership_ = params.ownership;
+
+  if (desktop_helper_.get())
+    desktop_helper_->PreInitialize(params);
+
   window_->set_user_data(this);
   window_->SetType(GetAuraWindowTypeForWidgetType(params.type));
   window_->SetProperty(aura::client::kShowStateKey, params.show_state);
@@ -171,7 +182,9 @@ void NativeWidgetAura::InitNativeWidget(const Widget::InitParams& params) {
     window_->Show();
 
   delegate_->OnNativeWidgetCreated();
-  if (params.child) {
+  if (desktop_helper_.get() && desktop_helper_->GetRootWindow()) {
+    window_->SetParent(desktop_helper_->GetRootWindow());
+  } else if (params.child) {
     window_->SetParent(params.GetParent());
   } else {
     // Set up the transient child before the window is added. This way the
@@ -179,21 +192,32 @@ void NativeWidgetAura::InitNativeWidget(const Widget::InitParams& params) {
     gfx::NativeView parent = params.GetParent();
     if (parent && parent->type() != aura::client::WINDOW_TYPE_UNKNOWN) {
       parent->AddTransientChild(window_);
-      parent = NULL;
+
+      // TODO(erg): The StackingClient interface implies that there is only a
+      // single root window. Solving this would require setting a stacking
+      // client per root window instead. For now, we hax our way around this by
+      // forcing the parent to be the root window instead of passing NULL as
+      // the parent which will dispatch to the stacking client.
+      if (desktop_helper_.get())
+        parent = parent->GetRootWindow();
+      else
+        parent = NULL;
     }
     // SetAlwaysOnTop before SetParent so that always-on-top container is used.
     SetAlwaysOnTop(params.keep_on_top);
     window_->SetParent(parent);
   }
+
   // Wait to set the bounds until we have a parent. That way we can know our
   // true state/bounds (the LayoutManager may enforce a particular
   // state/bounds).
   if (IsMaximized())
     SetRestoreBounds(window_, params.bounds);
   else
-    window_->SetBounds(params.bounds);
+    SetBounds(params.bounds);
   window_->set_ignore_events(!params.accept_events);
-  can_activate_ = params.can_activate;
+  can_activate_ =
+      params.can_activate && params.type != Widget::InitParams::TYPE_CONTROL;
   DCHECK(GetWidget()->GetRootView());
 #if !defined(OS_MACOSX)
   if (params.type != Widget::InitParams::TYPE_TOOLTIP)
@@ -207,6 +231,12 @@ void NativeWidgetAura::InitNativeWidget(const Widget::InitParams& params) {
   }
 
   aura::client::SetActivationDelegate(window_, this);
+
+  if (desktop_helper_.get()) {
+    desktop_helper_->PostInitialize();
+    // TODO(erg): Move this somewhere else?
+    desktop_helper_->ShowRootWindow();
+  }
 }
 
 NonClientFrameView* NativeWidgetAura::CreateNonClientFrameView() {
@@ -295,16 +325,16 @@ void NativeWidgetAura::SendNativeAccessibilityEvent(
   //NOTIMPLEMENTED();
 }
 
-void NativeWidgetAura::SetMouseCapture() {
-  window_->SetCapture();
+void NativeWidgetAura::SetCapture(unsigned int flags) {
+  window_->SetCapture(flags);
 }
 
-void NativeWidgetAura::ReleaseMouseCapture() {
+void NativeWidgetAura::ReleaseCapture() {
   window_->ReleaseCapture();
 }
 
-bool NativeWidgetAura::HasMouseCapture() const {
-  return window_->HasCapture();
+bool NativeWidgetAura::HasCapture(unsigned int flags) const {
+  return window_->HasCapture(flags);
 }
 
 InputMethod* NativeWidgetAura::CreateInputMethod() {
@@ -317,18 +347,19 @@ InputMethod* NativeWidgetAura::CreateInputMethod() {
 }
 
 void NativeWidgetAura::CenterWindow(const gfx::Size& size) {
-  gfx::Rect parent_bounds(window_->parent()->GetScreenBounds());
+  gfx::Rect parent_bounds(window_->parent()->GetBoundsInRootWindow());
   // When centering window, we take the intersection of the host and
   // the parent. We assume the root window represents the visible
   // rect of a single screen.
-  gfx::Rect work_area = gfx::Screen::GetMonitorWorkAreaNearestWindow(window_);
+  gfx::Rect work_area =
+      gfx::Screen::GetMonitorNearestWindow(window_).work_area();
   parent_bounds = parent_bounds.Intersect(work_area);
 
   // If |window_|'s transient parent's bounds are big enough to fit it, then we
   // center it with respect to the transient parent.
   if (window_->transient_parent()) {
     gfx::Rect transient_parent_rect = window_->transient_parent()->
-        GetScreenBounds().Intersect(work_area);
+        GetBoundsInRootWindow().Intersect(work_area);
     if (transient_parent_rect.height() >= size.height() &&
         transient_parent_rect.width() >= size.width())
       parent_bounds = transient_parent_rect;
@@ -387,13 +418,19 @@ void NativeWidgetAura::InitModalType(ui::ModalType modal_type) {
 }
 
 gfx::Rect NativeWidgetAura::GetWindowScreenBounds() const {
-  return window_->GetScreenBounds();
+  gfx::Rect bounds = window_->GetBoundsInRootWindow();
+  if (desktop_helper_.get())
+    bounds = desktop_helper_->ChangeRootWindowBoundsToScreenBounds(bounds);
+  return bounds;
 }
 
 gfx::Rect NativeWidgetAura::GetClientAreaScreenBounds() const {
   // View-to-screen coordinate system transformations depend on this returning
   // the full window bounds, for example View::ConvertPointToScreen().
-  return window_->GetScreenBounds();
+  gfx::Rect bounds = window_->GetBoundsInRootWindow();
+  if (desktop_helper_.get())
+    bounds = desktop_helper_->ChangeRootWindowBoundsToScreenBounds(bounds);
+  return bounds;
 }
 
 gfx::Rect NativeWidgetAura::GetRestoredBounds() const {
@@ -407,7 +444,10 @@ gfx::Rect NativeWidgetAura::GetRestoredBounds() const {
   return restore_bounds ? *restore_bounds : window_->bounds();
 }
 
-void NativeWidgetAura::SetBounds(const gfx::Rect& bounds) {
+void NativeWidgetAura::SetBounds(const gfx::Rect& in_bounds) {
+  gfx::Rect bounds = in_bounds;
+  if (desktop_helper_.get())
+    bounds = desktop_helper_->ModifyAndSetBounds(bounds);
   window_->SetBounds(bounds);
 }
 
@@ -573,16 +613,10 @@ bool NativeWidgetAura::IsAccessibleWidget() const {
 }
 
 void NativeWidgetAura::RunShellDrag(View* view,
-                                   const ui::OSExchangeData& data,
-                                   const gfx::Point& location,
-                                   int operation) {
-  gfx::Point root_location(location);
-  aura::RootWindow* root_window = window_->GetRootWindow();
-  aura::Window::ConvertPointToWindow(window_, root_window, &root_location);
-  if (aura::client::GetDragDropClient(root_window)) {
-    aura::client::GetDragDropClient(root_window)->StartDragAndDrop(data,
-        root_location, operation);
-  }
+                                    const ui::OSExchangeData& data,
+                                    const gfx::Point& location,
+                                    int operation) {
+  views::RunShellDrag(window_, data, location, operation);
 }
 
 void NativeWidgetAura::SchedulePaintInRect(const gfx::Rect& rect) {
@@ -606,7 +640,7 @@ void NativeWidgetAura::FocusNativeView(gfx::NativeView native_view) {
 }
 
 gfx::Rect NativeWidgetAura::GetWorkAreaBoundsInScreen() const {
-  return gfx::Screen::GetMonitorWorkAreaNearestWindow(GetNativeView());
+  return gfx::Screen::GetMonitorNearestWindow(GetNativeView()).work_area();
 }
 
 void NativeWidgetAura::SetInactiveRenderingDisabled(bool value) {
@@ -619,7 +653,7 @@ void NativeWidgetAura::SetInactiveRenderingDisabled(bool value) {
 Widget::MoveLoopResult NativeWidgetAura::RunMoveLoop() {
   if (window_->parent() &&
       aura::client::GetWindowMoveClient(window_->parent())) {
-    SetMouseCapture();
+    SetCapture(ui::CW_LOCK_MOUSE);
     aura::client::GetWindowMoveClient(window_->parent())->RunMoveLoop(window_);
     return Widget::MOVE_LOOP_SUCCESSFUL;
   }
@@ -659,7 +693,7 @@ gfx::Size NativeWidgetAura::GetMinimumSize() const {
 void NativeWidgetAura::OnBoundsChanged(const gfx::Rect& old_bounds,
                                        const gfx::Rect& new_bounds) {
   if (old_bounds.origin() != new_bounds.origin())
-    GetWidget()->widget_delegate()->OnWidgetMove();
+    delegate_->OnNativeWidgetMove();
   if (old_bounds.size() != new_bounds.size())
     delegate_->OnNativeWidgetSizeChanged(new_bounds.size());
 }

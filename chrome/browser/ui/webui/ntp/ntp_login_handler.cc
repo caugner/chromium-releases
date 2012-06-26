@@ -11,7 +11,9 @@
 #include "base/metrics/histogram.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
+#include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/managed_mode.h"
 #include "chrome/browser/prefs/pref_notifier.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
@@ -137,7 +139,9 @@ void NTPLoginHandler::HandleShowSyncLoginUI(const ListValue* args) {
       RecordInHistogram(NTP_SIGN_IN_PROMO_CLICKED);
     }
 #endif
-  } else if (args->GetSize() == 4) {
+  } else if (args->GetSize() == 4 &&
+             browser->command_updater()->IsCommandEnabled(
+                IDC_SHOW_AVATAR_MENU)) {
     // The user is signed in, show the profiles menu.
     double x = 0;
     double y = 0;
@@ -234,8 +238,9 @@ void NTPLoginHandler::UpdateLogin() {
   StringValue header_value(header);
   StringValue sub_header_value(sub_header);
   StringValue icon_url_value(icon_url);
-  web_ui()->CallJavascriptFunction(
-      "ntp.updateLogin", header_value, sub_header_value, icon_url_value);
+  base::FundamentalValue is_user_signed_in(!username.empty());
+  web_ui()->CallJavascriptFunction("ntp.updateLogin",
+      header_value, sub_header_value, icon_url_value, is_user_signed_in);
 }
 
 // static
@@ -256,19 +261,19 @@ bool NTPLoginHandler::ShouldShow(Profile* profile) {
 void NTPLoginHandler::GetLocalizedValues(Profile* profile,
                                          DictionaryValue* values) {
   PrefService* prefs = profile->GetPrefs();
-  if (prefs->GetString(prefs::kGoogleServicesUsername).empty() ||
-      !prefs->GetBoolean(prefs::kSyncPromoShowNTPBubble)) {
-    return;
-  }
+  bool hide_sync = prefs->GetString(prefs::kGoogleServicesUsername).empty() ||
+      !prefs->GetBoolean(prefs::kSyncPromoShowNTPBubble);
 
   values->SetString("login_status_message",
+      hide_sync ? string16() :
       l10n_util::GetStringFUTF16(IDS_SYNC_PROMO_NTP_BUBBLE_MESSAGE,
           l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME)));
-  values->SetString("login_status_url", chrome::kSyncLearnMoreURL);
-  values->SetString("login_status_learn_more",
-      l10n_util::GetStringUTF16(IDS_LEARN_MORE));
+  values->SetString("login_status_url",
+      hide_sync ? std::string() : chrome::kSyncLearnMoreURL);
   values->SetString("login_status_advanced",
+      hide_sync ? string16() :
       l10n_util::GetStringUTF16(IDS_SYNC_PROMO_NTP_BUBBLE_ADVANCED));
   values->SetString("login_status_dismiss",
+      hide_sync ? string16() :
       l10n_util::GetStringUTF16(IDS_SYNC_PROMO_NTP_BUBBLE_OK));
 }

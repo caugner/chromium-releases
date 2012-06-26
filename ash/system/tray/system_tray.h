@@ -8,12 +8,13 @@
 
 #include "ash/launcher/background_animator.h"
 #include "ash/ash_export.h"
+#include "ash/system/tray/tray_views.h"
 #include "ash/system/user/login_status.h"
 #include "base/basictypes.h"
-#include "base/message_pump_observer.h"
+#include "base/compiler_specific.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "ui/views/view.h"
-#include "ui/views/widget/widget.h"
 
 #include <vector>
 
@@ -25,6 +26,7 @@ class BluetoothObserver;
 class BrightnessObserver;
 class CapsLockObserver;
 class ClockObserver;
+class DriveObserver;
 class IMEObserver;
 class NetworkObserver;
 class PowerStatusObserver;
@@ -38,13 +40,18 @@ class SystemTrayBackground;
 class SystemTrayBubble;
 }
 
-class ASH_EXPORT SystemTray : public views::View,
-                              public views::Widget::Observer,
-                              public internal::BackgroundAnimatorDelegate,
-                              public base::MessagePumpObserver {
+class ASH_EXPORT SystemTray : NON_EXPORTED_BASE(
+                                  public internal::ActionableView),
+                              public internal::BackgroundAnimatorDelegate {
  public:
   SystemTray();
   virtual ~SystemTray();
+
+  // Creates the default set of items for the sytem tray.
+  void CreateItems();
+
+  // Creates the widget for the tray.
+  void CreateWidget();
 
   // Adds a new item in the tray.
   void AddTrayItem(SystemTrayItem* item);
@@ -68,8 +75,6 @@ class ASH_EXPORT SystemTray : public views::View,
   // Updates the items when the login status of the system changes.
   void UpdateAfterLoginStatusChange(user::LoginStatus login_status);
 
-  const ScopedVector<SystemTrayItem>& items() const { return items_; }
-
   // Sets whether the tray paints a background. Default is true, but is set to
   // false if a window overlaps the shelf.
   void SetPaintsBackground(
@@ -77,7 +82,11 @@ class ASH_EXPORT SystemTray : public views::View,
       internal::BackgroundAnimator::ChangeType change_type);
 
   // Returns true if the launcher should show.
-  bool should_show_launcher() const { return popup_ && should_show_launcher_; }
+  bool should_show_launcher() const {
+    return bubble_.get() && should_show_launcher_;
+  }
+
+  views::Widget* widget() const { return widget_; }
 
   AccessibilityObserver* accessibility_observer() const {
     return accessibility_observer_;
@@ -97,6 +106,9 @@ class ASH_EXPORT SystemTray : public views::View,
   ClockObserver* clock_observer() const {
     return clock_observer_;
   }
+  DriveObserver* drive_observer() const {
+    return drive_observer_;
+  }
   IMEObserver* ime_observer() const {
     return ime_observer_;
   }
@@ -114,33 +126,31 @@ class ASH_EXPORT SystemTray : public views::View,
   }
 
  private:
-  friend class Shell;
+  friend class internal::SystemTrayBubble;
 
-  void ShowItems(std::vector<SystemTrayItem*>& items,
+  // Called when the widget associated with |bubble| closes. |bubble| should
+  // always == |bubble_|. This triggers destroying |bubble_| and hiding the
+  // launcher if necessary.
+  void RemoveBubble(internal::SystemTrayBubble* bubble);
+
+  const ScopedVector<SystemTrayItem>& items() const { return items_; }
+
+  void ShowItems(const std::vector<SystemTrayItem*>& items,
                  bool details,
                  bool activate);
 
+  // Overridden from internal::ActionableView.
+  virtual bool PerformAction(const views::Event& event) OVERRIDE;
+
   // Overridden from views::View.
-  virtual bool OnKeyPressed(const views::KeyEvent& event) OVERRIDE;
-  virtual bool OnMousePressed(const views::MouseEvent& event) OVERRIDE;
   virtual void OnMouseEntered(const views::MouseEvent& event) OVERRIDE;
   virtual void OnMouseExited(const views::MouseEvent& event) OVERRIDE;
   virtual void AboutToRequestFocusFromTabTraversal(bool reverse) OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
   virtual void OnPaintFocusBorder(gfx::Canvas* canvas) OVERRIDE;
 
-  // Overridden from views::Widget::Observer.
-  virtual void OnWidgetClosing(views::Widget* widget) OVERRIDE;
-  virtual void OnWidgetVisibilityChanged(views::Widget* widget,
-                                         bool visible) OVERRIDE;
-
   // Overridden from internal::BackgroundAnimatorDelegate.
   virtual void UpdateBackground(int alpha) OVERRIDE;
-
-  // Overidden from base::MessagePumpObserver
-  virtual base::EventStatus WillProcessEvent(
-      const base::NativeEvent& event) OVERRIDE;
-  virtual void DidProcessEvent(const base::NativeEvent& event) OVERRIDE;
 
   ScopedVector<SystemTrayItem> items_;
 
@@ -154,15 +164,18 @@ class ASH_EXPORT SystemTray : public views::View,
   BrightnessObserver* brightness_observer_;
   CapsLockObserver* caps_lock_observer_;
   ClockObserver* clock_observer_;
+  DriveObserver* drive_observer_;
   IMEObserver* ime_observer_;
   NetworkObserver* network_observer_;
   PowerStatusObserver* power_status_observer_;
   UpdateObserver* update_observer_;
   UserObserver* user_observer_;
 
+  // The widget hosting the tray.
+  views::Widget* widget_;
+
   // The popup widget and the delegate.
-  internal::SystemTrayBubble* bubble_;
-  views::Widget* popup_;
+  scoped_ptr<internal::SystemTrayBubble> bubble_;
 
   // Owned by the view it's installed on.
   internal::SystemTrayBackground* background_;

@@ -2,10 +2,10 @@
     "encoding": "UTF-8",
     "entry": {
         "gd$quotaBytesTotal": {
-            "$t": "12345"
+            "$t": "9876543210"
         },
         "gd$quotaBytesUsed": {
-            "$t": "1234"
+            "$t": "6789012345"
         },
         "author": [
             {
@@ -245,7 +245,7 @@
             }
         ],
         "docs$largestChangestamp": {
-            "value": "32651"
+            "value": "654321"
         },
         "docs$maxUploadSize": [
             {
@@ -271,6 +271,71 @@
             {
                 "$t": "10737418240",
                 "kind": "file"
+            }
+        ],
+        "docs$installedApp": [
+            {
+               "docs$installedAppName": "Drive App 1",
+               "docs$installedAppObjectType": "Drive App Object 1",
+               "docs$installedAppSupportsCreate": "true",
+               "link": [
+                     {
+                      "rel": "http://schemas.google.com/docs/2007#product",
+                      "type": "text/html",
+                      "href": "https://chrome.google.com/webstore/detail/11111111"
+                     }
+               ],
+               "docs$installedAppPrimaryMimeType": [
+                     {
+                      "$t": "application/test_type_1"
+                     },
+                     {
+                      "$t": "application/vnd.google-apps.drive-sdk.11111111"
+                     }
+               ],
+               "docs$installedAppSecondaryMimeType": [
+                     {
+                      "$t": "image/jpeg"
+                     }
+               ],
+               "docs$installedAppPrimaryFileExtension": [
+                     {
+                      "$t": "ext_1"
+                     },
+                     {
+                      "$t": "ext_2"
+                     }
+               ],
+               "docs$installedAppSecondaryFileExtension": [
+                     {
+                      "$t": "ext_3"
+                     }
+               ]
+             },
+             {
+               "docs$installedAppName": "Drive App 2",
+               "docs$installedAppObjectType": "Drive App Object 2",
+               "docs$installedAppSupportsCreate": "false",
+               "link": [
+                     {
+                      "rel": "http://schemas.google.com/docs/2007#product",
+                      "type": "text/html",
+                      "href": "https://chrome.google.com/webstore/detail/22222222"
+                     }
+               ],
+               "docs$installedAppPrimaryMimeType": [
+                     {
+                      "$t": "application/test_type_2"
+                     },
+                     {
+                      "$t": "application/vnd.google-apps.drive-sdk.22222222"
+                     }
+               ],
+               "docs$installedAppPrimaryFileExtension": [
+                     {
+                      "$t": "ext_3"
+                     }
+               ]
             }
         ],
         "docs$quotaBytesUsedInTrash": {

@@ -6,11 +6,15 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/file_util.h"
+#include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
+#include "base/metrics/histogram.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/content_settings/cookie_settings.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_url.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/token_service.h"
@@ -54,17 +58,21 @@ const char kCloudPrintOAuthScope[] =
     "https://www.googleapis.com/auth/cloudprint";
 const char kTypeAndroidChromeSnapshot[] = "ANDROID_CHROME_SNAPSHOT";
 
-// The Chrome To Mobile requestor type; used by the service for filtering.
+// The account info URL pattern and strings to check for cloud print access.
+// The 'key=' query parameter is used for caching; supply a random number.
+// The 'rv=2' query parameter requests a JSON response; use 'rv=1' for XML.
+const char kAccountInfoURL[] =
+    "https://clients1.google.com/tbproxy/getaccountinfo?key=%s&rv=2&%s";
+const char kAccountServicesKey[] = "services";
+const char kCloudPrintSerivceValue[] = "cprt";
+
+// The Chrome To Mobile requestor type; used by services for filtering.
 const char kChromeToMobileRequestor[] = "requestor=chrome-to-mobile";
 
 // The types of Chrome To Mobile requests sent to the cloud print service.
 const char kRequestTypeURL[] = "url";
 const char kRequestTypeDelayedSnapshot[] = "url_with_delayed_snapshot";
 const char kRequestTypeSnapshot[] = "snapshot";
-
-// The snapshot path constants; used with a guid for each MHTML snapshot file.
-const FilePath::CharType kSnapshotPath[] =
-    FILE_PATH_LITERAL("chrome_to_mobile_snapshot_.mht");
 
 // Get the "__c2dm__job_data" tag JSON data for the cloud print job submission.
 std::string GetJobString(const ChromeToMobileService::RequestData& data) {
@@ -79,7 +87,7 @@ std::string GetJobString(const ChromeToMobileService::RequestData& data) {
   }
   std::string job_string;
   base::JSONWriter::Write(job.get(), &job_string);
-  return job_string;
+  return StringPrintf("__c2dm__job_data=%s", job_string.c_str());
 }
 
 // Get the URL for cloud print device search; appends a requestor query param.
@@ -100,36 +108,43 @@ GURL GetSubmitURL(const GURL& service_url,
 
   // Append form data to the URL's query for |URL| and |DELAYED_SNAPSHOT| jobs.
   static const bool kUsePlus = true;
-  std::string tag_string = net::EscapeQueryParamValue(
-      "__c2dm__job_data=" + GetJobString(data), kUsePlus);
-  GURL::Replacements replacements;
+  std::string tag = net::EscapeQueryParamValue(GetJobString(data), kUsePlus);
   // Provide dummy content to workaround |errorCode| 412 'Document missing'.
   std::string query = StringPrintf("printerid=%s&tag=%s&title=%s"
       "&contentType=text/plain&content=dummy",
       net::EscapeQueryParamValue(UTF16ToUTF8(data.mobile_id), kUsePlus).c_str(),
-      net::EscapeQueryParamValue(tag_string, kUsePlus).c_str(),
+      net::EscapeQueryParamValue(tag, kUsePlus).c_str(),
       net::EscapeQueryParamValue(UTF16ToUTF8(data.title), kUsePlus).c_str());
+  GURL::Replacements replacements;
   replacements.SetQueryStr(query);
   return submit_url.ReplaceComponents(replacements);
 }
 
-// Delete the specified file; called as a BlockingPoolTask.
-void DeleteFilePath(const FilePath& file_path) {
-  bool success = file_util::Delete(file_path, false);
-  DCHECK(success);
+// A callback to continue snapshot generation after creating the temp file.
+typedef base::Callback<void(FilePath path, bool success)>
+    CreateSnapshotFileCallback;
+
+// Create a temp file and post the callback on the UI thread with the results.
+// Call this as a BlockingPoolTask to avoid the FILE thread.
+void CreateSnapshotFile(CreateSnapshotFileCallback callback) {
+  FilePath snapshot;
+  bool success = file_util::CreateTemporaryFile(&snapshot);
+  content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
+                                   base::Bind(callback, snapshot, success));
 }
 
-// Construct POST data and submit the MHTML snapshot file; deletes the snapshot.
-void SubmitSnapshot(content::URLFetcher* request,
-                    const ChromeToMobileService::RequestData& data) {
+// Send snapshot file contents as POST data in a job submit request.
+// Call this as a BlockingPoolSequencedTask (before posting DeleteSnapshotFile).
+void SubmitSnapshotFile(content::URLFetcher* request,
+                        const ChromeToMobileService::RequestData& data) {
   std::string file;
   if (file_util::ReadFileToString(data.snapshot_path, &file) && !file.empty()) {
     std::string post_data, mime_boundary;
     cloud_print::CreateMimeBoundaryForUpload(&mime_boundary);
     cloud_print::AddMultipartValueForUpload("printerid",
         UTF16ToUTF8(data.mobile_id), mime_boundary, std::string(), &post_data);
-    cloud_print::AddMultipartValueForUpload("tag", "__c2dm__job_data=" +
-        GetJobString(data), mime_boundary, std::string(), &post_data);
+    cloud_print::AddMultipartValueForUpload("tag", GetJobString(data),
+        mime_boundary, std::string(), &post_data);
     cloud_print::AddMultipartValueForUpload("title", UTF16ToUTF8(data.title),
         mime_boundary, std::string(), &post_data);
     cloud_print::AddMultipartValueForUpload("contentType", "multipart/related",
@@ -145,9 +160,13 @@ void SubmitSnapshot(content::URLFetcher* request,
     request->SetUploadData(content_type, post_data);
     request->Start();
   }
+}
 
-  content::BrowserThread::PostBlockingPoolTask(FROM_HERE,
-      base::Bind(&DeleteFilePath, data.snapshot_path));
+// Delete the snapshot file; DCHECK, but really ignore the result of the delete.
+// Call this as a BlockingPoolSequencedTask [after posting SubmitSnapshotFile].
+void DeleteSnapshotFile(const FilePath snapshot) {
+  bool success = file_util::Delete(snapshot, false);
+  DCHECK(success);
 }
 
 }  // namespace
@@ -172,14 +191,13 @@ bool ChromeToMobileService::IsChromeToMobileEnabled() {
 }
 
 ChromeToMobileService::ChromeToMobileService(Profile* profile)
-    : profile_(profile),
-      cloud_print_url_(new CloudPrintURL(profile)) {
+    : ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_(this)),
+      profile_(profile),
+      cloud_print_url_(new CloudPrintURL(profile)),
+      cloud_print_accessible_(false) {
   // Skip initialization if constructed without a profile.
   if (profile_) {
-    content::BrowserThread::PostBlockingPoolTask(FROM_HERE,
-        base::Bind(&ChromeToMobileService::CreateUniqueTempDir,
-                   base::Unretained(this)));
-
+    // Get an access token as soon as the Gaia login refresh token is available.
     TokenService* service = TokenServiceFactory::GetForProfile(profile_);
     registrar_.Add(this, chrome::NOTIFICATION_TOKEN_AVAILABLE,
                    content::Source<TokenService>(service));
@@ -188,25 +206,41 @@ ChromeToMobileService::ChromeToMobileService(Profile* profile)
   }
 }
 
-ChromeToMobileService::~ChromeToMobileService() {}
+ChromeToMobileService::~ChromeToMobileService() {
+  while (!snapshots_.empty())
+    DeleteSnapshot(*snapshots_.begin());
+}
+
+bool ChromeToMobileService::HasDevices() {
+  return !mobiles().empty();
+}
+
+const std::vector<base::DictionaryValue*>& ChromeToMobileService::mobiles() {
+  return mobiles_.get();
+}
 
 void ChromeToMobileService::RequestMobileListUpdate() {
   if (access_token_.empty())
     RefreshAccessToken();
-  else
+  else if (cloud_print_accessible_)
     RequestSearch();
 }
 
 void ChromeToMobileService::GenerateSnapshot(base::WeakPtr<Observer> observer) {
-  FilePath path(temp_dir_.path().Append(kSnapshotPath));
-  BrowserList::GetLastActiveWithProfile(profile_)->GetSelectedWebContents()->
-      GenerateMHTML(path.InsertBeforeExtensionASCII(guid::GenerateGUID()),
-                    base::Bind(&Observer::SnapshotGenerated, observer));
+  // Callback SnapshotFileCreated from CreateSnapshotFile to continue.
+  CreateSnapshotFileCallback callback =
+      base::Bind(&ChromeToMobileService::SnapshotFileCreated,
+                 weak_ptr_factory_.GetWeakPtr(), observer);
+  // Create a temporary file via the blocking pool for snapshot storage.
+  content::BrowserThread::PostBlockingPoolTask(FROM_HERE,
+      base::Bind(&CreateSnapshotFile, callback));
 }
 
 void ChromeToMobileService::SendToMobile(const string16& mobile_id,
                                          const FilePath& snapshot,
                                          base::WeakPtr<Observer> observer) {
+  LogMetric(SENDING_URL);
+
   DCHECK(!access_token_.empty());
   RequestData data;
   data.mobile_id = mobile_id;
@@ -224,17 +258,37 @@ void ChromeToMobileService::SendToMobile(const string16& mobile_id,
   submit_url->Start();
 
   if (send_snapshot) {
+    LogMetric(SENDING_SNAPSHOT);
+
     data.type = SNAPSHOT;
     content::URLFetcher* submit_snapshot = CreateRequest(data);
     request_observer_map_[submit_snapshot] = observer;
-    content::BrowserThread::PostBlockingPoolTask(FROM_HERE,
-      base::Bind(&SubmitSnapshot, submit_snapshot, data));
+    content::BrowserThread::PostBlockingPoolSequencedTask(
+        data.snapshot_path.AsUTF8Unsafe(), FROM_HERE,
+        base::Bind(&SubmitSnapshotFile, submit_snapshot, data));
   }
+}
+
+void ChromeToMobileService::DeleteSnapshot(const FilePath& snapshot) {
+  DCHECK(snapshot.empty() || snapshots_.find(snapshot) != snapshots_.end());
+  if (snapshots_.find(snapshot) != snapshots_.end()) {
+    if (!snapshot.empty())
+      content::BrowserThread::PostBlockingPoolSequencedTask(
+          snapshot.AsUTF8Unsafe(), FROM_HERE,
+          base::Bind(&DeleteSnapshotFile, snapshot));
+    snapshots_.erase(snapshot);
+  }
+}
+
+void ChromeToMobileService::LogMetric(Metric metric) {
+  UMA_HISTOGRAM_ENUMERATION("ChromeToMobile.Service", metric, NUM_METRICS);
 }
 
 void ChromeToMobileService::OnURLFetchComplete(
     const content::URLFetcher* source) {
-  if (source == search_request_.get())
+  if (source == account_info_request_.get())
+    HandleAccountInfoResponse();
+  else if (source == search_request_.get())
     HandleSearchResponse();
   else
     HandleSubmitResponse(source);
@@ -244,7 +298,7 @@ void ChromeToMobileService::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
-  DCHECK(type == chrome::NOTIFICATION_TOKEN_AVAILABLE);
+  DCHECK_EQ(type, chrome::NOTIFICATION_TOKEN_AVAILABLE);
   TokenService::TokenAvailableDetails* token_details =
       content::Details<TokenService::TokenAvailableDetails>(details).ptr();
   if (token_details->service() == GaiaConstants::kGaiaOAuth2LoginRefreshToken)
@@ -257,7 +311,7 @@ void ChromeToMobileService::OnGetTokenSuccess(
   access_token_fetcher_.reset();
   auth_retry_timer_.Stop();
   access_token_ = access_token;
-  RequestMobileListUpdate();
+  RequestAccountInfo();
 }
 
 void ChromeToMobileService::OnGetTokenFailure(
@@ -269,9 +323,23 @@ void ChromeToMobileService::OnGetTokenFailure(
       this, &ChromeToMobileService::RefreshAccessToken);
 }
 
-void ChromeToMobileService::CreateUniqueTempDir() {
-  bool success = temp_dir_.CreateUniqueTempDir();
-  DCHECK(success);
+void ChromeToMobileService::SnapshotFileCreated(
+    base::WeakPtr<Observer> observer,
+    const FilePath path,
+    bool success) {
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  // Track the set of temporary files to be deleted later.
+  snapshots_.insert(path);
+
+  Browser* browser = BrowserList::GetLastActiveWithProfile(profile_);
+  if (success && browser && browser->GetSelectedWebContents()) {
+    // Generate the snapshot and have the observer be called back on completion.
+    browser->GetSelectedWebContents()->GenerateMHTML(path,
+        base::Bind(&Observer::SnapshotGenerated, observer));
+  } else if (observer.get()) {
+    // Signal snapshot generation failure.
+    observer->SnapshotGenerated(FilePath(), 0);
+  }
 }
 
 content::URLFetcher* ChromeToMobileService::CreateRequest(
@@ -309,11 +377,39 @@ void ChromeToMobileService::RefreshAccessToken() {
       gaia_urls->oauth2_chrome_client_secret(), token, scopes);
 }
 
+void ChromeToMobileService::RequestAccountInfo() {
+  // Deny concurrent requests.
+  if (account_info_request_.get())
+    return;
+
+  std::string url_string = StringPrintf(kAccountInfoURL,
+      guid::GenerateGUID().c_str(), kChromeToMobileRequestor);
+  GURL url(url_string);
+
+  // Account information is read from the profile's cookie. If cookies are
+  // blocked, access cloud print directly to list any potential devices.
+  scoped_refptr<CookieSettings> cookie_settings =
+      CookieSettings::Factory::GetForProfile(profile_);
+  if (cookie_settings && !cookie_settings->IsReadingCookieAllowed(url, url)) {
+    cloud_print_accessible_ = true;
+    RequestMobileListUpdate();
+    return;
+  }
+
+  account_info_request_.reset(
+      content::URLFetcher::Create(url, content::URLFetcher::GET, this));
+  account_info_request_->SetRequestContext(profile_->GetRequestContext());
+  account_info_request_->SetMaxRetries(kMaxRetries);
+  // This request sends the user's cookie to check the cloud print service flag.
+  account_info_request_->SetLoadFlags(net::LOAD_DO_NOT_SAVE_COOKIES);
+  account_info_request_->Start();
+}
+
 void ChromeToMobileService::RequestSearch() {
   DCHECK(!access_token_.empty());
 
-  // Deny requests while another request is currently pending.
-  if (search_request_.get())
+  // Deny requests if cloud print is inaccessible, and deny concurrent requests.
+  if (!cloud_print_accessible_ || search_request_.get())
     return;
 
   // Deny requests before the delay period has passed since the last request.
@@ -322,11 +418,32 @@ void ChromeToMobileService::RequestSearch() {
       elapsed_time.InHours() < kSearchRequestDelayHours)
     return;
 
+  LogMetric(DEVICES_REQUESTED);
+
   RequestData data;
   data.type = SEARCH;
   search_request_.reset(CreateRequest(data));
   search_request_->Start();
   previous_search_time_ = base::TimeTicks::Now();
+}
+
+void ChromeToMobileService::HandleAccountInfoResponse() {
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+
+  std::string data;
+  account_info_request_->GetResponseAsString(&data);
+  account_info_request_.reset();
+
+  ListValue* services = NULL;
+  DictionaryValue* dictionary = NULL;
+  scoped_ptr<Value> json(base::JSONReader::Read(data));
+  StringValue cloud_print_service(kCloudPrintSerivceValue);
+  if (json.get() && json->GetAsDictionary(&dictionary) && dictionary &&
+      dictionary->GetList(kAccountServicesKey, &services) && services &&
+      services->Find(cloud_print_service) != services->end()) {
+    cloud_print_accessible_ = true;
+    RequestMobileListUpdate();
+  }
 }
 
 void ChromeToMobileService::HandleSearchResponse() {
@@ -336,22 +453,25 @@ void ChromeToMobileService::HandleSearchResponse() {
   search_request_->GetResponseAsString(&data);
   search_request_.reset();
 
-  DictionaryValue* json_data = NULL;
-  cloud_print::ParseResponseJSON(data, NULL, &json_data);
-
   ListValue* list = NULL;
-  if (json_data && json_data->GetList(cloud_print::kPrinterListValue, &list)) {
-    std::vector<base::DictionaryValue*> mobiles;
+  DictionaryValue* dictionary = NULL;
+  scoped_ptr<Value> json(base::JSONReader::Read(data));
+  if (json.get() && json->GetAsDictionary(&dictionary) && dictionary &&
+      dictionary->GetList(cloud_print::kPrinterListValue, &list)) {
+    ScopedVector<base::DictionaryValue> mobiles;
     for (size_t index = 0; index < list->GetSize(); index++) {
       DictionaryValue* mobile_data = NULL;
       if (list->GetDictionary(index, &mobile_data)) {
         std::string mobile_type;
         mobile_data->GetString("type", &mobile_type);
         if (mobile_type.compare(kTypeAndroidChromeSnapshot) == 0)
-          mobiles.push_back(mobile_data);
+          mobiles.push_back(mobile_data->DeepCopy());
       }
     }
-    mobiles_ = mobiles;
+    mobiles_ = mobiles.Pass();
+
+    if (!mobiles_.empty())
+      LogMetric(DEVICES_AVAILABLE);
 
     Browser* browser = BrowserList::GetLastActiveWithProfile(profile_);
     if (browser && browser->command_updater())
@@ -374,11 +494,11 @@ void ChromeToMobileService::HandleSubmitResponse(
   // Get the success value from the CloudPrint server response data.
   std::string data;
   source->GetResponseAsString(&data);
-  DictionaryValue* json_data = NULL;
-  cloud_print::ParseResponseJSON(data, NULL, &json_data);
   bool success = false;
-  if (json_data)
-    json_data->GetBoolean("success", &success);
+  DictionaryValue* dictionary = NULL;
+  scoped_ptr<Value> json(base::JSONReader::Read(data));
+  if (json.get() && json->GetAsDictionary(&dictionary) && dictionary)
+    dictionary->GetBoolean("success", &success);
 
   // Check if the observer is waiting on a second response (url and snapshot).
   RequestObserverMap::iterator other = request_observer_map_.begin();
@@ -394,5 +514,6 @@ void ChromeToMobileService::HandleSubmitResponse(
     }
   }
 
+  LogMetric(success ? SEND_SUCCESS : SEND_ERROR);
   observer->OnSendComplete(success);
 }

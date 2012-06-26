@@ -77,12 +77,11 @@ bool SpdyProxyClientSocket::IsUsingSpdy() const {
   return true;
 }
 
-SSLClientSocket::NextProto
-SpdyProxyClientSocket::GetProtocolNegotiated() const {
+NextProto SpdyProxyClientSocket::GetProtocolNegotiated() const {
   // Save the negotiated protocol
   SSLInfo ssl_info;
   bool was_npn_negotiated;
-  SSLClientSocket::NextProto protocol_negotiated;
+  NextProto protocol_negotiated;
   spdy_stream_->GetSSLInfo(&ssl_info, &was_npn_negotiated,
                            &protocol_negotiated);
   return protocol_negotiated;
@@ -168,6 +167,10 @@ int64 SpdyProxyClientSocket::NumBytesRead() const {
 
 base::TimeDelta SpdyProxyClientSocket::GetConnectTimeMicros() const {
   return base::TimeDelta::FromMicroseconds(-1);
+}
+
+NextProto SpdyProxyClientSocket::GetNegotiatedProtocol() const {
+  return kProtoUnknown;
 }
 
 int SpdyProxyClientSocket::Read(IOBuffer* buf, int buf_len,
@@ -469,9 +472,9 @@ int SpdyProxyClientSocket::OnResponseReceived(
     return OK;
 
   // Save the response
-  int rv = SpdyHeadersToHttpResponse(response, &response_);
-  if (rv == ERR_INCOMPLETE_SPDY_HEADERS)
-    return rv;  // More headers are coming.
+  if (!SpdyHeadersToHttpResponse(
+          response, spdy_stream_->GetProtocolVersion(), &response_))
+      return ERR_INCOMPLETE_SPDY_HEADERS;
 
   OnIOComplete(status);
   return OK;

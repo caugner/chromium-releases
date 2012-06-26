@@ -38,8 +38,8 @@ class AutofillExternalDelegateGtk : public AutofillExternalDelegate {
       const std::vector<string16>& autofill_values,
       const std::vector<string16>& autofill_labels,
       const std::vector<string16>& autofill_icons,
-      const std::vector<int>& autofill_unique_ids,
-      int separator_index) OVERRIDE;
+      const std::vector<int>& autofill_unique_ids) OVERRIDE;
+  virtual void SetBounds(const gfx::Rect& bounds) OVERRIDE;
 
  private:
   // Create a valid view to display the autofill results if one doesn't

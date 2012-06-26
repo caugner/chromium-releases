@@ -48,8 +48,8 @@ void BalloonHost::Shutdown() {
   web_contents_.reset();
 }
 
-Browser* BalloonHost::GetBrowser() {
-  // Notifications aren't associated with a particular browser.
+ExtensionWindowController* BalloonHost::GetExtensionWindowController() const {
+  // Notifications don't have a window controller.
   return NULL;
 }
 
@@ -165,4 +165,15 @@ void BalloonHost::NotifyDisconnect() {
 
 bool BalloonHost::IsRenderViewReady() const {
   return should_notify_on_disconnect_;
+}
+
+bool BalloonHost::CanLoadDataURLsInWebUI() const {
+#if defined(OS_CHROMEOS)
+  // Chrome OS uses data URLs in WebUI BalloonHosts.  We normally do not allow
+  // data URLs in WebUI renderers, but normal pages cannot target BalloonHosts,
+  // so this should be safe.
+  return true;
+#else
+  return false;
+#endif
 }

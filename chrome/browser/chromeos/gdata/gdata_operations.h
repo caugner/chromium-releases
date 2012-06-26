@@ -141,7 +141,6 @@ class UrlFetchOperationBase : public GDataOperationInterface,
 
   Profile* profile_;
   ReAuthenticateCallback re_authenticate_callback_;
-  scoped_refptr<base::MessageLoopProxy> relay_proxy_;
   int re_authenticate_count_;
   bool save_temp_file_;
   FilePath output_file_path_;
@@ -208,6 +207,8 @@ class GetDocumentsOperation : public GetDataOperation {
  public:
   GetDocumentsOperation(GDataOperationRegistry* registry,
                         Profile* profile,
+                        int start_changestamp,
+                        const std::string& search_string,
                         const GetDataCallback& callback);
   virtual ~GetDocumentsOperation();
 
@@ -221,6 +222,8 @@ class GetDocumentsOperation : public GetDataOperation {
 
  private:
   GURL override_url_;
+  int start_changestamp_;
+  std::string search_string_;
 
   DISALLOW_COPY_AND_ASSIGN(GetDocumentsOperation);
 };
@@ -248,12 +251,14 @@ class GetAccountMetadataOperation : public GetDataOperation {
 // This class performs the operation for downloading of a given document/file.
 class DownloadFileOperation : public UrlFetchOperationBase {
  public:
-  DownloadFileOperation(GDataOperationRegistry* registry,
-                        Profile* profile,
-                        const DownloadActionCallback& callback,
-                        const GURL& document_url,
-                        const FilePath& virtual_path,
-                        const FilePath& output_file_path);
+  DownloadFileOperation(
+      GDataOperationRegistry* registry,
+      Profile* profile,
+      const DownloadActionCallback& download_action_callback,
+      const GetDownloadDataCallback& get_download_data_callback,
+      const GURL& document_url,
+      const FilePath& virtual_path,
+      const FilePath& output_file_path);
   virtual ~DownloadFileOperation();
 
  protected:
@@ -266,9 +271,14 @@ class DownloadFileOperation : public UrlFetchOperationBase {
   // Overridden from content::URLFetcherDelegate.
   virtual void OnURLFetchDownloadProgress(const content::URLFetcher* source,
                                           int64 current, int64 total) OVERRIDE;
+  virtual bool ShouldSendDownloadData() OVERRIDE;
+  virtual void OnURLFetchDownloadData(
+      const content::URLFetcher* source,
+      scoped_ptr<std::string> download_data) OVERRIDE;
 
  private:
-  DownloadActionCallback callback_;
+  DownloadActionCallback download_action_callback_;
+  GetDownloadDataCallback get_download_data_callback_;
   GURL document_url_;
 
   DISALLOW_COPY_AND_ASSIGN(DownloadFileOperation);

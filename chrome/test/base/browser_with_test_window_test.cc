@@ -19,10 +19,11 @@
 #include "ui/aura/env.h"
 #include "ui/aura/monitor_manager.h"
 #include "ui/aura/root_window.h"
-#include "ui/aura/test/single_monitor_manager.h"
+#include "ui/aura/single_monitor_manager.h"
 #include "ui/aura/test/test_activation_client.h"
 #include "ui/aura/test/test_screen.h"
 #include "ui/aura/test/test_stacking_client.h"
+#include "ui/gfx/screen.h"
 #endif
 
 using content::BrowserThread;
@@ -46,15 +47,14 @@ void BrowserWithTestWindowTest::SetUp() {
   window_.reset(new TestBrowserWindow(browser()));
   browser_->SetWindowForTesting(window_.get());
 #if defined(USE_AURA)
-  aura::Env::GetInstance()->SetMonitorManager(
-      new aura::test::SingleMonitorManager);
+  aura::Env::GetInstance()->SetMonitorManager(new aura::SingleMonitorManager);
   root_window_.reset(aura::MonitorManager::CreateRootWindowForPrimaryMonitor());
   gfx::Screen::SetInstance(new aura::TestScreen(root_window_.get()));
   test_activation_client_.reset(
       new aura::test::TestActivationClient(root_window_.get()));
   test_stacking_client_.reset(
       new aura::test::TestStackingClient(root_window_.get()));
-#endif
+#endif  // USE_AURA
 }
 
 void BrowserWithTestWindowTest::TearDown() {

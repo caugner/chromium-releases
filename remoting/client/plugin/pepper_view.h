@@ -41,6 +41,7 @@ class PepperView : public ChromotingView,
   virtual void SetConnectionState(
       protocol::ConnectionToHost::State state,
       protocol::ErrorCode error) OVERRIDE;
+  virtual protocol::ClipboardStub* GetClipboardStub() OVERRIDE;
 
   // FrameConsumer implementation.
   virtual void ApplyBuffer(const SkISize& view_size,
@@ -80,7 +81,7 @@ class PepperView : public ChromotingView,
                    const SkRegion& region);
 
   // This is a completion callback for FlushGraphics().
-  void OnFlushDone(base::Time paint_start, pp::ImageData* buffer);
+  void OnFlushDone(base::Time paint_start, pp::ImageData* buffer, int result);
 
   // Reference to the creating plugin instance. Needed for interacting with
   // pepper.  Marking explicitly as const since it must be initialized at

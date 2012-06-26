@@ -15,7 +15,7 @@
 #include "content/test/test_renderer_host.h"
 
 // This file provides a testing framework for mocking out the RenderProcessHost
-// layer. It allows you to test RenderViewHost, TabContents,
+// layer. It allows you to test RenderViewHost, WebContentsImpl,
 // NavigationController, and other layers above that without running an actual
 // renderer process.
 //
@@ -67,15 +67,10 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
   virtual void SetWindowVisibility(bool visible) OVERRIDE {}
   virtual void WindowFrameChanged() OVERRIDE {}
 #endif  // defined(OS_MACOSX)
-#if defined(TOOLKIT_USES_GTK)
+#if defined(TOOLKIT_GTK)
   virtual GdkEventButton* GetLastMouseDown() OVERRIDE;
-#if !defined(TOOLKIT_VIEWS)
   virtual gfx::NativeView BuildInputMethodsGtkMenu() OVERRIDE;
-#endif  // !defined(TOOLKIT_VIEWS)
-#endif  // defined(TOOLKIT_USES_GTK)
-  virtual bool CopyFromCompositingSurface(
-      const gfx::Size& size,
-             skia::PlatformCanvas* output) OVERRIDE;
+#endif  // defined(TOOLKIT_GTK)
 
   // RenderWidgetHostViewPort implementation.
   virtual void InitAsPopup(RenderWidgetHostView* parent_host_view,
@@ -102,6 +97,13 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
   virtual void Destroy() OVERRIDE {}
   virtual void SetTooltipText(const string16& tooltip_text) OVERRIDE {}
   virtual BackingStore* AllocBackingStore(const gfx::Size& size) OVERRIDE;
+  virtual bool CopyFromCompositingSurface(
+      const gfx::Size& size,
+      skia::PlatformCanvas* output) OVERRIDE;
+  virtual void AsyncCopyFromCompositingSurface(
+      const gfx::Size& size,
+      skia::PlatformCanvas* output,
+      base::Callback<void(bool)> callback) OVERRIDE;
   virtual void OnAcceleratedCompositingStateChange() OVERRIDE;
   virtual void AcceleratedSurfaceBuffersSwapped(
       const GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params& params,
@@ -110,6 +112,7 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
       const GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params& params,
       int gpu_host_id) OVERRIDE;
   virtual void AcceleratedSurfaceSuspend() OVERRIDE;
+  virtual bool HasAcceleratedSurface(const gfx::Size& desired_size) OVERRIDE;
 #if defined(OS_MACOSX)
   virtual gfx::Rect GetViewCocoaBounds() const OVERRIDE;
   virtual void PluginFocusChanged(bool focused, int plugin_id) OVERRIDE;
@@ -151,10 +154,10 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
   virtual void AcceleratedSurfaceRelease(uint64 surface_id) OVERRIDE { }
 #endif
 
-#if defined(TOOLKIT_USES_GTK)
+#if defined(TOOLKIT_GTK)
   virtual void CreatePluginContainer(gfx::PluginWindowHandle id) OVERRIDE { }
   virtual void DestroyPluginContainer(gfx::PluginWindowHandle id) OVERRIDE { }
-#endif  // defined(TOOLKIT_USES_GTK)
+#endif  // defined(TOOLKIT_GTK)
 
   virtual gfx::GLSurfaceHandle GetCompositingSurface() OVERRIDE;
 
@@ -179,8 +182,9 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
 // TestRenderViewHost ----------------------------------------------------------
 
 // TODO(brettw) this should use a TestWebContents which should be generalized
-// from the TabContents test. We will probably also need that class' version of
-// CreateRenderViewForRenderManager when more complicate tests start using this.
+// from the WebContentsImpl test. We will probably also need that class' version
+// of CreateRenderViewForRenderManager when more complicated tests start using
+// this.
 //
 // Note that users outside of content must use this class by getting
 // the separate content::RenderViewHostTester interface via
@@ -216,7 +220,8 @@ class TestRenderViewHost
  public:
   TestRenderViewHost(SiteInstance* instance,
                      RenderViewHostDelegate* delegate,
-                     int routing_id);
+                     int routing_id,
+                     bool swapped_out);
   virtual ~TestRenderViewHost();
 
   // RenderViewHostTester implementation.  Note that CreateRenderView
@@ -271,6 +276,7 @@ class TestRenderViewHost
   // RenderViewHost overrides --------------------------------------------------
 
   virtual bool CreateRenderView(const string16& frame_name,
+                                int opener_route_id,
                                 int32 max_page_id) OVERRIDE;
   virtual bool IsRenderViewLive() const OVERRIDE;
 

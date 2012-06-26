@@ -28,13 +28,15 @@ class LauncherDelegateImpl : public ash::LauncherDelegate {
   // LauncherDelegate overrides:
   virtual void CreateNewTab() OVERRIDE;
   virtual void CreateNewWindow() OVERRIDE;
-  virtual void ItemClicked(const ash::LauncherItem& item) OVERRIDE;
+  virtual void ItemClicked(const ash::LauncherItem& item,
+                           int event_flags) OVERRIDE;
   virtual int GetBrowserShortcutResourceId() OVERRIDE;
   virtual string16 GetTitle(const ash::LauncherItem& item) OVERRIDE;
   virtual ui::MenuModel* CreateContextMenu(
       const ash::LauncherItem& item) OVERRIDE;
   virtual ui::MenuModel* CreateContextMenuForLauncher() OVERRIDE;
   virtual ash::LauncherID GetIDByWindow(aura::Window* window) OVERRIDE;
+  virtual bool IsDraggable(const ash::LauncherItem& item) OVERRIDE;
 
  private:
   // Used to update Launcher. Owned by main.

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -39,7 +39,6 @@ class VideoCaptureController
  public:
   VideoCaptureController(
       media_stream::VideoCaptureManager* video_capture_manager);
-  virtual ~VideoCaptureController();
 
   // Start video capturing and try to use the resolution specified in
   // |params|.
@@ -60,6 +59,10 @@ class VideoCaptureController
                    VideoCaptureControllerEventHandler* event_handler,
                    bool force_buffer_return);
 
+  // API called directly by VideoCaptureManager in case the device is
+  // prematurely closed.
+  void StopSession(int session_id);
+
   // Return a buffer previously given in
   // VideoCaptureControllerEventHandler::OnBufferReady.
   void ReturnBuffer(const VideoCaptureControllerID& id,
@@ -72,9 +75,14 @@ class VideoCaptureController
                                        base::Time timestamp) OVERRIDE;
   virtual void OnError() OVERRIDE;
   virtual void OnFrameInfo(
-      const media::VideoCaptureDevice::Capability& info) OVERRIDE;
+      const media::VideoCaptureCapability& info) OVERRIDE;
+
+ protected:
+  virtual ~VideoCaptureController();
 
  private:
+  friend class base::RefCountedThreadSafe<VideoCaptureController>;
+
   struct ControllerClient;
   typedef std::list<ControllerClient*> ControllerClients;
 
@@ -83,9 +91,8 @@ class VideoCaptureController
 
   // Worker functions on IO thread.
   void DoIncomingCapturedFrameOnIOThread(int buffer_id, base::Time timestamp);
-  void DoFrameInfoOnIOThread(const media::VideoCaptureDevice::Capability info);
+  void DoFrameInfoOnIOThread(const media::VideoCaptureCapability info);
   void DoErrorOnIOThread();
-  void DoDeviceStateOnIOThread(bool in_use);
   void DoDeviceStoppedOnIOThread();
 
   // Send frame info and init buffers to |client|.
@@ -96,6 +103,10 @@ class VideoCaptureController
   ControllerClient* FindClient(
       const VideoCaptureControllerID& id,
       VideoCaptureControllerEventHandler* handler,
+      const ControllerClients& clients);
+  // Find a client of |session_id| in |clients|.
+  ControllerClient* FindClient(
+      int session_id,
       const ControllerClients& clients);
   // Decide what to do after kStopping state. Dependent on events, controller
   // can stay in kStopping state, or go to kStopped, or restart capture.
@@ -123,7 +134,7 @@ class VideoCaptureController
 
   // It's modified on caller thread, assuming there is only one OnFrameInfo()
   // call per StartCapture().
-  media::VideoCaptureDevice::Capability frame_info_;
+  media::VideoCaptureCapability frame_info_;
 
   // It's accessed only on IO thread.
   bool frame_info_available_;

@@ -41,13 +41,7 @@ PepperFileMessageFilter::PepperFileMessageFilter(
     int child_id, content::BrowserContext* browser_context)
         : child_id_(child_id),
           channel_(NULL) {
-  pepper_path_ =
-      browser_context->GetPath().Append(FILE_PATH_LITERAL("Pepper Data"));
-}
-
-PepperFileMessageFilter::~PepperFileMessageFilter() {
-  // This function should be called on the IO thread.
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  pepper_path_ = GetDataDirName(browser_context->GetPath());
 }
 
 void PepperFileMessageFilter::OverrideThreadForMessage(
@@ -74,6 +68,16 @@ bool PepperFileMessageFilter::OnMessageReceived(const IPC::Message& message,
 
 void PepperFileMessageFilter::OnDestruct() const {
   BrowserThread::DeleteOnIOThread::Destruct(this);
+}
+
+// static
+FilePath PepperFileMessageFilter::GetDataDirName(const FilePath& profile_path) {
+  return profile_path.Append(FILE_PATH_LITERAL("Pepper Data"));
+}
+
+PepperFileMessageFilter::~PepperFileMessageFilter() {
+  // This function should be called on the IO thread.
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 }
 
 // Called on the FILE thread:

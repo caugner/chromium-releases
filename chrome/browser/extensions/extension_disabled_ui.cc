@@ -30,6 +30,7 @@
 #include "content/public/browser/notification_source.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
+#include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace {
@@ -130,9 +131,11 @@ class ExtensionDisabledGlobalError : public GlobalError,
 
   // GlobalError implementation.
   virtual bool HasBadge() OVERRIDE;
+  virtual int GetBadgeResourceID() OVERRIDE;
   virtual bool HasMenuItem() OVERRIDE;
   virtual int MenuItemCommandID() OVERRIDE;
   virtual string16 MenuItemLabel() OVERRIDE;
+  virtual int MenuItemIconResourceID() OVERRIDE;
   virtual void ExecuteMenuItem(Browser* browser) OVERRIDE;
   virtual bool HasBubbleView() OVERRIDE;
   virtual string16 GetBubbleViewTitle() OVERRIDE;
@@ -188,6 +191,7 @@ ExtensionDisabledGlobalError::ExtensionDisabledGlobalError(
 }
 
 ExtensionDisabledGlobalError::~ExtensionDisabledGlobalError() {
+  ReleaseMenuCommandID(menu_command_id_);
   HISTOGRAM_ENUMERATION("Extensions.DisabledUIUserResponse",
                         user_response_, EXTENSION_DISABLED_UI_BUCKET_BOUNDARY);
 }
@@ -196,12 +200,20 @@ bool ExtensionDisabledGlobalError::HasBadge() {
   return true;
 }
 
+int ExtensionDisabledGlobalError::GetBadgeResourceID() {
+  return IDR_UPDATE_BADGE;
+}
+
 bool ExtensionDisabledGlobalError::HasMenuItem() {
   return true;
 }
 
 int ExtensionDisabledGlobalError::MenuItemCommandID() {
   return menu_command_id_;
+}
+
+int ExtensionDisabledGlobalError::MenuItemIconResourceID() {
+  return IDR_UPDATE_MENU;
 }
 
 string16 ExtensionDisabledGlobalError::MenuItemLabel() {
@@ -248,9 +260,15 @@ void ExtensionDisabledGlobalError::BubbleViewAcceptButtonPressed(
 
 void ExtensionDisabledGlobalError::BubbleViewCancelButtonPressed(
     Browser* browser) {
+#if !defined(OS_ANDROID)
   uninstall_dialog_.reset(
       ExtensionUninstallDialog::Create(service_->profile(), this));
-  uninstall_dialog_->ConfirmUninstall(extension_);
+  // Delay showing the uninstall dialog, so that this function returns
+  // immediately, to close the bubble properly. See crbug.com/121544.
+  MessageLoop::current()->PostTask(FROM_HERE,
+      base::Bind(&ExtensionUninstallDialog::ConfirmUninstall,
+                 uninstall_dialog_->AsWeakPtr(), extension_));
+#endif  // !defined(OS_ANDROID)
 }
 
 void ExtensionDisabledGlobalError::ExtensionUninstallAccepted() {
@@ -279,7 +297,6 @@ void ExtensionDisabledGlobalError::Observe(
   if (extension == extension_) {
     GlobalErrorServiceFactory::GetForProfile(service_->profile())->
         RemoveGlobalError(this);
-    ReleaseMenuCommandID(menu_command_id_);
 
     if (type == chrome::NOTIFICATION_EXTENSION_LOADED)
       user_response_ = REENABLE;

@@ -44,9 +44,6 @@ namespace {
 
 struct PrepopulatedEngine {
   const wchar_t* const name;
-  // If empty, we'll autogenerate a keyword based on the search_url every time
-  // someone asks.  Only entries which need keywords to auto-track a dynamically
-  // generated search URL should use this.
   const wchar_t* const keyword;
   const char* const favicon_url;  // If NULL, there is no favicon.
   const char* const search_url;
@@ -1085,19 +1082,16 @@ const PrepopulatedEngine goo = {
 
 const PrepopulatedEngine google = {
   L"Google",
-  L"",
+  L"google.com",  // This will be dynamically updated by the TemplateURL system.
   "http://www.google.com/favicon.ico",
   "{google:baseURL}search?{google:RLZ}{google:acceptedSuggestion}"
       "{google:originalQueryForSuggestion}{google:searchFieldtrialParameter}"
-      "{google:instantFieldTrialGroupParameter}sourceid=chrome&"
-      "ie={inputEncoding}&q={searchTerms}",
+      "sourceid=chrome&ie={inputEncoding}&q={searchTerms}",
   "UTF-8",
   "{google:baseSuggestURL}search?{google:searchFieldtrialParameter}"
-      "{google:instantFieldTrialGroupParameter}client=chrome&hl={language}&"
-      "q={searchTerms}",
+      "client=chrome&hl={language}&q={searchTerms}",
   "{google:baseURL}webhp?{google:RLZ}sourceid=chrome-instant&"
-      "{google:instantFieldTrialGroupParameter}ie={inputEncoding}"
-      "{google:instantEnabledParameter}{searchTerms}",
+      "ie={inputEncoding}{google:instantEnabledParameter}{searchTerms}",
   SEARCH_ENGINE_GOOGLE,
   1,
 };
@@ -3140,52 +3134,45 @@ void RegisterUserPrefs(PrefService* prefs) {
 int GetDataVersion(PrefService* prefs) {
   // Increment this if you change the above data in ways that mean users with
   // existing data should get a new version.
-  const int kCurrentDataVersion = 38;
-  if (!prefs)
-    return kCurrentDataVersion;
-  // If a version number exist in the preferences file, it overrides the
-  // version of the built-in data.
-  int version =
-    prefs->GetInteger(prefs::kSearchProviderOverridesVersion);
-  return (version >= 0) ? version : kCurrentDataVersion;
+  const int kCurrentDataVersion = 39;
+  // Allow tests to override the local version.
+  return (prefs && prefs->HasPrefPath(prefs::kSearchProviderOverridesVersion)) ?
+      prefs->GetInteger(prefs::kSearchProviderOverridesVersion) :
+      kCurrentDataVersion;
 }
 
-TemplateURL* MakePrepopulatedTemplateURL(const string16& name,
+TemplateURL* MakePrepopulatedTemplateURL(Profile* profile,
+                                         const string16& name,
                                          const string16& keyword,
                                          const base::StringPiece& search_url,
-                                         const base::StringPiece& favicon_url,
                                          const base::StringPiece& suggest_url,
                                          const base::StringPiece& instant_url,
+                                         const base::StringPiece& favicon_url,
                                          const base::StringPiece& encoding,
                                          int id) {
-  TemplateURL* new_turl = new TemplateURL();
-  new_turl->SetURL(search_url.as_string(), 0, 0);
-  new_turl->SetFaviconURL(GURL(favicon_url.as_string()));
-  new_turl->SetSuggestionsURL(suggest_url.as_string(), 0, 0);
-  new_turl->SetInstantURL(instant_url.as_string(), 0, 0);
-  new_turl->set_short_name(name);
-  if (keyword.empty())
-    new_turl->set_autogenerate_keyword(true);
-  else
-    new_turl->set_keyword(keyword);
-  new_turl->set_show_in_default_list(true);
-  new_turl->set_safe_for_autoreplace(true);
-  new_turl->set_date_created(base::Time());
-  new_turl->set_last_modified(base::Time());
-  std::vector<std::string> turl_encodings;
-  turl_encodings.push_back(encoding.as_string());
-  new_turl->set_input_encodings(turl_encodings);
-  new_turl->SetPrepopulateId(id);
-  return new_turl;
+  TemplateURLData data;
+  data.short_name = name;
+  data.SetKeyword(keyword);
+  data.SetURL(search_url.as_string());
+  data.suggestions_url = suggest_url.as_string();
+  data.instant_url = instant_url.as_string();
+  data.favicon_url = GURL(favicon_url.as_string());
+  data.show_in_default_list = true;
+  data.safe_for_autoreplace = true;
+  data.input_encodings.push_back(encoding.as_string());
+  data.date_created = base::Time();
+  data.last_modified = base::Time();
+  data.prepopulate_id = id;
+  return new TemplateURL(profile, data);
 }
 
-void GetPrepopulatedTemplateFromPrefs(PrefService* prefs,
+void GetPrepopulatedTemplateFromPrefs(Profile* profile,
                                       std::vector<TemplateURL*>* t_urls) {
-  if (!prefs)
+  if (!profile)
     return;
 
   const ListValue* list =
-      prefs->GetList(prefs::kSearchProviderOverrides);
+      profile->GetPrefs()->GetList(prefs::kSearchProviderOverrides);
   if (!list)
     return;
 
@@ -3212,52 +3199,54 @@ void GetPrepopulatedTemplateFromPrefs(PrefService* prefs,
         engine->Get("encoding", &val) && val->GetAsString(&encoding) &&
         engine->Get("id", &val) && val->GetAsInteger(&id)) {
       // These next fields are not allowed to be empty.
-      if (name.empty() || search_url.empty() || favicon_url.empty() ||
-          encoding.empty())
+      if (name.empty() || keyword.empty() || search_url.empty() ||
+          favicon_url.empty() || encoding.empty())
         return;
     } else {
       // Got a parsing error. No big deal.
       continue;
     }
-    t_urls->push_back(MakePrepopulatedTemplateURL(name, keyword, search_url,
-        favicon_url, suggest_url, instant_url, encoding, id));
+    t_urls->push_back(MakePrepopulatedTemplateURL(profile, name, keyword,
+        search_url, suggest_url, instant_url, favicon_url, encoding, id));
   }
 }
 
 // The caller owns the returned TemplateURL.
 TemplateURL* MakePrepopulatedTemplateURLFromPrepopulateEngine(
+    Profile* profile,
     const PrepopulatedEngine& engine) {
-  return MakePrepopulatedTemplateURL(WideToUTF16(engine.name),
-      WideToUTF16(engine.keyword), engine.search_url, engine.favicon_url,
-      engine.suggest_url, engine.instant_url, engine.encoding, engine.id);
+  return MakePrepopulatedTemplateURL(profile, WideToUTF16(engine.name),
+      WideToUTF16(engine.keyword), engine.search_url, engine.suggest_url,
+      engine.instant_url, engine.favicon_url, engine.encoding, engine.id);
 }
 
-void GetPrepopulatedEngines(PrefService* prefs,
+void GetPrepopulatedEngines(Profile* profile,
                             std::vector<TemplateURL*>* t_urls,
                             size_t* default_search_provider_index) {
   // If there is a set of search engines in the preferences file, it overrides
   // the built-in set.
   *default_search_provider_index = 0;
-  GetPrepopulatedTemplateFromPrefs(prefs, t_urls);
+  GetPrepopulatedTemplateFromPrefs(profile, t_urls);
   if (!t_urls->empty())
     return;
 
   const PrepopulatedEngine** engines;
   size_t num_engines;
-  GetPrepopulationSetFromCountryID(prefs, &engines, &num_engines);
+  GetPrepopulationSetFromCountryID(profile ? profile->GetPrefs() : NULL,
+                                   &engines, &num_engines);
   for (size_t i = 0; i != num_engines; ++i) {
     t_urls->push_back(
-        MakePrepopulatedTemplateURLFromPrepopulateEngine(*engines[i]));
+        MakePrepopulatedTemplateURLFromPrepopulateEngine(profile, *engines[i]));
   }
 }
 
-TemplateURL* GetPrepopulatedDefaultSearch(PrefService* prefs) {
+TemplateURL* GetPrepopulatedDefaultSearch(Profile* profile) {
   TemplateURL* default_search_provider = NULL;
   ScopedVector<TemplateURL> loaded_urls;
   size_t default_search_index;
   // This could be more efficient.  We are loading all the URLs to only keep
   // the first one.
-  GetPrepopulatedEngines(prefs, &loaded_urls.get(), &default_search_index);
+  GetPrepopulatedEngines(profile, &loaded_urls.get(), &default_search_index);
   if (default_search_index < loaded_urls.size()) {
     default_search_provider = loaded_urls[default_search_index];
     loaded_urls.weak_erase(loaded_urls.begin() + default_search_index);
@@ -3283,7 +3272,8 @@ static const PrepopulatedEngine* GetEngineForURL(const std::string& url) {
   // First special-case Google, because the prepopulate URL for it will not
   // convert to a GURL and thus won't have an origin.  Instead see if the
   // incoming URL's host is "[*.]google.<TLD>".
-  if (google_util::IsGoogleHostname(as_gurl.host()))
+  if (google_util::IsGoogleHostname(as_gurl.host(),
+                                    google_util::DISALLOW_SUBDOMAIN))
     return &google;
 
   // Now check the rest of the prepopulate data.

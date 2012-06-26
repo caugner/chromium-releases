@@ -75,13 +75,6 @@ class AudioUtilNoHardware : public AudioUtilInterface {
   DISALLOW_COPY_AND_ASSIGN(AudioUtilNoHardware);
 };
 
-bool IsRunningHeadless() {
-  scoped_ptr<base::Environment> env(base::Environment::Create());
-  if (env->HasVar("CHROME_HEADLESS"))
-    return true;
-  return false;
-}
-
 // Return true if at least one element in the array matches |value|.
 bool FindElementInArray(int* array, int size, int value) {
   return (std::find(&array[0], &array[0] + size, value) != &array[size]);
@@ -106,7 +99,7 @@ bool HardwareSampleRatesAreValid() {
 
   if (!FindElementInArray(valid_input_rates, arraysize(valid_input_rates),
                           input_sample_rate)) {
-    DLOG(WARNING) << "Non-supported input sample rate detected.";
+    LOG(WARNING) << "Non-supported input sample rate detected.";
     return false;
   }
 
@@ -115,7 +108,7 @@ bool HardwareSampleRatesAreValid() {
       static_cast<int>(audio_hardware::GetOutputSampleRate());
   if (!FindElementInArray(valid_output_rates, arraysize(valid_output_rates),
                           output_sample_rate)) {
-    DLOG(WARNING) << "Non-supported output sample rate detected.";
+    LOG(WARNING) << "Non-supported output sample rate detected.";
     return false;
   }
 
@@ -260,8 +253,10 @@ TEST_F(WebRTCAudioDeviceTest, Construct) {
 // verify that streaming starts correctly.
 // Disabled when running headless since the bots don't have the required config.
 TEST_F(WebRTCAudioDeviceTest, StartPlayout) {
-  if (IsRunningHeadless())
+  if (!has_output_devices_) {
+    LOG(WARNING) << "No output device detected.";
     return;
+  }
 
   AudioUtil audio_util;
   SetAudioUtilCallback(&audio_util);
@@ -332,8 +327,10 @@ TEST_F(WebRTCAudioDeviceTest, StartPlayout) {
 // that the audio capturing starts as it should.
 // Disabled when running headless since the bots don't have the required config.
 TEST_F(WebRTCAudioDeviceTest, StartRecording) {
-  if (IsRunningHeadless())
+  if (!has_input_devices_ || !has_output_devices_) {
+    LOG(WARNING) << "Missing audio devices.";
     return;
+  }
 
   AudioUtil audio_util;
   SetAudioUtilCallback(&audio_util);
@@ -399,8 +396,10 @@ TEST_F(WebRTCAudioDeviceTest, StartRecording) {
 // Uses WebRtcAudioDeviceImpl to play a local wave file.
 // Disabled when running headless since the bots don't have the required config.
 TEST_F(WebRTCAudioDeviceTest, PlayLocalFile) {
-  if (IsRunningHeadless())
+  if (!has_output_devices_) {
+    LOG(WARNING) << "No output device detected.";
     return;
+  }
 
   std::string file_path(
       GetTestDataPath(FILE_PATH_LITERAL("speechmusic_mono_16kHz.pcm")));
@@ -437,6 +436,7 @@ TEST_F(WebRTCAudioDeviceTest, PlayLocalFile) {
   EXPECT_EQ(0, base->StartPlayout(ch));
 
   ScopedWebRTCPtr<webrtc::VoEFile> file(engine.get());
+  ASSERT_TRUE(file.valid());
   int duration = 0;
   EXPECT_EQ(0, file->GetFileDuration(file_path.c_str(), duration,
                                      webrtc::kFileFormatPcm16kHzFile));
@@ -465,10 +465,12 @@ TEST_F(WebRTCAudioDeviceTest, PlayLocalFile) {
 // where they are decoded and played out on the default audio output device.
 // Disabled when running headless since the bots don't have the required config.
 // TODO(henrika): improve quality by using a wideband codec, enabling noise-
-// suppressions and perhaps also the digital AGC.
-TEST_F(WebRTCAudioDeviceTest, FullDuplexAudio) {
-  if (IsRunningHeadless())
+// suppressions etc.
+TEST_F(WebRTCAudioDeviceTest, FullDuplexAudioWithAGC) {
+  if (!has_output_devices_ || !has_input_devices_) {
+    LOG(WARNING) << "Missing audio devices.";
     return;
+  }
 
   AudioUtil audio_util;
   SetAudioUtilCallback(&audio_util);
@@ -477,13 +479,13 @@ TEST_F(WebRTCAudioDeviceTest, FullDuplexAudio) {
     return;
 
   EXPECT_CALL(media_observer(),
-    OnSetAudioStreamStatus(_, 1, StrEq("created")));
+      OnSetAudioStreamStatus(_, 1, StrEq("created")));
   EXPECT_CALL(media_observer(),
-    OnSetAudioStreamPlaying(_, 1, true));
+      OnSetAudioStreamPlaying(_, 1, true));
   EXPECT_CALL(media_observer(),
-    OnSetAudioStreamStatus(_, 1, StrEq("closed")));
+      OnSetAudioStreamStatus(_, 1, StrEq("closed")));
   EXPECT_CALL(media_observer(),
-    OnDeleteAudioStream(_, 1)).Times(AnyNumber());
+      OnDeleteAudioStream(_, 1)).Times(AnyNumber());
 
   scoped_refptr<WebRtcAudioDeviceImpl> audio_device(
       new WebRtcAudioDeviceImpl());
@@ -496,10 +498,19 @@ TEST_F(WebRTCAudioDeviceTest, FullDuplexAudio) {
   int err = base->Init(audio_device);
   ASSERT_EQ(0, err);
 
+  ScopedWebRTCPtr<webrtc::VoEAudioProcessing> audio_processing(engine.get());
+  ASSERT_TRUE(audio_processing.valid());
+  bool enabled = false;
+  webrtc::AgcModes agc_mode =  webrtc::kAgcDefault;
+  EXPECT_EQ(0, audio_processing->GetAgcStatus(enabled, agc_mode));
+  EXPECT_TRUE(enabled);
+  EXPECT_EQ(agc_mode, webrtc::kAgcAdaptiveAnalog);
+
   int ch = base->CreateChannel();
   EXPECT_NE(-1, ch);
 
   ScopedWebRTCPtr<webrtc::VoENetwork> network(engine.get());
+  ASSERT_TRUE(network.valid());
   scoped_ptr<WebRTCTransportImpl> transport(
       new WebRTCTransportImpl(network.get()));
   EXPECT_EQ(0, network->RegisterExternalTransport(ch, *transport.get()));

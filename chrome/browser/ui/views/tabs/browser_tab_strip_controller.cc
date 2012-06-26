@@ -14,6 +14,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/tabs/tab_menu_model.h"
+#include "chrome/browser/ui/views/tabs/tab.h"
 #include "chrome/browser/ui/views/tabs/tab_renderer_data.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -147,7 +148,7 @@ BrowserTabStripController::BrowserTabStripController(Browser* browser,
 BrowserTabStripController::~BrowserTabStripController() {
   // When we get here the TabStrip is being deleted. We need to explicitly
   // cancel the menu, otherwise it may try to invoke something on the tabstrip
-  // from it's destructor.
+  // from its destructor.
   if (context_menu_contents_.get())
     context_menu_contents_->Cancel();
 
@@ -159,7 +160,7 @@ void BrowserTabStripController::InitFromModel(TabStrip* tabstrip) {
   // Walk the model, calling our insertion observer method for each item within
   // it.
   for (int i = 0; i < model_->count(); ++i)
-    TabInsertedAt(model_->GetTabContentsAt(i), i, model_->active_index() == i);
+    AddTab(model_->GetTabContentsAt(i), i, model_->active_index() == i);
 }
 
 bool BrowserTabStripController::IsCommandEnabledForTab(
@@ -196,6 +197,10 @@ bool BrowserTabStripController::IsValidIndex(int index) const {
 
 bool BrowserTabStripController::IsActiveTab(int model_index) const {
   return model_->active_index() == model_index;
+}
+
+int BrowserTabStripController::GetActiveIndex() const {
+  return model_->active_index();
 }
 
 bool BrowserTabStripController::IsTabSelected(int model_index) const {
@@ -253,12 +258,10 @@ void BrowserTabStripController::UpdateLoadingAnimations() {
   // Don't use the model count here as it's possible for this to be invoked
   // before we've applied an update from the model (Browser::TabInsertedAt may
   // be processed before us and invokes this).
-  for (int tab_index = 0, tab_count = tabstrip_->tab_count();
-       tab_index < tab_count; ++tab_index) {
-    BaseTab* tab = tabstrip_->base_tab_at_tab_index(tab_index);
-    int model_index = tabstrip_->GetModelIndexOfBaseTab(tab);
-    if (model_->ContainsIndex(model_index)) {
-      TabContentsWrapper* contents = model_->GetTabContentsAt(model_index);
+  for (int i = 0, tab_count = tabstrip_->tab_count(); i < tab_count; ++i) {
+    BaseTab* tab = tabstrip_->tab_at(i);
+    if (model_->ContainsIndex(i)) {
+      TabContentsWrapper* contents = model_->GetTabContentsAt(i);
       tab->UpdateLoadingAnimation(
           TabContentsNetworkState(contents->web_contents()));
     }
@@ -324,18 +327,12 @@ bool BrowserTabStripController::IsIncognito() {
 
 void BrowserTabStripController::TabInsertedAt(TabContentsWrapper* contents,
                                               int model_index,
-                                              bool active) {
+                                              bool is_active) {
   DCHECK(contents);
-  DCHECK(model_index == TabStripModel::kNoTab ||
-         model_->ContainsIndex(model_index));
-
-  // Cancel any pending tab transition.
-  hover_tab_selector_.CancelTabTransition();
-
-  TabRendererData data;
-  SetTabRendererDataFromModel(contents->web_contents(), model_index, &data,
-                              NEW_TAB);
-  tabstrip_->AddTabAt(model_index, data);
+  CHECK_GE(model_index, 0);
+  CHECK_LT(model_index, model_->count());
+  CHECK_EQ(model_->count(), tabstrip_->tab_count() + 1);
+  AddTab(contents, model_index, is_active);
 }
 
 void BrowserTabStripController::TabDetachedAt(TabContentsWrapper* contents,
@@ -358,13 +355,11 @@ void BrowserTabStripController::TabMoved(TabContentsWrapper* contents,
   // Cancel any pending tab transition.
   hover_tab_selector_.CancelTabTransition();
 
-  // Update the data first as the pinned state may have changed.
+  // Pass in the TabRendererData as the pinned state may have changed.
   TabRendererData data;
   SetTabRendererDataFromModel(contents->web_contents(), to_model_index, &data,
                               EXISTING_TAB);
-  tabstrip_->SetTabData(from_model_index, data);
-
-  tabstrip_->MoveTab(from_model_index, to_model_index);
+  tabstrip_->MoveTab(from_model_index, to_model_index, data);
 }
 
 void BrowserTabStripController::TabChangedAt(TabContentsWrapper* contents,
@@ -416,7 +411,7 @@ void BrowserTabStripController::Observe(int type,
   // Here, we just re-layout each existing tab to reflect the change in its
   // closeable state, and then schedule paint for entire tabstrip.
   for (int i = 0; i < tabstrip_->tab_count(); ++i)
-    tabstrip_->base_tab_at_tab_index(i)->Layout();
+    static_cast<BaseTab*>(tabstrip_->tab_at(i))->Layout();
   tabstrip_->SchedulePaint();
 }
 
@@ -484,4 +479,15 @@ void BrowserTabStripController::StopHighlightTabsForCommand(
     // Just tell all Tabs to stop pulsing - it's safe.
     tabstrip_->StopAllHighlighting();
   }
+}
+
+void BrowserTabStripController::AddTab(TabContentsWrapper* contents,
+                                       int index,
+                                       bool is_active) {
+  // Cancel any pending tab transition.
+  hover_tab_selector_.CancelTabTransition();
+
+  TabRendererData data;
+  SetTabRendererDataFromModel(contents->web_contents(), index, &data, NEW_TAB);
+  tabstrip_->AddTabAt(index, data, is_active);
 }

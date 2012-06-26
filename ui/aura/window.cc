@@ -9,9 +9,11 @@
 #include "base/logging.h"
 #include "base/stl_util.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "ui/aura/client/event_client.h"
 #include "ui/aura/client/stacking_client.h"
 #include "ui/aura/client/visibility_client.h"
+#include "ui/aura/dip_util.h"
 #include "ui/aura/env.h"
 #include "ui/aura/event.h"
 #include "ui/aura/event_filter.h"
@@ -20,9 +22,9 @@
 #include "ui/aura/window_delegate.h"
 #include "ui/aura/window_observer.h"
 #include "ui/base/animation/multi_animation.h"
+#include "ui/compositor/compositor.h"
+#include "ui/compositor/layer.h"
 #include "ui/gfx/canvas.h"
-#include "ui/gfx/compositor/compositor.h"
-#include "ui/gfx/compositor/layer.h"
 #include "ui/gfx/screen.h"
 
 namespace aura {
@@ -47,6 +49,7 @@ bool Window::TestApi::OwnsLayer() const {
 
 Window::Window(WindowDelegate* delegate)
     : type_(client::WINDOW_TYPE_UNKNOWN),
+      owned_by_parent_(true),
       delegate_(delegate),
       layer_(NULL),
       parent_(NULL),
@@ -75,12 +78,20 @@ Window::~Window() {
     root_window->OnWindowDestroying(this);
 
   // Then destroy the children.
-  while (!children_.empty()) {
+  size_t child_count = children_.size();
+  while (child_count-- > 0) {
     Window* child = children_[0];
-    delete child;
-    // Deleting the child so remove it from out children_ list.
-    DCHECK(std::find(children_.begin(), children_.end(), child) ==
-           children_.end());
+    if (child->owned_by_parent_) {
+      delete child;
+      // Deleting the child so remove it from out children_ list.
+      DCHECK(std::find(children_.begin(), children_.end(), child) ==
+             children_.end());
+    } else {
+      // Even if we can't delete the child, we still need to remove it from the
+      // parent so that relevant bookkeeping (parent_ back-pointers etc) are
+      // updated.
+      RemoveChild(child);
+    }
   }
 
   // Removes ourselves from our transient parent (if it hasn't been done by the
@@ -174,6 +185,10 @@ void Window::Show() {
 }
 
 void Window::Hide() {
+  for (Windows::iterator it = transient_children_.begin();
+       it != transient_children_.end(); ++it) {
+    (*it)->Hide();
+  }
   SetVisible(false);
   ReleaseCapture();
 }
@@ -186,10 +201,19 @@ bool Window::IsVisible() const {
   return visible_ && layer_ && layer_->IsDrawn();
 }
 
-gfx::Rect Window::GetScreenBounds() const {
+gfx::Rect Window::GetBoundsInRootWindow() const {
+  // TODO(beng): There may be a better way to handle this, and the existing code
+  //             is likely wrong anyway in a multi-monitor world, but this will
+  //             do for now.
+  if (!GetRootWindow())
+    return bounds();
   gfx::Point origin = bounds().origin();
   Window::ConvertPointToWindow(parent_, GetRootWindow(), &origin);
   return gfx::Rect(origin, bounds().size());
+}
+
+const gfx::Rect& Window::GetBoundsInPixel() const {
+  return layer_->bounds();
 }
 
 void Window::SetTransform(const ui::Transform& transform) {
@@ -223,23 +247,28 @@ void Window::SetBounds(const gfx::Rect& new_bounds) {
 }
 
 gfx::Rect Window::GetTargetBounds() const {
-  return layer_->GetTargetBounds();
+  return ConvertRectToDIP(this, layer_->GetTargetBounds());
 }
 
-const gfx::Rect& Window::bounds() const {
+gfx::Rect Window::bounds() const {
+#if defined(ENABLE_DIP)
+  return ConvertRectToDIP(this, layer_->bounds());
+#else
   return layer_->bounds();
+#endif
 }
 
-void Window::SchedulePaintInRect(const gfx::Rect& rect) {
+void Window::SchedulePaintInRect(const gfx::Rect& rect_in_dip) {
+  gfx::Rect rect = ConvertRectToPixel(this, rect_in_dip);
   if (layer_->SchedulePaint(rect)) {
     FOR_EACH_OBSERVER(
-        WindowObserver, observers_, OnWindowPaintScheduled(this, rect));
+        WindowObserver, observers_, OnWindowPaintScheduled(this, rect_in_dip));
   }
 }
 
 void Window::SetExternalTexture(ui::Texture* texture) {
   layer_->SetExternalTexture(texture);
-  gfx::Rect region(gfx::Point(), bounds().size());
+  gfx::Rect region(bounds().size());
   FOR_EACH_OBSERVER(
       WindowObserver, observers_, OnWindowPaintScheduled(this, region));
 }
@@ -321,6 +350,8 @@ void Window::RemoveChild(Window* child) {
     layer_->Remove(child->layer_);
   children_.erase(i);
   child->OnParentChanged();
+  if (layout_manager_.get())
+    layout_manager_->OnWindowRemovedFromLayout(child);
 }
 
 bool Window::Contains(const Window* other) const {
@@ -353,7 +384,14 @@ void Window::ConvertPointToWindow(const Window* source,
                                   gfx::Point* point) {
   if (!source)
     return;
+  // TODO(oshima): We probably need to handle source's root != target's root
+  // case under multi monitor environment.
+  *point = ConvertPointToPixel(source, *point);
   ui::Layer::ConvertPointToLayer(source->layer(), target->layer(), point);
+  if (target)
+    *point = ConvertPointToDIP(target, *point);
+  else
+    *point = ConvertPointToDIP(source, *point);
 }
 
 gfx::NativeCursor Window::GetCursor(const gfx::Point& point) const {
@@ -464,7 +502,7 @@ const internal::FocusManager* Window::GetFocusManager() const {
   return parent_ ? parent_->GetFocusManager() : NULL;
 }
 
-void Window::SetCapture() {
+void Window::SetCapture(unsigned int flags) {
   if (!IsVisible())
     return;
 
@@ -472,7 +510,7 @@ void Window::SetCapture() {
   if (!root_window)
     return;
 
-  root_window->SetCapture(this);
+  root_window->SetCapture(this, flags);
 }
 
 void Window::ReleaseCapture() {
@@ -483,9 +521,11 @@ void Window::ReleaseCapture() {
   root_window->ReleaseCapture(this);
 }
 
-bool Window::HasCapture() {
+bool Window::HasCapture(unsigned int flags) {
   RootWindow* root_window = GetRootWindow();
-  return root_window && root_window->capture_window() == this;
+  if (!root_window)
+    return false;
+  return root_window->HasCapture(this, flags);
 }
 
 void Window::SuppressPaint() {
@@ -502,6 +542,9 @@ void Window::SetNativeWindowProperty(const char* key, void* value) {
 void* Window::GetNativeWindowProperty(const char* key) const {
   return reinterpret_cast<void*>(GetPropertyInternal(key, 0));
 }
+
+///////////////////////////////////////////////////////////////////////////////
+// Window, private:
 
 intptr_t Window::SetPropertyInternal(const void* key,
                                      const char* name,
@@ -531,9 +574,6 @@ intptr_t Window::GetPropertyInternal(const void* key,
   return iter->second.value;
 }
 
-///////////////////////////////////////////////////////////////////////////////
-// Window, private:
-
 void Window::SetBoundsInternal(const gfx::Rect& new_bounds) {
   gfx::Rect actual_new_bounds(new_bounds);
 
@@ -551,11 +591,11 @@ void Window::SetBoundsInternal(const gfx::Rect& new_bounds) {
       IsVisible() &&
       root_window && ContainsPointInRoot(root_window->last_mouse_location());
 
-  const gfx::Rect old_bounds = layer_->GetTargetBounds();
+  const gfx::Rect old_bounds = GetTargetBounds();
 
   // Always need to set the layer's bounds -- even if it is to the same thing.
   // This may cause important side effects such as stopping animation.
-  layer_->SetBounds(actual_new_bounds);
+  layer_->SetBounds(ConvertRectToPixel(this, actual_new_bounds));
 
   // If we're not changing the effective bounds, then we can bail early and skip
   // notifying our listeners.
@@ -578,7 +618,6 @@ void Window::SetVisible(bool visible) {
   if (visible == layer_->visible())
     return;  // No change.
 
-  bool was_visible = IsVisible();
   if (visible != layer_->visible()) {
     RootWindow* root_window = GetRootWindow();
     if (client::GetVisibilityClient(root_window)) {
@@ -589,13 +628,9 @@ void Window::SetVisible(bool visible) {
     }
   }
   visible_ = visible;
-  bool is_visible = IsVisible();
-  if (was_visible != is_visible) {
-    if (is_visible)
-      SchedulePaint();
-    if (delegate_)
-      delegate_->OnWindowVisibilityChanged(is_visible);
-  }
+  SchedulePaint();
+  if (delegate_)
+    delegate_->OnWindowVisibilityChanged(visible);
 
   if (parent_ && parent_->layout_manager_.get())
     parent_->layout_manager_->OnChildWindowVisibilityChanged(this, visible);
@@ -774,8 +809,16 @@ void Window::NotifyAddedToRootWindow() {
 }
 
 void Window::OnPaintLayer(gfx::Canvas* canvas) {
-  if (delegate_)
+  if (delegate_) {
+#if defined(ENABLE_DIP)
+    float scale = GetMonitorScaleFactor(this);
+    canvas->sk_canvas()->scale(SkFloatToScalar(scale), SkFloatToScalar(scale));
+#endif
     delegate_->OnPaint(canvas);
+#if defined(ENABLE_DIP)
+    canvas->Restore();
+#endif
+  }
 }
 
 void Window::UpdateLayerName(const std::string& name) {
@@ -794,5 +837,25 @@ void Window::UpdateLayerName(const std::string& name) {
   layer()->set_name(layer_name);
 #endif
 }
+
+#ifndef NDEBUG
+std::string Window::GetDebugInfo() const {
+  return StringPrintf(
+      "%s<%d> bounds(%d, %d, %d, %d) %s",
+      name().empty() ? "Unknown" : name().c_str(), id(),
+      bounds().x(), bounds().y(), bounds().width(), bounds().height(),
+      IsVisible() ? "Visible" : "Hidden");
+}
+
+void Window::PrintWindowHierarchy(int depth) const {
+  printf("%*s%s\n", depth * 2, "", GetDebugInfo().c_str());
+  for (Windows::const_reverse_iterator it = children_.rbegin(),
+           rend = children_.rend();
+       it != rend; ++it) {
+    Window* child = *it;
+    child->PrintWindowHierarchy(depth + 1);
+  }
+}
+#endif
 
 }  // namespace aura

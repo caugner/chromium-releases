@@ -9,9 +9,9 @@
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/rand_util.h"
-#include "base/stringprintf.h"
-#include "base/string_util.h"
 #include "base/string_number_conversions.h"
+#include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/chrome_download_manager_delegate.h"
@@ -29,6 +29,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/download_save_info.h"
+#include "content/public/browser/download_url_parameters.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_details.h"
@@ -41,8 +42,12 @@ using content::BrowserThread;
 using content::DownloadId;
 using content::DownloadItem;
 using content::NavigationController;
+using content::DownloadUrlParameters;
 
 namespace {
+
+// Key used to attach the Approval to the DownloadItem.
+const char kApprovalKey[] = "extensions.webstore_installer";
 
 const char kInvalidIdError[] = "Invalid id";
 const char kNoBrowserError[] = "No browser found";
@@ -116,34 +121,41 @@ void GetDownloadFilePath(
 
 }  // namespace
 
+WebstoreInstaller::Approval::Approval()
+    : profile(NULL),
+      use_app_installed_bubble(false),
+      skip_post_install_ui(false) {
+}
+
+WebstoreInstaller::Approval::~Approval() {}
+
+const WebstoreInstaller::Approval* WebstoreInstaller::GetAssociatedApproval(
+    const DownloadItem& download) {
+  return static_cast<const Approval*>(download.GetExternalData(kApprovalKey));
+}
 
 WebstoreInstaller::WebstoreInstaller(Profile* profile,
                                      Delegate* delegate,
                                      NavigationController* controller,
                                      const std::string& id,
+                                     scoped_ptr<Approval> approval,
                                      int flags)
     : profile_(profile),
       delegate_(delegate),
       controller_(controller),
       id_(id),
       download_item_(NULL),
-      flags_(flags) {
+      flags_(flags),
+      approval_(approval.release()) {
   download_url_ = GetWebstoreInstallURL(id, flags & FLAG_INLINE_INSTALL ?
       kInlineInstallSource : kDefaultInstallSource);
 
   registrar_.Add(this, chrome::NOTIFICATION_CRX_INSTALLER_DONE,
                  content::NotificationService::AllSources());
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_INSTALLED,
-                 content::Source<Profile>(profile));
+                 content::Source<Profile>(profile->GetOriginalProfile()));
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_INSTALL_ERROR,
                  content::Source<CrxInstaller>(NULL));
-}
-
-WebstoreInstaller::~WebstoreInstaller() {
-  if (download_item_) {
-    download_item_->RemoveObserver(this);
-    download_item_ = NULL;
-  }
 }
 
 void WebstoreInstaller::Start() {
@@ -214,6 +226,13 @@ void WebstoreInstaller::SetDownloadDirectoryForTests(FilePath* directory) {
   g_download_directory_for_tests = directory;
 }
 
+WebstoreInstaller::~WebstoreInstaller() {
+  if (download_item_) {
+    download_item_->RemoveObserver(this);
+    download_item_ = NULL;
+  }
+}
+
 void WebstoreInstaller::OnDownloadStarted(DownloadId id, net::Error error) {
   if (error != net::OK) {
     ReportFailure(net::ErrorToString(error));
@@ -225,6 +244,8 @@ void WebstoreInstaller::OnDownloadStarted(DownloadId id, net::Error error) {
   content::DownloadManager* download_manager = profile_->GetDownloadManager();
   download_item_ = download_manager->GetActiveDownloadItem(id.local());
   download_item_->AddObserver(this);
+  if (approval_.get())
+    download_item_->SetExternalData(kApprovalKey, approval_.release());
 }
 
 void WebstoreInstaller::OnDownloadUpdated(DownloadItem* download) {
@@ -280,11 +301,13 @@ void WebstoreInstaller::StartDownload(const FilePath& file) {
   // We will navigate the current tab to this url to start the download. The
   // download system will then pass the crx to the CrxInstaller.
   download_util::RecordDownloadSource(
-        download_util::INITIATED_BY_WEBSTORE_INSTALLER);
-  profile_->GetDownloadManager()->DownloadUrl(
-      download_url_, referrer, "",
-      false, -1, save_info, controller_->GetWebContents(),
-      base::Bind(&WebstoreInstaller::OnDownloadStarted, this));
+      download_util::INITIATED_BY_WEBSTORE_INSTALLER);
+  scoped_ptr<DownloadUrlParameters> params(
+      DownloadUrlParameters::FromWebContents(
+          controller_->GetWebContents(), download_url_, save_info));
+  params->set_referrer(referrer);
+  params->set_callback(base::Bind(&WebstoreInstaller::OnDownloadStarted, this));
+  profile_->GetDownloadManager()->DownloadUrl(params.Pass());
 }
 
 void WebstoreInstaller::ReportFailure(const std::string& error) {

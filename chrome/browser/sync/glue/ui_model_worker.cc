@@ -9,6 +9,7 @@
 #include "base/message_loop.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/third_party/dynamic_annotations/dynamic_annotations.h"
+#include "base/threading/thread_restrictions.h"
 #include "content/public/browser/browser_thread.h"
 
 using content::BrowserThread;
@@ -43,6 +44,37 @@ void CallDoWorkAndSignalCallback(const WorkCallback& work,
 }
 
 }  // namespace
+
+UIModelWorker::UIModelWorker()
+    : state_(WORKING),
+      syncapi_has_shutdown_(false),
+      syncapi_event_(&lock_) {
+}
+
+void UIModelWorker::Stop() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  base::AutoLock lock(lock_);
+  DCHECK_EQ(state_, WORKING);
+
+  // We're on our own now, the beloved UI MessageLoop is no longer running.
+  // Any tasks scheduled or to be scheduled on the UI MessageLoop will not run.
+  state_ = RUNNING_MANUAL_SHUTDOWN_PUMP;
+
+  // Drain any final tasks manually until the SyncerThread tells us it has
+  // totally finished. There should only ever be 0 or 1 tasks Run() here.
+  while (!syncapi_has_shutdown_) {
+    if (!pending_work_.is_null())
+      pending_work_.Run();  // OnTaskCompleted will set reset |pending_work_|.
+
+    // http://crbug.com/19757
+    base::ThreadRestrictions::ScopedAllowWait allow_wait;
+    // Wait for either a new task or SyncerThread termination.
+    syncapi_event_.Wait();
+  }
+
+  state_ = STOPPED;
+}
 
 SyncerError UIModelWorker::DoWorkAndWaitUntilDone(
     const WorkCallback& work) {
@@ -82,14 +114,8 @@ SyncerError UIModelWorker::DoWorkAndWaitUntilDone(
   return error_info;
 }
 
-UIModelWorker::UIModelWorker()
-    : state_(WORKING),
-      syncapi_has_shutdown_(false),
-      syncapi_event_(&lock_) {
-}
-
-UIModelWorker::~UIModelWorker() {
-  DCHECK_EQ(state_, STOPPED);
+ModelSafeGroup UIModelWorker::GetModelSafeGroup() {
+  return GROUP_UI;
 }
 
 void UIModelWorker::OnSyncerShutdownComplete() {
@@ -105,31 +131,8 @@ void UIModelWorker::OnSyncerShutdownComplete() {
   syncapi_event_.Signal();
 }
 
-void UIModelWorker::Stop() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
-  base::AutoLock lock(lock_);
-  DCHECK_EQ(state_, WORKING);
-
-  // We're on our own now, the beloved UI MessageLoop is no longer running.
-  // Any tasks scheduled or to be scheduled on the UI MessageLoop will not run.
-  state_ = RUNNING_MANUAL_SHUTDOWN_PUMP;
-
-  // Drain any final tasks manually until the SyncerThread tells us it has
-  // totally finished. There should only ever be 0 or 1 tasks Run() here.
-  while (!syncapi_has_shutdown_) {
-    if (!pending_work_.is_null())
-      pending_work_.Run();  // OnTaskCompleted will set reset |pending_work_|.
-
-    // Wait for either a new task or SyncerThread termination.
-    syncapi_event_.Wait();
-  }
-
-  state_ = STOPPED;
-}
-
-ModelSafeGroup UIModelWorker::GetModelSafeGroup() {
-  return GROUP_UI;
+UIModelWorker::~UIModelWorker() {
+  DCHECK_EQ(state_, STOPPED);
 }
 
 }  // namespace browser_sync

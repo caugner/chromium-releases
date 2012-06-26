@@ -16,6 +16,7 @@
 #include "base/threading/platform_thread.h"
 #include "base/threading/thread.h"
 #include "media/audio/audio_manager.h"
+#include "media/audio/null_audio_sink.h"
 #include "media/base/filter_collection.h"
 #include "media/base/media.h"
 #include "media/base/media_log.h"
@@ -23,11 +24,11 @@
 #include "media/base/message_loop_factory.h"
 #include "media/base/pipeline.h"
 #include "media/base/video_frame.h"
+#include "media/filters/audio_renderer_impl.h"
 #include "media/filters/ffmpeg_audio_decoder.h"
-#include "media/filters/ffmpeg_demuxer_factory.h"
+#include "media/filters/ffmpeg_demuxer.h"
 #include "media/filters/ffmpeg_video_decoder.h"
 #include "media/filters/file_data_source.h"
-#include "media/filters/null_audio_renderer.h"
 #include "media/filters/video_renderer_base.h"
 #include "media/tools/player_x11/data_source_logger.h"
 #include "media/tools/player_x11/gl_video_renderer.h"
@@ -37,7 +38,7 @@ static Display* g_display = NULL;
 static Window g_window = 0;
 static bool g_running = false;
 
-AudioManager* g_audio_manager = NULL;
+media::AudioManager* g_audio_manager = NULL;
 
 media::VideoRendererBase* g_video_renderer = NULL;
 
@@ -109,8 +110,8 @@ bool InitPipeline(MessageLoop* message_loop,
   // Create our filter factories.
   scoped_ptr<media::FilterCollection> collection(
       new media::FilterCollection());
-  collection->SetDemuxerFactory(scoped_ptr<media::DemuxerFactory>(
-      new media::FFmpegDemuxerFactory(data_source, message_loop)));
+  collection->SetDemuxer(new media::FFmpegDemuxer(
+      message_loop, data_source, true));
   collection->AddAudioDecoder(new media::FFmpegAudioDecoder(
       base::Bind(&media::MessageLoopFactory::GetMessageLoop,
                  base::Unretained(message_loop_factory),
@@ -127,13 +128,14 @@ bool InitPipeline(MessageLoop* message_loop,
       true);
   collection->AddVideoRenderer(g_video_renderer);
 
-  collection->AddAudioRenderer(new media::NullAudioRenderer());
+  collection->AddAudioRenderer(
+      new media::AudioRendererImpl(new media::NullAudioSink()));
 
   // Create the pipeline and start it.
   *pipeline = new media::Pipeline(message_loop, new media::MediaLog());
   media::PipelineStatusNotification note;
   (*pipeline)->Start(
-      collection.Pass(), "", media::PipelineStatusCB(),
+      collection.Pass(), media::PipelineStatusCB(),
       media::PipelineStatusCB(), media::NetworkEventCB(),
       note.Callback());
 
@@ -238,7 +240,7 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  scoped_ptr<AudioManager> audio_manager(AudioManager::Create());
+  scoped_ptr<media::AudioManager> audio_manager(media::AudioManager::Create());
   g_audio_manager = audio_manager.get();
 
   logging::InitLogging(

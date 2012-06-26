@@ -25,10 +25,10 @@
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/location_bar_view_gtk.h"
 #include "chrome/browser/ui/gtk/omnibox/omnibox_popup_view_gtk.h"
-#include "chrome/browser/ui/gtk/theme_service_gtk.h"
 #include "chrome/browser/ui/gtk/view_id_util.h"
 #include "chrome/browser/ui/toolbar/toolbar_model.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -43,11 +43,11 @@
 #include "ui/base/dragdrop/gtk_dnd_util.h"
 #include "ui/base/gtk/gtk_compat.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
+#include "ui/base/gtk/menu_label_accelerator_util.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/font.h"
-#include "ui/gfx/linux_util.h"
 #include "ui/gfx/skia_utils_gtk.h"
 
 using content::WebContents;
@@ -177,7 +177,7 @@ OmniboxViewGtk::OmniboxViewGtk(
       security_level_(ToolbarModel::NONE),
       mark_set_handler_id_(0),
       button_1_pressed_(false),
-      theme_service_(ThemeServiceGtk::GetFrom(profile)),
+      theme_service_(GtkThemeService::GetFrom(profile)),
       enter_was_pressed_(false),
       tab_was_pressed_(false),
       paste_clipboard_requested_(false),
@@ -1309,7 +1309,7 @@ void OmniboxViewGtk::HandlePopulatePopup(GtkWidget* sender, GtkMenu* menu) {
 
   // Search Engine menu item.
   GtkWidget* search_engine_menuitem = gtk_menu_item_new_with_mnemonic(
-      gfx::ConvertAcceleratorsFromWindowsStyle(
+      ui::ConvertAcceleratorsFromWindowsStyle(
           l10n_util::GetStringUTF8(IDS_EDIT_SEARCH_ENGINES)).c_str());
   gtk_menu_shell_append(GTK_MENU_SHELL(menu), search_engine_menuitem);
   g_signal_connect(search_engine_menuitem, "activate",
@@ -1333,7 +1333,7 @@ void OmniboxViewGtk::HandlePopulatePopup(GtkWidget* sender, GtkMenu* menu) {
   // before is_paste_and_search() in order to set up the paste-and-go state.
   bool can_paste_and_go = model_->CanPasteAndGo(sanitized_text);
   GtkWidget* paste_go_menuitem = gtk_menu_item_new_with_mnemonic(
-      gfx::ConvertAcceleratorsFromWindowsStyle(
+      ui::ConvertAcceleratorsFromWindowsStyle(
           l10n_util::GetStringUTF8(model_->is_paste_and_search() ?
               IDS_PASTE_AND_SEARCH : IDS_PASTE_AND_GO)).c_str());
 

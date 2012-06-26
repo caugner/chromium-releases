@@ -24,12 +24,16 @@
 
 class AutocompleteEditModel;
 class AutocompletePopupModel;
-class ThemeServiceGtk;
+class GtkThemeService;
 class OmniboxView;
 class SkBitmap;
 
 namespace gfx {
 class Image;
+}
+
+namespace ui {
+class GtkSignalRegistrar;
 }
 
 class OmniboxPopupViewGtk : public AutocompletePopupView,
@@ -101,6 +105,7 @@ class OmniboxPopupViewGtk : public AutocompletePopupView,
   CHROMEGTK_CALLBACK_1(OmniboxPopupViewGtk, gboolean, HandleExpose,
                        GdkEventExpose*);
 
+  scoped_ptr<ui::GtkSignalRegistrar> signal_registrar_;
   scoped_ptr<AutocompletePopupModel> model_;
   OmniboxView* omnibox_view_;
   GtkWidget* location_bar_;
@@ -111,7 +116,7 @@ class OmniboxPopupViewGtk : public AutocompletePopupView,
   // The pango layout object created from the window, cached across exposes.
   PangoLayout* layout_;
 
-  ThemeServiceGtk* theme_service_;
+  GtkThemeService* theme_service_;
   content::NotificationRegistrar registrar_;
 
   // Font used for suggestions after being derived from the constructor's

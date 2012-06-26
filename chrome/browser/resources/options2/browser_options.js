@@ -41,6 +41,13 @@ cr.define('options', function() {
     sessionOnlyCookies_: undefined,
 
     /**
+     * The cached value of the spellcheck.confirm_dialog_shown preference.
+     * @type {bool}
+     * @private
+     */
+    spellcheckConfirmDialogShown_: false,
+
+    /**
      * True if the "clear cookies and other site data on exit" setting is
      * selected. Used for deciding whether to show the session restore info
      * dialog. The value is undefined until the preference has been read.
@@ -75,7 +82,7 @@ cr.define('options', function() {
           this.updateAdvancedSettingsExpander_.bind(this));
 
       if (cr.isChromeOS)
-        AccountsOptions.applyGuestModeVisibility(document);
+        UIAccountTweaks.applyGuestModeVisibility(document);
 
       // Sync (Sign in) section.
       this.updateSyncState_(templateData.syncData);
@@ -114,7 +121,10 @@ cr.define('options', function() {
       // templateData.enable_restore_session_state is forced to false).
       this.sessionRestoreEnabled_ = templateData.enable_restore_session_state;
       if (this.sessionRestoreEnabled_) {
-        $('startup-restore-session').onchange = function(event) {
+        $('startup-restore-session').onclick = function(event) {
+          if (!event.currentTarget.checked)
+            return;
+
           if (!BrowserOptions.getInstance().maybeShowSessionRestoreDialog_()) {
             // The dialog is not shown; handle the event normally.
             event.currentTarget.savePrefState();
@@ -171,7 +181,7 @@ cr.define('options', function() {
           if (self.instantConfirmDialogShown_)
             chrome.send('enableInstant');
           else
-            OptionsPage.navigateToPage('instantConfirm');
+            OptionsPage.showPageByName('instantConfirm', false);
         } else {
           chrome.send('disableInstant');
         }
@@ -198,28 +208,34 @@ cr.define('options', function() {
           });
 
       // Users section.
-      var profilesList = $('profiles-list');
-      options.browser_options.ProfileList.decorate(profilesList);
-      profilesList.autoExpands = true;
+      if (typeof templateData.profilesInfo != 'undefined') {
+        $('profiles-section').hidden = false;
 
-      profilesList.addEventListener('change',
-          this.setProfileViewButtonsStatus_);
-      $('profiles-create').onclick = function(event) {
-        chrome.send('createProfile');
-      };
-      $('profiles-manage').onclick = function(event) {
-        var selectedProfile = self.getSelectedProfileItem_();
-        if (selectedProfile)
-          ManageProfileOverlay.showManageDialog(selectedProfile);
-      };
-      $('profiles-delete').onclick = function(event) {
-        var selectedProfile = self.getSelectedProfileItem_();
-        if (selectedProfile)
-          ManageProfileOverlay.showDeleteDialog(selectedProfile);
-      };
+        var profilesList = $('profiles-list');
+        options.browser_options.ProfileList.decorate(profilesList);
+        profilesList.autoExpands = true;
+
+        this.setProfilesInfo_(templateData.profilesInfo);
+
+        profilesList.addEventListener('change',
+            this.setProfileViewButtonsStatus_);
+        $('profiles-create').onclick = function(event) {
+          chrome.send('createProfile');
+        };
+        $('profiles-manage').onclick = function(event) {
+          var selectedProfile = self.getSelectedProfileItem_();
+          if (selectedProfile)
+            ManageProfileOverlay.showManageDialog(selectedProfile);
+        };
+        $('profiles-delete').onclick = function(event) {
+          var selectedProfile = self.getSelectedProfileItem_();
+          if (selectedProfile)
+            ManageProfileOverlay.showDeleteDialog(selectedProfile);
+        };
+      }
 
       if (cr.isChromeOS) {
-        if (!AccountsOptions.loggedInAsGuest()) {
+        if (!UIAccountTweaks.loggedInAsGuest()) {
           $('account-picture-wrapper').onclick = function(event) {
             OptionsPage.navigateToPage('changePicture');
           };
@@ -269,6 +285,20 @@ cr.define('options', function() {
         OptionsPage.navigateToPage('clearBrowserData');
         chrome.send('coreOptionsUserMetricsAction', ['Options_ClearData']);
       };
+      // 'spelling-enabled-control' element is only present on Chrome branded
+      // builds.
+      if ($('spelling-enabled-control')) {
+        $('spelling-enabled-control').customChangeHandler = function(event) {
+          if (this.checked && !self.spellcheckConfirmDialogShown_) {
+            OptionsPage.showPageByName('spellingConfirm', false);
+            return true;
+          }
+          return false;
+        };
+        Preferences.getInstance().addEventListener(
+            'spellcheck.confirm_dialog_shown',
+            this.onSpellcheckConfirmDialogShownChanged_.bind(this));
+      }
       // 'metricsReportingEnabled' element is only present on Chrome branded
       // builds.
       if ($('metricsReportingEnabled')) {
@@ -324,7 +354,7 @@ cr.define('options', function() {
         chrome.send('coreOptionsUserMetricsAction',
             ['Options_ShowPasswordManager']);
       };
-      if (cr.isChromeOS && AccountsOptions.loggedInAsGuest()) {
+      if (cr.isChromeOS && UIAccountTweaks.loggedInAsGuest()) {
         // Disable and turn off Autofill in guest mode.
         var autofillEnabled = $('autofill-enabled');
         autofillEnabled.disabled = true;
@@ -407,7 +437,7 @@ cr.define('options', function() {
       if (!cr.isChromeOS) {
         $('cloudPrintConnectorSetupButton').onclick = function(event) {
           if ($('cloudPrintManageButton').style.display == 'none') {
-            // Disable the button, set it's text to the intermediate state.
+            // Disable the button, set its text to the intermediate state.
             $('cloudPrintConnectorSetupButton').textContent =
               localStrings.getString('cloudPrintConnectorEnablingButton');
             $('cloudPrintConnectorSetupButton').disabled = true;
@@ -640,16 +670,6 @@ cr.define('options', function() {
     },
 
     /**
-     * Display or hide the profiles section of the page. This is used for
-     * multi-profile settings.
-     * @param {boolean} visible True to show the section.
-     * @private
-     */
-    setProfilesSectionVisible_: function(visible) {
-      $('profiles-section').hidden = !visible;
-    },
-
-    /**
      * Get the start/stop sync button DOM element. Used for testing.
      * @return {DOMElement} The start/stop sync button.
      * @private
@@ -760,6 +780,16 @@ cr.define('options', function() {
     },
 
     /**
+     * Called when the value of the spellcheck.confirm_dialog_shown preference
+     * changes. Cache this value.
+     * @param {Event} event Change event.
+     * @private
+     */
+    onSpellcheckConfirmDialogShownChanged_: function(event) {
+      this.spellcheckConfirmDialogShown_ = event.value['value'];
+    },
+
+    /**
      * Displays the session restore info dialog if options depending on sessions
      * (session only cookies or clearning data on exit) are selected, and the
      * dialog has never been shown.
@@ -768,14 +798,14 @@ cr.define('options', function() {
      */
     maybeShowSessionRestoreDialog_: function() {
       // Don't show this dialog in Guest mode.
-      if (cr.isChromeOS && AccountsOptions.loggedInAsGuest())
+      if (cr.isChromeOS && UIAccountTweaks.loggedInAsGuest())
         return false;
       // If some of the needed preferences haven't been read yet, the
       // corresponding member variable will be undefined and we won't display
       // the dialog yet.
       if (this.userHasSelectedSessionContentSettings_() &&
           this.sessionRestoreDialogShown_ === false) {
-        OptionsPage.navigateToPage('sessionRestoreOverlay');
+        OptionsPage.showPageByName('sessionRestoreOverlay', false);
         return true;
       }
       return false;
@@ -1182,6 +1212,52 @@ cr.define('options', function() {
     },
 
     /**
+     * Show/hide mouse settings slider.
+     * @private
+     */
+    showMouseControls_: function(show) {
+      $('mouse-settings').hidden = !show;
+      this.updatePointerSettingsText_();
+    },
+
+    /**
+     * Show/hide touchpad settings slider.
+     * @private
+     */
+    showTouchpadControls_: function(show) {
+      $('touchpad-settings').hidden = !show;
+      this.updatePointerSettingsText_();
+    },
+
+    /**
+    * Update pointer settings buttons text content to say mouse settings,
+    * touchpad settings, or mouse/touchpad settings as appropriate. If neither
+    * is available, hides the button and shows "No mouse or touchpad" text.
+    * @private
+    */
+    updatePointerSettingsText_: function() {
+      var pointerSettingsButton = $('pointer-settings-button');
+      pointerSettingsButton.hidden = false;
+      if ($('touchpad-settings').hidden) {
+        if ($('mouse-settings').hidden) {
+          pointerSettingsButton.hidden = true;
+        } else {
+          pointerSettingsButton.textContent =
+              localStrings.getString('mouseSettingsButtonTitle');
+        }
+      } else {
+        if ($('mouse-settings').hidden) {
+          pointerSettingsButton.textContent =
+              localStrings.getString('touchpadSettingsButtonTitle');
+        } else {
+          pointerSettingsButton.textContent =
+              localStrings.getString('touchpadMouseSettingsButtonTitle');
+        }
+      }
+      $('no-pointing-devices').hidden = !pointerSettingsButton.hidden;
+    },
+
+    /**
      * Activate the bluetooth settings section on the System settings page.
      * @private
      */
@@ -1295,7 +1371,6 @@ cr.define('options', function() {
     'setMetricsReportingCheckboxState',
     'setMetricsReportingSettingVisibility',
     'setProfilesInfo',
-    'setProfilesSectionVisible',
     'setScreenMagnifierCheckboxState',
     'setSpokenFeedbackCheckboxState',
     'setThemesResetButtonEnabled',
@@ -1304,6 +1379,8 @@ cr.define('options', function() {
     'setupProxySettingsSection',
     'setVirtualKeyboardCheckboxState',
     'showBluetoothSettings',
+    'showMouseControls',
+    'showTouchpadControls',
     'updateAccountPicture',
     'updateAutoLaunchState',
     'updateDefaultBrowserState',

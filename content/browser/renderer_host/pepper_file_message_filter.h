@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -44,10 +44,17 @@ class PepperFileMessageFilter : public content::BrowserMessageFilter {
 
   int child_id() const { return child_id_; }
 
+  // Returns the name of the pepper data directory that we'll use for local
+  // storage. The argument is the profile path so that this can be used on any
+  // thread independent of the profile context.
+  static FilePath GetDataDirName(const FilePath& profile_path);
+
+ protected:
+  virtual ~PepperFileMessageFilter();
+
  private:
   friend class content::BrowserThread;
   friend class base::DeleteHelper<PepperFileMessageFilter>;
-  virtual ~PepperFileMessageFilter();
 
   // Called on the FILE thread:
   void OnOpenFile(const webkit::ppapi::PepperFilePath& path,

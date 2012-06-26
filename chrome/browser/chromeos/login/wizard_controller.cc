@@ -25,7 +25,6 @@
 #include "chrome/browser/chromeos/cros_settings.h"
 #include "chrome/browser/chromeos/cros_settings_names.h"
 #include "chrome/browser/chromeos/customization_document.h"
-#include "chrome/browser/chromeos/language_preferences.h"
 #include "chrome/browser/chromeos/login/enrollment/enterprise_enrollment_screen.h"
 #include "chrome/browser/chromeos/login/eula_screen.h"
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
@@ -50,7 +49,7 @@
 #include "ui/base/l10n/l10n_util.h"
 
 #if defined(USE_LINUX_BREAKPAD)
-#include "chrome/app/breakpad_linux.h"
+#include "chrome/app/breakpad_linuxish.h"
 #endif
 
 using content::BrowserThread;
@@ -135,7 +134,8 @@ WizardController::WizardController(chromeos::LoginDisplayHost* host,
       is_out_of_box_(false),
       host_(host),
       oobe_display_(oobe_display),
-      usage_statistics_reporting_(true) {
+      usage_statistics_reporting_(true),
+      skip_update_enroll_after_eula_(false) {
   DCHECK(default_controller_ == NULL);
   default_controller_ = this;
 }
@@ -275,7 +275,10 @@ void WizardController::ShowUserImageScreen() {
     return;
   }
   VLOG(1) << "Showing user image screen.";
-  SetStatusAreaVisible(false);
+  // Status area has been already shown at sign in screen so it
+  // doesn't make sense to hide it here and then show again at user session as
+  // this produces undesired UX transitions.
+  SetStatusAreaVisible(true);
   SetCurrentScreen(GetUserImageScreen());
   host_->SetShutdownButtonEnabled(false);
 }
@@ -325,6 +328,10 @@ void WizardController::SkipRegistration() {
     OnRegistrationSkipped();
   else
     LOG(ERROR) << "Registration screen is not active.";
+}
+
+void WizardController::SkipUpdateEnrollAfterEula() {
+  skip_update_enroll_after_eula_ = true;
 }
 
 // static
@@ -412,7 +419,13 @@ void WizardController::OnEulaAccepted() {
 #endif
   }
 
-  InitiateOOBEUpdate();
+  if (skip_update_enroll_after_eula_) {
+    PerformPostEulaActions();
+    PerformPostUpdateActions();
+    ShowEnterpriseEnrollmentScreen();
+  } else {
+    InitiateOOBEUpdate();
+  }
 }
 
 void WizardController::OnUpdateErrorCheckingForUpdate() {
@@ -479,20 +492,27 @@ void WizardController::OnEnterpriseAutoEnrollmentDone() {
 }
 
 void WizardController::OnOOBECompleted() {
-  MarkOobeCompleted();
+  PerformPostUpdateActions();
   ShowLoginScreen();
 }
 
 void WizardController::InitiateOOBEUpdate() {
+  PerformPostEulaActions();
+  GetUpdateScreen()->StartUpdate();
+  SetCurrentScreenSmooth(GetUpdateScreen(), true);
+}
+
+void WizardController::PerformPostEulaActions() {
   // Now that EULA has been accepted (for official builds), enable portal check.
   // ChromiumOS builds would go though this code path too.
   chromeos::CrosLibrary::Get()->GetNetworkLibrary()->
       SetDefaultCheckPortalList();
   host_->CheckForAutoEnrollment();
-  GetUpdateScreen()->StartUpdate();
-  SetCurrentScreenSmooth(GetUpdateScreen(), true);
 }
 
+void WizardController::PerformPostUpdateActions() {
+  MarkOobeCompleted();
+}
 
 void WizardController::SetCurrentScreen(WizardScreen* new_current) {
   SetCurrentScreenSmooth(new_current, false);
@@ -738,11 +758,11 @@ void WizardController::OnSetUserNamePassword(const std::string& username,
   password_ = password;
 }
 
-void WizardController::set_usage_statistics_reporting(bool val) {
+void WizardController::SetUsageStatisticsReporting(bool val) {
   usage_statistics_reporting_ = val;
 }
 
-bool WizardController::usage_statistics_reporting() const {
+bool WizardController::GetUsageStatisticsReporting() const {
   return usage_statistics_reporting_;
 }
 

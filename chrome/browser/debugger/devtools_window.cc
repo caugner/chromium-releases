@@ -12,7 +12,6 @@
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/debugger/devtools_file_util.h"
 #include "chrome/browser/debugger/devtools_window.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/prefs/pref_service.h"
@@ -76,6 +75,8 @@ void DevToolsWindow::RegisterUserPrefs(PrefService* prefs) {
   prefs->RegisterStringPref(prefs::kDevToolsDockSide,
                             kDockSideBottom,
                             PrefService::UNSYNCABLE_PREF);
+  prefs->RegisterDictionaryPref(prefs::kDevToolsEditedFiles,
+                                PrefService::UNSYNCABLE_PREF);
 }
 
 // static
@@ -170,7 +171,7 @@ DevToolsWindow* DevToolsWindow::Create(
     RenderViewHost* inspected_rvh,
     bool docked,
     bool shared_worker_frontend) {
-  // Create TabContents with devtools.
+  // Create TabContentsWrapper with devtools.
   TabContentsWrapper* tab_contents =
       Browser::TabContentsFactory(profile, NULL, MSG_ROUTING_NONE, NULL, NULL);
   tab_contents->web_contents()->GetRenderViewHost()->AllowBindings(
@@ -193,11 +194,12 @@ DevToolsWindow::DevToolsWindow(TabContentsWrapper* tab_contents,
       browser_(NULL),
       docked_(docked),
       is_loaded_(false),
-      action_on_load_(DEVTOOLS_TOGGLE_ACTION_NONE),
-      frontend_host_(NULL) {
+      action_on_load_(DEVTOOLS_TOGGLE_ACTION_NONE) {
   frontend_host_ = DevToolsClientHost::CreateDevToolsFrontendHost(
       tab_contents->web_contents(),
       this);
+  file_helper_.reset(new DevToolsFileHelper(profile, this));
+
   g_instances.Get().push_back(this);
   // Wipe out page icon so that the default application icon is used.
   NavigationEntry* entry =
@@ -213,7 +215,7 @@ DevToolsWindow::DevToolsWindow(TabContentsWrapper* tab_contents,
           &tab_contents_->web_contents()->GetController()));
   registrar_.Add(
       this,
-      content::NOTIFICATION_TAB_CLOSING,
+      chrome::NOTIFICATION_TAB_CLOSING,
       content::Source<NavigationController>(
           &tab_contents_->web_contents()->GetController()));
   registrar_.Add(
@@ -238,7 +240,7 @@ DevToolsWindow::~DevToolsWindow() {
   instances.erase(it);
 }
 
-void DevToolsWindow::InspectedTabClosing() {
+void DevToolsWindow::InspectedContentsClosing() {
   if (docked_) {
     // Update dev tools to reflect removed dev tools window.
 
@@ -259,9 +261,9 @@ void DevToolsWindow::InspectedTabClosing() {
   }
 }
 
-void DevToolsWindow::TabReplaced(WebContents* new_tab) {
+void DevToolsWindow::ContentsReplaced(WebContents* new_contents) {
   TabContentsWrapper* new_tab_wrapper =
-      TabContentsWrapper::GetCurrentWrapperForContents(new_tab);
+      TabContentsWrapper::GetCurrentWrapperForContents(new_contents);
   DCHECK(new_tab_wrapper);
   if (!new_tab_wrapper)
       return;
@@ -375,7 +377,8 @@ void DevToolsWindow::CreateDevToolsBrowser() {
     defaults->SetBoolean("always_on_top", false);
   }
 
-  browser_ = Browser::CreateForDevTools(profile_);
+  browser_ = Browser::CreateWithParams(
+      Browser::CreateParams::CreateForDevTools(profile_));
   browser_->tabstrip_model()->AddTabContents(
       tab_contents_, -1, content::PAGE_TRANSITION_START_PAGE,
       TabStripModel::ADD_ACTIVE);
@@ -417,11 +420,8 @@ bool DevToolsWindow::IsInspectedBrowserPopupOrPanel() {
 }
 
 void DevToolsWindow::UpdateFrontendAttachedState() {
-  tab_contents_->web_contents()->GetRenderViewHost()->
-      ExecuteJavascriptInWebFrame(
-          string16(),
-          docked_ ? ASCIIToUTF16("WebInspector.setAttachedWindow(true);")
-                  : ASCIIToUTF16("WebInspector.setAttachedWindow(false);"));
+  base::FundamentalValue docked(docked_);
+  CallClientFunction("InspectorFrontendAPI.setAttachedWindow", &docked);
 }
 
 
@@ -429,7 +429,7 @@ void DevToolsWindow::AddDevToolsExtensionsToClient() {
   if (inspected_tab_) {
     base::FundamentalValue tabId(
         inspected_tab_->restore_tab_helper()->session_id().id());
-    CallClientFunction(ASCIIToUTF16("WebInspector.setInspectedTabId"), tabId);
+    CallClientFunction("WebInspector.setInspectedTabId", &tabId);
   }
   ListValue results;
   const ExtensionService* extension_service =
@@ -453,7 +453,7 @@ void DevToolsWindow::AddDevToolsExtensionsToClient() {
         new base::FundamentalValue(allow_experimental));
     results.Append(extension_info);
   }
-  CallClientFunction(ASCIIToUTF16("WebInspector.addExtensions"), results);
+  CallClientFunction("WebInspector.addExtensions", &results);
 }
 
 WebContents* DevToolsWindow::OpenURLFromTab(WebContents* source,
@@ -467,12 +467,14 @@ WebContents* DevToolsWindow::OpenURLFromTab(WebContents* source,
   return NULL;
 }
 
-void DevToolsWindow::CallClientFunction(const string16& function_name,
-                                        const Value& arg) {
+void DevToolsWindow::CallClientFunction(const std::string& function_name,
+                                        const Value* arg) {
   std::string json;
-  base::JSONWriter::Write(&arg, &json);
-  string16 javascript = function_name + char16('(') + UTF8ToUTF16(json) +
-      ASCIIToUTF16(");");
+  if (arg)
+    base::JSONWriter::Write(arg, &json);
+
+  string16 javascript =
+      ASCIIToUTF16(function_name + "(" + json + ");");
   tab_contents_->web_contents()->GetRenderViewHost()->
       ExecuteJavascriptInWebFrame(string16(), javascript);
 }
@@ -485,7 +487,7 @@ void DevToolsWindow::Observe(int type,
     UpdateTheme();
     DoAction();
     AddDevToolsExtensionsToClient();
-  } else if (type == content::NOTIFICATION_TAB_CLOSING) {
+  } else if (type == chrome::NOTIFICATION_TAB_CLOSING) {
     if (content::Source<NavigationController>(source).ptr() ==
             &tab_contents_->web_contents()->GetController()) {
       // This happens when browser closes all of its tabs as a result
@@ -511,16 +513,10 @@ void DevToolsWindow::DoAction() {
   // TODO: these messages should be pushed through the WebKit API instead.
   switch (action_on_load_) {
     case DEVTOOLS_TOGGLE_ACTION_SHOW_CONSOLE:
-      tab_contents_->web_contents()->GetRenderViewHost()->
-          ExecuteJavascriptInWebFrame(
-              string16(),
-              ASCIIToUTF16("WebInspector.showConsole();"));
+      CallClientFunction("InspectorFrontendAPI.showConsole", NULL);
       break;
     case DEVTOOLS_TOGGLE_ACTION_INSPECT:
-      tab_contents_->web_contents()->GetRenderViewHost()->
-          ExecuteJavascriptInWebFrame(
-              string16(),
-              ASCIIToUTF16("WebInspector.toggleSearchingForNode();"));
+      CallClientFunction("InspectorFrontendAPI.enterInspectElementMode", NULL);
     case DEVTOOLS_TOGGLE_ACTION_NONE:
       // Do nothing.
       break;
@@ -577,7 +573,7 @@ void DevToolsWindow::UpdateTheme() {
   SkColor color_tab_text =
       tp->GetColor(ThemeService::COLOR_BOOKMARK_TEXT);
   std::string command = StringPrintf(
-      "WebInspector.setToolbarColors(\"%s\", \"%s\")",
+      "InspectorFrontendAPI.setToolbarColors(\"%s\", \"%s\")",
       SkColorToRGBAString(color_toolbar).c_str(),
       SkColorToRGBAString(color_tab_text).c_str());
   tab_contents_->web_contents()->GetRenderViewHost()->
@@ -686,7 +682,7 @@ void DevToolsWindow::ActivateWindow() {
 void DevToolsWindow::CloseWindow() {
   DCHECK(docked_);
   DevToolsManager::GetInstance()->ClientHostClosing(frontend_host_);
-  InspectedTabClosing();
+  InspectedContentsClosing();
 }
 
 void DevToolsWindow::MoveWindow(int x, int y) {
@@ -737,11 +733,25 @@ void DevToolsWindow::OpenInNewTab(const std::string& url) {
   }
 }
 
-void DevToolsWindow::SaveToFile(const std::string& suggested_file_name,
-                                const std::string& content) {
-  DevToolsFileUtil::SaveAs(tab_contents_->profile(),
-                           suggested_file_name,
-                           content);
+void DevToolsWindow::SaveToFile(const std::string& url,
+                                const std::string& content,
+                                bool save_as) {
+  file_helper_->Save(url, content, save_as);
+}
+
+void DevToolsWindow::AppendToFile(const std::string& url,
+                                  const std::string& content) {
+  file_helper_->Append(url, content);
+}
+
+void DevToolsWindow::FileSavedAs(const std::string& url) {
+  StringValue url_value(url);
+  CallClientFunction("InspectorFrontendAPI.savedURL", &url_value);
+}
+
+void DevToolsWindow::AppendedTo(const std::string& url) {
+  StringValue url_value(url);
+  CallClientFunction("InspectorFrontendAPI.appendedToURL", &url_value);
 }
 
 content::JavaScriptDialogCreator* DevToolsWindow::GetJavaScriptDialogCreator() {

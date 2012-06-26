@@ -8,6 +8,7 @@
 #include "chrome/browser/extensions/api/api_resource_event_notifier.h"
 #include "net/base/address_list.h"
 #include "net/base/completion_callback.h"
+#include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "net/base/rand_callback.h"
 #include "net/socket/tcp_client_socket.h"
@@ -30,6 +31,10 @@ class MockTCPSocket : public net::TCPClientSocket {
                          const net::CompletionCallback& callback));
   MOCK_METHOD3(Write, int(net::IOBuffer* buf, int buf_len,
                           const net::CompletionCallback& callback));
+  virtual bool IsConnected() const OVERRIDE {
+    return true;
+  }
+
  private:
   DISALLOW_COPY_AND_ASSIGN(MockTCPSocket);
 };
@@ -43,6 +48,9 @@ class MockAPIResourceEventNotifier : public APIResourceEventNotifier {
   MOCK_METHOD2(OnReadComplete, void(int result_code,
                                     const std::string& message));
   MOCK_METHOD1(OnWriteComplete, void(int result_code));
+
+ protected:
+  virtual ~MockAPIResourceEventNotifier() {}
 };
 
 TEST(SocketTest, TestTCPSocketRead) {
@@ -51,12 +59,14 @@ TEST(SocketTest, TestTCPSocketRead) {
   APIResourceEventNotifier* notifier = new MockAPIResourceEventNotifier();
 
   scoped_ptr<TCPSocket> socket(TCPSocket::CreateSocketForTesting(
-      tcp_client_socket, "1.2.3.4", 1, notifier));
+      tcp_client_socket, notifier));
 
   EXPECT_CALL(*tcp_client_socket, Read(_, _, _))
       .Times(1);
 
-  std::string message = socket->Read();
+  scoped_refptr<net::IOBufferWithSize> io_buffer(
+      new net::IOBufferWithSize(512));
+  socket->Read(io_buffer.get(), io_buffer->size());
 }
 
 TEST(SocketTest, TestTCPSocketWrite) {
@@ -65,12 +75,14 @@ TEST(SocketTest, TestTCPSocketWrite) {
   APIResourceEventNotifier* notifier = new MockAPIResourceEventNotifier();
 
   scoped_ptr<TCPSocket> socket(TCPSocket::CreateSocketForTesting(
-      tcp_client_socket, "1.2.3.4", 1, notifier));
+      tcp_client_socket, notifier));
 
   EXPECT_CALL(*tcp_client_socket, Write(_, _, _))
       .Times(1);
 
-  socket->Write("foo");
+  scoped_refptr<net::IOBufferWithSize> io_buffer(
+      new net::IOBufferWithSize(256));
+  socket->Write(io_buffer.get(), io_buffer->size());
 }
 
 TEST(SocketTest, TestTCPSocketBlockedWrite) {
@@ -79,7 +91,7 @@ TEST(SocketTest, TestTCPSocketBlockedWrite) {
   MockAPIResourceEventNotifier* notifier = new MockAPIResourceEventNotifier();
 
   scoped_ptr<TCPSocket> socket(TCPSocket::CreateSocketForTesting(
-      tcp_client_socket, "1.2.3.4", 1, notifier));
+      tcp_client_socket, notifier));
 
   net::CompletionCallback callback;
   EXPECT_CALL(*tcp_client_socket, Write(_, _, _))
@@ -87,7 +99,10 @@ TEST(SocketTest, TestTCPSocketBlockedWrite) {
       .WillOnce(testing::DoAll(SaveArg<2>(&callback),
                                Return(net::ERR_IO_PENDING)));
 
-  ASSERT_EQ(net::ERR_IO_PENDING, socket->Write("foo"));
+  scoped_refptr<net::IOBufferWithSize> io_buffer(new net::IOBufferWithSize(
+      1));
+  ASSERT_EQ(net::ERR_IO_PENDING, socket->Write(io_buffer.get(),
+                                               io_buffer->size()));
 
   // Good. Original call came back unable to complete. Now pretend the socket
   // finished, and confirm that we passed the error back.

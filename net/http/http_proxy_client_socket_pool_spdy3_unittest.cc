@@ -8,7 +8,7 @@
 #include "base/compiler_specific.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "net/base/cert_verifier.h"
+#include "net/base/mock_cert_verifier.h"
 #include "net/base/mock_host_resolver.h"
 #include "net/base/net_errors.h"
 #include "net/base/ssl_config_service_defaults.h"
@@ -64,7 +64,7 @@ class HttpProxyClientSocketPoolSpdy3Test : public TestWithHttpParam {
             &tcp_histograms_,
             &socket_factory_),
         ssl_histograms_("MockSSL"),
-        cert_verifier_(CertVerifier::CreateDefault()),
+        cert_verifier_(new MockCertVerifier),
         proxy_service_(ProxyService::CreateDirect()),
         ssl_config_service_(new SSLConfigServiceDefaults),
         ssl_socket_pool_(kMaxSockets, kMaxSocketsPerGroup,
@@ -176,7 +176,7 @@ class HttpProxyClientSocketPoolSpdy3Test : public TestWithHttpParam {
   }
 
   void InitializeSpdySsl() {
-    ssl_data_->SetNextProto(SSLClientSocket::kProtoSPDY3);
+    ssl_data_->SetNextProto(kProtoSPDY3);
   }
 
   HttpNetworkSession* CreateNetworkSession() {
@@ -260,8 +260,8 @@ TEST_P(HttpProxyClientSocketPoolSpdy3Test, NeedAuth) {
     CreateMockWrite(*rst, 2, ASYNC),
   };
   static const char* const kAuthChallenge[] = {
-    "status", "407 Proxy Authentication Required",
-    "version", "HTTP/1.1",
+    ":status", "407 Proxy Authentication Required",
+    ":version", "HTTP/1.1",
     "proxy-authenticate", "Basic realm=\"MyRealm1\"",
   };
   scoped_ptr<SpdyFrame> resp(

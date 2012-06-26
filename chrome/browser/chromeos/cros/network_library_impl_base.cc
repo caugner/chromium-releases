@@ -12,8 +12,8 @@
 #include "content/public/browser/browser_thread.h"
 #include "crypto/nss_util.h"  // crypto::GetTPMTokenInfo() for 802.1X and VPN.
 #include "grit/generated_resources.h"
-#include "ui/base/l10n/l10n_util.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
+#include "ui/base/l10n/l10n_util.h"
 
 using content::BrowserThread;
 
@@ -735,16 +735,6 @@ void NetworkLibraryImplBase::NetworkConnectStartWifi(
     std::string tpm_pin = GetTpmPin();
     if (!tpm_pin.empty())
       wifi->SetCertificatePin(tpm_pin);
-
-    // For certificate patterns, we have to delay the connect start.
-    if (wifi->client_cert_type() == CLIENT_CERT_TYPE_PATTERN) {
-      wifi->MatchCertificatePattern(
-          base::Bind(&NetworkLibraryImplBase::NetworkConnectStart,
-                     notify_manager_weak_factory_.GetWeakPtr(),
-                     wifi,
-                     profile_type));
-      return;
-    }
   }
   NetworkConnectStart(wifi, profile_type);
 }
@@ -757,15 +747,6 @@ void NetworkLibraryImplBase::NetworkConnectStartVPN(VirtualNetwork* vpn) {
   if (!tpm_pin.empty()) {
     std::string tpm_slot = GetTpmSlot();
     vpn->SetCertificateSlotAndPin(tpm_slot, tpm_pin);
-  }
-  // Resolve any certificate pattern.
-  if (vpn->client_cert_type() == CLIENT_CERT_TYPE_PATTERN) {
-    vpn->MatchCertificatePattern(
-        base::Bind(&NetworkLibraryImplBase::NetworkConnectStart,
-                   notify_manager_weak_factory_.GetWeakPtr(),
-                   vpn,
-                   PROFILE_NONE));
-    return;
   }
   NetworkConnectStart(vpn, PROFILE_NONE);
 }
@@ -782,7 +763,7 @@ void NetworkLibraryImplBase::NetworkConnectStart(
   // and auto-connect.
   network->set_connection_started(true);
   NotifyNetworkManagerChanged(true);  // Forced update.
-  VLOG(1) << "Requesting connect to network: " << network->service_path()
+  VLOG(1) << "Requesting connect to network: " << network->name()
           << " profile type: " << profile_type;
   // Specify the correct profile for wifi networks (if specified or unset).
   if (network->type() == TYPE_WIFI &&
@@ -826,10 +807,13 @@ void NetworkLibraryImplBase::NetworkConnectCompleted(
     }
     NotifyNetworkManagerChanged(true);  // Forced update.
     NotifyNetworkChanged(network);
+    VLOG(1) << "Error connecting to network: " << network->name()
+            << " Status: " << status;
     return;
   }
 
-  VLOG(1) << "Connected to service: " << network->name();
+  VLOG(1) << "Connected to network: " << network->name()
+          << " State: " << network->state();
 
   // If the user asked not to save credentials, flimflam will have
   // forgotten them.  Wipe our cache as well.
@@ -1083,6 +1067,18 @@ bool NetworkLibraryImplBase::LoadOncNetworks(const std::string& onc_blob,
         *error = parser.parse_error();
       return false;
     }
+
+    // Disallow anything but WiFi and ethernet for device-level policy (which
+    // corresponds to shared networks). See also http://crosbug.com/28741.
+    if (source == NetworkUIData::ONC_SOURCE_DEVICE_POLICY &&
+        network->type() != TYPE_WIFI &&
+        network->type() != TYPE_ETHERNET) {
+      LOG(WARNING) << "Ignoring device-level policy-pushed network of type "
+                   << network->type();
+      delete network;
+      continue;
+    }
+
     networks.push_back(network);
     added_onc_map[network->unique_id()] = parser.GetNetworkConfig(i);
   }
@@ -1099,8 +1095,9 @@ bool NetworkLibraryImplBase::LoadOncNetworks(const std::string& onc_blob,
   // networks that are defined in the ONC blob in |network_ids|. They're later
   // used to clean out any previously-existing networks that had been configured
   // through policy but are no longer specified in the updated ONC blob.
-  std::set<std::string> network_ids;
   std::string profile_path(GetProfilePath(GetProfileTypeForSource(source)));
+  std::set<std::string>& network_ids(network_source_map_[source]);
+  network_ids.clear();
   for (std::vector<Network*>::iterator iter(networks.begin());
        iter != networks.end(); ++iter) {
     Network* network = *iter;
@@ -1312,11 +1309,37 @@ void NetworkLibraryImplBase::DeleteNetwork(Network* network) {
   delete network;
 }
 
-void NetworkLibraryImplBase::AddRememberedNetwork(Network* network) {
+bool NetworkLibraryImplBase::ValidateRememberedNetwork(Network* network) {
   std::pair<NetworkMap::iterator, bool> result =
       remembered_network_map_.insert(
           std::make_pair(network->service_path(), network));
   DCHECK(result.second);  // Should only get called with new network.
+
+  // See if this is a policy-configured network that has meanwhile been removed.
+  // This situation may arise when the full list of remembered networks is not
+  // available to LoadOncNetworks(), which can happen due to the asynchronous
+  // communication between flimflam and NetworkLibrary. Just tell flimflam to
+  // delete the network now.
+  const NetworkUIData::ONCSource source = network->ui_data().onc_source();
+  if (source == NetworkUIData::ONC_SOURCE_USER_POLICY ||
+      source == NetworkUIData::ONC_SOURCE_DEVICE_POLICY) {
+    NetworkSourceMap::const_iterator network_id_set(
+        network_source_map_.find(source));
+    if (network_id_set != network_source_map_.end() &&
+        network_id_set->second.find(network->unique_id()) ==
+            network_id_set->second.end()) {
+      DeleteRememberedNetwork(network->service_path());
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool NetworkLibraryImplBase::ValidateAndAddRememberedNetwork(Network* network) {
+  if (!ValidateRememberedNetwork(network))
+    return false;
+
   if (network->type() == TYPE_WIFI) {
     remembered_wifi_networks_.push_back(
         static_cast<WifiNetwork*>(network));
@@ -1335,13 +1358,14 @@ void NetworkLibraryImplBase::AddRememberedNetwork(Network* network) {
         profile.services.end()) {
       network->set_profile_path(profile.path);
       network->set_profile_type(profile.type);
-      VLOG(1) << "AddRememberedNetwork: " << network->service_path()
+      VLOG(1) << "ValidateAndAddRememberedNetwork: " << network->service_path()
               << " profile: " << profile.path;
       break;
     }
   }
   DCHECK(!network->profile_path().empty())
       << "Service path not in any profile: " << network->service_path();
+  return true;
 }
 
 void NetworkLibraryImplBase::DeleteRememberedNetwork(
@@ -1553,7 +1577,7 @@ void NetworkLibraryImplBase::NotifyNetworkManagerChanged(bool force_update) {
         FROM_HERE,
         base::Bind(&NetworkLibraryImplBase::SignalNetworkManagerObservers,
                    notify_manager_weak_factory_.GetWeakPtr()),
-        kNetworkNotifyDelayMs);
+        base::TimeDelta::FromMilliseconds(kNetworkNotifyDelayMs));
   }
 }
 

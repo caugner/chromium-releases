@@ -12,7 +12,7 @@
 #include "content/browser/child_process_security_policy_impl.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/browser/web_contents/web_contents_impl.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/web_contents_view.h"
 #include "content/public/browser/web_ui_controller.h"
@@ -85,16 +85,7 @@ void WebUIImpl::OnWebUISend(const GURL& source_url,
     return;
   }
 
-  if (controller_->OverrideHandleWebUIMessage(source_url, message,args))
-    return;
-
-  // Look up the callback for this message.
-  MessageCallbackMap::const_iterator callback =
-      message_callbacks_.find(message);
-  if (callback != message_callbacks_.end()) {
-    // Forward this message and content on.
-    callback->second.Run(&args);
-  }
+  ProcessWebUIMessage(source_url, message, args);
 }
 
 void WebUIImpl::RenderViewCreated(content::RenderViewHost* render_view_host) {
@@ -248,7 +239,16 @@ void WebUIImpl::RegisterMessageCallback(const std::string &message,
 void WebUIImpl::ProcessWebUIMessage(const GURL& source_url,
                                     const std::string& message,
                                     const base::ListValue& args) {
-  OnWebUISend(source_url, message, args);
+  if (controller_->OverrideHandleWebUIMessage(source_url, message, args))
+    return;
+
+  // Look up the callback for this message.
+  MessageCallbackMap::const_iterator callback =
+      message_callbacks_.find(message);
+  if (callback != message_callbacks_.end()) {
+    // Forward this message and content on.
+    callback->second.Run(&args);
+  }
 }
 
 // WebUIImpl, protected: -------------------------------------------------------

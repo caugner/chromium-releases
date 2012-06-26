@@ -7,19 +7,19 @@
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/extensions/api/alarms/alarm_manager.h"
+#include "chrome/browser/extensions/api/omnibox/omnibox_api.h"
 #include "chrome/browser/extensions/extension_pref_store.h"
 #include "chrome/browser/extensions/extension_sorting.h"
 #include "chrome/browser/prefs/pref_notifier.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/manifest.h"
 #include "chrome/common/extensions/url_pattern.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/notification_service.h"
-
-using base::Time;
 
 namespace {
 
@@ -56,6 +56,9 @@ const char kPrefOrphanAcknowledged[] = "ack_orphan";
 
 // Indicates whether to show an install warning when the user enables.
 const char kExtensionDidEscalatePermissions[] = "install_warning_on_enable";
+
+// Indicates whether the extension was updated while it was disabled.
+const char kPrefDisableReason[] = "disable_reason";
 
 // A preference that tracks browser action toolbar configuration. This is a list
 // object stored in the Preferences file. The extensions are stored by ID.
@@ -122,6 +125,7 @@ const char kPrefGrantedPermissions[] = "granted_permissions";
 const char kPrefAPIs[] = "api";
 const char kPrefExplicitHosts[] = "explicit_host";
 const char kPrefScriptableHosts[] = "scriptable_host";
+const char kPrefScopes[] = "scopes";
 
 // The preference names for the old granted permissions scheme.
 const char kPrefOldGrantedFullAccess[] = "granted_permissions.full";
@@ -154,6 +158,13 @@ const char kPrefIncognitoContentSettings[] = "incognito_content_settings";
 // A list of event names that this extension has registered from its lazy
 // background page.
 const char kRegisteredEvents[] = "events";
+
+// A list of alarms that this extension has set.
+const char kRegisteredAlarms[] = "alarms";
+const char kAlarmScheduledRunTime[] = "scheduled_run_time";
+
+// Persisted value for omnibox.setDefaultSuggestion.
+const char kOmniboxDefaultSuggestion[] = "omnibox_default_suggestion";
 
 // Provider of write access to a dictionary storing extension prefs.
 class ScopedExtensionPrefUpdate : public DictionaryPrefUpdate {
@@ -489,7 +500,20 @@ ExtensionPermissionSet* ExtensionPrefs::ReadExtensionPrefPermissionSet(
       extension_id, JoinPrefs(pref_key, kPrefScriptableHosts),
       &scriptable_hosts, UserScript::kValidUserScriptSchemes);
 
-  return new ExtensionPermissionSet(apis, explicit_hosts, scriptable_hosts);
+  // Retrieve the oauth2 scopes.
+  ExtensionOAuth2Scopes scopes;
+  const ListValue* scope_values = NULL;
+  std::string scope_pref = JoinPrefs(pref_key, kPrefScopes);
+  if (ReadExtensionPrefList(extension_id, scope_pref, &scope_values)) {
+    for (size_t i = 0; i < scope_values->GetSize(); ++i) {
+      std::string scope;
+      if (scope_values->GetString(i, &scope))
+        scopes.insert(scope);
+    }
+  }
+
+  return new ExtensionPermissionSet(
+      apis, explicit_hosts, scriptable_hosts, scopes);
 }
 
 void ExtensionPrefs::SetExtensionPrefPermissionSet(
@@ -521,6 +545,18 @@ void ExtensionPrefs::SetExtensionPrefPermissionSet(
     SetExtensionPrefURLPatternSet(extension_id,
                                   JoinPrefs(pref_key, kPrefScriptableHosts),
                                   new_value->scriptable_hosts());
+  }
+
+  // Set the oauth2 scopes.
+  ExtensionOAuth2Scopes scopes = new_value->scopes();
+  if (!scopes.empty()) {
+    ListValue* scope_values = new ListValue();
+    for (ExtensionOAuth2Scopes::iterator i = scopes.begin();
+         i != scopes.end(); ++i) {
+      scope_values->Append(Value::CreateStringValue(*i));
+    }
+    std::string scope_pref = JoinPrefs(pref_key, kPrefScopes);
+    UpdateExtensionPref(extension_id, scope_pref, scope_values);
   }
 }
 
@@ -617,48 +653,35 @@ void ExtensionPrefs::SetAppNotificationDisabled(
 
 bool ExtensionPrefs::IsExtensionAllowedByPolicy(
     const std::string& extension_id,
-    Extension::Location location) {
-  std::string string_value;
+    Extension::Location location) const {
+  base::StringValue id_value(extension_id);
 
   if (location == Extension::COMPONENT ||
       location == Extension::EXTERNAL_POLICY_DOWNLOAD) {
     return true;
   }
 
-  const ListValue* blacklist =
+  const base::ListValue* blacklist =
       prefs_->GetList(prefs::kExtensionInstallDenyList);
   if (!blacklist || blacklist->empty())
     return true;
 
   // Check the whitelist first.
-  const ListValue* whitelist =
+  const base::ListValue* whitelist =
       prefs_->GetList(prefs::kExtensionInstallAllowList);
-  if (whitelist) {
-    for (ListValue::const_iterator it = whitelist->begin();
-         it != whitelist->end(); ++it) {
-      if (!(*it)->GetAsString(&string_value))
-        LOG(WARNING) << "Failed to read whitelist string.";
-      else if (string_value == extension_id)
-        return true;
-    }
-  }
+  if (whitelist && whitelist->Find(id_value) != whitelist->end())
+    return true;
 
   // Then check the blacklist (the admin blacklist, not the Google blacklist).
-  if (blacklist) {
-    for (ListValue::const_iterator it = blacklist->begin();
-         it != blacklist->end(); ++it) {
-      if (!(*it)->GetAsString(&string_value)) {
-        LOG(WARNING) << "Failed to read blacklist string.";
-      } else {
-        if (string_value == "*")
-          return false;  // Only whitelisted extensions are allowed.
-        if (string_value == extension_id)
-          return false;
-      }
-    }
-  }
+  return blacklist->Find(id_value) == blacklist->end() &&
+         !ExtensionsBlacklistedByDefault();
+}
 
-  return true;
+bool ExtensionPrefs::ExtensionsBlacklistedByDefault() const {
+  const base::ListValue* blacklist =
+      prefs_->GetList(prefs::kExtensionInstallDenyList);
+  base::StringValue wildcard("*");
+  return blacklist && blacklist->Find(wildcard) != blacklist->end();
 }
 
 bool ExtensionPrefs::DidExtensionEscalatePermissions(
@@ -671,6 +694,27 @@ void ExtensionPrefs::SetDidExtensionEscalatePermissions(
     const Extension* extension, bool did_escalate) {
   UpdateExtensionPref(extension->id(), kExtensionDidEscalatePermissions,
                       Value::CreateBooleanValue(did_escalate));
+}
+
+Extension::DisableReason ExtensionPrefs::GetDisableReason(
+    const std::string& extension_id) {
+  int value = -1;
+  if (ReadExtensionPrefInteger(extension_id, kPrefDisableReason, &value) &&
+      value >= 0 && value < Extension::DISABLE_LAST) {
+    return static_cast<Extension::DisableReason>(value);
+  }
+  return Extension::DISABLE_UNKNOWN;
+}
+
+void ExtensionPrefs::SetDisableReason(const std::string& extension_id,
+                                      Extension::DisableReason disable_reason) {
+  UpdateExtensionPref(
+      extension_id, kPrefDisableReason,
+      Value::CreateIntegerValue(static_cast<int>(disable_reason)));
+}
+
+void ExtensionPrefs::RemoveDisableReason(const std::string& extension_id) {
+  UpdateExtensionPref(extension_id, kPrefDisableReason, NULL);
 }
 
 void ExtensionPrefs::UpdateBlacklist(
@@ -730,7 +774,9 @@ void ExtensionPrefs::UpdateBlacklist(
 namespace {
 
 // Serializes |time| as a string value mapped to |key| in |dictionary|.
-void SaveTime(DictionaryValue* dictionary, const char* key, const Time& time) {
+void SaveTime(DictionaryValue* dictionary,
+              const char* key,
+              const base::Time& time) {
   if (!dictionary)
     return;
   std::string string_value = base::Int64ToString(time.ToInternalValue());
@@ -739,44 +785,44 @@ void SaveTime(DictionaryValue* dictionary, const char* key, const Time& time) {
 
 // The opposite of SaveTime. If |key| is not found, this returns an empty Time
 // (is_null() will return true).
-Time ReadTime(const DictionaryValue* dictionary, const char* key) {
+base::Time ReadTime(const DictionaryValue* dictionary, const char* key) {
   if (!dictionary)
-    return Time();
+    return base::Time();
   std::string string_value;
   int64 value;
   if (dictionary->GetString(key, &string_value)) {
     if (base::StringToInt64(string_value, &value)) {
-      return Time::FromInternalValue(value);
+      return base::Time::FromInternalValue(value);
     }
   }
-  return Time();
+  return base::Time();
 }
 
 }  // namespace
 
-Time ExtensionPrefs::LastPingDay(const std::string& extension_id) const {
+base::Time ExtensionPrefs::LastPingDay(const std::string& extension_id) const {
   DCHECK(Extension::IdIsValid(extension_id));
   return ReadTime(GetExtensionPref(extension_id), kLastPingDay);
 }
 
 void ExtensionPrefs::SetLastPingDay(const std::string& extension_id,
-                                    const Time& time) {
+                                    const base::Time& time) {
   DCHECK(Extension::IdIsValid(extension_id));
   ScopedExtensionPrefUpdate update(prefs_, extension_id);
   SaveTime(update.Get(), kLastPingDay, time);
 }
 
-Time ExtensionPrefs::BlacklistLastPingDay() const {
+base::Time ExtensionPrefs::BlacklistLastPingDay() const {
   return ReadTime(prefs_->GetDictionary(kExtensionsBlacklistUpdate),
                   kLastPingDay);
 }
 
-void ExtensionPrefs::SetBlacklistLastPingDay(const Time& time) {
+void ExtensionPrefs::SetBlacklistLastPingDay(const base::Time& time) {
   DictionaryPrefUpdate update(prefs_, kExtensionsBlacklistUpdate);
   SaveTime(update.Get(), kLastPingDay, time);
 }
 
-Time ExtensionPrefs::LastActivePingDay(const std::string& extension_id) {
+base::Time ExtensionPrefs::LastActivePingDay(const std::string& extension_id) {
   DCHECK(Extension::IdIsValid(extension_id));
   return ReadTime(GetExtensionPref(extension_id), kLastActivePingDay);
 }
@@ -922,6 +968,62 @@ void ExtensionPrefs::SetRegisteredEvents(
   UpdateExtensionPref(extension_id, kRegisteredEvents, value);
 }
 
+std::vector<extensions::AlarmPref> ExtensionPrefs::GetRegisteredAlarms(
+    const std::string& extension_id) {
+  std::vector<extensions::AlarmPref> alarms;
+  const base::DictionaryValue* extension = GetExtensionPref(extension_id);
+  if (!extension)
+    return alarms;
+
+  base::ListValue* list = NULL;
+  if (!extension->GetList(kRegisteredAlarms, &list))
+    return alarms;
+
+  typedef extensions::AlarmManager::Alarm Alarm;
+  for (size_t i = 0; i < list->GetSize(); ++i) {
+    base::DictionaryValue* alarm_dict = NULL;
+    extensions::AlarmPref alarm;
+    alarm.alarm.reset(new Alarm());
+    if (list->GetDictionary(i, &alarm_dict) &&
+        Alarm::Populate(*alarm_dict, alarm.alarm.get())) {
+      alarm.scheduled_run_time = ReadTime(alarm_dict, kAlarmScheduledRunTime);
+      alarms.push_back(alarm);
+    }
+  }
+  return alarms;
+}
+
+void ExtensionPrefs::SetRegisteredAlarms(
+    const std::string& extension_id,
+    const std::vector<extensions::AlarmPref>& alarms) {
+  base::ListValue* list = new ListValue();
+  for (size_t i = 0; i < alarms.size(); ++i) {
+    scoped_ptr<base::DictionaryValue> alarm = alarms[i].alarm->ToValue().Pass();
+    SaveTime(alarm.get(), kAlarmScheduledRunTime, alarms[i].scheduled_run_time);
+    list->Append(alarm.release());
+  }
+  UpdateExtensionPref(extension_id, kRegisteredAlarms, list);
+}
+
+extensions::ExtensionOmniboxSuggestion
+ExtensionPrefs::GetOmniboxDefaultSuggestion(const std::string& extension_id) {
+  extensions::ExtensionOmniboxSuggestion suggestion;
+
+  const base::DictionaryValue* extension = GetExtensionPref(extension_id);
+  base::DictionaryValue* dict = NULL;
+  if (extension && extension->GetDictionary(kOmniboxDefaultSuggestion, &dict))
+    suggestion.Populate(*dict, false);
+
+  return suggestion;
+}
+
+void ExtensionPrefs::SetOmniboxDefaultSuggestion(
+    const std::string& extension_id,
+    const extensions::ExtensionOmniboxSuggestion& suggestion) {
+  scoped_ptr<base::DictionaryValue> dict = suggestion.ToValue().Pass();
+  UpdateExtensionPref(extension_id, kOmniboxDefaultSuggestion, dict.release());
+}
+
 bool ExtensionPrefs::IsIncognitoEnabled(const std::string& extension_id) {
   return ReadExtensionPrefBoolean(extension_id, kPrefIncognitoEnabled);
 }
@@ -985,12 +1087,10 @@ extension_misc::LaunchContainer ExtensionPrefs::GetLaunchContainer(
 
   extension_misc::LaunchContainer result = kInvalidLaunchContainer;
 
-  if (manifest_launch_container == extension_misc::LAUNCH_PANEL ||
-      manifest_launch_container == extension_misc::LAUNCH_SHELL) {
-    // Apps with app.launch.container = 'panel' or 'shell' should always respect
-    // the manifest setting.
+  if (manifest_launch_container == extension_misc::LAUNCH_PANEL) {
+    // Apps with app.launch.container = 'panel' should always respect the
+    // manifest setting.
     result = manifest_launch_container;
-
   } else if (manifest_launch_container == extension_misc::LAUNCH_TAB) {
     // Look for prefs that indicate the user's choice of launch
     // container.  The app's menu on the NTP provides a UI to set
@@ -1118,6 +1218,10 @@ void ExtensionPrefs::OnExtensionInstalled(
     extension_dict->Set(kPrefManifest,
                         extension->manifest()->value()->DeepCopy());
   }
+
+  // Clear any events and alarms that may be registered from a previous install.
+  extension_dict->Remove(kRegisteredEvents, NULL);
+  extension_dict->Remove(kRegisteredAlarms, NULL);
 
   if (extension->is_app()) {
     StringOrdinal new_page_ordinal = page_ordinal.IsValid() ?

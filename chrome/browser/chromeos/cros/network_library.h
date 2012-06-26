@@ -13,10 +13,9 @@
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/memory/scoped_vector.h"
 #include "base/memory/singleton.h"
+#include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
-#include "base/string16.h"
 #include "base/timer.h"
 #include "chrome/browser/chromeos/cros/cros_network_functions.h"
 #include "chrome/browser/chromeos/cros/network_constants.h"
@@ -72,18 +71,6 @@ struct CellularApn {
 };
 typedef std::vector<CellularApn> CellularApnList;
 
-// Cellular network is considered low data when less than 60 minues.
-static const int kCellularDataLowSecs = 60 * 60;
-
-// Cellular network is considered low data when less than 30 minues.
-static const int kCellularDataVeryLowSecs = 30 * 60;
-
-// Cellular network is considered low data when less than 100MB.
-static const int kCellularDataLowBytes = 100 * 1024 * 1024;
-
-// Cellular network is considered very low data when less than 50MB.
-static const int kCellularDataVeryLowBytes = 50 * 1024 * 1024;
-
 // The value of priority if it is not set.
 const int kPriorityNotSet = 0;
 // The value of priority if network is preferred.
@@ -118,6 +105,12 @@ class NetworkDevice {
   bool is_sim_locked() const {
     return sim_lock_state_ == SIM_LOCKED_PIN ||
         sim_lock_state_ == SIM_LOCKED_PUK;
+  }
+  // Returns true if GSM modem and SIM as absent, otherwise
+  // returns false: GSM modem and SIM card is present or CDMA modem.
+  bool is_sim_absent() const {
+    return technology_family() == TECHNOLOGY_FAMILY_GSM &&
+           !is_sim_locked() && imsi().empty();
   }
   const int sim_retries_left() const { return sim_retries_left_; }
   SimPinRequire sim_pin_required() const { return sim_pin_required_; }
@@ -278,29 +271,29 @@ class NetworkDevice {
   DISALLOW_COPY_AND_ASSIGN(NetworkDevice);
 };
 
+// A virtual class that can be used to handle certificate enrollment URIs when
+// encountered.  Also used by unit tests to avoid opening browser windows
+// when testing.
+class EnrollmentDelegate {
+ public:
+  EnrollmentDelegate() {}
+  virtual ~EnrollmentDelegate() {}
+
+  // Implemented to handle a given certificate enrollment URI.  Returns false
+  // if the enrollment URI doesn't use a scheme that we can handle, and in
+  // that case, this will be called for any remaining enrollment URIs.
+  // If enrollment succeeds, then the enrollment handler must run
+  // |post_action| to finish connecting.
+  virtual void Enroll(const std::vector<std::string>& uri_list,
+                      const base::Closure& post_action) = 0;
+ private:
+  DISALLOW_COPY_AND_ASSIGN(EnrollmentDelegate);
+};
+
 // Contains data common to all network service types.
 class Network {
  public:
   virtual ~Network();
-
-  // A virtual class that can be used to handle certificate enrollment URIs when
-  // encountered.  Also used by unit tests to avoid opening browser windows
-  // when testing.
-  class EnrollmentHandler {
-   public:
-    EnrollmentHandler() {}
-    virtual ~EnrollmentHandler() {}
-
-    // Implemented to handle a given certificate enrollment URI.  Returns false
-    // if the enrollment URI doesn't use a scheme that we can handle, and in
-    // that case, this will be called for any remaining enrollment URIs.
-    // If enrollment succeeds, then the enrollment handler must run
-    // |post_action| to finish connecting.
-    virtual void Enroll(const std::vector<std::string>& uri_list,
-                        const base::Closure& post_action) = 0;
-   private:
-    DISALLOW_COPY_AND_ASSIGN(EnrollmentHandler);
-  };
 
   // Test API for accessing setters in tests.
   class TestApi {
@@ -428,8 +421,8 @@ class Network {
 
   // Adopts the given enrollment handler to handle any certificate enrollment
   // URIs encountered during network connection.
-  void SetEnrollmentHandler(EnrollmentHandler* handler) {
-    enrollment_handler_.reset(handler);
+  void SetEnrollmentDelegate(EnrollmentDelegate* delegate) {
+    enrollment_delegate_.reset(delegate);
   }
 
   virtual bool UpdateStatus(const std::string& key,
@@ -439,6 +432,9 @@ class Network {
   // Retrieves a property from the property_map_.  If |value| is NULL,
   // just returns whether or not the given property was found.
   bool GetProperty(PropertyIndex index, const base::Value** value) const;
+
+  // Creates a Network object for the given type for testing.
+  static Network* CreateForTesting(ConnectionType type);
 
  protected:
   Network(const std::string& service_path,
@@ -485,8 +481,8 @@ class Network {
     return ui_data_.certificate_type();
   }
 
-  EnrollmentHandler* enrollment_handler() const {
-    return enrollment_handler_.get();
+  EnrollmentDelegate* enrollment_delegate() const {
+    return enrollment_delegate_.get();
   }
 
  private:
@@ -512,6 +508,8 @@ class Network {
                            TestLoadWifiCertificatePattern);
   FRIEND_TEST_ALL_PREFIXES(OncNetworkParserTest,
                            TestLoadVPNCertificatePattern);
+  FRIEND_TEST_ALL_PREFIXES(NetworkLibraryStubTest, NetworkConnectOncWifi);
+  FRIEND_TEST_ALL_PREFIXES(NetworkLibraryStubTest, NetworkConnectOncVPN);
 
   // Use these functions at your peril.  They are used by the various
   // parsers to set state, and really shouldn't be used by anything else
@@ -564,7 +562,7 @@ class Network {
   bool save_credentials_;  // save passphrase and EAP credentials to disk.
   std::string proxy_config_;  // ProxyConfig property in flimflam.
   ProxyOncConfig proxy_onc_config_;  // Only used for parsing ONC proxy value.
-  scoped_ptr<EnrollmentHandler> enrollment_handler_;
+  scoped_ptr<EnrollmentDelegate> enrollment_delegate_;
 
   // Unique identifier, set the first time the network is parsed.
   std::string unique_id_;
@@ -719,12 +717,14 @@ class VirtualNetwork : public Network {
     group_name_ = group_name;
   }
 
-  // Matches the client certificate pattern by checking to see if a
-  // certificate exists that meets the pattern criteria.  If it finds one,
-  // it sets the appropriate network property. If not, it passes |connect| to
-  // the EnrollmentHandler to do something with the enrollment URI (e.g. launch
-  // a dialog) to install the certificate, and then invoke |connect|.
-  void MatchCertificatePattern(const base::Closure& connect);
+  // Matches the client certificate pattern by checking to see if a certificate
+  // exists that meets the pattern criteria. If it finds one, it sets the
+  // appropriate network property. If not, it passes |connect| to the
+  // EnrollmentDelegate to do something with the enrollment URI (e.g. launch a
+  // dialog) to install the certificate, and then invoke |connect|. If
+  // |allow_enroll| is false, then the enrollment handler will not be invoked in
+  // the case of a missing certificate.
+  void MatchCertificatePattern(bool allow_enroll, const base::Closure& connect);
 
  // Network overrides.
   virtual void EraseCredentials() OVERRIDE;
@@ -745,6 +745,9 @@ class VirtualNetwork : public Network {
   std::string user_passphrase_;
   bool user_passphrase_required_;
   std::string group_name_;
+
+  // Weak pointer factory for wrapping pointers to this network in callbacks.
+  base::WeakPtrFactory<VirtualNetwork> weak_pointer_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(VirtualNetwork);
 };
@@ -790,8 +793,6 @@ class WirelessNetwork : public Network {
 };
 
 // Class for networks of TYPE_CELLULAR.
-class CellularDataPlan;
-
 class CellularNetwork : public WirelessNetwork {
  public:
   enum DataLeft {
@@ -955,6 +956,12 @@ class WifiNetwork : public WirelessNetwork {
     void SetEncryption(ConnectionSecurity encryption) {
       network_->set_encryption(encryption);
     }
+    void SetSsid(const std::string& ssid) {
+      network_->SetSsid(ssid);
+    }
+    void SetHexSsid(const std::string& ssid_hex) {
+      network_->SetHexSsid(ssid_hex);
+    }
    private:
     WifiNetwork* network_;
   };
@@ -968,6 +975,9 @@ class WifiNetwork : public WirelessNetwork {
   const std::string& passphrase() const { return passphrase_; }
   const std::string& identity() const { return identity_; }
   bool passphrase_required() const { return passphrase_required_; }
+  bool hidden_ssid() const { return hidden_ssid_; }
+  const std::string& bssid() const { return bssid_; }
+  int frequency() const { return frequency_; }
 
   EAPMethod eap_method() const { return eap_method_; }
   EAPPhase2Auth eap_phase_2_auth() const { return eap_phase_2_auth_; }
@@ -985,10 +995,11 @@ class WifiNetwork : public WirelessNetwork {
 
   const std::string& GetPassphrase() const;
 
-  bool SetSsid(const std::string& ssid);
-  bool SetHexSsid(const std::string& ssid_hex);
+  // Set property and call SetNetworkServiceProperty:
+
   void SetPassphrase(const std::string& passphrase);
   void SetIdentity(const std::string& identity);
+  void SetHiddenSSID(bool hidden_ssid);
 
   // 802.1x properties
   void SetEAPMethod(EAPMethod method);
@@ -1029,6 +1040,10 @@ class WifiNetwork : public WirelessNetwork {
   // parsers to set state, and really shouldn't be used by anything else
   // because they don't do the error checking and sending to the
   // network layer that the other setters do.
+
+  bool SetSsid(const std::string& ssid);
+  bool SetHexSsid(const std::string& ssid_hex);
+
   void set_encryption(ConnectionSecurity encryption) {
     encryption_ = encryption;
   }
@@ -1042,6 +1057,11 @@ class WifiNetwork : public WirelessNetwork {
   void set_identity(const std::string& identity) {
     identity_ = identity;
   }
+  void set_hidden_ssid(bool hidden_ssid) {
+    hidden_ssid_ = hidden_ssid;
+  }
+  void set_bssid(const std::string& bssid) { bssid_ = bssid; }
+  void set_frequency(int frequency) { frequency_ = frequency; }
   void set_eap_method(EAPMethod eap_method) { eap_method_ = eap_method; }
   void set_eap_phase_2_auth(EAPPhase2Auth eap_phase_2_auth) {
     eap_phase_2_auth_ = eap_phase_2_auth;
@@ -1070,12 +1090,14 @@ class WifiNetwork : public WirelessNetwork {
     eap_save_credentials_ = save_credentials;
   }
 
-  // Matches the client certificate pattern by checking to see if a
-  // certificate exists that meets the pattern criteria.  If it finds one,
-  // it sets the appropriate network property. If not, it passes |connect| to
-  // the EnrollmentHandler to do something with the enrollment URI (e.g. launch
-  // a dialog) to install the certificate, and then invoke |connect|.
-  void MatchCertificatePattern(const base::Closure& connect);
+  // Matches the client certificate pattern by checking to see if a certificate
+  // exists that meets the pattern criteria. If it finds one, it sets the
+  // appropriate network property. If not, it passes |connect| to the
+  // EnrollmentDelegate to do something with the enrollment URI (e.g. launch a
+  // dialog) to install the certificate, and then invoke |connect|. If
+  // |allow_enroll| is false, then the enrollment handler will not be invoked in
+  // the case of a missing certificate.
+  void MatchCertificatePattern(bool allow_enroll, const base::Closure& connect);
 
   // Network overrides.
   virtual void EraseCredentials() OVERRIDE;
@@ -1085,6 +1107,9 @@ class WifiNetwork : public WirelessNetwork {
   std::string passphrase_;
   bool passphrase_required_;
   std::string identity_;
+  bool hidden_ssid_;
+  std::string bssid_;
+  int frequency_;
 
   EAPMethod eap_method_;
   EAPPhase2Auth eap_phase_2_auth_;
@@ -1100,44 +1125,12 @@ class WifiNetwork : public WirelessNetwork {
   // Passphrase set by user (stored for UI).
   std::string user_passphrase_;
 
+  // Weak pointer factory for wrapping pointers to this network in callbacks.
+  base::WeakPtrFactory<WifiNetwork> weak_pointer_factory_;
+
   DISALLOW_COPY_AND_ASSIGN(WifiNetwork);
 };
 typedef std::vector<WifiNetwork*> WifiNetworkVector;
-
-// Cellular Data Plan management.
-class CellularDataPlan {
- public:
-  CellularDataPlan();
-  explicit CellularDataPlan(const CellularDataPlanInfo &plan);
-  ~CellularDataPlan();
-
-  // Formats cellular plan description.
-  string16 GetPlanDesciption() const;
-  // Evaluates cellular plans status and returns warning string if it is near
-  // expiration.
-  string16 GetRemainingWarning() const;
-  // Formats remaining plan data description.
-  string16 GetDataRemainingDesciption() const;
-  // Formats plan expiration description.
-  string16 GetPlanExpiration() const;
-  // Formats plan usage info.
-  string16 GetUsageInfo() const;
-  // Returns a unique string for this plan that can be used for comparisons.
-  std::string GetUniqueIdentifier() const;
-  base::TimeDelta remaining_time() const;
-  int64 remaining_minutes() const;
-  // Returns plan data remaining in bytes.
-  int64 remaining_data() const;
-  // TODO(stevenjb): Make these private with accessors and properly named.
-  std::string plan_name;
-  CellularDataPlanType plan_type;
-  base::Time update_time;
-  base::Time plan_start_time;
-  base::Time plan_end_time;
-  int64 plan_data_bytes;
-  int64 data_bytes_used;
-};
-typedef ScopedVector<CellularDataPlan> CellularDataPlanVector;
 
 // Geolocation data.
 struct CellTower {
@@ -1158,40 +1151,7 @@ struct CellTower {
                          // Each unit is roughly 550 meters.
 };
 
-struct WifiAccessPoint {
-  WifiAccessPoint();
-
-  std::string mac_address;  // The mac address of the WiFi node.
-  std::string name;         // The SSID of the WiFi node.
-  base::Time timestamp;     // Timestamp when this AP was detected.
-  int signal_strength;      // Radio signal strength measured in dBm.
-  int signal_to_noise;      // Current signal to noise ratio measured in dB.
-  int channel;              // Wifi channel number.
-};
-
 typedef std::vector<CellTower> CellTowerVector;
-typedef std::vector<WifiAccessPoint> WifiAccessPointVector;
-
-// IP Configuration.
-struct NetworkIPConfig {
-  NetworkIPConfig(const std::string& device_path, IPConfigType type,
-                  const std::string& address, const std::string& netmask,
-                  const std::string& gateway, const std::string& name_servers);
-  ~NetworkIPConfig();
-
-  // Gets the PrefixLength for an IPv4 netmask.
-  // For example, "255.255.255.0" => 24
-  // If the netmask is invalid, this will return -1;
-  // TODO(chocobo): Add support for IPv6.
-  int32 GetPrefixLength() const;
-  std::string device_path;  // This looks like "/device/0011aa22bb33"
-  IPConfigType type;
-  std::string address;
-  std::string netmask;
-  std::string gateway;
-  std::string name_servers;
-};
-typedef std::vector<NetworkIPConfig> NetworkIPConfigVector;
 
 // This class handles the interaction with the ChromeOS network library APIs.
 // Classes can add themselves as observers. Users can get an instance of the

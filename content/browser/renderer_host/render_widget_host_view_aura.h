@@ -18,12 +18,11 @@
 #include "ui/aura/client/activation_delegate.h"
 #include "ui/aura/window_delegate.h"
 #include "ui/base/ime/text_input_client.h"
-#include "ui/gfx/compositor/compositor_observer.h"
+#include "ui/compositor/compositor_observer.h"
 #include "ui/gfx/rect.h"
 #include "webkit/glue/webcursor.h"
 
 namespace content {
-class GLHelper;
 class RenderWidgetHostImpl;
 class RenderWidgetHostView;
 }
@@ -42,6 +41,7 @@ class WebTouchEvent;
 
 class ImageTransportClient;
 
+// RenderWidgetHostView class hierarchy described in render_widget_host_view.h.
 class RenderWidgetHostViewAura
     : public content::RenderWidgetHostViewBase,
       public ui::CompositorObserver,
@@ -66,9 +66,6 @@ class RenderWidgetHostViewAura
   virtual bool IsShowing() OVERRIDE;
   virtual gfx::Rect GetViewBounds() const OVERRIDE;
   virtual void SetBackground(const SkBitmap& background) OVERRIDE;
-  virtual bool CopyFromCompositingSurface(
-      const gfx::Size& size,
-      skia::PlatformCanvas* output) OVERRIDE;
 
   // Overridden from RenderWidgetHostViewPort:
   virtual void InitAsPopup(content::RenderWidgetHostView* parent_host_view,
@@ -96,6 +93,13 @@ class RenderWidgetHostViewAura
   virtual void SelectionBoundsChanged(const gfx::Rect& start_rect,
                                       const gfx::Rect& end_rect) OVERRIDE;
   virtual BackingStore* AllocBackingStore(const gfx::Size& size) OVERRIDE;
+  virtual bool CopyFromCompositingSurface(
+      const gfx::Size& size,
+      skia::PlatformCanvas* output) OVERRIDE;
+  virtual void AsyncCopyFromCompositingSurface(
+      const gfx::Size& size,
+      skia::PlatformCanvas* output,
+      base::Callback<void(bool)> callback) OVERRIDE;
   virtual void OnAcceleratedCompositingStateChange() OVERRIDE;
   virtual void AcceleratedSurfaceBuffersSwapped(
       const GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params& params,
@@ -104,6 +108,7 @@ class RenderWidgetHostViewAura
       const GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params& params,
       int gpu_host_id) OVERRIDE;
   virtual void AcceleratedSurfaceSuspend() OVERRIDE;
+  virtual bool HasAcceleratedSurface(const gfx::Size& desired_size) OVERRIDE;
   virtual void AcceleratedSurfaceNew(
       int32 width,
       int32 height,
@@ -219,11 +224,14 @@ class RenderWidgetHostViewAura
   // The model object.
   content::RenderWidgetHostImpl* host_;
 
-  scoped_ptr<content::GLHelper> gl_helper_;
-
   aura::Window* window_;
 
   scoped_ptr<WindowObserver> window_observer_;
+
+  // Are we in the process of closing?  Tracked so fullscreen views can avoid
+  // sending a second shutdown request to the host when they lose the focus
+  // after requesting shutdown for another reason (e.g. Escape key).
+  bool in_shutdown_;
 
   // Is this a fullscreen view?
   bool is_fullscreen_;

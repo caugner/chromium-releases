@@ -23,7 +23,6 @@
 #include "net/spdy/spdy_proxy_client_socket.h"
 #include "net/spdy/spdy_session.h"
 #include "net/spdy/spdy_session_pool.h"
-#include "net/spdy/spdy_settings_storage.h"
 #include "net/spdy/spdy_stream.h"
 
 namespace net {
@@ -89,7 +88,7 @@ HttpProxyConnectJob::HttpProxyConnectJob(
           callback_(base::Bind(&HttpProxyConnectJob::OnIOComplete,
                                base::Unretained(this)))),
       using_spdy_(false),
-      protocol_negotiated_(SSLClientSocket::kProtoUnknown) {
+      protocol_negotiated_(kProtoUnknown) {
 }
 
 HttpProxyConnectJob::~HttpProxyConnectJob() {}
@@ -238,7 +237,7 @@ int HttpProxyConnectJob::DoSSLConnectComplete(int result) {
   SSLClientSocket* ssl =
       static_cast<SSLClientSocket*>(transport_socket_handle_->socket());
   using_spdy_ = ssl->was_spdy_negotiated();
-  protocol_negotiated_ = ssl->protocol_negotiated();
+  protocol_negotiated_ = ssl->GetNegotiatedProtocol();
 
   // Reset the timer to just the length of time allowed for HttpProxy handshake
   // so that a fast SSL connection plus a slow HttpProxy failure doesn't take
@@ -397,9 +396,21 @@ HttpProxyClientSocketPool::HttpProxyClientSocketPool(
             new HttpProxyConnectJobFactory(transport_pool,
                                            ssl_pool,
                                            host_resolver,
-                                           net_log)) {}
+                                           net_log)) {
+  // We should always have a |transport_pool_| except in unit tests.
+  if (transport_pool_)
+    transport_pool_->AddLayeredPool(this);
+  if (ssl_pool_)
+    ssl_pool_->AddLayeredPool(this);
+}
 
-HttpProxyClientSocketPool::~HttpProxyClientSocketPool() {}
+HttpProxyClientSocketPool::~HttpProxyClientSocketPool() {
+  if (ssl_pool_)
+    ssl_pool_->RemoveLayeredPool(this);
+  // We should always have a |transport_pool_| except in unit tests.
+  if (transport_pool_)
+    transport_pool_->RemoveLayeredPool(this);
+}
 
 int HttpProxyClientSocketPool::RequestSocket(
     const std::string& group_name, const void* socket_params,
@@ -438,6 +449,12 @@ void HttpProxyClientSocketPool::Flush() {
   base_.Flush();
 }
 
+bool HttpProxyClientSocketPool::IsStalled() const {
+  return base_.IsStalled() ||
+      (transport_pool_ && transport_pool_->IsStalled()) ||
+      (ssl_pool_ && ssl_pool_->IsStalled());
+}
+
 void HttpProxyClientSocketPool::CloseIdleSockets() {
   base_.CloseIdleSockets();
 }
@@ -454,6 +471,14 @@ int HttpProxyClientSocketPool::IdleSocketCountInGroup(
 LoadState HttpProxyClientSocketPool::GetLoadState(
     const std::string& group_name, const ClientSocketHandle* handle) const {
   return base_.GetLoadState(group_name, handle);
+}
+
+void HttpProxyClientSocketPool::AddLayeredPool(LayeredPool* layered_pool) {
+  base_.AddLayeredPool(layered_pool);
+}
+
+void HttpProxyClientSocketPool::RemoveLayeredPool(LayeredPool* layered_pool) {
+  base_.RemoveLayeredPool(layered_pool);
 }
 
 DictionaryValue* HttpProxyClientSocketPool::GetInfoAsValue(
@@ -484,6 +509,12 @@ base::TimeDelta HttpProxyClientSocketPool::ConnectionTimeout() const {
 
 ClientSocketPoolHistograms* HttpProxyClientSocketPool::histograms() const {
   return base_.histograms();
+}
+
+bool HttpProxyClientSocketPool::CloseOneIdleConnection() {
+  if (base_.CloseOneIdleSocket())
+    return true;
+  return base_.CloseOneIdleConnectionInLayeredPool();
 }
 
 }  // namespace net

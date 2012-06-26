@@ -11,15 +11,15 @@
 #include "ui/aura/client/stacking_client.h"
 #include "ui/aura/env.h"
 #include "ui/aura/event.h"
-#include "ui/aura/monitor_manager.h"
 #include "ui/aura/root_window.h"
+#include "ui/aura/single_monitor_manager.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_delegate.h"
 #include "ui/base/hit_test.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_paths.h"
+#include "ui/compositor/test/compositor_test_support.h"
 #include "ui/gfx/canvas.h"
-#include "ui/gfx/compositor/test/compositor_test_support.h"
 #include "ui/gfx/rect.h"
 
 #if defined(USE_X11)
@@ -62,7 +62,7 @@ class DemoWindowDelegate : public aura::WindowDelegate {
   virtual bool CanFocus() OVERRIDE { return true; }
   virtual void OnCaptureLost() OVERRIDE {}
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE {
-    canvas->sk_canvas()->drawColor(color_, SkXfermode::kSrc_Mode);
+    canvas->DrawColor(color_, SkXfermode::kSrc_Mode);
   }
   virtual void OnWindowDestroying() OVERRIDE {}
   virtual void OnWindowDestroyed() OVERRIDE {}
@@ -111,7 +111,7 @@ int main(int argc, char** argv) {
   // Create the message-loop here before creating the root window.
   MessageLoop message_loop(MessageLoop::TYPE_UI);
   ui::CompositorTestSupport::Initialize();
-
+  aura::Env::GetInstance()->SetMonitorManager(new aura::SingleMonitorManager);
   scoped_ptr<aura::RootWindow> root_window(
       aura::MonitorManager::CreateRootWindowForPrimaryMonitor());
   scoped_ptr<DemoStackingClient> stacking_client(new DemoStackingClient(

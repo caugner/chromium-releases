@@ -49,6 +49,8 @@
 #include "media/base/data_buffer.h"
 #include "media/base/seekable_buffer.h"
 
+namespace media {
+
 // Amount of time to wait if we've exhausted the data source.  This is to avoid
 // busy looping.
 static const uint32 kNoDataSleepMilliseconds = 10;
@@ -383,7 +385,7 @@ void AlsaPcmOutputStream::BufferPacket(bool* source_exhausted) {
     // that aren't large enough to make a frame.  Without this, packet writing
     // may stall because the last few bytes in the packet may never get used by
     // WritePacket.
-    DCHECK(packet_size % bytes_per_frame_ == 0);
+    DCHECK_EQ(0u, packet_size % bytes_per_frame_);
     packet_size = (packet_size / bytes_per_frame_) * bytes_per_frame_;
 
     if (should_downmix_) {
@@ -615,10 +617,14 @@ std::string AlsaPcmOutputStream::FindDeviceForChannels(uint32 channels) {
 
 snd_pcm_sframes_t AlsaPcmOutputStream::GetCurrentDelay() {
   snd_pcm_sframes_t delay = -1;
-
-  // Don't query ALSA's delay if we have underrun since it'll be jammed at
-  // some non-zero value and potentially even negative!
-  if (wrapper_->PcmState(playback_handle_) != SND_PCM_STATE_XRUN) {
+  // Don't query ALSA's delay if we have underrun since it'll be jammed at some
+  // non-zero value and potentially even negative!
+  //
+  // Also, if we're in the prepared state, don't query because that seems to
+  // cause an I/O error when we do query the delay.
+  snd_pcm_state_t pcm_state = wrapper_->PcmState(playback_handle_);
+  if (pcm_state != SND_PCM_STATE_XRUN &&
+      pcm_state != SND_PCM_STATE_PREPARED) {
     int error = wrapper_->PcmDelay(playback_handle_, &delay);
     if (error < 0) {
       // Assume a delay of zero and attempt to recover the device.
@@ -649,7 +655,7 @@ snd_pcm_sframes_t AlsaPcmOutputStream::GetAvailableFrames() {
   // Find the number of frames queued in the sound device.
   snd_pcm_sframes_t available_frames =
       wrapper_->PcmAvailUpdate(playback_handle_);
-  if (available_frames  < 0) {
+  if (available_frames < 0) {
     available_frames = wrapper_->PcmRecover(playback_handle_,
                                             available_frames,
                                             kPcmRecoverIsSilent);
@@ -658,6 +664,11 @@ snd_pcm_sframes_t AlsaPcmOutputStream::GetAvailableFrames() {
     LOG(ERROR) << "Failed querying available frames. Assuming 0: "
                << wrapper_->StrError(available_frames);
     return 0;
+  }
+  if (static_cast<uint32>(available_frames) > alsa_buffer_frames_) {
+    LOG(ERROR) << "ALSA returned " << available_frames << " of "
+               << alsa_buffer_frames_ << " frames available.";
+    return alsa_buffer_frames_;
   }
 
   return available_frames;
@@ -781,7 +792,7 @@ uint32 AlsaPcmOutputStream::RunDataCallback(uint8* dest,
   TRACE_EVENT0("audio", "AlsaPcmOutputStream::RunDataCallback");
 
   if (source_callback_)
-    return source_callback_->OnMoreData(this, dest, max_size, buffers_state);
+    return source_callback_->OnMoreData(dest, max_size, buffers_state);
 
   return 0;
 }
@@ -797,3 +808,5 @@ void AlsaPcmOutputStream::set_source_callback(AudioSourceCallback* callback) {
   DCHECK(IsOnAudioThread());
   source_callback_ = callback;
 }
+
+}  // namespace media

@@ -6,6 +6,7 @@
 
 #include <string>
 
+#include "base/auto_reset.h"
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
@@ -30,6 +31,8 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebElement.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginDocument.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebPlugin.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebSize.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLRequest.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLResponse.h"
@@ -69,6 +72,8 @@ using WebKit::WebDocument;
 using WebKit::WebElement;
 using WebKit::WebFrame;
 using WebKit::WebNode;
+using WebKit::WebPlugin;
+using WebKit::WebPluginDocument;
 using WebKit::WebSize;
 using WebKit::WebString;
 using WebKit::WebURLRequest;
@@ -128,6 +133,8 @@ bool PrintMsg_Print_Params_IsEqual(
              newParams.params.supports_alpha_blend &&
          oldParams.pages.size() == newParams.pages.size() &&
          oldParams.params.print_to_pdf == newParams.params.print_to_pdf &&
+         oldParams.params.fit_to_paper_size ==
+             newParams.params.fit_to_paper_size &&
          oldParams.params.display_header_footer ==
              newParams.params.display_header_footer &&
          oldParams.params.date == newParams.params.date &&
@@ -308,8 +315,10 @@ void CalculatePrintCanvasSize(const PrintMsg_Print_Params& print_params,
 bool PrintingNodeOrPdfFrame(const WebFrame* frame, const WebNode& node) {
   if (!node.isNull())
     return true;
-  std::string mime(frame->dataSource()->response().mimeType().utf8());
-  return mime == "application/pdf";
+  if (!frame->document().isPluginDocument())
+    return false;
+  WebPlugin* plugin = frame->document().to<WebPluginDocument>().plugin();
+  return plugin && plugin->supportsPaginatedPrint();
 }
 
 bool PrintingFrameHasPageSizeStyle(WebFrame* frame, int total_page_count) {
@@ -662,10 +671,10 @@ PrintWebViewHelper::PrintWebViewHelper(content::RenderView* render_view)
       is_preview_enabled_(IsPrintPreviewEnabled()),
       is_print_ready_metafile_sent_(false),
       ignore_css_margins_(false),
-      fit_to_page_(true),
       user_cancelled_scripted_print_count_(0),
       is_scripted_printing_blocked_(false),
-      notify_browser_of_print_failure_(true) {
+      notify_browser_of_print_failure_(true),
+      print_for_preview_(false) {
 }
 
 PrintWebViewHelper::~PrintWebViewHelper() {}
@@ -743,8 +752,12 @@ void PrintWebViewHelper::OnPrintForPrintPreview(
     return;
   }
 
+  // Set |print_for_preview_| flag and autoreset it to back to original
+  // on return.
+  AutoReset<bool> set_printing_flag(&print_for_preview_, true);
+
   WebFrame* pdf_frame = pdf_element.document().frame();
-  if (!UpdatePrintSettings(pdf_frame, pdf_element, job_settings, true)) {
+  if (!UpdatePrintSettings(pdf_frame, pdf_element, job_settings)) {
     LOG(ERROR) << "UpdatePrintSettings failed";
     DidFinishPrinting(FAIL_PRINT);
     return;
@@ -825,7 +838,7 @@ void PrintWebViewHelper::OnPrintPreview(const DictionaryValue& settings) {
   print_preview_context_.OnPrintPreview();
 
   if (!UpdatePrintSettings(print_preview_context_.frame(),
-                           print_preview_context_.node(), settings, false)) {
+                           print_preview_context_.node(), settings)) {
     if (print_preview_context_.last_error() != PREVIEW_ERROR_BAD_SETTING) {
       Send(new PrintHostMsg_PrintPreviewInvalidPrinterSettings(
           routing_id(), print_pages_params_->params.document_cookie));
@@ -881,15 +894,14 @@ bool PrintWebViewHelper::CreatePreviewDocument() {
   PrintMsg_Print_Params print_params = print_pages_params_->params;
   const std::vector<int>& pages = print_pages_params_->pages;
   if (!print_preview_context_.CreatePreviewDocument(&print_params, pages,
-                                                    ignore_css_margins_,
-                                                    fit_to_page_)) {
+                                                    ignore_css_margins_)) {
     return false;
   }
 
   PageSizeMargins default_page_layout;
   ComputePageLayoutInPointsForCss(print_preview_context_.frame(), 0,
-                                  print_params, ignore_css_margins_,
-                                  fit_to_page_, NULL, &default_page_layout);
+                                  print_params, ignore_css_margins_, NULL,
+                                  &default_page_layout);
 
   if (!old_print_pages_params_.get() ||
       !PageLayoutIsEqual(*old_print_pages_params_, *print_pages_params_)) {
@@ -1159,8 +1171,7 @@ bool PrintWebViewHelper::PrintPages(WebFrame* frame, const WebNode& node) {
   const PrintMsg_Print_Params& print_params = params.params;
   PrepareFrameAndViewForPrint prep_frame_view(print_params, frame, node);
   UpdateFrameAndViewFromCssPageLayout(frame, node, &prep_frame_view,
-                                      print_params, ignore_css_margins_,
-                                      fit_to_page_);
+                                      print_params, ignore_css_margins_);
 
   int page_count = prep_frame_view.GetExpectedPageCount();
   if (!page_count)
@@ -1199,14 +1210,11 @@ void PrintWebViewHelper::ComputePageLayoutInPointsForCss(
     int page_index,
     const PrintMsg_Print_Params& page_params,
     bool ignore_css_margins,
-    bool fit_to_page,
     double* scale_factor,
     PageSizeMargins* page_layout_in_points) {
-  PrintMsg_Print_Params params = CalculatePrintParamsForCss(frame, page_index,
-                                                            page_params,
-                                                            ignore_css_margins,
-                                                            fit_to_page,
-                                                            scale_factor);
+  PrintMsg_Print_Params params = CalculatePrintParamsForCss(
+      frame, page_index, page_params, ignore_css_margins,
+      page_params.fit_to_paper_size, scale_factor);
   CalculatePageLayoutFromPrintParams(params, page_layout_in_points);
 }
 
@@ -1216,13 +1224,12 @@ void PrintWebViewHelper::UpdateFrameAndViewFromCssPageLayout(
     const WebNode& node,
     PrepareFrameAndViewForPrint* prepare,
     const PrintMsg_Print_Params& params,
-    bool ignore_css_margins,
-    bool fit_to_page) {
+    bool ignore_css_margins) {
   if (PrintingNodeOrPdfFrame(frame, node))
     return;
   PrintMsg_Print_Params print_params = CalculatePrintParamsForCss(
-      frame, 0, params, ignore_css_margins, ignore_css_margins && fit_to_page,
-      NULL);
+      frame, 0, params, ignore_css_margins,
+      ignore_css_margins && params.fit_to_paper_size, NULL);
   prepare->UpdatePrintParams(print_params);
 }
 
@@ -1246,7 +1253,7 @@ bool PrintWebViewHelper::InitPrintSettings() {
 
   // Reset to default values.
   ignore_css_margins_ = false;
-  fit_to_page_ = true;
+  settings.params.fit_to_paper_size = true;
   settings.pages.clear();
 
   print_pages_params_.reset(new PrintMsg_PrintPages_Params(settings));
@@ -1270,7 +1277,7 @@ bool PrintWebViewHelper::InitPrintSettingsAndPrepareFrame(
                                                  frame, node));
   UpdateFrameAndViewFromCssPageLayout(frame, node, prepare->get(),
                                       print_pages_params_->params,
-                                      ignore_css_margins_, fit_to_page_);
+                                      ignore_css_margins_);
   Send(new PrintHostMsg_DidGetDocumentCookie(
         routing_id(), print_pages_params_->params.document_cookie));
   return true;
@@ -1278,18 +1285,18 @@ bool PrintWebViewHelper::InitPrintSettingsAndPrepareFrame(
 
 bool PrintWebViewHelper::UpdatePrintSettings(
     WebKit::WebFrame* frame, const WebKit::WebNode& node,
-    const DictionaryValue& passed_job_settings, bool print_for_preview) {
+    const DictionaryValue& passed_job_settings) {
   DCHECK(is_preview_enabled_);
   const DictionaryValue* job_settings = &passed_job_settings;
   DictionaryValue modified_job_settings;
   if (job_settings->empty()) {
-    if (!print_for_preview)
+    if (!print_for_preview_)
       print_preview_context_.set_error(PREVIEW_ERROR_BAD_SETTING);
     return false;
   }
 
   bool source_is_html = true;
-  if (print_for_preview) {
+  if (print_for_preview_) {
     if (!job_settings->GetBoolean(printing::kSettingPreviewModifiable,
                                   &source_is_html)) {
       NOTREACHED();
@@ -1298,7 +1305,7 @@ bool PrintWebViewHelper::UpdatePrintSettings(
     source_is_html = !PrintingNodeOrPdfFrame(frame, node);
   }
 
-  if (print_for_preview || !source_is_html) {
+  if (print_for_preview_ || !source_is_html) {
     modified_job_settings.MergeDictionary(job_settings);
     modified_job_settings.SetBoolean(printing::kSettingHeaderFooterEnabled,
                                      false);
@@ -1310,9 +1317,9 @@ bool PrintWebViewHelper::UpdatePrintSettings(
     // - On Mac with CG, we can add a margin when generating the preview.
     // - On Linux, we never add a margin (We Could add it in the plugin).
 #if defined(OS_MACOSX) && !defined(USE_SKIA)
-    bool get_margins_from_pdf = !source_is_html && !print_for_preview;
+    bool get_margins_from_pdf = !source_is_html && !print_for_preview_;
 #elif defined(OS_WIN) || defined(OS_MACOSX)
-    bool get_margins_from_pdf = !source_is_html && print_for_preview;
+    bool get_margins_from_pdf = !source_is_html && print_for_preview_;
 #else
     bool get_margins_from_pdf = false;
 #endif
@@ -1335,7 +1342,7 @@ bool PrintWebViewHelper::UpdatePrintSettings(
   print_pages_params_.reset(new PrintMsg_PrintPages_Params(settings));
 
   if (!PrintMsg_Print_Params_IsValid(settings.params)) {
-    if (!print_for_preview) {
+    if (!print_for_preview_) {
       print_preview_context_.set_error(PREVIEW_ERROR_INVALID_PRINTER_SETTINGS);
     } else {
       // PrintForPrintPreview
@@ -1358,7 +1365,7 @@ bool PrintWebViewHelper::UpdatePrintSettings(
     return false;
   }
 
-  if (!print_for_preview) {
+  if (!print_for_preview_) {
     // Validate expected print preview settings.
     if (!job_settings->GetString(printing::kPreviewUIAddr,
                                  &(settings.params.preview_ui_addr)) ||
@@ -1373,7 +1380,10 @@ bool PrintWebViewHelper::UpdatePrintSettings(
 
     settings.params.print_to_pdf = IsPrintToPdfRequested(*job_settings);
     UpdateFrameMarginsCssInfo(*job_settings);
-    fit_to_page_ = source_is_html && !IsPrintToPdfRequested(*job_settings);
+
+    // Fit to paper size.
+    settings.params.fit_to_paper_size = source_is_html &&
+                                        !IsPrintToPdfRequested(*job_settings);
 
     // Header/Footer: Set |header_footer_info_|.
     if (settings.params.display_header_footer) {
@@ -1627,8 +1637,7 @@ void PrintWebViewHelper::PrintPreviewContext::OnPrintPreview() {
 bool PrintWebViewHelper::PrintPreviewContext::CreatePreviewDocument(
     PrintMsg_Print_Params* print_params,
     const std::vector<int>& pages,
-    bool ignore_css_margins,
-    bool fit_to_page) {
+    bool ignore_css_margins) {
   DCHECK_EQ(INITIALIZED, state_);
   state_ = RENDERING;
 
@@ -1643,8 +1652,7 @@ bool PrintWebViewHelper::PrintPreviewContext::CreatePreviewDocument(
   prep_frame_view_.reset(new PrepareFrameAndViewForPrint(*print_params, frame(),
                                                          node()));
   UpdateFrameAndViewFromCssPageLayout(frame_, node_, prep_frame_view_.get(),
-                                      *print_params, ignore_css_margins,
-                                      fit_to_page);
+                                      *print_params, ignore_css_margins);
 
   print_params_.reset(new PrintMsg_Print_Params(*print_params));
 

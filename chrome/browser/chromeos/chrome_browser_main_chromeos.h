@@ -11,10 +11,10 @@
 namespace chromeos {
 class BrightnessObserver;
 class DesktopBackgroundObserver;
-class InitialBrowserWindowObserver;
 class PowerButtonObserver;
 class PowerStateOverride;
 class ResumeObserver;
+class ScreenDimmingObserver;
 class ScreenLockObserver;
 class SessionManagerObserver;
 class VideoPropertyWriter;
@@ -30,6 +30,7 @@ class ChromeBrowserMainPartsChromeos : public ChromeBrowserMainPartsLinux {
   virtual void PreEarlyInitialization() OVERRIDE;
   virtual void PreMainMessageLoopStart() OVERRIDE;
   virtual void PostMainMessageLoopStart() OVERRIDE;
+  virtual int PreCreateThreads() OVERRIDE;
   virtual void PreMainMessageLoopRun() OVERRIDE;
 
   // Stages called from PreMainMessageLoopRun.
@@ -40,17 +41,19 @@ class ChromeBrowserMainPartsChromeos : public ChromeBrowserMainPartsLinux {
 
   virtual void PostMainMessageLoopRun() OVERRIDE;
 
+  // Set up field trial for low memory headroom settings.
+  void SetupLowMemoryHeadroomFieldTrial();
+
  private:
   scoped_ptr<chromeos::BrightnessObserver> brightness_observer_;
   scoped_ptr<chromeos::ResumeObserver> resume_observer_;
   scoped_ptr<chromeos::ScreenLockObserver> screen_lock_observer_;
   scoped_ptr<chromeos::SessionManagerObserver> session_manager_observer_;
   scoped_ptr<chromeos::DesktopBackgroundObserver> desktop_background_observer_;
-  scoped_ptr<chromeos::InitialBrowserWindowObserver>
-      initial_browser_window_observer_;
   scoped_ptr<chromeos::PowerButtonObserver> power_button_observer_;
   scoped_ptr<chromeos::PowerStateOverride> power_state_override_;
   scoped_ptr<chromeos::VideoPropertyWriter> video_property_writer_;
+  scoped_ptr<chromeos::ScreenDimmingObserver> screen_dimming_observer_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeBrowserMainPartsChromeos);
 };

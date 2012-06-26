@@ -9,6 +9,7 @@
 #include "chrome/browser/ui/cocoa/browser_window_utils.h"
 #include "chrome/browser/ui/cocoa/extensions/extension_view_mac.h"
 #include "chrome/common/extensions/extension.h"
+#import "ui/base/cocoa/underlay_opengl_hosting_window.h"
 
 @implementation ShellWindowController
 
@@ -24,21 +25,15 @@
 ShellWindowCocoa::ShellWindowCocoa(ExtensionHost* host)
     : ShellWindow(host),
       attention_request_id_(0) {
-  // TOOD(mihaip): Restore prior window dimensions and positions on relaunch.
-  NSRect rect = NSZeroRect;
-  rect.size.width = host_->extension()->launch_width();
-  rect.size.height = host_->extension()->launch_height();
+  NSRect rect = NSMakeRect(0, 0, kDefaultWidth, kDefaultHeight);
   NSUInteger styleMask = NSTitledWindowMask | NSClosableWindowMask |
                          NSMiniaturizableWindowMask | NSResizableWindowMask;
-  scoped_nsobject<NSWindow> window(
-      [[NSWindow alloc] initWithContentRect:rect
-                                  styleMask:styleMask
-                                    backing:NSBackingStoreBuffered
-                                      defer:NO]);
+  scoped_nsobject<NSWindow> window([[UnderlayOpenGLHostingWindow alloc]
+      initWithContentRect:rect
+                styleMask:styleMask
+                  backing:NSBackingStoreBuffered
+                    defer:NO]);
   [window setTitle:base::SysUTF8ToNSString(host->extension()->name())];
-  [window setContentMinSize:
-      NSMakeSize(host_->extension()->launch_min_width(),
-                 host_->extension()->launch_min_height())];
 
   NSView* view = host->view()->native_view();
   [view setFrame:rect];
@@ -62,6 +57,10 @@ bool ShellWindowCocoa::IsMaximized() const {
 
 bool ShellWindowCocoa::IsMinimized() const {
   return [window() isMiniaturized];
+}
+
+bool ShellWindowCocoa::IsFullscreen() const {
+  return false;
 }
 
 gfx::Rect ShellWindowCocoa::GetRestoredBounds() const {
@@ -134,6 +133,10 @@ void ShellWindowCocoa::SetBounds(const gfx::Rect& bounds) {
       [screen frame].size.height - checked_bounds.height() - checked_bounds.y();
 
   [window() setFrame:cocoa_bounds display:YES];
+}
+
+void ShellWindowCocoa::SetDraggableRegion(SkRegion* region) {
+  // TODO: implement
 }
 
 void ShellWindowCocoa::FlashFrame(bool flash) {

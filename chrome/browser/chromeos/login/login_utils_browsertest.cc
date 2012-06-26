@@ -10,12 +10,12 @@
 #include "base/path_service.h"
 #include "base/scoped_temp_dir.h"
 #include "base/string_util.h"
+#include "base/threading/sequenced_worker_pool.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/mock_cryptohome_library.h"
 #include "chrome/browser/chromeos/cros/mock_library_loader.h"
 #include "chrome/browser/chromeos/cryptohome/mock_async_method_caller.h"
-#include "chrome/browser/chromeos/dbus/mock_dbus_thread_manager.h"
-#include "chrome/browser/chromeos/dbus/mock_session_manager_client.h"
+#include "chrome/browser/chromeos/input_method/mock_input_method_manager.h"
 #include "chrome/browser/chromeos/login/authenticator.h"
 #include "chrome/browser/chromeos/login/login_status_consumer.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
@@ -27,11 +27,13 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/net/gaia/gaia_auth_consumer.h"
 #include "chrome/common/net/gaia/gaia_urls.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/net/gaia/gaia_auth_consumer.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_pref_service.h"
+#include "chromeos/dbus/mock_dbus_thread_manager.h"
+#include "chromeos/dbus/mock_session_manager_client.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/url_fetcher_delegate.h"
 #include "content/test/test_browser_thread.h"
@@ -49,6 +51,7 @@ namespace em = enterprise_management;
 
 using ::testing::DoAll;
 using ::testing::Return;
+using ::testing::SaveArg;
 using ::testing::SetArgPointee;
 using ::testing::_;
 using content::BrowserThread;
@@ -79,14 +82,17 @@ const char kDMPolicyRequest[] =
 
 const char kDMToken[] = "1234";
 
-ACTION_P(MockSessionManagerClientPolicyCallback, policy) {
-  arg0.Run(policy);
+ACTION_P(MockSessionManagerClientRetrievePolicyCallback, policy) {
+  arg0.Run(*policy);
 }
 
-template<typename TESTBASE>
-class LoginUtilsTestBase : public TESTBASE,
-                           public LoginUtils::Delegate,
-                           public LoginStatusConsumer {
+ACTION_P(MockSessionManagerClientStorePolicyCallback, success) {
+  arg1.Run(success);
+}
+
+class LoginUtilsTest : public testing::Test,
+                       public LoginUtils::Delegate,
+                       public LoginStatusConsumer {
  public:
   // Initialization here is important. The UI thread gets the test's
   // message loop, as does the file thread (which never actually gets
@@ -96,7 +102,7 @@ class LoginUtilsTestBase : public TESTBASE,
   // bits of initialization that get posted to the IO thread.  We do
   // however, at one point in the test, temporarily set the message
   // loop for the IO thread.
-  LoginUtilsTestBase()
+  LoginUtilsTest()
       : loop_(MessageLoop::TYPE_IO),
         browser_process_(
             static_cast<TestingBrowserProcess*>(g_browser_process)),
@@ -111,9 +117,6 @@ class LoginUtilsTestBase : public TESTBASE,
 
   virtual void SetUp() OVERRIDE {
     ASSERT_TRUE(scoped_temp_dir_.CreateUniqueTempDir());
-    // BrowserPolicyConnector makes the UserPolicyCache read relative to this
-    // path. Make sure it's in a clean state.
-    PathService::Override(chrome::DIR_USER_DATA, scoped_temp_dir_.path());
 
     CommandLine* command_line = CommandLine::ForCurrentProcess();
     command_line->AppendSwitch(switches::kEnableDevicePolicy);
@@ -127,12 +130,23 @@ class LoginUtilsTestBase : public TESTBASE,
     // which is part of io_thread_state_.
     DBusThreadManager::InitializeForTesting(&mock_dbus_thread_manager_);
 
+    input_method::InputMethodManager::InitializeForTesting(
+        &mock_input_method_manager_);
+
     // Likewise, SessionManagerClient should also be initialized before
     // io_thread_state_.
     MockSessionManagerClient* session_managed_client =
         mock_dbus_thread_manager_.mock_session_manager_client();
-    EXPECT_CALL(*session_managed_client, RetrievePolicy(_))
-        .WillRepeatedly(MockSessionManagerClientPolicyCallback(""));
+    EXPECT_CALL(*session_managed_client, RetrieveDevicePolicy(_))
+        .WillRepeatedly(
+            MockSessionManagerClientRetrievePolicyCallback(&device_policy_));
+    EXPECT_CALL(*session_managed_client, RetrieveUserPolicy(_))
+        .WillRepeatedly(
+            MockSessionManagerClientRetrievePolicyCallback(&user_policy_));
+    EXPECT_CALL(*session_managed_client, StoreUserPolicy(_, _))
+        .WillRepeatedly(
+            DoAll(SaveArg<0>(&user_policy_),
+                  MockSessionManagerClientStorePolicyCallback(true)));
 
     mock_async_method_caller_ = new cryptohome::MockAsyncMethodCaller;
     cryptohome::AsyncMethodCaller::InitializeForTesting(
@@ -197,14 +211,14 @@ class LoginUtilsTestBase : public TESTBASE,
     connector_ = browser_process_->browser_policy_connector();
     connector_->Init();
 
-    loop_.RunAllPending();
+    RunAllPending();
   }
 
   virtual void TearDown() OVERRIDE {
     cryptohome::AsyncMethodCaller::Shutdown();
     mock_async_method_caller_ = NULL;
 
-    loop_.RunAllPending();
+    RunAllPending();
     {
       // chrome_browser_net::Predictor usually skips its shutdown routines on
       // unit_tests, but does the full thing when
@@ -213,13 +227,13 @@ class LoginUtilsTestBase : public TESTBASE,
       // these routines.
       //
       // It is important to not have a fake message loop on the IO
-      // thread for the whole test, see comment on LoginUtilsTestBase
+      // thread for the whole test, see comment on LoginUtilsTest
       // constructor for details.
       io_thread_.DeprecatedSetMessageLoop(&loop_);
       loop_.PostTask(FROM_HERE,
-                     base::Bind(&LoginUtilsTestBase::TearDownOnIO,
+                     base::Bind(&LoginUtilsTest::TearDownOnIO,
                                 base::Unretained(this)));
-      loop_.RunAllPending();
+      RunAllPending();
       io_thread_.DeprecatedSetMessageLoop(NULL);
     }
 
@@ -228,7 +242,7 @@ class LoginUtilsTestBase : public TESTBASE,
     connector_ = NULL;
     browser_process_->SetBrowserPolicyConnector(NULL);
     browser_process_->SetProfileManager(NULL);
-    loop_.RunAllPending();
+    RunAllPending();
   }
 
   void TearDownOnIO() {
@@ -242,6 +256,12 @@ class LoginUtilsTestBase : public TESTBASE,
         predictor->Shutdown();
       }
     }
+  }
+
+  void RunAllPending() {
+    loop_.RunAllPending();
+    BrowserThread::GetBlockingPool()->FlushForTesting();
+    loop_.RunAllPending();
   }
 
   virtual void OnProfilePrepared(Profile* profile) OVERRIDE {
@@ -270,7 +290,7 @@ class LoginUtilsTestBase : public TESTBASE,
     device_data_store->set_device_id(kDeviceId);
     EXPECT_EQ(policy::EnterpriseInstallAttributes::LOCK_SUCCESS,
               connector_->LockDevice(username));
-    loop_.RunAllPending();
+    RunAllPending();
   }
 
   void PrepareProfile(const std::string& username) {
@@ -290,7 +310,7 @@ class LoginUtilsTestBase : public TESTBASE,
 
     LoginUtils::Get()->PrepareProfile(username, std::string(), "password",
                                       false, true, false, this);
-    loop_.RunAllPending();
+    RunAllPending();
   }
 
   TestURLFetcher* PrepareOAuthFetcher(const std::string& expected_url) {
@@ -353,6 +373,7 @@ class LoginUtilsTestBase : public TESTBASE,
   scoped_ptr<IOThread> io_thread_state_;
 
   MockDBusThreadManager mock_dbus_thread_manager_;
+  input_method::MockInputMethodManager mock_input_method_manager_;
   TestURLFetcherFactory test_url_fetcher_factory_;
 
   cryptohome::MockAsyncMethodCaller* mock_async_method_caller_;
@@ -364,15 +385,15 @@ class LoginUtilsTestBase : public TESTBASE,
  private:
   ScopedTempDir scoped_temp_dir_;
 
-  DISALLOW_COPY_AND_ASSIGN(LoginUtilsTestBase);
-};
+  std::string device_policy_;
+  std::string user_policy_;
 
-class LoginUtilsTest : public LoginUtilsTestBase<testing::Test> {
+  DISALLOW_COPY_AND_ASSIGN(LoginUtilsTest);
 };
 
 class LoginUtilsBlockingLoginTest
-    : public LoginUtilsTestBase<testing::TestWithParam<int> > {
-};
+    : public LoginUtilsTest,
+      public testing::WithParamInterface<int> {};
 
 TEST_F(LoginUtilsTest, NormalLoginDoesntBlock) {
   UserManager* user_manager = UserManager::Get();
@@ -470,13 +491,13 @@ TEST_P(LoginUtilsBlockingLoginTest, EnterpriseLoginBlocksForEnterpriseUser) {
 
     // The cloud policy subsystem is now ready to fetch the dmtoken and the user
     // policy.
-    loop_.RunAllPending();
+    RunAllPending();
     if (steps < 4) break;
 
     fetcher = PrepareDMRegisterFetcher();
     fetcher->delegate()->OnURLFetchComplete(fetcher);
     // The policy fetch job has now been scheduled, run it:
-    loop_.RunAllPending();
+    RunAllPending();
     if (steps < 5) break;
 
     // Verify that there is no profile prepared just before the policy fetch.

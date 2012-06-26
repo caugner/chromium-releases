@@ -12,15 +12,19 @@
 #include "content/common/child_thread.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDOMStringList.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBKey.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBKeyPath.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBKeyRange.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBTransaction.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebSerializedScriptValue.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 
+using content::IndexedDBKeyPath;
+using content::SerializedScriptValue;
 using WebKit::WebDOMStringList;
 using WebKit::WebExceptionCode;
 using WebKit::WebFrame;
 using WebKit::WebIDBCallbacks;
+using WebKit::WebIDBKeyPath;
 using WebKit::WebIDBKeyRange;
 using WebKit::WebIDBIndex;
 using WebKit::WebIDBKey;
@@ -49,8 +53,8 @@ WebString RendererWebIDBObjectStoreImpl::name() const {
   return result;
 }
 
-WebString RendererWebIDBObjectStoreImpl::keyPath() const {
-  NullableString16 result;
+WebIDBKeyPath RendererWebIDBObjectStoreImpl::keyPath() const {
+  IndexedDBKeyPath result;
   IndexedDBDispatcher::Send(
       new IndexedDBHostMsg_ObjectStoreKeyPath(idb_object_store_id_, &result));
   return result;
@@ -70,14 +74,15 @@ WebDOMStringList RendererWebIDBObjectStoreImpl::indexNames() const {
 }
 
 void RendererWebIDBObjectStoreImpl::get(
-    const WebIDBKey& key,
+    const WebIDBKeyRange& key_range,
     WebIDBCallbacks* callbacks,
     const WebIDBTransaction& transaction,
     WebExceptionCode& ec) {
   IndexedDBDispatcher* dispatcher =
       IndexedDBDispatcher::ThreadSpecificInstance();
   dispatcher->RequestIDBObjectStoreGet(
-      IndexedDBKey(key), callbacks, idb_object_store_id_, transaction, &ec);
+      content::IndexedDBKeyRange(key_range), callbacks,
+      idb_object_store_id_, transaction, &ec);
 }
 
 void RendererWebIDBObjectStoreImpl::put(
@@ -90,8 +95,8 @@ void RendererWebIDBObjectStoreImpl::put(
   IndexedDBDispatcher* dispatcher =
       IndexedDBDispatcher::ThreadSpecificInstance();
   dispatcher->RequestIDBObjectStorePut(
-      content::SerializedScriptValue(value), IndexedDBKey(key), put_mode,
-      callbacks, idb_object_store_id_, transaction, &ec);
+      SerializedScriptValue(value), content::IndexedDBKey(key),
+      put_mode, callbacks, idb_object_store_id_, transaction, &ec);
 }
 
 void RendererWebIDBObjectStoreImpl::deleteFunction(
@@ -102,7 +107,8 @@ void RendererWebIDBObjectStoreImpl::deleteFunction(
   IndexedDBDispatcher* dispatcher =
       IndexedDBDispatcher::ThreadSpecificInstance();
   dispatcher->RequestIDBObjectStoreDelete(
-      IndexedDBKey(key), callbacks, idb_object_store_id_, transaction, &ec);
+      content::IndexedDBKey(key), callbacks, idb_object_store_id_,
+      transaction, &ec);
 }
 
 void RendererWebIDBObjectStoreImpl::deleteFunction(
@@ -113,7 +119,7 @@ void RendererWebIDBObjectStoreImpl::deleteFunction(
   IndexedDBDispatcher* dispatcher =
       IndexedDBDispatcher::ThreadSpecificInstance();
   dispatcher->RequestIDBObjectStoreDeleteRange(
-      IndexedDBKeyRange(key_range), callbacks, idb_object_store_id_,
+      content::IndexedDBKeyRange(key_range), callbacks, idb_object_store_id_,
       transaction, &ec);
 }
 
@@ -129,14 +135,14 @@ void RendererWebIDBObjectStoreImpl::clear(
 
 WebIDBIndex* RendererWebIDBObjectStoreImpl::createIndex(
     const WebString& name,
-    const WebString& key_path,
+    const WebIDBKeyPath& key_path,
     bool unique,
     bool multi_entry,
     const WebIDBTransaction& transaction,
     WebExceptionCode& ec) {
   IndexedDBHostMsg_ObjectStoreCreateIndex_Params params;
   params.name = name;
-  params.key_path = key_path;
+  params.key_path = IndexedDBKeyPath(key_path);
   params.unique = unique;
   params.multi_entry = multi_entry;
   params.transaction_id = IndexedDBDispatcher::TransactionId(transaction);

@@ -10,17 +10,25 @@
 #include "ash/wm/resize_shadow_controller.h"
 #include "ash/wm/window_resizer.h"
 #include "ash/wm/window_util.h"
+#include "ash/wm/workspace/snap_sizer.h"
 #include "base/message_loop.h"
 #include "ui/aura/client/aura_constants.h"
-#include "ui/aura/cursor.h"
 #include "ui/aura/env.h"
 #include "ui/aura/event.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_delegate.h"
+#include "ui/base/cursor/cursor.h"
 #include "ui/base/hit_test.h"
 #include "ui/base/ui_base_types.h"
+#include "ui/compositor/layer.h"
+#include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/gfx/screen.h"
+
+namespace {
+const double kMinHorizVelocityForWindowSwipe = 1100;
+const double kMinVertVelocityForWindowMinimize = 1000;
+}
 
 namespace ash {
 
@@ -49,7 +57,7 @@ bool ToplevelWindowEventFilter::PreHandleKeyEvent(aura::Window* target,
                                                   aura::KeyEvent* event) {
   if (window_resizer_.get() && event->type() == ui::ET_KEY_PRESSED &&
       event->key_code() == ui::VKEY_ESCAPE) {
-    CompleteDrag(DRAG_REVERT);
+    CompleteDrag(DRAG_REVERT, event->flags());
   }
   return false;
 }
@@ -86,7 +94,8 @@ bool ToplevelWindowEventFilter::PreHandleMouseEvent(aura::Window* target,
     case ui::ET_MOUSE_CAPTURE_CHANGED:
     case ui::ET_MOUSE_RELEASED:
       CompleteDrag(event->type() == ui::ET_MOUSE_RELEASED ?
-                   DRAG_COMPLETE : DRAG_REVERT);
+                       DRAG_COMPLETE : DRAG_REVERT,
+                   event->flags());
       if (in_move_loop_) {
         MessageLoop::current()->Quit();
         in_move_loop_ = false;
@@ -142,7 +151,40 @@ ui::GestureStatus ToplevelWindowEventFilter::PreHandleGestureEvent(
     case ui::ET_GESTURE_SCROLL_END: {
       if (!in_gesture_resize_)
         return ui::GESTURE_STATUS_UNKNOWN;
-      CompleteDrag(DRAG_COMPLETE);
+      DefaultWindowResizer* default_resizer =
+          static_cast<DefaultWindowResizer*>(window_resizer_.get());
+      bool changed_size =
+          default_resizer ?  default_resizer->changed_size() : false;
+      aura::Window* window =
+          default_resizer ?  default_resizer->target_window() : NULL;
+      bool drag_done = false;
+
+      if (window && !changed_size) {
+        if (fabs(event->delta_y()) > kMinVertVelocityForWindowMinimize) {
+          // Minimize/maximize.
+          window->SetProperty(aura::client::kShowStateKey,
+              event->delta_y() > 0 ? ui::SHOW_STATE_MINIMIZED :
+                                     ui::SHOW_STATE_MAXIMIZED);
+          drag_done = true;
+        } else if (fabs(event->delta_x()) > kMinHorizVelocityForWindowSwipe) {
+          // Snap left/right.
+          internal::SnapSizer sizer(window,
+              gfx::Point(),
+              event->delta_x() < 0 ? internal::SnapSizer::LEFT_EDGE :
+              internal::SnapSizer::RIGHT_EDGE,
+              Shell::GetInstance()->GetGridSize());
+
+          ui::ScopedLayerAnimationSettings scoped_setter(
+              window->layer()->GetAnimator());
+          scoped_setter.SetPreemptionStrategy(
+              ui::LayerAnimator::REPLACE_QUEUED_ANIMATIONS);
+          window->SetBounds(sizer.target_bounds());
+          drag_done = true;
+        }
+      }
+
+      if (!drag_done)
+        CompleteDrag(DRAG_COMPLETE, event->flags());
       in_gesture_resize_ = false;
       break;
     }
@@ -163,7 +205,7 @@ void ToplevelWindowEventFilter::RunMoveLoop(aura::Window* source) {
       root_window, source->parent(), &parent_mouse_location);
   window_resizer_.reset(
       CreateWindowResizer(source, parent_mouse_location, HTCAPTION));
-  source->GetRootWindow()->SetCursor(aura::kCursorPointer);
+  source->GetRootWindow()->SetCursor(ui::kCursorPointer);
 #if !defined(OS_MACOSX)
   MessageLoopForUI* loop = MessageLoopForUI::current();
   MessageLoop::ScopedNestableTaskAllower allow_nested(loop);
@@ -191,15 +233,15 @@ WindowResizer* ToplevelWindowEventFilter::CreateWindowResizer(
     int window_component) {
   if (!wm::IsWindowNormal(window))
     return NULL;  // Don't allow resizing/dragging maximized/fullscreen windows.
-  return DefaultWindowResizer::Create(
-      window, point, window_component, grid_size_);
+  return DefaultWindowResizer::Create(window, point, window_component);
 }
 
-void ToplevelWindowEventFilter::CompleteDrag(DragCompletionStatus status) {
+void ToplevelWindowEventFilter::CompleteDrag(DragCompletionStatus status,
+                                             int event_flags) {
   scoped_ptr<WindowResizer> resizer(window_resizer_.release());
   if (resizer.get()) {
     if (status == DRAG_COMPLETE)
-      resizer->CompleteDrag();
+      resizer->CompleteDrag(event_flags);
     else
       resizer->RevertDrag();
   }
@@ -215,7 +257,8 @@ bool ToplevelWindowEventFilter::HandleDrag(aura::Window* target,
 
   if (!window_resizer_.get())
     return false;
-  window_resizer_->Drag(ConvertPointToParent(target, event->location()));
+  window_resizer_->Drag(ConvertPointToParent(target, event->location()),
+                        event->flags());
   return true;
 }
 

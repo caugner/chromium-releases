@@ -62,9 +62,6 @@ class RenderWidgetHostViewGtk : public content::RenderWidgetHostViewBase {
   virtual GdkEventButton* GetLastMouseDown() OVERRIDE;
   virtual gfx::NativeView BuildInputMethodsGtkMenu() OVERRIDE;
   virtual void SetBackground(const SkBitmap& background) OVERRIDE;
-  virtual bool CopyFromCompositingSurface(
-      const gfx::Size& size,
-      skia::PlatformCanvas* output) OVERRIDE;
 
   // RenderWidgetHostViewPort implementation.
   virtual void InitAsPopup(content::RenderWidgetHostView* parent_host_view,
@@ -96,6 +93,13 @@ class RenderWidgetHostViewGtk : public content::RenderWidgetHostViewBase {
   virtual void SelectionBoundsChanged(const gfx::Rect& start_rect,
                                       const gfx::Rect& end_rect) OVERRIDE;
   virtual BackingStore* AllocBackingStore(const gfx::Size& size) OVERRIDE;
+  virtual bool CopyFromCompositingSurface(
+      const gfx::Size& size,
+      skia::PlatformCanvas* output) OVERRIDE;
+  virtual void AsyncCopyFromCompositingSurface(
+      const gfx::Size& size,
+      skia::PlatformCanvas* output,
+      base::Callback<void(bool)> callback) OVERRIDE;
   virtual void OnAcceleratedCompositingStateChange() OVERRIDE;
   virtual void AcceleratedSurfaceBuffersSwapped(
       const GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params& params,
@@ -104,6 +108,7 @@ class RenderWidgetHostViewGtk : public content::RenderWidgetHostViewBase {
       const GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params& params,
       int gpu_host_id) OVERRIDE;
   virtual void AcceleratedSurfaceSuspend() OVERRIDE;
+  virtual bool HasAcceleratedSurface(const gfx::Size& desired_size) OVERRIDE;
   virtual void CreatePluginContainer(gfx::PluginWindowHandle id) OVERRIDE;
   virtual void DestroyPluginContainer(gfx::PluginWindowHandle id) OVERRIDE;
   virtual void ProcessTouchAck(WebKit::WebInputEvent::Type type,
@@ -210,7 +215,7 @@ class RenderWidgetHostViewGtk : public content::RenderWidgetHostViewBase {
   base::TimeTicks whiteout_start_time_;
 
   // The time it took after this view was selected for it to be fully painted.
-  base::TimeTicks tab_switch_paint_time_;
+  base::TimeTicks web_contents_switch_paint_time_;
 
   // The native view of our parent widget.  Used only for popups.
   GtkWidget* parent_;

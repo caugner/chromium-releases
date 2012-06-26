@@ -41,7 +41,7 @@ class CommandUpdater;
 class ContentSettingImageModel;
 class ContentSettingBubbleGtk;
 class ExtensionAction;
-class ThemeServiceGtk;
+class GtkThemeService;
 class SkBitmap;
 class ToolbarModel;
 
@@ -219,8 +219,7 @@ class LocationBarViewGtk : public AutocompleteEditController,
   };
 
   class PageActionViewGtk : public ImageLoadingTracker::Observer,
-                            public content::NotificationObserver,
-                            public ExtensionContextMenuModel::PopupDelegate {
+                            public content::NotificationObserver {
    public:
     PageActionViewGtk(LocationBarViewGtk* owner, ExtensionAction* page_action);
     virtual ~PageActionViewGtk();
@@ -236,7 +235,7 @@ class LocationBarViewGtk : public AutocompleteEditController,
     bool IsVisible();
 
     // Called to notify the PageAction that it should determine whether to be
-    // visible or hidden. |contents| is the TabContents that is active, |url|
+    // visible or hidden. |contents| is the WebContents that is active, |url|
     // is the current page URL.
     void UpdateVisibility(content::WebContents* contents, const GURL& url);
 
@@ -253,13 +252,9 @@ class LocationBarViewGtk : public AutocompleteEditController,
                          const content::NotificationSource& source,
                          const content::NotificationDetails& details) OVERRIDE;
 
-    // Overridden from ExtensionContextMenuModel::PopupDelegate:
-    virtual void InspectPopup(ExtensionAction* action) OVERRIDE;
-
    private:
-    // Show the popup for this page action. If |devtools| is true, show it
-    // with a debugger window attached. Returns true if a popup was shown.
-    bool ShowPopup(bool devtools);
+    // Show the popup for this page action. Returns true if a popup was shown.
+    bool ShowPopup();
 
     // Connect the accelerator for the page action popup.
     void ConnectPageActionAccelerator();
@@ -478,7 +473,7 @@ class LocationBarViewGtk : public AutocompleteEditController,
   bool popup_window_mode_;
 
   // Provides colors and rendering mode.
-  ThemeServiceGtk* theme_service_;
+  GtkThemeService* theme_service_;
 
   content::NotificationRegistrar registrar_;
 

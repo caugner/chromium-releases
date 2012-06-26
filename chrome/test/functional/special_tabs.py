@@ -41,7 +41,6 @@ class SpecialTabsTest(pyauto.PyUITest):
     'chrome://appcache-internals': { 'title': 'AppCache Internals' },
     'chrome://blob-internals': { 'title': 'Blob Storage Internals' },
     'chrome://feedback': {},
-    'chrome://feedback/#0': { 'title': 'Feedback' },
     'chrome://chrome-urls': { 'title': 'Chrome URLs' },
     'chrome://crashes': { 'title': 'Crashes' },
     'chrome://credits': { 'title': 'Credits' },
@@ -51,7 +50,6 @@ class SpecialTabsTest(pyauto.PyUITest):
     'chrome://flags': {},
     'chrome://flash': {},
     'chrome://gpu-internals': {},
-    'chrome://help': { 'title': 'Help' },
     'chrome://histograms': { 'title': 'About Histograms' },
     'chrome://history': { 'title': 'History' },
     'chrome://media-internals': { 'title': 'Media Internals' },
@@ -62,12 +60,12 @@ class SpecialTabsTest(pyauto.PyUITest):
     'chrome://plugins': { 'title': 'Plug-ins' },
     'chrome://sessions': { 'title': 'Sessions' },
     'chrome://settings': { 'title': 'Settings' },
-    'chrome://settings/autofill': { 'title': 'Settings - Autofill Settings' },
+    'chrome://settings/autofill': { 'title': 'Settings - Autofill settings' },
     'chrome://settings/clearBrowserData':
-      { 'title': 'Settings - Clear Browsing Data' },
-    'chrome://settings/content': { 'title': 'Settings - Content Settings' },
+      { 'title': 'Settings - Clear browsing data' },
+    'chrome://settings/content': { 'title': 'Settings - Content settings' },
     'chrome://settings/languages':
-      { 'title': 'Settings - Languages and Input' },
+      { 'title': 'Settings - Languages' },
     'chrome://settings/passwords': { 'title': 'Settings - Passwords' },
     'chrome://stats': {},
     'chrome://sync': { 'title': 'Sync Internals' },
@@ -76,7 +74,7 @@ class SpecialTabsTest(pyauto.PyUITest):
     'chrome://terms': {},
     'chrome://version': { 'title': 'About Version' },
     'chrome://view-http-cache': {},
-    'chrome://workers': { 'title': 'Workers' },
+    'chrome://inspect': { 'title': 'Inspect with Chrome Developer Tools' },
   }
   broken_special_url_tabs = {
     # crashed under debug when invoked from location bar (bug 88223).
@@ -138,7 +136,7 @@ class SpecialTabsTest(pyauto.PyUITest):
 
   linux_special_url_tabs = {
     'chrome://linux-proxy-config': { 'title': 'Proxy Configuration Help' },
-    'chrome://tcmalloc': { 'title': 'About tcmalloc' },
+    'chrome://tcmalloc': { 'title': 'tcmalloc stats' },
     'chrome://sandbox': { 'title': 'Sandbox Status' },
   }
   broken_linux_special_url_tabs = {}
@@ -273,9 +271,10 @@ class SpecialTabsTest(pyauto.PyUITest):
       self.NavigateToURL(url)
       expected_title = 'title' in properties and properties['title'] or url
       actual_title = self.GetActiveTabTitle()
-      logging.debug('  %s title was %s (%s)' %
-                    (url, actual_title, expected_title == actual_title))
-      self.assertEqual(expected_title, actual_title)
+      self.assertTrue(self.WaitUntil(
+          lambda: self.GetActiveTabTitle(), expect_retval=expected_title),
+          msg='Title did not match for %s. Expected: %s. Got %s' % (
+              url, expected_title, self.GetActiveTabTitle()))
       include_list = []
       exclude_list = []
       no_csp = 'CSP' in properties and not properties['CSP']
@@ -303,7 +302,11 @@ class SpecialTabsTest(pyauto.PyUITest):
         self.assertEqual(result, 'executed',
                          msg='Got %s for %s' % (result, url))
       else:
-        self.assertEqual(result, 'blocked');
+        self.assertEqual(result, 'blocked',
+                         msg='Got %s for %s' % (result, url))
+
+      # Restart browser so that every URL gets a fresh instance.
+      self.RestartBrowser(clear_profile=False)
 
   def testAboutAppCacheTab(self):
     """Test App Cache tab to confirm about page populates caches."""

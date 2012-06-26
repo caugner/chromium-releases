@@ -22,15 +22,19 @@ without changes to the corresponding grd file. -->
                file="shared/css/list.css" type="BINDATA" />
       <include name="IDR_SHARED_CSS_MENU"
                file="shared/css/menu.css" type="BINDATA" flattenhtml="true" />
+      <include name="IDR_SHARED_CSS_MENU_BUTTON"
+               file="shared/css/menu_button.css" type="BINDATA" flattenhtml="true" />
       <include name="IDR_SHARED_CSS_CHROME"
                file="shared/css/chrome_shared.css" type="BINDATA" />
       <include name="IDR_SHARED_CSS_CHROME2"
-               file="shared/css/chrome_shared2.css" type="BINDATA" />
+               file="shared/css/chrome_shared2.css" type="BINDATA"
+               flattenhtml="true" />
       <include name="IDR_SHARED_CSS_CHROME2_TOUCH"
                file="shared/css/chrome_shared2_touch.css" type="BINDATA"
                flattenhtml="true" />
       <include name="IDR_SHARED_CSS_OVERLAY"
-               file="shared/css/overlay.css" type="BINDATA" />
+               file="shared/css/overlay.css" type="BINDATA"
+               flattenhtml="true" />
       <include name="IDR_SHARED_CSS_SPINNER"
                file="shared/css/spinner.css" type="BINDATA" />
       <include name="IDR_SHARED_CSS_TABLE"
@@ -72,8 +76,6 @@ without changes to the corresponding grd file. -->
                file="shared/images/x-hover.png" type="BINDATA" />
       <include name="IDR_SHARED_JS_CR"
                file="shared/js/cr.js" type="BINDATA" />
-      <include name="IDR_SHARED_JS_CR_COMMAND_LINE"
-               file="shared/js/cr/command_line.js" type="BINDATA" />
       <include name="IDR_SHARED_JS_CR_EVENT_TARGET"
                file="shared/js/cr/event_target.js" type="BINDATA" />
       <include name="IDR_SHARED_JS_CR_LINK_CONTROLLER"
@@ -152,9 +154,13 @@ without changes to the corresponding grd file. -->
                file="shared/js/i18n_process.js" type="BINDATA" />
       <include name="IDR_SHARED_JS_I18N_TEMPLATE"
                file="shared/js/i18n_template.js" type="BINDATA" />
+      <include name="IDR_SHARED_JS_I18N_TEMPLATE2"
+               file="shared/js/i18n_template2.js" type="BINDATA" />
       <include name="IDR_SHARED_JS_JSTEMPLATE_COMPILED"
                file="shared/js/jstemplate_compiled.js" 
                flattenhtml="true" type="BINDATA" />
+      <include name="IDR_SHARED_JS_LOAD_TIME_DATA"
+               file="shared/js/load_time_data.js" type="BINDATA" />
       <include name="IDR_SHARED_JS_LOCAL_STRINGS"
                file="shared/js/local_strings.js" type="BINDATA" />
       <include name="IDR_SHARED_JS_MEDIA_COMMON"
@@ -163,6 +169,14 @@ without changes to the corresponding grd file. -->
                file="shared/js/parse_html_subset.js" type="BINDATA" />
       <include name="IDR_SHARED_JS_UTIL"
                file="shared/js/util.js" type="BINDATA" />
+      <if expr="pp_ifdef('chromeos')">
+        <include name="IDR_SHARED_CSS_UI_ACCOUNT_TWEAKS"
+                 file="shared/css/chromeos/ui_account_tweaks.css"
+                 type="BINDATA" />
+        <include name="IDR_SHARED_JS_UI_ACCOUNT_TWEAKS"
+                 file="shared/js/chromeos/ui_account_tweaks.js"
+                 type="BINDATA" />
+      </if>
     </includes>
   </release>
 </grit>

@@ -9,6 +9,7 @@
 #include "ash/system/power/power_supply_status.h"
 #include "ash/system/tray/system_tray_delegate.h"
 #include "ash/system/tray/tray_constants.h"
+#include "ash/system/tray/tray_views.h"
 #include "base/string_number_conversions.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
@@ -25,6 +26,7 @@
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/layout/box_layout.h"
+#include "ui/views/layout/fill_layout.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
 #include "unicode/fieldpos.h"
@@ -39,6 +41,8 @@ const int kBatteryImageHeight = 25;
 const int kBatteryImageWidth = 25;
 // Number of different power states.
 const int kNumPowerImages = 15;
+// Top/bottom padding of the text items.
+const int kPaddingVertical = 10;
 }
 
 namespace tray {
@@ -99,11 +103,20 @@ class PowerTrayView : public views::ImageView {
 };
 
 // This view is used only for the popup.
-class PowerPopupView : public views::Label {
+class PowerPopupView : public views::View {
  public:
   PowerPopupView() {
-    SetHorizontalAlignment(ALIGN_RIGHT);
+    status_label_ = new views::Label;
+    status_label_->SetHorizontalAlignment(views::Label::ALIGN_RIGHT);
+    time_label_ = new views::Label;
+    time_label_->SetHorizontalAlignment(views::Label::ALIGN_RIGHT);
     UpdateText();
+
+    SetLayoutManager(
+        new views::BoxLayout(
+            views::BoxLayout::kVertical, 0, 0, kTrayPopupTextSpacingVertical));
+    AddChildView(status_label_);
+    AddChildView(time_label_);
   }
 
   virtual ~PowerPopupView() {
@@ -120,28 +133,54 @@ class PowerPopupView : public views::Label {
 
  private:
   void UpdateText() {
+    if (supply_status_.is_calculating_battery_time) {
+      status_label_->SetText(
+          l10n_util::GetStringFUTF16(
+              IDS_ASH_STATUS_TRAY_BATTERY_PERCENT,
+              base::IntToString16(
+                  static_cast<int>(supply_status_.battery_percentage))));
+      time_label_->SetText(
+          ui::ResourceBundle::GetSharedInstance().GetLocalizedString(
+              supply_status_.line_power_on ?
+                  IDS_ASH_STATUS_TRAY_BATTERY_CALCULATING_ON :
+                  IDS_ASH_STATUS_TRAY_BATTERY_CALCULATING_OFF));
+      return;
+    }
+
     base::TimeDelta time = base::TimeDelta::FromSeconds(
         supply_status_.line_power_on ?
         supply_status_.battery_seconds_to_full :
         supply_status_.battery_seconds_to_empty);
     int hour = time.InHours();
     int min = (time - base::TimeDelta::FromHours(hour)).InMinutes();
-    ui::ResourceBundle& bundle = ui::ResourceBundle::GetSharedInstance();
     if (hour || min) {
-      SetText(l10n_util::GetStringFUTF16(IDS_ASH_STATUS_TRAY_BATTERY_STATUS,
-          base::IntToString16(
-              static_cast<int>(supply_status_.battery_percentage)),
-          base::IntToString16(hour),
-          base::IntToString16(min)));
+      status_label_->SetText(
+          l10n_util::GetStringFUTF16(
+              IDS_ASH_STATUS_TRAY_BATTERY_PERCENT,
+              base::IntToString16(
+                  static_cast<int>(supply_status_.battery_percentage))));
+      time_label_->SetText(
+          l10n_util::GetStringFUTF16(
+              supply_status_.line_power_on ?
+                  IDS_ASH_STATUS_TRAY_BATTERY_TIME_UNTIL_FULL :
+                  IDS_ASH_STATUS_TRAY_BATTERY_TIME_UNTIL_EMPTY,
+              base::IntToString16(hour),
+              base::IntToString16(min)));
     } else {
       if (supply_status_.line_power_on) {
-        SetText(bundle.GetLocalizedString(IDS_ASH_STATUS_TRAY_BATTERY_FULL));
+        status_label_->SetText(
+            ui::ResourceBundle::GetSharedInstance().GetLocalizedString(
+                IDS_ASH_STATUS_TRAY_BATTERY_FULL));
       } else {
         // Completely discharged? ... ha?
-        SetText(string16());
+        status_label_->SetText(string16());
       }
+      time_label_->SetText(string16());
     }
   }
+
+  views::Label* status_label_;
+  views::Label* time_label_;
 
   PowerSupplyStatus supply_status_;
 
@@ -151,7 +190,8 @@ class PowerPopupView : public views::Label {
 }  // namespace tray
 
 TrayPower::TrayPower()
-    : power_(NULL),
+    : date_(NULL),
+      power_(NULL),
       power_tray_(NULL) {
 }
 
@@ -164,32 +204,55 @@ views::View* TrayPower::CreateTrayView(user::LoginStatus status) {
   // necessary.
   PowerSupplyStatus power_status =
       ash::Shell::GetInstance()->tray_delegate()->GetPowerSupplyStatus();
-  power_tray_.reset(new tray::PowerTrayView());
+  CHECK(power_tray_ == NULL);
+  power_tray_ = new tray::PowerTrayView();
   power_tray_->UpdatePowerStatus(power_status);
-  return power_tray_.get();
+  return power_tray_;
 }
 
 views::View* TrayPower::CreateDefaultView(user::LoginStatus status) {
-  date_.reset(new tray::DateView(tray::DateView::DATE));
-  if (status != user::LOGGED_IN_NONE && status != user::LOGGED_IN_LOCKED)
-    date_->set_actionable(true);
+  CHECK(date_ == NULL);
+  date_ = new tray::DateView();
 
   views::View* container = new views::View;
   views::BoxLayout* layout = new views::BoxLayout(views::BoxLayout::kHorizontal,
-      kTrayPopupPaddingHorizontal, 10, 0);
+      0, 0, 0);
+
   layout->set_spread_blank_space(true);
   container->SetLayoutManager(layout);
   container->set_background(views::Background::CreateSolidBackground(
-      SkColorSetRGB(0xf1, 0xf1, 0xf1)));
-  container->AddChildView(date_.get());
+      kHeaderBackgroundColor));
+  HoverHighlightView* view = new HoverHighlightView(NULL);
+  view->SetLayoutManager(new views::FillLayout);
+  view->AddChildView(date_);
+  date_->set_border(views::Border::CreateEmptyBorder(kPaddingVertical,
+      kTrayPopupPaddingHorizontal,
+      kPaddingVertical,
+      kTrayPopupPaddingHorizontal));
+  container->AddChildView(view);
+  view->set_focusable(false);
+
+  if (status != user::LOGGED_IN_NONE && status != user::LOGGED_IN_LOCKED) {
+    date_->SetActionable(true);
+    view->set_highlight_color(kHeaderHoverBackgroundColor);
+  } else {
+    view->set_highlight_color(SkColorSetARGB(0, 0, 0, 0));
+  }
 
   PowerSupplyStatus power_status =
       ash::Shell::GetInstance()->tray_delegate()->GetPowerSupplyStatus();
   if (power_status.battery_is_present) {
-    power_.reset(new tray::PowerPopupView());
+    CHECK(power_ == NULL);
+    power_ = new tray::PowerPopupView();
     power_->UpdatePowerStatus(power_status);
-    container->AddChildView(power_.get());
+    power_->set_border(views::Border::CreateSolidSidedBorder(
+        kPaddingVertical, kTrayPopupPaddingHorizontal,
+        kPaddingVertical, kTrayPopupPaddingHorizontal,
+        SkColorSetARGB(0, 0, 0, 0)));
+    container->AddChildView(power_);
   }
+  ash::Shell::GetInstance()->tray_delegate()->RequestStatusUpdate();
+
   return container;
 }
 
@@ -198,21 +261,24 @@ views::View* TrayPower::CreateDetailedView(user::LoginStatus status) {
 }
 
 void TrayPower::DestroyTrayView() {
-  power_tray_.reset();
+  power_tray_ = NULL;
 }
 
 void TrayPower::DestroyDefaultView() {
-  date_.reset();
-  power_.reset();
+  date_ = NULL;
+  power_ = NULL;
 }
 
 void TrayPower::DestroyDetailedView() {
 }
 
+void TrayPower::UpdateAfterLoginStatusChange(user::LoginStatus status) {
+}
+
 void TrayPower::OnPowerStatusChanged(const PowerSupplyStatus& status) {
-  if (power_tray_.get())
+  if (power_tray_)
     power_tray_->UpdatePowerStatus(status);
-  if (power_.get())
+  if (power_)
     power_->UpdatePowerStatus(status);
 }
 

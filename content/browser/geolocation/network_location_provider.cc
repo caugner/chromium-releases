@@ -10,6 +10,7 @@
 #include "content/public/browser/access_token_store.h"
 
 using content::AccessTokenStore;
+using content::Geoposition;
 
 namespace {
 // The maximum period of time we'll wait for a complete set of device data
@@ -116,6 +117,7 @@ NetworkLocationProvider::NetworkLocationProvider(
       is_radio_data_complete_(false),
       is_wifi_data_complete_(false),
       access_token_(access_token),
+      is_permission_granted_(false),
       is_new_data_available_(false),
       ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
   // Create the position cache.
@@ -144,12 +146,10 @@ void NetworkLocationProvider::UpdatePosition() {
   }
 }
 
-void NetworkLocationProvider::OnPermissionGranted(
-    const GURL& requesting_frame) {
-  const bool host_was_empty = most_recent_authorized_host_.empty();
-  most_recent_authorized_host_ = requesting_frame.host();
-  if (host_was_empty && !most_recent_authorized_host_.empty()
-      && IsStarted()) {
+void NetworkLocationProvider::OnPermissionGranted() {
+  const bool was_permission_granted = is_permission_granted_;
+  is_permission_granted_ = true;
+  if (!was_permission_granted && IsStarted()) {
     UpdatePosition();
   }
 }
@@ -179,7 +179,7 @@ void NetworkLocationProvider::LocationResponseAvailable(
   DCHECK(CalledOnValidThread());
   // Record the position and update our cache.
   position_ = position;
-  if (position.IsValidFix()) {
+  if (position.Validate()) {
     position_cache_->CachePosition(wifi_data, position);
   }
 
@@ -244,7 +244,7 @@ void NetworkLocationProvider::RequestPosition() {
   DCHECK(!device_data_updated_timestamp_.is_null()) <<
       "Timestamp must be set before looking up position";
   if (cached_position) {
-    DCHECK(cached_position->IsValidFix());
+    DCHECK(cached_position->Validate());
     // Record the position and update its timestamp.
     position_ = *cached_position;
     // The timestamp of a position fix is determined by the timestamp
@@ -257,7 +257,7 @@ void NetworkLocationProvider::RequestPosition() {
     return;
   }
   // Don't send network requests until authorized. http://crbug.com/39171
-  if (most_recent_authorized_host_.empty())
+  if (!is_permission_granted_)
     return;
 
   weak_factory_.InvalidateWeakPtrs();
@@ -270,10 +270,7 @@ void NetworkLocationProvider::RequestPosition() {
                 "with new data. Wifi APs: "
              << wifi_data_.access_point_data.size();
   }
-  // The hostname sent in the request is just to give a first-order
-  // approximation of usage. We do not need to guarantee that this network
-  // request was triggered by an API call from this specific host.
-  request_->MakeRequest(most_recent_authorized_host_, access_token_,
+  request_->MakeRequest(access_token_,
                         radio_data_, wifi_data_,
                         device_data_updated_timestamp_);
 }

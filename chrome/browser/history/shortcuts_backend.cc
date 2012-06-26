@@ -95,8 +95,6 @@ ShortcutsBackend::ShortcutsBackend(const FilePath& db_folder_path,
   }
 }
 
-ShortcutsBackend::~ShortcutsBackend() {}
-
 bool ShortcutsBackend::Init() {
   if (current_state_ != NOT_INITIALIZED)
     return false;
@@ -190,6 +188,8 @@ bool ShortcutsBackend::DeleteAllShortcuts() {
                  db_.get()));
 }
 
+ShortcutsBackend::~ShortcutsBackend() {}
+
 void ShortcutsBackend::InitInternal() {
   DCHECK(current_state_ == INITIALIZING);
   db_->Init();
@@ -227,13 +227,15 @@ void ShortcutsBackend::Observe(int type,
             all_history) {
       DeleteAllShortcuts();
     }
-    const std::set<GURL>& urls =
-        content::Details<const history::URLsDeletedDetails>(details)->urls;
+    const URLRows& rows(
+        content::Details<const history::URLsDeletedDetails>(details)->rows);
     std::vector<std::string> shortcut_ids;
 
     for (GuidToShortcutsIteratorMap::iterator it = guid_map_.begin();
          it != guid_map_.end(); ++it) {
-      if (urls.find(it->second->second.url) != urls.end())
+      if (std::find_if(rows.begin(), rows.end(),
+                       URLRow::URLRowHasURL(it->second->second.url)) !=
+          rows.end())
         shortcut_ids.push_back(it->first);
     }
     DeleteShortcutsWithIds(shortcut_ids);

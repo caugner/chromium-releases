@@ -8,6 +8,7 @@
 #include "base/compiler_specific.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
+#include "net/base/mock_cert_verifier.h"
 #include "net/base/mock_host_resolver.h"
 #include "net/base/net_errors.h"
 #include "net/base/ssl_config_service_defaults.h"
@@ -63,7 +64,7 @@ class HttpProxyClientSocketPoolSpdy2Test : public TestWithHttpParam {
             &tcp_histograms_,
             &socket_factory_),
         ssl_histograms_("MockSSL"),
-        cert_verifier_(CertVerifier::CreateDefault()),
+        cert_verifier_(new MockCertVerifier),
         proxy_service_(ProxyService::CreateDirect()),
         ssl_config_service_(new SSLConfigServiceDefaults),
         ssl_socket_pool_(kMaxSockets, kMaxSocketsPerGroup,
@@ -175,7 +176,7 @@ class HttpProxyClientSocketPoolSpdy2Test : public TestWithHttpParam {
   }
 
   void InitializeSpdySsl() {
-    ssl_data_->SetNextProto(SSLClientSocket::kProtoSPDY2);
+    ssl_data_->SetNextProto(kProtoSPDY2);
   }
 
   HttpNetworkSession* CreateNetworkSession() {

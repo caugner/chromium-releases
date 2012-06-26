@@ -16,9 +16,6 @@
 #include "chrome/browser/chromeos/audio/audio_handler.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
-#include "chrome/browser/chromeos/dbus/dbus_thread_manager.h"
-#include "chrome/browser/chromeos/dbus/power_manager_client.h"
-#include "chrome/browser/chromeos/dbus/update_engine_client.h"
 #include "chrome/browser/chromeos/login/enrollment/enterprise_enrollment_screen.h"
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
 #include "chrome/browser/chromeos/login/login_display.h"
@@ -37,10 +34,12 @@
 #include "chrome/browser/policy/enterprise_install_attributes.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/dialog_style.h"
-#include "chrome/browser/ui/views/window.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "chrome/common/pref_names.h"
+#include "chromeos/dbus/dbus_thread_manager.h"
+#include "chromeos/dbus/power_manager_client.h"
+#include "chromeos/dbus/update_engine_client.h"
+#include "content/public/browser/web_contents.h"
 #include "net/base/network_change_notifier.h"
 #include "policy/policy_constants.h"
 #include "ui/views/widget/widget.h"
@@ -276,31 +275,27 @@ void TestingAutomationProvider::LoginAsGuest(DictionaryValue* args,
   controller->LoginAsGuest();
 }
 
-void TestingAutomationProvider::Login(DictionaryValue* args,
-                                      IPC::Message* reply_message) {
-  LOG(ERROR) << "TestingAutomationProvider::Login";
-
-  std::string username, password;
-  if (!args->GetString("username", &username) ||
-      !args->GetString("password", &password)) {
-    AutomationJSONReply(this, reply_message).SendError(
-        "Invalid or missing args.");
+void TestingAutomationProvider::AddLoginEventObserver(
+    DictionaryValue* args, IPC::Message* reply_message) {
+  chromeos::ExistingUserController* controller =
+      chromeos::ExistingUserController::current_controller();
+  AutomationJSONReply reply(this, reply_message);
+  if (!controller) {
+    reply.SendError("Unable to access ExistingUserController");
     return;
   }
 
-  chromeos::ExistingUserController* controller =
-      chromeos::ExistingUserController::current_controller();
+  if (!automation_event_queue_.get())
+    automation_event_queue_.reset(new AutomationEventQueue);
 
-  // Set up an observer (it will delete itself).
-  new LoginObserver(controller, this, reply_message);
+  int observer_id = automation_event_queue_->AddObserver(
+      new LoginEventObserver(automation_event_queue_.get(),
+                             controller));
 
-  // WebUI login.
-  chromeos::WebUILoginDisplay* webui_login_display =
-      static_cast<chromeos::WebUILoginDisplay*>(controller->login_display());
-  LOG(ERROR) << "TestingAutomationProvider::Login ShowSigninScreenForCreds("
-             << username << ", " << password << ")";
-
-  webui_login_display->ShowSigninScreenForCreds(username, password);
+  // Return the observer's id.
+  DictionaryValue return_value;
+  return_value.SetInteger("observer_id", observer_id);
+  reply.SendSuccess(&return_value);
 }
 
 void TestingAutomationProvider::LockScreen(DictionaryValue* args,
@@ -953,6 +948,50 @@ void TestingAutomationProvider::EnrollEnterpriseDevice(
   new EnrollmentObserver(this, reply_message, enroll_screen->GetActor(),
                          enroll_screen);
   enroll_screen->GetActor()->SubmitTestCredentials(user, password);
+}
+
+void TestingAutomationProvider::ExecuteJavascriptInOOBEWebUI(
+    DictionaryValue* args, IPC::Message* reply_message) {
+  std::string javascript, frame_xpath;
+  if (!args->GetString("javascript", &javascript)) {
+    AutomationJSONReply(this, reply_message)
+        .SendError("'javascript' missing or invalid");
+    return;
+  }
+  if (!args->GetString("frame_xpath", &frame_xpath)) {
+    AutomationJSONReply(this, reply_message)
+        .SendError("'frame_xpath' missing or invalid");
+    return;
+  }
+  const UserManager* user_manager = UserManager::Get();
+  if (!user_manager) {
+    AutomationJSONReply(this, reply_message).SendError(
+        "No user manager!");
+    return;
+  }
+  if (user_manager->IsUserLoggedIn()) {
+    AutomationJSONReply(this, reply_message).SendError(
+        "User is already logged in.");
+    return;
+  }
+  chromeos::ExistingUserController* controller =
+      chromeos::ExistingUserController::current_controller();
+  if (!controller) {
+    AutomationJSONReply(this, reply_message).SendError(
+        "Unable to access ExistingUserController");
+    return;
+  }
+  chromeos::WebUILoginDisplayHost* webui_login_display_host =
+      static_cast<chromeos::WebUILoginDisplayHost*>(
+          controller->login_display_host());
+  content::WebContents* web_contents =
+      webui_login_display_host->GetOobeUI()->web_ui()->GetWebContents();
+
+  new DomOperationMessageSender(this, reply_message, true);
+  ExecuteJavascriptInRenderViewFrame(ASCIIToUTF16(frame_xpath),
+                                     ASCIIToUTF16(javascript),
+                                     reply_message,
+                                     web_contents->GetRenderViewHost());
 }
 
 void TestingAutomationProvider::GetEnterprisePolicyInfo(

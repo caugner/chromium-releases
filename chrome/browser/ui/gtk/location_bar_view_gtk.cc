@@ -24,6 +24,8 @@
 #include "chrome/browser/command_updater.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/defaults.h"
+#include "chrome/browser/extensions/api/commands/extension_command_service.h"
+#include "chrome/browser/extensions/api/commands/extension_command_service_factory.h"
 #include "chrome/browser/extensions/extension_browser_event_router.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
@@ -45,11 +47,11 @@
 #include "chrome/browser/ui/gtk/content_setting_bubble_gtk.h"
 #include "chrome/browser/ui/gtk/extensions/extension_popup_gtk.h"
 #include "chrome/browser/ui/gtk/first_run_bubble.h"
+#include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/nine_box.h"
 #include "chrome/browser/ui/gtk/omnibox/omnibox_view_gtk.h"
 #include "chrome/browser/ui/gtk/rounded_window.h"
-#include "chrome/browser/ui/gtk/theme_service_gtk.h"
 #include "chrome/browser/ui/gtk/view_id_util.h"
 #include "chrome/browser/ui/omnibox/location_bar_util.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
@@ -200,7 +202,7 @@ void LocationBarViewGtk::Init(bool popup_window_mode) {
   popup_window_mode_ = popup_window_mode;
 
   Profile* profile = browser_->profile();
-  theme_service_ = ThemeServiceGtk::GetFrom(profile);
+  theme_service_ = GtkThemeService::GetFrom(profile);
 
   // Create the widget first, so we can pass it to the OmniboxViewGtk.
   hbox_.Own(gtk_hbox_new(FALSE, kInnerPadding));
@@ -868,7 +870,7 @@ gboolean LocationBarViewGtk::HandleExpose(GtkWidget* widget,
                                           GdkEventExpose* event) {
   // If we're not using GTK theming, draw our own border over the edge pixels
   // of the background.
-  if (!ThemeServiceGtk::GetFrom(browser_->profile())->UsingNativeTheme()) {
+  if (!GtkThemeService::GetFrom(browser_->profile())->UsingNativeTheme()) {
     int left, center, right;
     if (popup_window_mode_) {
       left = right = IDR_LOCATIONBG_POPUPMODE_EDGE;
@@ -990,16 +992,13 @@ void LocationBarViewGtk::SetKeywordLabel(const string16& keyword) {
     return;
 
   bool is_extension_keyword;
-  const string16 short_name = template_url_service->
-      GetKeywordShortName(keyword, &is_extension_keyword);
+  const string16 short_name = template_url_service->GetKeywordShortName(
+      keyword, &is_extension_keyword);
   int message_id = is_extension_keyword ?
       IDS_OMNIBOX_EXTENSION_KEYWORD_TEXT : IDS_OMNIBOX_KEYWORD_TEXT;
-  string16 full_name = l10n_util::GetStringFUTF16(message_id,
-                                                  short_name);
+  string16 full_name = l10n_util::GetStringFUTF16(message_id, short_name);
   string16 partial_name = l10n_util::GetStringFUTF16(
-      message_id,
-      WideToUTF16Hack(
-          location_bar_util::CalculateMinString(UTF16ToWideHack(short_name))));
+      message_id, location_bar_util::CalculateMinString(short_name));
   gtk_label_set_text(GTK_LABEL(tab_to_search_full_label_),
                      UTF16ToUTF8(full_name).c_str());
   gtk_label_set_text(GTK_LABEL(tab_to_search_partial_label_),
@@ -1187,10 +1186,8 @@ void LocationBarViewGtk::ShowStarBubble(const GURL& url,
 }
 
 void LocationBarViewGtk::ShowChromeToMobileBubble() {
-  Profile* profile = browser_->profile();
-  ChromeToMobileServiceFactory::GetForProfile(profile)->
-      RequestMobileListUpdate();
-  ChromeToMobileBubbleGtk::Show(GTK_IMAGE(chrome_to_mobile_image_), profile);
+  ChromeToMobileBubbleGtk::Show(GTK_IMAGE(chrome_to_mobile_image_),
+                                browser_->profile());
 }
 
 void LocationBarViewGtk::SetStarred(bool starred) {
@@ -1224,8 +1221,7 @@ void LocationBarViewGtk::UpdateChromeToMobileIcon() {
 
   Profile* profile = browser_->profile();
   bool enabled = !toolbar_model_->input_in_progress() &&
-      profile->IsSyncAccessible() &&
-      !ChromeToMobileServiceFactory::GetForProfile(profile)->mobiles().empty();
+      ChromeToMobileServiceFactory::GetForProfile(profile)->HasDevices();
   gtk_widget_set_visible(chrome_to_mobile_view_.get(), enabled);
   command_updater_->UpdateCommandEnabled(IDC_CHROME_TO_MOBILE_PAGE, enabled);
 }
@@ -1360,7 +1356,7 @@ void LocationBarViewGtk::ContentSettingImageViewGtk::UpdateFromWebContents(
   }
 
   gtk_image_set_from_pixbuf(GTK_IMAGE(image_.get()),
-      ThemeServiceGtk::GetFrom(parent_->browser()->profile())->GetImageNamed(
+      GtkThemeService::GetFrom(parent_->browser()->profile())->GetImageNamed(
           content_setting_image_model_->get_icon())->ToGdkPixbuf());
 
   gtk_widget_set_tooltip_text(widget(),
@@ -1685,20 +1681,14 @@ void LocationBarViewGtk::EnabledStateChangedForCommand(int id, bool enabled) {
     UpdateChromeToMobileIcon();
 }
 
-void LocationBarViewGtk::PageActionViewGtk::InspectPopup(
-    ExtensionAction* action) {
-  ShowPopup(true);
-}
-
-bool LocationBarViewGtk::PageActionViewGtk::ShowPopup(bool devtools) {
+bool LocationBarViewGtk::PageActionViewGtk::ShowPopup() {
   if (!page_action_->HasPopup(current_tab_id_))
     return false;
 
   ExtensionPopupGtk::Show(
       page_action_->GetPopupUrl(current_tab_id_),
       owner_->browser_,
-      event_box_.get(),
-      devtools);
+      event_box_.get());
   return true;
 }
 
@@ -1709,21 +1699,18 @@ void LocationBarViewGtk::PageActionViewGtk::ConnectPageActionAccelerator() {
       extensions->GetByID(page_action_->extension_id());
   window_ = owner_->browser()->window()->GetNativeHandle();
 
-  // Iterate through all the keybindings and see if one is assigned to the
-  // pageAction.
-  const std::vector<Extension::ExtensionKeybinding>& commands =
-      extension->keybindings();
-  for (size_t i = 0; i < commands.size(); ++i) {
-    if (commands[i].command_name() !=
-        extension_manifest_values::kPageActionKeybindingEvent)
-      continue;
-
+  ExtensionCommandService* command_service =
+      ExtensionCommandServiceFactory::GetForProfile(
+          owner_->browser()->profile());
+  const extensions::Command* command =
+      command_service->GetActivePageActionCommand(extension->id());
+  if (command) {
     // Found the browser action shortcut command, register it.
     keybinding_.reset(new ui::AcceleratorGtk(
-        commands[i].accelerator().key_code(),
-        commands[i].accelerator().IsShiftDown(),
-        commands[i].accelerator().IsCtrlDown(),
-        commands[i].accelerator().IsAltDown()));
+        command->accelerator().key_code(),
+        command->accelerator().IsShiftDown(),
+        command->accelerator().IsCtrlDown(),
+        command->accelerator().IsAltDown()));
 
     accel_group_ = gtk_accel_group_new();
     gtk_window_add_accel_group(window_, accel_group_);
@@ -1740,7 +1727,6 @@ void LocationBarViewGtk::PageActionViewGtk::ConnectPageActionAccelerator() {
     registrar_.Add(this,
                    chrome::NOTIFICATION_WINDOW_CLOSED,
                    content::Source<GtkWindow>(window_));
-    break;
   }
 }
 
@@ -1762,7 +1748,7 @@ gboolean LocationBarViewGtk::PageActionViewGtk::OnButtonPressed(
     GdkEventButton* event) {
   Profile* profile = owner_->browser()->profile();
   if (event->button != 3) {
-    if (!ShowPopup(false)) {
+    if (!ShowPopup()) {
       ExtensionService* service = profile->GetExtensionService();
       service->browser_event_router()->PageActionExecuted(profile,
           page_action_->extension_id(), page_action_->id(), current_tab_id_,
@@ -1774,7 +1760,7 @@ gboolean LocationBarViewGtk::PageActionViewGtk::OnButtonPressed(
 
     if (extension->ShowConfigureContextMenus()) {
       context_menu_model_ =
-          new ExtensionContextMenuModel(extension, owner_->browser_, this);
+          new ExtensionContextMenuModel(extension, owner_->browser_);
       context_menu_.reset(
           new MenuGtk(NULL, context_menu_model_.get()));
       context_menu_->PopupForWidget(sender, event->button, event->time);

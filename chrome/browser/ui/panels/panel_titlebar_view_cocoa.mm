@@ -15,13 +15,17 @@
 #import "chrome/browser/ui/cocoa/themed_window.h"
 #import "chrome/browser/ui/cocoa/tracking_area.h"
 #import "chrome/browser/ui/panels/panel_window_controller_cocoa.h"
+#include "grit/generated_resources.h"
 #include "grit/theme_resources_standard.h"
+#include "grit/theme_resources.h"
 #import "third_party/GTM/AppKit/GTMNSBezierPath+RoundRect.h"
 #import "third_party/GTM/AppKit/GTMNSColor+Luminance.h"
+#include "ui/base/l10n/l10n_util_mac.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/mac/nsimage_cache.h"
 #include "ui/gfx/scoped_ns_graphics_context_save_gstate_mac.h"
+#include "ui/gfx/image/image.h"
 
-const int kRoundedCornerSize = 3;
 const int kButtonPadding = 8;
 const int kIconAndTextPadding = 5;
 
@@ -63,7 +67,7 @@ static NSEvent* MakeMouseEvent(NSEventType type,
 // canceling the reorder by [NSApp preventWindowOrdering] in mouseDown handler
 // of this view.
 - (BOOL)shouldDelayWindowOrderingForEvent:(NSEvent*)theEvent {
-  disableReordering_ = ![controller_ isActivationByClickingTitlebarEnabled];
+  disableReordering_ = ![controller_ canBecomeKeyWindow];
   return disableReordering_;
 }
 
@@ -82,10 +86,11 @@ static NSEvent* MakeMouseEvent(NSEventType type,
 
 @implementation RepaintAnimation
 - (id)initWithView:(NSView*)targetView duration:(double) duration {
-  if (![super initWithDuration:duration animationCurve:NSAnimationEaseInOut])
-    return nil;
-  [self setAnimationBlockingMode:NSAnimationNonblocking];
-  targetView_ = targetView;
+  if ((self = [super initWithDuration:duration
+                       animationCurve:NSAnimationEaseInOut])) {
+    [self setAnimationBlockingMode:NSAnimationNonblocking];
+    targetView_ = targetView;
+  }
   return self;
 }
 
@@ -123,8 +128,12 @@ static NSEvent* MakeMouseEvent(NSEventType type,
   [controller_ closePanel];
 }
 
-- (void)onSettingsButtonClick:(id)sender {
-  [controller_ runSettingsMenu:settingsButton_];
+- (void)onMinimizeButtonClick:(id)sender {
+  [controller_ minimizeButtonClicked:[[NSApp currentEvent] modifierFlags]];
+}
+
+- (void)onRestoreButtonClick:(id)sender {
+  [controller_ restoreButtonClicked:[[NSApp currentEvent] modifierFlags]];
 }
 
 - (void)drawRect:(NSRect)rect {
@@ -277,18 +286,20 @@ static NSEvent* MakeMouseEvent(NSEventType type,
   // This draws nice tight shadow, 'sinking' text into the background.
   [[title_ cell] setBackgroundStyle:NSBackgroundStyleRaised];
 
-  // Initialize the settings button.
-  NSImage* image = gfx::GetCachedImageWithName(@"balloon_wrench.pdf");
-  [settingsButton_ setDefaultImage:image];
-  [settingsButton_ setDefaultOpacity:0.6];
-  [settingsButton_ setHoverImage:image];
-  [settingsButton_ setHoverOpacity:0.9];
-  [settingsButton_ setPressedImage:image];
-  [settingsButton_ setPressedOpacity:1.0];
-  [[settingsButton_ cell] setHighlightsBy:NSNoCellMask];
-  [self checkMouseAndUpdateSettingsButtonVisibility];
-
   [self updateCloseButtonLayout];
+
+  // Iniitalize the minimize and restore buttons.
+  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+  [self initializeMinimizeRestoreButton:minimizeButton_
+      image:rb.GetNativeImageNamed(IDR_PANEL_MINIMIZE)
+      hoverImage:rb.GetNativeImageNamed(IDR_PANEL_MINIMIZE_H)
+      toolTip:l10n_util::GetNSStringWithFixup(IDS_PANEL_MINIMIZE_TOOLTIP)];
+  [self initializeMinimizeRestoreButton:restoreButton_
+      image: rb.GetNativeImageNamed(IDR_PANEL_RESTORE)
+      hoverImage:rb.GetNativeImageNamed(IDR_PANEL_RESTORE_H)
+      toolTip:l10n_util::GetNSStringWithFixup(IDS_PANEL_RESTORE_TOOLTIP)];
+  [restoreButton_ setHidden:YES];  // Only visible when panel is minimized.
+  [self updateMinimizeRestoreButtonLayout];
 
   // Set autoresizing behavior: glued to edges on left, top and right.
   [self setAutoresizingMask:(NSViewMinYMargin | NSViewWidthSizable)];
@@ -315,6 +326,20 @@ static NSEvent* MakeMouseEvent(NSEventType type,
            object:[self window]];
 }
 
+- (void)initializeMinimizeRestoreButton:(HoverImageButton*)button
+                                  image:(NSImage*)image
+                             hoverImage:(NSImage*)hoverImage
+                                toolTip:(NSString*)toolTip {
+  [button setDefaultImage:image];
+  [button setDefaultOpacity:1.0];
+  [button setHoverImage:hoverImage];
+  [button setHoverOpacity:1.0];
+  [button setPressedImage:hoverImage];
+  [button setPressedOpacity:1.0];
+  [button setToolTip:toolTip];
+  [[button cell] setHighlightsBy:NSNoCellMask];
+}
+
 - (void)setTitle:(NSString*)newTitle {
   [title_ setStringValue:newTitle];
   [self updateIconAndTitleLayout];
@@ -332,6 +357,24 @@ static NSEvent* MakeMouseEvent(NSEventType type,
 
 - (NSView*)icon {
   return icon_;
+}
+
+- (void)setMinimizeButtonVisibility:(BOOL)visible {
+  [minimizeButton_ setHidden:!visible];
+}
+
+- (void)setRestoreButtonVisibility:(BOOL)visible {
+  [restoreButton_ setHidden:!visible];
+}
+
+- (void)updateMinimizeRestoreButtonLayout {
+  NSRect bounds = [self bounds];
+  NSRect buttonFrame = [minimizeButton_ frame];
+  buttonFrame.origin.x =
+      NSWidth(bounds) - NSWidth(buttonFrame) - kButtonPadding;
+  buttonFrame.origin.y = (NSHeight(bounds) - NSHeight(buttonFrame)) / 2;
+  [minimizeButton_ setFrame:buttonFrame];
+  [restoreButton_ setFrame:buttonFrame];
 }
 
 - (void)updateCloseButtonLayout {
@@ -358,16 +401,20 @@ static NSEvent* MakeMouseEvent(NSEventType type,
 - (void)updateIconAndTitleLayout {
   NSRect closeButtonFrame = [closeButton_ frame];
   NSRect iconFrame = [icon_ frame];
+  // NSTextField for title_ is set to Layout:Truncate, LineBreaks:TruncateTail
+  // in Interface Builder so it is sized in a single-line mode.
   [title_ sizeToFit];
   NSRect titleFrame = [title_ frame];
-  NSRect settingsButtonFrame = [settingsButtonWrapper_ frame];
+  // Only one of minimize/restore button is visible at a time so just allow for
+  // the width of one of them.
+  NSRect minimizeRestoreButtonFrame = [minimizeButton_ frame];
   NSRect bounds = [self bounds];
 
   // Place the icon and title at the center of the titlebar.
   int iconWidthWithPadding = NSWidth(iconFrame) + kIconAndTextPadding;
   int titleWidth = NSWidth(titleFrame);
   int availableWidth = NSWidth(bounds) - kButtonPadding * 4 -
-      NSWidth(closeButtonFrame) - NSWidth(settingsButtonFrame);
+      NSWidth(closeButtonFrame) - NSWidth(minimizeRestoreButtonFrame);
   if (iconWidthWithPadding + titleWidth > availableWidth)
     titleWidth = availableWidth - iconWidthWithPadding;
   int startX = kButtonPadding * 2 + NSWidth(closeButtonFrame) +
@@ -403,6 +450,8 @@ static NSEvent* MakeMouseEvent(NSEventType type,
 }
 
 - (void)didChangeFrame:(NSNotification*)notification {
+  // Update buttons first because title layout depends on buttons layout.
+  [self updateMinimizeRestoreButtonLayout];
   [self updateIconAndTitleLayout];
 }
 
@@ -412,15 +461,12 @@ static NSEvent* MakeMouseEvent(NSEventType type,
 
 - (void)didChangeMainWindow:(NSNotification*)notification {
   [self setNeedsDisplay:YES];
-  [self checkMouseAndUpdateSettingsButtonVisibility];
 }
 
 - (void)mouseDown:(NSEvent*)event {
-  if ([controller_ isDraggable]) {
-    dragState_ = PANEL_DRAG_CAN_START;
-    dragStartLocation_ =
-        [[self window] convertBaseToScreen:[event locationInWindow]];
-  }
+  dragState_ = PANEL_DRAG_CAN_START;
+  dragStartLocation_ =
+      [[self window] convertBaseToScreen:[event locationInWindow]];
 }
 
 - (void)mouseUp:(NSEvent*)event {
@@ -509,6 +555,7 @@ static NSEvent* MakeMouseEvent(NSEventType type,
   if (dragState_ == PANEL_DRAG_IN_PROGRESS)
     [controller_ endDrag:cancelled];
   dragState_ = PANEL_DRAG_SUPPRESSED;
+  dragStartLocation_ = NSZeroPoint;
 }
 
 - (void)drag:(NSPoint)mouseLocation {
@@ -577,14 +624,6 @@ static NSEvent* MakeMouseEvent(NSEventType type,
   }
 }
 
-- (int)iconOnlyWidthInScreenCoordinates {
-  int width = kIconAndTextPadding * 2;
-  if (!icon_)
-    return width;
-
-  return width + NSWidth([self convertRect:[icon_ frame] toView:nil]);
-}
-
 // (Private/TestingAPI)
 - (PanelWindowControllerCocoa*)controller {
   return controller_;
@@ -629,19 +668,16 @@ static NSEvent* MakeMouseEvent(NSEventType type,
   [self endDrag:NO];
 }
 
-- (void)updateSettingsButtonVisibility:(BOOL)mouseOverWindow {
-  // The settings button is visible if the panel is main window or the mouse is
-  // over it.
-  BOOL shouldShowSettingsButton =
-      mouseOverWindow || [[self window] isMainWindow];
-  [[settingsButtonWrapper_ animator]
-      setAlphaValue:shouldShowSettingsButton ? 1.0 : 0.0];
+- (NSButton*)closeButton {
+  return closeButton_;
 }
 
-- (void)checkMouseAndUpdateSettingsButtonVisibility {
-  BOOL mouseOverWindow = NSPointInRect([NSEvent mouseLocation],
-                                       [[self window] frame]);
-  [self updateSettingsButtonVisibility:mouseOverWindow];
+- (NSButton*)minimizeButton {
+  return minimizeButton_;
+}
+
+- (NSButton*)restoreButton {
+  return restoreButton_;
 }
 
 @end

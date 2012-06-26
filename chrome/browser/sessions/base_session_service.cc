@@ -73,7 +73,6 @@ BaseSessionService::BaseSessionService(SessionType type,
                                        Profile* profile,
                                        const FilePath& path)
     : profile_(profile),
-      path_(path),
       ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)),
       pending_reset_(false),
       commands_since_reset_(0),
@@ -85,8 +84,7 @@ BaseSessionService::BaseSessionService(SessionType type,
     save_post_data_ =
         !command_line->HasSwitch(switches::kDisableRestoreSessionState);
   }
-  backend_ = new SessionBackend(type,
-      profile_ ? profile_->GetPath() : path_);
+  backend_ = new SessionBackend(type, profile_ ? profile_->GetPath() : path);
   DCHECK(backend_.get());
 
   RunTaskOnBackendThread(FROM_HERE,
@@ -189,7 +187,10 @@ SessionCommand* BaseSessionService::CreateUpdateTabNavigationCommand(
           entry.GetReferrer().url.spec() : std::string());
   pickle.WriteInt(entry.GetReferrer().policy);
 
-  // Adding more data? Be sure and update TabRestoreService too.
+  WriteStringToPickle(pickle, &bytes_written, max_state_size,
+      entry.GetOriginalRequestURL().is_valid() ?
+          entry.GetOriginalRequestURL().spec() : std::string());
+
   return new SessionCommand(command_id, pickle);
 }
 
@@ -268,6 +269,12 @@ bool BaseSessionService::RestoreUpdateTabNavigationCommand(
     navigation->referrer_ = content::Referrer(
         referrer_spec.empty() ? GURL() : GURL(referrer_spec),
         policy);
+
+    // If the original URL can't be found, leave it empty.
+    std::string url_spec;
+    if (!pickle->ReadString(&iterator, &url_spec))
+      url_spec = std::string();
+    navigation->set_original_request_url(GURL(url_spec));
   }
 
   navigation->virtual_url_ = GURL(url_spec);

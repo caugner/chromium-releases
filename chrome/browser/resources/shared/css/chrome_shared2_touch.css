@@ -8,10 +8,38 @@
 
 <include src="chrome_shared2.css">
 
-html input[type='search'] {
-  font-size: 1.1em;
+/* TODO(kevers): Add [type='input'] and [type='password']. */
+input[type='search'] {
+  padding-bottom: 6px;
+  padding-top: 6px;
 }
 
-input[type='search']::-webkit-search-cancel-button {
-  -webkit-transform: scale(1.5);
+/* Margins are not touchable.  Use padding on the inner label instead to
+  increase the size of the touch target. */
+.checkbox,
+.radio {
+ margin: 0;
+}
+
+.checkbox label,
+.radio label {
+  padding-bottom: 7px;
+  padding-top: 7px;
+}
+
+li > button.link-button {
+  padding-bottom: 8px;
+  padding-top: 8px;
+}
+
+button:not(.custom-appearance):not(.link-button),
+input[type=button]:not(.custom-appearance),
+input[type=submit]:not(.custom-appearance),
+select {
+  margin-bottom: 6px;
+  margin-top: 6px;
+}
+
+html[touch-optimized] .tree-item > .tree-row {
+  padding: 4px 3px;
 }

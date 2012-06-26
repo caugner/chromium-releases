@@ -10,13 +10,25 @@
 #include <set>
 
 #include "base/command_line.h"
+#include "base/utf_string_conversions.h"
+#include "base/win/metro.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/search_engines/template_url.h"
+#include "chrome/browser/search_engines/template_url_service.h"
+#include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/toolbar/wrench_menu_model.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
+#include "chrome/browser/ui/views/frame/system_menu_model.h"
 #include "chrome/browser/ui/views/frame/system_menu_model_delegate.h"
+#include "chrome/browser/ui/views/tabs/tab_strip.h"
+#include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "content/public/browser/browser_accessibility_state.h"
+#include "content/public/browser/page_navigator.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/common/page_transition_types.h"
+#include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/models/simple_menu_model.h"
@@ -27,6 +39,7 @@
 #include "ui/views/widget/native_widget_win.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/non_client_view.h"
+#include "webkit/glue/window_open_disposition.h"
 
 #pragma comment(lib, "dwmapi.lib")
 
@@ -38,6 +51,10 @@ static const int kTabDragWindowAlpha = 200;
 static const int kDWMFrameTopOffset = 3;
 // If not -1, windows are shown with this state.
 static int explicit_show_state = -1;
+
+using content::OpenURLParams;
+using content::Referrer;
+using content::WebContents;
 
 ///////////////////////////////////////////////////////////////////////////////
 // BrowserFrameWin, public:
@@ -163,8 +180,7 @@ const views::NativeWidget* BrowserFrameWin::AsNativeWidget() const {
 }
 
 void BrowserFrameWin::InitSystemContextMenu() {
-  system_menu_contents_.reset(new views::SystemMenuModel(
-      system_menu_delegate_.get()));
+  system_menu_contents_.reset(new SystemMenuModel(system_menu_delegate_.get()));
   // We add the menu items in reverse order so that insertion_index never needs
   // to change.
   if (browser_view_->IsBrowserTypeNormal())
@@ -190,6 +206,23 @@ int BrowserFrameWin::GetMinimizeButtonOffset() const {
 
 void BrowserFrameWin::TabStripDisplayModeChanged() {
   UpdateDWMFrame();
+}
+
+LRESULT BrowserFrameWin::OnWndProc(UINT message,
+                                   WPARAM w_param,
+                                   LPARAM l_param) {
+  static const UINT metro_navigation_search_message =
+      RegisterWindowMessage(chrome::kMetroNavigationAndSearchMessage);
+
+  static const UINT metro_get_current_tab_info_message =
+      RegisterWindowMessage(chrome::kMetroGetCurrentTabInfoMessage);
+
+  if (message == metro_navigation_search_message) {
+    HandleMetroNavSearchRequest(w_param, l_param);
+  } else if (message == metro_get_current_tab_info_message) {
+    GetMetroCurrentTabInfo(w_param);
+  }
+  return views::NativeWidgetWin::OnWndProc(message, w_param, l_param);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -284,6 +317,76 @@ void BrowserFrameWin::AddFrameToggleItems() {
                                    L"Toggle Frame Type");
   }
 }
+
+void BrowserFrameWin::HandleMetroNavSearchRequest(WPARAM w_param,
+                                                  LPARAM l_param) {
+  if (!base::win::GetMetroModule()) {
+    NOTREACHED() << "Received unexpected metro navigation request";
+    return;
+  }
+
+  if (!w_param && !l_param) {
+    NOTREACHED() << "Invalid metro request parameters";
+    return;
+  }
+
+  Browser* browser = browser_view()->browser();
+  DCHECK(browser);
+
+  GURL request_url;
+
+  if (w_param) {
+    const wchar_t* url = reinterpret_cast<const wchar_t*>(w_param);
+    request_url = GURL(url);
+  } else if (l_param) {
+    const wchar_t* search_string =
+        reinterpret_cast<const wchar_t*>(l_param);
+    const TemplateURL* default_provider =
+        TemplateURLServiceFactory::GetForProfile(browser->profile())->
+        GetDefaultSearchProvider();
+    if (default_provider) {
+      const TemplateURLRef& search_url = default_provider->url_ref();
+      DCHECK(search_url.SupportsReplacement());
+      request_url = GURL(search_url.ReplaceSearchTerms(search_string,
+                            TemplateURLRef::NO_SUGGESTIONS_AVAILABLE,
+                            string16()));
+    }
+  }
+  if (request_url.is_valid()) {
+    browser->OpenURL(OpenURLParams(request_url, Referrer(), NEW_FOREGROUND_TAB,
+                                   content::PAGE_TRANSITION_TYPED, false));
+  }
+}
+
+void BrowserFrameWin::GetMetroCurrentTabInfo(WPARAM w_param) {
+  if (!base::win::GetMetroModule()) {
+    NOTREACHED() << "Received unexpected metro request";
+    return;
+  }
+
+  if (!w_param) {
+    NOTREACHED() << "Invalid metro request parameter";
+    return;
+  }
+
+  base::win::CurrentTabInfo* current_tab_info =
+      reinterpret_cast<base::win::CurrentTabInfo*>(w_param);
+
+  Browser* browser = browser_view()->browser();
+  DCHECK(browser);
+
+  // We allocate memory for the title and url via LocalAlloc. The caller has to
+  // free the memory via LocalFree.
+  current_tab_info->title = base::win::LocalAllocAndCopyString(
+      browser->GetWindowTitleForCurrentTab());
+
+  WebContents* current_tab = browser->GetSelectedWebContents();
+  DCHECK(current_tab);
+
+  current_tab_info->url = base::win::LocalAllocAndCopyString(
+      UTF8ToWide(current_tab->GetURL().spec()));
+}
+
 
 ////////////////////////////////////////////////////////////////////////////////
 // BrowserFrame, public:

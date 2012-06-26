@@ -13,15 +13,15 @@
 #include "chrome/browser/password_manager/password_store_change.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/glue/password_model_associator.h"
-#include "chrome/browser/sync/internal_api/change_record.h"
-#include "chrome/browser/sync/internal_api/read_node.h"
-#include "chrome/browser/sync/internal_api/write_node.h"
-#include "chrome/browser/sync/internal_api/write_transaction.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
+#include "sync/internal_api/change_record.h"
+#include "sync/internal_api/read_node.h"
+#include "sync/internal_api/write_node.h"
+#include "sync/internal_api/write_transaction.h"
 #include "sync/protocol/password_specifics.pb.h"
 #include "webkit/forms/password_form.h"
 
@@ -66,7 +66,8 @@ void PasswordChangeProcessor::Observe(
   sync_api::WriteTransaction trans(FROM_HERE, share_handle());
 
   sync_api::ReadNode password_root(&trans);
-  if (!password_root.InitByTagLookup(kPasswordTag)) {
+  if (password_root.InitByTagLookup(kPasswordTag) !=
+          sync_api::BaseNode::INIT_OK) {
     error_handler()->OnUnrecoverableError(FROM_HERE,
         "Server did not create the top-level password node. "
         "We might be running against an out-of-date server.");
@@ -103,7 +104,8 @@ void PasswordChangeProcessor::Observe(
                 "Unable to create or retrieve password node");
             return;
           }
-          if (!sync_node.InitByIdLookup(sync_id)) {
+          if (sync_node.InitByIdLookup(sync_id) !=
+                  sync_api::BaseNode::INIT_OK) {
             error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
                 "Unable to create or retrieve password node");
             return;
@@ -120,7 +122,8 @@ void PasswordChangeProcessor::Observe(
               "Unexpected notification for: ");
           return;
         } else {
-          if (!sync_node.InitByIdLookup(sync_id)) {
+          if (sync_node.InitByIdLookup(sync_id) !=
+                  sync_api::BaseNode::INIT_OK) {
             error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
                 "Password node lookup failed.");
             return;
@@ -140,7 +143,8 @@ void PasswordChangeProcessor::Observe(
           LOG(WARNING) << "Trying to delete nonexistent password sync node!";
           return;
         } else {
-          if (!sync_node.InitByIdLookup(sync_id)) {
+          if (sync_node.InitByIdLookup(sync_id) !=
+                  sync_api::BaseNode::INIT_OK) {
             error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
                 "Password node lookup failed.");
             return;
@@ -162,7 +166,8 @@ void PasswordChangeProcessor::ApplyChangesFromSyncModel(
     return;
 
   sync_api::ReadNode password_root(trans);
-  if (!password_root.InitByTagLookup(kPasswordTag)) {
+  if (password_root.InitByTagLookup(kPasswordTag) !=
+          sync_api::BaseNode::INIT_OK) {
     error_handler()->OnUnrecoverableError(FROM_HERE,
         "Password root node lookup failed.");
     return;
@@ -189,7 +194,7 @@ void PasswordChangeProcessor::ApplyChangesFromSyncModel(
     }
 
     sync_api::ReadNode sync_node(trans);
-    if (!sync_node.InitByIdLookup(it->id)) {
+    if (sync_node.InitByIdLookup(it->id) != sync_api::BaseNode::INIT_OK) {
       error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
           "Password node lookup failed.");
       return;
@@ -221,9 +226,11 @@ void PasswordChangeProcessor::CommitChangesFromSyncModel() {
     return;
   ScopedStopObserving<PasswordChangeProcessor> stop_observing(this);
 
-  if (!model_associator_->WriteToPasswordStore(&new_passwords_,
-                                               &updated_passwords_,
-                                               &deleted_passwords_)) {
+  SyncError error = model_associator_->WriteToPasswordStore(
+      &new_passwords_,
+      &updated_passwords_,
+      &deleted_passwords_);
+  if (error.IsSet()) {
     error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
         "Error writing passwords");
     return;

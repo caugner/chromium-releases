@@ -7,10 +7,10 @@
 #include "base/message_loop.h"
 #include "base/tracked_objects.h"
 #include "chrome/browser/sync/glue/data_type_manager_mock.h"
-#include "chrome/browser/sync/internal_api/write_transaction.h"
 #include "chrome/browser/sync/profile_sync_service_mock.h"
-#include "chrome/browser/sync/test/engine/test_user_share.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "sync/internal_api/test_user_share.h"
+#include "sync/internal_api/write_transaction.h"
 #include "sync/protocol/sync.pb.h"
 #include "sync/sessions/session_state.h"
 #include "sync/syncable/model_type_test_util.h"
@@ -47,7 +47,8 @@ class SyncBackendMigratorTest : public testing::Test {
 
     migrator_.reset(
         new BackendMigrator(
-            "Profile0", test_user_share_.user_share(), service(), manager()));
+            "Profile0", test_user_share_.user_share(), service(), manager(),
+            base::Closure()));
     SetUnsyncedTypes(syncable::ModelTypeSet());
   }
 
@@ -76,20 +77,14 @@ class SyncBackendMigratorTest : public testing::Test {
                          syncable::ModelTypeSet requested_types) {
     if (status == DataTypeManager::OK) {
       DataTypeManager::ConfigureResult result(status, requested_types);
-      content::NotificationService::current()->Notify(
-          chrome::NOTIFICATION_SYNC_CONFIGURE_DONE,
-          content::Source<DataTypeManager>(&manager_),
-          content::Details<const DataTypeManager::ConfigureResult>(&result));
+      migrator_->OnConfigureDone(result);
     } else {
       std::list<SyncError> errors;
       DataTypeManager::ConfigureResult result(
           status,
           requested_types,
           errors);
-      content::NotificationService::current()->Notify(
-          chrome::NOTIFICATION_SYNC_CONFIGURE_DONE,
-          content::Source<DataTypeManager>(&manager_),
-          content::Details<const DataTypeManager::ConfigureResult>(&result));
+      migrator_->OnConfigureDone(result);
     }
     message_loop_.RunAllPending();
   }

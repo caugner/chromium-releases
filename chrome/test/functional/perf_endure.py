@@ -47,17 +47,20 @@ class ChromeEndureBaseTest(perf.BasePerfTest):
                  self._get_perf_stats_interval)
 
     # Set up a remote inspector client associated with tab 0.
+    logging.info('Setting up connection to remote inspector...')
     self._remote_inspector_client = (
         remote_inspector_client.RemoteInspectorClient())
+    logging.info('Connection to remote inspector set up successfully.')
 
-    self._dom_node_count_results = []
-    self._event_listener_count_results = []
-    self._browser_process_private_mem_results = []
-    self._tab_process_private_mem_results = []
-    self._v8_mem_used_results = []
     self._test_start_time = 0
     self._num_errors = 0
-    self._iteration_num = 0
+    self._events_to_output = []
+
+  def tearDown(self):
+    logging.info('Terminating connection to remote inspector...')
+    self._remote_inspector_client.Stop()
+    logging.info('Connection to remote inspector terminated.')
+    perf.BasePerfTest.tearDown(self)  # Must be done at end of this function.
 
   def ExtraChromeFlags(self):
     """Ensures Chrome is launched with custom flags.
@@ -70,9 +73,28 @@ class ChromeEndureBaseTest(perf.BasePerfTest):
     return (perf.BasePerfTest.ExtraChromeFlags(self) +
             ['--remote-debugging-port=9222'])
 
-  def _RunControlTest(self, webapp_name, tab_title_substring, test_description,
-                      do_scenario):
-    """The main test harness function to run a general control test.
+  def _OnTimelineEvent(self, event_info):
+    """Invoked by the Remote Inspector Client when a timeline event occurs.
+
+    Args:
+      event_info: A dictionary containing raw information associated with a
+         timeline event received from Chrome's remote inspector.  Refer to
+         chrome/src/third_party/WebKit/Source/WebCore/inspector/Inspector.json
+         for the format of this dictionary.
+    """
+    elapsed_time = int(round(time.time() - self._test_start_time))
+
+    if event_info['type'] == 'GCEvent':
+      self._events_to_output.append({
+        'type': 'GarbageCollection',
+        'time': elapsed_time,
+        'data':
+            {'collected_bytes': event_info['data']['usedHeapSizeDelta']},
+      })
+
+  def _RunEndureTest(self, webapp_name, tab_title_substring, test_description,
+                     do_scenario):
+    """The main test harness function to run a general Chrome Endure test.
 
     After a test has performed any setup work and has navigated to the proper
     starting webpage, this function should be invoked to run the endurance test.
@@ -94,7 +116,11 @@ class ChromeEndureBaseTest(perf.BasePerfTest):
     last_perf_stats_time = time.time()
     self._GetPerformanceStats(
         webapp_name, test_description, tab_title_substring)
-    self._iteration_num = 0
+    self._iteration_num = 0  # Available to |do_scenario| if needed.
+
+    self._remote_inspector_client.StartTimelineEventMonitoring(
+        self._OnTimelineEvent)
+
     while time.time() - self._test_start_time < self._test_length_sec:
       self._iteration_num += 1
 
@@ -116,6 +142,7 @@ class ChromeEndureBaseTest(perf.BasePerfTest):
 
       do_scenario()
 
+    self._remote_inspector_client.StopTimelineEventMonitoring()
     self._GetPerformanceStats(
         webapp_name, test_description, tab_title_substring)
 
@@ -186,56 +213,70 @@ class ChromeEndureBaseTest(perf.BasePerfTest):
           the tab to use, for identifying the appropriate tab.
     """
     logging.info('Gathering performance stats...')
-    elapsed_time = time.time() - self._test_start_time
-    elapsed_time = int(round(elapsed_time))
+    elapsed_time = int(round(time.time() - self._test_start_time))
 
     memory_counts = self._remote_inspector_client.GetMemoryObjectCounts()
 
+    # DOM node count.
     dom_node_count = memory_counts['DOMNodeCount']
-    logging.info('  Total DOM node count: %d nodes' % dom_node_count)
-    self._dom_node_count_results.append((elapsed_time, dom_node_count))
-
-    event_listener_count = memory_counts['EventListenerCount']
-    logging.info('  Event listener count: %d listeners' % event_listener_count)
-    self._event_listener_count_results.append((elapsed_time,
-                                               event_listener_count))
-
-    proc_info = self._GetProcessInfo(tab_title_substring)
-    logging.info('  Browser process private memory: %d KB' %
-                 proc_info['browser_private_mem'])
-    self._browser_process_private_mem_results.append(
-        (elapsed_time, proc_info['browser_private_mem']))
-    logging.info('  Tab process private memory: %d KB' %
-                 proc_info['tab_private_mem'])
-    self._tab_process_private_mem_results.append(
-        (elapsed_time, proc_info['tab_private_mem']))
-
-    v8_info = self.GetV8HeapStats()  # First window, first tab.
-    v8_mem_used = v8_info['v8_memory_used'] / 1024.0  # Convert to KB.
-    logging.info('  V8 memory used: %f KB' % v8_mem_used)
-    self._v8_mem_used_results.append((elapsed_time, v8_mem_used))
-
-    # Output the results seen so far, to be graphed.
     self._OutputPerfGraphValue(
-        'TotalDOMNodeCount', self._dom_node_count_results, 'nodes',
+        'TotalDOMNodeCount', [(elapsed_time, dom_node_count)], 'nodes',
         graph_name='%s%s-Nodes-DOM' % (webapp_name, test_description),
         units_x='seconds')
+
+    # Event listener count.
+    event_listener_count = memory_counts['EventListenerCount']
     self._OutputPerfGraphValue(
-        'EventListenerCount', self._event_listener_count_results, 'listeners',
+        'EventListenerCount', [(elapsed_time, event_listener_count)],
+        'listeners',
         graph_name='%s%s-EventListeners' % (webapp_name, test_description),
         units_x='seconds')
+
+    # Browser process private memory.
+    proc_info = self._GetProcessInfo(tab_title_substring)
     self._OutputPerfGraphValue(
-        'BrowserPrivateMemory', self._browser_process_private_mem_results, 'KB',
+        'BrowserPrivateMemory',
+        [(elapsed_time, proc_info['browser_private_mem'])], 'KB',
         graph_name='%s%s-BrowserMem-Private' % (webapp_name, test_description),
         units_x='seconds')
+
+    # Tab process private memory.
     self._OutputPerfGraphValue(
-        'TabPrivateMemory', self._tab_process_private_mem_results, 'KB',
+        'TabPrivateMemory',
+        [(elapsed_time, proc_info['tab_private_mem'])], 'KB',
         graph_name='%s%s-TabMem-Private' % (webapp_name, test_description),
         units_x='seconds')
+
+    # V8 memory used.
+    v8_info = self.GetV8HeapStats()  # First window, first tab.
+    v8_mem_used = v8_info['v8_memory_used'] / 1024.0  # Convert to KB.
     self._OutputPerfGraphValue(
-        'V8MemoryUsed', self._v8_mem_used_results, 'KB',
+        'V8MemoryUsed', [(elapsed_time, v8_mem_used)], 'KB',
         graph_name='%s%s-V8MemUsed' % (webapp_name, test_description),
         units_x='seconds')
+
+    logging.info('  Total DOM node count: %d nodes' % dom_node_count)
+    logging.info('  Event listener count: %d listeners' % event_listener_count)
+    logging.info('  Browser process private memory: %d KB' %
+                 proc_info['browser_private_mem'])
+    logging.info('  Tab process private memory: %d KB' %
+                 proc_info['tab_private_mem'])
+    logging.info('  V8 memory used: %f KB' % v8_mem_used)
+
+    # Output any new timeline events that have occurred.
+    if self._events_to_output:
+      logging.info('Logging timeline events...')
+      event_type_to_value_list = {}
+      for event_info in self._events_to_output:
+        if not event_info['type'] in event_type_to_value_list:
+          event_type_to_value_list[event_info['type']] = []
+        event_type_to_value_list[event_info['type']].append(
+            (event_info['time'], event_info['data']))
+      for event_type, value_list in event_type_to_value_list.iteritems():
+        self._OutputEventGraphValue(event_type, value_list)
+      self._events_to_output = []
+    else:
+      logging.info('No new timeline events to log.')
 
   def _GetElement(self, find_by, value):
     """Gets a WebDriver element object from the webpage DOM.
@@ -316,8 +357,8 @@ class ChromeEndureControlTest(ChromeEndureBaseTest):
       # Just sleep.  Javascript in the webpage itself does the work.
       time.sleep(5)
 
-    self._RunControlTest(self._webapp_name, self._tab_title_substring,
-                         test_description, scenario)
+    self._RunEndureTest(self._webapp_name, self._tab_title_substring,
+                        test_description, scenario)
 
   def testControlAttachDetachDOMTreeWebDriver(self):
     """Use WebDriver to attach and detach a DOM tree from a basic document."""
@@ -342,8 +383,8 @@ class ChromeEndureControlTest(ChromeEndureBaseTest):
       self._ClickElementByXpath(driver, wait, 'id("detach")')
       time.sleep(0.5)
 
-    self._RunControlTest(self._webapp_name, self._tab_title_substring,
-                         test_description, lambda: scenario(driver, wait))
+    self._RunEndureTest(self._webapp_name, self._tab_title_substring,
+                        test_description, lambda: scenario(driver, wait))
 
 
 class ChromeEndureGmailTest(ChromeEndureBaseTest):
@@ -419,6 +460,9 @@ class ChromeEndureGmailTest(ChromeEndureBaseTest):
                                     action_description):
     """Clicks a DOM element and records the latency associated with that action.
 
+    To account for scenario warm-up time, latency values during the first
+    minute of test execution are not recorded.
+
     Args:
       element: A selenium.webdriver.remote.WebElement object to click.
       test_description: A string description of what the test does, used for
@@ -436,12 +480,13 @@ class ChromeEndureGmailTest(ChromeEndureBaseTest):
     match = re.search(r'\[(\d+) ms\]', latency_dom_element.text)
     if match:
       latency = int(match.group(1))
-      result = [(self._iteration_num, latency)]
-      self._OutputPerfGraphValue(
-          '%sLatency' % action_description, result, 'msec',
-          graph_name='%s%s-%sLatency' % (self._webapp_name, test_description,
-                                         action_description),
-          units_x='iteration', standalone_graphing_only=True)
+      elapsed_time = int(round(time.time() - self._test_start_time))
+      if elapsed_time > 60:  # Ignore the first minute of latency measurements.
+        self._OutputPerfGraphValue(
+            '%sLatency' % action_description, [(elapsed_time, latency)], 'msec',
+            graph_name='%s%s-%sLatency' % (self._webapp_name, test_description,
+                                           action_description),
+            units_x='seconds')
     else:
       logging.warning('Could not identify latency value.')
 
@@ -482,8 +527,8 @@ class ChromeEndureGmailTest(ChromeEndureBaseTest):
       self._wait.until(lambda _: not self._GetElement(
                            self._driver.find_element_by_name, 'to'))
 
-    self._RunControlTest(self._webapp_name, self._tab_title_substring,
-                         test_description, scenario)
+    self._RunEndureTest(self._webapp_name, self._tab_title_substring,
+                        test_description, scenario)
 
   # TODO(dennisjeffrey): Remove this test once the Gmail team is done analyzing
   # the results after the test runs for a period of time.
@@ -524,11 +569,13 @@ class ChromeEndureGmailTest(ChromeEndureBaseTest):
       self._wait.until(lambda _: not self._GetElement(
                            self._driver.find_element_by_name, 'to'))
 
-      logging.debug('Sleeping 30 seconds.')
-      time.sleep(30)
+      # Sleep 2 minutes after every batch of 500 compose/discard iterations.
+      if self._iteration_num % 500 == 0:
+        logging.info('Sleeping 2 minutes.')
+        time.sleep(120)
 
-    self._RunControlTest(self._webapp_name, self._tab_title_substring,
-                         test_description, scenario)
+    self._RunEndureTest(self._webapp_name, self._tab_title_substring,
+                        test_description, scenario)
 
   def testGmailAlternateThreadlistConversation(self):
     """Alternates between threadlist view and conversation view.
@@ -569,8 +616,8 @@ class ChromeEndureGmailTest(ChromeEndureBaseTest):
               '//div[text()="Click here to "]'))
       time.sleep(1)
 
-    self._RunControlTest(self._webapp_name, self._tab_title_substring,
-                         test_description, scenario)
+    self._RunEndureTest(self._webapp_name, self._tab_title_substring,
+                        test_description, scenario)
 
   def testGmailAlternateTwoLabels(self):
     """Continuously alternates between two labels.
@@ -608,8 +655,8 @@ class ChromeEndureGmailTest(ChromeEndureBaseTest):
           msg='Timed out waiting for Inbox to appear.')
       time.sleep(1)
 
-    self._RunControlTest(self._webapp_name, self._tab_title_substring,
-                         test_description, scenario)
+    self._RunEndureTest(self._webapp_name, self._tab_title_substring,
+                        test_description, scenario)
 
   def testGmailExpandCollapseConversation(self):
     """Continuously expands/collapses all messages in a conversation.
@@ -659,8 +706,8 @@ class ChromeEndureGmailTest(ChromeEndureBaseTest):
               '[@style="display: none; "]'))
       time.sleep(1)
 
-    self._RunControlTest(self._webapp_name, self._tab_title_substring,
-                         test_description, scenario)
+    self._RunEndureTest(self._webapp_name, self._tab_title_substring,
+                        test_description, scenario)
 
 
 class ChromeEndureDocsTest(ChromeEndureBaseTest):
@@ -720,8 +767,8 @@ class ChromeEndureDocsTest(ChromeEndureBaseTest):
         self._num_errors += 1
       time.sleep(1)
 
-    self._RunControlTest(self._webapp_name, self._tab_title_substring,
-                         test_description, scenario)
+    self._RunEndureTest(self._webapp_name, self._tab_title_substring,
+                        test_description, scenario)
 
 
 class ChromeEndurePlusTest(ChromeEndureBaseTest):
@@ -779,8 +826,60 @@ class ChromeEndurePlusTest(ChromeEndureBaseTest):
         self._num_errors += 1
       time.sleep(1)
 
-    self._RunControlTest(self._webapp_name, self._tab_title_substring,
-                         test_description, scenario)
+    self._RunEndureTest(self._webapp_name, self._tab_title_substring,
+                        test_description, scenario)
+
+
+class IndexedDBOfflineTest(ChromeEndureBaseTest):
+  """Long-running performance tests for IndexedDB, modeling offline usage."""
+
+  _webapp_name = 'IndexedDBOffline'
+  _tab_title_substring = 'IndexedDB Offline'
+
+  def setUp(self):
+    ChromeEndureBaseTest.setUp(self)
+
+    url = self.GetHttpURLForDataPath('indexeddb', 'endure', 'app.html')
+    self.NavigateToURL(url)
+    loaded_tab_title = self.GetActiveTabTitle()
+    self.assertTrue(self._tab_title_substring in loaded_tab_title,
+                    msg='Loaded tab title does not contain "%s": "%s"' %
+                        (self._tab_title_substring, loaded_tab_title))
+
+    self._driver = self.NewWebDriver()
+    # Any call to wait.until() will raise an exception if the timeout is hit.
+    self._wait = WebDriverWait(self._driver, timeout=60)
+
+  def testOfflineOnline(self):
+    """Simulates user input while offline and sync while online.
+
+    This test alternates between a simulated "Offline" state (where user
+    input events are queued) and an "Online" state (where user input events
+    are dequeued, sync data is staged, and sync data is unstaged).
+    """
+    test_description = 'OnlineOfflineSync'
+
+    def scenario():
+      # Click the "Online" button and let simulated sync run for 1 second.
+      if not self._ClickElementByXpath(self._driver, self._wait,
+                                       'id("online")'):
+        self._num_errors += 1
+      if not self._WaitForElementByXpath(
+        self._driver, self._wait, 'id("state")[text()="online"]'):
+        self._num_errors += 1
+      time.sleep(1)
+
+      # Click the "Offline" button and let user input occur for 1 second.
+      if not self._ClickElementByXpath(self._driver, self._wait,
+                                       'id("offline")'):
+        self._num_errors += 1
+      if not self._WaitForElementByXpath(
+          self._driver, self._wait, 'id("state")[text()="offline"]'):
+        self._num_errors += 1
+      time.sleep(1)
+
+    self._RunEndureTest(self._webapp_name, self._tab_title_substring,
+                        test_description, scenario)
 
 
 if __name__ == '__main__':

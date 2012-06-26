@@ -69,7 +69,7 @@ class PDFBrowserTest : public InProcessBrowserTest,
     // to a smaller window and then expanding leads to slight anti-aliasing
     // differences of the text and the pixel comparison fails.
     gfx::Rect bounds(gfx::Rect(0, 0, kBrowserWidth, kBrowserHeight));
-    gfx::Rect screen_bounds = gfx::Screen::GetPrimaryMonitorBounds();
+    gfx::Rect screen_bounds = gfx::Screen::GetPrimaryMonitor().bounds();
     ASSERT_GT(screen_bounds.width(), kBrowserWidth);
     ASSERT_GT(screen_bounds.height(), kBrowserHeight);
     browser()->window()->SetBounds(bounds);
@@ -197,10 +197,8 @@ class PDFBrowserTest : public InProcessBrowserTest,
   scoped_ptr<net::TestServer> pdf_test_server_;
 };
 
-#if defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS) || defined(OS_MACOSX)
 // TODO(sanjeevr): http://crbug.com/79837
-#define MAYBE_Basic DISABLED_Basic
-#elif defined(OS_MACOSX)
 #define MAYBE_Basic DISABLED_Basic
 #else
 #define MAYBE_Basic Basic

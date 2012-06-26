@@ -8,6 +8,7 @@
 #include "base/file_path.h"
 #include "base/path_service.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/common/url_constants.h"
 #include "content/shell/shell_browser_main.h"
 #include "content/shell/shell_content_browser_client.h"
 #include "content/shell/shell_content_plugin_client.h"
@@ -24,12 +25,21 @@ ShellMainDelegate::ShellMainDelegate() {
 }
 
 ShellMainDelegate::~ShellMainDelegate() {
+#if defined(OS_ANDROID)
+  NOTREACHED();
+#endif
 }
 
 bool ShellMainDelegate::BasicStartupComplete(int* exit_code) {
 #if defined(OS_MACOSX)
   OverrideFrameworkBundlePath();
 #endif
+  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  std::string process_type =
+      command_line.GetSwitchValueASCII(switches::kProcessType);
+  content::SetContentClient(&content_client_);
+  InitializeShellContentClient(process_type);
+
   return false;
 }
 
@@ -37,14 +47,6 @@ void ShellMainDelegate::PreSandboxStartup() {
 #if defined(OS_MACOSX)
   OverrideChildProcessPath();
 #endif  // OS_MACOSX
-
-  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
-  std::string process_type =
-      command_line.GetSwitchValueASCII(switches::kProcessType);
-
-  content::SetContentClient(&content_client_);
-  InitializeShellContentClient(process_type);
-
   InitializeResourceBundle();
 }
 
@@ -97,7 +99,10 @@ void ShellMainDelegate::InitializeShellContentClient(
   if (process_type.empty()) {
     browser_client_.reset(new content::ShellContentBrowserClient);
     content::GetContentClient()->set_browser(browser_client_.get());
-  } else if (process_type == switches::kRendererProcess) {
+  }
+
+  if (process_type == switches::kRendererProcess ||
+      CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess)) {
     renderer_client_.reset(new content::ShellContentRendererClient);
     content::GetContentClient()->set_renderer(renderer_client_.get());
   } else if (process_type == switches::kPluginProcess) {
@@ -115,7 +120,14 @@ void ShellMainDelegate::InitializeResourceBundle() {
   pak_file = GetResourcesPakFilePath();
 #else
   FilePath pak_dir;
+
+#if defined(OS_ANDROID)
+  DCHECK(PathService::Get(base::DIR_ANDROID_APP_DATA, &pak_dir));
+  pak_dir = pak_dir.Append(FILE_PATH_LITERAL("paks"));
+#else
   PathService::Get(base::DIR_MODULE, &pak_dir);
+#endif
+
   pak_file = pak_dir.Append(FILE_PATH_LITERAL("content_shell.pak"));
 #endif
   ui::ResourceBundle::InitSharedInstanceWithPakFile(pak_file);

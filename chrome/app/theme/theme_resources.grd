@@ -51,12 +51,6 @@
       <include name="IDR_CONSTRAINED_TOP_RIGHT_CORNER_V" file="constrained_top_right_corner_v.png" type="BINDATA" />
       <include name="IDR_COOKIE_ICON" file="cookie.png" type="BINDATA" />
       <include name="IDR_COOKIE_STORAGE_ICON" file="cookie_storage.png" type="BINDATA" />
-      <if expr="pp_ifdef('_google_chrome')">
-        <include name="IDR_CUSTOM_PRODUCT_LOGO" file="google_chrome/alt_logo.gif" type="BINDATA" />
-      </if>
-      <if expr="not pp_ifdef('_google_chrome')">
-        <include name="IDR_CUSTOM_PRODUCT_LOGO" file="chromium/product_logo.png" type="BINDATA" />
-      </if>
       <include name="IDR_CWS_STAR_EMPTY" file="cws_star_empty.png" type="BINDATA" />
       <include name="IDR_CWS_STAR_FULL" file="cws_star_full.png" type="BINDATA" />
       <include name="IDR_CWS_STAR_HALF" file="cws_star_half.png" type="BINDATA" />
@@ -154,6 +148,7 @@
         <include name="IDR_LOCATION_BAR_KEYWORD_HINT_TAB" file="keyword_hint_tab_mac.png" type="BINDATA" />
       </if>
       <include name="IDR_MAXIMIZE_BUTTON_MASK" file="maximize_button_mask.png" type="BINDATA" />
+      <include name="IDR_MEDIA_STREAM_CAPTURE_LED" file="media_stream_capture_led.png" type="BINDATA" />
       <include name="IDR_MINIMIZE_BUTTON_MASK" file="minimize_button_mask.png" type="BINDATA" />
       <include name="IDR_NEWTAB_CHROME_WELCOME_PAGE_THUMBNAIL" file="ntp_welcome_thumb.png" type="BINDATA" />
       <include name="IDR_NEWTAB_MENU_MASK" file="ntp_menu_mask.png" type="BINDATA" />
@@ -182,14 +177,18 @@
       <include name="IDR_OMNIBOX_TTS" file="omnibox_tts.png" type="BINDATA" />
       <include name="IDR_OMNIBOX_TTS_DARK" file="omnibox_tts_dark.png" type="BINDATA" />
       <include name="IDR_OMNIBOX_TTS_SELECTED" file="omnibox_tts_selected.png" type="BINDATA" />
-      <include name="IDR_OPT_IN_BUTTON" file="opt_in_button.png" type="BINDATA" />
-      <include name="IDR_OPT_IN_BUTTON_P" file="opt_in_button_p.png" type="BINDATA" />
       <include name="IDR_OTR_ICON" file="otr_icon.png" type="BINDATA" />
       <include name="IDR_PAGEINFO_BAD" file="pageinfo_bad.png" type="BINDATA" />
       <include name="IDR_PAGEINFO_GOOD" file="pageinfo_good.png" type="BINDATA" />
       <include name="IDR_PAGEINFO_INFO" file="pageinfo_info.png" type="BINDATA" />
       <include name="IDR_PAGEINFO_WARNING_MAJOR" file="pageinfo_warning_major.png" type="BINDATA" />
       <include name="IDR_PAGEINFO_WARNING_MINOR" file="pageinfo_warning_minor.png" type="BINDATA" />
+      <include name="IDR_PANEL_CLOSE" file="panel_close.png" type="BINDATA" />
+      <include name="IDR_PANEL_CLOSE_H" file="panel_close_h.png" type="BINDATA" />
+      <include name="IDR_PANEL_MINIMIZE" file="panel_minimize.png" type="BINDATA" />
+      <include name="IDR_PANEL_MINIMIZE_H" file="panel_minimize_h.png" type="BINDATA" />
+      <include name="IDR_PANEL_RESTORE" file="panel_restore.png" type="BINDATA" />
+      <include name="IDR_PANEL_RESTORE_H" file="panel_restore_h.png" type="BINDATA" />
       <include name="IDR_PRERENDER" file="prerender_succeed_icon.png" type="BINDATA" />
       <include name="IDR_PRERENDER_FAIL_ICON" file="prerender_fail_icon.png" type="BINDATA"/>
       <include name="IDR_PRERENDER_SUCCEED_ICON" file="prerender_succeed_icon.png" type="BINDATA"/>
@@ -325,7 +324,13 @@
       <include name="IDR_THEME_FRAME_OVERLAY_INACTIVE" file="notused.png" type="BINDATA" />
       <include name="IDR_THEME_NTP_ATTRIBUTION" file="notused.png" type="BINDATA" />
       <include name="IDR_THEME_NTP_BACKGROUND" file="ntp_background.png" type="BINDATA" />
-      <include name="IDR_THEME_TAB_BACKGROUND_INCOGNITO" file="theme_tab_background_incognito.png" type="BINDATA" />
+      <!-- Ash has a special gray background. -->
+      <if expr="pp_ifdef('use_ash')">
+        <include name="IDR_THEME_TAB_BACKGROUND_INCOGNITO" file="ash/theme_tab_background_incognito.png" type="BINDATA" />
+      </if>
+      <if expr="not pp_ifdef('use_ash')">
+        <include name="IDR_THEME_TAB_BACKGROUND_INCOGNITO" file="theme_tab_background_incognito.png" type="BINDATA" />
+      </if>
       <include name="IDR_THEME_TAB_BACKGROUND_V" file="theme_tab_background_glass.png" type="BINDATA" />
       <include name="IDR_THEME_WINDOW_CONTROL_BACKGROUND" file="notused.png" type="BINDATA" />
       <include name="IDR_THROBBER_LIGHT" file="throbber_light.png" type="BINDATA" />
@@ -352,6 +357,12 @@
       <include name="IDR_CONTROLLED_SETTING_RECOMMENDED_GRAY" file="controlled_setting_recommended_gray.png" type="BINDATA" />
       <include name="IDR_CONTROLLED_SETTING_RECOMMENDED" file="controlled_setting_recommended.png" type="BINDATA" />
       <include name="IDR_CONTROLLED_SETTING_RECOMMENDED_LARGE" file="controlled_setting_recommended_large.png" type="BINDATA" />
+      <if expr="not is_macosx">
+        <include name="IDR_MANAGED_MODE_AVATAR" file="managed_mode_avatar.png" type="BINDATA" />
+      </if>
+      <if expr="is_macosx">
+        <include name="IDR_MANAGED_MODE_AVATAR" file="managed_mode_avatar_mac.png" type="BINDATA" />
+      </if>
       <if expr="pp_ifdef('_google_chrome')">
         <include name="IDR_WEBSTORE_ICON" file="google_chrome/webstore_icon.png" type="BINDATA" />
         <include name="IDR_WEBSTORE_ICON_16" file="google_chrome/webstore_icon_16.png" type="BINDATA" />

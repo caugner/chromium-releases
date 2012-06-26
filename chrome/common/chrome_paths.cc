@@ -71,6 +71,18 @@ const FilePath::CharType kGTalkPluginFileName[] =
     FILE_PATH_LITERAL("pepper/libppgoogletalk.so");
 
 #endif  // defined(OS_POSIX) && !defined(OS_MACOSX)
+
+#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+// The path to the external extension <id>.json files.
+// /usr/share seems like a good choice, see: http://www.pathname.com/fhs/
+const char kFilepathSinglePrefExtensions[] =
+#if defined(GOOGLE_CHROME_BUILD)
+    FILE_PATH_LITERAL("/usr/share/google-chrome/extensions");
+#else
+    FILE_PATH_LITERAL("/usr/share/chromium/extensions");
+#endif  // defined(GOOGLE_CHROME_BUILD)
+#endif  // defined(OS_LINUX) && !defined(OS_CHROMEOS)
+
 }  // namespace
 
 namespace chrome {
@@ -144,7 +156,7 @@ bool PathProvider(int key, FilePath* result) {
       create_dir = true;
       break;
     case chrome::DIR_DEFAULT_DOWNLOADS_SAFE:
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_LINUX)
       if (!GetUserDownloadsDirectorySafe(&cur))
         return false;
       break;
@@ -185,11 +197,6 @@ bool PathProvider(int key, FilePath* result) {
         return false;
       cur = cur.Append(FILE_PATH_LITERAL("resources"));
 #endif
-      break;
-    case chrome::DIR_SHARED_RESOURCES:
-      if (!PathService::Get(chrome::DIR_RESOURCES, &cur))
-        return false;
-      cur = cur.Append(FILE_PATH_LITERAL("shared"));
       break;
     case chrome::DIR_INSPECTOR:
       if (!PathService::Get(chrome::DIR_RESOURCES, &cur))
@@ -366,6 +373,12 @@ bool PathProvider(int key, FilePath* result) {
       break;
     }
 #endif
+#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+    case chrome::DIR_STANDALONE_EXTERNAL_EXTENSIONS: {
+      cur = FilePath(FILE_PATH_LITERAL(kFilepathSinglePrefExtensions));
+      break;
+    }
+#endif
     case chrome::DIR_EXTERNAL_EXTENSIONS:
 #if defined(OS_MACOSX)
       if (!chrome::GetGlobalApplicationSupportDirectory(&cur))
@@ -383,21 +396,6 @@ bool PathProvider(int key, FilePath* result) {
       create_dir = true;
 #endif
       break;
-
-#if defined(OS_MACOSX)
-    case DIR_DEPRECATED_EXTERNAL_EXTENSIONS:
-      // TODO(skerner): Reading external extensions from a file inside the
-      // app budle causes several problems.  Once users have a chance to
-      // migrate, remove this path.  crbug/67203
-      if (!PathService::Get(base::DIR_EXE, &cur))
-        return false;
-
-      cur = cur.DirName();
-      cur = cur.Append(FILE_PATH_LITERAL("Extensions"));
-      create_dir = false;
-
-      break;
-#endif
 
     case chrome::DIR_DEFAULT_APPS:
 #if defined(OS_MACOSX)

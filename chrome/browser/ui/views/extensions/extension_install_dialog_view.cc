@@ -14,8 +14,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/dialog_style.h"
-#include "chrome/browser/ui/views/window.h"
 #include "chrome/common/extensions/extension.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -269,8 +267,8 @@ ExtensionInstallDialogView::ExtensionInstallDialogView(
     if (is_bundle_install()) {
       // We need to make the font bold like this, rather than using SetFont,
       // because otherwise SizeToFit mis-judges the width of the line.
-      gfx::Font bold_font = ResourceBundle::GetSharedInstance().GetFont(
-          ResourceBundle::BaseFont).DeriveFont(
+      gfx::Font bold_font = ui::ResourceBundle::GetSharedInstance().GetFont(
+          ui::ResourceBundle::BaseFont).DeriveFont(
               kHeadingFontSizeDelta, gfx::Font::BOLD);
       permissions_header = new views::Label(
           prompt.GetPermissionsHeading(), bold_font);

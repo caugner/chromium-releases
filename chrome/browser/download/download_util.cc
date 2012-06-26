@@ -4,11 +4,11 @@
 //
 // Download utility implementation
 
+#define _USE_MATH_DEFINES  // For VC++ to get M_PI. This has to be first.
+
 #include "chrome/browser/download/download_util.h"
 
-#if defined(OS_WIN)
-#include <shobjidl.h>
-#endif
+#include <cmath>
 #include <string>
 
 #include "base/file_util.h"
@@ -24,7 +24,6 @@
 #include "base/utf_string_conversions.h"
 #include "base/value_conversions.h"
 #include "base/values.h"
-#include "base/win/windows_version.h"
 #include "chrome/browser/download/download_extensions.h"
 #include "chrome/browser/download/download_item_model.h"
 #include "chrome/browser/profiles/profile.h"
@@ -52,25 +51,24 @@
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/rect.h"
 
+#if defined(OS_WIN)
+#include <shobjidl.h>
+
+#include "base/win/windows_version.h"
+#endif
+
 #if defined(TOOLKIT_VIEWS)
 #include "ui/base/dragdrop/drag_utils.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
-#if !defined(TOOLKIT_USES_GTK)
 #include "ui/base/dragdrop/drag_drop_types.h"
 #include "ui/gfx/screen.h"
 #include "ui/views/widget/widget.h"
 #endif
-#endif
 
-#if defined(TOOLKIT_USES_GTK)
-#if defined(TOOLKIT_VIEWS)
-#include "ui/base/dragdrop/drag_drop_types.h"
-#include "ui/views/widget/native_widget_gtk.h"
-#elif defined(TOOLKIT_GTK)
+#if defined(TOOLKIT_GTK)
 #include "chrome/browser/ui/gtk/custom_drag.h"
 #include "chrome/browser/ui/gtk/unity_service.h"
 #endif  // defined(TOOLKIT_GTK)
-#endif  // defined(TOOLKIT_USES_GTK)
 
 #if defined(OS_WIN) && !defined(USE_AURA)
 #include "base/win/scoped_comptr.h"
@@ -79,12 +77,6 @@
 #include "ui/base/dragdrop/drag_source.h"
 #include "ui/base/dragdrop/os_exchange_data_provider_win.h"
 #endif
-
-// TODO(phajdan.jr): Find some standard location for this, maintaining
-// the same value on all platforms.
-static const double PI = 3.141592653589793;
-
-using content::DownloadItem;
 
 namespace {
 
@@ -110,13 +102,24 @@ const char* GetDangerTypeString(content::DownloadDangerType danger_type) {
   }
 }
 
+// Get the opacity based on |animation_progress|, with values in [0.0, 1.0].
+// Range of return value is [0, 255].
+int GetOpacity(double animation_progress) {
+  DCHECK(animation_progress >= 0 && animation_progress <= 1);
+
+  // How many times to cycle the complete animation. This should be an odd
+  // number so that the animation ends faded out.
+  static const int kCompleteAnimationCycles = 5;
+  double temp = animation_progress * kCompleteAnimationCycles * M_PI + M_PI_2;
+  temp = sin(temp) / 2 + 0.5;
+  return static_cast<int>(255.0 * temp);
+}
+
 }  // namespace
 
 namespace download_util {
 
-// How many times to cycle the complete animation. This should be an odd number
-// so that the animation ends faded out.
-static const int kCompleteAnimationCycles = 5;
+using content::DownloadItem;
 
 // Download temporary file creation --------------------------------------------
 
@@ -129,6 +132,8 @@ class DefaultDownloadDirectory {
       NOTREACHED();
     }
     if (DownloadPathIsDangerous(path_)) {
+      // This is only useful on platforms that support
+      // DIR_DEFAULT_DOWNLOADS_SAFE.
       if (!PathService::Get(chrome::DIR_DEFAULT_DOWNLOADS_SAFE, &path_)) {
         NOTREACHED();
       }
@@ -145,7 +150,16 @@ const FilePath& GetDefaultDownloadDirectory() {
   return g_default_download_directory.Get().path();
 }
 
+// Consider downloads 'dangerous' if they go to the home directory on Linux and
+// to the desktop on any platform.
 bool DownloadPathIsDangerous(const FilePath& download_path) {
+#if defined(OS_LINUX)
+  FilePath home_dir = file_util::GetHomeDir();
+  if (download_path == home_dir) {
+    return true;
+  }
+#endif
+
   FilePath desktop_dir;
   if (!PathService::Get(chrome::DIR_USER_DESKTOP, &desktop_dir)) {
     NOTREACHED();
@@ -266,7 +280,7 @@ void PaintDownloadProgress(gfx::Canvas* canvas,
     foreground_paint.setShader(shader);
     foreground_paint.setAntiAlias(true);
     shader->unref();
-    canvas->sk_canvas()->drawPath(path, foreground_paint);
+    canvas->DrawPath(path, foreground_paint);
     return;
   }
 
@@ -302,10 +316,7 @@ void PaintDownloadComplete(gfx::Canvas* canvas,
 
   // Start at full opacity, then loop back and forth five times before ending
   // at zero opacity.
-  double opacity = sin(animation_progress * PI * kCompleteAnimationCycles +
-                   PI/2) / 2 + 0.5;
-
-  canvas->SaveLayerAlpha(static_cast<int>(255.0 * opacity), complete_bounds);
+  canvas->SaveLayerAlpha(GetOpacity(animation_progress), complete_bounds);
   canvas->sk_canvas()->drawARGB(0, 255, 255, 255, SkXfermode::kClear_Mode);
   canvas->DrawBitmapInt(*complete, complete_bounds.x(), complete_bounds.y());
   canvas->Restore();
@@ -337,11 +348,7 @@ void PaintDownloadInterrupted(gfx::Canvas* canvas,
 
   // Start at zero opacity, then loop back and forth five times before ending
   // at full opacity.
-  double opacity = sin(
-      (1.0 - animation_progress) * PI * kCompleteAnimationCycles + PI/2) / 2 +
-          0.5;
-
-  canvas->SaveLayerAlpha(static_cast<int>(255.0 * opacity), complete_bounds);
+  canvas->SaveLayerAlpha(GetOpacity(1.0 - animation_progress), complete_bounds);
   canvas->sk_canvas()->drawARGB(0, 255, 255, 255, SkXfermode::kClear_Mode);
   canvas->DrawBitmapInt(*complete, complete_bounds.x(), complete_bounds.y());
   canvas->Restore();
@@ -396,18 +403,23 @@ void DragDownload(const DownloadItem* download,
                 download->GetFileNameToReportUser().LossyDisplayName());
   }
 
-#if !defined(TOOLKIT_USES_GTK)
+#if !defined(TOOLKIT_GTK)
+#if defined(USE_AURA)
   views::Widget* widget = views::Widget::GetWidgetForNativeView(view);
-  // TODO(varunjain): Widget should not be NULL here. But its causing the crash
-  // in http://code.google.com/p/chromium/issues/detail?id=120430 Find out why.
-  if (!widget || !widget->native_widget())
-    return;
-
   gfx::Point location = gfx::Screen::GetCursorScreenPoint();
   // We do not care about notifying the DragItemView on completion of drag. So
   // we pass NULL to RunShellDrag for the source view.
   widget->RunShellDrag(NULL, data, location,
       ui::DragDropTypes::DRAG_COPY | ui::DragDropTypes::DRAG_LINK);
+#else  // We are on WIN without AURA
+  // We cannot use Widget::RunShellDrag on WIN since the |view| is backed by a
+  // TabContentsViewWin, not a NativeWidgetWin.
+  scoped_refptr<ui::DragSource> drag_source(new ui::DragSource);
+  // Run the drag and drop loop
+  DWORD effects;
+  DoDragDrop(ui::OSExchangeDataProviderWin::GetIDataObject(data),
+             drag_source.get(), DROPEFFECT_COPY | DROPEFFECT_LINK, &effects);
+#endif
 
 #else
   GtkWidget* root = gtk_widget_get_toplevel(view);
@@ -421,7 +433,7 @@ void DragDownload(const DownloadItem* download,
 
   widget->DoDrag(data,
                  ui::DragDropTypes::DRAG_COPY | ui::DragDropTypes::DRAG_LINK);
-#endif  // TOOLKIT_USES_GTK
+#endif  // TOOLKIT_GTK
 }
 #elif defined(USE_X11)
 void DragDownload(const DownloadItem* download,
@@ -496,6 +508,9 @@ DictionaryValue* CreateDownloadItemValue(DownloadItem* download, int id) {
         static_cast<int>(download->PercentComplete()));
     file_value->SetInteger("received",
         static_cast<int>(download->GetReceivedBytes()));
+    file_value->SetString("last_reason_text",
+        BaseDownloadItemModel::InterruptReasonMessage(
+            download->GetLastReason()));
   } else if (download->IsCancelled()) {
     file_value->SetString("state", "CANCELLED");
   } else if (download->IsComplete()) {

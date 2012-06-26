@@ -29,6 +29,9 @@
           # Whether or not we are building the Ash shell.
           'use_ash%': 0,
 
+          # Enable DIP (Density Independent Pixels) support.
+          'enable_dip%': 0,
+
           # Use OpenSSL instead of NSS. Under development: see http://crbug.com/62803
           'use_openssl%': 0,
 
@@ -37,14 +40,28 @@
 
           # Disable viewport meta tag by default.
           'enable_viewport%': 0,
+
+          # Enable HiDPI support.
+          'enable_hidpi%': 0,
+
+          # Enable touch optimized art assets and metrics.
+          'enable_touch_ui%': 0,
+
+          # Enable inclusion of touch-optimized resources.
+          # TODO(joi): Rename to enable_touch_assets.
+          'enable_metro%': 0,
         },
         # Copy conditionally-set variables out one scope.
         'chromeos%': '<(chromeos)',
         'use_aura%': '<(use_aura)',
         'use_ash%': '<(use_ash)',
+        'enable_dip%': '<(enable_dip)',
         'use_openssl%': '<(use_openssl)',
         'use_virtual_keyboard%': '<(use_virtual_keyboard)',
         'enable_viewport%': '<(enable_viewport)',
+        'enable_hidpi%': '<(enable_hidpi)',
+        'enable_touch_ui%': '<(enable_touch_ui)',
+        'enable_metro%': '<(enable_metro)',
 
         # Compute the architecture that we're building on.
         'conditions': [
@@ -71,12 +88,25 @@
           ['use_aura==1 and ((OS=="linux" and chromeos==0) or OS=="win")', {
             'use_ash%': 1,
           }],
+          ['use_ash==1', {
+            'use_aura%': 1,
+          }],
 
           # Set default value of toolkit_views based on OS.
           ['OS=="win" or chromeos==1 or use_aura==1', {
             'toolkit_views%': 1,
           }, {
             'toolkit_views%': 0,
+          }],
+
+          # Enable HiDPI on Mac OS.
+          ['OS=="mac"', {
+            'enable_hidpi%': 1,
+          }],
+
+          # Enable touch UI on Metro and Chrome OS.
+          ['enable_metro==1 or chromeos==1', {
+            'enable_touch_ui%': 1,
           }],
         ],
       },
@@ -87,9 +117,13 @@
       'toolkit_views%': '<(toolkit_views)',
       'use_aura%': '<(use_aura)',
       'use_ash%': '<(use_ash)',
+      'enable_dip%': '<(enable_dip)',
       'use_openssl%': '<(use_openssl)',
       'use_virtual_keyboard%': '<(use_virtual_keyboard)',
       'enable_viewport%': '<(enable_viewport)',
+      'enable_hidpi%': '<(enable_hidpi)',
+      'enable_touch_ui%': '<(enable_touch_ui)',
+      'enable_metro%': '<(enable_metro)',
 
       # We used to provide a variable for changing how libraries were built.
       # This variable remains until we can clean up all the users.
@@ -191,13 +225,12 @@
       # Run tools/clang/scripts/update.sh to make sure they are compiled.
       # This causes 'clang_chrome_plugins_flags' to be set.
       # Has no effect if 'clang' is not set as well.
-      'clang_use_chrome_plugins%': 0,
+      'clang_use_chrome_plugins%': 1,
 
       # Enable building with ASAN (Clang's -faddress-sanitizer option).
       # -faddress-sanitizer only works with clang, but asan=1 implies clang=1
       # See https://sites.google.com/a/chromium.org/dev/developers/testing/addresssanitizer
       'asan%': 0,
-      'asan_blacklist%': '<(PRODUCT_DIR)/../../third_party/asan/ignore.txt',
 
       # Use the provided profiled order file to link Chrome image with it.
       # This makes Chrome faster by better using CPU cache when executing code.
@@ -219,6 +252,9 @@
       # and extensions Web Intents support.
       'enable_web_intents%': 1,
 
+      # Enable Chrome browser extensions
+      'enable_extensions%': 1,
+
       # Enable Web Intents web content registration via HTML element
       # and WebUI managing such registrations.
       'enable_web_intents_tag%': 0,
@@ -231,9 +267,22 @@
       # plugins to make call of the main thread.
       'enable_pepper_threading%': 0,
 
+      # Enables use of the session service, which is enabled by default.
+      # Support for disabling depends on the platform.
+      'enable_session_service%': 1,
+
       # Enables theme support, which is enabled by default.  Support for
       # disabling depends on the platform.
       'enable_themes%': 1,
+
+      # Enables support for background apps.
+      'enable_background%': 1,
+
+      # Enable the task manager by default.
+      'enable_task_manager%': 1,
+
+      # Enables support for promo resource service.
+      'enable_promo_resource_service%': 1,
 
       # XInput2 multitouch support is disabled by default (use_xi2_mt=0).
       # Setting to non-zero value enables XI2 MT. When XI2 MT is enabled,
@@ -260,8 +309,15 @@
       # for details.
       'chromium_win_pch%': 0,
 
+      # Set this to true when building with Clang.
+      # See http://code.google.com/p/chromium/wiki/Clang for details.
+      'clang%': 0,
+
       # Enable plug-in installation by default.
       'enable_plugin_installation%': 1,
+
+      # Enable protector service by default.
+      'enable_protector_service%': 1,
 
       # Specifies whether to use canvas_skia.cc in place of platform
       # specific implementations of gfx::Canvas. Affects text drawing in the
@@ -280,10 +336,16 @@
       # always calls tools/isolate/isolate.py. See the script's --help for more
       # information and the valid --mode values. Meant to be overriden with
       # GYP_DEFINES.
-      'tests_run%': 'check',
+      # TODO(maruel): Converted the default from 'check' to 'noop' so work can
+      # be done while the builders are being reconfigured to check out test data
+      # files.
+      'tests_run%': 'noop',
 
        # Force rlz to use chrome's networking stack.
       'force_rlz_use_chrome_net%': 1,
+
+      'platformsdk_path%': '<(DEPTH)/third_party/platformsdk_win7/files',
+      'wix_path%': '<(DEPTH)/third_party/wix',
 
       'conditions': [
         # TODO(epoger): Figure out how to set use_skia=1 for Mac outside of
@@ -291,8 +353,6 @@
         # webkit disagreeing on its setting.
         ['OS=="mac"', {
           'use_skia%': 1,
-          # Mac uses clang by default, so turn on the plugin as well.
-          'clang_use_chrome_plugins%': 1,
         }, {
           'use_skia%': 1,
         }],
@@ -356,13 +416,6 @@
           'use_titlecase_in_grd_files%': 1,
         }],
 
-        # Enable some hacks to support Flapper only on Chrome OS.
-        ['chromeos==1', {
-          'enable_flapper_hacks%': 1,
-        }, {
-          'enable_flapper_hacks%': 0,
-        }],
-
         # Enable file manager extension on Chrome OS.
         ['chromeos==1', {
           'file_manager_extension%': 1,
@@ -373,12 +426,6 @@
         # Enable WebUI TaskManager on Chrome OS or Aura.
         ['chromeos==1 or use_aura==1', {
           'webui_task_manager%': 1,
-        }],
-
-        # For now one-click signin is enabled only for windows and mac
-        # since the UI is not yet complete for other platforms.
-        ['OS=="win" or OS=="mac"', {
-          'enable_one_click_signin%': 1,
         }],
 
         ['OS=="android"', {
@@ -403,6 +450,12 @@
           'enable_plugin_installation%': 0,
         }, {
           'enable_plugin_installation%': 1,
+        }],
+
+        ['OS=="android"', {
+          'enable_protector_service%': 0,
+        }, {
+          'enable_protector_service%': 1,
         }],
 
         # linux_use_gold_binary: whether to use the binary checked into
@@ -434,7 +487,7 @@
         #
         # On Aura, this allows per-tile painting to be used in the browser
         # compositor.
-        ['use_aura==1', {
+        ['use_aura==1 or OS=="win"', {
           'use_canvas_skia%': 1,
         }],
       ],
@@ -450,6 +503,7 @@
     'ui_compositor_image_transport%': '<(ui_compositor_image_transport)',
     'use_aura%': '<(use_aura)',
     'use_ash%': '<(use_ash)',
+    'enable_dip%': '<(enable_dip)',
     'use_openssl%': '<(use_openssl)',
     'use_nss%': '<(use_nss)',
     'os_bsd%': '<(os_bsd)',
@@ -460,11 +514,13 @@
     'use_x11%': '<(use_x11)',
     'use_gnome_keyring%': '<(use_gnome_keyring)',
     'linux_fpic%': '<(linux_fpic)',
-    'enable_flapper_hacks%': '<(enable_flapper_hacks)',
     'enable_pepper_threading%': '<(enable_pepper_threading)',
     'chromeos%': '<(chromeos)',
     'use_virtual_keyboard%': '<(use_virtual_keyboard)',
     'enable_viewport%': '<(enable_viewport)',
+    'enable_hidpi%': '<(enable_hidpi)',
+    'enable_touch_ui%': '<(enable_touch_ui)',
+    'enable_metro%': '<(enable_metro)',
     'use_xi2_mt%':'<(use_xi2_mt)',
     'file_manager_extension%': '<(file_manager_extension)',
     'webui_task_manager%': '<(webui_task_manager)',
@@ -491,22 +547,26 @@
     'notifications%': '<(notifications)',
     'clang_use_chrome_plugins%': '<(clang_use_chrome_plugins)',
     'asan%': '<(asan)',
-    'asan_blacklist%': '<(asan_blacklist)',
     'order_text_section%': '<(order_text_section)',
     'enable_register_protocol_handler%': '<(enable_register_protocol_handler)',
+    'enable_extensions%': '<(enable_extensions)',
     'enable_web_intents%': '<(enable_web_intents)',
     'enable_web_intents_tag%': '<(enable_web_intents_tag)',
     'enable_plugin_installation%': '<(enable_plugin_installation)',
+    'enable_protector_service%': '<(enable_protector_service)',
+    'enable_session_service%': '<(enable_session_service)',
     'enable_themes%': '<(enable_themes)',
+    'enable_background%': '<(enable_background)',
+    'enable_promo_resource_service%': '<(enable_promo_resource_service)',
     'linux_use_gold_binary%': '<(linux_use_gold_binary)',
     'linux_use_gold_flags%': '<(linux_use_gold_flags)',
     'use_canvas_skia%': '<(use_canvas_skia)',
     'tests_run%': '<(tests_run)',
     'enable_automation%': '<(enable_automation)',
     'force_rlz_use_chrome_net%': '<(force_rlz_use_chrome_net)',
-
-    # Whether to build for Wayland display server
-    'use_wayland%': 0,
+    'enable_task_manager%': '<(enable_task_manager)',
+    'platformsdk_path%': '<(platformsdk_path)',
+    'wix_path%': '<(wix_path)',
 
     # Use system yasm instead of bundled one.
     'use_system_yasm%': 0,
@@ -605,9 +665,8 @@
     # Set this to true to enable SELinux support.
     'selinux%': 0,
 
-    # Set this to true when building with Clang.
-    # See http://code.google.com/p/chromium/wiki/Clang for details.
-    'clang%': 0,
+    # Clang stuff.
+    'clang%': '<(clang)',
     'make_clang_dir%': 'third_party/llvm-build/Release+Asserts',
 
     # These two variables can be set in GYP_DEFINES while running
@@ -662,6 +721,9 @@
     # Set ARM fpu compilation flags (only meaningful if armv7==1 and
     # arm_neon==0).
     'arm_fpu%': 'vfpv3',
+
+    # Set ARM float abi compilation flag.
+    'arm_float_abi%': 'softfp',
 
     # Enable new NPDevice API.
     'enable_new_npdevice_api%': 0,
@@ -732,14 +794,13 @@
     # The desired version of Windows SDK can be set in ~/.gyp/include.gypi.
     'msbuild_toolset%': '',
 
+    # Native Client is enabled by default.
+    'disable_nacl%': 0,
+
+    'platformsdk_exists': '<!(python <(DEPTH)/build/dir_exists.py <(platformsdk_path))',
+    'wix_exists': '<!(python <(DEPTH)/build/dir_exists.py <(wix_path))',
+
     'conditions': [
-      # Used to disable Native Client at compile time, for platforms where it
-      # isn't supported (ARM)
-      ['target_arch=="arm" and chromeos == 1', {
-        'disable_nacl%': 1,
-       }, {
-        'disable_nacl%': 0,
-      }],
       ['os_posix==1 and OS!="mac" and OS!="android"', {
         # This will set gcc_version to XY if you are running gcc X.Y.*.
         # This is used to tweak build flags for gcc 4.4.
@@ -762,7 +823,16 @@
         'variables': {
           'variables': {
             'android_ndk_root%': '<!(/bin/echo -n $ANDROID_NDK_ROOT)',
-            'target_arch%': 'arm',  # target_arch in android terms.
+            # Android uses x86 instead of ia32 for their target_arch
+            # designation.
+            # TODO(wistoch): Adjust the target_arch naming scheme to avoid
+            # confusion.
+            # http://crbug.com/125329
+            'conditions': [
+              ['target_arch == "ia32"', {
+                'target_arch': 'x86',
+              }],
+            ],
 
             # Switch between different build types, currently only '0' is
             # supported.
@@ -784,22 +854,34 @@
         'use_openssl%': 1,
 
         'proprietary_codecs%': '<(proprietary_codecs)',
+        'enable_task_manager%': 0,
         'safe_browsing%': 0,
         'configuration_policy%': 0,
         'input_speech%': 0,
         'enable_web_intents%': 0,
+        'enable_extensions%': 0,
         'java_bridge%': 1,
         # Android does not support themes.
         'enable_themes%': 0,
+
+        # Android does not support background apps.
+        'enable_background%': 0,
+
+        # Android does not support promo resources service.
+        'enable_promo_resource_service%': 0,
+
+        # Sessions are store separately in the Java side.
+        'enable_session_service%': 0,
 
         # Set to 1 once we have a notification system for Android.
         # http://crbug.com/115320
         'notifications%': 0,
 
-        # Builds the gtest targets as a shared_library.
-        # TODO(michaelbai): Use the fixed value 'shared_library' once it
-        # is fully supported.
         'gtest_target_type%': '<(gtest_target_type)',
+        # TODO(jrg): when 'gtest_target_type'=='shared_libary' and
+        # OS==android, make all gtest_targets depend on
+        # testing/android/native_test.gyp:native_test_apk.
+        ### 'gtest_target_type': 'shared_libary',
 
         # Uses system APIs for decoding audio and video.
         'use_libffmpeg%': '0',
@@ -811,6 +893,12 @@
 
         # Use the system icu.
         'use_system_icu%': 0,
+
+        # TODO(yfriedman): Remove once unit_tests can link for Android.
+        # To override it specify:
+        # GYP_DEFINES="$GYP_DEFINES android_unit_test_target_type=executable"
+        #     android_gyp
+        'android_unit_test_target_type%': 'static_library',
 
         # Choose static link by build type.
         'conditions': [
@@ -899,7 +987,7 @@
         ],
       }],
 
-      ['os_posix==1 and chromeos==0 and target_arch!="arm"', {
+      ['os_posix==1 and chromeos==0 and OS!="android"', {
         'use_cups%': 1,
       }, {
         'use_cups%': 0,
@@ -973,7 +1061,10 @@
       ['OS=="android"', {
         'grit_defines': ['-D', 'android'],
       }],
-      ['clang_use_chrome_plugins==1', {
+      ['enable_extensions==1', {
+        'grit_defines': ['-D', 'enable_extensions'],
+      }],
+      ['clang_use_chrome_plugins==1 and OS!="win"', {
         'clang_chrome_plugins_flags':
             '<!(<(DEPTH)/tools/clang/scripts/plugin_flags.sh)',
       }],
@@ -1057,12 +1148,14 @@
     # default_apps/external_extensions.json file must also be updated.
     'default_apps_list': [
       'browser/resources/default_apps/external_extensions.json',
+      'browser/resources/default_apps/docs.crx',
       'browser/resources/default_apps/gmail.crx',
       'browser/resources/default_apps/search.crx',
       'browser/resources/default_apps/youtube.crx',
     ],
     'default_apps_list_linux_dest': [
       '<(PRODUCT_DIR)/default_apps/external_extensions.json',
+      '<(PRODUCT_DIR)/default_apps/docs.crx',
       '<(PRODUCT_DIR)/default_apps/gmail.crx',
       '<(PRODUCT_DIR)/default_apps/search.crx',
       '<(PRODUCT_DIR)/default_apps/youtube.crx',
@@ -1153,14 +1246,6 @@
       ['component=="shared_library"', {
         'defines': ['COMPONENT_BUILD'],
       }],
-      ['component=="shared_library" and incremental_chrome_dll==1', {
-        # TODO(dpranke): We can't incrementally link chrome when
-        # content is being built as a DLL because chrome links in
-        # webkit_glue and webkit_glue depends on symbols defined in
-        # content. We can remove this when we fix glue.
-        # See http://code.google.com/p/chromium/issues/detail?id=98755 .
-        'defines': ['COMPILE_CONTENT_STATICALLY'],
-      }],
       ['toolkit_views==1', {
         'defines': ['TOOLKIT_VIEWS=1'],
       }],
@@ -1173,14 +1258,14 @@
       ['use_ash==1', {
         'defines': ['USE_ASH=1'],
       }],
+      ['enable_dip==1', {
+        'defines': ['ENABLE_DIP'],
+      }],
       ['use_nss==1', {
         'defines': ['USE_NSS=1'],
       }],
       ['enable_one_click_signin==1', {
         'defines': ['ENABLE_ONE_CLICK_SIGNIN'],
-      }],
-      ['toolkit_uses_gtk==1', {
-        'defines': ['TOOLKIT_USES_GTK=1'],
       }],
       ['toolkit_uses_gtk==1 and toolkit_views==0', {
         # TODO(erg): We are progressively sealing up use of deprecated features
@@ -1195,9 +1280,6 @@
       }],
       ['use_xi2_mt!=0', {
         'defines': ['USE_XI2_MT=<(use_xi2_mt)'],
-      }],
-      ['use_wayland==1', {
-        'defines': ['USE_WAYLAND=1', 'WL_EGL_PLATFORM=1'],
       }],
       ['file_manager_extension==1', {
         'defines': ['FILE_MANAGER_EXTENSION=1'],
@@ -1225,9 +1307,6 @@
       ['proprietary_codecs==1', {
         'defines': ['USE_PROPRIETARY_CODECS'],
       }],
-      ['enable_flapper_hacks==1', {
-        'defines': ['ENABLE_FLAPPER_HACKS=1'],
-      }],
       ['enable_pepper_threading==1', {
         'defines': ['ENABLE_PEPPER_THREADING'],
       }],
@@ -1242,6 +1321,12 @@
       }],
       ['notifications==1', {
         'defines': ['ENABLE_NOTIFICATIONS'],
+      }],
+      ['enable_hidpi==1', {
+        'defines': ['ENABLE_HIDPI=1'],
+      }],
+      ['enable_metro==1', {
+        'defines': ['ENABLE_METRO=1'],
       }],
       ['fastbuild!=0', {
 
@@ -1358,9 +1443,19 @@
           'ENABLE_REGISTER_PROTOCOL_HANDLER=1',
         ],
       }],
+      ['enable_task_manager==1', {
+        'defines': [
+          'ENABLE_TASK_MANAGER=1',
+        ],
+      }],
       ['enable_web_intents==1', {
         'defines': [
           'ENABLE_WEB_INTENTS=1',
+        ],
+      }],
+      ['enable_extensions==1', {
+        'defines': [
+          'ENABLE_EXTENSIONS=1',
         ],
       }],
       ['OS=="win" and branding=="Chrome"', {
@@ -1372,8 +1467,20 @@
       ['enable_plugin_installation==1', {
         'defines': ['ENABLE_PLUGIN_INSTALLATION=1'],
       }],
+      ['enable_protector_service==1', {
+        'defines': ['ENABLE_PROTECTOR_SERVICE=1'],
+      }],
+      ['enable_session_service==1', {
+        'defines': ['ENABLE_SESSION_SERVICE=1'],
+      }],
       ['enable_themes==1', {
         'defines': ['ENABLE_THEMES=1'],
+      }],
+      ['enable_background==1', {
+        'defines': ['ENABLE_BACKGROUND=1'],
+      }],
+      ['enable_promo_resource_service==1', {
+        'defines': ['ENABLE_PROMO_RESOURCE_SERVICE=1'],
       }],
       ['enable_automation==1', {
         'defines': ['ENABLE_AUTOMATION=1'],
@@ -1731,6 +1838,7 @@
         # be disabled in ~/.gyp/include.gypi on the valgrind builders.
         'variables': {
           'werror%': '-Werror',
+	  'libraries_for_target%': '',
         },
         'defines': [
           '_FILE_OFFSET_BITS=64',
@@ -1767,6 +1875,9 @@
         'ldflags': [
           '-pthread', '-Wl,-z,noexecstack',
         ],
+	'libraries' : [
+	  '<(libraries_for_target)',
+	],
         'configurations': {
           'Debug_Base': {
             'variables': {
@@ -1966,7 +2077,7 @@
                     'cflags': [
                       '-march=armv7-a',
                       '-mtune=cortex-a8',
-                      '-mfloat-abi=softfp',
+                      '-mfloat-abi=<(arm_float_abi)',
                     ],
                     'conditions': [
                       ['arm_neon==1', {
@@ -2048,9 +2159,6 @@
               # removed when we change to that.  (This is also why we don't
               # bother fixing all these cases today.)
               '-Wno-unnamed-type-template-args',
-              # WebKit uses nullptr in a legit way, other that that this warning
-              # doesn't fire.
-              '-Wno-c++11-compat',
               # This (rightyfully) complains about 'override', which we use
               # heavily.
               '-Wno-c++11-extensions',
@@ -2058,11 +2166,6 @@
               # Warns on switches on enums that cover all enum values but
               # also contain a default: branch. Chrome is full of that.
               '-Wno-covered-switch-default',
-
-              # TODO(thakis): Reenable once this no longer complains about
-              # Invalid() in gmocks's gmock-internal-utils.h
-              # http://crbug.com/111806
-              '-Wno-null-dereference',
             ],
             'cflags!': [
               # Clang doesn't seem to know know this flag.
@@ -2095,7 +2198,6 @@
               '-faddress-sanitizer',
               '-fno-omit-frame-pointer',
               '-w',
-              '-mllvm', '-asan-blacklist=<(asan_blacklist)',
             ],
             'ldflags': [
               '-faddress-sanitizer',
@@ -2290,7 +2392,6 @@
             'ldflags': [
               '-nostdlib',
               '-Wl,--no-undefined',
-              '-Wl,--icf=safe',  # Enable identical code folding to reduce size
               # Don't export symbols from statically linked libraries.
               '-Wl,--exclude-libs=ALL',
             ],
@@ -2307,6 +2408,12 @@
               ['android_build_type==0', {
                 'ldflags': [
                   '--sysroot=<(android_ndk_sysroot)',
+                ],
+              }],
+              ['target_arch == "arm"', {
+                'ldflags': [
+                  # Enable identical code folding to reduce size.
+                  '-Wl,--icf=safe',
                 ],
               }],
               # NOTE: The stlport header include paths below are specified in
@@ -2366,6 +2473,13 @@
               ['_type=="shared_library"', {
                 'ldflags': [
                   '-Wl,-shared,-Bsymbolic',
+                  # crtbegin_so.o should be the last item in ldflags.
+                  '<(android_ndk_lib)/crtbegin_so.o',
+                ],
+                'libraries': [
+                  # crtend_so.o needs to be the last item in libraries.
+                  # Do not add any libraries after this!
+                  '<(android_ndk_lib)/crtend_so.o',
                 ],
               }],
             ],
@@ -2468,9 +2582,6 @@
                 '-Wno-unused-function',
                 # See comments on this flag higher up in this file.
                 '-Wno-unnamed-type-template-args',
-                # WebKit uses nullptr in a legit way, other that that this
-                # warning doesn't fire.
-                '-Wno-c++0x-compat',
                 # This (rightyfully) complains about 'override', which we use
                 # heavily.
                 '-Wno-c++11-extensions',
@@ -2478,11 +2589,6 @@
                 # Warns on switches on enums that cover all enum values but
                 # also contain a default: branch. Chrome is full of that.
                 '-Wno-covered-switch-default',
-
-                # TODO(thakis): Reenable once this no longer complains about
-                # Invalid() in gmock's gmock-internal-utils.h
-                # http://crbug.com/111806
-                '-Wno-null-dereference',
               ],
             }],
             ['clang==1 and clang_use_chrome_plugins==1', {
@@ -2519,7 +2625,6 @@
               'OTHER_CFLAGS': [
                 '-faddress-sanitizer',
                 '-w',
-                '-mllvm', '-asan-blacklist=<(asan_blacklist)',
               ],
               'OTHER_LDFLAGS': [
                 '-faddress-sanitizer',
@@ -2847,7 +2952,7 @@
             'TypeLibraryName': '$(InputName).tlb',
             'OutputDirectory': '$(IntDir)',
             'HeaderFileName': '$(InputName).h',
-            'DLLDataFileName': 'dlldata.c',
+            'DLLDataFileName': '$(InputName).dlldata.c',
             'InterfaceIdentifierFileName': '$(InputName)_i.c',
             'ProxyFileName': '$(InputName)_p.c',
           },

@@ -13,6 +13,7 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
+#include "chrome/browser/extensions/test_extension_system.h"
 #import "chrome/browser/ui/cocoa/animation_utils.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_constants.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_controller.h"
@@ -193,7 +194,7 @@ class FakeTheme : public ui::ThemeProvider {
   virtual bool GetDisplayProperty(int id, int* result) const { return false; }
   virtual bool ShouldUseNativeFrame() const { return false; }
   virtual bool HasCustomImage(int id) const { return false; }
-  virtual RefCountedMemory* GetRawData(int id) const { return NULL; }
+  virtual base::RefCountedMemory* GetRawData(int id) const { return NULL; }
   virtual NSImage* GetNSImageNamed(int id, bool allow_default) const {
     return nil;
   }
@@ -272,8 +273,11 @@ class BookmarkBarControllerTestBase : public CocoaProfileTest {
     ASSERT_TRUE(profile());
 
     FilePath extension_dir;
-    profile()->CreateExtensionService(CommandLine::ForCurrentProcess(),
-                                      extension_dir, false);
+    static_cast<TestExtensionSystem*>(
+        ExtensionSystem::Get(profile()))->
+        CreateExtensionService(
+            CommandLine::ForCurrentProcess(),
+            extension_dir, false);
     resizeDelegate_.reset([[ViewResizerPong alloc] init]);
     NSRect parent_frame = NSMakeRect(0, 0, 800, 50);
     parent_view_.reset([[NSView alloc] initWithFrame:parent_frame]);

@@ -22,12 +22,23 @@ body {
 
 button {
   font-family: inherit;
+  outline: none;
+}
+
+/* Follow same focus coloring as in widgets.css */
+button.custom-appearance {
+  -webkit-transition: border-color 200ms;
+  border: 1px solid transparent;
+}
+
+button.custom-appearance:focus {
+  border-color: rgb(77, 144, 254);
 }
 
 #outer-container {
   -webkit-box-align: center;
   -webkit-box-pack: center;
-  bottom: 40px;  /* Leave space for the header bar */
+  bottom: 41px;  /* Leave space for the header bar */
   display: -webkit-box;
   left: 0;
   position: absolute;
@@ -48,37 +59,37 @@ button {
 
 #security-info a,
 #eula a {
-  color: #006668;
+  color: rgb(0, 102, 104);
   text-decoration: none;
 }
 
 #eula #stats-help-link {
-  color: #316ac5;
+  color: rgb(49, 106, 197);
 }
 
 hr.shadow {
-  -webkit-mask: -webkit-linear-gradient(left, rgba(0,0,0,0),
-                                        black 50%, rgba(0,0,0,0));
+  -webkit-mask: -webkit-linear-gradient(left, rgba(0, 0, 0, 0),
+                                        black 50%, rgba(0, 0, 0, 0));
   border: none;
   opacity: 0.3
 }
 
 hr.top {
-  background: -webkit-linear-gradient(rgba(0,0,0,0.3), rgba(0,0,0,0.0));
-  border-top: 1px solid rgba(0,0,0,0.5);
+  background: -webkit-linear-gradient(rgba(0, 0, 0, 0.3), rgba(0, 0, 0, 0));
+  border-top: 1px solid rgba(0, 0, 0, 0.5);
   height: 4px;
 }
 
 hr.bottom {
   background: -webkit-linear-gradient(bottom,
-                                      rgba(0,0,0,0.2), rgba(0,0,0,0.0));
-  border-bottom: 1px solid rgba(0,0,0,0.5);
+                                      rgba(0, 0, 0, 0.2), rgba(0, 0, 0, 0));
+  border-bottom: 1px solid rgba(0, 0, 0, 0.5);
   height: 4px;
   z-index: 0;
 }
 
 #header {
-  -webkit-padding-start: 34px;
+  -webkit-padding-start: 45px;
   background-image: url('chrome://theme/IDR_PRODUCT_LOGO_32');
   background-position: left center;
   background-repeat: no-repeat;
@@ -98,6 +109,7 @@ hr.bottom {
 #header span,
 #user-image-screen-curtain p,
 .label,
+.flexible-label,
 .menu-control {
   cursor: default;
 }
@@ -111,7 +123,7 @@ hr.bottom {
 .header-section:before {
   /* Divider in header between product name and title,
      like "[Product name] > [step header]"  */
-  content: "\00A0\203A\00A0\00A0";
+  content: '\00A0\203A\00A0\00A0';
 }
 
 .header-section {
@@ -208,13 +220,13 @@ html[dir=rtl]  .step.left {
 }
 
 .control-with-label {
-  margin: 10px 0 10px 0;
-  display: -webkit-box;
   -webkit-box-align: start;
+  display: -webkit-box;
+  margin: 10px 0;
 }
 
 .menu-area {
-  margin: 5px 5px 5px 5px;
+  margin: 5px;
 }
 
 .menu-control {
@@ -224,11 +236,19 @@ html[dir=rtl]  .step.left {
   width: 250px;
 }
 
-.label {
+.label,
+.flexible-label {
   display: block;
   margin: 5px 5px 5px 0;
   padding: 5px 5px 5px 0;
+}
+
+.label {
   width: 170px;
+}
+
+.flexible-label {
+  max-width: 250px;
 }
 
 #connect {
@@ -275,8 +295,8 @@ html[dir=rtl]  .step.left {
 }
 
 #user-image-grid [role=listitem] {
-  border-radius: 4px;
   border: 1px solid rgba(0, 0, 0, 0.15);
+  border-radius: 4px;
   display: inline-block;
   margin: 4px;
   padding: 3px;
@@ -307,8 +327,8 @@ html[dir=rtl]  .step.left {
 }
 
 #profile-image .spinner {
-  position: absolute;
   left: 14px;
+  position: absolute;
   top: 14px;
 }
 
@@ -329,8 +349,8 @@ html[dir=rtl] #user-image-preview {
 }
 
 .default-image #user-image-preview-img {
-  border: solid 1px #cacaca;
   background: white;
+  border: solid 1px #cacaca;
 }
 
 #user-image-preview-caption {
@@ -415,7 +435,7 @@ html[dir=rtl] #user-image-preview {
 }
 
 #update #update-cancel-hint {
-  color: #a00;
+  color: rgb(170, 0, 0);
   left: 50%;
   margin: 1em -16em;
   position: absolute;
@@ -465,10 +485,10 @@ button {
 }
 
 #security-info-popup {
-  -webkit-box-shadow: 0 5px 80px #505050;
   background: white;
-  border-radius: 2px;
   border: 1px solid rgb(188, 193, 208);
+  border-radius: 2px;
+  box-shadow: 0 5px 80px #505050;
   min-height: 250px;
   position: relative;
   width: 460px;
@@ -479,7 +499,7 @@ button {
   -webkit-padding-end: 24px;
   -webkit-user-select: none;
   background: -webkit-linear-gradient(white, #F8F8F8);
-  color: #53637d;
+  color: rgb(83, 99, 125);
   font-size: 105%;
   font-weight: bold;
   margin: 0;
@@ -518,7 +538,6 @@ button {
   bottom: 0;
   display: -webkit-box;
   left: 0;
-  padding-bottom: 130px;
   padding: 20px;
   position: fixed;
   right: 0;

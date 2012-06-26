@@ -21,14 +21,26 @@
           'third_party/nspr/prtime.h',
           'third_party/nspr/prcpucfg_linux.h',
           'third_party/xdg_mime/xdgmime.h',
+          'allocator/allocator_extension.cc',
+          'allocator/allocator_extension.h',
+          'android/base_jni_registrar.cc',
+          'android/base_jni_registrar.h',
+          'android/build_info.cc',
+          'android/build_info.h',
           'android/scoped_java_ref.cc',
           'android/scoped_java_ref.h',
           'android/jni_android.cc',
           'android/jni_android.h',
           'android/jni_array.cc',
           'android/jni_array.h',
+          'android/jni_helper.cc',
+          'android/jni_helper.h',
+          'android/jni_registrar.cc',
+          'android/jni_registrar.h',
           'android/jni_string.cc',
           'android/jni_string.h',
+          'android/locale_utils.cc',
+          'android/locale_utils.h',
           'android/path_utils.cc',
           'android/path_utils.h',
           'at_exit.cc',
@@ -158,6 +170,8 @@
           'mac/crash_logging.mm',
           'mac/foundation_util.h',
           'mac/foundation_util.mm',
+          'mac/launchd.cc',
+          'mac/launchd.h',
           'mac/mac_logging.h',
           'mac/mac_logging.cc',
           'mac/mac_util.h',
@@ -170,6 +184,7 @@
           'mac/scoped_authorizationref.h',
           'mac/scoped_cftyperef.h',
           'mac/scoped_ioobject.h',
+          'mac/scoped_launch_data.h',
           'mac/scoped_nsautorelease_pool.h',
           'mac/scoped_nsautorelease_pool.mm',
           'mac/scoped_nsexception_enabler.h',
@@ -331,6 +346,7 @@
           'sys_string_conversions_win.cc',
           'task_runner.cc',
           'task_runner.h',
+          'task_runner_util.h',
           'template_util.h',
           'threading/non_thread_safe.h',
           'threading/non_thread_safe_impl.cc',
@@ -395,7 +411,8 @@
           'nix/mime_util_xdg.h',
           'nix/xdg_util.cc',
           'nix/xdg_util.h',
-          'wayland/wayland_event.h',
+          'win/accessibility_misc_utils.h',
+          'win/accessibility_misc_utils.cc',
           'win/enum_variant.h',
           'win/enum_variant.cc',
           'win/event_trace_consumer.h',
@@ -409,6 +426,8 @@
           'win/iat_patch_function.h',
           'win/iunknown_impl.h',
           'win/iunknown_impl.cc',
+          'win/metro.cc',
+          'win/metro.h',
           'win/object_watcher.cc',
           'win/object_watcher.h',
           'win/registry.cc',
@@ -426,6 +445,8 @@
           'win/scoped_handle.h',
           'win/scoped_hdc.h',
           'win/scoped_hglobal.h',
+          'win/scoped_process_information.cc',
+          'win/scoped_process_information.h',
           'win/scoped_select_object.h',
           'win/scoped_variant.cc',
           'win/scoped_variant.h',
@@ -468,12 +489,6 @@
           }, {
             'sources!' : [ 'message_pump_gtk.cc', ],
             'sources/' : [ [ 'include', '^message_pump_x\\.cc$', ] ],
-          }],
-          [ 'use_wayland==1', {
-            'sources/': [
-              [ 'exclude', '^message_pump_gtk\\.cc$',],
-              [ 'exclude', '^message_pump_x\\.cc$',],
-            ],
           }],
           [ 'OS != "linux" and os_bsd != 1', {
               'sources!': [
@@ -578,6 +593,7 @@
       },
       'dependencies': [
         'base_static',
+        'allocator/allocator.gyp:allocator_extension_thunks',
         '../testing/gtest.gyp:gtest_prod',
         '../third_party/modp_b64/modp_b64.gyp:modp_b64',
         'third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
@@ -647,15 +663,17 @@
           # hence the *_android.cc files are included but the actual code
           # doesn't have OS_ANDROID / ANDROID defined.
           'conditions': [
+            # Host build on linux depends on system.gyp::gtk as
+            # default linux build has TOOLKIT_GTK defined.
             ['host_os == "linux"', {
               'sources/': [
                 ['include', '^atomicops_internals_x86_gcc\\.cc$'],
               ],
               'dependencies': [
-                '../build/linux/system.gyp:glib',
+                '../build/linux/system.gyp:gtk',
               ],
               'export_dependent_settings': [
-                '../build/linux/system.gyp:glib',
+                '../build/linux/system.gyp:gtk',
               ],
             }],
             ['host_os == "mac"', {
@@ -670,10 +688,18 @@
           ],
         }],
         [ 'OS == "android" and _toolset == "target"', {
+          'conditions': [
+            ['target_arch == "ia32"', {
+              'sources/': [
+                ['include', '^atomicops_internals_x86_gcc\\.cc$'],
+              ],
+            }],
+          ],
           'dependencies': [
             'symbolize',
             '../third_party/ashmem/ashmem.gyp:ashmem',
-            'android/java/java.gyp:base_java',
+            '../third_party/icu/icu.gyp:icuuc',
+            'base_java',
             'base_jni_headers',
           ],
           'include_dirs': [
@@ -772,7 +798,6 @@
         'message_pump_libevent.h',
         'message_pump_mac.h',
         'message_pump_mac.mm',
-        'message_pump_wayland.h',
         'metrics/field_trial.cc',
         'metrics/field_trial.h',
         'string16.cc',
@@ -796,6 +821,7 @@
           },
           'dependencies': [
             'base_static_win64',
+            'allocator/allocator.gyp:allocator_extension_thunks_win64',
             'third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations_win64',
           ],
           # TODO(gregoryd): direct_dependent_settings should be shared with the

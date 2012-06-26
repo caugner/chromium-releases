@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 <include src="tracing/sorted_array_utils.js">
 <include src="tracing/measuring_stick.js">
 <include src="tracing/timeline.js">
+<include src="tracing/timeline_analysis.js">
 <include src="tracing/timeline_track.js">
 <include src="tracing/fast_rect_renderer.js">
 <include src="tracing/profiling_view.js">
@@ -29,6 +30,7 @@ function onLoad() {
 
   profilingView = $('profiling-view');
   cr.ui.decorate(profilingView, tracing.ProfilingView);
+  profilingView.tracingController = tracingController;
 }
 
 document.addEventListener('DOMContentLoaded', onLoad);

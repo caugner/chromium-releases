@@ -37,6 +37,11 @@ body {
   min-width: 600px;
 }
 
+body.uber-frame #searchBox {
+  position: fixed;
+  z-index: 4;
+}
+
 div.disabled {
   color: #999;
 }
@@ -66,28 +71,6 @@ div.disabled {
 
 .frozen {
   position: fixed;
-}
-
-/* For touch-optimized UI, make the radio/checkbox input boxes in
- * options/preference pages easier to touch.
- * TODO(rbyers): We need to solve this more generally for all web pages
- * (crbug.com/99981), and perhaps temporarily for all WebUI (crbug.com/102482).
- */
-html[touch-optimized] div.radio > label > span,
-html[touch-optimized] div.checkbox > label > span {
-  -webkit-padding-start: 5px;
-}
-
-html[touch-optimized] label > input[type=checkbox],
-html[touch-optimized] label > input[type=radio] {
-  -webkit-transform: scale(1.4);
-}
-
-/* Override the font-size rule in shared_options.css file.
- * 16 px font-size proved to be more touch friendly. It increases the touchable
- * area for buttons and input boxes. */
-html[touch-optimized] body {
-  font-size: 100%;
 }
 
 #overlay-container-1 {
@@ -172,25 +155,6 @@ html[touch-optimized] body {
 .page list {
   /* Min height is a multiple of the list item height (32) */
   min-height: 192px;
-}
-
-section {
-  -webkit-padding-start: 18px;
-  margin-bottom: 24px;
-  margin-top: 8px;
-  max-width: 600px;
-}
-
-section:last-of-type {
-  margin-bottom: 0;
-}
-
-section > h3 {
-  -webkit-margin-start: -18px;
-}
-
-section > div:only-of-type {
-  -webkit-box-flex: 1;
 }
 
 .option {
@@ -316,9 +280,8 @@ list .row-delete-button {
   width: 16px;
 }
 
-list > *:not(:hover):not([lead]) .row-delete-button,
-list > *:not(:hover):not([selected]) .row-delete-button,
-list:not([hasElementFocus]) > *:not(:hover) .row-delete-button,
+list > *:not(:hover):not([selected]):not([lead]) .row-delete-button,
+list:not([hasElementFocus]) > *:not(:hover):not([selected]) .row-delete-button,
 list[disabled] .row-delete-button,
 list .row-delete-button[disabled] {
   opacity: 0;

@@ -10,7 +10,8 @@
 #include "base/path_service.h"
 #include "base/string_piece.h"
 
-TestContentClient::TestContentClient() {
+TestContentClient::TestContentClient()
+    : data_pack_(ui::ResourceHandle::kScaleFactor100x) {
   FilePath content_resources_pack_path;
   PathService::Get(base::DIR_MODULE, &content_resources_pack_path);
   content_resources_pack_path = content_resources_pack_path.Append(
@@ -35,6 +36,11 @@ void TestContentClient::AddNPAPIPlugins(
     webkit::npapi::PluginList* plugin_list) {
 }
 
+void TestContentClient::AddAdditionalSchemes(
+    std::vector<std::string>* standard_schemes,
+    std::vector<std::string>* savable_schemes) {
+}
+
 bool TestContentClient::HasWebUIScheme(const GURL& url) const {
   return false;
 }
@@ -44,8 +50,7 @@ bool TestContentClient::CanHandleWhileSwappedOut(const IPC::Message& msg) {
   return false;
 }
 
-std::string TestContentClient::GetUserAgent(bool* overriding) const {
-  *overriding = false;
+std::string TestContentClient::GetUserAgent() const {
   return std::string("TestContentClient");
 }
 

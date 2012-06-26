@@ -87,7 +87,7 @@ EGLSurface Display::CreateWindowSurface(EGLConfig config,
   if (!command_buffer->Initialize())
     return NULL;
 
-  gpu::gles2::ContextGroup::Ref group(new gpu::gles2::ContextGroup(true));
+  gpu::gles2::ContextGroup::Ref group(new gpu::gles2::ContextGroup(NULL, true));
 
   decoder_.reset(gpu::gles2::GLES2Decoder::Create(group.get()));
   if (!decoder_.get())
@@ -112,6 +112,7 @@ EGLSurface Display::CreateWindowSurface(EGLConfig config,
   std::vector<int32> attribs;
   if (!decoder_->Initialize(gl_surface_.get(),
                             gl_context_.get(),
+                            gl_surface_->IsOffscreen(),
                             gfx::Size(),
                             gpu::gles2::DisallowedFeatures(),
                             NULL,
@@ -176,6 +177,7 @@ EGLContext Display::CreateContext(EGLConfig config,
   bool share_resources = share_ctx != NULL;
   context_.reset(new gpu::gles2::GLES2Implementation(
       gles2_cmd_helper_.get(),
+      NULL,
       transfer_buffer_.get(),
       share_resources,
       true));

@@ -7,6 +7,8 @@
 #include "ash/shell.h"
 #include "ash/system/tray/system_tray_delegate.h"
 #include "ash/system/tray/tray_constants.h"
+#include "ash/system/tray/tray_item_view.h"
+#include "ash/system/tray/tray_views.h"
 #include "base/utf_string_conversions.h"
 #include "grit/ash_strings.h"
 #include "skia/ext/image_operations.h"
@@ -28,71 +30,11 @@
 
 namespace {
 
-const int kPaddingAroundButtons = 5;
-
 const int kUserInfoHorizontalPadding = 14;
 const int kUserInfoVerticalPadding = 10;
 const int kUserInfoPaddingBetweenItems = 3;
 
 const int kUserIconSize = 27;
-
-const SkColor kButtonStrokeColor = SkColorSetRGB(0xdd, 0xdd, 0xdd);
-
-// A custom textbutton with some extra vertical padding, and custom border,
-// alignment and hover-effects.
-class TrayButton : public views::TextButton {
- public:
-  TrayButton(views::ButtonListener* listener, const string16& text)
-      : views::TextButton(listener, text),
-        hover_(false),
-        hover_bg_(views::Background::CreateSolidBackground(SkColorSetARGB(
-               10, 0, 0, 0))),
-        hover_border_(views::Border::CreateSolidBorder(1, kButtonStrokeColor)) {
-    set_alignment(ALIGN_CENTER);
-    set_border(NULL);
-    set_focusable(true);
-  }
-
-  virtual ~TrayButton() {}
-
- private:
-  // Overridden from views::View.
-  virtual gfx::Size GetPreferredSize() OVERRIDE {
-    gfx::Size size = views::TextButton::GetPreferredSize();
-    size.Enlarge(0, 16);
-    return size;
-  }
-
-  virtual void OnMouseEntered(const views::MouseEvent& event) OVERRIDE {
-    hover_ = true;
-    SchedulePaint();
-  }
-
-  virtual void OnMouseExited(const views::MouseEvent& event) OVERRIDE {
-    hover_ = false;
-    SchedulePaint();
-  }
-
-  virtual void OnPaintBackground(gfx::Canvas* canvas) OVERRIDE {
-    if (hover_)
-      hover_bg_->Paint(canvas, this);
-    else
-      views::TextButton::OnPaintBackground(canvas);
-  }
-
-  virtual void OnPaintBorder(gfx::Canvas* canvas) OVERRIDE {
-    if (hover_)
-      hover_border_->Paint(*this, canvas);
-    else
-      views::TextButton::OnPaintBorder(canvas);
-  }
-
-  bool hover_;
-  scoped_ptr<views::Background> hover_bg_;
-  scoped_ptr<views::Border> hover_border_;
-
-  DISALLOW_COPY_AND_ASSIGN(TrayButton);
-};
 
 }  // namespace
 
@@ -137,21 +79,14 @@ class UserView : public views::View,
     bool guest = login_ == ash::user::LOGGED_IN_GUEST;
     bool kiosk = login_ == ash::user::LOGGED_IN_KIOSK;
 
-    views::View* button_container = new views::View;
-    views::BoxLayout *layout = new
-        views::BoxLayout(views::BoxLayout::kHorizontal,
-            kPaddingAroundButtons,
-            kPaddingAroundButtons,
-            -1);
-    layout->set_spread_blank_space(true);
-    button_container->SetLayoutManager(layout);
-
+    TrayPopupTextButtonContainer* button_container =
+        new TrayPopupTextButtonContainer;
     ui::ResourceBundle& bundle = ui::ResourceBundle::GetSharedInstance();
 
     if (!kiosk) {
-      shutdown_ = new TrayButton(this, bundle.GetLocalizedString(
+      shutdown_ = new TrayPopupTextButton(this, bundle.GetLocalizedString(
             IDS_ASH_STATUS_TRAY_SHUT_DOWN));
-      button_container->AddChildView(shutdown_);
+      button_container->AddTextButton(shutdown_);
     } else {
       views::Label* label = new views::Label;
       label->SetText(
@@ -162,18 +97,18 @@ class UserView : public views::View,
       button_container->AddChildView(label);
     }
 
-    signout_ = new TrayButton(this, bundle.GetLocalizedString(
+    signout_ = new TrayPopupTextButton(this, bundle.GetLocalizedString(
         guest ? IDS_ASH_STATUS_TRAY_EXIT_GUEST :
         kiosk ? IDS_ASH_STATUS_TRAY_EXIT_KIOSK :
                 IDS_ASH_STATUS_TRAY_SIGN_OUT));
     signout_->set_border(views::Border::CreateSolidSidedBorder(
           kiosk, 1, kiosk, kiosk || !guest, kButtonStrokeColor));
-    button_container->AddChildView(signout_);
+    button_container->AddTextButton(signout_);
 
     if (!guest && !kiosk) {
-      lock_ = new TrayButton(this, bundle.GetLocalizedString(
+      lock_ = new TrayPopupTextButton(this, bundle.GetLocalizedString(
             IDS_ASH_STATUS_TRAY_LOCK));
-      button_container->AddChildView(lock_);
+      button_container->AddTextButton(lock_);
     }
 
     AddChildView(button_container);
@@ -241,15 +176,15 @@ class UserView : public views::View,
   views::Label* email_;
   views::View* update_;
 
-  TrayButton* shutdown_;
-  TrayButton* signout_;
-  TrayButton* lock_;
+  TrayPopupTextButton* shutdown_;
+  TrayPopupTextButton* signout_;
+  TrayPopupTextButton* lock_;
 
   DISALLOW_COPY_AND_ASSIGN(UserView);
 };
 
 // A custom image view with rounded edges.
-class RoundedImageView : public views::View {
+class RoundedImageView : public TrayItemView {
  public:
   // Constructs a new rounded image view with rounded corners of radius
   // |corner_radius|.
@@ -268,19 +203,26 @@ class RoundedImageView : public views::View {
     // Try to get the best image quality for the avatar.
     resized_ = skia::ImageOperations::Resize(image_,
         skia::ImageOperations::RESIZE_BEST, size.width(), size.height());
-    PreferredSizeChanged();
-    SchedulePaint();
+    if (GetWidget() && visible()) {
+      PreferredSizeChanged();
+      SchedulePaint();
+    }
   }
 
-  // Overridden from views::View.
-  virtual gfx::Size GetPreferredSize() OVERRIDE {
+  // Overridden from TrayItemView.
+  virtual gfx::Size DesiredSize() OVERRIDE {
     return gfx::Size(image_size_.width() + GetInsets().width(),
                      image_size_.height() + GetInsets().height());
   }
 
+  virtual int GetAnimationDurationMS() OVERRIDE {
+    return 750;
+  }
+
+  // Overridden from views::View.
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE {
     View::OnPaint(canvas);
-    gfx::Rect image_bounds(GetPreferredSize());
+    gfx::Rect image_bounds(DesiredSize());
     image_bounds.Inset(GetInsets());
     const SkScalar kRadius = SkIntToScalar(corner_radius_);
     SkPath path;
@@ -298,7 +240,7 @@ class RoundedImageView : public views::View {
     paint.setShader(shader);
     paint.setXfermodeMode(SkXfermode::kSrcOver_Mode);
     shader->unref();
-    canvas->sk_canvas()->drawPath(path, paint);
+    canvas->DrawPath(path, paint);
   }
 
  private:
@@ -312,32 +254,29 @@ class RoundedImageView : public views::View {
 
 }  // namespace tray
 
-TrayUser::TrayUser() {
+TrayUser::TrayUser()
+    : user_(NULL),
+      avatar_(NULL) {
 }
 
 TrayUser::~TrayUser() {
 }
 
 views::View* TrayUser::CreateTrayView(user::LoginStatus status) {
-  avatar_.reset(new tray::RoundedImageView(kTrayRoundedBorderRadius));
-  if (status != user::LOGGED_IN_NONE && status != user::LOGGED_IN_KIOSK &&
-      status != user::LOGGED_IN_GUEST) {
-    avatar_->SetImage(
-        ash::Shell::GetInstance()->tray_delegate()->GetUserImage(),
-        gfx::Size(kUserIconSize, kUserIconSize));
-  } else {
-    avatar_->SetVisible(false);
-  }
+  CHECK(avatar_ == NULL);
+  avatar_ = new tray::RoundedImageView(kTrayRoundedBorderRadius);
   avatar_->set_border(views::Border::CreateEmptyBorder(0, 6, 0, 0));
-  return avatar_.get();
+  UpdateAfterLoginStatusChange(status);
+  return avatar_;
 }
 
 views::View* TrayUser::CreateDefaultView(user::LoginStatus status) {
   if (status == user::LOGGED_IN_NONE)
     return NULL;
 
-  user_.reset(new tray::UserView(status));
-  return user_.get();
+  CHECK(user_ == NULL);
+  user_ = new tray::UserView(status);
+  return user_;
 }
 
 views::View* TrayUser::CreateDetailedView(user::LoginStatus status) {
@@ -345,14 +284,26 @@ views::View* TrayUser::CreateDetailedView(user::LoginStatus status) {
 }
 
 void TrayUser::DestroyTrayView() {
-  avatar_.reset();
+  avatar_ = NULL;
 }
 
 void TrayUser::DestroyDefaultView() {
-  user_.reset();
+  user_ = NULL;
 }
 
 void TrayUser::DestroyDetailedView() {
+}
+
+void TrayUser::UpdateAfterLoginStatusChange(user::LoginStatus status) {
+  if (status != user::LOGGED_IN_NONE && status != user::LOGGED_IN_KIOSK &&
+      status != user::LOGGED_IN_GUEST) {
+    avatar_->SetImage(
+        ash::Shell::GetInstance()->tray_delegate()->GetUserImage(),
+        gfx::Size(kUserIconSize, kUserIconSize));
+    avatar_->SetVisible(true);
+  } else {
+    avatar_->SetVisible(false);
+  }
 }
 
 void TrayUser::OnUserUpdate() {

@@ -49,7 +49,6 @@ class MockURLRequestThrottlerEntry : public URLRequestThrottlerEntry {
     set_exponential_backoff_release_time(exponential_backoff_release_time);
     set_sliding_window_release_time(sliding_window_release_time);
   }
-  virtual ~MockURLRequestThrottlerEntry() {}
 
   void InitPolicy() {
     // Some tests become flaky if we have jitter.
@@ -101,6 +100,9 @@ class MockURLRequestThrottlerEntry : public URLRequestThrottlerEntry {
 
   TimeTicks fake_time_now_;
   MockBackoffEntry mock_backoff_entry_;
+
+ protected:
+  virtual ~MockURLRequestThrottlerEntry() {}
 };
 
 class MockURLRequestThrottlerManager : public URLRequestThrottlerManager {
@@ -180,7 +182,6 @@ class URLRequestThrottlerEntryTest : public testing::Test {
 
 // List of all histograms we care about in these unit tests.
 const char* kHistogramNames[] = {
-  "Throttling.CustomRetryAfterMs",
   "Throttling.FailureCountAtSuccess",
   "Throttling.PerceivedDowntime",
   "Throttling.RequestThrottled",
@@ -253,26 +254,6 @@ TEST_F(URLRequestThrottlerEntryTest, InterfaceNotDuringExponentialBackoff) {
   CalculateHistogramDeltas();
   ASSERT_EQ(2, samples_["Throttling.RequestThrottled"].counts(0));
   ASSERT_EQ(0, samples_["Throttling.RequestThrottled"].counts(1));
-}
-
-TEST_F(URLRequestThrottlerEntryTest, InterfaceUpdateRetryAfter) {
-  // If the response we received has a retry-after field,
-  // the request should be delayed.
-  MockURLRequestThrottlerHeaderAdapter header_w_delay_header("5.5", "", 200);
-  entry_->UpdateWithResponse("", &header_w_delay_header);
-  EXPECT_GT(entry_->GetExponentialBackoffReleaseTime(), entry_->fake_time_now_)
-      << "When the server put a positive value in retry-after we should "
-         "increase release_time";
-
-  entry_->ResetToBlank(now_);
-  MockURLRequestThrottlerHeaderAdapter header_w_negative_header(
-      "-5.5", "", 200);
-  entry_->UpdateWithResponse("", &header_w_negative_header);
-  EXPECT_EQ(entry_->GetExponentialBackoffReleaseTime(), entry_->fake_time_now_)
-      << "When given a negative value, it should not change the release_time";
-
-  CalculateHistogramDeltas();
-  ASSERT_EQ(1, samples_["Throttling.CustomRetryAfterMs"].TotalCount());
 }
 
 TEST_F(URLRequestThrottlerEntryTest, InterfaceUpdateFailure) {

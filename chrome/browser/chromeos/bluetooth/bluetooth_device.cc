@@ -4,23 +4,27 @@
 
 #include "chrome/browser/chromeos/bluetooth/bluetooth_device.h"
 
+#include <map>
 #include <string>
 #include <vector>
 
 #include "base/bind.h"
 #include "base/logging.h"
+#include "base/memory/weak_ptr.h"
 #include "base/string16.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/bluetooth/bluetooth_adapter.h"
-#include "chrome/browser/chromeos/dbus/bluetooth_adapter_client.h"
-#include "chrome/browser/chromeos/dbus/bluetooth_agent_service_provider.h"
-#include "chrome/browser/chromeos/dbus/bluetooth_device_client.h"
-#include "chrome/browser/chromeos/dbus/bluetooth_input_client.h"
-#include "chrome/browser/chromeos/dbus/introspectable_client.h"
+#include "chrome/browser/chromeos/bluetooth/bluetooth_service_record.h"
+#include "chrome/browser/chromeos/bluetooth/bluetooth_socket.h"
 #include "chrome/browser/chromeos/dbus/introspect_util.h"
-#include "chrome/browser/chromeos/dbus/dbus_thread_manager.h"
+#include "chromeos/dbus/bluetooth_adapter_client.h"
+#include "chromeos/dbus/bluetooth_agent_service_provider.h"
+#include "chromeos/dbus/bluetooth_device_client.h"
+#include "chromeos/dbus/bluetooth_input_client.h"
+#include "chromeos/dbus/dbus_thread_manager.h"
+#include "chromeos/dbus/introspectable_client.h"
 #include "dbus/bus.h"
 #include "dbus/object_path.h"
 #include "grit/generated_resources.h"
@@ -52,7 +56,7 @@ void BluetoothDevice::Update(
   std::string address = properties->address.value();
   std::string name = properties->name.value();
   uint32 bluetooth_class = properties->bluetooth_class.value();
-  const std::vector<std::string> &uuids = properties->uuids.value();
+  const std::vector<std::string>& uuids = properties->uuids.value();
 
   if (!address.empty())
     address_ = address;
@@ -106,7 +110,17 @@ BluetoothDevice::DeviceType BluetoothDevice::GetDeviceType() const {
       switch ((bluetooth_class_ & 0xc0) >> 6) {
         case 0x00:
           // "Not a keyboard or pointing device."
-          return DEVICE_PERIPHERAL;
+          switch ((bluetooth_class_ & 0x01e) >> 2) {
+            case 0x01:
+              // Joystick.
+              return DEVICE_JOYSTICK;
+            case 0x02:
+              // Gamepad.
+              return DEVICE_GAMEPAD;
+            default:
+              return DEVICE_PERIPHERAL;
+          }
+          break;
         case 0x01:
           // Keyboard.
           return DEVICE_KEYBOARD;
@@ -133,7 +147,9 @@ BluetoothDevice::DeviceType BluetoothDevice::GetDeviceType() const {
 
 bool BluetoothDevice::IsSupported() const {
   DeviceType device_type = GetDeviceType();
-  return (device_type == DEVICE_KEYBOARD ||
+  return (device_type == DEVICE_JOYSTICK ||
+          device_type == DEVICE_GAMEPAD ||
+          device_type == DEVICE_KEYBOARD ||
           device_type == DEVICE_MOUSE ||
           device_type == DEVICE_TABLET ||
           device_type == DEVICE_KEYBOARD_MOUSE_COMBO);
@@ -151,6 +167,12 @@ string16 BluetoothDevice::GetAddressWithLocalizedDeviceTypeName() const {
                                             address);
     case DEVICE_MODEM:
       return l10n_util::GetStringFUTF16(IDS_BLUETOOTH_DEVICE_MODEM,
+                                        address);
+    case DEVICE_JOYSTICK:
+      return l10n_util::GetStringFUTF16(IDS_BLUETOOTH_DEVICE_JOYSTICK,
+                                        address);
+    case DEVICE_GAMEPAD:
+      return l10n_util::GetStringFUTF16(IDS_BLUETOOTH_DEVICE_GAMEPAD,
                                         address);
     case DEVICE_KEYBOARD:
       return l10n_util::GetStringFUTF16(IDS_BLUETOOTH_DEVICE_KEYBOARD,
@@ -172,6 +194,51 @@ string16 BluetoothDevice::GetAddressWithLocalizedDeviceTypeName() const {
 bool BluetoothDevice::IsConnected() const {
   // TODO(keybuk): examine protocol-specific connected state, such as Input
   return connected_;
+}
+
+bool BluetoothDevice::ProvidesServiceWithUUID(const std::string& uuid) const {
+  const BluetoothDevice::ServiceList& services = GetServices();
+  for (BluetoothDevice::ServiceList::const_iterator j = services.begin();
+      j != services.end(); ++j) {
+    if (*j == uuid)
+      return true;
+  }
+  return false;
+}
+
+void BluetoothDevice::SearchServicesForNameCallback(
+    const std::string& name,
+    ProvidesServiceCallback callback,
+    const dbus::ObjectPath& object_path,
+    const BluetoothDeviceClient::ServiceMap& service_map,
+    bool success) {
+  if (!success) {
+    callback.Run(false);
+    return;
+  }
+
+  for (BluetoothDeviceClient::ServiceMap::const_iterator i =
+      service_map.begin(); i != service_map.end(); ++i) {
+    BluetoothServiceRecord service_record(address(), i->second);
+    if (service_record.name() == name) {
+      callback.Run(true);
+      return;
+    }
+  }
+
+  callback.Run(false);
+}
+
+void BluetoothDevice::ProvidesServiceWithName(const std::string& name,
+    ProvidesServiceCallback callback) {
+  DBusThreadManager::Get()->GetBluetoothDeviceClient()->
+      DiscoverServices(
+          object_path_,
+          "",  // empty pattern to browse all services
+          base::Bind(&BluetoothDevice::SearchServicesForNameCallback,
+                     weak_ptr_factory_.GetWeakPtr(),
+                     name,
+                     callback));
 }
 
 void BluetoothDevice::Connect(PairingDelegate* pairing_delegate,
@@ -403,6 +470,47 @@ void BluetoothDevice::Forget(ErrorCallback error_callback) {
                    base::Bind(&BluetoothDevice::ForgetCallback,
                               weak_ptr_factory_.GetWeakPtr(),
                               error_callback));
+}
+
+
+void BluetoothDevice::ConnectToMatchingService(
+    const std::string& service_uuid,
+    SocketCallback callback,
+    const dbus::ObjectPath& object_path,
+    const BluetoothDeviceClient::ServiceMap& service_map,
+    bool success) {
+  if (success) {
+    // If multiple service records are found, use the first one that works.
+    for (BluetoothDeviceClient::ServiceMap::const_iterator i =
+        service_map.begin(); i != service_map.end(); ++i) {
+      BluetoothServiceRecord service_record(address(), i->second);
+      scoped_refptr<BluetoothSocket> socket(
+          BluetoothSocket::CreateBluetoothSocket(service_record));
+      if (socket.get() != NULL) {
+        callback.Run(socket);
+        break;
+      }
+    }
+  }
+  callback.Run(NULL);
+}
+
+void BluetoothDevice::ConnectToService(const std::string& service_uuid,
+                                       SocketCallback callback) {
+  // quick sanity check
+  if (!ProvidesServiceWithUUID(service_uuid)) {
+    callback.Run(NULL);
+    return;
+  }
+
+  DBusThreadManager::Get()->GetBluetoothDeviceClient()->
+      DiscoverServices(
+          object_path_,
+          service_uuid,
+          base::Bind(&BluetoothDevice::ConnectToMatchingService,
+                     weak_ptr_factory_.GetWeakPtr(),
+                     service_uuid,
+                     callback));
 }
 
 void BluetoothDevice::ForgetCallback(ErrorCallback error_callback,

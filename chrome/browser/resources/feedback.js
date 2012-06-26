@@ -3,8 +3,8 @@
 // found in the LICENSE file.
 
 // Constants.
-var FEEDBACK_LANDING_PAGE =
-    'http://www.google.com/support/chrome/go/feedback_confirmation'
+/** @const */ var FEEDBACK_LANDING_PAGE =
+    'http://www.google.com/support/chrome/go/feedback_confirmation';
 
 var selectedThumbnailDivId = '';
 var selectedThumbnailId = '';
@@ -14,12 +14,14 @@ var savedThumbnailIds = [];
 savedThumbnailIds['current-screenshots'] = '';
 savedThumbnailIds['saved-screenshots'] = '';
 
-var categoryTag = "";
+var categoryTag = '';
 
 var localStrings = new LocalStrings();
 
 /**
  * Selects an image thumbnail in the specified div.
+ * @param {string} divId The id of the div to search in.
+ * @param {string} thumbnailId The id of the thumbnail to search for.
  */
 function selectImage(divId, thumbnailId) {
   var thumbnailDivs = $(divId).children;
@@ -43,6 +45,8 @@ function selectImage(divId, thumbnailId) {
 
 /**
  * Adds an image thumbnail to the specified div.
+ * @param {string} divId The id of the div to add a screenshot to.
+ * @param {string} screenshot The URL of the screenshot being added.
  */
 function addScreenshot(divId, screenshot) {
   var thumbnailDiv = document.createElement('div');
@@ -86,9 +90,10 @@ function disableScreenshots() {
 }
 
 /**
- * Send's the report; after the report is sent, we need to be redirected to
+ * Sends the report; after the report is sent, we need to be redirected to
  * the landing page, but we shouldn't be able to navigate back, hence
  * we open the landing page in a new tab and sendReport closes this tab.
+ * @return {boolean} True if the report was sent.
  */
 function sendReport() {
   if ($('description-text').value.length == 0) {
@@ -110,7 +115,7 @@ function sendReport() {
 
   // Add chromeos data if it exists.
   if ($('user-email-text') && $('sys-info-checkbox')) {
-    var userEmail= $('user-email-text').textContent;
+    var userEmail = $('user-email-text').textContent;
     if (!$('user-email-checkbox').checked)
       userEmail = '';
     reportArray = reportArray.concat([userEmail,
@@ -123,9 +128,13 @@ function sendReport() {
   return true;
 }
 
-function cancel() {
-  chrome.send('cancel', []);
-  return true;
+/**
+ * Click listener for the cancel button.
+ * @param {Event} e The click event being handled.
+ */
+function cancel(e) {
+  chrome.send('cancel');
+  e.preventDefault();
 }
 
 /**
@@ -141,8 +150,6 @@ function currentSelected() {
   if (selectedThumbnailDivId != 'current-screenshots')
     selectImage('current-screenshots',
                 savedThumbnailIds['current-screenshots']);
-
-  return true;
 }
 
 /**
@@ -154,14 +161,12 @@ function savedSelected() {
 
   if ($('saved-screenshots').childElementCount == 0) {
     // setupSavedScreenshots will take care of changing visibility
-    chrome.send('refreshSavedScreenshots', []);
+    chrome.send('refreshSavedScreenshots');
   } else {
     $('saved-screenshots').hidden = false;
     if (selectedThumbnailDivId != 'saved-screenshots')
       selectImage('saved-screenshots', savedThumbnailIds['saved-screenshots']);
   }
-
-  return true;
 }
 
 
@@ -251,9 +256,9 @@ function load() {
   // Pick up the category tag (for most cases this will be an empty string)
   categoryTag = parameters['categoryTag'];
 
-  chrome.send('getDialogDefaults', []);
-  chrome.send('refreshCurrentScreenshot', []);
-};
+  chrome.send('getDialogDefaults');
+  chrome.send('refreshCurrentScreenshot');
+}
 
 function setupCurrentScreenshot(screenshot) {
   addScreenshot('current-screenshots', screenshot);

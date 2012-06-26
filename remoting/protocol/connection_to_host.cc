@@ -16,6 +16,7 @@
 #include "remoting/protocol/client_control_dispatcher.h"
 #include "remoting/protocol/client_event_dispatcher.h"
 #include "remoting/protocol/client_stub.h"
+#include "remoting/protocol/clipboard_stub.h"
 #include "remoting/protocol/errors.h"
 #include "remoting/protocol/jingle_session_manager.h"
 #include "remoting/protocol/pepper_transport_factory.h"
@@ -35,12 +36,22 @@ ConnectionToHost::ConnectionToHost(
       allow_nat_traversal_(allow_nat_traversal),
       event_callback_(NULL),
       client_stub_(NULL),
+      clipboard_stub_(NULL),
       video_stub_(NULL),
       state_(CONNECTING),
       error_(OK) {
 }
 
 ConnectionToHost::~ConnectionToHost() {
+}
+
+ClipboardStub* ConnectionToHost::clipboard_stub() {
+  return &clipboard_forwarder_;
+}
+
+HostStub* ConnectionToHost::host_stub() {
+  // TODO(wez): Add a HostFilter class, equivalent to input filter.
+  return control_dispatcher_.get();
 }
 
 InputStub* ConnectionToHost::input_stub() {
@@ -54,9 +65,11 @@ void ConnectionToHost::Connect(scoped_refptr<XmppProxy> xmpp_proxy,
                                scoped_ptr<Authenticator> authenticator,
                                HostEventCallback* event_callback,
                                ClientStub* client_stub,
+                               ClipboardStub* clipboard_stub,
                                VideoStub* video_stub) {
   event_callback_ = event_callback;
   client_stub_ = client_stub;
+  clipboard_stub_ = clipboard_stub;
   video_stub_ = video_stub;
   authenticator_ = authenticator.Pass();
 
@@ -73,9 +86,9 @@ void ConnectionToHost::Connect(scoped_refptr<XmppProxy> xmpp_proxy,
 
   scoped_ptr<TransportFactory> transport_factory(
       new PepperTransportFactory(pp_instance_));
-  session_manager_.reset(new JingleSessionManager(transport_factory.Pass()));
-  session_manager_->Init(signal_strategy_.get(), this,
-                         NetworkSettings(allow_nat_traversal_));
+  session_manager_.reset(new JingleSessionManager(
+      transport_factory.Pass(), true));
+  session_manager_->Init(signal_strategy_.get(), this);
 }
 
 void ConnectionToHost::Disconnect(const base::Closure& shutdown_task) {
@@ -165,6 +178,7 @@ void ConnectionToHost::OnSessionStateChange(
       control_dispatcher_->Init(session_.get(), base::Bind(
           &ConnectionToHost::OnChannelInitialized, base::Unretained(this)));
       control_dispatcher_->set_client_stub(client_stub_);
+      control_dispatcher_->set_clipboard_stub(clipboard_stub_);
 
       event_dispatcher_.reset(new ClientEventDispatcher());
       event_dispatcher_->Init(session_.get(), base::Bind(
@@ -210,7 +224,8 @@ void ConnectionToHost::NotifyIfChannelsReady() {
       event_dispatcher_.get() && event_dispatcher_->is_connected() &&
       video_reader_.get() && video_reader_->is_connected() &&
       state_ == CONNECTING) {
-    // Start forwarding input events to |event_dispatcher_|.
+    // Start forwarding clipboard and input events.
+    clipboard_forwarder_.set_clipboard_stub(control_dispatcher_.get());
     event_forwarder_.set_input_stub(event_dispatcher_.get());
     SetState(CONNECTED, OK);
   }
@@ -224,6 +239,7 @@ void ConnectionToHost::CloseOnError(ErrorCode error) {
 void ConnectionToHost::CloseChannels() {
   control_dispatcher_.reset();
   event_dispatcher_.reset();
+  clipboard_forwarder_.set_clipboard_stub(NULL);
   event_forwarder_.set_input_stub(NULL);
   video_reader_.reset();
 }

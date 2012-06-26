@@ -1,4 +1,5 @@
 include_rules = [
+  "+breakpad",
   "+chrome/app",
   "+chrome/app/locales",
   "+chrome/installer",
@@ -24,6 +25,7 @@ include_rules = [
   "+third_party/cros",
   "+third_party/cros_system_api",
   "+webkit/database",
+  "+webkit/dom_storage",  # Defines an ENABLE_NEW_DOM_STORAGE_BACKEND flag.
   "+webkit/forms",  # Defines some types that are marshalled over IPC.
   "+webkit/glue",  # Defines some types that are marshalled over IPC.
   "+webkit/plugins",  # Defines some types that are marshalled over IPC.
@@ -34,26 +36,20 @@ include_rules = [
   # TODO(jam): Need to remove all these and use only content/public. BUG=98716
   # DO NOT ADD ANY MORE ITEMS TO THE LIST BELOW!
   "+content/browser/geolocation/wifi_data_provider_common.h",
-  # TODO(asanka): see http://codereview.chromium.org/9141031
-  "+content/browser/download/download_state_info.h",
-  # TODO(ben): http://crbug.com/118410 will fix the following:
-  "+content/browser/renderer_host/render_view_host_factory.h",
-  "+content/browser/tab_contents/tab_contents_view_helper.h",
-  "+content/browser/tab_contents/web_contents_drag_win.h",
-  "+content/browser/tab_contents/web_drag_dest_win.h",
   # DO NOT ADD ANY MORE ITEMS TO THE ABOVE LIST!
 
   "-content/common",
 
   # Other libraries.
-  "+chrome/third_party/hunspell",
   "+chrome/third_party/mozilla_security_manager",
   "+libxml",  # For search engine definition parsing.
   "+third_party/apple_sample_code",  # Apple code ImageAndTextCell.
   "+third_party/cld",
   "+third_party/expat",
   "+third_party/iaccessible2",
+  "+third_party/icu",
   "+third_party/isimpledom",
+  "+third_party/leveldatabase",
   "+third_party/libevent",  # For the remote V8 debugging server
   "+third_party/libjingle",
   "+third_party/protobuf/src/google/protobuf",

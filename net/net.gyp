@@ -37,9 +37,14 @@
         '../third_party/zlib/zlib.gyp:zlib',
         '../v8/tools/gyp/v8.gyp:v8',
         'net_resources',
-        'ssl_false_start_blacklist_process#host',
       ],
       'sources': [
+        'android/net_jni_registrar.cc',
+        'android/net_jni_registrar.h',
+        'android/network_change_notifier.cc',
+        'android/network_change_notifier.h',
+        'android/network_change_notifier_factory.cc',
+        'android/network_change_notifier_factory.h',
         'android/network_library.cc',
         'android/network_library.h',
         'base/address_family.h',
@@ -109,9 +114,9 @@
         'base/escape.cc',
         'base/escape.h',
         'base/escape_icu.cc',
-        'base/expiring_cache.h',
         'base/ev_root_ca_metadata.cc',
         'base/ev_root_ca_metadata.h',
+        'base/expiring_cache.h',
         'base/file_stream.cc',
         'base/file_stream.h',
         'base/file_stream_metrics.cc',
@@ -239,13 +244,13 @@
         'base/ssl_config_service.h',
         'base/ssl_config_service_defaults.cc',
         'base/ssl_config_service_defaults.h',
-        'base/ssl_false_start_blacklist.cc',
-        'base/ssl_false_start_blacklist.h',
         'base/ssl_info.cc',
         'base/ssl_info.h',
         'base/static_cookie_policy.cc',
         'base/static_cookie_policy.h',
         'base/sys_addrinfo.h',
+        'base/tcp_listen_socket.cc',
+        'base/tcp_listen_socket.h',
         'base/test_data_stream.cc',
         'base/test_data_stream.h',
         'base/test_root_certs.cc',
@@ -256,6 +261,7 @@
         'base/test_root_certs_win.cc',
         'base/transport_security_state.cc',
         'base/transport_security_state.h',
+        'base/transport_security_state_static.h',
         'base/upload_data.cc',
         'base/upload_data.h',
         'base/upload_data_stream.cc',
@@ -371,6 +377,8 @@
         'dns/dns_transaction.h',
         'dns/file_path_watcher_wrapper.cc',
         'dns/file_path_watcher_wrapper.h',
+        'dns/notify_watcher_mac.cc',
+        'dns/notify_watcher_mac.h',
         'dns/serial_worker.cc',
         'dns/serial_worker.h',
         'ftp/ftp_auth_cache.cc',
@@ -599,6 +607,7 @@
         'socket/client_socket_pool_manager.h',
         'socket/client_socket_pool_manager_impl.cc',
         'socket/client_socket_pool_manager_impl.h',
+        'socket/next_proto.h',
         'socket/nss_ssl_util.cc',
         'socket/nss_ssl_util.h',
         'socket/server_socket.h',
@@ -679,8 +688,6 @@
         'spdy/spdy_session.h',
         'spdy/spdy_session_pool.cc',
         'spdy/spdy_session_pool.h',
-        'spdy/spdy_settings_storage.cc',
-        'spdy/spdy_settings_storage.h',
         'spdy/spdy_stream.cc',
         'spdy/spdy_stream.h',
         'spdy/spdy_websocket_stream.cc',
@@ -714,6 +721,8 @@
         'url_request/url_request_about_job.h',
         'url_request/url_request_context.cc',
         'url_request/url_request_context.h',
+        'url_request/url_request_context_builder.cc',
+        'url_request/url_request_context_builder.h',
         'url_request/url_request_context_getter.cc',
         'url_request/url_request_context_getter.h',
         'url_request/url_request_context_storage.cc',
@@ -772,28 +781,13 @@
       'export_dependent_settings': [
         '../base/base.gyp:base',
       ],
-      'actions': [
-        {
-          'action_name': 'ssl_false_start_blacklist',
-          'inputs': [
-            '<(PRODUCT_DIR)/<(EXECUTABLE_PREFIX)ssl_false_start_blacklist_process<(EXECUTABLE_SUFFIX)',
-            'base/ssl_false_start_blacklist.txt',
-          ],
-          'outputs': [
-            '<(SHARED_INTERMEDIATE_DIR)/net/base/ssl_false_start_blacklist_data.cc',
-          ],
-          'action':
-            ['<(PRODUCT_DIR)/<(EXECUTABLE_PREFIX)ssl_false_start_blacklist_process<(EXECUTABLE_SUFFIX)',
-             'base/ssl_false_start_blacklist.txt',
-              '<(SHARED_INTERMEDIATE_DIR)/net/base/ssl_false_start_blacklist_data.cc',
-            ],
-          'message': 'Generating SSL False Start blacklist',
-          'process_outputs_as_sources': 1,
-        },
-      ],
       'conditions': [
         ['chromeos==1', {
           'sources!': [
+             'base/network_change_notifier_linux.cc',
+             'base/network_change_notifier_linux.h',
+             'base/network_change_notifier_netlink_linux.cc',
+             'base/network_change_notifier_netlink_linux.h',
              'proxy/proxy_config_service_linux.cc',
              'proxy/proxy_config_service_linux.h',
           ],
@@ -996,11 +990,8 @@
             ],
             'dependencies': [
               '../build/android/system.gyp:ssl',
-            ],
-            'sources/': [
-              # TODO(jingzhao): The below files are excluded because of the
-              # missing JNI, add them back when JNI is ready.
-              ['exclude', '^android/'],
+              'net_java',
+              'net_jni_headers',
             ],
           }, {  # else OS! = "android"
             'defines': [
@@ -1045,6 +1036,7 @@
         'base/backoff_entry_unittest.cc',
         'base/big_endian_unittest.cc',
         'base/cert_database_nss_unittest.cc',
+        'base/cert_verify_proc_unittest.cc',
         'base/crl_set_unittest.cc',
         'base/data_url_unittest.cc',
         'base/default_server_bound_cert_store_unittest.cc',
@@ -1064,8 +1056,6 @@
         'base/host_resolver_impl_unittest.cc',
         'base/ip_endpoint_unittest.cc',
         'base/keygen_handler_unittest.cc',
-        'base/listen_socket_unittest.cc',
-        'base/listen_socket_unittest.h',
         'base/mapped_host_resolver_unittest.cc',
         'base/mime_sniffer_unittest.cc',
         'base/mime_util_unittest.cc',
@@ -1088,8 +1078,9 @@
         'base/ssl_cipher_suite_names_unittest.cc',
         'base/ssl_client_auth_cache_unittest.cc',
         'base/ssl_config_service_unittest.cc',
-        'base/ssl_false_start_blacklist_unittest.cc',
         'base/static_cookie_policy_unittest.cc',
+        'base/tcp_listen_socket_unittest.cc',
+        'base/tcp_listen_socket_unittest.h',
         'base/test_certificate_data.h',
         'base/test_completion_callback_unittest.cc',
         'base/transport_security_state_unittest.cc',
@@ -1151,7 +1142,6 @@
         'http/http_content_disposition_unittest.cc',
         'http/http_network_layer_unittest.cc',
         'http/http_network_transaction_spdy3_unittest.cc',
-        'http/http_network_transaction_spdy21_unittest.cc',
         'http/http_network_transaction_spdy2_unittest.cc',
         'http/http_pipelined_connection_impl_unittest.cc',
         'http/http_pipelined_host_forced_unittest.cc',
@@ -1161,7 +1151,6 @@
         'http/http_pipelined_host_test_util.h',
         'http/http_pipelined_network_transaction_unittest.cc',
         'http/http_proxy_client_socket_pool_spdy2_unittest.cc',
-        'http/http_proxy_client_socket_pool_spdy21_unittest.cc',
         'http/http_proxy_client_socket_pool_spdy3_unittest.cc',
         'http/http_request_headers_unittest.cc',
         'http/http_response_body_drainer_unittest.cc',
@@ -1224,8 +1213,8 @@
         'spdy/spdy_framer_test.cc',
         'spdy/spdy_http_stream_spdy3_unittest.cc',
         'spdy/spdy_http_stream_spdy2_unittest.cc',
+        'spdy/spdy_http_utils_unittest.cc',
         'spdy/spdy_network_transaction_spdy3_unittest.cc',
-        'spdy/spdy_network_transaction_spdy21_unittest.cc',
         'spdy/spdy_network_transaction_spdy2_unittest.cc',
         'spdy/spdy_protocol_test.cc',
         'spdy/spdy_proxy_client_socket_spdy3_unittest.cc',
@@ -1252,6 +1241,7 @@
         'tools/dump_cache/url_utilities.cc',
         'tools/dump_cache/url_utilities_unittest.cc',
         'udp/udp_socket_unittest.cc',
+        'url_request/url_request_context_builder_unittest.cc',
         'url_request/url_request_job_factory_unittest.cc',
         'url_request/url_request_job_unittest.cc',
         'url_request/url_request_throttler_simulation_unittest.cc',
@@ -1269,6 +1259,7 @@
       'conditions': [
         ['chromeos==1', {
           'sources!': [
+             'base/network_change_notifier_linux_unittest.cc',
              'proxy/proxy_config_service_linux_unittest.cc',
           ],
         }],
@@ -1376,63 +1367,27 @@
       'dependencies': [
         'net_unittests',
       ],
+      'includes': [
+        'net_unittests.isolate',
+      ],
       'actions': [
-        {
-          'action_name': 'response_file',
-          'inputs': [
-            '<(PRODUCT_DIR)/net_unittests<(EXECUTABLE_SUFFIX)',
-            '<(DEPTH)/testing/test_env.py',
-            '<(DEPTH)/testing/xvfb.py',
-            '<(DEPTH)/third_party/pyftpdlib/src/pyftpdlib/__init__.py',
-            '<(DEPTH)/third_party/pyftpdlib/src/pyftpdlib/ftpserver.py',
-          ],
-          'conditions': [
-            ['OS=="linux"', {
-              'inputs': [
-                '<(PRODUCT_DIR)/xdisplaycheck<(EXECUTABLE_SUFFIX)',
-              ],
-            }],
-          ],
-          'outputs': [
-            '<(PRODUCT_DIR)/net_unittests.inputs',
-          ],
-          'action': [
-            'python',
-            '-c',
-            'import sys; '
-                'open(sys.argv[1], \'w\').write(\'\\n\'.join(sys.argv[2:]))',
-            '<@(_outputs)',
-            '<@(_inputs)',
-          ],
-        },
         {
           'action_name': 'isolate',
           'inputs': [
-            '<(PRODUCT_DIR)/net_unittests.inputs',
+            'net_unittests.isolate',
+            '<@(isolate_dependency_tracked)',
           ],
           'outputs': [
             '<(PRODUCT_DIR)/net_unittests.results',
           ],
           'action': [
             'python',
-            '<(DEPTH)/tools/isolate/isolate.py',
-            '--mode=<(tests_run)',
-            '--root', '<(DEPTH)',
+            '../tools/isolate/isolate.py',
+            '--mode', '<(tests_run)',
+            '--variable', 'PRODUCT_DIR', '<(PRODUCT_DIR)',
+            '--variable', 'OS', '<(OS)',
             '--result', '<@(_outputs)',
-            '--files', '<@(_inputs)',
-            # Directories can't be tracked by build tools (make, msbuild, xcode,
-            # etc) so we just put it on the command line without specifying it
-            # as an input.
-            # TODO(maruel): Revisit the support for this at all and list each
-            # individual test files instead.
-            'data/',
-            'tools/testserver/',
-            '<(DEPTH)/third_party/tlslite/tlslite/',
-            '--',
-            # Wraps net_unittests under xvfb.
-            '<(DEPTH)/testing/xvfb.py',
-            '<(PRODUCT_DIR)',
-            '<(PRODUCT_DIR)/net_unittests<(EXECUTABLE_SUFFIX)',
+            'net_unittests.isolate',
           ],
         },
       ],
@@ -1532,6 +1487,8 @@
       'sources': [
         'base/cert_test_util.cc',
         'base/cert_test_util.h',
+        'base/mock_cert_verifier.cc',
+        'base/mock_cert_verifier.h',
         'base/mock_file_stream.cc',
         'base/mock_file_stream.h',
         'base/mock_host_resolver.cc',
@@ -1713,29 +1670,6 @@
         'tools/crl_set_dump/crl_set_dump.cc',
       ],
     },
-    {
-      'target_name': 'ssl_false_start_blacklist_process',
-      'type': 'executable',
-      'toolsets': ['host'],
-      'dependencies': [
-        '../base/base.gyp:base',
-        '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
-      ],
-      'include_dirs': [
-        '..',
-      ],
-      'sources': [
-        'base/ssl_false_start_blacklist_process.cc',
-        'base/ssl_false_start_blacklist.h',
-      ],
-      'conditions': [
-        ['OS == "android" and host_os == "linux"', {
-          'ldflags': [
-            '-ldl',
-          ],
-        }],
-      ],
-    },
   ],
   'conditions': [
      ['os_posix == 1 and OS != "mac" and OS != "android"', {
@@ -1861,6 +1795,37 @@
          },
        ]
      }],
+    ['OS=="android"', {
+      'targets': [
+        {
+          'target_name': 'net_jni_headers',
+          'type': 'none',
+          'variables': {
+            'java_sources': [
+              'android/java/org/chromium/net/AndroidNetworkLibrary.java',
+              'android/java/org/chromium/net/NetworkChangeNotifier.java',
+            ],
+            'jni_headers': [
+              '<(SHARED_INTERMEDIATE_DIR)/net/jni/android_network_library_jni.h',
+              '<(SHARED_INTERMEDIATE_DIR)/net/jni/network_change_notifier_jni.h',
+            ],
+          },
+          'includes': [ '../build/jni_generator.gypi' ],
+        },
+        {
+          'target_name': 'net_java',
+          'type': 'none',
+          'variables': {
+            'package_name': 'net',
+            'java_in_dir': '../net/android/java',
+          },
+          'dependencies': [
+            '../base/base.gyp:base_java',
+          ],
+          'includes': [ '../build/java.gypi' ],
+        },
+      ],
+    }],
     ['OS=="win"', {
       'targets': [
         {

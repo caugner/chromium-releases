@@ -171,7 +171,7 @@
         '../ipc/ipc.gyp:test_support_ipc',
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
-        '../ui/gfx/surface/surface.gyp:surface',
+        '../ui/surface/surface.gyp:surface',
       ],
       'sources': [
         'proxy/run_all_unittests.cc',
@@ -222,6 +222,16 @@
           }],
         ],
       },
+    },
+    {
+      'target_name': 'ppapi_example_mouse_cursor',
+      'dependencies': [
+        'ppapi_example_skeleton',
+        'ppapi.gyp:ppapi_cpp',
+      ],
+      'sources': [
+        'examples/mouse_cursor/mouse_cursor.cc',
+      ],
     },
     {
       'target_name': 'ppapi_example_mouse_lock',

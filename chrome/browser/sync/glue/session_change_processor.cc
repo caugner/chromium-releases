@@ -9,11 +9,10 @@
 
 #include "base/logging.h"
 #include "chrome/browser/extensions/extension_tab_helper.h"
+#include "chrome/browser/history/history_notifications.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/api/sync_error.h"
 #include "chrome/browser/sync/glue/session_model_associator.h"
-#include "chrome/browser/sync/internal_api/change_record.h"
-#include "chrome/browser/sync/internal_api/read_node.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/ui/sync/tab_contents_wrapper_synced_tab_delegate.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
@@ -24,7 +23,11 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/web_contents.h"
+#include "sync/internal_api/change_record.h"
+#include "sync/internal_api/read_node.h"
 #include "sync/protocol/session_specifics.pb.h"
+#include "sync/syncable/model_type.h"
+#include "sync/syncable/model_type_payload_map.h"
 
 using content::BrowserThread;
 using content::NavigationController;
@@ -91,6 +94,14 @@ void SessionChangeProcessor::Observe(
   // Track which windows and/or tabs are modified.
   std::vector<SyncedTabDelegate*> modified_tabs;
   switch (type) {
+    case chrome::NOTIFICATION_FAVICON_CHANGED: {
+      content::Details<history::FaviconChangeDetails> favicon_details(details);
+      session_model_associator_->FaviconsUpdated(favicon_details->urls);
+      // Note: we favicon notifications don't affect tab contents, so we return
+      // here instead of continuing on to reassociate tabs/windows.
+      return;
+    }
+
     case chrome::NOTIFICATION_BROWSER_OPENED: {
       Browser* browser = content::Source<Browser>(source).ptr();
       if (!browser || browser->profile() != profile_) {
@@ -100,7 +111,7 @@ void SessionChangeProcessor::Observe(
       break;
     }
 
-    case content::NOTIFICATION_TAB_PARENTED: {
+    case chrome::NOTIFICATION_TAB_PARENTED: {
       SyncedTabDelegate* tab =
           content::Source<TabContentsWrapper>(source).ptr()->
               synced_tab_delegate();
@@ -128,13 +139,20 @@ void SessionChangeProcessor::Observe(
       break;
     }
 
-    case content::NOTIFICATION_TAB_CLOSED: {
-      SyncedTabDelegate* tab = ExtractSyncedTabDelegate(source);
+    case content::NOTIFICATION_WEB_CONTENTS_DESTROYED: {
+      TabContentsWrapper* tab_contents_wrapper =
+          TabContentsWrapper::GetCurrentWrapperForContents(
+              content::Source<WebContents>(source).ptr());
+      if (!tab_contents_wrapper) {
+        return;
+      }
+      SyncedTabDelegate* tab = tab_contents_wrapper->synced_tab_delegate();
       if (!tab || tab->profile() != profile_) {
         return;
       }
       modified_tabs.push_back(tab);
-      DVLOG(1) << "Received TAB_CLOSED for profile " << profile_;
+      DVLOG(1) << "Received NOTIFICATION_WEB_CONTENTS_DESTROYED for profile "
+               << profile_;
       break;
     }
 
@@ -203,10 +221,12 @@ void SessionChangeProcessor::Observe(
         entry->GetVirtualURL().spec() == kNTPOpenTabSyncURL) {
       DVLOG(1) << "Triggering sync refresh for sessions datatype.";
       const syncable::ModelType type = syncable::SESSIONS;
+      syncable::ModelTypePayloadMap payload_map;
+      payload_map[type] = "";
       content::NotificationService::current()->Notify(
-          chrome::NOTIFICATION_SYNC_REFRESH,
+          chrome::NOTIFICATION_SYNC_REFRESH_LOCAL,
           content::Source<Profile>(profile_),
-          content::Details<const syncable::ModelType>(&type));
+          content::Details<const syncable::ModelTypePayloadMap>(&payload_map));
     }
   }
 
@@ -214,27 +234,26 @@ void SessionChangeProcessor::Observe(
   // Note that if we fail to associate, it means something has gone wrong,
   // such as our local session being deleted, so we disassociate and associate
   // again.
-  SyncError error;
   bool reassociation_needed = !modified_tabs.empty() &&
-      !session_model_associator_->AssociateTabs(modified_tabs, &error);
+      !session_model_associator_->AssociateTabs(modified_tabs, NULL);
 
   // Note, we always associate windows because it's possible a tab became
   // "interesting" by going to a valid URL, in which case it needs to be added
   // to the window's tab information.
   if (!reassociation_needed) {
     reassociation_needed =
-        !session_model_associator_->AssociateWindows(false, &error);
+        !session_model_associator_->AssociateWindows(false, NULL);
   }
 
   if (reassociation_needed) {
     LOG(WARNING) << "Reassociation of local models triggered.";
-    // Needing to reassociate would have set the error already so clear it.
-    error = SyncError();
-    session_model_associator_->DisassociateModels(&error);
-    session_model_associator_->AssociateModels(&error);
+    SyncError error;
+    error = session_model_associator_->DisassociateModels();
+    error = session_model_associator_->AssociateModels();
     if (error.IsSet()) {
-      error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
-          "Sessions reassociation failed.");
+      error_handler()->OnSingleDatatypeUnrecoverableError(
+          error.location(),
+          error.message());
     }
   }
 }
@@ -250,7 +269,7 @@ void SessionChangeProcessor::ApplyChangesFromSyncModel(
   ScopedStopObserving<SessionChangeProcessor> stop_observing(this);
 
   sync_api::ReadNode root(trans);
-  if (!root.InitByTagLookup(kSessionsTag)) {
+  if (root.InitByTagLookup(kSessionsTag) != sync_api::BaseNode::INIT_OK) {
     error_handler()->OnUnrecoverableError(FROM_HERE,
         "Sessions root node lookup failed.");
     return;
@@ -283,7 +302,7 @@ void SessionChangeProcessor::ApplyChangesFromSyncModel(
 
     // Handle an update or add.
     sync_api::ReadNode sync_node(trans);
-    if (!sync_node.InitByIdLookup(change.id)) {
+    if (sync_node.InitByIdLookup(change.id) != sync_api::BaseNode::INIT_OK) {
       error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
           "Session node lookup failed.");
       return;
@@ -333,9 +352,10 @@ void SessionChangeProcessor::StartObserving() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   if (!profile_)
     return;
-  notification_registrar_.Add(this, content::NOTIFICATION_TAB_PARENTED,
+  notification_registrar_.Add(this, chrome::NOTIFICATION_TAB_PARENTED,
       content::NotificationService::AllSources());
-  notification_registrar_.Add(this, content::NOTIFICATION_TAB_CLOSED,
+  notification_registrar_.Add(this,
+      content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
       content::NotificationService::AllSources());
   notification_registrar_.Add(this, content::NOTIFICATION_NAV_LIST_PRUNED,
       content::NotificationService::AllSources());
@@ -351,6 +371,8 @@ void SessionChangeProcessor::StartObserving() {
   notification_registrar_.Add(this,
       content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME,
       content::NotificationService::AllBrowserContextsAndSources());
+  notification_registrar_.Add(this, chrome::NOTIFICATION_FAVICON_CHANGED,
+      content::Source<Profile>(profile_));
 }
 
 void SessionChangeProcessor::StopObserving() {

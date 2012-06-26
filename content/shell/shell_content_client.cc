@@ -27,6 +27,11 @@ void ShellContentClient::AddNPAPIPlugins(
     webkit::npapi::PluginList* plugin_list) {
 }
 
+void ShellContentClient::AddAdditionalSchemes(
+    std::vector<std::string>* standard_schemes,
+    std::vector<std::string>* savable_schemes) {
+}
+
 bool ShellContentClient::HasWebUIScheme(const GURL& url) const {
   // There are no WebUI URLs in content_shell.
   return false;
@@ -36,8 +41,7 @@ bool ShellContentClient::CanHandleWhileSwappedOut(const IPC::Message& msg) {
   return false;
 }
 
-std::string ShellContentClient::GetUserAgent(bool* overriding) const {
-  *overriding = false;
+std::string ShellContentClient::GetUserAgent() const {
   // The "19" is so that sites that sniff for version think that this is
   // something reasonably current; the "77.34.5" is a hint that this isn't a
   // standard Chrome.

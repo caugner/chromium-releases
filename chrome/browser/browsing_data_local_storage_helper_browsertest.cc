@@ -12,6 +12,7 @@
 #include "base/file_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/test/thread_test_helper.h"
+#include "base/threading/sequenced_worker_pool.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browsing_data_helper_browsertest.h"
 #include "chrome/browser/browsing_data_local_storage_helper.h"
@@ -60,7 +61,7 @@ class BrowsingDataLocalStorageHelperTest : public InProcessBrowserTest {
 
   FilePath GetLocalStoragePathForTestingProfile() {
     return BrowserContext::GetDOMStorageContext(browser()->profile())->
-        GetFilePath(ASCIIToUTF16("blah")).DirName();
+        GetFilePath(ASCIIToUTF16("http_www.chromium.org_0")).DirName();
   }
 };
 
@@ -123,11 +124,8 @@ IN_PROC_BROWSER_TEST_F(BrowsingDataLocalStorageHelperTest, DeleteSingleFile) {
   CreateLocalStorageFilesForTest();
   local_storage_helper->DeleteLocalStorageFile(
       GetLocalStoragePathForTestingProfile().Append(FilePath(kTestFile0)));
-  scoped_refptr<base::ThreadTestHelper> wait_for_webkit_thread(
-      new base::ThreadTestHelper(
-          BrowserThread::GetMessageLoopProxyForThread(
-              BrowserThread::WEBKIT_DEPRECATED)));
-  ASSERT_TRUE(wait_for_webkit_thread->Run());
+  BrowserThread::GetBlockingPool()->FlushForTesting();
+
   // Ensure the file has been deleted.
   file_util::FileEnumerator file_enumerator(
       GetLocalStoragePathForTestingProfile(),

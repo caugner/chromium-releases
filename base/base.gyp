@@ -114,31 +114,6 @@
         4244,
       ],
     },
-    {
-      'target_name': 'base_jni_headers',
-      'type': 'none',
-      'actions': [
-        {
-          'action_name': 'generate_jni_headers',
-          'inputs': [
-            'android/jni_generator/jni_generator.py',
-            'android/java/org/chromium/base/PathUtils.java',
-            'android/java/org/chromium/base/SystemMessageHandler.java',
-          ],
-          'outputs': [
-            '<(SHARED_INTERMEDIATE_DIR)/base/jni/path_utils_jni.h',
-            '<(SHARED_INTERMEDIATE_DIR)/base/jni/system_message_handler_jni.h',
-          ],
-          'action': [
-            'python',
-            'android/jni_generator/jni_generator.py',
-            '-o',
-            '<@(_inputs)',
-            '<@(_outputs)',
-          ],
-        }
-      ],
-    },
     # Include this target for a main() function that simply instantiates
     # and runs a base::TestSuite.
     {
@@ -153,10 +128,11 @@
     },
     {
       'target_name': 'base_unittests',
-      'type': 'executable',
+      'type': '<(gtest_target_type)',
       'sources': [
         # Tests.
         'android/jni_android_unittest.cc',
+        'android/path_utils_unittest.cc',
         'android/scoped_java_ref_unittest.cc',
         'at_exit_unittest.cc',
         'atomicops_unittest.cc',
@@ -179,6 +155,7 @@
         'environment_unittest.cc',
         'file_descriptor_shuffle_unittest.cc',
         'file_path_unittest.cc',
+        'file_util_proxy_unittest.cc',
         'file_util_unittest.cc',
         'file_version_info_unittest.cc',
         'gmock_unittest.cc',
@@ -258,7 +235,10 @@
         'sys_string_conversions_mac_unittest.mm',
         'sys_string_conversions_unittest.cc',
         'system_monitor/system_monitor_unittest.cc',
+        'task_runner_util_unittest.cc',
         'template_util_unittest.cc',
+        'test/sequenced_worker_pool_owner.cc',
+        'test/sequenced_worker_pool_owner.h',
         'test/trace_event_analyzer_unittest.cc',
         'threading/non_thread_safe_unittest.cc',
         'threading/platform_thread_unittest.cc',
@@ -296,6 +276,7 @@
         'win/sampling_profiler_unittest.cc',
         'win/scoped_bstr_unittest.cc',
         'win/scoped_comptr_unittest.cc',
+        'win/scoped_process_information_unittest.cc',
         'win/scoped_variant_unittest.cc',
         'win/win_util_unittest.cc',
         'win/wrapped_window_proc_unittest.cc',
@@ -321,17 +302,27 @@
         ['OS == "android"', {
           'sources!': [
             # TODO(michaelbai): Removed the below once the fix upstreamed.
+            'debug/stack_trace_unittest.cc',
             'memory/mru_cache_unittest.cc',
             'process_util_unittest.cc',
             'synchronization/cancellation_flag_unittest.cc',
-            # TODO(michaelbai): The below files are excluded because of the
-            # missing JNI and should be added back once JNI is ready.
-            'android/jni_android_unittest.cc',
-            'android/scoped_java_ref_unittest.cc',
-            'debug/stack_trace_unittest.cc',
           ],
           'dependencies': [
             'android/jni_generator/jni_generator.gyp:jni_generator_tests',
+          ],
+          'conditions': [
+            ['"<(gtest_target_type)"=="shared_library"', {
+              'dependencies': [
+                '../testing/android/native_test.gyp:native_test_native_code',
+              ],
+            }, { # gtest_target_type != shared_library
+              'sources!': [
+                # The below files are excluded because of the missing JNI.
+                'android/jni_android_unittest.cc',
+                'android/path_utils_unittest.cc',
+                'android/scoped_java_ref_unittest.cc',
+              ],
+            }],
           ],
         }],
         ['use_glib==1', {
@@ -452,6 +443,8 @@
         'test/perf_test_suite.h',
         'test/scoped_locale.cc',
         'test/scoped_locale.h',
+        'test/sequenced_task_runner_test_template.cc',
+        'test/sequenced_task_runner_test_template.h',
         'test/task_runner_test_template.cc',
         'test/task_runner_test_template.h',
         'test/test_file_util.h',
@@ -482,66 +475,27 @@
       'dependencies': [
         'base_unittests',
       ],
+      'includes': [
+        'base_unittests.isolate',
+      ],
       'actions': [
-        {
-          'action_name': 'response_file',
-          'inputs': [
-            '<(PRODUCT_DIR)/base_unittests<(EXECUTABLE_SUFFIX)',
-            '<(DEPTH)/testing/test_env.py',
-            '<(DEPTH)/testing/xvfb.py',
-          ],
-          'conditions': [
-            ['OS=="linux"', {
-              'inputs': [
-                '<(PRODUCT_DIR)/xdisplaycheck<(EXECUTABLE_SUFFIX)',
-              ],
-            }],
-            ['OS == "win"', {
-              'inputs': [
-                'data/file_version_info_unittest/FileVersionInfoTest1.dll',
-                'data/file_version_info_unittest/FileVersionInfoTest2.dll',
-              ],
-            }],
-          ],
-          'outputs': [
-            '<(PRODUCT_DIR)/base_unittests.inputs',
-          ],
-          'action': [
-            'python',
-            '-c',
-            'import sys; '
-                'open(sys.argv[1], \'w\').write(\'\\n\'.join(sys.argv[2:]))',
-            '<@(_outputs)',
-            '<@(_inputs)',
-          ],
-        },
         {
           'action_name': 'isolate',
           'inputs': [
-            '<(PRODUCT_DIR)/base_unittests.inputs',
+            'base_unittests.isolate',
+            '<@(isolate_dependency_tracked)',
           ],
           'outputs': [
             '<(PRODUCT_DIR)/base_unittests.results',
           ],
           'action': [
             'python',
-            '<(DEPTH)/tools/isolate/isolate.py',
-            '--mode=<(tests_run)',
-            '--root', '<(DEPTH)',
+            '../tools/isolate/isolate.py',
+            '--mode', '<(tests_run)',
+            '--variable', 'PRODUCT_DIR', '<(PRODUCT_DIR)',
+            '--variable', 'OS', '<(OS)',
             '--result', '<@(_outputs)',
-            '--files', '<@(_inputs)',
-            # Directories can't be tracked by build tools (make, msbuild, xcode,
-            # etc) so we just put it on the command line without specifying it
-            # as an input.
-            # TODO(maruel): Revisit the support for this at all and list each
-            # individual test files instead.
-            'data/file_util_unittest/',
-            'data/json/bom_feff.json',
-            '--',
-            # Wraps base_unittests under xvfb.
-            '<(DEPTH)/testing/xvfb.py',
-            '<(PRODUCT_DIR)',
-            '<(PRODUCT_DIR)/base_unittests<(EXECUTABLE_SUFFIX)',
+            'base_unittests.isolate',
           ],
         },
       ],
@@ -576,6 +530,38 @@
     },
   ],
   'conditions': [
+    ['OS == "android"', {
+      'targets': [
+        {
+          'target_name': 'base_jni_headers',
+          'type': 'none',
+          'variables': {
+            'java_sources': [
+              'android/java/org/chromium/base/BuildInfo.java',
+              'android/java/org/chromium/base/LocaleUtils.java',
+              'android/java/org/chromium/base/PathUtils.java',
+              'android/java/org/chromium/base/SystemMessageHandler.java',
+            ],
+            'jni_headers': [
+              '<(SHARED_INTERMEDIATE_DIR)/base/jni/build_info_jni.h',
+              '<(SHARED_INTERMEDIATE_DIR)/base/jni/locale_utils_jni.h',
+              '<(SHARED_INTERMEDIATE_DIR)/base/jni/path_utils_jni.h',
+              '<(SHARED_INTERMEDIATE_DIR)/base/jni/system_message_handler_jni.h',
+            ],
+          },
+          'includes': [ '../build/jni_generator.gypi' ],
+        },
+        {
+          'target_name': 'base_java',
+          'type': 'none',
+          'variables': {
+            'package_name': 'base',
+            'java_in_dir': 'android/java',
+          },
+          'includes': [ '../build/java.gypi' ],
+        },
+      ],
+    }],
     ['OS == "win"', {
       'targets': [
         {
@@ -655,5 +641,54 @@
        },
      ],
    }],
+    # Special target to wrap a <(gtest_target_type)==shared_library
+    # base_unittests into an android apk for execution.
+    # TODO(jrg): lib.target comes from _InstallableTargetInstallPath()
+    # in the gyp make generator.  What is the correct way to extract
+    # this path from gyp and into 'raw' for input to antfiles?
+    # Hard-coding in the gypfile seems a poor choice.
+    # TODO(jrg): there has to be a shorter way to do all this.  Try
+    # and convert this entire target cluster into ~5 lines that can be
+    # trivially copied to other projects with only a deps change, such
+    # as with a new gtest_target_type called
+    # 'shared_library_apk_wrapper' that does a lot of this magically.
+    ['OS=="android" and "<(gtest_target_type)"=="shared_library"', {
+      'targets': [
+        {
+          'target_name': 'base_unittests_apk',
+          'type': 'none',
+          'dependencies': [
+            'base',  # So that android/java/java.gyp:base_java is built
+            'base_unittests',
+          ],
+          'actions': [
+            {
+              # Generate apk files (including source and antfile) from
+              # a template, and builds them.
+              'action_name': 'generate_and_build',
+              'inputs': [
+                '../testing/android/generate_native_test.py',
+                '<(PRODUCT_DIR)/lib.target/libbase_unittests.so',
+                '<(PRODUCT_DIR)/chromium_base.jar'
+              ],
+              'outputs': [
+                '<(PRODUCT_DIR)/ChromeNativeTests_base_unittests-debug.apk',
+              ],
+              'action': [ 
+                '../testing/android/generate_native_test.py',
+                '--native_library',
+                '<(PRODUCT_DIR)/lib.target/libbase_unittests.so',
+                '--jar',
+                '<(PRODUCT_DIR)/chromium_base.jar',
+                '--output',
+                '<(PRODUCT_DIR)/base_unittests_apk',
+                '--ant-args', 
+                '-DPRODUCT_DIR=<(PRODUCT_DIR)',
+                '--ant-compile'
+              ],
+            },
+          ]
+        }],
+    }],
   ],
 }

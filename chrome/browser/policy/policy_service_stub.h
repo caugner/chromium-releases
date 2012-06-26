@@ -30,6 +30,9 @@ class PolicyServiceStub : public PolicyService {
       PolicyDomain domain,
       const std::string& component_id) const OVERRIDE;
 
+  virtual bool IsInitializationComplete() const OVERRIDE;
+
+  virtual void RefreshPolicies(const base::Closure& callback) OVERRIDE;
  private:
   DISALLOW_COPY_AND_ASSIGN(PolicyServiceStub);
 };

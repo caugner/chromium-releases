@@ -6,6 +6,7 @@
 #define ASH_WM_ACTIVATION_CONTROLLER_H_
 #pragma once
 
+#include "ash/wm/scoped_observer.h"
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
@@ -40,6 +41,7 @@ class ASH_EXPORT ActivationController
   virtual aura::Window* GetActiveWindow() OVERRIDE;
   virtual bool OnWillFocusWindow(aura::Window* window,
                                  const aura::Event* event) OVERRIDE;
+  virtual bool CanActivateWindow(aura::Window* window) const OVERRIDE;
 
   // Overridden from aura::WindowObserver:
   virtual void OnWindowVisibilityChanged(aura::Window* window,
@@ -73,6 +75,8 @@ class ASH_EXPORT ActivationController
   // True inside ActivateWindow(). Used to prevent recursion of focus
   // change notifications causing activation.
   bool updating_activation_;
+
+  ScopedObserver<aura::Window, aura::WindowObserver> observer_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(ActivationController);
 };

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,15 +16,21 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 using content::FakeAccessTokenStore;
+using content::Geoposition;
 
 namespace {
 
 // Constants used in multiple tests.
 const char kTestServerUrl[] = "https://www.geolocation.test/service";
-const char kTestHost[] = "myclienthost.test";
-const char kTestHostUrl[] = "http://myclienthost.test/some/path";
-const char kTestJson[] = "?browser=chromium&sensor=true";
-const char kTestBrowser[] = "browser=chromium";
+
+#if defined(GOOGLE_CHROME_BUILD)
+  const char kTestJson[] = "?browser=googlechrome&sensor=true";
+  const char kTestBrowser[] = "browser=googlechrome";
+#else
+  const char kTestJson[] = "?browser=chromium&sensor=true";
+  const char kTestBrowser[] = "browser=chromium";
+#endif
+
 const char kTestSensor[] = "sensor=true";
 // Using #define so we can easily paste this into various other strings.
 #define REFERENCE_ACCESS_TOKEN "2:k7j3G6LaL6u_lafw:4iXOeOpTh1glSXe"
@@ -141,7 +147,7 @@ class GeolocationNetworkProviderTest : public testing::Test {
         test_server_url_,
         access_token_store_->access_token_set_[test_server_url_]);
     if (set_permission_granted)
-      provider->OnPermissionGranted(GURL(kTestHostUrl));
+      provider->OnPermissionGranted();
     return provider;
   }
 
@@ -375,7 +381,7 @@ TEST_F(GeolocationNetworkProviderTest, MultipleWifiScansComplete) {
 
   Geoposition position;
   provider->GetPosition(&position);
-  EXPECT_FALSE(position.IsValidFix());
+  EXPECT_FALSE(position.Validate());
 
   // Now wifi data arrives -- SetData will notify listeners.
   const int kFirstScanAps = 6;
@@ -408,8 +414,8 @@ TEST_F(GeolocationNetworkProviderTest, MultipleWifiScansComplete) {
   EXPECT_EQ(51.0, position.latitude);
   EXPECT_EQ(-0.1, position.longitude);
   EXPECT_EQ(1200.4, position.accuracy);
-  EXPECT_TRUE(position.is_valid_timestamp());
-  EXPECT_TRUE(position.IsValidFix());
+  EXPECT_FALSE(position.timestamp.is_null());
+  EXPECT_TRUE(position.Validate());
 
   // Token should be in the store.
   EXPECT_EQ(UTF8ToUTF16(REFERENCE_ACCESS_TOKEN),
@@ -426,7 +432,7 @@ TEST_F(GeolocationNetworkProviderTest, MultipleWifiScansComplete) {
   provider->GetPosition(&position);
   EXPECT_EQ(51.0, position.latitude);
   EXPECT_EQ(-0.1, position.longitude);
-  EXPECT_TRUE(position.IsValidFix());
+  EXPECT_TRUE(position.Validate());
 
   // Now a third scan with more than twice the original amount -> new request.
   const int kThirdScanAps = kFirstScanAps * 2 + 1;
@@ -447,8 +453,7 @@ TEST_F(GeolocationNetworkProviderTest, MultipleWifiScansComplete) {
 
   // Error means we now no longer have a fix.
   provider->GetPosition(&position);
-  EXPECT_FALSE(position.is_valid_latlong());
-  EXPECT_FALSE(position.IsValidFix());
+  EXPECT_FALSE(position.Validate());
 
   // Wifi scan returns to original set: should be serviced from cache.
   wifi_data_provider_->SetData(CreateReferenceWifiScanData(kFirstScanAps));
@@ -458,7 +463,7 @@ TEST_F(GeolocationNetworkProviderTest, MultipleWifiScansComplete) {
   provider->GetPosition(&position);
   EXPECT_EQ(51.0, position.latitude);
   EXPECT_EQ(-0.1, position.longitude);
-  EXPECT_TRUE(position.IsValidFix());
+  EXPECT_TRUE(position.Validate());
 }
 
 TEST_F(GeolocationNetworkProviderTest, NoRequestOnStartupUntilWifiData) {
@@ -497,7 +502,7 @@ TEST_F(GeolocationNetworkProviderTest, NetworkRequestDeferredForPermission) {
   EXPECT_TRUE(provider->StartProvider(false));
   TestURLFetcher* fetcher = get_url_fetcher_and_advance_id();
   EXPECT_FALSE(fetcher);
-  provider->OnPermissionGranted(GURL(kTestHostUrl));
+  provider->OnPermissionGranted();
 
   fetcher = get_url_fetcher_and_advance_id();
   ASSERT_TRUE(fetcher != NULL);
@@ -522,7 +527,7 @@ TEST_F(GeolocationNetworkProviderTest,
   fetcher = get_url_fetcher_and_advance_id();
   EXPECT_FALSE(fetcher);
 
-  provider->OnPermissionGranted(GURL(kTestHostUrl));
+  provider->OnPermissionGranted();
 
   fetcher = get_url_fetcher_and_advance_id();
   ASSERT_TRUE(fetcher != NULL);

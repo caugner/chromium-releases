@@ -6,9 +6,6 @@
 #define CHROME_BROWSER_UI_TAB_CONTENTS_TAB_CONTENTS_WRAPPER_H_
 #pragma once
 
-#include <string>
-#include <vector>
-
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
@@ -27,18 +24,17 @@ class ConstrainedWindowTabHelper;
 class CoreTabHelper;
 class DownloadRequestLimiterObserver;
 class ExtensionTabHelper;
-class ExtensionWebNavigationTabObserver;
 class ExternalProtocolObserver;
 class FaviconTabHelper;
 class FindTabHelper;
 class HistoryTabHelper;
+class HungPluginTabHelper;
 class InfoBarTabHelper;
 class OmniboxSearchHint;
 class PasswordManager;
 class PasswordManagerDelegate;
 class PDFTabObserver;
 class PluginObserver;
-class PrefService;
 class PrefsTabHelper;
 class Profile;
 class RestoreTabHelper;
@@ -59,6 +55,10 @@ namespace browser_sync {
 class SyncedTabDelegate;
 }
 
+namespace extensions {
+class WebNavigationTabObserver;
+}
+
 namespace prerender {
 class PrerenderTabHelper;
 }
@@ -72,13 +72,11 @@ namespace safe_browsing {
 class SafeBrowsingTabObserver;
 }
 
-// Wraps TabContents and all of its supporting objects in order to control
-// their ownership and lifetime, while allowing TabContents to remain generic
-// and re-usable in other projects.
+// Wraps WebContents and all of its supporting objects in order to control
+// their ownership and lifetime.
 //
 // TODO(avi): Eventually, this class will become TabContents as far as
-// the browser front-end is concerned, and the current TabContents will be
-// renamed to something like WebContents; <http://crbug.com/105875>.
+// the browser front-end is concerned.
 class TabContentsWrapper : public content::WebContentsObserver {
  public:
   // Takes ownership of |contents|, which must be heap-allocated (as it lives
@@ -90,12 +88,12 @@ class TabContentsWrapper : public content::WebContentsObserver {
   // heap-allocated pointer is owned by the caller.
   TabContentsWrapper* Clone();
 
-  // Helper to retrieve the existing instance that wraps a given TabContents.
+  // Helper to retrieve the existing instance that wraps a given WebContents.
   // Returns NULL if there is no such existing instance.
   // NOTE: This is not intended for general use. It is intended for situations
-  // like callbacks from content/ where only a TabContents is available. In the
+  // like callbacks from content/ where only a WebContents is available. In the
   // general case, please do NOT use this; plumb TabContentsWrapper through the
-  // chrome/ code instead of TabContents.
+  // chrome/ code instead of WebContents.
   static TabContentsWrapper* GetCurrentWrapperForContents(
       content::WebContents* contents);
   static const TabContentsWrapper* GetCurrentWrapperForContents(
@@ -145,6 +143,9 @@ class TabContentsWrapper : public content::WebContentsObserver {
   FaviconTabHelper* favicon_tab_helper() { return favicon_tab_helper_.get(); }
   FindTabHelper* find_tab_helper() { return find_tab_helper_.get(); }
   HistoryTabHelper* history_tab_helper() { return history_tab_helper_.get(); }
+  HungPluginTabHelper* hung_plugin_tab_helper() {
+    return hung_plugin_tab_helper_.get();
+  }
   InfoBarTabHelper* infobar_tab_helper() { return infobar_tab_helper_.get(); }
 
 #if defined(ENABLE_ONE_CLICK_SIGNIN)
@@ -192,6 +193,11 @@ class TabContentsWrapper : public content::WebContentsObserver {
     return content_settings_.get();
   }
 
+  // NOTE: This returns NULL unless in-browser thumbnail generation is enabled.
+  ThumbnailGenerator* thumbnail_generator() {
+    return thumbnail_generator_.get();
+  }
+
   TranslateTabHelper* translate_tab_helper() {
     return translate_tab_helper_.get();
   }
@@ -226,6 +232,7 @@ class TabContentsWrapper : public content::WebContentsObserver {
   scoped_ptr<FaviconTabHelper> favicon_tab_helper_;
   scoped_ptr<FindTabHelper> find_tab_helper_;
   scoped_ptr<HistoryTabHelper> history_tab_helper_;
+  scoped_ptr<HungPluginTabHelper> hung_plugin_tab_helper_;
   scoped_ptr<InfoBarTabHelper> infobar_tab_helper_;
 
   // PasswordManager and its delegate. The delegate must outlive the manager,
@@ -250,6 +257,7 @@ class TabContentsWrapper : public content::WebContentsObserver {
   // state by various UI elements.
   scoped_ptr<TabSpecificContentSettings> content_settings_;
 
+  scoped_ptr<ThumbnailGenerator> thumbnail_generator_;
   scoped_ptr<TranslateTabHelper> translate_tab_helper_;
 
   // Handles displaying a web intents picker to the user.
@@ -261,7 +269,7 @@ class TabContentsWrapper : public content::WebContentsObserver {
 
   scoped_ptr<AlternateErrorPageTabObserver> alternate_error_page_tab_observer_;
   scoped_ptr<DownloadRequestLimiterObserver> download_request_limiter_observer_;
-  scoped_ptr<ExtensionWebNavigationTabObserver> webnavigation_observer_;
+  scoped_ptr<extensions::WebNavigationTabObserver> webnavigation_observer_;
   scoped_ptr<ExternalProtocolObserver> external_protocol_observer_;
   scoped_ptr<OmniboxSearchHint> omnibox_search_hint_;
 #if defined(ENABLE_ONE_CLICK_SIGNIN)
@@ -272,9 +280,8 @@ class TabContentsWrapper : public content::WebContentsObserver {
   scoped_ptr<printing::PrintPreviewMessageHandler> print_preview_;
   scoped_ptr<safe_browsing::SafeBrowsingTabObserver>
       safe_browsing_tab_observer_;
-  scoped_ptr<ThumbnailGenerator> thumbnail_generation_observer_;
 
-  // TabContents (MUST BE LAST) ------------------------------------------------
+  // WebContents (MUST BE LAST) ------------------------------------------------
 
   // If true, we're running the destructor.
   bool in_destructor_;

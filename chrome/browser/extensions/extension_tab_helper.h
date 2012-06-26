@@ -53,8 +53,8 @@ class ExtensionTabHelper
   // App extensions ------------------------------------------------------------
 
   // Sets the extension denoting this as an app. If |extension| is non-null this
-  // tab becomes an app-tab. TabContents does not listen for unload events for
-  // the extension. It's up to consumers of TabContents to do that.
+  // tab becomes an app-tab. WebContents does not listen for unload events for
+  // the extension. It's up to consumers of WebContents to do that.
   //
   // NOTE: this should only be manipulated before the tab is added to a browser.
   // TODO(sky): resolve if this is the right way to identify an app tab. If it
@@ -75,7 +75,7 @@ class ExtensionTabHelper
     return web_app_info_;
   }
 
-  // If an app extension has been explicitly set for this TabContents its icon
+  // If an app extension has been explicitly set for this WebContents its icon
   // is returned.
   //
   // NOTE: the returned icon is larger than 16x16 (its size is
@@ -90,7 +90,7 @@ class ExtensionTabHelper
     return content::WebContentsObserver::web_contents();
   }
 
-  // Sets a non-extension app icon associated with TabContents and fires an
+  // Sets a non-extension app icon associated with WebContents and fires an
   // INVALIDATE_TYPE_TITLE navigation state change to trigger repaint of title.
   void SetAppIcon(const SkBitmap& app_icon);
 
@@ -102,7 +102,8 @@ class ExtensionTabHelper
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
   // ExtensionFunctionDispatcher::Delegate overrides.
-  virtual Browser* GetBrowser() OVERRIDE;
+  virtual ExtensionWindowController* GetExtensionWindowController()
+      const OVERRIDE;
   virtual content::WebContents* GetAssociatedWebContents() const OVERRIDE;
 
   // Message handlers.
@@ -116,6 +117,9 @@ class ExtensionTabHelper
                              const std::string& client_id,
                              int return_route_id,
                              int callback_id);
+  void OnGetAppInstallState(const GURL& requestor_url,
+                            int return_route_id,
+                            int callback_id);
   void OnRequest(const ExtensionHostMsg_Request_Params& params);
 
   // App extensions related methods:

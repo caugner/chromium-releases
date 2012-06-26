@@ -5,8 +5,6 @@
 cr.define('ntp', function() {
   'use strict';
 
-  var localStrings = new LocalStrings;
-
   var APP_LAUNCH = {
     // The histogram buckets (keep in sync with extension_constants.h).
     NTP_APPS_MAXIMIZED: 0,
@@ -97,7 +95,7 @@ cr.define('ntp', function() {
       this.menu.appendChild(button);
       cr.ui.decorate(button, cr.ui.MenuItem);
       if (textId)
-        button.textContent = localStrings.getString(textId);
+        button.textContent = loadTimeData.getString(textId);
       return button;
     },
 
@@ -136,8 +134,8 @@ cr.define('ntp', function() {
         launchTypeButton.checked = app.appData.launch_type == id;
       });
 
-      this.options_.disabled = !app.appData.options_url || !app.appData.enabled;
-      this.uninstall_.disabled = !app.appData.can_uninstall;
+      this.options_.disabled = !app.appData.optionsUrl || !app.appData.enabled;
+      this.uninstall_.disabled = !app.appData.mayDisable;
 
       this.disableNotifications_.hidden = true;
       var notificationsDisabled = app.appData.notifications_disabled;
@@ -168,7 +166,7 @@ cr.define('ntp', function() {
       });
     },
     onShowOptions_: function(e) {
-      window.location = this.app_.appData.options_url;
+      window.location = this.app_.appData.optionsUrl;
     },
     onDisableNotifications_: function(e) {
       var app = this.app_;
@@ -297,7 +295,7 @@ cr.define('ntp', function() {
       var src = this.useSmallIcon_ ? this.appData_.icon_small :
                                      this.appData_.icon_big;
       if (!this.appData_.enabled ||
-          (!this.appData_.offline_enabled && !navigator.onLine)) {
+          (!this.appData_.offlineEnabled && !navigator.onLine)) {
         src += '?grayscale=true';
       }
 
@@ -315,6 +313,7 @@ cr.define('ntp', function() {
         this.appImg_.classList.remove('invisible');
         this.appImgSrc_ = null;
       }
+
       this.classList.remove('icon-loading');
     },
 
@@ -586,7 +585,7 @@ cr.define('ntp', function() {
      * @return {boolean} True if the app can be uninstalled.
      */
     canBeRemoved: function() {
-      return this.appData_.can_uninstall;
+      return this.appData_.mayDisable;
     },
 
     /**
@@ -649,7 +648,7 @@ cr.define('ntp', function() {
     initialize: function() {
       this.classList.add('apps-page');
 
-      if (templateData.appInstallHintEnabled) {
+      if (loadTimeData.getBoolean('appInstallHintEnabled')) {
         this.appInstallHint_ = $('app-install-hint-template').cloneNode(true);
         this.appInstallHint_.addEventListener('click', function(e) {
           chrome.send('recordAppLaunchByURL',
@@ -965,7 +964,9 @@ cr.define('ntp', function() {
       var row = Math.floor(index / layout.numRowTiles);
       var realX = this.tileGrid_.offsetLeft +
           col * layout.colWidth + layout.leftMargin;
-      var realY = this.tileGrid_.offsetTop + row * layout.rowHeight;
+
+      var realY =
+          this.topMarginPx_ + row * layout.rowHeight + this.contentPadding;
 
       this.appInstallHint_.style.left = realX + 'px';
       this.appInstallHint_.style.right = realX + 'px';

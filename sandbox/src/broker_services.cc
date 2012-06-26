@@ -1,11 +1,14 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "sandbox/src/broker_services.h"
 
 #include "base/logging.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/threading/platform_thread.h"
+#include "base/win/scoped_handle.h"
+#include "base/win/scoped_process_information.h"
 #include "sandbox/src/sandbox_policy_base.h"
 #include "sandbox/src/sandbox.h"
 #include "sandbox/src/target_process.h"
@@ -38,11 +41,33 @@ sandbox::ResultCode SpawnCleanup(sandbox::TargetProcess* target, DWORD error) {
 // executes TargetEventsThread().
 enum {
   THREAD_CTRL_NONE,
+  THREAD_CTRL_REMOVE_PEER,
   THREAD_CTRL_QUIT,
-  THREAD_CTRL_LAST
+  THREAD_CTRL_LAST,
 };
 
-}
+// Helper structure that allows the Broker to associate a job notification
+// with a job object and with a policy.
+struct JobTracker {
+  HANDLE job;
+  sandbox::PolicyBase* policy;
+  JobTracker(HANDLE cjob, sandbox::PolicyBase* cpolicy)
+      : job(cjob), policy(cpolicy) {
+  }
+};
+
+// Helper structure that allows the broker to track peer processes
+struct PeerTracker {
+  HANDLE wait_object;
+  base::win::ScopedHandle process;
+  DWORD id;
+  HANDLE job_port;
+  PeerTracker(DWORD process_id, HANDLE broker_job_port)
+      : wait_object(NULL), id(process_id), job_port(broker_job_port) {
+  }
+};
+
+}  // namespace
 
 namespace sandbox {
 
@@ -82,6 +107,7 @@ BrokerServicesBase::~BrokerServicesBase() {
   // If there is no port Init() was never called successfully.
   if (!job_port_)
     return;
+
   // Closing the port causes, that no more Job notifications are delivered to
   // the worker thread and also causes the thread to exit. This is what we
   // want to do since we are going to close all outstanding Jobs and notifying
@@ -104,6 +130,18 @@ BrokerServicesBase::~BrokerServicesBase() {
   ::CloseHandle(job_thread_);
   delete thread_pool_;
   ::CloseHandle(no_targets_);
+
+  // Cancel the wait events and delete remaining peer trackers.
+  for (PeerTrackerMap::iterator it = peer_map_.begin();
+       it != peer_map_.end(); ++it) {
+    // Deregistration shouldn't fail, but we leak rather than crash if it does.
+    if (::UnregisterWaitEx(it->second->wait_object, INVALID_HANDLE_VALUE)) {
+      delete it->second;
+    } else {
+      NOTREACHED();
+    }
+  }
+
   // If job_port_ isn't NULL, assumes that the lock has been initialized.
   if (job_port_)
     ::DeleteCriticalSection(&lock_);
@@ -184,6 +222,10 @@ DWORD WINAPI BrokerServicesBase::TargetEventsThread(PVOID param) {
 
         case JOB_OBJECT_MSG_EXIT_PROCESS:
         case JOB_OBJECT_MSG_ABNORMAL_EXIT_PROCESS: {
+          {
+            AutoLock lock(&broker->lock_);
+            broker->child_process_ids_.erase(reinterpret_cast<DWORD>(ovl));
+          }
           --target_counter;
           if (0 == target_counter)
             ::SetEvent(no_targets);
@@ -202,9 +244,23 @@ DWORD WINAPI BrokerServicesBase::TargetEventsThread(PVOID param) {
         }
       }
 
+    } else if (THREAD_CTRL_REMOVE_PEER == key) {
+      // Remove a process from our list of peers.
+      AutoLock lock(&broker->lock_);
+      PeerTrackerMap::iterator it =
+          broker->peer_map_.find(reinterpret_cast<DWORD>(ovl));
+      // This shouldn't fail, but if it does leak the memory rather than crash.
+      if (::UnregisterWaitEx(it->second->wait_object, INVALID_HANDLE_VALUE)) {
+        delete it->second;
+        broker->peer_map_.erase(it);
+      } else {
+        NOTREACHED();
+      }
+
     } else if (THREAD_CTRL_QUIT == key) {
       // The broker object is being destroyed so the thread needs to exit.
       return 0;
+
     } else {
       // We have not implemented more commands.
       NOTREACHED();
@@ -241,14 +297,15 @@ ResultCode BrokerServicesBase::SpawnTarget(const wchar_t* exe_path,
 
   // Construct the tokens and the job object that we are going to associate
   // with the soon to be created target process.
-  HANDLE lockdown_token = NULL;
-  HANDLE initial_token = NULL;
-  DWORD win_result = policy_base->MakeTokens(&initial_token, &lockdown_token);
+  base::win::ScopedHandle lockdown_token;
+  base::win::ScopedHandle initial_token;
+  DWORD win_result = policy_base->MakeTokens(initial_token.Receive(),
+                                             lockdown_token.Receive());
   if (ERROR_SUCCESS != win_result)
     return SBOX_ERROR_GENERIC;
 
-  HANDLE job = NULL;
-  win_result = policy_base->MakeJobObject(&job);
+  base::win::ScopedHandle job;
+  win_result = policy_base->MakeJobObject(job.Receive());
   if (ERROR_SUCCESS != win_result)
     return SBOX_ERROR_GENERIC;
 
@@ -262,9 +319,11 @@ ResultCode BrokerServicesBase::SpawnTarget(const wchar_t* exe_path,
 
   // Create the TargetProces object and spawn the target suspended. Note that
   // Brokerservices does not own the target object. It is owned by the Policy.
-  PROCESS_INFORMATION process_info = {0};
-  TargetProcess* target = new TargetProcess(initial_token, lockdown_token,
-                                            job, thread_pool_);
+  base::win::ScopedProcessInformation process_info;
+  TargetProcess* target = new TargetProcess(initial_token.Take(),
+                                            lockdown_token.Take(),
+                                            job,
+                                            thread_pool_);
 
   std::wstring desktop = policy_base->GetAlternateDesktop();
 
@@ -272,10 +331,6 @@ ResultCode BrokerServicesBase::SpawnTarget(const wchar_t* exe_path,
                               desktop.empty() ? NULL : desktop.c_str(),
                               &process_info);
   if (ERROR_SUCCESS != win_result)
-    return SpawnCleanup(target, win_result);
-
-  if ((INVALID_HANDLE_VALUE == process_info.hProcess) ||
-      (INVALID_HANDLE_VALUE == process_info.hThread))
     return SpawnCleanup(target, win_result);
 
   // Now the policy is the owner of the target.
@@ -286,29 +341,63 @@ ResultCode BrokerServicesBase::SpawnTarget(const wchar_t* exe_path,
   // We are going to keep a pointer to the policy because we'll call it when
   // the job object generates notifications using the completion port.
   policy_base->AddRef();
-  JobTracker* tracker = new JobTracker(job, policy_base);
-  if (!AssociateCompletionPort(job, job_port_, tracker))
+  scoped_ptr<JobTracker> tracker(new JobTracker(job.Take(), policy_base));
+  if (!AssociateCompletionPort(tracker->job, job_port_, tracker.get()))
     return SpawnCleanup(target, 0);
   // Save the tracker because in cleanup we might need to force closing
   // the Jobs.
-  tracker_list_.push_back(tracker);
+  tracker_list_.push_back(tracker.release());
+  child_process_ids_.insert(process_info.process_id());
 
-  // We return the caller a duplicate of the process handle so they
-  // can close it at will.
-  HANDLE dup_process_handle = NULL;
-  if (!::DuplicateHandle(::GetCurrentProcess(), process_info.hProcess,
-                         ::GetCurrentProcess(), &dup_process_handle,
-                         0, FALSE, DUPLICATE_SAME_ACCESS))
-    return SpawnCleanup(target, 0);
-
-  *target_info = process_info;
-  target_info->hProcess = dup_process_handle;
+  *target_info = process_info.Take();
   return SBOX_ALL_OK;
 }
 
 
 ResultCode BrokerServicesBase::WaitForAllTargets() {
   ::WaitForSingleObject(no_targets_, INFINITE);
+  return SBOX_ALL_OK;
+}
+
+bool BrokerServicesBase::IsActiveTarget(DWORD process_id) {
+  AutoLock lock(&lock_);
+  return child_process_ids_.find(process_id) != child_process_ids_.end() ||
+         peer_map_.find(process_id) != peer_map_.end();
+}
+
+VOID CALLBACK BrokerServicesBase::RemovePeer(PVOID parameter, BOOLEAN) {
+  PeerTracker* peer = reinterpret_cast<PeerTracker*>(parameter);
+  // Don't check the return code because we this may fail (safely) at shutdown.
+  ::PostQueuedCompletionStatus(peer->job_port, 0, THREAD_CTRL_REMOVE_PEER,
+                               reinterpret_cast<LPOVERLAPPED>(peer->id));
+}
+
+ResultCode BrokerServicesBase::AddTargetPeer(HANDLE peer_process) {
+  scoped_ptr<PeerTracker> peer(new PeerTracker(::GetProcessId(peer_process),
+                                               job_port_));
+  if (!peer->id)
+    return SBOX_ERROR_GENERIC;
+
+  if (!::DuplicateHandle(::GetCurrentProcess(), peer_process,
+                         ::GetCurrentProcess(), peer->process.Receive(),
+                         SYNCHRONIZE, FALSE, 0)) {
+    return SBOX_ERROR_GENERIC;
+  }
+
+  AutoLock lock(&lock_);
+  if (!peer_map_.insert(std::make_pair(peer->id, peer.get())).second)
+    return SBOX_ERROR_BAD_PARAMS;
+
+  if (!::RegisterWaitForSingleObject(&peer->wait_object,
+                                     peer->process, RemovePeer,
+                                     peer.get(), INFINITE, WT_EXECUTEONLYONCE |
+                                     WT_EXECUTEINWAITTHREAD)) {
+    peer_map_.erase(peer->id);
+    return SBOX_ERROR_GENERIC;
+  }
+
+  // Leak the pointer since it will be cleaned up by the callback.
+  peer.release();
   return SBOX_ALL_OK;
 }
 

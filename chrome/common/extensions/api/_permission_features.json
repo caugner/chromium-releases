@@ -4,25 +4,31 @@
 
 {
   "appNotifications": {
+    "channel": "stable",
     "extension_types": ["packaged_app", "hosted_app"]
   },
   "background": {
+    "channel": "stable",
     "extension_types": [
       "extension", "packaged_app", "hosted_app", "platform_app"
     ]
   },
   "bookmarks": {
+    "channel": "stable",
     "extension_types": ["extension", "packaged_app", "platform_app"]
   },
   "browsingData": {
+    "channel": "stable",
     "extension_types": ["extension", "packaged_app", "platform_app"]
   },
   "chromeAuthPrivate": {
+    "channel": "stable",
     "extension_types": ["extension", "packaged_app"],
     // CloudPrint
     "whitelist": ["mfehgcgbbipciphmccgaenjidiccnmng"]
   },
   "chromePrivate": {
+    "channel": "stable",
     "extension_types": ["extension", "packaged_app", "platform_app"],
     "whitelist": [
       "haiffjcadagjlijoggckpgfnoeiflnem",  // Citrix Receiver
@@ -31,68 +37,82 @@
     ]
   },
   "chromeosInfoPrivate": {
+    "channel": "stable",
     "extension_types": ["extension", "packaged_app", "platform_app"],
     "location": "component"
   },
   "clipboardRead": {
+    "channel": "stable",
     "extension_types": [
       "extension", "packaged_app", "hosted_app", "platform_app"
     ]
   },
   "clipboardWrite": {
+    "channel": "stable",
     "extension_types": [
       "extension", "packaged_app", "hosted_app", "platform_app"
     ]
   },
   "contentSettings": {
+    "channel": "stable",
     "extension_types": ["extension", "packaged_app", "platform_app"]
   },
   "contextMenus": {
+    "channel": "stable",
     "extension_types": ["extension", "packaged_app", "platform_app"]
   },
   "cookies": {
+    "channel": "stable",
     "extension_types": ["extension", "packaged_app"]
   },
   "debugger": {
+    "channel": "stable",
     "extension_types": ["extension", "packaged_app", "platform_app"]
   },
   "devtools": {
+    "channel": "stable",
     "extension_types": ["extension", "packaged_app", "platform_app"]
   },
   "dns": {
+    "channel": "stable",
     "extension_types": ["platform_app"]
   },
   "experimental": {
+    "channel": "stable",
     "extension_types": [
       "extension", "packaged_app", "hosted_app", "platform_app"
     ]
   },
   "fileBrowserHandler": {
+    "channel": "stable",
     "extension_types": ["extension", "packaged_app", "platform_app"]
   },
   "fileBrowserPrivate": {
+    "channel": "stable",
     "extension_types": ["extension", "packaged_app", "platform_app"],
     "location": "component"
   },
   "geolocation": {
+    "channel": "stable",
     "extension_types": [
       "extension", "packaged_app", "hosted_app", "platform_app"
     ]
   },
   "history": {
+    "channel": "stable",
     "extension_types": ["extension", "packaged_app", "platform_app"]
   },
-  "identity": {
-    "extension_types": ["platform_app"]
-  },
   "idle": {
+    "channel": "stable",
     "extension_types": ["extension", "packaged_app", "platform_app"]
   },
   "input": {
+    "channel": "stable",
     "extension_types": ["extension", "packaged_app", "platform_app"],
     "inplies_full_url_access": true
   },
   "inputMethodPrivate": {
+    "channel": "stable",
     "extension_types": ["extension", "packaged_app", "platform_app"],
     "whitelist": [
       "haiffjcadagjlijoggckpgfnoeiflnem",  // Citrix Receiver
@@ -103,61 +123,79 @@
     ]
   },
   "keybinding": {
+    "channel": "stable",
     "extension_types": ["extension", "packaged_app", "platform_app"]
   },
-  "managedMode": {
-    "extension_types": ["extension", "packaged_app", "platform_app"]
+  "managedModePrivate": {
+    "channel": "stable",
+    "extension_types": ["extension", "packaged_app", "platform_app"],
+    "location": "component"
   },
   "management": {
+    "channel": "stable",
     "extension_types": ["extension", "packaged_app", "platform_app"]
   },
   "mediaPlayerPrivate": {
+    "channel": "stable",
     "extension_types": ["extension", "packaged_app", "platform_app"],
     "location": "component"
   },
   "metricsPrivate": {
+    "channel": "stable",
     "extension_types": ["extension", "packaged_app", "platform_app"],
     "location": "component"
   },
   "notifications": {
+    "channel": "stable",
     "extension_types": [
       "extension", "packaged_app", "hosted_app", "platform_app"
     ]
   },
-  "offersPrivate": {
+  "echoPrivate": {
+    "channel": "stable",
     "extension_types": ["extension", "packaged_app", "platform_app"],
     "location": "component"
   },
   "pageCapture": {
+    "channel": "stable",
     "extension_types": ["extension", "packaged_app", "platform_app"]
   },
   "plugin": {
+    "channel": "stable",
     "extension_types": ["extension", "packaged_app", "platform_app"]
   },
   "privacy": {
+    "channel": "stable",
     "extension_types": ["extension", "packaged_app", "platform_app"]
   },
   "proxy": {
+    "channel": "stable",
     "extension_types": ["extension", "packaged_app", "platform_app"]
   },
   "serial": {
+    "channel": "stable",
     "extension_types": ["platform_app"]
   },
   "socket": {
+    "channel": "stable",
     "extension_types": ["platform_app"]
   },
   "storage": {
+    "channel": "stable",
     "extension_types": ["extension", "packaged_app", "platform_app"],
     "min_manifest_version": 2
   },
   "systemPrivate": {
+    "channel": "stable",
     "extension_types": ["extension", "packaged_app", "platform_app"],
     "location": "component"
   },
   "tabs": {
+    "channel": "stable",
     "extension_types": ["extension", "packaged_app", "platform_app"]
   },
   "terminalPrivate": {
+    "channel": "stable",
     "extension_types": ["extension", "packaged_app", "platform_app"],
     "whitelist": [
       "pnhechapfaindjhompbnflcldabbghjo",  // HTerm
@@ -165,23 +203,33 @@
     ]
   },
   "topSites": {
+    "channel": "stable",
     "extension_types": ["extension", "packaged_app"]
   },
   "tts": {
+    "channel": "stable",
     "extension_types": ["extension", "packaged_app", "platform_app"]
   },
   "ttsEngine": {
+    "channel": "stable",
     "extension_types": ["extension", "packaged_app", "platform_app"]
   },
   "unlimitedStorage": {
+    "channel": "stable",
     "extension_types": [
       "extension", "packaged_app", "hosted_app", "platform_app"
     ]
   },
+  "usb": {
+    "channel": "stable",
+    "extension_types": ["platform_app"]
+  },
   "webNavigation": {
+    "channel": "stable",
     "extension_types": ["extension", "packaged_app"]
   },
   "webSocketProxyPrivate": {
+    "channel": "stable",
     "extension_types": ["extension", "packaged_app"],
     "whitelist": [
       "haiffjcadagjlijoggckpgfnoeiflnem",  // Citrix Receiver
@@ -192,6 +240,7 @@
     ]
   },
   "webstorePrivate": {
+    "channel": "stable",
     "extension_types": ["extension", "packaged_app"],
     "whitelist": [
       "ahfgeienlihckogmohjhadlkjgocpleb",  // Web Store
@@ -199,9 +248,11 @@
     ]
   },
   "webRequest": {
+    "channel": "stable",
     "extension_types": ["extension", "packaged_app"]
   },
   "webRequestBlocking": {
+    "channel": "stable",
     "extension_types": ["extension", "packaged_app"]
   }
 }

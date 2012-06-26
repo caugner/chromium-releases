@@ -9,24 +9,21 @@
 #include "content/browser/download/download_create_info.h"
 #include "content/browser/download/download_file_impl.h"
 #include "content/browser/download/download_request_handle.h"
+#include "content/browser/power_save_blocker.h"
 #include "content/public/browser/download_manager.h"
 #include "content/test/mock_download_manager.h"
 #include "net/base/file_stream.h"
 #include "net/base/net_errors.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if defined(OS_LINUX)
-// http://crbug.com/110886 for Linux
-#define MAYBE_RenameFileFinal DISABLED_RenameFileFinal
-#else
-#define MAYBE_RenameFileFinal RenameFileFinal
-#endif
-
 using content::BrowserThread;
 using content::BrowserThreadImpl;
 using content::DownloadFile;
 using content::DownloadId;
 using content::DownloadManager;
+using testing::_;
+using testing::AnyNumber;
+using testing::StrictMock;
 
 DownloadId::Domain kValidIdDomain = "valid DownloadId::Domain";
 
@@ -53,8 +50,21 @@ class DownloadFileTest : public testing::Test {
   ~DownloadFileTest() {
   }
 
+  void SetUpdateDownloadInfo(int32 id, int64 bytes, int64 bytes_per_sec,
+                             const std::string& hash_state) {
+    bytes_ = bytes;
+    bytes_per_sec_ = bytes_per_sec;
+    hash_state_ = hash_state;
+  }
+
   virtual void SetUp() {
-    download_manager_ = new content::MockDownloadManager;
+    download_manager_ = new StrictMock<content::MockDownloadManager>;
+    EXPECT_CALL(*(download_manager_.get()),
+                UpdateDownload(
+                    DownloadId(kValidIdDomain, kDummyDownloadId + 0).local(),
+                    _, _, _))
+        .Times(AnyNumber())
+        .WillRepeatedly(Invoke(this, &DownloadFileTest::SetUpdateDownloadInfo));
   }
 
   virtual void TearDown() {
@@ -77,6 +87,7 @@ class DownloadFileTest : public testing::Test {
     file->reset(
         new DownloadFileImpl(&info, new DownloadRequestHandle(),
                              download_manager_, calculate_hash,
+                             scoped_ptr<PowerSaveBlocker>(NULL).Pass(),
                              net::BoundNetLog()));
   }
 
@@ -108,15 +119,21 @@ class DownloadFileTest : public testing::Test {
   }
 
  protected:
-  scoped_refptr<DownloadManager> download_manager_;
+  scoped_refptr<StrictMock<content::MockDownloadManager> > download_manager_;
 
   linked_ptr<net::FileStream> file_stream_;
 
   // DownloadFile instance we are testing.
   scoped_ptr<DownloadFile> download_file_;
 
- private:
+  // Latest update sent to the download manager.
+  int64 bytes_;
+  int64 bytes_per_sec_;
+  std::string hash_state_;
+
   MessageLoop loop_;
+
+ private:
   // UI thread.
   BrowserThreadImpl ui_thread_;
   // File thread to satisfy debug checks in DownloadFile.
@@ -139,7 +156,7 @@ const int DownloadFileTest::kDummyRequestId = 67;
 
 // Rename the file before any data is downloaded, after some has, after it all
 // has, and after it's closed.
-TEST_F(DownloadFileTest, MAYBE_RenameFileFinal) {
+TEST_F(DownloadFileTest, RenameFileFinal) {
   CreateDownloadFile(&download_file_, 0, true);
   ASSERT_EQ(net::OK, download_file_->Initialize());
   FilePath initial_path(download_file_->FullPath());
@@ -201,5 +218,27 @@ TEST_F(DownloadFileTest, MAYBE_RenameFileFinal) {
   EXPECT_TRUE(download_file_->GetHash(&hash));
   EXPECT_EQ(kDataHash, base::HexEncode(hash.data(), hash.size()));
 
+  DestroyDownloadFile(&download_file_, 0);
+}
+
+// Send some data, wait 3/4s of a second, run the message loop, and
+// confirm the values the DownloadManager received are correct.
+TEST_F(DownloadFileTest, ConfirmUpdate) {
+  CreateDownloadFile(&download_file_, 0, true);
+  ASSERT_EQ(net::OK, download_file_->Initialize());
+
+  AppendDataToFile(&download_file_, kTestData1);
+  AppendDataToFile(&download_file_, kTestData2);
+
+  // Run the message loops for 750ms and check for results.
+  loop_.PostDelayedTask(FROM_HERE, MessageLoop::QuitClosure(),
+                         base::TimeDelta::FromMilliseconds(750));
+  loop_.Run();
+
+  EXPECT_EQ(static_cast<int64>(strlen(kTestData1) + strlen(kTestData2)),
+            bytes_);
+  EXPECT_EQ(download_file_->GetHashState(), hash_state_);
+
+  download_file_->Finish();
   DestroyDownloadFile(&download_file_, 0);
 }

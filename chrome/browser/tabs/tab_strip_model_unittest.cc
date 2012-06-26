@@ -50,7 +50,8 @@ using testing::_;
 
 namespace {
 
-// Class used to delete a TabContents when another TabContents is destroyed.
+// Class used to delete a TabContentsWrapper when another TabContentsWrapper is
+// destroyed.
 class DeleteTabContentsOnDestroyedObserver
     : public content::NotificationObserver {
  public:
@@ -115,8 +116,8 @@ class TabStripDummyDelegate : public TestTabStripModelDelegate {
   }
 
  private:
-  // A dummy TabContents we give to callers that expect us to actually build a
-  // Destinations tab for them.
+  // A dummy TabContentsWrapper we give to callers that expect us to actually
+  // build a Destinations tab for them.
   TabContentsWrapper* dummy_contents_;
 
   // Whether tabs can be closed.
@@ -148,7 +149,7 @@ class TabStripModelTest : public ChromeRenderViewHostTestHarness {
     return retval;
   }
 
-  // Forwards a URL "load" request through to our dummy TabContents
+  // Forwards a URL "load" request through to our dummy TabContentsWrapper
   // implementation.
   void LoadURL(WebContents* con, const std::wstring& url) {
     controller().LoadURL(GURL(WideToUTF16(url)), content::Referrer(),
@@ -251,12 +252,11 @@ class TabStripModelTest : public ChromeRenderViewHostTestHarness {
 
 class MockTabStripModelObserver : public TabStripModelObserver {
  public:
-  MockTabStripModelObserver() : empty_(true),
-                                log_tab_selection_changed_(false),
-                                model_(NULL) {}
+  MockTabStripModelObserver()
+      : empty_(true),
+        model_(NULL) {}
   explicit MockTabStripModelObserver(TabStripModel* model)
       : empty_(true),
-        log_tab_selection_changed_(false),
         model_(model) {}
   virtual ~MockTabStripModelObserver() {
     STLDeleteContainerPointers(states_.begin(), states_.end());
@@ -267,6 +267,7 @@ class MockTabStripModelObserver : public TabStripModelObserver {
     CLOSE,
     DETACH,
     ACTIVATE,
+    DEACTIVATE,
     SELECT,
     MOVE,
     CHANGE,
@@ -343,9 +344,6 @@ class MockTabStripModelObserver : public TabStripModelObserver {
   }
   virtual void TabSelectionChanged(TabStripModel* tab_strip_model,
                                    const TabStripSelectionModel& old_model) {
-    if (!log_tab_selection_changed())
-      return;
-
     State* s = new State(model()->GetActiveTabContents(),
                          model()->active_index(),
                          SELECT);
@@ -367,6 +365,9 @@ class MockTabStripModelObserver : public TabStripModelObserver {
   }
   virtual void TabDetachedAt(TabContentsWrapper* contents, int index) {
     states_.push_back(new State(contents, index, DETACH));
+  }
+  virtual void TabDeactivated(TabContentsWrapper* contents) {
+    states_.push_back(new State(contents, model()->active_index(), DEACTIVATE));
   }
   virtual void TabChangedAt(TabContentsWrapper* contents, int index,
                             TabChangeType change_type) {
@@ -392,21 +393,13 @@ class MockTabStripModelObserver : public TabStripModelObserver {
     states_.clear();
   }
 
-  void set_log_tab_selection_changed(bool flag) {
-    log_tab_selection_changed_ = flag;
-  }
-
   bool empty() const { return empty_; }
-  bool log_tab_selection_changed() const { return log_tab_selection_changed_; }
   TabStripModel* model() { return model_; }
 
  private:
   std::vector<State*> states_;
 
   bool empty_;
-  // TODO(dpapad): Remove this variable and update TestBasicAPI so that it takes
-  // into account TabSelectionChanged notifications.
-  bool log_tab_selection_changed_;
   TabStripModel* model_;
 
   DISALLOW_COPY_AND_ASSIGN(MockTabStripModelObserver);
@@ -415,7 +408,7 @@ class MockTabStripModelObserver : public TabStripModelObserver {
 TEST_F(TabStripModelTest, TestBasicAPI) {
   TabStripDummyDelegate delegate(NULL);
   TabStripModel tabstrip(&delegate, profile());
-  MockTabStripModelObserver observer;
+  MockTabStripModelObserver observer(&tabstrip);
   tabstrip.AddObserver(&observer);
 
   EXPECT_TRUE(tabstrip.empty());
@@ -434,13 +427,16 @@ TEST_F(TabStripModelTest, TestBasicAPI) {
     tabstrip.AppendTabContents(contents1, true);
     EXPECT_TRUE(tabstrip.ContainsIndex(0));
     EXPECT_EQ(1, tabstrip.count());
-    EXPECT_EQ(2, observer.GetStateCount());
+    EXPECT_EQ(3, observer.GetStateCount());
     State s1(contents1, 0, MockTabStripModelObserver::INSERT);
     s1.foreground = true;
     EXPECT_TRUE(observer.StateEquals(0, s1));
     State s2(contents1, 0, MockTabStripModelObserver::ACTIVATE);
-    s2.src_contents = NULL;
     EXPECT_TRUE(observer.StateEquals(1, s2));
+    State s3(contents1, 0, MockTabStripModelObserver::SELECT);
+    s3.src_contents = NULL;
+    s3.src_index = TabStripSelectionModel::kUnselectedIndex;
+    EXPECT_TRUE(observer.StateEquals(2, s3));
     observer.ClearStates();
   }
 
@@ -450,13 +446,19 @@ TEST_F(TabStripModelTest, TestBasicAPI) {
     tabstrip.InsertTabContentsAt(1, contents2, TabStripModel::ADD_ACTIVE);
 
     EXPECT_EQ(2, tabstrip.count());
-    EXPECT_EQ(2, observer.GetStateCount());
+    EXPECT_EQ(4, observer.GetStateCount());
     State s1(contents2, 1, MockTabStripModelObserver::INSERT);
     s1.foreground = true;
     EXPECT_TRUE(observer.StateEquals(0, s1));
-    State s2(contents2, 1, MockTabStripModelObserver::ACTIVATE);
-    s2.src_contents = contents1;
+    State s2(contents1, 0, MockTabStripModelObserver::DEACTIVATE);
     EXPECT_TRUE(observer.StateEquals(1, s2));
+    State s3(contents2, 1, MockTabStripModelObserver::ACTIVATE);
+    s3.src_contents = contents1;
+    EXPECT_TRUE(observer.StateEquals(2, s3));
+    State s4(contents2, 1, MockTabStripModelObserver::SELECT);
+    s4.src_contents = contents1;
+    s4.src_index = 0;
+    EXPECT_TRUE(observer.StateEquals(3, s4));
     observer.ClearStates();
   }
 
@@ -476,11 +478,17 @@ TEST_F(TabStripModelTest, TestBasicAPI) {
   // Test ActivateTabAt
   {
     tabstrip.ActivateTabAt(2, true);
-    EXPECT_EQ(1, observer.GetStateCount());
-    State s1(contents3, 2, MockTabStripModelObserver::ACTIVATE);
-    s1.src_contents = contents2;
-    s1.user_gesture = true;
+    EXPECT_EQ(3, observer.GetStateCount());
+    State s1(contents2, 1, MockTabStripModelObserver::DEACTIVATE);
     EXPECT_TRUE(observer.StateEquals(0, s1));
+    State s2(contents3, 2, MockTabStripModelObserver::ACTIVATE);
+    s2.src_contents = contents2;
+    s2.user_gesture = true;
+    EXPECT_TRUE(observer.StateEquals(1, s2));
+    State s3(contents3, 2, MockTabStripModelObserver::SELECT);
+    s3.src_contents = contents2;
+    s3.src_index = 1;
+    EXPECT_TRUE(observer.StateEquals(2, s3));
     observer.ClearStates();
   }
 
@@ -490,20 +498,33 @@ TEST_F(TabStripModelTest, TestBasicAPI) {
     TabContentsWrapper* detached = tabstrip.DetachTabContentsAt(2);
     // ... and append again because we want this for later.
     tabstrip.AppendTabContents(detached, true);
-    EXPECT_EQ(4, observer.GetStateCount());
+    EXPECT_EQ(8, observer.GetStateCount());
     State s1(detached, 2, MockTabStripModelObserver::DETACH);
     EXPECT_TRUE(observer.StateEquals(0, s1));
-    State s2(contents2, 1, MockTabStripModelObserver::ACTIVATE);
-    s2.src_contents = contents3;
-    s2.user_gesture = false;
+    State s2(detached, TabStripSelectionModel::kUnselectedIndex,
+        MockTabStripModelObserver::DEACTIVATE);
     EXPECT_TRUE(observer.StateEquals(1, s2));
-    State s3(detached, 2, MockTabStripModelObserver::INSERT);
-    s3.foreground = true;
+    State s3(contents2, 1, MockTabStripModelObserver::ACTIVATE);
+    s3.src_contents = contents3;
+    s3.user_gesture = false;
     EXPECT_TRUE(observer.StateEquals(2, s3));
-    State s4(detached, 2, MockTabStripModelObserver::ACTIVATE);
-    s4.src_contents = contents2;
-    s4.user_gesture = false;
+    State s4(contents2, 1, MockTabStripModelObserver::SELECT);
+    s4.src_contents = NULL;
+    s4.src_index = TabStripSelectionModel::kUnselectedIndex;
     EXPECT_TRUE(observer.StateEquals(3, s4));
+    State s5(detached, 2, MockTabStripModelObserver::INSERT);
+    s5.foreground = true;
+    EXPECT_TRUE(observer.StateEquals(4, s5));
+    State s6(contents2, 1, MockTabStripModelObserver::DEACTIVATE);
+    EXPECT_TRUE(observer.StateEquals(5, s6));
+    State s7(detached, 2, MockTabStripModelObserver::ACTIVATE);
+    s7.src_contents = contents2;
+    s7.user_gesture = false;
+    EXPECT_TRUE(observer.StateEquals(6, s7));
+    State s8(detached, 2, MockTabStripModelObserver::SELECT);
+    s8.src_contents = contents2;
+    s8.src_index = 1;
+    EXPECT_TRUE(observer.StateEquals(7, s8));
     observer.ClearStates();
   }
 
@@ -520,15 +541,22 @@ TEST_F(TabStripModelTest, TestBasicAPI) {
     EXPECT_TRUE(tabstrip.CloseTabContentsAt(2, TabStripModel::CLOSE_NONE));
     EXPECT_EQ(2, tabstrip.count());
 
-    EXPECT_EQ(3, observer.GetStateCount());
+    EXPECT_EQ(5, observer.GetStateCount());
     State s1(contents3, 2, MockTabStripModelObserver::CLOSE);
     EXPECT_TRUE(observer.StateEquals(0, s1));
     State s2(contents3, 2, MockTabStripModelObserver::DETACH);
     EXPECT_TRUE(observer.StateEquals(1, s2));
-    State s3(contents2, 1, MockTabStripModelObserver::ACTIVATE);
-    s3.src_contents = contents3;
-    s3.user_gesture = false;
+    State s3(contents3, TabStripSelectionModel::kUnselectedIndex,
+        MockTabStripModelObserver::DEACTIVATE);
     EXPECT_TRUE(observer.StateEquals(2, s3));
+    State s4(contents2, 1, MockTabStripModelObserver::ACTIVATE);
+    s4.src_contents = contents3;
+    s4.user_gesture = false;
+    EXPECT_TRUE(observer.StateEquals(3, s4));
+    State s5(contents2, 1, MockTabStripModelObserver::SELECT);
+    s5.src_contents = NULL;
+    s5.src_index = TabStripSelectionModel::kUnselectedIndex;
+    EXPECT_TRUE(observer.StateEquals(4, s5));
     observer.ClearStates();
   }
 
@@ -1252,11 +1280,11 @@ TEST_F(TabStripModelTest, AddTabContents_MiddleClickLinksAndClose) {
   EXPECT_EQ(typed_page_contents, tabstrip.GetTabContentsAt(4));
 
   // Now simulate seleting a tab in the middle of the group of tabs opened from
-  // the home page and start closing them. Each TabContents in the group should
-  // be closed, right to left. This test is constructed to start at the middle
-  // TabContents in the group to make sure the cursor wraps around to the first
-  // TabContents in the group before closing the opener or any other
-  // TabContents.
+  // the home page and start closing them. Each TabContentsWrapper in the group
+  // should be closed, right to left. This test is constructed to start at the
+  // middle TabContentsWrapper in the group to make sure the cursor wraps around
+  // to the first TabContentsWrapper in the group before closing the opener or
+  // any other TabContentsWrapper.
   tabstrip.ActivateTabAt(2, true);
   tabstrip.CloseSelectedTabs();
   EXPECT_EQ(middle_click_contents3, tabstrip.GetActiveTabContents());
@@ -1273,8 +1301,9 @@ TEST_F(TabStripModelTest, AddTabContents_MiddleClickLinksAndClose) {
   EXPECT_TRUE(tabstrip.empty());
 }
 
-// Tests whether or not a TabContents created by a left click on a link that
-// opens a new tab is inserted correctly adjacent to the tab that spawned it.
+// Tests whether or not a TabContentsWrapper created by a left click on a link
+// that opens a new tab is inserted correctly adjacent to the tab that spawned
+// it.
 TEST_F(TabStripModelTest, AddTabContents_LeftClickPopup) {
   TabStripDummyDelegate delegate(NULL);
   TabStripModel tabstrip(&delegate, profile());
@@ -1721,7 +1750,7 @@ TEST_F(TabStripModelTest, NavigationForgettingDoesntAffectNewTab) {
 TEST_F(TabStripModelTest, FastShutdown) {
   TabStripDummyDelegate delegate(NULL);
   TabStripModel tabstrip(&delegate, profile());
-  MockTabStripModelObserver observer;
+  MockTabStripModelObserver observer(&tabstrip);
   tabstrip.AddObserver(&observer);
 
   EXPECT_TRUE(tabstrip.empty());
@@ -1782,7 +1811,7 @@ TEST_F(TabStripModelTest, FastShutdown) {
 TEST_F(TabStripModelTest, Apps) {
   TabStripDummyDelegate delegate(NULL);
   TabStripModel tabstrip(&delegate, profile());
-  MockTabStripModelObserver observer;
+  MockTabStripModelObserver observer(&tabstrip);
   tabstrip.AddObserver(&observer);
 
   EXPECT_TRUE(tabstrip.empty());
@@ -1914,7 +1943,7 @@ TEST_F(TabStripModelTest, Apps) {
 TEST_F(TabStripModelTest, Pinning) {
   TabStripDummyDelegate delegate(NULL);
   TabStripModel tabstrip(&delegate, profile());
-  MockTabStripModelObserver observer;
+  MockTabStripModelObserver observer(&tabstrip);
   tabstrip.AddObserver(&observer);
 
   EXPECT_TRUE(tabstrip.empty());
@@ -2086,7 +2115,7 @@ TEST_F(TabStripModelTest, ReplaceSendsSelected) {
   strip.AddTabContents(first_contents, -1, content::PAGE_TRANSITION_TYPED,
                        TabStripModel::ADD_ACTIVE);
 
-  MockTabStripModelObserver tabstrip_observer;
+  MockTabStripModelObserver tabstrip_observer(&strip);
   strip.AddObserver(&tabstrip_observer);
 
   TabContentsWrapper* new_contents = CreateTabContents();
@@ -2140,7 +2169,7 @@ TEST_F(TabStripModelTest, DiscardTabContentsAt) {
 
   // Start watching for events after the appends to avoid observing state
   // transitions that aren't relevant to this test.
-  MockTabStripModelObserver tabstrip_observer;
+  MockTabStripModelObserver tabstrip_observer(&tabstrip);
   tabstrip.AddObserver(&tabstrip_observer);
 
   // Discard one of the tabs.
@@ -2291,7 +2320,6 @@ TEST_F(TabStripModelTest, MultipleSelection) {
   strip.AppendTabContents(contents1, false);
   strip.AppendTabContents(contents2, false);
   strip.AppendTabContents(contents3, false);
-  observer.set_log_tab_selection_changed(true);
   strip.AddObserver(&observer);
 
   // Selection and active tab change.
@@ -2306,14 +2334,16 @@ TEST_F(TabStripModelTest, MultipleSelection) {
 
   // Adding all tabs to selection, active tab is now at 0.
   strip.ExtendSelectionTo(0);
-  ASSERT_EQ(2, observer.GetStateCount());
+  ASSERT_EQ(3, observer.GetStateCount());
   ASSERT_EQ(observer.GetStateAt(0)->action,
+            MockTabStripModelObserver::DEACTIVATE);
+  ASSERT_EQ(observer.GetStateAt(1)->action,
             MockTabStripModelObserver::ACTIVATE);
   MockTabStripModelObserver::State s2(contents0, 0,
       MockTabStripModelObserver::SELECT);
   s2.src_contents = contents3;
   s2.src_index = 3;
-  EXPECT_TRUE(observer.StateEquals(1, s2));
+  EXPECT_TRUE(observer.StateEquals(2, s2));
   observer.ClearStates();
 
   // Toggle the active tab, should make the next index active.
@@ -2321,10 +2351,12 @@ TEST_F(TabStripModelTest, MultipleSelection) {
   EXPECT_EQ(1, strip.active_index());
   EXPECT_EQ(3U, strip.selection_model().size());
   EXPECT_EQ(4, strip.count());
-  ASSERT_EQ(2, observer.GetStateCount());
+  ASSERT_EQ(3, observer.GetStateCount());
   ASSERT_EQ(observer.GetStateAt(0)->action,
-            MockTabStripModelObserver::ACTIVATE);
+            MockTabStripModelObserver::DEACTIVATE);
   ASSERT_EQ(observer.GetStateAt(1)->action,
+            MockTabStripModelObserver::ACTIVATE);
+  ASSERT_EQ(observer.GetStateAt(2)->action,
             MockTabStripModelObserver::SELECT);
   observer.ClearStates();
 
@@ -2333,10 +2365,12 @@ TEST_F(TabStripModelTest, MultipleSelection) {
   EXPECT_EQ(0, strip.active_index());
   EXPECT_EQ(4U, strip.selection_model().size());
   EXPECT_EQ(4, strip.count());
-  ASSERT_EQ(2, observer.GetStateCount());
+  ASSERT_EQ(3, observer.GetStateCount());
   ASSERT_EQ(observer.GetStateAt(0)->action,
-            MockTabStripModelObserver::ACTIVATE);
+            MockTabStripModelObserver::DEACTIVATE);
   ASSERT_EQ(observer.GetStateAt(1)->action,
+            MockTabStripModelObserver::ACTIVATE);
+  ASSERT_EQ(observer.GetStateAt(2)->action,
             MockTabStripModelObserver::SELECT);
   observer.ClearStates();
 
@@ -2355,14 +2389,16 @@ TEST_F(TabStripModelTest, MultipleSelection) {
   // Closing the active tab, while there are others tabs selected.
   strip.CloseTabContentsAt(0, TabStripModel::CLOSE_NONE);
   EXPECT_EQ(2, strip.count());
-  ASSERT_EQ(4, observer.GetStateCount());
+  ASSERT_EQ(5, observer.GetStateCount());
   ASSERT_EQ(observer.GetStateAt(0)->action,
             MockTabStripModelObserver::CLOSE);
   ASSERT_EQ(observer.GetStateAt(1)->action,
             MockTabStripModelObserver::DETACH);
   ASSERT_EQ(observer.GetStateAt(2)->action,
-            MockTabStripModelObserver::ACTIVATE);
+            MockTabStripModelObserver::DEACTIVATE);
   ASSERT_EQ(observer.GetStateAt(3)->action,
+            MockTabStripModelObserver::ACTIVATE);
+  ASSERT_EQ(observer.GetStateAt(4)->action,
             MockTabStripModelObserver::SELECT);
   observer.ClearStates();
 
@@ -2397,7 +2433,6 @@ TEST_F(TabStripModelTest, MultipleToSingle) {
   strip.ToggleSelectionAt(1);
 
   MockTabStripModelObserver observer(&strip);
-  observer.set_log_tab_selection_changed(true);
   strip.AddObserver(&observer);
   // This changes the selection (0 is no longer selected) but the selected_index
   // still remains at 1.

@@ -121,6 +121,11 @@ void PanelBrowserWindowCocoa::setBoundsInternal(const gfx::Rect& bounds,
 
   bounds_ = bounds;
 
+  // Safely ignore calls to animate bounds before the panel is shown to
+  // prevent the window from loading prematurely.
+  if (animate && !is_shown_)
+    return;
+
   NSRect frame = cocoa_utils::ConvertRectToCocoaCoordinates(bounds);
   [controller_ setPanelFrame:frame animate:animate];
 }
@@ -275,17 +280,8 @@ void PanelBrowserWindowCocoa::DestroyPanelBrowser() {
   [controller_ close];
 }
 
-gfx::Size PanelBrowserWindowCocoa::IconOnlySize() const {
-  return gfx::Size([controller_ titlebarIconOnlyWidthInScreenCoordinates],
-                   [controller_ titlebarHeightInScreenCoordinates]);
-}
-
 void PanelBrowserWindowCocoa::EnsurePanelFullyVisible() {
   [controller_ ensureFullyVisible];
-}
-
-void PanelBrowserWindowCocoa::SetPanelAppIconVisibility(bool visible) {
-  // TODO(dimich): to be implemented.
 }
 
 void PanelBrowserWindowCocoa::SetPanelAlwaysOnTop(bool on_top) {
@@ -294,6 +290,10 @@ void PanelBrowserWindowCocoa::SetPanelAlwaysOnTop(bool on_top) {
 
 void PanelBrowserWindowCocoa::EnableResizeByMouse(bool enable) {
   [controller_ enableResizeByMouse:enable];
+}
+
+void PanelBrowserWindowCocoa::UpdatePanelMinimizeRestoreButtonVisibility() {
+  [controller_ updateTitleBarMinimizeRestoreButtonVisibility];
 }
 
 void PanelBrowserWindowCocoa::DidCloseNativeWindow() {
@@ -359,6 +359,7 @@ class NativePanelTestingCocoa : public NativePanelTesting {
   virtual bool VerifyActiveState(bool is_active) OVERRIDE;
   virtual bool IsWindowSizeKnown() const OVERRIDE;
   virtual bool IsAnimatingBounds() const OVERRIDE;
+  virtual bool IsButtonVisible(TitlebarButtonType button_type) const OVERRIDE;
 
  private:
   PanelTitlebarViewCocoa* titlebar() const;
@@ -385,7 +386,7 @@ void NativePanelTestingCocoa::PressLeftMouseButtonTitlebar(
   // coordinates because PanelTitlebarViewCocoa method takes Cocoa's screen
   // coordinates.
   int modifierFlags =
-      (modifier == panel::APPLY_TO_ALL ? NSAlternateKeyMask : 0);
+      (modifier == panel::APPLY_TO_ALL ? NSShiftKeyMask : 0);
   [titlebar() pressLeftMouseButtonTitlebar:
       cocoa_utils::ConvertPointToCocoaCoordinates(mouse_location)
            modifiers:modifierFlags];
@@ -394,7 +395,7 @@ void NativePanelTestingCocoa::PressLeftMouseButtonTitlebar(
 void NativePanelTestingCocoa::ReleaseMouseButtonTitlebar(
     panel::ClickModifier modifier) {
   int modifierFlags =
-      (modifier == panel::APPLY_TO_ALL ? NSAlternateKeyMask : 0);
+      (modifier == panel::APPLY_TO_ALL ? NSShiftKeyMask : 0);
   [titlebar() releaseLeftMouseButtonTitlebar:modifierFlags];
 }
 
@@ -429,4 +430,19 @@ bool NativePanelTestingCocoa::IsWindowSizeKnown() const {
 
 bool NativePanelTestingCocoa::IsAnimatingBounds() const {
   return [native_panel_window_->controller_ isAnimatingBounds];
+}
+
+bool NativePanelTestingCocoa::IsButtonVisible(
+    TitlebarButtonType button_type) const {
+  switch (button_type) {
+    case CLOSE_BUTTON:
+      return ![[titlebar() closeButton] isHidden];
+    case MINIMIZE_BUTTON:
+      return ![[titlebar() minimizeButton] isHidden];
+    case RESTORE_BUTTON:
+      return ![[titlebar() restoreButton] isHidden];
+    default:
+      NOTREACHED();
+  }
+  return false;
 }

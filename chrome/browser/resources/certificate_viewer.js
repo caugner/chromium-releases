@@ -10,20 +10,33 @@ cr.define('cert_viewer', function() {
    * substituting in translated strings and requesting certificate details.
    */
   function initialize() {
-    $('export').onclick = exportCertificate;
     cr.ui.decorate('tabbox', cr.ui.TabBox);
 
-    initializeTree($('hierarchy'), showCertificateFields);
-    initializeTree($('cert-fields'), showCertificateFieldValue);
-
     i18nTemplate.process(document, templateData);
+
+    var args = JSON.parse(chrome.dialogArguments);
+    getCertificateInfo(args);
+
+    // The second tab's contents aren't visible on startup, so we can
+    // shorten startup by not populating those controls until after we
+    // have had a chance to draw the visible controls the first time.
+    // The value of 200ms is quick enough that the user couldn't open the
+    // tab in that time but long enough to allow the first tab to draw on
+    // even the slowest machine.
+    setTimeout(function() {
+      initializeTree($('hierarchy'), showCertificateFields);
+      initializeTree($('cert-fields'), showCertificateFieldValue);
+      createCertificateHierarchy(args.hierarchy);
+    }, 200);
+
     stripGtkAccessorKeys();
-    chrome.send('requestCertificateInfo');
+
+    $('export').onclick = exportCertificate;
+
     // TODO(kochi): ESC key should be handled in the views window side.
     document.addEventListener('keydown', function(e) {
-      if (e.keyCode == 27) {  // ESC
+      if (e.keyCode == 27)  // ESC
         chrome.send('DialogClose');
-      }
     });
   }
 
@@ -42,7 +55,7 @@ cr.define('cert_viewer', function() {
   /**
    * The tab name strings in the languages file have accessor keys indicated
    * by a preceding & sign. Strip these out for now.
-   * @TODO(flackr) These accessor keys could be implemented with Javascript or
+   * TODO(flackr) These accessor keys could be implemented with Javascript or
    *     translated strings could be added / modified to remove the & sign.
    */
   function stripGtkAccessorKeys() {
@@ -50,7 +63,7 @@ cr.define('cert_viewer', function() {
     var nodes = Array.prototype.slice.call($('tabs').childNodes, 0);
     nodes.push($('export'));
     for (var i = 0; i < nodes.length; i++)
-      nodes[i].textContent = nodes[i].textContent.replace('&','');
+      nodes[i].textContent = nodes[i].textContent.replace('&', '');
   }
 
   /**
@@ -73,7 +86,6 @@ cr.define('cert_viewer', function() {
     for (var key in certInfo.general) {
       $(key).textContent = certInfo.general[key];
     }
-    createCertificateHierarchy(certInfo.hierarchy);
   }
 
   /**
@@ -148,7 +160,7 @@ cr.define('cert_viewer', function() {
     treeItem.add(treeItem.detail.children['root'] =
         constructTree(certFields[0]));
     revealTree(treeItem);
-    // Ensure the list is scrolled  to the top by selecting the first item.
+    // Ensure the list is scrolled to the top by selecting the first item.
     treeItem.children[0].selected = true;
   }
 
@@ -174,7 +186,6 @@ cr.define('cert_viewer', function() {
 
   return {
     initialize: initialize,
-    getCertificateInfo: getCertificateInfo,
     getCertificateFields: getCertificateFields,
   };
 });

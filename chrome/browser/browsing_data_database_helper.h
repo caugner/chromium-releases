@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,8 +24,6 @@ class Profile;
 // A client of this class need to call StartFetching from the UI thread to
 // initiate the flow, and it'll be notified by the callback in its UI
 // thread at some later point.
-// The client must call CancelNotification() if it's destroyed before the
-// callback is notified.
 class BrowsingDataDatabaseHelper
     : public base::RefCountedThreadSafe<BrowsingDataDatabaseHelper> {
  public:
@@ -40,8 +38,6 @@ class BrowsingDataDatabaseHelper
                  int64 size,
                  base::Time last_modified);
     ~DatabaseInfo();
-
-    bool IsFileSchemeData();
 
     std::string host;
     std::string database_name;
@@ -59,11 +55,6 @@ class BrowsingDataDatabaseHelper
   // This must be called only in the UI thread.
   virtual void StartFetching(
       const base::Callback<void(const std::list<DatabaseInfo>&)>& callback);
-
-  // Cancels the notification callback (i.e., the window that created it no
-  // longer exists).
-  // This must be called only in the UI thread.
-  virtual void CancelNotification();
 
   // Requests a single database to be deleted in the FILE thread. This must be
   // called in the UI thread.
@@ -126,11 +117,13 @@ class CannedBrowsingDataDatabaseHelper : public BrowsingDataDatabaseHelper {
   // True if no databases are currently stored.
   bool empty() const;
 
+  // Returns the number of currently stored databases.
+  size_t GetDatabaseCount() const;
+
   // BrowsingDataDatabaseHelper implementation.
   virtual void StartFetching(
       const base::Callback<void(const std::list<DatabaseInfo>&)>& callback)
           OVERRIDE;
-  virtual void CancelNotification() OVERRIDE {}
 
  private:
   struct PendingDatabaseInfo {

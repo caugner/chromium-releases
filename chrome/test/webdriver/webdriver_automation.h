@@ -197,9 +197,6 @@ class Automation {
   // Waits for all views to stop loading.
   void WaitForAllViewsToStopLoading(Error** error);
 
-  // Install packed extension.
-  void InstallExtensionDeprecated(const FilePath& path, Error** error);
-
   // Install a packed or unpacked extension. If the path ends with '.crx',
   // the extension is assumed to be packed.
   void InstallExtension(const FilePath& path, std::string* extension_id,
@@ -240,6 +237,14 @@ class Automation {
                      base::Value* value,
                      Error** error);
 
+  // Gets the current geolocation.
+  void GetGeolocation(scoped_ptr<base::DictionaryValue>* geolocation,
+                      Error** error);
+
+  // Overrides the current geolocation.
+  void OverrideGeolocation(base::DictionaryValue* geolocation,
+                           Error** error);
+
  private:
   AutomationProxy* automation() const;
   Error* ConvertViewIdToLocator(const WebViewId& view_id,
@@ -250,11 +255,13 @@ class Automation {
   Error* CheckAlertsSupported();
   Error* CheckAdvancedInteractionsSupported();
   Error* CheckNewExtensionInterfaceSupported();
+  Error* CheckGeolocationSupported();
   Error* IsNewMouseApiSupported(bool* supports_new_api);
 
   const Logger& logger_;
   scoped_ptr<ProxyLauncher> launcher_;
   int build_no_;
+  scoped_ptr<base::DictionaryValue> geolocation_;
 
   DISALLOW_COPY_AND_ASSIGN(Automation);
 };

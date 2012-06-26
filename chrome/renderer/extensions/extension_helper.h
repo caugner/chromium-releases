@@ -36,6 +36,18 @@ class ExtensionHelper
     : public content::RenderViewObserver,
       public content::RenderViewObserverTracker<ExtensionHelper> {
  public:
+  // Returns a list of extension RenderViews that match the given filter
+  // criteria. If |browser_window_id| is not extension_misc::kUnknownWindowId,
+  // the list is restricted to views in that browser window.
+  static std::vector<content::RenderView*> GetExtensionViews(
+      const std::string& extension_id,
+      int browser_window_id,
+      content::ViewType view_type);
+
+  // Returns the given extension's background page, or NULL if none.
+  static content::RenderView* GetBackgroundPage(
+      const std::string& extension_id);
+
   ExtensionHelper(content::RenderView* render_view,
                   ExtensionDispatcher* extension_dispatcher);
   virtual ~ExtensionHelper();
@@ -62,15 +74,21 @@ class ExtensionHelper
                                    WebKit::WebDataSource* ds) OVERRIDE;
 
   void OnExtensionResponse(int request_id, bool success,
-                           const std::string& response,
+                           const base::ListValue& response,
                            const std::string& error);
   void OnExtensionMessageInvoke(const std::string& extension_id,
                                 const std::string& function_name,
                                 const base::ListValue& args,
                                 const GURL& event_url,
                                 bool user_gesture);
+  void OnExtensionDispatchOnConnect(int target_port_id,
+                                    const std::string& channel_name,
+                                    const std::string& tab_json,
+                                    const std::string& source_extension_id,
+                                    const std::string& target_extension_id);
   void OnExtensionDeliverMessage(int target_port_id,
                                  const std::string& message);
+  void OnExtensionDispatchOnDisconnect(int port_id, bool connection_error);
   void OnExecuteCode(const ExtensionMsg_ExecuteCode_Params& params);
   void OnGetApplicationInfo(int page_id);
   void OnNotifyRendererViewType(content::ViewType view_type);

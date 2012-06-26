@@ -13,7 +13,7 @@ namespace ash {
 namespace internal {
 
 namespace tray {
-class DateView;
+class TimeView;
 }
 
 class TrayDate : public SystemTrayItem,
@@ -30,12 +30,13 @@ class TrayDate : public SystemTrayItem,
   virtual void DestroyTrayView() OVERRIDE;
   virtual void DestroyDefaultView() OVERRIDE;
   virtual void DestroyDetailedView() OVERRIDE;
+  virtual void UpdateAfterLoginStatusChange(user::LoginStatus status) OVERRIDE;
 
   // Overridden from ClockObserver.
   virtual void OnDateFormatChanged() OVERRIDE;
   virtual void Refresh() OVERRIDE;
 
-  scoped_ptr<tray::DateView> date_tray_;
+  tray::TimeView* time_tray_;
 
   DISALLOW_COPY_AND_ASSIGN(TrayDate);
 };

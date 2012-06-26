@@ -13,16 +13,28 @@
 
 class GetManagedModeFunction : public SyncExtensionFunction {
  public:
+  DECLARE_EXTENSION_FUNCTION_NAME("managedModePrivate.get")
+
+ protected:
   virtual ~GetManagedModeFunction();
+
+  // ExtensionFunction:
   virtual bool RunImpl() OVERRIDE;
-  DECLARE_EXTENSION_FUNCTION_NAME("experimental.managedMode.get")
 };
 
-class EnterManagedModeFunction : public SyncExtensionFunction {
+class EnterManagedModeFunction : public AsyncExtensionFunction {
  public:
+  DECLARE_EXTENSION_FUNCTION_NAME("managedModePrivate.enter")
+
+ protected:
   virtual ~EnterManagedModeFunction();
+
+  // ExtensionFunction:
   virtual bool RunImpl() OVERRIDE;
-  DECLARE_EXTENSION_FUNCTION_NAME("experimental.managedMode.enter")
+
+ private:
+  // Called when we have either successfully entered managed mode or failed.
+  void SendResult(bool success);
 };
 
 #endif  // CHROME_BROWSER_EXTENSIONS_EXTENSION_MANAGED_MODE_API_H_

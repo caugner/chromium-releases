@@ -20,7 +20,6 @@
 class TestingPrefStore : public PersistentPrefStore {
  public:
   TestingPrefStore();
-  virtual ~TestingPrefStore();
 
   // Overriden from PrefStore.
   virtual ReadResult GetValue(const std::string& key,
@@ -38,6 +37,7 @@ class TestingPrefStore : public PersistentPrefStore {
   virtual void SetValueSilently(const std::string& key,
                                 base::Value* value) OVERRIDE;
   virtual void RemoveValue(const std::string& key) OVERRIDE;
+  virtual void MarkNeedsEmptyValue(const std::string& key) OVERRIDE;
   virtual bool ReadOnly() const OVERRIDE;
   virtual PrefReadError GetReadError() const OVERRIDE;
   virtual PersistentPrefStore::PrefReadError ReadPrefs() OVERRIDE;
@@ -63,6 +63,9 @@ class TestingPrefStore : public PersistentPrefStore {
   // Getter and Setter methods for setting and getting the state of the
   // |TestingPrefStore|.
   virtual void set_read_only(bool read_only);
+
+ protected:
+  virtual ~TestingPrefStore();
 
  private:
   // Stores the preference values.

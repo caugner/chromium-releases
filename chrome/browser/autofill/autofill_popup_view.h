@@ -34,8 +34,7 @@ class AutofillPopupView : public content::NotificationObserver {
   void Show(const std::vector<string16>& autofill_values,
             const std::vector<string16>& autofill_labels,
             const std::vector<string16>& autofill_icons,
-            const std::vector<int>& autofill_unique_ids,
-            int separator_index);
+            const std::vector<int>& autofill_unique_ids);
 
   void set_element_bounds(const gfx::Rect& bounds) {
     element_bounds_ = bounds;
@@ -54,6 +53,9 @@ class AutofillPopupView : public content::NotificationObserver {
   // Invalide the given row and redraw it.
   virtual void InvalidateRow(size_t row) = 0;
 
+  // Adjust the size of the popup to show the elements being held.
+  virtual void ResizePopup() = 0;
+
   AutofillExternalDelegate* external_delegate() { return external_delegate_; }
 
   const std::vector<string16>& autofill_values() const {
@@ -68,14 +70,35 @@ class AutofillPopupView : public content::NotificationObserver {
   const std::vector<int>& autofill_unique_ids() const {
     return autofill_unique_ids_;
   }
-  int separator_index() const { return separator_index_; }
 
   int selected_line() const { return selected_line_; }
 
   // Change which line is currently selected by the user.
   void SetSelectedLine(int selected_line);
 
+  // Increase the selected line by 1, properly handling wrapping.
+  void SelectNextLine();
+
+  // Decrease the selected line by 1, properly handling wrapping.
+  void SelectPreviousLine();
+
+  // The user has choosen the selected line.
+  bool AcceptSelectedLine();
+
+  // The user has removed a suggestion.
+  bool RemoveSelectedLine();
+
+  // Return true if the index is the first element of a new section and should
+  // have a separator above it.
+  bool IsSeparatorIndex(int index);
+
  private:
+  // Returns true if the given id refers to an element that can be deleted.
+  bool CanDelete(int id);
+
+  // Returns true if the popup still has non-options entries to show the user.
+  bool HasAutofillEntries();
+
   // content::NotificationObserver method override.
   virtual void Observe(int type,
                        const content::NotificationSource& source,
@@ -95,12 +118,8 @@ class AutofillPopupView : public content::NotificationObserver {
   std::vector<string16> autofill_icons_;
   std::vector<int> autofill_unique_ids_;
 
-  // The location of the separator index (which separates the returned values
-  // from the Autofill options).
-  int separator_index_;
-
   // The line that is currently selected by the user.
-  // -1 indicates that no line is currently selected.
+  // |kNoSelection| indicates that no line is currently selected.
   int selected_line_;
 };
 

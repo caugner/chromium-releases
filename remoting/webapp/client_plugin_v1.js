@@ -119,7 +119,7 @@ remoting.ClientPluginV1.prototype.cleanup = function() {
 };
 
 /**
- * @return {Element} HTML element that correspods to the plugin.
+ * @return {HTMLEmbedElement} HTML element that correspods to the plugin.
  */
 remoting.ClientPluginV1.prototype.element = function() {
   return this.plugin;
@@ -141,10 +141,20 @@ remoting.ClientPluginV1.prototype.isSupportedVersion = function() {
 };
 
 /**
- * @return {boolean} True if the plugin supports high-quality scaling.
+ * @param {remoting.ClientPlugin.Feature} feature The feature to test for.
+ * @return {boolean} True if the plugin supports the named feature.
  */
-remoting.ClientPluginV1.prototype.isHiQualityScalingSupported = function() {
-  return this.plugin.apiVersion >= 3;
+remoting.ClientPluginV1.prototype.hasFeature = function(feature) {
+  if (feature == remoting.ClientPlugin.Feature.HIGH_QUALITY_SCALING)
+    return this.plugin.apiVersion >= 3;
+  return false;
+};
+
+/**
+ * @return {boolean} True if the plugin supports the injectKeyEvent API.
+ */
+remoting.ClientPluginV1.prototype.isInjectKeyEventSupported = function() {
+  return false;
 };
 
 /**
@@ -217,4 +227,51 @@ remoting.ClientPluginV1.prototype.getPerfStats = function() {
            decodeLatency: this.plugin.videoDecodeLatency,
            renderLatency: this.plugin.videoRenderLatency,
            roundtripLatency: this.plugin.roundTripLatency };
+};
+
+/**
+ * These dummy methods exist only so that this class implements ClientPlugin.
+ */
+
+/**
+ * @param {string} mimeType
+ * @param {string} item
+ */
+remoting.ClientPluginV1.prototype.sendClipboardItem = function(mimeType, item) {
+  return;
+};
+
+/**
+ * @param {number} usbKeycode
+ * @param {boolean} pressed
+ */
+remoting.ClientPluginV1.prototype.injectKeyEvent =
+    function(usbKeycode, pressed) {
+  return;
+};
+
+/**
+ * @param {number} fromKeycode
+ * @param {number} toKeycode
+ */
+remoting.ClientPluginV1.prototype.remapKey =
+    function(fromKeycode, toKeycode) {
+  return;
+};
+
+/**
+ * @param {number} width
+ * @param {number} height
+ */
+remoting.ClientPluginV1.prototype.notifyClientDimensions =
+    function(width, height) {
+  return;
+};
+
+/**
+ * @param {boolean} pause
+ */
+remoting.ClientPluginV1.prototype.pauseVideo =
+    function(pause) {
+  return;
 };

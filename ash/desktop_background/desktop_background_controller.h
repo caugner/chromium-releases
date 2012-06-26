@@ -23,6 +23,10 @@ class UserWallpaperDelegate {
 
   // Open the set wallpaper page in the browser.
   virtual void OpenSetWallpaperPage() = 0;
+
+  // Returns true if user can open set wallpaper page. Only guest user returns
+  // false currently.
+  virtual bool CanOpenSetWallpaperPage() = 0;
 };
 
 // A class to listen for login and desktop background change events and set the
@@ -42,13 +46,10 @@ class ASH_EXPORT DesktopBackgroundController {
     return desktop_background_mode_;
   }
 
-  // Change the desktop background image to user selected wallpaper.
-  void OnDesktopBackgroundChanged();
-
   // Sets the desktop background to image mode and create a new background
-  // widget with |wallpaper| and image |layout|.
-  void SetDesktopBackgroundImageMode(const SkBitmap& wallpaper,
-                                     ImageLayout layout);
+  // widget with user selected wallpaper or default wallpaper. Delete the old
+  // widget if any.
+  void SetDesktopBackgroundImageMode();
 
   // Sets the desktop background to solid color mode and create a solid color
   // layout.

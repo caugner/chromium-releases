@@ -27,7 +27,7 @@ AudioRendererHost::AudioEntry::~AudioEntry() {}
 ///////////////////////////////////////////////////////////////////////////////
 // AudioRendererHost implementations.
 AudioRendererHost::AudioRendererHost(
-    AudioManager* audio_manager,
+    media::AudioManager* audio_manager,
     content::MediaObserver* media_observer)
     : audio_manager_(audio_manager),
       media_observer_(media_observer) {
@@ -192,11 +192,11 @@ bool AudioRendererHost::OnMessageReceived(const IPC::Message& message,
 }
 
 void AudioRendererHost::OnCreateStream(
-    int stream_id, const AudioParameters& params) {
+    int stream_id, const media::AudioParameters& params) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   DCHECK(LookupById(stream_id) == NULL);
 
-  AudioParameters audio_params(params);
+  media::AudioParameters audio_params(params);
   DCHECK_GT(audio_params.frames_per_buffer(), 0);
 
   uint32 buffer_size = audio_params.GetBytesPerBuffer();
@@ -329,17 +329,9 @@ void AudioRendererHost::CloseAndDeleteStream(AudioEntry* entry) {
 
   if (!entry->pending_close) {
     entry->controller->Close(
-        base::Bind(&AudioRendererHost::OnStreamClosed, this, entry));
+        base::Bind(&AudioRendererHost::DeleteEntry, this, entry));
     entry->pending_close = true;
   }
-}
-
-void AudioRendererHost::OnStreamClosed(AudioEntry* entry) {
-  // Delete the entry on the IO thread after we've closed the stream.
-  // (We're currently on the audio thread).
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
-      base::Bind(&AudioRendererHost::DeleteEntry, this, entry));
 }
 
 void AudioRendererHost::DeleteEntry(AudioEntry* entry) {

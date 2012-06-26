@@ -359,7 +359,7 @@
 <p>
   Reading the current value of a Chrome setting is straightforward. You'll first
   need to find the property you're interested in, then you'll call
-  <code>get()</code> on that object in order to retrieve it's current value and
+  <code>get()</code> on that object in order to retrieve its current value and
   your extension's level of control. For example, to determine if Chrome's
   Autofill feature is enabled, you'd write:
 </p>
@@ -626,6 +626,29 @@
               </em>
           </dt>
           <dd>If enabled, Chrome sends the text you type into the Omnibox to your default search engine, which provides predictions of websites and searches that are likely completions of what you've typed so far. This preference's value is a boolean, defaulting to <code>true</code>.</dd>
+          <!-- OBJECT PROPERTIES -->
+          <!-- OBJECT METHODS -->
+          <!-- OBJECT EVENT FIELDS -->
+          <!-- FUNCTION PARAMETERS -->
+        </div>
+              </div><div>
+                <div>
+          <dt>
+            <var>spellingServiceEnabled</var>
+              <em>
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span id="typeTemplate">
+                      <span>
+                        <a href="types.html#type-ChromeSetting">ChromeSetting</a>
+                      </span>
+                    </span>
+                  )
+                </div>
+              </em>
+          </dt>
+          <dd>If enabled, Chrome uses a web service to help correct spelling errors. This preference's value is a boolean, defaulting to <code>false</code>.</dd>
           <!-- OBJECT PROPERTIES -->
           <!-- OBJECT METHODS -->
           <!-- OBJECT EVENT FIELDS -->

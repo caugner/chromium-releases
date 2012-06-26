@@ -22,8 +22,11 @@
 
 class FaviconHandlerDelegate;
 class Profile;
-class RefCountedMemory;
 class SkBitmap;
+
+namespace base {
+class RefCountedMemory;
+}
 
 namespace content {
 class NavigationEntry;
@@ -231,10 +234,10 @@ class FaviconHandler {
 
   // Converts the FAVICON's image data to an SkBitmap and sets it on the
   // NavigationEntry.
-  // If the TabContents has a delegate, it is notified of the new favicon
+  // If the WebContents has a delegate, it is notified of the new favicon
   // (INVALIDATE_FAVICON).
   void UpdateFavicon(content::NavigationEntry* entry,
-                     scoped_refptr<RefCountedMemory> data);
+                     scoped_refptr<base::RefCountedMemory> data);
   void UpdateFavicon(content::NavigationEntry* entry, const gfx::Image* image);
 
   // If the image is not already at its preferred size, scales the image such

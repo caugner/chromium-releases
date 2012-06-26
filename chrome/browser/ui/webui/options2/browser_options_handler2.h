@@ -18,9 +18,11 @@
 #include "chrome/browser/ui/webui/options2/options_ui2.h"
 #include "ui/base/models/table_model_observer.h"
 
-#if !defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/system/pointer_device_observer.h"
+#else
 #include "chrome/browser/prefs/pref_set_observer.h"
-#endif  // !defined(OS_CHROMEOS)
+#endif  // defined(OS_CHROMEOS)
 
 class AutocompleteController;
 class CloudPrintSetupHandler;
@@ -36,6 +38,9 @@ class BrowserOptionsHandler
       public ProfileSyncServiceObserver,
       public SelectFileDialog::Listener,
       public ShellIntegration::DefaultWebClientObserver,
+#if defined(OS_CHROMEOS)
+      public chromeos::system::PointerDeviceObserver::Observer,
+#endif
       public TemplateURLServiceObserver {
  public:
   BrowserOptionsHandler();
@@ -70,6 +75,12 @@ class BrowserOptionsHandler
 
   // CloudPrintSetupHandler::Delegate implementation.
   virtual void OnCloudPrintSetupClosed() OVERRIDE;
+
+#if defined(OS_CHROMEOS)
+  // PointerDeviceObserver::Observer implementation.
+  virtual void TouchpadExists(bool exists) OVERRIDE;
+  virtual void MouseExists(bool exists) OVERRIDE;
+#endif
 
   // Makes this the default browser. Called from WebUI.
   void BecomeDefaultBrowser(const base::ListValue* args);
@@ -114,14 +125,16 @@ class BrowserOptionsHandler
   // Loads the possible default search engine list and reports it to the WebUI.
   void AddTemplateUrlServiceObserver();
 
-  // Sends an array of Profile objects to javascript.
-  // Each object is of the form:
+  // Creates a list of dictionaries where each dictionary is of the form:
   //   profileInfo = {
   //     name: "Profile Name",
   //     iconURL: "chrome://path/to/icon/image",
   //     filePath: "/path/to/profile/data/on/disk",
   //     isCurrentProfile: false
   //   };
+  scoped_ptr<ListValue> GetProfilesInfoList();
+
+  // Sends an array of Profile objects to javascript.
   void SendProfilesInfo();
 
   // Asynchronously opens a new browser window to create a new profile.
@@ -260,7 +273,7 @@ class BrowserOptionsHandler
 
   // Returns a newly created dictionary with a number of properties that
   // correspond to the status of sync.
-  DictionaryValue* GetSyncStateDictionary();
+  scoped_ptr<DictionaryValue> GetSyncStateDictionary();
 
   scoped_refptr<ShellIntegration::DefaultBrowserWorker> default_browser_worker_;
 

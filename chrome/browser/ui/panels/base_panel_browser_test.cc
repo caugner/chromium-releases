@@ -25,9 +25,9 @@
 #include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/string_ordinal.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/test/web_contents_tester.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/common/url_constants.h"
+#include "content/test/web_contents_tester.h"
 
 #if defined(OS_LINUX)
 #include "ui/base/x/x11_util.h"
@@ -43,8 +43,8 @@ using content::WebContentsTester;
 
 namespace {
 
-const int kTestingWorkAreaWidth = 800;
-const int kTestingWorkAreaHeight = 600;
+const gfx::Rect kTestingPrimaryScreenArea = gfx::Rect(0, 0, 800, 600);
+const gfx::Rect kTestingWorkArea = gfx::Rect(0, 0, 800, 580);
 
 struct MockDesktopBar {
   bool auto_hiding_enabled;
@@ -55,11 +55,12 @@ struct MockDesktopBar {
 class MockDisplaySettingsProviderImpl :
     public BasePanelBrowserTest::MockDisplaySettingsProvider {
  public:
-  explicit MockDisplaySettingsProviderImpl(Observer* observer);
+  explicit MockDisplaySettingsProviderImpl(PanelManager* panel_manager);
   virtual ~MockDisplaySettingsProviderImpl() { }
 
   // Overridden from DisplaySettingsProvider:
-  virtual gfx::Rect GetWorkArea() OVERRIDE;
+  virtual gfx::Rect GetPrimaryScreenArea() const OVERRIDE;
+  virtual gfx::Rect GetWorkArea() const OVERRIDE;
   virtual bool IsAutoHidingDesktopBarEnabled(
       DesktopBarAlignment alignment) OVERRIDE;
   virtual int GetDesktopBarThickness(
@@ -68,6 +69,8 @@ class MockDisplaySettingsProviderImpl :
       DesktopBarAlignment alignment) const OVERRIDE;
 
   // Overridden from MockDisplaySettingsProvider:
+  virtual void SetPrimaryScreenArea(
+      const gfx::Rect& primary_screen_area) OVERRIDE;
   virtual void SetWorkArea(const gfx::Rect& work_area) OVERRIDE;
   virtual void EnableAutoHidingDesktopBar(DesktopBarAlignment alignment,
                                           bool enabled,
@@ -78,10 +81,8 @@ class MockDisplaySettingsProviderImpl :
                                       int thickness) OVERRIDE;
 
  private:
-  void NotifyDesktopBarVisibilityChange(DesktopBarAlignment alignment,
-                                        DesktopBarVisibility visibility);
-  void NotifyDesktopBarThicknessChange();
-
+  gfx::Rect testing_primary_screen_area_;
+  gfx::Rect testing_work_area_;
   MockDesktopBar mock_desktop_bars[3];
 
   DISALLOW_COPY_AND_ASSIGN(MockDisplaySettingsProviderImpl);
@@ -89,16 +90,36 @@ class MockDisplaySettingsProviderImpl :
 
 
 MockDisplaySettingsProviderImpl::MockDisplaySettingsProviderImpl(
-    DisplaySettingsProvider::Observer* observer)
-    : MockDisplaySettingsProvider(observer) {
+    PanelManager* panel_manager) {
+  DisplaySettingsProvider* old_provider =
+      panel_manager->display_settings_provider();
+
+  ObserverListBase<DisplaySettingsProvider::DisplayAreaObserver>::Iterator
+      display_area_observers_iter(old_provider->display_area_observers());
+  AddDisplayAreaObserver(display_area_observers_iter.GetNext());
+  DCHECK(!display_area_observers_iter.GetNext());
+
+  ObserverListBase<DisplaySettingsProvider::DesktopBarObserver>::Iterator
+      desktop_bar_observer_iter(old_provider->desktop_bar_observers());
+  AddDesktopBarObserver(desktop_bar_observer_iter.GetNext());
+  DCHECK(!desktop_bar_observer_iter.GetNext());
+
+  ObserverListBase<DisplaySettingsProvider::FullScreenObserver>::Iterator
+      full_screen_observer_iter(old_provider->full_screen_observers());
+  AddFullScreenObserver(full_screen_observer_iter.GetNext());
+  DCHECK(!full_screen_observer_iter.GetNext());
+
+  panel_manager->set_display_settings_provider(this);
+
   memset(mock_desktop_bars, 0, sizeof(mock_desktop_bars));
 }
 
-gfx::Rect MockDisplaySettingsProviderImpl::GetWorkArea() {
-  // Some test might want to use the actual work area, that is indicated by
-  // passing empty testing work area.
-  return work_area_.IsEmpty() ? DisplaySettingsProvider::GetWorkArea()
-                              : work_area_;
+gfx::Rect MockDisplaySettingsProviderImpl::GetPrimaryScreenArea() const {
+  return testing_primary_screen_area_;
+}
+
+gfx::Rect MockDisplaySettingsProviderImpl::GetWorkArea() const {
+  return testing_work_area_;
 }
 
 bool MockDisplaySettingsProviderImpl::IsAutoHidingDesktopBarEnabled(
@@ -122,11 +143,17 @@ void MockDisplaySettingsProviderImpl::EnableAutoHidingDesktopBar(
   MockDesktopBar* bar = &(mock_desktop_bars[static_cast<int>(alignment)]);
   bar->auto_hiding_enabled = enabled;
   bar->thickness = thickness;
-  observer_->OnAutoHidingDesktopBarThicknessChanged();
+  OnAutoHidingDesktopBarChanged();
+}
+
+void MockDisplaySettingsProviderImpl::SetPrimaryScreenArea(
+    const gfx::Rect& primary_screen_area) {
+  testing_primary_screen_area_ = primary_screen_area;
 }
 
 void MockDisplaySettingsProviderImpl::SetWorkArea(const gfx::Rect& work_area) {
-  work_area_ = work_area;
+  testing_work_area_ = work_area;
+  OnDisplaySettingsChanged();
 }
 
 void MockDisplaySettingsProviderImpl::SetDesktopBarVisibility(
@@ -137,13 +164,7 @@ void MockDisplaySettingsProviderImpl::SetDesktopBarVisibility(
   if (visibility == bar->visibility)
     return;
   bar->visibility = visibility;
-  MessageLoop::current()->PostTask(
-      FROM_HERE,
-      base::Bind(
-          &MockDisplaySettingsProviderImpl::NotifyDesktopBarVisibilityChange,
-          base::Unretained(this),
-          alignment,
-          visibility));
+  OnAutoHidingDesktopBarChanged();
 }
 
 void MockDisplaySettingsProviderImpl::SetDesktopBarThickness(
@@ -154,21 +175,7 @@ void MockDisplaySettingsProviderImpl::SetDesktopBarThickness(
   if (thickness == bar->thickness)
     return;
   bar->thickness = thickness;
-  MessageLoop::current()->PostTask(
-      FROM_HERE,
-      base::Bind(
-          &MockDisplaySettingsProviderImpl::NotifyDesktopBarThicknessChange,
-          base::Unretained(this)));
-}
-
-void MockDisplaySettingsProviderImpl::NotifyDesktopBarVisibilityChange(
-    DesktopBarAlignment alignment,
-    DesktopBarVisibility visibility) {
-  observer_->OnAutoHidingDesktopBarVisibilityChanged(alignment, visibility);
-}
-
-void MockDisplaySettingsProviderImpl::NotifyDesktopBarThicknessChange() {
-  observer_->OnAutoHidingDesktopBarThicknessChanged();
+  OnAutoHidingDesktopBarChanged();
 }
 
 bool ExistsPanel(Panel* panel) {
@@ -182,7 +189,8 @@ const FilePath::CharType* BasePanelBrowserTest::kTestDir =
     FILE_PATH_LITERAL("panels");
 
 BasePanelBrowserTest::BasePanelBrowserTest()
-    : InProcessBrowserTest() {
+    : InProcessBrowserTest(),
+      mock_display_settings_enabled_(true) {
 #if defined(OS_MACOSX)
   FindBarBridge::disable_animations_during_testing_ = true;
 #endif
@@ -218,11 +226,11 @@ void BasePanelBrowserTest::SetUpOnMainThread() {
   // Setup the work area and desktop bar so that we have consistent testing
   // environment for all panel related tests.
   PanelManager* panel_manager = PanelManager::GetInstance();
-  mock_display_settings_provider_ = new MockDisplaySettingsProviderImpl(
-      panel_manager);
-  panel_manager->set_display_settings_provider(mock_display_settings_provider_);
-  SetTestingWorkArea(gfx::Rect(
-      0, 0, kTestingWorkAreaWidth, kTestingWorkAreaHeight));
+  if (mock_display_settings_enabled_) {
+    mock_display_settings_provider_ =
+        new MockDisplaySettingsProviderImpl(panel_manager);
+    SetTestingAreas(kTestingPrimaryScreenArea, kTestingWorkArea);
+  }
 
   panel_manager->enable_auto_sizing(false);
 
@@ -291,17 +299,6 @@ void BasePanelBrowserTest::WaitForBoundsAnimationFinished(Panel* panel) {
   EXPECT_TRUE(!panel_testing->IsAnimatingBounds());
 }
 
-void BasePanelBrowserTest::WaitForLayoutModeChanged(
-    Panel* panel, PanelStrip::Type layout_type) {
-  ui_test_utils::WindowedNotificationObserver signal(
-      chrome::NOTIFICATION_PANEL_CHANGED_LAYOUT_MODE,
-      content::Source<Panel>(panel));
-  if (panel->panel_strip()->type() == layout_type)
-    return;
-  signal.Wait();
-  EXPECT_EQ(layout_type, panel->panel_strip()->type());
-}
-
 void BasePanelBrowserTest::WaitForExpansionStateChanged(
     Panel* panel, Panel::ExpansionState expansion_state) {
   ui_test_utils::WindowedNotificationObserver signal(
@@ -325,10 +322,10 @@ Panel* BasePanelBrowserTest::CreatePanelWithParams(
   base::mac::ScopedNSAutoreleasePool autorelease_pool;
 #endif
 
-  Browser* panel_browser = Browser::CreateForApp(Browser::TYPE_PANEL,
-                                                 params.name,
-                                                 params.bounds,
-                                                 browser()->profile());
+  Browser* panel_browser = Browser::CreateWithParams(
+      Browser::CreateParams::CreateForApp(
+          Browser::TYPE_PANEL, params.name, params.bounds,
+          browser()->profile()));
   EXPECT_TRUE(panel_browser->is_type_panel());
 
   if (!params.url.is_empty()) {
@@ -426,17 +423,6 @@ Panel* BasePanelBrowserTest::CreateDetachedPanel(const std::string& name,
   return panel;
 }
 
-Panel* BasePanelBrowserTest::CreateOverflowPanel(const std::string& name,
-                                                 const gfx::Rect& bounds) {
-  // The overflow panel is always shown as inactive even though we pass
-  // SHOW_AS_ACTIVE.
-  CreatePanelParams params(name, bounds, SHOW_AS_ACTIVE);
-  params.expected_active_state = SHOW_AS_INACTIVE;
-  Panel* panel = CreatePanelWithParams(params);
-  WaitForLayoutModeChanged(panel, PanelStrip::IN_OVERFLOW);
-  return panel;
-}
-
 void BasePanelBrowserTest::CreateTestTabContents(Browser* browser) {
   TabContentsWrapper* tab_contents =
       new TabContentsWrapper(
@@ -465,18 +451,17 @@ scoped_refptr<Extension> BasePanelBrowserTest::CreateExtension(
       Extension::STRICT_ERROR_CHECKS, &error);
   EXPECT_TRUE(extension.get());
   EXPECT_STREQ("", error.c_str());
-  browser()->GetProfile()->GetExtensionService()->
+  browser()->profile()->GetExtensionService()->
       OnExtensionInstalled(extension.get(), false, StringOrdinal());
   return extension;
 }
 
-gfx::Rect BasePanelBrowserTest::GetTestingWorkArea() const {
-  return mock_display_settings_provider_->GetWorkArea();
-}
-
-void BasePanelBrowserTest::SetTestingWorkArea(const gfx::Rect& work_area) {
-  mock_display_settings_provider_->SetWorkArea(work_area);
-  PanelManager::GetInstance()->OnDisplayChanged();
+void BasePanelBrowserTest::SetTestingAreas(const gfx::Rect& primary_screen_area,
+                                           const gfx::Rect& work_area) {
+  DCHECK(primary_screen_area.Contains(work_area));
+  mock_display_settings_provider_->SetPrimaryScreenArea(primary_screen_area);
+  mock_display_settings_provider_->SetWorkArea(
+      work_area.IsEmpty() ? primary_screen_area : work_area);
 }
 
 void BasePanelBrowserTest::CloseWindowAndWait(Browser* browser) {

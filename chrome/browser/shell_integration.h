@@ -17,12 +17,6 @@
 
 class CommandLine;
 
-#if defined(USE_X11)
-namespace base {
-class Environment;
-}
-#endif
-
 class ShellIntegration {
  public:
   // Sets Chrome as the default browser (only for the current user). Returns
@@ -105,44 +99,12 @@ class ShellIntegration {
   // The new command line reuses the current process's user data directory (and
   // login profile, for ChromeOS).
   // If |extension_app_id| is non-empty, the arguments use kAppId=<id>.
-  // Otherwise, kApp=<url> is used.
+  // Otherwise, kApp=<url> is used. If |is_platform_app| is true the flag
+  // --enable-platform-apps is added to the command line.
   static CommandLine CommandLineArgsForLauncher(
       const GURL& url,
-      const std::string& extension_app_id);
-
-  // Set up command line arguments for launching a platform app.
-  // The command line will have the switches --app-id, --user-data-dir and
-  // --load-extension, using values |extension_app_id|, |user_data_dir| and
-  // |extension_path| respectively.
-  static CommandLine CommandLineArgsForPlatformApp(
       const std::string& extension_app_id,
-      const FilePath& user_data_dir,
-      const FilePath& extension_path);
-
-#if defined(USE_X11)
-  // Returns filename of the desktop shortcut used to launch the browser.
-  static std::string GetDesktopName(base::Environment* env);
-
-  static bool GetDesktopShortcutTemplate(base::Environment* env,
-                                         std::string* output);
-
-  // Returns filename for .desktop file based on |url|, sanitized for security.
-  static FilePath GetDesktopShortcutFilename(const GURL& url);
-
-  // Returns contents for .desktop file based on |template_contents|, |url|
-  // and |title|. The |template_contents| should be contents of .desktop file
-  // used to launch Chrome.
-  static std::string GetDesktopFileContents(
-      const std::string& template_contents,
-      const std::string& app_name,
-      const GURL& url,
-      const std::string& extension_id,
-      const string16& title,
-      const std::string& icon_name);
-
-  static void CreateDesktopShortcut(const ShortcutInfo& shortcut_info,
-                                    const std::string& shortcut_template);
-#endif  // defined(USE_X11)
+      bool is_platform_app);
 
 #if defined(OS_WIN)
   // Generates Win7 app id for given app name and profile path. The returned app

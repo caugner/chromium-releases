@@ -16,6 +16,7 @@ class MessageLoop;
 
 namespace net {
 class HostResolver;
+class NetworkDelegate;
 class ProxyConfigService;
 class URLRequestContextStorage;
 }
@@ -28,7 +29,6 @@ class ShellURLRequestContextGetter : public net::URLRequestContextGetter {
       const FilePath& base_path,
       MessageLoop* io_loop,
       MessageLoop* file_loop);
-  virtual ~ShellURLRequestContextGetter();
 
   // net::URLRequestContextGetter implementation.
   virtual net::URLRequestContext* GetURLRequestContext() OVERRIDE;
@@ -36,6 +36,9 @@ class ShellURLRequestContextGetter : public net::URLRequestContextGetter {
       GetIOMessageLoopProxy() const OVERRIDE;
 
   net::HostResolver* host_resolver();
+
+ protected:
+  virtual ~ShellURLRequestContextGetter();
 
  private:
   FilePath base_path_;
@@ -46,6 +49,7 @@ class ShellURLRequestContextGetter : public net::URLRequestContextGetter {
 
   scoped_refptr<net::URLRequestContext> url_request_context_;
   scoped_ptr<net::URLRequestContextStorage> storage_;
+  scoped_ptr<net::NetworkDelegate> network_delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(ShellURLRequestContextGetter);
 };

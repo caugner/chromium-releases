@@ -161,8 +161,7 @@ void PluginChannel::NotifyRenderersOfPendingShutdown() {
 }
 
 PluginChannel::PluginChannel()
-    : renderer_handle_(0),
-      renderer_id_(-1),
+    : renderer_id_(-1),
       in_send_(0),
       incognito_(false),
       filter_(new MessageFilter()) {
@@ -173,9 +172,6 @@ PluginChannel::PluginChannel()
 }
 
 PluginChannel::~PluginChannel() {
-  if (renderer_handle_)
-    base::CloseProcessHandle(renderer_handle_);
-
   MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&PluginReleaseCallback),
@@ -258,7 +254,7 @@ int PluginChannel::GenerateRouteID() {
 
 void PluginChannel::OnClearSiteData(const std::string& site,
                                     uint64 flags,
-                                    base::Time begin_time) {
+                                    uint64 max_age) {
   bool success = false;
   CommandLine* command_line = CommandLine::ForCurrentProcess();
   FilePath path = command_line->GetSwitchValuePath(switches::kPluginPath);
@@ -268,13 +264,6 @@ void PluginChannel::OnClearSiteData(const std::string& site,
     NPError err = plugin_lib->NP_Initialize();
     if (err == NPERR_NO_ERROR) {
       const char* site_str = site.empty() ? NULL : site.c_str();
-      uint64 max_age;
-      if (begin_time > base::Time()) {
-        base::TimeDelta delta = base::Time::Now() - begin_time;
-        max_age = delta.InSeconds();
-      } else {
-        max_age = kuint64max;
-      }
       err = plugin_lib->NP_ClearSiteData(site_str, flags, max_age);
       std::string site_name =
           site.empty() ? "NULL"
@@ -292,18 +281,7 @@ base::WaitableEvent* PluginChannel::GetModalDialogEvent(
   return filter_->GetModalDialogEvent(containing_window);
 }
 
-void PluginChannel::OnChannelConnected(int32 peer_pid) {
-  base::ProcessHandle handle;
-  if (!base::OpenProcessHandle(peer_pid, &handle)) {
-    NOTREACHED();
-  }
-  renderer_handle_ = handle;
-  NPChannelBase::OnChannelConnected(peer_pid);
-}
-
 void PluginChannel::OnChannelError() {
-  base::CloseProcessHandle(renderer_handle_);
-  renderer_handle_ = 0;
   NPChannelBase::OnChannelError();
   CleanUp();
 }

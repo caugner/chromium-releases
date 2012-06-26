@@ -27,71 +27,6 @@ RenderAudioSourceProvider::RenderAudioSourceProvider()
   default_sink_ = new AudioDevice();
 }
 
-RenderAudioSourceProvider::~RenderAudioSourceProvider() {}
-
-void RenderAudioSourceProvider::Start() {
-  base::AutoLock auto_lock(sink_lock_);
-  if (!client_)
-    default_sink_->Start();
-  is_running_ = true;
-}
-
-void RenderAudioSourceProvider::Stop() {
-  base::AutoLock auto_lock(sink_lock_);
-  if (!client_)
-    default_sink_->Stop();
-  is_running_ = false;
-}
-
-void RenderAudioSourceProvider::Play() {
-  base::AutoLock auto_lock(sink_lock_);
-  if (!client_)
-    default_sink_->Play();
-  is_running_ = true;
-}
-
-void RenderAudioSourceProvider::Pause(bool flush) {
-  base::AutoLock auto_lock(sink_lock_);
-  if (!client_)
-    default_sink_->Pause(flush);
-  is_running_ = false;
-}
-
-bool RenderAudioSourceProvider::SetVolume(double volume) {
-  base::AutoLock auto_lock(sink_lock_);
-  if (!client_)
-    default_sink_->SetVolume(volume);
-  volume_ = volume;
-  return true;
-}
-
-void RenderAudioSourceProvider::GetVolume(double* volume) {
-  if (!client_)
-    default_sink_->GetVolume(volume);
-  else if (volume)
-    *volume = volume_;
-}
-
-void RenderAudioSourceProvider::Initialize(
-    const AudioParameters& params, RenderCallback* renderer) {
-  base::AutoLock auto_lock(sink_lock_);
-  CHECK(!is_initialized_);
-  renderer_ = renderer;
-
-  default_sink_->Initialize(params, renderer);
-
-  // Keep track of the format in case the client hasn't yet been set.
-  channels_ = params.channels();
-  sample_rate_ = params.sample_rate();
-
-  if (client_) {
-    // Inform WebKit about the audio stream format.
-    client_->setFormat(channels_, sample_rate_);
-  }
-
-  is_initialized_ = true;
-}
-
 void RenderAudioSourceProvider::setClient(
     WebKit::WebAudioSourceProviderClient* client) {
   // Synchronize with other uses of client_ and default_sink_.
@@ -99,7 +34,7 @@ void RenderAudioSourceProvider::setClient(
 
   if (client && client != client_) {
     // Detach the audio renderer from normal playback.
-    default_sink_->Pause(true);
+    default_sink_->Stop();
 
     // The client will now take control by calling provideInput() periodically.
     client_ = client;
@@ -139,3 +74,75 @@ void RenderAudioSourceProvider::provideInput(
       memset(audio_data[i], 0, sizeof(float) * number_of_frames);
   }
 }
+
+void RenderAudioSourceProvider::Start() {
+  base::AutoLock auto_lock(sink_lock_);
+  if (!client_)
+    default_sink_->Start();
+  is_running_ = true;
+}
+
+void RenderAudioSourceProvider::Stop() {
+  base::AutoLock auto_lock(sink_lock_);
+  if (!client_)
+    default_sink_->Stop();
+  is_running_ = false;
+}
+
+void RenderAudioSourceProvider::Play() {
+  base::AutoLock auto_lock(sink_lock_);
+  if (!client_)
+    default_sink_->Play();
+  is_running_ = true;
+}
+
+void RenderAudioSourceProvider::Pause(bool flush) {
+  base::AutoLock auto_lock(sink_lock_);
+  if (!client_)
+    default_sink_->Pause(flush);
+  is_running_ = false;
+}
+
+void RenderAudioSourceProvider::SetPlaybackRate(float rate) {
+  base::AutoLock auto_lock(sink_lock_);
+  if (!client_)
+    default_sink_->SetPlaybackRate(rate);
+}
+
+bool RenderAudioSourceProvider::SetVolume(double volume) {
+  base::AutoLock auto_lock(sink_lock_);
+  if (!client_)
+    default_sink_->SetVolume(volume);
+  volume_ = volume;
+  return true;
+}
+
+void RenderAudioSourceProvider::GetVolume(double* volume) {
+  if (!client_)
+    default_sink_->GetVolume(volume);
+  else if (volume)
+    *volume = volume_;
+}
+
+void RenderAudioSourceProvider::Initialize(
+    const media::AudioParameters& params,
+    RenderCallback* renderer) {
+  base::AutoLock auto_lock(sink_lock_);
+  CHECK(!is_initialized_);
+  renderer_ = renderer;
+
+  default_sink_->Initialize(params, renderer);
+
+  // Keep track of the format in case the client hasn't yet been set.
+  channels_ = params.channels();
+  sample_rate_ = params.sample_rate();
+
+  if (client_) {
+    // Inform WebKit about the audio stream format.
+    client_->setFormat(channels_, sample_rate_);
+  }
+
+  is_initialized_ = true;
+}
+
+RenderAudioSourceProvider::~RenderAudioSourceProvider() {}

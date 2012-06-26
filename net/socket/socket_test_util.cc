@@ -239,7 +239,7 @@ SSLSocketDataProvider::SSLSocketDataProvider(IoMode mode, int result)
     : connect(mode, result),
       next_proto_status(SSLClientSocket::kNextProtoUnsupported),
       was_npn_negotiated(false),
-      protocol_negotiated(SSLClientSocket::kProtoUnknown),
+      protocol_negotiated(kProtoUnknown),
       client_cert_sent(false),
       cert_request_info(NULL),
       domain_bound_cert_type(CLIENT_CERT_INVALID_TYPE) {
@@ -248,7 +248,7 @@ SSLSocketDataProvider::SSLSocketDataProvider(IoMode mode, int result)
 SSLSocketDataProvider::~SSLSocketDataProvider() {
 }
 
-void SSLSocketDataProvider::SetNextProto(SSLClientSocket::NextProto proto) {
+void SSLSocketDataProvider::SetNextProto(NextProto proto) {
   was_npn_negotiated = true;
   next_proto_status = SSLClientSocket::kNextProtoNegotiated;
   protocol_negotiated = proto;
@@ -424,9 +424,8 @@ DeterministicSocketData::DeterministicSocketData(MockRead* reads,
       current_write_(),
       stopping_sequence_number_(0),
       stopped_(false),
-      print_debug_(false) {}
-
-DeterministicSocketData::~DeterministicSocketData() {}
+      print_debug_(false) {
+}
 
 void DeterministicSocketData::Run() {
   SetStopped(false);
@@ -553,6 +552,8 @@ void DeterministicSocketData::Reset() {
   StaticSocketDataProvider::Reset();
   NOTREACHED();
 }
+
+DeterministicSocketData::~DeterministicSocketData() {}
 
 void DeterministicSocketData::InvokeCallbacks() {
   if (socket_ && socket_->write_pending() &&
@@ -1069,7 +1070,7 @@ MockSSLClientSocket::MockSSLClientSocket(
       is_npn_state_set_(false),
       new_npn_value_(false),
       is_protocol_negotiated_set_(false),
-      protocol_negotiated_(SSLClientSocket::kProtoUnknown) {
+      protocol_negotiated_(kProtoUnknown) {
   DCHECK(data_);
   delete ssl_host_info;  // we take ownership but don't use it.
 }
@@ -1166,14 +1167,14 @@ bool MockSSLClientSocket::set_was_npn_negotiated(bool negotiated) {
   return new_npn_value_ = negotiated;
 }
 
-SSLClientSocket::NextProto MockSSLClientSocket::protocol_negotiated() const {
+NextProto MockSSLClientSocket::GetNegotiatedProtocol() const {
   if (is_protocol_negotiated_set_)
     return protocol_negotiated_;
   return data_->protocol_negotiated;
 }
 
 void MockSSLClientSocket::set_protocol_negotiated(
-    SSLClientSocket::NextProto protocol_negotiated) {
+    NextProto protocol_negotiated) {
   is_protocol_negotiated_set_ = true;
   protocol_negotiated_ = protocol_negotiated;
 }

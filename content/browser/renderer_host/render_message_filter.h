@@ -24,7 +24,11 @@
 #include "media/base/channel_layout.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPopupType.h"
 #include "ui/gfx/native_widget_types.h"
-#include "ui/gfx/surface/transport_dib.h"
+#include "ui/surface/transport_dib.h"
+
+#if defined(OS_MACOSX)
+#include "content/common/mac/font_loader.h"
+#endif
 
 class DOMStorageContextImpl;
 class PluginServiceImpl;
@@ -131,10 +135,9 @@ class RenderMessageFilter : public content::BrowserMessageFilter {
                         bool* cookies_enabled);
 
 #if defined(OS_MACOSX)
-  void OnLoadFont(const FontDescriptor& font,
-                  uint32* handle_size,
-                  base::SharedMemoryHandle* handle,
-                  uint32* font_id);
+  // Messages for OOP font loading.
+  void OnLoadFont(const FontDescriptor& font, IPC::Message* reply_msg);
+  void SendLoadFontReply(IPC::Message* reply, FontLoader::Result* result);
 #endif
 
 #if defined(OS_WIN) && !defined(USE_AURA)
@@ -249,7 +252,8 @@ class RenderMessageFilter : public content::BrowserMessageFilter {
 
   scoped_refptr<RenderWidgetHelper> render_widget_helper_;
 
-  // Whether this process is used for incognito tabs.
+  // Whether this process is used for incognito contents.
+  // This doesn't belong here; http://crbug.com/89628
   bool incognito_;
 
   // Initialized to 0, accessed on FILE thread only.

@@ -14,7 +14,6 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
-#include "chrome/browser/ui/views/dom_view.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension_messages.h"
@@ -26,8 +25,9 @@
 #include "ui/base/animation/animation_delegate.h"
 #include "ui/base/animation/slide_animation.h"
 #include "ui/base/ime/text_input_type.h"
-#include "ui/gfx/compositor/layer.h"
+#include "ui/compositor/layer.h"
 #include "ui/gfx/screen.h"
+#include "ui/views/controls/webview/webview.h"
 #include "ui/views/ime/text_input_type_tracker.h"
 #include "ui/views/widget/widget.h"
 
@@ -55,7 +55,7 @@ const char kOnTextInputTypeChanged[] =
 // The default position of the keyboard widget should be at the bottom,
 // spanning the entire width of the root window.
 gfx::Rect GetKeyboardPosition(int height) {
-  gfx::Rect area = gfx::Screen::GetMonitorAreaNearestPoint(gfx::Point());
+  gfx::Rect area = gfx::Screen::GetPrimaryMonitor().bounds();
   return gfx::Rect(area.x(), area.y() + area.height() - height,
                    area.width(), height);
 }
@@ -152,8 +152,8 @@ class KeyboardWidget
 
   GURL keyboard_url_;
 
-  // The DOM view to host the keyboard.
-  DOMView* dom_view_;
+  // The WebView to host the keyboard.
+  views::WebView* web_view_;
 
   ExtensionFunctionDispatcher extension_dispatcher_;
 
@@ -171,7 +171,7 @@ class KeyboardWidget
 KeyboardWidget::KeyboardWidget()
     : views::Widget::Widget(),
       keyboard_url_(chrome::kChromeUIKeyboardURL),
-      dom_view_(new DOMView),
+      web_view_(new views::WebView(ProfileManager::GetDefaultProfile()))),
       ALLOW_THIS_IN_INITIALIZER_LIST(
           extension_dispatcher_(ProfileManager::GetDefaultProfile(), this)),
       target_(NULL),
@@ -189,16 +189,14 @@ KeyboardWidget::KeyboardWidget()
   Init(params);
 
   // Setup the DOM view to host the keyboard.
-  Profile* profile = ProfileManager::GetDefaultProfile();
-  dom_view_->Init(profile,
-                  content::SiteInstance::CreateForURL(profile, keyboard_url_));
-  dom_view_->LoadURL(keyboard_url_);
-  dom_view_->SetVisible(true);
-  SetContentsView(dom_view_);
+  web_view_->CreateWebContentsWithSiteInstance(
+      content::SiteInstance::CreateForURL(web_view_->browser_context(),
+                                          keyboard_url_));
+  web_view_->LoadInitialURL(keyboard_url_);
+  SetContentsView(web_view_);
 
   // Setup observer so the events from the keyboard can be handled.
-  content::WebContentsObserver::Observe(
-      dom_view_->dom_contents()->web_contents());
+  content::WebContentsObserver::Observe(web_view_->web_contents());
 
   // Initialize the animation.
   animation_.reset(new ui::SlideAnimation(this));
@@ -343,14 +341,15 @@ bool KeyboardWidget::OnMessageReceived(const IPC::Message& message) {
 void KeyboardWidget::RenderViewGone(base::TerminationStatus status) {
   if (status != base::TERMINATION_STATUS_NORMAL_TERMINATION) {
     // Reload the keyboard if it crashes.
-    dom_view_->LoadURL(keyboard_url_);
-    dom_view_->SchedulePaint();
+    web_view_->LoadInitialURL(keyboard_url_);
+    web_view_->SchedulePaint();
   }
 }
 
 void KeyboardWidget::OnRequest(const ExtensionHostMsg_Request_Params& request) {
-  extension_dispatcher_.Dispatch(request,
-      dom_view_->dom_contents()->web_contents()->GetRenderViewHost());
+  extension_dispatcher_.Dispatch(
+      request,
+      web_view_->web_contents()->GetRenderViewHost());
 }
 
 void KeyboardWidget::TextInputTypeChanged(ui::TextInputType type,
@@ -400,9 +399,7 @@ void KeyboardWidget::TextInputTypeChanged(ui::TextInputType type,
   std::string json_args;
   base::JSONWriter::Write(&args, &json_args);
 
-  Profile* profile =
-      Profile::FromBrowserContext(
-          dom_view_->dom_contents()->web_contents()->GetBrowserContext());
+  Profile* profile = Profile::FromBrowserContext(web_view_->browser_context());
   profile->GetExtensionEventRouter()->DispatchEventToRenderers(
       kOnTextInputTypeChanged, json_args, NULL, GURL());
 
@@ -420,8 +417,7 @@ Browser* KeyboardWidget::GetBrowser() {
 }
 
 content::WebContents* KeyboardWidget::GetAssociatedWebContents() const {
-  return dom_view_->dom_contents() ?
-      dom_view_->dom_contents()->web_contents() : NULL;
+  return web_view_->web_contents();
 }
 
 #if defined(OS_CHROMEOS)
@@ -430,7 +426,7 @@ void KeyboardWidget::VirtualKeyboardChanged(
     const chromeos::input_method::VirtualKeyboard& virtual_keyboard,
     const std::string& virtual_keyboard_layout) {
   const GURL& url = virtual_keyboard.GetURLForLayout(virtual_keyboard_layout);
-  dom_view_->LoadURL(url);
+  web_view_->LoadInitialURL(url);
   VLOG(1) << "VirtualKeyboardChanged: Switched to " << url.spec();
 }
 #endif

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -10,6 +10,7 @@
 #pragma once
 
 #include "base/basictypes.h"
+#include "base/memory/ref_counted.h"
 
 class CrxInstaller;
 class ExtensionInstallUI;
@@ -27,6 +28,11 @@ namespace download_crx_util {
 // installs, you need to call this function once before the first
 // install, and again after the first install and before the second.
 void SetMockInstallUIForTesting(ExtensionInstallUI* mock_ui);
+
+// Returns true if the specified download_item containing an extension should be
+// automatically installed. This is typically true in the case of webstore
+// installations.
+bool ShouldOpenExtensionDownload(const content::DownloadItem& download_item);
 
 // Start installing a downloaded item item as a CRX (extension, theme, app,
 // ...).  The installer does work on the file thread, so the installation

@@ -128,7 +128,6 @@ class TestFinishObserver : public content::NotificationObserver {
 class BrowserKeyEventsTest : public InProcessBrowserTest {
  public:
   BrowserKeyEventsTest() {
-    set_show_window(true);
     EnableDOMAutomation();
   }
 
@@ -364,7 +363,7 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, NormalKeyEvents) {
   ui_test_utils::NavigateToURL(browser(), url);
 
   ASSERT_NO_FATAL_FAILURE(ClickOnView(VIEW_ID_TAB_CONTAINER));
-  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER_FOCUS_VIEW));
+  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER));
 
   int tab_index = browser()->active_index();
   for (size_t i = 0; i < arraysize(kTestNoInput); ++i) {
@@ -449,7 +448,7 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, CtrlKeyEvents) {
   ui_test_utils::NavigateToURL(browser(), url);
 
   ASSERT_NO_FATAL_FAILURE(ClickOnView(VIEW_ID_TAB_CONTAINER));
-  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER_FOCUS_VIEW));
+  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER));
 
   int tab_index = browser()->active_index();
   // Press Ctrl+F, which will make the Find box open and request focus.
@@ -459,11 +458,11 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, CtrlKeyEvents) {
   // Press Escape to close the Find box and move the focus back to the web page.
   ASSERT_TRUE(ui_test_utils::SendKeyPressSync(
       browser(), ui::VKEY_ESCAPE, false, false, false, false));
-  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER_FOCUS_VIEW));
+  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER));
 
   // Press Ctrl+F with keydown suppressed shall not open the find box.
   EXPECT_NO_FATAL_FAILURE(TestKeyEvent(tab_index, kTestCtrlFSuppressKeyDown));
-  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER_FOCUS_VIEW));
+  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER));
 
   EXPECT_NO_FATAL_FAILURE(TestKeyEvent(tab_index, kTestCtrlZ));
   EXPECT_NO_FATAL_FAILURE(TestKeyEvent(tab_index, kTestCtrlZSuppressKeyDown));
@@ -495,7 +494,7 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, DISABLED_CommandKeyEvents) {
   ui_test_utils::NavigateToURL(browser(), url);
 
   ASSERT_NO_FATAL_FAILURE(ClickOnView(VIEW_ID_TAB_CONTAINER));
-  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER_FOCUS_VIEW));
+  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER));
 
   int tab_index = browser()->active_index();
   // Press Cmd+F, which will make the Find box open and request focus.
@@ -505,11 +504,11 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, DISABLED_CommandKeyEvents) {
   // Press Escape to close the Find box and move the focus back to the web page.
   ASSERT_TRUE(ui_test_utils::SendKeyPressSync(
       browser(), ui::VKEY_ESCAPE, false, false, false, false));
-  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER_FOCUS_VIEW));
+  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER));
 
   // Press Cmd+F with keydown suppressed shall not open the find box.
   EXPECT_NO_FATAL_FAILURE(TestKeyEvent(tab_index, kTestCmdFSuppressKeyDown));
-  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER_FOCUS_VIEW));
+  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER));
 }
 #endif
 
@@ -597,7 +596,7 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, AccessKeys) {
 
   ui_test_utils::RunAllPendingInMessageLoop();
   ASSERT_NO_FATAL_FAILURE(ClickOnView(VIEW_ID_TAB_CONTAINER));
-  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER_FOCUS_VIEW));
+  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER));
 
   int tab_index = browser()->active_index();
   // Make sure no element is focused.
@@ -628,7 +627,7 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, AccessKeys) {
 
   // Move the focus back to the web page.
   ASSERT_NO_FATAL_FAILURE(ClickOnView(VIEW_ID_TAB_CONTAINER));
-  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER_FOCUS_VIEW));
+  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER));
 
   // Make sure no element is focused.
   EXPECT_NO_FATAL_FAILURE(CheckFocusedElement(tab_index, L""));
@@ -639,7 +638,7 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, AccessKeys) {
   // a part of the default action of the key event, so it should not be
   // suppressed at all.
   EXPECT_NO_FATAL_FAILURE(TestKeyEvent(tab_index, kTestAccessDSuppress));
-  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER_FOCUS_VIEW));
+  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER));
   EXPECT_NO_FATAL_FAILURE(CheckFocusedElement(tab_index, L"D"));
 
   // Blur the focused element.
@@ -670,7 +669,7 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, MAYBE_ReservedAccelerators) {
   ui_test_utils::NavigateToURL(browser(), url);
 
   ASSERT_NO_FATAL_FAILURE(ClickOnView(VIEW_ID_TAB_CONTAINER));
-  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER_FOCUS_VIEW));
+  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER));
 
   ASSERT_EQ(1, browser()->tab_count());
 
@@ -687,7 +686,7 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, MAYBE_ReservedAccelerators) {
   };
 
   ui_test_utils::WindowedNotificationObserver wait_for_new_tab(
-      content::NOTIFICATION_TAB_PARENTED,
+      chrome::NOTIFICATION_TAB_PARENTED,
       content::NotificationService::AllSources());
 
   // Press Ctrl/Cmd+T, which will open a new tab. It cannot be suppressed.
@@ -701,22 +700,21 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, MAYBE_ReservedAccelerators) {
   EXPECT_EQ(2, browser()->tab_count());
   ASSERT_EQ(1, browser()->active_index());
 
-  // Because of issue http://crbug.com/65375, switching back to the first tab
+  // Because of issue <http://crbug.com/65375>, switching back to the first tab
   // may cause the focus to be grabbed by omnibox. So instead, we load our
   // testing page in the newly created tab and try Cmd-W here.
   ui_test_utils::NavigateToURL(browser(), url);
 
   // Make sure the focus is in the testing page.
   ASSERT_NO_FATAL_FAILURE(ClickOnView(VIEW_ID_TAB_CONTAINER));
-  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER_FOCUS_VIEW));
+  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER));
 
   // Reserved accelerators can't be suppressed.
   ASSERT_NO_FATAL_FAILURE(SuppressAllEvents(1, true));
 
   ui_test_utils::WindowedNotificationObserver wait_for_tab_closed(
-      content::NOTIFICATION_TAB_CLOSED,
-      content::Source<NavigationController>(
-          &browser()->GetWebContentsAt(1)->GetController()));
+      content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
+      content::Source<content::WebContents>(browser()->GetWebContentsAt(1)));
 
   // Press Ctrl/Cmd+W, which will close the tab.
 #if defined(OS_MACOSX)
@@ -768,7 +766,7 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, EditorKeyBindings) {
   ui_test_utils::NavigateToURL(browser(), url);
 
   ASSERT_NO_FATAL_FAILURE(ClickOnView(VIEW_ID_TAB_CONTAINER));
-  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER_FOCUS_VIEW));
+  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER));
 
   int tab_index = browser()->active_index();
   ASSERT_NO_FATAL_FAILURE(SetFocusedElement(tab_index, L"A"));
@@ -805,7 +803,7 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, PageUpDownKeys) {
   ui_test_utils::NavigateToURL(browser(), url);
 
   ASSERT_NO_FATAL_FAILURE(ClickOnView(VIEW_ID_TAB_CONTAINER));
-  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER_FOCUS_VIEW));
+  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER));
 
   int tab_index = browser()->active_index();
   ASSERT_NO_FATAL_FAILURE(SetFocusedElement(tab_index, L"A"));
@@ -847,7 +845,7 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, FocusMenuBarByAltKey) {
   ui_test_utils::NavigateToURL(browser(), url);
 
   ASSERT_NO_FATAL_FAILURE(ClickOnView(VIEW_ID_TAB_CONTAINER));
-  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER_FOCUS_VIEW));
+  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER));
 
   int tab_index = browser()->active_index();
   // Press and release Alt key to focus wrench menu button.
@@ -855,15 +853,15 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, FocusMenuBarByAltKey) {
   EXPECT_TRUE(IsViewFocused(VIEW_ID_APP_MENU));
 
   ASSERT_NO_FATAL_FAILURE(ClickOnView(VIEW_ID_TAB_CONTAINER));
-  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER_FOCUS_VIEW));
+  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER));
 
   // Alt key can be suppressed.
   EXPECT_NO_FATAL_FAILURE(TestKeyEvent(tab_index, kTestAltKeySuppress));
-  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER_FOCUS_VIEW));
+  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER));
 
   // Ctrl+Alt should have no effect.
   EXPECT_NO_FATAL_FAILURE(TestKeyEvent(tab_index, kTestCtrlAltKey));
-  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER_FOCUS_VIEW));
+  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER));
 }
 #endif
 

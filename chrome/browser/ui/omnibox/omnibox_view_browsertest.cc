@@ -37,7 +37,7 @@
 #include "ui/base/events.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 
-#if defined(TOOLKIT_USES_GTK)
+#if defined(TOOLKIT_GTK)
 #include <gdk/gdk.h>
 #include <gtk/gtk.h>
 #endif
@@ -118,7 +118,7 @@ const struct TestHistoryEntry {
   {"http://bar/", "Bar", kSearchText, 1, 0, false },
 };
 
-#if defined(TOOLKIT_USES_GTK)
+#if defined(TOOLKIT_GTK)
 // Returns the text stored in the PRIMARY clipboard.
 std::string GetPrimarySelectionText() {
   GtkClipboard* clipboard = gtk_clipboard_get(GDK_SELECTION_PRIMARY);
@@ -152,7 +152,6 @@ class OmniboxViewTest : public InProcessBrowserTest,
  protected:
   OmniboxViewTest()
       : location_bar_focus_view_id_(VIEW_ID_LOCATION_BAR) {
-    set_show_window(true);
   }
 
   virtual void SetUpOnMainThread() {
@@ -160,9 +159,8 @@ class OmniboxViewTest : public InProcessBrowserTest,
     ASSERT_NO_FATAL_FAILURE(SetupComponents());
     browser()->FocusLocationBar();
     // Use Textfield's view id on pure views. See crbug.com/71144.
-#if defined(TOOLKIT_VIEWS)
-    if (views::Widget::IsPureViews())
-      location_bar_focus_view_id_ = VIEW_ID_OMNIBOX;
+#if defined(USE_AURA)
+    location_bar_focus_view_id_ = VIEW_ID_OMNIBOX;
 #endif
     ASSERT_TRUE(ui_test_utils::IsViewFocused(browser(),
                                              location_bar_focus_view_id_));
@@ -225,11 +223,12 @@ class OmniboxViewTest : public InProcessBrowserTest,
       return;
 
     content::NotificationRegistrar registrar;
-    registrar.Add(this,
-                  (tab_count < expected_tab_count ?
-                   content::NOTIFICATION_TAB_PARENTED :
-                   content::NOTIFICATION_TAB_CLOSED),
-                   content::NotificationService::AllSources());
+    registrar.Add(
+        this,
+        tab_count < expected_tab_count
+            ? static_cast<int>(chrome::NOTIFICATION_TAB_PARENTED)
+            : static_cast<int>(content::NOTIFICATION_WEB_CONTENTS_DESTROYED),
+        content::NotificationService::AllSources());
 
     while (!HasFailure() && browser->tab_count() != expected_tab_count)
       ui_test_utils::RunMessageLoop();
@@ -264,8 +263,9 @@ class OmniboxViewTest : public InProcessBrowserTest,
   }
 
   void SetupSearchEngine() {
+    Profile* profile = browser()->profile();
     TemplateURLService* model =
-        TemplateURLServiceFactory::GetForProfile(browser()->profile());
+        TemplateURLServiceFactory::GetForProfile(profile);
     ASSERT_TRUE(model);
 
     if (!model->loaded()) {
@@ -285,18 +285,16 @@ class OmniboxViewTest : public InProcessBrowserTest,
          i = builtins.begin(); i != builtins.end(); ++i)
       model->Remove(*i);
 
-    TemplateURL* template_url = new TemplateURL();
-    template_url->SetURL(kSearchURL, 0, 0);
-    template_url->set_keyword(ASCIIToUTF16(kSearchKeyword));
-    template_url->set_short_name(ASCIIToUTF16(kSearchShortName));
+    TemplateURLData data;
+    data.short_name = ASCIIToUTF16(kSearchShortName);
+    data.SetKeyword(ASCIIToUTF16(kSearchKeyword));
+    data.SetURL(kSearchURL);
+    TemplateURL* template_url = new TemplateURL(profile, data);
     model->Add(template_url);
     model->SetDefaultSearchProvider(template_url);
 
-    TemplateURL* second_url = new TemplateURL();
-    second_url->SetURL(kSearchURL, 0, 0);
-    second_url->set_keyword(ASCIIToUTF16(kSearchKeyword2));
-    second_url->set_short_name(ASCIIToUTF16(kSearchShortName));
-    model->Add(second_url);
+    data.SetKeyword(ASCIIToUTF16(kSearchKeyword2));
+    model->Add(new TemplateURL(profile, data));
   }
 
   void AddHistoryEntry(const TestHistoryEntry& entry, const Time& time) {
@@ -335,7 +333,7 @@ class OmniboxViewTest : public InProcessBrowserTest,
     // Wait at least for the AddPageWithDetails() call to finish.
     {
       content::NotificationRegistrar registrar;
-      registrar.Add(this, chrome::NOTIFICATION_HISTORY_TYPED_URLS_MODIFIED,
+      registrar.Add(this, chrome::NOTIFICATION_HISTORY_URLS_MODIFIED,
                     content::Source<Profile>(profile));
       ui_test_utils::RunMessageLoop();
       // We don't want to return until all observers have processed this
@@ -373,12 +371,12 @@ class OmniboxViewTest : public InProcessBrowserTest,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) {
     switch (type) {
-      case content::NOTIFICATION_TAB_CLOSED:
-      case content::NOTIFICATION_TAB_PARENTED:
+      case content::NOTIFICATION_WEB_CONTENTS_DESTROYED:
+      case chrome::NOTIFICATION_TAB_PARENTED:
       case chrome::NOTIFICATION_AUTOCOMPLETE_CONTROLLER_RESULT_READY:
       case chrome::NOTIFICATION_BOOKMARK_MODEL_LOADED:
       case chrome::NOTIFICATION_HISTORY_LOADED:
-      case chrome::NOTIFICATION_HISTORY_TYPED_URLS_MODIFIED:
+      case chrome::NOTIFICATION_HISTORY_URLS_MODIFIED:
       case chrome::NOTIFICATION_TEMPLATE_URL_SERVICE_LOADED:
         break;
       default:
@@ -941,14 +939,16 @@ class OmniboxViewTest : public InProcessBrowserTest,
     AutocompletePopupModel* popup_model = omnibox_view->model()->popup_model();
     ASSERT_TRUE(popup_model);
 
+    Profile* profile = browser()->profile();
     TemplateURLService* template_url_service =
-        TemplateURLServiceFactory::GetForProfile(browser()->profile());
+        TemplateURLServiceFactory::GetForProfile(profile);
 
     // Add a non-default substituting keyword.
-    TemplateURL* template_url = new TemplateURL();
-    template_url->SetURL("http://abc.com/{searchTerms}", 0, 0);
-    template_url->set_keyword(UTF8ToUTF16(kSearchText));
-    template_url->set_short_name(UTF8ToUTF16("Search abc"));
+    TemplateURLData data;
+    data.short_name = ASCIIToUTF16("Search abc");
+    data.SetKeyword(ASCIIToUTF16(kSearchText));
+    data.SetURL("http://abc.com/{searchTerms}");
+    TemplateURL* template_url = new TemplateURL(profile, data);
     template_url_service->Add(template_url);
 
     omnibox_view->SetUserText(string16());
@@ -970,11 +970,9 @@ class OmniboxViewTest : public InProcessBrowserTest,
 
     // Try a non-substituting keyword.
     template_url_service->Remove(template_url);
-    template_url = new TemplateURL();
-    template_url->SetURL("http://abc.com/", 0, 0);
-    template_url->set_keyword(UTF8ToUTF16(kSearchText));
-    template_url->set_short_name(UTF8ToUTF16("abc"));
-    template_url_service->Add(template_url);
+    data.short_name = ASCIIToUTF16("abc");
+    data.SetURL("http://abc.com/");
+    template_url_service->Add(new TemplateURL(profile, data));
 
     // We always allow exact matches for non-substituting keywords.
     ASSERT_NO_FATAL_FAILURE(SendKeySequence(kSearchTextKeys));
@@ -1356,9 +1354,9 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest,
   CtrlKeyPressedWithInlineAutocompleteTest();
 }
 
-#if defined(TOOLKIT_USES_GTK)
+#if defined(TOOLKIT_GTK)
 // TODO(oshima): enable these tests for views-implmentation when
-// these featuers are supported.
+// these featuers are supported. http://crbug.com/121558.
 
 IN_PROC_BROWSER_TEST_F(OmniboxViewTest, UndoRedoLinux) {
   ui_test_utils::NavigateToURL(browser(), GURL(chrome::kAboutBlankURL));

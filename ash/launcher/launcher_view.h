@@ -11,22 +11,29 @@
 
 #include "ash/launcher/launcher_button_host.h"
 #include "ash/launcher/launcher_model_observer.h"
+#include "base/observer_list.h"
 #include "ui/views/context_menu_controller.h"
 #include "ui/views/controls/button/button.h"
+#include "ui/views/focus/focus_manager.h"
 #include "ui/views/view.h"
 
 namespace views {
 class BoundsAnimator;
 class ImageButton;
 class MenuRunner;
+class ViewModel;
 }
 
 namespace ash {
 
+namespace test {
+class LauncherViewTestAPI;
+}
+
 class LauncherDelegate;
 struct LauncherItem;
+class LauncherIconObserver;
 class LauncherModel;
-class ViewModel;
 
 namespace internal {
 
@@ -36,25 +43,9 @@ class ASH_EXPORT LauncherView : public views::View,
                                 public LauncherModelObserver,
                                 public views::ButtonListener,
                                 public LauncherButtonHost,
-                                public views::ContextMenuController {
+                                public views::ContextMenuController,
+                                public views::FocusTraversable {
  public:
-  // Use the api in this class for testing only.
-  class ASH_EXPORT TestAPI {
-   public:
-    explicit TestAPI(LauncherView* launcher_view)
-        : launcher_view_(launcher_view) {
-    }
-    // Number of icons displayed.
-    int GetButtonCount();
-    // Retrieve the button at |index|.
-    LauncherButton* GetButton(int index);
-
-   private:
-    LauncherView* launcher_view_;
-
-    DISALLOW_COPY_AND_ASSIGN(TestAPI);
-  };
-
   LauncherView(LauncherModel* model, LauncherDelegate* delegate);
   virtual ~LauncherView();
 
@@ -64,10 +55,20 @@ class ASH_EXPORT LauncherView : public views::View,
   // isn't know.
   gfx::Rect GetIdealBoundsOfItemIcon(LauncherID id);
 
+  void AddIconObserver(LauncherIconObserver* observer);
+  void RemoveIconObserver(LauncherIconObserver* observer);
+
   // Returns true if we're showing a menu.
   bool IsShowingMenu() const;
 
+  // Overridden from FocusTraversable:
+  virtual views::FocusSearch* GetFocusSearch() OVERRIDE;
+  virtual FocusTraversable* GetFocusTraversableParent() OVERRIDE;
+  virtual View* GetFocusTraversableParentView() OVERRIDE;
+
  private:
+  friend class ash::test::LauncherViewTestAPI;
+
   class FadeOutAnimationDelegate;
   class StartFadeAnimationDelegate;
 
@@ -124,6 +125,7 @@ class ASH_EXPORT LauncherView : public views::View,
   // Overridden from views::View:
   virtual gfx::Size GetPreferredSize() OVERRIDE;
   virtual void OnBoundsChanged(const gfx::Rect& previous_bounds) OVERRIDE;
+  virtual FocusTraversable* GetPaneFocusTraversable() OVERRIDE;
 
   // Overridden from LauncherModelObserver:
   virtual void LauncherItemAdded(int model_index) OVERRIDE;
@@ -131,7 +133,6 @@ class ASH_EXPORT LauncherView : public views::View,
   virtual void LauncherItemChanged(int model_index,
                                    const ash::LauncherItem& old_item) OVERRIDE;
   virtual void LauncherItemMoved(int start_index, int target_index) OVERRIDE;
-  virtual void LauncherItemWillChange(int index) OVERRIDE;
 
   // Overridden from LauncherButtonHost:
   virtual void MousePressedOnButton(views::View* view,
@@ -159,7 +160,11 @@ class ASH_EXPORT LauncherView : public views::View,
 
   // Used to manage the set of active launcher buttons. There is a view per
   // item in |model_|.
-  scoped_ptr<ViewModel> view_model_;
+  scoped_ptr<views::ViewModel> view_model_;
+
+  // Last index of a launcher button that is visible
+  // (does not go into overflow).
+  int last_visible_index_;
 
   scoped_ptr<views::BoundsAnimator> bounds_animator_;
 
@@ -182,11 +187,15 @@ class ASH_EXPORT LauncherView : public views::View,
   // Used for the context menu of a particular item.
   LauncherID context_menu_id_;
 
+  scoped_ptr<views::FocusSearch> focus_search_;
+
 #if !defined(OS_MACOSX)
   scoped_ptr<views::MenuRunner> overflow_menu_runner_;
 
   scoped_ptr<views::MenuRunner> launcher_menu_runner_;
 #endif
+
+  ObserverList<LauncherIconObserver> observers_;
 
   DISALLOW_COPY_AND_ASSIGN(LauncherView);
 };

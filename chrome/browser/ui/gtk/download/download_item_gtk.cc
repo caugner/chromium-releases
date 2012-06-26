@@ -19,9 +19,9 @@
 #include "chrome/browser/ui/gtk/custom_drag.h"
 #include "chrome/browser/ui/gtk/download/download_shelf_context_menu_gtk.h"
 #include "chrome/browser/ui/gtk/download/download_shelf_gtk.h"
+#include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/nine_box.h"
-#include "chrome/browser/ui/gtk/theme_service_gtk.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/notification_source.h"
@@ -109,7 +109,7 @@ DownloadItemGtk::DownloadItemGtk(DownloadShelfGtk* parent_shelf,
       arrow_(NULL),
       menu_showing_(false),
       theme_service_(
-          ThemeServiceGtk::GetFrom(parent_shelf->browser()->profile())),
+          GtkThemeService::GetFrom(parent_shelf->browser()->profile())),
       progress_angle_(download_util::kStartAngleDegrees),
       download_model_(download_model),
       dangerous_prompt_(NULL),
@@ -335,6 +335,7 @@ void DownloadItemGtk::OnDownloadUpdated(DownloadItem* download) {
       break;
     case DownloadItem::INTERRUPTED:
       StopDownloadProgress();
+      UpdateTooltip();
 
       complete_animation_.Show();
       break;
@@ -476,11 +477,9 @@ void DownloadItemGtk::LoadIcon() {
 }
 
 void DownloadItemGtk::UpdateTooltip() {
-  string16 elided_filename = ui::ElideFilename(
-      get_download()->GetFileNameToReportUser(),
-      gfx::Font(), kTooltipMaxWidth);
-  gtk_widget_set_tooltip_text(body_.get(),
-                              UTF16ToUTF8(elided_filename).c_str());
+  string16 tooltip_text =
+      download_model_->GetTooltipText(gfx::Font(), kTooltipMaxWidth);
+  gtk_widget_set_tooltip_text(body_.get(), UTF16ToUTF8(tooltip_text).c_str());
 }
 
 void DownloadItemGtk::UpdateNameLabel() {

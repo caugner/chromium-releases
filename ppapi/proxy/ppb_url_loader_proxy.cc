@@ -34,7 +34,6 @@
 #include <sys/shm.h>
 #endif
 
-using ppapi::thunk::EnterFunctionNoLock;
 using ppapi::thunk::EnterResourceNoLock;
 using ppapi::thunk::PPB_URLLoader_API;
 using ppapi::thunk::ResourceCreationAPI;
@@ -57,6 +56,7 @@ void UpdateResourceLoadStatus(PP_Instance pp_instance,
                               int64 total_bytes_to_be_sent,
                               int64 bytes_received,
                               int64 total_bytes_to_be_received) {
+#if !defined(OS_NACL)
   Dispatcher* dispatcher = HostDispatcher::GetForInstance(pp_instance);
   if (!dispatcher)
     return;
@@ -70,6 +70,7 @@ void UpdateResourceLoadStatus(PP_Instance pp_instance,
   params.total_bytes_to_be_received = total_bytes_to_be_received;
   dispatcher->Send(new PpapiMsg_PPBURLLoader_UpdateProgress(
       API_ID_PPB_URL_LOADER, params));
+#endif
 }
 
 InterfaceProxy* CreateURLLoaderProxy(Dispatcher* dispatcher) {
@@ -424,9 +425,10 @@ bool PPB_URLLoader_Proxy::OnMessageReceived(const IPC::Message& msg) {
                         OnMsgClose)
     IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBURLLoader_GrantUniversalAccess,
                         OnMsgGrantUniversalAccess)
-
+#if !defined(OS_NACL)
     IPC_MESSAGE_HANDLER(PpapiMsg_PPBURLLoader_UpdateProgress,
                         OnMsgUpdateProgress)
+#endif
     IPC_MESSAGE_HANDLER(PpapiMsg_PPBURLLoader_ReadResponseBody_Ack,
                         OnMsgReadResponseBodyAck)
     IPC_MESSAGE_HANDLER(PpapiMsg_PPBURLLoader_CallbackComplete,

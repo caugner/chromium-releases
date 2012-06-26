@@ -5,8 +5,8 @@
 // Multiply-included message file, hence no include guard here, but see below
 // for a much smaller-than-usual include guard section.
 
-#include <vector>
 #include <string>
+#include <vector>
 
 #include "base/shared_memory.h"
 #include "content/common/content_export.h"
@@ -23,7 +23,7 @@
 #include "ui/gfx/gl/gpu_preference.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/size.h"
-#include "ui/gfx/surface/transport_dib.h"
+#include "ui/surface/transport_dib.h"
 
 #define IPC_MESSAGE_START GpuMsgStart
 
@@ -144,7 +144,7 @@ IPC_ENUM_TRAITS(content::CauseForGpuLaunch)
 IPC_ENUM_TRAITS(gfx::GpuPreference)
 IPC_ENUM_TRAITS(gpu::error::ContextLostReason)
 
-IPC_ENUM_TRAITS(media::VideoDecodeAccelerator::Profile)
+IPC_ENUM_TRAITS(media::VideoCodecProfile)
 
 //------------------------------------------------------------------------------
 // GPU Messages
@@ -216,11 +216,10 @@ IPC_MESSAGE_CONTROL0(GpuMsg_Hang)
 // A renderer sends this when it wants to create a connection to the GPU
 // process. The browser will create the GPU process if necessary, and will
 // return a handle to the channel via a GpuChannelEstablished message.
-IPC_SYNC_MESSAGE_CONTROL1_4(GpuHostMsg_EstablishGpuChannel,
+IPC_SYNC_MESSAGE_CONTROL1_3(GpuHostMsg_EstablishGpuChannel,
                             content::CauseForGpuLaunch,
                             int /* client id */,
                             IPC::ChannelHandle /* handle to channel */,
-                            base::ProcessHandle /* renderer_process_for_gpu */,
                             content::GPUInfo /* stats about GPU process*/)
 
 // A renderer sends this to the browser process when it wants to
@@ -291,13 +290,6 @@ IPC_MESSAGE_CONTROL1(GpuHostMsg_AcceleratedSurfaceSuspend,
 //------------------------------------------------------------------------------
 // GPU Channel Messages
 // These are messages from a renderer process to the GPU process.
-
-// Initialize a channel between a renderer process and a GPU process. The
-// renderer passes its process handle to the GPU process, which gives gives the
-// GPU process the ability to map handles from the renderer process. This must
-// be the first message sent on a newly connected channel.
-IPC_MESSAGE_CONTROL1(GpuChannelMsg_Initialize,
-                     base::ProcessHandle /* renderer_process_for_gpu */)
 
 // Tells the GPU process to create a new command buffer that renders to an
 // offscreen frame buffer.
@@ -405,7 +397,7 @@ IPC_SYNC_MESSAGE_ROUTED1_2(GpuCommandBufferMsg_GetTransferBuffer,
 
 // Create and initialize a hardware video decoder, returning its new route_id.
 IPC_SYNC_MESSAGE_ROUTED1_1(GpuCommandBufferMsg_CreateVideoDecoder,
-                           media::VideoDecodeAccelerator::Profile /* profile */,
+                           media::VideoCodecProfile /* profile */,
                            int /* route_id */)
 
 // Release all resources held by the named hardware video decoder.
@@ -452,6 +444,11 @@ IPC_MESSAGE_ROUTED0(GpuCommandBufferMsg_EnsureBackbuffer)
 // Sent to proxy when the gpu memory manager changes its memory allocation.
 IPC_MESSAGE_ROUTED1(GpuCommandBufferMsg_SetMemoryAllocation,
                     GpuMemoryAllocationForRenderer /* allocation */)
+
+// Sent to stub when proxy is assigned a memory allocation changed callback.
+IPC_MESSAGE_ROUTED1(
+    GpuCommandBufferMsg_SetClientHasMemoryAllocationChangedCallback,
+    bool /* has_callback */)
 
 //------------------------------------------------------------------------------
 // Accelerated Video Decoder Messages

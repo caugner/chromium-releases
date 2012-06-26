@@ -49,6 +49,7 @@
 #include "ui/base/ime/composition_text.h"
 #include "ui/base/l10n/l10n_util_win.h"
 #include "ui/base/text/text_elider.h"
+#include "ui/base/ui_base_switches.h"
 #include "ui/base/view_prop.h"
 #include "ui/base/win/hwnd_util.h"
 #include "ui/base/win/mouse_wheel_util.h"
@@ -152,7 +153,7 @@ void NotifyPluginProcessHostHelper(HWND window, HWND parent, int tries) {
       MessageLoop::current()->PostDelayedTask(
           FROM_HERE,
           base::Bind(&NotifyPluginProcessHostHelper, window, parent, tries - 1),
-          kTryDelayMs);
+          base::TimeDelta::FromMilliseconds(kTryDelayMs));
       return;
     }
   }
@@ -331,8 +332,7 @@ RenderWidgetHostViewWin::RenderWidgetHostViewWin(RenderWidgetHost* widget)
       pointer_down_context_(false),
       focus_on_editable_field_(false),
       received_focus_change_after_pointer_down_(false),
-      touch_events_enabled_(false),
-      ALLOW_THIS_IN_INITIALIZER_LIST(sys_color_change_listener_(this)) {
+      touch_events_enabled_(false) {
   render_widget_host_->SetView(this);
   registrar_.Add(this,
                  content::NOTIFICATION_RENDERER_PROCESS_TERMINATED,
@@ -388,10 +388,10 @@ void RenderWidgetHostViewWin::InitAsPopup(
 
 void RenderWidgetHostViewWin::InitAsFullscreen(
     RenderWidgetHostView* reference_host_view) {
-  gfx::Rect pos = gfx::Screen::GetMonitorAreaNearestWindow(
-      reference_host_view->GetNativeView());
+  gfx::Rect pos = gfx::Screen::GetMonitorNearestWindow(
+      reference_host_view->GetNativeView()).bounds();
   is_fullscreen_ = true;
-  DoPopupOrFullscreenInit(GetDesktopWindow(), pos, 0);
+  DoPopupOrFullscreenInit(ui::GetWindowToParentTo(true), pos, 0);
 }
 
 RenderWidgetHost* RenderWidgetHostViewWin::GetRenderWidgetHost() const {
@@ -402,13 +402,12 @@ void RenderWidgetHostViewWin::DidBecomeSelected() {
   if (!is_hidden_)
     return;
 
-  if (tab_switch_paint_time_.is_null())
-    tab_switch_paint_time_ = TimeTicks::Now();
+  if (web_contents_switch_paint_time_.is_null())
+    web_contents_switch_paint_time_ = TimeTicks::Now();
   is_hidden_ = false;
-  EnsureTooltip();
 
-  // |render_widget_host_| may be NULL if the TabContents is in the process of
-  // closing.
+  // |render_widget_host_| may be NULL if the WebContentsImpl is in the process
+  // of closing.
   if (render_widget_host_)
     render_widget_host_->WasRestored();
 }
@@ -451,7 +450,6 @@ void RenderWidgetHostViewWin::SetBounds(const gfx::Rect& rect) {
 
   SetWindowPos(NULL, point.x, point.y, rect.width(), rect.height(), swp_flags);
   render_widget_host_->WasResized();
-  EnsureTooltip();
 }
 
 gfx::NativeView RenderWidgetHostViewWin::GetNativeView() const {
@@ -464,7 +462,8 @@ gfx::NativeViewId RenderWidgetHostViewWin::GetNativeViewId() const {
 
 gfx::NativeViewAccessible
 RenderWidgetHostViewWin::GetNativeViewAccessible() {
-  if (render_widget_host_ && !render_widget_host_->renderer_accessible()) {
+  if (render_widget_host_ &&
+      !BrowserAccessibilityState::GetInstance()->IsAccessibleBrowser()) {
     // Attempt to detect screen readers by sending an event with our custom id.
     NotifyWinEvent(EVENT_SYSTEM_ALERT, m_hWnd, kIdCustom, CHILDID_SELF);
   }
@@ -640,7 +639,7 @@ void RenderWidgetHostViewWin::CleanupCompositorWindow() {
       FROM_HERE,
       base::Bind(base::IgnoreResult(&::DestroyWindow),
                  compositor_host_window_),
-      kDestroyCompositorHostWindowDelay);
+      base::TimeDelta::FromMilliseconds(kDestroyCompositorHostWindowDelay));
 
   compositor_host_window_ = NULL;
 }
@@ -666,7 +665,7 @@ bool RenderWidgetHostViewWin::HasFocus() const {
 void RenderWidgetHostViewWin::Show() {
   if (!is_fullscreen_) {
     DCHECK(parent_hwnd_);
-    DCHECK(parent_hwnd_ != GetDesktopWindow());
+    DCHECK(parent_hwnd_ != ui::GetWindowToParentTo(true));
     SetParent(parent_hwnd_);
   }
   ShowWindow(SW_SHOW);
@@ -675,7 +674,7 @@ void RenderWidgetHostViewWin::Show() {
 }
 
 void RenderWidgetHostViewWin::Hide() {
-  if (!is_fullscreen_ && GetParent() == GetDesktopWindow()) {
+  if (!is_fullscreen_ && GetParent() == ui::GetWindowToParentTo(true)) {
     LOG(WARNING) << "Hide() called twice in a row: " << this << ":" <<
         parent_hwnd_ << ":" << GetParent();
     return;
@@ -871,6 +870,9 @@ void RenderWidgetHostViewWin::Destroy() {
 }
 
 void RenderWidgetHostViewWin::SetTooltipText(const string16& tooltip_text) {
+  if (!is_hidden_)
+    EnsureTooltip();
+
   // Clamp the tooltip length to kMaxTooltipLength so that we don't
   // accidentally DOS the user with a mega tooltip (since Windows doesn't seem
   // to do this itself).
@@ -903,11 +905,6 @@ BackingStore* RenderWidgetHostViewWin::AllocBackingStore(
   return new BackingStoreWin(render_widget_host_, size);
 }
 
-void RenderWidgetHostViewWin::SetBackground(const SkBitmap& background) {
-  content::RenderWidgetHostViewBase::SetBackground(background);
-  render_widget_host_->SetBackground(background);
-}
-
 bool RenderWidgetHostViewWin::CopyFromCompositingSurface(
       const gfx::Size& size,
       skia::PlatformCanvas* output) {
@@ -922,6 +919,18 @@ bool RenderWidgetHostViewWin::CopyFromCompositingSurface(
 
   return accelerated_surface_->CopyTo(
       size, output->getTopDevice()->accessBitmap(true).getPixels());
+}
+
+void RenderWidgetHostViewWin::AsyncCopyFromCompositingSurface(
+    const gfx::Size& size,
+    skia::PlatformCanvas* output,
+    base::Callback<void(bool)> callback) {
+  callback.Run(CopyFromCompositingSurface(size, output));
+}
+
+void RenderWidgetHostViewWin::SetBackground(const SkBitmap& background) {
+  content::RenderWidgetHostViewBase::SetBackground(background);
+  render_widget_host_->SetBackground(background);
 }
 
 void RenderWidgetHostViewWin::ProcessTouchAck(
@@ -963,7 +972,7 @@ void RenderWidgetHostViewWin::UpdateDesiredTouchMode(bool touch_mode) {
   // Make sure that touch events even make sense.
   bool touch_mode_valid = base::win::GetVersion() >= base::win::VERSION_WIN7 &&
       CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableTouchEvents);
-  touch_mode = touch_mode && touch_mode_valid;
+  touch_mode = touch_mode_valid;
 
   // Already in correct mode, nothing to do.
   if ((touch_mode && touch_events_enabled_) ||
@@ -1000,7 +1009,12 @@ LRESULT RenderWidgetHostViewWin::OnCreate(CREATESTRUCT* create_struct) {
   // scrolled when under the mouse pointer even if inactive.
   props_.push_back(ui::SetWindowSupportsRerouteMouseWheel(m_hWnd));
 
-  SetToGestureMode();
+  bool touch_enabled = base::win::GetVersion() >= base::win::VERSION_WIN7 &&
+      CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableTouchEvents);
+  if (touch_enabled)
+    SetToTouchMode();
+  else
+    SetToGestureMode();
 
   return 0;
 }
@@ -1167,14 +1181,14 @@ void RenderWidgetHostViewWin::OnPaint(HDC unused_dc) {
       // time the backing store is NULL...
       whiteout_start_time_ = TimeTicks();
     }
-    if (!tab_switch_paint_time_.is_null()) {
-      TimeDelta tab_switch_paint_duration = TimeTicks::Now() -
-          tab_switch_paint_time_;
+    if (!web_contents_switch_paint_time_.is_null()) {
+      TimeDelta web_contents_switch_paint_duration = TimeTicks::Now() -
+          web_contents_switch_paint_time_;
       UMA_HISTOGRAM_TIMES("MPArch.RWH_TabSwitchPaintDuration",
-          tab_switch_paint_duration);
-      // Reset tab_switch_paint_time_ to 0 so future tab selections are
+          web_contents_switch_paint_duration);
+      // Reset contents_switch_paint_time_ to 0 so future tab selections are
       // recorded.
-      tab_switch_paint_time_ = TimeTicks();
+      web_contents_switch_paint_time_ = TimeTicks();
     }
   } else {
     DrawBackground(paint_dc.m_ps.rcPaint, &paint_dc);
@@ -1326,12 +1340,6 @@ void RenderWidgetHostViewWin::OnThemeChanged() {
     return;
   render_widget_host_->Send(new ViewMsg_ThemeChanged(
       render_widget_host_->GetRoutingID()));
-}
-
-void RenderWidgetHostViewWin::OnSysColorChange() {
-  render_widget_host_->Send(new ViewMsg_InvertWebContent(
-      render_widget_host_->GetRoutingID(),
-      gfx::IsInvertedColorScheme()));
 }
 
 LRESULT RenderWidgetHostViewWin::OnNotify(int w_param, NMHDR* header) {
@@ -1521,14 +1529,14 @@ LRESULT RenderWidgetHostViewWin::OnMouseEvent(UINT message, WPARAM wparam,
   }
 
   // TODO(jcampan): I am not sure if we should forward the message to the
-  // TabContents first in the case of popups.  If we do, we would need to
-  // convert the click from the popup window coordinates to the TabContents'
+  // WebContentsImpl first in the case of popups.  If we do, we would need to
+  // convert the click from the popup window coordinates to the WebContentsImpl'
   // window coordinates. For now we don't forward the message in that case to
   // address bug #907474.
   // Note: GetParent() on popup windows returns the top window and not the
   // parent the window was created with (the parent and the owner of the popup
   // is the first non-child view of the view that was specified to the create
-  // call).  So the TabContents window would have to be specified to the
+  // call).  So the WebContentsImpl's window would have to be specified to the
   // RenderViewHostHWND as there is no way to retrieve it from the HWND.
 
   // Don't forward if the container is a popup or fullscreen widget.
@@ -1543,7 +1551,7 @@ LRESULT RenderWidgetHostViewWin::OnMouseEvent(UINT message, WPARAM wparam,
         // Fall through.
       case WM_MOUSEMOVE:
       case WM_MOUSELEAVE: {
-        // Give the TabContents first crack at the message. It may want to
+        // Give the WebContentsImpl first crack at the message. It may want to
         // prevent forwarding to the renderer if some higher level browser
         // functionality is invoked.
         LPARAM parent_msg_lparam = lparam;
@@ -1687,8 +1695,8 @@ LRESULT RenderWidgetHostViewWin::OnWheelEvent(UINT message, WPARAM wparam,
   }
 
   // This is a bit of a hack, but will work for now since we don't want to
-  // pollute this object with TabContents-specific functionality...
-  bool handled_by_TabContents = false;
+  // pollute this object with WebContentsImpl-specific functionality...
+  bool handled_by_WebContentsImpl = false;
   if (!is_fullscreen_ && GetParent()) {
     // Use a special reflected message to break recursion. If we send
     // WM_MOUSEWHEEL, the focus manager subclass of web contents will
@@ -1699,12 +1707,12 @@ LRESULT RenderWidgetHostViewWin::OnWheelEvent(UINT message, WPARAM wparam,
     new_message.wParam = wparam;
     new_message.lParam = lparam;
 
-    handled_by_TabContents =
+    handled_by_WebContentsImpl =
         !!::SendMessage(GetParent(), base::win::kReflectedMessage, 0,
                         reinterpret_cast<LPARAM>(&new_message));
   }
 
-  if (!handled_by_TabContents && render_widget_host_) {
+  if (!handled_by_WebContentsImpl && render_widget_host_) {
     render_widget_host_->ForwardWheelEvent(
         WebInputEventFactory::mouseWheelEvent(m_hWnd, message, wparam,
                                               lparam));
@@ -2235,6 +2243,14 @@ void RenderWidgetHostViewWin::AcceleratedSurfaceSuspend() {
     accelerated_surface_->Suspend();
 }
 
+bool RenderWidgetHostViewWin::HasAcceleratedSurface(
+      const gfx::Size& desired_size) {
+  // TODO(jbates) Implement this so this view can use GetBackingStore for both
+  // software and GPU frames. Defaulting to false just makes GetBackingStore
+  // only useable for software frames.
+  return false;
+}
+
 void RenderWidgetHostViewWin::SetAccessibilityFocus(int acc_obj_id) {
   if (!render_widget_host_)
     return;
@@ -2280,7 +2296,8 @@ LRESULT RenderWidgetHostViewWin::OnGetObject(UINT message, WPARAM wparam,
     // An MSAA client requestes our custom id. Assume that we have detected an
     // active windows screen reader.
     BrowserAccessibilityState::GetInstance()->OnScreenReaderDetected();
-    render_widget_host_->EnableRendererAccessibility();
+    if (BrowserAccessibilityState::GetInstance()->IsAccessibleBrowser())
+      render_widget_host_->SetAccessibilityMode(AccessibilityModeComplete);
 
     // Return with failure.
     return static_cast<LRESULT>(0L);
@@ -2334,7 +2351,8 @@ LRESULT RenderWidgetHostViewWin::OnPointerMessage(
     received_focus_change_after_pointer_down_ = false;
     MessageLoop::current()->PostDelayedTask(FROM_HERE,
         base::Bind(&RenderWidgetHostViewWin::ResetPointerDownContext,
-                   weak_factory_.GetWeakPtr()), kPointerDownContextResetDelay);
+                   weak_factory_.GetWeakPtr()),
+        base::TimeDelta::FromMilliseconds(kPointerDownContextResetDelay));
   }
   handled = FALSE;
   return 0;
@@ -2503,10 +2521,6 @@ void RenderWidgetHostViewWin::DoPopupOrFullscreenInit(HWND parent_hwnd,
   parent_hwnd_ = parent_hwnd;
   Create(parent_hwnd_, NULL, NULL, WS_POPUP, ex_style);
   MoveWindow(pos.x(), pos.y(), pos.width(), pos.height(), TRUE);
-  // To show tooltip on popup window.(e.g. title in <select>)
-  // Popups default to showing, which means |DidBecomeSelected()| isn't invoked.
-  // Ensure the tooltip is created otherwise tooltips are never shown.
-  EnsureTooltip();
   ShowWindow(IsActivatable() ? SW_SHOW : SW_SHOWNA);
 }
 

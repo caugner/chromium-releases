@@ -50,11 +50,6 @@ class BrowserWindowGtk : public BrowserWindow,
                          public ui::ActiveWindowWatcherXObserver,
                          public InfoBarContainer::Delegate {
  public:
-  enum TitleDecoration {
-    PANGO_MARKUP,
-    PLAIN_TEXT
-  };
-
   explicit BrowserWindowGtk(Browser* browser);
   virtual ~BrowserWindowGtk();
 
@@ -62,17 +57,10 @@ class BrowserWindowGtk : public BrowserWindow,
   // functions during initialization.
   virtual void Init();
 
-  // Shows the settings menu when the settings button, if present, is clicked.
-  // This is currently only used in panel window.
-  virtual void ShowSettingsMenu(GtkWidget* widget, GdkEventButton* event);
-
-  // Allows for a derived class to decorate title text with pango markup.
-  // Returns the type of text used for title.
-  virtual TitleDecoration GetWindowTitle(std::string* title) const;
-
-  // Gives a derived class a way to control visibility of close button.
-  // Returns true if close button should be visible.
-  virtual bool ShouldShowCloseButton() const;
+  // Returns whether to draw the content drop shadow on the sides and bottom
+  // of the browser window. When false, we still draw a shadow on the top of
+  // the toolbar (under the tab strip), but do not round the top corners.
+  virtual bool ShouldDrawContentDropShadow() const;
 
   // Overridden from BrowserWindow:
   virtual void Show() OVERRIDE;
@@ -118,7 +106,6 @@ class BrowserWindowGtk : public BrowserWindow,
   virtual void FocusToolbar() OVERRIDE;
   virtual void FocusAppMenu() OVERRIDE;
   virtual void FocusBookmarksToolbar() OVERRIDE;
-  virtual void FocusChromeOSStatus() OVERRIDE;
   virtual void RotatePaneFocus(bool forwards) OVERRIDE;
   virtual bool IsBookmarkBarVisible() const OVERRIDE;
   virtual bool IsBookmarkBarAnimating() const OVERRIDE;
@@ -126,7 +113,7 @@ class BrowserWindowGtk : public BrowserWindow,
   virtual bool IsToolbarVisible() const OVERRIDE;
   virtual gfx::Rect GetRootWindowResizerRect() const OVERRIDE;
   virtual bool IsPanel() const OVERRIDE;
-  virtual void ConfirmAddSearchProvider(const TemplateURL* template_url,
+  virtual void ConfirmAddSearchProvider(TemplateURL* template_url,
                                         Profile* profile) OVERRIDE;
   virtual void ToggleBookmarkBar() OVERRIDE;
   virtual void ShowAboutChromeDialog() OVERRIDE;
@@ -137,7 +124,9 @@ class BrowserWindowGtk : public BrowserWindow,
                                   bool already_bookmarked) OVERRIDE;
   virtual void ShowChromeToMobileBubble() OVERRIDE;
 #if defined(ENABLE_ONE_CLICK_SIGNIN)
-  virtual void ShowOneClickSigninBubble() OVERRIDE;
+  virtual void ShowOneClickSigninBubble(
+      const base::Closure& learn_more_callback,
+      const base::Closure& advanced_callback) OVERRIDE;
 #endif
   virtual bool IsDownloadShelfVisible() const OVERRIDE;
   virtual DownloadShelf* GetDownloadShelf() OVERRIDE;
@@ -176,6 +165,7 @@ class BrowserWindowGtk : public BrowserWindow,
   virtual void ShowAvatarBubble(content::WebContents* web_contents,
                                 const gfx::Rect& rect) OVERRIDE;
   virtual void ShowAvatarBubbleFromAvatarButton() OVERRIDE;
+  virtual void ShowPasswordGenerationBubble(const gfx::Rect& rect) OVERRIDE;
 
   // Overridden from NotificationObserver:
   virtual void Observe(int type,
@@ -220,10 +210,6 @@ class BrowserWindowGtk : public BrowserWindow,
 
   bool ShouldShowWindowIcon() const;
 
-  // This should only be called from tests where the debounce timeout introduces
-  // timing issues.
-  void DisableDebounceTimerForTests(bool is_disabled);
-
   // Add the find bar widget to the window hierarchy.
   void AddFindBar(FindBarGtk* findbar);
 
@@ -256,11 +242,6 @@ class BrowserWindowGtk : public BrowserWindow,
 
   static void RegisterUserPrefs(PrefService* prefs);
 
-  // Returns whether to draw the content drop shadow on the sides and bottom
-  // of the browser window. When false, we still draw a shadow on the top of
-  // the toolbar (under the tab strip), but do not round the top corners.
-  bool ShouldDrawContentDropShadow();
-
   // Tells GTK that the toolbar area is invalidated and needs redrawing. We
   // have this method as a hack because GTK doesn't queue the toolbar area for
   // redraw when it should.
@@ -273,14 +254,30 @@ class BrowserWindowGtk : public BrowserWindow,
  protected:
   virtual void DestroyBrowser() OVERRIDE;
 
+  // Returns an instance of |BrowserTitlebar| to be used for this window.
+  virtual BrowserTitlebar* CreateBrowserTitlebar();
+
   // Checks to see if the mouse pointer at |x|, |y| is over the border of the
   // custom frame (a spot that should trigger a window resize). Returns true if
   // it should and sets |edge|.
   virtual bool GetWindowEdge(int x, int y, GdkWindowEdge* edge);
 
+  // Returns the window shape for the window with |width| and |height|.
+  // The caller is responsible for destroying the region if non-null region is
+  // returned.
+  virtual GdkRegion* GetWindowShape(int width, int height) const;
+
+  // Draws the border, including resizable corners, for the custom frame.
+  virtual void DrawCustomFrameBorder(GtkWidget* widget);
+
   virtual bool HandleTitleBarLeftMousePress(GdkEventButton* event,
                                             guint32 last_click_time,
                                             gfx::Point last_click_position);
+
+  // Returns true if handled.
+  virtual bool HandleWindowEdgeLeftMousePress(GtkWindow* window,
+                                              GdkWindowEdge edge,
+                                              GdkEventButton* event);
 
   // Save the window position in the prefs.
   virtual void SaveWindowPosition();
@@ -290,7 +287,11 @@ class BrowserWindowGtk : public BrowserWindow,
   virtual void SetGeometryHints();
 
   // Returns |true| if we should use the custom frame.
-  virtual bool UseCustomFrame();
+  virtual bool UseCustomFrame() const;
+
+  // Whether we should draw the tab background instead of the theme_frame
+  // background because this window is a popup.
+  virtual bool UsingCustomPopupFrame() const;
 
   // Called when the window size changed.
   virtual void OnSizeChanged(int width, int height);
@@ -308,6 +309,9 @@ class BrowserWindowGtk : public BrowserWindow,
 
   // Returns the size of the window frame around the client content area.
   gfx::Size GetNonClientFrameSize() const;
+
+  // Invalidate window to force repaint.
+  void InvalidateWindow();
 
   // Top level window.
   GtkWindow* window_;
@@ -353,9 +357,6 @@ class BrowserWindowGtk : public BrowserWindow,
   // Must be called once at startup.
   // Triggers relayout of the content.
   void UpdateCustomFrame();
-
-  // Invalidate window to force repaint.
-  void InvalidateWindow();
 
   // Set the bounds of the current window. If |exterior| is true, set the size
   // of the window itself, otherwise set the bounds of the web contents.
@@ -450,10 +451,6 @@ class BrowserWindowGtk : public BrowserWindow,
   bool IsTabStripSupported() const;
   bool IsToolbarSupported() const;
   bool IsBookmarkBarSupported() const;
-
-  // Whether we should draw the tab background instead of the theme_frame
-  // background because this window is a popup.
-  bool UsingCustomPopupFrame() const;
 
   // Returns |true| if the window bounds match the monitor size.
   bool BoundsMatchMonitorSize();
@@ -564,12 +561,7 @@ class BrowserWindowGtk : public BrowserWindow,
 
   scoped_ptr<FullscreenExitBubbleGtk> fullscreen_exit_bubble_;
 
-  // If true, the debounce timer won't be used and OnDebounceBoundsChanged won't
-  // be called. This should only be enabled in tests where the debounce timeout
-  // introduces timing issues (e.g. in OmniBoxApiTest it dismisses the
-  // autocomplete popup before the results can be read) and the final window
-  // position is unimportant.
-  bool debounce_timer_disabled_;
+  FullscreenExitBubbleType fullscreen_exit_bubble_type_;
 
   content::NotificationRegistrar registrar_;
 

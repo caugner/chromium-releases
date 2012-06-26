@@ -22,6 +22,7 @@
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkColorPriv.h"
 #include "third_party/skia/include/core/SkShader.h"
+#include "ui/gfx/color_utils.h"
 #include "ui/gfx/gdi_util.h"
 #include "ui/gfx/rect.h"
 
@@ -45,6 +46,10 @@ const SkColor kTextButtonHoverColor = kTextButtonEnabledColor;
 const SkColor kEnabledMenuItemForegroundColor = kTextButtonEnabledColor;
 const SkColor kDisabledMenuItemForegroundColor = kTextButtonDisabledColor;
 const SkColor kFocusedMenuItemBackgroundColor = SkColorSetRGB(246, 249, 253);
+// Label:
+const SkColor kLabelEnabledColor = color_utils::GetSysSkColor(COLOR_WINDOWTEXT);
+const SkColor kLabelDisabledColor = color_utils::GetSysSkColor(COLOR_GRAYTEXT);
+const SkColor kLabelBackgroundColor = color_utils::GetSysSkColor(COLOR_WINDOW);
 // Textfield:
 const SkColor kTextfieldDefaultColor = SK_ColorBLACK;
 const SkColor kTextfieldDefaultBackground = SK_ColorWHITE;
@@ -366,7 +371,7 @@ void NativeThemeWin::Paint(SkCanvas* canvas,
     default:
       // While transitioning NativeThemeWin to the single Paint() entry point,
       // unsupported parts will DCHECK here.
-      DCHECK(false);
+      NOTREACHED();
   }
 }
 
@@ -398,6 +403,14 @@ SkColor NativeThemeWin::GetSystemColor(ColorId color_id) const {
       return kDisabledMenuItemForegroundColor;
     case kColorId_FocusedMenuItemBackgroundColor:
       return kFocusedMenuItemBackgroundColor;
+
+    // Label
+    case kColorId_LabelEnabledColor:
+      return kLabelEnabledColor;
+    case kColorId_LabelDisabledColor:
+      return kLabelDisabledColor;
+    case kColorId_LabelBackgroundColor:
+      return kLabelBackgroundColor;
 
     // Textfield
     case kColorId_TextfieldDefaultColor:
@@ -464,9 +477,10 @@ void NativeThemeWin::PaintToNonPlatformCanvas(SkCanvas* canvas,
 
   // Copy the pixels to a bitmap that has ref-counted pixel storage, which is
   // necessary to have when drawing to a SkPicture.
-  const SkBitmap& bitmap = offscreen_canvas->getDevice()->accessBitmap(false);
-  SkBitmap ref_counted;
-  bitmap.copyTo(&ref_counted, SkBitmap::kARGB_8888_Config);
+  const SkBitmap& hdc_bitmap =
+      offscreen_canvas->getDevice()->accessBitmap(false);
+  SkBitmap bitmap;
+  hdc_bitmap.copyTo(&bitmap, SkBitmap::kARGB_8888_Config);
 
   // Post-process the pixels to fix up the alpha values (see big comment above).
   const SkPMColor placeholder_value = SkPreMultiplyColor(placeholder);
@@ -486,7 +500,7 @@ void NativeThemeWin::PaintToNonPlatformCanvas(SkCanvas* canvas,
   }
 
   // Draw the offscreen bitmap to the destination canvas.
-  canvas->drawBitmap(ref_counted, rect.x(), rect.y());
+  canvas->drawBitmap(bitmap, rect.x(), rect.y());
 }
 
 HRESULT NativeThemeWin::GetThemePartSize(ThemeName theme_name,

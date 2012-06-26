@@ -11,7 +11,7 @@
 #include "base/timer.h"
 #include "ui/aura/event_filter.h"
 #include "ui/aura/root_window_observer.h"
-#include "ui/gfx/compositor/layer_animation_observer.h"
+#include "ui/compositor/layer_animation_observer.h"
 #include "ui/views/widget/widget.h"
 
 namespace ash {
@@ -37,6 +37,13 @@ class AppList : public aura::EventFilter,
 
   // Whether app list window is visible (shown or being shown).
   bool IsVisible();
+
+  // Returns target visibility. This differs from IsVisible() if an animation
+  // is ongoing.
+  bool GetTargetVisibility() const { return is_visible_; }
+
+  // Returns app list window or NULL if it is not visible.
+  aura::Window* GetWindow();
 
  private:
   // Sets app list view. If we are in visible mode, start showing animation.
@@ -76,14 +83,13 @@ class AppList : public aura::EventFilter,
   // aura::RootWindowObserver overrides:
   virtual void OnRootWindowResized(const aura::RootWindow* root,
                                    const gfx::Size& old_size) OVERRIDE;
+  virtual void OnWindowFocused(aura::Window* window) OVERRIDE;
 
   // ui::ImplicitAnimationObserver overrides:
   virtual void OnImplicitAnimationsCompleted() OVERRIDE;
 
   // views::Widget::Observer overrides:
   virtual void OnWidgetClosing(views::Widget* widget) OVERRIDE;
-  virtual void OnWidgetActivationChanged(views::Widget* widget,
-      bool active) OVERRIDE;
 
   // Whether we should show or hide app list widget.
   bool is_visible_;

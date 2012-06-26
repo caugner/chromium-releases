@@ -10,12 +10,12 @@
 #include <string>
 
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/extensions/extension_context_menu_model.h"
 #include "chrome/browser/extensions/image_loading_tracker.h"
 #include "chrome/browser/ui/views/extensions/extension_popup.h"
 #include "ui/views/controls/image_view.h"
 
 class Browser;
+class ExtensionAction;
 class LocationBarView;
 
 namespace content {
@@ -29,7 +29,6 @@ class MenuRunner;
 // given PageAction and notify the extension when the icon is clicked.
 class PageActionImageView : public views::ImageView,
                             public ImageLoadingTracker::Observer,
-                            public ExtensionContextMenuModel::PopupDelegate,
                             public views::Widget::Observer,
                             public content::NotificationObserver {
  public:
@@ -59,9 +58,6 @@ class PageActionImageView : public views::ImageView,
                              const std::string& extension_id,
                              int index) OVERRIDE;
 
-  // Overridden from ExtensionContextMenuModelModel::Delegate
-  virtual void InspectPopup(ExtensionAction* action) OVERRIDE;
-
   // Overridden from views::Widget::Observer
   virtual void OnWidgetClosing(views::Widget* widget) OVERRIDE;
 
@@ -75,12 +71,12 @@ class PageActionImageView : public views::ImageView,
   virtual bool CanHandleAccelerators() const OVERRIDE;
 
   // Called to notify the PageAction that it should determine whether to be
-  // visible or hidden. |contents| is the TabContents that is active, |url| is
+  // visible or hidden. |contents| is the WebContents that is active, |url| is
   // the current page URL.
   void UpdateVisibility(content::WebContents* contents, const GURL& url);
 
   // Either notify listeners or show a popup depending on the page action.
-  void ExecuteAction(int button, bool inspect_with_devtools);
+  void ExecuteAction(int button);
 
  private:
   // Hides the active popup, if there is one.

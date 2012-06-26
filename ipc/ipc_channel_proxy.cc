@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,32 +14,9 @@
 
 namespace IPC {
 
-// This helper ensures the message is deleted if the task is deleted without
-// having been run.
-class SendCallbackHelper
-    : public base::RefCountedThreadSafe<SendCallbackHelper> {
- public:
-  SendCallbackHelper(ChannelProxy::Context* context, Message* message)
-      : context_(context),
-        message_(message) {
-  }
-
-  void Send() {
-    context_->OnSendMessage(message_.release());
-  }
-
- private:
-  scoped_refptr<ChannelProxy::Context> context_;
-  scoped_ptr<Message> message_;
-
-  DISALLOW_COPY_AND_ASSIGN(SendCallbackHelper);
-};
-
 //------------------------------------------------------------------------------
 
 ChannelProxy::MessageFilter::MessageFilter() {}
-
-ChannelProxy::MessageFilter::~MessageFilter() {}
 
 void ChannelProxy::MessageFilter::OnFilterAdded(Channel* channel) {}
 
@@ -59,6 +36,8 @@ void ChannelProxy::MessageFilter::OnDestruct() const {
   delete this;
 }
 
+ChannelProxy::MessageFilter::~MessageFilter() {}
+
 //------------------------------------------------------------------------------
 
 ChannelProxy::Context::Context(Channel::Listener* listener,
@@ -66,8 +45,8 @@ ChannelProxy::Context::Context(Channel::Listener* listener,
     : listener_message_loop_(base::MessageLoopProxy::current()),
       listener_(listener),
       ipc_message_loop_(ipc_message_loop),
-      peer_pid_(0),
-      channel_connected_called_(false) {
+      channel_connected_called_(false),
+      peer_pid_(base::kNullProcessId) {
 }
 
 ChannelProxy::Context::~Context() {
@@ -126,7 +105,8 @@ void ChannelProxy::Context::OnChannelConnected(int32 peer_pid) {
   // the filter is run on the IO thread.
   OnAddFilter();
 
-  peer_pid_ = peer_pid;
+  // We cache off the peer_pid so it can be safely accessed from both threads.
+  peer_pid_ = channel_->peer_pid();
   for (size_t i = 0; i < filters_.size(); ++i)
     filters_[i]->OnChannelConnected(peer_pid);
 
@@ -185,13 +165,12 @@ void ChannelProxy::Context::OnChannelClosed() {
 }
 
 // Called on the IPC::Channel thread
-void ChannelProxy::Context::OnSendMessage(Message* message) {
+void ChannelProxy::Context::OnSendMessage(scoped_ptr<Message> message) {
   if (!channel_.get()) {
-    delete message;
     OnChannelClosed();
     return;
   }
-  if (!channel_->Send(message))
+  if (!channel_->Send(message.release()))
     OnChannelError();
 }
 
@@ -367,8 +346,8 @@ bool ChannelProxy::Send(Message* message) {
 
   context_->ipc_message_loop()->PostTask(
       FROM_HERE,
-      base::Bind(&SendCallbackHelper::Send,
-                 new SendCallbackHelper(context_.get(), message)));
+      base::Bind(&ChannelProxy::Context::OnSendMessage,
+                 context_, base::Passed(scoped_ptr<Message>(message))));
   return true;
 }
 
@@ -386,7 +365,7 @@ void ChannelProxy::ClearIPCMessageLoop() {
   context()->ClearIPCMessageLoop();
 }
 
-#if defined(OS_POSIX) && !defined(OS_NACL)
+#if defined(OS_POSIX)
 // See the TODO regarding lazy initialization of the channel in
 // ChannelProxy::Init().
 int ChannelProxy::GetClientFileDescriptor() {

@@ -34,7 +34,11 @@ class PrerenderTabHelper : public content::WebContentsObserver {
       const GURL& validated_url,
       bool is_error_page,
       content::RenderViewHost* render_view_host) OVERRIDE;
-
+ virtual void DidCommitProvisionalLoadForFrame(
+      int64 frame_id,
+      bool is_main_frame,
+      const GURL& validated_url,
+      content::PageTransition transition_type) OVERRIDE;
   // Called when this prerendered TabContents has just been swapped in.
   void PrerenderSwappedIn();
 
@@ -47,7 +51,7 @@ class PrerenderTabHelper : public content::WebContentsObserver {
   // Retrieves the PrerenderManager, or NULL, if none was found.
   PrerenderManager* MaybeGetPrerenderManager() const;
 
-  // Returns whether the TabContents being observed is currently prerendering.
+  // Returns whether the WebContents being observed is currently prerendering.
   bool IsPrerendering();
 
   // Records histogram information for the current hover, based on whether

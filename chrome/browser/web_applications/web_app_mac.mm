@@ -22,6 +22,7 @@
 #include "skia/ext/skia_utils_mac.h"
 #include "third_party/icon_family/IconFamily.h"
 #include "ui/base/l10n/l10n_util_mac.h"
+#include "ui/gfx/image/image_skia.h"
 
 namespace {
 
@@ -197,9 +198,10 @@ bool WebAppShortcutCreator::UpdateIcon(const FilePath& app_path) const {
 
   scoped_nsobject<IconFamily> icon_family([[IconFamily alloc] init]);
   bool image_added = false;
-  for (size_t i = 0; i < info_.favicon.GetNumberOfSkBitmaps(); ++i) {
-    NSBitmapImageRep* image_rep =
-        SkBitmapToImageRep(*info_.favicon.GetSkBitmapAtIndex(i));
+  const std::vector<const SkBitmap*>& bitmaps =
+      info_.favicon.ToImageSkia()->bitmaps();
+  for (size_t i = 0; i < bitmaps.size(); ++i) {
+    NSBitmapImageRep* image_rep = SkBitmapToImageRep(*bitmaps[i]);
     if (!image_rep)
       continue;
 
@@ -248,14 +250,15 @@ void WebAppShortcutCreator::RevealGeneratedBundleInFinder(
 namespace web_app {
 namespace internals {
 
-void CreateShortcutTask(const FilePath& web_app_path,
-                        const FilePath& profile_path,
-                        const ShellIntegration::ShortcutInfo& shortcut_info) {
+bool CreatePlatformShortcut(
+    const FilePath& web_app_path,
+    const FilePath& profile_path,
+    const ShellIntegration::ShortcutInfo& shortcut_info) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::FILE));
   string16 bundle_id = UTF8ToUTF16(base::mac::BaseBundleID());
   WebAppShortcutCreator shortcut_creator(web_app_path, shortcut_info,
                             bundle_id);
-  shortcut_creator.CreateShortcut();
+  return shortcut_creator.CreateShortcut();
 }
 
 }  // namespace internals

@@ -65,7 +65,7 @@ int GetMaxWidth(int x, int y) {
   // TODO(varunjain): implementation duplicated in tooltip_manager_aura. Figure
   // out a way to merge.
   gfx::Rect monitor_bounds =
-      gfx::Screen::GetMonitorAreaNearestPoint(gfx::Point(x, y));
+      gfx::Screen::GetMonitorNearestPoint(gfx::Point(x, y)).bounds();
   return (monitor_bounds.width() + 1) / 2;
 }
 
@@ -155,7 +155,7 @@ class TooltipController::Tooltip {
 
     tooltip_rect.Offset(kCursorOffsetX, kCursorOffsetY);
     gfx::Rect monitor_bounds =
-        gfx::Screen::GetMonitorAreaNearestPoint(tooltip_rect.origin());
+        gfx::Screen::GetMonitorNearestPoint(tooltip_rect.origin()).bounds();
 
     // If tooltip is out of bounds on the x axis, we simply shift it
     // horizontally by the offset.
@@ -372,7 +372,8 @@ void TooltipController::TooltipTimerFired() {
 }
 
 void TooltipController::UpdateIfRequired() {
-  if (!tooltips_enabled_ || mouse_pressed_ || IsDragDropInProgress()) {
+  if (!tooltips_enabled_ || mouse_pressed_ || IsDragDropInProgress() ||
+      !Shell::GetRootWindow()->cursor_shown()) {
     tooltip_->Hide();
     return;
   }
@@ -404,7 +405,8 @@ void TooltipController::UpdateIfRequired() {
     } else {
       string16 tooltip_text(tooltip_text_);
       gfx::Point widget_loc = curr_mouse_loc_;
-      widget_loc = widget_loc.Add(tooltip_window_->GetScreenBounds().origin());
+      widget_loc = widget_loc.Add(
+          tooltip_window_->GetBoundsInRootWindow().origin());
       tooltip_->SetText(tooltip_text, widget_loc);
       tooltip_->Show();
     }

@@ -14,7 +14,7 @@
 #include "base/observer_list.h"
 #include "ui/base/accessibility/accessibility_types.h"
 #include "ui/base/ui_base_types.h"
-#include "ui/gfx/compositor/layer_type.h"
+#include "ui/compositor/layer_type.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/rect.h"
 #include "ui/views/focus/focus_manager.h"
@@ -98,6 +98,7 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
     virtual void OnWidgetClosing(Widget* widget) {}
     virtual void OnWidgetVisibilityChanged(Widget* widget, bool visible) {}
     virtual void OnWidgetActivationChanged(Widget* widget, bool active) {}
+    virtual void OnWidgetMoved(Widget* widget) {}
   };
 
   typedef std::set<Widget*> Widgets;
@@ -146,7 +147,7 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
     InitParams();
     explicit InitParams(Type type);
 
-    // If |parent_widget| is non-null, it's native view is returned, otherwise
+    // If |parent_widget| is non-null, its native view is returned, otherwise
     // |parent| is returned.
     gfx::NativeView GetParent() const;
 
@@ -218,11 +219,6 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
                           const Widget* target,
                           gfx::Rect* rect);
 
-  // SetPureViews and IsPureViews update and return the state of a global
-  // setting that tracks whether to use available pure Views implementations.
-  static void SetPureViews(bool pure);
-  static bool IsPureViews();
-
   // Retrieves the Widget implementation associated with the given
   // NativeView or Window, or NULL if the supplied handle has no associated
   // Widget.
@@ -255,10 +251,6 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   static int GetLocalizedContentsHeight(int row_resource_id);
   static gfx::Size GetLocalizedContentsSize(int col_resource_id,
                                             int row_resource_id);
-
-  // Enable/Disable debug paint.
-  static void SetDebugPaintEnabled(bool enabled);
-  static bool IsDebugPaintEnabled();
 
   // Returns true if the specified type requires a NonClientView.
   static bool RequiresNonClientView(InitParams::Type type);
@@ -399,8 +391,7 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
 
   // Sets the opacity of the widget. This may allow widgets behind the widget
   // in the Z-order to become visible, depending on the capabilities of the
-  // underlying windowing system. Note that the caller must then schedule a
-  // repaint to allow this change to take effect.
+  // underlying windowing system.
   void SetOpacity(unsigned char opacity);
 
   // Sets whether or not the window should show its frame as a "transient drag
@@ -614,6 +605,12 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   // Returns the bounds of work area in the screen that Widget belongs to.
   gfx::Rect GetWorkAreaBoundsInScreen() const;
 
+  // Notification that our owner is closing.
+  // NOTE: this is not invoked for aura as it's currently not needed there.
+  // Under aura menus close by way of activation getting reset when the owner
+  // closes.
+  virtual void OnOwnerClosing();
+
   // Overridden from NativeWidgetDelegate:
   virtual bool IsModal() const OVERRIDE;
   virtual bool IsDialogBox() const OVERRIDE;
@@ -629,6 +626,7 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   virtual void OnNativeWidgetDestroyed() OVERRIDE;
   virtual gfx::Size GetMinimumSize() OVERRIDE;
   virtual gfx::Size GetMaximumSize() OVERRIDE;
+  virtual void OnNativeWidgetMove() OVERRIDE;
   virtual void OnNativeWidgetSizeChanged(const gfx::Size& new_size) OVERRIDE;
   virtual void OnNativeWidgetBeginUserBoundsChange() OVERRIDE;
   virtual void OnNativeWidgetEndUserBoundsChange() OVERRIDE;

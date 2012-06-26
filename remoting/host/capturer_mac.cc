@@ -6,6 +6,7 @@
 
 #include <ApplicationServices/ApplicationServices.h>
 #include <dlfcn.h>
+#include <IOKit/pwr_mgt/IOPMLib.h>
 #include <OpenGL/CGLMacro.h>
 #include <OpenGL/OpenGL.h>
 #include <stddef.h>
@@ -15,6 +16,7 @@
 #include "base/mac/scoped_cftyperef.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/time.h"
 #include "remoting/base/util.h"
 #include "remoting/host/capturer_helper.h"
 
@@ -156,6 +158,8 @@ class CapturerMac : public Capturer {
   bool Init();
 
   // Capturer interface.
+  virtual void Start() OVERRIDE;
+  virtual void Stop() OVERRIDE;
   virtual void ScreenConfigurationChanged() OVERRIDE;
   virtual media::VideoFrame::Format pixel_format() const OVERRIDE;
   virtual void ClearInvalidRegion() OVERRIDE;
@@ -192,6 +196,7 @@ class CapturerMac : public Capturer {
                                            void *user_parameter);
 
   void ReleaseBuffers();
+
   CGLContextObj cgl_context_;
   static const int kNumBuffers = 2;
   scoped_pixel_buffer_object pixel_buffer_object_;
@@ -221,6 +226,9 @@ class CapturerMac : public Capturer {
   // Will be non-null on lion.
   CGDisplayCreateImageFunc display_create_image_func_;
 
+  // Power management assertion to prevent the screen from sleeping.
+  IOPMAssertionID power_assertion_id_;
+
   DISALLOW_COPY_AND_ASSIGN(CapturerMac);
 };
 
@@ -230,7 +238,8 @@ CapturerMac::CapturerMac()
       last_buffer_(NULL),
       pixel_format_(media::VideoFrame::RGB32),
       display_configuration_capture_event_(false, true),
-      display_create_image_func_(NULL) {
+      display_create_image_func_(NULL),
+      power_assertion_id_(kIOPMNullAssertionID) {
 }
 
 CapturerMac::~CapturerMac() {
@@ -290,6 +299,21 @@ void CapturerMac::ReleaseBuffers() {
   // the capturer, they will be recreated if necessary.
   for (int i = 0; i < kNumBuffers; ++i) {
     buffers_[i].set_needs_update();
+  }
+}
+
+void CapturerMac::Start() {
+  // Create a power management assertion that wakes the display and prevents it
+  // from going to sleep on user idle.
+  IOPMAssertionCreate(kIOPMAssertionTypeNoDisplaySleep,
+                      kIOPMAssertionLevelOn,
+                      &power_assertion_id_);
+}
+
+void CapturerMac::Stop() {
+  if (power_assertion_id_ != kIOPMNullAssertionID) {
+    IOPMAssertionRelease(power_assertion_id_);
+    power_assertion_id_ = kIOPMNullAssertionID;
   }
 }
 

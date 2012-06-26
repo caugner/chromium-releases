@@ -246,6 +246,13 @@ enum CreateNewUpdateItem {
 
 typedef std::set<int64> MetahandleSet;
 
+// Reason for unlinking.
+enum UnlinkReason {
+  NODE_MANIPULATION, // To be used by any operation manipulating the linked
+                     // list.
+  DATA_TYPE_PURGE    // To be used when purging a dataype.
+};
+
 // TODO(akalin): Move EntryKernel and related into its own header file.
 
 // Why the singular enums?  So the code compile-time dispatches instead of
@@ -378,10 +385,6 @@ struct EntryKernel {
   }
 
   syncable::ModelType GetServerModelType() const;
-
-  // Does a case in-sensitive search for a given string, which must be
-  // lower case.
-  bool ContainsString(const std::string& lowercase_query) const;
 
   // Dumps all kernel info into a DictionaryValue and returns it.
   // Transfers ownership of the DictionaryValue to the caller.
@@ -924,7 +927,8 @@ class Directory {
   // The semantic checking is implemented higher up.
   bool UnlinkEntryFromOrder(EntryKernel* entry,
                             WriteTransaction* trans,
-                            ScopedKernelLock* lock);
+                            ScopedKernelLock* lock,
+                            UnlinkReason unlink_reason);
 
   DirOpenResult OpenImpl(
       DirectoryBackingStore* store, const std::string& name,
@@ -1011,10 +1015,9 @@ class Directory {
 
   // Get all the metahandles for unapplied updates for a given set of
   // server types.
-  typedef std::vector<int64> UnappliedUpdateMetaHandles;
   void GetUnappliedUpdateMetaHandles(BaseTransaction* trans,
                                      FullModelTypeSet server_types,
-                                     UnappliedUpdateMetaHandles* result);
+                                     std::vector<int64>* result);
 
   // Checks tree metadata consistency.
   // If full_scan is false, the function will avoid pulling any entries from the

@@ -94,6 +94,12 @@ class CONTENT_EXPORT ContentClient {
   virtual void AddNPAPIPlugins(
       webkit::npapi::PluginList* plugin_list) = 0;
 
+  // Gives the embedder a chance to register its own standard and saveable
+  // url schemes early on in the startup sequence.
+  virtual void AddAdditionalSchemes(
+      std::vector<std::string>* standard_schemes,
+      std::vector<std::string>* savable_schemes) = 0;
+
   // Returns true if the url has a scheme for WebUI.  See also
   // WebUIControllerFactory::UseWebUIForURL in the browser process.
   virtual bool HasWebUIScheme(const GURL& url) const = 0;
@@ -102,10 +108,8 @@ class CONTENT_EXPORT ContentClient {
   // behalf of a swapped out renderer.
   virtual bool CanHandleWhileSwappedOut(const IPC::Message& msg) = 0;
 
-  // Returns the user agent and a flag indicating whether the returned
-  // string should always be used (if false, callers may override the
-  // value as needed to work around various user agent sniffing bugs).
-  virtual std::string GetUserAgent(bool *overriding) const = 0;
+  // Returns the user agent.
+  virtual std::string GetUserAgent() const = 0;
 
   // Returns a string resource given its id.
   virtual string16 GetLocalizedString(int message_id) const = 0;

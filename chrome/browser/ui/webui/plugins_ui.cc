@@ -10,6 +10,7 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/memory/ref_counted_memory.h"
 #include "base/memory/singleton.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
@@ -43,6 +44,19 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "webkit/plugins/npapi/plugin_group.h"
+
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/ui/webui/chromeos/ui_account_tweaks.h"
+#endif
+
+#if defined(ENABLE_PLUGIN_INSTALLATION)
+#include "chrome/browser/plugin_finder.h"
+#include "chrome/browser/plugin_installer.h"
+#else
+// Forward-declare PluginFinder. It's never actually used, but we pass a NULL
+// pointer instead.
+class PluginFinder;
+#endif
 
 using content::PluginService;
 using content::WebContents;
@@ -87,6 +101,9 @@ ChromeWebUIDataSource* CreatePluginsUIHTMLSource() {
   source->set_json_path("strings.js");
   source->add_resource_path("plugins.js", IDR_PLUGINS_JS);
   source->set_default_resource(IDR_PLUGINS_HTML);
+#if defined(OS_CHROMEOS)
+  chromeos::AddAccountUITweaksLocalizedValues(source);
+#endif
   return source;
 }
 
@@ -149,10 +166,14 @@ class PluginsDOMHandler : public WebUIMessageHandler,
 
  private:
   // Call this to start getting the plugins on the UI thread.
-  void LoadPlugins();
+  void GetPluginFinder();
+
+  // Called when we have a PluginFinder and need to load the list of plug-ins.
+  void LoadPlugins(PluginFinder* plugin_finder);
 
   // Called on the UI thread when the plugin information is ready.
-  void PluginsLoaded(const std::vector<PluginGroup>& groups);
+  void PluginsLoaded(PluginFinder* plugin_finder,
+                     const std::vector<PluginGroup>& groups);
 
   content::NotificationRegistrar registrar_;
 
@@ -197,7 +218,7 @@ void PluginsDOMHandler::RegisterMessages() {
 }
 
 void PluginsDOMHandler::HandleRequestPluginsData(const ListValue* args) {
-  LoadPlugins();
+  GetPluginFinder();
 }
 
 void PluginsDOMHandler::HandleEnablePluginMessage(const ListValue* args) {
@@ -244,8 +265,9 @@ void PluginsDOMHandler::HandleEnablePluginMessage(const ListValue* args) {
       NOTREACHED();
       return;
     }
-    bool result = plugin_prefs->EnablePlugin(enable, FilePath(file_path));
-    DCHECK(result);
+    DCHECK(plugin_prefs->CanEnablePlugin(enable, FilePath(file_path)));
+    plugin_prefs->EnablePlugin(enable, FilePath(file_path),
+                               base::Bind(&base::DoNothing));
   }
 }
 
@@ -295,24 +317,32 @@ void PluginsDOMHandler::Observe(int type,
                                 const content::NotificationSource& source,
                                 const content::NotificationDetails& details) {
   DCHECK_EQ(chrome::NOTIFICATION_PLUGIN_ENABLE_STATUS_CHANGED, type);
-  LoadPlugins();
+  GetPluginFinder();
 }
 
-void PluginsDOMHandler::LoadPlugins() {
+void PluginsDOMHandler::GetPluginFinder() {
   if (weak_ptr_factory_.HasWeakPtrs())
     return;
 
-  PluginService::GetInstance()->GetPluginGroups(
-      base::Bind(&PluginsDOMHandler::PluginsLoaded,
-          weak_ptr_factory_.GetWeakPtr()));
+#if defined(ENABLE_PLUGIN_INSTALLATION)
+  PluginFinder::Get(base::Bind(&PluginsDOMHandler::LoadPlugins,
+                               weak_ptr_factory_.GetWeakPtr()));
+#else
+  LoadPlugins(NULL);
+#endif
 }
 
-void PluginsDOMHandler::PluginsLoaded(const std::vector<PluginGroup>& groups) {
-  Profile* profile = Profile::FromWebUI(web_ui());
-  PluginPrefs* plugin_prefs =
-      PluginPrefs::GetForProfile(profile);
+void PluginsDOMHandler::LoadPlugins(PluginFinder* plugin_finder) {
+  PluginService::GetInstance()->GetPluginGroups(
+      base::Bind(&PluginsDOMHandler::PluginsLoaded,
+          weak_ptr_factory_.GetWeakPtr(), plugin_finder));
+}
 
-  HostContentSettingsMap* map = profile->GetHostContentSettingsMap();
+void PluginsDOMHandler::PluginsLoaded(PluginFinder* plugin_finder,
+                                      const std::vector<PluginGroup>& groups) {
+  Profile* profile = Profile::FromWebUI(web_ui());
+  PluginPrefs* plugin_prefs = PluginPrefs::GetForProfile(profile);
+
   ContentSettingsPattern wildcard = ContentSettingsPattern::Wildcard();
 
   // Construct DictionaryValues to return to the UI
@@ -396,7 +426,15 @@ void PluginsDOMHandler::PluginsLoaded(const std::vector<PluginGroup>& groups) {
     group_data->SetString("description", active_plugin->desc);
     group_data->SetString("version", active_plugin->version);
     group_data->SetBoolean("critical", group.IsVulnerable(*active_plugin));
-    group_data->SetString("update_url", group.GetUpdateURL());
+
+    std::string update_url;
+#if defined(ENABLE_PLUGIN_INSTALLATION)
+    PluginInstaller* installer =
+        plugin_finder->FindPluginWithIdentifier(group.identifier());
+    if (installer)
+      update_url = installer->plugin_url().spec();
+#endif
+    group_data->SetString("update_url", update_url);
 
     std::string enabled_mode;
     if (all_plugins_enabled_by_policy) {
@@ -410,19 +448,11 @@ void PluginsDOMHandler::PluginsLoaded(const std::vector<PluginGroup>& groups) {
     }
     group_data->SetString("enabledMode", enabled_mode);
 
-    // TODO(bauerb): We should have a method on HostContentSettinsMap for this.
     bool always_allowed = false;
-    ContentSettingsForOneType settings;
-    map->GetSettingsForOneType(CONTENT_SETTINGS_TYPE_PLUGINS,
-                               group.identifier(), &settings);
-    for (ContentSettingsForOneType::const_iterator it = settings.begin();
-         it != settings.end(); ++it) {
-      if (it->primary_pattern == wildcard &&
-          it->secondary_pattern == wildcard &&
-          it->setting == CONTENT_SETTING_ALLOW) {
-        always_allowed = true;
-        break;
-      }
+    if (group_enabled) {
+      const DictionaryValue* whitelist = profile->GetPrefs()->GetDictionary(
+          prefs::kContentSettingsPluginWhitelist);
+      whitelist->GetBoolean(group.identifier(), &always_allowed);
     }
     group_data->SetBoolean("alwaysAllowed", always_allowed);
 
@@ -446,12 +476,11 @@ PluginsUI::PluginsUI(content::WebUI* web_ui) : WebUIController(web_ui) {
 
   // Set up the chrome://plugins/ source.
   Profile* profile = Profile::FromWebUI(web_ui);
-  profile->GetChromeURLDataManager()->AddDataSource(
-      CreatePluginsUIHTMLSource());
+  ChromeURLDataManager::AddDataSource(profile, CreatePluginsUIHTMLSource());
 }
 
 // static
-RefCountedMemory* PluginsUI::GetFaviconResourceBytes() {
+base::RefCountedMemory* PluginsUI::GetFaviconResourceBytes() {
   return ResourceBundle::GetSharedInstance().
       LoadDataResourceBytes(IDR_PLUGIN);
 }

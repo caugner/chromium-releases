@@ -182,8 +182,9 @@ void AutocompleteProviderTest::
   profile_.CreateTemplateURLService();
 
   // Reset the default TemplateURL.
-  TemplateURL* default_t_url = new TemplateURL();
-  default_t_url->SetURL("http://defaultturl/{searchTerms}", 0, 0);
+  TemplateURLData data;
+  data.SetURL("http://defaultturl/{searchTerms}");
+  TemplateURL* default_t_url = new TemplateURL(&profile_, data);
   TemplateURLService* turl_model =
       TemplateURLServiceFactory::GetForProfile(&profile_);
   turl_model->Add(default_t_url);
@@ -192,10 +193,10 @@ void AutocompleteProviderTest::
   ASSERT_NE(0, default_provider_id);
 
   // Create another TemplateURL for KeywordProvider.
-  TemplateURL* keyword_t_url = new TemplateURL();
-  keyword_t_url->set_short_name(ASCIIToUTF16("k"));
-  keyword_t_url->set_keyword(ASCIIToUTF16("k"));
-  keyword_t_url->SetURL("http://keyword/{searchTerms}", 0, 0);
+  data.short_name = ASCIIToUTF16("k");
+  data.SetKeyword(ASCIIToUTF16("k"));
+  data.SetURL("http://keyword/{searchTerms}");
+  TemplateURL* keyword_t_url = new TemplateURL(&profile_, data);
   turl_model->Add(keyword_t_url);
   ASSERT_NE(0, keyword_t_url->id());
 
@@ -223,18 +224,19 @@ void AutocompleteProviderTest::
       TemplateURLServiceFactory::GetForProfile(&profile_);
 
   // Create a TemplateURL for KeywordProvider.
-  TemplateURL* keyword_t_url = new TemplateURL();
-  keyword_t_url->set_short_name(ASCIIToUTF16("foo.com"));
-  keyword_t_url->set_keyword(ASCIIToUTF16("foo.com"));
-  keyword_t_url->SetURL("http://foo.com/{searchTerms}", 0, 0);
+  TemplateURLData data;
+  data.short_name = ASCIIToUTF16("foo.com");
+  data.SetKeyword(ASCIIToUTF16("foo.com"));
+  data.SetURL("http://foo.com/{searchTerms}");
+  TemplateURL* keyword_t_url = new TemplateURL(&profile_, data);
   turl_model->Add(keyword_t_url);
   ASSERT_NE(0, keyword_t_url->id());
 
   // Create another TemplateURL for KeywordProvider.
-  keyword_t_url = new TemplateURL();
-  keyword_t_url->set_short_name(ASCIIToUTF16("bar.com"));
-  keyword_t_url->set_keyword(ASCIIToUTF16("bar.com"));
-  keyword_t_url->SetURL("http://bar.com/{searchTerms}", 0, 0);
+  data.short_name = ASCIIToUTF16("bar.com");
+  data.SetKeyword(ASCIIToUTF16("bar.com"));
+  data.SetURL("http://bar.com/{searchTerms}");
+  keyword_t_url = new TemplateURL(&profile_, data);
   turl_model->Add(keyword_t_url);
   ASSERT_NE(0, keyword_t_url->id());
 
@@ -262,15 +264,11 @@ void AutocompleteProviderTest::RunRedundantKeywordTest(
     const KeywordTestData* match_data,
     size_t size) {
   ACMatches matches;
-  TemplateURLService* turl_model =
-      TemplateURLServiceFactory::GetForProfile(&profile_);
   for (size_t i = 0; i < size; ++i) {
     AutocompleteMatch match;
     match.fill_into_edit = match_data[i].fill_into_edit;
     match.transition = content::PAGE_TRANSITION_KEYWORD;
     match.keyword = match_data[i].keyword;
-    if (!match.keyword.empty())
-      match.template_url = turl_model->GetTemplateURLForKeyword(match.keyword);
     matches.push_back(match);
   }
 
@@ -495,6 +493,12 @@ TEST_F(AutocompleteTest, InputType) {
     { ASCIIToUTF16("[2001:dB8::1]"), AutocompleteInput::URL },
     { ASCIIToUTF16("192.168.0.256"), AutocompleteInput::QUERY },
     { ASCIIToUTF16("[foo.com]"), AutocompleteInput::QUERY },
+    { ASCIIToUTF16("filesystem:http://a.com/t/bar"), AutocompleteInput::URL },
+    { ASCIIToUTF16("filesystem:http:foo"), AutocompleteInput::URL },
+    { ASCIIToUTF16("filesystem:file://"), AutocompleteInput::URL },
+    { ASCIIToUTF16("filesystem:http"), AutocompleteInput::URL },
+    { ASCIIToUTF16("filesystem:"), AutocompleteInput::URL },
+    { ASCIIToUTF16("ftp:"), AutocompleteInput::URL },
   };
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(input_cases); ++i) {
