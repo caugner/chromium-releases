@@ -10,10 +10,17 @@
 #include "base/file_path.h"
 #include "base/path_service.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/policy/async_policy_provider.h"
+#include "chrome/browser/policy/cloud_policy_client.h"
 #include "chrome/browser/policy/cloud_policy_provider.h"
+#include "chrome/browser/policy/cloud_policy_service.h"
 #include "chrome/browser/policy/cloud_policy_subsystem.h"
 #include "chrome/browser/policy/configuration_policy_provider.h"
+#include "chrome/browser/policy/device_management_service.h"
+#include "chrome/browser/policy/managed_mode_policy_provider.h"
+#include "chrome/browser/policy/managed_mode_policy_provider_factory.h"
 #include "chrome/browser/policy/policy_service_impl.h"
+#include "chrome/browser/policy/user_cloud_policy_manager.h"
 #include "chrome/browser/policy/user_policy_cache.h"
 #include "chrome/browser/policy/user_policy_token_cache.h"
 #include "chrome/browser/signin/token_service.h"
@@ -28,11 +35,12 @@
 #include "policy/policy_constants.h"
 
 #if defined(OS_WIN)
-#include "chrome/browser/policy/configuration_policy_provider_win.h"
+#include "chrome/browser/policy/policy_loader_win.h"
 #elif defined(OS_MACOSX)
-#include "chrome/browser/policy/configuration_policy_provider_mac.h"
+#include "chrome/browser/policy/policy_loader_mac.h"
+#include "chrome/browser/preferences_mac.h"
 #elif defined(OS_POSIX)
-#include "chrome/browser/policy/config_dir_policy_provider.h"
+#include "chrome/browser/policy/config_dir_policy_loader.h"
 #endif
 
 #if defined(OS_CHROMEOS)
@@ -41,7 +49,6 @@
 #include "chrome/browser/policy/app_pack_updater.h"
 #include "chrome/browser/policy/cros_user_policy_cache.h"
 #include "chrome/browser/policy/device_policy_cache.h"
-#include "chrome/browser/policy/network_configuration_updater.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #endif
 
@@ -69,17 +76,25 @@ const char kMachineInfoSystemHwqual[] = "hardware_class";
 
 // These are the machine serial number keys that we check in order until we
 // find a non-empty serial number. The VPD spec says the serial number should be
-// in the "serial_number" key for v2+ VPDs. However, we cannot check this first,
-// since we'd get the "serial_number" value from the SMBIOS (yes, there's a name
-// clash here!), which is different from the serial number we want and not
-// actually per-device. So, we check the legacy keys first. If we find a
-// serial number for these, we use it, otherwise we must be on a newer device
-// that provides the correct data in "serial_number".
+// in the "serial_number" key for v2+ VPDs. However, legacy devices used a
+// different keys to report their serial number, which we fall back to if
+// "serial_number" is not present.
+//
+// Product_S/N is still special-cased due to inconsistencies with serial
+// numbers on Lumpy devices: On these devices, serial_number is identical to
+// Product_S/N with an appended checksum. Unfortunately, the sticker on the
+// packaging doesn't include that checksum either (the sticker on the device
+// does though!). The former sticker is the source of the serial number used by
+// device management service, so we prefer Product_S/N over serial number to
+// match the server.
+//
+// TODO(mnissler): Move serial_number back to the top once the server side uses
+// the correct serial number.
 const char* kMachineInfoSerialNumberKeys[] = {
-  "sn",            // ZGB
-  "Product_S/N",   // Alex
+  "Product_S/N",   // Lumpy/Alex devices
+  "serial_number", // VPD v2+ devices
   "Product_SN",    // Mario
-  "serial_number"  // VPD v2+ devices
+  "sn",            // old ZGB devices (more recent ones use serial_number)
 };
 #endif
 
@@ -106,11 +121,16 @@ BrowserPolicyConnector::~BrowserPolicyConnector() {
   user_cloud_policy_subsystem_.reset();
   user_policy_token_cache_.reset();
   user_data_store_.reset();
+
+  if (user_cloud_policy_manager_.get())
+    user_cloud_policy_manager_->Shutdown();
+  user_cloud_policy_manager_.reset();
+
+  device_management_service_.reset();
 }
 
 void BrowserPolicyConnector::Init() {
-  managed_platform_provider_.reset(CreateManagedPlatformProvider());
-  recommended_platform_provider_.reset(CreateRecommendedPlatformProvider());
+  platform_provider_.reset(CreatePlatformProvider());
 
 #if defined(OS_CHROMEOS)
   // The CloudPolicyProvider blocks asynchronous Profile creation until a login
@@ -121,24 +141,20 @@ void BrowserPolicyConnector::Init() {
   // but for now it just isn't created.
   CommandLine* command_line = CommandLine::ForCurrentProcess();
   if (command_line->HasSwitch(switches::kDeviceManagementUrl)) {
-    managed_cloud_provider_.reset(new CloudPolicyProvider(
-        this,
-        GetChromePolicyDefinitionList(),
-        POLICY_LEVEL_MANDATORY));
-    recommended_cloud_provider_.reset(new CloudPolicyProvider(
-        this,
-        GetChromePolicyDefinitionList(),
-        POLICY_LEVEL_RECOMMENDED));
+    device_management_service_.reset(
+        new DeviceManagementService(
+            command_line->GetSwitchValueASCII(switches::kDeviceManagementUrl)));
+    if (!command_line->HasSwitch(switches::kEnableCloudPolicyService)) {
+      managed_cloud_provider_.reset(new CloudPolicyProvider(
+          this,
+          POLICY_LEVEL_MANDATORY));
+      recommended_cloud_provider_.reset(new CloudPolicyProvider(
+          this,
+          POLICY_LEVEL_RECOMMENDED));
+    }
   }
 
   InitializeDevicePolicy();
-
-  if (command_line->HasSwitch(switches::kEnableONCPolicy)) {
-    network_configuration_updater_.reset(
-        new NetworkConfigurationUpdater(
-            managed_cloud_provider_.get(),
-            chromeos::CrosLibrary::Get()->GetNetworkLibrary()));
-  }
 
   // Create the AppPackUpdater to start updating the cache. It requires the
   // system request context, which isn't available yet; therefore it is
@@ -150,17 +166,31 @@ void BrowserPolicyConnector::Init() {
 #endif
 }
 
-PolicyService* BrowserPolicyConnector::CreatePolicyService() const {
+PolicyService* BrowserPolicyConnector::CreatePolicyService(
+    Profile* profile) {
   // |providers| in decreasing order of priority.
   PolicyServiceImpl::Providers providers;
-  if (managed_platform_provider_.get())
-    providers.push_back(managed_platform_provider_.get());
+  if (platform_provider_.get())
+    providers.push_back(platform_provider_.get());
   if (managed_cloud_provider_.get())
     providers.push_back(managed_cloud_provider_.get());
-  if (recommended_platform_provider_.get())
-    providers.push_back(recommended_platform_provider_.get());
   if (recommended_cloud_provider_.get())
     providers.push_back(recommended_cloud_provider_.get());
+
+  // The global policy service uses the proxy provider to allow for swapping in
+  // user policy after startup, while profiles use |user_cloud_policy_manager_|
+  // directly as their provider, which may also block initialization on a policy
+  // fetch at login time.
+  if (profile) {
+    if (user_cloud_policy_manager_.get())
+      providers.push_back(user_cloud_policy_manager_.get());
+
+    providers.push_back(
+        ManagedModePolicyProviderFactory::GetForProfile(profile));
+  } else {
+    providers.push_back(&user_cloud_policy_provider_);
+  }
+
   return new PolicyServiceImpl(providers);
 }
 
@@ -259,6 +289,8 @@ void BrowserPolicyConnector::FetchCloudPolicy() {
 
 void BrowserPolicyConnector::ScheduleServiceInitialization(
     int64 delay_milliseconds) {
+  if (device_management_service_.get())
+    device_management_service_->ScheduleInitialization(delay_milliseconds);
   if (user_cloud_policy_subsystem_.get()) {
     user_cloud_policy_subsystem_->
         ScheduleServiceInitialization(delay_milliseconds);
@@ -274,6 +306,8 @@ void BrowserPolicyConnector::InitializeUserPolicy(
     const std::string& user_name,
     bool wait_for_policy_fetch) {
   // Throw away the old backend.
+  user_cloud_policy_manager_.reset();
+
   user_cloud_policy_subsystem_.reset();
   user_policy_token_cache_.reset();
   user_data_store_.reset();
@@ -283,51 +317,65 @@ void BrowserPolicyConnector::InitializeUserPolicy(
   CommandLine* command_line = CommandLine::ForCurrentProcess();
 
   if (command_line->HasSwitch(switches::kDeviceManagementUrl)) {
-    user_data_store_.reset(CloudPolicyDataStore::CreateForUserPolicies());
-
-    FilePath profile_dir;
-    PathService::Get(chrome::DIR_USER_DATA, &profile_dir);
-#if defined(OS_CHROMEOS)
-    profile_dir = profile_dir.Append(
-        command_line->GetSwitchValuePath(switches::kLoginProfile));
-#endif
-    const FilePath policy_dir = profile_dir.Append(kPolicyDir);
-    const FilePath policy_cache_file = policy_dir.Append(kPolicyCacheFile);
-    const FilePath token_cache_file = policy_dir.Append(kTokenCacheFile);
-    CloudPolicyCacheBase* user_policy_cache = NULL;
-
-#if defined(OS_CHROMEOS)
-    user_policy_cache =
-        new CrosUserPolicyCache(
-            chromeos::DBusThreadManager::Get()->GetSessionManagerClient(),
-            user_data_store_.get(),
-            wait_for_policy_fetch,
-            token_cache_file,
-            policy_cache_file);
-#else
-    user_policy_cache = new UserPolicyCache(policy_cache_file,
-                                            wait_for_policy_fetch);
-    user_policy_token_cache_.reset(
-        new UserPolicyTokenCache(user_data_store_.get(), token_cache_file));
-
-    // Initiate the DM-Token load.
-    user_policy_token_cache_->Load();
-#endif
-
-    managed_cloud_provider_->SetUserPolicyCache(user_policy_cache);
-    recommended_cloud_provider_->SetUserPolicyCache(user_policy_cache);
-    user_cloud_policy_subsystem_.reset(new CloudPolicySubsystem(
-        user_data_store_.get(),
-        user_policy_cache));
-
-    user_data_store_->set_user_name(user_name);
-    user_data_store_->set_user_affiliation(GetUserAffiliation(user_name));
-
-    int64 delay =
+    int64 startup_delay =
         wait_for_policy_fetch ? 0 : kServiceInitializationStartupDelay;
-    user_cloud_policy_subsystem_->CompleteInitialization(
-        prefs::kUserPolicyRefreshRate,
-        delay);
+
+    if (command_line->HasSwitch(switches::kEnableCloudPolicyService)) {
+#if defined(OS_CHROMEOS)
+      user_cloud_policy_manager_ =
+          UserCloudPolicyManager::Create(wait_for_policy_fetch);
+      user_cloud_policy_manager_->Initialize(g_browser_process->local_state(),
+                                             device_management_service_.get(),
+                                             GetUserAffiliation(user_name));
+      user_cloud_policy_provider_.SetDelegate(user_cloud_policy_manager_.get());
+
+      device_management_service_->ScheduleInitialization(startup_delay);
+#endif
+    } else {
+      FilePath profile_dir;
+      PathService::Get(chrome::DIR_USER_DATA, &profile_dir);
+#if defined(OS_CHROMEOS)
+      profile_dir = profile_dir.Append(
+          command_line->GetSwitchValuePath(switches::kLoginProfile));
+#endif
+      const FilePath policy_dir = profile_dir.Append(kPolicyDir);
+      const FilePath policy_cache_file = policy_dir.Append(kPolicyCacheFile);
+      const FilePath token_cache_file = policy_dir.Append(kTokenCacheFile);
+      CloudPolicyCacheBase* user_policy_cache = NULL;
+
+      user_data_store_.reset(CloudPolicyDataStore::CreateForUserPolicies());
+#if defined(OS_CHROMEOS)
+      user_policy_cache =
+          new CrosUserPolicyCache(
+              chromeos::DBusThreadManager::Get()->GetSessionManagerClient(),
+              user_data_store_.get(),
+              wait_for_policy_fetch,
+              token_cache_file,
+              policy_cache_file);
+#else
+      user_policy_cache = new UserPolicyCache(policy_cache_file,
+                                              wait_for_policy_fetch);
+      user_policy_token_cache_.reset(
+          new UserPolicyTokenCache(user_data_store_.get(), token_cache_file));
+
+      // Initiate the DM-Token load.
+      user_policy_token_cache_->Load();
+#endif
+
+      user_cloud_policy_subsystem_.reset(new CloudPolicySubsystem(
+          user_data_store_.get(),
+          user_policy_cache));
+
+      user_data_store_->set_user_name(user_name);
+      user_data_store_->set_user_affiliation(GetUserAffiliation(user_name));
+
+      user_cloud_policy_subsystem_->CompleteInitialization(
+          prefs::kUserPolicyRefreshRate,
+          startup_delay);
+
+      managed_cloud_provider_->SetUserPolicyCache(user_policy_cache);
+      recommended_cloud_provider_->SetUserPolicyCache(user_policy_cache);
+    }
   }
 }
 
@@ -358,6 +406,17 @@ void BrowserPolicyConnector::RegisterForUserPolicy(
   } else {
     if (user_data_store_.get())
       user_data_store_->SetOAuthToken(oauth_token);
+  }
+  if (user_cloud_policy_manager_.get()) {
+    CloudPolicyService* service =
+        user_cloud_policy_manager_->cloud_policy_service();
+    if (service->client() &&
+        !service->client()->is_registered() &&
+        !oauth_token.empty()) {
+      service->client()->Register(oauth_token);
+    } else {
+      user_cloud_policy_manager_->CancelWaitForPolicyFetch();
+    }
   }
 }
 
@@ -438,26 +497,31 @@ void BrowserPolicyConnector::InitializeDevicePolicy() {
 
   CommandLine* command_line = CommandLine::ForCurrentProcess();
   if (command_line->HasSwitch(switches::kEnableDevicePolicy)) {
-    device_data_store_.reset(CloudPolicyDataStore::CreateForDevicePolicies());
-    chromeos::CryptohomeLibrary* cryptohome =
-        chromeos::CrosLibrary::Get()->GetCryptohomeLibrary();
-    install_attributes_.reset(new EnterpriseInstallAttributes(cryptohome));
-    DevicePolicyCache* device_policy_cache =
-        new DevicePolicyCache(device_data_store_.get(),
-                              install_attributes_.get());
+    if (command_line->HasSwitch(switches::kEnableCloudPolicyService)) {
+      // TODO(mnissler): Initialize new-style device policy here once it's
+      // implemented.
+    } else {
+      device_data_store_.reset(CloudPolicyDataStore::CreateForDevicePolicies());
+      chromeos::CryptohomeLibrary* cryptohome =
+          chromeos::CrosLibrary::Get()->GetCryptohomeLibrary();
+      install_attributes_.reset(new EnterpriseInstallAttributes(cryptohome));
+      DevicePolicyCache* device_policy_cache =
+          new DevicePolicyCache(device_data_store_.get(),
+                                install_attributes_.get());
 
-    managed_cloud_provider_->SetDevicePolicyCache(device_policy_cache);
-    recommended_cloud_provider_->SetDevicePolicyCache(device_policy_cache);
+      managed_cloud_provider_->SetDevicePolicyCache(device_policy_cache);
+      recommended_cloud_provider_->SetDevicePolicyCache(device_policy_cache);
 
-    device_cloud_policy_subsystem_.reset(new CloudPolicySubsystem(
-        device_data_store_.get(),
-        device_policy_cache));
+      device_cloud_policy_subsystem_.reset(new CloudPolicySubsystem(
+          device_data_store_.get(),
+          device_policy_cache));
 
-    // Initialize the subsystem once the message loops are spinning.
-    MessageLoop::current()->PostTask(
-        FROM_HERE,
-        base::Bind(&BrowserPolicyConnector::CompleteInitialization,
-                   weak_ptr_factory_.GetWeakPtr()));
+      // Initialize the subsystem once the message loops are spinning.
+      MessageLoop::current()->PostTask(
+          FROM_HERE,
+          base::Bind(&BrowserPolicyConnector::CompleteInitialization,
+                     weak_ptr_factory_.GetWeakPtr()));
+    }
   }
 #endif
 }
@@ -500,51 +564,22 @@ void BrowserPolicyConnector::CompleteInitialization() {
 }
 
 // static
-ConfigurationPolicyProvider*
-    BrowserPolicyConnector::CreateManagedPlatformProvider() {
-  const PolicyDefinitionList* policy_list = GetChromePolicyDefinitionList();
+ConfigurationPolicyProvider* BrowserPolicyConnector::CreatePlatformProvider() {
 #if defined(OS_WIN)
-  return new ConfigurationPolicyProviderWin(policy_list,
-                                            policy::kRegistryMandatorySubKey,
-                                            POLICY_LEVEL_MANDATORY);
+  const PolicyDefinitionList* policy_list = GetChromePolicyDefinitionList();
+  scoped_ptr<AsyncPolicyLoader> loader(new PolicyLoaderWin(policy_list));
+  return new AsyncPolicyProvider(loader.Pass());
 #elif defined(OS_MACOSX)
-  return new ConfigurationPolicyProviderMac(policy_list,
-                                            POLICY_LEVEL_MANDATORY);
+  const PolicyDefinitionList* policy_list = GetChromePolicyDefinitionList();
+  scoped_ptr<AsyncPolicyLoader> loader(
+      new PolicyLoaderMac(policy_list, new MacPreferences()));
+  return new AsyncPolicyProvider(loader.Pass());
 #elif defined(OS_POSIX)
   FilePath config_dir_path;
   if (PathService::Get(chrome::DIR_POLICY_FILES, &config_dir_path)) {
-    return new ConfigDirPolicyProvider(
-        policy_list,
-        POLICY_LEVEL_MANDATORY,
-        POLICY_SCOPE_MACHINE,
-        config_dir_path.Append(FILE_PATH_LITERAL("managed")));
-  } else {
-    return NULL;
-  }
-#else
-  return NULL;
-#endif
-}
-
-// static
-ConfigurationPolicyProvider*
-    BrowserPolicyConnector::CreateRecommendedPlatformProvider() {
-  const PolicyDefinitionList* policy_list = GetChromePolicyDefinitionList();
-#if defined(OS_WIN)
-  return new ConfigurationPolicyProviderWin(policy_list,
-                                            policy::kRegistryRecommendedSubKey,
-                                            POLICY_LEVEL_RECOMMENDED);
-#elif defined(OS_MACOSX)
-  return new ConfigurationPolicyProviderMac(policy_list,
-                                            POLICY_LEVEL_RECOMMENDED);
-#elif defined(OS_POSIX)
-  FilePath config_dir_path;
-  if (PathService::Get(chrome::DIR_POLICY_FILES, &config_dir_path)) {
-    return new ConfigDirPolicyProvider(
-        policy_list,
-        POLICY_LEVEL_RECOMMENDED,
-        POLICY_SCOPE_MACHINE,
-        config_dir_path.Append(FILE_PATH_LITERAL("recommended")));
+    scoped_ptr<AsyncPolicyLoader> loader(
+        new ConfigDirPolicyLoader(config_dir_path, POLICY_SCOPE_MACHINE));
+    return new AsyncPolicyProvider(loader.Pass());
   } else {
     return NULL;
   }

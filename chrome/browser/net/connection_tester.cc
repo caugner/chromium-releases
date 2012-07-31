@@ -10,6 +10,7 @@
 #include "base/logging.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/common/chrome_switches.h"
@@ -52,6 +53,8 @@ class ExperimentURLRequestContext : public net::URLRequestContext {
       : proxy_request_context_(proxy_request_context),
         ALLOW_THIS_IN_INITIALIZER_LIST(storage_(this)),
         ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {}
+
+  virtual ~ExperimentURLRequestContext() {}
 
   // Creates a proxy config service for |experiment|. On success returns net::OK
   // and fills |config_service| with a new pointer. Otherwise returns a network
@@ -125,10 +128,6 @@ class ExperimentURLRequestContext : public net::URLRequestContext {
     storage_.set_cookie_store(new net::CookieMonster(NULL, NULL));
 
     return net::OK;
-  }
-
- protected:
-  virtual ~ExperimentURLRequestContext() {
   }
 
  private:
@@ -215,11 +214,12 @@ class ExperimentURLRequestContext : public net::URLRequestContext {
 #else
     config_service->reset(
         net::ProxyService::CreateSystemProxyConfigService(
-            MessageLoop::current(), NULL));
+            base::ThreadTaskRunnerHandle::Get(), NULL));
     return net::OK;
 #endif
   }
 
+#if !defined(OS_ANDROID)
   static int FirefoxProxySettingsTask(
       FirefoxProxySettings* firefox_settings) {
     if (!FirefoxProxySettings::GetSettings(firefox_settings))
@@ -245,6 +245,7 @@ class ExperimentURLRequestContext : public net::URLRequestContext {
     }
     callback.Run(rv);
   }
+#endif
 
   // Creates a fixed proxy config service that is initialized using Firefox's
   // current proxy settings. On success returns net::OK and fills
@@ -272,7 +273,7 @@ class ExperimentURLRequestContext : public net::URLRequestContext {
 #endif
   }
 
-  const scoped_refptr<net::URLRequestContext> proxy_request_context_;
+  net::URLRequestContext* const proxy_request_context_;
   net::URLRequestContextStorage storage_;
   base::WeakPtrFactory<ExperimentURLRequestContext> weak_factory_;
 };
@@ -296,7 +297,6 @@ class ConnectionTester::TestRunner : public net::URLRequest::Delegate {
   // after disk access has completed.
   void ProxyConfigServiceCreated(
     const Experiment& experiment,
-    scoped_refptr<ExperimentURLRequestContext> context,
     scoped_ptr<net::ProxyConfigService>* proxy_config_service, int status);
 
   // Starts running |experiment|. Notifies tester->OnExperimentCompleted() when
@@ -321,6 +321,7 @@ class ConnectionTester::TestRunner : public net::URLRequest::Delegate {
   void OnExperimentCompletedWithResult(int result);
 
   ConnectionTester* tester_;
+  scoped_ptr<ExperimentURLRequestContext> request_context_;
   scoped_ptr<net::URLRequest> request_;
 
   base::WeakPtrFactory<TestRunner> weak_factory_;
@@ -385,36 +386,35 @@ void ConnectionTester::TestRunner::OnExperimentCompletedWithResult(int result) {
 
 void ConnectionTester::TestRunner::ProxyConfigServiceCreated(
     const Experiment& experiment,
-    scoped_refptr<ExperimentURLRequestContext> context,
     scoped_ptr<net::ProxyConfigService>* proxy_config_service,
     int status) {
   if (status == net::OK)
-    status = context->Init(experiment, proxy_config_service);
+    status = request_context_->Init(experiment, proxy_config_service);
   if (status != net::OK) {
     tester_->OnExperimentCompleted(status);
     return;
   }
   // Fetch a request using the experimental context.
   request_.reset(new net::URLRequest(experiment.url, this));
-  request_->set_context(context);
+  request_->set_context(request_context_.get());
   request_->Start();
 }
 
 void ConnectionTester::TestRunner::Run(const Experiment& experiment) {
   // Try to create a net::URLRequestContext for this experiment.
-  scoped_refptr<ExperimentURLRequestContext> context(
+  request_context_.reset(
       new ExperimentURLRequestContext(tester_->proxy_request_context_));
   scoped_ptr<net::ProxyConfigService>* proxy_config_service =
       new scoped_ptr<net::ProxyConfigService>();
   base::Callback<void(int)> config_service_callback =
       base::Bind(
           &TestRunner::ProxyConfigServiceCreated, weak_factory_.GetWeakPtr(),
-          experiment, context, base::Owned(proxy_config_service));
-  int rv = context->CreateProxyConfigService(
+          experiment, base::Owned(proxy_config_service));
+  int rv = request_context_->CreateProxyConfigService(
       experiment.proxy_settings_experiment,
       proxy_config_service, config_service_callback);
   if (rv != net::ERR_IO_PENDING)
-    ProxyConfigServiceCreated(experiment, context, proxy_config_service, rv);
+    ProxyConfigServiceCreated(experiment, proxy_config_service, rv);
 }
 
 // ConnectionTester ----------------------------------------------------------

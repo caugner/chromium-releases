@@ -248,10 +248,9 @@ void FlashDOMHandler::MaybeRespondToPage() {
     case base::win::VERSION_SERVER_2003:
       os_label += " Server 2003 or XP Pro 64 bit";
       break;
-    case base::win::VERSION_VISTA: os_label += " Vista"; break;
-    case base::win::VERSION_SERVER_2008: os_label += " Server 2008"; break;
-    case base::win::VERSION_WIN7: os_label += " 7"; break;
-    case base::win::VERSION_WIN8: os_label += " 8"; break;
+    case base::win::VERSION_VISTA: os_label += " Vista or Server 2008"; break;
+    case base::win::VERSION_WIN7: os_label += " 7 or Server 2008 R2"; break;
+    case base::win::VERSION_WIN8: os_label += " 8 or Server 2012"; break;
     default:  os_label += " UNKNOWN"; break;
   }
   os_label += " SP" + base::IntToString(os->service_pack().major);
@@ -336,10 +335,10 @@ void FlashDOMHandler::MaybeRespondToPage() {
   AddPair(list, string16(), "--- GPU driver, more information ---");
   AddPair(list,
           ASCIIToUTF16("Vendor Id"),
-          base::StringPrintf("0x%04x", gpu_info.vendor_id));
+          base::StringPrintf("0x%04x", gpu_info.gpu.vendor_id));
   AddPair(list,
           ASCIIToUTF16("Device Id"),
-          base::StringPrintf("0x%04x", gpu_info.device_id));
+          base::StringPrintf("0x%04x", gpu_info.gpu.device_id));
   AddPair(list, ASCIIToUTF16("Driver vendor"), gpu_info.driver_vendor);
   AddPair(list, ASCIIToUTF16("Driver version"), gpu_info.driver_version);
   AddPair(list, ASCIIToUTF16("Driver date"), gpu_info.driver_date);

@@ -47,6 +47,7 @@
 #include "net/http/http_util.h"
 #include "net/url_request/url_request.h"
 
+using content::BrowserContext;
 using content::BrowserThread;
 using content::DownloadId;
 using content::DownloadItem;
@@ -93,6 +94,7 @@ const char kHeaderValueKey[] = "value";
 const char kHeaderBinaryValueKey[] = "binaryValue";
 const char kHeadersKey[] = "headers";
 const char kIdKey[] = "id";
+const char kIncognito[] = "incognito";
 const char kLimitKey[] = "limit";
 const char kMethodKey[] = "method";
 const char kMimeKey[] = "mime";
@@ -196,6 +198,7 @@ scoped_ptr<base::DictionaryValue> DownloadItemToJSON(DownloadItem* item) {
       (item->GetStartTime() - base::Time::UnixEpoch()).InMilliseconds());
   json->SetInteger(kBytesReceivedKey, item->GetReceivedBytes());
   json->SetInteger(kTotalBytesKey, item->GetTotalBytes());
+  json->SetBoolean(kIncognito, item->IsOtr());
   if (item->GetState() == DownloadItem::INTERRUPTED) {
     json->SetInteger(kErrorKey, static_cast<int>(item->GetLastReason()));
   } else if (item->GetState() == DownloadItem::CANCELLED) {
@@ -247,7 +250,7 @@ void DownloadFileIconExtractorImpl::OnIconLoadComplete(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   std::string url;
   if (icon)
-    url = web_ui_util::GetImageDataUrl(*icon->ToSkBitmap());
+    url = web_ui_util::GetImageDataUrl(*icon->ToImageSkia());
   callback_.Run(url);
 }
 
@@ -307,6 +310,31 @@ bool IsNotTemporaryDownloadFilter(const DownloadItem& item) {
   return !item.IsTemporary();
 }
 
+void GetManagers(
+    Profile* profile,
+    bool include_incognito,
+    DownloadManager** manager, DownloadManager** incognito_manager) {
+  *manager = BrowserContext::GetDownloadManager(profile);
+  *incognito_manager = NULL;
+  if (include_incognito && profile->HasOffTheRecordProfile()) {
+    *incognito_manager = BrowserContext::GetDownloadManager(
+        profile->GetOffTheRecordProfile());
+  }
+}
+
+DownloadItem* GetActiveItemInternal(
+    Profile* profile,
+    bool include_incognito,
+    int id) {
+  DownloadManager* manager = NULL;
+  DownloadManager* incognito_manager = NULL;
+  GetManagers(profile, include_incognito, &manager, &incognito_manager);
+  DownloadItem* download_item = manager->GetActiveDownloadItem(id);
+  if (!download_item && incognito_manager)
+    download_item = incognito_manager->GetActiveDownloadItem(id);
+  return download_item;
+}
+
 }  // namespace
 
 bool DownloadsFunctionInterface::RunImplImpl(
@@ -334,6 +362,10 @@ SyncDownloadsFunction::function() const {
   return function_;
 }
 
+DownloadItem* SyncDownloadsFunction::GetActiveItem(int download_id) {
+  return GetActiveItemInternal(profile(), include_incognito(), download_id);
+}
+
 AsyncDownloadsFunction::AsyncDownloadsFunction(
     DownloadsFunctionInterface::DownloadsFunctionName function)
   : function_(function) {
@@ -348,6 +380,10 @@ bool AsyncDownloadsFunction::RunImpl() {
 DownloadsFunctionInterface::DownloadsFunctionName
 AsyncDownloadsFunction::function() const {
   return function_;
+}
+
+DownloadItem* AsyncDownloadsFunction::GetActiveItem(int download_id) {
+  return GetActiveItemInternal(profile(), include_incognito(), download_id);
 }
 
 DownloadsDownloadFunction::DownloadsDownloadFunction()
@@ -376,6 +412,13 @@ bool DownloadsDownloadFunction::ParseArgs() {
   EXTENSION_FUNCTION_VALIDATE(options->GetString(kUrlKey, &url));
   iodata_->url = GURL(url);
   if (!iodata_->url.is_valid()) {
+    error_ = download_extension_errors::kInvalidURLError;
+    return false;
+  }
+
+  if (!iodata_->url.SchemeIs("data") &&
+      iodata_->url.GetOrigin() != GetExtension()->url().GetOrigin() &&
+      !GetExtension()->HasHostPermission(iodata_->url)) {
     error_ = download_extension_errors::kInvalidURLError;
     return false;
   }
@@ -502,6 +545,7 @@ void DownloadsDownloadFunction::BeginDownloadOnIOThread() {
 
   net::Error error = iodata_->rdh->BeginDownload(
       request.Pass(),
+      false,  // is_content_initiated
       iodata_->resource_context,
       iodata_->render_process_host_id,
       iodata_->render_view_host_routing_id,
@@ -632,15 +676,21 @@ bool DownloadsSearchFunction::ParseOrderBy(const base::Value& order_by_value) {
 }
 
 bool DownloadsSearchFunction::RunInternal() {
+  DownloadManager* manager = NULL;
+  DownloadManager* incognito_manager = NULL;
+  GetManagers(profile(), include_incognito(), &manager, &incognito_manager);
   DownloadQuery::DownloadVector all_items, cpp_results;
-  DownloadManager* manager = DownloadServiceFactory::GetForProfile(profile())
-    ->GetDownloadManager();
   if (has_get_id_) {
     DownloadItem* item = manager->GetDownloadItem(get_id_);
-    if (item != NULL)
+    if (!item && incognito_manager)
+      item = incognito_manager->GetDownloadItem(get_id_);
+    if (item)
       all_items.push_back(item);
   } else {
     manager->GetAllDownloads(FilePath(FILE_PATH_LITERAL("")), &all_items);
+    if (incognito_manager)
+      incognito_manager->GetAllDownloads(
+          FilePath(FILE_PATH_LITERAL("")), &all_items);
   }
   query_->Search(all_items.begin(), all_items.end(), &cpp_results);
   base::ListValue* json_results = new base::ListValue();
@@ -666,13 +716,8 @@ bool DownloadsPauseFunction::ParseArgs() {
 }
 
 bool DownloadsPauseFunction::RunInternal() {
-  DownloadManager* download_manager =
-      DownloadServiceFactory::GetForProfile(profile())->GetDownloadManager();
-  DownloadItem* download_item =
-      download_manager->GetActiveDownloadItem(download_id_);
-  DCHECK(!download_item || download_item->IsInProgress());
-
-  if (!download_item) {
+  DownloadItem* download_item = GetActiveItem(download_id_);
+  if ((download_item == NULL) || !download_item->IsInProgress()) {
     // This could be due to an invalid download ID, or it could be due to the
     // download not being currently active.
     error_ = download_extension_errors::kInvalidOperationError;
@@ -696,13 +741,8 @@ bool DownloadsResumeFunction::ParseArgs() {
 }
 
 bool DownloadsResumeFunction::RunInternal() {
-  DownloadManager* download_manager =
-      DownloadServiceFactory::GetForProfile(profile())->GetDownloadManager();
-  DownloadItem* download_item =
-      download_manager->GetActiveDownloadItem(download_id_);
-  DCHECK(!download_item || download_item->IsInProgress());
-
-  if (!download_item) {
+  DownloadItem* download_item = GetActiveItem(download_id_);
+  if (download_item == NULL) {
     // This could be due to an invalid download ID, or it could be due to the
     // download not being currently active.
     error_ = download_extension_errors::kInvalidOperationError;
@@ -726,12 +766,8 @@ bool DownloadsCancelFunction::ParseArgs() {
 }
 
 bool DownloadsCancelFunction::RunInternal() {
-  DownloadManager* download_manager =
-      DownloadServiceFactory::GetForProfile(profile())->GetDownloadManager();
-  DownloadItem* download_item =
-      download_manager->GetActiveDownloadItem(download_id_);
-
-  if (download_item)
+  DownloadItem* download_item = GetActiveItem(download_id_);
+  if (download_item != NULL)
     download_item->Cancel(true);
   // |download_item| can be NULL if the download ID was invalid or if the
   // download is not currently active.  Either way, we don't consider it a
@@ -862,10 +898,13 @@ bool DownloadsGetFileIconFunction::ParseArgs() {
     DCHECK(icon_size_ == 16 || icon_size_ == 32);
   }
 
-  DownloadManager* download_manager =
-      DownloadServiceFactory::GetForProfile(profile())->GetDownloadManager();
-  DownloadItem* download_item = download_manager->GetDownloadItem(dl_id);
-  if (download_item == NULL) {
+  DownloadManager* manager = NULL;
+  DownloadManager* incognito_manager = NULL;
+  GetManagers(profile(), include_incognito(), &manager, &incognito_manager);
+  DownloadItem* download_item = manager->GetDownloadItem(dl_id);
+  if (!download_item && incognito_manager)
+    download_item = incognito_manager->GetDownloadItem(dl_id);
+  if (!download_item) {
     // The DownloadItem is is added to history when the path is determined. If
     // the download is not in history, then we don't have a path / final
     // filename and no icon.

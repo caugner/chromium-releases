@@ -1,10 +1,11 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <gtest/gtest.h>
 #include <windows.h>
 
+#include "base/json/json_writer.h"
 #include "base/string16.h"
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
@@ -12,6 +13,7 @@
 #include "chrome/browser/policy/asynchronous_policy_test_base.h"
 #include "chrome/browser/policy/configuration_policy_provider_test.h"
 #include "chrome/browser/policy/configuration_policy_provider_win.h"
+#include "chrome/browser/policy/policy_bundle.h"
 #include "chrome/browser/policy/policy_map.h"
 #include "policy/policy_constants.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -57,12 +59,12 @@ class ScopedGroupPolicyRegistrySandbox {
 
 class TestHarness : public PolicyProviderTestHarness {
  public:
-  explicit TestHarness(HKEY hive);
+  explicit TestHarness(HKEY hive, PolicyScope scope);
   virtual ~TestHarness();
 
   virtual void SetUp() OVERRIDE;
 
-  virtual AsynchronousPolicyProvider* CreateProvider(
+  virtual ConfigurationPolicyProvider* CreateProvider(
       const PolicyDefinitionList* policy_definition_list) OVERRIDE;
 
   virtual void InstallEmptyPolicy() OVERRIDE;
@@ -72,8 +74,12 @@ class TestHarness : public PolicyProviderTestHarness {
                                     int policy_value) OVERRIDE;
   virtual void InstallBooleanPolicy(const std::string& policy_name,
                                     bool policy_value) OVERRIDE;
-  virtual void InstallStringListPolicy(const std::string& policy_name,
-                                       const ListValue* policy_value) OVERRIDE;
+  virtual void InstallStringListPolicy(
+      const std::string& policy_name,
+      const base::ListValue* policy_value) OVERRIDE;
+  virtual void InstallDictionaryPolicy(
+      const std::string& policy_name,
+      const base::DictionaryValue* policy_value) OVERRIDE;
 
   // Creates a harness instance that will install policy in HKCU or HKLM,
   // respectively.
@@ -126,18 +132,16 @@ void ScopedGroupPolicyRegistrySandbox::DeleteKeys() {
   key.DeleteKey(L"");
 }
 
-TestHarness::TestHarness(HKEY hive)
-    : hive_(hive) {}
+TestHarness::TestHarness(HKEY hive, PolicyScope scope)
+    : PolicyProviderTestHarness(POLICY_LEVEL_MANDATORY, scope), hive_(hive) {}
 
 TestHarness::~TestHarness() {}
 
 void TestHarness::SetUp() {}
 
-AsynchronousPolicyProvider* TestHarness::CreateProvider(
+ConfigurationPolicyProvider* TestHarness::CreateProvider(
     const PolicyDefinitionList* policy_definition_list) {
-  return new ConfigurationPolicyProviderWin(policy_definition_list,
-                                            policy::kRegistryMandatorySubKey,
-                                            POLICY_LEVEL_MANDATORY);
+  return new ConfigurationPolicyProviderWin(policy_definition_list);
 }
 
 void TestHarness::InstallEmptyPolicy() {}
@@ -164,13 +168,13 @@ void TestHarness::InstallBooleanPolicy(const std::string& policy_name,
 }
 
 void TestHarness::InstallStringListPolicy(const std::string& policy_name,
-                                          const ListValue* policy_value) {
+                                          const base::ListValue* policy_value) {
   RegKey key(hive_,
              (string16(policy::kRegistryMandatorySubKey) + ASCIIToUTF16("\\") +
               UTF8ToUTF16(policy_name)).c_str(),
              KEY_ALL_ACCESS);
   int index = 1;
-  for (ListValue::const_iterator element(policy_value->begin());
+  for (base::ListValue::const_iterator element(policy_value->begin());
        element != policy_value->end();
        ++element) {
     std::string element_value;
@@ -182,14 +186,24 @@ void TestHarness::InstallStringListPolicy(const std::string& policy_name,
   }
 }
 
+void TestHarness::InstallDictionaryPolicy(
+    const std::string& policy_name,
+    const base::DictionaryValue* policy_value) {
+  std::string json;
+  base::JSONWriter::Write(policy_value, &json);
+  RegKey key(hive_, policy::kRegistryMandatorySubKey, KEY_ALL_ACCESS);
+  key.WriteValue(UTF8ToUTF16(policy_name).c_str(),
+                 UTF8ToUTF16(json).c_str());
+}
+
 // static
 PolicyProviderTestHarness* TestHarness::CreateHKCU() {
-  return new TestHarness(HKEY_CURRENT_USER);
+  return new TestHarness(HKEY_CURRENT_USER, POLICY_SCOPE_USER);
 }
 
 // static
 PolicyProviderTestHarness* TestHarness::CreateHKLM() {
-  return new TestHarness(HKEY_LOCAL_MACHINE);
+  return new TestHarness(HKEY_LOCAL_MACHINE, POLICY_SCOPE_MACHINE);
 }
 
 }  // namespace
@@ -204,9 +218,7 @@ INSTANTIATE_TEST_CASE_P(
 class ConfigurationPolicyProviderWinTest : public AsynchronousPolicyTestBase {
  protected:
   ConfigurationPolicyProviderWinTest()
-      : provider_(&test_policy_definitions::kList,
-                  policy::kRegistryMandatorySubKey,
-                  POLICY_LEVEL_MANDATORY) {}
+      : provider_(&test_policy_definitions::kList) {}
   virtual ~ConfigurationPolicyProviderWinTest() {}
 
   ScopedGroupPolicyRegistrySandbox registry_sandbox_;
@@ -228,10 +240,13 @@ TEST_F(ConfigurationPolicyProviderWinTest, HKLMOverHKCU) {
   provider_.RefreshPolicies();
   loop_.RunAllPending();
 
-  PolicyMap policy_map;
-  provider_.Provide(&policy_map);
-  const Value* value = policy_map.GetValue(test_policy_definitions::kKeyString);
-  EXPECT_TRUE(StringValue("hklm").Equals(value));
+  PolicyBundle expected_bundle;
+  expected_bundle.Get(POLICY_DOMAIN_CHROME, "")
+      .Set(test_policy_definitions::kKeyString,
+           POLICY_LEVEL_MANDATORY,
+           POLICY_SCOPE_MACHINE,
+           base::Value::CreateStringValue("hklm"));
+  EXPECT_TRUE(provider_.policies().Equals(expected_bundle));
 }
 
 }  // namespace policy

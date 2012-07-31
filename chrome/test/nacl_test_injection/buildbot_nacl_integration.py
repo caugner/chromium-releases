@@ -77,18 +77,15 @@ def Main(args):
       # http://code.google.com/p/nativeclient/issues/detail?id=1835
       tests_to_disable.append('run_ppapi_crash_browser_test')
 
-    # See http://crbug.com/120355
-    if sys.platform == 'win32':
+    if sys.platform in ('win32', 'cygwin'):
+      # This one is only failing for nacl_glibc on x64 Windows
+      # but it is not clear how to disable only that limited case.
+      # See http://crbug.com/132395
       tests_to_disable.append('run_inbrowser_test_runner')
+
 
   if sys.platform in ('win32', 'cygwin'):
     tests_to_disable.append('run_ppapi_ppp_input_event_browser_test')
-
-    # TODO(mseaborn): Enable this test for 32-bit Windows.
-    # See http://code.google.com/p/nativeclient/issues/detail?id=2602
-    if not ('64' in os.environ.get('PROCESSOR_ARCHITECTURE', '') or
-            '64' in os.environ.get('PROCESSOR_ARCHITEW6432', '')):
-      tests_to_disable.append('run_inbrowser_exception_test')
 
   script_dir = os.path.dirname(os.path.abspath(__file__))
   test_dir = os.path.dirname(script_dir)
@@ -104,10 +101,6 @@ def Main(args):
          '--',
          nacl_integration_script,
          '--disable_tests=%s' % ','.join(tests_to_disable)]
-  if not is_integration_bot:
-    if sys.platform in ('win32', 'cygwin'):
-      # http://code.google.com/p/nativeclient/issues/detail?id=2648
-      cmd.append('--disable_glibc')
   cmd += args
   sys.stdout.write('Running %s\n' % ' '.join(cmd))
   sys.stdout.flush()

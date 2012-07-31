@@ -24,6 +24,9 @@
 #include "content/common/content_export.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "ui/base/gestures/gesture_recognizer.h"
+#include "ui/base/gestures/gesture_types.h"
+#include "ui/base/win/extra_sdk_defines.h"
 #include "ui/base/win/ime_input.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/point.h"
@@ -32,6 +35,7 @@
 
 class BackingStore;
 class SkRegion;
+class WebTouchState;
 
 namespace content {
 class RenderWidgetHost;
@@ -55,21 +59,6 @@ typedef CWinTraits<WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS, 0>
 
 CONTENT_EXPORT extern const wchar_t kRenderWidgetHostHWNDClass[];
 
-// TODO(ananta)
-// This should be removed once we have the new windows SDK which defines these
-// messages.
-#if !defined(WM_POINTERUPDATE)
-#define WM_POINTERUPDATE 0x0245
-#endif  // WM_POINTERUPDATE
-
-#if !defined(WM_POINTERDOWN)
-#define WM_POINTERDOWN  0x0246
-#endif  // WM_POINTERDOWN
-
-#if !defined(WM_POINTERUP)
-#define WM_POINTERUP    0x0247
-#endif  // WM_POINTERUP
-
 ///////////////////////////////////////////////////////////////////////////////
 // RenderWidgetHostViewWin
 //
@@ -92,13 +81,15 @@ class RenderWidgetHostViewWin
                          RenderWidgetHostHWNDTraits>,
       public content::RenderWidgetHostViewBase,
       public content::NotificationObserver,
-      public BrowserAccessibilityDelegate {
+      public BrowserAccessibilityDelegate,
+      public ui::GestureConsumer,
+      public ui::GestureEventHelper {
  public:
   virtual ~RenderWidgetHostViewWin();
 
   CONTENT_EXPORT void CreateWnd(HWND parent);
 
-  void ScheduleComposite();
+  void AcceleratedPaint(HDC dc);
 
   DECLARE_WND_CLASS_EX(kRenderWidgetHostHWNDClass, CS_DBLCLKS, 0);
 
@@ -163,6 +154,7 @@ class RenderWidgetHostViewWin
   virtual gfx::NativeViewId GetNativeViewId() const OVERRIDE;
   virtual gfx::NativeViewAccessible GetNativeViewAccessible() OVERRIDE;
   virtual bool HasFocus() const OVERRIDE;
+  virtual bool IsSurfaceAvailableForCopy() const OVERRIDE;
   virtual void Show() OVERRIDE;
   virtual void Hide() OVERRIDE;
   virtual bool IsShowing() OVERRIDE;
@@ -187,7 +179,9 @@ class RenderWidgetHostViewWin
   virtual void SelectionBoundsChanged(const gfx::Rect& start_rect,
                                       const gfx::Rect& end_rect) OVERRIDE;
   virtual void ImeCancelComposition() OVERRIDE;
-  virtual void ImeCompositionRangeChanged(const ui::Range& range) OVERRIDE;
+  virtual void ImeCompositionRangeChanged(
+      const ui::Range& range,
+      const std::vector<gfx::Rect>& character_bounds) OVERRIDE;
   virtual void DidUpdateBackingStore(
       const gfx::Rect& scroll_rect, int scroll_dx, int scroll_dy,
       const std::vector<gfx::Rect>& copy_rects) OVERRIDE;
@@ -198,10 +192,7 @@ class RenderWidgetHostViewWin
   virtual void Destroy() OVERRIDE;
   virtual void SetTooltipText(const string16& tooltip_text) OVERRIDE;
   virtual BackingStore* AllocBackingStore(const gfx::Size& size) OVERRIDE;
-  virtual bool CopyFromCompositingSurface(
-      const gfx::Size& size,
-      skia::PlatformCanvas* output) OVERRIDE;
-  virtual void AsyncCopyFromCompositingSurface(
+  virtual void CopyFromCompositingSurface(
       const gfx::Size& size,
       skia::PlatformCanvas* output,
       base::Callback<void(bool)> callback) OVERRIDE;
@@ -242,6 +233,23 @@ class RenderWidgetHostViewWin
       int acc_obj_id, gfx::Point point) OVERRIDE;
   virtual void AccessibilitySetTextSelection(
       int acc_obj_id, int start_offset, int end_offset) OVERRIDE;
+
+  // Overridden from ui::GestureEventHelper.
+  virtual ui::GestureEvent* CreateGestureEvent(
+      ui::EventType type,
+      const gfx::Point& location,
+      int flags,
+      base::Time time,
+      float param_first,
+      float param_second,
+      unsigned int touch_id_bitfield) OVERRIDE;
+  virtual ui::TouchEvent* CreateTouchEvent(
+      ui::EventType type,
+      const gfx::Point& location,
+      int touch_id,
+      base::TimeDelta time_stamp) OVERRIDE;
+  virtual bool DispatchLongPressGestureEvent(ui::GestureEvent* event) OVERRIDE;
+  virtual bool DispatchCancelTouchEvent(ui::TouchEvent* event) OVERRIDE;
 
  protected:
   friend class content::RenderWidgetHostView;
@@ -327,6 +335,13 @@ class RenderWidgetHostViewWin
   // Tooltips become invalid when the root ancestor changes. When the View
   // becomes hidden, this method is called to reset the tooltip.
   void ResetTooltip();
+
+  // Builds and forwards a WebKitGestureEvent to the renderer.
+  bool ForwardGestureEventToRenderer(
+    ui::GestureEvent* gesture);
+
+  // Process all of the given gestures (passes them on to renderer)
+  void ProcessGestures(ui::GestureRecognizer::Gestures* gestures);
 
   // Sends the specified mouse event to the renderer.
   void ForwardMouseEventToRenderer(UINT message, WPARAM wparam, LPARAM lparam);
@@ -428,42 +443,10 @@ class RenderWidgetHostViewWin
   // true if the View is not visible.
   bool is_hidden_;
 
-  // Wrapper for maintaining touchstate associated with a WebTouchEvent.
-  class WebTouchState {
-   public:
-    explicit WebTouchState(const CWindowImpl* window);
-
-    // Updates the current touchpoint state with the supplied touches.
-    // Touches will be consumed only if they are of the same type (e.g. down,
-    // up, move). Returns the number of consumed touches.
-    size_t UpdateTouchPoints(TOUCHINPUT* points, size_t count);
-
-    // Marks all active touchpoints as released.
-    bool ReleaseTouchPoints();
-
-    // The contained WebTouchEvent.
-    const WebKit::WebTouchEvent& touch_event() { return touch_event_; }
-
-    // Returns if any touches are modified in the event.
-    bool is_changed() { return touch_event_.changedTouchesLength != 0; }
-
-   private:
-    // Adds a touch point or returns NULL if there's not enough space.
-    WebKit::WebTouchPoint* AddTouchPoint(TOUCHINPUT* touch_input);
-
-    // Copy details from a TOUCHINPUT to an existing WebTouchPoint, returning
-    // true if the resulting point is a stationary move.
-    bool UpdateTouchPoint(WebKit::WebTouchPoint* touch_point,
-                          TOUCHINPUT* touch_input);
-
-    WebKit::WebTouchEvent touch_event_;
-    const CWindowImpl* const window_;
-  };
-
   // The touch-state. Its touch-points are updated as necessary. A new
   // touch-point is added from an TOUCHEVENTF_DOWN message, and a touch-point
   // is removed from the list on an TOUCHEVENTF_UP message.
-  WebTouchState touch_state_;
+  scoped_ptr<WebTouchState> touch_state_;
 
   // True if we're in the midst of a paint operation and should respond to
   // DidPaintRect() notifications by merely invalidating.  See comments on
@@ -545,15 +528,18 @@ class RenderWidgetHostViewWin
 
   ui::Range composition_range_;
 
+  // The current composition character bounds.
+  std::vector<gfx::Rect> composition_character_bounds_;
+
   // TODO(ananta)
   // The WM_POINTERDOWN and on screen keyboard handling related members should
   // be moved to an independent class to reduce the clutter. This includes all
   // members starting from virtual_keyboard_ to
   // received_focus_change_after_pointer_down_.
 
-  // IPenInputPanel to allow us to show the Windows virtual keyboard when a
+  // ITextInputPanel to allow us to show the Windows virtual keyboard when a
   // user touches an editable field on the page.
-  base::win::ScopedComPtr<IPenInputPanel> virtual_keyboard_;
+  base::win::ScopedComPtr<ITextInputPanel> virtual_keyboard_;
 
   // Set to true if we are in the context of a WM_POINTERDOWN message
   bool pointer_down_context_;
@@ -569,6 +555,8 @@ class RenderWidgetHostViewWin
 
   // Are touch events currently enabled?
   bool touch_events_enabled_;
+
+  scoped_ptr<ui::GestureRecognizer> gesture_recognizer_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostViewWin);
 };

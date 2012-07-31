@@ -13,7 +13,7 @@
 #include "base/time.h"
 #include "base/timer.h"
 #include "grit/ash_strings.h"
-#include "grit/ui_resources.h"
+#include "grit/ui_resources_standard.h"
 #include "ui/aura/window.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/compositor/layer.h"
@@ -45,7 +45,7 @@ class UpdateView : public ash::internal::ActionableView {
     views::ImageView* image =
         new ash::internal::FixedSizedImageView(0, ash::kTrayPopupItemHeight);
     image->SetImage(bundle.GetImageNamed(IDR_AURA_UBER_TRAY_UPDATE_DARK).
-        ToSkBitmap());
+        ToImageSkia());
 
     AddChildView(image);
     AddChildView(new views::Label(
@@ -77,12 +77,12 @@ class UpdateNagger : public ui::LayerAnimationObserver {
   explicit UpdateNagger(SystemTrayItem* owner)
       : owner_(owner) {
     RestartTimer();
-    Shell::GetInstance()->tray()->widget()->GetNativeView()->layer()->
+    Shell::GetInstance()->system_tray()->GetWidget()->GetNativeView()->layer()->
         GetAnimator()->AddObserver(this);
   }
 
   virtual ~UpdateNagger() {
-    Shell::GetInstance()->tray()->widget()->GetNativeView()->layer()->
+    Shell::GetInstance()->system_tray()->GetWidget()->GetNativeView()->layer()->
         GetAnimator()->RemoveObserver(this);
   }
 

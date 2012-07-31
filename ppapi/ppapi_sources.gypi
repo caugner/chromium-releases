@@ -70,6 +70,7 @@
       'c/dev/ppb_ime_input_event_dev.h',
       'c/dev/ppb_memory_dev.h',
       'c/dev/ppb_message_loop_dev.h',
+      'c/dev/ppb_printing_dev.h',
       'c/dev/ppb_resource_array_dev.h',
       'c/dev/ppb_scrollbar_dev.h',
       'c/dev/ppb_testing_dev.h',
@@ -252,6 +253,8 @@
       'cpp/private/flash.h',
       'cpp/private/flash_clipboard.cc',
       'cpp/private/flash_clipboard.h',
+      'cpp/private/flash_device_id.cc',
+      'cpp/private/flash_device_id.h',
       'cpp/private/flash_fullscreen.cc',
       'cpp/private/flash_fullscreen.h',
       'cpp/private/flash_menu.cc',
@@ -311,6 +314,8 @@
       'tests/arch_dependent_sizes_32.h',
       'tests/arch_dependent_sizes_64.h',
       'tests/pp_thread.h',
+      'tests/test_audio.cc',
+      'tests/test_audio.h',
       'tests/test_audio_config.cc',
       'tests/test_audio_config.h',
       'tests/test_case.cc',
@@ -333,6 +338,8 @@
       'tests/test_host_resolver_private.h',
       'tests/test_image_data.cc',
       'tests/test_image_data.h',
+      'tests/test_ime_input_event.cc',
+      'tests/test_ime_input_event.h',
       'tests/test_input_event.cc',
       'tests/test_input_event.h',
       'tests/test_memory.cc',
@@ -386,8 +393,9 @@
     #
     'test_trusted_source_files': [
       # Test cases (PLEASE KEEP THIS SECTION IN ALPHABETICAL ORDER)
-      'tests/test_audio.cc',
-      'tests/test_audio.h',
+      'lib/gl/gles2/gles2.c',
+      'lib/gl/gles2/gl2ext_ppapi.c',
+      'lib/gl/gles2/gl2ext_ppapi.h',
       'tests/test_broker.cc',
       'tests/test_broker.h',
       'tests/test_browser_font.cc',
@@ -406,6 +414,8 @@
       'tests/test_flash.h',
       'tests/test_flash_clipboard.cc',
       'tests/test_flash_clipboard.h',
+      'tests/test_flash_file.cc',
+      'tests/test_flash_file.h',
       'tests/test_flash_fullscreen.cc',
       'tests/test_flash_fullscreen.h',
       'tests/test_flash_message_loop.cc',
@@ -441,17 +451,4 @@
       'tests/test_var_deprecated.h',
     ],
   },
-  'conditions': [
-    ['p2p_apis==1', {
-      'variables': {
-        'c_source_files': [
-          'c/dev/ppb_transport_dev.h',
-        ],
-        'cpp_source_files': [
-          'cpp/dev/transport_dev.cc',
-          'cpp/dev/transport_dev.h',
-        ],
-      },
-    }],
-  ],
 }

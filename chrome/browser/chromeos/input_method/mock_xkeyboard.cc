@@ -20,10 +20,6 @@ bool MockXKeyboard::SetCurrentKeyboardLayoutByName(
   return true;
 }
 
-bool MockXKeyboard::RemapModifierKeys(const ModifierMap& modifier_map) {
-  return true;
-}
-
 bool MockXKeyboard::ReapplyCurrentKeyboardLayout() {
   return true;
 }
@@ -55,12 +51,6 @@ bool MockXKeyboard::NumLockIsEnabled() {
 
 bool MockXKeyboard::CapsLockIsEnabled() {
   return caps_lock_is_enabled_;
-}
-
-std::string MockXKeyboard::CreateFullXkbLayoutName(
-    const std::string& layout_name,
-      const ModifierMap& modifire_map) {
-  return "";
 }
 
 unsigned int MockXKeyboard::GetNumLockMask() {

@@ -14,7 +14,7 @@
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/web_applications/web_app_ui.h"
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
 #include "chrome/common/chrome_constants.h"
@@ -25,7 +25,7 @@
 #include "content/public/browser/web_contents_delegate.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
-#include "grit/theme_resources.h"
+#include "grit/theme_resources_standard.h"
 #include "net/base/load_flags.h"
 #include "net/url_request/url_request.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -161,7 +161,7 @@ void AppInfoView::UpdateText(const string16& title,
 
 void AppInfoView::UpdateIcon(const gfx::Image& image) {
   if (!image.IsEmpty())
-    icon_->SetImage(image.ToSkBitmap());
+    icon_->SetImage(image.ToImageSkia());
 }
 
 void AppInfoView::OnPaint(gfx::Canvas* canvas) {
@@ -200,7 +200,7 @@ void AppInfoView::OnPaint(gfx::Canvas* canvas) {
 namespace browser {
 
 void ShowCreateWebAppShortcutsDialog(gfx::NativeWindow parent_window,
-                                     TabContentsWrapper* tab_contents) {
+                                     TabContents* tab_contents) {
   views::Widget::CreateWindowWithParent(
       new CreateUrlApplicationShortcutView(tab_contents),
       parent_window)->Show();
@@ -208,7 +208,7 @@ void ShowCreateWebAppShortcutsDialog(gfx::NativeWindow parent_window,
 
 void ShowCreateChromeAppShortcutsDialog(gfx::NativeWindow parent_window,
                                         Profile* profile,
-                                        const Extension* app) {
+                                        const extensions::Extension* app) {
   views::Widget::CreateWindowWithParent(
       new CreateChromeApplicationShortcutView(profile, app),
       parent_window)->Show();
@@ -412,7 +412,7 @@ void CreateApplicationShortcutView::ButtonPressed(views::Button* sender,
 }
 
 CreateUrlApplicationShortcutView::CreateUrlApplicationShortcutView(
-    TabContentsWrapper* tab_contents)
+    TabContents* tab_contents)
     : CreateApplicationShortcutView(tab_contents->profile()),
       tab_contents_(tab_contents),
       pending_download_(NULL)  {
@@ -482,7 +482,7 @@ void CreateUrlApplicationShortcutView::OnIconDownloaded(bool errored,
 
 CreateChromeApplicationShortcutView::CreateChromeApplicationShortcutView(
     Profile* profile,
-    const Extension* app) :
+    const extensions::Extension* app) :
       CreateApplicationShortcutView(profile),
       app_(app),
       ALLOW_THIS_IN_INITIALIZER_LIST(tracker_(this)) {

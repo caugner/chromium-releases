@@ -27,9 +27,8 @@
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/web_contents_delegate.h"
-#include "content/test/mock_render_process_host.h"
-#include "content/test/test_browser_context.h"
-#include "content/test/test_notification_tracker.h"
+#include "content/public/test/mock_render_process_host.h"
+#include "content/public/test/test_notification_tracker.h"
 #include "net/base/net_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "webkit/glue/webkit_glue.h"
@@ -40,6 +39,7 @@ using content::NavigationEntry;
 using content::NavigationEntryImpl;
 using content::RenderViewHostImplTestHarness;
 using content::SiteInstance;
+using content::TestNotificationTracker;
 using content::TestRenderViewHost;
 using content::TestWebContents;
 using content::WebContents;

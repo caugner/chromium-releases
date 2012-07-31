@@ -4,7 +4,9 @@
 
 #include "ash/launcher/launcher_context_menu.h"
 
+#include "ash/root_window_controller.h"
 #include "ash/shell.h"
+#include "ash/wm/shelf_auto_hide_behavior.h"
 #include "grit/ash_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -13,6 +15,9 @@ namespace ash {
 LauncherContextMenu::LauncherContextMenu() : ui::SimpleMenuModel(NULL) {
   set_delegate(this);
   AddCheckItemWithStringId(MENU_AUTO_HIDE, GetAutoHideResourceStringId());
+  AddSubMenuWithStringId(MENU_ALIGNMENT_MENU,
+                         IDS_AURA_LAUNCHER_CONTEXT_MENU_POSITION,
+                         &alignment_menu_);
 }
 
 LauncherContextMenu::~LauncherContextMenu() {
@@ -20,21 +25,21 @@ LauncherContextMenu::~LauncherContextMenu() {
 
 // static
 bool LauncherContextMenu::IsAutoHideMenuHideChecked() {
-  ash::Shell* shell = ash::Shell::GetInstance();
+  internal::RootWindowController* controller =
+      Shell::GetPrimaryRootWindowController();
   ash::ShelfAutoHideBehavior auto_hide_behavior =
-      shell->GetShelfAutoHideBehavior();
-  return (shell->IsInMaximizedMode() &&
+      Shell::GetInstance()->GetShelfAutoHideBehavior();
+  return (controller->IsInMaximizedMode() &&
           (auto_hide_behavior == ash::SHELF_AUTO_HIDE_BEHAVIOR_DEFAULT ||
            auto_hide_behavior == ash::SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS)) ||
-      (!shell->IsInMaximizedMode() &&
+      (!controller->IsInMaximizedMode() &&
        auto_hide_behavior == ash::SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS);
 }
 
 // static
 ShelfAutoHideBehavior LauncherContextMenu::GetToggledAutoHideBehavior() {
-  ash::Shell* shell = ash::Shell::GetInstance();
   ash::ShelfAutoHideBehavior auto_hide_behavior;
-  if (shell->IsInMaximizedMode()) {
+  if (Shell::GetPrimaryRootWindowController()->IsInMaximizedMode()) {
     if (IsAutoHideMenuHideChecked())
       auto_hide_behavior = ash::SHELF_AUTO_HIDE_BEHAVIOR_NEVER;
     else
@@ -49,7 +54,7 @@ ShelfAutoHideBehavior LauncherContextMenu::GetToggledAutoHideBehavior() {
 
 // static
 int LauncherContextMenu::GetAutoHideResourceStringId() {
-  return ash::Shell::GetInstance()->IsInMaximizedMode() ?
+  return Shell::GetPrimaryRootWindowController()->IsInMaximizedMode() ?
       IDS_AURA_LAUNCHER_CONTEXT_MENU_AUTO_HIDE_MAXIMIZED :
       IDS_AURA_LAUNCHER_CONTEXT_MENU_AUTO_HIDE_NOT_MAXIMIZED;
 }
@@ -78,6 +83,8 @@ void LauncherContextMenu::ExecuteCommand(int command_id) {
     case MENU_AUTO_HIDE:
       ash::Shell::GetInstance()->SetShelfAutoHideBehavior(
           GetToggledAutoHideBehavior());
+      break;
+    case MENU_ALIGNMENT_MENU:
       break;
   }
 }

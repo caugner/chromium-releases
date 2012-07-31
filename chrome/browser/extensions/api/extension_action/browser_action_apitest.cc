@@ -26,6 +26,7 @@
 #include "ui/gfx/size.h"
 
 using content::WebContents;
+using extensions::Extension;
 
 class BrowserActionApiTest : public ExtensionApiTest {
  public:
@@ -76,11 +77,10 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, Basic) {
       test_server()->GetURL("files/extensions/test_file.txt"));
 
   ExtensionService* service = browser()->profile()->GetExtensionService();
-  service->toolbar_model()->ExecuteBrowserAction(
-      action->extension_id(), browser());
+  service->toolbar_model()->ExecuteBrowserAction(extension, browser(), NULL);
 
   // Verify the command worked.
-  WebContents* tab = browser()->GetSelectedWebContents();
+  WebContents* tab = browser()->GetActiveWebContents();
   bool result = false;
   ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
       tab->GetRenderViewHost(), L"",
@@ -196,7 +196,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, BrowserActionAddPopup) {
   const Extension* extension = GetSingleLoadedExtension();
   ASSERT_TRUE(extension) << message_;
 
-  int tab_id = ExtensionTabUtil::GetTabId(browser()->GetSelectedWebContents());
+  int tab_id = ExtensionTabUtil::GetTabId(browser()->GetActiveWebContents());
 
   ExtensionAction* browser_action = extension->browser_action();
   ASSERT_TRUE(browser_action)
@@ -251,7 +251,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, BrowserActionRemovePopup) {
   const Extension* extension = GetSingleLoadedExtension();
   ASSERT_TRUE(extension) << message_;
 
-  int tab_id = ExtensionTabUtil::GetTabId(browser()->GetSelectedWebContents());
+  int tab_id = ExtensionTabUtil::GetTabId(browser()->GetActiveWebContents());
 
   ExtensionAction* browser_action = extension->browser_action();
   ASSERT_TRUE(browser_action)
@@ -401,7 +401,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, DISABLED_CloseBackgroundPage) {
 
   // Click the browser action.
   browser()->profile()->GetExtensionService()->toolbar_model()->
-      ExecuteBrowserAction(action->extension_id(), browser());
+      ExecuteBrowserAction(extension, browser(), NULL);
 
   // It can take a moment for the background page to actually get destroyed
   // so we wait for the notification before checking that it's really gone

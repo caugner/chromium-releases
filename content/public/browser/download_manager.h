@@ -52,6 +52,7 @@ struct DownloadRetrieveInfo;
 namespace content {
 
 class BrowserContext;
+class ByteStreamReader;
 class DownloadManagerDelegate;
 class DownloadQuery;
 class DownloadUrlParameters;
@@ -60,17 +61,19 @@ class DownloadUrlParameters;
 class CONTENT_EXPORT DownloadManager
     : public base::RefCountedThreadSafe<DownloadManager> {
  public:
-  virtual ~DownloadManager() {}
-
-  static DownloadManager* Create(
-      DownloadManagerDelegate* delegate,
-      net::NetLog* net_log);
-
   // A method that can be used in tests to ensure that all the internal download
   // classes have no pending downloads.
   static bool EnsureNoPendingDownloadsForTesting();
 
-  // Shutdown the download manager. Must be called before destruction.
+  // Sets/Gets the delegate for this DownloadManager. The delegate has to live
+  // past its Shutdown method being called (by the DownloadManager).
+  virtual void SetDelegate(DownloadManagerDelegate* delegate) = 0;
+  virtual DownloadManagerDelegate* GetDelegate() const = 0;
+
+  // Shutdown the download manager. Content calls this when BrowserContext is
+  // being destructed. If the embedder needs this to be called earlier, it can
+  // call it. In that case, the delegate's Shutdown() method will only be called
+  // once.
   virtual void Shutdown() = 0;
 
   // Interface to implement for observers that wish to be informed of changes
@@ -117,8 +120,15 @@ class CONTENT_EXPORT DownloadManager
   // Returns true if initialized properly.
   virtual bool Init(BrowserContext* browser_context) = 0;
 
+  // Called by a download source (Currently DownloadResourceHandler)
+  // to initiate the non-source portions of a download.
+  // Returns the id assigned to the download.  If the DownloadCreateInfo
+  // specifies an id, that id will be used.
+  virtual content::DownloadId StartDownload(
+      scoped_ptr<DownloadCreateInfo> info,
+      scoped_ptr<content::ByteStreamReader> stream) = 0;
+
   // Notifications sent from the download thread to the UI thread
-  virtual void StartDownload(int32 id) = 0;
   virtual void UpdateDownload(int32 download_id,
                               int64 bytes_so_far,
                               int64 bytes_per_sec,
@@ -146,13 +156,6 @@ class CONTENT_EXPORT DownloadManager
       int64 size,
       const std::string& hash_state,
       DownloadInterruptReason reason) = 0;
-
-  // Called when the download is renamed to its final name.
-  // |uniquifier| is a number used to make unique names for the file.  It is
-  // only valid for the DANGEROUS_BUT_VALIDATED state of the download item.
-  virtual void OnDownloadRenamedToFinalName(int download_id,
-                                    const FilePath& full_path,
-                                    int uniquifier) = 0;
 
   // Remove downloads after remove_begin (inclusive) and before remove_end
   // (exclusive). You may pass in null Time values to do an unbounded delete
@@ -197,9 +200,7 @@ class CONTENT_EXPORT DownloadManager
 
   // Creates the download item.  Must be called on the UI thread.
   // Returns the |BoundNetLog| used by the |DownloadItem|.
-  virtual net::BoundNetLog CreateDownloadItem(
-      DownloadCreateInfo* info,
-      const DownloadRequestHandle& request_handle) = 0;
+  virtual net::BoundNetLog CreateDownloadItem(DownloadCreateInfo* info) = 0;
 
   // Creates a download item for the SavePackage system.
   // Must be called on the UI thread.  Note that the DownloadManager
@@ -240,18 +241,11 @@ class CONTENT_EXPORT DownloadManager
 
   virtual bool GenerateFileHash() = 0;
 
-  virtual DownloadManagerDelegate* delegate() const = 0;
-
-  // For testing only.  May be called from tests indirectly (through
-  // other for testing only methods).
-  virtual void SetDownloadManagerDelegate(
-      DownloadManagerDelegate* delegate) = 0;
+ protected:
+  virtual ~DownloadManager() {}
 
  private:
-  friend class base::RefCountedThreadSafe<
-      DownloadManager, BrowserThread::DeleteOnUIThread>;
-  friend struct BrowserThread::DeleteOnThread<BrowserThread::UI>;
-  friend class base::DeleteHelper<DownloadManager>;
+  friend class base::RefCountedThreadSafe<DownloadManager>;
 };
 
 }  // namespace content

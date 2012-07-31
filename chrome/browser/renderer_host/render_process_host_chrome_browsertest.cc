@@ -11,10 +11,11 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
-#include "content/public/browser/render_view_host_delegate.h"
+#include "content/public/browser/web_contents.h"
 
 using content::RenderViewHost;
 using content::RenderWidgetHost;
+using content::WebContents;
 
 namespace {
 
@@ -47,9 +48,8 @@ RenderViewHost* FindFirstDevToolsHost() {
         continue;
       RenderViewHost* host =
           RenderViewHost::From(const_cast<RenderWidgetHost*>(widget));
-
-      content::RenderViewHostDelegate* host_delegate = host->GetDelegate();
-      GURL url = host_delegate->GetURL();
+      WebContents* contents = WebContents::FromRenderViewHost(host);
+      GURL url = contents->GetURL();
       if (url.SchemeIs(chrome::kChromeDevToolsScheme))
         return host;
     }
@@ -70,10 +70,6 @@ IN_PROC_BROWSER_TEST_F(ChromeRenderProcessHostTest,
 
   int tab_count = 1;
   int host_count = 1;
-
-#if defined(USE_VIRTUAL_KEYBOARD)
-  ++host_count;  // For the virtual keyboard.
-#endif
 
   GURL page1("data:text/html,hello world1");
   browser()->ShowSingletonTab(page1);
@@ -107,10 +103,6 @@ IN_PROC_BROWSER_TEST_F(ChromeRenderProcessHostTest,
                        DevToolsOnSelfInOwnProcess) {
   int tab_count = 1;
   int host_count = 1;
-
-#if defined(USE_VIRTUAL_KEYBOARD)
-  ++host_count;  // For the virtual keyboard.
-#endif
 
   GURL page1("data:text/html,hello world1");
   browser()->ShowSingletonTab(page1);

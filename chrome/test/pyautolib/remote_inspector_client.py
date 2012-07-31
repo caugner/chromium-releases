@@ -25,9 +25,9 @@ For example, to take v8 heap snapshots from a pyauto test:
 
 import remote_inspector_client
 my_client = remote_inspector_client.RemoteInspectorClient()
-snapshot_info = my_client.HeapSnapshot()
+snapshot_info = my_client.HeapSnapshot(include_summary=True)
 // Do some stuff...
-new_snapshot_info = my_client.HeapSnapshot()
+new_snapshot_info = my_client.HeapSnapshot(include_summary=True)
 my_client.Stop()
 
 It is expected that a test will only use one instance of RemoteInspectorClient
@@ -70,7 +70,7 @@ class _DevToolsSocketRequest(object):
         and all relevant results for it have been obtained (i.e., this value is
         True only if all results for this request are known).
   """
-  def __init__(self, method, message_id):
+  def __init__(self, method, params, message_id):
     """Initialize.
 
     Args:
@@ -80,7 +80,7 @@ class _DevToolsSocketRequest(object):
     """
     self.method = method
     self.id = message_id
-    self.params = {}
+    self.params = params
     self.results = {}
     self.is_fulfilled = False
 
@@ -333,7 +333,7 @@ class _RemoteInspectorThread(threading.Thread):
         # Prepare the request list.
         for message_id, message in enumerate(messages):
           self._requests.append(
-              _DevToolsSocketRequest(message, message_id))
+              _DevToolsSocketRequest(message[0], message[1], message_id))
 
         # Send out each request.  Wait until each request is complete before
         # sending the next request.
@@ -715,24 +715,27 @@ class RemoteInspectorClient(object):
       self._remote_inspector_driver_thread.join()
       self._remote_inspector_driver_thread = None
 
-  def HeapSnapshot(self):
+  def HeapSnapshot(self, include_summary=False):
     """Takes a v8 heap snapshot.
 
     Returns:
-      A dictionary containing the summarized information for a single v8 heap
-      snapshot that was taken:
+      A dictionary containing information for a single v8 heap
+      snapshot that was taken.
       {
         'url': string,  # URL of the webpage that was snapshotted.
+        'raw_data': string, # The raw data as JSON string.
         'total_v8_node_count': integer,  # Total number of nodes in the v8 heap.
+                                         # Only if |include_summary| is True.
         'total_heap_size': integer,  # Total v8 heap size (number of bytes).
+                                     # Only if |include_summary| is True.
       }
     """
     HEAP_SNAPSHOT_MESSAGES = [
-      'Page.getResourceTree',
-      'Debugger.enable',
-      'Profiler.clearProfiles',
-      'Profiler.takeHeapSnapshot',
-      'Profiler.getProfile',
+      ('Page.getResourceTree', {}),
+      ('Debugger.enable', {}),
+      ('Profiler.clearProfiles', {}),
+      ('Profiler.takeHeapSnapshot', {}),
+      ('Profiler.getProfile', {}),
     ]
 
     self._current_heap_snapshot = []
@@ -768,24 +771,23 @@ class RemoteInspectorClient(object):
           # TODO(dennisjeffrey): Parse the heap snapshot on-the-fly as the data
           # is coming in over the wire, so we can avoid storing the entire
           # snapshot string in memory.
-          self._logger.debug('Now analyzing heap snapshot...')
-          parser = _V8HeapSnapshotParser()
-          time_start = time.time()
           raw_snapshot_data = ''.join(self._current_heap_snapshot)
-          self._logger.debug('Raw snapshot data size: %.2f MB',
-                             len(raw_snapshot_data) / (1024.0 * 1024.0))
-          result = parser.ParseSnapshotData(raw_snapshot_data)
-          self._logger.debug('Time to parse data: %.2f sec',
-                             time.time() - time_start)
-          num_nodes = result['total_v8_node_count']
-          total_size = result['total_shallow_size']
-          total_size_str = self._ConvertByteCountToHumanReadableString(
-              total_size)
-
           self._collected_heap_snapshot_data = {
               'url': self._url,
-              'total_v8_node_count': num_nodes,
-              'total_heap_size': total_size}
+              'raw_data': raw_snapshot_data}
+          if include_summary:
+            self._logger.debug('Now analyzing heap snapshot...')
+            parser = _V8HeapSnapshotParser()
+            time_start = time.time()
+            self._logger.debug('Raw snapshot data size: %.2f MB',
+                               len(raw_snapshot_data) / (1024.0 * 1024.0))
+            result = parser.ParseSnapshotData(raw_snapshot_data)
+            self._logger.debug('Time to parse data: %.2f sec',
+                               time.time() - time_start)
+            count = result['total_v8_node_count']
+            self._collected_heap_snapshot_data['total_v8_node_count'] = count
+            total_size = result['total_shallow_size']
+            self._collected_heap_snapshot_data['total_heap_size'] = total_size
 
     # Tell the remote inspector to take a v8 heap snapshot, then wait until
     # the snapshot information is available to return.
@@ -794,6 +796,45 @@ class RemoteInspectorClient(object):
     while not self._collected_heap_snapshot_data:
       time.sleep(0.1)
     return self._collected_heap_snapshot_data
+
+  def EvaluateJavaScript(self, expression):
+    """Evaluates a JavaScript expression and returns the result.
+
+    Sends a message containing the expression to the remote Chrome instance we
+    are connected to, and evaluates it in the context of the tab we are
+    connected to. Blocks until the result is available and returns it.
+
+    Returns:
+      A dictionary representing the result.
+    """
+    EVALUATE_MESSAGES = [
+      ('Runtime.evaluate', { 'expression': expression,
+                             'objectGroup': 'group',
+                             'returnByValue': True }),
+      ('Runtime.releaseObjectGroup', { 'objectGroup': 'group' })
+    ]
+
+    self._result = None
+    self._got_result = False
+
+    def HandleReply(reply_dict):
+      """Processes a reply message received from the remote Chrome instance.
+
+      Args:
+        reply_dict: A dictionary object representing the reply message received
+                    from the remote Chrome instance.
+      """
+      if 'result' in reply_dict and 'result' in reply_dict['result']:
+        self._result = reply_dict['result']['result']['value']
+        self._got_result = True
+
+    # Tell the remote inspector to evaluate the given expression, then wait
+    # until that information is available to return.
+    self._remote_inspector_thread.PerformAction(EVALUATE_MESSAGES,
+                                                HandleReply)
+    while not self._got_result:
+      time.sleep(0.1)
+    return self._result
 
   def GetMemoryObjectCounts(self):
     """Retrieves memory object count information.
@@ -806,7 +847,7 @@ class RemoteInspectorClient(object):
       }
     """
     MEMORY_COUNT_MESSAGES = [
-      'Memory.getDOMNodeCount',
+      ('Memory.getDOMNodeCount', {})
     ]
 
     self._event_listener_count = None
@@ -847,7 +888,7 @@ class RemoteInspectorClient(object):
   def CollectGarbage(self):
     """Forces a garbage collection."""
     COLLECT_GARBAGE_MESSAGES = [
-      'Profiler.collectGarbage',
+      ('Profiler.collectGarbage', {})
     ]
 
     # Tell the remote inspector to do a garbage collect.  We can return
@@ -867,7 +908,7 @@ class RemoteInspectorClient(object):
       self._logger.warning('Timeline monitoring already started.')
       return
     TIMELINE_MESSAGES = [
-      'Timeline.start',
+      ('Timeline.start', {})
     ]
 
     self._event_callback = event_callback
@@ -895,7 +936,7 @@ class RemoteInspectorClient(object):
       self._logger.warning('Timeline monitoring already stopped.')
       return
     TIMELINE_MESSAGES = [
-      'Timeline.stop',
+      ('Timeline.stop', {})
     ]
 
     # Tell the remote inspector to stop the timeline.  We can return

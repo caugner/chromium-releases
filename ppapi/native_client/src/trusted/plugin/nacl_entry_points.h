@@ -13,16 +13,18 @@
 #include <string>
 
 #include "native_client/src/shared/imc/nacl_imc.h"
+#include "ppapi/c/pp_instance.h"
 
 
-typedef bool (*LaunchNaClProcessFunc)(const char* url,
+typedef bool (*LaunchNaClProcessFunc)(PP_Instance instance,
+                                      const char* url,
                                       int socket_count,
                                       nacl::Handle* result_sockets);
 
-typedef int (*GetURandomFDFunc)(void);
+typedef bool (*StartPpapiProxyFunc)(PP_Instance instance);
 
 
 extern LaunchNaClProcessFunc launch_nacl_process;
-extern GetURandomFDFunc get_urandom_fd;
+extern StartPpapiProxyFunc start_ppapi_proxy;
 
 #endif  // NATIVE_CLIENT_SRC_TRUSTED_PLUGIN_NACL_ENTRY_POINTS_H_

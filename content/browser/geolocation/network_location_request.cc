@@ -12,8 +12,8 @@
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "content/common/net/url_fetcher_impl.h"
 #include "content/public/common/geoposition.h"
+#include "content/public/common/url_fetcher.h"
 #include "net/base/escape.h"
 #include "net/base/load_flags.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -74,21 +74,19 @@ NetworkLocationRequest::~NetworkLocationRequest() {
 }
 
 bool NetworkLocationRequest::MakeRequest(const string16& access_token,
-                                         const RadioData& radio_data,
                                          const WifiData& wifi_data,
                                          const base::Time& timestamp) {
   if (url_fetcher_ != NULL) {
     DVLOG(1) << "NetworkLocationRequest : Cancelling pending request";
     url_fetcher_.reset();
   }
-  radio_data_ = radio_data;
   wifi_data_ = wifi_data;
   timestamp_ = timestamp;
 
   GURL request_url = FormRequestURL(url_.spec(), access_token,
                                     wifi_data, timestamp_);
-  url_fetcher_.reset(URLFetcherImpl::Create(
-      url_fetcher_id_for_tests, request_url, URLFetcherImpl::GET, this));
+  url_fetcher_.reset(content::URLFetcher::Create(
+      url_fetcher_id_for_tests, request_url, net::URLFetcher::GET, this));
   url_fetcher_->SetRequestContext(url_context_);
   url_fetcher_->SetLoadFlags(
       net::LOAD_BYPASS_CACHE | net::LOAD_DISABLE_CACHE |
@@ -100,7 +98,7 @@ bool NetworkLocationRequest::MakeRequest(const string16& access_token,
 }
 
 void NetworkLocationRequest::OnURLFetchComplete(
-    const content::URLFetcher* source) {
+    const net::URLFetcher* source) {
   DCHECK_EQ(url_fetcher_.get(), source);
 
   net::URLRequestStatus status = source->GetStatus();
@@ -124,7 +122,7 @@ void NetworkLocationRequest::OnURLFetchComplete(
   DCHECK(listener_);
   DVLOG(1) << "NetworkLocationRequest::Run() : Calling listener with position.";
   listener_->LocationResponseAvailable(position, server_error, access_token,
-                                       radio_data_, wifi_data_);
+                                       wifi_data_);
 }
 
 // Local functions.

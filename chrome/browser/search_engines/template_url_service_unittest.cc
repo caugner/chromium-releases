@@ -14,6 +14,7 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/history/history_notifications.h"
+#include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/search_engines/search_host_to_urls_map.h"
 #include "chrome/browser/search_engines/search_terms_data.h"
 #include "chrome/browser/search_engines/template_url.h"
@@ -21,9 +22,10 @@
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_test_util.h"
 #include "chrome/browser/webdata/web_database.h"
+#include "chrome/browser/webdata/web_data_service_factory.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::Time;
@@ -122,6 +124,28 @@ TestSearchTermsData::TestSearchTermsData(const char* google_base_url)
 std::string TestSearchTermsData::GoogleBaseURLValue() const {
   return google_base_url_;
 }
+
+
+// QueryHistoryCallbackImpl ---------------------------------------------------
+
+struct QueryHistoryCallbackImpl {
+  QueryHistoryCallbackImpl() : success(false) {}
+
+  void Callback(HistoryService::Handle handle,
+                bool success,
+                const history::URLRow* row,
+                history::VisitVector* visits) {
+    this->success = success;
+    if (row)
+      this->row = *row;
+    if (visits)
+      this->visits = *visits;
+  }
+
+  bool success;
+  history::URLRow row;
+  history::VisitVector visits;
+};
 
 };  // namespace
 
@@ -293,22 +317,26 @@ void TemplateURLServiceTest::TestLoadUpdatingPreloadedURL(
       index_offset_from_default, &prepopulated_url);
 
   string16 original_url = t_url->url_ref().DisplayURL();
-  ASSERT_NE(prepopulated_url, original_url);
+  std::string original_guid = t_url->sync_guid();
+  EXPECT_NE(prepopulated_url, original_url);
 
   // Then add it to the model and save it all.
   test_util_.ChangeModelToLoadState();
   model()->Add(t_url);
   const TemplateURL* keyword_url =
       model()->GetTemplateURLForKeyword(ASCIIToUTF16("unittest"));
-  ASSERT_EQ(t_url, keyword_url);
-  ASSERT_EQ(original_url, keyword_url->url_ref().DisplayURL());
+  ASSERT_TRUE(keyword_url != NULL);
+  EXPECT_EQ(t_url, keyword_url);
+  EXPECT_EQ(original_url, keyword_url->url_ref().DisplayURL());
   test_util_.BlockTillServiceProcessesRequests();
 
-  // Now reload the model and verify that the merge updates the url.
+  // Now reload the model and verify that the merge updates the url, and
+  // preserves the sync GUID.
   test_util_.ResetModel(true);
   keyword_url = model()->GetTemplateURLForKeyword(ASCIIToUTF16("unittest"));
   ASSERT_TRUE(keyword_url != NULL);
-  ASSERT_EQ(prepopulated_url, keyword_url->url_ref().DisplayURL());
+  EXPECT_EQ(prepopulated_url, keyword_url->url_ref().DisplayURL());
+  EXPECT_EQ(original_guid, keyword_url->sync_guid());
 
   // Wait for any saves to finish.
   test_util_.BlockTillServiceProcessesRequests();
@@ -317,7 +345,8 @@ void TemplateURLServiceTest::TestLoadUpdatingPreloadedURL(
   test_util_.ResetModel(true);
   keyword_url = model()->GetTemplateURLForKeyword(ASCIIToUTF16("unittest"));
   ASSERT_TRUE(keyword_url != NULL);
-  ASSERT_EQ(prepopulated_url, keyword_url->url_ref().DisplayURL());
+  EXPECT_EQ(prepopulated_url, keyword_url->url_ref().DisplayURL());
+  EXPECT_EQ(original_guid, keyword_url->sync_guid());
 }
 
 void TemplateURLServiceTest::VerifyObserverCount(int expected_changed_count) {
@@ -1017,25 +1046,6 @@ TEST_F(TemplateURLServiceTest, ChangeGoogleBaseValue) {
   EXPECT_EQ(ASCIIToUTF16("google.fr"), t_url->keyword());
 }
 
-struct QueryHistoryCallbackImpl {
-  QueryHistoryCallbackImpl() : success(false) {}
-
-  void Callback(HistoryService::Handle handle,
-                bool success,
-                const history::URLRow* row,
-                history::VisitVector* visits) {
-    this->success = success;
-    if (row)
-      this->row = *row;
-    if (visits)
-      this->visits = *visits;
-  }
-
-  bool success;
-  history::URLRow row;
-  history::VisitVector visits;
-};
-
 // Make sure TemplateURLService generates a KEYWORD_GENERATED visit for
 // KEYWORD visits.
 TEST_F(TemplateURLServiceTest, GenerateVisitOnKeyword) {
@@ -1049,7 +1059,8 @@ TEST_F(TemplateURLServiceTest, GenerateVisitOnKeyword) {
 
   // Add a visit that matches the url of the keyword.
   HistoryService* history =
-      test_util_.profile()->GetHistoryService(Profile::EXPLICIT_ACCESS);
+      HistoryServiceFactory::GetForProfile(test_util_.profile(),
+                                           Profile::EXPLICIT_ACCESS);
   history->AddPage(
       GURL(t_url->url_ref().ReplaceSearchTerms(ASCIIToUTF16("blah"),
           TemplateURLRef::NO_SUGGESTIONS_AVAILABLE, string16())),
@@ -1158,6 +1169,39 @@ TEST_F(TemplateURLServiceTest, LoadSavesPrepopulatedDefaultSearchProvider) {
   AssertEquals(*cloned_url, *default_search);
 }
 
+TEST_F(TemplateURLServiceTest, FindNewDefaultSearchProvider) {
+  // Ensure that if our service is initially empty, we don't initial have a
+  // valid new DSP.
+  EXPECT_FALSE(model()->FindNewDefaultSearchProvider());
+
+  // Add a few entries with searchTerms, but ensure only the last one is in the
+  // default list.
+  AddKeywordWithDate("name1", "key1", "http://foo1/{searchTerms}",
+      "http://sugg1", "http://icon1", true, "UTF-8;UTF-16", Time(), Time());
+  AddKeywordWithDate("name2", "key2", "http://foo2/{searchTerms}",
+      "http://sugg2", "http://icon1", true, "UTF-8;UTF-16", Time(), Time());
+  AddKeywordWithDate("name3", "key3", "http://foo1/{searchTerms}",
+      "http://sugg3", "http://icon3", true, "UTF-8;UTF-16", Time(), Time());
+  TemplateURLData data;
+  data.short_name = ASCIIToUTF16("valid");
+  data.SetKeyword(ASCIIToUTF16("validkeyword"));
+  data.SetURL("http://valid/{searchTerms}");
+  data.favicon_url = GURL("http://validicon");
+  data.show_in_default_list = true;
+  TemplateURL* valid_turl(new TemplateURL(test_util_.profile(), data));
+  model()->Add(valid_turl);
+  EXPECT_EQ(4U, model()->GetTemplateURLs().size());
+
+  // Request a new DSP from the service and only expect the valid one.
+  TemplateURL* new_default = model()->FindNewDefaultSearchProvider();
+  ASSERT_TRUE(new_default);
+  EXPECT_EQ(valid_turl, new_default);
+
+  // Remove the default we received and ensure that the service returns NULL.
+  model()->Remove(new_default);
+  EXPECT_FALSE(model()->FindNewDefaultSearchProvider());
+}
+
 // Make sure that the load routine doesn't delete
 // prepopulated engines that no longer exist in the prepopulate data if
 // it is the default search provider.
@@ -1256,8 +1300,9 @@ TEST_F(TemplateURLServiceTest, FailedInit) {
   test_util_.VerifyLoad();
 
   test_util_.ClearModel();
-  WebDataService* web_service =
-      test_util_.profile()->GetWebDataService(Profile::EXPLICIT_ACCESS);
+  scoped_refptr<WebDataService> web_service =
+      WebDataServiceFactory::GetForProfile(test_util_.profile(),
+                                           Profile::EXPLICIT_ACCESS);
   web_service->UnloadDatabase();
   web_service->set_failed_init(true);
 
@@ -1421,6 +1466,46 @@ TEST_F(TemplateURLServiceTest, PatchEmptySyncGUID) {
   ASSERT_EQ(initial_count + 1, model()->GetTemplateURLs().size());
   const TemplateURL* loaded_url =
       model()->GetTemplateURLForKeyword(ASCIIToUTF16("keyword"));
-  ASSERT_TRUE(loaded_url != NULL);
+  ASSERT_FALSE(loaded_url == NULL);
   ASSERT_FALSE(loaded_url->sync_guid().empty());
+}
+
+// Test that if we load a TemplateURL with duplicate input encodings, the load
+// process de-dupes them.
+TEST_F(TemplateURLServiceTest, DuplicateInputEncodings) {
+  // Add a new TemplateURL.
+  test_util_.VerifyLoad();
+  const size_t initial_count = model()->GetTemplateURLs().size();
+
+  TemplateURLData data;
+  data.short_name = ASCIIToUTF16("google");
+  data.SetKeyword(ASCIIToUTF16("keyword"));
+  data.SetURL("http://www.google.com/foo/bar");
+  std::vector<std::string> encodings;
+  data.input_encodings.push_back("UTF-8");
+  data.input_encodings.push_back("UTF-8");
+  data.input_encodings.push_back("UTF-16");
+  data.input_encodings.push_back("UTF-8");
+  data.input_encodings.push_back("Big5");
+  data.input_encodings.push_back("UTF-16");
+  data.input_encodings.push_back("Big5");
+  data.input_encodings.push_back("Windows-1252");
+  TemplateURL* t_url = new TemplateURL(test_util_.profile(), data);
+  model()->Add(t_url);
+
+  VerifyObserverCount(1);
+  test_util_.BlockTillServiceProcessesRequests();
+  ASSERT_EQ(initial_count + 1, model()->GetTemplateURLs().size());
+  const TemplateURL* loaded_url =
+      model()->GetTemplateURLForKeyword(ASCIIToUTF16("keyword"));
+  ASSERT_TRUE(loaded_url != NULL);
+  EXPECT_EQ(8U, loaded_url->input_encodings().size());
+
+  // Reload the model to verify it was actually saved to the database and the
+  // duplicate encodings were removed.
+  test_util_.ResetModel(true);
+  ASSERT_EQ(initial_count + 1, model()->GetTemplateURLs().size());
+  loaded_url = model()->GetTemplateURLForKeyword(ASCIIToUTF16("keyword"));
+  ASSERT_FALSE(loaded_url == NULL);
+  EXPECT_EQ(4U, loaded_url->input_encodings().size());
 }

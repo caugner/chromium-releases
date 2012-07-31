@@ -5,6 +5,7 @@
 #include "content/browser/web_contents/web_contents_view_aura.h"
 
 #include "base/utf_string_conversions.h"
+#include "content/browser/renderer_host/dip_util.h"
 #include "content/browser/renderer_host/render_view_host_factory.h"
 #include "content/browser/web_contents/interstitial_page_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
@@ -14,6 +15,7 @@
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_contents_view_delegate.h"
 #include "content/public/browser/web_drag_dest_delegate.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 #include "ui/aura/client/drag_drop_client.h"
 #include "ui/aura/client/drag_drop_delegate.h"
 #include "ui/aura/event.h"
@@ -27,6 +29,17 @@
 #include "ui/compositor/layer.h"
 #include "ui/gfx/screen.h"
 #include "webkit/glue/webdropdata.h"
+
+namespace content {
+WebContentsView* CreateWebContentsView(
+    WebContentsImpl* web_contents,
+    WebContentsViewDelegate* delegate,
+    RenderViewHostDelegateView** render_view_host_delegate_view) {
+  WebContentsViewAura* rv = new WebContentsViewAura(web_contents, delegate);
+  *render_view_host_delegate_view = rv;
+  return rv;
+}
+}
 
 namespace {
 
@@ -55,7 +68,9 @@ class WebDragSourceAura : public MessageLoopForUI::Observer {
       case ui::ET_MOUSE_DRAGGED:
         rvh = contents_->GetRenderViewHost();
         if (rvh) {
-          gfx::Point screen_loc = ui::EventLocationFromNative(event);
+          gfx::Point screen_loc_in_pixel = ui::EventLocationFromNative(event);
+          gfx::Point screen_loc = content::ConvertPointToDIP(rvh->GetView(),
+              screen_loc_in_pixel);
           gfx::Point client_loc = screen_loc;
           aura::Window* window = rvh->GetView()->GetNativeView();
           aura::Window::ConvertPointToWindow(window->GetRootWindow(),
@@ -79,18 +94,23 @@ class WebDragSourceAura : public MessageLoopForUI::Observer {
 // Utility to fill a ui::OSExchangeDataProviderAura object from WebDropData.
 void PrepareDragData(const WebDropData& drop_data,
                      ui::OSExchangeDataProviderAura* provider) {
-  if (!drop_data.plain_text.empty())
-    provider->SetString(drop_data.plain_text);
+  if (!drop_data.text.string().empty())
+    provider->SetString(drop_data.text.string());
   if (drop_data.url.is_valid())
     provider->SetURL(drop_data.url, drop_data.url_title);
-  if (!drop_data.text_html.empty())
-    provider->SetHtml(drop_data.text_html, drop_data.html_base_url);
+  if (!drop_data.html.string().empty())
+    provider->SetHtml(drop_data.html.string(), drop_data.html_base_url);
   if (!drop_data.filenames.empty()) {
-    std::vector<FilePath> paths;
-    for (std::vector<string16>::const_iterator it = drop_data.filenames.begin();
-        it != drop_data.filenames.end(); ++it)
-      paths.push_back(FilePath::FromUTF8Unsafe(UTF16ToUTF8(*it)));
-    provider->SetFilenames(paths);
+    std::vector<ui::OSExchangeData::FileInfo> filenames;
+    for (std::vector<WebDropData::FileInfo>::const_iterator it =
+             drop_data.filenames.begin();
+         it != drop_data.filenames.end(); ++it) {
+      filenames.push_back(
+          ui::OSExchangeData::FileInfo(
+              FilePath::FromUTF8Unsafe(UTF16ToUTF8(it->path)),
+              FilePath::FromUTF8Unsafe(UTF16ToUTF8(it->display_name))));
+    }
+    provider->SetFilenames(filenames);
   }
   if (!drop_data.custom_data.empty()) {
     Pickle pickle;
@@ -103,26 +123,36 @@ void PrepareDragData(const WebDropData& drop_data,
 // Utility to fill a WebDropData object from ui::OSExchangeData.
 void PrepareWebDropData(WebDropData* drop_data,
                         const ui::OSExchangeData& data) {
-  string16 plain_text, url_title;
-  GURL url;
-
+  string16 plain_text;
   data.GetString(&plain_text);
   if (!plain_text.empty())
-    drop_data->plain_text = plain_text;
+    drop_data->text = NullableString16(plain_text, false);
 
+  GURL url;
+  string16 url_title;
   data.GetURLAndTitle(&url, &url_title);
   if (url.is_valid()) {
     drop_data->url = url;
     drop_data->url_title = url_title;
   }
 
-  data.GetHtml(&drop_data->text_html, &drop_data->html_base_url);
+  string16 html;
+  GURL html_base_url;
+  data.GetHtml(&html, &html_base_url);
+  if (!html.empty())
+    drop_data->html = NullableString16(html, false);
+  if (html_base_url.is_valid())
+    drop_data->html_base_url = html_base_url;
 
-  std::vector<FilePath> files;
+  std::vector<ui::OSExchangeData::FileInfo> files;
   if (data.GetFilenames(&files) && !files.empty()) {
-    for (std::vector<FilePath>::const_iterator it = files.begin();
-        it != files.end(); ++it)
-      drop_data->filenames.push_back(UTF8ToUTF16(it->AsUTF8Unsafe()));
+    for (std::vector<ui::OSExchangeData::FileInfo>::const_iterator
+             it = files.begin(); it != files.end(); ++it) {
+      drop_data->filenames.push_back(
+          WebDropData::FileInfo(
+              UTF8ToUTF16(it->path.AsUTF8Unsafe()),
+              UTF8ToUTF16(it->display_name.AsUTF8Unsafe())));
+    }
   }
 
   Pickle pickle;
@@ -156,6 +186,19 @@ WebKit::WebDragOperationsMask ConvertToWeb(int drag_op) {
   return (WebKit::WebDragOperationsMask) web_drag_op;
 }
 
+int ConvertAuraEventFlagsToWebInputEventModifiers(int aura_event_flags) {
+  int web_input_event_modifiers = 0;
+  if (aura_event_flags & ui::EF_SHIFT_DOWN)
+    web_input_event_modifiers |= WebKit::WebInputEvent::ShiftKey;
+  if (aura_event_flags & ui::EF_CONTROL_DOWN)
+    web_input_event_modifiers |= WebKit::WebInputEvent::ControlKey;
+  if (aura_event_flags & ui::EF_ALT_DOWN)
+    web_input_event_modifiers |= WebKit::WebInputEvent::AltKey;
+  if (aura_event_flags & ui::EF_COMMAND_DOWN)
+    web_input_event_modifiers |= WebKit::WebInputEvent::MetaKey;
+  return web_input_event_modifiers;
+}
+
 }  // namespace
 
 
@@ -170,14 +213,18 @@ WebContentsViewAura::WebContentsViewAura(
       delegate_(delegate),
       current_drag_op_(WebKit::WebDragOperationNone),
       close_tab_after_drag_ends_(false),
-      drag_dest_delegate_(NULL) {
-}
-
-WebContentsViewAura::~WebContentsViewAura() {
+      drag_dest_delegate_(NULL),
+      current_rvh_for_drag_(NULL) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // WebContentsViewAura, private:
+
+WebContentsViewAura::~WebContentsViewAura() {
+  // Window needs a valid delegate during its destructor, so we explicitly
+  // delete it here.
+  window_.reset();
+}
 
 void WebContentsViewAura::SizeChangedCommon(const gfx::Size& size) {
   if (web_contents_->GetInterstitialPage())
@@ -210,9 +257,7 @@ void WebContentsViewAura::CreateView(const gfx::Size& initial_size) {
   window_->SetType(aura::client::WINDOW_TYPE_CONTROL);
   window_->SetTransparent(false);
   window_->Init(ui::LAYER_NOT_DRAWN);
-#if defined(USE_ASH)
   window_->SetParent(NULL);
-#endif
   window_->layer()->SetMasksToBounds(true);
   window_->SetName("WebContentsViewAura");
 
@@ -269,6 +314,10 @@ void WebContentsViewAura::SetPageTitle(const string16& title) {
 void WebContentsViewAura::OnTabCrashed(base::TerminationStatus status,
                                        int error_code) {
   view_ = NULL;
+  // Set the focus to the parent because neither the view window nor this
+  // window can handle key events.
+  if (window_->HasFocus() && window_->parent())
+    window_->parent()->Focus();
 }
 
 void WebContentsViewAura::SizeContents(const gfx::Size& size) {
@@ -280,7 +329,6 @@ void WebContentsViewAura::SizeContents(const gfx::Size& size) {
     // Our size matches what we want but the renderers size may not match.
     // Pretend we were resized so that the renderers size is updated too.
     SizeChangedCommon(size);
-
   }
 }
 
@@ -349,65 +397,15 @@ bool WebContentsViewAura::IsEventTracking() const {
 void WebContentsViewAura::CloseTabAfterEventTracking() {
 }
 
-void WebContentsViewAura::GetViewBounds(gfx::Rect* out) const {
-  *out = window_->GetBoundsInRootWindow();
+gfx::Rect WebContentsViewAura::GetViewBounds() const {
+  return window_->GetBoundsInRootWindow();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// WebContentsViewAura, RenderViewHostDelegate::View implementation:
-
-void WebContentsViewAura::CreateNewWindow(
-    int route_id,
-    const ViewHostMsg_CreateWindow_Params& params) {
-  web_contents_view_helper_.CreateNewWindow(web_contents_, route_id, params);
-}
-
-void WebContentsViewAura::CreateNewWidget(int route_id,
-                                          WebKit::WebPopupType popup_type) {
-  web_contents_view_helper_.CreateNewWidget(web_contents_,
-                                            route_id,
-                                            false,
-                                            popup_type);
-}
-
-void WebContentsViewAura::CreateNewFullscreenWidget(int route_id) {
-  web_contents_view_helper_.CreateNewWidget(web_contents_,
-                                            route_id,
-                                            true,
-                                            WebKit::WebPopupTypeNone);
-}
-
-void WebContentsViewAura::ShowCreatedWindow(int route_id,
-                                            WindowOpenDisposition disposition,
-                                            const gfx::Rect& initial_pos,
-                                            bool user_gesture) {
-  web_contents_view_helper_.ShowCreatedWindow(
-      web_contents_, route_id, disposition, initial_pos, user_gesture);
-}
-
-void WebContentsViewAura::ShowCreatedWidget(int route_id,
-                                            const gfx::Rect& initial_pos) {
-  web_contents_view_helper_.ShowCreatedWidget(web_contents_,
-                                              route_id,
-                                              false,
-                                              initial_pos);
-}
-
-void WebContentsViewAura::ShowCreatedFullscreenWidget(int route_id) {
-  web_contents_view_helper_.ShowCreatedWidget(web_contents_,
-                                              route_id,
-                                              true,
-                                              gfx::Rect());
-}
+// WebContentsViewAura, RenderViewHostDelegateView implementation:
 
 void WebContentsViewAura::ShowContextMenu(
     const content::ContextMenuParams& params) {
-  // Allow WebContentsDelegates to handle the context menu operation first.
-  if (web_contents_->GetDelegate() &&
-      web_contents_->GetDelegate()->HandleContextMenu(params)) {
-    return;
-  }
-
   if (delegate_.get())
     delegate_->ShowContextMenu(params);
 }
@@ -417,8 +415,9 @@ void WebContentsViewAura::ShowPopupMenu(const gfx::Rect& bounds,
                                         double item_font_size,
                                         int selected_item,
                                         const std::vector<WebMenuItem>& items,
-                                        bool right_aligned) {
-  // External popup menus are only used on Mac.
+                                        bool right_aligned,
+                                        bool allow_multiple_selection) {
+  // External popup menus are only used on Mac and Android.
   NOTIMPLEMENTED();
 }
 
@@ -491,7 +490,7 @@ void WebContentsViewAura::OnBoundsChanged(const gfx::Rect& old_bounds,
     delegate_->SizeChanged(new_bounds.size());
 }
 
-void WebContentsViewAura::OnFocus() {
+void WebContentsViewAura::OnFocus(aura::Window* old_focused_window) {
 }
 
 void WebContentsViewAura::OnBlur() {
@@ -507,6 +506,12 @@ gfx::NativeCursor WebContentsViewAura::GetCursor(const gfx::Point& point) {
 
 int WebContentsViewAura::GetNonClientComponent(const gfx::Point& point) const {
   return HTCLIENT;
+}
+
+bool WebContentsViewAura::ShouldDescendIntoChildForEventHandling(
+    aura::Window* child,
+    const gfx::Point& location) {
+  return true;
 }
 
 bool WebContentsViewAura::OnMouseEvent(aura::MouseEvent* event) {
@@ -537,13 +542,19 @@ ui::GestureStatus WebContentsViewAura::OnGestureEvent(
 }
 
 bool WebContentsViewAura::CanFocus() {
-  return true;
+  // Do not take the focus if |view_| is gone because neither the view window
+  // nor this window can handle key events.
+  return view_ != NULL;
 }
 
 void WebContentsViewAura::OnCaptureLost() {
 }
 
 void WebContentsViewAura::OnPaint(gfx::Canvas* canvas) {
+}
+
+void WebContentsViewAura::OnDeviceScaleFactorChanged(
+    float device_scale_factor) {
 }
 
 void WebContentsViewAura::OnWindowDestroying() {
@@ -558,6 +569,14 @@ void WebContentsViewAura::OnWindowVisibilityChanged(bool visible) {
   else
     web_contents_->HideContents();
 }
+
+bool WebContentsViewAura::HasHitTestMask() const {
+  return false;
+}
+
+void WebContentsViewAura::GetHitTestMask(gfx::Path* mask) const {
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // WebContentsViewAura, aura::client::DragDropDelegate implementation:
 
@@ -571,8 +590,10 @@ void WebContentsViewAura::OnDragEntered(const aura::DropTargetEvent& event) {
 
   gfx::Point screen_pt =
       GetNativeView()->GetRootWindow()->last_mouse_location();
+  current_rvh_for_drag_ = web_contents_->GetRenderViewHost();
   web_contents_->GetRenderViewHost()->DragTargetDragEnter(
-      drop_data, event.location(), screen_pt, op);
+      drop_data, event.location(), screen_pt, op,
+      ConvertAuraEventFlagsToWebInputEventModifiers(event.flags()));
 
   if (drag_dest_delegate_) {
     drag_dest_delegate_->OnReceiveDragData(event.data());
@@ -581,11 +602,16 @@ void WebContentsViewAura::OnDragEntered(const aura::DropTargetEvent& event) {
 }
 
 int WebContentsViewAura::OnDragUpdated(const aura::DropTargetEvent& event) {
+  DCHECK(current_rvh_for_drag_);
+  if (current_rvh_for_drag_ != web_contents_->GetRenderViewHost())
+    OnDragEntered(event);
+
   WebKit::WebDragOperationsMask op = ConvertToWeb(event.source_operations());
   gfx::Point screen_pt =
       GetNativeView()->GetRootWindow()->last_mouse_location();
   web_contents_->GetRenderViewHost()->DragTargetDragOver(
-      event.location(), screen_pt, op);
+      event.location(), screen_pt, op,
+      ConvertAuraEventFlagsToWebInputEventModifiers(event.flags()));
 
   if (drag_dest_delegate_)
     drag_dest_delegate_->OnDragOver();
@@ -594,15 +620,24 @@ int WebContentsViewAura::OnDragUpdated(const aura::DropTargetEvent& event) {
 }
 
 void WebContentsViewAura::OnDragExited() {
+  DCHECK(current_rvh_for_drag_);
+  if (current_rvh_for_drag_ != web_contents_->GetRenderViewHost())
+    return;
+
   web_contents_->GetRenderViewHost()->DragTargetDragLeave();
   if (drag_dest_delegate_)
     drag_dest_delegate_->OnDragLeave();
 }
 
 int WebContentsViewAura::OnPerformDrop(const aura::DropTargetEvent& event) {
+  DCHECK(current_rvh_for_drag_);
+  if (current_rvh_for_drag_ != web_contents_->GetRenderViewHost())
+    OnDragEntered(event);
+
   web_contents_->GetRenderViewHost()->DragTargetDrop(
       event.location(),
-      GetNativeView()->GetRootWindow()->last_mouse_location());
+      GetNativeView()->GetRootWindow()->last_mouse_location(),
+      ConvertAuraEventFlagsToWebInputEventModifiers(event.flags()));
   if (drag_dest_delegate_)
     drag_dest_delegate_->OnDrop();
   return current_drag_op_;

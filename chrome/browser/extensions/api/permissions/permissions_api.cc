@@ -75,7 +75,7 @@ bool RemovePermissionsFunction::RunImpl() {
   if (!permissions.get())
     return false;
 
-  const Extension* extension = GetExtension();
+  const extensions::Extension* extension = GetExtension();
   ExtensionPermissionsInfo* info = ExtensionPermissionsInfo::GetInstance();
 
   // Make sure they're only trying to remove permissions supported by this API.
@@ -203,7 +203,7 @@ bool RequestPermissionsFunction::RunImpl() {
     InstallUIAbort(true);
   } else {
     CHECK_EQ(DO_NOT_SKIP, auto_confirm_for_tests);
-    install_ui_.reset(new ExtensionInstallUI(profile()));
+    install_ui_.reset(new ExtensionInstallPrompt(GetCurrentBrowser()));
     install_ui_->ConfirmPermissions(
         this, GetExtension(), requested_permissions_.get());
   }

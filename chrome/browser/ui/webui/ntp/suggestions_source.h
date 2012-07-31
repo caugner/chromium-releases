@@ -6,6 +6,8 @@
 #define CHROME_BROWSER_UI_WEBUI_NTP_SUGGESTIONS_SOURCE_H_
 #pragma once
 
+#include "base/basictypes.h"
+
 class Profile;
 class SuggestionsCombiner;
 
@@ -24,6 +26,10 @@ class SuggestionsSource {
   SuggestionsSource() {}
 
   friend class SuggestionsCombiner;
+
+  // Enables or disables debug mode for the current source. The source is
+  // expected to provide additional data when debug mode is enabled.
+  virtual void SetDebug(bool enable) = 0;
 
   // The source's weight indicates how many items from this source will be
   // selected by the combiner. If a source weight is x and the total weight of

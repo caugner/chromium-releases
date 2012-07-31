@@ -17,12 +17,12 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
-#include "content/public/browser/render_view_host_delegate.h"
 #include "content/public/browser/site_instance.h"
 
 using content::ChildProcessSecurityPolicy;
 using content::RenderViewHost;
 using content::SiteInstance;
+using extensions::Extension;
 
 ChromeRenderViewHostObserver::ChromeRenderViewHostObserver(
     RenderViewHost* render_view_host, chrome_browser_net::Predictor* predictor)
@@ -42,12 +42,6 @@ ChromeRenderViewHostObserver::~ChromeRenderViewHostObserver() {
 
 void ChromeRenderViewHostObserver::RenderViewHostInitialized() {
   InitRenderViewForExtensions();
-
-  if (render_view_host()->GetDelegate()->GetRenderViewType() ==
-      content::VIEW_TYPE_INTERSTITIAL_PAGE) {
-    render_view_host()->Send(new ChromeViewMsg_SetAsInterstitial(
-        render_view_host()->GetRoutingID()));
-  }
 }
 
 void ChromeRenderViewHostObserver::RenderViewHostDestroyed(

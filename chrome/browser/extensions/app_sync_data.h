@@ -7,10 +7,9 @@
 #pragma once
 
 #include "chrome/browser/extensions/extension_sync_data.h"
-#include "chrome/browser/sync/api/sync_change.h"
 #include "chrome/common/string_ordinal.h"
+#include "sync/api/sync_change.h"
 
-class Extension;
 class SyncData;
 namespace sync_pb {
 class AppSpecifics;
@@ -18,6 +17,7 @@ class AppSpecifics;
 
 namespace extensions {
 
+class Extension;
 class ExtensionSyncData;
 
 // A class that encapsulates the synced properties of an Application.

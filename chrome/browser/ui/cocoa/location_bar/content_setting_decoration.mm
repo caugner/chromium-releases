@@ -14,10 +14,11 @@
 #include "chrome/browser/ui/browser_content_setting_bubble_model_delegate.h"
 #include "chrome/browser/ui/browser_list.h"
 #import "chrome/browser/ui/cocoa/content_settings/content_setting_bubble_cocoa.h"
+#include "chrome/browser/ui/cocoa/last_active_browser_cocoa.h"
 #import "chrome/browser/ui/cocoa/location_bar/location_bar_view_mac.h"
 #include "chrome/browser/ui/content_settings/content_setting_bubble_model.h"
 #include "chrome/browser/ui/content_settings/content_setting_image_model.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/web_contents.h"
 #include "net/base/net_util.h"
@@ -196,8 +197,7 @@ bool ContentSettingDecoration::UpdateFromWebContents(
 
     // Check if the animation has already run.
     TabSpecificContentSettings* content_settings =
-        TabContentsWrapper::GetCurrentWrapperForContents(web_contents)->
-            content_settings();
+        TabContents::FromWebContents(web_contents)->content_settings();
     ContentSettingsType content_type =
         content_setting_image_model_->get_content_settings_type();
     bool ran_animation = content_settings->IsBlockageIndicated(content_type);
@@ -261,8 +261,8 @@ bool ContentSettingDecoration::AcceptsMousePress() {
 
 bool ContentSettingDecoration::OnMousePressed(NSRect frame) {
   // Get host. This should be shared on linux/win/osx medium-term.
-  Browser* browser = BrowserList::GetLastActive();
-  TabContentsWrapper* tabContents = browser->GetSelectedTabContentsWrapper();
+  Browser* browser = browser::GetLastActiveBrowser();
+  TabContents* tabContents = browser->GetActiveTabContents();
   if (!tabContents)
     return true;
 

@@ -17,7 +17,9 @@ class CompositorTestPlatformSupport:
     return string16();
   }
 
-  virtual base::StringPiece GetDataResource(int resource_id) OVERRIDE {
+  virtual base::StringPiece GetDataResource(
+      int resource_id,
+      ui::ScaleFactor scale_factor) OVERRIDE {
     return base::StringPiece();
   }
 

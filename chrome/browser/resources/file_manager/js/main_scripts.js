@@ -12,9 +12,9 @@
 // //so we want to parse it as early as possible.
 //<include src="metrics.js"/>
 //
-//<include src="../../shared/js/local_strings.js"/>
+//<include src="../../shared/js/load_time_data.js"/>
 //<include src="../../shared/js/util.js"/>
-//<include src="../../shared/js/i18n_template.js"/>
+//<include src="../../shared/js/i18n_template_no_process.js"/>
 //
 //<include src="../../shared/js/cr.js"/>
 //<include src="../../shared/js/event_tracker.js"/>
@@ -46,18 +46,19 @@
 //<include src="../../shared/js/cr/ui/menu.js"/>
 //<include src="../../shared/js/cr/ui/menu_button.js"/>
 //<include src="../../shared/js/cr/ui/context_menu_handler.js"/>
-//
 //<include src="combobutton.js"/>
 //
 //<include src="util.js"/>
+//<include src="volume_manager.js"/>
 //<include src="directory_model.js"/>
 //<include src="file_copy_manager.js"/>
 //<include src="file_manager.js"/>
 //<include src="file_manager_pyauto.js"/>
 //<include src="file_type.js"/>
 //<include src="file_transfer_controller.js"/>
-//<include src="metadata/metadata_provider.js"/>
+//<include src="media/media_util.js"/>
 //<include src="metadata/metadata_cache.js"/>
+//<include src="default_action_dialog.js"/>
 // // For accurate load performance tracking place main.js should be
 // // the last include to include.
 //<include src="main.js"/>

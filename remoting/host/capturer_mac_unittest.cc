@@ -11,9 +11,20 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/memory/scoped_ptr.h"
+#include "remoting/base/capture_data.h"
+#include "remoting/proto/control.pb.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace remoting {
+
+// Verify that the OS is at least Snow Leopard (10.6).
+// Chromoting doesn't support 10.5 or earlier.
+bool CheckSnowLeopard() {
+  long minorVersion, majorVersion;
+  Gestalt(gestaltSystemVersionMajor, &majorVersion);
+  Gestalt(gestaltSystemVersionMinor, &minorVersion);
+  return majorVersion == 10 && minorVersion > 5;
+}
 
 class CapturerMacTest : public testing::Test {
  protected:
@@ -85,9 +96,29 @@ void CapturerCallback2::CaptureDoneCallback(
   EXPECT_EQ(0, planes.strides[2]);
 }
 
+class CursorCallback {
+ public:
+  CursorCallback() { }
+  void CursorShapeChangedCallback(
+      scoped_ptr<protocol::CursorShapeInfo> cursor_data);
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(CursorCallback);
+};
+
+void CursorCallback::CursorShapeChangedCallback(
+    scoped_ptr<protocol::CursorShapeInfo> cursor_data) {
+}
+
 TEST_F(CapturerMacTest, Capture) {
+  if (!CheckSnowLeopard()) {
+    return;
+  }
+
   SCOPED_TRACE("");
-  capturer_->Start();
+  CursorCallback cursor_callback;
+  capturer_->Start(base::Bind(&CursorCallback::CursorShapeChangedCallback,
+                              base::Unretained(&cursor_callback)));
   // Check that we get an initial full-screen updated.
   CapturerCallback1 callback1;
   capturer_->CaptureInvalidRegion(base::Bind(

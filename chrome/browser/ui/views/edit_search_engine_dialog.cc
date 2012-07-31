@@ -11,7 +11,7 @@
 #include "chrome/browser/ui/search_engines/edit_search_engine_controller.h"
 #include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
-#include "grit/theme_resources.h"
+#include "grit/theme_resources_standard.h"
 #include "grit/ui_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -251,9 +251,9 @@ void EditSearchEngineDialog::UpdateImageView(ImageView* image_view,
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   if (is_valid) {
     image_view->SetTooltipText(string16());
-    image_view->SetImage(rb.GetBitmapNamed(IDR_INPUT_GOOD));
+    image_view->SetImage(rb.GetImageSkiaNamed(IDR_INPUT_GOOD));
   } else {
     image_view->SetTooltipText(l10n_util::GetStringUTF16(invalid_message_id));
-    image_view->SetImage(rb.GetBitmapNamed(IDR_INPUT_ALERT));
+    image_view->SetImage(rb.GetImageSkiaNamed(IDR_INPUT_ALERT));
   }
 }

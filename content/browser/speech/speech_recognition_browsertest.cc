@@ -14,9 +14,9 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/speech/input_tag_speech_dispatcher_host.h"
-#include "content/browser/speech/speech_recognition_manager_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/speech_recognition_manager.h"
 #include "content/public/browser/speech_recognition_session_config.h"
 #include "content/public/browser/speech_recognition_session_context.h"
 #include "content/public/common/content_switches.h"
@@ -25,6 +25,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 
 using content::SpeechRecognitionEventListener;
+using content::SpeechRecognitionSessionConfig;
 using content::SpeechRecognitionSessionContext;
 using content::NavigationController;
 using content::WebContents;
@@ -37,7 +38,7 @@ namespace speech {
 
 const char kTestResult[] = "Pictures of the moon";
 
-class FakeSpeechRecognitionManager : public SpeechRecognitionManagerImpl {
+class FakeSpeechRecognitionManager : public content::SpeechRecognitionManager {
  public:
   FakeSpeechRecognitionManager()
       : session_id_(0),
@@ -69,14 +70,15 @@ class FakeSpeechRecognitionManager : public SpeechRecognitionManagerImpl {
 
   // SpeechRecognitionManager methods.
   virtual int CreateSession(
-      const content::SpeechRecognitionSessionConfig& config,
-      SpeechRecognitionEventListener* event_listener) OVERRIDE {
+      const content::SpeechRecognitionSessionConfig& config) OVERRIDE {
     VLOG(1) << "FAKE CreateSession invoked.";
     EXPECT_EQ(0, session_id_);
     EXPECT_EQ(NULL, listener_);
-    listener_ = event_listener;
-    grammar_ = config.grammar;
+    listener_ = config.event_listener;
+    if (config.grammars.size() > 0)
+      grammar_ = config.grammars[0].url;
     session_ctx_ = config.initial_context;
+    session_config_ = config;
     session_id_ = 1;
     return session_id_;
   }
@@ -123,18 +125,23 @@ class FakeSpeechRecognitionManager : public SpeechRecognitionManagerImpl {
     did_cancel_all_ = true;
   }
 
-  virtual void SendSessionToBackground(int session_id) OVERRIDE {}
   virtual bool HasAudioInputDevices() OVERRIDE { return true; }
   virtual bool IsCapturingAudio() OVERRIDE { return true; }
   virtual string16 GetAudioInputDeviceModel() OVERRIDE { return string16(); }
   virtual void ShowAudioInputSettings() OVERRIDE {}
 
-  virtual int LookupSessionByContext(
-      base::Callback<bool(
-          const content::SpeechRecognitionSessionContext&)> matcher)
-            const OVERRIDE {
-    bool matched = matcher.Run(session_ctx_);
-    return matched ? session_id_ : 0;
+  virtual int GetSession(int render_process_id,
+                         int render_view_id,
+                         int request_id) const OVERRIDE {
+    return session_ctx_.render_process_id == render_process_id &&
+           session_ctx_.render_view_id == render_view_id &&
+           session_ctx_.request_id == request_id;
+  }
+
+  virtual const SpeechRecognitionSessionConfig& GetSessionConfig(
+      int session_id) const OVERRIDE {
+    EXPECT_EQ(session_id, session_id_);
+    return session_config_;
   }
 
   virtual content::SpeechRecognitionSessionContext GetSessionContext(
@@ -161,6 +168,7 @@ class FakeSpeechRecognitionManager : public SpeechRecognitionManagerImpl {
 
   int session_id_;
   SpeechRecognitionEventListener* listener_;
+  SpeechRecognitionSessionConfig session_config_;
   SpeechRecognitionSessionContext session_ctx_;
   std::string grammar_;
   bool did_cancel_all_;
@@ -194,7 +202,7 @@ class SpeechRecognitionBrowserTest : public InProcessBrowserTest {
     mouse_event.x = 0;
     mouse_event.y = 0;
     mouse_event.clickCount = 1;
-    WebContents* web_contents = browser()->GetSelectedWebContents();
+    WebContents* web_contents = browser()->GetActiveWebContents();
 
     ui_test_utils::WindowedNotificationObserver observer(
         content::NOTIFICATION_LOAD_STOP,
@@ -217,7 +225,7 @@ class SpeechRecognitionBrowserTest : public InProcessBrowserTest {
     // then sets the URL fragment as 'pass' if it received the expected string.
     LoadAndStartSpeechRecognitionTest(filename);
 
-    EXPECT_EQ("pass", browser()->GetSelectedWebContents()->GetURL().ref());
+    EXPECT_EQ("pass", browser()->GetActiveWebContents()->GetURL().ref());
   }
 
   // InProcessBrowserTest methods.
@@ -227,7 +235,8 @@ class SpeechRecognitionBrowserTest : public InProcessBrowserTest {
 
     // Inject the fake manager factory so that the test result is returned to
     // the web page.
-    InputTagSpeechDispatcherHost::set_manager(speech_recognition_manager_);
+    InputTagSpeechDispatcherHost::SetManagerForTests(
+        speech_recognition_manager_);
   }
 
   virtual void TearDownInProcessBrowserTestFixture() {
@@ -238,10 +247,10 @@ class SpeechRecognitionBrowserTest : public InProcessBrowserTest {
 
   // This is used by the static |fakeManager|, and it is a pointer rather than a
   // direct instance per the style guide.
-  static SpeechRecognitionManagerImpl* speech_recognition_manager_;
+  static content::SpeechRecognitionManager* speech_recognition_manager_;
 };
 
-SpeechRecognitionManagerImpl*
+content::SpeechRecognitionManager*
     SpeechRecognitionBrowserTest::speech_recognition_manager_ = NULL;
 
 // TODO(satish): Once this flakiness has been fixed, add a second test here to

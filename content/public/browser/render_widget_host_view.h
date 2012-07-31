@@ -6,15 +6,16 @@
 #define CONTENT_PUBLIC_BROWSER_RENDER_WIDGET_HOST_VIEW_H_
 #pragma once
 
-#if defined(TOOLKIT_GTK)
-#include <gdk/gdk.h>
-#endif
-
+#include "base/basictypes.h"
 #include "content/common/content_export.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkRegion.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 #include "ui/gfx/native_widget_types.h"
+
+#if defined(TOOLKIT_GTK)
+#include <gdk/gdk.h>
+#endif
 
 class BrowserAccessibilityManager;
 
@@ -82,6 +83,8 @@ class CONTENT_EXPORT RenderWidgetHostView {
   virtual void Focus() = 0;
   // Returns true if the View currently has the focus.
   virtual bool HasFocus() const = 0;
+  // Returns true is the current display surface is available.
+  virtual bool IsSurfaceAvailableForCopy() const = 0;
 
   // Shows/hides the view.  These must always be called together in pairs.
   // It is not legal to call Hide() multiple times in a row.

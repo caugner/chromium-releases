@@ -21,6 +21,7 @@
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
+#include "content/public/browser/web_contents.h"
 #include "content/public/common/file_chooser_params.h"
 #include "content/public/common/selected_file_info.h"
 #include "grit/generated_resources.h"
@@ -28,6 +29,7 @@
 #include "ui/base/l10n/l10n_util.h"
 
 using content::BrowserThread;
+using content::FileChooserParams;
 using content::RenderViewHost;
 using content::RenderWidgetHost;
 using content::WebContents;
@@ -247,30 +249,31 @@ SelectFileDialog::FileTypeInfo* FileSelectHelper::GetFileTypesFromAcceptType(
   file_type->extensions.resize(1);
   std::vector<FilePath::StringType>* extensions = &file_type->extensions.back();
 
-  // Find the correspondinge extensions.
+  // Find the corresponding extensions.
   int valid_type_count = 0;
   int description_id = 0;
   for (size_t i = 0; i < accept_types.size(); ++i) {
-    std::string ascii_mime_type = UTF16ToASCII(accept_types[i]);
-    // WebKit normalizes MIME types.  See HTMLInputElement::acceptMIMETypes().
-    DCHECK(StringToLowerASCII(ascii_mime_type) == ascii_mime_type)
-        << "A MIME type contains uppercase letter: " << ascii_mime_type;
-    DCHECK(TrimWhitespaceASCII(ascii_mime_type, TRIM_ALL, &ascii_mime_type)
-        == TRIM_NONE)
-        << "A MIME type contains whitespace: '" << ascii_mime_type << "'";
+    std::string ascii_type = UTF16ToASCII(accept_types[i]);
+    if (!IsAcceptTypeValid(ascii_type))
+      continue;
 
     size_t old_extension_size = extensions->size();
-    if (ascii_mime_type == "image/*") {
+    if (ascii_type[0] == '.') {
+      // If the type starts with a period it is assumed to be a file extension
+      // so we just have to add it to the list.
+      FilePath::StringType ext(ascii_type.begin(), ascii_type.end());
+      extensions->push_back(ext.substr(1));
+    } else if (ascii_type == "image/*") {
       description_id = IDS_IMAGE_FILES;
       net::GetImageExtensions(extensions);
-    } else if (ascii_mime_type == "audio/*") {
+    } else if (ascii_type == "audio/*") {
       description_id = IDS_AUDIO_FILES;
       net::GetAudioExtensions(extensions);
-    } else if (ascii_mime_type == "video/*") {
+    } else if (ascii_type == "video/*") {
       description_id = IDS_VIDEO_FILES;
       net::GetVideoExtensions(extensions);
     } else {
-      net::GetExtensionsForMimeType(ascii_mime_type, extensions);
+      net::GetExtensionsForMimeType(ascii_type, extensions);
     }
 
     if (extensions->size() > old_extension_size)
@@ -300,10 +303,31 @@ SelectFileDialog::FileTypeInfo* FileSelectHelper::GetFileTypesFromAcceptType(
   return file_type.release();
 }
 
-void FileSelectHelper::RunFileChooser(
-    RenderViewHost* render_view_host,
-    content::WebContents* web_contents,
-    const content::FileChooserParams& params) {
+// static
+void FileSelectHelper::RunFileChooser(content::WebContents* tab,
+                                      const FileChooserParams& params) {
+  Profile* profile = Profile::FromBrowserContext(tab->GetBrowserContext());
+  // FileSelectHelper will keep itself alive until it sends the result message.
+  scoped_refptr<FileSelectHelper> file_select_helper(
+      new FileSelectHelper(profile));
+  file_select_helper->RunFileChooser(tab->GetRenderViewHost(), tab, params);
+}
+
+// static
+void FileSelectHelper::EnumerateDirectory(content::WebContents* tab,
+                                          int request_id,
+                                          const FilePath& path) {
+  Profile* profile = Profile::FromBrowserContext(tab->GetBrowserContext());
+  // FileSelectHelper will keep itself alive until it sends the result message.
+  scoped_refptr<FileSelectHelper> file_select_helper(
+      new FileSelectHelper(profile));
+  file_select_helper->EnumerateDirectory(
+      request_id, tab->GetRenderViewHost(), path);
+}
+
+void FileSelectHelper::RunFileChooser(RenderViewHost* render_view_host,
+                                      content::WebContents* web_contents,
+                                      const FileChooserParams& params) {
   DCHECK(!render_view_host_);
   DCHECK(!web_contents_);
   render_view_host_ = render_view_host;
@@ -329,7 +353,7 @@ void FileSelectHelper::RunFileChooser(
 }
 
 void FileSelectHelper::RunFileChooserOnFileThread(
-    const content::FileChooserParams& params) {
+    const FileChooserParams& params) {
   select_file_types_.reset(
       GetFileTypesFromAcceptType(params.accept_types));
 
@@ -339,7 +363,7 @@ void FileSelectHelper::RunFileChooserOnFileThread(
 }
 
 void FileSelectHelper::RunFileChooserOnUIThread(
-    const content::FileChooserParams& params) {
+    const FileChooserParams& params) {
   if (!render_view_host_ || !web_contents_) {
     // If the renderer was destroyed before we started, just cancel the
     // operation.
@@ -351,16 +375,16 @@ void FileSelectHelper::RunFileChooserOnUIThread(
     select_file_dialog_ = SelectFileDialog::Create(this);
 
   switch (params.mode) {
-    case content::FileChooserParams::Open:
+    case FileChooserParams::Open:
       dialog_type_ = SelectFileDialog::SELECT_OPEN_FILE;
       break;
-    case content::FileChooserParams::OpenMultiple:
+    case FileChooserParams::OpenMultiple:
       dialog_type_ = SelectFileDialog::SELECT_OPEN_MULTI_FILE;
       break;
-    case content::FileChooserParams::OpenFolder:
+    case FileChooserParams::OpenFolder:
       dialog_type_ = SelectFileDialog::SELECT_FOLDER;
       break;
-    case content::FileChooserParams::Save:
+    case FileChooserParams::Save:
       dialog_type_ = SelectFileDialog::SELECT_SAVEAS_FILE;
       break;
     default:
@@ -383,7 +407,11 @@ void FileSelectHelper::RunFileChooserOnUIThread(
       FILE_PATH_LITERAL(""),
       web_contents_,
       owning_window,
+#if defined(OS_ANDROID)
+      const_cast<content::FileChooserParams*>(&params);
+#else
       NULL);
+#endif
 
   select_file_types_.reset();
 }
@@ -400,7 +428,6 @@ void FileSelectHelper::RunFileChooserEnd() {
 void FileSelectHelper::EnumerateDirectory(int request_id,
                                           RenderViewHost* render_view_host,
                                           const FilePath& path) {
-  DCHECK_NE(kFileSelectEnumerationId, request_id);
 
   // Because this class returns notifications to the RenderViewHost, it is
   // difficult for callers to know how long to keep a reference to this
@@ -438,4 +465,18 @@ void FileSelectHelper::Observe(int type,
     default:
       NOTREACHED();
   }
+}
+
+// static
+bool FileSelectHelper::IsAcceptTypeValid(const std::string& accept_type) {
+  // TODO(raymes): This only does some basic checks, extend to test more cases.
+  // A 1 character accept type will always be invalid (either a "." in the case
+  // of an extension or a "/" in the case of a MIME type).
+  std::string unused;
+  if (accept_type.length() <= 1 ||
+      StringToLowerASCII(accept_type) != accept_type ||
+      TrimWhitespaceASCII(accept_type, TRIM_ALL, &unused) != TRIM_NONE) {
+    return false;
+  }
+  return true;
 }

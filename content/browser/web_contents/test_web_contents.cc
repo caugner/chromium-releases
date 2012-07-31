@@ -16,7 +16,7 @@
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/common/page_transition_types.h"
-#include "content/test/mock_render_process_host.h"
+#include "content/public/test/mock_render_process_host.h"
 #include "webkit/forms/password_form.h"
 #include "webkit/glue/webkit_glue.h"
 
@@ -82,7 +82,7 @@ void TestWebContents::TestDidNavigateWithReferrer(
   DidNavigate(render_view_host, params);
 }
 
-WebPreferences TestWebContents::TestGetWebkitPrefs() {
+webkit_glue::WebPreferences TestWebContents::TestGetWebkitPrefs() {
   return GetWebkitPrefs();
 }
 
@@ -90,7 +90,11 @@ bool TestWebContents::CreateRenderViewForRenderManager(
     RenderViewHost* render_view_host, int opener_route_id) {
   // This will go to a TestRenderViewHost.
   static_cast<RenderViewHostImpl*>(
-      render_view_host)->CreateRenderView(string16(), opener_route_id, -1);
+      render_view_host)->CreateRenderView(string16(),
+                                          opener_route_id,
+                                          -1,
+                                          std::string(),
+                                          -1);
   return true;
 }
 
@@ -113,6 +117,10 @@ void TestWebContents::NavigateAndCommit(const GURL& url) {
   // LoadURL created a navigation entry, now simulate the RenderView sending
   // a notification that it actually navigated.
   CommitPendingNavigation();
+}
+
+void TestWebContents::TestSetIsLoading(bool value) {
+  SetIsLoading(value, NULL);
 }
 
 void TestWebContents::CommitPendingNavigation() {
@@ -154,10 +162,10 @@ void TestWebContents::ProceedWithCrossSiteNavigation() {
   rvh->SendShouldCloseACK(true);
 }
 
-RenderViewHostDelegate::View* TestWebContents::GetViewDelegate() {
+RenderViewHostDelegateView* TestWebContents::GetDelegateView() {
   if (delegate_view_override_)
     return delegate_view_override_;
-  return WebContentsImpl::GetViewDelegate();
+  return WebContentsImpl::GetDelegateView();
 }
 
 void TestWebContents::SetOpener(TestWebContents* opener) {
@@ -188,6 +196,32 @@ void TestWebContents::SetHistoryLengthAndPrune(
   EXPECT_EQ(expect_set_history_length_and_prune_history_length_,
             history_length);
   EXPECT_EQ(expect_set_history_length_and_prune_min_page_id_, min_page_id);
+}
+
+void TestWebContents::CreateNewWindow(
+    int route_id,
+    const ViewHostMsg_CreateWindow_Params& params,
+    SessionStorageNamespace* session_storage_namespace) {
+}
+
+void TestWebContents::CreateNewWidget(int route_id,
+                                      WebKit::WebPopupType popup_type) {
+}
+
+void TestWebContents::CreateNewFullscreenWidget(int route_id) {
+}
+
+void TestWebContents::ShowCreatedWindow(int route_id,
+                                        WindowOpenDisposition disposition,
+                                        const gfx::Rect& initial_pos,
+                                        bool user_gesture) {
+}
+
+void TestWebContents::ShowCreatedWidget(int route_id,
+                                        const gfx::Rect& initial_pos) {
+}
+
+void TestWebContents::ShowCreatedFullscreenWidget(int route_id) {
 }
 
 }  // namespace content

@@ -14,7 +14,6 @@
 #include "base/stl_util.h"
 #include "base/utf_string_conversions.h"
 #include "build/build_config.h"
-#include "content/common/pepper_file_messages.h"
 #include "content/common/swapped_out_messages.h"
 #include "content/common/view_messages.h"
 #include "content/public/common/content_switches.h"
@@ -34,11 +33,10 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebSize.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 #include "third_party/skia/include/core/SkShader.h"
-#include "third_party/skia/include/effects/SkTableColorFilter.h"
-#include "ui/gfx/gl/gl_switches.h"
 #include "ui/gfx/point.h"
 #include "ui/gfx/size.h"
 #include "ui/gfx/skia_util.h"
+#include "ui/gl/gl_switches.h"
 #include "ui/surface/transport_dib.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/plugins/npapi/webplugin.h"
@@ -72,25 +70,7 @@ using WebKit::WebVector;
 using WebKit::WebWidget;
 using content::RenderThread;
 
-namespace {
-
-bool CanSendMessageWhileClosing(const IPC::Message* msg) {
-  // We filter out most IPC messages when closing. However, some are
-  // important for allowing pepper plugins to update their unsaved state
-  // when the renderer removes them.
-  switch (msg->type()) {
-    case PepperFileMsg_OpenFile::ID:
-    case PepperFileMsg_RenameFile::ID:
-    case PepperFileMsg_DeleteFileOrDir::ID:
-    case PepperFileMsg_CreateDir::ID:
-      return true;
-    default:
-      break;
-  }
-  return false;
-}
-
-}  // namespace
+static const int kStandardDPI = 160;
 
 RenderWidget::RenderWidget(WebKit::WebPopupType popup_type,
                            const WebKit::WebScreenInfo& screen_info,
@@ -126,12 +106,15 @@ RenderWidget::RenderWidget(WebKit::WebPopupType popup_type,
       animation_update_pending_(false),
       invalidation_task_posted_(false),
       screen_info_(screen_info),
-      invert_(false) {
+      device_scale_factor_(1) {
   if (!swapped_out)
     RenderProcess::current()->AddRefProcess();
   DCHECK(RenderThread::Get());
   has_disable_gpu_vsync_switch_ = CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kDisableGpuVsync);
+#if defined(OS_CHROMEOS) || defined(OS_MACOSX)
+  device_scale_factor_ = std::max(1, screen_info.verticalDPI / kStandardDPI);
+#endif
 }
 
 RenderWidget::~RenderWidget() {
@@ -252,9 +235,10 @@ bool RenderWidget::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(ViewMsg_ImeConfirmComposition, OnImeConfirmComposition)
     IPC_MESSAGE_HANDLER(ViewMsg_PaintAtSize, OnMsgPaintAtSize)
     IPC_MESSAGE_HANDLER(ViewMsg_Repaint, OnMsgRepaint)
+    IPC_MESSAGE_HANDLER(ViewMsg_SetDeviceScaleFactor, OnSetDeviceScaleFactor)
     IPC_MESSAGE_HANDLER(ViewMsg_SetTextDirection, OnSetTextDirection)
     IPC_MESSAGE_HANDLER(ViewMsg_Move_ACK, OnRequestMoveAck)
-    IPC_MESSAGE_HANDLER(ViewMsg_InvertWebContent, OnInvertWebContent)
+    IPC_MESSAGE_HANDLER(ViewMsg_ScreenInfoChanged, OnScreenInfoChanged)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
@@ -265,7 +249,7 @@ bool RenderWidget::Send(IPC::Message* message) {
   // most outgoing messages while swapped out.
   if ((is_swapped_out_ &&
        !content::SwappedOutMessages::CanSendWhileSwappedOut(message)) ||
-      (closing_ && !CanSendMessageWhileClosing(message))) {
+      closing_) {
     delete message;
     return false;
   }
@@ -452,7 +436,9 @@ void RenderWidget::OnUpdateRectAck() {
   }
 
   // Notify subclasses that software rendering was flushed to the screen.
-  DidFlushPaint();
+  if (!is_accelerated_compositing_active_) {
+    DidFlushPaint();
+  }
 
   // Continue painting if necessary...
   DoDeferredUpdateAndSendInputAck();
@@ -498,7 +484,7 @@ void RenderWidget::OnSwapBuffersPosted() {
 void RenderWidget::OnSwapBuffersComplete() {
   TRACE_EVENT0("renderer", "RenderWidget::OnSwapBuffersComplete");
 
-  // Notify subclasses that composited rendering got flushed to the screen.
+  // Notify subclasses that composited rendering was flushed to the screen.
   DidFlushPaint();
 
   // When compositing deactivates, we reset the swapbuffers pending count.  The
@@ -644,15 +630,6 @@ void RenderWidget::PaintRect(const gfx::Rect& rect,
   canvas->translate(static_cast<SkScalar>(-canvas_origin.x()),
                     static_cast<SkScalar>(-canvas_origin.y()));
 
-  if (invert_) {
-    // Draw everything to a temporary bitmap and then apply an
-    // inverting color map to the result. This is balanced by an extra
-    // call to canvas->restore(), below.
-    DCHECK(invert_paint_.get());
-    SkRect bounds(gfx::RectToSkRect(rect));
-    canvas->saveLayer(&bounds, invert_paint_.get());
-  }
-
   // If there is a custom background, tile it.
   if (!background_.empty()) {
     SkPaint paint;
@@ -709,9 +686,6 @@ void RenderWidget::PaintRect(const gfx::Rect& rect,
     // Flush to underlying bitmap.  TODO(darin): is this needed?
     skia::GetTopDevice(*canvas)->accessBitmap(false);
   }
-
-  if (invert_)
-    canvas->restore();
 
   PaintDebugBorder(rect, canvas);
   canvas->restore();
@@ -938,6 +912,7 @@ void RenderWidget::DoDeferredUpdate() {
   pending_update_params_->flags = next_paint_flags_;
   pending_update_params_->scroll_offset = GetScrollOffset();
   pending_update_params_->needs_ack = true;
+  pending_update_params_->scale_factor = device_scale_factor_;
   next_paint_flags_ = 0;
   need_update_rect_for_auto_resize_ = false;
 
@@ -952,9 +927,10 @@ void RenderWidget::DoDeferredUpdate() {
     pending_update_params_->copy_rects.push_back(optimized_copy_rect);
   } else if (!is_accelerated_compositing_active_) {
     // Compute a buffer for painting and cache it.
+    gfx::Rect pixel_bounds = bounds.Scale(device_scale_factor_);
     scoped_ptr<skia::PlatformCanvas> canvas(
         RenderProcess::current()->GetDrawingCanvas(&current_paint_buf_,
-                                                   bounds));
+                                                   pixel_bounds));
     if (!canvas.get()) {
       NOTREACHED();
       return;
@@ -962,10 +938,12 @@ void RenderWidget::DoDeferredUpdate() {
 
     // We may get back a smaller canvas than we asked for.
     // TODO(darin): This seems like it could cause painting problems!
-    DCHECK_EQ(bounds.width(), canvas->getDevice()->width());
-    DCHECK_EQ(bounds.height(), canvas->getDevice()->height());
-    bounds.set_width(canvas->getDevice()->width());
-    bounds.set_height(canvas->getDevice()->height());
+    DCHECK_EQ(pixel_bounds.width(), canvas->getDevice()->width());
+    DCHECK_EQ(pixel_bounds.height(), canvas->getDevice()->height());
+    pixel_bounds.set_width(canvas->getDevice()->width());
+    pixel_bounds.set_height(canvas->getDevice()->height());
+    bounds.set_width(pixel_bounds.width() / device_scale_factor_);
+    bounds.set_height(pixel_bounds.height() / device_scale_factor_);
 
     HISTOGRAM_COUNTS_100("MPArch.RW_PaintRectCount", update.paint_rects.size());
 
@@ -979,7 +957,7 @@ void RenderWidget::DoDeferredUpdate() {
       copy_rects.push_back(scroll_damage);
 
     for (size_t i = 0; i < copy_rects.size(); ++i)
-      PaintRect(copy_rects[i], bounds.origin(), canvas.get());
+      PaintRect(copy_rects[i], pixel_bounds.origin(), canvas.get());
 
     // Software FPS tick for performance tests. The accelerated path traces the
     // frame events in didCommitAndDrawCompositorFrame. See throughput_tests.cc.
@@ -1170,6 +1148,9 @@ void RenderWidget::didCommitAndDrawCompositorFrame() {
 }
 
 void RenderWidget::didCompleteSwapBuffers() {
+  TRACE_EVENT0("renderer", "RenderWidget::didCompleteSwapBuffers");
+
+  // Notify subclasses threaded composited rendering was flushed to the screen.
   DidFlushPaint();
 
   if (update_reply_pending_)
@@ -1187,6 +1168,7 @@ void RenderWidget::didCompleteSwapBuffers() {
   params.flags = next_paint_flags_;
   params.scroll_offset = GetScrollOffset();
   params.needs_ack = false;
+  params.scale_factor = device_scale_factor_;
 
   Send(new ViewHostMsg_UpdateRect(routing_id_, params));
   next_paint_flags_ = 0;
@@ -1345,6 +1327,17 @@ void RenderWidget::OnSetInputMethodActive(bool is_active) {
   input_method_is_active_ = is_active;
 }
 
+void RenderWidget::UpdateCompositionInfo(
+    const ui::Range& range,
+    const std::vector<gfx::Rect>& character_bounds) {
+  if (!ShouldUpdateCompositionInfo(range, character_bounds))
+    return;
+  composition_character_bounds_ = character_bounds;
+  composition_range_ = range;
+  Send(new ViewHostMsg_ImeCompositionRangeChanged(
+      routing_id(), composition_range_, composition_character_bounds_));
+}
+
 void RenderWidget::OnImeSetComposition(
     const string16& text,
     const std::vector<WebCompositionUnderline>& underlines,
@@ -1367,7 +1360,9 @@ void RenderWidget::OnImeSetComposition(
       range.set_start(location);
       range.set_end(location + length);
     }
-    Send(new ViewHostMsg_ImeCompositionRangeChanged(routing_id(), range));
+    std::vector<gfx::Rect> character_bounds;
+    GetCompositionCharacterBounds(&character_bounds);
+    UpdateCompositionInfo(range, character_bounds);
   } else {
     // If we failed to set the composition text, then we need to let the browser
     // process to cancel the input method's ongoing composition session, to make
@@ -1381,7 +1376,7 @@ void RenderWidget::OnImeSetComposition(
       range.set_start(location);
       range.set_end(location + length);
     }
-    Send(new ViewHostMsg_ImeCompositionRangeChanged(routing_id(), range));
+    UpdateCompositionInfo(range, std::vector<gfx::Rect>());
   }
 }
 
@@ -1401,7 +1396,7 @@ void RenderWidget::OnImeConfirmComposition(
     range.set_start(location);
     range.set_end(location + length);
   }
-  Send(new ViewHostMsg_ImeCompositionRangeChanged(routing_id(), range));
+  UpdateCompositionInfo(range, std::vector<gfx::Rect>());
 }
 
 // This message causes the renderer to render an image of the
@@ -1495,41 +1490,28 @@ void RenderWidget::OnMsgRepaint(const gfx::Size& size_to_paint) {
   }
 }
 
+void RenderWidget::OnSetDeviceScaleFactor(float device_scale_factor) {
+  if (device_scale_factor_ == device_scale_factor)
+    return;
+
+  device_scale_factor_ = device_scale_factor;
+
+  if (!is_accelerated_compositing_active_) {
+    didInvalidateRect(gfx::Rect(size_.width(), size_.height()));
+  } else {
+    scheduleComposite();
+  }
+}
+
 void RenderWidget::OnSetTextDirection(WebTextDirection direction) {
   if (!webwidget_)
     return;
   webwidget_->setTextDirection(direction);
 }
 
-void RenderWidget::OnInvertWebContent(bool invert) {
-  if (invert_ == invert)
-    return;
-
-  invert_ = invert;
-
-  if (invert_ && !invert_paint_.get()) {
-    // Gamma-aware color inversion: each source pixel value x is normally
-    // displayed on a computer monitor with a gamma correction x^gamma,
-    // where gamma is typically in the range 1.8...2.2. By approximating
-    // gamma as exactly 2, the formula to invert one value is sqrt(1 - x^2).
-    uint8_t table[256];
-    for (unsigned int i = 0; i < 256; i++) {
-      double value = i / 255.0;
-      value = sqrt(1 - (value * value));
-      table[i] = static_cast<uint8_t>(255 * value);
-    }
-
-    // Create a Skia Paint with this inverting color map.
-    invert_paint_.reset(new SkPaint());
-    invert_paint_->setStyle(SkPaint::kFill_Style);
-    invert_paint_->setColor(SK_ColorBLACK);
-    SkColorFilter* filter = SkTableColorFilter::CreateARGB(
-        NULL, table, table, table);
-    invert_paint_->setColorFilter(filter);
-    filter->unref();
-  }
-
-  OnMsgRepaint(size_);
+void RenderWidget::OnScreenInfoChanged(
+    const WebKit::WebScreenInfo& screen_info) {
+  screen_info_ = screen_info;
 }
 
 webkit::ppapi::PluginInstance* RenderWidget::GetBitmapForOptimizedPluginPaint(
@@ -1639,13 +1621,30 @@ void RenderWidget::UpdateSelectionBounds() {
   gfx::Rect start_rect;
   gfx::Rect end_rect;
   GetSelectionBounds(&start_rect, &end_rect);
-  if (selection_start_rect_ == start_rect && selection_end_rect_ == end_rect)
-    return;
+  if (selection_start_rect_ != start_rect || selection_end_rect_ != end_rect) {
+    selection_start_rect_ = start_rect;
+    selection_end_rect_ = end_rect;
+    Send(new ViewHostMsg_SelectionBoundsChanged(
+        routing_id_, selection_start_rect_, selection_end_rect_));
+  }
 
-  selection_start_rect_ = start_rect;
-  selection_end_rect_ = end_rect;
-  Send(new ViewHostMsg_SelectionBoundsChanged(
-      routing_id_, selection_start_rect_, selection_end_rect_));
+  std::vector<gfx::Rect> character_bounds;
+  GetCompositionCharacterBounds(&character_bounds);
+  UpdateCompositionInfo(composition_range_, character_bounds);
+}
+
+bool RenderWidget::ShouldUpdateCompositionInfo(
+    const ui::Range& range,
+    const std::vector<gfx::Rect>& bounds) {
+  if (composition_range_ != range)
+    return true;
+  if (bounds.size() != composition_character_bounds_.size())
+    return true;
+  for (size_t i = 0; i < bounds.size(); ++i) {
+    if (bounds[i] != composition_character_bounds_[i])
+      return true;
+  }
+  return false;
 }
 
 // Check WebKit::WebTextInputType and ui::TextInputType is kept in sync.
@@ -1665,16 +1664,34 @@ COMPILE_ASSERT(int(WebKit::WebTextInputTypeTelephone) == \
                int(ui::TEXT_INPUT_TYPE_TELEPHONE), mismatching_enums);
 COMPILE_ASSERT(int(WebKit::WebTextInputTypeURL) == \
                int(ui::TEXT_INPUT_TYPE_URL), mismatching_enums);
+COMPILE_ASSERT(int(WebKit::WebTextInputTypeDate) == \
+               int(ui::TEXT_INPUT_TYPE_DATE), mismatching_enum);
+COMPILE_ASSERT(int(WebKit::WebTextInputTypeDateTime) == \
+               int(ui::TEXT_INPUT_TYPE_DATE_TIME), mismatching_enum);
+COMPILE_ASSERT(int(WebKit::WebTextInputTypeDateTimeLocal) == \
+               int(ui::TEXT_INPUT_TYPE_DATE_TIME_LOCAL), mismatching_enum);
+COMPILE_ASSERT(int(WebKit::WebTextInputTypeMonth) == \
+               int(ui::TEXT_INPUT_TYPE_MONTH), mismatching_enum);
+COMPILE_ASSERT(int(WebKit::WebTextInputTypeTime) == \
+               int(ui::TEXT_INPUT_TYPE_TIME), mismatching_enum);
+COMPILE_ASSERT(int(WebKit::WebTextInputTypeWeek) == \
+               int(ui::TEXT_INPUT_TYPE_WEEK), mismatching_enum);
 
 ui::TextInputType RenderWidget::GetTextInputType() {
   if (webwidget_) {
     int type = webwidget_->textInputType();
     // Check the type is in the range representable by ui::TextInputType.
-    DCHECK(type <= ui::TEXT_INPUT_TYPE_URL) <<
+    DCHECK_LE(type, ui::TEXT_INPUT_TYPE_WEEK) <<
       "WebKit::WebTextInputType and ui::TextInputType not synchronized";
     return static_cast<ui::TextInputType>(type);
   }
   return ui::TEXT_INPUT_TYPE_NONE;
+}
+
+void RenderWidget::GetCompositionCharacterBounds(
+    std::vector<gfx::Rect>* bounds) {
+  DCHECK(bounds);
+  bounds->clear();
 }
 
 bool RenderWidget::CanComposeInline() {
@@ -1683,6 +1700,10 @@ bool RenderWidget::CanComposeInline() {
 
 WebScreenInfo RenderWidget::screenInfo() {
   return screen_info_;
+}
+
+float RenderWidget::deviceScaleFactor() {
+  return device_scale_factor_;
 }
 
 void RenderWidget::resetInputMethod() {
@@ -1705,7 +1726,8 @@ void RenderWidget::resetInputMethod() {
     range.set_start(location);
     range.set_end(location + length);
   }
-  Send(new ViewHostMsg_ImeCompositionRangeChanged(routing_id(), range));
+
+  UpdateCompositionInfo(range, std::vector<gfx::Rect>());
 }
 
 void RenderWidget::SchedulePluginMove(

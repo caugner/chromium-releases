@@ -146,7 +146,8 @@ gboolean OnDragIconExpose(GtkWidget* sender,
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   const gfx::Font& base_font = rb.GetFont(ui::ResourceBundle::BaseFont);
   canvas.DrawStringInt(data->text, base_font, data->text_color,
-                       text_x, 0, text_width, allocation.height);
+                       text_x, 0, text_width, allocation.height,
+                       gfx::Canvas::NO_SUBPIXEL_RENDERING);
 
   return TRUE;
 }
@@ -169,13 +170,13 @@ GdkPixbuf* GetPixbufForNode(const BookmarkNode* node, BookmarkModel* model,
 
   if (node->is_url()) {
     if (model->GetFavicon(node).width() != 0) {
-      pixbuf = gfx::GdkPixbufFromSkBitmap(&model->GetFavicon(node));
+      pixbuf = gfx::GdkPixbufFromSkBitmap(model->GetFavicon(node));
     } else {
-      pixbuf = GtkThemeService::GetDefaultFavicon(native)->ToGdkPixbuf();
+      pixbuf = GtkThemeService::GetDefaultFavicon(native).ToGdkPixbuf();
       g_object_ref(pixbuf);
     }
   } else {
-    pixbuf = GtkThemeService::GetFolderIcon(native)->ToGdkPixbuf();
+    pixbuf = GtkThemeService::GetFolderIcon(native).ToGdkPixbuf();
     g_object_ref(pixbuf);
   }
 

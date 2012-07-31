@@ -16,7 +16,10 @@
 class FilePath;
 class GURL;
 struct WebDropData;
+
+namespace webkit_glue {
 struct WebPreferences;
+}
 
 namespace gfx {
 class Point;
@@ -119,14 +122,17 @@ class CONTENT_EXPORT RenderViewHost : virtual public RenderWidgetHost {
       const WebDropData& drop_data,
       const gfx::Point& client_pt,
       const gfx::Point& screen_pt,
-      WebKit::WebDragOperationsMask operations_allowed) = 0;
+      WebKit::WebDragOperationsMask operations_allowed,
+      int key_modifiers) = 0;
   virtual void DragTargetDragOver(
       const gfx::Point& client_pt,
       const gfx::Point& screen_pt,
-      WebKit::WebDragOperationsMask operations_allowed) = 0;
+      WebKit::WebDragOperationsMask operations_allowed,
+      int key_modifiers) = 0;
   virtual void DragTargetDragLeave() = 0;
   virtual void DragTargetDrop(const gfx::Point& client_pt,
-                              const gfx::Point& screen_pt) = 0;
+                              const gfx::Point& screen_pt,
+                              int key_modifiers) = 0;
 
   // Instructs the RenderView to automatically resize and send back updates
   // for the new size.
@@ -245,8 +251,12 @@ class CONTENT_EXPORT RenderViewHost : virtual public RenderWidgetHost {
 
   virtual void ToggleSpeechInput() = 0;
 
+  // Returns the current WebKit preferences.
+  virtual webkit_glue::WebPreferences GetWebkitPreferences() = 0;
+
   // Passes a list of Webkit preferences to the renderer.
-  virtual void UpdateWebkitPreferences(const WebPreferences& prefs) = 0;
+  virtual void UpdateWebkitPreferences(
+      const webkit_glue::WebPreferences& prefs) = 0;
 };
 
 }  // namespace content

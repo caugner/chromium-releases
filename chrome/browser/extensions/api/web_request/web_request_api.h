@@ -13,13 +13,14 @@
 #include <vector>
 
 #include "base/memory/singleton.h"
+#include "base/memory/weak_ptr.h"
 #include "base/time.h"
 #include "chrome/browser/extensions/api/declarative_webrequest/request_stages.h"
 #include "chrome/browser/extensions/api/web_request/web_request_api_helpers.h"
 #include "chrome/browser/extensions/extension_function.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/extensions/url_pattern_set.h"
-#include "ipc/ipc_message.h"
+#include "ipc/ipc_sender.h"
 #include "net/base/completion_callback.h"
 #include "net/base/network_delegate.h"
 #include "net/http/http_request_headers.h"
@@ -54,7 +55,8 @@ class URLRequest;
 // This class observes network events and routes them to the appropriate
 // extensions listening to those events. All methods must be called on the IO
 // thread unless otherwise specified.
-class ExtensionWebRequestEventRouter {
+class ExtensionWebRequestEventRouter
+    : public base::SupportsWeakPtr<ExtensionWebRequestEventRouter> {
  public:
   struct BlockedRequest;
 
@@ -229,8 +231,8 @@ class ExtensionWebRequestEventRouter {
   // Adds a listener to the given event. |event_name| specifies the event being
   // listened to. |sub_event_name| is an internal event uniquely generated in
   // the extension process to correspond to the given filter and
-  // extra_info_spec.
-  void AddEventListener(
+  // extra_info_spec. It returns true on success, false on failure.
+  bool AddEventListener(
       void* profile,
       const std::string& extension_id,
       const std::string& extension_name,
@@ -238,7 +240,7 @@ class ExtensionWebRequestEventRouter {
       const std::string& sub_event_name,
       const RequestFilter& filter,
       int extra_info_spec,
-      base::WeakPtr<IPC::Message::Sender> ipc_sender);
+      base::WeakPtr<IPC::Sender> ipc_sender);
 
   // Removes the listener for the given sub-event.
   void RemoveEventListener(
@@ -330,10 +332,15 @@ class ExtensionWebRequestEventRouter {
 
   // Evaluates the rules of the declarative webrequest API and stores
   // modifications to the request that result from WebRequestActions as
-  // deltas in |blocked_requests_|. Returns whether any deltas were
-  // generated.
-  bool ProcessDeclarativeRules(net::URLRequest* request,
-                               extensions::RequestStages request_stage);
+  // deltas in |blocked_requests_|. |original_response_headers| should only be
+  // set for the OnHeadersReceived stage and NULL otherwise. Returns whether any
+  // deltas were generated.
+  bool ProcessDeclarativeRules(
+      void* profile,
+      const std::string& event_name,
+      net::URLRequest* request,
+      extensions::RequestStages request_stage,
+      net::HttpResponseHeaders* original_response_headers);
 
   // Sets the flag that |event_type| has been signaled for |request_id|.
   // Returns the value of the flag before setting it.
@@ -377,7 +384,7 @@ class ExtensionWebRequestEventRouter {
 
 class WebRequestAddEventListener : public SyncIOThreadExtensionFunction {
  public:
-  DECLARE_EXTENSION_FUNCTION_NAME("webRequest.addEventListener");
+  DECLARE_EXTENSION_FUNCTION_NAME("webRequestInternal.addEventListener");
 
  protected:
   virtual ~WebRequestAddEventListener() {}
@@ -388,7 +395,7 @@ class WebRequestAddEventListener : public SyncIOThreadExtensionFunction {
 
 class WebRequestEventHandled : public SyncIOThreadExtensionFunction {
  public:
-  DECLARE_EXTENSION_FUNCTION_NAME("webRequest.eventHandled");
+  DECLARE_EXTENSION_FUNCTION_NAME("webRequestInternal.eventHandled");
 
  protected:
   virtual ~WebRequestEventHandled() {}

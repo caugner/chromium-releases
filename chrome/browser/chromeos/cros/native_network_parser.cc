@@ -650,6 +650,8 @@ Network* NativeNetworkParser::CreateNewNetwork(
       network->SetNetworkParser(new NativeEthernetNetworkParser());
     else if (type == TYPE_WIFI)
       network->SetNetworkParser(new NativeWifiNetworkParser());
+    else if (type == TYPE_WIMAX)
+      network->SetNetworkParser(new NativeWimaxNetworkParser());
     else if (type == TYPE_CELLULAR)
       network->SetNetworkParser(new NativeCellularNetworkParser());
     else if (type == TYPE_VPN)
@@ -823,8 +825,10 @@ NativeWirelessNetworkParser::~NativeWirelessNetworkParser() {}
 bool NativeWirelessNetworkParser::ParseValue(PropertyIndex index,
                                              const base::Value& value,
                                              Network* network) {
-  DCHECK_NE(TYPE_ETHERNET, network->type());
-  DCHECK_NE(TYPE_VPN, network->type());
+  CHECK(network->type() == TYPE_WIFI ||
+        network->type() == TYPE_WIMAX ||
+        network->type() == TYPE_BLUETOOTH ||
+        network->type() == TYPE_CELLULAR);
   WirelessNetwork* wireless_network = static_cast<WirelessNetwork*>(network);
   switch (index) {
     case PROPERTY_INDEX_SIGNAL_STRENGTH: {
@@ -849,7 +853,7 @@ NativeCellularNetworkParser::~NativeCellularNetworkParser() {}
 bool NativeCellularNetworkParser::ParseValue(PropertyIndex index,
                                              const base::Value& value,
                                              Network* network) {
-  DCHECK_EQ(TYPE_CELLULAR, network->type());
+  CHECK_EQ(TYPE_CELLULAR, network->type());
   CellularNetwork* cellular_network = static_cast<CellularNetwork*>(network);
   switch (index) {
     case PROPERTY_INDEX_ACTIVATION_STATE: {
@@ -1025,6 +1029,46 @@ NetworkRoamingState NativeCellularNetworkParser::ParseRoamingState(
   return parser.Get(roaming_state);
 }
 
+// -------------------- NativeWimaxNetworkParser --------------------
+
+NativeWimaxNetworkParser::NativeWimaxNetworkParser() {}
+NativeWimaxNetworkParser::~NativeWimaxNetworkParser() {}
+
+
+bool NativeWimaxNetworkParser::ParseValue(PropertyIndex index,
+                                          const base::Value& value,
+                                          Network* network) {
+  CHECK_EQ(TYPE_WIMAX, network->type());
+  WimaxNetwork* wimax_network = static_cast<WimaxNetwork*>(network);
+  switch (index) {
+    case PROPERTY_INDEX_PASSPHRASE_REQUIRED: {
+      bool passphrase_required;
+      if (!value.GetAsBoolean(&passphrase_required))
+        break;
+      wimax_network->set_passphrase_required(passphrase_required);
+      return true;
+    }
+    case PROPERTY_INDEX_EAP_IDENTITY: {
+      std::string eap_identity;
+      if (!value.GetAsString(&eap_identity))
+        break;
+
+      wimax_network->set_eap_identity(eap_identity);
+    }
+    case PROPERTY_INDEX_EAP_PASSWORD: {
+      std::string passphrase;
+      if (!value.GetAsString(&passphrase))
+        break;
+
+      wimax_network->set_eap_passphrase(passphrase);
+      return true;
+    }
+    default:
+      return NativeWirelessNetworkParser::ParseValue(index, value, network);
+  }
+  return false;
+}
+
 // -------------------- NativeWifiNetworkParser --------------------
 
 NativeWifiNetworkParser::NativeWifiNetworkParser() {}
@@ -1033,7 +1077,7 @@ NativeWifiNetworkParser::~NativeWifiNetworkParser() {}
 bool NativeWifiNetworkParser::ParseValue(PropertyIndex index,
                                          const base::Value& value,
                                          Network* network) {
-  DCHECK_EQ(TYPE_WIFI, network->type());
+  CHECK_EQ(TYPE_WIFI, network->type());
   WifiNetwork* wifi_network = static_cast<WifiNetwork*>(network);
   switch (index) {
     case PROPERTY_INDEX_WIFI_HEX_SSID: {
@@ -1089,8 +1133,7 @@ bool NativeWifiNetworkParser::ParseValue(PropertyIndex index,
       std::string passphrase;
       if (!value.GetAsString(&passphrase))
         break;
-      // Only store the passphrase if we are the owner.
-      // TODO(stevenjb): Remove this when chromium-os:12948 is resolved.
+
       if (chromeos::UserManager::Get()->IsCurrentUserOwner())
         wifi_network->set_passphrase(passphrase);
       return true;
@@ -1214,7 +1257,7 @@ NativeVirtualNetworkParser::~NativeVirtualNetworkParser() {}
 bool NativeVirtualNetworkParser::UpdateNetworkFromInfo(
     const DictionaryValue& info,
     Network* network) {
-  DCHECK_EQ(TYPE_VPN, network->type());
+  CHECK_EQ(TYPE_VPN, network->type());
   VirtualNetwork* virtual_network = static_cast<VirtualNetwork*>(network);
   if (!NativeNetworkParser::UpdateNetworkFromInfo(info, network))
     return false;
@@ -1232,11 +1275,16 @@ bool NativeVirtualNetworkParser::UpdateNetworkFromInfo(
 bool NativeVirtualNetworkParser::ParseValue(PropertyIndex index,
                                             const base::Value& value,
                                             Network* network) {
-  DCHECK_EQ(TYPE_VPN, network->type());
+  CHECK_EQ(TYPE_VPN, network->type());
   VirtualNetwork* virtual_network = static_cast<VirtualNetwork*>(network);
   switch (index) {
     case PROPERTY_INDEX_PROVIDER: {
-      DCHECK_EQ(value.GetType(), Value::TYPE_DICTIONARY);
+      // TODO(rkc): Figure out why is this ever not true and fix the root
+      // cause. 'value' comes to us all the way from the cros dbus call, the
+      // issue is likely on the cros side of things.
+      if (value.GetType() != Value::TYPE_DICTIONARY)
+        return false;
+
       const DictionaryValue& dict = static_cast<const DictionaryValue&>(value);
       for (DictionaryValue::key_iterator iter = dict.begin_keys();
            iter != dict.end_keys(); ++iter) {

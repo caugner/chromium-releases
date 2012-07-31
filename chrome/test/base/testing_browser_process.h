@@ -13,6 +13,7 @@
 
 #include <string>
 
+#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
@@ -54,6 +55,7 @@ class TestingBrowserProcess : public BrowserProcess {
   virtual WatchDogThread* watchdog_thread() OVERRIDE;
   virtual ProfileManager* profile_manager() OVERRIDE;
   virtual PrefService* local_state() OVERRIDE;
+  virtual VariationsService* variations_service() OVERRIDE;
   virtual policy::BrowserPolicyConnector* browser_policy_connector() OVERRIDE;
   virtual policy::PolicyService* policy_service() OVERRIDE;
   virtual IconManager* icon_manager() OVERRIDE;
@@ -67,7 +69,7 @@ class TestingBrowserProcess : public BrowserProcess {
   virtual net::URLRequestContextGetter* system_request_context() OVERRIDE;
 
 #if defined(OS_CHROMEOS)
-  virtual browser::OomPriorityManager* oom_priority_manager() OVERRIDE;
+  virtual chromeos::OomPriorityManager* oom_priority_manager() OVERRIDE;
 #endif  // defined(OS_CHROMEOS)
 
   virtual ui::Clipboard* clipboard() OVERRIDE;

@@ -9,6 +9,7 @@
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "ipc/ipc_channel.h"
 
 #include "remoting/host/event_executor.h"
@@ -27,19 +28,22 @@ class ChannelProxy;
 
 namespace remoting {
 
-class SessionEventExecutorWin : public protocol::HostEventStub,
+class SessionEventExecutorWin : public EventExecutor,
                                 public IPC::Channel::Listener {
  public:
   SessionEventExecutorWin(MessageLoop* message_loop,
                           base::MessageLoopProxy* io_message_loop,
-                          scoped_ptr<protocol::HostEventStub> nested_executor);
+                          scoped_ptr<EventExecutor> nested_executor);
   ~SessionEventExecutorWin();
 
-  // ClipboardStub interface.
+  // EventExecutor implementation.
+  virtual void OnSessionStarted(
+      scoped_ptr<protocol::ClipboardStub> client_clipboard) OVERRIDE;
+  virtual void OnSessionFinished() OVERRIDE;
+
+  // protocol::HostStub implementation.
   virtual void InjectClipboardEvent(
       const protocol::ClipboardEvent& event) OVERRIDE;
-
-  // protocol::InputStub implementation.
   virtual void InjectKeyEvent(const protocol::KeyEvent& event) OVERRIDE;
   virtual void InjectMouseEvent(const protocol::MouseEvent& event) OVERRIDE;
 
@@ -52,7 +56,7 @@ class SessionEventExecutorWin : public protocol::HostEventStub,
   void SwitchToInputDesktop();
 
   // Pointer to the next event executor.
-  scoped_ptr<protocol::HostEventStub> nested_executor_;
+  scoped_ptr<EventExecutor> nested_executor_;
 
   MessageLoop* message_loop_;
 
@@ -63,6 +67,9 @@ class SessionEventExecutorWin : public protocol::HostEventStub,
 
   // Keys currently pressed by the client, used to detect Ctrl-Alt-Del.
   std::set<uint32> pressed_keys_;
+
+  base::WeakPtrFactory<SessionEventExecutorWin> weak_ptr_factory_;
+  base::WeakPtr<SessionEventExecutorWin> weak_ptr_;
 
   DISALLOW_COPY_AND_ASSIGN(SessionEventExecutorWin);
 };

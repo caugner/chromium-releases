@@ -6,7 +6,7 @@
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/constrained_window_tab_helper.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -14,7 +14,7 @@
 #include "chrome/test/ui/ui_test.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/web_contents.h"
-#include "content/test/test_navigation_observer.h"
+#include "content/public/test/test_navigation_observer.h"
 #include "net/test/test_server.h"
 
 typedef InProcessBrowserTest RepostFormWarningTest;
@@ -32,15 +32,14 @@ IN_PROC_BROWSER_TEST_F(RepostFormWarningTest, TestDoubleReload) {
       GURL("javascript:document.getElementById('form').submit()"));
 
   // Try to reload it twice, checking for repost.
-  content::WebContents* web_contents = browser()->GetSelectedWebContents();
+  content::WebContents* web_contents = browser()->GetActiveWebContents();
   web_contents->GetController().Reload(true);
   web_contents->GetController().Reload(true);
 
   // There should only be one dialog open.
-  TabContentsWrapper* wrapper =
-      TabContentsWrapper::GetCurrentWrapperForContents(web_contents);
+  TabContents* tab_contents = TabContents::FromWebContents(web_contents);
   size_t num_constrained_windows =
-      wrapper->constrained_window_tab_helper()->constrained_window_count();
+      tab_contents->constrained_window_tab_helper()->constrained_window_count();
   EXPECT_EQ(1u, num_constrained_windows);
 
   // Navigate away from the page (this is when the test usually crashes).
@@ -48,7 +47,7 @@ IN_PROC_BROWSER_TEST_F(RepostFormWarningTest, TestDoubleReload) {
 
   // The dialog should've been closed.
   num_constrained_windows =
-      wrapper->constrained_window_tab_helper()->constrained_window_count();
+      tab_contents->constrained_window_tab_helper()->constrained_window_count();
   EXPECT_EQ(0u, num_constrained_windows);
 }
 
@@ -65,7 +64,7 @@ IN_PROC_BROWSER_TEST_F(RepostFormWarningTest, TestLoginAfterRepost) {
       GURL("javascript:document.getElementById('form').submit()"));
 
   // Try to reload it, checking for repost.
-  content::WebContents* web_contents = browser()->GetSelectedWebContents();
+  content::WebContents* web_contents = browser()->GetActiveWebContents();
   web_contents->GetController().Reload(true);
 
   // Navigate to a page that requires authentication, bringing up another
@@ -86,7 +85,7 @@ IN_PROC_BROWSER_TEST_F(RepostFormWarningTest, TestLoginAfterRepost) {
   // because that waits for the current page to stop loading first, which won't
   // happen while the auth dialog is up.
   content::Source<content::NavigationController> source(&controller);
-  TestNavigationObserver navigation_observer(source);
+  content::TestNavigationObserver navigation_observer(source);
   browser()->OpenURL(content::OpenURLParams(
         test_server()->GetURL("bar"), content::Referrer(), CURRENT_TAB,
         content::PAGE_TRANSITION_TYPED, false));

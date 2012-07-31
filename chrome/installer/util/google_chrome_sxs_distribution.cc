@@ -25,7 +25,7 @@ GoogleChromeSxSDistribution::GoogleChromeSxSDistribution()
   GoogleChromeDistribution::set_product_guid(kChromeSxSGuid);
 }
 
-string16 GoogleChromeSxSDistribution::GetApplicationName() {
+string16 GoogleChromeSxSDistribution::GetBaseAppName() {
   return L"Google Chrome Canary";
 }
 
@@ -35,7 +35,7 @@ string16 GoogleChromeSxSDistribution::GetAppShortCutName() {
   return shortcut_name;
 }
 
-string16 GoogleChromeSxSDistribution::GetBrowserAppId() {
+string16 GoogleChromeSxSDistribution::GetBaseAppId() {
   return kBrowserAppId;
 }
 

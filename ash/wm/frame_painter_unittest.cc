@@ -20,7 +20,8 @@ using views::ImageButton;
 namespace {
 
 aura::Window* GetDefaultContainer() {
-  return ash::Shell::GetInstance()->GetContainer(
+  return ash::Shell::GetContainer(
+      ash::Shell::GetPrimaryRootWindow(),
       ash::internal::kShellWindowId_DefaultContainer);
 }
 
@@ -164,7 +165,7 @@ TEST_F(FramePainterTest, GetHeaderOpacity) {
                                 NULL));
 
   // Custom overlay image is drawn completely opaque.
-  SkBitmap custom_overlay;
+  gfx::ImageSkia custom_overlay;
   EXPECT_EQ(255,
             p1.GetHeaderOpacity(FramePainter::ACTIVE,
                                 IDR_AURA_WINDOW_HEADER_BASE_ACTIVE,

@@ -16,6 +16,10 @@
 #include "ui/views/controls/button/button.h"  // views::ButtonListener
 #include "ui/views/window/dialog_delegate.h"
 
+namespace gfx {
+class ImageSkia;
+}
+
 namespace views {
 class ImageView;
 class NativeTextButton;
@@ -42,11 +46,10 @@ class NetworkConfigView : public views::DialogDelegateView,
      virtual ~Delegate() {}
   };
 
-  // Login dialog for known networks.
-  explicit NetworkConfigView(Network* network);
-  // Login dialog for new/hidden networks.
-  explicit NetworkConfigView(ConnectionType type);
-  virtual ~NetworkConfigView() {}
+  // Shows a network connection dialog if none is currently visible.
+  // Returns false if a dialog is already visible.
+  static bool Show(Network* network, gfx::NativeWindow parent);
+  static bool ShowForType(ConnectionType type, gfx::NativeWindow parent);
 
   // Returns corresponding native window.
   gfx::NativeWindow GetNativeWindow() const;
@@ -84,6 +87,12 @@ class NetworkConfigView : public views::DialogDelegateView,
                                     views::View* child) OVERRIDE;
 
  private:
+  // Login dialog for known networks.
+  explicit NetworkConfigView(Network* network);
+  // Login dialog for new/hidden networks.
+  explicit NetworkConfigView(ConnectionType type);
+  virtual ~NetworkConfigView();
+
   // Creates an "Advanced" button in the lower-left corner of the dialog.
   void CreateAdvancedButton();
 
@@ -169,8 +178,8 @@ class ControlledSettingIndicatorView : public views::View {
 
   bool managed_;
   views::ImageView* image_view_;
-  const SkBitmap* gray_image_;
-  const SkBitmap* color_image_;
+  const gfx::ImageSkia* gray_image_;
+  const gfx::ImageSkia* color_image_;
 
   DISALLOW_COPY_AND_ASSIGN(ControlledSettingIndicatorView);
 };

@@ -157,7 +157,6 @@ void PluginProxyTestHarness::SetUpHarness() {
   resource_tracker().DidCreateInstance(pp_instance());
 
   plugin_dispatcher_.reset(new PluginDispatcher(
-      base::Process::Current().handle(),
       &MockGetInterface,
       false));
   plugin_dispatcher_->InitWithTestSink(&sink());
@@ -175,7 +174,6 @@ void PluginProxyTestHarness::SetUpHarnessWithChannel(
   plugin_delegate_mock_.Init(ipc_message_loop, shutdown_event);
 
   plugin_dispatcher_.reset(new PluginDispatcher(
-      base::Process::Current().handle(),
       &MockGetInterface,
       false));
   plugin_dispatcher_->InitPluginWithChannel(&plugin_delegate_mock_,
@@ -201,6 +199,16 @@ PluginProxyTestHarness::PluginDelegateMock::GetShutdownEvent() {
   return shutdown_event_;
 }
 
+IPC::PlatformFileForTransit
+PluginProxyTestHarness::PluginDelegateMock::ShareHandleWithRemote(
+    base::PlatformFile handle,
+    const IPC::SyncChannel& /* channel */,
+    bool should_close_source) {
+  return IPC::GetFileHandleForProcess(handle,
+                                      base::Process::Current().handle(),
+                                      should_close_source);
+}
+
 std::set<PP_Instance>*
 PluginProxyTestHarness::PluginDelegateMock::GetGloballySeenInstanceIDSet() {
   return &instance_id_set_;
@@ -219,6 +227,10 @@ bool PluginProxyTestHarness::PluginDelegateMock::SendToBrowser(
     IPC::Message* msg) {
   NOTREACHED();
   return false;
+}
+
+std::string PluginProxyTestHarness::PluginDelegateMock::GetUILanguage() {
+  return std::string("en-US");
 }
 
 void PluginProxyTestHarness::PluginDelegateMock::PreCacheFont(
@@ -266,7 +278,6 @@ void HostProxyTestHarness::SetUpHarness() {
   // These must be first since the dispatcher set-up uses them.
   PpapiGlobals::SetPpapiGlobalsOnThreadForTest(GetGlobals());
   host_dispatcher_.reset(new HostDispatcher(
-      base::Process::Current().handle(),
       pp_module(),
       &MockGetInterface,
       status_receiver_.get()));
@@ -284,7 +295,6 @@ void HostProxyTestHarness::SetUpHarnessWithChannel(
   delegate_mock_.Init(ipc_message_loop, shutdown_event);
 
   host_dispatcher_.reset(new HostDispatcher(
-      base::Process::Current().handle(),
       pp_module(),
       &MockGetInterface,
       status_receiver_.get()));
@@ -306,6 +316,16 @@ HostProxyTestHarness::DelegateMock::GetIPCMessageLoop() {
 
 base::WaitableEvent* HostProxyTestHarness::DelegateMock::GetShutdownEvent() {
   return shutdown_event_;
+}
+
+IPC::PlatformFileForTransit
+HostProxyTestHarness::DelegateMock::ShareHandleWithRemote(
+    base::PlatformFile handle,
+    const IPC::SyncChannel& /* channel */,
+    bool should_close_source) {
+  return IPC::GetFileHandleForProcess(handle,
+                                      base::Process::Current().handle(),
+                                      should_close_source);
 }
 
 

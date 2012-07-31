@@ -17,10 +17,8 @@
 #include "chrome/browser/printing/print_preview_data_service.h"
 #include "chrome/browser/printing/print_preview_tab_controller.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
-#include "chrome/browser/ui/webui/web_dialog_delegate.h"
-#include "chrome/browser/ui/webui/web_dialog_ui.h"
 #include "chrome/browser/ui/webui/print_preview/print_preview_data_source.h"
 #include "chrome/browser/ui/webui/print_preview/print_preview_handler.h"
 #include "chrome/common/print_messages.h"
@@ -28,9 +26,13 @@
 #include "printing/page_size_margins.h"
 #include "printing/print_job_constants.h"
 #include "ui/gfx/rect.h"
+#include "ui/web_dialogs/web_dialog_delegate.h"
+#include "ui/web_dialogs/web_dialog_ui.h"
 
 using content::WebContents;
 using printing::PageSizeMargins;
+using ui::ConstrainedWebDialogDelegate;
+using ui::ConstrainedWebDialogUI;
 
 namespace {
 
@@ -82,16 +84,9 @@ PrintPreviewUI::PrintPreviewUI(content::WebUI* web_ui)
       handler_(NULL),
       source_is_modifiable_(true),
       tab_closed_(false) {
-  printing::PrintPreviewTabController* controller =
-      printing::PrintPreviewTabController::GetInstance();
-  is_dummy_ = (!controller || !controller->is_creating_print_preview_tab());
-
   // Set up the chrome://print/ data source.
   Profile* profile = Profile::FromWebUI(web_ui);
-  ChromeURLDataManager::AddDataSource(profile,
-      new PrintPreviewDataSource(is_dummy_));
-  if (is_dummy_)
-    return;
+  ChromeURLDataManager::AddDataSource(profile, new PrintPreviewDataSource());
 
   // WebUI owns |handler_|.
   handler_ = new PrintPreviewHandler();
@@ -102,9 +97,6 @@ PrintPreviewUI::PrintPreviewUI(content::WebUI* web_ui)
 }
 
 PrintPreviewUI::~PrintPreviewUI() {
-  if (is_dummy_)
-    return;
-
   print_preview_data_service()->RemoveEntry(preview_ui_addr_str_);
   g_print_preview_request_id_map.Get().Erase(preview_ui_addr_str_);
 }
@@ -138,9 +130,8 @@ void PrintPreviewUI::SetInitiatorTabURLAndTitle(
 }
 
 // static
-void PrintPreviewUI::SetSourceIsModifiable(
-    TabContentsWrapper* print_preview_tab,
-    bool source_is_modifiable) {
+void PrintPreviewUI::SetSourceIsModifiable(TabContents* print_preview_tab,
+                                           bool source_is_modifiable) {
   if (!print_preview_tab || !print_preview_tab->web_contents()->GetWebUI())
     return;
   PrintPreviewUI* print_preview_ui = static_cast<PrintPreviewUI*>(
@@ -170,9 +161,8 @@ std::string PrintPreviewUI::GetPrintPreviewUIAddress() const {
 }
 
 void PrintPreviewUI::OnPrintPreviewTabClosed() {
-  TabContentsWrapper* preview_tab =
-      TabContentsWrapper::GetCurrentWrapperForContents(
-        web_ui()->GetWebContents());
+  TabContents* preview_tab =
+      TabContents::FromWebContents(web_ui()->GetWebContents());
   printing::BackgroundPrintingManager* background_printing_manager =
       g_browser_process->background_printing_manager();
   if (background_printing_manager->HasPrintPreviewTab(preview_tab))
@@ -181,9 +171,8 @@ void PrintPreviewUI::OnPrintPreviewTabClosed() {
 }
 
 void PrintPreviewUI::OnInitiatorTabClosed() {
-  TabContentsWrapper* preview_tab =
-      TabContentsWrapper::GetCurrentWrapperForContents(
-          web_ui()->GetWebContents());
+  TabContents* preview_tab =
+      TabContents::FromWebContents(web_ui()->GetWebContents());
   printing::BackgroundPrintingManager* background_printing_manager =
       g_browser_process->background_printing_manager();
   if (background_printing_manager->HasPrintPreviewTab(preview_tab))
@@ -301,9 +290,8 @@ PrintPreviewDataService* PrintPreviewUI::print_preview_data_service() {
 }
 
 void PrintPreviewUI::OnHidePreviewTab() {
-  TabContentsWrapper* preview_tab =
-      TabContentsWrapper::GetCurrentWrapperForContents(
-          web_ui()->GetWebContents());
+  TabContents* preview_tab =
+      TabContents::FromWebContents(web_ui()->GetWebContents());
   printing::BackgroundPrintingManager* background_printing_manager =
       g_browser_process->background_printing_manager();
   if (background_printing_manager->HasPrintPreviewTab(preview_tab))
@@ -330,4 +318,8 @@ void PrintPreviewUI::OnClosePrintPreviewTab() {
 
 void PrintPreviewUI::OnReloadPrintersList() {
   web_ui()->CallJavascriptFunction("reloadPrintersList");
+}
+
+void PrintPreviewUI::OnPrintPreviewScalingDisabled() {
+  web_ui()->CallJavascriptFunction("printScalingDisabledForSourcePDF");
 }

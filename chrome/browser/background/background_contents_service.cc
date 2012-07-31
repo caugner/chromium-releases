@@ -22,7 +22,7 @@
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
@@ -37,6 +37,8 @@
 
 using content::SiteInstance;
 using content::WebContents;
+using extensions::Extension;
+using extensions::UnloadedExtensionInfo;
 
 namespace {
 
@@ -55,19 +57,20 @@ void ScheduleCloseBalloon(const std::string& extension_id) {
 
 class CrashNotificationDelegate : public NotificationDelegate {
  public:
-  CrashNotificationDelegate(Profile* profile, const Extension* extension)
+  CrashNotificationDelegate(Profile* profile,
+                            const Extension* extension)
       : profile_(profile),
         is_hosted_app_(extension->is_hosted_app()),
         extension_id_(extension->id()) {
   }
 
-  void Display() {}
+  virtual void Display() OVERRIDE {}
 
-  void Error() {}
+  virtual void Error() OVERRIDE {}
 
-  void Close(bool by_user) {}
+  virtual void Close(bool by_user) OVERRIDE {}
 
-  void Click() {
+  virtual void Click() OVERRIDE {
     if (is_hosted_app_) {
       // There can be a race here: user clicks the balloon, and simultaneously
       // reloads the sad tab for the app. So we check here to be safe before
@@ -85,8 +88,12 @@ class CrashNotificationDelegate : public NotificationDelegate {
     ScheduleCloseBalloon(extension_id_);
   }
 
-  std::string id() const {
+  virtual std::string id() const OVERRIDE {
     return kNotificationPrefix + extension_id_;
+  }
+
+  virtual content::RenderViewHost* GetRenderViewHost() const OVERRIDE {
+    return NULL;
   }
 
  private:
@@ -101,18 +108,16 @@ class CrashNotificationDelegate : public NotificationDelegate {
 
 void ShowBalloon(const Extension* extension, Profile* profile) {
 #if defined(ENABLE_NOTIFICATIONS)
+  string16 title;  // no notifiaction title
   string16 message = l10n_util::GetStringFUTF16(
       extension->is_app() ?  IDS_BACKGROUND_CRASHED_APP_BALLOON_MESSAGE :
       IDS_BACKGROUND_CRASHED_EXTENSION_BALLOON_MESSAGE,
       UTF8ToUTF16(extension->name()));
-  string16 content_url = DesktopNotificationService::CreateDataUrl(
-      extension->GetIconURL(ExtensionIconSet::EXTENSION_ICON_SMALLISH,
-                            ExtensionIconSet::MATCH_BIGGER),
-      string16(), message, WebKit::WebTextDirectionDefault);
-  Notification notification(
-      extension->url(), GURL(content_url), string16(), string16(),
-      new CrashNotificationDelegate(profile, extension));
-  g_browser_process->notification_ui_manager()->Add(notification, profile);
+  GURL icon_url(extension->GetIconURL(ExtensionIconSet::EXTENSION_ICON_SMALLISH,
+                                      ExtensionIconSet::MATCH_BIGGER));
+  DesktopNotificationService::AddNotification(
+      extension->url(), title, message, icon_url,
+      new CrashNotificationDelegate(profile, extension), profile);
 #endif
 }
 
@@ -366,8 +371,8 @@ void BackgroundContentsService::LoadBackgroundContentsFromPrefs(
   for (DictionaryValue::key_iterator it = contents->begin_keys();
        it != contents->end_keys(); ++it) {
     // Check to make sure that the parent extension is still enabled.
-    const Extension* extension = extensions_service->GetExtensionById(
-        *it, false);
+    const Extension* extension = extensions_service->
+        GetExtensionById(*it, false);
     if (!extension) {
       // We should never reach here - it should not be possible for an app
       // to become uninstalled without the associated BackgroundContents being
@@ -605,7 +610,7 @@ void BackgroundContentsService::AddWebContents(
     WindowOpenDisposition disposition,
     const gfx::Rect& initial_pos,
     bool user_gesture) {
-  Browser* browser = BrowserList::GetLastActiveWithProfile(
+  Browser* browser = browser::FindLastActiveWithProfile(
       Profile::FromBrowserContext(new_contents->GetBrowserContext()));
   if (!browser)
     return;

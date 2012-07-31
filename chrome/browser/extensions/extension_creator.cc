@@ -23,6 +23,8 @@
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
+using extensions::Extension;
+
 namespace {
   const int kRSAKeySize = 1024;
 };
@@ -105,7 +107,7 @@ bool ExtensionCreator::ValidateManifest(const FilePath& extension_dir,
           extension_dir,
           extension_id,
           Extension::INTERNAL,
-          Extension::STRICT_ERROR_CHECKS | Extension::FOLLOW_SYMLINKS_ANYWHERE,
+          Extension::FOLLOW_SYMLINKS_ANYWHERE | Extension::ERROR_ON_PRIVATE_KEY,
           &error_message_));
   return !!extension.get();
 }

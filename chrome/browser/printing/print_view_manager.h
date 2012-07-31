@@ -13,7 +13,7 @@
 #include "content/public/browser/web_contents_observer.h"
 #include "printing/printed_pages_source.h"
 
-class TabContentsWrapper;
+class TabContents;
 struct PrintHostMsg_DidPrintPage_Params;
 
 namespace content {
@@ -27,14 +27,14 @@ class PrintJob;
 class PrintJobWorkerOwner;
 class PrintViewManagerObserver;
 
-// Manages the print commands in relation to a TabContentsWrapper.
-// TabContentsWrapper delegates a few printing related commands to this
+// Manages the print commands in relation to a TabContents.
+// TabContents delegates a few printing related commands to this
 // instance.
 class PrintViewManager : public content::NotificationObserver,
                          public PrintedPagesSource,
                          public content::WebContentsObserver {
  public:
-  explicit PrintViewManager(TabContentsWrapper* tab);
+  explicit PrintViewManager(TabContents* tab);
   virtual ~PrintViewManager();
 
   // Prints the current document immediately. Since the rendering is
@@ -64,9 +64,6 @@ class PrintViewManager : public content::NotificationObserver,
   // Notify PrintViewManager that print preview has finished. Unfreeze the
   // renderer in the case of scripted print preview.
   void PrintPreviewDone();
-
-  // Handles cancelled preview printing request.
-  void PreviewPrintingRequestCancelled();
 
   // Whether to block scripted printing or not.
   void SetScriptedPrintingBlocked(bool blocked);
@@ -165,8 +162,8 @@ class PrintViewManager : public content::NotificationObserver,
   // Release the PrinterQuery associated with our |cookie_|.
   void ReleasePrinterQuery();
 
-  // TabContentsWrapper we're associated with.
-  TabContentsWrapper* tab_;
+  // TabContents we're associated with.
+  TabContents* tab_;
 
   content::NotificationRegistrar registrar_;
 

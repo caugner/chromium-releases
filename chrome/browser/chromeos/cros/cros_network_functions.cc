@@ -344,6 +344,7 @@ void OnGetService(const NetworkPropertiesCallback& callback,
                   DBusMethodCallStatus call_status,
                   const dbus::ObjectPath& service_path) {
   if (call_status == DBUS_METHOD_CALL_SUCCESS) {
+    VLOG(1) << "OnGetServiceService: " << service_path.value();
     DBusThreadManager::Get()->GetFlimflamServiceClient()->GetProperties(
         service_path, base::Bind(&RunCallbackWithDictionaryValue,
                                  callback,
@@ -362,25 +363,27 @@ void OnConfigureService(void* object,
   }
 }
 
-// A callback used to call a NetworkActionCallback on success.
-void OnNetworkActionSuccess(const std::string& path,
-                            NetworkActionCallback callback,
-                            void* object) {
-  callback(object, path.c_str(), NETWORK_METHOD_ERROR_NONE, "");
+// Handles responses for network actions.
+void OnNetworkAction(void* object,
+                     const char* path,
+                     NetworkMethodErrorType error,
+                     const char* error_message) {
+  NetworkOperationCallback* callback =
+      static_cast<NetworkOperationCallback*>(object);
+  scoped_ptr<NetworkOperationCallback> callback_deleter(callback);
+
+  callback->Run(path, error, error_message ? error_message : "");
 }
 
-// A callback used to call a NetworkActionCallback on error.
-void OnNetworkActionError(const std::string& path,
-                          NetworkActionCallback callback,
-                          void* object,
+// A callback used to call a NetworkOperationCallback on error.
+void OnNetworkActionError(const NetworkOperationCallback& callback,
+                          const std::string& path,
                           const std::string& error_name,
                           const std::string& error_message) {
-  if (error_name.empty()) {
-    callback(object, path.c_str(), NETWORK_METHOD_ERROR_LOCAL, "");
-  } else {
-    callback(object, path.c_str(), NETWORK_METHOD_ERROR_REMOTE,
-             error_message.c_str());
-  }
+  if (error_name.empty())
+    callback.Run(path, NETWORK_METHOD_ERROR_LOCAL, "");
+  else
+    callback.Run(path, NETWORK_METHOD_ERROR_REMOTE, error_message);
 }
 
 // Safe string constructor since we can't rely on non NULL pointers
@@ -637,17 +640,20 @@ CrosNetworkWatcher* CrosMonitorSMS(const std::string& modem_device_path,
     return new SMSWatcher(modem_device_path, callback, object);
 }
 
-void CrosRequestNetworkServiceConnect(const std::string& service_path,
-                                      NetworkActionCallback callback,
-                                      void* object) {
+void CrosRequestNetworkServiceConnect(
+    const std::string& service_path,
+    const NetworkOperationCallback& callback) {
   if (g_libcros_network_functions_enabled) {
-    chromeos::RequestNetworkServiceConnect(service_path.c_str(), callback,
-                                           object);
+    // The newly allocated callback will be deleted in OnNetworkAction.
+    chromeos::RequestNetworkServiceConnect(
+        service_path.c_str(), &OnNetworkAction,
+        new NetworkOperationCallback(callback));
   } else {
     DBusThreadManager::Get()->GetFlimflamServiceClient()->Connect(
         dbus::ObjectPath(service_path),
-        base::Bind(&OnNetworkActionSuccess, service_path, callback, object),
-        base::Bind(&OnNetworkActionError, service_path, callback, object));
+        base::Bind(callback, service_path, NETWORK_METHOD_ERROR_NONE,
+                   std::string()),
+        base::Bind(&OnNetworkActionError, callback, service_path));
   }
 }
 
@@ -860,63 +866,71 @@ void CrosRequestNetworkDeviceEnable(const std::string& network_type,
 void CrosRequestRequirePin(const std::string& device_path,
                            const std::string& pin,
                            bool enable,
-                           NetworkActionCallback callback,
-                           void* object) {
+                           const NetworkOperationCallback& callback) {
   if (g_libcros_network_functions_enabled) {
+    // The newly allocated callback will be deleted in OnNetworkAction.
     chromeos::RequestRequirePin(device_path.c_str(), pin.c_str(), enable,
-                                callback, object);
+                                &OnNetworkAction,
+                                new NetworkOperationCallback(callback));
   } else {
     DBusThreadManager::Get()->GetFlimflamDeviceClient()->RequirePin(
         dbus::ObjectPath(device_path), pin, enable,
-        base::Bind(&OnNetworkActionSuccess, device_path, callback, object),
-        base::Bind(&OnNetworkActionError, device_path, callback, object));
+        base::Bind(callback, device_path, NETWORK_METHOD_ERROR_NONE,
+                   std::string()),
+        base::Bind(&OnNetworkActionError, callback, device_path));
   }
 }
 
 void CrosRequestEnterPin(const std::string& device_path,
                          const std::string& pin,
-                         NetworkActionCallback callback,
-                         void* object) {
+                         const NetworkOperationCallback& callback) {
   if (g_libcros_network_functions_enabled) {
-    chromeos::RequestEnterPin(device_path.c_str(), pin.c_str(), callback,
-                              object);
+    // The newly allocated callback will be deleted in OnNetworkAction.
+    chromeos::RequestEnterPin(device_path.c_str(), pin.c_str(),
+                              &OnNetworkAction,
+                              new NetworkOperationCallback(callback));
   } else {
     DBusThreadManager::Get()->GetFlimflamDeviceClient()->EnterPin(
         dbus::ObjectPath(device_path), pin,
-        base::Bind(&OnNetworkActionSuccess, device_path, callback, object),
-        base::Bind(&OnNetworkActionError, device_path, callback, object));
+        base::Bind(callback, device_path, NETWORK_METHOD_ERROR_NONE,
+                   std::string()),
+        base::Bind(&OnNetworkActionError, callback, device_path));
   }
 }
 
 void CrosRequestUnblockPin(const std::string& device_path,
                            const std::string& unblock_code,
                            const std::string& pin,
-                           NetworkActionCallback callback,
-                           void* object) {
+                           const NetworkOperationCallback& callback) {
   if (g_libcros_network_functions_enabled) {
+    // The newly allocated callback will be deleted in OnNetworkAction.
     chromeos::RequestUnblockPin(device_path.c_str(), unblock_code.c_str(),
-                                pin.c_str(), callback, object);
+                                pin.c_str(), &OnNetworkAction,
+                                new NetworkOperationCallback(callback));
   } else {
     DBusThreadManager::Get()->GetFlimflamDeviceClient()->UnblockPin(
         dbus::ObjectPath(device_path), unblock_code, pin,
-        base::Bind(&OnNetworkActionSuccess, device_path, callback, object),
-        base::Bind(&OnNetworkActionError, device_path, callback, object));
+        base::Bind(callback, device_path, NETWORK_METHOD_ERROR_NONE,
+                   std::string()),
+        base::Bind(&OnNetworkActionError, callback, device_path));
   }
 }
 
 void CrosRequestChangePin(const std::string& device_path,
                           const std::string& old_pin,
                           const std::string& new_pin,
-                          NetworkActionCallback callback,
-                          void* object) {
+                          const NetworkOperationCallback& callback) {
   if (g_libcros_network_functions_enabled) {
+    // The newly allocated callback will be deleted in OnNetworkAction.
     chromeos::RequestChangePin(device_path.c_str(), old_pin.c_str(),
-                               new_pin.c_str(), callback, object);
+                               new_pin.c_str(), &OnNetworkAction,
+                               new NetworkOperationCallback(callback));
   } else {
     DBusThreadManager::Get()->GetFlimflamDeviceClient()->ChangePin(
         dbus::ObjectPath(device_path), old_pin, new_pin,
-        base::Bind(&OnNetworkActionSuccess, device_path, callback, object),
-        base::Bind(&OnNetworkActionError, device_path, callback, object));
+        base::Bind(callback, device_path, NETWORK_METHOD_ERROR_NONE,
+                   std::string()),
+        base::Bind(&OnNetworkActionError, callback, device_path));
   }
 }
 
@@ -931,16 +945,18 @@ void CrosProposeScan(const std::string& device_path) {
 
 void CrosRequestCellularRegister(const std::string& device_path,
                                  const std::string& network_id,
-                                 chromeos::NetworkActionCallback callback,
-                                 void* object) {
+                                 const NetworkOperationCallback& callback) {
   if (g_libcros_network_functions_enabled) {
+    // The newly allocated callback will be deleted in OnNetworkAction.
     chromeos::RequestCellularRegister(device_path.c_str(), network_id.c_str(),
-                                      callback, object);
+                                      &OnNetworkAction,
+                                      new NetworkOperationCallback(callback));
   } else {
     DBusThreadManager::Get()->GetFlimflamDeviceClient()->Register(
         dbus::ObjectPath(device_path), network_id,
-        base::Bind(&OnNetworkActionSuccess, device_path, callback, object),
-        base::Bind(&OnNetworkActionError, device_path, callback, object));
+        base::Bind(callback, device_path, NETWORK_METHOD_ERROR_NONE,
+                   std::string()),
+        base::Bind(&OnNetworkActionError, callback, device_path));
   }
 }
 
@@ -1049,7 +1065,8 @@ bool CrosAddIPConfig(const std::string& device_path, IPConfigType type) {
         DBusThreadManager::Get()->GetFlimflamDeviceClient()->
         CallAddIPConfigAndBlock(dbus::ObjectPath(device_path), type_str);
     if (result.value().empty()) {
-      LOG(WARNING) <<"Add IPConfig failed: ";
+      LOG(ERROR) << "Add IPConfig failed for device path " << device_path
+                 << " and type " << type_str;
       return false;
     }
     return true;

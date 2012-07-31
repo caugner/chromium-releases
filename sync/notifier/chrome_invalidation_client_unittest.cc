@@ -8,18 +8,19 @@
 #include "google/cacheinvalidation/include/invalidation-client.h"
 #include "google/cacheinvalidation/include/types.h"
 #include "google/cacheinvalidation/v2/types.pb.h"
-#include "jingle/notifier/base/fake_base_task.h"
+#include "jingle/notifier/listener/fake_push_client.h"
+#include "sync/internal_api/public/syncable/model_type.h"
+#include "sync/internal_api/public/syncable/model_type_payload_map.h"
+#include "sync/internal_api/public/util/weak_handle.h"
 #include "sync/notifier/chrome_invalidation_client.h"
-#include "sync/notifier/state_writer.h"
-#include "sync/syncable/model_type.h"
-#include "sync/syncable/model_type_payload_map.h"
-#include "sync/util/weak_handle.h"
+#include "sync/notifier/mock_invalidation_state_tracker.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace sync_notifier {
 
 using ::testing::_;
+using ::testing::InSequence;
 using ::testing::Return;
 using ::testing::StrictMock;
 
@@ -28,6 +29,7 @@ namespace {
 const char kClientId[] = "client_id";
 const char kClientInfo[] = "client_info";
 const char kState[] = "state";
+const char kNewState[] = "new_state";
 
 class MockInvalidationClient : public invalidation::InvalidationClient {
  public:
@@ -43,33 +45,24 @@ class MockInvalidationClient : public invalidation::InvalidationClient {
 class MockListener : public ChromeInvalidationClient::Listener {
  public:
   MOCK_METHOD1(OnInvalidate, void(const syncable::ModelTypePayloadMap&));
-  MOCK_METHOD1(OnSessionStatusChanged, void(bool));
-};
-
-class MockInvalidationVersionTracker
-    : public InvalidationVersionTracker,
-      public base::SupportsWeakPtr<MockInvalidationVersionTracker> {
- public:
-  MOCK_CONST_METHOD0(GetAllMaxVersions, InvalidationVersionMap());
-  MOCK_METHOD2(SetMaxVersion, void(syncable::ModelType, int64));
-};
-
-class MockStateWriter : public StateWriter {
- public:
-  MOCK_METHOD1(WriteState, void(const std::string&));
+  MOCK_METHOD0(OnNotificationsEnabled, void());
+  MOCK_METHOD1(OnNotificationsDisabled, void(NotificationsDisabledReason));
 };
 
 }  // namespace
 
 class ChromeInvalidationClientTest : public testing::Test {
  protected:
+  ChromeInvalidationClientTest()
+      : fake_push_client_(new notifier::FakePushClient()),
+        client_(scoped_ptr<notifier::PushClient>(fake_push_client_)) {}
+
   virtual void SetUp() {
     client_.Start(kClientId, kClientInfo, kState,
                   InvalidationVersionMap(),
                   browser_sync::MakeWeakHandle(
-                      mock_invalidation_version_tracker_.AsWeakPtr()),
-                  &mock_listener_, &mock_state_writer_,
-                  fake_base_task_.AsWeakPtr());
+                      mock_invalidation_state_tracker_.AsWeakPtr()),
+                  &mock_listener_);
   }
 
   virtual void TearDown() {
@@ -98,7 +91,7 @@ class ChromeInvalidationClientTest : public testing::Test {
     EXPECT_CALL(mock_invalidation_client_, Acknowledge(ack_handle));
     client_.Invalidate(&mock_invalidation_client_, inv, ack_handle);
     // Pump message loop to trigger
-    // InvalidationVersionTracker::SetMaxVersion().
+    // InvalidationStateTracker::SetMaxVersion().
     message_loop_.RunAllPending();
   }
 
@@ -121,11 +114,10 @@ class ChromeInvalidationClientTest : public testing::Test {
 
   MessageLoop message_loop_;
   StrictMock<MockListener> mock_listener_;
-  StrictMock<MockInvalidationVersionTracker>
-      mock_invalidation_version_tracker_;
-  StrictMock<MockStateWriter> mock_state_writer_;
+  StrictMock<MockInvalidationStateTracker>
+      mock_invalidation_state_tracker_;
   StrictMock<MockInvalidationClient> mock_invalidation_client_;
-  notifier::FakeBaseTask fake_base_task_;
+  notifier::FakePushClient* const fake_push_client_;
   ChromeInvalidationClient client_;
 };
 
@@ -156,7 +148,7 @@ TEST_F(ChromeInvalidationClientTest, InvalidateBadObjectId) {
 TEST_F(ChromeInvalidationClientTest, InvalidateNoPayload) {
   EXPECT_CALL(mock_listener_,
               OnInvalidate(MakeMap(syncable::BOOKMARKS, "")));
-  EXPECT_CALL(mock_invalidation_version_tracker_,
+  EXPECT_CALL(mock_invalidation_state_tracker_,
               SetMaxVersion(syncable::BOOKMARKS, 1));
   FireInvalidate("BOOKMARK", 1, NULL);
 }
@@ -164,7 +156,7 @@ TEST_F(ChromeInvalidationClientTest, InvalidateNoPayload) {
 TEST_F(ChromeInvalidationClientTest, InvalidateWithPayload) {
   EXPECT_CALL(mock_listener_,
               OnInvalidate(MakeMap(syncable::PREFERENCES, "payload")));
-  EXPECT_CALL(mock_invalidation_version_tracker_,
+  EXPECT_CALL(mock_invalidation_state_tracker_,
               SetMaxVersion(syncable::PREFERENCES, 1));
   FireInvalidate("PREFERENCE", 1, "payload");
 }
@@ -174,7 +166,7 @@ TEST_F(ChromeInvalidationClientTest, InvalidateVersion) {
 
   EXPECT_CALL(mock_listener_,
               OnInvalidate(MakeMap(syncable::APPS, "")));
-  EXPECT_CALL(mock_invalidation_version_tracker_,
+  EXPECT_CALL(mock_invalidation_state_tracker_,
               SetMaxVersion(syncable::APPS, 1));
 
   // Should trigger.
@@ -207,9 +199,9 @@ TEST_F(ChromeInvalidationClientTest, InvalidateVersionMultipleTypes) {
   EXPECT_CALL(mock_listener_,
               OnInvalidate(MakeMap(syncable::EXTENSIONS, "")));
 
-  EXPECT_CALL(mock_invalidation_version_tracker_,
+  EXPECT_CALL(mock_invalidation_state_tracker_,
               SetMaxVersion(syncable::APPS, 3));
-  EXPECT_CALL(mock_invalidation_version_tracker_,
+  EXPECT_CALL(mock_invalidation_state_tracker_,
               SetMaxVersion(syncable::EXTENSIONS, 2));
 
   // Should trigger both.
@@ -217,21 +209,21 @@ TEST_F(ChromeInvalidationClientTest, InvalidateVersionMultipleTypes) {
   FireInvalidate("EXTENSION", 2, NULL);
 
   Mock::VerifyAndClearExpectations(&mock_listener_);
-  Mock::VerifyAndClearExpectations(&mock_invalidation_version_tracker_);
+  Mock::VerifyAndClearExpectations(&mock_invalidation_state_tracker_);
 
   // Should both be dropped.
   FireInvalidate("APP", 1, NULL);
   FireInvalidate("EXTENSION", 1, NULL);
 
   Mock::VerifyAndClearExpectations(&mock_listener_);
-  Mock::VerifyAndClearExpectations(&mock_invalidation_version_tracker_);
+  Mock::VerifyAndClearExpectations(&mock_invalidation_state_tracker_);
 
   // InvalidateAll shouldn't change any version state.
   EXPECT_CALL(mock_listener_, OnInvalidate(MakeMapFromSet(types, "")));
   FireInvalidateAll();
 
   Mock::VerifyAndClearExpectations(&mock_listener_);
-  Mock::VerifyAndClearExpectations(&mock_invalidation_version_tracker_);
+  Mock::VerifyAndClearExpectations(&mock_invalidation_state_tracker_);
 
   EXPECT_CALL(mock_listener_,
               OnInvalidate(MakeMap(syncable::PREFERENCES, "")));
@@ -240,11 +232,11 @@ TEST_F(ChromeInvalidationClientTest, InvalidateVersionMultipleTypes) {
   EXPECT_CALL(mock_listener_,
               OnInvalidate(MakeMap(syncable::APPS, "")));
 
-  EXPECT_CALL(mock_invalidation_version_tracker_,
+  EXPECT_CALL(mock_invalidation_state_tracker_,
               SetMaxVersion(syncable::PREFERENCES, 5));
-  EXPECT_CALL(mock_invalidation_version_tracker_,
+  EXPECT_CALL(mock_invalidation_state_tracker_,
               SetMaxVersion(syncable::EXTENSIONS, 3));
-  EXPECT_CALL(mock_invalidation_version_tracker_,
+  EXPECT_CALL(mock_invalidation_state_tracker_,
               SetMaxVersion(syncable::APPS, 4));
 
   // Should trigger all three.
@@ -270,6 +262,74 @@ TEST_F(ChromeInvalidationClientTest, RegisterTypes) {
   FireInvalidateAll();
 }
 
-// TODO(akalin): Flesh out unit tests.
+TEST_F(ChromeInvalidationClientTest, WriteState) {
+  EXPECT_CALL(mock_invalidation_state_tracker_,
+              SetInvalidationState(kNewState));
+  client_.WriteState(kNewState);
+}
+
+TEST_F(ChromeInvalidationClientTest, StateChangesNotReady) {
+  InSequence dummy;
+  EXPECT_CALL(mock_listener_,
+              OnNotificationsDisabled(TRANSIENT_NOTIFICATION_ERROR));
+  EXPECT_CALL(mock_listener_,
+              OnNotificationsDisabled(NOTIFICATION_CREDENTIALS_REJECTED));
+  EXPECT_CALL(mock_listener_,
+              OnNotificationsDisabled(TRANSIENT_NOTIFICATION_ERROR));
+
+  fake_push_client_->DisableNotifications(
+      notifier::TRANSIENT_NOTIFICATION_ERROR);
+  fake_push_client_->DisableNotifications(
+      notifier::NOTIFICATION_CREDENTIALS_REJECTED);
+  fake_push_client_->EnableNotifications();
+}
+
+TEST_F(ChromeInvalidationClientTest, StateChangesReady) {
+  InSequence dummy;
+  EXPECT_CALL(mock_listener_,
+              OnNotificationsDisabled(TRANSIENT_NOTIFICATION_ERROR));
+  EXPECT_CALL(mock_listener_, OnNotificationsEnabled());
+  EXPECT_CALL(mock_listener_,
+              OnNotificationsDisabled(TRANSIENT_NOTIFICATION_ERROR));
+  EXPECT_CALL(mock_listener_,
+              OnNotificationsDisabled(NOTIFICATION_CREDENTIALS_REJECTED));
+  EXPECT_CALL(mock_listener_, OnNotificationsEnabled());
+
+  fake_push_client_->EnableNotifications();
+  client_.Ready(NULL);
+  fake_push_client_->DisableNotifications(
+      notifier::TRANSIENT_NOTIFICATION_ERROR);
+  fake_push_client_->DisableNotifications(
+      notifier::NOTIFICATION_CREDENTIALS_REJECTED);
+  fake_push_client_->EnableNotifications();
+}
+
+TEST_F(ChromeInvalidationClientTest, StateChangesAuthError) {
+  InSequence dummy;
+  EXPECT_CALL(mock_listener_,
+              OnNotificationsDisabled(TRANSIENT_NOTIFICATION_ERROR));
+  EXPECT_CALL(mock_listener_, OnNotificationsEnabled());
+  EXPECT_CALL(mock_listener_,
+              OnNotificationsDisabled(NOTIFICATION_CREDENTIALS_REJECTED))
+      .Times(4);
+  EXPECT_CALL(mock_listener_, OnNotificationsEnabled());
+
+  fake_push_client_->EnableNotifications();
+  client_.Ready(NULL);
+
+  client_.InformError(
+      NULL,
+      invalidation::ErrorInfo(
+          invalidation::ErrorReason::AUTH_FAILURE,
+          false /* is_transient */,
+          "auth error",
+          invalidation::ErrorContext()));
+  fake_push_client_->DisableNotifications(
+      notifier::TRANSIENT_NOTIFICATION_ERROR);
+  fake_push_client_->DisableNotifications(
+      notifier::NOTIFICATION_CREDENTIALS_REJECTED);
+  fake_push_client_->EnableNotifications();
+  client_.Ready(NULL);
+}
 
 }  // namespace sync_notifier

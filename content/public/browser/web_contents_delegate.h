@@ -10,9 +10,11 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "base/callback.h"
 #include "base/string16.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/navigation_type.h"
+#include "content/public/common/media_stream_request.h"
 #include "content/public/common/page_transition_types.h"
 #include "content/public/common/window_container_type.h"
 #include "third_party/skia/include/core/SkColor.h"
@@ -22,7 +24,6 @@
 class FilePath;
 class GURL;
 class WebContentsImpl;
-struct NativeWebKeyboardEvent;
 
 namespace base {
 class ListValue;
@@ -38,6 +39,7 @@ class WebContents;
 class WebIntentsDispatcher;
 struct ContextMenuParams;
 struct FileChooserParams;
+struct NativeWebKeyboardEvent;
 struct SSLStatus;
 }
 
@@ -53,11 +55,14 @@ class HistoryAddPageArgs;
 
 namespace webkit_glue {
 struct WebIntentData;
+struct WebIntentServiceData;
 }
 
 namespace content {
 
 struct OpenURLParams;
+
+typedef base::Callback< void(const MediaStreamDevices&) > MediaResponseCallback;
 
 // Objects implement this interface to get notified about changes in the
 // WebContents and to provide necessary functionality.
@@ -165,10 +170,6 @@ class CONTENT_EXPORT WebContentsDelegate {
   // a WebContents with a valid WebApp set.
   virtual void ConvertContentsToApplication(WebContents* source) {}
 
-  // Whether the specified tab can be reloaded.
-  // Reloading can be disabled e. g. for the DevTools window.
-  virtual bool CanReloadContents(WebContents* source) const;
-
   // Return the rect where to display the resize corner, if any, otherwise
   // an empty rect.
   virtual gfx::Rect GetRootWindowResizerRect() const;
@@ -179,6 +180,15 @@ class CONTENT_EXPORT WebContentsDelegate {
   // Returns true if javascript dialogs and unload alerts are suppressed.
   // Default is false.
   virtual bool ShouldSuppressDialogs();
+
+  // Add a message to the console. Returning true indicates that the delegate
+  // handled the message. If false is returned the default logging mechanism
+  // will be used for the message.
+  virtual bool AddMessageToConsole(WebContents* soruce,
+                                   int32 level,
+                                   const string16& message,
+                                   int32 line_no,
+                                   const string16& source_id);
 
   // Tells us that we've finished firing this tab's beforeunload event.
   // The proceed bool tells us whether the user chose to proceed closing the
@@ -346,18 +356,22 @@ class CONTENT_EXPORT WebContentsDelegate {
   virtual void JSOutOfMemory(WebContents* web_contents) {}
 
   // Register a new handler for URL requests with the given scheme.
+  // |user_gesture| is true if the registration is made in the context of a user
+  // gesture.
   virtual void RegisterProtocolHandler(WebContents* web_contents,
                                        const std::string& protocol,
                                        const GURL& url,
-                                       const string16& title) {}
+                                       const string16& title,
+                                       bool user_gesture) {}
 
-  // Register a new handler for Intents with the given action and type filter.
-  virtual void RegisterIntentHandler(WebContents* web_contents,
-                                     const string16& action,
-                                     const string16& type,
-                                     const string16& href,
-                                     const string16& title,
-                                     const string16& disposition) {}
+  // Register a new Web Intents service.
+  // |user_gesture| is true if the registration is made in the context of a user
+  // gesture. |web_contents| is the context in which the registration was
+  // performed, and |data| is the service record being registered.
+  virtual void RegisterIntentHandler(
+      WebContents* web_contents,
+      const webkit_glue::WebIntentServiceData& data,
+      bool user_gesture) {}
 
   // Web Intents notification handler. See WebIntentsDispatcher for
   // documentation of callee responsibility for the dispatcher.
@@ -392,10 +406,21 @@ class CONTENT_EXPORT WebContentsDelegate {
   // GotResponseToLockMouseRequest() will be called on the requesting tab
   // contents.
   virtual void RequestToLockMouse(WebContents* web_contents,
-                                  bool user_gesture) {}
+                                  bool user_gesture,
+                                  bool last_unlocked_by_target) {}
 
   // Notification that the page has lost the mouse lock.
   virtual void LostMouseLock() {}
+
+  // Asks permission to use the camera and/or microphone. If permission is
+  // granted, a call should be made to |callback| with the devices. If the
+  // request is denied, a call should be made to |callback| with an empty list
+  // of devices. |request| has the details of the request (e.g. which of audio
+  // and/or video devices are requested, and lists of available devices).
+  virtual void RequestMediaAccessPermission(
+      WebContents* web_contents,
+      const MediaStreamRequest* request,
+      const MediaResponseCallback& callback) {}
 
  protected:
   virtual ~WebContentsDelegate();

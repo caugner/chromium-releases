@@ -22,9 +22,12 @@ typedef struct _GdkPixbuf GdkPixbuf;
 typedef struct _GtkWidget GtkWidget;
 typedef struct _GtkWindow GtkWindow;
 
-class Extension;
 class Profile;
-class TabContentsWrapper;
+class TabContents;
+
+namespace extensions{
+class Extension;
+}
 
 class CreateApplicationShortcutsDialogGtk
     : public base::RefCountedThreadSafe<CreateApplicationShortcutsDialogGtk,
@@ -81,18 +84,19 @@ class CreateWebApplicationShortcutsDialogGtk
     : public CreateApplicationShortcutsDialogGtk {
  public:
   // Displays the dialog box to create application shortcuts for |tab_contents|.
-  static void Show(GtkWindow* parent, TabContentsWrapper* tab_contents);
+  static void Show(GtkWindow* parent, TabContents* tab_contents);
 
   CreateWebApplicationShortcutsDialogGtk(GtkWindow* parent,
-                                         TabContentsWrapper* tab_contents);
-  virtual ~CreateWebApplicationShortcutsDialogGtk() {}
+                                         TabContents* tab_contents);
 
   virtual void OnCreatedShortcut(void) OVERRIDE;
 
- private:
+ protected:
+  virtual ~CreateWebApplicationShortcutsDialogGtk() {}
 
-  // TabContentsWrapper for which the shortcut will be created.
-  TabContentsWrapper* tab_contents_;
+ private:
+  // TabContents for which the shortcut will be created.
+  TabContents* tab_contents_;
 
   DISALLOW_COPY_AND_ASSIGN(CreateWebApplicationShortcutsDialogGtk);
 };
@@ -102,12 +106,12 @@ class CreateChromeApplicationShortcutsDialogGtk
     public ImageLoadingTracker::Observer {
  public:
   // Displays the dialog box to create application shortcuts for |app|.
-  static void Show(GtkWindow* parent, Profile* profile, const Extension* app);
+  static void Show(GtkWindow* parent, Profile* profile,
+                   const extensions::Extension* app);
 
   CreateChromeApplicationShortcutsDialogGtk(GtkWindow* parent,
                                             Profile* profile,
-                                            const Extension* app);
-  virtual ~CreateChromeApplicationShortcutsDialogGtk() {}
+                                            const extensions::Extension* app);
 
   // Implement ImageLoadingTracker::Observer.  |tracker_| is used to
   // load the app's icon.  This method recieves the icon, and adds
@@ -117,11 +121,13 @@ class CreateChromeApplicationShortcutsDialogGtk
                              int index) OVERRIDE;
 
  protected:
+  virtual ~CreateChromeApplicationShortcutsDialogGtk() {}
+
   virtual void CreateDesktopShortcut(
       const ShellIntegration::ShortcutInfo& shortcut_info) OVERRIDE;
 
  private:
-  const Extension* app_;
+  const extensions::Extension* app_;
   FilePath profile_path_;
   ImageLoadingTracker tracker_;
   DISALLOW_COPY_AND_ASSIGN(CreateChromeApplicationShortcutsDialogGtk);

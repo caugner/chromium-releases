@@ -12,7 +12,7 @@
 #include <string>
 
 #include "chrome/common/net/gaia/gaia_auth_fetcher.h"
-#include "content/test/test_url_fetcher_factory.h"
+#include "content/public/test/test_url_fetcher_factory.h"
 #include "net/url_request/url_request_status.h"
 
 // Responds as though ClientLogin returned from the server.
@@ -21,16 +21,16 @@ class MockFetcher : public TestURLFetcher {
   MockFetcher(bool success,
               const GURL& url,
               const std::string& results,
-              content::URLFetcher::RequestType request_type,
-              content::URLFetcherDelegate* d);
+              net::URLFetcher::RequestType request_type,
+              net::URLFetcherDelegate* d);
 
   MockFetcher(const GURL& url,
               const net::URLRequestStatus& status,
               int response_code,
               const net::ResponseCookies& cookies,
               const std::string& results,
-              content::URLFetcher::RequestType request_type,
-              content::URLFetcherDelegate* d);
+              net::URLFetcher::RequestType request_type,
+              net::URLFetcherDelegate* d);
 
   virtual ~MockFetcher();
 
@@ -41,7 +41,7 @@ class MockFetcher : public TestURLFetcher {
 };
 
 template<typename T>
-class MockURLFetcherFactory : public content::URLFetcherFactory,
+class MockURLFetcherFactory : public net::URLFetcherFactory,
                               public ScopedURLFetcherFactory {
  public:
   MockURLFetcherFactory()
@@ -49,11 +49,11 @@ class MockURLFetcherFactory : public content::URLFetcherFactory,
         success_(true) {
   }
   ~MockURLFetcherFactory() {}
-  content::URLFetcher* CreateURLFetcher(
+  net::URLFetcher* CreateURLFetcher(
       int id,
       const GURL& url,
-      content::URLFetcher::RequestType request_type,
-      content::URLFetcherDelegate* d) OVERRIDE {
+      net::URLFetcher::RequestType request_type,
+      net::URLFetcherDelegate* d) OVERRIDE {
     return new T(success_, url, results_, request_type, d);
   }
   void set_success(bool success) {

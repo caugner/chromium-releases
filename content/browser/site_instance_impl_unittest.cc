@@ -8,7 +8,6 @@
 #include "content/browser/browser_thread_impl.h"
 #include "content/browser/browsing_instance.h"
 #include "content/browser/child_process_security_policy_impl.h"
-#include "content/browser/mock_content_browser_client.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/renderer_host/test_render_view_host.h"
@@ -19,8 +18,10 @@
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/common/url_constants.h"
-#include "content/test/mock_render_process_host.h"
-#include "content/test/test_browser_context.h"
+#include "content/public/test/mock_render_process_host.h"
+#include "content/public/test/test_browser_context.h"
+#include "content/public/test/test_browser_thread.h"
+#include "content/test/test_content_browser_client.h"
 #include "content/test/test_content_client.h"
 #include "googleurl/src/url_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -79,7 +80,8 @@ class SiteInstanceTestClient : public TestContentClient {
   }
 };
 
-class SiteInstanceTestBrowserClient : public content::MockContentBrowserClient {
+class SiteInstanceTestBrowserClient :
+    public content::TestContentBrowserClient {
  public:
   SiteInstanceTestBrowserClient()
       : privileged_process_id_(-1) {
@@ -114,6 +116,9 @@ class SiteInstanceTest : public testing::Test {
  public:
   SiteInstanceTest()
       : ui_thread_(BrowserThread::UI, &message_loop_),
+        file_user_blocking_thread_(content::BrowserThread::FILE_USER_BLOCKING,
+                                   &message_loop_),
+        io_thread_(content::BrowserThread::IO, &message_loop_),
         old_client_(NULL),
         old_browser_client_(NULL) {
   }
@@ -122,14 +127,16 @@ class SiteInstanceTest : public testing::Test {
     old_client_ = content::GetContentClient();
     old_browser_client_ = content::GetContentClient()->browser();
     content::SetContentClient(&client_);
-    content::GetContentClient()->set_browser(&browser_client_);
+    content::GetContentClient()->set_browser_for_testing(&browser_client_);
     url_util::AddStandardScheme(kPrivilegedScheme);
     url_util::AddStandardScheme(chrome::kChromeUIScheme);
   }
 
   virtual void TearDown() {
-    content::GetContentClient()->set_browser(old_browser_client_);
+    content::GetContentClient()->set_browser_for_testing(old_browser_client_);
     content::SetContentClient(old_client_);
+    MessageLoop::current()->RunAllPending();
+    message_loop_.RunAllPending();
   }
 
   void set_privileged_process_id(int process_id) {
@@ -138,7 +145,9 @@ class SiteInstanceTest : public testing::Test {
 
  private:
   MessageLoopForUI message_loop_;
-  BrowserThreadImpl ui_thread_;
+  content::TestBrowserThread ui_thread_;
+  content::TestBrowserThread file_user_blocking_thread_;
+  content::TestBrowserThread io_thread_;
 
   SiteInstanceTestClient client_;
   SiteInstanceTestBrowserClient browser_client_;
@@ -245,7 +254,8 @@ TEST_F(SiteInstanceTest, SiteInstanceDestructor) {
   // browsing_instance is now deleted
 
   // Ensure that instances are deleted when their RenderViewHosts are gone.
-  scoped_ptr<TestBrowserContext> browser_context(new TestBrowserContext());
+  scoped_ptr<content::TestBrowserContext> browser_context(
+      new content::TestBrowserContext());
   instance =
       TestSiteInstance::CreateTestSiteInstance(browser_context.get(),
                                                &site_delete_counter,
@@ -309,7 +319,8 @@ TEST_F(SiteInstanceTest, CloneNavigationEntry) {
 // Test to ensure GetProcess returns and creates processes correctly.
 TEST_F(SiteInstanceTest, GetProcess) {
   // Ensure that GetProcess returns a process.
-  scoped_ptr<TestBrowserContext> browser_context(new TestBrowserContext());
+  scoped_ptr<content::TestBrowserContext> browser_context(
+      new content::TestBrowserContext());
   scoped_ptr<content::RenderProcessHost> host1;
   scoped_refptr<SiteInstanceImpl> instance(static_cast<SiteInstanceImpl*>(
       SiteInstance::Create(browser_context.get())));
@@ -503,7 +514,8 @@ TEST_F(SiteInstanceTest, OneSiteInstancePerSiteInBrowserContext) {
 
   // A visit to the original site in a new BrowsingInstance (different browser
   // context) should return a different SiteInstance.
-  scoped_ptr<TestBrowserContext> browser_context(new TestBrowserContext());
+  scoped_ptr<content::TestBrowserContext> browser_context(
+      new content::TestBrowserContext());
   TestBrowsingInstance* browsing_instance3 =
       new TestBrowsingInstance(browser_context.get(), &delete_counter);
   browsing_instance3->set_use_process_per_site(true);
@@ -596,7 +608,8 @@ TEST_F(SiteInstanceTest, ProcessSharingByType) {
 // Test to ensure that HasWrongProcessForURL behaves properly for different
 // types of URLs.
 TEST_F(SiteInstanceTest, HasWrongProcessForURL) {
-  scoped_ptr<TestBrowserContext> browser_context(new TestBrowserContext());
+  scoped_ptr<content::TestBrowserContext> browser_context(
+      new content::TestBrowserContext());
   scoped_ptr<content::RenderProcessHost> host;
   scoped_refptr<SiteInstanceImpl> instance(static_cast<SiteInstanceImpl*>(
       SiteInstance::Create(browser_context.get())));

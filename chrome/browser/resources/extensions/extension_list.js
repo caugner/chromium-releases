@@ -48,8 +48,7 @@ cr.define('options', function() {
      */
      showExtensionNodes_: function() {
        // Iterate over the extension data and add each item to the list.
-       var list = this;
-       this.data_.extensions.forEach(this.createNode_.bind(this));
+       this.data_.extensions.forEach(this.createNode_, this);
 
        if (this.data_.extensions.length == 0)
          this.classList.add('empty-extension-list');
@@ -69,10 +68,10 @@ cr.define('options', function() {
       var node = template.cloneNode(true);
       node.id = extension.id;
 
-      if (!extension.enabled)
-        node.classList.add('disabled-extension');
+      if (!extension.enabled || extension.terminated)
+        node.classList.add('inactive-extension');
 
-      if (!extension.mayDisable)
+      if (!extension.userModifiable)
         node.classList.add('may-not-disable');
 
       var item = node.querySelector('.extension-list-item');
@@ -132,8 +131,18 @@ cr.define('options', function() {
 
       if (extension.allow_activity) {
         var activity = node.querySelector('.activity-link');
-        activity.href = 'chrome://extension-activity?extensionId=' +
-            extension.id;
+        activity.addEventListener('click', function(e) {
+          chrome.send('navigateToUrl', [
+            'chrome://extension-activity?extensionId=' + extension.id,
+            '_blank',
+            e.button,
+            e.altKey,
+            e.ctrlKey,
+            e.metaKey,
+            e.shiftKey
+          ]);
+          e.preventDefault();
+        });
         activity.hidden = false;
       }
 
@@ -160,9 +169,9 @@ cr.define('options', function() {
         // The 'Enabled' checkbox.
         var enable = node.querySelector('.enable-checkbox');
         enable.hidden = false;
-        enable.querySelector('input').disabled = !extension.mayDisable;
+        enable.querySelector('input').disabled = !extension.userModifiable;
 
-        if (extension.mayDisable) {
+        if (extension.userModifiable) {
           enable.addEventListener('click', function(e) {
             chrome.send('extensionSettingsEnable',
                         [extension.id, e.target.checked ? 'true' : 'false']);
@@ -202,7 +211,7 @@ cr.define('options', function() {
       }
 
       // Then the 'managed, cannot uninstall/disable' message.
-      if (!extension.mayDisable)
+      if (!extension.userModifiable)
         node.querySelector('.managed-message').hidden = false;
 
       // Then active views.
@@ -235,18 +244,30 @@ cr.define('options', function() {
         });
       }
 
+      // The extension warnings (describing runtime issues).
+      if (extension.warnings) {
+        var panel = node.querySelector('.extension-warnings');
+        panel.hidden = false;
+        var list = panel.querySelector('ul');
+        extension.warnings.forEach(function(warning) {
+          list.appendChild(document.createElement('li')).innerText = warning;
+        });
+      }
+
       // The install warnings.
       if (extension.installWarnings) {
         var panel = node.querySelector('.install-warnings');
         panel.hidden = false;
         var list = panel.querySelector('ul');
         extension.installWarnings.forEach(function(warning) {
-          list.appendChild(document.createElement('li')).innerText = warning;
+          var li = document.createElement('li');
+          li[warning.isHTML ? 'innerHTML' : 'innerText'] = warning.message;
+          list.appendChild(li);
         });
       }
 
       this.appendChild(node);
-    },
+    }
   };
 
   return {

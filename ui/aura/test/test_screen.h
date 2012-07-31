@@ -7,7 +7,6 @@
 #pragma once
 
 #include "base/compiler_specific.h"
-#include "base/memory/scoped_ptr.h"
 #include "ui/gfx/screen_impl.h"
 
 namespace aura {
@@ -23,15 +22,15 @@ class TestScreen : public gfx::ScreenImpl {
   // gfx::ScreenImpl overrides:
   virtual gfx::Point GetCursorScreenPoint() OVERRIDE;
   virtual gfx::NativeWindow GetWindowAtCursorScreenPoint() OVERRIDE;
-  virtual int GetNumMonitors() OVERRIDE;
-  virtual gfx::Monitor GetMonitorNearestWindow(
+  virtual int GetNumDisplays() OVERRIDE;
+  virtual gfx::Display GetDisplayNearestWindow(
       gfx::NativeView view) const OVERRIDE;
-  virtual gfx::Monitor GetMonitorNearestPoint(
+  virtual gfx::Display GetDisplayNearestPoint(
       const gfx::Point& point) const OVERRIDE;
-  virtual gfx::Monitor GetPrimaryMonitor() const OVERRIDE;
+  virtual gfx::Display GetPrimaryDisplay() const OVERRIDE;
 
  private:
-  gfx::Monitor GetMonitor() const;
+  gfx::Display GetMonitor() const;
 
   aura::RootWindow* root_window_;
 

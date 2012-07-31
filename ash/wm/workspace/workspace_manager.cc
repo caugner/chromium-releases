@@ -30,13 +30,17 @@
 
 namespace {
 
-// Returns a list of all the windows with layers in |result|.
+// Returns a list of all the windows with layers in |result|.  Optionally
+// ignores the window |ignore_window|.
 void BuildWindowList(const std::vector<aura::Window*>& windows,
+                     aura::Window* ignore_window,
                      std::vector<aura::Window*>* result) {
   for (size_t i = 0; i < windows.size(); ++i) {
+    if (windows[i] == ignore_window)
+      continue;
     if (windows[i]->layer())
       result->push_back(windows[i]);
-    BuildWindowList(windows[i]->transient_children(), result);
+    BuildWindowList(windows[i]->transient_children(), ignore_window, result);
   }
 }
 
@@ -51,7 +55,7 @@ namespace internal {
 WorkspaceManager::WorkspaceManager(aura::Window* contents_view)
     : contents_view_(contents_view),
       active_workspace_(NULL),
-      ignored_window_(NULL),
+      maximize_restore_window_(NULL),
       grid_size_(0),
       shelf_(NULL) {
   DCHECK(contents_view);
@@ -129,7 +133,8 @@ void WorkspaceManager::SetActiveWorkspaceByWindow(aura::Window* window) {
 }
 
 void WorkspaceManager::UpdateShelfVisibility() {
-  shelf_->UpdateVisibilityState();
+  if (shelf_)
+    shelf_->UpdateVisibilityState();
 }
 
 WorkspaceManager::WindowState WorkspaceManager::GetWindowState() {
@@ -137,9 +142,7 @@ WorkspaceManager::WindowState WorkspaceManager::GetWindowState() {
     return WINDOW_STATE_DEFAULT;
 
   // TODO: this code needs to be made multi-monitor aware.
-  gfx::Rect bounds(
-      gfx::Screen::GetMonitorNearestWindow(contents_view_).bounds());
-  bounds.set_height(bounds.height() - shelf_->shelf_height());
+  gfx::Rect shelf_bounds(shelf_->GetIdealBounds());
   const aura::Window::Windows& windows(contents_view_->children());
   bool window_overlaps_launcher = false;
   bool has_maximized_window = false;
@@ -155,7 +158,7 @@ WorkspaceManager::WindowState WorkspaceManager::GetWindowState() {
     } else if (wm::IsWindowFullscreen(*i)) {
       return WINDOW_STATE_FULL_SCREEN;
     }
-    if (!window_overlaps_launcher && (*i)->bounds().bottom() > bounds.bottom())
+    if (!window_overlaps_launcher && (*i)->bounds().Intersects(shelf_bounds))
       window_overlaps_launcher = true;
   }
   if (has_maximized_window)
@@ -214,7 +217,7 @@ void WorkspaceManager::SetVisibilityOfWorkspaceWindows(
     AnimateChangeType change_type,
     bool value) {
   std::vector<aura::Window*> children;
-  BuildWindowList(workspace->windows(), &children);
+  BuildWindowList(workspace->windows(), maximize_restore_window_, &children);
   SetWindowLayerVisibility(children, change_type, value);
 }
 
@@ -291,9 +294,7 @@ int WorkspaceManager::GetWorkspaceIndexContaining(aura::Window* window) const {
 
 void WorkspaceManager::SetWindowBounds(aura::Window* window,
                                        const gfx::Rect& bounds) {
-  ignored_window_ = window;
   window->SetBounds(bounds);
-  ignored_window_ = NULL;
 }
 
 void WorkspaceManager::OnTypeOfWorkspacedNeededChanged(aura::Window* window) {
@@ -314,7 +315,9 @@ void WorkspaceManager::OnTypeOfWorkspacedNeededChanged(aura::Window* window) {
       new_workspace = CreateWorkspace(Workspace::TYPE_MANAGED);
     new_workspace->AddWindowAfter(window, NULL);
   }
+  maximize_restore_window_ = window;
   SetActiveWorkspace(new_workspace);
+  maximize_restore_window_ = NULL;
   // Delete at the end so that we don't attempt to switch to another
   // workspace in RemoveWorkspace().
   CleanupWorkspace(current_workspace);

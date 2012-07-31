@@ -16,8 +16,8 @@
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
 #include "grit/ui_resources.h"
-#include "ui/aura/window.h"
 #include "ui/aura/client/aura_constants.h"
+#include "ui/aura/window.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/hit_test.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -42,15 +42,12 @@ const int kAvatarSideSpacing = 2;
 const int kTabstripLeftSpacing = 0;
 // Space between right edge of tabstrip and maximize button.
 const int kTabstripRightSpacing = 10;
-// Space between top of window and top of tabstrip for maximized windows.
-// Place them flush to the top to make them clickable when the cursor is at
-// the screen edge.
-const int kTabstripTopSpacingMaximized = 0;
 // Height of the shadow of the content area, at the top of the toolbar.
 const int kContentShadowHeight = 1;
 
-// Space between top of window and top of tabstrip for restored windows.
-int GetTabstripTopSpacingRestored() {
+// Space between top of window and top of tabstrip for tall headers, such as
+// for restored windows, apps, etc.
+int tabstrip_top_spacing_tall() {
   static int value = -1;
   if (value == -1) {
     switch (ui::GetDisplayLayout()) {
@@ -68,10 +65,34 @@ int GetTabstripTopSpacingRestored() {
   return value;
 }
 
+// Space between top of window and top of tabstrip for short headers, such as
+// for maximized windows, pop-ups, etc.
+int tabstrip_top_spacing_short() {
+  static int value = -1;
+  if (value == -1) {
+    switch (ui::GetDisplayLayout()) {
+      case ui::LAYOUT_ASH:
+      case ui::LAYOUT_DESKTOP:
+        // Place them flush to the top to make them clickable when the cursor
+        // is at the screen edge.
+        value = 0;
+        break;
+      case ui::LAYOUT_TOUCH:
+        // Touch needs space for full-size window caption buttons (size, close)
+        // and Fitt's Law doesn't apply to fingers at the screen edge.
+        value = 8;
+        break;
+      default:
+        NOTREACHED();
+    }
+  }
+  return value;
+}
+
 // Height of the shadow in the tab image, used to ensure clicks in the shadow
 // area still drag restored windows.  This keeps the clickable area large enough
 // to hit easily.
-int GetTabShadowHeight() {
+int tab_shadow_height() {
   static int value = -1;
   if (value == -1) {
     switch (ui::GetDisplayLayout()) {
@@ -201,7 +222,7 @@ int BrowserNonClientFrameViewAsh::NonClientHitTest(const gfx::Point& point) {
     View::ConvertPointToView(this, frame()->client_view(), &client_point);
     // Report hits in shadow at top of tabstrip as caption.
     gfx::Rect tabstrip_bounds(browser_view()->tabstrip()->bounds());
-    if (client_point.y() < tabstrip_bounds.y() + GetTabShadowHeight())
+    if (client_point.y() < tabstrip_bounds.y() + tab_shadow_height())
       hit_test = HTCAPTION;
   }
   return hit_test;
@@ -235,8 +256,8 @@ void BrowserNonClientFrameViewAsh::OnPaint(gfx::Canvas* canvas) {
       canvas,
       ShouldPaintAsActive() ?
           ash::FramePainter::ACTIVE : ash::FramePainter::INACTIVE,
-      GetThemeFrameBitmapId(),
-      GetThemeFrameOverlayBitmap());
+      GetThemeFrameImageId(),
+      GetThemeFrameOverlayImage());
   if (browser_view()->ShouldShowWindowTitle())
     frame_painter_->PaintTitleBar(this, canvas, BrowserFrame::GetTitleFont());
   if (browser_view()->IsToolbarVisible())
@@ -246,9 +267,7 @@ void BrowserNonClientFrameViewAsh::OnPaint(gfx::Canvas* canvas) {
 }
 
 void BrowserNonClientFrameViewAsh::Layout() {
-  // Maximized windows and app/popup windows use shorter buttons.
-  bool maximized_layout =
-      frame()->IsMaximized() || !browser_view()->IsBrowserTypeNormal();
+  bool maximized_layout = UseShortHeader();
   frame_painter_->LayoutHeader(this, maximized_layout);
   if (avatar_button())
     LayoutAvatar();
@@ -318,14 +337,14 @@ bool BrowserNonClientFrameViewAsh::ShouldTabIconViewAnimate() const {
   // This function is queried during the creation of the window as the
   // TabIconView we host is initialized, so we need to NULL check the selected
   // WebContents because in this condition there is not yet a selected tab.
-  content::WebContents* current_tab = browser_view()->GetSelectedWebContents();
+  content::WebContents* current_tab = browser_view()->GetActiveWebContents();
   return current_tab ? current_tab->IsLoading() : false;
 }
 
-SkBitmap BrowserNonClientFrameViewAsh::GetFaviconForTabIconView() {
+gfx::ImageSkia BrowserNonClientFrameViewAsh::GetFaviconForTabIconView() {
   views::WidgetDelegate* delegate = frame()->widget_delegate();
   if (!delegate)
-    return SkBitmap();
+    return gfx::ImageSkia();
   return delegate->GetWindowIcon();
 }
 
@@ -336,23 +355,47 @@ SkBitmap BrowserNonClientFrameViewAsh::GetFaviconForTabIconView() {
 int BrowserNonClientFrameViewAsh::NonClientTopBorderHeight(
     bool force_restored) const {
   if (force_restored)
-    return GetTabstripTopSpacingRestored();
+    return tabstrip_top_spacing_tall();
   if (frame()->IsFullscreen())
     return 0;
   // Windows with tab strips need a smaller non-client area.
   if (browser_view()->IsTabStripVisible()) {
-    if (frame()->IsMaximized())
-      return kTabstripTopSpacingMaximized;
-    return GetTabstripTopSpacingRestored();
+    if (UseShortHeader())
+      return tabstrip_top_spacing_short();
+    return tabstrip_top_spacing_tall();
   }
   // For windows without a tab strip (popups, etc.) ensure we have enough space
-  // to see the window caption buttons and the content separator line.
-  return close_button_->bounds().bottom() + kClientEdgeThickness;
+  // to see the window caption buttons.
+  return close_button_->bounds().bottom() - kContentShadowHeight;
+}
+
+bool BrowserNonClientFrameViewAsh::UseShortHeader() const {
+  // Window at top of screen -> short header
+  if (frame()->GetWindowScreenBounds().y() == 0)
+    return true;
+  // Restored browser -> tall header
+  // Maximized browser -> short header
+  // App window -> tall header
+  // Popup window -> short header
+  // Panel -> short header
+  // Dialogs use short header and are handled via CustomFrameViewAsh.
+  Browser* browser = browser_view()->browser();
+  switch (browser->type()) {
+    case Browser::TYPE_TABBED:
+      return frame()->IsMaximized();
+    case Browser::TYPE_POPUP:
+      return !browser->is_app();
+    case Browser::TYPE_PANEL:
+      return true;
+    default:
+      NOTREACHED();
+      return false;
+  }
 }
 
 void BrowserNonClientFrameViewAsh::LayoutAvatar() {
   DCHECK(avatar_button());
-  SkBitmap incognito_icon = browser_view()->GetOTRAvatarIcon();
+  gfx::ImageSkia incognito_icon = browser_view()->GetOTRAvatarIcon();
 
   int avatar_bottom = GetHorizontalTabStripVerticalOffset(false) +
       browser_view()->GetTabStripHeight() - kAvatarBottomSpacing;
@@ -398,7 +441,7 @@ void BrowserNonClientFrameViewAsh::PaintToolbarBackground(
   // source y position.  If you have to debug this code use an image editor
   // to paint a diagonal line through the toolbar image and ensure it lines up
   // across the tab and toolbar.
-  SkBitmap* theme_toolbar = tp->GetBitmapNamed(IDR_THEME_TOOLBAR);
+  gfx::ImageSkia* theme_toolbar = tp->GetImageSkiaNamed(IDR_THEME_TOOLBAR);
   canvas->TileImageInt(
       *theme_toolbar,
       x, bottom_y - GetHorizontalTabStripVerticalOffset(false),
@@ -408,21 +451,22 @@ void BrowserNonClientFrameViewAsh::PaintToolbarBackground(
   // The content area line has a shadow that extends a couple of pixels above
   // the toolbar bounds.
   const int kContentShadowHeight = 2;
-  SkBitmap* toolbar_top =
-      tp->GetBitmapNamed(IDR_TOOLBAR_SHADE_TOP);
+  gfx::ImageSkia* toolbar_top =
+      tp->GetImageSkiaNamed(IDR_TOOLBAR_SHADE_TOP);
   canvas->TileImageInt(*toolbar_top,
                        0, 0,
                        x, y - kContentShadowHeight,
                        w, split_point + kContentShadowHeight + 1);
 
   // Draw the "lightening" shade line around the edges of the toolbar.
-  SkBitmap* toolbar_left = tp->GetBitmapNamed(IDR_TOOLBAR_SHADE_LEFT);
+  gfx::ImageSkia* toolbar_left = tp->GetImageSkiaNamed(IDR_TOOLBAR_SHADE_LEFT);
   canvas->TileImageInt(*toolbar_left,
                        0, 0,
                        x + kClientEdgeThickness,
                        y + kClientEdgeThickness + kContentShadowHeight,
                        toolbar_left->width(), theme_toolbar->height());
-  SkBitmap* toolbar_right = tp->GetBitmapNamed(IDR_TOOLBAR_SHADE_RIGHT);
+  gfx::ImageSkia* toolbar_right =
+      tp->GetImageSkiaNamed(IDR_TOOLBAR_SHADE_RIGHT);
   canvas->TileImageInt(*toolbar_right,
                        0, 0,
                        w - toolbar_right->width() - 2 * kClientEdgeThickness,
@@ -443,7 +487,7 @@ void BrowserNonClientFrameViewAsh::PaintContentEdge(gfx::Canvas* canvas) {
       ThemeService::GetDefaultColor(ThemeService::COLOR_TOOLBAR_SEPARATOR));
 }
 
-int BrowserNonClientFrameViewAsh::GetThemeFrameBitmapId() const {
+int BrowserNonClientFrameViewAsh::GetThemeFrameImageId() const {
   bool is_incognito = browser_view()->IsOffTheRecord();
   if (browser_view()->IsBrowserTypeNormal()) {
     // Use the standard resource ids to allow users to theme the frames.
@@ -465,13 +509,13 @@ int BrowserNonClientFrameViewAsh::GetThemeFrameBitmapId() const {
       IDR_AURA_WINDOW_HEADER_BASE_INACTIVE;
 }
 
-const SkBitmap*
-BrowserNonClientFrameViewAsh::GetThemeFrameOverlayBitmap() const {
+const gfx::ImageSkia*
+BrowserNonClientFrameViewAsh::GetThemeFrameOverlayImage() const {
   ui::ThemeProvider* tp = GetThemeProvider();
   if (tp->HasCustomImage(IDR_THEME_FRAME_OVERLAY) &&
       browser_view()->IsBrowserTypeNormal() &&
       !browser_view()->IsOffTheRecord()) {
-    return tp->GetBitmapNamed(ShouldPaintAsActive() ?
+    return tp->GetImageSkiaNamed(ShouldPaintAsActive() ?
         IDR_THEME_FRAME_OVERLAY : IDR_THEME_FRAME_OVERLAY_INACTIVE);
   }
   return NULL;

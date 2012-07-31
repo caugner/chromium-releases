@@ -9,9 +9,9 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "sync/engine/model_changing_syncer_command.h"
-#include "sync/engine/model_safe_worker.h"
 #include "sync/engine/syncer_types.h"
 #include "sync/engine/syncproto.h"
+#include "sync/internal_api/public/engine/model_safe_worker.h"
 
 namespace syncable {
 class WriteTransaction;
@@ -40,6 +40,7 @@ class VerifyUpdatesCommand : public ModelChangingSyncerCommand {
   };
   VerifyUpdateResult VerifyUpdate(syncable::WriteTransaction* trans,
                                   const SyncEntity& entry,
+                                  const syncable::ModelTypeSet& requested_types,
                                   const ModelSafeRoutingInfo& routes);
   DISALLOW_COPY_AND_ASSIGN(VerifyUpdatesCommand);
 };

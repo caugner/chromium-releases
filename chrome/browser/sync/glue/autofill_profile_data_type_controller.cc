@@ -9,15 +9,16 @@
 #include "chrome/browser/autofill/personal_data_manager.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sync/api/sync_error.h"
-#include "chrome/browser/sync/api/syncable_service.h"
 #include "chrome/browser/sync/profile_sync_components_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/webdata/web_data_service.h"
+#include "chrome/browser/webdata/web_data_service_factory.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
+#include "sync/api/sync_error.h"
+#include "sync/api/syncable_service.h"
 
 using content::BrowserThread;
 
@@ -47,16 +48,17 @@ void AutofillProfileDataTypeController::Observe(
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
   notification_registrar_.RemoveAll();
-  DoStartAssociationAsync();
+  OnModelLoaded();
 }
 
 void AutofillProfileDataTypeController::OnPersonalDataChanged() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK_EQ(state(), MODEL_STARTING);
   personal_data_->RemoveObserver(this);
-  web_data_service_ = profile()->GetWebDataService(Profile::IMPLICIT_ACCESS);
+  web_data_service_ = WebDataServiceFactory::GetForProfile(
+      profile(), Profile::IMPLICIT_ACCESS);
   if (web_data_service_.get() && web_data_service_->IsDatabaseLoaded()) {
-    DoStartAssociationAsync();
+    OnModelLoaded();
   } else {
     notification_registrar_.Add(this, chrome::NOTIFICATION_WEB_DATABASE_LOADED,
                                 content::NotificationService::AllSources());
@@ -84,7 +86,8 @@ bool AutofillProfileDataTypeController::StartModels() {
     return false;
   }
 
-  web_data_service_ = profile()->GetWebDataService(Profile::IMPLICIT_ACCESS);
+  web_data_service_ = WebDataServiceFactory::GetForProfile(
+      profile(), Profile::IMPLICIT_ACCESS);
   if (web_data_service_.get() && web_data_service_->IsDatabaseLoaded()) {
     return true;
   } else {
@@ -99,18 +102,6 @@ void AutofillProfileDataTypeController::StopModels() {
   DCHECK(state() == STOPPING || state() == NOT_RUNNING);
   notification_registrar_.RemoveAll();
   personal_data_->RemoveObserver(this);
-}
-
-void AutofillProfileDataTypeController::DoStartAssociationAsync() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  DCHECK_EQ(state(), MODEL_STARTING);
-  set_state(ASSOCIATING);
-  if (!StartAssociationAsync()) {
-    SyncError error(FROM_HERE,
-                    "Failed to post association task.",
-                    type());
-    StartDoneImpl(ASSOCIATION_FAILED, NOT_RUNNING, error);
-  }
 }
 
 }  // namepsace browser_sync

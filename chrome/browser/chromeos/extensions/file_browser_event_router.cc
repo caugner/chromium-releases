@@ -12,6 +12,7 @@
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/extensions/file_browser_notifications.h"
 #include "chrome/browser/chromeos/extensions/file_manager_util.h"
+#include "chrome/browser/chromeos/gdata/gdata_documents_service.h"
 #include "chrome/browser/chromeos/gdata/gdata_system_service.h"
 #include "chrome/browser/chromeos/gdata/gdata_util.h"
 #include "chrome/browser/chromeos/login/base_login_display_host.h"
@@ -116,8 +117,7 @@ void FileBrowserEventRouter::ShutdownOnUIThread() {
       GDataSystemServiceFactory::FindForProfile(profile_);
   if (system_service) {
     system_service->file_system()->RemoveObserver(this);
-    system_service->file_system()->GetOperationRegistry()->
-        RemoveObserver(this);
+    system_service->docs_service()->operation_registry()->RemoveObserver(this);
   }
 
   chromeos::NetworkLibrary* network_library =
@@ -147,7 +147,7 @@ void FileBrowserEventRouter::ObserveFileSystemEvents() {
     NOTREACHED();
     return;
   }
-  system_service->file_system()->GetOperationRegistry()->AddObserver(this);
+  system_service->docs_service()->operation_registry()->AddObserver(this);
   system_service->file_system()->AddObserver(this);
 
   chromeos::NetworkLibrary* network_library =
@@ -317,10 +317,14 @@ void FileBrowserEventRouter::MountCompleted(
     if ((event_type == DiskMountManager::MOUNTING) !=
         (error_code == chromeos::MOUNT_ERROR_NONE)) {
       FilePath source_path(mount_info.source_path);
-      gdata::GDataFileSystem* file_system = GetRemoteFileSystem();
-      if (file_system && file_system->IsUnderGDataCacheDirectory(source_path))
-        file_system->SetMountedState(source_path, false,
-                                     gdata::SetMountedStateCallback());
+      gdata::GDataSystemService* system_service =
+          gdata::GDataSystemServiceFactory::GetForProfile(profile_);
+      gdata::GDataCache* cache =
+          system_service ? system_service->cache() : NULL;
+      if (cache) {
+        cache->SetMountedStateOnUIThread(
+            source_path, false, gdata::SetMountedStateCallback());
+      }
     }
   }
 }
@@ -429,7 +433,7 @@ void FileBrowserEventRouter::DispatchFolderChangeEvent(
 
   for (ExtensionUsageRegistry::const_iterator iter = extensions.begin();
        iter != extensions.end(); ++iter) {
-    GURL target_origin_url(Extension::GetBaseURLFromExtensionId(
+    GURL target_origin_url(extensions::Extension::GetBaseURLFromExtensionId(
         iter->first));
     GURL base_url = fileapi::GetFileSystemRootURI(target_origin_url,
         fileapi::kFileSystemTypeExternal);
@@ -585,7 +589,7 @@ void FileBrowserEventRouter::OnDeviceAdded(
   notifications_->RegisterDevice(device_path);
   notifications_->ShowNotificationDelayed(FileBrowserNotifications::DEVICE,
                                           device_path,
-                                          5000);
+                                          base::TimeDelta::FromSeconds(5));
 }
 
 void FileBrowserEventRouter::OnDeviceRemoved(
@@ -630,7 +634,9 @@ void FileBrowserEventRouter::OnFormattingFinished(
                                      device_path);
     // Hide it after a couple of seconds.
     notifications_->HideNotificationDelayed(
-        FileBrowserNotifications::FORMAT_SUCCESS, device_path, 4000);
+        FileBrowserNotifications::FORMAT_SUCCESS,
+        device_path,
+        base::TimeDelta::FromSeconds(4));
     // MountPath auto-detects filesystem format if second argument is empty.
     // The third argument (mount label) is not used in a disk mount operation.
     DiskMountManager::GetInstance()->MountPath(device_path, std::string(),

@@ -11,10 +11,10 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
-#include "sync/internal_api/configure_reason.h"
-#include "sync/internal_api/read_transaction.h"
+#include "sync/internal_api/public/configure_reason.h"
+#include "sync/internal_api/public/read_transaction.h"
 #include "sync/protocol/sync.pb.h"
-#include "sync/sessions/session_state.h"
+#include "sync/syncable/syncable.h" // TODO(tim): Bug 131130.
 
 using syncable::ModelTypeSet;
 

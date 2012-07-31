@@ -10,7 +10,7 @@
   <property name="sdk.version" value="${env.ANDROID_SDK_VERSION}"/>
   <property name="src" location="."/>
   <property name="dist" location="dist"/>
-  <property name="out.dir" location="${PRODUCT_DIR}"/>
+  <property name="out.dir" location="${PRODUCT_DIR}/lib.java"/>
   <!-- TODO(jrg): establish a standard for the intermediate java
        directories.  Settle on a standard once ant/jar build files
        like this are androidified -->
@@ -42,7 +42,7 @@
            defaulting to build.sysclasspath=last; 
            set to false for repeatable builds
       -->
-    <javac srcdir="${src}" destdir="${dest.dir}">
+    <javac srcdir="${src}" destdir="${dest.dir}" debug="true" includeantruntime="false">
       <classpath>
         <path location="${location.base}/android.jar"/>
       </classpath>
@@ -52,7 +52,7 @@
   <target name="dist" depends="compile"
           description="generate the distribution" >
     <!-- Create the distribution directory -->
-    <mkdir dir="${dist}/lib"/>
+    <mkdir dir="${out.dir}"/>
 
     <jar jarfile="${out.dir}/chromium_base.jar" basedir="${dest.dir}"/>
   </target>

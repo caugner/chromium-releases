@@ -117,8 +117,9 @@ GlobalErrorBubble::GlobalErrorBubble(Browser* browser,
                             NULL,
                             content,
                             arrow_location,
-                            true,  // match_system_theme
-                            true,  // grab_input
+                            BubbleGtk::MATCH_SYSTEM_THEME |
+                                BubbleGtk::POPUP_WINDOW |
+                                BubbleGtk::GRAB_INPUT,
                             theme_service,
                             this);  // error_
 }
@@ -163,7 +164,7 @@ GlobalErrorBubbleViewBase* GlobalErrorBubbleViewBase::ShowBubbleView(
     const base::WeakPtr<GlobalError>& error) {
   BrowserWindowGtk* browser_window =
       BrowserWindowGtk::GetBrowserWindowForNativeWindow(
-          browser->window()->GetNativeHandle());
+          browser->window()->GetNativeWindow());
   GtkWidget* anchor = browser_window->GetToolbar()->GetAppMenuButton();
 
   // The bubble will be automatically deleted when it's closed.

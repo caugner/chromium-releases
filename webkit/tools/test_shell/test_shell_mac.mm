@@ -207,12 +207,12 @@ void TestShell::InitializeTestShell(bool layout_test_mode,
   layout_test_mode_ = layout_test_mode;
   allow_external_pages_ = allow_external_pages;
 
-  web_prefs_ = new WebPreferences;
+  web_prefs_ = new webkit_glue::WebPreferences;
 
   // mmap the data pack which holds strings used by WebCore. This is only
   // a fatal error if we're bundled, which means we might be running layout
   // tests. This is a harmless failure for test_shell_tests.
-  g_resource_data_pack = new ui::DataPack(ui::ResourceHandle::kScaleFactor100x);
+  g_resource_data_pack = new ui::DataPack(ui::SCALE_FACTOR_100P);
   NSString *resource_path =
       [base::mac::FrameworkBundle() pathForResource:@"test_shell"
                                              ofType:@"pak"];
@@ -630,7 +630,9 @@ string16 TestShellWebKitInit::GetLocalizedString(int message_id) {
   return msg;
 }
 
-base::StringPiece TestShellWebKitInit::GetDataResource(int resource_id) {
+base::StringPiece TestShellWebKitInit::GetDataResource(
+    int resource_id,
+    ui::ScaleFactor scale_factor) {
   switch (resource_id) {
   case IDR_BROKENIMAGE: {
     // Use webkit's broken image icon (16x16)
@@ -677,6 +679,7 @@ base::StringPiece TestShellWebKitInit::GetDataResource(int resource_id) {
   case IDR_INPUT_SPEECH:
   case IDR_INPUT_SPEECH_RECORDING:
   case IDR_INPUT_SPEECH_WAITING:
+    // TODO(flackr): Pass scale_factor to ResourceProvider.
     return TestShell::ResourceProvider(resource_id);
 
   default:

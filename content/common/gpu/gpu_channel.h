@@ -19,10 +19,10 @@
 #include "content/common/gpu/gpu_memory_manager.h"
 #include "content/common/message_router.h"
 #include "ipc/ipc_sync_channel.h"
-#include "ui/gfx/gl/gl_share_group.h"
-#include "ui/gfx/gl/gpu_preference.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/size.h"
+#include "ui/gl/gl_share_group.h"
+#include "ui/gl/gpu_preference.h"
 
 class GpuChannelManager;
 struct GPUCreateCommandBufferConfig;
@@ -31,6 +31,10 @@ class GpuWatchdog;
 namespace base {
 class MessageLoopProxy;
 class WaitableEvent;
+}
+
+namespace gpu {
+struct RefCountedCounter;
 }
 
 // Encapsulates an IPC channel between the GPU process and one renderer
@@ -43,6 +47,7 @@ class GpuChannel : public IPC::Channel::Listener,
   GpuChannel(GpuChannelManager* gpu_channel_manager,
              GpuWatchdog* watchdog,
              gfx::GLShareGroup* share_group,
+             gpu::gles2::MailboxManager* mailbox_manager,
              int client_id,
              bool software);
 
@@ -101,9 +106,14 @@ class GpuChannel : public IPC::Channel::Listener,
   void AddRoute(int32 route_id, IPC::Channel::Listener* listener);
   void RemoveRoute(int32 route_id);
 
-  // Indicates whether newly created contexts should prefer the
-  // discrete GPU even if they would otherwise use the integrated GPU.
-  bool ShouldPreferDiscreteGpu() const;
+  gpu::RefCountedCounter* MessagesPendingCount() {
+    return unprocessed_messages_.get();
+  }
+
+  // If preempt_by_counter->count is non-zero, any stub on this channel
+  // should stop issuing GL commands. Setting this to NULL stops deferral.
+  void SetPreemptByCounter(
+      scoped_refptr<gpu::RefCountedCounter> preempt_by_counter);
 
  protected:
   virtual ~GpuChannel();
@@ -126,20 +136,20 @@ class GpuChannel : public IPC::Channel::Listener,
       IPC::Message* reply_message);
   void OnDestroyCommandBuffer(int32 route_id, IPC::Message* reply_message);
 
-  void OnWillGpuSwitchOccur(bool is_creating_context,
-                            gfx::GpuPreference gpu_preference,
-                            IPC::Message* reply_message);
-  void OnCloseChannel();
-
-  void WillCreateCommandBuffer(gfx::GpuPreference gpu_preference);
-  void DidDestroyCommandBuffer(gfx::GpuPreference gpu_preference);
-
   // The lifetime of objects of this class is managed by a GpuChannelManager.
   // The GpuChannelManager destroy all the GpuChannels that they own when they
   // are destroyed. So a raw pointer is safe.
   GpuChannelManager* gpu_channel_manager_;
 
   scoped_ptr<IPC::SyncChannel> channel_;
+
+  // Number of routed messages for pending processing on a stub.
+  scoped_refptr<gpu::RefCountedCounter> unprocessed_messages_;
+
+  // If non-NULL, all stubs on this channel should stop processing GL
+  // commands (via their GpuScheduler) when preempt_by_counter_->count
+  // is non-zero.
+  scoped_refptr<gpu::RefCountedCounter> preempt_by_counter_;
 
   std::deque<IPC::Message*> deferred_messages_;
 
@@ -169,7 +179,6 @@ class GpuChannel : public IPC::Channel::Listener,
   bool software_;
   bool handle_messages_scheduled_;
   bool processed_get_state_fast_;
-  int32 num_contexts_preferring_discrete_gpu_;
 
   base::WeakPtrFactory<GpuChannel> weak_factory_;
 

@@ -3,12 +3,15 @@
 // found in the LICENSE file.
 
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
 #include "chrome/browser/autocomplete/autocomplete_edit.h"
+#include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/gfx/font.h"
 
 using content::WebContents;
 
@@ -38,7 +41,7 @@ class TestingOmniboxView : public OmniboxView {
                                         bool update_popup,
                                         bool notify_text_changed) OVERRIDE {}
   virtual void SetForcedQuery() OVERRIDE {}
-  virtual bool IsSelectAll() OVERRIDE { return false; }
+  virtual bool IsSelectAll() const OVERRIDE { return false; }
   virtual bool DeleteAtEndPressed() OVERRIDE { return false; }
   virtual void GetSelectionBounds(size_t* start, size_t* end) const OVERRIDE {}
   virtual void SelectAll(bool reversed) OVERRIDE {}
@@ -75,6 +78,8 @@ class TestingOmniboxView : public OmniboxView {
   virtual int OnPerformDrop(const views::DropTargetEvent& event) OVERRIDE {
     return 0;
   }
+  virtual gfx::Font GetFont() { return gfx::Font(); }
+  virtual int WidthOfTextAfterCursor() { return 0; }
 #endif
 
  private:
@@ -96,7 +101,7 @@ class TestingAutocompleteEditController : public AutocompleteEditController {
   virtual SkBitmap GetFavicon() const OVERRIDE { return SkBitmap(); }
   virtual string16 GetTitle() const OVERRIDE { return string16(); }
   virtual InstantController* GetInstant() OVERRIDE { return NULL; }
-  virtual TabContentsWrapper* GetTabContentsWrapper() const OVERRIDE {
+  virtual TabContents* GetTabContents() const OVERRIDE {
     return NULL;
   }
 
@@ -159,8 +164,10 @@ TEST_F(AutocompleteEditTest, AdjustTextForCopy) {
   // NOTE: The TemplateURLService must be created before the
   // AutocompleteClassifier so that the SearchProvider gets a non-NULL
   // TemplateURLService at construction time.
-  profile.CreateTemplateURLService();
-  profile.CreateAutocompleteClassifier();
+  TemplateURLServiceFactory::GetInstance()->SetTestingFactoryAndUse(
+      &profile, &TemplateURLServiceFactory::BuildInstanceFor);
+  AutocompleteClassifierFactory::GetInstance()->SetTestingFactoryAndUse(
+      &profile, &AutocompleteClassifierFactory::BuildInstanceFor);
   AutocompleteEditModel model(&view, &controller, &profile);
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(input); ++i) {

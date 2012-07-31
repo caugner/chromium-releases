@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,15 @@
 
 #include <set>
 
+#include "base/memory/scoped_ptr.h"
 #include "chrome/common/extensions/url_pattern.h"
 
 class GURL;
+
+namespace base {
+class ListValue;
+class Value;
+}
 
 // Represents the set of URLs an extension uses for web content.
 class URLPatternSet {
@@ -34,6 +40,10 @@ class URLPatternSet {
                           const URLPatternSet& set2,
                           URLPatternSet* out);
 
+  // Clears |out| and populates it with the union of all sets in |sets|.
+  static void CreateUnion(const std::vector<URLPatternSet>& sets,
+                          URLPatternSet* out);
+
   URLPatternSet();
   URLPatternSet(const URLPatternSet& rhs);
   explicit URLPatternSet(const std::set<URLPattern>& patterns);
@@ -43,6 +53,7 @@ class URLPatternSet {
   bool operator==(const URLPatternSet& rhs) const;
 
   bool is_empty() const;
+  size_t size() const;
   const std::set<URLPattern>& patterns() const { return patterns_; }
   const_iterator begin() const { return patterns_.begin(); }
   const_iterator end() const { return patterns_.end(); }
@@ -60,6 +71,13 @@ class URLPatternSet {
 
   // Returns true if there is a single URL that would be in two extents.
   bool OverlapsWith(const URLPatternSet& other) const;
+
+  // Converts to and from Value for serialization to preferences.
+  scoped_ptr<base::ListValue> ToValue() const;
+  bool Populate(const base::ListValue& value,
+                int valid_schemes,
+                bool allow_file_access,
+                std::string* error);
 
  private:
   // The list of URL patterns that comprise the extent.

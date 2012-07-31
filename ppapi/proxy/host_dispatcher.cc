@@ -61,11 +61,10 @@ class BoolRestorer {
 
 }  // namespace
 
-HostDispatcher::HostDispatcher(base::ProcessHandle remote_process_handle,
-                               PP_Module module,
+HostDispatcher::HostDispatcher(PP_Module module,
                                PP_GetInterface_Func local_get_interface,
                                SyncMessageStatusReceiver* sync_status)
-    : Dispatcher(remote_process_handle, local_get_interface),
+    : Dispatcher(local_get_interface),
       sync_status_(sync_status),
       pp_module_(module),
       ppb_proxy_(NULL),
@@ -248,14 +247,17 @@ void HostDispatcher::OnHostMsgLogWithSource(PP_Instance instance,
 
 // ScopedModuleReference -------------------------------------------------------
 
-ScopedModuleReference::ScopedModuleReference(Dispatcher* dispatcher) {
-  DCHECK(!dispatcher->IsPlugin());
-  dispatcher_ = static_cast<HostDispatcher*>(dispatcher);
-  dispatcher_->ppb_proxy()->AddRefModule(dispatcher_->pp_module());
+ScopedModuleReference::ScopedModuleReference(Dispatcher* dispatcher)
+    : dispatcher_(NULL) {
+  if (!dispatcher->IsPlugin()) {
+    dispatcher_ = static_cast<HostDispatcher*>(dispatcher);
+    dispatcher_->ppb_proxy()->AddRefModule(dispatcher_->pp_module());
+  }
 }
 
 ScopedModuleReference::~ScopedModuleReference() {
-  dispatcher_->ppb_proxy()->ReleaseModule(dispatcher_->pp_module());
+  if (dispatcher_)
+    dispatcher_->ppb_proxy()->ReleaseModule(dispatcher_->pp_module());
 }
 
 }  // namespace proxy

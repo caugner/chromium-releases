@@ -20,6 +20,7 @@ class GPUTestExpectationsParser {
     kGpuTestFail = 1 << 1,
     kGpuTestFlaky = 1 << 2,
     kGpuTestTimeout = 1 << 3,
+    kGpuTestSkip = 1 << 4,
   };
 
   enum GPUTestProfile {
@@ -42,6 +43,10 @@ class GPUTestExpectationsParser {
   // Get the test expectation of a given test on a given bot.
   int32 GetTestExpectation(const std::string& test_name,
                            const GPUTestBotConfig& bot_config) const;
+
+  // Parse a list of config modifiers. If we have a valid entry with no
+  // conflicts, | config | stores it, and the function returns true.
+  bool ParseConfig(const std::string& config_data, GPUTestConfig* config);
 
  private:
   struct GPUTestExpectationEntry {

@@ -12,7 +12,7 @@
 #include "base/utf_string_conversions.h"
 #include "base/win/scoped_handle.h"
 #include "base/win/wrapped_window_proc.h"
-#include "chrome/browser/simple_message_box.h"
+#include "chrome/browser/ui/simple_message_box.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/installer/util/wmi.h"
 #include "content/public/common/result_codes.h"
@@ -199,7 +199,14 @@ ProcessSingleton::ProcessSingleton(const FilePath& user_data_dir)
 }
 
 ProcessSingleton::~ProcessSingleton() {
-  Cleanup();
+  // We need to unregister the window as late as possible so that we can detect
+  // another instance of chrome running. Otherwise we may end up writing out
+  // data while a new chrome is starting up.
+  if (window_) {
+    ::DestroyWindow(window_);
+    ::UnregisterClass(chrome::kMessageWindowClass,
+                      base::GetModuleFromAddress(&ThunkWndProc));
+  }
 }
 
 ProcessSingleton::NotifyResult ProcessSingleton::NotifyOtherProcess() {
@@ -264,14 +271,12 @@ ProcessSingleton::NotifyResult ProcessSingleton::NotifyOtherProcess() {
                     reinterpret_cast<LPARAM>(&visible_window));
 
   // If there is a visible browser window, ask the user before killing it.
-  if (visible_window) {
-    const string16 title = l10n_util::GetStringUTF16(IDS_PRODUCT_NAME);
-    const string16 message = l10n_util::GetStringUTF16(
-        IDS_BROWSER_HUNGBROWSER_MESSAGE);
-    if (!browser::ShowQuestionMessageBox(NULL, title, message)) {
-      // The user denied. Quit silently.
-      return PROCESS_NOTIFIED;
-    }
+  if (visible_window && browser::ShowMessageBox(NULL,
+      l10n_util::GetStringUTF16(IDS_PRODUCT_NAME),
+      l10n_util::GetStringUTF16(IDS_BROWSER_HUNGBROWSER_MESSAGE),
+      browser::MESSAGE_BOX_TYPE_QUESTION) == browser::MESSAGE_BOX_RESULT_NO) {
+    // The user denied. Quit silently.
+    return PROCESS_NOTIFIED;
   }
 
   // Time to take action. Kill the browser process.
@@ -304,18 +309,6 @@ bool ProcessSingleton::Create(
 }
 
 void ProcessSingleton::Cleanup() {
-  // Window classes registered by DLLs are not cleaned up automatically on
-  // process exit, so we must unregister at the earliest chance possible.
-  // During the fast shutdown sequence, ProcessSingleton::Cleanup() is
-  // called if our process was the first to start.  Therefore we try cleaning
-  // up here, and again in the destructor if needed to catch as many cases
-  // as possible.
-  if (window_) {
-    ::DestroyWindow(window_);
-    ::UnregisterClass(chrome::kMessageWindowClass,
-                      base::GetModuleFromAddress(&ThunkWndProc));
-    window_ = NULL;
-  }
 }
 
 LRESULT ProcessSingleton::OnCopyData(HWND hwnd, const COPYDATASTRUCT* cds) {

@@ -25,38 +25,9 @@ using content::UserMetricsAction;
 
 namespace {
 
-// Users are randomly assigned to one of kDefaultGroupSize + 1 buckets, in order
-// to be able to roll out promos slowly, or display different promos to
-// different groups.
 const int kDefaultGroupSize = 100;
 
-bool OutOfBounds(int var, int min, int max) {
-  return var < min || var > max;
-}
-
-const char kHeaderProperty[] = "topic";
-const char kArrayProperty[] = "answers";
-const char kIdentifierProperty[] = "name";
-const char kStartPropertyValue[] = "promo_start";
-const char kEndPropertyValue[] = "promo_end";
-const char kTextProperty[] = "tooltip";
-const char kTimeProperty[] = "inproduct";
-const char kParamsProperty[] = "question";
-
-const char promo_server_url[] = "http://clients3.google.com/crsignal/client";
-
-// Time getters.
-double GetTimeFromDict(const DictionaryValue* dict) {
-  std::string time_str;
-  if (!dict->GetString(kTimeProperty, &time_str))
-    return 0.0;
-
-  base::Time time;
-  if (time_str.empty() || !base::Time::FromString(time_str.c_str(), &time))
-    return 0.0;
-
-  return time.ToDoubleT();
-}
+const char promo_server_url[] = "https://clients3.google.com/crsignal/client";
 
 double GetTimeFromPrefs(PrefService* prefs, const char* pref) {
   return prefs->HasPrefPath(pref) ? prefs->GetDouble(pref) : 0.0;
@@ -79,8 +50,13 @@ const char* PlatformString() {
 
 // Returns a string suitable for the Promo Server URL 'dist' value.
 const char* ChannelString() {
+#if defined (OS_WIN)
+  // GetChannel hits the registry on Windows. See http://crbug.com/70898.
+  // TODO(achuith): Move NotificationPromo::PromoServerURL to the blocking pool.
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
+#endif
   const chrome::VersionInfo::Channel channel =
-      PromoResourceService::GetChannel();
+      chrome::VersionInfo::GetChannel();
   switch (channel) {
     case chrome::VersionInfo::CHANNEL_CANARY:
       return "canary";
@@ -97,9 +73,8 @@ const char* ChannelString() {
 
 }  // namespace
 
-NotificationPromo::NotificationPromo(Profile* profile, Delegate* delegate)
+NotificationPromo::NotificationPromo(Profile* profile)
     : profile_(profile),
-      delegate_(delegate),
       prefs_(profile_->GetPrefs()),
       start_(0.0),
       end_(0.0),
@@ -112,38 +87,27 @@ NotificationPromo::NotificationPromo(Profile* profile, Delegate* delegate)
       group_(0),
       views_(0),
       closed_(false),
-      build_(PromoResourceService::ALL_BUILDS),
-      platform_(PLATFORM_ALL) {
+      gplus_required_(false),
+      new_notification_(false) {
   DCHECK(profile);
   DCHECK(prefs_);
 }
 
 NotificationPromo::~NotificationPromo() {}
 
-void NotificationPromo::InitFromJsonLegacy(const DictionaryValue& json) {
-  DictionaryValue* header = NULL;
-  if (json.GetDictionary(kHeaderProperty, &header)) {
-    ListValue* answers;
-    if (header->GetList(kArrayProperty, &answers)) {
-      for (ListValue::const_iterator it = answers->begin();
-           it != answers->end();
-           ++it) {
-        if ((*it)->IsType(Value::TYPE_DICTIONARY))
-          Parse(static_cast<DictionaryValue*>(*it));
-      }
-    }
-  }
-  CheckForNewNotification();
-}
-
 void NotificationPromo::InitFromJson(const DictionaryValue& json) {
-  DictionaryValue* root = NULL;
-  if (!json.GetDictionary("ntp_notification_promo", &root))
+  ListValue* promo_list = NULL;
+  if (!json.GetList("ntp_notification_promo", &promo_list))
+    return;
+
+  // No support for multiple promos yet. Only consider the first one.
+  DictionaryValue* promo = NULL;
+  if (!promo_list->GetDictionary(0, &promo))
     return;
 
   // Strings. Assume the first one is the promo text.
   DictionaryValue* strings;
-  if (root->GetDictionary("strings", &strings)) {
+  if (promo->GetDictionary("strings", &strings)) {
     DictionaryValue::Iterator iter(*strings);
     iter.value().GetAsString(&promo_text_);
     DVLOG(1) << "promo_text_=" << promo_text_;
@@ -151,7 +115,7 @@ void NotificationPromo::InitFromJson(const DictionaryValue& json) {
 
   // Date.
   ListValue* date_list;
-  if (root->GetList("date", &date_list)) {
+  if (promo->GetList("date", &date_list)) {
     DictionaryValue* date;
     if (date_list->GetDictionary(0, &date)) {
       std::string time_str;
@@ -173,7 +137,7 @@ void NotificationPromo::InitFromJson(const DictionaryValue& json) {
 
   // Grouping.
   DictionaryValue* grouping;
-  if (root->GetDictionary("grouping", &grouping)) {
+  if (promo->GetDictionary("grouping", &grouping)) {
     grouping->GetInteger("buckets", &num_groups_);
     grouping->GetInteger("segment", &initial_segment_);
     grouping->GetInteger("increment", &increment_);
@@ -187,79 +151,27 @@ void NotificationPromo::InitFromJson(const DictionaryValue& json) {
     DVLOG(1) << "max_group_ = " << max_group_;
   }
 
-  root->GetInteger("max_views", &max_views_);
+  // Payload.
+  DictionaryValue* payload;
+  if (promo->GetDictionary("payload", &payload)) {
+    payload->GetBoolean("gplus_required", &gplus_required_);
+
+    DVLOG(1) << "gplus_required_ = " << gplus_required_;
+  }
+
+  promo->GetInteger("max_views", &max_views_);
   DVLOG(1) << "max_views_ " << max_views_;
 
   CheckForNewNotification();
 }
 
-void NotificationPromo::Parse(const DictionaryValue* dict) {
-  std::string key;
-  if (dict->GetString(kIdentifierProperty, &key)) {
-    if (key == kStartPropertyValue) {
-      ParseParams(dict);
-      dict->GetString(kTextProperty, &promo_text_);
-      start_ = GetTimeFromDict(dict);
-    } else if (key == kEndPropertyValue) {
-      end_ = GetTimeFromDict(dict);
-    }
-  }
-}
-
-void NotificationPromo::ParseParams(const DictionaryValue* dict) {
-  std::string question;
-  if (!dict->GetString(kParamsProperty, &question))
-    return;
-
-  size_t index = 0;
-  bool err = false;
-
-  build_ = GetNextQuestionValue(question, &index, &err);
-  time_slice_ = GetNextQuestionValue(question, &index, &err);
-  max_group_ = GetNextQuestionValue(question, &index, &err);
-  max_views_ = GetNextQuestionValue(question, &index, &err);
-  platform_ = GetNextQuestionValue(question, &index, &err);
-
-  if (err ||
-      OutOfBounds(build_, PromoResourceService::NO_BUILD,
-          PromoResourceService::ALL_BUILDS) ||
-      OutOfBounds(max_group_, 0, kDefaultGroupSize) ||
-      OutOfBounds(platform_, PLATFORM_NONE, PLATFORM_ALL)) {
-    // If values are not valid, do not show promo notification.
-    DLOG(ERROR) << "Invalid server data, question=" << question <<
-        ", build=" << build_ <<
-        ", time_slice=" << time_slice_ <<
-        ", max_group=" << max_group_ <<
-        ", max_views=" << max_views_ <<
-        ", platform_=" << platform_;
-    build_ = PromoResourceService::NO_BUILD;
-    time_slice_ = 0;
-    max_group_ = 0;
-    max_views_ = 0;
-    platform_ = PLATFORM_NONE;
-  }
-}
-
 void NotificationPromo::CheckForNewNotification() {
-  double start = 0.0;
-  double end = 0.0;
-  bool new_notification = false;
-
   const double old_start = GetTimeFromPrefs(prefs_, prefs::kNtpPromoStart);
   const double old_end = GetTimeFromPrefs(prefs_, prefs::kNtpPromoEnd);
 
-  if (old_start != start_ || old_end != end_) {
+  new_notification_ = old_start != start_ || old_end != end_;
+  if (new_notification_)
     OnNewNotification();
-    // For testing.
-    start = StartTimeForGroup();
-    end = end_;
-    new_notification = true;
-  }
-  // For testing.
-  if (delegate_) {
-    // If no change needed, call delegate with default values.
-    delegate_->OnNotificationParsed(start, end, new_notification);
-  }
 }
 
 void NotificationPromo::OnNewNotification() {
@@ -311,28 +223,19 @@ void NotificationPromo::RegisterUserPrefs(PrefService* prefs) {
                              false,
                              PrefService::UNSYNCABLE_PREF);
 
-  prefs->RegisterIntegerPref(prefs::kNtpPromoBuild,
-                             PromoResourceService::NO_BUILD,
-                             PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterIntegerPref(prefs::kNtpPromoPlatform,
-                             PLATFORM_NONE,
-                             PrefService::UNSYNCABLE_PREF);
-
-  // TODO(achuith): Delete code below in M21. http://crbug.com/125974.
-  prefs->RegisterBooleanPref(prefs::kNtpPromoIsLoggedInToPlus,
+  prefs->RegisterBooleanPref(prefs::kNtpPromoGplusRequired,
                              false,
                              PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterIntegerPref(prefs::kNtpPromoFeatureMask,
+
+  // TODO(achuith): Delete this in M22.
+  prefs->RegisterIntegerPref(prefs::kNtpPromoBuild,
                              0,
                              PrefService::UNSYNCABLE_PREF);
-  prefs->ClearPref(prefs::kNtpPromoIsLoggedInToPlus);
-  prefs->ClearPref(prefs::kNtpPromoFeatureMask);
-}
-
-// static
-NotificationPromo* NotificationPromo::Create(Profile *profile,
-    NotificationPromo::Delegate * delegate) {
-  return new NotificationPromo(profile, delegate);
+  prefs->RegisterIntegerPref(prefs::kNtpPromoPlatform,
+                             0,
+                             PrefService::UNSYNCABLE_PREF);
+  prefs->ClearPref(prefs::kNtpPromoBuild);
+  prefs->ClearPref(prefs::kNtpPromoPlatform);
 }
 
 void NotificationPromo::WritePrefs() {
@@ -353,8 +256,7 @@ void NotificationPromo::WritePrefs() {
   prefs_->SetInteger(prefs::kNtpPromoViews, views_);
   prefs_->SetBoolean(prefs::kNtpPromoClosed, closed_);
 
-  prefs_->SetInteger(prefs::kNtpPromoBuild, build_);
-  prefs_->SetInteger(prefs::kNtpPromoPlatform, platform_);
+  prefs_->SetBoolean(prefs::kNtpPromoGplusRequired, gplus_required_);
 }
 
 void NotificationPromo::InitFromPrefs() {
@@ -375,8 +277,7 @@ void NotificationPromo::InitFromPrefs() {
   views_ = prefs_->GetInteger(prefs::kNtpPromoViews);
   closed_ = prefs_->GetBoolean(prefs::kNtpPromoClosed);
 
-  build_ = prefs_->GetInteger(prefs::kNtpPromoBuild);
-  platform_ = prefs_->GetInteger(prefs::kNtpPromoPlatform);
+  gplus_required_ = prefs_->GetBoolean(prefs::kNtpPromoGplusRequired);
 }
 
 bool NotificationPromo::CanShow() const {
@@ -385,9 +286,8 @@ bool NotificationPromo::CanShow() const {
       group_ < max_group_ &&
       !ExceedsMaxViews() &&
       base::Time::FromDoubleT(StartTimeForGroup()) < base::Time::Now() &&
-      base::Time::FromDoubleT(end_) > base::Time::Now() &&
-      IsBuildAllowed(build_) &&
-      IsPlatformAllowed(platform_);
+      base::Time::FromDoubleT(EndTime()) > base::Time::Now() &&
+      IsGPlusRequired();
 }
 
 void NotificationPromo::HandleClosed() {
@@ -411,35 +311,8 @@ bool NotificationPromo::ExceedsMaxViews() const {
   return (max_views_ == 0) ? false : views_ >= max_views_;
 }
 
-bool NotificationPromo::IsBuildAllowed(int builds_allowed) const {
-  if (delegate_)  // For testing.
-    return delegate_->IsBuildAllowed(builds_allowed);
-  else
-    return PromoResourceService::IsBuildTargeted(
-        PromoResourceService::GetChannel(), builds_allowed);
-}
-
-bool NotificationPromo::IsPlatformAllowed(int target_platform) const {
-  const int current_platform = delegate_? delegate_->CurrentPlatform()
-                                        : CurrentPlatform();
-  return (target_platform & current_platform) != 0;
-}
-
-// static
-int NotificationPromo::CurrentPlatform() {
-  // Ignore OS_ANDROID, OS_FREEBSD, OS_OPENBSD, OS_SOLARIS, OS_NACL for now.
-  // Order is important - OS_LINUX and OS_CHROMEOS can both be defined.
-#if defined(OS_WIN)
-  return PLATFORM_WIN;
-#elif defined(OS_MACOSX)
-  return PLATFORM_MAC;
-#elif defined(OS_CHROMEOS)
-  return PLATFORM_CHROMEOS;
-#elif defined(OS_LINUX)
-  return PLATFORM_LINUX;
-#else
-  return PLATFORM_NONE;
-#endif
+bool NotificationPromo::IsGPlusRequired() const {
+  return !gplus_required_ || prefs_->GetBoolean(prefs::kIsGooglePlusUser);
 }
 
 // static
@@ -457,7 +330,6 @@ GURL NotificationPromo::PromoServerURL() {
 }
 
 double NotificationPromo::StartTimeForGroup() const {
-  // TODO(achuith): Write unittests for this.
   if (group_ < initial_segment_)
     return start_;
   return start_ +
@@ -465,19 +337,6 @@ double NotificationPromo::StartTimeForGroup() const {
       * time_slice_;
 }
 
-// static
-int NotificationPromo::GetNextQuestionValue(const std::string& question,
-                                            size_t* index,
-                                            bool* err) {
-  if (*err)
-    return 0;
-
-  size_t new_index = question.find(':', *index);
-  // Note that substr correctly handles npos.
-  std::string fragment(question.substr(*index, new_index - *index));
-  *index = new_index + 1;
-
-  int value;
-  *err = !base::StringToInt(fragment, &value);
-  return *err ? 0 : value;
+double NotificationPromo::EndTime() const {
+  return end_;
 }

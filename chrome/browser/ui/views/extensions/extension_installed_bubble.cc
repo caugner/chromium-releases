@@ -11,12 +11,13 @@
 #include "base/i18n/rtl.h"
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/extensions/api/commands/extension_command_service.h"
-#include "chrome/browser/extensions/api/commands/extension_command_service_factory.h"
+#include "chrome/browser/extensions/api/commands/command_service.h"
+#include "chrome/browser/extensions/api/commands/command_service_factory.h"
 #include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/views/browser_action_view.h"
 #include "chrome/browser/ui/views/browser_actions_container.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
@@ -40,6 +41,8 @@
 #include "ui/views/controls/link_listener.h"
 #include "ui/views/layout/fill_layout.h"
 #include "ui/views/layout/layout_constants.h"
+
+using extensions::Extension;
 
 namespace {
 
@@ -144,11 +147,13 @@ class InstalledBubbleContent : public views::View,
 
     switch (type_) {
       case ExtensionInstalledBubble::BROWSER_ACTION: {
-        ExtensionCommandService* command_service =
-            ExtensionCommandServiceFactory::GetForProfile(
+        extensions::CommandService* command_service =
+            extensions::CommandServiceFactory::GetForProfile(
                 browser_->profile());
         const extensions::Command* browser_action_command =
-            command_service->GetActiveBrowserActionCommand(extension->id());
+            command_service->GetBrowserActionCommand(
+                extension->id(),
+                extensions::CommandService::ACTIVE_ONLY);
         if (!browser_action_command) {
           info_ = new views::Label(l10n_util::GetStringUTF16(
               IDS_EXTENSION_INSTALLED_BROWSER_ACTION_INFO));
@@ -166,11 +171,13 @@ class InstalledBubbleContent : public views::View,
         break;
       }
       case ExtensionInstalledBubble::PAGE_ACTION: {
-        ExtensionCommandService* command_service =
-            ExtensionCommandServiceFactory::GetForProfile(
+        extensions::CommandService* command_service =
+            extensions::CommandServiceFactory::GetForProfile(
                 browser_->profile());
         const extensions::Command* page_action_command =
-            command_service->GetActivePageActionCommand(extension->id());
+            command_service->GetPageActionCommand(
+                extension->id(),
+                extensions::CommandService::ACTIVE_ONLY);
         if (!page_action_command) {
           info_ = new views::Label(l10n_util::GetStringUTF16(
               IDS_EXTENSION_INSTALLED_PAGE_ACTION_INFO));
@@ -225,11 +232,11 @@ class InstalledBubbleContent : public views::View,
 
     close_button_ = new views::ImageButton(this);
     close_button_->SetImage(views::CustomButton::BS_NORMAL,
-        rb.GetBitmapNamed(IDR_CLOSE_BAR));
+        rb.GetImageSkiaNamed(IDR_CLOSE_BAR));
     close_button_->SetImage(views::CustomButton::BS_HOT,
-        rb.GetBitmapNamed(IDR_CLOSE_BAR_H));
+        rb.GetImageSkiaNamed(IDR_CLOSE_BAR_H));
     close_button_->SetImage(views::CustomButton::BS_PUSHED,
-        rb.GetBitmapNamed(IDR_CLOSE_BAR_P));
+        rb.GetImageSkiaNamed(IDR_CLOSE_BAR_P));
     AddChildView(close_button_);
   }
 
@@ -387,7 +394,7 @@ void ExtensionInstalledBubble::Observe(
     }
   } else if (type == chrome::NOTIFICATION_EXTENSION_UNLOADED) {
     const Extension* extension =
-        content::Details<UnloadedExtensionInfo>(details)->extension;
+        content::Details<extensions::UnloadedExtensionInfo>(details)->extension;
     if (extension == extension_)
       extension_ = NULL;
   } else {
@@ -421,7 +428,7 @@ void ExtensionInstalledBubble::ShowInternal() {
           FROM_HERE,
           base::Bind(&ExtensionInstalledBubble::ShowInternal,
                      base::Unretained(this)),
-          kAnimationWaitTime);
+          base::TimeDelta::FromMilliseconds(kAnimationWaitTime));
       return;
     }
     reference_view = container->GetBrowserActionView(

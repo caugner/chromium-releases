@@ -8,7 +8,9 @@
 #include "base/bind_helpers.h"
 #include "base/compiler_specific.h"
 #include "base/stringprintf.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/password_manager/encryptor.h"
+#include "chrome/browser/prefs/browser_prefs.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/signin/token_service.h"
 #include "chrome/browser/signin/token_service_unittest.h"
@@ -17,8 +19,10 @@
 #include "chrome/common/net/gaia/gaia_constants.h"
 #include "chrome/common/net/gaia/gaia_urls.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/test/base/testing_browser_process.h"
+#include "chrome/test/base/testing_pref_service.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/test/test_url_fetcher_factory.h"
+#include "content/public/test/test_url_fetcher_factory.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_status.h"
 
@@ -41,6 +45,10 @@ const char kGetTokenPairValidResponse[] =
 class SigninManagerTest : public TokenServiceTestHarness {
  public:
   virtual void SetUp() OVERRIDE {
+    prefs_.reset(new TestingPrefService);
+    browser::RegisterLocalState(prefs_.get());
+    static_cast<TestingBrowserProcess*>(g_browser_process)->SetLocalState(
+        prefs_.get());
     TokenServiceTestHarness::SetUp();
     manager_.reset(new SigninManager());
     google_login_success_.ListenFor(
@@ -48,6 +56,15 @@ class SigninManagerTest : public TokenServiceTestHarness {
         content::Source<Profile>(profile_.get()));
     google_login_failure_.ListenFor(chrome::NOTIFICATION_GOOGLE_SIGNIN_FAILED,
                                     content::Source<Profile>(profile_.get()));
+  }
+
+  virtual void TearDown() OVERRIDE {
+    // Destroy the SigninManager here, because it relies on profile_ which is
+    // freed in the base class.
+    manager_.reset(NULL);
+    static_cast<TestingBrowserProcess*>(g_browser_process)->SetLocalState(NULL);
+    prefs_.reset(NULL);
+    TokenServiceTestHarness::TearDown();
   }
 
   void SetupFetcherAndComplete(const std::string& url,
@@ -117,7 +134,7 @@ class SigninManagerTest : public TokenServiceTestHarness {
                             "    \"url\" : \"https://www.terminating.com\""
                             "  },"
                             "  \"challenge\" : {"
-                            "    \"name\" : \"TwoFactor\","
+                            "    \"name\" : \"TwoStep\","
                             "    \"prompt_text\" : \"prompt_text\","
                             "    \"alternate_text\" : \"alternate_text\","
                             "    \"challenge_token\" : \"challengetokenblob\","
@@ -140,19 +157,10 @@ class SigninManagerTest : public TokenServiceTestHarness {
     SetupFetcherAndComplete(GaiaUrls::GetInstance()->oauth2_token_url(), 200,
                             net::ResponseCookies(), kGetTokenPairValidResponse);
 
-    // Simulate the correct StartUberAuthTokenFetch response.
-    std::string url(base::StringPrintf(
-        "%s?source=%s&issueuberauth=1",
-        GaiaUrls::GetInstance()->oauth1_login_url().c_str(),
-        GaiaConstants::kChromeSource));
-    SetupFetcherAndComplete(url, 200, net::ResponseCookies(), "token");
-
-    // Simulate the correct StartTokenAuth response.
-    net::ResponseCookies cookies;
-    cookies.push_back("SID=sid");
-    cookies.push_back("LSID=lsid");
-    SetupFetcherAndComplete(GaiaUrls::GetInstance()->token_auth_url(), 200,
-                            cookies, "data");
+    // Simulate the correct StartOAuthLogin response.
+    SetupFetcherAndComplete(GaiaUrls::GetInstance()->oauth1_login_url(), 200,
+                            net::ResponseCookies(),
+                            "SID=sid\nLSID=lsid\nAuth=auth_token");
 
     SimulateValidResponseGetClientInfo(false);
   }
@@ -175,8 +183,9 @@ class SigninManagerTest : public TokenServiceTestHarness {
 
   TestURLFetcherFactory factory_;
   scoped_ptr<SigninManager> manager_;
-  TestNotificationTracker google_login_success_;
-  TestNotificationTracker google_login_failure_;
+  content::TestNotificationTracker google_login_success_;
+  content::TestNotificationTracker google_login_failure_;
+  scoped_ptr<TestingPrefService> prefs_;
 };
 
 // NOTE: ClientLogin's "StartSignin" is called after collecting credentials
@@ -200,6 +209,51 @@ TEST_F(SigninManagerTest, SignInClientLogin) {
   manager_.reset(new SigninManager());
   manager_->Initialize(profile_.get());
   EXPECT_EQ("user@gmail.com", manager_->GetAuthenticatedUsername());
+}
+
+TEST_F(SigninManagerTest, Prohibited) {
+  g_browser_process->local_state()->SetString(
+      prefs::kGoogleServicesUsernamePattern, ".*@google.com");
+  manager_->Initialize(profile_.get());
+  EXPECT_TRUE(manager_->IsAllowedUsername("test@google.com"));
+  EXPECT_TRUE(manager_->IsAllowedUsername("happy@google.com"));
+  EXPECT_FALSE(manager_->IsAllowedUsername("test@invalid.com"));
+  EXPECT_FALSE(manager_->IsAllowedUsername("test@notgoogle.com"));
+  EXPECT_FALSE(manager_->IsAllowedUsername(""));
+}
+
+TEST_F(SigninManagerTest, TestAlternateWildcard) {
+  // Test to make sure we accept "*@google.com" as a pattern (treat it as if
+  // the admin entered ".*@google.com").
+  g_browser_process->local_state()->SetString(
+      prefs::kGoogleServicesUsernamePattern, "*@google.com");
+  manager_->Initialize(profile_.get());
+  EXPECT_TRUE(manager_->IsAllowedUsername("test@google.com"));
+  EXPECT_TRUE(manager_->IsAllowedUsername("happy@google.com"));
+  EXPECT_FALSE(manager_->IsAllowedUsername("test@invalid.com"));
+  EXPECT_FALSE(manager_->IsAllowedUsername("test@notgoogle.com"));
+  EXPECT_FALSE(manager_->IsAllowedUsername(""));
+}
+
+TEST_F(SigninManagerTest, ProhibitedAtStartup) {
+  profile_->GetPrefs()->SetString(prefs::kGoogleServicesUsername,
+                                  "monkey@invalid.com");
+  g_browser_process->local_state()->SetString(
+      prefs::kGoogleServicesUsernamePattern, ".*@google.com");
+  manager_->Initialize(profile_.get());
+  // Currently signed in user is prohibited by policy, so should be signed out.
+  EXPECT_EQ("", manager_->GetAuthenticatedUsername());
+}
+
+TEST_F(SigninManagerTest, ProhibitedAfterStartup) {
+  std::string user("monkey@invalid.com");
+  profile_->GetPrefs()->SetString(prefs::kGoogleServicesUsername, user);
+  manager_->Initialize(profile_.get());
+  EXPECT_EQ(user, manager_->GetAuthenticatedUsername());
+  // Update the profile - user should be signed out.
+  g_browser_process->local_state()->SetString(
+      prefs::kGoogleServicesUsernamePattern, ".*@google.com");
+  EXPECT_EQ("", manager_->GetAuthenticatedUsername());
 }
 
 TEST_F(SigninManagerTest, SignInWithCredentials) {

@@ -86,7 +86,7 @@ class FlimflamManagerClientImpl : public FlimflamManagerClient {
                                  flimflam::kSetPropertyFunction);
     dbus::MessageWriter writer(&method_call);
     writer.AppendString(name);
-    dbus::AppendBasicTypeValueData(&writer, value);
+    FlimflamClientHelper::AppendValueDataAsVariant(&writer, value);
     helper_.CallVoidMethod(&method_call, callback);
   }
 
@@ -129,7 +129,6 @@ class FlimflamManagerClientImpl : public FlimflamManagerClient {
 
   virtual void GetService(const base::DictionaryValue& properties,
                           const ObjectPathCallback& callback) OVERRIDE {
-    DCHECK(AreServicePropertiesValid(properties));
     dbus::MethodCall method_call(flimflam::kFlimflamManagerInterface,
                                  flimflam::kGetServiceFunction);
     dbus::MessageWriter writer(&method_call);
@@ -145,9 +144,18 @@ class FlimflamManagerClientImpl : public FlimflamManagerClient {
 };
 
 // A stub implementation of FlimflamManagerClient.
+// Implemented: Stub cellular DeviceList entry for SMS testing.
 class FlimflamManagerClientStubImpl : public FlimflamManagerClient {
  public:
-  FlimflamManagerClientStubImpl() : weak_ptr_factory_(this) {}
+  FlimflamManagerClientStubImpl() : weak_ptr_factory_(this) {
+    base::ListValue* device_list = new base::ListValue;
+    // Note: names match Device stub map.
+    const char kStubCellular1[] = "stub_cellular1";
+    const char kStubCellular2[] = "stub_cellular2";
+    device_list->Append(base::Value::CreateStringValue(kStubCellular1));
+    device_list->Append(base::Value::CreateStringValue(kStubCellular2));
+    stub_properties_.Set(flimflam::kDevicesProperty, device_list);
+  }
 
   virtual ~FlimflamManagerClientStubImpl() {}
 
@@ -162,7 +170,7 @@ class FlimflamManagerClientStubImpl : public FlimflamManagerClient {
   virtual void GetProperties(const DictionaryValueCallback& callback) OVERRIDE {
     MessageLoop::current()->PostTask(
         FROM_HERE, base::Bind(
-            &FlimflamManagerClientStubImpl::PassEmptyDictionaryValue,
+            &FlimflamManagerClientStubImpl::PassStubProperties,
             weak_ptr_factory_.GetWeakPtr(),
             callback));
   }
@@ -176,6 +184,7 @@ class FlimflamManagerClientStubImpl : public FlimflamManagerClient {
   virtual void SetProperty(const std::string& name,
                            const base::Value& value,
                            const VoidCallback& callback) OVERRIDE {
+    stub_properties_.Set(name, value.DeepCopy());
     MessageLoop::current()->PostTask(FROM_HERE,
                                      base::Bind(callback,
                                                 DBUS_METHOD_CALL_SUCCESS));
@@ -223,12 +232,12 @@ class FlimflamManagerClientStubImpl : public FlimflamManagerClient {
   }
 
  private:
-  void PassEmptyDictionaryValue(const DictionaryValueCallback& callback) const {
-    base::DictionaryValue dictionary;
-    callback.Run(DBUS_METHOD_CALL_SUCCESS, dictionary);
+  void PassStubProperties(const DictionaryValueCallback& callback) const {
+    callback.Run(DBUS_METHOD_CALL_SUCCESS, stub_properties_);
   }
 
   base::WeakPtrFactory<FlimflamManagerClientStubImpl> weak_ptr_factory_;
+  base::DictionaryValue stub_properties_;
 
   DISALLOW_COPY_AND_ASSIGN(FlimflamManagerClientStubImpl);
 };

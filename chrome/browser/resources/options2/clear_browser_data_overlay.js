@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,7 @@ cr.define('options', function() {
    */
   function ClearBrowserDataOverlay() {
     OptionsPage.call(this, 'clearBrowserData',
-                     templateData.clearBrowserDataOverlayTabTitle,
+                     loadTimeData.getString('clearBrowserDataOverlayTabTitle'),
                      'clearBrowserDataOverlay');
   }
 
@@ -35,7 +35,9 @@ cr.define('options', function() {
                    'browser.clear_data.cache',
                    'browser.clear_data.cookies',
                    'browser.clear_data.passwords',
-                   'browser.clear_data.form_data'];
+                   'browser.clear_data.form_data',
+                   'browser.clear_data.hosted_apps_data',
+                   'browser.clear_data.content_licenses'];
       types.forEach(function(type) {
           Preferences.getInstance().addEventListener(type, f);
       });
@@ -51,6 +53,7 @@ cr.define('options', function() {
         ClearBrowserDataOverlay.dismiss();
       };
       $('clearBrowserDataCommit').onclick = function(event) {
+        ClearBrowserDataOverlay.setClearingState(true);
         chrome.send('performClearBrowserData');
       };
     },
@@ -80,8 +83,11 @@ cr.define('options', function() {
     $('deleteCookiesCheckbox').disabled = state;
     $('deletePasswordsCheckbox').disabled = state;
     $('deleteFormDataCheckbox').disabled = state;
+    $('deleteHostedAppsDataCheckbox').disabled = state;
+    $('deauthorizeContentLicensesCheckbox').disabled = state;
     $('clearBrowserDataTimePeriod').disabled = state;
     $('cbdThrobber').style.visibility = state ? 'visible' : 'hidden';
+    $('clearBrowserDataDismiss').disabled = state;
 
     if (state)
       $('clearBrowserDataCommit').disabled = true;

@@ -21,9 +21,9 @@ class MediaDeviceNotificationsWindowWin {
   // Only for use in unit tests.
   explicit MediaDeviceNotificationsWindowWin(VolumeNameFunc volumeNameFunc);
 
-  virtual ~MediaDeviceNotificationsWindowWin();
+  ~MediaDeviceNotificationsWindowWin();
 
-  virtual LRESULT OnDeviceChange(UINT event_type, DWORD data);
+  LRESULT OnDeviceChange(UINT event_type, DWORD data);
 
  private:
   void Init();
@@ -37,6 +37,12 @@ class MediaDeviceNotificationsWindowWin {
                                        UINT message,
                                        WPARAM wparam,
                                        LPARAM lparam);
+
+  // The window class of |window_|.
+  ATOM atom_;
+
+  // The handle of the module that contains the window procedure of |window_|.
+  HMODULE instance_;
 
   HWND window_;
   VolumeNameFunc volume_name_func_;

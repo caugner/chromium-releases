@@ -40,7 +40,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/webui/web_ui_util.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -52,9 +52,11 @@
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
-#include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/display.h"
+#include "ui/gfx/image/image_skia.h"
+#include "ui/gfx/screen.h"
 #include "ui/views/widget/widget.h"
 
 namespace {
@@ -81,25 +83,31 @@ const char kNetworkInfoKeyPolicyManaged[] = "policyManaged";
 class NetworkInfoDictionary {
  public:
   // Initializes the dictionary with default values.
-  NetworkInfoDictionary();
+  explicit NetworkInfoDictionary(float bitmapScale);
 
   // Copies in service path, connect{ing|ed|able} flags and connection type from
   // the provided network object. Also chooses an appropriate icon based on the
   // network type.
-  explicit NetworkInfoDictionary(const chromeos::Network* network);
+  NetworkInfoDictionary(const chromeos::Network* network,
+                        float bitmapScape);
 
   // Initializes a remembered network entry, pulling information from the passed
   // network object and the corresponding remembered network object. |network|
   // may be NULL.
   NetworkInfoDictionary(const chromeos::Network* network,
-                        const chromeos::Network* remembered);
+                        const chromeos::Network* remembered,
+                        float bitmapScale);
 
   // Setters for filling in information.
   void set_service_path(const std::string& service_path) {
     service_path_ = service_path;
   }
-  void set_icon(const SkBitmap& icon) {
-    icon_url_ = icon.isNull() ? "" : web_ui_util::GetImageDataUrl(icon);
+  void set_icon(const gfx::ImageSkia& icon) {
+    float actualScale;
+    SkBitmap bitmap = icon.GetBitmapForScale(bitmap_scale_factor_,
+                                             bitmap_scale_factor_,
+                                             &actualScale);
+    icon_url_ = icon.isNull() ? "" : web_ui_util::GetImageDataUrl(bitmap);
   }
   void set_name(const std::string& name) {
     name_ = name;
@@ -150,11 +158,13 @@ class NetworkInfoDictionary {
   chromeos::ActivationState activation_state_;
   bool needs_new_plan_;
   bool policy_managed_;
+  float bitmap_scale_factor_;
 
   DISALLOW_COPY_AND_ASSIGN(NetworkInfoDictionary);
 };
 
-NetworkInfoDictionary::NetworkInfoDictionary() {
+NetworkInfoDictionary::NetworkInfoDictionary(float bitmapScale)
+  : bitmap_scale_factor_(bitmapScale) {
   set_connecting(false);
   set_connected(false);
   set_connectable(false);
@@ -165,9 +175,11 @@ NetworkInfoDictionary::NetworkInfoDictionary() {
   set_policy_managed(false);
 }
 
-NetworkInfoDictionary::NetworkInfoDictionary(const chromeos::Network* network) {
+NetworkInfoDictionary::NetworkInfoDictionary(const chromeos::Network* network,
+                                             float bitmapScale)
+  : bitmap_scale_factor_(bitmapScale) {
   set_service_path(network->service_path());
-  set_icon(chromeos::NetworkMenuIcon::GetBitmap(network,
+  set_icon(chromeos::NetworkMenuIcon::GetImage(network,
       chromeos::NetworkMenuIcon::COLOR_DARK));
   set_name(network->name());
   set_connecting(network->connecting());
@@ -182,9 +194,11 @@ NetworkInfoDictionary::NetworkInfoDictionary(const chromeos::Network* network) {
 
 NetworkInfoDictionary::NetworkInfoDictionary(
     const chromeos::Network* network,
-    const chromeos::Network* remembered) {
+    const chromeos::Network* remembered,
+    float bitmapScale)
+  : bitmap_scale_factor_(bitmapScale) {
   set_service_path(remembered->service_path());
-  set_icon(chromeos::NetworkMenuIcon::GetBitmap(
+  set_icon(chromeos::NetworkMenuIcon::GetImage(
       network ? network : remembered, chromeos::NetworkMenuIcon::COLOR_DARK));
   set_name(remembered->name());
   set_connecting(network ? network->connecting() : false);
@@ -280,6 +294,8 @@ void InternetOptionsHandler::GetLocalizedValues(
 
     { "ethernetTitle", IDS_STATUSBAR_NETWORK_DEVICE_ETHERNET },
     { "wifiTitle", IDS_OPTIONS_SETTINGS_SECTION_TITLE_WIFI_NETWORK },
+    // TODO(zelidrag): Change details title to Wimax once we get strings.
+    { "wimaxTitle", IDS_OPTIONS_SETTINGS_SECTION_TITLE_CELLULAR_NETWORK },
     { "cellularTitle", IDS_OPTIONS_SETTINGS_SECTION_TITLE_CELLULAR_NETWORK },
     { "vpnTitle", IDS_OPTIONS_SETTINGS_SECTION_TITLE_PRIVATE_NETWORK },
     { "airplaneModeTitle", IDS_OPTIONS_SETTINGS_SECTION_TITLE_AIRPLANE_MODE },
@@ -335,6 +351,9 @@ void InternetOptionsHandler::GetLocalizedValues(
     { "connectButton", IDS_OPTIONS_SETTINGS_CONNECT },
     { "disconnectButton", IDS_OPTIONS_SETTINGS_DISCONNECT },
     { "viewAccountButton", IDS_STATUSBAR_NETWORK_VIEW_ACCOUNT },
+
+    // TODO(zelidrag): Change details title to Wimax once we get strings.
+    { "wimaxConnTabLabel", IDS_OPTIONS_SETTINGS_INTERNET_TAB_CONNECTION },
 
     // Wifi Tab.
 
@@ -435,7 +454,9 @@ void InternetOptionsHandler::GetLocalizedValues(
   chromeos::CrosSettings::Get()->GetString(chromeos::kDeviceOwner, &owner);
   localized_strings->SetString("ownerUserId", UTF8ToUTF16(owner));
 
-  FillNetworkInfo(localized_strings);
+  DictionaryValue* network_dictionary = new DictionaryValue;
+  FillNetworkInfo(network_dictionary);
+  localized_strings->Set("networkData", network_dictionary);
 }
 
 void InternetOptionsHandler::InitializePage() {
@@ -474,6 +495,12 @@ void InternetOptionsHandler::RegisterMessages() {
   web_ui()->RegisterMessageCallback("disableCellular",
       base::Bind(&InternetOptionsHandler::DisableCellularCallback,
                  base::Unretained(this)));
+  web_ui()->RegisterMessageCallback("enableWimax",
+      base::Bind(&InternetOptionsHandler::EnableWimaxCallback,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback("disableWimax",
+      base::Bind(&InternetOptionsHandler::DisableWimaxCallback,
+                 base::Unretained(this)));
   web_ui()->RegisterMessageCallback("buyDataPlan",
       base::Bind(&InternetOptionsHandler::BuyDataPlanCallback,
                  base::Unretained(this)));
@@ -504,12 +531,12 @@ void InternetOptionsHandler::DisableWifiCallback(const ListValue* args) {
 
 void InternetOptionsHandler::EnableCellularCallback(const ListValue* args) {
   // TODO(nkostylev): Code duplication, see NetworkMenu::ToggleCellular().
-  const chromeos::NetworkDevice* cellular = cros_->FindCellularDevice();
-  if (!cellular) {
-    LOG(ERROR) << "Didn't find cellular device, it should have been available.";
+  const chromeos::NetworkDevice* mobile = cros_->FindMobileDevice();
+  if (!mobile) {
+    LOG(ERROR) << "Didn't find mobile device, it should have been available.";
     cros_->EnableCellularNetworkDevice(true);
-  } else if (!cellular->is_sim_locked()) {
-    if (cellular->is_sim_absent()) {
+  } else if (!mobile->is_sim_locked()) {
+    if (mobile->is_sim_absent()) {
       std::string setup_url;
       chromeos::MobileConfig* config = chromeos::MobileConfig::GetInstance();
       if (config->IsReady()) {
@@ -536,10 +563,18 @@ void InternetOptionsHandler::DisableCellularCallback(const ListValue* args) {
   cros_->EnableCellularNetworkDevice(false);
 }
 
+void InternetOptionsHandler::EnableWimaxCallback(const ListValue* args) {
+  cros_->EnableWimaxNetworkDevice(true);
+}
+
+void InternetOptionsHandler::DisableWimaxCallback(const ListValue* args) {
+  cros_->EnableWimaxNetworkDevice(false);
+}
+
 void InternetOptionsHandler::ShowMorePlanInfoCallback(const ListValue* args) {
   if (!web_ui())
     return;
-  Browser* browser = BrowserList::FindBrowserWithFeature(
+  Browser* browser = browser::FindBrowserWithFeature(
       Profile::FromWebUI(web_ui()), Browser::FEATURE_TABSTRIP);
   if (!browser)
     return;
@@ -557,7 +592,13 @@ void InternetOptionsHandler::ShowMorePlanInfoCallback(const ListValue* args) {
 void InternetOptionsHandler::BuyDataPlanCallback(const ListValue* args) {
   if (!web_ui())
     return;
-  ash::Shell::GetInstance()->delegate()->OpenMobileSetup();
+
+  std::string service_path;
+  if (args->GetSize() != 1 || !args->GetString(0, &service_path)) {
+    NOTREACHED();
+    return;
+  }
+  ash::Shell::GetInstance()->delegate()->OpenMobileSetup(service_path);
 }
 
 void InternetOptionsHandler::SetApnCallback(const ListValue* args) {
@@ -645,9 +686,16 @@ void InternetOptionsHandler::MonitorNetworks() {
   const chromeos::WifiNetwork* wifi_network = cros_->wifi_network();
   if (wifi_network)
     cros_->AddNetworkObserver(wifi_network->service_path(), this);
-  // Always monitor the cellular networks, if any, so that changes
+
+  // Always monitor all mobile networks, if any, so that changes
   // in network technology, roaming status, and signal strength
   // will be shown.
+  const chromeos::WimaxNetworkVector& wimax_networks =
+      cros_->wimax_networks();
+  for (size_t i = 0; i < wimax_networks.size(); ++i) {
+    chromeos::WimaxNetwork* wimax_network = wimax_networks[i];
+    cros_->AddNetworkObserver(wimax_network->service_path(), this);
+  }
   const chromeos::CellularNetworkVector& cell_networks =
       cros_->cellular_networks();
   for (size_t i = 0; i < cell_networks.size(); ++i) {
@@ -868,12 +916,13 @@ void InternetOptionsHandler::PopulateDictionaryDetails(
                        preferred_ui_data);
   }
   chromeos::NetworkPropertyUIData auto_connect_ui_data(ui_data);
-  if (type == chromeos::TYPE_WIFI)
+  if (type == chromeos::TYPE_WIFI) {
     auto_connect_ui_data.ParseOncProperty(
         ui_data, onc,
         base::StringPrintf("%s.%s",
                            chromeos::onc::kWiFi,
                            chromeos::onc::wifi::kAutoConnect));
+  }
   SetValueDictionary(&dictionary, "autoConnect",
                      Value::CreateBooleanValue(network->auto_connect()),
                      auto_connect_ui_data);
@@ -886,6 +935,15 @@ void InternetOptionsHandler::PopulateDictionaryDetails(
       LOG(WARNING) << "Cannot find network " << network->service_path();
     } else {
       PopulateWifiDetails(wifi, &dictionary);
+    }
+  } else if (type == chromeos::TYPE_WIMAX) {
+    dictionary.SetBoolean("deviceConnected", cros_->wimax_connected());
+    const chromeos::WimaxNetwork* wimax =
+        cros_->FindWimaxNetworkByPath(network->service_path());
+    if (!wimax) {
+      LOG(WARNING) << "Cannot find network " << network->service_path();
+    } else {
+      PopulateWimaxDetails(wimax, &dictionary);
     }
   } else if (type == chromeos::TYPE_CELLULAR) {
     dictionary.SetBoolean("deviceConnected", cros_->cellular_connected());
@@ -926,6 +984,19 @@ void InternetOptionsHandler::PopulateWifiDetails(
   dictionary->SetString("bssid", wifi->bssid());
   dictionary->SetInteger("frequency", wifi->frequency());
   dictionary->SetInteger("strength", wifi->strength());
+}
+
+void InternetOptionsHandler::PopulateWimaxDetails(
+    const chromeos::WimaxNetwork* wimax,
+    DictionaryValue* dictionary) {
+  bool remembered = (wimax->profile_type() != chromeos::PROFILE_NONE);
+  dictionary->SetBoolean("remembered", remembered);
+  bool shared = wimax->profile_type() == chromeos::PROFILE_SHARED;
+  dictionary->SetBoolean("shared", shared);
+  if (wimax->passphrase_required())
+    dictionary->SetString("identity", wimax->eap_identity());
+
+  dictionary->SetInteger("strength", wimax->strength());
 }
 
 DictionaryValue* InternetOptionsHandler::CreateDictionaryFromCellularApn(
@@ -1051,23 +1122,16 @@ void InternetOptionsHandler::SetActivationButtonVisibility(
   }
 }
 
-void InternetOptionsHandler::CreateModalPopup(views::WidgetDelegate* view) {
-  views::Widget* window = views::Widget::CreateWindowWithParent(
-      view, GetNativeWindow());
-  window->SetAlwaysOnTop(true);
-  window->Show();
-}
-
 gfx::NativeWindow InternetOptionsHandler::GetNativeWindow() const {
   // TODO(beng): This is an improper direct dependency on Browser. Route this
   // through some sort of delegate.
   Browser* browser =
-      BrowserList::FindBrowserWithProfile(Profile::FromWebUI(web_ui()));
-  return browser->window()->GetNativeHandle();
+      browser::FindBrowserWithProfile(Profile::FromWebUI(web_ui()));
+  return browser->window()->GetNativeWindow();
 }
 
 Browser* InternetOptionsHandler::GetAppropriateBrowser() {
-  return Browser::GetOrCreateTabbedBrowser(
+  return browser::FindOrCreateTabbedBrowser(
       ProfileManager::GetDefaultProfileOrOffTheRecord());
 }
 
@@ -1090,6 +1154,8 @@ void InternetOptionsHandler::NetworkCommandCallback(const ListValue* args) {
       PopulateDictionaryDetails(ether);
   } else if (type == chromeos::TYPE_WIFI) {
     HandleWifiButtonClick(service_path, command);
+  } else if (type == chromeos::TYPE_WIMAX) {
+    HandleWimaxButtonClick(service_path, command);
   } else if (type == chromeos::TYPE_CELLULAR) {
     HandleCellularButtonClick(service_path, command);
   } else if (type == chromeos::TYPE_VPN) {
@@ -1113,7 +1179,8 @@ void InternetOptionsHandler::HandleWifiButtonClick(
     cros_->ForgetNetwork(service_path);
   } else if (service_path == kOtherNetworksFakePath) {
     // Other wifi networks.
-    CreateModalPopup(new chromeos::NetworkConfigView(chromeos::TYPE_WIFI));
+    chromeos::NetworkConfigView::ShowForType(
+        chromeos::TYPE_WIFI, GetNativeWindow());
   } else if ((wifi = cros_->FindWifiNetworkByPath(service_path))) {
     if (command == "connect") {
       wifi->SetEnrollmentDelegate(
@@ -1130,6 +1197,28 @@ void InternetOptionsHandler::HandleWifiButtonClick(
   }
 }
 
+void InternetOptionsHandler::HandleWimaxButtonClick(
+    const std::string& service_path,
+    const std::string& command) {
+  chromeos::WimaxNetwork* wimax = NULL;
+  if (command == "forget") {
+    cros_->ForgetNetwork(service_path);
+  } else if ((wimax = cros_->FindWimaxNetworkByPath(service_path))) {
+    if (command == "connect") {
+      wimax->SetEnrollmentDelegate(
+          chromeos::CreateEnrollmentDelegate(GetNativeWindow(), wimax->name(),
+              ProfileManager::GetLastUsedProfile()));
+      wimax->AttemptConnection(base::Bind(&InternetOptionsHandler::DoConnect,
+                                          weak_factory_.GetWeakPtr(),
+                                          wimax));
+    } else if (command == "disconnect") {
+      cros_->DisconnectFromNetwork(wimax);
+    } else if (command == "options") {
+      PopulateDictionaryDetails(wimax);
+    }
+  }
+}
+
 void InternetOptionsHandler::HandleCellularButtonClick(
     const std::string& service_path,
     const std::string& command) {
@@ -1142,7 +1231,7 @@ void InternetOptionsHandler::HandleCellularButtonClick(
     } else if (command == "disconnect") {
       cros_->DisconnectFromNetwork(cellular);
     } else if (command == "activate") {
-      ash::Shell::GetInstance()->delegate()->OpenMobileSetup();
+      ash::Shell::GetInstance()->delegate()->OpenMobileSetup(service_path);
     } else if (command == "options") {
       PopulateDictionaryDetails(cellular);
     }
@@ -1158,7 +1247,8 @@ void InternetOptionsHandler::HandleVPNButtonClick(
   } else if (service_path == kOtherNetworksFakePath) {
     // TODO(altimofeev): verify if service_path in condition is correct.
     // Other VPN networks.
-    CreateModalPopup(new chromeos::NetworkConfigView(chromeos::TYPE_VPN));
+    chromeos::NetworkConfigView::ShowForType(
+        chromeos::TYPE_VPN, GetNativeWindow());
   } else if ((network = cros_->FindVirtualNetworkByPath(service_path))) {
     if (command == "connect") {
       network->SetEnrollmentDelegate(
@@ -1182,20 +1272,31 @@ void InternetOptionsHandler::DoConnect(chromeos::Network* network) {
     chromeos::VirtualNetwork* vpn =
         static_cast<chromeos::VirtualNetwork*>(network);
     if (vpn->NeedMoreInfoToConnect()) {
-      CreateModalPopup(new chromeos::NetworkConfigView(network));
+      chromeos::NetworkConfigView::Show(network, GetNativeWindow());
     } else {
       cros_->ConnectToVirtualNetwork(vpn);
       // Connection failures are responsible for updating the UI, including
       // reopening dialogs.
     }
-  }
-  if (network->type() == chromeos::TYPE_WIFI) {
+  } else if (network->type() == chromeos::TYPE_WIFI) {
     chromeos::WifiNetwork* wifi = static_cast<chromeos::WifiNetwork*>(network);
     if (wifi->IsPassphraseRequired()) {
       // Show the connection UI if we require a passphrase.
-      CreateModalPopup(new chromeos::NetworkConfigView(wifi));
+      chromeos::NetworkConfigView::Show(wifi, GetNativeWindow());
     } else {
       cros_->ConnectToWifiNetwork(wifi);
+      // Connection failures are responsible for updating the UI, including
+      // reopening dialogs.
+    }
+  } else if (network->type() == chromeos::TYPE_WIMAX) {
+    chromeos::WimaxNetwork* wimax =
+        static_cast<chromeos::WimaxNetwork*>(network);
+    if (wimax->passphrase_required()) {
+      // Show the connection UI if we require a passphrase.
+      // TODO(stavenjb): Implament WiMAX connection UI.
+      chromeos::NetworkConfigView::Show(wimax, GetNativeWindow());
+    } else {
+      cros_->ConnectToWimaxNetwork(wimax);
       // Connection failures are responsible for updating the UI, including
       // reopening dialogs.
     }
@@ -1224,7 +1325,8 @@ ListValue* InternetOptionsHandler::GetWiredList() {
     const chromeos::EthernetNetwork* ethernet_network =
         cros_->ethernet_network();
     if (ethernet_network) {
-      NetworkInfoDictionary network_dict(ethernet_network);
+      NetworkInfoDictionary network_dict(ethernet_network,
+                                         web_ui()->GetDeviceScale());
       network_dict.set_name(
           l10n_util::GetStringUTF8(IDS_STATUSBAR_NETWORK_DEVICE_ETHERNET)),
       list->Append(network_dict.BuildDictionary());
@@ -1239,7 +1341,15 @@ ListValue* InternetOptionsHandler::GetWirelessList() {
   const chromeos::WifiNetworkVector& wifi_networks = cros_->wifi_networks();
   for (chromeos::WifiNetworkVector::const_iterator it =
       wifi_networks.begin(); it != wifi_networks.end(); ++it) {
-    NetworkInfoDictionary network_dict(*it);
+    NetworkInfoDictionary network_dict(*it, web_ui()->GetDeviceScale());
+    network_dict.set_connectable(cros_->CanConnectToNetwork(*it));
+    list->Append(network_dict.BuildDictionary());
+  }
+
+  const chromeos::WimaxNetworkVector& wimax_networks = cros_->wimax_networks();
+  for (chromeos::WimaxNetworkVector::const_iterator it =
+      wimax_networks.begin(); it != wimax_networks.end(); ++it) {
+    NetworkInfoDictionary network_dict(*it, web_ui()->GetDeviceScale());
     network_dict.set_connectable(cros_->CanConnectToNetwork(*it));
     list->Append(network_dict.BuildDictionary());
   }
@@ -1248,7 +1358,7 @@ ListValue* InternetOptionsHandler::GetWirelessList() {
       cros_->cellular_networks();
   for (chromeos::CellularNetworkVector::const_iterator it =
       cellular_networks.begin(); it != cellular_networks.end(); ++it) {
-    NetworkInfoDictionary network_dict(*it);
+    NetworkInfoDictionary network_dict(*it, web_ui()->GetDeviceScale());
     network_dict.set_connectable(cros_->CanConnectToNetwork(*it));
     network_dict.set_activation_state((*it)->activation_state());
     network_dict.set_needs_new_plan(
@@ -1259,10 +1369,10 @@ ListValue* InternetOptionsHandler::GetWirelessList() {
   const chromeos::NetworkDevice* cellular_device = cros_->FindCellularDevice();
   if (cellular_device && cellular_device->support_network_scan() &&
       cros_->cellular_enabled()) {
-    NetworkInfoDictionary network_dict;
+    NetworkInfoDictionary network_dict(web_ui()->GetDeviceScale());
     network_dict.set_service_path(kOtherNetworksFakePath);
     network_dict.set_icon(
-        chromeos::NetworkMenuIcon::GetDisconnectedBitmap(
+        chromeos::NetworkMenuIcon::GetDisconnectedImage(
             chromeos::NetworkMenuIcon::BARS,
             chromeos::NetworkMenuIcon::COLOR_DARK));
     network_dict.set_name(
@@ -1283,7 +1393,7 @@ ListValue* InternetOptionsHandler::GetVPNList() {
       cros_->virtual_networks();
   for (chromeos::VirtualNetworkVector::const_iterator it =
       virtual_networks.begin(); it != virtual_networks.end(); ++it) {
-    NetworkInfoDictionary network_dict(*it);
+    NetworkInfoDictionary network_dict(*it, web_ui()->GetDeviceScale());
     network_dict.set_connectable(cros_->CanConnectToNetwork(*it));
     list->Append(network_dict.BuildDictionary());
   }
@@ -1301,7 +1411,9 @@ ListValue* InternetOptionsHandler::GetRememberedList() {
     chromeos::WifiNetwork* wifi = static_cast<chromeos::WifiNetwork*>(
         cros_->FindNetworkByUniqueId(remembered->unique_id()));
 
-    NetworkInfoDictionary network_dict(wifi, remembered);
+    NetworkInfoDictionary network_dict(wifi,
+                                       remembered,
+                                       web_ui()->GetDeviceScale());
     list->Append(network_dict.BuildDictionary());
   }
 
@@ -1312,7 +1424,9 @@ ListValue* InternetOptionsHandler::GetRememberedList() {
     chromeos::VirtualNetwork* vpn = static_cast<chromeos::VirtualNetwork*>(
         cros_->FindNetworkByUniqueId(remembered->unique_id()));
 
-    NetworkInfoDictionary network_dict(vpn, remembered);
+    NetworkInfoDictionary network_dict(vpn,
+                                       remembered,
+                                       web_ui()->GetDeviceScale());
     list->Append(network_dict.BuildDictionary());
   }
 
@@ -1331,6 +1445,9 @@ void InternetOptionsHandler::FillNetworkInfo(DictionaryValue* dictionary) {
   dictionary->SetBoolean("cellularAvailable", cros_->cellular_available());
   dictionary->SetBoolean("cellularBusy", cros_->cellular_busy());
   dictionary->SetBoolean("cellularEnabled", cros_->cellular_enabled());
+  dictionary->SetBoolean("wimaxEnabled", cros_->wimax_enabled());
+  dictionary->SetBoolean("wimaxAvailable", cros_->wimax_available());
+  dictionary->SetBoolean("wimaxBusy", cros_->wimax_busy());
   // TODO(kevers): The use of 'offline_mode' is not quite correct.  Update once
   // we have proper back-end support.
   dictionary->SetBoolean("airplaneMode", cros_->offline_mode());

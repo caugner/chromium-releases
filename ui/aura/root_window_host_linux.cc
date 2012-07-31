@@ -6,18 +6,20 @@
 
 #include <X11/Xatom.h>
 #include <X11/Xcursor/Xcursor.h>
+#include <X11/Xlib.h>
 #include <X11/cursorfont.h>
 #include <X11/extensions/XInput2.h>
 #include <X11/extensions/Xfixes.h>
 #include <X11/extensions/Xrandr.h>
 #include <algorithm>
 
-#include "base/message_pump_x.h"
+#include "base/message_pump_aurax11.h"
 #include "base/stl_util.h"
 #include "base/stringprintf.h"
 #include "grit/ui_resources_standard.h"
 #include "third_party/skia/include/core/SkBitmap.h"
-#include "ui/aura/client/user_gesture_client.h"
+#include "ui/aura/client/capture_client.h"
+#include "ui/aura/client/user_action_client.h"
 #include "ui/aura/dispatcher_linux.h"
 #include "ui/aura/env.h"
 #include "ui/aura/event.h"
@@ -29,7 +31,10 @@
 #include "ui/base/view_prop.h"
 #include "ui/base/x/x11_util.h"
 #include "ui/compositor/layer.h"
+#include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/image/image.h"
+#include "ui/gfx/image/image_skia.h"
+#include "ui/gfx/screen.h"
 
 using std::max;
 using std::min;
@@ -42,12 +47,22 @@ namespace {
 const int kBackMouseButton = 8;
 const int kForwardMouseButton = 9;
 
+const int kAnimatedCursorFrameDelayMs = 25;
+
 const char kRootWindowHostLinuxKey[] = "__AURA_ROOT_WINDOW_HOST_LINUX__";
+
+const char* kAtomsToCache[] = {
+  "WM_DELETE_WINDOW",
+  "_NET_WM_PING",
+  "_NET_WM_PID",
+  "WM_S0",
+  NULL
+};
 
 // The events reported for slave devices can have incorrect information for some
 // fields. This utility function is used to check for such inconsistencies.
 void CheckXEventForConsistency(XEvent* xevent) {
-#if defined(USE_XI2_MT)
+#if defined(USE_XI2_MT) && !defined(NDEBUG)
   static bool expect_master_event = false;
   static XIDeviceEvent slave_event;
   static gfx::Point slave_location;
@@ -92,7 +107,7 @@ void CheckXEventForConsistency(XEvent* xevent) {
     CHECK_EQ(slave_event.mods.locked, xievent->mods.locked);
     CHECK_EQ(slave_event.mods.effective, xievent->mods.effective);
   }
-#endif  // defined(USE_XI2_MT)
+#endif  // defined(USE_XI2_MT) && !defined(NDEBUG)
 }
 
 // Returns X font cursor shape from an Aura cursor.
@@ -286,65 +301,180 @@ bool ShouldSendCharEventForKeyboardCode(ui::KeyboardCode keycode) {
   }
 }
 
-// A list of atoms that we'll intern on host creation to save roundtrips to the
-// X11 server. Must be kept in sync with RootWindowHostLinux::AtomList
-const char* kAtomList[] = {
-  "WM_DELETE_WINDOW",
-  "_NET_WM_PING",
-  "_NET_WM_PID",
-  "WM_S0"
-};
-
 }  // namespace
 
 // A utility class that provides X Cursor for NativeCursors for which we have
 // image resources.
 class RootWindowHostLinux::ImageCursors {
  public:
-  ImageCursors() {
-    LoadImageCursor(ui::kCursorNoDrop, IDR_AURA_CURSOR_NO_DROP);
-    LoadImageCursor(ui::kCursorCopy, IDR_AURA_CURSOR_COPY);
-    // TODO (varunjain): add more cursors once we have assets.
+  ImageCursors() : scale_factor_(0.0) {
+  }
+
+  void Reload(float scale_factor) {
+    if (scale_factor_ == scale_factor)
+      return;
+    scale_factor_ = scale_factor;
+    UnloadAll();
+    // The cursor's hot points are defined in chromeos's
+    // src/platforms/assets/cursors/*.cfg files.
+    LoadImageCursor(ui::kCursorNull, IDR_AURA_CURSOR_PTR, 9, 5);
+    LoadImageCursor(ui::kCursorPointer, IDR_AURA_CURSOR_PTR, 9, 5);
+    LoadImageCursor(ui::kCursorNoDrop, IDR_AURA_CURSOR_NO_DROP, 9, 5);
+    LoadImageCursor(ui::kCursorCopy, IDR_AURA_CURSOR_COPY, 9, 5);
+    LoadImageCursor(ui::kCursorHand, IDR_AURA_CURSOR_HAND, 9, 4);
+    LoadImageCursor(ui::kCursorMove, IDR_AURA_CURSOR_MOVE, 12, 12);
+    LoadImageCursor(ui::kCursorNorthEastResize,
+                    IDR_AURA_CURSOR_NORTH_EAST_RESIZE, 12, 11);
+    LoadImageCursor(ui::kCursorSouthWestResize,
+                    IDR_AURA_CURSOR_SOUTH_WEST_RESIZE, 12, 11);
+    LoadImageCursor(ui::kCursorSouthEastResize,
+                    IDR_AURA_CURSOR_SOUTH_EAST_RESIZE, 11, 11);
+    LoadImageCursor(ui::kCursorNorthWestResize,
+                    IDR_AURA_CURSOR_NORTH_WEST_RESIZE, 11, 11);
+    LoadImageCursor(ui::kCursorNorthResize,
+                    IDR_AURA_CURSOR_NORTH_RESIZE, 11, 10);
+    LoadImageCursor(ui::kCursorSouthResize,
+                    IDR_AURA_CURSOR_SOUTH_RESIZE, 11, 10);
+    LoadImageCursor(ui::kCursorEastResize, IDR_AURA_CURSOR_EAST_RESIZE, 11, 11);
+    LoadImageCursor(ui::kCursorWestResize, IDR_AURA_CURSOR_WEST_RESIZE, 11, 11);
+    LoadImageCursor(ui::kCursorIBeam, IDR_AURA_CURSOR_IBEAM, 12, 11);
+    LoadImageCursor(ui::kCursorAlias, IDR_AURA_CURSOR_ALIAS, 8, 7);
+    LoadImageCursor(ui::kCursorCell, IDR_AURA_CURSOR_CELL, 16, 15);
+    LoadImageCursor(ui::kCursorContextMenu, IDR_AURA_CURSOR_CONTEXT_MENU, 5, 5);
+    LoadImageCursor(ui::kCursorCross, IDR_AURA_CURSOR_CROSSHAIR, 15, 15);
+    LoadImageCursor(ui::kCursorHelp, IDR_AURA_CURSOR_HELP, 5, 5);
+    LoadImageCursor(ui::kCursorVerticalText,
+                    IDR_AURA_CURSOR_XTERM_HORIZ, 10, 12);
+    LoadImageCursor(ui::kCursorZoomIn, IDR_AURA_CURSOR_ZOOM_IN, 14, 13);
+    LoadImageCursor(ui::kCursorZoomOut, IDR_AURA_CURSOR_ZOOM_OUT, 15, 14);
+    LoadImageCursor(ui::kCursorRowResize, IDR_AURA_CURSOR_ROW_RESIZE, 11, 11);
+    LoadImageCursor(ui::kCursorColumnResize,
+                    IDR_AURA_CURSOR_COL_RESIZE, 11, 10);
+    LoadImageCursor(ui::kCursorEastWestResize,
+                    IDR_AURA_CURSOR_EAST_WEST_RESIZE, 11, 11);
+    LoadImageCursor(ui::kCursorNorthSouthResize,
+                    IDR_AURA_CURSOR_NORTH_SOUTH_RESIZE, 11, 10);
+    LoadImageCursor(ui::kCursorNorthEastSouthWestResize,
+                    IDR_AURA_CURSOR_NORTH_EAST_SOUTH_WEST_RESIZE, 12, 11);
+    LoadImageCursor(ui::kCursorNorthWestSouthEastResize,
+                    IDR_AURA_CURSOR_NORTH_WEST_SOUTH_EAST_RESIZE, 11, 11);
+    LoadAnimatedCursor(ui::kCursorWait, IDR_THROBBER, 7, 7);
+    LoadAnimatedCursor(ui::kCursorProgress, IDR_THROBBER, 7, 7);
   }
 
   ~ImageCursors() {
-    std::map<int, Cursor>::const_iterator it;
-    for (it = cursors_.begin(); it != cursors_.end(); ++it)
+    UnloadAll();
+  }
+
+  void UnloadAll() {
+    for (std::map<int, Cursor>::const_iterator it = cursors_.begin();
+        it != cursors_.end(); ++it)
       ui::UnrefCustomXCursor(it->second);
+
+    // Free animated cursors and images.
+    for (AnimatedCursorMap::iterator it = animated_cursors_.begin();
+        it != animated_cursors_.end(); ++it) {
+      XcursorImagesDestroy(it->second.second);  // also frees individual frames.
+      XFreeCursor(ui::GetXDisplay(), it->second.first);
+    }
   }
 
   // Returns true if we have an image resource loaded for the |native_cursor|.
   bool IsImageCursor(gfx::NativeCursor native_cursor) {
-    return cursors_.find(native_cursor.native_type()) != cursors_.end();
+    int type = native_cursor.native_type();
+    return cursors_.find(type) != cursors_.end() ||
+        animated_cursors_.find(type) != animated_cursors_.end();
   }
 
   // Gets the X Cursor corresponding to the |native_cursor|.
   ::Cursor ImageCursorFromNative(gfx::NativeCursor native_cursor) {
-    DCHECK(cursors_.find(native_cursor.native_type()) != cursors_.end());
-    return cursors_[native_cursor.native_type()];
+    int type = native_cursor.native_type();
+    if (animated_cursors_.find(type) != animated_cursors_.end())
+      return animated_cursors_[type].first;
+    DCHECK(cursors_.find(type) != cursors_.end());
+    return cursors_[type];
   }
 
  private:
   // Creates an X Cursor from an image resource and puts it in the cursor map.
-  void LoadImageCursor(int id, int resource_id) {
-    const SkBitmap* bitmap =
-        ui::ResourceBundle::GetSharedInstance().GetImageNamed(
-            resource_id).ToSkBitmap();
+  void LoadImageCursor(int id, int resource_id, int hot_x, int hot_y) {
+    const gfx::ImageSkia* image =
+        ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(resource_id);
+    float actual_scale = 0;
+    const SkBitmap& bitmap = image->GetBitmapForScale(scale_factor_,
+                                                      scale_factor_,
+                                                      &actual_scale);
+    // We never use scaled cursor, but the following DCHECK fails
+    // because the method above computes the actual scale from the image
+    // size instead of obtaining from the resource data, and the some
+    // of cursors are indeed not 2x size of the 2x images.
+    // TODO(oshima): Fix this and enable the following DCHECK.
+    // DCHECK_EQ(actual_scale, scale_factor_);
+    XcursorImage* x_image = ui::SkBitmapToXcursorImage(
+        &bitmap, gfx::Point(hot_x * actual_scale, hot_y * actual_scale));
+    cursors_[id] = ui::CreateReffedCustomXCursor(x_image);
+    // |bitmap| is owned by the resource bundle. So we do not need to free it.
+  }
 
-    XcursorImage* image = ui::SkBitmapToXcursorImage(bitmap, gfx::Point(0, 0));
-    cursors_[id] = ui::CreateReffedCustomXCursor(image);
+  // Creates an animated X Cursor from an image resource and puts it in the
+  // cursor map. The image is assumed to be a concatenation of animation frames.
+  // Also, each frame is assumed to be square (width == height)
+  void LoadAnimatedCursor(int id, int resource_id, int hot_x, int hot_y) {
+    const gfx::ImageSkia* image =
+        ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(resource_id);
+    float actual_scale = 0;
+    const SkBitmap& bitmap = image->GetBitmapForScale(scale_factor_,
+                                                      scale_factor_,
+                                                      &actual_scale);
+    DCHECK_EQ(bitmap.config(), SkBitmap::kARGB_8888_Config);
+    int frame_width = bitmap.height();
+    int frame_height = frame_width;
+    int total_width = bitmap.width();
+    DCHECK_EQ(total_width % frame_width, 0);
+    int frame_count = total_width / frame_width;
+    DCHECK_GT(frame_count, 0);
+    XcursorImages* x_images = XcursorImagesCreate(frame_count);
+    x_images->nimage = frame_count;
+    bitmap.lockPixels();
+    unsigned int* pixels = bitmap.getAddr32(0, 0);
+    // Create each frame.
+    for (int i = 0; i < frame_count; ++i) {
+      XcursorImage* x_image = XcursorImageCreate(frame_width, frame_height);
+      for (int j = 0; j < frame_height; ++j) {
+        // Copy j'th row of i'th frame.
+        memcpy(x_image->pixels + j * frame_width,
+               pixels + i * frame_width + j * total_width,
+               frame_width * 4);
+      }
+      x_image->xhot = hot_x * actual_scale;
+      x_image->yhot = hot_y * actual_scale;
+      x_image->delay = kAnimatedCursorFrameDelayMs;
+      x_images->images[i] = x_image;
+    }
+    bitmap.unlockPixels();
+
+    animated_cursors_[id] = std::make_pair(
+        XcursorImagesLoadCursor(ui::GetXDisplay(), x_images), x_images);
     // |bitmap| is owned by the resource bundle. So we do not need to free it.
   }
 
   // A map to hold all image cursors. It maps the cursor ID to the X Cursor.
   std::map<int, Cursor> cursors_;
 
+  // A map to hold all animated cursors. It maps the cursor ID to the pair of
+  // the X Cursor and the corresponding XcursorImages. We need a pointer to the
+  // images so that we can free them on destruction.
+  typedef std::map<int, std::pair<Cursor, XcursorImages*> > AnimatedCursorMap;
+  AnimatedCursorMap animated_cursors_;
+
+  float scale_factor_;
+
   DISALLOW_COPY_AND_ASSIGN(ImageCursors);
 };
 
 RootWindowHostLinux::RootWindowHostLinux(const gfx::Rect& bounds)
     : root_window_(NULL),
-      xdisplay_(base::MessagePumpX::GetDefaultXDisplay()),
+      xdisplay_(base::MessagePumpAuraX11::GetDefaultXDisplay()),
       xwindow_(0),
       x_root_window_(DefaultRootWindow(xdisplay_)),
       current_cursor_(ui::kCursorNull),
@@ -352,7 +482,8 @@ RootWindowHostLinux::RootWindowHostLinux(const gfx::Rect& bounds)
       bounds_(bounds),
       focus_when_shown_(false),
       pointer_barriers_(NULL),
-      image_cursors_(new ImageCursors) {
+      image_cursors_(new ImageCursors),
+      atom_cache_(xdisplay_, kAtomsToCache) {
   XSetWindowAttributes swa;
   memset(&swa, 0, sizeof(swa));
   swa.background_pixmap = None;
@@ -366,7 +497,7 @@ RootWindowHostLinux::RootWindowHostLinux(const gfx::Rect& bounds)
       CWBackPixmap,
       &swa);
   static_cast<DispatcherLinux*>(Env::GetInstance()->GetDispatcher())->
-      WindowDispatcherCreated(xwindow_, this);
+      AddDispatcherForWindow(this, xwindow_);
 
   prop_.reset(new ui::ViewProp(xwindow_, kRootWindowHostLinuxKey, this));
 
@@ -395,16 +526,12 @@ RootWindowHostLinux::RootWindowHostLinux(const gfx::Rect& bounds)
   if (RootWindow::hide_host_cursor())
     XDefineCursor(xdisplay_, x_root_window_, invisible_cursor_);
 
-  // Grab all the atoms we need now to minimize roundtrips to the X11 server.
-  XInternAtoms(xdisplay_, const_cast<char**>(kAtomList), ATOM_COUNT, False,
-               cached_atoms_);
-
   // TODO(erg): We currently only request window deletion events. We also
   // should listen for activation events and anything else that GTK+ listens
   // for, and do something useful.
   ::Atom protocols[2];
-  protocols[0] = cached_atoms_[ATOM_WM_DELETE_WINDOW];
-  protocols[1] = cached_atoms_[ATOM__NET_WM_PING];
+  protocols[0] = atom_cache_.GetAtom("WM_DELETE_WINDOW");
+  protocols[1] = atom_cache_.GetAtom("_NET_WM_PING");
   XSetWMProtocols(xdisplay_, xwindow_, protocols, 2);
 
   // We need a WM_CLIENT_MACHINE and WM_LOCALE_NAME value so we integrate with
@@ -416,7 +543,7 @@ RootWindowHostLinux::RootWindowHostLinux(const gfx::Rect& bounds)
   pid_t pid = getpid();
   XChangeProperty(xdisplay_,
                   xwindow_,
-                  cached_atoms_[ATOM__NET_WM_PID],
+                  atom_cache_.GetAtom("_NET_WM_PID"),
                   XA_CARDINAL,
                   32,
                   PropModeReplace,
@@ -428,11 +555,13 @@ RootWindowHostLinux::RootWindowHostLinux(const gfx::Rect& bounds)
   static int root_window_number = 0;
   std::string name = StringPrintf("aura_root_%d", root_window_number++);
   XStoreName(xdisplay_, xwindow_, name.c_str());
+  XRRSelectInput(xdisplay_, x_root_window_,
+                 RRScreenChangeNotifyMask | RROutputChangeNotifyMask);
 }
 
 RootWindowHostLinux::~RootWindowHostLinux() {
   static_cast<DispatcherLinux*>(Env::GetInstance()->GetDispatcher())->
-      WindowDispatcherDestroying(xwindow_);
+      RemoveDispatcherForWindow(xwindow_);
 
   UnConfineCursor();
 
@@ -466,13 +595,13 @@ bool RootWindowHostLinux::Dispatch(const base::NativeEvent& event) {
     case ButtonPress: {
       if (static_cast<int>(xev->xbutton.button) == kBackMouseButton ||
           static_cast<int>(xev->xbutton.button) == kForwardMouseButton) {
-        client::UserGestureClient* gesture_client =
-            client::GetUserGestureClient(root_window_);
+        client::UserActionClient* gesture_client =
+            client::GetUserActionClient(root_window_);
         if (gesture_client) {
-          gesture_client->OnUserGesture(
+          gesture_client->OnUserAction(
               static_cast<int>(xev->xbutton.button) == kBackMouseButton ?
-              client::UserGestureClient::GESTURE_BACK :
-              client::UserGestureClient::GESTURE_FORWARD);
+              client::UserActionClient::BACK :
+              client::UserActionClient::FORWARD);
         }
         break;
       }
@@ -483,8 +612,11 @@ bool RootWindowHostLinux::Dispatch(const base::NativeEvent& event) {
       break;
     }
     case FocusOut:
-      if (xev->xfocus.mode != NotifyGrab)
-        root_window_->SetCapture(NULL, 0);
+      if (xev->xfocus.mode != NotifyGrab) {
+        Window* capture_window = client::GetCaptureWindow(root_window_);
+        if (capture_window && capture_window->GetRootWindow() == root_window_)
+          capture_window->ReleaseCapture();
+      }
       break;
     case ConfigureNotify: {
       DCHECK_EQ(xwindow_, xev->xconfigure.window);
@@ -543,16 +675,16 @@ bool RootWindowHostLinux::Dispatch(const base::NativeEvent& event) {
                 static_cast<XIDeviceEvent*>(xev->xcookie.data);
             int button = xievent->detail;
             if (button == kBackMouseButton || button == kForwardMouseButton) {
-              client::UserGestureClient* gesture_client =
-                  client::GetUserGestureClient(root_window_);
+              client::UserActionClient* gesture_client =
+                  client::GetUserActionClient(root_window_);
               if (gesture_client) {
                 bool reverse_direction =
                     ui::IsTouchpadEvent(xev) && ui::IsNaturalScrollEnabled();
-                gesture_client->OnUserGesture(
+                gesture_client->OnUserAction(
                     (button == kBackMouseButton && !reverse_direction) ||
                     (button == kForwardMouseButton && reverse_direction) ?
-                    client::UserGestureClient::GESTURE_BACK :
-                    client::UserGestureClient::GESTURE_FORWARD);
+                    client::UserActionClient::BACK :
+                    client::UserActionClient::FORWARD);
               }
               break;
             }
@@ -588,10 +720,10 @@ bool RootWindowHostLinux::Dispatch(const base::NativeEvent& event) {
     }
     case ClientMessage: {
       Atom message_type = static_cast<Atom>(xev->xclient.data.l[0]);
-      if (message_type == cached_atoms_[ATOM_WM_DELETE_WINDOW]) {
+      if (message_type == atom_cache_.GetAtom("WM_DELETE_WINDOW")) {
         // We have received a close message from the window manager.
         root_window_->OnRootWindowHostClosed();
-      } else if (message_type == cached_atoms_[ATOM__NET_WM_PING]) {
+      } else if (message_type == atom_cache_.GetAtom("_NET_WM_PING")) {
         XEvent reply_event = *xev;
         reply_event.xclient.window = x_root_window_;
 
@@ -647,6 +779,8 @@ bool RootWindowHostLinux::Dispatch(const base::NativeEvent& event) {
 
 void RootWindowHostLinux::SetRootWindow(RootWindow* root_window) {
   root_window_ = root_window;
+  // The device scale factor is now accessible, so load cursors now.
+  image_cursors_->Reload(root_window_->layer()->device_scale_factor());
 }
 
 RootWindow* RootWindowHostLinux::GetRootWindow() {
@@ -678,11 +812,13 @@ gfx::Rect RootWindowHostLinux::GetBounds() const {
 }
 
 void RootWindowHostLinux::SetBounds(const gfx::Rect& bounds) {
-  bool size_changed = bounds_.size() != bounds.size();
-  if (bounds == bounds_) {
-    root_window_->SchedulePaintInRect(root_window_->bounds());
-    return;
-  }
+  // Even if the host window's size doesn't change, aura's root window
+  // size, which is in DIP, changes when the scale changes.
+  float current_scale = root_window_->compositor()->device_scale_factor();
+  float new_scale =
+      gfx::Screen::GetDisplayNearestWindow(root_window_).device_scale_factor();
+  bool size_changed = bounds_.size() != bounds.size() ||
+      current_scale != new_scale;
 
   if (bounds.size() != bounds_.size())
     XResizeWindow(xdisplay_, xwindow_, bounds.width(), bounds.height());
@@ -698,6 +834,8 @@ void RootWindowHostLinux::SetBounds(const gfx::Rect& bounds) {
   bounds_ = bounds;
   if (size_changed)
     root_window_->OnHostResized(bounds.size());
+  else
+    root_window_->SchedulePaintInRect(root_window_->bounds());
 }
 
 gfx::Point RootWindowHostLinux::GetLocationOnNativeScreen() const {
@@ -705,9 +843,11 @@ gfx::Point RootWindowHostLinux::GetLocationOnNativeScreen() const {
 }
 
 void RootWindowHostLinux::SetCapture() {
+  // TODO(oshima): Grab x input.
 }
 
 void RootWindowHostLinux::ReleaseCapture() {
+  // TODO(oshima): Release x input.
 }
 
 void RootWindowHostLinux::SetCursor(gfx::NativeCursor cursor) {
@@ -804,6 +944,53 @@ void RootWindowHostLinux::SetFocusWhenShown(bool focus_when_shown) {
   }
 }
 
+bool RootWindowHostLinux::GrabSnapshot(
+    const gfx::Rect& snapshot_bounds,
+    std::vector<unsigned char>* png_representation) {
+  XImage* image = XGetImage(
+      xdisplay_, xwindow_,
+      snapshot_bounds.x(), snapshot_bounds.y(),
+      snapshot_bounds.width(), snapshot_bounds.height(),
+      AllPlanes, ZPixmap);
+
+  if (!image) {
+    LOG(ERROR) << "XGetImage failed";
+    return false;
+  }
+
+  gfx::PNGCodec::ColorFormat color_format;
+
+  if (image->bits_per_pixel == 32) {
+    color_format = (image->byte_order == LSBFirst) ?
+        gfx::PNGCodec::FORMAT_BGRA : gfx::PNGCodec::FORMAT_RGBA;
+  } else if (image->bits_per_pixel == 24) {
+    // PNGCodec accepts FORMAT_RGB for 3 bytes per pixel:
+    color_format = gfx::PNGCodec::FORMAT_RGB;
+    if (image->byte_order == LSBFirst) {
+      LOG(WARNING) << "Converting BGR->RGB will damage the performance...";
+      int image_size =
+          image->width * image->height * image->bits_per_pixel / 8;
+      for (int i = 0; i < image_size; i += 3) {
+        char tmp = image->data[i];
+        image->data[i] = image->data[i+2];
+        image->data[i+2] = tmp;
+      }
+    }
+  } else {
+    LOG(ERROR) << "bits_per_pixel is too small";
+    XFree(image);
+    return false;
+  }
+
+  unsigned char* data = reinterpret_cast<unsigned char*>(image->data);
+  gfx::PNGCodec::Encode(data, color_format, snapshot_bounds.size(),
+                        image->width * image->bits_per_pixel / 8,
+                        true, std::vector<gfx::PNGCodec::Comment>(),
+                        png_representation);
+  XFree(image);
+  return true;
+}
+
 void RootWindowHostLinux::PostNativeEvent(
     const base::NativeEvent& native_event) {
   DCHECK(xwindow_);
@@ -837,21 +1024,25 @@ void RootWindowHostLinux::PostNativeEvent(
   XSendEvent(xdisplay_, xwindow_, False, 0, &xevent);
 }
 
+void RootWindowHostLinux::OnDeviceScaleFactorChanged(
+    float device_scale_factor) {
+  image_cursors_->Reload(device_scale_factor);
+}
+
 bool RootWindowHostLinux::IsWindowManagerPresent() {
   // Per ICCCM 2.8, "Manager Selections", window managers should take ownership
   // of WM_Sn selections (where n is a screen number).
-  return XGetSelectionOwner(xdisplay_, cached_atoms_[ATOM_WM_S0]) != None;
+  return XGetSelectionOwner(
+      xdisplay_, atom_cache_.GetAtom("WM_S0")) != None;
 }
 
 void RootWindowHostLinux::SetCursorInternal(gfx::NativeCursor cursor) {
   ::Cursor xcursor =
       image_cursors_->IsImageCursor(cursor) ?
       image_cursors_->ImageCursorFromNative(cursor) :
-      cursor == ui::kCursorNone ?
-      invisible_cursor_ :
-      cursor == ui::kCursorCustom ?
-      cursor.platform() :
-      ui::GetXCursor(CursorShapeFromNative(cursor));
+      (cursor == ui::kCursorNone ? invisible_cursor_ :
+       (cursor == ui::kCursorCustom ? cursor.platform() :
+        ui::GetXCursor(CursorShapeFromNative(cursor))));
   XDefineCursor(xdisplay_, xwindow_, xcursor);
 }
 
@@ -869,7 +1060,7 @@ RootWindowHost* RootWindowHost::GetForAcceleratedWidget(
 
 // static
 gfx::Size RootWindowHost::GetNativeScreenSize() {
-  ::Display* xdisplay = base::MessagePumpX::GetDefaultXDisplay();
+  ::Display* xdisplay = base::MessagePumpAuraX11::GetDefaultXDisplay();
   return gfx::Size(DisplayWidth(xdisplay, 0), DisplayHeight(xdisplay, 0));
 }
 

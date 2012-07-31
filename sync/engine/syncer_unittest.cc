@@ -24,22 +24,23 @@
 #include "base/time.h"
 #include "build/build_config.h"
 #include "sync/engine/get_commit_ids_command.h"
-#include "sync/engine/model_safe_worker.h"
 #include "sync/engine/net/server_connection_manager.h"
 #include "sync/engine/nigori_util.h"
 #include "sync/engine/process_updates_command.h"
+#include "sync/engine/sync_scheduler.h"
 #include "sync/engine/syncer.h"
 #include "sync/engine/syncer_proto_util.h"
 #include "sync/engine/syncer_util.h"
 #include "sync/engine/syncproto.h"
+#include "sync/engine/throttled_data_type_tracker.h"
 #include "sync/engine/traffic_recorder.h"
-#include "sync/engine/sync_scheduler.h"
+#include "sync/internal_api/public/engine/model_safe_worker.h"
+#include "sync/internal_api/public/syncable/model_type.h"
 #include "sync/protocol/bookmark_specifics.pb.h"
 #include "sync/protocol/nigori_specifics.pb.h"
 #include "sync/protocol/preference_specifics.pb.h"
 #include "sync/protocol/sync.pb.h"
 #include "sync/sessions/sync_session_context.h"
-#include "sync/syncable/model_type.h"
 #include "sync/syncable/syncable.h"
 #include "sync/test/engine/fake_model_worker.h"
 #include "sync/test/engine/mock_connection_manager.h"
@@ -113,7 +114,6 @@ using sessions::SyncSession;
 
 class SyncerTest : public testing::Test,
                    public SyncSession::Delegate,
-                   public ModelSafeWorkerRegistrar,
                    public SyncEngineEventListener {
  protected:
   SyncerTest()
@@ -147,12 +147,11 @@ class SyncerTest : public testing::Test,
       const sessions::SyncSessionSnapshot& snapshot) OVERRIDE {
   }
 
-  // ModelSafeWorkerRegistrar implementation.
-  virtual void GetWorkers(std::vector<ModelSafeWorker*>* out) OVERRIDE {
+  void GetWorkers(std::vector<ModelSafeWorker*>* out) {
     out->push_back(worker_.get());
   }
 
-  virtual void GetModelSafeRoutingInfo(ModelSafeRoutingInfo* out) OVERRIDE {
+  void GetModelSafeRoutingInfo(ModelSafeRoutingInfo* out) {
     // We're just testing the sync engine here, so we shunt everything to
     // the SyncerThread.  Datatypes which aren't enabled aren't in the map.
     for (syncable::ModelTypeSet::Iterator it = enabled_datatypes_.First();
@@ -227,11 +226,20 @@ class SyncerTest : public testing::Test,
     worker_ = new FakeModelWorker(GROUP_PASSIVE);
     std::vector<SyncEngineEventListener*> listeners;
     listeners.push_back(this);
+
+    ModelSafeRoutingInfo routing_info;
+    std::vector<ModelSafeWorker*> workers;
+
+    GetModelSafeRoutingInfo(&routing_info);
+    GetWorkers(&workers);
+
+    throttled_data_type_tracker_.reset(new ThrottledDataTypeTracker(NULL));
+
     context_.reset(
         new SyncSessionContext(
-            mock_server_.get(), directory(), this,
-            &extensions_activity_monitor_, listeners, NULL,
-            &traffic_recorder_));
+            mock_server_.get(), directory(), routing_info, workers,
+            &extensions_activity_monitor_, throttled_data_type_tracker_.get(),
+            listeners, NULL, &traffic_recorder_));
     ASSERT_FALSE(context_->resolver());
     syncer_ = new Syncer();
     session_.reset(MakeSession());
@@ -391,37 +399,31 @@ class SyncerTest : public testing::Test,
   void DoTruncationTest(const vector<int64>& unsynced_handle_view,
                         const vector<syncable::Id>& expected_id_order) {
     for (size_t limit = expected_id_order.size() + 2; limit > 0; --limit) {
-      StatusController* status = session_->mutable_status_controller();
       WriteTransaction wtrans(FROM_HERE, UNITTEST, directory());
       ScopedSetSessionWriteTransaction set_trans(session_.get(), &wtrans);
 
       ModelSafeRoutingInfo routes;
       GetModelSafeRoutingInfo(&routes);
-      GetCommitIdsCommand command(limit);
+      sessions::OrderedCommitSet output_set(routes);
+      GetCommitIdsCommand command(limit, &output_set);
       std::set<int64> ready_unsynced_set;
       command.FilterUnreadyEntries(&wtrans, syncable::ModelTypeSet(),
                                    syncable::ModelTypeSet(), false,
                                    unsynced_handle_view, &ready_unsynced_set);
       command.BuildCommitIds(session_->write_transaction(), routes,
                              ready_unsynced_set);
-      syncable::Directory::UnsyncedMetaHandles ready_unsynced_vector(
-        ready_unsynced_set.begin(), ready_unsynced_set.end());
-      status->set_unsynced_handles(ready_unsynced_vector);
-      vector<syncable::Id> output =
-          command.ordered_commit_set_->GetAllCommitIds();
       size_t truncated_size = std::min(limit, expected_id_order.size());
-      ASSERT_EQ(truncated_size, output.size());
+      ASSERT_EQ(truncated_size, output_set.Size());
       for (size_t i = 0; i < truncated_size; ++i) {
-        ASSERT_EQ(expected_id_order[i], output[i])
+        ASSERT_EQ(expected_id_order[i], output_set.GetCommitIdAt(i))
             << "At index " << i << " with batch size limited to " << limit;
       }
       sessions::OrderedCommitSet::Projection proj;
-      proj = command.ordered_commit_set_->GetCommitIdProjection(GROUP_PASSIVE);
+      proj = output_set.GetCommitIdProjection(GROUP_PASSIVE);
       ASSERT_EQ(truncated_size, proj.size());
       for (size_t i = 0; i < truncated_size; ++i) {
         SCOPED_TRACE(::testing::Message("Projection mismatch with i = ") << i);
-        syncable::Id projected =
-            command.ordered_commit_set_->GetCommitIdAt(proj[i]);
+        syncable::Id projected = output_set.GetCommitIdAt(proj[i]);
         ASSERT_EQ(expected_id_order[proj[i]], projected);
         // Since this projection is the identity, the following holds.
         ASSERT_EQ(expected_id_order[i], projected);
@@ -459,11 +461,27 @@ class SyncerTest : public testing::Test,
 
   void EnableDatatype(syncable::ModelType model_type) {
     enabled_datatypes_.Put(model_type);
+
+    ModelSafeRoutingInfo routing_info;
+    GetModelSafeRoutingInfo(&routing_info);
+
+    if (context_.get()) {
+      context_->set_routing_info(routing_info);
+    }
+
     mock_server_->ExpectGetUpdatesRequestTypes(enabled_datatypes_);
   }
 
   void DisableDatatype(syncable::ModelType model_type) {
     enabled_datatypes_.Remove(model_type);
+
+    ModelSafeRoutingInfo routing_info;
+    GetModelSafeRoutingInfo(&routing_info);
+
+    if (context_.get()) {
+      context_->set_routing_info(routing_info);
+    }
+
     mock_server_->ExpectGetUpdatesRequestTypes(enabled_datatypes_);
   }
 
@@ -529,6 +547,7 @@ class SyncerTest : public testing::Test,
   TestDirectorySetterUpper dir_maker_;
   FakeEncryptor encryptor_;
   FakeExtensionsActivityMonitor extensions_activity_monitor_;
+  scoped_ptr<ThrottledDataTypeTracker> throttled_data_type_tracker_;
   scoped_ptr<MockConnectionManager> mock_server_;
 
   Syncer* syncer_;
@@ -632,7 +651,7 @@ TEST_F(SyncerTest, GetCommitIdsFiltersThrottledEntries) {
   }
 
   // Now set the throttled types.
-  context_->SetUnthrottleTime(
+  context_->throttled_data_type_tracker()->SetUnthrottleTime(
       throttled_types,
       base::TimeTicks::Now() + base::TimeDelta::FromSeconds(1200));
   SyncShareNudge();
@@ -646,7 +665,7 @@ TEST_F(SyncerTest, GetCommitIdsFiltersThrottledEntries) {
   }
 
   // Now unthrottle.
-  context_->SetUnthrottleTime(
+  context_->throttled_data_type_tracker()->SetUnthrottleTime(
       throttled_types,
       base::TimeTicks::Now() - base::TimeDelta::FromSeconds(1200));
   SyncShareNudge();
@@ -734,9 +753,6 @@ TEST_F(SyncerTest, GetCommitIdsFiltersUnreadyEntries) {
   }
   SyncShareNudge();
   {
-    // We remove any unready entries from the status controller's unsynced
-    // handles, so this should remain 0 even though the entries didn't commit.
-    EXPECT_EQ(0U, session_->status_controller().unsynced_handles().size());
     // Nothing should have commited due to bookmarks being encrypted and
     // the cryptographer having pending keys. A would have been resolved
     // as a simple conflict, but still be unsynced until the next sync cycle.
@@ -751,8 +767,6 @@ TEST_F(SyncerTest, GetCommitIdsFiltersUnreadyEntries) {
   }
   SyncShareNudge();
   {
-    // 2 unsynced handles to reflect the items that committed succesfully.
-    EXPECT_EQ(2U, session_->status_controller().unsynced_handles().size());
     // All properly encrypted and non-conflicting items should commit. "A" was
     // conflicting, but last sync cycle resolved it as simple conflict, so on
     // this sync cycle it committed succesfullly.
@@ -780,9 +794,9 @@ TEST_F(SyncerTest, GetCommitIdsFiltersUnreadyEntries) {
   }
   SyncShareNudge();
   {
-    // We attempted to commit two items.
-    EXPECT_EQ(2U, session_->status_controller().unsynced_handles().size());
-    EXPECT_TRUE(session_->status_controller().did_commit_items());
+    const StatusController& status_controller = session_->status_controller();
+    // Expect success.
+    EXPECT_EQ(status_controller.error().commit_result, SYNCER_OK);
     // None should be unsynced anymore.
     ReadTransaction rtrans(FROM_HERE, directory());
     VERIFY_ENTRY(1, false, false, false, 0, 21, 21, ids_, &rtrans);
@@ -831,7 +845,6 @@ TEST_F(SyncerTest, EncryptionAwareConflicts) {
   mock_server_->AddUpdateSpecifics(4, 0, "D", 10, 10, false, 0, pref);
   SyncShareNudge();
   {
-    EXPECT_EQ(0U, session_->status_controller().unsynced_handles().size());
     // Initial state. Everything is normal.
     ReadTransaction rtrans(FROM_HERE, directory());
     VERIFY_ENTRY(1, false, false, false, 0, 10, 10, ids_, &rtrans);
@@ -852,7 +865,6 @@ TEST_F(SyncerTest, EncryptionAwareConflicts) {
                                    encrypted_pref);
   SyncShareNudge();
   {
-    EXPECT_EQ(0U, session_->status_controller().unsynced_handles().size());
     // All should be unapplied due to being undecryptable and have a valid
     // BASE_SERVER_SPECIFICS.
     ReadTransaction rtrans(FROM_HERE, directory());
@@ -873,7 +885,6 @@ TEST_F(SyncerTest, EncryptionAwareConflicts) {
                                    encrypted_pref);
   SyncShareNudge();
   {
-    EXPECT_EQ(0U, session_->status_controller().unsynced_handles().size());
     // Items 1, 2, and 4 should have newer server versions, 3 remains the same.
     // All should remain unapplied due to be undecryptable.
     ReadTransaction rtrans(FROM_HERE, directory());
@@ -892,7 +903,6 @@ TEST_F(SyncerTest, EncryptionAwareConflicts) {
                                    encrypted_bookmark);
   SyncShareNudge();
   {
-    EXPECT_EQ(0U, session_->status_controller().unsynced_handles().size());
     // Items 2 and 4 should be the only ones with BASE_SERVER_SPECIFICS set.
     // Items 1 is now unencrypted, so should have applied normally.
     ReadTransaction rtrans(FROM_HERE, directory());
@@ -928,7 +938,6 @@ TEST_F(SyncerTest, EncryptionAwareConflicts) {
   }
   SyncShareNudge();
   {
-    EXPECT_EQ(0U, session_->status_controller().unsynced_handles().size());
     // Item 1 remains unsynced due to there being pending keys.
     // Items 2, 3, 4 should remain unsynced since they were not up to date.
     ReadTransaction rtrans(FROM_HERE, directory());
@@ -945,31 +954,23 @@ TEST_F(SyncerTest, EncryptionAwareConflicts) {
   }
   // First cycle resolves conflicts, second cycle commits changes.
   SyncShareNudge();
-  EXPECT_EQ(2, session_->status_controller().syncer_status().
-      num_server_overwrites);
-  EXPECT_EQ(1, session_->status_controller().syncer_status().
-      num_local_overwrites);
-  // We attempted to commit item 1.
-  EXPECT_EQ(1U, session_->status_controller().unsynced_handles().size());
-  EXPECT_TRUE(session_->status_controller().did_commit_items());
+  EXPECT_EQ(2, status().syncer_status().num_server_overwrites);
+  EXPECT_EQ(1, status().syncer_status().num_local_overwrites);
+  // We successfully commited item(s).
+  EXPECT_EQ(status().error().commit_result, SYNCER_OK);
   SyncShareNudge();
-  {
-    // Everything should be resolved now. The local changes should have
-    // overwritten the server changes for 2 and 4, while the server changes
-    // overwrote the local for entry 3.
-    // We attempted to commit two handles.
-    EXPECT_EQ(0, session_->status_controller().syncer_status().
-        num_server_overwrites);
-    EXPECT_EQ(0, session_->status_controller().syncer_status().
-        num_local_overwrites);
-    EXPECT_EQ(2U, session_->status_controller().unsynced_handles().size());
-    EXPECT_TRUE(session_->status_controller().did_commit_items());
-    ReadTransaction rtrans(FROM_HERE, directory());
-    VERIFY_ENTRY(1, false, false, false, 0, 41, 41, ids_, &rtrans);
-    VERIFY_ENTRY(2, false, false, false, 1, 31, 31, ids_, &rtrans);
-    VERIFY_ENTRY(3, false, false, false, 1, 30, 30, ids_, &rtrans);
-    VERIFY_ENTRY(4, false, false, false, 0, 31, 31, ids_, &rtrans);
-  }
+
+  // Everything should be resolved now. The local changes should have
+  // overwritten the server changes for 2 and 4, while the server changes
+  // overwrote the local for entry 3.
+  EXPECT_EQ(0, status().syncer_status().num_server_overwrites);
+  EXPECT_EQ(0, status().syncer_status().num_local_overwrites);
+  EXPECT_EQ(status().error().commit_result, SYNCER_OK);
+  ReadTransaction rtrans(FROM_HERE, directory());
+  VERIFY_ENTRY(1, false, false, false, 0, 41, 41, ids_, &rtrans);
+  VERIFY_ENTRY(2, false, false, false, 1, 31, 31, ids_, &rtrans);
+  VERIFY_ENTRY(3, false, false, false, 1, 30, 30, ids_, &rtrans);
+  VERIFY_ENTRY(4, false, false, false, 0, 31, 31, ids_, &rtrans);
 }
 
 #undef VERIFY_ENTRY
@@ -1058,10 +1059,9 @@ TEST_F(SyncerTest, ReceiveOldNigori) {
 }
 
 // Resolve a confict between two nigori's with different encrypted types,
-// sync_tabs bits, and encryption keys (remote is explicit). Afterwards, the
-// encrypted types should be unioned, the sync_tab bit should be true, and the
-// cryptographer should have both keys and be encrypting with the remote
-// encryption key by default.
+// and encryption keys (remote is explicit). Afterwards, the encrypted types
+// should be unioned and the cryptographer should have both keys and be
+// encrypting with the remote encryption key by default.
 TEST_F(SyncerTest, NigoriConflicts) {
   KeyParams local_key_params = {"localhost", "dummy", "blargle"};
   KeyParams other_key_params = {"localhost", "dummy", "foobar"};
@@ -1085,7 +1085,7 @@ TEST_F(SyncerTest, NigoriConflicts) {
   SyncShareNudge();
   encrypted_types = syncable::ModelTypeSet::All();
   {
-    // Local changes with different passphrase, different types, and sync_tabs.
+    // Local changes with different passphrase, different types.
     WriteTransaction wtrans(FROM_HERE, UNITTEST, directory());
     sync_pb::EntitySpecifics specifics;
     sync_pb::NigoriSpecifics* nigori = specifics.mutable_nigori();
@@ -1096,7 +1096,6 @@ TEST_F(SyncerTest, NigoriConflicts) {
     cryptographer(&wtrans)->GetKeys(
         nigori->mutable_encrypted());
     cryptographer(&wtrans)->UpdateNigoriFromEncryptedTypes(nigori);
-    nigori->set_sync_tabs(true);
     cryptographer(&wtrans)->set_encrypt_everything();
     MutableEntry nigori_entry(&wtrans, GET_BY_SERVER_TAG,
                               syncable::ModelTypeToRootTag(syncable::NIGORI));
@@ -1126,7 +1125,7 @@ TEST_F(SyncerTest, NigoriConflicts) {
   SyncShareNudge();  // Resolve conflict in this cycle.
   SyncShareNudge();  // Commit local change in this cycle.
   {
-    // Ensure the nigori data merged (encrypted types, sync_tabs).
+    // Ensure the nigori data merged (encrypted types).
     WriteTransaction wtrans(FROM_HERE, UNITTEST, directory());
     MutableEntry nigori_entry(&wtrans, GET_BY_SERVER_TAG,
                               syncable::ModelTypeToRootTag(syncable::NIGORI));
@@ -1138,7 +1137,6 @@ TEST_F(SyncerTest, NigoriConflicts) {
     EXPECT_TRUE(encrypted_types.Equals(
             cryptographer(&wtrans)->GetEncryptedTypes()));
     EXPECT_TRUE(cryptographer(&wtrans)->encrypt_everything());
-    EXPECT_TRUE(specifics.nigori().sync_tabs());
     EXPECT_TRUE(specifics.nigori().using_explicit_passphrase());
     // Supply the pending keys. Afterwards, we should be able to decrypt both
     // our own encrypted data and data encrypted by the other cryptographer,
@@ -1157,8 +1155,8 @@ TEST_F(SyncerTest, NigoriConflicts) {
   SyncShareNudge();
   {
     // Ensure everything is committed and stable now. The cryptographer
-    // should be able to decrypt both sets of keys, sync_tabs should be true,
-    // and the encrypted types should have been unioned.
+    // should be able to decrypt both sets of keys, and the encrypted types
+    // should have been unioned.
     WriteTransaction wtrans(FROM_HERE, UNITTEST, directory());
     MutableEntry nigori_entry(&wtrans, GET_BY_SERVER_TAG,
                               syncable::ModelTypeToRootTag(syncable::NIGORI));
@@ -1173,7 +1171,6 @@ TEST_F(SyncerTest, NigoriConflicts) {
         other_encrypted_specifics.encrypted()));
     EXPECT_TRUE(cryptographer(&wtrans)->
         CanDecryptUsingDefaultKey(other_encrypted_specifics.encrypted()));
-    EXPECT_TRUE(nigori_entry.Get(SPECIFICS).nigori().sync_tabs());
     EXPECT_TRUE(nigori_entry.Get(SPECIFICS).nigori().
         using_explicit_passphrase());
   }
@@ -1198,7 +1195,6 @@ TEST_F(SyncerTest, TestGetUnsyncedAndSimpleCommit) {
   }
 
   SyncShareNudge();
-  EXPECT_EQ(2u, status().unsynced_handles().size());
   ASSERT_EQ(2u, mock_server_->committed_ids().size());
   // If this test starts failing, be aware other sort orders could be valid.
   EXPECT_TRUE(parent_id_ == mock_server_->committed_ids()[0]);
@@ -1242,7 +1238,6 @@ TEST_F(SyncerTest, TestPurgeWhileUnsynced) {
       syncable::ModelTypeSet(syncable::PREFERENCES));
 
   SyncShareNudge();
-  EXPECT_EQ(2U, status().unsynced_handles().size());
   ASSERT_EQ(2U, mock_server_->committed_ids().size());
   // If this test starts failing, be aware other sort orders could be valid.
   EXPECT_TRUE(parent_id_ == mock_server_->committed_ids()[0]);
@@ -1450,28 +1445,28 @@ TEST_F(SyncerTest, TestCommitListOrderingWithNesting) {
       MutableEntry parent(&wtrans, syncable::CREATE, wtrans.root_id(),
                           "Pete");
       ASSERT_TRUE(parent.good());
+      parent.Put(syncable::ID, ids_.FromNumber(103));
       parent.Put(syncable::IS_UNSYNCED, true);
       parent.Put(syncable::IS_DIR, true);
       parent.Put(syncable::SPECIFICS, DefaultBookmarkSpecifics());
       parent.Put(syncable::IS_DEL, true);
-      parent.Put(syncable::ID, ids_.FromNumber(103));
       parent.Put(syncable::BASE_VERSION, 1);
       parent.Put(syncable::MTIME, now_minus_2h);
       MutableEntry child(&wtrans, syncable::CREATE, ids_.FromNumber(103),
                          "Pete");
       ASSERT_TRUE(child.good());
+      child.Put(syncable::ID, ids_.FromNumber(104));
       child.Put(syncable::IS_UNSYNCED, true);
       child.Put(syncable::IS_DIR, true);
       child.Put(syncable::SPECIFICS, DefaultBookmarkSpecifics());
       child.Put(syncable::IS_DEL, true);
-      child.Put(syncable::ID, ids_.FromNumber(104));
       child.Put(syncable::BASE_VERSION, 1);
       child.Put(syncable::MTIME, now_minus_2h);
       MutableEntry grandchild(&wtrans, syncable::CREATE, ids_.FromNumber(104),
                               "Pete");
       ASSERT_TRUE(grandchild.good());
-      grandchild.Put(syncable::IS_UNSYNCED, true);
       grandchild.Put(syncable::ID, ids_.FromNumber(105));
+      grandchild.Put(syncable::IS_UNSYNCED, true);
       grandchild.Put(syncable::IS_DEL, true);
       grandchild.Put(syncable::IS_DIR, false);
       grandchild.Put(syncable::SPECIFICS, DefaultBookmarkSpecifics());
@@ -1481,7 +1476,6 @@ TEST_F(SyncerTest, TestCommitListOrderingWithNesting) {
   }
 
   SyncShareNudge();
-  EXPECT_EQ(6u, session_->status_controller().unsynced_handles().size());
   ASSERT_EQ(6u, mock_server_->committed_ids().size());
   // This test will NOT unroll deletes because SERVER_PARENT_ID is not set.
   // It will treat these like moves.
@@ -1549,7 +1543,6 @@ TEST_F(SyncerTest, TestCommitListOrderingWithNewItems) {
   }
 
   SyncShareNudge();
-  EXPECT_EQ(6u, session_->status_controller().unsynced_handles().size());
   ASSERT_EQ(6u, mock_server_->committed_ids().size());
   // If this test starts failing, be aware other sort orders could be valid.
   EXPECT_TRUE(parent_id_ == mock_server_->committed_ids()[0]);
@@ -1588,7 +1581,6 @@ TEST_F(SyncerTest, TestCommitListOrderingCounterexample) {
   }
 
   SyncShareNudge();
-  EXPECT_EQ(3u, session_->status_controller().unsynced_handles().size());
   ASSERT_EQ(3u, mock_server_->committed_ids().size());
   // If this test starts failing, be aware other sort orders could be valid.
   EXPECT_TRUE(parent_id_ == mock_server_->committed_ids()[0]);
@@ -1634,7 +1626,6 @@ TEST_F(SyncerTest, TestCommitListOrderingAndNewParent) {
   }
 
   SyncShareNudge();
-  EXPECT_EQ(3u, session_->status_controller().unsynced_handles().size());
   ASSERT_EQ(3u, mock_server_->committed_ids().size());
   // If this test starts failing, be aware other sort orders could be valid.
   EXPECT_TRUE(parent_id_ == mock_server_->committed_ids()[0]);
@@ -1705,7 +1696,6 @@ TEST_F(SyncerTest, TestCommitListOrderingAndNewParentAndChild) {
   }
 
   SyncShareNudge();
-  EXPECT_EQ(3u, session_->status_controller().unsynced_handles().size());
   ASSERT_EQ(3u, mock_server_->committed_ids().size());
   // If this test starts failing, be aware other sort orders could be valid.
   EXPECT_TRUE(parent_id_ == mock_server_->committed_ids()[0]);
@@ -2332,8 +2322,9 @@ TEST_F(EntryCreatedInNewFolderTest, EntryCreatedInNewFolderMidSync) {
   mock_server_->SetMidCommitCallback(
       base::Bind(&EntryCreatedInNewFolderTest::CreateFolderInBob,
                  base::Unretained(this)));
-  syncer_->SyncShare(session_.get(), BUILD_COMMIT_REQUEST, SYNCER_END);
-  EXPECT_EQ(1u, mock_server_->committed_ids().size());
+  syncer_->SyncShare(session_.get(), COMMIT, SYNCER_END);
+  // We loop until no unsynced handles remain, so we will commit both ids.
+  EXPECT_EQ(2u, mock_server_->committed_ids().size());
   {
     ReadTransaction trans(FROM_HERE, directory());
     Entry parent_entry(&trans, syncable::GET_BY_ID,
@@ -2345,7 +2336,7 @@ TEST_F(EntryCreatedInNewFolderTest, EntryCreatedInNewFolderMidSync) {
     Entry child(&trans, syncable::GET_BY_ID, child_id);
     ASSERT_TRUE(child.good());
     EXPECT_EQ(parent_entry.Get(ID), child.Get(PARENT_ID));
-}
+  }
 }
 
 TEST_F(SyncerTest, NegativeIDInUpdate) {
@@ -2691,9 +2682,12 @@ TEST_F(SyncerTest, NameCollidingFolderSwapWorksFine) {
   saw_syncer_event_ = false;
 }
 
-TEST_F(SyncerTest, CommitManyItemsInOneGo) {
-  uint32 max_batches = 3;
-  uint32 items_to_commit = kDefaultMaxCommitBatchSize * max_batches;
+// Committing more than kDefaultMaxCommitBatchSize items requires that
+// we post more than one commit command to the server.  This test makes
+// sure that scenario works as expected.
+TEST_F(SyncerTest, CommitManyItemsInOneGo_Success) {
+  uint32 num_batches = 3;
+  uint32 items_to_commit = kDefaultMaxCommitBatchSize * num_batches;
   {
     WriteTransaction trans(FROM_HERE, UNITTEST, directory());
     for (uint32 i = 0; i < items_to_commit; i++) {
@@ -2705,12 +2699,71 @@ TEST_F(SyncerTest, CommitManyItemsInOneGo) {
       e.Put(SPECIFICS, DefaultBookmarkSpecifics());
     }
   }
-  uint32 num_loops = 0;
-  while (SyncShareNudge()) {
-    num_loops++;
-    ASSERT_LT(num_loops, max_batches * 2);
+  ASSERT_EQ(items_to_commit, directory()->unsynced_entity_count());
+
+  EXPECT_FALSE(SyncShareNudge());
+  EXPECT_EQ(num_batches, mock_server_->commit_messages().size());
+  EXPECT_EQ(0, directory()->unsynced_entity_count());
+}
+
+// Test that a single failure to contact the server will cause us to exit the
+// commit loop immediately.
+TEST_F(SyncerTest, CommitManyItemsInOneGo_PostBufferFail) {
+  uint32 num_batches = 3;
+  uint32 items_to_commit = kDefaultMaxCommitBatchSize * num_batches;
+  {
+    WriteTransaction trans(FROM_HERE, UNITTEST, directory());
+    for (uint32 i = 0; i < items_to_commit; i++) {
+      string nameutf8 = base::StringPrintf("%d", i);
+      string name(nameutf8.begin(), nameutf8.end());
+      MutableEntry e(&trans, CREATE, trans.root_id(), name);
+      e.Put(IS_UNSYNCED, true);
+      e.Put(IS_DIR, true);
+      e.Put(SPECIFICS, DefaultBookmarkSpecifics());
+    }
   }
-  EXPECT_GE(mock_server_->commit_messages().size(), max_batches);
+  ASSERT_EQ(items_to_commit, directory()->unsynced_entity_count());
+
+  // The second commit should fail.  It will be preceded by one successful
+  // GetUpdate and one succesful commit.
+  mock_server_->FailNthPostBufferToPathCall(3);
+  SyncShareNudge();
+
+  EXPECT_EQ(1U, mock_server_->commit_messages().size());
+  EXPECT_FALSE(session_->Succeeded());
+  EXPECT_EQ(SYNC_SERVER_ERROR,
+            session_->status_controller().error().commit_result);
+  EXPECT_EQ(items_to_commit - kDefaultMaxCommitBatchSize,
+            directory()->unsynced_entity_count());
+}
+
+// Test that a single conflict response from the server will cause us to exit
+// the commit loop immediately.
+TEST_F(SyncerTest, CommitManyItemsInOneGo_CommitConflict) {
+  uint32 num_batches = 2;
+  uint32 items_to_commit = kDefaultMaxCommitBatchSize * num_batches;
+  {
+    WriteTransaction trans(FROM_HERE, UNITTEST, directory());
+    for (uint32 i = 0; i < items_to_commit; i++) {
+      string nameutf8 = base::StringPrintf("%d", i);
+      string name(nameutf8.begin(), nameutf8.end());
+      MutableEntry e(&trans, CREATE, trans.root_id(), name);
+      e.Put(IS_UNSYNCED, true);
+      e.Put(IS_DIR, true);
+      e.Put(SPECIFICS, DefaultBookmarkSpecifics());
+    }
+  }
+  ASSERT_EQ(items_to_commit, directory()->unsynced_entity_count());
+
+  // Return a CONFLICT response for the first item.
+  mock_server_->set_conflict_n_commits(1);
+  SyncShareNudge();
+
+  // We should stop looping at the first sign of trouble.
+  EXPECT_EQ(1U, mock_server_->commit_messages().size());
+  EXPECT_FALSE(session_->Succeeded());
+  EXPECT_EQ(items_to_commit - (kDefaultMaxCommitBatchSize - 1),
+            directory()->unsynced_entity_count());
 }
 
 TEST_F(SyncerTest, HugeConflict) {
@@ -3709,6 +3762,7 @@ TEST_F(SyncerTest, ClientTagUncommittedTagMatchesUpdate) {
 
 TEST_F(SyncerTest, ClientTagConflictWithDeletedLocalEntry) {
   {
+    // Create a deleted local entry with a unique client tag.
     WriteTransaction trans(FROM_HERE, UNITTEST, directory());
     MutableEntry perm_folder(&trans, CREATE, ids_.root(), "clientname");
     ASSERT_TRUE(perm_folder.good());
@@ -3716,24 +3770,28 @@ TEST_F(SyncerTest, ClientTagConflictWithDeletedLocalEntry) {
     perm_folder.Put(UNIQUE_CLIENT_TAG, "clientperm");
     perm_folder.Put(SPECIFICS, DefaultBookmarkSpecifics());
     perm_folder.Put(IS_UNSYNCED, true);
+
+    // Note: IS_DEL && !ServerKnows() will clear the UNSYNCED bit.
+    // (We never attempt to commit server-unknown deleted items, so this
+    // helps us clean up those entries).
     perm_folder.Put(IS_DEL, true);
   }
 
+  // Prepare an update with the same unique client tag.
   mock_server_->AddUpdateDirectory(1, 0, "permitem_renamed", 10, 100);
   mock_server_->SetLastUpdateClientTag("clientperm");
-  mock_server_->set_conflict_all_commits(true);
 
   SyncShareNudge();
-  // This should cause client tag overwrite.
+  // The local entry will be overwritten.
   {
     ReadTransaction trans(FROM_HERE, directory());
 
     Entry perm_folder(&trans, GET_BY_CLIENT_TAG, "clientperm");
     ASSERT_TRUE(perm_folder.good());
     ASSERT_TRUE(perm_folder.Get(ID).ServerKnows());
-    EXPECT_TRUE(perm_folder.Get(IS_DEL));
+    EXPECT_FALSE(perm_folder.Get(IS_DEL));
     EXPECT_FALSE(perm_folder.Get(IS_UNAPPLIED_UPDATE));
-    EXPECT_TRUE(perm_folder.Get(IS_UNSYNCED));
+    EXPECT_FALSE(perm_folder.Get(IS_UNSYNCED));
     EXPECT_EQ(perm_folder.Get(BASE_VERSION), 10);
     EXPECT_EQ(perm_folder.Get(UNIQUE_CLIENT_TAG), "clientperm");
   }
@@ -4261,18 +4319,27 @@ TEST_F(SyncerUndeletionTest, UndeleteDuringCommit) {
       base::Bind(&SyncerUndeletionTest::Undelete, base::Unretained(this)));
   SyncShareNudge();
 
-  // The item ought to exist as an unsynced undeletion (meaning,
-  // we think that the next commit ought to be a recreation commit).
+  // We will continue to commit until all nodes are synced, so we expect
+  // that both the delete and following undelete were committed.  We haven't
+  // downloaded any updates, though, so the SERVER fields will be the same
+  // as they were at the start of the cycle.
   EXPECT_EQ(0, session_->status_controller().TotalNumConflictingItems());
   EXPECT_EQ(1, mock_server_->GetAndClearNumGetUpdatesRequests());
-  ExpectUnsyncedUndeletion();
+
+  // Server fields lag behind.
+  EXPECT_FALSE(Get(metahandle_, SERVER_IS_DEL));
+
+  // We have committed the second (undelete) update.
+  EXPECT_FALSE(Get(metahandle_, IS_DEL));
+  EXPECT_FALSE(Get(metahandle_, IS_UNSYNCED));
+  EXPECT_FALSE(Get(metahandle_, IS_UNAPPLIED_UPDATE));
 
   // Now, encounter a GetUpdates corresponding to the deletion from
   // the server.  The undeletion should prevail again and be committed.
   // None of this should trigger any conflict detection -- it is perfectly
   // normal to recieve updates from our own commits.
   mock_server_->SetMidCommitCallback(base::Closure());
-  mock_server_->AddUpdateTombstone(Get(metahandle_, ID));
+  mock_server_->AddUpdateFromLastCommit();
   SyncShareNudge();
   EXPECT_EQ(0, session_->status_controller().TotalNumConflictingItems());
   EXPECT_EQ(1, mock_server_->GetAndClearNumGetUpdatesRequests());

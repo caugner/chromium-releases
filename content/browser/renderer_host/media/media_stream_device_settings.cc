@@ -10,10 +10,13 @@
 #include "base/callback.h"
 #include "base/stl_util.h"
 #include "content/browser/renderer_host/media/media_stream_settings_requester.h"
+#include "content/browser/renderer_host/render_view_host_delegate.h"
+#include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/common/media/media_stream_options.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/common/media_stream_request.h"
+#include "googleurl/src/gurl.h"
 
 using content::BrowserThread;
 using content::MediaStreamDevice;
@@ -88,7 +91,7 @@ class MediaStreamDeviceSettingsRequest : public MediaStreamRequest {
   MediaStreamDeviceSettingsRequest(
       int render_pid,
       int render_vid,
-      const std::string& origin,
+      const GURL& origin,
       const StreamOptions& request_options)
       : MediaStreamRequest(render_pid, render_vid, origin),
         options(request_options),
@@ -105,6 +108,30 @@ class MediaStreamDeviceSettingsRequest : public MediaStreamRequest {
   bool posted_task;
 };
 
+namespace {
+
+// Sends the request to the appropriate WebContents.
+void DoDeviceRequest(
+    const MediaStreamDeviceSettingsRequest& request,
+    const content::MediaResponseCallback& callback) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  // Send the permission request to the web contents.
+  content::RenderViewHostImpl* host =
+      content::RenderViewHostImpl::FromID(request.render_process_id,
+                                          request.render_view_id);
+
+  // Tab may have gone away.
+  if (!host || !host->GetDelegate()) {
+    callback.Run(content::MediaStreamDevices());
+    return;
+  }
+
+  host->GetDelegate()->RequestMediaAccessPermission(&request, callback);
+}
+
+}  // namespace
+
 MediaStreamDeviceSettings::MediaStreamDeviceSettings(
     SettingsRequester* requester)
     : requester_(requester),
@@ -119,7 +146,7 @@ MediaStreamDeviceSettings::~MediaStreamDeviceSettings() {
 
 void MediaStreamDeviceSettings::RequestCaptureDeviceUsage(
     const std::string& label, int render_process_id, int render_view_id,
-    const StreamOptions& request_options, const std::string& security_origin) {
+    const StreamOptions& request_options, const GURL& security_origin) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   if (requests_.find(label) != requests_.end()) {
@@ -131,6 +158,28 @@ void MediaStreamDeviceSettings::RequestCaptureDeviceUsage(
   // Create a new request.
   requests_.insert(std::make_pair(label, new MediaStreamDeviceSettingsRequest(
       render_process_id, render_view_id, security_origin, request_options)));
+}
+
+void MediaStreamDeviceSettings::RemovePendingCaptureRequest(
+    const std::string& label) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+
+  SettingsRequests::iterator request_it = requests_.find(label);
+  if (request_it != requests_.end()) {
+    // Proceed the next pending request for the same page.
+    MediaStreamDeviceSettingsRequest* request = request_it->second;
+    std::string new_label = FindReadyRequestForView(request->render_view_id,
+                                                    request->render_process_id);
+    if (!new_label.empty()) {
+      PostRequestToUi(new_label);
+    }
+
+    // TODO(xians): Post a cancel request on UI thread to dismiss the infobar
+    // if request has been sent to the UI.
+    // Remove the request from the queue.
+    requests_.erase(request_it);
+    delete request;
+  }
 }
 
 void MediaStreamDeviceSettings::AvailableDevices(
@@ -213,6 +262,10 @@ void MediaStreamDeviceSettings::PostResponse(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   SettingsRequests::iterator req = requests_.find(label);
+  // Return if the request has been removed.
+  if (req == requests_.end())
+    return;
+
   DCHECK(req != requests_.end()) << "Invalid request label.";
   DCHECK(requester_);
   MediaStreamDeviceSettingsRequest* request = req->second;
@@ -309,19 +362,15 @@ void MediaStreamDeviceSettings::PostRequestToUi(const std::string& label) {
     }
   }
 
-  // Send the permission request to the content client.
   scoped_refptr<ResponseCallbackHelper> helper =
       new ResponseCallbackHelper(AsWeakPtr());
   content::MediaResponseCallback callback =
       base::Bind(&ResponseCallbackHelper::PostResponse,
                  helper.get(), label);
+
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      base::Bind(
-          &content::ContentBrowserClient::RequestMediaAccessPermission,
-          base::Unretained(content::GetContentClient()->browser()),
-          request, callback));
-
+      base::Bind(&DoDeviceRequest, *request, callback));
 }
 
 }  // namespace media_stream

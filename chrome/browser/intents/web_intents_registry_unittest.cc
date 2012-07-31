@@ -8,6 +8,7 @@
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/scoped_temp_dir.h"
+#include "base/synchronization/waitable_event.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/extensions/test_extension_service.h"
 #include "chrome/browser/intents/default_web_intent_service.h"
@@ -15,11 +16,12 @@
 #include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension_set.h"
-#include "content/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using content::BrowserThread;
+using extensions::Extension;
 using webkit_glue::WebIntentServiceData;
 
 class MockExtensionService: public TestExtensionService {
@@ -43,7 +45,6 @@ DictionaryValue* LoadManifestFile(const FilePath& path,
 scoped_refptr<Extension> LoadExtensionWithLocation(
     const std::string& name,
     Extension::Location location,
-    bool strict_error_checks,
     std::string* error) {
   FilePath path;
   PathService::Get(chrome::DIR_TEST_DATA, &path);
@@ -53,20 +54,17 @@ scoped_refptr<Extension> LoadExtensionWithLocation(
   scoped_ptr<DictionaryValue> value(LoadManifestFile(path, error));
   if (!value.get())
     return NULL;
-  int flags = Extension::NO_FLAGS;
-  if (strict_error_checks)
-    flags |= Extension::STRICT_ERROR_CHECKS;
   return Extension::Create(path.DirName(),
                            location,
                            *value,
-                           flags,
+                           Extension::NO_FLAGS,
                            Extension::GenerateIdForPath(path),
                            error);
 }
 
 scoped_refptr<Extension> LoadExtension(const std::string& name,
                                        std::string* error) {
-  return LoadExtensionWithLocation(name, Extension::INTERNAL, false, error);
+  return LoadExtensionWithLocation(name, Extension::INTERNAL, error);
 }
 
 scoped_refptr<Extension> LoadAndExpectSuccess(const std::string& name) {
@@ -102,9 +100,16 @@ class WebIntentsRegistryTest : public testing::Test {
   }
 
   virtual void TearDown() {
-    if (wds_.get())
-      wds_->Shutdown();
+    // Clear all references to wds to force it destruction.
+    wds_->ShutdownOnUIThread();
+    wds_ = NULL;
 
+    // Schedule another task on the DB thread to notify us that it's safe to
+    // carry on with the test.
+    base::WaitableEvent done(false, false);
+    BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
+        base::Bind(&base::WaitableEvent::Signal, base::Unretained(&done)));
+    done.Wait();
     db_thread_.Stop();
     MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
     MessageLoop::current()->Run();
@@ -231,6 +236,9 @@ TEST_F(WebIntentsRegistryTest, GetIntentServicesForExtensionFilter) {
           base::Unretained(&consumer)));
   consumer.WaitForData();
   ASSERT_EQ(1U, consumer.services_.size());
+
+  EXPECT_EQ(edit_extension->url().spec() + "services/edit",
+            consumer.services_[0].service_url.spec());
 }
 
 TEST_F(WebIntentsRegistryTest, GetAllIntents) {

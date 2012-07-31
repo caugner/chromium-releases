@@ -9,7 +9,7 @@
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/memory/scoped_ptr.h"
+#include "base/compiler_specific.h"
 #include "base/observer_list.h"
 #include "chrome/browser/prefs/pref_value_map.h"
 #include "chrome/common/persistent_pref_store.h"
@@ -73,9 +73,6 @@ class TestingPrefStore : public PersistentPrefStore {
 
   // Flag that indicates if the PrefStore is read-only
   bool read_only_;
-
-  // Flag that indicates if the method WritePrefs was called.
-  bool prefs_written_;
 
   // Whether initialization has been completed.
   bool init_complete_;

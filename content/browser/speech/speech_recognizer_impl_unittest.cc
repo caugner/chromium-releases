@@ -8,7 +8,7 @@
 #include "content/browser/speech/google_one_shot_remote_engine.h"
 #include "content/browser/speech/speech_recognizer_impl.h"
 #include "content/public/browser/speech_recognition_event_listener.h"
-#include "content/test/test_url_fetcher_factory.h"
+#include "content/public/test/test_url_fetcher_factory.h"
 #include "media/audio/audio_manager.h"
 #include "media/audio/fake_audio_input_stream.h"
 #include "media/audio/fake_audio_output_stream.h"
@@ -108,9 +108,9 @@ class SpeechRecognizerImplTest : public content::SpeechRecognitionEventListener,
         error_(content::SPEECH_RECOGNITION_ERROR_NONE),
         volume_(-1.0f) {
     // SpeechRecognizerImpl takes ownership of sr_engine.
-    GoogleOneShotRemoteEngine* sr_engine =
+    SpeechRecognitionEngine* sr_engine =
         new GoogleOneShotRemoteEngine(NULL /* URLRequestContextGetter */);
-    GoogleOneShotRemoteEngineConfig config;
+    SpeechRecognitionEngineConfig config;
     config.audio_num_bits_per_sample =
         SpeechRecognizerImpl::kNumBitsPerAudioSample;
     config.audio_sample_rate = SpeechRecognizerImpl::kAudioSampleRate;
@@ -245,7 +245,7 @@ class SpeechRecognizerImplTest : public content::SpeechRecognitionEventListener,
 TEST_F(SpeechRecognizerImplTest, StopNoData) {
   // Check for callbacks when stopping record before any audio gets recorded.
   recognizer_->StartRecognition();
-  recognizer_->AbortRecognition();
+  recognizer_->StopAudioCapture();
   MessageLoop::current()->RunAllPending();
   EXPECT_TRUE(recognition_started_);
   EXPECT_FALSE(audio_started_);
@@ -258,12 +258,12 @@ TEST_F(SpeechRecognizerImplTest, CancelNoData) {
   // Check for callbacks when canceling recognition before any audio gets
   // recorded.
   recognizer_->StartRecognition();
-  recognizer_->StopAudioCapture();
+  recognizer_->AbortRecognition();
   MessageLoop::current()->RunAllPending();
   EXPECT_TRUE(recognition_started_);
   EXPECT_FALSE(audio_started_);
   EXPECT_FALSE(result_received_);
-  EXPECT_EQ(content::SPEECH_RECOGNITION_ERROR_NONE, error_);
+  EXPECT_EQ(content::SPEECH_RECOGNITION_ERROR_ABORTED, error_);
   CheckFinalEventsConsistency();
 }
 
@@ -333,7 +333,7 @@ TEST_F(SpeechRecognizerImplTest, CancelWithData) {
   EXPECT_TRUE(recognition_started_);
   EXPECT_TRUE(audio_started_);
   EXPECT_FALSE(result_received_);
-  EXPECT_EQ(content::SPEECH_RECOGNITION_ERROR_NONE, error_);
+  EXPECT_EQ(content::SPEECH_RECOGNITION_ERROR_ABORTED, error_);
   CheckFinalEventsConsistency();
 }
 

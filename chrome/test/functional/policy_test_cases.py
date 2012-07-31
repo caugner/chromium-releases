@@ -137,6 +137,9 @@ class PolicyPrefsTestCases(object):
     'ExtensionInstallForcelist':
       ('kExtensionInstallForceList', ['lcncmkcnkcdbbanbjakcencbaoegdjlp;' +
        'https://clients2.google.com/service/update2/crx'], [], OS_ALL),
+    'ExtensionInstallSources':
+        ('kExtensionAllowedInstallSites', ['https://www.corp.monkey.net/*'],
+         [], OS_ALL),
     'ShowHomeButton': ('kShowHomeButton', True, [BROWSER], OS_ALL),
     'DeveloperToolsDisabled': ('kDevToolsDisabled', True, [], OS_ALL),
     'RestoreOnStartup': (None, 5, [BROWSER], OS_ALL),
@@ -236,6 +239,8 @@ class PolicyPrefsTestCases(object):
         ('kPrintPreviewDisabled', True, [], ['win', 'mac', 'linux']),
     'BackgroundModeEnabled':
         ('kBackgroundModeEnabled', True, [BROWSER], ['win', 'linux']),
+    'RestrictSigninToPattern': ('kGoogleServicesUsernamePattern',
+                                '.*@google.com', [], ['win', 'mac', 'linux']),
 
     # ChromeOS-only policies:
     # TODO(frankf): Add prefs for these after crosbug.com/28756 is fixed.
@@ -273,6 +278,8 @@ class PolicyPrefsTestCases(object):
     'DeviceAppPack': (None, [], [], ['chromeos']),
     'DeviceAutoUpdateDisabled': (None, True, [], ['chromeos']),
     'DeviceTargetVersionPrefix': (None, '1412.', [], ['chromeos']),
+    'DeviceUpdateScatterFactor': (None, '7200', [], ['chromeos']),
+    'DeviceUpdateAllowedConnectionTypes': (None, [], [], ['chromeos']),
     'ReportDeviceLocation': (None, False, [], ['chromeos']),
 
     # Chrome Frame policies:

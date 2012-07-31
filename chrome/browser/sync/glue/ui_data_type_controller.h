@@ -10,7 +10,7 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/memory/scoped_ptr.h"
+#include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/sync/glue/data_type_controller.h"
 #include "chrome/browser/sync/glue/shared_change_processor.h"
@@ -37,16 +37,16 @@ class UIDataTypeController : public DataTypeController {
       ProfileSyncService* sync_service);
 
   // DataTypeController interface.
-  virtual void Start(const StartCallback& start_callback) OVERRIDE;
+  virtual void LoadModels(
+      const ModelLoadCallback& model_load_callback) OVERRIDE;
+  virtual void StartAssociating(const StartCallback& start_callback) OVERRIDE;
   virtual void Stop() OVERRIDE;
   virtual syncable::ModelType type() const OVERRIDE;
   virtual browser_sync::ModelSafeGroup model_safe_group() const OVERRIDE;
   virtual std::string name() const OVERRIDE;
   virtual State state() const OVERRIDE;
 
-  // UnrecoverableErrorHandler interface.
-  virtual void OnUnrecoverableError(const tracked_objects::Location& from_here,
-                                    const std::string& message) OVERRIDE;
+  // DataTypeErrorHandler interface.
   virtual void OnSingleDatatypeUnrecoverableError(
       const tracked_objects::Location& from_here,
       const std::string& message) OVERRIDE;
@@ -65,12 +65,12 @@ class UIDataTypeController : public DataTypeController {
   //           models are ready.
   virtual bool StartModels();
 
-  // Associate the sync model with the service's model, then start syncing.
-  virtual void Associate();
-
   // Perform any DataType controller specific state cleanup before stopping
   // the datatype controller. The default implementation is a no-op.
   virtual void StopModels();
+
+  // DataTypeController interface.
+  virtual void OnModelLoaded() OVERRIDE;
 
   // Helper methods for cleaning up state and invoking the start callback.
   virtual void StartFailed(StartResult result, const SyncError& error);
@@ -88,6 +88,7 @@ class UIDataTypeController : public DataTypeController {
   State state_;
 
   StartCallback start_callback_;
+  ModelLoadCallback model_load_callback_;
 
   // The sync datatype being controlled.
   syncable::ModelType type_;
@@ -112,6 +113,12 @@ class UIDataTypeController : public DataTypeController {
   // A weak pointer to the actual local syncable service, which performs all the
   // real work. We do not own the object.
   base::WeakPtr<SyncableService> local_service_;
+
+ private:
+   // Associate the sync model with the service's model, then start syncing.
+  virtual void Associate();
+
+  virtual void AbortModelLoad();
 
   DISALLOW_COPY_AND_ASSIGN(UIDataTypeController);
 };

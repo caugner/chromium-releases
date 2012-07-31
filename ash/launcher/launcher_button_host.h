@@ -7,6 +7,7 @@
 #pragma once
 
 #include "ash/ash_export.h"
+#include "ash/wm/shelf_auto_hide_behavior.h"
 #include "base/string16.h"
 
 namespace views {
@@ -21,7 +22,7 @@ namespace internal {
 // This interface is used to enable reordering the items on the launcher.
 class ASH_EXPORT LauncherButtonHost {
  public:
-  // Invoked when the mose is pressed on a view.
+  // Invoked when the mouse is pressed on a view.
   virtual void MousePressedOnButton(views::View* view,
                                     const views::MouseEvent& event) = 0;
 
@@ -33,8 +34,16 @@ class ASH_EXPORT LauncherButtonHost {
   virtual void MouseReleasedOnButton(views::View* view,
                                      bool canceled) = 0;
 
+  // Invoked when the mouse moves on the item.
+  virtual void MouseMovedOverButton(views::View* view) = 0;
+
+  // Invoked when the mouse enters the item.
+  virtual void MouseEnteredButton(views::View* view) = 0;
+
   // Invoked when the mouse exits the item.
   virtual void MouseExitedButton(views::View* view) = 0;
+
+  virtual ShelfAlignment GetShelfAlignment() const = 0;
 
   // Invoked to get the accessible name of the item.
   virtual string16 GetAccessibleName(const views::View* view) = 0;

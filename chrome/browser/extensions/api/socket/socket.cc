@@ -25,28 +25,61 @@ Socket::~Socket() {
   DCHECK(!is_connected_);
 }
 
-void Socket::OnDataRead(scoped_refptr<net::IOBuffer> io_buffer,
-                        net::IPEndPoint* address,
-                        int result) {
-  // OnDataRead will take ownership of data_value.
-  ListValue* data_value = new ListValue();
-  if (result >= 0) {
-    size_t bytes_size = static_cast<size_t>(result);
-    const char* io_buffer_start = io_buffer->data();
-    for (size_t i = 0; i < bytes_size; ++i) {
-      data_value->Set(i, Value::CreateIntegerValue(io_buffer_start[i]));
-    }
-  }
+void Socket::Write(scoped_refptr<net::IOBuffer> io_buffer,
+                   int byte_count,
+                   const CompletionCallback& callback) {
+  DCHECK(!callback.is_null());
+  write_queue_.push(WriteRequest(io_buffer, byte_count, callback));
+  WriteData();
+}
 
-  std::string ip_address_str;
-  int port = 0;
-  if (address)
-    IPEndPointToStringAndPort(*address, &ip_address_str, &port);
-  event_notifier()->OnDataRead(result, data_value, ip_address_str, port);
+void Socket::WriteData() {
+  // IO is pending.
+  if (io_buffer_write_.get())
+    return;
+
+  WriteRequest& request = write_queue_.front();
+
+  DCHECK(request.byte_count > request.bytes_written);
+  io_buffer_write_ = new net::WrappedIOBuffer(
+      request.io_buffer->data() + request.bytes_written);
+  int result = WriteImpl(
+      io_buffer_write_.get(),
+      request.byte_count - request.bytes_written,
+      base::Bind(&Socket::OnWriteComplete, base::Unretained(this)));
+
+  if (result != net::ERR_IO_PENDING)
+    OnWriteComplete(result);
 }
 
 void Socket::OnWriteComplete(int result) {
-  event_notifier()->OnWriteComplete(result);
+  io_buffer_write_ = NULL;
+
+  WriteRequest& request = write_queue_.front();
+
+  if (result >= 0) {
+    request.bytes_written += result;
+    if (request.bytes_written < request.byte_count) {
+      WriteData();
+      return;
+    }
+    DCHECK(request.bytes_written == request.byte_count);
+    result = request.bytes_written;
+  }
+
+  request.callback.Run(result);
+  write_queue_.pop();
+
+  if (!write_queue_.empty())
+    WriteData();
+}
+
+bool Socket::SetKeepAlive(bool enable, int delay) {
+  return false;
+}
+
+bool Socket::SetNoDelay(bool no_delay) {
+  return false;
 }
 
 // static
@@ -79,16 +112,11 @@ void Socket::IPEndPointToStringAndPort(const net::IPEndPoint& address,
                                        int* port) {
   DCHECK(ip_address_str);
   DCHECK(port);
-  struct sockaddr_storage addr;
-  size_t addr_len = sizeof(addr);
-  if (address.ToSockAddr(reinterpret_cast<struct sockaddr*>(&addr),
-                         &addr_len)) {
-    *ip_address_str = net::NetAddressToString(
-        reinterpret_cast<struct sockaddr*>(&addr), addr_len);
-    *port = address.port();
-  } else {
-    *ip_address_str = "";
+  *ip_address_str = address.ToStringWithoutPort();
+  if (ip_address_str->empty()) {
     *port = 0;
+  } else {
+    *port = address.port();
   }
 }
 

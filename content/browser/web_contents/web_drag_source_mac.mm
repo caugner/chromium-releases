@@ -22,9 +22,13 @@
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/url_constants.h"
+#include "grit/ui_resources_standard.h"
+#include "net/base/escape.h"
 #include "net/base/file_stream.h"
 #include "net/base/net_util.h"
 #include "ui/base/clipboard/custom_data_helper.h"
+#include "ui/base/dragdrop/cocoa_dnd_util.h"
+#include "ui/gfx/image/image.h"
 #include "ui/gfx/mac/nsimage_cache.h"
 #include "webkit/glue/webdropdata.h"
 
@@ -57,8 +61,6 @@ FilePath FilePathFromFilename(const string16& filename) {
 // and move it somewhere sensible.
 FilePath GetFileNameFromDragData(const WebDropData& drop_data) {
   FilePath file_name(FilePathFromFilename(drop_data.file_description_filename));
-  std::string extension = file_name.Extension();
-  file_name = file_name.BaseName().RemoveExtension();
 
   // Images without ALT text will only have a file extension so we need to
   // synthesize one from the provided extension and URL.
@@ -66,10 +68,12 @@ FilePath GetFileNameFromDragData(const WebDropData& drop_data) {
     // Retrieve the name from the URL.
     string16 suggested_filename =
         net::GetSuggestedFilename(drop_data.url, "", "", "", "", "");
+    const std::string extension = file_name.Extension();
     file_name = FilePathFromFilename(suggested_filename);
+    file_name = file_name.ReplaceExtension(extension);
   }
 
-  return file_name.ReplaceExtension(extension);
+  return file_name;
 }
 
 // This helper's sole task is to write out data for a promised file; the caller
@@ -143,30 +147,33 @@ void PromiseWriterHelper(const WebDropData& drop_data,
 
   // Be extra paranoid; avoid crashing.
   if (!dropData_.get()) {
-    NOTREACHED() << "No drag-and-drop data available for lazy write.";
+    NOTREACHED();
     return;
   }
 
   // HTML.
   if ([type isEqualToString:NSHTMLPboardType]) {
-    DCHECK(!dropData_->text_html.empty());
+    DCHECK(!dropData_->html.string().empty());
     // See comment on |kHtmlHeader| above.
-    [pboard setString:SysUTF16ToNSString(kHtmlHeader + dropData_->text_html)
+    [pboard setString:SysUTF16ToNSString(kHtmlHeader + dropData_->html.string())
               forType:NSHTMLPboardType];
 
   // URL.
   } else if ([type isEqualToString:NSURLPboardType]) {
     DCHECK(dropData_->url.is_valid());
-    NSString* urlStr = SysUTF8ToNSString(dropData_->url.spec());
-    NSURL* url = [NSURL URLWithString:urlStr];
+    NSURL* url = [NSURL URLWithString:SysUTF8ToNSString(dropData_->url.spec())];
     // If NSURL creation failed, check for a badly-escaped JavaScript URL.
     // Strip out any existing escapes and then re-escape uniformly.
-    if (!url && urlStr && dropData_->url.SchemeIs(chrome::kJavaScriptScheme)) {
-      NSString* unEscapedStr = [urlStr
-          stringByReplacingPercentEscapesUsingEncoding:NSUTF8StringEncoding];
-      NSString* escapedStr = [unEscapedStr
-          stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding];
-      url = [NSURL URLWithString:escapedStr];
+    if (!url && dropData_->url.SchemeIs(chrome::kJavaScriptScheme)) {
+      net::UnescapeRule::Type unescapeRules =
+          net::UnescapeRule::SPACES |
+          net::UnescapeRule::URL_SPECIAL_CHARS |
+          net::UnescapeRule::CONTROL_CHARS;
+      std::string unescapedUrlString =
+          net::UnescapeURLComponent(dropData_->url.spec(), unescapeRules);
+      std::string escapedUrlString =
+          net::EscapeUrlEncodedData(unescapedUrlString, false);
+      url = [NSURL URLWithString:SysUTF8ToNSString(escapedUrlString)];
     }
     [url writeToPasteboard:pboard];
   // URL title.
@@ -201,8 +208,8 @@ void PromiseWriterHelper(const WebDropData& drop_data,
 
   // Plain text.
   } else if ([type isEqualToString:NSStringPboardType]) {
-    DCHECK(!dropData_->plain_text.empty());
-    [pboard setString:SysUTF16ToNSString(dropData_->plain_text)
+    DCHECK(!dropData_->text.string().empty());
+    [pboard setString:SysUTF16ToNSString(dropData_->text.string())
               forType:NSStringPboardType];
 
   // Custom MIME data.
@@ -214,7 +221,8 @@ void PromiseWriterHelper(const WebDropData& drop_data,
 
   // Oops!
   } else {
-    NOTREACHED() << "Asked for a drag pasteboard type we didn't offer.";
+    // Unknown drag pasteboard type.
+    NOTREACHED();
   }
 }
 
@@ -336,7 +344,7 @@ void PromiseWriterHelper(const WebDropData& drop_data,
         filePath,
         linked_ptr<net::FileStream>(fileStream),
         downloadURL_,
-        contents_->GetURL(),
+        content::Referrer(contents_->GetURL(), dropData_->referrer_policy),
         contents_->GetEncoding(),
         contents_));
 
@@ -364,10 +372,12 @@ void PromiseWriterHelper(const WebDropData& drop_data,
 - (void)fillPasteboard {
   DCHECK(pasteboard_.get());
 
-  [pasteboard_ declareTypes:[NSArray array] owner:contentsView_];
+  [pasteboard_
+      declareTypes:[NSArray arrayWithObject:ui::kChromeDragDummyPboardType]
+             owner:contentsView_];
 
   // HTML.
-  if (!dropData_->text_html.empty())
+  if (!dropData_->html.string().empty())
     [pasteboard_ addTypes:[NSArray arrayWithObject:NSHTMLPboardType]
                     owner:contentsView_];
 
@@ -431,7 +441,7 @@ void PromiseWriterHelper(const WebDropData& drop_data,
   }
 
   // Plain text.
-  if (!dropData_->plain_text.empty())
+  if (!dropData_->text.string().empty())
     [pasteboard_ addTypes:[NSArray arrayWithObject:NSStringPboardType]
                     owner:contentsView_];
 
@@ -447,7 +457,7 @@ void PromiseWriterHelper(const WebDropData& drop_data,
     return dragImage_;
 
   // Default to returning a generic image.
-  return gfx::GetCachedImageWithName(@"nav.pdf");
+  return content::GetContentClient()->GetNativeImageNamed(IDR_DEFAULT_FAVICON);
 }
 
 @end  // @implementation WebDragSource (Private)

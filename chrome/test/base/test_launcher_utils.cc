@@ -12,7 +12,7 @@
 #include "base/string_number_conversions.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#include "ui/gfx/gl/gl_switches.h"
+#include "ui/gl/gl_switches.h"
 
 #if defined(USE_ASH)
 #include "ash/ash_switches.h"
@@ -53,9 +53,9 @@ void PrepareBrowserCommandLineForTests(CommandLine* command_line) {
   command_line->AppendSwitch(switches::kAllowFileAccessFromFiles);
 
 #if defined(USE_ASH)
-  // Disable window animations under aura as the animations effect the
+  // Disable window animations under Ash as the animations effect the
   // coordinates returned and result in flake.
-  command_line->AppendSwitch(ash::switches::kAuraWindowAnimationsDisabled);
+  command_line->AppendSwitch(ash::switches::kAshWindowAnimationsDisabled);
 #endif
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_CHROMEOS)
@@ -71,10 +71,6 @@ void PrepareBrowserCommandLineForTests(CommandLine* command_line) {
   // Use mock keychain on mac to prevent blocking permissions dialogs.
   command_line->AppendSwitch(switches::kUseMockKeychain);
 #endif
-
-  // Disable the Instant field trial, which may cause unexpected page loads.
-  if (!command_line->HasSwitch(switches::kInstantFieldTrial))
-    command_line->AppendSwitchASCII(switches::kInstantFieldTrial, "disabled");
 
   command_line->AppendSwitch(switches::kDisableComponentUpdate);
 }

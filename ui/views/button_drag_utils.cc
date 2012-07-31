@@ -6,7 +6,7 @@
 
 #include "base/utf_string_conversions.h"
 #include "googleurl/src/gurl.h"
-#include "grit/ui_resources.h"
+#include "grit/ui_resources_standard.h"
 #include "ui/base/dragdrop/drag_utils.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -21,7 +21,7 @@ static const int kLinkDragImageMaxWidth = 200;
 
 void SetURLAndDragImage(const GURL& url,
                         const string16& title,
-                        const SkBitmap& icon,
+                        const gfx::ImageSkia& icon,
                         ui::OSExchangeData* data) {
   DCHECK(url.is_valid() && data);
 
@@ -33,7 +33,7 @@ void SetURLAndDragImage(const GURL& url,
   button.set_max_width(kLinkDragImageMaxWidth);
   if (icon.isNull()) {
     button.SetIcon(*ui::ResourceBundle::GetSharedInstance().GetImageNamed(
-                   IDR_DEFAULT_FAVICON).ToSkBitmap());
+                   IDR_DEFAULT_FAVICON).ToImageSkia());
   } else {
     button.SetIcon(icon);
   }

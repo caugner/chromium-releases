@@ -11,6 +11,7 @@
 #include "base/path_service.h"
 #include "base/utf_string_conversions.h"
 #include "net/base/mock_cert_verifier.h"
+#include "net/base/mock_host_resolver.h"
 #include "net/base/net_util.h"
 #include "net/base/load_flags.h"
 #include "net/base/ssl_config_service_defaults.h"
@@ -70,10 +71,7 @@ class RequestContext : public URLRequestContext {
  public:
   RequestContext() : ALLOW_THIS_IN_INITIALIZER_LIST(storage_(this)) {
     ProxyConfig no_proxy;
-    storage_.set_host_resolver(
-        CreateSystemHostResolver(HostResolver::kDefaultParallelism,
-                                 HostResolver::kDefaultRetryAttempts,
-                                 NULL));
+    storage_.set_host_resolver(new MockHostResolver);
     storage_.set_cert_verifier(new MockCertVerifier);
     storage_.set_proxy_service(ProxyService::CreateFixed(no_proxy));
     storage_.set_ssl_config_service(new SSLConfigServiceDefaults);
@@ -96,10 +94,10 @@ class RequestContext : public URLRequestContext {
         new CheckNoRevocationFlagSetInterceptor);
   }
 
- private:
-  ~RequestContext() {
+  virtual ~RequestContext() {
   }
 
+ private:
   URLRequestContextStorage storage_;
   scoped_ptr<URLRequestJobFactory> url_request_job_factory_;
 };
@@ -185,6 +183,15 @@ class BasicNetworkDelegate : public NetworkDelegate {
                                const FilePath& path) const OVERRIDE {
     return true;
   }
+  virtual bool OnCanThrottleRequest(const URLRequest& request) const OVERRIDE {
+    return false;
+  }
+
+  virtual int OnBeforeSocketStreamConnect(
+      SocketStream* stream,
+      const CompletionCallback& callback) OVERRIDE {
+    return OK;
+  }
 
   DISALLOW_COPY_AND_ASSIGN(BasicNetworkDelegate);
 };
@@ -197,22 +204,17 @@ class ProxyScriptFetcherImplTest : public PlatformTest {
       : test_server_(TestServer::TYPE_HTTP,
                      net::TestServer::kLocalhost,
                      FilePath(kDocRoot)) {
-  }
-
-  // testing::Test overrides
-  virtual void SetUp() OVERRIDE {
-    context_ = new RequestContext;
-    context_->set_network_delegate(&network_delegate_);
+    context_.set_network_delegate(&network_delegate_);
   }
 
  protected:
   TestServer test_server_;
   BasicNetworkDelegate network_delegate_;
-  scoped_refptr<URLRequestContext> context_;
+  RequestContext context_;
 };
 
 TEST_F(ProxyScriptFetcherImplTest, FileUrl) {
-  ProxyScriptFetcherImpl pac_fetcher(context_.get());
+  ProxyScriptFetcherImpl pac_fetcher(&context_);
 
   { // Fetch a non-existent file.
     string16 text;
@@ -239,7 +241,7 @@ TEST_F(ProxyScriptFetcherImplTest, FileUrl) {
 TEST_F(ProxyScriptFetcherImplTest, HttpMimeType) {
   ASSERT_TRUE(test_server_.Start());
 
-  ProxyScriptFetcherImpl pac_fetcher(context_.get());
+  ProxyScriptFetcherImpl pac_fetcher(&context_);
 
   { // Fetch a PAC with mime type "text/plain"
     GURL url(test_server_.GetURL("files/pac.txt"));
@@ -273,7 +275,7 @@ TEST_F(ProxyScriptFetcherImplTest, HttpMimeType) {
 TEST_F(ProxyScriptFetcherImplTest, HttpStatusCode) {
   ASSERT_TRUE(test_server_.Start());
 
-  ProxyScriptFetcherImpl pac_fetcher(context_.get());
+  ProxyScriptFetcherImpl pac_fetcher(&context_);
 
   { // Fetch a PAC which gives a 500 -- FAIL
     GURL url(test_server_.GetURL("files/500.pac"));
@@ -298,7 +300,7 @@ TEST_F(ProxyScriptFetcherImplTest, HttpStatusCode) {
 TEST_F(ProxyScriptFetcherImplTest, ContentDisposition) {
   ASSERT_TRUE(test_server_.Start());
 
-  ProxyScriptFetcherImpl pac_fetcher(context_.get());
+  ProxyScriptFetcherImpl pac_fetcher(&context_);
 
   // Fetch PAC scripts via HTTP with a Content-Disposition header -- should
   // have no effect.
@@ -314,7 +316,7 @@ TEST_F(ProxyScriptFetcherImplTest, ContentDisposition) {
 TEST_F(ProxyScriptFetcherImplTest, NoCache) {
   ASSERT_TRUE(test_server_.Start());
 
-  ProxyScriptFetcherImpl pac_fetcher(context_.get());
+  ProxyScriptFetcherImpl pac_fetcher(&context_);
 
   // Fetch a PAC script whose HTTP headers make it cacheable for 1 hour.
   GURL url(test_server_.GetURL("files/cacheable_1hr.pac"));
@@ -345,7 +347,7 @@ TEST_F(ProxyScriptFetcherImplTest, NoCache) {
 TEST_F(ProxyScriptFetcherImplTest, TooLarge) {
   ASSERT_TRUE(test_server_.Start());
 
-  ProxyScriptFetcherImpl pac_fetcher(context_.get());
+  ProxyScriptFetcherImpl pac_fetcher(&context_);
 
   // Set the maximum response size to 50 bytes.
   int prev_size = pac_fetcher.SetSizeConstraint(50);
@@ -385,7 +387,7 @@ TEST_F(ProxyScriptFetcherImplTest, TooLarge) {
 TEST_F(ProxyScriptFetcherImplTest, Hang) {
   ASSERT_TRUE(test_server_.Start());
 
-  ProxyScriptFetcherImpl pac_fetcher(context_.get());
+  ProxyScriptFetcherImpl pac_fetcher(&context_);
 
   // Set the timeout period to 0.5 seconds.
   base::TimeDelta prev_timeout = pac_fetcher.SetTimeoutConstraint(
@@ -393,7 +395,8 @@ TEST_F(ProxyScriptFetcherImplTest, Hang) {
 
   // Try fetching a URL which takes 1.2 seconds. We should abort the request
   // after 500 ms, and fail with a timeout error.
-  { GURL url(test_server_.GetURL("slow/proxy.pac?1.2"));
+  {
+    GURL url(test_server_.GetURL("slow/proxy.pac?1.2"));
     string16 text;
     TestCompletionCallback callback;
     int result = pac_fetcher.Fetch(url, &text, callback.callback());
@@ -422,7 +425,7 @@ TEST_F(ProxyScriptFetcherImplTest, Hang) {
 TEST_F(ProxyScriptFetcherImplTest, Encodings) {
   ASSERT_TRUE(test_server_.Start());
 
-  ProxyScriptFetcherImpl pac_fetcher(context_.get());
+  ProxyScriptFetcherImpl pac_fetcher(&context_);
 
   // Test a response that is gzip-encoded -- should get inflated.
   {
@@ -449,7 +452,7 @@ TEST_F(ProxyScriptFetcherImplTest, Encodings) {
 }
 
 TEST_F(ProxyScriptFetcherImplTest, DataURLs) {
-  ProxyScriptFetcherImpl pac_fetcher(context_.get());
+  ProxyScriptFetcherImpl pac_fetcher(&context_);
 
   const char kEncodedUrl[] =
       "data:application/x-ns-proxy-autoconfig;base64,ZnVuY3Rpb24gRmluZFByb3h5R"

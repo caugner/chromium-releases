@@ -31,6 +31,8 @@ class MockTCPSocket : public net::TCPClientSocket {
                          const net::CompletionCallback& callback));
   MOCK_METHOD3(Write, int(net::IOBuffer* buf, int buf_len,
                           const net::CompletionCallback& callback));
+  MOCK_METHOD2(SetKeepAlive, bool(bool enable, int delay));
+  MOCK_METHOD1(SetNoDelay, bool(bool no_delay));
   virtual bool IsConnected() const OVERRIDE {
     return true;
   }
@@ -53,39 +55,119 @@ class MockAPIResourceEventNotifier : public APIResourceEventNotifier {
   virtual ~MockAPIResourceEventNotifier() {}
 };
 
+class CompleteHandler {
+ public:
+  CompleteHandler() {}
+  MOCK_METHOD1(OnComplete, void(int result_code));
+  MOCK_METHOD2(OnReadComplete, void(int result_code,
+      scoped_refptr<net::IOBuffer> io_buffer));
+ private:
+  DISALLOW_COPY_AND_ASSIGN(CompleteHandler);
+};
+
+
 TEST(SocketTest, TestTCPSocketRead) {
   net::AddressList address_list;
   MockTCPSocket* tcp_client_socket = new MockTCPSocket(address_list);
   APIResourceEventNotifier* notifier = new MockAPIResourceEventNotifier();
+  CompleteHandler handler;
 
   scoped_ptr<TCPSocket> socket(TCPSocket::CreateSocketForTesting(
       tcp_client_socket, notifier));
 
   EXPECT_CALL(*tcp_client_socket, Read(_, _, _))
       .Times(1);
+  EXPECT_CALL(handler, OnReadComplete(_, _))
+      .Times(1);
 
-  scoped_refptr<net::IOBufferWithSize> io_buffer(
-      new net::IOBufferWithSize(512));
-  socket->Read(io_buffer.get(), io_buffer->size());
+  const int count = 512;
+  socket->Read(count, base::Bind(&CompleteHandler::OnReadComplete,
+        base::Unretained(&handler)));
 }
 
 TEST(SocketTest, TestTCPSocketWrite) {
   net::AddressList address_list;
   MockTCPSocket* tcp_client_socket = new MockTCPSocket(address_list);
   APIResourceEventNotifier* notifier = new MockAPIResourceEventNotifier();
+  CompleteHandler handler;
 
   scoped_ptr<TCPSocket> socket(TCPSocket::CreateSocketForTesting(
       tcp_client_socket, notifier));
 
+  net::CompletionCallback callback;
   EXPECT_CALL(*tcp_client_socket, Write(_, _, _))
+      .Times(2)
+      .WillRepeatedly(testing::DoAll(SaveArg<2>(&callback),
+                                     Return(128)));
+  EXPECT_CALL(handler, OnComplete(_))
       .Times(1);
 
   scoped_refptr<net::IOBufferWithSize> io_buffer(
       new net::IOBufferWithSize(256));
-  socket->Write(io_buffer.get(), io_buffer->size());
+  socket->Write(io_buffer.get(), io_buffer->size(),
+      base::Bind(&CompleteHandler::OnComplete, base::Unretained(&handler)));
 }
 
 TEST(SocketTest, TestTCPSocketBlockedWrite) {
+  net::AddressList address_list;
+  MockTCPSocket* tcp_client_socket = new MockTCPSocket(address_list);
+  MockAPIResourceEventNotifier* notifier = new MockAPIResourceEventNotifier();
+  CompleteHandler handler;
+
+  scoped_ptr<TCPSocket> socket(TCPSocket::CreateSocketForTesting(
+      tcp_client_socket, notifier));
+
+  net::CompletionCallback callback;
+  EXPECT_CALL(*tcp_client_socket, Write(_, _, _))
+      .Times(2)
+      .WillRepeatedly(testing::DoAll(SaveArg<2>(&callback),
+                                     Return(net::ERR_IO_PENDING)));
+  scoped_refptr<net::IOBufferWithSize> io_buffer(new net::IOBufferWithSize(42));
+  socket->Write(io_buffer.get(), io_buffer->size(),
+      base::Bind(&CompleteHandler::OnComplete, base::Unretained(&handler)));
+
+  // Good. Original call came back unable to complete. Now pretend the socket
+  // finished, and confirm that we passed the error back.
+  EXPECT_CALL(handler, OnComplete(42))
+      .Times(1);
+  callback.Run(40);
+  callback.Run(2);
+}
+
+TEST(SocketTest, TestTCPSocketBlockedWriteReentry) {
+  net::AddressList address_list;
+  MockTCPSocket* tcp_client_socket = new MockTCPSocket(address_list);
+  MockAPIResourceEventNotifier* notifier = new MockAPIResourceEventNotifier();
+  CompleteHandler handlers[5];
+
+  scoped_ptr<TCPSocket> socket(TCPSocket::CreateSocketForTesting(
+      tcp_client_socket, notifier));
+
+  net::CompletionCallback callback;
+  EXPECT_CALL(*tcp_client_socket, Write(_, _, _))
+      .Times(5)
+      .WillRepeatedly(testing::DoAll(SaveArg<2>(&callback),
+                                     Return(net::ERR_IO_PENDING)));
+  scoped_refptr<net::IOBufferWithSize> io_buffers[5];
+  int i;
+  for (i = 0; i < 5; i++) {
+    io_buffers[i] = new net::IOBufferWithSize(128 + i * 50);
+    scoped_refptr<net::IOBufferWithSize> io_buffer1(
+        new net::IOBufferWithSize(42));
+    socket->Write(io_buffers[i].get(), io_buffers[i]->size(),
+        base::Bind(&CompleteHandler::OnComplete,
+            base::Unretained(&handlers[i])));
+
+    EXPECT_CALL(handlers[i], OnComplete(io_buffers[i]->size()))
+        .Times(1);
+  }
+
+  for (i = 0; i < 5; i++) {
+    callback.Run(128 + i * 50);
+  }
+}
+
+TEST(SocketTest, TestTCPSocketSetNoDelay) {
   net::AddressList address_list;
   MockTCPSocket* tcp_client_socket = new MockTCPSocket(address_list);
   MockAPIResourceEventNotifier* notifier = new MockAPIResourceEventNotifier();
@@ -93,22 +175,48 @@ TEST(SocketTest, TestTCPSocketBlockedWrite) {
   scoped_ptr<TCPSocket> socket(TCPSocket::CreateSocketForTesting(
       tcp_client_socket, notifier));
 
-  net::CompletionCallback callback;
-  EXPECT_CALL(*tcp_client_socket, Write(_, _, _))
-      .Times(1)
-      .WillOnce(testing::DoAll(SaveArg<2>(&callback),
-                               Return(net::ERR_IO_PENDING)));
+  bool no_delay = false;
+  EXPECT_CALL(*tcp_client_socket, SetNoDelay(_))
+      .WillOnce(testing::DoAll(SaveArg<0>(&no_delay), Return(true)));
+  int result = socket->SetNoDelay(true);
+  EXPECT_TRUE(result);
+  EXPECT_TRUE(no_delay);
 
-  scoped_refptr<net::IOBufferWithSize> io_buffer(new net::IOBufferWithSize(
-      1));
-  ASSERT_EQ(net::ERR_IO_PENDING, socket->Write(io_buffer.get(),
-                                               io_buffer->size()));
+  EXPECT_CALL(*tcp_client_socket, SetNoDelay(_))
+      .WillOnce(testing::DoAll(SaveArg<0>(&no_delay), Return(false)));
 
-  // Good. Original call came back unable to complete. Now pretend the socket
-  // finished, and confirm that we passed the error back.
-  EXPECT_CALL(*notifier, OnWriteComplete(42))
-      .Times(1);
-  callback.Run(42);
+  result = socket->SetNoDelay(false);
+  EXPECT_FALSE(result);
+  EXPECT_FALSE(no_delay);
+}
+
+TEST(SocketTest, TestTCPSocketSetKeepAlive) {
+  net::AddressList address_list;
+  MockTCPSocket* tcp_client_socket = new MockTCPSocket(address_list);
+  MockAPIResourceEventNotifier* notifier = new MockAPIResourceEventNotifier();
+
+  scoped_ptr<TCPSocket> socket(TCPSocket::CreateSocketForTesting(
+      tcp_client_socket, notifier));
+
+  bool enable = false;
+  int delay = 0;
+  EXPECT_CALL(*tcp_client_socket, SetKeepAlive(_, _))
+      .WillOnce(testing::DoAll(SaveArg<0>(&enable),
+                               SaveArg<1>(&delay),
+                               Return(true)));
+  int result = socket->SetKeepAlive(true, 4500);
+  EXPECT_TRUE(result);
+  EXPECT_TRUE(enable);
+  EXPECT_EQ(4500, delay);
+
+  EXPECT_CALL(*tcp_client_socket, SetKeepAlive(_, _))
+      .WillOnce(testing::DoAll(SaveArg<0>(&enable),
+                               SaveArg<1>(&delay),
+                               Return(false)));
+  result = socket->SetKeepAlive(false, 0);
+  EXPECT_FALSE(result);
+  EXPECT_FALSE(enable);
+  EXPECT_EQ(0, delay);
 }
 
 }  // namespace extensions

@@ -57,6 +57,7 @@
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
 #include "net/base/escape.h"
+#include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
 
 #if defined(OS_CHROMEOS)
@@ -77,9 +78,6 @@
 #include "chrome/browser/ui/webui/options2/chromeos/stats_options_handler2.h"
 #include "chrome/browser/ui/webui/options2/chromeos/user_image_source2.h"
 #include "chrome/browser/ui/webui/options2/chromeos/wallpaper_thumbnail_source2.h"
-#if defined(USE_VIRTUAL_KEYBOARD)
-#include "chrome/browser/ui/webui/options2/chromeos/virtual_keyboard_manager_handler2.h"
-#endif
 #endif
 
 #if defined(OS_CHROMEOS) && defined(USE_ASH)
@@ -142,17 +140,18 @@ void OptionsUIHTMLSource::StartDataRequest(const std::string& path,
 
   if (path == kLocalizedStringsFile) {
     // Return dynamically-generated strings from memory.
+    jstemplate_builder::UseVersion2 version;
     std::string strings_js;
     jstemplate_builder::AppendJsonJS(localized_strings_.get(), &strings_js);
     response_bytes = base::RefCountedString::TakeString(&strings_js);
   } else if (path == kOptionsBundleJsFile) {
     // Return (and cache) the options javascript code.
     response_bytes = ResourceBundle::GetSharedInstance().LoadDataResourceBytes(
-        IDR_OPTIONS2_BUNDLE_JS);
+        IDR_OPTIONS2_BUNDLE_JS, ui::SCALE_FACTOR_NONE);
   } else {
     // Return (and cache) the main options html page as the default.
     response_bytes = ResourceBundle::GetSharedInstance().LoadDataResourceBytes(
-        IDR_OPTIONS2_HTML);
+        IDR_OPTIONS2_HTML, ui::SCALE_FACTOR_NONE);
   }
 
   SendResponse(request_id, response_bytes);
@@ -270,12 +269,6 @@ OptionsUI::OptionsUI(content::WebUI* web_ui)
       new chromeos::options2::PointerHandler();
   AddOptionsPageUIHandler(localized_strings, pointer_handler);
 
-#if defined(USE_VIRTUAL_KEYBOARD)
-  AddOptionsPageUIHandler(
-      localized_strings,
-      new chromeos::options2::VirtualKeyboardManagerHandler());
-#endif
-
   AddOptionsPageUIHandler(localized_strings,
                           new chromeos::options2::ProxyHandler());
   AddOptionsPageUIHandler(
@@ -354,7 +347,8 @@ void OptionsUI::ProcessAutocompleteSuggestions(
 // static
 base::RefCountedMemory* OptionsUI::GetFaviconResourceBytes() {
   return ResourceBundle::GetSharedInstance().
-      LoadDataResourceBytes(IDR_SETTINGS_FAVICON);
+      LoadDataResourceBytes(IDR_SETTINGS_FAVICON,
+                            ui::SCALE_FACTOR_100P);
 }
 
 void OptionsUI::InitializeHandlers() {

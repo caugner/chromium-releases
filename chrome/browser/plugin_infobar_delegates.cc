@@ -9,7 +9,7 @@
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/plugin_observer.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/render_view_host.h"
@@ -31,9 +31,11 @@ using content::Referrer;
 using content::UserMetricsAction;
 
 PluginInfoBarDelegate::PluginInfoBarDelegate(InfoBarTabHelper* infobar_helper,
-                                             const string16& name)
+                                             const string16& name,
+                                             const std::string& identifier)
     : ConfirmInfoBarDelegate(infobar_helper),
-      name_(name) {
+      name_(name),
+      identifier_(identifier) {
 }
 
 PluginInfoBarDelegate::~PluginInfoBarDelegate() {
@@ -50,7 +52,8 @@ bool PluginInfoBarDelegate::LinkClicked(WindowOpenDisposition disposition) {
 }
 
 void PluginInfoBarDelegate::LoadBlockedPlugins() {
-  owner()->Send(new ChromeViewMsg_LoadBlockedPlugins(owner()->routing_id()));
+  owner()->Send(
+      new ChromeViewMsg_LoadBlockedPlugins(owner()->routing_id(), identifier_));
 }
 
 gfx::Image* PluginInfoBarDelegate::GetIcon() const {
@@ -67,8 +70,9 @@ string16 PluginInfoBarDelegate::GetLinkText() const {
 UnauthorizedPluginInfoBarDelegate::UnauthorizedPluginInfoBarDelegate(
     InfoBarTabHelper* infobar_helper,
     HostContentSettingsMap* content_settings,
-    const string16& utf16_name)
-    : PluginInfoBarDelegate(infobar_helper, utf16_name),
+    const string16& utf16_name,
+    const std::string& identifier)
+    : PluginInfoBarDelegate(infobar_helper, utf16_name, identifier),
       content_settings_(content_settings) {
   content::RecordAction(UserMetricsAction("BlockedPluginInfobar.Shown"));
   std::string name = UTF16ToUTF8(utf16_name);
@@ -146,11 +150,11 @@ InfoBarDelegate* OutdatedPluginInfoBarDelegate::Create(
     PluginInstaller* installer) {
   string16 message;
   switch (installer->state()) {
-    case PluginInstaller::kStateIdle:
+    case PluginInstaller::INSTALLER_STATE_IDLE:
       message = l10n_util::GetStringFUTF16(IDS_PLUGIN_OUTDATED_PROMPT,
                                            installer->name());
       break;
-    case PluginInstaller::kStateDownloading:
+    case PluginInstaller::INSTALLER_STATE_DOWNLOADING:
       message = l10n_util::GetStringFUTF16(IDS_PLUGIN_DOWNLOADING,
                                            installer->name());
       break;
@@ -164,8 +168,9 @@ OutdatedPluginInfoBarDelegate::OutdatedPluginInfoBarDelegate(
     PluginInstaller* installer,
     const string16& message)
     : PluginInfoBarDelegate(
-        observer->tab_contents_wrapper()->infobar_tab_helper(),
-        installer->name()),
+        observer->tab_contents()->infobar_tab_helper(),
+        installer->name(),
+        installer->identifier()),
       WeakPluginInstallerObserver(installer),
       observer_(observer),
       message_(message) {
@@ -211,7 +216,7 @@ string16 OutdatedPluginInfoBarDelegate::GetButtonLabel(
 
 bool OutdatedPluginInfoBarDelegate::Accept() {
   content::RecordAction(UserMetricsAction("OutdatedPluginInfobar.Update"));
-  if (installer()->state() != PluginInstaller::kStateIdle) {
+  if (installer()->state() != PluginInstaller::INSTALLER_STATE_IDLE) {
     NOTREACHED();
     return false;
   }
@@ -220,7 +225,7 @@ bool OutdatedPluginInfoBarDelegate::Accept() {
   if (installer()->url_for_display()) {
     installer()->OpenDownloadURL(web_contents);
   } else {
-    installer()->StartInstalling(observer_->tab_contents_wrapper());
+    installer()->StartInstalling(observer_->tab_contents());
   }
   return false;
 }
@@ -309,11 +314,11 @@ InfoBarDelegate* PluginInstallerInfoBarDelegate::Create(
   string16 message;
   const string16& plugin_name = installer->name();
   switch (installer->state()) {
-    case PluginInstaller::kStateIdle:
+    case PluginInstaller::INSTALLER_STATE_IDLE:
       message = l10n_util::GetStringFUTF16(
           IDS_PLUGININSTALLER_INSTALLPLUGIN_PROMPT, plugin_name);
       break;
-    case PluginInstaller::kStateDownloading:
+    case PluginInstaller::INSTALLER_STATE_DOWNLOADING:
       message = l10n_util::GetStringFUTF16(IDS_PLUGIN_DOWNLOADING, plugin_name);
       break;
   }

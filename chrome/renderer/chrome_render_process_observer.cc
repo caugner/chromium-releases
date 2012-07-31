@@ -35,7 +35,6 @@
 #include "net/base/net_errors.h"
 #include "net/base/net_module.h"
 #include "third_party/sqlite/sqlite3.h"
-#include "third_party/tcmalloc/chromium/src/gperftools/heap-profiler.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCache.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCrossOriginPreflightResultCache.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
@@ -45,8 +44,16 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "v8/include/v8.h"
 
+#if defined(OS_ANDROID)
+#include "webkit/media/android/webmediaplayer_android.h"
+#endif
+
 #if defined(OS_WIN)
 #include "base/win/iat_patch_function.h"
+#endif
+
+#if defined(USE_TCMALLOC)
+#include "third_party/tcmalloc/chromium/src/gperftools/heap-profiler.h"
 #endif
 
 using WebKit::WebCache;
@@ -183,7 +190,7 @@ ChromeRenderProcessObserver::ChromeRenderProcessObserver(
 #endif
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX) && defined(USE_NSS)
-  // Remoting requires NSS to function properly.
+  // On platforms where we use system NSS libraries, the .so's must be loaded.
   if (!command_line.HasSwitch(switches::kSingleProcess)) {
     // We are going to fork to engage the sandbox and we have not loaded
     // any security modules so it is safe to disable the fork check in NSS.
@@ -213,12 +220,6 @@ bool ChromeRenderProcessObserver::OnControlMessageReceived(
     IPC_MESSAGE_HANDLER(ChromeViewMsg_SetCacheCapacities, OnSetCacheCapacities)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_ClearCache, OnClearCache)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_SetFieldTrialGroup, OnSetFieldTrialGroup)
-#if defined(USE_TCMALLOC)
-    IPC_MESSAGE_HANDLER(ChromeViewMsg_SetTcmallocHeapProfiling,
-                        OnSetTcmallocHeapProfiling)
-    IPC_MESSAGE_HANDLER(ChromeViewMsg_WriteTcmallocHeapProfile,
-                        OnWriteTcmallocHeapProfile)
-#endif
     IPC_MESSAGE_HANDLER(ChromeViewMsg_GetV8HeapStats, OnGetV8HeapStats)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_GetCacheResourceStats,
                         OnGetCacheResourceStats)
@@ -233,6 +234,9 @@ bool ChromeRenderProcessObserver::OnControlMessageReceived(
 void ChromeRenderProcessObserver::OnSetIsIncognitoProcess(
     bool is_incognito_process) {
   is_incognito_process_ = is_incognito_process;
+#if defined(OS_ANDROID)
+  webkit_media::WebMediaPlayerAndroid::InitIncognito(is_incognito_process_);
+#endif
 }
 
 void ChromeRenderProcessObserver::OnSetContentSettingRules(
@@ -260,40 +264,6 @@ void ChromeRenderProcessObserver::OnGetCacheResourceStats() {
   WebCache::getResourceTypeStats(&stats);
   RenderThread::Get()->Send(new ChromeViewHostMsg_ResourceTypeStats(stats));
 }
-
-#if defined(USE_TCMALLOC)
-void ChromeRenderProcessObserver::OnSetTcmallocHeapProfiling(
-    bool profiling, const std::string& filename_prefix) {
-#if !defined(OS_WIN)
-  // TODO(stevenjb): Create MallocExtension wrappers for HeapProfile functions.
-  if (profiling)
-    HeapProfilerStart(filename_prefix.c_str());
-  else
-    HeapProfilerStop();
-#endif
-}
-
-void ChromeRenderProcessObserver::OnWriteTcmallocHeapProfile(
-    const FilePath::StringType& filename) {
-#if !defined(OS_WIN)
-  // TODO(stevenjb): Create MallocExtension wrappers for HeapProfile functions.
-  if (!IsHeapProfilerRunning())
-    return;
-  char* profile = GetHeapProfile();
-  if (!profile) {
-    LOG(WARNING) << "Unable to get heap profile.";
-    return;
-  }
-  // The render process can not write to a file, so copy the result into
-  // a string and pass it to the handler (which runs on the browser host).
-  std::string result(profile);
-  delete profile;
-  RenderThread::Get()->Send(
-      new ChromeViewHostMsg_WriteTcmallocHeapProfile_ACK(filename, result));
-#endif
-}
-
-#endif
 
 void ChromeRenderProcessObserver::OnSetFieldTrialGroup(
     const std::string& field_trial_name,

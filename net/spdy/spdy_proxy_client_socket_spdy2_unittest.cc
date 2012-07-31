@@ -150,9 +150,10 @@ SpdyProxyClientSocketSpdy2Test::SpdyProxyClientSocketSpdy2Test()
       proxy_(ProxyServer::SCHEME_HTTPS, proxy_host_port_),
       endpoint_host_port_proxy_pair_(endpoint_host_port_pair_, proxy_),
       transport_params_(new TransportSocketParams(proxy_host_port_,
-                                            LOWEST,
-                                            false,
-                                            false)) {
+                                                  LOWEST,
+                                                  false,
+                                                  false,
+                                                  OnHostResolutionCallback())) {
 }
 
 void SpdyProxyClientSocketSpdy2Test::TearDown() {
@@ -551,7 +552,7 @@ TEST_F(SpdyProxyClientSocketSpdy2Test, GetPeerAddressReturnsCorrectValues) {
 
   Initialize(reads, arraysize(reads), writes, arraysize(writes));
 
-  net::AddressList addr;
+  net::IPEndPoint addr;
   EXPECT_EQ(ERR_SOCKET_NOT_CONNECTED, sock_->GetPeerAddress(&addr));
 
   AssertConnectSucceeds();

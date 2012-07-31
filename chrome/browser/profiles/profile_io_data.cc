@@ -24,6 +24,7 @@
 #include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/extensions/extension_info_map.h"
 #include "chrome/browser/extensions/extension_protocols.h"
+#include "chrome/browser/extensions/extension_resource_protocols.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/net/chrome_cookie_notification_details.h"
@@ -32,12 +33,12 @@
 #include "chrome/browser/net/chrome_network_delegate.h"
 #include "chrome/browser/net/http_server_properties_manager.h"
 #include "chrome/browser/net/proxy_service_factory.h"
+#include "chrome/browser/net/transport_security_persister.h"
 #include "chrome/browser/notifications/desktop_notification_service_factory.h"
 #include "chrome/browser/policy/url_blacklist_manager.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/transport_security_persister.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager_backend.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
@@ -163,14 +164,11 @@ void ProfileIOData::InitializeOnUIThread(Profile* profile) {
 
   scoped_ptr<ProfileParams> params(new ProfileParams);
   params->path = profile->GetPath();
-  params->clear_local_state_on_exit =
-      pref_service->GetBoolean(prefs::kClearSiteDataOnExit);
 
   // Set up Accept-Language and Accept-Charset header values
   params->accept_language = net::HttpUtil::GenerateAcceptLanguageHeader(
       pref_service->GetString(prefs::kAcceptLanguages));
-  std::string default_charset =
-      pref_service->GetString(prefs::kGlobalDefaultCharset);
+  std::string default_charset = pref_service->GetString(prefs::kDefaultCharset);
   params->accept_charset =
       net::HttpUtil::GenerateAcceptCharsetHeader(default_charset);
 
@@ -249,8 +247,7 @@ void ProfileIOData::AppRequestContext::SetHttpTransactionFactory(
 ProfileIOData::AppRequestContext::~AppRequestContext() {}
 
 ProfileIOData::ProfileParams::ProfileParams()
-    : clear_local_state_on_exit(false),
-      io_thread(NULL),
+    : io_thread(NULL),
 #if defined(ENABLE_NOTIFICATIONS)
       notification_service(NULL),
 #endif
@@ -272,13 +269,14 @@ ProfileIOData::~ProfileIOData() {
   if (BrowserThread::IsMessageLoopValid(BrowserThread::IO))
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
-  if (main_request_context_)
+  if (main_request_context_.get())
     main_request_context_->AssertNoURLRequests();
-  if (extensions_request_context_)
+  if (extensions_request_context_.get())
     extensions_request_context_->AssertNoURLRequests();
   for (AppRequestContextMap::iterator it = app_request_context_map_.begin();
        it != app_request_context_map_.end(); ++it) {
     it->second->AssertNoURLRequests();
+    delete it->second;
   }
 }
 
@@ -301,6 +299,7 @@ bool ProfileIOData::IsHandledProtocol(const std::string& scheme) {
 #endif  // defined(OS_CHROMEOS)
     chrome::kBlobScheme,
     chrome::kFileSystemScheme,
+    chrome::kExtensionResourceScheme,
   };
   for (size_t i = 0; i < arraysize(kProtocolList); ++i) {
     if (scheme == kProtocolList[i])
@@ -328,33 +327,33 @@ ProfileIOData::GetChromeURLDataManagerBackend() const {
   return chrome_url_data_manager_backend_.get();
 }
 
-scoped_refptr<ChromeURLRequestContext>
+ChromeURLRequestContext*
 ProfileIOData::GetMainRequestContext() const {
   LazyInitialize();
-  return main_request_context_;
+  return main_request_context_.get();
 }
 
-scoped_refptr<ChromeURLRequestContext>
+ChromeURLRequestContext*
 ProfileIOData::GetMediaRequestContext() const {
   LazyInitialize();
-  scoped_refptr<ChromeURLRequestContext> context =
+  ChromeURLRequestContext* context =
       AcquireMediaRequestContext();
   DCHECK(context);
   return context;
 }
 
-scoped_refptr<ChromeURLRequestContext>
+ChromeURLRequestContext*
 ProfileIOData::GetExtensionsRequestContext() const {
   LazyInitialize();
-  return extensions_request_context_;
+  return extensions_request_context_.get();
 }
 
-scoped_refptr<ChromeURLRequestContext>
+ChromeURLRequestContext*
 ProfileIOData::GetIsolatedAppRequestContext(
-    scoped_refptr<ChromeURLRequestContext> main_context,
+    ChromeURLRequestContext* main_context,
     const std::string& app_id) const {
   LazyInitialize();
-  scoped_refptr<ChromeURLRequestContext> context;
+  ChromeURLRequestContext* context;
   if (ContainsKey(app_request_context_map_, app_id)) {
     context = app_request_context_map_[app_id];
   } else {
@@ -467,8 +466,8 @@ void ProfileIOData::LazyInitialize() const {
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
 
   // Create the common request contexts.
-  main_request_context_ = new ChromeURLRequestContext;
-  extensions_request_context_ = new ChromeURLRequestContext;
+  main_request_context_.reset(new ChromeURLRequestContext);
+  extensions_request_context_.reset(new ChromeURLRequestContext);
 
   chrome_url_data_manager_backend_.reset(new ChromeURLDataManagerBackend);
 
@@ -482,7 +481,7 @@ void ProfileIOData::LazyInitialize() const {
 
   fraudulent_certificate_reporter_.reset(
       new chrome_browser_net::ChromeFraudulentCertificateReporter(
-          main_request_context_));
+          main_request_context_.get()));
 
   proxy_service_.reset(
       ProxyServiceFactory::CreateProxyService(
@@ -512,6 +511,10 @@ void ProfileIOData::LazyInitialize() const {
       chrome::kExtensionScheme,
       CreateExtensionProtocolHandler(is_incognito(),
                                      profile_params_->extension_info_map));
+  DCHECK(set_protocol);
+  set_protocol = job_factory_->SetProtocolHandler(
+      chrome::kExtensionResourceScheme,
+      CreateExtensionResourceProtocolHandler());
   DCHECK(set_protocol);
   set_protocol = job_factory_->SetProtocolHandler(
       chrome::kChromeUIScheme,
@@ -545,7 +548,7 @@ void ProfileIOData::LazyInitialize() const {
   extension_info_map_ = profile_params_->extension_info_map;
 
   resource_context_->host_resolver_ = io_thread_globals->host_resolver.get();
-  resource_context_->request_context_ = main_request_context_;
+  resource_context_->request_context_ = main_request_context_.get();
 
   LazyInitializeInternal(profile_params_.get());
 
@@ -568,7 +571,6 @@ void ProfileIOData::ShutdownOnUIThread() {
 #if !defined(OS_CHROMEOS)
   enable_metrics_.Destroy();
 #endif
-  clear_local_state_on_exit_.Destroy();
   safe_browsing_enabled_.Destroy();
   session_startup_pref_.Destroy();
 #if defined(ENABLE_CONFIGURATION_POLICY)

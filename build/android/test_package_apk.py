@@ -46,7 +46,7 @@ class TestPackageApk(TestPackage):
     command_line_file.write(self.test_suite_basename + ' ' + options)
     command_line_file.flush()
     self.adb.PushIfNeeded(command_line_file.name,
-                          TestPackageApk.APK_DATA_DIR +
+                          '/data/local/tmp/' +
                           'chrome-native-tests-command-line')
 
   def _GetGTestReturnCode(self):
@@ -88,3 +88,8 @@ class TestPackageApk(TestPackage):
     self.adb.Adb().SendCommand('install -r ' + self.test_suite_full,
                                timeout_time=60*5)
     logging.info('Install has completed.')
+
+  def _GetTestSuiteBaseName(self):
+    """Returns the  base name of the test suite."""
+    # APK test suite names end with '-debug.apk'
+    return os.path.basename(self.test_suite).rsplit('-debug', 1)[0]

@@ -9,10 +9,10 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/values.h"
 #include "content/public/common/url_fetcher.h"
-#include "content/public/common/url_fetcher_delegate.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/escape.h"
 #include "net/http/http_status_code.h"
+#include "net/url_request/url_fetcher_delegate.h"
 #include "net/url_request/url_request_context_getter.h"
 
 namespace {
@@ -25,7 +25,7 @@ namespace gaia {
 
 class GaiaOAuthClient::Core
     : public base::RefCountedThreadSafe<GaiaOAuthClient::Core>,
-      public content::URLFetcherDelegate {
+      public net::URLFetcherDelegate {
  public:
   Core(const std::string& gaia_url,
        net::URLRequestContextGetter* request_context_getter)
@@ -43,24 +43,24 @@ class GaiaOAuthClient::Core
                     int max_retries,
                     GaiaOAuthClient::Delegate* delegate);
 
-  // content::URLFetcherDelegate implementation.
-  virtual void OnURLFetchComplete(const content::URLFetcher* source);
+  // net::URLFetcherDelegate implementation.
+  virtual void OnURLFetchComplete(const net::URLFetcher* source);
 
  private:
   friend class base::RefCountedThreadSafe<Core>;
   virtual ~Core() {}
 
-  void MakeGaiaRequest(std::string post_body,
+  void MakeGaiaRequest(const std::string& post_body,
                        int max_retries,
                        GaiaOAuthClient::Delegate* delegate);
-  void HandleResponse(const content::URLFetcher* source,
+  void HandleResponse(const net::URLFetcher* source,
                       bool* should_retry_request);
 
   GURL gaia_url_;
   int num_retries_;
   scoped_refptr<net::URLRequestContextGetter> request_context_getter_;
   GaiaOAuthClient::Delegate* delegate_;
-  scoped_ptr<content::URLFetcher> request_;
+  scoped_ptr<net::URLFetcher> request_;
 };
 
 void GaiaOAuthClient::Core::GetTokensFromAuthCode(
@@ -94,14 +94,14 @@ void GaiaOAuthClient::Core::RefreshToken(
 }
 
 void GaiaOAuthClient::Core::MakeGaiaRequest(
-    std::string post_body,
+    const std::string& post_body,
     int max_retries,
     GaiaOAuthClient::Delegate* delegate) {
   DCHECK(!request_.get()) << "Tried to fetch two things at once!";
   delegate_ = delegate;
   num_retries_ = 0;
   request_.reset(content::URLFetcher::Create(
-      0, gaia_url_, content::URLFetcher::POST, this));
+      0, gaia_url_, net::URLFetcher::POST, this));
   request_->SetRequestContext(request_context_getter_);
   request_->SetUploadData("application/x-www-form-urlencoded", post_body);
   request_->SetMaxRetries(max_retries);
@@ -110,7 +110,7 @@ void GaiaOAuthClient::Core::MakeGaiaRequest(
 
 // URLFetcher::Delegate implementation.
 void GaiaOAuthClient::Core::OnURLFetchComplete(
-    const content::URLFetcher* source) {
+    const net::URLFetcher* source) {
   bool should_retry = false;
   HandleResponse(source, &should_retry);
   if (should_retry) {
@@ -130,7 +130,7 @@ void GaiaOAuthClient::Core::OnURLFetchComplete(
 }
 
 void GaiaOAuthClient::Core::HandleResponse(
-    const content::URLFetcher* source,
+    const net::URLFetcher* source,
     bool* should_retry_request) {
   *should_retry_request = false;
   // RC_BAD_REQUEST means the arguments are invalid. No point retrying. We are

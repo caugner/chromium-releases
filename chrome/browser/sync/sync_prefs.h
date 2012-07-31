@@ -14,8 +14,8 @@
 #include "base/time.h"
 #include "chrome/browser/prefs/pref_member.h"
 #include "content/public/browser/notification_observer.h"
-#include "sync/notifier/invalidation_version_tracker.h"
-#include "sync/syncable/model_type.h"
+#include "sync/internal_api/public/syncable/model_type.h"
+#include "sync/notifier/invalidation_state_tracker.h"
 
 class PrefService;
 
@@ -44,8 +44,8 @@ class SyncPrefObserver {
 //   sync_setup_wizard.cc
 //   sync_setup_wizard_unittest.cc
 //   two_client_preferences_sync_test.cc
-class SyncPrefs : public base::SupportsWeakPtr<SyncPrefs>,
-                  public sync_notifier::InvalidationVersionTracker,
+class SyncPrefs : NON_EXPORTED_BASE(public base::NonThreadSafe),
+                  public base::SupportsWeakPtr<SyncPrefs>,
                   public content::NotificationObserver {
  public:
   // |pref_service| may be NULL (for unit tests), but in that case no
@@ -106,12 +106,6 @@ class SyncPrefs : public base::SupportsWeakPtr<SyncPrefs>,
   void SetSpareBootstrapToken(const std::string& token);
 #endif
 
-  // InvalidationVersionTracker implementation.
-  virtual sync_notifier::InvalidationVersionMap
-      GetAllMaxVersions() const OVERRIDE;
-  virtual void SetMaxVersion(syncable::ModelType model_type,
-                             int64 max_version) OVERRIDE;
-
   // Merges the given set of types with the set of acknowledged types.
   void AcknowledgeSyncedTypes(syncable::ModelTypeSet types);
 
@@ -139,8 +133,6 @@ class SyncPrefs : public base::SupportsWeakPtr<SyncPrefs>,
   syncable::ModelTypeSet ResolvePrefGroups(
       syncable::ModelTypeSet registered_types,
       syncable::ModelTypeSet types) const;
-
-  base::NonThreadSafe non_thread_safe_;
 
   // May be NULL.
   PrefService* const pref_service_;

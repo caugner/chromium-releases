@@ -13,8 +13,8 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "ipc/ipc_message.h"
-#include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/accessibility/accessibility_types.h"
+#include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/views/controls/native/native_view_host.h"
 #include "ui/views/focus/focus_manager.h"
 #include "ui/views/views_delegate.h"
@@ -79,6 +79,10 @@ void WebView::OnWebContentsFocused(content::WebContents* web_contents) {
     focus_manager->SetFocusedView(this);
 }
 
+void WebView::SetPreferredSize(const gfx::Size& preferred_size) {
+  preferred_size_ = preferred_size;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // WebView, View overrides:
 
@@ -135,6 +139,13 @@ gfx::NativeViewAccessible WebView::GetNativeViewAccessible() {
       return host_view->GetNativeViewAccessible();
   }
   return View::GetNativeViewAccessible();
+}
+
+gfx::Size WebView::GetPreferredSize() {
+  if (preferred_size_ == gfx::Size())
+    return View::GetPreferredSize();
+  else
+    return preferred_size_;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

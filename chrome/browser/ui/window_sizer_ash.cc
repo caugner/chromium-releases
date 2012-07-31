@@ -25,7 +25,7 @@ bool IsValidToplevelWindow(aura::Window* window) {
        ++iter) {
     Browser* browser = *iter;
     if (browser && browser->window() &&
-        browser->window()->GetNativeHandle() == window) {
+        browser->window()->GetNativeWindow() == window) {
       return (!(browser->is_type_popup() || browser->is_type_panel()));
     }
   }
@@ -85,6 +85,9 @@ bool WindowSizer::GetBoundsIgnoringPreviousState(
       GetDefaultWindowBounds(bounds);
     } else {
       *bounds = top_window->GetBoundsInRootWindow();
+      gfx::Rect work_area =
+          monitor_info_provider_->GetMonitorWorkAreaMatching(*bounds);
+      *bounds = bounds->AdjustToFit(work_area);
     }
     return true;
     // If both fail we will continue the default path.
@@ -97,7 +100,7 @@ void WindowSizer::GetDefaultWindowBounds(gfx::Rect* default_bounds) const {
   DCHECK(default_bounds);
   DCHECK(monitor_info_provider_.get());
 
-  gfx::Rect work_area = monitor_info_provider_->GetPrimaryMonitorWorkArea();
+  gfx::Rect work_area = monitor_info_provider_->GetPrimaryDisplayWorkArea();
 
   DCHECK_EQ(kDesktopBorderSize, ash::Shell::GetInstance()->GetGridSize());
 

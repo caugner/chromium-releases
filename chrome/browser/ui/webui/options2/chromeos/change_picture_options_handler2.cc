@@ -13,10 +13,11 @@
 #include "base/values.h"
 #include "chrome/browser/chromeos/login/camera_detector.h"
 #include "chrome/browser/chromeos/login/default_user_images.h"
+#include "chrome/browser/chromeos/login/user_image.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/options/take_photo_dialog.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/webui/web_ui_util.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -27,7 +28,6 @@
 #include "content/public/common/url_constants.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/views/widget/widget.h"
@@ -94,9 +94,8 @@ void ChangePictureOptionsHandler::GetLocalizedValues(
       l10n_util::GetStringUTF16(
           IDS_OPTIONS_CHANGE_PICTURE_PROFILE_LOADING_PHOTO));
 
-  localized_strings->SetString("userIsEphemeral",
-      UserManager::Get()->IsCurrentUserEphemeral() ?
-          ASCIIToUTF16("true") : ASCIIToUTF16("false"));
+  localized_strings->SetBoolean("userIsEphemeral",
+                                UserManager::Get()->IsCurrentUserEphemeral());
 }
 
 void ChangePictureOptionsHandler::RegisterMessages() {
@@ -218,7 +217,7 @@ void ChangePictureOptionsHandler::SendSelectedImage() {
   }
 }
 
-void ChangePictureOptionsHandler::SendProfileImage(const SkBitmap& image,
+void ChangePictureOptionsHandler::SendProfileImage(const gfx::ImageSkia& image,
                                                    bool should_select) {
   base::StringValue data_url(web_ui_util::GetImageDataUrl(image));
   base::FundamentalValue select(should_select);
@@ -259,7 +258,8 @@ void ChangePictureOptionsHandler::HandleSelectImage(const ListValue* args) {
     // (profile image, current image from file) is easier.
 
     DCHECK(!previous_image_.empty());
-    user_manager->SaveUserImage(user.email(), previous_image_);
+    user_manager->SaveUserImage(user.email(),
+                                chromeos::UserImage(previous_image_));
 
     UMA_HISTOGRAM_ENUMERATION("UserImage.ChangeChoice",
                               kHistogramImageOld,
@@ -302,9 +302,10 @@ void ChangePictureOptionsHandler::FileSelected(const FilePath& path,
                             kHistogramImagesCount);
 }
 
-void ChangePictureOptionsHandler::OnPhotoAccepted(const SkBitmap& photo) {
+void ChangePictureOptionsHandler::OnPhotoAccepted(const gfx::ImageSkia& photo) {
   UserManager* user_manager = UserManager::Get();
-  user_manager->SaveUserImage(user_manager->GetLoggedInUser().email(), photo);
+  user_manager->SaveUserImage(user_manager->GetLoggedInUser().email(),
+                              chromeos::UserImage(photo));
   UMA_HISTOGRAM_ENUMERATION("UserImage.ChangeChoice",
                             kHistogramImageFromCamera,
                             kHistogramImagesCount);
@@ -334,16 +335,17 @@ void ChangePictureOptionsHandler::Observe(
   OptionsPageUIHandler::Observe(type, source, details);
   if (type == chrome::NOTIFICATION_PROFILE_IMAGE_UPDATED) {
     // User profile image has been updated.
-    SendProfileImage(*content::Details<const SkBitmap>(details).ptr(), false);
+    SendProfileImage(*content::Details<const gfx::ImageSkia>(details).ptr(),
+                     false);
   }
 }
 
 gfx::NativeWindow ChangePictureOptionsHandler::GetBrowserWindow() const {
   Browser* browser =
-      BrowserList::FindBrowserWithProfile(Profile::FromWebUI(web_ui()));
+      browser::FindBrowserWithProfile(Profile::FromWebUI(web_ui()));
   if (!browser)
     return NULL;
-  return browser->window()->GetNativeHandle();
+  return browser->window()->GetNativeWindow();
 }
 
 }  // namespace options2

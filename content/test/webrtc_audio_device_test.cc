@@ -19,12 +19,13 @@
 #include "content/common/view_messages.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/content_paths.h"
+#include "content/public/test/mock_resource_context.h"
+#include "content/public/test/test_browser_thread.h"
 #include "content/renderer/media/audio_hardware.h"
 #include "content/renderer/media/webrtc_audio_device_impl.h"
 #include "content/renderer/render_process.h"
 #include "content/renderer/render_thread_impl.h"
-#include "content/test/mock_resource_context.h"
-#include "content/test/test_browser_thread.h"
+#include "content/renderer/renderer_webkitplatformsupport_impl.h"
 #include "net/url_request/url_request_test_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -68,11 +69,11 @@ class ReplaceContentClientRenderer {
   explicit ReplaceContentClientRenderer(
       content::ContentRendererClient* new_renderer) {
     saved_renderer_ = content::GetContentClient()->renderer();
-    content::GetContentClient()->set_renderer(new_renderer);
+    content::GetContentClient()->set_renderer_for_testing(new_renderer);
   }
   ~ReplaceContentClientRenderer() {
     // Restore the original renderer.
-    content::GetContentClient()->set_renderer(saved_renderer_);
+    content::GetContentClient()->set_renderer_for_testing(saved_renderer_);
   }
  private:
   content::ContentRendererClient* saved_renderer_;
@@ -81,11 +82,34 @@ class ReplaceContentClientRenderer {
 
 namespace {
 
+class MockResourceContext : public content::ResourceContext {
+ public:
+  MockResourceContext() : test_request_context_(NULL) {}
+  virtual ~MockResourceContext() {}
+
+  void set_request_context(net::URLRequestContext* request_context) {
+    test_request_context_ = request_context;
+  }
+
+  // ResourceContext implementation:
+  virtual net::HostResolver* GetHostResolver() OVERRIDE {
+    return NULL;
+  }
+  virtual net::URLRequestContext* GetRequestContext() OVERRIDE {
+    return test_request_context_;
+  }
+
+ private:
+  net::URLRequestContext* test_request_context_;
+
+  DISALLOW_COPY_AND_ASSIGN(MockResourceContext);
+};
+
 ACTION_P(QuitMessageLoop, loop_or_proxy) {
   loop_or_proxy->PostTask(FROM_HERE, MessageLoop::QuitClosure());
 }
 
-}  // end namespace
+}  // namespace
 
 WebRTCAudioDeviceTest::WebRTCAudioDeviceTest()
     : render_thread_(NULL), audio_util_callback_(NULL),
@@ -100,13 +124,13 @@ void WebRTCAudioDeviceTest::SetUp() {
   // Main parts are inspired by the RenderViewFakeResourcesTest.
   // Note that, the IPC part is not utilized in this test.
   saved_content_renderer_.reset(
-      new ReplaceContentClientRenderer(&mock_content_renderer_client_));
+      new ReplaceContentClientRenderer(&content_renderer_client_));
   mock_process_.reset(new WebRTCMockRenderProcess());
   ui_thread_.reset(new content::TestBrowserThread(content::BrowserThread::UI,
                                                   MessageLoop::current()));
 
   // Construct the resource context on the UI thread.
-  resource_context_.reset(new content::MockResourceContext(NULL));
+  resource_context_.reset(new MockResourceContext);
 
   static const char kThreadName[] = "RenderThread";
   ChildProcess::current()->io_message_loop()->PostTask(FROM_HERE,
@@ -114,6 +138,8 @@ void WebRTCAudioDeviceTest::SetUp() {
                  base::Unretained(this), kThreadName));
   WaitForIOThreadCompletion();
 
+  sandbox_was_enabled_ =
+      RendererWebKitPlatformSupportImpl::SetSandboxEnabledForTesting(false);
   render_thread_ = new RenderThreadImpl(kThreadName);
 }
 
@@ -143,6 +169,8 @@ void WebRTCAudioDeviceTest::TearDown() {
                  base::Unretained((this))));
   WaitForIOThreadCompletion();
   mock_process_.reset();
+  RendererWebKitPlatformSupportImpl::SetSandboxEnabledForTesting(
+      sandbox_was_enabled_);
 }
 
 bool WebRTCAudioDeviceTest::Send(IPC::Message* message) {
@@ -168,8 +196,10 @@ void WebRTCAudioDeviceTest::InitializeIOThread(const char* thread_name) {
   audio_manager_.reset(media::AudioManager::Create());
 
   // Populate our resource context.
-  test_request_context_ = new TestURLRequestContext();
-  resource_context_->set_request_context(test_request_context_.get());
+  test_request_context_.reset(new TestURLRequestContext());
+  MockResourceContext* resource_context =
+      static_cast<MockResourceContext*>(resource_context_.get());
+  resource_context->set_request_context(test_request_context_.get());
   media_observer_.reset(new MockMediaObserver());
 
   has_input_devices_ = audio_manager_->HasAudioInputDevices();
@@ -183,7 +213,7 @@ void WebRTCAudioDeviceTest::UninitializeIOThread() {
   resource_context_.reset();
 
   audio_manager_.reset();
-  test_request_context_ = NULL;
+  test_request_context_.reset();
   initialize_com_.reset();
 }
 

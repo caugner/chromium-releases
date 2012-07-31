@@ -19,15 +19,15 @@
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
-#include "base/process_util.h"
 #include "base/stringize_macros.h"
 #include "base/stringprintf.h"
 #include "base/threading/thread.h"
 #include "base/win/wrapped_window_proc.h"
-
+#include "remoting/base/breakpad.h"
 #include "remoting/base/scoped_sc_handle_win.h"
 #include "remoting/host/branding.h"
 #include "remoting/host/host_service_resource.h"
+#include "remoting/host/usage_stats_consent.h"
 #include "remoting/host/wts_console_observer_win.h"
 #include "remoting/host/wts_session_process_launcher_win.h"
 
@@ -255,26 +255,24 @@ int HostService::RunInConsole() {
   }
 
   // Create a window for receiving session change notifications.
-  LPCWSTR atom = NULL;
   HWND window = NULL;
-  WNDPROC window_proc =
-      base::win::WrappedWindowProc<SessionChangeNotificationProc>;
-  HINSTANCE instance = base::GetModuleFromAddress(window_proc);
-
-  WNDCLASSEX wc = {0};
-  wc.cbSize = sizeof(wc);
-  wc.lpfnWndProc = window_proc;
-  wc.hInstance = instance;
-  wc.lpszClassName = kSessionNotificationWindowClass;
-  atom = reinterpret_cast<LPCWSTR>(RegisterClassExW(&wc));
-  if (atom == NULL) {
+  WNDCLASSEX window_class;
+  base::win::InitializeWindowClass(
+      kSessionNotificationWindowClass,
+      &base::win::WrappedWindowProc<SessionChangeNotificationProc>,
+      0, 0, 0, NULL, NULL, NULL, NULL, NULL,
+      &window_class);
+  HINSTANCE instance = window_class.hInstance;
+  ATOM atom = RegisterClassExW(&window_class);
+  if (atom == 0) {
     LOG_GETLASTERROR(ERROR)
         << "Failed to register the window class '"
         << kSessionNotificationWindowClass << "'";
     goto cleanup;
   }
 
-  window = CreateWindowW(atom, 0, 0, 0, 0, 0, 0, HWND_MESSAGE, 0, instance, 0);
+  window = CreateWindowW(MAKEINTATOM(atom), 0, 0, 0, 0, 0, 0, HWND_MESSAGE, 0,
+                         instance, 0);
   if (window == NULL) {
     LOG_GETLASTERROR(ERROR)
         << "Failed to creat the session notificationwindow";
@@ -302,7 +300,7 @@ cleanup:
   }
 
   if (atom != 0) {
-    UnregisterClass(atom, instance);
+    UnregisterClass(MAKEINTATOM(atom), instance);
   }
 
   // Unsubscribe from console events. Ignore the exit code. There is nothing
@@ -413,6 +411,10 @@ LRESULT CALLBACK HostService::SessionChangeNotificationProc(HWND hwnd,
 } // namespace remoting
 
 int main(int argc, char** argv) {
+  if (remoting::IsCrashReportingEnabled()) {
+    remoting::InitializeCrashReporting();
+  }
+
   CommandLine::Init(argc, argv);
 
   // This object instance is required by Chrome code (for example,

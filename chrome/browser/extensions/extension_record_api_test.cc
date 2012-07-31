@@ -21,7 +21,7 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/extensions/api/experimental.record.h"
+#include "chrome/common/extensions/api/experimental_record.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/browser_thread.h"
@@ -37,7 +37,8 @@ const std::string kTestStatistics = "Sample Stat 1\nSample Stat 2\n";
 // Standard capture parameters, with a mix of good and bad URLs, and
 // a hole for filling in the user data dir.
 const char kCaptureArgs1[] =
-    "[[\"URL 1\", \"URL 2(bad)\", \"URL 3\", \"URL 4(bad)\"], \"%s\"]";
+    "[[\"URL 1\", \"URL 2(bad)\", \"URL 3\", \"URL 4(bad)\"]"
+    ", \"%s\", 2]";
 
 // Standard playback parameters, with the same mix of good and bad URLs
 // as the capture parameters, a hole for filling in the user data dir, and
@@ -46,7 +47,7 @@ const char kCaptureArgs1[] =
 // and repeat-counting are hard to emulate in the test ProcessStrategy.
 const char kPlaybackArgs1[] =
     "[[\"URL 1\", \"URL 2(bad)\", \"URL 3\", \"URL 4(bad)\"], \"%s\""
-    ", {\"extensionPath\": \"MockExtension\", \"repeatCount\": 2}]";
+    ", 2, {\"extensionPath\": \"MockExtension\"}]";
 
 // Use this as the value of FilePath switches (e.g. user-data-dir) that
 // should be replaced by the record methods.
@@ -63,7 +64,9 @@ const FilePath::CharType kUserDataDirPrefix[]
 
 class TestProcessStrategy : public ProcessStrategy {
  public:
-  TestProcessStrategy() : command_line_(CommandLine::NO_PROGRAM) {}
+  explicit TestProcessStrategy(std::vector<FilePath>* temp_files)
+      : command_line_(CommandLine::NO_PROGRAM), temp_files_(temp_files) {}
+
   ~TestProcessStrategy() {}
 
   // Pump the blocking pool queue, since this is needed during test.
@@ -89,6 +92,7 @@ class TestProcessStrategy : public ProcessStrategy {
       FilePath url_path =
           command_line.GetSwitchValuePath(switches::kVisitURLs);
 
+      temp_files_->push_back(url_path);
       if (command_line.HasSwitch(switches::kRecordMode) ||
           command_line.HasSwitch(switches::kPlaybackMode)) {
         FilePath url_path_copy = command_line.GetSwitchValuePath(
@@ -126,15 +130,19 @@ class TestProcessStrategy : public ProcessStrategy {
             .Append(url_path.BaseName().value() +
             FilePath::StringType(kURLErrorsSuffix));
         std::string error_content = JoinString(bad_urls, '\n');
+        temp_files_->push_back(url_errors_path);
         file_util::WriteFile(url_errors_path, error_content.c_str(),
             error_content.size());
       }
     }
 
-    if (command_line.HasSwitch(switches::kRecordStats))
-      file_util::WriteFile(command_line.GetSwitchValuePath(
-          switches::kRecordStats), kTestStatistics.c_str(),
+    if (command_line.HasSwitch(switches::kRecordStats)) {
+      FilePath record_stats_path(command_line.GetSwitchValuePath(
+          switches::kRecordStats));
+      temp_files_->push_back(record_stats_path);
+      file_util::WriteFile(record_stats_path, kTestStatistics.c_str(),
           kTestStatistics.size());
+    }
   }
 
   const CommandLine& GetCommandLine() const {
@@ -148,10 +156,39 @@ class TestProcessStrategy : public ProcessStrategy {
  private:
   CommandLine command_line_;
   std::vector<std::string> visited_urls_;
+  std::vector<FilePath>* temp_files_;
 };
 
 class RecordApiTest : public InProcessBrowserTest {
  public:
+  RecordApiTest() {}
+  virtual ~RecordApiTest() {}
+
+  // Override to scope known temp directories outside the scope of the running
+  // browser test.
+  virtual void SetUp() OVERRIDE {
+    InProcessBrowserTest::SetUp();
+    if (!scoped_temp_user_data_dir_.Set(FilePath(kDummyDirName)))
+      NOTREACHED();
+  }
+
+  // Override to delete temp directories.
+  virtual void TearDown() OVERRIDE {
+    if (!scoped_temp_user_data_dir_.Delete())
+      NOTREACHED();
+    InProcessBrowserTest::TearDown();
+  }
+
+  // Override to delete temporary files created during execution.
+  virtual void CleanUpOnMainThread() OVERRIDE {
+    InProcessBrowserTest::CleanUpOnMainThread();
+    for (std::vector<FilePath>::const_iterator it = temp_files_.begin();
+        it != temp_files_.end(); ++it) {
+      if (!file_util::Delete(*it, false))
+        NOTREACHED();
+    }
+  }
+
   // Override SetUpCommandline to specify a dummy user_data_dir, which
   // should be replaced.  Clear record-mode, playback-mode, visit-urls,
   // record-stats, and load-extension.
@@ -185,7 +222,7 @@ class RecordApiTest : public InProcessBrowserTest {
       scoped_ptr<base::ListValue>* out_list) {
 
     scoped_refptr<CaptureURLsFunction> capture_function(
-        new CaptureURLsFunction(new TestProcessStrategy()));
+        new CaptureURLsFunction(new TestProcessStrategy(&temp_files_)));
 
     std::string escaped_user_data_dir;
     ReplaceChars(user_data_dir.AsUTF8Unsafe(), "\\", "\\\\",
@@ -221,6 +258,14 @@ class RecordApiTest : public InProcessBrowserTest {
 
     return true;
   }
+
+ protected:
+  std::vector<FilePath> temp_files_;
+
+ private:
+  ScopedTempDir scoped_temp_user_data_dir_;
+
+  DISALLOW_COPY_AND_ASSIGN(RecordApiTest);
 };
 
 
@@ -245,7 +290,13 @@ IN_PROC_BROWSER_TEST_F(RecordApiTest, CheckCapture) {
   EXPECT_TRUE(VerifyURLHandling(result.get(), strategy));
 }
 
-IN_PROC_BROWSER_TEST_F(RecordApiTest, CheckPlayback) {
+#if defined(ADDRESS_SANITIZER)
+// Times out under ASan, see http://crbug.com/130267.
+#define MAYBE_CheckPlayback DISABLED_CheckPlayback
+#else
+#define MAYBE_CheckPlayback CheckPlayback
+#endif
+IN_PROC_BROWSER_TEST_F(RecordApiTest, MAYBE_CheckPlayback) {
   ScopedTempDir user_data_dir;
 
   EXPECT_TRUE(user_data_dir.CreateUniqueTempDir());
@@ -260,7 +311,7 @@ IN_PROC_BROWSER_TEST_F(RecordApiTest, CheckPlayback) {
       &escaped_user_data_dir);
 
   scoped_refptr<ReplayURLsFunction> playback_function(new ReplayURLsFunction(
-      new TestProcessStrategy()));
+      new TestProcessStrategy(&temp_files_)));
   scoped_ptr<base::DictionaryValue> result(utils::ToDictionary(
       utils::RunFunctionAndReturnResult(playback_function,
       base::StringPrintf(kPlaybackArgs1, escaped_user_data_dir.c_str()),

@@ -99,7 +99,7 @@ void WebUILoginDisplay::ShowError(int error_msg_id,
   switch (error_msg_id) {
     case IDS_LOGIN_ERROR_AUTHENTICATING_HOSTED:
       error_text = l10n_util::GetStringFUTF8(
-          error_msg_id, l10n_util::GetStringUTF16(IDS_PRODUCT_OS_NAME));
+          error_msg_id, l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_OS_NAME));
       break;
     case IDS_LOGIN_ERROR_CAPTIVE_PORTAL:
       error_text = l10n_util::GetStringFUTF8(
@@ -150,6 +150,10 @@ void WebUILoginDisplay::ShowGaiaPasswordChanged(const std::string& username) {
 }
 
 // WebUILoginDisplay, SigninScreenHandlerDelegate implementation: --------------
+gfx::NativeWindow WebUILoginDisplay::GetNativeWindow() const {
+  return parent_window();
+}
+
 void WebUILoginDisplay::CompleteLogin(const std::string& username,
                                       const std::string& password) {
   DCHECK(delegate_);
@@ -184,6 +188,10 @@ void WebUILoginDisplay::CreateAccount() {
   DCHECK(delegate_);
   if (delegate_)
     delegate_->CreateAccount();
+}
+
+void WebUILoginDisplay::UserSelected(const std::string& username) {
+  UserManager::Get()->UserSelected(username);
 }
 
 void WebUILoginDisplay::RemoveUser(const std::string& username) {

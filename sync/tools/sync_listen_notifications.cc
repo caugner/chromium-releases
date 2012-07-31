@@ -18,13 +18,14 @@
 #include "jingle/notifier/base/notification_method.h"
 #include "jingle/notifier/base/notifier_options.h"
 #include "net/base/host_port_pair.h"
+#include "net/base/host_resolver.h"
 #include "net/url_request/url_request_test_util.h"
-#include "sync/notifier/invalidation_version_tracker.h"
+#include "sync/internal_api/public/syncable/model_type.h"
+#include "sync/internal_api/public/syncable/model_type_payload_map.h"
+#include "sync/notifier/invalidation_state_tracker.h"
 #include "sync/notifier/sync_notifier.h"
 #include "sync/notifier/sync_notifier_factory.h"
 #include "sync/notifier/sync_notifier_observer.h"
-#include "sync/syncable/model_type.h"
-#include "sync/syncable/model_type_payload_map.h"
 
 // This is a simple utility that initializes a sync notifier and
 // listens to any received notifications.
@@ -36,6 +37,16 @@ class NotificationPrinter : public sync_notifier::SyncNotifierObserver {
  public:
   NotificationPrinter() {}
   virtual ~NotificationPrinter() {}
+
+  virtual void OnNotificationsEnabled() OVERRIDE {
+    LOG(INFO) << "Notifications enabled";
+  }
+
+  virtual void OnNotificationsDisabled(
+      sync_notifier::NotificationsDisabledReason reason) OVERRIDE {
+    LOG(INFO) << "Notifications disabled with reason "
+              << sync_notifier::NotificationsDisabledReasonToString(reason);
+  }
 
   virtual void OnIncomingNotification(
       const syncable::ModelTypePayloadMap& type_payloads,
@@ -50,27 +61,16 @@ class NotificationPrinter : public sync_notifier::SyncNotifierObserver {
     }
   }
 
-  virtual void OnNotificationStateChange(
-      bool notifications_enabled) OVERRIDE {
-    LOG(INFO) << "Notifications enabled: " << notifications_enabled;
-  }
-
-  virtual void StoreState(const std::string& state) OVERRIDE {
-    std::string base64_state;
-    CHECK(base::Base64Encode(state, &base64_state));
-    LOG(INFO) << "Got state to store: " << base64_state;
-  }
-
  private:
   DISALLOW_COPY_AND_ASSIGN(NotificationPrinter);
 };
 
-class NullInvalidationVersionTracker
-    : public base::SupportsWeakPtr<NullInvalidationVersionTracker>,
-      public sync_notifier::InvalidationVersionTracker {
+class NullInvalidationStateTracker
+    : public base::SupportsWeakPtr<NullInvalidationStateTracker>,
+      public sync_notifier::InvalidationStateTracker {
  public:
-  NullInvalidationVersionTracker() {}
-  virtual ~NullInvalidationVersionTracker() {}
+  NullInvalidationStateTracker() {}
+  virtual ~NullInvalidationStateTracker() {}
 
   virtual sync_notifier::InvalidationVersionMap
       GetAllMaxVersions() const OVERRIDE {
@@ -83,6 +83,14 @@ class NullInvalidationVersionTracker
     LOG(INFO) << "Setting max invalidation version for "
               << syncable::ModelTypeToString(model_type) << " to "
               << max_invalidation_version;
+  }
+
+  virtual std::string GetInvalidationState() const OVERRIDE {
+    return std::string();
+  }
+
+  virtual void SetInvalidationState(const std::string& state) OVERRIDE {
+    LOG(INFO) << "Setting invalidation state to: " << state;
   }
 };
 
@@ -127,6 +135,41 @@ notifier::NotifierOptions ParseNotifierOptions(
   return notifier_options;
 }
 
+// Needed to use a real host resolver.
+class MyTestURLRequestContext : public TestURLRequestContext {
+ public:
+  MyTestURLRequestContext() : TestURLRequestContext(true) {
+    context_storage_.set_host_resolver(
+        net::CreateSystemHostResolver(
+            net::HostResolver::kDefaultParallelism,
+            net::HostResolver::kDefaultRetryAttempts,
+            NULL));
+    Init();
+  }
+
+  virtual ~MyTestURLRequestContext() {}
+};
+
+class MyTestURLRequestContextGetter : public TestURLRequestContextGetter {
+ public:
+  explicit MyTestURLRequestContextGetter(
+      const scoped_refptr<base::MessageLoopProxy>& io_message_loop_proxy)
+      : TestURLRequestContextGetter(io_message_loop_proxy) {}
+
+  virtual TestURLRequestContext* GetURLRequestContext() OVERRIDE {
+    // Construct |context_| lazily so it gets constructed on the right
+    // thread (the IO thread).
+    if (!context_.get())
+      context_.reset(new MyTestURLRequestContext());
+    return context_.get();
+  }
+
+ private:
+  virtual ~MyTestURLRequestContextGetter() {}
+
+  scoped_ptr<MyTestURLRequestContext> context_;
+};
+
 }  // namespace
 
 int main(int argc, char* argv[]) {
@@ -160,7 +203,7 @@ int main(int argc, char* argv[]) {
                 "after logging into\n"
                 "sync to get the token to pass into this utility.\n",
                 argv[0],
-                kTokenSwitch, kEmailSwitch, kHostPortSwitch,
+                kEmailSwitch, kTokenSwitch, kHostPortSwitch,
                 kTrySslTcpFirstSwitch, kAllowInsecureConnectionSwitch,
                 kNotificationMethodSwitch);
     return -1;
@@ -169,12 +212,12 @@ int main(int argc, char* argv[]) {
   const notifier::NotifierOptions& notifier_options =
       ParseNotifierOptions(
           command_line,
-          new TestURLRequestContextGetter(io_thread.message_loop_proxy()));
+          new MyTestURLRequestContextGetter(io_thread.message_loop_proxy()));
   const char kClientInfo[] = "sync_listen_notifications";
-  NullInvalidationVersionTracker null_invalidation_version_tracker;
+  NullInvalidationStateTracker null_invalidation_state_tracker;
   sync_notifier::SyncNotifierFactory sync_notifier_factory(
       notifier_options, kClientInfo,
-      null_invalidation_version_tracker.AsWeakPtr());
+      null_invalidation_state_tracker.AsWeakPtr());
   scoped_ptr<sync_notifier::SyncNotifier> sync_notifier(
       sync_notifier_factory.CreateSyncNotifier());
   NotificationPrinter notification_printer;
@@ -182,7 +225,6 @@ int main(int argc, char* argv[]) {
 
   const char kUniqueId[] = "fake_unique_id";
   sync_notifier->SetUniqueId(kUniqueId);
-  sync_notifier->SetState("");
   sync_notifier->UpdateCredentials(email, token);
   // Listen for notifications for all known types.
   sync_notifier->UpdateEnabledTypes(syncable::ModelTypeSet::All());

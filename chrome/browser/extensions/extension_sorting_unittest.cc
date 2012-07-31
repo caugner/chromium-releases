@@ -7,6 +7,8 @@
 #include "chrome/common/extensions/extension_manifest_constants.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+using extensions::Extension;
+
 namespace keys = extension_manifest_keys;
 
 class ExtensionSortingTest : public ExtensionPrefsTest {
@@ -616,7 +618,7 @@ class ExtensionSortingPreinstalledAppsBase :
     std::string error;
     app1_scoped_ = Extension::Create(
         prefs_.temp_dir().AppendASCII("app1_"), Extension::EXTERNAL_PREF,
-        simple_dict, Extension::STRICT_ERROR_CHECKS, &error);
+        simple_dict, Extension::NO_FLAGS, &error);
     prefs()->OnExtensionInstalled(app1_scoped_.get(),
                                   Extension::ENABLED,
                                   false,
@@ -624,7 +626,7 @@ class ExtensionSortingPreinstalledAppsBase :
 
     app2_scoped_ = Extension::Create(
         prefs_.temp_dir().AppendASCII("app2_"), Extension::EXTERNAL_PREF,
-        simple_dict, Extension::STRICT_ERROR_CHECKS, &error);
+        simple_dict, Extension::NO_FLAGS, &error);
     prefs()->OnExtensionInstalled(app2_scoped_.get(),
                                   Extension::ENABLED,
                                   false,

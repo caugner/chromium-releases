@@ -12,6 +12,7 @@
 #include "base/hash_tables.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
+#include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/synchronization/lock.h"
 #include "base/time.h"
@@ -32,6 +33,7 @@ class ProfileSyncService;
 namespace chromeos {
 
 class RemoveUserDelegate;
+class UserImage;
 
 // Implementation of the UserManager.
 class UserManagerImpl : public UserManager,
@@ -43,10 +45,13 @@ class UserManagerImpl : public UserManager,
   virtual ~UserManagerImpl();
 
   virtual const UserList& GetUsers() const OVERRIDE;
-  virtual void UserLoggedIn(const std::string& email) OVERRIDE;
+  virtual void UserLoggedIn(const std::string& email,
+                            bool browser_restart) OVERRIDE;
   virtual void DemoUserLoggedIn() OVERRIDE;
   virtual void GuestUserLoggedIn() OVERRIDE;
   virtual void EphemeralUserLoggedIn(const std::string& email) OVERRIDE;
+  virtual void InitializeWallpaper() OVERRIDE;
+  virtual void UserSelected(const std::string& email) OVERRIDE;
   virtual void SessionStarted() OVERRIDE;
   virtual void RemoveUser(const std::string& email,
                           RemoveUserDelegate* delegate) OVERRIDE;
@@ -55,27 +60,37 @@ class UserManagerImpl : public UserManager,
   virtual const User* FindUser(const std::string& email) const OVERRIDE;
   virtual const User& GetLoggedInUser() const OVERRIDE;
   virtual User& GetLoggedInUser() OVERRIDE;
-  virtual bool IsDisplayNameUnique(
-      const std::string& display_name) const OVERRIDE;
   virtual void SaveUserOAuthStatus(
       const std::string& username,
       User::OAuthTokenStatus oauth_token_status) OVERRIDE;
+  virtual void SaveUserDisplayName(const std::string& username,
+                                   const string16& display_name) OVERRIDE;
+  virtual string16 GetUserDisplayName(
+      const std::string& username) const OVERRIDE;
   virtual void SaveUserDisplayEmail(const std::string& username,
                                     const std::string& display_email) OVERRIDE;
   virtual std::string GetUserDisplayEmail(
       const std::string& username) const OVERRIDE;
-  virtual int GetUserWallpaperIndex() OVERRIDE;
-  virtual void SaveUserWallpaperIndex(int wallpaper_index) OVERRIDE;
+  virtual void GetLoggedInUserWallpaperProperties(User::WallpaperType* type,
+                                                  int* index) OVERRIDE;
+  virtual void SaveLoggedInUserWallpaperProperties(User::WallpaperType type,
+                                                   int index) OVERRIDE;
   virtual void SaveUserDefaultImageIndex(const std::string& username,
                                          int image_index) OVERRIDE;
   virtual void SaveUserImage(const std::string& username,
-                             const SkBitmap& image) OVERRIDE;
+                             const UserImage& user_image) OVERRIDE;
+  virtual void SetLoggedInUserCustomWallpaperLayout(
+      ash::WallpaperLayout layout) OVERRIDE;
   virtual void SaveUserImageFromFile(const std::string& username,
                                      const FilePath& path) OVERRIDE;
+  virtual void SaveUserWallpaperFromFile(
+      const std::string& username,
+      const FilePath& path,
+      ash::WallpaperLayout layout,
+      base::WeakPtr<WallpaperDelegate> delegate) OVERRIDE;
   virtual void SaveUserImageFromProfileImage(
       const std::string& username) OVERRIDE;
   virtual void DownloadProfileImage(const std::string& reason) OVERRIDE;
-  virtual void LoadKeyStore() OVERRIDE;
   virtual bool IsCurrentUserOwner() const OVERRIDE;
   virtual bool IsCurrentUserNew() const OVERRIDE;
   virtual bool IsCurrentUserEphemeral() const OVERRIDE;
@@ -103,6 +118,10 @@ class UserManagerImpl : public UserManager,
   // Returns image filepath for the given user.
   FilePath GetImagePathForUser(const std::string& username);
 
+  // Returns wallpaper/thumbnail filepath for the given user.
+  FilePath GetWallpaperPathForUser(const std::string& username,
+                                   bool is_thumbnail);
+
  private:
   friend class UserManagerImplWrapper;
   friend class UserManagerTest;
@@ -110,6 +129,10 @@ class UserManagerImpl : public UserManager,
   // Loads |users_| from Local State if the list has not been loaded yet.
   // Subsequent calls have no effect. Must be called on the UI thread.
   void EnsureUsersLoaded();
+
+  // Loads wallpaper asynchronously if the current wallpaper is not the
+  // wallpaper of logged in user.
+  void EnsureLoggedInUserWallpaperLoaded();
 
   // Retrieves trusted device policies and removes users from the persistent
   // list if ephemeral users are enabled. Schedules a callback to itself if
@@ -144,26 +167,78 @@ class UserManagerImpl : public UserManager,
   // Does not send LOGIN_USER_IMAGE_CHANGED notification.
   void SetInitialUserImage(const std::string& username);
 
+  // Sets one of the default wallpapers for the specified user and saves this
+  // settings in local state.
+  void SetInitialUserWallpaper(const std::string& username);
+
+  // Migrate the old wallpaper index to a new wallpaper structure.
+  // The new wallpaper structure is:
+  // { WallpaperType: RANDOM|CUSTOMIZED|DEFAULT,
+  //   index: index of the default wallpapers }
+  void MigrateWallpaperData();
+
   // Sets image for user |username| and sends LOGIN_USER_IMAGE_CHANGED
   // notification unless this is a new user and image is set for the first time.
   // If |image| is empty, sets a stub image for the user.
   void SetUserImage(const std::string& username,
                     int image_index,
-                    const SkBitmap& image);
+                    const UserImage& user_image);
+
+  void GetUserWallpaperProperties(const std::string& username,
+                                 User::WallpaperType* type,
+                                 int* index);
+  void SaveUserWallpaperProperties(const std::string& username,
+                                   User::WallpaperType type,
+                                   int index);
 
   // Saves image to file, updates local state preferences to given image index
   // and sends LOGIN_USER_IMAGE_CHANGED notification.
   void SaveUserImageInternal(const std::string& username,
                              int image_index,
-                             const SkBitmap& image);
+                             const UserImage& user_image);
+
+  // Saves wallpaper to file, post task to generate thumbnail and updates local
+  // state preferences.
+  void SaveUserWallpaperInternal(const std::string& username,
+                                 ash::WallpaperLayout layout,
+                                 User::WallpaperType type,
+                                 base::WeakPtr<WallpaperDelegate> delegate,
+                                 const UserImage& user_image);
+
+  // Sets desktop background to custom wallpaper and loads wallpaper thumbnail
+  // asynchronously.
+  void OnCustomWallpaperLoaded(const std::string& email,
+                               ash::WallpaperLayout layout,
+                               const UserImage& wallpaper);
+
+  // Caches the loaded wallpaper for the given user.
+  void OnCustomWallpaperThumbnailLoaded(const std::string& email,
+                                        const UserImage& user_image);
+
+  // Updates the custom wallpaper thumbnail in wallpaper picker UI.
+  void OnThumbnailUpdated(base::WeakPtr<WallpaperDelegate> delegate);
+
+  // Generates a 128x80 thumbnail and saves it to local file system.
+  void GenerateUserWallpaperThumbnail(const std::string& username,
+                                      User::WallpaperType type,
+                                      base::WeakPtr<WallpaperDelegate> delegate,
+                                      const SkBitmap& wallpaper);
 
   // Saves image to file with specified path and sends LOGIN_USER_IMAGE_CHANGED
   // notification. Runs on FILE thread. Posts task for saving image info to
   // Local State on UI thread.
   void SaveImageToFile(const std::string& username,
-                       const SkBitmap& image,
+                       const UserImage& user_image,
                        const FilePath& image_path,
                        int image_index);
+
+  // Saves wallpaper to file with specified path. Runs on FILE thread. Posts
+  // task for saving wallpaper info to Local State on UI thread.
+  void SaveWallpaperToFile(const std::string& username,
+                           const SkBitmap& wallpaper,
+                           const FilePath& wallpaper_path,
+                           ash::WallpaperLayout layout,
+                           User::WallpaperType type);
 
   // Stores path to the image and its index in local state. Runs on UI thread.
   // If |is_async| is true, it has been posted from the FILE thread after
@@ -173,7 +248,17 @@ class UserManagerImpl : public UserManager,
                              int image_index,
                              bool is_async);
 
-  // Initializes |downloaded_profile_picture_| with the picture of the logged-in
+  // Stores layout and type preference in local state. Runs on UI thread.
+  void SaveWallpaperToLocalState(const std::string& username,
+                                 const std::string& wallpaper_path,
+                                 ash::WallpaperLayout layout,
+                                 User::WallpaperType type);
+
+  // Saves |image| to the specified |image_path|. Runs on FILE thread.
+  bool SaveBitmapToFile(const UserImage& user_image,
+                        const FilePath& image_path);
+
+  // Initializes |downloaded_profile_image_| with the picture of the logged-in
   // user.
   void InitDownloadedProfileImage();
 
@@ -207,10 +292,6 @@ class UserManagerImpl : public UserManager,
   // when users are removed by |RemoveUserFromListInternal|.
   mutable UserList users_;
 
-  // Map of users' display names used to determine which users have unique
-  // display names.
-  mutable base::hash_map<std::string, size_t> display_name_count_;
-
   // The logged-in user. NULL until a user has logged in, then points to one
   // of the User instances in |users_|, the |guest_user_| instance or an
   // ephemeral user instance. In test paths without login points to the
@@ -235,13 +316,10 @@ class UserManagerImpl : public UserManager,
   // mounting their cryptohomes using tmpfs.
   bool is_current_user_ephemeral_;
 
-  // Cache current user selected index in memory.
+  User::WallpaperType current_user_wallpaper_type_;
+
   int current_user_wallpaper_index_;
 
-  // The key store for the current user has been loaded. This flag is needed to
-  // ensure that the key store will not be loaded twice in the policy recovery
-  // "safe-mode".
-  bool key_store_loaded_;
   // Cached flag indicating whether ephemeral users are enabled. Defaults to
   // |false| if the value has not been read from trusted device policy yet.
   bool ephemeral_users_enabled_;

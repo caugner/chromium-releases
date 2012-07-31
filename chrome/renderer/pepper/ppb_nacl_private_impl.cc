@@ -9,12 +9,11 @@
 #include "base/command_line.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
-#include "base/rand_util_c.h"
+#include "base/rand_util.h"
 #include "chrome/common/render_messages.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/renderer/render_thread.h"
 #include "ipc/ipc_sync_message_filter.h"
-#include "native_client/src/shared/imc/nacl_imc.h"
 #include "ppapi/c/private/ppb_nacl_private.h"
 #include "ppapi/native_client/src/trusted/plugin/nacl_entry_points.h"
 
@@ -28,30 +27,36 @@ base::LazyInstance<scoped_refptr<IPC::SyncMessageFilter> >
     g_background_thread_sender = LAZY_INSTANCE_INITIALIZER;
 
 // Launch NaCl's sel_ldr process.
-bool LaunchSelLdr(const char* alleged_url, int socket_count,
-                  void* imc_handles) {
+PP_Bool LaunchSelLdr(PP_Instance instance,
+                     const char* alleged_url, int socket_count,
+                     void* imc_handles) {
   std::vector<nacl::FileDescriptor> sockets;
-  IPC::Message::Sender* sender = content::RenderThread::Get();
+  IPC::Sender* sender = content::RenderThread::Get();
   if (sender == NULL)
     sender = g_background_thread_sender.Pointer()->get();
 
   if (!sender->Send(new ChromeViewHostMsg_LaunchNaCl(
           GURL(alleged_url), socket_count, &sockets)))
-    return false;
+    return PP_FALSE;
 
   CHECK(static_cast<int>(sockets.size()) == socket_count);
   for (int i = 0; i < socket_count; i++) {
     static_cast<nacl::Handle*>(imc_handles)[i] =
         nacl::ToNativeHandle(sockets[i]);
   }
-  return true;
+
+  return PP_TRUE;
+}
+
+PP_Bool StartPpapiProxy(PP_Instance instance) {
+  return PP_FALSE;
 }
 
 int UrandomFD(void) {
 #if defined(OS_POSIX)
-  return GetUrandomFD();
+  return base::GetUrandomFD();
 #else
-  return 0;
+  return -1;
 #endif
 }
 
@@ -80,6 +85,7 @@ int BrokerDuplicateHandle(void* source_handle,
 
 const PPB_NaCl_Private nacl_interface = {
   &LaunchSelLdr,
+  &StartPpapiProxy,
   &UrandomFD,
   &Are3DInterfacesDisabled,
   &EnableBackgroundSelLdrLaunch,

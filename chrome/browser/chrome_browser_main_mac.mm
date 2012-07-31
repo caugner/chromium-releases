@@ -5,6 +5,8 @@
 #include "chrome/browser/chrome_browser_main_mac.h"
 
 #import <Cocoa/Cocoa.h>
+#include <sys/sysctl.h>
+#include <sys/time.h>
 
 #include "base/command_line.h"
 #include "base/debug/debugger.h"
@@ -12,11 +14,13 @@
 #include "base/mac/bundle_locations.h"
 #include "base/mac/mac_util.h"
 #include "base/memory/scoped_nsobject.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
 #include "chrome/app/breakpad_mac.h"
 #import "chrome/browser/app_controller_mac.h"
 #import "chrome/browser/chrome_browser_application_mac.h"
 #include "chrome/browser/mac/install_from_dmg.h"
+#include "chrome/browser/mac/keychain_reauthorize.h"
 #import "chrome/browser/mac/keystone_glue.h"
 #include "chrome/browser/metrics/metrics_service.h"
 #include "chrome/common/chrome_paths.h"
@@ -27,13 +31,48 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/resource/resource_handle.h"
 
+namespace {
+
+// This preference is used to track whether the KeychainReauthorize operation
+// has occurred at launch. This operation only makes sense while the
+// application continues to be signed by the old certificate.
+NSString* const kKeychainReauthorizeAtLaunchPref =
+    @"KeychainReauthorizeInAppMay2012";
+const int kKeychainReauthorizeAtLaunchMaxTries = 2;
+
+// Some users rarely restart Chrome, so they might never get a chance to run
+// the at-launch KeychainReauthorize. To account for them, there's also an
+// at-update KeychainReauthorize option, which runs from .keystone_install for
+// users on a user Keystone ticket. This operation may make sense for a period
+// of time after the application switches to being signed by the new
+// certificate, as long as the at-update stub executable is still signed by
+// the old one.
+NSString* const kKeychainReauthorizeAtUpdatePref =
+    @"KeychainReauthorizeAtUpdateMay2012";
+const int kKeychainReauthorizeAtUpdateMaxTries = 3;
+
+}  // namespace
+
 void RecordBreakpadStatusUMA(MetricsService* metrics) {
   metrics->RecordBreakpadRegistration(IsCrashReporterEnabled());
   metrics->RecordBreakpadHasDebugger(base::debug::BeingDebugged());
 }
 
 void RecordBrowserStartupTime() {
-  // Not implemented on Mac for now.
+  int mib[] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid() };
+  size_t len = 0;
+  if (sysctl(mib, arraysize(mib), NULL, &len, NULL, 0) < 0)
+    return;
+
+  scoped_ptr_malloc<struct kinfo_proc>
+      proc(static_cast<struct kinfo_proc*>(malloc(len)));
+  if (sysctl(mib, arraysize(mib), proc.get(), &len, NULL, 0) < 0)
+    return;
+  base::Time process_creation_time =
+      base::Time::FromTimeVal(proc->kp_proc.p_un.__p_starttime);
+
+  RecordPreReadExperimentTime("Startup.BrowserMessageLoopStartTime",
+      base::Time::Now() - process_creation_time);
 }
 
 void WarnAboutMinimumSystemRequirements() {
@@ -54,6 +93,25 @@ ChromeBrowserMainPartsMac::ChromeBrowserMainPartsMac(
 }
 
 void ChromeBrowserMainPartsMac::PreEarlyInitialization() {
+  if (parsed_command_line().HasSwitch(switches::kKeychainReauthorize)) {
+    if (base::mac::AmIBundled()) {
+      LOG(FATAL) << "Inappropriate process type for Keychain reauthorization";
+    }
+
+    // Do Keychain reauthorization at the time of update installation. This
+    // gets three chances to run. If the first or second try doesn't complete
+    // successfully (crashes or is interrupted for any reason), there will be
+    // another chance. Once this step completes successfully, it should never
+    // have to run again.
+    //
+    // This is kicked off by a special stub executable during an automatic
+    // update. See chrome/installer/mac/keychain_reauthorize_main.cc.
+    chrome::browser::mac::KeychainReauthorizeIfNeeded(
+        kKeychainReauthorizeAtUpdatePref, kKeychainReauthorizeAtUpdateMaxTries);
+
+    exit(0);
+  }
+
   ChromeBrowserMainPartsPosix::PreEarlyInitialization();
 
   if (base::mac::WasLaunchedAsHiddenLoginItem()) {
@@ -88,13 +146,13 @@ void ChromeBrowserMainPartsMac::PreMainMessageLoopStart() {
     // TODO(markusheintz): Read preference pref::kApplicationLocale in order
     // to enforce the application locale.
     const std::string loaded_locale =
-        ResourceBundle::InitSharedInstanceWithLocale(std::string());
+        ResourceBundle::InitSharedInstanceWithLocale(std::string(), NULL);
     CHECK(!loaded_locale.empty()) << "Default locale could not be found";
 
     FilePath resources_pack_path;
     PathService::Get(chrome::FILE_RESOURCES_PACK, &resources_pack_path);
     ResourceBundle::GetSharedInstance().AddDataPack(
-        resources_pack_path, ui::ResourceHandle::kScaleFactor100x);
+        resources_pack_path, ui::SCALE_FACTOR_100P);
   }
 
   // This is a no-op if the KeystoneRegistration framework is not present.

@@ -2,39 +2,68 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "gpu/command_buffer/tests/gl_manager.h"
 #include "base/at_exit.h"
 #include "base/bind.h"
-#include "gpu/command_buffer/client/gles2_lib.h"
 #include "gpu/command_buffer/client/gles2_implementation.h"
+#include "gpu/command_buffer/client/gles2_lib.h"
 #include "gpu/command_buffer/client/transfer_buffer.h"
 #include "gpu/command_buffer/common/constants.h"
 #include "gpu/command_buffer/service/command_buffer_service.h"
 #include "gpu/command_buffer/service/context_group.h"
 #include "gpu/command_buffer/service/gpu_scheduler.h"
 #include "gpu/command_buffer/service/mailbox_manager.h"
+#include "gpu/command_buffer/tests/gl_manager.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/gfx/gl/gl_context.h"
-#include "ui/gfx/gl/gl_share_group.h"
-#include "ui/gfx/gl/gl_surface.h"
+#include "ui/gl/gl_context.h"
+#include "ui/gl/gl_share_group.h"
+#include "ui/gl/gl_surface.h"
 
 namespace gpu {
 
-GLManager::GLManager(gles2::MailboxManager* mailbox_manager,
-                     gfx::GLShareGroup* share_group)
-    : mailbox_manager_(
-        mailbox_manager ? mailbox_manager : new gles2::MailboxManager),
-      share_group_(share_group ? share_group : new gfx::GLShareGroup) {
+GLManager::GLManager() {
 }
 
 GLManager::~GLManager() {
 }
 
 void GLManager::Initialize(const gfx::Size& size) {
+  Setup(size, NULL, NULL, NULL, NULL);
+}
+
+void GLManager::InitializeShared(
+    const gfx::Size& size, GLManager* gl_manager) {
+  DCHECK(gl_manager);
+  Setup(
+      size,
+      gl_manager->mailbox_manager(),
+      gl_manager->share_group(),
+      gl_manager->decoder_->GetContextGroup(),
+      gl_manager->gles2_implementation()->share_group());
+}
+
+void GLManager::InitializeSharedMailbox(
+     const gfx::Size& size, GLManager* gl_manager) {
+  DCHECK(gl_manager);
+  Setup(
+      size,
+      gl_manager->mailbox_manager(),
+      gl_manager->share_group(),
+      NULL,
+      NULL);
+}
+
+void GLManager::Setup(
+    const gfx::Size& size,
+    gles2::MailboxManager* mailbox_manager,
+    gfx::GLShareGroup* share_group,
+    gles2::ContextGroup* context_group,
+    gles2::ShareGroup* client_share_group) {
   const int32 kCommandBufferSize = 1024 * 1024;
   const size_t kStartTransferBufferSize = 4 * 1024 * 1024;
   const size_t kMinTransferBufferSize = 1 * 256 * 1024;
   const size_t kMaxTransferBufferSize = 16 * 1024 * 1024;
+  const bool kBindGeneratesResource = false;
+  const bool kShareResources = true;
 
   // From <EGL/egl.h>.
   const int32 EGL_ALPHA_SIZE = 0x3021;
@@ -43,6 +72,11 @@ void GLManager::Initialize(const gfx::Size& size) {
   const int32 EGL_RED_SIZE = 0x3024;
   const int32 EGL_DEPTH_SIZE = 0x3025;
   const int32 EGL_NONE = 0x3038;
+
+  mailbox_manager_ =
+      mailbox_manager ? mailbox_manager : new gles2::MailboxManager;
+  share_group_ =
+      share_group ? share_group : new gfx::GLShareGroup;
 
   gfx::GpuPreference gpu_preference(gfx::PreferDiscreteGpu);
   const char* allowed_extensions = "*";
@@ -59,12 +93,17 @@ void GLManager::Initialize(const gfx::Size& size) {
   attribs.push_back(16);
   attribs.push_back(EGL_NONE);
 
-  command_buffer_.reset(new CommandBufferService);
+  if (!context_group) {
+    context_group = new gles2::ContextGroup(
+        mailbox_manager_.get(), kBindGeneratesResource);
+  }
+
+  decoder_.reset(::gpu::gles2::GLES2Decoder::Create(context_group));
+
+  command_buffer_.reset(new CommandBufferService(
+      decoder_->GetContextGroup()->transfer_buffer_manager()));
   ASSERT_TRUE(command_buffer_->Initialize())
       << "could not create command buffer service";
-
-  decoder_.reset(::gpu::gles2::GLES2Decoder::Create(
-      new gles2::ContextGroup(mailbox_manager_.get(), false)));
 
   gpu_scheduler_.reset(new GpuScheduler(command_buffer_.get(),
                                         decoder_.get(),
@@ -79,6 +118,8 @@ void GLManager::Initialize(const gfx::Size& size) {
                                              surface_.get(),
                                              gpu_preference);
   ASSERT_TRUE(context_.get() != NULL) << "could not create GL context";
+
+  ASSERT_TRUE(context_->MakeCurrent(surface_.get()));
 
   ASSERT_TRUE(decoder_->Initialize(
       surface_.get(),
@@ -104,10 +145,10 @@ void GLManager::Initialize(const gfx::Size& size) {
   // Create the object exposing the OpenGL API.
   gles2_implementation_.reset(new gles2::GLES2Implementation(
       gles2_helper_.get(),
-      NULL,
+      client_share_group,
       transfer_buffer_.get(),
-      true,
-      false));
+      kShareResources,
+      kBindGeneratesResource));
 
   ASSERT_TRUE(gles2_implementation_->Initialize(
       kStartTransferBufferSize,
@@ -123,6 +164,8 @@ void GLManager::MakeCurrent() {
 
 void GLManager::Destroy() {
   if (gles2_implementation_.get()) {
+    MakeCurrent();
+    EXPECT_TRUE(glGetError() == GL_NONE);
     gles2_implementation_->Flush();
     gles2_implementation_.reset();
   }
@@ -130,7 +173,8 @@ void GLManager::Destroy() {
   gles2_helper_.reset();
   command_buffer_.reset();
   if (decoder_.get()) {
-    decoder_->Destroy();
+    decoder_->MakeCurrent();
+    decoder_->Destroy(true);
   }
 }
 

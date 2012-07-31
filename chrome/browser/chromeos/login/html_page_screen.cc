@@ -7,12 +7,14 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/login/screen_observer.h"
+#include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/site_instance.h"
 #include "googleurl/src/gurl.h"
 #include "ui/views/events/event.h"
 
+using content::NativeWebKeyboardEvent;
 using content::SiteInstance;
 using content::WebContents;
 
@@ -36,6 +38,12 @@ HTMLPageScreen::HTMLPageScreen(ViewScreenDelegate* delegate,
 }
 
 HTMLPageScreen::~HTMLPageScreen() {}
+
+///////////////////////////////////////////////////////////////////////////////
+// HTMLPageScreen, WizardScreen implementation:
+std::string HTMLPageScreen::GetName() const {
+  return WizardController::kHTMLPageScreenName;
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 // HTMLPageScreen, ViewScreen implementation:

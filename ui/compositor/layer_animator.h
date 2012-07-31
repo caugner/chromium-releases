@@ -11,7 +11,6 @@
 
 #include "base/compiler_specific.h"
 #include "base/memory/linked_ptr.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
 #include "base/time.h"
 #include "ui/base/animation/animation_container_element.h"
@@ -136,6 +135,15 @@ class COMPOSITOR_EXPORT LayerAnimator : public AnimationContainerElement {
   }
   base::TimeTicks last_step_time() const { return last_step_time_; }
 
+  // When set all animations play slowly for visual debugging.
+  static void set_slow_animation_mode(bool slow) {
+    slow_animation_mode_ = slow;
+  }
+  static bool slow_animation_mode() { return slow_animation_mode_; }
+
+  // When in slow animation mode, animation durations a scaled by this value.
+  static int slow_animation_scale_factor();
+
   // When set to true, all animations complete immediately.
   static void set_disable_animations_for_test(bool disable_animations) {
     disable_animations_for_test_ = disable_animations;
@@ -241,6 +249,10 @@ class COMPOSITOR_EXPORT LayerAnimator : public AnimationContainerElement {
   // starting the animation or adding to the queue.
   void OnScheduled(LayerAnimationSequence* sequence);
 
+  // Returns the default length of animations, including adjustment for slow
+  // animation mode if set.
+  base::TimeDelta GetTransitionDuration() const;
+
   // This is the queue of animations to run.
   AnimationQueue animation_queue_;
 
@@ -271,6 +283,9 @@ class COMPOSITOR_EXPORT LayerAnimator : public AnimationContainerElement {
 
   // This causes all animations to complete immediately.
   static bool disable_animations_for_test_;
+
+  // Slows down all animations for visual debugging.
+  static bool slow_animation_mode_;
 
   // Observers are notified when layer animations end, are scheduled or are
   // aborted.

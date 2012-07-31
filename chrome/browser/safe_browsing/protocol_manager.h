@@ -25,15 +25,19 @@
 #include "chrome/browser/safe_browsing/protocol_parser.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/safe_browsing/safe_browsing_util.h"
-#include "content/public/common/url_fetcher_delegate.h"
+#include "net/url_request/url_fetcher_delegate.h"
+
+namespace net {
+class URLFetcher;
+}  // namespace net
 
 #if defined(COMPILER_GCC)
 // Allows us to use URLFetchers in a hash_map with gcc (MSVC is okay without
 // specifying this).
 namespace __gnu_cxx {
 template<>
-struct hash<const content::URLFetcher*> {
-  size_t operator()(const content::URLFetcher* fetcher) const {
+struct hash<const net::URLFetcher*> {
+  size_t operator()(const net::URLFetcher* fetcher) const {
     return reinterpret_cast<size_t>(fetcher);
   }
 };
@@ -56,7 +60,7 @@ class SBProtocolManagerFactory {
   DISALLOW_COPY_AND_ASSIGN(SBProtocolManagerFactory);
 };
 
-class SafeBrowsingProtocolManager : public content::URLFetcherDelegate {
+class SafeBrowsingProtocolManager : public net::URLFetcherDelegate {
   FRIEND_TEST_ALL_PREFIXES(SafeBrowsingProtocolManagerTest, TestBackOffTimes);
   FRIEND_TEST_ALL_PREFIXES(SafeBrowsingProtocolManagerTest, TestChunkStrings);
   FRIEND_TEST_ALL_PREFIXES(SafeBrowsingProtocolManagerTest, TestGetHashUrl);
@@ -91,8 +95,8 @@ class SafeBrowsingProtocolManager : public content::URLFetcherDelegate {
   // of the SafeBrowsing service.
   virtual void Initialize();
 
-  // content::URLFetcherDelegate interface.
-  virtual void OnURLFetchComplete(const content::URLFetcher* source) OVERRIDE;
+  // net::URLFetcherDelegate interface.
+  virtual void OnURLFetchComplete(const net::URLFetcher* source) OVERRIDE;
 
   // API used by the SafeBrowsingService for issuing queries. When the results
   // are available, SafeBrowsingService::HandleGetHashResults is called.
@@ -282,7 +286,7 @@ class SafeBrowsingProtocolManager : public content::URLFetcherDelegate {
   // Current active request (in case we need to cancel) for updates or chunks
   // from the SafeBrowsing service. We can only have one of these outstanding
   // at any given time unlike GetHash requests, which are tracked separately.
-  scoped_ptr<content::URLFetcher> request_;
+  scoped_ptr<net::URLFetcher> request_;
 
   // The kind of request that is currently in progress.
   SafeBrowsingRequestType request_type_;
@@ -310,7 +314,7 @@ class SafeBrowsingProtocolManager : public content::URLFetcherDelegate {
   std::deque<ChunkUrl> chunk_request_urls_;
 
   // Map of GetHash requests.
-  typedef base::hash_map<const content::URLFetcher*,
+  typedef base::hash_map<const net::URLFetcher*,
                          SafeBrowsingService::SafeBrowsingCheck*> HashRequests;
   HashRequests hash_requests_;
 
@@ -343,7 +347,7 @@ class SafeBrowsingProtocolManager : public content::URLFetcherDelegate {
 
   // Track outstanding SafeBrowsing report fetchers for clean up.
   // We add both "hit" and "detail" fetchers in this set.
-  std::set<const content::URLFetcher*> safebrowsing_reports_;
+  std::set<const net::URLFetcher*> safebrowsing_reports_;
 
   // The safe browsing client name sent in each request.
   std::string client_name_;

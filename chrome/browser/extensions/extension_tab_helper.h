@@ -6,7 +6,10 @@
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_TAB_HELPER_H_
 #pragma once
 
+#include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
+#include "base/observer_list.h"
+#include "chrome/browser/extensions/active_tab_permission_manager.h"
 #include "chrome/browser/extensions/app_notify_channel_setup.h"
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
 #include "chrome/browser/extensions/image_loading_tracker.h"
@@ -15,13 +18,19 @@
 #include "content/public/browser/web_contents_observer.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 
-class Extension;
 class ExtensionTabHelperDelegate;
-class TabContentsWrapper;
+class TabContents;
 struct WebApplicationInfo;
 
 namespace content {
 struct LoadCommittedDetails;
+}
+
+namespace extensions {
+class Extension;
+class LocationBarController;
+class ScriptBadgeController;
+class ScriptExecutor;
 }
 
 // Per-tab extension helper. Also handles non-extension apps.
@@ -33,7 +42,7 @@ class ExtensionTabHelper
       public AppNotifyChannelSetup::Delegate,
       public base::SupportsWeakPtr<ExtensionTabHelper> {
  public:
-  explicit ExtensionTabHelper(TabContentsWrapper* wrapper);
+  explicit ExtensionTabHelper(TabContents* tab_contents);
   virtual ~ExtensionTabHelper();
 
   // Copies the internal state from another ExtensionTabHelper.
@@ -50,6 +59,12 @@ class ExtensionTabHelper
   // the data is available.
   void GetApplicationInfo(int32 page_id);
 
+  // Gets the ID of the tab.
+  int tab_id() const;
+
+  // Gets the window ID of the tab.
+  int window_id() const;
+
   // App extensions ------------------------------------------------------------
 
   // Sets the extension denoting this as an app. If |extension| is non-null this
@@ -59,7 +74,7 @@ class ExtensionTabHelper
   // NOTE: this should only be manipulated before the tab is added to a browser.
   // TODO(sky): resolve if this is the right way to identify an app tab. If it
   // is, than this should be passed in the constructor.
-  void SetExtensionApp(const Extension* extension);
+  void SetExtensionApp(const extensions::Extension* extension);
 
   // Convenience for setting the app extension by id. This does nothing if
   // |extension_app_id| is empty, or an extension can't be found given the
@@ -69,7 +84,7 @@ class ExtensionTabHelper
   // Set just the app icon, used by panels created by an extension.
   void SetExtensionAppIconById(const std::string& extension_app_id);
 
-  const Extension* extension_app() const { return extension_app_; }
+  const extensions::Extension* extension_app() const { return extension_app_; }
   bool is_app() const { return extension_app_ != NULL; }
   const WebApplicationInfo& web_app_info() const {
     return web_app_info_;
@@ -82,12 +97,20 @@ class ExtensionTabHelper
   // Extension::EXTENSION_ICON_SMALLISH).
   SkBitmap* GetExtensionAppIcon();
 
-  TabContentsWrapper* tab_contents_wrapper() {
-    return wrapper_;
+  TabContents* tab_contents() {
+    return tab_contents_;
   }
 
   content::WebContents* web_contents() const {
     return content::WebContentsObserver::web_contents();
+  }
+
+  extensions::ScriptExecutor* script_executor();
+
+  extensions::LocationBarController* location_bar_controller();
+
+  extensions::ActiveTabPermissionManager* active_tab_permission_manager() {
+    return &active_tab_permission_manager_;
   }
 
   // Sets a non-extension app icon associated with WebContents and fires an
@@ -96,6 +119,8 @@ class ExtensionTabHelper
 
  private:
   // content::WebContentsObserver overrides.
+  virtual void RenderViewCreated(
+      content::RenderViewHost* render_view_host) OVERRIDE;
   virtual void DidNavigateMainFrame(
       const content::LoadCommittedDetails& details,
       const content::FrameNavigateParams& params) OVERRIDE;
@@ -126,9 +151,10 @@ class ExtensionTabHelper
 
   // Resets app_icon_ and if |extension| is non-null creates a new
   // ImageLoadingTracker to load the extension's image.
-  void UpdateExtensionAppIcon(const Extension* extension);
+  void UpdateExtensionAppIcon(const extensions::Extension* extension);
 
-  const Extension* GetExtension(const std::string& extension_app_id);
+  const extensions::Extension* GetExtension(
+      const std::string& extension_app_id);
 
   // ImageLoadingTracker::Observer.
   virtual void OnImageLoaded(const gfx::Image& image,
@@ -150,12 +176,16 @@ class ExtensionTabHelper
 
   // Data for app extensions ---------------------------------------------------
 
+  // Our observers. Declare at top so that it will outlive all other members,
+  // since they might add themselves as observers.
+  ObserverList<Observer> observers_;
+
   // Delegate for notifying our owner about stuff. Not owned by us.
   ExtensionTabHelperDelegate* delegate_;
 
   // If non-null this tab is an app tab and this is the extension the tab was
   // created for.
-  const Extension* extension_app_;
+  const extensions::Extension* extension_app_;
 
   // Icon for extension_app_ (if non-null) or a manually-set icon for
   // non-extension apps.
@@ -170,7 +200,16 @@ class ExtensionTabHelper
   // Cached web app info data.
   WebApplicationInfo web_app_info_;
 
-  TabContentsWrapper* wrapper_;
+  TabContents* tab_contents_;
+
+  // Either script_executor/location_bar_controller will have values, or
+  // script_badge_controller will have a value, depending on whether the action
+  // box is turned on.
+  scoped_ptr<extensions::ScriptExecutor> script_executor_;
+  scoped_ptr<extensions::LocationBarController> location_bar_controller_;
+  scoped_refptr<extensions::ScriptBadgeController> script_badge_controller_;
+
+  extensions::ActiveTabPermissionManager active_tab_permission_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionTabHelper);
 };

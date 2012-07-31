@@ -5,7 +5,9 @@
 #include "remoting/client/plugin/pepper_network_manager.h"
 
 #include "base/bind.h"
-#include "base/message_loop.h"
+#include "base/location.h"
+#include "base/single_thread_task_runner.h"
+#include "base/thread_task_runner_handle.h"
 #include "ppapi/cpp/module.h"
 #include "ppapi/cpp/private/network_list_private.h"
 #include "ppapi/cpp/private/net_address_private.h"
@@ -27,7 +29,7 @@ PepperNetworkManager::~PepperNetworkManager() {
 void PepperNetworkManager::StartUpdating() {
   if (network_list_received_) {
     // Post a task to avoid reentrancy.
-    MessageLoop::current()->PostTask(
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE, base::Bind(&PepperNetworkManager::SendNetworksChangedSignal,
                               weak_factory_.GetWeakPtr()));
   }
@@ -44,9 +46,8 @@ void PepperNetworkManager::OnNetworkListCallbackHandler(
     void* user_data,
     PP_Resource list_resource) {
   PepperNetworkManager* object = static_cast<PepperNetworkManager*>(user_data);
-  pp::NetworkListPrivate list(list_resource);
+  pp::NetworkListPrivate list(pp::PASS_REF, list_resource);
   object->OnNetworkList(list);
-  pp::Module::Get()->core()->ReleaseResource(list_resource);
 }
 
 void PepperNetworkManager::OnNetworkList(const pp::NetworkListPrivate& list) {

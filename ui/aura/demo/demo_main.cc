@@ -23,7 +23,7 @@
 #include "ui/gfx/rect.h"
 
 #if defined(USE_X11)
-#include "base/message_pump_x.h"
+#include "base/message_pump_aurax11.h"
 #endif
 
 namespace {
@@ -39,7 +39,7 @@ class DemoWindowDelegate : public aura::WindowDelegate {
   }
   virtual void OnBoundsChanged(const gfx::Rect& old_bounds,
                                const gfx::Rect& new_bounds) OVERRIDE {}
-  virtual void OnFocus() OVERRIDE {}
+  virtual void OnFocus(aura::Window* old_focused_window) OVERRIDE {}
   virtual void OnBlur() OVERRIDE {}
   virtual bool OnKeyEvent(aura::KeyEvent* event) OVERRIDE {
     return false;
@@ -49,6 +49,11 @@ class DemoWindowDelegate : public aura::WindowDelegate {
   }
   virtual int GetNonClientComponent(const gfx::Point& point) const OVERRIDE {
     return HTCAPTION;
+  }
+  virtual bool ShouldDescendIntoChildForEventHandling(
+      aura::Window* child,
+      const gfx::Point& location) OVERRIDE {
+    return true;
   }
   virtual bool OnMouseEvent(aura::MouseEvent* event) OVERRIDE {
     return true;
@@ -64,9 +69,12 @@ class DemoWindowDelegate : public aura::WindowDelegate {
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE {
     canvas->DrawColor(color_, SkXfermode::kSrc_Mode);
   }
+  virtual void OnDeviceScaleFactorChanged(float device_scale_factor) OVERRIDE {}
   virtual void OnWindowDestroying() OVERRIDE {}
   virtual void OnWindowDestroyed() OVERRIDE {}
   virtual void OnWindowVisibilityChanged(bool visible) OVERRIDE {}
+  virtual bool HasHitTestMask() const OVERRIDE { return false; }
+  virtual void GetHitTestMask(gfx::Path* mask) const OVERRIDE {}
 
  private:
   SkColor color_;
@@ -106,7 +114,7 @@ int main(int argc, char** argv) {
 
   ui::RegisterPathProvider();
   icu_util::Initialize();
-  ResourceBundle::InitSharedInstanceWithLocale("en-US");
+  ResourceBundle::InitSharedInstanceWithLocale("en-US", NULL);
 
   // Create the message-loop here before creating the root window.
   MessageLoop message_loop(MessageLoop::TYPE_UI);

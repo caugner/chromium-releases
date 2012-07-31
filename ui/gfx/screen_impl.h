@@ -6,8 +6,8 @@
 #define UI_GFX_SCREEN_IMPL_H_
 #pragma once
 
+#include "ui/gfx/display.h"
 #include "ui/gfx/native_widget_types.h"
-#include "ui/gfx/monitor.h"
 #include "ui/gfx/point.h"
 
 namespace gfx {
@@ -20,12 +20,12 @@ class UI_EXPORT ScreenImpl {
   virtual gfx::Point GetCursorScreenPoint() = 0;
   virtual gfx::NativeWindow GetWindowAtCursorScreenPoint() = 0;
 
-  virtual int GetNumMonitors() = 0;
-  virtual gfx::Monitor GetMonitorNearestWindow(
+  virtual int GetNumDisplays() = 0;
+  virtual gfx::Display GetDisplayNearestWindow(
       gfx::NativeView window) const = 0;
-  virtual gfx::Monitor GetMonitorNearestPoint(
+  virtual gfx::Display GetDisplayNearestPoint(
       const gfx::Point& point) const = 0;
-  virtual gfx::Monitor GetPrimaryMonitor() const = 0;
+  virtual gfx::Display GetPrimaryDisplay() const = 0;
 };
 
 }  // namespace gfx

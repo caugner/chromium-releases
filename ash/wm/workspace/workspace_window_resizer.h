@@ -16,7 +16,6 @@ namespace ash {
 namespace internal {
 
 class PhantomWindowController;
-class RootWindowEventFilter;
 class SnapSizer;
 
 // WindowResizer implementation for workspaces. This enforces that windows are
@@ -129,8 +128,6 @@ class ASH_EXPORT WorkspaceWindowResizer : public WindowResizer {
 
   // Set to true once Drag() is invoked and the bounds of the window change.
   bool did_move_or_resize_;
-
-  internal::RootWindowEventFilter* root_filter_;
 
   // The initial size of each of the windows in |attached_windows_| along the
   // primary axis.

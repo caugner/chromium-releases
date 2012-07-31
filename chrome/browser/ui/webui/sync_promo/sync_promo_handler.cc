@@ -12,9 +12,9 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
-#include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/webui/sync_promo/sync_promo_trial.h"
 #include "chrome/browser/ui/webui/sync_promo/sync_promo_ui.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -164,7 +164,7 @@ void SyncPromoHandler::Observe(int type,
     case chrome::NOTIFICATION_BROWSER_CLOSING: {
       // Make sure we're in the tab strip of the closing window.
       Browser* browser = content::Source<Browser>(source).ptr();
-      if (browser->tabstrip_model()->GetWrapperIndex(
+      if (browser->tab_strip_model()->GetIndexOfWebContents(
               web_ui()->GetWebContents()) != TabStripModel::kNoTab) {
         RecordUserFlowAction(SYNC_PROMO_CLOSED_WINDOW);
         window_already_closed_ = true;
@@ -192,7 +192,7 @@ void SyncPromoHandler::HandleCloseSyncPromo(const base::ListValue* args) {
   // If the browser window is being closed then don't try to navigate to another
   // URL. This prevents the browser window from flashing during close.
   Browser* browser =
-      BrowserList::FindBrowserWithWebContents(web_ui()->GetWebContents());
+      browser::FindBrowserWithWebContents(web_ui()->GetWebContents());
   if (!browser || !browser->IsAttemptingToCloseBrowser()) {
     GURL url = SyncPromoUI::GetNextPageURLForSyncPromoURL(
         web_ui()->GetWebContents()->GetURL());

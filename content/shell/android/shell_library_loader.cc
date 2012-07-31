@@ -3,12 +3,15 @@
 // found in the LICENSE file.
 
 #include "base/basictypes.h"
+#include "base/debug/debugger.h"
+#include "base/logging.h"
 #include "base/android/jni_android.h"
 #include "base/android/jni_registrar.h"
-#include "content/public/browser/android_library_loader_hooks.h"
-#include "content/shell/shell_main_delegate.h"
+#include "content/public/app/android_library_loader_hooks.h"
+#include "content/public/app/content_main.h"
 #include "content/shell/android/shell_manager.h"
 #include "content/shell/android/shell_view.h"
+#include "content/shell/shell_main_delegate.h"
 
 static base::android::RegistrationMethod kRegistrationMethods[] = {
     { "ShellManager", content::RegisterShellManager },
@@ -19,7 +22,7 @@ static base::android::RegistrationMethod kRegistrationMethods[] = {
 JNI_EXPORT jint JNI_OnLoad(JavaVM* vm, void* reserved) {
   base::android::InitVM(vm);
   JNIEnv* env = base::android::AttachCurrentThread();
-  if (!RegisterLibraryLoaderEntryHook(env)) {
+  if (!content::RegisterLibraryLoaderEntryHook(env)) {
     return -1;
   }
 
@@ -29,9 +32,7 @@ JNI_EXPORT jint JNI_OnLoad(JavaVM* vm, void* reserved) {
                                             arraysize(kRegistrationMethods)))
     return -1;
 
-  // TODO(tedchoc): Set this to the main delegate once the Android specific
-  // browser process initialization gets checked in.
-  new ShellMainDelegate();
+  content::SetContentMainDelegate(new ShellMainDelegate());
 
   return JNI_VERSION_1_4;
 }

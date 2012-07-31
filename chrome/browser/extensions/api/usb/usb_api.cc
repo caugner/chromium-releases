@@ -12,7 +12,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/usb/usb_service_factory.h"
 #include "chrome/browser/usb/usb_service.h"
-#include "chrome/common/extensions/api/experimental.usb.h"
+#include "chrome/common/extensions/api/experimental_usb.h"
 
 namespace BulkTransfer = extensions::api::experimental_usb::BulkTransfer;
 namespace CloseDevice = extensions::api::experimental_usb::CloseDevice;
@@ -20,12 +20,14 @@ namespace ControlTransfer = extensions::api::experimental_usb::ControlTransfer;
 namespace FindDevice = extensions::api::experimental_usb::FindDevice;
 namespace InterruptTransfer =
     extensions::api::experimental_usb::InterruptTransfer;
+namespace IsochronousTransfer =
+    extensions::api::experimental_usb::IsochronousTransfer;
 using extensions::api::experimental_usb::Device;
 using std::vector;
 
 namespace extensions {
 
-UsbFindDeviceFunction::UsbFindDeviceFunction() {}
+UsbFindDeviceFunction::UsbFindDeviceFunction() : event_notifier_(NULL) {}
 
 UsbFindDeviceFunction::~UsbFindDeviceFunction() {}
 
@@ -73,7 +75,7 @@ bool UsbCloseDeviceFunction::Prepare() {
 }
 
 void UsbCloseDeviceFunction::Work() {
-  controller()->RemoveAPIResource(parameters_->device.handle);
+  controller()->RemoveUsbDeviceResource(parameters_->device.handle);
 }
 
 bool UsbCloseDeviceFunction::Respond() {
@@ -143,6 +145,28 @@ void UsbInterruptTransferFunction::Work() {
 }
 
 bool UsbInterruptTransferFunction::Respond() {
+  return true;
+}
+
+UsbIsochronousTransferFunction::UsbIsochronousTransferFunction() {}
+
+UsbIsochronousTransferFunction::~UsbIsochronousTransferFunction() {}
+
+bool UsbIsochronousTransferFunction::Prepare() {
+  parameters_ = IsochronousTransfer::Params::Create(*args_);
+  EXTENSION_FUNCTION_VALIDATE(parameters_.get());
+  return true;
+}
+
+void UsbIsochronousTransferFunction::Work() {
+  UsbDeviceResource* const device = controller()->GetUsbDeviceResource(
+      parameters_->device.handle);
+  if (device) {
+    device->IsochronousTransfer(parameters_->transfer_info);
+  }
+}
+
+bool UsbIsochronousTransferFunction::Respond() {
   return true;
 }
 

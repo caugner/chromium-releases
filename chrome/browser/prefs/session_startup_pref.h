@@ -58,9 +58,16 @@ struct SessionStartupPref {
   // the same effect.
   static void MigrateIfNecessary(PrefService* prefs);
 
+  // The default startup pref for Mac used to be LAST, now it's DEFAULT. This
+  // migrates old users by writing out the preference explicitly.
+  static void MigrateMacDefaultPrefIfNecessary(PrefService* prefs);
+
   // Whether the startup type and URLs are managed via policy.
   static bool TypeIsManaged(PrefService* prefs);
   static bool URLsAreManaged(PrefService* prefs);
+
+  // Whether the startup type has not been overridden from its default.
+  static bool TypeIsDefault(PrefService* prefs);
 
   // Converts an integer pref value to a SessionStartupPref::Type.
   static SessionStartupPref::Type PrefValueToType(int pref_value);

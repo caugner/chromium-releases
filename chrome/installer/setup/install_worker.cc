@@ -10,6 +10,7 @@
 #include <oaidl.h>
 #include <shlobj.h>
 #include <time.h>
+
 #include <vector>
 
 #include "base/command_line.h"
@@ -775,36 +776,43 @@ void AddInstallWorkItems(const InstallationState& original_state,
         WorkItem::ALWAYS_MOVE);
   }
 
-  if (base::win::GetVersion() >= base::win::VERSION_WIN8) {
-    // Desktop only (i.e. not supporting Metro) versions of Chromium do not have
-    // to include visual elements.
-    scoped_ptr<WorkItemList> win8_work_items(
-        WorkItem::CreateConditionalWorkItemList(new ConditionRunIfFileExists(
-            src_path.Append(L"visualelementsmanifest.xml"))));
-    // TODO (gab): All of these hard-coded strings are temporary and will be
-    // deleted in the patch following this one.
-    win8_work_items->AddMoveTreeWorkItem(
-        src_path.Append(L"visualelementsmanifest.xml").value(),
-        target_path.Append(L"visualelementsmanifest.xml").value(),
+  // Install kVisualElementsManifest if it is present in |src_path|. No need to
+  // make this a conditional work item as if the file is not there now, it will
+  // never be.
+  if (file_util::PathExists(
+          src_path.Append(installer::kVisualElementsManifest))) {
+    install_list->AddMoveTreeWorkItem(
+        src_path.Append(installer::kVisualElementsManifest).value(),
+        target_path.Append(installer::kVisualElementsManifest).value(),
         temp_path.value(),
         WorkItem::ALWAYS_MOVE);
-    win8_work_items->AddMoveTreeWorkItem(
-        src_path.Append(L"logo.png").value(),
-        target_path.Append(L"logo.png").value(),
-        temp_path.value(),
-        WorkItem::ALWAYS_MOVE);
-    win8_work_items->AddMoveTreeWorkItem(
-        src_path.Append(L"smalllogo.png").value(),
-        target_path.Append(L"smalllogo.png").value(),
-        temp_path.value(),
-        WorkItem::ALWAYS_MOVE);
-    win8_work_items->AddMoveTreeWorkItem(
-        src_path.Append(L"splash-620x300.png").value(),
-        target_path.Append(L"splash-620x300.png").value(),
-        temp_path.value(),
-        WorkItem::ALWAYS_MOVE);
-    install_list->AddWorkItem(win8_work_items.release());
+  } else {
+    // We do not want to have an old VisualElementsManifest pointing to an old
+    // version directory. Delete it as there wasn't a new one to replace it.
+    install_list->AddDeleteTreeWorkItem(
+        target_path.Append(installer::kVisualElementsManifest),
+        temp_path);
   }
+
+  // For the component build to work with the installer, we need to drop a
+  // config file and a manifest by chrome.exe. These files are only found in
+  // the archive if this is a component build.
+#if defined(COMPONENT_BUILD)
+  static const FilePath::CharType kChromeExeConfig[] =
+      FILE_PATH_LITERAL("chrome.exe.config");
+  static const FilePath::CharType kChromeExeManifest[] =
+      FILE_PATH_LITERAL("chrome.exe.manifest");
+  install_list->AddMoveTreeWorkItem(
+      src_path.Append(kChromeExeConfig).value(),
+      target_path.Append(kChromeExeConfig).value(),
+      temp_path.value(),
+      WorkItem::ALWAYS_MOVE);
+  install_list->AddMoveTreeWorkItem(
+      src_path.Append(kChromeExeManifest).value(),
+      target_path.Append(kChromeExeManifest).value(),
+      temp_path.value(),
+      WorkItem::ALWAYS_MOVE);
+#endif  // defined(COMPONENT_BUILD)
 
   // In the past, we copied rather than moved for system level installs so that
   // the permissions of %ProgramFiles% would be picked up.  Now that |temp_path|
@@ -821,14 +829,6 @@ void AddInstallWorkItems(const InstallationState& original_state,
       temp_path.value(),
       check_for_duplicates ? WorkItem::CHECK_DUPLICATES :
                              WorkItem::ALWAYS_MOVE);
-
-  // Copy the default Dictionaries only if the folder doesn't exist already.
-  // TODO(grt): Use AddMoveTreeWorkItem in a conditional WorkItemList, which
-  // will be more efficient in space and time.
-  install_list->AddCopyTreeWorkItem(
-      src_path.Append(installer::kDictionaries).value(),
-      target_path.Append(installer::kDictionaries).value(),
-      temp_path.value(), WorkItem::IF_NOT_PRESENT);
 
   // Delete any old_chrome.exe if present (ignore failure if it's in use).
   install_list->AddDeleteTreeWorkItem(

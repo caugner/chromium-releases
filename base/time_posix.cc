@@ -34,7 +34,7 @@ struct timespec TimeDelta::ToTimeSpec() const {
   }
   struct timespec result =
       {seconds,
-       microseconds * Time::kNanosecondsPerMicrosecond};
+       static_cast<long>(microseconds * Time::kNanosecondsPerMicrosecond)};
   return result;
 }
 
@@ -228,7 +228,11 @@ TimeTicks TimeTicks::HighResNow() {
   return Now();
 }
 
-#if defined(OS_POSIX) && defined(CLOCK_SYSTEM_TRACE)
+#if defined(OS_CHROMEOS)
+// Force definition of the system trace clock; it is a chromeos-only api
+// at the moment and surfacing it in the right place requires mucking
+// with glibc et al.
+#define CLOCK_SYSTEM_TRACE 11
 
 // static
 TimeTicks TimeTicks::NowFromSystemTraceTime() {
@@ -236,7 +240,7 @@ TimeTicks TimeTicks::NowFromSystemTraceTime() {
 
   struct timespec ts;
   if (clock_gettime(CLOCK_SYSTEM_TRACE, &ts) != 0) {
-    NOTREACHED() << "clock_gettime(CLOCK_SYSTEM_TRACE) failed.";
+    // NB: fall-back for a chrome os build running on linux
     return HighResNow();
   }
 
@@ -247,16 +251,26 @@ TimeTicks TimeTicks::NowFromSystemTraceTime() {
   return TimeTicks(absolute_micro);
 }
 
-#else // !(defined(OS_POSIX) && defined(CLOCK_SYSTEM_TRACE))
+#else // !defined(OS_CHROMEOS)
 
 // static
 TimeTicks TimeTicks::NowFromSystemTraceTime() {
   return HighResNow();
 }
 
-#endif // defined(OS_POSIX) && defined(CLOCK_SYSTEM_TRACE)
+#endif // defined(OS_CHROMEOS)
 
 #endif  // !OS_MACOSX
+
+// static
+Time Time::FromTimeVal(struct timeval t) {
+  DCHECK_LT(t.tv_usec, static_cast<int>(Time::kMicrosecondsPerSecond));
+  DCHECK_GE(t.tv_usec, 0);
+  return Time(
+      (static_cast<int64>(t.tv_sec) * Time::kMicrosecondsPerSecond) +
+      t.tv_usec +
+      kTimeTToMicrosecondsOffset);
+}
 
 struct timeval Time::ToTimeVal() const {
   struct timeval result;

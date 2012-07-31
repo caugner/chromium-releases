@@ -6,6 +6,8 @@
     # 'branding_dir' is set in the 'conditions' section at the bottom.
     'msvs_use_common_release': 0,
     'msvs_use_common_linker_extras': 0,
+    'mini_installer_internal_deps%': 0,
+    'mini_installer_official_deps%': 0,
   },
   'includes': [
     '../../build/win_precompile.gypi',
@@ -19,7 +21,6 @@
           '../chrome.gyp:chrome_dll',
           '../chrome.gyp:default_extensions',
           '../chrome.gyp:setup',
-          'mini_installer/support/mini_installer_support.gyp:*',
         ],
         'include_dirs': [
           '../..',
@@ -204,13 +205,22 @@
                     'enable_hidpi_flag': '',
                   },
                 }],
-                ['enable_metro == 1', {
+                ['enable_touch_ui == 1', {
                   'variables': {
-                    'enable_metro_flag': '--enable_metro=1',
+                    'enable_touch_ui_flag': '--enable_touch_ui=1',
                   },
                 }, {
                   'variables': {
-                    'enable_metro_flag': '',
+                    'enable_touch_ui_flag': '',
+                  },
+                }],
+                ['component == "shared_library"', {
+                  'variables': {
+                    'component_build_flag': '--component_build=1',
+                  },
+                }, {
+                  'variables': {
+                    'component_build_flag': '',
                   },
                 }],
               ],
@@ -240,7 +250,8 @@
                 '--input_file', '<(RULE_INPUT_PATH)',
                 '--resource_file_path', '<(INTERMEDIATE_DIR)/packed_files.rc',
                 '<(enable_hidpi_flag)',
-                '<(enable_metro_flag)',
+                '<(enable_touch_ui_flag)',
+                '<(component_build_flag)',
                 # TODO(sgk):  may just use environment variables
                 #'--distribution=$(CHROMIUM_BUILD)',
                 '--distribution=_google_chrome',
@@ -254,6 +265,13 @@
           ],
         },
       ],
+    }],
+    [ 'mini_installer_internal_deps == 1 or mini_installer_official_deps == 1', {
+      'target_defaults': {
+        'dependencies': [
+          'mini_installer/support/mini_installer_support.gyp:*',
+        ],
+      },
     }],
     [ 'branding == "Chrome"', {
       'variables': {

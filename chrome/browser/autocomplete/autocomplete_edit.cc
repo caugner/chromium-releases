@@ -13,9 +13,11 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier.h"
+#include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/autocomplete/autocomplete_popup_model.h"
 #include "chrome/browser/autocomplete/autocomplete_popup_view.h"
+#include "chrome/browser/autocomplete/extension_app_provider.h"
 #include "chrome/browser/autocomplete/keyword_provider.h"
 #include "chrome/browser/autocomplete/search_provider.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
@@ -39,7 +41,7 @@
 #include "chrome/browser/sessions/restore_tab_helper.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/metrics/proto/omnibox_event.pb.h"
@@ -54,6 +56,8 @@
 #include "third_party/skia/include/core/SkBitmap.h"
 
 using content::UserMetricsAction;
+using predictors::AutocompleteActionPredictor;
+using predictors::AutocompleteActionPredictorFactory;
 
 ///////////////////////////////////////////////////////////////////////////////
 // AutocompleteEditController
@@ -217,7 +221,8 @@ bool AutocompleteEditModel::CommitSuggestedText(bool skip_inline_autocomplete) {
 }
 
 bool AutocompleteEditModel::AcceptCurrentInstantPreview() {
-  return InstantController::CommitIfCurrent(controller_->GetInstant());
+  InstantController* instant = controller_->GetInstant();
+  return instant && instant->CommitIfCurrent();
 }
 
 void AutocompleteEditModel::OnChanged() {
@@ -244,7 +249,8 @@ void AutocompleteEditModel::OnChanged() {
         action_predictor->RecommendAction(user_text_, current_match);
   }
 
-  UMA_HISTOGRAM_ENUMERATION("NetworkActionPredictor.Action", recommended_action,
+  UMA_HISTOGRAM_ENUMERATION("AutocompleteActionPredictor.Action",
+                            recommended_action,
                             AutocompleteActionPredictor::LAST_PREDICT_ACTION);
   string16 suggested_text;
 
@@ -374,8 +380,8 @@ void AutocompleteEditModel::AdjustTextForCopy(int sel_min,
   // the user is probably holding down control to cause the copy, which will
   // screw up our calculation of the desired_tld.
   AutocompleteMatch match;
-  profile_->GetAutocompleteClassifier()->Classify(*text, string16(),
-        KeywordIsSelected(), true, &match, NULL);
+  AutocompleteClassifierFactory::GetForProfile(profile_)->Classify(*text,
+        string16(), KeywordIsSelected(), true, &match, NULL);
   if (match.transition != content::PAGE_TRANSITION_TYPED)
     return;
   *url = match.destination_url;
@@ -454,8 +460,9 @@ bool AutocompleteEditModel::CanPasteAndGo(const string16& text) const {
   if (!view_->GetCommandUpdater()->IsCommandEnabled(IDC_OPEN_CURRENT_URL))
     return false;
 
-  profile_->GetAutocompleteClassifier()->Classify(text, string16(),
-      false, false, &paste_and_go_match_, &paste_and_go_alternate_nav_url_);
+  AutocompleteClassifierFactory::GetForProfile(profile_)->Classify(text,
+      string16(), false, false, &paste_and_go_match_,
+      &paste_and_go_alternate_nav_url_);
   return paste_and_go_match_.destination_url.is_valid();
 }
 
@@ -517,7 +524,7 @@ void AutocompleteEditModel::OpenMatch(const AutocompleteMatch& match,
         autocomplete_controller_->input().type(),
         popup_->selected_line(),
         -1,  // don't yet know tab ID; set later if appropriate
-        ClassifyPage(controller_->GetTabContentsWrapper()->
+        ClassifyPage(controller_->GetTabContents()->
                      web_contents()->GetURL()),
         base::TimeTicks::Now() - time_user_first_modified_omnibox_,
         0,  // inline autocomplete length; possibly set later
@@ -533,13 +540,15 @@ void AutocompleteEditModel::OpenMatch(const AutocompleteMatch& match,
       // If we know the destination is being opened in the current tab,
       // we can easily get the tab ID.  (If it's being opened in a new
       // tab, we don't know the tab ID yet.)
-      log.tab_id = controller_->GetTabContentsWrapper()->
+      log.tab_id = controller_->GetTabContents()->
           restore_tab_helper()->session_id().id();
     }
+    autocomplete_controller_->AddProvidersInfo(&log.providers_info);
     content::NotificationService::current()->Notify(
         chrome::NOTIFICATION_OMNIBOX_OPENED_URL,
         content::Source<Profile>(profile_),
         content::Details<AutocompleteLog>(&log));
+    HISTOGRAM_ENUMERATION("Omnibox.EventCount", 1, 2);
   }
 
   TemplateURL* template_url = match.GetTemplateURL(profile_);
@@ -592,7 +601,7 @@ void AutocompleteEditModel::OpenMatch(const AutocompleteMatch& match,
   }
 
   if (match.type == AutocompleteMatch::EXTENSION_APP) {
-    extensions::LaunchAppFromOmnibox(match, profile_, disposition);
+    ExtensionAppProvider::LaunchAppFromOmnibox(match, profile_, disposition);
   } else {
     controller_->OnAutocompleteAccept(match.destination_url, disposition,
                                       match.transition, alternate_nav_url);
@@ -664,9 +673,8 @@ void AutocompleteEditModel::OnSetFocus(bool control_down) {
   control_key_state_ = control_down ? DOWN_WITHOUT_CHANGE : UP;
 
   InstantController* instant = controller_->GetInstant();
-  TabContentsWrapper* tab = controller_->GetTabContentsWrapper();
-  if (instant && tab)
-    instant->OnAutocompleteGotFocus(tab);
+  if (instant)
+    instant->OnAutocompleteGotFocus();
 }
 
 void AutocompleteEditModel::OnWillKillFocus(
@@ -1008,7 +1016,7 @@ void AutocompleteEditModel::GetInfoForCurrentText(
   if (popup_->IsOpen() || query_in_progress()) {
     InfoForCurrentSelection(match, alternate_nav_url);
   } else {
-    profile_->GetAutocompleteClassifier()->Classify(
+    AutocompleteClassifierFactory::GetForProfile(profile_)->Classify(
         UserTextFromDisplayText(view_->GetText()), GetDesiredTLD(),
         KeywordIsSelected(), true, match, alternate_nav_url);
   }
@@ -1077,19 +1085,17 @@ bool AutocompleteEditModel::DoInstant(const AutocompleteMatch& match,
   if (!instant)
     return false;
 
-  // It's possible the tab strip does not have an active tab contents, for
-  // instance if the tab has been closed or on return from a sleep state
-  // (http://crbug.com/105689)
-  TabContentsWrapper* tab = controller_->GetTabContentsWrapper();
-  if (!tab)
-    return false;
-
   if (user_input_in_progress_ && popup_->IsOpen()) {
-    return instant->Update(tab, match, view_->GetText(), UseVerbatimInstant(),
+    return instant->Update(match, view_->GetText(), UseVerbatimInstant(),
                            suggested_text);
   }
 
-  instant->Hide();
+  // It's possible DoInstant() was called due to an OnChanged() event from the
+  // omnibox view if the user clicked the renderer while IME composition was
+  // active. In that case we still want to commit on mouse up, so don't call
+  // Hide().
+  if (!instant->commit_on_mouse_up())
+    instant->Hide();
   return false;
 }
 
@@ -1100,7 +1106,7 @@ void AutocompleteEditModel::DoPrerender(const AutocompleteMatch& match) {
   // It's possible the tab strip does not have an active tab contents, for
   // instance if the tab has been closed or on return from a sleep state
   // (http://crbug.com/105689)
-  TabContentsWrapper* tab = controller_->GetTabContentsWrapper();
+  TabContents* tab = controller_->GetTabContents();
   if (!tab)
     return;
   prerender::PrerenderManager* prerender_manager =

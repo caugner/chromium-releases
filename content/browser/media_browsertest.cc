@@ -30,7 +30,7 @@ class MediaTest : public InProcessBrowserTest {
     const string16 kFailed = ASCIIToUTF16("FAILED");
     const string16 kError = ASCIIToUTF16("ERROR");
     ui_test_utils::TitleWatcher title_watcher(
-        browser()->GetSelectedWebContents(), kPlaying);
+        browser()->GetActiveWebContents(), kPlaying);
     title_watcher.AlsoWaitForTitle(kFailed);
     title_watcher.AlsoWaitForTitle(kError);
 
@@ -151,12 +151,13 @@ class MediaLayoutTest : public InProcessBrowserLayoutTest {
   }
 };
 
-#if defined(OS_MACOSX)
+// Timing out, see http://crbug.com/127526.
+// Flakily crashing on Mac, see http://crbug.com/128021.
+#if defined(ADDRESS_SANITIZER) || defined(OS_MACOSX)
 #define MAYBE_Tests DISABLED_Tests
 #else
 #define MAYBE_Tests Tests
 #endif
-
 IN_PROC_BROWSER_TEST_F(MediaLayoutTest, MAYBE_Tests) {
   static const char* kMediaTests[] = {
     "video-autoplay.html",

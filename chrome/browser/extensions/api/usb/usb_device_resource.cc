@@ -13,10 +13,11 @@
 #include "chrome/browser/extensions/api/api_resource_event_notifier.h"
 #include "chrome/browser/extensions/api/api_resource.h"
 #include "chrome/browser/usb/usb_device.h"
-#include "chrome/common/extensions/api/experimental.usb.h"
+#include "chrome/common/extensions/api/experimental_usb.h"
 
 using extensions::api::experimental_usb::ControlTransferInfo;
 using extensions::api::experimental_usb::GenericTransferInfo;
+using extensions::api::experimental_usb::IsochronousTransferInfo;
 using std::string;
 using std::vector;
 
@@ -84,7 +85,7 @@ static bool ConvertRecipient(const string& input,
 }
 
 template<class T>
-static bool GetTransferSize(const T& input, unsigned int* output) {
+static bool GetTransferSize(const T& input, size_t* output) {
   if (input.direction == kDirectionIn) {
     const int* length = input.length.get();
     if (length) {
@@ -93,7 +94,7 @@ static bool GetTransferSize(const T& input, unsigned int* output) {
     }
   } else if (input.direction == kDirectionOut) {
     if (input.data.get()) {
-      *output = input.data->size();
+      *output = input.data->GetSize();
       return true;
     }
   }
@@ -102,7 +103,7 @@ static bool GetTransferSize(const T& input, unsigned int* output) {
 
 template<class T>
 static scoped_refptr<net::IOBuffer> CreateBufferForTransfer(const T& input) {
-  unsigned int size = 0;
+  size_t size = 0;
   if (!GetTransferSize(input, &size)) {
     return NULL;
   }
@@ -112,10 +113,7 @@ static scoped_refptr<net::IOBuffer> CreateBufferForTransfer(const T& input) {
     return buffer;
   }
 
-  const vector<int>& input_buffer = *input.data.get();
-  for (unsigned int i = 0; i < size; ++i) {
-    buffer->data()[i] = input_buffer[i];
-  }
+  memcpy(buffer->data(), input.data->GetBuffer(), size);
 
   return buffer;
 }
@@ -134,7 +132,7 @@ void UsbDeviceResource::ControlTransfer(const ControlTransferInfo& transfer) {
   UsbDevice::TransferDirection direction;
   UsbDevice::TransferRequestType request_type;
   UsbDevice::TransferRecipient recipient;
-  unsigned int size;
+  size_t size;
   scoped_refptr<net::IOBuffer> buffer = CreateBufferForTransfer(transfer);
 
   if (!ConvertDirection(transfer.direction, &direction) ||
@@ -152,7 +150,7 @@ void UsbDeviceResource::ControlTransfer(const ControlTransferInfo& transfer) {
 }
 
 void UsbDeviceResource::InterruptTransfer(const GenericTransferInfo& transfer) {
-  unsigned int size;
+  size_t size;
   UsbDevice::TransferDirection direction;
   scoped_refptr<net::IOBuffer> buffer = CreateBufferForTransfer(transfer);
 
@@ -168,7 +166,7 @@ void UsbDeviceResource::InterruptTransfer(const GenericTransferInfo& transfer) {
 }
 
 void UsbDeviceResource::BulkTransfer(const GenericTransferInfo& transfer) {
-  unsigned int size;
+  size_t size;
   UsbDevice::TransferDirection direction;
   scoped_refptr<net::IOBuffer> buffer = CreateBufferForTransfer(transfer);
 
@@ -183,15 +181,33 @@ void UsbDeviceResource::BulkTransfer(const GenericTransferInfo& transfer) {
                                    base::Unretained(this), buffer, size));
 }
 
+void UsbDeviceResource::IsochronousTransfer(
+    const IsochronousTransferInfo& transfer) {
+  const GenericTransferInfo& generic_transfer = transfer.transfer_info;
+
+  size_t size;
+  UsbDevice::TransferDirection direction;
+  scoped_refptr<net::IOBuffer> buffer = CreateBufferForTransfer(
+      generic_transfer);
+
+  if (!ConvertDirection(generic_transfer.direction, &direction) ||
+      !GetTransferSize(generic_transfer, &size) || !buffer) {
+    LOG(INFO) << "Malformed transfer parameters.";
+    return;
+  }
+
+  device_->IsochronousTransfer(direction, generic_transfer.endpoint, buffer,
+      size, transfer.packets, transfer.packet_length, 0, base::Bind(
+          &UsbDeviceResource::TransferComplete, base::Unretained(this), buffer,
+          size));
+}
+
 void UsbDeviceResource::TransferComplete(net::IOBuffer* buffer,
                                          const size_t length,
                                          int success) {
   if (buffer) {
-    base::ListValue *const response_buffer = new base::ListValue();
-    for (unsigned int i = 0; i < length; ++i) {
-      const uint8_t value = buffer->data()[i] & 0xFF;
-      response_buffer->Append(base::Value::CreateIntegerValue(value));
-    }
+    base::BinaryValue* const response_buffer =
+        base::BinaryValue::CreateWithCopiedBuffer(buffer->data(), length);
     event_notifier()->OnTransferComplete(success, response_buffer);
   }
 }

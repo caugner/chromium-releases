@@ -9,6 +9,7 @@
 #include "chromeos/dbus/mock_bluetooth_input_client.h"
 #include "chromeos/dbus/mock_bluetooth_manager_client.h"
 #include "chromeos/dbus/mock_bluetooth_node_client.h"
+#include "chromeos/dbus/mock_bluetooth_out_of_band_client.h"
 #include "chromeos/dbus/mock_cashew_client.h"
 #include "chromeos/dbus/mock_cros_disks_client.h"
 #include "chromeos/dbus/mock_cryptohome_client.h"
@@ -22,8 +23,10 @@
 #include "chromeos/dbus/mock_gsm_sms_client.h"
 #include "chromeos/dbus/mock_image_burner_client.h"
 #include "chromeos/dbus/mock_introspectable_client.h"
+#include "chromeos/dbus/mock_modem_messaging_client.h"
 #include "chromeos/dbus/mock_power_manager_client.h"
 #include "chromeos/dbus/mock_session_manager_client.h"
+#include "chromeos/dbus/mock_sms_client.h"
 #include "chromeos/dbus/mock_speech_synthesizer_client.h"
 #include "chromeos/dbus/mock_update_engine_client.h"
 
@@ -39,6 +42,7 @@ MockDBusThreadManager::MockDBusThreadManager()
       mock_bluetooth_input_client_(new MockBluetoothInputClient),
       mock_bluetooth_manager_client_(new MockBluetoothManagerClient),
       mock_bluetooth_node_client_(new MockBluetoothNodeClient),
+      mock_bluetooth_out_of_band_client_(new MockBluetoothOutOfBandClient),
       mock_cashew_client_(new MockCashewClient),
       mock_cros_disks_client_(new MockCrosDisksClient),
       mock_cryptohome_client_(new MockCryptohomeClient),
@@ -52,8 +56,10 @@ MockDBusThreadManager::MockDBusThreadManager()
       mock_gsm_sms_client_(new MockGsmSMSClient),
       mock_image_burner_client_(new MockImageBurnerClient),
       mock_introspectable_client_(new MockIntrospectableClient),
+      mock_modem_messaging_client_(new MockModemMessagingClient),
       mock_power_manager_client_(new MockPowerManagerClient),
       mock_session_manager_client_(new MockSessionManagerClient),
+      mock_sms_client_(new MockSMSClient),
       mock_speech_synthesizer_client_(new MockSpeechSynthesizerClient),
       mock_update_engine_client_(new MockUpdateEngineClient) {
   EXPECT_CALL(*this, GetBluetoothAdapterClient())
@@ -66,6 +72,8 @@ MockDBusThreadManager::MockDBusThreadManager()
       .WillRepeatedly(Return(mock_bluetooth_manager_client()));
   EXPECT_CALL(*this, GetBluetoothNodeClient())
       .WillRepeatedly(Return(mock_bluetooth_node_client_.get()));
+  EXPECT_CALL(*this, GetBluetoothOutOfBandClient())
+      .WillRepeatedly(Return(mock_bluetooth_out_of_band_client_.get()));
   EXPECT_CALL(*this, GetCashewClient())
       .WillRepeatedly(Return(mock_cashew_client()));
   EXPECT_CALL(*this, GetCrosDisksClient())
@@ -92,10 +100,14 @@ MockDBusThreadManager::MockDBusThreadManager()
       .WillRepeatedly(Return(mock_image_burner_client()));
   EXPECT_CALL(*this, GetIntrospectableClient())
       .WillRepeatedly(Return(mock_introspectable_client()));
+  EXPECT_CALL(*this, GetModemMessagingClient())
+      .WillRepeatedly(Return(mock_modem_messaging_client()));
   EXPECT_CALL(*this, GetPowerManagerClient())
       .WillRepeatedly(Return(mock_power_manager_client_.get()));
   EXPECT_CALL(*this, GetSessionManagerClient())
       .WillRepeatedly(Return(mock_session_manager_client_.get()));
+  EXPECT_CALL(*this, GetSMSClient())
+      .WillRepeatedly(Return(mock_sms_client_.get()));
   EXPECT_CALL(*this, GetSpeechSynthesizerClient())
       .WillRepeatedly(Return(mock_speech_synthesizer_client_.get()));
   EXPECT_CALL(*this, GetUpdateEngineClient())

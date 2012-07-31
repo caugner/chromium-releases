@@ -172,7 +172,7 @@ string16 KeywordProvider::GetKeywordForText(
 
   // Don't provide a keyword for inactive/disabled extension keywords.
   if (template_url->IsExtensionKeyword()) {
-    const Extension* extension = profile_->GetExtensionService()->
+    const extensions::Extension* extension = profile_->GetExtensionService()->
         GetExtensionById(template_url->GetExtensionId(), false);
     if (!extension ||
         (profile_->IsOffTheRecord() &&
@@ -249,7 +249,7 @@ void KeywordProvider::Start(const AutocompleteInput& input,
     // we're incognito), or disabled.
     if (profile_ && template_url->IsExtensionKeyword()) {
       ExtensionService* service = profile_->GetExtensionService();
-      const Extension* extension = service->GetExtensionById(
+      const extensions::Extension* extension = service->GetExtensionById(
           template_url->GetExtensionId(), false);
       bool enabled =
           extension && (!profile_->IsOffTheRecord() ||
@@ -361,7 +361,6 @@ bool KeywordProvider::ExtractKeywordFromInput(const AutocompleteInput& input,
 
 // static
 void KeywordProvider::FillInURLAndContents(
-    Profile* profile,
     const string16& remaining_input,
     const TemplateURL* element,
     AutocompleteMatch* match) {
@@ -470,7 +469,7 @@ AutocompleteMatch KeywordProvider::CreateAutocompleteMatch(
 
   // Create destination URL and popup entry content by substituting user input
   // into keyword templates.
-  FillInURLAndContents(profile_, remaining_input, element, &match);
+  FillInURLAndContents(remaining_input, element, &match);
 
   match.keyword = keyword;
   match.transition = content::PAGE_TRANSITION_KEYWORD;

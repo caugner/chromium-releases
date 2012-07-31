@@ -8,7 +8,6 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/protector/base_setting_change.h"
@@ -67,9 +66,9 @@ class SettingsChangeGlobalError : public GlobalError,
   virtual void BubbleViewCancelButtonPressed(Browser* browser) OVERRIDE;
 
   // BrowserList::Observer implementation.
-  virtual void OnBrowserAdded(const Browser* browser) OVERRIDE {}
-  virtual void OnBrowserRemoved(const Browser* browser) OVERRIDE {}
-  virtual void OnBrowserSetLastActive(const Browser* browser) OVERRIDE;
+  virtual void OnBrowserAdded(Browser* browser) OVERRIDE {}
+  virtual void OnBrowserRemoved(Browser* browser) OVERRIDE {}
+  virtual void OnBrowserSetLastActive(Browser* browser) OVERRIDE;
 
   // Displays the bubble in |browser|'s window.
   void ShowBubbleInBrowser(Browser* browser);

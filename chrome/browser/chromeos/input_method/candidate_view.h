@@ -26,7 +26,8 @@ class CandidateView : public views::View {
   // A width of 0 means that the column is resizable.
   void Init(int shortcut_column_width,
             int candidate_column_width,
-            int annotation_column_width);
+            int annotation_column_width,
+            int column_height);
 
   // Sets candidate text to the given text.
   void SetCandidateText(const string16& text);
@@ -85,7 +86,7 @@ class CandidateView : public views::View {
   views::Label* annotation_label_;
 
   // The infolist icon.
-  views::Label* infolist_label_;
+  views::View* infolist_icon_;
   bool infolist_icon_enabled_;
 
   DISALLOW_COPY_AND_ASSIGN(CandidateView);

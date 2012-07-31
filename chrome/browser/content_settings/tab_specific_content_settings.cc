@@ -28,7 +28,7 @@
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_view_host.h"
-#include "content/public/browser/render_view_host_delegate.h"
+#include "content/public/browser/render_view_host_observer.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "webkit/fileapi/file_system_types.h"
@@ -43,6 +43,19 @@ namespace {
 typedef std::list<TabSpecificContentSettings*> TabSpecificList;
 static base::LazyInstance<TabSpecificList> g_tab_specific =
     LAZY_INSTANCE_INITIALIZER;
+
+class InterstitialHostObserver : public content::RenderViewHostObserver {
+ public:
+  explicit InterstitialHostObserver(RenderViewHost* rvh)
+      : content::RenderViewHostObserver(rvh) {}
+
+  // content::RenderViewHostObserver overrides.
+  virtual void RenderViewHostInitialized() OVERRIDE {
+    Send(new ChromeViewMsg_SetAsInterstitial(routing_id()));
+    delete this;
+  }
+};
+
 }
 
 TabSpecificContentSettings::SiteDataObserver::SiteDataObserver(
@@ -87,7 +100,7 @@ TabSpecificContentSettings* TabSpecificContentSettings::Get(
   // latter will miss provisional RenderViewHosts.
   for (TabSpecificList::iterator i = g_tab_specific.Get().begin();
        i != g_tab_specific.Get().end(); ++i) {
-    if (view->GetDelegate()->GetAsWebContents() == (*i)->web_contents())
+    if (WebContents::FromRenderViewHost(view) == (*i)->web_contents())
       return (*i);
   }
 
@@ -98,12 +111,13 @@ TabSpecificContentSettings* TabSpecificContentSettings::Get(
 void TabSpecificContentSettings::CookiesRead(int render_process_id,
                                              int render_view_id,
                                              const GURL& url,
-                                             const GURL& first_party_url,
+                                             const GURL& frame_url,
                                              const net::CookieList& cookie_list,
                                              bool blocked_by_policy) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   TabSpecificContentSettings* settings = Get(render_process_id, render_view_id);
   if (settings) {
-    settings->OnCookiesRead(url, first_party_url, cookie_list,
+    settings->OnCookiesRead(url, frame_url, cookie_list,
                             blocked_by_policy);
   }
 }
@@ -113,13 +127,14 @@ void TabSpecificContentSettings::CookieChanged(
     int render_process_id,
     int render_view_id,
     const GURL& url,
-    const GURL& first_party_url,
+    const GURL& frame_url,
     const std::string& cookie_line,
     const net::CookieOptions& options,
     bool blocked_by_policy) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   TabSpecificContentSettings* settings = Get(render_process_id, render_view_id);
   if (settings)
-    settings->OnCookieChanged(url, first_party_url, cookie_line, options,
+    settings->OnCookieChanged(url, frame_url, cookie_line, options,
                               blocked_by_policy);
 }
 
@@ -131,6 +146,7 @@ void TabSpecificContentSettings::WebDatabaseAccessed(
     const string16& name,
     const string16& display_name,
     bool blocked_by_policy) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   TabSpecificContentSettings* settings = Get(render_process_id, render_view_id);
   if (settings)
     settings->OnWebDatabaseAccessed(url, name, display_name, blocked_by_policy);
@@ -142,6 +158,7 @@ void TabSpecificContentSettings::DOMStorageAccessed(int render_process_id,
                                                     const GURL& url,
                                                     bool local,
                                                     bool blocked_by_policy) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   TabSpecificContentSettings* settings = Get(render_process_id, render_view_id);
   if (settings)
     settings->OnLocalStorageAccessed(url, local, blocked_by_policy);
@@ -153,6 +170,7 @@ void TabSpecificContentSettings::IndexedDBAccessed(int render_process_id,
                                                    const GURL& url,
                                                    const string16& description,
                                                    bool blocked_by_policy) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   TabSpecificContentSettings* settings = Get(render_process_id, render_view_id);
   if (settings)
     settings->OnIndexedDBAccessed(url, description, blocked_by_policy);
@@ -163,6 +181,7 @@ void TabSpecificContentSettings::FileSystemAccessed(int render_process_id,
                                                     int render_view_id,
                                                     const GURL& url,
                                                     bool blocked_by_policy) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   TabSpecificContentSettings* settings = Get(render_process_id, render_view_id);
   if (settings)
     settings->OnFileSystemAccessed(url, blocked_by_policy);
@@ -180,7 +199,8 @@ bool TabSpecificContentSettings::IsContentBlocked(
       content_type == CONTENT_SETTINGS_TYPE_JAVASCRIPT ||
       content_type == CONTENT_SETTINGS_TYPE_PLUGINS ||
       content_type == CONTENT_SETTINGS_TYPE_COOKIES ||
-      content_type == CONTENT_SETTINGS_TYPE_POPUPS)
+      content_type == CONTENT_SETTINGS_TYPE_POPUPS ||
+      content_type == CONTENT_SETTINGS_TYPE_MIXEDSCRIPT)
     return content_blocked_[content_type];
 
   return false;
@@ -265,18 +285,18 @@ void TabSpecificContentSettings::OnContentAccessed(ContentSettingsType type) {
 
 void TabSpecificContentSettings::OnCookiesRead(
     const GURL& url,
-    const GURL& first_party_url,
+    const GURL& frame_url,
     const net::CookieList& cookie_list,
     bool blocked_by_policy) {
   if (cookie_list.empty())
     return;
   if (blocked_by_policy) {
     blocked_local_shared_objects_.cookies()->AddReadCookies(
-        url, cookie_list);
+        frame_url, url, cookie_list);
     OnContentBlocked(CONTENT_SETTINGS_TYPE_COOKIES, std::string());
   } else {
     allowed_local_shared_objects_.cookies()->AddReadCookies(
-        url, cookie_list);
+        frame_url, url, cookie_list);
     OnContentAccessed(CONTENT_SETTINGS_TYPE_COOKIES);
   }
 
@@ -285,17 +305,17 @@ void TabSpecificContentSettings::OnCookiesRead(
 
 void TabSpecificContentSettings::OnCookieChanged(
     const GURL& url,
-    const GURL& first_party_url,
+    const GURL& frame_url,
     const std::string& cookie_line,
     const net::CookieOptions& options,
     bool blocked_by_policy) {
   if (blocked_by_policy) {
     blocked_local_shared_objects_.cookies()->AddChangedCookie(
-        url, cookie_line, options);
+        frame_url, url, cookie_line, options);
     OnContentBlocked(CONTENT_SETTINGS_TYPE_COOKIES, std::string());
   } else {
     allowed_local_shared_objects_.cookies()->AddChangedCookie(
-        url, cookie_line, options);
+        frame_url, url, cookie_line, options);
     OnContentAccessed(CONTENT_SETTINGS_TYPE_COOKIES);
   }
 
@@ -426,6 +446,13 @@ void TabSpecificContentSettings::GeolocationDidNavigate(
 
 void TabSpecificContentSettings::ClearGeolocationContentSettings() {
   geolocation_settings_state_.ClearStateMap();
+}
+
+void TabSpecificContentSettings::RenderViewForInterstitialPageCreated(
+    RenderViewHost* render_view_host) {
+  // We want to tell the renderer-side code to ignore content settings for this
+  // page but we must wait until the RenderView is created.
+  new InterstitialHostObserver(render_view_host);
 }
 
 bool TabSpecificContentSettings::OnMessageReceived(

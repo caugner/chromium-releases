@@ -53,6 +53,11 @@ class VideoDetectorTest : public AshTestBase {
     detector_->set_now_for_test(now_);
   }
 
+  virtual void TearDown() OVERRIDE {
+    detector_->RemoveObserver(observer_.get());
+    AshTestBase::TearDown();
+  }
+
  protected:
   // Move |detector_|'s idea of the current time forward by |delta|.
   void AdvanceTime(base::TimeDelta delta) {
@@ -119,7 +124,7 @@ TEST_F(VideoDetectorTest, WindowNotVisible) {
 
   // Reparent the window to the root to make sure that visibility changes aren't
   // animated.
-  Shell::GetRootWindow()->AddChild(window.get());
+  Shell::GetPrimaryRootWindow()->AddChild(window.get());
 
   // We shouldn't report video that's played in a hidden window.
   window->Hide();
@@ -143,7 +148,7 @@ TEST_F(VideoDetectorTest, WindowNotVisible) {
   observer_->reset_stats();
   AdvanceTime(base::TimeDelta::FromSeconds(2));
   gfx::Rect offscreen_bounds(
-      gfx::Point(Shell::GetRootWindow()->bounds().width(), 0),
+      gfx::Point(Shell::GetPrimaryRootWindow()->bounds().width(), 0),
       window_bounds.size());
   window->SetBounds(offscreen_bounds);
   ASSERT_EQ(offscreen_bounds, window->bounds());

@@ -62,6 +62,8 @@ ChromeWebUIDataSource* CreateUberHTMLSource() {
   source->AddString("settingsHost",
                     ASCIIToUTF16(chrome::kChromeUISettingsHost));
 
+  source->set_use_json_js_format_v2();
+
   return source;
 }
 
@@ -72,8 +74,9 @@ bool HasExtensionType(Profile* profile, const char* extensionType) {
 
   for (ExtensionSet::const_iterator iter = extensionSet->begin();
        iter != extensionSet->end(); ++iter) {
-    Extension::URLOverrideMap map = (*iter)->GetChromeURLOverrides();
-    Extension::URLOverrideMap::const_iterator result =
+    extensions::Extension::URLOverrideMap map =
+        (*iter)->GetChromeURLOverrides();
+    extensions::Extension::URLOverrideMap::const_iterator result =
         map.find(std::string(extensionType));
 
     if (result != map.end())
@@ -91,9 +94,9 @@ ChromeWebUIDataSource* CreateUberFrameHTMLSource(Profile* profile) {
   source->add_resource_path("uber_frame.js", IDR_UBER_FRAME_JS);
   source->set_default_resource(IDR_UBER_FRAME_HTML);
 
-  // TODO(jhawkins): Attempt to get rid of IDS_PRODUCT_OS_NAME.
+  // TODO(jhawkins): Attempt to get rid of IDS_SHORT_PRODUCT_OS_NAME.
 #if defined(OS_CHROMEOS)
-  source->AddLocalizedString("shortProductName", IDS_PRODUCT_OS_NAME);
+  source->AddLocalizedString("shortProductName", IDS_SHORT_PRODUCT_OS_NAME);
 #else
   source->AddLocalizedString("shortProductName", IDS_SHORT_PRODUCT_NAME);
 #endif  // defined(OS_CHROMEOS)

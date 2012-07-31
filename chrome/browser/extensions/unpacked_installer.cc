@@ -7,23 +7,25 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/file_util.h"
-#include "chrome/browser/extensions/extension_install_ui.h"
+#include "chrome/browser/extensions/extension_install_prompt.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/permissions_updater.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_file_util.h"
 #include "chrome/common/string_ordinal.h"
 
 using content::BrowserThread;
+using extensions::Extension;
 
 namespace {
 
 const char kUnpackedExtensionsBlacklistedError[] =
     "Loading of unpacked extensions is disabled by the administrator.";
 
-// Manages an ExtensionInstallUI for a particular extension.
-class SimpleExtensionLoadPrompt : public ExtensionInstallUI::Delegate {
+// Manages an ExtensionInstallPrompt for a particular extension.
+class SimpleExtensionLoadPrompt : public ExtensionInstallPrompt::Delegate {
  public:
   SimpleExtensionLoadPrompt(Profile* profile,
                             base::WeakPtr<ExtensionService> extension_service,
@@ -38,7 +40,7 @@ class SimpleExtensionLoadPrompt : public ExtensionInstallUI::Delegate {
 
  private:
   base::WeakPtr<ExtensionService> service_weak_;
-  scoped_ptr<ExtensionInstallUI> install_ui_;
+  scoped_ptr<ExtensionInstallPrompt> install_ui_;
   scoped_refptr<const Extension> extension_;
 };
 
@@ -47,8 +49,9 @@ SimpleExtensionLoadPrompt::SimpleExtensionLoadPrompt(
     base::WeakPtr<ExtensionService> extension_service,
     const Extension* extension)
     : service_weak_(extension_service),
-      install_ui_(new ExtensionInstallUI(profile)),
       extension_(extension) {
+  Browser* browser = browser::FindLastActiveWithProfile(profile);
+  install_ui_.reset(new ExtensionInstallPrompt(browser));
 }
 
 SimpleExtensionLoadPrompt::~SimpleExtensionLoadPrompt() {
@@ -124,14 +127,12 @@ void UnpackedInstaller::LoadFromCommandLine(const FilePath& path_in) {
   int flags = Extension::REQUIRE_MODERN_MANIFEST_VERSION;
   if (allow_file_access)
     flags |= Extension::ALLOW_FILE_ACCESS;
-  if (Extension::ShouldDoStrictErrorChecking(Extension::LOAD))
-    flags |= Extension::STRICT_ERROR_CHECKS;
 
   std::string error;
   scoped_refptr<const Extension> extension(extension_file_util::LoadExtension(
       extension_path_,
       Extension::LOAD,
-      flags,
+      flags | Extension::FOLLOW_SYMLINKS_ANYWHERE,
       &error));
 
   if (!extension) {
@@ -188,13 +189,11 @@ void UnpackedInstaller::LoadWithFileAccess(bool allow_file_access) {
   int flags = Extension::REQUIRE_MODERN_MANIFEST_VERSION;
   if (allow_file_access)
     flags |= Extension::ALLOW_FILE_ACCESS;
-  if (Extension::ShouldDoStrictErrorChecking(Extension::LOAD))
-    flags |= Extension::STRICT_ERROR_CHECKS;
   std::string error;
   scoped_refptr<const Extension> extension(extension_file_util::LoadExtension(
       extension_path_,
       Extension::LOAD,
-      flags,
+      flags | Extension::FOLLOW_SYMLINKS_ANYWHERE,
       &error));
 
   if (!extension) {
@@ -234,7 +233,7 @@ void UnpackedInstaller::OnLoaded(
         service_weak_,
         extension);
     prompt->ShowPrompt();
-    return;  // continues in SimpleExtensionLoadPrompt::InstallUI*
+    return;  // continues in SimpleExtensionLoadPrompt::InstallPrompt*
   }
 
   PermissionsUpdater perms_updater(service_weak_->profile());

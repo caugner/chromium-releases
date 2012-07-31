@@ -40,6 +40,7 @@
       'bookmarks',
       'browser',
       'browsing_data',
+      'chromoting_basic',
       'codesign',
       'content',
       'cookies',
@@ -82,38 +83,24 @@
       'test_basic',
       'test_pyauto',
       'themes',
-      'youtube',
-
-      # One-click infobars disabled on M20 by r135749.
-      # Re-enable for M21 after branch point.
-      '-infobars.OneClickInfobarTest',
 
       # ==================================================
       # Disabled tests that need to be investigated/fixed.
       # ==================================================
-      # crbug.com/83686
-      '-autofill.AutofillTest.testFillProfileCrazyCharacters',
       # crbug.com/102798
       '-autofill.AutofillTest.testMergeAggregatedProfilesWithSameAddress',
       # crbug.com/99475
       '-autofill.AutofillTest.testNoDuplicatePhoneNumsInPrefs',
       # crbug.com/123396
       '-fullscreen_mouselock.FullscreenMouselockTest.testPatternsForFSAndML',
-      # crbug.com/126388
-      '-indexeddb.IndexedDBTest.testIndexedDBNullKeyPathPersistence',
-      # crbug.com/126311
-      '-infobars.OneClickInfobarTest.testDisplayOneClickInfobarPerProfile',
-      # crbug.com/126311
-      '-multiprofile.MultiprofileTest.test20NewProfiles',
-      '-multiprofile.MultiprofileTest.testBasic',
-      # crbug.com/100593
-      '-nacl_sdk.NaClSDKTest.testVerifyNaClPlugin',
+      # crbug.com/131874
+      '-infobars.OneClickInfobarTest.testNoOneClickInfobarAfterCancel',
+      # crbug.com/133315
+      '-infobars.OneClickInfobarTest.testDisplayOneClickInfobarAfterDismiss',
       # crbug.com/105560
       '-notifications',
       # crbug.com/99506
       '-notifications.NotificationsTest.testSpecialURLNotification',
-      # crbug.com/126311
-      '-ntp.NTPTest.testDifferentProfileNotAppearInMostVisited',
       # crbug.com/71715
       '-omnibox.OmniboxTest.testHistoryResult',
       # crbug.com/123019
@@ -128,8 +115,8 @@
       '-policy.PolicyTest.testAlwaysAuthorizePlugins',
       # crbug.com/118054
       '-policy.PolicyTest.testApplicationLocaleValue',
-      # crbug.com/103379
-      '-policy.PolicyTest.testDisable3DAPIs',
+      # crbug.com/131258
+      '-policy.PolicyTest.testDefaultSearchProviderOptions',
       # crbug.com/96896
       '-policy.PolicyTest.testEnabledPlugins',
       # crbug.com/118123
@@ -142,14 +129,14 @@
       '-prefs.PrefsTest.testNavigationStateOnSessionRestore',
       # crbug.com/112051
       '-prefs_ui.PrefsUITest.testChangeExceptionBehaviorUI',
-      # crbug.com/102517 -- external webpage throws 500
-      '-special_tabs.SpecialTabsTest.testAboutAppCacheTab',
-      # Flaky: crbug.com/67851
-      '-special_tabs.SpecialTabsTest.testAboutDNSTab',
+      # crbug.com/131212
+      '-process_count',
       # crbug.com/88593
       '-sync.SyncTest.testPersonalStuffSyncSection',
       # crbug.com/95140
       '-translate.TranslateTest.testGoBackAndForwardToTranslatePage',
+      # crbug.com/124913
+      '-infobars.OneClickInfobarTest.testNoSameIDSigninForTwoProfiles',
     ],
 
     'win': [
@@ -172,6 +159,8 @@
       '-omnibox.OmniboxTest.testIncognitoAppSearchWithVeryLongAppName',
       # crbug.com/117569
       '-passwords.PasswordTest.testSavedPasswordInTabsAndWindows',
+      # crbug.com/103379
+      '-policy.PolicyTest.testDisable3DAPIs',
       # crbug.com/104227
       '-sync.SyncIntegrationTest',
       # crbug.com/88679
@@ -180,8 +169,6 @@
       '-sync.SyncTest.testRestartBrowser',
       # crbug.com/87642
       '-sync.SyncTest.testDisableAndEnableDatatypes',
-      # crbug.com/95621
-      '-youtube.YoutubeTest.testPlayerStatus',
       # crbug.com/98526
       '-pyauto_webdriver.PyAutoWebDriverTest.testCanConnectToRestartedBrowser',
       '-pyauto_webdriver.PyAutoWebDriverTest.testTypeIntoTextBox',
@@ -193,9 +180,6 @@
       # ==================================================
       # Disabled tests that need to be investigated/fixed.
       # ==================================================
-      # crbug.com/117317
-      '-policy',
-      '-policy_prefs_ui',
       # Keychain popups make autofill/password tests difficult: crbug.com/49378
       '-autofill',
       # Autofill on Mac. crbug.com/95165
@@ -211,8 +195,6 @@
       '-fullscreen_mouselock.FullscreenMouselockTest.testNoMouseLockWhenCancelFS',
       # crbug.com/114244
       '-imports.ImportsTest.testImportSafariDataTwice',
-      # Test fails due to keychain popup: crbug.com/124913
-      '-infobars.OneClickInfobarTest.testNoSameIDSigninForTwoProfiles',
       # crbug.com/121484
       '-multiprofile.MultiprofileTest.test20NewProfiles',
       '-ntp.NTPTest.testLaunchAppNewWindow',  # crbug.com/79812
@@ -228,8 +210,10 @@
       '-passwords',
       # crbug.com/97140
       '-plugins.PluginsTest.testDisableEnableAllPlugins',
-      # crbug.com/79263
-      '-popups.PopupsTest.testPopupsLaunchUponBrowserBackButton',
+      # crbug.com/130094
+      '-policy',
+      '-policy_prefs_ui.PolicyPrefsUITest.testToggleUserPolicyTogglesBanner',
+      '-policy_prefs_ui.PolicyPrefsUITest.testUserPoliciesShowBanner',
       # crbug.com/69619
       '-search_engines.SearchEnginesTest.testDiscoverSearchEngine',
       # Keychain popups make sync tests difficult on Mac.  crbug.com/49378
@@ -237,10 +221,6 @@
       # crbug.com/98526
       '-pyauto_webdriver.PyAutoWebDriverTest.testCanConnectToRestartedBrowser',
       '-pyauto_webdriver.PyAutoWebDriverTest.testTypeIntoTextBox',
-      # crbug.com/109035
-      '-youtube.YoutubeTest.testPlayerBytes',
-      # crbug.com/109035
-      '-youtube.YoutubeTest.testPlayerResolution',
     ],
 
     'linux': [  # linux != chromeos
@@ -283,14 +263,12 @@
       '-instant',
       # crbug.com/91033
       '-omnibox.OmniboxTest.testOmniboxSearchHistory',
+      # crbug.com/103379
+      '-policy.PolicyTest.testDisable3DAPIs',
       # Gnome / kwallet popups on linux break sync tests.  crbug.com/80329
       '-sync',
       # crbug.com/66072
       '-notifications.NotificationsTest.testNotificationOrderAfterClosingOne',
-      # crbug.com/109035
-      '-youtube.YoutubeTest.testPlayerBytes',
-      # crbug.com/109035
-      '-youtube.YoutubeTest.testPlayerResolution',
     ],
 
     # ChromeOS is linux, but note that this section does not include the
@@ -300,7 +278,6 @@
     'chromeos': [
       'chromeos_basic',
       'chromeos_browser',
-      'chromeos_firmware_version_checker',
       'chromeos_file_browser',
       'chromeos_power',
       'chromeos_prefs',
@@ -314,6 +291,8 @@
       # ===========================
       # You cannot resize the browser window on ChromeOS.
       '-browser.BrowserTest.testWindowResize',
+      # ChromeOS doesn't yet support the chromoting host.
+      '-chromoting_basic',
       # No codesign verification on ChromeOS.
       '-codesign',
       # Import tests are invalid on ChromeOS since Chrome is the only browser.
@@ -339,10 +318,18 @@
       # crosbug.com/19556
       '-autofill.AutofillTest.testDisplayLineItemForEntriesWithNoCCNum',
       '-autofill.AutofillTest.testPostalCodeAndStateLabelsBasedOnCountry',
+      # crbug.com/132337
+      '-autofill.AutofillTest.testTabOrderForEditAddress',
       # crosbug.com/27405
       '-browser.BrowserTest.testKillAndReloadSharedProcess',
-      # crosbug.com/26669
-      '-chromeos_file_browser',
+      # crbug.com/129489
+      '-chromeos_file_browser.ChromeosFileBrowserTest.testCopyFolderInDialog',
+      '-chromeos_file_browser.ChromeosFileBrowserTest.testCreateFolderInDialog',
+      '-chromeos_file_browser.ChromeosFileBrowserTest.testCreateFolderInFullPage',
+      '-chromeos_file_browser.ChromeosFileBrowserTest.testCutFolderInDialog',
+      '-chromeos_file_browser.ChromeosFileBrowserTest.testOpenMediaFiles',
+      # crbug.com/129469
+      '-chromeos_prefs.ChromeosPrefsTest.testCaptureUserPhoto',
       # Downloads panel stays even after declining a download.
       # crosbug.com/14728
       '-downloads.DownloadsTest.testDeclineDangerousDownload',
@@ -352,10 +339,11 @@
       '-extensions.ExtensionsTest.testDisableEnableExtension',
       # Need internal data dirs in autotest package. crosbug.com/6855
       '-find_in_page.FindMatchTests.testSearchInPDF',
-      # crbug.com/125112
-      '-fullscreen_mouselock.FullscreenMouselockTest.testFullScreenMouseLockHooks',
-      '-fullscreen_mouselock.FullscreenMouselockTest.testNoMouseLockRequest',
-      '-fullscreen_mouselock.FullscreenMouselockTest.testPatternsForAllowMouseLock',
+      # crbug.com/132340
+      '-gtalk.test_basic.BasicTest.testBasicFunctionality',
+      # crbug.com/129498
+      '-https.SSLTest.testSSLCertAuthorityOK',
+      '-https.SSLTest.testSSLCertOK',
       # crosbug.com/24496
       '-infobars.InfobarTest.testPluginCrashForMultiTabs',
       # crbug.com/109035
@@ -411,18 +399,12 @@
       # Disabled tests that need to be investigated/fixed.
       # ==================================================
       # These currently fail even with internal data
-      '-chromeos_firmware_version_checker.ChromeosFirmwareVersionChecker.testECVersion',
-      '-chromeos_firmware_version_checker.ChromeosFirmwareVersionChecker.testFirmwareVersion',
       '-passwords.PasswordTest.testSavedPasswordInTabsAndWindows',
 
       # ===========================
       # Permanently-disabled tests.
       # ===========================
       '-infobars.InfobarTest.testPluginCrashForMultiTabs',
-      '-chromeos_security.ChromeosSecurity.testBundledCrxPermissions',
-      '-chromeos_security.ChromeosSecurity.testCannotViewLocalFiles',
-      '-chromeos_security.ChromeosSecurity.testComponentExtensionPermissions',
-      '-chromeos_security.ChromeosSecurity.testNoUnexpectedExtensions',
       '-flash.FlashTest.testCanLoadFlash',
       '-flash.FlashTest.testFlashLoadsAfterKill',
       '-flash.FlashTest.testFlashIncognitoMode',
@@ -448,7 +430,9 @@
       '-passwords.PasswordTest.testDisplayAndSavePasswordInfobar',
       '-passwords.PasswordTest.testInfoBarDisappearByNavigatingPage',
       '-passwords.PasswordTest.testInfoBarDisappearByReload',
+      '-passwords.PasswordTest.testLoginCredsNotShownInIncognito',
       '-passwords.PasswordTest.testNeverSavePasswords',
+      '-passwords.PasswordTest.testPasswordInfobarShowsForBlockedDomain',
       '-plugins.PluginsTest.testBlockAllPlugins',
       '-popups.PopupsTest.testMultiplePopups',
       '-popups.PopupsTest.testPopupBlockedEverySec',
@@ -484,21 +468,34 @@
     'all': [
       '@CONTINUOUS',
       'about_plugins_ui.ChromeAboutPluginsUITest',
-      'https.SSLTest',
       'media.media_basic_playback',
       'nacl_sdk',
       'translate',
+      'youtube',
+
+      # Remove after r138552 reaches QA bots. (05/24/2012)
+      '-test_pyauto.PyAutoTest.testCallOnInvalidWindow',
+
+      # ===========================
+      # Permanently-disabled tests.
+      # ===========================
+      # The chromoting webapp isn't currently available when FULL is run.
+      '-chromoting_basic',
 
       # ==================================================
       # Disabled tests that need to be investigated/fixed.
       # ==================================================
       # The source is behind.  Waiting for dev to automate the update.
-      '-nacl_sdk.NaClSDKTest.testVerifyNaClSDKChecksum',
-      # crbug.com/98681
-      '-nacl_sdk.NaClSDKTest.testNaClSDK',
-      '-nacl_sdk.NaClSDKTest.testVerifyPrereleaseGallery',
       # crbug.com/109160
       '-execute_javascript.ExecuteJavascriptTest.testExecuteJavascriptInExtension',
+      # crbug.com/132272
+      '-shortcuts.ShortcutsTest.testHelpShortcut',
+      # crbug.com/132285
+      '-special_tabs.SpecialTabsTest.testSpecialURLTabs',
+      # crbug.com/129802
+      '-translate.TranslateTest.testAlwaysTranslateLanguageButton',
+      '-translate.TranslateTest.testChangeTargetLanguageAlwaysTranslate',
+      '-translate.TranslateTest.testToggleTranslateOption',
     ],
 
     'win': [
@@ -525,13 +522,26 @@
       '-extensions.ExtensionsTest.testAllowAccessFileURLs',
       # crbug.com/113090
       '-extensions.ExtensionsTest.testAllowIncognitoExtension',
+      # crbug.com/94682
+      '-gpu.GpuTest.test2dCanvas',
       # crbug.com/125424
       '-media.media_basic_playback.MediaConstrainedNetworkPerfTest.testBasicPlaybackMatrix',
       # crbug.com/115646
       '-translate.TranslateTest.testSeveralLanguages',
+      # crbug.com/95621
+      '-youtube.YoutubeTest.testPlayerStatus',
     ],
 
     'mac': [
+      # ==================================================
+      # Disabled tests that need to be investigated/fixed.
+      # ==================================================
+      # crbug.com/128563
+      '-gtalk.test_basic.BasicTest.testBasicFunctionality',
+      # crbug.com/109035
+      '-youtube.YoutubeTest.testPlayerBytes',
+      '-youtube.YoutubeTest.testPlayerResolution',
+
       # ===========================
       # Permanently-disabled tests.
       # ===========================
@@ -571,6 +581,9 @@
       # crbug.com/123419
       '-browsing_data.BrowsingDataTest.testClearCookies',
       '-databases.DatabasesTest.testDeleteAndUpdateDatabase',
+      # crbug.com/109035
+      '-youtube.YoutubeTest.testPlayerBytes',
+      '-youtube.YoutubeTest.testPlayerResolution',
     ],
 
     'chromeos': [
@@ -587,6 +600,81 @@
       '-translate.TranslateTest.testSessionRestore',
       # Deal with i18n chars.  crosbug.com/12639
       '-translate.TranslateTest.testDownloadsNotTranslated',
+    ],
+  },
+
+  # Performance tests.
+  'PERFORMANCE': {
+    'all': [
+      'perf',
+
+      # ==================================================
+      # Disabled tests that need to be investigated/fixed.
+      # ==================================================
+      '-perf.WebGLTest.testWebGLField',  # crbug.com/132797
+
+      # ===========================
+      # Permanently-disabled tests.
+      # ===========================
+      # Invoked outside of the pyauto_tests framework.
+      '-perf.BenchmarkPerfTest.testSpaceport',
+    ],
+    'win': [
+      # ==================================================
+      # Disabled tests that need to be investigated/fixed.
+      # ==================================================
+      '-perf.GPUPerfTest',  # Fails. Discuss with prachij@.
+      '-perf.PageCyclerNetSimTest',  # Dependence missing: crbug.com/132559
+      '-perf.LiveGamePerfTest',  # Requires linux /proc/stat.
+      '-perf.YoutubePerfTest',  # AttributeError: AssertPlayingState.
+
+      # ===========================
+      # Permanently-disabled tests.
+      # ===========================
+      '-perf.MemoryTest',  # Designed only for ChromeOS.
+      '-perf.NetflixPerfTest',  # Designed only for ChromeOS.
+    ],
+    'mac': [
+      # ==================================================
+      # Disabled tests that need to be investigated/fixed.
+      # ==================================================
+      '-perf.GPUPerfTest',  # Fails. Discuss with prachij@.
+      '-perf.PageCyclerNetSimTest',  # Dependence missing: crbug.com/132559
+      '-perf.LiveGamePerfTest',  # Requires linux /proc/stat.
+      '-perf.YoutubePerfTest',  # AttributeError: AssertPlayingState.
+
+      # ===========================
+      # Permanently-disabled tests.
+      # ===========================
+      '-perf.MemoryTest',  # Designed only for ChromeOS.
+      '-perf.NetflixPerfTest',  # Designed only for ChromeOS.
+    ],
+    'linux': [
+      # ==================================================
+      # Disabled tests that need to be investigated/fixed.
+      # ==================================================
+      '-perf.GPUPerfTest',  # Fails. Discuss with prachij@.
+      '-perf.PageCyclerNetSimTest',  # Dependence missing: crbug.com/132559
+      '-perf.WebGLTest',  # May not render WebGL; need to verify on QA bot.
+      '-perf.YoutubePerfTest',  # AttributeError: AssertPlayingState.
+
+      # ===========================
+      # Permanently-disabled tests.
+      # ===========================
+      '-perf.MemoryTest',  # Designed only for ChromeOS.
+      '-perf.NetflixPerfTest',  # Designed only for ChromeOS.
+    ],
+    'chromeos': [
+      # ==================================================
+      # Disabled tests that need to be investigated/fixed.
+      # ==================================================
+      '-perf.NetflixPerfTest',  # crosbug.com/p/8499.
+      '-perf.PageCyclerNetSimTest',  # Investigate Web Page Replay on ChromeOS.
+
+      # ===========================
+      # Permanently-disabled tests.
+      # ===========================
+      '-perf.GPUPerfTest',  # Designed only for Chrome desktop.
     ],
   },
 
@@ -616,7 +704,6 @@
   'CHROMEOS_VM_PUBLIC': {
     'chromeos': [
       '@CONTINUOUS_PUBLIC',
-      '-chromeos_firmware_version_checker',
       '-chromeos_power',
       '-chromeos_prefs.ChromeosPrefsTest.testCaptureUserPhoto',
       '-chromeos_wifi_sanity',
@@ -637,12 +724,22 @@
     ],
   },
 
-  # ChromeOS policy tests. These are shared with Desktop Chrome tests, but
-  # require custom setup on ChromeOS.
+  # ChromeOS OOBE tests.
+  # TODO(ivankr): schedule this for running after .forget_usernames is removed.
+  'CHROMEOS_OOBE': {
+    'chromeos': [
+      'chromeos_oobe',
+    ],
+  },
+
+  # ChromeOS policy tests. Some of these are shared with Desktop Chrome tests
+  # but require custom setup on ChromeOS. Others are specific to ChromeOS only.
   'CHROMEOS_POLICY': {
     'chromeos': [
       'chromeos_ephemeral',
-      'chromeos_onc',
+      'chromeos_device_policy',
+      # crosbug.com/30221
+      # 'chromeos_onc',
       'policy',
       'policy_prefs_ui',
       # crbug.com/115427
@@ -669,8 +766,6 @@
   'CHROMEOS_ACCESSIBILITY': {
     'chromeos': [
       'chromeos_accessibility',
-      # crosbug.com/26731
-      '-chromeos_accessibility.AccessibilityTest.testPagePerformance',
     ],
   },
 
@@ -679,19 +774,12 @@
     'chromeos': [
       'perf.BenchmarkPerfTest.testV8BenchmarkSuite',
       'perf.LiveWebappLoadTest.testNewTabGmail',
+      'perf.PageCyclerTest',
       'perf.ScrollTest.testGooglePlusScroll',
     ],
   },
 
-  # ChromeOS performance tests.
-  'CHROMEOS_PERF': {
-    'chromeos': [
-      'perf',
-      '-perf.GPUPerfTest',
-    ],
-  },
-
-  # Subset of performance tests for seaboard.
+  # Subset of ChromeOS performance tests for seaboard.
   'CHROMEOS_PERF_SEABOARD': {
     'chromeos': [
       'perf.ScrollTest.testBlankPageScroll',
@@ -703,9 +791,12 @@
   # HTML5 media performance tests.
   'AV_PERF': {
      'linux': [
+       'media.audio_latency_perf',
        'media.media_constrained_network_perf',
-       'media.media_stat_perf',
+       'media.media_scrub_perf',
        'media.media_seek_perf',
+       'media.media_stat_perf',
+       'media.mixed_audio_latency_perf',
      ],
   },
 
@@ -714,9 +805,39 @@
   'WEBRTC': {
     'all': [
       'media_stream_infobar',
+      'webrtc_call',
+
+      # Disabled tests.
+      # ROAP issue: crbug.com/130531
+      '-webrtc_call.WebRTCCallTest.testSimpleWebRtcRoapCall',
+    ],
+  },
+
+  # Pyauto functional tests running on coverage bots.
+  'CODE_COVERAGE': {
+    'all': [
+      '@FULL',
     ],
     'linux': [
-      'webrtc_call',
+      # These tests fail on coverage bots. Disabling for now.
+      '-test_clean_exit',
+      '-about_plugins_ui',
+      '-autofill',
+      '-pyauto_webdriver',
+      '-chromoting_basic',
+      '-extensions',
+      '-flash',
+      '-fullscreen_mouselock',
+      '-gtalk.test_basic',
+      '-infobars',
+      '-multiprofile',
+      '-policy',
+      '-prefs',
+      '-prefs_ui',
+      '-apptest',
+      '-plugins',
+      '-omnibox',
+      '-special_tabs',
     ],
   },
 }

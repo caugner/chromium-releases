@@ -7,22 +7,39 @@
 #pragma once
 
 #include "base/compiler_specific.h"
-#include "base/test/test_suite.h"
 #include "base/win/scoped_com_initializer.h"
+#include "content/public/test/content_test_suite_base.h"
 
-class ContentTestSuite : public base::TestSuite {
+#if defined(USE_AURA)
+namespace aura {
+namespace test {
+class TestAuraInitializer;
+}  // namespace test
+}  // namespace aura
+#endif
+
+namespace content {
+
+class ContentTestSuite : public ContentTestSuiteBase {
  public:
   ContentTestSuite(int argc, char** argv);
   virtual ~ContentTestSuite();
 
  protected:
   virtual void Initialize() OVERRIDE;
-  virtual void Shutdown() OVERRIDE;
+
+  virtual ContentClient* CreateClientForInitialization() OVERRIDE;
 
  private:
   base::win::ScopedCOMInitializer com_initializer_;
 
+#if defined(USE_AURA)
+  scoped_ptr<aura::test::TestAuraInitializer> aura_initializer_;
+#endif
+
   DISALLOW_COPY_AND_ASSIGN(ContentTestSuite);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_TEST_CONTENT_TEST_SUITE_H_

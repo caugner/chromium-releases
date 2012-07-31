@@ -1,12 +1,6 @@
 // Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-//
-// NOTE: These tests are run as part of "unit_tests" (in chrome/test/unit)
-// rather than as part of test_shell_tests because they rely on being able
-// to instantiate a MessageLoop of type TYPE_IO.  test_shell_tests uses
-// TYPE_UI, which URLRequest doesn't allow.
-//
 
 #include "webkit/fileapi/file_system_dir_url_request_job.h"
 
@@ -93,8 +87,7 @@ class FileSystemDirURLRequestJobTest : public testing::Test {
     delegate_->set_quit_on_redirect(true);
     request_.reset(new net::URLRequest(url, delegate_.get()));
     job_ = new FileSystemDirURLRequestJob(request_.get(),
-                                          file_system_context_.get(),
-                                          file_thread_proxy_);
+                                          file_system_context_.get());
 
     request_->Start();
     ASSERT_TRUE(request_->is_pending());  // verify that we're starting async
@@ -258,10 +251,10 @@ TEST_F(FileSystemDirURLRequestJobTest, DirectoryListing) {
 #endif
 
   EXPECT_TRUE(std::getline(in, line));
-  VerifyListingEntry(line, "baz", "baz", true, 0);
+  VerifyListingEntry(line, "hoge", "hoge", false, 10);
 
   EXPECT_TRUE(std::getline(in, line));
-  VerifyListingEntry(line, "hoge", "hoge", false, 10);
+  VerifyListingEntry(line, "baz", "baz", true, 0);
 }
 
 TEST_F(FileSystemDirURLRequestJobTest, InvalidURL) {

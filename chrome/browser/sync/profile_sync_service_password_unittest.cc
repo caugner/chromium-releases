@@ -33,12 +33,12 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/profile_mock.h"
 #include "content/public/browser/notification_source.h"
-#include "content/test/notification_observer_mock.h"
-#include "content/test/test_browser_thread.h"
-#include "sync/internal_api/read_node.h"
-#include "sync/internal_api/read_transaction.h"
-#include "sync/internal_api/write_node.h"
-#include "sync/internal_api/write_transaction.h"
+#include "content/public/test/mock_notification_observer.h"
+#include "content/public/test/test_browser_thread.h"
+#include "sync/internal_api/public/read_node.h"
+#include "sync/internal_api/public/read_transaction.h"
+#include "sync/internal_api/public/write_node.h"
+#include "sync/internal_api/public/write_transaction.h"
 #include "sync/protocol/password_specifics.pb.h"
 #include "sync/syncable/syncable.h"
 #include "sync/test/engine/test_id_factory.h"
@@ -146,9 +146,9 @@ class ProfileSyncServicePasswordTest : public AbstractProfileSyncServiceTest {
 
     sync_api::WriteNode node(&trans);
     std::string tag = PasswordModelAssociator::MakeTag(entry);
-    ASSERT_TRUE(node.InitUniqueByCreation(syncable::PASSWORDS,
-                                          password_root,
-                                          tag));
+    sync_api::WriteNode::InitUniqueByCreationResult result =
+        node.InitUniqueByCreation(syncable::PASSWORDS, password_root, tag);
+    ASSERT_EQ(sync_api::WriteNode::INIT_SUCCESS, result);
     PasswordModelAssociator::WriteToSyncNode(entry, &node);
   }
 
@@ -288,7 +288,7 @@ class ProfileSyncServicePasswordTest : public AbstractProfileSyncServiceTest {
     EXPECT_CALL(*password_store_, RemoveLoginImpl(_)).Times(0);
   }
 
-  content::NotificationObserverMock observer_;
+  content::MockNotificationObserver observer_;
   ProfileMock profile_;
   scoped_refptr<MockPasswordStore> password_store_;
   content::NotificationRegistrar registrar_;
@@ -302,7 +302,7 @@ void AddPasswordEntriesCallback(ProfileSyncServicePasswordTest* test,
 
 TEST_F(ProfileSyncServicePasswordTest, FailModelAssociation) {
   StartSyncService(base::Closure(), base::Closure());
-  EXPECT_TRUE(service_->unrecoverable_error_detected());
+  EXPECT_TRUE(service_->HasUnrecoverableError());
 }
 
 TEST_F(ProfileSyncServicePasswordTest, EmptyNativeEmptySync) {

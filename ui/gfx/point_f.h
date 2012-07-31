@@ -11,10 +11,6 @@
 #include "ui/base/ui_export.h"
 #include "ui/gfx/point_base.h"
 
-#if !defined(ENABLE_DIP)
-#error "This class should be used only when DIP feature is enabled"
-#endif
-
 namespace gfx {
 class Point;
 
@@ -31,6 +27,10 @@ class UI_EXPORT PointF : public PointBase<PointF, float> {
   // Returns a string representation of point.
   std::string ToString() const;
 };
+
+#if !defined(COMPILER_MSVC)
+extern template class PointBase<PointF, float>;
+#endif
 
 }  // namespace gfx
 

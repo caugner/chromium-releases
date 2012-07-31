@@ -12,7 +12,7 @@
 #include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/extensions/extension_resource.h"
 #include "content/public/browser/notification_service.h"
-#include "content/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread.h"
 #include "grit/component_extension_resources.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -21,6 +21,7 @@
 #include "ui/gfx/size.h"
 
 using content::BrowserThread;
+using extensions::Extension;
 
 class ImageLoadingTrackerTest : public testing::Test,
                                 public ImageLoadingTracker::Observer {
@@ -79,7 +80,7 @@ class ImageLoadingTrackerTest : public testing::Test,
       return NULL;
 
     return Extension::Create(test_file, location, *valid_value,
-        Extension::STRICT_ERROR_CHECKS, &error);
+                             Extension::NO_FLAGS, &error);
   }
 
   gfx::Image image_;
@@ -168,12 +169,12 @@ TEST_F(ImageLoadingTrackerTest, DeleteExtensionWhileWaitingForCache) {
   EXPECT_EQ(0, image_loaded_count());
 
   // Send out notification the extension was uninstalled.
-  UnloadedExtensionInfo details(extension.get(),
-                                extension_misc::UNLOAD_REASON_UNINSTALL);
+  extensions::UnloadedExtensionInfo details(extension.get(),
+      extension_misc::UNLOAD_REASON_UNINSTALL);
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_EXTENSION_UNLOADED,
       content::NotificationService::AllSources(),
-      content::Details<UnloadedExtensionInfo>(&details));
+      content::Details<extensions::UnloadedExtensionInfo>(&details));
 
   // Chuck the extension, that way if anyone tries to access it we should crash
   // or get valgrind errors.
@@ -218,11 +219,10 @@ TEST_F(ImageLoadingTrackerTest, MultipleImages) {
   EXPECT_EQ(1, image_loaded_count());
 
   // Check that all images were loaded.
-  const std::vector<const SkBitmap*>& bitmaps =
-      image_.ToImageSkia()->bitmaps();
+  const std::vector<SkBitmap> bitmaps = image_.ToImageSkia()->bitmaps();
   ASSERT_EQ(2u, bitmaps.size());
-  const SkBitmap* bmp1 = bitmaps[0];
-  const SkBitmap* bmp2 = bitmaps[1];
+  const SkBitmap* bmp1 = &bitmaps[0];
+  const SkBitmap* bmp2 = &bitmaps[1];
   if (bmp1->width() > bmp2->width()) {
     std::swap(bmp1, bmp2);
   }

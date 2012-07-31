@@ -29,6 +29,7 @@ using WebKit::WebDocument;
 using WebKit::WebFrame;
 using WebKit::WebString;
 using WebKit::WebView;
+using extensions::Extension;
 
 UserScriptScheduler::UserScriptScheduler(
     WebFrame* frame, ExtensionDispatcher* extension_dispatcher)
@@ -132,12 +133,13 @@ void UserScriptScheduler::ExecuteCodeImpl(
       params.extension_id);
   content::RenderView* render_view =
       content::RenderView::FromWebView(frame_->view());
+  ExtensionHelper* extension_helper = ExtensionHelper::Get(render_view);
 
   // Since extension info is sent separately from user script info, they can
   // be out of sync. We just ignore this situation.
   if (!extension) {
     render_view->Send(new ExtensionHostMsg_ExecuteCodeFinished(
-        render_view->GetRoutingID(), params.request_id, true, ""));
+        render_view->GetRoutingID(), params.request_id, true, -1, ""));
     return;
   }
 
@@ -161,12 +163,17 @@ void UserScriptScheduler::ExecuteCodeImpl(
       // For child frames, we just skip ones the extension doesn't have access
       // to and carry on.
       if (!extension->CanExecuteScriptOnPage(frame->document().url(),
-                                             NULL, NULL)) {
+                                             extension_helper->tab_id(),
+                                             NULL,
+                                             NULL)) {
         if (frame->parent()) {
           continue;
         } else {
           render_view->Send(new ExtensionHostMsg_ExecuteCodeFinished(
-              render_view->GetRoutingID(), params.request_id, false,
+              render_view->GetRoutingID(),
+              params.request_id,
+              false,
+              -1,
               ExtensionErrorUtils::FormatErrorMessage(
                   extension_manifest_errors::kCannotAccessPage,
                   frame->document().url().spec())));
@@ -194,7 +201,11 @@ void UserScriptScheduler::ExecuteCodeImpl(
   }
 
   render_view->Send(new ExtensionHostMsg_ExecuteCodeFinished(
-      render_view->GetRoutingID(), params.request_id, true, ""));
+      render_view->GetRoutingID(),
+      params.request_id,
+      true,
+      render_view->GetPageId(),
+      ""));
 }
 
 bool UserScriptScheduler::GetAllChildFrames(

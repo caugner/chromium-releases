@@ -5,12 +5,14 @@
 #include "chrome/browser/autofill/autofill_popup_view.h"
 
 #include "base/logging.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/autofill/autofill_external_delegate.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
+#include "grit/webkit_resources.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebAutofillClient.h"
 
 using WebKit::WebAutofillClient;
@@ -19,6 +21,22 @@ namespace {
 
 // Used to indicate that no line is currently selected by the user.
 const int kNoSelection = -1;
+
+struct DataResource {
+  const char* name;
+  int id;
+};
+
+const DataResource kDataResources[] = {
+  { "americanExpressCC", IDR_AUTOFILL_CC_AMEX },
+  { "dinersCC", IDR_AUTOFILL_CC_DINERS },
+  { "discoverCC", IDR_AUTOFILL_CC_DISCOVER },
+  { "genericCC", IDR_AUTOFILL_CC_GENERIC },
+  { "jcbCC", IDR_AUTOFILL_CC_JCB },
+  { "masterCardCC", IDR_AUTOFILL_CC_MASTERCARD },
+  { "soloCC", IDR_AUTOFILL_CC_SOLO },
+  { "visaCC", IDR_AUTOFILL_CC_VISA },
+};
 
 }  // end namespace
 
@@ -31,7 +49,7 @@ AutofillPopupView::AutofillPopupView(
     return;
 
   registrar_.Add(this,
-                 content::NOTIFICATION_WEB_CONTENTS_HIDDEN,
+                 content::NOTIFICATION_WEB_CONTENTS_VISIBILITY_CHANGED,
                  content::Source<content::WebContents>(web_contents));
   registrar_.Add(
       this,
@@ -78,6 +96,10 @@ void AutofillPopupView::SetSelectedLine(int selected_line) {
   }
 }
 
+void AutofillPopupView::ClearSelectedLine() {
+  SetSelectedLine(kNoSelection);
+}
+
 void AutofillPopupView::SelectNextLine() {
   int new_selected_line = selected_line_ + 1;
 
@@ -102,6 +124,9 @@ bool AutofillPopupView::AcceptSelectedLine() {
 
   DCHECK_GE(selected_line_, 0);
   DCHECK_LT(selected_line_, static_cast<int>(autofill_values_.size()));
+
+  if (!CanAccept(autofill_unique_ids_[selected_line_]))
+    return false;
 
   return external_delegate()->DidAcceptAutofillSuggestions(
       autofill_values_[selected_line_],
@@ -138,23 +163,31 @@ bool AutofillPopupView::RemoveSelectedLine() {
 
   SetSelectedLine(kNoSelection);
 
+  external_delegate_->ClearPreviewedForm();
+
   if (!HasAutofillEntries())
     Hide();
 
   return true;
 }
 
-bool AutofillPopupView::IsSeparatorIndex(int index) {
-  // TODO(csharp): Use WebAutofillClient::MenuItemIDSeparator instead.
-  // http://crbug.com/125001
-  return (index > 0 && autofill_unique_ids_[index - 1] >= 0 &&
-          autofill_unique_ids_[index] < 0);
+int AutofillPopupView::GetIconResourceID(const string16& resource_name) {
+  for (size_t i = 0; i < arraysize(kDataResources); ++i) {
+    if (resource_name == ASCIIToUTF16(kDataResources[i].name))
+      return kDataResources[i].id;
+  }
+
+  return -1;
 }
 
 bool AutofillPopupView::CanDelete(int id) {
   return id > 0 ||
       id == WebAutofillClient::MenuItemIDAutocompleteEntry ||
       id == WebAutofillClient::MenuItemIDPasswordEntry;
+}
+
+bool AutofillPopupView::CanAccept(int id) {
+  return id != WebAutofillClient::MenuItemIDSeparator;
 }
 
 bool AutofillPopupView::HasAutofillEntries() {
@@ -169,7 +202,10 @@ bool AutofillPopupView::HasAutofillEntries() {
 void AutofillPopupView::Observe(int type,
                                 const content::NotificationSource& source,
                                 const content::NotificationDetails& details) {
-  if (type == content::NOTIFICATION_WEB_CONTENTS_HIDDEN
-      || type == content::NOTIFICATION_NAV_ENTRY_COMMITTED)
+  if (type == content::NOTIFICATION_WEB_CONTENTS_VISIBILITY_CHANGED) {
+    if (!*content::Details<bool>(details).ptr())
+      Hide();
+  } else if (type == content::NOTIFICATION_NAV_ENTRY_COMMITTED) {
     Hide();
+  }
 }

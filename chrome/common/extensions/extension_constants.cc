@@ -100,7 +100,6 @@ namespace extension_info_keys {
   const char kEnabledKey[] = "enabled";
   const char kHomepageUrlKey[] = "homepageUrl";
   const char kIdKey[] = "id";
-  const char kMayDisableKey[] = "mayDisable";
   const char kNameKey[] = "name";
   const char kOfflineEnabledKey[] = "offlineEnabled";
   const char kOptionsUrlKey[] = "optionsUrl";
@@ -118,6 +117,7 @@ const char kHTermDevAppId[] = "okddffdblfhhnmhodogpojmfkjmhinfp";
 const char kCroshBuiltinAppId[] = "nkoccljplnhpfnfiajclkommnmllphnl";
 const char kWebStoreAppId[] = "ahfgeienlihckogmohjhadlkjgocpleb";
 const char kCloudPrintAppId[] = "mfehgcgbbipciphmccgaenjidiccnmng";
+const char kChromeAppId[] = "mgndgikekgjfcpckkfioiadnlibdjbkf";
 const char kAppsPromoHistogram[] = "Extensions.AppsPromo";
 const char kAppLaunchHistogram[] = "Extensions.AppLaunch";
 #if defined(OS_CHROMEOS)

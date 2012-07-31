@@ -12,6 +12,7 @@
 
 #include <algorithm>
 
+#include "base/auto_reset.h"
 #include "base/basictypes.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
@@ -276,6 +277,13 @@ bool WebPluginDelegateProxy::Initialize(
     const std::vector<std::string>& arg_values,
     webkit::npapi::WebPlugin* plugin,
     bool load_manually) {
+#if defined(OS_MACOSX)
+  // TODO(shess): Debugging for http://crbug.com/97285 .  See comment
+  // in plugin_channel_host.cc.
+  scoped_ptr<AutoReset<bool> > track_nested_removes(new AutoReset<bool>(
+      PluginChannelHost::GetRemoveTrackingFlag(), true));
+#endif
+
   IPC::ChannelHandle channel_handle;
   if (!RenderThreadImpl::current()->Send(new ViewHostMsg_OpenChannelToPlugin(
           render_view_->routing_id(), url, page_url_, mime_type_,
@@ -306,6 +314,9 @@ bool WebPluginDelegateProxy::Initialize(
     LOG(ERROR) << "Couldn't get PluginChannelHost";
     return false;
   }
+#if defined(OS_MACOSX)
+  track_nested_removes.reset();
+#endif
 
   int instance_id;
   bool result = channel_host->Send(new PluginMsg_CreateInstance(
@@ -703,7 +714,6 @@ void WebPluginDelegateProxy::Paint(WebKit::WebCanvas* canvas,
     return;
 
   // We're using the native OS APIs from here on out.
-#if WEBKIT_USING_SKIA
   if (!skia::SupportsPlatformPaint(canvas)) {
     // TODO(alokp): Implement this path.
     // This block will only get hit with --enable-accelerated-drawing flag.
@@ -716,9 +726,6 @@ void WebPluginDelegateProxy::Paint(WebKit::WebCanvas* canvas,
   skia::ScopedPlatformPaint scoped_platform_paint(canvas);
   gfx::NativeDrawingContext context =
       scoped_platform_paint.GetPlatformSurface();
-#elif WEBKIT_USING_CG
-  gfx::NativeDrawingContext context = canvas;
-#endif
 
   gfx::Rect offset_rect = rect;
   offset_rect.Offset(-plugin_rect_.x(), -plugin_rect_.y());
@@ -838,10 +845,11 @@ bool WebPluginDelegateProxy::BackgroundChanged(
   DCHECK_EQ(cairo_image_surface_get_format(page_surface), CAIRO_FORMAT_ARGB32);
 
   // Transform context coordinates into surface coordinates.
-  double page_x_double = rect.x();
-  double page_y_double = rect.y();
-  cairo_user_to_device(context, &page_x_double, &page_y_double);
-  gfx::Rect full_content_rect(0, 0,
+  double page_x_double = 0;
+  double page_y_double = 0;
+  cairo_device_to_user(context, &page_x_double, &page_y_double);
+  gfx::Rect full_content_rect(static_cast<int>(page_x_double),
+                              static_cast<int>(page_y_double),
                               cairo_image_surface_get_width(page_surface),
                               cairo_image_surface_get_height(page_surface));
 #endif
@@ -874,8 +882,8 @@ bool WebPluginDelegateProxy::BackgroundChanged(
   cairo_surface_flush(page_surface);
   const unsigned char* page_bytes = cairo_image_surface_get_data(page_surface);
   int page_stride = cairo_image_surface_get_stride(page_surface);
-  int page_start_x = static_cast<int>(page_x_double);
-  int page_start_y = static_cast<int>(page_y_double);
+  int page_start_x = content_rect.x() - static_cast<int>(page_x_double);
+  int page_start_y = content_rect.y() - static_cast<int>(page_y_double);
 
   skia::ScopedPlatformPaint scoped_platform_paint(
       background_store_.canvas.get());

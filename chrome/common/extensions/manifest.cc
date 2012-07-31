@@ -8,10 +8,11 @@
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/string_split.h"
+#include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/extension_error_utils.h"
-#include "chrome/common/extensions/simple_feature_provider.h"
+#include "chrome/common/extensions/features/simple_feature_provider.h"
 
 namespace errors = extension_manifest_errors;
 namespace keys = extension_manifest_keys;
@@ -25,21 +26,17 @@ Manifest::Manifest(Extension::Location location,
       type_(Extension::TYPE_UNKNOWN) {
   if (value_->HasKey(keys::kTheme)) {
     type_ = Extension::TYPE_THEME;
-  } else {
-    bool is_platform_app = false;
-    if (value_->GetBoolean(keys::kPlatformApp, &is_platform_app) &&
-        is_platform_app) {
+  } else if (value_->HasKey(keys::kApp)) {
+    if (value_->Get(keys::kWebURLs, NULL) ||
+        value_->Get(keys::kLaunchWebURL, NULL)) {
+      type_ = Extension::TYPE_HOSTED_APP;
+    } else if (value_->Get(keys::kPlatformAppBackground, NULL)) {
       type_ = Extension::TYPE_PLATFORM_APP;
-    } else if (value_->HasKey(keys::kApp)) {
-      if (value_->Get(keys::kWebURLs, NULL) ||
-          value_->Get(keys::kLaunchWebURL, NULL)) {
-        type_ = Extension::TYPE_HOSTED_APP;
-      } else {
-        type_ = Extension::TYPE_PACKAGED_APP;
-      }
     } else {
-      type_ = Extension::TYPE_EXTENSION;
+      type_ = Extension::TYPE_PACKAGED_APP;
     }
+  } else {
+    type_ = Extension::TYPE_EXTENSION;
   }
   CHECK_NE(type_, Extension::TYPE_UNKNOWN);
 }
@@ -47,8 +44,9 @@ Manifest::Manifest(Extension::Location location,
 Manifest::~Manifest() {
 }
 
-void Manifest::ValidateManifest(std::string* error,
-                                std::vector<std::string>* warnings) const {
+void Manifest::ValidateManifest(
+    std::string* error,
+    Extension::InstallWarningVector* warnings) const {
   *error = "";
   if (type_ == Extension::TYPE_PLATFORM_APP && GetManifestVersion() < 2) {
     *error = errors::kPlatformAppNeedsManifestVersion2;
@@ -75,12 +73,30 @@ void Manifest::ValidateManifest(std::string* error,
         extension_id_, type_, Feature::ConvertLocation(location_),
         GetManifestVersion());
     if (result != Feature::IS_AVAILABLE)
-      warnings->push_back(feature->GetErrorMessage(result));
+      warnings->push_back(Extension::InstallWarning(
+          Extension::InstallWarning::FORMAT_TEXT,
+          feature->GetErrorMessage(result)));
+  }
+
+  // Also generate warnings for keys that are not features.
+  for (DictionaryValue::key_iterator key = value_->begin_keys();
+      key != value_->end_keys(); ++key) {
+    if (!SimpleFeatureProvider::GetManifestFeatures()->GetFeature(*key)) {
+      warnings->push_back(Extension::InstallWarning(
+          Extension::InstallWarning::FORMAT_TEXT,
+          base::StringPrintf("Unrecognized manifest key '%s'.",
+                             (*key).c_str())));
+    }
   }
 }
 
 bool Manifest::HasKey(const std::string& key) const {
   return CanAccessKey(key) && value_->HasKey(key);
+}
+
+bool Manifest::HasPath(const std::string& path) const {
+  Value* ignored = NULL;
+  return CanAccessPath(path) && value_->Get(path, &ignored);
 }
 
 bool Manifest::Get(

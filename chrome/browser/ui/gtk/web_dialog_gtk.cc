@@ -11,27 +11,32 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_dialogs.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/tab_contents_container_gtk.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/webui/web_dialog_controller.h"
-#include "chrome/browser/ui/webui/web_dialog_ui.h"
-#include "content/public/browser/web_contents.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/web_contents.h"
+#include "ui/web_dialogs/web_dialog_ui.h"
 
+using content::NativeWebKeyboardEvent;
 using content::WebContents;
 using content::WebUIMessageHandler;
+using ui::WebDialogDelegate;
+using ui::WebDialogUI;
 
 namespace browser {
 
 gfx::NativeWindow ShowWebDialog(gfx::NativeWindow parent,
-                                Profile* profile,
-                                Browser* browser,
+                                content::BrowserContext* context,
                                 WebDialogDelegate* delegate) {
+  // TODO(mazda): Remove the dependency on Browser.
+  Browser* browser =
+      browser::FindLastActiveWithProfile(Profile::FromBrowserContext(context));
   WebDialogGtk* web_dialog =
-      new WebDialogGtk(profile, browser, delegate, parent);
+      new WebDialogGtk(context, browser, delegate, parent);
   return web_dialog->InitDialog();
 }
 
@@ -60,15 +65,15 @@ void SetDialogStyle() {
 ////////////////////////////////////////////////////////////////////////////////
 // WebDialogGtk, public:
 
-WebDialogGtk::WebDialogGtk(Profile* profile,
+WebDialogGtk::WebDialogGtk(content::BrowserContext* context,
                            Browser* browser,
                            WebDialogDelegate* delegate,
                            gfx::NativeWindow parent_window)
-    : WebDialogWebContentsDelegate(profile),
+    : WebDialogWebContentsDelegate(context),
       delegate_(delegate),
       parent_window_(parent_window),
       dialog_(NULL),
-      dialog_controller_(new WebDialogController(this, profile, browser)) {
+      dialog_controller_(new WebDialogController(this, context, browser)) {
 }
 
 WebDialogGtk::~WebDialogGtk() {
@@ -208,7 +213,7 @@ void WebDialogGtk::HandleKeyboardEvent(const NativeWebKeyboardEvent& event) {
 // WebDialogGtk:
 
 gfx::NativeWindow WebDialogGtk::InitDialog() {
-  tab_.reset(new TabContentsWrapper(
+  tab_.reset(new TabContents(
       WebContents::Create(profile(), NULL, MSG_ROUTING_NONE, NULL, NULL)));
   tab_->web_contents()->SetDelegate(this);
 

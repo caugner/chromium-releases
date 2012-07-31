@@ -9,11 +9,11 @@
 #include <map>
 
 #include "base/gtest_prod_util.h"
-#include "base/memory/scoped_ptr.h"
+#include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/string16.h"
 #include "chrome/browser/history/history_types.h"
-#include "chrome/browser/predictors/autocomplete_action_predictor_database.h"
+#include "chrome/browser/predictors/autocomplete_action_predictor_table.h"
 #include "chrome/browser/profiles/profile_keyed_service.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -23,20 +23,28 @@ struct AutocompleteLog;
 struct AutocompleteMatch;
 class AutocompleteResult;
 class HistoryService;
+class PredictorsHandler;
 class Profile;
 
 namespace history {
 class URLDatabase;
 }
 
+namespace predictors {
+
 // This class is responsible for determining the correct predictive network
-// action to take given for a given AutocompleteMatch and entered text. it uses
-// an AutocompleteActionPredictorDatabase accessed asynchronously on the DB
+// action to take given for a given AutocompleteMatch and entered text. It can
+// be instantiated for both normal and incognito profiles.  For normal profiles,
+// it uses an AutocompleteActionPredictorTable accessed asynchronously on the DB
 // thread to permanently store the data used to make predictions, and keeps
 // local caches of that data to be able to make predictions synchronously on the
-// UI thread where it lives. It can be accessed as a weak pointer so that it can
-// safely use PostTaskAndReply without fear of crashes if it is destroyed before
-// the reply triggers. This is necessary during initialization.
+// UI thread where it lives.  For incognito profiles, there is no table; the
+// local caches are copied from the main profile at creation and from there on
+// are the only thing used.
+//
+// This class can be accessed as a weak pointer so that it can safely use
+// PostTaskAndReply without fear of crashes if it is destroyed before the reply
+// triggers. This is necessary during initialization.
 class AutocompleteActionPredictor
     : public ProfileKeyedService,
       public content::NotificationObserver,
@@ -51,9 +59,6 @@ class AutocompleteActionPredictor
 
   explicit AutocompleteActionPredictor(Profile* profile);
   virtual ~AutocompleteActionPredictor();
-
-  static void set_hit_weight(double weight) { hit_weight_ = weight; }
-  static double get_hit_weight() { return hit_weight_; }
 
   // Registers an AutocompleteResult for a given |user_text|. This will be used
   // when the user navigates from the Omnibox to determine early opportunities
@@ -80,7 +85,7 @@ class AutocompleteActionPredictor
 
  private:
   friend class AutocompleteActionPredictorTest;
-  friend class AutocompleteActionPredictorDOMHandler;
+  friend class ::PredictorsHandler;
 
   struct TransitionalMatch {
     TransitionalMatch();
@@ -114,46 +119,56 @@ class AutocompleteActionPredictor
   };
 
   typedef std::map<DBCacheKey, DBCacheValue> DBCacheMap;
-  typedef std::map<DBCacheKey, AutocompleteActionPredictorDatabase::Row::Id>
+  typedef std::map<DBCacheKey, AutocompleteActionPredictorTable::Row::Id>
       DBIdCacheMap;
 
   static const int kMaximumDaysToKeepEntry;
-
-  // Multiplying factor applied to the |number_of_hits| for a database entry
-  // when calculating the confidence. It is currently set by a field trial so is
-  // static. Once the field trial ends, this will be a constant value.
-  static double hit_weight_;
-
-  // ProfileKeyedService
-  virtual void Shutdown() OVERRIDE;
 
   // NotificationObserver
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
+  // Removes all rows from the database and caches.
+  void DeleteAllRows();
+
+  // Removes rows from the database and caches that contain a URL in |rows|.
+  void DeleteRowsWithURLs(const history::URLRows& rows);
+
   // Called when NOTIFICATION_OMNIBOX_OPENED_URL is observed.
   void OnOmniboxOpenedUrl(const AutocompleteLog& log);
 
-  // Deletes any old or invalid entries from the local caches. |url_db| and
-  // |id_list| must not be NULL. Every row id deleted will be added to id_list.
-  void DeleteOldIdsFromCaches(
-      history::URLDatabase* url_db,
-      std::vector<AutocompleteActionPredictorDatabase::Row::Id>* id_list);
-
-  // Called to delete any old or invalid entries from the database. Called after
-  // the local caches are created once the history service is available.
-  void DeleteOldEntries(history::URLDatabase* url_db);
+  // Adds and updates rows in the database and caches.
+  void AddAndUpdateRows(
+    const AutocompleteActionPredictorTable::Rows& rows_to_add,
+    const AutocompleteActionPredictorTable::Rows& rows_to_update);
 
   // Called to populate the local caches. This also calls DeleteOldEntries
   // if the history service is available, or registers for the notification of
   // it becoming available.
   void CreateCaches(
-      std::vector<AutocompleteActionPredictorDatabase::Row>* row_buffer);
+      std::vector<AutocompleteActionPredictorTable::Row>* row_buffer);
 
   // Attempts to call DeleteOldEntries if the in-memory database has been loaded
   // by |service|. Returns success as a boolean.
   bool TryDeleteOldEntries(HistoryService* service);
+
+  // Called to delete any old or invalid entries from the database. Called after
+  // the local caches are created once the history service is available.
+  void DeleteOldEntries(history::URLDatabase* url_db);
+
+  // Deletes any old or invalid entries from the local caches. |url_db| and
+  // |id_list| must not be NULL. Every row id deleted will be added to id_list.
+  void DeleteOldIdsFromCaches(
+      history::URLDatabase* url_db,
+      std::vector<AutocompleteActionPredictorTable::Row::Id>* id_list);
+
+  // Called on an incognito-owned predictor to copy the current caches from the
+  // main profile.
+  void CopyFromMainProfile();
+
+  // Registers for notifications and sets the |initialized_| flag.
+  void FinishInitialization();
 
   // Uses local caches to calculate an exact percentage prediction that the user
   // will take a particular match given what they have typed. |is_in_db| is set
@@ -166,35 +181,30 @@ class AutocompleteActionPredictor
   // Calculates the confidence for an entry in the DBCacheMap.
   double CalculateConfidenceForDbEntry(DBCacheMap::const_iterator iter) const;
 
-  // Adds a row to the database and caches.
-  void AddRow(const DBCacheKey& key,
-              const AutocompleteActionPredictorDatabase::Row& row);
-
-  // Updates a row in the database and the caches.
-  void UpdateRow(DBCacheMap::iterator it,
-                 const AutocompleteActionPredictorDatabase::Row& row);
-
-  // Removes all rows from the database and caches.
-  void DeleteAllRows();
-
-  // Removes rows from the database and caches that contain a URL in |rows|.
-  void DeleteRowsWithURLs(const history::URLRows& rows);
-
-  // Used to batch operations on the database.
-  void BeginTransaction();
-  void CommitTransaction();
-
   Profile* profile_;
-  scoped_refptr<AutocompleteActionPredictorDatabase> db_;
+
+  // Set when this is a predictor for an incognito profile.
+  AutocompleteActionPredictor* main_profile_predictor_;
+
+  // Set when this is a predictor for a non-incognito profile, and the incognito
+  // profile creates a predictor.  If this is non-NULL when we finish
+  // initialization, we should call CopyFromMainProfile() on it.
+  AutocompleteActionPredictor* incognito_predictor_;
+
+  // The backing data store.  This is NULL for incognito-owned predictors.
+  scoped_refptr<AutocompleteActionPredictorTable> table_;
+
   content::NotificationRegistrar notification_registrar_;
 
   // This is cleared after every Omnibox navigation.
   std::vector<TransitionalMatch> transitional_matches_;
 
   // This allows us to predict the effect of confidence threshold changes on
-  // accuracy.
+  // accuracy.  This is cleared after every omnibox navigation.
   mutable std::vector<std::pair<GURL, double> > tracked_urls_;
 
+  // Local caches of the data store.  For incognito-owned predictors this is the
+  // only copy of the data.
   DBCacheMap db_cache_;
   DBIdCacheMap db_id_cache_;
 
@@ -202,5 +212,7 @@ class AutocompleteActionPredictor
 
   DISALLOW_COPY_AND_ASSIGN(AutocompleteActionPredictor);
 };
+
+}  // namespace predictors
 
 #endif  // CHROME_BROWSER_PREDICTORS_AUTOCOMPLETE_ACTION_PREDICTOR_H_

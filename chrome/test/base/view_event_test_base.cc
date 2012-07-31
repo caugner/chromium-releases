@@ -10,6 +10,7 @@
 #include "base/string_number_conversions.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/browser_thread.h"
+#include "ui/base/ime/text_input_test_support.h"
 #include "ui/compositor/test/compositor_test_support.h"
 #include "ui/ui_controls/ui_controls.h"
 #include "ui/views/view.h"
@@ -82,12 +83,13 @@ void ViewEventTestBase::Done() {
 }
 
 void ViewEventTestBase::SetUp() {
+  ui::TextInputTestSupport::Initilaize();
   ui::CompositorTestSupport::Initialize();
 #if defined(USE_ASH)
   ash::Shell::CreateInstance(NULL);
   // The shell runs with a locked screen in tests, so we must clear the event
   // client so it doesn't interfere with event propagation.
-  aura::client::SetEventClient(ash::Shell::GetInstance()->GetRootWindow(),
+  aura::client::SetEventClient(ash::Shell::GetPrimaryRootWindow(),
                                NULL);
 #endif
   window_ = views::Widget::CreateWindow(this);
@@ -110,6 +112,7 @@ void ViewEventTestBase::TearDown() {
   aura::Env::DeleteInstance();
 #endif
   ui::CompositorTestSupport::Terminate();
+  ui::TextInputTestSupport::Shutdown();
 }
 
 bool ViewEventTestBase::CanResize() const {

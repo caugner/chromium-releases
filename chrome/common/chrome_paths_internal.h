@@ -26,6 +26,12 @@ namespace chrome {
 // DIR_USER_DATA has been overridden by a command-line option.
 bool GetDefaultUserDataDirectory(FilePath* result);
 
+#if defined(OS_WIN)
+// Gets the path to the user data directory for the alternate environment to
+// the one in use (metro or desktop).
+bool GetAlternateUserDataDirectory(FilePath *result);
+#endif
+
 // This returns the base directory in which Chrome Frame stores user profiles.
 // Note that this cannot be wrapped in a preprocessor define since
 // CF and Google Chrome want to share the same binaries.
@@ -50,6 +56,9 @@ bool GetUserDownloadsDirectorySafe(FilePath* result);
 
 // Get the path to the user's downloads directory.
 bool GetUserDownloadsDirectory(FilePath* result);
+
+// Gets the path to the user's pictures directory.
+bool GetUserPicturesDirectory(FilePath* result);
 
 // The path to the user's desktop.
 bool GetUserDesktop(FilePath* result);

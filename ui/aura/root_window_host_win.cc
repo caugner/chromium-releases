@@ -9,6 +9,7 @@
 #include <algorithm>
 
 #include "base/message_loop.h"
+#include "ui/aura/client/capture_client.h"
 #include "ui/aura/env.h"
 #include "ui/aura/event.h"
 #include "ui/aura/root_window.h"
@@ -267,6 +268,13 @@ bool RootWindowHostWin::ConfineCursorToRootWindow() {
   return ClipCursor(&window_rect) != 0;
 }
 
+bool RootWindowHostWin::GrabSnapshot(
+    const gfx::Rect& snapshot_bounds,
+    std::vector<unsigned char>* png_representation) {
+  NOTIMPLEMENTED();
+  return false;
+}
+
 void RootWindowHostWin::UnConfineCursor() {
   ClipCursor(NULL);
 }
@@ -284,6 +292,11 @@ void RootWindowHostWin::SetFocusWhenShown(bool focus_when_shown) {
 void RootWindowHostWin::PostNativeEvent(const base::NativeEvent& native_event) {
   ::PostMessage(
       hwnd(), native_event.message, native_event.wParam, native_event.lParam);
+}
+
+void RootWindowHostWin::OnDeviceScaleFactorChanged(
+    float device_scale_factor) {
+  NOTIMPLEMENTED();
 }
 
 void RootWindowHostWin::OnClose() {
@@ -318,7 +331,9 @@ LRESULT RootWindowHostWin::OnCaptureChanged(UINT message,
                                             LPARAM l_param) {
   if (has_capture_) {
     has_capture_ = false;
-    root_window_->SetCapture(NULL, 0);
+    Window* capture_window = client::GetCaptureWindow(root_window_);
+    if (capture_window && capture_window->GetRootWindow() == root_window_)
+      capture_window->ReleaseCapture();
   }
   return 0;
 }

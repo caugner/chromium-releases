@@ -14,14 +14,15 @@
 #include "chrome/browser/extensions/extension_install_dialog.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/common/chrome_utility_messages.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/url_pattern.h"
 #include "chrome/common/url_constants.h"
-#include "content/public/browser/web_contents.h"
 #include "content/public/browser/utility_process_host.h"
 #include "content/public/browser/utility_process_host_client.h"
+#include "content/public/browser/web_contents.h"
 #include "content/public/common/url_fetcher.h"
 #include "net/base/escape.h"
 #include "net/base/load_flags.h"
@@ -163,7 +164,7 @@ WebstoreInlineInstaller::WebstoreInlineInstaller(WebContents* web_contents,
 void WebstoreInlineInstaller::BeginInstall() {
   AddRef(); // Balanced in CompleteInstall or WebContentsDestroyed.
 
-  if (!Extension::IdIsValid(id_)) {
+  if (!extensions::Extension::IdIsValid(id_)) {
     CompleteInstall(kInvalidWebstoreItemId);
     return;
   }
@@ -171,7 +172,7 @@ void WebstoreInlineInstaller::BeginInstall() {
   GURL webstore_data_url(extension_urls::GetWebstoreItemJsonDataURL(id_));
 
   webstore_data_url_fetcher_.reset(content::URLFetcher::Create(
-      webstore_data_url, content::URLFetcher::GET, this));
+      webstore_data_url, net::URLFetcher::GET, this));
   Profile* profile = Profile::FromBrowserContext(
       web_contents()->GetBrowserContext());
   webstore_data_url_fetcher_->SetRequestContext(
@@ -189,7 +190,7 @@ void WebstoreInlineInstaller::BeginInstall() {
 WebstoreInlineInstaller::~WebstoreInlineInstaller() {}
 
 void WebstoreInlineInstaller::OnURLFetchComplete(
-    const content::URLFetcher* source) {
+    const net::URLFetcher* source) {
   CHECK_EQ(webstore_data_url_fetcher_.get(), source);
   // We shouldn't be getting UrlFetcher callbacks if the WebContents has gone
   // away; we stop any in in-progress fetches in WebContentsDestroyed.
@@ -260,8 +261,8 @@ void WebstoreInlineInstaller::OnWebstoreResponseParseSuccess(
     return;
   }
 
-  if (average_rating_ < ExtensionInstallUI::kMinExtensionRating ||
-      average_rating_ >ExtensionInstallUI::kMaxExtensionRating) {
+  if (average_rating_ < ExtensionInstallPrompt::kMinExtensionRating ||
+      average_rating_ > ExtensionInstallPrompt::kMaxExtensionRating) {
     CompleteInstall(kInvalidWebstoreResponseError);
     return;
   }
@@ -341,15 +342,16 @@ void WebstoreInlineInstaller::OnWebstoreParseSuccess(
   manifest_.reset(manifest);
   icon_ = icon;
 
-  Profile* profile = Profile::FromBrowserContext(
-      web_contents()->GetBrowserContext());
+  Browser* browser = browser::FindBrowserWithWebContents(web_contents());
+  CHECK(browser);
 
-  ExtensionInstallUI::Prompt prompt(ExtensionInstallUI::INLINE_INSTALL_PROMPT);
+  ExtensionInstallPrompt::Prompt prompt(
+      ExtensionInstallPrompt::INLINE_INSTALL_PROMPT);
   prompt.SetInlineInstallWebstoreData(localized_user_count_,
                                       average_rating_,
                                       rating_count_);
   std::string error;
-  dummy_extension_ = ExtensionInstallUI::GetLocalizedExtensionForDisplay(
+  dummy_extension_ = ExtensionInstallPrompt::GetLocalizedExtensionForDisplay(
       manifest, id_, localized_name_, localized_description_, &error);
   if (!dummy_extension_) {
     OnWebstoreParseFailure(id_, WebstoreInstallHelper::Delegate::MANIFEST_ERROR,
@@ -357,7 +359,7 @@ void WebstoreInlineInstaller::OnWebstoreParseSuccess(
     return;
   }
 
-  install_ui_.reset(new ExtensionInstallUI(profile));
+  install_ui_.reset(new ExtensionInstallPrompt(browser));
   install_ui_->ConfirmInlineInstall(this, dummy_extension_, &icon_, prompt);
   // Control flow finishes up in InstallUIProceed or InstallUIAbort.
 }
@@ -380,10 +382,10 @@ void WebstoreInlineInstaller::InstallUIProceed() {
       web_contents()->GetBrowserContext());
 
   scoped_ptr<WebstoreInstaller::Approval> approval(
-      new WebstoreInstaller::Approval);
-  approval->extension_id = id_;
-  approval->profile = profile;
-  approval->parsed_manifest.reset(manifest_.get()->DeepCopy());
+      WebstoreInstaller::Approval::CreateWithNoInstallPrompt(
+          profile,
+          id_,
+          scoped_ptr<base::DictionaryValue>(manifest_.get()->DeepCopy())));
   approval->use_app_installed_bubble = true;
 
   scoped_refptr<WebstoreInstaller> installer = new WebstoreInstaller(

@@ -7,13 +7,15 @@
 #pragma once
 
 #include "base/values.h"
-#include "base/memory/scoped_ptr.h"
+#include "base/memory/ref_counted.h"
 #include "chrome/browser/ui/panels/display_settings_provider.h"
 #include "chrome/browser/ui/panels/panel.h"
 #include "chrome/browser/ui/panels/panel_strip.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "ui/gfx/rect.h"
+
+class NativePanelTesting;
 
 class BasePanelBrowserTest : public InProcessBrowserTest {
  public:
@@ -82,8 +84,8 @@ class BasePanelBrowserTest : public InProcessBrowserTest {
   Panel* CreateDockedPanel(const std::string& name, const gfx::Rect& bounds);
   Panel* CreateDetachedPanel(const std::string& name, const gfx::Rect& bounds);
 
-  void WaitForPanelAdded(Panel* panel);
-  void WaitForPanelRemoved(Panel* panel);
+  static NativePanelTesting* CreateNativePanelTesting(Panel* panel);
+
   void WaitForPanelActiveState(Panel* panel, ActiveState state);
   void WaitForWindowSizeAvailable(Panel* panel);
   void WaitForBoundsAnimationFinished(Panel* panel);
@@ -92,12 +94,15 @@ class BasePanelBrowserTest : public InProcessBrowserTest {
 
   void CreateTestTabContents(Browser* browser);
 
-  scoped_refptr<Extension> CreateExtension(const FilePath::StringType& path,
-                                           Extension::Location location,
-                                           const DictionaryValue& extra_value);
+  scoped_refptr<extensions::Extension> CreateExtension(
+      const FilePath::StringType& path,
+      extensions::Extension::Location location,
+      const DictionaryValue& extra_value);
 
+  void MoveMouseAndWaitForExpansionStateChange(Panel* panel,
+                                               const gfx::Point& position);
   static void MoveMouse(const gfx::Point& position);
-  void CloseWindowAndWait(Browser* browser);
+  void CloseWindowAndWait(Panel* panel);
   static std::string MakePanelName(int index);
 
   // |primary_screen_area| must contain |work_area|. If empty rect is passed

@@ -17,8 +17,11 @@
 #include "chrome/browser/extensions/extension_event_router.h"
 #include "chrome/browser/extensions/extension_management_api_constants.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_system.h"
+#include "chrome/browser/extensions/extension_uninstall_dialog.h"
+#include "chrome/browser/extensions/management_policy.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_utility_messages.h"
@@ -40,9 +43,22 @@ using base::IntToString;
 using content::BrowserThread;
 using content::UtilityProcessHost;
 using content::UtilityProcessHostClient;
+using extensions::Extension;
 
 namespace events = extension_event_names;
 namespace keys = extension_management_api_constants;
+
+namespace {
+
+enum AutoConfirmForTest {
+  DO_NOT_SKIP = 0,
+  PROCEED,
+  ABORT
+};
+
+AutoConfirmForTest auto_confirm_for_test = DO_NOT_SKIP;
+
+} // namespace
 
 ExtensionService* ExtensionManagementFunction::service() {
   return profile()->GetExtensionService();
@@ -58,11 +74,17 @@ static DictionaryValue* CreateExtensionInfo(const Extension& extension,
   bool enabled = service->IsExtensionEnabled(extension.id());
   extension.GetBasicInfo(enabled, info);
 
+  const extensions::ManagementPolicy* policy = ExtensionSystem::Get(
+      service->profile())->management_policy();
+  info->SetBoolean(keys::kMayDisableKey,
+                   policy->UserMayModifySettings(&extension, NULL));
+
   info->SetBoolean(keys::kIsAppKey, extension.is_app());
 
   if (!enabled) {
-    bool permissions_escalated = service->extension_prefs()->
-        DidExtensionEscalatePermissions(extension.id());
+    ExtensionPrefs* prefs = service->extension_prefs();
+    bool permissions_escalated =
+        prefs->DidExtensionEscalatePermissions(extension.id());
     const char* reason = permissions_escalated ?
         keys::kDisabledReasonPermissionsIncrease : keys::kDisabledReasonUnknown;
     info->SetString(keys::kDisabledReasonKey, reason);
@@ -169,7 +191,7 @@ bool GetPermissionWarningsByIdFunction::RunImpl() {
   const Extension* extension = service()->GetExtensionById(ext_id, true);
   if (!extension) {
     error_ = ExtensionErrorUtils::FormatErrorMessage(keys::kNoExtensionError,
-                                                       ext_id);
+                                                     ext_id);
     return false;
   }
 
@@ -189,7 +211,7 @@ namespace {
 class SafeManifestJSONParser : public UtilityProcessHostClient {
  public:
   SafeManifestJSONParser(GetPermissionWarningsByManifestFunction* client,
-                 const std::string& manifest)
+                         const std::string& manifest)
       : client_(client),
         manifest_(manifest) {}
 
@@ -290,8 +312,8 @@ void GetPermissionWarningsByManifestFunction::OnParseSuccess(
   CHECK(parsed_manifest);
 
   scoped_refptr<Extension> extension = Extension::Create(
-      FilePath(), Extension::INVALID, *parsed_manifest,
-      Extension::STRICT_ERROR_CHECKS, &error_);
+      FilePath(), Extension::INVALID, *parsed_manifest, Extension::NO_FLAGS,
+      &error_);
   if (!extension.get()) {
     OnParseFailure(keys::kExtensionCreateError);
     return;
@@ -339,8 +361,8 @@ bool LaunchAppFunction::RunImpl() {
   extension_misc::LaunchContainer launch_container =
       service()->extension_prefs()->GetLaunchContainer(
           extension, ExtensionPrefs::LAUNCH_DEFAULT);
-  Browser::OpenApplication(profile(), extension, launch_container, GURL(),
-                           NEW_FOREGROUND_TAB);
+  application_launch::OpenApplication(profile(), extension, launch_container,
+                                      GURL(), NEW_FOREGROUND_TAB, NULL);
 #if !defined(OS_ANDROID)
   AppLauncherHandler::RecordAppLaunchType(
       extension_misc::APP_LAUNCH_EXTENSION_API);
@@ -349,9 +371,11 @@ bool LaunchAppFunction::RunImpl() {
   return true;
 }
 
-SetEnabledFunction::SetEnabledFunction() {}
+SetEnabledFunction::SetEnabledFunction() {
+}
 
-SetEnabledFunction::~SetEnabledFunction() {}
+SetEnabledFunction::~SetEnabledFunction() {
+}
 
 bool SetEnabledFunction::RunImpl() {
   bool enable;
@@ -365,9 +389,11 @@ bool SetEnabledFunction::RunImpl() {
     return false;
   }
 
-  if (!Extension::UserMayDisable(extension->location())) {
+  const extensions::ManagementPolicy* policy = ExtensionSystem::Get(
+      profile())->management_policy();
+  if (!policy->UserMayModifySettings(extension, NULL)) {
     error_ = ExtensionErrorUtils::FormatErrorMessage(
-        keys::kUserCantDisableError, extension_id_);
+        keys::kUserCantModifyError, extension_id_);
     return false;
   }
 
@@ -381,8 +407,8 @@ bool SetEnabledFunction::RunImpl() {
         return false;
       }
       AddRef(); // Matched in InstallUIProceed/InstallUIAbort
-      install_ui_.reset(new ExtensionInstallUI(profile_));
-      install_ui_->ConfirmReEnable(this, extension);
+      install_prompt_.reset(new ExtensionInstallPrompt(GetCurrentBrowser()));
+      install_prompt_->ConfirmReEnable(this, extension);
       return true;
     }
     service()->EnableExtension(extension_id_);
@@ -410,28 +436,87 @@ void SetEnabledFunction::InstallUIAbort(bool user_initiated) {
   Release();
 }
 
+UninstallFunction::UninstallFunction() {
+}
+
+UninstallFunction::~UninstallFunction() {
+}
+
 bool UninstallFunction::RunImpl() {
-  std::string extension_id;
-  EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &extension_id));
+  bool show_confirm_dialog = false;
 
-  if (!service()->GetExtensionById(extension_id, true)) {
+  EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &extension_id_));
+
+  if (HasOptionalArgument(1)) {
+    DictionaryValue* options = NULL;
+    EXTENSION_FUNCTION_VALIDATE(args_->GetDictionary(1, &options));
+
+    if (options->HasKey(keys::kShowConfirmDialogKey)) {
+      EXTENSION_FUNCTION_VALIDATE(options->GetBoolean(
+          keys::kShowConfirmDialogKey, &show_confirm_dialog));
+    }
+  }
+
+  const Extension* extension = service()->GetExtensionById(extension_id_, true);
+  if (!extension) {
     error_ = ExtensionErrorUtils::FormatErrorMessage(
-        keys::kNoExtensionError, extension_id);
+        keys::kNoExtensionError, extension_id_);
     return false;
   }
 
-  ExtensionPrefs* prefs = service()->extension_prefs();
-
-  if (!Extension::UserMayDisable(
-      prefs->GetInstalledExtensionInfo(extension_id)->extension_location)) {
+  if (!ExtensionSystem::Get(
+      profile())->management_policy()->UserMayModifySettings(extension, NULL)) {
     error_ = ExtensionErrorUtils::FormatErrorMessage(
-        keys::kUserCantDisableError, extension_id);
+        keys::kUserCantModifyError, extension_id_);
     return false;
   }
 
-  service()->UninstallExtension(extension_id, false /* external_uninstall */,
-                                NULL);
+  if (auto_confirm_for_test == DO_NOT_SKIP) {
+    if (show_confirm_dialog) {
+      AddRef(); // Balanced in ExtensionUninstallAccepted/Canceled
+      extension_uninstall_dialog_.reset(ExtensionUninstallDialog::Create(
+          profile_, this));
+      extension_uninstall_dialog_->ConfirmUninstall(extension);
+    } else {
+      Finish(true);
+    }
+  } else {
+    Finish(auto_confirm_for_test == PROCEED);
+  }
+
   return true;
+}
+
+// static
+void UninstallFunction::SetAutoConfirmForTest(bool should_proceed) {
+  auto_confirm_for_test = should_proceed ? PROCEED : ABORT;
+}
+
+void UninstallFunction::Finish(bool should_uninstall) {
+  if (should_uninstall) {
+    bool success = service()->UninstallExtension(
+        extension_id_,
+        false, /* external uninstall */
+        NULL);
+
+    // TODO set error_ if !success
+    SendResponse(success);
+  } else {
+    error_ = ExtensionErrorUtils::FormatErrorMessage(
+        keys::kUninstallCanceledError, extension_id_);
+    SendResponse(false);
+  }
+
+}
+
+void UninstallFunction::ExtensionUninstallAccepted() {
+  Finish(true);
+  Release();
+}
+
+void UninstallFunction::ExtensionUninstallCanceled() {
+  Finish(false);
+  Release();
 }
 
 ExtensionManagementEventRouter::ExtensionManagementEventRouter(Profile* profile)
@@ -489,7 +574,8 @@ void ExtensionManagementEventRouter::Observe(
   } else {
     const Extension* extension = NULL;
     if (event_name == events::kOnExtensionDisabled) {
-      extension = content::Details<UnloadedExtensionInfo>(details)->extension;
+      extension = content::Details<extensions::UnloadedExtensionInfo>(
+          details)->extension;
     } else {
       extension = content::Details<const Extension>(details).ptr();
     }

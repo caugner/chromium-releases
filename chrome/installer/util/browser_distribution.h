@@ -67,16 +67,23 @@ class BrowserDistribution {
 
   virtual string16 GetAppGuid();
 
-  // Returns the name by which the program is registered with Default Programs.
-  // This is not a localized string suitable for presenting to a user.
-  virtual string16 GetApplicationName();
+  // Returns the unsuffixed application name of this program.
+  // This is the base of the name registered with Default Programs on Windows.
+  // IMPORTANT: This should only be called by the installer which needs to make
+  // decisions on the suffixing of the upcoming install, not by external callers
+  // at run-time.
+  virtual string16 GetBaseAppName();
 
   // Returns the localized name of the program.
   virtual string16 GetAppShortCutName();
 
   virtual string16 GetAlternateApplicationName();
 
-  virtual string16 GetBrowserAppId();
+  // Returns the unsuffixed appid of this program.
+  // The AppUserModelId is a property of Windows programs.
+  // IMPORTANT: This should only be called by ShellUtil::GetAppId as the appid
+  // should be suffixed in all scenarios.
+  virtual string16 GetBaseAppId();
 
   virtual string16 GetInstallSubDir();
 
@@ -122,9 +129,6 @@ class BrowserDistribution {
   // |type_lib_uuid| and |type_lib_version| identify its type library.
   // |interface_uuid| is the ICommandExecuteImpl interface UUID.
   // Only non-null parameters will be set, others will be ignored.
-  // Implementations that only provide a DelegateExecute handler for use on
-  // certain OS versions must only return true when run on those supported
-  // systems.
   virtual bool GetDelegateExecuteHandlerData(string16* handler_class_uuid,
                                              string16* type_lib_uuid,
                                              string16* type_lib_version,

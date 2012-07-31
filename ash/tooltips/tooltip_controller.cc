@@ -13,6 +13,8 @@
 #include "base/string_split.h"
 #include "base/time.h"
 #include "ui/aura/client/drag_drop_client.h"
+#include "ui/aura/cursor_manager.h"
+#include "ui/aura/env.h"
 #include "ui/aura/event.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
@@ -65,7 +67,7 @@ int GetMaxWidth(int x, int y) {
   // TODO(varunjain): implementation duplicated in tooltip_manager_aura. Figure
   // out a way to merge.
   gfx::Rect monitor_bounds =
-      gfx::Screen::GetMonitorNearestPoint(gfx::Point(x, y)).bounds();
+      gfx::Screen::GetDisplayNearestPoint(gfx::Point(x, y)).bounds();
   return (monitor_bounds.width() + 1) / 2;
 }
 
@@ -99,10 +101,9 @@ class TooltipController::Tooltip {
           views::Border::CreateSolidBorder(kTooltipBorderWidth,
                                            kTooltipBorder));
     }
-    label_.set_parent_owned(false);
+    label_.set_owned_by_client();
     widget_.reset(CreateTooltip());
     widget_->SetContentsView(&label_);
-    widget_->Activate();
   }
 
   ~Tooltip() {
@@ -155,7 +156,7 @@ class TooltipController::Tooltip {
 
     tooltip_rect.Offset(kCursorOffsetX, kCursorOffsetY);
     gfx::Rect monitor_bounds =
-        gfx::Screen::GetMonitorNearestPoint(tooltip_rect.origin()).bounds();
+        gfx::Screen::GetDisplayNearestPoint(tooltip_rect.origin()).bounds();
 
     // If tooltip is out of bounds on the x axis, we simply shift it
     // horizontally by the offset.
@@ -177,8 +178,10 @@ class TooltipController::Tooltip {
 ////////////////////////////////////////////////////////////////////////////////
 // TooltipController public:
 
-TooltipController::TooltipController()
-    : tooltip_window_(NULL),
+TooltipController::TooltipController(
+    aura::client::DragDropClient* drag_drop_client)
+    : drag_drop_client_(drag_drop_client),
+      tooltip_window_(NULL),
       tooltip_window_at_mouse_press_(NULL),
       mouse_pressed_(false),
       tooltip_(new Tooltip),
@@ -186,7 +189,7 @@ TooltipController::TooltipController()
   tooltip_timer_.Start(FROM_HERE,
       base::TimeDelta::FromMilliseconds(kTooltipTimeoutMs),
       this, &TooltipController::TooltipTimerFired);
-  aura::client::SetTooltipClient(Shell::GetRootWindow(), this);
+  DCHECK(drag_drop_client_);
 }
 
 TooltipController::~TooltipController() {
@@ -373,7 +376,7 @@ void TooltipController::TooltipTimerFired() {
 
 void TooltipController::UpdateIfRequired() {
   if (!tooltips_enabled_ || mouse_pressed_ || IsDragDropInProgress() ||
-      !Shell::GetRootWindow()->cursor_shown()) {
+      !aura::Env::GetInstance()->cursor_manager()->cursor_visible()) {
     tooltip_->Hide();
     return;
   }
@@ -418,11 +421,7 @@ bool TooltipController::IsTooltipVisible() {
 }
 
 bool TooltipController::IsDragDropInProgress() {
-  aura::client::DragDropClient* client = aura::client::GetDragDropClient(
-      Shell::GetRootWindow());
-  if (client)
-    return client->IsDragDropInProgress();
-  return false;
+  return drag_drop_client_->IsDragDropInProgress();
 }
 
 }  // namespace internal

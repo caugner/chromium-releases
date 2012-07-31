@@ -9,6 +9,7 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/callback.h"
+#include "base/command_line.h"
 #include "base/message_loop.h"
 #include "base/pickle.h"
 #include "base/string16.h"
@@ -22,6 +23,7 @@
 #include "ui/base/ime/text_input_client.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/ui_base_switches.h"
 #include "ui/gfx/render_text.h"
 #include "ui/views/controls/textfield/native_textfield_views.h"
 #include "ui/views/controls/textfield/textfield.h"
@@ -42,11 +44,6 @@ namespace {
 // OnKeyReleased() methods.
 class TestTextfield : public views::Textfield {
  public:
-  TestTextfield()
-      : key_handled_(false),
-        key_received_(false) {
-  }
-
   explicit TestTextfield(StyleFlags style)
       : Textfield(style),
         key_handled_(false),
@@ -68,9 +65,7 @@ class TestTextfield : public views::Textfield {
   bool key_handled() const { return key_handled_; }
   bool key_received() const { return key_received_; }
 
-  void clear() {
-    key_received_ = key_handled_ = false;
-  }
+  void clear() { key_received_ = key_handled_ = false; }
 
  private:
   bool key_handled_;
@@ -82,8 +77,7 @@ class TestTextfield : public views::Textfield {
 // A helper class for use with ui::TextInputClient::GetTextFromRange().
 class GetTextHelper {
  public:
-  GetTextHelper() {
-  }
+  GetTextHelper() {}
 
   void set_text(const string16& text) { text_ = text; }
   const string16& text() const { return text_; }
@@ -141,9 +135,7 @@ class NativeTextfieldViewsTest : public ViewsTestBase,
     last_contents_ = new_contents;
   }
 
-  virtual bool HandleKeyEvent(Textfield* sender,
-                              const KeyEvent& key_event) {
-
+  virtual bool HandleKeyEvent(Textfield* sender, const KeyEvent& key_event) {
     // TODO(oshima): figure out how to test the keystroke.
     return false;
   }
@@ -161,6 +153,10 @@ class NativeTextfieldViewsTest : public ViewsTestBase,
   }
 
   void InitTextfields(Textfield::StyleFlags style, int count) {
+    // Append kEnableViewsTextfield to use NativeTextfieldViews on Windows.
+    CommandLine* command_line = CommandLine::ForCurrentProcess();
+    command_line->AppendSwitch(switches::kEnableViewsTextfield);
+
     ASSERT_FALSE(textfield_);
     textfield_ = new TestTextfield(style);
     textfield_->SetController(this);
@@ -193,6 +189,8 @@ class NativeTextfieldViewsTest : public ViewsTestBase,
     // Assumes the Widget is always focused.
     input_method_->OnFocus();
 
+    // TODO(msw): Determine why this requires two calls to work on Windows.
+    textfield_->RequestFocus();
     textfield_->RequestFocus();
   }
 
@@ -366,14 +364,14 @@ TEST_F(NativeTextfieldViewsTest, ModelChangesTestLowerCase) {
 
   last_contents_.clear();
   textfield_->SetText(ASCIIToUTF16("THIS IS"));
-  EXPECT_EQ(0U, textfield_->GetCursorPosition());
+  EXPECT_EQ(7U, textfield_->GetCursorPosition());
 
   EXPECT_STR_EQ("this is", model_->GetText());
   EXPECT_STR_EQ("THIS IS", textfield_->text());
   EXPECT_TRUE(last_contents_.empty());
 
   textfield_->AppendText(ASCIIToUTF16(" A TEST"));
-  EXPECT_EQ(0U, textfield_->GetCursorPosition());
+  EXPECT_EQ(7U, textfield_->GetCursorPosition());
   EXPECT_STR_EQ("this is a test", model_->GetText());
   EXPECT_STR_EQ("THIS IS A TEST", textfield_->text());
 
@@ -388,7 +386,7 @@ TEST_F(NativeTextfieldViewsTest, ModelChangesTestLowerCaseI18n) {
   last_contents_.clear();
   // Zenkaku Japanese "ABCabc"
   textfield_->SetText(WideToUTF16(L"\xFF21\xFF22\xFF23\xFF41\xFF42\xFF43"));
-  EXPECT_EQ(0U, textfield_->GetCursorPosition());
+  EXPECT_EQ(6U, textfield_->GetCursorPosition());
   // Zenkaku Japanese "abcabc"
   EXPECT_EQ(WideToUTF16(L"\xFF41\xFF42\xFF43\xFF41\xFF42\xFF43"),
             model_->GetText());
@@ -399,7 +397,7 @@ TEST_F(NativeTextfieldViewsTest, ModelChangesTestLowerCaseI18n) {
 
   // Zenkaku Japanese "XYZxyz"
   textfield_->AppendText(WideToUTF16(L"\xFF38\xFF39\xFF3A\xFF58\xFF59\xFF5A"));
-  EXPECT_EQ(0U, textfield_->GetCursorPosition());
+  EXPECT_EQ(6U, textfield_->GetCursorPosition());
   // Zenkaku Japanese "abcabcxyzxyz"
   EXPECT_EQ(WideToUTF16(L"\xFF41\xFF42\xFF43\xFF41\xFF42\xFF43"
                         L"\xFF58\xFF59\xFF5A\xFF58\xFF59\xFF5A"),
@@ -422,7 +420,7 @@ TEST_F(NativeTextfieldViewsTest, ModelChangesTestLowerCaseWithLocale) {
   last_contents_.clear();
   // Turkish 'I' should be converted to dotless 'i' (U+0131).
   textfield_->SetText(WideToUTF16(L"I"));
-  EXPECT_EQ(0U, textfield_->GetCursorPosition());
+  EXPECT_EQ(1U, textfield_->GetCursorPosition());
   EXPECT_EQ(WideToUTF16(L"\x0131"), model_->GetText());
   EXPECT_EQ(WideToUTF16(L"I"), textfield_->text());
   EXPECT_TRUE(last_contents_.empty());
@@ -431,7 +429,7 @@ TEST_F(NativeTextfieldViewsTest, ModelChangesTestLowerCaseWithLocale) {
 
   // On default (en) locale, 'I' should be converted to 'i'.
   textfield_->SetText(WideToUTF16(L"I"));
-  EXPECT_EQ(0U, textfield_->GetCursorPosition());
+  EXPECT_EQ(1U, textfield_->GetCursorPosition());
   EXPECT_EQ(WideToUTF16(L"i"), model_->GetText());
   EXPECT_EQ(WideToUTF16(L"I"), textfield_->text());
   EXPECT_TRUE(last_contents_.empty());
@@ -462,8 +460,8 @@ TEST_F(NativeTextfieldViewsTest, ControlAndSelectTest) {
   // Insert a test string in a textfield.
   InitTextfield(Textfield::STYLE_DEFAULT);
   textfield_->SetText(ASCIIToUTF16("one two three"));
-  SendKeyEvent(ui::VKEY_RIGHT,
-                              true /* shift */, false /* control */);
+  SendKeyEvent(ui::VKEY_HOME,  false /* shift */, false /* control */);
+  SendKeyEvent(ui::VKEY_RIGHT, true, false);
   SendKeyEvent(ui::VKEY_RIGHT, true, false);
   SendKeyEvent(ui::VKEY_RIGHT, true, false);
 
@@ -1656,6 +1654,47 @@ TEST_F(NativeTextfieldViewsTest, OverflowInRTLTest) {
 
   // Reset locale.
   base::i18n::SetICUDefaultLocale(locale);
+}
+
+TEST_F(NativeTextfieldViewsTest, GetCompositionCharacterBoundsTest) {
+  InitTextfield(Textfield::STYLE_DEFAULT);
+
+  string16 str;
+  const uint32 char_count = 10UL;
+  ui::CompositionText composition;
+  composition.text = UTF8ToUTF16("0123456789");
+  ui::TextInputClient* client = textfield_->GetTextInputClient();
+
+  // Return false if there is no composition text.
+  gfx::Rect rect;
+  EXPECT_FALSE(client->GetCompositionCharacterBounds(0, &rect));
+
+  // Get each character boundary by cursor.
+  gfx::Rect char_rect[char_count];
+  gfx::Rect prev_cursor = GetCursorBounds();
+  for (uint32 i = 0; i < char_count; ++i) {
+    composition.selection = ui::Range(0, i+1);
+    client->SetCompositionText(composition);
+    EXPECT_TRUE(client->HasCompositionText()) << " i=" << i;
+    gfx::Rect cursor_bounds = GetCursorBounds();
+    char_rect[i] = gfx::Rect(prev_cursor.x(),
+                             prev_cursor.y(),
+                             cursor_bounds.x() - prev_cursor.x(),
+                             prev_cursor.height());
+    prev_cursor = cursor_bounds;
+  }
+
+  for (uint32 i = 0; i < char_count; ++i) {
+    gfx::Rect actual_rect;
+    EXPECT_TRUE(client->GetCompositionCharacterBounds(i, &actual_rect))
+        << " i=" << i;
+    EXPECT_EQ(char_rect[i], actual_rect) << " i=" << i;
+  }
+
+  // Return false if the index is out of range.
+  EXPECT_FALSE(client->GetCompositionCharacterBounds(char_count, &rect));
+  EXPECT_FALSE(client->GetCompositionCharacterBounds(char_count + 1, &rect));
+  EXPECT_FALSE(client->GetCompositionCharacterBounds(char_count + 100, &rect));
 }
 
 }  // namespace views

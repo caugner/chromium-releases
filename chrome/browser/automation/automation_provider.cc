@@ -36,6 +36,7 @@
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_storage.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browsing_data_helper.h"
 #include "chrome/browser/browsing_data_remover.h"
 #include "chrome/browser/character_encoding.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
@@ -46,7 +47,7 @@
 #include "chrome/browser/ssl/ssl_blocking_page.h"
 #include "chrome/browser/ui/app_modal_dialogs/app_modal_dialog.h"
 #include "chrome/browser/ui/app_modal_dialogs/app_modal_dialog_queue.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/find_bar/find_bar.h"
 #include "chrome/browser/ui/find_bar/find_bar_controller.h"
@@ -54,7 +55,7 @@
 #include "chrome/browser/ui/find_bar/find_tab_helper.h"
 #include "chrome/browser/ui/login/login_prompt.h"
 #include "chrome/browser/ui/omnibox/location_bar.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/automation_constants.h"
 #include "chrome/common/automation_messages.h"
 #include "chrome/common/chrome_constants.h"
@@ -182,6 +183,10 @@ AutomationProvider::~AutomationProvider() {
     channel_->Close();
 }
 
+void AutomationProvider::set_profile(Profile* profile) {
+  profile_ = profile;
+}
+
 bool AutomationProvider::InitializeChannel(const std::string& channel_id) {
   TRACE_EVENT_BEGIN_ETW("AutomationProvider::InitializeChannel", 0, "");
 
@@ -219,7 +224,7 @@ bool AutomationProvider::InitializeChannel(const std::string& channel_id) {
     if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kLoginManager) &&
         !chromeos::UserManager::Get()->IsUserLoggedIn()) {
       login_webui_ready_ = false;
-      new LoginWebuiReadyObserver(this);
+      new OOBEWebuiReadyObserver(this);
     }
 
     // Wait for the network manager to initialize.
@@ -269,9 +274,9 @@ void AutomationProvider::OnNetworkLibraryInit() {
   SendInitialLoadMessage();
 }
 
-void AutomationProvider::OnLoginWebuiReady() {
+void AutomationProvider::OnOOBEWebuiReady() {
   login_webui_ready_ = true;
-  VLOG(2) << "OnLoginWebuiReady";
+  VLOG(2) << "OnOOBEWebuiReady";
   SendInitialLoadMessage();
 }
 
@@ -287,7 +292,7 @@ void AutomationProvider::DisableInitialLoadObservers() {
   use_initial_load_observers_ = false;
   OnInitialTabLoadsComplete();
   OnNetworkLibraryInit();
-  OnLoginWebuiReady();
+  OnOOBEWebuiReady();
 }
 
 int AutomationProvider::GetIndexForNavigationController(
@@ -468,7 +473,7 @@ bool AutomationProvider::Send(IPC::Message* msg) {
 Browser* AutomationProvider::FindAndActivateTab(
     NavigationController* controller) {
   int tab_index;
-  Browser* browser = Browser::GetBrowserForController(controller, &tab_index);
+  Browser* browser = browser::FindBrowserForController(controller, &tab_index);
   if (browser)
     browser->ActivateTabAt(tab_index, true);
 
@@ -514,10 +519,9 @@ void AutomationProvider::SendFindRequest(
   if (!with_json) {
     find_in_page_observer_.reset(observer);
   }
-  TabContentsWrapper* wrapper =
-      TabContentsWrapper::GetCurrentWrapperForContents(web_contents);
-  if (wrapper)
-    wrapper->find_tab_helper()->set_current_find_request_id(request_id);
+  TabContents* tab_contents = TabContents::FromWebContents(web_contents);
+  if (tab_contents)
+    tab_contents->find_tab_helper()->set_current_find_request_id(request_id);
 
   WebFindOptions options;
   options.forward = forward;
@@ -670,8 +674,7 @@ void AutomationProvider::OnSetPageFontSize(int tab_handle,
       DCHECK(tab->GetWebContents()->GetBrowserContext() != NULL);
       Profile* profile = Profile::FromBrowserContext(
           tab->GetWebContents()->GetBrowserContext());
-      profile->GetPrefs()->SetInteger(
-          prefs::kWebKitGlobalDefaultFontSize, font_size);
+      profile->GetPrefs()->SetInteger(prefs::kWebKitDefaultFontSize, font_size);
     }
   }
 }
@@ -681,7 +684,7 @@ void AutomationProvider::RemoveBrowsingData(int remove_mask) {
   remover = new BrowsingDataRemover(profile(),
       BrowsingDataRemover::EVERYTHING,  // All time periods.
       base::Time());
-  remover->Remove(remove_mask);
+  remover->Remove(remove_mask, BrowsingDataHelper::UNPROTECTED_WEB);
   // BrowsingDataRemover deletes itself.
 }
 

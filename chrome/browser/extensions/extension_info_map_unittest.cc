@@ -9,12 +9,13 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
-#include "content/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURL.h"
 
 using content::BrowserThread;
+using extensions::Extension;
 using WebKit::WebSecurityOrigin;
 using WebKit::WebString;
 
@@ -50,7 +51,7 @@ static scoped_refptr<Extension> CreateExtension(const std::string& name) {
   std::string error;
   scoped_refptr<Extension> extension = Extension::Create(
       path.AppendASCII(name), Extension::INVALID, manifest,
-      Extension::STRICT_ERROR_CHECKS, &error);
+      Extension::NO_FLAGS, &error);
   EXPECT_TRUE(extension) << error;
 
   return extension;
@@ -72,7 +73,7 @@ static scoped_refptr<Extension> LoadManifest(const std::string& dir,
   std::string error;
   scoped_refptr<Extension> extension = Extension::Create(
       path, Extension::INVALID, *static_cast<DictionaryValue*>(result.get()),
-      Extension::STRICT_ERROR_CHECKS, &error);
+      Extension::NO_FLAGS, &error);
   EXPECT_TRUE(extension) << error;
 
   return extension;

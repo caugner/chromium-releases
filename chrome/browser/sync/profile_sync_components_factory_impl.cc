@@ -15,7 +15,6 @@
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
-#include "chrome/browser/sync/api/syncable_service.h"
 #include "chrome/browser/sync/glue/app_notification_data_type_controller.h"
 #include "chrome/browser/sync/glue/autofill_data_type_controller.h"
 #include "chrome/browser/sync/glue/autofill_profile_data_type_controller.h"
@@ -47,9 +46,11 @@
 #include "chrome/browser/webdata/autocomplete_syncable_service.h"
 #include "chrome/browser/webdata/autofill_profile_syncable_service.h"
 #include "chrome/browser/webdata/web_data_service.h"
+#include "chrome/browser/webdata/web_data_service_factory.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_thread.h"
+#include "sync/api/syncable_service.h"
 
 using browser_sync::AppNotificationDataTypeController;
 using browser_sync::AutofillDataTypeController;
@@ -87,7 +88,12 @@ ProfileSyncComponentsFactoryImpl::ProfileSyncComponentsFactoryImpl(
     : profile_(profile),
       command_line_(command_line),
       extension_system_(
-          ExtensionSystem::Get(profile)) {
+          ExtensionSystemFactory::GetForProfile(profile)),
+      web_data_service_(WebDataServiceFactory::GetForProfile(
+          profile_, Profile::IMPLICIT_ACCESS)) {
+}
+
+ProfileSyncComponentsFactoryImpl::~ProfileSyncComponentsFactoryImpl() {
 }
 
 void ProfileSyncComponentsFactoryImpl::RegisterDataTypes(
@@ -159,8 +165,6 @@ void ProfileSyncComponentsFactoryImpl::RegisterDataTypes(
   }
 
   // Session sync is enabled by default.  Register unless explicitly disabled.
-  // TODO(dubroy): Once this change is permanent, clean up the logic for
-  // explicitly enabling tab sync (http://crbug.com/118570).
   if (!command_line_->HasSwitch(switches::kDisableSyncTabs)) {
     pss->RegisterDataTypeController(
         new SessionDataTypeController(this, profile_, pss));
@@ -227,14 +231,14 @@ base::WeakPtr<SyncableService> ProfileSyncComponentsFactoryImpl::
       return profile_->GetPrefs()->GetSyncableService()->AsWeakPtr();
     case syncable::AUTOFILL:
     case syncable::AUTOFILL_PROFILE: {
-      WebDataService* wds =
-          profile_->GetWebDataService(Profile::IMPLICIT_ACCESS);
-      if (!wds)
+      if (!web_data_service_.get())
         return base::WeakPtr<SyncableService>();
-      if (type == syncable::AUTOFILL)
-        return wds->GetAutocompleteSyncableService()->AsWeakPtr();
-      else
-        return wds->GetAutofillProfileSyncableService()->AsWeakPtr();
+      if (type == syncable::AUTOFILL) {
+        return web_data_service_->GetAutocompleteSyncableService()->AsWeakPtr();
+      } else {
+        return web_data_service_->
+                   GetAutofillProfileSyncableService()->AsWeakPtr();
+      }
     }
     case syncable::APPS:
     case syncable::EXTENSIONS:

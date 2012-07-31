@@ -19,7 +19,7 @@ class LoadTimingObserverTest : public InProcessBrowserTest {
 };
 
 // http://crbug.com/102030
-IN_PROC_BROWSER_TEST_F(LoadTimingObserverTest, CacheHitAfterRedirect) {
+IN_PROC_BROWSER_TEST_F(LoadTimingObserverTest, FLAKY_CacheHitAfterRedirect) {
   ASSERT_TRUE(test_server()->Start());
   GURL cached_page = test_server()->GetURL("cachetime");
   std::string redirect = "server-redirect?" + cached_page.spec();
@@ -29,7 +29,7 @@ IN_PROC_BROWSER_TEST_F(LoadTimingObserverTest, CacheHitAfterRedirect) {
   int response_start = 0;
   int response_end = 0;
   content::RenderViewHost* render_view_host =
-      browser()->GetSelectedWebContents()->GetRenderViewHost();
+      browser()->GetActiveWebContents()->GetRenderViewHost();
   ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractInt(
       render_view_host, L"",
       L"window.domAutomationController.send("

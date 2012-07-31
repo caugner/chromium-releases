@@ -22,6 +22,7 @@
 #include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/chromeos/login/language_switch_menu.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
+#include "chrome/browser/chromeos/login/login_wizard.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/login/webui_login_display_host.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
@@ -129,7 +130,8 @@ LoginDisplayHost* BaseLoginDisplayHost::default_host_ = NULL;
 
 BaseLoginDisplayHost::BaseLoginDisplayHost(const gfx::Rect& background_bounds)
     : background_bounds_(background_bounds),
-      ALLOW_THIS_IN_INITIALIZER_LIST(pointer_factory_(this)) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(pointer_factory_(this)),
+      shutting_down_(false) {
   // We need to listen to APP_EXITING but not APP_TERMINATING because
   // APP_TERMINATING will never be fired as long as this keeps ref-count.
   // APP_EXITING is safe here because there will be no browser instance that
@@ -167,6 +169,8 @@ BaseLoginDisplayHost::~BaseLoginDisplayHost() {
 
 void BaseLoginDisplayHost::OnSessionStart() {
   DVLOG(1) << "Session starting";
+  if (wizard_controller_.get())
+    wizard_controller_->OnSessionStart();
   // Display host is deleted once animation is completed
   // since sign in screen widget has to stay alive.
   StartAnimation();
@@ -282,6 +286,10 @@ void BaseLoginDisplayHost::Observe(
 }
 
 void BaseLoginDisplayHost::ShutdownDisplayHost(bool post_quit_task) {
+  if (shutting_down_)
+    return;
+
+  shutting_down_ = true;
   registrar_.RemoveAll();
   MessageLoop::current()->DeleteSoon(FROM_HERE, this);
   if (post_quit_task)
@@ -289,7 +297,8 @@ void BaseLoginDisplayHost::ShutdownDisplayHost(bool post_quit_task) {
 }
 
 void BaseLoginDisplayHost::StartAnimation() {
-  if (ash::Shell::GetInstance()->GetContainer(
+  if (ash::Shell::GetContainer(
+          ash::Shell::GetPrimaryRootWindow(),
           ash::internal::kShellWindowId_DesktopBackgroundContainer)->
           children().empty()) {
     // If there is no background window, don't perform any animation on the
@@ -316,7 +325,8 @@ void BaseLoginDisplayHost::StartAnimation() {
   // Background animation.
   if (do_background_animation) {
     ui::Layer* background_layer =
-        ash::Shell::GetInstance()->GetContainer(
+        ash::Shell::GetContainer(
+            ash::Shell::GetPrimaryRootWindow(),
             ash::internal::kShellWindowId_DesktopBackgroundContainer)->
                 layer();
 
@@ -347,8 +357,9 @@ void BaseLoginDisplayHost::StartAnimation() {
   // Browser windows layer opacity and transform animation.
   if (do_browser_transform_animation || do_browser_opacity_animation) {
     ui::Layer* default_container_layer =
-        ash::Shell::GetInstance()->GetContainer(
-              ash::internal::kShellWindowId_DefaultContainer)->layer();
+        ash::Shell::GetContainer(
+            ash::Shell::GetPrimaryRootWindow(),
+            ash::internal::kShellWindowId_DefaultContainer)->layer();
 
     ui::LayerAnimationElement::AnimatableProperties browser_pause_properties;
 
@@ -438,14 +449,7 @@ void BaseLoginDisplayHost::ForceAutoEnrollment() {
     sign_in_controller_->DoAutoEnrollment();
 }
 
-}  // namespace chromeos
-
-////////////////////////////////////////////////////////////////////////////////
-// browser::ShowLoginWizard implementation:
-
-namespace browser {
-
-// Declared in browser_dialogs.h so that others don't need to depend on our .h.
+// Declared in login_wizard.h so that others don't need to depend on our .h.
 // TODO(nkostylev): Split this into a smaller functions.
 void ShowLoginWizard(const std::string& first_screen_name,
                      const gfx::Size& size) {
@@ -569,4 +573,4 @@ void ShowLoginWizard(const std::string& first_screen_name,
   }
 }
 
-}  // namespace browser
+}  // namespace chromeos

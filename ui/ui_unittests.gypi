@@ -7,6 +7,9 @@
     {
       'target_name': 'ui_test_support',
       'type': 'static_library',
+      'includes': [
+        'base/ime/ime_test_support.gypi',
+      ],
       'dependencies': [
         '../base/base.gyp:base',
         '../testing/gtest.gyp:gtest',
@@ -21,6 +24,14 @@
       ],
       'include_dirs': [
         '../',
+      ],
+      'conditions': [
+        ['chromeos==1', {
+          'dependencies': [
+            '../chromeos/chromeos.gyp:chromeos_test_support',
+            '../skia/skia.gyp:skia',
+          ]
+        }],
       ],
     },
     {
@@ -39,8 +50,8 @@
         '../third_party/icu/icu.gyp:icui18n',
         '../third_party/icu/icu.gyp:icuuc',
         '../third_party/libpng/libpng.gyp:libpng',
-        'gfx_resources',
         'ui',
+        'ui_resources_standard',
         'ui_test_support',
       ],
       'sources': [
@@ -80,6 +91,7 @@
         'gfx/codec/png_codec_unittest.cc',
         'gfx/color_analysis_unittest.cc',
         'gfx/color_utils_unittest.cc',
+        'gfx/display_unittest.cc',
         'gfx/font_list_unittest.cc',
         'gfx/font_unittest.cc',
         'gfx/image/image_mac_unittest.mm',
@@ -87,17 +99,17 @@
         'gfx/image/image_unittest_util.cc',
         'gfx/image/image_unittest_util.h',
         'gfx/insets_unittest.cc',
-        'gfx/monitor_unittest.cc',
         'gfx/rect_unittest.cc',
         'gfx/screen_unittest.cc',
         'gfx/shadow_value_unittest.cc',
         'gfx/skbitmap_operations_unittest.cc',
         'gfx/skia_util_unittest.cc',
         'gfx/transform_util_unittest.cc',
+        'gfx/video_decode_acceleration_support_mac_unittest.mm',
         'test/run_all_unittests.cc',
         'test/test_suite.cc',
         'test/test_suite.h',
-        '<(SHARED_INTERMEDIATE_DIR)/ui/gfx/gfx_resources.rc',
+        '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources_standard/ui_resources_standard.rc',
       ],
       'include_dirs': [
         '../',
@@ -106,9 +118,9 @@
         ['OS == "win"', {
           'sources': [
             'base/dragdrop/os_exchange_data_win_unittest.cc',
+            'base/native_theme/native_theme_win_unittest.cc',
             'base/win/hwnd_subclass_unittest.cc',
             'gfx/icon_util_unittest.cc',
-            'gfx/native_theme_win_unittest.cc',
             'gfx/platform_font_win_unittest.cc',
           ],
           'include_dirs': [
@@ -150,7 +162,7 @@
             'gfx/interpolated_transform_unittest.cc',
           ],
         }],
-        ['OS=="android" and "<(gtest_target_type)"=="shared_library"', {
+        ['OS == "android" and gtest_target_type == "shared_library"', {
           'dependencies': [
             '../testing/android/native_test.gyp:native_test_native_code',
           ],
@@ -194,9 +206,9 @@
         }],
         ['use_aura==1', {
           'sources!': [
-            'gfx/screen_unittest.cc',
-            'gfx/native_theme_win_unittest.cc',
             'base/dragdrop/os_exchange_data_win_unittest.cc',
+            'base/native_theme/native_theme_win_unittest.cc',
+            'gfx/screen_unittest.cc',
           ],
         }],
         ['use_aura==1 or toolkit_views==1', {
@@ -208,46 +220,24 @@
     },
   ],
   'conditions': [
-    # Special target to wrap a <(gtest_target_type)==shared_library
+    # Special target to wrap a gtest_target_type==shared_library
     # ui_unittests into an android apk for execution.
     # See base.gyp for TODO(jrg)s about this strategy.
-    ['OS=="android" and "<(gtest_target_type)"=="shared_library"', {
+    ['OS == "android" and gtest_target_type == "shared_library"', {
       'targets': [
         {
           'target_name': 'ui_unittests_apk',
           'type': 'none',
           'dependencies': [
+            '../base/base.gyp:base_java',
             'ui_unittests',
           ],
-          'actions': [
-            {
-              # Generate apk files (including source and antfile) from
-              # a template, and builds them.
-              'action_name': 'generate_and_build',
-              'inputs': [
-                '../testing/android/generate_native_test.py',
-                '<(PRODUCT_DIR)/lib.target/libui_unittests.so',
-                '<(PRODUCT_DIR)/chromium_base.jar',
-              ],
-              'outputs': [
-                '<(PRODUCT_DIR)/ChromeNativeTests_ui_unittests-debug.apk',
-              ],
-              'action': [
-                '../testing/android/generate_native_test.py',
-                '--native_library',
-                '<(PRODUCT_DIR)/lib.target/libui_unittests.so',
-                # TODO(jrg): find a better way to specify jar
-                # dependencies.  Hard coding seems fragile.
-                '--jar',
-                '<(PRODUCT_DIR)/chromium_base.jar',
-                '--output',
-                '<(PRODUCT_DIR)/ui_unittests_apk',
-                '--ant-args',
-                '-DPRODUCT_DIR=<(PRODUCT_DIR)',
-                '--ant-compile'
-              ],
-            },
-          ]
+          'variables': {
+            'test_suite_name': 'ui_unittests',
+            'input_shlib_path': '<(SHARED_LIB_DIR)/<(SHARED_LIB_PREFIX)ui_unittests<(SHARED_LIB_SUFFIX)',
+            'input_jars_paths': ['<(PRODUCT_DIR)/lib.java/chromium_base.jar',],
+          },
+          'includes': [ '../build/apk_test.gypi' ],
         },
       ],
     }],

@@ -4,7 +4,7 @@
 
 // Constants.
 /** @const */ var FEEDBACK_LANDING_PAGE =
-    'http://www.google.com/support/chrome/go/feedback_confirmation';
+    'https://www.google.com/support/chrome/go/feedback_confirmation';
 
 var selectedThumbnailDivId = '';
 var selectedThumbnailId = '';
@@ -15,8 +15,6 @@ savedThumbnailIds['current-screenshots'] = '';
 savedThumbnailIds['saved-screenshots'] = '';
 
 var categoryTag = '';
-
-var localStrings = new LocalStrings();
 
 /**
  * Selects an image thumbnail in the specified div.
@@ -30,15 +28,16 @@ function selectImage(divId, thumbnailId) {
     $(divId).hidden = true;
     return;
   }
+
   for (var i = 0; i < thumbnailDivs.length; i++) {
+    thumbnailDivs[i].className = 'image-thumbnail-container';
+
     // If the the current div matches the thumbnail id provided,
     // or there is no thumbnail id given, and we're at the first thumbnail.
-    if ((thumbnailDivs[i].id == thumbnailId) || (!thumbnailId && !i)) {
-      thumbnailDivs[i].className = 'image-thumbnail-container-selected';
+    if (thumbnailDivs[i].id == thumbnailId || (!thumbnailId && !i)) {
+      thumbnailDivs[i].classList.add('image-thumbnail-container-selected');
       selectedThumbnailId = thumbnailId;
       savedThumbnailIds[divId] = thumbnailId;
-    } else {
-      thumbnailDivs[i].className = 'image-thumbnail-container';
     }
   }
 }
@@ -58,10 +57,7 @@ function addScreenshot(divId, screenshot) {
   };
 
   var innerDiv = document.createElement('div');
-  if (divId == 'current-screenshots')
-    innerDiv.className = 'image-thumbnail-current';
-  else
-    innerDiv.className = 'image-thumbnail';
+  innerDiv.className = 'image-thumbnail';
 
   var thumbnail = document.createElement('img');
   thumbnail.id = thumbnailDiv.id + '-image';
@@ -97,7 +93,7 @@ function disableScreenshots() {
  */
 function sendReport() {
   if ($('description-text').value.length == 0) {
-    alert(localStrings.getString('no-description'));
+    alert(loadTimeData.getString('no-description'));
     return false;
   }
 
@@ -157,18 +153,16 @@ function currentSelected() {
  * selected when we had this div open previously.
  */
 function savedSelected() {
-  $('current-screenshots').hidden = true;
-
   if ($('saved-screenshots').childElementCount == 0) {
     // setupSavedScreenshots will take care of changing visibility
     chrome.send('refreshSavedScreenshots');
   } else {
+    $('current-screenshots').hidden = true;
     $('saved-screenshots').hidden = false;
     if (selectedThumbnailDivId != 'saved-screenshots')
       selectImage('saved-screenshots', savedThumbnailIds['saved-screenshots']);
   }
 }
-
 
 /**
  * Change the type of screenshot we're showing to the user from
@@ -219,10 +213,6 @@ function load() {
   $('send-report-button').onclick = sendReport;
   $('cancel-button').onclick = cancel;
 
-  var menuOffPattern = /(^\?|&)menu=off($|&)/;
-  var menuDisabled = menuOffPattern.test(window.location.search);
-  document.documentElement.setAttribute('hide-menu', menuDisabled);
-
   // Set default values for the possible parameters, and then parse the actual
   // values from the URL hash.
   var parameters = {
@@ -267,9 +257,10 @@ function setupCurrentScreenshot(screenshot) {
 function setupSavedScreenshots(screenshots) {
   if (screenshots.length == 0) {
     $('saved-screenshots').textContent =
-        localStrings.getString('no-saved-screenshots');
+        loadTimeData.getString('no-saved-screenshots');
 
     // Make sure we make the display the message.
+    $('current-screenshots').hidden = true;
     $('saved-screenshots').hidden = false;
 
     // In case the user tries to send now; fail safe, do not send a screenshot

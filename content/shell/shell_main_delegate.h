@@ -14,8 +14,10 @@
 namespace content {
 class ShellContentBrowserClient;
 class ShellContentRendererClient;
-class ShellContentPluginClient;
-class ShellContentUtilityClient;
+
+#if defined(OS_ANDROID)
+class BrowserMainRunner;
+#endif
 }  // namespace content
 
 class ShellMainDelegate : public content::ContentMainDelegate {
@@ -23,33 +25,26 @@ class ShellMainDelegate : public content::ContentMainDelegate {
   ShellMainDelegate();
   virtual ~ShellMainDelegate();
 
+  // content::ContentMainDelegate implementation:
   virtual bool BasicStartupComplete(int* exit_code) OVERRIDE;
   virtual void PreSandboxStartup() OVERRIDE;
-  virtual void SandboxInitialized(const std::string& process_type) OVERRIDE;
   virtual int RunProcess(
       const std::string& process_type,
       const content::MainFunctionParams& main_function_params) OVERRIDE;
-  virtual void ProcessExiting(const std::string& process_type) OVERRIDE;
-#if defined(OS_MACOSX)
-  virtual bool ProcessRegistersWithSystemProcess(
-      const std::string& process_type) OVERRIDE;
-  virtual bool ShouldSendMachPort(const std::string& process_type) OVERRIDE;
-  virtual bool DelaySandboxInitialization(
-      const std::string& process_type) OVERRIDE;
-#elif defined(OS_POSIX)
-  virtual content::ZygoteForkDelegate* ZygoteStarting() OVERRIDE;
-  virtual void ZygoteForked() OVERRIDE;
-#endif  // OS_MACOSX
+  virtual content::ContentBrowserClient* CreateContentBrowserClient() OVERRIDE;
+  virtual content::ContentRendererClient*
+      CreateContentRendererClient() OVERRIDE;
 
  private:
-  void InitializeShellContentClient(const std::string& process_type);
   void InitializeResourceBundle();
 
   scoped_ptr<content::ShellContentBrowserClient> browser_client_;
   scoped_ptr<content::ShellContentRendererClient> renderer_client_;
-  scoped_ptr<content::ShellContentPluginClient> plugin_client_;
-  scoped_ptr<content::ShellContentUtilityClient> utility_client_;
   content::ShellContentClient content_client_;
+
+#if defined(OS_ANDROID)
+  scoped_ptr<content::BrowserMainRunner> browser_runner_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(ShellMainDelegate);
 };

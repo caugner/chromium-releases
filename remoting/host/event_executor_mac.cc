@@ -8,9 +8,12 @@
 #include <Carbon/Carbon.h>
 
 #include "base/basictypes.h"
+#include "base/bind.h"
 #include "base/compiler_specific.h"
+#include "base/location.h"
 #include "base/mac/scoped_cftyperef.h"
-#include "base/message_loop.h"
+#include "base/single_thread_task_runner.h"
+#include "remoting/host/clipboard.h"
 #include "remoting/proto/internal.pb.h"
 #include "remoting/protocol/message_decoder.h"
 #include "third_party/skia/include/core/SkPoint.h"
@@ -25,13 +28,13 @@ using protocol::MouseEvent;
 
 // USB to Mac keycode mapping table.
 #define USB_KEYMAP(usb, xkb, win, mac) {usb, mac}
-#include "remoting/host/usb_keycode_map.h"
+#include "ui/base/keycodes/usb_keycode_map.h"
 #undef USB_KEYMAP
 
 // A class to generate events on Mac.
 class EventExecutorMac : public EventExecutor {
  public:
-  EventExecutorMac(MessageLoop* message_loop);
+  EventExecutorMac(scoped_refptr<base::SingleThreadTaskRunner> task_runner);
   virtual ~EventExecutorMac() {}
 
   // ClipboardStub interface.
@@ -41,17 +44,34 @@ class EventExecutorMac : public EventExecutor {
   virtual void InjectKeyEvent(const KeyEvent& event) OVERRIDE;
   virtual void InjectMouseEvent(const MouseEvent& event) OVERRIDE;
 
+  // EventExecutor interface.
+  virtual void OnSessionStarted(
+      scoped_ptr<protocol::ClipboardStub> client_clipboard) OVERRIDE;
+  virtual void OnSessionFinished() OVERRIDE;
+
  private:
-  MessageLoop* message_loop_;
+  scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
   SkIPoint mouse_pos_;
   uint32 mouse_button_state_;
+  scoped_ptr<Clipboard> clipboard_;
 
   DISALLOW_COPY_AND_ASSIGN(EventExecutorMac);
 };
 
 EventExecutorMac::EventExecutorMac(
-    MessageLoop* message_loop)
-    : message_loop_(message_loop), mouse_button_state_(0) {
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner)
+    : task_runner_(task_runner),
+      mouse_button_state_(0),
+      clipboard_(Clipboard::Create()) {
+  // Ensure that local hardware events are not suppressed after injecting
+  // input events.  This allows LocalInputMonitor to detect if the local mouse
+  // is being moved whilst a remote user is connected.
+  // This API is deprecated, but it is needed when using the deprecated
+  // injection APIs.
+  // If the non-deprecated injection APIs were used instead, the equivalent of
+  // this line would not be needed, as OS X defaults to _not_ suppressing local
+  // inputs in that case.
+  CGSetLocalEventsSuppressionInterval(0.0);
 }
 
 // Hard-coded mapping from Virtual Key codes to Mac KeySyms.
@@ -237,7 +257,16 @@ const int kUsVkeyToKeysym[256] = {
 };
 
 void EventExecutorMac::InjectClipboardEvent(const ClipboardEvent& event) {
-  // TODO(simonmorris): Implement clipboard injection.
+  if (!task_runner_->BelongsToCurrentThread()) {
+    task_runner_->PostTask(
+        FROM_HERE,
+        base::Bind(&EventExecutorMac::InjectClipboardEvent,
+                   base::Unretained(this),
+                   event));
+    return;
+  }
+
+  clipboard_->InjectClipboardEvent(event);
 }
 
 void EventExecutorMac::InjectKeyEvent(const KeyEvent& event) {
@@ -322,12 +351,39 @@ void EventExecutorMac::InjectMouseEvent(const MouseEvent& event) {
   }
 }
 
+void EventExecutorMac::OnSessionStarted(
+    scoped_ptr<protocol::ClipboardStub> client_clipboard) {
+  if (!task_runner_->BelongsToCurrentThread()) {
+    task_runner_->PostTask(
+        FROM_HERE,
+        base::Bind(&EventExecutorMac::OnSessionStarted,
+                   base::Unretained(this),
+                   base::Passed(&client_clipboard)));
+    return;
+  }
+
+  clipboard_->Start(client_clipboard.Pass());
+}
+
+void EventExecutorMac::OnSessionFinished() {
+  if (!task_runner_->BelongsToCurrentThread()) {
+    task_runner_->PostTask(
+        FROM_HERE,
+        base::Bind(&EventExecutorMac::OnSessionFinished,
+                   base::Unretained(this)));
+    return;
+  }
+
+  clipboard_->Stop();
+}
+
 }  // namespace
 
-scoped_ptr<protocol::HostEventStub> EventExecutor::Create(
-    MessageLoop* message_loop, Capturer* capturer) {
-  return scoped_ptr<protocol::HostEventStub>(
-      new EventExecutorMac(message_loop));
+scoped_ptr<EventExecutor> EventExecutor::Create(
+    scoped_refptr<base::SingleThreadTaskRunner> main_task_runner,
+    scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner,
+    Capturer* capturer) {
+  return scoped_ptr<EventExecutor>(new EventExecutorMac(main_task_runner));
 }
 
 }  // namespace remoting

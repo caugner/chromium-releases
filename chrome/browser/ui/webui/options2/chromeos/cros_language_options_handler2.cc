@@ -20,6 +20,7 @@
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
@@ -65,9 +66,6 @@ void CrosLanguageOptionsHandler::GetLocalizedValues(
   localized_strings->SetString("restart_button",
       l10n_util::GetStringUTF16(
           IDS_OPTIONS_SETTINGS_LANGUAGES_SIGN_OUT_BUTTON));
-  localized_strings->SetString("virtual_keyboard_button",
-      l10n_util::GetStringUTF16(
-          IDS_OPTIONS_SETTINGS_LANGUAGES_VIRTUAL_KEYBOARD_BUTTON));
 
   input_method::InputMethodManager* manager =
       input_method::InputMethodManager::GetInstance();
@@ -205,7 +203,7 @@ ListValue* CrosLanguageOptionsHandler::GetLanguageList(
 }
 
 string16 CrosLanguageOptionsHandler::GetProductName() {
-  return l10n_util::GetStringUTF16(IDS_PRODUCT_OS_NAME);
+  return l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_OS_NAME);
 }
 
 void CrosLanguageOptionsHandler::SetApplicationLocale(
@@ -217,7 +215,7 @@ void CrosLanguageOptionsHandler::SetApplicationLocale(
 void CrosLanguageOptionsHandler::RestartCallback(const ListValue* args) {
   content::RecordAction(UserMetricsAction("LanguageOptions_SignOut"));
 
-  Browser* browser = Browser::GetBrowserForController(
+  Browser* browser = browser::FindBrowserForController(
       &web_ui()->GetWebContents()->GetController(), NULL);
   if (browser)
     browser->ExecuteCommand(IDC_EXIT);

@@ -14,17 +14,17 @@
 #include "sync/engine/build_commit_command.h"
 #include "sync/engine/cleanup_disabled_types_command.h"
 #include "sync/engine/clear_data_command.h"
+#include "sync/engine/commit.h"
 #include "sync/engine/conflict_resolver.h"
 #include "sync/engine/download_updates_command.h"
-#include "sync/engine/get_commit_ids_command.h"
 #include "sync/engine/net/server_connection_manager.h"
-#include "sync/engine/post_commit_message_command.h"
 #include "sync/engine/process_commit_response_command.h"
 #include "sync/engine/process_updates_command.h"
 #include "sync/engine/resolve_conflicts_command.h"
 #include "sync/engine/store_timestamps_command.h"
 #include "sync/engine/syncer_types.h"
 #include "sync/engine/syncproto.h"
+#include "sync/engine/throttled_data_type_tracker.h"
 #include "sync/engine/verify_updates_command.h"
 #include "sync/syncable/syncable-inl.h"
 #include "sync/syncable/syncable.h"
@@ -65,9 +65,7 @@ const char* SyncerStepToString(const SyncerStep step)
     ENUM_CASE(PROCESS_UPDATES);
     ENUM_CASE(STORE_TIMESTAMPS);
     ENUM_CASE(APPLY_UPDATES);
-    ENUM_CASE(BUILD_COMMIT_REQUEST);
-    ENUM_CASE(POST_COMMIT_MESSAGE);
-    ENUM_CASE(PROCESS_COMMIT_RESPONSE);
+    ENUM_CASE(COMMIT);
     ENUM_CASE(RESOLVE_CONFLICTS);
     ENUM_CASE(APPLY_UPDATES_TO_RESOLVE_CONFLICTS);
     ENUM_CASE(CLEAR_PRIVATE_DATA);
@@ -110,7 +108,8 @@ void Syncer::SyncShare(sessions::SyncSession* session,
 
     switch (current_step) {
       case SYNCER_BEGIN:
-        session->context()->PruneUnthrottledTypes(base::TimeTicks::Now());
+        session->context()->throttled_data_type_tracker()->
+            PruneUnthrottledTypes(base::TimeTicks::Now());
         session->SendEventNotification(SyncEngineEvent::SYNC_CYCLE_BEGIN);
 
         next_step = CLEANUP_DISABLED_TYPES;
@@ -180,59 +179,13 @@ void Syncer::SyncShare(sessions::SyncSession* session,
           last_step = SYNCER_END;
           next_step = SYNCER_END;
         } else {
-          next_step = BUILD_COMMIT_REQUEST;
+          next_step = COMMIT;
         }
         break;
       }
-      // These two steps are combined since they are executed within the same
-      // write transaction.
-      case BUILD_COMMIT_REQUEST: {
-        syncable::Directory* dir = session->context()->directory();
-        WriteTransaction trans(FROM_HERE, SYNCER, dir);
-        sessions::ScopedSetSessionWriteTransaction set_trans(session, &trans);
-
-        DVLOG(1) << "Getting the Commit IDs";
-        GetCommitIdsCommand get_commit_ids_command(
-            session->context()->max_commit_batch_size());
-        get_commit_ids_command.Execute(session);
-
-        if (!session->status_controller().commit_ids().empty()) {
-          DVLOG(1) << "Building a commit message";
-
-          // This isn't perfect, since the set of extensions activity may not
-          // correlate exactly with the items being committed.  That's OK as
-          // long as we're looking for a rough estimate of extensions activity,
-          // not an precise mapping of which commits were triggered by which
-          // extension.
-          //
-          // We will push this list of extensions activity back into the
-          // ExtensionsActivityMonitor if this commit turns out to not contain
-          // any bookmarks, or if the commit fails.
-          session->context()->extensions_monitor()->GetAndClearRecords(
-              session->mutable_extensions_activity());
-
-          BuildCommitCommand build_commit_command;
-          build_commit_command.Execute(session);
-
-          next_step = POST_COMMIT_MESSAGE;
-        } else {
-          next_step = RESOLVE_CONFLICTS;
-        }
-
-        break;
-      }
-      case POST_COMMIT_MESSAGE: {
-        PostCommitMessageCommand post_commit_command;
-        session->mutable_status_controller()->set_last_post_commit_result(
-            post_commit_command.Execute(session));
-        next_step = PROCESS_COMMIT_RESPONSE;
-        break;
-      }
-      case PROCESS_COMMIT_RESPONSE: {
-        ProcessCommitResponseCommand process_response_command;
-        session->mutable_status_controller()->
-            set_last_process_commit_response_result(
-                process_response_command.Execute(session));
+      case COMMIT: {
+        session->mutable_status_controller()->set_commit_result(
+            BuildAndPostCommits(this, session));
         next_step = RESOLVE_CONFLICTS;
         break;
       }
@@ -291,8 +244,10 @@ void Syncer::SyncShare(sessions::SyncSession* session,
              << "current step: " << SyncerStepToString(current_step) << ", "
              << "next step: " << SyncerStepToString(next_step) << ", "
              << "snapshot: " << session->TakeSnapshot().ToString();
-    if (last_step == current_step)
+    if (last_step == current_step) {
+      session->SetFinished();
       break;
+    }
     current_step = next_step;
   }
 }

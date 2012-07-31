@@ -426,6 +426,8 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
   def CleanupBrowserProfileOnChromeOS():
     """Cleanup browser profile dir on ChromeOS.
 
+    This does not clear cryptohome.
+
     Browser should not be running, or else there will be locked files.
     """
     profile_dir = '/home/chronos/user'
@@ -1399,19 +1401,21 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     }
     self._GetResultFromJSONRequest(cmd_dict, windex=None)
 
-  def GetPrefsInfo(self):
+  def GetPrefsInfo(self, windex=0):
     """Return info about preferences.
 
     This represents a snapshot of the preferences. If you expect preferences
     to have changed, you need to call this method again to get a fresh
     snapshot.
 
+    Args:
+      windex: The window index, default is 0.
     Returns:
       an instance of prefs_info.PrefsInfo
     """
     cmd_dict = {
       'command': 'GetPrefsInfo',
-      'windex': 0,
+      'windex': windex,
     }
     return prefs_info.PrefsInfo(
         self._SendJSONRequest(-1, json.dumps(cmd_dict),
@@ -2041,7 +2045,8 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
             tab_index=tab_index, window_index=window_index)['page_translated'],
         args=[tab_index, window_index])
 
-  def InstallExtension(self, extension_path, with_ui=False, windex=0):
+  def InstallExtension(self, extension_path, with_ui=False, from_webstore=None,
+                       windex=0):
     """Installs an extension from the given path.
 
     The path must be absolute and may be a crx file or an unpacked extension
@@ -2052,6 +2057,9 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       extension_path: The absolute path to the extension to install. If the
                       extension is packed, it must have a .crx extension.
       with_ui: Whether the extension install confirmation UI should be shown.
+      from_webstore: If True, forces a .crx extension to be recognized as one
+          from the webstore. Can be used to force install an extension with
+          'experimental' permissions.
       windex: Integer index of the browser window to use; defaults to 0
               (first window).
 
@@ -2067,6 +2075,8 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
         'with_ui': with_ui,
         'windex': windex,
     }
+    if from_webstore:
+      cmd_dict['from_webstore'] = True
     return self._GetResultFromJSONRequest(cmd_dict, windex=None)['id']
 
   def GetExtensionsInfo(self, windex=0):
@@ -2581,6 +2591,8 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       html content of a page as a string.
     """
     tempdir = tempfile.mkdtemp()
+    # Make it writable by chronos on chromeos
+    os.chmod(tempdir, 0777)
     filename = os.path.join(tempdir, 'content.html')
     cmd_dict = {  # Prepare command for the json interface
       'command': 'SaveTabContents',
@@ -3034,7 +3046,10 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
             (automation_id, observer_id, mutation_type,
              xpath.replace('"', r'\"'), attribute, expected_string))
     exec_js = exec_js or PyUITest.ExecuteJavascript
-    jsreturn = exec_js(self, js, **kwargs)
+    try:
+      jsreturn = exec_js(self, js, **kwargs)
+    except JSONInterfaceError:
+      raise JSONInterfaceError('Failed to inject DOM mutation observer.')
     if jsreturn != 'success':
       self.RemoveEventObserver(observer_id)
       raise pyauto_errors.JavascriptRuntimeError(jsreturn)
@@ -3077,23 +3092,6 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       self.GetNextEvent(observer_id, timeout=timeout)
     except JSONInterfaceError:
       raise JSONInterfaceError(msg)
-
-  def _AddLoginEventObserver(self):
-    """Adds a LoginEventObserver associated with the AutomationEventQueue.
-
-    The LoginEventObserver will generate an event when login completes.
-
-    Returns:
-      The id of the created observer, which can be used with GetNextEvent(id)
-      and RemoveEventObserver(id).
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    cmd_dict = {
-      'command': 'AddLoginEventObserver',
-    }
-    return self._GetResultFromJSONRequest(cmd_dict, windex=None)['observer_id']
 
   def GetNextEvent(self, observer_id=-1, blocking=True, timeout=-1):
     """Waits for an observed event to occur.
@@ -3158,6 +3156,25 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       'command': 'ClearEventQueue',
     }
     return self._GetResultFromJSONRequest(cmd_dict, windex=None)
+
+  def AppendTab(self, url, windex=0):
+    """Create a new tab.
+
+    Create a new tab at the end of given or first browser window
+    and activate it. Blocks until the url is loaded.
+
+    Args:
+      url: The url to load, can be string or a GURL object.
+      windex: Index of the window to open a tab in. Default 0 - first window.
+
+    Returns:
+      True on success.
+    """
+    if type(url) is GURL:
+      gurl = url
+    else:
+      gurl = GURL(url)
+    return pyautolib.PyUITestBase.AppendTab(self, gurl, windex)
 
   def WaitUntilNavigationCompletes(self, tab_index=0, windex=0):
     """Wait until the specified tab is done navigating.
@@ -3486,11 +3503,11 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
   def HeapProfilerDump(self, process_type, reason, tab_index=0, windex=0):
     """Dumps a heap profile.  It works only on Linux and ChromeOS.
 
-       We need an environment variable "HEAPPROFILE" set to a directory and a
-       filename prefix, for example, "/tmp/prof".  In a case of this example,
-       heap profiles will be dumped into "/tmp/prof.(pid).0002.heap",
-       "/tmp/prof.(pid).0003.heap", and so on.  Nothing happens when this
-       function is called without the env.
+    We need an environment variable "HEAPPROFILE" set to a directory and a
+    filename prefix, for example, "/tmp/prof".  In a case of this example,
+    heap profiles will be dumped into "/tmp/prof.(pid).0002.heap",
+    "/tmp/prof.(pid).0003.heap", and so on.  Nothing happens when this
+    function is called without the env.
 
     Args:
       process_type: A string which is one of 'browser' or 'renderer'.
@@ -4007,6 +4024,16 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
                                  tab_index, windex, frame_xpath),
         expect_retval='complete')
 
+  def SimulateAsanMemoryBug(self):
+    """Simulates a memory bug for Address Sanitizer to catch.
+
+    Address Sanitizer (if it was built it) will catch the bug and abort
+    the process.
+    This method returns immediately before it actually causes a crash.
+    """
+    cmd_dict = { 'command': 'SimulateAsanMemoryBug' }
+    self._GetResultFromJSONRequest(cmd_dict, windex=None)
+
   ## ChromeOS section
 
   def GetLoginInfo(self):
@@ -4021,6 +4048,7 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       { u'is_guest': False,
         u'is_owner': True,
         u'email': u'example@gmail.com',
+        u'user_image': 2,  # non-negative int, 'profile', 'file'
         u'is_screen_locked': False,
         u'login_ui_type': 'nativeui', # or 'webui'
         u'is_logged_in': True}
@@ -4075,6 +4103,111 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
         'Chrome did not reopen the testing channel after login as guest.'
     self.SetUp()
 
+  def SkipToLogin(self, skip_image_selection=True):
+    """Skips OOBE to the login screen.
+
+    Assumes that we're at the beginning of OOBE.
+
+    Args:
+      skip_image_selection: Boolean indicating whether the user image selection
+                            screen should also be skipped.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = { 'command': 'SkipToLogin',
+                 'skip_image_selection': skip_image_selection }
+    result = self._GetResultFromJSONRequest(cmd_dict, windex=None)
+    assert result['next_screen'] == 'login', 'Unexpected wizard transition'
+
+  def GetOOBEScreenInfo(self):
+    """Queries info about the current OOBE screen.
+
+    Returns:
+      A dictionary with the following keys:
+
+      'screen_name': The title of the current OOBE screen as a string.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = { 'command': 'GetOOBEScreenInfo' }
+    return self._GetResultFromJSONRequest(cmd_dict, windex=None)
+
+  def AcceptOOBENetworkScreen(self):
+    """Accepts OOBE network screen and advances to the next one.
+
+    Assumes that we're already at the OOBE network screen.
+
+    Returns:
+      A dictionary with the following keys:
+
+      'next_screen': The title of the next OOBE screen as a string.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = { 'command': 'AcceptOOBENetworkScreen' }
+    return self._GetResultFromJSONRequest(cmd_dict, windex=None)
+
+  def AcceptOOBEEula(self, accepted, usage_stats_reporting=False):
+    """Accepts OOBE EULA and advances to the next screen.
+
+    Assumes that we're already at the OOBE EULA screen.
+
+    Args:
+      accepted: Boolean indicating whether the EULA should be accepted.
+      usage_stats_reporting: Boolean indicating whether UMA should be enabled.
+
+    Returns:
+      A dictionary with the following keys:
+
+      'next_screen': The title of the next OOBE screen as a string.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = { 'command': 'AcceptOOBEEula',
+                 'accepted': accepted,
+                 'usage_stats_reporting': usage_stats_reporting }
+    return self._GetResultFromJSONRequest(cmd_dict, windex=None)
+
+  def CancelOOBEUpdate(self):
+    """Skips update on OOBE and advances to the next screen.
+
+    Returns:
+      A dictionary with the following keys:
+
+      'next_screen': The title of the next OOBE screen as a string.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = { 'command': 'CancelOOBEUpdate' }
+    return self._GetResultFromJSONRequest(cmd_dict, windex=None)
+
+  def PickUserImage(self, image):
+    """Chooses image for the newly created user.
+
+    Should be called immediately after login.
+
+    Args:
+      image_type: type of user image to choose. Possible values:
+        - "profile": Google profile image
+        - non-negative int: one of the default images
+
+    Returns:
+      A dictionary with the following keys:
+
+      'next_screen': The title of the next OOBE screen as a string.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = { 'command': 'PickUserImage',
+                 'image': image }
+    return self._GetResultFromJSONRequest(cmd_dict, windex=None)
+
   def LoginAsGuest(self):
     """Login to chromeos as a guest user.
 
@@ -4100,6 +4233,10 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     Waits until logged in and browser is ready.
     Should be displaying the login screen to work.
 
+    Note that in case of webui auth-extension-based login, gaia auth errors
+    will not be noticed here, because the browser has no knowledge of it. In
+    this case the GetNextEvent automation command will always time out.
+
     Returns:
       An error string if an error occured.
       None otherwise.
@@ -4107,26 +4244,43 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     Raises:
       pyauto_errors.JSONInterfaceError if the automation call returns an error.
     """
-    observer_id = self._AddLoginEventObserver()
-    ret = self.ExecuteJavascriptInOOBEWebUI("""
-        chrome.send("completeLogin", ["%s", "%s"] );
-        window.domAutomationController.send("success");""" %
-        (username, password));
-    return self.GetNextEvent(observer_id).get('error_string')
+    self._GetResultFromJSONRequest({'command': 'AddLoginEventObserver'},
+                                   windex=None)
+    cmd_dict = {
+        'command': 'SubmitLoginForm',
+        'username': username,
+        'password': password,
+    }
+    self._GetResultFromJSONRequest(cmd_dict, windex=None)
+    try:
+      # TODO(craigdh): Add login failure events once PyAuto switches to mocked
+      # GAIA authentication.
+      self.GetNextEvent()
+    except JSONInterfaceError as e:
+      raise JSONInterfaceError('%s\nLogin failed. Perhaps Chrome crashed, '
+                               'failed to start, or the login flow is '
+                               'broken?' % str(e))
 
   def Logout(self):
     """Log out from ChromeOS and wait for session_manager to come up.
 
-    May return before logout is complete and
-    gives no indication of success or failure.
-    Should be logged in to work.
+    This is equivalent to pressing the 'Sign out' button from the
+    aura shell tray when logged in.
+
+    Should be logged in to work. Re-initializes the automation channel
+    after logout.
     """
+    clear_profile_orig = self.get_clear_profile()
+    self.set_clear_profile(False)
     assert self.GetLoginInfo()['is_logged_in'], \
         'Trying to log out when already logged out.'
-    assert self.WaitForSessionManagerRestart(
-        lambda: self.ApplyAccelerator(IDC_EXIT)), \
+    def _SignOut():
+      cmd_dict = { 'command': 'SignOut' }
+      self._GetResultFromJSONRequest(cmd_dict, windex=None)
+    assert self.WaitForSessionManagerRestart(_SignOut), \
         'Session manager did not restart after logout.'
     self.__SetUp()
+    self.set_clear_profile(clear_profile_orig)
 
   def LockScreen(self):
     """Locks the screen on chromeos.
@@ -4987,6 +5141,72 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
         'mute': mute,
     }
     return self._GetResultFromJSONRequest(cmd_dict, windex=None)
+
+  # HTML Terminal
+
+  def OpenCrosh(self):
+    """Open crosh.
+
+    Equivalent to pressing Ctrl-Alt-t.
+    Opens in the last active (non-incognito) window.
+
+    Waits long enough for crosh to load, but does not wait for the crosh
+    prompt. Use WaitForHtermText() for that.
+    """
+    cmd_dict = { 'command': 'OpenCrosh' }
+    self._GetResultFromJSONRequest(cmd_dict, windex=None)
+
+  def WaitForHtermText(self, text, msg=None, tab_index=0, windex=0):
+    """Waits for the given text in a hterm tab.
+
+    Can be used to wait for the crosh> prompt or ssh prompt.
+
+    This does not poll. It uses dom mutation observers to wait
+    for the given text to show up.
+
+    Args:
+      text: the text to wait for. Can be a regex.
+      msg: the failure message to emit if the text could not be found.
+      tab_index: the tab for the hterm tab. Default: 0.
+      windex: the window index for the hterm tab. Default: 0.
+    """
+    self.WaitForDomNode(
+        xpath='//*[contains(text(), "%s")]' % text, frame_xpath='//iframe',
+        msg=msg, tab_index=tab_index, windex=windex)
+
+  def GetHtermRowsText(self, start, end, tab_index=0, windex=0):
+    """Fetch rows from a html terminal tab.
+
+    Works for both crosh and ssh tab.
+    Uses term_.getRowsText(start, end) javascript call.
+
+    Args:
+      start: start line number (0-based).
+      end: the end line (one beyond the line of interest).
+      tab_index: the tab for the hterm tab. Default: 0.
+      windex: the window index for the hterm tab. Default: 0.
+    """
+    return self.ExecuteJavascript(
+        'domAutomationController.send(term_.getRowsText(%d, %d))' % (
+            start, end),
+        tab_index=tab_index, windex=windex)
+
+  def SendKeysToHterm(self, text, tab_index=0, windex=0):
+    """Send keys to a html terminal tab.
+
+    Works for both crosh and ssh tab.
+    Uses term_.onVTKeystroke(str) javascript call.
+
+    Args:
+      text: the text to send.
+      tab_index: the tab for the hterm tab. Default: 0.
+      windex: the window index for the hterm tab. Default: 0.
+    """
+    return self.ExecuteJavascript(
+        'term_.onVTKeystroke("%s");'
+        'domAutomationController.send("done")' % text,
+        tab_index=tab_index, windex=windex)
+
 
   def CaptureProfilePhoto(self):
     """Captures user profile photo on ChromeOS.

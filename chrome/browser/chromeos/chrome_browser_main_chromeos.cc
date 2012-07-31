@@ -4,6 +4,9 @@
 
 #include "chrome/browser/chromeos/chrome_browser_main_chromeos.h"
 
+#include <string>
+#include <vector>
+
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/chromeos/chromeos_version.h"
@@ -14,7 +17,6 @@
 #include "base/string_split.h"
 #include "chrome/browser/browser_process_impl.h"
 #include "chrome/browser/chromeos/audio/audio_handler.h"
-#include "chrome/browser/chromeos/background/desktop_background_observer.h"
 #include "chrome/browser/chromeos/boot_times_loader.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cryptohome/async_method_caller.h"
@@ -29,36 +31,39 @@
 #include "chrome/browser/chromeos/kiosk_mode/kiosk_mode_settings.h"
 #include "chrome/browser/chromeos/login/authenticator.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
+#include "chrome/browser/chromeos/login/login_wizard.h"
 #include "chrome/browser/chromeos/login/ownership_service.h"
 #include "chrome/browser/chromeos/login/screen_locker.h"
 #include "chrome/browser/chromeos/login/session_manager_observer.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
+#include "chrome/browser/chromeos/low_memory_observer.h"
 #include "chrome/browser/chromeos/net/cros_network_change_notifier_factory.h"
 #include "chrome/browser/chromeos/net/network_change_notifier_chromeos.h"
+#include "chrome/browser/chromeos/oom_priority_manager.h"
 #include "chrome/browser/chromeos/power/brightness_observer.h"
+#include "chrome/browser/chromeos/power/output_observer.h"
 #include "chrome/browser/chromeos/power/power_button_controller_delegate_chromeos.h"
 #include "chrome/browser/chromeos/power/power_button_observer.h"
 #include "chrome/browser/chromeos/power/power_state_override.h"
 #include "chrome/browser/chromeos/power/resume_observer.h"
 #include "chrome/browser/chromeos/power/screen_dimming_observer.h"
 #include "chrome/browser/chromeos/power/screen_lock_observer.h"
-#include "chrome/browser/chromeos/power/video_property_writer.h"
+#include "chrome/browser/chromeos/power/user_activity_notifier.h"
+#include "chrome/browser/chromeos/power/video_activity_notifier.h"
 #include "chrome/browser/chromeos/system/statistics_provider.h"
 #include "chrome/browser/chromeos/system_key_event_listener.h"
 #include "chrome/browser/chromeos/upgrade_detector_chromeos.h"
 #include "chrome/browser/chromeos/web_socket_proxy_controller.h"
 #include "chrome/browser/chromeos/xinput_hierarchy_changed_event_listener.h"
 #include "chrome/browser/defaults.h"
-#include "chrome/browser/low_memory_observer.h"
 #include "chrome/browser/metrics/metrics_service.h"
 #include "chrome/browser/net/chrome_network_delegate.h"
-#include "chrome/browser/oom_priority_manager.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
+#include "chrome/browser/policy/network_configuration_updater.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/token_service_factory.h"
-#include "chrome/browser/ui/views/browser_dialogs.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
@@ -72,7 +77,6 @@
 #include "grit/platform_locale_settings.h"
 #include "net/base/network_change_notifier.h"
 #include "net/url_request/url_request.h"
-#include "ui/base/l10n/l10n_util.h"
 
 class MessageLoopObserver : public MessageLoopForUI::Observer {
   virtual base::EventStatus WillProcessEvent(
@@ -170,7 +174,7 @@ void OptionallyRunChromeOSLoginManager(const CommandLine& parsed_command_line,
       }
     }
 
-    browser::ShowLoginWizard(first_screen, size);
+    chromeos::ShowLoginWizard(first_screen, size);
 
     if (chromeos::KioskModeSettings::Get()->IsKioskModeEnabled())
       chromeos::InitializeKioskModeScreensaver();
@@ -353,7 +357,7 @@ void ChromeBrowserMainPartsChromeos::PreProfileInit() {
     std::string username =
         parsed_command_line().GetSwitchValueASCII(switches::kLoginUser);
     VLOG(1) << "Relaunching browser for user: " << username;
-    chromeos::UserManager::Get()->UserLoggedIn(username);
+    chromeos::UserManager::Get()->UserLoggedIn(username, true);
 
     // Redirects Chrome logging to the user data dir.
     logging::RedirectChromeLogging(parsed_command_line());
@@ -367,10 +371,6 @@ void ChromeBrowserMainPartsChromeos::PreProfileInit() {
 
   // In Aura builds this will initialize ash::Shell.
   ChromeBrowserMainPartsLinux::PreProfileInit();
-
-  // Initialize desktop background observer so that it can receive
-  // LOGIN_USER_CHANGED notification from UserManager.
-  desktop_background_observer_.reset(new chromeos::DesktopBackgroundObserver);
 }
 
 void ChromeBrowserMainPartsChromeos::PostProfileInit() {
@@ -393,6 +393,13 @@ void ChromeBrowserMainPartsChromeos::PostProfileInit() {
       profile()->GetPrefs()->SetBoolean(prefs::kUseSharedProxies, false);
   }
 
+  if (parsed_command_line().HasSwitch(switches::kEnableONCPolicy)) {
+    network_config_updater_.reset(
+        new policy::NetworkConfigurationUpdater(
+            g_browser_process->policy_service(),
+            chromeos::CrosLibrary::Get()->GetNetworkLibrary()));
+  }
+
   // Tests should be able to tune login manager before showing it.
   // Thus only show login manager in normal (non-testing) mode.
   if (!parameters().ui_task)
@@ -404,6 +411,7 @@ void ChromeBrowserMainPartsChromeos::PostProfileInit() {
   // Initialize the brightness observer so that we'll display an onscreen
   // indication of brightness changes during login.
   brightness_observer_.reset(new chromeos::BrightnessObserver());
+  output_observer_.reset(new chromeos::OutputObserver());
   resume_observer_.reset(new chromeos::ResumeObserver());
   screen_lock_observer_.reset(new chromeos::ScreenLockObserver());
   if (chromeos::KioskModeSettings::Get()->IsKioskModeEnabled())
@@ -444,7 +452,8 @@ void ChromeBrowserMainPartsChromeos::PostBrowserStart() {
   // These are dependent on the ash::Shell singleton already having been
   // initialized.
   power_button_observer_.reset(new chromeos::PowerButtonObserver);
-  video_property_writer_.reset(new chromeos::VideoPropertyWriter);
+  user_activity_notifier_.reset(new chromeos::UserActivityNotifier);
+  video_activity_notifier_.reset(new chromeos::VideoActivityNotifier);
   screen_dimming_observer_.reset(new chromeos::ScreenDimmingObserver);
 
   ChromeBrowserMainPartsLinux::PostBrowserStart();
@@ -479,6 +488,7 @@ void ChromeBrowserMainPartsChromeos::PostMainMessageLoopRun() {
   screen_lock_observer_.reset();
   resume_observer_.reset();
   brightness_observer_.reset();
+  output_observer_.reset();
 
   // The XInput2 event listener needs to be shut down earlier than when
   // Singletons are finally destroyed in AtExitManager.
@@ -492,13 +502,18 @@ void ChromeBrowserMainPartsChromeos::PostMainMessageLoopRun() {
 
   chromeos::WebSocketProxyController::Shutdown();
 
-  // Let VideoPropertyWriter unregister itself as an observer of the ash::Shell
-  // singleton before the shell is destroyed.
-  video_property_writer_.reset();
+  // Let classes unregister themselves as observers of the ash::Shell singleton
+  // before the shell is destroyed.
+  user_activity_notifier_.reset();
+  video_activity_notifier_.reset();
 
   // Detach D-Bus clients before DBusThreadManager is shut down.
   power_button_observer_.reset();
   screen_dimming_observer_.reset();
+
+  // Delete the NetworkConfigurationUpdater while |g_browser_process| is still
+  // alive.
+  network_config_updater_.reset();
 
   ChromeBrowserMainPartsLinux::PostMainMessageLoopRun();
 }
@@ -527,25 +542,24 @@ void ChromeBrowserMainPartsChromeos::SetupLowMemoryHeadroomFieldTrial() {
     int margin_200mb = trial->AppendGroup("200mb", kEnableProbability);
     if (trial->group() == disable) {
       LOG(WARNING) << "low_mem: Part of 'off' experiment";
-      browser::LowMemoryObserver::SetLowMemoryMargin(0);
+      chromeos::LowMemoryObserver::SetLowMemoryMargin(-1);
     } else if (trial->group() == margin_0mb) {
       LOG(WARNING) << "low_mem: Part of '0MB' experiment";
-      browser::LowMemoryObserver::SetLowMemoryMargin(50);
+      chromeos::LowMemoryObserver::SetLowMemoryMargin(0);
     } else if (trial->group() == margin_25mb) {
       LOG(WARNING) << "low_mem: Part of '25MB' experiment";
-      browser::LowMemoryObserver::SetLowMemoryMargin(50);
+      chromeos::LowMemoryObserver::SetLowMemoryMargin(25);
     } else if (trial->group() == margin_50mb) {
       LOG(WARNING) << "low_mem: Part of '50MB' experiment";
-      browser::LowMemoryObserver::SetLowMemoryMargin(50);
+      chromeos::LowMemoryObserver::SetLowMemoryMargin(50);
     } else if (trial->group() == margin_100mb) {
       LOG(WARNING) << "low_mem: Part of '100MB' experiment";
-      browser::LowMemoryObserver::SetLowMemoryMargin(100);
+      chromeos::LowMemoryObserver::SetLowMemoryMargin(100);
     } else if (trial->group() == margin_200mb) {
       LOG(WARNING) << "low_mem: Part of '200MB' experiment";
-      browser::LowMemoryObserver::SetLowMemoryMargin(200);
+      chromeos::LowMemoryObserver::SetLowMemoryMargin(200);
     } else {
       LOG(WARNING) << "low_mem: Part of 'default' experiment";
     }
   }
 }
-

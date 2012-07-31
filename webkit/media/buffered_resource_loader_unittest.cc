@@ -84,7 +84,8 @@ class BufferedResourceLoaderTest : public testing::Test {
     last_position_ = last_position;
 
     loader_.reset(new BufferedResourceLoader(
-        gurl_, first_position_, last_position_,
+        gurl_, BufferedResourceLoader::kUnspecified,
+        first_position_, last_position_,
         BufferedResourceLoader::kThresholdDefer, 0, 0,
         new media::MediaLog()));
 
@@ -94,8 +95,9 @@ class BufferedResourceLoaderTest : public testing::Test {
   }
 
   void SetLoaderBuffer(int forward_capacity, int backward_capacity) {
-    loader_->buffer_.reset(
-        new media::SeekableBuffer(backward_capacity, forward_capacity));
+    loader_->buffer_.set_forward_capacity(forward_capacity);
+    loader_->buffer_.set_backward_capacity(backward_capacity);
+    loader_->buffer_.Clear();
   }
 
   void Start() {
@@ -218,8 +220,8 @@ class BufferedResourceLoaderTest : public testing::Test {
   }
 
   void WriteUntilThreshold() {
-    int buffered = loader_->buffer_->forward_bytes();
-    int capacity = loader_->buffer_->forward_capacity();
+    int buffered = loader_->buffer_.forward_bytes();
+    int capacity = loader_->buffer_.forward_capacity();
     CHECK_LT(buffered, capacity);
 
     EXPECT_CALL(*this, NetworkCallback());
@@ -251,19 +253,19 @@ class BufferedResourceLoaderTest : public testing::Test {
                           int backward_capacity,
                           int forward_bytes,
                           int forward_capacity) {
-    EXPECT_EQ(backward_bytes, loader_->buffer_->backward_bytes());
-    EXPECT_EQ(backward_capacity, loader_->buffer_->backward_capacity());
-    EXPECT_EQ(forward_bytes, loader_->buffer_->forward_bytes());
-    EXPECT_EQ(forward_capacity, loader_->buffer_->forward_capacity());
+    EXPECT_EQ(backward_bytes, loader_->buffer_.backward_bytes());
+    EXPECT_EQ(backward_capacity, loader_->buffer_.backward_capacity());
+    EXPECT_EQ(forward_bytes, loader_->buffer_.forward_bytes());
+    EXPECT_EQ(forward_capacity, loader_->buffer_.forward_capacity());
   }
 
   void ConfirmLoaderBufferBackwardCapacity(int expected_backward_capacity) {
-    EXPECT_EQ(loader_->buffer_->backward_capacity(),
+    EXPECT_EQ(loader_->buffer_.backward_capacity(),
               expected_backward_capacity);
   }
 
   void ConfirmLoaderBufferForwardCapacity(int expected_forward_capacity) {
-    EXPECT_EQ(loader_->buffer_->forward_capacity(), expected_forward_capacity);
+    EXPECT_EQ(loader_->buffer_.forward_capacity(), expected_forward_capacity);
   }
 
   void ConfirmLoaderDeferredState(bool expectedVal) {
@@ -274,13 +276,13 @@ class BufferedResourceLoaderTest : public testing::Test {
   void CheckBufferWindowBounds() {
     // Corresponds to value defined in buffered_resource_loader.cc.
     static const int kMinBufferCapacity = 2 * 1024 * 1024;
-    EXPECT_GE(loader_->buffer_->forward_capacity(), kMinBufferCapacity);
-    EXPECT_GE(loader_->buffer_->backward_capacity(), kMinBufferCapacity);
+    EXPECT_GE(loader_->buffer_.forward_capacity(), kMinBufferCapacity);
+    EXPECT_GE(loader_->buffer_.backward_capacity(), kMinBufferCapacity);
 
     // Corresponds to value defined in buffered_resource_loader.cc.
     static const int kMaxBufferCapacity = 20 * 1024 * 1024;
-    EXPECT_LE(loader_->buffer_->forward_capacity(), kMaxBufferCapacity);
-    EXPECT_LE(loader_->buffer_->backward_capacity(), kMaxBufferCapacity);
+    EXPECT_LE(loader_->buffer_.forward_capacity(), kMaxBufferCapacity);
+    EXPECT_LE(loader_->buffer_.backward_capacity(), kMaxBufferCapacity);
   }
 
   MOCK_METHOD1(StartCallback, void(BufferedResourceLoader::Status));
@@ -288,8 +290,8 @@ class BufferedResourceLoaderTest : public testing::Test {
   MOCK_METHOD0(NetworkCallback, void());
 
   // Accessors for private variables on |loader_|.
-  int forward_bytes() { return loader_->buffer_->forward_bytes(); }
-  int forward_capacity() { return loader_->buffer_->forward_capacity(); }
+  int forward_bytes() { return loader_->buffer_.forward_bytes(); }
+  int forward_capacity() { return loader_->buffer_.forward_capacity(); }
 
  protected:
   GURL gurl_;
@@ -301,6 +303,8 @@ class BufferedResourceLoaderTest : public testing::Test {
 
   MockWebFrameClient client_;
   WebView* view_;
+
+  MessageLoop message_loop_;
 
   uint8 data_[kDataSize];
 
@@ -540,6 +544,30 @@ TEST_F(BufferedResourceLoaderTest, RequestFailedWhenRead) {
   error.reason = net::ERR_TIMED_OUT;
   error.isCancellation = false;
   loader_->didFail(url_loader_, error);
+}
+
+TEST_F(BufferedResourceLoaderTest, RequestFailedWithNoPendingReads) {
+  Initialize(kHttpUrl, 10, 29);
+  Start();
+  PartialResponse(10, 29, 30);
+
+  uint8 buffer[10];
+  InSequence s;
+
+  // Write enough data so that a read would technically complete had the request
+  // not failed.
+  WriteLoader(10, 20);
+
+  // Fail without a pending read.
+  WebURLError error;
+  error.reason = net::ERR_TIMED_OUT;
+  error.isCancellation = false;
+  EXPECT_CALL(*this, NetworkCallback());
+  loader_->didFail(url_loader_, error);
+
+  // Now we should immediately fail any read even if we have data buffered.
+  EXPECT_CALL(*this, ReadCallback(BufferedResourceLoader::kFailed, 0));
+  ReadLoader(10, 10, buffer);
 }
 
 TEST_F(BufferedResourceLoaderTest, RequestCancelledWhenRead) {

@@ -4,6 +4,9 @@
 
 #ifndef CONTENT_PUBLIC_BROWSER_SPEECH_RECOGNITION_SESSION_CONTEXT_H_
 #define CONTENT_PUBLIC_BROWSER_SPEECH_RECOGNITION_SESSION_CONTEXT_H_
+#pragma once
+
+#include <string>
 
 #include "content/common/content_export.h"
 #include "ui/gfx/rect.h"
@@ -11,25 +14,31 @@
 namespace content {
 
 // The context information required by clients of the SpeechRecognitionManager
-// (InputTagSpeechDispatcherHost) and its delegates for mapping the recognition
-// session to other browser elements involved with the it (e.g., the page
-// element that requested the recognition). The SpeechRecognitionManager is
-// not aware of the content of this struct and does NOT use it for its purposes.
-// However the manager keeps this struct "attached" to the recognition session
-// during all the session lifetime, making its contents available to clients
-// (In this regard, see SpeechRecognitionManager::GetSessionContext and
+// and its delegates for mapping the recognition session to other browser
+// elements involved with it (e.g., the page element that requested the
+// recognition). The manager keeps this struct attached to the recognition
+// session during all the session lifetime, making its contents available to
+// clients (In this regard, see SpeechRecognitionManager::GetSessionContext and
 // SpeechRecognitionManager::LookupSessionByContext methods).
 struct CONTENT_EXPORT SpeechRecognitionSessionContext {
-  SpeechRecognitionSessionContext()
-      : render_process_id(0),
-        render_view_id(0),
-        render_request_id(0) {}
-  ~SpeechRecognitionSessionContext() {}
+  SpeechRecognitionSessionContext();
+  ~SpeechRecognitionSessionContext();
 
   int render_process_id;
   int render_view_id;
-  int render_request_id;
+  int request_id;
+
+  // Determines whether recognition was requested by a page element (in which
+  // case its coordinates are passed in |element_rect|).
+  bool requested_by_page_element;
+
+  // The coordinates of the page element for placing the bubble (valid only when
+  // |requested_by_page_element| = true).
   gfx::Rect element_rect;
+
+  // A texual description of the context (website, extension name) that is
+  // requesting recognition, for prompting security notifications to the user.
+  std::string context_name;
 };
 
 }  // namespace content

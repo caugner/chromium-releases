@@ -8,7 +8,6 @@
 
 #include <map>
 #include <string>
-#include <vector>
 
 #include "base/callback.h"
 #include "base/gtest_prod_util.h"
@@ -25,7 +24,6 @@
 
 namespace gdata {
 
-class FindEntryDelegate;
 class GDataFile;
 class GDataDirectory;
 class GDataRootDirectory;
@@ -55,6 +53,14 @@ enum GDataFileType {
   REGULAR_FILE,
   HOSTED_DOCUMENT,
 };
+
+// The root directory name used for the Google Drive file system tree. The
+// name is used in URLs for the file manager, hence user-visible.
+const FilePath::CharType kGDataRootDirectory[] = FILE_PATH_LITERAL("drive");
+
+// The resource ID for the root directory is defined in the spec:
+// https://developers.google.com/google-apps/documents-list/
+const char kGDataRootDirectoryResourceId[] = "folder:root";
 
 // Base class for representing files and directories in gdata virtual file
 // system.
@@ -94,7 +100,7 @@ class GDataEntry {
       PlatformFileInfoProto* proto);
 
   // Converts to/from proto.
-  void FromProto(const GDataEntryProto& proto);
+  bool FromProto(const GDataEntryProto& proto) WARN_UNUSED_RESULT;
   void ToProto(GDataEntryProto* proto) const;
 
   // Escapes forward slashes from file names with magic unicode character
@@ -138,12 +144,6 @@ class GDataEntry {
   // True if file was deleted. Used only for instances that are generated from
   // delta feeds.
   bool is_deleted() const { return deleted_; }
-
-  // True if the entry is not bound to any file system (i.e. doesn't have a root
-  // directory set). E.g. |fake_search_directory| below.
-  // NOTE: GDataRootDirectories will return true here, since they have
-  // themselves as root directories.
-  bool is_detached() const { return root_ == NULL; }
 
   // Returns virtual file path representing this file system entry. This path
   // corresponds to file path expected by public methods of GDataFileSyste
@@ -200,15 +200,6 @@ typedef std::map<FilePath::StringType, GDataDirectory*>
 // this could be either a regular file or a server side document.
 class GDataFile : public GDataEntry {
  public:
-  // This is used as a bitmask for the cache state.
-  enum CacheState {
-    CACHE_STATE_NONE    = 0x0,
-    CACHE_STATE_PINNED  = 0x1 << 0,
-    CACHE_STATE_PRESENT = 0x1 << 1,
-    CACHE_STATE_DIRTY   = 0x1 << 2,
-    CACHE_STATE_MOUNTED = 0x1 << 3,
-  };
-
   explicit GDataFile(GDataDirectory* parent, GDataRootDirectory* root);
   virtual ~GDataFile();
   virtual GDataFile* AsGDataFile() OVERRIDE;
@@ -219,49 +210,13 @@ class GDataFile : public GDataEntry {
                                        GDataRootDirectory* root);
 
   // Converts to/from proto.
-  void FromProto(const GDataFileProto& proto);
+  bool FromProto(const GDataFileProto& proto) WARN_UNUSED_RESULT;
   void ToProto(GDataFileProto* proto) const;
-
-  static bool IsCachePresent(int cache_state) {
-    return cache_state & CACHE_STATE_PRESENT;
-  }
-  static bool IsCachePinned(int cache_state) {
-    return cache_state & CACHE_STATE_PINNED;
-  }
-  static bool IsCacheDirty(int cache_state) {
-    return cache_state & CACHE_STATE_DIRTY;
-  }
-  static bool IsCacheMounted(int cache_state) {
-    return cache_state & CACHE_STATE_MOUNTED;
-  }
-  static int SetCachePresent(int cache_state) {
-    return cache_state |= CACHE_STATE_PRESENT;
-  }
-  static int SetCachePinned(int cache_state) {
-    return cache_state |= CACHE_STATE_PINNED;
-  }
-  static int SetCacheDirty(int cache_state) {
-    return cache_state |= CACHE_STATE_DIRTY;
-  }
-  static int SetCacheMounted(int cache_state) {
-    return cache_state |= CACHE_STATE_MOUNTED;
-  }
-  static int ClearCachePresent(int cache_state) {
-    return cache_state &= ~CACHE_STATE_PRESENT;
-  }
-  static int ClearCachePinned(int cache_state) {
-    return cache_state &= ~CACHE_STATE_PINNED;
-  }
-  static int ClearCacheDirty(int cache_state) {
-    return cache_state &= ~CACHE_STATE_DIRTY;
-  }
-  static int ClearCacheMounted(int cache_state) {
-    return cache_state &= ~CACHE_STATE_MOUNTED;
-  }
 
   DocumentEntry::EntryKind kind() const { return kind_; }
   const GURL& thumbnail_url() const { return thumbnail_url_; }
   const GURL& alternate_url() const { return alternate_url_; }
+  const GURL& upload_url() const { return upload_url_; }
   const std::string& content_mime_type() const { return content_mime_type_; }
   const std::string& etag() const { return etag_; }
   const std::string& id() const { return id_; }
@@ -269,6 +224,7 @@ class GDataFile : public GDataEntry {
   void set_file_md5(const std::string& file_md5) { file_md5_ = file_md5; }
   const std::string& document_extension() const { return document_extension_; }
   bool is_hosted_document() const { return is_hosted_document_; }
+  void set_file_info(const base::PlatformFileInfo& info) { file_info_ = info; }
 
   // Overrides GDataEntry::SetFileNameFromTitle() to set |file_name_| based
   // on the value of |title_| as well as |is_hosted_document_| and
@@ -280,6 +236,9 @@ class GDataFile : public GDataEntry {
   DocumentEntry::EntryKind kind_;
   GURL thumbnail_url_;
   GURL alternate_url_;
+  // Upload url, corresponds to resumable-edit-media link, used for updating
+  // the content of the file.
+  GURL upload_url_;
   std::string content_mime_type_;
   std::string etag_;
   std::string id_;
@@ -304,7 +263,7 @@ class GDataDirectory : public GDataEntry {
                                        GDataRootDirectory* root);
 
   // Converts to/from proto.
-  void FromProto(const GDataDirectoryProto& proto);
+  bool FromProto(const GDataDirectoryProto& proto) WARN_UNUSED_RESULT;
   void ToProto(GDataDirectoryProto* proto) const;
 
   // Adds child file to the directory and takes over the ownership of |file|
@@ -328,12 +287,11 @@ class GDataDirectory : public GDataEntry {
   // Removes the entry from its children list and destroys the entry instance.
   bool RemoveEntry(GDataEntry* entry);
 
-  // Removes children elements.
+  // Removes child elements.
   void RemoveChildren();
+  void RemoveChildFiles();
+  void RemoveChildDirectories();
 
-  // Last refresh time.
-  const base::Time& refresh_time() const { return refresh_time_; }
-  void set_refresh_time(const base::Time& time) { refresh_time_ = time; }
   // Url for this feed.
   const GURL& start_feed_url() const { return start_feed_url_; }
   void set_start_feed_url(const GURL& url) { start_feed_url_ = url; }
@@ -361,7 +319,6 @@ class GDataDirectory : public GDataEntry {
   // entry instance.
   bool RemoveChild(GDataEntry* entry);
 
-  base::Time refresh_time_;
   // Url for this feed.
   GURL start_feed_url_;
   // Continuing feed's url.
@@ -382,58 +339,6 @@ class GDataDirectory : public GDataEntry {
 
 class GDataRootDirectory : public GDataDirectory {
  public:
-  // Enum defining GCache subdirectory location.
-  // This indexes into |GDataFileSystem::cache_paths_| vector.
-  enum CacheSubDirectoryType {
-    CACHE_TYPE_META = 0,       // Downloaded feeds.
-    CACHE_TYPE_PINNED,         // Symlinks to files in persistent dir that are
-                               // pinned, or to /dev/null for non-existent
-                               // files.
-    CACHE_TYPE_OUTGOING,       // Symlinks to files in persistent or tmp dir to
-                               // be uploaded.
-    CACHE_TYPE_PERSISTENT,     // Files that are pinned or modified locally,
-                               // not evictable, hopefully.
-    CACHE_TYPE_TMP,            // Files that don't meet criteria to be in
-                               // persistent dir, and hence evictable.
-    CACHE_TYPE_TMP_DOWNLOADS,  // Downloaded files.
-    CACHE_TYPE_TMP_DOCUMENTS,  // Temporary JSON files for hosted documents.
-    NUM_CACHE_TYPES,           // This must be at the end.
-  };
-
-  // Structure to store information of an existing cache file.
-  struct CacheEntry {
-    CacheEntry(const std::string& in_md5,
-               CacheSubDirectoryType in_sub_dir_type,
-               int in_cache_state)
-        : md5(in_md5),
-          sub_dir_type(in_sub_dir_type),
-          cache_state(in_cache_state) {
-    }
-
-    bool IsPresent() const {
-      return GDataFile::IsCachePresent(cache_state);
-    }
-    bool IsPinned() const {
-      return GDataFile::IsCachePinned(cache_state);
-    }
-    bool IsDirty() const {
-      return GDataFile::IsCacheDirty(cache_state);
-    }
-    bool IsMounted() const {
-      return GDataFile::IsCacheMounted(cache_state);
-    }
-
-    // For debugging purposes.
-    std::string ToString() const;
-
-    std::string md5;
-    CacheSubDirectoryType sub_dir_type;
-    int cache_state;
-  };
-
-  // A map table of cache file's resource id to its CacheEntry* entry.
-  typedef std::map<std::string, CacheEntry*> CacheMap;
-
   // A map table of file's resource string to its GDataFile* entry.
   typedef std::map<std::string, GDataEntry*> ResourceMap;
 
@@ -460,79 +365,27 @@ class GDataRootDirectory : public GDataDirectory {
   // Removes the entry from resource map.
   void RemoveEntryFromResourceMap(GDataEntry* entry);
 
-  // Searches for |file_path| triggering callback in |delegate|.
+  // Searches for |file_path| triggering callback.
   void FindEntryByPath(const FilePath& file_path,
-                       FindEntryDelegate* delegate);
+                       const FindEntryCallback& callback);
 
   // Returns the GDataEntry* with the corresponding |resource_id|.
   GDataEntry* GetEntryByResourceId(const std::string& resource_id);
 
-  // Sets |cache_map_| data member to formal parameter |new_cache_map|.
-  void SetCacheMap(const CacheMap& new_cache_map);
-
-  // Updates cache map with entry corresponding to |resource_id|.
-  // Creates new entry if it doesn't exist, otherwise update the entry.
-  void UpdateCacheMap(const std::string& resource_id,
-                      const std::string& md5,
-                      CacheSubDirectoryType subdir,
-                      int cache_state);
-
-  // Removes entry corresponding to |resource_id| from cache map.
-  void RemoveFromCacheMap(const std::string& resource_id);
-
-  // Returns the cache entry for file corresponding to |resource_id| and |md5|
-  // if entry exists in cache map.  Otherwise, returns NULL.
-  // |md5| can be empty if only matching |resource_id| is desired, which may
-  // happen when looking for pinned entries where symlinks' filenames have no
-  // extension and hence no md5.
-  CacheEntry* GetCacheEntry(const std::string& resource_id,
-                            const std::string& md5);
-
-  // Removes temporary files (files in CACHE_TYPE_TMP) from the cache map.
-  void RemoveTemporaryFilesFromCacheMap();
+  // Replaces file entry with the same resource id as |fresh_file| with its
+  // fresh value |fresh_file|.
+  void RefreshFile(scoped_ptr<GDataFile> fresh_file);
 
   // Serializes/Parses to/from string via proto classes.
   void SerializeToString(std::string* serialized_proto) const;
   bool ParseFromString(const std::string& serialized_proto);
 
   // Converts to/from proto.
-  void FromProto(const GDataRootDirectoryProto& proto);
+  bool FromProto(const GDataRootDirectoryProto& proto) WARN_UNUSED_RESULT;
   void ToProto(GDataRootDirectoryProto* proto) const;
 
  private:
-  // Used in |FindEntryByPath| if the path that is being searched for is
-  // pointing to a search result path. The find entry parameters should be
-  // modified to point to the actual file system entry that is referenced by
-  // virtual search path.
-  // Search path is formatted: <search_result_path><search_result_child_path>.
-  // <search_result_child_path> is used when search result is directory, and is
-  // relative to search result path (id references some content inside search
-  // result).
-  // Search result file name will be formatted <resource_id>.<file_name>.
-  // We can define "search result path references gdata entry" for gdata search
-  // results by:
-  // Entry that whose file name is <file_name>, and has the same parent as
-  // the entry with resource id <resource_id>. This definition enables us to
-  // test uniqueness of the proposed name when renaming gdata search result.
-  //
-  // For example, if drive/.search/foo/res_id.foo_name references
-  // drive/result_parent/result, and the search path is
-  // drive/.search/foo/res_ud.foo_name/foo_child, we'll set current dir to the
-  // entry with path reulst_parent, and components to [result_parent, result,
-  // foo_child].
-  bool ModifyFindEntryParamsForSearchPath(
-      const FilePath& file_path,
-      std::vector<FilePath::StringType>* components,
-      GDataDirectory** current_dir,
-      FilePath* directory_path);
-
   ResourceMap resource_map_;
-  CacheMap cache_map_;
-
-  // Fake directory that will be returned when searching for content search
-  // paths to make file manager happy when resolving paths. This directory
-  // should never be used for file operations or storing file entries.
-  scoped_ptr<GDataDirectory> fake_search_directory_;
 
   base::Time last_serialized_;
   int largest_changestamp_;

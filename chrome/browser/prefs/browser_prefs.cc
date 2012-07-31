@@ -5,16 +5,16 @@
 #include "chrome/browser/prefs/browser_prefs.h"
 
 #include "chrome/browser/about_flags.h"
+#include "chrome/browser/accessibility/invert_bubble_prefs.h"
 #include "chrome/browser/autofill/autofill_manager.h"
 #include "chrome/browser/background/background_mode_manager.h"
-#include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
 #include "chrome/browser/debugger/devtools_window.h"
 #include "chrome/browser/download/download_prefs.h"
-#include "chrome/browser/extensions/api/commands/extension_command_service.h"
+#include "chrome/browser/extensions/api/commands/command_service.h"
 #include "chrome/browser/extensions/apps_promo.h"
 #include "chrome/browser/extensions/component_loader.h"
 #include "chrome/browser/extensions/extension_prefs.h"
@@ -29,6 +29,7 @@
 #include "chrome/browser/managed_mode.h"
 #include "chrome/browser/metrics/metrics_log.h"
 #include "chrome/browser/metrics/metrics_service.h"
+#include "chrome/browser/metrics/variations_service.h"
 #include "chrome/browser/net/http_server_properties_manager.h"
 #include "chrome/browser/net/net_pref_observer.h"
 #include "chrome/browser/net/predictor.h"
@@ -37,6 +38,7 @@
 #include "chrome/browser/notifications/notification_prefs_manager.h"
 #include "chrome/browser/page_info_model.h"
 #include "chrome/browser/password_manager/password_manager.h"
+#include "chrome/browser/pepper_flash_settings_manager.h"
 #include "chrome/browser/policy/cloud_policy_subsystem.h"
 #include "chrome/browser/policy/url_blacklist_manager.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
@@ -50,17 +52,18 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/renderer_host/web_cache_manager.h"
 #include "chrome/browser/search_engines/template_url_prepopulate_data.h"
-#include "chrome/browser/tabs/pinned_tab_codec.h"
+#include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/task_manager/task_manager.h"
 #include "chrome/browser/translate/translate_prefs.h"
 #include "chrome/browser/ui/alternate_error_tab_observer.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_init.h"
+#include "chrome/browser/ui/network_profile_bubble_prefs.h"
 #include "chrome/browser/ui/prefs/prefs_tab_helper.h"
 #include "chrome/browser/ui/search_engines/keyword_editor_controller.h"
+#include "chrome/browser/ui/startup/autolaunch_prompt.h"
+#include "chrome/browser/ui/tabs/pinned_tab_codec.h"
 #include "chrome/browser/ui/webui/extensions/extension_settings_handler.h"
 #include "chrome/browser/ui/webui/flags_ui.h"
-#include "chrome/browser/ui/webui/ntp/new_tab_page_handler.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/browser/ui/webui/plugins_ui.h"
 #include "chrome/browser/ui/webui/sync_promo/sync_promo_ui.h"
@@ -72,16 +75,12 @@
 #if defined(OS_MACOSX)
 #include "chrome/browser/ui/cocoa/confirm_quit.h"
 #include "chrome/browser/ui/cocoa/presentation_mode_prefs.h"
+#include "chrome/browser/ui/startup/obsolete_os_prompt.h"
 #endif
 
-#if defined(OS_WIN)
-#include "chrome/browser/profiles/network_profile_bubble.h"
-#endif
-
-#if defined(TOOLKIT_VIEWS)  // TODO(port): whittle this down as we port
-#include "chrome/browser/accessibility/invert_bubble_views.h"
-#include "chrome/browser/ui/views/browser_actions_container.h"
-#include "chrome/browser/ui/views/frame/browser_view.h"
+#if defined(TOOLKIT_VIEWS)
+#include "chrome/browser/ui/browser_view_prefs.h"
+#include "chrome/browser/ui/tabs/tab_strip_layout_type_prefs.h"
 #endif
 
 #if defined(TOOLKIT_GTK)
@@ -104,7 +103,7 @@
 #endif
 
 #if defined(USE_ASH)
-#include "chrome/browser/ui/views/ash/launcher/chrome_launcher_controller.h"
+#include "chrome/browser/ui/ash/chrome_launcher_prefs.h"
 #endif
 
 namespace browser {
@@ -113,7 +112,6 @@ void RegisterLocalState(PrefService* local_state) {
   // Prefs in Local State
   local_state->RegisterIntegerPref(prefs::kMultipleProfilePrefMigration, 0);
 
-  AppsPromo::RegisterPrefs(local_state);
   browser_shutdown::RegisterPrefs(local_state);
   ExternalProtocolHandler::RegisterPrefs(local_state);
   geolocation::RegisterPrefs(local_state);
@@ -124,7 +122,9 @@ void RegisterLocalState(PrefService* local_state) {
   PrefProxyConfigTrackerImpl::RegisterPrefs(local_state);
   ProfileInfoCache::RegisterPrefs(local_state);
   ProfileManager::RegisterPrefs(local_state);
+  SigninManagerFactory::RegisterPrefs(local_state);
   SSLConfigServiceManager::RegisterPrefs(local_state);
+  VariationsService::RegisterPrefs(local_state);
   WebCacheManager::RegisterPrefs(local_state);
 
 #if defined(ENABLE_CONFIGURATION_POLICY)
@@ -140,18 +140,22 @@ void RegisterLocalState(PrefService* local_state) {
 #endif  // defined(ENABLE_TASK_MANAGER)
 
 #if defined(TOOLKIT_VIEWS)
-  BrowserView::RegisterBrowserViewPrefs(local_state);
+  browser::RegisterBrowserViewPrefs(local_state);
+  browser::RegisterTabStripLayoutTypePrefs(local_state);
 #endif
 
 #if !defined(OS_ANDROID)
+  AppsPromo::RegisterPrefs(local_state);
   BackgroundModeManager::RegisterPrefs(local_state);
   Browser::RegisterPrefs(local_state);
   FlagsUI::RegisterPrefs(local_state);
   ManagedMode::RegisterPrefs(local_state);
-  NewTabPageHandler::RegisterPrefs(local_state);
-  printing::PrintJobManager::RegisterPrefs(local_state);
   PromoResourceService::RegisterPrefs(local_state);
   UpgradeDetector::RegisterPrefs(local_state);
+#endif
+
+#if defined(ENABLE_PRINTING)
+  printing::PrintJobManager::RegisterPrefs(local_state);
 #endif
 
 #if defined(OS_CHROMEOS)
@@ -168,6 +172,7 @@ void RegisterLocalState(PrefService* local_state) {
 #endif
 
 #if defined(OS_MACOSX)
+  browser::RegisterObsoleteOSInfobarPrefs(local_state);
   confirm_quit::RegisterLocalState(local_state);
 #endif
 }
@@ -175,19 +180,13 @@ void RegisterLocalState(PrefService* local_state) {
 void RegisterUserPrefs(PrefService* user_prefs) {
   // User prefs
   AlternateErrorPageTabObserver::RegisterUserPrefs(user_prefs);
-  AppsPromo::RegisterUserPrefs(user_prefs);
   AutofillManager::RegisterUserPrefs(user_prefs);
   bookmark_utils::RegisterUserPrefs(user_prefs);
-  BookmarkModel::RegisterUserPrefs(user_prefs);
   ChromeVersionService::RegisterUserPrefs(user_prefs);
   chrome_browser_net::HttpServerPropertiesManager::RegisterPrefs(user_prefs);
   chrome_browser_net::Predictor::RegisterUserPrefs(user_prefs);
   DownloadPrefs::RegisterUserPrefs(user_prefs);
-  extensions::ComponentLoader::RegisterUserPrefs(user_prefs);
-  ExtensionCommandService::RegisterUserPrefs(user_prefs);
-  ExtensionPrefs::RegisterUserPrefs(user_prefs);
   ExtensionSettingsHandler::RegisterUserPrefs(user_prefs);
-  ExtensionWebUI::RegisterUserPrefs(user_prefs);
   GAIAInfoUpdateService::RegisterUserPrefs(user_prefs);
   HostContentSettingsMap::RegisterUserPrefs(user_prefs);
   IncognitoModePrefs::RegisterUserPrefs(user_prefs);
@@ -202,30 +201,36 @@ void RegisterUserPrefs(PrefService* user_prefs) {
   SessionStartupPref::RegisterUserPrefs(user_prefs);
   TemplateURLPrepopulateData::RegisterUserPrefs(user_prefs);
   TranslatePrefs::RegisterUserPrefs(user_prefs);
+  web_intents::RegisterUserPrefs(user_prefs);
 
 #if defined(ENABLE_CONFIGURATION_POLICY)
   policy::URLBlacklistManager::RegisterPrefs(user_prefs);
 #endif
 
-#if defined(ENABLE_WEB_INTENTS)
-  web_intents::RegisterUserPrefs(user_prefs);
-#endif
-
 #if defined(TOOLKIT_VIEWS)
-  BrowserActionsContainer::RegisterUserPrefs(user_prefs);
-  InvertBubble::RegisterUserPrefs(user_prefs);
+  browser::RegisterInvertBubbleUserPrefs(user_prefs);
 #elif defined(TOOLKIT_GTK)
   BrowserWindowGtk::RegisterUserPrefs(user_prefs);
 #endif
 
+#if defined(OS_ANDROID)
+  geolocation::RegisterUserPrefs(user_prefs);
+#endif
+
 #if defined(USE_ASH)
-  ChromeLauncherController::RegisterUserPrefs(user_prefs);
+  ash::RegisterChromeLauncherUserPrefs(user_prefs);
 #endif
 
 #if !defined(OS_ANDROID)
+  AppsPromo::RegisterUserPrefs(user_prefs);
+  extensions::CommandService::RegisterUserPrefs(user_prefs);
+  extensions::ComponentLoader::RegisterUserPrefs(user_prefs);
+  ExtensionPrefs::RegisterUserPrefs(user_prefs);
+  ExtensionWebUI::RegisterUserPrefs(user_prefs);
   Browser::RegisterUserPrefs(user_prefs);
-  BrowserInit::RegisterUserPrefs(user_prefs);
+  browser::RegisterAutolaunchPrefs(user_prefs);
   DevToolsWindow::RegisterUserPrefs(user_prefs);
+  PepperFlashSettingsManager::RegisterUserPrefs(user_prefs);
   PinnedTabCodec::RegisterUserPrefs(user_prefs);
   PluginsUI::RegisterUserPrefs(user_prefs);
   PromoResourceService::RegisterUserPrefs(user_prefs);
@@ -247,7 +252,7 @@ void RegisterUserPrefs(PrefService* user_prefs) {
 #endif
 
 #if defined(OS_WIN)
-  NetworkProfileBubble::RegisterPrefs(user_prefs);
+  browser::RegisterNetworkProfileBubblePrefs(user_prefs);
 #endif
 }
 

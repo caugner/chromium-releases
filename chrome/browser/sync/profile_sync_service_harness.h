@@ -15,7 +15,7 @@
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_observer.h"
 #include "chrome/browser/sync/retry_verifier.h"
-#include "sync/syncable/model_type.h"
+#include "sync/internal_api/public/syncable/model_type.h"
 
 class Profile;
 
@@ -358,6 +358,11 @@ class ProfileSyncServiceHarness
   // Keeps track of the number of attempts at exponential backoff and its
   // related bookkeeping information for verification.
   browser_sync::RetryVerifier retry_verifier_;
+
+  // Flag set to true when we're waiting for a status change to happen. Used to
+  // avoid triggering internal state machine logic on unexpected sync observer
+  // callbacks.
+  bool waiting_for_status_change_;
 
   DISALLOW_COPY_AND_ASSIGN(ProfileSyncServiceHarness);
 };

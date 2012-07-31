@@ -9,7 +9,7 @@
 #include "ash/system/tray/tray_constants.h"
 #include "ash/system/tray/tray_views.h"
 #include "grit/ash_strings.h"
-#include "grit/ui_resources.h"
+#include "grit/ui_resources_standard.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
@@ -35,7 +35,7 @@ class CapsLockDefaultView : public ActionableView {
     FixedSizedImageView* image =
         new FixedSizedImageView(0, kTrayPopupItemHeight);
     image->SetImage(bundle.GetImageNamed(IDR_AURA_UBER_TRAY_CAPS_LOCK_DARK).
-        ToSkBitmap());
+        ToImageSkia());
     AddChildView(image);
 
     text_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
@@ -102,7 +102,8 @@ TrayCapsLock::TrayCapsLock()
       detailed_(NULL),
       search_mapped_to_caps_lock_(false),
       caps_lock_enabled_(
-          Shell::GetInstance()->tray_delegate()->IsCapsLockOn()) {
+          Shell::GetInstance()->tray_delegate()->IsCapsLockOn()),
+      message_shown_(false) {
 }
 
 TrayCapsLock::~TrayCapsLock() {}
@@ -131,15 +132,17 @@ views::View* TrayCapsLock::CreateDetailedView(user::LoginStatus status) {
   ui::ResourceBundle& bundle = ui::ResourceBundle::GetSharedInstance();
   views::ImageView* image = new views::ImageView;
   image->SetImage(bundle.GetImageNamed(IDR_AURA_UBER_TRAY_CAPS_LOCK_DARK).
-      ToSkBitmap());
+      ToImageSkia());
 
   detailed_->AddChildView(image);
 
   const int string_id = search_mapped_to_caps_lock_ ?
       IDS_ASH_STATUS_TRAY_CAPS_LOCK_ENABLED_PRESS_SEARCH :
       IDS_ASH_STATUS_TRAY_CAPS_LOCK_ENABLED_PRESS_SHIFT_AND_SEARCH_KEYS;
-  detailed_->AddChildView(
-      new views::Label(bundle.GetLocalizedString(string_id)));
+  views::Label* label = new views::Label(bundle.GetLocalizedString(string_id));
+  label->SetMultiLine(true);
+  label->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+  detailed_->AddChildView(label);
 
   return detailed_;
 }
@@ -163,10 +166,14 @@ void TrayCapsLock::OnCapsLockChanged(bool enabled,
   if (default_) {
     default_->Update(enabled, search_mapped_to_caps_lock);
   } else {
-    if (enabled)
-      PopupDetailedView(kTrayPopupAutoCloseDelayForTextInSeconds, false);
-    else if (detailed_)
+    if (enabled) {
+      if (!message_shown_) {
+        PopupDetailedView(kTrayPopupAutoCloseDelayForTextInSeconds, false);
+        message_shown_ = true;
+      }
+    } else if (detailed_) {
       detailed_->GetWidget()->Close();
+    }
   }
 }
 

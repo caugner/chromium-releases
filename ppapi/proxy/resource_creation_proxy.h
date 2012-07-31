@@ -41,6 +41,15 @@ class ResourceCreationProxy : public InterfaceProxy,
                                     const char* path) OVERRIDE;
   virtual PP_Resource CreateFileSystem(PP_Instance instance,
                                        PP_FileSystemType type) OVERRIDE;
+  virtual PP_Resource CreateIMEInputEvent(PP_Instance instance,
+                                          PP_InputEvent_Type type,
+                                          PP_TimeTicks time_stamp,
+                                          struct PP_Var text,
+                                          uint32_t segment_number,
+                                          const uint32_t* segment_offsets,
+                                          int32_t target_segment,
+                                          uint32_t selection_start,
+                                          uint32_t selection_end) OVERRIDE;
   virtual PP_Resource CreateKeyboardInputEvent(
       PP_Instance instance,
       PP_InputEvent_Type type,
@@ -72,7 +81,6 @@ class ResourceCreationProxy : public InterfaceProxy,
       const PP_FloatPoint* wheel_ticks,
       PP_Bool scroll_by_page) OVERRIDE;
 
-#if !defined(OS_NACL)
   virtual PP_Resource CreateAudio(PP_Instance instance,
                                   PP_Resource config_id,
                                   PPB_Audio_Callback audio_callback,
@@ -80,6 +88,11 @@ class ResourceCreationProxy : public InterfaceProxy,
   virtual PP_Resource CreateAudioConfig(PP_Instance instance,
                                         PP_AudioSampleRate sample_rate,
                                         uint32_t sample_frame_count) OVERRIDE;
+  virtual PP_Resource CreateImageData(PP_Instance instance,
+                                      PP_ImageDataFormat format,
+                                      const PP_Size& size,
+                                      PP_Bool init_to_zero) OVERRIDE;
+#if !defined(OS_NACL)
   virtual PP_Resource CreateAudioTrusted(PP_Instance instance) OVERRIDE;
   virtual PP_Resource CreateAudioInput0_1(
       PP_Instance instance,
@@ -97,7 +110,8 @@ class ResourceCreationProxy : public InterfaceProxy,
   virtual PP_Resource CreateFileChooser(
       PP_Instance instance,
       PP_FileChooserMode_Dev mode,
-      const char* accept_mime_types) OVERRIDE;
+      const char* accept_types) OVERRIDE;
+  virtual PP_Resource CreateFlashDeviceID(PP_Instance instance) OVERRIDE;
   virtual PP_Resource CreateFlashMenu(PP_Instance instance,
                                       const PP_Flash_Menu* menu_data) OVERRIDE;
   virtual PP_Resource CreateFlashMessageLoop(PP_Instance instance) OVERRIDE;
@@ -107,14 +121,11 @@ class ResourceCreationProxy : public InterfaceProxy,
   virtual PP_Resource CreateGraphics3D(PP_Instance instance,
                                        PP_Resource share_context,
                                        const int32_t* attrib_list) OVERRIDE;
-  virtual PP_Resource CreateGraphics3DRaw(PP_Instance instance,
-                                          PP_Resource share_context,
-                                          const int32_t* attrib_list) OVERRIDE;
+  virtual PP_Resource CreateGraphics3DRaw(
+      PP_Instance instance,
+      PP_Resource share_context,
+      const int32_t* attrib_list) OVERRIDE;
   virtual PP_Resource CreateHostResolverPrivate(PP_Instance instance) OVERRIDE;
-  virtual PP_Resource CreateImageData(PP_Instance instance,
-                                      PP_ImageDataFormat format,
-                                      const PP_Size& size,
-                                      PP_Bool init_to_zero) OVERRIDE;
   virtual PP_Resource CreateNetworkMonitor(
       PP_Instance instance,
       PPB_NetworkMonitor_Callback callback,
@@ -125,9 +136,6 @@ class ResourceCreationProxy : public InterfaceProxy,
   virtual PP_Resource CreateTCPServerSocketPrivate(
       PP_Instance instance) OVERRIDE;
   virtual PP_Resource CreateTCPSocketPrivate(PP_Instance instance) OVERRIDE;
-  virtual PP_Resource CreateTransport(PP_Instance instance,
-                                      const char* name,
-                                      PP_TransportType type) OVERRIDE;
   virtual PP_Resource CreateUDPSocketPrivate(PP_Instance instance) OVERRIDE;
   virtual PP_Resource CreateVideoCapture(PP_Instance instance) OVERRIDE;
   virtual PP_Resource CreateVideoDecoder(

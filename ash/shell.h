@@ -17,23 +17,34 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
-#include "ui/gfx/size.h"
+#include "ui/aura/cursor_delegate.h"
 #include "ui/gfx/insets.h"
+#include "ui/gfx/size.h"
 
 class CommandLine;
-class SkBitmap;
 
 namespace aura {
 class EventFilter;
-class Monitor;
+class FocusManager;
 class RootWindow;
 class Window;
+namespace client {
+class UserActionClient;
+}
+namespace shared {
+class CompoundEventFilter;
+class InputMethodEventFilter;
+}
+}
+namespace chromeos {
+class OutputConfigurator;
 }
 namespace content {
 class BrowserContext;
 }
 
 namespace gfx {
+class ImageSkia;
 class Point;
 class Rect;
 }
@@ -49,6 +60,7 @@ namespace ash {
 
 class AcceleratorController;
 class DesktopBackgroundController;
+class HighContrastController;
 class Launcher;
 class NestedDispatcherController;
 class PowerButtonController;
@@ -57,33 +69,35 @@ class ShellDelegate;
 class ShellObserver;
 class SystemTrayDelegate;
 class SystemTray;
+class UserActivityDetector;
 class UserWallpaperDelegate;
 class VideoDetector;
 class WindowCycleController;
 
 namespace internal {
-class ActivationController;
 class AcceleratorFilter;
-class AppList;
+class ActivationController;
+class AppListController;
+class CaptureController;
 class DragDropController;
-class EventClientImpl;
 class FocusCycler;
-class InputMethodEventFilter;
 class KeyRewriterEventFilter;
 class MagnificationController;
 class MonitorController;
 class PanelLayoutManager;
 class PartialScreenshotEventFilter;
 class ResizeShadowController;
-class RootWindowEventFilter;
+class RootWindowController;
 class RootWindowLayoutManager;
-class ScreenDimmer;
 class ShadowController;
 class ShelfLayoutManager;
 class ShellContextMenu;
+class SlowAnimationEventFilter;
 class SystemGestureEventFilter;
 class StackingController;
+class StatusAreaWidget;
 class TooltipController;
+class TouchObserverHUD;
 class VisibilityController;
 class WindowModalityController;
 class WorkspaceController;
@@ -94,8 +108,11 @@ class WorkspaceController;
 //
 // Upon creation, the Shell sets itself as the RootWindow's delegate, which
 // takes ownership of the Shell.
-class ASH_EXPORT Shell {
+class ASH_EXPORT Shell : aura::CursorDelegate {
  public:
+  typedef std::vector<aura::RootWindow*> RootWindowList;
+  typedef std::vector<internal::RootWindowController*> RootWindowControllerList;
+
   enum Direction {
     FORWARD,
     BACKWARD
@@ -107,7 +124,7 @@ class ASH_EXPORT Shell {
     explicit TestApi(Shell* shell);
 
     internal::RootWindowLayoutManager* root_window_layout();
-    internal::InputMethodEventFilter* input_method_event_filter();
+    aura::shared::InputMethodEventFilter* input_method_event_filter();
     internal::SystemGestureEventFilter* system_gesture_event_filter();
     internal::WorkspaceController* workspace_controller();
 
@@ -129,20 +146,47 @@ class ASH_EXPORT Shell {
 
   static void DeleteInstance();
 
-  // Gets the singleton RootWindow used by the Shell.
-  static aura::RootWindow* GetRootWindow();
+  // Returns the root window controller for the primary root window.
+  static internal::RootWindowController* GetPrimaryRootWindowController();
 
-  internal::RootWindowLayoutManager* root_window_layout() const {
-    return root_window_layout_;
+  // Returns all root window controllers. In non extended desktop
+  // mode, this return a RootWindowController for the primary root window only.
+  static RootWindowControllerList GetAllRootWindowControllers();
+
+  // Returns the primary RootWindow. The primary RootWindow is the one
+  // that has a launcher.
+  static aura::RootWindow* GetPrimaryRootWindow();
+
+  // Returns the active RootWindow. The active RootWindow is the one that
+  // contains the current active window as a decendant child. The active
+  // RootWindow remains the same even when the active window becomes NULL,
+  // until the another window who has a different root window becomes active.
+  static aura::RootWindow* GetActiveRootWindow();
+
+  // Returns the RootWindow at |point| in the virtual screen coordinates.
+  // Returns NULL if the root window does not exist at the given
+  // point.
+  static aura::RootWindow* GetRootWindowAt(const gfx::Point& point);
+
+  // Returns all root windows. In non extended desktop mode, this
+  // returns the primary root window only.
+  static RootWindowList GetAllRootWindows();
+
+  static aura::Window* GetContainer(aura::RootWindow* root_window,
+                                    int container_id);
+
+  // Returns the list of containers that match |container_id| in
+  // all root windows.
+  static std::vector<aura::Window*> GetAllContainers(int container_id);
+
+  void set_active_root_window(aura::RootWindow* active_root_window) {
+    active_root_window_ = active_root_window;
   }
 
-  aura::Window* GetContainer(int container_id);
-  const aura::Window* GetContainer(int container_id) const;
-
-  // Adds or removes |filter| from the RootWindowEventFilter.
-  void AddRootWindowEventFilter(aura::EventFilter* filter);
-  void RemoveRootWindowEventFilter(aura::EventFilter* filter);
-  size_t GetRootWindowEventFilterCount() const;
+  // Adds or removes |filter| from the aura::Env's CompoundEventFilter.
+  void AddEnvEventFilter(aura::EventFilter* filter);
+  void RemoveEnvEventFilter(aura::EventFilter* filter);
+  size_t GetEnvEventFilterCount() const;
 
   // Shows the background menu over |widget|.
   void ShowBackgroundMenu(views::Widget* widget, const gfx::Point& location);
@@ -200,8 +244,8 @@ class ASH_EXPORT Shell {
   }
 #endif  // !defined(OS_MACOSX)
 
-  internal::RootWindowEventFilter* root_filter() {
-    return root_filter_;
+  aura::shared::CompoundEventFilter* env_filter() {
+    return env_filter_;
   }
   internal::TooltipController* tooltip_controller() {
     return tooltip_controller_.get();
@@ -218,6 +262,9 @@ class ASH_EXPORT Shell {
   PowerButtonController* power_button_controller() {
     return power_button_controller_.get();
   }
+  UserActivityDetector* user_activity_detector() {
+    return user_activity_detector_.get();
+  }
   VideoDetector* video_detector() {
     return video_detector_.get();
   }
@@ -227,18 +274,22 @@ class ASH_EXPORT Shell {
   internal::FocusCycler* focus_cycler() {
     return focus_cycler_.get();
   }
+  internal::MonitorController* monitor_controller() {
+    return monitor_controller_.get();
+  }
 
   ShellDelegate* delegate() { return delegate_.get(); }
-  SystemTrayDelegate* tray_delegate() { return tray_delegate_.get(); }
+
   UserWallpaperDelegate* user_wallpaper_delegate() {
     return user_wallpaper_delegate_.get();
   }
 
+  HighContrastController* high_contrast_controller() {
+    return high_contrast_controller_.get();
+  }
+
   internal::MagnificationController* magnification_controller() {
     return magnification_controller_.get();
-  }
-  internal::ScreenDimmer* screen_dimmer() {
-    return screen_dimmer_.get();
   }
 
   Launcher* launcher() { return launcher_.get(); }
@@ -252,16 +303,25 @@ class ASH_EXPORT Shell {
   void SetShelfAutoHideBehavior(ShelfAutoHideBehavior behavior);
   ShelfAutoHideBehavior GetShelfAutoHideBehavior() const;
 
+  void SetShelfAlignment(ShelfAlignment alignment);
+  ShelfAlignment GetShelfAlignment();
+
+  // Dims or undims the screen.
+  void SetDimming(bool should_dim);
+
   // TODO(sky): don't expose this!
   internal::ShelfLayoutManager* shelf() const { return shelf_; }
 
-  SystemTray* tray() const { return tray_.get(); }
+  internal::StatusAreaWidget* status_area_widget() const {
+    return status_area_widget_;
+  }
+
+  // Convenience accessor for members of StatusAreaWidget.
+  SystemTrayDelegate* tray_delegate();
+  SystemTray* system_tray();
 
   // Returns the size of the grid.
   int GetGridSize() const;
-
-  // Returns true if in maximized or fullscreen mode.
-  bool IsInMaximizedMode() const;
 
   static void set_initially_hide_cursor(bool hide) {
     initially_hide_cursor_ = hide;
@@ -281,9 +341,20 @@ class ASH_EXPORT Shell {
     browser_context_ = browser_context;
   }
 
+  // Initializes the root window to be used for a secondary monitor.
+  void InitRootWindowForSecondaryMonitor(aura::RootWindow* root);
+
+#if defined(OS_CHROMEOS)
+  chromeos::OutputConfigurator* output_configurator() {
+    return output_configurator_.get();
+  }
+#endif  // defined(OS_CHROMEOS)
+
  private:
-  FRIEND_TEST_ALL_PREFIXES(RootWindowEventFilterTest, MouseEventCursors);
-  FRIEND_TEST_ALL_PREFIXES(RootWindowEventFilterTest, TransformActivate);
+  FRIEND_TEST_ALL_PREFIXES(ExtendedDesktopTest, TestCursor);
+  FRIEND_TEST_ALL_PREFIXES(WindowManagerTest, MouseEventCursors);
+  FRIEND_TEST_ALL_PREFIXES(WindowManagerTest, TransformActivate);
+  friend class internal::RootWindowController;
 
   typedef std::pair<aura::Window*, gfx::Rect> WindowAndBoundsPair;
 
@@ -292,11 +363,21 @@ class ASH_EXPORT Shell {
 
   void Init();
 
-  // Initializes the layout managers and event filters.
-  void InitLayoutManagers();
+  // Initializes the root window and root window controller so that it
+  // can host browser windows.
+  void InitRootWindowController(internal::RootWindowController* root);
+
+  // Initializes the layout managers and event filters specific for
+  // primary display.
+  void InitLayoutManagersForPrimaryDisplay(
+      internal::RootWindowController* root_window_controller);
 
   // Disables the workspace grid layout.
   void DisableWorkspaceGridLayout();
+
+  // aura::CursorManager::Delegate overrides:
+  virtual void SetCursor(gfx::NativeCursor cursor) OVERRIDE;
+  virtual void ShowCursor(bool visible) OVERRIDE;
 
   static Shell* instance_;
 
@@ -304,10 +385,13 @@ class ASH_EXPORT Shell {
   // when the screen is initially created.
   static bool initially_hide_cursor_;
 
-  scoped_ptr<aura::RootWindow> root_window_;
   ScreenAsh* screen_;
 
-  internal::RootWindowEventFilter* root_filter_;  // not owned
+  // Active root window. Never become NULL.
+  aura::RootWindow* active_root_window_;
+
+  // The CompoundEventFilter owned by aura::Env object.
+  aura::shared::CompoundEventFilter* env_filter_;
 
   std::vector<WindowAndBoundsPair> to_restore_;
 
@@ -318,32 +402,33 @@ class ASH_EXPORT Shell {
 #endif  // !defined(OS_MACOSX)
 
   scoped_ptr<ShellDelegate> delegate_;
-  scoped_ptr<SystemTrayDelegate> tray_delegate_;
   scoped_ptr<UserWallpaperDelegate> user_wallpaper_delegate_;
 
   scoped_ptr<Launcher> launcher_;
 
-  scoped_ptr<internal::AppList> app_list_;
+  scoped_ptr<internal::AppListController> app_list_controller_;
 
   scoped_ptr<internal::ShellContextMenu> shell_context_menu_;
   scoped_ptr<internal::StackingController> stacking_controller_;
   scoped_ptr<internal::ActivationController> activation_controller_;
+  scoped_ptr<internal::CaptureController> capture_controller_;
   scoped_ptr<internal::WindowModalityController> window_modality_controller_;
   scoped_ptr<internal::DragDropController> drag_drop_controller_;
-  scoped_ptr<internal::WorkspaceController> workspace_controller_;
   scoped_ptr<internal::ResizeShadowController> resize_shadow_controller_;
   scoped_ptr<internal::ShadowController> shadow_controller_;
   scoped_ptr<internal::TooltipController> tooltip_controller_;
   scoped_ptr<internal::VisibilityController> visibility_controller_;
   scoped_ptr<DesktopBackgroundController> desktop_background_controller_;
   scoped_ptr<PowerButtonController> power_button_controller_;
+  scoped_ptr<UserActivityDetector> user_activity_detector_;
   scoped_ptr<VideoDetector> video_detector_;
   scoped_ptr<WindowCycleController> window_cycle_controller_;
   scoped_ptr<internal::FocusCycler> focus_cycler_;
-  scoped_ptr<internal::EventClientImpl> event_client_;
   scoped_ptr<internal::MonitorController> monitor_controller_;
+  scoped_ptr<HighContrastController> high_contrast_controller_;
   scoped_ptr<internal::MagnificationController> magnification_controller_;
-  scoped_ptr<internal::ScreenDimmer> screen_dimmer_;
+  scoped_ptr<aura::FocusManager> focus_manager_;
+  scoped_ptr<aura::client::UserActionClient> user_action_client_;
 
   // An event filter that rewrites or drops a key event.
   scoped_ptr<internal::KeyRewriterEventFilter> key_rewriter_filter_;
@@ -361,7 +446,20 @@ class ASH_EXPORT Shell {
 #endif
 
   // An event filter that pre-handles all key events to send them to an IME.
-  scoped_ptr<internal::InputMethodEventFilter> input_method_filter_;
+  scoped_ptr<aura::shared::InputMethodEventFilter> input_method_filter_;
+
+  // An event filter that silently keeps track of all touch events and controls
+  // a heads-up display. This is enabled only if --ash-touch-hud flag is used.
+  scoped_ptr<internal::TouchObserverHUD> touch_observer_hud_;
+
+  // An event filter that looks for modifier keypresses and triggers a slowdown
+  // of layer animations for visual debugging.
+  scoped_ptr<internal::SlowAnimationEventFilter> slow_animation_filter_;
+
+#if defined(OS_CHROMEOS)
+  // Controls video output device state.
+  scoped_ptr<chromeos::OutputConfigurator> output_configurator_;
+#endif  // defined(OS_CHROMEOS)
 
   // The shelf for managing the launcher and the status widget in non-compact
   // mode. Shell does not own the shelf. Instead, it is owned by container of
@@ -373,11 +471,8 @@ class ASH_EXPORT Shell {
 
   ObserverList<ShellObserver> observers_;
 
-  // Owned by aura::RootWindow, cached here for type safety.
-  internal::RootWindowLayoutManager* root_window_layout_;
-
-  // System tray with clock, Wi-Fi signal, etc.
-  scoped_ptr<SystemTray> tray_;
+  // Widget containing system tray.
+  internal::StatusAreaWidget* status_area_widget_;
 
   // Used by ash/shell.
   content::BrowserContext* browser_context_;

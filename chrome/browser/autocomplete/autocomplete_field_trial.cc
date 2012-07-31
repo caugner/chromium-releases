@@ -17,6 +17,7 @@ namespace {
 static const char kDisallowInlineHQPFieldTrialName[] =
     "OmniboxDisallowInlineHQP";
 static const char kSuggestFieldTrialName[] = "OmniboxSearchSuggest";
+static const char kHQPNewScoringFieldTrialName[] = "OmniboxHQPNewScoring";
 
 // Field trial experiment probabilities.
 
@@ -31,6 +32,12 @@ const base::FieldTrial::Probability
 // will decide what behavior (if any) to change based on the group.
 const int kSuggestFieldTrialNumberOfGroups = 20;
 
+// For History Quick Provider new scoring field trial, put 0% ( = 0/100 )
+// of the users in the new scoring experiment group.
+const base::FieldTrial::Probability kHQPNewScoringFieldTrialDivisor = 100;
+const base::FieldTrial::Probability
+    kHQPNewScoringFieldTrialExperimentFraction = 0;
+
 // Field trial IDs.
 // Though they are not literally "const", they are set only once, in
 // Activate() below.
@@ -38,6 +45,9 @@ const int kSuggestFieldTrialNumberOfGroups = 20;
 // Field trial ID for the disallow-inline History Quick Provider
 // experiment group.
 int disallow_inline_hqp_experiment_group = 0;
+
+// Field trial ID for the History Quick Provider new scoring experiment group.
+int hqp_new_scoring_experiment_group = 0;
 
 }
 
@@ -74,7 +84,7 @@ void AutocompleteFieldTrial::Activate() {
     trial->UseOneTimeRandomization();
 
   // Mark this group in suggest requests to Google.
-  experiments_helper::AssociateGoogleExperimentID(
+  experiments_helper::AssociateGoogleVariationID(
       kSuggestFieldTrialName, "0", chrome_variations::kSuggestIDMin);
   DCHECK_EQ(kSuggestFieldTrialNumberOfGroups,
       chrome_variations::kSuggestIDMax - chrome_variations::kSuggestIDMin + 1);
@@ -85,11 +95,21 @@ void AutocompleteFieldTrial::Activate() {
   for (int i = 1; i < kSuggestFieldTrialNumberOfGroups; i++) {
     const std::string group_name = base::IntToString(i);
     trial->AppendGroup(group_name, 1);
-    experiments_helper::AssociateGoogleExperimentID(
+    experiments_helper::AssociateGoogleVariationID(
         kSuggestFieldTrialName, group_name,
         static_cast<chrome_variations::ID>(
             chrome_variations::kSuggestIDMin + i));
   }
+
+  // Create inline History Quick Provider new scoring field trial.
+  // Make it expire on January 14, 2013.
+  trial = base::FieldTrialList::FactoryGetFieldTrial(
+      kHQPNewScoringFieldTrialName, kHQPNewScoringFieldTrialDivisor,
+      "Standard", 2013, 1, 14, NULL);
+  if (base::FieldTrialList::IsOneTimeRandomizationEnabled())
+    trial->UseOneTimeRandomization();
+  hqp_new_scoring_experiment_group = trial->AppendGroup("NewScoring",
+      kHQPNewScoringFieldTrialExperimentFraction);
 }
 
 bool AutocompleteFieldTrial::InDisallowInlineHQPFieldTrial() {
@@ -129,4 +149,18 @@ int AutocompleteFieldTrial::GetSuggestGroupNameAsNumber() {
 
 int AutocompleteFieldTrial::GetSuggestNumberOfGroups() {
   return kSuggestFieldTrialNumberOfGroups;
+}
+
+bool AutocompleteFieldTrial::InHQPNewScoringFieldTrial() {
+  return base::FieldTrialList::TrialExists(kHQPNewScoringFieldTrialName);
+}
+
+bool AutocompleteFieldTrial::InHQPNewScoringFieldTrialExperimentGroup() {
+  if (!InHQPNewScoringFieldTrial())
+    return false;
+
+  // Return true if we're in the experiment group.
+  const int group = base::FieldTrialList::FindValue(
+      kHQPNewScoringFieldTrialName);
+  return group == hqp_new_scoring_experiment_group;
 }

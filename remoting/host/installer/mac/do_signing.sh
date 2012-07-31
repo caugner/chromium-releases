@@ -17,23 +17,39 @@ set -e -u
 ME="$(basename "${0}")"
 readonly ME
 
+# Choose which installer package to use:
+# 'true' to use Iceberg, 'false' to use Packages.
+# TODO(garykac) Switch completely to Packages so we can sign for 10.8.
+# (crbug.com/127267)
+USE_ICEBERG=false
+
 declare -a g_cleanup_dirs
 
 # Binaries to sign.
 ME2ME_HOST='PrivilegedHelperTools/org.chromium.chromoting.me2me_host.app'
 UNINSTALLER='Applications/@@HOST_UNINSTALLER_NAME@@.app'
+PREFPANE='PreferencePanes/org.chromium.chromoting.prefPane'
 
 # The Chromoting Host installer is a meta-package that consists of 3
 # components:
 #  * Chromoting Host Service package
 #  * Chromoting Host Uninstaller package
-#  * Keystone package(GoogleSoftwareUpdate - for Official builds only)
-PKGPROJ_HOST='ChromotingHost.packproj'
-PKGPROJ_HOST_SERVICE='ChromotingHostService.packproj'
-PKGPROJ_HOST_UNINSTALLER='ChromotingHostUninstaller.packproj'
+#  * Keystone package (GoogleSoftwareUpdate - for Official builds only)
+if $USE_ICEBERG ; then
+  PKGPROJ_HOST='ChromotingHost.packproj'
+  PKGPROJ_HOST_SERVICE='ChromotingHostService.packproj'
+  PKGPROJ_HOST_UNINSTALLER='ChromotingHostUninstaller.packproj'
 
-# Final (user-visible) mpkg name.
-PKG_FINAL='@@HOST_PKG@@.mpkg'
+  # Final (user-visible) mpkg name.
+  PKG_FINAL='@@HOST_PKG@@.mpkg'
+else
+  PKGPROJ_HOST='ChromotingHost.pkgproj'
+  PKGPROJ_HOST_SERVICE='ChromotingHostService.pkgproj'
+  PKGPROJ_HOST_UNINSTALLER='ChromotingHostUninstaller.pkgproj'
+
+  # Final (user-visible) pkg name.
+  PKG_FINAL='@@HOST_PKG@@.pkg'
+fi
 
 DMG_VOLUME_NAME='@@DMG_VOLUME_NAME@@'
 DMG_FILE_NAME='@@DMG_FILE_NAME@@.dmg'
@@ -103,12 +119,28 @@ sign_binaries() {
 
   sign "${input_dir}/${ME2ME_HOST}" "${keychain}" "${id}"
   sign "${input_dir}/${UNINSTALLER}" "${keychain}" "${id}"
+  sign "${input_dir}/${PREFPANE}" "${keychain}" "${id}"
+}
+
+sign_installer() {
+  local input_dir="${1}"
+  local keychain="${2}"
+  local id="${3}"
+
+  local package="${input_dir}/${PKG_DIR}/${PKG_FINAL}"
+  productsign --sign "${id}" --keychain "${keychain}" \
+      "${package}" "${package}.signed"
+  mv -f "${package}.signed" "${package}"
 }
 
 build_package() {
   local pkg="${1}"
   echo "Building .pkg from ${pkg}"
-  freeze "${pkg}"
+  if $USE_ICEBERG ; then
+    freeze "${pkg}"
+  else
+    packagesbuild -v "${pkg}"
+  fi
 }
 
 build_packages() {
@@ -145,26 +177,34 @@ cleanup() {
 }
 
 usage() {
-  echo "Usage: ${ME}: output_dir input_dir codesign_keychain codesign_id" >&2
+  echo "Usage: ${ME}: output_dir input_dir keychain codesign_id"\
+      "[productsign_id]" >&2
 }
 
 main() {
   local output_dir="$(shell_safe_path "${1}")"
   local input_dir="$(shell_safe_path "${2}")"
-  local codesign_keychain="$(shell_safe_path "${3}")"
+  local keychain="$(shell_safe_path "${3}")"
   local codesign_id="${4}"
+  local productsign_id=""
+  if [[ ${#} -ge 5 ]]; then
+    productsign_id="${5}"
+  fi
 
   verify_clean_dir "${output_dir}"
 
-  sign_binaries "${input_dir}" "${codesign_keychain}" "${codesign_id}"
+  sign_binaries "${input_dir}" "${keychain}" "${codesign_id}"
   build_packages "${input_dir}"
-  # TODO(garykac): Sign final .mpkg.
+  if [[ -n "${productsign_id}" ]]; then
+    echo "Signing installer..."
+    sign_installer "${input_dir}" "${keychain}" "${productsign_id}"
+  fi
   build_dmg "${input_dir}" "${output_dir}"
 
   cleanup
 }
 
-if [[ ${#} -ne 4 ]]; then
+if [[ ${#} < 4 || ${#} > 5 ]]; then
   usage
   exit 1
 fi

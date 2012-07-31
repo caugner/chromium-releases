@@ -22,7 +22,6 @@ class MockXKeyboard : public XKeyboard {
 
   virtual bool SetCurrentKeyboardLayoutByName(
       const std::string& layout_name) OVERRIDE;
-  virtual bool RemapModifierKeys(const ModifierMap& modifier_map) OVERRIDE;
   virtual bool ReapplyCurrentKeyboardLayout() OVERRIDE;
   virtual void ReapplyCurrentModifierLockStatus() OVERRIDE;
   virtual void SetLockedModifiers(
@@ -32,9 +31,6 @@ class MockXKeyboard : public XKeyboard {
   virtual void SetCapsLockEnabled(bool enable_caps_lock) OVERRIDE;
   virtual bool NumLockIsEnabled() OVERRIDE;
   virtual bool CapsLockIsEnabled() OVERRIDE;
-  virtual std::string CreateFullXkbLayoutName(
-      const std::string& layout_name,
-      const ModifierMap& modifire_map) OVERRIDE;
   virtual unsigned int GetNumLockMask() OVERRIDE;
   virtual void GetLockedModifiers(bool* out_caps_lock_enabled,
                                   bool* out_num_lock_enabled) OVERRIDE;

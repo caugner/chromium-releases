@@ -8,8 +8,10 @@
 
 #include <string>
 
+#include "ash/desktop_background/desktop_background_resources.h"
 #include "base/memory/singleton.h"
 #include "chrome/browser/chromeos/login/user.h"
+#include "chrome/browser/ui/webui/options2/chromeos/set_wallpaper_options_handler2.h"
 
 class SkBitmap;
 class FilePath;
@@ -18,6 +20,7 @@ class PrefService;
 namespace chromeos {
 
 class RemoveUserDelegate;
+class UserImage;
 
 // Base class for UserManagerImpl - provides a mechanism for discovering users
 // who have logged into this Chrome OS device before and updating that list.
@@ -38,10 +41,17 @@ class UserManager {
   static const char kLoggedInUsers[];
 
   // A dictionary that maps usernames to file paths to their wallpapers.
+  // Deprecated. Will remove this const char after done migration.
   static const char kUserWallpapers[];
+
+  // A dictionary that maps usernames to wallpaper properties.
+  static const char kUserWallpapersProperties[];
 
   // A dictionary that maps usernames to file paths to their images.
   static const char kUserImages[];
+
+  // A dictionary that maps usernames to the displayed name.
+  static const char kUserDisplayName[];
 
   // A dictionary that maps usernames to the displayed (non-canonical) emails.
   static const char kUserDisplayEmail[];
@@ -84,7 +94,9 @@ class UserManager {
 
   // Indicates that a user with the given email has just logged in. The
   // persistent list is updated accordingly if the user is not ephemeral.
-  virtual void UserLoggedIn(const std::string& email) = 0;
+  // |browser_restart| is true when reloading Chrome after crash to distinguish
+  // from normal sign in flow.
+  virtual void UserLoggedIn(const std::string& email, bool browser_restart) = 0;
 
   // Indicates that user just logged on as the demo user.
   virtual void DemoUserLoggedIn() = 0;
@@ -95,8 +107,16 @@ class UserManager {
   // Indicates that a user just logged in as ephemeral.
   virtual void EphemeralUserLoggedIn(const std::string& email) = 0;
 
+  // Initializes wallpaper. If logged in, loads user's wallpaper. If not logged
+  // in, uses a solid color wallpaper. If logged in as a stub user, uses an
+  // empty wallpaper.
+  virtual void InitializeWallpaper() = 0;
+
+  // Called when user pod with |email| is selected.
+  virtual void UserSelected(const std::string& email) = 0;
+
   // Called when browser session is started i.e. after
-  // browser_init.LaunchBrowser(...) was called after user sign in.
+  // browser_creator.LaunchBrowser(...) was called after user sign in.
   // When user is at the image screen IsUserLoggedIn() will return true
   // but SessionStarted() will return false.
   // Fires NOTIFICATION_SESSION_STARTED.
@@ -124,15 +144,23 @@ class UserManager {
   virtual const User& GetLoggedInUser() const = 0;
   virtual User& GetLoggedInUser() = 0;
 
-  // Returns true if given display name is unique.
-  virtual bool IsDisplayNameUnique(const std::string& display_name) const = 0;
-
   // Saves user's oauth token status in local state preferences.
   virtual void SaveUserOAuthStatus(
       const std::string& username,
       User::OAuthTokenStatus oauth_token_status) = 0;
 
-  // Save user's displayed (non-canonical) email in local state preferences.
+  // Saves user's displayed name in local state preferences.
+  // Ignored If there is no such user.
+  virtual void SaveUserDisplayName(const std::string& username,
+                                   const string16& display_name) = 0;
+
+  // Returns the display name for user |username| if it is known (was
+  // previously set by a |SaveUserDisplayName| call).
+  // Otherwise, returns an empty string.
+  virtual string16 GetUserDisplayName(
+      const std::string& username) const = 0;
+
+  // Saves user's displayed (non-canonical) email in local state preferences.
   // Ignored If there is no such user.
   virtual void SaveUserDisplayEmail(const std::string& username,
                                     const std::string& display_email) = 0;
@@ -143,14 +171,14 @@ class UserManager {
   virtual std::string GetUserDisplayEmail(
       const std::string& username) const = 0;
 
-  // Returns the index of the default wallpapers saved in local state for login
-  // user if it is known (was previousely set by |SaveWallpaperToLocalState|
-  // call). Otherwise, returns a randomly generated index.
-  virtual int GetUserWallpaperIndex() = 0;
+  // Sets |type| and |index| to the value saved in local state for logged in
+  // user.
+  virtual void GetLoggedInUserWallpaperProperties(User::WallpaperType* type,
+                                                  int* index) = 0;
 
-  // Save the index |wallpaper_index| of the default wallpapers selected by
-  // current user to Local State.
-  virtual void SaveUserWallpaperIndex(int wallpaper_index) = 0;
+  // Saves |type| and |index| chose by logged in user to Local State.
+  virtual void SaveLoggedInUserWallpaperProperties(User::WallpaperType type,
+                                                   int index) = 0;
 
   // Sets user image to the default image with index |image_index|, sends
   // LOGIN_USER_IMAGE_CHANGED notification and updates Local State.
@@ -160,29 +188,39 @@ class UserManager {
   // Saves image to file, sends LOGIN_USER_IMAGE_CHANGED notification and
   // updates Local State.
   virtual void SaveUserImage(const std::string& username,
-                             const SkBitmap& image) = 0;
+                             const UserImage& user_image) = 0;
+
+  // Updates custom wallpaper to selected layout and saves layout to Local
+  // State.
+  virtual void SetLoggedInUserCustomWallpaperLayout(
+      ash::WallpaperLayout layout) = 0;
 
   // Tries to load user image from disk; if successful, sets it for the user,
   // sends LOGIN_USER_IMAGE_CHANGED notification and updates Local State.
   virtual void SaveUserImageFromFile(const std::string& username,
                                      const FilePath& path) = 0;
 
+  // Tries to load user image from disk; if successful, sets it for the user,
+  // and updates Local State.
+  virtual void SaveUserWallpaperFromFile(
+      const std::string& username,
+      const FilePath& path,
+      ash::WallpaperLayout layout,
+      base::WeakPtr<WallpaperDelegate> delegate) = 0;
+
   // Sets profile image as user image for |username|, sends
   // LOGIN_USER_IMAGE_CHANGED notification and updates Local State. If the user
   // is not logged-in or the last |DownloadProfileImage| call has failed, a
   // default grey avatar will be used until the user logs in and profile image
-  // is downloaded successfuly.
+  // is downloaded successfully.
   virtual void SaveUserImageFromProfileImage(const std::string& username) = 0;
 
   // Starts downloading the profile image for the logged-in user.
   // If user's image index is |kProfileImageIndex|, newly downloaded image
   // is immediately set as user's current picture.
-  // |reason| is an arbitraty string (used to report UMA histograms with
+  // |reason| is an arbitrary string (used to report UMA histograms with
   // download times).
   virtual void DownloadProfileImage(const std::string& reason) = 0;
-
-  // Loads the key/certificates database for the current logged in user.
-  virtual void LoadKeyStore() = 0;
 
   // Returns true if current user is an owner.
   virtual bool IsCurrentUserOwner() const = 0;
@@ -206,7 +244,7 @@ class UserManager {
   virtual bool IsLoggedInAsStub() const = 0;
 
   // Returns true if we're logged in and browser has been started i.e.
-  // browser_init.LaunchBrowser(...) was called after sign in
+  // browser_creator.LaunchBrowser(...) was called after sign in
   // or restart after crash.
   virtual bool IsSessionStarted() const = 0;
 

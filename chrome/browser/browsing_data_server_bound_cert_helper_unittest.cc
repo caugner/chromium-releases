@@ -8,7 +8,7 @@
 #include "base/message_loop.h"
 #include "base/synchronization/waitable_event.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread.h"
 #include "net/base/server_bound_cert_service.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -28,7 +28,7 @@ class BrowsingDataServerBoundCertHelperTest : public testing::Test {
   }
 
   void CreateCertsForTest() {
-    scoped_refptr<net::URLRequestContext> context =
+    net::URLRequestContext* context =
         testing_profile_->GetRequestContext()->GetURLRequestContext();
     net::ServerBoundCertStore* cert_store =
         context->server_bound_cert_service()->GetCertStore();

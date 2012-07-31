@@ -13,7 +13,7 @@
 #include "base/string16.h"
 #include "ui/gfx/size.h"
 
-class TabContentsWrapper;
+class TabContents;
 class WebIntentPickerDelegate;
 class WebIntentPickerModel;
 
@@ -26,7 +26,7 @@ class WebIntentPicker {
  public:
   // Platform specific factory function. This function will automatically show
   // the picker.
-  static WebIntentPicker* Create(TabContentsWrapper* wrapper,
+  static WebIntentPicker* Create(TabContents* tab_contents,
                                  WebIntentPickerDelegate* delegate,
                                  WebIntentPickerModel* model);
 
@@ -43,6 +43,9 @@ class WebIntentPicker {
   // Called when an extension installation started via the picker has failed.
   virtual void OnExtensionInstallFailure(const std::string& id) {}
 
+  // Called when the inline disposition experiences an auto-resize.
+  virtual void OnInlineDispositionAutoResize(const gfx::Size& size) {}
+
   // Called when the controller has finished all pending asynchronous
   // activities.
   virtual void OnPendingAsyncCompleted() {}
@@ -54,6 +57,12 @@ class WebIntentPicker {
   // Get the default size of the inline disposition tab container.
   static gfx::Size GetDefaultInlineDispositionSize(
       content::WebContents* web_contents);
+
+  // Get the minimum size of the inline disposition content container.
+  static gfx::Size GetMinInlineDispositionSize();
+
+  // Get the maximum size of the inline disposition content container.
+  static gfx::Size GetMaxInlineDispositionSize();
 
   // Get the star image IDs to use for the nth star (out of 5), given a
   // |rating| in the range [0, 5].

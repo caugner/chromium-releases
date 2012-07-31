@@ -10,11 +10,12 @@
 #include "chrome/browser/extensions/extension_event_names.h"
 #include "chrome/browser/extensions/extension_event_router.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/settings/leveldb_settings_storage_factory.h"
 #include "chrome/browser/extensions/settings/settings_backend.h"
 #include "chrome/browser/extensions/settings/settings_namespace.h"
-#include "chrome/browser/extensions/settings/settings_leveldb_storage.h"
 #include "chrome/browser/extensions/settings/weak_unlimited_settings_storage.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/value_store/leveldb_value_store.h"
 #include "chrome/common/extensions/api/storage.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
@@ -90,18 +91,18 @@ void CallbackWithUnlimitedStorage(
 
 SettingsStorageQuotaEnforcer::Limits GetLocalLimits() {
   SettingsStorageQuotaEnforcer::Limits limits = {
-    api::storage::local::QUOTA_BYTES,
-    UINT_MAX,
-    UINT_MAX
+    static_cast<size_t>(api::storage::local::QUOTA_BYTES),
+    std::numeric_limits<size_t>::max(),
+    std::numeric_limits<size_t>::max()
   };
   return limits;
 }
 
 SettingsStorageQuotaEnforcer::Limits GetSyncLimits() {
   SettingsStorageQuotaEnforcer::Limits limits = {
-    api::storage::sync::QUOTA_BYTES,
-    api::storage::sync::QUOTA_BYTES_PER_ITEM,
-    api::storage::sync::MAX_ITEMS
+    static_cast<size_t>(api::storage::sync::QUOTA_BYTES),
+    static_cast<size_t>(api::storage::sync::QUOTA_BYTES_PER_ITEM),
+    static_cast<size_t>(api::storage::sync::MAX_ITEMS)
   };
   return limits;
 }
@@ -204,7 +205,7 @@ class SettingsFrontend::BackendWrapper
 
 // static
 SettingsFrontend* SettingsFrontend::Create(Profile* profile) {
-  return new SettingsFrontend(new SettingsLeveldbStorage::Factory(), profile);
+  return new SettingsFrontend(new LeveldbSettingsStorageFactory(), profile);
 }
 
 // static

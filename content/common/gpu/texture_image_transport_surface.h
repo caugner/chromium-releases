@@ -10,7 +10,7 @@
 #include "content/common/gpu/gpu_command_buffer_stub.h"
 #include "content/common/gpu/image_transport_surface.h"
 #include "gpu/command_buffer/service/texture_manager.h"
-#include "ui/gfx/gl/gl_surface.h"
+#include "ui/gl/gl_surface.h"
 
 class GpuChannelManager;
 
@@ -35,7 +35,8 @@ class TextureImageTransportSurface :
   virtual unsigned int GetBackingFrameBufferObject() OVERRIDE;
   virtual bool PostSubBuffer(int x, int y, int width, int height) OVERRIDE;
   virtual bool OnMakeCurrent(gfx::GLContext* context) OVERRIDE;
-  virtual void SetBufferAllocation(BufferAllocationState state) OVERRIDE;
+  virtual void SetBackbufferAllocation(bool allocated) OVERRIDE;
+  virtual void SetFrontbufferAllocation(bool allocated) OVERRIDE;
   virtual void* GetShareHandle() OVERRIDE;
   virtual void* GetDisplay() OVERRIDE;
   virtual void* GetConfig() OVERRIDE;
@@ -93,7 +94,11 @@ class TextureImageTransportSurface :
   // Whether or not the command buffer stub has been destroyed.
   bool stub_destroyed_;
 
+  bool backbuffer_suggested_allocation_;
+  bool frontbuffer_suggested_allocation_;
+
   scoped_ptr<ImageTransportHelper> helper_;
+  gfx::GLSurfaceHandle handle_;
   GpuCommandBufferStub* parent_stub_;
 
   DISALLOW_COPY_AND_ASSIGN(TextureImageTransportSurface);

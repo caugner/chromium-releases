@@ -146,7 +146,7 @@ BASE_EXPORT ProcessId GetCurrentProcId();
 BASE_EXPORT ProcessHandle GetCurrentProcessHandle();
 
 #if defined(OS_WIN)
-// Returns the module handle to which an address belongs. The reference counter
+// Returns the module handle to which an address belongs. The reference count
 // of the module is not incremented.
 BASE_EXPORT HMODULE GetModuleFromAddress(void* address);
 #endif

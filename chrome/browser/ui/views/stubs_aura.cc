@@ -22,7 +22,7 @@
 #endif
 
 class SSLClientAuthHandler;
-class TabContentsWrapper;
+class TabContents;
 
 namespace net {
 class HttpNetworkSession;

@@ -19,8 +19,8 @@
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/test/test_navigation_observer.h"
 #include "content/test/net/url_request_mock_http_job.h"
-#include "content/test/test_navigation_observer.h"
 
 using content::BrowserThread;
 
@@ -42,7 +42,7 @@ class BrowserEncodingTest : public InProcessBrowserTest {
     ui_test_utils::WindowedNotificationObserver observer(
         content::NOTIFICATION_SAVE_PACKAGE_SUCCESSFULLY_FINISHED,
         content::NotificationService::AllSources());
-    browser()->GetSelectedWebContents()->SavePage(
+    browser()->GetActiveWebContents()->SavePage(
         full_file_name, temp_sub_resource_dir_,
         content::SAVE_PAGE_TYPE_AS_COMPLETE_HTML);
     observer.Wait();
@@ -74,7 +74,14 @@ class BrowserEncodingTest : public InProcessBrowserTest {
 // encoding name). Webkit layout tests cover some, but testing in the UI test is
 // also necessary.
 // SLOW_ is added for XP debug bots. These tests should really be unittests...
-IN_PROC_BROWSER_TEST_F(BrowserEncodingTest, SLOW_TestEncodingAliasMapping) {
+//
+// The tests times out under ASan, see http://crbug.com/127748.
+#if defined(ADDRESS_SANITIZER)
+#define MAYBE_TestEncodingAliasMapping DISABLED_TestEncodingAliasMapping
+#else
+#define MAYBE_TestEncodingAliasMapping SLOW_TestEncodingAliasMapping
+#endif
+IN_PROC_BROWSER_TEST_F(BrowserEncodingTest, MAYBE_TestEncodingAliasMapping) {
   struct EncodingTestData {
     const char* file_name;
     const char* encoding_name;
@@ -131,7 +138,7 @@ IN_PROC_BROWSER_TEST_F(BrowserEncodingTest, SLOW_TestEncodingAliasMapping) {
         ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
 
     EXPECT_EQ(kEncodingTestDatas[i].encoding_name,
-              browser()->GetSelectedWebContents()->GetEncoding());
+              browser()->GetActiveWebContents()->GetEncoding());
     browser()->CloseTab();
   }
 }
@@ -147,13 +154,13 @@ IN_PROC_BROWSER_TEST_F(BrowserEncodingTest, TestOverrideEncoding) {
   test_dir_path = test_dir_path.AppendASCII(kTestFileName);
   GURL url = URLRequestMockHTTPJob::GetMockUrl(test_dir_path);
   ui_test_utils::NavigateToURL(browser(), url);
-  content::WebContents* web_contents = browser()->GetSelectedWebContents();
+  content::WebContents* web_contents = browser()->GetActiveWebContents();
   EXPECT_EQ("ISO-8859-1", web_contents->GetEncoding());
 
   // Override the encoding to "gb18030".
   const std::string selected_encoding =
       CharacterEncoding::GetCanonicalEncodingNameByAliasName("gb18030");
-  TestNavigationObserver navigation_observer(
+  content::TestNavigationObserver navigation_observer(
       content::Source<content::NavigationController>(
           &web_contents->GetController()));
   web_contents->SetOverrideEncoding(selected_encoding);
@@ -248,10 +255,10 @@ IN_PROC_BROWSER_TEST_F(BrowserEncodingTest, MAYBE_TestEncodingAutoDetect) {
   // Set the default charset to one of encodings not supported by the current
   // auto-detector (Please refer to the above comments) to make sure we
   // incorrectly decode the page. Now we use ISO-8859-4.
-  browser()->profile()->GetPrefs()->SetString(
-      prefs::kGlobalDefaultCharset, "ISO-8859-4");
+  browser()->profile()->GetPrefs()->SetString(prefs::kDefaultCharset,
+                                              "ISO-8859-4");
 
-  content::WebContents* web_contents = browser()->GetSelectedWebContents();
+  content::WebContents* web_contents = browser()->GetActiveWebContents();
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kTestDatas); ++i) {
     // Disable auto detect if it is on.
     browser()->profile()->GetPrefs()->SetBoolean(
@@ -270,7 +277,7 @@ IN_PROC_BROWSER_TEST_F(BrowserEncodingTest, MAYBE_TestEncodingAutoDetect) {
     browser()->profile()->GetPrefs()->SetBoolean(
         prefs::kWebKitUsesUniversalDetector, true);
 
-    TestNavigationObserver observer(
+    content::TestNavigationObserver observer(
         content::Source<content::NavigationController>(
             &web_contents->GetController()));
     browser()->Reload(CURRENT_TAB);

@@ -24,23 +24,30 @@ class TestShellDelegate : public ShellDelegate {
   virtual bool IsScreenLocked() const OVERRIDE;
   virtual void Shutdown() OVERRIDE;
   virtual void Exit() OVERRIDE;
+  virtual void NewTab() OVERRIDE;
   virtual void NewWindow(bool incognito) OVERRIDE;
-  virtual void Search() OVERRIDE;
-  virtual void OpenFileManager() OVERRIDE;
+  virtual void OpenFileManager(bool as_dialog) OVERRIDE;
   virtual void OpenCrosh() OVERRIDE;
-  virtual void OpenMobileSetup() OVERRIDE;
+  virtual void OpenMobileSetup(const std::string& service_path) OVERRIDE;
+  virtual void RestoreTab() OVERRIDE;
+  virtual bool RotatePaneFocus(Shell::Direction direction) OVERRIDE;
+  virtual void ShowKeyboardOverlay() OVERRIDE;
+  virtual void ShowTaskManager() OVERRIDE;
   virtual content::BrowserContext* GetCurrentBrowserContext() OVERRIDE;
   virtual void ToggleSpokenFeedback() OVERRIDE;
-  virtual AppListViewDelegate* CreateAppListViewDelegate() OVERRIDE;
+  virtual bool IsSpokenFeedbackEnabled() const OVERRIDE;
+  virtual app_list::AppListViewDelegate* CreateAppListViewDelegate() OVERRIDE;
   virtual void StartPartialScreenshot(
       ScreenshotDelegate* screenshot_delegate) OVERRIDE;
   virtual LauncherDelegate* CreateLauncherDelegate(
       ash::LauncherModel* model) OVERRIDE;
   virtual SystemTrayDelegate* CreateSystemTrayDelegate(SystemTray* t) OVERRIDE;
   virtual UserWallpaperDelegate* CreateUserWallpaperDelegate() OVERRIDE;
+  virtual aura::client::UserActionClient* CreateUserActionClient() OVERRIDE;
 
  private:
   bool locked_;
+  bool spoken_feedback_enabled_;
 
   DISALLOW_COPY_AND_ASSIGN(TestShellDelegate);
 };

@@ -7,10 +7,11 @@
 #include <string>
 
 #include "base/string_util.h"
-#include "chrome/common/chrome_view_type.h"
+#include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/extensions/extension_messages.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/common/view_type.h"
 #include "chrome/renderer/extensions/extension_dispatcher.h"
 #include "chrome/renderer/extensions/extension_helper.h"
 #include "content/public/renderer/render_view.h"
@@ -48,9 +49,9 @@ v8::Handle<v8::Value> ExtensionCustomBindings::GetExtensionViews(
 
   std::string view_type_string = *v8::String::Utf8Value(args[1]->ToString());
   StringToUpperASCII(&view_type_string);
-  // |view_type| == content::VIEW_TYPE_INVALID means getting any type of
+  // |view_type| == chrome::VIEW_TYPE_INVALID means getting any type of
   // views.
-  content::ViewType view_type = content::VIEW_TYPE_INVALID;
+  chrome::ViewType view_type = chrome::VIEW_TYPE_INVALID;
   if (view_type_string == chrome::kViewTypeBackgroundPage) {
     view_type = chrome::VIEW_TYPE_EXTENSION_BACKGROUND_PAGE;
   } else if (view_type_string == chrome::kViewTypeInfobar) {
@@ -58,7 +59,7 @@ v8::Handle<v8::Value> ExtensionCustomBindings::GetExtensionViews(
   } else if (view_type_string == chrome::kViewTypeNotification) {
     view_type = chrome::VIEW_TYPE_NOTIFICATION;
   } else if (view_type_string == chrome::kViewTypeTabContents) {
-    view_type = content::VIEW_TYPE_WEB_CONTENTS;
+    view_type = chrome::VIEW_TYPE_TAB_CONTENTS;
   } else if (view_type_string == chrome::kViewTypePopup) {
     view_type = chrome::VIEW_TYPE_EXTENSION_POPUP;
   } else if (view_type_string == chrome::kViewTypeExtensionDialog) {
@@ -73,7 +74,7 @@ v8::Handle<v8::Value> ExtensionCustomBindings::GetExtensionViews(
 
   ExtensionCustomBindings* v8_extension =
       GetFromArguments<ExtensionCustomBindings>(args);
-  const ::Extension* extension =
+  const Extension* extension =
       v8_extension->GetExtensionForCurrentRenderView();
   if (!extension)
     return v8::Undefined();

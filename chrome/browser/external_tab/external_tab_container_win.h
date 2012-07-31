@@ -31,7 +31,7 @@ class AutomationProvider;
 class Browser;
 class Profile;
 class TabContentsContainer;
-class TabContentsWrapper;
+class TabContents;
 class RenderViewContextMenuViews;
 struct NavigationInfo;
 
@@ -66,7 +66,7 @@ class ExternalTabContainer : public content::WebContentsDelegate,
                        AutomationResourceMessageFilter* filter);
 
   content::WebContents* web_contents() const;
-  TabContentsWrapper* tab_contents_wrapper() { return tab_contents_.get(); }
+  TabContents* tab_contents() { return tab_contents_.get(); }
 
   // Temporary hack so we can send notifications back
   void SetTabHandle(int handle);
@@ -81,7 +81,7 @@ class ExternalTabContainer : public content::WebContentsDelegate,
             DWORD style,
             bool load_requests_via_automation,
             bool handle_top_level_requests,
-            TabContentsWrapper* existing_tab_contents,
+            TabContents* existing_tab_contents,
             const GURL& initial_url,
             const GURL& referrer,
             bool infobars_enabled,
@@ -146,10 +146,11 @@ class ExternalTabContainer : public content::WebContentsDelegate,
                                   int64 source_frame_id,
                                   const GURL& target_url,
                                   content::WebContents* new_contents) OVERRIDE;
-  virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
-                                      bool* is_keyboard_shortcut) OVERRIDE;
+  virtual bool PreHandleKeyboardEvent(
+      const content::NativeWebKeyboardEvent& event,
+      bool* is_keyboard_shortcut) OVERRIDE;
   virtual void HandleKeyboardEvent(
-      const NativeWebKeyboardEvent& event) OVERRIDE;
+      const content::NativeWebKeyboardEvent& event) OVERRIDE;
   virtual bool TakeFocus(bool reverse) OVERRIDE;
   virtual bool CanDownload(content::RenderViewHost* render_view_host,
                            int request_id,
@@ -175,13 +176,12 @@ class ExternalTabContainer : public content::WebContentsDelegate,
   virtual void RegisterProtocolHandler(content::WebContents* tab,
                                        const std::string& protocol,
                                        const GURL& url,
-                                       const string16& title) OVERRIDE;
-  virtual void RegisterIntentHandler(content::WebContents* tab,
-                                     const string16& action,
-                                     const string16& type,
-                                     const string16& href,
-                                     const string16& title,
-                                     const string16& disposition) OVERRIDE;
+                                       const string16& title,
+                                       bool user_gesture) OVERRIDE;
+  virtual void RegisterIntentHandler(
+      content::WebContents* tab,
+      const webkit_glue::WebIntentServiceData& data,
+      bool user_gesture) OVERRIDE;
   virtual void WebIntentDispatch(
       content::WebContents* tab,
       content::WebIntentsDispatcher* intents_dispatcher) OVERRIDE;
@@ -191,6 +191,10 @@ class ExternalTabContainer : public content::WebContentsDelegate,
                          const gfx::Rect& selection_rect,
                          int active_match_ordinal,
                          bool final_update) OVERRIDE;
+  virtual void RequestMediaAccessPermission(
+      content::WebContents* web_contents,
+      const content::MediaStreamRequest* request,
+      const content::MediaResponseCallback& callback) OVERRIDE;
 
   void RegisterRenderViewHost(content::RenderViewHost* render_view_host);
   void UnregisterRenderViewHost(content::RenderViewHost* render_view_host);
@@ -202,7 +206,8 @@ class ExternalTabContainer : public content::WebContentsDelegate,
       bool is_main_frame,
       const GURL& validated_url,
       int error_code,
-      const string16& error_description) OVERRIDE;
+      const string16& error_description,
+      content::RenderViewHost* render_view_host) OVERRIDE;
 
   // Message handlers
   void OnForwardMessageToExternalHost(const std::string& message,
@@ -243,8 +248,7 @@ class ExternalTabContainer : public content::WebContentsDelegate,
   void RunUnloadHandlers(IPC::Message* reply_message);
 
   // Overridden from BlockedContentTabHelperDelegate:
-  virtual TabContentsWrapper* GetConstrainingContentsWrapper(
-      TabContentsWrapper* source) OVERRIDE;
+  virtual TabContents* GetConstrainingTabContents(TabContents* source) OVERRIDE;
 
  protected:
   ~ExternalTabContainer();
@@ -282,7 +286,7 @@ class ExternalTabContainer : public content::WebContentsDelegate,
   // Creates and initializes the view hierarchy for this ExternalTabContainer.
   void SetupExternalTabView();
 
-  scoped_ptr<TabContentsWrapper> tab_contents_;
+  scoped_ptr<TabContents> tab_contents_;
   scoped_refptr<AutomationProvider> automation_;
 
   content::NotificationRegistrar registrar_;

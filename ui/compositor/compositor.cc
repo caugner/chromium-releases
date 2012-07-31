@@ -14,13 +14,18 @@
 #include "third_party/skia/include/images/SkImageEncoder.h"
 #include "ui/compositor/compositor_observer.h"
 #include "ui/compositor/compositor_switches.h"
+#include "ui/compositor/dip_util.h"
 #include "ui/compositor/layer.h"
 #include "ui/compositor/test_web_graphics_context_3d.h"
-#include "ui/gfx/gl/gl_context.h"
-#include "ui/gfx/gl/gl_implementation.h"
-#include "ui/gfx/gl/gl_surface.h"
+#include "ui/gl/gl_context.h"
+#include "ui/gl/gl_implementation.h"
+#include "ui/gl/gl_surface.h"
 #include "webkit/glue/webthread_impl.h"
 #include "webkit/gpu/webgraphicscontext3d_in_process_impl.h"
+
+#if defined(OS_CHROMEOS)
+#include "base/chromeos/chromeos_version.h"
+#endif
 
 namespace {
 
@@ -99,11 +104,15 @@ WebKit::WebGraphicsContext3D* DefaultContextFactory::CreateContextCommon(
           attrs, false) :
       webkit::gpu::WebGraphicsContext3DInProcessImpl::CreateForWindow(
           attrs, compositor->widget(), share_group_.get());
+  if (!context)
+    return NULL;
+
   CommandLine* command_line = CommandLine::ForCurrentProcess();
-  if (!command_line->HasSwitch(switches::kDisableUIVsync)) {
+  if (!offscreen) {
     context->makeContextCurrent();
     gfx::GLContext* gl_context = gfx::GLContext::GetCurrent();
-    gl_context->SetSwapInterval(1);
+    bool vsync = !command_line->HasSwitch(switches::kDisableUIVsync);
+    gl_context->SetSwapInterval(vsync ? 1 : 0);
     gl_context->ReleaseCurrent(NULL);
   }
   return context;
@@ -119,33 +128,39 @@ Texture::~Texture() {
 }
 
 Compositor::Compositor(CompositorDelegate* delegate,
-                       gfx::AcceleratedWidget widget,
-                       const gfx::Size& size)
+                       gfx::AcceleratedWidget widget)
     : delegate_(delegate),
-      size_(size),
       root_layer_(NULL),
       widget_(widget),
       root_web_layer_(WebKit::WebLayer::create()),
-      swap_posted_(false) {
+      swap_posted_(false),
+      device_scale_factor_(0.0f),
+      last_started_frame_(0),
+      last_ended_frame_(0),
+      disable_schedule_composite_(false) {
   WebKit::WebLayerTreeView::Settings settings;
   CommandLine* command_line = CommandLine::ForCurrentProcess();
   settings.showFPSCounter =
       command_line->HasSwitch(switches::kUIShowFPSCounter);
   settings.showPlatformLayerTree =
       command_line->HasSwitch(switches::kUIShowLayerTree);
-  settings.refreshRate = test_compositor_enabled ?
-      kTestRefreshRate : kDefaultRefreshRate;
+  settings.refreshRate =
+      test_compositor_enabled ? kTestRefreshRate : kDefaultRefreshRate;
+
+#if !defined(WEBCOMPOSITOR_OWNS_SETTINGS)
   settings.partialSwapEnabled =
       command_line->HasSwitch(switches::kUIEnablePartialSwap);
   settings.perTilePainting =
-    command_line->HasSwitch(switches::kUIEnablePerTilePainting);
+      command_line->HasSwitch(switches::kUIEnablePerTilePainting);
+#endif
 
   host_.initialize(this, root_web_layer_, settings);
   root_web_layer_.setAnchorPoint(WebKit::WebFloatPoint(0.f, 0.f));
-  WidgetSizeChanged(size_);
 }
 
 Compositor::~Compositor() {
+  // Don't call |CompositorDelegate::ScheduleDraw| from this point.
+  delegate_ = NULL;
   // There's a cycle between |root_web_layer_| and |host_|, which results in
   // leaking and/or crashing. Explicitly set the root layer to NULL so the cycle
   // is broken.
@@ -157,6 +172,14 @@ Compositor::~Compositor() {
 }
 
 void Compositor::Initialize(bool use_thread) {
+#if defined(WEBCOMPOSITOR_OWNS_SETTINGS)
+  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  // These settings must be applied before we initialize the compositor.
+  WebKit::WebCompositor::setPartialSwapEnabled(
+      command_line->HasSwitch(switches::kUIEnablePartialSwap));
+  WebKit::WebCompositor::setPerTilePaintingEnabled(
+      command_line->HasSwitch(switches::kUIEnablePerTilePainting));
+#endif
   if (use_thread)
     g_compositor_thread = new webkit_glue::WebThreadImpl("Browser Compositor");
   WebKit::WebCompositor::initialize(g_compositor_thread);
@@ -176,7 +199,7 @@ void Compositor::ScheduleDraw() {
     // compositeImmediately() directly.
     layout();
     host_.composite();
-  } else {
+  } else if (delegate_) {
     delegate_->ScheduleDraw();
   }
 }
@@ -198,6 +221,8 @@ void Compositor::Draw(bool force_clear) {
   if (!root_layer_)
     return;
 
+  last_started_frame_++;
+
   // TODO(nduca): Temporary while compositor calls
   // compositeImmediately() directly.
   layout();
@@ -210,32 +235,42 @@ void Compositor::ScheduleFullDraw() {
   host_.setNeedsRedraw();
 }
 
-bool Compositor::ReadPixels(SkBitmap* bitmap, const gfx::Rect& bounds) {
-  if (bounds.right() > size().width() || bounds.bottom() > size().height())
+bool Compositor::ReadPixels(SkBitmap* bitmap,
+                            const gfx::Rect& bounds_in_pixel) {
+  if (bounds_in_pixel.right() > size().width() ||
+      bounds_in_pixel.bottom() > size().height())
     return false;
   // Convert to OpenGL coordinates.
-  gfx::Point new_origin(bounds.x(),
-                        size().height() - bounds.height() - bounds.y());
+  gfx::Point new_origin(
+      bounds_in_pixel.x(),
+      size().height() - bounds_in_pixel.height() - bounds_in_pixel.y());
 
   bitmap->setConfig(SkBitmap::kARGB_8888_Config,
-                    bounds.width(), bounds.height());
+                    bounds_in_pixel.width(), bounds_in_pixel.height());
   bitmap->allocPixels();
   SkAutoLockPixels lock_image(*bitmap);
   unsigned char* pixels = static_cast<unsigned char*>(bitmap->getPixels());
-  if (host_.compositeAndReadback(pixels,
-                                 gfx::Rect(new_origin, bounds.size()))) {
-    SwizzleRGBAToBGRAAndFlip(pixels, bounds.size());
+  if (host_.compositeAndReadback(
+          pixels, gfx::Rect(new_origin, bounds_in_pixel.size()))) {
+    SwizzleRGBAToBGRAAndFlip(pixels, bounds_in_pixel.size());
     return true;
   }
   return false;
 }
 
-void Compositor::WidgetSizeChanged(const gfx::Size& size) {
-  if (size.IsEmpty())
+void Compositor::SetScaleAndSize(float scale, const gfx::Size& size_in_pixel) {
+  DCHECK(scale > 0);
+  if (size_in_pixel.IsEmpty() || scale <= 0)
     return;
-  size_ = size;
-  host_.setViewportSize(size_);
-  root_web_layer_.setBounds(size_);
+  size_ = size_in_pixel;
+  host_.setViewportSize(size_in_pixel);
+  root_web_layer_.setBounds(size_in_pixel);
+
+  if (device_scale_factor_ != scale) {
+    device_scale_factor_ = scale;
+    if (root_layer_)
+      root_layer_->OnDeviceScaleFactorChanged(scale);
+  }
 }
 
 void Compositor::AddObserver(CompositorObserver* observer) {
@@ -265,14 +300,21 @@ void Compositor::OnSwapBuffersAborted() {
     swap_posted_ = false;
     NotifyEnd();
   }
+  FOR_EACH_OBSERVER(CompositorObserver,
+                    observer_list_,
+                    OnCompositingAborted(this));
 }
 
 void Compositor::updateAnimations(double frameBeginTime) {
 }
 
 void Compositor::layout() {
+  // We're sending damage that will be addressed during this composite
+  // cycle, so we don't need to schedule another composite to address it.
+  disable_schedule_composite_ = true;
   if (root_layer_)
     root_layer_->SendDamagedRects();
+  disable_schedule_composite_ = false;
 }
 
 void Compositor::applyScrollAndScale(const WebKit::WebSize& scrollDelta,
@@ -304,7 +346,8 @@ void Compositor::didCompleteSwapBuffers() {
 }
 
 void Compositor::scheduleComposite() {
-  ScheduleDraw();
+  if (!disable_schedule_composite_)
+    ScheduleDraw();
 }
 
 void Compositor::SwizzleRGBAToBGRAAndFlip(unsigned char* pixels,
@@ -331,6 +374,7 @@ void Compositor::SwizzleRGBAToBGRAAndFlip(unsigned char* pixels,
 }
 
 void Compositor::NotifyEnd() {
+  last_ended_frame_++;
   FOR_EACH_OBSERVER(CompositorObserver,
                     observer_list_,
                     OnCompositingEnded(this));
@@ -341,6 +385,12 @@ COMPOSITOR_EXPORT void SetupTestCompositor() {
       switches::kDisableTestCompositor)) {
     test_compositor_enabled = true;
   }
+#if defined(OS_CHROMEOS)
+  // If the test is running on the chromeos envrionment (such as
+  // device or vm bots), use the real compositor.
+  if (base::chromeos::IsRunningOnChromeOS())
+    test_compositor_enabled = false;
+#endif
 }
 
 COMPOSITOR_EXPORT void DisableTestCompositor() {

@@ -7,6 +7,7 @@
 #include "base/command_line.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
@@ -19,23 +20,12 @@ void RegisterUserPrefs(PrefService* user_prefs) {
                                   PrefService::SYNCABLE_PREF);
 }
 
-bool IsWebIntentsEnabled(Profile* profile) {
-  bool disabled_flag = CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kDisableWebIntents);
-
-  bool enabled_pref = profile->GetPrefs()->GetBoolean(
-      prefs::kWebIntentsEnabled);
-
-  return !disabled_flag && enabled_pref;
+bool IsWebIntentsEnabled(PrefService* prefs) {
+  return prefs->GetBoolean(prefs::kWebIntentsEnabled);
 }
 
-bool IsWebIntentsEnabledInActiveBrowser() {
-  Browser* browser = BrowserList::GetLastActive();
-  if (!browser)
-    browser = *BrowserList::begin();
-  DCHECK(browser);
-
-  return IsWebIntentsEnabled(browser->profile());
+bool IsWebIntentsEnabledForProfile(Profile* profile) {
+  return IsWebIntentsEnabled(profile->GetPrefs());
 }
 
 }  // namespace web_intents

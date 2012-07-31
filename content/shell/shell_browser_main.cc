@@ -4,6 +4,8 @@
 
 #include "content/shell/shell_browser_main.h"
 
+#include <iostream>
+
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
@@ -57,15 +59,13 @@ int ShellBrowserMain(const content::MainFunctionParams& parameters) {
 
   int exit_code = main_runner_->Initialize(parameters);
 
-#if defined(OS_ANDROID)
-  DCHECK(exit_code < 0);
-
-  // Return 0 so that we do NOT trigger the default behavior. On Android, the
-  // UI message loop is managed by the Java application.
-  return 0;
-#else
   if (exit_code >= 0)
     return exit_code;
+
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+        switches::kCheckLayoutTestSysDeps)) {
+    return 0;
+  }
 
   bool layout_test_mode =
       CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpRenderTree);
@@ -82,8 +82,10 @@ int ShellBrowserMain(const content::MainFunctionParams& parameters) {
         *new_line_position = '\0';
       if (test_string[0] == '\0')
         continue;
-      if (!strcmp(test_string, "QUIT"))
-        break;
+
+      // Test header.
+      std::cout << "Content-Type: text/plain\n";
+
       content::Shell::CreateNewWindow(browser_context,
                                       GetURLForLayoutTest(test_string),
                                       NULL,
@@ -92,6 +94,11 @@ int ShellBrowserMain(const content::MainFunctionParams& parameters) {
       main_runner_->Run();
 
       content::Shell::CloseAllWindows();
+
+      // Test footer.
+      std::cout << "#EOF\n";
+      std::cout.flush();
+
     }
     exit_code = 0;
   } else {
@@ -101,5 +108,4 @@ int ShellBrowserMain(const content::MainFunctionParams& parameters) {
   main_runner_->Shutdown();
 
   return exit_code;
-#endif
 }

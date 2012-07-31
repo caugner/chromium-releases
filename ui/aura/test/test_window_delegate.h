@@ -9,6 +9,7 @@
 #include "base/compiler_specific.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/aura/window_delegate.h"
+#include "ui/gfx/rect.h"
 
 namespace aura {
 namespace test {
@@ -27,20 +28,26 @@ class TestWindowDelegate : public WindowDelegate {
   virtual gfx::Size GetMinimumSize() const OVERRIDE;
   virtual void OnBoundsChanged(const gfx::Rect& old_bounds,
                                const gfx::Rect& new_bounds) OVERRIDE;
-  virtual void OnFocus() OVERRIDE;
+  virtual void OnFocus(Window* old_focused_window) OVERRIDE;
   virtual void OnBlur() OVERRIDE;
   virtual bool OnKeyEvent(KeyEvent* event) OVERRIDE;
   virtual gfx::NativeCursor GetCursor(const gfx::Point& point) OVERRIDE;
   virtual int GetNonClientComponent(const gfx::Point& point) const OVERRIDE;
+  virtual bool ShouldDescendIntoChildForEventHandling(
+      Window* child,
+      const gfx::Point& location) OVERRIDE;
   virtual bool OnMouseEvent(MouseEvent* event) OVERRIDE;
   virtual ui::TouchStatus OnTouchEvent(TouchEvent* event) OVERRIDE;
   virtual ui::GestureStatus OnGestureEvent(GestureEvent* event) OVERRIDE;
   virtual bool CanFocus() OVERRIDE;
   virtual void OnCaptureLost() OVERRIDE;
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
+  virtual void OnDeviceScaleFactorChanged(float device_scale_factor) OVERRIDE;
   virtual void OnWindowDestroying() OVERRIDE;
   virtual void OnWindowDestroyed() OVERRIDE;
   virtual void OnWindowVisibilityChanged(bool visible) OVERRIDE;
+  virtual bool HasHitTestMask() const OVERRIDE;
+  virtual void GetHitTestMask(gfx::Path* mask) const OVERRIDE;
 
  private:
   int window_component_;
@@ -67,6 +74,21 @@ class ColorTestWindowDelegate : public TestWindowDelegate {
   ui::KeyboardCode last_key_code_;
 
   DISALLOW_COPY_AND_ASSIGN(ColorTestWindowDelegate);
+};
+
+// A simple WindowDelegate that has a hit-test mask.
+class MaskedWindowDelegate : public TestWindowDelegate {
+ public:
+  explicit MaskedWindowDelegate(const gfx::Rect mask_rect);
+
+  // Overridden from TestWindowDelegate:
+  virtual bool HasHitTestMask() const OVERRIDE;
+  virtual void GetHitTestMask(gfx::Path* mask) const OVERRIDE;
+
+ private:
+  gfx::Rect mask_rect_;
+
+  DISALLOW_COPY_AND_ASSIGN(MaskedWindowDelegate);
 };
 
 }  // namespace test

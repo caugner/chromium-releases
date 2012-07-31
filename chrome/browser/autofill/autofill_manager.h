@@ -23,7 +23,9 @@
 #include "chrome/browser/autofill/autofill_download.h"
 #include "chrome/browser/autofill/field_types.h"
 #include "chrome/browser/autofill/form_structure.h"
+#include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/browser/sync/profile_sync_service_observer.h"
+#include "content/public/browser/notification_observer.h"
 #include "content/public/browser/web_contents_observer.h"
 
 class AutofillExternalDelegate;
@@ -34,9 +36,13 @@ class CreditCard;
 class PersonalDataManager;
 class PrefService;
 class ProfileSyncService;
-class TabContentsWrapper;
+class TabContents;
 
 struct ViewHostMsg_FrameNavigate_Params;
+
+namespace autofill {
+class PasswordGenerator;
+}
 
 namespace content {
 class RenderViewHost;
@@ -54,18 +60,20 @@ namespace webkit {
 namespace forms {
 struct FormData;
 struct FormField;
+struct PasswordForm;
 struct PasswordFormFillData;
 }
 }
 
 // Manages saving and restoring the user's personal information entered into web
 // forms.
-class AutofillManager : public content::WebContentsObserver,
+class AutofillManager : public content::NotificationObserver,
+                        public content::WebContentsObserver,
                         public AutofillDownloadManager::Observer,
                         public ProfileSyncServiceObserver,
                         public base::RefCounted<AutofillManager> {
  public:
-  explicit AutofillManager(TabContentsWrapper* tab_contents);
+  explicit AutofillManager(TabContents* tab_contents);
 
   // Registers our Enable/Disable Autofill pref.
   static void RegisterUserPrefs(PrefService* prefs);
@@ -90,7 +98,9 @@ class AutofillManager : public content::WebContentsObserver,
   void OnDidFillAutofillFormData(const base::TimeTicks& timestamp);
   void OnShowAutofillDialog();
   void OnDidPreviewAutofillFormData();
-  void OnShowPasswordGenerationPopup(const gfx::Rect& bounds);
+  void OnShowPasswordGenerationPopup(const gfx::Rect& bounds,
+                                     int max_length,
+                                     const webkit::forms::PasswordForm& form);
 
   // Remove the credit card or Autofill profile that matches |unique_id|
   // from the database.
@@ -107,7 +117,7 @@ class AutofillManager : public content::WebContentsObserver,
   typedef std::pair<std::string, size_t> GUIDPair;
 
   // Test code should prefer to use this constructor.
-  AutofillManager(TabContentsWrapper* tab_contents,
+  AutofillManager(TabContents* tab_contents,
                   PersonalDataManager* personal_data);
 
   // Returns the value of the AutofillEnabled pref.
@@ -177,6 +187,11 @@ class AutofillManager : public content::WebContentsObserver,
   // Register as an observer with the sync service.
   void RegisterWithSyncService();
 
+  // content::NotificationObserver override
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
+
   // Determines what the current state of password generation is, and if it has
   // changed from |password_generation_enabled_|. If it has changed or if
   // |new_renderer| is true, it notifies the renderer of this change via
@@ -204,6 +219,10 @@ class AutofillManager : public content::WebContentsObserver,
   void OnShowPasswordSuggestions(const webkit::forms::FormField& field,
                                  const gfx::Rect& bounds,
                                  const std::vector<string16>& suggestions);
+  void OnSetDataList(const std::vector<string16>& values,
+                     const std::vector<string16>& labels,
+                     const std::vector<string16>& icons,
+                     const std::vector<int>& unique_ids);
 
   // Fills |host| with the RenderViewHost for this tab.
   // Returns false if Autofill is disabled or if the host is unavailable.
@@ -302,8 +321,8 @@ class AutofillManager : public content::WebContentsObserver,
   void SendAutofillTypePredictions(
       const std::vector<FormStructure*>& forms) const;
 
-  // The owning TabContentsWrapper.
-  TabContentsWrapper* tab_contents_wrapper_;
+  // The owning TabContents.
+  TabContents* tab_contents_;
 
   // The personal data manager, used to save and load personal data to/from the
   // web database.  This is overridden by the AutofillManagerTest.
@@ -348,6 +367,10 @@ class AutofillManager : public content::WebContentsObserver,
   // The ProfileSyncService associated with this tab. This may be NULL in
   // testing.
   base::WeakPtr<ProfileSyncService> sync_service_;
+  // Listens for changes to the 'enabled' state for password generation.
+  PrefChangeRegistrar registrar_;
+  // To be passed to the password generation UI to generate the password.
+  scoped_ptr<autofill::PasswordGenerator> password_generator_;
 
   // Our copy of the form data.
   ScopedVector<FormStructure> form_structures_;

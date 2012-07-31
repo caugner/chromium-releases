@@ -5,14 +5,16 @@
 #include "chrome/common/chrome_content_client.h"
 
 #include "base/command_line.h"
+#include "base/cpu.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
 #include "base/string_number_conversions.h"
-#include "base/stringprintf.h"
 #include "base/string_split.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
+#include "build/build_config.h"
 #include "chrome/common/child_process_logging.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -25,6 +27,7 @@
 #include "grit/common_resources.h"
 #include "remoting/client/plugin/pepper_entrypoints.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "webkit/glue/user_agent.h"
 #include "webkit/plugins/npapi/plugin_list.h"
@@ -73,10 +76,6 @@ const FilePath::CharType kRemotingViewerPluginPath[] =
 // Use a consistent MIME-type regardless of branding.
 const char kRemotingViewerPluginMimeType[] =
     "application/vnd.chromium.remoting-viewer";
-// TODO(garykac): Remove the old MIME-type once client code no longer needs it.
-// Tracked in crbug.com/112532.
-const char kRemotingViewerPluginOldMimeType[] =
-    "pepper-application/x-chromoting";
 #endif
 
 // Appends the known built-in plugins to the given vector. Some built-in
@@ -180,11 +179,6 @@ void ComputeBuiltInPlugins(std::vector<content::PepperPluginInfo>* plugins) {
       std::string(),
       std::string());
   info.mime_types.push_back(remoting_mime_type);
-  webkit::WebPluginMimeType old_remoting_mime_type(
-      kRemotingViewerPluginOldMimeType,
-      std::string(),
-      std::string());
-  info.mime_types.push_back(old_remoting_mime_type);
   info.internal_entry_points.get_interface = remoting::PPP_GetInterface;
   info.internal_entry_points.initialize_module =
       remoting::PPP_InitializeModule;
@@ -264,6 +258,12 @@ bool GetBundledPepperFlash(content::PepperPluginInfo* plugin,
       switches::kDisableBundledPpapiFlash);
   if (force_disable)
     return false;
+
+// For Linux ia32, Flapper requires SSE2.
+#if defined(OS_LINUX) && defined(ARCH_CPU_X86)
+  if (!base::CPU().has_sse2())
+    return false;
+#endif  // ARCH_CPU_X86
 
   FilePath flash_path;
   if (!PathService::Get(chrome::FILE_PEPPER_FLASH_PLUGIN, &flash_path))
@@ -379,6 +379,8 @@ void ChromeContentClient::AddAdditionalSchemes(
     std::vector<std::string>* savable_schemes) {
   standard_schemes->push_back(kExtensionScheme);
   savable_schemes->push_back(kExtensionScheme);
+  standard_schemes->push_back(kExtensionResourceScheme);
+  savable_schemes->push_back(kExtensionResourceScheme);
 #if defined(OS_CHROMEOS)
   standard_schemes->push_back(kCrosScheme);
 #endif
@@ -415,8 +417,15 @@ string16 ChromeContentClient::GetLocalizedString(int message_id) const {
   return l10n_util::GetStringUTF16(message_id);
 }
 
-base::StringPiece ChromeContentClient::GetDataResource(int resource_id) const {
-  return ResourceBundle::GetSharedInstance().GetRawDataResource(resource_id);
+base::StringPiece ChromeContentClient::GetDataResource(
+    int resource_id,
+    ui::ScaleFactor scale_factor) const {
+  return ResourceBundle::GetSharedInstance().GetRawDataResource(
+      resource_id, scale_factor);
+}
+
+gfx::Image& ChromeContentClient::GetNativeImageNamed(int resource_id) const {
+  return ResourceBundle::GetSharedInstance().GetNativeImageNamed(resource_id);
 }
 
 #if defined(OS_WIN)

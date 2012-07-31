@@ -10,6 +10,7 @@
 #include "chrome/browser/extensions/bundle_installer.h"
 #include "chrome/browser/extensions/extension_install_dialog.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
@@ -39,44 +40,52 @@ const int kExtensionsPadding = kPermissionsPadding;
 const double kRatingTextSize = 12.1;  // 12.1px = 9pt @ 96dpi
 
 // Adds a Skia image as an icon control to the given container.
-void AddResourceIcon(const SkBitmap* icon, void* data) {
+void AddResourceIcon(const gfx::ImageSkia* icon, void* data) {
   GtkWidget* container = static_cast<GtkWidget*>(data);
-  GdkPixbuf* icon_pixbuf = gfx::GdkPixbufFromSkBitmap(icon);
+  GdkPixbuf* icon_pixbuf = gfx::GdkPixbufFromSkBitmap(*icon);
   GtkWidget* icon_widget = gtk_image_new_from_pixbuf(icon_pixbuf);
   g_object_unref(icon_pixbuf);
   gtk_box_pack_start(GTK_BOX(container), icon_widget, FALSE, FALSE, 0);
 }
 
+}  // namespace
+
+namespace browser {
+
 // Displays the dialog when constructed, deletes itself when dialog is
-// dismissed. Success/failure is passed back through the ExtensionInstallUI::
-// Delegate instance.
+// dismissed. Success/failure is passed back through the
+// ExtensionInstallPrompt::Delegate instance.
 class ExtensionInstallDialog {
  public:
-  ExtensionInstallDialog(GtkWindow* parent,
-                         ExtensionInstallUI::Delegate *delegate,
-                         const ExtensionInstallUI::Prompt& prompt);
+  ExtensionInstallDialog(Browser* browser,
+                         GtkWindow* parent,
+                         ExtensionInstallPrompt::Delegate *delegate,
+                         const ExtensionInstallPrompt::Prompt& prompt);
  private:
   ~ExtensionInstallDialog();
 
   CHROMEGTK_CALLBACK_1(ExtensionInstallDialog, void, OnResponse, int);
   CHROMEGTK_CALLBACK_0(ExtensionInstallDialog, void, OnStoreLinkClick);
 
-  ExtensionInstallUI::Delegate* delegate_;
+  Browser* browser_;
+  ExtensionInstallPrompt::Delegate* delegate_;
   std::string extension_id_;  // Set for INLINE_INSTALL_PROMPT.
   GtkWidget* dialog_;
 };
 
 ExtensionInstallDialog::ExtensionInstallDialog(
+    Browser* browser,
     GtkWindow* parent,
-    ExtensionInstallUI::Delegate *delegate,
-    const ExtensionInstallUI::Prompt& prompt)
-    : delegate_(delegate),
+    ExtensionInstallPrompt::Delegate *delegate,
+    const ExtensionInstallPrompt::Prompt& prompt)
+    : browser_(browser),
+      delegate_(delegate),
       dialog_(NULL) {
   bool show_permissions = prompt.GetPermissionCount() > 0;
   bool is_inline_install =
-      prompt.type() == ExtensionInstallUI::INLINE_INSTALL_PROMPT;
+      prompt.type() == ExtensionInstallPrompt::INLINE_INSTALL_PROMPT;
   bool is_bundle_install =
-      prompt.type() == ExtensionInstallUI::BUNDLE_INSTALL_PROMPT;
+      prompt.type() == ExtensionInstallPrompt::BUNDLE_INSTALL_PROMPT;
 
   if (is_inline_install)
     extension_id_ = prompt.extension()->id();
@@ -191,7 +200,7 @@ ExtensionInstallDialog::ExtensionInstallDialog(
     }
 
     // Put icon in the right column.
-    GdkPixbuf* pixbuf = gfx::GdkPixbufFromSkBitmap(&scaled_icon);
+    GdkPixbuf* pixbuf = gfx::GdkPixbufFromSkBitmap(scaled_icon);
     GtkWidget* icon = gtk_image_new_from_pixbuf(pixbuf);
     g_object_unref(pixbuf);
     gtk_box_pack_start(GTK_BOX(top_content_hbox), icon, FALSE, FALSE, 0);
@@ -252,25 +261,19 @@ void ExtensionInstallDialog::OnResponse(GtkWidget* dialog, int response_id) {
 void ExtensionInstallDialog::OnStoreLinkClick(GtkWidget* sender) {
   GURL store_url(
       extension_urls::GetWebstoreItemDetailURLPrefix() + extension_id_);
-  BrowserList::GetLastActive()->OpenURL(OpenURLParams(
+  browser_->OpenURL(OpenURLParams(
       store_url, content::Referrer(), NEW_FOREGROUND_TAB,
       content::PAGE_TRANSITION_LINK, false));
 
   OnResponse(dialog_, GTK_RESPONSE_CLOSE);
 }
 
-}  // namespace
+}  // namespace browser
 
 void ShowExtensionInstallDialogImpl(
-    Profile* profile,
-    ExtensionInstallUI::Delegate* delegate,
-    const ExtensionInstallUI::Prompt& prompt) {
-  Browser* browser = BrowserList::GetLastActiveWithProfile(profile);
-  if (!browser) {
-    delegate->InstallUIAbort(false);
-    return;
-  }
-
+    Browser* browser,
+    ExtensionInstallPrompt::Delegate* delegate,
+    const ExtensionInstallPrompt::Prompt& prompt) {
   BrowserWindowGtk* browser_window = static_cast<BrowserWindowGtk*>(
       browser->window());
   if (!browser_window) {
@@ -278,5 +281,6 @@ void ShowExtensionInstallDialogImpl(
     return;
   }
 
-  new ExtensionInstallDialog(browser_window->window(), delegate, prompt);
+  new browser::ExtensionInstallDialog(browser, browser_window->window(),
+                                      delegate, prompt);
 }

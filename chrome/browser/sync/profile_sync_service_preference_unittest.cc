@@ -19,7 +19,6 @@
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/signin/token_service_factory.h"
 #include "chrome/browser/sync/abstract_profile_sync_service_test.h"
-#include "chrome/browser/sync/api/sync_data.h"
 #include "chrome/browser/sync/glue/generic_change_processor.h"
 #include "chrome/browser/sync/glue/sync_backend_host.h"
 #include "chrome/browser/sync/glue/ui_data_type_controller.h"
@@ -29,13 +28,14 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_pref_service.h"
 #include "chrome/test/base/testing_profile.h"
-#include "sync/internal_api/change_record.h"
-#include "sync/internal_api/read_node.h"
-#include "sync/internal_api/read_transaction.h"
-#include "sync/internal_api/write_node.h"
-#include "sync/internal_api/write_transaction.h"
+#include "sync/api/sync_data.h"
+#include "sync/internal_api/public/change_record.h"
+#include "sync/internal_api/public/read_node.h"
+#include "sync/internal_api/public/read_transaction.h"
+#include "sync/internal_api/public/syncable/model_type.h"
+#include "sync/internal_api/public/write_node.h"
+#include "sync/internal_api/public/write_transaction.h"
 #include "sync/protocol/preference_specifics.pb.h"
-#include "sync/syncable/model_type.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -75,7 +75,10 @@ class ProfileSyncServicePreferenceTest
             sync_api::BaseNode::INIT_OK) {
       return WriteSyncedValue(name, value, &tag_node);
     }
-    if (node.InitUniqueByCreation(syncable::PREFERENCES, root, name))
+
+    sync_api::WriteNode::InitUniqueByCreationResult result =
+        node.InitUniqueByCreation(syncable::PREFERENCES, root, name);
+    if (result == sync_api::WriteNode::INIT_SUCCESS)
       return WriteSyncedValue(name, value, &node);
 
     return sync_api::kInvalidId;
@@ -311,7 +314,7 @@ TEST_F(ProfileSyncServicePreferenceTest, ModelAssociationCloudHasData) {
   urls_to_restore->Append(Value::CreateStringValue(example_url1_));
   urls_to_restore->Append(Value::CreateStringValue(example_url2_));
   cloud_data[prefs::kURLsToRestoreOnStartup] = urls_to_restore;
-  cloud_data[prefs::kGlobalDefaultCharset] =
+  cloud_data[prefs::kDefaultCharset] =
       Value::CreateStringValue(non_default_charset_value_);
 
   AddPreferenceEntriesHelper helper(this, cloud_data);
@@ -336,19 +339,19 @@ TEST_F(ProfileSyncServicePreferenceTest, ModelAssociationCloudHasData) {
   EXPECT_TRUE(GetPreferenceValue(prefs::kURLsToRestoreOnStartup).
               Equals(expected_urls.get()));
 
-  value.reset(GetSyncedValue(prefs::kGlobalDefaultCharset));
+  value.reset(GetSyncedValue(prefs::kDefaultCharset));
   ASSERT_TRUE(value.get());
   EXPECT_TRUE(static_cast<const StringValue*>(value.get())->
               GetAsString(&string_value));
   EXPECT_EQ(non_default_charset_value_, string_value);
   EXPECT_EQ(non_default_charset_value_,
-            prefs_->GetString(prefs::kGlobalDefaultCharset));
+            prefs_->GetString(prefs::kDefaultCharset));
   STLDeleteValues(&cloud_data);
 }
 
 TEST_F(ProfileSyncServicePreferenceTest, FailModelAssociation) {
   ASSERT_TRUE(StartSyncService(base::Closure(), true));
-  EXPECT_TRUE(service_->unrecoverable_error_detected());
+  EXPECT_TRUE(service_->HasUnrecoverableError());
 }
 
 TEST_F(ProfileSyncServicePreferenceTest, UpdatedPreferenceWithDefaultValue) {

@@ -44,7 +44,7 @@ WebUIScreenLocker::WebUIScreenLocker(ScreenLocker* screen_locker)
 }
 
 void WebUIScreenLocker::LockScreen(bool unlock_on_input) {
-  gfx::Rect bounds(gfx::Screen::GetPrimaryMonitor().bounds());
+  gfx::Rect bounds(gfx::Screen::GetPrimaryDisplay().bounds());
 
   LockWindow* lock_window = LockWindow::Create();
   lock_window->set_observer(this);
@@ -60,6 +60,7 @@ void WebUIScreenLocker::LockScreen(bool unlock_on_input) {
   UserList users(1, &chromeos::UserManager::Get()->GetLoggedInUser());
   login_display_.reset(new WebUILoginDisplay(this));
   login_display_->set_background_bounds(bounds);
+  login_display_->set_parent_window(GetNativeWindow());
   login_display_->Init(users, false, true, false);
 
   static_cast<OobeUI*>(GetWebUI()->GetController())->ShowSigninScreen(

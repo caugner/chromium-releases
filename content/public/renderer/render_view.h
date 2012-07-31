@@ -12,7 +12,9 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPageVisibilityState.h"
 #include "ui/gfx/native_widget_types.h"
 
+namespace webkit_glue {
 struct WebPreferences;
+}
 
 namespace WebKit {
 class WebFrame;
@@ -62,11 +64,8 @@ class CONTENT_EXPORT RenderView : public IPC::Message::Sender {
   // Returns the size of the view.
   virtual gfx::Size GetSize() const = 0;
 
-  // Returns the window we are embedded within.
-  virtual gfx::NativeViewId GetHostWindow() const = 0;
-
   // Gets WebKit related preferences associated with this view.
-  virtual WebPreferences& GetWebkitPreferences() = 0;
+  virtual webkit_glue::WebPreferences& GetWebkitPreferences() = 0;
 
   // Returns the associated WebView. May return NULL when the view is closing.
   virtual WebKit::WebView* GetWebView() = 0;
@@ -77,8 +76,8 @@ class CONTENT_EXPORT RenderView : public IPC::Message::Sender {
   // Gets the node that the context menu was pressed over.
   virtual WebKit::WebNode GetContextMenuNode() const = 0;
 
-  // Returns true if the parameter node is a textfield, text area or a content
-  // editable div.
+  // Returns true if the parameter node is a textfield, text area, a content
+  // editable div, or has an ARIA role of textbox.
   virtual bool IsEditableNode(const WebKit::WebNode& node) const = 0;
 
   // Create a new NPAPI/Pepper plugin depending on |info|. Returns NULL if no

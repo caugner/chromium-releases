@@ -108,6 +108,8 @@ cr.define('ntp', function() {
    */
   function onLoad() {
     sectionsToWaitFor = loadTimeData.getBoolean('showApps') ? 2 : 1;
+    if (loadTimeData.getBoolean('isSuggestionsPageEnabled'))
+      sectionsToWaitFor++;
     measureNavDots();
 
     // Load the current theme colors.
@@ -148,24 +150,16 @@ cr.define('ntp', function() {
                                    (newTabView.appsPages.length > 0) ?
                                        newTabView.appsPages[0] : null);
          chrome.send('getSuggestions');
+         cr.dispatchSimpleEvent(document, 'sectionready', true, true);
       };
       document.querySelector('head').appendChild(suggestions_script);
     }
 
     var webStoreLink = loadTimeData.getString('webStoreLink');
-    if (loadTimeData.getBoolean('isWebStoreExperimentEnabled')) {
-      var url = appendParam(webStoreLink, 'utm_source', 'chrome-ntp-launcher');
-      $('chrome-web-store-href').href = url;
-      $('chrome-web-store-href').addEventListener('click',
-          onChromeWebStoreButtonClick);
-
-      $('footer-content').classList.add('enable-cws-experiment');
-    }
-
-    if (loadTimeData.getBoolean('appInstallHintEnabled')) {
-      var url = appendParam(webStoreLink, 'utm_source', 'chrome-ntp-plus-icon');
-      $('app-install-hint-template').href = url;
-    }
+    var url = appendParam(webStoreLink, 'utm_source', 'chrome-ntp-launcher');
+    $('chrome-web-store-link').href = url;
+    $('chrome-web-store-link').addEventListener('click',
+        onChromeWebStoreButtonClick);
 
     if (loadTimeData.getString('login_status_message')) {
       loginBubble = new cr.ui.Bubble;
@@ -187,27 +181,6 @@ cr.define('ntp', function() {
       // The anchor node won't be updated until updateLogin is called so don't
       // show the bubble yet.
       shouldShowLoginBubble = true;
-    } else if (loadTimeData.valueExists('ntp4_intro_message')) {
-      infoBubble = new cr.ui.Bubble;
-      infoBubble.anchorNode = newTabView.mostVisitedPage.navigationDot;
-      infoBubble.setArrowLocation(cr.ui.ArrowLocation.BOTTOM_START);
-      infoBubble.handleCloseEvent = function() {
-        this.hide();
-        chrome.send('introMessageDismissed');
-      };
-
-      var bubbleContent = $('ntp4-intro-bubble-contents');
-      infoBubble.content = bubbleContent;
-
-      bubbleContent.querySelector('div > div').innerHTML =
-          loadTimeData.getString('ntp4_intro_message');
-
-      var learnMoreLink = bubbleContent.querySelector('a');
-      learnMoreLink.href = loadTimeData.getString('ntp4_intro_url');
-      learnMoreLink.onclick = infoBubble.hide.bind(infoBubble);
-
-      infoBubble.show();
-      chrome.send('introMessageSeen');
     }
 
     var loginContainer = getRequiredElement('login-container');
@@ -618,3 +591,5 @@ cr.define('ntp', function() {
 });
 
 document.addEventListener('DOMContentLoaded', ntp.onLoad);
+
+var toCssPx = cr.ui.toCssPx;

@@ -212,9 +212,10 @@ enum NotificationType {
   // is a std::pair<NavigationEntry*, bool> that contains more information.
   NOTIFICATION_WEB_CONTENTS_TITLE_UPDATED,
 
-  // This notification is sent when a WebContents is being hidden, e.g. due
-  // to switching away from this tab.  The source is a Source<WebContents>.
-  NOTIFICATION_WEB_CONTENTS_HIDDEN,
+  // Indicates a WebContents has been hidden or restored.  The source is
+  // a Source<WebContents>. The details is a bool set to true if the new
+  // state is visible.
+  NOTIFICATION_WEB_CONTENTS_VISIBILITY_CHANGED,
 
   // This notification is sent when a WebContents is being destroyed. Any
   // object holding a reference to a WebContents can listen to that
@@ -275,9 +276,9 @@ enum NotificationType {
   // the RenderWidgetHost, the details are not used.
   NOTIFICATION_RENDER_WIDGET_HOST_DESTROYED,
 
-  // Sent after the widget has painted. The source is the RenderWidgetHost,
-  // the details are not used.
-  NOTIFICATION_RENDER_WIDGET_HOST_DID_PAINT,
+  // Sent after the backing store has been updated but before the widget has
+  // painted. The source is the RenderWidgetHost, the details are not used.
+  NOTIFICATION_RENDER_WIDGET_HOST_DID_UPDATE_BACKING_STORE,
 
   // This notifies the observer that a PaintAtSizeACK was received. The source
   // is the RenderWidgetHost, the details are an instance of

@@ -75,18 +75,14 @@ class SingleTestRunner(BaseTestRunner):
 
   def _GetFilterFileName(self):
     """Returns the filename of gtest filter."""
-    filter_dir = os.path.join(sys.path[0], 'gtest_filter')
-    filter_name = self.test_package.test_suite_basename + '_disabled'
-    disabled_filter = os.path.join(filter_dir, filter_name)
-    return disabled_filter
+    return os.path.join(sys.path[0], 'gtest_filter',
+        self.test_package.test_suite_basename + '_disabled')
 
   def _GetAdditionalEmulatorFilterName(self):
     """Returns the filename of additional gtest filter for emulator."""
-    filter_dir = os.path.join(sys.path[0], 'gtest_filter')
-    filter_name = '%s%s' % (self.test_package.test_suite_basename,
+    return os.path.join(sys.path[0], 'gtest_filter',
+        self.test_package.test_suite_basename +
         '_emulator_additional_disabled')
-    disabled_filter = os.path.join(filter_dir, filter_name)
-    return disabled_filter
 
   def GetDisabledTests(self):
     """Returns a list of disabled tests.
@@ -197,9 +193,10 @@ class SingleTestRunner(BaseTestRunner):
     elif self.test_package.test_suite_basename == 'webkit_unit_tests':
       return [
           'third_party/WebKit/Source/WebKit/chromium/tests/data',
-          # We need the chrome/ directory to convice webkit_support::
-          # GetWebKitRootDirFilePath() we're in a chrome working dir.
-          'chrome/VERSION',
+          ]
+    elif self.test_package.test_suite_basename == 'content_unittests':
+      return [
+          'webkit/data/dom_storage/webcore_test_database.localstorage',
           ]
     return []
 
@@ -271,10 +268,9 @@ class SingleTestRunner(BaseTestRunner):
       logging.info('*' * 80)
       if executed_names == all_tests:
         break
-    self.test_results = TestResults.FromOkAndFailed(list(executed_results -
-                                                         failed_results),
-                                                    list(failed_results),
-                                                    False, False)
+    self.test_results = TestResults.FromRun(
+        ok=list(executed_results - failed_results),
+        failed=list(failed_results))
 
   def RunTests(self):
     """Runs all tests (in rebaseline mode, runs each test in isolation).

@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "content/test/test_file_error_injector.h"
+#include "content/public/test/test_file_error_injector.h"
 
 #include <vector>
 
@@ -16,6 +16,10 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_id.h"
 #include "googleurl/src/gurl.h"
+
+namespace content {
+class ByteStreamReader;
+}
 
 namespace {
 
@@ -35,6 +39,7 @@ class DownloadFileWithErrors: public DownloadFileImpl {
 
   DownloadFileWithErrors(
       const DownloadCreateInfo* info,
+      scoped_ptr<content::ByteStreamReader> stream,
       DownloadRequestHandleInterface* request_handle,
       content::DownloadManager* download_manager,
       bool calculate_hash,
@@ -73,6 +78,7 @@ class DownloadFileWithErrors: public DownloadFileImpl {
 
 DownloadFileWithErrors::DownloadFileWithErrors(
     const DownloadCreateInfo* info,
+    scoped_ptr<content::ByteStreamReader> stream,
     DownloadRequestHandleInterface* request_handle,
     content::DownloadManager* download_manager,
     bool calculate_hash,
@@ -81,10 +87,11 @@ DownloadFileWithErrors::DownloadFileWithErrors(
     const ConstructionCallback& ctor_callback,
     const DestructionCallback& dtor_callback)
         : DownloadFileImpl(info,
+                           stream.Pass(),
                            request_handle,
                            download_manager,
                            calculate_hash,
-                           scoped_ptr<PowerSaveBlocker>(NULL).Pass(),
+                           scoped_ptr<content::PowerSaveBlocker>(NULL).Pass(),
                            bound_net_log),
           source_url_(info->url()),
           error_info_(error_info),
@@ -157,7 +164,7 @@ class DownloadFileWithErrorsFactory
   // DownloadFileFactory interface.
   virtual content::DownloadFile* CreateFile(
       DownloadCreateInfo* info,
-      const DownloadRequestHandle& request_handle,
+      scoped_ptr<content::ByteStreamReader> stream,
       content::DownloadManager* download_manager,
       bool calculate_hash,
       const net::BoundNetLog& bound_net_log);
@@ -188,7 +195,7 @@ DownloadFileWithErrorsFactory::~DownloadFileWithErrorsFactory() {
 
 content::DownloadFile* DownloadFileWithErrorsFactory::CreateFile(
     DownloadCreateInfo* info,
-    const DownloadRequestHandle& request_handle,
+    scoped_ptr<content::ByteStreamReader> stream,
     content::DownloadManager* download_manager,
     bool calculate_hash,
     const net::BoundNetLog& bound_net_log) {
@@ -205,14 +212,16 @@ content::DownloadFile* DownloadFileWithErrorsFactory::CreateFile(
     injected_errors_[url] = err_info;
   }
 
-  return new DownloadFileWithErrors(info,
-                                    new DownloadRequestHandle(request_handle),
-                                    download_manager,
-                                    calculate_hash,
-                                    bound_net_log,
-                                    injected_errors_[url],
-                                    construction_callback_,
-                                    destruction_callback_);
+  return new DownloadFileWithErrors(
+      info,
+      stream.Pass(),
+      new DownloadRequestHandle(info->request_handle),
+      download_manager,
+      calculate_hash,
+      bound_net_log,
+      injected_errors_[url],
+      construction_callback_,
+      destruction_callback_);
 }
 
 bool DownloadFileWithErrorsFactory::AddError(

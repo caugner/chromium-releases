@@ -54,7 +54,8 @@ class ProfileImpl : public Profile,
 
   // content::BrowserContext implementation:
   virtual FilePath GetPath() OVERRIDE;
-  virtual content::DownloadManager* GetDownloadManager() OVERRIDE;
+  virtual content::DownloadManagerDelegate*
+      GetDownloadManagerDelegate() OVERRIDE;
   virtual net::URLRequestContextGetter* GetRequestContext() OVERRIDE;
   virtual net::URLRequestContextGetter* GetRequestContextForRenderProcess(
       int renderer_child_id) OVERRIDE;
@@ -87,10 +88,8 @@ class ProfileImpl : public Profile,
   virtual GAIAInfoUpdateService* GetGAIAInfoUpdateService() OVERRIDE;
   virtual HistoryService* GetHistoryService(ServiceAccessType sat) OVERRIDE;
   virtual HistoryService* GetHistoryServiceWithoutCreating() OVERRIDE;
-  virtual AutocompleteClassifier* GetAutocompleteClassifier() OVERRIDE;
   virtual history::ShortcutsBackend* GetShortcutsBackend() OVERRIDE;
-  virtual WebDataService* GetWebDataService(ServiceAccessType sat) OVERRIDE;
-  virtual WebDataService* GetWebDataServiceWithoutCreating() OVERRIDE;
+  virtual policy::PolicyService* GetPolicyService() OVERRIDE;
   virtual PrefService* GetPrefs() OVERRIDE;
   virtual PrefService* GetOffTheRecordPrefs() OVERRIDE;
   virtual net::URLRequestContextGetter*
@@ -130,7 +129,8 @@ class ProfileImpl : public Profile,
 
  private:
   friend class Profile;
-  FRIEND_TEST_ALL_PREFIXES(BrowserInitTest, ProfilesLaunchedAfterCrash);
+  FRIEND_TEST_ALL_PREFIXES(StartupBrowserCreatorTest,
+                           ProfilesLaunchedAfterCrash);
   FRIEND_TEST_ALL_PREFIXES(ProfileBrowserTest, ProfileReadmeCreated);
   FRIEND_TEST_ALL_PREFIXES(ProfileBrowserTest,
                            ProfileDeletedBeforeReadmeCreated);
@@ -148,10 +148,12 @@ class ProfileImpl : public Profile,
 
   void InitHostZoomMap();
 
+  // The installation of any pre-defined protocol handlers.
+  void InstallDefaultProtocolHandlers();
+
   // Does final prefs initialization and calls Init().
   void OnPrefsLoaded(bool success);
 
-  void CreateWebDataService();
   FilePath GetPrefFilePath();
 
 #if defined(ENABLE_SESSION_SERVICE)
@@ -190,8 +192,13 @@ class ProfileImpl : public Profile,
   //  that the declaration occurs AFTER things it depends on as destruction
   //  happens in reverse order of declaration.
 
+  // |prefs_| depends on |policy_service_|.
+  // TODO(bauerb): Once |prefs_| is a ProfileKeyedService, |policy_service_|
+  // should become one as well.
+  scoped_ptr<policy::PolicyService> policy_service_;
+
   // Keep |prefs_| on top for destruction order because |extension_prefs_|,
-  // |net_pref_observer_|, |web_resource_service_|, and |io_data_| store
+  // |net_pref_observer_|, |promo_resource_service_|, |io_data_| an others store
   // pointers to |prefs_| and shall be destructed first.
   scoped_ptr<PrefService> prefs_;
   scoped_ptr<PrefService> otr_prefs_;
@@ -201,7 +208,6 @@ class ProfileImpl : public Profile,
   scoped_refptr<ExtensionSpecialStoragePolicy>
       extension_special_storage_policy_;
   scoped_ptr<NetPrefObserver> net_pref_observer_;
-  scoped_ptr<BookmarkModel> bookmark_bar_model_;
 
 #if defined(ENABLE_PROMO_RESOURCE_SERVICE)
   scoped_refptr<PromoResourceService> promo_resource_service_;
@@ -214,18 +220,10 @@ class ProfileImpl : public Profile,
   scoped_refptr<HostContentSettingsMap> host_content_settings_map_;
   scoped_refptr<content::GeolocationPermissionContext>
       geolocation_permission_context_;
-  scoped_refptr<content::SpeechRecognitionPreferences>
-      speech_recognition_preferences_;
   scoped_ptr<GAIAInfoUpdateService> gaia_info_update_service_;
-  scoped_refptr<HistoryService> history_service_;
   scoped_ptr<FaviconService> favicon_service_;
-  scoped_ptr<AutocompleteClassifier> autocomplete_classifier_;
   scoped_refptr<history::ShortcutsBackend> shortcuts_backend_;
-  scoped_refptr<WebDataService> web_data_service_;
-  bool history_service_created_;
   bool favicon_service_created_;
-  bool created_web_data_service_;
-  bool clear_local_state_on_exit_;
 
   // Whether or not the last session exited cleanly. This is set only once.
   bool last_session_exited_cleanly_;

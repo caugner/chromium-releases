@@ -10,11 +10,13 @@
 #include "base/debug/debugger.h"
 #include "base/debug/trace_event.h"
 #include "base/file_util.h"
+#include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
-#include "base/stringprintf.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
+#include "base/win/iat_patch_function.h"
 #include "base/win/scoped_handle.h"
 #include "base/win/scoped_process_information.h"
 #include "base/win/windows_version.h"
@@ -24,7 +26,9 @@
 #include "content/public/common/process_type.h"
 #include "content/public/common/sandbox_init.h"
 #include "sandbox/src/sandbox.h"
-#include "ui/gfx/gl/gl_switches.h"
+#include "sandbox/src/sandbox_nt_util.h"
+#include "sandbox/src/win_utils.h"
+#include "ui/gl/gl_switches.h"
 
 static sandbox::BrokerServices* g_broker_services = NULL;
 static sandbox::TargetServices* g_target_services = NULL;
@@ -41,6 +45,7 @@ const wchar_t* const kTroublesomeDlls[] = {
   L"babylonchromepi.dll",         // Babylon translator.
   L"btkeyind.dll",                // Widcomm Bluetooth.
   L"cmcsyshk.dll",                // CMC Internet Security.
+  L"cmsetac.dll",                 // Unknown (suspected malware).
   L"cooliris.dll",                // CoolIris.
   L"dockshellhook.dll",           // Stardock Objectdock.
   L"easyhook32.dll",              // GDIPP and others.
@@ -58,6 +63,7 @@ const wchar_t* const kTroublesomeDlls[] = {
   L"madchook.dll",                // Madshi (generic hooking library).
   L"mdnsnsp.dll",                 // Bonjour.
   L"moonsysh.dll",                // Moon Secure Antivirus.
+  L"mpk.dll",                     // KGB Spy.
   L"npdivx32.dll",                // DivX.
   L"npggNT.des",                  // GameGuard 2008.
   L"npggNT.dll",                  // GameGuard (older).
@@ -74,11 +80,13 @@ const wchar_t* const kTroublesomeDlls[] = {
   L"owexplorer-10522.dll",        // Overwolf.
   L"owexplorer-10523.dll",        // Overwolf.
   L"pavhook.dll",                 // Panda Internet Security.
+  L"pavlsphook.dll",              // Panda Antivirus.
   L"pavshook.dll",                // Panda Antivirus.
   L"pavshookwow.dll",             // Panda Antivirus.
   L"pctavhook.dll",               // PC Tools Antivirus.
   L"pctgmhk.dll",                 // PC Tools Spyware Doctor.
   L"prntrack.dll",                // Pharos Systems.
+  L"protector.dll",               // Unknown (suspected malware).
   L"radhslib.dll",                // Radiant Naomi Internet Filter.
   L"radprlib.dll",                // Radiant Naomi Internet Filter.
   L"rapportnikko.dll",            // Trustware Rapport.
@@ -385,6 +393,16 @@ bool AddPolicyForGPU(CommandLine* cmd_line, sandbox::TargetPolicy* policy) {
   if (result != sandbox::SBOX_ALL_OK)
     return false;
 
+#ifdef USE_AURA
+  // GPU also needs to add sections to the browser for aura
+  // TODO(jschuh): refactor the GPU channel to remove this. crbug.com/128786
+  result = policy->AddRule(sandbox::TargetPolicy::SUBSYS_HANDLES,
+                           sandbox::TargetPolicy::HANDLES_DUP_BROKER,
+                           L"Section");
+  if (result != sandbox::SBOX_ALL_OK)
+    return false;
+#endif
+
   AddGenericDllEvictionPolicy(policy);
 #endif
   return true;
@@ -449,6 +467,104 @@ bool AddPolicyForPepperPlugin(sandbox::TargetPolicy* policy) {
   return result == sandbox::SBOX_ALL_OK;
 }
 
+// This code is test only, and attempts to catch unsafe uses of
+// DuplicateHandle() that copy privileged handles into sandboxed processes.
+#ifndef OFFICIAL_BUILD
+base::win::IATPatchFunction g_iat_patch_duplicate_handle;
+
+BOOL (WINAPI *g_iat_orig_duplicate_handle)(HANDLE source_process_handle,
+                                           HANDLE source_handle,
+                                           HANDLE target_process_handle,
+                                           LPHANDLE target_handle,
+                                           DWORD desired_access,
+                                           BOOL inherit_handle,
+                                           DWORD options);
+
+NtQueryObject g_QueryObject = NULL;
+
+static const char* kDuplicateHandleWarning =
+    "You are attempting to duplicate a privileged handle into a sandboxed"
+    " process.\n Please use the sandbox::BrokerDuplicateHandle API or"
+    " contact security@chromium.org for assistance.";
+
+void CheckDuplicateHandle(HANDLE handle) {
+  // Get the object type (32 characters is safe; current max is 14).
+  BYTE buffer[sizeof(OBJECT_TYPE_INFORMATION) + 32 * sizeof(wchar_t)];
+  OBJECT_TYPE_INFORMATION* type_info =
+      reinterpret_cast<OBJECT_TYPE_INFORMATION*>(buffer);
+  ULONG size = sizeof(buffer) - sizeof(wchar_t);
+  NTSTATUS error;
+  error = g_QueryObject(handle, ObjectTypeInformation, type_info, size, &size);
+  CHECK(NT_SUCCESS(error));
+  type_info->Name.Buffer[type_info->Name.Length / sizeof(wchar_t)] = L'\0';
+
+  // Get the object basic information.
+  OBJECT_BASIC_INFORMATION basic_info;
+  size = sizeof(basic_info);
+  error = g_QueryObject(handle, ObjectBasicInformation, &basic_info, size,
+                        &size);
+  CHECK(NT_SUCCESS(error));
+
+  if (0 == _wcsicmp(type_info->Name.Buffer, L"Process")) {
+    const ACCESS_MASK kDangerousMask = ~(PROCESS_QUERY_LIMITED_INFORMATION |
+                                         SYNCHRONIZE);
+    CHECK(!(basic_info.GrantedAccess & kDangerousMask)) <<
+        kDuplicateHandleWarning;
+  }
+}
+
+BOOL WINAPI DuplicateHandlePatch(HANDLE source_process_handle,
+                                 HANDLE source_handle,
+                                 HANDLE target_process_handle,
+                                 LPHANDLE target_handle,
+                                 DWORD desired_access,
+                                 BOOL inherit_handle,
+                                 DWORD options) {
+  // Duplicate the handle so we get the final access mask.
+  if (!g_iat_orig_duplicate_handle(source_process_handle, source_handle,
+                                   target_process_handle, target_handle,
+                                   desired_access, inherit_handle, options))
+    return FALSE;
+
+  // We're not worried about broker handles or not crossing process boundaries.
+  if (source_process_handle == target_process_handle ||
+      target_process_handle == ::GetCurrentProcess())
+    return TRUE;
+
+  // Only sandboxed children are placed in jobs, so just check them.
+  BOOL is_in_job = FALSE;
+  if (!::IsProcessInJob(target_process_handle, NULL, &is_in_job)) {
+    // We need a handle with permission to check the job object.
+    if (ERROR_ACCESS_DENIED == ::GetLastError()) {
+      base::win::ScopedHandle process;
+      CHECK(g_iat_orig_duplicate_handle(::GetCurrentProcess(),
+                                        target_process_handle,
+                                        ::GetCurrentProcess(),
+                                        process.Receive(),
+                                        PROCESS_QUERY_INFORMATION,
+                                        FALSE, 0));
+      CHECK(::IsProcessInJob(process, NULL, &is_in_job));
+    }
+  }
+
+  if (is_in_job) {
+    // We never allow inheritable child handles.
+    CHECK(!inherit_handle) << kDuplicateHandleWarning;
+
+    // Duplicate the handle again, to get the final permissions.
+    base::win::ScopedHandle handle;
+    CHECK(g_iat_orig_duplicate_handle(target_process_handle, *target_handle,
+                                      ::GetCurrentProcess(), handle.Receive(),
+                                      0, FALSE, DUPLICATE_SAME_ACCESS));
+
+    // Callers use CHECK macro to make sure we get the right stack.
+    CheckDuplicateHandle(handle);
+  }
+
+  return TRUE;
+}
+#endif
+
 }  // namespace
 
 namespace sandbox {
@@ -460,6 +576,30 @@ bool InitBrokerServices(sandbox::BrokerServices* broker_services) {
   DCHECK(!g_broker_services);
   sandbox::ResultCode result = broker_services->Init();
   g_broker_services = broker_services;
+
+// In non-official builds warn about dangerous uses of DuplicateHandle.
+  BOOL is_in_job = FALSE;
+#ifdef NACL_WIN64
+  CHECK(::IsProcessInJob(::GetCurrentProcess(), NULL, &is_in_job));
+#endif
+#ifndef OFFICIAL_BUILD
+  if (!is_in_job && !g_iat_patch_duplicate_handle.is_patched()) {
+    HMODULE module = NULL;
+    wchar_t module_name[MAX_PATH];
+    CHECK(::GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+                              reinterpret_cast<LPCWSTR>(InitBrokerServices),
+                              &module));
+    DWORD result = ::GetModuleFileNameW(module, module_name, MAX_PATH);
+    if (result && (result != MAX_PATH)) {
+      ResolveNTFunctionPtr("NtQueryObject", &g_QueryObject);
+      g_iat_orig_duplicate_handle = ::DuplicateHandle;
+      g_iat_patch_duplicate_handle.Patch(
+          module_name, "kernel32.dll", "DuplicateHandle",
+          DuplicateHandlePatch);
+    }
+  }
+#endif
+
   return SBOX_ALL_OK == result;
 }
 
@@ -705,6 +845,12 @@ bool BrokerDuplicateHandle(HANDLE source_handle,
 
 bool BrokerAddTargetPeer(HANDLE peer_process) {
   return g_broker_services->AddTargetPeer(peer_process) == sandbox::SBOX_ALL_OK;
+}
+
+base::ProcessHandle StartProcessWithAccess(
+    CommandLine* cmd_line,
+    const FilePath& exposed_dir) {
+  return sandbox::StartProcessWithAccess(cmd_line, exposed_dir);
 }
 
 }  // namespace content

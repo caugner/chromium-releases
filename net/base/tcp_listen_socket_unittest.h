@@ -17,6 +17,7 @@
 #endif
 
 #include "base/basictypes.h"
+#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
@@ -27,13 +28,6 @@
 #include "net/base/tcp_listen_socket.h"
 #include "net/base/winsock_init.h"
 #include "testing/gtest/include/gtest/gtest.h"
-
-#if defined(OS_POSIX)
-// Used same name as in Windows to avoid #ifdef where referenced
-#define SOCKET int
-const int INVALID_SOCKET = -1;
-const int SOCKET_ERROR = -1;
-#endif
 
 namespace net {
 
@@ -67,7 +61,7 @@ class TCPListenSocketTestAction {
 // This had to be split out into a separate class because I couldn't
 // make the testing::Test class refcounted.
 class TCPListenSocketTester :
-    public ListenSocket::ListenSocketDelegate,
+    public StreamListenSocket::Delegate,
     public base::RefCountedThreadSafe<TCPListenSocketTester> {
 
  public:
@@ -91,23 +85,25 @@ class TCPListenSocketTester :
   void TestClientSendLong();
   // verify a send/read from server to client
   void TestServerSend();
+  // verify multiple sends and reads from server to client.
+  void TestServerSendMultiple();
 
-  virtual bool Send(SOCKET sock, const std::string& str);
+  virtual bool Send(SocketDescriptor sock, const std::string& str);
 
-  // ListenSocket::ListenSocketDelegate:
-  virtual void DidAccept(ListenSocket *server,
-                         ListenSocket *connection) OVERRIDE;
-  virtual void DidRead(ListenSocket *connection, const char* data,
+  // StreamListenSocket::Delegate:
+  virtual void DidAccept(StreamListenSocket* server,
+                         StreamListenSocket* connection) OVERRIDE;
+  virtual void DidRead(StreamListenSocket* connection, const char* data,
                        int len) OVERRIDE;
-  virtual void DidClose(ListenSocket *sock) OVERRIDE;
+  virtual void DidClose(StreamListenSocket* sock) OVERRIDE;
 
   scoped_ptr<base::Thread> thread_;
   MessageLoopForIO* loop_;
-  TCPListenSocket* server_;
-  ListenSocket* connection_;
+  scoped_refptr<TCPListenSocket> server_;
+  StreamListenSocket* connection_;
   TCPListenSocketTestAction last_action_;
 
-  SOCKET test_socket_;
+  SocketDescriptor test_socket_;
   static const int kTestPort;
 
   base::Lock lock_;  // protects |queue_| and wraps |cv_|
@@ -119,7 +115,7 @@ class TCPListenSocketTester :
 
   virtual ~TCPListenSocketTester();
 
-  virtual TCPListenSocket* DoListen();
+  virtual scoped_refptr<TCPListenSocket> DoListen();
 };
 
 }  // namespace net

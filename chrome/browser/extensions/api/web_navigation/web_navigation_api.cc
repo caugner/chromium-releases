@@ -16,17 +16,21 @@
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/retargeting_details.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
+#include "chrome/browser/view_type_utils.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/extensions/api/web_navigation.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/resource_request_details.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_view_host.h"
-#include "content/public/browser/render_view_host_delegate.h"
 #include "content/public/browser/web_contents.h"
 #include "net/base/net_errors.h"
+
+namespace GetFrame = extensions::api::web_navigation::GetFrame;
+namespace GetAllFrames = extensions::api::web_navigation::GetAllFrames;
 
 using content::BrowserContext;
 using content::ResourceRedirectDetails;
@@ -447,8 +451,8 @@ void WebNavigationEventRouter::Retargeting(const RetargetingDetails* details) {
   if (!tab_observer) {
     // If you hit this DCHECK(), please add reproduction steps to
     // http://crbug.com/109464.
-    DCHECK(details->source_web_contents->GetViewType() !=
-           content::VIEW_TYPE_WEB_CONTENTS);
+    DCHECK(chrome::GetViewType(details->source_web_contents) !=
+           chrome::VIEW_TYPE_TAB_CONTENTS);
     return;
   }
   const FrameNavigationState& frame_navigation_state =
@@ -458,11 +462,10 @@ void WebNavigationEventRouter::Retargeting(const RetargetingDetails* details) {
     return;
 
   // If the WebContents was created as a response to an IPC from a renderer
-  // (and therefore doesn't yet have a wrapper), or if it isn't yet inserted
+  // (and therefore doesn't yet have a TabContents), or if it isn't yet inserted
   // into a tab strip, we need to delay the extension event until the
   // WebContents is fully initialized.
-  if ((TabContentsWrapper::GetCurrentWrapperForContents(
-       details->target_web_contents) == NULL) ||
+  if (TabContents::FromWebContents(details->target_web_contents) == NULL ||
       details->not_yet_in_tabstrip) {
     pending_web_contents_[details->target_web_contents] =
         PendingWebContents(
@@ -584,7 +587,8 @@ void WebNavigationTabObserver::DidCommitProvisionalLoadForFrame(
     int64 frame_id,
     bool is_main_frame,
     const GURL& url,
-    content::PageTransition transition_type) {
+    content::PageTransition transition_type,
+    content::RenderViewHost* render_view_host) {
   if (!navigation_state_.CanSendEvents(frame_id))
     return;
 
@@ -624,7 +628,8 @@ void WebNavigationTabObserver::DidFailProvisionalLoad(
     bool is_main_frame,
     const GURL& validated_url,
     int error_code,
-    const string16& error_description) {
+    const string16& error_description,
+    content::RenderViewHost* render_view_host) {
   if (!navigation_state_.CanSendEvents(frame_id))
     return;
   navigation_state_.SetErrorOccurredInFrame(frame_id);
@@ -717,26 +722,25 @@ bool WebNavigationTabObserver::IsReferenceFragmentNavigation(
 }
 
 bool GetFrameFunction::RunImpl() {
-  DictionaryValue* details;
-  EXTENSION_FUNCTION_VALIDATE(args_->GetDictionary(0, &details));
-  DCHECK(details);
-
-  int tab_id;
-  int frame_id;
-  EXTENSION_FUNCTION_VALIDATE(details->GetInteger(keys::kTabIdKey, &tab_id));
-  EXTENSION_FUNCTION_VALIDATE(
-      details->GetInteger(keys::kFrameIdKey, &frame_id));
+  scoped_ptr<GetFrame::Params> params(GetFrame::Params::Create(*args_));
+  EXTENSION_FUNCTION_VALIDATE(params.get());
+  int tab_id = params->details.tab_id;
+  int frame_id = params->details.frame_id;
 
   result_.reset(Value::CreateNullValue());
 
-  TabContentsWrapper* wrapper;
-  if (!ExtensionTabUtil::GetTabById(
-        tab_id, profile(), include_incognito(), NULL, NULL, &wrapper, NULL) ||
-      !wrapper) {
+  TabContents* tab_contents;
+  if (!ExtensionTabUtil::GetTabById(tab_id,
+                                    profile(),
+                                    include_incognito(),
+                                    NULL, NULL,
+                                    &tab_contents,
+                                    NULL) ||
+      !tab_contents) {
     return true;
   }
 
-  WebContents* web_contents = wrapper->web_contents();
+  WebContents* web_contents = tab_contents->web_contents();
   WebNavigationTabObserver* observer =
       WebNavigationTabObserver::Get(web_contents);
   DCHECK(observer);
@@ -753,33 +757,33 @@ bool GetFrameFunction::RunImpl() {
   if (!frame_navigation_state.IsValidUrl(frame_url))
     return true;
 
-  DictionaryValue* resultDict = new DictionaryValue();
-  resultDict->SetString(keys::kUrlKey, frame_url.spec());
-  resultDict->SetBoolean(
-      keys::kErrorOccurredKey,
-      frame_navigation_state.GetErrorOccurredInFrame(frame_id));
-  result_.reset(resultDict);
+  GetFrame::Result::Details frame_details;
+  frame_details.url = frame_url.spec();
+  frame_details.error_occurred =
+      frame_navigation_state.GetErrorOccurredInFrame(frame_id);
+  result_.reset(GetFrame::Result::Create(frame_details));
   return true;
 }
 
 bool GetAllFramesFunction::RunImpl() {
-  DictionaryValue* details;
-  EXTENSION_FUNCTION_VALIDATE(args_->GetDictionary(0, &details));
-  DCHECK(details);
-
-  int tab_id;
-  EXTENSION_FUNCTION_VALIDATE(details->GetInteger(keys::kTabIdKey, &tab_id));
+  scoped_ptr<GetAllFrames::Params> params(GetAllFrames::Params::Create(*args_));
+  EXTENSION_FUNCTION_VALIDATE(params.get());
+  int tab_id = params->details.tab_id;
 
   result_.reset(Value::CreateNullValue());
 
-  TabContentsWrapper* wrapper;
-  if (!ExtensionTabUtil::GetTabById(
-        tab_id, profile(), include_incognito(), NULL, NULL, &wrapper, NULL) ||
-      !wrapper) {
+  TabContents* tab_contents;
+  if (!ExtensionTabUtil::GetTabById(tab_id,
+                                    profile(),
+                                    include_incognito(),
+                                    NULL, NULL,
+                                    &tab_contents,
+                                    NULL) ||
+      !tab_contents) {
     return true;
   }
 
-  WebContents* web_contents = wrapper->web_contents();
+  WebContents* web_contents = tab_contents->web_contents();
   WebNavigationTabObserver* observer =
       WebNavigationTabObserver::Get(web_contents);
   DCHECK(observer);
@@ -787,23 +791,22 @@ bool GetAllFramesFunction::RunImpl() {
   const FrameNavigationState& navigation_state =
       observer->frame_navigation_state();
 
-  ListValue* resultList = new ListValue();
-  for (FrameNavigationState::const_iterator frame = navigation_state.begin();
-       frame != navigation_state.end(); ++frame) {
-    GURL frame_url = navigation_state.GetUrl(*frame);
+  std::vector<linked_ptr<GetAllFrames::Result::DetailsElement> > result_list;
+  for (FrameNavigationState::const_iterator it = navigation_state.begin();
+       it != navigation_state.end(); ++it) {
+    int64 frame_id = *it;
+    GURL frame_url = navigation_state.GetUrl(frame_id);
     if (!navigation_state.IsValidUrl(frame_url))
       continue;
-    DictionaryValue* frameDict = new DictionaryValue();
-    frameDict->SetString(keys::kUrlKey, frame_url.spec());
-    frameDict->SetInteger(
-        keys::kFrameIdKey,
-        GetFrameId(navigation_state.IsMainFrame(*frame), *frame));
-    frameDict->SetBoolean(
-        keys::kErrorOccurredKey,
-        navigation_state.GetErrorOccurredInFrame(*frame));
-    resultList->Append(frameDict);
+    linked_ptr<GetAllFrames::Result::DetailsElement> frame(
+        new GetAllFrames::Result::DetailsElement());
+    frame->url = frame_url.spec();
+    frame->frame_id = GetFrameId(navigation_state.IsMainFrame(frame_id),
+                                 frame_id);
+    frame->error_occurred = navigation_state.GetErrorOccurredInFrame(frame_id);
+    result_list.push_back(frame);
   }
-  result_.reset(resultList);
+  result_.reset(GetAllFrames::Result::Create(result_list));
   return true;
 }
 

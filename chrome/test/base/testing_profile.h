@@ -16,7 +16,6 @@
 
 namespace content {
 class MockResourceContext;
-class SpeechRecognitionPreferences;
 }
 
 namespace history {
@@ -32,13 +31,10 @@ namespace quota {
 class SpecialStoragePolicy;
 }
 
-class AutocompleteClassifier;
-class BookmarkModel;
 class CommandLine;
 class ExtensionPrefs;
 class ExtensionSpecialStoragePolicy;
 class FaviconService;
-class HistoryService;
 class HostContentSettingsMap;
 class PrefService;
 class ProfileDependencyManager;
@@ -98,19 +94,12 @@ class TestingProfile : public Profile {
   // BlockUntilBookmarkModelLoaded.
   void CreateBookmarkModel(bool delete_file);
 
-  // Creates an AutocompleteClassifier. If not invoked the
-  // AutocompleteClassifier is NULL.
-  void CreateAutocompleteClassifier();
-
   // Creates a ProtocolHandlerRegistry. If not invoked the protocol handler
   // registry is NULL.
   void CreateProtocolHandlerRegistry();
 
-  // Creates the webdata service.  If |delete_file| is true, the webdata file is
-  // deleted first, then the WebDataService is created.  As TestingProfile
-  // deletes the directory containing the files used by WebDataService, this
-  // only matters if you're recreating the WebDataService.
-  void CreateWebDataService(bool delete_file);
+  // Creates a WebDataService. If not invoked, the web data service is NULL.
+  void CreateWebDataService();
 
   // Blocks until the BookmarkModel finishes loaded. This is NOT invoked from
   // CreateBookmarkModel.
@@ -119,19 +108,13 @@ class TestingProfile : public Profile {
   // Blocks until TopSites finishes loading.
   void BlockUntilTopSitesLoaded();
 
-  // Creates a TemplateURLService. If not invoked, the TemplateURLService is
-  // NULL.
-  void CreateTemplateURLService();
-
-  // Blocks until TempalteURLService finishes loading.
-  void BlockUntilTemplateURLServiceLoaded();
-
   TestingPrefService* GetTestingPrefService();
 
   // content::BrowserContext
   virtual FilePath GetPath() OVERRIDE;
   virtual bool IsOffTheRecord() const OVERRIDE;
-  virtual content::DownloadManager* GetDownloadManager() OVERRIDE;
+  virtual content::DownloadManagerDelegate*
+      GetDownloadManagerDelegate() OVERRIDE;
   // Returns a testing ContextGetter (if one has been created via
   // CreateRequestContext) or NULL. This is not done on-demand for two reasons:
   // (1) Some tests depend on GetRequestContext() returning NULL. (2) Because
@@ -177,10 +160,8 @@ class TestingProfile : public Profile {
   // this by calling CreateRequestContext(). See the note at GetRequestContext
   // for more information.
   net::CookieMonster* GetCookieMonster();
-  virtual AutocompleteClassifier* GetAutocompleteClassifier() OVERRIDE;
   virtual history::ShortcutsBackend* GetShortcutsBackend() OVERRIDE;
-  virtual WebDataService* GetWebDataService(ServiceAccessType access) OVERRIDE;
-  virtual WebDataService* GetWebDataServiceWithoutCreating() OVERRIDE;
+  virtual policy::PolicyService* GetPolicyService() OVERRIDE;
   // Sets the profile's PrefService. If a pref service hasn't been explicitly
   // set GetPrefs creates one, so normally you need not invoke this. If you need
   // to set a pref service you must invoke this before GetPrefs.
@@ -265,10 +246,6 @@ class TestingProfile : public Profile {
   // Destroys favicon service if it has been created.
   void DestroyFaviconService();
 
-  // If the webdata service has been created, it is destroyed.  This is invoked
-  // from the destructor.
-  void DestroyWebDataService();
-
   // Creates a TestingPrefService and associates it with the TestingProfile.
   void CreateTestingPrefService();
 
@@ -278,25 +255,12 @@ class TestingProfile : public Profile {
   // The favicon service. Only created if CreateFaviconService is invoked.
   scoped_ptr<FaviconService> favicon_service_;
 
-  // The history service. Only created if CreateHistoryService is invoked.
-  scoped_refptr<HistoryService> history_service_;
-
-  // The BookmarkModel. Only created if CreateBookmarkModel is invoked.
-  scoped_ptr<BookmarkModel> bookmark_bar_model_;
-
   // The ProtocolHandlerRegistry. Only created if CreateProtocolHandlerRegistry
   // is invoked.
   scoped_refptr<ProtocolHandlerRegistry> protocol_handler_registry_;
 
-  // The ProfileSyncService.  Created by CreateProfileSyncService.
-  scoped_ptr<ProfileSyncService> profile_sync_service_;
-
-  // The AutocompleteClassifier.  Only created if CreateAutocompleteClassifier
-  // is invoked.
-  scoped_ptr<AutocompleteClassifier> autocomplete_classifier_;
-
-  // The WebDataService.  Only created if CreateWebDataService is invoked.
-  scoped_refptr<WebDataService> web_data_service_;
+  // The policy service. Lazily created as a stub.
+  scoped_ptr<policy::PolicyService> policy_service_;
 
   // Internally, this is a TestURLRequestContextGetter that creates a dummy
   // request context. Currently, only the CookieMonster is hooked up.
@@ -314,9 +278,6 @@ class TestingProfile : public Profile {
   scoped_refptr<HostContentSettingsMap> host_content_settings_map_;
   scoped_refptr<content::GeolocationPermissionContext>
       geolocation_permission_context_;
-
-  scoped_refptr<content::SpeechRecognitionPreferences>
-      speech_recognition_preferences_;
 
   FilePath last_selected_directory_;
   scoped_refptr<history::TopSites> top_sites_;  // For history and thumbnails.

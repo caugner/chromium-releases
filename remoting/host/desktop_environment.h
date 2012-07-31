@@ -8,18 +8,16 @@
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/time.h"
-#include "remoting/base/scoped_thread_proxy.h"
+#include "remoting/host/event_executor.h"
 
 namespace remoting {
 
 class Capturer;
-class ChromotingHost;
 class ChromotingHostContext;
 
 namespace protocol {
+class ClipboardStub;
 class HostEventStub;
 };
 
@@ -36,24 +34,19 @@ class DesktopEnvironment {
   static scoped_ptr<DesktopEnvironment> CreateFake(
       ChromotingHostContext* context,
       scoped_ptr<Capturer> capturer,
-      scoped_ptr<protocol::HostEventStub> event_executor);
+      scoped_ptr<EventExecutor> event_executor);
 
   virtual ~DesktopEnvironment();
 
-  void set_host(ChromotingHost* host) { host_ = host; }
-
   Capturer* capturer() const { return capturer_.get(); }
-  protocol::HostEventStub* event_executor() const {
-    return event_executor_.get();
-  }
+  EventExecutor* event_executor() const { return event_executor_.get(); }
+  void OnSessionStarted(scoped_ptr<protocol::ClipboardStub> client_clipboard);
+  void OnSessionFinished();
 
  private:
   DesktopEnvironment(ChromotingHostContext* context,
                      scoped_ptr<Capturer> capturer,
-                     scoped_ptr<protocol::HostEventStub> event_executor);
-
-  // The host that owns this DesktopEnvironment.
-  ChromotingHost* host_;
+                     scoped_ptr<EventExecutor> event_executor);
 
   // Host context used to make sure operations are run on the correct thread.
   // This is owned by the ChromotingHost.
@@ -63,7 +56,7 @@ class DesktopEnvironment {
   scoped_ptr<Capturer> capturer_;
 
   // Executes input and clipboard events received from the client.
-  scoped_ptr<protocol::HostEventStub> event_executor_;
+  scoped_ptr<EventExecutor> event_executor_;
 
   DISALLOW_COPY_AND_ASSIGN(DesktopEnvironment);
 };

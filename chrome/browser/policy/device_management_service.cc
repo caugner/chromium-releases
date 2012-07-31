@@ -57,6 +57,7 @@ const char kDMTokenAuthHeader[] = "Authorization: GoogleDMToken token=";
 const int kSuccess = 200;
 const int kInvalidArgument = 400;
 const int kInvalidAuthCookieOrDMToken = 401;
+const int kMissingLicenses = 402;
 const int kDeviceManagementNotAllowed = 403;
 const int kInvalidURL = 404; // This error is not coming from the GFE.
 const int kInvalidSerialNumber = 405;
@@ -93,7 +94,7 @@ bool IsProxyError(const net::URLRequestStatus status) {
   return false;
 }
 
-bool IsProtobufMimeType(const content::URLFetcher* source) {
+bool IsProtobufMimeType(const net::URLFetcher* source) {
   return source->GetResponseHeaders()->HasHeaderValue(
       "content-type", "application/x-protobuffer");
 }
@@ -186,10 +187,9 @@ const std::string& GetPlatformString() {
 class DeviceManagementRequestContext : public net::URLRequestContext {
  public:
   explicit DeviceManagementRequestContext(net::URLRequestContext* base_context);
-
- private:
   virtual ~DeviceManagementRequestContext();
 
+ private:
   // Overridden from net::URLRequestContext:
   virtual const std::string& GetUserAgent(const GURL& url) const OVERRIDE;
 };
@@ -236,14 +236,14 @@ class DeviceManagementRequestContextGetter
 
   // Overridden from net::URLRequestContextGetter:
   virtual net::URLRequestContext* GetURLRequestContext() OVERRIDE;
-  virtual scoped_refptr<base::MessageLoopProxy> GetIOMessageLoopProxy()
-      const OVERRIDE;
+  virtual scoped_refptr<base::SingleThreadTaskRunner>
+      GetNetworkTaskRunner() const OVERRIDE;
 
  protected:
   virtual ~DeviceManagementRequestContextGetter() {}
 
  private:
-  scoped_refptr<net::URLRequestContext> context_;
+  scoped_ptr<net::URLRequestContext> context_;
   scoped_refptr<net::URLRequestContextGetter> base_context_getter_;
 };
 
@@ -251,16 +251,16 @@ class DeviceManagementRequestContextGetter
 net::URLRequestContext*
 DeviceManagementRequestContextGetter::GetURLRequestContext() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  if (!context_) {
-    context_ = new DeviceManagementRequestContext(
-        base_context_getter_->GetURLRequestContext());
+  if (!context_.get()) {
+    context_.reset(new DeviceManagementRequestContext(
+        base_context_getter_->GetURLRequestContext()));
   }
 
   return context_.get();
 }
 
-scoped_refptr<base::MessageLoopProxy>
-DeviceManagementRequestContextGetter::GetIOMessageLoopProxy() const {
+scoped_refptr<base::SingleThreadTaskRunner>
+DeviceManagementRequestContextGetter::GetNetworkTaskRunner() const {
   return BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO);
 }
 
@@ -283,7 +283,7 @@ class DeviceManagementRequestJobImpl : public DeviceManagementRequestJob {
   GURL GetURL(const std::string& server_url);
 
   // Configures the fetcher, setting up payload and headers.
-  void ConfigureRequest(content::URLFetcher* fetcher);
+  void ConfigureRequest(net::URLFetcher* fetcher);
 
  protected:
   // DeviceManagementRequestJob:
@@ -338,6 +338,9 @@ void DeviceManagementRequestJobImpl::HandleResponse(
       return;
     case kInvalidAuthCookieOrDMToken:
       ReportError(DM_STATUS_SERVICE_MANAGEMENT_TOKEN_INVALID);
+      return;
+    case kMissingLicenses:
+      ReportError(DM_STATUS_MISSING_LICENSES);
       return;
     case kDeviceManagementNotAllowed:
       ReportError(DM_STATUS_SERVICE_MANAGEMENT_NOT_SUPPORTED);
@@ -394,7 +397,7 @@ GURL DeviceManagementRequestJobImpl::GetURL(
 }
 
 void DeviceManagementRequestJobImpl::ConfigureRequest(
-    content::URLFetcher* fetcher) {
+    net::URLFetcher* fetcher) {
   std::string payload;
   CHECK(request_.SerializeToString(&payload));
   fetcher->SetUploadData(kPostContentType, payload);
@@ -511,8 +514,8 @@ DeviceManagementService::DeviceManagementService(
 
 void DeviceManagementService::StartJob(DeviceManagementRequestJobImpl* job,
                                        bool bypass_proxy) {
-  content::URLFetcher* fetcher = content::URLFetcher::Create(
-      0, job->GetURL(server_url_), content::URLFetcher::POST, this);
+  net::URLFetcher* fetcher = content::URLFetcher::Create(
+      0, job->GetURL(server_url_), net::URLFetcher::POST, this);
   fetcher->SetLoadFlags(net::LOAD_DO_NOT_SEND_COOKIES |
                         net::LOAD_DO_NOT_SAVE_COOKIES |
                         net::LOAD_DISABLE_CACHE |
@@ -524,7 +527,7 @@ void DeviceManagementService::StartJob(DeviceManagementRequestJobImpl* job,
 }
 
 void DeviceManagementService::OnURLFetchComplete(
-    const content::URLFetcher* source) {
+    const net::URLFetcher* source) {
   JobFetcherMap::iterator entry(pending_jobs_.find(source));
   if (entry == pending_jobs_.end()) {
     NOTREACHED() << "Callback from foreign URL fetcher";

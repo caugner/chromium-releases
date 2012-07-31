@@ -105,7 +105,7 @@ const char kApplicationLocaleBackup[] = "intl.app_locale_backup";
 
 // The default character encoding to assume for a web page in the
 // absence of MIME charset specification
-const char kGlobalDefaultCharset[] = "intl.global.charset_default";
+const char kDefaultCharset[] = "intl.charset_default";
 
 // The value to use for Accept-Languages HTTP header when making an HTTP
 // request.
@@ -116,7 +116,24 @@ const char kAcceptLanguages[] = "intl.accept_languages";
 // stored in non-translatable part of the resource bundle.
 const char kStaticEncodings[] = "intl.static_encodings";
 
-// WebKit preferences.
+// Obselete WebKit prefs for migration.
+const char kGlobalDefaultCharset[] = "intl.global.charset_default";
+const char kWebKitGlobalDefaultFontSize[] =
+    "webkit.webprefs.global.default_font_size";
+const char kWebKitGlobalDefaultFixedFontSize[] =
+    "webkit.webprefs.global.default_fixed_font_size";
+const char kWebKitGlobalMinimumFontSize[] =
+    "webkit.webprefs.global.minimum_font_size";
+const char kWebKitGlobalMinimumLogicalFontSize[] =
+    "webkit.webprefs.global.minimum_logical_font_size";
+const char kWebKitGlobalJavascriptCanOpenWindowsAutomatically[] =
+    "webkit.webprefs.global.javascript_can_open_windows_automatically";
+const char kWebKitGlobalJavascriptEnabled[] =
+    "webkit.webprefs.global.javascript_enabled";
+const char kWebKitGlobalLoadsImagesAutomatically[] =
+    "webkit.webprefs.global.loads_images_automatically";
+const char kWebKitGlobalPluginsEnabled[] =
+    "webkit.webprefs.global.plugins_enabled";
 const char kWebKitGlobalStandardFontFamily[] =
     "webkit.webprefs.global.standard_font_family";
 const char kWebKitGlobalFixedFontFamily[] =
@@ -129,6 +146,16 @@ const char kWebKitGlobalCursiveFontFamily[] =
     "webkit.webprefs.global.cursive_font_family";
 const char kWebKitGlobalFantasyFontFamily[] =
     "webkit.webprefs.global.fantasy_font_family";
+const char kWebKitOldStandardFontFamily[] =
+    "webkit.webprefs.standard_font_family";
+const char kWebKitOldFixedFontFamily[] = "webkit.webprefs.fixed_font_family";
+const char kWebKitOldSerifFontFamily[] = "webkit.webprefs.serif_font_family";
+const char kWebKitOldSansSerifFontFamily[] =
+    "webkit.webprefs.sansserif_font_family";
+const char kWebKitOldCursiveFontFamily[] =
+    "webkit.webprefs.cursive_font_family";
+const char kWebKitOldFantasyFontFamily[] =
+    "webkit.webprefs.fantasy_font_family";
 const char kWebKitStandardFontFamilyMap[] =
     "webkit.webprefs.fonts.standard";
 const char kWebKitFixedFontFamilyMap[] =
@@ -145,15 +172,29 @@ const char kWebKitFantasyFontFamilyMap[] =
 // If these change, the corresponding enums in the extension API
 // experimental.fontSettings.json must also change.
 const char* const kWebKitScriptsForFontFamilyMaps[] = {
-    "Arab", "Armn", "Beng", "Cans", "Cher", "Cyrl", "Deva", "Ethi", "Geor",
-    "Grek", "Gujr", "Guru", "Hang", "Hans", "Hant", "Hebr", "Hrkt", "Knda",
-    "Khmr", "Laoo", "Mlym", "Mong", "Mymr", "Orya", "Sinh", "Taml", "Telu",
-    "Thaa", "Thai", "Tibt", "Yiii"
+  "Afak", "Arab", "Armi", "Armn", "Avst", "Bali", "Bamu", "Bass", "Batk",
+  "Beng", "Blis", "Bopo", "Brah", "Brai", "Bugi", "Buhd", "Cakm", "Cans",
+  "Cari", "Cham", "Cher", "Cirt", "Copt", "Cprt", "Cyrl", "Cyrs", "Deva",
+  "Dsrt", "Dupl", "Egyd", "Egyh", "Egyp", "Elba", "Ethi", "Geor", "Geok",
+  "Glag", "Goth", "Gran", "Grek", "Gujr", "Guru", "Hang", "Hani", "Hano",
+  "Hans", "Hant", "Hebr", "Hluw", "Hmng", "Hrkt", "Hung", "Inds", "Ital",
+  "Java", "Jurc", "Kali", "Khar", "Khmr", "Khoj", "Knda", "Kpel", "Kthi",
+  "Lana", "Laoo", "Latf", "Latg", "Latn", "Lepc", "Limb", "Lina", "Linb",
+  "Lisu", "Loma", "Lyci", "Lydi", "Mand", "Mani", "Maya", "Mend", "Merc",
+  "Mero", "Mlym", "Moon", "Mong", "Mroo", "Mtei", "Mymr", "Narb", "Nbat",
+  "Nkgb", "Nkoo", "Nshu", "Ogam", "Olck", "Orkh", "Orya", "Osma", "Palm",
+  "Perm", "Phag", "Phli", "Phlp", "Phlv", "Phnx", "Plrd", "Prti", "Rjng",
+  "Roro", "Runr", "Samr", "Sara", "Sarb", "Saur", "Sgnw", "Shaw", "Shrd",
+  "Sind", "Sinh", "Sora", "Sund", "Sylo", "Syrc", "Syre", "Syrj", "Syrn",
+  "Tagb", "Takr", "Tale", "Talu", "Taml", "Tang", "Tavt", "Telu", "Teng",
+  "Tfng", "Tglg", "Thaa", "Thai", "Tibt", "Tirh", "Ugar", "Vaii", "Visp",
+  "Wara", "Wole", "Xpeo", "Xsux", "Yiii", "Zmth", "Zsym", "Zyyy"
 };
 
 const size_t kWebKitScriptsForFontFamilyMapsLength =
     arraysize(kWebKitScriptsForFontFamilyMaps);
 
+// WebKit preferences.
 const char kWebKitStandardFontFamilyArabic[] =
     "webkit.webprefs.fonts.standard.Arab";
 const char kWebKitFixedFontFamilyArabic[] =
@@ -162,6 +203,22 @@ const char kWebKitSerifFontFamilyArabic[] =
     "webkit.webprefs.fonts.serif.Arab";
 const char kWebKitSansSerifFontFamilyArabic[] =
     "webkit.webprefs.fonts.sansserif.Arab";
+const char kWebKitStandardFontFamilyCyrillic[] =
+    "webkit.webprefs.fonts.standard.Cyrl";
+const char kWebKitFixedFontFamilyCyrillic[] =
+    "webkit.webprefs.fonts.fixed.Cyrl";
+const char kWebKitSerifFontFamilyCyrillic[] =
+    "webkit.webprefs.fonts.serif.Cyrl";
+const char kWebKitSansSerifFontFamilyCyrillic[] =
+    "webkit.webprefs.fonts.sansserif.Cyrl";
+const char kWebKitStandardFontFamilyGreek[] =
+    "webkit.webprefs.fonts.standard.Grek";
+const char kWebKitFixedFontFamilyGreek[] =
+    "webkit.webprefs.fonts.fixed.Grek";
+const char kWebKitSerifFontFamilyGreek[] =
+    "webkit.webprefs.fonts.serif.Grek";
+const char kWebKitSansSerifFontFamilyGreek[] =
+    "webkit.webprefs.fonts.sansserif.Grek";
 const char kWebKitStandardFontFamilyJapanese[] =
     "webkit.webprefs.fonts.standard.Hrkt";
 const char kWebKitFixedFontFamilyJapanese[] =
@@ -197,22 +254,6 @@ const char kWebKitSerifFontFamilyTraditionalHan[] =
 const char kWebKitSansSerifFontFamilyTraditionalHan[] =
     "webkit.webprefs.fonts.sansserif.Hant";
 
-const char kWebKitGlobalDefaultFontSize[] =
-    "webkit.webprefs.global.default_font_size";
-const char kWebKitGlobalDefaultFixedFontSize[] =
-    "webkit.webprefs.global.default_fixed_font_size";
-const char kWebKitGlobalMinimumFontSize[] =
-    "webkit.webprefs.global.minimum_font_size";
-const char kWebKitGlobalMinimumLogicalFontSize[] =
-    "webkit.webprefs.global.minimum_logical_font_size";
-const char kWebKitGlobalJavascriptCanOpenWindowsAutomatically[] =
-    "webkit.webprefs.global.javascript_can_open_windows_automatically";
-const char kWebKitGlobalJavascriptEnabled[] =
-    "webkit.webprefs.global.javascript_enabled";
-const char kWebKitGlobalLoadsImagesAutomatically[] =
-    "webkit.webprefs.global.loads_images_automatically";
-const char kWebKitGlobalPluginsEnabled[] =
-    "webkit.webprefs.global.plugins_enabled";
 const char kWebKitWebSecurityEnabled[] = "webkit.webprefs.web_security_enabled";
 const char kWebKitDomPasteEnabled[] = "webkit.webprefs.dom_paste_enabled";
 const char kWebKitShrinksStandaloneImagesToFit[] =
@@ -229,15 +270,14 @@ const char kWebKitAllowDisplayingInsecureContent[] =
 const char kWebKitAllowRunningInsecureContent[] =
     "webkit.webprefs.allow_running_insecure_content";
 
-// Settings below can be overridden for each tab individually.
-const char kDefaultCharset[] = "intl.charset_default";
-const char kWebKitStandardFontFamily[] = "webkit.webprefs.standard_font_family";
-const char kWebKitFixedFontFamily[] = "webkit.webprefs.fixed_font_family";
-const char kWebKitSerifFontFamily[] = "webkit.webprefs.serif_font_family";
+const char kWebKitCommonScript[] = "Zyyy";
+const char kWebKitStandardFontFamily[] = "webkit.webprefs.fonts.standard.Zyyy";
+const char kWebKitFixedFontFamily[] = "webkit.webprefs.fonts.fixed.Zyyy";
+const char kWebKitSerifFontFamily[] = "webkit.webprefs.fonts.serif.Zyyy";
 const char kWebKitSansSerifFontFamily[] =
-    "webkit.webprefs.sansserif_font_family";
-const char kWebKitCursiveFontFamily[] = "webkit.webprefs.cursive_font_family";
-const char kWebKitFantasyFontFamily[] = "webkit.webprefs.fantasy_font_family";
+    "webkit.webprefs.fonts.sansserif.Zyyy";
+const char kWebKitCursiveFontFamily[] = "webkit.webprefs.fonts.cursive.Zyyy";
+const char kWebKitFantasyFontFamily[] = "webkit.webprefs.fonts.fantasy.Zyyy";
 const char kWebKitDefaultFontSize[] = "webkit.webprefs.default_font_size";
 const char kWebKitDefaultFixedFontSize[] =
     "webkit.webprefs.default_fixed_font_size";
@@ -266,6 +306,9 @@ const char kPasswordManagerEnabled[] = "profile.password_manager_enabled";
 // in clear text.
 const char kPasswordManagerAllowShowPasswords[] =
     "profile.password_manager_allow_show_passwords";
+
+// Boolean that is true when password generation is enabled.
+const char kPasswordGenerationEnabled[] = "password_generation.enabled";
 
 // Booleans identifying whether normal and reverse auto-logins are enabled.
 const char kAutologinEnabled[] = "autologin.enabled";
@@ -409,9 +452,6 @@ const char kInstantConfirmDialogShown[] = "instant.confirm_dialog_shown";
 
 // Boolean pref indicating if instant is enabled.
 const char kInstantEnabled[] = "instant.enabled";
-
-// Boolean pref indicating if instant was ever enabled.
-const char kInstantEnabledOnce[] = "instant.enabled_once";
 
 // Used to migrate preferences from local state to user preferences to
 // enable multiple profiles.
@@ -631,18 +671,14 @@ const char kLanguageXkbAutoRepeatInterval[] =
 // "_r2" suffixes are added to the three prefs above when we change the
 // preferences not user-configurable, not to sync them with cloud.
 
-// A dictionary pref which determines a preferred virtual keyboard per layout.
-// e.g. { "us(dvorak)": "http://asdfg..yuiop/" }
-const char kLanguagePreferredVirtualKeyboard[] =
-    "settings.language.preferred_virtual_keyboard";
-
 // A boolean pref which determines whether spoken feedback is enabled.
 const char kSpokenFeedbackEnabled[] = "settings.accessibility";
 // A boolean pref which determines whether high conrast is enabled.
-const char kHighContrastEnabled[] = "settings.a11y.high_contrast";
+const char kHighContrastEnabled[] = "settings.a11y.high_contrast_enabled";
 // A boolean pref which determines whether screen magnifier is enabled.
 const char kScreenMagnifierEnabled[] = "settings.a11y.screen_magnifier";
 // A boolean pref which determines whether virtual keyboard is enabled.
+// TODO(hashimoto): Remove this pref.
 const char kVirtualKeyboardEnabled[] = "settings.a11y.virtual_keyboard";
 
 // A boolean pref which turns on Advanced Filesystem
@@ -698,6 +734,9 @@ const char kDeleteCache[] = "browser.clear_data.cache";
 const char kDeleteCookies[] = "browser.clear_data.cookies";
 const char kDeletePasswords[] = "browser.clear_data.passwords";
 const char kDeleteFormData[] = "browser.clear_data.form_data";
+const char kDeleteHostedAppsData[] = "browser.clear_data.hosted_apps_data";
+const char kDeauthorizeContentLicenses[] =
+    "browser.clear_data.content_licenses";
 const char kDeleteTimePeriod[] = "browser.clear_data.time_period";
 
 // Boolean pref to define the default values for using spellchecker.
@@ -714,10 +753,10 @@ const char kEnableAutoSpellCorrect[] = "browser.enable_autospellcorrect";
 const char kSpeechRecognitionFilterProfanities[] =
     "browser.speechinput_censor_results";
 
-// Boolean pref to determine if the tray notification balloon for speech input
-// extension API has been already shown once to the user.
-const char kSpeechInputTrayNotificationShown[] =
-    "browser.speechinput_tray_notification_shown";
+// List of speech recognition context names (extensions or websites) for which
+// the tray notification balloon has already been shown.
+const char kSpeechRecognitionTrayNotificationShownContexts[] =
+    "browser.speechinput_tray_notification_shown_contexts";
 
 // Boolean controlling whether history saving is disabled.
 const char kSavingBrowserHistoryDisabled[] = "history.saving_disabled";
@@ -825,6 +864,11 @@ const char kDesktopNotificationPosition[] =
 // Dictionary of content settings applied to all hosts by default.
 const char kDefaultContentSettings[] = "profile.default_content_settings";
 
+// Boolean indicating whether the clear on exit pref was migrated to content
+// settings yet.
+const char kContentSettingsClearOnExitMigrated[] =
+    "profile.content_settings.clear_on_exit_migrated";
+
 // Version of the pattern format used to define content settings.
 const char kContentSettingsVersion[] = "profile.content_settings.pref_version";
 
@@ -896,6 +940,11 @@ const char kPinnedTabs[] = "pinned_tabs";
 // Integer containing the default Geolocation content setting.
 const char kGeolocationDefaultContentSetting[] =
     "geolocation.default_content_setting";
+
+#if defined(OS_ANDROID)
+// Boolean that controls the enabled-state of Geolocation.
+const char kGeolocationEnabled[] = "geolocation.enabled";
+#endif
 
 // Dictionary that maps [frame, toplevel] to their Geolocation content setting.
 const char kGeolocationContentSettings[] = "geolocation.content_settings";
@@ -988,15 +1037,17 @@ const char kProfileInfoCache[] = "profile.info_cache";
 
 // Prefs for SSLConfigServicePref.
 const char kCertRevocationCheckingEnabled[] = "ssl.rev_checking.enabled";
-const char kSSL3Enabled[] = "ssl.ssl3.enabled";
-const char kTLS1Enabled[] = "ssl.tls1.enabled";
+const char kSSLVersionMin[] = "ssl.version_min";
+const char kSSLVersionMax[] = "ssl.version_max";
 const char kCipherSuiteBlacklist[] = "ssl.cipher_suites.blacklist";
 const char kEnableOriginBoundCerts[] = "ssl.origin_bound_certs.enabled";
 const char kDisableSSLRecordSplitting[] = "ssl.ssl_record_splitting.disabled";
 
-// The metrics client GUID and session ID.
+// The metrics client GUID, entropy source and session ID.
 const char kMetricsClientID[] = "user_experience_metrics.client_id";
 const char kMetricsSessionID[] = "user_experience_metrics.session_id";
+const char kMetricsLowEntropySource[] =
+    "user_experience_metrics.low_entropy_source";
 
 // Date/time when the current metrics profile ID was created
 // (which hopefully corresponds to first run).
@@ -1024,6 +1075,12 @@ const char kMetricsOngoingLogsXml[] =
     "user_experience_metrics.ongoing_logs";
 const char kMetricsOngoingLogsProto[] =
     "user_experience_metrics.ongoing_logs_as_protobufs";
+
+// String serialized form of variations seed protobuf.
+const char kVariationsSeed[] = "variations_seed";
+
+// 64-bit integer serialization of the base::Time from the last seed received.
+const char kVariationsSeedDate[] = "variations_seed_date";
 
 // Where profile specific metrics are placed.
 const char kProfileMetrics[] = "user_experience_metrics.profiles";
@@ -1313,13 +1370,18 @@ const char kDisablePluginFinder[] = "plugins.disable_plugin_finder";
 const char kBrowserActionContainerWidth[] =
     "extensions.browseractions.container.width";
 
+// The sites that are allowed to install extensions. These sites should be
+// allowed to install extensions without the scary dangerous downloads bar.
+// Also, when off-store-extension installs are disabled, these sites are exempt.
+const char kExtensionAllowedInstallSites[] = "extensions.allowed_install_sites";
+
 // A whitelist of extension ids the user can install: exceptions from the
-// following blacklist. This is controlled by the administrator.
+// following blacklist.
 const char kExtensionInstallAllowList[] = "extensions.install.allowlist";
+
 // A blacklist, containing extensions the user cannot install. This list can
-// conatin "*" meaning all extensions. This is controlled by the administrator.
-// This list should not be confused with the extension blacklist, which is
-// Google controlled.
+// contain "*" meaning all extensions. This list should not be confused with the
+// extension blacklist, which is Google controlled.
 const char kExtensionInstallDenyList[] = "extensions.install.denylist";
 
 // Whether we have run the extension-alert system (see ExtensionGlobalError)
@@ -1343,9 +1405,6 @@ const char kExtensionBlacklistUpdateVersion[] =
 // Keeps track of which sessions are collapsed in the Other Devices menu.
 const char kNtpCollapsedForeignSessions[] = "ntp.collapsed_foreign_sessions";
 
-// Number of times the NTP4 informational bubble has been shown.
-const char kNtp4IntroDisplayCount[] = "ntp.intro_display_count";
-
 // New Tab Page URLs that should not be shown as most visited thumbnails.
 const char kNtpMostVisitedURLsBlacklist[] = "ntp.most_visited_blacklist";
 
@@ -1357,12 +1416,6 @@ const char kNtpPromoResourceCache[] = "ntp.promo_resource_cache";
 // Last time of update of promo_resource_cache.
 const char kNtpPromoResourceCacheUpdate[] = "ntp.promo_resource_cache_update";
 #endif
-
-// Is user logged into G+ (used for G+ extension promo).
-const char kNtpPromoIsLoggedInToPlus[] = "ntp.promo_is_logged_in_to_plus";
-
-// Bit mask used to decide when to show the NTP Promo.
-const char kNtpPromoFeatureMask[] = "ntp.promo_feature_mask";
 
 // Serves promo resources for the NTP.
 const char kNtpPromoResourceServer[] = "ntp.web_resource_server";
@@ -1434,6 +1487,9 @@ const char kNtpPromoLine[] = "ntp.promo_line";
 // from the promo server.
 const char kNtpPromoStart[] = "ntp.promo_start";
 const char kNtpPromoEnd[] = "ntp.promo_end";
+
+// True if this promo should only be shown to G+ users.
+const char kNtpPromoGplusRequired[] = "ntp.gplus_required";
 
 // Boolean indicating whether the web store is active for the current locale.
 const char kNtpWebStoreEnabled[] = "ntp.webstore_enabled";
@@ -1536,6 +1592,10 @@ const char kSyncMaxInvalidationVersions[] = "sync.max_invalidation_versions";
 // disable/enable events.
 const char kSyncSessionsGUID[] = "sync.session_sync_guid";
 
+// Opaque state from the invalidation subsystem that is persisted via prefs.
+// The value is base 64 encoded.
+const char kInvalidatorInvalidationState[] = "invalidator.invalidation_state";
+
 // A string that can be used to restore sync encryption infrastructure on
 // startup so that the user doesn't need to provide credentials on each start.
 const char kSyncEncryptionBootstrapToken[] =
@@ -1547,6 +1607,12 @@ const char kSyncUsingSecondaryPassphrase[] = "sync.using_secondary_passphrase";
 
 // String that identifies the user logged into sync and other google services.
 const char kGoogleServicesUsername[] = "google.services.username";
+
+// Local state pref containing a string regex that restricts which accounts
+// can be used to log in to chrome (e.g. "*@google.com"). If missing or blank,
+// all accounts are allowed (no restrictions).
+const char kGoogleServicesUsernamePattern[] =
+    "google.services.username_pattern";
 
 #if !defined(OS_ANDROID)
 // Tracks the number of times that we have shown the sync promo at startup.
@@ -1686,6 +1752,10 @@ const char kSyncSpareBootstrapToken[] = "sync.spare_bootstrap_token";
 // Whether there is a Flash version installed that supports clearing LSO data.
 const char kClearPluginLSODataEnabled[] = "browser.clear_lso_data_enabled";
 
+// Whether we should show Pepper Flash-specific settings.
+const char kPepperFlashSettingsEnabled[] =
+    "browser.pepper_flash_settings_enabled";
+
 // String which specifies where to store the disk cache.
 const char kDiskCacheDir[] = "browser.disk_cache_dir";
 // Pref name for the policy specifying the maximal cache size.
@@ -1700,6 +1770,9 @@ const char kMediaCacheSize[] = "browser.media_cache_size";
 // http://crosbug.com/17015 is implemented and the update engine can just
 // fetch the correct value from the policy.
 const char kChromeOsReleaseChannel[] = "cros.system.releaseChannel";
+
+// Value of the enums in TabStrip::LayoutType as an int.
+const char kTabStripLayoutType[] = "tab_strip_layout_type";
 
 // *************** SERVICE PREFS ***************
 // These are attached to the service process.
@@ -1832,6 +1905,8 @@ const char kPinnedLauncherApps[] =
 
 const char kLongPressTimeInSeconds[] =
     "gesture.long_press_time_in_seconds";
+const char kMaxDistanceForTwoFingerTapInPixels[] =
+    "gesture.max_distance_for_two_finger_tap_in_pixels";
 const char kMaxSecondsBetweenDoubleClick[] =
     "gesture.max_seconds_between_double_click";
 const char kMaxSeparationForGestureTouchesInPixels[] =
@@ -1874,4 +1949,11 @@ const char kNetworkProfileWarningsLeft[] = "network_profile.warnings_left";
 // |network_profile.warnings_left| after a silence period.
 const char kNetworkProfileLastWarningTime[] =
     "network_profile.last_warning_time";
+
+#if defined(OS_MACOSX)
+// A timestamp of when the obsolete OS infobar was last shown to a user on 10.5.
+const char kMacLeopardObsoleteInfobarLastShown[] =
+    "mac_105_obsolete_infobar_last_shown";
+#endif  // defined(OS_MACOSX)
+
 }  // namespace prefs

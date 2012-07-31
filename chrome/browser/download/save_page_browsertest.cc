@@ -43,6 +43,7 @@
 #include "chrome/browser/download/save_package_file_picker.h"
 #endif
 
+using content::BrowserContext;
 using content::BrowserThread;
 using content::DownloadItem;
 using content::DownloadManager;
@@ -98,25 +99,24 @@ class SavePageBrowserTest : public InProcessBrowserTest {
   }
 
   WebContents* GetCurrentTab() const {
-    WebContents* current_tab = browser()->GetSelectedWebContents();
+    WebContents* current_tab = browser()->GetActiveWebContents();
     EXPECT_TRUE(current_tab);
     return current_tab;
   }
 
 
   GURL WaitForSavePackageToFinish() const {
-    ui_test_utils::TestNotificationObserver observer;
-    ui_test_utils::RegisterAndWait(&observer,
+    ui_test_utils::WindowedNotificationObserver observer(
         content::NOTIFICATION_SAVE_PACKAGE_SUCCESSFULLY_FINISHED,
         content::NotificationService::AllSources());
+    observer.Wait();
     return content::Details<DownloadItem>(observer.details()).ptr()->
         GetOriginalUrl();
   }
 
   DownloadManager* GetDownloadManager() const {
     DownloadManager* download_manager =
-        DownloadServiceFactory::GetForProfile(
-            browser()->profile())->GetDownloadManager();
+        BrowserContext::GetDownloadManager(browser()->profile());
     EXPECT_TRUE(download_manager);
     return download_manager;
   }
@@ -125,7 +125,7 @@ class SavePageBrowserTest : public InProcessBrowserTest {
     // Query the history system.
     ChromeDownloadManagerDelegate* delegate =
       static_cast<ChromeDownloadManagerDelegate*>(
-          GetDownloadManager()->delegate());
+          GetDownloadManager()->GetDelegate());
     delegate->download_history()->Load(
         base::Bind(&SavePageBrowserTest::OnQueryDownloadEntriesComplete,
                    base::Unretained(this)));
@@ -156,11 +156,13 @@ class SavePageBrowserTest : public InProcessBrowserTest {
 
     bool operator() (const DownloadPersistentStoreInfo& info) const {
       return info.url == url_ &&
-        info.path == path_ &&
-        // For save packages, received bytes is actually the number of files.
-        info.received_bytes == num_files_ &&
-        info.total_bytes == 0 &&
-        info.state == DownloadItem::COMPLETE;
+             info.path == path_ &&
+             // For non-MHTML save packages, received_bytes is actually the
+             // number of files.
+             ((num_files_ < 0) ||
+              (info.received_bytes == num_files_)) &&
+             info.total_bytes == 0 &&
+             info.state == DownloadItem::COMPLETE;
     }
 
     GURL url_;
@@ -349,7 +351,7 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, CleanFilenameFromPageTitle) {
   const FilePath file_name(FILE_PATH_LITERAL("c.htm"));
   FilePath download_dir =
       DownloadPrefs::FromDownloadManager(GetDownloadManager())->
-          download_path();
+          DownloadPath();
   FilePath full_file_name =
       download_dir.AppendASCII(std::string("test.exe") + kAppendedExtension);
   FilePath dir = download_dir.AppendASCII("test.exe_files");
@@ -388,11 +390,11 @@ class SavePageAsMHTMLBrowserTest : public SavePageBrowserTest {
 SavePageAsMHTMLBrowserTest::~SavePageAsMHTMLBrowserTest() {
 }
 
-IN_PROC_BROWSER_TEST_F(SavePageAsMHTMLBrowserTest, DISABLED_SavePageAsMHTML) {
-  static const int64 kFileSize = 2759;
+IN_PROC_BROWSER_TEST_F(SavePageAsMHTMLBrowserTest, SavePageAsMHTML) {
+  static const int64 kFileSizeMin = 2758;
   GURL url = NavigateToMockURL("b");
   FilePath download_dir = DownloadPrefs::FromDownloadManager(
-      GetDownloadManager())->download_path();
+      GetDownloadManager())->DownloadPath();
   FilePath full_file_name = download_dir.AppendASCII(std::string(
       "Test page for saving page feature.mhtml"));
 #if defined(OS_CHROMEOS)
@@ -405,10 +407,10 @@ IN_PROC_BROWSER_TEST_F(SavePageAsMHTMLBrowserTest, DISABLED_SavePageAsMHTML) {
         content::NotificationService::AllSources());
   browser()->SavePage();
   observer.Wait();
-  CheckDownloadHistory(url, full_file_name, kFileSize);
+  CheckDownloadHistory(url, full_file_name, -1);
 
   EXPECT_TRUE(file_util::PathExists(full_file_name));
   int64 actual_file_size = -1;
   EXPECT_TRUE(file_util::GetFileSize(full_file_name, &actual_file_size));
-  EXPECT_EQ(kFileSize, actual_file_size);
+  EXPECT_LE(kFileSizeMin, actual_file_size);
 }

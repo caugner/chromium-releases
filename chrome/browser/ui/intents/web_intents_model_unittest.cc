@@ -11,7 +11,7 @@
 #include "chrome/browser/intents/web_intents_registry.h"
 #include "chrome/browser/ui/intents/web_intents_model.h"
 #include "chrome/browser/webdata/web_data_service.h"
-#include "content/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/models/tree_node_model.h"
 
@@ -34,9 +34,12 @@ class WebIntentsModelTest : public testing::Test {
   }
 
   virtual void TearDown() {
-    if (wds_.get())
-      wds_->Shutdown();
-
+    wds_->ShutdownOnUIThread();
+    wds_ = NULL;
+    base::WaitableEvent done(false, false);
+    BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
+        base::Bind(&base::WaitableEvent::Signal, base::Unretained(&done)));
+    done.Wait();
     db_thread_.Stop();
     MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
     MessageLoop::current()->Run();

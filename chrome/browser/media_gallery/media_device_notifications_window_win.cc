@@ -6,6 +6,7 @@
 
 #include <windows.h>
 #include <dbt.h>
+
 #include <string>
 
 #include "base/file_path.h"
@@ -13,10 +14,9 @@
 #include "base/system_monitor/system_monitor.h"
 #include "base/win/wrapped_window_proc.h"
 
-static const wchar_t* const WindowClassName =
-    L"Chrome_MediaDeviceNotificationWindow";
-
 namespace {
+
+const wchar_t WindowClassName[] = L"Chrome_MediaDeviceNotificationWindow";
 
 LRESULT GetVolumeName(LPCWSTR drive,
                       LPWSTR volume_name,
@@ -42,36 +42,45 @@ DWORD GetVolumeBitMaskFromBroadcastHeader(DWORD data) {
 namespace chrome {
 
 MediaDeviceNotificationsWindowWin::MediaDeviceNotificationsWindowWin()
-    : volume_name_func_(&GetVolumeName) {
+    : atom_(0),
+      instance_(NULL),
+      window_(NULL),
+      volume_name_func_(&GetVolumeName) {
   Init();
 }
 
 MediaDeviceNotificationsWindowWin::MediaDeviceNotificationsWindowWin(
-    VolumeNameFunc volume_name_func) : volume_name_func_(volume_name_func) {
+    VolumeNameFunc volume_name_func)
+    : atom_(0),
+      instance_(NULL),
+      window_(NULL),
+      volume_name_func_(volume_name_func) {
   Init();
 }
 
 void MediaDeviceNotificationsWindowWin::Init() {
-  HINSTANCE hinst = GetModuleHandle(NULL);
+  WNDCLASSEX window_class;
+  base::win::InitializeWindowClass(
+      WindowClassName,
+      &base::win::WrappedWindowProc<
+          MediaDeviceNotificationsWindowWin::WndProcThunk>,
+      0, 0, 0, NULL, NULL, NULL, NULL, NULL,
+      &window_class);
+  instance_ = window_class.hInstance;
+  atom_ = RegisterClassEx(&window_class);
+  DCHECK(atom_);
 
-  WNDCLASSEX wc = {0};
-  wc.cbSize = sizeof(wc);
-  wc.lpfnWndProc = base::win::WrappedWindowProc<
-      &MediaDeviceNotificationsWindowWin::WndProcThunk>;
-  wc.hInstance = hinst;
-  wc.lpszClassName = WindowClassName;
-  ATOM clazz = RegisterClassEx(&wc);
-  DCHECK(clazz);
-
-  window_ = CreateWindow(WindowClassName, 0, 0, 0, 0, 0, 0, 0, 0, hinst, 0);
+  window_ = CreateWindow(MAKEINTATOM(atom_), 0, 0, 0, 0, 0, 0, 0, 0, instance_,
+                         0);
   SetWindowLongPtr(window_, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
 }
 
 MediaDeviceNotificationsWindowWin::~MediaDeviceNotificationsWindowWin() {
-  if (window_) {
+  if (window_)
     DestroyWindow(window_);
-    UnregisterClass(WindowClassName, GetModuleHandle(NULL));
-  }
+
+  if (atom_)
+    UnregisterClass(MAKEINTATOM(atom_), instance_);
 }
 
 LRESULT MediaDeviceNotificationsWindowWin::OnDeviceChange(UINT event_type,

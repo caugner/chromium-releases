@@ -39,7 +39,11 @@ class RootWindowHostWin : public RootWindowHost, public ui::WindowImpl {
   virtual void UnConfineCursor() OVERRIDE;
   virtual void MoveCursorTo(const gfx::Point& location) OVERRIDE;
   virtual void SetFocusWhenShown(bool focus_when_shown) OVERRIDE;
+  virtual bool GrabSnapshot(
+      const gfx::Rect& snapshot_bounds,
+      std::vector<unsigned char>* png_representation) OVERRIDE;
   virtual void PostNativeEvent(const base::NativeEvent& native_event) OVERRIDE;
+  virtual void OnDeviceScaleFactorChanged(float device_scale_factor) OVERRIDE;
 
  private:
   BEGIN_MSG_MAP_EX(RootWindowHostWin)

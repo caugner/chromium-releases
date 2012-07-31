@@ -7,9 +7,11 @@
 #include "ash/desktop_background/desktop_background_controller.h"
 #include "ash/shell.h"
 #include "grit/ash_strings.h"
+#include "ui/aura/window.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/views/controls/menu/menu_model_adapter.h"
 #include "ui/views/controls/menu/menu_runner.h"
+#include "ui/views/widget/widget.h"
 
 namespace ash {
 namespace internal {
@@ -22,6 +24,12 @@ ShellContextMenu::~ShellContextMenu() {
 
 void ShellContextMenu::ShowMenu(views::Widget* widget,
                                 const gfx::Point& location) {
+  // TODO(oshima): Figure out the exact semantics of
+  // just switching the active root window without changing the
+  // active window.
+  Shell::GetInstance()->set_active_root_window(
+      widget->GetNativeView()->GetRootWindow());
+
   ui::SimpleMenuModel menu_model(this);
   menu_model.AddItem(MENU_CHANGE_WALLPAPER,
       l10n_util::GetStringUTF16(IDS_AURA_SET_DESKTOP_WALLPAPER));
@@ -29,7 +37,7 @@ void ShellContextMenu::ShowMenu(views::Widget* widget,
   menu_runner_.reset(new views::MenuRunner(menu_model_adapter.CreateMenu()));
   if (menu_runner_->RunMenuAt(
           widget, NULL, gfx::Rect(location, gfx::Size()),
-          views::MenuItemView::TOPRIGHT, views::MenuRunner::HAS_MNEMONICS) ==
+          views::MenuItemView::TOPLEFT, views::MenuRunner::HAS_MNEMONICS) ==
       views::MenuRunner::MENU_DELETED)
     return;
 }

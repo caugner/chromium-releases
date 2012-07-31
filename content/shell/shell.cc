@@ -4,12 +4,19 @@
 
 #include "content/shell/shell.h"
 
+#include <iostream>
+
 #include "base/auto_reset.h"
 #include "base/command_line.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
+#include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_source.h"
+#include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/shell/shell_javascript_dialog_creator.h"
@@ -28,14 +35,14 @@ std::vector<Shell*> Shell::windows_;
 bool Shell::quit_message_loop_ = true;
 
 Shell::Shell(WebContents* web_contents)
-    : WebContentsObserver(web_contents),
-      wait_until_done_(false),
-      window_(NULL),
+    : window_(NULL),
       url_edit_view_(NULL)
 #if defined(OS_WIN) && !defined(USE_AURA)
       , default_edit_wnd_proc_(0)
 #endif
   {
+    registrar_.Add(this, NOTIFICATION_WEB_CONTENTS_TITLE_UPDATED,
+        Source<WebContents>(web_contents));
     windows_.push_back(this);
 }
 
@@ -157,25 +164,38 @@ void Shell::DidNavigateMainFramePostCommit(WebContents* web_contents) {
 }
 
 JavaScriptDialogCreator* Shell::GetJavaScriptDialogCreator() {
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpRenderTree))
-    return NULL;
-
   if (!dialog_creator_.get())
     dialog_creator_.reset(new ShellJavaScriptDialogCreator());
   return dialog_creator_.get();
 }
 
-void Shell::DidFinishLoad(int64 frame_id,
-                          const GURL& validated_url,
-                          bool is_main_frame) {
-  if (!is_main_frame || wait_until_done_)
-    return;
+bool Shell::AddMessageToConsole(WebContents* source,
+                                int32 level,
+                                const string16& message,
+                                int32 line_no,
+                                const string16& source_id) {
   if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpRenderTree))
-    return;
-  RenderViewHost* render_view_host = web_contents_->GetRenderViewHost();
-  render_view_host->Send(
-      new ShellViewMsg_CaptureTextDump(render_view_host->GetRoutingID(),
-                                       false));
+    return false;
+
+  std::cout << "CONSOLE MESSAGE: ";
+  if (line_no)
+    std::cout << "line " << line_no << ": ";
+  std::cout << UTF16ToUTF8(message) << "\n";
+  return true;
+}
+
+void Shell::Observe(int type,
+                    const NotificationSource& source,
+                    const NotificationDetails& details) {
+  if (type == NOTIFICATION_WEB_CONTENTS_TITLE_UPDATED) {
+    std::pair<NavigationEntry*, bool>* title =
+        Details<std::pair<NavigationEntry*, bool> >(details).ptr();
+
+    if (title->first) {
+      string16 text = title->first->GetTitle();
+      PlatformSetTitle(text);
+    }
+  }
 }
 
 }  // namespace content

@@ -23,7 +23,7 @@
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_status.h"
 
-using content::URLFetcher;
+using net::URLFetcher;
 using net::URLRequestContextGetter;
 using net::URLRequestStatus;
 
@@ -51,12 +51,14 @@ static const char kDetailKey[] = "detail";
 static const char kDetailSeparators[] = "\n";
 
 static GoogleServiceAuthError CreateAuthError(URLRequestStatus status) {
-  CHECK(!status.is_success());
   if (status.status() == URLRequestStatus::CANCELED) {
     return GoogleServiceAuthError(GoogleServiceAuthError::REQUEST_CANCELED);
   } else {
-    DLOG(WARNING) << "Could not reach Google Accounts servers: errno "
-                  << status.error();
+    // TODO(munjal): Improve error handling. Currently we return connection
+    // error for even application level errors. We need to either expand the
+    // GoogleServiceAuthError enum or create a new one to report better
+    // errors.
+    DLOG(WARNING) << "Server returned error: errno " << status.error();
     return GoogleServiceAuthError::FromConnectionError(status.error());
   }
 }
@@ -179,13 +181,12 @@ std::string OAuth2MintTokenFlow::CreateApiCallBody() {
 }
 
 void OAuth2MintTokenFlow::ProcessApiCallSuccess(
-    const content::URLFetcher* source) {
+    const net::URLFetcher* source) {
   // TODO(munjal): Change error code paths in this method to report an
   // internal error.
   std::string response_body;
   source->GetResponseAsString(&response_body);
-  base::JSONReader reader;
-  scoped_ptr<base::Value> value(reader.Read(response_body, false));
+  scoped_ptr<base::Value> value(base::JSONReader::Read(response_body));
   DictionaryValue* dict = NULL;
   if (!value.get() || !value->GetAsDictionary(&dict)) {
     ReportFailure(GoogleServiceAuthError::FromConnectionError(101));
@@ -213,7 +214,7 @@ void OAuth2MintTokenFlow::ProcessApiCallSuccess(
 }
 
 void OAuth2MintTokenFlow::ProcessApiCallFailure(
-    const content::URLFetcher* source) {
+    const net::URLFetcher* source) {
   ReportFailure(CreateAuthError(source->GetStatus()));
 }
 void OAuth2MintTokenFlow::ProcessNewAccessToken(

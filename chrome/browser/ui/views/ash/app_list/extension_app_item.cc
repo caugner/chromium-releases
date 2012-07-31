@@ -4,14 +4,15 @@
 
 #include "chrome/browser/ui/views/ash/app_list/extension_app_item.h"
 
-#include "ash/app_list/app_list_item_view.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_uninstall_dialog.h"
+#include "chrome/browser/extensions/management_policy.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/views/ash/extension_utils.h"
 #include "chrome/browser/ui/views/ash/launcher/chrome_launcher_controller.h"
@@ -21,6 +22,8 @@
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/image/image.h"
+
+using extensions::Extension;
 
 namespace {
 
@@ -162,7 +165,7 @@ void ExtensionAppItem::ShowExtensionOptions() {
   if (!extension)
     return;
 
-  Browser* browser = BrowserList::GetLastActiveWithProfile(profile_);
+  Browser* browser = browser::FindLastActiveWithProfile(profile_);
   if (!browser) {
     browser = Browser::Create(profile_);
     browser->window()->Show();
@@ -221,7 +224,10 @@ bool ExtensionAppItem::IsCommandIdEnabled(int command_id) const {
         !extension->options_url().is_empty();
   } else if (command_id == UNINSTALL) {
     const Extension* extension = GetExtension();
-    return extension && Extension::UserMayDisable(extension->location());
+    const extensions::ManagementPolicy* policy = ExtensionSystem::Get(
+        profile_)->management_policy();
+    return extension &&
+           policy->UserMayModifySettings(extension, NULL);
   }
   return true;
 }
@@ -258,10 +264,14 @@ void ExtensionAppItem::Activate(int event_flags) {
   if (!extension)
     return;
 
-  extension_utils::OpenExtension(profile_, extension, event_flags);
+  ChromeLauncherController::instance()->OpenAppID(extension->id(), event_flags);
 }
 
 ui::MenuModel* ExtensionAppItem::GetContextMenuModel() {
+  // No context menu for Chrome app.
+  if (extension_id_ == extension_misc::kChromeAppId)
+    return NULL;
+
   if (!context_menu_model_.get()) {
     context_menu_model_.reset(new ui::SimpleMenuModel(this));
     context_menu_model_->AddItem(LAUNCH, UTF8ToUTF16(title()));

@@ -8,7 +8,7 @@
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/common/extensions/extension.h"
 #include "googleurl/src/gurl.h"
 
@@ -17,7 +17,7 @@ namespace extension_utils {
 // Opens an extension.  |event_flags| holds the flags of the event
 // which invokes this extension.
 void OpenExtension(Profile* profile,
-                   const Extension* extension,
+                   const extensions::Extension* extension,
                    int event_flags) {
   DCHECK(profile);
   DCHECK(extension);
@@ -31,13 +31,13 @@ void OpenExtension(Profile* profile,
 
   if (disposition == NEW_FOREGROUND_TAB || disposition == NEW_BACKGROUND_TAB) {
     // Opens in a tab.
-    Browser::OpenApplication(
-        profile, extension, extension_misc::LAUNCH_TAB, url, disposition);
+    application_launch::OpenApplication(
+        profile, extension, extension_misc::LAUNCH_TAB, url, disposition, NULL);
   } else if (disposition == NEW_WINDOW) {
     // Force a new window open.
-    Browser::OpenApplication(
+    application_launch::OpenApplication(
         profile, extension, extension_misc::LAUNCH_WINDOW, url,
-        disposition);
+        disposition, NULL);
   } else {
     // Look at preference to find the right launch container.  If no preference
     // is set, launch as a regular tab.
@@ -45,9 +45,9 @@ void OpenExtension(Profile* profile,
         profile->GetExtensionService()->extension_prefs()->GetLaunchContainer(
             extension, ExtensionPrefs::LAUNCH_DEFAULT);
 
-    Browser::OpenApplication(
+    application_launch::OpenApplication(
         profile, extension, launch_container, GURL(url),
-        NEW_FOREGROUND_TAB);
+        NEW_FOREGROUND_TAB, NULL);
   }
 }
 

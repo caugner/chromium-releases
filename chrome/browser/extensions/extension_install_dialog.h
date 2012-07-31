@@ -10,23 +10,22 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/string16.h"
-#include "chrome/browser/extensions/extension_install_ui.h"
+#include "chrome/browser/extensions/extension_install_prompt.h"
 
-class Extension;
-class Profile;
-class SkBitmap;
+class Browser;
 
 namespace base {
 class DictionaryValue;
 }
 
-void ShowExtensionInstallDialog(Profile* profile,
-                                ExtensionInstallUI::Delegate* delegate,
-                                const ExtensionInstallUI::Prompt& prompt);
+void ShowExtensionInstallDialog(Browser* browser,
+                                ExtensionInstallPrompt::Delegate* delegate,
+                                const ExtensionInstallPrompt::Prompt& prompt);
 
 // The implementations of this function are platform-specific.
-void ShowExtensionInstallDialogImpl(Profile* profile,
-                                    ExtensionInstallUI::Delegate* delegate,
-                                    const ExtensionInstallUI::Prompt& prompt);
+void ShowExtensionInstallDialogImpl(
+    Browser* browser,
+    ExtensionInstallPrompt::Delegate* delegate,
+    const ExtensionInstallPrompt::Prompt& prompt);
 
 #endif  // CHROME_BROWSER_EXTENSIONS_EXTENSION_INSTALL_DIALOG_H_

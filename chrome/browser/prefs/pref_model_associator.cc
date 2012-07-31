@@ -11,10 +11,10 @@
 #include "base/logging.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/sync/api/sync_change.h"
-#include "chrome/browser/sync/api/sync_error_factory.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
+#include "sync/api/sync_change.h"
+#include "sync/api/sync_error_factory.h"
 #include "sync/protocol/preference_specifics.pb.h"
 #include "sync/protocol/sync.pb.h"
 
@@ -49,8 +49,7 @@ void PrefModelAssociator::InitPrefAndAssociate(
         sync_pref.GetSpecifics().preference();
     DCHECK_EQ(pref->name(), preference.name());
 
-    scoped_ptr<Value> value(
-        reader.JsonToValue(preference.value(), false, false));
+    scoped_ptr<Value> value(reader.ReadToValue(preference.value()));
     if (!value.get()) {
       LOG(ERROR) << "Failed to deserialize preference value: "
                  << reader.GetErrorMessage();
@@ -355,7 +354,7 @@ Value* PrefModelAssociator::ReadPreferenceSpecifics(
     const sync_pb::PreferenceSpecifics& preference,
     std::string* name) {
   base::JSONReader reader;
-  scoped_ptr<Value> value(reader.JsonToValue(preference.value(), false, false));
+  scoped_ptr<Value> value(reader.ReadToValue(preference.value()));
   if (!value.get()) {
     std::string err = "Failed to deserialize preference value: " +
         reader.GetErrorMessage();

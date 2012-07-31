@@ -33,6 +33,10 @@ class RenderViewHost;
 class WebContents;
 }
 
+namespace extensions {
+class Extension;
+}
+
 namespace gfx {
 class Point;
 }
@@ -52,7 +56,7 @@ struct WebPluginAction;
 // The following snippet describes the simple usage that updates a context-menu
 // item with this interface.
 //
-//   class MyTask : public content::URLFetcherDelegate {
+//   class MyTask : public net::URLFetcherDelegate {
 //    public:
 //     MyTask(RenderViewContextMenuProxy* proxy, int id)
 //         : proxy_(proxy),
@@ -60,7 +64,7 @@ struct WebPluginAction;
 //     }
 //     virtual ~MyTask() {
 //     }
-//     virtual void OnURLFetchComplete(const content::URLFetcher* source,
+//     virtual void OnURLFetchComplete(const net::URLFetcher* source,
 //                                     const GURL& url,
 //                                     const net::URLRequestStatus& status,
 //                                     int response,
@@ -73,7 +77,8 @@ struct WebPluginAction;
 //     void Start(const GURL* url, net::URLRequestContextGetter* context) {
 //       fetcher_.reset(new URLFetcher(url, URLFetcher::GET, this));
 //       fetcher_->SetRequestContext(context);
-//       fetcher_->AssociateWithRenderView(
+//       content::AssociateURLFetcherWithRenderView(
+//           fetcher_.get(),
 //           proxy_->GetRenderViewHost()->GetSiteInstance()->GetSite(),
 //           proxy_->GetRenderViewHost()->GetProcess()->GetID(),
 //           proxy_->GetRenderViewHost()->GetRoutingID());
@@ -204,7 +209,7 @@ class RenderViewContextMenu : public ui::SimpleMenuModel::Delegate,
       bool can_cross_incognito);
 
   // Gets the extension (if any) associated with the WebContents that we're in.
-  const Extension* GetExtension() const;
+  const extensions::Extension* GetExtension() const;
   void AppendPlatformAppItems();
   void AppendPopupExtensionItems();
   bool AppendCustomItems();

@@ -134,6 +134,37 @@ void ValidateUTF8(const std::string& str, std::string* output) {
   }
 }
 
+std::string ConnectionStateString(ConnectionState state) {
+  switch (state) {
+    case STATE_UNKNOWN:
+      return l10n_util::GetStringUTF8(IDS_CHROMEOS_NETWORK_STATE_UNKNOWN);
+    case STATE_IDLE:
+      return l10n_util::GetStringUTF8(IDS_CHROMEOS_NETWORK_STATE_IDLE);
+    case STATE_CARRIER:
+      return l10n_util::GetStringUTF8(IDS_CHROMEOS_NETWORK_STATE_CARRIER);
+    case STATE_ASSOCIATION:
+      return l10n_util::GetStringUTF8(IDS_CHROMEOS_NETWORK_STATE_ASSOCIATION);
+    case STATE_CONFIGURATION:
+      return l10n_util::GetStringUTF8(IDS_CHROMEOS_NETWORK_STATE_CONFIGURATION);
+    case STATE_READY:
+      return l10n_util::GetStringUTF8(IDS_CHROMEOS_NETWORK_STATE_READY);
+    case STATE_DISCONNECT:
+      return l10n_util::GetStringUTF8(IDS_CHROMEOS_NETWORK_STATE_DISCONNECT);
+    case STATE_FAILURE:
+      return l10n_util::GetStringUTF8(IDS_CHROMEOS_NETWORK_STATE_FAILURE);
+    case STATE_ACTIVATION_FAILURE:
+      return l10n_util::GetStringUTF8(
+          IDS_CHROMEOS_NETWORK_STATE_ACTIVATION_FAILURE);
+    case STATE_PORTAL:
+      return l10n_util::GetStringUTF8(IDS_CHROMEOS_NETWORK_STATE_PORTAL);
+    case STATE_ONLINE:
+      return l10n_util::GetStringUTF8(IDS_CHROMEOS_NETWORK_STATE_ONLINE);
+    case STATE_CONNECT_REQUESTED:
+      return "Connect Requested";
+  }
+  return l10n_util::GetStringUTF8(IDS_CHROMEOS_NETWORK_STATE_UNRECOGNIZED);
+}
+
 }  // namespace
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -225,12 +256,12 @@ void Network::UpdatePropertyMap(PropertyIndex index, const base::Value* value) {
   Value*& entry = property_map_[index];
   delete entry;
   entry = value->DeepCopy();
-  if (VLOG_IS_ON(2)) {
+  if (VLOG_IS_ON(3)) {
     std::string value_json;
     base::JSONWriter::WriteWithOptions(value,
                                        base::JSONWriter::OPTIONS_PRETTY_PRINT,
                                        &value_json);
-    VLOG(2) << "Updated property map on network: "
+    VLOG(3) << "Updated property map on network: "
             << unique_id() << "[" << index << "] = " << value_json;
   }
 }
@@ -253,11 +284,20 @@ Network* Network::CreateForTesting(ConnectionType type) {
 void Network::SetState(ConnectionState new_state) {
   if (new_state == state_)
     return;
+  if (state_ == STATE_CONNECT_REQUESTED && new_state == STATE_IDLE) {
+    // CONNECT_REQUESTED is set internally. Shill/flimflam do not update the
+    // state immediately, so ignore any Idle state updates sent while a
+    // connection attempt is in progress.
+    VLOG(2) << "Ignoring idle state change after connection request.";
+    return;
+  }
   ConnectionState old_state = state_;
+  VLOG(2) << "Entering new state: " << ConnectionStateString(new_state);
   state_ = new_state;
   if (!IsConnectingState(new_state))
     set_connection_started(false);
   if (new_state == STATE_FAILURE) {
+    VLOG(2) << "Detected Failure state.";
     if (old_state != STATE_UNKNOWN &&
         old_state != STATE_IDLE) {
       // New failure, the user needs to be notified.
@@ -266,15 +306,18 @@ void Network::SetState(ConnectionState new_state) {
       notify_failure_ = true;
       // Normally error_ should be set, but if it is not we need to set it to
       // something here so that the retry logic will be triggered.
-      if (error_ == ERROR_NO_ERROR)
+      if (error_ == ERROR_NO_ERROR) {
+        VLOG(2) << "Detected NO_ERROR error state.  Setting to UNKNOWN.";
         error_ = ERROR_UNKNOWN;
+      }
     }
   } else {
     // State changed, so refresh IP address.
     // Note: blocking DBus call. TODO(stevenjb): refactor this.
     InitIPAddress();
   }
-  VLOG(1) << name() << ".State = " << GetStateString();
+  VLOG(1) << name() << ".State [" << service_path() << "]: " << GetStateString()
+          << " (was: " << ConnectionStateString(old_state) << ")";
 }
 
 void Network::SetName(const std::string& name) {
@@ -389,32 +432,7 @@ void Network::SetProfilePath(const std::string& profile_path) {
 }
 
 std::string Network::GetStateString() const {
-  switch (state_) {
-    case STATE_UNKNOWN:
-      return l10n_util::GetStringUTF8(IDS_CHROMEOS_NETWORK_STATE_UNKNOWN);
-    case STATE_IDLE:
-      return l10n_util::GetStringUTF8(IDS_CHROMEOS_NETWORK_STATE_IDLE);
-    case STATE_CARRIER:
-      return l10n_util::GetStringUTF8(IDS_CHROMEOS_NETWORK_STATE_CARRIER);
-    case STATE_ASSOCIATION:
-      return l10n_util::GetStringUTF8(IDS_CHROMEOS_NETWORK_STATE_ASSOCIATION);
-    case STATE_CONFIGURATION:
-      return l10n_util::GetStringUTF8(IDS_CHROMEOS_NETWORK_STATE_CONFIGURATION);
-    case STATE_READY:
-      return l10n_util::GetStringUTF8(IDS_CHROMEOS_NETWORK_STATE_READY);
-    case STATE_DISCONNECT:
-      return l10n_util::GetStringUTF8(IDS_CHROMEOS_NETWORK_STATE_DISCONNECT);
-    case STATE_FAILURE:
-      return l10n_util::GetStringUTF8(IDS_CHROMEOS_NETWORK_STATE_FAILURE);
-    case STATE_ACTIVATION_FAILURE:
-      return l10n_util::GetStringUTF8(
-          IDS_CHROMEOS_NETWORK_STATE_ACTIVATION_FAILURE);
-    case STATE_PORTAL:
-      return l10n_util::GetStringUTF8(IDS_CHROMEOS_NETWORK_STATE_PORTAL);
-    case STATE_ONLINE:
-      return l10n_util::GetStringUTF8(IDS_CHROMEOS_NETWORK_STATE_ONLINE);
-  }
-  return l10n_util::GetStringUTF8(IDS_CHROMEOS_NETWORK_STATE_UNRECOGNIZED);
+  return ConnectionStateString(state_);
 }
 
 std::string Network::GetErrorString() const {
@@ -549,7 +567,7 @@ void VirtualNetwork::AttemptConnection(const base::Closure& connect) {
 }
 
 void VirtualNetwork::CopyCredentialsFromRemembered(Network* remembered) {
-  DCHECK_EQ(remembered->type(), TYPE_VPN);
+  CHECK_EQ(remembered->type(), TYPE_VPN);
   VirtualNetwork* remembered_vpn = static_cast<VirtualNetwork*>(remembered);
   VLOG(1) << "Copy VPN credentials: " << name()
           << " username: " << remembered_vpn->username();
@@ -1261,6 +1279,37 @@ void WifiNetwork::MatchCertificatePattern(bool allow_enroll,
     }
   }
   connect.Run();
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// WimaxNetwork
+
+WimaxNetwork::WimaxNetwork(const std::string& service_path)
+    : WirelessNetwork(service_path, TYPE_WIMAX),
+      passphrase_required_(false),
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_pointer_factory_(this)) {
+}
+
+WimaxNetwork::~WimaxNetwork() {
+}
+
+void WimaxNetwork::EraseCredentials() {
+  WipeString(&eap_passphrase_);
+  WipeString(&eap_identity_);
+}
+
+void WimaxNetwork::SetEAPPassphrase(const std::string& passphrase) {
+  SetOrClearStringProperty(
+      flimflam::kEapPasswordProperty, passphrase, &eap_passphrase_);
+}
+
+void WimaxNetwork::SetEAPIdentity(const std::string& identity) {
+  SetOrClearStringProperty(
+      flimflam::kEapIdentityProperty, identity, &eap_identity_);
+}
+
+void WimaxNetwork::CalculateUniqueId() {
+  set_unique_id(name() + "|" + eap_identity());
 }
 
 // static

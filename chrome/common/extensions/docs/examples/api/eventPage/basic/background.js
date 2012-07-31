@@ -18,7 +18,7 @@ sendMessage();
 chrome.browserAction.setBadgeText({text: "ON"});
 console.log("Loaded.");
 
-chrome.experimental.runtime.onInstalled.addListener(function() {
+chrome.runtime.onInstalled.addListener(function() {
   console.log("Installed.");
 
   // localStorage is persisted, so it's a good place to keep state that you
@@ -26,8 +26,8 @@ chrome.experimental.runtime.onInstalled.addListener(function() {
   localStorage.counter = 1;
 
   // Register a webRequest rule to redirect bing to google.
-  var wr = chrome.experimental.webRequest;
-  chrome.experimental.webRequest.onRequest.addRules([{
+  var wr = chrome.declarativeWebRequest;
+  chrome.declarativeWebRequest.onRequest.addRules([{
     id: "0",
     conditions: [new wr.RequestMatcher({url: {hostSuffix: "bing.com"}})],
     actions: [new wr.RedirectRequest({redirectUrl: "http://google.com"})]
@@ -58,7 +58,7 @@ chrome.experimental.keybinding.onCommand.addListener(function(command) {
 
 chrome.extension.onMessage.addListener(function(msg, _, sendResponse) {
   if (msg.setAlarm) {
-    chrome.experimental.alarms.create({delayInMinutes: 0.1});
+    chrome.alarms.create({delayInMinutes: 0.1});
   } else if (msg.delayedResponse) {
     // Note: setTimeout itself does NOT keep the page awake. We return true
     // from the onMessage event handler, which keeps the message channel open -
@@ -75,11 +75,11 @@ chrome.extension.onMessage.addListener(function(msg, _, sendResponse) {
   // of whether we called sendResponse.
 });
 
-chrome.experimental.alarms.onAlarm.addListener(function() {
+chrome.alarms.onAlarm.addListener(function() {
   alert("Time's up!");
 });
 
-chrome.experimental.runtime.onBackgroundPageUnloadingSoon.addListener(
+chrome.runtime.onBackgroundPageUnloadingSoon.addListener(
     function() {
   chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
     // After the unload event listener runs, the page will unload, so any

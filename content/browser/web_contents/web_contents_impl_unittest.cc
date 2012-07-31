@@ -4,7 +4,6 @@
 
 #include "base/logging.h"
 #include "base/utf_string_conversions.h"
-#include "content/browser/mock_content_browser_client.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/renderer_host/test_render_view_host.h"
 #include "content/browser/site_instance_impl.h"
@@ -23,8 +22,9 @@
 #include "content/public/common/bindings_policy.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/common/url_constants.h"
-#include "content/test/mock_render_process_host.h"
-#include "content/test/test_browser_thread.h"
+#include "content/public/test/mock_render_process_host.h"
+#include "content/public/test/test_browser_thread.h"
+#include "content/test/test_content_browser_client.h"
 #include "content/test/test_content_client.h"
 #include "googleurl/src/url_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -39,6 +39,7 @@ using content::NavigationEntryImpl;
 using content::SiteInstance;
 using content::RenderViewHost;
 using content::RenderViewHostImplTestHarness;
+using content::TestBrowserThread;
 using content::TestRenderViewHost;
 using content::TestWebContents;
 using content::WebContents;
@@ -93,7 +94,7 @@ class WebContentsImplTestContentClient : public TestContentClient {
 };
 
 class WebContentsImplTestBrowserClient
-    : public content::MockContentBrowserClient {
+    : public content::TestContentBrowserClient {
  public:
   WebContentsImplTestBrowserClient() {
   }
@@ -221,7 +222,7 @@ class TestInterstitialPage : public InterstitialPageImpl {
   virtual content::RenderViewHost* CreateRenderViewHost() OVERRIDE {
     return new TestRenderViewHost(
         SiteInstance::Create(web_contents()->GetBrowserContext()),
-        this, MSG_ROUTING_NONE, false);
+        this, this, MSG_ROUTING_NONE, false);
   }
 
   virtual content::WebContentsView* CreateWebContentsView() OVERRIDE {
@@ -272,9 +273,12 @@ class TestInterstitialPageStateGuard : public TestInterstitialPage::Delegate {
 class WebContentsImplTest : public RenderViewHostImplTestHarness {
  public:
   WebContentsImplTest()
-      : ui_thread_(BrowserThread::UI, &message_loop_),
-        old_client_(NULL),
-        old_browser_client_(NULL) {
+      : old_client_(NULL),
+        old_browser_client_(NULL),
+        ui_thread_(BrowserThread::UI, &message_loop_),
+        file_user_blocking_thread_(
+            BrowserThread::FILE_USER_BLOCKING, &message_loop_),
+        io_thread_(BrowserThread::IO, &message_loop_) {
   }
 
   virtual void SetUp() {
@@ -285,12 +289,12 @@ class WebContentsImplTest : public RenderViewHostImplTestHarness {
     old_client_ = content::GetContentClient();
     old_browser_client_ = content::GetContentClient()->browser();
     content::SetContentClient(&client_);
-    content::GetContentClient()->set_browser(&browser_client_);
+    content::GetContentClient()->set_browser_for_testing(&browser_client_);
     RenderViewHostImplTestHarness::SetUp();
   }
 
   virtual void TearDown() {
-    content::GetContentClient()->set_browser(old_browser_client_);
+    content::GetContentClient()->set_browser_for_testing(old_browser_client_);
     content::SetContentClient(old_client_);
     RenderViewHostImplTestHarness::TearDown();
   }
@@ -298,9 +302,11 @@ class WebContentsImplTest : public RenderViewHostImplTestHarness {
  private:
   WebContentsImplTestContentClient client_;
   WebContentsImplTestBrowserClient browser_client_;
-  content::TestBrowserThread ui_thread_;
   content::ContentClient* old_client_;
   content::ContentBrowserClient* old_browser_client_;
+  TestBrowserThread ui_thread_;
+  TestBrowserThread file_user_blocking_thread_;
+  TestBrowserThread io_thread_;
 };
 
 }  // namespace
@@ -1835,7 +1841,7 @@ TEST_F(WebContentsImplTest, NoJSMessageOnInterstitials) {
   bool did_suppress_message = false;
   contents()->RunJavaScriptMessage(contents()->GetRenderViewHost(),
       ASCIIToUTF16("This is an informative message"), ASCIIToUTF16("OK"),
-      kGURL, ui::JAVASCRIPT_MESSAGE_TYPE_ALERT, dummy_message,
+      kGURL, content::JAVASCRIPT_MESSAGE_TYPE_ALERT, dummy_message,
       &did_suppress_message);
   EXPECT_TRUE(did_suppress_message);
 }

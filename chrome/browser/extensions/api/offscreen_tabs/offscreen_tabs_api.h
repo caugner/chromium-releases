@@ -9,8 +9,8 @@
 #include <string>
 
 #include "base/values.h"
+#include "chrome/browser/extensions/api/tabs/tabs.h"
 #include "chrome/browser/extensions/extension_function.h"
-#include "chrome/browser/extensions/extension_tabs_module.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_contents_observer.h"
@@ -28,7 +28,7 @@
 
 class BackingStore;
 class SkBitmap;
-class TabContentsWrapper;
+class TabContents;
 namespace content {
 class WebContents;
 }  // namespace content
@@ -153,7 +153,7 @@ class ToDataUrlOffscreenTabFunction : public CaptureVisibleTabFunction {
 
   // CaptureVisibleTabFunction:
   virtual bool GetTabToCapture(content::WebContents** web_contents,
-                               TabContentsWrapper** wrapper) OVERRIDE;
+                               TabContents** tab_contents) OVERRIDE;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ToDataUrlOffscreenTabFunction);

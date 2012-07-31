@@ -19,9 +19,9 @@
 #include "base/values.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/plugin_prefs.h"
-#include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
@@ -42,6 +42,7 @@
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "webkit/plugins/npapi/plugin_group.h"
 
@@ -69,6 +70,7 @@ namespace {
 ChromeWebUIDataSource* CreatePluginsUIHTMLSource() {
   ChromeWebUIDataSource* source =
       new ChromeWebUIDataSource(chrome::kChromeUIPluginsHost);
+  source->set_use_json_js_format_v2();
 
   source->AddLocalizedString("pluginsTitle", IDS_PLUGINS_TITLE);
   source->AddLocalizedString("pluginsDetailsModeLink",
@@ -425,16 +427,17 @@ void PluginsDOMHandler::PluginsLoaded(PluginFinder* plugin_finder,
     group_data->SetString("id", group.identifier());
     group_data->SetString("description", active_plugin->desc);
     group_data->SetString("version", active_plugin->version);
-    group_data->SetBoolean("critical", group.IsVulnerable(*active_plugin));
 
-    std::string update_url;
 #if defined(ENABLE_PLUGIN_INSTALLATION)
     PluginInstaller* installer =
         plugin_finder->FindPluginWithIdentifier(group.identifier());
-    if (installer)
-      update_url = installer->plugin_url().spec();
+    if (installer) {
+      bool out_of_date = installer->GetSecurityStatus(*active_plugin) ==
+                         PluginInstaller::SECURITY_STATUS_OUT_OF_DATE;
+      group_data->SetBoolean("critical", out_of_date);
+      group_data->SetString("update_url", installer->plugin_url().spec());
+    }
 #endif
-    group_data->SetString("update_url", update_url);
 
     std::string enabled_mode;
     if (all_plugins_enabled_by_policy) {
@@ -482,7 +485,7 @@ PluginsUI::PluginsUI(content::WebUI* web_ui) : WebUIController(web_ui) {
 // static
 base::RefCountedMemory* PluginsUI::GetFaviconResourceBytes() {
   return ResourceBundle::GetSharedInstance().
-      LoadDataResourceBytes(IDR_PLUGIN);
+      LoadDataResourceBytes(IDR_PLUGIN, ui::SCALE_FACTOR_100P);
 }
 
 // static

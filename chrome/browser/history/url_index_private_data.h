@@ -14,6 +14,7 @@
 #include "base/memory/ref_counted.h"
 #include "chrome/browser/history/in_memory_url_index_types.h"
 #include "chrome/browser/history/in_memory_url_index_cache.pb.h"
+#include "chrome/browser/history/scored_history_match.h"
 #include "content/public/browser/notification_details.h"
 
 class HistoryQuickProviderTest;
@@ -88,13 +89,13 @@ class URLIndexPrivateData
   typedef std::map<string16, SearchTermCacheItem> SearchTermCacheMap;
 
   // A helper class which performs the final filter on each candidate
-  // history URL match, inserting accepted matches into |scored_matches_|
-  // and trimming the maximum number of matches to 10.
+  // history URL match, inserting accepted matches into |scored_matches_|.
   class AddHistoryMatch : public std::unary_function<HistoryID, void> {
    public:
     AddHistoryMatch(const URLIndexPrivateData& private_data,
                     const string16& lower_string,
-                    const String16Vector& lower_terms);
+                    const String16Vector& lower_terms,
+                    const base::Time now);
     ~AddHistoryMatch();
 
     void operator()(const HistoryID history_id);
@@ -106,6 +107,7 @@ class URLIndexPrivateData
     ScoredHistoryMatches scored_matches_;
     const string16& lower_string_;
     const String16Vector& lower_terms_;
+    const base::Time now_;
   };
 
   // A helper predicate class used to filter excess history items when the
@@ -141,12 +143,11 @@ class URLIndexPrivateData
 
   // Creates a new URLIndexPrivateData object, populates it from the contents
   // of the cache file stored in |file_path|, and assigns it to |private_data|.
-  // |languages| will be used to break URLs and page titles into words and is
-  // deliberately passed by value.
+  // |languages| will be used to break URLs and page titles into words.
   static void RestoreFromFileTask(
       const FilePath& file_path,
       scoped_refptr<URLIndexPrivateData> private_data,
-      std::string languages);
+      const std::string& languages);
 
   // Constructs a new object by restoring its contents from the file at |path|.
   // Returns the new URLIndexPrivateData which on success will contain the
@@ -215,7 +216,7 @@ class URLIndexPrivateData
                  const std::string& languages,
                  const std::set<std::string>& scheme_whitelist);
 
-  // Deletes indexing data for the history item with the URL given in |url|.
+  // Deletes index data for the history item with the given |url|.
   // The item may not have actually been indexed, which is the case if it did
   // not previously meet minimum 'quick' criteria. Returns true if the index
   // was actually updated.
@@ -257,28 +258,6 @@ class URLIndexPrivateData
   // Helper function to HistoryIDSetFromWords which composes a set of history
   // ids for the given term given in |term|.
   HistoryIDSet HistoryIDsForTerm(const string16& term);
-
-  // Calculates a raw score for this history item by first determining
-  // if all of the terms in |terms_vector| occur in |row| and, if so,
-  // calculating a raw score based on 1) starting position of each term
-  // in the user input, 2) completeness of each term's match, 3) ordering
-  // of the occurrence of each term (i.e. they appear in order), 4) last
-  // visit time, and 5) number of visits.
-  // This raw score allows the results to be ordered and can be used
-  // to influence the final score calculated by the client of this
-  // index. Returns a ScoredHistoryMatch structure with the raw score and
-  // substring matching metrics.
-  static ScoredHistoryMatch ScoredMatchForURL(
-      const URLRow& row,
-      const string16& lower_string,
-      const String16Vector& terms_vector,
-      const RowWordStarts& word_starts);
-
-  // Calculates a component score based on position, ordering and total
-  // substring match size using metrics recorded in |matches|. |max_length|
-  // is the length of the string against which the terms are being searched.
-  static int ScoreComponentForMatches(const TermMatches& matches,
-                                      size_t max_length);
 
   // Encode a data structure into the protobuf |cache|.
   void SavePrivateData(imui::InMemoryURLIndexCacheItem* cache) const;

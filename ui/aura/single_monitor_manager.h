@@ -7,11 +7,10 @@
 #pragma once
 
 #include "base/compiler_specific.h"
-#include "base/memory/scoped_ptr.h"
 #include "ui/aura/aura_export.h"
 #include "ui/aura/monitor_manager.h"
 #include "ui/aura/window_observer.h"
-#include "ui/gfx/monitor.h"
+#include "ui/gfx/display.h"
 
 namespace gfx {
 class Rect;
@@ -28,21 +27,22 @@ class AURA_EXPORT SingleMonitorManager : public MonitorManager,
 
   // MonitorManager overrides:
   virtual void OnNativeMonitorsChanged(
-      const std::vector<gfx::Monitor>& monitors) OVERRIDE;
+      const std::vector<gfx::Display>& display) OVERRIDE;
   virtual RootWindow* CreateRootWindowForMonitor(
-      const gfx::Monitor& monitor) OVERRIDE;
-  virtual const gfx::Monitor& GetMonitorAt(size_t index) OVERRIDE;
+      const gfx::Display& display) OVERRIDE;
+  virtual const gfx::Display& GetDisplayAt(size_t index) OVERRIDE;
 
-  virtual size_t GetNumMonitors() const OVERRIDE;
+  virtual size_t GetNumDisplays() const OVERRIDE;
 
-  virtual const gfx::Monitor& GetMonitorNearestWindow(
+  virtual const gfx::Display& GetDisplayNearestWindow(
       const Window* window) const OVERRIDE;
-  virtual const gfx::Monitor& GetMonitorNearestPoint(
+  virtual const gfx::Display& GetDisplayNearestPoint(
       const gfx::Point& point) const OVERRIDE;
 
   // WindowObserver overrides:
   virtual void OnWindowBoundsChanged(Window* window,
-                                     const gfx::Rect& bounds) OVERRIDE;
+                                     const gfx::Rect& old_bounds,
+                                     const gfx::Rect& new_bounds) OVERRIDE;
   virtual void OnWindowDestroying(Window* window) OVERRIDE;
 
  private:
@@ -50,11 +50,11 @@ class AURA_EXPORT SingleMonitorManager : public MonitorManager,
   void Update(const gfx::Size size);
 
   RootWindow* root_window_;
-  gfx::Monitor monitor_;
+  gfx::Display display_;
 
   DISALLOW_COPY_AND_ASSIGN(SingleMonitorManager);
 };
 
 }  // namespace aura
 
-#endif  //  UI_AURA_SINGLE_MONITOR_MANAGER_H_
+#endif  // UI_AURA_SINGLE_MONITOR_MANAGER_H_

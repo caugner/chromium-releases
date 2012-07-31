@@ -93,13 +93,17 @@ namespace extension_manifest_keys {
   extern const char kPageActionPopupPath[];
   extern const char kPageActions[];
   extern const char kPermissions[];
-  extern const char kPlatformApp[];
+  extern const char kPlatformAppBackground[];
+  extern const char kPlatformAppBackgroundPage[];
+  extern const char kPlatformAppBackgroundScripts[];
   extern const char kPlugins[];
   extern const char kPluginsPath[];
   extern const char kPluginsPublic[];
   extern const char kPublicKey[];
   extern const char kRequirements[];
   extern const char kRunAt[];
+  extern const char kSandboxedPages[];
+  extern const char kSandboxedPagesCSP[];
   extern const char kShiftKey[];
   extern const char kShortcutKey[];
   extern const char kSignature[];
@@ -232,6 +236,7 @@ namespace extension_manifest_errors {
   extern const char kInvalidKeyBindingDescription[];
   extern const char kInvalidKeyBindingDictionary[];
   extern const char kInvalidKeyBindingMissingPlatform[];
+  extern const char kInvalidKeyBindingTooMany[];
   extern const char kInvalidKeyBindingUnknownPlatform[];
   extern const char kInvalidLaunchContainer[];
   extern const char kInvalidLaunchValue[];
@@ -274,6 +279,9 @@ namespace extension_manifest_errors {
   extern const char kInvalidRequirement[];
   extern const char kInvalidRequirements[];
   extern const char kInvalidRunAt[];
+  extern const char kInvalidSandboxedPagesList[];
+  extern const char kInvalidSandboxedPage[];
+  extern const char kInvalidSandboxedPagesCSP[];
   extern const char kInvalidSignature[];
   extern const char kInvalidTheme[];
   extern const char kInvalidThemeColors[];
@@ -312,7 +320,7 @@ namespace extension_manifest_errors {
   extern const char kPlatformAppNeedsManifestVersion2[];
   extern const char kOneUISurfaceOnly[];
   extern const char kReservedMessageFound[];
-  extern const char kWebContentMustBeEnabled[];
+  extern const char kWebRequestConflictsWithLazyBackground[];
 #if defined(OS_CHROMEOS)
   extern const char kIllegalPlugins[];
 #endif

@@ -8,11 +8,11 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/event_disposition.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/ui/views/accessibility_event_router_views.h"
-#include "chrome/browser/ui/views/event_utils.h"
+#include "chrome/browser/ui/views/accessibility/accessibility_event_router_views.h"
 #include "chrome/common/pref_names.h"
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/gfx/rect.h"
@@ -75,7 +75,7 @@ void ChromeViewsDelegate::SaveWindowPlacement(const views::Widget* window,
   window_preferences->SetBoolean("maximized",
                                  show_state == ui::SHOW_STATE_MAXIMIZED);
   gfx::Rect work_area(
-      gfx::Screen::GetMonitorMatching(bounds).work_area());
+      gfx::Screen::GetDisplayMatching(bounds).work_area());
   window_preferences->SetInteger("work_area_left", work_area.x());
   window_preferences->SetInteger("work_area_top", work_area.y());
   window_preferences->SetInteger("work_area_right", work_area.right());
@@ -157,7 +157,7 @@ void ChromeViewsDelegate::ReleaseRef() {
 }
 
 int ChromeViewsDelegate::GetDispositionForEvent(int event_flags) {
-  return event_utils::DispositionFromEventFlags(event_flags);
+  return browser::DispositionFromEventFlags(event_flags);
 }
 
 #if defined(USE_AURA)

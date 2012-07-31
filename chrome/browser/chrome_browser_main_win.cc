@@ -26,9 +26,8 @@
 #include "chrome/browser/metrics/metrics_service.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_shortcut_manager_win.h"
-#include "chrome/browser/simple_message_box.h"
-#include "chrome/browser/ui/browser_list.h"
-#include "chrome/browser/ui/views/uninstall_view.h"
+#include "chrome/browser/ui/simple_message_box.h"
+#include "chrome/browser/ui/uninstall_browser_prompt.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_result_codes.h"
 #include "chrome/common/chrome_switches.h"
@@ -36,18 +35,19 @@
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/helper.h"
 #include "chrome/installer/util/install_util.h"
+#include "chrome/installer/util/l10n_string_util.h"
 #include "chrome/installer/util/shell_util.h"
 #include "content/public/common/main_function_params.h"
 #include "grit/app_locale_settings.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
+#include "installer_util_strings/installer_util_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_win.h"
 #include "ui/base/ui_base_switches.h"
 #include "ui/base/win/message_box_win.h"
 #include "ui/gfx/platform_font_win.h"
-#include "ui/views/focus/accelerator_handler.h"
-#include "ui/views/widget/widget.h"
+
 
 namespace {
 
@@ -78,6 +78,11 @@ int GetMinimumFontSize() {
   return min_font_size;
 }
 
+class TranslationDelegate : public installer::TranslationDelegate {
+ public:
+  virtual string16 GetLocalizedString(int installer_string_id) OVERRIDE;
+};
+
 }  // namespace
 
 void RecordBreakpadStatusUMA(MetricsService* metrics) {
@@ -89,7 +94,8 @@ void WarnAboutMinimumSystemRequirements() {
     const string16 title = l10n_util::GetStringUTF16(IDS_PRODUCT_NAME);
     const string16 message =
         l10n_util::GetStringUTF16(IDS_UNSUPPORTED_OS_PRE_WIN_XP);
-    browser::ShowWarningMessageBox(NULL, title, message);
+    browser::ShowMessageBox(NULL, title, message,
+                            browser::MESSAGE_BOX_TYPE_WARNING);
   }
 }
 
@@ -104,18 +110,11 @@ void RecordBrowserStartupTime() {
       base::Time::Now() - base::Time::FromFileTime(creation_time));
 }
 
-int AskForUninstallConfirmation() {
-  int ret = content::RESULT_CODE_NORMAL_EXIT;
-  views::Widget::CreateWindow(new UninstallView(&ret))->Show();
-  views::AcceleratorHandler accelerator_handler;
-  MessageLoopForUI::current()->RunWithDispatcher(&accelerator_handler);
-  return ret;
-}
-
 void ShowCloseBrowserFirstMessageBox() {
   const string16 title = l10n_util::GetStringUTF16(IDS_PRODUCT_NAME);
   const string16 message = l10n_util::GetStringUTF16(IDS_UNINSTALL_CLOSE_APP);
-  browser::ShowWarningMessageBox(NULL, title, message);
+  browser::ShowMessageBox(NULL, title, message,
+                          browser::MESSAGE_BOX_TYPE_WARNING);
 }
 
 int DoUninstallTasks(bool chrome_still_running) {
@@ -127,13 +126,13 @@ int DoUninstallTasks(bool chrome_still_running) {
     ShowCloseBrowserFirstMessageBox();
     return chrome::RESULT_CODE_UNINSTALL_CHROME_ALIVE;
   }
-  int ret = AskForUninstallConfirmation();
+  int result = browser::ShowUninstallBrowserPrompt();
   if (browser_util::IsBrowserAlreadyRunning()) {
     ShowCloseBrowserFirstMessageBox();
     return chrome::RESULT_CODE_UNINSTALL_CHROME_ALIVE;
   }
 
-  if (ret != chrome::RESULT_CODE_UNINSTALL_USER_CANCEL) {
+  if (result != chrome::RESULT_CODE_UNINSTALL_USER_CANCEL) {
     // The following actions are just best effort.
     VLOG(1) << "Executing uninstall actions";
     if (!first_run::RemoveSentinel())
@@ -155,7 +154,7 @@ int DoUninstallTasks(bool chrome_still_running) {
       VLOG(1) << "Failed to delete quick launch shortcut.";
     }
   }
-  return ret;
+  return result;
 }
 
 // ChromeBrowserMainPartsWin ---------------------------------------------------
@@ -163,10 +162,6 @@ int DoUninstallTasks(bool chrome_still_running) {
 ChromeBrowserMainPartsWin::ChromeBrowserMainPartsWin(
     const content::MainFunctionParams& parameters)
     : ChromeBrowserMainParts(parameters) {
-  if (base::win::GetMetroModule()) {
-    CommandLine::ForCurrentProcess()->AppendSwitch(
-        switches::kTouchOptimizedUI);
-  }
 }
 
 ChromeBrowserMainPartsWin::~ChromeBrowserMainPartsWin() {
@@ -179,6 +174,10 @@ void ChromeBrowserMainPartsWin::ToolkitInitialized() {
 }
 
 void ChromeBrowserMainPartsWin::PreMainMessageLoopStart() {
+  // installer_util references strings that are normally compiled into
+  // setup.exe.  In Chrome, these strings are in the locale files.
+  SetupInstallerUtilStrings();
+
   ChromeBrowserMainParts::PreMainMessageLoopStart();
   if (!parameters().ui_task) {
     // Make sure that we know how to handle exceptions from the message loop.
@@ -320,4 +319,29 @@ bool ChromeBrowserMainPartsWin::CheckMachineLevelInstall() {
     }
   }
   return false;
+}
+
+string16 TranslationDelegate::GetLocalizedString(int installer_string_id) {
+  int resource_id = 0;
+  switch (installer_string_id) {
+  // HANDLE_STRING is used by the DO_INSTALLER_STRING_MAPPING macro which is in
+  // the generated header installer_util_strings.h.
+#define HANDLE_STRING(base_id, chrome_id) \
+  case base_id: \
+    resource_id = chrome_id; \
+    break;
+  DO_INSTALLER_STRING_MAPPING
+#undef HANDLE_STRING
+  default:
+    NOTREACHED();
+  }
+  if (resource_id)
+    return l10n_util::GetStringUTF16(resource_id);
+  return string16();
+}
+
+// static
+void ChromeBrowserMainPartsWin::SetupInstallerUtilStrings() {
+  CR_DEFINE_STATIC_LOCAL(TranslationDelegate, delegate, ());
+  installer::SetTranslationDelegate(&delegate);
 }

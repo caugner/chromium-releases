@@ -18,11 +18,13 @@
 #include "base/utf_string_conversions.h"
 #include "content/browser/child_process_security_policy_impl.h"
 #include "content/browser/dom_storage/dom_storage_context_impl.h"
+#include "content/browser/dom_storage/session_storage_namespace_impl.h"
 #include "content/browser/download/download_stats.h"
 #include "content/browser/plugin_process_host.h"
 #include "content/browser/plugin_service_impl.h"
 #include "content/browser/ppapi_plugin_process_host.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
+#include "content/browser/renderer_host/render_view_host_delegate.h"
 #include "content/browser/renderer_host/render_widget_helper.h"
 #include "content/browser/renderer_host/resource_dispatcher_host_impl.h"
 #include "content/common/child_process_host_impl.h"
@@ -35,7 +37,6 @@
 #include "content/public/browser/download_save_info.h"
 #include "content/public/browser/media_observer.h"
 #include "content/public/browser/plugin_service_filter.h"
-#include "content/public/browser/render_view_host_delegate.h"
 #include "content/public/browser/resource_context.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/common/content_switches.h"
@@ -130,11 +131,10 @@ class OpenChannelToPpapiPluginCallback
     *renderer_id = filter()->render_process_id();
   }
 
-  virtual void OnPpapiChannelOpened(base::ProcessHandle plugin_process_handle,
-                                    const IPC::ChannelHandle& channel_handle,
+  virtual void OnPpapiChannelOpened(const IPC::ChannelHandle& channel_handle,
                                     int plugin_child_id) {
     ViewHostMsg_OpenChannelToPepperPlugin::WriteReplyParams(
-        reply_msg(), plugin_process_handle, channel_handle, plugin_child_id);
+        reply_msg(), channel_handle, plugin_child_id);
     SendReplyAndDeleteThis();
   }
 
@@ -169,12 +169,10 @@ class OpenChannelToPpapiBrokerCallback
     *renderer_id = filter_->render_process_id();
   }
 
-  virtual void OnPpapiChannelOpened(base::ProcessHandle broker_process_handle,
-                                    const IPC::ChannelHandle& channel_handle,
+  virtual void OnPpapiChannelOpened(const IPC::ChannelHandle& channel_handle,
                                     int /* plugin_child_id */) {
     filter_->Send(new ViewMsg_PpapiBrokerChannelCreated(routing_id_,
                                                         request_id_,
-                                                        broker_process_handle,
                                                         channel_handle));
     delete this;
   }
@@ -282,7 +280,7 @@ RenderMessageFilter::RenderMessageFilter(
     content::MediaObserver* media_observer)
     : resource_dispatcher_host_(ResourceDispatcherHostImpl::Get()),
       plugin_service_(plugin_service),
-      browser_context_(browser_context),
+      profile_data_directory_(browser_context->GetPath()),
       request_context_(request_context),
       resource_context_(browser_context->GetResourceContext()),
       render_widget_helper_(render_widget_helper),
@@ -428,20 +426,18 @@ void RenderMessageFilter::OnMsgCreateWindow(
     return;
   }
 
-  // TODO(michaeln): Fix this.
-  // This is a bug in the existing impl, session storage is effectively
-  // leaked when created thru this code path (window.open()) since there
-  // is no balancing DeleteSessionStorage() for this Clone() call anywhere
-  // in the codebase. I'm replicating the bug for now.
-  *cloned_session_storage_namespace_id =
-      dom_storage_context_->LeakyCloneSessionStorage(
-          params.session_storage_namespace_id);
+  // This will clone the sessionStorage for namespace_id_to_clone.
+  scoped_refptr<SessionStorageNamespaceImpl> session_storage_namespace =
+      new SessionStorageNamespaceImpl(dom_storage_context_,
+                                      params.session_storage_namespace_id);
+  *cloned_session_storage_namespace_id = session_storage_namespace->id();
 
   render_widget_helper_->CreateNewWindow(params,
                                          no_javascript_access,
                                          peer_handle(),
                                          route_id,
-                                         surface_id);
+                                         surface_id,
+                                         session_storage_namespace.get());
 }
 
 void RenderMessageFilter::OnMsgCreateWidget(int opener_id,
@@ -666,8 +662,7 @@ void RenderMessageFilter::OnOpenChannelToPepperPlugin(
     const FilePath& path,
     IPC::Message* reply_msg) {
   plugin_service_->OpenChannelToPpapiPlugin(
-      path,
-      new OpenChannelToPpapiPluginCallback(
+      path, profile_data_directory_, new OpenChannelToPpapiPluginCallback(
           this, resource_context_, reply_msg));
 }
 
@@ -715,15 +710,18 @@ void RenderMessageFilter::OnGetHardwareInputChannelLayout(
 
 void RenderMessageFilter::OnDownloadUrl(const IPC::Message& message,
                                         const GURL& url,
-                                        const GURL& referrer,
+                                        const content::Referrer& referrer,
                                         const string16& suggested_name) {
   content::DownloadSaveInfo save_info;
   save_info.suggested_name = suggested_name;
   scoped_ptr<net::URLRequest> request(new net::URLRequest(url, NULL));
-  request->set_referrer(referrer.spec());
+  request->set_referrer(referrer.url.spec());
+  webkit_glue::ConfigureURLRequestForReferrerPolicy(
+      request.get(), referrer.policy);
   download_stats::RecordDownloadSource(download_stats::INITIATED_BY_RENDERER);
   resource_dispatcher_host_->BeginDownload(
       request.Pass(),
+      true,  // is_content_initiated
       resource_context_,
       render_process_id_,
       message.routing_id(),
@@ -734,9 +732,13 @@ void RenderMessageFilter::OnDownloadUrl(const IPC::Message& message,
 
 void RenderMessageFilter::OnCheckNotificationPermission(
     const GURL& source_origin, int* result) {
+#if defined(ENABLE_NOTIFICATIONS)
   *result = content::GetContentClient()->browser()->
       CheckDesktopNotificationPermission(source_origin, resource_context_,
                                          render_process_id_);
+#else
+  *result = WebKit::WebNotificationPresenter::PermissionAllowed;
+#endif
 }
 
 void RenderMessageFilter::OnAllocateSharedMemory(

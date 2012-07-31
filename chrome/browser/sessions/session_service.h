@@ -23,7 +23,7 @@
 
 class Profile;
 class SessionCommand;
-class TabContentsWrapper;
+class TabContents;
 struct SessionTab;
 struct SessionWindow;
 
@@ -54,7 +54,7 @@ class NavigationEntry;
 class SessionService : public BaseSessionService,
                        public content::NotificationObserver {
   friend class SessionRestoreTest;
-  friend class SessionServiceTestHelper;  
+  friend class SessionServiceTestHelper;
  public:
   // Used to distinguish an application window from a normal one.
   enum AppType {
@@ -156,7 +156,7 @@ class SessionService : public BaseSessionService,
 
   // Notification that a tab has restored its entries or a closed tab is being
   // reused.
-  void TabRestored(TabContentsWrapper* tab, bool pinned);
+  void TabRestored(TabContents* tab, bool pinned);
 
   // Sets the index of the selected entry in the navigation controller for the
   // specified tab.
@@ -220,6 +220,11 @@ class SessionService : public BaseSessionService,
   void SetTabExtensionAppID(const SessionID& window_id,
                             const SessionID& tab_id,
                             const std::string& extension_app_id);
+
+  // Sets the user agent override of the specified tab.
+  void SetTabUserAgentOverride(const SessionID& window_id,
+                               const SessionID& tab_id,
+                               const std::string& user_agent_override);
 
   // Methods to create the various commands. It is up to the caller to delete
   // the returned the SessionCommand* object.
@@ -321,7 +326,7 @@ class SessionService : public BaseSessionService,
   // indices that were written.
   void BuildCommandsForTab(
       const SessionID& window_id,
-      TabContentsWrapper* tab,
+      TabContents* tab,
       int index_in_window,
       bool is_pinned,
       std::vector<SessionCommand*>* commands,

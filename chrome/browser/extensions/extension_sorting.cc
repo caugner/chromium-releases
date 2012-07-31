@@ -56,7 +56,8 @@ void ExtensionSorting::CreateOrdinalsIfNecessary(size_t minimum_size) {
 
   while (ntp_ordinal_map_.size() < minimum_size) {
     StringOrdinal filler = ntp_ordinal_map_.rbegin()->first.CreateAfter();
-    ntp_ordinal_map_[filler];
+    AppLaunchOrdinalMap empty_ordinal_map;
+    ntp_ordinal_map_.insert(std::make_pair(filler, empty_ordinal_map));
   }
 }
 
@@ -496,7 +497,7 @@ void ExtensionSorting::RemoveOrdinalMapping(
 
 void ExtensionSorting::SyncIfNeeded(const std::string& extension_id) {
   if (extension_service_) {
-    const Extension* ext =
+    const extensions::Extension* ext =
         extension_service_->GetInstalledExtension(extension_id);
 
     if (ext) {

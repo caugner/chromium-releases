@@ -13,18 +13,18 @@
 #include "base/string16.h"
 #include "chrome/browser/chromeos/notifications/balloon_view_host_chromeos.h"  // MessageCallback
 #include "chrome/browser/notifications/notification_delegate.h"
+#include "chromeos/dbus/power_manager_client.h"
 #include "googleurl/src/gurl.h"
 
+class BalloonCollectionImplAsh;
+class Notification;
 class Profile;
 
 namespace chromeos {
 
-class BalloonCollectionImplAura;
-typedef class BalloonCollectionImplAura BalloonCollectionImplType;
-
 // The system notification object handles the display of a system notification
 
-class SystemNotification {
+class SystemNotification : public PowerManagerClient::Observer {
  public:
   // The profile is the current user profile. The id is any string used
   // to uniquely identify this notification. The title is the title of
@@ -41,6 +41,9 @@ class SystemNotification {
                      const string16& title);
 
   virtual ~SystemNotification();
+
+  // PowerManagerClient::Observer override.
+  virtual void UnlockScreen() OVERRIDE;
 
   void set_title(const string16& title) { title_ = title; }
 
@@ -74,6 +77,7 @@ class SystemNotification {
     virtual void Close(bool by_user) OVERRIDE {}
     virtual void Click() OVERRIDE {}
     virtual std::string id() const OVERRIDE;
+    virtual content::RenderViewHost* GetRenderViewHost() const OVERRIDE;
 
    private:
     std::string id_;
@@ -82,14 +86,20 @@ class SystemNotification {
   };
 
   void Init(int icon_resource_id);
+  void ShowNotification(const Notification& notify);
 
   Profile* profile_;
-  BalloonCollectionImplType* collection_;
+  BalloonCollectionImplAsh* collection_;
   scoped_refptr<NotificationDelegate> delegate_;
+  string16 message_;
+  string16 link_;
+  BalloonViewHost::MessageCallback callback_;
   GURL icon_;
   string16 title_;
   bool visible_;
+  bool sticky_;
   bool urgent_;
+  bool show_on_unlock_;
 
   DISALLOW_COPY_AND_ASSIGN(SystemNotification);
 };

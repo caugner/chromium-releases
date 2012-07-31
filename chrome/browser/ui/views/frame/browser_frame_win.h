@@ -10,6 +10,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/ui/views/frame/browser_frame.h"
 #include "chrome/browser/ui/views/frame/native_browser_frame.h"
+#include "ui/views/controls/button/image_button.h"
 #include "ui/views/widget/native_widget_win.h"
 
 class BrowserView;
@@ -29,7 +30,8 @@ class NativeMenuWin;
 //  for the Chrome browser window.
 //
 class BrowserFrameWin : public views::NativeWidgetWin,
-                        public NativeBrowserFrame {
+                        public NativeBrowserFrame,
+                        public views::ButtonListener {
  public:
   BrowserFrameWin(BrowserFrame* browser_frame, BrowserView* browser_view);
   virtual ~BrowserFrameWin();
@@ -53,6 +55,12 @@ class BrowserFrameWin : public views::NativeWidgetWin,
   virtual void OnWindowPosChanged(WINDOWPOS* window_pos) OVERRIDE;
   virtual void OnScreenReaderDetected() OVERRIDE;
   virtual bool ShouldUseNativeFrame() const OVERRIDE;
+  virtual void Show() OVERRIDE;
+  virtual void ShowMaximizedWithBounds(
+      const gfx::Rect& restored_bounds) OVERRIDE;
+  virtual void ShowWithWindowState(ui::WindowShowState show_state) OVERRIDE;
+  virtual void Close() OVERRIDE;
+  virtual void OnActivate(UINT action, BOOL minimized, HWND window) OVERRIDE;
 
   // Overridden from NativeBrowserFrame:
   virtual views::NativeWidget* AsNativeWidget() OVERRIDE;
@@ -60,6 +68,10 @@ class BrowserFrameWin : public views::NativeWidgetWin,
   virtual void InitSystemContextMenu() OVERRIDE;
   virtual int GetMinimizeButtonOffset() const OVERRIDE;
   virtual void TabStripDisplayModeChanged() OVERRIDE;
+
+  // Overriden from views::ImageButton override:
+  virtual void ButtonPressed(views::Button* sender,
+                             const views::Event& event) OVERRIDE;
 
   // Overridden from WindowImpl:
   virtual LRESULT OnWndProc(UINT message,
@@ -83,6 +95,18 @@ class BrowserFrameWin : public views::NativeWidgetWin,
   // Returns information about the currently displayed tab in metro mode.
   void GetMetroCurrentTabInfo(WPARAM w_param);
 
+  // Ensures that the window frame follows the Windows 8 metro app guidelines,
+  // i.e. no system menu, etc.
+  void AdjustFrameForImmersiveMode();
+
+  // Called when the frame is closed. Only applies to Windows 8 metro mode.
+  void CloseImmersiveFrame();
+
+  // Calculates and caches the minimize button delta, i.e. the offset to be
+  // applied to the left/right coordinates of the client rectangle in case
+  // we fail to retrieve the offset of the minimize button.
+  void CacheMinimizeButtonDelta();
+
   // The BrowserView is our ClientView. This is a pointer to it.
   BrowserView* browser_view_;
 
@@ -95,6 +119,9 @@ class BrowserFrameWin : public views::NativeWidgetWin,
   scoped_ptr<EncodingMenuModel> encoding_menu_contents_;
   // The wrapped system menu itself.
   scoped_ptr<views::NativeMenuWin> system_menu_;
+
+  // See CacheMinimizeButtonDelta() for details about this member.
+  int cached_minimize_button_x_delta_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserFrameWin);
 };

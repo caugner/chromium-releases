@@ -7,9 +7,11 @@
 #include "base/bind.h"
 #include "content/common/child_thread.h"
 #include "content/common/gpu/gpu_channel.h"
-#include "content/common/gpu/gpu_messages.h"
 #include "content/common/gpu/gpu_memory_manager.h"
-#include "ui/gfx/gl/gl_share_group.h"
+#include "content/common/gpu/gpu_messages.h"
+#include "content/common/gpu/sync_point_manager.h"
+#include "gpu/command_buffer/service/mailbox_manager.h"
+#include "ui/gl/gl_share_group.h"
 
 GpuChannelManager::GpuChannelManager(ChildThread* gpu_child_thread,
                                      GpuWatchdog* watchdog,
@@ -21,7 +23,8 @@ GpuChannelManager::GpuChannelManager(ChildThread* gpu_child_thread,
       gpu_child_thread_(gpu_child_thread),
       ALLOW_THIS_IN_INITIALIZER_LIST(gpu_memory_manager_(this,
           GpuMemoryManager::kDefaultMaxSurfacesWithFrontbufferSoftLimit)),
-      watchdog_(watchdog) {
+      watchdog_(watchdog),
+      sync_point_manager_(new SyncPointManager) {
   DCHECK(gpu_child_thread);
   DCHECK(io_message_loop);
   DCHECK(shutdown_event);
@@ -87,15 +90,21 @@ void GpuChannelManager::OnEstablishChannel(int client_id, bool share_context) {
   IPC::ChannelHandle channel_handle;
 
   gfx::GLShareGroup* share_group = NULL;
+  gpu::gles2::MailboxManager* mailbox_manager = NULL;
   if (share_context) {
-    if (!share_group_)
+    if (!share_group_) {
       share_group_ = new gfx::GLShareGroup;
+      DCHECK(!mailbox_manager_);
+      mailbox_manager_ = new gpu::gles2::MailboxManager;
+    }
     share_group = share_group_;
+    mailbox_manager = mailbox_manager_;
   }
 
   scoped_refptr<GpuChannel> channel = new GpuChannel(this,
                                                      watchdog_,
                                                      share_group,
+                                                     mailbox_manager,
                                                      client_id,
                                                      false);
   if (channel->Init(io_message_loop_, shutdown_event_)) {

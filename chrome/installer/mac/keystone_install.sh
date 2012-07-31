@@ -1,6 +1,6 @@
 #!/bin/bash -p
 
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -388,6 +388,39 @@ ksadmin_supports_versionpath_versionkey() {
   # return value.
 }
 
+# Runs "defaults read" to obtain the value of a key in a property list. As
+# with "defaults read", an absolute path to a plist is supplied, without the
+# ".plist" extension.
+#
+# As of Mac OS X 10.8, defaults (and NSUserDefaults and CFPreferences)
+# normally communicates with cfprefsd to read and write plists. Changes to a
+# plist file aren't necessarily reflected immediately via this API family when
+# not made through this API family, because cfprefsd may return cached data
+# from a former on-disk version of a plist file instead of reading the current
+# version from disk. The old behavior can be restored by setting the
+# __CFPREFERENCES_AVOID_DAEMON environment variable, although extreme care
+# should be used because portions of the system that use this API family
+# normally and thus use cfprefsd and its cache will become unsynchronized with
+# the on-disk state.
+#
+# This function is provided to set __CFPREFERENCES_AVOID_DAEMON when calling
+# "defaults read" and thus avoid cfprefsd and its on-disk cache, and is
+# intended only to be used to read values from Info.plist files, which are not
+# preferences. The use of "defaults" for this purpose has always been
+# questionable, but there's no better option to interact with plists from
+# shell scripts. Definitely don't use infoplist_read to read preference
+# plists.
+#
+# This function exists because the update process delivers new copies of
+# Info.plist files to the disk behind cfprefsd's back, and if cfprefsd becomes
+# aware of the original version of the file for any reason (such as this
+# script reading values from it via "defaults read"), the new version of the
+# file will not be immediately effective or visible via cfprefsd after the
+# update is applied.
+infoplist_read() {
+  __CFPREFERENCES_AVOID_DAEMON=1 defaults read "${@}"
+}
+
 usage() {
   echo "usage: ${ME} update_dmg_mount_point" >& 2
 }
@@ -413,6 +446,7 @@ main() {
   readonly UNROOTED_DEBUG_FILE="Library/Google/Google Chrome Updater Debug"
 
   readonly APP_VERSION_KEY="CFBundleShortVersionString"
+  readonly APP_BUNDLEID_KEY="CFBundleIdentifier"
   readonly KS_VERSION_KEY="KSVersion"
   readonly KS_PRODUCT_KEY="KSProductID"
   readonly KS_URL_KEY="KSUpdateURL"
@@ -420,6 +454,7 @@ main() {
   readonly KS_BRAND_KEY="KSBrandID"
 
   readonly QUARANTINE_ATTR="com.apple.quarantine"
+  readonly KEYCHAIN_REAUTHORIZE_DIR=".keychain_reauthorize"
 
   # Don't use rsync -a, because -a expands to -rlptgoD.  -g and -o copy owners
   # and groups, respectively, from the source, and that is undesirable in this
@@ -536,8 +571,8 @@ main() {
 
     local update_app_plist="${update_app}/${APP_PLIST}"
     note "update_app_plist = ${update_app_plist}"
-    if ! update_version_app="$(defaults read "${update_app_plist}" \
-                                             "${APP_VERSION_KEY}")" ||
+    if ! update_version_app="$(infoplist_read "${update_app_plist}" \
+                                              "${APP_VERSION_KEY}")" ||
        [[ -z "${update_version_app}" ]]; then
       err "couldn't determine update_version_app"
       exit 2
@@ -546,16 +581,16 @@ main() {
 
     local update_ks_plist="${update_app_plist}"
     note "update_ks_plist = ${update_ks_plist}"
-    if ! update_version_ks="$(defaults read "${update_ks_plist}" \
-                                            "${KS_VERSION_KEY}")" ||
+    if ! update_version_ks="$(infoplist_read "${update_ks_plist}" \
+                                             "${KS_VERSION_KEY}")" ||
        [[ -z "${update_version_ks}" ]]; then
       err "couldn't determine update_version_ks"
       exit 2
     fi
     note "update_version_ks = ${update_version_ks}"
 
-    if ! product_id="$(defaults read "${update_ks_plist}" \
-                                     "${KS_PRODUCT_KEY}")" ||
+    if ! product_id="$(infoplist_read "${update_ks_plist}" \
+                                      "${KS_PRODUCT_KEY}")" ||
        [[ -z "${product_id}" ]]; then
       err "couldn't determine product_id"
       exit 2
@@ -673,8 +708,8 @@ main() {
   # likely fail for another reason and the user ticket will hang around until
   # something is eventually able to remove it.
   if [[ -z "${system_ticket}" ]] &&
-     ksadmin -S --print-tickets -P "${product_id}" >& /dev/null; then
-    ksadmin --delete -P "${product_id}" || true
+     ksadmin -S --print-tickets --productid "${product_id}" >& /dev/null; then
+    ksadmin --delete --productid "${product_id}" || true
     err "can't update on a user ticket when a system ticket is also present"
     exit 4
   fi
@@ -690,8 +725,8 @@ main() {
   local installed_app_plist_path="${installed_app_plist}.plist"
   note "installed_app_plist_path = ${installed_app_plist_path}"
   local old_version_app
-  old_version_app="$(defaults read "${installed_app_plist}" \
-                                   "${APP_VERSION_KEY}" || true)"
+  old_version_app="$(infoplist_read "${installed_app_plist}" \
+                                    "${APP_VERSION_KEY}" || true)"
   note "old_version_app = ${old_version_app}"
 
   # old_version_app is not required, because it won't be present in skeleton
@@ -726,8 +761,8 @@ main() {
   local old_ks_plist="${installed_app_plist}"
   note "old_ks_plist = ${old_ks_plist}"
   local old_brand
-  old_brand="$(defaults read "${old_ks_plist}" \
-                             "${KS_BRAND_KEY}" 2> /dev/null ||
+  old_brand="$(infoplist_read "${old_ks_plist}" \
+                              "${KS_BRAND_KEY}" 2> /dev/null ||
                true)"
   note "old_brand = ${old_brand}"
 
@@ -921,8 +956,8 @@ main() {
   note "reading new values"
 
   local new_version_app
-  if ! new_version_app="$(defaults read "${installed_app_plist}" \
-                                        "${APP_VERSION_KEY}")" ||
+  if ! new_version_app="$(infoplist_read "${installed_app_plist}" \
+                                         "${APP_VERSION_KEY}")" ||
      [[ -z "${new_version_app}" ]]; then
     err "couldn't determine new_version_app"
     exit 9
@@ -936,8 +971,8 @@ main() {
   note "new_ks_plist = ${new_ks_plist}"
 
   local new_version_ks
-  if ! new_version_ks="$(defaults read "${new_ks_plist}" \
-                                       "${KS_VERSION_KEY}")" ||
+  if ! new_version_ks="$(infoplist_read "${new_ks_plist}" \
+                                        "${KS_VERSION_KEY}")" ||
      [[ -z "${new_version_ks}" ]]; then
     err "couldn't determine new_version_ks"
     exit 9
@@ -945,7 +980,7 @@ main() {
   note "new_version_ks = ${new_version_ks}"
 
   local update_url
-  if ! update_url="$(defaults read "${new_ks_plist}" "${KS_URL_KEY}")" ||
+  if ! update_url="$(infoplist_read "${new_ks_plist}" "${KS_URL_KEY}")" ||
      [[ -z "${update_url}" ]]; then
     err "couldn't determine update_url"
     exit 9
@@ -955,8 +990,8 @@ main() {
   # The channel ID is optional.  Suppress stderr to prevent Keystone from
   # seeing possible error output.
   local channel
-  channel="$(defaults read "${new_ks_plist}" "${KS_CHANNEL_KEY}" 2> /dev/null ||
-             true)"
+  channel="$(infoplist_read "${new_ks_plist}" \
+                            "${KS_CHANNEL_KEY}" 2> /dev/null || true)"
   note "channel = ${channel}"
 
   # Make sure that the update was successful by comparing the version found in
@@ -1059,7 +1094,7 @@ main() {
 
   local ksadmin_args=(
     --register
-    -P "${product_id}"
+    --productid "${product_id}"
     --version "${new_version_ks}"
     --xcpath "${installed_app}"
     --url "${update_url}"
@@ -1266,6 +1301,51 @@ main() {
     # On earlier systems, xattr doesn't support -r, so run xattr via find.
     find "${installed_app}" -exec xattr -d "${QUARANTINE_ATTR}" {} + \
         2> /dev/null
+  fi
+
+  # Do Keychain reauthorization. This involves running a stub executable on
+  # the dmg that loads the newly-updated framework and jumps to it to perform
+  # the reauthorization. The stub executable can be signed by the old
+  # certificate even after the rest of Chrome switches to the new certificate,
+  # so it still has access to the old Keychain items. The stub executable is
+  # an unbundled flat file executable whose name matches the real
+  # application's bundle identifier, so it's permitted access to the Keychain
+  # items. Doing a reauthorization step at update time reauthorizes Keychain
+  # items for users who never bother restarting Chrome, and provides a
+  # mechanism to continue doing reauthorizations even after the certificate
+  # changes. However, it only works for non-system ticket installations of
+  # Chrome, because the updater runs as root when on a system ticket, and root
+  # can't access individual user Keychains.
+  #
+  # Even if the reauthorization tool is launched, it doesn't necessarily try
+  # to do anything. It will only attempt to perform a reauthorization if one
+  # hasn't yet been done at update time.
+  note "maybe reauthorizing Keychain"
+
+  if [[ -z "${system_ticket}" ]]; then
+    local new_bundleid_app
+    new_bundleid_app="$(infoplist_read "${installed_app_plist}" \
+                                       "${APP_BUNDLEID_KEY}" || true)"
+    note "new_bundleid_app = ${new_bundleid_app}"
+
+    local keychain_reauthorize_dir="\
+${update_dmg_mount_point}/${KEYCHAIN_REAUTHORIZE_DIR}"
+    local keychain_reauthorize_path="\
+${keychain_reauthorize_dir}/${new_bundleid_app}"
+    note "keychain_reauthorize_path = ${keychain_reauthorize_path}"
+
+    if [[ -x "${keychain_reauthorize_path}" ]]; then
+      local framework_dir="${new_versioned_dir}/${FRAMEWORK_DIR}"
+      local framework_code_path="${framework_dir}/${FRAMEWORK_NAME}"
+      note "framework_code_path = ${framework_code_path}"
+
+      if [[ -f "${framework_code_path}" ]]; then
+        note "reauthorizing Keychain"
+        "${keychain_reauthorize_path}" "${framework_code_path}"
+      fi
+    fi
+  else
+    note "system ticket, not reauthorizing Keychain"
   fi
 
   # Great success!

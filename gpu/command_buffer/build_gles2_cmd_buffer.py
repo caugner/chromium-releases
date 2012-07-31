@@ -339,10 +339,10 @@ _ENUM_LISTS = {
   'Capability': {
     'type': 'GLenum',
     'valid': [
+      'GL_DITHER',  # 1st one is a non-cached value so autogen unit tests work.
       'GL_BLEND',
       'GL_CULL_FACE',
       'GL_DEPTH_TEST',
-      'GL_DITHER',
       'GL_POLYGON_OFFSET_FILL',
       'GL_SAMPLE_ALPHA_TO_COVERAGE',
       'GL_SAMPLE_COVERAGE',
@@ -629,6 +629,19 @@ _ENUM_LISTS = {
       'GL_INT',
     ],
   },
+  'ReadPixelType': {
+    'type': 'GLenum',
+    'valid': [
+      'GL_UNSIGNED_BYTE',
+      'GL_UNSIGNED_SHORT_5_6_5',
+      'GL_UNSIGNED_SHORT_4_4_4_4',
+      'GL_UNSIGNED_SHORT_5_5_5_1',
+    ],
+    'invalid': [
+      'GL_SHORT',
+      'GL_INT',
+    ],
+  },
   'RenderBufferFormat': {
     'type': 'GLenum',
     'valid': [
@@ -758,12 +771,12 @@ _ENUM_LISTS = {
 # GL commands. 'dev' is true if it's a dev interface.
 _PEPPER_INTERFACES = [
   {'name': '', 'dev': False},
-  {'name': 'InstancedArrays', 'dev': True},
-  {'name': 'FramebufferBlit', 'dev': True},
-  {'name': 'FramebufferMultisample', 'dev': True},
-  {'name': 'ChromiumEnableFeature', 'dev': True},
-  {'name': 'ChromiumMapSub', 'dev': True},
-  {'name': 'Query', 'dev': True},
+  {'name': 'InstancedArrays', 'dev': False},
+  {'name': 'FramebufferBlit', 'dev': False},
+  {'name': 'FramebufferMultisample', 'dev': False},
+  {'name': 'ChromiumEnableFeature', 'dev': False},
+  {'name': 'ChromiumMapSub', 'dev': False},
+  {'name': 'Query', 'dev': False},
 ]
 
 # This table specifies types and other special data for the commands that
@@ -948,6 +961,7 @@ _FUNCTION_INFO = {
   'DetachShader': {'decoder_func': 'DoDetachShader'},
   'Disable': {
     'decoder_func': 'DoDisable',
+    'impl_func': False,
   },
   'DisableVertexAttribArray': {
     'decoder_func': 'DoDisableVertexAttribArray',
@@ -965,6 +979,7 @@ _FUNCTION_INFO = {
   },
   'Enable': {
     'decoder_func': 'DoEnable',
+    'impl_func': False,
   },
   'EnableVertexAttribArray': {
     'decoder_func': 'DoEnableVertexAttribArray',
@@ -1243,7 +1258,11 @@ _FUNCTION_INFO = {
     'decoder_func': 'DoIsBuffer',
     'expectation': False,
   },
-  'IsEnabled': {'type': 'Is'},
+  'IsEnabled': {
+    'type': 'Is',
+    'decoder_func': 'DoIsEnabled',
+    'impl_func': False,
+  },
   'IsFramebuffer': {
     'type': 'Is',
     'decoder_func': 'DoIsFramebuffer',
@@ -1329,7 +1348,7 @@ _FUNCTION_INFO = {
     'client_test': False,
     'cmd_args':
         'GLint x, GLint y, GLsizei width, GLsizei height, '
-        'GLenumReadPixelFormat format, GLenumPixelType type, '
+        'GLenumReadPixelFormat format, GLenumReadPixelType type, '
         'uint32 pixels_shm_id, uint32 pixels_shm_offset, '
         'uint32 result_shm_id, uint32 result_shm_offset',
     'result': ['uint32'],
@@ -1677,6 +1696,12 @@ _FUNCTION_INFO = {
     'client_test': False,
     'gl_test_func': 'glGetQueryObjectuiv',
     'pepper_interface': 'Query',
+  },
+  'GetUniformLocationsCHROMIUM': {
+    'gen_cmd': False,
+    'extension': True,
+    'chromium': True,
+    'client_test': False,
   },
 }
 
@@ -2400,7 +2425,7 @@ class TodoHandler(CustomHandler):
                 func.MakeTypedOriginalArgString("")))
     file.Write("  // TODO: for now this is a no-op\n")
     file.Write(
-        "  SetGLError(GL_INVALID_OPERATION, \"gl%s not implemented\");\n" %
+        "  SetGLError(GL_INVALID_OPERATION, \"gl%s\", \"not implemented\");\n" %
         func.name)
     if func.return_type != "void":
       file.Write("  return 0;\n")
@@ -2415,7 +2440,7 @@ class TodoHandler(CustomHandler):
         "    uint32 immediate_data_size, const gles2::%s& c) {\n" % func.name)
     file.Write("  // TODO: for now this is a no-op\n")
     file.Write(
-        "  SetGLError(GL_INVALID_OPERATION, \"gl%s not implemented\");\n" %
+        "  SetGLError(GL_INVALID_OPERATION, \"gl%s\", \"not implemented\");\n" %
         func.name)
     file.Write("  return error::kNoError;\n")
     file.Write("}\n")
@@ -2726,7 +2751,7 @@ TEST_F(%(test_name)s, %(name)sInvalidArgs%(arg_index)d_%(value_index)d) {
       for arg in func.GetOriginalArgs():
         arg.WriteClientSideValidationCode(file, func)
       code = """  if (Is%(type)sReservedId(%(id)s)) {
-    SetGLError(GL_INVALID_OPERATION, "%(name)s: %(id)s reserved id");
+    SetGLError(GL_INVALID_OPERATION, "%(name)s\", \"%(id)s reserved id");
     return;
   }
   Bind%(type)sHelper(%(arg_string)s);
@@ -3374,7 +3399,7 @@ class GETnHandler(TypeHandler):
   if (error == GL_NO_ERROR) {
     result->SetNumResults(num_values);
   } else {
-    SetGLError(error, NULL);
+    SetGLError(error, "", "");
   }
   return error::kNoError;
 }
@@ -3809,8 +3834,8 @@ TEST_F(%(test_name)s, %(name)sValidArgsCountTooLarge) {
         # defined in GLES2DecoderBase::SetupShaderForUniform
         gl_arg_strings.append("3")
         arg_strings.append(
-            "program_manager()->SwizzleLocation(ProgramManager::"
-            "ProgramInfo::GetFakeLocation(1, 1))")
+            "GLES2Util::SwizzleLocation("
+            "GLES2Util::MakeFakeLocation(1, 1))")
       elif count == 1:
         # the number of elements that gl will be called with.
         gl_arg_strings.append("3")
@@ -4666,14 +4691,14 @@ class UniformLocationArgument(Argument):
 
   def WriteGetCode(self, file):
     """Writes the code to get an argument from a command structure."""
-    code = """  %s %s = program_manager()->UnswizzleLocation(
+    code = """  %s %s = GLES2Util::UnswizzleLocation(
       static_cast<%s>(c.%s));
 """
     file.Write(code % (self.type, self.name, self.type, self.name))
 
   def GetValidArg(self, func, offset, index):
     """Gets a valid value for this argument."""
-    return "program_manager()->SwizzleLocation(%d)" % (offset + 1)
+    return "GLES2Util::SwizzleLocation(%d)" % (offset + 1)
 
 
 class DataSizeArgument(Argument):
@@ -4705,7 +4730,7 @@ class SizeArgument(Argument):
   def WriteValidationCode(self, file, func):
     """overridden from Argument."""
     file.Write("  if (%s < 0) {\n" % self.name)
-    file.Write("    SetGLError(GL_INVALID_VALUE, \"gl%s: %s < 0\");\n" %
+    file.Write("    SetGLError(GL_INVALID_VALUE, \"gl%s\", \"%s < 0\");\n" %
                (func.original_name, self.name))
     file.Write("    return error::kNoError;\n")
     file.Write("  }\n")
@@ -4713,7 +4738,7 @@ class SizeArgument(Argument):
   def WriteClientSideValidationCode(self, file, func):
     """overridden from Argument."""
     file.Write("  if (%s < 0) {\n" % self.name)
-    file.Write("    SetGLError(GL_INVALID_VALUE, \"gl%s: %s < 0\");\n" %
+    file.Write("    SetGLError(GL_INVALID_VALUE, \"gl%s\", \"%s < 0\");\n" %
                (func.original_name, self.name))
     file.Write("    return;\n")
     file.Write("  }\n")
@@ -4732,11 +4757,6 @@ class SizeNotNegativeArgument(SizeArgument):
   def WriteValidationCode(self, file, func):
     """overridden from SizeArgument."""
     pass
-    #file.Write("  if (%s < 0) {\n" % self.name)
-    #file.Write("    SetGLError(GL_INVALID_VALUE, \"gl%s: %s < 0\");\n" %
-    #           (func.original_name, self.name))
-    #file.Write("    return error::kNoError;\n")
-    #file.Write("  }\n")
 
 
 class EnumBaseArgument(Argument):
@@ -4754,7 +4774,7 @@ class EnumBaseArgument(Argument):
   def WriteValidationCode(self, file, func):
     file.Write("  if (!validators_->%s.IsValid(%s)) {\n" %
         (ToUnderscore(self.type_name), self.name))
-    file.Write("    SetGLError(%s, \"gl%s: %s %s\");\n" %
+    file.Write("    SetGLError(%s, \"gl%s\", \"%s %s\");\n" %
                (self.gl_error, func.original_name, self.name, self.gl_error))
     file.Write("    return error::kNoError;\n")
     file.Write("  }\n")

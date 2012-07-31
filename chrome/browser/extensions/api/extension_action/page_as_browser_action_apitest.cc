@@ -6,6 +6,7 @@
 #include "chrome/browser/extensions/browser_action_test_util.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_browser_event_router.h"
+#include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/profiles/profile.h"
@@ -13,7 +14,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/omnibox/location_bar.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_action.h"
@@ -22,6 +23,8 @@
 
 // These are a mash-up of the tests from from page_actions_apitest.cc and
 // browser_actions_apitest.cc.
+
+using extensions::Extension;
 
 namespace {
 
@@ -32,7 +35,7 @@ class PageAsBrowserActionApiTest : public ExtensionApiTest {
 
   void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     ExtensionApiTest::SetUpCommandLine(command_line);
-    command_line->AppendSwitch(switches::kEnableBrowserActionsForAll);
+    command_line->AppendSwitch(switches::kEnableScriptBadges);
   }
 
  protected:
@@ -47,6 +50,16 @@ IN_PROC_BROWSER_TEST_F(PageAsBrowserActionApiTest, Basic) {
   const Extension* extension = GetSingleLoadedExtension();
   ASSERT_TRUE(extension) << message_;
 
+  // The extension declares a page action, but it should have gotten a browser
+  // action instead.
+  ASSERT_TRUE(extension->browser_action());
+  ASSERT_FALSE(extension->page_action());
+
+  // With the "action box" there won't be browser actions unless they're pinned.
+  ExtensionPrefs* prefs =
+      browser()->profile()->GetExtensionService()->extension_prefs();
+  prefs->SetBrowserActionVisibility(extension, true);
+
   // Test that there is a browser action in the toolbar.
   ASSERT_EQ(1, GetBrowserActionsBar().NumberOfBrowserActions());
 
@@ -59,7 +72,7 @@ IN_PROC_BROWSER_TEST_F(PageAsBrowserActionApiTest, Basic) {
   }
 
   // Test that we received the changes.
-  int tab_id = ExtensionTabUtil::GetTabId(browser()->GetSelectedWebContents());
+  int tab_id = ExtensionTabUtil::GetTabId(browser()->GetActiveWebContents());
   ExtensionAction* action = extension->browser_action();
   ASSERT_TRUE(action);
   EXPECT_EQ("Modified", action->GetTitle(tab_id));
@@ -68,8 +81,7 @@ IN_PROC_BROWSER_TEST_F(PageAsBrowserActionApiTest, Basic) {
     // Simulate the page action being clicked.
     ResultCatcher catcher;
     ExtensionService* service = browser()->profile()->GetExtensionService();
-    service->toolbar_model()->ExecuteBrowserAction(
-        extension->id(), browser());
+    service->toolbar_model()->ExecuteBrowserAction(extension, browser(), NULL);
     EXPECT_TRUE(catcher.GetNextResult());
   }
 
@@ -92,7 +104,7 @@ IN_PROC_BROWSER_TEST_F(PageAsBrowserActionApiTest, AddPopup) {
   const Extension* extension = GetSingleLoadedExtension();
   ASSERT_TRUE(extension) << message_;
 
-  int tab_id = ExtensionTabUtil::GetTabId(browser()->GetSelectedWebContents());
+  int tab_id = ExtensionTabUtil::GetTabId(browser()->GetActiveWebContents());
 
   ExtensionAction* page_action = extension->browser_action();
   ASSERT_TRUE(page_action)
@@ -105,8 +117,7 @@ IN_PROC_BROWSER_TEST_F(PageAsBrowserActionApiTest, AddPopup) {
   {
     ResultCatcher catcher;
     ExtensionService* service = browser()->profile()->GetExtensionService();
-    service->toolbar_model()->ExecuteBrowserAction(
-        extension->id(), browser());
+    service->toolbar_model()->ExecuteBrowserAction(extension, browser(), NULL);
     ASSERT_TRUE(catcher.GetNextResult());
   }
 
@@ -138,7 +149,7 @@ IN_PROC_BROWSER_TEST_F(PageAsBrowserActionApiTest, RemovePopup) {
   const Extension* extension = GetSingleLoadedExtension();
   ASSERT_TRUE(extension) << message_;
 
-  int tab_id = ExtensionTabUtil::GetTabId(browser()->GetSelectedWebContents());
+  int tab_id = ExtensionTabUtil::GetTabId(browser()->GetActiveWebContents());
 
   ExtensionAction* page_action = extension->browser_action();
   ASSERT_TRUE(page_action)

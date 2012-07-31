@@ -8,12 +8,14 @@
 #include "base/memory/singleton.h"
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/views/web_dialog_view.h"
 #include "chrome/browser/ui/webui/test_web_dialog_delegate.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "content/public/browser/browser_context.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
@@ -23,6 +25,7 @@
 
 using content::WebContents;
 using testing::Eq;
+using ui::WebDialogDelegate;
 
 namespace {
 
@@ -33,16 +36,10 @@ const int kInitialHeight = 40;
 class TestWebDialogView : public WebDialogView {
  public:
   TestWebDialogView(Profile* profile,
-                    Browser* browser,
                     WebDialogDelegate* delegate)
-      : WebDialogView(profile, browser, delegate),
-        painted_(false),
+      : WebDialogView(profile, delegate),
         should_quit_on_size_change_(false) {
     delegate->GetDialogSize(&last_size_);
-  }
-
-  bool painted() const {
-    return painted_;
   }
 
   void set_should_quit_on_size_change(bool should_quit) {
@@ -68,15 +65,6 @@ class TestWebDialogView : public WebDialogView {
     should_quit_on_size_change_ = false;  // No quit when we are closing.
     WebDialogView::OnDialogClosed(json_retval);
   }
-
-  virtual void OnTabMainFrameRender() OVERRIDE {
-    WebDialogView::OnTabMainFrameRender();
-    painted_ = true;
-    MessageLoop::current()->Quit();
-  }
-
-  // Whether first rendered notification is received.
-  bool painted_;
 
   // Whether we should quit message loop when size change is detected.
   bool should_quit_on_size_change_;
@@ -110,8 +98,8 @@ IN_PROC_BROWSER_TEST_F(WebDialogBrowserTest, MAYBE_SizeWindow) {
   delegate->set_size(kInitialWidth, kInitialHeight);
 
   TestWebDialogView* view =
-      new TestWebDialogView(browser()->profile(), browser(), delegate);
-  WebContents* web_contents = browser()->GetSelectedWebContents();
+      new TestWebDialogView(browser()->profile(), delegate);
+  WebContents* web_contents = browser()->GetActiveWebContents();
   ASSERT_TRUE(web_contents != NULL);
   views::Widget::CreateWindowWithParent(
       view, web_contents->GetView()->GetTopLevelNativeWindow());
@@ -182,28 +170,4 @@ IN_PROC_BROWSER_TEST_F(WebDialogBrowserTest, MAYBE_SizeWindow) {
   actual_bounds = view->GetWidget()->GetClientAreaScreenBounds();
   EXPECT_LT(0, actual_bounds.width());
   EXPECT_LT(0, actual_bounds.height());
-}
-
-// This is timing out about 5~10% of runs. See crbug.com/86059.
-IN_PROC_BROWSER_TEST_F(WebDialogBrowserTest, DISABLED_WebContentRendered) {
-  WebDialogDelegate* delegate = new test::TestWebDialogDelegate(
-      GURL(chrome::kChromeUIChromeURLsURL));
-
-  TestWebDialogView* view =
-      new TestWebDialogView(browser()->profile(), browser(), delegate);
-  WebContents* web_contents = browser()->GetSelectedWebContents();
-  ASSERT_TRUE(web_contents != NULL);
-  views::Widget::CreateWindowWithParent(
-      view, web_contents->GetView()->GetTopLevelNativeWindow());
-  EXPECT_TRUE(view->initialized_);
-
-  view->InitDialog();
-  view->GetWidget()->Show();
-
-  // TestWebDialogView::OnTabMainFrameRender() will Quit().
-  MessageLoopForUI::current()->Run();
-
-  EXPECT_TRUE(view->painted());
-
-  view->GetWidget()->Close();
 }

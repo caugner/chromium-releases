@@ -17,11 +17,10 @@
 #include "chrome/browser/ui/browser.h"
 #import "chrome/browser/ui/cocoa/extensions/browser_action_button.h"
 #import "chrome/browser/ui/cocoa/extensions/browser_actions_container_view.h"
-#import "chrome/browser/ui/cocoa/extensions/chevron_menu_button.h"
 #import "chrome/browser/ui/cocoa/extensions/extension_popup_controller.h"
 #import "chrome/browser/ui/cocoa/image_button_cell.h"
 #import "chrome/browser/ui/cocoa/menu_button.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/pref_names.h"
@@ -34,13 +33,16 @@
 #import "third_party/GTM/AppKit/GTMNSAnimation+Duration.h"
 #include "ui/gfx/mac/nsimage_cache.h"
 
+using extensions::Extension;
+using extensions::ExtensionList;
+
 NSString* const kBrowserActionVisibilityChangedNotification =
     @"BrowserActionVisibilityChangedNotification";
 
 namespace {
 const CGFloat kAnimationDuration = 0.2;
 
-const CGFloat kChevronWidth = 14.0;
+const CGFloat kChevronWidth = 18;
 
 // Since the container is the maximum height of the toolbar, we have
 // to move the buttons up by this amount in order to have them look
@@ -718,25 +720,20 @@ class ExtensionServiceObserverBridge : public content::NotificationObserver,
 }
 
 - (void)browserActionClicked:(BrowserActionButton*)button {
-  int tabId = [self currentTabId];
-  if (tabId < 0) {
-    NOTREACHED() << "No current tab.";
-    return;
-  }
-  // If an extension popup is already open, it will get closed when it
-  // loses focus.
-
-  ExtensionAction* action = [button extension]->browser_action();
-  if (action->HasPopup(tabId)) {
-    GURL popupUrl = action->GetPopupUrl(tabId);
-    NSPoint arrowPoint = [self popupPointForBrowserAction:[button extension]];
-    [ExtensionPopupController showURL:popupUrl
-                            inBrowser:browser_
-                           anchoredAt:arrowPoint
-                        arrowLocation:info_bubble::kTopRight
-                              devMode:NO];
-  } else {
-    toolbarModel_->ExecuteBrowserAction(action->extension_id(), browser_);
+  const Extension* extension = [button extension];
+  GURL popupUrl;
+  switch (toolbarModel_->ExecuteBrowserAction(extension, browser_, &popupUrl)) {
+    case ExtensionToolbarModel::ACTION_NONE:
+      break;
+    case ExtensionToolbarModel::ACTION_SHOW_POPUP: {
+      NSPoint arrowPoint = [self popupPointForBrowserAction:extension];
+      [ExtensionPopupController showURL:popupUrl
+                              inBrowser:browser_
+                             anchoredAt:arrowPoint
+                          arrowLocation:info_bubble::kTopRight
+                                devMode:NO];
+      break;
+    }
   }
 }
 
@@ -769,7 +766,8 @@ class ExtensionServiceObserverBridge : public content::NotificationObserver,
     return;
 
   if (!chevronMenuButton_.get()) {
-    chevronMenuButton_.reset([[ChevronMenuButton alloc] init]);
+    chevronMenuButton_.reset([[MenuButton alloc] init]);
+    [chevronMenuButton_ setOpenMenuOnClick:YES];
     [chevronMenuButton_ setBordered:NO];
     [chevronMenuButton_ setShowsBorderOnlyWhileMouseInside:YES];
 
@@ -843,7 +841,7 @@ class ExtensionServiceObserverBridge : public content::NotificationObserver,
 }
 
 - (int)currentTabId {
-  TabContentsWrapper* selected_tab = browser_->GetSelectedTabContentsWrapper();
+  TabContents* selected_tab = browser_->GetActiveTabContents();
   if (!selected_tab)
     return -1;
 

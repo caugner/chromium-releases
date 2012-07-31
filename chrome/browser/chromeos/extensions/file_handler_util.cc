@@ -39,6 +39,7 @@ using content::BrowserThread;
 using content::ChildProcessSecurityPolicy;
 using content::SiteInstance;
 using content::WebContents;
+using extensions::Extension;
 
 namespace file_handler_util {
 namespace {
@@ -73,18 +74,6 @@ int ExtractProcessFromExtensionId(const std::string& extension_id,
   content::RenderProcessHost* process = site_instance->GetProcess();
 
   return process->GetID();
-}
-
-// Update file handler usage stats.
-void UpdateFileHandlerUsageStats(Profile* profile, const std::string& task_id) {
-  if (!profile || !profile->GetPrefs())
-    return;
-  DictionaryPrefUpdate prefs_usage_update(profile->GetPrefs(),
-      prefs::kLastUsedFileBrowserHandlers);
-  prefs_usage_update->SetWithoutPathExpansion(task_id,
-      new base::FundamentalValue(
-          static_cast<int>(base::Time::Now().ToInternalValue()/
-                           base::Time::kMicrosecondsPerSecond)));
 }
 
 URLPatternSet GetAllMatchingPatterns(const FileBrowserHandler* handler,
@@ -200,6 +189,18 @@ void SortLastUsedHandlerList(LastUsedHandlerList *list) {
 
 }  // namespace
 
+// Update file handler usage stats.
+void UpdateFileHandlerUsageStats(Profile* profile, const std::string& task_id) {
+  if (!profile || !profile->GetPrefs())
+    return;
+  DictionaryPrefUpdate prefs_usage_update(profile->GetPrefs(),
+      prefs::kLastUsedFileBrowserHandlers);
+  prefs_usage_update->SetWithoutPathExpansion(task_id,
+      new base::FundamentalValue(
+          static_cast<int>(base::Time::Now().ToInternalValue()/
+                           base::Time::kMicrosecondsPerSecond)));
+}
+
 int GetReadWritePermissions() {
   return kReadWriteFilePermissions;
 }
@@ -227,6 +228,20 @@ bool CrackTaskID(const std::string& task_id,
   *extension_id = result[0];
   *action_id = result[1];
   return true;
+}
+
+// Find a specific handler in the handler list.
+LastUsedHandlerList::iterator FindHandler(
+    LastUsedHandlerList* list,
+    const std::string& extension_id,
+    const std::string& id) {
+  LastUsedHandlerList::iterator iter = list->begin();
+  while (iter != list->end() &&
+         !(iter->handler->extension_id() == extension_id &&
+           iter->handler->id() == id)) {
+    iter++;
+  }
+  return iter;
 }
 
 // Given the list of selected files, returns array of context menu tasks
@@ -271,7 +286,7 @@ bool FindCommonTasks(Profile* profile,
     int last_used_timestamp = 0;
 
     if ((*iter)->extension_id() == kFileBrowserDomain) {
-      // Give a little bump to the action from File Browser extenion
+      // Give a little bump to the action from File Browser extension
       // to make sure it is the default on a fresh profile.
       last_used_timestamp = 1;
     }
@@ -280,6 +295,23 @@ bool FindCommonTasks(Profile* profile,
     URLPatternSet matching_patterns = GetAllMatchingPatterns(*iter, files_list);
     named_action_list->push_back(LastUsedHandler(last_used_timestamp, *iter,
                                                  matching_patterns));
+  }
+
+  LastUsedHandlerList::iterator watch_iter = FindHandler(
+      named_action_list, kFileBrowserDomain, kFileBrowserWatchTaskId);
+  LastUsedHandlerList::iterator gallery_iter = FindHandler(
+      named_action_list, kFileBrowserDomain, kFileBrowserGalleryTaskId);
+  if (watch_iter != named_action_list->end() &&
+      gallery_iter != named_action_list->end()) {
+    // Both "watch" and "gallery" actions are applicable which means that
+    // the selection is all videos. Showing them both is confusing. We only keep
+    // the one that makes more sense ("watch" for single selection, "gallery"
+    // for multiple selection).
+
+    if (files_list.size() == 1)
+      named_action_list->erase(gallery_iter);
+    else
+      named_action_list->erase(watch_iter);
   }
 
   SortLastUsedHandlerList(named_action_list);
@@ -464,8 +496,7 @@ class FileTaskExecutor::ExecuteTasksFileSystemCallbackDispatcher {
     GURL base_url = fileapi::GetFileSystemRootURI(target_origin_url,
         fileapi::kFileSystemTypeExternal);
     file->target_file_url = GURL(base_url.spec() + virtual_path.value());
-    FilePath root(FILE_PATH_LITERAL("/"));
-    file->virtual_path = root.Append(virtual_path);
+    file->virtual_path = virtual_path;
     file->is_directory = file_info.is_directory;
     file->absolute_path = final_file_path;
     return true;
@@ -547,6 +578,14 @@ void FileTaskExecutor::ExecuteFailedOnUIThread() {
   Done(false);
 }
 
+const Extension* FileTaskExecutor::GetExtension() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  ExtensionService* service = profile_->GetExtensionService();
+  return service ? service->GetExtensionById(extension_id_, false) :
+                   NULL;
+}
+
 void FileTaskExecutor::ExecuteFileActionsOnUIThread(
     const std::string& file_system_name,
     const GURL& file_system_root,
@@ -554,19 +593,36 @@ void FileTaskExecutor::ExecuteFileActionsOnUIThread(
     int handler_pid) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  ExtensionService* service = profile_->GetExtensionService();
-  if (!service) {
-    Done(false);
-    return;
-  }
-
-  const Extension* extension = service->GetExtensionById(extension_id_, false);
+  const Extension* extension = GetExtension();
   if (!extension) {
     Done(false);
     return;
   }
 
-  InitHandlerHostFileAccessPermissions(file_list, extension, action_id_);
+  InitHandlerHostFileAccessPermissions(
+      file_list,
+      extension,
+      action_id_,
+      base::Bind(&FileTaskExecutor::OnInitAccessForExecuteFileActionsOnUIThread,
+                 this,
+                 file_system_name,
+                 file_system_root,
+                 file_list,
+                 handler_pid));
+}
+
+void FileTaskExecutor::OnInitAccessForExecuteFileActionsOnUIThread(
+    const std::string& file_system_name,
+    const GURL& file_system_root,
+    const FileDefinitionList& file_list,
+    int handler_pid) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  const Extension* extension = GetExtension();
+  if (!extension) {
+    Done(false);
+    return;
+  }
 
   if (handler_pid > 0) {
     SetupPermissionsAndDispatchEvent(file_system_name, file_system_root,
@@ -623,18 +679,18 @@ void FileTaskExecutor::SetupPermissionsAndDispatchEvent(
     files_urls->Append(file_def);
     file_def->SetString("fileSystemName", file_system_name);
     file_def->SetString("fileSystemRoot", file_system_root.spec());
-    file_def->SetString("fileFullPath", iter->virtual_path.value());
+    FilePath root(FILE_PATH_LITERAL("/"));
+    FilePath full_path = root.Append(iter->virtual_path);
+    file_def->SetString("fileFullPath", full_path.value());
     file_def->SetBoolean("fileIsDirectory", iter->is_directory);
   }
   // Get tab id.
   Browser* current_browser = browser();
   if (current_browser) {
-    WebContents* contents = current_browser->GetSelectedWebContents();
+    WebContents* contents = current_browser->GetActiveWebContents();
     if (contents)
       details->SetInteger("tab_id", ExtensionTabUtil::GetTabId(contents));
   }
-
-  UpdateFileHandlerUsageStats(profile_, MakeTaskID(extension_id_, action_id_));
 
   std::string json_args;
   base::JSONWriter::Write(event_args.get(), &json_args);
@@ -649,9 +705,11 @@ void FileTaskExecutor::SetupPermissionsAndDispatchEvent(
 void FileTaskExecutor::InitHandlerHostFileAccessPermissions(
     const FileDefinitionList& file_list,
     const Extension* handler_extension,
-    const std::string& action_id) {
+    const std::string& action_id,
+    const base::Closure& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
+  scoped_ptr<std::vector<FilePath> > gdata_paths(new std::vector<FilePath>);
   for (FileDefinitionList::const_iterator iter = file_list.begin();
        iter != file_list.end();
        ++iter) {
@@ -660,15 +718,22 @@ void FileTaskExecutor::InitHandlerHostFileAccessPermissions(
         iter->absolute_path,
         GetAccessPermissionsForHandler(handler_extension, action_id)));
 
-    if (!gdata::util::IsUnderGDataMountPoint(iter->absolute_path))
-      continue;
-
-    // If the file is on gdata mount point, we'll have to give handler host
-    // permissions for file's gdata cache paths.
-    // This has to be called on UI thread.
-    gdata::util::InsertGDataCachePathsPermissions(profile_, iter->absolute_path,
-        &handler_host_permissions_);
+    if (gdata::util::IsUnderGDataMountPoint(iter->absolute_path))
+      gdata_paths->push_back(iter->virtual_path);
   }
+
+  if (gdata_paths->empty()) {
+    // Invoke callback if none of the files are on gdata mount point.
+    callback.Run();
+    return;
+  }
+
+  // For files on gdata mount point, we'll have to give handler host permissions
+  // for their cache paths. This has to be called on UI thread.
+  gdata::util::InsertGDataCachePathsPermissions(profile_,
+                                                gdata_paths.Pass(),
+                                                &handler_host_permissions_,
+                                                callback);
 }
 
 void FileTaskExecutor::SetupHandlerHostFileAccessPermissions(int handler_pid) {

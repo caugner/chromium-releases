@@ -45,7 +45,9 @@ class NonFrontendDataTypeController : public DataTypeController {
       ProfileSyncService* sync_service);
 
   // DataTypeController interface.
-  virtual void Start(const StartCallback& start_callback) OVERRIDE;
+  virtual void LoadModels(
+      const ModelLoadCallback& model_load_callback) OVERRIDE;
+  virtual void StartAssociating(const StartCallback& start_callback) OVERRIDE;
   virtual void Stop() OVERRIDE;
   virtual syncable::ModelType type() const = 0;
   virtual browser_sync::ModelSafeGroup model_safe_group() const = 0;
@@ -54,8 +56,6 @@ class NonFrontendDataTypeController : public DataTypeController {
 
   // DataTypeErrorHandler interface.
   // Note: this is performed on the datatype's thread.
-  virtual void OnUnrecoverableError(const tracked_objects::Location& from_here,
-                                    const std::string& message) OVERRIDE;
   virtual void OnSingleDatatypeUnrecoverableError(
       const tracked_objects::Location& from_here,
       const std::string& message) OVERRIDE;
@@ -65,6 +65,9 @@ class NonFrontendDataTypeController : public DataTypeController {
   NonFrontendDataTypeController();
 
   virtual ~NonFrontendDataTypeController();
+
+  // DataTypeController interface.
+  virtual void OnModelLoaded() OVERRIDE;
 
   // Start any dependent services that need to be running before we can
   // associate models. The default implementation is a no-op.
@@ -78,6 +81,9 @@ class NonFrontendDataTypeController : public DataTypeController {
   // Posts the given task to the backend thread, i.e. the thread the
   // datatype lives on.  Return value: True if task posted successfully,
   // false otherwise.
+  // NOTE: The StopAssociationAsync() implementation relies on the fact that
+  // implementations of this API do not hold any references to the DTC while
+  // the task is executing. See http://crbug.com/127706.
   virtual bool PostTaskOnBackendThread(
       const tracked_objects::Location& from_here,
       const base::Closure& task) = 0;
@@ -107,11 +113,6 @@ class NonFrontendDataTypeController : public DataTypeController {
   // Note: this is performed on the frontend (UI) thread.
   virtual void StopModels();
 
-  // Implementation of OnUnrecoverableError that lives on UI thread.
-  virtual void OnUnrecoverableErrorImpl(
-      const tracked_objects::Location& from_here,
-      const std::string& message);
-
   // The actual implementation of Disabling the datatype. This happens
   // on the UI thread.
   virtual void DisableImpl(const tracked_objects::Location& from_here,
@@ -121,16 +122,6 @@ class NonFrontendDataTypeController : public DataTypeController {
   virtual void RecordAssociationTime(base::TimeDelta time);
   // Record causes of start failure. Called on UI thread.
   virtual void RecordStartFailure(StartResult result);
-
-  // Post the association task to the thread the datatype lives on.
-  // Note: this is performed on the frontend (UI) thread.
-  // Return value: True if task posted successfully, False otherwise.
-  //
-  // TODO(akalin): Callers handle false return values inconsistently;
-  // some set the state to NOT_RUNNING, and some set the state to
-  // DISABLED.  Move the error handling inside this function to be
-  // consistent.
-  virtual bool StartAssociationAsync();
 
   // Accessors and mutators used by derived classes.
   ProfileSyncComponentsFactory* profile_sync_factory() const;
@@ -144,7 +135,21 @@ class NonFrontendDataTypeController : public DataTypeController {
   virtual ChangeProcessor* change_processor() const;
   virtual void set_change_processor(ChangeProcessor* change_processor);
 
+  State state_;
+  StartCallback start_callback_;
+  ModelLoadCallback model_load_callback_;
+
  private:
+  // Post the association task to the thread the datatype lives on.
+  // Note: this is performed on the frontend (UI) thread.
+  // Return value: True if task posted successfully, False otherwise.
+  //
+  // TODO(akalin): Callers handle false return values inconsistently;
+  // some set the state to NOT_RUNNING, and some set the state to
+  // DISABLED.  Move the error handling inside this function to be
+  // consistent.
+  virtual bool StartAssociationAsync();
+
   // Build sync components and associate models.
   // Note: this is performed on the datatype's thread.
   void StartAssociation();
@@ -165,9 +170,6 @@ class NonFrontendDataTypeController : public DataTypeController {
   Profile* const profile_;
   ProfileSyncService* const profile_sync_service_;
 
-  State state_;
-
-  StartCallback start_callback_;
   scoped_ptr<AssociatorInterface> model_associator_;
   scoped_ptr<ChangeProcessor> change_processor_;
 
@@ -175,10 +177,6 @@ class NonFrontendDataTypeController : public DataTypeController {
   base::Lock abort_association_lock_;
   bool abort_association_;
   base::WaitableEvent abort_association_complete_;
-
-  // Barrier to ensure that the datatype has been stopped on the DB thread
-  // from the UI thread.
-  base::WaitableEvent datatype_stopped_;
 
   // This is added for debugging purpose.
   // TODO(lipalani): Remove this after debugging.

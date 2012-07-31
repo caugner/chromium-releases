@@ -3,14 +3,15 @@
 // found in the LICENSE file.
 
 #include "chrome/browser/extensions/crx_installer.h"
-#include "chrome/browser/extensions/extension_install_ui.h"
+#include "chrome/browser/extensions/extension_install_prompt.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/browser/profiles/profile.h"
 #include "content/public/browser/notification_service.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -22,6 +23,11 @@ class InfoBarsTest : public InProcessBrowserTest {
  public:
   InfoBarsTest() {}
 
+  void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+    command_line->AppendSwitchASCII(
+        switches::kAppsGalleryInstallAutoConfirmForTests, "accept");
+  }
+
   void InstallExtension(const char* filename) {
     FilePath path = ui_test_utils::GetTestFilePath(
         FilePath().AppendASCII("extensions"), FilePath().AppendASCII(filename));
@@ -32,7 +38,7 @@ class InfoBarsTest : public InProcessBrowserTest {
         chrome::NOTIFICATION_EXTENSION_LOADED,
         content::NotificationService::AllSources());
 
-    ExtensionInstallUI* client = new ExtensionInstallUI(profile);
+    ExtensionInstallPrompt* client = new ExtensionInstallPrompt(browser());
     scoped_refptr<CrxInstaller> installer(
         CrxInstaller::Create(service, client));
     installer->set_install_cause(extension_misc::INSTALL_CAUSE_AUTOMATION);
@@ -67,7 +73,7 @@ IN_PROC_BROWSER_TEST_F(InfoBarsTest, TestInfoBarsCloseOnNewTheme) {
   infobar_added_2.Wait();
   infobar_removed_1.Wait();
   EXPECT_EQ(0u,
-            browser()->GetTabContentsWrapperAt(0)->infobar_tab_helper()->
+            browser()->GetTabContentsAt(0)->infobar_tab_helper()->
                 infobar_count());
 
   ui_test_utils::WindowedNotificationObserver infobar_removed_2(
@@ -76,6 +82,6 @@ IN_PROC_BROWSER_TEST_F(InfoBarsTest, TestInfoBarsCloseOnNewTheme) {
   ThemeServiceFactory::GetForProfile(browser()->profile())->UseDefaultTheme();
   infobar_removed_2.Wait();
   EXPECT_EQ(0u,
-            browser()->GetSelectedTabContentsWrapper()->infobar_tab_helper()->
+            browser()->GetActiveTabContents()->infobar_tab_helper()->
                 infobar_count());
 }

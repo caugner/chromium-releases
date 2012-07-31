@@ -41,25 +41,26 @@ void PartialScreenshotView::StartPartialScreenshot(
   views::Widget* widget = new views::Widget;
   PartialScreenshotView* view = new PartialScreenshotView(
       screenshot_delegate);
-
+  aura::RootWindow* root_window = Shell::GetActiveRootWindow();
   views::Widget::InitParams params(
       views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
   params.transparent = true;
   params.delegate = view;
   // The partial screenshot rectangle has to be at the real top of
   // the screen.
-  params.parent = Shell::GetInstance()->GetContainer(
+  params.parent = Shell::GetContainer(
+      root_window,
       internal::kShellWindowId_OverlayContainer);
 
   widget->Init(params);
   widget->SetContentsView(view);
-  widget->SetBounds(Shell::GetRootWindow()->bounds());
+  widget->SetBounds(root_window->bounds());
   widget->GetNativeView()->SetName("PartialScreenshotView");
   widget->StackAtTop();
   widget->Show();
   // Captures mouse events in case that context menu already captures the
   // events.  This will close the context menu.
-  widget->GetNativeView()->SetCapture(ui::CW_LOCK_MOUSE | ui::CW_LOCK_TOUCH);
+  widget->GetNativeView()->SetCapture();
 
   view->set_window(widget->GetNativeWindow());
   Shell::GetInstance()->partial_screenshot_filter()->Activate(view);
@@ -117,7 +118,7 @@ void PartialScreenshotView::OnMouseReleased(const views::MouseEvent& event) {
 
   is_dragging_ = false;
   if (screenshot_delegate_) {
-    aura::RootWindow *root_window = Shell::GetRootWindow();
+    aura::RootWindow *root_window = Shell::GetPrimaryRootWindow();
     screenshot_delegate_->HandleTakePartialScreenshot(
         root_window, root_window->bounds().Intersect(GetScreenshotRect()));
   }

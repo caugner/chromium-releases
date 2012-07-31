@@ -9,6 +9,7 @@
 
 #include "base/basictypes.h"
 #include "base/callback.h"
+#include "base/time.h"
 #include "chromeos/chromeos_export.h"
 #include "chromeos/dbus/dbus_client_implementation_type.h"
 
@@ -50,6 +51,13 @@ class CHROMEOS_EXPORT PowerManagerClient {
     // |level| is of the range [0, 100].
     // |user_initiated| is true if the action is initiated by the user.
     virtual void BrightnessChanged(int level, bool user_initiated) {}
+
+    // Called when a screen is turned on or off to request that Chrome enable or
+    // disable the corresponding CRTC for the output.
+    // |power_on| The new state of the power setting.
+    // |all_displays| True if this applies to all displays or false if it is
+    // the internal display only.
+    virtual void ScreenPowerSet(bool power_on, bool all_displays) {}
 
     // Called when power supply polling takes place.  |status| is a data
     // structure that contains the current state of the power supply.
@@ -141,6 +149,11 @@ class CHROMEOS_EXPORT PowerManagerClient {
   // Notifies PowerManager that screen is unlocked.
   virtual void NotifyScreenUnlockCompleted() = 0;
 
+  // Return whether or not the screen is locked. Implementation should cache
+  // this state so that it can return immediately. Useful for observers that
+  // need to know the current screen lock state when they are added.
+  virtual bool GetIsScreenLocked() = 0;
+
   // Idle management functions:
 
   // Calculates idle time asynchronously, after the idle time request has
@@ -158,6 +171,15 @@ class CHROMEOS_EXPORT PowerManagerClient {
   // Requests that the observers be notified in case of an Idle->Active event.
   // NOTE: Like the previous request, this will also get triggered exactly once.
   virtual void RequestActiveNotification() = 0;
+
+  // Notifies the power manager that the user is active (i.e. generating input
+  // events).
+  virtual void NotifyUserActivity(
+      const base::TimeTicks& last_activity_time) = 0;
+
+  // Notifies the power manager that a video is currently playing.
+  virtual void NotifyVideoActivity(
+      const base::TimeTicks& last_activity_time) = 0;
 
   // Override the current power state on the machine. The overrides will be
   // applied to the request ID specified. To specify a new request; use 0 as

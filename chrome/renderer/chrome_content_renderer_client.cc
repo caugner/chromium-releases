@@ -18,11 +18,11 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/content_settings_pattern.h"
-#include "chrome/common/external_ipc_fuzzer.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_process_policy.h"
 #include "chrome/common/extensions/extension_set.h"
+#include "chrome/common/external_ipc_fuzzer.h"
 #include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
@@ -53,6 +53,7 @@
 #include "chrome/renderer/prerender/prerender_dispatcher.h"
 #include "chrome/renderer/prerender/prerender_helper.h"
 #include "chrome/renderer/prerender/prerender_webmediaplayer.h"
+#include "chrome/renderer/prerender/prerenderer_client.h"
 #include "chrome/renderer/print_web_view_helper.h"
 #include "chrome/renderer/renderer_histogram_snapshots.h"
 #include "chrome/renderer/safe_browsing/malware_dom_details.h"
@@ -64,6 +65,7 @@
 #include "chrome/renderer/spellchecker/spellcheck_provider.h"
 #include "chrome/renderer/translate_helper.h"
 #include "chrome/renderer/visitedlink_slave.h"
+#include "content/public/common/content_constants.h"
 #include "content/public/renderer/render_thread.h"
 #include "content/public/renderer/render_view.h"
 #include "grit/generated_resources.h"
@@ -82,17 +84,25 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLError.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLRequest.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "webkit/plugins/npapi/plugin_list.h"
 #include "webkit/plugins/ppapi/plugin_module.h"
 #include "webkit/plugins/ppapi/ppapi_interface_factory.h"
 
+using autofill::AutofillAgent;
+using autofill::PasswordAutofillManager;
+using autofill::PasswordGenerationManager;
+using content::RenderThread;
+using extensions::Extension;
 using WebKit::WebCache;
 using WebKit::WebConsoleMessage;
 using WebKit::WebDataSource;
 using WebKit::WebDocument;
 using WebKit::WebFrame;
 using WebKit::WebPlugin;
+using webkit::WebPluginInfo;
+using webkit::WebPluginMimeType;
 using WebKit::WebPluginParams;
 using WebKit::WebSecurityOrigin;
 using WebKit::WebSecurityPolicy;
@@ -102,12 +112,6 @@ using WebKit::WebURLError;
 using WebKit::WebURLRequest;
 using WebKit::WebURLResponse;
 using WebKit::WebVector;
-using autofill::AutofillAgent;
-using autofill::PasswordAutofillManager;
-using autofill::PasswordGenerationManager;
-using content::RenderThread;
-using webkit::WebPluginInfo;
-using webkit::WebPluginMimeType;
 
 namespace {
 
@@ -211,6 +215,11 @@ void ChromeContentRendererClient::RenderThreadStarted() {
   WebSecurityPolicy::registerURLSchemeAsLocal(drive_scheme);
 #endif
 
+#if defined(OS_ANDROID)
+  WebString content_scheme(ASCIIToUTF16(chrome::kContentScheme));
+  WebSecurityPolicy::registerURLSchemeAsLocal(content_scheme);
+#endif
+
   // chrome: pages should not be accessible by bookmarklets or javascript:
   // URLs typed in the omnibox.
   WebSecurityPolicy::registerURLSchemeAsNotAllowingJavascriptURLs(
@@ -225,6 +234,14 @@ void ChromeContentRendererClient::RenderThreadStarted() {
 
   // chrome-extension: resources should be allowed to receive CORS requests.
   WebSecurityPolicy::registerURLSchemeAsCORSEnabled(extension_scheme);
+
+  WebString extension_resource_scheme(
+      ASCIIToUTF16(chrome::kExtensionResourceScheme));
+  WebSecurityPolicy::registerURLSchemeAsSecure(extension_resource_scheme);
+
+  // chrome-extension-resource: resources should be allowed to receive CORS
+  // requests.
+  WebSecurityPolicy::registerURLSchemeAsCORSEnabled(extension_resource_scheme);
 }
 
 void ChromeContentRendererClient::RenderViewCreated(
@@ -237,9 +254,12 @@ void ChromeContentRendererClient::RenderViewCreated(
   }
   new ExtensionHelper(render_view, extension_dispatcher_.get());
   new PageLoadHistograms(render_view, histogram_snapshots_.get());
+#if defined(ENABLE_PRINTING)
   new PrintWebViewHelper(render_view);
+#endif
   new SearchBox(render_view);
   new SpellCheckProvider(render_view, this);
+  new prerender::PrerendererClient(render_view);
 #if defined(ENABLE_SAFE_BROWSING)
   safe_browsing::MalwareDOMDetails::Create(render_view);
 #endif
@@ -248,6 +268,10 @@ void ChromeContentRendererClient::RenderViewCreated(
       new PasswordAutofillManager(render_view);
   AutofillAgent* autofill_agent = new AutofillAgent(render_view,
                                                     password_autofill_manager);
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnablePasswordGeneration)) {
+    new PasswordGenerationManager(render_view);
+  }
   PageClickTracker* page_click_tracker = new PageClickTracker(render_view);
   // Note that the order of insertion of the listeners is important.
   // The password_autocomplete_manager takes the first shot at processing the
@@ -264,10 +288,6 @@ void ChromeContentRendererClient::RenderViewCreated(
   if (CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kDomAutomationController)) {
     new AutomationRendererHelper(render_view);
-  }
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnablePasswordGeneration)) {
-    new PasswordGenerationManager(render_view);
   }
 }
 
@@ -291,9 +311,19 @@ bool ChromeContentRendererClient::OverrideCreatePlugin(
   ChromeViewHostMsg_GetPluginInfo_Status status;
   webkit::WebPluginInfo plugin_info;
   std::string actual_mime_type;
+  std::string orig_mime_type = params.mimeType.utf8();
+
+  std::string browser_plugin_switch = CommandLine::ForCurrentProcess()->
+      GetSwitchValueASCII(switches::kBrowserPlugin);
+  if (orig_mime_type == content::kBrowserPluginMimeType &&
+      (browser_plugin_switch == switches::kBrowserPluginEnabled ||
+       (browser_plugin_switch == switches::kBrowserPluginPlatformApps &&
+        ExtensionHelper::Get(render_view)->view_type() == VIEW_TYPE_APP_SHELL)))
+      return false;
+
   render_view->Send(new ChromeViewHostMsg_GetPluginInfo(
       render_view->GetRoutingID(), GURL(params.url),
-      frame->top()->document().url(), params.mimeType.utf8(),
+      frame->top()->document().url(), orig_mime_type,
       &status, &plugin_info, &actual_mime_type));
   *plugin = CreatePlugin(render_view, frame, params,
                          status, plugin_info, actual_mime_type);
@@ -316,6 +346,7 @@ ChromeContentRendererClient::OverrideCreateWebMediaPlayer(
     base::WeakPtr<webkit_media::WebMediaPlayerDelegate> delegate,
     media::FilterCollection* collection,
     WebKit::WebAudioSourceProvider* audio_source_provider,
+    media::AudioRendererSink* audio_renderer_sink,
     media::MessageLoopFactory* message_loop_factory,
     webkit_media::MediaStreamClient* media_stream_client,
     media::MediaLog* media_log) {
@@ -323,8 +354,8 @@ ChromeContentRendererClient::OverrideCreateWebMediaPlayer(
     return NULL;
 
   return new prerender::PrerenderWebMediaPlayer(render_view, frame, client,
-      delegate, collection, audio_source_provider, message_loop_factory,
-      media_stream_client, media_log);
+      delegate, collection, audio_source_provider, audio_renderer_sink,
+      message_loop_factory, media_stream_client, media_log);
 }
 
 WebPlugin* ChromeContentRendererClient::CreatePlugin(
@@ -338,7 +369,17 @@ WebPlugin* ChromeContentRendererClient::CreatePlugin(
   GURL url(original_params.url);
   std::string orig_mime_type = original_params.mimeType.utf8();
   PluginPlaceholder* placeholder = NULL;
-  if (status_value == ChromeViewHostMsg_GetPluginInfo_Status::kNotFound) {
+
+  // If the browser plugin is to be enabled, this should be handled by the
+  // renderer, so the code won't reach here due to the early exit in
+  // OverrideCreatePlugin.
+  if (status_value == ChromeViewHostMsg_GetPluginInfo_Status::kNotFound ||
+      orig_mime_type == content::kBrowserPluginMimeType) {
+#if defined(ENABLE_MOBILE_YOUTUBE_PLUGIN)
+    if (PluginPlaceholder::IsYouTubeURL(url, orig_mime_type))
+      return PluginPlaceholder::CreateMobileYoutubePlugin(render_view, frame,
+          original_params)->plugin();
+#endif
     MissingPluginReporter::GetInstance()->ReportPluginMissing(
         orig_mime_type, url);
     placeholder = PluginPlaceholder::CreateMissingPlugin(
@@ -381,7 +422,7 @@ WebPlugin* ChromeContentRendererClient::CreatePlugin(
              ChromeViewHostMsg_GetPluginInfo_Status::kUnauthorized ||
          status_value == ChromeViewHostMsg_GetPluginInfo_Status::kClickToPlay ||
          status_value == ChromeViewHostMsg_GetPluginInfo_Status::kBlocked) &&
-        observer->plugins_temporarily_allowed()) {
+        observer->IsPluginTemporarilyAllowed(group->identifier())) {
       status_value = ChromeViewHostMsg_GetPluginInfo_Status::kAllowed;
     }
 
@@ -436,7 +477,7 @@ WebPlugin* ChromeContentRendererClient::CreatePlugin(
                     "Chrome Web Store can load NaCl modules without enabling "
                     "Native Client in about:flags."));
             placeholder = PluginPlaceholder::CreateBlockedPlugin(
-                render_view, frame, params, plugin, name,
+                render_view, frame, params, plugin, group->identifier(), name,
                 IDR_BLOCKED_PLUGIN_HTML, IDS_PLUGIN_BLOCKED);
             break;
           }
@@ -448,7 +489,7 @@ WebPlugin* ChromeContentRendererClient::CreatePlugin(
         //                reduce the chance of future regressions.
         if (prerender::PrerenderHelper::IsPrerendering(render_view)) {
           placeholder = PluginPlaceholder::CreateBlockedPlugin(
-              render_view, frame, params, plugin, name,
+              render_view, frame, params, plugin, group->identifier(), name,
               IDR_CLICK_TO_PLAY_PLUGIN_HTML, IDS_PLUGIN_LOAD);
           placeholder->set_blocked_for_prerendering(true);
           placeholder->set_allow_loading(true);
@@ -459,14 +500,14 @@ WebPlugin* ChromeContentRendererClient::CreatePlugin(
       }
       case ChromeViewHostMsg_GetPluginInfo_Status::kDisabled: {
         placeholder = PluginPlaceholder::CreateBlockedPlugin(
-            render_view, frame, params, plugin, name,
+            render_view, frame, params, plugin, group->identifier(), name,
             IDR_DISABLED_PLUGIN_HTML, IDS_PLUGIN_DISABLED);
         break;
       }
       case ChromeViewHostMsg_GetPluginInfo_Status::kOutdatedBlocked: {
 #if defined(ENABLE_PLUGIN_INSTALLATION)
         placeholder = PluginPlaceholder::CreateBlockedPlugin(
-            render_view, frame, params, plugin, name,
+            render_view, frame, params, plugin, group->identifier(), name,
             IDR_BLOCKED_PLUGIN_HTML, IDS_PLUGIN_OUTDATED);
         placeholder->set_allow_loading(true);
         render_view->Send(new ChromeViewHostMsg_BlockedOutdatedPlugin(
@@ -479,22 +520,24 @@ WebPlugin* ChromeContentRendererClient::CreatePlugin(
       }
       case ChromeViewHostMsg_GetPluginInfo_Status::kOutdatedDisallowed: {
         placeholder = PluginPlaceholder::CreateBlockedPlugin(
-            render_view, frame, params, plugin, name,
+            render_view, frame, params, plugin, group->identifier(), name,
             IDR_BLOCKED_PLUGIN_HTML, IDS_PLUGIN_OUTDATED);
         break;
       }
       case ChromeViewHostMsg_GetPluginInfo_Status::kUnauthorized: {
         placeholder = PluginPlaceholder::CreateBlockedPlugin(
-            render_view, frame, params, plugin, name,
+            render_view, frame, params, plugin, group->identifier(), name,
             IDR_BLOCKED_PLUGIN_HTML, IDS_PLUGIN_NOT_AUTHORIZED);
         placeholder->set_allow_loading(true);
         render_view->Send(new ChromeViewHostMsg_BlockedUnauthorizedPlugin(
-            render_view->GetRoutingID(), group->GetGroupName()));
+            render_view->GetRoutingID(),
+            group->GetGroupName(),
+            group->identifier()));
         break;
       }
       case ChromeViewHostMsg_GetPluginInfo_Status::kClickToPlay: {
         placeholder = PluginPlaceholder::CreateBlockedPlugin(
-            render_view, frame, params, plugin, name,
+            render_view, frame, params, plugin, group->identifier(), name,
             IDR_CLICK_TO_PLAY_PLUGIN_HTML, IDS_PLUGIN_LOAD);
         placeholder->set_allow_loading(true);
         RenderThread::Get()->RecordUserMetrics("Plugin_ClickToPlay");
@@ -503,7 +546,7 @@ WebPlugin* ChromeContentRendererClient::CreatePlugin(
       }
       case ChromeViewHostMsg_GetPluginInfo_Status::kBlocked: {
         placeholder = PluginPlaceholder::CreateBlockedPlugin(
-            render_view, frame, params, plugin, name,
+            render_view, frame, params, plugin, group->identifier(), name,
             IDR_BLOCKED_PLUGIN_HTML, IDS_PLUGIN_BLOCKED);
         placeholder->set_allow_loading(true);
         RenderThread::Get()->RecordUserMetrics("Plugin_Blocked");
@@ -645,7 +688,8 @@ void ChromeContentRendererClient::GetNavigationErrorStrings(
     }
 
     const base::StringPiece template_html(
-        ResourceBundle::GetSharedInstance().GetRawDataResource(resource_id));
+        ResourceBundle::GetSharedInstance().GetRawDataResource(
+            resource_id, ui::SCALE_FACTOR_NONE));
     if (template_html.empty()) {
       NOTREACHED() << "unable to load template. ID: " << resource_id;
     } else {
@@ -730,15 +774,23 @@ bool ChromeContentRendererClient::ShouldFork(WebFrame* frame,
 bool ChromeContentRendererClient::WillSendRequest(WebKit::WebFrame* frame,
                                                   const GURL& url,
                                                   GURL* new_url) {
-  // If the request is for an extension resource, check whether it should be
-  // allowed. If not allowed, we reset the URL to something invalid to prevent
-  // the request and cause an error.
+  // Check whether the request should be allowed. If not allowed, we reset the
+  // URL to something invalid to prevent the request and cause an error.
   if (url.SchemeIs(chrome::kExtensionScheme) &&
       !ExtensionResourceRequestPolicy::CanRequestResource(
           url,
           frame,
           extension_dispatcher_->extensions())) {
     *new_url = GURL("chrome-extension://invalid/");
+    return true;
+
+  }
+
+  if (url.SchemeIs(chrome::kExtensionResourceScheme) &&
+      !ExtensionResourceRequestPolicy::CanRequestExtensionResourceScheme(
+          url,
+          frame)) {
+    *new_url = GURL("chrome-extension-resource://invalid/");
     return true;
   }
 
@@ -852,8 +904,14 @@ bool ChromeContentRendererClient::CrossesExtensionExtents(
     old_url = frame->top()->opener()->top()->document().url();
   }
 
+  // Only consider keeping non-app URLs in an app process if this window
+  // has an opener (in which case it might be an OAuth popup that tries to
+  // script an iframe within the app).
+  bool should_consider_workaround = !!frame->opener();
+
   return extensions::CrossesExtensionProcessBoundary(
-      extensions, ExtensionURLInfo(old_url), ExtensionURLInfo(new_url));
+      extensions, ExtensionURLInfo(old_url), ExtensionURLInfo(new_url),
+      should_consider_workaround);
 }
 
 void ChromeContentRendererClient::OnPurgeMemory() {

@@ -5,8 +5,10 @@
 
 import json
 import os.path
-import sys
 import re
+import sys
+
+import schema_util
 
 # This file is a peer to json_schema.py. Each of these files understands a
 # certain format describing APIs (either JSON or IDL), reads files written
@@ -95,6 +97,28 @@ class Dictionary(object):
              'properties': properties,
              'type': 'object' }
 
+class Enum(object):
+  '''
+  Given an IDL Enum node, converts into a Python dictionary that the JSON
+  schema compiler expects to see.
+  '''
+  def __init__(self, enum_node):
+    self.node = enum_node
+
+  def process(self, callbacks):
+    enum = []
+    for node in self.node.children:
+      if node.cls == 'EnumItem':
+        name = node.GetName()
+        enum.append(name)
+      else:
+        sys.exit("Did not process %s %s" % (node.cls, node))
+    return { "id" : self.node.GetName(),
+             'enum': enum,
+             'type': 'string' }
+
+
+
 class Member(object):
   '''
   Given an IDL dictionary or interface member, converts into a name/value pair
@@ -107,10 +131,9 @@ class Member(object):
   def process(self, callbacks):
     properties = {}
     name = self.node.GetName()
-    if self.node.GetProperty('OPTIONAL'):
-      properties['optional'] = True
-    if self.node.GetProperty('nodoc'):
-      properties['nodoc'] = True
+    for property_name in ('OPTIONAL', 'nodoc', 'nocompile'):
+      if self.node.GetProperty(property_name):
+        properties[property_name.lower()] = True
     is_function = False
     parameter_comments = {}
     for node in self.node.children:
@@ -175,6 +198,9 @@ class Typeref(object):
       instance_of = self.parent.GetProperty('instanceOf')
       if instance_of:
         properties['isInstanceOf'] = instance_of
+    elif self.typeref == 'ArrayBuffer':
+      properties['type'] = 'binary'
+      properties['isInstanceOf'] = 'ArrayBuffer'
     elif self.typeref is None:
       properties['type'] = 'function'
     else:
@@ -211,6 +237,8 @@ class Namespace(object):
         self.functions = self.process_interface(node)
       elif cls == "Interface" and node.GetName() == "Events":
         self.events = self.process_interface(node)
+      elif cls == "Enum":
+        self.types.append(Enum(node).process(self.callbacks))
       else:
         sys.exit("Did not process %s %s" % (node.cls, node))
 
@@ -256,6 +284,7 @@ class IDLSchema(object):
           continue
       else:
         sys.exit("Did not process %s %s" % (node.cls, node))
+    schema_util.PrefixSchemasWithNamespace(namespaces)
     return namespaces
 
 def Load(filename):

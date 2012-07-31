@@ -15,15 +15,13 @@
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/speech_recognition_event_listener.h"
 
-class Extension;
 class Profile;
-class SpeechInputExtensionNotification;
 
 namespace content {
 class NotificationRegistrar;
 struct SpeechRecognitionError;
+class SpeechRecognitionManager;
 struct SpeechRecognitionResult;
-class SpeechRecognizer;
 }
 
 namespace net {
@@ -40,10 +38,11 @@ class SpeechInputExtensionInterface {
   virtual void StartRecording(
       content::SpeechRecognitionEventListener* listener,
       net::URLRequestContextGetter* context_getter,
-      int session_id,
+      const std::string& extension_name,
       const std::string& language,
       const std::string& grammar,
-      bool filter_profanities) = 0;
+      bool filter_profanities,
+      int render_process_id) = 0;
 
   virtual void StopRecording(bool recognition_failed) = 0;
   virtual bool HasAudioInputDevices() = 0;
@@ -133,7 +132,8 @@ class SpeechInputExtensionManager
 
   // Methods for API testing.
   void SetSpeechInputExtensionInterface(
-      SpeechInputExtensionInterface* interface);
+      SpeechInputExtensionInterface* speech_interface);
+
   SpeechInputExtensionInterface* GetSpeechInputExtensionInterface();
 
  private:
@@ -144,19 +144,22 @@ class SpeechInputExtensionManager
   virtual void StartRecording(
       content::SpeechRecognitionEventListener* listener,
       net::URLRequestContextGetter* context_getter,
-      int session_id,
+      const std::string& extension_name,
       const std::string& language,
       const std::string& grammar,
-      bool filter_profanities) OVERRIDE;
+      bool filter_profanities,
+      int render_process_id) OVERRIDE;
 
   virtual void StopRecording(bool recognition_failed) OVERRIDE;
 
   // Internal methods.
   void StartOnIOThread(
-      net::URLRequestContextGetter* context_getter,
+      scoped_refptr<net::URLRequestContextGetter> context_getter,
+      const std::string& extension_name,
       const std::string& language,
       const std::string& grammar,
-      bool filter_profanities);
+      bool filter_profanities,
+      int render_process_id);
   void ForceStopOnIOThread();
   void IsRecordingOnIOThread(const IsRecordingCallback& callback);
 
@@ -173,8 +176,11 @@ class SpeechInputExtensionManager
                                 const std::string& json_args);
   void ExtensionUnloaded(const std::string& extension_id);
 
-  void SetInputVolumeOnUIThread(float volume);
   void ResetToIdleState();
+
+  void AbortAllSessionsOnIOThread();
+
+  int GetRenderProcessIDForExtension(const std::string& extension_id) const;
 
   virtual ~SpeechInputExtensionManager();
 
@@ -197,10 +203,10 @@ class SpeechInputExtensionManager
   // Used in the UI thread.
   scoped_ptr<content::NotificationRegistrar> registrar_;
   SpeechInputExtensionInterface* speech_interface_;
-  scoped_ptr<SpeechInputExtensionNotification> notification_;
 
   // Used in the IO thread.
-  scoped_refptr<content::SpeechRecognizer> recognizer_;
+  bool is_recognition_in_progress_;
+  int speech_recognition_session_id_;
 };
 
 #endif  // CHROME_BROWSER_SPEECH_SPEECH_INPUT_EXTENSION_MANAGER_H_

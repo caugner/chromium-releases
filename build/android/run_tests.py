@@ -76,7 +76,6 @@ _TEST_SUITES = ['base_unittests',
                 'ui_unittests',
                ]
 
-
 def FullyQualifiedTestSuites(apk):
   """Return a fully qualified list that represents all known suites.
 
@@ -86,10 +85,10 @@ def FullyQualifiedTestSuites(apk):
   test_suite_dir = os.path.abspath(os.path.join(run_tests_helper.CHROME_DIR,
                                                 'out', 'Release'))
   if apk:
-    # out/Release/$SUITE_apk/ChromeNativeTests-debug.apk
+    # out/Release/$SUITE_apk/$SUITE-debug.apk
     suites = [os.path.join(test_suite_dir,
                            t + '_apk',
-                           'ChromeNativeTests-debug.apk')
+                           t + '-debug.apk')
               for t in _TEST_SUITES]
   else:
     suites = [os.path.join(test_suite_dir, t) for t in _TEST_SUITES]
@@ -159,6 +158,17 @@ class Xvfb(object):
       del os.environ['DISPLAY']
       self._pid = 0
 
+def PrintAnnotationForTestResults(test_results):
+  if test_results.timed_out:
+    print '@@@STEP_WARNINGS@@@'
+  elif test_results.failed:
+    print '@@@STEP_FAILURE@@@'
+  elif test_results.crashed:
+    print '@@@STEP_FAILURE@@@'
+  elif test_results.overall_fail:
+    print '@@@STEP_FAILURE@@@'
+  else:
+    print 'Step success!'  # No annotation needed
 
 def RunTests(device, test_suite, gtest_filter, test_arguments, rebaseline,
              timeout, performance_test, cleanup_test_files, tool,
@@ -193,8 +203,7 @@ def RunTests(device, test_suite, gtest_filter, test_arguments, rebaseline,
       if test_suite in _TEST_SUITES:
         logging.critical('(Remember to include the path: out/Release/%s)',
                          test_suite)
-      return TestResults.FromOkAndFailed([], [BaseTestResult(test_suite, '')],
-                                         False, False)
+      return TestResults.FromRun(failed=[BaseTestResult(test_suite, '')])
     fully_qualified_test_suites = [test_suite]
   else:
     fully_qualified_test_suites = FullyQualifiedTestSuites(apk)
@@ -222,14 +231,7 @@ def RunTests(device, test_suite, gtest_filter, test_arguments, rebaseline,
       log_dump_name, [d for d in debug_info_list if d])
 
   if annotate:
-    if test.test_results.timed_out:
-      print '@@@STEP_WARNINGS@@@'
-    elif test.test_results.failed:
-      print '@@@STEP_FAILURE@@@'
-    elif test.test_results.overall_fail:
-      print '@@@STEP_FAILURE@@@'
-    else:
-      print 'Step success!'  # No annotation needed
+    PrintAnnotationForTestResults(test.test_results)
 
   return TestResults.FromTestResults(results)
 
@@ -239,7 +241,7 @@ class TestSharder(BaseTestSharder):
 
   def __init__(self, attached_devices, test_suite, gtest_filter,
                test_arguments, timeout, rebaseline, performance_test,
-               cleanup_test_files, tool):
+               cleanup_test_files, tool, annotate):
     BaseTestSharder.__init__(self, attached_devices)
     self.test_suite = test_suite
     self.test_suite_basename = os.path.basename(test_suite)
@@ -250,6 +252,7 @@ class TestSharder(BaseTestSharder):
     self.performance_test = performance_test
     self.cleanup_test_files = cleanup_test_files
     self.tool = tool
+    self.annotate = annotate
     test = SingleTestRunner(self.attached_devices[0], test_suite, gtest_filter,
                             test_arguments, timeout, rebaseline,
                             performance_test, cleanup_test_files, tool, 0)
@@ -284,6 +287,8 @@ class TestSharder(BaseTestSharder):
   def OnTestsCompleted(self, test_runners, test_results):
     """Notifies that we completed the tests."""
     test_results.LogFull()
+    if self.annotate:
+      PrintAnnotationForTestResults(test_results)
     if test_results.failed and self.rebaseline:
       test_runners[0].UpdateFilter(test_results.failed)
 
@@ -316,6 +321,8 @@ def _RunATestSuite(options):
     # Wait for all emulators to become available.
     map(lambda buildbot_emulator:buildbot_emulator.ConfirmLaunch(),
         buildbot_emulators)
+  elif options.test_device:
+    attached_devices = [options.test_device]
   else:
     attached_devices = android_commands.GetAttachedDevices()
 
@@ -329,7 +336,8 @@ def _RunATestSuite(options):
                           options.gtest_filter, options.test_arguments,
                           options.timeout, options.rebaseline,
                           options.performance_test,
-                          options.cleanup_test_files, options.tool)
+                          options.cleanup_test_files, options.tool,
+                          options.annotate)
     test_results = sharder.RunShardedTests()
   else:
     test_results = RunTests(attached_devices[0], options.test_suite,
@@ -387,8 +395,6 @@ def Dispatch(options):
 
   if options.use_xvfb:
     xvfb.Stop()
-  if options.annotate:
-    print '@@@BUILD_STEP Test Finished@@@'
   return failures
 
 
@@ -406,6 +412,8 @@ def main(argv):
   option_parser.add_option('-s', '--suite', dest='test_suite',
                            help='Executable name of the test suite to run '
                            '(use -s help to list them)')
+  option_parser.add_option('-d', '--device', dest='test_device',
+                           help='Target device the test suite to run ')
   option_parser.add_option('-r', dest='rebaseline',
                            help='Rebaseline and update *testsuite_disabled',
                            action='store_true',
@@ -452,7 +460,19 @@ def main(argv):
     option_parser.print_usage()
     sys.exit(1)
   run_tests_helper.SetLogLevel(options.verbose_count)
-  return Dispatch(options)
+  failed_tests_count = Dispatch(options)
+
+  # If we're printing annotations then failures of individual test suites are
+  # communicated by printing a STEP_FAILURE message.
+  # Returning a success exit status also prevents the buildbot from incorrectly
+  # marking the last suite as failed if there were failures in other suites in
+  # the batch (this happens because the exit status is a sum of all failures
+  # from all suites, but the buildbot associates the exit status only with the
+  # most recent step).
+  if options.annotate:
+    return 0
+  else:
+    return failed_tests_count
 
 
 if __name__ == '__main__':

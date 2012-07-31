@@ -17,10 +17,10 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "content/public/browser/browser_thread.h"
-#include "sync/internal_api/change_record.h"
-#include "sync/internal_api/read_node.h"
-#include "sync/internal_api/write_node.h"
-#include "sync/internal_api/write_transaction.h"
+#include "sync/internal_api/public/change_record.h"
+#include "sync/internal_api/public/read_node.h"
+#include "sync/internal_api/public/write_node.h"
+#include "sync/internal_api/public/write_transaction.h"
 #include "sync/syncable/syncable.h"  // TODO(tim): Investigating bug 121587.
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/codec/png_codec.h"
@@ -177,7 +177,7 @@ int64 BookmarkChangeProcessor::CreateSyncNode(const BookmarkNode* parent,
 
   // Actually create the node with the appropriate initial position.
   if (!PlaceSyncNode(CREATE, parent, index, trans, &sync_child, associator)) {
-    error_handler->OnUnrecoverableError(FROM_HERE,
+    error_handler->OnSingleDatatypeUnrecoverableError(FROM_HERE,
         "Sync node creation failed; recovery unlikely");
     return sync_api::kInvalidId;
   }
@@ -220,12 +220,15 @@ void BookmarkChangeProcessor::BookmarkNodeChanged(BookmarkModel* model,
                                                  sync_api::kInvalidId) {
       error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
           "Bookmark id not found in model associator on BookmarkNodeChanged");
+      LOG(ERROR) << "Bad id.";
     } else if (!sync_node.GetEntry()->good()) {
       error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
           "Could not InitByIdLookup on BookmarkNodeChanged, good() failed");
+      LOG(ERROR) << "Bad entry.";
     } else if (sync_node.GetEntry()->Get(syncable::IS_DEL)) {
       error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
           "Could not InitByIdLookup on BookmarkNodeChanged, is_del true");
+      LOG(ERROR) << "Deleted entry.";
     } else {
       Cryptographer* crypto = trans.GetCryptographer();
       syncable::ModelTypeSet encrypted_types(crypto->GetEncryptedTypes());
@@ -239,21 +242,25 @@ void BookmarkChangeProcessor::BookmarkNodeChanged(BookmarkModel* model,
             "Could not InitByIdLookup on BookmarkNodeChanged, "
             " Cryptographer thinks bookmarks not encrypted, and CanDecrypt"
             " failed.");
+        LOG(ERROR) << "Case 1.";
       } else if (agreement && can_decrypt) {
         error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
             "Could not InitByIdLookup on BookmarkNodeChanged, "
             " Cryptographer thinks bookmarks are encrypted, and CanDecrypt"
             " succeeded (?!), but DecryptIfNecessary failed.");
+        LOG(ERROR) << "Case 2.";
       } else if (agreement) {
         error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
             "Could not InitByIdLookup on BookmarkNodeChanged, "
             " Cryptographer thinks bookmarks are encrypted, but CanDecrypt"
             " failed.");
+        LOG(ERROR) << "Case 3.";
       } else {
         error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
             "Could not InitByIdLookup on BookmarkNodeChanged, "
             " Cryptographer thinks bookmarks not encrypted, but CanDecrypt"
             " succeeded (super weird, btw)");
+        LOG(ERROR) << "Case 4.";
       }
     }
     return;
@@ -296,7 +303,8 @@ void BookmarkChangeProcessor::BookmarkNodeMoved(BookmarkModel* model,
 
   if (!PlaceSyncNode(MOVE, new_parent, new_index, &trans, &sync_node,
                      model_associator_)) {
-    error_handler()->OnUnrecoverableError(FROM_HERE, std::string());
+    error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
+                                                        std::string());
     return;
   }
 }
@@ -329,7 +337,8 @@ void BookmarkChangeProcessor::BookmarkNodeChildrenReordered(
 
     if (!PlaceSyncNode(MOVE, node, i, &trans, &sync_child,
                        model_associator_)) {
-      error_handler()->OnUnrecoverableError(FROM_HERE, std::string());
+      error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
+                                                          std::string());
       return;
     }
   }
@@ -461,7 +470,7 @@ void BookmarkChangeProcessor::ApplyChangesFromSyncModel(
                                            model->other_node()->child_count(),
                                            string16());
           if (!foster_parent) {
-            error_handler()->OnUnrecoverableError(FROM_HERE,
+            error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
                 "Failed to create foster parent.");
             return;
           }

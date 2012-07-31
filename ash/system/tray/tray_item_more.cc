@@ -7,7 +7,7 @@
 #include "ash/system/tray/system_tray_item.h"
 #include "ash/system/tray/tray_constants.h"
 #include "ash/system/tray/tray_views.h"
-#include "grit/ui_resources.h"
+#include "grit/ui_resources_standard.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
@@ -32,7 +32,7 @@ TrayItemMore::TrayItemMore(SystemTrayItem* owner)
   more_ = new views::ImageView;
   more_->EnableCanvasFlippingForRTLUI(true);
   more_->SetImage(ui::ResourceBundle::GetSharedInstance().GetImageNamed(
-      IDR_AURA_UBER_TRAY_MORE).ToSkBitmap());
+      IDR_AURA_UBER_TRAY_MORE).ToImageSkia());
   AddChildView(more_);
 }
 
@@ -45,8 +45,8 @@ void TrayItemMore::SetLabel(const string16& label) {
   SchedulePaint();
 }
 
-void TrayItemMore::SetImage(const SkBitmap* bitmap) {
-  icon_->SetImage(bitmap);
+void TrayItemMore::SetImage(const gfx::ImageSkia* image_skia) {
+  icon_->SetImage(image_skia);
   SchedulePaint();
 }
 
@@ -61,7 +61,7 @@ void TrayItemMore::ReplaceIcon(views::View* view) {
 }
 
 bool TrayItemMore::PerformAction(const views::Event& event) {
-  owner_->PopupDetailedView(0, true);
+  owner_->TransitionDetailedView();
   return true;
 }
 

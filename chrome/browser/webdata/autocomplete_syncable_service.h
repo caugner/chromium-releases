@@ -14,15 +14,15 @@
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/threading/non_thread_safe.h"
-#include "chrome/browser/sync/api/sync_change.h"
-#include "chrome/browser/sync/api/sync_data.h"
-#include "chrome/browser/sync/api/sync_error.h"
-#include "chrome/browser/sync/api/syncable_service.h"
 #include "chrome/browser/webdata/autofill_change.h"
 #include "chrome/browser/webdata/autofill_entry.h"
 #include "chrome/browser/webdata/web_data_service.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "sync/api/sync_change.h"
+#include "sync/api/sync_data.h"
+#include "sync/api/sync_error.h"
+#include "sync/api/syncable_service.h"
 
 class ProfileSyncServiceAutofillTest;
 class SyncErrorFactory;
@@ -103,8 +103,7 @@ class AutocompleteSyncableService
   // stored and immediately discarded.
   void CreateOrUpdateEntry(const SyncData& data,
                            AutocompleteEntryMap* loaded_data,
-                           std::vector<AutofillEntry>* new_entries,
-                           std::vector<AutofillEntry>* ignored_entries);
+                           std::vector<AutofillEntry>* new_entries);
 
   // Writes |entry| data into supplied |autofill_specifics|.
   static void WriteAutofillEntry(const AutofillEntry& entry,
@@ -127,12 +126,10 @@ class AutocompleteSyncableService
     sync_processor_.reset(sync_processor);
   }
 
-  // Ignore deletions of the following keys as they were never synced.
-  std::set<AutofillKey> keys_to_ignore_;
-
   // Lifetime of AutocompleteSyncableService object is shorter than
   // |web_data_service_| passed to it.
   WebDataService* web_data_service_;
+
   content::NotificationRegistrar notification_registrar_;
 
   // We receive ownership of |sync_processor_| in MergeDataAndStartSyncing() and

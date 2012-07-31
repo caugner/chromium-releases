@@ -11,6 +11,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/synchronization/cancellation_flag.h"
+#include "chrome/browser/autocomplete/url_prefix.h"
 #include "chrome/browser/autocomplete/history_provider.h"
 #include "chrome/browser/autocomplete/history_provider_util.h"
 
@@ -144,10 +145,17 @@ class HistoryURLProvider : public HistoryProvider {
                      Profile* profile,
                      const std::string& languages)
     : HistoryProvider(listener, profile, "History"),
-      prefixes_(GetPrefixes()),
       params_(NULL),
       languages_(languages) {}
 #endif
+
+  // Returns a match corresponding to exactly what the user has typed.
+  // NOTE: This does not set the relevance of the returned match, as different
+  //       callers want different behavior. Callers must set this manually.
+  // This function is static so SearchProvider may construct similar matches.
+  static AutocompleteMatch SuggestExactInput(AutocompleteProvider* provider,
+                                             const AutocompleteInput& input,
+                                             bool trim_http);
 
   // AutocompleteProvider
   virtual void Start(const AutocompleteInput& input,
@@ -184,9 +192,6 @@ class HistoryURLProvider : public HistoryProvider {
 
   ~HistoryURLProvider();
 
-  // Returns the set of prefixes to use for prefixes_.
-  static history::Prefixes GetPrefixes();
-
   // Determines the relevance for a match, given its type.  If
   // |match_type| is NORMAL, |match_number| is a number [0,
   // kMaxSuggestions) indicating the relevance of the match (higher ==
@@ -194,25 +199,11 @@ class HistoryURLProvider : public HistoryProvider {
   // is ignored.  Only called some of the time; for some matches,
   // relevancy scores are assigned consecutively decreasing (1416,
   // 1415, 1414, ...).
-  int CalculateRelevance(MatchType match_type,
-                         size_t match_number) const;
+  int CalculateRelevance(MatchType match_type, size_t match_number) const;
 
   // Helper function that actually launches the two autocomplete passes.
   void RunAutocompletePasses(const AutocompleteInput& input,
                              bool fixup_input_and_run_pass_1);
-
-  // Returns the best prefix that begins |text|.  "Best" means "greatest number
-  // of components".  This may return NULL if no prefix begins |text|.
-  //
-  // |prefix_suffix| (which may be empty) is appended to every attempted
-  // prefix.  This is useful when you need to figure out the innermost match
-  // for some user input in a URL.
-  const history::Prefix* BestPrefix(const GURL& text,
-                                    const string16& prefix_suffix) const;
-
-  // Returns a match corresponding to exactly what the user has typed.
-  AutocompleteMatch SuggestExactInput(const AutocompleteInput& input,
-                                      bool trim_http);
 
   // Given a |match| containing the "what you typed" suggestion created by
   // SuggestExactInput(), looks up its info in the DB.  If found, fills in the
@@ -232,12 +223,24 @@ class HistoryURLProvider : public HistoryProvider {
   bool CanFindIntranetURL(history::URLDatabase* db,
                           const AutocompleteInput& input) const;
 
-  // Determines if |match| is suitable for inline autocomplete, and promotes it
-  // if so.
-  bool PromoteMatchForInlineAutocomplete(
-      HistoryURLProviderParams* params,
-      const history::HistoryMatch& match,
-      const history::HistoryMatches& history_matches);
+  // Determines if |match| is suitable for inline autocomplete.  If so, and if
+  // |params| is non-NULL, promotes the match.  Returns whether |match| is
+  // suitable for inline autocomplete.
+  bool PromoteMatchForInlineAutocomplete(HistoryURLProviderParams* params,
+                                         const history::HistoryMatch& match);
+
+  // Sees if a shorter version of the best match should be created, and if so
+  // places it at the front of |matches|.  This can suggest history URLs that
+  // are prefixes of the best match (if they've been visited enough, compared to
+  // the best match), or create host-only suggestions even when they haven't
+  // been visited before: if the user visited http://example.com/asdf once,
+  // we'll suggest http://example.com/ even if they've never been to it.
+  void PromoteOrCreateShorterSuggestion(
+      history::URLDatabase* db,
+      const HistoryURLProviderParams& params,
+      bool have_what_you_typed_match,
+      const AutocompleteMatch& what_you_typed_match,
+      history::HistoryMatches* matches);
 
   // Sorts the given list of matches.
   void SortMatches(history::HistoryMatches* matches) const;
@@ -271,9 +274,6 @@ class HistoryURLProvider : public HistoryProvider {
       const history::HistoryMatch& history_match,
       MatchType match_type,
       int relevance);
-
-  // Prefixes to try appending to user input when looking for a match.
-  const history::Prefixes prefixes_;
 
   // Params for the current query.  The provider should not free this directly;
   // instead, it is passed as a parameter through the history backend, and the

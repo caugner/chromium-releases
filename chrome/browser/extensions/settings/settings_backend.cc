@@ -11,14 +11,14 @@
 #include "base/logging.h"
 #include "base/memory/linked_ptr.h"
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/extensions/settings/failing_settings_storage.h"
 #include "chrome/browser/extensions/settings/settings_storage_factory.h"
 #include "chrome/browser/extensions/settings/settings_storage_quota_enforcer.h"
 #include "chrome/browser/extensions/settings/settings_sync_processor.h"
 #include "chrome/browser/extensions/settings/settings_sync_util.h"
-#include "chrome/browser/sync/api/sync_error_factory.h"
+#include "chrome/browser/value_store/failing_value_store.h"
 #include "chrome/common/extensions/extension.h"
 #include "content/public/browser/browser_thread.h"
+#include "sync/api/sync_error_factory.h"
 
 using content::BrowserThread;
 
@@ -41,7 +41,7 @@ SettingsBackend::~SettingsBackend() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
 }
 
-SettingsStorage* SettingsBackend::GetStorage(
+ValueStore* SettingsBackend::GetStorage(
     const std::string& extension_id) const {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
   DictionaryValue empty;
@@ -57,13 +57,13 @@ SyncableSettingsStorage* SettingsBackend::GetOrCreateStorageWithSyncData(
     return maybe_storage->second.get();
   }
 
-  SettingsStorage* storage = storage_factory_->Create(base_path_, extension_id);
+  ValueStore* storage = storage_factory_->Create(base_path_, extension_id);
   if (storage) {
     // It's fine to create the quota enforcer underneath the sync layer, since
     // sync will only go ahead if each underlying storage operation succeeds.
     storage = new SettingsStorageQuotaEnforcer(quota_, storage);
   } else {
-    storage = new FailingSettingsStorage();
+    storage = new FailingValueStore();
   }
 
   linked_ptr<SyncableSettingsStorage> syncable_storage(
@@ -158,13 +158,14 @@ SyncDataList SettingsBackend::GetAllSyncData(
 
   for (std::set<std::string>::const_iterator it = known_extension_ids.begin();
       it != known_extension_ids.end(); ++it) {
-    SettingsStorage::ReadResult maybe_settings = GetStorage(*it)->Get();
-    if (maybe_settings.HasError()) {
+    ValueStore::ReadResult maybe_settings = GetStorage(*it)->Get();
+    if (maybe_settings->HasError()) {
       LOG(WARNING) << "Failed to get settings for " << *it << ": " <<
-          maybe_settings.error();
+          maybe_settings->error();
       continue;
     }
-    AddAllSyncData(*it, maybe_settings.settings(), type, &all_sync_data);
+    AddAllSyncData(*it, *maybe_settings->settings().get(),
+                   type, &all_sync_data);
   }
 
   return all_sync_data;

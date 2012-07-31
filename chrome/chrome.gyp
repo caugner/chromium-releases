@@ -264,43 +264,6 @@
       ],
     },
     {
-      # Provides the API that Chrome services use to talk to sync.
-      'target_name': 'syncapi_service',
-      'type': 'static_library',
-      'variables': { 'enable_wexit_time_destructors': 1, },
-      'sources': [
-        'browser/sync/api/syncable_service.cc',
-        'browser/sync/api/syncable_service.h',
-        'browser/sync/api/sync_data.h',
-        'browser/sync/api/sync_data.cc',
-        'browser/sync/api/sync_change.h',
-        'browser/sync/api/sync_change.cc',
-        'browser/sync/api/sync_change_processor.h',
-        'browser/sync/api/sync_change_processor.cc',
-        'browser/sync/api/sync_error.h',
-        'browser/sync/api/sync_error.cc',
-        'browser/sync/api/sync_error_factory.h',
-        'browser/sync/api/sync_error_factory.cc',
-      ],
-      'include_dirs': [
-        '..',
-      ],
-      'dependencies': [
-        '../base/base.gyp:base',
-        '../sync/protocol/sync_proto.gyp:sync_proto',
-        '../sync/sync.gyp:sync',
-      ],
-      'export_dependent_settings': [
-        '../base/base.gyp:base',
-        '../sync/protocol/sync_proto.gyp:sync_proto',
-        '../sync/sync.gyp:sync',
-      ],
-      # Even though this target depends on sync_proto, it doesn't
-      # need to export a hard dependency since we explicitly avoid
-      # including the generated proto header files from this target's
-      # header files.
-    },
-    {
       'target_name': 'service',
       'type': 'static_library',
       'variables': { 'enable_wexit_time_destructors': 1, },
@@ -520,6 +483,15 @@
                 'CHROMIUM_STRIP_SAVE_FILE': 'app/app_asan.saves',
               },
             }],
+            ['component=="shared_library"', {
+              'xcode_settings': {
+                'LD_RUNPATH_SEARCH_PATHS': [
+                  # Get back from Chromium.app/Contents/Versions/V/
+                  #                                    Helper.app/Contents/MacOS
+                  '@loader_path/../../../../../../..',
+                ],
+              },
+            }],
           ],
         },  # target helper_app
         {
@@ -673,6 +645,12 @@
                 '../webkit/support/webkit_support.gyp:glue',
                 '../content/content.gyp:content_plugin',
               ],
+              'xcode_settings': {
+                'LD_RUNPATH_SEARCH_PATHS': [
+                  # Get back from Chromium.app/Contents/Versions/V
+                  '@loader_path/../../../..',
+                ],
+              },
             }],
           ],
           'sources': [
@@ -878,9 +856,6 @@
         {
           'target_name': 'chrome_version_resources',
           'type': 'none',
-          'dependencies': [
-            '../build/util/build_util.gyp:lastchange#target',
-          ],
           'direct_dependent_settings': {
             'include_dirs': [
               '<(SHARED_INTERMEDIATE_DIR)/chrome_version',
@@ -939,9 +914,6 @@
           'target_name': 'chrome_version_header',
           'type': 'none',
           'hard_dependency': 1,
-          'dependencies': [
-            '../build/util/build_util.gyp:lastchange#target',
-          ],
           'actions': [
             {
               'action_name': 'version_header',

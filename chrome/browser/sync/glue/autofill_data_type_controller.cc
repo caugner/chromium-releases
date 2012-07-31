@@ -7,12 +7,13 @@
 #include "base/bind.h"
 #include "base/metrics/histogram.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sync/api/sync_error.h"
 #include "chrome/browser/sync/profile_sync_components_factory.h"
 #include "chrome/browser/webdata/web_data_service.h"
+#include "chrome/browser/webdata/web_data_service_factory.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_source.h"
+#include "sync/api/sync_error.h"
 
 using content::BrowserThread;
 
@@ -43,11 +44,7 @@ void AutofillDataTypeController::Observe(
   DCHECK_EQ(chrome::NOTIFICATION_WEB_DATABASE_LOADED, notification_type);
   DCHECK_EQ(MODEL_STARTING, state());
   notification_registrar_.RemoveAll();
-  set_state(ASSOCIATING);
-  if (!StartAssociationAsync()) {
-    SyncError error(FROM_HERE, "Failed to post association task.", type());
-    StartDoneImpl(ASSOCIATION_FAILED, DISABLED, error);
-  }
+  OnModelLoaded();
 }
 
 AutofillDataTypeController::~AutofillDataTypeController() {
@@ -65,7 +62,8 @@ bool AutofillDataTypeController::StartModels() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK_EQ(MODEL_STARTING, state());
 
-  web_data_service_ = profile()->GetWebDataService(Profile::IMPLICIT_ACCESS);
+  web_data_service_ = WebDataServiceFactory::GetForProfile(
+      profile(), Profile::IMPLICIT_ACCESS);
   if (web_data_service_->IsDatabaseLoaded()) {
     return true;
   } else {

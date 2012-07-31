@@ -10,10 +10,10 @@
 
 #import "base/mac/scoped_sending_event.h"
 #import "base/message_pump_mac.h"
+#include "content/browser/renderer_host/popup_menu_helper_mac.h"
 #include "content/browser/renderer_host/render_view_host_factory.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_view_mac.h"
-#include "content/browser/web_contents/popup_menu_helper_mac.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #import "content/browser/web_contents/web_drag_dest_mac.h"
 #import "content/browser/web_contents/web_drag_source_mac.h"
@@ -22,7 +22,9 @@
 #include "content/public/browser/web_contents_view_delegate.h"
 #include "skia/ext/skia_utils_mac.h"
 #import "third_party/mozilla/NSPasteboard+Utils.h"
+#include "ui/base/clipboard/custom_data_helper.h"
 #import "ui/base/cocoa/focus_tracker.h"
+#include "ui/base/dragdrop/cocoa_dnd_util.h"
 
 using WebKit::WebDragOperation;
 using WebKit::WebDragOperationsMask;
@@ -46,6 +48,7 @@ COMPILE_ASSERT_MATCHING_ENUM(DragOperationEvery);
 - (id)initWithWebContentsViewMac:(WebContentsViewMac*)w;
 - (void)registerDragTypes;
 - (void)setCurrentDragOperation:(NSDragOperation)operation;
+- (WebDropData*)dropData;
 - (void)startDragWithDropData:(const WebDropData&)dropData
             dragOperationMask:(NSDragOperation)operationMask
                         image:(NSImage*)image
@@ -56,11 +59,14 @@ COMPILE_ASSERT_MATCHING_ENUM(DragOperationEvery);
 - (void)viewDidBecomeFirstResponder:(NSNotification*)notification;
 @end
 
-namespace web_contents_view_mac {
-content::WebContentsView* CreateWebContentsView(
+namespace content {
+WebContentsView* CreateWebContentsView(
     WebContentsImpl* web_contents,
-    content::WebContentsViewDelegate* delegate) {
-  return new WebContentsViewMac(web_contents, delegate);
+    WebContentsViewDelegate* delegate,
+    RenderViewHostDelegateView** render_view_host_delegate_view) {
+  WebContentsViewMac* rv = new WebContentsViewMac(web_contents, delegate);
+  *render_view_host_delegate_view = rv;
+  return rv;
 }
 }
 
@@ -248,7 +254,7 @@ void WebContentsViewMac::CancelDragAndCloseTab() {
 }
 
 WebDropData* WebContentsViewMac::GetDropData() const {
-  return NULL;
+  return [cocoa_view_ dropData];
 }
 
 void WebContentsViewMac::UpdateDragCursor(WebDragOperation operation) {
@@ -268,80 +274,6 @@ void WebContentsViewMac::TakeFocus(bool reverse) {
   } else {
     [[cocoa_view_ window] selectNextKeyView:cocoa_view_.get()];
   }
-}
-
-void WebContentsViewMac::CreateNewWindow(
-    int route_id,
-    const ViewHostMsg_CreateWindow_Params& params) {
-  web_contents_view_helper_.CreateNewWindow(web_contents_, route_id, params);
-}
-
-void WebContentsViewMac::CreateNewWidget(
-    int route_id, WebKit::WebPopupType popup_type) {
-  RenderWidgetHostView* widget_view =
-      web_contents_view_helper_.CreateNewWidget(web_contents_,
-                                                route_id,
-                                                false,
-                                                popup_type);
-
-  // A RenderWidgetHostViewMac has lifetime scoped to the view. We'll retain it
-  // to allow it to survive the trip without being hosted.
-  RenderWidgetHostViewMac* widget_view_mac =
-      static_cast<RenderWidgetHostViewMac*>(widget_view);
-  [widget_view_mac->GetNativeView() retain];
-}
-
-void WebContentsViewMac::CreateNewFullscreenWidget(int route_id) {
-  RenderWidgetHostView* widget_view =
-      web_contents_view_helper_.CreateNewWidget(web_contents_,
-                                                route_id,
-                                                true,
-                                                WebKit::WebPopupTypeNone);
-
-  // A RenderWidgetHostViewMac has lifetime scoped to the view. We'll retain it
-  // to allow it to survive the trip without being hosted.
-  RenderWidgetHostViewMac* widget_view_mac =
-      static_cast<RenderWidgetHostViewMac*>(widget_view);
-  [widget_view_mac->GetNativeView() retain];
-}
-
-void WebContentsViewMac::ShowCreatedWindow(int route_id,
-                                           WindowOpenDisposition disposition,
-                                           const gfx::Rect& initial_pos,
-                                           bool user_gesture) {
-  web_contents_view_helper_.ShowCreatedWindow(
-      web_contents_, route_id, disposition, initial_pos, user_gesture);
-}
-
-void WebContentsViewMac::ShowCreatedWidget(
-    int route_id, const gfx::Rect& initial_pos) {
-  RenderWidgetHostView* widget_host_view =
-      web_contents_view_helper_.ShowCreatedWidget(web_contents_,
-                                                  route_id,
-                                                  false,
-                                                  initial_pos);
-
-  // A RenderWidgetHostViewMac has lifetime scoped to the view. Now that it's
-  // properly embedded (or purposefully ignored) we can release the retain we
-  // took in CreateNewWidgetInternal().
-  RenderWidgetHostViewMac* widget_view_mac =
-      static_cast<RenderWidgetHostViewMac*>(widget_host_view);
-  [widget_view_mac->GetNativeView() release];
-}
-
-void WebContentsViewMac::ShowCreatedFullscreenWidget(int route_id) {
-  RenderWidgetHostView* widget_host_view =
-      web_contents_view_helper_.ShowCreatedWidget(web_contents_,
-                                                  route_id,
-                                                  true,
-                                                  gfx::Rect());
-
-  // A RenderWidgetHostViewMac has lifetime scoped to the view. Now that it's
-  // properly embedded (or purposely ignored) we can release the retain we took
-  // in CreateNewFullscreenWidgetInternal().
-  RenderWidgetHostViewMac* widget_view_mac =
-      static_cast<RenderWidgetHostViewMac*>(widget_host_view);
-  [widget_view_mac->GetNativeView() release];
 }
 
 void WebContentsViewMac::ShowContextMenu(
@@ -365,10 +297,12 @@ void WebContentsViewMac::ShowPopupMenu(
     double item_font_size,
     int selected_item,
     const std::vector<WebMenuItem>& items,
-    bool right_aligned) {
+    bool right_aligned,
+    bool allow_multiple_selection) {
   PopupMenuHelper popup_menu_helper(web_contents_->GetRenderViewHost());
   popup_menu_helper.ShowPopupMenu(bounds, item_height, item_font_size,
-                                  selected_item, items, right_aligned);
+                                  selected_item, items, right_aligned,
+                                  allow_multiple_selection);
 }
 
 bool WebContentsViewMac::IsEventTracking() const {
@@ -386,9 +320,10 @@ void WebContentsViewMac::CloseTabAfterEventTracking() {
                     afterDelay:0.0];
 }
 
-void WebContentsViewMac::GetViewBounds(gfx::Rect* out) const {
+gfx::Rect WebContentsViewMac::GetViewBounds() const {
   // This method is not currently used on mac.
   NOTIMPLEMENTED();
+  return gfx::Rect();
 }
 
 void WebContentsViewMac::CloseTab() {
@@ -433,13 +368,25 @@ void WebContentsViewMac::CloseTab() {
 
 // Registers for the view for the appropriate drag types.
 - (void)registerDragTypes {
-  NSArray* types = [NSArray arrayWithObjects:NSStringPboardType,
-      NSHTMLPboardType, NSURLPboardType, nil];
+  NSArray* types = [NSArray arrayWithObjects:
+      ui::kChromeDragDummyPboardType,
+      kWebURLsWithTitlesPboardType,
+      NSURLPboardType,
+      NSStringPboardType,
+      NSHTMLPboardType,
+      NSRTFPboardType,
+      NSFilenamesPboardType,
+      ui::kWebCustomDataPboardType,
+      nil];
   [self registerForDraggedTypes:types];
 }
 
 - (void)setCurrentDragOperation:(NSDragOperation)operation {
   [dragDest_ setCurrentOperation:operation];
+}
+
+- (WebDropData*)dropData {
+  return [dragDest_ currentDropData];
 }
 
 - (WebContentsImpl*)webContents {

@@ -202,7 +202,7 @@ typedef std::vector<URLRow> URLRows;
 enum VisitSource {
   SOURCE_SYNCED = 0,         // Synchronized from somewhere else.
   SOURCE_BROWSED = 1,        // User browsed.
-  SOURCE_EXTENSION = 2,      // Added by an externsion.
+  SOURCE_EXTENSION = 2,      // Added by an extension.
   SOURCE_FIREFOX_IMPORTED = 3,
   SOURCE_IE_IMPORTED = 4,
   SOURCE_SAFARI_IMPORTED = 5,
@@ -597,6 +597,18 @@ struct MostVisitedURL {
 
 // Holds the per-URL information of the filterd url query.
 struct FilteredURL {
+  struct ExtendedInfo {
+    ExtendedInfo();
+    // The absolute number of visits.
+    unsigned int total_visits;
+    // The number of visits, as seen by the Most Visited NTP pane.
+    unsigned int visits;
+    // The total number of seconds that the page was open.
+    int64 duration_opened;
+    // The time when the page was last visited.
+    base::Time last_visit_time;
+  };
+
   FilteredURL();
   explicit FilteredURL(const PageUsageData& data);
   ~FilteredURL();
@@ -604,6 +616,7 @@ struct FilteredURL {
   GURL url;
   string16 title;
   double score;
+  ExtendedInfo extended_info;
 };
 
 // Navigation -----------------------------------------------------------------

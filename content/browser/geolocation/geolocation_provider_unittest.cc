@@ -2,31 +2,27 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/basictypes.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
+#include "base/string16.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/time.h"
 #include "content/browser/geolocation/arbitrator_dependency_factory.h"
-#include "content/browser/geolocation/fake_access_token_store.h"
-#include "content/browser/geolocation/geolocation_observer.h"
 #include "content/browser/geolocation/geolocation_provider.h"
 #include "content/browser/geolocation/location_arbitrator.h"
+#include "content/browser/geolocation/location_provider.h"
 #include "content/browser/geolocation/mock_location_provider.h"
+#include "content/public/browser/access_token_store.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread.h"
+#include "googleurl/src/gurl.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using content::Geoposition;
-using testing::_;
-using testing::DoAll;
-using testing::Invoke;
-using testing::InvokeWithoutArgs;
 using testing::MakeMatcher;
 using testing::Matcher;
 using testing::MatcherInterface;
@@ -42,33 +38,50 @@ class NonSingletonGeolocationProvider : public GeolocationProvider {
 
 class StartStopMockLocationProvider : public MockLocationProvider {
  public:
-  explicit StartStopMockLocationProvider() : MockLocationProvider(&instance_) {
+  StartStopMockLocationProvider(base::WaitableEvent* event) :
+      MockLocationProvider(&instance_),
+      event_(event) {
   }
 
   virtual ~StartStopMockLocationProvider() {
-    Die();
+    event_->Signal();
   }
 
-  MOCK_METHOD0(Die, void());
+ private:
+  base::WaitableEvent* event_;
+};
+
+// The AccessTokenStore will be accessed from the geolocation helper thread. The
+// existing FakeAccessTokenStore class cannot be used here because it is based
+// on gmock and gmock is not thread-safe on Windows.
+// See: http://code.google.com/p/googlemock/issues/detail?id=156
+class TestingAccessTokenStore : public content::AccessTokenStore {
+ public:
+  TestingAccessTokenStore(base::WaitableEvent* event) : event_(event) {}
+
+  virtual void LoadAccessTokens(const LoadAccessTokensCallbackType& callback)
+        OVERRIDE {
+    callback.Run(AccessTokenSet(), NULL);
+    event_->Signal();
+  }
+
+  virtual void SaveAccessToken(const GURL& server_url,
+                               const string16& access_token) OVERRIDE {}
+
+ protected:
+  virtual ~TestingAccessTokenStore() {}
+
+ private:
+  base::WaitableEvent* event_;
 };
 
 class TestingDependencyFactory
     : public DefaultGeolocationArbitratorDependencyFactory {
  public:
-  TestingDependencyFactory(base::WaitableEvent* event) : event_(event) {
-  }
+  TestingDependencyFactory(base::WaitableEvent* event) : event_(event) {}
 
   virtual content::AccessTokenStore* NewAccessTokenStore() OVERRIDE {
-    content::FakeAccessTokenStore* store = new content::FakeAccessTokenStore();
-    EXPECT_CALL(*store, LoadAccessTokens(_))
-        .WillRepeatedly(DoAll(
-            Invoke(store,
-                   &content::FakeAccessTokenStore::DefaultLoadAccessTokens),
-            InvokeWithoutArgs(store,
-                              &content::FakeAccessTokenStore::
-                                  NotifyDelegateTokensLoaded),
-            InvokeWithoutArgs(event_, &base::WaitableEvent::Signal)));
-    return store;
+    return new TestingAccessTokenStore(event_);
   }
 
   virtual LocationProviderBase* NewNetworkLocationProvider(
@@ -76,17 +89,15 @@ class TestingDependencyFactory
       net::URLRequestContextGetter* context,
       const GURL& url,
       const string16& access_token) OVERRIDE {
-    StartStopMockLocationProvider* provider =
-        new StartStopMockLocationProvider();
-    EXPECT_CALL(*provider, Die())
-        .Times(1)
-        .WillOnce(InvokeWithoutArgs(event_, &base::WaitableEvent::Signal));
-    return provider;
+    return new StartStopMockLocationProvider(event_);
   }
 
   virtual LocationProviderBase* NewSystemLocationProvider() OVERRIDE  {
     return NULL;
   }
+
+ protected:
+  virtual ~TestingDependencyFactory() {}
 
  private:
   base::WaitableEvent* event_;
@@ -164,6 +175,11 @@ class GeolocationProviderTest : public testing::Test {
     GeolocationArbitrator::SetDependencyFactoryForTest(NULL);
   }
 
+  void WaitAndReset() {
+    event_.Wait();
+    event_.Reset();
+  }
+
   MessageLoop message_loop_;
   content::TestBrowserThread io_thread_;
 
@@ -186,14 +202,13 @@ TEST_F(GeolocationProviderTest, StartStop) {
   provider_->AddObserver(&null_observer, options);
   EXPECT_TRUE(provider_->IsRunning());
   // Wait for token load request from the arbitrator to come through.
-  event_.Wait();
+  WaitAndReset();
 
-  event_.Reset();
   EXPECT_EQ(MockLocationProvider::instance_->state_,
             MockLocationProvider::LOW_ACCURACY);
   provider_->RemoveObserver(&null_observer);
-  // Wait for the providers to be stopped.
-  event_.Wait();
+  // Wait for the providers to be stopped now that all clients are gone.
+  WaitAndReset();
   EXPECT_TRUE(provider_->IsRunning());
 }
 
@@ -206,7 +221,12 @@ TEST_F(GeolocationProviderTest, OverrideLocationForTesting) {
   MockGeolocationObserver mock_observer;
   EXPECT_CALL(mock_observer, OnLocationUpdate(GeopositionEq(position)));
   provider_->AddObserver(&mock_observer, GeolocationObserverOptions());
+  // Wait for token load request from the arbitrator to come through.
+  WaitAndReset();
+
   provider_->RemoveObserver(&mock_observer);
+  // Wait for the providers to be stopped now that all clients are gone.
+  WaitAndReset();
 }
 
 TEST_F(GeolocationProviderTest, Callback) {
@@ -214,6 +234,8 @@ TEST_F(GeolocationProviderTest, Callback) {
   provider_->RequestCallback(
       base::Bind(&MockGeolocationCallbackWrapper::Callback,
                  base::Unretained(&callback_wrapper)));
+  // Wait for token load request from the arbitrator to come through.
+  WaitAndReset();
 
   content::Geoposition position;
   position.latitude = 12;
@@ -222,6 +244,8 @@ TEST_F(GeolocationProviderTest, Callback) {
   position.timestamp = base::Time::Now();
   EXPECT_CALL(callback_wrapper, Callback(GeopositionEq(position)));
   provider_->OverrideLocationForTesting(position);
+  // Wait for the providers to be stopped now that all clients are gone.
+  WaitAndReset();
 }
 
 }  // namespace

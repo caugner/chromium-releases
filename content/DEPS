@@ -13,12 +13,11 @@ include_rules = [
   "-content",
   "+content/common",
   "+content/public/common",
+  "+content/public/test",
   "+content/test",
 
-  # TODO(ben): remove this
-  "+content/public/browser/native_web_keyboard_event.h",
-
   "+grit/content_resources.h",
+  "+grit/ui_resources_standard.h",
   "+grit/webkit_chromium_resources.h",
   "+grit/webkit_resources.h",
   "+grit/webkit_strings.h",
@@ -54,6 +53,7 @@ include_rules = [
   "+ui/base",
   "+ui/compositor",
   "+ui/gfx",
+  "+ui/gl",
   "+ui/surface",
   # Content knows about grd files, but the specifics of how to get a resource
   # given its id is left to the embedder.
@@ -71,4 +71,7 @@ include_rules = [
   "-ui/aura_shell",
 
   "+webkit",
+
+  # For generated JNI includes
+  "+jni",
 ]

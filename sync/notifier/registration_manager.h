@@ -16,7 +16,7 @@
 #include "base/threading/non_thread_safe.h"
 #include "base/time.h"
 #include "base/timer.h"
-#include "sync/syncable/model_type.h"
+#include "sync/internal_api/public/syncable/model_type.h"
 // For invalidation::InvalidationListener::RegistrationState.
 #include "google/cacheinvalidation/include/invalidation-listener.h"
 
@@ -32,7 +32,7 @@ using ::invalidation::InvalidationListener;
 // implementations include the syncer thread (both versions) and XMPP
 // retries.  The most sophisticated one is URLRequestThrottler; making
 // that generic should work for everyone.
-class RegistrationManager {
+class RegistrationManager : public base::NonThreadSafe {
  public:
   // Constants for exponential backoff (used by tests).
   static const int kInitialRegistrationDelaySeconds;
@@ -164,7 +164,6 @@ class RegistrationManager {
   // Returns true iff the given type, which must be valid, is registered.
   bool IsTypeRegistered(syncable::ModelType model_type) const;
 
-  base::NonThreadSafe non_thread_safe_;
   RegistrationStatus registration_statuses_[syncable::MODEL_TYPE_COUNT];
   // Weak pointer.
   invalidation::InvalidationClient* invalidation_client_;

@@ -27,32 +27,45 @@ class TCPSocket : public Socket {
   explicit TCPSocket(APIResourceEventNotifier* event_notifier);
   virtual ~TCPSocket();
 
-  virtual int Connect(const std::string& address, int port) OVERRIDE;
+  virtual void Connect(const std::string& address,
+                       int port,
+                       const CompletionCallback& callback) OVERRIDE;
   virtual void Disconnect() OVERRIDE;
   virtual int Bind(const std::string& address, int port) OVERRIDE;
-  virtual int Read(scoped_refptr<net::IOBuffer> io_buffer,
-                   int io_buffer_size) OVERRIDE;
-  virtual int Write(scoped_refptr<net::IOBuffer> io_buffer,
-                    int bytes) OVERRIDE;
-  virtual int RecvFrom(scoped_refptr<net::IOBuffer> io_buffer,
-                       int io_buffer_size,
-                       net::IPEndPoint *address) OVERRIDE;
-  virtual int SendTo(scoped_refptr<net::IOBuffer> io_buffer,
-                     int byte_count,
-                     const std::string& address,
-                     int port) OVERRIDE;
-
-  virtual void OnConnect(int result);
+  virtual void Read(int count,
+                    const ReadCompletionCallback& callback) OVERRIDE;
+  virtual void RecvFrom(int count,
+                        const RecvFromCompletionCallback& callback) OVERRIDE;
+  virtual void SendTo(scoped_refptr<net::IOBuffer> io_buffer,
+                      int byte_count,
+                      const std::string& address,
+                      int port,
+                      const CompletionCallback& callback) OVERRIDE;
+  virtual bool SetKeepAlive(bool enable, int delay) OVERRIDE;
+  virtual bool SetNoDelay(bool no_delay) OVERRIDE;
 
   static TCPSocket* CreateSocketForTesting(
       net::TCPClientSocket* tcp_client_socket,
       APIResourceEventNotifier* event_notifier);
 
+ protected:
+  virtual int WriteImpl(net::IOBuffer* io_buffer,
+                        int io_buffer_size,
+                        const net::CompletionCallback& callback) OVERRIDE;
+
  private:
+  void OnConnectComplete(int result);
+  void OnReadComplete(scoped_refptr<net::IOBuffer> io_buffer,
+                      int result);
+
   TCPSocket(net::TCPClientSocket* tcp_client_socket,
             APIResourceEventNotifier* event_notifier);
 
   scoped_ptr<net::TCPClientSocket> socket_;
+
+  CompletionCallback connect_callback_;
+
+  ReadCompletionCallback read_callback_;
 };
 
 }  //  namespace extensions

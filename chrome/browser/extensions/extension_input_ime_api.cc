@@ -128,16 +128,14 @@ bool ReadMenuItems(
 
 namespace events {
 
-const char kOnActivate[] = "experimental.input.ime.onActivate";
-const char kOnDeactivated[] = "experimental.input.ime.onDeactivated";
-const char kOnFocus[] = "experimental.input.ime.onFocus";
-const char kOnBlur[] = "experimental.input.ime.onBlur";
-const char kOnInputContextUpdate[] =
-    "experimental.input.ime.onInputContextUpdate";
-const char kOnKeyEvent[] = "experimental.input.ime.onKeyEvent";
-const char kOnCandidateClicked[] = "experimental.input.ime.onCandidateClicked";
-const char kOnMenuItemActivated[] =
-    "experimental.input.ime.onMenuItemActivated";
+const char kOnActivate[] = "input.ime.onActivate";
+const char kOnDeactivated[] = "input.ime.onDeactivated";
+const char kOnFocus[] = "input.ime.onFocus";
+const char kOnBlur[] = "input.ime.onBlur";
+const char kOnInputContextUpdate[] = "input.ime.onInputContextUpdate";
+const char kOnKeyEvent[] = "input.ime.onKeyEvent";
+const char kOnCandidateClicked[] = "input.ime.onCandidateClicked";
+const char kOnMenuItemActivated[] = "input.ime.onMenuItemActivated";
 
 }  // namespace events
 
@@ -326,7 +324,7 @@ void ExtensionInputImeEventRouter::Init() {}
 bool ExtensionInputImeEventRouter::RegisterIme(
     Profile* profile,
     const std::string& extension_id,
-    const Extension::InputComponentInfo& component) {
+    const extensions::Extension::InputComponentInfo& component) {
   VLOG(1) << "RegisterIme: " << extension_id << " id: " << component.id;
 
   std::map<std::string, chromeos::InputMethodEngine*>& engine_map =
@@ -500,27 +498,34 @@ bool SetCompositionFunction::RunImpl() {
   }
 
   if (args->HasKey(keys::kSegmentsKey)) {
-    ListValue* segment_list;
+    ListValue* segment_list = NULL;
     EXTENSION_FUNCTION_VALIDATE(args->GetList(keys::kSegmentsKey,
                                               &segment_list));
-    int start;
-    int end;
-    std::string style;
 
-    EXTENSION_FUNCTION_VALIDATE(args->GetInteger(keys::kStartKey,
-                                                 &start));
-    EXTENSION_FUNCTION_VALIDATE(args->GetInteger(keys::kEndKey, &end));
-    EXTENSION_FUNCTION_VALIDATE(args->GetString(keys::kStyleKey, &style));
+    for (size_t i = 0; i < segment_list->GetSize(); ++i) {
+      DictionaryValue* segment = NULL;
+      if (!segment_list->GetDictionary(i, &segment))
+        continue;
 
-    segments.push_back(chromeos::InputMethodEngine::SegmentInfo());
-    segments.back().start = start;
-    segments.back().end = end;
-    if (style == keys::kStyleUnderline) {
-      segments.back().style =
-          chromeos::InputMethodEngine::SEGMENT_STYLE_UNDERLINE;
-    } else if (style == keys::kStyleDoubleUnderline) {
-      segments.back().style =
-          chromeos::InputMethodEngine::SEGMENT_STYLE_DOUBLE_UNDERLINE;
+      int start;
+      int end;
+      std::string style;
+
+      EXTENSION_FUNCTION_VALIDATE(segment->GetInteger(keys::kStartKey,
+                                                      &start));
+      EXTENSION_FUNCTION_VALIDATE(segment->GetInteger(keys::kEndKey, &end));
+      EXTENSION_FUNCTION_VALIDATE(segment->GetString(keys::kStyleKey, &style));
+
+      segments.push_back(chromeos::InputMethodEngine::SegmentInfo());
+      segments.back().start = start;
+      segments.back().end = end;
+      if (style == keys::kStyleUnderline) {
+        segments.back().style =
+            chromeos::InputMethodEngine::SEGMENT_STYLE_UNDERLINE;
+      } else if (style == keys::kStyleDoubleUnderline) {
+        segments.back().style =
+            chromeos::InputMethodEngine::SEGMENT_STYLE_DOUBLE_UNDERLINE;
+      }
     }
   }
 

@@ -4,13 +4,21 @@
 
 #include "chrome/browser/extensions/api/declarative_webrequest/webrequest_rules_registry.h"
 
+#include <limits>
+
 #include "chrome/browser/extensions/api/declarative_webrequest/webrequest_condition.h"
 #include "chrome/browser/extensions/api/web_request/web_request_api_helpers.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "net/url_request/url_request.h"
 
 namespace extensions {
 
-WebRequestRulesRegistry::WebRequestRulesRegistry() {}
+WebRequestRulesRegistry::WebRequestRulesRegistry(Profile* profile,
+                                                 Delegate* delegate)
+    : RulesRegistryWithCache(delegate) {
+  if (profile)
+    extension_info_map_ = ExtensionSystem::Get(profile)->info_map();
+}
 
 std::set<WebRequestRule::GlobalRuleId>
 WebRequestRulesRegistry::GetMatches(net::URLRequest* request,
@@ -32,35 +40,76 @@ WebRequestRulesRegistry::GetMatches(net::URLRequest* request,
     if (rule->conditions().IsFulfilled(*url_match, request, request_stage))
       result.insert(rule->id());
   }
-
   return result;
 }
 
 std::list<LinkedPtrEventResponseDelta> WebRequestRulesRegistry::CreateDeltas(
     net::URLRequest* request,
-    RequestStages request_stage) {
+    RequestStages request_stage,
+    const WebRequestRule::OptionalRequestData& optional_request_data) {
   std::set<WebRequestRule::GlobalRuleId> matches =
       GetMatches(request, request_stage);
 
-  std::list<LinkedPtrEventResponseDelta> result;
-
+  // Sort all matching rules by their priority so that they can be processed
+  // in decreasing order.
+  typedef std::pair<WebRequestRule::Priority, WebRequestRule::GlobalRuleId>
+      PriorityRuleIdPair;
+  std::vector<PriorityRuleIdPair> ordered_matches;
+  ordered_matches.reserve(matches.size());
   for (std::set<WebRequestRule::GlobalRuleId>::iterator i = matches.begin();
        i != matches.end(); ++i) {
     RulesMap::const_iterator rule = webrequest_rules_.find(*i);
     CHECK(rule != webrequest_rules_.end());
-    std::list<LinkedPtrEventResponseDelta> rule_result =
-        rule->second->CreateDeltas(request, request_stage);
-    result.splice(result.begin(), rule_result);
+    ordered_matches.push_back(make_pair(rule->second->priority(), *i));
+  }
+  // Sort from rbegin to rend in order to get descending priority order.
+  std::sort(ordered_matches.rbegin(), ordered_matches.rend());
+
+  // Build a map that maps each extension id to the minimum required priority
+  // for rules of that extension. Initially, this priority is -infinite and
+  // will be increased when the rules are processed and raise the bar via
+  // WebRequestIgnoreRulesActions.
+  typedef std::string ExtensionId;
+  typedef std::map<ExtensionId, WebRequestRule::Priority> MinPriorities;
+  MinPriorities min_priorities;
+  for (std::vector<PriorityRuleIdPair>::iterator i = ordered_matches.begin();
+       i != ordered_matches.end(); ++i) {
+    const WebRequestRule::GlobalRuleId& rule_id = i->second;
+    const ExtensionId& extension_id = rule_id.first;
+    min_priorities[extension_id] = std::numeric_limits<int>::min();
   }
 
+  // Create deltas until we have passed the minimum priority.
+  std::list<LinkedPtrEventResponseDelta> result;
+  for (std::vector<PriorityRuleIdPair>::iterator i = ordered_matches.begin();
+       i != ordered_matches.end(); ++i) {
+    const WebRequestRule::Priority priority_of_rule = i->first;
+    const WebRequestRule::GlobalRuleId& rule_id = i->second;
+    const ExtensionId& extension_id = rule_id.first;
+    const WebRequestRule* rule = webrequest_rules_[rule_id].get();
+    CHECK(rule);
+
+    // Skip rule if a previous rule of this extension instructed to ignore
+    // all rules with a lower priority than min_priorities[extension_id].
+    int current_min_priority = min_priorities[extension_id];
+    if (priority_of_rule < current_min_priority)
+      continue;
+
+    std::list<LinkedPtrEventResponseDelta> rule_result =
+        rule->CreateDeltas(request, request_stage, optional_request_data);
+    result.splice(result.begin(), rule_result);
+
+    min_priorities[extension_id] = std::max(current_min_priority,
+                                            rule->GetMinimumPriority());
+  }
   return result;
 }
 
 std::string WebRequestRulesRegistry::AddRulesImpl(
     const std::string& extension_id,
     const std::vector<linked_ptr<RulesRegistry::Rule> >& rules) {
-  // TODO(battre): Retrieve this from somewhere
-  base::Time extension_installation_time;
+  base::Time extension_installation_time =
+      GetExtensionInstallationTime(extension_id);
 
   std::string error;
   RulesMap new_webrequest_rules;
@@ -174,5 +223,13 @@ bool WebRequestRulesRegistry::IsEmpty() const {
 }
 
 WebRequestRulesRegistry::~WebRequestRulesRegistry() {}
+
+base::Time WebRequestRulesRegistry::GetExtensionInstallationTime(
+    const std::string& extension_id) const {
+  if (!extension_info_map_.get())  // May be NULL during testing.
+    return base::Time();
+
+  return extension_info_map_->GetInstallTime(extension_id);
+}
 
 }  // namespace extensions

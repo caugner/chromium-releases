@@ -30,9 +30,9 @@
            so we want to parse it as early as possible -->
       <script src="js/metrics.js"></script>
 
-      <script src="../shared/js/local_strings.js"></script>
+      <script src="../shared/js/load_time_data.js"></script>
       <script src="../shared/js/util.js"></script>
-      <script src="../shared/js/i18n_template.js"></script>
+      <script src="../shared/js/i18n_template_no_process.js"></script>
 
       <script src="../shared/js/cr.js"></script>
       <script src="../shared/js/event_tracker.js"></script>
@@ -68,14 +68,16 @@
       <script src="js/combobutton.js"></script>
 
       <script src="js/util.js"></script>
+      <script src="js/volume_manager.js"></script>
       <script src="js/directory_model.js"></script>
       <script src="js/file_copy_manager.js"></script>
       <script src="js/file_manager.js"></script>
       <script src="js/file_manager_pyauto.js"></script>
       <script src="js/file_transfer_controller.js"></script>
       <script src="js/file_type.js"></script>
-      <script src="js/metadata/metadata_provider.js"></script>
+      <script src="js/media/media_util.js"></script>
       <script src="js/metadata/metadata_cache.js"></script>
+      <script src="js/default_action_dialog.js"></script>
       <!-- For accurate load performance tracking main.js should be
            the last script to include. -->
       <script src="js/main.js"></script>
@@ -123,6 +125,9 @@
           i18n-content=GDATA_SHOW_HOSTED_FILES_OPTION></menuitem>
     </menu>
 
+    <menu id="tasks-menu" class="chrome-menu">
+    </menu>
+
     <div class=dialog-title invisibleif='full-page'>[TITLE]</div>
     <div class=dialog-container>
       <div class=dialog-sidebar>
@@ -132,18 +137,29 @@
       <div class=dialog-main>
         <div class=dialog-header>
           <div class=breadcrumbs></div>
-          <input id="search-box" type="search" tabindex="4">
+          <input id="search-box" type="search" tabindex="4"
+              i18n-values="aria-label:SEARCH_TEXT_LABEL">
 
           <div class="right buttonbar">
-            <button class="left small" id="detail-view">
-              <img src="images/view_list_black_12x12.png">
-            </button>
-            <button class="right small" id="thumbnail-view">
-              <img src="images/view_thumbs_black_12x12.png">
-            </button>
-            <button class="menubutton" id="gdata-settings"
+            <div>
+              <button class="left small" id="detail-view" tabindex="5"
+                  i18n-values="aria-label:DETAIL_VIEW_TOOLTIP">
+                <img src="images/view_list_black_12x12.png">
+              </button>
+              <div class="tooltip" i18n-content=DETAIL_VIEW_TOOLTIP
+                   >[DETAIL VIEW]</div>
+            </div>
+              <div>
+               <button class="right small" id="thumbnail-view" tabindex="6"
+                   i18n-values="aria-label:THUMBNAIL_VIEW_TOOLTIP">
+                <img src="images/view_thumbs_black_12x12.png">
+              </button>
+              <div class="tooltip" i18n-content=THUMBNAIL_VIEW_TOOLTIP
+                   >[THUMBNAIL VIEW]</div>
+            </div>
+            <button class="menubutton" id="gdata-settings" tabindex="7"
                     menu="#docs-settings" visibleif="full-page">
-              <img src="images/settings.svg" alt="Settings">
+              <img src="images/settings.svg">
               <span class="disclosureindicator"></span>
             </button>
           </div>
@@ -157,6 +173,7 @@
               <grid class=thumbnail-grid tabindex=0></grid>
               <div class=spinner></div>
               <div class="gdrive-welcome page"></div>
+              <div id="no-search-results"></div>
             </div>
             <div class=downloads-warning hidden>
               <img src=images/warning_icon_square_26x26.png>
@@ -169,22 +186,23 @@
             </div>
             <div class=preview-summary></div>
             <div class="right buttonbar" visibleif="full-page">
-              <button id="tasks" class="combobutton"></button>
+              <button id="tasks" class="combobutton" menu="#tasks-menu">
+              </button>
               <button id="delete-button" command="#delete"
                       i18n-content="DELETE_BUTTON_LABEL">
               </button>
             </div>
           </div>
-          <div class='unmounted-panel'></div>
+          <div id='unmounted-panel'></div>
         </div>
       </div>
     </div>
     <div class=dialog-footer invisibleif='full-page'>
-      <div class=filename-label i18n-content=FILENAME_LABEL
-           visibleif='saveas-file'
-           >[FILENAME]</div>
-      <input type=text class=filename-input spellcheck=false
-             visibleif='saveas-file'>
+      <div id=filename-input-box>
+        <div class=filename-label i18n-content=FILENAME_LABEL
+             >[FILENAME]</div>
+        <input type=text spellcheck=false>
+      </div>
       <div class=horizontal-spacer></div>
       <button class=ok disabled>[OK]</button>
       <div class=preparing-label i18n-content=PREPARING_LABEL>[PREPARING]</div>

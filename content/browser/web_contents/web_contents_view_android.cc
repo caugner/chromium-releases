@@ -6,6 +6,18 @@
 
 #include "base/logging.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
+#include "content/browser/web_contents/web_contents_impl.h"
+
+namespace content {
+WebContentsView* CreateWebContentsView(
+    WebContentsImpl* web_contents,
+    WebContentsViewDelegate* delegate,
+    RenderViewHostDelegateView** render_view_host_delegate_view) {
+  WebContentsViewAndroid* rv = new WebContentsViewAndroid(web_contents);
+  *render_view_host_delegate_view = rv;
+  return rv;
+}
+}
 
 WebContentsViewAndroid::WebContentsViewAndroid(
     content::WebContents* web_contents)
@@ -100,39 +112,9 @@ void WebContentsViewAndroid::CloseTabAfterEventTracking() {
   NOTIMPLEMENTED();
 }
 
-void WebContentsViewAndroid::GetViewBounds(gfx::Rect* out) const {
+gfx::Rect WebContentsViewAndroid::GetViewBounds() const {
   NOTIMPLEMENTED();
-}
-
-void WebContentsViewAndroid::CreateNewWindow(
-    int route_id,
-    const ViewHostMsg_CreateWindow_Params& params) {
-  NOTIMPLEMENTED();
-}
-
-void WebContentsViewAndroid::CreateNewWidget(
-    int route_id, WebKit::WebPopupType popup_type) {
-  NOTIMPLEMENTED();
-}
-
-void WebContentsViewAndroid::CreateNewFullscreenWidget(int route_id) {
-  NOTIMPLEMENTED();
-}
-
-void WebContentsViewAndroid::ShowCreatedWindow(int route_id,
-                                           WindowOpenDisposition disposition,
-                                           const gfx::Rect& initial_pos,
-                                           bool user_gesture) {
-  NOTIMPLEMENTED();
-}
-
-void WebContentsViewAndroid::ShowCreatedWidget(
-    int route_id, const gfx::Rect& initial_pos) {
-  NOTIMPLEMENTED();
-}
-
-void WebContentsViewAndroid::ShowCreatedFullscreenWidget(int route_id) {
-  NOTIMPLEMENTED();
+  return gfx::Rect();
 }
 
 void WebContentsViewAndroid::ShowContextMenu(
@@ -146,7 +128,8 @@ void WebContentsViewAndroid::ShowPopupMenu(
     double item_font_size,
     int selected_item,
     const std::vector<WebMenuItem>& items,
-    bool right_aligned) {
+    bool right_aligned,
+    bool allow_multiple_selection) {
   NOTIMPLEMENTED();
 }
 

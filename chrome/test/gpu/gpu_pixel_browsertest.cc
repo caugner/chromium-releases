@@ -28,8 +28,8 @@
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/compositor/compositor_setup.h"
 #include "ui/gfx/codec/png_codec.h"
-#include "ui/gfx/gl/gl_switches.h"
 #include "ui/gfx/size.h"
+#include "ui/gl/gl_switches.h"
 
 namespace {
 
@@ -40,7 +40,9 @@ const char kGeneratedDir[] = "generated-dir";
 const char kReferenceDir[] = "reference-dir";
 
 // Corner shadow size.
-const int kCornerDecorationSize = 10;
+const int kCornerDecorationSize = 15;
+// Side shadow size.
+const int kSideDecorationSize = 2;
 
 // Reads and decodes a PNG image to a bitmap. Returns true on success. The PNG
 // should have been encoded using |gfx::PNGCodec::Encode|.
@@ -164,7 +166,7 @@ class GpuPixelBrowserTest : public InProcessBrowserTest {
     js_call << ");";
 
     ASSERT_TRUE(ui_test_utils::ExecuteJavaScript(
-        browser()->GetSelectedWebContents()->GetRenderViewHost(),
+        browser()->GetActiveWebContents()->GetRenderViewHost(),
         L"", js_call.str()));
 
     std::string message;
@@ -317,9 +319,11 @@ class GpuPixelBrowserTest : public InProcessBrowserTest {
       for (int x = 0; x < gen_bmp.width(); ++x) {
         for (int y = 0; y < gen_bmp.height(); ++y) {
           if (skip_bottom_corners &&
-              (x < kCornerDecorationSize ||
-               x >= gen_bmp.width() - kCornerDecorationSize) &&
-              y >= gen_bmp.height() - kCornerDecorationSize)
+              (((x < kCornerDecorationSize ||
+                 x >= gen_bmp.width() - kCornerDecorationSize) &&
+                y >= gen_bmp.height() - kCornerDecorationSize) ||
+               (x < kSideDecorationSize ||
+                x >= gen_bmp.width() - kSideDecorationSize)))
             continue;
           if ((*gen_bmp.getAddr32(x, y) & kAlphaMask) !=
               (*ref_bmp->getAddr32(x, y) & kAlphaMask)) {
@@ -369,7 +373,7 @@ class GpuPixelBrowserTest : public InProcessBrowserTest {
   // have if the tab contents have the desired size.
   gfx::Rect GetNewTabContainerBounds(const gfx::Size& desired_size) {
     gfx::Rect container_rect;
-    browser()->GetSelectedWebContents()->GetContainerBounds(&container_rect);
+    browser()->GetActiveWebContents()->GetContainerBounds(&container_rect);
     // Size cannot be negative, so use a point.
     gfx::Point correction(
         desired_size.width() - container_rect.size().width(),
@@ -389,7 +393,7 @@ class GpuPixelBrowserTest : public InProcessBrowserTest {
 
     gfx::Rect root_bounds = browser()->window()->GetBounds();
     gfx::Rect tab_contents_bounds;
-    browser()->GetSelectedWebContents()->GetContainerBounds(
+    browser()->GetActiveWebContents()->GetContainerBounds(
         &tab_contents_bounds);
 
     gfx::Rect snapshot_bounds(tab_contents_bounds.x() - root_bounds.x(),
@@ -397,7 +401,7 @@ class GpuPixelBrowserTest : public InProcessBrowserTest {
                               tab_contents_bounds.width(),
                               tab_contents_bounds.height());
 
-    gfx::NativeWindow native_window = browser()->window()->GetNativeHandle();
+    gfx::NativeWindow native_window = browser()->window()->GetNativeWindow();
     if (!browser::GrabWindowSnapshot(native_window, &png, snapshot_bounds)) {
       LOG(ERROR) << "browser::GrabWindowSnapShot() failed";
       return false;

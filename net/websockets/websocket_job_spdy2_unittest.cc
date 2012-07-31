@@ -18,7 +18,6 @@
 #include "net/base/mock_host_resolver.h"
 #include "net/base/net_errors.h"
 #include "net/base/ssl_config_service.h"
-#include "net/base/sys_addrinfo.h"
 #include "net/base/test_completion_callback.h"
 #include "net/base/transport_security_state.h"
 #include "net/cookies/cookie_store.h"
@@ -259,8 +258,6 @@ class MockURLRequestContext : public net::URLRequestContext {
     transport_security_state_.EnableHost("upgrademe.com", state);
   }
 
- protected:
-  friend class base::RefCountedThreadSafe<MockURLRequestContext>;
   virtual ~MockURLRequestContext() {}
 
  private:
@@ -289,10 +286,12 @@ class MockHttpTransactionFactory : public net::HttpTransactionFactory {
         spdy_session_pool->Get(host_port_proxy_pair_, net::BoundNetLog());
     EXPECT_TRUE(spdy_session_pool->HasSession(host_port_proxy_pair_));
 
-    transport_params_ = new net::TransportSocketParams(host_port_pair_,
-                                                       net::MEDIUM,
-                                                       false,
-                                                       false);
+    transport_params_ =
+        new net::TransportSocketParams(host_port_pair_,
+                                       net::MEDIUM,
+                                       false,
+                                       false,
+                                       net::OnHostResolutionCallback());
     net::ClientSocketHandle* connection = new net::ClientSocketHandle;
     EXPECT_EQ(net::OK,
               connection->Init(host_port_pair_.ToString(), transport_params_,
@@ -338,11 +337,11 @@ class WebSocketJobSpdy2Test : public PlatformTest {
     SpdySession::set_default_protocol(kProtoSPDY2);
     stream_type_ = STREAM_INVALID;
     cookie_store_ = new MockCookieStore;
-    context_ = new MockURLRequestContext(cookie_store_.get());
+    context_.reset(new MockURLRequestContext(cookie_store_.get()));
   }
   virtual void TearDown() OVERRIDE {
     cookie_store_ = NULL;
-    context_ = NULL;
+    context_.reset();
     websocket_ = NULL;
     socket_ = NULL;
   }
@@ -407,16 +406,9 @@ class WebSocketJobSpdy2Test : public PlatformTest {
 
     websocket_->InitSocketStream(socket_.get());
     websocket_->set_context(context_.get());
-    struct addrinfo addr;
-    memset(&addr, 0, sizeof(struct addrinfo));
-    addr.ai_family = AF_INET;
-    addr.ai_addrlen = sizeof(struct sockaddr_in);
-    struct sockaddr_in sa_in;
-    memset(&sa_in, 0, sizeof(struct sockaddr_in));
-    memcpy(&sa_in.sin_addr, "\x7f\0\0\1", 4);
-    addr.ai_addr = reinterpret_cast<sockaddr*>(&sa_in);
-    addr.ai_next = NULL;
-    websocket_->addresses_ = AddressList::CreateByCopying(&addr);
+    IPAddressNumber ip;
+    ParseIPLiteralToNumber("127.0.0.1", &ip);
+    websocket_->addresses_ = AddressList::CreateFromIPAddress(ip, 0);
   }
   void SkipToConnecting() {
     websocket_->state_ = WebSocketJob::CONNECTING;
@@ -463,7 +455,7 @@ class WebSocketJobSpdy2Test : public PlatformTest {
 
   StreamType stream_type_;
   scoped_refptr<MockCookieStore> cookie_store_;
-  scoped_refptr<MockURLRequestContext> context_;
+  scoped_ptr<MockURLRequestContext> context_;
   scoped_refptr<WebSocketJob> websocket_;
   scoped_refptr<SocketStream> socket_;
   scoped_ptr<MockClientSocketFactory> socket_factory_;

@@ -403,49 +403,6 @@ void ParamTraits<net::IPEndPoint>::Log(const param_type& p, std::string* l) {
   LogParam("IPEndPoint:" + p.ToString(), l);
 }
 
-void ParamTraits<base::PlatformFileInfo>::Write(
-    Message* m, const param_type& p) {
-  WriteParam(m, p.size);
-  WriteParam(m, p.is_directory);
-  WriteParam(m, p.last_modified.ToDoubleT());
-  WriteParam(m, p.last_accessed.ToDoubleT());
-  WriteParam(m, p.creation_time.ToDoubleT());
-}
-
-bool ParamTraits<base::PlatformFileInfo>::Read(
-    const Message* m, PickleIterator* iter, param_type* p) {
-  double last_modified;
-  double last_accessed;
-  double creation_time;
-  bool result =
-      ReadParam(m, iter, &p->size) &&
-      ReadParam(m, iter, &p->is_directory) &&
-      ReadParam(m, iter, &last_modified) &&
-      ReadParam(m, iter, &last_accessed) &&
-      ReadParam(m, iter, &creation_time);
-  if (result) {
-    p->last_modified = base::Time::FromDoubleT(last_modified);
-    p->last_accessed = base::Time::FromDoubleT(last_accessed);
-    p->creation_time = base::Time::FromDoubleT(creation_time);
-  }
-  return result;
-}
-
-void ParamTraits<base::PlatformFileInfo>::Log(
-    const param_type& p, std::string* l) {
-  l->append("(");
-  LogParam(p.size, l);
-  l->append(",");
-  LogParam(p.is_directory, l);
-  l->append(",");
-  LogParam(p.last_modified.ToDoubleT(), l);
-  l->append(",");
-  LogParam(p.last_accessed.ToDoubleT(), l);
-  l->append(",");
-  LogParam(p.creation_time.ToDoubleT(), l);
-  l->append(")");
-}
-
 void ParamTraits<content::Referrer>::Write(
     Message* m, const param_type& p) {
   WriteParam(m, p.url);
@@ -594,6 +551,41 @@ bool ParamTraits<SkBitmap>::Read(const Message* m,
 
 void ParamTraits<SkBitmap>::Log(const SkBitmap& p, std::string* l) {
   l->append("<SkBitmap>");
+}
+
+void ParamTraits<content::ConsoleMessageLevel>::Write(Message* m,
+                                                      const param_type& p) {
+  m->WriteInt(static_cast<int>(p));
+}
+
+bool ParamTraits<content::ConsoleMessageLevel>::Read(const Message* m,
+                                                     PickleIterator* iter,
+                                                     param_type* p) {
+  int type;
+  if (!m->ReadInt(iter, &type))
+    return false;
+  *p = static_cast<param_type>(type);
+  return true;
+}
+
+void ParamTraits<content::ConsoleMessageLevel>::Log(const param_type& p,
+                                                    std::string* l) {
+  std::string level;
+  switch (p) {
+    case content::CONSOLE_MESSAGE_LEVEL_TIP:
+      level = "CONSOLE_MESSAGE_LEVEL_TIP";
+      break;
+    case content::CONSOLE_MESSAGE_LEVEL_LOG:
+      level = "CONSOLE_MESSAGE_LEVEL_LOG";
+      break;
+    case content::CONSOLE_MESSAGE_LEVEL_WARNING:
+      level = "CONSOLE_MESSAGE_LEVEL_WARNING";
+      break;
+    case content::CONSOLE_MESSAGE_LEVEL_ERROR:
+      level = "CONSOLE_MESSAGE_LEVEL_ERROR";
+      break;
+  }
+  LogParam(level, l);
 }
 
 }  // namespace IPC

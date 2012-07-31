@@ -89,7 +89,8 @@ MenuItemView::MenuItemView(MenuDelegate* delegate)
       top_margin_(-1),
       bottom_margin_(-1),
       requested_menu_position_(POSITION_BEST_FIT),
-      actual_menu_position_(requested_menu_position_) {
+      actual_menu_position_(requested_menu_position_),
+      use_right_margin_(true) {
   // NOTE: don't check the delegate for NULL, UpdateMenuPartSizes supplies a
   // NULL delegate.
   Init(NULL, 0, SUBMENU, delegate);
@@ -202,7 +203,7 @@ void MenuItemView::Cancel() {
 MenuItemView* MenuItemView::AddMenuItemAt(int index,
                                           int item_id,
                                           const string16& label,
-                                          const SkBitmap& icon,
+                                          const gfx::ImageSkia& icon,
                                           Type type) {
   DCHECK_NE(type, EMPTY);
   DCHECK_LE(0, index);
@@ -243,17 +244,17 @@ void MenuItemView::RemoveMenuItemAt(int index) {
 MenuItemView* MenuItemView::AppendMenuItem(int item_id,
                                            const string16& label,
                                            Type type) {
-  return AppendMenuItemImpl(item_id, label, SkBitmap(), type);
+  return AppendMenuItemImpl(item_id, label, gfx::ImageSkia(), type);
 }
 
 MenuItemView* MenuItemView::AppendSubMenu(int item_id,
                                           const string16& label) {
-  return AppendMenuItemImpl(item_id, label, SkBitmap(), SUBMENU);
+  return AppendMenuItemImpl(item_id, label, gfx::ImageSkia(), SUBMENU);
 }
 
 MenuItemView* MenuItemView::AppendSubMenuWithIcon(int item_id,
                                                   const string16& label,
-                                                  const SkBitmap& icon) {
+                                                  const gfx::ImageSkia& icon) {
   return AppendMenuItemImpl(item_id, label, icon, SUBMENU);
 }
 
@@ -267,19 +268,19 @@ MenuItemView* MenuItemView::AppendDelegateMenuItem(int item_id) {
 }
 
 void MenuItemView::AppendSeparator() {
-  AppendMenuItemImpl(0, string16(), SkBitmap(), SEPARATOR);
+  AppendMenuItemImpl(0, string16(), gfx::ImageSkia(), SEPARATOR);
 }
 
 MenuItemView* MenuItemView::AppendMenuItemWithIcon(int item_id,
                                                    const string16& label,
-                                                   const SkBitmap& icon) {
+                                                   const gfx::ImageSkia& icon) {
   return AppendMenuItemImpl(item_id, label, icon, NORMAL);
 }
 
 MenuItemView* MenuItemView::AppendMenuItemFromModel(ui::MenuModel* model,
                                                     int index,
                                                     int id) {
-  SkBitmap icon;
+  gfx::ImageSkia icon;
   string16 label;
   MenuItemView::Type type;
   ui::MenuModel::ItemType menu_type = model->GetTypeAt(index);
@@ -316,7 +317,7 @@ MenuItemView* MenuItemView::AppendMenuItemFromModel(ui::MenuModel* model,
 
 MenuItemView* MenuItemView::AppendMenuItemImpl(int item_id,
                                                const string16& label,
-                                               const SkBitmap& icon,
+                                               const gfx::ImageSkia& icon,
                                                Type type) {
   const int index = submenu_ ? submenu_->child_count() : 0;
   return AddMenuItemAt(index, item_id, label, icon, type);
@@ -352,13 +353,13 @@ void MenuItemView::SetTooltip(const string16& tooltip, int item_id) {
   item->tooltip_ = tooltip;
 }
 
-void MenuItemView::SetIcon(const SkBitmap& icon, int item_id) {
+void MenuItemView::SetIcon(const gfx::ImageSkia& icon, int item_id) {
   MenuItemView* item = GetMenuItemByID(item_id);
   DCHECK(item);
   item->SetIcon(icon);
 }
 
-void MenuItemView::SetIcon(const SkBitmap& icon) {
+void MenuItemView::SetIcon(const gfx::ImageSkia& icon) {
   icon_ = icon;
   SchedulePaint();
 }
@@ -477,8 +478,8 @@ void MenuItemView::Layout() {
   } else {
     // Child views are laid out right aligned and given the full height. To
     // right align start with the last view and progress to the first.
-    for (int i = child_count() - 1, x = width() - item_right_margin_; i >= 0;
-         --i) {
+    int x = width() - (use_right_margin_ ? item_right_margin_ : 0);
+    for (int i = child_count() - 1; i >= 0; --i) {
       View* child = child_at(i);
       int width = child->GetPreferredSize().width();
       child->SetBounds(x - width, 0, width, height());
@@ -538,16 +539,17 @@ void MenuItemView::UpdateMenuPartSizes(bool has_icons) {
   const MenuConfig& config = MenuConfig::instance();
 
   item_right_margin_ = config.label_to_arrow_padding + config.arrow_width +
-      config.arrow_to_edge_padding;
+                       config.arrow_to_edge_padding;
 
-  if (has_icons) {
+  if (config.always_use_icon_to_label_padding)
     label_start_ = config.item_left_margin + config.check_width +
                    config.icon_to_label_padding;
-  } else {
+  else
     // If there are no icons don't pad by the icon to label padding. This
     // makes us look close to system menus.
-    label_start_ = config.item_left_margin + config.check_width;
-  }
+    label_start_ = config.item_left_margin + config.check_width +
+                   (has_icons ? config.icon_to_label_padding : 0);
+
   if (config.render_gutter)
     label_start_ += config.gutter_width + config.gutter_to_label;
 
@@ -671,7 +673,10 @@ void MenuItemView::PaintAccelerator(gfx::Canvas* canvas) {
   int available_height = height() - GetTopMargin() - GetBottomMargin();
   int max_accel_width =
       parent_menu_item_->GetSubmenu()->max_accelerator_width();
-  gfx::Rect accel_bounds(width() - item_right_margin_ - max_accel_width,
+  const MenuConfig& config = MenuConfig::instance();
+  int accel_right_margin = config.align_arrow_and_shortcut ?
+                           config.arrow_to_edge_padding :  item_right_margin_;
+  gfx::Rect accel_bounds(width() - accel_right_margin - max_accel_width,
                          GetTopMargin(), max_accel_width, available_height);
   accel_bounds.set_x(GetMirroredXForRect(accel_bounds));
   int flags = GetRootMenuItem()->GetDrawStringFlags() |
@@ -682,8 +687,8 @@ void MenuItemView::PaintAccelerator(gfx::Canvas* canvas) {
   else
     flags |= gfx::Canvas::TEXT_ALIGN_RIGHT;
   canvas->DrawStringInt(
-      accel_text, font, gfx::NativeTheme::instance()->GetSystemColor(
-          gfx::NativeTheme::kColorId_TextButtonDisabledColor),
+      accel_text, font, ui::NativeTheme::instance()->GetSystemColor(
+          ui::NativeTheme::kColorId_TextButtonDisabledColor),
       accel_bounds.x(), accel_bounds.y(), accel_bounds.width(),
       accel_bounds.height(), flags);
 }

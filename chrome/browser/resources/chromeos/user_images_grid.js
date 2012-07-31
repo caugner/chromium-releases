@@ -3,11 +3,11 @@
 // found in the LICENSE file.
 
 cr.define('options', function() {
-  const ArrayDataModel = cr.ui.ArrayDataModel;
-  const Grid = cr.ui.Grid;
-  const GridItem = cr.ui.GridItem;
-  const GridSelectionController = cr.ui.GridSelectionController;
-  const ListSingleSelectionModel = cr.ui.ListSingleSelectionModel;
+  /** @const */ var ArrayDataModel = cr.ui.ArrayDataModel;
+  /** @const */ var Grid = cr.ui.Grid;
+  /** @const */ var GridItem = cr.ui.GridItem;
+  /** @const */ var GridSelectionController = cr.ui.GridSelectionController;
+  /** @const */ var ListSingleSelectionModel = cr.ui.ListSingleSelectionModel;
 
   /**
    * Creates a new user images grid item.
@@ -211,6 +211,11 @@ cr.define('options', function() {
           imageInfo.clickHandler,
           imageIndex,
           imageInfo.decorateFn);
+      // Update image data with the reset of the keys from the old data.
+      for (k in imageInfo) {
+        if (!(k in newInfo))
+          newInfo[k] = imageInfo[k];
+      }
       if (wasSelected)
         this.selectedItem = newInfo;
       return newInfo;
@@ -223,8 +228,14 @@ cr.define('options', function() {
     removeItem: function(imageInfo) {
       var index = this.indexOf(imageInfo);
       if (index != -1) {
+        var wasSelected = this.selectionModel.selectedIndex == index;
         this.inProgramSelection_ = true;
         this.dataModel.splice(index, 1);
+        if (wasSelected) {
+          // If item removed was selected, select the item next to it.
+          this.selectedItem = this.dataModel.item(
+              Math.min(this.dataModel.length - 1, index));
+        }
         this.inProgramSelection_ = false;
       }
     },

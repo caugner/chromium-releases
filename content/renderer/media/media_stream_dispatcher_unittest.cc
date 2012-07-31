@@ -10,6 +10,7 @@
 #include "content/common/media/media_stream_messages.h"
 #include "content/renderer/media/media_stream_dispatcher.h"
 #include "content/renderer/media/media_stream_dispatcher_eventhandler.h"
+#include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
@@ -91,7 +92,7 @@ TEST(MediaStreamDispatcherTest, BasicStream) {
   scoped_ptr<MockMediaStreamDispatcherEventHandler>
       handler(new MockMediaStreamDispatcherEventHandler);
   media_stream::StreamOptions components(true, true);
-  std::string security_origin;
+  GURL security_origin;
 
   int ipc_request_id1 = dispatcher->next_ipc_id_;
   dispatcher->GenerateStream(kRequestId1, handler.get()->AsWeakPtr(),
@@ -165,7 +166,7 @@ TEST(MediaStreamDispatcherTest, BasicVideoDevice) {
   scoped_ptr<MediaStreamDispatcher> dispatcher(new MediaStreamDispatcher(NULL));
   scoped_ptr<MockMediaStreamDispatcherEventHandler>
       handler(new MockMediaStreamDispatcherEventHandler);
-  std::string security_origin;
+  GURL security_origin;
 
   int ipc_request_id1 = dispatcher->next_ipc_id_;
   dispatcher->EnumerateDevices(kRequestId1, handler.get()->AsWeakPtr(),
@@ -253,7 +254,7 @@ TEST(MediaStreamDispatcherTest, TestFailure) {
   scoped_ptr<MockMediaStreamDispatcherEventHandler>
       handler(new MockMediaStreamDispatcherEventHandler);
   media_stream::StreamOptions components(true, true);
-  std::string security_origin;
+  GURL security_origin;
 
   // Test failure when creating a stream.
   int ipc_request_id1 = dispatcher->next_ipc_id_;
@@ -312,4 +313,46 @@ TEST(MediaStreamDispatcherTest, TestFailure) {
   // Stop stream1.
   dispatcher->StopStream(stream_label1);
   EXPECT_EQ(dispatcher->label_stream_map_.size(), size_t(0));
+}
+
+TEST(MediaStreamDispatcherTest, CancelGenerateStream) {
+  scoped_ptr<MediaStreamDispatcher> dispatcher(new MediaStreamDispatcher(NULL));
+  scoped_ptr<MockMediaStreamDispatcherEventHandler>
+      handler(new MockMediaStreamDispatcherEventHandler);
+  media_stream::StreamOptions components(true, true);
+  int ipc_request_id1 = dispatcher->next_ipc_id_;
+
+  dispatcher->GenerateStream(kRequestId1, handler.get()->AsWeakPtr(),
+                             components, GURL());
+  dispatcher->GenerateStream(kRequestId2, handler.get()->AsWeakPtr(),
+                             components, GURL());
+
+  EXPECT_EQ(2u, dispatcher->requests_.size());
+  dispatcher->CancelGenerateStream(kRequestId2);
+  EXPECT_EQ(1u, dispatcher->requests_.size());
+
+  // Complete the creation of stream1.
+  media_stream::StreamDeviceInfo audio_device_info;
+  audio_device_info.name = "Microphone";
+  audio_device_info.stream_type =
+      content::MEDIA_STREAM_DEVICE_TYPE_AUDIO_CAPTURE;
+  audio_device_info.session_id = kAudioSessionId;
+  media_stream::StreamDeviceInfoArray audio_device_array(1);
+  audio_device_array[0] = audio_device_info;
+
+  media_stream::StreamDeviceInfo video_device_info;
+  video_device_info.name = "Camera";
+  video_device_info.stream_type =
+      content::MEDIA_STREAM_DEVICE_TYPE_VIDEO_CAPTURE;
+  video_device_info.session_id = kVideoSessionId;
+  media_stream::StreamDeviceInfoArray video_device_array(1);
+  video_device_array[0] = video_device_info;
+
+  std::string stream_label1 = "stream1";
+  dispatcher->OnMessageReceived(MediaStreamMsg_StreamGenerated(
+      kRouteId, ipc_request_id1, stream_label1,
+      audio_device_array, video_device_array));
+  EXPECT_EQ(handler->request_id_, kRequestId1);
+  EXPECT_EQ(handler->label_, stream_label1);
+  EXPECT_EQ(0u, dispatcher->requests_.size());
 }

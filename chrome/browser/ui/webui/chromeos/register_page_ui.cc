@@ -31,6 +31,7 @@
 #include "content/public/browser/web_ui_message_handler.h"
 #include "googleurl/src/gurl.h"
 #include "grit/browser_resources.h"
+#include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
 
 using content::WebContents;
@@ -57,6 +58,7 @@ const char kMachineInfoSerialNumber[] = "serial_number";
 // Types of network connection.
 const char kConnectionEthernet[] = "ethernet";
 const char kConnectionWifi[] = "wifi";
+const char kConnectionWimax[] = "wimax";
 const char kConnection3g[] = "3g";
 const char kUndefinedValue[] = "undefined";
 
@@ -76,6 +78,8 @@ static std::string GetConnectionType() {
     return kConnectionWifi;
   else if (network_lib->cellular_connected())
     return kConnection3g;
+  else if (network_lib->wimax_connected())
+    return kConnectionWimax;
   // Connection might have been lost and is in reconnecting state at this point.
   else if (network_lib->ethernet_connecting())
     return kConnectionEthernet;
@@ -83,6 +87,8 @@ static std::string GetConnectionType() {
     return kConnectionWifi;
   else if (network_lib->cellular_connecting())
     return kConnection3g;
+  else if (network_lib->wimax_connecting())
+    return kConnectionWimax;
   else
     return kUndefinedValue;
 }
@@ -167,7 +173,8 @@ void RegisterPageUIHTMLSource::StartDataRequest(const std::string& path,
 
   scoped_refptr<base::RefCountedMemory> html_bytes(
       ResourceBundle::GetSharedInstance().LoadDataResourceBytes(
-          IDR_HOST_REGISTRATION_PAGE_HTML));
+          IDR_HOST_REGISTRATION_PAGE_HTML,
+          ui::SCALE_FACTOR_NONE));
 
   SendResponse(request_id, html_bytes);
 }

@@ -11,10 +11,9 @@
 #include "content/browser/renderer_host/resource_handler.h"
 #include "googleurl/src/gurl.h"
 
-class ResourceMessageFilter;
-
 namespace content {
 class ResourceDispatcherHostImpl;
+class ResourceMessageFilter;
 class SharedIOBuffer;
 
 // Used to complete an asynchronous resource request in response to resource
@@ -25,6 +24,7 @@ class AsyncResourceHandler : public ResourceHandler {
                        int routing_id,
                        const GURL& url,
                        ResourceDispatcherHostImpl* rdh);
+  virtual ~AsyncResourceHandler();
 
   // ResourceHandler implementation:
   virtual bool OnUploadProgress(int request_id,
@@ -35,7 +35,8 @@ class AsyncResourceHandler : public ResourceHandler {
                                    ResourceResponse* response,
                                    bool* defer) OVERRIDE;
   virtual bool OnResponseStarted(int request_id,
-                                 ResourceResponse* response) OVERRIDE;
+                                 ResourceResponse* response,
+                                 bool* defer) OVERRIDE;
   virtual bool OnWillStart(int request_id,
                            const GURL& url,
                            bool* defer) OVERRIDE;
@@ -44,19 +45,17 @@ class AsyncResourceHandler : public ResourceHandler {
                           int* buf_size,
                           int min_size) OVERRIDE;
   virtual bool OnReadCompleted(int request_id,
-                               int* bytes_read) OVERRIDE;
+                               int* bytes_read,
+                               bool* defer) OVERRIDE;
   virtual bool OnResponseCompleted(int request_id,
                                    const net::URLRequestStatus& status,
                                    const std::string& security_info) OVERRIDE;
-  virtual void OnRequestClosed() OVERRIDE;
   virtual void OnDataDownloaded(int request_id,
                                 int bytes_downloaded) OVERRIDE;
 
   static void GlobalCleanup();
 
  private:
-  virtual ~AsyncResourceHandler();
-
   scoped_refptr<SharedIOBuffer> read_buffer_;
   scoped_refptr<ResourceMessageFilter> filter_;
   int routing_id_;

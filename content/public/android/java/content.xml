@@ -12,10 +12,8 @@
   <property name="sdk.dir" location="${env.ANDROID_SDK_ROOT}"/>
   <property name="sdk.version" value="${env.ANDROID_SDK_VERSION}"/>
   <property name="src" location="."/>
-  <property name="out.dir" location="${PRODUCT_DIR}"/>
-  <property name="classes.dir" location="${out.dir}/java/${PACKAGE_NAME}"/>
-  <!-- TODO(tedchoc): Move out of the main out/ dir ... needs to sync with
-       java.gypi output -->
+  <property name="out.dir" location="${PRODUCT_DIR}/lib.java"/>
+  <property name="classes.dir" location="${PRODUCT_DIR}/java/${PACKAGE_NAME}"/>
   <property name="jar.dir" location="${out.dir}"/>
 
   <condition property="location.base"
@@ -37,9 +35,12 @@
     <mkdir dir="${classes.dir}"/>
 
     <!-- Compile the java code from ${src} into ${classes.dir} -->
-    <javac srcdir="${src}" destdir="${classes.dir}">
+    <!-- Gyp target should have compiled aidl files into java source files in
+         lib.jar (see content.gyp:common_aidl). -->
+    <javac srcdir="${src}:${out.dir}" destdir="${classes.dir}" debug="true" includeantruntime="false">
       <classpath>
-        <path location="${location.base}/android.jar"/>
+        <pathelement path="${location.base}/android.jar" />
+        <pathelement path="${jar.dir}/chromium_base.jar" />
       </classpath>
     </javac>
   </target>

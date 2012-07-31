@@ -8,6 +8,7 @@
 
 #include "chrome/browser/extensions/extension_function.h"
 #include "chrome/browser/extensions/api/api_resource.h"
+#include "content/public/browser/browser_thread.h"
 
 class ExtensionService;
 
@@ -16,18 +17,26 @@ namespace extensions {
 class APIResourceController;
 class APIResourceEventNotifier;
 
-// AsyncIOAPIFunction provides convenient thread management for APIs that
-// need to do essentially all their work on the IO thread.
-class AsyncIOAPIFunction : public AsyncExtensionFunction {
+// AsyncAPIFunction provides convenient thread management for APIs that need to
+// do essentially all their work on a thread other than the UI thread.
+class AsyncAPIFunction : public AsyncExtensionFunction {
  protected:
-  virtual ~AsyncIOAPIFunction() {}
+  AsyncAPIFunction();
+  virtual ~AsyncAPIFunction() {}
 
   // Set up for work (e.g., validate arguments). Guaranteed to happen on UI
   // thread.
   virtual bool Prepare() = 0;
 
-  // Do actual work. Guaranteed to happen on IO thread.
-  virtual void Work() = 0;
+  // Do actual work. Guaranteed to happen on the thread specified in
+  // work_thread_id_.
+  virtual void Work();
+
+  // Start the asynchronous work. Guraranteed to happen on requested thread.
+  virtual void AsyncWorkStart();
+
+  // Notify AsyncIOAPIFunction that the work is completed
+  void AsyncWorkCompleted();
 
   // Respond. Guaranteed to happen on UI thread.
   virtual bool Respond() = 0;
@@ -42,12 +51,21 @@ class AsyncIOAPIFunction : public AsyncExtensionFunction {
   // Access to the controller singleton.
   APIResourceController* controller();
 
-  // ExtensionFunction:
+  // ExtensionFunction::RunImpl()
   virtual bool RunImpl() OVERRIDE;
 
+ protected:
+  void set_work_thread_id(content::BrowserThread::ID work_thread_id) {
+    work_thread_id_ = work_thread_id;
+  }
+
  private:
-  void WorkOnIOThread();
+  void WorkOnWorkThread();
   void RespondOnUIThread();
+
+  // If you don't want your Work() method to happen on the IO thread, then set
+  // this to the thread that you do want, preferably in Prepare().
+  content::BrowserThread::ID work_thread_id_;
 
   ExtensionService* extension_service_;
 };

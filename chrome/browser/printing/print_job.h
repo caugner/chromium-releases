@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
 #include "chrome/browser/printing/print_job_worker_owner.h"
 #include "content/public/browser/notification_observer.h"
@@ -77,7 +78,7 @@ class PrintJob : public PrintJobWorkerOwner,
   // Synchronously wait for the job to finish. It is mainly useful when the
   // process is about to be shut down and we're waiting for the spooler to eat
   // our data.
-  bool FlushJob(int timeout_ms);
+  bool FlushJob(base::TimeDelta timeout);
 
   // Disconnects the PrintedPage source (PrintedPagesSource). It is done when
   // the source is being destroyed.
@@ -108,6 +109,9 @@ class PrintJob : public PrintJobWorkerOwner,
   // eventual deadlock.
   void ControlledWorkerShutdown();
 
+  // Called at shutdown when running a nested message loop.
+  void Quit();
+
   content::NotificationRegistrar registrar_;
 
   // Main message loop reference. Used to send notifications in the right
@@ -135,6 +139,9 @@ class PrintJob : public PrintJobWorkerOwner,
   // Is Canceling? If so, try to not cause recursion if on FAILED notification,
   // the notified calls Cancel() again.
   bool is_canceling_;
+
+  // Used at shutdown so that we can quit a nested message loop.
+  base::WeakPtrFactory<PrintJob> quit_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(PrintJob);
 };

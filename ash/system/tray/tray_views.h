@@ -6,6 +6,7 @@
 #define ASH_SYSTEM_TRAY_TRAY_VIEWS_H_
 #pragma once
 
+#include "ash/ash_export.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/size.h"
 #include "ui/views/controls/button/image_button.h"
@@ -15,11 +16,15 @@
 #include "ui/views/controls/slider.h"
 #include "ui/views/view.h"
 
-class SkBitmap;
 typedef unsigned int SkColor;
+
+namespace gfx {
+class ImageSkia;
+}
 
 namespace views {
 class Label;
+class BoxLayout;
 }
 
 namespace ash {
@@ -42,8 +47,12 @@ class FixedSizedImageView : public views::ImageView {
 };
 
 // A focusable view that performs an action when user clicks on it, or presses
-// enter or space when focused.
-class ActionableView : public views::View {
+// enter or space when focused. Note that the action is triggered on mouse-up,
+// instead of on mouse-down. So if user presses the mouse on the view, then
+// moves the mouse out of the view and then releases, then the action will not
+// be performed.
+// Exported for SystemTray.
+class ASH_EXPORT ActionableView : public views::View {
  public:
   ActionableView();
 
@@ -62,11 +71,16 @@ class ActionableView : public views::View {
   // Overridden from views::View.
   virtual bool OnKeyPressed(const views::KeyEvent& event) OVERRIDE;
   virtual bool OnMousePressed(const views::MouseEvent& event) OVERRIDE;
+  virtual void OnMouseReleased(const views::MouseEvent& event) OVERRIDE;
+  virtual void OnMouseCaptureLost() OVERRIDE;
+  virtual ui::GestureStatus OnGestureEvent(
+      const views::GestureEvent& event) OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
   virtual void OnPaintFocusBorder(gfx::Canvas* canvas) OVERRIDE;
 
  private:
   string16 accessible_name_;
+  bool has_capture_;
 
   DISALLOW_COPY_AND_ASSIGN(ActionableView);
 };
@@ -87,7 +101,7 @@ class HoverHighlightView : public ActionableView {
 
   // Convenience function for adding an icon and a label.  This also sets the
   // accessible name.
-  void AddIconAndLabel(const SkBitmap& image,
+  void AddIconAndLabel(const gfx::ImageSkia& image,
                        const string16& text,
                        gfx::Font::FontStyle style);
 
@@ -97,6 +111,8 @@ class HoverHighlightView : public ActionableView {
 
   void set_highlight_color(SkColor color) { highlight_color_ = color; }
   void set_default_color(SkColor color) { default_color_ = color; }
+  void set_text_highlight_color(SkColor c) { text_highlight_color_ = c; }
+  void set_text_default_color(SkColor color) { text_default_color_ = color; }
   void set_fixed_height(int height) { fixed_height_ = height; }
 
  private:
@@ -112,8 +128,11 @@ class HoverHighlightView : public ActionableView {
   virtual void OnFocus() OVERRIDE;
 
   ViewClickListener* listener_;
+  views::Label* text_label_;
   SkColor highlight_color_;
   SkColor default_color_;
+  SkColor text_highlight_color_;
+  SkColor text_default_color_;
   int fixed_height_;
   bool hover_;
 
@@ -128,17 +147,19 @@ class FixedSizedScrollView : public views::ScrollView {
   virtual ~FixedSizedScrollView();
 
   void SetContentsView(View* view);
+  void SetFixedSize(gfx::Size size);
 
-  void set_fixed_size(gfx::Size size) { fixed_size_ = size; }
-
- private:
-  // Overridden from views::View.
+  // views::View public method overrides.
   virtual gfx::Size GetPreferredSize() OVERRIDE;
   virtual void Layout() OVERRIDE;
-  virtual void OnBoundsChanged(const gfx::Rect& previous_bounds) OVERRIDE;
   virtual void OnMouseEntered(const views::MouseEvent& event) OVERRIDE;
+
+ protected:
+  // views::View protected method overrides.
+  virtual void OnBoundsChanged(const gfx::Rect& previous_bounds) OVERRIDE;
   virtual void OnPaintFocusBorder(gfx::Canvas* canvas) OVERRIDE;
 
+ private:
   gfx::Size fixed_size_;
 
   DISALLOW_COPY_AND_ASSIGN(FixedSizedScrollView);
@@ -176,7 +197,11 @@ class TrayPopupTextButtonContainer : public views::View {
 
   void AddTextButton(TrayPopupTextButton* button);
 
+  views::BoxLayout* layout() const { return layout_; }
+
  private:
+  views::BoxLayout* layout_;
+
   DISALLOW_COPY_AND_ASSIGN(TrayPopupTextButtonContainer);
 };
 
@@ -186,7 +211,9 @@ class TrayPopupHeaderButton : public views::ToggleImageButton {
  public:
   TrayPopupHeaderButton(views::ButtonListener* listener,
                         int enabled_resource_id,
-                        int disabled_resource_id);
+                        int disabled_resource_id,
+                        int enabled_resource_id_hover,
+                        int disabled_resource_id_hover);
   virtual ~TrayPopupHeaderButton();
 
  private:
@@ -201,10 +228,71 @@ class TrayPopupHeaderButton : public views::ToggleImageButton {
   DISALLOW_COPY_AND_ASSIGN(TrayPopupHeaderButton);
 };
 
-// Creates a container for the various detailed popups. Clicking on the view
-// triggers the callback in ViewClickListener.
-views::View* CreateDetailedHeaderEntry(int string_id,
-                                       ViewClickListener* listener);
+// The 'special' looking row in the uber-tray popups. This is usually the bottom
+// row in the popups, and has a fixed height.
+class SpecialPopupRow : public views::View {
+ public:
+  SpecialPopupRow();
+  virtual ~SpecialPopupRow();
+
+  void SetTextLabel(int string_id, ViewClickListener* listener);
+  void SetContent(views::View* view);
+
+  void AddButton(TrayPopupHeaderButton* button);
+
+  views::View* content() const { return content_; }
+
+ private:
+  // Overridden from views::View.
+  virtual gfx::Size GetPreferredSize() OVERRIDE;
+  virtual void Layout() OVERRIDE;
+
+  views::View* content_;
+  views::View* button_container_;
+  views::Label* text_label_;
+  DISALLOW_COPY_AND_ASSIGN(SpecialPopupRow);
+};
+
+// A view for closable notification views, laid out like:
+//  -------------------
+// | icon  contents  x |
+//  ----------------v--
+// The close button will call OnClose() when clicked.
+class TrayNotificationView : public views::View,
+                             public views::ButtonListener {
+ public:
+  // If icon_id is 0, no icon image will be set. SetIconImage can be called
+  // to later set the icon image.
+  explicit TrayNotificationView(int icon_id);
+  virtual ~TrayNotificationView();
+
+  // InitView must be called once with the contents to be displayed.
+  void InitView(views::View* contents);
+
+  // Sets/updates the icon image.
+  void SetIconImage(const gfx::ImageSkia& image);
+
+  // Replaces the contents view.
+  void UpdateView(views::View* new_contents);
+
+  // Replaces the contents view and updates the icon image.
+  void UpdateViewAndImage(views::View* new_contents,
+                          const gfx::ImageSkia& image);
+
+  // Overridden from ButtonListener.
+  virtual void ButtonPressed(views::Button* sender,
+                             const views::Event& event) OVERRIDE;
+
+ protected:
+  // Called when the closed button is pressed.
+  virtual void OnClose() = 0;
+
+ private:
+  int icon_id_;
+  views::ImageView* icon_;
+
+  DISALLOW_COPY_AND_ASSIGN(TrayNotificationView);
+};
 
 // Sets up a Label properly for the tray (sets color, font etc.).
 void SetupLabelForTray(views::Label* label);

@@ -7,12 +7,13 @@
 #include "base/logging.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
-#include "grit/theme_resources.h"
+#include "grit/theme_resources_standard.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
@@ -60,7 +61,7 @@ string16 SpellingBubbleModel::GetLinkText() const {
 }
 
 void SpellingBubbleModel::LinkClicked() {
-  Browser* browser = BrowserList::GetLastActiveWithProfile(profile_);
+  Browser* browser = browser::FindLastActiveWithProfile(profile_);
   OpenURLParams params(
       GURL(chrome::kPrivacyLearnMoreURL), Referrer(), NEW_FOREGROUND_TAB,
       content::PAGE_TRANSITION_LINK, false);

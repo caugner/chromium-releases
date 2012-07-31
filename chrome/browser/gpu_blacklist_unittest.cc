@@ -33,8 +33,8 @@ class GpuBlacklistTest : public testing::Test {
 
  protected:
   void SetUp() {
-    gpu_info_.vendor_id = 0x10de;
-    gpu_info_.device_id = 0x0640;
+    gpu_info_.gpu.vendor_id = 0x10de;
+    gpu_info_.gpu.device_id = 0x0640;
     gpu_info_.driver_vendor = "NVIDIA";
     gpu_info_.driver_version = "1.6.18";
     gpu_info_.driver_date = "7-14-2009";
@@ -755,3 +755,119 @@ TEST_F(GpuBlacklistTest, DisabledEntry) {
       content::GPU_FEATURE_TYPE_ALL, flag_entries, disabled);
   EXPECT_EQ(flag_entries.size(), 1u);
 }
+
+TEST_F(GpuBlacklistTest, Optimus) {
+  const std::string optimus_json =
+      "{\n"
+      "  \"name\": \"gpu blacklist\",\n"
+      "  \"version\": \"0.1\",\n"
+      "  \"entries\": [\n"
+      "    {\n"
+      "      \"id\": 1,\n"
+      "      \"os\": {\n"
+      "        \"type\": \"linux\"\n"
+      "      },\n"
+      "      \"multi_gpu_style\": \"optimus\",\n"
+      "      \"blacklist\": [\n"
+      "        \"webgl\"\n"
+      "      ]\n"
+      "    }\n"
+      "  ]\n"
+      "}";
+  scoped_ptr<Version> os_version(Version::GetVersionFromString("10.6.4"));
+
+  content::GPUInfo gpu_info;
+  gpu_info.optimus = true;
+
+  scoped_ptr<GpuBlacklist> blacklist(Create());
+  EXPECT_TRUE(blacklist->LoadGpuBlacklist(
+      optimus_json, GpuBlacklist::kAllOs));
+  GpuFeatureType type = blacklist->DetermineGpuFeatureType(
+      GpuBlacklist::kOsLinux, os_version.get(), gpu_info);
+  EXPECT_EQ(type, content::GPU_FEATURE_TYPE_WEBGL);
+}
+
+TEST_F(GpuBlacklistTest, AMDSwitchable) {
+  const std::string amd_switchable_json =
+      "{\n"
+      "  \"name\": \"gpu blacklist\",\n"
+      "  \"version\": \"0.1\",\n"
+      "  \"entries\": [\n"
+      "    {\n"
+      "      \"id\": 1,\n"
+      "      \"os\": {\n"
+      "        \"type\": \"macosx\"\n"
+      "      },\n"
+      "      \"multi_gpu_style\": \"amd_switchable\",\n"
+      "      \"blacklist\": [\n"
+      "        \"webgl\"\n"
+      "      ]\n"
+      "    }\n"
+      "  ]\n"
+      "}";
+  scoped_ptr<Version> os_version(Version::GetVersionFromString("10.6.4"));
+
+  content::GPUInfo gpu_info;
+  gpu_info.amd_switchable = true;
+
+  scoped_ptr<GpuBlacklist> blacklist(Create());
+  EXPECT_TRUE(blacklist->LoadGpuBlacklist(
+      amd_switchable_json, GpuBlacklist::kAllOs));
+  GpuFeatureType type = blacklist->DetermineGpuFeatureType(
+      GpuBlacklist::kOsMacosx, os_version.get(), gpu_info);
+  EXPECT_EQ(type, content::GPU_FEATURE_TYPE_WEBGL);
+}
+
+TEST_F(GpuBlacklistTest, LexicalDriverVersion) {
+  const std::string lexical_json =
+      "{\n"
+      "  \"name\": \"gpu blacklist\",\n"
+      "  \"version\": \"0.1\",\n"
+      "  \"entries\": [\n"
+      "    {\n"
+      "      \"id\": 1,\n"
+      "      \"os\": {\n"
+      "        \"type\": \"linux\"\n"
+      "      },\n"
+      "      \"vendor_id\": \"0x1002\",\n"
+      "      \"driver_version\": {\n"
+      "        \"op\": \"<\",\n"
+      "        \"style\": \"lexical\",\n"
+      "        \"number\": \"8.201\"\n"
+      "      },\n"
+      "      \"blacklist\": [\n"
+      "        \"webgl\"\n"
+      "      ]\n"
+      "    }\n"
+      "  ]\n"
+      "}";
+  scoped_ptr<Version> os_version(Version::GetVersionFromString("10.6.4"));
+
+  content::GPUInfo gpu_info;
+  gpu_info.gpu.vendor_id = 0x1002;
+
+  scoped_ptr<GpuBlacklist> blacklist(Create());
+  EXPECT_TRUE(blacklist->LoadGpuBlacklist(
+      lexical_json, GpuBlacklist::kAllOs));
+
+  gpu_info.driver_version = "8.109";
+  GpuFeatureType type = blacklist->DetermineGpuFeatureType(
+      GpuBlacklist::kOsLinux, os_version.get(), gpu_info);
+  EXPECT_EQ(type, content::GPU_FEATURE_TYPE_WEBGL);
+
+  gpu_info.driver_version = "8.2";
+  type = blacklist->DetermineGpuFeatureType(
+      GpuBlacklist::kOsLinux, os_version.get(), gpu_info);
+  EXPECT_EQ(type, content::GPU_FEATURE_TYPE_WEBGL);
+
+  gpu_info.driver_version = "8.21";
+  type = blacklist->DetermineGpuFeatureType(
+      GpuBlacklist::kOsLinux, os_version.get(), gpu_info);
+  EXPECT_EQ(type, 0);
+
+  gpu_info.driver_version = "8.2010";
+  type = blacklist->DetermineGpuFeatureType(
+      GpuBlacklist::kOsLinux, os_version.get(), gpu_info);
+  EXPECT_EQ(type, 0);
+}
+

@@ -11,11 +11,11 @@
 #include "base/threading/thread.h"
 #include "chrome/browser/sync/glue/chrome_sync_notification_bridge.h"
 #include "chrome/test/base/profile_mock.h"
-#include "content/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread.h"
+#include "sync/internal_api/public/syncable/model_type.h"
+#include "sync/internal_api/public/syncable/model_type_test_util.h"
 #include "sync/notifier/mock_sync_notifier_observer.h"
 #include "sync/notifier/sync_notifier.h"
-#include "sync/syncable/model_type.h"
-#include "sync/syncable/model_type_test_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -47,7 +47,7 @@ class MockSyncNotifier : public sync_notifier::SyncNotifier {
   MOCK_METHOD1(AddObserver, void(sync_notifier::SyncNotifierObserver*));
   MOCK_METHOD1(RemoveObserver, void(sync_notifier::SyncNotifierObserver*));
   MOCK_METHOD1(SetUniqueId, void(const std::string&));
-  MOCK_METHOD1(SetState, void(const std::string&));
+  MOCK_METHOD1(SetStateDeprecated, void(const std::string&));
   MOCK_METHOD2(UpdateCredentials, void(const std::string&, const std::string&));
   MOCK_METHOD1(UpdateEnabledTypes, void(syncable::ModelTypeSet));
   MOCK_METHOD1(SendNotification, void(syncable::ModelTypeSet));
@@ -92,10 +92,10 @@ TEST_F(BridgedSyncNotifierTest, SetUniqueId) {
   bridged_notifier_.SetUniqueId(unique_id);
 }
 
-TEST_F(BridgedSyncNotifierTest, SetState) {
+TEST_F(BridgedSyncNotifierTest, SetStateDeprecated) {
   std::string state = "state";
-  EXPECT_CALL(*mock_delegate_, SetState(state));
-  bridged_notifier_.SetState(state);
+  EXPECT_CALL(*mock_delegate_, SetStateDeprecated(state));
+  bridged_notifier_.SetStateDeprecated(state);
 }
 
 TEST_F(BridgedSyncNotifierTest, UpdateCredentials) {

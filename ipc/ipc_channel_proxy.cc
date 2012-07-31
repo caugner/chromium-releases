@@ -9,7 +9,9 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "ipc/ipc_channel_proxy.h"
+#include "ipc/ipc_listener.h"
 #include "ipc/ipc_logging.h"
+#include "ipc/ipc_message_macros.h"
 #include "ipc/ipc_message_utils.h"
 
 namespace IPC {
@@ -40,7 +42,7 @@ ChannelProxy::MessageFilter::~MessageFilter() {}
 
 //------------------------------------------------------------------------------
 
-ChannelProxy::Context::Context(Channel::Listener* listener,
+ChannelProxy::Context::Context(Listener* listener,
                                base::MessageLoopProxy* ipc_message_loop)
     : listener_message_loop_(base::MessageLoopProxy::current()),
       listener_(listener),
@@ -225,8 +227,9 @@ void ChannelProxy::Context::OnDispatchMessage(const Message& message) {
   TRACE_EVENT1("task", "ChannelProxy::Context::OnDispatchMessage",
                "name", name);
 #else
-  TRACE_EVENT1("task", "ChannelProxy::Context::OnDispatchMessage",
-               "type", message.type());
+  TRACE_EVENT2("task", "ChannelProxy::Context::OnDispatchMessage",
+               "class", IPC_MESSAGE_ID_CLASS(message.type()),
+               "line", IPC_MESSAGE_ID_LINE(message.type()));
 #endif
 
   if (!listener_)
@@ -272,7 +275,7 @@ void ChannelProxy::Context::OnDispatchError() {
 
 ChannelProxy::ChannelProxy(const IPC::ChannelHandle& channel_handle,
                            Channel::Mode mode,
-                           Channel::Listener* listener,
+                           Listener* listener,
                            base::MessageLoopProxy* ipc_thread)
     : context_(new Context(listener, ipc_thread)),
       outgoing_message_filter_(NULL),
@@ -365,7 +368,7 @@ void ChannelProxy::ClearIPCMessageLoop() {
   context()->ClearIPCMessageLoop();
 }
 
-#if defined(OS_POSIX)
+#if defined(OS_POSIX) && !defined(OS_NACL)
 // See the TODO regarding lazy initialization of the channel in
 // ChannelProxy::Init().
 int ChannelProxy::GetClientFileDescriptor() {

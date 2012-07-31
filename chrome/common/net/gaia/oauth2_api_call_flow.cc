@@ -10,15 +10,16 @@
 #include "base/basictypes.h"
 #include "base/stringprintf.h"
 #include "chrome/common/net/gaia/gaia_urls.h"
+#include "content/public/common/url_fetcher.h"
 #include "net/base/escape.h"
 #include "net/base/load_flags.h"
 #include "net/http/http_status_code.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_status.h"
 
-using content::URLFetcher;
-using content::URLFetcherDelegate;
 using net::ResponseCookies;
+using net::URLFetcher;
+using net::URLFetcherDelegate;
 using net::URLRequestContextGetter;
 using net::URLRequestStatus;
 
@@ -63,7 +64,7 @@ void OAuth2ApiCallFlow::BeginApiCall() {
   }
 }
 
-void OAuth2ApiCallFlow::EndApiCall(const URLFetcher* source) {
+void OAuth2ApiCallFlow::EndApiCall(const net::URLFetcher* source) {
   CHECK_EQ(API_CALL_STARTED, state_);
   state_ = API_CALL_DONE;
 
@@ -128,7 +129,7 @@ OAuth2AccessTokenFetcher* OAuth2ApiCallFlow::CreateAccessTokenFetcher() {
   return new OAuth2AccessTokenFetcher(this, context_);
 }
 
-void OAuth2ApiCallFlow::OnURLFetchComplete(const URLFetcher* source) {
+void OAuth2ApiCallFlow::OnURLFetchComplete(const net::URLFetcher* source) {
   CHECK(source);
   CHECK_EQ(API_CALL_STARTED, state_);
   EndApiCall(source);
@@ -147,7 +148,7 @@ void OAuth2ApiCallFlow::OnGetTokenFailure(
 URLFetcher* OAuth2ApiCallFlow::CreateURLFetcher() {
   std::string body = CreateApiCallBody();
   bool empty_body = body.empty();
-  URLFetcher* result = URLFetcher::Create(
+  URLFetcher* result = content::URLFetcher::Create(
       0,
       CreateApiCallUrl(),
       empty_body ? URLFetcher::GET : URLFetcher::POST,

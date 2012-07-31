@@ -15,6 +15,8 @@
 #include "chrome/browser/speech/extension_api/tts_extension_api_controller.h"
 #include "chrome/common/extensions/extension.h"
 
+using extensions::Extension;
+
 namespace constants = tts_extension_api_constants;
 
 namespace events {
@@ -181,6 +183,8 @@ void ExtensionTtsEngineSpeak(Utterance* utterance,
     options->Remove(constants::kSrcIdKey, NULL);
   if (options->HasKey(constants::kIsFinalEventKey))
     options->Remove(constants::kIsFinalEventKey, NULL);
+  if (options->HasKey(constants::kOnEventKey))
+    options->Remove(constants::kOnEventKey, NULL);
 
   args.Set(1, options);
   args.Set(2, Value::CreateIntegerValue(utterance->id()));

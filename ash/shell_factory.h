@@ -9,7 +9,17 @@
 #include "ash/ash_export.h"
 #include "ash/desktop_background/desktop_background_resources.h"
 
-class SkBitmap;
+namespace aura {
+class RootWindow;
+}
+
+namespace gfx {
+class ImageSkia;
+}
+
+namespace ui_controls {
+class UIControlsAura;
+}
 
 namespace views {
 class View;
@@ -21,8 +31,13 @@ class Widget;
 namespace ash {
 
 namespace internal {
-void CreateDesktopBackground(const SkBitmap& wallpaper, ImageLayout layout);
+void CreateDesktopBackground(const gfx::ImageSkia& wallpaper,
+                             WallpaperLayout wallpaper_layout,
+                             aura::RootWindow* root_window);
+
 ASH_EXPORT views::Widget* CreateStatusArea(views::View* contents);
+
+ui_controls::UIControlsAura* CreateUIControls();
 }  // namespace internal
 
 }  // namespace ash

@@ -208,7 +208,7 @@ class SelectFileDialogExtensionBrowserTest : public ExtensionBrowserTest {
 
 IN_PROC_BROWSER_TEST_F(SelectFileDialogExtensionBrowserTest, CreateAndDestroy) {
   // Browser window must be up for us to test dialog window parent.
-  gfx::NativeWindow native_window = browser()->window()->GetNativeHandle();
+  gfx::NativeWindow native_window = browser()->window()->GetNativeWindow();
   ASSERT_TRUE(native_window != NULL);
 
   // Before we call SelectFile, dialog is not running/visible.
@@ -226,17 +226,11 @@ IN_PROC_BROWSER_TEST_F(SelectFileDialogExtensionBrowserTest, DestroyListener) {
 // page element, as that uses different memory management pathways.
 // crbug.com/98791
 
-// TODO(jamescook): Make dialog work on non-ChromeOS platforms. crbug.com/97424
-#if !defined(OS_CHROMEOS)
-#define MAYBE_SelectFileAndCancel DISABLED_SelectFileAndCancel
-#else
-#define MAYBE_SelectFileAndCancel SelectFileAndCancel
-#endif
 IN_PROC_BROWSER_TEST_F(SelectFileDialogExtensionBrowserTest,
-                       MAYBE_SelectFileAndCancel) {
+                       SelectFileAndCancel) {
   AddMountPoint(downloads_dir_);
 
-  gfx::NativeWindow owning_window = browser()->window()->GetNativeHandle();
+  gfx::NativeWindow owning_window = browser()->window()->GetNativeWindow();
 
   // FilePath() for default path.
   OpenDialog(SelectFileDialog::SELECT_OPEN_FILE, FilePath(), owning_window, "");
@@ -250,14 +244,8 @@ IN_PROC_BROWSER_TEST_F(SelectFileDialogExtensionBrowserTest,
   ASSERT_EQ(this, listener_->params());
 }
 
-// TODO(jamescook): Make dialog work on non-ChromeOS platforms. crbug.com/97424
-#if !defined(OS_CHROMEOS)
-#define MAYBE_SelectFileAndOpen DISABLED_SelectFileAndOpen
-#else
-#define MAYBE_SelectFileAndOpen SelectFileAndOpen
-#endif
 IN_PROC_BROWSER_TEST_F(SelectFileDialogExtensionBrowserTest,
-                       MAYBE_SelectFileAndOpen) {
+                       SelectFileAndOpen) {
   AddMountPoint(downloads_dir_);
 
   FilePath test_file = downloads_dir_.AppendASCII("file_manager_test.html");
@@ -267,7 +255,7 @@ IN_PROC_BROWSER_TEST_F(SelectFileDialogExtensionBrowserTest,
   ASSERT_TRUE(fp != NULL);
   ASSERT_TRUE(file_util::CloseFile(fp));
 
-  gfx::NativeWindow owning_window = browser()->window()->GetNativeHandle();
+  gfx::NativeWindow owning_window = browser()->window()->GetNativeWindow();
 
   // Spawn a dialog to open a file.  Provide the path to the file so the dialog
   // will automatically select it.  Ensure that the OK button is enabled by
@@ -287,19 +275,13 @@ IN_PROC_BROWSER_TEST_F(SelectFileDialogExtensionBrowserTest,
   ASSERT_EQ(this, listener_->params());
 }
 
-// TODO(jamescook): Make dialog work on non-ChromeOS platforms. crbug.com/97424
-#if !defined(OS_CHROMEOS)
-#define MAYBE_SelectFileAndSave DISABLED_SelectFileAndSave
-#else
-#define MAYBE_SelectFileAndSave SelectFileAndSave
-#endif
 IN_PROC_BROWSER_TEST_F(SelectFileDialogExtensionBrowserTest,
-                       MAYBE_SelectFileAndSave) {
+                       SelectFileAndSave) {
   AddMountPoint(downloads_dir_);
 
   FilePath test_file = downloads_dir_.AppendASCII("file_manager_test.html");
 
-  gfx::NativeWindow owning_window = browser()->window()->GetNativeHandle();
+  gfx::NativeWindow owning_window = browser()->window()->GetNativeWindow();
 
   // Spawn a dialog to save a file, providing a suggested path.
   // Ensure "Save" button is enabled by waiting for notification from
@@ -319,17 +301,11 @@ IN_PROC_BROWSER_TEST_F(SelectFileDialogExtensionBrowserTest,
   ASSERT_EQ(this, listener_->params());
 }
 
-// TODO(jamescook): Make dialog work on non-ChromeOS platforms. crbug.com/97424
-#if !defined(OS_CHROMEOS)
-#define MAYBE_OpenSingletonTabAndCancel DISABLED_OpenSingletonTabAndCancel
-#else
-#define MAYBE_OpenSingletonTabAndCancel OpenSingletonTabAndCancel
-#endif
 IN_PROC_BROWSER_TEST_F(SelectFileDialogExtensionBrowserTest,
-                       MAYBE_OpenSingletonTabAndCancel) {
+                       OpenSingletonTabAndCancel) {
   AddMountPoint(downloads_dir_);
 
-  gfx::NativeWindow owning_window = browser()->window()->GetNativeHandle();
+  gfx::NativeWindow owning_window = browser()->window()->GetNativeWindow();
 
   OpenDialog(SelectFileDialog::SELECT_OPEN_FILE, FilePath(), owning_window, "");
 
@@ -349,17 +325,11 @@ IN_PROC_BROWSER_TEST_F(SelectFileDialogExtensionBrowserTest,
   ASSERT_EQ(this, listener_->params());
 }
 
-// TODO(jamescook): Make dialog work on non-ChromeOS platforms. crbug.com/97424
-#if !defined(OS_CHROMEOS)
-#define MAYBE_OpenTwoDialogs DISABLED_OpenTwoDialogs
-#else
-#define MAYBE_OpenTwoDialogs OpenTwoDialogs
-#endif
 IN_PROC_BROWSER_TEST_F(SelectFileDialogExtensionBrowserTest,
-                       MAYBE_OpenTwoDialogs) {
+                       OpenTwoDialogs) {
   AddMountPoint(downloads_dir_);
 
-  gfx::NativeWindow owning_window = browser()->window()->GetNativeHandle();
+  gfx::NativeWindow owning_window = browser()->window()->GetNativeWindow();
 
   OpenDialog(SelectFileDialog::SELECT_OPEN_FILE, FilePath(), owning_window, "");
 

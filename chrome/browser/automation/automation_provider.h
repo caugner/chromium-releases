@@ -32,6 +32,8 @@
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/trace_subscriber.h"
 #include "ipc/ipc_channel.h"
+#include "ipc/ipc_listener.h"
+#include "ipc/ipc_sender.h"
 
 #if defined(OS_WIN) && !defined(USE_AURA)
 #include "ui/gfx/native_widget_types.h"
@@ -45,10 +47,12 @@ class AutomationWindowTracker;
 class Browser;
 class ExternalTabContainer;
 class FilePath;
+class FindInPageNotificationObserver;
 class InitialLoadObserver;
 class LoginHandler;
 class MetricEventDurationObserver;
 class NavigationControllerRestoredObserver;
+class NewTabUILoadObserver;
 class Profile;
 struct AutomationMsg_Find_Params;
 struct Reposition_Params;
@@ -77,8 +81,8 @@ class Point;
 }
 
 class AutomationProvider
-    : public IPC::Channel::Listener,
-      public IPC::Message::Sender,
+    : public IPC::Listener,
+      public IPC::Sender,
       public base::SupportsWeakPtr<AutomationProvider>,
       public base::RefCountedThreadSafe<
           AutomationProvider, content::BrowserThread::DeleteOnUIThread>,
@@ -87,6 +91,8 @@ class AutomationProvider
   explicit AutomationProvider(Profile* profile);
 
   Profile* profile() const { return profile_; }
+
+  void set_profile(Profile* profile);
 
   // Initializes a channel for a connection to an AutomationProxy.
   // If channel_id starts with kNamedInterfacePrefix, it will act
@@ -110,8 +116,8 @@ class AutomationProvider
   // Called when the ChromeOS network library has finished its first update.
   void OnNetworkLibraryInit();
 
-  // Called when the chromeos WebUI login is ready.
-  void OnLoginWebuiReady();
+  // Called when the chromeos WebUI OOBE/Login is ready.
+  void OnOOBEWebuiReady();
 
   // Checks all of the initial load conditions, then sends the
   // InitialLoadsComplete message over the automation channel.
@@ -129,10 +135,10 @@ class AutomationProvider
       const content::NavigationController* controller,
       const Browser* parent) const;
 
-  // IPC::Channel::Sender implementation.
+  // IPC::Sender implementation.
   virtual bool Send(IPC::Message* msg) OVERRIDE;
 
-  // IPC::Channel::Listener implementation.
+  // IPC::Listener implementation.
   virtual void OnChannelConnected(int pid) OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
   virtual void OnChannelError() OVERRIDE;
@@ -238,7 +244,6 @@ class AutomationProvider
                           bool press_escape_en_route,
                           IPC::Message* reply_message);
   void HandleUnused(const IPC::Message& message, int handle);
-  void SetFilteredInet(const IPC::Message& message, bool enabled);
   void GetFilteredInetHitCount(int* hit_count);
   void SetProxyConfig(const std::string& new_proxy_config);
 
@@ -340,8 +345,8 @@ class AutomationProvider
 #endif  // defined(OS_WIN) && !defined(USE_AURA)
 
   scoped_ptr<IPC::ChannelProxy> channel_;
-  scoped_ptr<content::NotificationObserver> new_tab_ui_load_observer_;
-  scoped_ptr<content::NotificationObserver> find_in_page_observer_;
+  scoped_ptr<NewTabUILoadObserver> new_tab_ui_load_observer_;
+  scoped_ptr<FindInPageNotificationObserver> find_in_page_observer_;
 
   // True iff we should enable observers that check for initial load conditions.
   bool use_initial_load_observers_;

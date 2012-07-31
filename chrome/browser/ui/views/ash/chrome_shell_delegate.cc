@@ -11,11 +11,15 @@
 #include "base/command_line.h"
 #include "chrome/browser/chromeos/login/screen_locker.h"
 #include "chrome/browser/extensions/api/terminal/terminal_extension_helper.h"
+#include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/sessions/tab_restore_service.h"
+#include "chrome/browser/sessions/tab_restore_service_factory.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/views/ash/app_list/app_list_view_delegate.h"
 #include "chrome/browser/ui/views/ash/launcher/chrome_launcher_controller.h"
+#include "chrome/browser/ui/views/ash/user_action_handler.h"
 #include "chrome/browser/ui/views/ash/window_positioner.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -25,22 +29,37 @@
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
+#include "ui/aura/client/user_action_client.h"
 #include "ui/aura/window.h"
 
 #if defined(OS_CHROMEOS)
 #include "base/chromeos/chromeos_version.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_util.h"
-#include "chrome/browser/chromeos/background/desktop_background_observer.h"
+#include "chrome/browser/chromeos/background/ash_user_wallpaper_delegate.h"
 #include "chrome/browser/chromeos/extensions/file_manager_util.h"
 #include "chrome/browser/chromeos/kiosk_mode/kiosk_mode_settings.h"
-#include "chrome/browser/chromeos/login/webui_login_display_host.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
+#include "chrome/browser/chromeos/login/webui_login_display_host.h"
 #include "chrome/browser/chromeos/system/ash_system_tray_delegate.h"
+#include "chrome/browser/ui/views/keyboard_overlay_dialog_view.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "chrome/browser/ui/webui/chromeos/mobile_setup_dialog.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/power_manager_client.h"
 #endif
+
+namespace {
+
+// Returns the browser that should handle accelerators.
+Browser* GetTargetBrowser() {
+  Browser* browser = browser::FindBrowserWithWindow(ash::wm::GetActiveWindow());
+  if (browser)
+    return browser;
+  return browser::FindOrCreateTabbedBrowser(
+      ProfileManager::GetDefaultProfileOrOffTheRecord());
+}
+
+}  // namespace
 
 // static
 ChromeShellDelegate* ChromeShellDelegate::instance_ = NULL;
@@ -65,9 +84,12 @@ ChromeShellDelegate::~ChromeShellDelegate() {
 bool ChromeShellDelegate::IsUserLoggedIn() {
 #if defined(OS_CHROMEOS)
   // When running a Chrome OS build outside of a device (i.e. on a developer's
-  // workstation), pretend like we're always logged in.
-  if (!base::chromeos::IsRunningOnChromeOS())
+  // workstation) and not running as login-manager, pretend like we're always
+  // logged in.
+  if (!base::chromeos::IsRunningOnChromeOS() &&
+      !CommandLine::ForCurrentProcess()->HasSwitch(switches::kLoginManager)) {
     return true;
+  }
 
   return chromeos::UserManager::Get()->IsUserLoggedIn();
 #else
@@ -109,7 +131,13 @@ void ChromeShellDelegate::Shutdown() {
 }
 
 void ChromeShellDelegate::Exit() {
-  BrowserList::AttemptUserExit();
+  browser::AttemptUserExit();
+}
+
+void ChromeShellDelegate::NewTab() {
+  Browser* browser = GetTargetBrowser();
+  browser->NewTab();
+  browser->window()->Show();
 }
 
 void ChromeShellDelegate::NewWindow(bool is_incognito) {
@@ -118,47 +146,25 @@ void ChromeShellDelegate::NewWindow(bool is_incognito) {
       is_incognito ? profile->GetOffTheRecordProfile() : profile);
 }
 
-void ChromeShellDelegate::Search() {
-  // Exit fullscreen to show omnibox.
-  Browser* last_active = BrowserList::GetLastActive();
-  if (last_active) {
-    if (last_active->window()->IsFullscreen()) {
-      last_active->ToggleFullscreenMode();
-      // ToggleFullscreenMode is asynchronous, so we don't have omnibox
-      // visible at this point. Wait for next event cycle which toggles
-      // the visibility of omnibox before creating new tab.
-      MessageLoop::current()->PostTask(
-          FROM_HERE, base::Bind(&ChromeShellDelegate::Search,
-                                weak_factory_.GetWeakPtr()));
+void ChromeShellDelegate::OpenFileManager(bool as_dialog) {
+#if defined(OS_CHROMEOS)
+  if (as_dialog) {
+    Browser* browser =
+        browser::FindBrowserWithWindow(ash::wm::GetActiveWindow());
+    // Open the select file dialog only if there is an active browser where the
+    // selected file is displayed. Otherwise open a file manager in a tab.
+    if (browser) {
+      browser->OpenFile();
       return;
     }
   }
-
-  Browser* target_browser = Browser::GetOrCreateTabbedBrowser(
-      last_active ? last_active->profile() :
-                    ProfileManager::GetDefaultProfileOrOffTheRecord());
-  const GURL& url = target_browser->GetSelectedWebContents() ?
-      target_browser->GetSelectedWebContents()->GetURL() : GURL();
-  if (url.SchemeIs(chrome::kChromeUIScheme) &&
-      url.host() == chrome::kChromeUINewTabHost) {
-    // If the NTP is showing, focus the omnibox.
-    target_browser->window()->SetFocusToLocationBar(true);
-  } else {
-    target_browser->NewTab();
-  }
-  target_browser->window()->Show();
-}
-
-void ChromeShellDelegate::OpenFileManager() {
-#if defined(OS_CHROMEOS)
   file_manager_util::OpenApplication();
 #endif
 }
 
 void ChromeShellDelegate::OpenCrosh() {
 #if defined(OS_CHROMEOS)
-  Browser* browser = Browser::GetOrCreateTabbedBrowser(
-      ProfileManager::GetDefaultProfileOrOffTheRecord());
+  Browser* browser = GetTargetBrowser();
   GURL crosh_url = TerminalExtensionHelper::GetCroshExtensionURL(
       browser->profile());
   if (!crosh_url.is_valid())
@@ -172,16 +178,17 @@ void ChromeShellDelegate::OpenCrosh() {
 #endif
 }
 
-void ChromeShellDelegate::OpenMobileSetup() {
+void ChromeShellDelegate::OpenMobileSetup(const std::string& service_path) {
 #if defined(OS_CHROMEOS)
-  Browser* browser = Browser::GetOrCreateTabbedBrowser(
-      ProfileManager::GetDefaultProfileOrOffTheRecord());
+  Browser* browser = GetTargetBrowser();
   if (CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kEnableMobileSetupDialog)) {
-    MobileSetupDialog::Show();
+    MobileSetupDialog::Show(service_path);
   } else {
+    std::string url(chrome::kChromeUIMobileSetupURL);
+    url.append(service_path);
     browser->OpenURL(
-        content::OpenURLParams(GURL(chrome::kChromeUIMobileSetupURL),
+        content::OpenURLParams(GURL(url),
                                content::Referrer(),
                                NEW_FOREGROUND_TAB,
                                content::PAGE_TRANSITION_LINK,
@@ -189,6 +196,62 @@ void ChromeShellDelegate::OpenMobileSetup() {
     browser->window()->Activate();
   }
 #endif
+}
+
+void ChromeShellDelegate::RestoreTab() {
+  Browser* browser = GetTargetBrowser();
+  // Do not restore tabs while in the incognito mode.
+  if (browser->profile()->IsOffTheRecord())
+    return;
+  TabRestoreService* service =
+      TabRestoreServiceFactory::GetForProfile(browser->profile());
+  if (!service)
+    return;
+  if (service->IsLoaded()) {
+    browser->RestoreTab();
+  } else {
+    service->LoadTabsFromLastSession();
+    // LoadTabsFromLastSession is asynchronous, so TabRestoreService has not
+    // finished loading the entries at this point. Wait for next event cycle
+    // which loads the restored tab entries.
+    MessageLoop::current()->PostTask(
+        FROM_HERE,
+        base::Bind(&ChromeShellDelegate::RestoreTab,
+                   weak_factory_.GetWeakPtr()));
+  }
+}
+
+bool ChromeShellDelegate::RotatePaneFocus(ash::Shell::Direction direction) {
+  aura::Window* window = ash::wm::GetActiveWindow();
+  if (!window)
+    return false;
+
+  Browser* browser = browser::FindBrowserWithWindow(window);
+  if (!browser)
+    return false;
+
+  switch (direction) {
+    case ash::Shell::FORWARD:
+      browser->FocusNextPane();
+      break;
+    case ash::Shell::BACKWARD:
+      browser->FocusPreviousPane();
+      break;
+  }
+  return true;
+}
+
+void ChromeShellDelegate::ShowKeyboardOverlay() {
+#if defined(OS_CHROMEOS)
+  KeyboardOverlayDialogView::ShowDialog(
+      ProfileManager::GetDefaultProfileOrOffTheRecord());
+#endif
+}
+
+void ChromeShellDelegate::ShowTaskManager() {
+  Browser* browser = browser::FindOrCreateTabbedBrowser(
+      ProfileManager::GetDefaultProfileOrOffTheRecord());
+  browser->OpenTaskManager(false);
 }
 
 content::BrowserContext* ChromeShellDelegate::GetCurrentBrowserContext() {
@@ -207,7 +270,15 @@ void ChromeShellDelegate::ToggleSpokenFeedback() {
 #endif
 }
 
-ash::AppListViewDelegate*
+bool ChromeShellDelegate::IsSpokenFeedbackEnabled() const {
+#if defined(OS_CHROMEOS)
+  return chromeos::accessibility::IsSpokenFeedbackEnabled();
+#else
+  return false;
+#endif
+}
+
+app_list::AppListViewDelegate*
     ChromeShellDelegate::CreateAppListViewDelegate() {
   // Shell will own the created delegate.
   return new AppListViewDelegate;
@@ -241,6 +312,10 @@ ash::UserWallpaperDelegate* ChromeShellDelegate::CreateUserWallpaperDelegate() {
 #else
   return NULL;
 #endif
+}
+
+aura::client::UserActionClient* ChromeShellDelegate::CreateUserActionClient() {
+  return new UserActionHandler;
 }
 
 void ChromeShellDelegate::Observe(int type,

@@ -18,7 +18,7 @@
 #include "chrome/browser/sessions/restore_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/automation_messages.h"
 #include "chrome/common/render_messages.h"
 #include "content/public/browser/navigation_controller.h"
@@ -91,7 +91,7 @@ void AutomationProvider::WindowSimulateDrag(
     IPC::Message* reply_message) {
   if (browser_tracker_->ContainsHandle(handle) && (drag_path.size() > 1)) {
     gfx::NativeWindow window =
-        browser_tracker_->GetResource(handle)->window()->GetNativeHandle();
+        browser_tracker_->GetResource(handle)->window()->GetNativeWindow();
 
     UINT down_message = 0;
     UINT up_message = 0;
@@ -119,7 +119,7 @@ void AutomationProvider::WindowSimulateDrag(
     Browser* browser = browser_tracker_->GetResource(handle);
     DCHECK(browser);
     HWND top_level_hwnd =
-        reinterpret_cast<HWND>(browser->window()->GetNativeHandle());
+        reinterpret_cast<HWND>(browser->window()->GetNativeWindow());
     POINT temp = drag_path[0].ToPOINT();
     MapWindowPoints(top_level_hwnd, HWND_DESKTOP, &temp, 1);
     MoveMouse(temp);
@@ -195,7 +195,7 @@ void AutomationProvider::CreateExternalTab(
     *tab_handle = external_tab_container->tab_handle();
     *tab_container_window = external_tab_container->GetNativeView();
     *tab_window = web_contents->GetNativeView();
-    *session_id = external_tab_container->tab_contents_wrapper()->
+    *session_id = external_tab_container->tab_contents()->
         restore_tab_helper()->session_id().id();
   } else {
     external_tab_container->Uninitialize();
@@ -241,9 +241,8 @@ void AutomationProvider::PrintAsync(int tab_handle) {
   if (!web_contents)
     return;
 
-  TabContentsWrapper* wrapper =
-      TabContentsWrapper::GetCurrentWrapperForContents(web_contents);
-  wrapper->print_view_manager()->PrintNow();
+  TabContents* tab_contents = TabContents::FromWebContents(web_contents);
+  tab_contents->print_view_manager()->PrintNow();
 }
 
 ExternalTabContainer* AutomationProvider::GetExternalTabForHandle(int handle) {
@@ -335,7 +334,7 @@ void AutomationProvider::ConnectExternalTab(
     *tab_handle = external_tab_container->tab_handle();
     *tab_container_window = external_tab_container->GetNativeView();
     *tab_window = tab_contents->GetNativeView();
-    *session_id = external_tab_container->tab_contents_wrapper()->
+    *session_id = external_tab_container->tab_contents()->
         restore_tab_helper()->session_id().id();
   } else {
     external_tab_container->Uninitialize();

@@ -13,6 +13,7 @@
 #include "content/public/browser/web_drag_dest_delegate.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_util.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 #include "ui/base/clipboard/clipboard_util_win.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
 #include "ui/base/dragdrop/os_exchange_data_provider_win.h"
@@ -31,6 +32,8 @@ using content::WebContents;
 
 namespace {
 
+const unsigned short kHighBitMaskShort = 0x8000;
+
 // A helper method for getting the preferred drop effect.
 DWORD GetPreferredDropEffect(DWORD effect) {
   if (effect & DROPEFFECT_COPY)
@@ -40,6 +43,21 @@ DWORD GetPreferredDropEffect(DWORD effect) {
   if (effect & DROPEFFECT_MOVE)
     return DROPEFFECT_MOVE;
   return DROPEFFECT_NONE;
+}
+
+int GetModifierFlags() {
+  int modifier_state = 0;
+  if (::GetKeyState(VK_SHIFT) & kHighBitMaskShort)
+    modifier_state |= WebKit::WebInputEvent::ShiftKey;
+  if (::GetKeyState(VK_CONTROL) & kHighBitMaskShort)
+    modifier_state |= WebKit::WebInputEvent::ControlKey;
+  if (::GetKeyState(VK_MENU) & kHighBitMaskShort)
+    modifier_state |= WebKit::WebInputEvent::AltKey;
+  if (::GetKeyState(VK_LWIN) & kHighBitMaskShort)
+    modifier_state |= WebKit::WebInputEvent::MetaKey;
+  if (::GetKeyState(VK_RWIN) & kHighBitMaskShort)
+    modifier_state |= WebKit::WebInputEvent::MetaKey;
+  return modifier_state;
 }
 
 }  // namespace
@@ -115,20 +133,22 @@ DWORD WebDragDest::OnDragEnter(IDataObject* data_object,
 
   // TODO(tc): PopulateWebDropData can be slow depending on what is in the
   // IDataObject.  Maybe we can do this in a background thread.
-  WebDropData drop_data;
-  WebDropData::PopulateWebDropData(data_object, &drop_data);
+  drop_data_.reset(new WebDropData());
+  WebDropData::PopulateWebDropData(data_object, drop_data_.get());
 
-  if (drop_data.url.is_empty())
-    ui::OSExchangeDataProviderWin::GetPlainTextURL(data_object, &drop_data.url);
+  if (drop_data_->url.is_empty())
+    ui::OSExchangeDataProviderWin::GetPlainTextURL(data_object,
+                                                   &drop_data_->url);
 
   drag_cursor_ = WebDragOperationNone;
 
   POINT client_pt = cursor_position;
   ScreenToClient(GetHWND(), &client_pt);
-  web_contents_->GetRenderViewHost()->DragTargetDragEnter(drop_data,
+  web_contents_->GetRenderViewHost()->DragTargetDragEnter(*drop_data_,
       gfx::Point(client_pt.x, client_pt.y),
       gfx::Point(cursor_position.x, cursor_position.y),
-      web_drag_utils_win::WinDragOpMaskToWebDragOpMask(effects));
+      web_drag_utils_win::WinDragOpMaskToWebDragOpMask(effects),
+      GetModifierFlags());
 
   if (delegate_)
       delegate_->OnDragEnter(data_object);
@@ -154,7 +174,8 @@ DWORD WebDragDest::OnDragOver(IDataObject* data_object,
   web_contents_->GetRenderViewHost()->DragTargetDragOver(
       gfx::Point(client_pt.x, client_pt.y),
       gfx::Point(cursor_position.x, cursor_position.y),
-      web_drag_utils_win::WinDragOpMaskToWebDragOpMask(effects));
+      web_drag_utils_win::WinDragOpMaskToWebDragOpMask(effects),
+      GetModifierFlags());
 
   if (delegate_)
     delegate_->OnDragOver(data_object);
@@ -175,6 +196,8 @@ void WebDragDest::OnDragLeave(IDataObject* data_object) {
 
   if (delegate_)
     delegate_->OnDragLeave(data_object);
+
+  drop_data_.reset();
 }
 
 DWORD WebDragDest::OnDrop(IDataObject* data_object,
@@ -195,7 +218,8 @@ DWORD WebDragDest::OnDrop(IDataObject* data_object,
   ScreenToClient(GetHWND(), &client_pt);
   web_contents_->GetRenderViewHost()->DragTargetDrop(
       gfx::Point(client_pt.x, client_pt.y),
-      gfx::Point(cursor_position.x, cursor_position.y));
+      gfx::Point(cursor_position.x, cursor_position.y),
+      GetModifierFlags());
 
   if (delegate_)
     delegate_->OnDrop(data_object);
@@ -205,5 +229,9 @@ DWORD WebDragDest::OnDrop(IDataObject* data_object,
   // This isn't always correct, but at least it's a close approximation.
   // For now, we always map a move to a copy to prevent potential data loss.
   DWORD drop_effect = web_drag_utils_win::WebDragOpToWinDragOp(drag_cursor_);
-  return drop_effect != DROPEFFECT_MOVE ? drop_effect : DROPEFFECT_COPY;
+  DWORD result = drop_effect != DROPEFFECT_MOVE ?
+      drop_effect : DROPEFFECT_COPY;
+
+  drop_data_.reset();
+  return result;
 }

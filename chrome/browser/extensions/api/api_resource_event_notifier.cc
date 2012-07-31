@@ -82,7 +82,7 @@ void APIResourceEventNotifier::OnWriteComplete(int result_code) {
 }
 
 void APIResourceEventNotifier::OnTransferComplete(int result_code,
-                                                  base::ListValue* data) {
+                                                  base::BinaryValue* data) {
   if (src_id_ < 0) {
     delete data;
     return;
@@ -126,14 +126,11 @@ void APIResourceEventNotifier::DispatchEvent(const std::string &extension,
 
 void APIResourceEventNotifier::DispatchEventOnUIThread(
     const std::string &extension, DictionaryValue* event) {
-  ListValue args;
-
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
+  ListValue args;
   args.Set(0, event);
-  std::string json_args;
-  base::JSONWriter::Write(&args, &json_args);
-  router_->DispatchEventToExtension(src_extension_id_, extension, json_args,
+  router_->DispatchEventToExtension(src_extension_id_, extension, args,
                                     profile_, src_url_);
 }
 

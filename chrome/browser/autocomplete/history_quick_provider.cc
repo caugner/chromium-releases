@@ -18,8 +18,10 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete_field_trial.h"
 #include "chrome/browser/history/history.h"
+#include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/history/in_memory_url_index.h"
 #include "chrome/browser/history/in_memory_url_index_types.h"
+#include "chrome/browser/history/scored_history_match.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
@@ -192,6 +194,7 @@ AutocompleteMatch HistoryQuickProvider::QuickMatchToACMatch(
   AutocompleteMatch match(this, score, !!info.visit_count(),
       history_match.url_matches.empty() ?
           AutocompleteMatch::HISTORY_TITLE : AutocompleteMatch::HISTORY_URL);
+  match.typed_count = info.typed_count();
   match.destination_url = info.url();
   DCHECK(match.destination_url.is_valid());
 
@@ -237,7 +240,7 @@ history::InMemoryURLIndex* HistoryQuickProvider::GetIndex() {
     return index_for_testing_.get();
 
   HistoryService* const history_service =
-      profile_->GetHistoryService(Profile::EXPLICIT_ACCESS);
+      HistoryServiceFactory::GetForProfile(profile_, Profile::EXPLICIT_ACCESS);
   if (!history_service)
     return NULL;
 

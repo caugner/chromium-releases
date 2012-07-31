@@ -8,6 +8,8 @@
 
 #include <set>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "base/compiler_specific.h"
 #include "content/public/browser/content_browser_client.h"
@@ -26,7 +28,9 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   virtual content::BrowserMainParts* CreateBrowserMainParts(
       const content::MainFunctionParams& parameters) OVERRIDE;
   virtual content::WebContentsView* OverrideCreateWebContentsView(
-      content::WebContents* web_contents) OVERRIDE;
+      content::WebContents* web_contents,
+      content::RenderViewHostDelegateView** render_view_host_delegate_view)
+          OVERRIDE;
   virtual content::WebContentsViewDelegate* GetWebContentsViewDelegate(
       content::WebContents* web_contents) OVERRIDE;
   virtual void RenderViewHostCreated(
@@ -51,6 +55,10 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       OVERRIDE;
   virtual bool ShouldSwapProcessesForNavigation(const GURL& current_url,
                                                 const GURL& new_url) OVERRIDE;
+  virtual bool ShouldSwapProcessesForRedirect(
+      content::ResourceContext* resource_context,
+      const GURL& current_url,
+      const GURL& new_url) OVERRIDE;
   virtual std::string GetCanonicalEncodingNameByAliasName(
       const std::string& alias_name) OVERRIDE;
   virtual void AppendExtraCommandLineSwitches(CommandLine* command_line,
@@ -58,7 +66,7 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   virtual std::string GetApplicationLocale() OVERRIDE;
   virtual std::string GetAcceptLangs(
       content::BrowserContext* context) OVERRIDE;
-  virtual SkBitmap* GetDefaultFavicon() OVERRIDE;
+  virtual gfx::ImageSkia* GetDefaultFavicon() OVERRIDE;
   virtual bool AllowAppCache(const GURL& manifest_url,
                              const GURL& first_party,
                              content::ResourceContext* context) OVERRIDE;
@@ -105,6 +113,7 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       const net::SSLInfo& ssl_info,
       const GURL& request_url,
       bool overridable,
+      bool strict_enforcement,
       const base::Callback<void(bool)>& callback,
       bool* cancel_request) OVERRIDE;
   virtual void SelectClientCertificate(
@@ -118,9 +127,6 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       net::X509Certificate* cert,
       int render_process_id,
       int render_view_id) OVERRIDE;
-  virtual void RequestMediaAccessPermission(
-      const content::MediaStreamRequest* request,
-      const content::MediaResponseCallback& callback) OVERRIDE;
   virtual content::MediaObserver* GetMediaObserver() OVERRIDE;
   virtual void RequestDesktopNotificationPermission(
       const GURL& source_origin,
@@ -153,13 +159,12 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   virtual void ResourceDispatcherHostCreated() OVERRIDE;
   virtual content::SpeechRecognitionManagerDelegate*
       GetSpeechRecognitionManagerDelegate() OVERRIDE;
-  virtual ui::Clipboard* GetClipboard() OVERRIDE;
   virtual net::NetLog* GetNetLog() OVERRIDE;
   virtual content::AccessTokenStore* CreateAccessTokenStore() OVERRIDE;
   virtual bool IsFastShutdownPossible() OVERRIDE;
   virtual void OverrideWebkitPrefs(content::RenderViewHost* rvh,
                                    const GURL& url,
-                                   WebPreferences* prefs) OVERRIDE;
+                                   webkit_glue::WebPreferences* prefs) OVERRIDE;
   virtual void UpdateInspectorSetting(content::RenderViewHost* rvh,
                                       const std::string& key,
                                       const std::string& value) OVERRIDE;
@@ -170,8 +175,9 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   virtual void ClearCookies(content::RenderViewHost* rvh) OVERRIDE;
   virtual FilePath GetDefaultDownloadDirectory() OVERRIDE;
   virtual std::string GetDefaultDownloadName() OVERRIDE;
-  virtual bool AllowSocketAPI(content::BrowserContext* browser_context,
-                              const GURL& url) OVERRIDE;
+  virtual bool AllowPepperSocketAPI(content::BrowserContext* browser_context,
+                                    const GURL& url) OVERRIDE;
+  virtual bool AllowPepperPrivateFileAPI() OVERRIDE;
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
   virtual int GetCrashSignalFD(const CommandLine& command_line) OVERRIDE;
@@ -185,9 +191,20 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
           const GURL& url) OVERRIDE;
 #endif
 
+  // Notification that the application locale has changed. This allows us to
+  // update our I/O thread cache of this value.
+  void SetApplicationLocale(const std::string& locale);
+
  private:
+  // Sets io_thread_application_locale_ to the given value.
+  void SetApplicationLocaleOnIOThread(const std::string& locale);
+
   // Set of origins that can use TCP/UDP private APIs from NaCl.
   std::set<std::string> allowed_socket_origins_;
+
+  // Cached version of the locale so we can return the locale on the I/O
+  // thread.
+  std::string io_thread_application_locale_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeContentBrowserClient);
 };

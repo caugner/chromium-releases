@@ -180,35 +180,31 @@ function bb_goma_make {
     COMMON_JAVAC="$COMMON_JAVAC" \
     "$@"
 
+  local make_exit_status=$?
   bb_stop_goma_internal
+  return $make_exit_status
 }
 
 # Compile step
 function bb_compile {
-  echo "@@@BUILD_STEP Compile@@@"
+  # This must be named 'compile', not 'Compile', for CQ interaction.
+  # Talk to maruel for details.
+  echo "@@@BUILD_STEP compile@@@"
   bb_goma_make
 }
 
 # Re-gyp and compile with unit test bundles configured as shlibs for
 # the native test runner.  Experimental for now.  Once the native test
 # loader is on by default, this entire function becomes obsolete.
-function bb_native_test_compile_run_tests {
+function bb_compile_apk_tests {
   echo "@@@BUILD_STEP Re-gyp for the native test runner@@@"
+  # Setup goma again. Not doing this breaks the android_gyp step.
+  bb_setup_goma_internal
+
   GYP_DEFINES="$GYP_DEFINES gtest_target_type=shared_library" android_gyp
 
   echo "@@@BUILD_STEP Native test runner compile@@@"
   bb_goma_make
-
-  # Make sure running the template prints an expected failure.
-  echo "@@@BUILD_STEP Native test runner template test@@@"
-  tempfile=/tmp/tempfile-$$.txt
-  build/android/run_tests.py --xvfb --verbose \
-    -s out/Release/replaceme_apk/ChromeNativeTests-debug.apk \
-    | sed 's/@@@STEP_FAILURE@@@//g' | tee $tempfile
-  happy_failure=$(cat $tempfile | grep RUNNER_FAILED | wc -l)
-  if [[ $happy_failure -eq 0 ]] ; then
-    echo "@@@STEP_FAILURE@@@"
-  fi
 }
 
 # Experimental compile step; does not turn the tree red if it fails.
@@ -236,4 +232,10 @@ function bb_run_tests_emulator {
 function bb_run_tests {
   echo "@@@BUILD_STEP Run Tests on actual hardware@@@"
   build/android/run_tests.py --xvfb --verbose
+}
+
+# Run APK tests on an actual device.
+function bb_run_apk_tests {
+  echo "@@@BUILD_STEP Run APK Tests on actual hardware@@@"
+  build/android/run_tests.py --xvfb --verbose --apk=True
 }

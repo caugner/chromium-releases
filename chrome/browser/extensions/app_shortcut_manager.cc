@@ -13,9 +13,11 @@
 #include "chrome/common/extensions/extension_resource.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
-#include "grit/theme_resources.h"
+#include "grit/theme_resources_standard.h"
 #include "skia/ext/image_operations.h"
 #include "ui/base/resource/resource_bundle.h"
+
+using extensions::Extension;
 
 namespace {
 // Allow tests to disable shortcut creation, to prevent developers' desktops
@@ -60,10 +62,14 @@ void AppShortcutManager::Observe(int type,
                                  const content::NotificationSource& source,
                                  const content::NotificationDetails& details) {
   DCHECK(type == chrome::NOTIFICATION_EXTENSION_INSTALLED);
-  const Extension* extension = content::Details<const Extension>(details).ptr();
-  if (!disable_shortcut_creation_for_tests && extension->is_platform_app() &&
-      extension->location() != Extension::LOAD)
-    InstallApplicationShortcuts(extension);
+  #if !defined(OS_MACOSX)
+    const Extension* extension = content::Details<const Extension>(
+        details).ptr();
+    if (!disable_shortcut_creation_for_tests &&
+        extension->is_platform_app() &&
+        extension->location() != Extension::LOAD)
+      InstallApplicationShortcuts(extension);
+  #endif
 }
 
 // static
@@ -73,14 +79,6 @@ void AppShortcutManager::SetShortcutCreationDisabledForTesting(bool disabled) {
 
 void AppShortcutManager::InstallApplicationShortcuts(
     const Extension* extension) {
-#if defined(OS_MACOSX)
-  // TODO(sail): For now only install shortcuts if enable platform apps is true.
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kEnablePlatformApps)) {
-    return;
-  }
-#endif
-
   shortcut_info_.extension_id = extension->id();
   shortcut_info_.url = GURL(extension->launch_web_url());
   shortcut_info_.title = UTF8ToUTF16(extension->name());

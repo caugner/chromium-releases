@@ -9,12 +9,12 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autocomplete_history_manager.h"
 #include "chrome/browser/autofill/test_autofill_external_delegate.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/rect.h"
@@ -37,7 +37,8 @@ class MockWebDataService : public WebDataService {
 class AutocompleteHistoryManagerTest : public ChromeRenderViewHostTestHarness {
  protected:
   AutocompleteHistoryManagerTest()
-      : ui_thread_(BrowserThread::UI, MessageLoopForUI::current()) {
+      : ui_thread_(BrowserThread::UI, MessageLoopForUI::current()),
+        db_thread_(BrowserThread::DB) {
   }
 
   virtual void SetUp() {
@@ -48,6 +49,7 @@ class AutocompleteHistoryManagerTest : public ChromeRenderViewHostTestHarness {
   }
 
   content::TestBrowserThread ui_thread_;
+  content::TestBrowserThread db_thread_;
 
   TestingProfile profile_;
   scoped_refptr<MockWebDataService> web_data_service_;
@@ -143,8 +145,8 @@ namespace {
 
 class MockAutofillExternalDelegate : public TestAutofillExternalDelegate {
  public:
-  explicit MockAutofillExternalDelegate(TabContentsWrapper* wrapper)
-      : TestAutofillExternalDelegate(wrapper, NULL) {}
+  explicit MockAutofillExternalDelegate(TabContents* tab_contents)
+      : TestAutofillExternalDelegate(tab_contents, NULL) {}
   virtual ~MockAutofillExternalDelegate() {}
 
   virtual void ApplyAutofillSuggestions(
@@ -185,7 +187,7 @@ TEST_F(AutocompleteHistoryManagerTest, ExternalDelegate) {
       &profile_, web_data_service_);
 
   MockAutofillExternalDelegate external_delegate(
-      TabContentsWrapper::GetCurrentWrapperForContents(contents()));
+      TabContents::FromWebContents(contents()));
   EXPECT_CALL(external_delegate, OnSuggestionsReturned(_, _,  _,  _,  _));
   autocomplete_history_manager.SetExternalDelegate(&external_delegate);
 

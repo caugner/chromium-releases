@@ -876,7 +876,8 @@ Plugin::~Plugin() {
   PLUGIN_PRINTF(("Plugin::~Plugin (this=%p, scriptable_plugin=%p)\n",
                  static_cast<void*>(this),
                  static_cast<void*>(scriptable_plugin())));
-
+  // Destroy the coordinator while the rest of the data is still there
+  pnacl_coordinator_.reset(NULL);
   // If the proxy has been shutdown before now, it's likely the plugin suffered
   // an error while loading.
   if (ppapi_proxy_ != NULL) {
@@ -1622,24 +1623,6 @@ bool Plugin::StreamAsFile(const nacl::string& url,
                           open_callback,
                           &UpdateDownloadProgress);
 }
-
-#ifndef HACK_FOR_MACOS_HANG_REMOVED
-// The following is needed to avoid a plugin startup hang in the
-// MacOS "chrome_browser_tests under gyp" stage.
-// TODO(sehr,mseaborn): remove this hack.
-void (plugin::Plugin::*pmem)(int32_t,
-                             plugin::FileDownloader*&,
-                             pp::VarPrivate&);
-void Plugin::XYZZY(const nacl::string& url,
-                           pp::VarPrivate js_callback) {
-  UNREFERENCED_PARAMETER(url);
-  UNREFERENCED_PARAMETER(js_callback);
-  pp::CompletionCallback open_callback = callback_factory_.NewCallback(pmem,
-      reinterpret_cast<plugin::FileDownloader*>(NULL),
-      js_callback);
-  static_cast<void>(open_callback);
-}
-#endif  // HACK_FOR_MACOS_HANG_REMOVED
 
 
 void Plugin::ReportLoadSuccess(LengthComputable length_computable,

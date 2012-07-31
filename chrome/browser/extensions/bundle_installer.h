@@ -12,7 +12,7 @@
 #include "base/memory/linked_ptr.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/string16.h"
-#include "chrome/browser/extensions/extension_install_ui.h"
+#include "chrome/browser/extensions/extension_install_prompt.h"
 #include "chrome/browser/extensions/webstore_installer.h"
 #include "chrome/browser/extensions/webstore_install_helper.h"
 #include "chrome/browser/ui/browser_list.h"
@@ -38,7 +38,7 @@ namespace extensions {
 //  2) CompleteInstall: install the CRXs and show confirmation bubble
 //
 class BundleInstaller : public WebstoreInstallHelper::Delegate,
-                        public ExtensionInstallUI::Delegate,
+                        public ExtensionInstallPrompt::Delegate,
                         public WebstoreInstaller::Delegate,
                         public BrowserList::Observer,
                         public base::RefCountedThreadSafe<BundleInstaller> {
@@ -76,7 +76,7 @@ class BundleInstaller : public WebstoreInstallHelper::Delegate,
 
   typedef std::vector<Item> ItemList;
 
-  BundleInstaller(Profile* profile, const ItemList& items);
+  BundleInstaller(Browser* browser, const ItemList& items);
 
   // Returns true if the user has approved the bundle's permissions.
   bool approved() const { return approved_; }
@@ -97,7 +97,6 @@ class BundleInstaller : public WebstoreInstallHelper::Delegate,
   // the specified |browser|.
   // Note: the |delegate| must stay alive until receiving the callback.
   void CompleteInstall(content::NavigationController* controller,
-                       Browser* browser,
                        Delegate* delegate);
 
   // We change the headings in the install prompt and installed bubble depending
@@ -154,7 +153,7 @@ class BundleInstaller : public WebstoreInstallHelper::Delegate,
       InstallHelperResultCode result_code,
       const std::string& error_message) OVERRIDE;
 
-  // ExtensionInstallUI::Delegate implementation:
+  // ExtensionInstallPrompt::Delegate implementation:
   virtual void InstallUIProceed() OVERRIDE;
   virtual void InstallUIAbort(bool user_initiated) OVERRIDE;
 
@@ -164,9 +163,9 @@ class BundleInstaller : public WebstoreInstallHelper::Delegate,
                                          const std::string& error) OVERRIDE;
 
   // BrowserList::observer implementation:
-  virtual void OnBrowserAdded(const Browser* browser) OVERRIDE;
-  virtual void OnBrowserRemoved(const Browser* browser) OVERRIDE;
-  virtual void OnBrowserSetLastActive(const Browser* browser) OVERRIDE;
+  virtual void OnBrowserAdded(Browser* browser) OVERRIDE;
+  virtual void OnBrowserRemoved(Browser* browser) OVERRIDE;
+  virtual void OnBrowserSetLastActive(Browser* browser) OVERRIDE;
 
   // Holds the Extensions used to generate the permission warnings.
   ExtensionList dummy_extensions_;
@@ -187,7 +186,7 @@ class BundleInstaller : public WebstoreInstallHelper::Delegate,
   Profile* profile_;
 
   // The UI that shows the confirmation prompt.
-  scoped_ptr<ExtensionInstallUI> install_ui_;
+  scoped_ptr<ExtensionInstallPrompt> install_ui_;
 
   Delegate* delegate_;
 

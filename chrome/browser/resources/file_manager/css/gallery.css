@@ -242,7 +242,7 @@ body {
   top: 15px;
 }
 
-.gallery .filename-spacer[saved] .namebox {
+.gallery[editing] .filename-spacer .namebox {
   top: 5px;
 }
 
@@ -250,7 +250,7 @@ body {
   top: 50px;
 }
 
-.gallery .filename-spacer[saved] .options {
+.gallery[editing] .filename-spacer .options {
   top: 27px;
 }
 
@@ -314,6 +314,25 @@ body {
   pointer-events: none;
 }
 
+.gallery[editing] .filename-spacer .saved {
+  opacity: 1;
+}
+
+.gallery[editing] .filename-spacer .overwrite-original,
+.gallery[editing] .filename-spacer .overwrite-original > * {
+  color: gray;
+  cursor: pointer;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.gallery[editing] .filename-spacer[saved] .overwrite-original,
+.gallery[editing] .filename-spacer[saved] .overwrite-original > * {
+  cursor: default;
+  opacity: 0.5;
+  pointer-events: none;
+}
+
 .gallery .filename-spacer .overwrite-original input {
   margin-bottom: -2px;
   margin-right: 6px;
@@ -322,18 +341,6 @@ body {
 .gallery .filename-spacer .saved[highlighted] {
   -webkit-transform: scaleX(1.1) scaleY(1.1) rotate(0);
   color: white;
-}
-
-.gallery .filename-spacer[saved] .saved {
-  opacity: 1;
-}
-
-.gallery .filename-spacer[overwrite] .overwrite-original,
-.gallery .filename-spacer[overwrite] .overwrite-original > * {
-  color: gray;
-  cursor: pointer;
-  opacity: 1;
-  pointer-events: auto;
 }
 
 /* Bubble */
@@ -345,7 +352,7 @@ body {
   width: 220px;
 }
 
-.gallery .toolbar .bubble[hidden] {
+.gallery:not([editing]) .toolbar .bubble {
   display: none;
 }
 
@@ -427,6 +434,10 @@ body {
   width: 45px;
 }
 
+.gallery .image-wrapper > img {
+  position: absolute;
+}
+
 /* Editor buttons */
 
 .gallery .toolbar .edit-bar {
@@ -471,6 +482,7 @@ body {
   display: -webkit-box;
   height: 40px;
   margin: 8px 0 7px 3px;
+  max-width: 90px;
   opacity: 0.99;  /* Workaround for http://crosbug.com/21065 */
   padding: 0 10px 0 35px;
 }

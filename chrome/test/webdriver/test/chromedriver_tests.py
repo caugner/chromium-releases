@@ -207,6 +207,7 @@ class NativeInputTest(ChromeDriverTest):
     q.send_keys('tokyo')
     self.assertEqual(q.text, 'tokyo')
 
+
   # Needs to run on a machine with an IME installed.
   def DISABLED_testSendKeysNativeProcessedByIME(self):
     driver = self.GetNewDriver(NativeInputTest._CAPABILITIES)
@@ -539,9 +540,7 @@ class MouseEventTest(ChromeDriverTest):
   def setUp(self):
     super(MouseEventTest, self).setUp()
     self._driver = self.GetNewDriver()
-    self._driver.command_executor._commands['_keys_'] = (
-        'POST', '/session/$sessionId/keys')
-    self._driver.execute('_keys_', {'value': [Keys.CONTROL, Keys.SHIFT]})
+    ActionChains(self._driver).key_down([Keys.CONTROL, Keys.SHIFT]).perform()
     self._driver.get(self.GetTestDataUrl() + '/events.html')
     self._divs = self._driver.find_elements_by_tag_name('div')
 
@@ -803,18 +802,19 @@ class FileUploadControlTest(ChromeDriverTest):
     super(FileUploadControlTest, self).setUp()
     self._driver = self.GetNewDriver()
 
-  def testSetFilePathToFileUploadControl(self):
+  # Fails on win - crbug.com/131782
+  def DISABLED_testSetFilePathToFileUploadControl(self):
     """Verify a file path is set to the file upload control."""
     self._driver.get(self.GetTestDataUrl() + '/upload.html')
 
-    file = tempfile.NamedTemporaryFile()
+    tmp_file = tempfile.NamedTemporaryFile()
 
     fileupload_single = self._driver.find_element_by_name('fileupload_single')
     multiple = fileupload_single.get_attribute('multiple')
     self.assertEqual('false', multiple)
-    fileupload_single.send_keys(file.name)
+    fileupload_single.send_keys(tmp_file.name)
     path = fileupload_single.get_attribute('value')
-    self.assertTrue(path.endswith(os.path.basename(file.name)))
+    self.assertTrue(path.endswith(os.path.basename(tmp_file.name)))
 
   def testSetMultipleFilePathsToFileuploadControlWithoutMultipleWillFail(self):
     """Verify setting file paths to the file upload control without 'multiple'
@@ -824,16 +824,15 @@ class FileUploadControlTest(ChromeDriverTest):
     files = []
     filepaths = []
     for index in xrange(4):
-      file = tempfile.NamedTemporaryFile()
+      tmp_file = tempfile.NamedTemporaryFile()
       # We need to hold the file objects because the files will be deleted on
       # GC.
-      files.append(file)
-      filepath = file.name
+      files.append(tmp_file)
+      filepath = tmp_file.name
       filepaths.append(filepath)
 
     fileupload_single = self._driver.find_element_by_name('fileupload_single')
-    multiple = fileupload_single.get_attribute('multiple')
-    self.assertEqual('false', multiple)
+    self.assertFalse(fileupload_single.get_attribute('multiple'))
     self.assertRaises(WebDriverException, fileupload_single.send_keys,
                       '\n'.join(filepaths))
 
@@ -845,9 +844,9 @@ class FileUploadControlTest(ChromeDriverTest):
     filepaths = []
     filenames = set()
     for index in xrange(4):
-      file = tempfile.NamedTemporaryFile()
-      files.append(file)
-      filepath = file.name
+      tmp_file = tempfile.NamedTemporaryFile()
+      files.append(tmp_file)
+      filepath = tmp_file.name
       filepaths.append(filepath)
       filenames.add(os.path.basename(filepath))
 
@@ -979,62 +978,60 @@ class AlertTest(ChromeDriverTest):
 
 
 class WindowTest(ChromeDriverTest):
-  def testSizeAndPosition(self):
-    driver = self.GetNewDriver()
+  """Tests for WebDriver window commands."""
 
-    # TODO(kkania): Update the python bindings and get rid of these.
-    driver.command_executor._commands.update({
-        'getSize': ('GET', '/session/$sessionId/window/$windowHandle/size'),
-        'setSize': ('POST', '/session/$sessionId/window/$windowHandle/size'),
-        'getPos': ('GET', '/session/$sessionId/window/$windowHandle/position'),
-        'setPos': ('POST', '/session/$sessionId/window/$windowHandle/position')
-    })
-    def getSize(window='current'):
-      return driver.execute('getSize', {'windowHandle': window})['value']
-    def setSize(width, height, window='current'):
-      params = { 'windowHandle': window,
-                 'width': width,
-                 'height': height
-               }
-      return driver.execute('setSize', params)
-    def getPosition(window='current'):
-      return driver.execute('getPos', {'windowHandle': window})['value']
-    def setPosition(x, y, window='current'):
-      params = { 'windowHandle': window,
-                 'x': x,
-                 'y': y
-               }
-      return driver.execute('setPos', params)
+  def setUp(self):
+    super(WindowTest, self).setUp()
+    self._driver = self.GetNewDriver()
 
-    # Test size.
-    size = getSize()
-    setSize(size['width'], size['height'])
-    self.assertEquals(size, getSize())
-    setSize(800, 600)
-    self.assertEquals(800, getSize()['width'])
-    self.assertEquals(600, getSize()['height'])
-    # Test position.
-    pos = getPosition()
-    setPosition(pos['x'], pos['y'])
-    self.assertEquals(pos, getPosition())
-    setPosition(100, 200)
-    self.assertEquals(100, getPosition()['x'])
-    self.assertEquals(200, getPosition()['y'])
-    # Test specifying window handle.
-    driver.execute_script(
+  def testSize(self):
+    size = self._driver.get_window_size()
+    self._driver.set_window_size(size['width'], size['height'])
+    self.assertEquals(size, self._driver.get_window_size())
+    self._driver.set_window_size(800, 600)
+    self.assertEquals(800, self._driver.get_window_size()['width'])
+    self.assertEquals(600, self._driver.get_window_size()['height'])
+
+  def testPosition(self):
+    pos = self._driver.get_window_position()
+    self._driver.set_window_position(pos['x'], pos['y'])
+    self.assertEquals(pos, self._driver.get_window_position())
+    self._driver.set_window_position(100, 200)
+    self.assertEquals(100, self._driver.get_window_position()['x'])
+    self.assertEquals(200, self._driver.get_window_position()['y'])
+
+  # Systems without window manager (Xvfb, Xvnc) do not implement maximization.
+  @SkipIf(util.IsLinux())
+  def testMaximize(self):
+    old_size = self._driver.get_window_size()
+    self._driver.maximize_window()
+    new_size = self._driver.get_window_size()
+    self.assertTrue(old_size['width'] <= new_size['width'])
+    self.assertTrue(old_size['height'] <= new_size['height'])
+
+  def testWindowHandle(self):
+    """Test specifying window handle."""
+    self._driver.execute_script(
         'window.open("about:blank", "name", "height=200, width=200")')
-    windows = driver.window_handles
+    windows = self._driver.window_handles
     self.assertEquals(2, len(windows))
-    setSize(400, 300, windows[1])
-    self.assertEquals(400, getSize(windows[1])['width'])
-    self.assertEquals(300, getSize(windows[1])['height'])
-    self.assertNotEquals(getSize(windows[1]), getSize(windows[0]))
-    # Test specifying invalid handle.
+    self._driver.set_window_size(400, 300, windows[1])
+    self.assertEquals(400, self._driver.get_window_size(windows[1])['width'])
+    self.assertEquals(300, self._driver.get_window_size(windows[1])['height'])
+    self.assertNotEquals(self._driver.get_window_size(windows[1]),
+                         self._driver.get_window_size(windows[0]))
+
+  def testInvalidWindowHandle(self):
+    """Tests specifying invalid handle."""
     invalid_handle = 'f1-120'
-    self.assertRaises(WebDriverException, setSize, 400, 300, invalid_handle)
-    self.assertRaises(NoSuchWindowException, getSize, invalid_handle)
-    self.assertRaises(NoSuchWindowException, setPosition, 1, 1, invalid_handle)
-    self.assertRaises(NoSuchWindowException, getPosition, invalid_handle)
+    self.assertRaises(WebDriverException, self._driver.set_window_size,
+                      400, 300, invalid_handle)
+    self.assertRaises(NoSuchWindowException, self._driver.get_window_size,
+                      invalid_handle)
+    self.assertRaises(NoSuchWindowException, self._driver.set_window_position,
+                      1, 1, invalid_handle)
+    self.assertRaises(NoSuchWindowException, self._driver.get_window_position,
+                      invalid_handle)
 
 
 class GeolocationTest(ChromeDriverTest):
@@ -1052,7 +1049,7 @@ class GeolocationTest(ChromeDriverTest):
     def getLocation():
       return driver.execute('getLoc')['value']
     def setLocation(location):
-      driver.execute('setLoc', location)
+      driver.execute('setLoc', {'location': location})
     expected_location = {'latitude': 50, 'longitude': 50, 'altitude': 300}
     setLocation(expected_location)
     location = getLocation()

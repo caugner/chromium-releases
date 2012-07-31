@@ -16,7 +16,6 @@
 #include "ui/views/widget/native_widget_private.h"
 
 namespace aura {
-class Monitor;
 class Window;
 }
 namespace gfx {
@@ -35,7 +34,6 @@ class VIEWS_EXPORT NativeWidgetAura : public internal::NativeWidgetPrivate,
                                       public aura::client::DragDropDelegate {
  public:
   explicit NativeWidgetAura(internal::NativeWidgetDelegate* delegate);
-  virtual ~NativeWidgetAura();
 
   // TODO(beng): Find a better place for this, and the similar method on
   //             NativeWidgetWin.
@@ -65,17 +63,17 @@ class VIEWS_EXPORT NativeWidgetAura : public internal::NativeWidgetPrivate,
   virtual void SendNativeAccessibilityEvent(
       View* view,
       ui::AccessibilityTypes::Event event_type) OVERRIDE;
-  virtual void SetCapture(unsigned int flags) OVERRIDE;
+  virtual void SetCapture() OVERRIDE;
   virtual void ReleaseCapture() OVERRIDE;
-  virtual bool HasCapture(unsigned int flags) const OVERRIDE;
+  virtual bool HasCapture() const OVERRIDE;
   virtual InputMethod* CreateInputMethod() OVERRIDE;
   virtual void CenterWindow(const gfx::Size& size) OVERRIDE;
   virtual void GetWindowPlacement(
       gfx::Rect* bounds,
       ui::WindowShowState* maximized) const OVERRIDE;
   virtual void SetWindowTitle(const string16& title) OVERRIDE;
-  virtual void SetWindowIcons(const SkBitmap& window_icon,
-                              const SkBitmap& app_icon) OVERRIDE;
+  virtual void SetWindowIcons(const gfx::ImageSkia& window_icon,
+                              const gfx::ImageSkia& app_icon) OVERRIDE;
   virtual void SetAccessibleName(const string16& name) OVERRIDE;
   virtual void SetAccessibleRole(ui::AccessibilityTypes::Role role) OVERRIDE;
   virtual void SetAccessibleState(ui::AccessibilityTypes::State state) OVERRIDE;
@@ -133,20 +131,26 @@ class VIEWS_EXPORT NativeWidgetAura : public internal::NativeWidgetPrivate,
   virtual gfx::Size GetMinimumSize() const OVERRIDE;
   virtual void OnBoundsChanged(const gfx::Rect& old_bounds,
                                const gfx::Rect& new_bounds) OVERRIDE;
-  virtual void OnFocus() OVERRIDE;
+  virtual void OnFocus(aura::Window* old_focused_window) OVERRIDE;
   virtual void OnBlur() OVERRIDE;
   virtual bool OnKeyEvent(aura::KeyEvent* event) OVERRIDE;
   virtual gfx::NativeCursor GetCursor(const gfx::Point& point) OVERRIDE;
   virtual int GetNonClientComponent(const gfx::Point& point) const OVERRIDE;
+  virtual bool ShouldDescendIntoChildForEventHandling(
+      aura::Window* child,
+      const gfx::Point& location) OVERRIDE;
   virtual bool OnMouseEvent(aura::MouseEvent* event) OVERRIDE;
   virtual ui::TouchStatus OnTouchEvent(aura::TouchEvent* event) OVERRIDE;
   virtual ui::GestureStatus OnGestureEvent(aura::GestureEvent* event) OVERRIDE;
   virtual bool CanFocus() OVERRIDE;
   virtual void OnCaptureLost() OVERRIDE;
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
+  virtual void OnDeviceScaleFactorChanged(float device_scale_factor) OVERRIDE;
   virtual void OnWindowDestroying() OVERRIDE;
   virtual void OnWindowDestroyed() OVERRIDE;
   virtual void OnWindowVisibilityChanged(bool visible) OVERRIDE;
+  virtual bool HasHitTestMask() const OVERRIDE;
+  virtual void GetHitTestMask(gfx::Path* mask) const OVERRIDE;
 
   // Overridden from aura::client::ActivationDelegate:
   virtual bool ShouldActivate(const aura::Event* event) OVERRIDE;
@@ -160,6 +164,8 @@ class VIEWS_EXPORT NativeWidgetAura : public internal::NativeWidgetPrivate,
   virtual int OnPerformDrop(const aura::DropTargetEvent& event) OVERRIDE;
 
  protected:
+  virtual ~NativeWidgetAura();
+
   internal::NativeWidgetDelegate* delegate() { return delegate_; }
 
  private:
@@ -182,6 +188,9 @@ class VIEWS_EXPORT NativeWidgetAura : public internal::NativeWidgetPrivate,
 
   // Can we be made active?
   bool can_activate_;
+
+  // Are we in the destructor?
+  bool destroying_;
 
   gfx::NativeCursor cursor_;
 

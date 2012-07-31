@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,12 +6,14 @@
 #define CONTENT_BROWSER_PPAPI_PLUGIN_PROCESS_HOST_H_
 #pragma once
 
+#include <string>
 #include <queue>
 
 #include "base/basictypes.h"
 #include "base/file_path.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
+#include "content/browser/renderer_host/pepper_file_message_filter.h"
 #include "content/browser/renderer_host/pepper_message_filter.h"
 #include "content/public/browser/browser_child_process_host_delegate.h"
 #include "content/public/browser/browser_child_process_host_iterator.h"
@@ -45,7 +47,6 @@ class PpapiPluginProcessHost : public content::BrowserChildProcessHostDelegate,
     //   IPC::ChannelHandle(),
     //   0
     virtual void OnPpapiChannelOpened(
-        base::ProcessHandle plugin_process_handle,
         const IPC::ChannelHandle& channel_handle,
         int plugin_child_id) = 0;
 
@@ -66,6 +67,7 @@ class PpapiPluginProcessHost : public content::BrowserChildProcessHostDelegate,
 
   static PpapiPluginProcessHost* CreatePluginHost(
       const content::PepperPluginInfo& info,
+      const FilePath& profile_data_directory,
       net::HostResolver* host_resolver);
   static PpapiPluginProcessHost* CreateBrokerHost(
       const content::PepperPluginInfo& info);
@@ -78,6 +80,9 @@ class PpapiPluginProcessHost : public content::BrowserChildProcessHostDelegate,
   void OpenChannelToPlugin(Client* client);
 
   const FilePath& plugin_path() const { return plugin_path_; }
+  const FilePath& profile_data_directory() const {
+    return profile_data_directory_;
+  }
 
   // The client pointer must remain valid until its callback is issued.
 
@@ -86,7 +91,9 @@ class PpapiPluginProcessHost : public content::BrowserChildProcessHostDelegate,
 
   // Constructors for plugin and broker process hosts, respectively.
   // You must call Init before doing anything else.
-  PpapiPluginProcessHost(net::HostResolver* host_resolver);
+  PpapiPluginProcessHost(const std::string& plugin_name,
+                         const FilePath& profile_data_directory,
+                         net::HostResolver* host_resolver);
   PpapiPluginProcessHost();
 
   // Actually launches the process with the given plugin info. Returns true
@@ -109,6 +116,9 @@ class PpapiPluginProcessHost : public content::BrowserChildProcessHostDelegate,
   // Handles most requests from the plugin. May be NULL.
   scoped_refptr<PepperMessageFilter> filter_;
 
+  // Handles filesystem requests from flash plugins. May be NULL.
+  scoped_refptr<PepperFileMessageFilter> file_filter_;
+
   // Observes network changes. May be NULL.
   scoped_ptr<PluginNetworkObserver> network_observer_;
 
@@ -122,6 +132,9 @@ class PpapiPluginProcessHost : public content::BrowserChildProcessHostDelegate,
 
   // Path to the plugin library.
   FilePath plugin_path_;
+
+  // Path to the top-level plugin data directory (differs based upon profile).
+  FilePath profile_data_directory_;
 
   const bool is_broker_;
 

@@ -8,6 +8,7 @@
 #include "base/memory/scoped_nsobject.h"
 #include "chrome/app/chrome_command_ids.h"
 #import "chrome/browser/app_controller_mac.h"
+#import "chrome/browser/ui/browser.h"
 #import "chrome/browser/ui/browser_list.h"
 #import "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -67,7 +68,7 @@ IN_PROC_BROWSER_TEST_F(AppControllerWebAppBrowserTest,
   EXPECT_EQ(2u, BrowserList::size());
 
   Browser* browser = *(BrowserList::begin());
-  GURL current_url = browser->GetSelectedWebContents()->GetURL();
+  GURL current_url = browser->GetActiveWebContents()->GetURL();
   EXPECT_EQ(GetAppURL(), current_url.spec());
 }
 

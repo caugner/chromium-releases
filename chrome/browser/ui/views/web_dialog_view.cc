@@ -8,9 +8,8 @@
 
 #include "base/property_bag.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_dialogs.h"
-#include "chrome/browser/ui/webui/web_dialog_controller.h"
+#include "content/public/browser/browser_context.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
@@ -22,24 +21,28 @@
 #include "ui/views/layout/fill_layout.h"
 #include "ui/views/widget/root_view.h"
 #include "ui/views/widget/widget.h"
+#include "ui/web_dialogs/web_dialog_delegate.h"
+#include "ui/web_dialogs/web_dialog_ui.h"
 
 #if defined(USE_AURA)
 #include "ui/aura/event.h"
 #include "ui/views/widget/native_widget_aura.h"
 #endif
 
+using content::NativeWebKeyboardEvent;
 using content::WebContents;
 using content::WebUIMessageHandler;
+using ui::WebDialogDelegate;
+using ui::WebDialogUI;
 
 namespace browser {
 
 // Declared in browser_dialogs.h so that others don't need to depend on our .h.
 gfx::NativeWindow ShowWebDialog(gfx::NativeWindow parent,
-                                Profile* profile,
-                                Browser* browser,
+                                content::BrowserContext* context,
                                 WebDialogDelegate* delegate) {
   views::Widget* widget = views::Widget::CreateWindowWithParent(
-      new WebDialogView(profile, browser, delegate), parent);
+      new WebDialogView(context, delegate), parent);
   widget->Show();
   return widget->GetNativeWindow();
 }
@@ -49,19 +52,19 @@ gfx::NativeWindow ShowWebDialog(gfx::NativeWindow parent,
 ////////////////////////////////////////////////////////////////////////////////
 // WebDialogView, public:
 
-WebDialogView::WebDialogView(Profile* profile,
-                             Browser* browser,
+WebDialogView::WebDialogView(content::BrowserContext* context,
                              WebDialogDelegate* delegate)
-    : WebDialogWebContentsDelegate(profile),
+    : ClientView(NULL, NULL),
+      WebDialogWebContentsDelegate(context),
       initialized_(false),
       delegate_(delegate),
-      dialog_controller_(new WebDialogController(this, profile, browser)),
-      web_view_(new views::WebView(profile)) {
+      web_view_(new views::WebView(context)) {
   web_view_->set_allow_accelerators(true);
   AddChildView(web_view_);
+  set_contents_view(web_view_);
   SetLayoutManager(new views::FillLayout);
   // Pressing the ESC key will close the dialog.
-  AddAccelerator(ui::Accelerator(ui::VKEY_ESCAPE, false, false, false));
+  AddAccelerator(ui::Accelerator(ui::VKEY_ESCAPE, ui::EF_NONE));
 }
 
 WebDialogView::~WebDialogView() {
@@ -93,6 +96,15 @@ void WebDialogView::ViewHierarchyChanged(bool is_add,
                                          views::View* child) {
   if (is_add && GetWidget())
     InitDialog();
+}
+
+bool WebDialogView::CanClose() {
+  bool close_dialog = true;
+  if (delegate_)
+    delegate_->OnCloseContents(web_view_->web_contents(),
+                               &close_dialog);
+
+  return close_dialog;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -127,6 +139,10 @@ void WebDialogView::WindowClosing() {
 }
 
 views::View* WebDialogView::GetContentsView() {
+  return this;
+}
+
+views::ClientView* WebDialogView::CreateClientView(views::Widget* widget) {
   return this;
 }
 
@@ -185,6 +201,12 @@ std::string WebDialogView::GetDialogArgs() const {
   if (delegate_)
     return delegate_->GetDialogArgs();
   return std::string();
+}
+
+void WebDialogView::OnDialogShown(content::WebUI* webui,
+                                  content::RenderViewHost* render_view_host) {
+  if (delegate_)
+    delegate_->OnDialogShown(webui, render_view_host);
 }
 
 void WebDialogView::OnDialogClosed(const std::string& json_retval) {
@@ -285,19 +307,6 @@ void WebDialogView::LoadingStateChanged(content::WebContents* source) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// WebDialogView, TabRenderWatcher::Delegate implementation:
-
-void WebDialogView::OnRenderHostCreated(content::RenderViewHost* host) {
-}
-
-void WebDialogView::OnTabMainFrameLoaded() {
-}
-
-void WebDialogView::OnTabMainFrameRender() {
-  tab_watcher_.reset();
-}
-
-////////////////////////////////////////////////////////////////////////////////
 // WebDialogView, private:
 
 void WebDialogView::InitDialog() {
@@ -311,7 +320,6 @@ void WebDialogView::InitDialog() {
   // the comment above WebDialogUI in its header file for why.
   WebDialogUI::GetPropertyAccessor().SetProperty(
       web_contents->GetPropertyBag(), this);
-  tab_watcher_.reset(new TabRenderWatcher(web_contents, this));
 
   if (delegate_) {
     gfx::Size out;

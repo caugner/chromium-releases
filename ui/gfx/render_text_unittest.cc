@@ -15,6 +15,17 @@
 
 namespace gfx {
 
+namespace {
+
+// Checks whether |range| contains |index|. This is not the same as calling
+// |range.Contains(ui::Range(index))| - as that would return true when
+// |index| == |range.end()|.
+bool IndexInRange(const ui::Range& range, size_t index) {
+  return index >= range.start() && index < range.end();
+}
+
+}  // namespace
+
 class RenderTextTest : public testing::Test {
 };
 
@@ -606,6 +617,13 @@ TEST_F(RenderTextTest, GraphemePositions) {
   // LTR ab, LTR 2-character grapheme, LTR cd.
   const string16 kText2 = WideToUTF16(L"ab"L"\x0915\x093f"L"cd");
 
+  // The below is 'MUSICAL SYMBOL G CLEF', which is represented in UTF-16 as
+  // two characters forming the surrogate pair 0x0001D11E.
+  const std::string kSurrogate = "\xF0\x9D\x84\x9E";
+
+  // LTR ab, UTF16 surrogate pair, LTR cd.
+  const string16 kText3 = UTF8ToUTF16("ab" + kSurrogate + "cd");
+
   struct {
     string16 text;
     size_t index;
@@ -634,6 +652,15 @@ TEST_F(RenderTextTest, GraphemePositions) {
     { kText2, 6, 5, 6 },
     { kText2, 7, 6, 6 },
     { kText2, 50, 6, 6 },
+    { kText3, 0, 0, 1 },
+    { kText3, 1, 0, 2 },
+    { kText3, 2, 1, 4 },
+    { kText3, 3, 2, 4 },
+    { kText3, 4, 2, 5 },
+    { kText3, 5, 4, 6 },
+    { kText3, 6, 5, 6 },
+    { kText3, 7, 6, 6 },
+    { kText3, 50, 6, 6 },
   };
 
   // TODO(asvitkine): Disable tests that fail on XP bots due to lack of complete
@@ -943,12 +970,22 @@ TEST_F(RenderTextTest, StringSizeBoldWidth) {
 
   // Apply a bold style and check that the new width is greater.
   StyleRange bold;
-  bold.font_style |= gfx::Font::BOLD;
+  bold.font_style |= Font::BOLD;
   render_text->set_default_style(bold);
   render_text->ApplyDefaultStyle();
 
   const int bold_width = render_text->GetStringSize().width();
   EXPECT_GT(bold_width, plain_width);
+
+  // Now, apply a plain style over the first word only.
+  StyleRange plain;
+  plain.font_style = Font::NORMAL;
+  plain.range = ui::Range(0, 5);
+  render_text->ApplyStyleRange(plain);
+
+  const int plain_bold_width = render_text->GetStringSize().width();
+  EXPECT_GT(plain_bold_width, plain_width);
+  EXPECT_LT(plain_bold_width, bold_width);
 }
 
 TEST_F(RenderTextTest, StringSizeHeight) {
@@ -1016,12 +1053,88 @@ TEST_F(RenderTextTest, OriginForDrawing) {
   EXPECT_EQ(origin.y(), 1);
 }
 
+TEST_F(RenderTextTest, SameFontForParentheses) {
+  struct {
+    const char16 left_char;
+    const char16 right_char;
+  } punctuation_pairs[] = {
+    { '(', ')' },
+    { '{', '}' },
+    { '<', '>' },
+  };
+  struct {
+    string16 text;
+  } cases[] = {
+    // English(English)
+    { WideToUTF16(L"Hello World(a)") },
+    // English(English)English
+    { WideToUTF16(L"Hello World(a)Hello World") },
+
+    // Japanese(English)
+    { WideToUTF16(L"\x6328\x62f6(a)") },
+    // Japanese(English)Japanese
+    { WideToUTF16(L"\x6328\x62f6(a)\x6328\x62f6") },
+    // English(Japanese)English
+    { WideToUTF16(L"Hello World(\x6328\x62f6)Hello World") },
+
+    // Hindi(English)
+    { WideToUTF16(L"\x0915\x093f(a)") },
+    // Hindi(English)Hindi
+    { WideToUTF16(L"\x0915\x093f(a)\x0915\x093f") },
+    // English(Hindi)English
+    { WideToUTF16(L"Hello World(\x0915\x093f)Hello World") },
+
+    // Hebrew(English)
+    { WideToUTF16(L"\x05e0\x05b8(a)") },
+    // Hebrew(English)Hebrew
+    { WideToUTF16(L"\x05e0\x05b8(a)\x05e0\x05b8") },
+    // English(Hebrew)English
+    { WideToUTF16(L"Hello World(\x05e0\x05b8)Hello World") },
+  };
+
+  scoped_ptr<RenderText> render_text(RenderText::CreateRenderText());
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(cases); ++i) {
+    string16 text = cases[i].text;
+    const size_t start_paren_char_index = text.find('(');
+    ASSERT_NE(string16::npos, start_paren_char_index);
+    const size_t end_paren_char_index = text.find(')');
+    ASSERT_NE(string16::npos, end_paren_char_index);
+
+    for (size_t j = 0; j < ARRAYSIZE_UNSAFE(punctuation_pairs); ++j) {
+      text[start_paren_char_index] = punctuation_pairs[j].left_char;
+      text[end_paren_char_index] = punctuation_pairs[j].right_char;
+      render_text->SetText(text);
+
+      const std::vector<RenderText::FontSpan> spans =
+          render_text->GetFontSpansForTesting();
+
+      int start_paren_span_index = -1;
+      int end_paren_span_index = -1;
+      for (size_t k = 0; k < spans.size(); ++k) {
+        if (IndexInRange(spans[k].second, start_paren_char_index))
+          start_paren_span_index = k;
+        if (IndexInRange(spans[k].second, end_paren_char_index))
+          end_paren_span_index = k;
+      }
+      ASSERT_NE(-1, start_paren_span_index);
+      ASSERT_NE(-1, end_paren_span_index);
+
+      const Font& start_font = spans[start_paren_span_index].first;
+      const Font& end_font = spans[end_paren_span_index].first;
+      EXPECT_EQ(start_font.GetFontName(), end_font.GetFontName());
+      EXPECT_EQ(start_font.GetFontSize(), end_font.GetFontSize());
+      EXPECT_EQ(start_font.GetStyle(), end_font.GetStyle());
+    }
+  }
+}
+
 TEST_F(RenderTextTest, DisplayRectShowsCursorLTR) {
   scoped_ptr<RenderText> render_text(RenderText::CreateRenderText());
   render_text->SetText(WideToUTF16(L"abcdefghijklmnopqrstuvwxzyabcdefg"));
   render_text->MoveCursorTo(SelectionModel(render_text->text().length(),
                                            CURSOR_FORWARD));
   int width = render_text->GetStringSize().width();
+  ASSERT_GT(width, 10);
 
   // Ensure that the cursor is placed at the width of its preceding text.
   render_text->SetDisplayRect(Rect(width + 10, 1));
@@ -1046,6 +1159,7 @@ TEST_F(RenderTextTest, DisplayRectShowsCursorLTR) {
       L"\x5d8\x5d9\x5da\x5db\x5dc\x5dd\x5de\x5df"));
   render_text->MoveCursorTo(SelectionModel(0, CURSOR_FORWARD));
   width = render_text->GetStringSize().width();
+  ASSERT_GT(width, 10);
 
   // Ensure that the cursor is placed at the width of its preceding text.
   render_text->SetDisplayRect(Rect(width + 10, 1));
@@ -1075,6 +1189,7 @@ TEST_F(RenderTextTest, DisplayRectShowsCursorRTL) {
   render_text->SetText(WideToUTF16(L"abcdefghijklmnopqrstuvwxzyabcdefg"));
   render_text->MoveCursorTo(SelectionModel(0, CURSOR_FORWARD));
   int width = render_text->GetStringSize().width();
+  ASSERT_GT(width, 10);
 
   // Ensure that the cursor is placed at the width of its preceding text.
   render_text->SetDisplayRect(Rect(width + 10, 1));
@@ -1100,6 +1215,7 @@ TEST_F(RenderTextTest, DisplayRectShowsCursorRTL) {
   render_text->MoveCursorTo(SelectionModel(render_text->text().length(),
                                            CURSOR_FORWARD));
   width = render_text->GetStringSize().width();
+  ASSERT_GT(width, 10);
 
   // Ensure that the cursor is placed at the width of its preceding text.
   render_text->SetDisplayRect(Rect(width + 10, 1));

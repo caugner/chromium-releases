@@ -12,12 +12,12 @@
 #include "base/values.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
 #include "chrome/common/net/gaia/oauth2_mint_token_flow.h"
-#include "content/test/test_url_fetcher_factory.h"
+#include "content/public/test/test_url_fetcher_factory.h"
 #include "net/url_request/url_request_status.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using content::URLFetcher;
+using net::URLFetcher;
 using net::URLRequestStatus;
 using testing::_;
 using testing::StrictMock;
@@ -119,8 +119,6 @@ static IssueAdviceInfo CreateIssueAdvice() {
   return ia;
 }
 
-}  // namespace
-
 class MockDelegate : public OAuth2MintTokenFlow::Delegate {
  public:
   MockDelegate() {}
@@ -143,6 +141,8 @@ class MockMintTokenFlow : public OAuth2MintTokenFlow {
   MOCK_METHOD0(CreateAccessTokenFetcher, OAuth2AccessTokenFetcher*());
   MOCK_METHOD0(CreateMintTokenFetcher, OAuth2MintTokenFetcher*());
 };
+
+}  // namespace
 
 class OAuth2MintTokenFlowTest : public testing::Test {
  public:
@@ -167,8 +167,7 @@ class OAuth2MintTokenFlowTest : public testing::Test {
 
   // Helper to parse the given string to DictionaryValue.
   static base::DictionaryValue* ParseJson(const std::string& str) {
-    base::JSONReader reader;
-    scoped_ptr<Value> value(reader.Read(str, false));
+    scoped_ptr<Value> value(base::JSONReader::Read(str));
     EXPECT_TRUE(value.get());
     EXPECT_EQ(Value::TYPE_DICTIONARY, value->GetType());
     return static_cast<base::DictionaryValue*>(value.release());

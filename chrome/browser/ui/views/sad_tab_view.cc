@@ -11,12 +11,14 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/feedback/feedback_util.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/webui/feedback_ui.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "grit/theme_resources_standard.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/font.h"
@@ -52,11 +54,13 @@ const int kMessageFontSizeDelta = 1;
 const char kExperiment[] = "LowMemoryMargin";
 
 #define EXPERIMENT_CUSTOM_COUNTS(name, sample, min, max, buckets)          \
-    UMA_HISTOGRAM_CUSTOM_COUNTS(name, sample, min, max, buckets);          \
-    if (base::FieldTrialList::TrialExists(kExperiment))                    \
-      UMA_HISTOGRAM_CUSTOM_COUNTS(                                         \
-          base::FieldTrial::MakeName(name, kExperiment),                   \
-          sample, min, max, buckets);
+    {                                                                      \
+      UMA_HISTOGRAM_CUSTOM_COUNTS(name, sample, min, max, buckets);        \
+      if (base::FieldTrialList::TrialExists(kExperiment))                  \
+        UMA_HISTOGRAM_CUSTOM_COUNTS(                                       \
+            base::FieldTrial::MakeName(name, kExperiment),                 \
+            sample, min, max, buckets);                                    \
+    }
 
 }  // namespace
 
@@ -119,7 +123,8 @@ void SadTabView::LinkClicked(views::Link* source, int event_flags) {
     web_contents_->OpenURL(params);
   } else if (source == feedback_link_) {
     browser::ShowWebFeedbackView(
-        Browser::GetBrowserForController(&web_contents_->GetController(), NULL),
+        browser::FindBrowserForController(&web_contents_->GetController(),
+                                          NULL),
         l10n_util::GetStringUTF8(IDS_KILLED_TAB_FEEDBACK_MESSAGE),
         std::string(kCategoryTagCrash));
   }
@@ -155,7 +160,7 @@ void SadTabView::ViewHierarchyChanged(bool is_add,
   columns->AddPaddingColumn(1, kPadding);
 
   views::ImageView* image = new views::ImageView();
-  image->SetImage(ui::ResourceBundle::GetSharedInstance().GetBitmapNamed(
+  image->SetImage(ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
       (kind_ == CRASHED) ? IDR_SAD_TAB : IDR_KILLED_TAB));
   layout->StartRowWithPadding(0, column_set_id, 1, kPadding);
   layout->AddView(image);

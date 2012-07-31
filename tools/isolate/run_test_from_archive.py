@@ -107,6 +107,14 @@ def rmtree(root):
     shutil.rmtree(root)
 
 
+def is_same_filesystem(path1, path2):
+  """Returns True if both paths are on the same filesystem.
+
+  This is required to enable the use of hardlinks.
+  """
+  return os.stat(path1).st_dev == os.stat(path2).st_dev
+
+
 def open_remote(file_or_url):
   """Reads a file or url."""
   if re.match(r'^https?://.+$', file_or_url):
@@ -134,6 +142,16 @@ def get_free_space(path):
     return free_bytes.value
   f = os.statvfs(path)
   return f.f_bfree * f.f_frsize
+
+
+def fix_python_path(cmd):
+  """Returns the fixed command line to call the right python executable."""
+  out = cmd[:]
+  if out[0] == 'python':
+    out[0] = sys.executable
+  elif out[0].endswith('.py'):
+    out.insert(0, sys.executable)
+  return out
 
 
 class Cache(object):
@@ -167,7 +185,7 @@ class Cache(object):
       os.makedirs(self.cache_dir)
     if os.path.isfile(self.state_file):
       try:
-        self.state = json.load(open(self.state_file, 'rb'))
+        self.state = json.load(open(self.state_file, 'r'))
       except ValueError:
         # Too bad. The file will be overwritten and the cache cleared.
         pass
@@ -175,27 +193,49 @@ class Cache(object):
 
   def trim(self):
     """Trims anything we don't know, make sure enough free space exists."""
-    for f in os.listdir(self.cache_dir):
-      if f == self.STATE_FILE or f in self.state:
+    # Ensure that all files listed in the state still exist.
+    for filename in self.state[:]:
+      if not os.path.exists(self.path(filename)):
+        logging.info('Removing lost file %s' % filename)
+        self.state.remove(filename)
+
+    for filename in os.listdir(self.cache_dir):
+      if filename == self.STATE_FILE or filename in self.state:
         continue
-      logging.warn('Unknown file %s from cache' % f)
+      logging.warn('Unknown file %s from cache' % filename)
       # Insert as the oldest file. It will be deleted eventually if not
       # accessed.
-      self.state.insert(0, f)
+      self.state.insert(0, filename)
 
     # Ensure enough free space.
     while (
         self.min_free_space and
         self.state and
         get_free_space(self.cache_dir) < self.min_free_space):
-      os.remove(self.path(self.state.pop(0)))
+      try:
+        filename = self.state.pop(0)
+        logging.info('Trimming %s' % filename)
+        os.remove(self.path(filename))
+      except OSError as e:
+        logging.error('Error attempting to delete a file\n%s' % e)
 
     # Ensure maximum cache size.
     if self.max_cache_size and self.state:
-      sizes = [os.stat(self.path(f)).st_size for f in self.state]
+      try:
+        sizes = [os.stat(self.path(f)).st_size for f in self.state]
+      except OSError:
+        logging.error(
+            'At least one file is missing; %s\n' % '\n'.join(self.state))
+        raise
+
       while sizes and sum(sizes) > self.max_cache_size:
         # Delete the oldest item.
-        os.remove(self.path(self.state.pop(0)))
+        try:
+          filename = self.state.pop(0)
+          logging.info('Trimming %s' % filename)
+          os.remove(self.path(filename))
+        except OSError as e:
+          logging.error('Error attempting to delete a file\n%s' % e)
         sizes.pop(0)
 
     self.save()
@@ -211,8 +251,11 @@ class Cache(object):
       return False
     except ValueError:
       out = self.path(item)
-      download_or_copy(os.path.join(self.remote, item), out)
-      self.state.append(item)
+      download_or_copy(self.remote.rstrip('/') + '/' + item, out)
+      if os.path.exists(out):
+        self.state.append(item)
+      else:
+        logging.error('File, %s, not placed in cache' % item)
       return True
     finally:
       self.save()
@@ -231,7 +274,15 @@ def run_tha_test(manifest, cache_dir, remote, max_cache_size, min_free_space):
   directory and runs the executable.
   """
   cache = Cache(cache_dir, remote, max_cache_size, min_free_space)
-  outdir = tempfile.mkdtemp(prefix='run_tha_test')
+
+  base_temp_dir = None
+  if not is_same_filesystem(cache_dir, tempfile.gettempdir()):
+    # Do not use tempdir since it's a separate filesystem than cache_dir. It
+    # could be tmpfs for example. This would mean copying up to 100mb of data
+    # there, when a simple tree of hardlinks would do.
+    base_temp_dir = os.path.dirname(cache_dir)
+  outdir = tempfile.mkdtemp(prefix='run_tha_test', dir=base_temp_dir)
+
   try:
     for filepath, properties in manifest['files'].iteritems():
       infile = properties['sha-1']
@@ -251,8 +302,15 @@ def run_tha_test(manifest, cache_dir, remote, max_cache_size, min_free_space):
     if manifest.get('read_only'):
       make_writable(outdir, True)
     cmd = manifest['command']
+    # Ensure paths are correctly separated on windows.
+    cmd[0] = cmd[0].replace('/', os.path.sep)
+    cmd = fix_python_path(cmd)
     logging.info('Running %s, cwd=%s' % (cmd, cwd))
-    return subprocess.call(cmd, cwd=cwd)
+    try:
+      return subprocess.call(cmd, cwd=cwd)
+    except OSError:
+      print >> sys.stderr, 'Failed to run %s; cwd=%s' % (cmd, cwd)
+      raise
   finally:
     # Save first, in case an exception occur in the following lines, then clean
     # up.
@@ -265,7 +323,7 @@ def main():
   parser = optparse.OptionParser(
       usage='%prog <options>', description=sys.modules[__name__].__doc__)
   parser.add_option(
-      '-v', '--verbose', action='count', default=0, help='Use multiple times')
+      '-v', '--verbose', action='count', default=1, help='Use multiple times')
   parser.add_option(
       '-m', '--manifest',
       metavar='FILE',

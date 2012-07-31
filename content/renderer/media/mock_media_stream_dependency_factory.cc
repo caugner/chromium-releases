@@ -28,7 +28,7 @@ class MockMediaStreamTrackList
   virtual ~MockMediaStreamTrackList() {}
 
  private:
-  std::vector<TrackType*> tracks_;
+  std::vector<talk_base::scoped_refptr<TrackType> > tracks_;
 };
 
 typedef MockMediaStreamTrackList<AudioTrackInterface> MockAudioTracks;
@@ -87,8 +87,7 @@ void MockLocalVideoTrack::SetRenderer(VideoRendererWrapperInterface* renderer) {
 }
 
 VideoRendererWrapperInterface* MockLocalVideoTrack::GetRenderer() {
-  NOTIMPLEMENTED();
-  return NULL;
+  return renderer_;
 }
 
 std::string MockLocalVideoTrack::kind() const {
@@ -186,11 +185,12 @@ class MockSessionDescription : public SessionDescriptionInterface {
     NOTIMPLEMENTED();
     return 0;
   }
-  virtual const IceCandidateColletion* candidates(
+  virtual const IceCandidateCollection* candidates(
       size_t mediasection_index) const OVERRIDE {
     NOTIMPLEMENTED();
     return NULL;
   }
+
   virtual bool ToString(std::string* out) const OVERRIDE {
     *out = sdp_;
     return true;

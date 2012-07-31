@@ -164,14 +164,12 @@ class FullscreenMouselockTest(pyauto.PyUITest):
   def _EnableMouseLockMode(self, button_action='lockMouse1'):
     """Helper function to enable mouse lock mode.
 
-    For now, to lock the mouse, the browser needs to be in fullscreen mode.
-
     Args:
       button_action: The button id to click to initiate an action. Default is to
           click lockMouse1.
     """
     self._driver.find_element_by_id(button_action).click()
-    self.assertTrue(self.IsMouseLockPermissionRequested())
+    self.assertTrue(self.WaitUntil(self.IsMouseLockPermissionRequested))
     self.AcceptCurrentFullscreenOrMouseLockRequest()
     self.assertTrue(self.IsMouseLocked())
 
@@ -280,20 +278,18 @@ class FullscreenMouselockTest(pyauto.PyUITest):
     self.assertTrue(self.WaitUntil(lambda: self.IsFullscreenForTab()))
     self.assertTrue(self.WaitUntil(lambda: not self.IsMouseLocked()))
 
-  def testNoMouseLockInBrowserFS(self):
-    """Verify mouse lock can't be activated in browser fullscreen.
-
-    Later on when windowed-mode mouse lock is allowed, this test will adjust to
-    verify that mouse lock in browser fullscreen requires an allow prompt, even
-    when there is a content setting for Allow.
-    """
+  def testMouseLockInBrowserFS(self):
+    """Verify mouse lock in browser fullscreen requires allow prompt."""
     self._InitiateBrowserFullscreen()
     self._driver.set_script_timeout(2)
-    lock_result = self._driver.execute_script('lockMouse1AndSetLockResult()')
+    self._driver.execute_script('lockMouse1AndSetLockResult()')
+    # Bubble should display prompting to allow mouselock.
+    self.assertTrue(self.WaitUntil(self.IsMouseLockPermissionRequested))
+    self.AcceptCurrentFullscreenOrMouseLockRequest()
     # Waits until lock_result gets 'success' or 'failure'.
     lock_result = self._driver.execute_script('return lock_result')
-    self.assertEqual(
-        lock_result, 'failure', msg='Mouse is locked in browser fullscreen.')
+    self.assertEqual(lock_result, 'success',
+        msg='Mouse was not locked in browser fullscreen.')
 
   def testNoMouseLockWhenCancelFS(self):
     """Verify mouse lock breaks when canceling tab fullscreen.
@@ -359,8 +355,30 @@ class FullscreenMouselockTest(pyauto.PyUITest):
     self.assertTrue(self.WaitUntil(lambda: not self.IsMouseLocked()),
                     msg='Mouse lock did not break when browser lost focus.')
 
+  def testMouseLockLostOnReload(self):
+    """Verify mouse lock is lost on page reload."""
+    self.NavigateToURL(self.GetHttpURLForDataPath(
+        'fullscreen_mouselock', 'fullscreen_mouselock.html'))
+    self._EnableMouseLockMode()
+    self.ReloadActiveTab()
+    self.assertTrue(self.WaitUntil(lambda: not self.IsMouseLocked()),
+                    msg='Mouse lock did not break when page is reloaded.')
+
+  def testNoMLBubbleWhenTabLoseFocus(self):
+    """Verify mouse lock bubble goes away when tab loses focus."""
+    self.NavigateToURL(self.GetHttpURLForDataPath(
+        'fullscreen_mouselock', 'fullscreen_mouselock.html'))
+    self._driver.find_element_by_id('lockMouse1').click()
+    self.assertTrue(self.WaitUntil(self.IsMouseLockPermissionRequested))
+    self.AppendTab(pyauto.GURL('chrome://newtab'))
+    self.assertTrue(self.WaitUntil(
+        lambda: not self.IsFullscreenBubbleDisplayingButtons()),
+                    msg='Mouse lock bubble did not clear when tab lost focus.')
+
   def ExitTabFSToBrowserFS(self):
     """Verify exiting tab fullscreen leaves browser in browser fullscreen.
+
+    This test is semi-automated.
 
     The browser initiates browser fullscreen, then initiates tab fullscreen. The
     test verifies that existing tab fullscreen by simulating ESC key press or
@@ -373,7 +391,7 @@ class FullscreenMouselockTest(pyauto.PyUITest):
     self.assertTrue(self.WaitUntil(lambda: self.IsFullscreenForTab()))
     # Require manual intervention to send ESC key due to crbug.com/123930.
     # TODO(dyu): Update to a full test once associated bug is fixed.
-    print "Press ESC key to exit tab fullscreen."
+    logging.info('Press ESC key to exit tab fullscreen.')
     time.sleep(5)
     self.assertTrue(self.WaitUntil(lambda: not self.IsFullscreenForTab()))
     self.assertTrue(self.WaitUntil(lambda: self.IsFullscreenForBrowser()),
@@ -390,6 +408,8 @@ class FullscreenMouselockTest(pyauto.PyUITest):
   def F11KeyExitsTabAndBrowserFS(self):
     """Verify existing tab fullscreen exits all fullscreen modes.
 
+    This test is semi-automated.
+
     The browser initiates browser fullscreen, then initiates tab fullscreen. The
     test verifies that existing tab fullscreen by simulating F11 key press or
     CMD + SHIFT + F keys on the Mac will exit the tab fullscreen and the
@@ -401,7 +421,7 @@ class FullscreenMouselockTest(pyauto.PyUITest):
     self.assertTrue(self.WaitUntil(lambda: self.IsFullscreenForTab()))
     # Require manual intervention to send F11 key due to crbug.com/123930.
     # TODO(dyu): Update to a full test once associated bug is fixed.
-    print "Press F11 key to exit tab fullscreen."
+    logging.info('Press F11 key to exit tab fullscreen.')
     time.sleep(5)
     self.assertTrue(self.WaitUntil(lambda: not self.IsFullscreenForTab()))
     self.assertTrue(self.WaitUntil(lambda: not self.IsFullscreenForBrowser()),
@@ -409,6 +429,8 @@ class FullscreenMouselockTest(pyauto.PyUITest):
 
   def SearchForTextOutsideOfContainer(self):
     """Verify text outside of container is not visible when fullscreen.
+
+    This test is semi-automated.
 
     Verify this test manually until there is a way to find text on screen
     without using FindInPage().
@@ -432,6 +454,31 @@ class FullscreenMouselockTest(pyauto.PyUITest):
     time.sleep(5)
     # TODO(dyu): find a way to verify on screen text instead of using
     #            FindInPage() which searches for text in the HTML.
+
+  def SameMouseLockMovement(self):
+    """Verify the correct feel of mouse movement data when mouse is locked.
+
+    This test is semi-automated.
+
+    This test loads the same web page in two different tabs while in mouse lock
+    mode. Each tab loads the web page from a different URL (e.g. by loading it
+    from a localhost server and a file url). The test verifies
+    that the mouse lock movements work the same in both
+    tabs.
+    """
+    url1 = self.GetHttpURLForDataPath(
+        'fullscreen_mouselock', 'fullscreen_mouselock.html')
+    url2 = self.GetFileURLForDataPath(
+        'fullscreen_mouselock', 'fullscreen_mouselock.html')
+    tab2 = 'f1-4'
+    self.NavigateToURL(url1)
+    self.RunCommand(pyauto.IDC_NEW_TAB)  # Open new tab.
+    self.NavigateToURL(url2, 0, 1)
+    self._driver.switch_to_window(tab2)
+    self._EnableMouseLockMode()  # Lock mouse in tab 2.
+    raw_input('Manually move the mouse cursor on the page in tab 2. Shift+Tab \
+              into tab 1, click on lockMouse1() button, and move the mouse \
+              cursor on the page in tab 1. Verify mouse movement is smooth.')
 
 
 if __name__ == '__main__':

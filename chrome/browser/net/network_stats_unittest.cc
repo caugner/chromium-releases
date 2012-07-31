@@ -36,7 +36,7 @@ class NetworkStatsTestUDP : public NetworkStatsTest {
   }
 
  protected:
-  void RunUDPEchoTest(int bytes, int packets) {
+  void RunUDPEchoTest(int bytes, int packets, bool has_proxy) {
     net::TestCompletionCallback cb;
 
     scoped_ptr<net::MockHostResolver> host_resolver(
@@ -48,6 +48,7 @@ class NetworkStatsTestUDP : public NetworkStatsTest {
     EXPECT_TRUE(udp_stats_client->Start(host_resolver.get(),
                                         test_server_.host_port_pair(),
                                         NetworkStats::HISTOGRAM_PORT_MAX,
+                                        has_proxy,
                                         bytes,
                                         packets,
                                         cb.callback()));
@@ -68,7 +69,7 @@ class NetworkStatsTestTCP : public NetworkStatsTest {
   }
 
  protected:
-  void RunTCPEchoTest(int bytes, int packets) {
+  void RunTCPEchoTest(int bytes, int packets, bool has_proxy) {
     net::TestCompletionCallback cb;
 
     scoped_ptr<net::MockHostResolver> host_resolver(
@@ -80,6 +81,7 @@ class NetworkStatsTestTCP : public NetworkStatsTest {
     EXPECT_TRUE(tcp_stats_client->Start(host_resolver.get(),
                                         test_server_.host_port_pair(),
                                         NetworkStats::HISTOGRAM_PORT_MAX,
+                                        has_proxy,
                                         bytes,
                                         packets,
                                         cb.callback()));
@@ -91,29 +93,54 @@ class NetworkStatsTestTCP : public NetworkStatsTest {
   net::TestServer test_server_;
 };
 
-TEST_F(NetworkStatsTestUDP, UDPEcho_100B_Of_Data) {
+TEST_F(NetworkStatsTestUDP, UDPEcho100BytesHasProxy) {
   ASSERT_TRUE(test_server_.Start());
-  RunUDPEchoTest(100, 1);
+  RunUDPEchoTest(100, 1, true);
 }
 
-TEST_F(NetworkStatsTestUDP, UDPEcho_1K_Of_Data) {
+TEST_F(NetworkStatsTestUDP, UDPEcho100BytesNoProxy) {
   ASSERT_TRUE(test_server_.Start());
-  RunUDPEchoTest(1024, 1);
+  RunUDPEchoTest(100, 1, false);
 }
 
-TEST_F(NetworkStatsTestUDP, UDPEchoMultiplePackets) {
+TEST_F(NetworkStatsTestUDP, UDPEcho1KBytesHasProxy) {
   ASSERT_TRUE(test_server_.Start());
-  RunUDPEchoTest(1024, 4);
+  RunUDPEchoTest(1024, 1, true);
 }
 
-TEST_F(NetworkStatsTestTCP, TCPEcho_100B_Of_Data) {
+TEST_F(NetworkStatsTestUDP, UDPEcho1KBytesNoProxy) {
   ASSERT_TRUE(test_server_.Start());
-  RunTCPEchoTest(100, 1);
+  RunUDPEchoTest(1024, 1, false);
 }
 
-TEST_F(NetworkStatsTestTCP, TCPEcho_1K_Of_Data) {
+TEST_F(NetworkStatsTestUDP, UDPEchoMultiplePacketsHasProxy) {
   ASSERT_TRUE(test_server_.Start());
-  RunTCPEchoTest(1024, 1);
+  RunUDPEchoTest(1024, 4, true);
+}
+
+TEST_F(NetworkStatsTestUDP, UDPEchoMultiplePacketsNoProxy) {
+  ASSERT_TRUE(test_server_.Start());
+  RunUDPEchoTest(1024, 4, false);
+}
+
+TEST_F(NetworkStatsTestTCP, TCPEcho100BytesHasProxy) {
+  ASSERT_TRUE(test_server_.Start());
+  RunTCPEchoTest(100, 1, true);
+}
+
+TEST_F(NetworkStatsTestTCP, TCPEcho100BytesNoProxy) {
+  ASSERT_TRUE(test_server_.Start());
+  RunTCPEchoTest(100, 1, false);
+}
+
+TEST_F(NetworkStatsTestTCP, TCPEcho1KBytesHasProxy) {
+  ASSERT_TRUE(test_server_.Start());
+  RunTCPEchoTest(1024, 1, true);
+}
+
+TEST_F(NetworkStatsTestTCP, TCPEcho1KBytesNoProxy) {
+  ASSERT_TRUE(test_server_.Start());
+  RunTCPEchoTest(1024, 1, false);
 }
 
 TEST_F(NetworkStatsTestTCP, VerifyBytes) {
@@ -124,6 +151,7 @@ TEST_F(NetworkStatsTestTCP, VerifyBytes) {
   net::TestCompletionCallback cb;
   network_stats.Initialize(KBytesToSend,
                            NetworkStats::HISTOGRAM_PORT_MAX,
+                           true,
                            packets_to_send,
                            cb.callback());
 
@@ -243,39 +271,6 @@ TEST_F(NetworkStatsTestTCP, VerifyBytes) {
   message = version + checksum + payload_size + key_string + encoded_payload;
   EXPECT_EQ(NetworkStats::SUCCESS, network_stats.VerifyBytes(message));
   EXPECT_EQ(1u, network_stats.packets_received_mask());
-}
-
-TEST_F(NetworkStatsTest, GetHistogramNames) {
-  // Test TCP, large packet, success histogram name.
-  std::string rtt_histogram_name;
-  std::string status_histogram_name;
-  std::string packet_loss_histogram_name;
-  NetworkStats::GetHistogramNames(NetworkStats::PROTOCOL_TCP,
-                                  NetworkStats::PORT_53,
-                                  1024,
-                                  net::OK,
-                                  &rtt_histogram_name,
-                                  &status_histogram_name,
-                                  &packet_loss_histogram_name);
-  EXPECT_EQ("NetConnectivity.TCP.Success.53.1K.RTT", rtt_histogram_name);
-  EXPECT_EQ("NetConnectivity.TCP.Status.53.1K", status_histogram_name);
-  EXPECT_EQ("NetConnectivity.TCP.PacketLoss.53.1K", packet_loss_histogram_name);
-
-  // Test UDP, small packet, failure histogram name.
-  std::string rtt_histogram_name1;
-  std::string status_histogram_name1;
-  std::string packet_loss_histogram_name1;
-  NetworkStats::GetHistogramNames(NetworkStats::PROTOCOL_UDP,
-                                  NetworkStats::PORT_6121,
-                                  100,
-                                  net::ERR_INVALID_ARGUMENT,
-                                  &rtt_histogram_name1,
-                                  &status_histogram_name1,
-                                  &packet_loss_histogram_name1);
-  EXPECT_EQ("", rtt_histogram_name1);
-  EXPECT_EQ("NetConnectivity.UDP.Status.6121.100B", status_histogram_name1);
-  EXPECT_EQ("NetConnectivity.UDP.PacketLoss.6121.100B",
-            packet_loss_histogram_name1);
 }
 
 }  // namespace chrome_browser_net

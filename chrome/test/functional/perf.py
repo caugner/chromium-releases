@@ -24,6 +24,7 @@ desired threshold value.
 
 import BaseHTTPServer
 import commands
+import errno
 import logging
 import math
 import os
@@ -31,6 +32,7 @@ import posixpath
 import re
 import SimpleHTTPServer
 import SocketServer
+import signal
 import subprocess
 import sys
 import tempfile
@@ -48,7 +50,35 @@ import simplejson  # Must be imported after pyauto; located in third_party.
 from netflix import NetflixTestHelper
 import pyauto_utils
 import test_utils
+import webpagereplay
 from youtube import YoutubeTestHelper
+
+
+def StandardDeviation(values):
+  """Returns the standard deviation of |values|."""
+  avg = Mean(values)
+  if not avg:
+    return None
+  if len(values) < 2:
+    return 0.0
+  temp_vals = [math.pow(x - avg, 2) for x in values]
+  return math.sqrt(sum(temp_vals) / (len(temp_vals) - 1))
+
+
+def Mean(values):
+  """Returns the arithmetic mean of |values|."""
+  if not values or None in values:
+    return None
+  return sum(values) / float(len(values))
+
+
+def GeometricMean(values):
+  """Returns the geometric mean of |values|."""
+  if not values or None in values or [x for x in values if x < 0.0]:
+    return None
+  if 0.0 in values:
+    return 0.0
+  return math.exp(Mean([math.log(x) for x in values]))
 
 
 class BasePerfTest(pyauto.PyUITest):
@@ -91,6 +121,49 @@ class BasePerfTest(pyauto.PyUITest):
     if self.IsLinux():  # IsLinux() also implies IsChromeOS().
       os.system('sync')
       self._WaitForIdleCPU(60.0, 0.05)
+
+  def _IsPIDRunning(self, pid):
+    """Checks if a given process id is running.
+
+    Args:
+      pid: The process id of the process to check.
+
+    Returns:
+      True if the process is running. False if not.
+    """
+    try:
+      # Note that this sends the signal 0, which should not interfere with the
+      # process.
+      os.kill(pid, 0)
+    except OSError, err:
+      if err.errno == errno.ESRCH:
+        return False
+    return True
+
+  def _WaitForChromeExit(self, browser_info, timeout):
+    child_processes = browser_info['child_processes']
+    initial_time = time.time()
+    while time.time() - initial_time < timeout:
+      if any([self._IsPIDRunning(c['pid']) for c in child_processes]):
+        time.sleep(1)
+      else:
+        logging.info('_WaitForChromeExit() took: %s seconds',
+                     time.time() - initial_time)
+        return
+    self.fail('_WaitForChromeExit() did not finish within %s seconds',
+              timeout)
+
+  def tearDown(self):
+    if self._IsPGOMode():
+      browser_info = self.GetBrowserInfo()
+      pid = browser_info['browser_pid']
+      os.kill(pid, signal.SIGINT)
+      self._WaitForChromeExit(browser_info, 30)
+
+    pyauto.PyUITest.tearDown(self)
+
+  def _IsPGOMode(self):
+    return 'USE_PGO' in os.environ
 
   def _WaitForIdleCPU(self, timeout, utilization):
     """Waits for the CPU to become idle (< utilization).
@@ -161,24 +234,6 @@ class BasePerfTest(pyauto.PyUITest):
         python_command()
     timer = timeit.Timer(stmt=RunCommand)
     return timer.timeit(number=1) * 1000  # Convert seconds to milliseconds.
-
-  def _AvgAndStdDev(self, values):
-    """Computes the average and standard deviation of a set of values.
-
-    Args:
-      values: A list of numeric values.
-
-    Returns:
-      A 2-tuple of floats (average, standard_deviation).
-    """
-    avg = 0.0
-    std_dev = 0.0
-    if values:
-      avg = float(sum(values)) / len(values)
-      if len(values) > 1:
-        temp_vals = [math.pow(x - avg, 2) for x in values]
-        std_dev = math.sqrt(sum(temp_vals) / (len(temp_vals) - 1))
-    return avg, std_dev
 
   def _OutputPerfForStandaloneGraphing(self, graph_name, description, value,
                                        units, units_x):
@@ -306,12 +361,12 @@ class BasePerfTest(pyauto.PyUITest):
     Args:
       description: A string description of the performance value.  Should not
           include spaces.
-      value: Either a single numeric value representing a performance
-          measurement, or a list of (x, y) tuples representing one or more
-          long-running performance measurements, where 'x' is an x-axis value
-          (such as an iteration number) and 'y' is the corresponding performance
-          measurement.  If a list of tuples is given, the |units_x| argument
-          must also be specified.
+      value: Either a numeric value representing a performance measurement, or
+          a list of values to be averaged. Lists may also contain (x, y) tuples
+          representing one or more performance measurements, where 'x' is an
+          x-axis value (such as an iteration number) and 'y' is the
+          corresponding performance measurement.  If a list of tuples is given,
+          the |units_x| argument must also be specified.
       units: A string representing the units of the performance measurement(s).
           Should not include spaces.
       graph_name: A string name for the graph associated with this performance
@@ -321,12 +376,18 @@ class BasePerfTest(pyauto.PyUITest):
           are iteration numbers.  If this argument is specified, then the
           |value| argument must be a list of (x, y) tuples.
     """
-    if isinstance(value, list):
+    if (isinstance(value, list) and value[0] is not None and
+        isinstance(value[0], tuple)):
       assert units_x
     if units_x:
       assert isinstance(value, list)
 
     if self.IsChromeOS():
+      # ChromeOS results don't support lists.
+      if (isinstance(value, list) and value[0] is not None and
+          not isinstance(value[0], tuple)):
+        value = Mean(value)
+
       if units_x:
         # TODO(dennisjeffrey): Support long-running performance measurements on
         # ChromeOS in a way that can be graphed: crosbug.com/21881.
@@ -471,10 +532,9 @@ class BasePerfTest(pyauto.PyUITest):
     """
     logging.info('Overall results for: %s', description)
     if values:
-      avg, std_dev = self._AvgAndStdDev(values)
-      logging.info('  Average: %f %s', avg, units)
-      logging.info('  Std dev: %f %s', std_dev, units)
-      self._OutputPerfGraphValue(description, avg, units, graph_name)
+      logging.info('  Average: %f %s', Mean(values), units)
+      logging.info('  Std dev: %f %s', StandardDeviation(values), units)
+      self._OutputPerfGraphValue(description, values, units, graph_name)
     else:
       logging.info('No results to report.')
 
@@ -581,7 +641,9 @@ class BasePerfTest(pyauto.PyUITest):
       A list of extra flags to pass to Chrome when it is launched.
     """
     flags = super(BasePerfTest, self).ExtraChromeFlags()
-    if 'USE_PGO' in os.environ:
+    # Window size impacts a variety of perf tests, ensure consistency.
+    flags.append('--window-size=1024,768')
+    if self._IsPGOMode():
       flags = flags + ['--renderer-clean-exit', '--no-sandbox']
     return flags
 
@@ -791,6 +853,48 @@ class BenchmarkPerfTest(BasePerfTest):
       for benchmark_name, benchmark_score in group['sub_groups'].iteritems():
         logging.info('  Result "%s": %s', benchmark_name, benchmark_score)
 
+  def testSpaceport(self):
+    """Measures results from Spaceport benchmark suite."""
+    url = self.GetFileURLForDataPath('third_party', 'spaceport', 'index.html')
+    self.assertTrue(self.AppendTab(pyauto.GURL(url + '?auto')),
+                    msg='Failed to append tab for Spaceport benchmark suite.')
+
+    # The test reports results to console.log in the format "name: value".
+    # Inject a bit of JS to intercept those.
+    js_collect_console_log = """
+        window.__pyautoresult = {};
+        window.console.log = function(str) {
+            if (!str) return;
+            var key_val = str.split(': ');
+            if (!key_val.length == 2) return;
+            __pyautoresult[key_val[0]] = key_val[1];
+        };
+        window.domAutomationController.send('done');
+    """
+    self.ExecuteJavascript(js_collect_console_log, tab_index=1)
+
+    def _IsDone():
+      expected_num_results = 30  # The number of tests in benchmark.
+      results = eval(self.ExecuteJavascript(js_get_results, tab_index=1))
+      return expected_num_results == len(results)
+
+    js_get_results = """
+        window.domAutomationController.send(
+            JSON.stringify(window.__pyautoresult));
+    """
+    self.assertTrue(
+        self.WaitUntil(_IsDone, timeout=1200, expect_retval=True,
+                       retry_sleep=5),
+        msg='Timed out when waiting for Spaceport benchmark to complete.')
+    results = eval(self.ExecuteJavascript(js_get_results, tab_index=1))
+
+    for key in results:
+      suite, test = key.split('.')
+      value = float(results[key])
+      self._OutputPerfGraphValue(test, value, 'ObjectsAt30FPS', suite)
+    self._PrintSummaryResults('Overall', [float(x) for x in results.values()],
+                              'ObjectsAt30FPS', 'Overall')
+
 
 class LiveWebappLoadTest(BasePerfTest):
   """Tests that involve performance measurements of live webapps.
@@ -972,7 +1076,8 @@ class YoutubePerfTest(BasePerfTest, YoutubeTestHelper):
         ytplayer.setPlaybackQuality('hd720');
         window.domAutomationController.send('');
     """)
-    self.AssertPlayingState()
+    self.AssertPlayerState(state=self.is_playing,
+                           msg='Player did not enter the playing state')
     self.assertTrue(
         self.WaitUntil(self._VerifyVideoTotalBytes, expect_retval=True),
         msg='Failed to get video total bytes information.')
@@ -1198,8 +1303,7 @@ class GPUPerfTest(BasePerfTest):
       fps = self.GetFPS(tab_index=tab_index)
       fps_vals.append(fps['fps'])
       time.sleep(1)
-    avg_fps, _ = self._AvgAndStdDev(fps_vals)
-    return avg_fps
+    return Mean(fps_vals)
 
   def _GetStdAvgAndCompare(self, avg_fps, description, ref_dict):
     """Computes the average and compare set of values with reference data.
@@ -1732,12 +1836,31 @@ class LiveGamePerfTest(BasePerfTest):
                               'AngryBirds', 'angry_birds')
 
 
-class PageCyclerTest(BasePerfTest):
-  """Tests to run various page cyclers."""
+class BasePageCyclerTest(BasePerfTest):
+  """Page class for page cycler tests.
+
+  Derived classes must implement StartUrl().
+
+  Environment Variables:
+    PC_NO_AUTO: if set, avoids automatically loading pages.
+  """
+  MAX_ITERATION_SECONDS = 60
+  TRIM_PERCENT = 20
+  DEFAULT_USE_AUTO = True
 
   # Page Cycler lives in src/data/page_cycler rather than src/chrome/test/data
-  PC_PATH = os.path.join(BasePerfTest.DataDir(), os.pardir, os.pardir,
-                         os.pardir, 'data', 'page_cycler')
+  DATA_PATH = os.path.abspath(
+      os.path.join(BasePerfTest.DataDir(), os.pardir, os.pardir,
+                   os.pardir, 'data', 'page_cycler'))
+
+  def setUp(self):
+    """Performs necessary setup work before running each test."""
+    super(BasePageCyclerTest, self).setUp()
+    self.use_auto = 'PC_NO_AUTO' not in os.environ
+
+  @classmethod
+  def DataPath(cls, subdir):
+    return os.path.join(cls.DATA_PATH, subdir)
 
   def ExtraChromeFlags(self):
     """Ensures Chrome is launched with custom flags.
@@ -1749,129 +1872,309 @@ class PageCyclerTest(BasePerfTest):
     # The first two are needed for the test.
     # The plugins argument is to prevent bad scores due to pop-ups from
     # running an old version of something (like Flash).
-    return (super(PageCyclerTest, self).ExtraChromeFlags() +
+    return (super(BasePageCyclerTest, self).ExtraChromeFlags() +
             ['--js-flags="--expose_gc"',
              '--enable-file-cookies',
              '--allow-outdated-plugins'])
 
-  def _PreReadDir(self, dir):
-    """This recursively reads all of the files in a given url directory.
-
-    The intent is to get them into memory before they are used by the benchmark.
-    """
-    def _PreReadDir(dirname, names):
-      for rfile in names:
-        with open(os.path.join(dirname, rfile)) as fp:
-          fp.read()
-
-    for root, dirs, files in os.walk(os.path.dirname(dir)):
-      _PreReadDir(root, files)
-
-  def setUp(self):
-    self._PreReadDir(os.path.join(self.PC_PATH, 'common'))
-    BasePerfTest.setUp(self)
-
-  def _RunPageCyclerTest(self, dirname, iterations, description):
-    """Runs the specified PageCycler test.
-
-    The final score that is calculated is a geometric mean of the
-    arithmetic means of each site's load time, and we drop the upper
-    20% of the times for each site so they don't skew the mean.
-    The Geometric mean is used for the final score because the time
-    range for any given site may be very different, and we don't want
-    slower sites to weight more heavily than others.
-
-    Args:
-      dirname: The directory containing the page cycler test.
-      iterations: How many times to run through the set of pages.
-      description: A string description for the particular test being run.
-    """
-    self._PreReadDir(os.path.join(self.PC_PATH, dirname))
-
-    url = self.GetFileURLForDataPath(os.path.join(self.PC_PATH, dirname),
-                                     'start.html')
-
-    self.NavigateToURL('%s?auto=1&iterations=%d' % (url, iterations))
-
-    # Check cookies for "__pc_done=1" to know the test is over.
-    def IsTestDone():
-      cookies = self.GetCookie(pyauto.GURL(url))  # Window 0, tab 0.
+  def WaitUntilDone(self, url, iterations):
+    """Check cookies for "__pc_done=1" to know the test is over."""
+    def IsDone():
+      cookies = self.GetCookie(pyauto.GURL(url))  # window 0, tab 0
       return '__pc_done=1' in cookies
-
     self.assertTrue(
-        self.WaitUntil(IsTestDone, timeout=(60 * iterations), retry_sleep=1),
+        self.WaitUntil(
+            IsDone,
+            timeout=(self.MAX_ITERATION_SECONDS * iterations),
+            retry_sleep=1),
         msg='Timed out waiting for page cycler test to complete.')
 
-    # Collect the results from the cookies.
-    site_to_time_list = {}
-    cookies = self.GetCookie(pyauto.GURL(url))  # Window 0, tab 0.
-    site_list = ''
-    time_list = ''
+  def CollectPagesAndTimes(self, url):
+    """Collect the results from the cookies."""
+    pages, times = None, None
+    cookies = self.GetCookie(pyauto.GURL(url))  # window 0, tab 0
     for cookie in cookies.split(';'):
       if '__pc_pages' in cookie:
-        site_list = cookie[cookie.find('=') + 1:]
+        pages_str = cookie.split('=', 1)[1]
+        pages = pages_str.split(',')
       elif '__pc_timings' in cookie:
-        time_list = cookie[cookie.find('=') + 1:]
-    self.assertTrue(site_list and time_list,
-                    msg='Could not find test results in cookies: %s' % cookies)
-    site_list = site_list.split(',')
-    time_list = time_list.split(',')
-    self.assertEqual(iterations, len(time_list) / len(site_list),
-                     msg='Iteration count %d does not match with site/timing '
-                     'lists: %s and %s' % (iterations, site_list, time_list))
-    for site_index, site in enumerate(site_list):
-      site_to_time_list[site] = []
-      for iteration_index in xrange(iterations):
-        site_to_time_list[site].append(
-            float(time_list[iteration_index * len(site_list) + site_index]))
+        times_str = cookie.split('=', 1)[1]
+        times = [float(t) for t in times_str.split(',')]
+    self.assertTrue(pages and times,
+                    msg='Unable to find test results in cookies: %s' % cookies)
+    return pages, times
 
-    site_times = []
-    for site, time_list in site_to_time_list.iteritems():
-      sorted_times = sorted(time_list)
-      num_to_drop = int(len(sorted_times) * 0.2)
-      logging.debug('Before dropping %d: ' % num_to_drop)
-      logging.debug(sorted_times)
-      if num_to_drop:
-        sorted_times = sorted_times[:-num_to_drop]
-      logging.debug('After dropping:')
-      logging.debug(sorted_times)
-      # Do an arithmetic mean of the load times for a given page.
-      mean_time = sum(sorted_times) / len(sorted_times)
-      logging.debug('Mean time is: ' + str(mean_time))
-      site_times.append(mean_time)
+  def IteratePageTimes(self, pages, times, iterations):
+    """Regroup the times by the page.
 
-    logging.info('site times = %s' % site_times)
-    # Compute a geometric mean over the averages for each site.
-    final_result = reduce(lambda x, y: x * y,
-                          site_times) ** (1.0/ len(site_times))
+    Args:
+      pages: the list of pages
+      times: e.g. [page1_iter1, page1_iter2, ..., page2_iter1, page2_iter2, ...]
+      iterations: the number of times for each page
+    Yields:
+      (pageN, [pageN_iter1, pageN_iter2, ...])
+    """
+    num_pages = len(pages)
+    num_times = len(times)
+    expected_num_times = num_pages * iterations
+    self.assertEqual(
+        expected_num_times, num_times,
+        msg=('num_times != num_pages * iterations: %s != %s * %s, times=%s' %
+             (num_times, num_pages, iterations, times)))
+    next_time = iter(times).next
+    for page in pages:
+      yield page, [next_time() for _ in range(iterations)]
+
+  def CheckPageTimes(self, pages, times, iterations):
+    """Assert that all the times are greater than zero."""
+    failed_pages = []
+    for page, times in self.IteratePageTimes(pages, times, iterations):
+      failed_times = [t for t in times if t <= 0.0]
+      if failed_times:
+        failed_pages.append((page, failed_times))
+    if failed_pages:
+      self.fail('Pages with unexpected times: %s' % failed_pages)
+
+  def TrimTimes(self, times, percent):
+    """Return a new list with |percent| number of times trimmed for each page.
+
+    Removes the largest and smallest values.
+    """
+    iterations = len(times)
+    times = sorted(times)
+    num_to_trim = int(iterations * float(percent) / 100.0)
+    logging.debug('Before trimming %d: %s' % (num_to_trim, times))
+    a = num_to_trim / 2
+    b = iterations - (num_to_trim / 2 + num_to_trim % 2)
+    trimmed_times = times[a:b]
+    logging.debug('After trimming: %s', trimmed_times)
+    return trimmed_times
+
+  def ComputeFinalResult(self, pages, times, iterations):
+    """The final score that is calculated is a geometric mean of the
+    arithmetic means of each page's load time, and we drop the
+    upper/lower 20% of the times for each page so they don't skew the
+    mean.  The geometric mean is used for the final score because the
+    time range for any given site may be very different, and we don't
+    want slower sites to weight more heavily than others.
+    """
+    self.CheckPageTimes(pages, times, iterations)
+    page_means = [
+        Mean(self.TrimTimes(times, percent=self.TRIM_PERCENT))
+        for _, times in self.IteratePageTimes(pages, times, iterations)]
+    return GeometricMean(page_means)
+
+  def StartUrl(self, test_name, iterations):
+    """Return the URL to used to start the test.
+
+    Derived classes must implement this.
+    """
+    raise NotImplemented
+
+  def RunPageCyclerTest(self, name, description):
+    """Runs the specified PageCycler test.
+
+    Args:
+      name: the page cycler test name (corresponds to a directory or test file)
+      description: a string description for the test
+    """
+    iterations = self._num_iterations
+    start_url = self.StartUrl(name, iterations)
+    self.NavigateToURL(start_url)
+    self.WaitUntilDone(start_url, iterations)
+    pages, times = self.CollectPagesAndTimes(start_url)
+    final_result = self.ComputeFinalResult(pages, times, iterations)
     logging.info('%s page cycler final result: %f' %
                  (description, final_result))
     self._OutputPerfGraphValue(description + '_PageCycler', final_result,
                                'milliseconds', graph_name='PageCycler')
 
+
+class PageCyclerTest(BasePageCyclerTest):
+  """Tests to run various page cyclers.
+
+  Environment Variables:
+    PC_NO_AUTO: if set, avoids automatically loading pages.
+  """
+
+  def _PreReadDataDir(self, subdir):
+    """This recursively reads all of the files in a given url directory.
+
+    The intent is to get them into memory before they are used by the benchmark.
+
+    Args:
+      subdir: a subdirectory of the page cycler data directory.
+    """
+    def _PreReadDir(dirname, names):
+      for rfile in names:
+        with open(os.path.join(dirname, rfile)) as fp:
+          fp.read()
+    for root, dirs, files in os.walk(self.DataPath(subdir)):
+      _PreReadDir(root, files)
+
+  def StartUrl(self, test_name, iterations):
+    # Must invoke GetFileURLForPath before appending parameters to the URL,
+    # otherwise those parameters will get quoted.
+    start_url = self.GetFileURLForPath(self.DataPath(test_name), 'start.html')
+    start_url += '?iterations=%d' % iterations
+    if self.use_auto:
+      start_url += '&auto=1'
+    return start_url
+
+  def RunPageCyclerTest(self, dirname, description):
+    """Runs the specified PageCycler test.
+
+    Args:
+      dirname: directory containing the page cycler test
+      description: a string description for the test
+    """
+    self._PreReadDataDir('common')
+    self._PreReadDataDir(dirname)
+    super(PageCyclerTest, self).RunPageCyclerTest(dirname, description)
+
   def testMoreJSFile(self):
-    self._RunPageCyclerTest('morejs', self._num_iterations, 'MoreJSFile')
+    self.RunPageCyclerTest('morejs', 'MoreJSFile')
 
   def testAlexaFile(self):
-    self._RunPageCyclerTest('alexa_us', self._num_iterations, 'Alexa_usFile')
+    self.RunPageCyclerTest('alexa_us', 'Alexa_usFile')
 
   def testBloatFile(self):
-    self._RunPageCyclerTest('bloat', self._num_iterations, 'BloatFile')
+    self.RunPageCyclerTest('bloat', 'BloatFile')
 
   def testDHTMLFile(self):
-    self._RunPageCyclerTest('dhtml', self._num_iterations, 'DhtmlFile')
+    self.RunPageCyclerTest('dhtml', 'DhtmlFile')
 
   def testIntl1File(self):
-    self._RunPageCyclerTest('intl1', self._num_iterations, 'Intl1File')
+    self.RunPageCyclerTest('intl1', 'Intl1File')
 
   def testIntl2File(self):
-    self._RunPageCyclerTest('intl2', self._num_iterations, 'Intl2File')
+    self.RunPageCyclerTest('intl2', 'Intl2File')
 
   def testMozFile(self):
-    self._RunPageCyclerTest('moz', self._num_iterations, 'MozFile')
+    self.RunPageCyclerTest('moz', 'MozFile')
 
   def testMoz2File(self):
-    self._RunPageCyclerTest('moz2', self._num_iterations, 'Moz2File')
+    self.RunPageCyclerTest('moz2', 'Moz2File')
+
+
+class PageCyclerNetSimTest(BasePageCyclerTest):
+  """Run page cycler tests with network simulation via Web Page Replay.
+
+  Web Page Replay is a proxy that can record and "replay" web pages with
+  simulated network characteristics -- without having to edit the pages
+  by hand. With WPR, tests can use "real" web content, and catch
+  performance issues that may result from introducing network delays and
+  bandwidth throttling.
+
+  Environment Variables:
+    PC_NO_AUTO: if set, avoids automatically loading pages.
+    PC_RECORD: if set, puts Web Page Replay in record mode instead of replay.
+    PC_REPLAY_DIR: path to alternate Web Page Replay source (for development).
+    PC_ARCHIVE_PATH: path to alternate archive file (e.g. '/tmp/foo.wpr').
+  """
+  _PATHS = {
+      'archive':    'src/data/page_cycler/webpagereplay/{test_name}.wpr',
+      'start_page': 'src/tools/page_cycler/webpagereplay/start.html',
+      'extension':  'src/tools/page_cycler/webpagereplay/extension',
+      'replay':     'src/third_party/webpagereplay',
+      'logs':       'src/webpagereplay_logs',
+      }
+
+  _BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__),
+                                           '..', '..', '..', '..'))
+  _IS_DNS_FORWARDED = False
+  MAX_ITERATION_SECONDS = 180
+
+  def setUp(self):
+    """Performs necessary setup work before running each test."""
+    super(PageCyclerNetSimTest, self).setUp()
+    self.replay_dir = os.environ.get('PC_REPLAY_DIR')
+    self.archive_path = os.environ.get('PC_ARCHIVE_PATH')
+    self.is_record_mode = 'PC_RECORD' in os.environ
+    if self.is_record_mode:
+      self._num_iterations = 1
+
+  @classmethod
+  def _Path(cls, key, **kwargs):
+    """Provide paths for page cycler tests with Web Page Replay."""
+    chromium_path = cls._PATHS[key].format(**kwargs)
+    return os.path.join(cls._BASE_DIR, *chromium_path.split('/'))
+
+  def _ArchivePath(self, test_name):
+    archive_path = self.archive_path or self._Path('archive',
+                                                   test_name=test_name)
+    if self.is_record_mode:
+      archive_dir = os.path.dirname(archive_path)
+      self.assertTrue(os.path.exists(archive_dir),
+                      msg='Archive directory does not exist: %s' % archive_dir)
+    else:
+      self.assertTrue(os.path.exists(archive_path),
+                      msg='Archive file path does not exist: %s' % archive_path)
+    return archive_path
+
+  def ExtraChromeFlags(self):
+    """Ensures Chrome is launched with custom flags.
+
+    Returns:
+      A list of extra flags to pass to Chrome when it is launched.
+    """
+    flags = super(PageCyclerNetSimTest, self).ExtraChromeFlags()
+    flags.append('--load-extension=%s' % self._Path('extension'))
+    if not self._IS_DNS_FORWARDED:
+      flags.append('--host-resolver-rules=MAP * %s' % webpagereplay.REPLAY_HOST)
+    flags.extend([
+        '--testing-fixed-http-port=%s' % webpagereplay.HTTP_PORT,
+        '--testing-fixed-https-port=%s' % webpagereplay.HTTPS_PORT,
+        '--log-level=0',
+        ])
+    extra_flags = [
+        '--disable-background-networking',
+        '--enable-experimental-extension-apis',
+        '--enable-logging',
+        '--enable-stats-table',
+        '--enable-benchmarking',
+        '--ignore-certificate-errors',
+        '--metrics-recording-only',
+        '--activate-on-launch',
+        '--no-first-run',
+        '--no-proxy-server',
+        ]
+    flags.extend(f for f in extra_flags if f not in flags)
+    return flags
+
+  def StartUrl(self, test_name, iterations):
+    start_url = 'file://%s?test=%s&iterations=%d' % (
+        self._Path('start_page'), test_name, iterations)
+    if self.use_auto:
+      start_url += '&auto=1'
+    return start_url
+
+  def RunPageCyclerTest(self, test_name, description):
+    """Runs the specified PageCycler test.
+
+    Args:
+      test_name: name for archive (.wpr) and config (.js) files.
+      description: a string description for the test
+    """
+    replay_options = []
+    if not self._IS_DNS_FORWARDED:
+      replay_options.append('--no-dns_forwarding')
+    if self.is_record_mode:
+      replay_options.append('--record')
+    if self.replay_dir:
+      replay_dir = self.replay_dir
+    else:
+      replay_dir = self._Path('replay')
+    with webpagereplay.ReplayServer(
+        replay_dir,
+        self._ArchivePath(test_name),
+        self._Path('logs'),
+        replay_options):
+      super_self = super(PageCyclerNetSimTest, self)
+      super_self.RunPageCyclerTest(test_name, description)
+
+  def test2012Q2(self):
+    self.RunPageCyclerTest('2012Q2', '2012Q2')
 
 
 class MemoryTest(BasePerfTest):
@@ -1971,7 +2274,7 @@ class MemoryTest(BasePerfTest):
       'http://www.google.com/youtube',
       'http://www.nytimes.com',
       'http://www.cnn.com',
-      'http://www.facebook.com',
+      'http://www.facebook.com/zuck',
       'http://www.techcrunch.com',
       'http://www.theverge.com',
       'http://www.yahoo.com',

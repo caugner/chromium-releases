@@ -22,8 +22,8 @@
 #include "chrome/browser/translate/translate_infobar_delegate.h"
 #include "chrome/browser/translate/translate_manager.h"
 #include "chrome/browser/translate/translate_prefs.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
-#include "chrome/browser/ui/tab_contents/test_tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/tab_contents/test_tab_contents.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
@@ -34,13 +34,12 @@
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_contents.h"
-#include "content/test/mock_render_process_host.h"
-#include "content/test/notification_observer_mock.h"
-#include "content/test/render_view_test.h"
-#include "content/test/test_browser_thread.h"
-#include "content/test/test_renderer_host.h"
-#include "content/test/test_renderer_host.h"
-#include "content/test/test_url_fetcher_factory.h"
+#include "content/public/test/mock_notification_observer.h"
+#include "content/public/test/mock_render_process_host.h"
+#include "content/public/test/render_view_test.h"
+#include "content/public/test/test_browser_thread.h"
+#include "content/public/test/test_renderer_host.h"
+#include "content/public/test/test_url_fetcher_factory.h"
 #include "grit/generated_resources.h"
 #include "ipc/ipc_test_sink.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -57,7 +56,7 @@ using testing::Pointee;
 using testing::Property;
 using WebKit::WebContextMenuData;
 
-class TranslateManagerTest : public TabContentsWrapperTestHarness,
+class TranslateManagerTest : public TabContentsTestHarness,
                              public content::NotificationObserver {
  public:
   TranslateManagerTest()
@@ -102,7 +101,7 @@ class TranslateManagerTest : public TabContentsWrapperTestHarness,
   }
 
   InfoBarTabHelper* infobar_tab_helper() {
-    return contents_wrapper()->infobar_tab_helper();
+    return tab_contents()->infobar_tab_helper();
   }
 
   // Returns the translate infobar if there is 1 infobar and it is a translate
@@ -167,9 +166,9 @@ class TranslateManagerTest : public TabContentsWrapperTestHarness,
 
  protected:
   virtual void SetUp() {
-    WebKit::initialize(&webkit_platform_support_);
+    WebKit::initialize(webkit_platform_support_.Get());
     // Access the TranslateManager singleton so it is created before we call
-    // TabContentsWrapperTestHarness::SetUp() to match what's done in Chrome,
+    // TabContentsTestHarness::SetUp() to match what's done in Chrome,
     // where the TranslateManager is created before the WebContents.  This
     // matters as they both register for similar events and we want the
     // notifications to happen in the same sequence (TranslateManager first,
@@ -180,12 +179,12 @@ class TranslateManagerTest : public TabContentsWrapperTestHarness,
     TranslateManager::GetInstance()->
         set_translate_script_expiration_delay(60 * 60 * 1000);
 
-    TabContentsWrapperTestHarness::SetUp();
+    TabContentsTestHarness::SetUp();
 
     notification_registrar_.Add(this,
         chrome::NOTIFICATION_TAB_CONTENTS_INFOBAR_REMOVED,
         content::Source<InfoBarTabHelper>(
-            contents_wrapper()->infobar_tab_helper()));
+            tab_contents()->infobar_tab_helper()));
   }
 
   virtual void TearDown() {
@@ -194,9 +193,9 @@ class TranslateManagerTest : public TabContentsWrapperTestHarness,
     notification_registrar_.Remove(this,
         chrome::NOTIFICATION_TAB_CONTENTS_INFOBAR_REMOVED,
         content::Source<InfoBarTabHelper>(
-            contents_wrapper()->infobar_tab_helper()));
+            tab_contents()->infobar_tab_helper()));
 
-    TabContentsWrapperTestHarness::TearDown();
+    TabContentsTestHarness::TearDown();
     WebKit::shutdown();
   }
 
@@ -249,7 +248,7 @@ class TranslateManagerTest : public TabContentsWrapperTestHarness,
                 Property(&content::Details<std::string>::ptr, Pointee(path))));
   }
 
-  content::NotificationObserverMock pref_observer_;
+  content::MockNotificationObserver pref_observer_;
 
  private:
   content::NotificationRegistrar notification_registrar_;

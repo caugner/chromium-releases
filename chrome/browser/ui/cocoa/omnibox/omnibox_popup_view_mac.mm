@@ -17,7 +17,7 @@
 #include "chrome/browser/ui/cocoa/image_utils.h"
 #import "chrome/browser/ui/cocoa/location_bar/omnibox_popup_view.h"
 #include "chrome/browser/ui/cocoa/omnibox/omnibox_view_mac.h"
-#include "grit/theme_resources.h"
+#include "grit/theme_resources_standard.h"
 #include "skia/ext/skia_utils_mac.h"
 #import "third_party/GTM/AppKit/GTMNSAnimation+Duration.h"
 #import "third_party/GTM/AppKit/GTMNSBezierPath+RoundRect.h"
@@ -117,14 +117,24 @@ NSMutableAttributedString* OmniboxPopupViewMac::DecorateMatchedString(
                                               attributes:attributes]
         autorelease];
 
+  // As a protective measure, bail if the length of the match string is not
+  // the same as the length of the converted NSString. http://crbug.com/121703
+  if ([s length] != matchString.size())
+    return as;
+
   // Mark up the runs which differ from the default.
   for (ACMatchClassifications::const_iterator i = classifications.begin();
        i != classifications.end(); ++i) {
     const BOOL isLast = (i+1) == classifications.end();
-    const size_t nextOffset = (isLast ? matchString.length() : (i + 1)->offset);
+    const NSInteger nextOffset =
+        (isLast ? [s length] : static_cast<NSInteger>((i + 1)->offset));
     const NSInteger location = static_cast<NSInteger>(i->offset);
-    const NSInteger length = static_cast<NSInteger>(nextOffset - i->offset);
-    const NSRange range = NSMakeRange(location, length);
+    const NSInteger length = nextOffset - static_cast<NSInteger>(i->offset);
+    // Guard against bad, off-the-end classification ranges.
+    if (i->offset >= [s length] || length <= 0)
+      break;
+    const NSRange range = NSMakeRange(location,
+        MIN(length, static_cast<NSInteger>([s length]) - location));
 
     if (0 != (i->style & ACMatchClassification::URL)) {
       [as addAttribute:NSForegroundColorAttributeName

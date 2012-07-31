@@ -6,13 +6,13 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/net/url_request_mock_util.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/test/test_navigation_observer.h"
 #include "content/test/net/url_request_failed_job.h"
 #include "content/test/net/url_request_mock_http_job.h"
-#include "content/test/test_navigation_observer.h"
 #include "net/base/net_errors.h"
 
 using content::BrowserThread;
@@ -38,7 +38,7 @@ class ErrorPageTest : public InProcessBrowserTest {
                                     const std::string& expected_title,
                                     int num_navigations) {
     ui_test_utils::TitleWatcher title_watcher(
-        browser()->GetSelectedWebContents(),
+        browser()->GetActiveWebContents(),
         ASCIIToUTF16(expected_title));
 
     ui_test_utils::NavigateToURLBlockUntilNavigationsComplete(
@@ -84,13 +84,12 @@ class ErrorPageTest : public InProcessBrowserTest {
                                       int num_navigations,
                                       HistoryNavigationDirection direction) {
     ui_test_utils::TitleWatcher title_watcher(
-        browser()->GetSelectedWebContents(),
+        browser()->GetActiveWebContents(),
         ASCIIToUTF16(expected_title));
 
-    TestNavigationObserver test_navigation_observer(
-      content::Source<NavigationController>(
-            &browser()->GetSelectedTabContentsWrapper()->web_contents()->
-                GetController()),
+    content::TestNavigationObserver test_navigation_observer(
+        content::Source<NavigationController>(
+              &browser()->GetActiveWebContents()->GetController()),
         NULL,
         num_navigations);
     if (direction == HISTORY_NAVIGATE_BACK) {
@@ -149,7 +148,7 @@ IN_PROC_BROWSER_TEST_F(ErrorPageTest, MAYBE_DNSError_GoBack2) {
 }
 
 // See crbug.com/109669
-#if defined(USE_AURA) || defined(OS_LINUX)
+#if defined(USE_AURA)
 #define MAYBE_DNSError_GoBack2AndForward DISABLED_DNSError_GoBack2AndForward
 #else
 #define MAYBE_DNSError_GoBack2AndForward DNSError_GoBack2AndForward

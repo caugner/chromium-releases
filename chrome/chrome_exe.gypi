@@ -44,6 +44,18 @@
         'INFOPLIST_FILE': 'app/app-Info.plist',
       },
       'conditions': [
+        ['component == "shared_library"', {
+          'msvs_settings': {
+            'VCManifestTool': {
+              'EmbedManifest': 'false',
+            },
+          },
+        }],
+        ['order_profiling!=0 and (chromeos==1 or OS=="linux")', {
+          'dependencies' : [
+            '../tools/cygprofile/cygprofile.gyp:cygprofile',
+          ],
+        }],
         ['order_text_section!=""', {
           'target_conditions' : [
             ['_toolset=="target"', {
@@ -439,7 +451,6 @@
             'chrome_dll',
             'chrome_version_resources',
             'installer_util',
-            'installer_util_strings',
             'image_pre_reader',
             '../base/base.gyp:base',
             '../breakpad/breakpad.gyp:breakpad_handler',
@@ -517,7 +528,6 @@
             'nacl/nacl_exe_win_64.cc',
             '../content/app/startup_helper_win.cc',
             '../content/common/debug_flags.cc',  # Needed for sandbox_policy.cc
-            '../content/common/hi_res_timer_manager_win.cc',
             '../content/common/sandbox_init_win.cc',
             '../content/common/sandbox_policy.cc',
             '../content/public/common/content_switches.cc',

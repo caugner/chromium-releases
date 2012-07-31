@@ -4,11 +4,10 @@
 
 #include "base/utf_string_conversions.h"
 #include "content/browser/browser_thread_impl.h"
-#include "content/browser/mock_content_browser_client.h"
 #include "content/browser/renderer_host/test_render_view_host.h"
 #include "content/browser/site_instance_impl.h"
-#include "content/browser/web_contents/navigation_entry_impl.h"
 #include "content/browser/web_contents/navigation_controller_impl.h"
+#include "content/browser/web_contents/navigation_entry_impl.h"
 #include "content/browser/web_contents/render_view_host_manager.h"
 #include "content/browser/web_contents/test_web_contents.h"
 #include "content/common/test_url_constants.h"
@@ -18,15 +17,17 @@
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/web_ui_controller.h"
 #include "content/public/browser/web_ui_controller_factory.h"
+#include "content/public/common/bindings_policy.h"
+#include "content/public/common/javascript_message_type.h"
 #include "content/public/common/page_transition_types.h"
 #include "content/public/common/url_constants.h"
-#include "content/test/mock_render_process_host.h"
-#include "content/test/test_browser_context.h"
+#include "content/public/test/mock_render_process_host.h"
+#include "content/public/test/test_browser_context.h"
+#include "content/public/test/test_notification_tracker.h"
+#include "content/test/test_content_browser_client.h"
 #include "content/test/test_content_client.h"
-#include "content/test/test_notification_tracker.h"
 #include "googleurl/src/url_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/base/javascript_message_type.h"
 #include "webkit/glue/webkit_glue.h"
 
 using content::BrowserContext;
@@ -88,7 +89,7 @@ class RenderViewHostManagerTestWebUIControllerFactory
       BrowserContext* browser_context,
       const GURL& url,
       bool data_urls_allowed) const OVERRIDE {
-    return false;
+    return content::GetContentClient()->HasWebUIScheme(url);
   }
 
  private:
@@ -108,7 +109,7 @@ class RenderViewHostManagerTestClient : public TestContentClient {
 };
 
 class RenderViewHostManagerTestBrowserClient
-    : public content::MockContentBrowserClient {
+    : public content::TestContentBrowserClient {
  public:
   RenderViewHostManagerTestBrowserClient() {}
   virtual ~RenderViewHostManagerTestBrowserClient() {}
@@ -117,7 +118,7 @@ class RenderViewHostManagerTestBrowserClient
     factory_.set_should_create_webui(should_create_webui);
   }
 
-  // content::MockContentBrowserClient implementation.
+  // content::TestContentBrowserClient implementation.
   virtual content::WebUIControllerFactory*
       GetWebUIControllerFactory() OVERRIDE {
     return &factory_;
@@ -139,13 +140,13 @@ class RenderViewHostManagerTest
     old_client_ = content::GetContentClient();
     old_browser_client_ = content::GetContentClient()->browser();
     content::SetContentClient(&client_);
-    content::GetContentClient()->set_browser(&browser_client_);
+    content::GetContentClient()->set_browser_for_testing(&browser_client_);
     url_util::AddStandardScheme(chrome::kChromeUIScheme);
   }
 
   virtual void TearDown() OVERRIDE {
     RenderViewHostImplTestHarness::TearDown();
-    content::GetContentClient()->set_browser(old_browser_client_);
+    content::GetContentClient()->set_browser_for_testing(old_browser_client_);
     content::SetContentClient(old_client_);
   }
 
@@ -325,7 +326,7 @@ TEST_F(RenderViewHostManagerTest, FilterMessagesWhileSwappedOut) {
   ntp_process_host->sink().ClearMessages();
   ViewHostMsg_RunJavaScriptMessage js_msg(
       rvh()->GetRoutingID(), msg, msg, kNtpUrl,
-      ui::JAVASCRIPT_MESSAGE_TYPE_CONFIRM, &result, &unused);
+      content::JAVASCRIPT_MESSAGE_TYPE_CONFIRM, &result, &unused);
   js_msg.EnableMessagePumping();
   EXPECT_TRUE(ntp_rvh->OnMessageReceived(js_msg));
   EXPECT_TRUE(ntp_process_host->sink().GetUniqueMessageMatching(IPC_REPLY_ID));
@@ -391,7 +392,7 @@ TEST_F(RenderViewHostManagerTest, Init) {
   EXPECT_FALSE(instance->HasSite());
 
   TestWebContents web_contents(browser_context(), instance);
-  RenderViewHostManager manager(&web_contents, &web_contents);
+  RenderViewHostManager manager(&web_contents, &web_contents, &web_contents);
 
   manager.Init(browser_context(), instance, MSG_ROUTING_NONE);
 
@@ -406,7 +407,7 @@ TEST_F(RenderViewHostManagerTest, Init) {
 // Tests the Navigate function. We navigate three sites consecutively and check
 // how the pending/committed RenderViewHost are modified.
 TEST_F(RenderViewHostManagerTest, Navigate) {
-  TestNotificationTracker notifications;
+  content::TestNotificationTracker notifications;
 
   SiteInstance* instance = SiteInstance::Create(browser_context());
 
@@ -417,7 +418,7 @@ TEST_F(RenderViewHostManagerTest, Navigate) {
           &web_contents.GetController()));
 
   // Create.
-  RenderViewHostManager manager(&web_contents, &web_contents);
+  RenderViewHostManager manager(&web_contents, &web_contents, &web_contents);
 
   manager.Init(browser_context(), instance, MSG_ROUTING_NONE);
 
@@ -498,7 +499,7 @@ TEST_F(RenderViewHostManagerTest, Navigate) {
 // has been committed. This is also a regression test for
 // http://crbug.com/104600.
 TEST_F(RenderViewHostManagerTest, NavigateWithEarlyReNavigation) {
-  TestNotificationTracker notifications;
+  content::TestNotificationTracker notifications;
 
   SiteInstance* instance = SiteInstance::Create(browser_context());
 
@@ -509,7 +510,7 @@ TEST_F(RenderViewHostManagerTest, NavigateWithEarlyReNavigation) {
           &web_contents.GetController()));
 
   // Create.
-  RenderViewHostManager manager(&web_contents, &web_contents);
+  RenderViewHostManager manager(&web_contents, &web_contents, &web_contents);
 
   manager.Init(browser_context(), instance, MSG_ROUTING_NONE);
 
@@ -654,7 +655,7 @@ TEST_F(RenderViewHostManagerTest, WebUI) {
   SiteInstance* instance = SiteInstance::Create(browser_context());
 
   TestWebContents web_contents(browser_context(), instance);
-  RenderViewHostManager manager(&web_contents, &web_contents);
+  RenderViewHostManager manager(&web_contents, &web_contents, &web_contents);
 
   manager.Init(browser_context(), instance, MSG_ROUTING_NONE);
 
@@ -684,6 +685,7 @@ TEST_F(RenderViewHostManagerTest, WebUI) {
 
   // Commit.
   manager.DidNavigateMainFrame(host);
+  EXPECT_TRUE(host->GetEnabledBindings() & content::BINDINGS_POLICY_WEB_UI);
 }
 
 // Tests that we don't end up in an inconsistent state if a page does a back and
@@ -782,8 +784,6 @@ TEST_F(RenderViewHostManagerTest, CreateSwappedOutOpenerRVHs) {
   // Navigate to an initial URL.
   contents()->NavigateAndCommit(kUrl1);
   RenderViewHostManager* manager = contents()->GetRenderManagerForTesting();
-
-  // Pretend the RVH is alive so it doesn't go away.
   TestRenderViewHost* rvh1 = test_rvh();
 
   // Create 2 new tabs and simulate them being the opener chain for the main
@@ -834,4 +834,43 @@ TEST_F(RenderViewHostManagerTest, CreateSwappedOutOpenerRVHs) {
                    rvh3->GetSiteInstance()));
   EXPECT_FALSE(opener2_manager->GetSwappedOutRenderViewHost(
                    rvh3->GetSiteInstance()));
+}
+
+// Test that RenderViewHosts created for WebUI navigations are properly
+// granted WebUI bindings even if an unprivileged swapped out RenderViewHost
+// is in the same process (http://crbug.com/79918).
+TEST_F(RenderViewHostManagerTest, EnableWebUIWithSwappedOutOpener) {
+  set_should_create_webui(true);
+  const GURL kSettingsUrl("chrome://chrome/settings");
+  const GURL kPluginUrl("chrome://plugins");
+
+  // Navigate to an initial WebUI URL.
+  contents()->NavigateAndCommit(kSettingsUrl);
+
+  // Ensure the RVH has WebUI bindings.
+  TestRenderViewHost* rvh1 = test_rvh();
+  EXPECT_TRUE(rvh1->GetEnabledBindings() & content::BINDINGS_POLICY_WEB_UI);
+
+  // Create a new tab and simulate it being the opener for the main
+  // tab.  It should be in the same SiteInstance.
+  TestWebContents opener1(browser_context(), rvh1->GetSiteInstance());
+  RenderViewHostManager* opener1_manager = opener1.GetRenderManagerForTesting();
+  contents()->SetOpener(&opener1);
+
+  // Navigate to a different WebUI URL (different SiteInstance, same
+  // BrowsingInstance).
+  contents()->NavigateAndCommit(kPluginUrl);
+  TestRenderViewHost* rvh2 = test_rvh();
+  EXPECT_NE(rvh1->GetSiteInstance(), rvh2->GetSiteInstance());
+  EXPECT_TRUE(rvh1->GetSiteInstance()->IsRelatedSiteInstance(
+                  rvh2->GetSiteInstance()));
+
+  // Ensure a swapped out RVH is created in the first opener tab.
+  TestRenderViewHost* opener1_rvh = static_cast<TestRenderViewHost*>(
+      opener1_manager->GetSwappedOutRenderViewHost(rvh2->GetSiteInstance()));
+  EXPECT_TRUE(opener1_manager->IsSwappedOut(opener1_rvh));
+  EXPECT_TRUE(opener1_rvh->is_swapped_out());
+
+  // Ensure the new RVH has WebUI bindings.
+  EXPECT_TRUE(rvh2->GetEnabledBindings() & content::BINDINGS_POLICY_WEB_UI);
 }

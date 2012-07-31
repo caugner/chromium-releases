@@ -24,6 +24,7 @@
 #include "base/synchronization/lock.h"
 #include "content/common/gpu/gpu_memory_allocation.h"
 #include "content/common/gpu/client/gpu_channel_host.h"
+#include "content/common/gpu/gpu_process_launch_causes.h"
 #include "content/public/common/content_switches.h"
 #include "gpu/command_buffer/client/gles2_cmd_helper.h"
 #include "gpu/command_buffer/client/gles2_implementation.h"
@@ -43,6 +44,26 @@ namespace {
 void ClearSharedContexts() {
   base::AutoLock lock(g_all_shared_contexts_lock.Get());
   g_all_shared_contexts.Pointer()->clear();
+}
+
+void ClearSharedContextsIfInShareSet(
+    WebGraphicsContext3DCommandBufferImpl* context) {
+  // If the given context isn't in the share set, that means that it
+  // or another context it was previously sharing with already
+  // provoked a lost context. Other contexts might have since been
+  // successfully created and added to the share set, so do not clear
+  // out the share set unless we know that all the contexts in there
+  // are supposed to be lost simultaneously.
+  base::AutoLock lock(g_all_shared_contexts_lock.Get());
+  std::set<WebGraphicsContext3DCommandBufferImpl*>* share_set =
+      g_all_shared_contexts.Pointer();
+  for (std::set<WebGraphicsContext3DCommandBufferImpl*>::iterator iter =
+           share_set->begin(); iter != share_set->end(); ++iter) {
+    if (context == *iter) {
+      share_set->clear();
+      return;
+    }
+  }
 }
 
 const int32 kCommandBufferSize = 1024 * 1024;
@@ -137,13 +158,6 @@ WebGraphicsContext3DCommandBufferImpl::
     gl_->SetErrorMessageCallback(NULL);
   }
 
-  if (host_) {
-    if (host_->WillGpuSwitchOccur(false, gpu_preference_)) {
-      host_->ForciblyCloseChannel();
-      ClearSharedContexts();
-    }
-  }
-
   {
     base::AutoLock lock(g_all_shared_contexts_lock.Get());
     g_all_shared_contexts.Pointer()->erase(this);
@@ -177,28 +191,10 @@ bool WebGraphicsContext3DCommandBufferImpl::Initialize(
   if (attributes.preferDiscreteGPU)
     gpu_preference_ = gfx::PreferDiscreteGpu;
 
-  bool retry = false;
-
-  // Note similar code in Pepper PlatformContext3DImpl::Init.
-  do {
-    host_ = factory_->EstablishGpuChannelSync(cause);
-    if (!host_)
-      return false;
-    DCHECK(host_->state() == GpuChannelHost::kConnected);
-
-    if (!retry) {
-      // If the creation of this context requires all contexts for this
-      // client to be destroyed on the GPU process side, then drop the
-      // channel and recreate it.
-      if (host_->WillGpuSwitchOccur(true, gpu_preference_)) {
-        host_->ForciblyCloseChannel();
-        ClearSharedContexts();
-        retry = true;
-      }
-    } else {
-      retry = false;
-    }
-  } while (retry);
+  host_ = factory_->EstablishGpuChannelSync(cause);
+  if (!host_)
+    return false;
+  DCHECK(host_->state() == GpuChannelHost::kConnected);
 
   return true;
 }
@@ -400,6 +396,17 @@ bool WebGraphicsContext3DCommandBufferImpl::setParentContext(
   return SetParent(parent_context_impl);
 }
 
+unsigned int WebGraphicsContext3DCommandBufferImpl::insertSyncPoint() {
+  gl_->helper()->CommandBufferHelper::Flush();
+  return command_buffer_->InsertSyncPoint();
+}
+
+void WebGraphicsContext3DCommandBufferImpl::waitSyncPoint(
+    unsigned int sync_point) {
+  gl_->helper()->CommandBufferHelper::Flush();
+  command_buffer_->WaitSyncPoint(sync_point);
+}
+
 bool WebGraphicsContext3DCommandBufferImpl::SetParent(
     WebGraphicsContext3DCommandBufferImpl* new_parent) {
   if (parent_ == new_parent)
@@ -471,8 +478,11 @@ void WebGraphicsContext3DCommandBufferImpl::Destroy() {
   delete gles2_helper_;
   gles2_helper_ = NULL;
 
-  if (host_ && command_buffer_) {
-    host_->DestroyCommandBuffer(command_buffer_);
+  if (command_buffer_) {
+    if (host_)
+      host_->DestroyCommandBuffer(command_buffer_);
+    else
+      delete command_buffer_;
     command_buffer_ = NULL;
   }
 
@@ -1428,7 +1438,7 @@ bool WebGraphicsContext3DCommandBufferImpl::IsCommandBufferContextLost() {
 
 // static
 WebGraphicsContext3DCommandBufferImpl*
-    WebGraphicsContext3DCommandBufferImpl::CreateViewContext (
+WebGraphicsContext3DCommandBufferImpl::CreateViewContext(
       GpuChannelHostFactory* factory,
       int32 surface_id,
       const char* allowed_extensions,
@@ -1448,6 +1458,24 @@ WebGraphicsContext3DCommandBufferImpl*
     return NULL;
   }
   return context;
+}
+
+// static
+WebGraphicsContext3DCommandBufferImpl*
+WebGraphicsContext3DCommandBufferImpl::CreateOffscreenContext(
+    GpuChannelHostFactory* factory,
+    const WebGraphicsContext3D::Attributes& attributes) {
+  if (!factory)
+    return NULL;
+  base::WeakPtr<WebGraphicsContext3DSwapBuffersClient> null_client;
+  scoped_ptr<WebGraphicsContext3DCommandBufferImpl> context(
+      new WebGraphicsContext3DCommandBufferImpl(
+          0, GURL(), factory, null_client));
+  content::CauseForGpuLaunch cause =
+      content::CAUSE_FOR_GPU_LAUNCH_WEBGRAPHICSCONTEXT3DCOMMANDBUFFERIMPL_INITIALIZE;
+  if (context->Initialize(attributes, false, cause))
+    return context.release();
+  return NULL;
 }
 
 void WebGraphicsContext3DCommandBufferImpl::
@@ -1481,13 +1509,11 @@ DELEGATE_TO_GL_3(getQueryObjectuivEXT, GetQueryObjectuivEXT,
                  WebGLId, WGC3Denum, WGC3Duint*)
 
 DELEGATE_TO_GL_5(copyTextureCHROMIUM, CopyTextureCHROMIUM,  WGC3Denum,
-                 WGC3Denum, WGC3Denum, WGC3Dint, WGC3Dint);
+                 WebGLId, WebGLId, WGC3Dint, WGC3Denum);
 
-#if WEBKIT_USING_SKIA
 GrGLInterface* WebGraphicsContext3DCommandBufferImpl::onCreateGrGLInterface() {
   return webkit_glue::CreateCommandBufferSkiaGLBinding();
 }
-#endif
 
 namespace {
 
@@ -1514,7 +1540,7 @@ void WebGraphicsContext3DCommandBufferImpl::OnContextLost() {
     context_lost_callback_->onContextLost();
   }
   if (attributes_.shareResources)
-    ClearSharedContexts();
+    ClearSharedContextsIfInShareSet(this);
   if (ShouldUseSwapClient())
     swap_client_->OnViewContextSwapBuffersAborted();
 }

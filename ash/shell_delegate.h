@@ -13,8 +13,15 @@
 #include "base/callback.h"
 #include "base/string16.h"
 
+namespace app_list {
+class AppListViewDelegate;
+}
+
 namespace aura {
 class Window;
+namespace client {
+class UserActionClient;
+}
 }
 
 namespace views {
@@ -23,7 +30,6 @@ class Widget;
 
 namespace ash {
 
-class AppListViewDelegate;
 class LauncherDelegate;
 class LauncherModel;
 struct LauncherItem;
@@ -56,20 +62,33 @@ class ASH_EXPORT ShellDelegate {
   // Invoked when the user uses Ctrl-Shift-Q to close chrome.
   virtual void Exit() = 0;
 
+  // Invoked when the user uses Ctrl+T to open a new tab.
+  virtual void NewTab() = 0;
+
   // Invoked when the user uses Ctrl-N or Ctrl-Shift-N to open a new window.
   virtual void NewWindow(bool incognito) = 0;
 
-  // Invoked when the user presses the Search key.
-  virtual void Search() = 0;
-
-  // Invoked when the user uses Ctrl-M to open file manager.
-  virtual void OpenFileManager() = 0;
+  // Invoked when the user uses Ctrl-M or Ctrl-O to open file manager.
+  virtual void OpenFileManager(bool as_dialog) = 0;
 
   // Invoked when the user opens Crosh.
   virtual void OpenCrosh() = 0;
 
   // Invoked when the user needs to set up mobile networking.
-  virtual void OpenMobileSetup() = 0;
+  virtual void OpenMobileSetup(const std::string& service_path) = 0;
+
+  // Invoked when the user uses Shift+Ctrl+T to restore the closed tab.
+  virtual void RestoreTab() = 0;
+
+  // Moves keyboard focus to the next pane. Returns false if no browser window
+  // is created.
+  virtual bool RotatePaneFocus(Shell::Direction direction) = 0;
+
+  // Shows the keyboard shortcut overlay.
+  virtual void ShowKeyboardOverlay() = 0;
+
+  // Shows the task manager window.
+  virtual void ShowTaskManager() = 0;
 
   // Get the current browser context. This will get us the current profile.
   virtual content::BrowserContext* GetCurrentBrowserContext() = 0;
@@ -78,9 +97,12 @@ class ASH_EXPORT ShellDelegate {
   // for accessibility.
   virtual void ToggleSpokenFeedback() = 0;
 
+  // Returns true if spoken feedback is enabled.
+  virtual bool IsSpokenFeedbackEnabled() const = 0;
+
   // Invoked to create an AppListViewDelegate. Shell takes the ownership of
   // the created delegate.
-  virtual AppListViewDelegate* CreateAppListViewDelegate() = 0;
+  virtual app_list::AppListViewDelegate* CreateAppListViewDelegate() = 0;
 
   // Invoked to start taking partial screenshot.
   virtual void StartPartialScreenshot(
@@ -96,6 +118,9 @@ class ASH_EXPORT ShellDelegate {
 
   // Creates a user wallpaper delegate. Shell takes ownership of the delegate.
   virtual UserWallpaperDelegate* CreateUserWallpaperDelegate() = 0;
+
+  // Creates a user action client. Shell takes ownership of the object.
+  virtual aura::client::UserActionClient* CreateUserActionClient() = 0;
 };
 
 }  // namespace ash

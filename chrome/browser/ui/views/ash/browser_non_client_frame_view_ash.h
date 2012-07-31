@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_UI_VIEWS_ASH_BROWSER_NON_CLIENT_FRAME_VIEW_ASH_H_
 #pragma once
 
+#include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/ui/views/frame/browser_non_client_frame_view.h"
 #include "chrome/browser/ui/views/tab_icon_view.h"
@@ -59,11 +60,16 @@ class BrowserNonClientFrameViewAsh : public BrowserNonClientFrameView,
 
   // Overridden from TabIconView::TabIconViewModel:
   virtual bool ShouldTabIconViewAnimate() const OVERRIDE;
-  virtual SkBitmap GetFaviconForTabIconView() OVERRIDE;
+  virtual gfx::ImageSkia GetFaviconForTabIconView() OVERRIDE;
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(BrowserNonClientFrameViewAshTest, UseShortHeader);
+
   // Distance between top of window and client area.
   int NonClientTopBorderHeight(bool force_restored) const;
+
+  // Returns true if we should use a short header, such as for popup windows.
+  bool UseShortHeader() const;
 
   // Layout the incognito icon.
   void LayoutAvatar();
@@ -75,10 +81,10 @@ class BrowserNonClientFrameViewAsh : public BrowserNonClientFrameView,
   // above the content area.
   void PaintContentEdge(gfx::Canvas* canvas);
 
-  // Returns the correct bitmap id for the frame header based on activation
+  // Returns the correct image id for the frame header based on activation
   // state and incognito mode.
-  int GetThemeFrameBitmapId() const;
-  const SkBitmap* GetThemeFrameOverlayBitmap() const;
+  int GetThemeFrameImageId() const;
+  const gfx::ImageSkia* GetThemeFrameOverlayImage() const;
 
   // Window controls. The |size_button_| either toggles maximized or toggles
   // minimized. The exact behavior is determined by |size_button_minimizes_|.

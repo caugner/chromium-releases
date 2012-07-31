@@ -16,19 +16,23 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/extensions/default_apps_trial.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/managed_mode.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
+#include "chrome/browser/profiles/profile_destroyer.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_metrics.h"
 #include "chrome/browser/sessions/session_service_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/startup/startup_browser_creator.h"
 #include "chrome/browser/ui/webui/sync_promo/sync_promo_ui.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -37,9 +41,6 @@
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#if defined(OS_WIN)
-#include "chrome/installer/util/browser_distribution.h"
-#endif
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/user_metrics.h"
@@ -49,6 +50,11 @@
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_job.h"
 #include "ui/base/l10n/l10n_util.h"
+
+#if defined(OS_WIN)
+#include "base/win/metro.h"
+#include "chrome/installer/util/browser_distribution.h"
+#endif
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/cros/cros_library.h"
@@ -150,8 +156,8 @@ void OnOpenWindowForNewProfile(Profile* profile,
   if (status == Profile::CREATE_STATUS_INITIALIZED) {
     ProfileManager::FindOrCreateNewWindowForProfile(
         profile,
-        BrowserInit::IS_PROCESS_STARTUP,
-        BrowserInit::IS_FIRST_RUN,
+        browser::startup::IS_PROCESS_STARTUP,
+        browser::startup::IS_FIRST_RUN,
         false);
   }
 }
@@ -469,13 +475,13 @@ Profile* ProfileManager::GetProfileByPath(const FilePath& path) const {
 // static
 void ProfileManager::FindOrCreateNewWindowForProfile(
     Profile* profile,
-    BrowserInit::IsProcessStartup process_startup,
-    BrowserInit::IsFirstRun is_first_run,
+    browser::startup::IsProcessStartup process_startup,
+    browser::startup::IsFirstRun is_first_run,
     bool always_create) {
   DCHECK(profile);
 
   if (!always_create) {
-    Browser* browser = BrowserList::FindTabbedBrowser(profile, false);
+    Browser* browser = browser::FindTabbedBrowser(profile, false);
     if (browser) {
       browser->window()->Activate();
       return;
@@ -485,9 +491,9 @@ void ProfileManager::FindOrCreateNewWindowForProfile(
   content::RecordAction(UserMetricsAction("NewWindow"));
   CommandLine command_line(CommandLine::NO_PROGRAM);
   int return_code;
-  BrowserInit browser_init;
-  browser_init.LaunchBrowser(command_line, profile, FilePath(),
-                             process_startup, is_first_run, &return_code);
+  StartupBrowserCreator browser_creator;
+  browser_creator.LaunchBrowser(command_line, profile, FilePath(),
+                                process_startup, is_first_run, &return_code);
 }
 
 void ProfileManager::Observe(
@@ -603,13 +609,13 @@ ProfileManager::BrowserListObserver::~BrowserListObserver() {
 }
 
 void ProfileManager::BrowserListObserver::OnBrowserAdded(
-    const Browser* browser) {}
+    Browser* browser) {}
 
 void ProfileManager::BrowserListObserver::OnBrowserRemoved(
-    const Browser* browser) {}
+    Browser* browser) {}
 
 void ProfileManager::BrowserListObserver::OnBrowserSetLastActive(
-    const Browser* browser) {
+    Browser* browser) {
   Profile* last_active = browser->profile();
   PrefService* local_state = g_browser_process->local_state();
   DCHECK(local_state);
@@ -643,6 +649,12 @@ void ProfileManager::DoFinalInitForServices(Profile* profile,
                                             bool go_off_the_record) {
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
   ExtensionSystem::Get(profile)->Init(!go_off_the_record);
+  // During tests, when |profile| is an instance of TestingProfile,
+  // ExtensionSystem might not create an ExtensionService.
+  if (ExtensionSystem::Get(profile)->extension_service()) {
+    profile->GetHostContentSettingsMap()->RegisterExtensionService(
+        ExtensionSystem::Get(profile)->extension_service());
+  }
   if (!command_line.HasSwitch(switches::kDisableWebResources))
     profile->InitPromoResources();
 }
@@ -936,6 +948,10 @@ bool ProfileManager::IsMultipleProfilesEnabled() {
   if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kMultiProfiles))
     return false;
 #endif
+#if defined(OS_WIN)
+  if (base::win::IsMetroProcess())
+    return false;
+#endif
   return !ManagedMode::IsInManagedMode();
 }
 
@@ -972,4 +988,8 @@ void ProfileManager::RunCallbacks(const std::vector<CreateCallback>& callbacks,
                                   Profile::CreateStatus status) {
   for (size_t i = 0; i < callbacks.size(); ++i)
     callbacks[i].Run(profile, status);
+}
+
+ProfileManager::ProfileInfo::~ProfileInfo() {
+  ProfileDestroyer::DestroyProfileWhenAppropriate(profile.release());
 }

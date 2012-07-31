@@ -4,13 +4,21 @@
 
 #include "chrome/browser/ui/gtk/extensions/extension_keybinding_registry_gtk.h"
 
-#include "chrome/browser/extensions/api/commands/extension_command_service.h"
-#include "chrome/browser/extensions/api/commands/extension_command_service_factory.h"
+#include "chrome/browser/extensions/api/commands/command_service.h"
+#include "chrome/browser/extensions/api/commands/command_service_factory.h"
 #include "chrome/browser/extensions/extension_browser_event_router.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/extensions/extension.h"
 #include "ui/base/keycodes/keyboard_code_conversion_gtk.h"
+
+// static
+void extensions::ExtensionKeybindingRegistry::SetShortcutHandlingSuspended(
+    bool suspended) {
+  ExtensionKeybindingRegistryGtk::set_shortcut_handling_suspended(suspended);
+}
+
+bool ExtensionKeybindingRegistryGtk::shortcut_handling_suspended_ = false;
 
 ExtensionKeybindingRegistryGtk::ExtensionKeybindingRegistryGtk(
     Profile* profile, gfx::NativeWindow window)
@@ -35,6 +43,9 @@ ExtensionKeybindingRegistryGtk::~ExtensionKeybindingRegistryGtk() {
 
 gboolean ExtensionKeybindingRegistryGtk::HasPriorityHandler(
     const GdkEventKey* event) const {
+  if (shortcut_handling_suspended_)
+    return FALSE;
+
   ui::AcceleratorGtk accelerator(ui::WindowsKeyCodeForGdkKeyCode(event->keyval),
                                  event->state & GDK_SHIFT_MASK,
                                  event->state & GDK_CONTROL_MASK,
@@ -43,11 +54,13 @@ gboolean ExtensionKeybindingRegistryGtk::HasPriorityHandler(
 }
 
 void ExtensionKeybindingRegistryGtk::AddExtensionKeybinding(
-    const Extension* extension) {
-  ExtensionCommandService* command_service =
-      ExtensionCommandServiceFactory::GetForProfile(profile_);
+    const extensions::Extension* extension) {
+  extensions::CommandService* command_service =
+      extensions::CommandServiceFactory::GetForProfile(profile_);
   const extensions::CommandMap& commands =
-      command_service->GetActiveNamedCommands(extension->id());
+      command_service->GetNamedCommands(
+          extension->id(),
+          extensions::CommandService::ACTIVE_ONLY);
   extensions::CommandMap::const_iterator iter = commands.begin();
   for (; iter != commands.end(); ++iter) {
     ui::AcceleratorGtk accelerator(iter->second.accelerator().key_code(),
@@ -74,7 +87,9 @@ void ExtensionKeybindingRegistryGtk::AddExtensionKeybinding(
   // action to the event_targets_, even though we don't register them as
   // handlers. See http://crbug.com/124873.
   const extensions::Command* browser_action =
-      command_service->GetActiveBrowserActionCommand(extension->id());
+      command_service->GetBrowserActionCommand(
+          extension->id(),
+          extensions::CommandService::ACTIVE_ONLY);
   if (browser_action) {
     ui::AcceleratorGtk accelerator(browser_action->accelerator().key_code(),
                                    browser_action->accelerator().IsShiftDown(),
@@ -85,7 +100,9 @@ void ExtensionKeybindingRegistryGtk::AddExtensionKeybinding(
   }
 
   const extensions::Command* page_action =
-      command_service->GetActivePageActionCommand(extension->id());
+      command_service->GetPageActionCommand(
+          extension->id(),
+          extensions::CommandService::ACTIVE_ONLY);
   if (page_action) {
     ui::AcceleratorGtk accelerator(page_action->accelerator().key_code(),
                                    page_action->accelerator().IsShiftDown(),
@@ -97,7 +114,7 @@ void ExtensionKeybindingRegistryGtk::AddExtensionKeybinding(
 }
 
 void ExtensionKeybindingRegistryGtk::RemoveExtensionKeybinding(
-    const Extension* extension) {
+    const extensions::Extension* extension) {
   EventTargets::iterator iter = event_targets_.begin();
   while (iter != event_targets_.end()) {
     if (iter->second.first != extension->id()) {

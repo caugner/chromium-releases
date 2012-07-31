@@ -37,7 +37,7 @@ class TestPasswordGenerationManager : public PasswordGenerationManager {
   }
 
  protected:
-  virtual bool ShouldAnalyzeFrame(const WebKit::WebFrame& frame) const
+  virtual bool ShouldAnalyzeDocument(const WebKit::WebDocument& document) const
       OVERRIDE {
     return true;
   }
@@ -65,6 +65,18 @@ class PasswordGenerationManagerTest : public ChromeRenderViewTest {
     generation_manager_.reset(new TestPasswordGenerationManager(view_));
   }
 
+  void SimulateClickOnDecoration(WebKit::WebInputElement* input_element) {
+    WebKit::WebElement decoration =
+        input_element->decorationElementFor(generation_manager_.get());
+    decoration.simulateClick();
+  }
+
+  bool DecorationIsVisible(WebKit::WebInputElement* input_element) {
+    WebKit::WebElement decoration =
+        input_element->decorationElementFor(generation_manager_.get());
+    return decoration.hasNonEmptyBoundingBox();
+  }
+
  protected:
   scoped_ptr<TestPasswordGenerationManager> generation_manager_;
 
@@ -73,14 +85,30 @@ class PasswordGenerationManagerTest : public ChromeRenderViewTest {
 };
 
 const char kSigninFormHTML[] =
-    "<FORM name = 'blah' action = 'www.random.com/'> "
+    "<FORM name = 'blah' action = 'http://www.random.com/'> "
     "  <INPUT type = 'text' id = 'username'/> "
     "  <INPUT type = 'password' id = 'password'/> "
     "  <INPUT type = 'submit' value = 'LOGIN' />"
     "</FORM>";
 
 const char kAccountCreationFormHTML[] =
-    "<FORM name = 'blah' action = 'www.random.com/'> "
+    "<FORM name = 'blah' action = 'http://www.random.com/'> "
+    "  <INPUT type = 'text' id = 'username'/> "
+    "  <INPUT type = 'password' id = 'first_password' size=5/> "
+    "  <INPUT type = 'password' id = 'second_password' size=5/> "
+    "  <INPUT type = 'submit' value = 'LOGIN' />"
+    "</FORM>";
+
+const char kHiddenPasswordAccountCreationFormHTML[] =
+    "<FORM name = 'blah' action = 'http://www.random.com/'> "
+    "  <INPUT type = 'text' id = 'username'/> "
+    "  <INPUT type = 'password' id = 'first_password'/> "
+    "  <INPUT type = 'password' id = 'second_password' style='display:none'/> "
+    "  <INPUT type = 'submit' value = 'LOGIN' />"
+    "</FORM>";
+
+const char kInvalidActionAccountCreationFormHTML[] =
+    "<FORM name = 'blah' action = 'invalid'> "
     "  <INPUT type = 'text' id = 'username'/> "
     "  <INPUT type = 'password' id = 'first_password'/> "
     "  <INPUT type = 'password' id = 'second_password'/> "
@@ -95,42 +123,49 @@ TEST_F(PasswordGenerationManagerTest, DetectionTest) {
       document.getElementById(WebString::fromUTF8("password"));
   ASSERT_FALSE(element.isNull());
   WebInputElement password_element = element.to<WebInputElement>();
-  EXPECT_EQ(0u, generation_manager_->messages().size());
+  EXPECT_FALSE(DecorationIsVisible(&password_element));
 
   LoadHTML(kAccountCreationFormHTML);
 
-  // We don't do anything yet because the feature is disabled.
+  // We don't show the decoration yet because the feature isn't enabled.
   document = GetMainFrame()->document();
   element = document.getElementById(WebString::fromUTF8("first_password"));
   ASSERT_FALSE(element.isNull());
   WebInputElement first_password_element = element.to<WebInputElement>();
-  EXPECT_EQ(0u, generation_manager_->messages().size());
-  element = document.getElementById(WebString::fromUTF8("second_password"));
-  ASSERT_FALSE(element.isNull());
-  WebInputElement second_password_element = element.to<WebInputElement>();
-  EXPECT_EQ(0u, generation_manager_->messages().size());
-  SetFocused(first_password_element.to<WebNode>());
-  EXPECT_EQ(0u, generation_manager_->messages().size());
+  EXPECT_FALSE(DecorationIsVisible(&first_password_element));
 
-  // Pretend like sync was enabled.
+  // Pretend like password generation was enabled.
   AutofillMsg_PasswordGenerationEnabled msg(0, true);
   generation_manager_->OnMessageReceived(msg);
 
-  // Now we will send a message once the first password feld is focused.
+  // Now check that the decoration is visible on the first password field and
+  // that we send a message after the decoration is clicked.
   LoadHTML(kAccountCreationFormHTML);
   document = GetMainFrame()->document();
   element = document.getElementById(WebString::fromUTF8("first_password"));
   ASSERT_FALSE(element.isNull());
   first_password_element = element.to<WebInputElement>();
-  EXPECT_EQ(0u, generation_manager_->messages().size());
-  element = document.getElementById(WebString::fromUTF8("second_password"));
-  ASSERT_FALSE(element.isNull());
-  second_password_element = element.to<WebInputElement>();
-  EXPECT_EQ(0u, generation_manager_->messages().size());
-  SetFocused(first_password_element.to<WebNode>());
+  EXPECT_TRUE(DecorationIsVisible(&first_password_element));
+  SimulateClickOnDecoration(&first_password_element);
   EXPECT_EQ(1u, generation_manager_->messages().size());
   EXPECT_EQ(AutofillHostMsg_ShowPasswordGenerationPopup::ID,
             generation_manager_->messages()[0]->type());
+
+  // This doesn't trigger because hidden password fields are ignored.
+  LoadHTML(kHiddenPasswordAccountCreationFormHTML);
+  document = GetMainFrame()->document();
+  element = document.getElementById(WebString::fromUTF8("first_password"));
+  ASSERT_FALSE(element.isNull());
+  first_password_element = element.to<WebInputElement>();
+  EXPECT_FALSE(DecorationIsVisible(&first_password_element));
+
+  // This doesn't trigger because the form action is invalid.
+  LoadHTML(kInvalidActionAccountCreationFormHTML);
+  document = GetMainFrame()->document();
+  element = document.getElementById(WebString::fromUTF8("first_password"));
+  ASSERT_FALSE(element.isNull());
+  first_password_element = element.to<WebInputElement>();
+  EXPECT_FALSE(DecorationIsVisible(&first_password_element));
 }
 
 TEST_F(PasswordGenerationManagerTest, FillTest) {

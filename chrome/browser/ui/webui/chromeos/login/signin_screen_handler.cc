@@ -14,6 +14,8 @@
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_shutdown.h"
+#include "chrome/browser/browsing_data_helper.h"
+#include "chrome/browser/browsing_data_remover.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/chromeos/cros_settings.h"
@@ -87,6 +89,8 @@ void ClearDnsCache(IOThread* io_thread) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   if (browser_shutdown::IsTryingToQuit())
     return;
+
+  io_thread->ClearHostCache();
 }
 
 }  // namespace
@@ -417,6 +421,10 @@ void SigninScreenHandler::Initialize() {
   }
 }
 
+gfx::NativeWindow SigninScreenHandler::GetNativeWindow() {
+  return delegate_ ? delegate_->GetNativeWindow() : NULL;
+}
+
 void SigninScreenHandler::RegisterMessages() {
   network_state_informer_.reset(new NetworkStateInformer(this, web_ui()));
   network_state_informer_->Init();
@@ -453,6 +461,9 @@ void SigninScreenHandler::RegisterMessages() {
                  base::Unretained(this)));
   web_ui()->RegisterMessageCallback("shutdownSystem",
       base::Bind(&SigninScreenHandler::HandleShutdownSystem,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback("userSelectedDelayed",
+      base::Bind(&SigninScreenHandler::HandleUserSelected,
                  base::Unretained(this)));
   web_ui()->RegisterMessageCallback("removeUser",
       base::Bind(&SigninScreenHandler::HandleRemoveUser,
@@ -492,6 +503,9 @@ void SigninScreenHandler::RegisterMessages() {
                  base::Unretained(this)));
   web_ui()->RegisterMessageCallback("openProxySettings",
       base::Bind(&SigninScreenHandler::HandleOpenProxySettings,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback("loginVisible",
+      base::Bind(&SigninScreenHandler::HandleLoginVisible,
                  base::Unretained(this)));
 }
 
@@ -650,9 +664,13 @@ void SigninScreenHandler::LoadAuthExtension(
   }
 
   params.SetString("gaiaOrigin", GaiaUrls::GetInstance()->gaia_origin_url());
+  const CommandLine* command_line = CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(switches::kGaiaUrlPath)) {
+    params.SetString("gaiaUrlPath",
+                     command_line->GetSwitchValueASCII(switches::kGaiaUrlPath));
+  }
 
   // Test automation data:
-  const CommandLine* command_line = CommandLine::ForCurrentProcess();
   if (command_line->HasSwitch(switches::kAuthExtensionPath)) {
     if (!test_user_.empty()) {
       params.SetString("test_email", test_user_);
@@ -730,6 +748,8 @@ void SigninScreenHandler::HandleLaunchIncognito(const base::ListValue* args) {
 }
 
 void SigninScreenHandler::HandleFixCaptivePortal(const base::ListValue* args) {
+  if (!delegate_)
+    return;
   // TODO(altimofeev): move error page and captive portal window showing logic
   // to C++ (currenly most of it is done on the JS side).
   if (!captive_portal_window_proxy_.get()) {
@@ -775,6 +795,19 @@ void SigninScreenHandler::HandleShutdownSystem(const base::ListValue* args) {
 #endif
 }
 
+void SigninScreenHandler::HandleUserSelected(const base::ListValue* args) {
+  if (!delegate_)
+    return;
+
+  std::string email;
+  if (!args->GetString(0, &email)) {
+    NOTREACHED();
+    return;
+  }
+
+  delegate_->UserSelected(email);
+}
+
 void SigninScreenHandler::HandleRemoveUser(const base::ListValue* args) {
   if (!delegate_)
     return;
@@ -813,6 +846,8 @@ void SigninScreenHandler::HandleToggleEnrollmentScreen(
 }
 
 void SigninScreenHandler::HandleLaunchHelpApp(const base::ListValue* args) {
+  if (!delegate_)
+    return;
   double help_topic_id;  // Javascript number is passed back as double.
   if (!args->GetDouble(0, &help_topic_id)) {
     NOTREACHED();
@@ -850,8 +885,7 @@ void SigninScreenHandler::SendUserList(bool animated) {
       user_dict->SetString(kKeyUsername, email);
       user_dict->SetString(kKeyEmailAddress, (*it)->display_email());
       user_dict->SetString(kKeyDisplayName, (*it)->GetDisplayName());
-      if ((*it)->NeedsNameTooltip())
-        user_dict->SetString(kKeyNameTooltip, (*it)->GetNameTooltip());
+      user_dict->SetString(kKeyNameTooltip, (*it)->email());
       user_dict->SetInteger(kKeyOauthTokenStatus, (*it)->oauth_token_status());
       user_dict->SetBoolean(kKeySignedIn, signed_in);
 
@@ -917,7 +951,7 @@ void SigninScreenHandler::HandleLoginWebuiReady(const base::ListValue* args) {
   }
   if (!gaia_silent_load_) {
     content::NotificationService::current()->Notify(
-        chrome::NOTIFICATION_LOGIN_WEBUI_READY,
+        chrome::NOTIFICATION_LOGIN_WEBUI_LOADED,
         content::NotificationService::AllSources(),
         content::NotificationService::NoDetails());
   } else {
@@ -995,6 +1029,13 @@ void SigninScreenHandler::HandleOpenProxySettings(const base::ListValue* args) {
   BaseLoginDisplayHost::default_host()->OpenProxySettings();
 }
 
+void SigninScreenHandler::HandleLoginVisible(const base::ListValue* args) {
+  content::NotificationService::current()->Notify(
+      chrome::NOTIFICATION_LOGIN_WEBUI_VISIBLE,
+      content::NotificationService::AllSources(),
+      content::NotificationService::NoDetails());
+}
+
 void SigninScreenHandler::StartClearingDnsCache() {
   if (dns_clear_task_running_ || !g_browser_process->io_thread())
     return;
@@ -1018,7 +1059,8 @@ void SigninScreenHandler::StartClearingCookies() {
       BrowsingDataRemover::EVERYTHING,
       base::Time());
   cookie_remover_->AddObserver(this);
-  cookie_remover_->Remove(BrowsingDataRemover::REMOVE_SITE_DATA);
+  cookie_remover_->Remove(BrowsingDataRemover::REMOVE_SITE_DATA,
+                          BrowsingDataHelper::UNPROTECTED_WEB);
 }
 
 void SigninScreenHandler::MaybePreloadAuthExtension() {

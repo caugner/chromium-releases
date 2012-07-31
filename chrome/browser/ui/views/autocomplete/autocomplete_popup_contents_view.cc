@@ -18,11 +18,13 @@
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/browser/ui/views/autocomplete/autocomplete_result_view.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
+#include "chrome/browser/ui/views/autocomplete/touch_autocomplete_popup_contents_view.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "third_party/skia/include/core/SkShader.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/theme_provider.h"
 #include "ui/gfx/canvas.h"
@@ -77,6 +79,25 @@ class AutocompletePopupContentsView::AutocompletePopupWidget
 ////////////////////////////////////////////////////////////////////////////////
 // AutocompletePopupContentsView, public:
 
+AutocompletePopupContentsView*
+    AutocompletePopupContentsView::CreateForEnvironment(
+        const gfx::Font& font,
+        OmniboxView* omnibox_view,
+        AutocompleteEditModel* edit_model,
+        views::View* location_bar) {
+  AutocompletePopupContentsView* view = NULL;
+  if (ui::GetDisplayLayout() == ui::LAYOUT_TOUCH) {
+    view = new TouchAutocompletePopupContentsView(
+        font, omnibox_view, edit_model, location_bar);
+  } else {
+    view = new AutocompletePopupContentsView(
+        font, omnibox_view, edit_model, location_bar);
+  }
+
+  view->Init();
+  return view;
+}
+
 AutocompletePopupContentsView::AutocompletePopupContentsView(
     const gfx::Font& font,
     OmniboxView* omnibox_view,
@@ -98,8 +119,13 @@ AutocompletePopupContentsView::AutocompletePopupContentsView(
   bubble_border_ = bubble_border;
   set_border(bubble_border);
   // The contents is owned by the LocationBarView.
-  set_parent_owned(false);
+  set_owned_by_client();
+}
 
+void AutocompletePopupContentsView::Init() {
+  // This can't be done in the constructor as at that point we aren't
+  // necessarily our final class yet, and we may have subclasses
+  // overriding CreateResultView.
   for (size_t i = 0; i < AutocompleteResult::kMaxMatches; ++i) {
     AutocompleteResultView* result_view =
         CreateResultView(this, i, result_font_, result_bold_font_);
@@ -213,6 +239,9 @@ void AutocompletePopupContentsView::UpdatePopupAppearance() {
     ash::SetWindowVisibilityAnimationType(
         popup_->GetNativeView(),
         ash::WINDOW_VISIBILITY_ANIMATION_TYPE_VERTICAL);
+    // No animation for autocomplete popup appearance.  see crbug.com/124104
+    ash::SetWindowVisibilityAnimationTransition(
+        popup_->GetNativeView(), ash::ANIMATE_HIDE);
 #endif
     popup_->SetContentsView(this);
     popup_->StackAbove(omnibox_view_->GetRelativeWindowForPopup());
@@ -300,23 +329,15 @@ views::View* AutocompletePopupContentsView::GetEventHandlerForPoint(
 bool AutocompletePopupContentsView::OnMousePressed(
     const views::MouseEvent& event) {
   ignore_mouse_drag_ = false;  // See comment on |ignore_mouse_drag_| in header.
-  if (event.IsLeftMouseButton() || event.IsMiddleMouseButton()) {
-    size_t index = GetIndexForPoint(event.location());
-    model_->SetHoveredLine(index);
-    if (HasMatchAt(index) && event.IsLeftMouseButton())
-      model_->SetSelectedLine(index, false, false);
-  }
+  if (event.IsLeftMouseButton() || event.IsMiddleMouseButton())
+    UpdateLineEvent(event, event.IsLeftMouseButton());
   return true;
 }
 
 bool AutocompletePopupContentsView::OnMouseDragged(
     const views::MouseEvent& event) {
-  if (event.IsLeftMouseButton() || event.IsMiddleMouseButton()) {
-    size_t index = GetIndexForPoint(event.location());
-    model_->SetHoveredLine(index);
-    if (!ignore_mouse_drag_ && HasMatchAt(index) && event.IsLeftMouseButton())
-      model_->SetSelectedLine(index, false, false);
-  }
+  if (event.IsLeftMouseButton() || event.IsMiddleMouseButton())
+    UpdateLineEvent(event, !ignore_mouse_drag_ && event.IsLeftMouseButton());
   return true;
 }
 
@@ -327,11 +348,10 @@ void AutocompletePopupContentsView::OnMouseReleased(
     return;
   }
 
-  size_t index = GetIndexForPoint(event.location());
-  if (event.IsOnlyMiddleMouseButton())
-    OpenIndex(index, NEW_BACKGROUND_TAB);
-  else if (event.IsOnlyLeftMouseButton())
-    OpenIndex(index, CURRENT_TAB);
+  if (event.IsOnlyMiddleMouseButton() || event.IsOnlyLeftMouseButton()) {
+    OpenSelectedLine(event, event.IsOnlyLeftMouseButton() ? CURRENT_TAB :
+                                                            NEW_BACKGROUND_TAB);
+  }
 }
 
 void AutocompletePopupContentsView::OnMouseCaptureLost() {
@@ -351,6 +371,24 @@ void AutocompletePopupContentsView::OnMouseEntered(
 void AutocompletePopupContentsView::OnMouseExited(
     const views::MouseEvent& event) {
   model_->SetHoveredLine(AutocompletePopupModel::kNoMatch);
+}
+
+ui::GestureStatus AutocompletePopupContentsView::OnGestureEvent(
+    const views::GestureEvent& event) {
+  switch (event.type()) {
+    case ui::ET_GESTURE_TAP_DOWN:
+    case ui::ET_GESTURE_SCROLL_BEGIN:
+    case ui::ET_GESTURE_SCROLL_UPDATE:
+      UpdateLineEvent(event, true);
+      break;
+    case ui::ET_GESTURE_TAP:
+    case ui::ET_GESTURE_SCROLL_END:
+      OpenSelectedLine(event, CURRENT_TAB);
+      break;
+    default:
+      return ui::GESTURE_STATUS_UNKNOWN;
+  }
+  return ui::GESTURE_STATUS_CONSUMED;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -382,39 +420,20 @@ AutocompleteResultView* AutocompletePopupContentsView::CreateResultView(
 // AutocompletePopupContentsView, views::View overrides, protected:
 
 void AutocompletePopupContentsView::OnPaint(gfx::Canvas* canvas) {
-  // We paint our children in an unconventional way.
-  //
-  // Because the border of this view creates an anti-aliased round-rect region
-  // for the contents, we need to render our rectangular result child views into
-  // this round rect region. We can't use a simple clip because clipping is
-  // 1-bit and we get nasty jagged edges.
-  //
-  // Instead, we paint all our children into a second canvas and use that as a
-  // shader to fill a path representing the round-rect clipping region. This
-  // yields a nice anti-aliased edge.
-  gfx::Canvas contents_canvas(size(), true);
-  PaintResultViews(&contents_canvas);
+  gfx::Path path;
+  MakeContentsPath(&path, GetContentsBounds());
+  canvas->Save();
+  canvas->sk_canvas()->clipPath(path,
+                                SkRegion::kIntersect_Op,
+                                true /* doAntialias */);
+  PaintResultViews(canvas);
 
   // We want the contents background to be slightly transparent so we can see
   // the blurry glass effect on DWM systems behind. We do this _after_ we paint
   // the children since they paint text, and GDI will reset this alpha data if
   // we paint text after this call.
-  MakeCanvasTransparent(&contents_canvas);
-
-  // Now paint the contents of the contents canvas into the actual canvas.
-  SkPaint paint;
-  paint.setAntiAlias(true);
-
-  SkShader* shader = SkShader::CreateBitmapShader(
-      contents_canvas.sk_canvas()->getDevice()->accessBitmap(false),
-      SkShader::kClamp_TileMode,
-      SkShader::kClamp_TileMode);
-  paint.setShader(shader);
-  shader->unref();
-
-  gfx::Path path;
-  MakeContentsPath(&path, GetContentsBounds());
-  canvas->DrawPath(path, paint);
+  MakeCanvasTransparent(canvas);
+  canvas->Restore();
 
   // Now we paint the border, so it will be alpha-blended atop the contents.
   // This looks slightly better in the corners than drawing the contents atop
@@ -536,4 +555,20 @@ gfx::Rect AutocompletePopupContentsView::CalculateTargetBounds(int h) {
   location_bar_bounds.set_origin(location_bar_origin);
   return bubble_border_->GetBounds(
       location_bar_bounds, gfx::Size(location_bar_bounds.width(), h));
+}
+
+void AutocompletePopupContentsView::UpdateLineEvent(
+    const views::LocatedEvent& event,
+    bool should_set_selected_line) {
+  size_t index = GetIndexForPoint(event.location());
+  model_->SetHoveredLine(index);
+  if (HasMatchAt(index) && should_set_selected_line)
+    model_->SetSelectedLine(index, false, false);
+}
+
+void AutocompletePopupContentsView::OpenSelectedLine(
+    const views::LocatedEvent& event,
+    WindowOpenDisposition disposition) {
+  size_t index = GetIndexForPoint(event.location());
+  OpenIndex(index, disposition);
 }

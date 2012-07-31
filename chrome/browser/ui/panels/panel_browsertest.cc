@@ -4,21 +4,15 @@
 
 #include "base/bind.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_service.h"
 #include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/net/url_request_mock_util.h"
-#include "chrome/browser/notifications/balloon.h"
-#include "chrome/browser/notifications/balloon_collection_impl.h"
-#include "chrome/browser/notifications/desktop_notification_service.h"
-#include "chrome/browser/notifications/notification.h"
-#include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/browser/prefs/browser_prefs.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/app_modal_dialogs/app_modal_dialog.h"
 #include "chrome/browser/ui/app_modal_dialogs/native_app_modal_dialog.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/find_bar/find_bar.h"
@@ -29,6 +23,7 @@
 #include "chrome/browser/ui/panels/panel.h"
 #include "chrome/browser/ui/panels/panel_manager.h"
 #include "chrome/browser/ui/panels/test_panel_mouse_watcher.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
@@ -38,17 +33,21 @@
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/show_desktop_notification_params.h"
 #include "content/public/common/url_constants.h"
 #include "content/test/net/url_request_mock_http_job.h"
 #include "net/base/net_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/screen.h"
 
+// Refactor has only been done for Mac panels so far.
+#if defined(OS_MACOSX)
+
+using content::BrowserContext;
 using content::BrowserThread;
 using content::DownloadItem;
 using content::DownloadManager;
 using content::WebContents;
+using extensions::Extension;
 
 class PanelBrowserTest : public BasePanelBrowserTest {
  public:
@@ -56,15 +55,6 @@ class PanelBrowserTest : public BasePanelBrowserTest {
   }
 
  protected:
-  void MoveMouseAndWaitForExpansionStateChange(Panel* panel,
-                                               const gfx::Point& position) {
-    ui_test_utils::WindowedNotificationObserver signal(
-        chrome::NOTIFICATION_PANEL_CHANGED_EXPANSION_STATE,
-        content::Source<Panel>(panel));
-    MoveMouse(position);
-    signal.Wait();
-  }
-
   // Helper function for debugging.
   void PrintAllPanelBounds() {
     const std::vector<Panel*>& panels = PanelManager::GetInstance()->panels();
@@ -147,8 +137,7 @@ class PanelBrowserTest : public BasePanelBrowserTest {
         panels.size(), Panel::EXPANDED);
     std::vector<NativePanelTesting*> native_panels_testing(panels.size());
     for (size_t i = 0; i < panels.size(); ++i) {
-      native_panels_testing[i] =
-          NativePanelTesting::Create(panels[i]->native_panel());
+      native_panels_testing[i] = CreateNativePanelTesting(panels[i]);
     }
 
     // Verify titlebar click does not minimize.
@@ -168,10 +157,10 @@ class PanelBrowserTest : public BasePanelBrowserTest {
     // Minimize all panels for next stage in test.
     for (size_t index = 0; index < panels.size(); ++index) {
       panels[index]->Minimize();
-      expected_bounds[index].set_height(Panel::kMinimizedPanelHeight);
+      expected_bounds[index].set_height(panel::kMinimizedPanelHeight);
       expected_bounds[index].set_y(
           test_begin_bounds[index].y() +
-          test_begin_bounds[index].height() - Panel::kMinimizedPanelHeight);
+          test_begin_bounds[index].height() - panel::kMinimizedPanelHeight);
       expected_expansion_states[index] = Panel::MINIMIZED;
       EXPECT_EQ(expected_bounds, GetAllPanelBounds());
       EXPECT_EQ(expected_expansion_states, GetAllPanelExpansionStates());
@@ -282,11 +271,11 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, CheckDockedPanelProperties) {
   panel3->SetExpansionState(Panel::MINIMIZED);
   WaitForExpansionStateChanged(panel3, Panel::MINIMIZED);
   scoped_ptr<NativePanelTesting> panel1_testing(
-      NativePanelTesting::Create(panel1->native_panel()));
+      CreateNativePanelTesting(panel1));
   scoped_ptr<NativePanelTesting> panel2_testing(
-      NativePanelTesting::Create(panel2->native_panel()));
+      CreateNativePanelTesting(panel2));
   scoped_ptr<NativePanelTesting> panel3_testing(
-      NativePanelTesting::Create(panel3->native_panel()));
+      CreateNativePanelTesting(panel3));
 
   // Ensure that the layout message can get a chance to be processed so that
   // the button visibility can be updated.
@@ -305,26 +294,17 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, CheckDockedPanelProperties) {
   EXPECT_TRUE(panel2->always_on_top());
   EXPECT_TRUE(panel3->always_on_top());
 
-  EXPECT_TRUE(panel1_testing->IsButtonVisible(
-      NativePanelTesting::CLOSE_BUTTON));
-  EXPECT_TRUE(panel2_testing->IsButtonVisible(
-      NativePanelTesting::CLOSE_BUTTON));
-  EXPECT_TRUE(panel3_testing->IsButtonVisible(
-      NativePanelTesting::CLOSE_BUTTON));
+  EXPECT_TRUE(panel1_testing->IsButtonVisible(panel::CLOSE_BUTTON));
+  EXPECT_TRUE(panel2_testing->IsButtonVisible(panel::CLOSE_BUTTON));
+  EXPECT_TRUE(panel3_testing->IsButtonVisible(panel::CLOSE_BUTTON));
 
-  EXPECT_TRUE(panel1_testing->IsButtonVisible(
-      NativePanelTesting::MINIMIZE_BUTTON));
-  EXPECT_FALSE(panel2_testing->IsButtonVisible(
-      NativePanelTesting::MINIMIZE_BUTTON));
-  EXPECT_FALSE(panel3_testing->IsButtonVisible(
-      NativePanelTesting::MINIMIZE_BUTTON));
+  EXPECT_TRUE(panel1_testing->IsButtonVisible(panel::MINIMIZE_BUTTON));
+  EXPECT_FALSE(panel2_testing->IsButtonVisible(panel::MINIMIZE_BUTTON));
+  EXPECT_FALSE(panel3_testing->IsButtonVisible(panel::MINIMIZE_BUTTON));
 
-  EXPECT_FALSE(panel1_testing->IsButtonVisible(
-      NativePanelTesting::RESTORE_BUTTON));
-  EXPECT_TRUE(panel2_testing->IsButtonVisible(
-      NativePanelTesting::RESTORE_BUTTON));
-  EXPECT_TRUE(panel3_testing->IsButtonVisible(
-      NativePanelTesting::RESTORE_BUTTON));
+  EXPECT_FALSE(panel1_testing->IsButtonVisible(panel::RESTORE_BUTTON));
+  EXPECT_TRUE(panel2_testing->IsButtonVisible(panel::RESTORE_BUTTON));
+  EXPECT_TRUE(panel3_testing->IsButtonVisible(panel::RESTORE_BUTTON));
 
   EXPECT_EQ(panel::RESIZABLE_ALL_SIDES_EXCEPT_BOTTOM,
             panel1->CanResizeByMouse());
@@ -354,7 +334,7 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, CreatePanel) {
   EXPECT_EQ(bounds.right(),
             panel_manager->docked_strip()->StartingRightPosition());
 
-  CloseWindowAndWait(panel->browser());
+  CloseWindowAndWait(panel);
 
   EXPECT_EQ(0, panel_manager->num_panels());
 }
@@ -368,16 +348,6 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, CreateBigPanel) {
   EXPECT_LT(bounds.width(), work_area.width());
   EXPECT_EQ(panel->max_size().height(), bounds.height());
   EXPECT_LT(bounds.height(), work_area.height());
-  panel->Close();
-}
-
-IN_PROC_BROWSER_TEST_F(PanelBrowserTest, FindBar) {
-  Panel* panel = CreatePanelWithBounds("PanelTest", gfx::Rect(0, 0, 400, 400));
-  Browser* browser = panel->browser();
-  // FindBar needs tab contents.
-  CreateTestTabContents(browser);
-  browser->ShowFindBar();
-  ASSERT_TRUE(browser->GetFindBarController()->find_bar()->IsFindBarVisible());
   panel->Close();
 }
 
@@ -402,7 +372,7 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, DISABLED_AutoResize) {
       chrome::NOTIFICATION_PANEL_BOUNDS_ANIMATIONS_FINISHED,
       content::Source<Panel>(panel));
   EXPECT_TRUE(ui_test_utils::ExecuteJavaScript(
-      panel->browser()->GetSelectedWebContents()->GetRenderViewHost(),
+      panel->WebContents()->GetRenderViewHost(),
       std::wstring(),
       L"changeSize(50);"));
   enlarge.Wait();
@@ -415,7 +385,7 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, DISABLED_AutoResize) {
       chrome::NOTIFICATION_PANEL_BOUNDS_ANIMATIONS_FINISHED,
       content::Source<Panel>(panel));
   EXPECT_TRUE(ui_test_utils::ExecuteJavaScript(
-      panel->browser()->GetSelectedWebContents()->GetRenderViewHost(),
+      panel->WebContents()->GetRenderViewHost(),
       std::wstring(),
       L"changeSize(-30);"));
   shrink.Wait();
@@ -430,10 +400,11 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, DISABLED_AutoResize) {
   EXPECT_EQ(previous_bounds.size(), panel->GetRestoredBounds().size());
   gfx::Size new_size(previous_bounds.size());
   new_size.Enlarge(5, 5);
-  panel_manager->ResizePanel(panel, new_size);
+  gfx::Rect new_bounds(previous_bounds.origin(), new_size);
+  panel->SetBounds(new_bounds);
   EXPECT_FALSE(panel->auto_resizable());
-  EXPECT_EQ(new_size, panel->GetBounds().size());
-  EXPECT_EQ(new_size, panel->GetRestoredBounds().size());
+  EXPECT_EQ(new_bounds.size(), panel->GetBounds().size());
+  EXPECT_EQ(new_bounds.size(), panel->GetRestoredBounds().size());
 
   // Turn back on auto-resize and verify that it works.
   ui_test_utils::WindowedNotificationObserver auto_resize_enabled(
@@ -462,19 +433,21 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, ResizePanel) {
   EXPECT_EQ(original_bounds.size(), panel->GetRestoredBounds().size());
   gfx::Size new_size(original_bounds.size());
   new_size.Enlarge(5, 5);
-  panel_manager->ResizePanel(panel, new_size);
+  gfx::Rect new_bounds(original_bounds.origin(), new_size);
+  panel->SetBounds(new_bounds);
   EXPECT_FALSE(panel->auto_resizable());
-  EXPECT_EQ(new_size, panel->GetBounds().size());
-  EXPECT_EQ(new_size, panel->GetRestoredBounds().size());
+  EXPECT_EQ(new_bounds.size(), panel->GetBounds().size());
+  EXPECT_EQ(new_bounds.size(), panel->GetRestoredBounds().size());
 
   // Verify current height unaffected when panel is not expanded.
   panel->SetExpansionState(Panel::MINIMIZED);
   int original_height = panel->GetBounds().height();
   new_size.Enlarge(5, 5);
-  panel_manager->ResizePanel(panel, new_size);
-  EXPECT_EQ(new_size.width(), panel->GetBounds().width());
+  new_bounds.set_size(new_size);
+  panel->SetBounds(new_bounds);
+  EXPECT_EQ(new_bounds.size().width(), panel->GetBounds().width());
   EXPECT_EQ(original_height, panel->GetBounds().height());
-  EXPECT_EQ(new_size, panel->GetRestoredBounds().size());
+  EXPECT_EQ(new_bounds.size(), panel->GetRestoredBounds().size());
 
   panel->Close();
 }
@@ -482,7 +455,7 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, ResizePanel) {
 IN_PROC_BROWSER_TEST_F(PanelBrowserTest, AnimateBounds) {
   Panel* panel = CreatePanelWithBounds("PanelTest", gfx::Rect(0, 0, 100, 100));
   scoped_ptr<NativePanelTesting> panel_testing(
-      NativePanelTesting::Create(panel->native_panel()));
+      CreateNativePanelTesting(panel));
 
   // Set bounds with animation.
   gfx::Rect bounds = gfx::Rect(10, 20, 150, 160);
@@ -662,11 +635,11 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, RestoreAllWithTitlebarClick) {
   EXPECT_FALSE(panel3->IsMinimized());
 
   scoped_ptr<NativePanelTesting> test_panel1(
-      NativePanelTesting::Create(panel1->native_panel()));
+      CreateNativePanelTesting(panel1));
   scoped_ptr<NativePanelTesting> test_panel2(
-      NativePanelTesting::Create(panel2->native_panel()));
+      CreateNativePanelTesting(panel2));
   scoped_ptr<NativePanelTesting> test_panel3(
-      NativePanelTesting::Create(panel3->native_panel()));
+      CreateNativePanelTesting(panel3));
 
   // Click on an expanded panel's titlebar using the apply-all modifier.
   // Verify expansion state is unchanged.
@@ -826,6 +799,7 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, MAYBE_ActivatePanelOrTabbedWindow) {
   Panel* panel1 = CreatePanelWithParams(params1);
   CreatePanelParams params2("Panel2", gfx::Rect(), SHOW_AS_ACTIVE);
   Panel* panel2 = CreatePanelWithParams(params2);
+
   // Need tab contents in order to trigger deactivation upon close.
   CreateTestTabContents(panel2->browser());
 
@@ -843,7 +817,7 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, MAYBE_ActivatePanelOrTabbedWindow) {
   browser()->window()->Activate();
   WaitForPanelActiveState(panel2, SHOW_AS_INACTIVE);
   // Close the main tabbed window. That should move focus back to panel.
-  CloseWindowAndWait(browser());
+  browser()->CloseWindow();
   WaitForPanelActiveState(panel2, SHOW_AS_ACTIVE);
 
   // Activate another panel.
@@ -857,7 +831,7 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, MAYBE_ActivatePanelOrTabbedWindow) {
   WaitForPanelActiveState(panel1, SHOW_AS_INACTIVE);
 
   // Close active panel, focus should move to the remaining one.
-  CloseWindowAndWait(panel2->browser());
+  CloseWindowAndWait(panel2);
   WaitForPanelActiveState(panel1, SHOW_AS_ACTIVE);
   panel1->Close();
 }
@@ -872,7 +846,7 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, MAYBE_ActivateDeactivateBasic) {
   // Create an active panel.
   Panel* panel = CreatePanel("PanelTest");
   scoped_ptr<NativePanelTesting> native_panel_testing(
-      NativePanelTesting::Create(panel->native_panel()));
+      CreateNativePanelTesting(panel));
   EXPECT_TRUE(panel->IsActive());
   EXPECT_TRUE(native_panel_testing->VerifyActiveState(true));
 
@@ -889,14 +863,14 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, MAYBE_ActivateDeactivateBasic) {
   EXPECT_TRUE(native_panel_testing->VerifyActiveState(true));
 }
 // TODO(jianli): To be enabled for other platforms.
-#if defined(OS_WIN) || defined(OS_MACOSX)
+#if defined(OS_WIN)
 #define MAYBE_ActivateDeactivateMultiple ActivateDeactivateMultiple
 #else
 #define MAYBE_ActivateDeactivateMultiple DISABLED_ActivateDeactivateMultiple
 #endif
 
 IN_PROC_BROWSER_TEST_F(PanelBrowserTest, MAYBE_ActivateDeactivateMultiple) {
-  BrowserWindow* tabbed_window = BrowserList::GetLastActive()->window();
+  BrowserWindow* tabbed_window = browser()->window();
 
   // Create 4 panels in the following screen layout:
   //    P3  P2  P1  P0
@@ -954,7 +928,7 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, DrawAttentionBasic) {
   CreatePanelParams params("Initially Inactive", gfx::Rect(), SHOW_AS_INACTIVE);
   Panel* panel = CreatePanelWithParams(params);
   scoped_ptr<NativePanelTesting> native_panel_testing(
-      NativePanelTesting::Create(panel->native_panel()));
+      CreateNativePanelTesting(panel));
 
   // Test that the attention is drawn when the expanded panel is not in focus.
   EXPECT_EQ(Panel::EXPANDED, panel->expansion_state());
@@ -992,17 +966,19 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, DrawAttentionWhileMinimized) {
   PanelMouseWatcher* mouse_watcher = new TestPanelMouseWatcher();
   PanelManager::GetInstance()->SetMouseWatcherForTesting(mouse_watcher);
 
-  CreatePanelParams params("Initially Active", gfx::Rect(), SHOW_AS_ACTIVE);
-  Panel* panel = CreatePanelWithParams(params);
-  NativePanel* native_panel = panel->native_panel();
+  // Create 2 panels so we end up with an inactive panel that can
+  // be made to draw attention.
+  Panel* panel = CreatePanel("test panel1");
+  Panel* panel2 = CreatePanel("test panel2");
+  Panel* panel3 = CreatePanel("test panel2");
+
   scoped_ptr<NativePanelTesting> native_panel_testing(
-      NativePanelTesting::Create(native_panel));
+      CreateNativePanelTesting(panel));
 
   // Test that the attention is drawn and the title-bar is brought up when the
   // minimized panel is drawing attention.
-  panel->SetExpansionState(Panel::MINIMIZED);
-  WaitForPanelActiveState(panel, SHOW_AS_INACTIVE);
-  EXPECT_EQ(Panel::MINIMIZED, panel->expansion_state());
+  panel->Minimize();
+  WaitForExpansionStateChanged(panel, Panel::MINIMIZED);
   panel->FlashFrame(true);
   EXPECT_TRUE(panel->IsDrawingAttention());
   EXPECT_EQ(Panel::TITLE_ONLY, panel->expansion_state());
@@ -1011,9 +987,11 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, DrawAttentionWhileMinimized) {
 
   // Test that we cannot bring up other minimized panel if the mouse is over
   // the panel that draws attension.
+  panel2->Minimize();
   gfx::Point hover_point(panel->GetBounds().origin());
   MoveMouse(hover_point);
   EXPECT_EQ(Panel::TITLE_ONLY, panel->expansion_state());
+  EXPECT_EQ(Panel::MINIMIZED, panel2->expansion_state());
 
   // Test that we cannot bring down the panel that is drawing the attention.
   hover_point.set_y(hover_point.y() - 200);
@@ -1029,6 +1007,8 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, DrawAttentionWhileMinimized) {
   EXPECT_FALSE(native_panel_testing->VerifyDrawingAttention());
 
   panel->Close();
+  panel2->Close();
+  panel3->Close();
 }
 
 // Verify that minimized state of a panel is correct after draw attention
@@ -1077,6 +1057,25 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, StopDrawingAttentionWhileMinimized) {
   EXPECT_EQ(Panel::MINIMIZED, panel1->expansion_state());
   EXPECT_EQ(Panel::MINIMIZED, panel2->expansion_state());
 
+  // Verify minimized panel that is drawing attention stays in title-only mode
+  // after attention is cleared if mouse is in the titlebar area.
+  panel1->FlashFrame(true);
+  EXPECT_TRUE(panel1->IsDrawingAttention());
+  EXPECT_EQ(Panel::TITLE_ONLY, panel1->expansion_state());
+
+  gfx::Point hover_point_in_panel(panel1->GetBounds().origin());
+  MoveMouse(hover_point_in_panel);
+
+  panel1->FlashFrame(false);
+  EXPECT_FALSE(panel1->IsDrawingAttention());
+  EXPECT_EQ(Panel::TITLE_ONLY, panel1->expansion_state());
+  EXPECT_EQ(Panel::MINIMIZED, panel2->expansion_state());
+
+  // Move mouse away and panel should go back to fully minimized state.
+  MoveMouseAndWaitForExpansionStateChange(panel1, hover_point);
+  EXPECT_EQ(Panel::MINIMIZED, panel1->expansion_state());
+  EXPECT_EQ(Panel::MINIMIZED, panel2->expansion_state());
+
   panel1->Close();
   panel2->Close();
 }
@@ -1085,7 +1084,7 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, DrawAttentionWhenActive) {
   CreatePanelParams params("Initially Active", gfx::Rect(), SHOW_AS_ACTIVE);
   Panel* panel = CreatePanelWithParams(params);
   scoped_ptr<NativePanelTesting> native_panel_testing(
-      NativePanelTesting::Create(panel->native_panel()));
+      CreateNativePanelTesting(panel));
 
   // Test that the attention should not be drawn if the expanded panel is in
   // focus.
@@ -1101,14 +1100,13 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, DrawAttentionWhenActive) {
 }
 
 IN_PROC_BROWSER_TEST_F(PanelBrowserTest, DrawAttentionResetOnActivate) {
-  CreatePanelParams params("Initially active", gfx::Rect(), SHOW_AS_ACTIVE);
-  Panel* panel = CreatePanelWithParams(params);
-  scoped_ptr<NativePanelTesting> native_panel_testing(
-      NativePanelTesting::Create(panel->native_panel()));
+  // Create 2 panels so we end up with an inactive panel that can
+  // be made to draw attention.
+  Panel* panel = CreatePanel("test panel1");
+  Panel* panel2 = CreatePanel("test panel2");
 
-  // Deactivate the panel.
-  panel->Deactivate();
-  WaitForPanelActiveState(panel, SHOW_AS_INACTIVE);
+  scoped_ptr<NativePanelTesting> native_panel_testing(
+      CreateNativePanelTesting(panel));
 
   panel->FlashFrame(true);
   EXPECT_TRUE(panel->IsDrawingAttention());
@@ -1123,6 +1121,7 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, DrawAttentionResetOnActivate) {
   EXPECT_FALSE(native_panel_testing->VerifyDrawingAttention());
 
   panel->Close();
+  panel2->Close();
 }
 
 IN_PROC_BROWSER_TEST_F(PanelBrowserTest,
@@ -1159,7 +1158,7 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, DrawAttentionResetOnClick) {
   CreatePanelParams params("Initially Inactive", gfx::Rect(), SHOW_AS_INACTIVE);
   Panel* panel = CreatePanelWithParams(params);
   scoped_ptr<NativePanelTesting> native_panel_testing(
-      NativePanelTesting::Create(panel->native_panel()));
+      CreateNativePanelTesting(panel));
 
   panel->FlashFrame(true);
   EXPECT_TRUE(panel->IsDrawingAttention());
@@ -1181,25 +1180,25 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, DrawAttentionResetOnClick) {
 
 IN_PROC_BROWSER_TEST_F(PanelBrowserTest,
                        MinimizeImmediatelyAfterRestore) {
-  CreatePanelParams params("Initially Inactive", gfx::Rect(), SHOW_AS_ACTIVE);
+  CreatePanelParams params("Panel Test", gfx::Rect(), SHOW_AS_ACTIVE);
   Panel* panel = CreatePanelWithParams(params);
   scoped_ptr<NativePanelTesting> native_panel_testing(
-      NativePanelTesting::Create(panel->native_panel()));
+      CreateNativePanelTesting(panel));
 
   panel->Minimize();  // this should deactivate.
   MessageLoop::current()->RunAllPending();
   WaitForPanelActiveState(panel, SHOW_AS_INACTIVE);
   EXPECT_EQ(Panel::MINIMIZED, panel->expansion_state());
 
-  panel->Activate();
+  panel->Restore();
   MessageLoop::current()->RunAllPending();
-  WaitForPanelActiveState(panel, SHOW_AS_ACTIVE);
-  EXPECT_EQ(Panel::EXPANDED, panel->expansion_state());
+  WaitForExpansionStateChanged(panel, Panel::EXPANDED);
 
   // Verify that minimizing a panel right after expansion works.
   panel->Minimize();
   MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(Panel::MINIMIZED, panel->expansion_state());
+  WaitForExpansionStateChanged(panel, Panel::MINIMIZED);
+
   panel->Close();
 }
 
@@ -1247,7 +1246,11 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest,
   Panel* panel2 = CreatePanelWithParams(params);
 
   // Close main tabbed window.
-  CloseWindowAndWait(browser());
+  ui_test_utils::WindowedNotificationObserver signal(
+      chrome::NOTIFICATION_BROWSER_CLOSED,
+      content::Source<Browser>(browser()));
+  browser()->CloseWindow();
+  signal.Wait();
 
   EXPECT_EQ(Panel::EXPANDED, panel1->expansion_state());
   EXPECT_EQ(Panel::EXPANDED, panel2->expansion_state());
@@ -1276,8 +1279,9 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest,
   panel2->Close();
 }
 
+// TODO(jennb): Disabled until refactored panels supports web contents.
 IN_PROC_BROWSER_TEST_F(PanelBrowserTest,
-                       NonExtensionDomainPanelsCloseOnUninstall) {
+                       DISABLED_NonExtensionDomainPanelsCloseOnUninstall) {
   // Create a test extension.
   DictionaryValue empty_value;
   scoped_refptr<Extension> extension =
@@ -1314,19 +1318,19 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest,
   Panel* panel_other = CreatePanel(extension_app_name_other);
 
   ui_test_utils::WindowedNotificationObserver signal(
-      chrome::NOTIFICATION_BROWSER_CLOSED,
-      content::Source<Browser>(panel->browser()));
+      chrome::NOTIFICATION_PANEL_CLOSED,
+      content::Source<Panel>(panel));
   ui_test_utils::WindowedNotificationObserver signal1(
-      chrome::NOTIFICATION_BROWSER_CLOSED,
-      content::Source<Browser>(panel1->browser()));
+      chrome::NOTIFICATION_PANEL_CLOSED,
+      content::Source<Panel>(panel1));
 
   // Send unload notification on the first extension.
-  UnloadedExtensionInfo details(extension,
+  extensions::UnloadedExtensionInfo details(extension,
                                 extension_misc::UNLOAD_REASON_UNINSTALL);
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_EXTENSION_UNLOADED,
       content::Source<Profile>(browser()->profile()),
-      content::Details<UnloadedExtensionInfo>(&details));
+      content::Details<extensions::UnloadedExtensionInfo>(&details));
 
   // Wait for the panels opened by the first extension to close.
   signal.Wait();
@@ -1337,7 +1341,9 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest,
   panel_other->Close();
 }
 
-IN_PROC_BROWSER_TEST_F(PanelBrowserTest, OnBeforeUnloadOnClose) {
+// TODO(jennb): Disabled until refactored panels supports web contents (or
+// delete if onbeforeunload will not be supported.
+IN_PROC_BROWSER_TEST_F(PanelBrowserTest, DISABLED_OnBeforeUnloadOnClose) {
   PanelManager* panel_manager = PanelManager::GetInstance();
   EXPECT_EQ(0, panel_manager->num_panels()); // No panels initially.
 
@@ -1352,7 +1358,7 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, OnBeforeUnloadOnClose) {
       FilePath(FILE_PATH_LITERAL("onbeforeunload.html")));
   Panel* panel = CreatePanelWithParams(params);
   EXPECT_EQ(1, panel_manager->num_panels());
-  WebContents* web_contents = panel->browser()->GetSelectedWebContents();
+  WebContents* web_contents = panel->WebContents();
 
   // Close panel and respond to the onbeforeunload dialog with cancel. This is
   // equivalent to clicking "Stay on this page"
@@ -1376,17 +1382,20 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, OnBeforeUnloadOnClose) {
 
   // Close panel and respond to the onbeforeunload dialog with accept. This is
   // equivalent to clicking "Leave this page".
-  ui_test_utils::WindowedNotificationObserver browser_closed(
-      chrome::NOTIFICATION_BROWSER_CLOSED,
-      content::Source<Browser>(panel->browser()));
+  ui_test_utils::WindowedNotificationObserver signal(
+      chrome::NOTIFICATION_PANEL_CLOSED,
+      content::Source<Panel>(panel));
   panel->Close();
   alert = ui_test_utils::WaitForAppModalDialog();
   alert->native_dialog()->AcceptAppModalDialog();
-  browser_closed.Wait();
+  signal.Wait();
   EXPECT_EQ(0, panel_manager->num_panels());
 }
 
-IN_PROC_BROWSER_TEST_F(PanelBrowserTest, CreateWithExistingContents) {
+// http://crbug.com/126381 - should find a better notification to wait
+// for resize completion. Bounds animation could happen for all sorts of
+// reasons.
+IN_PROC_BROWSER_TEST_F(PanelBrowserTest, DISABLED_CreateWithExistingContents) {
   PanelManager::GetInstance()->enable_auto_sizing(true);
 
   // Load contents into regular tabbed browser.
@@ -1403,12 +1412,11 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, CreateWithExistingContents) {
   EXPECT_EQ(2U, BrowserList::size());
 
   // Swap tab contents over to the panel from the tabbed browser.
-  TabContentsWrapper* contents =
-      browser()->tabstrip_model()->DetachTabContentsAt(0);
-  panel_browser->tabstrip_model()->InsertTabContentsAt(
+  TabContents* contents = browser()->tab_strip_model()->DetachTabContentsAt(0);
+  panel_browser->tab_strip_model()->InsertTabContentsAt(
       0, contents, TabStripModel::ADD_NONE);
   panel_browser->SelectNumberedTab(0);
-  EXPECT_EQ(contents, panel_browser->GetSelectedTabContentsWrapper());
+  EXPECT_EQ(contents, panel_browser->GetActiveTabContents());
   EXPECT_EQ(1, PanelManager::GetInstance()->num_panels());
 
   // Ensure that the tab contents were noticed by the panel by
@@ -1419,7 +1427,7 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, CreateWithExistingContents) {
       chrome::NOTIFICATION_PANEL_BOUNDS_ANIMATIONS_FINISHED,
       content::Source<Panel>(panel));
   EXPECT_TRUE(ui_test_utils::ExecuteJavaScript(
-      panel_browser->GetSelectedWebContents()->GetRenderViewHost(),
+      panel_browser->GetActiveWebContents()->GetRenderViewHost(),
       std::wstring(),
       L"changeSize(50);"));
   enlarge.Wait();
@@ -1427,14 +1435,14 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, CreateWithExistingContents) {
 
   // Swapping tab contents back to the browser should close the panel.
   ui_test_utils::WindowedNotificationObserver signal(
-      chrome::NOTIFICATION_BROWSER_CLOSED,
-      content::Source<Browser>(panel_browser));
+      chrome::NOTIFICATION_PANEL_CLOSED,
+      content::Source<Panel>(panel));
   panel_browser->ConvertPopupToTabbedBrowser();
   signal.Wait();
   EXPECT_EQ(0, PanelManager::GetInstance()->num_panels());
 
-  Browser* tabbed_browser = BrowserList::FindTabbedBrowser(profile, false);
-  EXPECT_EQ(contents, tabbed_browser->GetSelectedTabContentsWrapper());
+  Browser* tabbed_browser = browser::FindTabbedBrowser(profile, false);
+  EXPECT_EQ(contents, tabbed_browser->GetActiveTabContents());
   tabbed_browser->window()->Close();
 }
 
@@ -1470,7 +1478,9 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, SizeClamping) {
   panel->Close();
 }
 
-IN_PROC_BROWSER_TEST_F(PanelBrowserTest, TightAutosizeAroundSingleLine) {
+// TODO(jennb): Disabled until refactored panels supports web contents.
+IN_PROC_BROWSER_TEST_F(PanelBrowserTest,
+                       DISABLED_TightAutosizeAroundSingleLine) {
   PanelManager::GetInstance()->enable_auto_sizing(true);
   // Using 0 sizes triggers auto-sizing.
   CreatePanelParams params("Panel", gfx::Rect(), SHOW_AS_ACTIVE);
@@ -1485,7 +1495,7 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, TightAutosizeAroundSingleLine) {
       chrome::NOTIFICATION_PANEL_BOUNDS_ANIMATIONS_FINISHED,
       content::Source<Panel>(panel));
   EXPECT_TRUE(ui_test_utils::ExecuteJavaScript(
-      panel->browser()->GetSelectedWebContents()->GetRenderViewHost(),
+      panel->WebContents()->GetRenderViewHost(),
       std::wstring(),
       L"document.body.innerHTML ="
       L"'<nobr>line of text and a <button>Button</button>';"));
@@ -1595,7 +1605,7 @@ class DownloadObserver : public content::DownloadManager::Observer {
  public:
   explicit DownloadObserver(Profile* profile)
       : download_manager_(
-          DownloadServiceFactory::GetForProfile(profile)->GetDownloadManager()),
+            BrowserContext::GetDownloadManager(profile)),
         saw_download_(false),
         waiting_(false) {
     download_manager_->AddObserver(this);
@@ -1708,7 +1718,7 @@ IN_PROC_BROWSER_TEST_F(PanelDownloadTest, MAYBE_DownloadNoTabbedBrowser) {
   browser()->CloseWindow();
   signal.Wait();
   ASSERT_EQ(1U, BrowserList::size());
-  ASSERT_EQ(NULL, Browser::GetTabbedBrowser(profile, false));
+  ASSERT_EQ(NULL, browser::FindTabbedBrowser(profile, false));
 
   scoped_ptr<DownloadObserver> observer(new DownloadObserver(profile));
   FilePath file(FILE_PATH_LITERAL("download-test1.lib"));
@@ -1722,19 +1732,10 @@ IN_PROC_BROWSER_TEST_F(PanelDownloadTest, MAYBE_DownloadNoTabbedBrowser) {
 
   EXPECT_EQ(2U, BrowserList::size());
 
-#if defined(OS_CHROMEOS)
-  // ChromeOS uses a download panel instead of a download shelf.
-  std::set<Browser*> original_browsers;
-  original_browsers.insert(panel_browser);
-  Browser* added = ui_test_utils::GetBrowserNotInSet(original_browsers);
-  ASSERT_TRUE(added->is_type_panel());
-  ASSERT_FALSE(added->window()->IsDownloadShelfVisible());
-#else
-  Browser* tabbed_browser = Browser::GetTabbedBrowser(profile, false);
+  Browser* tabbed_browser = browser::FindTabbedBrowser(profile, false);
   EXPECT_EQ(1, tabbed_browser->tab_count());
   ASSERT_TRUE(tabbed_browser->window()->IsDownloadShelfVisible());
   tabbed_browser->CloseWindow();
-#endif
 
   EXPECT_EQ(1, panel_browser->tab_count());
   ASSERT_FALSE(panel_browser->window()->IsDownloadShelfVisible());
@@ -1742,170 +1743,4 @@ IN_PROC_BROWSER_TEST_F(PanelDownloadTest, MAYBE_DownloadNoTabbedBrowser) {
   panel_browser->CloseWindow();
 }
 
-class PanelAndNotificationTest : public PanelBrowserTest {
- public:
-  PanelAndNotificationTest() : PanelBrowserTest() {
-  }
-
-  virtual ~PanelAndNotificationTest() {
-  }
-
-  virtual void SetUpOnMainThread() OVERRIDE {
-    // Do not use our own testing work area since desktop notification code
-    // does not have the hook up for testing work area.
-    disable_display_settings_mock();
-
-    PanelBrowserTest::SetUpOnMainThread();
-
-    g_browser_process->local_state()->SetInteger(
-        prefs::kDesktopNotificationPosition, BalloonCollection::LOWER_RIGHT);
-    balloons_ = new BalloonCollectionImpl();
-    ui_manager_.reset(NotificationUIManager::Create(
-        g_browser_process->local_state(), balloons_));
-    service_.reset(new DesktopNotificationService(browser()->profile(),
-                   ui_manager_.get()));
-  }
-
-  virtual void CleanUpOnMainThread() OVERRIDE {
-    balloons_->RemoveAll();
-    MessageLoopForUI::current()->RunAllPending();
-
-    service_.reset();
-    ui_manager_.reset();
-
-    PanelBrowserTest::CleanUpOnMainThread();
-  }
-
-  content::ShowDesktopNotificationHostMsgParams StandardTestNotification() {
-    content::ShowDesktopNotificationHostMsgParams params;
-    params.notification_id = 0;
-    params.origin = GURL("http://www.google.com");
-    params.is_html = false;
-    params.icon_url = GURL("/icon.png");
-    params.title = ASCIIToUTF16("Title");
-    params.body = ASCIIToUTF16("Text");
-    params.direction = WebKit::WebTextDirectionDefault;
-    return params;
-  }
-
-  int GetBalloonBottomPosition(Balloon* balloon) const {
-#if defined(OS_MACOSX)
-    // The position returned by the notification balloon is based on Mac's
-    // vertically inverted orientation. We need to flip it so that it can
-    // be compared against the position returned by the panel.
-    gfx::Size screen_size = gfx::Screen::GetPrimaryMonitor().size();
-    return screen_size.height() - balloon->GetPosition().y();
-#else
-    return balloon->GetPosition().y() + balloon->GetViewSize().height();
-#endif
-  }
-
-  DesktopNotificationService* service() const { return service_.get(); }
-  const BalloonCollection::Balloons& balloons() const {
-    return balloons_->GetActiveBalloons();
-  }
-
- private:
-  BalloonCollectionImpl* balloons_;  // Owned by NotificationUIManager.
-  scoped_ptr<NotificationUIManager> ui_manager_;
-  scoped_ptr<DesktopNotificationService> service_;
-};
-
-// crbug.com/118168
-#if defined(OS_MACOSX)
-#define MAYBE_NoOverlapping FAILS_NoOverlapping
-#else
-#define MAYBE_NoOverlapping NoOverlapping
-#endif
-
-IN_PROC_BROWSER_TEST_F(PanelAndNotificationTest, MAYBE_NoOverlapping) {
-  const int kPanelWidth = 200;
-  const int kShortPanelHeight = 150;
-  const int kTallPanelHeight = 200;
-
-  content::ShowDesktopNotificationHostMsgParams params =
-      StandardTestNotification();
-  EXPECT_TRUE(service()->ShowDesktopNotification(
-        params, 0, 0, DesktopNotificationService::PageNotification));
-  MessageLoopForUI::current()->RunAllPending();
-  Balloon* balloon = balloons().front();
-  int original_balloon_bottom = GetBalloonBottomPosition(balloon);
-  // Ensure that balloon width is greater than the panel width.
-  EXPECT_GT(balloon->GetViewSize().width(), kPanelWidth);
-
-  // Creating a short panel should move the notification balloon up.
-  Panel* panel1 = CreatePanelWithBounds(
-      "Panel1", gfx::Rect(0, 0, kPanelWidth, kShortPanelHeight));
-  WaitForPanelAdded(panel1);
-  int balloon_bottom_after_short_panel_created =
-      GetBalloonBottomPosition(balloon);
-  EXPECT_LT(balloon_bottom_after_short_panel_created, panel1->GetBounds().y());
-  EXPECT_LT(balloon_bottom_after_short_panel_created, original_balloon_bottom);
-
-  // Creating another tall panel should move the notification balloon further
-  // up.
-  Panel* panel2 = CreatePanelWithBounds(
-      "Panel2", gfx::Rect(0, 0, kPanelWidth, kTallPanelHeight));
-  WaitForPanelAdded(panel2);
-  int balloon_bottom_after_tall_panel_created =
-      GetBalloonBottomPosition(balloon);
-  EXPECT_LT(balloon_bottom_after_tall_panel_created, panel2->GetBounds().y());
-  EXPECT_LT(balloon_bottom_after_tall_panel_created,
-            balloon_bottom_after_short_panel_created);
-
-  // Minimizing tall panel should move the notification balloon down to the same
-  // position when short panel is first created.
-  panel2->SetExpansionState(Panel::MINIMIZED);
-  WaitForBoundsAnimationFinished(panel2);
-  int balloon_bottom_after_tall_panel_minimized =
-      GetBalloonBottomPosition(balloon);
-  EXPECT_EQ(balloon_bottom_after_short_panel_created,
-            balloon_bottom_after_tall_panel_minimized);
-
-  // Minimizing short panel should move the notification balloon further down.
-  panel1->SetExpansionState(Panel::MINIMIZED);
-  WaitForBoundsAnimationFinished(panel1);
-  int balloon_bottom_after_both_panels_minimized =
-      GetBalloonBottomPosition(balloon);
-  EXPECT_LT(balloon_bottom_after_both_panels_minimized,
-            panel1->GetBounds().y());
-  EXPECT_LT(balloon_bottom_after_both_panels_minimized,
-            panel2->GetBounds().y());
-  EXPECT_LT(balloon_bottom_after_short_panel_created,
-            balloon_bottom_after_both_panels_minimized);
-  EXPECT_LT(balloon_bottom_after_both_panels_minimized,
-            original_balloon_bottom);
-
-  // Bringing up the titlebar for tall panel should move the notification
-  // balloon up a little bit.
-  panel2->SetExpansionState(Panel::TITLE_ONLY);
-  WaitForBoundsAnimationFinished(panel2);
-  int balloon_bottom_after_tall_panel_titlebar_up =
-      GetBalloonBottomPosition(balloon);
-  EXPECT_LT(balloon_bottom_after_tall_panel_titlebar_up,
-            panel2->GetBounds().y());
-  EXPECT_LT(balloon_bottom_after_tall_panel_titlebar_up,
-            balloon_bottom_after_both_panels_minimized);
-  EXPECT_LT(balloon_bottom_after_short_panel_created,
-            balloon_bottom_after_tall_panel_titlebar_up);
-
-  // Expanding short panel should move the notification balloon further up to
-  // the same position when short panel is first created.
-  panel1->SetExpansionState(Panel::EXPANDED);
-  WaitForBoundsAnimationFinished(panel1);
-  int balloon_bottom_after_short_panel_expanded =
-      GetBalloonBottomPosition(balloon);
-  EXPECT_EQ(balloon_bottom_after_short_panel_created,
-            balloon_bottom_after_short_panel_expanded);
-
-  // Closing short panel should move the notification balloon down to the same
-  // position when tall panel brings up its titlebar.
-  CloseWindowAndWait(panel1->browser());
-  EXPECT_EQ(balloon_bottom_after_tall_panel_titlebar_up,
-            GetBalloonBottomPosition(balloon));
-
-  // Closing the remaining tall panel should move the notification balloon back
-  // to its original position.
-  CloseWindowAndWait(panel2->browser());
-  EXPECT_EQ(original_balloon_bottom, GetBalloonBottomPosition(balloon));
-}
+#endif // OS_MACOSX

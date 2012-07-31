@@ -65,6 +65,7 @@ CrasOutputStream::CrasOutputStream(const AudioParameters& params,
     : client_(NULL),
       stream_id_(0),
       samples_per_packet_(params.frames_per_buffer()),
+      bytes_per_frame_(0),
       frame_rate_(params.sample_rate()),
       num_channels_(params.channels()),
       pcm_format_(alsa_util::BitsToFormat(params.bits_per_sample())),
@@ -119,6 +120,7 @@ bool CrasOutputStream::Open() {
   int err = cras_client_create(&client_);
   if (err < 0) {
     LOG(WARNING) << "Couldn't create CRAS client.\n";
+    client_ = NULL;
     TransitionTo(kInError);
     return false;
   }
@@ -126,6 +128,7 @@ bool CrasOutputStream::Open() {
   if (err) {
     LOG(WARNING) << "Couldn't connect CRAS client.\n";
     cras_client_destroy(client_);
+    client_ = NULL;
     TransitionTo(kInError);
     return false;
   }
@@ -134,6 +137,7 @@ bool CrasOutputStream::Open() {
   if (err) {
     LOG(WARNING) << "Couldn't run CRAS client.\n";
     cras_client_destroy(client_);
+    client_ = NULL;
     TransitionTo(kInError);
     return false;
   }
@@ -148,8 +152,11 @@ void CrasOutputStream::Close() {
     return;
   }
 
-  cras_client_stop(client_);
-  cras_client_destroy(client_);
+  if (client_) {
+    cras_client_stop(client_);
+    cras_client_destroy(client_);
+    client_ = NULL;
+  }
 
   // Signal to the manager that we're closed and can be removed.
   // Should be last call in the method as it deletes "this".
@@ -195,6 +202,10 @@ void CrasOutputStream::Start(AudioSourceCallback* callback) {
     return;
   }
 
+  // Before starting the stream, save the number of bytes in a frame for use in
+  // the callback.
+  bytes_per_frame_ = cras_client_format_bytes_per_frame(audio_format);
+
   // Adding the stream will start the audio callbacks requesting data.
   int err = cras_client_add_stream(client_, &stream_id_, stream_params);
   if (err < 0) {
@@ -208,6 +219,7 @@ void CrasOutputStream::Start(AudioSourceCallback* callback) {
 
   // Set initial volume.
   cras_client_set_stream_volume(client_, stream_id_, volume_);
+
   // Done with config params.
   cras_audio_format_destroy(audio_format);
   cras_client_stream_params_destroy(stream_params);
@@ -257,20 +269,18 @@ int CrasOutputStream::StreamError(cras_client* client,
 uint32 CrasOutputStream::Render(size_t frames,
                                 uint8* buffer,
                                 const timespec* sample_ts) {
-  uint32 bytes_per_frame = cras_client_bytes_per_frame(client_, stream_id_);
   timespec latency_ts  = {0, 0};
 
   // Determine latency and pass that on to the source.
-  cras_client_calc_latency(client_, stream_id_, sample_ts, &latency_ts);
+  cras_client_calc_playback_latency(sample_ts, &latency_ts);
   uint32 latency_usec = (latency_ts.tv_sec * 1000000) +
       latency_ts.tv_nsec / 1000;
 
   uint32 frames_latency = latency_usec * frame_rate_ / 1000000;
-  uint32 bytes_latency = frames_latency * bytes_per_frame;
-  uint32 rendered = source_callback_->OnMoreData(buffer,
-      frames * bytes_per_frame,
-      AudioBuffersState(0, bytes_latency));
-  return rendered / bytes_per_frame;
+  uint32 bytes_latency = frames_latency * bytes_per_frame_;
+  uint32 rendered = source_callback_->OnMoreData(
+      buffer, frames * bytes_per_frame_, AudioBuffersState(0, bytes_latency));
+  return rendered / bytes_per_frame_;
 }
 
 void CrasOutputStream::NotifyStreamError(int err) {

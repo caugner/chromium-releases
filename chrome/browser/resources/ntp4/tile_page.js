@@ -92,9 +92,9 @@ cr.define('ntp', function() {
      */
     moveTo: function(x, y) {
       // left overrides right in LTR, and right takes precedence in RTL.
-      this.style.left = x + 'px';
-      this.style.right = x + 'px';
-      this.style.top = y + 'px';
+      this.style.left = toCssPx(x);
+      this.style.right = toCssPx(x);
+      this.style.top = toCssPx(y);
     },
 
     /**
@@ -148,8 +148,8 @@ cr.define('ntp', function() {
       }
 
       this.dragClone.hidden = false;
-      this.dragClone.style.left = (e.x - this.dragOffsetX) + 'px';
-      this.dragClone.style.top = (e.y - this.dragOffsetY) + 'px';
+      this.dragClone.style.left = toCssPx(e.x - this.dragOffsetX);
+      this.dragClone.style.top = toCssPx(e.y - this.dragOffsetY);
     },
 
     /**
@@ -184,11 +184,13 @@ cr.define('ntp', function() {
               this.firstChild.offsetLeft;
           var contentDiffY = this.dragClone.firstChild.offsetTop -
               this.firstChild.offsetTop;
-          this.dragClone.style.left = (this.gridX + this.parentNode.offsetLeft -
-              contentDiffX) + 'px';
+          this.dragClone.style.left =
+              toCssPx(this.gridX + this.parentNode.offsetLeft -
+                         contentDiffX);
           this.dragClone.style.top =
-              (this.gridY + this.parentNode.getBoundingClientRect().top -
-              contentDiffY) + 'px';
+              toCssPx(this.gridY +
+                         this.parentNode.getBoundingClientRect().top -
+                         contentDiffY);
         } else if (this.dragClone.hidden) {
           this.finalizeDrag_();
         } else {
@@ -558,7 +560,7 @@ cr.define('ntp', function() {
     /**
      * Appends a tile to the end of the tile grid.
      * @param {HTMLElement} tileElement The contents of the tile.
-     * @param {?boolean} animate If true, the append will be animated.
+     * @param {boolean} animate If true, the append will be animated.
      * @protected
      */
     appendTile: function(tileElement, animate) {
@@ -569,13 +571,13 @@ cr.define('ntp', function() {
      * Adds the given element to the tile grid.
      * @param {Node} tileElement The tile object/node to insert.
      * @param {number} index The location in the tile grid to insert it at.
-     * @param {boolean=} opt_animate If true, the tile in question will be
+     * @param {boolean} animate If true, the tile in question will be
      *     animated (other tiles, if they must reposition, do not animate).
      * @protected
      */
-    addTileAt: function(tileElement, index, opt_animate) {
+    addTileAt: function(tileElement, index, animate) {
       this.classList.remove('animating-tile-page');
-      if (opt_animate)
+      if (animate)
         tileElement.classList.add('new-tile-contents');
 
       // Make sure the index is positive and either in the the bounds of
@@ -590,7 +592,7 @@ cr.define('ntp', function() {
       this.heightChanged_();
 
       this.repositionTiles_();
-      this.fireAddedEvent(wrapperDiv, index, !!opt_animate);
+      this.fireAddedEvent(wrapperDiv, index, animate);
     },
 
     /**
@@ -984,8 +986,6 @@ cr.define('ntp', function() {
       // be 1/3 down the page.
       var numTiles = this.tileCount +
           (this.isCurrentDragTarget && !this.withinPageDrag_ ? 1 : 0);
-      // Minimum of 1 row (this can come into play when there is an app install
-      // hint hiding the webstore tile, and there are no other tiles).
       var numRows = Math.max(1, Math.ceil(numTiles / layout.numRowTiles));
       var usedHeight = layout.rowHeight * numRows;
       var newMargin = document.documentElement.clientHeight / 3 -
@@ -1008,14 +1008,13 @@ cr.define('ntp', function() {
         this.topMarginIsForWide_ = layout.wide;
       if (this.topMarginIsForWide_ != layout.wide) {
         this.animatedTopMarginPx_ += newMargin - this.topMarginPx_;
-        this.topMargin_.style.marginBottom =
-            this.animatedTopMarginPx_ + 'px';
+        this.topMargin_.style.marginBottom = toCssPx(this.animatedTopMarginPx_);
       }
 
       this.topMarginIsForWide_ = layout.wide;
       this.topMarginPx_ = newMargin;
       this.topMargin_.style.marginTop =
-          (this.topMarginPx_ - this.animatedTopMarginPx_) + 'px';
+          toCssPx(this.topMarginPx_ - this.animatedTopMarginPx_);
     },
 
     /**
@@ -1172,7 +1171,6 @@ cr.define('ntp', function() {
      * @param {Event} e A mouseover event for the drag enter.
      */
     doDragEnter: function(e) {
-
       // Applies the mask so doppleganger tiles disappear into the fog.
       this.updateMask_();
 

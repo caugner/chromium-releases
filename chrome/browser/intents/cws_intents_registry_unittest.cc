@@ -8,7 +8,7 @@
 #include "base/bind_helpers.h"
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
-#include "content/test/test_url_fetcher_factory.h"
+#include "content/public/test/test_url_fetcher_factory.h"
 #include "net/url_request/url_request_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -151,7 +151,7 @@ TEST_F(CWSIntentsRegistryTest, InvalidQuery) {
 TEST_F(CWSIntentsRegistryTest, BuildQueryURL) {
   const std::string kExpectedURL = "https://www.googleapis.com"
       "/chromewebstore/v1.1b/items/intent"
-      "?intent=action&mime_types=mime%2Ftype";
+      "?intent=action&mime_types=mime%2Ftype&start_index=0&num_results=15";
   GURL url = CWSIntentsRegistry::BuildQueryURL(ASCIIToUTF16("action"),
                                                ASCIIToUTF16("mime/type"));
 

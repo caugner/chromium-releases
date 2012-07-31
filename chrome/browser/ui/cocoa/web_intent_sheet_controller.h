@@ -25,7 +25,7 @@ class WebIntentPickerModel;
   WebIntentPickerCocoa* picker_;
 
   // Inline disposition tab contents. Weak reference.
-  TabContentsWrapper* contents_;
+  TabContents* contents_;
 
   // The intent picker data to be rendered. Weak reference.
   WebIntentPickerModel* model_;
@@ -34,6 +34,7 @@ class WebIntentPickerModel;
   scoped_nsobject<SuggestionView> suggestionView_;
   scoped_nsobject<NSButton> closeButton_;
   scoped_nsobject<NSMutableArray> intentButtons_;
+  scoped_nsobject<NSView> flipView_;
 }
 - (IBAction)installExtension:(id)sender;
 
@@ -41,7 +42,10 @@ class WebIntentPickerModel;
 - (id)initWithPicker:(WebIntentPickerCocoa*)picker;
 
 // Set the contents for inline disposition intents.
-- (void)setInlineDispositionTabContents:(TabContentsWrapper*)wrapper;
+- (void)setInlineDispositionTabContents:(TabContents*)tabContents;
+
+// Set the size of the inline disposition view.
+- (void)setInlineDispositionFrameSize:(NSSize)size;
 
 - (void)performLayoutWithModel:(WebIntentPickerModel*)model;
 

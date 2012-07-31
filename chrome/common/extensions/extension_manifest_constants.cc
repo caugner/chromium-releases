@@ -85,13 +85,17 @@ const char kPageActionPopup[] = "popup";
 const char kPageActionPopupPath[] = "path";
 const char kPageActions[] = "page_actions";
 const char kPermissions[] = "permissions";
-const char kPlatformApp[] = "platform_app";
+const char kPlatformAppBackground[] = "app.background";
+const char kPlatformAppBackgroundPage[] = "app.background.page";
+const char kPlatformAppBackgroundScripts[] = "app.background.scripts";
 const char kPlugins[] = "plugins";
 const char kPluginsPath[] = "path";
 const char kPluginsPublic[] = "public";
 const char kPublicKey[] = "key";
 const char kRequirements[] = "requirements";
 const char kRunAt[] = "run_at";
+const char kSandboxedPages[] = "sandbox.pages";
+const char kSandboxedPagesCSP[] = "sandbox.content_security_policy";
 const char kShiftKey[] = "shiftKey";
 const char kShortcutKey[] = "shortcutKey";
 const char kSignature[] = "signature";
@@ -168,8 +172,6 @@ const char kCannotClaimAllURLsInExtent[] =
     "Cannot claim all URLs in an extent.";
 const char kCannotScriptGallery[] =
     "The extensions gallery cannot be scripted.";
-const char kCannotUninstallManagedExtension[] =
-    "Attempted uninstallation of an extension that is not user-manageable.";
 const char kChromeVersionTooLow[] =
     "This extension requires * version * or greater.";
 const char kDisabledByPolicy[] =
@@ -305,6 +307,8 @@ const char kInvalidKeyBindingDictionary[] =
 const char kInvalidKeyBindingMissingPlatform[] =
     "Could not find key specification for 'command[*].*': Either specify a key "
     "for '*', or specify a default key.";
+const char kInvalidKeyBindingTooMany[] =
+    "Too many commands specified for 'commands': The maximum is *.";
 const char kInvalidKeyBindingUnknownPlatform[] =
     "Unknown platform for 'command[*]': *. Valid values are: 'windows', 'mac'"
     " 'chromeos', 'linux' and 'default'.";
@@ -391,6 +395,12 @@ const char kInvalidRequirements[] =
     "Invalid value for 'requirements'";
 const char kInvalidRunAt[] =
     "Invalid value for 'content_scripts[*].run_at'.";
+const char kInvalidSandboxedPagesList[] =
+    "Invalid value for 'sandbox.pages'.";
+const char kInvalidSandboxedPage[] =
+    "Invalid value for 'sandbox.pages[*]'.";
+const char kInvalidSandboxedPagesCSP[] =
+    "Invalid value for 'sandbox.content_security_policy'.";
 const char kInvalidSignature[] =
     "Value 'signature' is missing or invalid.";
 const char kInvalidTheme[] =
@@ -471,6 +481,8 @@ const char kPlatformAppNeedsManifestVersion2[] =
     "Platform apps need manifest_version set to >= 2";
 const char kReservedMessageFound[] =
     "Reserved key * found in message catalog.";
+const char kWebRequestConflictsWithLazyBackground[] =
+    "The 'webRequest' API cannot be used with event pages.";
 #if defined(OS_CHROMEOS)
 const char kIllegalPlugins[] =
     "Extensions cannot install plugins on Chrome OS";

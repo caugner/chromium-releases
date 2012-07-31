@@ -138,7 +138,8 @@ TEST_F(SpdySessionSpdy3Test, GoAway) {
       new TransportSocketParams(test_host_port_pair,
                                 MEDIUM,
                                 false,
-                                false));
+                                false,
+                                OnHostResolutionCallback()));
   scoped_ptr<ClientSocketHandle> connection(new ClientSocketHandle);
   EXPECT_EQ(OK, connection->Init(test_host_port_pair.ToString(),
                                  transport_params, MEDIUM, CompletionCallback(),
@@ -207,7 +208,8 @@ TEST_F(SpdySessionSpdy3Test, Ping) {
       new TransportSocketParams(test_host_port_pair,
                                 MEDIUM,
                                 false,
-                                false));
+                                false,
+                                OnHostResolutionCallback()));
   scoped_ptr<ClientSocketHandle> connection(new ClientSocketHandle);
   EXPECT_EQ(OK, connection->Init(test_host_port_pair.ToString(),
                                  transport_params, MEDIUM, CompletionCallback(),
@@ -294,7 +296,8 @@ TEST_F(SpdySessionSpdy3Test, FailedPing) {
       new TransportSocketParams(test_host_port_pair,
                                 MEDIUM,
                                 false,
-                                false));
+                                false,
+                                OnHostResolutionCallback()));
   scoped_ptr<ClientSocketHandle> connection(new ClientSocketHandle);
   EXPECT_EQ(OK, connection->Init(test_host_port_pair.ToString(),
                                  transport_params, MEDIUM, CompletionCallback(),
@@ -538,7 +541,8 @@ TEST_F(SpdySessionSpdy3Test, OnSettings) {
       new TransportSocketParams(test_host_port_pair,
                                 MEDIUM,
                                 false,
-                                false));
+                                false,
+                                OnHostResolutionCallback()));
   scoped_ptr<ClientSocketHandle> connection(new ClientSocketHandle);
   EXPECT_EQ(OK, connection->Init(test_host_port_pair.ToString(),
                                  transport_params, MEDIUM, CompletionCallback(),
@@ -621,7 +625,8 @@ TEST_F(SpdySessionSpdy3Test, CancelPendingCreateStream) {
       new TransportSocketParams(test_host_port_pair,
                                 MEDIUM,
                                 false,
-                                false));
+                                false,
+                                OnHostResolutionCallback()));
   scoped_ptr<ClientSocketHandle> connection(new ClientSocketHandle);
   EXPECT_EQ(OK, connection->Init(test_host_port_pair.ToString(),
                                  transport_params, MEDIUM, CompletionCallback(),
@@ -661,6 +666,73 @@ TEST_F(SpdySessionSpdy3Test, CancelPendingCreateStream) {
 
   // Should not crash when running the pending callback.
   MessageLoop::current()->RunAllPending();
+}
+
+TEST_F(SpdySessionSpdy3Test, SendInitialSettingsOnNewSession) {
+  SpdySessionDependencies session_deps;
+  session_deps.host_resolver->set_synchronous_mode(true);
+
+  MockRead reads[] = {
+    MockRead(SYNCHRONOUS, ERR_IO_PENDING)  // Stall forever.
+  };
+
+  SettingsMap settings;
+  const SpdySettingsIds kSpdySettingsIds1 = SETTINGS_MAX_CONCURRENT_STREAMS;
+  const SpdySettingsIds kSpdySettingsIds2 = SETTINGS_INITIAL_WINDOW_SIZE;
+  const uint32 kInitialRecvWindowSize = 10 * 1024 * 1024;
+  settings[kSpdySettingsIds1] =
+      SettingsFlagsAndValue(SETTINGS_FLAG_NONE, kInitialMaxConcurrentStreams);
+  settings[kSpdySettingsIds2] =
+      SettingsFlagsAndValue(SETTINGS_FLAG_NONE, kInitialRecvWindowSize);
+  MockConnect connect_data(SYNCHRONOUS, OK);
+  scoped_ptr<SpdyFrame> settings_frame(ConstructSpdySettings(settings));
+  MockWrite writes[] = {
+    CreateMockWrite(*settings_frame),
+  };
+  SpdySession::set_default_initial_recv_window_size(kInitialRecvWindowSize);
+
+  StaticSocketDataProvider data(
+      reads, arraysize(reads), writes, arraysize(writes));
+  data.set_connect_data(connect_data);
+  session_deps.socket_factory->AddSocketDataProvider(&data);
+
+  SSLSocketDataProvider ssl(SYNCHRONOUS, OK);
+  session_deps.socket_factory->AddSSLSocketDataProvider(&ssl);
+
+  scoped_refptr<HttpNetworkSession> http_session(
+      SpdySessionDependencies::SpdyCreateSession(&session_deps));
+
+  static const char kStreamUrl[] = "http://www.google.com/";
+  GURL url(kStreamUrl);
+
+  const std::string kTestHost("www.google.com");
+  const int kTestPort = 80;
+  HostPortPair test_host_port_pair(kTestHost, kTestPort);
+  HostPortProxyPair pair(test_host_port_pair, ProxyServer::Direct());
+
+  SpdySessionPool* spdy_session_pool(http_session->spdy_session_pool());
+  EXPECT_FALSE(spdy_session_pool->HasSession(pair));
+  SpdySessionPoolPeer pool_peer(spdy_session_pool);
+  pool_peer.EnableSendingInitialSettings(true);
+  scoped_refptr<SpdySession> session =
+      spdy_session_pool->Get(pair, BoundNetLog());
+  EXPECT_TRUE(spdy_session_pool->HasSession(pair));
+
+  scoped_refptr<TransportSocketParams> transport_params(
+      new TransportSocketParams(test_host_port_pair,
+                                MEDIUM,
+                                false,
+                                false,
+                                OnHostResolutionCallback()));
+  scoped_ptr<ClientSocketHandle> connection(new ClientSocketHandle);
+  EXPECT_EQ(OK, connection->Init(test_host_port_pair.ToString(),
+                                 transport_params, MEDIUM, CompletionCallback(),
+                                 http_session->GetTransportSocketPool(
+                                     HttpNetworkSession::NORMAL_SOCKET_POOL),
+                                 BoundNetLog()));
+  EXPECT_EQ(OK, session->InitializeWithSocket(connection.release(), false, OK));
+  MessageLoop::current()->RunAllPending();
+  EXPECT_TRUE(data.at_write_eof());
 }
 
 TEST_F(SpdySessionSpdy3Test, SendSettingsOnNewSession) {
@@ -718,7 +790,8 @@ TEST_F(SpdySessionSpdy3Test, SendSettingsOnNewSession) {
       new TransportSocketParams(test_host_port_pair,
                                 MEDIUM,
                                 false,
-                                false));
+                                false,
+                                OnHostResolutionCallback()));
   scoped_ptr<ClientSocketHandle> connection(new ClientSocketHandle);
   EXPECT_EQ(OK, connection->Init(test_host_port_pair.ToString(),
                                  transport_params, MEDIUM, CompletionCallback(),
@@ -791,9 +864,10 @@ void IPPoolingTest(bool clean_via_close_current_sessions) {
   HostPortPair test_host_port_pair(test_hosts[0].name, kTestPort);
   scoped_refptr<TransportSocketParams> transport_params(
       new TransportSocketParams(test_host_port_pair,
-                          MEDIUM,
-                          false,
-                          false));
+                                MEDIUM,
+                                false,
+                                false,
+                                OnHostResolutionCallback()));
   scoped_ptr<ClientSocketHandle> connection(new ClientSocketHandle);
   EXPECT_EQ(OK, connection->Init(test_host_port_pair.ToString(),
                                  transport_params, MEDIUM, CompletionCallback(),
@@ -804,9 +878,8 @@ void IPPoolingTest(bool clean_via_close_current_sessions) {
 
   // TODO(rtenneti): MockClientSocket::GetPeerAddress return's 0 as the port
   // number. Fix it to return port 80 and then use GetPeerAddress to AddAlias.
-  const addrinfo* address = test_hosts[0].addresses.head();
   SpdySessionPoolPeer pool_peer(spdy_session_pool);
-  pool_peer.AddAlias(address, test_hosts[0].pair);
+  pool_peer.AddAlias(test_hosts[0].addresses.front(), test_hosts[0].pair);
 
   // Flush the SpdySession::OnReadComplete() task.
   MessageLoop::current()->RunAllPending();
@@ -935,7 +1008,8 @@ TEST_F(SpdySessionSpdy3Test, NeedsCredentials) {
       new TransportSocketParams(test_host_port_pair,
                                 MEDIUM,
                                 false,
-                                false));
+                                false,
+                                OnHostResolutionCallback()));
   scoped_refptr<SOCKSSocketParams> socks_params;
   scoped_refptr<HttpProxySocketParams> http_proxy_params;
   scoped_refptr<SSLSocketParams> ssl_params(
@@ -1005,7 +1079,8 @@ TEST_F(SpdySessionSpdy3Test, SendCredentials) {
       new TransportSocketParams(test_host_port_pair,
                                 MEDIUM,
                                 false,
-                                false));
+                                false,
+                                OnHostResolutionCallback()));
   scoped_refptr<SOCKSSocketParams> socks_params;
   scoped_refptr<HttpProxySocketParams> http_proxy_params;
   scoped_refptr<SSLSocketParams> ssl_params(
@@ -1046,7 +1121,7 @@ TEST_F(SpdySessionSpdy3Test, CloseSessionOnError) {
     MockRead(SYNCHRONOUS, 0, 0)  // EOF
   };
 
-  net::CapturingBoundNetLog log(net::CapturingNetLog::kUnbounded);
+  CapturingBoundNetLog log;
 
   StaticSocketDataProvider data(reads, arraysize(reads), NULL, 0);
   data.set_connect_data(connect_data);
@@ -1073,7 +1148,8 @@ TEST_F(SpdySessionSpdy3Test, CloseSessionOnError) {
       new TransportSocketParams(test_host_port_pair,
                                 MEDIUM,
                                 false,
-                                false));
+                                false,
+                                OnHostResolutionCallback()));
   scoped_ptr<ClientSocketHandle> connection(new ClientSocketHandle);
   EXPECT_EQ(OK, connection->Init(test_host_port_pair.ToString(),
                                  transport_params, MEDIUM, CompletionCallback(),
@@ -1088,7 +1164,7 @@ TEST_F(SpdySessionSpdy3Test, CloseSessionOnError) {
   EXPECT_FALSE(spdy_session_pool->HasSession(pair));
 
   // Check that the NetLog was filled reasonably.
-  net::CapturingNetLog::EntryList entries;
+  net::CapturingNetLog::CapturedEntryList entries;
   log.GetEntries(&entries);
   EXPECT_LT(0u, entries.size());
 
@@ -1098,11 +1174,10 @@ TEST_F(SpdySessionSpdy3Test, CloseSessionOnError) {
       net::NetLog::TYPE_SPDY_SESSION_CLOSE,
       net::NetLog::PHASE_NONE);
 
-  CapturingNetLog::Entry entry = entries[pos];
-  NetLogSpdySessionCloseParameter* request_params =
-      static_cast<NetLogSpdySessionCloseParameter*>(
-          entry.extra_parameters.get());
-  EXPECT_EQ(ERR_CONNECTION_CLOSED, request_params->status());
+  CapturingNetLog::CapturedEntry entry = entries[pos];
+  int error_code = 0;
+  ASSERT_TRUE(entry.GetNetErrorCode(&error_code));
+  EXPECT_EQ(ERR_CONNECTION_CLOSED, error_code);
 }
 
 TEST_F(SpdySessionSpdy3Test, UpdateStreamsSendWindowSize) {
@@ -1152,7 +1227,8 @@ TEST_F(SpdySessionSpdy3Test, UpdateStreamsSendWindowSize) {
       new TransportSocketParams(test_host_port_pair,
                                 MEDIUM,
                                 false,
-                                false));
+                                false,
+                                OnHostResolutionCallback()));
   scoped_ptr<ClientSocketHandle> connection(new ClientSocketHandle);
   EXPECT_EQ(OK, connection->Init(test_host_port_pair.ToString(),
                                  transport_params, MEDIUM, CompletionCallback(),
@@ -1189,6 +1265,109 @@ TEST_F(SpdySessionSpdy3Test, UpdateStreamsSendWindowSize) {
                                   callback1.callback()));
 
   EXPECT_EQ(spdy_stream2->send_window_size(), window_size);
+  spdy_stream2->Cancel();
+  spdy_stream2 = NULL;
+}
+
+TEST_F(SpdySessionSpdy3Test, OutOfOrderSynStreams) {
+  // Construct the request.
+  MockConnect connect_data(SYNCHRONOUS, OK);
+  scoped_ptr<SpdyFrame> req1(ConstructSpdyGet(NULL, 0, false, 1, LOWEST));
+  scoped_ptr<SpdyFrame> req2(ConstructSpdyGet(NULL, 0, false, 3, HIGHEST));
+  MockWrite writes[] = {
+    CreateMockWrite(*req1, 2),
+    CreateMockWrite(*req2, 1),
+  };
+
+  scoped_ptr<SpdyFrame> resp1(ConstructSpdyGetSynReply(NULL, 0, 3));
+  scoped_ptr<SpdyFrame> body1(ConstructSpdyBodyFrame(3, true));
+  scoped_ptr<SpdyFrame> resp2(ConstructSpdyGetSynReply(NULL, 0, 5));
+  scoped_ptr<SpdyFrame> body2(ConstructSpdyBodyFrame(5, true));
+  MockRead reads[] = {
+    CreateMockRead(*resp1, 3),
+    CreateMockRead(*body1, 4),
+    CreateMockRead(*resp2, 5),
+    CreateMockRead(*body2, 6),
+    MockRead(ASYNC, 0, 7)  // EOF
+  };
+
+  SpdySessionDependencies session_deps;
+  session_deps.host_resolver->set_synchronous_mode(true);
+
+  StaticSocketDataProvider data(reads, arraysize(reads),
+                                writes, arraysize(writes));
+  data.set_connect_data(connect_data);
+  session_deps.socket_factory->AddSocketDataProvider(&data);
+
+  SSLSocketDataProvider ssl(SYNCHRONOUS, OK);
+  session_deps.socket_factory->AddSSLSocketDataProvider(&ssl);
+
+  scoped_refptr<HttpNetworkSession> http_session(
+      SpdySessionDependencies::SpdyCreateSession(&session_deps));
+
+  const std::string kTestHost("www.foo.com");
+  const int kTestPort = 80;
+  HostPortPair test_host_port_pair(kTestHost, kTestPort);
+  HostPortProxyPair pair(test_host_port_pair, ProxyServer::Direct());
+
+  SpdySessionPool* spdy_session_pool(http_session->spdy_session_pool());
+
+  // Create a session.
+  EXPECT_FALSE(spdy_session_pool->HasSession(pair));
+  scoped_refptr<SpdySession> session =
+      spdy_session_pool->Get(pair, BoundNetLog());
+  ASSERT_TRUE(spdy_session_pool->HasSession(pair));
+
+  scoped_refptr<TransportSocketParams> transport_params(
+      new TransportSocketParams(test_host_port_pair,
+                                MEDIUM,
+                                false,
+                                false,
+                                OnHostResolutionCallback()));
+  scoped_ptr<ClientSocketHandle> connection(new ClientSocketHandle);
+  EXPECT_EQ(OK, connection->Init(test_host_port_pair.ToString(),
+                                 transport_params, MEDIUM, CompletionCallback(),
+                                 http_session->GetTransportSocketPool(
+                                     HttpNetworkSession::NORMAL_SOCKET_POOL),
+                                 BoundNetLog()));
+  EXPECT_EQ(OK, session->InitializeWithSocket(connection.release(), false, OK));
+
+  scoped_refptr<SpdyStream> spdy_stream1;
+  TestCompletionCallback callback1;
+  GURL url1("http://www.google.com");
+  EXPECT_EQ(OK, session->CreateStream(url1, LOWEST, &spdy_stream1,
+                                      BoundNetLog(), callback1.callback()));
+  EXPECT_EQ(1u, spdy_stream1->stream_id());
+
+  scoped_refptr<SpdyStream> spdy_stream2;
+  TestCompletionCallback callback2;
+  GURL url2("http://www.google.com");
+  EXPECT_EQ(OK, session->CreateStream(url2, HIGHEST, &spdy_stream2,
+                                      BoundNetLog(), callback2.callback()));
+  EXPECT_EQ(3u, spdy_stream2->stream_id());
+
+  linked_ptr<SpdyHeaderBlock> headers(new SpdyHeaderBlock);
+  (*headers)[":method"] = "GET";
+  (*headers)[":scheme"] = url1.scheme();
+  (*headers)[":host"] = url1.host();
+  (*headers)[":path"] = url1.path();
+  (*headers)[":version"] = "HTTP/1.1";
+  spdy_stream1->set_spdy_headers(headers);
+  EXPECT_TRUE(spdy_stream1->HasUrl());
+
+  spdy_stream2->set_spdy_headers(headers);
+  EXPECT_TRUE(spdy_stream2->HasUrl());
+
+  spdy_stream1->SendRequest(false);
+  spdy_stream2->SendRequest(false);
+  MessageLoop::current()->RunAllPending();
+
+  EXPECT_EQ(1u, spdy_stream1->stream_id());
+  EXPECT_EQ(3u, spdy_stream2->stream_id());
+
+  spdy_stream1->Cancel();
+  spdy_stream1 = NULL;
+
   spdy_stream2->Cancel();
   spdy_stream2 = NULL;
 }

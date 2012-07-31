@@ -37,6 +37,7 @@ namespace content {
 
 class DOMStorageContext;
 class DownloadManager;
+class DownloadManagerDelegate;
 class GeolocationPermissionContext;
 class IndexedDBContext;
 class ResourceContext;
@@ -46,6 +47,7 @@ class SpeechRecognitionPreferences;
 // It lives on the UI thread.
 class CONTENT_EXPORT BrowserContext : public base::SupportsUserData {
  public:
+  static DownloadManager* GetDownloadManager(BrowserContext* browser_context);
   static quota::QuotaManager* GetQuotaManager(BrowserContext* browser_context);
   static DOMStorageContext* GetDOMStorageContext(
       BrowserContext* browser_context);
@@ -68,9 +70,6 @@ class CONTENT_EXPORT BrowserContext : public base::SupportsUserData {
   // across the next restart.
   static void SaveSessionState(BrowserContext* browser_context);
 
-  // Tells the HTML5 objects on this context to clear their data on destruction.
-  static void ClearLocalOnDestruction(BrowserContext* browser_context);
-
   // Tells the HTML5 objects on this context to purge any uneeded memory.
   static void PurgeMemory(BrowserContext* browser_context);
 
@@ -82,9 +81,6 @@ class CONTENT_EXPORT BrowserContext : public base::SupportsUserData {
   // Return whether this context is incognito. Default is false.
   // This doesn't belong here; http://crbug.com/89628
   virtual bool IsOffTheRecord() const = 0;
-
-  // Returns the DownloadManager associated with this context.
-  virtual content::DownloadManager* GetDownloadManager() = 0;
 
   // Returns the request context information associated with this context.  Call
   // this only on the UI thread, since it can send notifications that should
@@ -107,11 +103,18 @@ class CONTENT_EXPORT BrowserContext : public base::SupportsUserData {
   // Returns the resource context.
   virtual ResourceContext* GetResourceContext() = 0;
 
-  // Returns the geolocation permission context for this context.
+  // Returns the DownloadManagerDelegate for this context. This will be called
+  // once per context. The embedder owns the delegate and is responsible for
+  // ensuring that it outlives DownloadManager. It's valid to return NULL.
+  virtual DownloadManagerDelegate* GetDownloadManagerDelegate() = 0;
+
+  // Returns the geolocation permission context for this context. It's valid to
+  // return NULL, in which case geolocation requests will always be allowed.
   virtual GeolocationPermissionContext* GetGeolocationPermissionContext() = 0;
 
   // Returns the speech input preferences. SpeechRecognitionPreferences is a
-  // ref counted class, so callers should take a reference if needed.
+  // ref counted class, so callers should take a reference if needed. It's valid
+  // to return NULL.
   virtual SpeechRecognitionPreferences* GetSpeechRecognitionPreferences() = 0;
 
   // Returns true if the last time this context was open it was exited cleanly.

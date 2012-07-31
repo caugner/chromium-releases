@@ -6,20 +6,31 @@
 #define ASH_TEST_ASH_TEST_BASE_H_
 #pragma once
 
+#include <string>
+
 #include "ash/shell.h"
 #include "base/compiler_specific.h"
+#include "base/message_loop.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/aura/test/aura_test_helper.h"
+#include "ui/views/test/test_views_delegate.h"
 
 namespace ash {
 namespace test {
+
+class AshTestViewsDelegate : public views::TestViewsDelegate {
+ public:
+  // Overriden from TestViewsDelegate.
+  virtual content::WebContents* CreateWebContents(
+      content::BrowserContext* browser_context,
+      content::SiteInstance* site_instance) OVERRIDE;
+};
 
 class AshTestBase : public testing::Test {
  public:
   AshTestBase();
   virtual ~AshTestBase();
 
-  MessageLoopForUI* message_loop() { return helper_.message_loop(); }
+  MessageLoopForUI* message_loop() { return &message_loop_; }
 
   // testing::Test:
   virtual void SetUp() OVERRIDE;
@@ -29,11 +40,18 @@ class AshTestBase : public testing::Test {
   // and |scale|.
   void ChangeMonitorConfig(float scale, const gfx::Rect& bounds);
 
+  // Update the display configuration as given in |display_specs|.  The
+  // format of |display_spec| is a list of comma separated spec for
+  // each displays. Please refer to the comment in
+  // | aura::MonitorManager::CreateMonitorFromSpec| for the format of
+  // the display spec.
+  void UpdateMonitor(const std::string& display_specs);
+
  protected:
   void RunAllPendingInMessageLoop();
 
  private:
-  aura::test::AuraTestHelper helper_;
+  MessageLoopForUI message_loop_;
 
   DISALLOW_COPY_AND_ASSIGN(AshTestBase);
 };

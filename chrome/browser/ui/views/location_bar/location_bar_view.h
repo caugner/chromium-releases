@@ -19,17 +19,14 @@
 #include "chrome/browser/ui/views/dropdown_bar_host.h"
 #include "chrome/browser/ui/views/dropdown_bar_host_delegate.h"
 #include "chrome/browser/ui/views/extensions/extension_popup.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/rect.h"
 #include "ui/views/controls/native/native_view_host.h"
 #include "ui/views/drag_controller.h"
 
-#if defined(USE_AURA)
-#include "chrome/browser/ui/views/omnibox/omnibox_view_views.h"
-#elif defined(OS_WIN)
-#include "chrome/browser/ui/views/omnibox/omnibox_view_win.h"
-#endif
-
+class ActionBoxButtonView;
 class ChromeToMobileView;
 class CommandUpdater;
 class ContentSettingBubbleModelDelegate;
@@ -45,17 +42,14 @@ class PageActionImageView;
 class Profile;
 class SelectedKeywordView;
 class StarView;
-class TabContentsWrapper;
+class SuggestedTextView;
+class TabContents;
 class TemplateURLService;
 
 namespace views {
 class BubbleDelegateView;
 class Widget;
 }
-
-#if defined(OS_WIN) || defined(USE_AURA)
-class SuggestedTextView;
-#endif
 
 /////////////////////////////////////////////////////////////////////////////
 //
@@ -87,7 +81,7 @@ class LocationBarView : public LocationBar,
   class Delegate {
    public:
     // Should return the current tab contents.
-    virtual TabContentsWrapper* GetTabContentsWrapper() const = 0;
+    virtual TabContents* GetTabContents() const = 0;
 
     // Returns the InstantController, or NULL if there isn't one.
     virtual InstantController* GetInstant() = 0;
@@ -194,14 +188,12 @@ class LocationBarView : public LocationBar,
   // appears, not where the icons are shown).
   gfx::Point GetLocationEntryOrigin() const;
 
-#if defined(OS_WIN) || defined(USE_AURA)
   // Invoked from OmniboxViewWin to show the instant suggestion.
   void SetInstantSuggestion(const string16& text,
                             bool animate_to_complete);
 
   // Returns the current instant suggestion text.
   string16 GetInstantSuggestion() const;
-#endif
 
   // Sets whether the location entry can accept focus.
   void SetLocationEntryFocusable(bool focusable);
@@ -259,7 +251,7 @@ class LocationBarView : public LocationBar,
   virtual SkBitmap GetFavicon() const OVERRIDE;
   virtual string16 GetTitle() const OVERRIDE;
   virtual InstantController* GetInstant() OVERRIDE;
-  virtual TabContentsWrapper* GetTabContentsWrapper() const OVERRIDE;
+  virtual TabContents* GetTabContents() const OVERRIDE;
 
   // Overridden from views::View:
   virtual std::string GetClassName() const OVERRIDE;
@@ -292,8 +284,8 @@ class LocationBarView : public LocationBar,
   virtual void InvalidatePageActions() OVERRIDE;
   virtual void SaveStateToContents(content::WebContents* contents) OVERRIDE;
   virtual void Revert() OVERRIDE;
-  virtual const OmniboxView* location_entry() const OVERRIDE;
-  virtual OmniboxView* location_entry() OVERRIDE;
+  virtual const OmniboxView* GetLocationEntry() const OVERRIDE;
+  virtual OmniboxView* GetLocationEntry() OVERRIDE;
   virtual LocationBarTesting* GetLocationBarForTesting() OVERRIDE;
 
   // Overridden from LocationBarTesting:
@@ -311,16 +303,24 @@ class LocationBarView : public LocationBar,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
+  // Returns the height of the control without the top and bottom
+  // edges(i.e.  the height of the edit control inside).  If
+  // |use_preferred_size| is true this will be the preferred height,
+  // otherwise it will be the current height.
+  int GetInternalHeight(bool use_preferred_size);
+
+  // Space between items in the location bar.
+  static int GetItemPadding();
+
+  // Space between the edges and the items next to them.
+  static int GetEdgeItemPadding();
+
   // Thickness of the left and right edges of the omnibox, in normal mode.
   static const int kNormalHorizontalEdgeThickness;
   // Thickness of the top and bottom edges of the omnibox.
   static const int kVerticalEdgeThickness;
-  // Space between items in the location bar.
-  static const int kItemPadding;
   // Amount of padding built into the standard omnibox icons.
   static const int kIconInternalPadding;
-  // Space between the edges and the items next to them.
-  static const int kEdgeItemPadding;
   // Space between the edge and a bubble.
   static const int kBubbleHorizontalPadding;
 
@@ -364,7 +364,6 @@ class LocationBarView : public LocationBar,
   // Sets the visibility of view to new_vis.
   void ToggleVisibility(bool new_vis, views::View* view);
 
-#if defined(OS_WIN) || defined(USE_AURA)
 #if !defined(USE_AURA)
   // Helper for the Mouse event handlers that does all the real work.
   void OnMouseEvent(const views::MouseEvent& event, UINT msg);
@@ -373,15 +372,12 @@ class LocationBarView : public LocationBar,
   // Returns true if the suggest text is valid.
   bool HasValidSuggestText() const;
 
-#if !defined(USE_AURA)
-  // Returns |location_entry_| cast to OmniboxViewWin, or NULL if
-  // |location_entry_| is of a different type.
-  OmniboxViewWin* GetOmniboxViewWin();
-#endif
-#endif
-
   // Helper to show the first run info bubble.
   void ShowFirstRunBubbleInternal();
+
+  // Draw the background and the left border.
+  void PaintActionBoxBackground(gfx::Canvas* canvas,
+                                const gfx::Rect& content_rect);
 
   // The Autocomplete Edit field.
   scoped_ptr<OmniboxView> location_entry_;
@@ -432,11 +428,9 @@ class LocationBarView : public LocationBar,
   // Shown if the user has selected a keyword.
   SelectedKeywordView* selected_keyword_view_;
 
-#if defined(OS_WIN) || defined(USE_AURA)
   // View responsible for showing suggested text. This is NULL when there is no
   // suggested text.
   SuggestedTextView* suggested_text_view_;
-#endif
 
   // Shown if the selected url has a corresponding keyword.
   KeywordHintView* keyword_hint_view_;
@@ -444,11 +438,17 @@ class LocationBarView : public LocationBar,
   // The content setting views.
   ContentSettingViews content_setting_views_;
 
+  // The current page actions.
+  std::vector<ExtensionAction*> page_actions_;
+
   // The page action icon views.
   PageActionViews page_action_views_;
 
   // The star.
   StarView* star_view_;
+
+  // The action box button (plus).
+  ActionBoxButtonView* action_box_button_view_;
 
   // The Chrome To Mobile page action icon view.
   ChromeToMobileView* chrome_to_mobile_view_;
@@ -472,6 +472,9 @@ class LocationBarView : public LocationBar,
   // the widget so that we can draw the curved edges that attach to the toolbar
   // in the right location.
   int animation_offset_;
+
+  // Used to register for notifications received by NotificationObserver.
+  content::NotificationRegistrar registrar_;
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(LocationBarView);
 };

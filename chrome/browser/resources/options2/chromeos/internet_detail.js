@@ -22,27 +22,6 @@ cr.define('options.internet', function() {
   Constants.TYPE_VPN = 6;
 
   /*
-   * Minimum delay in milliseconds before updating controls.  Used to
-   * consolidate update requests resulting from preference update
-   * notifications.
-   * @type {Number}
-   * @const
-   */
-  var minimumUpdateContentsDelay_ = 50;
-
-  /**
-   * Time of the last request to update controls in milliseconds.
-   * @type {Number}
-   */
-  var lastContentsUpdateRequest_ = 0;
-
-  /**
-   * Time of the last update to the controls in milliseconds.
-   * @type {Number}
-   */
-  var lastContentsUpdate_ = 0;
-
-  /*
    * Helper function to set hidden attribute for elements matching a selector.
    * @param {string} selector CSS selector for extracting a list of elements.
    * @param {bool} hidden New hidden value.
@@ -67,31 +46,7 @@ cr.define('options.internet', function() {
    * @param {Event} e The update event.
    */
   function handlePrefUpdate(e) {
-    var now = new Date();
-    requestUpdateControls(now.getTime());
-  }
-
-  /**
-   * Throttles the frequency of updating controls to accelerate loading of the
-   * page.
-   * @param {Number} when Timestamp for the update request.
-   */
-  function requestUpdateControls(when) {
-    if (when < lastContentsUpdate_)
-      return;
-    var now = new Date();
-    var time = now.getTime();
-    if (!lastContentsUpdateRequest_)
-      lastContentsUpdateRequest_ = time;
-    var elapsed = time - lastContentsUpdateRequest_;
-    if (elapsed > minimumUpdateContentsDelay_) {
-      DetailsInternetPage.getInstance().updateControls();
-    } else {
-      setTimeout(function() {
-        requestUpdateControls(when);
-      }, minimumUpdateContentsDelay_);
-    }
-    lastContentsUpdateRequest_ = time;
+    DetailsInternetPage.getInstance().updateControls();
   }
 
   /////////////////////////////////////////////////////////////////////////////
@@ -126,16 +81,16 @@ cr.define('options.internet', function() {
     initializePage: function() {
       OptionsPage.prototype.initializePage.call(this);
       options.internet.CellularPlanElement.decorate($('plan-list'));
-      this.initializePageContents_();
-      this.showNetworkDetails_();
+      var params = parseQueryParams(window.location);
+      this.initializePageContents_(params);
+      this.showNetworkDetails_(params);
     },
 
     /**
      * Auto-activates the network details dialog if network information
      * is included in the URL.
      */
-    showNetworkDetails_: function() {
-      var params = parseQueryParams(window.location);
+    showNetworkDetails_: function(params) {
       var servicePath = params.servicePath;
       var networkType = params.networkType;
       if (!servicePath || !servicePath.length ||
@@ -148,7 +103,7 @@ cr.define('options.internet', function() {
     /**
      * Initializes the contents of the page.
      */
-    initializePageContents_: function() {
+    initializePageContents_: function(params) {
       $('details-internet-dismiss').addEventListener('click', function(event) {
         DetailsInternetPage.setDetails();
       });
@@ -169,7 +124,8 @@ cr.define('options.internet', function() {
       });
 
       $('buyplan-details').addEventListener('click', function(event) {
-        chrome.send('buyDataPlan');
+        var data = $('connection-state').data;
+        chrome.send('buyDataPlan', [String(data.servicePath)]);
         OptionsPage.closeOverlay();
       });
 
@@ -333,10 +289,6 @@ cr.define('options.internet', function() {
      * @private
      */
     updateControls: function() {
-      // Record time of the update to throttle future updates.
-      var now = new Date();
-      lastContentsUpdate_ = now.getTime();
-
       // Only show ipconfig section if network is connected OR if nothing on
       // this device is connected. This is so that you can fix the ip configs
       // if you can't connect to any network.
@@ -347,10 +299,15 @@ cr.define('options.internet', function() {
       // Network type related.
       updateHidden('#details-internet-page .cellular-details', !this.cellular);
       updateHidden('#details-internet-page .wifi-details', !this.wireless);
+      updateHidden('#details-internet-page .wimax-details', !this.wimax);
       updateHidden('#details-internet-page .vpn-details', !this.vpn);
       updateHidden('#details-internet-page .proxy-details', !this.showProxy);
-      /* Network information merged into the Wifi tab for wireless networks. */
-      updateHidden('#details-internet-page .network-details', this.wireless);
+      /* Network information merged into the Wifi tab for wireless networks
+         unless the option is set for enabling a static IP configuration. */
+      updateHidden('#details-internet-page .network-details',
+                   this.wireless && !this.showStaticIPConfig);
+      updateHidden('#details-internet-page .wifi-network-setting',
+                   this.showStaticIPConfig);
 
       // Cell plan related.
       $('plan-list').hidden = this.cellplanloading;
@@ -368,12 +325,17 @@ cr.define('options.internet', function() {
                    !this.cellular || !this.gsm);
       updateHidden('#details-internet-page .apn-details-view', true);
 
-      // Password and shared.
+      // Wifi - Password and shared.
       updateHidden('#details-internet-page #password-details',
                    !this.wireless || !this.password);
-      updateHidden('#details-internet-page #shared-network', !this.shared);
+      updateHidden('#details-internet-page #wifi-shared-network',
+          !this.shared);
       updateHidden('#details-internet-page #prefer-network',
                    !this.showPreferred);
+
+      // WiMAX.
+      updateHidden('#details-internet-page #wimax-shared-network',
+        !this.shared);
 
       // Proxy
       this.updateProxyBannerVisibility_();
@@ -403,7 +365,7 @@ cr.define('options.internet', function() {
         bannerDiv.hidden = false;
         // controlledBy must match strings loaded in proxy_handler.cc and
         // set in proxy_cros_settings_provider.cc.
-        $('banner-text').textContent = localStrings.getString(controlledBy);
+        $('banner-text').textContent = loadTimeData.getString(controlledBy);
       }
     },
 
@@ -570,6 +532,10 @@ cr.define('options.internet', function() {
       chrome.send('setAutoConnect',
                   [String(servicePath),
                    $('auto-connect-network-wifi').checked ? 'true' : 'false']);
+    } else if (data.type == Constants.TYPE_WIMAX) {
+      chrome.send('setAutoConnect',
+          [String(servicePath),
+          $('auto-connect-network-wimax').checked ? 'true' : 'false']);
     } else if (data.type == Constants.TYPE_CELLULAR) {
       chrome.send('setAutoConnect',
                   [String(servicePath),
@@ -594,7 +560,7 @@ cr.define('options.internet', function() {
     var statusKey = data.connected ? 'networkConnected' :
                                      'networkNotConnected';
     $('network-details-subtitle-status').textContent =
-        localStrings.getString(statusKey);
+        loadTimeData.getString(statusKey);
     var typeKey = null;
     switch (data.type) {
     case Constants.TYPE_ETHERNET:
@@ -602,6 +568,9 @@ cr.define('options.internet', function() {
       break;
     case Constants.TYPE_WIFI:
       typeKey = 'wifiTitle';
+      break;
+    case Constants.TYPE_WIMAX:
+      typeKey = 'wimaxTitle';
       break;
     case Constants.TYPE_CELLULAR:
       typeKey = 'cellularTitle';
@@ -613,7 +582,7 @@ cr.define('options.internet', function() {
     var typeLabel = $('network-details-subtitle-type');
     var typeSeparator = $('network-details-subtitle-separator');
     if (typeKey) {
-      typeLabel.textContent = localStrings.getString(typeKey);
+      typeLabel.textContent = loadTimeData.getString(typeKey);
       typeLabel.hidden = false;
       typeSeparator.hidden = false;
     } else {
@@ -638,6 +607,7 @@ cr.define('options.internet', function() {
     detailsPage.connecting = data.connecting;
     detailsPage.connected = data.connected;
     detailsPage.showProxy = data.showProxy;
+    detailsPage.showStaticIPConfig = data.showStaticIPConfig;
     $('connection-state').textContent = data.connectionState;
 
     var inetAddress = '';
@@ -670,24 +640,24 @@ cr.define('options.internet', function() {
     ipConfigList.autoExpands = true;
     var model = new ArrayDataModel([]);
     model.push({
-      'property': 'inetAddress',
-      'name': localStrings.getString('inetAddress'),
-      'value': inetAddress,
+      property: 'inetAddress',
+      name: loadTimeData.getString('inetAddress'),
+      value: inetAddress,
     });
     model.push({
-      'property': 'inetSubnetAddress',
-      'name': localStrings.getString('inetSubnetAddress'),
-      'value': inetSubnetAddress,
+      property: 'inetSubnetAddress',
+      name: loadTimeData.getString('inetSubnetAddress'),
+      value: inetSubnetAddress,
     });
     model.push({
-      'property': 'inetGateway',
-      'name': localStrings.getString('inetGateway'),
-      'value': inetGateway,
+      property: 'inetGateway',
+      name: loadTimeData.getString('inetGateway'),
+      value: inetGateway,
     });
     model.push({
-      'property': 'inetDns',
-      'name': localStrings.getString('inetDns'),
-      'value': inetDns,
+      property: 'inetDns',
+      name: loadTimeData.getString('inetDns'),
+      value: inetDns,
     });
     ipConfigList.dataModel = model;
 
@@ -730,6 +700,7 @@ cr.define('options.internet', function() {
       detailsPage.ethernet = false;
       detailsPage.cellular = false;
       detailsPage.gsm = false;
+      detailsPage.wimax = false;
       detailsPage.shared = data.shared;
       $('wifi-connection-state').textContent = data.connectionState;
       $('wifi-ssid').textContent = data.ssid;
@@ -750,11 +721,11 @@ cr.define('options.internet', function() {
         $('wifi-security-entry').hidden = true;
       }
       // Frequency is in MHz.
-      var frequency = localStrings.getString('inetFrequencyFormat');
+      var frequency = loadTimeData.getString('inetFrequencyFormat');
       frequency = frequency.replace('$1', data.frequency);
       $('wifi-frequency').textContent = frequency;
       // Signal strength as percentage.
-      var signalStrength = localStrings.getString('inetSignalStrengthFormat');
+      var signalStrength = loadTimeData.getString('inetSignalStrengthFormat');
       signalStrength = signalStrength.replace('$1', data.strength);
       $('wifi-signal-strength').textContent = signalStrength;
       if (data.hardwareAddress) {
@@ -769,6 +740,29 @@ cr.define('options.internet', function() {
       $('auto-connect-network-wifi').checked = data.autoConnect.value;
       $('auto-connect-network-wifi').disabled = !data.remembered;
       detailsPage.password = data.encrypted;
+    } else if (data.type == Constants.TYPE_WIMAX) {
+      OptionsPage.showTab($('wimax-network-nav-tab'));
+      detailsPage.wimax = true;
+      detailsPage.wireless = false;
+      detailsPage.vpn = false;
+      detailsPage.ethernet = false;
+      detailsPage.cellular = false;
+      detailsPage.gsm = false;
+      detailsPage.shared = data.shared;
+      detailsPage.showPreferred = data.showPreferred;
+      $('wimax-connection-state').textContent = data.connectionState;
+      $('auto-connect-network-wimax').checked = data.autoConnect.value;
+      $('auto-connect-network-wimax').disabled = !data.remembered;
+      if (data.identity) {
+        $('wimax-eap-identity').textContent = data.identity;
+        $('wimax-eap-identity-entry').hidden = false;
+      } else {
+        $('wimax-eap-identity-entry').hidden = true;
+      }
+      // Signal strength as percentage.
+      var signalStrength = loadTimeData.getString('inetSignalStrengthFormat');
+      signalStrength = signalStrength.replace('$1', data.strength);
+      $('wimax-signal-strength').textContent = signalStrength;
     } else if (data.type == Constants.TYPE_CELLULAR) {
       if (!data.gsm)
         OptionsPage.showTab($('cellular-plan-nav-tab'));
@@ -776,6 +770,7 @@ cr.define('options.internet', function() {
         OptionsPage.showTab($('cellular-conn-nav-tab'));
       detailsPage.ethernet = false;
       detailsPage.wireless = false;
+      detailsPage.wimax = false;
       detailsPage.vpn = false;
       detailsPage.cellular = true;
       $('service-name').textContent = data.serviceName;
@@ -866,6 +861,7 @@ cr.define('options.internet', function() {
     } else if (data.type == Constants.TYPE_VPN) {
       OptionsPage.showTab($('vpn-nav-tab'));
       detailsPage.wireless = false;
+      detailsPage.wimax = false;
       detailsPage.vpn = true;
       detailsPage.ethernet = false;
       detailsPage.cellular = false;
@@ -878,6 +874,7 @@ cr.define('options.internet', function() {
       OptionsPage.showTab($('internet-nav-tab'));
       detailsPage.ethernet = true;
       detailsPage.wireless = false;
+      detailsPage.wimax = false;
       detailsPage.vpn = false;
       detailsPage.cellular = false;
       detailsPage.gsm = false;

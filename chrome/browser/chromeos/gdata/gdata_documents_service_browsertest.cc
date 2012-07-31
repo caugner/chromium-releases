@@ -30,7 +30,7 @@ class GDataTest : public InProcessBrowserTest {
     ASSERT_TRUE(gdata_test_server_.Start());
     service_.reset(new gdata::DocumentsService);
     service_->Initialize(browser()->profile());
-    service_->gdata_auth_service()->set_oauth2_auth_token_for_testing(
+    service_->auth_service_for_testing()->set_oauth2_auth_token_for_testing(
         net::TestServer::kGDataAuthToken);
   }
 
@@ -112,6 +112,7 @@ IN_PROC_BROWSER_TEST_F(GDataTest, GetDocuments) {
       gdata_test_server_.GetURL("files/chromeos/gdata/root_feed.json"),
       0,  // start_changestamp
       std::string(),  // search string
+      std::string(),  // directory resource ID
       base::Bind(&TestGetDocumentsCallback, &result, &result_data));
   ui_test_utils::RunMessageLoop();
 
@@ -136,6 +137,7 @@ IN_PROC_BROWSER_TEST_F(GDataTest, GetDocumentsFailure) {
       gdata_test_server_.GetURL("files/chromeos/gdata/testfile.txt"),
       0,  // start_changestamp
       std::string(),  // search string
+      std::string(),  // directory resource ID
       base::Bind(&TestGetDocumentsCallback, &result, &result_data));
   ui_test_utils::RunMessageLoop();
 

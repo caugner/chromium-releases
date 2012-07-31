@@ -7,6 +7,7 @@
 #include "base/json/json_reader.h"
 #include "base/json/string_escape.h"
 #include "base/logging.h"
+#include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
@@ -50,9 +51,6 @@ bool SpellingServiceClient::RequestTextCheck(
     const string16& text,
     const TextCheckCompleteCallback& callback) {
   DCHECK(type == SUGGEST || type == SPELLCHECK);
-  net::URLRequestContextGetter* context = profile->GetRequestContext();
-  if (!context)
-    return false;
   std::string locale = profile->GetPrefs()->GetString(
       prefs::kSpellCheckDictionary);
   char language[ULOC_LANG_CAPACITY] = ULOC_ENGLISH;
@@ -74,6 +72,8 @@ bool SpellingServiceClient::RequestTextCheck(
     uloc_getLanguage(id, language, arraysize(language), &error);
     country = uloc_getISO3Country(id);
   }
+  if (type == SPELLCHECK && base::strcasecmp(language, ULOC_ENGLISH))
+    return false;
 
   // Format the JSON request to be sent to the Spelling service.
   std::string encoded_text;
@@ -101,19 +101,20 @@ bool SpellingServiceClient::RequestTextCheck(
   static const char kSpellingServiceURL[] = SPELLING_SERVICE_URL;
   GURL url = GURL(kSpellingServiceURL);
   fetcher_.reset(CreateURLFetcher(url));
-  fetcher_->SetRequestContext(context);
+  fetcher_->SetRequestContext(profile->GetRequestContext());
   fetcher_->SetUploadData("application/json", request);
   fetcher_->SetLoadFlags(
       net::LOAD_DO_NOT_SEND_COOKIES | net::LOAD_DO_NOT_SAVE_COOKIES);
   fetcher_->Start();
   tag_ = tag;
+  text_ = text;
   callback_ = callback;
   return true;
 }
 
 void SpellingServiceClient::OnURLFetchComplete(
-    const content::URLFetcher* source) {
-  scoped_ptr<content::URLFetcher> clean_up_fetcher(fetcher_.release());
+    const net::URLFetcher* source) {
+  scoped_ptr<net::URLFetcher> clean_up_fetcher(fetcher_.release());
   bool success = false;
   std::vector<SpellCheckResult> results;
   if (source->GetResponseCode() / 100 == 2) {
@@ -121,11 +122,11 @@ void SpellingServiceClient::OnURLFetchComplete(
     source->GetResponseAsString(&data);
     success = ParseResponse(data, &results);
   }
-  callback_.Run(tag_, success, results);
+  callback_.Run(tag_, success, text_, results);
 }
 
-content::URLFetcher* SpellingServiceClient::CreateURLFetcher(const GURL& url) {
-  return content::URLFetcher::Create(url, content::URLFetcher::POST, this);
+net::URLFetcher* SpellingServiceClient::CreateURLFetcher(const GURL& url) {
+  return content::URLFetcher::Create(url, net::URLFetcher::POST, this);
 }
 
 bool SpellingServiceClient::ParseResponse(

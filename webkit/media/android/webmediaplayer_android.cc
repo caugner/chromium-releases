@@ -13,10 +13,14 @@
 #include "base/utf_string_conversions.h"
 #include "media/base/android/media_player_bridge.h"
 #include "net/base/mime_util.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebMediaPlayerClient.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebCookieJar.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebRect.h"
+#include "webkit/media/android/stream_texture_factory_android.h"
+#include "webkit/media/android/webmediaplayer_manager_android.h"
 #include "webkit/media/android/webmediaplayer_proxy_android.h"
 #include "webkit/media/webmediaplayer_util.h"
 #include "webkit/media/webvideoframe_impl.h"
@@ -33,6 +37,9 @@ using media::MediaPlayerBridge;
 using media::VideoFrame;
 using webkit_media::WebVideoFrameImpl;
 
+// TODO(qinmin): Figure out where we should define this more appropriately
+static const uint32 kGLTextureExternalOES = 0x8D65;
+
 namespace webkit_media {
 
 // Because we create the media player lazily on android, the duration of the
@@ -47,37 +54,56 @@ static const float kTemporaryDuration = 100.0f;
 bool WebMediaPlayerAndroid::incognito_mode_ = false;
 
 WebMediaPlayerAndroid::WebMediaPlayerAndroid(
+    WebKit::WebFrame* frame,
     WebMediaPlayerClient* client,
-    WebKit::WebCookieJar* cookie_jar)
-    : client_(client),
+    WebKit::WebCookieJar* cookie_jar,
+    webkit_media::WebMediaPlayerManagerAndroid* manager,
+    webkit_media::StreamTextureFactory* factory)
+    : frame_(frame),
+      client_(client),
       buffered_(1u),
       video_frame_(new WebVideoFrameImpl(VideoFrame::CreateEmptyFrame())),
-      proxy_(new WebMediaPlayerProxyAndroid(base::MessageLoopProxy::current(),
+      main_loop_(MessageLoop::current()),
+      proxy_(new WebMediaPlayerProxyAndroid(main_loop_->message_loop_proxy(),
                                             AsWeakPtr())),
       prepared_(false),
       duration_(0),
       pending_seek_(0),
       seeking_(false),
       playback_completed_(false),
-      buffered_bytes_(0),
+      did_loading_progress_(false),
       cookie_jar_(cookie_jar),
+      manager_(manager),
       pending_play_event_(false),
       network_state_(WebMediaPlayer::NetworkStateEmpty),
-      ready_state_(WebMediaPlayer::ReadyStateHaveNothing) {
-  video_frame_.reset(new WebVideoFrameImpl(VideoFrame::CreateEmptyFrame()));
+      ready_state_(WebMediaPlayer::ReadyStateHaveNothing),
+      texture_id_(0),
+      stream_id_(0),
+      needs_establish_peer_(true),
+      stream_texture_factory_(factory) {
+  main_loop_->AddDestructionObserver(this);
+  if (manager_)
+    player_id_ = manager_->RegisterMediaPlayer(this);
+  if (stream_texture_factory_.get())
+    stream_texture_proxy_.reset(stream_texture_factory_->CreateProxy());
 }
 
 WebMediaPlayerAndroid::~WebMediaPlayerAndroid() {
-  if (media_player_.get()) {
-    media_player_->Stop();
-  }
+  if (manager_)
+    manager_->UnregisterMediaPlayer(player_id_);
+
+  if (main_loop_)
+    main_loop_->RemoveDestructionObserver(this);
 }
 
 void WebMediaPlayerAndroid::InitIncognito(bool incognito_mode) {
   incognito_mode_ = incognito_mode;
 }
 
-void WebMediaPlayerAndroid::load(const WebURL& url) {
+void WebMediaPlayerAndroid::load(const WebURL& url, CORSMode cors_mode) {
+  if (cors_mode != CORSModeUnspecified)
+    NOTIMPLEMENTED() << "No CORS support";
+
   url_ = url;
 
   UpdateNetworkState(WebMediaPlayer::NetworkStateLoading);
@@ -264,8 +290,10 @@ float WebMediaPlayerAndroid::maxTimeSeekable() const {
   return duration();
 }
 
-unsigned long long WebMediaPlayerAndroid::bytesLoaded() const {
-  return buffered_bytes_;
+bool WebMediaPlayerAndroid::didLoadingProgress() const {
+  bool ret = did_loading_progress_;
+  did_loading_progress_ = false;
+  return ret;
 }
 
 unsigned long long WebMediaPlayerAndroid::totalBytes() const {
@@ -285,6 +313,10 @@ void WebMediaPlayerAndroid::paint(WebKit::WebCanvas* canvas,
 }
 
 bool WebMediaPlayerAndroid::hasSingleSecurityOrigin() const {
+  return false;
+}
+
+bool WebMediaPlayerAndroid::didPassCORSAccessCheck() const {
   return false;
 }
 
@@ -371,11 +403,7 @@ void WebMediaPlayerAndroid::OnPlaybackComplete() {
 
 void WebMediaPlayerAndroid::OnBufferingUpdate(int percentage) {
   buffered_[0].end = duration() * percentage / 100;
-  // Implement a trick here to fake progress event, as WebKit checks
-  // consecutive bytesLoaded() to see if any progress made.
-  // See HTMLMediaElement::progressEventTimerFired.
-  // TODO(qinmin): need a method to calculate the buffered bytes.
-  buffered_bytes_++;
+  did_loading_progress_ = true;
 }
 
 void WebMediaPlayerAndroid::OnSeekComplete() {
@@ -429,9 +457,24 @@ void WebMediaPlayerAndroid::UpdateReadyState(
   client_->readyStateChanged();
 }
 
-void WebMediaPlayerAndroid::SetVideoSurface(jobject j_surface) {
-  if (media_player_.get())
-    media_player_->SetVideoSurface(j_surface);
+void WebMediaPlayerAndroid::ReleaseMediaResources() {
+  // Pause the media player first.
+  pause();
+  client_->playbackStateChanged();
+
+  if (media_player_.get()) {
+    // Save the current media player status.
+    pending_seek_ = currentTime();
+    duration_ = duration();
+
+    media_player_.reset();
+    needs_establish_peer_ = true;
+  }
+  prepared_ = false;
+}
+
+bool WebMediaPlayerAndroid::IsInitialized() const {
+  return (media_player_ != NULL);
 }
 
 void WebMediaPlayerAndroid::InitializeMediaPlayer() {
@@ -442,10 +485,13 @@ void WebMediaPlayerAndroid::InitializeMediaPlayer() {
 
   std::string cookies;
   if (cookie_jar_ != NULL) {
-    WebURL url(url_);
-    cookies = UTF16ToUTF8(cookie_jar_->cookies(url, url));
+    WebURL first_party_url(frame_->document().firstPartyForCookies());
+    cookies = UTF16ToUTF8(cookie_jar_->cookies(url_, first_party_url));
   }
   media_player_->SetDataSource(url_.spec(), cookies, incognito_mode_);
+
+  if (manager_)
+    manager_->RequestMediaResources(player_id_);
 
   media_player_->Prepare(
       base::Bind(&WebMediaPlayerProxyAndroid::MediaInfoCallback, proxy_),
@@ -457,6 +503,16 @@ void WebMediaPlayerAndroid::InitializeMediaPlayer() {
 
 void WebMediaPlayerAndroid::PlayInternal() {
   CHECK(prepared_);
+
+  if (hasVideo() && stream_texture_factory_.get()) {
+    if (!stream_id_)
+      CreateStreamTexture();
+
+    if (needs_establish_peer_) {
+      stream_texture_factory_->EstablishPeer(stream_id_, player_id_);
+      needs_establish_peer_ = false;
+    }
+  }
 
   if (paused())
     media_player_->Start(base::Bind(
@@ -475,12 +531,53 @@ void WebMediaPlayerAndroid::SeekInternal(float seconds) {
       &WebMediaPlayerProxyAndroid::SeekCompleteCallback, proxy_));
 }
 
+void WebMediaPlayerAndroid::CreateStreamTexture() {
+  DCHECK(!stream_id_);
+  DCHECK(!texture_id_);
+  stream_id_ = stream_texture_factory_->CreateStreamTexture(&texture_id_);
+  if (texture_id_)
+    video_frame_.reset(new WebVideoFrameImpl(VideoFrame::WrapNativeTexture(
+        texture_id_,
+        kGLTextureExternalOES,
+        texture_size_.width,
+        texture_size_.height,
+        base::TimeDelta(),
+        base::TimeDelta(),
+        base::Bind(&WebMediaPlayerAndroid::DestroyStreamTexture,
+                   base::Unretained(this)))));
+}
+
+void WebMediaPlayerAndroid::DestroyStreamTexture() {
+  DCHECK(stream_id_);
+  DCHECK(texture_id_);
+  stream_texture_factory_->DestroyStreamTexture(texture_id_);
+  texture_id_ = 0;
+  stream_id_ = 0;
+}
+
+void WebMediaPlayerAndroid::WillDestroyCurrentMessageLoop() {
+  manager_ = NULL;
+  main_loop_ = NULL;
+}
+
 WebVideoFrame* WebMediaPlayerAndroid::getCurrentFrame() {
+  if (!stream_texture_proxy_->IsInitialized() && stream_id_) {
+    stream_texture_proxy_->Initialize(
+        stream_id_, video_frame_->width(), video_frame_->height());
+  }
+
   return video_frame_.get();
 }
 
 void WebMediaPlayerAndroid::putCurrentFrame(
     WebVideoFrame* web_video_frame) {
+}
+
+// This gets called both on compositor and main thread.
+void WebMediaPlayerAndroid::setStreamTextureClient(
+    WebKit::WebStreamTextureClient* client) {
+  if (stream_texture_proxy_.get())
+    stream_texture_proxy_->SetClient(client);
 }
 
 }  // namespace webkit_media

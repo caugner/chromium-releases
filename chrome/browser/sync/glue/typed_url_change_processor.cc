@@ -15,10 +15,10 @@
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_service.h"
-#include "sync/internal_api/change_record.h"
-#include "sync/internal_api/read_node.h"
-#include "sync/internal_api/write_node.h"
-#include "sync/internal_api/write_transaction.h"
+#include "sync/internal_api/public/change_record.h"
+#include "sync/internal_api/public/read_node.h"
+#include "sync/internal_api/public/write_node.h"
+#include "sync/internal_api/public/write_transaction.h"
 #include "sync/protocol/typed_url_specifics.pb.h"
 #include "sync/syncable/syncable.h"  // TODO(tim): Investigating bug 121587.
 
@@ -92,9 +92,9 @@ void TypedUrlChangeProcessor::HandleURLsModified(
   for (history::URLRows::iterator url = details->changed_urls.begin();
        url != details->changed_urls.end(); ++url) {
     if (url->typed_count() > 0) {
-      // Exit if we were unable to update the sync node.
-      if (!CreateOrUpdateSyncNode(*url, &trans))
-        return;
+      // If there were any errors updating the sync node, just ignore them and
+      // continue on to process the next URL.
+      CreateOrUpdateSyncNode(*url, &trans);
     }
   }
 }
@@ -104,17 +104,15 @@ bool TypedUrlChangeProcessor::CreateOrUpdateSyncNode(
   DCHECK_GT(url.typed_count(), 0);
   // Get the visits for this node.
   history::VisitVector visit_vector;
-  if (!model_associator_->FixupURLAndGetVisits(
-          history_backend_, &url, &visit_vector)) {
-    error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
-        "Could not get the url's visits.");
+  if (!model_associator_->FixupURLAndGetVisits(&url, &visit_vector)) {
+    DLOG(ERROR) << "Could not load visits for url: " << url.url();
     return false;
   }
 
   sync_api::ReadNode typed_url_root(trans);
   if (typed_url_root.InitByTagLookup(kTypedUrlTag) !=
           sync_api::BaseNode::INIT_OK) {
-    error_handler()->OnUnrecoverableError(FROM_HERE,
+    error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
         "Server did not create the top-level typed_url node. We "
          "might be running against an out-of-date server.");
     return false;
@@ -146,26 +144,32 @@ bool TypedUrlChangeProcessor::CreateOrUpdateSyncNode(
           "Could not InitByIdLookup in CreateOrUpdateSyncNode, "
           " Cryptographer thinks typed urls not encrypted, and CanDecrypt"
           " failed.");
+      LOG(ERROR) << "Case 1.";
     } else if (agreement && can_decrypt) {
       error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
           "Could not InitByIdLookup on CreateOrUpdateSyncNode, "
           " Cryptographer thinks typed urls are encrypted, and CanDecrypt"
           " succeeded (?!), but DecryptIfNecessary failed.");
+      LOG(ERROR) << "Case 2.";
     } else if (agreement) {
       error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
           "Could not InitByIdLookup on CreateOrUpdateSyncNode, "
           " Cryptographer thinks typed urls are encrypted, but CanDecrypt"
           " failed.");
+      LOG(ERROR) << "Case 3.";
     } else {
       error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
           "Could not InitByIdLookup on CreateOrUpdateSyncNode, "
           " Cryptographer thinks typed urls not encrypted, but CanDecrypt"
           " succeeded (super weird, btw)");
+      LOG(ERROR) << "Case 4.";
     }
   } else {
     sync_api::WriteNode create_node(trans);
-    if (!create_node.InitUniqueByCreation(syncable::TYPED_URLS,
-                                          typed_url_root, tag)) {
+    sync_api::WriteNode::InitUniqueByCreationResult result =
+        create_node.InitUniqueByCreation(syncable::TYPED_URLS,
+                                         typed_url_root, tag);
+    if (result != sync_api::WriteNode::INIT_SUCCESS) {
       error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
           "Failed to create typed_url sync node.");
       return false;
@@ -180,6 +184,14 @@ bool TypedUrlChangeProcessor::CreateOrUpdateSyncNode(
 void TypedUrlChangeProcessor::HandleURLsDeleted(
     history::URLsDeletedDetails* details) {
   sync_api::WriteTransaction trans(FROM_HERE, share_handle());
+
+  // Ignore archivals (we don't want to sync them as deletions, to avoid
+  // extra traffic up to the server, and also to make sure that a client with
+  // a bad clock setting won't go on an archival rampage and delete all
+  // history from every client). The server will gracefully age out the sync DB
+  // entries when they've been idle for long enough.
+  if (details->archived)
+    return;
 
   if (details->all_history) {
     if (!model_associator_->DeleteAllNodes(&trans)) {
@@ -240,7 +252,7 @@ void TypedUrlChangeProcessor::ApplyChangesFromSyncModel(
   sync_api::ReadNode typed_url_root(trans);
   if (typed_url_root.InitByTagLookup(kTypedUrlTag) !=
           sync_api::BaseNode::INIT_OK) {
-    error_handler()->OnUnrecoverableError(FROM_HERE,
+    error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
         "TypedUrl root node lookup failed.");
     return;
   }

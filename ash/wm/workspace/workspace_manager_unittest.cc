@@ -30,7 +30,7 @@ namespace internal {
 
 class WorkspaceManagerTest : public test::AshTestBase {
  public:
-  WorkspaceManagerTest() {}
+  WorkspaceManagerTest() : manager_(NULL) {}
   virtual ~WorkspaceManagerTest() {}
 
   aura::Window* CreateTestWindowUnparented() {
@@ -51,7 +51,9 @@ class WorkspaceManagerTest : public test::AshTestBase {
   }
 
   aura::Window* GetViewport() {
-    return Shell::GetInstance()->GetContainer(kShellWindowId_DefaultContainer);
+    return Shell::GetContainer(
+        Shell::GetPrimaryRootWindow(),
+        kShellWindowId_DefaultContainer);
   }
 
   const std::vector<Workspace*>& workspaces() const {
@@ -59,7 +61,7 @@ class WorkspaceManagerTest : public test::AshTestBase {
   }
 
   gfx::Rect GetFullscreenBounds(aura::Window* window) {
-    return gfx::Screen::GetMonitorNearestWindow(window).bounds();
+    return gfx::Screen::GetDisplayNearestWindow(window).bounds();
   }
 
   Workspace* active_workspace() {
@@ -451,7 +453,7 @@ TEST_F(WorkspaceManagerTest, ShelfStateUpdated) {
   // Since ShelfLayoutManager queries for mouse location, move the mouse so
   // it isn't over the shelf.
   aura::test::EventGenerator generator(
-      Shell::GetInstance()->GetRootWindow(), gfx::Point());
+      Shell::GetPrimaryRootWindow(), gfx::Point());
   generator.MoveMouseTo(0, 0);
 
   // Two windows, w1 normal, w2 maximized.
@@ -571,7 +573,7 @@ TEST_F(WorkspaceManagerTest, PersistAcrossAllWorkspaces) {
 }
 
 // Verifies Show()ing a minimized window that persists across all workspaces
-// unminimizes thew indow.
+// unminimizes the window.
 TEST_F(WorkspaceManagerTest, ShowMinimizedPersistWindow) {
   // Create a window that persists across all workspaces.
   scoped_ptr<Window> w1(CreateTestWindow());

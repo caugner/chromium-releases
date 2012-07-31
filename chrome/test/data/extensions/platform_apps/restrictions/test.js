@@ -6,14 +6,14 @@ var assertEq = chrome.test.assertEq;
 var fail = chrome.test.fail;
 var succeed = chrome.test.succeed;
 
-var error = "Not available for platform apps.";
+var DEFAULT_EXPECTED_ERROR = "Not available for platform apps.";
 
-function assertThrowsError(method) {
+function assertThrowsError(method, opt_expectedError) {
   try {
     method();
     fail("error not thrown");
   } catch (e) {
-    assertEq(e, error);
+    assertEq(opt_expectedError || DEFAULT_EXPECTED_ERROR, e.message || e);
   }
 }
 
@@ -30,12 +30,6 @@ chrome.test.runTests([
 
   function testDocumentWrite() {
     assertThrowsError(document.write);
-    succeed();
-  },
-
-  function testWindowHistoryOpen() {
-    assertThrowsError(window.history.open);
-    assertThrowsError(history.open);
     succeed();
   },
 
@@ -80,24 +74,28 @@ chrome.test.runTests([
   },
 
   function testWindowFind() {
+    assertThrowsError(Window.prototype.find);
     assertThrowsError(window.find);
     assertThrowsError(find);
     succeed();
   },
 
   function testWindowAlert() {
+    assertThrowsError(Window.prototype.alert);
     assertThrowsError(window.alert);
     assertThrowsError(alert);
     succeed();
   },
 
   function testWindowConfirm() {
+    assertThrowsError(Window.prototype.confirm);
     assertThrowsError(window.confirm);
     assertThrowsError(confirm);
     succeed();
   },
 
   function testWindowPrompt() {
+    assertThrowsError(Window.prototype.prompt);
     assertThrowsError(window.prompt);
     assertThrowsError(prompt);
     succeed();
@@ -112,6 +110,34 @@ chrome.test.runTests([
         visible = window[bars[x]].visible;
       });
     }
+    succeed();
+  },
+
+  function testBlockedEvents() {
+    var eventHandler = function() { fail('event handled'); };
+    var blockedEvents = ['unload', 'beforeunload'];
+
+    for (var i = 0; i < blockedEvents.length; ++i) {
+      assertThrowsError(function() {
+        window['on' + blockedEvents[i]] = eventHandler;
+      });
+      assertThrowsError(function() {
+        window.addEventListener(blockedEvents[i], eventHandler);
+      });
+      assertThrowsError(function() {
+        Window.prototype.addEventListener.apply(window,
+            [blockedEvents[i], eventHandler]);
+      });
+    }
+
+    succeed();
+  },
+
+  function testSyncXhr() {
+    var xhr = new XMLHttpRequest();
+    assertThrowsError(function() {
+      xhr.open('GET', 'data:should not load', false);
+    }, 'INVALID_ACCESS_ERR: DOM Exception 15');
     succeed();
   }
 ]);

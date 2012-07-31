@@ -16,15 +16,14 @@
 #include "base/stl_util.h"
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
-#include "base/values.h"
 #include "base/value_conversions.h"
+#include "base/values.h"
 #include "chrome/browser/auto_launch_trial.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_page_zoom.h"
 #include "chrome/browser/custom_home_pages_table_model.h"
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/instant/instant_controller.h"
-#include "chrome/browser/instant/instant_field_trial.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
@@ -88,7 +87,7 @@
 #include "chrome/browser/chromeos/options/take_photo_dialog.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/webui/options2/chromeos/system_settings_provider2.h"
-#include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/gfx/image/image_skia.h"
 #endif  // defined(OS_CHROMEOS)
 
 #if defined(OS_WIN)
@@ -99,6 +98,7 @@
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #endif  // defined(TOOLKIT_GTK)
 
+using content::BrowserContext;
 using content::BrowserThread;
 using content::DownloadManager;
 using content::OpenURLParams;
@@ -150,6 +150,7 @@ void BrowserOptionsHandler::GetLocalizedValues(DictionaryValue* values) {
 
   static OptionsStringResource resources[] = {
     { "advancedSectionTitleCloudPrint", IDS_GOOGLE_CLOUD_PRINT },
+    { "currentUserOnly", IDS_OPTIONS_CURRENT_USER_ONLY },
     { "advancedSectionTitleContent",
       IDS_OPTIONS_ADVANCED_SECTION_TITLE_CONTENT },
     { "advancedSectionTitleLanguages",
@@ -214,6 +215,8 @@ void BrowserOptionsHandler::GetLocalizedValues(DictionaryValue* values) {
     { "passwordsAndAutofillGroupName",
       IDS_OPTIONS_PASSWORDS_AND_FORMS_GROUP_NAME },
     { "passwordManagerEnabled", IDS_OPTIONS_PASSWORD_MANAGER_ENABLE },
+    { "passwordGenerationEnabledDescription",
+      IDS_OPTIONS_PASSWORD_GENERATION_ENABLED_LABEL },
     { "privacyClearDataButton", IDS_OPTIONS_PRIVACY_CLEAR_DATA_BUTTON },
     { "privacyContentSettingsButton",
       IDS_OPTIONS_PRIVACY_CONTENT_SETTINGS_BUTTON },
@@ -286,12 +289,6 @@ void BrowserOptionsHandler::GetLocalizedValues(DictionaryValue* values) {
       IDS_OPTIONS2_DEVICE_GROUP_KEYBOARD_SETTINGS_BUTTON_TITLE },
     { "manageAccountsButtonTitle", IDS_OPTIONS_ACCOUNTS_BUTTON_TITLE },
     { "noPointingDevices", IDS_OPTIONS_NO_POINTING_DEVICES },
-    { "touchpadSettingsButtonTitle",
-        IDS_OPTIONS_POINTER_TOUCHPAD_OVERLAY_TITLE },
-    { "mouseSettingsButtonTitle",
-        IDS_OPTIONS_POINTER_MOUSE_OVERLAY_TITLE },
-    { "touchpadMouseSettingsButtonTitle",
-        IDS_OPTIONS_POINTER_TOUCHPAD_MOUSE_OVERLAY_TITLE },
     { "sectionTitleDevice", IDS_OPTIONS_DEVICE_GROUP_NAME },
     { "sectionTitleInternet", IDS_OPTIONS_INTERNET_OPTIONS_GROUP_LABEL },
     { "syncOverview", IDS_SYNC_OVERVIEW },
@@ -371,6 +368,8 @@ void BrowserOptionsHandler::GetLocalizedValues(DictionaryValue* values) {
   values->Set("syncData", GetSyncStateDictionary().release());
 
   values->SetString("privacyLearnMoreURL", chrome::kPrivacyLearnMoreURL);
+  values->SetString("sessionRestoreLearnMoreURL",
+                    chrome::kSessionRestoreLearnMoreURL);
 
   values->SetString(
       "languageSectionLabel",
@@ -439,10 +438,6 @@ void BrowserOptionsHandler::RegisterMessages() {
   web_ui()->RegisterMessageCallback(
       "disableInstant",
       base::Bind(&BrowserOptionsHandler::DisableInstant,
-                 base::Unretained(this)));
-  web_ui()->RegisterMessageCallback(
-      "getInstantFieldTrialStatus",
-      base::Bind(&BrowserOptionsHandler::GetInstantFieldTrialStatus,
                  base::Unretained(this)));
   web_ui()->RegisterMessageCallback(
       "createProfile",
@@ -551,7 +546,6 @@ void BrowserOptionsHandler::InitializeHandler() {
       ProfileSyncServiceFactory::GetInstance()->GetForProfile(profile));
   if (sync_service)
     sync_service->AddObserver(this);
-  OnStateChanged();
 
   // Create our favicon data source.
   ChromeURLDataManager::AddDataSource(profile,
@@ -560,7 +554,6 @@ void BrowserOptionsHandler::InitializeHandler() {
   default_browser_policy_.Init(prefs::kDefaultBrowserSettingEnabled,
                                g_browser_process->local_state(),
                                this);
-  UpdateDefaultBrowserState();
 
   registrar_.Add(this, chrome::NOTIFICATION_PROFILE_CACHED_INFO_CHANGED,
                  content::NotificationService::AllSources());
@@ -604,7 +597,7 @@ void BrowserOptionsHandler::InitializeHandler() {
 #endif
 
   auto_open_files_.Init(prefs::kDownloadExtensionsToOpen, prefs, this);
-  default_font_size_.Init(prefs::kWebKitGlobalDefaultFontSize, prefs, this);
+  default_font_size_.Init(prefs::kWebKitDefaultFontSize, prefs, this);
   default_zoom_level_.Init(prefs::kDefaultZoomLevel, prefs, this);
 #if !defined(OS_CHROMEOS)
   proxy_prefs_.reset(
@@ -615,9 +608,12 @@ void BrowserOptionsHandler::InitializeHandler() {
 void BrowserOptionsHandler::InitializePage() {
   OnTemplateURLServiceChanged();
   ObserveThemeChanged();
+  OnStateChanged();
+  UpdateDefaultBrowserState();
 
   SetupMetricsReportingCheckbox();
   SetupMetricsReportingSettingVisibility();
+  SetupPasswordGenerationSettingVisibility();
   SetupFontSizeSelector();
   SetupPageZoomSelector();
   SetupAutoOpenFileTypes();
@@ -682,7 +678,8 @@ void BrowserOptionsHandler::CheckAutoLaunchCallback(
 
 void BrowserOptionsHandler::UpdateDefaultBrowserState() {
   // Check for side-by-side first.
-  if (!ShellIntegration::CanSetAsDefaultBrowser()) {
+  if (ShellIntegration::CanSetAsDefaultBrowser() ==
+          ShellIntegration::SET_DEFAULT_NOT_ALLOWED) {
     SetDefaultBrowserUIString(IDS_OPTIONS_DEFAULTBROWSER_SXS);
     return;
   }
@@ -747,6 +744,10 @@ void BrowserOptionsHandler::SetDefaultWebClientUIState(
     return;  // Still processing.
 
   SetDefaultBrowserUIString(status_string_id);
+}
+
+bool BrowserOptionsHandler::IsInteractiveSetDefaultPermitted() {
+  return true;  // This is UI so we can allow it.
 }
 
 void BrowserOptionsHandler::SetDefaultBrowserUIString(int status_string_id) {
@@ -850,7 +851,7 @@ void BrowserOptionsHandler::Observe(
       if (cloud_print_connector_ui_enabled_)
         SetupCloudPrintConnectorSection();
 #endif
-    } else if (*pref_name == prefs::kWebKitGlobalDefaultFontSize) {
+    } else if (*pref_name == prefs::kWebKitDefaultFontSize) {
       SetupFontSizeSelector();
     } else if (*pref_name == prefs::kDefaultZoomLevel) {
       SetupPageZoomSelector();
@@ -898,15 +899,6 @@ void BrowserOptionsHandler::ToggleAutoLaunch(const ListValue* args) {
 #endif  // OS_WIN
 }
 
-void BrowserOptionsHandler::GetInstantFieldTrialStatus(const ListValue* args) {
-  Profile* profile = Profile::FromWebUI(web_ui());
-  base::FundamentalValue enabled(
-      !profile->GetPrefs()->GetBoolean(prefs::kInstantEnabled) &&
-      InstantFieldTrial::GetMode(profile) == InstantFieldTrial::INSTANT);
-  web_ui()->CallJavascriptFunction("BrowserOptions.setInstantFieldTrialStatus",
-                                   enabled);
-}
-
 scoped_ptr<ListValue> BrowserOptionsHandler::GetProfilesInfoList() {
   ProfileInfoCache& cache =
       g_browser_process->profile_manager()->GetProfileInfoCache();
@@ -929,7 +921,7 @@ scoped_ptr<ListValue> BrowserOptionsHandler::GetProfilesInfoList() {
       gfx::Image icon = profiles::GetAvatarIconForWebUI(
           cache.GetAvatarIconOfProfileAtIndex(i), true);
       profile_value->SetString("iconURL",
-          web_ui_util::GetImageDataUrl(*icon.ToSkBitmap()));
+          web_ui_util::GetImageDataUrl(*icon.ToImageSkia()));
     } else {
       size_t icon_index = cache.GetAvatarIconIndexOfProfileAtIndex(i);
       profile_value->SetString("iconURL",
@@ -1026,10 +1018,11 @@ scoped_ptr<DictionaryValue> BrowserOptionsHandler::GetSyncStateDictionary() {
 
   sync_status->SetBoolean("managed", service->IsManaged());
   sync_status->SetBoolean("hasUnrecoverableError",
-                          service->unrecoverable_error_detected());
-  sync_status->SetBoolean("autoLoginVisible",
+                          service->HasUnrecoverableError());
+  sync_status->SetBoolean(
+      "autoLoginVisible",
       CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableAutologin) &&
-      service->AreCredentialsAvailable());
+      service->IsSyncEnabledAndLoggedIn() && service->IsSyncTokenAvailable());
 
   return sync_status.Pass();
 }
@@ -1074,8 +1067,8 @@ void BrowserOptionsHandler::MouseExists(bool exists) {
 
 void BrowserOptionsHandler::HandleAutoOpenButton(const ListValue* args) {
   content::RecordAction(UserMetricsAction("Options_ResetAutoOpenFiles"));
-  DownloadManager* manager =
-      web_ui()->GetWebContents()->GetBrowserContext()->GetDownloadManager();
+  DownloadManager* manager = BrowserContext::GetDownloadManager(
+      web_ui()->GetWebContents()->GetBrowserContext());
   if (manager)
     DownloadPrefs::FromDownloadManager(manager)->ResetAutoOpen();
 }
@@ -1333,6 +1326,14 @@ void BrowserOptionsHandler::SetupMetricsReportingSettingVisibility() {
 #endif
 }
 
+void BrowserOptionsHandler::SetupPasswordGenerationSettingVisibility() {
+  base::FundamentalValue visible(
+      CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnablePasswordGeneration));
+  web_ui()->CallJavascriptFunction(
+      "BrowserOptions.setPasswordGenerationSettingVisibility", visible);
+}
+
 void BrowserOptionsHandler::SetupFontSizeSelector() {
   // We're only interested in integer values, so convert to int.
   base::FundamentalValue font_size(default_font_size_.GetValue());
@@ -1377,8 +1378,8 @@ void BrowserOptionsHandler::SetupPageZoomSelector() {
 void BrowserOptionsHandler::SetupAutoOpenFileTypes() {
   // Set the hidden state for the AutoOpenFileTypesResetToDefault button.
   // We show the button if the user has any auto-open file types registered.
-  DownloadManager* manager =
-      web_ui()->GetWebContents()->GetBrowserContext()->GetDownloadManager();
+  DownloadManager* manager = BrowserContext::GetDownloadManager(
+      web_ui()->GetWebContents()->GetBrowserContext());
   bool display = manager &&
       DownloadPrefs::FromDownloadManager(manager)->IsAutoOpenUsed();
   base::FundamentalValue value(display);

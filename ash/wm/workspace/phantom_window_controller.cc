@@ -95,6 +95,13 @@ void PhantomWindowController::Show(const gfx::Rect& bounds) {
   animation_->Show();
 }
 
+void PhantomWindowController::SetBounds(const gfx::Rect& bounds) {
+  DCHECK(IsShowing());
+  animation_.reset();
+  bounds_ = bounds;
+  phantom_widget_->SetBounds(bounds_);
+}
+
 void PhantomWindowController::Hide() {
   phantom_widget_.reset();
 }
@@ -118,8 +125,9 @@ void PhantomWindowController::CreatePhantomWidget(const gfx::Rect& bounds) {
   // PhantomWindowController is used by FrameMaximizeButton to highlight the
   // launcher button. Put the phantom in the same window as the launcher so that
   // the phantom is visible.
-  params.parent =
-      Shell::GetInstance()->GetContainer(kShellWindowId_LauncherContainer);
+  params.parent = Shell::GetContainer(
+      Shell::GetActiveRootWindow(),
+      kShellWindowId_LauncherContainer);
   params.can_activate = false;
   params.keep_on_top = true;
   phantom_widget_->set_focus_on_creation(false);

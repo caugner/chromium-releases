@@ -10,7 +10,7 @@
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/web_contents.h"
-#include "grit/theme_resources.h"
+#include "grit/theme_resources_standard.h"
 #include "ui/base/animation/linear_animation.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/rect.h"
@@ -82,9 +82,9 @@ DownloadStartedAnimationWin::DownloadStartedAnimationWin(
     : ui::LinearAnimation(kMoveTimeMs, kFrameRateHz, NULL),
       popup_(NULL),
       web_contents_(web_contents) {
-  static SkBitmap* kDownloadImage = NULL;
+  static gfx::ImageSkia* kDownloadImage = NULL;
   if (!kDownloadImage) {
-    kDownloadImage = ui::ResourceBundle::GetSharedInstance().GetBitmapNamed(
+    kDownloadImage = ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
         IDR_DOWNLOAD_ANIMATION_BEGIN);
   }
 
@@ -96,7 +96,7 @@ DownloadStartedAnimationWin::DownloadStartedAnimationWin(
 
   registrar_.Add(
       this,
-      content::NOTIFICATION_WEB_CONTENTS_HIDDEN,
+      content::NOTIFICATION_WEB_CONTENTS_VISIBILITY_CHANGED,
       content::Source<WebContents>(web_contents_));
   registrar_.Add(
       this,
@@ -143,7 +143,7 @@ void DownloadStartedAnimationWin::Close() {
 
   registrar_.Remove(
       this,
-      content::NOTIFICATION_WEB_CONTENTS_HIDDEN,
+      content::NOTIFICATION_WEB_CONTENTS_VISIBILITY_CHANGED,
       content::Source<WebContents>(web_contents_));
   registrar_.Remove(
       this,
@@ -171,6 +171,11 @@ void DownloadStartedAnimationWin::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
+  if (type == content::NOTIFICATION_WEB_CONTENTS_VISIBILITY_CHANGED) {
+    bool visible = *content::Details<bool>(details).ptr();
+    if (visible)
+      return;
+  }
   Close();
 }
 

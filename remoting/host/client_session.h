@@ -10,6 +10,7 @@
 #include "base/time.h"
 #include "base/threading/non_thread_safe.h"
 #include "remoting/host/remote_input_filter.h"
+#include "remoting/protocol/clipboard_echo_filter.h"
 #include "remoting/protocol/clipboard_stub.h"
 #include "remoting/protocol/connection_to_client.h"
 #include "remoting/protocol/host_event_stub.h"
@@ -109,6 +110,8 @@ class ClientSession : public protocol::HostEventStub,
 
   const std::string& client_jid() { return client_jid_; }
 
+  bool is_authenticated() { return is_authenticated_;  }
+
   // Indicate that local mouse activity has been detected. This causes remote
   // inputs to be ignored for a short time so that the local user will always
   // have the upper hand in 'pointer wars'.
@@ -118,6 +121,9 @@ class ClientSession : public protocol::HostEventStub,
   // keys or mouse buttons pressed then these will be released.
   void SetDisableInputs(bool disable_inputs);
 
+  // Creates a proxy for sending clipboard events to the client.
+  scoped_ptr<protocol::ClipboardStub> CreateClipboardProxy();
+
  private:
   EventHandler* event_handler_;
 
@@ -125,6 +131,7 @@ class ClientSession : public protocol::HostEventStub,
   scoped_ptr<protocol::ConnectionToClient> connection_;
 
   std::string client_jid_;
+  bool is_authenticated_;
 
   // The host event stub to which this object delegates. This is the final
   // element in the input pipeline, whose components appear in order below.
@@ -144,6 +151,15 @@ class ClientSession : public protocol::HostEventStub,
 
   // Filter used to disable inputs when we're not authenticated.
   protocol::InputFilter auth_input_filter_;
+
+  // Filter to used to stop clipboard items sent from the client being echoed
+  // back to it.
+  protocol::ClipboardEchoFilter clipboard_echo_filter_;
+
+  // Factory for weak pointers to the client clipboard stub.
+  // This must appear after |clipboard_echo_filter_|, so that it won't outlive
+  // it.
+  base::WeakPtrFactory<ClipboardStub> client_clipboard_factory_;
 
   // Capturer, used to determine current screen size for ensuring injected
   // mouse events fall within the screen area.

@@ -22,7 +22,6 @@
 #include "sql/statement.h"
 #include "sql/transaction.h"
 #include "sync/protocol/bookmark_specifics.pb.h"
-#include "sync/protocol/service_constants.h"
 #include "sync/protocol/sync.pb.h"
 #include "sync/syncable/syncable-inl.h"
 #include "sync/syncable/syncable_columns.h"
@@ -507,10 +506,18 @@ bool DirectoryBackingStore::SaveEntryToDB(const EntryKernel& entry) {
 }
 
 bool DirectoryBackingStore::DropDeletedEntries() {
-  return db_->Execute("DELETE FROM metas "
-                      "WHERE is_del > 0 "
-                      "AND is_unsynced < 1 "
-                      "AND is_unapplied_update < 1");
+  if (!db_->Execute("DELETE FROM metas "
+                    "WHERE is_del > 0 "
+                    "AND is_unsynced < 1 "
+                    "AND is_unapplied_update < 1")) {
+    return false;
+  }
+  if (!db_->Execute("DELETE FROM metas "
+                    "WHERE is_del > 0 "
+                    "AND id LIKE 'c%'")) {
+    return false;
+  }
+  return true;
 }
 
 bool DirectoryBackingStore::SafeDropTable(const char* table_name) {

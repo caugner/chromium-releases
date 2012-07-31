@@ -49,13 +49,13 @@
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
 #include "grit/ui_resources.h"
+#include "grit/ui_resources_standard.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/x/active_window_watcher_x.h"
 #include "ui/gfx/gtk_util.h"
 #include "ui/gfx/image/image.h"
-#include "ui/gfx/skbitmap_operations.h"
 
 using content::WebContents;
 
@@ -208,6 +208,8 @@ BrowserTitlebar::BrowserTitlebar(BrowserWindowGtk* browser_window,
                                  GtkWindow* window)
     : browser_window_(browser_window),
       window_(window),
+      container_(NULL),
+      container_hbox_(NULL),
       titlebar_left_buttons_vbox_(NULL),
       titlebar_right_buttons_vbox_(NULL),
       titlebar_left_buttons_hbox_(NULL),
@@ -217,6 +219,7 @@ BrowserTitlebar::BrowserTitlebar(BrowserWindowGtk* browser_window,
       avatar_(NULL),
       top_padding_left_(NULL),
       top_padding_right_(NULL),
+      titlebar_alignment_(NULL),
       app_mode_favicon_(NULL),
       app_mode_title_(NULL),
       using_custom_frame_(false),
@@ -473,10 +476,10 @@ GtkWidget* BrowserTitlebar::GetButtonHBox(bool left_side) {
                     titlebar_right_buttons_vbox_;
 
   GtkWidget* top_padding = gtk_fixed_new();
-  gtk_widget_set_size_request(top_padding, -1, GetButtonOuterPadding());
+  gtk_widget_set_size_request(top_padding, -1, kButtonOuterPadding);
   gtk_box_pack_start(GTK_BOX(vbox), top_padding, FALSE, FALSE, 0);
 
-  GtkWidget* buttons_hbox = gtk_hbox_new(FALSE, GetButtonSpacing());
+  GtkWidget* buttons_hbox = gtk_hbox_new(FALSE, kButtonSpacing);
   gtk_box_pack_start(GTK_BOX(vbox), buttons_hbox, FALSE, FALSE, 0);
 
   if (left_side) {
@@ -488,14 +491,6 @@ GtkWidget* BrowserTitlebar::GetButtonHBox(bool left_side) {
   }
 
   return buttons_hbox;
-}
-
-int BrowserTitlebar::GetButtonOuterPadding() const {
-  return kButtonOuterPadding;
-}
-
-int BrowserTitlebar::GetButtonSpacing() const {
-  return kButtonSpacing;
 }
 
 CustomDrawButton* BrowserTitlebar::CreateTitlebarButton(
@@ -611,7 +606,7 @@ void BrowserTitlebar::UpdateTitleAndIcon() {
         if (icon.empty()) {
           gtk_util::SetWindowIcon(window_, profile);
         } else {
-          GdkPixbuf* icon_pixbuf = gfx::GdkPixbufFromSkBitmap(&icon);
+          GdkPixbuf* icon_pixbuf = gfx::GdkPixbufFromSkBitmap(icon);
           gtk_util::SetWindowIcon(window_, profile, icon_pixbuf);
           g_object_unref(icon_pixbuf);
         }
@@ -648,7 +643,7 @@ void BrowserTitlebar::UpdateThrobber(WebContents* web_contents) {
         gtk_image_set_from_pixbuf(GTK_IMAGE(app_mode_favicon_),
             rb.GetNativeImageNamed(IDR_PRODUCT_LOGO_16).ToGdkPixbuf());
       } else {
-        GdkPixbuf* icon_pixbuf = gfx::GdkPixbufFromSkBitmap(&icon);
+        GdkPixbuf* icon_pixbuf = gfx::GdkPixbufFromSkBitmap(icon);
         gtk_image_set_from_pixbuf(GTK_IMAGE(app_mode_favicon_), icon_pixbuf);
         g_object_unref(icon_pixbuf);
       }
@@ -703,10 +698,10 @@ void BrowserTitlebar::UpdateTitlebarAlignment() {
   GtkRequisition minimize_button_req = minimize_button_req_;
   GtkRequisition restore_button_req = restore_button_req_;
   if (using_custom_frame_ && browser_window_->IsMaximized()) {
-    close_button_req.width += GetButtonOuterPadding();
-    close_button_req.height += GetButtonOuterPadding();
-    minimize_button_req.height += GetButtonOuterPadding();
-    restore_button_req.height += GetButtonOuterPadding();
+    close_button_req.width += kButtonOuterPadding;
+    close_button_req.height += kButtonOuterPadding;
+    minimize_button_req.height += kButtonOuterPadding;
+    restore_button_req.height += kButtonOuterPadding;
     if (top_padding_left_)
       gtk_widget_hide(top_padding_left_);
     if (top_padding_right_)
@@ -833,17 +828,6 @@ void BrowserTitlebar::UpdateAvatar() {
   avatar_button_->set_menu_arrow_location(arrow_location);
 }
 
-void BrowserTitlebar::ShowFaviconMenu(GdkEventButton* event) {
-  if (!favicon_menu_model_.get()) {
-    favicon_menu_model_.reset(
-        new PopupPageMenuModel(this, browser_window_->browser()));
-
-    favicon_menu_.reset(new MenuGtk(NULL, favicon_menu_model_.get()));
-  }
-
-  favicon_menu_->PopupForWidget(app_mode_favicon_, event->button, event->time);
-}
-
 void BrowserTitlebar::MaximizeButtonClicked() {
   GdkEvent* event = gtk_get_current_event();
   if (event->button.button == 1) {
@@ -911,10 +895,6 @@ gboolean BrowserTitlebar::OnScroll(GtkWidget* widget, GdkEventScroll* event) {
 }
 
 void BrowserTitlebar::OnButtonClicked(GtkWidget* button) {
-  HandleButtonClick(button);
-}
-
-void BrowserTitlebar::HandleButtonClick(GtkWidget* button) {
   if (close_button_.get() && close_button_->widget() == button) {
     browser_window_->Close();
   } else if (restore_button_.get() && restore_button_->widget() == button) {
@@ -931,7 +911,15 @@ gboolean BrowserTitlebar::OnFaviconMenuButtonPressed(GtkWidget* widget,
   if (event->button != 1)
     return FALSE;
 
-  ShowFaviconMenu(event);
+  if (!favicon_menu_model_.get()) {
+    favicon_menu_model_.reset(
+        new PopupPageMenuModel(this, browser_window_->browser()));
+
+    favicon_menu_.reset(new MenuGtk(NULL, favicon_menu_model_.get()));
+  }
+
+  favicon_menu_->PopupForWidget(app_mode_favicon_, event->button, event->time);
+
   return TRUE;
 }
 
@@ -962,7 +950,7 @@ bool BrowserTitlebar::IsCommandIdChecked(int command_id) const {
   EncodingMenuController controller;
   if (controller.DoesCommandBelongToEncodingMenu(command_id)) {
     WebContents* web_contents =
-        browser_window_->browser()->GetSelectedWebContents();
+        browser_window_->browser()->GetActiveWebContents();
     if (web_contents) {
       return controller.IsItemChecked(browser_window_->browser()->profile(),
                                       web_contents->GetEncoding(),
@@ -1049,60 +1037,16 @@ bool BrowserTitlebar::IsOffTheRecord() {
   return browser_window_->browser()->profile()->IsOffTheRecord();
 }
 
-///////////////////////////////////////////////////////////////////////////////
-// BrowserTitlebar::Throbber implementation
-// TODO(tc): Handle anti-clockwise spinning when waiting for a connection.
-
-// We don't bother to clean up these or the pixbufs they contain when we exit.
-static std::vector<GdkPixbuf*>* g_throbber_frames = NULL;
-static std::vector<GdkPixbuf*>* g_throbber_waiting_frames = NULL;
-
-// Load |resource_id| from the ResourceBundle and split it into a series of
-// square GdkPixbufs that get stored in |frames|.
-static void MakeThrobberFrames(int resource_id,
-                               std::vector<GdkPixbuf*>* frames) {
-  ui::ResourceBundle &rb = ui::ResourceBundle::GetSharedInstance();
-  SkBitmap* frame_strip = rb.GetBitmapNamed(resource_id);
-
-  // Each frame of the animation is a square, so we use the height as the
-  // frame size.
-  int frame_size = frame_strip->height();
-  size_t num_frames = frame_strip->width() / frame_size;
-
-  // Make a separate GdkPixbuf for each frame of the animation.
-  for (size_t i = 0; i < num_frames; ++i) {
-    SkBitmap frame = SkBitmapOperations::CreateTiledBitmap(*frame_strip,
-        i * frame_size, 0, frame_size, frame_size);
-    frames->push_back(gfx::GdkPixbufFromSkBitmap(&frame));
-  }
+GtkWidget* BrowserTitlebar::widget() const {
+  return container_;
 }
 
-GdkPixbuf* BrowserTitlebar::Throbber::GetNextFrame(bool is_waiting) {
-  Throbber::InitFrames();
-  if (is_waiting) {
-    return (*g_throbber_waiting_frames)[current_waiting_frame_++ %
-        g_throbber_waiting_frames->size()];
-  } else {
-    return (*g_throbber_frames)[current_frame_++ % g_throbber_frames->size()];
-  }
+void BrowserTitlebar::set_window(GtkWindow* window) {
+  window_ = window;
 }
 
-void BrowserTitlebar::Throbber::Reset() {
-  current_frame_ = 0;
-  current_waiting_frame_ = 0;
-}
-
-// static
-void BrowserTitlebar::Throbber::InitFrames() {
-  if (g_throbber_frames)
-    return;
-
-  // We load the light version of the throbber since it'll be in the titlebar.
-  g_throbber_frames = new std::vector<GdkPixbuf*>;
-  MakeThrobberFrames(IDR_THROBBER_LIGHT, g_throbber_frames);
-
-  g_throbber_waiting_frames = new std::vector<GdkPixbuf*>;
-  MakeThrobberFrames(IDR_THROBBER_WAITING_LIGHT, g_throbber_waiting_frames);
+AvatarMenuButtonGtk* BrowserTitlebar::avatar_button() const {
+  return avatar_button_.get();
 }
 
 BrowserTitlebar::ContextMenuModel::ContextMenuModel(

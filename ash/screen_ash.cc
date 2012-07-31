@@ -10,7 +10,7 @@
 #include "ui/aura/env.h"
 #include "ui/aura/monitor_manager.h"
 #include "ui/aura/root_window.h"
-#include "ui/gfx/monitor.h"
+#include "ui/gfx/display.h"
 #include "ui/gfx/screen.h"
 
 namespace ash {
@@ -21,8 +21,7 @@ aura::MonitorManager* GetMonitorManager() {
 }
 }  // namespace
 
-ScreenAsh::ScreenAsh(aura::RootWindow* root_window)
-    : root_window_(root_window) {
+ScreenAsh::ScreenAsh() {
 }
 
 ScreenAsh::~ScreenAsh() {
@@ -30,37 +29,45 @@ ScreenAsh::~ScreenAsh() {
 
 // static
 gfx::Rect ScreenAsh::GetMaximizedWindowBounds(aura::Window* window) {
-  return Shell::GetInstance()->shelf()->GetMaximizedWindowBounds(window);
+  if (window->GetRootWindow() == Shell::GetPrimaryRootWindow())
+    return Shell::GetInstance()->shelf()->GetMaximizedWindowBounds(window);
+  else
+    return gfx::Screen::GetDisplayNearestWindow(window).bounds();
 }
 
 // static
 gfx::Rect ScreenAsh::GetUnmaximizedWorkAreaBounds(aura::Window* window) {
-  return Shell::GetInstance()->shelf()->GetUnmaximizedWorkAreaBounds(window);
+  if (window->GetRootWindow() == Shell::GetPrimaryRootWindow())
+    return Shell::GetInstance()->shelf()->GetUnmaximizedWorkAreaBounds(window);
+  else
+    return gfx::Screen::GetDisplayNearestWindow(window).work_area();
 }
 
 gfx::Point ScreenAsh::GetCursorScreenPoint() {
-  return root_window_->last_mouse_location();
+  // TODO(oshima): Support multiple root window.
+  return Shell::GetPrimaryRootWindow()->last_mouse_location();
 }
 
 gfx::NativeWindow ScreenAsh::GetWindowAtCursorScreenPoint() {
   const gfx::Point point = gfx::Screen::GetCursorScreenPoint();
-  return root_window_->GetTopWindowContainingPoint(point);
+  // TODO(oshima): convert point to relateive to the root window.
+  return Shell::GetRootWindowAt(point)->GetTopWindowContainingPoint(point);
 }
 
-int ScreenAsh::GetNumMonitors() {
-  return GetMonitorManager()->GetNumMonitors();
+int ScreenAsh::GetNumDisplays() {
+  return GetMonitorManager()->GetNumDisplays();
 }
 
-gfx::Monitor ScreenAsh::GetMonitorNearestWindow(gfx::NativeView window) const {
-  return GetMonitorManager()->GetMonitorNearestWindow(window);
+gfx::Display ScreenAsh::GetDisplayNearestWindow(gfx::NativeView window) const {
+  return GetMonitorManager()->GetDisplayNearestWindow(window);
 }
 
-gfx::Monitor ScreenAsh::GetMonitorNearestPoint(const gfx::Point& point) const {
-  return GetMonitorManager()->GetMonitorNearestPoint(point);
+gfx::Display ScreenAsh::GetDisplayNearestPoint(const gfx::Point& point) const {
+  return GetMonitorManager()->GetDisplayNearestPoint(point);
 }
 
-gfx::Monitor ScreenAsh::GetPrimaryMonitor() const {
-  return GetMonitorManager()->GetMonitorAt(0);
+gfx::Display ScreenAsh::GetPrimaryDisplay() const {
+  return GetMonitorManager()->GetDisplayAt(0);
 }
 
 }  // namespace ash

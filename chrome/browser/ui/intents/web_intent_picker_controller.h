@@ -15,8 +15,8 @@
 #include "base/string16.h"
 #include "chrome/browser/extensions/webstore_installer.h"
 #include "chrome/browser/favicon/favicon_service.h"
-#include "chrome/browser/intents/web_intents_registry.h"
 #include "chrome/browser/intents/cws_intents_registry.h"
+#include "chrome/browser/intents/web_intents_registry.h"
 #include "chrome/browser/ui/intents/web_intent_picker_delegate.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -26,7 +26,7 @@
 class Browser;
 struct DefaultWebIntentService;
 class GURL;
-class TabContentsWrapper;
+class TabContents;
 class WebIntentPicker;
 class WebIntentPickerModel;
 
@@ -45,8 +45,7 @@ class WebIntentPickerController : public content::NotificationObserver,
                                   public WebIntentPickerDelegate,
                                   public WebstoreInstaller::Delegate {
  public:
-  // Takes ownership of |factory|.
-  explicit WebIntentPickerController(TabContentsWrapper* wrapper);
+  explicit WebIntentPickerController(TabContents* tab_contents);
   virtual ~WebIntentPickerController();
 
   // Sets the intent data and return pathway handler object for which
@@ -132,7 +131,7 @@ class WebIntentPickerController : public content::NotificationObserver,
 
   // Called when a suggested extension's icon is fetched.
   void OnExtensionIconURLFetchComplete(const string16& extension_id,
-                                       const content::URLFetcher* source);
+                                       const net::URLFetcher* source);
 
   typedef base::Callback<void(const gfx::Image&)>
       ExtensionIconAvailableCallback;
@@ -166,7 +165,7 @@ class WebIntentPickerController : public content::NotificationObserver,
   void ClosePicker();
 
   // A weak pointer to the tab contents that the picker is displayed on.
-  TabContentsWrapper* wrapper_;
+  TabContents* tab_contents_;
 
   // A notification registrar, listening for notifications when the tab closes
   // to close the picker ui.

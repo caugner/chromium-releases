@@ -25,7 +25,7 @@
 class CustomDrawButton;
 class GURL;
 class TabContentsContainerGtk;
-class TabContentsWrapper;
+class TabContents;
 class ThrobberGtk;
 class WebIntentPickerDelegate;
 
@@ -35,7 +35,7 @@ class WebIntentPickerGtk : public WebIntentPicker,
                            public ConstrainedWindowGtkDelegate,
                            public content::NotificationObserver {
  public:
-  WebIntentPickerGtk(TabContentsWrapper* tab_contents,
+  WebIntentPickerGtk(TabContents* tab_contents,
                      WebIntentPickerDelegate* delegate,
                      WebIntentPickerModel* model);
   virtual ~WebIntentPickerGtk();
@@ -54,6 +54,9 @@ class WebIntentPickerGtk : public WebIntentPicker,
                                       const string16& extension_id) OVERRIDE;
   virtual void OnInlineDisposition(WebIntentPickerModel* model,
                                    const GURL& url) OVERRIDE;
+  virtual void OnInlineDispositionAutoResize(const gfx::Size& size) OVERRIDE;
+
+  virtual void OnPendingAsyncCompleted() OVERRIDE;
 
   // ConstrainedWindowGtkDelegate implementation.
   virtual GtkWidget* GetWidgetRoot() OVERRIDE;
@@ -61,10 +64,10 @@ class WebIntentPickerGtk : public WebIntentPicker,
   virtual void DeleteDelegate() OVERRIDE;
   virtual bool ShouldHaveBorderPadding() const OVERRIDE;
 
-   // content::NotificationObserver implementation.
-   virtual void Observe(int type,
-                        const content::NotificationSource& source,
-                        const content::NotificationDetails& details) OVERRIDE;
+  // content::NotificationObserver implementation.
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
  private:
   // Callback when picker is destroyed.
@@ -83,6 +86,15 @@ class WebIntentPickerGtk : public WebIntentPicker,
   // Initialize the contents of the picker. After this call, contents_ will be
   // non-NULL.
   void InitContents();
+
+  // Create the (inset relative to |box|) container for dialog elements.
+  GtkWidget* CreateSubContents(GtkWidget* box);
+
+  // Add a close button to dialog contents
+  void AddCloseButton(GtkWidget* containingBox);
+
+  // Add title to dialog contents
+  void AddTitle(GtkWidget* containingBox);
 
   // Update the installed service buttons from |model_|.
   void UpdateInstalledServices();
@@ -104,7 +116,7 @@ class WebIntentPickerGtk : public WebIntentPicker,
   void RemoveThrobber();
 
   // A weak pointer to the tab contents on which to display the picker UI.
-  TabContentsWrapper* wrapper_;
+  TabContents* tab_contents_;
 
   // A weak pointer to the WebIntentPickerDelegate to notify when the user
   // chooses a service or cancels.
@@ -140,7 +152,7 @@ class WebIntentPickerGtk : public WebIntentPicker,
   ConstrainedWindowGtk* window_;
 
   // Container for the HTML in the inline disposition case.
-  scoped_ptr<TabContentsWrapper> inline_disposition_tab_contents_;
+  scoped_ptr<TabContents> inline_disposition_tab_contents_;
 
   // Widget for displaying the HTML in the inline disposition case.
   scoped_ptr<TabContentsContainerGtk> tab_contents_container_;

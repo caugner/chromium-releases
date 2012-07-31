@@ -19,6 +19,7 @@ cr.define('options', function() {
     this.pageDivName = pageDivName;
     this.pageDiv = $(this.pageDivName);
     this.tab = null;
+    this.lastFocusedElement = null;
   }
 
   /** @const */ var HORIZONTAL_OFFSET = 155;
@@ -234,6 +235,11 @@ cr.define('options', function() {
     if (!overlay || !overlay.canShowPage())
       return false;
 
+    // Save the currently focused element in the page for restoration later.
+    var currentPage = this.getTopmostVisiblePage();
+    if (currentPage)
+      currentPage.lastFocusedElement = document.activeElement;
+
     if ((!rootPage || !rootPage.sticky) && overlay.parentPage)
       this.showPageByName(overlay.parentPage.name, false);
 
@@ -244,6 +250,8 @@ cr.define('options', function() {
 
     // Update tab title.
     this.setTitle_(overlay.title);
+
+    $('searchBox').setAttribute('aria-hidden', true);
 
     return true;
   };
@@ -274,6 +282,15 @@ cr.define('options', function() {
   };
 
   /**
+   * Restores the last focused element on a given page.
+   */
+  OptionsPage.restoreLastFocusedElement_ = function() {
+    var currentPage = this.getTopmostVisiblePage();
+    if (currentPage.lastFocusedElement)
+      currentPage.lastFocusedElement.focus();
+  };
+
+  /**
    * Closes the visible overlay. Updates the history state after closing the
    * overlay.
    */
@@ -286,6 +303,10 @@ cr.define('options', function() {
 
     if (overlay.didClosePage) overlay.didClosePage();
     this.updateHistoryState_(false, {ignoreHash: true});
+
+    this.restoreLastFocusedElement_();
+    if (!this.isOverlayVisible_())
+      $('searchBox').removeAttribute('aria-hidden');
   };
 
   /**
@@ -296,11 +317,13 @@ cr.define('options', function() {
     document.activeElement.blur();
     var overlay = this.getVisibleOverlay_();
     // Let the overlay handle the <Esc> if it wants to.
-    if (overlay.handleCancel)
+    if (overlay.handleCancel) {
       overlay.handleCancel();
-    else
+      this.restoreLastFocusedElement_();
+    } else {
       this.closeOverlay();
-  }
+    }
+  };
 
   /**
    * Hides the visible overlay. Does not affect the history state.
@@ -608,6 +631,16 @@ cr.define('options', function() {
     }
   };
 
+  OptionsPage.setPepperFlashSettingsEnabled = function(enabled) {
+    if (enabled) {
+      document.documentElement.setAttribute(
+          'enablePepperFlashSettings', '');
+    } else {
+      document.documentElement.removeAttribute(
+          'enablePepperFlashSettings');
+    }
+  };
+
   OptionsPage.prototype = {
     __proto__: cr.EventTarget.prototype,
 
@@ -677,12 +710,14 @@ cr.define('options', function() {
 
         var text = bannerDiv.querySelector('.managed-prefs-text');
         if (controlledByPolicy && !controlledByExtension) {
-          text.textContent = templateData.policyManagedPrefsBannerText;
-        } else if (!controlledByPolicy && controlledByExtension) {
-          text.textContent = templateData.extensionManagedPrefsBannerText;
-        } else if (controlledByPolicy && controlledByExtension) {
           text.textContent =
-              templateData.policyAndExtensionManagedPrefsBannerText;
+              loadTimeData.getString('policyManagedPrefsBannerText');
+        } else if (!controlledByPolicy && controlledByExtension) {
+          text.textContent =
+              loadTimeData.getString('extensionManagedPrefsBannerText');
+        } else if (controlledByPolicy && controlledByExtension) {
+          text.textContent = loadTimeData.getString(
+              'policyAndExtensionManagedPrefsBannerText');
         }
       }
     },
@@ -709,6 +744,7 @@ cr.define('options', function() {
       }
       return !this.pageDiv.hidden;
     },
+
     /**
      * Sets page visibility.
      * @type {boolean}
@@ -740,8 +776,15 @@ cr.define('options', function() {
       var pageDiv = this.pageDiv;
       var container = this.container;
 
-      if (visible)
+      if (visible) {
         uber.invokeMethodOnParent('beginInterceptingEvents');
+        this.pageDiv.removeAttribute('aria-hidden');
+        if (this.parentPage)
+          this.parentPage.pageDiv.setAttribute('aria-hidden', true);
+      } else {
+        if (this.parentPage)
+          this.parentPage.pageDiv.removeAttribute('aria-hidden');
+      }
 
       if (container.hidden != visible) {
         if (visible) {

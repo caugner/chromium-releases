@@ -10,11 +10,11 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "content/browser/renderer_host/render_view_host_delegate.h"
 #include "content/browser/site_instance_impl.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
-#include "content/public/browser/render_view_host_delegate.h"
 
 class InterstitialPageImpl;
 class NavigationControllerImpl;
@@ -26,6 +26,7 @@ class NavigationEntry;
 class NavigationEntryImpl;
 class RenderViewHost;
 class RenderViewHostImpl;
+class RenderWidgetHostDelegate;
 class RenderWidgetHostView;
 class TestWebContents;
 }
@@ -100,13 +101,16 @@ class CONTENT_EXPORT RenderViewHostManager
     virtual ~Delegate() {}
   };
 
-  // Both delegate pointers must be non-NULL and are not owned by this class.
-  // They must outlive this class. The RenderViewHostDelegate is what will be
-  // installed into all RenderViewHosts that are created.
+  // All three delegate pointers must be non-NULL and are not owned by this
+  // class.  They must outlive this class. The RenderViewHostDelegate and
+  // RenderWidgetHostDelegate are what will be installed into all
+  // RenderViewHosts that are created.
   //
   // You must call Init() before using this class.
-  RenderViewHostManager(content::RenderViewHostDelegate* render_view_delegate,
-                        Delegate* delegate);
+  RenderViewHostManager(
+      content::RenderViewHostDelegate* render_view_delegate,
+      content::RenderWidgetHostDelegate* render_widget_delegate,
+      Delegate* delegate);
   virtual ~RenderViewHostManager();
 
   // For arguments, see WebContentsImpl constructor.
@@ -279,9 +283,10 @@ class CONTENT_EXPORT RenderViewHostManager
   // for the view type (like view source versus not).
   bool cross_navigation_pending_;
 
-  // Implemented by the owner of this class, this delegate is installed into all
-  // the RenderViewHosts that we create.
+  // Implemented by the owner of this class, these delegates are installed into
+  // all the RenderViewHosts that we create.
   content::RenderViewHostDelegate* render_view_delegate_;
+  content::RenderWidgetHostDelegate* render_widget_delegate_;
 
   // Our RenderView host and its associated Web UI (if any, will be NULL for
   // non-DOM-UI pages). This object is responsible for all communication with

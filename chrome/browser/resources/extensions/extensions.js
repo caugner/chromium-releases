@@ -4,6 +4,8 @@
 
 <include src="../shared/js/cr/ui/drag_wrapper.js"></include>
 <include src="../uber/uber_utils.js"></include>
+<include src="extension_commands_overlay.js"></include>
+<include src="extension_focus_manager.js"></include>
 <include src="extension_list.js"></include>
 <include src="pack_extension_overlay.js"></include>
 
@@ -43,7 +45,7 @@ cr.define('extensions', function() {
       // Only process files that look like extensions. Other files should
       // navigate the browser normally.
       if (!e.dataTransfer.files.length ||
-          !/\.crx$/.test(e.dataTransfer.files[0].name)) {
+          !/\.(crx|user\.js)$/.test(e.dataTransfer.files[0].name)) {
         return;
       }
 
@@ -94,14 +96,26 @@ cr.define('extensions', function() {
           this.handleUpdateExtensionNow_.bind(this));
 
       if (!loadTimeData.getBoolean('offStoreInstallEnabled')) {
-        this.dragWrapper_ =
-            new cr.ui.DragWrapper(document.body, dragWrapperHandler);
+        this.dragWrapper_ = new cr.ui.DragWrapper(document.documentElement,
+                                                  dragWrapperHandler);
       }
 
       var packExtensionOverlay = extensions.PackExtensionOverlay.getInstance();
       packExtensionOverlay.initializePage();
 
+      // Hook up the configure commands link to the overlay.
+      var link = document.querySelector('.extension-commands-config');
+      link.addEventListener('click',
+          this.handleExtensionCommandsConfig_.bind(this));
+
+      // Initialize the Commands overlay.
+      var extensionCommandsOverlay =
+          extensions.ExtensionCommandsOverlay.getInstance();
+      extensionCommandsOverlay.initializePage();
+
       cr.ui.overlay.setupOverlay($('dropTargetOverlay'));
+
+      extensions.ExtensionFocusManager.getInstance().initialize();
     },
 
     /**
@@ -126,6 +140,17 @@ cr.define('extensions', function() {
     handlePackExtension_: function(e) {
       ExtensionSettings.showOverlay($('packExtensionOverlay'));
       chrome.send('coreOptionsUserMetricsAction', ['Options_PackExtension']);
+    },
+
+    /**
+     * Handles the Configure (Extension) Commands link.
+     * @param {Event} e Change event.
+     * @private
+     */
+    handleExtensionCommandsConfig_: function(e) {
+      ExtensionSettings.showOverlay($('extensionCommandsOverlay'));
+      chrome.send('coreOptionsUserMetricsAction',
+                  ['Options_ExtensionCommands']);
     },
 
     /**
@@ -237,14 +262,21 @@ cr.define('extensions', function() {
   }
 
   /**
+   * Returns the current overlay or null if one does not exist.
+   * @return {Element} The overlay element.
+   */
+  ExtensionSettings.getCurrentOverlay = function() {
+    return document.querySelector('#overlay .page.showing');
+  }
+
+  /**
    * Sets the given overlay to show. This hides whatever overlay is currently
    * showing, if any.
    * @param {HTMLElement} node The overlay page to show. If falsey, all overlays
    *     are hidden.
    */
   ExtensionSettings.showOverlay = function(node) {
-    var currentlyShowingOverlay =
-        document.querySelector('#overlay .page.showing');
+    var currentlyShowingOverlay = ExtensionSettings.getCurrentOverlay();
     if (currentlyShowingOverlay)
       currentlyShowingOverlay.classList.remove('showing');
 

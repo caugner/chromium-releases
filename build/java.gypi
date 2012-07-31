@@ -25,7 +25,7 @@
 # base/android/java/org/chromium/base/Bar.java
 #
 # Finally, the generated jar-file will be:
-#   <(PRODUCT_DIR)/chromium_base.jar
+#   <(PRODUCT_DIR)/lib.java/chromium_base.jar
 #
 # TODO(yfriedman): The "finally" statement isn't entirely true yet, as we don't
 # auto-generate the ant file yet.
@@ -40,11 +40,11 @@
          '<!@(find <(java_in_dir) -name "*.java")'
       ],
       'outputs': [
-         '<(PRODUCT_DIR)/chromium_<(package_name).jar',
+        '<(PRODUCT_DIR)/lib.java/chromium_<(package_name).jar',
       ],
       'action': [
         'ant',
-        '-DPRODUCT_DIR=<(PRODUCT_DIR)',
+        '-DPRODUCT_DIR=<(ant_build_out)',
         '-DPACKAGE_NAME=<(package_name)',
         '-buildfile',
         '<(java_in_dir)/<(package_name).xml',

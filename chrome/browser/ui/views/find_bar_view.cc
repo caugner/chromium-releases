@@ -16,7 +16,7 @@
 #include "chrome/browser/ui/find_bar/find_bar_state_factory.h"
 #include "chrome/browser/ui/find_bar/find_notification_details.h"
 #include "chrome/browser/ui/find_bar/find_tab_helper.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/find_bar_host.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
@@ -100,11 +100,11 @@ FindBarView::FindBarView(FindBarHost* host)
   find_previous_button_->set_tag(FIND_PREVIOUS_TAG);
   find_previous_button_->set_focusable(true);
   find_previous_button_->SetImage(views::CustomButton::BS_NORMAL,
-      rb.GetBitmapNamed(IDR_FINDINPAGE_PREV));
+      rb.GetImageSkiaNamed(IDR_FINDINPAGE_PREV));
   find_previous_button_->SetImage(views::CustomButton::BS_HOT,
-      rb.GetBitmapNamed(IDR_FINDINPAGE_PREV_H));
+      rb.GetImageSkiaNamed(IDR_FINDINPAGE_PREV_H));
   find_previous_button_->SetImage(views::CustomButton::BS_DISABLED,
-      rb.GetBitmapNamed(IDR_FINDINPAGE_PREV_P));
+      rb.GetImageSkiaNamed(IDR_FINDINPAGE_PREV_P));
   find_previous_button_->SetTooltipText(
       l10n_util::GetStringUTF16(IDS_FIND_IN_PAGE_PREVIOUS_TOOLTIP));
   find_previous_button_->SetAccessibleName(
@@ -115,11 +115,11 @@ FindBarView::FindBarView(FindBarHost* host)
   find_next_button_->set_tag(FIND_NEXT_TAG);
   find_next_button_->set_focusable(true);
   find_next_button_->SetImage(views::CustomButton::BS_NORMAL,
-      rb.GetBitmapNamed(IDR_FINDINPAGE_NEXT));
+      rb.GetImageSkiaNamed(IDR_FINDINPAGE_NEXT));
   find_next_button_->SetImage(views::CustomButton::BS_HOT,
-      rb.GetBitmapNamed(IDR_FINDINPAGE_NEXT_H));
+      rb.GetImageSkiaNamed(IDR_FINDINPAGE_NEXT_H));
   find_next_button_->SetImage(views::CustomButton::BS_DISABLED,
-      rb.GetBitmapNamed(IDR_FINDINPAGE_NEXT_P));
+      rb.GetImageSkiaNamed(IDR_FINDINPAGE_NEXT_P));
   find_next_button_->SetTooltipText(
       l10n_util::GetStringUTF16(IDS_FIND_IN_PAGE_NEXT_TOOLTIP));
   find_next_button_->SetAccessibleName(
@@ -130,28 +130,29 @@ FindBarView::FindBarView(FindBarHost* host)
   close_button_->set_tag(CLOSE_TAG);
   close_button_->set_focusable(true);
   close_button_->SetImage(views::CustomButton::BS_NORMAL,
-                          rb.GetBitmapNamed(IDR_CLOSE_BAR));
+                          rb.GetImageSkiaNamed(IDR_CLOSE_BAR));
   close_button_->SetImage(views::CustomButton::BS_HOT,
-                          rb.GetBitmapNamed(IDR_CLOSE_BAR_H));
+                          rb.GetImageSkiaNamed(IDR_CLOSE_BAR_H));
   close_button_->SetImage(views::CustomButton::BS_PUSHED,
-                          rb.GetBitmapNamed(IDR_CLOSE_BAR_P));
+                          rb.GetImageSkiaNamed(IDR_CLOSE_BAR_P));
   close_button_->SetTooltipText(
       l10n_util::GetStringUTF16(IDS_FIND_IN_PAGE_CLOSE_TOOLTIP));
   close_button_->SetAccessibleName(
       l10n_util::GetStringUTF16(IDS_ACCNAME_CLOSE));
   AddChildView(close_button_);
 
-  SetBackground(rb.GetBitmapNamed(IDR_FIND_DLG_LEFT_BACKGROUND),
-                rb.GetBitmapNamed(IDR_FIND_DLG_RIGHT_BACKGROUND));
+  SetBackground(rb.GetImageSkiaNamed(IDR_FIND_DLG_LEFT_BACKGROUND),
+                rb.GetImageSkiaNamed(IDR_FIND_DLG_RIGHT_BACKGROUND));
 
   SetBorder(IDR_FIND_DIALOG_LEFT, IDR_FIND_DIALOG_MIDDLE,
             IDR_FIND_DIALOG_RIGHT);
 
-  preferred_height_ = rb.GetBitmapNamed(IDR_FIND_DIALOG_MIDDLE)->height();
+  preferred_height_ = rb.GetImageSkiaNamed(IDR_FIND_DIALOG_MIDDLE)->height();
 
   // Background images for the Find edit box.
-  text_box_background_ = rb.GetBitmapNamed(IDR_FIND_BOX_BACKGROUND);
-  text_box_background_left_ = rb.GetBitmapNamed(IDR_FIND_BOX_BACKGROUND_LEFT);
+  text_box_background_ = rb.GetImageSkiaNamed(IDR_FIND_BOX_BACKGROUND);
+  text_box_background_left_ =
+      rb.GetImageSkiaNamed(IDR_FIND_BOX_BACKGROUND_LEFT);
 
   EnableCanvasFlippingForRTLUI(true);
 }
@@ -371,7 +372,8 @@ void FindBarView::ButtonPressed(
       break;
     case CLOSE_TAG:
       find_bar_host()->GetFindBarController()->EndFindSession(
-          FindBarController::kKeepSelection);
+          FindBarController::kKeepSelectionOnPage,
+          FindBarController::kKeepResultsInFindBox);
       break;
     default:
       NOTREACHED() << L"Unknown button";
@@ -401,7 +403,7 @@ void FindBarView::ContentsChanged(views::Textfield* sender,
     // The last two params here are forward (true) and case sensitive (false).
     find_tab_helper->StartFinding(new_contents, true, false);
   } else {
-    find_tab_helper->StopFinding(FindBarController::kClearSelection);
+    find_tab_helper->StopFinding(FindBarController::kClearSelectionOnPage);
     UpdateForResult(find_tab_helper->find_result(), string16());
     find_bar_host()->MoveWindowIfNecessary(gfx::Rect(), false);
 
@@ -488,7 +490,7 @@ void FindBarView::OnThemeChanged() {
   if (GetThemeProvider()) {
     close_button_->SetBackground(
         GetThemeProvider()->GetColor(ThemeService::COLOR_TAB_TEXT),
-        rb.GetBitmapNamed(IDR_CLOSE_BAR),
-        rb.GetBitmapNamed(IDR_CLOSE_BAR_MASK));
+        rb.GetImageSkiaNamed(IDR_CLOSE_BAR),
+        rb.GetImageSkiaNamed(IDR_CLOSE_BAR_MASK));
   }
 }

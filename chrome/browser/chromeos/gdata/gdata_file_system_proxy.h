@@ -47,10 +47,27 @@ class GDataFileSystemProxy : public fileapi::RemoteFileSystemProxyInterface {
       bool recursive,
       const fileapi::FileSystemOperationInterface::StatusCallback& callback)
           OVERRIDE;
+  virtual void CreateFile(
+      const GURL& file_url,
+      bool exclusive,
+      const fileapi::FileSystemOperationInterface::StatusCallback& callback)
+          OVERRIDE;
+  virtual void Truncate(const GURL& file_url, int64 length,
+      const fileapi::FileSystemOperationInterface::StatusCallback& callback)
+          OVERRIDE;
   virtual void CreateSnapshotFile(
       const GURL& path,
       const fileapi::FileSystemOperationInterface::SnapshotFileCallback&
       callback) OVERRIDE;
+  virtual void CreateWritableSnapshotFile(
+      const GURL& path,
+      const fileapi::WritableSnapshotFile& callback) OVERRIDE;
+  virtual void OpenFile(
+      const GURL& path,
+      int file_flags,
+      base::ProcessHandle peer_handle,
+      const fileapi::FileSystemOperationInterface::OpenFileCallback&
+          callback) OVERRIDE;
   // TODO(zelidrag): More methods to follow as we implement other parts of FSO.
 
  private:
@@ -69,14 +86,54 @@ class GDataFileSystemProxy : public fileapi::RemoteFileSystemProxyInterface {
       const FilePath& entry_path,
       scoped_ptr<gdata::GDataEntryProto> entry_proto);
 
+  // Helper callback for relaying reply for GetEntryInfoByPath() to the
+  // calling thread.
+  void OnGetEntryInfoByPath(
+      const fileapi::FileSystemOperationInterface::SnapshotFileCallback&
+          callback,
+      base::PlatformFileError error,
+      const FilePath& entry_path,
+      scoped_ptr<GDataEntryProto> entry_proto);
+
   // Helper callback for relaying reply for ReadDirectory() to the calling
   // thread.
   void OnReadDirectory(
-      bool hide_hosted_documents,
       const fileapi::FileSystemOperationInterface::ReadDirectoryCallback&
           callback,
       base::PlatformFileError error,
+      bool hide_hosted_documents,
       scoped_ptr<GDataDirectoryProto> directory_proto);
+
+  // Helper callback for relaying reply for CreateWritableSnapshotFile() to
+  // the calling thread.
+  void OnCreateWritableSnapshotFile(
+      const FilePath& virtual_path,
+      const fileapi::WritableSnapshotFile& callback,
+      base::PlatformFileError result,
+      const FilePath& local_path);
+
+  // Helper callback for closing the local cache file and committing the dirty
+  // flag. This is triggered when the callback for CreateWritableSnapshotFile
+  // released the refcounted reference to the file.
+  void CloseWritableSnapshotFile(
+      const FilePath& virtual_path,
+      const FilePath& local_path);
+
+  // Invoked during Truncate() operation. This is called when a local modifiable
+  // cache is ready for truncation.
+  void OnFileOpenedForTruncate(
+      const FilePath& virtual_path,
+      int64 length,
+      const fileapi::FileSystemOperationInterface::StatusCallback& callback,
+      base::PlatformFileError open_result,
+      const FilePath& local_cache_path);
+
+  // Invoked during Truncate() operation. This is called when the truncation of
+  // a local cache file is finished on FILE thread.
+  void DidTruncate(
+      const FilePath& virtual_path,
+      const fileapi::FileSystemOperationInterface::StatusCallback& callback,
+      base::PlatformFileError* truncate_result);
 
   // GDataFileSystemProxy is owned by Profile, which outlives
   // GDataFileSystemProxy, which is owned by CrosMountPointProvider (i.e. by

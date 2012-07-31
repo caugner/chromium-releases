@@ -9,10 +9,10 @@
 #include "base/basictypes.h"
 #include "base/lazy_instance.h"
 #include "base/message_loop.h"
-#include "chrome/common/chrome_view_type.h"
 #include "chrome/common/extensions/extension_messages.h"
 #include "chrome/common/extensions/extension_set.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/common/view_type.h"
 #include "chrome/renderer/extensions/chrome_v8_context.h"
 #include "chrome/renderer/extensions/chrome_v8_context_set.h"
 #include "chrome/renderer/extensions/chrome_v8_extension.h"
@@ -35,6 +35,7 @@ using WebKit::WebFrame;
 using WebKit::WebSecurityOrigin;
 using WebKit::WebURL;
 using content::RenderThread;
+using extensions::Extension;
 
 namespace {
 

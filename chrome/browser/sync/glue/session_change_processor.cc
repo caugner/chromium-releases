@@ -11,11 +11,10 @@
 #include "chrome/browser/extensions/extension_tab_helper.h"
 #include "chrome/browser/history/history_notifications.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sync/api/sync_error.h"
 #include "chrome/browser/sync/glue/session_model_associator.h"
 #include "chrome/browser/sync/profile_sync_service.h"
-#include "chrome/browser/ui/sync/tab_contents_wrapper_synced_tab_delegate.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/sync/tab_contents_synced_tab_delegate.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
@@ -23,11 +22,12 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/web_contents.h"
-#include "sync/internal_api/change_record.h"
-#include "sync/internal_api/read_node.h"
+#include "sync/api/sync_error.h"
+#include "sync/internal_api/public/change_record.h"
+#include "sync/internal_api/public/read_node.h"
+#include "sync/internal_api/public/syncable/model_type.h"
+#include "sync/internal_api/public/syncable/model_type_payload_map.h"
 #include "sync/protocol/session_specifics.pb.h"
-#include "sync/syncable/model_type.h"
-#include "sync/syncable/model_type_payload_map.h"
 
 using content::BrowserThread;
 using content::NavigationController;
@@ -45,7 +45,7 @@ static const char kNTPOpenTabSyncURL[] = "chrome://newtab/#opentabs";
 // from a NavigationController, if it exists. Returns |NULL| otherwise.
 SyncedTabDelegate* ExtractSyncedTabDelegate(
     const content::NotificationSource& source) {
-  TabContentsWrapper* tab = TabContentsWrapper::GetCurrentWrapperForContents(
+  TabContents* tab = TabContents::FromWebContents(
       content::Source<NavigationController>(source).ptr()->GetWebContents());
   if (!tab)
     return NULL;
@@ -113,8 +113,7 @@ void SessionChangeProcessor::Observe(
 
     case chrome::NOTIFICATION_TAB_PARENTED: {
       SyncedTabDelegate* tab =
-          content::Source<TabContentsWrapper>(source).ptr()->
-              synced_tab_delegate();
+          content::Source<TabContents>(source).ptr()->synced_tab_delegate();
       if (!tab || tab->profile() != profile_) {
         return;
       }
@@ -124,13 +123,12 @@ void SessionChangeProcessor::Observe(
     }
 
     case content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME: {
-      TabContentsWrapper* tab_contents_wrapper =
-          TabContentsWrapper::GetCurrentWrapperForContents(
-              content::Source<WebContents>(source).ptr());
-      if (!tab_contents_wrapper) {
+      TabContents* tab_contents = TabContents::FromWebContents(
+          content::Source<WebContents>(source).ptr());
+      if (!tab_contents) {
         return;
       }
-      SyncedTabDelegate* tab = tab_contents_wrapper->synced_tab_delegate();
+      SyncedTabDelegate* tab = tab_contents->synced_tab_delegate();
       if (!tab || tab->profile() != profile_) {
         return;
       }
@@ -139,19 +137,14 @@ void SessionChangeProcessor::Observe(
       break;
     }
 
-    case content::NOTIFICATION_WEB_CONTENTS_DESTROYED: {
-      TabContentsWrapper* tab_contents_wrapper =
-          TabContentsWrapper::GetCurrentWrapperForContents(
-              content::Source<WebContents>(source).ptr());
-      if (!tab_contents_wrapper) {
-        return;
-      }
-      SyncedTabDelegate* tab = tab_contents_wrapper->synced_tab_delegate();
+    case chrome::NOTIFICATION_TAB_CONTENTS_DESTROYED: {
+      TabContents* tab_contents = content::Source<TabContents>(source).ptr();
+      SyncedTabDelegate* tab = tab_contents->synced_tab_delegate();
       if (!tab || tab->profile() != profile_) {
         return;
       }
       modified_tabs.push_back(tab);
-      DVLOG(1) << "Received NOTIFICATION_WEB_CONTENTS_DESTROYED for profile "
+      DVLOG(1) << "Received NOTIFICATION_TAB_CONTENTS_DESTROYED for profile "
                << profile_;
       break;
     }
@@ -195,7 +188,7 @@ void SessionChangeProcessor::Observe(
         return;
       }
       if (extension_tab_helper->extension_app()) {
-        modified_tabs.push_back(extension_tab_helper->tab_contents_wrapper()->
+        modified_tabs.push_back(extension_tab_helper->tab_contents()->
             synced_tab_delegate());
       }
       DVLOG(1) << "Received TAB_CONTENTS_APPLICATION_EXTENSION_CHANGED "
@@ -270,7 +263,7 @@ void SessionChangeProcessor::ApplyChangesFromSyncModel(
 
   sync_api::ReadNode root(trans);
   if (root.InitByTagLookup(kSessionsTag) != sync_api::BaseNode::INIT_OK) {
-    error_handler()->OnUnrecoverableError(FROM_HERE,
+    error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
         "Sessions root node lookup failed.");
     return;
   }
@@ -354,8 +347,7 @@ void SessionChangeProcessor::StartObserving() {
     return;
   notification_registrar_.Add(this, chrome::NOTIFICATION_TAB_PARENTED,
       content::NotificationService::AllSources());
-  notification_registrar_.Add(this,
-      content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
+  notification_registrar_.Add(this, chrome::NOTIFICATION_TAB_CONTENTS_DESTROYED,
       content::NotificationService::AllSources());
   notification_registrar_.Add(this, content::NOTIFICATION_NAV_LIST_PRUNED,
       content::NotificationService::AllSources());

@@ -96,9 +96,6 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kSavingBrowserHistoryDisabled,
     prefs::kSavingBrowserHistoryDisabled,
     Value::TYPE_BOOLEAN },
-  { key::kClearSiteDataOnExit,
-    prefs::kClearSiteDataOnExit,
-    Value::TYPE_BOOLEAN },
   { key::kDeveloperToolsDisabled,
     prefs::kDevToolsDisabled,
     Value::TYPE_BOOLEAN },
@@ -282,6 +279,9 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kEnableMemoryInfo,
     prefs::kEnableMemoryInfo,
     Value::TYPE_BOOLEAN },
+  { key::kRestrictSigninToPattern,
+    prefs::kGoogleServicesUsernamePattern,
+    Value::TYPE_STRING },
 
 #if defined(OS_CHROMEOS)
   { key::kChromeOsLockOnIdleSuspend,
@@ -316,6 +316,7 @@ ConfigurationPolicyHandlerList::ConfigurationPolicyHandlerList() {
   }
 
   handlers_.push_back(new AutofillPolicyHandler());
+  handlers_.push_back(new ClearSiteDataOnExitPolicyHandler());
   handlers_.push_back(new DefaultSearchPolicyHandler());
   handlers_.push_back(new DiskCacheDirPolicyHandler());
   handlers_.push_back(new FileSelectionDialogsHandler());
@@ -333,6 +334,10 @@ ConfigurationPolicyHandlerList::ConfigurationPolicyHandlerList() {
       new ExtensionListPolicyHandler(key::kExtensionInstallBlacklist,
                                      prefs::kExtensionInstallDenyList,
                                      true));
+  handlers_.push_back(
+      new ExtensionURLPatternListPolicyHandler(
+          key::kExtensionInstallSources,
+          prefs::kExtensionAllowedInstallSites));
 
 #if !defined(OS_CHROMEOS)
   handlers_.push_back(new DownloadDirPolicyHandler());

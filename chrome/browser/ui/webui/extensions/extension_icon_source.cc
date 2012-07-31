@@ -19,10 +19,12 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/url_constants.h"
+#include "googleurl/src/gurl.h"
 #include "grit/component_extension_resources_map.h"
 #include "grit/theme_resources.h"
-#include "googleurl/src/gurl.h"
+#include "grit/theme_resources_standard.h"
 #include "skia/ext/image_operations.h"
+#include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/color_utils.h"
@@ -60,14 +62,14 @@ ExtensionIconSource::ExtensionIconSource(Profile* profile)
 
 struct ExtensionIconSource::ExtensionIconRequest {
   int request_id;
-  const Extension* extension;
+  const extensions::Extension* extension;
   bool grayscale;
   int size;
   ExtensionIconSet::MatchType match;
 };
 
 // static
-GURL ExtensionIconSource::GetIconURL(const Extension* extension,
+GURL ExtensionIconSource::GetIconURL(const extensions::Extension* extension,
                                      int icon_size,
                                      ExtensionIconSet::MatchType match,
                                      bool grayscale,
@@ -90,7 +92,8 @@ GURL ExtensionIconSource::GetIconURL(const Extension* extension,
 // static
 SkBitmap* ExtensionIconSource::LoadImageByResourceId(int resource_id) {
   std::string contents = ResourceBundle::GetSharedInstance()
-      .GetRawDataResource(resource_id).as_string();
+      .GetRawDataResource(resource_id,
+                          ui::SCALE_FACTOR_100P).as_string();
 
   // Convert and return it.
   const unsigned char* data =
@@ -296,7 +299,7 @@ bool ExtensionIconSource::ParseData(const std::string& path,
     match_type = ExtensionIconSet::MATCH_EXACTLY;
 
   std::string extension_id = path_parts.at(0);
-  const Extension* extension =
+  const extensions::Extension* extension =
       profile_->GetExtensionService()->GetInstalledExtension(extension_id);
   if (!extension)
     return false;
@@ -316,7 +319,7 @@ void ExtensionIconSource::SendDefaultResponse(int request_id) {
 }
 
 void ExtensionIconSource::SetData(int request_id,
-                                  const Extension* extension,
+                                  const extensions::Extension* extension,
                                   bool grayscale,
                                   int size,
                                   ExtensionIconSet::MatchType match) {

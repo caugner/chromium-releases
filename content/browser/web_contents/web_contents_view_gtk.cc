@@ -78,6 +78,15 @@ gboolean OnMouseScroll(GtkWidget* widget, GdkEventScroll* event,
 
 namespace content {
 
+WebContentsView* CreateWebContentsView(
+    WebContentsImpl* web_contents,
+    WebContentsViewDelegate* delegate,
+    RenderViewHostDelegateView** render_view_host_delegate_view) {
+  WebContentsViewGtk* rv = new WebContentsViewGtk(web_contents, delegate);
+  *render_view_host_delegate_view = rv;
+  return rv;
+}
+
 WebContentsViewGtk::WebContentsViewGtk(
     WebContentsImpl* web_contents,
     content::WebContentsViewDelegate* delegate)
@@ -250,15 +259,17 @@ bool WebContentsViewGtk::IsEventTracking() const {
 void WebContentsViewGtk::CloseTabAfterEventTracking() {
 }
 
-void WebContentsViewGtk::GetViewBounds(gfx::Rect* out) const {
+gfx::Rect WebContentsViewGtk::GetViewBounds() const {
+  gfx::Rect rect;
   GdkWindow* window = gtk_widget_get_window(GetNativeView());
   if (!window) {
-    out->SetRect(0, 0, requested_size_.width(), requested_size_.height());
-    return;
+    rect.SetRect(0, 0, requested_size_.width(), requested_size_.height());
+    return rect;
   }
   int x = 0, y = 0, w, h;
   gdk_window_get_geometry(window, &x, &y, &w, &h, NULL);
-  out->SetRect(x, y, w, h);
+  rect.SetRect(x, y, w, h);
+  return rect;
 }
 
 WebContents* WebContentsViewGtk::web_contents() {
@@ -315,58 +326,8 @@ gboolean WebContentsViewGtk::OnFocus(GtkWidget* widget,
   return TRUE;
 }
 
-void WebContentsViewGtk::CreateNewWindow(
-    int route_id,
-    const ViewHostMsg_CreateWindow_Params& params) {
-  web_contents_view_helper_.CreateNewWindow(web_contents_, route_id, params);
-}
-
-void WebContentsViewGtk::CreateNewWidget(
-    int route_id, WebKit::WebPopupType popup_type) {
-  web_contents_view_helper_.CreateNewWidget(web_contents_,
-                                            route_id,
-                                            false,
-                                            popup_type);
-}
-
-void WebContentsViewGtk::CreateNewFullscreenWidget(int route_id) {
-  web_contents_view_helper_.CreateNewWidget(web_contents_,
-                                            route_id,
-                                            true,
-                                            WebKit::WebPopupTypeNone);
-}
-
-void WebContentsViewGtk::ShowCreatedWindow(int route_id,
-                                           WindowOpenDisposition disposition,
-                                           const gfx::Rect& initial_pos,
-                                           bool user_gesture) {
-  web_contents_view_helper_.ShowCreatedWindow(
-      web_contents_, route_id, disposition, initial_pos, user_gesture);
-}
-
-void WebContentsViewGtk::ShowCreatedWidget(
-    int route_id, const gfx::Rect& initial_pos) {
-  web_contents_view_helper_.ShowCreatedWidget(web_contents_,
-                                              route_id,
-                                              false,
-                                              initial_pos);
-}
-
-void WebContentsViewGtk::ShowCreatedFullscreenWidget(int route_id) {
-  web_contents_view_helper_.ShowCreatedWidget(web_contents_,
-                                              route_id,
-                                              true,
-                                              gfx::Rect());
-}
-
 void WebContentsViewGtk::ShowContextMenu(
     const content::ContextMenuParams& params) {
-  // Allow delegates to handle the context menu operation first.
-  if (web_contents()->GetDelegate() &&
-      web_contents()->GetDelegate()->HandleContextMenu(params)) {
-    return;
-  }
-
   if (delegate_.get())
     delegate_->ShowContextMenu(params);
   else
@@ -378,10 +339,10 @@ void WebContentsViewGtk::ShowPopupMenu(const gfx::Rect& bounds,
                                        double item_font_size,
                                        int selected_item,
                                        const std::vector<WebMenuItem>& items,
-                                       bool right_aligned) {
-  // We are not using external popup menus on Linux, they are rendered by
-  // WebKit.
-  NOTREACHED();
+                                       bool right_aligned,
+                                       bool allow_multiple_selection) {
+  // External popup menus are only used on Mac and Android.
+  NOTIMPLEMENTED();
 }
 
 // Render view DnD -------------------------------------------------------------

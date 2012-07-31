@@ -28,6 +28,7 @@
 #include "ui/base/clipboard/clipboard_util_win.h"
 #include "ui/base/clipboard/custom_data_helper.h"
 #include "ui/base/dragdrop/drag_utils.h"
+#include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/size.h"
 #include "webkit/glue/webdropdata.h"
 
@@ -215,12 +216,13 @@ void WebContentsDragWin::PrepareDragForDownload(
   // Zone.Identifier ADS (Alternate Data Stream) attached will be created.
   linked_ptr<net::FileStream> empty_file_stream;
   scoped_refptr<DragDownloadFile> download_file =
-      new DragDownloadFile(generated_download_file_name,
-                           empty_file_stream,
-                           download_url,
-                           page_url,
-                           page_encoding,
-                           web_contents_);
+      new DragDownloadFile(
+          generated_download_file_name,
+          empty_file_stream,
+          download_url,
+          content::Referrer(page_url, drop_data.referrer_policy),
+          page_encoding,
+          web_contents_);
   ui::OSExchangeData::DownloadFileInfo file_download(FilePath(),
                                                      download_file.get());
   data->SetDownloadFileInfo(file_download);
@@ -233,11 +235,11 @@ void WebContentsDragWin::PrepareDragForFileContents(
     const WebDropData& drop_data, ui::OSExchangeData* data) {
   static const int kMaxFilenameLength = 255;  // FAT and NTFS
   FilePath file_name(drop_data.file_description_filename);
-  string16 extension = file_name.Extension();
-  file_name = file_name.BaseName().RemoveExtension();
+
   // Images without ALT text will only have a file extension so we need to
   // synthesize one from the provided extension and URL.
-  if (file_name.value().empty()) {
+  if (file_name.BaseName().RemoveExtension().empty()) {
+    const string16 extension = file_name.Extension();
     // Retrieve the name from the URL.
     file_name = FilePath(
         net::GetSuggestedFilename(drop_data.url, "", "", "", "", ""));
@@ -245,15 +247,17 @@ void WebContentsDragWin::PrepareDragForFileContents(
       file_name = FilePath(file_name.value().substr(
           0, kMaxFilenameLength - extension.size()));
     }
+    file_name = file_name.ReplaceExtension(extension);
   }
-  file_name = file_name.ReplaceExtension(extension);
   data->SetFileContents(file_name, drop_data.file_contents);
 }
 
 void WebContentsDragWin::PrepareDragForUrl(const WebDropData& drop_data,
                                            ui::OSExchangeData* data) {
-  if (drag_dest_->delegate()->AddDragData(drop_data, data))
+  if (drag_dest_->delegate() &&
+      drag_dest_->delegate()->AddDragData(drop_data, data)) {
     return;
+  }
 
   data->SetURL(drop_data.url, drop_data.url_title);
 }
@@ -278,12 +282,12 @@ void WebContentsDragWin::DoDragging(const WebDropData& drop_data,
     // a shortcut so we add it first.
     if (!drop_data.file_contents.empty())
       PrepareDragForFileContents(drop_data, &data);
-    if (!drop_data.text_html.empty())
-      data.SetHtml(drop_data.text_html, drop_data.html_base_url);
+    if (!drop_data.html.string().empty())
+      data.SetHtml(drop_data.html.string(), drop_data.html_base_url);
     // We set the text contents before the URL because the URL also sets text
     // content.
-    if (!drop_data.plain_text.empty())
-      data.SetString(drop_data.plain_text);
+    if (!drop_data.text.string().empty())
+      data.SetString(drop_data.text.string());
     if (drop_data.url.is_valid())
       PrepareDragForUrl(drop_data, &data);
     if (!drop_data.custom_data.empty()) {
@@ -296,8 +300,8 @@ void WebContentsDragWin::DoDragging(const WebDropData& drop_data,
 
   // Set drag image.
   if (!image.isNull()) {
-    drag_utils::SetDragImageOnDataObject(
-        image, gfx::Size(image.width(), image.height()), image_offset, &data);
+    drag_utils::SetDragImageOnDataObject(gfx::ImageSkia(image),
+        gfx::Size(image.width(), image.height()), image_offset, &data);
   }
 
   // We need to enable recursive tasks on the message loop so we can get

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@
 #define CHROME_BROWSER_EXTENSIONS_EXTENSIONS_STARTUP_H_
 #pragma once
 
-#include "base/memory/scoped_ptr.h"
+#include "base/memory/ref_counted.h"
 #include "chrome/browser/extensions/pack_extension_job.h"
 
 class CommandLine;
@@ -33,8 +33,6 @@ class ExtensionsStartupUtil : public PackExtensionJob::Client {
   bool UninstallExtension(const CommandLine& cmd_line, Profile* profile);
 
  private:
-  void ShowPackExtensionMessage(const std::wstring& caption,
-                                const std::wstring& message);
   scoped_refptr<PackExtensionJob> pack_job_;
   bool pack_job_succeeded_;
 

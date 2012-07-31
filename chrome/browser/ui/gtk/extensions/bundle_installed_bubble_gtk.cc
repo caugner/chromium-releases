@@ -62,7 +62,7 @@ BundleInstalledBubbleGtk::~BundleInstalledBubbleGtk() {}
 void BundleInstalledBubbleGtk::ShowInternal(const BundleInstaller* bundle) {
   BrowserWindowGtk* browser_window =
       BrowserWindowGtk::GetBrowserWindowForNativeWindow(
-          browser_->window()->GetNativeHandle());
+          browser_->window()->GetNativeWindow());
 
   GtkThemeService* theme_provider = GtkThemeService::GetFrom(
       browser_->profile());
@@ -100,8 +100,9 @@ void BundleInstalledBubbleGtk::ShowInternal(const BundleInstaller* bundle) {
                             &bounds,
                             bubble_content,
                             arrow_location,
-                            true,  // match_system_theme
-                            true,  // grab_input
+                            BubbleGtk::MATCH_SYSTEM_THEME |
+                                BubbleGtk::POPUP_WINDOW |
+                                BubbleGtk::GRAB_INPUT,
                             theme_provider,
                             this);
 }

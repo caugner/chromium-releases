@@ -4,6 +4,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+# Version = @@VERSION@@
+
 HELPERTOOLS=/Library/PrivilegedHelperTools
 NAME=org.chromium.chromoting
 CONFIG_FILE="$HELPERTOOLS/$NAME.json"
@@ -14,7 +16,7 @@ ENABLED_FILE_BACKUP="$ENABLED_FILE.backup"
 KSADMIN=/Library/Google/GoogleSoftwareUpdate/GoogleSoftwareUpdate.bundle/Contents/MacOS/ksadmin
 KSUPDATE=https://tools.google.com/service/update2
 KSPID=com.google.chrome_remote_desktop
-KSPVERSION=@@VERSION_SHORT@@
+KSPVERSION=@@VERSION@@
 
 trap onexit ERR
 
@@ -24,12 +26,19 @@ function onexit {
   exit 0
 }
 
+logger Running Chrome Remote Desktop postflight script @@VERSION@@
+
 # Create auth file (with correct owner and permissions) if it doesn't already
 # exist.
 if [[ ! -f "$CONFIG_FILE" ]]; then
   touch "$CONFIG_FILE"
   chmod 600 "$CONFIG_FILE"
   chmod +a "$USER:allow:read" "$CONFIG_FILE"
+fi
+
+# If there is a backup _enabled file, re-enable the service.
+if [[ -f "$ENABLED_FILE_BACKUP" ]]; then
+  mv "$ENABLED_FILE_BACKUP" "$ENABLED_FILE"
 fi
 
 # Load the service.
@@ -46,14 +55,6 @@ USERNAME=$1
 USERID=$2
 if [[ -n "$USERNAME" && -n "$USERID" ]]; then
   launchctl bsexec "$USERID" sudo -u "$USERNAME" launchctl load -w -S Aqua "$PLIST"
-fi
-
-# If there is a backup _enabled file, re-enable the service.
-if [[ -f "$ENABLED_FILE_BACKUP" ]]; then
-  mv "$ENABLED_FILE_BACKUP" "$ENABLED_FILE"
-  if [[ -n "$USERNAME" && -n "$USERID" ]]; then
-    launchctl bsexec "$USERID" sudo -u "$USERNAME" launchctl start -w -S Aqua "$NAME"
-  fi
 fi
 
 # Register a ticket with Keystone so we're updated.

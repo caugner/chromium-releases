@@ -14,7 +14,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/test/base/test_browser_window.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
@@ -94,7 +94,6 @@ class MockCallback : public base::RefCountedThreadSafe<MockCallback> {
   explicit MockCallback(FakeManagedMode* managed_mode)
       : managed_mode_(managed_mode) {
   }
-  virtual ~MockCallback() {}
 
   void CheckManagedMode(bool success) {
     EXPECT_EQ(managed_mode_->IsInManagedModeImpl(), success);
@@ -103,7 +102,12 @@ class MockCallback : public base::RefCountedThreadSafe<MockCallback> {
 
   MOCK_METHOD1(DidEnterManagedMode, void(bool));
 
+ protected:
+  virtual ~MockCallback() {}
+
  private:
+  friend class base::RefCountedThreadSafe<MockCallback>;
+
   FakeManagedMode* managed_mode_;
 
   DISALLOW_COPY_AND_ASSIGN(MockCallback);

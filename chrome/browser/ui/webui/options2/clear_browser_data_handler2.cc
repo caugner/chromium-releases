@@ -10,6 +10,8 @@
 #include "base/string16.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browsing_data_helper.h"
+#include "chrome/browser/browsing_data_remover.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
@@ -22,7 +24,9 @@
 
 namespace options2 {
 
-ClearBrowserDataHandler::ClearBrowserDataHandler() : remover_(NULL) {
+ClearBrowserDataHandler::ClearBrowserDataHandler()
+    : remover_(NULL),
+      remove_hosted_app_data_pending_(false) {
 }
 
 ClearBrowserDataHandler::~ClearBrowserDataHandler() {
@@ -49,8 +53,12 @@ void ClearBrowserDataHandler::GetLocalizedValues(
     { "deleteCookiesFlashCheckbox", IDS_DEL_COOKIES_FLASH_CHKBOX },
     { "deletePasswordsCheckbox", IDS_DEL_PASSWORDS_CHKBOX },
     { "deleteFormDataCheckbox", IDS_DEL_FORM_DATA_CHKBOX },
+    { "deleteHostedAppsDataCheckbox", IDS_DEL_HOSTED_APPS_DATA_CHKBOX },
+    { "deauthorizeContentLicensesCheckbox",
+      IDS_DEAUTHORIZE_CONTENT_LICENSES_CHKBOX },
     { "clearBrowserDataCommit", IDS_CLEAR_BROWSING_DATA_COMMIT },
     { "flash_storage_url", IDS_FLASH_STORAGE_URL },
+    { "clearBrowsingDataLearnMoreUrl", IDS_CLEAR_BROWSING_DATA_LEARN_MORE_URL },
   };
 
   RegisterStrings(localized_strings, resources, arraysize(resources));
@@ -93,6 +101,8 @@ void ClearBrowserDataHandler::RegisterMessages() {
 }
 
 void ClearBrowserDataHandler::HandleClearBrowserData(const ListValue* value) {
+  DCHECK(!remover_);
+
   Profile* profile = Profile::FromWebUI(web_ui());
   PrefService* prefs = profile->GetPrefs();
 
@@ -114,30 +124,62 @@ void ClearBrowserDataHandler::HandleClearBrowserData(const ListValue* value) {
     remove_mask |= BrowsingDataRemover::REMOVE_PASSWORDS;
   if (prefs->GetBoolean(prefs::kDeleteFormData))
     remove_mask |= BrowsingDataRemover::REMOVE_FORM_DATA;
+  if (prefs->GetBoolean(prefs::kDeauthorizeContentLicenses))
+    remove_mask |= BrowsingDataRemover::REMOVE_CONTENT_LICENSES;
+
+  remove_hosted_app_data_pending_ =
+      prefs->GetBoolean(prefs::kDeleteHostedAppsData);
+
+  if (!remove_mask) {
+    // If no unprotected data should be removed, skip straight to removing
+    // hosted app data. If nothing should be removed (which would mean that the
+    // JS-side is buggy), skip straight to cleaning up.
+    if (remove_hosted_app_data_pending_)
+      ClearHostedAppData();
+    else
+      OnAllDataRemoved();
+  } else {
+    // BrowsingDataRemover deletes itself when done.
+    int period_selected = prefs->GetInteger(prefs::kDeleteTimePeriod);
+    remover_ = new BrowsingDataRemover(profile,
+        static_cast<BrowsingDataRemover::TimePeriod>(period_selected),
+        base::Time::Now());
+    remover_->AddObserver(this);
+    remover_->Remove(remove_mask, BrowsingDataHelper::UNPROTECTED_WEB);
+  }
+}
+
+void ClearBrowserDataHandler::ClearHostedAppData() {
+  DCHECK(!remover_);
+  DCHECK(remove_hosted_app_data_pending_);
+
+  remove_hosted_app_data_pending_ = false;
+  Profile* profile = Profile::FromWebUI(web_ui());
+  PrefService* prefs = profile->GetPrefs();
 
   int period_selected = prefs->GetInteger(prefs::kDeleteTimePeriod);
-
-  base::FundamentalValue state(true);
-  web_ui()->CallJavascriptFunction("ClearBrowserDataOverlay.setClearingState",
-                                   state);
-
-  // If we are still observing a previous data remover, we need to stop
-  // observing.
-  if (remover_)
-    remover_->RemoveObserver(this);
-
   // BrowsingDataRemover deletes itself when done.
-  remover_ = new BrowsingDataRemover(profile,
+  remover_ = new BrowsingDataRemover(
+      profile,
       static_cast<BrowsingDataRemover::TimePeriod>(period_selected),
-      base::Time());
+      base::Time::Now());
   remover_->AddObserver(this);
-  remover_->Remove(remove_mask);
+  remover_->Remove(BrowsingDataRemover::REMOVE_SITE_DATA,
+                   BrowsingDataHelper::PROTECTED_WEB);
 }
 
 void ClearBrowserDataHandler::OnBrowsingDataRemoverDone() {
   // No need to remove ourselves as an observer as BrowsingDataRemover deletes
   // itself after we return.
   remover_ = NULL;
+
+  if (remove_hosted_app_data_pending_)
+    ClearHostedAppData();
+  else
+    OnAllDataRemoved();
+}
+
+void ClearBrowserDataHandler::OnAllDataRemoved() {
   web_ui()->CallJavascriptFunction("ClearBrowserDataOverlay.doneClearing");
 }
 

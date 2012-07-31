@@ -17,10 +17,10 @@
 #include "base/memory/weak_ptr.h"
 #include "ipc/ipc_channel.h"
 #include "ipc/ipc_message.h"
-#include "ui/gfx/gl/gl_surface.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/size.h"
+#include "ui/gl/gl_surface.h"
 #include "ui/surface/transport_dib.h"
 
 class GpuChannelManager;
@@ -37,7 +37,7 @@ class GLSurface;
 
 namespace gpu {
 class GpuScheduler;
-
+struct RefCountedCounter;
 namespace gles2 {
 class GLES2Decoder;
 }
@@ -116,13 +116,19 @@ class ImageTransportHelper : public IPC::Channel::Listener {
 
   void DeferToFence(base::Closure task);
 
+  void SetPreemptByCounter(
+      scoped_refptr<gpu::RefCountedCounter> preempt_by_counter);
+
   // Make the surface's context current.
   bool MakeCurrent();
 
   // Set the default swap interval on the surface.
-  void SetSwapInterval();
+  static void SetSwapInterval(gfx::GLContext* context);
 
   void Suspend();
+
+  GpuChannelManager* manager() const { return manager_; }
+  GpuCommandBufferStub* stub() const { return stub_.get(); }
 
  private:
   gpu::GpuScheduler* Scheduler();

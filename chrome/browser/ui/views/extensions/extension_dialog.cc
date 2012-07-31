@@ -130,9 +130,9 @@ ExtensionHost* ExtensionDialog::CreateExtensionHost(const GURL& url,
 
 #if defined(USE_AURA)
 void ExtensionDialog::InitWindowFullscreen() {
-  aura::RootWindow* root_window = ash::Shell::GetRootWindow();
+  aura::RootWindow* root_window = ash::Shell::GetPrimaryRootWindow();
   gfx::Rect screen_rect =
-      gfx::Screen::GetMonitorNearestWindow(root_window).bounds();
+      gfx::Screen::GetDisplayNearestWindow(root_window).bounds();
 
   // We want to be the fullscreen topmost child of the root window.
   window_ = new views::Widget;
@@ -156,7 +156,7 @@ void ExtensionDialog::InitWindowFullscreen() {
 
 
 void ExtensionDialog::InitWindow(Browser* browser, int width, int height) {
-  gfx::NativeWindow parent = browser->window()->GetNativeHandle();
+  gfx::NativeWindow parent = browser->window()->GetNativeWindow();
   window_ = views::Widget::CreateWindowWithParent(this, parent);
 
   // Center the window over the browser.
@@ -192,6 +192,11 @@ void ExtensionDialog::MaybeFocusRenderView() {
   if (!view)
     return;
 
+  // TODO(oshima): Views + aura doesn't seem to update the views focus
+  // manager when an aura window gets focus. This is a workaround for
+  // this issue. Fix it this and remove this workaround.
+  // See bug.com/127222.
+  focus_manager->SetFocusedView(GetContentsView());
   view->Focus();
 }
 

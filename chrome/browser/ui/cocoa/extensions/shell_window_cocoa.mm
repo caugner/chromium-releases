@@ -5,10 +5,12 @@
 #include "chrome/browser/ui/cocoa/extensions/shell_window_cocoa.h"
 
 #include "base/sys_string_conversions.h"
-#include "chrome/browser/extensions/extension_host.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/cocoa/browser_window_utils.h"
 #include "chrome/browser/ui/cocoa/extensions/extension_view_mac.h"
 #include "chrome/common/extensions/extension.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #import "ui/base/cocoa/underlay_opengl_hosting_window.h"
 
 @implementation ShellWindowController
@@ -22,10 +24,14 @@
 
 @end
 
-ShellWindowCocoa::ShellWindowCocoa(ExtensionHost* host)
-    : ShellWindow(host),
+ShellWindowCocoa::ShellWindowCocoa(Profile* profile,
+                                   const extensions::Extension* extension,
+                                   const GURL& url,
+                                   const ShellWindow::CreateParams& params)
+    : ShellWindow(profile, extension, url),
       attention_request_id_(0) {
-  NSRect rect = NSMakeRect(0, 0, kDefaultWidth, kDefaultHeight);
+  NSRect rect = NSMakeRect(params.bounds.x(), params.bounds.y(),
+                           params.bounds.width(), params.bounds.height());
   NSUInteger styleMask = NSTitledWindowMask | NSClosableWindowMask |
                          NSMiniaturizableWindowMask | NSResizableWindowMask;
   scoped_nsobject<NSWindow> window([[UnderlayOpenGLHostingWindow alloc]
@@ -33,10 +39,10 @@ ShellWindowCocoa::ShellWindowCocoa(ExtensionHost* host)
                 styleMask:styleMask
                   backing:NSBackingStoreBuffered
                     defer:NO]);
-  [window setTitle:base::SysUTF8ToNSString(host->extension()->name())];
+  [window setTitle:base::SysUTF8ToNSString(extension->name())];
 
-  NSView* view = host->view()->native_view();
-  [view setFrame:rect];
+  NSView* view = web_contents()->GetView()->GetNativeView();
+  [view setFrame:[[window contentView] bounds]];
   [view setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
   [[window contentView] addSubview:view];
 
@@ -44,7 +50,6 @@ ShellWindowCocoa::ShellWindowCocoa(ExtensionHost* host)
       [[ShellWindowController alloc] initWithWindow:window.release()]);
   [[window_controller_ window] setDelegate:window_controller_];
   [window_controller_ setShellWindow:this];
-  [window_controller_ showWindow:nil];
 }
 
 bool ShellWindowCocoa::IsActive() const {
@@ -63,12 +68,16 @@ bool ShellWindowCocoa::IsFullscreen() const {
   return false;
 }
 
+gfx::NativeWindow ShellWindowCocoa::GetNativeWindow() {
+  return window();
+}
+
 gfx::Rect ShellWindowCocoa::GetRestoredBounds() const {
   // Flip coordinates based on the primary screen.
   NSScreen* screen = [[NSScreen screens] objectAtIndex:0];
   NSRect frame = [window() frame];
-  gfx::Rect bounds(frame.origin.x, 0, frame.size.width, frame.size.height);
-  bounds.set_y([screen frame].size.height - frame.origin.y - frame.size.height);
+  gfx::Rect bounds(frame.origin.x, 0, NSWidth(frame), NSHeight(frame));
+  bounds.set_y(NSHeight([screen frame]) - NSMaxY(frame));
   return bounds;
 }
 
@@ -77,6 +86,7 @@ gfx::Rect ShellWindowCocoa::GetBounds() const {
 }
 
 void ShellWindowCocoa::Show() {
+  [window_controller_ showWindow:nil];
   [window() makeKeyAndOrderFront:window_controller_];
 }
 
@@ -129,8 +139,7 @@ void ShellWindowCocoa::SetBounds(const gfx::Rect& bounds) {
                                    checked_bounds.height());
   // Flip coordinates based on the primary screen.
   NSScreen* screen = [[NSScreen screens] objectAtIndex:0];
-  cocoa_bounds.origin.y =
-      [screen frame].size.height - checked_bounds.height() - checked_bounds.y();
+  cocoa_bounds.origin.y = NSHeight([screen frame]) - checked_bounds.bottom();
 
   [window() setFrame:cocoa_bounds display:YES];
 }
@@ -154,7 +163,7 @@ bool ShellWindowCocoa::IsAlwaysOnTop() const {
 
 void ShellWindowCocoa::WindowWillClose() {
   [window_controller_ setShellWindow:NULL];
-  delete this;
+  OnNativeClose();
 }
 
 ShellWindowCocoa::~ShellWindowCocoa() {
@@ -165,6 +174,9 @@ NSWindow* ShellWindowCocoa::window() const {
 }
 
 // static
-ShellWindow* ShellWindow::CreateShellWindow(ExtensionHost* host) {
-  return new ShellWindowCocoa(host);
+ShellWindow* ShellWindow::CreateImpl(Profile* profile,
+                                     const extensions::Extension* extension,
+                                     const GURL& url,
+                                     const ShellWindow::CreateParams& params) {
+  return new ShellWindowCocoa(profile, extension, url, params);
 }

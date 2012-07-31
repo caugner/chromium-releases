@@ -19,7 +19,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_pref_service.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread.h"
 #include "sync/js/js_arg_list.h"
 #include "sync/js/js_event_details.h"
 #include "sync/js/js_test_util.h"
@@ -47,6 +47,7 @@ class ProfileSyncServiceTest : public testing::Test {
  protected:
   ProfileSyncServiceTest()
       : ui_thread_(BrowserThread::UI, &ui_loop_),
+        db_thread_(BrowserThread::DB),
         file_thread_(BrowserThread::FILE),
         io_thread_(BrowserThread::IO) {}
 
@@ -144,6 +145,7 @@ class ProfileSyncServiceTest : public testing::Test {
   MessageLoop ui_loop_;
   // Needed by |service_|.
   content::TestBrowserThread ui_thread_;
+  content::TestBrowserThread db_thread_;
   // Needed by DisableAndEnableSyncTemporarily test case.
   content::TestBrowserThread file_thread_;
   // Needed by |service| and |profile_|'s request context.

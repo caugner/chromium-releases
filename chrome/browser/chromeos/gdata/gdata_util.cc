@@ -21,6 +21,7 @@
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/browser/chromeos/gdata/gdata.pb.h"
 #include "chrome/browser/chromeos/gdata/gdata_file_system.h"
 #include "chrome/browser/chromeos/gdata/gdata_system_service.h"
 #include "chrome/browser/chromeos/login/user.h"
@@ -28,11 +29,13 @@
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_security_policy.h"
 #include "net/base/escape.h"
 #include "third_party/libxml/chromium/libxml_utils.h"
+
+using content::BrowserThread;
 
 namespace gdata {
 namespace util {
@@ -47,38 +50,21 @@ const FilePath::CharType* kGDataMountPointPathComponents[] = {
   "/", "special", "drive"
 };
 
-const FilePath::CharType* kGDataSearchPathComponents[] = {
-  "drive", ".search"
-};
-
 const int kReadOnlyFilePermissions = base::PLATFORM_FILE_OPEN |
                                      base::PLATFORM_FILE_READ |
                                      base::PLATFORM_FILE_EXCLUSIVE_READ |
                                      base::PLATFORM_FILE_ASYNC;
 
-class GetFileNameDelegate : public FindEntryDelegate {
- public:
-  GetFileNameDelegate() {}
-  virtual ~GetFileNameDelegate() {}
-
-  const std::string& file_name() const { return file_name_; }
- private:
-  // GDataFileSystem::FindEntryDelegate overrides.
-  virtual void OnDone(base::PlatformFileError error,
-                      const FilePath& directory_path,
-                      GDataEntry* entry) OVERRIDE {
-    if (error == base::PLATFORM_FILE_OK && entry && entry->AsGDataFile()) {
-      file_name_ = entry->AsGDataFile()->file_name();
-    }
-  }
-
-  std::string file_name_;
-};
-
 GDataFileSystem* GetGDataFileSystem(Profile* profile) {
   GDataSystemService* system_service =
       GDataSystemServiceFactory::GetForProfile(profile);
   return system_service ? system_service->file_system() : NULL;
+}
+
+GDataCache* GetGDataCache(Profile* profile) {
+  GDataSystemService* system_service =
+      GDataSystemServiceFactory::GetForProfile(profile);
+  return system_service ? system_service->cache() : NULL;
 }
 
 void GetHostedDocumentURLBlockingThread(const FilePath& gdata_cache_path,
@@ -104,12 +90,83 @@ void GetHostedDocumentURLBlockingThread(const FilePath& gdata_cache_path,
   DVLOG(1) << "edit url " << *url;
 }
 
-void OpenEditURLUIThread(Profile* profile, GURL* edit_url) {
-  Browser* browser = BrowserList::GetLastActiveWithProfile(profile);
+void OpenEditURLUIThread(Profile* profile, const GURL* edit_url) {
+  Browser* browser = browser::FindLastActiveWithProfile(profile);
   if (browser) {
     browser->OpenURL(content::OpenURLParams(*edit_url, content::Referrer(),
         CURRENT_TAB, content::PAGE_TRANSITION_TYPED, false));
   }
+}
+
+// Invoked upon completion of GetFileInfoByResourceId initiated by
+// ModifyGDataFileResourceUrl.
+void OnGetFileInfoByResourceId(Profile* profile,
+                               const std::string& resource_id,
+                               base::PlatformFileError error,
+                               const FilePath& /* gdata_file_path */,
+                               scoped_ptr<GDataFileProto> file_proto) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  if (error != base::PLATFORM_FILE_OK)
+    return;
+
+  DCHECK(file_proto.get());
+  const std::string& file_name = file_proto->gdata_entry().file_name();
+  const GURL edit_url = GetFileResourceUrl(resource_id, file_name);
+  OpenEditURLUIThread(profile, &edit_url);
+  DVLOG(1) << "OnFindEntryByResourceId " << edit_url;
+}
+
+// Invoked upon completion of GetFileInfoByPath initiated by
+// InsertGDataCachePathPermissions.
+void OnGetFileInfoForInsertGDataCachePathsPermissions(
+    Profile* profile,
+    std::vector<std::pair<FilePath, int> >* cache_paths,
+    const base::Closure& callback,
+    base::PlatformFileError error,
+    scoped_ptr<GDataFileProto> file_info) {
+  DCHECK(profile);
+  DCHECK(cache_paths);
+  DCHECK(!callback.is_null());
+
+  GDataCache* cache = GetGDataCache(profile);
+  if (!cache || error != base::PLATFORM_FILE_OK) {
+    callback.Run();
+    return;
+  }
+
+  DCHECK(file_info.get());
+  std::string resource_id = file_info->gdata_entry().resource_id();
+  std::string file_md5 = file_info->file_md5();
+
+  // We check permissions for raw cache file paths only for read-only
+  // operations (when fileEntry.file() is called), so read only permissions
+  // should be sufficient for all cache paths. For the rest of supported
+  // operations the file access check is done for drive/ paths.
+  cache_paths->push_back(std::make_pair(
+      cache->GetCacheFilePath(resource_id, file_md5,
+          GDataCache::CACHE_TYPE_PERSISTENT,
+          GDataCache::CACHED_FILE_FROM_SERVER),
+      kReadOnlyFilePermissions));
+  // TODO(tbarzic): When we start supporting openFile operation, we may have to
+  // change permission for localy modified files to match handler's permissions.
+  cache_paths->push_back(std::make_pair(
+      cache->GetCacheFilePath(resource_id, file_md5,
+          GDataCache::CACHE_TYPE_PERSISTENT,
+          GDataCache::CACHED_FILE_LOCALLY_MODIFIED),
+     kReadOnlyFilePermissions));
+  cache_paths->push_back(std::make_pair(
+      cache->GetCacheFilePath(resource_id, file_md5,
+          GDataCache::CACHE_TYPE_PERSISTENT,
+          GDataCache::CACHED_FILE_MOUNTED),
+     kReadOnlyFilePermissions));
+  cache_paths->push_back(std::make_pair(
+      cache->GetCacheFilePath(resource_id, file_md5,
+          GDataCache::CACHE_TYPE_TMP,
+          GDataCache::CACHED_FILE_FROM_SERVER),
+      kReadOnlyFilePermissions));
+
+  callback.Run();
 }
 
 }  // namespace
@@ -144,86 +201,43 @@ GURL GetFileResourceUrl(const std::string& resource_id,
 void ModifyGDataFileResourceUrl(Profile* profile,
                                 const FilePath& gdata_cache_path,
                                 GURL* url) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
   GDataFileSystem* file_system = GetGDataFileSystem(profile);
   if (!file_system)
     return;
+  GDataCache* cache = GetGDataCache(profile);
+  if (!cache)
+    return;
 
-  // Handle hosted documents. The edit url is in the temporary file, so we
-  // read it on a blocking thread.
-  if (file_system->GetCacheDirectoryPath(
-          GDataRootDirectory::CACHE_TYPE_TMP_DOCUMENTS).IsParent(
+  if (cache->GetCacheDirectoryPath(
+          GDataCache::CACHE_TYPE_TMP_DOCUMENTS).IsParent(
       gdata_cache_path)) {
+    // Handle hosted documents. The edit url is in the temporary file, so we
+    // read it on a blocking thread.
     GURL* edit_url = new GURL();
     content::BrowserThread::GetBlockingPool()->PostTaskAndReply(FROM_HERE,
         base::Bind(&GetHostedDocumentURLBlockingThread,
                    gdata_cache_path, edit_url),
         base::Bind(&OpenEditURLUIThread, profile, base::Owned(edit_url)));
     *url = GURL();
-    return;
-  }
-
-  // Handle all other gdata files.
-  if (file_system->GetCacheDirectoryPath(
-          GDataRootDirectory::CACHE_TYPE_TMP).IsParent(gdata_cache_path)) {
+  } else if (cache->GetCacheDirectoryPath(
+      GDataCache::CACHE_TYPE_TMP).IsParent(gdata_cache_path)) {
+    // Handle all other gdata files.
     const std::string resource_id =
         gdata_cache_path.BaseName().RemoveExtension().AsUTF8Unsafe();
-    GetFileNameDelegate delegate;
-    file_system->FindEntryByResourceIdSync(resource_id, &delegate);
-    *url = gdata::util::GetFileResourceUrl(resource_id, delegate.file_name());
-    DVLOG(1) << "ModifyGDataFileResourceUrl " << *url;
+    file_system->GetFileInfoByResourceId(
+        resource_id,
+        base::Bind(&OnGetFileInfoByResourceId,
+                   profile,
+                   resource_id));
+    *url = GURL();
   }
 }
 
 bool IsUnderGDataMountPoint(const FilePath& path) {
   return GetGDataMountPointPath() == path ||
          GetGDataMountPointPath().IsParent(path);
-}
-
-GDataSearchPathType GetSearchPathStatus(const FilePath& path) {
-  std::vector<std::string> components;
-  path.GetComponents(&components);
-  return GetSearchPathStatusForPathComponents(components);
-}
-
-GDataSearchPathType GetSearchPathStatusForPathComponents(
-    const std::vector<std::string>& path_components) {
-  if (path_components.size() < arraysize(kGDataSearchPathComponents))
-    return GDATA_SEARCH_PATH_INVALID;
-
-  for (size_t i = 0; i < arraysize(kGDataSearchPathComponents); i++) {
-    if (path_components[i] != kGDataSearchPathComponents[i])
-      return GDATA_SEARCH_PATH_INVALID;
-  }
-
-  switch (path_components.size()) {
-    case 2:
-      return GDATA_SEARCH_PATH_ROOT;
-    case 3:
-      return GDATA_SEARCH_PATH_QUERY;
-    case 4:
-      return GDATA_SEARCH_PATH_RESULT;
-    default:
-      return GDATA_SEARCH_PATH_RESULT_CHILD;
-  }
-}
-
-bool ParseSearchFileName(const std::string& search_file_name,
-                         std::string* resource_id,
-                         std::string* original_file_name) {
-  DCHECK(resource_id);
-  DCHECK(original_file_name);
-
-  *resource_id = "";
-  *original_file_name = "";
-
-  size_t dot_index = search_file_name.find('.');
-  if (dot_index == std::string::npos)
-    return false;
-
-  *resource_id = search_file_name.substr(0, dot_index);
-  if (search_file_name.length() - 1 > dot_index)
-    *original_file_name = search_file_name.substr(dot_index + 1);
-  return (!resource_id->empty() && !original_file_name->empty());
 }
 
 FilePath ExtractGDataPath(const FilePath& path) {
@@ -244,47 +258,40 @@ FilePath ExtractGDataPath(const FilePath& path) {
 
 void InsertGDataCachePathsPermissions(
     Profile* profile,
-    const FilePath& gdata_path,
-    std::vector<std::pair<FilePath, int> >* cache_paths ) {
+    scoped_ptr<std::vector<FilePath> > gdata_paths,
+    std::vector<std::pair<FilePath, int> >* cache_paths,
+    const base::Closure& callback) {
+  DCHECK(profile);
+  DCHECK(gdata_paths.get());
   DCHECK(cache_paths);
+  DCHECK(!callback.is_null());
 
   GDataFileSystem* file_system = GetGDataFileSystem(profile);
-  if (!file_system)
+  if (!file_system || gdata_paths->empty()) {
+    callback.Run();
     return;
+  }
 
-  GDataFileProperties file_properties;
-  file_system->GetFileInfoByPath(gdata_path, &file_properties);
+  // Remove one file path entry from the back of the input vector |gdata_paths|.
+  FilePath gdata_path = gdata_paths->back();
+  gdata_paths->pop_back();
 
-  std::string resource_id = file_properties.resource_id;
-  std::string file_md5 = file_properties.file_md5;
-
-  // We check permissions for raw cache file paths only for read-only
-  // operations (when fileEntry.file() is called), so read only permissions
-  // should be sufficient for all cache paths. For the rest of supported
-  // operations the file access check is done for drive/ paths.
-  cache_paths->push_back(std::make_pair(
-      file_system->GetCacheFilePath(resource_id, file_md5,
-          GDataRootDirectory::CACHE_TYPE_PERSISTENT,
-          GDataFileSystem::CACHED_FILE_FROM_SERVER),
-      kReadOnlyFilePermissions));
-  // TODO(tbarzic): When we start supporting openFile operation, we may have to
-  // change permission for localy modified files to match handler's permissions.
-  cache_paths->push_back(std::make_pair(
-      file_system->GetCacheFilePath(resource_id, file_md5,
-          GDataRootDirectory::CACHE_TYPE_PERSISTENT,
-          GDataFileSystem::CACHED_FILE_LOCALLY_MODIFIED),
-     kReadOnlyFilePermissions));
-  cache_paths->push_back(std::make_pair(
-      file_system->GetCacheFilePath(resource_id, file_md5,
-          GDataRootDirectory::CACHE_TYPE_PERSISTENT,
-          GDataFileSystem::CACHED_FILE_MOUNTED),
-     kReadOnlyFilePermissions));
-  cache_paths->push_back(std::make_pair(
-      file_system->GetCacheFilePath(resource_id, file_md5,
-          GDataRootDirectory::CACHE_TYPE_TMP,
-          GDataFileSystem::CACHED_FILE_FROM_SERVER),
-      kReadOnlyFilePermissions));
-
+  // Call GetFileInfoByPath() to get file info for |gdata_path| then insert
+  // all possible cache paths to the output vector |cache_paths|.
+  // Note that we can only process one file path at a time. Upon completion
+  // of OnGetFileInfoForInsertGDataCachePathsPermissions(), we recursively call
+  // InsertGDataCachePathsPermissions() to process the next file path from the
+  // back of the input vector |gdata_paths| until it is empty.
+  file_system->GetFileInfoByPath(
+      gdata_path,
+      base::Bind(&OnGetFileInfoForInsertGDataCachePathsPermissions,
+                 profile,
+                 cache_paths,
+                 base::Bind(&InsertGDataCachePathsPermissions,
+                             profile,
+                             base::Passed(&gdata_paths),
+                             cache_paths,
+                             callback)));
 }
 
 bool IsGDataAvailable(Profile* profile) {

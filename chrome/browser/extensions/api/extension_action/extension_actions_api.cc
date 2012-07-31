@@ -13,7 +13,7 @@
 #include "chrome/browser/extensions/extension_tab_helper.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_action.h"
@@ -46,7 +46,13 @@ bool ExtensionActionFunction::RunImpl() {
   extension_action_ = GetExtension()->browser_action();
   if (!extension_action_)
     extension_action_ = GetExtension()->page_action();
-  EXTENSION_FUNCTION_VALIDATE(extension_action_);
+  if (!extension_action_) {
+    // TODO(kalman): ideally the browserAction/pageAction APIs wouldn't event
+    // exist for extensions that don't have one declared. This should come as
+    // part of the Feature system.
+    error_ = kNoExtensionActionError;
+    return false;
+  }
 
   // There may or may not be details (depends on the function).
   // The tabId might appear in details (if it exists) or as the first
@@ -60,18 +66,31 @@ bool ExtensionActionFunction::RunImpl() {
         CHECK(first_arg->GetAsInteger(&tab_id_));
         break;
 
-      case Value::TYPE_DICTIONARY:
+      case Value::TYPE_DICTIONARY: {
         details_ = static_cast<base::DictionaryValue*>(first_arg);
-        if (details_->HasKey("tabId"))
-          EXTENSION_FUNCTION_VALIDATE(details_->GetInteger("tabId", &tab_id_));
+        base::Value* tab_id_value = NULL;
+        if (details_->Get("tabId", &tab_id_value)) {
+          switch (tab_id_value->GetType()) {
+            case Value::TYPE_NULL:
+              // Fine, equivalent to it being not-there, and tabId is optional.
+              break;
+            case Value::TYPE_INTEGER:
+              CHECK(tab_id_value->GetAsInteger(&tab_id_));
+              break;
+            default:
+              // Boom.
+              EXTENSION_FUNCTION_VALIDATE(false);
+          }
+        }
         break;
+      }
 
       default:
         EXTENSION_FUNCTION_VALIDATE(false);
     }
   }
 
-  // Find the TabContentsWrapper that contains this tab id if one is required.
+  // Find the TabContents that contains this tab id if one is required.
   if (tab_id_ == ExtensionAction::kDefaultTabId) {
     EXTENSION_FUNCTION_VALIDATE(GetExtension()->browser_action());
   } else {
@@ -145,9 +164,8 @@ bool ExtensionActionFunction::ParseCSSColorString(
 }
 
 bool ExtensionActionFunction::SetVisible(bool visible) {
-  // If --browser-actions-for-all is enabled there will be a browser_action
-  // here instead of a page action. Until we decide what to do with that, just
-  // ignore.
+  // If --enable-script-badges is on there will be a browser_action here
+  // instead of a page action. Disable/renable the browser action perhaps?
   if (!GetExtension()->page_action())
     return true;
   extension_action_->SetIsVisible(tab_id_, visible);
@@ -176,8 +194,8 @@ bool ExtensionActionSetIconFunction::RunExtensionAction() {
         IPC::ReadParam(&bitmap_pickle, &iter, &bitmap));
     extension_action_->SetIcon(tab_id_, bitmap);
   } else if (details_->GetInteger("iconIndex", &icon_index)) {
-    // If --browser-actions-for-all is enabled there might legitimately be an
-    // iconIndex set. Until we decide what to do with that, ignore.
+    // If --enable-script-badges is on there might legitimately be an iconIndex
+    // set. Until we decide what to do with that, ignore.
     if (!GetExtension()->page_action())
       return true;
     if (icon_index < 0 ||

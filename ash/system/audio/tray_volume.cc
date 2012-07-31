@@ -10,7 +10,7 @@
 #include "ash/system/tray/tray_views.h"
 #include "base/utf_string_conversions.h"
 #include "grit/ash_strings.h"
-#include "grit/ui_resources.h"
+#include "grit/ui_resources_standard.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkPaint.h"
 #include "third_party/skia/include/core/SkRect.h"
@@ -69,9 +69,9 @@ class VolumeButton : public views::ToggleImageButton {
     if (image_index != image_index_) {
       SkIRect region = SkIRect::MakeXYWH(0, image_index * kVolumeImageHeight,
           kVolumeImageWidth, kVolumeImageHeight);
-      SkBitmap bitmap;
-      image_.ToSkBitmap()->extractSubset(&bitmap, region);
-      SetImage(views::CustomButton::BS_NORMAL, &bitmap);
+      gfx::ImageSkia image_skia;
+      image_.ToImageSkia()->extractSubset(&image_skia, region);
+      SetImage(views::CustomButton::BS_NORMAL, &image_skia);
       image_index_ = image_index;
     }
     SchedulePaint();
@@ -106,7 +106,8 @@ class VolumeView : public views::View,
         ash::Shell::GetInstance()->tray_delegate();
     slider_ = new views::Slider(this, views::Slider::HORIZONTAL);
     slider_->set_focus_border_color(kFocusBorderColor);
-    slider_->SetValue(delegate->GetVolumeLevel());
+    slider_->SetValue(
+        delegate->IsAudioMuted() ? 0.0 : delegate->GetVolumeLevel());
     slider_->SetAccessibleName(
         ui::ResourceBundle::GetSharedInstance().GetLocalizedString(
             IDS_ASH_STATUS_TRAY_VOLUME));
@@ -148,8 +149,11 @@ class VolumeView : public views::View,
                                   float value,
                                   float old_value,
                                   views::SliderChangeReason reason) OVERRIDE {
-    if (reason == views::VALUE_CHANGED_BY_USER)
-      ash::Shell::GetInstance()->tray_delegate()->SetVolumeLevel(value);
+    if (reason == views::VALUE_CHANGED_BY_USER) {
+      ash::SystemTrayDelegate* delegate =
+          ash::Shell::GetInstance()->tray_delegate();
+      delegate->SetVolumeLevel(value);
+    }
     icon_->Update();
   }
 
@@ -171,7 +175,9 @@ TrayVolume::~TrayVolume() {
 }
 
 bool TrayVolume::GetInitialVisibility() {
-  return ash::Shell::GetInstance()->tray_delegate()->IsAudioMuted();
+  ash::SystemTrayDelegate* delegate =
+      ash::Shell::GetInstance()->tray_delegate();
+  return delegate->GetVolumeLevel() == 0.0 || delegate->IsAudioMuted();
 }
 
 views::View* TrayVolume::CreateDefaultView(user::LoginStatus status) {
@@ -201,6 +207,8 @@ void TrayVolume::OnVolumeChanged(float percent) {
     tray_view()->SetVisible(GetInitialVisibility());
 
   if (volume_view_) {
+    if (ash::Shell::GetInstance()->tray_delegate()->IsAudioMuted())
+      percent = 0.0;
     volume_view_->SetVolumeLevel(percent);
     SetDetailedViewCloseDelay(kTrayPopupAutoCloseDelayInSeconds);
     return;

@@ -106,7 +106,7 @@ VideoCaptureDevice* VideoCaptureDevice::Create(const Name& device_name) {
   // allocates the camera.
   int fd = open(device_name.unique_id.c_str(), O_RDONLY);
   if (fd < 0) {
-    DPLOG(ERROR) << "Cannot open device";
+    DVLOG(1) << "Cannot open device";
     delete self;
     return NULL;
   }
@@ -197,7 +197,8 @@ void VideoCaptureDeviceLinux::OnAllocate(int width,
 
   observer_ = observer;
 
-  if ((device_fd_ = open(device_name_.unique_id.c_str(), O_RDONLY)) < 0) {
+  // Need to open camera with O_RDWR after Linux kernel 3.3.
+  if ((device_fd_ = open(device_name_.unique_id.c_str(), O_RDWR)) < 0) {
     SetErrorState("Failed to open V4L2 device driver.");
     return;
   }
@@ -451,7 +452,7 @@ void VideoCaptureDeviceLinux::DeAllocateVideoBuffers() {
 }
 
 void VideoCaptureDeviceLinux::SetErrorState(const std::string& reason) {
-  DLOG(ERROR) << reason;
+  DVLOG(1) << reason;
   state_ = kError;
   observer_->OnError();
 }

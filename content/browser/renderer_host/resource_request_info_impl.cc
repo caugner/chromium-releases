@@ -4,11 +4,9 @@
 
 #include "content/browser/renderer_host/resource_request_info_impl.h"
 
-#include "content/browser/renderer_host/resource_handler.h"
-#include "content/browser/ssl/ssl_client_auth_handler.h"
 #include "content/browser/worker_host/worker_service_impl.h"
 #include "content/common/net/url_request_user_data.h"
-#include "content/public/browser/resource_dispatcher_host_login_delegate.h"
+#include "content/public/browser/global_request_id.h"
 #include "net/url_request/url_request.h"
 #include "webkit/blob/blob_data.h"
 
@@ -30,7 +28,6 @@ void ResourceRequestInfo::AllocateForTesting(
     ResourceContext* context) {
   ResourceRequestInfoImpl* info =
       new ResourceRequestInfoImpl(
-          NULL,                              // handler
           PROCESS_TYPE_RENDERER,             // process_type
           -1,                                // child_id
           MSG_ROUTING_NONE,                  // route_id
@@ -81,7 +78,6 @@ const ResourceRequestInfoImpl* ResourceRequestInfoImpl::ForRequest(
 }
 
 ResourceRequestInfoImpl::ResourceRequestInfoImpl(
-    ResourceHandler* handler,
     ProcessType process_type,
     int child_id,
     int route_id,
@@ -99,8 +95,7 @@ ResourceRequestInfoImpl::ResourceRequestInfoImpl(
     bool has_user_gesture,
     WebKit::WebReferrerPolicy referrer_policy,
     ResourceContext* context)
-    : resource_handler_(handler),
-      cross_site_handler_(NULL),
+    : cross_site_handler_(NULL),
       process_type_(process_type),
       child_id_(child_id),
       route_id_(route_id),
@@ -114,24 +109,15 @@ ResourceRequestInfoImpl::ResourceRequestInfoImpl(
       is_download_(is_download),
       allow_download_(allow_download),
       has_user_gesture_(has_user_gesture),
-      pause_count_(0),
       resource_type_(resource_type),
       transition_type_(transition_type),
       upload_size_(upload_size),
-      last_upload_position_(0),
-      waiting_for_upload_progress_ack_(false),
       memory_cost_(0),
       referrer_policy_(referrer_policy),
-      context_(context),
-      is_paused_(false),
-      called_on_response_started_(false),
-      has_started_reading_(false),
-      paused_read_bytes_(0) {
+      context_(context) {
 }
 
 ResourceRequestInfoImpl::~ResourceRequestInfoImpl() {
-  if (resource_handler_)
-    resource_handler_->OnRequestClosed();
 }
 
 ResourceContext* ResourceRequestInfoImpl::GetContext() const {
@@ -214,19 +200,8 @@ void ResourceRequestInfoImpl::AssociateWithRequest(net::URLRequest* request) {
   }
 }
 
-void ResourceRequestInfoImpl::set_resource_handler(
-    ResourceHandler* resource_handler) {
-  resource_handler_ = resource_handler;
-}
-
-void ResourceRequestInfoImpl::set_login_delegate(
-    ResourceDispatcherHostLoginDelegate* ld) {
-  login_delegate_ = ld;
-}
-
-void ResourceRequestInfoImpl::set_ssl_client_auth_handler(
-    SSLClientAuthHandler* s) {
-  ssl_client_auth_handler_ = s;
+GlobalRequestID ResourceRequestInfoImpl::GetGlobalRequestID() const {
+  return GlobalRequestID(child_id_, request_id_);
 }
 
 void ResourceRequestInfoImpl::set_requested_blob_data(

@@ -42,6 +42,9 @@ const char kOnFileBrowserNetworkConnectionChanged[] =
 
 const char kOnInputMethodChanged[] = "inputMethodPrivate.onChanged";
 
+const char kOnContextMenus[] = "contextMenus";
+const char kOnContextMenuClicked[] = "contextMenus.onClicked";
+
 const char kOnDownloadCreated[] = "experimental.downloads.onCreated";
 const char kOnDownloadChanged[] = "experimental.downloads.onChanged";
 const char kOnDownloadErased[] = "experimental.downloads.onErased";
@@ -55,6 +58,8 @@ const char kOnOffscreenTabUpdated[] = "experimental.offscreenTabs.onUpdated";
 #if defined(OS_CHROMEOS)
 const char kBluetoothOnAvailabilityChanged[] =
     "experimental.bluetooth.onAvailabilityChanged";
+const char kBluetoothOnDeviceDiscovered[] =
+    "experimental.bluetooth.onDeviceDiscovered";
 const char kBluetoothOnPowerChanged[] =
     "experimental.bluetooth.onPowerChanged";
 #endif

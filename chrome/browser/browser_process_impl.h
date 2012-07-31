@@ -15,16 +15,14 @@
 
 #include "base/basictypes.h"
 #include "base/debug/stack_trace.h"
+#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
 #include "base/threading/non_thread_safe.h"
 #include "base/timer.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/browser/prefs/pref_member.h"
-#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_observer.h"
-#include "ipc/ipc_message.h"
 
 class ChromeNetLog;
 class ChromeResourceDispatcherHostDelegate;
@@ -60,7 +58,7 @@ class BrowserProcessImpl : public BrowserProcess,
   void StartTearDown();
   void PostDestroyThreads();
 
-  // BrowserProcess methods
+  // BrowserProcess implementation.
   virtual void ResourceDispatcherHostCreated() OVERRIDE;
   virtual void EndSession() OVERRIDE;
   virtual MetricsService* metrics_service() OVERRIDE;
@@ -70,8 +68,9 @@ class BrowserProcessImpl : public BrowserProcess,
   virtual PrefService* local_state() OVERRIDE;
   virtual ui::Clipboard* clipboard() OVERRIDE;
   virtual net::URLRequestContextGetter* system_request_context() OVERRIDE;
+  virtual VariationsService* variations_service() OVERRIDE;
 #if defined(OS_CHROMEOS)
-  virtual browser::OomPriorityManager* oom_priority_manager() OVERRIDE;
+  virtual chromeos::OomPriorityManager* oom_priority_manager() OVERRIDE;
 #endif  // defined(OS_CHROMEOS)
   virtual ExtensionEventRouterForwarder*
         extension_event_router_forwarder() OVERRIDE;
@@ -107,11 +106,6 @@ class BrowserProcessImpl : public BrowserProcess,
       safe_browsing_detection_service() OVERRIDE;
   virtual bool plugin_finder_disabled() const OVERRIDE;
 
-  // content::NotificationObserver methods
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
-
 #if (defined(OS_WIN) || defined(OS_LINUX)) && !defined(OS_CHROMEOS)
   virtual void StartAutoupdateTimer() OVERRIDE;
 #endif
@@ -121,15 +115,18 @@ class BrowserProcessImpl : public BrowserProcess,
   virtual ComponentUpdateService* component_updater() OVERRIDE;
   virtual CRLSetFetcher* crl_set_fetcher() OVERRIDE;
 
+  // content::NotificationObserver implementation.
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
+
  private:
   void CreateMetricsService();
   void CreateWatchdogThread();
 #if defined(OS_CHROMEOS)
   void InitializeWebSocketProxyThread();
 #endif
-  void CreateTemplateURLService();
   void CreateProfileManager();
-  void CreateWebDataService();
   void CreateLocalState();
   void CreateViewedPageTracker();
   void CreateIconManager();
@@ -156,6 +153,11 @@ class BrowserProcessImpl : public BrowserProcess,
   bool created_watchdog_thread_;
   scoped_ptr<WatchDogThread> watchdog_thread_;
 
+  // Must be destroyed after |policy_service_| if StartTearDown() isn't invoked
+  // during an early shutdown.
+  bool created_browser_policy_connector_;
+  scoped_ptr<policy::BrowserPolicyConnector> browser_policy_connector_;
+
   // Must be destroyed after |local_state_|.
   scoped_ptr<policy::PolicyService> policy_service_;
 
@@ -173,15 +175,14 @@ class BrowserProcessImpl : public BrowserProcess,
 
   scoped_ptr<RemoteDebuggingServer> remote_debugging_server_;
 
-  bool created_browser_policy_connector_;
-  scoped_ptr<policy::BrowserPolicyConnector> browser_policy_connector_;
-
   scoped_refptr<printing::PrintPreviewTabController>
       print_preview_tab_controller_;
 
   scoped_ptr<printing::BackgroundPrintingManager> background_printing_manager_;
 
   scoped_ptr<ui::Clipboard> clipboard_;
+
+  scoped_ptr<VariationsService> variations_service_;
 
   // Manager for desktop notification UI.
   bool created_notification_ui_manager_;
@@ -249,13 +250,11 @@ class BrowserProcessImpl : public BrowserProcess,
   void OnAutoupdateTimer();
   bool CanAutorestartForUpdate() const;
   void RestartBackgroundInstance();
-#endif  // defined(OS_WIN) || defined(OS_LINUX)
+#endif  // defined(OS_WIN) || defined(OS_LINUX) && !defined(OS_CHROMEOS)
 
 #if defined(OS_CHROMEOS)
-  scoped_ptr<browser::OomPriorityManager> oom_priority_manager_;
-#endif
-
-#if !defined(OS_CHROMEOS)
+  scoped_ptr<chromeos::OomPriorityManager> oom_priority_manager_;
+#else
   scoped_ptr<ComponentUpdateService> component_updater_;
 
   scoped_refptr<CRLSetFetcher> crl_set_fetcher_;

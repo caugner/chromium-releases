@@ -10,14 +10,15 @@
 #include "chrome/browser/extensions/extension_protocols.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/resource_request_info.h"
-#include "content/test/mock_resource_context.h"
-#include "content/test/test_browser_thread.h"
+#include "content/public/test/mock_resource_context.h"
+#include "content/public/test/test_browser_thread.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_status.h"
 #include "net/url_request/url_request_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using content::BrowserThread;
+using extensions::Extension;
 
 namespace {
 
@@ -34,7 +35,7 @@ scoped_refptr<Extension> CreateTestExtension(const std::string& name,
   std::string error;
   scoped_refptr<Extension> extension(
       Extension::Create(path, Extension::INTERNAL, manifest,
-                        Extension::STRICT_ERROR_CHECKS, &error));
+                        Extension::NO_FLAGS, &error));
   EXPECT_TRUE(extension.get()) << error;
   return extension;
 }

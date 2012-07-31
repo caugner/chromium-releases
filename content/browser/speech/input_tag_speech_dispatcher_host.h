@@ -4,8 +4,10 @@
 
 #ifndef CONTENT_BROWSER_SPEECH_INPUT_TAG_SPEECH_DISPATCHER_HOST_H_
 #define CONTENT_BROWSER_SPEECH_INPUT_TAG_SPEECH_DISPATCHER_HOST_H_
+#pragma once
 
-#include "base/memory/scoped_ptr.h"
+#include "base/compiler_specific.h"
+#include "base/memory/ref_counted.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/browser_message_filter.h"
 #include "content/public/browser/speech_recognition_event_listener.h"
@@ -14,13 +16,12 @@
 struct InputTagSpeechHostMsg_StartRecognition_Params;
 
 namespace content {
+class SpeechRecognitionManager;
 class SpeechRecognitionPreferences;
 struct SpeechRecognitionResult;
 }
 
 namespace speech {
-
-class SpeechRecognitionManagerImpl;
 
 // InputTagSpeechDispatcherHost is a delegate for Speech API messages used by
 // RenderMessageFilter. Basically it acts as a proxy, relaying the events coming
@@ -55,27 +56,25 @@ class CONTENT_EXPORT InputTagSpeechDispatcherHost
                                  bool* message_was_ok) OVERRIDE;
 
   // Singleton manager setter useful for tests.
-  static void set_manager(SpeechRecognitionManagerImpl* manager);
+  static void SetManagerForTests(content::SpeechRecognitionManager* manager);
 
  private:
   virtual ~InputTagSpeechDispatcherHost();
 
   void OnStartRecognition(
-      const InputTagSpeechHostMsg_StartRecognition_Params &params);
+      const InputTagSpeechHostMsg_StartRecognition_Params& params);
   void OnCancelRecognition(int render_view_id, int request_id);
   void OnStopRecording(int render_view_id, int request_id);
 
   // Returns the speech recognition manager to forward events to, creating one
   // if needed.
-  SpeechRecognitionManagerImpl* manager();
+  content::SpeechRecognitionManager* manager();
 
   int render_process_id_;
-  bool may_have_pending_requests_;  // Set if we received any speech IPC request
-
   scoped_refptr<net::URLRequestContextGetter> url_request_context_getter_;
   scoped_refptr<content::SpeechRecognitionPreferences> recognition_preferences_;
 
-  static SpeechRecognitionManagerImpl* manager_;
+  static content::SpeechRecognitionManager* manager_for_tests_;
 
   DISALLOW_COPY_AND_ASSIGN(InputTagSpeechDispatcherHost);
 };

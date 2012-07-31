@@ -13,6 +13,7 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/linked_ptr.h"
+#include "ui/aura/client/activation_change_observer.h"
 #include "ui/aura/env_observer.h"
 #include "ui/aura/window_observer.h"
 
@@ -30,8 +31,10 @@ class Shadow;
 
 // ShadowController observes changes to windows and creates and updates drop
 // shadows as needed.
-class ASH_EXPORT ShadowController : public aura::EnvObserver,
-                                    public aura::WindowObserver {
+class ASH_EXPORT ShadowController :
+    public aura::EnvObserver,
+    public aura::WindowObserver,
+    public aura::client::ActivationChangeObserver {
  public:
   class TestApi {
    public:
@@ -58,8 +61,14 @@ class ASH_EXPORT ShadowController : public aura::EnvObserver,
   virtual void OnWindowPropertyChanged(
       aura::Window* window, const void* key, intptr_t old) OVERRIDE;
   virtual void OnWindowBoundsChanged(
-      aura::Window* window, const gfx::Rect& bounds) OVERRIDE;
+      aura::Window* window,
+      const gfx::Rect& old_bounds,
+      const gfx::Rect& new_bounds) OVERRIDE;
   virtual void OnWindowDestroyed(aura::Window* window) OVERRIDE;
+
+  // aura::client::ActivationChangeObserver overrides:
+  virtual void OnWindowActivated(aura::Window* active,
+                                 aura::Window* old_active) OVERRIDE;
 
  private:
   typedef std::map<aura::Window*, linked_ptr<Shadow> > WindowShadowMap;

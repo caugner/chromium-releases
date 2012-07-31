@@ -15,27 +15,28 @@
 #include "chrome/common/net/gaia/oauth2_mint_token_fetcher.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/common/url_fetcher.h"
-#include "content/public/common/url_fetcher_delegate.h"
-#include "content/public/common/url_fetcher_factory.h"
-#include "content/test/test_browser_thread.h"
-#include "content/test/test_url_fetcher_factory.h"
+#include "content/public/test/test_browser_thread.h"
+#include "content/public/test/test_url_fetcher_factory.h"
 #include "googleurl/src/gurl.h"
 #include "net/http/http_status_code.h"
+#include "net/url_request/url_fetcher_delegate.h"
+#include "net/url_request/url_fetcher_factory.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_status.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using content::BrowserThread;
-using content::URLFetcher;
-using content::URLFetcherDelegate;
-using content::URLFetcherFactory;
 using net::ResponseCookies;
+using net::URLFetcher;
+using net::URLFetcherDelegate;
+using net::URLFetcherFactory;
 using net::URLRequestStatus;
 using testing::_;
 using testing::Return;
 
 namespace {
+
 static const char kValidTokenResponse[] =
     "{"
     "  \"token\": \"at1\","
@@ -45,7 +46,6 @@ static const char kTokenResponseNoAccessToken[] =
     "{"
     "  \"issueAdvice\": \"Auto\""
     "}";
-}
 
 class MockUrlFetcherFactory : public ScopedURLFetcherFactory,
                               public URLFetcherFactory {
@@ -72,6 +72,8 @@ class MockOAuth2MintTokenConsumer : public OAuth2MintTokenConsumer {
   MOCK_METHOD1(OnMintTokenFailure,
                void(const GoogleServiceAuthError& error));
 };
+
+}  // namespace
 
 class OAuth2MintTokenFetcherTest : public testing::Test {
  public:

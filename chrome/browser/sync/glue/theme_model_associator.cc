@@ -8,14 +8,14 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/sync/api/sync_error.h"
 #include "chrome/browser/sync/glue/sync_backend_host.h"
 #include "chrome/browser/sync/glue/theme_util.h"
 #include "chrome/browser/sync/profile_sync_service.h"
-#include "sync/internal_api/read_node.h"
-#include "sync/internal_api/read_transaction.h"
-#include "sync/internal_api/write_node.h"
-#include "sync/internal_api/write_transaction.h"
+#include "sync/api/sync_error.h"
+#include "sync/internal_api/public/read_node.h"
+#include "sync/internal_api/public/read_transaction.h"
+#include "sync/internal_api/public/write_node.h"
+#include "sync/internal_api/public/write_transaction.h"
 #include "sync/protocol/theme_specifics.pb.h"
 
 namespace browser_sync {
@@ -68,8 +68,10 @@ SyncError ThemeModelAssociator::AssociateModels() {
   } else {
     // Set the sync data from the current theme.
     sync_api::WriteNode node(&trans);
-    if (!node.InitUniqueByCreation(syncable::THEMES, root,
-                                   kCurrentThemeClientTag)) {
+    sync_api::WriteNode::InitUniqueByCreationResult result =
+        node.InitUniqueByCreation(syncable::THEMES, root,
+                                  kCurrentThemeClientTag);
+    if (result != sync_api::WriteNode::INIT_SUCCESS) {
       return error_handler_->CreateAndUploadError(
           FROM_HERE,
           "Could not create current theme node.",

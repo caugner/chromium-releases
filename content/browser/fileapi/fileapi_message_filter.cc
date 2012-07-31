@@ -26,9 +26,11 @@
 #include "webkit/blob/blob_data.h"
 #include "webkit/blob/blob_storage_controller.h"
 #include "webkit/blob/shareable_file_reference.h"
+#include "webkit/fileapi/isolated_context.h"
 #include "webkit/fileapi/file_system_context.h"
 #include "webkit/fileapi/file_system_operation.h"
 #include "webkit/fileapi/file_system_quota_util.h"
+#include "webkit/fileapi/file_system_types.h"
 #include "webkit/fileapi/file_system_util.h"
 #include "webkit/fileapi/sandbox_mount_point_provider.h"
 
@@ -169,6 +171,11 @@ void FileAPIMessageFilter::UnregisterOperation(int request_id) {
 }
 
 FileAPIMessageFilter::~FileAPIMessageFilter() {}
+
+void FileAPIMessageFilter::BadMessageReceived() {
+  content::RecordAction(UserMetricsAction("BadMessageTerminate_FAMF"));
+  BrowserMessageFilter::BadMessageReceived();
+}
 
 void FileAPIMessageFilter::OnOpen(
     int request_id, const GURL& origin_url, fileapi::FileSystemType type,
@@ -432,10 +439,7 @@ void FileAPIMessageFilter::OnSyncGetPlatformPath(
   // TODO(kinuko): this hack should go away once appropriate upload-stream
   // handling based on element types is supported.
   FileSystemOperation* operation =
-      context_->CreateFileSystemOperation(
-          path,
-          BrowserThread::GetMessageLoopProxyForThread(
-              BrowserThread::FILE))->AsFileSystemOperation();
+      context_->CreateFileSystemOperation(path)->AsFileSystemOperation();
   DCHECK(operation);
   operation->SyncGetPlatformPath(path, platform_path);
 }
@@ -464,12 +468,20 @@ void FileAPIMessageFilter::OnAppendBlobDataItem(
     OnRemoveBlob(url);
     return;
   }
+  if (item.length == 0) {
+    BadMessageReceived();
+    return;
+  }
   blob_storage_context_->controller()->AppendBlobDataItem(url, item);
 }
 
 void FileAPIMessageFilter::OnAppendSharedMemory(
     const GURL& url, base::SharedMemoryHandle handle, size_t buffer_size) {
   DCHECK(base::SharedMemory::IsHandleValid(handle));
+  if (!buffer_size) {
+    BadMessageReceived();
+    return;
+  }
 #if defined(OS_WIN)
   base::SharedMemory shared_memory(handle, true, peer_handle());
 #else
@@ -650,16 +662,42 @@ bool FileAPIMessageFilter::HasPermissionsForFile(
     return false;
   }
 
-  FilePath file_path =
-      mount_point_provider->GetPathForPermissionsCheck(virtual_path);
+  FilePath file_path;
+  ChildProcessSecurityPolicyImpl* policy =
+      ChildProcessSecurityPolicyImpl::GetInstance();
+
+  // Special handling for isolated filesystem.
+  // (See ChildProcessSecurityPolicy::GrantReadFileSystem for more
+  // details about access permission for isolated filesystem.)
+  if (file_system_type == fileapi::kFileSystemTypeIsolated) {
+    std::string filesystem_id;
+    if (!fileapi::IsolatedContext::GetInstance()->CrackIsolatedPath(
+            virtual_path, &filesystem_id, NULL, &file_path)) {
+      *error = base::PLATFORM_FILE_ERROR_INVALID_URL;
+      return false;
+    }
+    // The root directory case. Always allow read-only access as far as the
+    // filesystem is valid.
+    if (file_path.empty())
+      return (permissions == kReadFilePermissions);
+
+    // Access permission to the file system overrides the file permission
+    // (if and only if they accessed via an isolated file system).
+    bool success = policy->HasPermissionsForFileSystem(
+        process_id_, filesystem_id, permissions);
+    if (!success)
+      *error = base::PLATFORM_FILE_ERROR_SECURITY;
+    return success;
+  }
+
+  file_path = mount_point_provider->GetPathForPermissionsCheck(virtual_path);
   if (file_path.empty()) {
     *error = base::PLATFORM_FILE_ERROR_SECURITY;
     return false;
   }
 
-  bool success =
-      ChildProcessSecurityPolicyImpl::GetInstance()->HasPermissionsForFile(
-          process_id_, file_path, permissions);
+  bool success = policy->HasPermissionsForFile(
+      process_id_, file_path, permissions);
   if (!success)
     *error = base::PLATFORM_FILE_ERROR_SECURITY;
   return success;
@@ -670,9 +708,7 @@ FileSystemOperationInterface* FileAPIMessageFilter::GetNewOperation(
     const GURL& target_path,
     int request_id) {
   FileSystemOperationInterface* operation =
-      context_->CreateFileSystemOperation(
-          target_path,
-          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE));
+      context_->CreateFileSystemOperation(target_path);
   DCHECK(operation);
   operations_.AddWithID(operation, request_id);
   return operation;

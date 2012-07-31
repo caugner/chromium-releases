@@ -346,16 +346,19 @@ TEST_F(HistoryBackendTest, DeleteAll) {
   // Add thumbnails for each page. The |Images| take ownership of SkBitmap
   // created from decoding the images.
   ThumbnailScore score(0.25, true, true);
-  gfx::Image google_bitmap(
+  scoped_ptr<SkBitmap> google_bitmap(
       gfx::JPEGCodec::Decode(kGoogleThumbnail, sizeof(kGoogleThumbnail)));
+
+  gfx::Image google_image(*google_bitmap);
 
   Time time;
   GURL gurl;
-  backend_->thumbnail_db_->SetPageThumbnail(gurl, row1_id, &google_bitmap,
+  backend_->thumbnail_db_->SetPageThumbnail(gurl, row1_id, &google_image,
                                             score, time);
-  gfx::Image weewar_bitmap(
+  scoped_ptr<SkBitmap> weewar_bitmap(
      gfx::JPEGCodec::Decode(kWeewarThumbnail, sizeof(kWeewarThumbnail)));
-  backend_->thumbnail_db_->SetPageThumbnail(gurl, row2_id, &weewar_bitmap,
+  gfx::Image weewar_image(*weewar_bitmap);
+  backend_->thumbnail_db_->SetPageThumbnail(gurl, row2_id, &weewar_image,
                                             score, time);
 
   // Star row1.
@@ -1248,6 +1251,7 @@ TEST_F(HistoryBackendTest, QueryFilteredURLs) {
   const char* yahoo_sports_with_article2 =
       "http://sports.yahoo.com/article2.htm";
   const char* yahoo_sports_soccer = "http://sports.yahoo.com/soccer";
+  const char* apple = "http://www.apple.com/";
 
   // Clear all history.
   backend_->DeleteAllHistory();
@@ -1255,10 +1259,13 @@ TEST_F(HistoryBackendTest, QueryFilteredURLs) {
   Time tested_time = Time::Now().LocalMidnight() +
                      base::TimeDelta::FromHours(4);
   base::TimeDelta half_an_hour = base::TimeDelta::FromMinutes(30);
+  base::TimeDelta one_hour = base::TimeDelta::FromHours(1);
   base::TimeDelta one_day = base::TimeDelta::FromDays(1);
 
   const content::PageTransition kTypedTransition =
       content::PAGE_TRANSITION_TYPED;
+  const content::PageTransition kKeywordGeneratedTransition =
+      content::PAGE_TRANSITION_KEYWORD_GENERATED;
 
   const char* redirect_sequence[2];
   redirect_sequence[1] = NULL;
@@ -1273,13 +1280,22 @@ TEST_F(HistoryBackendTest, QueryFilteredURLs) {
   AddRedirectChainWithTransitionAndTime(
       redirect_sequence, 0,
       kTypedTransition, tested_time - half_an_hour / 2);
-  AddRedirectChainWithTransitionAndTime(redirect_sequence, 0,
-                                        kTypedTransition, tested_time);
+  AddRedirectChainWithTransitionAndTime(
+      redirect_sequence, 0,
+      kTypedTransition, tested_time);
+
+  // Add a visit with a transition that will make sure that no segment gets
+  // created for this page (so the subsequent entries will have different URLIDs
+  // and SegmentIDs).
+  redirect_sequence[0] = apple;
+  AddRedirectChainWithTransitionAndTime(
+      redirect_sequence, 0, kKeywordGeneratedTransition,
+      tested_time - one_day + one_hour * 6);
 
   redirect_sequence[0] = yahoo;
-  AddRedirectChainWithTransitionAndTime(redirect_sequence, 0,
-                                        kTypedTransition,
-                                        tested_time - one_day + half_an_hour);
+  AddRedirectChainWithTransitionAndTime(
+      redirect_sequence, 0, kTypedTransition,
+      tested_time - one_day + half_an_hour);
   AddRedirectChainWithTransitionAndTime(
       redirect_sequence, 0, kTypedTransition,
       tested_time - one_day + half_an_hour * 2);
@@ -1288,8 +1304,9 @@ TEST_F(HistoryBackendTest, QueryFilteredURLs) {
   AddRedirectChainWithTransitionAndTime(
       redirect_sequence, 0, kTypedTransition,
       tested_time - one_day - half_an_hour * 2);
-  AddRedirectChainWithTransitionAndTime(redirect_sequence, 0, kTypedTransition,
-                                        tested_time - one_day);
+  AddRedirectChainWithTransitionAndTime(
+      redirect_sequence, 0, kTypedTransition,
+      tested_time - one_day);
   int transition1, transition2;
   AddClientRedirect(GURL(yahoo_sports), GURL(yahoo_sports_with_article1), false,
                     tested_time - one_day + half_an_hour,
@@ -1317,9 +1334,9 @@ TEST_F(HistoryBackendTest, QueryFilteredURLs) {
   VisitFilter filter;
   // Time limit is |tested_time| +/- 45 min.
   base::TimeDelta three_quarters_of_an_hour = base::TimeDelta::FromMinutes(45);
-  filter.SetTimeInRangeFilter(tested_time - three_quarters_of_an_hour,
-                              tested_time + three_quarters_of_an_hour);
-  backend_->QueryFilteredURLs(request1, 100, filter);
+  filter.SetFilterTime(tested_time);
+  filter.SetFilterWidth(three_quarters_of_an_hour);
+  backend_->QueryFilteredURLs(request1, 100, filter, false);
 
   ASSERT_EQ(4U, get_filtered_list().size());
   EXPECT_EQ(std::string(google), get_filtered_list()[0].url.spec());
@@ -1336,9 +1353,9 @@ TEST_F(HistoryBackendTest, QueryFilteredURLs) {
                      base::Unretained(static_cast<HistoryBackendTest*>(this))));
   cancellable_request.MockScheduleOfRequest<QueryFilteredURLsRequest>(
       request2);
-  filter.SetTimeInRangeFilter(tested_time,
-                              tested_time + base::TimeDelta::FromHours(2));
-  backend_->QueryFilteredURLs(request2, 100, filter);
+  filter.SetFilterTime(tested_time + one_hour);
+  filter.SetFilterWidth(one_hour);
+  backend_->QueryFilteredURLs(request2, 100, filter, false);
 
   ASSERT_EQ(3U, get_filtered_list().size());
   EXPECT_EQ(std::string(google), get_filtered_list()[0].url.spec());
@@ -1352,9 +1369,9 @@ TEST_F(HistoryBackendTest, QueryFilteredURLs) {
                      base::Unretained(static_cast<HistoryBackendTest*>(this))));
   cancellable_request.MockScheduleOfRequest<QueryFilteredURLsRequest>(
       request3);
-  filter.SetTimeInRangeFilter(tested_time - base::TimeDelta::FromHours(2),
-                              tested_time);
-  backend_->QueryFilteredURLs(request3, 100, filter);
+  filter.SetFilterTime(tested_time - one_hour);
+  filter.SetFilterWidth(one_hour);
+  backend_->QueryFilteredURLs(request3, 100, filter, false);
 
   ASSERT_EQ(3U, get_filtered_list().size());
   EXPECT_EQ(std::string(google), get_filtered_list()[0].url.spec());
@@ -1373,9 +1390,9 @@ TEST_F(HistoryBackendTest, QueryFilteredURLs) {
                      base::Unretained(static_cast<HistoryBackendTest*>(this))));
   cancellable_request.MockScheduleOfRequest<QueryFilteredURLsRequest>(
       request4);
-  filter.SetDayOfTheWeekFilter(static_cast<int>(exploded_time.day_of_week),
-                               tested_time);
-  backend_->QueryFilteredURLs(request4, 100, filter);
+  filter.SetFilterTime(tested_time);
+  filter.SetDayOfTheWeekFilter(static_cast<int>(exploded_time.day_of_week));
+  backend_->QueryFilteredURLs(request4, 100, filter, false);
 
   ASSERT_EQ(2U, get_filtered_list().size());
   EXPECT_EQ(std::string(google), get_filtered_list()[0].url.spec());
@@ -1389,13 +1406,34 @@ TEST_F(HistoryBackendTest, QueryFilteredURLs) {
                      base::Unretained(static_cast<HistoryBackendTest*>(this))));
   cancellable_request.MockScheduleOfRequest<QueryFilteredURLsRequest>(
       request5);
-  filter.SetTimeInRangeFilter(tested_time - base::TimeDelta::FromHours(1),
-                              tested_time - base::TimeDelta::FromMinutes(20));
-  backend_->QueryFilteredURLs(request5, 100, filter);
+  filter.SetFilterTime(tested_time - base::TimeDelta::FromMinutes(40));
+  filter.SetFilterWidth(base::TimeDelta::FromMinutes(20));
+  backend_->QueryFilteredURLs(request5, 100, filter, false);
 
   ASSERT_EQ(1U, get_filtered_list().size());
   EXPECT_EQ(std::string(yahoo_sports_soccer),
             get_filtered_list()[0].url.spec());
+
+  // Make sure we get debug data if we request it.
+  scoped_refptr<QueryFilteredURLsRequest> request6 =
+      new history::QueryFilteredURLsRequest(
+          base::Bind(&HistoryBackendTest::OnQueryFiltered,
+                     base::Unretained(static_cast<HistoryBackendTest*>(this))));
+  cancellable_request.MockScheduleOfRequest<QueryFilteredURLsRequest>(
+      request6);
+  filter.SetFilterTime(tested_time);
+  filter.SetFilterWidth(one_hour * 2);
+  backend_->QueryFilteredURLs(request6, 100, filter, true);
+
+  // If the SegmentID is used by QueryFilteredURLs when generating the debug
+  // data instead of the URLID, the |total_visits| for the |yahoo_sports_soccer|
+  // entry will be zero instead of 1.
+  ASSERT_GE(get_filtered_list().size(), 2U);
+  EXPECT_EQ(std::string(google), get_filtered_list()[0].url.spec());
+  EXPECT_EQ(std::string(yahoo_sports_soccer),
+      get_filtered_list()[1].url.spec());
+  EXPECT_EQ(4U, get_filtered_list()[0].extended_info.total_visits);
+  EXPECT_EQ(1U, get_filtered_list()[1].extended_info.total_visits);
 }
 
 TEST_F(HistoryBackendTest, UpdateVisitDuration) {

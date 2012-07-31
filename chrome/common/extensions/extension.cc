@@ -30,17 +30,18 @@
 #include "chrome/common/extensions/extension_error_utils.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/extension_resource.h"
-#include "chrome/common/extensions/feature.h"
+#include "chrome/common/extensions/extension_switch_utils.h"
+#include "chrome/common/extensions/features/feature.h"
+#include "chrome/common/extensions/features/simple_feature_provider.h"
 #include "chrome/common/extensions/file_browser_handler.h"
 #include "chrome/common/extensions/manifest.h"
-#include "chrome/common/extensions/simple_feature_provider.h"
 #include "chrome/common/extensions/user_script.h"
 #include "chrome/common/url_constants.h"
 #include "crypto/sha2.h"
 #include "googleurl/src/url_util.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
-#include "grit/theme_resources.h"
+#include "grit/theme_resources_standard.h"
 #include "net/base/registry_controlled_domain.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/keycodes/keyboard_codes.h"
@@ -49,13 +50,21 @@
 #include "webkit/glue/image_decoder.h"
 #include "webkit/glue/web_intent_service_data.h"
 
+#if defined(OS_WIN)
+#include "base/win/metro.h"
+#endif
+
 namespace keys = extension_manifest_keys;
 namespace values = extension_manifest_values;
 namespace errors = extension_manifest_errors;
 namespace info_keys = extension_info_keys;
+namespace switch_utils = extensions::switch_utils;
 
 using extensions::csp_validator::ContentSecurityPolicyIsLegal;
+using extensions::csp_validator::ContentSecurityPolicyIsSandboxed;
 using extensions::csp_validator::ContentSecurityPolicyIsSecure;
+
+namespace extensions {
 
 namespace {
 
@@ -63,6 +72,10 @@ const int kModernManifestVersion = 1;
 const int kPEMOutputColumns = 65;
 
 const char kOverrideExtentUrlPatternFormat[] = "chrome://%s/*";
+
+// The maximum number of commands (including page action/browser actions) an
+// extension can have.
+const size_t kMaxCommandsPerExtension = 4;
 
 // KEY MARKERS
 const char kKeyBeginHeaderMarker[] = "-----BEGIN";
@@ -74,7 +87,29 @@ const char kPrivate[] = "PRIVATE";
 const int kRSAKeySize = 1024;
 
 const char kDefaultContentSecurityPolicy[] =
-    "script-src 'self'; object-src 'self'";
+    "script-src 'self' chrome-extension-resource:; object-src 'self'";
+
+#define PLATFORM_APP_LOCAL_CSP_SOURCES \
+    "'self' blob: data: filesystem: chrome-extension-resource:"
+const char kDefaultPlatformAppContentSecurityPolicy[] =
+    // Platform apps can only use local resources by default.
+    "default-src 'self' chrome-extension-resource:;"
+    // For remote resources, they can fetch them via XMLHttpRequest.
+    "connect-src *;"
+    // And serve them via blob:, data: or filesystem: URLs
+    "style-src " PLATFORM_APP_LOCAL_CSP_SOURCES " 'unsafe-inline';"
+    "img-src " PLATFORM_APP_LOCAL_CSP_SOURCES ";"
+    "frame-src " PLATFORM_APP_LOCAL_CSP_SOURCES ";"
+    "font-src " PLATFORM_APP_LOCAL_CSP_SOURCES ";"
+    // Media can be loaded from remote resources since:
+    // 1. <video> and <audio> have good fallback behavior when offline or under
+    //    spotty connectivity.
+    // 2. Fetching via XHR and serving via blob: URLs currently does not allow
+    //    streaming or partial buffering.
+    "media-src *;";
+
+const char kDefaultSandboxedPageContentSecurityPolicy[] =
+    "sandbox allow-scripts allow-forms";
 
 // Converts a normal hexadecimal string into the alphabet used by extensions.
 // We use the characters 'a'-'p' instead of '0'-'f' to avoid ever having a
@@ -286,7 +321,7 @@ scoped_refptr<Extension> Extension::Create(const FilePath& path,
     return NULL;
   }
 
-  std::vector<std::string> install_warnings;
+  InstallWarningVector install_warnings;
   manifest->ValidateManifest(utf8_error, &install_warnings);
   if (!utf8_error->empty())
     return NULL;
@@ -299,7 +334,8 @@ scoped_refptr<Extension> Extension::Create(const FilePath& path,
     return NULL;
   }
 
-  if (!extension->CheckPlatformAppFeatures(utf8_error))
+  if (!extension->CheckPlatformAppFeatures(utf8_error) ||
+      !extension->CheckConflictingFeatures(utf8_error))
     return NULL;
 
   return extension;
@@ -373,6 +409,12 @@ const std::string Extension::VersionString() const {
   return version()->GetString();
 }
 
+void Extension::AddInstallWarnings(
+    const InstallWarningVector& new_warnings) {
+  install_warnings_.insert(install_warnings_.end(),
+                           new_warnings.begin(), new_warnings.end());
+}
+
 // static
 bool Extension::IsExtension(const FilePath& file_name) {
   return file_name.MatchesExtension(chrome::kExtensionFileExtension);
@@ -411,7 +453,6 @@ void Extension::GetBasicInfo(bool enabled,
   info->SetString(info_keys::kIdKey, id());
   info->SetString(info_keys::kNameKey, name());
   info->SetBoolean(info_keys::kEnabledKey, enabled);
-  info->SetBoolean(info_keys::kMayDisableKey, UserMayDisable(location()));
   info->SetBoolean(info_keys::kOfflineEnabledKey, offline_enabled());
   info->SetString(info_keys::kVersionKey, VersionString());
   info->SetString(info_keys::kDescriptionKey, description());
@@ -434,7 +475,15 @@ GURL Extension::GetResourceURL(const GURL& extension_url,
   DCHECK(extension_url.SchemeIs(chrome::kExtensionScheme));
   DCHECK_EQ("/", extension_url.path());
 
-  GURL ret_val = GURL(extension_url.spec() + relative_path);
+  std::string path = relative_path;
+
+  // If the relative path starts with "/", it is "absolute" relative to the
+  // extension base directory, but extension_url is already specified to refer
+  // to that base directory, so strip the leading "/" if present.
+  if (relative_path.size() > 0 && relative_path[0] == '/')
+    path = relative_path.substr(1);
+
+  GURL ret_val = GURL(extension_url.spec() + path);
   DCHECK(StartsWithASCII(ret_val.spec(), extension_url.spec(), false));
 
   return ret_val;
@@ -484,6 +533,17 @@ bool Extension::HasWebAccessibleResources() const {
     return true;
 
   return false;
+}
+
+bool Extension::IsSandboxedPage(const std::string& relative_path) const {
+  return sandboxed_pages_.find(relative_path) != sandboxed_pages_.end();
+}
+
+
+std::string Extension::GetResourceContentSecurityPolicy(
+    const std::string& relative_path) const {
+  return IsSandboxedPage(relative_path) ?
+      sandboxed_pages_content_security_policy_ : content_security_policy_;
 }
 
 bool Extension::GenerateId(const std::string& input, std::string* output) {
@@ -710,7 +770,7 @@ bool Extension::LoadGlobsHelper(
     const char* globs_property_name,
     string16* error,
     void(UserScript::*add_method)(const std::string& glob),
-    UserScript *instance) {
+    UserScript* instance) {
   if (!content_script->HasKey(globs_property_name))
     return true;  // they are optional
 
@@ -950,6 +1010,7 @@ bool Extension::LoadName(string16* error) {
     *error = ASCIIToUTF16(errors::kInvalidName);
     return false;
   }
+  non_localized_name_ = UTF16ToUTF8(localized_name);
   base::i18n::AdjustStringForLocaleDirection(&localized_name);
   name_ = UTF16ToUTF8(localized_name);
   return true;
@@ -968,8 +1029,7 @@ bool Extension::LoadAppFeatures(string16* error) {
   if (!LoadExtent(keys::kWebURLs, &extent_,
                   errors::kInvalidWebURLs, errors::kInvalidWebURL, error) ||
       !LoadLaunchURL(error) ||
-      !LoadLaunchContainer(error) ||
-      !LoadOAuth2Info(error))
+      !LoadLaunchContainer(error))
     return false;
 
   return true;
@@ -1180,6 +1240,10 @@ bool Extension::LoadLaunchURL(string16* error) {
           cloud_print_service_url.ReplaceComponents(replacements);
       OverrideLaunchUrl(cloud_print_enable_connector_url);
     }
+  } else if (id() == extension_misc::kChromeAppId) {
+    // Override launch url to new tab.
+    launch_web_url_ = chrome::kChromeUINewTabURL;
+    extent_.ClearPatterns();
   }
 
   return true;
@@ -1239,6 +1303,7 @@ bool Extension::LoadSharedFeatures(
       !LoadPlugins(error) ||
       !LoadNaClModules(error) ||
       !LoadWebAccessibleResources(error) ||
+      !LoadSandboxedPages(error) ||
       !CheckRequirements(error) ||
       !LoadDefaultLocale(error) ||
       !LoadOfflineEnabled(error) ||
@@ -1248,7 +1313,8 @@ bool Extension::LoadSharedFeatures(
       !LoadBackgroundPage(api_permissions, error) ||
       !LoadBackgroundPersistent(api_permissions, error) ||
       !LoadBackgroundAllowJSAccess(api_permissions, error) ||
-      !LoadWebIntentServices(error))
+      !LoadWebIntentServices(error) ||
+      !LoadOAuth2Info(error))
     return false;
 
   return true;
@@ -1285,9 +1351,19 @@ bool Extension::LoadManifestVersion(string16* error) {
   if (creation_flags_ & REQUIRE_MODERN_MANIFEST_VERSION &&
       manifest_version_ < kModernManifestVersion &&
       !CommandLine::ForCurrentProcess()->HasSwitch(
-                switches::kAllowLegacyExtensionManifests)) {
-    *error = ASCIIToUTF16(errors::kInvalidManifestVersion);
-    return false;
+          switches::kAllowLegacyExtensionManifests)) {
+      *error = ASCIIToUTF16(errors::kInvalidManifestVersion);
+      return false;
+  }
+
+  if (location() == LOAD && manifest_version_ == 1) {
+    install_warnings_.push_back(Extension::InstallWarning(
+        Extension::InstallWarning::FORMAT_HTML,
+        l10n_util::GetStringFUTF8(
+            IDS_EXTENSION_MANIFEST_VERSION_OLD,
+            ASCIIToUTF16("<a href='http://code.google.com/chrome/extensions/"
+                         "manifestVersion.html'>"),
+            ASCIIToUTF16("</a>"))));
   }
 
   return true;
@@ -1373,6 +1449,13 @@ bool Extension::LoadCommands(string16* error) {
       return false;
     }
 
+    if (commands->size() > kMaxCommandsPerExtension) {
+      *error = ExtensionErrorUtils::FormatErrorMessageUTF16(
+          errors::kInvalidKeyBindingTooMany,
+          base::IntToString(kMaxCommandsPerExtension));
+      return false;
+    }
+
     int command_index = 0;
     for (DictionaryValue::key_iterator iter = commands->begin_keys();
          iter != commands->end_keys(); ++iter) {
@@ -1397,7 +1480,7 @@ bool Extension::LoadCommands(string16* error) {
         browser_action_command_.reset(binding.release());
       } else {
         if (command_name[0] != '_')  // All commands w/underscore are reserved.
-          named_commands_[command_name] = *binding.release();
+          named_commands_[command_name] = *binding.get();
       }
     }
   }
@@ -1437,14 +1520,24 @@ bool Extension::LoadPlugins(string16* error) {
       }
     }
 
+#if defined(OS_CHROMEOS)
     // We don't allow extension plugins to run on Chrome OS. We still
     // parse the manifest entry so that error messages are consistently
     // displayed across platforms.
-#if !defined(OS_CHROMEOS)
+#else
+#if defined(OS_WIN)
+  // Like Chrome OS, we don't support NPAPI plugins in Windows 8 metro mode
+  // but in this case we want to fail with an error.
+  if (base::win::IsMetroProcess()) {
+    *error = l10n_util::GetStringUTF16(
+        IDS_EXTENSION_INSTALL_PLUGIN_NOT_SUPPORTED);
+    return false;
+  }
+#endif  // defined(OS_WIN).
     plugins_.push_back(PluginInfo());
     plugins_.back().path = path().Append(FilePath::FromUTF8Unsafe(path_str));
     plugins_.back().is_public = is_public;
-#endif
+#endif  // defined(OS_CHROMEOS).
   }
   return true;
 }
@@ -1493,7 +1586,7 @@ bool Extension::LoadNaClModules(string16* error) {
 bool Extension::LoadWebAccessibleResources(string16* error) {
   if (!manifest_->HasKey(keys::kWebAccessibleResources))
     return true;
-  ListValue* list_value;
+  ListValue* list_value = NULL;
   if (!manifest_->GetList(keys::kWebAccessibleResources, &list_value)) {
     *error = ASCIIToUTF16(errors::kInvalidWebAccessibleResourcesList);
     return false;
@@ -1508,6 +1601,51 @@ bool Extension::LoadWebAccessibleResources(string16* error) {
     if (relative_path[0] != '/')
       relative_path = '/' + relative_path;
     web_accessible_resources_.insert(relative_path);
+  }
+
+  return true;
+}
+
+bool Extension::LoadSandboxedPages(string16* error) {
+  if (!manifest_->HasPath(keys::kSandboxedPages))
+    return true;
+
+  ListValue* list_value = NULL;
+  if (!manifest_->GetList(keys::kSandboxedPages, &list_value)) {
+    *error = ASCIIToUTF16(errors::kInvalidSandboxedPagesList);
+    return false;
+  }
+  for (size_t i = 0; i < list_value->GetSize(); ++i) {
+    std::string relative_path;
+    if (!list_value->GetString(i, &relative_path)) {
+      *error = ExtensionErrorUtils::FormatErrorMessageUTF16(
+          errors::kInvalidSandboxedPage, base::IntToString(i));
+      return false;
+    }
+    if (relative_path[0] != '/')
+      relative_path = '/' + relative_path;
+    sandboxed_pages_.insert(relative_path);
+  }
+
+  if (manifest_->HasPath(keys::kSandboxedPagesCSP)) {
+    if (!manifest_->GetString(
+        keys::kSandboxedPagesCSP, &sandboxed_pages_content_security_policy_)) {
+      *error = ASCIIToUTF16(errors::kInvalidSandboxedPagesCSP);
+      return false;
+    }
+
+    if (!ContentSecurityPolicyIsLegal(
+            sandboxed_pages_content_security_policy_) ||
+        !ContentSecurityPolicyIsSandboxed(
+            sandboxed_pages_content_security_policy_, GetType())) {
+      *error = ASCIIToUTF16(errors::kInvalidSandboxedPagesCSP);
+      return false;
+    }
+  } else {
+    sandboxed_pages_content_security_policy_ =
+        kDefaultSandboxedPageContentSecurityPolicy;
+    CHECK(ContentSecurityPolicyIsSandboxed(
+        sandboxed_pages_content_security_policy_, GetType()));
   }
 
   return true;
@@ -1593,8 +1731,16 @@ bool Extension::LoadOptionsPage(string16* error) {
 }
 
 bool Extension::LoadBackgroundScripts(string16* error) {
+  if (is_platform_app()) {
+    return LoadBackgroundScripts(keys::kPlatformAppBackgroundScripts, error);
+  }
+
+  return LoadBackgroundScripts(keys::kBackgroundScripts, error);
+}
+
+bool Extension::LoadBackgroundScripts(const std::string& key, string16* error) {
   Value* background_scripts_value = NULL;
-  if (!manifest_->Get(keys::kBackgroundScripts, &background_scripts_value))
+  if (!manifest_->Get(key, &background_scripts_value))
     return true;
 
   CHECK(background_scripts_value);
@@ -1621,12 +1767,32 @@ bool Extension::LoadBackgroundScripts(string16* error) {
 bool Extension::LoadBackgroundPage(
     const ExtensionAPIPermissionSet& api_permissions,
     string16* error) {
-  base::Value* background_page_value = NULL;
-  if (!manifest_->Get(keys::kBackgroundPage, &background_page_value))
-    manifest_->Get(keys::kBackgroundPageLegacy, &background_page_value);
+  if (is_platform_app()) {
+    return LoadBackgroundPage(
+        keys::kPlatformAppBackgroundPage, api_permissions, error);
+  }
 
-  if (!background_page_value)
+  if (!LoadBackgroundPage(keys::kBackgroundPage, api_permissions, error))
+    return false;
+  if (background_url_.is_empty())
+    return LoadBackgroundPage(
+        keys::kBackgroundPageLegacy, api_permissions, error);
+  return true;
+}
+
+bool Extension::LoadBackgroundPage(
+    const std::string& key,
+    const ExtensionAPIPermissionSet& api_permissions,
+    string16* error) {
+  base::Value* background_page_value = NULL;
+  if (!manifest_->Get(key, &background_page_value))
     return true;
+
+  if (!background_scripts_.empty()) {
+    *error = ASCIIToUTF16(errors::kInvalidBackgroundCombination);
+    return false;
+  }
+
 
   std::string background_str;
   if (!background_page_value->GetAsString(&background_str)) {
@@ -1634,32 +1800,27 @@ bool Extension::LoadBackgroundPage(
     return false;
   }
 
-  if (!background_scripts_.empty()) {
-    *error = ASCIIToUTF16(errors::kInvalidBackgroundCombination);
-    return false;
-  }
-
   if (is_hosted_app()) {
+    background_url_ = GURL(background_str);
+
     // Make sure "background" permission is set.
     if (!api_permissions.count(ExtensionAPIPermission::kBackground)) {
       *error = ASCIIToUTF16(errors::kBackgroundPermissionNeeded);
       return false;
     }
     // Hosted apps require an absolute URL.
-    GURL bg_page(background_str);
-    if (!bg_page.is_valid()) {
+    if (!background_url_.is_valid()) {
       *error = ASCIIToUTF16(errors::kInvalidBackgroundInHostedApp);
       return false;
     }
 
-    if (!(bg_page.SchemeIs("https") ||
+    if (!(background_url_.SchemeIs("https") ||
           (CommandLine::ForCurrentProcess()->HasSwitch(
               switches::kAllowHTTPBackgroundPage) &&
-           bg_page.SchemeIs("http")))) {
+           background_url_.SchemeIs("http")))) {
       *error = ASCIIToUTF16(errors::kInvalidBackgroundInHostedApp);
       return false;
     }
-    background_url_ = bg_page;
   } else {
     background_url_ = GetResourceURL(background_str);
   }
@@ -1751,13 +1912,13 @@ bool Extension::LoadWebIntentAction(const std::string& action_name,
   if (href.empty()) {
     if (is_hosted_app()) {
       href = launch_web_url();
-    } else if (is_packaged_app() || is_platform_app()) {
+    } else if (is_packaged_app()) {
       href = launch_local_path();
     }
   }
 
   // If we still don't have an href, the manifest is malformed.
-  if (href.empty()) {
+  if (href.empty() && !is_platform_app()) {
     *error = ExtensionErrorUtils::FormatErrorMessageUTF16(
         errors::kInvalidIntentHrefEmpty, action_name);
     return false;
@@ -1773,7 +1934,7 @@ bool Extension::LoadWebIntentAction(const std::string& action_name,
       return false;
     }
     service.service_url = service_url;
-  } else {
+  } else if (!is_platform_app()) {
     // We do not allow absolute intent URLs in non-hosted apps.
     if (service_url.is_valid()) {
       *error = ExtensionErrorUtils::FormatErrorMessageUTF16(
@@ -1933,14 +2094,6 @@ bool Extension::LoadInputComponents(
     if (module_value->GetString(keys::kType, &type_str)) {
       if (type_str == "ime") {
         type = INPUT_COMPONENT_TYPE_IME;
-      } else if (type_str == "virtual_keyboard") {
-          if (!api_permissions.count(ExtensionAPIPermission::kExperimental)) {
-            // Virtual Keyboards require the experimental flag.
-            *error = ExtensionErrorUtils::FormatErrorMessageUTF16(
-                errors::kInvalidInputComponentType, base::IntToString(i));
-            return false;
-          }
-        type = INPUT_COMPONENT_TYPE_VIRTUAL_KEYBOARD;
       } else {
         *error = ExtensionErrorUtils::FormatErrorMessageUTF16(
             errors::kInvalidInputComponentType, base::IntToString(i));
@@ -2102,8 +2255,9 @@ bool Extension::LoadPageAction(string16* error) {
       return false;  // Failed to parse page action definition.
     declared_action_type_ = ExtensionAction::TYPE_PAGE;
 
-    if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableBrowserActionsForAll)) {
+    // The action box changes the meaning of the page action area, so we need
+    // to convert page actions into browser actions.
+    if (switch_utils::AreScriptBadgesEnabled()) {
       browser_action_ = page_action_.Pass();
       // declared_action_type_ stays the same; that's the point.
     }
@@ -2126,22 +2280,6 @@ bool Extension::LoadBrowserAction(string16* error) {
     return false;  // Failed to parse browser action definition.
   declared_action_type_ = ExtensionAction::TYPE_BROWSER;
   return true;
-}
-
-void Extension::GenerateBrowserActionIfPossible() {
-  // It only makes sense to generate brower actions for extensions that are
-  // shown in chrome://extensions.
-  if (!ShouldDisplayInExtensionSettings())
-    return;
-
-  // Hosted and platform apps are shown in extension settings, but we don't
-  // want to generate browser actions for those either, since they can't define
-  // browser actions.
-  if (is_app())
-    return;
-
-  browser_action_.reset(new ExtensionAction(id()));
-  browser_action_->SetTitle(ExtensionAction::kDefaultTabId, name());
 }
 
 bool Extension::LoadFileBrowserHandlers(string16* error) {
@@ -2307,11 +2445,9 @@ bool Extension::LoadChromeURLOverrides(string16* error) {
     std::string val;
     // Restrict override pages to a list of supported URLs.
     if ((page != chrome::kChromeUINewTabHost &&
-#if defined(USE_VIRTUAL_KEYBOARD)
-         page != chrome::kChromeUIKeyboardHost &&
-#endif
 #if defined(OS_CHROMEOS)
          page != chrome::kChromeUIActivationMessageHost &&
+         page != chrome::kChromeUIWallpaperHost &&
 #endif
          page != chrome::kChromeUIBookmarksHost &&
          page != chrome::kChromeUIHistoryHost
@@ -2327,6 +2463,7 @@ bool Extension::LoadChromeURLOverrides(string16* error) {
     }
     // Replace the entry with a fully qualified chrome-extension:// URL.
     chrome_url_overrides_[page] = GetResourceURL(val);
+
     // For component extensions, add override URL to extent patterns.
     if (is_packaged_app() && location() == COMPONENT) {
       URLPattern pattern(URLPattern::SCHEME_CHROMEUI);
@@ -2485,7 +2622,9 @@ bool Extension::LoadContentSecurityPolicy(string16* error) {
     // Manifest version 2 introduced a default Content-Security-Policy.
     // TODO(abarth): Should we continue to let extensions override the
     //               default Content-Security-Policy?
-    content_security_policy_ = kDefaultContentSecurityPolicy;
+    content_security_policy_ = is_platform_app() ?
+        kDefaultPlatformAppContentSecurityPolicy :
+        kDefaultContentSecurityPolicy;
     CHECK(ContentSecurityPolicyIsSecure(content_security_policy_));
   }
   return true;
@@ -2904,12 +3043,6 @@ bool Extension::InitFromValue(int flags, string16* error) {
   if (!LoadThemeFeatures(error))
     return false;
 
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-        switches::kEnableBrowserActionsForAll) &&
-      !browser_action()) {
-    GenerateBrowserActionIfPossible();
-  }
-
   if (HasMultipleUISurfaces()) {
     *error = ASCIIToUTF16(errors::kOneUISurfaceOnly);
     return false;
@@ -3122,7 +3255,9 @@ bool Extension::ParsePermissions(const char* key,
           // Don't fail, but warn the developer that the manifest contains
           // unrecognized permissions. This may happen legitimately if the
           // extensions requests platform- or channel-specific permissions.
-          install_warnings_.push_back(feature->GetErrorMessage(availability));
+          install_warnings_.push_back(
+              InstallWarning(InstallWarning::FORMAT_TEXT,
+                             feature->GetErrorMessage(availability)));
           continue;
         }
 
@@ -3168,9 +3303,11 @@ bool Extension::ParsePermissions(const char* key,
 
       // It's probably an unknown API permission. Do not throw an error so
       // extensions can retain backwards compatability (http://crbug.com/42742).
-      install_warnings_.push_back(base::StringPrintf(
-          "Permission '%s' is unknown or URL pattern is malformed.",
-          permission_str.c_str()));
+      install_warnings_.push_back(InstallWarning(
+          InstallWarning::FORMAT_TEXT,
+          base::StringPrintf(
+              "Permission '%s' is unknown or URL pattern is malformed.",
+              permission_str.c_str())));
     }
   }
   return true;
@@ -3290,6 +3427,7 @@ bool Extension::HasMultipleUISurfaces() const {
 }
 
 bool Extension::CanExecuteScriptOnPage(const GURL& page_url,
+                                       int tab_id,
                                        const UserScript* script,
                                        std::string* error) const {
   base::AutoLock auto_lock(runtime_data_lock_);
@@ -3311,6 +3449,16 @@ bool Extension::CanExecuteScriptOnPage(const GURL& page_url,
   if (page_url.SchemeIs(chrome::kChromeUIScheme) &&
       !CanExecuteScriptEverywhere())
     return false;
+
+  // If a tab ID is specified, try the tab-specific permissions.
+  if (tab_id >= 0) {
+    const URLPatternSet* tab_permissions =
+        runtime_data_.GetTabSpecificHostPermissions(tab_id);
+    if (tab_permissions &&
+        tab_permissions->MatchesSecurityOrigin(page_url)) {
+      return true;
+    }
+  }
 
   // If a script is specified, use its matches.
   if (script)
@@ -3374,7 +3522,17 @@ bool Extension::CanExecuteScriptEverywhere() const {
 }
 
 bool Extension::CanCaptureVisiblePage(const GURL& page_url,
+                                      int tab_id,
                                       std::string *error) const {
+  if (tab_id >= 0) {
+    const URLPatternSet* tab_permissions =
+        GetTabSpecificHostPermissions(tab_id);
+    if (tab_permissions &&
+        tab_permissions->MatchesSecurityOrigin(page_url)) {
+      return true;
+    }
+  }
+
   if (HasHostPermission(page_url) || page_url.GetOrigin() == url())
     return true;
 
@@ -3501,6 +3659,73 @@ bool Extension::ShouldDisplayInExtensionSettings() const {
   return true;
 }
 
+bool Extension::HasContentScriptAtURL(const GURL& url) const {
+  for (UserScriptList::const_iterator it = content_scripts_.begin();
+      it != content_scripts_.end(); ++it) {
+    if (it->MatchesURL(url))
+      return true;
+  }
+  return false;
+}
+
+ExtensionAction* Extension::GetScriptBadge() const {
+  if (!script_badge_.get()) {
+    script_badge_.reset(new ExtensionAction(id()));
+
+    // On initialization, copy the default icon path from the browser action,
+    // or generate a puzzle piece if there isn't one. Extensions may later
+    // overwrite this icon using the browserAction API.
+    if (browser_action() && !browser_action()->default_icon_path().empty()) {
+      script_badge_->set_default_icon_path(
+          browser_action()->default_icon_path());
+    } else {
+      script_badge_->SetIcon(
+          ExtensionAction::kDefaultTabId,
+          *ui::ResourceBundle::GetSharedInstance().GetImageNamed(
+              IDR_EXTENSIONS_FAVICON).ToSkBitmap());
+    }
+
+    // Likewise, make sure there is always a title.
+    script_badge_->SetTitle(ExtensionAction::kDefaultTabId, name());
+  }
+
+  // Every time, re-initialize the script badge based on the current state of
+  // the browser action.
+  int kDefaultTabId = ExtensionAction::kDefaultTabId;
+
+  script_badge_->SetIsVisible(kDefaultTabId, true);
+
+  if (browser_action()) {
+    SkBitmap icon = browser_action()->GetIcon(kDefaultTabId);
+    if (!icon.isNull())
+      script_badge_->SetIcon(kDefaultTabId, icon);
+
+    std::string title = browser_action()->GetTitle(kDefaultTabId);
+    if (!title.empty())
+      script_badge_->SetTitle(kDefaultTabId, title);
+  }
+
+  return script_badge_.get();
+}
+
+const URLPatternSet* Extension::GetTabSpecificHostPermissions(
+    int tab_id) const {
+  base::AutoLock auto_lock(runtime_data_lock_);
+  return runtime_data_.GetTabSpecificHostPermissions(tab_id);
+}
+
+void Extension::SetTabSpecificHostPermissions(
+    int tab_id,
+    const URLPatternSet& permissions) const {
+  base::AutoLock auto_lock(runtime_data_lock_);
+  runtime_data_.SetTabSpecificHostPermissions(tab_id, permissions);
+}
+
+void Extension::ClearTabSpecificHostPermissions(int tab_id) const {
+  base::AutoLock auto_lock(runtime_data_lock_);
+  runtime_data_.ClearTabSpecificHostPermissions(tab_id);
+}
+
 bool Extension::CheckPlatformAppFeatures(std::string* utf8_error) {
   if (!is_platform_app())
     return true;
@@ -3513,6 +3738,16 @@ bool Extension::CheckPlatformAppFeatures(std::string* utf8_error) {
 
   if (!has_background_page()) {
     *utf8_error = errors::kBackgroundRequiredForPlatformApps;
+    return false;
+  }
+
+  return true;
+}
+
+bool Extension::CheckConflictingFeatures(std::string* utf8_error) {
+  if (has_lazy_background_page() &&
+      HasAPIPermission(ExtensionAPIPermission::kWebRequest)) {
+    *utf8_error = errors::kWebRequestConflictsWithLazyBackground;
     return false;
   }
 
@@ -3536,6 +3771,27 @@ void Extension::RuntimeData::SetActivePermissions(
   active_permissions_ = active;
 }
 
+const URLPatternSet*
+    Extension::RuntimeData::GetTabSpecificHostPermissions(int tab_id) const {
+  CHECK_GE(tab_id, 0);
+  TabHostPermissionsMap::const_iterator it =
+      tab_specific_host_permissions_.find(tab_id);
+  return (it != tab_specific_host_permissions_.end()) ? it->second.get() : NULL;
+}
+
+void Extension::RuntimeData::SetTabSpecificHostPermissions(
+    int tab_id,
+    const URLPatternSet& hosts) {
+  CHECK_GE(tab_id, 0);
+  tab_specific_host_permissions_[tab_id] =
+      make_linked_ptr(new URLPatternSet(hosts));
+}
+
+void Extension::RuntimeData::ClearTabSpecificHostPermissions(int tab_id) {
+  CHECK_GE(tab_id, 0);
+  tab_specific_host_permissions_.erase(tab_id);
+}
+
 UnloadedExtensionInfo::UnloadedExtensionInfo(
     const Extension* extension,
     extension_misc::UnloadedExtensionReason reason)
@@ -3550,3 +3806,5 @@ UpdatedExtensionPermissionsInfo::UpdatedExtensionPermissionsInfo(
     : reason(reason),
       extension(extension),
       permissions(permissions) {}
+
+}   // namespace extensions

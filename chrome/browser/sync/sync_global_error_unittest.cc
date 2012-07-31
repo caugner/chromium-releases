@@ -15,7 +15,7 @@
 #include "chrome/browser/ui/webui/signin/login_ui_service_factory.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread.h"
 #include "testing/gmock/include/gmock/gmock-actions.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -60,6 +60,10 @@ class SyncGlobalErrorTest : public BrowserWithTestWindowTest {
     set_browser(new BrowserMock(Browser::TYPE_TABBED, profile()));
     set_window(new TestBrowserWindow(browser()));
     browser()->SetWindowForTesting(window());
+  }
+
+  virtual void TearDown() OVERRIDE {
+    testing::Test::TearDown();
   }
 
  private:
@@ -131,6 +135,10 @@ TEST_F(SyncGlobalErrorTest, PassphraseGlobalError) {
       LoginUIServiceFactory::GetInstance()->SetTestingFactoryAndUse(
           profile.get(), BuildMockLoginUIService));
   SyncGlobalError error(&service, signin);
+
+  browser_sync::SyncBackendHost::Status status;
+  EXPECT_CALL(service, QueryDetailedSyncStatus())
+              .WillRepeatedly(Return(status));
 
   EXPECT_CALL(service, IsPassphraseRequired())
               .WillRepeatedly(Return(true));

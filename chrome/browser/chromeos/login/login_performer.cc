@@ -17,6 +17,7 @@
 #include "chrome/browser/chromeos/boot_times_loader.h"
 #include "chrome/browser/chromeos/cros_settings.h"
 #include "chrome/browser/chromeos/cros_settings_names.h"
+#include "chrome/browser/chromeos/kiosk_mode/kiosk_mode_metrics.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
 #include "chrome/browser/chromeos/login/screen_locker.h"
 #include "chrome/browser/prefs/pref_service.h"
@@ -53,6 +54,7 @@ LoginPerformer::LoginPerformer(Delegate* delegate)
       last_login_failure_(LoginFailure::None()),
       delegate_(delegate),
       password_changed_(false),
+      password_changed_callback_count_(0),
       screen_lock_requested_(false),
       initial_online_auth_pending_(false),
       auth_mode_(AUTH_MODE_INTERNAL),
@@ -120,6 +122,7 @@ void LoginPerformer::OnLoginFailure(const LoginFailure& failure) {
 void LoginPerformer::OnDemoUserLoginSuccess() {
   content::RecordAction(
       UserMetricsAction("Login_DemoUserLoginSuccess"));
+  KioskModeMetrics::Get()->SessionStarted();
 
   LoginStatusConsumer::OnDemoUserLoginSuccess();
 }
@@ -210,6 +213,7 @@ void LoginPerformer::OnOffTheRecordLoginSuccess() {
 
 void LoginPerformer::OnPasswordChangeDetected() {
   password_changed_ = true;
+  password_changed_callback_count_++;
   if (delegate_) {
     delegate_->OnPasswordChangeDetected();
   } else {
@@ -266,11 +270,19 @@ void LoginPerformer::CompleteLogin(const std::string& username,
   // Whitelist check is always performed during initial login and
   // should not be performed when ScreenLock is active (pending online auth).
   if (!ScreenLocker::default_screen_locker()) {
-    // Must not proceed without signature verification or valid user list.
-    if (!cros_settings->PrepareTrustedValues(
+    CrosSettingsProvider::TrustedStatus status =
+        cros_settings->PrepareTrustedValues(
             base::Bind(&LoginPerformer::CompleteLogin,
                        weak_factory_.GetWeakPtr(),
-                       username, password))) {
+                       username, password));
+    // Must not proceed without signature verification.
+    if (status == CrosSettingsProvider::PERMANENTLY_UNTRUSTED) {
+      if (delegate_)
+        delegate_->PolicyLoadFailed();
+      else
+        NOTREACHED();
+      return;
+    } else if (status != CrosSettingsProvider::TRUSTED) {
       // Value of AllowNewUser setting is still not verified.
       // Another attempt will be invoked after verification completion.
       return;
@@ -301,11 +313,19 @@ void LoginPerformer::Login(const std::string& username,
   // Whitelist check is always performed during initial login and
   // should not be performed when ScreenLock is active (pending online auth).
   if (!ScreenLocker::default_screen_locker()) {
-    // Must not proceed without signature verification.
-    if (!cros_settings->PrepareTrustedValues(
+    CrosSettingsProvider::TrustedStatus status =
+        cros_settings->PrepareTrustedValues(
             base::Bind(&LoginPerformer::Login,
                        weak_factory_.GetWeakPtr(),
-                       username, password))) {
+                       username, password));
+    // Must not proceed without signature verification.
+    if (status == CrosSettingsProvider::PERMANENTLY_UNTRUSTED) {
+      if (delegate_)
+        delegate_->PolicyLoadFailed();
+      else
+        NOTREACHED();
+      return;
+    } else if (status != CrosSettingsProvider::TRUSTED) {
       // Value of AllowNewUser setting is still not verified.
       // Another attempt will be invoked after verification completion.
       return;

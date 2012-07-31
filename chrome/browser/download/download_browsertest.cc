@@ -28,7 +28,7 @@
 #include "chrome/browser/download/download_shelf.h"
 #include "chrome/browser/download/download_test_observer.h"
 #include "chrome/browser/download/download_util.h"
-#include "chrome/browser/extensions/extension_install_ui.h"
+#include "chrome/browser/extensions/extension_install_prompt.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/net/url_request_mock_util.h"
@@ -40,6 +40,7 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/extensions/extension_switch_utils.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -55,20 +56,22 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/context_menu_params.h"
 #include "content/public/common/page_transition_types.h"
+#include "content/public/test/test_file_error_injector.h"
+#include "content/public/test/test_navigation_observer.h"
 #include "content/test/net/url_request_mock_http_job.h"
 #include "content/test/net/url_request_slow_download_job.h"
-#include "content/test/test_file_error_injector.h"
-#include "content/test/test_navigation_observer.h"
 #include "net/base/net_util.h"
 #include "net/test/test_server.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+using content::BrowserContext;
 using content::BrowserThread;
 using content::DownloadItem;
 using content::DownloadManager;
 using content::DownloadPersistentStoreInfo;
 using content::DownloadUrlParameters;
 using content::WebContents;
+using extensions::Extension;
 
 namespace {
 
@@ -83,15 +86,11 @@ class PickSuggestedFileDelegate : public ChromeDownloadManagerDelegate {
  public:
   explicit PickSuggestedFileDelegate(Profile* profile)
       : ChromeDownloadManagerDelegate(profile) {
-    SetDownloadManager(
-        DownloadServiceFactory::GetForProfile(profile)->GetDownloadManager());
   }
 
-  virtual void ChooseDownloadPath(WebContents* web_contents,
-                                  const FilePath& suggested_path,
-                                  int32 download_id) OVERRIDE {
+  virtual void ChooseDownloadPath(DownloadItem* item) OVERRIDE {
     if (download_manager_)
-      download_manager_->FileSelected(suggested_path, download_id);
+      download_manager_->FileSelected(item->GetTargetFilePath(), item->GetId());
   }
 
  protected:
@@ -153,9 +152,9 @@ class DownloadsHistoryDataCollector {
 // Mock that simulates a permissions dialog where the user denies
 // permission to install.  TODO(skerner): This could be shared with
 // extensions tests.  Find a common place for this class.
-class MockAbortExtensionInstallUI : public ExtensionInstallUI {
+class MockAbortExtensionInstallPrompt : public ExtensionInstallPrompt {
  public:
-  MockAbortExtensionInstallUI() : ExtensionInstallUI(NULL) {}
+  MockAbortExtensionInstallPrompt() : ExtensionInstallPrompt(NULL) {}
 
   // Simulate a user abort on an extension installation.
   virtual void ConfirmInstall(Delegate* delegate, const Extension* extension) {
@@ -164,15 +163,15 @@ class MockAbortExtensionInstallUI : public ExtensionInstallUI {
   }
 
   virtual void OnInstallSuccess(const Extension* extension, SkBitmap* icon) {}
-  virtual void OnInstallFailure(const string16& error) {}
+  virtual void OnInstallFailure(const CrxInstallerError& error) {}
 };
 
 // Mock that simulates a permissions dialog where the user allows
 // installation.
-class MockAutoConfirmExtensionInstallUI : public ExtensionInstallUI {
+class MockAutoConfirmExtensionInstallPrompt : public ExtensionInstallPrompt {
  public:
-  explicit MockAutoConfirmExtensionInstallUI(Profile* profile)
-      : ExtensionInstallUI(profile) {}
+  explicit MockAutoConfirmExtensionInstallPrompt(Browser* browser)
+      : ExtensionInstallPrompt(browser) {}
 
   // Proceed without confirmation prompt.
   virtual void ConfirmInstall(Delegate* delegate, const Extension* extension) {
@@ -180,12 +179,11 @@ class MockAutoConfirmExtensionInstallUI : public ExtensionInstallUI {
   }
 
   virtual void OnInstallSuccess(const Extension* extension, SkBitmap* icon) {}
-  virtual void OnInstallFailure(const string16& error) {}
+  virtual void OnInstallFailure(const CrxInstallerError& error) {}
 };
 
 static DownloadManager* DownloadManagerForBrowser(Browser* browser) {
-  return DownloadServiceFactory::GetForProfile(browser->profile())
-      ->GetDownloadManager();
+  return BrowserContext::GetDownloadManager(browser->profile());
 }
 
 class TestRenderViewContextMenu : public RenderViewContextMenu {
@@ -349,7 +347,7 @@ class DownloadTest : public InProcessBrowserTest {
   }
 
   FilePath GetDownloadDirectory(Browser* browser) {
-    return GetDownloadPrefs(browser)->download_path();
+    return GetDownloadPrefs(browser)->DownloadPath();
   }
 
   // Create a DownloadTestObserverTerminal that will wait for the
@@ -650,7 +648,7 @@ class DownloadTest : public InProcessBrowserTest {
     ASSERT_TRUE(url.is_valid()) << s.str();
 
     DownloadManager* download_manager = DownloadManagerForBrowser(browser());
-    WebContents* web_contents = browser()->GetSelectedWebContents();
+    WebContents* web_contents = browser()->GetActiveWebContents();
     ASSERT_TRUE(web_contents) << s.str();
 
     scoped_ptr<DownloadTestObserver> observer(
@@ -959,26 +957,24 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadResourceThrottleCancels) {
   EXPECT_TRUE(EnsureNoPendingDownloads());
 
   // Disable downloads for the tab.
-  content::NavigationController* controller =
-      &browser()->GetSelectedWebContents()->GetController();
+  WebContents* web_contents = browser()->GetActiveWebContents();
   DownloadRequestLimiter::TabDownloadState* tab_download_state =
       g_browser_process->download_request_limiter()->GetDownloadState(
-          controller,
-          controller,
-          true);
+          web_contents, web_contents, true);
   ASSERT_TRUE(tab_download_state);
   tab_download_state->set_download_status(
       DownloadRequestLimiter::DOWNLOADS_NOT_ALLOWED);
 
   // Try to start the download via Javascript and wait for the corresponding
   // load stop event.
-  TestNavigationObserver observer(
-      content::Source<content::NavigationController>(controller),
+  content::TestNavigationObserver observer(
+      content::Source<content::NavigationController>(
+          &web_contents->GetController()),
       NULL,
       1);
   bool download_assempted;
   ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
-      browser()->GetSelectedWebContents()->GetRenderViewHost(),
+      browser()->GetActiveWebContents()->GetRenderViewHost(),
       L"",
       L"window.domAutomationController.send(startDownload());",
       &download_assempted));
@@ -1038,7 +1034,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, PerWindowShelf) {
   EXPECT_TRUE(browser()->window()->IsDownloadShelfVisible());
 
   // Open a second tab and wait.
-  EXPECT_NE(static_cast<TabContentsWrapper*>(NULL),
+  EXPECT_NE(static_cast<TabContents*>(NULL),
             browser()->AddSelectedTabWithURL(
                 GURL(), content::PAGE_TRANSITION_TYPED));
   EXPECT_EQ(2, browser()->tab_count());
@@ -1401,7 +1397,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, MultiDownload) {
   observer1->WaitForFinished();
 
   std::vector<DownloadItem*> downloads;
-  browser()->profile()->GetDownloadManager()->SearchDownloads(
+  DownloadManagerForBrowser(browser())->SearchDownloads(
       string16(), &downloads);
   ASSERT_EQ(1u, downloads.size());
   ASSERT_EQ(DownloadItem::IN_PROGRESS, downloads[0]->GetState());
@@ -1416,7 +1412,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, MultiDownload) {
 
   // Should now have 2 items on the download shelf.
   downloads.clear();
-  browser()->profile()->GetDownloadManager()->SearchDownloads(
+  DownloadManagerForBrowser(browser())->SearchDownloads(
       string16(), &downloads);
   ASSERT_EQ(2u, downloads.size());
   // We don't know the order of the downloads.
@@ -1555,7 +1551,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, ChromeURLAfterDownload) {
   ui_test_utils::NavigateToURL(browser(), flags_url);
   DownloadAndWait(browser(), download_url, EXPECT_NO_SELECT_DIALOG);
   ui_test_utils::NavigateToURL(browser(), extensions_url);
-  WebContents* contents = browser()->GetSelectedWebContents();
+  WebContents* contents = browser()->GetActiveWebContents();
   ASSERT_TRUE(contents);
   bool webui_responded = false;
   EXPECT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
@@ -1575,7 +1571,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, BrowserCloseAfterDownload) {
   GURL download_url(URLRequestMockHTTPJob::GetMockUrl(file));
 
   ui_test_utils::NavigateToURL(browser(), downloads_url);
-  WebContents* contents = browser()->GetSelectedWebContents();
+  WebContents* contents = browser()->GetActiveWebContents();
   ASSERT_TRUE(contents);
   bool result = false;
   EXPECT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
@@ -1653,6 +1649,9 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, MAYBE_AutoOpen) {
 // Download an extension.  Expect a dangerous download warning.
 // Deny the download.
 IN_PROC_BROWSER_TEST_F(DownloadTest, CrxDenyInstall) {
+  if (!extensions::switch_utils::IsEasyOffStoreInstallEnabled())
+    return;
+
   GURL extension_url(URLRequestMockHTTPJob::GetMockUrl(kGoodCrxPath));
 
   scoped_ptr<DownloadTestObserver> observer(
@@ -1677,12 +1676,15 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, CrxDenyInstall) {
 // Download an extension.  Expect a dangerous download warning.
 // Allow the download, deny the install.
 IN_PROC_BROWSER_TEST_F(DownloadTest, CrxInstallDenysPermissions) {
+  if (!extensions::switch_utils::IsEasyOffStoreInstallEnabled())
+    return;
+
   GURL extension_url(URLRequestMockHTTPJob::GetMockUrl(kGoodCrxPath));
 
   // Install a mock install UI that simulates a user denying permission to
   // finish the install.
-  download_crx_util::SetMockInstallUIForTesting(
-      new MockAbortExtensionInstallUI());
+  download_crx_util::SetMockInstallPromptForTesting(
+      new MockAbortExtensionInstallPrompt());
 
   scoped_ptr<DownloadTestObserver> observer(
       DangerousDownloadWaiter(
@@ -1707,12 +1709,15 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, CrxInstallDenysPermissions) {
 // Download an extension.  Expect a dangerous download warning.
 // Allow the download, and the install.
 IN_PROC_BROWSER_TEST_F(DownloadTest, CrxInstallAcceptPermissions) {
+  if (!extensions::switch_utils::IsEasyOffStoreInstallEnabled())
+    return;
+
   GURL extension_url(URLRequestMockHTTPJob::GetMockUrl(kGoodCrxPath));
 
   // Install a mock install UI that simulates a user allowing permission to
   // finish the install.
-  download_crx_util::SetMockInstallUIForTesting(
-      new MockAutoConfirmExtensionInstallUI(browser()->profile()));
+  download_crx_util::SetMockInstallPromptForTesting(
+      new MockAutoConfirmExtensionInstallPrompt(browser()));
 
   scoped_ptr<DownloadTestObserver> observer(
       DangerousDownloadWaiter(
@@ -1742,8 +1747,8 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, CrxInvalid) {
   // Install a mock install UI that simulates a user allowing permission to
   // finish the install, and dismisses any error message.  We check that the
   // install failed below.
-  download_crx_util::SetMockInstallUIForTesting(
-      new MockAutoConfirmExtensionInstallUI(browser()->profile()));
+  download_crx_util::SetMockInstallPromptForTesting(
+      new MockAutoConfirmExtensionInstallPrompt(browser()));
 
   scoped_ptr<DownloadTestObserver> observer(
       DangerousDownloadWaiter(
@@ -1763,12 +1768,15 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, CrxInvalid) {
 
 // Install a large (100kb) theme.
 IN_PROC_BROWSER_TEST_F(DownloadTest, CrxLargeTheme) {
+  if (!extensions::switch_utils::IsEasyOffStoreInstallEnabled())
+    return;
+
   GURL extension_url(URLRequestMockHTTPJob::GetMockUrl(kLargeThemePath));
 
   // Install a mock install UI that simulates a user allowing permission to
   // finish the install.
-  download_crx_util::SetMockInstallUIForTesting(
-      new MockAutoConfirmExtensionInstallUI(browser()->profile()));
+  download_crx_util::SetMockInstallPromptForTesting(
+      new MockAutoConfirmExtensionInstallPrompt(browser()));
 
   scoped_ptr<DownloadTestObserver> observer(
       DangerousDownloadWaiter(
@@ -1928,7 +1936,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadUrl) {
   // DownloadUrl always prompts; return acceptance of whatever it prompts.
   NullSelectFile(browser());
 
-  WebContents* web_contents = browser()->GetSelectedWebContents();
+  WebContents* web_contents = browser()->GetActiveWebContents();
   ASSERT_TRUE(web_contents);
 
   DownloadTestObserver* observer(
@@ -1956,7 +1964,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadUrlToPath) {
   FilePath file(FILE_PATH_LITERAL("download-test1.lib"));
   GURL url(URLRequestMockHTTPJob::GetMockUrl(file));
 
-  WebContents* web_contents = browser()->GetSelectedWebContents();
+  WebContents* web_contents = browser()->GetActiveWebContents();
   ASSERT_TRUE(web_contents);
 
   ScopedTempDir other_directory;
@@ -2026,7 +2034,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, SavePageNonHTMLViaGet) {
   context_menu_params.media_type = WebKit::WebContextMenuData::MediaTypeImage;
   context_menu_params.src_url = url;
   context_menu_params.page_url = url;
-  TestRenderViewContextMenu menu(browser()->GetSelectedWebContents(),
+  TestRenderViewContextMenu menu(browser()->GetActiveWebContents(),
                                  context_menu_params);
   menu.Init();
   menu.ExecuteCommand(IDC_CONTENT_CONTEXT_SAVEIMAGEAS);
@@ -2063,7 +2071,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, SavePageNonHTMLViaPost) {
   // which normally requires revalidation each time.
   GURL jpeg_url = test_server()->GetURL("files/post/downloads/image.jpg");
   ASSERT_TRUE(jpeg_url.is_valid());
-  WebContents* web_contents = browser()->GetSelectedWebContents();
+  WebContents* web_contents = browser()->GetActiveWebContents();
   ASSERT_TRUE(web_contents != NULL);
   ui_test_utils::WindowedNotificationObserver observer(
       content::NOTIFICATION_NAV_ENTRY_COMMITTED,
@@ -2400,4 +2408,53 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadDangerousBlobData) {
 
   EXPECT_EQ(1u, observer->NumDownloadsSeenInState(DownloadItem::COMPLETE));
   EXPECT_EQ(1u, observer->NumDangerousDownloadsSeen());
+}
+
+IN_PROC_BROWSER_TEST_F(DownloadTest, LoadURLExternallyReferrerPolicy) {
+  // Do initial setup.
+  ASSERT_TRUE(test_server()->Start());
+  NullSelectFile(browser());
+  std::vector<DownloadItem*> download_items;
+  GetDownloads(browser(), &download_items);
+  ASSERT_TRUE(download_items.empty());
+
+  // Navigate to a page with a referrer policy and a link on it. The link points
+  // to testserver's /echoheader.
+  GURL url = test_server()->GetURL("files/downloads/referrer_policy.html");
+  ASSERT_TRUE(url.is_valid());
+  ui_test_utils::NavigateToURL(browser(), url);
+
+  scoped_ptr<DownloadTestObserver> waiter(
+      new DownloadTestObserverTerminal(
+          DownloadManagerForBrowser(browser()), 1,
+          false, DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_FAIL));
+
+  // Click on the link with the alt key pressed. This will download the link
+  // target.
+  WebContents* tab = browser()->GetActiveWebContents();
+  WebKit::WebMouseEvent mouse_event;
+  mouse_event.type = WebKit::WebInputEvent::MouseDown;
+  mouse_event.button = WebKit::WebMouseEvent::ButtonLeft;
+  mouse_event.x = 15;
+  mouse_event.y = 15;
+  mouse_event.clickCount = 1;
+  mouse_event.modifiers = WebKit::WebInputEvent::AltKey;
+  tab->GetRenderViewHost()->ForwardMouseEvent(mouse_event);
+  mouse_event.type = WebKit::WebInputEvent::MouseUp;
+  tab->GetRenderViewHost()->ForwardMouseEvent(mouse_event);
+
+  waiter->WaitForFinished();
+  EXPECT_EQ(1u, waiter->NumDownloadsSeenInState(DownloadItem::COMPLETE));
+  CheckDownloadStates(1, DownloadItem::COMPLETE);
+
+  // Validate that the correct file was downloaded.
+  GetDownloads(browser(), &download_items);
+  ASSERT_EQ(1u, download_items.size());
+  ASSERT_EQ(test_server()->GetURL("echoheader?Referer"),
+            download_items[0]->GetOriginalUrl());
+
+  // Check that the file contains the expected referrer.
+  FilePath file(download_items[0]->GetFullPath());
+  std::string expected_contents = test_server()->GetURL("").spec();
+  ASSERT_TRUE(VerifyFile(file, expected_contents, expected_contents.length()));
 }

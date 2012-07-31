@@ -9,7 +9,8 @@
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/app_modal_dialogs/app_modal_dialog.h"
-#include "chrome/browser/ui/app_modal_dialogs/js_modal_dialog.h"
+#include "chrome/browser/ui/app_modal_dialogs/javascript_app_modal_dialog.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
@@ -96,7 +97,7 @@ void ManagedMode::EnterManagedModeImpl(Profile* profile,
                  content::NotificationService::AllSources());
   registrar_.Add(this, chrome::NOTIFICATION_BROWSER_CLOSE_CANCELLED,
                  content::NotificationService::AllSources());
-  for (std::set<const Browser*>::const_iterator i = browsers_to_close_.begin();
+  for (std::set<Browser*>::const_iterator i = browsers_to_close_.begin();
        i != browsers_to_close_.end(); ++i) {
     (*i)->window()->Close();
   }
@@ -113,7 +114,7 @@ void ManagedMode::LeaveManagedModeImpl() {
     SetInManagedMode(false);
 }
 
-void ManagedMode::OnBrowserAdded(const Browser* browser) {
+void ManagedMode::OnBrowserAdded(Browser* browser) {
   // Return early if we don't have any queued callbacks.
   if (callbacks_.empty())
     return;
@@ -122,7 +123,7 @@ void ManagedMode::OnBrowserAdded(const Browser* browser) {
     FinalizeEnter(false);
 }
 
-void ManagedMode::OnBrowserRemoved(const Browser* browser) {
+void ManagedMode::OnBrowserRemoved(Browser* browser) {
   // Return early if we don't have any queued callbacks.
   if (callbacks_.empty())
     return;

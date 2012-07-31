@@ -12,8 +12,12 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
+#include "chrome/browser/extensions/extension_event_names.h"
 #include "chrome/browser/extensions/extension_event_router.h"
+#include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
+#include "chrome/browser/extensions/state_store.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
@@ -24,6 +28,62 @@
 #include "ui/gfx/favicon_size.h"
 
 using content::WebContents;
+
+namespace {
+
+// Keys for serialization to and from Value to store in the preferences.
+const char kContextMenusKey[] = "context_menus";
+
+const char kCheckedKey[] = "checked";
+const char kContextsKey[] = "contexts";
+const char kDocumentURLPatternsKey[] = "document_url_patterns";
+const char kEnabledKey[] = "enabled";
+const char kIncognitoKey[] = "incognito";
+const char kParentUIDKey[] = "parent_uid";
+const char kStringUIDKey[] = "string_uid";
+const char kTargetURLPatternsKey[] = "target_url_patterns";
+const char kTitleKey[] = "title";
+const char kTypeKey[] = "type";
+
+void SetIdKeyValue(base::DictionaryValue* properties,
+                   const char* key,
+                   const ExtensionMenuItem::Id& id) {
+  if (id.uid == 0)
+    properties->SetString(key, id.string_uid);
+  else
+    properties->SetInteger(key, id.uid);
+}
+
+ExtensionMenuItem::List MenuItemsFromValue(const std::string& extension_id,
+                                           base::Value* value) {
+  ExtensionMenuItem::List items;
+
+  base::ListValue* list = NULL;
+  if (!value || !value->GetAsList(&list))
+    return items;
+
+  for (size_t i = 0; i < list->GetSize(); ++i) {
+    base::DictionaryValue* dict = NULL;
+    if (!list->GetDictionary(i, &dict))
+      continue;
+    ExtensionMenuItem* item = ExtensionMenuItem::Populate(
+        extension_id, *dict, NULL);
+    if (!item)
+      continue;
+    items.push_back(item);
+  }
+  return items;
+}
+
+scoped_ptr<base::Value> MenuItemsToValue(
+    const ExtensionMenuItem::List& items) {
+  scoped_ptr<base::ListValue> list(new ListValue());
+  for (size_t i = 0; i < items.size(); ++i)
+    list->Append(items[i]->ToValue().release());
+  return scoped_ptr<Value>(list.release());
+}
+
+}  // namespace
 
 ExtensionMenuItem::ExtensionMenuItem(const Id& id,
                                      const std::string& title,
@@ -59,6 +119,12 @@ ExtensionMenuItem* ExtensionMenuItem::ReleaseChild(const Id& child_id,
     }
   }
   return NULL;
+}
+
+void ExtensionMenuItem::GetFlattenedSubtree(ExtensionMenuItem::List* list) {
+  list->push_back(this);
+  for (List::iterator i = children_.begin(); i != children_.end(); ++i)
+    (*i)->GetFlattenedSubtree(list);
 }
 
 std::set<ExtensionMenuItem::Id> ExtensionMenuItem::RemoveAllDescendants() {
@@ -97,9 +163,117 @@ void ExtensionMenuItem::AddChild(ExtensionMenuItem* item) {
   children_.push_back(item);
 }
 
-ExtensionMenuManager::ExtensionMenuManager(Profile* profile) {
+scoped_ptr<DictionaryValue> ExtensionMenuItem::ToValue() const {
+  scoped_ptr<DictionaryValue> value(new DictionaryValue);
+  // Should only be called for extensions with event pages, which only have
+  // string IDs for items.
+  DCHECK_EQ(0, id_.uid);
+  value->SetString(kStringUIDKey, id_.string_uid);
+  value->SetBoolean(kIncognitoKey, id_.incognito);
+  value->SetInteger(kTypeKey, type_);
+  if (type_ != SEPARATOR)
+    value->SetString(kTitleKey, title_);
+  if (type_ == CHECKBOX || type_ == RADIO)
+    value->SetBoolean(kCheckedKey, checked_);
+  value->SetBoolean(kEnabledKey, enabled_);
+  value->Set(kContextsKey, contexts_.ToValue().release());
+  if (parent_id_.get()) {
+    DCHECK_EQ(0, parent_id_->uid);
+    value->SetString(kParentUIDKey, parent_id_->string_uid);
+  }
+  value->Set(kDocumentURLPatternsKey,
+             document_url_patterns_.ToValue().release());
+  value->Set(kTargetURLPatternsKey, target_url_patterns_.ToValue().release());
+  return value.Pass();
+}
+
+// static
+ExtensionMenuItem* ExtensionMenuItem::Populate(const std::string& extension_id,
+                                               const DictionaryValue& value,
+                                               std::string* error) {
+  bool incognito = false;
+  if (!value.GetBoolean(kIncognitoKey, &incognito))
+    return NULL;
+  Id id(incognito, extension_id);
+  if (!value.GetString(kStringUIDKey, &id.string_uid))
+    return NULL;
+  int type_int;
+  Type type;
+  if (!value.GetInteger(kTypeKey, &type_int))
+    return NULL;
+  type = static_cast<Type>(type_int);
+  std::string title;
+  if (type != SEPARATOR && !value.GetString(kTitleKey, &title))
+    return NULL;
+  bool checked;
+  if ((type == CHECKBOX || type == RADIO) &&
+      !value.GetBoolean(kCheckedKey, &checked)) {
+    return NULL;
+  }
+  bool enabled = true;
+  if (!value.GetBoolean(kEnabledKey, &enabled))
+    return NULL;
+  ContextList contexts;
+  Value* contexts_value = NULL;
+  if (!value.Get(kContextsKey, &contexts_value))
+    return NULL;
+  if (!contexts.Populate(*contexts_value))
+    return NULL;
+
+  scoped_ptr<ExtensionMenuItem> result(new ExtensionMenuItem(
+      id, title, checked, enabled, type, contexts));
+
+  if (!result->PopulateURLPatterns(
+          value, kDocumentURLPatternsKey, kTargetURLPatternsKey, error))
+    return NULL;
+
+  // parent_id is filled in from the value, but it might not be valid. It's left
+  // to be validated upon being added (via AddChildItem) to the menu manager.
+  scoped_ptr<Id> parent_id(new Id(incognito, extension_id));
+  if (value.HasKey(kParentUIDKey)) {
+    if (!value.GetString(kParentUIDKey, &parent_id->string_uid))
+      return NULL;
+    result->parent_id_.swap(parent_id);
+  }
+  return result.release();
+}
+
+bool ExtensionMenuItem::PopulateURLPatterns(
+    const DictionaryValue& properties,
+    const char* document_url_patterns_key,
+    const char* target_url_patterns_key,
+    std::string* error) {
+  if (properties.HasKey(document_url_patterns_key)) {
+    ListValue* list = NULL;
+    if (!properties.GetList(document_url_patterns_key, &list))
+      return false;
+    if (!document_url_patterns_.Populate(
+            *list, URLPattern::SCHEME_ALL, true, error)) {
+      return false;
+    }
+  }
+  if (properties.HasKey(target_url_patterns_key)) {
+    ListValue* list = NULL;
+    if (!properties.GetList(target_url_patterns_key, &list))
+      return false;
+    if (!target_url_patterns_.Populate(
+            *list, URLPattern::SCHEME_ALL, true, error)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+ExtensionMenuManager::ExtensionMenuManager(Profile* profile)
+    : profile_(profile) {
+  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
+                 content::Source<Profile>(profile));
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
                  content::Source<Profile>(profile));
+
+  extensions::StateStore* store = ExtensionSystem::Get(profile_)->state_store();
+  if (store)
+    store->RegisterKey(kContextMenusKey);
 }
 
 ExtensionMenuManager::~ExtensionMenuManager() {
@@ -127,8 +301,9 @@ const ExtensionMenuItem::List* ExtensionMenuManager::MenuItems(
   return NULL;
 }
 
-bool ExtensionMenuManager::AddContextItem(const Extension* extension,
-                                          ExtensionMenuItem* item) {
+bool ExtensionMenuManager::AddContextItem(
+    const extensions::Extension* extension,
+    ExtensionMenuItem* item) {
   const std::string& extension_id = item->extension_id();
   // The item must have a non-empty extension id, and not have already been
   // added.
@@ -159,6 +334,7 @@ bool ExtensionMenuManager::AddChildItem(const ExtensionMenuItem::Id& parent_id,
                                         ExtensionMenuItem* child) {
   ExtensionMenuItem* parent = GetItemById(parent_id);
   if (!parent || parent->type() != ExtensionMenuItem::NORMAL ||
+      parent->incognito() != child->incognito() ||
       parent->extension_id() != child->extension_id() ||
       ContainsKey(items_by_id_, child->id()))
     return false;
@@ -167,7 +343,6 @@ bool ExtensionMenuManager::AddChildItem(const ExtensionMenuItem::Id& parent_id,
 
   if (child->type() == ExtensionMenuItem::RADIO)
     SanitizeRadioList(parent->children());
-
   return true;
 }
 
@@ -198,6 +373,7 @@ bool ExtensionMenuManager::ChangeParent(
   if ((parent_id && (child_id == *parent_id)) || !child ||
       (!new_parent && parent_id != NULL) ||
       (new_parent && (DescendantOf(new_parent, child_id) ||
+                      child->incognito() != new_parent->incognito() ||
                       child->extension_id() != new_parent->extension_id())))
     return false;
 
@@ -298,7 +474,6 @@ bool ExtensionMenuManager::RemoveContextMenuItem(
     context_items_.erase(extension_id);
     icon_manager_.RemoveIcon(extension_id);
   }
-
   return result;
 }
 
@@ -408,9 +583,9 @@ void ExtensionMenuManager::ExecuteCommand(
   ListValue args;
 
   DictionaryValue* properties = new DictionaryValue();
-  properties->SetInteger("menuItemId", item->id().uid);
+  SetIdKeyValue(properties, "menuItemId", item->id());
   if (item->parent_id())
-    properties->SetInteger("parentMenuItemId", item->parent_id()->uid);
+    SetIdKeyValue(properties, "parentMenuItemId", item->id());
 
   switch (params.media_type) {
     case WebKit::WebContextMenuData::MediaTypeImage:
@@ -456,13 +631,21 @@ void ExtensionMenuManager::ExecuteCommand(
 
     item->SetChecked(checked);
     properties->SetBoolean("checked", item->checked());
+
+    const extensions::Extension* extension = ExtensionSystem::Get(profile_)->
+        extension_service()->GetExtensionById(menuItemId.extension_id, false);
+    WriteToStorage(extension);
   }
 
   std::string json_args;
   base::JSONWriter::Write(&args, &json_args);
-  std::string event_name = "contextMenus";
   event_router->DispatchEventToExtension(
-      item->extension_id(), event_name, json_args, profile, GURL(),
+      item->extension_id(), extension_event_names::kOnContextMenus,
+      json_args, profile, GURL(),
+      ExtensionEventRouter::USER_GESTURE_ENABLED);
+  event_router->DispatchEventToExtension(
+      item->extension_id(), extension_event_names::kOnContextMenuClicked,
+      json_args, profile, GURL(),
       ExtensionEventRouter::USER_GESTURE_ENABLED);
 }
 
@@ -523,17 +706,70 @@ bool ExtensionMenuManager::ItemUpdated(const ExtensionMenuItem::Id& id) {
   return true;
 }
 
+void ExtensionMenuManager::WriteToStorage(
+    const extensions::Extension* extension) {
+  if (!extension->has_lazy_background_page())
+    return;
+  const ExtensionMenuItem::List* top_items = MenuItems(extension->id());
+  ExtensionMenuItem::List all_items;
+  if (top_items) {
+    for (ExtensionMenuItem::List::const_iterator i = top_items->begin();
+         i != top_items->end(); ++i) {
+      (*i)->GetFlattenedSubtree(&all_items);
+    }
+  }
+
+  extensions::StateStore* store = ExtensionSystem::Get(profile_)->state_store();
+  if (store)
+    store->SetExtensionValue(extension->id(), kContextMenusKey,
+                             MenuItemsToValue(all_items));
+}
+
+void ExtensionMenuManager::ReadFromStorage(const std::string& extension_id,
+                                           scoped_ptr<base::Value> value) {
+  const extensions::Extension* extension =
+      ExtensionSystem::Get(profile_)->extension_service()->extensions()->
+          GetByID(extension_id);
+  if (!extension)
+    return;
+
+  ExtensionMenuItem::List items = MenuItemsFromValue(extension_id, value.get());
+  for (size_t i = 0; i < items.size(); ++i) {
+    if (items[i]->parent_id()) {
+      // Parent IDs are stored in the parent_id field for convenience, but
+      // they have not yet been validated. Separate them out here.
+      // Because of the order in which we store items in the prefs, parents will
+      // precede children, so we should already know about any parent items.
+      scoped_ptr<ExtensionMenuItem::Id> parent_id;
+      parent_id.swap(items[i]->parent_id_);
+      AddChildItem(*parent_id, items[i]);
+    } else {
+      AddContextItem(extension, items[i]);
+    }
+  }
+}
+
 void ExtensionMenuManager::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
-  DCHECK(type == chrome::NOTIFICATION_EXTENSION_UNLOADED);
-
-  // Remove menu items for disabled/uninstalled extensions.
-  const Extension* extension =
-      content::Details<UnloadedExtensionInfo>(details)->extension;
-  if (ContainsKey(context_items_, extension->id())) {
-    RemoveAllContextItems(extension->id());
+  if (type == chrome::NOTIFICATION_EXTENSION_UNLOADED) {
+    // Remove menu items for disabled/uninstalled extensions.
+    const extensions::Extension* extension =
+        content::Details<extensions::UnloadedExtensionInfo>(details)->extension;
+    if (ContainsKey(context_items_, extension->id())) {
+      RemoveAllContextItems(extension->id());
+    }
+  } else if (type == chrome::NOTIFICATION_EXTENSION_LOADED) {
+    const extensions::Extension* extension =
+        content::Details<const extensions::Extension>(details).ptr();
+    extensions::StateStore* store =
+        ExtensionSystem::Get(profile_)->state_store();
+    if (store && extension->has_lazy_background_page()) {
+      store->GetExtensionValue(extension->id(), kContextMenusKey,
+          base::Bind(&ExtensionMenuManager::ReadFromStorage,
+                     AsWeakPtr(), extension->id()));
+    }
   }
 }
 
@@ -543,22 +779,22 @@ const SkBitmap& ExtensionMenuManager::GetIconForExtension(
 }
 
 ExtensionMenuItem::Id::Id()
-    : profile(NULL), uid(0) {
+    : incognito(false), extension_id(""), uid(0), string_uid("") {
 }
 
-ExtensionMenuItem::Id::Id(Profile* profile,
-                          const std::string& extension_id,
-                          int uid)
-    : profile(profile), extension_id(extension_id), uid(uid) {
+ExtensionMenuItem::Id::Id(bool incognito, const std::string& extension_id)
+    : incognito(incognito), extension_id(extension_id), uid(0),
+      string_uid("") {
 }
 
 ExtensionMenuItem::Id::~Id() {
 }
 
 bool ExtensionMenuItem::Id::operator==(const Id& other) const {
-  return (profile == other.profile &&
+  return (incognito == other.incognito &&
           extension_id == other.extension_id &&
-          uid == other.uid);
+          uid == other.uid &&
+          string_uid == other.string_uid);
 }
 
 bool ExtensionMenuItem::Id::operator!=(const Id& other) const {
@@ -566,13 +802,17 @@ bool ExtensionMenuItem::Id::operator!=(const Id& other) const {
 }
 
 bool ExtensionMenuItem::Id::operator<(const Id& other) const {
-  if (profile < other.profile)
+  if (incognito < other.incognito)
     return true;
-  if (profile == other.profile) {
+  if (incognito == other.incognito) {
     if (extension_id < other.extension_id)
       return true;
-    if (extension_id == other.extension_id)
-      return uid < other.uid;
+    if (extension_id == other.extension_id) {
+      if (uid < other.uid)
+        return true;
+      if (uid == other.uid)
+        return string_uid < other.string_uid;
+    }
   }
   return false;
 }

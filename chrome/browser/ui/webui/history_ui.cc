@@ -24,7 +24,7 @@
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
 #include "chrome/browser/ui/webui/favicon_source.h"
@@ -45,6 +45,7 @@
 #include "grit/theme_resources_standard.h"
 #include "net/base/escape.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
 
 using content::UserMetricsAction;
@@ -286,7 +287,7 @@ void BrowsingHistoryHandler::HandleClearBrowsingData(const ListValue* args) {
   // TODO(beng): This is an improper direct dependency on Browser. Route this
   // through some sort of delegate.
   Profile* profile = Profile::FromWebUI(web_ui());
-  Browser* browser = BrowserList::FindBrowserWithProfile(profile);
+  Browser* browser = browser::FindBrowserWithProfile(profile);
   if (browser)
     browser->OpenClearBrowsingDataDialog();
 #endif
@@ -485,5 +486,6 @@ const GURL HistoryUI::GetHistoryURLWithSearchText(const string16& text) {
 // static
 base::RefCountedMemory* HistoryUI::GetFaviconResourceBytes() {
   return ResourceBundle::GetSharedInstance().
-      LoadDataResourceBytes(IDR_HISTORY_FAVICON);
+      LoadDataResourceBytes(IDR_HISTORY_FAVICON,
+                            ui::SCALE_FACTOR_100P);
 }

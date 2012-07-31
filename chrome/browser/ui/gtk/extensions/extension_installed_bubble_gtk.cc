@@ -31,6 +31,8 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/gtk_util.h"
 
+using extensions::Extension;
+
 namespace {
 
 const int kHorizontalColumnSpacing = 10;
@@ -115,7 +117,7 @@ void ExtensionInstalledBubbleGtk::Observe(
     }
   } else if (type == chrome::NOTIFICATION_EXTENSION_UNLOADED) {
     const Extension* extension =
-        content::Details<UnloadedExtensionInfo>(details)->extension;
+        content::Details<extensions::UnloadedExtensionInfo>(details)->extension;
     if (extension == extension_)
       extension_ = NULL;
   } else {
@@ -126,7 +128,7 @@ void ExtensionInstalledBubbleGtk::Observe(
 void ExtensionInstalledBubbleGtk::ShowInternal() {
   BrowserWindowGtk* browser_window =
       BrowserWindowGtk::GetBrowserWindowForNativeWindow(
-          browser_->window()->GetNativeHandle());
+          browser_->window()->GetNativeWindow());
 
   GtkWidget* reference_widget = NULL;
 
@@ -186,7 +188,7 @@ void ExtensionInstalledBubbleGtk::ShowInternal() {
 
   if (!icon_.isNull()) {
     // Scale icon down to 43x43, but allow smaller icons (don't scale up).
-    GdkPixbuf* pixbuf = gfx::GdkPixbufFromSkBitmap(&icon_);
+    GdkPixbuf* pixbuf = gfx::GdkPixbufFromSkBitmap(icon_);
     gfx::Size size(icon_.width(), icon_.height());
     if (size.width() > kIconSize || size.height() > kIconSize) {
       if (size.width() > size.height()) {
@@ -321,8 +323,9 @@ void ExtensionInstalledBubbleGtk::ShowInternal() {
                             &bounds,
                             bubble_content,
                             arrow_location,
-                            true,  // match_system_theme
-                            true,  // grab_input
+                            BubbleGtk::MATCH_SYSTEM_THEME |
+                                BubbleGtk::POPUP_WINDOW |
+                                BubbleGtk::GRAB_INPUT,
                             theme_provider,
                             this);
 }
@@ -342,7 +345,7 @@ void ExtensionInstalledBubbleGtk::BubbleClosing(BubbleGtk* bubble,
     // Turn the page action preview off.
     BrowserWindowGtk* browser_window =
           BrowserWindowGtk::GetBrowserWindowForNativeWindow(
-              browser_->window()->GetNativeHandle());
+              browser_->window()->GetNativeWindow());
     LocationBarViewGtk* location_bar_view =
         browser_window->GetToolbar()->GetLocationBarView();
     location_bar_view->SetPreviewEnabledPageAction(extension_->page_action(),

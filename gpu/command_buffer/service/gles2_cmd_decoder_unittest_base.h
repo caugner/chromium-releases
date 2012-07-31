@@ -17,10 +17,11 @@
 #include "gpu/command_buffer/service/query_manager.h"
 #include "gpu/command_buffer/service/renderbuffer_manager.h"
 #include "gpu/command_buffer/service/shader_manager.h"
+#include "gpu/command_buffer/service/test_helper.h"
 #include "gpu/command_buffer/service/texture_manager.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/gfx/gl/gl_context_stub.h"
-#include "ui/gfx/gl/gl_surface_stub.h"
+#include "ui/gl/gl_context_stub.h"
+#include "ui/gl/gl_surface_stub.h"
 
 namespace gpu {
 namespace gles2 {
@@ -154,20 +155,8 @@ class GLES2DecoderTestBase : public testing::Test {
     return decoder_.get();
   }
 
-  struct AttribInfo {
-    const char* name;
-    GLint size;
-    GLenum type;
-    GLint location;
-  };
-
-  struct UniformInfo {
-    const char* name;
-    GLint size;
-    GLenum type;
-    GLint fake_location;
-    GLint real_location;
-  };
+  typedef TestHelper::AttribInfo AttribInfo;
+  typedef TestHelper::UniformInfo UniformInfo;
 
   void SetupShader(
       AttribInfo* attribs, size_t num_attribs,
@@ -177,7 +166,10 @@ class GLES2DecoderTestBase : public testing::Test {
       GLuint fragment_shader_client_id, GLuint fragment_shader_service_id);
 
   void SetupExpectationsForClearingUniforms(
-      UniformInfo* uniforms, size_t num_uniforms);
+      UniformInfo* uniforms, size_t num_uniforms) {
+    TestHelper::SetupExpectationsForClearingUniforms(
+        gl_.get(), uniforms, num_uniforms);
+  }
 
   // Setups up a shader for testing glUniform.
   void SetupShaderForUniform();
@@ -215,6 +207,10 @@ class GLES2DecoderTestBase : public testing::Test {
   void DoDeleteShader(GLuint client_id, GLuint service_id);
   void DoDeleteTexture(GLuint client_id, GLuint service_id);
 
+  void DoCompressedTexImage2D(
+      GLenum target, GLint level, GLenum format,
+      GLsizei width, GLsizei height, GLint border,
+      GLsizei size, uint32 bucket_id);
   void DoTexImage2D(
       GLenum target, GLint level, GLenum internal_format,
       GLsizei width, GLsizei height, GLint border,
@@ -269,6 +265,15 @@ class GLES2DecoderTestBase : public testing::Test {
       GLenum type,
       GLsizei width,
       GLsizei height);
+
+  void SetupExpectationsForRestoreClearState(
+      GLclampf restore_red,
+      GLclampf restore_green,
+      GLclampf restore_blue,
+      GLclampf restore_alpha,
+      GLuint restore_stencil,
+      GLclampf restore_depth,
+      bool restore_scissor_test);
 
   void SetupExpectationsForFramebufferClearing(
       GLenum target,
@@ -508,7 +513,7 @@ class GLES2DecoderTestBase : public testing::Test {
     Buffer invalid_buffer_;
   };
 
-  void AddExpectationsForCopyTextureCHROMIUM();
+  void AddExpectationsForVertexAttribManager();
 
   scoped_ptr< ::testing::StrictMock<MockCommandBufferEngine> > engine_;
   ContextGroup::Ref group_;

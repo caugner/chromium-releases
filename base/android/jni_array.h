@@ -32,8 +32,12 @@ ScopedJavaLocalRef<jobjectArray> ToJavaArrayOfStrings(
 
 // Converts a Java string array to a native array.
 void AppendJavaStringArrayToStringVector(JNIEnv* env,
-                                         const JavaRef<jobjectArray>& array,
+                                         jobjectArray array,
                                          std::vector<string16>* out);
+
+void AppendJavaStringArrayToStringVector(JNIEnv* env,
+                                         jobjectArray array,
+                                         std::vector<std::string>* out);
 
 // Appends the Java bytes in |bytes_array| onto the end of |out|.
 void AppendJavaByteArrayToByteVector(JNIEnv* env,

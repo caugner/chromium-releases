@@ -16,6 +16,7 @@
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/theme_provider.h"
+#include "ui/gfx/image/image_skia.h"
 
 using ::testing::_;
 using ::testing::DoAll;
@@ -29,6 +30,7 @@ class MockThemeProvider : public ui::ThemeProvider {
   // Cross platform methods
   MOCK_METHOD1(Init, void(Profile*));
   MOCK_CONST_METHOD1(GetBitmapNamed, SkBitmap*(int));
+  MOCK_CONST_METHOD1(GetImageSkiaNamed, gfx::ImageSkia*(int));
   MOCK_CONST_METHOD1(GetColor, SkColor(int));
   MOCK_CONST_METHOD2(GetDisplayProperty, bool(int, int*));
   MOCK_CONST_METHOD0(ShouldUseNativeFrame, bool());
@@ -176,11 +178,12 @@ TEST_F(BookmarkBarToolbarViewTest, DisplayAsDetachedBarWithBgImage) {
       .WillRepeatedly(SetAlignLeft());
 
   // Create a dummy bitmap full of not-red to blit with.
-  SkBitmap fake_bg;
-  fake_bg.setConfig(SkBitmap::kARGB_8888_Config, 800, 800);
-  fake_bg.allocPixels();
-  fake_bg.eraseColor(SK_ColorGREEN);
-  EXPECT_CALL(provider, GetBitmapNamed(IDR_THEME_NTP_BACKGROUND))
+  SkBitmap fake_bg_bitmap;
+  fake_bg_bitmap.setConfig(SkBitmap::kARGB_8888_Config, 800, 800);
+  fake_bg_bitmap.allocPixels();
+  fake_bg_bitmap.eraseColor(SK_ColorGREEN);
+  gfx::ImageSkia fake_bg(fake_bg_bitmap);
+  EXPECT_CALL(provider, GetImageSkiaNamed(IDR_THEME_NTP_BACKGROUND))
       .WillRepeatedly(Return(&fake_bg));
 
   [controller_.get() setThemeProvider:&provider];

@@ -117,11 +117,11 @@ InputMethodDescriptor MockInputMethodManager::GetCurrentInputMethod() const {
   InputMethodDescriptor descriptor =
       InputMethodDescriptor::GetFallbackInputMethodDescriptor();
   if (!current_input_method_id_.empty()) {
-    return InputMethodDescriptor(whitelist_,
-                                 current_input_method_id_,
+    return InputMethodDescriptor(current_input_method_id_,
                                  descriptor.name(),
                                  descriptor.keyboard_layout(),
-                                 descriptor.language_code());
+                                 descriptor.language_code(),
+                                 false);
   }
   return descriptor;
 }

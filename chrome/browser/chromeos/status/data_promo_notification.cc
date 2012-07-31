@@ -142,7 +142,7 @@ void DataPromoNotification::ShowOptionalMobileDataPromoNotification(
       !UserManager::Get()->IsLoggedInAsGuest() &&
       check_for_promo_ &&
       cros->cellular_connected() && !cros->ethernet_connected() &&
-      !cros->wifi_connected()) {
+      !cros->wifi_connected() && !cros->wimax_connected()) {
     std::string deal_text;
     int carrier_deal_promo_pref = kNotificationCountPrefDefault;
     const MobileConfig::CarrierDeal* deal = NULL;
@@ -203,12 +203,14 @@ void DataPromoNotification::ShowOptionalMobileDataPromoNotification(
     mobile_data_bubble_ = new MessageBubble(
         host,
         views::BubbleBorder::TOP_RIGHT,
-        ResourceBundle::GetSharedInstance().GetBitmapNamed(IDR_NOTIFICATION_3G),
+        ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
+            IDR_NOTIFICATION_3G),
         message,
         links);
     mobile_data_bubble_->set_link_listener(listener);
     mobile_data_bubble_->set_parent_window(
-        ash::Shell::GetInstance()->GetContainer(
+        ash::Shell::GetContainer(
+            ash::Shell::GetPrimaryRootWindow(),
             ash::internal::kShellWindowId_SettingBubbleContainer));
     views::BubbleDelegateView::CreateBubble(mobile_data_bubble_);
     mobile_data_bubble_->Show();

@@ -5,10 +5,11 @@
 #ifndef CHROME_BROWSER_AUTOMATION_AUTOMATION_EVENT_OBSERVERS_H_
 #define CHROME_BROWSER_AUTOMATION_AUTOMATION_EVENT_OBSERVERS_H_
 
-#include "base/memory/scoped_ptr.h"
+#include "base/compiler_specific.h"
 #include "base/values.h"
-#include "chrome/browser/automation/automation_provider_observers.h"
 #include "chrome/browser/automation/automation_event_queue.h"
+#include "chrome/browser/automation/automation_provider.h"
+#include "chrome/browser/automation/automation_provider_observers.h"
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/login/login_status_consumer.h"
 #endif  // defined(OS_CHROMEOS)
@@ -84,7 +85,8 @@ class LoginEventObserver
     : public AutomationEventObserver, public chromeos::LoginStatusConsumer {
  public:
   LoginEventObserver(AutomationEventQueue* event_queue,
-                     chromeos::ExistingUserController* controller);
+                     chromeos::ExistingUserController* controller,
+                     AutomationProvider* automation);
   virtual ~LoginEventObserver();
 
   virtual void OnLoginFailure(const chromeos::LoginFailure& error) OVERRIDE;
@@ -95,6 +97,7 @@ class LoginEventObserver
 
  private:
   chromeos::ExistingUserController* controller_;
+  base::WeakPtr<AutomationProvider> automation_;
 
   void _NotifyLoginEvent(const std::string& error_string);
 

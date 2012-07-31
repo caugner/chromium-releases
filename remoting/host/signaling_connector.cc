@@ -31,11 +31,15 @@ SignalingConnector::OAuthCredentials::OAuthCredentials(
       client_info(client_info_value) {
 }
 
-SignalingConnector::SignalingConnector(XmppSignalStrategy* signal_strategy)
+SignalingConnector::SignalingConnector(
+    XmppSignalStrategy* signal_strategy,
+    const base::Closure& auth_failed_callback)
     : signal_strategy_(signal_strategy),
+      auth_failed_callback_(auth_failed_callback),
       reconnect_attempts_(0),
       refreshing_oauth_token_(false) {
-  net::NetworkChangeNotifier::AddOnlineStateObserver(this);
+  DCHECK(!auth_failed_callback_.is_null());
+  net::NetworkChangeNotifier::AddConnectionTypeObserver(this);
   net::NetworkChangeNotifier::AddIPAddressObserver(this);
   signal_strategy_->AddListener(this);
   ScheduleTryReconnect();
@@ -43,17 +47,16 @@ SignalingConnector::SignalingConnector(XmppSignalStrategy* signal_strategy)
 
 SignalingConnector::~SignalingConnector() {
   signal_strategy_->RemoveListener(this);
-  net::NetworkChangeNotifier::RemoveOnlineStateObserver(this);
+  net::NetworkChangeNotifier::RemoveConnectionTypeObserver(this);
   net::NetworkChangeNotifier::RemoveIPAddressObserver(this);
 }
 
 void SignalingConnector::EnableOAuth(
     scoped_ptr<OAuthCredentials> oauth_credentials,
-    const base::Closure& oauth_failed_callback,
     net::URLRequestContextGetter* url_context) {
   oauth_credentials_ = oauth_credentials.Pass();
-  oauth_failed_callback_ = oauth_failed_callback;
-  gaia_oauth_client_.reset(new GaiaOAuthClient(kGaiaOAuth2Url, url_context));
+  gaia_oauth_client_.reset(new GaiaOAuthClient(
+      OAuthProviderInfo::GetDefault(), url_context));
 }
 
 void SignalingConnector::OnSignalStrategyStateChange(
@@ -66,7 +69,14 @@ void SignalingConnector::OnSignalStrategyStateChange(
   } else if (state == SignalStrategy::DISCONNECTED) {
     LOG(INFO) << "Signaling disconnected.";
     reconnect_attempts_++;
-    ScheduleTryReconnect();
+
+    // If authentication failed then we have an invalid OAuth token,
+    // inform the upper layer about it.
+    if (signal_strategy_->GetError() == SignalStrategy::AUTHENTICATION_FAILED) {
+      auth_failed_callback_.Run();
+    } else {
+      ScheduleTryReconnect();
+    }
   }
 }
 
@@ -76,19 +86,29 @@ void SignalingConnector::OnIPAddressChanged() {
   ResetAndTryReconnect();
 }
 
-void SignalingConnector::OnOnlineStateChanged(bool online) {
+void SignalingConnector::OnConnectionTypeChanged(
+    net::NetworkChangeNotifier::ConnectionType type) {
   DCHECK(CalledOnValidThread());
-  if (online) {
+  if (type != net::NetworkChangeNotifier::CONNECTION_NONE) {
     LOG(INFO) << "Network state changed to online.";
     ResetAndTryReconnect();
   }
 }
 
-void SignalingConnector::OnRefreshTokenResponse(const std::string& access_token,
+void SignalingConnector::OnRefreshTokenResponse(const std::string& user_email,
+                                                const std::string& access_token,
                                                 int expires_seconds) {
   DCHECK(CalledOnValidThread());
   DCHECK(oauth_credentials_.get());
   LOG(INFO) << "Received OAuth token.";
+
+  if (user_email != oauth_credentials_->login) {
+    LOG(ERROR) << "OAuth token and email address do not refer to "
+        "the same account.";
+    auth_failed_callback_.Run();
+    return;
+  }
+
   refreshing_oauth_token_ = false;
   auth_token_expiry_time_ = base::Time::Now() +
       base::TimeDelta::FromSeconds(expires_seconds) -
@@ -106,7 +126,7 @@ void SignalingConnector::OnOAuthError() {
   LOG(ERROR) << "OAuth: invalid credentials.";
   refreshing_oauth_token_ = false;
   reconnect_attempts_++;
-  oauth_failed_callback_.Run();
+  auth_failed_callback_.Run();
 }
 
 void SignalingConnector::OnNetworkError(int response_code) {

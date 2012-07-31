@@ -11,7 +11,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/scoped_temp_dir.h"
 #include "content/public/common/page_transition_types.h"
-#include "content/test/browser_test.h"
+#include "content/public/test/browser_test.h"
 #include "content/test/browser_test_base.h"
 #include "net/test/test_server.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -111,9 +111,6 @@ class InProcessBrowserTest : public BrowserTestBase {
   void AddTabAtIndex(int index, const GURL& url,
                      content::PageTransition transition);
 
-  // Adds a selected tab at |index| to |url| with the specified |transition|.
-  void AddTabAt(int index, const GURL& url, content::PageTransition transition);
-
   // Override this to add any custom setup code that needs to be done on the
   // main thread after the browser is created and just before calling
   // RunTestOnMainThread().
@@ -137,6 +134,7 @@ class InProcessBrowserTest : public BrowserTestBase {
   virtual void RunTestOnMainThreadLoop() OVERRIDE;
 
   // Returns the testing server. Guaranteed to be non-NULL.
+  const net::TestServer* test_server() const { return test_server_.get(); }
   net::TestServer* test_server() { return test_server_.get(); }
 
   // Creates a browser with a single tab (about:blank), waits for the tab to

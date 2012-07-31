@@ -17,6 +17,7 @@
 #include "chrome/browser/ui/webui/chromeos/login/base_screen_handler.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/web_ui.h"
+#include "ui/gfx/native_widget_types.h"
 
 class BrowsingDataRemover;
 
@@ -55,6 +56,9 @@ class LoginDisplayWebUIHandler {
 // An interface for SigninScreenHandler to call WebUILoginDisplay.
 class SigninScreenHandlerDelegate {
  public:
+  // Returns corresponding native window.
+  virtual gfx::NativeWindow GetNativeWindow() const = 0;
+
   // Confirms sign up by provided |username| and |password| specified.
   // Used for new user login via GAIA extension.
   virtual void CompleteLogin(const std::string& username,
@@ -76,6 +80,10 @@ class SigninScreenHandlerDelegate {
 
   // Create a new Google account.
   virtual void CreateAccount() = 0;
+
+  // Called when user pod with |username| is selected at login screen.
+  // |username| is the email address of the selected user.
+  virtual void UserSelected(const std::string& username) = 0;
 
   // Attempts to remove given user.
   virtual void RemoveUser(const std::string& username) = 0;
@@ -135,6 +143,7 @@ class SigninScreenHandler : public BaseScreenHandler,
   virtual void GetLocalizedStrings(
       base::DictionaryValue* localized_strings) OVERRIDE;
   virtual void Initialize() OVERRIDE;
+  virtual gfx::NativeWindow GetNativeWindow() OVERRIDE;
 
   // WebUIMessageHandler implementation:
   virtual void RegisterMessages() OVERRIDE;
@@ -190,6 +199,7 @@ class SigninScreenHandler : public BaseScreenHandler,
   void HandleHideCaptivePortal(const base::ListValue* args);
   void HandleOfflineLogin(const base::ListValue* args);
   void HandleShutdownSystem(const base::ListValue* args);
+  void HandleUserSelected(const base::ListValue* args);
   void HandleRemoveUser(const base::ListValue* args);
   void HandleShowAddUser(const base::ListValue* args);
   void HandleToggleEnrollmentScreen(const base::ListValue* args);
@@ -204,6 +214,7 @@ class SigninScreenHandler : public BaseScreenHandler,
   void HandleUserImagesLoaded(const base::ListValue* args);
   void HandleNetworkErrorShown(const base::ListValue* args);
   void HandleOpenProxySettings(const base::ListValue* args);
+  void HandleLoginVisible(const base::ListValue* args);
 
   // Sends user list to account picker.
   void SendUserList(bool animated);

@@ -1,13 +1,13 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <gtk/gtk.h>
 
-#include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/gtk/view_id_util.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "net/test/test_server.h"
@@ -58,7 +58,7 @@ IN_PROC_BROWSER_TEST_F(
   ASSERT_TRUE(test_server()->Start());
 
   GtkWidget* other_bookmarks =
-      ViewIDUtil::GetWidget(GTK_WIDGET(browser()->window()->GetNativeHandle()),
+      ViewIDUtil::GetWidget(GTK_WIDGET(browser()->window()->GetNativeWindow()),
       VIEW_ID_OTHER_BOOKMARKS);
   bool has_been_clicked = false;
   g_signal_connect(other_bookmarks, "clicked",

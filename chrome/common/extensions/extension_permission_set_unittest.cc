@@ -17,6 +17,8 @@
 #include "chrome/common/extensions/extension_permission_set.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+using extensions::Extension;
+
 namespace errors = extension_manifest_errors;
 namespace keys = extension_manifest_keys;
 namespace values = extension_manifest_values;
@@ -41,8 +43,7 @@ static scoped_refptr<Extension> LoadManifest(const std::string& dir,
 
   scoped_refptr<Extension> extension = Extension::Create(
       path.DirName(), Extension::INVALID,
-      *static_cast<DictionaryValue*>(result.get()),
-      Extension::STRICT_ERROR_CHECKS | extra_flags, &error);
+      *static_cast<DictionaryValue*>(result.get()), extra_flags, &error);
   EXPECT_TRUE(extension) << error;
   return extension;
 }
@@ -64,6 +65,21 @@ void CompareLists(const std::vector<std::string>& expected,
 static void AddPattern(URLPatternSet* extent, const std::string& pattern) {
   int schemes = URLPattern::SCHEME_ALL;
   extent->AddPattern(URLPattern(schemes, pattern));
+}
+
+static size_t IndexOf(const std::vector<string16>& warnings,
+                      const std::string& warning) {
+  for (size_t i = 0; i < warnings.size(); ++i) {
+    if (warnings[i] == ASCIIToUTF16(warning))
+      return i;
+  }
+
+  return warnings.size();
+}
+
+static bool Contains(const std::vector<string16>& warnings,
+                     const std::string& warning) {
+  return IndexOf(warnings, warning) != warnings.size();
 }
 
 } // namespace
@@ -558,9 +574,13 @@ TEST(ExtensionPermissionsTest, PermissionMessages) {
 
   // These are considered "nuisance" or "trivial" permissions that don't need
   // a prompt.
+  skip.insert(ExtensionAPIPermission::kActiveTab);
+  skip.insert(ExtensionAPIPermission::kAlarms);
   skip.insert(ExtensionAPIPermission::kAppNotifications);
+  skip.insert(ExtensionAPIPermission::kAppWindow);
   skip.insert(ExtensionAPIPermission::kBrowsingData);
   skip.insert(ExtensionAPIPermission::kContextMenus);
+  skip.insert(ExtensionAPIPermission::kDeclarative);
   skip.insert(ExtensionAPIPermission::kIdle);
   skip.insert(ExtensionAPIPermission::kNotification);
   skip.insert(ExtensionAPIPermission::kUnlimitedStorage);
@@ -578,10 +598,11 @@ TEST(ExtensionPermissionsTest, PermissionMessages) {
 
   // The ime, proxy, and webRequest permissions are warned as part of host
   // permission checks.
-  skip.insert(ExtensionAPIPermission::kInput);
   skip.insert(ExtensionAPIPermission::kProxy);
   skip.insert(ExtensionAPIPermission::kWebRequest);
   skip.insert(ExtensionAPIPermission::kWebRequestBlocking);
+  skip.insert(ExtensionAPIPermission::kDeclarativeWebRequest);
+
 
   // This permission requires explicit user action (context menu handler)
   // so we won't prompt for it for now.
@@ -598,6 +619,7 @@ TEST(ExtensionPermissionsTest, PermissionMessages) {
   // These are private.
   skip.insert(ExtensionAPIPermission::kChromeAuthPrivate);
   skip.insert(ExtensionAPIPermission::kChromeosInfoPrivate);
+  skip.insert(ExtensionAPIPermission::kFileBrowserHandlerInternal);
   skip.insert(ExtensionAPIPermission::kFileBrowserPrivate);
   skip.insert(ExtensionAPIPermission::kInputMethodPrivate);
   skip.insert(ExtensionAPIPermission::kManagedModePrivate);
@@ -606,6 +628,7 @@ TEST(ExtensionPermissionsTest, PermissionMessages) {
   skip.insert(ExtensionAPIPermission::kEchoPrivate);
   skip.insert(ExtensionAPIPermission::kSystemPrivate);
   skip.insert(ExtensionAPIPermission::kTerminalPrivate);
+  skip.insert(ExtensionAPIPermission::kWebRequestInternal);
   skip.insert(ExtensionAPIPermission::kWebSocketProxyPrivate);
   skip.insert(ExtensionAPIPermission::kWebstorePrivate);
 
@@ -613,6 +636,7 @@ TEST(ExtensionPermissionsTest, PermissionMessages) {
   skip.insert(ExtensionAPIPermission::kDevtools);
 
   // Platform apps. TODO(miket): must we skip?
+  skip.insert(ExtensionAPIPermission::kFileSystem);
   skip.insert(ExtensionAPIPermission::kSocket);
   skip.insert(ExtensionAPIPermission::kUsb);
 
@@ -708,7 +732,7 @@ TEST(ExtensionPermissionsTest, GetWarningMessages_ManyHosts) {
   std::vector<string16> warnings =
       extension->GetActivePermissions()->GetWarningMessages();
   ASSERT_EQ(1u, warnings.size());
-  EXPECT_EQ("Your data on encrypted.google.com and www.google.com",
+  EXPECT_EQ("Access your data on encrypted.google.com and www.google.com",
             UTF16ToUTF8(warnings[0]));
 }
 
@@ -725,9 +749,42 @@ TEST(ExtensionPermissionsTest, GetWarningMessages_Plugins) {
   ASSERT_EQ(0u, warnings.size());
 #else
   ASSERT_EQ(1u, warnings.size());
-  EXPECT_EQ("All data on your computer and the websites you visit",
+  EXPECT_EQ("Access all data on your computer and the websites you visit",
             UTF16ToUTF8(warnings[0]));
 #endif
+}
+
+TEST(ExtensionPermissionsTest, GetWarningMessages_AudioVideo) {
+  // Both audio and video present.
+  CommandLine::ForCurrentProcess()->AppendSwitch(switches::kEnablePlatformApps);
+  scoped_refptr<Extension> extension =
+      LoadManifest("permissions", "audio-video.json");
+  ExtensionPermissionSet* set =
+      const_cast<ExtensionPermissionSet*>(
+          extension->GetActivePermissions().get());
+  std::vector<string16> warnings = set->GetWarningMessages();
+  EXPECT_FALSE(Contains(warnings, "Use your microphone"));
+  EXPECT_FALSE(Contains(warnings, "Use your camera"));
+  EXPECT_TRUE(Contains(warnings, "Use your microphone and camera"));
+  size_t combined_index = IndexOf(warnings, "Use your microphone and camera");
+  size_t combined_size = warnings.size();
+
+  // Just audio present.
+  set->apis_.erase(ExtensionAPIPermission::kVideoCapture);
+  warnings = set->GetWarningMessages();
+  EXPECT_EQ(combined_size, warnings.size());
+  EXPECT_EQ(combined_index, IndexOf(warnings, "Use your microphone"));
+  EXPECT_FALSE(Contains(warnings, "Use your camera"));
+  EXPECT_FALSE(Contains(warnings, "Use your microphone and camera"));
+
+  // Just video present.
+  set->apis_.erase(ExtensionAPIPermission::kAudioCapture);
+  set->apis_.insert(ExtensionAPIPermission::kVideoCapture);
+  warnings = set->GetWarningMessages();
+  EXPECT_EQ(combined_size, warnings.size());
+  EXPECT_FALSE(Contains(warnings, "Use your microphone"));
+  EXPECT_FALSE(Contains(warnings, "Use your microphone and camera"));
+  EXPECT_TRUE(Contains(warnings, "Use your camera"));
 }
 
 TEST(ExtensionPermissionsTest, GetDistinctHostsForDisplay) {
@@ -1099,4 +1156,16 @@ TEST(ExtensionPermissionsTest, IsEmpty) {
   perm_set = new ExtensionPermissionSet(
       empty_apis, empty_extent, non_empty_extent);
   EXPECT_FALSE(perm_set->IsEmpty());
+}
+
+TEST(ExtensionPermissionsTest, ImpliedPermissions) {
+  URLPatternSet empty_extent;
+  ExtensionAPIPermissionSet apis;
+  apis.insert(ExtensionAPIPermission::kWebRequest);
+  apis.insert(ExtensionAPIPermission::kFileBrowserHandler);
+  EXPECT_EQ(2U, apis.size());
+
+  scoped_refptr<ExtensionPermissionSet> perm_set;
+  perm_set = new ExtensionPermissionSet(apis, empty_extent, empty_extent);
+  EXPECT_EQ(4U, perm_set->apis().size());
 }

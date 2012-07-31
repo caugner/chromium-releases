@@ -52,6 +52,7 @@ WHITELISTED_LICENSES = [
     'BSL (v1.0)',
     # TODO(phajdan.jr): Make licensecheck not print the comma after 3.1.
     'BSL (v1.0) GPL (v3.1,)',
+    'GPL (v2 or later) with Bison parser exception',
     'GPL (v3 or later) with Bison parser exception',
     'GPL with Bison parser exception',
     'ISC',
@@ -166,6 +167,7 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
     ],
     'third_party/WebKit/Source/JavaScriptCore/tests/mozilla': [
         'GPL',
+        'GPL (v2 or later)',
         'GPL (unversioned/unknown version)',
     ],
     'third_party/active_doc': [  # http://crbug.com/98113
@@ -245,19 +247,52 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
     ],
 
     # The following files lack license headers, but are trivial.
-    'third_party/libusb/libusb/os/poll_posix.h': [
+    'third_party/libusb/src/libusb/os/poll_posix.h': [
         'UNKNOWN',
     ],
-    'third_party/libusb/libusb/version.h': [
+    'third_party/libusb/src/libusb/version.h': [
         'UNKNOWN',
     ],
-    'third_party/libusb/autogen.sh': [
+    'third_party/libusb/src/autogen.sh': [
         'UNKNOWN',
     ],
-    'third_party/libusb/config.h': [
+    'third_party/libusb/src/config.h': [
         'UNKNOWN',
     ],
-    'third_party/libusb/msvc/config.h': [
+    'third_party/libusb/src/msvc/config.h': [
+        'UNKNOWN',
+    ],
+
+    # The package has a compatible COPYING file and most source files conform,
+    # but there are several exceptions.
+    # TODO(posciak,fischman): remove this exception once upstream makes all
+    # their files conform.  https://bugs.freedesktop.org/show_bug.cgi?id=49588
+    # http://crbug.com/126466
+    'third_party/libva/va/va_x11.h': [
+        'UNKNOWN',
+    ],
+    'third_party/libva/va/va_android.h': [
+        'UNKNOWN',
+    ],
+    'third_party/libva/va/x11/va_dricommon.h': [
+        'UNKNOWN',
+    ],
+    'third_party/libva/va/x11/va_dri2tokens.h': [
+        'UNKNOWN',
+    ],
+    'third_party/libva/va/x11/va_dri2str.h': [
+        'UNKNOWN',
+    ],
+    'third_party/libva/va/x11/va_dri2.h': [
+        'UNKNOWN',
+    ],
+    'third_party/libva/va/va_egl.h': [
+        'UNKNOWN',
+    ],
+    'third_party/libva/va/egl/va_egl_impl.h': [
+        'UNKNOWN',
+    ],
+    'third_party/libva/va/egl/va_egl_private.h': [
         'UNKNOWN',
     ],
 

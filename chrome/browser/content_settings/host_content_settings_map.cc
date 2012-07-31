@@ -83,31 +83,13 @@ bool SupportsResourceIdentifier(ContentSettingsType content_type) {
 
 HostContentSettingsMap::HostContentSettingsMap(
     PrefService* prefs,
-    ExtensionService* extension_service,
     bool incognito)
     : prefs_(prefs),
       is_off_the_record_(incognito) {
-  if (extension_service) {
-    content_settings::PlatformAppProvider* platform_app_provider =
-        new content_settings::PlatformAppProvider(extension_service);
-    platform_app_provider->AddObserver(this);
-    content_settings_providers_[PLATFORM_APP_PROVIDER] = platform_app_provider;
-  }
-
   content_settings::ObservableProvider* policy_provider =
       new content_settings::PolicyProvider(prefs_);
   policy_provider->AddObserver(this);
   content_settings_providers_[POLICY_PROVIDER] = policy_provider;
-
-  if (extension_service) {
-    // |extension_service| can be NULL in unit tests.
-    content_settings::ObservableProvider* extension_provider =
-        new content_settings::ExtensionProvider(
-            extension_service->GetExtensionContentSettingsStore(),
-            is_off_the_record_);
-    extension_provider->AddObserver(this);
-    content_settings_providers_[EXTENSION_PROVIDER] = extension_provider;
-  }
 
   content_settings::ObservableProvider* pref_provider =
       new content_settings::PrefProvider(prefs_, is_off_the_record_);
@@ -118,6 +100,35 @@ HostContentSettingsMap::HostContentSettingsMap(
       new content_settings::DefaultProvider(prefs_, is_off_the_record_);
   default_provider->AddObserver(this);
   content_settings_providers_[DEFAULT_PROVIDER] = default_provider;
+
+  if (!is_off_the_record_) {
+    // Migrate obsolete preferences.
+    MigrateObsoleteClearOnExitPref();
+  }
+}
+
+void HostContentSettingsMap::RegisterExtensionService(
+    ExtensionService* extension_service) {
+  DCHECK(extension_service);
+  DCHECK(!content_settings_providers_[PLATFORM_APP_PROVIDER]);
+  DCHECK(!content_settings_providers_[EXTENSION_PROVIDER]);
+
+  content_settings::PlatformAppProvider* platform_app_provider =
+      new content_settings::PlatformAppProvider(extension_service);
+  platform_app_provider->AddObserver(this);
+  content_settings_providers_[PLATFORM_APP_PROVIDER] = platform_app_provider;
+
+  content_settings::ObservableProvider* extension_provider =
+      new content_settings::ExtensionProvider(
+          extension_service->GetContentSettingsStore(),
+          is_off_the_record_);
+  extension_provider->AddObserver(this);
+  content_settings_providers_[EXTENSION_PROVIDER] = extension_provider;
+
+  OnContentSettingChanged(ContentSettingsPattern(),
+                          ContentSettingsPattern(),
+                          CONTENT_SETTINGS_TYPE_DEFAULT,
+                          "");
 }
 
 // static
@@ -127,6 +138,8 @@ void HostContentSettingsMap::RegisterUserPrefs(PrefService* prefs) {
                              PrefService::UNSYNCABLE_PREF);
   prefs->RegisterIntegerPref(prefs::kContentSettingsDefaultWhitelistVersion,
                              0, PrefService::SYNCABLE_PREF);
+  prefs->RegisterBooleanPref(prefs::kContentSettingsClearOnExitMigrated,
+                             false, PrefService::SYNCABLE_PREF);
 
   // Register the prefs for the content settings providers.
   content_settings::DefaultProvider::RegisterUserPrefs(prefs);
@@ -225,7 +238,7 @@ void HostContentSettingsMap::SetDefaultContentSetting(
     ContentSettingsType content_type,
     ContentSetting setting) {
   DCHECK(!ContentTypeHasCompoundValue(content_type));
-  DCHECK(IsSettingAllowedForType(setting, content_type));
+  DCHECK(IsSettingAllowedForType(prefs_, setting, content_type));
 
   base::Value* value = NULL;
   if (setting != CONTENT_SETTING_DEFAULT)
@@ -244,7 +257,7 @@ void HostContentSettingsMap::SetWebsiteSetting(
     ContentSettingsType content_type,
     const std::string& resource_identifier,
     base::Value* value) {
-  DCHECK(IsValueAllowedForType(value, content_type));
+  DCHECK(IsValueAllowedForType(prefs_, value, content_type));
   DCHECK(SupportsResourceIdentifier(content_type) ||
          resource_identifier.empty());
   for (ProviderIterator provider = content_settings_providers_.begin();
@@ -314,23 +327,25 @@ void HostContentSettingsMap::ClearSettingsForOneType(
 }
 
 bool HostContentSettingsMap::IsValueAllowedForType(
-    const base::Value* value, ContentSettingsType type) {
+    PrefService* prefs, const base::Value* value, ContentSettingsType type) {
   return IsSettingAllowedForType(
-      content_settings::ValueToContentSetting(value), type);
+      prefs, content_settings::ValueToContentSetting(value), type);
 }
 
 // static
 bool HostContentSettingsMap::IsSettingAllowedForType(
-    ContentSetting setting, ContentSettingsType content_type) {
+    PrefService* prefs,
+    ContentSetting setting,
+    ContentSettingsType content_type) {
   // Intents content settings are hidden behind a switch for now.
   if (content_type == CONTENT_SETTINGS_TYPE_INTENTS) {
-#if defined(ENABLE_WEB_INTENTS)
-    if (!web_intents::IsWebIntentsEnabledInActiveBrowser())
+    if (!web_intents::IsWebIntentsEnabled(prefs))
       return false;
-#else
-    return false;
-#endif
   }
+
+  // We don't yet support stored content settings for mixed scripting.
+  if (content_type == CONTENT_SETTINGS_TYPE_MIXEDSCRIPT)
+    return false;
 
   // BLOCK semantics are not implemented for fullscreen.
   if (content_type == CONTENT_SETTINGS_TYPE_FULLSCREEN &&
@@ -389,6 +404,57 @@ void HostContentSettingsMap::ShutdownOnUIThread() {
   }
 }
 
+void HostContentSettingsMap::MigrateObsoleteClearOnExitPref() {
+  // Don't migrate more than once.
+  if (prefs_->HasPrefPath(prefs::kContentSettingsClearOnExitMigrated) &&
+      prefs_->GetBoolean(prefs::kContentSettingsClearOnExitMigrated)) {
+    return;
+  }
+
+  if (!prefs_->GetBoolean(prefs::kClearSiteDataOnExit)) {
+    // Nothing to be done
+    prefs_->SetBoolean(prefs::kContentSettingsClearOnExitMigrated, true);
+    return;
+  }
+
+  // Change the default cookie settings:
+  //  old              new
+  //  ---------------- ----------------
+  //  ALLOW            SESSION_ONLY
+  //  SESSION_ONLY     SESSION_ONLY
+  //  BLOCK            BLOCK
+  ContentSetting default_setting = GetDefaultContentSettingFromProvider(
+      CONTENT_SETTINGS_TYPE_COOKIES,
+      content_settings_providers_[DEFAULT_PROVIDER]);
+  if (default_setting == CONTENT_SETTING_ALLOW) {
+    SetDefaultContentSetting(
+        CONTENT_SETTINGS_TYPE_COOKIES, CONTENT_SETTING_SESSION_ONLY);
+  }
+
+  // Change the exceptions using the same rules.
+  ContentSettingsForOneType exceptions;
+  AddSettingsForOneType(content_settings_providers_[PREF_PROVIDER],
+                        PREF_PROVIDER,
+                        CONTENT_SETTINGS_TYPE_COOKIES,
+                        "",
+                        &exceptions,
+                        false);
+  for (ContentSettingsForOneType::iterator it = exceptions.begin();
+       it != exceptions.end(); ++it) {
+    if (it->setting != CONTENT_SETTING_ALLOW)
+      continue;
+    SetWebsiteSetting(
+        it->primary_pattern,
+        it->secondary_pattern,
+        CONTENT_SETTINGS_TYPE_COOKIES,
+        "",
+        Value::CreateIntegerValue(CONTENT_SETTING_SESSION_ONLY));
+  }
+
+  prefs_->SetBoolean(prefs::kContentSettingsClearOnExitMigrated, true);
+}
+
+
 void HostContentSettingsMap::AddSettingsForOneType(
     const content_settings::ProviderInterface* provider,
     ProviderType provider_type,
@@ -400,7 +466,6 @@ void HostContentSettingsMap::AddSettingsForOneType(
       provider->GetRuleIterator(content_type,
                                 resource_identifier,
                                 incognito));
-  ContentSettingsPattern wildcard = ContentSettingsPattern::Wildcard();
   while (rule_iterator->HasNext()) {
     const content_settings::Rule& rule = rule_iterator->Next();
     settings->push_back(ContentSettingPatternSource(

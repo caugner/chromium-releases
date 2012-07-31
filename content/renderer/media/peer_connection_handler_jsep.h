@@ -23,7 +23,6 @@ class CONTENT_EXPORT PeerConnectionHandlerJsep
  public:
   PeerConnectionHandlerJsep(
       WebKit::WebPeerConnection00HandlerClient* client,
-      MediaStreamImpl* msi,
       MediaStreamDependencyFactory* dependency_factory);
   virtual ~PeerConnectionHandlerJsep();
 
@@ -66,8 +65,6 @@ class CONTENT_EXPORT PeerConnectionHandlerJsep
   virtual void OnIceComplete() OVERRIDE;
 
  private:
-  FRIEND_TEST_ALL_PREFIXES(PeerConnectionHandlerJsepTest, Basic);
-
   webrtc::SessionDescriptionInterface* CreateNativeSessionDescription(
       const WebKit::WebSessionDescriptionDescriptor& description);
   WebKit::WebSessionDescriptionDescriptor CreateWebKitSessionDescription(

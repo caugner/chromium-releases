@@ -1,12 +1,6 @@
 // Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-//
-// NOTE: These tests are run as part of "unit_tests" (in chrome/test/unit)
-// rather than as part of test_shell_tests because they rely on being able
-// to instantiate a MessageLoop of type TYPE_IO.  test_shell_tests uses
-// TYPE_UI, which URLRequest doesn't allow.
-//
 
 #include "webkit/fileapi/file_system_url_request_job.h"
 
@@ -122,8 +116,7 @@ class FileSystemURLRequestJobTest : public testing::Test {
     ASSERT_TRUE(!job_);
     job_ = new FileSystemURLRequestJob(
         request_.get(),
-        file_system_context_.get(),
-        base::MessageLoopProxy::current());
+        file_system_context_.get());
     pending_job_ = job_;
 
     request_->Start();

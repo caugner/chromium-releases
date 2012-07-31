@@ -31,10 +31,12 @@
 #include "base/threading/thread.h"
 #include "crypto/nss_util.h"
 #include "net/base/network_change_notifier.h"
+#include "net/socket/ssl_server_socket.h"
 #include "remoting/base/constants.h"
 #include "remoting/host/capturer_fake.h"
 #include "remoting/host/chromoting_host.h"
 #include "remoting/host/chromoting_host_context.h"
+#include "remoting/host/constants.h"
 #include "remoting/host/desktop_environment.h"
 #include "remoting/host/event_executor.h"
 #include "remoting/host/heartbeat_sender.h"
@@ -43,7 +45,9 @@
 #include "remoting/host/it2me_host_user_interface.h"
 #include "remoting/host/json_host_config.h"
 #include "remoting/host/log_to_server.h"
+#include "remoting/host/network_settings.h"
 #include "remoting/host/register_support_host_request.h"
+#include "remoting/host/session_manager_factory.h"
 #include "remoting/host/signaling_connector.h"
 #include "remoting/jingle_glue/xmpp_signal_strategy.h"
 #include "remoting/proto/video.pb.h"
@@ -82,7 +86,6 @@ const char kMaxPortSwitchName[] = "max-port";
 const char kVideoSwitchValueVerbatim[] = "verbatim";
 const char kVideoSwitchValueZip[] = "zip";
 const char kVideoSwitchValueVp8[] = "vp8";
-const char kVideoSwitchValueVp8Rtp[] = "vp8rtp";
 
 }  // namespace
 
@@ -94,7 +97,9 @@ class SimpleHost : public HeartbeatSender::Listener {
       : message_loop_(MessageLoop::TYPE_UI),
         context_(message_loop_.message_loop_proxy()),
         fake_(false),
-        is_it2me_(false) {
+        is_it2me_(false),
+        shutting_down_(false),
+        exit_code_(kSuccessExitCode) {
     context_.Start();
     network_change_notifier_.reset(net::NetworkChangeNotifier::Create());
   }
@@ -102,7 +107,7 @@ class SimpleHost : public HeartbeatSender::Listener {
   // Overridden from HeartbeatSender::Listener
   virtual void OnUnknownHostIdError() OVERRIDE {
     LOG(ERROR) << "Host ID not found.";
-    Shutdown();
+    Shutdown(kInvalidHostIdExitCode);
   }
 
   int Run() {
@@ -153,7 +158,7 @@ class SimpleHost : public HeartbeatSender::Listener {
 
     message_loop_.MessageLoop::Run();
 
-    return 0;
+    return exit_code_;
   }
 
   void set_config_path(const FilePath& config_path) {
@@ -214,21 +219,25 @@ class SimpleHost : public HeartbeatSender::Listener {
     signal_strategy_.reset(
         new XmppSignalStrategy(context_.jingle_thread(), xmpp_login_,
                                xmpp_auth_token_, xmpp_auth_service_));
-    signaling_connector_.reset(new SignalingConnector(signal_strategy_.get()));
+    signaling_connector_.reset(new SignalingConnector(
+        signal_strategy_.get(),
+        base::Bind(&SimpleHost::OnAuthFailed, base::Unretained(this))));
 
     if (fake_) {
       scoped_ptr<Capturer> capturer(new CapturerFake());
-      scoped_ptr<protocol::HostEventStub> event_executor =
-          EventExecutor::Create(
-              context_.desktop_message_loop(), capturer.get());
+      scoped_ptr<EventExecutor> event_executor = EventExecutor::Create(
+          context_.desktop_message_loop()->message_loop_proxy(),
+          context_.ui_message_loop(), capturer.get());
       desktop_environment_ = DesktopEnvironment::CreateFake(
           &context_, capturer.Pass(), event_executor.Pass());
     } else {
       desktop_environment_ = DesktopEnvironment::Create(&context_);
     }
 
-    host_ = new ChromotingHost(&context_, signal_strategy_.get(),
-                               desktop_environment_.get(), network_settings_);
+    host_ = new ChromotingHost(
+        &context_, signal_strategy_.get(), desktop_environment_.get(),
+        CreateHostSessionManager(network_settings_,
+                                 context_.url_request_context_getter()));
 
     ServerLogEntry::Mode mode =
         is_it2me_ ? ServerLogEntry::IT2ME : ServerLogEntry::ME2ME;
@@ -260,13 +269,38 @@ class SimpleHost : public HeartbeatSender::Listener {
     if (!is_it2me_) {
       scoped_ptr<protocol::AuthenticatorFactory> factory(
           new protocol::Me2MeHostAuthenticatorFactory(
-              xmpp_login_, key_pair_.GenerateCertificate(),
-              *key_pair_.private_key(), host_secret_hash_));
+              key_pair_.GenerateCertificate(), *key_pair_.private_key(),
+              host_secret_hash_));
       host_->SetAuthenticatorFactory(factory.Pass());
     }
   }
 
-  void Shutdown() {
+  void OnAuthFailed() {
+    Shutdown(kInvalidOauthCredentialsExitCode);
+  }
+
+  void Shutdown(int exit_code) {
+    DCHECK(context_.network_message_loop()->BelongsToCurrentThread());
+
+    if (shutting_down_)
+      return;
+
+    shutting_down_ = true;
+    exit_code_ = exit_code;
+    host_->Shutdown(base::Bind(
+        &SimpleHost::OnShutdownFinished, base::Unretained(this)));
+  }
+
+  void OnShutdownFinished() {
+    DCHECK(context_.network_message_loop()->BelongsToCurrentThread());
+
+    // Destroy networking objects while we are on the network thread.
+    host_ = NULL;
+    log_to_server_.reset();
+    heartbeat_sender_.reset();
+    signaling_connector_.reset();
+    signal_strategy_.reset();
+
     message_loop_.PostTask(FROM_HERE, MessageLoop::QuitClosure());
   }
 
@@ -296,6 +330,9 @@ class SimpleHost : public HeartbeatSender::Listener {
   scoped_ptr<HeartbeatSender> heartbeat_sender_;
 
   scoped_refptr<ChromotingHost> host_;
+
+  bool shutting_down_;
+  int exit_code_;
 };
 
 } // namespace remoting
@@ -316,6 +353,10 @@ int main(int argc, char** argv) {
   gfx::GtkInitFromCommandLine(*cmd_line);
 #endif  // TOOLKIT_GTK
 
+  // Enable support for SSL server sockets, which must be done while still
+  // single-threaded.
+  net::EnableSSLServerSockets();
+
   remoting::SimpleHost simple_host;
 
   if (cmd_line->HasSwitch(kConfigSwitchName)) {
@@ -331,7 +372,6 @@ int main(int argc, char** argv) {
         CandidateSessionConfig::CreateDefault());
     config->mutable_video_configs()->clear();
 
-    ChannelConfig::TransportType transport = ChannelConfig::TRANSPORT_STREAM;
     ChannelConfig::Codec codec;
     if (video_codec == kVideoSwitchValueVerbatim) {
       codec = ChannelConfig::CODEC_VERBATIM;
@@ -339,15 +379,13 @@ int main(int argc, char** argv) {
       codec = ChannelConfig::CODEC_ZIP;
     } else if (video_codec == kVideoSwitchValueVp8) {
       codec = ChannelConfig::CODEC_VP8;
-    } else if (video_codec == kVideoSwitchValueVp8Rtp) {
-      transport = ChannelConfig::TRANSPORT_SRTP;
-      codec = ChannelConfig::CODEC_VP8;
     } else {
       LOG(ERROR) << "Unknown video codec: " << video_codec;
       return 1;
     }
     config->mutable_video_configs()->push_back(ChannelConfig(
-        transport, remoting::protocol::kDefaultStreamVersion, codec));
+        ChannelConfig::TRANSPORT_STREAM,
+        remoting::protocol::kDefaultStreamVersion, codec));
     simple_host.set_protocol_config(config.release());
   }
 

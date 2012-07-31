@@ -14,9 +14,26 @@
 
 namespace extensions {
 
+class APIResourceEventNotifier;
+
 extern const char kConnectionIdKey[];
 
-class SerialOpenFunction : public AsyncIOAPIFunction {
+class SerialGetPortsFunction : public AsyncAPIFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION_NAME("experimental.serial.getPorts")
+
+  SerialGetPortsFunction();
+
+ protected:
+  virtual ~SerialGetPortsFunction() {}
+
+  // AsyncAPIFunction:
+  virtual bool Prepare() OVERRIDE;
+  virtual void Work() OVERRIDE;
+  virtual bool Respond() OVERRIDE;
+};
+
+class SerialOpenFunction : public AsyncAPIFunction {
  public:
   DECLARE_EXTENSION_FUNCTION_NAME("experimental.serial.open")
 
@@ -25,24 +42,28 @@ class SerialOpenFunction : public AsyncIOAPIFunction {
  protected:
   virtual ~SerialOpenFunction() {}
 
-  // AsyncIOAPIFunction:
+  // AsyncAPIFunction:
   virtual bool Prepare() OVERRIDE;
+  virtual void AsyncWorkStart() OVERRIDE;
   virtual void Work() OVERRIDE;
   virtual bool Respond() OVERRIDE;
 
  private:
   int src_id_;
   std::string port_;
+
+  // SerialConnection will take ownership.
+  APIResourceEventNotifier* event_notifier_;
 };
 
-class SerialCloseFunction : public AsyncIOAPIFunction {
+class SerialCloseFunction : public AsyncAPIFunction {
  public:
   DECLARE_EXTENSION_FUNCTION_NAME("experimental.serial.close")
 
  protected:
   virtual ~SerialCloseFunction() {}
 
-  // AsyncIOAPIFunction:
+  // AsyncAPIFunction:
   virtual bool Prepare() OVERRIDE;
   virtual void Work() OVERRIDE;
   virtual bool Respond() OVERRIDE;
@@ -51,14 +72,14 @@ class SerialCloseFunction : public AsyncIOAPIFunction {
   int connection_id_;
 };
 
-class SerialReadFunction : public AsyncIOAPIFunction {
+class SerialReadFunction : public AsyncAPIFunction {
  public:
   DECLARE_EXTENSION_FUNCTION_NAME("experimental.serial.read")
 
  protected:
   virtual ~SerialReadFunction() {}
 
-  // AsyncIOAPIFunction:
+  // AsyncAPIFunction:
   virtual bool Prepare() OVERRIDE;
   virtual void Work() OVERRIDE;
   virtual bool Respond() OVERRIDE;
@@ -67,7 +88,7 @@ class SerialReadFunction : public AsyncIOAPIFunction {
   int connection_id_;
 };
 
-class SerialWriteFunction : public AsyncIOAPIFunction {
+class SerialWriteFunction : public AsyncAPIFunction {
  public:
   DECLARE_EXTENSION_FUNCTION_NAME("experimental.serial.write")
 
@@ -76,14 +97,31 @@ class SerialWriteFunction : public AsyncIOAPIFunction {
  protected:
   virtual ~SerialWriteFunction();
 
-  // AsyncIOAPIFunction:
+  // AsyncAPIFunction:
   virtual bool Prepare() OVERRIDE;
   virtual void Work() OVERRIDE;
   virtual bool Respond() OVERRIDE;
 
  private:
   int connection_id_;
-  scoped_refptr<net::IOBufferWithSize> io_buffer_;
+  scoped_refptr<net::IOBuffer> io_buffer_;
+  size_t io_buffer_size_;
+};
+
+class SerialFlushFunction : public AsyncAPIFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION_NAME("experimental.serial.flush")
+
+ protected:
+  virtual ~SerialFlushFunction() {}
+
+  // AsyncAPIFunction:
+  virtual bool Prepare() OVERRIDE;
+  virtual void Work() OVERRIDE;
+  virtual bool Respond() OVERRIDE;
+
+ private:
+  int connection_id_;
 };
 
 }  // namespace extensions

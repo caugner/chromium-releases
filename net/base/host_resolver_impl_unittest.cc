@@ -4,6 +4,7 @@
 
 #include "net/base/host_resolver_impl.h"
 
+#include <algorithm>
 #include <string>
 
 #include "base/bind.h"
@@ -21,7 +22,6 @@
 #include "net/base/mock_host_resolver.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_util.h"
-#include "net/base/sys_addrinfo.h"
 #include "net/dns/dns_client.h"
 #include "net/dns/dns_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -41,42 +41,6 @@ PrioritizedDispatcher::Limits DefaultLimits() {
 HostResolverImpl::ProcTaskParams DefaultParams(
     HostResolverProc* resolver_proc) {
   return HostResolverImpl::ProcTaskParams(resolver_proc, kMaxRetryAttempts);
-}
-
-HostResolverImpl* CreateHostResolverImpl(HostResolverProc* resolver_proc) {
-  return new HostResolverImpl(
-      HostCache::CreateDefaultCache(),
-      DefaultLimits(),
-      DefaultParams(resolver_proc),
-      scoped_ptr<DnsConfigService>(NULL),
-      NULL);
-}
-
-HostResolverImpl* CreateHostResolverImplWithDnsConfig(
-    HostResolverProc* resolver_proc,
-    scoped_ptr<DnsConfigService> config_service) {
-  return new HostResolverImpl(
-      HostCache::CreateDefaultCache(),
-      DefaultLimits(),
-      DefaultParams(resolver_proc),
-      config_service.Pass(),
-      NULL);
-}
-
-// This HostResolverImpl will only allow 1 outstanding resolve at a time.
-HostResolverImpl* CreateSerialHostResolverImpl(
-    HostResolverProc* resolver_proc) {
-  HostResolverImpl::ProcTaskParams params = DefaultParams(resolver_proc);
-  params.max_retry_attempts = 0u;
-
-  PrioritizedDispatcher::Limits limits(NUM_PRIORITIES, 1);
-
-  return new HostResolverImpl(
-      HostCache::CreateDefaultCache(),
-      limits,
-      params,
-      scoped_ptr<DnsConfigService>(NULL),
-      NULL);
 }
 
 // A HostResolverProc that pushes each host mapped into a list and allows
@@ -240,7 +204,7 @@ class Request {
     result_ = resolver_->Resolve(
         info_, &list_, base::Bind(&Request::OnComplete, base::Unretained(this)),
         &handle_, BoundNetLog());
-    if (list_.head())
+    if (!list_.empty())
       EXPECT_EQ(OK, result_);
     return result_;
   }
@@ -269,28 +233,14 @@ class Request {
     IPAddressNumber ip;
     bool rv = ParseIPLiteralToNumber(address, &ip);
     DCHECK(rv);
-    IPEndPoint target(ip, port);
-    for (const struct addrinfo* ai = list_.head();
-         ai != NULL;
-         ai = ai->ai_next) {
-      IPEndPoint ipe;
-      rv = ipe.FromSockAddr(ai->ai_addr, ai->ai_addrlen);
-      DCHECK(rv);
-      if (target == ipe)
-        return true;
-    }
-    return false;
+    return std::find(list_.begin(),
+                     list_.end(),
+                     IPEndPoint(ip, port)) != list_.end();
   }
 
   // Returns the number of addresses in |list_|.
   unsigned NumberOfAddresses() const {
-    unsigned count = 0;
-    for (const struct addrinfo* ai = list_.head();
-         ai != NULL;
-         ai = ai->ai_next) {
-      ++count;
-    }
-    return count;
+    return list_.size();
   }
 
   bool HasOneAddress(const std::string& address, int port) const {
@@ -323,10 +273,10 @@ class Request {
     EXPECT_NE(ERR_IO_PENDING, rv);
     result_ = rv;
     handle_ = NULL;
-    if (list_.head())
+    if (!list_.empty()) {
       EXPECT_EQ(OK, result_);
-    if (OK == rv)
-      EXPECT_EQ(info_.port(), list_.GetPort());
+      EXPECT_EQ(info_.port(), list_.front().port());
+    }
     if (handler_)
       handler_->Handle(this);
     if (quit_on_complete_) {
@@ -456,10 +406,7 @@ class HostResolverImplTest : public testing::Test {
  public:
   static const int kDefaultPort = 80;
 
-  HostResolverImplTest()
-      : proc_(new MockHostResolverProc()),
-        resolver_(CreateHostResolverImpl(proc_)) {
-  }
+  HostResolverImplTest() : proc_(new MockHostResolverProc()) {}
 
  protected:
   // A Request::Handler which is a proxy to the HostResolverImplTest fixture.
@@ -483,8 +430,29 @@ class HostResolverImplTest : public testing::Test {
     HostResolverImplTest* test;
   };
 
+  void CreateResolver() {
+    resolver_.reset(new HostResolverImpl(
+        HostCache::CreateDefaultCache(),
+        DefaultLimits(),
+        DefaultParams(proc_),
+        scoped_ptr<DnsConfigService>(NULL),
+        scoped_ptr<DnsClient>(NULL),
+        NULL));
+  }
+
+  // This HostResolverImpl will only allow 1 outstanding resolve at a time and
+  // perform no retries.
   void CreateSerialResolver() {
-    resolver_.reset(CreateSerialHostResolverImpl(proc_));
+    HostResolverImpl::ProcTaskParams params = DefaultParams(proc_);
+    params.max_retry_attempts = 0u;
+    PrioritizedDispatcher::Limits limits(NUM_PRIORITIES, 1);
+    resolver_.reset(new HostResolverImpl(
+        HostCache::CreateDefaultCache(),
+        limits,
+        params,
+        scoped_ptr<DnsConfigService>(NULL),
+        scoped_ptr<DnsClient>(NULL),
+        NULL));
   }
 
   // The Request will not be made until a call to |Resolve()|, and the Job will
@@ -520,7 +488,11 @@ class HostResolverImplTest : public testing::Test {
     return CreateRequest(hostname, kDefaultPort);
   }
 
-  void TearDown() OVERRIDE {
+  virtual void SetUp() OVERRIDE {
+    CreateResolver();
+  }
+
+  virtual void TearDown() OVERRIDE {
     if (resolver_.get())
       EXPECT_EQ(0u, resolver_->num_running_jobs_for_tests());
     EXPECT_FALSE(proc_->HasBlockedRequests());
@@ -535,10 +507,6 @@ class HostResolverImplTest : public testing::Test {
   size_t num_running_jobs() const {
     DCHECK(resolver_.get());
     return resolver_->num_running_jobs_for_tests();
-  }
-
-  void set_dns_client(scoped_ptr<DnsClient> client) {
-    resolver_->set_dns_client_for_tests(client.Pass());
   }
 
   scoped_refptr<MockHostResolverProc> proc_;
@@ -587,7 +555,7 @@ TEST_F(HostResolverImplTest, AbortedAsynchronousLookup) {
   proc_->SignalAll();
 
   // To ensure there was no spurious callback, complete with a new resolver.
-  resolver_.reset(CreateHostResolverImpl(proc_));
+  CreateResolver();
   Request* req1 = CreateRequest("just.testing", 80);
   EXPECT_EQ(ERR_IO_PENDING, req1->Resolve());
 
@@ -796,6 +764,7 @@ TEST_F(HostResolverImplTest, StartWithinCallback) {
       DefaultLimits(),
       DefaultParams(proc_),
       scoped_ptr<DnsConfigService>(NULL),
+      scoped_ptr<DnsClient>(NULL),
       NULL));
 
   for (size_t i = 0; i < 4; ++i) {
@@ -1233,6 +1202,7 @@ TEST_F(HostResolverImplTest, MultipleAttempts) {
                            DefaultLimits(),
                            params,
                            scoped_ptr<DnsConfigService>(NULL),
+                           scoped_ptr<DnsClient>(NULL),
                            NULL));
 
   // Resolve "host1".
@@ -1262,12 +1232,37 @@ DnsConfig CreateValidDnsConfig() {
   return config;
 }
 
+// Specialized fixture for tests of DnsTask.
+class HostResolverImplDnsTest : public HostResolverImplTest {
+ protected:
+  virtual void SetUp() OVERRIDE {
+    config_service_ = new MockDnsConfigService();
+    resolver_.reset(new HostResolverImpl(
+        HostCache::CreateDefaultCache(),
+        DefaultLimits(),
+        DefaultParams(proc_),
+        scoped_ptr<DnsConfigService>(config_service_),
+        CreateMockDnsClient(DnsConfig()),
+        NULL));
+  }
+
+  void ChangeDnsConfig(const DnsConfig& config) {
+    config_service_->ChangeConfig(config);
+    config_service_->ChangeHosts(config.hosts);
+  }
+
+  // Owned by |resolver_|.
+  MockDnsConfigService* config_service_;
+};
+
 // TODO(szym): Test AbortAllInProgressJobs due to DnsConfig change.
 
 // TODO(cbentzel): Test a mix of requests with different HostResolverFlags.
 
 // Test successful and fallback resolutions in HostResolverImpl::DnsTask.
-TEST_F(HostResolverImplTest, DnsTask) {
+TEST_F(HostResolverImplDnsTest, DnsTask) {
+  resolver_->SetDefaultAddressFamily(ADDRESS_FAMILY_IPV4);
+
   proc_->AddRuleForAllFamilies("er_succeed", "192.168.1.101");
   proc_->AddRuleForAllFamilies("nx_succeed", "192.168.1.102");
   // All other hostnames will fail in proc_.
@@ -1278,7 +1273,7 @@ TEST_F(HostResolverImplTest, DnsTask) {
 
   EXPECT_EQ(ERR_NAME_NOT_RESOLVED, requests_[0]->WaitForResult());
 
-  set_dns_client(CreateMockDnsClient(CreateValidDnsConfig()));
+  ChangeDnsConfig(CreateValidDnsConfig());
 
   EXPECT_EQ(ERR_IO_PENDING, CreateRequest("ok_fail", 80)->Resolve());
   EXPECT_EQ(ERR_IO_PENDING, CreateRequest("er_fail", 80)->Resolve());
@@ -1288,13 +1283,13 @@ TEST_F(HostResolverImplTest, DnsTask) {
 
   proc_->SignalMultiple(requests_.size());
 
-  for (size_t i = 0; i < requests_.size(); ++i) {
-    EXPECT_NE(ERR_UNEXPECTED, requests_[i]->WaitForResult()) << 1;
-  }
+  for (size_t i = 1; i < requests_.size(); ++i)
+    EXPECT_NE(ERR_UNEXPECTED, requests_[i]->WaitForResult()) << i;
 
   EXPECT_EQ(OK, requests_[1]->result());
   // Resolved by MockDnsClient.
   EXPECT_TRUE(requests_[1]->HasOneAddress("127.0.0.1", 80));
+  // Fallback to ProcTask.
   EXPECT_EQ(ERR_NAME_NOT_RESOLVED, requests_[2]->result());
   EXPECT_EQ(ERR_NAME_NOT_RESOLVED, requests_[3]->result());
   EXPECT_EQ(OK, requests_[4]->result());
@@ -1303,19 +1298,12 @@ TEST_F(HostResolverImplTest, DnsTask) {
   EXPECT_TRUE(requests_[5]->HasOneAddress("192.168.1.102", 80));
 }
 
-TEST_F(HostResolverImplTest, ServeFromHosts) {
-  // Initially, there's DnsConfigService, but no DnsConfig.
-  MockDnsConfigService* config_service = new MockDnsConfigService();
-  resolver_.reset(
-      CreateHostResolverImplWithDnsConfig(
-          proc_,
-          scoped_ptr<DnsConfigService>(config_service)));
+TEST_F(HostResolverImplDnsTest, ServeFromHosts) {
+  // Initially, use empty HOSTS file.
+  ChangeDnsConfig(CreateValidDnsConfig());
 
   proc_->AddRuleForAllFamilies("", "0.0.0.0");  // Default to failures.
   proc_->SignalMultiple(1u);  // For the first request which misses.
-
-  DnsConfig config = CreateValidDnsConfig();
-  set_dns_client(CreateMockDnsClient(config));
 
   Request* req0 = CreateRequest("er_ipv4", 80);
   EXPECT_EQ(ERR_IO_PENDING, req0->Resolve());
@@ -1331,9 +1319,8 @@ TEST_F(HostResolverImplTest, ServeFromHosts) {
   hosts[DnsHostsKey("er_both", ADDRESS_FAMILY_IPV4)] = local_ipv4;
   hosts[DnsHostsKey("er_both", ADDRESS_FAMILY_IPV6)] = local_ipv6;
 
-  // Then we introduce valid DnsConfig.
-  config_service->ChangeConfig(config);
-  config_service->ChangeHosts(hosts);
+  // Update HOSTS file.
+  config_service_->ChangeHosts(hosts);
 
   Request* req1 = CreateRequest("er_ipv4", 80);
   EXPECT_EQ(OK, req1->Resolve());
@@ -1361,6 +1348,26 @@ TEST_F(HostResolverImplTest, ServeFromHosts) {
   Request* req6 = CreateRequest("er_IPV4", 80);
   EXPECT_EQ(OK, req6->Resolve());
   EXPECT_TRUE(req6->HasOneAddress("127.0.0.1", 80));
+}
+
+TEST_F(HostResolverImplDnsTest, BypassDnsTask) {
+  ChangeDnsConfig(CreateValidDnsConfig());
+
+  proc_->AddRuleForAllFamilies("", "0.0.0.0");  // Default to failures.
+
+  EXPECT_EQ(ERR_IO_PENDING, CreateRequest("ok.local", 80)->Resolve());
+  EXPECT_EQ(ERR_IO_PENDING, CreateRequest("ok.local.", 80)->Resolve());
+  EXPECT_EQ(ERR_IO_PENDING, CreateRequest("oklocal", 80)->Resolve());
+  EXPECT_EQ(ERR_IO_PENDING, CreateRequest("oklocal.", 80)->Resolve());
+  EXPECT_EQ(ERR_IO_PENDING, CreateRequest("ok", 80)->Resolve());
+
+  proc_->SignalMultiple(requests_.size());
+
+  for (size_t i = 0; i < 2; ++i)
+    EXPECT_EQ(ERR_NAME_NOT_RESOLVED, requests_[i]->WaitForResult()) << i;
+
+  for (size_t i = 2; i < requests_.size(); ++i)
+    EXPECT_EQ(OK, requests_[i]->WaitForResult()) << i;
 }
 
 }  // namespace net

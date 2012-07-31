@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-#include "base/memory/scoped_ptr.h"
+#include "base/compiler_specific.h"
 #include "chrome/browser/chromeos/login/login_display.h"
 #include "chrome/browser/chromeos/login/user.h"
 #include "chrome/browser/ui/webui/chromeos/login/signin_screen_handler.h"
@@ -42,6 +42,7 @@ class WebUILoginDisplay : public LoginDisplay,
   virtual void ShowGaiaPasswordChanged(const std::string& username) OVERRIDE;
 
   // SigninScreenHandlerDelegate implementation:
+  virtual gfx::NativeWindow GetNativeWindow() const OVERRIDE;
   virtual void CompleteLogin(const std::string& username,
                              const std::string& password) OVERRIDE;
   virtual void Login(const std::string& username,
@@ -50,6 +51,7 @@ class WebUILoginDisplay : public LoginDisplay,
   virtual void LoginAsGuest() OVERRIDE;
   virtual void Signout() OVERRIDE;
   virtual void CreateAccount() OVERRIDE;
+  virtual void UserSelected(const std::string& username) OVERRIDE;
   virtual void RemoveUser(const std::string& username) OVERRIDE;
   virtual void ShowEnterpriseEnrollmentScreen() OVERRIDE;
   virtual void SetWebUIHandler(

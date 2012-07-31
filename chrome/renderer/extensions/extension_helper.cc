@@ -12,10 +12,10 @@
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/chrome_view_type.h"
 #include "chrome/common/extensions/extension_messages.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/common/view_type.h"
 #include "chrome/renderer/extensions/chrome_v8_context.h"
 #include "chrome/renderer/extensions/extension_dispatcher.h"
 #include "chrome/renderer/extensions/miscellaneous_bindings.h"
@@ -32,6 +32,7 @@
 #include "webkit/glue/image_resource_fetcher.h"
 #include "webkit/glue/resource_fetcher.h"
 
+using content::ConsoleMessageLevel;
 using extensions::MiscellaneousBindings;
 using WebKit::WebConsoleMessage;
 using WebKit::WebDataSource;
@@ -59,7 +60,7 @@ class ExtensionViewAccumulator : public content::RenderViewVisitor {
  public:
   ExtensionViewAccumulator(const std::string& extension_id,
                            int browser_window_id,
-                           content::ViewType view_type)
+                           chrome::ViewType view_type)
       : extension_id_(extension_id),
         browser_window_id_(browser_window_id),
         view_type_(view_type) {
@@ -94,12 +95,12 @@ class ExtensionViewAccumulator : public content::RenderViewVisitor {
 
  private:
   // Returns true if |type| "isa" |match|.
-  static bool ViewTypeMatches(content::ViewType type, content::ViewType match) {
+  static bool ViewTypeMatches(chrome::ViewType type, chrome::ViewType match) {
     if (type == match)
       return true;
 
     // INVALID means match all.
-    if (match == content::VIEW_TYPE_INVALID)
+    if (match == chrome::VIEW_TYPE_INVALID)
       return true;
 
     return false;
@@ -107,7 +108,7 @@ class ExtensionViewAccumulator : public content::RenderViewVisitor {
 
   std::string extension_id_;
   int browser_window_id_;
-  content::ViewType view_type_;
+  chrome::ViewType view_type_;
   std::vector<content::RenderView*> views_;
 };
 
@@ -117,7 +118,7 @@ class ExtensionViewAccumulator : public content::RenderViewVisitor {
 std::vector<content::RenderView*> ExtensionHelper::GetExtensionViews(
     const std::string& extension_id,
     int browser_window_id,
-    content::ViewType view_type) {
+    chrome::ViewType view_type) {
   ExtensionViewAccumulator accumulator(
       extension_id, browser_window_id, view_type);
   content::RenderView::ForEach(&accumulator);
@@ -143,7 +144,8 @@ ExtensionHelper::ExtensionHelper(content::RenderView* render_view,
       content::RenderViewObserverTracker<ExtensionHelper>(render_view),
       extension_dispatcher_(extension_dispatcher),
       pending_app_icon_requests_(0),
-      view_type_(content::VIEW_TYPE_INVALID),
+      view_type_(chrome::VIEW_TYPE_INVALID),
+      tab_id_(-1),
       browser_window_id_(-1) {
 }
 
@@ -209,10 +211,13 @@ bool ExtensionHelper::OnMessageReceived(const IPC::Message& message) {
                         OnExtensionDispatchOnDisconnect)
     IPC_MESSAGE_HANDLER(ExtensionMsg_ExecuteCode, OnExecuteCode)
     IPC_MESSAGE_HANDLER(ExtensionMsg_GetApplicationInfo, OnGetApplicationInfo)
+    IPC_MESSAGE_HANDLER(ExtensionMsg_SetTabId, OnSetTabId)
     IPC_MESSAGE_HANDLER(ExtensionMsg_UpdateBrowserWindowId,
                         OnUpdateBrowserWindowId)
     IPC_MESSAGE_HANDLER(ExtensionMsg_NotifyRenderViewType,
                         OnNotifyRendererViewType)
+    IPC_MESSAGE_HANDLER(ExtensionMsg_AddMessageToConsole,
+                        OnAddMessageToConsole)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
@@ -335,7 +340,7 @@ void ExtensionHelper::OnExecuteCode(
   WebFrame* main_frame = webview->mainFrame();
   if (!main_frame) {
     Send(new ExtensionHostMsg_ExecuteCodeFinished(
-        routing_id(), params.request_id, false, ""));
+        routing_id(), params.request_id, false, -1, ""));
     return;
   }
 
@@ -369,12 +374,23 @@ void ExtensionHelper::OnGetApplicationInfo(int page_id) {
       routing_id(), page_id, app_info));
 }
 
-void ExtensionHelper::OnNotifyRendererViewType(content::ViewType type) {
+void ExtensionHelper::OnNotifyRendererViewType(chrome::ViewType type) {
   view_type_ = type;
+}
+
+void ExtensionHelper::OnSetTabId(int init_tab_id) {
+  CHECK_EQ(tab_id_, -1);
+  CHECK_GE(init_tab_id, 0);
+  tab_id_ = init_tab_id;
 }
 
 void ExtensionHelper::OnUpdateBrowserWindowId(int window_id) {
   browser_window_id_ = window_id;
+}
+
+void ExtensionHelper::OnAddMessageToConsole(ConsoleMessageLevel level,
+                                            const std::string& message) {
+  AddMessageToRootConsole(level, UTF8ToUTF16(message));
 }
 
 void ExtensionHelper::DidDownloadApplicationDefinition(
@@ -388,14 +404,16 @@ void ExtensionHelper::DidDownloadApplicationDefinition(
   std::string error_message;
   scoped_ptr<Value> result(serializer.Deserialize(&error_code, &error_message));
   if (!result.get()) {
-    AddErrorToRootConsole(UTF8ToUTF16(error_message));
+    AddMessageToRootConsole(
+        content::CONSOLE_MESSAGE_LEVEL_ERROR, UTF8ToUTF16(error_message));
     return;
   }
 
   string16 error_message_16;
   if (!web_apps::ParseWebAppFromDefinitionFile(result.get(), app_info.get(),
                                                &error_message_16)) {
-    AddErrorToRootConsole(error_message_16);
+    AddMessageToRootConsole(
+        content::CONSOLE_MESSAGE_LEVEL_ERROR, error_message_16);
     return;
   }
 
@@ -458,8 +476,10 @@ void ExtensionHelper::DidDownloadApplicationIcon(ImageResourceFetcher* fetcher,
   for (size_t i = 0; i < pending_app_info_->icons.size(); ++i) {
     size_t current_size = pending_app_info_->icons[i].data.getSize();
     if (current_size > kMaxIconSize - actual_icon_size) {
-      AddErrorToRootConsole(ASCIIToUTF16(
-        "Icons are too large. Maximum total size for app icons is 128 KB."));
+      AddMessageToRootConsole(
+          content::CONSOLE_MESSAGE_LEVEL_ERROR,
+          ASCIIToUTF16("Icons are too large. "
+              "Maximum total size for app icons is 128 KB."));
       return;
     }
     actual_icon_size += current_size;
@@ -470,9 +490,25 @@ void ExtensionHelper::DidDownloadApplicationIcon(ImageResourceFetcher* fetcher,
   pending_app_info_.reset(NULL);
 }
 
-void ExtensionHelper::AddErrorToRootConsole(const string16& message) {
+void ExtensionHelper::AddMessageToRootConsole(ConsoleMessageLevel level,
+                                              const string16& message) {
   if (render_view()->GetWebView() && render_view()->GetWebView()->mainFrame()) {
+    WebConsoleMessage::Level target_level = WebConsoleMessage::LevelLog;
+    switch (level) {
+      case content::CONSOLE_MESSAGE_LEVEL_TIP:
+        target_level = WebConsoleMessage::LevelTip;
+        break;
+      case content::CONSOLE_MESSAGE_LEVEL_LOG:
+        target_level = WebConsoleMessage::LevelLog;
+        break;
+      case content::CONSOLE_MESSAGE_LEVEL_WARNING:
+        target_level = WebConsoleMessage::LevelWarning;
+        break;
+      case content::CONSOLE_MESSAGE_LEVEL_ERROR:
+        target_level = WebConsoleMessage::LevelError;
+        break;
+    }
     render_view()->GetWebView()->mainFrame()->addMessageToConsole(
-        WebConsoleMessage(WebConsoleMessage::LevelError, message));
+        WebConsoleMessage(target_level, message));
   }
 }

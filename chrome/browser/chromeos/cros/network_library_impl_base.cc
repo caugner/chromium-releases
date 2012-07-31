@@ -51,6 +51,7 @@ NetworkLibraryImplBase::NetworkLibraryImplBase()
     : ethernet_(NULL),
       active_wifi_(NULL),
       active_cellular_(NULL),
+      active_wimax_(NULL),
       active_virtual_(NULL),
       available_devices_(0),
       enabled_devices_(0),
@@ -61,7 +62,8 @@ NetworkLibraryImplBase::NetworkLibraryImplBase()
       is_locked_(false),
       sim_operation_(SIM_OPERATION_NONE),
       ALLOW_THIS_IN_INITIALIZER_LIST(notify_manager_weak_factory_(this)) {
-  network_login_observer_.reset(new NetworkLoginObserver(this));
+  network_login_observer_.reset(new NetworkLoginObserver());
+  AddNetworkManagerObserver(network_login_observer_.get());
 }
 
 NetworkLibraryImplBase::~NetworkLibraryImplBase() {
@@ -261,6 +263,26 @@ bool NetworkLibraryImplBase::cellular_connecting() const {
 bool NetworkLibraryImplBase::cellular_connected() const {
   return active_cellular_ ? active_cellular_->connected() : false;
 }
+const WimaxNetwork* NetworkLibraryImplBase::wimax_network() const {
+  return active_wimax_;
+}
+bool NetworkLibraryImplBase::wimax_connecting() const {
+  return active_wimax_ ? active_wimax_->connecting() : false;
+}
+bool NetworkLibraryImplBase::wimax_connected() const {
+  return active_wimax_ ? active_wimax_->connected() : false;
+}
+const Network* NetworkLibraryImplBase::mobile_network() const {
+  return active_cellular_ ?
+      static_cast<Network*>(active_cellular_) :
+      static_cast<Network*>(active_wimax_);
+}
+bool NetworkLibraryImplBase::mobile_connecting() const {
+  return cellular_connecting() || wimax_connecting();
+}
+bool NetworkLibraryImplBase::mobile_connected() const {
+  return wimax_connecting() || wimax_connected();
+}
 const VirtualNetwork* NetworkLibraryImplBase::virtual_network() const {
   return active_virtual_;
 }
@@ -271,10 +293,12 @@ bool NetworkLibraryImplBase::virtual_network_connected() const {
   return active_virtual_ ? active_virtual_->connected() : false;
 }
 bool NetworkLibraryImplBase::Connected() const {
-  return ethernet_connected() || wifi_connected() || cellular_connected();
+  return ethernet_connected() || wifi_connected() ||
+      cellular_connected() || wimax_connected();
 }
 bool NetworkLibraryImplBase::Connecting() const {
-  return ethernet_connecting() || wifi_connecting() || cellular_connecting();
+  return ethernet_connecting() || wifi_connecting() ||
+      cellular_connecting() || wimax_connecting();
 }
 const WifiNetworkVector& NetworkLibraryImplBase::wifi_networks() const {
   return wifi_networks_;
@@ -285,6 +309,9 @@ const WifiNetworkVector&
 }
 const CellularNetworkVector& NetworkLibraryImplBase::cellular_networks() const {
   return cellular_networks_;
+}
+const WimaxNetworkVector& NetworkLibraryImplBase::wimax_networks() const {
+  return wimax_networks_;
 }
 const VirtualNetworkVector& NetworkLibraryImplBase::virtual_networks() const {
   return virtual_networks_;
@@ -317,6 +344,8 @@ const Network* NetworkLibraryImplBase::active_network() const {
     result = highest_priority(result, active_wifi_);
   if (active_cellular_ && active_cellular_->is_active())
     result = highest_priority(result, active_cellular_);
+  if (active_wimax_ && active_wimax_->is_active())
+    result = highest_priority(result, active_wimax_);
   if (active_virtual_ && active_virtual_->is_active())
     result = highest_priority(result, active_virtual_);
   return result;
@@ -330,6 +359,8 @@ const Network* NetworkLibraryImplBase::connected_network() const {
     result = highest_priority(result, active_wifi_);
   if (active_cellular_ && active_cellular_->connected())
     result = highest_priority(result, active_cellular_);
+  if (active_wimax_ && active_wimax_->connected())
+    result = highest_priority(result, active_wimax_);
   return result;
 }
 
@@ -341,6 +372,8 @@ const Network* NetworkLibraryImplBase::connecting_network() const {
     return wifi_network();
   else if (cellular_connecting())
     return cellular_network();
+  else if (wimax_connecting())
+    return wimax_network();
   return NULL;
 }
 
@@ -352,8 +385,16 @@ bool NetworkLibraryImplBase::wifi_available() const {
   return available_devices_ & (1 << TYPE_WIFI);
 }
 
+bool NetworkLibraryImplBase::wimax_available() const {
+  return available_devices_ & (1 << TYPE_WIMAX);
+}
+
 bool NetworkLibraryImplBase::cellular_available() const {
   return available_devices_ & (1 << TYPE_CELLULAR);
+}
+
+bool NetworkLibraryImplBase::mobile_available() const {
+  return cellular_available() || wimax_available();
 }
 
 bool NetworkLibraryImplBase::ethernet_enabled() const {
@@ -364,8 +405,16 @@ bool NetworkLibraryImplBase::wifi_enabled() const {
   return enabled_devices_ & (1 << TYPE_WIFI);
 }
 
+bool NetworkLibraryImplBase::wimax_enabled() const {
+  return enabled_devices_ & (1 << TYPE_WIMAX);
+}
+
 bool NetworkLibraryImplBase::cellular_enabled() const {
   return enabled_devices_ & (1 << TYPE_CELLULAR);
+}
+
+bool NetworkLibraryImplBase::mobile_enabled() const {
+  return cellular_enabled() || wimax_enabled();
 }
 
 bool NetworkLibraryImplBase::ethernet_busy() const {
@@ -376,8 +425,16 @@ bool NetworkLibraryImplBase::wifi_busy() const {
   return busy_devices_ & (1 << TYPE_WIFI);
 }
 
+bool NetworkLibraryImplBase::wimax_busy() const {
+  return busy_devices_ & (1 << TYPE_WIMAX);
+}
+
 bool NetworkLibraryImplBase::cellular_busy() const {
   return busy_devices_ & (1 << TYPE_CELLULAR);
+}
+
+bool NetworkLibraryImplBase::mobile_busy() const {
+  return cellular_busy() || wimax_busy();
 }
 
 bool NetworkLibraryImplBase::wifi_scanning() const {
@@ -425,30 +482,27 @@ NetworkDevice* NetworkLibraryImplBase::FindNetworkDeviceByPath(
 }
 
 const NetworkDevice* NetworkLibraryImplBase::FindCellularDevice() const {
-  for (NetworkDeviceMap::const_iterator iter = device_map_.begin();
-       iter != device_map_.end(); ++iter) {
-    if (iter->second && iter->second->type() == TYPE_CELLULAR)
-      return iter->second;
-  }
-  return NULL;
+  return FindDeviceByType(TYPE_CELLULAR);
 }
 
 const NetworkDevice* NetworkLibraryImplBase::FindEthernetDevice() const {
-  for (NetworkDeviceMap::const_iterator iter = device_map_.begin();
-       iter != device_map_.end(); ++iter) {
-    if (iter->second->type() == TYPE_ETHERNET)
-      return iter->second;
-  }
-  return NULL;
+  return FindDeviceByType(TYPE_ETHERNET);
 }
 
 const NetworkDevice* NetworkLibraryImplBase::FindWifiDevice() const {
-  for (NetworkDeviceMap::const_iterator iter = device_map_.begin();
-       iter != device_map_.end(); ++iter) {
-    if (iter->second->type() == TYPE_WIFI)
-      return iter->second;
-  }
-  return NULL;
+  return FindDeviceByType(TYPE_WIFI);
+}
+
+const NetworkDevice* NetworkLibraryImplBase::FindWimaxDevice() const {
+  return FindDeviceByType(TYPE_WIMAX);
+}
+
+const NetworkDevice* NetworkLibraryImplBase::FindMobileDevice() const {
+  const NetworkDevice* device = FindDeviceByType(TYPE_CELLULAR);
+  if (device)
+    return device;
+
+  return FindDeviceByType(TYPE_WIMAX);
 }
 
 Network* NetworkLibraryImplBase::FindNetworkByPath(
@@ -471,7 +525,8 @@ WirelessNetwork* NetworkLibraryImplBase::FindWirelessNetworkByPath(
     const std::string& path) const {
   Network* network = FindNetworkByPath(path);
   if (network &&
-      (network->type() == TYPE_WIFI || network->type() == TYPE_CELLULAR))
+      (network->type() == TYPE_WIFI || network->type() == TYPE_WIMAX ||
+           network->type() == TYPE_CELLULAR))
     return static_cast<WirelessNetwork*>(network);
   return NULL;
 }
@@ -481,6 +536,14 @@ WifiNetwork* NetworkLibraryImplBase::FindWifiNetworkByPath(
   Network* network = FindNetworkByPath(path);
   if (network && network->type() == TYPE_WIFI)
     return static_cast<WifiNetwork*>(network);
+  return NULL;
+}
+
+WimaxNetwork* NetworkLibraryImplBase::FindWimaxNetworkByPath(
+    const std::string& path) const {
+  Network* network = FindNetworkByPath(path);
+  if (network && (network->type() == TYPE_WIMAX))
+    return static_cast<WimaxNetwork*>(network);
   return NULL;
 }
 
@@ -683,6 +746,16 @@ void NetworkLibraryImplBase::SetNetworkProfile(
   NotifyNetworkManagerChanged(false);
 }
 
+const NetworkDevice* NetworkLibraryImplBase::FindDeviceByType(
+    ConnectionType type) const {
+  for (NetworkDeviceMap::const_iterator iter = device_map_.begin();
+       iter != device_map_.end(); ++iter) {
+    if (iter->second && iter->second->type() == type)
+      return iter->second;
+  }
+  return NULL;
+}
+
 /////////////////////////////////////////////////////////////////////////////
 // Connect to an existing network.
 
@@ -702,6 +775,18 @@ void NetworkLibraryImplBase::ConnectToWifiNetwork(
 // 1. Request a connection to an existing wifi network.
 void NetworkLibraryImplBase::ConnectToWifiNetwork(WifiNetwork* wifi) {
   NetworkConnectStartWifi(wifi, PROFILE_NONE);
+}
+
+// 1. Request a connection to an existing wimax network.
+// Use |shared| to pass along the desired profile type.
+void NetworkLibraryImplBase::ConnectToWimaxNetwork(
+    WimaxNetwork* wimax, bool shared) {
+  NetworkConnectStart(wimax, shared ? PROFILE_SHARED : PROFILE_USER);
+}
+
+// 1. Request a connection to an existing wimax network.
+void NetworkLibraryImplBase::ConnectToWimaxNetwork(WimaxNetwork* wimax) {
+  NetworkConnectStart(wimax, PROFILE_NONE);
 }
 
 // 1. Connect to a cellular network.
@@ -758,7 +843,7 @@ void NetworkLibraryImplBase::NetworkConnectStart(
   // In order to be certain to trigger any notifications, set the connecting
   // state locally and notify observers. Otherwise there might be a state
   // change without a forced notify.
-  network->set_connecting(true);
+  network->set_connecting();
   // Distinguish between user-initiated connection attempts
   // and auto-connect.
   network->set_connection_started(true);
@@ -766,7 +851,7 @@ void NetworkLibraryImplBase::NetworkConnectStart(
   VLOG(1) << "Requesting connect to network: " << network->name()
           << " profile type: " << profile_type;
   // Specify the correct profile for wifi networks (if specified or unset).
-  if (network->type() == TYPE_WIFI &&
+  if ((network->type() == TYPE_WIFI || network->type() == TYPE_WIMAX) &&
       (profile_type != PROFILE_NONE ||
        network->profile_type() == PROFILE_NONE)) {
     if (network->RequiresUserProfile())
@@ -813,7 +898,8 @@ void NetworkLibraryImplBase::NetworkConnectCompleted(
   }
 
   VLOG(1) << "Connected to network: " << network->name()
-          << " State: " << network->state();
+          << " State: " << network->state()
+          << " Status: " << status;
 
   // If the user asked not to save credentials, flimflam will have
   // forgotten them.  Wipe our cache as well.
@@ -1007,6 +1093,17 @@ void NetworkLibraryImplBase::EnableWifiNetworkDevice(bool enable) {
   CallEnableNetworkDeviceType(TYPE_WIFI, enable);
 }
 
+void NetworkLibraryImplBase::EnableMobileNetworkDevice(bool enable) {
+  EnableWimaxNetworkDevice(enable);
+  EnableCellularNetworkDevice(enable);
+}
+
+void NetworkLibraryImplBase::EnableWimaxNetworkDevice(bool enable) {
+  if (is_locked_)
+    return;
+  CallEnableNetworkDeviceType(TYPE_WIMAX, enable);
+}
+
 void NetworkLibraryImplBase::EnableCellularNetworkDevice(bool enable) {
   if (is_locked_)
     return;
@@ -1058,9 +1155,11 @@ bool NetworkLibraryImplBase::LoadOncNetworks(const std::string& onc_blob,
   // Parse all networks. Bail out if that fails.
   NetworkOncMap added_onc_map;
   ScopedVector<Network> networks;
+  std::set<std::string> removal_ids;
   for (int i = 0; i < parser.GetNetworkConfigsSize(); i++) {
     // Parse Open Network Configuration blob into a temporary Network object.
-    Network* network = parser.ParseNetwork(i);
+    bool marked_for_removal = false;
+    Network* network = parser.ParseNetwork(i, &marked_for_removal);
     if (!network) {
       DLOG(WARNING) << "Cannot parse network in ONC file";
       if (error)
@@ -1068,7 +1167,7 @@ bool NetworkLibraryImplBase::LoadOncNetworks(const std::string& onc_blob,
       return false;
     }
 
-    // Disallow anything but WiFi and ethernet for device-level policy (which
+    // Disallow anything but WiFi and Ethernet for device-level policy (which
     // corresponds to shared networks). See also http://crosbug.com/28741.
     if (source == NetworkUIData::ONC_SOURCE_DEVICE_POLICY &&
         network->type() != TYPE_WIFI &&
@@ -1080,7 +1179,12 @@ bool NetworkLibraryImplBase::LoadOncNetworks(const std::string& onc_blob,
     }
 
     networks.push_back(network);
-    added_onc_map[network->unique_id()] = parser.GetNetworkConfig(i);
+    if (!(source == NetworkUIData::ONC_SOURCE_USER_IMPORT &&
+          marked_for_removal))
+      added_onc_map[network->unique_id()] = parser.GetNetworkConfig(i);
+
+    if (marked_for_removal)
+      removal_ids.insert(network->unique_id());
   }
 
   // Update the ONC map.
@@ -1101,6 +1205,14 @@ bool NetworkLibraryImplBase::LoadOncNetworks(const std::string& onc_blob,
   for (std::vector<Network*>::iterator iter(networks.begin());
        iter != networks.end(); ++iter) {
     Network* network = *iter;
+
+    // Don't configure a network that is supposed to be removed. For
+    // policy-managed networks, the "remove" functionality of ONC is ignored.
+    if (source == NetworkUIData::ONC_SOURCE_USER_IMPORT &&
+        removal_ids.find(network->unique_id()) != removal_ids.end()) {
+      continue;
+    }
+
     DictionaryValue dict;
     for (Network::PropertyMap::const_iterator props =
              network->property_map_.begin();
@@ -1117,14 +1229,14 @@ bool NetworkLibraryImplBase::LoadOncNetworks(const std::string& onc_blob,
     if (!profile_path.empty())
       dict.SetString(flimflam::kProfileProperty, profile_path);
 
-    // For ethernet networks, apply them to the current ethernet service.
+    // For Ethernet networks, apply them to the current Ethernet service.
     if (network->type() == TYPE_ETHERNET) {
       const EthernetNetwork* ethernet = ethernet_network();
       if (ethernet) {
         CallConfigureService(ethernet->unique_id(), &dict);
       } else {
-        DLOG(WARNING) << "Tried to import ONC with an ethernet network when "
-                      << "there is no active ethernet connection.";
+        DLOG(WARNING) << "Tried to import ONC with an Ethernet network when "
+                      << "there is no active Ethernet connection.";
       }
     } else {
       CallConfigureService(network->unique_id(), &dict);
@@ -1139,40 +1251,23 @@ bool NetworkLibraryImplBase::LoadOncNetworks(const std::string& onc_blob,
     // networks and clean out the ones that no longer have a definition in the
     // ONC blob. We first collect the networks and do the actual deletion later
     // because ForgetNetwork() changes the remembered network vectors.
-    std::vector<std::string> to_be_deleted;
-    for (WifiNetworkVector::iterator i(remembered_wifi_networks_.begin());
-         i != remembered_wifi_networks_.end(); ++i) {
-      WifiNetwork* network = *i;
-      if (network->ui_data().onc_source() == source &&
-          network_ids.find(network->unique_id()) == network_ids.end()) {
-        to_be_deleted.push_back(network->service_path());
-      }
-    }
-
-    for (VirtualNetworkVector::iterator i(remembered_virtual_networks_.begin());
-         i != remembered_virtual_networks_.end(); ++i) {
-      VirtualNetwork* network = *i;
-      if (network->ui_data().onc_source() == source &&
-          network_ids.find(network->unique_id()) == network_ids.end()) {
-        to_be_deleted.push_back(network->service_path());
-      }
-    }
-
-    for (std::vector<std::string>::const_iterator i(to_be_deleted.begin());
-         i != to_be_deleted.end(); ++i) {
-      ForgetNetwork(*i);
-    }
+    ForgetNetworksById(source, network_ids, false);
   } else if (source == NetworkUIData::ONC_SOURCE_USER_IMPORT) {
     // User-imported files should always contain something.
     if (parser.GetNetworkConfigsSize() == 0 &&
         parser.GetCertificatesSize() == 0) {
-      LOG(ERROR) << "Onc file missing networks and certs.";
+      LOG(ERROR) << "ONC file contains no networks or certificates.";
       if (error) {
         *error = l10n_util::GetStringUTF8(
             IDS_NETWORK_CONFIG_ERROR_NETWORK_IMPORT);
       }
       return false;
     }
+
+    if (removal_ids.empty())
+      return true;
+
+    ForgetNetworksById(source, removal_ids, true);
   }
 
   return true;
@@ -1239,6 +1334,14 @@ void NetworkLibraryImplBase::UpdateActiveNetwork(Network* network) {
         VLOG(2) << "Active cellular -> " << active_cellular_->name();
       }
     }
+  } else if (type == TYPE_WIMAX) {
+    if (wimax_enabled()) {
+      // Set active_wimax_ to first connected/connecting wimax service.
+      if (active_wimax_ == NULL && network->connecting_or_connected()) {
+        active_wimax_ = static_cast<WimaxNetwork*>(network);
+        VLOG(2) << "Active wimax -> " << active_wimax_->name();
+      }
+    }
   } else if (type == TYPE_VPN) {
     // Set active_virtual_ to the first connected or connecting vpn service. {
     if (active_virtual_ == NULL && network->connecting_or_connected()) {
@@ -1266,6 +1369,9 @@ void NetworkLibraryImplBase::ClearActiveNetwork(ConnectionType type) {
     case TYPE_CELLULAR:
       active_cellular_ = NULL;
       break;
+    case TYPE_WIMAX:
+      active_wimax_ = NULL;
+      break;
     case TYPE_VPN:
       active_virtual_ = NULL;
       break;
@@ -1287,6 +1393,9 @@ void NetworkLibraryImplBase::AddNetwork(Network* network) {
   } else if (type == TYPE_CELLULAR) {
     if (cellular_enabled())
       cellular_networks_.push_back(static_cast<CellularNetwork*>(network));
+  } else if (type == TYPE_WIMAX) {
+    if (wimax_enabled())
+      wimax_networks_.push_back(static_cast<WimaxNetwork*>(network));
   } else if (type == TYPE_VPN) {
     virtual_networks_.push_back(static_cast<VirtualNetwork*>(network));
   }
@@ -1307,6 +1416,33 @@ void NetworkLibraryImplBase::DeleteNetwork(Network* network) {
     }
   }
   delete network;
+}
+
+void NetworkLibraryImplBase::ForgetNetworksById(
+    NetworkUIData::ONCSource source,
+    std::set<std::string> ids,
+    bool if_found) {
+  std::vector<std::string> to_be_forgotten;
+  for (WifiNetworkVector::iterator i = remembered_wifi_networks_.begin();
+       i != remembered_wifi_networks_.end(); ++i) {
+    WifiNetwork* wifi_network = *i;
+    if (wifi_network->ui_data().onc_source() == source &&
+        if_found == (ids.find(wifi_network->unique_id()) != ids.end()))
+      to_be_forgotten.push_back(wifi_network->service_path());
+  }
+
+  for (VirtualNetworkVector::iterator i = remembered_virtual_networks_.begin();
+       i != remembered_virtual_networks_.end(); ++i) {
+    VirtualNetwork* virtual_network = *i;
+    if (virtual_network->ui_data().onc_source() == source &&
+        if_found == (ids.find(virtual_network->unique_id()) != ids.end()))
+      to_be_forgotten.push_back(virtual_network->service_path());
+  }
+
+  for (std::vector<std::string>::const_iterator i = to_be_forgotten.begin();
+       i != to_be_forgotten.end(); ++i) {
+    ForgetNetwork(*i);
+  }
 }
 
 bool NetworkLibraryImplBase::ValidateRememberedNetwork(Network* network) {
@@ -1448,9 +1584,11 @@ void NetworkLibraryImplBase::ClearNetworks() {
   ethernet_ = NULL;
   active_wifi_ = NULL;
   active_cellular_ = NULL;
+  active_wimax_ = NULL;
   active_virtual_ = NULL;
   wifi_networks_.clear();
   cellular_networks_.clear();
+  wimax_networks_.clear();
   virtual_networks_.clear();
 }
 

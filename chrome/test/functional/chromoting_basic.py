@@ -13,6 +13,18 @@ import pyauto
 class ChromotingBasic(chromoting.ChromotingMixIn, pyauto.PyUITest):
   """Basic tests for Chromoting."""
 
+  _EXTRA_CHROME_FLAGS = [
+    '--allow-nacl-socket-api=*',
+  ]
+
+  def ExtraChromeFlags(self):
+    """Ensures Chrome is launched with some custom flags.
+
+    Overrides the default list of extra flags passed to Chrome.  See
+    ExtraChromeFlags() in pyauto.py.
+    """
+    return pyauto.PyUITest.ExtraChromeFlags(self) + self._EXTRA_CHROME_FLAGS
+
   def setUp(self):
     """Set up test for Chromoting on both local and remote machines.
 
@@ -40,7 +52,7 @@ class ChromotingBasic(chromoting.ChromotingMixIn, pyauto.PyUITest):
     if client_local:
       client.LaunchApp(self._app)
 
-    self.assertTrue(client.Connect(access_code, client_tab_index),
+    self.assertTrue(client.Connect(access_code, True, client_tab_index),
                     msg='The client attempted to connect to the host, '
                         'but the chromoting session did not start.')
 

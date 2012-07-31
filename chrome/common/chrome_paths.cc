@@ -4,7 +4,6 @@
 
 #include "chrome/common/chrome_paths.h"
 
-#include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/mac/bundle_locations.h"
@@ -14,7 +13,6 @@
 #include "base/version.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths_internal.h"
-#include "chrome/common/chrome_switches.h"
 
 #if defined(OS_MACOSX)
 #include "base/mac/mac_util.h"
@@ -150,10 +148,23 @@ bool PathProvider(int key, FilePath* result) {
       }
       create_dir = true;
       break;
+#if defined(OS_WIN)
+    case chrome::DIR_ALT_USER_DATA:
+      if (!GetAlternateUserDataDirectory(&cur)) {
+        NOTREACHED();
+        return false;
+      }
+      create_dir = false;
+      break;
+#endif  // OS_WIN
     case chrome::DIR_USER_DOCUMENTS:
       if (!GetUserDocumentsDirectory(&cur))
         return false;
       create_dir = true;
+      break;
+    case chrome::DIR_USER_PICTURES:
+      if (!GetUserPicturesDirectory(&cur))
+        return false;
       break;
     case chrome::DIR_DEFAULT_DOWNLOADS_SAFE:
 #if defined(OS_WIN) || defined(OS_LINUX)
@@ -304,6 +315,12 @@ bool PathProvider(int key, FilePath* result) {
       if (!PathService::Get(base::DIR_MODULE, &cur))
         return false;
       cur = cur.Append(FILE_PATH_LITERAL("resources.pak"));
+      break;
+    case chrome::DIR_RESOURCES_EXTENSION:
+      if (!PathService::Get(base::DIR_MODULE, &cur))
+        return false;
+      cur = cur.Append(FILE_PATH_LITERAL("resources"))
+               .Append(FILE_PATH_LITERAL("extension"));
       break;
 #if defined(OS_CHROMEOS)
     case chrome::FILE_CHROMEOS_API:

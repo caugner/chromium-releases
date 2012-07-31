@@ -14,46 +14,48 @@
 #include "google/cacheinvalidation/include/invalidation-client.h"
 #include "google/cacheinvalidation/include/types.h"
 #include "google/cacheinvalidation/v2/types.pb.h"
-#include "sync/notifier/cache_invalidation_packet_handler.h"
+#include "jingle/notifier/listener/push_client.h"
+#include "sync/internal_api/public/syncable/model_type.h"
 #include "sync/notifier/invalidation_util.h"
 #include "sync/notifier/registration_manager.h"
-#include "sync/syncable/model_type.h"
 
 namespace {
 
 const char kApplicationName[] = "chrome-sync";
 
-}  // anonymous namespace
+}  // namespace
 
 namespace sync_notifier {
 
 ChromeInvalidationClient::Listener::~Listener() {}
 
-ChromeInvalidationClient::ChromeInvalidationClient()
-    : chrome_system_resources_(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
+ChromeInvalidationClient::ChromeInvalidationClient(
+    scoped_ptr<notifier::PushClient> push_client)
+    : push_client_(push_client.get()),
+      chrome_system_resources_(push_client.Pass(),
+                               ALLOW_THIS_IN_INITIALIZER_LIST(this)),
       listener_(NULL),
-      state_writer_(NULL),
-      ticl_ready_(false) {
-  DCHECK(non_thread_safe_.CalledOnValidThread());
+      ticl_state_(DEFAULT_NOTIFICATION_ERROR),
+      push_client_state_(DEFAULT_NOTIFICATION_ERROR) {
+  DCHECK(CalledOnValidThread());
+  push_client_->AddObserver(this);
 }
 
 ChromeInvalidationClient::~ChromeInvalidationClient() {
-  DCHECK(non_thread_safe_.CalledOnValidThread());
+  DCHECK(CalledOnValidThread());
+  push_client_->RemoveObserver(this);
   Stop();
   DCHECK(!listener_);
-  DCHECK(!state_writer_);
 }
 
 void ChromeInvalidationClient::Start(
     const std::string& client_id, const std::string& client_info,
     const std::string& state,
     const InvalidationVersionMap& initial_max_invalidation_versions,
-    const browser_sync::WeakHandle<InvalidationVersionTracker>&
-        invalidation_version_tracker,
-    Listener* listener,
-    StateWriter* state_writer,
-    base::WeakPtr<buzz::XmppTaskParentInterface> base_task) {
-  DCHECK(non_thread_safe_.CalledOnValidThread());
+    const browser_sync::WeakHandle<InvalidationStateTracker>&
+        invalidation_state_tracker,
+    Listener* listener) {
+  DCHECK(CalledOnValidThread());
   Stop();
 
   chrome_system_resources_.set_platform(client_info);
@@ -76,62 +78,37 @@ void ChromeInvalidationClient::Start(
                << it->second;
     }
   }
-  invalidation_version_tracker_ = invalidation_version_tracker;
-  DCHECK(invalidation_version_tracker_.IsInitialized());
+  invalidation_state_tracker_ = invalidation_state_tracker;
+  DCHECK(invalidation_state_tracker_.IsInitialized());
 
   DCHECK(!listener_);
   DCHECK(listener);
   listener_ = listener;
-  DCHECK(!state_writer_);
-  DCHECK(state_writer);
-  state_writer_ = state_writer;
 
   int client_type = ipc::invalidation::ClientType::CHROME_SYNC;
   invalidation_client_.reset(
       invalidation::CreateInvalidationClient(
           &chrome_system_resources_, client_type, client_id,
           kApplicationName, this));
-  ChangeBaseTask(base_task);
   invalidation_client_->Start();
 
   registration_manager_.reset(
       new RegistrationManager(invalidation_client_.get()));
 }
 
-void ChromeInvalidationClient::ChangeBaseTask(
-    base::WeakPtr<buzz::XmppTaskParentInterface> base_task) {
-  DCHECK(invalidation_client_.get());
-  DCHECK(base_task.get());
-  cache_invalidation_packet_handler_.reset(
-      new CacheInvalidationPacketHandler(base_task));
-  chrome_system_resources_.network()->UpdatePacketHandler(
-      cache_invalidation_packet_handler_.get());
-}
-
-void ChromeInvalidationClient::Stop() {
-  DCHECK(non_thread_safe_.CalledOnValidThread());
-  if (!invalidation_client_.get()) {
-    DCHECK(!cache_invalidation_packet_handler_.get());
-    return;
-  }
-
-  registration_manager_.reset();
-  cache_invalidation_packet_handler_.reset();
-  chrome_system_resources_.Stop();
-  invalidation_client_->Stop();
-
-  invalidation_client_.reset();
-  state_writer_ = NULL;
-  listener_ = NULL;
-
-  invalidation_version_tracker_.Reset();
-  max_invalidation_versions_.clear();
+void ChromeInvalidationClient::UpdateCredentials(
+    const std::string& email, const std::string& token) {
+  DCHECK(CalledOnValidThread());
+  chrome_system_resources_.network()->UpdateCredentials(email, token);
 }
 
 void ChromeInvalidationClient::RegisterTypes(syncable::ModelTypeSet types) {
-  DCHECK(non_thread_safe_.CalledOnValidThread());
+  DCHECK(CalledOnValidThread());
   registered_types_ = types;
-  if (ticl_ready_ && registration_manager_.get()) {
+  // |ticl_state_| can go to NO_NOTIFICATION_ERROR even without a
+  // working XMPP connection (as observed by us), so check it instead
+  // of GetState() (see http://crbug.com/139424).
+  if (ticl_state_ == NO_NOTIFICATION_ERROR && registration_manager_.get()) {
     registration_manager_->SetRegisteredTypes(registered_types_);
   }
   // TODO(akalin): Clear invalidation versions for unregistered types.
@@ -139,8 +116,8 @@ void ChromeInvalidationClient::RegisterTypes(syncable::ModelTypeSet types) {
 
 void ChromeInvalidationClient::Ready(
     invalidation::InvalidationClient* client) {
-  ticl_ready_ = true;
-  listener_->OnSessionStatusChanged(true);
+  ticl_state_ = NO_NOTIFICATION_ERROR;
+  EmitStateChange();
   registration_manager_->SetRegisteredTypes(registered_types_);
 }
 
@@ -148,7 +125,7 @@ void ChromeInvalidationClient::Invalidate(
     invalidation::InvalidationClient* client,
     const invalidation::Invalidation& invalidation,
     const invalidation::AckHandle& ack_handle) {
-  DCHECK(non_thread_safe_.CalledOnValidThread());
+  DCHECK(CalledOnValidThread());
   DVLOG(1) << "Invalidate: " << InvalidationToString(invalidation);
   syncable::ModelType model_type;
   if (!ObjectIdToRealModelType(invalidation.object_id(), &model_type)) {
@@ -178,9 +155,9 @@ void ChromeInvalidationClient::Invalidate(
            << syncable::ModelTypeToString(model_type) << " to "
            << invalidation.version();
   max_invalidation_versions_[model_type] = invalidation.version();
-  invalidation_version_tracker_.Call(
+  invalidation_state_tracker_.Call(
       FROM_HERE,
-      &InvalidationVersionTracker::SetMaxVersion,
+      &InvalidationStateTracker::SetMaxVersion,
       model_type, invalidation.version());
 
   std::string payload;
@@ -198,7 +175,7 @@ void ChromeInvalidationClient::InvalidateUnknownVersion(
     invalidation::InvalidationClient* client,
     const invalidation::ObjectId& object_id,
     const invalidation::AckHandle& ack_handle) {
-  DCHECK(non_thread_safe_.CalledOnValidThread());
+  DCHECK(CalledOnValidThread());
   DVLOG(1) << "InvalidateUnknownVersion";
 
   syncable::ModelType model_type;
@@ -221,7 +198,7 @@ void ChromeInvalidationClient::InvalidateUnknownVersion(
 void ChromeInvalidationClient::InvalidateAll(
     invalidation::InvalidationClient* client,
     const invalidation::AckHandle& ack_handle) {
-  DCHECK(non_thread_safe_.CalledOnValidThread());
+  DCHECK(CalledOnValidThread());
   DVLOG(1) << "InvalidateAll";
   EmitInvalidation(registered_types_, std::string());
   // TODO(akalin): We should really acknowledge only after we get the
@@ -231,7 +208,7 @@ void ChromeInvalidationClient::InvalidateAll(
 
 void ChromeInvalidationClient::EmitInvalidation(
     syncable::ModelTypeSet types, const std::string& payload) {
-  DCHECK(non_thread_safe_.CalledOnValidThread());
+  DCHECK(CalledOnValidThread());
   syncable::ModelTypePayloadMap type_payloads =
       syncable::ModelTypePayloadMapFromEnumSet(types, payload);
   listener_->OnInvalidate(type_payloads);
@@ -241,7 +218,7 @@ void ChromeInvalidationClient::InformRegistrationStatus(
       invalidation::InvalidationClient* client,
       const invalidation::ObjectId& object_id,
       InvalidationListener::RegistrationState new_state) {
-  DCHECK(non_thread_safe_.CalledOnValidThread());
+  DCHECK(CalledOnValidThread());
   DVLOG(1) << "InformRegistrationStatus: "
            << ObjectIdToString(object_id) << " " << new_state;
 
@@ -262,7 +239,7 @@ void ChromeInvalidationClient::InformRegistrationFailure(
     const invalidation::ObjectId& object_id,
     bool is_transient,
     const std::string& error_message) {
-  DCHECK(non_thread_safe_.CalledOnValidThread());
+  DCHECK(CalledOnValidThread());
   DVLOG(1) << "InformRegistrationFailure: "
            << ObjectIdToString(object_id)
            << "is_transient=" << is_transient
@@ -291,7 +268,7 @@ void ChromeInvalidationClient::ReissueRegistrations(
     invalidation::InvalidationClient* client,
     const std::string& prefix,
     int prefix_length) {
-  DCHECK(non_thread_safe_.CalledOnValidThread());
+  DCHECK(CalledOnValidThread());
   DVLOG(1) << "AllRegistrationsLost";
   registration_manager_->MarkAllRegistrationsLost();
 }
@@ -299,15 +276,87 @@ void ChromeInvalidationClient::ReissueRegistrations(
 void ChromeInvalidationClient::InformError(
     invalidation::InvalidationClient* client,
     const invalidation::ErrorInfo& error_info) {
-  listener_->OnSessionStatusChanged(false);
-  LOG(ERROR) << "Invalidation client encountered an error";
-  // TODO(ghc): handle the error.
+  LOG(ERROR) << "Ticl error " << error_info.error_reason() << ": "
+             << error_info.error_message()
+             << " (transient = " << error_info.is_transient() << ")";
+  if (error_info.error_reason() == invalidation::ErrorReason::AUTH_FAILURE) {
+    ticl_state_ = NOTIFICATION_CREDENTIALS_REJECTED;
+  } else {
+    ticl_state_ = TRANSIENT_NOTIFICATION_ERROR;
+  }
+  EmitStateChange();
 }
 
 void ChromeInvalidationClient::WriteState(const std::string& state) {
-  DCHECK(non_thread_safe_.CalledOnValidThread());
-  CHECK(state_writer_);
-  state_writer_->WriteState(state);
+  DCHECK(CalledOnValidThread());
+  DVLOG(1) << "WriteState";
+  invalidation_state_tracker_.Call(
+      FROM_HERE, &InvalidationStateTracker::SetInvalidationState, state);
+}
+
+void ChromeInvalidationClient::Stop() {
+  DCHECK(CalledOnValidThread());
+  if (!invalidation_client_.get()) {
+    return;
+  }
+
+  registration_manager_.reset();
+  chrome_system_resources_.Stop();
+  invalidation_client_->Stop();
+
+  invalidation_client_.reset();
+  listener_ = NULL;
+
+  invalidation_state_tracker_.Reset();
+  max_invalidation_versions_.clear();
+  ticl_state_ = DEFAULT_NOTIFICATION_ERROR;
+  push_client_state_ = DEFAULT_NOTIFICATION_ERROR;
+}
+
+NotificationsDisabledReason ChromeInvalidationClient::GetState() const {
+  DCHECK(CalledOnValidThread());
+  if (ticl_state_ == NOTIFICATION_CREDENTIALS_REJECTED ||
+      push_client_state_ == NOTIFICATION_CREDENTIALS_REJECTED) {
+    // If either the ticl or the push client rejected our credentials,
+    // return NOTIFICATION_CREDENTIALS_REJECTED.
+    return NOTIFICATION_CREDENTIALS_REJECTED;
+  }
+  if (ticl_state_ == NO_NOTIFICATION_ERROR &&
+      push_client_state_ == NO_NOTIFICATION_ERROR) {
+    // If the ticl is ready and the push client notifications are
+    // enabled, return NO_NOTIFICATION_ERROR.
+    return NO_NOTIFICATION_ERROR;
+  }
+  // Otherwise, we have a transient error.
+  return TRANSIENT_NOTIFICATION_ERROR;
+}
+
+void ChromeInvalidationClient::EmitStateChange() {
+  DCHECK(CalledOnValidThread());
+  if (GetState() == NO_NOTIFICATION_ERROR) {
+    listener_->OnNotificationsEnabled();
+  } else {
+    listener_->OnNotificationsDisabled(GetState());
+  }
+}
+
+void ChromeInvalidationClient::OnNotificationsEnabled() {
+  DCHECK(CalledOnValidThread());
+  push_client_state_ = NO_NOTIFICATION_ERROR;
+  EmitStateChange();
+}
+
+void ChromeInvalidationClient::OnNotificationsDisabled(
+    notifier::NotificationsDisabledReason reason) {
+  DCHECK(CalledOnValidThread());
+  push_client_state_ = FromNotifierReason(reason);
+  EmitStateChange();
+}
+
+void ChromeInvalidationClient::OnIncomingNotification(
+    const notifier::Notification& notification) {
+  DCHECK(CalledOnValidThread());
+  // Do nothing, since this is already handled by |invalidation_client_|.
 }
 
 }  // namespace sync_notifier

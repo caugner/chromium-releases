@@ -123,8 +123,8 @@ FileTransferController.prototype = {
     dataTransfer.setData('fs/tag', 'filemanager-data');
 
     dataTransfer.setData('fs/isOnGData', this.isOnGData);
-    dataTransfer.setData('fs/sourceDir',
-                         this.currentDirectory.fullPath);
+    if (this.currentDirectory)
+      dataTransfer.setData('fs/sourceDir', this.currentDirectory.fullPath);
     dataTransfer.setData('fs/directories', directories.join('\n'));
     dataTransfer.setData('fs/files', files.join('\n'));
     dataTransfer.effectAllowed = effectAllowed;
@@ -144,6 +144,11 @@ FileTransferController.prototype = {
     var sourceDir = dataTransfer.getData('fs/sourceDir');
     if (sourceDir)
       return DirectoryModel.getRootPath(sourceDir);
+
+    // For drive search, sourceDir will be set to null, so we should double
+    // check that we are not on drive.
+    if (dataTransfer.getData('fs/isOnGData') == 'true')
+      return '/' + DirectoryModel.GDATA_DIRECTORY;
 
     // |dataTransfer| in protected mode.
     if (window[DRAG_AND_DROP_GLOBAL_DATA])
@@ -346,7 +351,8 @@ FileTransferController.prototype = {
   },
 
   isDocumentWideEvent_: function(event) {
-    return event.target == this.document_.body;
+    return this.document_.activeElement.nodeName.toLowerCase() != 'input' ||
+        this.document_.activeElement.type.toLowerCase() != 'text';
   },
 
   onCopy_: function(event) {
@@ -428,6 +434,8 @@ FileTransferController.prototype = {
     if (this.directoryModel_.isPathReadOnly(destinationPath)) {
       return false;
     }
+    if (this.directoryModel_.isSearching())
+      return false;
 
     if (!dataTransfer.types || dataTransfer.types.indexOf('fs/tag') == -1)
       return false;  // Unsupported type of content.
@@ -449,6 +457,10 @@ FileTransferController.prototype = {
   },
 
   queryPasteCommandEnabled: function() {
+    if (!this.isDocumentWideEvent_()) {
+      return false;
+    }
+
     // HACK(serya): return this.document_.queryCommandEnabled('paste')
     // should be used.
     var result;
@@ -509,6 +521,8 @@ FileTransferController.prototype = {
   },
 
   get currentDirectory() {
+    if (this.directoryModel_.isSearching() && this.isOnGData)
+      return null;
     return this.directoryModel_.getCurrentDirEntry();
   },
 
@@ -533,9 +547,20 @@ FileTransferController.prototype = {
    */
   get selectedEntries_() {
     var list = this.fileList_;
-    return this.fileListSelection_.selectedIndexes.map(function(index) {
+    var selectedIndexes = this.fileListSelection_.selectedIndexes;
+    var entries = selectedIndexes.map(function(index) {
       return list.item(index);
     });
+
+    // TODO(serya): Diagnostics for http://crbug/129642
+    if (entries.indexOf(undefined) != -1) {
+      var index = entries.indexOf(undefined);
+      entries = entries.filter(function(e) { return !!e; });
+      console.error('Invalid selection found: list items: ', list.length,
+                    'wrong indexe value: ', selectedIndexes[index],
+                    'Stack trace: ', new Error().stack);
+    }
+    return entries;
   },
 
   selectDropEffect_: function(event, destinationPath) {

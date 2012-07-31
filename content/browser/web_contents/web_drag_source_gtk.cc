@@ -12,11 +12,11 @@
 #include "base/utf_string_conversions.h"
 #include "content/browser/download/drag_download_file.h"
 #include "content/browser/download/drag_download_util.h"
+#include "content/browser/renderer_host/render_view_host_delegate.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/web_contents/drag_utils_gtk.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/content_browser_client.h"
-#include "content/public/browser/render_view_host_delegate.h"
 #include "content/public/browser/web_contents_view.h"
 #include "content/public/common/content_client.h"
 #include "net/base/file_stream.h"
@@ -85,14 +85,14 @@ void WebDragSourceGtk::StartDragging(const WebDropData& drop_data,
 
   int targets_mask = 0;
 
-  if (!drop_data.plain_text.empty())
+  if (!drop_data.text.string().empty())
     targets_mask |= ui::TEXT_PLAIN;
   if (drop_data.url.is_valid()) {
     targets_mask |= ui::TEXT_URI_LIST;
     targets_mask |= ui::CHROME_NAMED_URL;
     targets_mask |= ui::NETSCAPE_URL;
   }
-  if (!drop_data.text_html.empty())
+  if (!drop_data.html.string().empty())
     targets_mask |= ui::TEXT_HTML;
   if (!drop_data.file_contents.empty())
     targets_mask |= ui::CHROME_WEBDROP_FILE_CONTENTS;
@@ -114,7 +114,7 @@ void WebDragSourceGtk::StartDragging(const WebDropData& drop_data,
   // The image we get from WebKit makes heavy use of alpha-shading. This looks
   // bad on non-compositing WMs. Fall back to the default drag icon.
   if (!image.isNull() && ui::IsScreenComposited())
-    drag_pixbuf_ = gfx::GdkPixbufFromSkBitmap(&image);
+    drag_pixbuf_ = gfx::GdkPixbufFromSkBitmap(image);
   image_offset_ = image_offset;
 
   GtkTargetList* list = ui::GetTargetListFromCodeMask(targets_mask);
@@ -183,7 +183,7 @@ void WebDragSourceGtk::OnDragDataGet(GtkWidget* sender,
 
   switch (target_type) {
     case ui::TEXT_PLAIN: {
-      std::string utf8_text = UTF16ToUTF8(drop_data_->plain_text);
+      std::string utf8_text = UTF16ToUTF8(drop_data_->text.string());
       gtk_selection_data_set_text(selection_data, utf8_text.c_str(),
                                   utf8_text.length());
       break;
@@ -192,7 +192,7 @@ void WebDragSourceGtk::OnDragDataGet(GtkWidget* sender,
     case ui::TEXT_HTML: {
       // TODO(estade): change relative links to be absolute using
       // |html_base_url|.
-      std::string utf8_text = UTF16ToUTF8(drop_data_->text_html);
+      std::string utf8_text = UTF16ToUTF8(drop_data_->html.string());
       gtk_selection_data_set(selection_data,
                              ui::GetAtomForTarget(ui::TEXT_HTML),
                              kBitsPerByte,
@@ -251,12 +251,14 @@ void WebDragSourceGtk::OnDragDataGet(GtkWidget* sender,
           if (file_stream) {
             // Start downloading the file to the stream.
             scoped_refptr<DragDownloadFile> drag_file_downloader =
-                new DragDownloadFile(file_path,
-                                     linked_ptr<net::FileStream>(file_stream),
-                                     download_url_,
-                                     web_contents_->GetURL(),
-                                     web_contents_->GetEncoding(),
-                                     web_contents_);
+                new DragDownloadFile(
+                    file_path,
+                    linked_ptr<net::FileStream>(file_stream),
+                    download_url_,
+                    content::Referrer(web_contents_->GetURL(),
+                                      drop_data_->referrer_policy),
+                    web_contents_->GetEncoding(),
+                    web_contents_);
             drag_file_downloader->Start(
                 new drag_download_util::PromiseFileFinalizer(
                     drag_file_downloader));

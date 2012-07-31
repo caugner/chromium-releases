@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #pragma once
 
 #import <Cocoa/Cocoa.h>
+#include "base/memory/scoped_ptr.h"
 #import "chrome/browser/ui/cocoa/hover_close_button.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_drag_controller.h"
 #include "chrome/browser/ui/tabs/tab_menu_model.h"
@@ -94,6 +95,9 @@ class MenuDelegate;
 // Closes the associated TabView by relaying the message to |target_| to
 // perform the close.
 - (IBAction)closeTab:(id)sender;
+
+// Selects the associated TabView by sending |action_| to |target_|.
+- (void)selectTab:(id)sender;
 
 // Replace the current icon view with the given view. |iconView| will be
 // resized to the size of the current icon view.

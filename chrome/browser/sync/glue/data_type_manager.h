@@ -10,11 +10,10 @@
 #include <set>
 #include <string>
 
-#include "base/memory/scoped_ptr.h"
-#include "chrome/browser/sync/api/sync_error.h"
 #include "chrome/browser/sync/glue/data_type_controller.h"
-#include "sync/internal_api/configure_reason.h"
-#include "sync/syncable/model_type.h"
+#include "sync/api/sync_error.h"
+#include "sync/internal_api/public/configure_reason.h"
+#include "sync/internal_api/public/syncable/model_type.h"
 
 namespace browser_sync {
 
@@ -46,6 +45,8 @@ class DataTypeManager {
                          // all types were started.
     RETRY,               // Download failed due to a transient error and it
                          // is being retried.
+    CONFIGURE_BLOCKED,   // Configuration was blocked due to missing
+                         // passphrase.
     UNRECOVERABLE_ERROR  // We got an unrecoverable error during startup.
   };
 
@@ -58,11 +59,21 @@ class DataTypeManager {
                     TypeSet requested_types);
     ConfigureResult(ConfigureStatus status,
                     TypeSet requested_types,
-                    const std::list<SyncError>& errors);
+                    const std::list<SyncError>& failed_data_types,
+                    syncable::ModelTypeSet waiting_to_start);
     ~ConfigureResult();
     ConfigureStatus status;
     TypeSet requested_types;
-    std::list<SyncError> errors;
+
+    // These types encountered a failure in association.
+    std::list<SyncError> failed_data_types;
+
+    // List of types that failed to start association with in our alloted
+    // time period(see kDataTypeLoadWaitTimeInSeconds). We move
+    // forward here and allow these types to continue loading in the
+    // background. When these types are loaded DataTypeManager will
+    // be informed and another configured cycle will be started.
+    syncable::ModelTypeSet waiting_to_start;
   };
 
   virtual ~DataTypeManager() {}

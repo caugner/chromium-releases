@@ -8,7 +8,7 @@
 
 #include "base/i18n/break_iterator.h"
 #include "base/logging.h"
-#include "base/stl_util.h"
+#include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/utf_string_conversions.h"
@@ -17,6 +17,8 @@
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/font_smoothing_win.h"
 #include "ui/gfx/platform_font_win.h"
+
+namespace gfx {
 
 namespace {
 
@@ -48,10 +50,10 @@ int CALLBACK MetaFileEnumProc(HDC hdc,
 // |true| if a fallback font was found.
 // Adapted from WebKit's |FontCache::GetFontDataForCharacters()|.
 bool ChooseFallbackFont(HDC hdc,
-                        const gfx::Font& font,
+                        const Font& font,
                         const wchar_t* text,
                         int text_length,
-                        gfx::Font* result) {
+                        Font* result) {
   // Use a meta file to intercept the fallback font chosen by Uniscribe.
   HDC meta_file_dc = CreateEnhMetaFile(hdc, NULL, NULL, NULL);
   if (!meta_file_dc)
@@ -77,7 +79,7 @@ bool ChooseFallbackFont(HDC hdc,
     log_font.lfFaceName[0] = 0;
     EnumEnhMetaFile(0, meta_file, MetaFileEnumProc, &log_font, NULL);
     if (log_font.lfFaceName[0]) {
-      *result = gfx::Font(UTF16ToUTF8(log_font.lfFaceName), font.GetFontSize());
+      *result = Font(UTF16ToUTF8(log_font.lfFaceName), font.GetFontSize());
       found_fallback = true;
     }
   }
@@ -86,9 +88,83 @@ bool ChooseFallbackFont(HDC hdc,
   return found_fallback;
 }
 
+// Queries the Registry to get a mapping from font filenames to font names.
+void QueryFontsFromRegistry(std::map<std::string, std::string>* map) {
+  const wchar_t* kFonts =
+      L"Software\\Microsoft\\Windows NT\\CurrentVersion\\Fonts";
+
+  base::win::RegistryValueIterator it(HKEY_LOCAL_MACHINE, kFonts);
+  for (; it.Valid(); ++it) {
+    const std::string filename = StringToLowerASCII(WideToUTF8(it.Value()));
+    (*map)[filename] = WideToUTF8(it.Name());
+  }
+}
+
+// Fills |font_names| with a list of font families found in the font file at
+// |filename|. Takes in a |font_map| from font filename to font families, which
+// is filled-in by querying the registry, if empty.
+void GetFontNamesFromFilename(const std::string& filename,
+                              std::map<std::string, std::string>* font_map,
+                              std::vector<std::string>* font_names) {
+  if (font_map->empty())
+    QueryFontsFromRegistry(font_map);
+
+  std::map<std::string, std::string>::const_iterator it =
+      font_map->find(StringToLowerASCII(filename));
+  if (it == font_map->end())
+    return;
+
+  // The family string is in the format "FamilyFoo & FamilyBar (TrueType)".
+  // Split by '&' and strip off the trailing parenthesized experession.
+  base::SplitString(it->second, '&', font_names);
+  if (!font_names->empty()) {
+    const size_t index = font_names->back().find('(');
+    if (index != std::string::npos) {
+      font_names->back().resize(index);
+      TrimWhitespace(font_names->back(), TRIM_TRAILING, &font_names->back());
+    }
+  }
+}
+
+// Returns true if |text| contains only ASCII digits.
+bool ContainsOnlyDigits(const std::string& text) {
+  return text.find_first_not_of("0123456789") == string16::npos;
+}
+
+// Parses the font's name and filename out of a SystemLink entry string, setting
+// |font_name| and |filename| respectively. If a field is not present or could
+// not be parsed, the corresponding param will be cleared.
+void ParseFontLinkEntry(const std::string& entry,
+                        std::string* filename,
+                        std::string* font_name) {
+  // Each entry is comma separated, having the font filename as the first value
+  // followed optionally by the font family name and a pair of integer scaling
+  // factors. See: http://msdn.microsoft.com/en-us/goglobal/bb688134.aspx
+  // TODO(asvitkine): Should we support these scaling factors?
+  std::vector<std::string> parts;
+  base::SplitString(entry, ',', &parts);
+  filename->clear();
+  font_name->clear();
+  if (parts.size() > 0)
+    *filename = parts[0];
+  // The second entry may be the font name or the first scaling factor, if the
+  // entry does not contain a font name. If it contains only digits, assume it
+  // is a scaling factor.
+  if (parts.size() > 1 && !ContainsOnlyDigits(parts[1]))
+    *font_name = parts[1];
+}
+
+// Appends a Font with the given |name| and |size| to |fonts| unless the last
+// entry is already a font with that name.
+void AppendFont(const std::string& name, int size, std::vector<Font>* fonts) {
+  if (fonts->empty() || fonts->back().GetFontName() != name)
+    fonts->push_back(Font(name, size));
+}
+
 // Queries the Registry to get a list of linked fonts for |font|.
-void QueryLinkedFontsFromRegistry(const gfx::Font& font,
-                                  std::vector<gfx::Font>* linked_fonts) {
+void QueryLinkedFontsFromRegistry(const Font& font,
+                                  std::map<std::string, std::string>* font_map,
+                                  std::vector<Font>* linked_fonts) {
   base::ThreadRestrictions::ScopedAllowIO allow_io;
   const wchar_t* kSystemLink =
       L"Software\\Microsoft\\Windows NT\\CurrentVersion\\FontLink\\SystemLink";
@@ -97,20 +173,26 @@ void QueryLinkedFontsFromRegistry(const gfx::Font& font,
   if (FAILED(key.Open(HKEY_LOCAL_MACHINE, kSystemLink, KEY_READ)))
     return;
 
-  const std::wstring font_name = UTF8ToWide(font.GetFontName());
+  const std::wstring original_font_name = UTF8ToWide(font.GetFontName());
   std::vector<std::wstring> values;
-  if (FAILED(key.ReadValues(font_name.c_str(), &values))) {
+  if (FAILED(key.ReadValues(original_font_name.c_str(), &values))) {
     key.Close();
     return;
   }
 
-  for (size_t i = 0; i < values.size(); i++) {
-    // The font name follows the comma in each entry.
-    const size_t index = values[i].find(',');
-    if ((index != string16::npos) && (index + 1 != values[i].length())) {
-      const std::string linked_name = UTF16ToUTF8(values[i].substr(index + 1));
-      const gfx::Font linked_font(linked_name, font.GetFontSize());
-      linked_fonts->push_back(linked_font);
+  std::string filename;
+  std::string font_name;
+  for (size_t i = 0; i < values.size(); ++i) {
+    ParseFontLinkEntry(WideToUTF8(values[i]), &filename, &font_name);
+    // If the font name is present, add that directly, otherwise add the
+    // font names corresponding to the filename.
+    if (!font_name.empty()) {
+      AppendFont(font_name, font.GetFontSize(), linked_fonts);
+    } else if (!filename.empty()) {
+      std::vector<std::string> font_names;
+      GetFontNamesFromFilename(filename, font_map, &font_names);
+      for (size_t i = 0; i < font_names.size(); ++i)
+        AppendFont(font_names[i], font.GetFontSize(), linked_fonts);
     }
   }
 
@@ -123,15 +205,15 @@ void QueryLinkedFontsFromRegistry(const gfx::Font& font,
 void DeriveFontIfNecessary(int font_size,
                            int font_height,
                            int font_style,
-                           gfx::Font* font) {
-  const int kStyleMask = (gfx::Font::BOLD | gfx::Font::ITALIC);
+                           Font* font) {
+  const int kStyleMask = (Font::BOLD | Font::ITALIC);
   const int target_style = (font_style & kStyleMask);
 
   // On Windows XP, the font must be resized using |font_height| instead of
   // |font_size| to match GDI behavior.
   if (base::win::GetVersion() < base::win::VERSION_VISTA) {
-    gfx::PlatformFontWin* platform_font =
-        static_cast<gfx::PlatformFontWin*>(font->platform_font());
+    PlatformFontWin* platform_font =
+        static_cast<PlatformFontWin*>(font->platform_font());
     *font = platform_font->DeriveFontWithHeight(font_height, target_style);
     return;
   }
@@ -142,9 +224,18 @@ void DeriveFontIfNecessary(int font_size,
     *font = font->DeriveFont(font_size - current_size, font_style);
 }
 
-}  // namespace
+// Returns true if |c| is a Unicode BiDi control character.
+bool IsUnicodeBidiControlCharacter(char16 c) {
+  return c == base::i18n::kRightToLeftMark ||
+         c == base::i18n::kLeftToRightMark ||
+         c == base::i18n::kLeftToRightEmbeddingMark ||
+         c == base::i18n::kRightToLeftEmbeddingMark ||
+         c == base::i18n::kPopDirectionalFormatting ||
+         c == base::i18n::kLeftToRightOverride ||
+         c == base::i18n::kRightToLeftOverride;
+}
 
-namespace gfx {
+}  // namespace
 
 namespace internal {
 
@@ -192,6 +283,9 @@ HDC RenderTextWin::cached_hdc_ = NULL;
 std::map<std::string, std::vector<Font> > RenderTextWin::cached_linked_fonts_;
 
 // static
+std::map<std::string, std::string> RenderTextWin::cached_system_fonts_;
+
+// static
 std::map<std::string, Font> RenderTextWin::successful_substitute_fonts_;
 
 RenderTextWin::RenderTextWin()
@@ -205,7 +299,6 @@ RenderTextWin::RenderTextWin()
 }
 
 RenderTextWin::~RenderTextWin() {
-  STLDeleteContainerPointers(runs_.begin(), runs_.end());
 }
 
 base::i18n::TextDirection RenderTextWin::GetTextDirection() {
@@ -251,55 +344,14 @@ SelectionModel RenderTextWin::FindCursorPosition(const Point& point) {
   return SelectionModel(cursor, trailing ? CURSOR_BACKWARD : CURSOR_FORWARD);
 }
 
-size_t RenderTextWin::IndexOfAdjacentGrapheme(
-    size_t index,
-    LogicalCursorDirection direction) {
+std::vector<RenderText::FontSpan> RenderTextWin::GetFontSpansForTesting() {
   EnsureLayout();
 
-  if (text().empty())
-    return 0;
+  std::vector<RenderText::FontSpan> spans;
+  for (size_t i = 0; i < runs_.size(); ++i)
+    spans.push_back(RenderText::FontSpan(runs_[i]->font, runs_[i]->range));
 
-  if (index >= text().length()) {
-    if (direction == CURSOR_FORWARD || index > text().length()) {
-      return text().length();
-    } else {
-      // The requested |index| is at the end of the text. Use the index of the
-      // last character to find the grapheme.
-      index = text().length() - 1;
-      if (IsCursorablePosition(index))
-        return index;
-    }
-  }
-
-  size_t run_index =
-      GetRunContainingCaret(SelectionModel(index, CURSOR_FORWARD));
-  DCHECK(run_index < runs_.size());
-  internal::TextRun* run = runs_[run_index];
-  size_t start = run->range.start();
-  size_t ch = index - start;
-
-  if (direction == CURSOR_BACKWARD) {
-    // If |ch| is the start of the run, use the preceding run, if any.
-    if (ch == 0) {
-      if (run_index == 0)
-        return 0;
-      run = runs_[run_index - 1];
-      start = run->range.start();
-      ch = run->range.length();
-    }
-
-    // Loop to find the start of the grapheme.
-    WORD cluster = run->logical_clusters[ch - 1];
-    do {
-      ch--;
-    } while (ch > 0 && run->logical_clusters[ch - 1] == cluster);
-  } else {  // direction == CURSOR_FORWARD
-    WORD cluster = run->logical_clusters[ch];
-    while (ch < run->range.length() && run->logical_clusters[ch] == cluster)
-      ch++;
-  }
-
-  return start + ch;
+  return spans;
 }
 
 SelectionModel RenderTextWin::AdjacentCharSelectionModel(
@@ -536,8 +588,7 @@ void RenderTextWin::DrawVisualText(Canvas* canvas) {
 }
 
 void RenderTextWin::ItemizeLogicalText() {
-  STLDeleteContainerPointers(runs_.begin(), runs_.end());
-  runs_.clear();
+  runs_.reset();
   string_size_ = Size(0, GetFont().GetHeight());
   common_baseline_ = 0;
   if (text().empty())
@@ -799,7 +850,8 @@ bool RenderTextWin::HasMissingGlyphs(internal::TextRun* run) const {
     // See: http://crbug.com/125629
     if (run->glyphs[glyph_index] == properties.wgBlank &&
         run->visible_attributes[glyph_index].fZeroWidth &&
-        !IsWhitespace(run_text[char_index])) {
+        !IsWhitespace(run_text[char_index]) &&
+        !IsUnicodeBidiControlCharacter(run_text[char_index])) {
       return true;
     }
   }
@@ -816,7 +868,7 @@ const std::vector<Font>* RenderTextWin::GetLinkedFonts(const Font& font) const {
 
   cached_linked_fonts_[font_name] = std::vector<Font>();
   std::vector<Font>* linked_fonts = &cached_linked_fonts_[font_name];
-  QueryLinkedFontsFromRegistry(font, linked_fonts);
+  QueryLinkedFontsFromRegistry(font, &cached_system_fonts_, linked_fonts);
   return linked_fonts;
 }
 

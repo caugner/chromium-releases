@@ -7,18 +7,21 @@
 #include <windows.h>
 #include <d3d9.h>
 #include <setupapi.h>
-#include <winsatcominterfacei.h>
 
 #include "base/command_line.h"
+#include "base/debug/trace_event.h"
 #include "base/file_path.h"
+#include "base/file_util.h"
 #include "base/logging.h"
+#include "base/metrics/histogram.h"
 #include "base/scoped_native_library.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/win/scoped_com_initializer.h"
 #include "base/win/scoped_comptr.h"
-#include "ui/gfx/gl/gl_implementation.h"
-#include "ui/gfx/gl/gl_surface_egl.h"
+#include "third_party/libxml/chromium/libxml_utils.h"
+#include "ui/gl/gl_implementation.h"
+#include "ui/gl/gl_surface_egl.h"
 
 // ANGLE seems to require that main.h be included before any other ANGLE header.
 #include "libEGL/Display.h"
@@ -35,66 +38,113 @@ std::string VersionNumberToString(uint32 version_number) {
   return base::IntToString(hi) + "." + base::IntToString(low);
 }
 
-float GetAssessmentScore(IProvideWinSATResultsInfo* results,
-                         WINSAT_ASSESSMENT_TYPE type) {
-  base::win::ScopedComPtr<IProvideWinSATAssessmentInfo> subcomponent;
-  if (FAILED(results->GetAssessmentInfo(type, subcomponent.Receive())))
+float ReadXMLFloatValue(XmlReader* reader) {
+  std::string score_string;
+  if (!reader->ReadElementContent(&score_string))
     return 0.0;
 
-  float score = 0.0;
-  if (FAILED(subcomponent->get_Score(&score)))
-    score = 0.0;
-  return score;
+  double score;
+  if (!base::StringToDouble(score_string, &score))
+    return 0.0;
+
+  return static_cast<float>(score);
 }
 
 content::GpuPerformanceStats RetrieveGpuPerformanceStats() {
+  TRACE_EVENT0("gpu", "RetrieveGpuPerformanceStats");
+
+  // If the user re-runs the assessment without restarting, the COM API
+  // returns WINSAT_ASSESSMENT_STATE_NOT_AVAILABLE. Because of that and
+  // http://crbug.com/124325, read the assessment result files directly.
   content::GpuPerformanceStats stats;
 
-  base::win::ScopedCOMInitializer com_initializer;
-  if (!com_initializer.succeeded()) {
-    LOG(ERROR) << "CoInitializeEx() failed";
+  base::TimeTicks start_time = base::TimeTicks::Now();
+
+  // Get path to WinSAT results files.
+  wchar_t winsat_results_path[MAX_PATH];
+  DWORD size = ExpandEnvironmentStrings(
+      L"%WinDir%\\Performance\\WinSAT\\DataStore\\",
+      winsat_results_path, MAX_PATH);
+  if (size == 0 || size > MAX_PATH) {
+    LOG(ERROR) << "The path to the WinSAT results is too long: "
+               << size << " chars.";
     return stats;
   }
 
-  base::win::ScopedComPtr<IQueryRecentWinSATAssessment> assessment;
-  HRESULT hr = assessment.CreateInstance(__uuidof(CQueryWinSAT), NULL,
-                                         CLSCTX_INPROC_SERVER);
-  if (FAILED(hr)) {
-    LOG(ERROR) << "CoCreateInstance() failed";
+  // Find most recent formal assessment results.
+  file_util::FileEnumerator file_enumerator(
+      FilePath(winsat_results_path),
+      false,  // not recursive
+      file_util::FileEnumerator::FILES,
+      FILE_PATH_LITERAL("* * Formal.Assessment (*).WinSAT.xml"));
+
+  FilePath current_results;
+  for (FilePath results = file_enumerator.Next(); !results.empty();
+       results = file_enumerator.Next()) {
+    // The filenames start with the date and time as yyyy-mm-dd hh.mm.ss.xxx,
+    // so the greatest file lexicographically is also the most recent file.
+    if (FilePath::CompareLessIgnoreCase(current_results.value(),
+                                        results.value()))
+      current_results = results;
+  }
+
+  std::string current_results_string = current_results.MaybeAsASCII();
+  if (current_results_string.empty()) {
+    LOG(ERROR) << "Can't retrieve a valid WinSAT assessment.";
     return stats;
   }
 
-  base::win::ScopedComPtr<IProvideWinSATResultsInfo> results;
-  hr = assessment->get_Info(results.Receive());
-  if (FAILED(hr)) {
-    LOG(ERROR) << "get_Info() failed";
+  // Get relevant scores from results file. XML schema at:
+  // http://msdn.microsoft.com/en-us/library/windows/desktop/aa969210.aspx
+  XmlReader reader;
+  if (!reader.LoadFile(current_results_string)) {
+    LOG(ERROR) << "Could not open WinSAT results file.";
+    return stats;
+  }
+  // Descend into <WinSAT> root element.
+  if (!reader.SkipToElement() || !reader.Read()) {
+    LOG(ERROR) << "Could not read WinSAT results file.";
     return stats;
   }
 
-  WINSAT_ASSESSMENT_STATE state = WINSAT_ASSESSMENT_STATE_UNKNOWN;
-  hr = results->get_AssessmentState(&state);
-  if (FAILED(hr)) {
-    LOG(ERROR) << "get_AssessmentState() failed";
+  // Search for <WinSPR> element containing the results.
+  do {
+    if (reader.NodeName() == "WinSPR")
+      break;
+  } while (reader.Next());
+  // Descend into <WinSPR> element.
+  if (!reader.Read()) {
+    LOG(ERROR) << "Could not find WinSPR element in results file.";
     return stats;
   }
 
-  if (state != WINSAT_ASSESSMENT_STATE_VALID &&
-      state != WINSAT_ASSESSMENT_STATE_INCOHERENT_WITH_HARDWARE) {
-    LOG(ERROR) << "Can't retrieve a valid assessment";
-    return stats;
+  // Read scores.
+  for (int depth = reader.Depth(); reader.Depth() == depth; reader.Next()) {
+    std::string node_name = reader.NodeName();
+    if (node_name == "SystemScore")
+      stats.overall = ReadXMLFloatValue(&reader);
+    else if (node_name == "GraphicsScore")
+      stats.graphics = ReadXMLFloatValue(&reader);
+    else if (node_name == "GamingScore")
+      stats.gaming = ReadXMLFloatValue(&reader);
   }
 
-  hr = results->get_SystemRating(&stats.overall);
-  if (FAILED(hr))
-    LOG(ERROR) << "Get overall score failed";
-
-  stats.gaming = GetAssessmentScore(results, WINSAT_ASSESSMENT_D3D);
-  if (stats.gaming == 0.0)
-    LOG(ERROR) << "Get gaming score failed";
-
-  stats.graphics = GetAssessmentScore(results, WINSAT_ASSESSMENT_GRAPHICS);
+  if (stats.overall == 0.0)
+    LOG(ERROR) << "Could not read overall score from assessment results.";
   if (stats.graphics == 0.0)
-    LOG(ERROR) << "Get graphics score failed";
+    LOG(ERROR) << "Could not read graphics score from assessment results.";
+  if (stats.gaming == 0.0)
+    LOG(ERROR) << "Could not read gaming score from assessment results.";
+
+  UMA_HISTOGRAM_CUSTOM_COUNTS("GPU.WinSAT.OverallScore",
+                              stats.overall, 0.0, 50.0, 50);
+  UMA_HISTOGRAM_CUSTOM_COUNTS("GPU.WinSAT.GraphicsScore",
+                              stats.graphics, 0.0, 50.0, 50);
+  UMA_HISTOGRAM_CUSTOM_COUNTS("GPU.WinSAT.GamingScore",
+                              stats.gaming, 0.0, 50.0, 50);
+
+  UMA_HISTOGRAM_TIMES("GPU.WinSAT.ReadResultsFileTime",
+                      base::TimeTicks::Now() - start_time);
 
   return stats;
 }
@@ -104,9 +154,15 @@ content::GpuPerformanceStats RetrieveGpuPerformanceStats() {
 namespace gpu_info_collector {
 
 bool CollectGraphicsInfo(content::GPUInfo* gpu_info) {
+  TRACE_EVENT0("gpu", "CollectGraphicsInfo");
+
   DCHECK(gpu_info);
 
-  gpu_info->performance_stats = RetrieveGpuPerformanceStats();
+  content::GpuPerformanceStats stats = RetrieveGpuPerformanceStats();
+  UMA_HISTOGRAM_BOOLEAN(
+      "GPU.WinSAT.HasResults",
+      stats.overall != 0.0 && stats.graphics != 0.0 && stats.gaming != 0.0);
+  gpu_info->performance_stats = stats;
 
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kUseGL)) {
     std::string requested_implementation_name =
@@ -153,6 +209,8 @@ bool CollectGraphicsInfo(content::GPUInfo* gpu_info) {
 }
 
 bool CollectPreliminaryGraphicsInfo(content::GPUInfo* gpu_info) {
+  TRACE_EVENT0("gpu", "CollectPreliminaryGraphicsInfo");
+
   DCHECK(gpu_info);
 
   bool rt = true;
@@ -165,6 +223,8 @@ bool CollectPreliminaryGraphicsInfo(content::GPUInfo* gpu_info) {
 }
 
 bool CollectGraphicsInfoD3D(IDirect3D9* d3d, content::GPUInfo* gpu_info) {
+  TRACE_EVENT0("gpu", "CollectGraphicsInfoD3D");
+
   DCHECK(d3d);
   DCHECK(gpu_info);
 
@@ -195,6 +255,8 @@ bool CollectGraphicsInfoD3D(IDirect3D9* d3d, content::GPUInfo* gpu_info) {
 }
 
 bool CollectVideoCardInfo(content::GPUInfo* gpu_info) {
+  TRACE_EVENT0("gpu", "CollectVideoCardInfo");
+
   DCHECK(gpu_info);
 
   // nvd3d9wrap.dll is loaded into all processes when Optimus is enabled.
@@ -219,8 +281,8 @@ bool CollectVideoCardInfo(content::GPUInfo* gpu_info) {
     std::wstring device_id_string = id.substr(17, 4);
     base::HexStringToInt(WideToASCII(vendor_id_string), &vendor_id);
     base::HexStringToInt(WideToASCII(device_id_string), &device_id);
-    gpu_info->vendor_id = vendor_id;
-    gpu_info->device_id = device_id;
+    gpu_info->gpu.vendor_id = vendor_id;
+    gpu_info->gpu.device_id = device_id;
     // TODO(zmo): we only need to call CollectDriverInfoD3D() if we use ANGLE.
     return CollectDriverInfoD3D(id, gpu_info);
   }
@@ -229,6 +291,8 @@ bool CollectVideoCardInfo(content::GPUInfo* gpu_info) {
 
 bool CollectDriverInfoD3D(const std::wstring& device_id,
                           content::GPUInfo* gpu_info) {
+  TRACE_EVENT0("gpu", "CollectDriverInfoD3D");
+
   // create device info for the display device
   HDEVINFO device_info = SetupDiGetClassDevsW(
       NULL, device_id.c_str(), NULL,
@@ -302,6 +366,8 @@ bool CollectDriverInfoD3D(const std::wstring& device_id,
 }
 
 bool CollectDriverInfoGL(content::GPUInfo* gpu_info) {
+  TRACE_EVENT0("gpu", "CollectDriverInfoGL");
+
   DCHECK(gpu_info);
 
   std::string gl_version_string = gpu_info->gl_version_string;

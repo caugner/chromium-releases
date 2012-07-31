@@ -16,7 +16,7 @@
 #include "gpu/command_buffer/service/program_manager.h"
 #include "gpu/command_buffer/service/test_helper.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/gfx/gl/gl_implementation.h"
+#include "ui/gl/gl_implementation.h"
 
 using ::gfx::MockGLInterface;
 using ::testing::_;
@@ -64,123 +64,12 @@ void GLES2DecoderTestBase::SetUp() {
       true);   // bind generates resource
 }
 
-// Setup the expectations required for the inialiazation of the resources
-// used by the GL_CHROMIUM_copy_texture extension.
-void GLES2DecoderTestBase::AddExpectationsForCopyTextureCHROMIUM() {
-  static GLuint copy_texture_chromium_buffer_ids[] = {
-    kServiceCopyTextureChromiumVertexBufferId,
-    kServiceCopyTextureChromiumTextureBufferId
-  };
-  EXPECT_CALL(*gl_, GenBuffersARB(arraysize(copy_texture_chromium_buffer_ids),
-                                  _))
-      .WillOnce(SetArrayArgument<1>(copy_texture_chromium_buffer_ids,
-          copy_texture_chromium_buffer_ids + arraysize(
-              copy_texture_chromium_buffer_ids)))
-      .RetiresOnSaturation();
-
-  EXPECT_CALL(*gl_, BindBuffer(GL_ARRAY_BUFFER,
-                               kServiceCopyTextureChromiumVertexBufferId))
-      .Times(1)
-      .RetiresOnSaturation();
-
-  EXPECT_CALL(*gl_, BufferData(GL_ARRAY_BUFFER, 16 * sizeof(GLfloat), _,
-                               GL_STATIC_DRAW))
-      .Times(1)
-      .RetiresOnSaturation();
-
-  EXPECT_CALL(*gl_, BindBuffer(GL_ARRAY_BUFFER,
-                               kServiceCopyTextureChromiumTextureBufferId))
-      .Times(1)
-      .RetiresOnSaturation();
-
-  EXPECT_CALL(*gl_, BufferData(GL_ARRAY_BUFFER, 8 * sizeof(GLfloat), _,
-                               GL_STATIC_DRAW))
-      .Times(1)
-      .RetiresOnSaturation();
-
-  static GLuint copy_texture_chromium_fbo_ids[] = {
-    kServiceCopyTextureChromiumFBOId
-  };
-  EXPECT_CALL(*gl_, GenFramebuffersEXT(arraysize(copy_texture_chromium_fbo_ids),
-                                       _))
-      .WillOnce(SetArrayArgument<1>(copy_texture_chromium_fbo_ids,
-          copy_texture_chromium_fbo_ids + arraysize(
-              copy_texture_chromium_fbo_ids)))
-      .RetiresOnSaturation();
-
-  for (int shader = 0; shader < 5; ++shader) {
-    EXPECT_CALL(*gl_, CreateShader(
-        shader == 0 ? GL_VERTEX_SHADER : GL_FRAGMENT_SHADER))
-        .WillOnce(Return(kServiceCopyTextureChromiumShaderId + shader))
-        .RetiresOnSaturation();
-
-    EXPECT_CALL(*gl_, ShaderSource(kServiceCopyTextureChromiumShaderId + shader,
-                                   1, _, 0))
+void GLES2DecoderTestBase::AddExpectationsForVertexAttribManager() {
+  for (GLint ii = 0; ii < kNumVertexAttribs; ++ii) {
+    EXPECT_CALL(*gl_, VertexAttrib4f(ii, 0.0f, 0.0f, 0.0f, 1.0f))
         .Times(1)
-        .RetiresOnSaturation();
-
-    EXPECT_CALL(*gl_, CompileShader(
-        kServiceCopyTextureChromiumShaderId + shader))
-        .Times(1)
-        .RetiresOnSaturation();
-#ifndef NDEBUG
-    EXPECT_CALL(*gl_, GetShaderiv(kServiceCopyTextureChromiumShaderId + shader,
-                                  GL_COMPILE_STATUS, _))
-        .WillOnce(SetArgPointee<2>(GL_TRUE))
-        .RetiresOnSaturation();
-#endif
-  }
-
-  for (int program = 0; program < 4; ++program) {
-    EXPECT_CALL(*gl_, CreateProgram())
-        .WillOnce(Return(kServiceCopyTextureChromiumProgramId + program))
-        .RetiresOnSaturation();
-
-    EXPECT_CALL(*gl_, AttachShader(
-        kServiceCopyTextureChromiumProgramId + program,
-        kServiceCopyTextureChromiumShaderId))
-        .Times(1)
-        .RetiresOnSaturation();
-
-    EXPECT_CALL(*gl_, AttachShader(
-        kServiceCopyTextureChromiumProgramId + program,
-        kServiceCopyTextureChromiumShaderId + program + 1))
-        .Times(1)
-        .RetiresOnSaturation();
-
-    EXPECT_CALL(*gl_, BindAttribLocation(
-        kServiceCopyTextureChromiumProgramId + program, 0, _))
-        .Times(1)
-        .RetiresOnSaturation();
-
-    EXPECT_CALL(*gl_, BindAttribLocation(
-        kServiceCopyTextureChromiumProgramId + program, 1, _))
-        .Times(1)
-        .RetiresOnSaturation();
-
-    EXPECT_CALL(*gl_, LinkProgram(
-        kServiceCopyTextureChromiumProgramId + program))
-        .Times(1)
-        .RetiresOnSaturation();
-
-#ifndef NDEBUG
-    EXPECT_CALL(*gl_, GetProgramiv(
-        kServiceCopyTextureChromiumProgramId + program, GL_LINK_STATUS, _))
-        .WillOnce(SetArgPointee<2>(true))
-        .RetiresOnSaturation();
-#endif
-
-    EXPECT_CALL(*gl_, GetUniformLocation(
-        kServiceCopyTextureChromiumProgramId + program, _))
-        .WillOnce(Return(kServiceCopyTextureChromiumSamplerLocation))
         .RetiresOnSaturation();
   }
-
-  for (int shader = 0; shader < 5; ++shader)
-    EXPECT_CALL(*gl_,
-                DeleteShader(kServiceCopyTextureChromiumShaderId + shader))
-        .Times(1)
-        .RetiresOnSaturation();
 }
 
 void GLES2DecoderTestBase::InitDecoder(
@@ -203,7 +92,7 @@ void GLES2DecoderTestBase::InitDecoder(
 
   EXPECT_TRUE(group_->Initialize(DisallowedFeatures(), NULL));
 
-  AddExpectationsForCopyTextureCHROMIUM();
+  AddExpectationsForVertexAttribManager();
 
   EXPECT_CALL(*gl_, EnableVertexAttribArray(0))
       .Times(1)
@@ -287,21 +176,9 @@ void GLES2DecoderTestBase::InitDecoder(
       .Times(1)
       .RetiresOnSaturation();
 
-#if defined(OS_MACOSX)
-  EXPECT_CALL(*gl_, GetString(GL_VENDOR))
+  EXPECT_CALL(*gl_, Viewport(
+      kViewportX, kViewportY, kViewportWidth, kViewportHeight))
       .Times(1)
-      .RetiresOnSaturation();
-#endif
-
-  static GLint viewport_dims[] = {
-    kViewportX,
-    kViewportY,
-    kViewportWidth,
-    kViewportHeight,
-  };
-  EXPECT_CALL(*gl_, GetIntegerv(GL_VIEWPORT, _))
-      .WillOnce(SetArrayArgument<1>(viewport_dims,
-                                    viewport_dims + arraysize(viewport_dims)))
       .RetiresOnSaturation();
 
   static GLint max_viewport_dims[] = {
@@ -326,6 +203,8 @@ void GLES2DecoderTestBase::InitDecoder(
 
   context_ = new gfx::GLContextStub;
 
+  context_->MakeCurrent(surface_);
+
   // From <EGL/egl.h>.
   const int32 EGL_ALPHA_SIZE = 0x3021;
   const int32 EGL_DEPTH_SIZE = 0x3025;
@@ -343,6 +222,7 @@ void GLES2DecoderTestBase::InitDecoder(
   decoder_->Initialize(
       surface_, context_, false, surface_->GetSize(), DisallowedFeatures(),
       NULL, attribs);
+  decoder_->MakeCurrent();
   decoder_->set_engine(engine_.get());
 
   EXPECT_CALL(*gl_, GenBuffersARB(_, _))
@@ -377,24 +257,12 @@ void GLES2DecoderTestBase::TearDown() {
 
   // All Tests should have read all their GLErrors before getting here.
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
-  EXPECT_CALL(*gl_, DeleteFramebuffersEXT(1,
-      Pointee(kServiceCopyTextureChromiumFBOId)))
-      .Times(1)
-      .RetiresOnSaturation();
-
-  EXPECT_CALL(*gl_, DeleteProgram(_))
-      .Times(4)
-      .RetiresOnSaturation();
-
-  EXPECT_CALL(*gl_, DeleteBuffersARB(2, _))
-      .Times(1)
-      .RetiresOnSaturation();
 
   EXPECT_CALL(*gl_, DeleteBuffersARB(1, _))
       .Times(2)
       .RetiresOnSaturation();
 
-  decoder_->Destroy();
+  decoder_->Destroy(true);
   decoder_.reset();
   group_->Destroy(false);
   engine_.reset();
@@ -520,6 +388,31 @@ void GLES2DecoderTestBase::SetupExpectationsForFramebufferClearing(
       restore_scissor_test);
 }
 
+void GLES2DecoderTestBase::SetupExpectationsForRestoreClearState(
+    GLclampf restore_red,
+    GLclampf restore_green,
+    GLclampf restore_blue,
+    GLclampf restore_alpha,
+    GLuint restore_stencil,
+    GLclampf restore_depth,
+    bool restore_scissor_test) {
+  EXPECT_CALL(*gl_, ClearColor(
+      restore_red, restore_green, restore_blue, restore_alpha))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, ClearStencil(restore_stencil))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, ClearDepth(restore_depth))
+      .Times(1)
+      .RetiresOnSaturation();
+  if (restore_scissor_test) {
+    EXPECT_CALL(*gl_, Enable(GL_SCISSOR_TEST))
+        .Times(1)
+        .RetiresOnSaturation();
+  }
+}
+
 void GLES2DecoderTestBase::SetupExpectationsForFramebufferClearingMulti(
     GLuint read_framebuffer_service_id,
     GLuint draw_framebuffer_service_id,
@@ -576,21 +469,9 @@ void GLES2DecoderTestBase::SetupExpectationsForFramebufferClearingMulti(
   EXPECT_CALL(*gl_, Clear(clear_bits))
       .Times(1)
       .RetiresOnSaturation();
-  EXPECT_CALL(*gl_, ClearColor(
-      restore_red, restore_green, restore_blue, restore_alpha))
-      .Times(1)
-      .RetiresOnSaturation();
-  EXPECT_CALL(*gl_, ClearStencil(restore_stencil))
-      .Times(1)
-      .RetiresOnSaturation();
-  EXPECT_CALL(*gl_, ClearDepth(restore_depth))
-      .Times(1)
-      .RetiresOnSaturation();
-  if (restore_scissor_test) {
-    EXPECT_CALL(*gl_, Enable(GL_SCISSOR_TEST))
-        .Times(1)
-        .RetiresOnSaturation();
-  }
+  SetupExpectationsForRestoreClearState(
+      restore_red, restore_green, restore_blue, restore_alpha,
+      restore_stencil, restore_depth, restore_scissor_test);
   if (target == GL_READ_FRAMEBUFFER_EXT) {
     EXPECT_CALL(*gl_, BindFramebufferEXT(
         GL_READ_FRAMEBUFFER_EXT, read_framebuffer_service_id))
@@ -851,6 +732,29 @@ void GLES2DecoderTestBase::DoTexImage2D(
   TexImage2D cmd;
   cmd.Init(target, level, internal_format, width, height, border, format,
            type, shared_memory_id, shared_memory_offset);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+}
+
+void GLES2DecoderTestBase::DoCompressedTexImage2D(
+    GLenum target, GLint level, GLenum format,
+    GLsizei width, GLsizei height, GLint border,
+    GLsizei size, uint32 bucket_id) {
+  EXPECT_CALL(*gl_, GetError())
+      .WillOnce(Return(GL_NO_ERROR))
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, CompressedTexImage2D(
+      target, level, format, width, height, border, size, _))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, GetError())
+      .WillOnce(Return(GL_NO_ERROR))
+      .RetiresOnSaturation();
+  CommonDecoder::Bucket* bucket = decoder_->CreateBucket(bucket_id);
+  bucket->SetSize(size);
+  CompressedTexImage2DBucket cmd;
+  cmd.Init(
+      target, level, format, width, height, border,
+      bucket_id);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
 }
 
@@ -1157,93 +1061,9 @@ void GLES2DecoderTestBase::SetupShader(
                 AttachShader(program_service_id, fragment_shader_service_id))
         .Times(1)
         .RetiresOnSaturation();
-    EXPECT_CALL(*gl_, LinkProgram(program_service_id))
-        .Times(1)
-        .RetiresOnSaturation();
-    EXPECT_CALL(*gl_, GetProgramiv(program_service_id, GL_LINK_STATUS, _))
-        .WillOnce(SetArgumentPointee<2>(GL_TRUE))
-        .RetiresOnSaturation();
-    EXPECT_CALL(*gl_,
-        GetProgramiv(program_service_id, GL_INFO_LOG_LENGTH, _))
-        .WillOnce(SetArgumentPointee<2>(0))
-        .RetiresOnSaturation();
-    EXPECT_CALL(*gl_,
-        GetProgramiv(program_service_id, GL_ACTIVE_ATTRIBUTES, _))
-        .WillOnce(SetArgumentPointee<2>(num_attribs))
-        .RetiresOnSaturation();
-    size_t max_attrib_len = 0;
-    for (size_t ii = 0; ii < num_attribs; ++ii) {
-      size_t len = strlen(attribs[ii].name) + 1;
-      max_attrib_len = std::max(max_attrib_len, len);
-    }
-    EXPECT_CALL(*gl_,
-        GetProgramiv(program_service_id, GL_ACTIVE_ATTRIBUTE_MAX_LENGTH, _))
-        .WillOnce(SetArgumentPointee<2>(max_attrib_len))
-        .RetiresOnSaturation();
-    for (size_t ii = 0; ii < num_attribs; ++ii) {
-      const AttribInfo& info = attribs[ii];
-      EXPECT_CALL(*gl_,
-          GetActiveAttrib(program_service_id, ii, max_attrib_len, _, _, _, _))
-          .WillOnce(DoAll(
-              SetArgumentPointee<3>(strlen(info.name)),
-              SetArgumentPointee<4>(info.size),
-              SetArgumentPointee<5>(info.type),
-              SetArrayArgument<6>(info.name,
-                                  info.name + strlen(info.name) + 1)))
-          .RetiresOnSaturation();
-      if (!ProgramManager::IsInvalidPrefix(info.name, strlen(info.name))) {
-        EXPECT_CALL(*gl_, GetAttribLocation(program_service_id,
-                                            StrEq(info.name)))
-            .WillOnce(Return(info.location))
-            .RetiresOnSaturation();
-      }
-    }
-    EXPECT_CALL(*gl_,
-        GetProgramiv(program_service_id, GL_ACTIVE_UNIFORMS, _))
-        .WillOnce(SetArgumentPointee<2>(num_uniforms))
-        .RetiresOnSaturation();
-    size_t max_uniform_len = 0;
-    for (size_t ii = 0; ii < num_uniforms; ++ii) {
-      size_t len = strlen(uniforms[ii].name) + 1;
-      max_uniform_len = std::max(max_uniform_len, len);
-    }
-    EXPECT_CALL(*gl_,
-        GetProgramiv(program_service_id, GL_ACTIVE_UNIFORM_MAX_LENGTH, _))
-        .WillOnce(SetArgumentPointee<2>(max_uniform_len))
-        .RetiresOnSaturation();
-    for (size_t ii = 0; ii < num_uniforms; ++ii) {
-      const UniformInfo& info = uniforms[ii];
-      EXPECT_CALL(*gl_,
-          GetActiveUniform(program_service_id, ii, max_uniform_len, _, _, _, _))
-          .WillOnce(DoAll(
-              SetArgumentPointee<3>(strlen(info.name)),
-              SetArgumentPointee<4>(info.size),
-              SetArgumentPointee<5>(info.type),
-              SetArrayArgument<6>(info.name,
-                                  info.name + strlen(info.name) + 1)))
-          .RetiresOnSaturation();
-      if (!ProgramManager::IsInvalidPrefix(info.name, strlen(info.name))) {
-        EXPECT_CALL(*gl_, GetUniformLocation(program_service_id,
-                                             StrEq(info.name)))
-            .WillOnce(Return(info.real_location))
-            .RetiresOnSaturation();
-        if (info.size > 1) {
-          std::string base_name = info.name;
-          size_t array_pos = base_name.rfind("[0]");
-          if (base_name.size() > 3 && array_pos == base_name.size() - 3) {
-            base_name = base_name.substr(0, base_name.size() - 3);
-          }
-          for (GLsizei jj = 1; jj < info.size; ++jj) {
-            std::string element_name(
-                std::string(base_name) + "[" + base::IntToString(jj) + "]");
-            EXPECT_CALL(*gl_, GetUniformLocation(program_service_id,
-                                                 StrEq(element_name)))
-                .WillOnce(Return(info.real_location + jj * 2))
-                .RetiresOnSaturation();
-          }
-        }
-      }
-    }
+    TestHelper::SetupShader(
+        gl_.get(), attribs, num_attribs, uniforms, num_uniforms,
+        program_service_id);
   }
 
   DoCreateShader(
@@ -1269,83 +1089,6 @@ void GLES2DecoderTestBase::SetupShader(
 
   // Assume the next command will be UseProgram.
   SetupExpectationsForClearingUniforms(uniforms, num_uniforms);
-}
-
-void GLES2DecoderTestBase::SetupExpectationsForClearingUniforms(
-    UniformInfo* uniforms, size_t num_uniforms) {
-  for (size_t ii = 0; ii < num_uniforms; ++ii) {
-    const UniformInfo& info = uniforms[ii];
-    switch (info.type) {
-    case GL_FLOAT:
-      EXPECT_CALL(*gl_, Uniform1fv(info.real_location, info.size, _))
-          .Times(1)
-          .RetiresOnSaturation();
-      break;
-    case GL_FLOAT_VEC2:
-      EXPECT_CALL(*gl_, Uniform2fv(info.real_location, info.size, _))
-          .Times(1)
-          .RetiresOnSaturation();
-      break;
-    case GL_FLOAT_VEC3:
-      EXPECT_CALL(*gl_, Uniform3fv(info.real_location, info.size, _))
-          .Times(1)
-          .RetiresOnSaturation();
-      break;
-    case GL_FLOAT_VEC4:
-      EXPECT_CALL(*gl_, Uniform4fv(info.real_location, info.size, _))
-          .Times(1)
-          .RetiresOnSaturation();
-      break;
-    case GL_INT:
-    case GL_BOOL:
-    case GL_SAMPLER_2D:
-    case GL_SAMPLER_CUBE:
-    case GL_SAMPLER_EXTERNAL_OES:
-      EXPECT_CALL(*gl_, Uniform1iv(info.real_location, info.size, _))
-          .Times(1)
-          .RetiresOnSaturation();
-      break;
-    case GL_INT_VEC2:
-    case GL_BOOL_VEC2:
-      EXPECT_CALL(*gl_, Uniform2iv(info.real_location, info.size, _))
-          .Times(1)
-          .RetiresOnSaturation();
-      break;
-    case GL_INT_VEC3:
-    case GL_BOOL_VEC3:
-      EXPECT_CALL(*gl_, Uniform3iv(info.real_location, info.size, _))
-          .Times(1)
-          .RetiresOnSaturation();
-      break;
-    case GL_INT_VEC4:
-    case GL_BOOL_VEC4:
-      EXPECT_CALL(*gl_, Uniform4iv(info.real_location, info.size, _))
-          .Times(1)
-          .RetiresOnSaturation();
-      break;
-    case GL_FLOAT_MAT2:
-      EXPECT_CALL(*gl_, UniformMatrix2fv(
-          info.real_location, info.size, false, _))
-          .Times(1)
-          .RetiresOnSaturation();
-      break;
-    case GL_FLOAT_MAT3:
-      EXPECT_CALL(*gl_, UniformMatrix3fv(
-          info.real_location, info.size, false, _))
-          .Times(1)
-          .RetiresOnSaturation();
-      break;
-    case GL_FLOAT_MAT4:
-      EXPECT_CALL(*gl_, UniformMatrix4fv(
-          info.real_location, info.size, false, _))
-          .Times(1)
-          .RetiresOnSaturation();
-      break;
-    default:
-      NOTREACHED();
-      break;
-    }
-  }
 }
 
 void GLES2DecoderTestBase::DoEnableVertexAttribArray(GLint index) {
@@ -1460,10 +1203,6 @@ void GLES2DecoderTestBase::AddExpectationsForSimulatedAttrib0WithError(
         .Times(1)
         .RetiresOnSaturation();
     EXPECT_CALL(*gl_, BindBuffer(GL_ARRAY_BUFFER, buffer_id))
-        .Times(1)
-        .RetiresOnSaturation();
-
-    EXPECT_CALL(*gl_, DisableVertexAttribArray(0))
         .Times(1)
         .RetiresOnSaturation();
   }

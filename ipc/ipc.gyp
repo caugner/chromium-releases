@@ -6,30 +6,28 @@
   'variables': {
     'chromium_code': 1,
   },
-  'target_defaults': {
-    'sources/': [
-      ['exclude', '/win/'],
-      ['exclude', '_(posix|win)(_unittest)?\\.(cc|mm?)$'],
-      ['exclude', '/win_[^/]*\\.cc$'],
-    ],
-    'conditions': [
-      ['os_posix == 1 and OS != "mac"', {'sources/': [
-        ['include', '_posix(_unittest)?\\.cc$'],
-      ]}],
-      ['OS=="mac"', {'sources/': [
-        ['include', '_posix(_unittest)?\\.(cc|mm?)$'],
-      ]}],
-      ['OS=="win"', {'sources/': [
-        ['include', '_win(_unittest)?\\.cc$'],
-        ['include', '/win/'],
-        ['include', '/win_[^/]*\\.cc$'],
-      ]}],
-    ],
-  },
   'includes': [
     'ipc.gypi',
   ],
   'targets': [
+    {
+      'target_name': 'ipc',
+      'type': '<(component)',
+      'variables': {
+        'ipc_target': 1,
+      },
+      'dependencies': [
+        '../base/base.gyp:base',
+        '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
+      ],
+      # TODO(gregoryd): direct_dependent_settings should be shared with the
+      # 64-bit target, but it doesn't work due to a bug in gyp
+      'direct_dependent_settings': {
+        'include_dirs': [
+          '..',
+        ],
+      },
+    },
     {
       'target_name': 'ipc_tests',
       'type': '<(gtest_target_type)',
@@ -63,7 +61,7 @@
             '../build/linux/system.gyp:gtk',
           ],
         }],
-        ['OS=="android" and "<(gtest_target_type)"=="shared_library"', {
+        ['OS == "android" and gtest_target_type == "shared_library"', {
           'dependencies': [
             '../testing/android/native_test.gyp:native_test_native_code',
           ],
@@ -93,46 +91,51 @@
     },
   ],
   'conditions': [
-    # Special target to wrap a <(gtest_target_type)==shared_library
+    ['OS=="win"', {
+      'targets': [
+        {
+          'target_name': 'ipc_win64',
+          'type': '<(component)',
+          'variables': {
+            'ipc_target': 1,
+          },
+          'dependencies': [
+            '../base/base.gyp:base_nacl_win64',
+            '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations_win64',
+          ],
+          # TODO(gregoryd): direct_dependent_settings should be shared with the
+          # 32-bit target, but it doesn't work due to a bug in gyp
+          'direct_dependent_settings': {
+            'include_dirs': [
+              '..',
+            ],
+          },
+          'configurations': {
+            'Common_Base': {
+              'msvs_target_platform': 'x64',
+            },
+          },
+        },
+      ],
+    }],
+    # Special target to wrap a gtest_target_type==shared_library
     # ipc_tests into an android apk for execution.
     # See base.gyp for TODO(jrg)s about this strategy.
-    ['OS=="android" and "<(gtest_target_type)"=="shared_library"', {
+    ['OS == "android" and gtest_target_type == "shared_library"', {
       'targets': [
         {
           'target_name': 'ipc_tests_apk',
           'type': 'none',
           'dependencies': [
+            '../base/base.gyp:base_java',
             'ipc_tests',
           ],
-          'actions': [
-            {
-              # Generate apk files (including source and antfile) from
-              # a template, and builds them.
-              'action_name': 'generate_and_build',
-              'inputs': [
-                '../testing/android/generate_native_test.py',
-                '<(PRODUCT_DIR)/lib.target/libipc_tests.so',
-                '<(PRODUCT_DIR)/chromium_base.jar'
-              ],
-              'outputs': [
-                '<(PRODUCT_DIR)/ChromeNativeTests_ipc_tests-debug.apk',
-              ],
-              'action': [ 
-                '../testing/android/generate_native_test.py',
-                '--native_library',
-                '<(PRODUCT_DIR)/lib.target/libipc_tests.so',
-                # TODO(jrg): find a better way to specify jar
-                # dependencies.  Hard coding seems fragile.
-                '--jar',
-                '<(PRODUCT_DIR)/chromium_base.jar',
-                '--output',
-                '<(PRODUCT_DIR)/ipc_tests_apk',
-                '--ant-args', 
-                '-DPRODUCT_DIR=<(PRODUCT_DIR)',
-                '--ant-compile'
-              ],
-            },
-          ],
+          'variables': {
+            'test_suite_name': 'ipc_tests',
+            'input_shlib_path': '<(SHARED_LIB_DIR)/<(SHARED_LIB_PREFIX)ipc_tests<(SHARED_LIB_SUFFIX)',
+            'input_jars_paths': ['<(PRODUCT_DIR)/lib.java/chromium_base.jar',],
+          },
+          'includes': [ '../build/apk_test.gypi' ],
         }],
     }],
   ],

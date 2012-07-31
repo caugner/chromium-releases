@@ -13,9 +13,9 @@
 #include "chrome/browser/ui/gtk/avatar_menu_item_gtk.h"
 #include "chrome/browser/ui/gtk/browser_toolbar_gtk.h"
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
+#include "chrome/browser/ui/gtk/event_utils.h"
 #include "chrome/browser/ui/gtk/gtk_chrome_link_button.h"
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
-#include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/location_bar_view_gtk.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_source.h"
@@ -54,8 +54,9 @@ AvatarMenuBubbleGtk::AvatarMenuBubbleGtk(Browser* browser,
                             rect,
                             contents_,
                             arrow,
-                            true,  // |match_system_theme|
-                            true,  // |grab_input|
+                            BubbleGtk::MATCH_SYSTEM_THEME |
+                                BubbleGtk::POPUP_WINDOW |
+                                BubbleGtk::GRAB_INPUT,
                             theme_service_,
                             this);  // |delegate|
   g_signal_connect(contents_, "destroy",
@@ -78,6 +79,7 @@ void AvatarMenuBubbleGtk::OnDestroy(GtkWidget* widget) {
 
 void AvatarMenuBubbleGtk::BubbleClosing(BubbleGtk* bubble,
                                         bool closed_by_escape) {
+  bubble_ = NULL;
 }
 
 void AvatarMenuBubbleGtk::OnAvatarMenuModelChanged(
@@ -174,6 +176,8 @@ void AvatarMenuBubbleGtk::InitContents() {
 }
 
 void AvatarMenuBubbleGtk::CloseBubble() {
-  bubble_->Close();
-  bubble_ = NULL;
+  if (bubble_) {
+    bubble_->Close();
+    bubble_ = NULL;
+  }
 }

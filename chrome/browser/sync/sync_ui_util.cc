@@ -27,10 +27,10 @@
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
+#include "sync/internal_api/public/sessions/sync_session_snapshot.h"
+#include "sync/internal_api/public/syncable/model_type.h"
 #include "sync/protocol/proto_enum_conversions.h"
 #include "sync/protocol/sync_protocol_error.h"
-#include "sync/sessions/session_state.h"
-#include "sync/syncable/model_type.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -215,7 +215,7 @@ MessageType GetStatusInfo(ProfileSyncService* service,
     // The order or priority is going to be: 1. Unrecoverable errors.
     // 2. Auth errors. 3. Protocol errors. 4. Passphrase errors.
 
-    if (service->unrecoverable_error_detected()) {
+    if (service->HasUnrecoverableError()) {
       if (status_label) {
         status_label->assign(l10n_util::GetStringFUTF16(
             IDS_SYNC_STATUS_UNRECOVERABLE_ERROR,
@@ -297,7 +297,7 @@ MessageType GetStatusInfo(ProfileSyncService* service,
         }
         result_type = SYNC_ERROR;
       }
-    } else if (service->unrecoverable_error_detected()) {
+    } else if (service->HasUnrecoverableError()) {
       result_type = SYNC_ERROR;
       ProfileSyncService::Status status(service->QueryDetailedSyncStatus());
       if (ShouldShowActionOnUI(status.sync_protocol_error)) {
@@ -389,6 +389,19 @@ void GetStatusLabelsForSyncGlobalError(ProfileSyncService* service,
   if (!service->HasSyncSetupCompleted())
     return;
 
+  MessageType status = GetStatus(service, signin);
+  if (status == SYNC_ERROR) {
+    const AuthError& auth_error = service->GetAuthError();
+    if (auth_error.state() != AuthError::NONE) {
+      GetStatusLabelsForAuthError(auth_error, *service, NULL, NULL,
+          menu_label, bubble_message, bubble_accept_label);
+      // If we have an actionable auth error, display it.
+      if (!menu_label->empty())
+        return;
+    }
+  }
+
+  // No actionable auth error - display the passphrase error.
   if (service->IsPassphraseRequired() &&
       service->IsPassphraseRequiredForDecryption()) {
     // This is not the first machine so ask user to enter passphrase.
@@ -400,16 +413,6 @@ void GetStatusLabelsForSyncGlobalError(ProfileSyncService* service,
     *bubble_accept_label = l10n_util::GetStringUTF16(
         IDS_SYNC_PASSPHRASE_ERROR_BUBBLE_VIEW_ACCEPT);
     return;
-  }
-
-  MessageType status = GetStatus(service, signin);
-  if (status != SYNC_ERROR)
-    return;
-
-  const AuthError& auth_error = service->GetAuthError();
-  if (auth_error.state() != AuthError::NONE) {
-    GetStatusLabelsForAuthError(auth_error, *service, NULL, NULL,
-        menu_label, bubble_message, bubble_accept_label);
   }
 }
 
@@ -516,8 +519,7 @@ void ConstructAboutInformation(ProfileSyncService* service,
     // with the last snapshot emitted by the syncer.  Keep in mind, though, that
     // not all events that update these values will ping the UI thread, so you
     // might not see all intermediate values.
-    sync_api::SyncManager::Status full_status(
-        service->QueryDetailedSyncStatus());
+    sync_api::SyncStatus full_status(service->QueryDetailedSyncStatus());
 
     // This is a cache of the last snapshot of type SYNC_CYCLE_ENDED where
     // !snapshot.has_more_to_sync().  In other words, it's the last in this
@@ -551,7 +553,7 @@ void ConstructAboutInformation(ProfileSyncService* service,
         user_state, "Username",
         service->signin() ? service->signin()->GetAuthenticatedUsername() : "");
     sync_ui_util::AddBoolSyncDetail(
-        user_state, "Sync Token Available", service->AreCredentialsAvailable());
+        user_state, "Sync Token Available", service->IsSyncTokenAvailable());
 
     ListValue* local_state = AddSyncDetailsSection(details, "Local State");
     sync_ui_util::AddStringSyncDetails(local_state, "Last Synced",
@@ -612,15 +614,11 @@ void ConstructAboutInformation(ProfileSyncService* service,
         browser_sync::GetUpdatesSourceString(
         snapshot.source().updates_source));
     sync_ui_util::AddStringSyncDetails(
-        cycles, "Download Updates",
+        cycles, "Download Step Result",
         GetSyncerErrorString(snapshot.errors().last_download_updates_result));
     sync_ui_util::AddStringSyncDetails(
-        cycles, "Post Commit",
-        GetSyncerErrorString(snapshot.errors().last_post_commit_result));
-    sync_ui_util::AddStringSyncDetails(
-        cycles, "Process Commit Response",
-        GetSyncerErrorString(
-            snapshot.errors().last_process_commit_response_result));
+        cycles, "Commit Step Result",
+        GetSyncerErrorString(snapshot.errors().commit_result));
 
     // Strictly increasing counters.
     ListValue* counters = AddSyncDetailsSection(details, "Running Totals");
@@ -658,6 +656,10 @@ void ConstructAboutInformation(ProfileSyncService* service,
         full_status.reflected_updates_received);
 
     sync_ui_util::AddIntSyncDetail(
+        counters, "Successful Commits",
+        full_status.num_commits_total);
+
+    sync_ui_util::AddIntSyncDetail(
         counters, "Conflict Resolved: Client Wins",
         full_status.num_local_overwrites_total);
     sync_ui_util::AddIntSyncDetail(
@@ -667,9 +669,6 @@ void ConstructAboutInformation(ProfileSyncService* service,
     // This is counted when we prepare the commit message.
     ListValue* transient_cycle = AddSyncDetailsSection(
         details, "Transient Counters (this cycle)");
-    sync_ui_util::AddIntSyncDetail(transient_cycle,
-                                   "Unsynced Count (before commit)",
-                                   full_status.unsynced_count);
 
     // These are counted during the ApplyUpdates step.
     sync_ui_util::AddIntSyncDetail(
@@ -709,6 +708,11 @@ void ConstructAboutInformation(ProfileSyncService* service,
     sync_ui_util::AddIntSyncDetail(transient_session, "Entries",
                                    snapshot.num_entries());
 
+    if (!full_status.throttled_types.Empty()) {
+      strings->Set("throttled_data_types", base::Value::CreateStringValue(
+              ModelTypeSetToString(full_status.throttled_types)));
+    }
+
     // Now set the actionable errors.
     if ((full_status.sync_protocol_error.error_type !=
          browser_sync::UNKNOWN_ERROR) &&
@@ -742,7 +746,7 @@ void ConstructAboutInformation(ProfileSyncService* service,
           failed_datatypes_handler.GetErrorString());
     }
 
-    if (service->unrecoverable_error_detected()) {
+    if (service->HasUnrecoverableError()) {
       strings->Set("unrecoverable_error_detected",
                    new base::FundamentalValue(true));
       tracked_objects::Location loc(service->unrecoverable_error_location());

@@ -22,8 +22,9 @@ class HostPortAllocatorSession
  public:
   HostPortAllocatorSession(
       cricket::HttpPortAllocatorBase* allocator,
-      const std::string& channel_name,
       int component,
+      const std::string& ice_username_fragment,
+      const std::string& ice_password,
       const std::vector<talk_base::SocketAddress>& stun_hosts,
       const std::vector<std::string>& relay_hosts,
       const std::string& relay,
@@ -48,14 +49,16 @@ class HostPortAllocatorSession
 
 HostPortAllocatorSession::HostPortAllocatorSession(
     cricket::HttpPortAllocatorBase* allocator,
-    const std::string& channel_name,
     int component,
+    const std::string& ice_username_fragment,
+    const std::string& ice_password,
     const std::vector<talk_base::SocketAddress>& stun_hosts,
     const std::vector<std::string>& relay_hosts,
     const std::string& relay,
     const scoped_refptr<net::URLRequestContextGetter>& url_context)
     : HttpPortAllocatorSessionBase(
-        allocator, channel_name, component, stun_hosts, relay_hosts, relay, ""),
+        allocator, component, ice_username_fragment, ice_password,
+        stun_hosts, relay_hosts, relay, ""),
       url_context_(url_context) {
 }
 
@@ -87,7 +90,7 @@ void HostPortAllocatorSession::SendSessionRequest(const std::string& host,
   url_fetcher->SetRequestContext(url_context_);
   url_fetcher->SetHeader("X-Talk-Google-Relay-Auth", relay_token());
   url_fetcher->SetHeader("X-Google-Relay-Auth", relay_token());
-  url_fetcher->SetHeader("X-Stream-Type", channel_name());
+  url_fetcher->SetHeader("X-Stream-Type", "chromoting");
   url_fetcher->Start(base::Bind(&HostPortAllocatorSession::OnSessionRequestDone,
                                 base::Unretained(this), url_fetcher.get()));
   url_fetchers_.insert(url_fetcher.release());
@@ -128,7 +131,11 @@ scoped_ptr<HostPortAllocator> HostPortAllocator::Create(
   // We always use PseudoTcp to provide a reliable channel. It
   // provides poor performance when combined with TCP-based transport,
   // so we have to disable TCP ports.
-  int flags = cricket::PORTALLOCATOR_DISABLE_TCP;
+  // ENABLE_SHARED_UFRAG flag is
+  // specified so that the same username fragment is shared between
+  // all candidates for this channel.
+  int flags = cricket::PORTALLOCATOR_DISABLE_TCP |
+      cricket::PORTALLOCATOR_ENABLE_SHARED_UFRAG;
   if (network_settings.nat_traversal_mode !=
       NetworkSettings::NAT_TRAVERSAL_ENABLED) {
     flags |= cricket::PORTALLOCATOR_DISABLE_STUN |
@@ -154,12 +161,13 @@ HostPortAllocator::HostPortAllocator(
 HostPortAllocator::~HostPortAllocator() {
 }
 
-cricket::PortAllocatorSession* HostPortAllocator::CreateSession(
-    const std::string& channel_name,
-    int component) {
+cricket::PortAllocatorSession* HostPortAllocator::CreateSessionInternal(
+    int component,
+    const std::string& ice_username_fragment,
+    const std::string& ice_password) {
   return new HostPortAllocatorSession(
-      this, channel_name, component, stun_hosts(),
-      relay_hosts(), relay_token(), url_context_);
+      this, component, ice_username_fragment, ice_password,
+      stun_hosts(), relay_hosts(), relay_token(), url_context_);
 }
 
 }  // namespace remoting

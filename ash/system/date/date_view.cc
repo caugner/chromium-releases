@@ -7,7 +7,9 @@
 #include "ash/shell.h"
 #include "ash/system/tray/system_tray_delegate.h"
 #include "ash/system/tray/tray_constants.h"
+#include "base/i18n/time_formatting.h"
 #include "base/time.h"
+#include "base/utf_string_conversions.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/layout/box_layout.h"
 #include "ui/views/widget/widget.h"
@@ -93,9 +95,7 @@ void BaseDateTimeView::SetTimer(const base::Time& now) {
 }
 
 void BaseDateTimeView::ChildPreferredSizeChanged(views::View* child) {
-  views::View::PreferredSizeChanged();
-  if (GetWidget())
-    GetWidget()->SetSize(GetWidget()->GetContentsView()->GetPreferredSize());
+  PreferredSizeChanged();
 }
 
 void BaseDateTimeView::OnLocaleChanged() {
@@ -107,7 +107,10 @@ DateView::DateView() : actionable_(false) {
       new views::BoxLayout(
           views::BoxLayout::kVertical, 0, 0, kTrayPopupTextSpacingVertical));
   date_label_ = CreateLabel();
+  date_label_->SetFont(date_label_->font().DeriveFont(0, gfx::Font::BOLD));
   day_of_week_label_ = CreateLabel();
+  date_label_->SetEnabledColor(kHeaderTextColorNormal);
+  day_of_week_label_->SetEnabledColor(kHeaderTextColorNormal);
   UpdateTextInternal(base::Time::Now());
   AddChildView(date_label_);
   AddChildView(day_of_week_label_);
@@ -135,15 +138,35 @@ bool DateView::PerformAction(const views::Event& event) {
   return true;
 }
 
+void DateView::OnMouseEntered(const views::MouseEvent& event) {
+  if (!actionable_)
+    return;
+  date_label_->SetEnabledColor(kHeaderTextColorHover);
+  day_of_week_label_->SetEnabledColor(kHeaderTextColorHover);
+  SchedulePaint();
+}
+
+void DateView::OnMouseExited(const views::MouseEvent& event) {
+  if (!actionable_)
+    return;
+  date_label_->SetEnabledColor(kHeaderTextColorNormal);
+  day_of_week_label_->SetEnabledColor(kHeaderTextColorNormal);
+  SchedulePaint();
+}
+
 TimeView::TimeView()
     : hour_type_(
           ash::Shell::GetInstance()->tray_delegate()->GetHourClockType()) {
   SetLayoutManager(
       new views::BoxLayout(views::BoxLayout::kHorizontal, 0, 0, 0));
-  label_ = CreateLabel();
+  label_.reset(CreateLabel());
+  label_hour_.reset(CreateLabel());
+  label_minute_.reset(CreateLabel());
+  label_->set_owned_by_client();
+  label_hour_->set_owned_by_client();
+  label_minute_->set_owned_by_client();
   UpdateTextInternal(base::Time::Now());
-  AddChildView(label_);
-  set_focusable(true);
+  AddChildView(label_.get());
 }
 
 TimeView::~TimeView() {
@@ -155,16 +178,57 @@ void TimeView::UpdateTimeFormat() {
 }
 
 void TimeView::UpdateTextInternal(const base::Time& now) {
-  label_->SetText(
-      base::TimeFormatTimeOfDayWithHourClockType(
-          now, hour_type_, base::kDropAmPm));
+  string16 current_time = base::TimeFormatTimeOfDayWithHourClockType(
+      now, hour_type_, base::kDropAmPm);
+  label_->SetText(current_time);
   label_->SetTooltipText(base::TimeFormatFriendlyDate(now));
+
+  // Calculate vertical clock layout labels.
+  size_t colon_pos = current_time.find(ASCIIToUTF16(":"));
+  string16 hour = current_time.substr(0, colon_pos);
+  string16 minute = current_time.substr(colon_pos + 1);
+  if (hour.length() == 2) {
+    label_hour_->SetText(hour);
+  } else {
+    label_hour_->SetText(hour_type_ == base::k24HourClock ?
+        ASCIIToUTF16("0") + hour : hour + ASCIIToUTF16(":"));
+  }
+  label_minute_->SetText(minute);
 }
 
 bool TimeView::PerformAction(const views::Event& event) {
   return false;
 }
 
+bool TimeView::OnMousePressed(const views::MouseEvent& event) {
+  // Let the event fall through.
+  return false;
+}
+
+void TimeView::UpdateClockLayout(TrayDate::ClockLayout clock_layout){
+  SetBorder(clock_layout);
+  if (clock_layout == TrayDate::HORIZONTAL_CLOCK) {
+    RemoveChildView(label_hour_.get());
+    RemoveChildView(label_minute_.get());
+    SetLayoutManager(
+        new views::BoxLayout(views::BoxLayout::kHorizontal, 0, 0, 0));
+    AddChildView(label_.get());
+  } else {
+    RemoveChildView(label_.get());
+    SetLayoutManager(
+        new views::BoxLayout(views::BoxLayout::kVertical, 0, 0, 0));
+    AddChildView(label_hour_.get());
+    AddChildView(label_minute_.get());
+  }
+  set_focusable(true);
+}
+
+void TimeView::SetBorder(TrayDate::ClockLayout clock_layout) {
+  if (clock_layout == TrayDate::HORIZONTAL_CLOCK)
+    set_border(views::Border::CreateEmptyBorder(0, 10, 0, 7));
+  else
+    set_border(views::Border::CreateEmptyBorder(2, 12, 2, 2));
+}
 
 }  // namespace tray
 }  // namespace internal

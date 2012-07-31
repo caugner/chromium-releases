@@ -38,6 +38,7 @@ cr.define('options.network', function() {
    */
   Constants.NETWORK_ORDER = ['ethernet',
                              'wifi',
+                             'wimax',
                              'cellular',
                              'vpn',
                              'airplaneMode',
@@ -49,6 +50,7 @@ cr.define('options.network', function() {
   var categoryMap = {
     'cellular': Constants.TYPE_CELLULAR,
     'ethernet': Constants.TYPE_ETHERNET,
+    'wimax': Constants.TYPE_WIMAX,
     'wifi': Constants.TYPE_WIFI,
     'vpn': Constants.TYPE_VPN
   };
@@ -73,6 +75,20 @@ cr.define('options.network', function() {
    * @private
    */
   var cellularEnabled_ = false;
+
+  /**
+   * Indicates if WiMAX networks are available.
+   * @type {boolean}
+   * @private
+   */
+  var wimaxAvailable_ = false;
+
+  /**
+   * Indicates if WiMAX networks are enabled.
+   * @type {boolean}
+   * @private
+   */
+  var wimaxEnabled_ = false;
 
   /**
    * Indicates if mobile data roaming is enabled.
@@ -225,7 +241,7 @@ cr.define('options.network', function() {
       var categoryLabel = this.ownerDocument.createElement('div');
       var title = this.data_.key + 'Title';
       categoryLabel.className = 'network-title';
-      categoryLabel.textContent = templateData[title];
+      categoryLabel.textContent = loadTimeData.getString(title);
       textContent.appendChild(categoryLabel);
       this.subtitle_ = this.ownerDocument.createElement('div');
       this.subtitle_.className = 'network-subtitle';
@@ -362,7 +378,7 @@ cr.define('options.network', function() {
       var policyManaged = false;
       var defaultMessage = this.data_.key == 'wifi' ?
           'networkOffline' : 'networkNotConnected';
-      this.subtitle = templateData[defaultMessage];
+      this.subtitle = loadTimeData.getString(defaultMessage);
       var list = this.data_.networkList;
       var candidateURL = null;
       for (var i = 0; i < list.length; i++) {
@@ -418,7 +434,7 @@ cr.define('options.network', function() {
       Menu.decorate(menu);
       var addendum = [];
       if (this.data_.key == 'wifi') {
-        addendum.push({label: localStrings.getString('joinOtherNetwork'),
+        addendum.push({label: loadTimeData.getString('joinOtherNetwork'),
                        command: 'connect',
                        data: {networkType: Constants.TYPE_WIFI,
                               servicePath: '?'}});
@@ -426,12 +442,12 @@ cr.define('options.network', function() {
         var label = enableDataRoaming_ ? 'disableDataRoaming' :
             'enableDataRoaming';
         var disabled = !UIAccountTweaks.currentUserIsOwner();
-        var entry = {label: localStrings.getString(label),
+        var entry = {label: loadTimeData.getString(label),
                      data: {}};
         if (disabled) {
           entry.command = null;
           entry.tooltip =
-              localStrings.getString('dataRoamingDisableToggleTooltip');
+              loadTimeData.getString('dataRoamingDisableToggleTooltip');
         } else {
           entry.command = function() {
             options.Preferences.setBooleanPref(
@@ -452,7 +468,7 @@ cr.define('options.network', function() {
           OptionsPage.showPageByName('preferredNetworksPage', false);
           dialog.update(list);
         };
-        addendum.push({label: localStrings.getString('preferredNetworks'),
+        addendum.push({label: loadTimeData.getString('preferredNetworks'),
                        command: callback,
                        data: list});
       }
@@ -481,37 +497,45 @@ cr.define('options.network', function() {
               empty = false;
             }
           } else if (data.connected) {
-            addendum.push({label: localStrings.getString('networkOptions'),
+            addendum.push({label: loadTimeData.getString('networkOptions'),
                            command: 'options',
                            data: data});
             if (data.networkType == Constants.TYPE_VPN) {
               // Add separator
               addendum.push({});
               var i18nKey = 'disconnectNetwork';
-              addendum.push({label: localStrings.getString(i18nKey),
+              addendum.push({label: loadTimeData.getString(i18nKey),
                              command: 'disconnect',
                              data: data});
             }
             if (data.networkType != Constants.TYPE_ETHERNET) {
               var onlineMessage = this.ownerDocument.createElement('div');
               onlineMessage.textContent =
-                  localStrings.getString('networkOnline');
+                  loadTimeData.getString('networkOnline');
               onlineMessage.className = 'network-menu-header';
               menu.insertBefore(onlineMessage, menu.firstChild);
             }
           }
         }
       }
-      if (this.data_.key == 'wifi' || this.data_.key == 'cellular') {
+      if (this.data_.key == 'wifi' || this.data_.key == 'wimax' ||
+              this.data_.key == 'cellular') {
         addendum.push({});
         if (this.data_.key == 'wifi') {
-          addendum.push({label: localStrings.getString('turnOffWifi'),
+          addendum.push({label: loadTimeData.getString('turnOffWifi'),
                        command: function() {
                          chrome.send('disableWifi');
                        },
                        data: {}});
+        } else if (this.data_.key == 'wimax') {
+          // TODO(zelidrag): Add proper strings for wimax.
+          addendum.push({label: loadTimeData.getString('turnOffCellular'),
+                       command: function() {
+                         chrome.send('disableWimax');
+                       },
+                       data: {}});
         } else if (this.data_.key == 'cellular') {
-          addendum.push({label: localStrings.getString('turnOffCellular'),
+          addendum.push({label: loadTimeData.getString('turnOffCellular'),
                        command: function() {
                          chrome.send('disableCellular');
                        },
@@ -597,7 +621,7 @@ cr.define('options.network', function() {
       var cmd = opt_connect ? opt_connect : 'connect';
       var label = data.networkName;
       if (cmd == 'activate') {
-        label = localStrings.getString('activateNetwork');
+        label = loadTimeData.getString('activateNetwork');
         label = label.replace('$1', data.networkName);
       }
       var menuItem = this.createCallback_(menu,
@@ -667,6 +691,7 @@ cr.define('options.network', function() {
     /** @inheritDoc */
     decorate: function() {
       List.prototype.decorate.call(this);
+      this.autoExpands = true;
       this.addEventListener('blur', this.onBlur_);
       this.dataModel = new ArrayDataModel([]);
 
@@ -675,7 +700,7 @@ cr.define('options.network', function() {
 
       if (airplaneModeAvailable_()) {
         this.update({key: 'airplaneMode',
-                     subtitle: localStrings.getString('airplaneModeLabel'),
+                     subtitle: loadTimeData.getString('airplaneModeLabel'),
                      command: function() {
                        chrome.send('toggleAirplaneMode');
                      }});
@@ -691,9 +716,9 @@ cr.define('options.network', function() {
       }
       this.update({key: 'addConnection',
                    iconType: 'add-connection',
-                   menu: [{label: localStrings.getString('addConnectionWifi'),
+                   menu: [{label: loadTimeData.getString('addConnectionWifi'),
                            command: addConnection(Constants.TYPE_WIFI)},
-                          {label: localStrings.getString('addConnectionVPN'),
+                          {label: loadTimeData.getString('addConnectionVPN'),
                            command: addConnection(Constants.TYPE_VPN)}]
                   });
 
@@ -736,6 +761,7 @@ cr.define('options.network', function() {
      * @param {Object.<string,string>} data Description of the entry.
      */
     update: function(data) {
+      this.startBatchUpdates();
       var index = this.indexOf(data.key);
       if (index == undefined) {
         // Find reference position for adding the element.  We cannot hide
@@ -770,6 +796,7 @@ cr.define('options.network', function() {
         data.sortIndex = entry.sortIndex;
         this.dataModel.splice(index, 1, data);
       }
+      this.endBatchUpdates();
     },
 
     /** @inheritDoc */
@@ -817,6 +844,8 @@ cr.define('options.network', function() {
     var networkList = $('network-list');
     cellularAvailable_ = data.cellularAvailable;
     cellularEnabled_ = data.cellularEnabled;
+    wimaxAvailable_ = data.wimaxAvailable;
+    wimaxEnabled_ = data.wimaxEnabled;
 
     if (data.accessLocked) {
       $('network-locked-message').hidden = false;
@@ -838,7 +867,7 @@ cr.define('options.network', function() {
                     [type, path, 'options']);
       };
       networkList.update({key: 'ethernet',
-                          subtitle: localStrings.getString('networkConnected'),
+                          subtitle: loadTimeData.getString('networkConnected'),
                           iconURL: ethernetConnection.iconURL,
                           command: ethernetOptions});
     } else {
@@ -852,7 +881,7 @@ cr.define('options.network', function() {
         chrome.send('enableWifi');
       };
       networkList.update({key: 'wifi',
-                          subtitle: localStrings.getString('networkDisabled'),
+                          subtitle: loadTimeData.getString('networkDisabled'),
                           iconType: 'wifi',
                           command: enableWifi});
     }
@@ -862,7 +891,7 @@ cr.define('options.network', function() {
       if (data.cellularEnabled) {
         loadData_('cellular', data.wirelessList, data.rememberedList);
       } else {
-        var subtitle = localStrings.getString('networkDisabled');
+        var subtitle = loadTimeData.getString('networkDisabled');
         var enableCellular = function() {
           chrome.send('enableCellular');
         };
@@ -875,6 +904,24 @@ cr.define('options.network', function() {
       networkList.deleteItem('cellular');
     }
 
+    // Only show cellular control if available and not in airplane mode.
+    if (data.wimaxAvailable && !data.airplaneMode) {
+      if (data.wimaxEnabled) {
+        loadData_('wimax', data.wirelessList, data.rememberedList);
+      } else {
+        var subtitle = loadTimeData.getString('networkDisabled');
+        var enableWimax = function() {
+          chrome.send('enableWimax');
+        };
+        networkList.update({key: 'wimax',
+                            subtitle: subtitle,
+                            iconType: 'cellular',
+                            command: enableWimax});
+      }
+    } else {
+      networkList.deleteItem('wimax');
+    }
+
     // Only show VPN control if there is an available network and an internet
     // connection.
     if (data.vpnList.length > 0 && (ethernetConnection ||
@@ -883,9 +930,6 @@ cr.define('options.network', function() {
     else
       networkList.deleteItem('vpn');
     networkList.updateToggleControl('airplaneMode', data.airplaneMode);
-
-    networkList.invalidate();
-    networkList.redraw();
   };
 
   /**
@@ -906,7 +950,7 @@ cr.define('options.network', function() {
     decorate: function() {
       ControlledSettingIndicator.prototype.decorate.call(this);
       this.controlledBy = 'policy';
-      var policyLabel = localStrings.getString('managedNetwork');
+      var policyLabel = loadTimeData.getString('managedNetwork');
       this.setAttribute('textPolicy', policyLabel);
       this.className = 'controlled-setting-indicator';
       // The default popup clips to the bounds of the list of networks in the

@@ -11,12 +11,11 @@ var css = [
   'list.css',
   'table.css',
   'menu.css',
-  'widgets.css',
 ];
 
 var script = [
-  'local_strings.js',
-  'i18n_template.js',
+  'load_time_data.js',
+  'i18n_template_no_process.js',
 
   'event_tracker.js',
   'util.js',

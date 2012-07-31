@@ -18,8 +18,10 @@
 #include "base/utf_string_conversions.h"
 #include "base/win/windows_version.h"
 #include "chrome/browser/google/google_util.h"
+#include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/url_constants.h"
@@ -29,6 +31,7 @@
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
+#include "grit/theme_resources_standard.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
@@ -90,11 +93,10 @@ namespace browser {
 
 // Declared in browser_dialogs.h so that others don't
 // need to depend on our .h.
-views::Widget* ShowAboutChromeView(gfx::NativeWindow parent, Profile* profile) {
+void ShowAboutChromeView(gfx::NativeWindow parent, Profile* profile) {
   views::Widget* window = views::Widget::CreateWindowWithParent(
       new AboutChromeView(profile), parent);
   window->Show();
-  return window;
 }
 
 }  // namespace browser
@@ -143,31 +145,32 @@ void AboutChromeView::Init() {
   // Views we will add to the *parent* of this dialog, since it will display
   // next to the buttons which we don't draw ourselves.
   throbber_.reset(new views::Throbber(50, true));
-  throbber_->set_parent_owned(false);
+  throbber_->set_owned_by_client();
   throbber_->SetVisible(false);
 
-  SkBitmap* success_image = rb.GetBitmapNamed(IDR_UPDATE_UPTODATE);
+  gfx::ImageSkia* success_image = rb.GetImageSkiaNamed(IDR_UPDATE_UPTODATE);
   success_indicator_.SetImage(*success_image);
-  success_indicator_.set_parent_owned(false);
+  success_indicator_.set_owned_by_client();
 
-  SkBitmap* update_available_image = rb.GetBitmapNamed(IDR_UPDATE_AVAILABLE);
+  gfx::ImageSkia* update_available_image = rb.GetImageSkiaNamed(
+      IDR_UPDATE_AVAILABLE);
   update_available_indicator_.SetImage(*update_available_image);
-  update_available_indicator_.set_parent_owned(false);
+  update_available_indicator_.set_owned_by_client();
 
-  SkBitmap* timeout_image = rb.GetBitmapNamed(IDR_UPDATE_FAIL);
+  gfx::ImageSkia* timeout_image = rb.GetImageSkiaNamed(IDR_UPDATE_FAIL);
   timeout_indicator_.SetImage(*timeout_image);
-  timeout_indicator_.set_parent_owned(false);
+  timeout_indicator_.set_owned_by_client();
 
   update_label_.SetVisible(false);
-  update_label_.set_parent_owned(false);
+  update_label_.set_owned_by_client();
 
   // Regular view controls we draw by ourself. First, we add the background
-  // image for the dialog. We have two different background bitmaps, one for
-  // LTR UIs and one for RTL UIs. We load the correct bitmap based on the UI
+  // image for the dialog. We have two different background images, one for
+  // LTR UIs and one for RTL UIs. We load the correct image based on the UI
   // layout of the view.
   about_dlg_background_logo_ = new views::ImageView();
-  SkBitmap* about_background_logo = rb.GetBitmapNamed(base::i18n::IsRTL() ?
-      IDR_ABOUT_BACKGROUND_RTL : IDR_ABOUT_BACKGROUND);
+  gfx::ImageSkia* about_background_logo = rb.GetImageSkiaNamed(
+      base::i18n::IsRTL() ? IDR_ABOUT_BACKGROUND_RTL : IDR_ABOUT_BACKGROUND);
 
   about_dlg_background_logo_->SetImage(*about_background_logo);
   AddChildView(about_dlg_background_logo_);
@@ -423,8 +426,8 @@ void AboutChromeView::OnPaint(gfx::Canvas* canvas) {
   // Draw the background image color (and the separator) across the dialog.
   // This will become the background for the logo image at the top of the
   // dialog.
-  SkBitmap* background = ui::ResourceBundle::GetSharedInstance().GetBitmapNamed(
-      IDR_ABOUT_BACKGROUND_COLOR);
+  gfx::ImageSkia* background = ui::ResourceBundle::GetSharedInstance().
+      GetImageSkiaNamed(IDR_ABOUT_BACKGROUND_COLOR);
   canvas->TileImageInt(*background, 0, 0, dialog_dimensions_.width(),
                        background->height());
 
@@ -598,7 +601,7 @@ ui::ModalType AboutChromeView::GetModalType() const {
 }
 
 bool AboutChromeView::Accept() {
-  BrowserList::AttemptRestart();
+  browser::AttemptRestart();
   return true;
 }
 
@@ -613,15 +616,14 @@ void AboutChromeView::LinkClicked(views::Link* source, int event_flags) {
   if (source == terms_of_service_url_) {
     url = GURL(chrome::kChromeUITermsURL);
   } else if (source == chromium_url_) {
-    url = google_util::AppendGoogleLocaleParam(
-      GURL(chrome::kChromiumProjectURL));
+    url = GURL(chrome::kChromiumProjectURL);
   } else if (source == open_source_url_) {
     url = GURL(chrome::kChromeUICreditsURL);
   } else {
     NOTREACHED() << "Unknown link source";
   }
 
-  Browser* browser = BrowserList::GetLastActiveWithProfile(profile_);
+  Browser* browser = browser::FindLastActiveWithProfile(profile_);
   OpenURLParams params(
       url, Referrer(), NEW_WINDOW, content::PAGE_TRANSITION_LINK, false);
   browser->OpenURL(params);

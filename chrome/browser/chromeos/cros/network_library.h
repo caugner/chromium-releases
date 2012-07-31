@@ -299,11 +299,14 @@ class Network {
   class TestApi {
    public:
     explicit TestApi(Network* network) : network_(network) {}
-    void SetConnected(bool connected) {
-      network_->set_connected(connected);
+    void SetConnected() {
+      network_->set_connected();
     }
-    void SetConnecting(bool connecting) {
-      network_->set_connecting(connecting);
+    void SetConnecting() {
+      network_->set_connecting();
+    }
+    void SetDisconnected() {
+      network_->set_disconnected();
     }
    private:
     Network* network_;
@@ -407,7 +410,8 @@ class Network {
             state == STATE_PORTAL);
   }
   static bool IsConnectingState(ConnectionState state) {
-    return (state == STATE_ASSOCIATION ||
+    return (state == STATE_CONNECT_REQUESTED ||
+            state == STATE_ASSOCIATION ||
             state == STATE_CONFIGURATION ||
             state == STATE_CARRIER);
   }
@@ -520,11 +524,14 @@ class Network {
   }
   void set_name(const std::string& name) { name_ = name; }
   void set_mode(ConnectionMode mode) { mode_ = mode; }
-  void set_connecting(bool connecting) {
-    state_ = (connecting ? STATE_ASSOCIATION : STATE_IDLE);
+  void set_connecting() {
+    state_ = STATE_CONNECT_REQUESTED;
   }
-  void set_connected(bool connected) {
-    state_ = (connected ? STATE_ONLINE : STATE_IDLE);
+  void set_connected() {
+    state_ = STATE_ONLINE;
+  }
+  void set_disconnected() {
+    state_ = STATE_IDLE;
   }
   void set_connectable(bool connectable) { connectable_ = connectable; }
   void set_connection_started(bool started) { connection_started_ = started; }
@@ -1025,7 +1032,7 @@ class WifiNetwork : public WirelessNetwork {
   // Return true if a passphrase or other input is required to connect.
   bool IsPassphraseRequired() const;
 
- private:
+ protected:
    // This allows NativeWifiNetworkParser access to device privates so
   // that they can be reconstituted during parsing.  The parsers only
   // access things through the private set_ functions so that this
@@ -1130,7 +1137,58 @@ class WifiNetwork : public WirelessNetwork {
 
   DISALLOW_COPY_AND_ASSIGN(WifiNetwork);
 };
+
 typedef std::vector<WifiNetwork*> WifiNetworkVector;
+
+
+// Class for networks of TYPE_WIMAX.
+class WimaxNetwork : public WirelessNetwork {
+ public:
+  explicit WimaxNetwork(const std::string& service_path);
+  virtual ~WimaxNetwork();
+
+  bool passphrase_required() const { return passphrase_required_; }
+  const std::string& eap_identity() const { return eap_identity_; }
+  const std::string& eap_passphrase() const { return eap_passphrase_; }
+
+  void SetEAPIdentity(const std::string& identity);
+  void SetEAPPassphrase(const std::string& passphrase);
+
+ protected:
+  // This allows NativeWimaxNetworkParser access to device privates so
+  // that they can be reconstituted during parsing.  The parsers only
+  // access things through the private set_ functions so that this
+  // class can evolve without having to change all the parsers.
+  friend class NativeWimaxNetworkParser;
+
+  // This allows the implementation classes access to privates.
+  NETWORK_LIBRARY_IMPL_FRIENDS;
+
+  void set_eap_identity(const std::string& identity) {
+    eap_identity_ = identity;
+  }
+  void set_eap_passphrase(const std::string& passphrase) {
+    eap_passphrase_ = passphrase;
+  }
+  void set_passphrase_required(bool passphrase_required) {
+    passphrase_required_ = passphrase_required;
+  }
+
+  // Network overrides.
+  virtual void EraseCredentials() OVERRIDE;
+  virtual void CalculateUniqueId() OVERRIDE;
+
+  bool passphrase_required_;
+  std::string eap_identity_;
+  std::string eap_passphrase_;
+
+  // Weak pointer factory for wrapping pointers to this network in callbacks.
+  base::WeakPtrFactory<WimaxNetwork> weak_pointer_factory_;
+
+  DISALLOW_COPY_AND_ASSIGN(WimaxNetwork);
+};
+
+typedef std::vector<WimaxNetwork*> WimaxNetworkVector;
 
 // Geolocation data.
 struct CellTower {
@@ -1290,6 +1348,17 @@ class NetworkLibrary {
   virtual bool cellular_connecting() const = 0;
   virtual bool cellular_connected() const = 0;
 
+  // Return the active Wimax network (or NULL if none active).
+  virtual const WimaxNetwork* wimax_network() const = 0;
+  virtual bool wimax_connecting() const = 0;
+  virtual bool wimax_connected() const = 0;
+
+  // Return the active mobile (cellular or WiMax) network
+  // (or NULL if none active).
+  virtual const Network* mobile_network() const = 0;
+  virtual bool mobile_connecting() const = 0;
+  virtual bool mobile_connected() const = 0;
+
   // Return the active virtual network (or NULL if none active).
   virtual const VirtualNetwork* virtual_network() const = 0;
   virtual bool virtual_network_connecting() const = 0;
@@ -1310,6 +1379,9 @@ class NetworkLibrary {
   // Returns the current list of cellular networks.
   virtual const CellularNetworkVector& cellular_networks() const = 0;
 
+  // Returns the current list of Wimax networks.
+  virtual const WimaxNetworkVector& wimax_networks() const = 0;
+
   // Returns the current list of virtual networks.
   virtual const VirtualNetworkVector& virtual_networks() const = 0;
 
@@ -1322,15 +1394,21 @@ class NetworkLibrary {
 
   virtual bool ethernet_available() const = 0;
   virtual bool wifi_available() const = 0;
+  virtual bool wimax_available() const = 0;
   virtual bool cellular_available() const = 0;
+  virtual bool mobile_available() const = 0;
 
   virtual bool ethernet_enabled() const = 0;
   virtual bool wifi_enabled() const = 0;
+  virtual bool wimax_enabled() const = 0;
   virtual bool cellular_enabled() const = 0;
+  virtual bool mobile_enabled() const = 0;
 
   virtual bool ethernet_busy() const = 0;
   virtual bool wifi_busy() const = 0;
+  virtual bool wimax_busy() const = 0;
   virtual bool cellular_busy() const = 0;
+  virtual bool mobile_busy() const = 0;
 
   virtual bool wifi_scanning() const = 0;
 
@@ -1356,6 +1434,13 @@ class NetworkLibrary {
   virtual const NetworkDevice* FindNetworkDeviceByPath(
       const std::string& path) const = 0;
 
+  // Returns device with TYPE_CELLULAR or TYPE_WIMAX.
+  // Returns NULL if none exists.
+  virtual const NetworkDevice* FindMobileDevice() const = 0;
+
+  // Returns device with TYPE_WIMAX. Returns NULL if none exists.
+  virtual const NetworkDevice* FindWimaxDevice() const = 0;
+
   // Returns device with TYPE_CELLULAR. Returns NULL if none exists.
   virtual const NetworkDevice* FindCellularDevice() const = 0;
 
@@ -1378,6 +1463,8 @@ class NetworkLibrary {
       const std::string& unique_id) const = 0;
   virtual WifiNetwork* FindWifiNetworkByPath(const std::string& path) const = 0;
   virtual CellularNetwork* FindCellularNetworkByPath(
+      const std::string& path) const = 0;
+  virtual WimaxNetwork* FindWimaxNetworkByPath(
       const std::string& path) const = 0;
   virtual VirtualNetwork* FindVirtualNetworkByPath(
       const std::string& path) const = 0;
@@ -1480,6 +1567,13 @@ class NetworkLibrary {
   // Connect to the specified cellular network.
   virtual void ConnectToCellularNetwork(CellularNetwork* network) = 0;
 
+  // Connect to the specified WiMAX network.
+  virtual void ConnectToWimaxNetwork(WimaxNetwork* network) = 0;
+
+  // Connect to the specified WiMAX network and set its profile
+  // to SHARED if |shared| is true, otherwise to USER.
+  virtual void ConnectToWimaxNetwork(WimaxNetwork* network, bool shared) = 0;
+
   // Connect to the specified virtual network.
   virtual void ConnectToVirtualNetwork(VirtualNetwork* network) = 0;
 
@@ -1538,6 +1632,12 @@ class NetworkLibrary {
 
   // Enables/disables the wifi network device.
   virtual void EnableWifiNetworkDevice(bool enable) = 0;
+
+  // Enables/disables mobile (cellular, wimax) network device.
+  virtual void EnableMobileNetworkDevice(bool enable) = 0;
+
+  // Enables/disables the wimax network device.
+  virtual void EnableWimaxNetworkDevice(bool enable) = 0;
 
   // Enables/disables the cellular network device.
   virtual void EnableCellularNetworkDevice(bool enable) = 0;

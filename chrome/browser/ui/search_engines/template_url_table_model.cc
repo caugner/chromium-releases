@@ -14,12 +14,13 @@
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "grit/generated_resources.h"
-#include "grit/ui_resources.h"
+#include "grit/ui_resources_standard.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/table_model_observer.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/codec/png_codec.h"
+#include "ui/gfx/image/image_skia.h"
 
 // Group IDs used by TemplateURLTableModel.
 static const int kMainGroupID = 0;
@@ -31,7 +32,7 @@ static const int kOtherGroupID = 1;
 // ModelEntry also tracks state information about the URL.
 
 // Icon used while loading, or if a specific favicon can't be found.
-static SkBitmap* default_icon = NULL;
+static gfx::ImageSkia* default_icon = NULL;
 
 class ModelEntry {
  public:
@@ -41,7 +42,7 @@ class ModelEntry {
         model_(model) {
     if (!default_icon) {
       default_icon = ResourceBundle::GetSharedInstance().
-          GetBitmapNamed(IDR_DEFAULT_FAVICON);
+          GetImageSkiaNamed(IDR_DEFAULT_FAVICON);
     }
   }
 
@@ -49,7 +50,7 @@ class ModelEntry {
     return template_url_;
   }
 
-  SkBitmap GetIcon() {
+  gfx::ImageSkia GetIcon() {
     if (load_state_ == NOT_LOADED)
       LoadFavicon();
     if (!favicon_.isNull())
@@ -193,7 +194,7 @@ string16 TemplateURLTableModel::GetText(int row, int col_id) {
   return base::i18n::GetDisplayStringInLTRDirectionality(url->keyword());
 }
 
-SkBitmap TemplateURLTableModel::GetIcon(int row) {
+gfx::ImageSkia TemplateURLTableModel::GetIcon(int row) {
   DCHECK(row >= 0 && row < RowCount());
   return entries_[row]->GetIcon();
 }

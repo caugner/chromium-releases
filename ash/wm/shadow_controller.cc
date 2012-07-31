@@ -72,11 +72,13 @@ ShadowController::ShadowController()
     : ALLOW_THIS_IN_INITIALIZER_LIST(observer_manager_(this)) {
   aura::Env::GetInstance()->AddObserver(this);
   // Watch for window activation changes.
-  Shell::GetRootWindow()->AddObserver(this);
+  aura::client::GetActivationClient(Shell::GetPrimaryRootWindow())->
+      AddObserver(this);
 }
 
 ShadowController::~ShadowController() {
-  Shell::GetRootWindow()->RemoveObserver(this);
+  aura::client::GetActivationClient(Shell::GetPrimaryRootWindow())->
+      RemoveObserver(this);
   aura::Env::GetInstance()->RemoveObserver(this);
 }
 
@@ -93,24 +95,35 @@ void ShadowController::OnWindowPropertyChanged(aura::Window* window,
     HandlePossibleShadowVisibilityChange(window);
     return;
   }
-  if (key == aura::client::kRootWindowActiveWindowKey) {
-    HandleWindowActivationChange(
-        window->GetProperty(aura::client::kRootWindowActiveWindowKey),
-        reinterpret_cast<aura::Window*>(old));
-    return;
-  }
 }
 
 void ShadowController::OnWindowBoundsChanged(aura::Window* window,
-                                             const gfx::Rect& bounds) {
+                                             const gfx::Rect& old_bounds,
+                                             const gfx::Rect& new_bounds) {
   Shadow* shadow = GetShadowForWindow(window);
   if (shadow)
-    shadow->SetContentBounds(gfx::Rect(bounds.size()));
+    shadow->SetContentBounds(gfx::Rect(new_bounds.size()));
 }
 
 void ShadowController::OnWindowDestroyed(aura::Window* window) {
   window_shadows_.erase(window);
   observer_manager_.Remove(window);
+}
+
+void ShadowController::OnWindowActivated(aura::Window* gaining_active,
+                                         aura::Window* losing_active) {
+  if (gaining_active) {
+    Shadow* shadow = GetShadowForWindow(gaining_active);
+    if (shadow && !ShouldUseSmallShadowForWindow(gaining_active))
+      shadow->SetStyle(Shadow::STYLE_ACTIVE);
+  }
+  if (losing_active) {
+    Shadow* shadow = GetShadowForWindow(losing_active);
+    if (shadow && !ShouldUseSmallShadowForWindow(losing_active)) {
+      shadow->SetStyle(GetShadowStyleForWindowLosingActive(losing_active,
+                                                           gaining_active));
+    }
+  }
 }
 
 bool ShadowController::ShouldShowShadowForWindow(aura::Window* window) const {
@@ -131,23 +144,6 @@ Shadow* ShadowController::GetShadowForWindow(aura::Window* window) {
   return it != window_shadows_.end() ? it->second.get() : NULL;
 }
 
-void ShadowController::HandleWindowActivationChange(
-    aura::Window* gaining_active,
-    aura::Window* losing_active) {
-  if (gaining_active) {
-    Shadow* shadow = GetShadowForWindow(gaining_active);
-    if (shadow && !ShouldUseSmallShadowForWindow(gaining_active))
-      shadow->SetStyle(Shadow::STYLE_ACTIVE);
-  }
-  if (losing_active) {
-    Shadow* shadow = GetShadowForWindow(losing_active);
-    if (shadow && !ShouldUseSmallShadowForWindow(losing_active)) {
-      shadow->SetStyle(GetShadowStyleForWindowLosingActive(losing_active,
-                                                           gaining_active));
-    }
-  }
-}
-
 void ShadowController::HandlePossibleShadowVisibilityChange(
     aura::Window* window) {
   const bool should_show = ShouldShowShadowForWindow(window);
@@ -162,8 +158,7 @@ void ShadowController::CreateShadowForWindow(aura::Window* window) {
   linked_ptr<Shadow> shadow(new Shadow());
   window_shadows_.insert(make_pair(window, shadow));
 
-  shadow->Init(window,
-               ShouldUseSmallShadowForWindow(window) ?
+  shadow->Init(ShouldUseSmallShadowForWindow(window) ?
                Shadow::STYLE_SMALL : Shadow::STYLE_ACTIVE);
   shadow->SetContentBounds(gfx::Rect(window->bounds().size()));
   shadow->layer()->SetVisible(ShouldShowShadowForWindow(window));

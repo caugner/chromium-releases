@@ -3,11 +3,14 @@
 // found in the LICENSE file.
 
 #include "base/base_paths.h"
+#include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "base/time.h"
 #include "base/utf_string_conversions.h"
+#include "base/values.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/automation/automation_proxy.h"
 #include "chrome/test/automation/tab_proxy.h"
@@ -121,20 +124,17 @@ void PyUITestBase::ReloadActiveTab(int window_index) {
 }
 
 bool PyUITestBase::AppendTab(const GURL& tab_url, int window_index) {
-  scoped_refptr<BrowserProxy> browser_proxy =
-      automation()->GetBrowserWindow(window_index);
+  scoped_refptr<BrowserProxy> browser_proxy = GetBrowserWindow(window_index);
   return browser_proxy->AppendTab(tab_url);
 }
 
 bool PyUITestBase::ApplyAccelerator(int id, int window_index) {
-  scoped_refptr<BrowserProxy> browser_proxy =
-      automation()->GetBrowserWindow(window_index);
+  scoped_refptr<BrowserProxy> browser_proxy = GetBrowserWindow(window_index);
   return browser_proxy->ApplyAccelerator(id);
 }
 
 bool PyUITestBase::RunCommand(int browser_command, int window_index) {
-  scoped_refptr<BrowserProxy> browser_proxy =
-      automation()->GetBrowserWindow(window_index);
+  scoped_refptr<BrowserProxy> browser_proxy = GetBrowserWindow(window_index);
   EXPECT_TRUE(browser_proxy.get());
   if (!browser_proxy.get())
     return false;
@@ -142,8 +142,7 @@ bool PyUITestBase::RunCommand(int browser_command, int window_index) {
 }
 
 bool PyUITestBase::IsMenuCommandEnabled(int id, int window_index) {
-  scoped_refptr<BrowserProxy> browser_proxy =
-      automation()->GetBrowserWindow(window_index);
+  scoped_refptr<BrowserProxy> browser_proxy = GetBrowserWindow(window_index);
   EXPECT_TRUE(browser_proxy.get());
   bool enabled = false;
   if (browser_proxy.get())
@@ -152,21 +151,18 @@ bool PyUITestBase::IsMenuCommandEnabled(int id, int window_index) {
 }
 
 bool PyUITestBase::ActivateTab(int tab_index, int window_index) {
-  scoped_refptr<BrowserProxy> browser_proxy =
-      automation()->GetBrowserWindow(window_index);
+  scoped_refptr<BrowserProxy> browser_proxy = GetBrowserWindow(window_index);
   return browser_proxy->BringToFront() && browser_proxy->ActivateTab(tab_index);
 }
 
 void PyUITestBase::SetDownloadShelfVisible(bool is_visible, int window_index) {
-  scoped_refptr<BrowserProxy> browser_proxy =
-      automation()->GetBrowserWindow(window_index);
+  scoped_refptr<BrowserProxy> browser_proxy = GetBrowserWindow(window_index);
   ASSERT_TRUE(browser_proxy.get());
   EXPECT_TRUE(browser_proxy->SetShelfVisible(is_visible));
 }
 
 bool PyUITestBase::IsDownloadShelfVisible(int window_index) {
-  scoped_refptr<BrowserProxy> browser_proxy =
-      automation()->GetBrowserWindow(window_index);
+  scoped_refptr<BrowserProxy> browser_proxy = GetBrowserWindow(window_index);
   EXPECT_TRUE(browser_proxy.get());
   if (!browser_proxy.get())
     return false;
@@ -184,15 +180,13 @@ GURL PyUITestBase::GetActiveTabURL(int window_index) {
 }
 
 void PyUITestBase::OpenFindInPage(int window_index) {
-  scoped_refptr<BrowserProxy> browser_proxy =
-      automation()->GetBrowserWindow(window_index);
+  scoped_refptr<BrowserProxy> browser_proxy = GetBrowserWindow(window_index);
   ASSERT_TRUE(browser_proxy.get());
   EXPECT_TRUE(browser_proxy->OpenFindInPage());
 }
 
 bool PyUITestBase::IsFindInPageVisible(int window_index) {
-  scoped_refptr<BrowserProxy> browser_proxy =
-      automation()->GetBrowserWindow(window_index);
+  scoped_refptr<BrowserProxy> browser_proxy = GetBrowserWindow(window_index);
   EXPECT_TRUE(browser_proxy.get());
   if (!browser_proxy.get())
     return false;
@@ -216,8 +210,7 @@ bool PyUITestBase::OpenNewBrowserWindow(bool show) {
 }
 
 bool PyUITestBase::CloseBrowserWindow(int window_index) {
-  scoped_refptr<BrowserProxy> browser_proxy =
-      automation()->GetBrowserWindow(window_index);
+  scoped_refptr<BrowserProxy> browser_proxy = GetBrowserWindow(window_index);
   if (!browser_proxy.get())
     return false;
   bool app_closed;
@@ -232,7 +225,7 @@ int PyUITestBase::GetBrowserWindowCount() {
 
 bool PyUITestBase::GetBookmarkBarState(bool* visible, bool* detached) {
   scoped_refptr<BrowserProxy> browser_proxy =
-      automation()->GetBrowserWindow(0);  // Window doesn't matter.
+      GetBrowserWindow(0);  // Window doesn't matter.
   EXPECT_TRUE(browser_proxy.get());
   if (!browser_proxy.get())
     return false;
@@ -263,7 +256,7 @@ bool PyUITestBase::IsBookmarkBarDetached() {
 
 bool PyUITestBase::WaitForBookmarkBarVisibilityChange(bool wait_for_open) {
   scoped_refptr<BrowserProxy> browser_proxy =
-      automation()->GetBrowserWindow(0);  // Window doesn't matter.
+      GetBrowserWindow(0);  // Window doesn't matter.
   EXPECT_TRUE(browser_proxy.get());
   if (!browser_proxy.get())
     return false;
@@ -278,7 +271,7 @@ bool PyUITestBase::WaitForBookmarkBarVisibilityChange(bool wait_for_open) {
 
 std::string PyUITestBase::_GetBookmarksAsJSON() {
   scoped_refptr<BrowserProxy> browser_proxy =
-      automation()->GetBrowserWindow(0);  // Window doesn't matter.
+      GetBrowserWindow(0);  // Window doesn't matter.
   EXPECT_TRUE(browser_proxy.get());
   if (!browser_proxy.get())
     return NULL;
@@ -291,7 +284,7 @@ std::string PyUITestBase::_GetBookmarksAsJSON() {
 bool PyUITestBase::AddBookmarkGroup(std::wstring& parent_id, int index,
                                     std::wstring& title) {
   scoped_refptr<BrowserProxy> browser_proxy =
-      automation()->GetBrowserWindow(0);  // Window doesn't matter.
+      GetBrowserWindow(0);  // Window doesn't matter.
   EXPECT_TRUE(browser_proxy.get());
   if (!browser_proxy.get())
     return false;
@@ -302,7 +295,7 @@ bool PyUITestBase::AddBookmarkGroup(std::wstring& parent_id, int index,
 bool PyUITestBase::AddBookmarkURL(std::wstring& parent_id, int index,
                                   std::wstring& title, std::wstring& url) {
   scoped_refptr<BrowserProxy> browser_proxy =
-      automation()->GetBrowserWindow(0);  // Window doesn't matter.
+      GetBrowserWindow(0);  // Window doesn't matter.
   EXPECT_TRUE(browser_proxy.get());
   if (!browser_proxy.get())
     return false;
@@ -315,7 +308,7 @@ bool PyUITestBase::AddBookmarkURL(std::wstring& parent_id, int index,
 bool PyUITestBase::ReparentBookmark(
     std::wstring& id, std::wstring& new_parent_id, int index) {
   scoped_refptr<BrowserProxy> browser_proxy =
-      automation()->GetBrowserWindow(0);  // Window doesn't matter.
+      GetBrowserWindow(0);  // Window doesn't matter.
   EXPECT_TRUE(browser_proxy.get());
   if (!browser_proxy.get())
     return false;
@@ -327,7 +320,7 @@ bool PyUITestBase::ReparentBookmark(
 
 bool PyUITestBase::SetBookmarkTitle(std::wstring& id, std::wstring& title) {
   scoped_refptr<BrowserProxy> browser_proxy =
-      automation()->GetBrowserWindow(0);  // Window doesn't matter.
+      GetBrowserWindow(0);  // Window doesn't matter.
   EXPECT_TRUE(browser_proxy.get());
   if (!browser_proxy.get())
     return false;
@@ -337,7 +330,7 @@ bool PyUITestBase::SetBookmarkTitle(std::wstring& id, std::wstring& title) {
 
 bool PyUITestBase::SetBookmarkURL(std::wstring& id, std::wstring& url) {
   scoped_refptr<BrowserProxy> browser_proxy =
-      automation()->GetBrowserWindow(0);  // Window doesn't matter.
+      GetBrowserWindow(0);  // Window doesn't matter.
   EXPECT_TRUE(browser_proxy.get());
   if (!browser_proxy.get())
     return false;
@@ -347,13 +340,22 @@ bool PyUITestBase::SetBookmarkURL(std::wstring& id, std::wstring& url) {
 
 bool PyUITestBase::RemoveBookmark(std::wstring& id) {
   scoped_refptr<BrowserProxy> browser_proxy =
-      automation()->GetBrowserWindow(0);  // Window doesn't matter.
+      GetBrowserWindow(0);  // Window doesn't matter.
   EXPECT_TRUE(browser_proxy.get());
   if (!browser_proxy.get())
     return false;
 
   return browser_proxy->RemoveBookmark(StringToId(id));
 }
+
+AutomationProxy* PyUITestBase::automation() const {
+  AutomationProxy* automation_proxy = UITestBase::automation();
+  if (!automation_proxy) {
+    LOG(FATAL) << "The automation proxy is NULL.";
+  }
+  return automation_proxy;
+}
+
 
 scoped_refptr<BrowserProxy> PyUITestBase::GetBrowserWindow(int window_index) {
   return automation()->GetBrowserWindow(window_index);
@@ -363,14 +365,30 @@ std::string PyUITestBase::_SendJSONRequest(int window_index,
                                            const std::string& request,
                                            int timeout) {
   std::string response;
+  base::TimeTicks time;
   if (window_index < 0) {  // Do not need to target a browser window.
-    EXPECT_TRUE(automation()->SendJSONRequest(request, timeout, &response));
+    time = base::TimeTicks::Now();
+    if (!automation()->SendJSONRequest(request, timeout, &response)) {
+        LOG(WARNING) << "SendJSONRequest returned false after "
+                     << (base::TimeTicks::Now() - time).InSeconds()
+                     << " seconds: " << request;
+    }
   } else {
-    scoped_refptr<BrowserProxy> browser_proxy =
-        automation()->GetBrowserWindow(window_index);
-    EXPECT_TRUE(browser_proxy.get());
-    if (browser_proxy.get()) {
-      EXPECT_TRUE(browser_proxy->SendJSONRequest(request, timeout, &response));
+    scoped_refptr<BrowserProxy> browser_proxy = GetBrowserWindow(window_index);
+    if (!browser_proxy.get()) {
+      base::DictionaryValue error_dict;
+      std::string error_string = StringPrintf(
+          "No browser at windex=%d for %s", window_index, request.c_str());
+      LOG(WARNING) << error_string;
+      error_dict.SetString("error", error_string);
+      base::JSONWriter::Write(&error_dict, &response);
+    } else {
+      time = base::TimeTicks::Now();
+      if (!browser_proxy->SendJSONRequest(request, timeout, &response)) {
+        LOG(WARNING) << "SendJSONRequest returned false after "
+                     << (base::TimeTicks::Now() - time).InSeconds()
+                     << " seconds: " << request;
+      }
     }
   }
   return response;

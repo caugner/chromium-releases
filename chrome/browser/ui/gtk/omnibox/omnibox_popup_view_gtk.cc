@@ -28,6 +28,7 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_source.h"
 #include "grit/theme_resources.h"
+#include "grit/theme_resources_standard.h"
 #include "ui/base/gtk/gtk_compat.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/gtk/gtk_screen_util.h"
@@ -105,16 +106,6 @@ gfx::Rect GetRectForLine(size_t line, int width) {
                    (line * kHeightPerResult) + kBorderThickness,
                    width - (kBorderThickness * 2),
                    kHeightPerResult);
-}
-
-// Helper for drawing an entire pixbuf without dithering.
-void DrawFullImage(cairo_t* cr, GtkWidget* widget, const gfx::Image* image,
-                   gint dest_x, gint dest_y) {
-  gfx::CairoCachedSurface* surface = image->ToCairo();
-  surface->SetSource(cr, widget, dest_x, dest_y);
-  cairo_pattern_set_extend(cairo_get_source(cr), CAIRO_EXTEND_REPEAT);
-  cairo_rectangle(cr, dest_x, dest_y, surface->Width(), surface->Height());
-  cairo_fill(cr);
 }
 
 // TODO(deanm): Find some better home for this, and make it more efficient.
@@ -502,7 +493,7 @@ const gfx::Image* OmniboxPopupViewGtk::IconForMatch(
     if (!ContainsKey(images_, bitmap)) {
       // gfx::Image wants ownership of bitmaps given to it, and we might as
       // well make the bitmap copy a format that will be used.
-      images_[bitmap] = new gfx::Image(gfx::GdkPixbufFromSkBitmap(bitmap));
+      images_[bitmap] = new gfx::Image(gfx::GdkPixbufFromSkBitmap(*bitmap));
     }
     return images_[bitmap];
   }
@@ -522,9 +513,6 @@ const gfx::Image* OmniboxPopupViewGtk::IconForMatch(
         break;
       case IDR_OMNIBOX_HTTP:
         icon = IDR_OMNIBOX_HTTP_DARK;
-        break;
-      case IDR_OMNIBOX_HISTORY:
-        icon = IDR_OMNIBOX_HISTORY_DARK;
         break;
       case IDR_OMNIBOX_SEARCH:
         icon = IDR_OMNIBOX_SEARCH_DARK;
@@ -662,9 +650,10 @@ gboolean OmniboxPopupViewGtk::HandleExpose(GtkWidget* widget,
     int icon_start_x = ltr ? kIconLeftPadding :
         (line_rect.width() - kIconLeftPadding - kIconWidth);
     // Draw the icon for this result.
-    DrawFullImage(cr, widget,
-                  IconForMatch(*match, is_selected, is_selected_keyword),
-                  icon_start_x, line_rect.y() + kIconTopPadding);
+    gtk_util::DrawFullImage(cr, widget,
+                            IconForMatch(*match, is_selected,
+                                         is_selected_keyword),
+                            icon_start_x, line_rect.y() + kIconTopPadding);
 
     // Draw the results text vertically centered in the results space.
     // First draw the contents / url, but don't let it take up the whole width
@@ -738,10 +727,11 @@ gboolean OmniboxPopupViewGtk::HandleExpose(GtkWidget* widget,
       icon_start_x = ltr ? (line_rect.width() - kIconLeftPadding - kIconWidth) :
           kIconLeftPadding;
       // Draw the icon for this result.
-      DrawFullImage(cr, widget,
-                    theme_service_->GetImageNamed(
-                        is_selected ? IDR_OMNIBOX_TTS_DARK : IDR_OMNIBOX_TTS),
-                    icon_start_x, line_rect.y() + kIconTopPadding);
+      gtk_util::DrawFullImage(cr, widget,
+                              theme_service_->GetImageNamed(
+                                  is_selected ? IDR_OMNIBOX_TTS_DARK :
+                                  IDR_OMNIBOX_TTS),
+                              icon_start_x, line_rect.y() + kIconTopPadding);
     }
   }
 

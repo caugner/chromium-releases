@@ -18,13 +18,13 @@
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/restore_tab_helper.h"
-#include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -56,6 +56,7 @@ using content::DevToolsAgentHost;
 using content::DevToolsAgentHostRegistry;
 using content::DevToolsClientHost;
 using content::DevToolsManager;
+using content::NativeWebKeyboardEvent;
 using content::NavigationController;
 using content::NavigationEntry;
 using content::OpenURLParams;
@@ -80,8 +81,7 @@ void DevToolsWindow::RegisterUserPrefs(PrefService* prefs) {
 }
 
 // static
-TabContentsWrapper* DevToolsWindow::GetDevToolsContents(
-    WebContents* inspected_tab) {
+TabContents* DevToolsWindow::GetDevToolsContents(WebContents* inspected_tab) {
   if (!inspected_tab)
     return NULL;
 
@@ -101,7 +101,7 @@ TabContentsWrapper* DevToolsWindow::GetDevToolsContents(
 // static
 bool DevToolsWindow::IsDevToolsWindow(RenderViewHost* window_rvh) {
   if (g_instances == NULL)
-    return NULL;
+    return false;
   DevToolsWindowList& instances = g_instances.Get();
   for (DevToolsWindowList::iterator it = instances.begin();
        it != instances.end(); ++it) {
@@ -171,8 +171,8 @@ DevToolsWindow* DevToolsWindow::Create(
     RenderViewHost* inspected_rvh,
     bool docked,
     bool shared_worker_frontend) {
-  // Create TabContentsWrapper with devtools.
-  TabContentsWrapper* tab_contents =
+  // Create TabContents with devtools.
+  TabContents* tab_contents =
       Browser::TabContentsFactory(profile, NULL, MSG_ROUTING_NONE, NULL, NULL);
   tab_contents->web_contents()->GetRenderViewHost()->AllowBindings(
       content::BINDINGS_POLICY_WEB_UI);
@@ -184,7 +184,7 @@ DevToolsWindow* DevToolsWindow::Create(
   return new DevToolsWindow(tab_contents, profile, inspected_rvh, docked);
 }
 
-DevToolsWindow::DevToolsWindow(TabContentsWrapper* tab_contents,
+DevToolsWindow::DevToolsWindow(TabContents* tab_contents,
                                Profile* profile,
                                RenderViewHost* inspected_rvh,
                                bool docked)
@@ -225,9 +225,9 @@ DevToolsWindow::DevToolsWindow(TabContentsWrapper* tab_contents,
           ThemeServiceFactory::GetForProfile(profile_)));
   // There is no inspected_rvh in case of shared workers.
   if (inspected_rvh) {
-    WebContents* tab = inspected_rvh->GetDelegate()->GetAsWebContents();
+    WebContents* tab = WebContents::FromRenderViewHost(inspected_rvh);
     if (tab)
-      inspected_tab_ = TabContentsWrapper::GetCurrentWrapperForContents(tab);
+      inspected_tab_ = TabContents::FromWebContents(tab);
   }
 }
 
@@ -262,13 +262,12 @@ void DevToolsWindow::InspectedContentsClosing() {
 }
 
 void DevToolsWindow::ContentsReplaced(WebContents* new_contents) {
-  TabContentsWrapper* new_tab_wrapper =
-      TabContentsWrapper::GetCurrentWrapperForContents(new_contents);
-  DCHECK(new_tab_wrapper);
-  if (!new_tab_wrapper)
+  TabContents* new_tab_contents = TabContents::FromWebContents(new_contents);
+  DCHECK(new_tab_contents);
+  if (!new_tab_contents)
       return;
-  DCHECK_EQ(profile_, new_tab_wrapper->profile());
-  inspected_tab_ = new_tab_wrapper;
+  DCHECK_EQ(profile_, new_tab_contents->profile());
+  inspected_tab_ = new_tab_contents;
 }
 
 void DevToolsWindow::Show(DevToolsToggleAction action) {
@@ -288,8 +287,8 @@ void DevToolsWindow::Show(DevToolsToggleAction action) {
       inspected_window->UpdateDevTools();
       tab_contents_->web_contents()->GetView()->SetInitialFocus();
       inspected_window->Show();
-      TabStripModel* tabstrip_model = inspected_browser->tabstrip_model();
-      tabstrip_model->ActivateTabAt(inspected_tab_index, true);
+      TabStripModel* tab_strip_model = inspected_browser->tab_strip_model();
+      tab_strip_model->ActivateTabAt(inspected_tab_index, true);
       ScheduleAction(action);
       return;
     } else {
@@ -334,9 +333,9 @@ void DevToolsWindow::RequestSetDocked(bool docked) {
   if (docked) {
     // Detach window from the external devtools browser. It will lead to
     // the browser object's close and delete. Remove observer first.
-    TabStripModel* tabstrip_model = browser_->tabstrip_model();
-    tabstrip_model->DetachTabContentsAt(
-        tabstrip_model->GetIndexOfTabContents(tab_contents_));
+    TabStripModel* tab_strip_model = browser_->tab_strip_model();
+    tab_strip_model->DetachTabContentsAt(
+        tab_strip_model->GetIndexOfTabContents(tab_contents_));
     browser_ = NULL;
   } else {
     // Update inspected window to hide split and reset it.
@@ -379,7 +378,7 @@ void DevToolsWindow::CreateDevToolsBrowser() {
 
   browser_ = Browser::CreateWithParams(
       Browser::CreateParams::CreateForDevTools(profile_));
-  browser_->tabstrip_model()->AddTabContents(
+  browser_->tab_strip_model()->AddTabContents(
       tab_contents_, -1, content::PAGE_TRANSITION_START_PAGE,
       TabStripModel::ADD_ACTIVE);
 }
@@ -458,12 +457,8 @@ void DevToolsWindow::AddDevToolsExtensionsToClient() {
 
 WebContents* DevToolsWindow::OpenURLFromTab(WebContents* source,
                                             const OpenURLParams& params) {
-  if (inspected_tab_) {
-    OpenURLParams forward_params = params;
-    forward_params.disposition = NEW_FOREGROUND_TAB;
-    forward_params.transition = content::PAGE_TRANSITION_LINK;
-    return inspected_tab_->web_contents()->OpenURL(forward_params);
-  }
+  if (inspected_tab_)
+    return inspected_tab_->web_contents()->OpenURL(params);
   return NULL;
 }
 
@@ -589,10 +584,6 @@ void DevToolsWindow::AddNewContents(WebContents* source,
     inspected_tab_->web_contents()->GetDelegate()->AddNewContents(
         source, new_contents, disposition, initial_pos, user_gesture);
   }
-}
-
-bool DevToolsWindow::CanReloadContents(WebContents* source) const {
-  return false;
 }
 
 bool DevToolsWindow::PreHandleKeyboardEvent(

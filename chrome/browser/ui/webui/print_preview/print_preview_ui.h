@@ -12,7 +12,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/time.h"
 #include "chrome/browser/printing/print_preview_data_service.h"
-#include "chrome/browser/ui/webui/constrained_web_dialog_ui.h"
+#include "ui/web_dialogs/constrained_web_dialog_ui.h"
 
 class PrintPreviewDataService;
 class PrintPreviewHandler;
@@ -30,7 +30,7 @@ namespace printing {
 struct PageSizeMargins;
 }
 
-class PrintPreviewUI : public ConstrainedWebDialogUI {
+class PrintPreviewUI : public ui::ConstrainedWebDialogUI {
  public:
   explicit PrintPreviewUI(content::WebUI* web_ui);
   virtual ~PrintPreviewUI();
@@ -62,7 +62,7 @@ class PrintPreviewUI : public ConstrainedWebDialogUI {
   bool source_is_modifiable() { return source_is_modifiable_; }
 
   // Set |source_is_modifiable_| for |print_preview_tab|'s PrintPreviewUI.
-  static void SetSourceIsModifiable(TabContentsWrapper* print_preview_tab,
+  static void SetSourceIsModifiable(TabContents* print_preview_tab,
                                     bool source_is_modifiable);
 
   // Determines whether to cancel a print preview request based on
@@ -140,6 +140,10 @@ class PrintPreviewUI : public ConstrainedWebDialogUI {
   // Reload the printers list.
   void OnReloadPrintersList();
 
+  // Notifies the WebUI that the pdf print scaling option is disabled by
+  // default.
+  void OnPrintPreviewScalingDisabled();
+
  private:
   friend class PrintPreviewHandlerTest;
   FRIEND_TEST_ALL_PREFIXES(PrintPreviewHandlerTest, StickyMarginsCustom);
@@ -177,9 +181,6 @@ class PrintPreviewUI : public ConstrainedWebDialogUI {
 
   // Keeps track of whether OnClosePrintPreviewTab() has been called or not.
   bool tab_closed_;
-
-  // True if the user visited the page directly, false if it's a live UI.
-  bool is_dummy_;
 
   DISALLOW_COPY_AND_ASSIGN(PrintPreviewUI);
 };

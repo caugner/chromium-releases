@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include <gtk/gtk.h>
+#include <pango/pango-font.h>
 
 #include <algorithm>
 #include <vector>
@@ -22,6 +23,7 @@
 #include "ui/base/gtk/menu_label_accelerator_util.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/native_widget_types.h"
+#include "ui/gfx/pango_util.h"
 
 namespace {
 
@@ -304,7 +306,10 @@ void CertificateViewer::FillHierarchyStore(GtkTreeStore* hierarchy_store,
   GtkTreeIter parent;
   GtkTreeIter* parent_ptr = NULL;
   GtkTreeIter iter;
+
   gint index = cert_chain_list_.size() - 1;
+  DCHECK_NE(-1, index);
+
   for (net::X509Certificate::OSCertHandles::const_reverse_iterator i =
           cert_chain_list_.rbegin();
        i != cert_chain_list_.rend(); ++i, --index) {
@@ -320,6 +325,7 @@ void CertificateViewer::FillHierarchyStore(GtkTreeStore* hierarchy_store,
     parent = iter;
     parent_ptr = &parent;
   }
+
   *leaf = iter;
 }
 
@@ -630,11 +636,10 @@ void CertificateViewer::InitDetailsPage() {
                      value_scroll_window, TRUE, TRUE, 0);
 
   gtk_widget_ensure_style(field_value_view);
-  PangoFontDescription* font_desc = pango_font_description_copy(
-      gtk_widget_get_style(field_value_view)->font_desc);
-  pango_font_description_set_family(font_desc, kDetailsFontFamily);
-  gtk_widget_modify_font(field_value_view, font_desc);
-  pango_font_description_free(font_desc);
+  gfx::ScopedPangoFontDescription font_desc(pango_font_description_copy(
+      gtk_widget_get_style(field_value_view)->font_desc));
+  pango_font_description_set_family(font_desc.get(), kDetailsFontFamily);
+  gtk_widget_modify_font(field_value_view, font_desc.get());
 
   GtkWidget* export_hbox = gtk_hbox_new(FALSE, 0);
   gtk_box_pack_start(GTK_BOX(details_page_vbox_), export_hbox,

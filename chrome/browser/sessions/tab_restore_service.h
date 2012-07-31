@@ -104,6 +104,9 @@ class TabRestoreService : public BaseSessionService {
 
     // The associated session storage namespace (if any).
     scoped_refptr<content::SessionStorageNamespace> session_storage_namespace;
+
+    // The user agent override used for the tab's navigations (if applicable).
+    std::string user_agent_override;
   };
 
   // Represents a previously open window.
@@ -176,6 +179,9 @@ class TabRestoreService : public BaseSessionService {
   // Loads the tabs and previous session. This does nothing if the tabs
   // from the previous session have already been loaded.
   void LoadTabsFromLastSession();
+
+  // Returns true if the tab entries have been loaded.
+  bool IsLoaded() const;
 
   // Max number of entries we'll keep around.
   static const size_t kMaxEntries;

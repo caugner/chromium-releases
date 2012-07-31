@@ -31,9 +31,9 @@
 #include "ipc/ipc_message.h"
 #include "ipc/ipc_message_macros.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
-#include "third_party/skia/include/core/SkBitmap.h"
 #include "webkit/glue/resource_type.h"
 
+using extensions::Extension;
 using extensions::ExtensionAPI;
 using content::RenderViewHost;
 using WebKit::WebSecurityOrigin;
@@ -94,6 +94,16 @@ base::LazyInstance<Static> g_global_io_data = LAZY_INSTANCE_INITIALIZER;
 
 }  // namespace
 
+ExtensionWindowController*
+    ExtensionFunctionDispatcher::Delegate::GetExtensionWindowController()
+    const {
+  return NULL;
+}
+
+content::WebContents*
+    ExtensionFunctionDispatcher::Delegate::GetAssociatedWebContents() const {
+  return NULL;
+}
 
 void ExtensionFunctionDispatcher::GetAllFunctionNames(
     std::vector<std::string>* names) {
@@ -240,7 +250,7 @@ ExtensionFunction* ExtensionFunctionDispatcher::CreateExtensionFunction(
     const extensions::ProcessMap& process_map,
     extensions::ExtensionAPI* api,
     void* profile,
-    IPC::Message::Sender* ipc_sender,
+    IPC::Sender* ipc_sender,
     int routing_id) {
   if (!extension) {
     LOG(ERROR) << "Specified extension does not exist.";
@@ -278,7 +288,7 @@ ExtensionFunction* ExtensionFunctionDispatcher::CreateExtensionFunction(
 
 // static
 void ExtensionFunctionDispatcher::SendAccessDenied(
-    IPC::Message::Sender* ipc_sender, int routing_id, int request_id) {
+    IPC::Sender* ipc_sender, int routing_id, int request_id) {
   ListValue empty_list;
   ipc_sender->Send(new ExtensionMsg_Response(
       routing_id, request_id, false, empty_list,

@@ -23,12 +23,14 @@
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_types.h"
-#include "content/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 // This value is used to seed the PRNG at the beginning of a sequence of
 // operations to produce a repeatable sequence.
 #define RANDOM_SEED (0x33F7A7A7)
+
+using extensions::Extension;
 
 // For ExtensionService interface when it requires a path that is not used.
 FilePath bogus_file_path() {
@@ -70,7 +72,7 @@ static scoped_refptr<Extension> CreateExtension(const std::string& name,
       bogus_file_path().AppendASCII(name),
       Extension::INVALID,
       manifest,
-      Extension::STRICT_ERROR_CHECKS,
+      Extension::NO_FLAGS,
       &error);
   // Cannot ASSERT_* here because that attempts an illegitimate return.
   // Cannot EXPECT_NE here because that assumes non-pointers unlike EXPECT_EQ

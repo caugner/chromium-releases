@@ -2,29 +2,19 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/command_line.h"
-#include "base/stringprintf.h"
-#include "base/utf_string_conversions.h"
+#include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/automation/automation_util.h"
-#include "chrome/browser/extensions/extension_apitest.h"
-#include "chrome/browser/extensions/extension_browsertest.h"
-#include "chrome/browser/extensions/extension_host.h"
-#include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_test_message_listener.h"
-#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/render_view_context_menu.h"
+#include "chrome/browser/extensions/extension_test_message_listener.h"
+#include "chrome/browser/extensions/platform_app_browsertest_util.h"
+#include "chrome/browser/extensions/shell_window_registry.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_list.h"
-#include "chrome/common/chrome_switches.h"
-#include "chrome/common/chrome_view_type.h"
-#include "chrome/common/extensions/extension_constants.h"
+#include "chrome/browser/ui/extensions/shell_window.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/public/browser/web_contents.h"
-#include "content/public/common/context_menu_params.h"
-#include "testing/gtest/include/gtest/gtest.h"
-#include "ui/base/models/menu_model.h"
 
 using content::WebContents;
+using extensions::Extension;
 
 namespace {
 // Non-abstract RenderViewContextMenu class.
@@ -33,6 +23,10 @@ class PlatformAppContextMenu : public RenderViewContextMenu {
   PlatformAppContextMenu(WebContents* web_contents,
                          const content::ContextMenuParams& params)
       : RenderViewContextMenu(web_contents, params) {}
+
+  bool HasCommandWithId(int command_id) {
+    return menu_model_.GetIndexOfCommandId(command_id) != -1;
+  }
 
  protected:
   // These two functions implement pure virtual methods of
@@ -47,78 +41,6 @@ class PlatformAppContextMenu : public RenderViewContextMenu {
 
 }  // namespace
 
-class PlatformAppBrowserTest : public ExtensionApiTest {
- public:
-  virtual void SetUpCommandLine(CommandLine* command_line) {
-    ExtensionBrowserTest::SetUpCommandLine(command_line);
-    command_line->AppendSwitch(switches::kEnablePlatformApps);
-    command_line->AppendSwitch(switches::kEnableExperimentalExtensionApis);
-  }
-
- protected:
-  void LoadAndLaunchPlatformApp(const char* name) {
-    size_t platform_app_count = GetPlatformAppCount();
-    ui_test_utils::WindowedNotificationObserver app_loaded_observer(
-        content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME,
-        content::NotificationService::AllSources());
-
-    EXPECT_TRUE(LoadExtension(test_data_dir_.AppendASCII("platform_apps").
-        AppendASCII(name)));
-
-    ExtensionService* service = browser()->profile()->GetExtensionService();
-    const Extension* extension = service->GetExtensionById(
-        last_loaded_extension_id_, false);
-    EXPECT_TRUE(extension);
-
-    Browser::OpenApplication(
-        browser()->profile(),
-        extension,
-        extension_misc::LAUNCH_NONE,
-        GURL(),
-        NEW_WINDOW);
-
-    app_loaded_observer.Wait();
-
-    // Now we have a new platform app running.
-    EXPECT_EQ(platform_app_count + 1, GetPlatformAppCount());
-  }
-
-  // Gets the number of platform apps extension hosts that are running.
-  size_t GetPlatformAppCount() {
-    int count = 0;
-    ExtensionProcessManager* process_manager =
-        browser()->profile()->GetExtensionProcessManager();
-    ExtensionProcessManager::const_iterator iter;
-    ExtensionProcessManager::ExtensionHostSet platform_app_hosts =
-        process_manager->platform_app_hosts();
-    for (iter = platform_app_hosts.begin(); iter != platform_app_hosts.end();
-         ++iter) {
-      if ((*iter)->extension())
-        count++;
-    }
-
-    return count;
-  }
-
-  // Gets the WebContents associated with the ExtensionHost of the first
-  // platform app shell window that is found (most tests only deal with one
-  // platform app window, so this is good enough).
-  WebContents* GetFirstPlatformAppShellWindowWebContents() {
-    ExtensionProcessManager* process_manager =
-        browser()->profile()->GetExtensionProcessManager();
-    ExtensionProcessManager::const_iterator iter;
-    ExtensionProcessManager::ExtensionHostSet platform_app_hosts =
-        process_manager->platform_app_hosts();
-    for (iter = platform_app_hosts.begin(); iter != platform_app_hosts.end();
-         ++iter) {
-      if ((*iter)->extension_host_type() == chrome::VIEW_TYPE_APP_SHELL)
-        return (*iter)->host_contents();
-    }
-
-    return NULL;
-  }
-};
-
 // Tests that platform apps received the "launch" event when launched.
 IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, OnLaunchedEvent) {
   ASSERT_TRUE(RunPlatformAppTest("platform_apps/launch")) << message_;
@@ -126,21 +48,23 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, OnLaunchedEvent) {
 
 IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, EmptyContextMenu) {
   ExtensionTestMessageListener launched_listener("Launched", false);
-  LoadAndLaunchPlatformApp("empty_context_menu");
+  LoadAndLaunchPlatformApp("minimal");
 
   ASSERT_TRUE(launched_listener.WaitUntilSatisfied());
 
   // The empty app doesn't add any context menu items, so its menu should
   // only include the developer tools.
-  WebContents* web_contents = GetFirstPlatformAppShellWindowWebContents();
+  WebContents* web_contents = GetFirstShellWindowWebContents();
   ASSERT_TRUE(web_contents);
   WebKit::WebContextMenuData data;
   content::ContextMenuParams params(data);
   PlatformAppContextMenu* menu = new PlatformAppContextMenu(web_contents,
       params);
   menu->Init();
-  // 3 including separator
-  ASSERT_EQ(3, menu->menu_model().GetItemCount());
+  ASSERT_TRUE(menu->HasCommandWithId(IDC_CONTENT_CONTEXT_INSPECTELEMENT));
+  ASSERT_TRUE(menu->HasCommandWithId(IDC_RELOAD));
+  ASSERT_FALSE(menu->HasCommandWithId(IDC_BACK));
+  ASSERT_FALSE(menu->HasCommandWithId(IDC_SAVE_PAGE));
 }
 
 IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, AppWithContextMenu) {
@@ -153,19 +77,28 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, AppWithContextMenu) {
 
   // The context_menu app has one context menu item. This, along with a
   // separator and the developer tools, is all that should be in the menu.
-  WebContents* web_contents = GetFirstPlatformAppShellWindowWebContents();
+  WebContents* web_contents = GetFirstShellWindowWebContents();
   ASSERT_TRUE(web_contents);
   WebKit::WebContextMenuData data;
   content::ContextMenuParams params(data);
   PlatformAppContextMenu* menu = new PlatformAppContextMenu(web_contents,
       params);
   menu->Init();
-  ASSERT_EQ(4, menu->menu_model().GetItemCount());
+  ASSERT_TRUE(menu->HasCommandWithId(IDC_EXTENSIONS_CONTEXT_CUSTOM_FIRST));
+  ASSERT_TRUE(menu->HasCommandWithId(IDC_CONTENT_CONTEXT_INSPECTELEMENT));
+  ASSERT_TRUE(menu->HasCommandWithId(IDC_RELOAD));
+  ASSERT_FALSE(menu->HasCommandWithId(IDC_BACK));
+  ASSERT_FALSE(menu->HasCommandWithId(IDC_SAVE_PAGE));
 }
 
 IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, DisallowNavigation) {
   ASSERT_TRUE(StartTestServer());
   ASSERT_TRUE(RunPlatformAppTest("platform_apps/navigation")) << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, Iframes) {
+  ASSERT_TRUE(StartTestServer());
+  ASSERT_TRUE(RunPlatformAppTest("platform_apps/iframes")) << message_;
 }
 
 // Tests that localStorage and WebSQL are disabled for platform apps.
@@ -211,4 +144,127 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, Isolation) {
   // Let the platform app request the same URL, and make sure that it doesn't
   // see the cookie.
   ASSERT_TRUE(RunPlatformAppTest("platform_apps/isolation")) << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, ExtensionWindowingApis) {
+  // Initially there should be just the one browser window visible to the
+  // extensions API.
+  const Extension* extension = LoadExtension(
+      test_data_dir_.AppendASCII("common/background_page"));
+  ASSERT_EQ(1U, RunGetWindowsFunctionForExtension(extension));
+
+  // And no shell windows.
+  ASSERT_EQ(0U, GetShellWindowCount());
+
+  // Launch a platform app that shows a window.
+  ExtensionTestMessageListener launched_listener("Launched", false);
+  LoadAndLaunchPlatformApp("minimal");
+  ASSERT_TRUE(launched_listener.WaitUntilSatisfied());
+  ASSERT_EQ(1U, GetShellWindowCount());
+  ShellWindowRegistry::ShellWindowSet shell_windows =
+      ShellWindowRegistry::Get(browser()->profile())->shell_windows();
+  int shell_window_id = (*shell_windows.begin())->session_id().id();
+
+  // But it's not visible to the extensions API, it still thinks there's just
+  // one browser window.
+  ASSERT_EQ(1U, RunGetWindowsFunctionForExtension(extension));
+  // It can't look it up by ID either
+  ASSERT_FALSE(RunGetWindowFunctionForExtension(shell_window_id, extension));
+
+  // The app can also only see one window (its own).
+  // TODO(jeremya): add an extension function to get a shell window by ID, and
+  // to get a list of all the shell windows, so we can test this.
+
+  // Launch another platform app that also shows a window.
+  ExtensionTestMessageListener launched_listener2("Launched", false);
+  LoadAndLaunchPlatformApp("context_menu");
+  ASSERT_TRUE(launched_listener2.WaitUntilSatisfied());
+
+  // There are two total shell windows, but each app can only see its own.
+  ASSERT_EQ(2U, GetShellWindowCount());
+  // TODO(jeremya): as above, this requires more extension functions.
+}
+
+// TODO(benwells): fix these tests for ChromeOS.
+#if !defined(OS_CHROMEOS)
+// Tests that command line parameters get passed through to platform apps
+// via launchData correctly when launching with a file.
+IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, LaunchWithFile) {
+  SetCommandLineArg( "platform_apps/launch_files/test.txt");
+  ASSERT_TRUE(RunPlatformAppTest("platform_apps/launch_file"))
+      << message_;
+}
+
+// Tests that no launch data is sent through if the platform app provides
+// an intent with the wrong action.
+IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, LaunchWithWrongIntent) {
+  SetCommandLineArg("platform_apps/launch_files/test.txt");
+  ASSERT_TRUE(RunPlatformAppTest("platform_apps/launch_wrong_intent"))
+      << message_;
+}
+
+// Tests that no launch data is sent through if the file is of the wrong MIME
+// type.
+IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, LaunchWithWrongType) {
+  SetCommandLineArg("platform_apps/launch_files/test.txt");
+  ASSERT_TRUE(RunPlatformAppTest("platform_apps/launch_wrong_type"))
+      << message_;
+}
+
+// Tests that no launch data is sent through if the platform app does not
+// provide an intent.
+IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, LaunchWithNoIntent) {
+  SetCommandLineArg("platform_apps/launch_files/test.txt");
+  ASSERT_TRUE(RunPlatformAppTest("platform_apps/launch_no_intent"))
+      << message_;
+}
+
+// Tests that no launch data is sent through if the file MIME type cannot
+// be read.
+IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, LaunchNoType) {
+  SetCommandLineArg("platform_apps/launch_files/test.unknownextension");
+  ASSERT_TRUE(RunPlatformAppTest("platform_apps/launch_invalid"))
+      << message_;
+}
+
+// Tests that no launch data is sent through if the file does not exist.
+IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, LaunchNoFile) {
+  SetCommandLineArg("platform_apps/launch_files/doesnotexist.txt");
+  ASSERT_TRUE(RunPlatformAppTest("platform_apps/launch_invalid"))
+      << message_;
+}
+
+// Tests that no launch data is sent through if the argument is a directory.
+IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, LaunchWithDirectory) {
+  SetCommandLineArg("platform_apps/launch_files");
+  ASSERT_TRUE(RunPlatformAppTest("platform_apps/launch_invalid"))
+      << message_;
+}
+
+// Tests that no launch data is sent through if there are no arguments passed
+// on the command line
+IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, LaunchWithNothing) {
+  ClearCommandLineArgs();
+  ASSERT_TRUE(RunPlatformAppTest("platform_apps/launch_nothing"))
+      << message_;
+}
+
+// Test that platform apps can use the chrome.fileSystem.getDisplayPath
+// function to get the native file system path of a file they are launched with.
+IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, GetDisplayPath) {
+  SetCommandLineArg("platform_apps/launch_files/test.txt");
+  ASSERT_TRUE(RunPlatformAppTest("platform_apps/get_display_path"))
+      << message_;
+}
+
+#endif  // defined(OS_CHROMEOS)
+
+IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, OpenLink) {
+  ASSERT_TRUE(StartTestServer());
+  ui_test_utils::WindowedNotificationObserver observer(
+      chrome::NOTIFICATION_TAB_ADDED,
+      content::Source<content::WebContentsDelegate>(browser()));
+  LoadAndLaunchPlatformApp("open_link");
+  observer.Wait();
+  ASSERT_EQ(2, browser()->tab_count());
 }

@@ -6,28 +6,16 @@
   {
     "namespace": "extension",
     "nocompile": true,
-    "dependencies": [ "tabs" ],
+    "dependencies": [ "events", "tabs" ],
     "types": [
       {
         "id": "MessageSender",
         "type": "object",
         "description": "An object containing information about the script context that sent a message or request.",
         "properties": {
-          "tab": {"$ref": "Tab", "optional": true, "description":"This property will <b>only</b> be present when the connection was opened from a tab or content script."},
+          "tab": {"$ref": "tabs.Tab", "optional": true, "description":"This property will <b>only</b> be present when the connection was opened from a tab or content script."},
           "id": {"type": "string", "description": "The extension ID of the extension that opened the connection."}
         }
-      },
-      {
-        "id": "Event",
-        "type": "object",
-        "description": "An object which allows the addition and removal of listeners for a Chrome event.",
-        "properties": {
-          "addListener": {"type": "function"},
-          "removeListener": {"type": "function"},
-          "hasListener": {"type": "function"},
-          "hasListeners": {"type": "function"}
-        },
-        "additionalProperties": { "type": "any"}
       },
       {
         "id": "Port",
@@ -35,8 +23,8 @@
         "description": "An object which allows two way communication with other pages.",
         "properties": {
           "name": {"type": "string"},
-          "onDisconnect": { "$ref": "Event" },
-          "onMessage": { "$ref": "Event" },
+          "onDisconnect": { "$ref": "events.Event" },
+          "onMessage": { "$ref": "events.Event" },
           "postMessage": {"type": "function"},
           "sender": {
             "$ref": "MessageSender",

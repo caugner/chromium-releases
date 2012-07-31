@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,6 @@
 #include <vector>
 
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/process.h"
 #include "ipc/ipc_channel_proxy.h"
 #include "ppapi/c/pp_instance.h"
@@ -47,8 +46,7 @@ class PPAPI_PROXY_EXPORT HostDispatcher : public Dispatcher {
   // SyncMessageStatusReceiver.
   //
   // You must call InitHostWithChannel after the constructor.
-  HostDispatcher(base::ProcessHandle host_process_handle,
-                 PP_Module module,
+  HostDispatcher(PP_Module module,
                  PP_GetInterface_Func local_get_interface,
                  SyncMessageStatusReceiver* sync_status);
   ~HostDispatcher();
@@ -136,8 +134,7 @@ class PPAPI_PROXY_EXPORT HostDispatcher : public Dispatcher {
 // dispatcher) from being deleted out from under you. This is necessary when
 // calling some scripting functions that may delete the plugin.
 //
-// This may only be called in the host. The parameter is a plain Dispatcher
-// since that's what most callers have.
+// This class does nothing if used on the plugin side.
 class ScopedModuleReference {
  public:
   explicit ScopedModuleReference(Dispatcher* dispatcher);

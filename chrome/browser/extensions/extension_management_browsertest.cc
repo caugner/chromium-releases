@@ -15,7 +15,7 @@
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
@@ -23,6 +23,8 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/common/url_fetcher.h"
+
+using extensions::Extension;
 
 class ExtensionManagementTest : public ExtensionBrowserTest {
  protected:
@@ -117,7 +119,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementTest, InstallRequiresConfirm) {
 
   // And the install should succeed when the permissions are accepted.
   ASSERT_TRUE(InstallExtensionWithUIAutoConfirm(
-      test_data_dir_.AppendASCII("good.crx"), 1, browser()->profile()));
+      test_data_dir_.AppendASCII("good.crx"), 1, browser()));
   UninstallExtension(id);
 }
 

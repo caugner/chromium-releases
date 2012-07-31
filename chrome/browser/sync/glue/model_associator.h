@@ -8,8 +8,8 @@
 
 #include "base/basictypes.h"
 #include "base/synchronization/lock.h"
-#include "chrome/browser/sync/api/sync_error.h"
-#include "sync/syncable/model_type.h"
+#include "sync/api/sync_error.h"
+#include "sync/internal_api/public/syncable/model_type.h"
 
 namespace sync_api {
 class BaseNode;

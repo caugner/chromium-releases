@@ -7,32 +7,29 @@
 #pragma once
 
 #include <deque>
+#include <string>
 
-#include "chrome/browser/cancelable_request.h"
-#include "chrome/browser/history/history_types.h"
+#include "base/basictypes.h"
+#include "base/compiler_specific.h"
 #include "chrome/browser/ui/webui/ntp/suggestions_source.h"
-#include "content/public/common/url_fetcher_delegate.h"
 
 class SuggestionsCombiner;
 class Profile;
-class URLFetcher;
 
 namespace base {
 class DictionaryValue;
 }
 
-// A source that suggests websites the user might find interesting.
-class SuggestionsSourceDiscovery : public SuggestionsSource,
-                                   public content::URLFetcherDelegate {
+// A source linked to a single extension using the discovery API to suggest
+// websites the user might find interesting.
+class SuggestionsSourceDiscovery : public SuggestionsSource {
  public:
-  SuggestionsSourceDiscovery();
+  explicit SuggestionsSourceDiscovery(const std::string& extension_id);
   virtual ~SuggestionsSourceDiscovery();
-
-  // content::URLFetcherDelegate override and implementation.
-  virtual void OnURLFetchComplete(const content::URLFetcher* source) OVERRIDE;
 
  protected:
   // SuggestionsSource overrides:
+  virtual void SetDebug(bool enable) OVERRIDE;
   virtual int GetWeight() OVERRIDE;
   virtual int GetItemCount() OVERRIDE;
   virtual base::DictionaryValue* PopItem() OVERRIDE;
@@ -46,8 +43,11 @@ class SuggestionsSourceDiscovery : public SuggestionsSource,
   // Keep the results fetched from the discovery service here.
   std::deque<base::DictionaryValue*> items_;
 
-  // Fetcher for the recommended pages.
-  scoped_ptr<content::URLFetcher> recommended_fetcher_;
+  // The extension associated with this source.
+  std::string extension_id_;
+
+  // Whether the source should provide additional debug information or not.
+  bool debug_;
 
   DISALLOW_COPY_AND_ASSIGN(SuggestionsSourceDiscovery);
 };

@@ -19,6 +19,7 @@ class NativePanelTestingWin;
 class Panel;
 class PanelBoundsAnimation;
 class PanelBrowserFrameView;
+class TaskbarWindowThumbnailerWin;
 
 // A browser view that implements Panel specific behavior.
 class PanelBrowserView : public BrowserView,
@@ -32,6 +33,9 @@ class PanelBrowserView : public BrowserView,
   Panel* panel() const { return panel_.get(); }
   bool closed() const { return closed_; }
   bool focused() const { return focused_; }
+  bool force_to_paint_as_inactive() const {
+    return force_to_paint_as_inactive_;
+  }
 
   PanelBrowserFrameView* GetFrameView() const;
 
@@ -109,11 +113,11 @@ class PanelBrowserView : public BrowserView,
   virtual void DrawAttention(bool draw_attention) OVERRIDE;
   virtual bool IsDrawingAttention() const OVERRIDE;
   virtual bool PreHandlePanelKeyboardEvent(
-      const NativeWebKeyboardEvent& event,
+      const content::NativeWebKeyboardEvent& event,
       bool* is_keyboard_shortcut) OVERRIDE;
   virtual void FullScreenModeChanged(bool is_full_screen) OVERRIDE;
   virtual void HandlePanelKeyboardEvent(
-      const NativeWebKeyboardEvent& event) OVERRIDE;
+      const content::NativeWebKeyboardEvent& event) OVERRIDE;
   virtual gfx::Size WindowSizeFromContentSize(
       const gfx::Size& content_size) const OVERRIDE;
   virtual gfx::Size ContentSizeFromWindowSize(
@@ -125,6 +129,10 @@ class PanelBrowserView : public BrowserView,
   virtual void SetPanelAlwaysOnTop(bool on_top) OVERRIDE;
   virtual void EnableResizeByMouse(bool enable) OVERRIDE;
   virtual void UpdatePanelMinimizeRestoreButtonVisibility() OVERRIDE;
+  virtual void PanelExpansionStateChanging(
+      Panel::ExpansionState old_state,
+      Panel::ExpansionState new_state) OVERRIDE;
+  virtual NativePanelTesting* CreateNativePanelTesting() OVERRIDE;
 
   // Overridden from AnimationDelegate:
   virtual void AnimationEnded(const ui::Animation* animation) OVERRIDE;
@@ -175,11 +183,20 @@ class PanelBrowserView : public BrowserView,
   // Is the panel in highlighted state to draw people's attention?
   bool is_drawing_attention_;
 
+  // Should we force to paint the panel as inactive? This is needed when we need
+  // to capture the screenshot before an active panel goes minimized.
+  bool force_to_paint_as_inactive_;
+
   // The last view that had focus in the panel. This is saved so that focus can
   // be restored properly when a drag ends.
   views::View* old_focused_view_;
 
   content::NotificationRegistrar registrar_;
+
+#if defined(OS_WIN) && !defined(USE_ASH) && !defined(USE_AURA)
+  // Used to provide custom taskbar thumbnail for Windows 7 and later.
+  scoped_ptr<TaskbarWindowThumbnailerWin> thumbnailer_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(PanelBrowserView);
 };

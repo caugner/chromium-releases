@@ -12,8 +12,8 @@
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/common/jstemplate_builder.h"
-#include "chrome/common/render_messages.h"
 #include "chrome/common/prerender_messages.h"
+#include "chrome/common/render_messages.h"
 #include "chrome/renderer/chrome_content_renderer_client.h"
 #include "chrome/renderer/custom_menu_commands.h"
 #include "chrome/renderer/plugins/plugin_uma.h"
@@ -22,9 +22,6 @@
 #include "grit/generated_resources.h"
 #include "grit/renderer_resources.h"
 #include "grit/webkit_strings.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebData.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebPoint.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebVector.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebContextMenuData.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebElement.h"
@@ -36,7 +33,11 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScriptSource.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebTextCaseSensitivity.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebData.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebPoint.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebVector.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "webkit/glue/webpreferences.h"
 #include "webkit/plugins/npapi/plugin_group.h"
@@ -63,12 +64,35 @@ using WebKit::WebString;
 using WebKit::WebURLRequest;
 using WebKit::WebVector;
 using webkit::WebViewPlugin;
+using webkit_glue::CppArgumentList;
+using webkit_glue::CppVariant;
 
 const char* const kPluginPlaceholderDataURL =
     "chrome://pluginplaceholderdata/";
 
+#if defined(ENABLE_MOBILE_YOUTUBE_PLUGIN)
+// Strings we used to parse the youtube plugin url.
+const char* const kSlashVSlash = "/v/";
+const char* const kSlashESlash = "/e/";
+#endif
+
 namespace {
 const PluginPlaceholder* g_last_active_menu = NULL;
+
+#if defined(ENABLE_MOBILE_YOUTUBE_PLUGIN)
+// Helper function to get the youtube id from plugin params for old style
+// embedded youtube video.
+std::string GetYoutubeVideoId(const WebPluginParams& params) {
+  GURL url(params.url);
+  std::string video_id = url.path().substr(strlen(kSlashVSlash));
+
+  // Extract just the video id
+  size_t video_id_end = video_id.find('&');
+  if (video_id_end != std::string::npos)
+    video_id = video_id.substr(0, video_id_end);
+  return video_id;
+}
+#endif
 }
 
 // static
@@ -78,7 +102,7 @@ PluginPlaceholder* PluginPlaceholder::CreateMissingPlugin(
     const WebPluginParams& params) {
   const base::StringPiece template_html(
       ResourceBundle::GetSharedInstance().GetRawDataResource(
-          IDR_BLOCKED_PLUGIN_HTML));
+          IDR_BLOCKED_PLUGIN_HTML, ui::SCALE_FACTOR_NONE));
 
   DictionaryValue values;
   values.SetString("message", l10n_util::GetStringUTF8(IDS_PLUGIN_SEARCHING));
@@ -109,7 +133,7 @@ PluginPlaceholder* PluginPlaceholder::CreateErrorPlugin(
 
   const base::StringPiece template_html(
       ResourceBundle::GetSharedInstance().GetRawDataResource(
-          IDR_BLOCKED_PLUGIN_HTML));
+          IDR_BLOCKED_PLUGIN_HTML, ui::SCALE_FACTOR_NONE));
   std::string html_data =
       jstemplate_builder::GetI18nTemplateHtml(template_html, &values);
 
@@ -118,6 +142,9 @@ PluginPlaceholder* PluginPlaceholder::CreateErrorPlugin(
   PluginPlaceholder* plugin = new PluginPlaceholder(
       render_view, NULL, params, html_data, params.mimeType);
 
+  RenderThread::Get()->Send(
+      new ChromeViewHostMsg_CouldNotLoadPlugin(plugin->routing_id(),
+                                               file_path));
   return plugin;
 }
 
@@ -127,6 +154,7 @@ PluginPlaceholder* PluginPlaceholder::CreateBlockedPlugin(
     WebFrame* frame,
     const WebPluginParams& params,
     const WebPluginInfo& plugin,
+    const std::string& identifier,
     const string16& name,
     int template_id,
     int message_id) {
@@ -138,7 +166,8 @@ PluginPlaceholder* PluginPlaceholder::CreateBlockedPlugin(
   values.SetString("hide", l10n_util::GetStringUTF8(IDS_PLUGIN_HIDE));
 
   const base::StringPiece template_html(
-      ResourceBundle::GetSharedInstance().GetRawDataResource(template_id));
+      ResourceBundle::GetSharedInstance().GetRawDataResource(
+          template_id, ui::SCALE_FACTOR_NONE));
 
   DCHECK(!template_html.empty()) << "unable to load template. ID: "
                                  << template_id;
@@ -149,8 +178,31 @@ PluginPlaceholder* PluginPlaceholder::CreateBlockedPlugin(
   PluginPlaceholder* blocked_plugin = new PluginPlaceholder(
       render_view, frame, params, html_data, name);
   blocked_plugin->plugin_info_ = plugin;
+  blocked_plugin->identifier_ = identifier;
   return blocked_plugin;
 }
+
+#if defined(ENABLE_MOBILE_YOUTUBE_PLUGIN)
+// static
+PluginPlaceholder* PluginPlaceholder::CreateMobileYoutubePlugin(
+    content::RenderView* render_view,
+    WebFrame* frame,
+    const WebPluginParams& params) {
+  const base::StringPiece template_html(
+      ResourceBundle::GetSharedInstance().GetRawDataResource(
+          IDR_YOUTUBE_PLUGIN_HTML, ui::SCALE_FACTOR_NONE));
+
+  DictionaryValue values;
+  values.SetString("video_id", GetYoutubeVideoId(params));
+  std::string html_data = jstemplate_builder::GetI18nTemplateHtml(
+      template_html, &values);
+
+  // |youtube_plugin| will destroy itself when its WebViewPlugin is going away.
+  PluginPlaceholder* youtube_plugin = new PluginPlaceholder(
+      render_view, frame, params, html_data, params.mimeType);
+  return youtube_plugin;
+}
+#endif
 
 PluginPlaceholder::PluginPlaceholder(content::RenderView* render_view,
                                      WebFrame* frame,
@@ -215,6 +267,11 @@ void PluginPlaceholder::BindWebFrame(WebFrame* frame) {
   BindCallback("didFinishLoading",
                base::Bind(&PluginPlaceholder::DidFinishLoadingCallback,
                base::Unretained(this)));
+#if defined(ENABLE_MOBILE_YOUTUBE_PLUGIN)
+  BindCallback("openYoutubeURL",
+               base::Bind(&PluginPlaceholder::OpenYoutubeUrlCallback,
+               base::Unretained(this)));
+#endif
 }
 
 bool PluginPlaceholder::OnMessageReceived(const IPC::Message& message) {
@@ -473,7 +530,10 @@ void PluginPlaceholder::ShowContextMenu(const WebMouseEvent& event) {
   g_last_active_menu = this;
 }
 
-void PluginPlaceholder::OnLoadBlockedPlugins() {
+void PluginPlaceholder::OnLoadBlockedPlugins(const std::string& identifier) {
+  if (!identifier.empty() && identifier != identifier_)
+    return;
+
   RenderThread::Get()->RecordUserMetrics("Plugin_Load_UI");
   LoadPlugin();
 }
@@ -528,3 +588,51 @@ void PluginPlaceholder::DidFinishLoadingCallback(const CppArgumentList& args,
   if (message_.length() > 0)
     UpdateMessage();
 }
+
+#if defined(ENABLE_MOBILE_YOUTUBE_PLUGIN)
+void PluginPlaceholder::OpenYoutubeUrlCallback(const CppArgumentList& args,
+                                               CppVariant* result) {
+  std::string youtube("vnd.youtube:");
+  GURL url(youtube.append(GetYoutubeVideoId(plugin_params_)));
+  WebURLRequest request;
+  request.initialize();
+  request.setURL(url);
+  render_view()->LoadURLExternally(
+      frame_, request, WebKit::WebNavigationPolicyCurrentTab);
+}
+
+bool PluginPlaceholder::IsValidYouTubeVideo(const std::string& path) {
+  unsigned len = strlen(kSlashVSlash);
+
+  // check for more than just /v/ or /e/.
+  if (path.length() <= len)
+    return false;
+
+  std::string str = StringToLowerASCII(path);
+  // Youtube flash url can start with /v/ or /e/.
+  if (strncmp(str.data(), kSlashVSlash, len) != 0 &&
+      strncmp(str.data(), kSlashESlash, len) != 0)
+    return false;
+
+  // Start after /v/
+  for (unsigned i = len; i < path.length(); i++) {
+    char c = str[i];
+    if (isalpha(c) || isdigit(c) || c == '_' || c == '-')
+      continue;
+    // The url can have more parameters such as &hl=en after the video id.
+    // Once we start seeing extra parameters we can return true.
+    return c == '&' && i > len;
+  }
+  return true;
+}
+
+bool PluginPlaceholder::IsYouTubeURL(const GURL& url,
+                                       const std::string& mime_type) {
+  std::string host = url.host();
+  bool is_youtube = EndsWith(host, "youtube.com", true) ||
+      EndsWith(host, "youtube-nocookie.com", true);
+
+  return is_youtube && IsValidYouTubeVideo(url.path()) &&
+      LowerCaseEqualsASCII(mime_type, "application/x-shockwave-flash");
+}
+#endif

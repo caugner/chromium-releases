@@ -23,23 +23,26 @@
 #include "base/rand_util.h"
 #include "base/string_number_conversions.h"
 #include "base/test/test_timeouts.h"
+#include "base/threading/platform_thread.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/history/history.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_test_util.h"
 #include "chrome/browser/tab_contents/thumbnail_generator.h"
 #include "chrome/browser/ui/app_modal_dialogs/app_modal_dialog.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/find_bar/find_notification_details.h"
 #include "chrome/browser/ui/find_bar/find_tab_helper.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension_action.h"
@@ -54,12 +57,11 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
-#include "content/public/browser/render_view_host_delegate.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_view.h"
 #include "content/public/common/geoposition.h"
-#include "content/test/test_navigation_observer.h"
+#include "content/public/test/test_navigation_observer.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_util.h"
 #include "net/test/python_utils.h"
@@ -79,6 +81,7 @@
 #endif
 
 using content::DomOperationNotificationDetails;
+using content::NativeWebKeyboardEvent;
 using content::NavigationController;
 using content::NavigationEntry;
 using content::OpenURLParams;
@@ -98,7 +101,7 @@ class DOMOperationObserver : public content::NotificationObserver,
  public:
   explicit DOMOperationObserver(RenderViewHost* render_view_host)
       : content::WebContentsObserver(
-            render_view_host->GetDelegate()->GetAsWebContents()),
+            WebContents::FromRenderViewHost(render_view_host)),
         did_respond_(false) {
     registrar_.Add(this, content::NOTIFICATION_DOM_OPERATION_RESPONSE,
                    content::Source<RenderViewHost>(render_view_host));
@@ -135,7 +138,7 @@ class DOMOperationObserver : public content::NotificationObserver,
 
 class FindInPageNotificationObserver : public content::NotificationObserver {
  public:
-  explicit FindInPageNotificationObserver(TabContentsWrapper* parent_tab)
+  explicit FindInPageNotificationObserver(TabContents* parent_tab)
       : parent_tab_(parent_tab),
         active_match_ordinal_(-1),
         number_of_matches_(0) {
@@ -173,7 +176,7 @@ class FindInPageNotificationObserver : public content::NotificationObserver {
 
  private:
   content::NotificationRegistrar registrar_;
-  TabContentsWrapper* parent_tab_;
+  TabContents* parent_tab_;
   // We will at some point (before final update) be notified of the ordinal and
   // we need to preserve it so we can send it later.
   int active_match_ordinal_;
@@ -249,28 +252,13 @@ bool ExecuteJavaScriptHelper(RenderViewHost* render_view_host,
   if (!result)
     return true;
 
-  // Wrap |json| in an array before deserializing because valid JSON has an
-  // array or an object as the root.
-  json.insert(0, "[");
-  json.append("]");
-
-  scoped_ptr<Value> root_val(
-      base::JSONReader::Read(json, base::JSON_ALLOW_TRAILING_COMMAS));
-  if (!root_val->IsType(Value::TYPE_LIST)) {
-    DLOG(ERROR) << "JSON result is not a list.";
+  base::JSONReader reader(base::JSON_ALLOW_TRAILING_COMMAS);
+  result->reset(reader.ReadToValue(json));
+  if (!result->get()) {
+    DLOG(ERROR) << reader.GetErrorMessage();
     return false;
   }
 
-  ListValue* list = static_cast<ListValue*>(root_val.get());
-  Value* result_val;
-  if (!list || !list->GetSize() ||
-      // Remove gives us ownership of the value.
-      !list->Remove(0, &result_val)) {
-    DLOG(ERROR) << "JSON result list is empty.";
-    return false;
-  }
-
-  result->reset(result_val);
   return true;
 }
 
@@ -327,7 +315,7 @@ void RunAllPendingInMessageLoop(content::BrowserThread::ID thread_id) {
 }
 
 bool GetCurrentTabTitle(const Browser* browser, string16* title) {
-  WebContents* web_contents = browser->GetSelectedWebContents();
+  WebContents* web_contents = browser->GetActiveWebContents();
   if (!web_contents)
     return false;
   NavigationEntry* last_entry = web_contents->GetController().GetActiveEntry();
@@ -339,7 +327,7 @@ bool GetCurrentTabTitle(const Browser* browser, string16* title) {
 
 void WaitForNavigations(NavigationController* controller,
                         int number_of_navigations) {
-  TestNavigationObserver observer(
+  content::TestNavigationObserver observer(
       content::Source<NavigationController>(controller), NULL,
       number_of_navigations);
   observer.WaitForObservation(
@@ -349,16 +337,17 @@ void WaitForNavigations(NavigationController* controller,
 }
 
 void WaitForNewTab(Browser* browser) {
-  TestNotificationObserver observer;
-  RegisterAndWait(&observer, chrome::NOTIFICATION_TAB_ADDED,
-                  content::Source<content::WebContentsDelegate>(browser));
+  WindowedNotificationObserver observer(
+      chrome::NOTIFICATION_TAB_ADDED,
+      content::Source<content::WebContentsDelegate>(browser));
+  observer.Wait();
 }
 
 void WaitForBrowserActionUpdated(ExtensionAction* browser_action) {
-  TestNotificationObserver observer;
-  RegisterAndWait(&observer,
-                  chrome::NOTIFICATION_EXTENSION_BROWSER_ACTION_UPDATED,
-                  content::Source<ExtensionAction>(browser_action));
+  WindowedNotificationObserver observer(
+      chrome::NOTIFICATION_EXTENSION_BROWSER_ACTION_UPDATED,
+      content::Source<ExtensionAction>(browser_action));
+  observer.Wait();
 }
 
 void WaitForLoadStop(WebContents* tab) {
@@ -373,14 +362,14 @@ void WaitForLoadStop(WebContents* tab) {
 }
 
 Browser* WaitForNewBrowser() {
-  TestNotificationObserver observer;
-  RegisterAndWait(&observer, chrome::NOTIFICATION_BROWSER_WINDOW_READY,
-                   content::NotificationService::AllSources());
+  WindowedNotificationObserver observer(
+      chrome::NOTIFICATION_BROWSER_WINDOW_READY,
+      content::NotificationService::AllSources());
+  observer.Wait();
   return content::Source<Browser>(observer.source()).ptr();
 }
 
 Browser* WaitForBrowserNotInSet(std::set<Browser*> excluded_browsers) {
-  TestNotificationObserver observer;
   Browser* new_browser = GetBrowserNotInSet(excluded_browsers);
   if (new_browser == NULL) {
     new_browser = WaitForNewBrowser();
@@ -390,15 +379,22 @@ Browser* WaitForBrowserNotInSet(std::set<Browser*> excluded_browsers) {
   return new_browser;
 }
 
+void WaitEventSignaled(base::WaitableEvent* event) {
+  while (!event->IsSignaled()) {
+    base::PlatformThread::YieldCurrentThread();
+    RunAllPendingInMessageLoop();
+  }
+}
+
 void OpenURLOffTheRecord(Profile* profile, const GURL& url) {
   Browser::OpenURLOffTheRecord(profile, url);
-  Browser* browser = BrowserList::FindTabbedBrowser(
+  Browser* browser = browser::FindTabbedBrowser(
       profile->GetOffTheRecordProfile(), false);
-  WaitForNavigations(&browser->GetSelectedWebContents()->GetController(), 1);
+  WaitForNavigations(&browser->GetActiveWebContents()->GetController(), 1);
 }
 
 void NavigateToURL(browser::NavigateParams* params) {
-  TestNavigationObserver observer(
+  content::TestNavigationObserver observer(
       content::NotificationService::AllSources(), NULL, 1);
   browser::Navigate(params);
   observer.WaitForObservation(
@@ -423,12 +419,12 @@ static void NavigateToURLWithDispositionBlockUntilNavigationsComplete(
     int number_of_navigations,
     WindowOpenDisposition disposition,
     int browser_test_flags) {
-  if (disposition == CURRENT_TAB && browser->GetSelectedWebContents())
-    WaitForLoadStop(browser->GetSelectedWebContents());
+  if (disposition == CURRENT_TAB && browser->GetActiveWebContents())
+    WaitForLoadStop(browser->GetActiveWebContents());
   NavigationController* controller =
-      browser->GetSelectedWebContents() ?
-      &browser->GetSelectedWebContents()->GetController() : NULL;
-  TestNavigationObserver same_tab_observer(
+      browser->GetActiveWebContents() ?
+      &browser->GetActiveWebContents()->GetController() : NULL;
+  content::TestNavigationObserver same_tab_observer(
       content::Source<NavigationController>(controller),
       NULL,
       number_of_navigations);
@@ -472,7 +468,7 @@ static void NavigateToURLWithDispositionBlockUntilNavigationsComplete(
       (disposition == NEW_FOREGROUND_TAB) ||
       (disposition == SINGLETON_TAB)) {
     // The currently selected tab is the right one.
-    web_contents = browser->GetSelectedWebContents();
+    web_contents = browser->GetActiveWebContents();
   }
   if (disposition == CURRENT_TAB) {
     same_tab_observer.WaitForObservation(
@@ -516,7 +512,7 @@ void NavigateToURLBlockUntilNavigationsComplete(Browser* browser,
 DOMElementProxyRef GetActiveDOMDocument(Browser* browser) {
   JavaScriptExecutionController* executor =
       new InProcessJavaScriptExecutionController(
-          browser->GetSelectedWebContents()->GetRenderViewHost());
+          browser->GetActiveWebContents()->GetRenderViewHost());
   int element_handle;
   executor->ExecuteJavaScriptAndGetReturn("document;", &element_handle);
   return executor->GetObjectProxy<DOMElementProxy>(element_handle);
@@ -591,9 +587,10 @@ GURL GetFileUrlWithQuery(const FilePath& path,
 }
 
 AppModalDialog* WaitForAppModalDialog() {
-  TestNotificationObserver observer;
-  RegisterAndWait(&observer, chrome::NOTIFICATION_APP_MODAL_DIALOG_SHOWN,
-                  content::NotificationService::AllSources());
+  WindowedNotificationObserver observer(
+      chrome::NOTIFICATION_APP_MODAL_DIALOG_SHOWN,
+      content::NotificationService::AllSources());
+  observer.Wait();
   return content::Source<AppModalDialog>(observer.source()).ptr();
 }
 
@@ -604,13 +601,14 @@ void WaitForAppModalDialogAndCloseIt() {
 
 void CrashTab(WebContents* tab) {
   content::RenderProcessHost* rph = tab->GetRenderProcessHost();
+  WindowedNotificationObserver observer(
+      content::NOTIFICATION_RENDERER_PROCESS_CLOSED,
+      content::Source<content::RenderProcessHost>(rph));
   base::KillProcess(rph->GetHandle(), 0, false);
-  TestNotificationObserver observer;
-  RegisterAndWait(&observer, content::NOTIFICATION_RENDERER_PROCESS_CLOSED,
-                  content::Source<content::RenderProcessHost>(rph));
+  observer.Wait();
 }
 
-int FindInPage(TabContentsWrapper* tab_contents, const string16& search_string,
+int FindInPage(TabContents* tab_contents, const string16& search_string,
                bool forward, bool match_case, int* ordinal) {
   tab_contents->
       find_tab_helper()->StartFinding(search_string, forward, match_case);
@@ -636,6 +634,16 @@ void SimulateMouseClick(content::WebContents* tab) {
   mouse_event.clickCount = 1;
   tab->GetRenderViewHost()->ForwardMouseEvent(mouse_event);
   mouse_event.type = WebKit::WebInputEvent::MouseUp;
+  tab->GetRenderViewHost()->ForwardMouseEvent(mouse_event);
+}
+
+void SimulateMouseEvent(content::WebContents* tab,
+                        WebKit::WebInputEvent::Type type,
+                        const gfx::Point& point) {
+  WebKit::WebMouseEvent mouse_event;
+  mouse_event.type = type;
+  mouse_event.x = point.x();
+  mouse_event.y = point.y();
   tab->GetRenderViewHost()->ForwardMouseEvent(mouse_event);
 }
 
@@ -725,9 +733,7 @@ void WaitForTemplateURLServiceToLoad(TemplateURLService* service) {
   ASSERT_TRUE(service->loaded());
 }
 
-void WaitForHistoryToLoad(Browser* browser) {
-  HistoryService* history_service =
-      browser->profile()->GetHistoryService(Profile::EXPLICIT_ACCESS);
+void WaitForHistoryToLoad(HistoryService* history_service) {
   WindowedNotificationObserver history_loaded_observer(
       chrome::NOTIFICATION_HISTORY_LOADED,
       content::NotificationService::AllSources());
@@ -740,7 +746,7 @@ bool GetNativeWindow(const Browser* browser, gfx::NativeWindow* native_window) {
   if (!window)
     return false;
 
-  *native_window = window->GetNativeHandle();
+  *native_window = window->GetNativeWindow();
   return *native_window;
 }
 
@@ -894,6 +900,8 @@ bool TestWebSocketServer::Start(const FilePath& root_directory) {
     LOG(ERROR) << "Unable to create a temporary directory.";
     return false;
   }
+  cmd_line->AppendArgNative(FILE_PATH_LITERAL("--output-dir=") +
+                            temp_dir_.path().value());
   websocket_pid_file_ = temp_dir_.path().AppendASCII("websocket.pid");
   cmd_line->AppendArgNative(FILE_PATH_LITERAL("--pidfile=") +
                             websocket_pid_file_.value());
@@ -1003,55 +1011,38 @@ TestWebSocketServer::~TestWebSocketServer() {
 #endif
 }
 
-TestNotificationObserver::TestNotificationObserver()
-    : source_(content::NotificationService::AllSources()) {
-}
-
-TestNotificationObserver::~TestNotificationObserver() {}
-
-void TestNotificationObserver::Observe(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
-  source_ = source;
-  details_ = details;
-  MessageLoopForUI::current()->Quit();
-}
-
 WindowedNotificationObserver::WindowedNotificationObserver(
     int notification_type,
     const content::NotificationSource& source)
     : seen_(false),
       running_(false),
-      waiting_for_(source) {
-  registrar_.Add(this, notification_type, waiting_for_);
+      source_(content::NotificationService::AllSources()) {
+  registrar_.Add(this, notification_type, source);
 }
 
 WindowedNotificationObserver::~WindowedNotificationObserver() {}
 
 void WindowedNotificationObserver::Wait() {
-  if (seen_ || (waiting_for_ == content::NotificationService::AllSources() &&
-                !sources_seen_.empty())) {
+  if (seen_)
     return;
-  }
 
   running_ = true;
   ui_test_utils::RunMessageLoop();
-  running_ = false;
+  EXPECT_TRUE(seen_);
 }
 
 void WindowedNotificationObserver::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
-  if (waiting_for_ == source ||
-      (running_ && waiting_for_ == content::NotificationService::AllSources())) {
-    seen_ = true;
-    if (running_)
-      MessageLoopForUI::current()->Quit();
-  } else {
-    sources_seen_.insert(source.map_key());
-  }
+  source_ = source;
+  details_ = details;
+  seen_ = true;
+  if (!running_)
+    return;
+
+  MessageLoopForUI::current()->Quit();
+  running_ = false;
 }
 
 WindowedTabAddedNotificationObserver::WindowedTabAddedNotificationObserver(
@@ -1097,23 +1088,6 @@ void TitleWatcher::AlsoWaitForTitle(const string16& expected_title) {
 TitleWatcher::~TitleWatcher() {
 }
 
-BrowserAddedObserver::BrowserAddedObserver()
-    : notification_observer_(
-          chrome::NOTIFICATION_BROWSER_OPENED,
-          content::NotificationService::AllSources()) {
-  original_browsers_.insert(BrowserList::begin(), BrowserList::end());
-}
-
-BrowserAddedObserver::~BrowserAddedObserver() {
-}
-
-Browser* BrowserAddedObserver::WaitForSingleNewBrowser() {
-  notification_observer_.Wait();
-  // Ensure that only a single new browser has appeared.
-  EXPECT_EQ(original_browsers_.size() + 1, BrowserList::size());
-  return GetBrowserNotInSet(original_browsers_);
-}
-
 const string16& TitleWatcher::WaitAndGetTitle() {
   if (expected_title_observed_)
     return observed_title_;
@@ -1148,7 +1122,24 @@ void TitleWatcher::Observe(int type,
     MessageLoopForUI::current()->Quit();
 }
 
-DOMMessageQueue::DOMMessageQueue() {
+BrowserAddedObserver::BrowserAddedObserver()
+    : notification_observer_(
+          chrome::NOTIFICATION_BROWSER_OPENED,
+          content::NotificationService::AllSources()) {
+  original_browsers_.insert(BrowserList::begin(), BrowserList::end());
+}
+
+BrowserAddedObserver::~BrowserAddedObserver() {
+}
+
+Browser* BrowserAddedObserver::WaitForSingleNewBrowser() {
+  notification_observer_.Wait();
+  // Ensure that only a single new browser has appeared.
+  EXPECT_EQ(original_browsers_.size() + 1, BrowserList::size());
+  return GetBrowserNotInSet(original_browsers_);
+}
+
+DOMMessageQueue::DOMMessageQueue() : waiting_for_message_(false) {
   registrar_.Add(this, content::NOTIFICATION_DOM_OPERATION_RESPONSE,
                  content::NotificationService::AllSources());
 }
@@ -1200,7 +1191,6 @@ class SnapshotTaker {
     snapshot_taken_ = false;
     generator->AskForSnapshot(
         rwh,
-        false,  // don't use backing_store
         base::Bind(&SnapshotTaker::OnSnapshotTaken, base::Unretained(this)),
         page_size,
         desired_size);

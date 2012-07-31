@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "content/test/test_renderer_host.h"
+#include "content/public/test/test_renderer_host.h"
 
 #include "content/browser/renderer_host/render_view_host_factory.h"
 #include "content/browser/renderer_host/test_render_view_host.h"
@@ -10,18 +10,12 @@
 #include "content/browser/web_contents/navigation_entry_impl.h"
 #include "content/browser/web_contents/test_web_contents.h"
 #include "content/public/browser/web_contents.h"
-#include "content/test/mock_render_process_host.h"
-#include "content/test/test_browser_context.h"
+#include "content/public/test/mock_render_process_host.h"
+#include "content/public/test/test_browser_context.h"
 #include "content/test/test_render_view_host_factory.h"
 
 #if defined(USE_AURA)
-#include "ui/aura/env.h"
-#include "ui/aura/monitor_manager.h"
-#include "ui/aura/root_window.h"
-#include "ui/aura/single_monitor_manager.h"
-#include "ui/aura/test/test_screen.h"
-#include "ui/aura/test/test_stacking_client.h"
-#include "ui/gfx/screen.h"
+#include "ui/aura/test/aura_test_helper.h"
 #endif
 
 namespace content {
@@ -112,7 +106,7 @@ void RenderViewHostTestHarness::SetContents(WebContents* contents) {
 WebContents* RenderViewHostTestHarness::CreateTestWebContents() {
   // See comment above browser_context_ decl for why we check for NULL here.
   if (!browser_context_.get())
-    browser_context_.reset(new TestBrowserContext());
+    browser_context_.reset(new content::TestBrowserContext());
 
   // This will be deleted when the WebContentsImpl goes away.
   SiteInstance* instance = SiteInstance::Create(browser_context_.get());
@@ -134,22 +128,17 @@ void RenderViewHostTestHarness::Reload() {
 
 void RenderViewHostTestHarness::SetUp() {
 #if defined(USE_AURA)
-  aura::Env::GetInstance()->SetMonitorManager(new aura::SingleMonitorManager);
-  root_window_.reset(aura::MonitorManager::CreateRootWindowForPrimaryMonitor());
-  gfx::Screen::SetInstance(new aura::TestScreen(root_window_.get()));
-  test_stacking_client_.reset(
-      new aura::test::TestStackingClient(root_window_.get()));
-#endif  // USE_AURA
+  aura_test_helper_.reset(new aura::test::AuraTestHelper(&message_loop_));
+  aura_test_helper_->SetUp();
+#endif
   SetContents(CreateTestWebContents());
 }
 
 void RenderViewHostTestHarness::TearDown() {
   SetContents(NULL);
 #if defined(USE_AURA)
-  test_stacking_client_.reset();
-  root_window_.reset();
+  aura_test_helper_->TearDown();
 #endif
-
   // Make sure that we flush any messages related to WebContentsImpl destruction
   // before we destroy the browser context.
   MessageLoop::current()->RunAllPending();

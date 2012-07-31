@@ -23,7 +23,7 @@
 #include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -120,8 +120,12 @@ class PasswordStoreWinTest : public testing::Test {
   virtual void TearDown() {
     if (store_.get())
       store_->ShutdownOnUIThread();
-    if (wds_.get())
-      wds_->Shutdown();
+    wds_->ShutdownOnUIThread();
+    wds_ = NULL;
+    base::WaitableEvent done(false, false);
+    BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
+        base::Bind(&base::WaitableEvent::Signal, base::Unretained(&done)));
+    done.Wait();
     MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
     MessageLoop::current()->Run();
     db_thread_.Stop();
@@ -250,7 +254,6 @@ TEST_F(PasswordStoreWinTest, DISABLED_OutstandingWDSQueries) {
   // Release the PSW and the WDS before the query can return.
   store_->ShutdownOnUIThread();
   store_ = NULL;
-  wds_->Shutdown();
   wds_ = NULL;
 
   MessageLoop::current()->RunAllPending();

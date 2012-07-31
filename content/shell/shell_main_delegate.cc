@@ -7,13 +7,12 @@
 #include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/path_service.h"
+#include "content/public/browser/browser_main_runner.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
 #include "content/shell/shell_browser_main.h"
 #include "content/shell/shell_content_browser_client.h"
-#include "content/shell/shell_content_plugin_client.h"
 #include "content/shell/shell_content_renderer_client.h"
-#include "content/shell/shell_content_utility_client.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_paths.h"
 
@@ -34,12 +33,7 @@ bool ShellMainDelegate::BasicStartupComplete(int* exit_code) {
 #if defined(OS_MACOSX)
   OverrideFrameworkBundlePath();
 #endif
-  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
-  std::string process_type =
-      command_line.GetSwitchValueASCII(switches::kProcessType);
   content::SetContentClient(&content_client_);
-  InitializeShellContentClient(process_type);
-
   return false;
 }
 
@@ -50,68 +44,23 @@ void ShellMainDelegate::PreSandboxStartup() {
   InitializeResourceBundle();
 }
 
-void ShellMainDelegate::SandboxInitialized(const std::string& process_type) {
-}
-
 int ShellMainDelegate::RunProcess(
     const std::string& process_type,
     const content::MainFunctionParams& main_function_params) {
-  if (process_type != "")
+  if (!process_type.empty())
     return -1;
 
+#if !defined(OS_ANDROID)
   return ShellBrowserMain(main_function_params);
-}
+#else
+  // If no process type is specified, we are creating the main browser process.
+  browser_runner_.reset(content::BrowserMainRunner::Create());
+  int exit_code = browser_runner_->Initialize(main_function_params);
+  DCHECK(exit_code < 0)
+      << "BrowserRunner::Initialize failed in ShellMainDelegate";
 
-void ShellMainDelegate::ProcessExiting(const std::string& process_type) {
-}
-
-#if defined(OS_MACOSX)
-bool ShellMainDelegate::ProcessRegistersWithSystemProcess(
-    const std::string& process_type) {
-  return false;
-}
-
-bool ShellMainDelegate::ShouldSendMachPort(const std::string& process_type) {
-  // There are no auxiliary-type processes.
-  return true;
-}
-
-bool ShellMainDelegate::DelaySandboxInitialization(
-    const std::string& process_type) {
-  return false;
-}
-
-#elif defined(OS_POSIX)
-content::ZygoteForkDelegate* ShellMainDelegate::ZygoteStarting() {
-  return NULL;
-}
-
-void ShellMainDelegate::ZygoteForked() {
-  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
-  std::string process_type =
-      command_line.GetSwitchValueASCII(switches::kProcessType);
-  InitializeShellContentClient(process_type);
-}
-#endif  // OS_MACOSX
-
-void ShellMainDelegate::InitializeShellContentClient(
-    const std::string& process_type) {
-  if (process_type.empty()) {
-    browser_client_.reset(new content::ShellContentBrowserClient);
-    content::GetContentClient()->set_browser(browser_client_.get());
-  }
-
-  if (process_type == switches::kRendererProcess ||
-      CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess)) {
-    renderer_client_.reset(new content::ShellContentRendererClient);
-    content::GetContentClient()->set_renderer(renderer_client_.get());
-  } else if (process_type == switches::kPluginProcess) {
-    plugin_client_.reset(new content::ShellContentPluginClient);
-    content::GetContentClient()->set_plugin(plugin_client_.get());
-  } else if (process_type == switches::kUtilityProcess) {
-    utility_client_.reset(new content::ShellContentUtilityClient);
-    content::GetContentClient()->set_utility(utility_client_.get());
-  }
+  return exit_code;
+#endif
 }
 
 void ShellMainDelegate::InitializeResourceBundle() {
@@ -131,4 +80,15 @@ void ShellMainDelegate::InitializeResourceBundle() {
   pak_file = pak_dir.Append(FILE_PATH_LITERAL("content_shell.pak"));
 #endif
   ui::ResourceBundle::InitSharedInstanceWithPakFile(pak_file);
+}
+
+content::ContentBrowserClient* ShellMainDelegate::CreateContentBrowserClient() {
+  browser_client_.reset(new content::ShellContentBrowserClient);
+  return browser_client_.get();
+}
+
+content::ContentRendererClient*
+    ShellMainDelegate::CreateContentRendererClient() {
+  renderer_client_.reset(new content::ShellContentRendererClient);
+  return renderer_client_.get();
 }

@@ -13,6 +13,7 @@
 #include "base/stl_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/ui/gtk/event_utils.h"
 #include "chrome/browser/ui/gtk/gtk_custom_menu.h"
 #include "chrome/browser/ui/gtk/gtk_custom_menu_item.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
@@ -234,7 +235,7 @@ GtkWidget* MenuGtk::Delegate::GetDefaultImageForCommandId(int command_id) {
       stock = GTK_STOCK_QUIT;
       break;
 
-    case IDC_HELP_PAGE:
+    case IDC_HELP_PAGE_VIA_MENU:
       stock = GTK_STOCK_HELP;
       break;
 
@@ -421,7 +422,7 @@ GtkWidget* MenuGtk::BuildMenuItemWithImage(const std::string& label,
 
 GtkWidget* MenuGtk::BuildMenuItemWithImage(const std::string& label,
                                            const SkBitmap& icon) {
-  GdkPixbuf* pixbuf = gfx::GdkPixbufFromSkBitmap(&icon);
+  GdkPixbuf* pixbuf = gfx::GdkPixbufFromSkBitmap(icon);
   GtkWidget* menu_item = BuildMenuItemWithImage(label,
       gtk_image_new_from_pixbuf(pixbuf));
   g_object_unref(pixbuf);
@@ -445,7 +446,7 @@ void MenuGtk::BuildSubmenuFromModel(ui::MenuModel* model, GtkWidget* menu) {
   std::map<int, GtkWidget*> radio_groups;
   GtkWidget* menu_item = NULL;
   for (int i = 0; i < model->GetItemCount(); ++i) {
-    SkBitmap icon;
+    gfx::ImageSkia icon;
     std::string label = ui::ConvertAcceleratorsFromWindowsStyle(
         UTF16ToUTF8(model->GetLabelAt(i)));
     bool connect_to_activate = true;
@@ -759,6 +760,9 @@ void MenuGtk::OnSubMenuShow(GtkWidget* submenu) {
   // Notify the submenu model that the menu will be shown.
   ui::MenuModel* submenu_model = static_cast<ui::MenuModel*>(
       g_object_get_data(G_OBJECT(menu_item), "submenu-model"));
+  // TODO(mdm): Figure out why this can sometimes be NULL. See bug 131974.
+  if (!submenu_model)
+    return;
   submenu_model->MenuWillShow();
 
   // Actually build the submenu and attach it to the parent menu item.
@@ -876,9 +880,9 @@ void MenuGtk::SetMenuItemInfo(GtkWidget* widget, gpointer userdata) {
 
         gtk_menu_item_set_label(GTK_MENU_ITEM(widget), label.c_str());
         if (GTK_IS_IMAGE_MENU_ITEM(widget)) {
-          SkBitmap icon;
+          gfx::ImageSkia icon;
           if (model->GetIconAt(id, &icon)) {
-            GdkPixbuf* pixbuf = gfx::GdkPixbufFromSkBitmap(&icon);
+            GdkPixbuf* pixbuf = gfx::GdkPixbufFromSkBitmap(icon);
             gtk_image_menu_item_set_image(GTK_IMAGE_MENU_ITEM(widget),
                                           gtk_image_new_from_pixbuf(pixbuf));
             g_object_unref(pixbuf);

@@ -58,6 +58,7 @@ class BrowserOptionsHandler
   // ShellIntegration::DefaultWebClientObserver implementation.
   virtual void SetDefaultWebClientUIState(
       ShellIntegration::DefaultWebClientUIState state) OVERRIDE;
+  virtual bool IsInteractiveSetDefaultPermitted() OVERRIDE;
 
   // TemplateURLServiceObserver implementation.
   virtual void OnTemplateURLServiceChanged() OVERRIDE;
@@ -108,9 +109,6 @@ class BrowserOptionsHandler
   // whether Chrome will auto-launch at login.
   void CheckAutoLaunchCallback(bool is_in_auto_launch_group,
                                bool will_launch_at_login);
-
-  // Called to request information about the Instant field trial.
-  void GetInstantFieldTrialStatus(const base::ListValue* args);
 
   // Returns the string ID for the given default browser state.
   int StatusStringIdForState(ShellIntegration::DefaultWebClientState state);
@@ -250,6 +248,9 @@ class BrowserOptionsHandler
 
   // Setup the visibility for the metrics reporting setting.
   void SetupMetricsReportingSettingVisibility();
+
+  // Setup the visibility for the password generation setting.
+  void SetupPasswordGenerationSettingVisibility();
 
   // Setup the font size selector control.
   void SetupFontSizeSelector();

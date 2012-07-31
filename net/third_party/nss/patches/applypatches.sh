@@ -24,18 +24,20 @@ patch -p6 < $patches_dir/clientauth.patch
 
 patch -p6 < $patches_dir/didhandshakeresume.patch
 
-patch -p6 < $patches_dir/origin_bound_certs.patch
-
 patch -p6 < $patches_dir/negotiatedextension.patch
 
 patch -p6 < $patches_dir/getrequestedclientcerttypes.patch
 
 patch -p6 < $patches_dir/restartclientauth.patch
 
-patch -p6 < $patches_dir/encryptedclientcerts.patch
-
 patch -p4 < $patches_dir/dtls.patch
 
 patch -p5 < $patches_dir/falsestartnpn.patch
 
 patch -p5 < $patches_dir/dhvalues.patch
+
+patch -p4 < $patches_dir/channelid.patch
+
+patch -p4 < $patches_dir/dtlssrtp.patch
+
+patch -p4 < $patches_dir/keylog.patch

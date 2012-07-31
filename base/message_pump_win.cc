@@ -6,22 +6,26 @@
 
 #include <math.h>
 
+#include "base/debug/trace_event.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/process_util.h"
-#include "base/stringprintf.h"
 #include "base/win/wrapped_window_proc.h"
 
 namespace {
 
-// The ID of the timer used by the UI message pump.
-const int kMessagePumpTimerId = 0;
+enum MessageLoopProblems {
+  MESSAGE_POST_ERROR,
+  COMPLETION_POST_ERROR,
+  SET_TIMER_ERROR,
+  MESSAGE_LOOP_PROBLEM_MAX,
+};
 
 }  // namespace
 
 namespace base {
 
-static const wchar_t kWndClassFormat[] = L"Chrome_MessagePumpWindow%p";
+static const wchar_t kWndClass[] = L"Chrome_MessagePumpWindow";
 
 // Message sent to get an additional time slice for pumping (processing) another
 // task (a series of such messages creates a continuous task pump).
@@ -91,19 +95,13 @@ int MessagePumpWin::GetCurrentDelay() const {
 //-----------------------------------------------------------------------------
 // MessagePumpForUI public:
 
-MessagePumpForUI::MessagePumpForUI()
-    : atom_(0),
-      instance_(NULL),
-      message_hwnd_(NULL) {
+MessagePumpForUI::MessagePumpForUI() : instance_(NULL) {
   InitMessageWnd();
 }
 
 MessagePumpForUI::~MessagePumpForUI() {
-  if (message_hwnd_ != NULL)
-    DestroyWindow(message_hwnd_);
-
-  if (atom_ != 0)
-    UnregisterClass(reinterpret_cast<const char16*>(atom_), instance_);
+  DestroyWindow(message_hwnd_);
+  UnregisterClass(kWndClass, instance_);
 }
 
 void MessagePumpForUI::ScheduleWork() {
@@ -111,7 +109,22 @@ void MessagePumpForUI::ScheduleWork() {
     return;  // Someone else continued the pumping.
 
   // Make sure the MessagePump does some work for us.
-  PostMessage(message_hwnd_, kMsgHaveWork, 0, 0);
+  BOOL ret = PostMessage(message_hwnd_, kMsgHaveWork,
+                         reinterpret_cast<WPARAM>(this), 0);
+  if (ret)
+    return;  // There was room in the Window Message queue.
+
+  // We have failed to insert a have-work message, so there is a chance that we
+  // will starve tasks/timers while sitting in a nested message loop.  Nested
+  // loops only look at Windows Message queues, and don't look at *our* task
+  // queues, etc., so we might not get a time slice in such. :-(
+  // We could abort here, but the fear is that this failure mode is plausibly
+  // common (queue is full, of about 2000 messages), so we'll do a near-graceful
+  // recovery.  Nested loops are pretty transient (we think), so this will
+  // probably be recoverable.
+  InterlockedExchange(&have_work_, 0);  // Clarify that we didn't really insert.
+  UMA_HISTOGRAM_ENUMERATION("Chrome.MessageLoopProblem", MESSAGE_POST_ERROR,
+                            MESSAGE_LOOP_PROBLEM_MAX);
 }
 
 void MessagePumpForUI::ScheduleDelayedWork(const TimeTicks& delayed_work_time) {
@@ -144,7 +157,15 @@ void MessagePumpForUI::ScheduleDelayedWork(const TimeTicks& delayed_work_time) {
 
   // Create a WM_TIMER event that will wake us up to check for any pending
   // timers (in case we are running within a nested, external sub-pump).
-  SetTimer(message_hwnd_, kMessagePumpTimerId, delay_msec, NULL);
+  BOOL ret = SetTimer(message_hwnd_, reinterpret_cast<UINT_PTR>(this),
+                      delay_msec, NULL);
+  if (ret)
+    return;
+  // If we can't set timers, we are in big trouble... but cross our fingers for
+  // now.
+  // TODO(jar): If we don't see this error, use a CHECK() here instead.
+  UMA_HISTOGRAM_ENUMERATION("Chrome.MessageLoopProblem", SET_TIMER_ERROR,
+                            MESSAGE_LOOP_PROBLEM_MAX);
 }
 
 void MessagePumpForUI::PumpOutPendingPaintMessages() {
@@ -177,19 +198,13 @@ void MessagePumpForUI::PumpOutPendingPaintMessages() {
 // static
 LRESULT CALLBACK MessagePumpForUI::WndProcThunk(
     HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) {
-  // Retrieve |this| from the user data, associated with the window.
-  MessagePumpForUI* self = reinterpret_cast<MessagePumpForUI*>(
-      GetWindowLongPtr(hwnd, GWLP_USERDATA));
-  if (self != NULL) {
-    switch (message) {
-      case kMsgHaveWork:
-        self->HandleWorkMessage();
-        break;
-      case WM_TIMER:
-        DCHECK(wparam == kMessagePumpTimerId);
-        self->HandleTimerMessage();
-        break;
-    }
+  switch (message) {
+    case kMsgHaveWork:
+      reinterpret_cast<MessagePumpForUI*>(wparam)->HandleWorkMessage();
+      break;
+    case WM_TIMER:
+      reinterpret_cast<MessagePumpForUI*>(wparam)->HandleTimerMessage();
+      break;
   }
   return DefWindowProc(hwnd, message, wparam, lparam);
 }
@@ -232,7 +247,7 @@ void MessagePumpForUI::DoRunLoop() {
     // don't want to disturb that timer if it is already in flight.  However,
     // if we did do all remaining delayed work, then lets kill the WM_TIMER.
     if (more_work_is_plausible && delayed_work_time_.is_null())
-      KillTimer(message_hwnd_, kMessagePumpTimerId);
+      KillTimer(message_hwnd_, reinterpret_cast<UINT_PTR>(this));
     if (state_->should_quit)
       break;
 
@@ -251,38 +266,17 @@ void MessagePumpForUI::DoRunLoop() {
 }
 
 void MessagePumpForUI::InitMessageWnd() {
-  // Register a unique window class for each instance of UI pump.
-  string16 class_name = base::StringPrintf(kWndClassFormat, this);
-  WNDPROC window_procedure = &base::win::WrappedWindowProc<WndProcThunk>;
-
-  // RegisterClassEx uses a handle of the module containing the window procedure
-  // to distinguish identically named classes registered in different modules.
-  instance_ = GetModuleFromAddress(window_procedure);
-
-  WNDCLASSEXW wc = {0};
+  WNDCLASSEX wc = {0};
   wc.cbSize = sizeof(wc);
-  wc.lpfnWndProc = window_procedure;
-  wc.hInstance = instance_;
-  wc.lpszClassName = class_name.c_str();
-  atom_ = RegisterClassEx(&wc);
-  if (atom_ == 0) {
-    DCHECK(atom_);
-    return;
-  }
+  wc.lpfnWndProc = base::win::WrappedWindowProc<WndProcThunk>;
+  wc.hInstance = base::GetModuleFromAddress(wc.lpfnWndProc);
+  wc.lpszClassName = kWndClass;
+  instance_ = wc.hInstance;
+  RegisterClassEx(&wc);
 
-  // Create the message-only window.
-  message_hwnd_ = CreateWindow(
-      reinterpret_cast<const char16*>(atom_), 0, 0, 0, 0, 0, 0, HWND_MESSAGE, 0,
-      instance_, 0);
-  if (message_hwnd_ == NULL) {
-    DCHECK(message_hwnd_);
-    return;
-  }
-
-  // Store |this| so that the window procedure could retrieve it later.
-  SetWindowLongPtr(message_hwnd_,
-                   GWLP_USERDATA,
-                   reinterpret_cast<LONG_PTR>(this));
+  message_hwnd_ =
+      CreateWindow(kWndClass, 0, 0, 0, 0, 0, 0, HWND_MESSAGE, 0, instance_, 0);
+  DCHECK(message_hwnd_);
 }
 
 void MessagePumpForUI::WaitForWork() {
@@ -341,7 +335,7 @@ void MessagePumpForUI::HandleWorkMessage() {
 }
 
 void MessagePumpForUI::HandleTimerMessage() {
-  KillTimer(message_hwnd_, kMessagePumpTimerId);
+  KillTimer(message_hwnd_, reinterpret_cast<UINT_PTR>(this));
 
   // If we are being called outside of the context of Run, then don't do
   // anything.  This could correspond to a MessageBox call or something of
@@ -374,6 +368,8 @@ bool MessagePumpForUI::ProcessNextWindowsMessage() {
 }
 
 bool MessagePumpForUI::ProcessMessageHelper(const MSG& msg) {
+  TRACE_EVENT1("base", "MessagePumpForUI::ProcessMessageHelper",
+               "message", msg.message);
   if (WM_QUIT == msg.message) {
     // Repost the QUIT message so that it will be retrieved by the primary
     // GetMessage() loop.
@@ -461,7 +457,13 @@ void MessagePumpForIO::ScheduleWork() {
   BOOL ret = PostQueuedCompletionStatus(port_, 0,
                                         reinterpret_cast<ULONG_PTR>(this),
                                         reinterpret_cast<OVERLAPPED*>(this));
-  DCHECK(ret);
+  if (ret)
+    return;  // Post worked perfectly.
+
+  // See comment in MessagePumpForUI::ScheduleWork() for this error recovery.
+  InterlockedExchange(&have_work_, 0);  // Clarify that we didn't succeed.
+  UMA_HISTOGRAM_ENUMERATION("Chrome.MessageLoopProblem", COMPLETION_POST_ERROR,
+                            MESSAGE_LOOP_PROBLEM_MAX);
 }
 
 void MessagePumpForIO::ScheduleDelayedWork(const TimeTicks& delayed_work_time) {

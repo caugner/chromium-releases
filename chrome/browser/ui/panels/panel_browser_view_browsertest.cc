@@ -30,6 +30,10 @@
 #include "ui/views/controls/link.h"
 #include "ui/views/controls/textfield/textfield.h"
 
+// BasePanelBrowserTest now creates refactored Panels. Refactor
+// has only been done for Mac panels so far.
+#if 0
+
 class PanelBrowserViewTest : public BasePanelBrowserTest {
  public:
   PanelBrowserViewTest() : BasePanelBrowserTest() { }
@@ -48,7 +52,7 @@ class PanelBrowserViewTest : public BasePanelBrowserTest {
   }
 
   gfx::NativeWindow GetNativeWindow(Panel* panel) const {
-    return GetBrowserView(panel)->GetNativeHandle();
+    return GetBrowserView(panel)->GetNativeWindow();
   }
 
   PanelBoundsAnimation* GetBoundsAnimator(Panel* panel) const {
@@ -119,8 +123,8 @@ class PanelBrowserViewTest : public BasePanelBrowserTest {
 
   void ClosePanelAndWaitForNotification(Panel* panel) {
     ui_test_utils::WindowedNotificationObserver signal(
-        chrome::NOTIFICATION_BROWSER_CLOSED,
-        content::Source<Browser>(panel->browser()));
+        chrome::NOTIFICATION_PANEL_CLOSED,
+        content::Source<Panel>(panel));
     panel->Close();
     signal.Wait();
   }
@@ -395,7 +399,7 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserViewTest, CreatePanelInactive) {
 IN_PROC_BROWSER_TEST_F(PanelBrowserViewTest, PanelLayout) {
   // Create a fixed-size panel to avoid possible collapsing of the title
   // if the enforced min sizes are too small.
-  Panel* panel = CreatePanelWithBounds("PanelTest", gfx::Rect(0, 0, 100, 50));
+  Panel* panel = CreatePanelWithBounds("PanelTest", gfx::Rect(0, 0, 200, 50));
 
   views::View* title_icon = GetTitleIcon(panel);
   views::View* title_text = GetTitleText(panel);
@@ -485,3 +489,5 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserViewTest,
   TestChangeAutoHideTaskBarThickness();
 }
 #endif
+
+#endif  // #if 0 - until Panel refactored for Views

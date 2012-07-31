@@ -8,16 +8,17 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
+#include "chrome/browser/sync/invalidations/invalidator_storage.h"
 #include "chrome/browser/sync/sync_prefs.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/test/test_browser_thread.h"
-#include "content/test/test_url_fetcher_factory.h"
+#include "content/public/test/test_browser_thread.h"
+#include "content/public/test/test_url_fetcher_factory.h"
 #include "googleurl/src/gurl.h"
-#include "sync/engine/model_safe_worker.h"
+#include "sync/internal_api/public/engine/model_safe_worker.h"
+#include "sync/internal_api/public/syncable/model_type.h"
+#include "sync/internal_api/public/util/experiments.h"
 #include "sync/protocol/encryption.pb.h"
 #include "sync/protocol/sync_protocol_error.h"
-#include "sync/syncable/model_type.h"
-#include "sync/util/experiments.h"
 #include "sync/util/test_unrecoverable_error_handler.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -93,8 +94,10 @@ TEST_F(SyncBackendHostTest, InitShutdown) {
   profile.CreateRequestContext();
 
   SyncPrefs sync_prefs(profile.GetPrefs());
+  InvalidatorStorage invalidator_storage(profile.GetPrefs());
   SyncBackendHost backend(profile.GetDebugName(),
-                          &profile, sync_prefs.AsWeakPtr());
+                          &profile, sync_prefs.AsWeakPtr(),
+                          invalidator_storage.AsWeakPtr());
 
   MockSyncFrontend mock_frontend;
   sync_api::SyncCredentials credentials;

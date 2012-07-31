@@ -7,6 +7,7 @@
 
 #include "base/memory/scoped_vector.h"
 #include "base/time.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/intents/web_intent_inline_disposition_delegate.h"
@@ -14,7 +15,7 @@
 #include "chrome/browser/ui/intents/web_intent_picker_delegate.h"
 #include "chrome/browser/ui/intents/web_intent_picker_model.h"
 #include "chrome/browser/ui/intents/web_intent_picker_model_observer.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/views/constrained_window_views.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/location_bar/location_icon_view.h"
@@ -114,7 +115,7 @@ StarsView::StarsView(double rating)
 
   for (int i = 0; i < 5; ++i) {
     views::ImageView* image = new views::ImageView();
-    image->SetImage(rb.GetBitmapNamed(
+    image->SetImage(rb.GetImageSkiaNamed(
         WebIntentPicker::GetNthStarImageIdFromCWSRating(rating, i)));
     AddChildView(image);
   }
@@ -144,20 +145,20 @@ class ThrobberNativeTextButton : public views::NativeTextButton {
   void StopThrobber();
 
   // Set the throbber bitmap to use. IDR_THROBBER is used by default.
-  void SetFrames(const SkBitmap* frames);
+  void SetFrames(const gfx::ImageSkia* frames);
 
  protected:
-  virtual const SkBitmap& GetImageToPaint() const OVERRIDE;
+  virtual const gfx::ImageSkia& GetImageToPaint() const OVERRIDE;
 
  private:
   // The timer callback to schedule painting this view.
   void Run();
 
-  // Bitmap that contains the throbber frames.
-  const SkBitmap* frames_;
+  // Image that contains the throbber frames.
+  const gfx::ImageSkia* frames_;
 
   // The currently displayed frame, given to GetImageToPaint.
-  mutable SkBitmap this_frame_;
+  mutable gfx::ImageSkia this_frame_;
 
   // How long one frame is displayed.
   base::TimeDelta frame_time_;
@@ -184,7 +185,7 @@ ThrobberNativeTextButton::ThrobberNativeTextButton(
       frame_count_(0),
       running_(false) {
   SetFrames(ui::ResourceBundle::GetSharedInstance().GetImageNamed(
-      IDR_THROBBER).ToSkBitmap());
+      IDR_THROBBER).ToImageSkia());
 }
 
 ThrobberNativeTextButton::~ThrobberNativeTextButton() {
@@ -210,7 +211,7 @@ void ThrobberNativeTextButton::StopThrobber() {
   running_ = false;
 }
 
-void ThrobberNativeTextButton::SetFrames(const SkBitmap* frames) {
+void ThrobberNativeTextButton::SetFrames(const gfx::ImageSkia* frames) {
   frames_ = frames;
   DCHECK(frames_->width() > 0 && frames_->height() > 0);
   DCHECK(frames_->width() % frames_->height() == 0);
@@ -218,7 +219,7 @@ void ThrobberNativeTextButton::SetFrames(const SkBitmap* frames) {
   PreferredSizeChanged();
 }
 
-const SkBitmap& ThrobberNativeTextButton::GetImageToPaint() const {
+const gfx::ImageSkia& ThrobberNativeTextButton::GetImageToPaint() const {
   if (!running_)
     return NativeTextButton::GetImageToPaint();
 
@@ -504,7 +505,7 @@ SuggestedExtensionsRowView::SuggestedExtensionsRowView(
   SetLayoutManager(new SuggestedExtensionsLayout);
 
   icon_ = new views::ImageView();
-  icon_->SetImage(extension_->icon.ToSkBitmap());
+  icon_->SetImage(extension_->icon.ToImageSkia());
   AddChildView(icon_);
 
   string16 elided_title = ui::ElideText(
@@ -661,7 +662,7 @@ class WebIntentPickerViews : public views::ButtonListener,
                              public ServiceButtonsView::Delegate,
                              public SuggestedExtensionsRowView::Delegate {
  public:
-  WebIntentPickerViews(TabContentsWrapper* tab_contents,
+  WebIntentPickerViews(TabContents* tab_contents,
                        WebIntentPickerDelegate* delegate,
                        WebIntentPickerModel* model);
   virtual ~WebIntentPickerViews();
@@ -686,6 +687,7 @@ class WebIntentPickerViews : public views::ButtonListener,
   virtual void SetActionString(const string16& action) OVERRIDE;
   virtual void OnExtensionInstallSuccess(const std::string& id) OVERRIDE;
   virtual void OnExtensionInstallFailure(const std::string& id) OVERRIDE;
+  virtual void OnInlineDispositionAutoResize(const gfx::Size& size) OVERRIDE;
   virtual void OnInlineDispositionWebContentsLoaded(
       content::WebContents* web_contents) OVERRIDE;
 
@@ -748,8 +750,8 @@ class WebIntentPickerViews : public views::ButtonListener,
   // Delegate for inline disposition tab contents.
   scoped_ptr<WebIntentInlineDispositionDelegate> inline_disposition_delegate_;
 
-  // A weak pointer to the wrapper of the WebContents this picker is in.
-  TabContentsWrapper* wrapper_;
+  // A weak pointer to the TabContents this picker is in.
+  TabContents* tab_contents_;
 
   // A weak pointer to the WebView that hosts the WebContents being displayed.
   // Created locally, owned by Views.
@@ -785,16 +787,13 @@ class WebIntentPickerViews : public views::ButtonListener,
 };
 
 // static
-WebIntentPicker* WebIntentPicker::Create(TabContentsWrapper* wrapper,
+WebIntentPicker* WebIntentPicker::Create(TabContents* tab_contents,
                                          WebIntentPickerDelegate* delegate,
                                          WebIntentPickerModel* model) {
-  WebIntentPickerViews* picker =
-      new WebIntentPickerViews(wrapper, delegate, model);
-
-  return picker;
+  return new WebIntentPickerViews(tab_contents, delegate, model);
 }
 
-WebIntentPickerViews::WebIntentPickerViews(TabContentsWrapper* wrapper,
+WebIntentPickerViews::WebIntentPickerViews(TabContents* tab_contents,
                                            WebIntentPickerDelegate* delegate,
                                            WebIntentPickerModel* model)
     : delegate_(delegate),
@@ -803,8 +802,8 @@ WebIntentPickerViews::WebIntentPickerViews(TabContentsWrapper* wrapper,
       action_label_(NULL),
       suggestions_label_(NULL),
       extensions_(NULL),
-      wrapper_(wrapper),
-      webview_(new views::WebView(wrapper->profile())),
+      tab_contents_(tab_contents),
+      webview_(new views::WebView(tab_contents->profile())),
       contents_(NULL),
       window_(NULL),
       more_suggestions_link_(NULL),
@@ -814,7 +813,7 @@ WebIntentPickerViews::WebIntentPickerViews(TabContentsWrapper* wrapper,
   InitContents();
 
   // Show the dialog.
-  window_ = new ConstrainedWindowViews(wrapper, this);
+  window_ = new ConstrainedWindowViews(tab_contents, this);
 }
 
 WebIntentPickerViews::~WebIntentPickerViews() {
@@ -885,6 +884,13 @@ void WebIntentPickerViews::OnExtensionInstallFailure(const std::string& id) {
   // TODO(binji): What to display to user on failure?
 }
 
+void WebIntentPickerViews::OnInlineDispositionAutoResize(
+    const gfx::Size& size) {
+  webview_->SetPreferredSize(size);
+  contents_->Layout();
+  SizeToContents();
+}
+
 void WebIntentPickerViews::OnInlineDispositionWebContentsLoaded(
     content::WebContents* web_contents) {
   if (displaying_web_contents_)
@@ -915,7 +921,7 @@ void WebIntentPickerViews::OnInlineDispositionWebContentsLoaded(
 #endif
 
   views::ColumnSet* full_cs = grid_layout->AddColumnSet(1);
-  full_cs->AddColumn(GridLayout::FILL, GridLayout::FILL, 0,
+  full_cs->AddColumn(GridLayout::FILL, GridLayout::FILL, 1.0,
                      GridLayout::USE_PREF, 0, 0);
 
   const WebIntentPickerModel::InstalledService* service =
@@ -924,18 +930,19 @@ void WebIntentPickerViews::OnInlineDispositionWebContentsLoaded(
   // Header row.
   grid_layout->StartRow(0, 0);
   views::ImageView* icon = new views::ImageView();
-  icon->SetImage(service->favicon.ToSkBitmap());
+  icon->SetImage(service->favicon.ToImageSkia());
   grid_layout->AddView(icon);
 
   string16 elided_title = ui::ElideText(
       service->title, gfx::Font(), kTitleLinkMaxWidth, ui::ELIDE_AT_END);
   views::Label* title = new views::Label(elided_title);
   grid_layout->AddView(title);
-
-  choose_another_service_link_ = new views::Link(
-      l10n_util::GetStringUTF16(IDS_INTENT_PICKER_USE_ALTERNATE_SERVICE));
-  grid_layout->AddView(choose_another_service_link_);
-  choose_another_service_link_->set_listener(this);
+  if (model_->GetSuggestedExtensionCount()) {
+    choose_another_service_link_ = new views::Link(
+        l10n_util::GetStringUTF16(IDS_INTENT_PICKER_USE_ALTERNATE_SERVICE));
+    grid_layout->AddView(choose_another_service_link_);
+    choose_another_service_link_->set_listener(this);
+  }
 
 #if defined(USE_CLOSE_BUTTON)
   grid_layout->AddView(CreateCloseButton());
@@ -944,20 +951,19 @@ void WebIntentPickerViews::OnInlineDispositionWebContentsLoaded(
   // Inline web contents row.
   grid_layout->StartRow(0, 1);
   grid_layout->AddView(webview_, 1, 1, GridLayout::CENTER,
-                       GridLayout::CENTER, kDialogMinWidth, 140);
+                       GridLayout::CENTER, 0, 0);
   contents_->Layout();
   SizeToContents();
   displaying_web_contents_ = true;
 }
 
 void WebIntentPickerViews::OnModelChanged(WebIntentPickerModel* model) {
-  if (model->GetInstalledServiceCount() == 0) {
-    suggestions_label_->SetText(l10n_util::GetStringUTF16(
-        IDS_INTENT_PICKER_GET_MORE_SERVICES_NONE_INSTALLED));
-  } else {
-    suggestions_label_->SetText(
-        l10n_util::GetStringUTF16(IDS_INTENT_PICKER_GET_MORE_SERVICES));
-  }
+  suggestions_label_->SetText(l10n_util::GetStringUTF16(
+      model->GetInstalledServiceCount() ?
+          IDS_INTENT_PICKER_GET_MORE_SERVICES :
+          IDS_INTENT_PICKER_GET_MORE_SERVICES_NONE_INSTALLED));
+
+  suggestions_label_->SetVisible(model->GetSuggestedExtensionCount() > 0);
 
   service_buttons_->Update();
   extensions_->Update();
@@ -983,18 +989,18 @@ void WebIntentPickerViews::OnExtensionIconChanged(
 void WebIntentPickerViews::OnInlineDisposition(
     WebIntentPickerModel* model, const GURL& url) {
   if (!webview_)
-    webview_ = new views::WebView(wrapper_->profile());
+    webview_ = new views::WebView(tab_contents_->profile());
 
   inline_web_contents_.reset(WebContents::Create(
-      wrapper_->profile(),
-      tab_util::GetSiteInstanceForNewTab(wrapper_->profile(), url),
+      tab_contents_->profile(),
+      tab_util::GetSiteInstanceForNewTab(tab_contents_->profile(), url),
       MSG_ROUTING_NONE, NULL, NULL));
   // Does not take ownership, so we keep a scoped_ptr
   // for the WebContents locally.
   webview_->SetWebContents(inline_web_contents_.get());
   inline_disposition_delegate_.reset(
       new WebIntentInlineDispositionDelegate(this, inline_web_contents_.get(),
-                                             wrapper_->profile()));
+                                             tab_contents_->profile()));
   content::WebContents* web_contents = webview_->GetWebContents();
 
   const WebIntentPickerModel::InstalledService* service =
@@ -1099,8 +1105,8 @@ void WebIntentPickerViews::InitContents() {
 
   // Row with app suggestions label.
   grid_layout->StartRow(0, kIndentedFullWidthColumnSet);
-  suggestions_label_ = new views::Label(
-      l10n_util::GetStringUTF16(IDS_INTENT_PICKER_GET_MORE_SERVICES));
+  suggestions_label_ = new views::Label();
+  suggestions_label_->SetVisible(false);
   suggestions_label_->SetMultiLine(true);
   suggestions_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
   grid_layout->AddView(suggestions_label_);
@@ -1149,8 +1155,7 @@ void WebIntentPickerViews::SizeToContents() {
   gfx::Rect client_bounds(client_size);
   gfx::Rect new_window_bounds = window_->non_client_view()->frame_view()->
       GetWindowBoundsForClientBounds(client_bounds);
-  // TODO(binji): figure out how to get the constrained dialog centered...
-  window_->SetSize(new_window_bounds.size());
+  window_->CenterWindow(new_window_bounds.size());
 }
 
 #if defined(USE_CLOSE_BUTTON)
@@ -1158,11 +1163,11 @@ views::ImageButton* WebIntentPickerViews::CreateCloseButton() {
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   views::ImageButton* close_button = new views::ImageButton(this);
   close_button->SetImage(views::CustomButton::BS_NORMAL,
-                          rb.GetBitmapNamed(IDR_CLOSE_BAR));
+                          rb.GetImageSkiaNamed(IDR_CLOSE_BAR));
   close_button->SetImage(views::CustomButton::BS_HOT,
-                          rb.GetBitmapNamed(IDR_CLOSE_BAR_H));
+                          rb.GetImageSkiaNamed(IDR_CLOSE_BAR_H));
   close_button->SetImage(views::CustomButton::BS_PUSHED,
-                          rb.GetBitmapNamed(IDR_CLOSE_BAR_P));
+                          rb.GetImageSkiaNamed(IDR_CLOSE_BAR_P));
   return close_button;
 }
 #endif

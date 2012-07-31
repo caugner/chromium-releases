@@ -13,6 +13,7 @@
 #include "chrome/browser/ui/views/avatar_menu_button.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "grit/theme_resources.h"
+#include "grit/theme_resources_standard.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
 
@@ -51,7 +52,7 @@ void BrowserNonClientFrameView::UpdateAvatarInfo() {
     NOTREACHED();
 #endif
   } else if (browser_view_->IsOffTheRecord()) {
-    avatar = rb.GetImageNamed(IDR_OTR_ICON);
+    avatar = rb.GetImageNamed(browser_view_->GetOTRIconResourceID());
   } else if (ManagedMode::IsInManagedMode()) {
     avatar = rb.GetImageNamed(IDR_MANAGED_MODE_AVATAR);
   } else if (AvatarMenuModel::ShouldShowAvatarMenu()) {

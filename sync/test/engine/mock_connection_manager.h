@@ -17,8 +17,8 @@
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_vector.h"
 #include "sync/engine/net/server_connection_manager.h"
-#include "sync/syncable/model_type.h"
-#include "sync/syncable/model_type_payload_map.h"
+#include "sync/internal_api/public/syncable/model_type.h"
+#include "sync/internal_api/public/syncable/model_type_payload_map.h"
 #include "sync/protocol/sync.pb.h"
 
 class MockConnectionManager : public browser_sync::ServerConnectionManager {
@@ -42,6 +42,7 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
       browser_sync::ScopedServerStatusWatcher* watcher) OVERRIDE;
 
   // Control of commit response.
+  // NOTE: Commit callback is invoked only once then reset.
   void SetMidCommitCallback(const base::Closure& callback);
   void SetMidCommitObserver(MidCommitObserver* observer);
 

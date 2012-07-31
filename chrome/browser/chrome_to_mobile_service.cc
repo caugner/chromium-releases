@@ -7,6 +7,7 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
+#include "base/guid.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/metrics/histogram.h"
@@ -20,11 +21,10 @@
 #include "chrome/browser/signin/token_service.h"
 #include "chrome/browser/signin/token_service_factory.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/cloud_print/cloud_print_helpers.h"
-#include "chrome/common/guid.h"
 #include "chrome/common/net/gaia/gaia_constants.h"
 #include "chrome/common/net/gaia/gaia_urls.h"
 #include "chrome/common/net/gaia/oauth2_access_token_fetcher.h"
@@ -121,7 +121,7 @@ GURL GetSubmitURL(const GURL& service_url,
 }
 
 // A callback to continue snapshot generation after creating the temp file.
-typedef base::Callback<void(FilePath path, bool success)>
+typedef base::Callback<void(const FilePath& path, bool success)>
     CreateSnapshotFileCallback;
 
 // Create a temp file and post the callback on the UI thread with the results.
@@ -135,7 +135,7 @@ void CreateSnapshotFile(CreateSnapshotFileCallback callback) {
 
 // Send snapshot file contents as POST data in a job submit request.
 // Call this as a BlockingPoolSequencedTask (before posting DeleteSnapshotFile).
-void SubmitSnapshotFile(content::URLFetcher* request,
+void SubmitSnapshotFile(net::URLFetcher* request,
                         const ChromeToMobileService::RequestData& data) {
   std::string file;
   if (file_util::ReadFileToString(data.snapshot_path, &file) && !file.empty()) {
@@ -164,7 +164,7 @@ void SubmitSnapshotFile(content::URLFetcher* request,
 
 // Delete the snapshot file; DCHECK, but really ignore the result of the delete.
 // Call this as a BlockingPoolSequencedTask [after posting SubmitSnapshotFile].
-void DeleteSnapshotFile(const FilePath snapshot) {
+void DeleteSnapshotFile(const FilePath& snapshot) {
   bool success = file_util::Delete(snapshot, false);
   DCHECK(success);
 }
@@ -245,15 +245,15 @@ void ChromeToMobileService::SendToMobile(const string16& mobile_id,
   RequestData data;
   data.mobile_id = mobile_id;
   content::WebContents* web_contents =
-      BrowserList::GetLastActiveWithProfile(profile_)->GetSelectedWebContents();
+      browser::FindLastActiveWithProfile(profile_)->GetActiveWebContents();
   data.url = web_contents->GetURL();
   data.title = web_contents->GetTitle();
   data.snapshot_path = snapshot;
   bool send_snapshot = !snapshot.empty();
-  data.snapshot_id = send_snapshot ? guid::GenerateGUID() : std::string();
+  data.snapshot_id = send_snapshot ? base::GenerateGUID() : std::string();
   data.type = send_snapshot ? DELAYED_SNAPSHOT : URL;
 
-  content::URLFetcher* submit_url = CreateRequest(data);
+  net::URLFetcher* submit_url = CreateRequest(data);
   request_observer_map_[submit_url] = observer;
   submit_url->Start();
 
@@ -261,7 +261,7 @@ void ChromeToMobileService::SendToMobile(const string16& mobile_id,
     LogMetric(SENDING_SNAPSHOT);
 
     data.type = SNAPSHOT;
-    content::URLFetcher* submit_snapshot = CreateRequest(data);
+    net::URLFetcher* submit_snapshot = CreateRequest(data);
     request_observer_map_[submit_snapshot] = observer;
     content::BrowserThread::PostBlockingPoolSequencedTask(
         data.snapshot_path.AsUTF8Unsafe(), FROM_HERE,
@@ -285,7 +285,7 @@ void ChromeToMobileService::LogMetric(Metric metric) {
 }
 
 void ChromeToMobileService::OnURLFetchComplete(
-    const content::URLFetcher* source) {
+    const net::URLFetcher* source) {
   if (source == account_info_request_.get())
     HandleAccountInfoResponse();
   else if (source == search_request_.get())
@@ -325,16 +325,16 @@ void ChromeToMobileService::OnGetTokenFailure(
 
 void ChromeToMobileService::SnapshotFileCreated(
     base::WeakPtr<Observer> observer,
-    const FilePath path,
+    const FilePath& path,
     bool success) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   // Track the set of temporary files to be deleted later.
   snapshots_.insert(path);
 
-  Browser* browser = BrowserList::GetLastActiveWithProfile(profile_);
-  if (success && browser && browser->GetSelectedWebContents()) {
+  Browser* browser = browser::FindLastActiveWithProfile(profile_);
+  if (success && browser && browser->GetActiveWebContents()) {
     // Generate the snapshot and have the observer be called back on completion.
-    browser->GetSelectedWebContents()->GenerateMHTML(path,
+    browser->GetActiveWebContents()->GenerateMHTML(path,
         base::Bind(&Observer::SnapshotGenerated, observer));
   } else if (observer.get()) {
     // Signal snapshot generation failure.
@@ -342,14 +342,14 @@ void ChromeToMobileService::SnapshotFileCreated(
   }
 }
 
-content::URLFetcher* ChromeToMobileService::CreateRequest(
+net::URLFetcher* ChromeToMobileService::CreateRequest(
   const RequestData& data) {
   bool get = data.type != SNAPSHOT;
   GURL service_url(cloud_print_url_->GetCloudPrintServiceURL());
-  content::URLFetcher* request = content::URLFetcher::Create(
+  net::URLFetcher* request = content::URLFetcher::Create(
       data.type == SEARCH ? GetSearchURL(service_url) :
                             GetSubmitURL(service_url, data),
-      get ? content::URLFetcher::GET : content::URLFetcher::POST, this);
+      get ? net::URLFetcher::GET : net::URLFetcher::POST, this);
   request->SetRequestContext(profile_->GetRequestContext());
   request->SetMaxRetries(kMaxRetries);
   request->SetExtraRequestHeaders("Authorization: OAuth " +
@@ -383,7 +383,7 @@ void ChromeToMobileService::RequestAccountInfo() {
     return;
 
   std::string url_string = StringPrintf(kAccountInfoURL,
-      guid::GenerateGUID().c_str(), kChromeToMobileRequestor);
+      base::GenerateGUID().c_str(), kChromeToMobileRequestor);
   GURL url(url_string);
 
   // Account information is read from the profile's cookie. If cookies are
@@ -397,7 +397,7 @@ void ChromeToMobileService::RequestAccountInfo() {
   }
 
   account_info_request_.reset(
-      content::URLFetcher::Create(url, content::URLFetcher::GET, this));
+      content::URLFetcher::Create(url, net::URLFetcher::GET, this));
   account_info_request_->SetRequestContext(profile_->GetRequestContext());
   account_info_request_->SetMaxRetries(kMaxRetries);
   // This request sends the user's cookie to check the cloud print service flag.
@@ -473,7 +473,7 @@ void ChromeToMobileService::HandleSearchResponse() {
     if (!mobiles_.empty())
       LogMetric(DEVICES_AVAILABLE);
 
-    Browser* browser = BrowserList::GetLastActiveWithProfile(profile_);
+    Browser* browser = browser::FindLastActiveWithProfile(profile_);
     if (browser && browser->command_updater())
       browser->command_updater()->UpdateCommandEnabled(
           IDC_CHROME_TO_MOBILE_PAGE, !mobiles_.empty());
@@ -481,7 +481,7 @@ void ChromeToMobileService::HandleSearchResponse() {
 }
 
 void ChromeToMobileService::HandleSubmitResponse(
-    const content::URLFetcher* source) {
+    const net::URLFetcher* source) {
   // Get the observer for this response; bail if there is none or it is NULL.
   RequestObserverMap::iterator i = request_observer_map_.find(source);
   if (i == request_observer_map_.end())

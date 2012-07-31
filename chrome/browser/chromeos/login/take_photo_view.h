@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,10 +13,14 @@
 class PhotoCaptureObserver;
 class SkBitmap;
 
+namespace gfx {
+class ImageSkia;
+}
+
 namespace views {
 class ImageButton;
 class Label;
-}  // namespace views
+}
 
 namespace chromeos {
 
@@ -56,10 +60,10 @@ class TakePhotoView : public views::View,
   void ShowCameraError();
 
   // Returns the currently selected image.
-  const SkBitmap& GetImage() const;
+  const gfx::ImageSkia& GetImage() const;
 
   // Sets the image indicating that the view is used only for image preview.
-  void SetImage(SkBitmap* image);
+  void SetImage(gfx::ImageSkia* image);
 
   // Captures the image, as if the button was pressed.
   void CaptureImage();

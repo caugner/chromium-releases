@@ -20,10 +20,11 @@ struct GlobalRequestID;
 // after we determine that a response is safe and not a download.
 class CrossSiteResourceHandler : public LayeredResourceHandler {
  public:
-  CrossSiteResourceHandler(ResourceHandler* handler,
+  CrossSiteResourceHandler(scoped_ptr<ResourceHandler> next_handler,
                            int render_process_host_id,
                            int render_view_id,
                            ResourceDispatcherHostImpl* rdh);
+  virtual ~CrossSiteResourceHandler();
 
   // ResourceHandler implementation:
   virtual bool OnRequestRedirected(int request_id,
@@ -31,9 +32,11 @@ class CrossSiteResourceHandler : public LayeredResourceHandler {
                                    ResourceResponse* response,
                                    bool* defer) OVERRIDE;
   virtual bool OnResponseStarted(int request_id,
-                                 ResourceResponse* response) OVERRIDE;
+                                 ResourceResponse* response,
+                                 bool* defer) OVERRIDE;
   virtual bool OnReadCompleted(int request_id,
-                               int* bytes_read) OVERRIDE;
+                               int* bytes_read,
+                               bool* defer) OVERRIDE;
   virtual bool OnResponseCompleted(int request_id,
                                    const net::URLRequestStatus& status,
                                    const std::string& security_info) OVERRIDE;
@@ -43,14 +46,15 @@ class CrossSiteResourceHandler : public LayeredResourceHandler {
   void ResumeResponse();
 
  private:
-  virtual ~CrossSiteResourceHandler();
-
   // Prepare to render the cross-site response in a new RenderViewHost, by
   // telling the old RenderViewHost to run its onunload handler.
   void StartCrossSiteTransition(
       int request_id,
       ResourceResponse* response,
-      const GlobalRequestID& global_id);
+      const GlobalRequestID& global_id,
+      bool* defer);
+
+  void ResumeIfDeferred();
 
   int render_process_host_id_;
   int render_view_id_;
@@ -58,6 +62,7 @@ class CrossSiteResourceHandler : public LayeredResourceHandler {
   bool in_cross_site_transition_;
   int request_id_;
   bool completed_during_transition_;
+  bool did_defer_;
   net::URLRequestStatus completed_status_;
   std::string completed_security_info_;
   ResourceResponse* response_;

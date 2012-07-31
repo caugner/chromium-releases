@@ -9,6 +9,7 @@
 #include "base/string_util.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/webdata/web_data_service_factory.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/net/gaia/gaia_auth_fetcher.h"
@@ -64,7 +65,8 @@ void TokenService::Initialize(const char* const source,
   getter_ = profile->GetRequestContext();
   // Since the user can create a bookmark in incognito, sync may be running.
   // Thus we have to go for explicit access.
-  web_data_service_ = profile->GetWebDataService(Profile::EXPLICIT_ACCESS);
+  web_data_service_ = WebDataServiceFactory::GetForProfile(
+      profile, Profile::EXPLICIT_ACCESS);
   source_ = std::string(source);
 
   CommandLine* cmd_line = CommandLine::ForCurrentProcess();
@@ -155,6 +157,11 @@ void TokenService::EraseTokensFromDB() {
   }
   if (web_data_service_.get())
     web_data_service_->RemoveAllTokens();
+
+  content::NotificationService::current()->Notify(
+      chrome::NOTIFICATION_TOKENS_CLEARED,
+      content::Source<TokenService>(this),
+      content::NotificationService::NoDetails());
 }
 
 bool TokenService::TokensLoadedFromDB() const {
@@ -263,7 +270,7 @@ void TokenService::OnIssueAuthTokenSuccess(const std::string& service,
   // login scoped token pair.
   if (service == GaiaConstants::kLSOService) {
     int index = GetServiceIndex(service);
-    DCHECK_NE(-1, index);
+    CHECK_GE(index, 0);
     fetchers_[index]->StartLsoForOAuthLoginTokenExchange(auth_token);
   }
 }
@@ -271,7 +278,8 @@ void TokenService::OnIssueAuthTokenSuccess(const std::string& service,
 void TokenService::OnIssueAuthTokenFailure(const std::string& service,
     const GoogleServiceAuthError& error) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  LOG(WARNING) << "Auth token issuing failed for service:" << service;
+  LOG(WARNING) << "Auth token issuing failed for service:" << service
+               << ", error: " << error.ToString();
   FireTokenRequestFailedNotification(service, error);
 }
 
@@ -294,7 +302,7 @@ void TokenService::OnClientOAuthSuccess(const ClientOAuthResult& result) {
 void TokenService::OnClientOAuthFailure(
    const GoogleServiceAuthError& error) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  LOG(WARNING) << "OAuth2 login token pair fetch failed:";
+  LOG(WARNING) << "OAuth2 login token pair fetch failed: " << error.ToString();
   FireTokenRequestFailedNotification(
       GaiaConstants::kGaiaOAuth2LoginRefreshToken, error);
 }

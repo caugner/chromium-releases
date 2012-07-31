@@ -4,13 +4,13 @@
 
 #ifndef CONTENT_BROWSER_SPEECH_SPEECH_RECOGNIZER_IMPL_H_
 #define CONTENT_BROWSER_SPEECH_SPEECH_RECOGNIZER_IMPL_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "content/browser/speech/endpointer/endpointer.h"
 #include "content/browser/speech/speech_recognition_engine.h"
-#include "content/public/browser/speech_recognizer.h"
 #include "content/public/common/speech_recognition_error.h"
 #include "content/public/common/speech_recognition_result.h"
 #include "media/audio/audio_input_controller.h"
@@ -26,15 +26,13 @@ class AudioManager;
 
 namespace speech {
 
-// TODO(primiano) Next CL: Remove the Impl suffix and the exported
-// /content/public/browser/speech_recognizer.h interface since this class should
-// not be visible outside (currently we need it for speech input extension API).
+// TODO(primiano) Next CL: Remove the Impl suffix.
 
 // Handles speech recognition for a session (identified by |session_id|), taking
 // care of audio capture, silence detection/endpointer and interaction with the
 // SpeechRecognitionEngine.
 class CONTENT_EXPORT SpeechRecognizerImpl
-    : public NON_EXPORTED_BASE(content::SpeechRecognizer),
+    : public base::RefCountedThreadSafe<SpeechRecognizerImpl>,
       public media::AudioInputController::EventHandler,
       public NON_EXPORTED_BASE(SpeechRecognitionEngineDelegate) {
  public:
@@ -49,18 +47,15 @@ class CONTENT_EXPORT SpeechRecognizerImpl
       int session_id,
       SpeechRecognitionEngine* engine);
 
-  // content::SpeechRecognizer methods.
-  virtual void StartRecognition() OVERRIDE;
-  virtual void AbortRecognition() OVERRIDE;
-  virtual void StopAudioCapture() OVERRIDE;
-  virtual bool IsActive() const OVERRIDE;
-  virtual bool IsCapturingAudio() const OVERRIDE;
+  void StartRecognition();
+  void AbortRecognition();
+  void StopAudioCapture();
+  bool IsActive() const;
+  bool IsCapturingAudio() const;
   const SpeechRecognitionEngine& recognition_engine() const;
 
- protected:
-  virtual ~SpeechRecognizerImpl();
-
  private:
+  friend class base::RefCountedThreadSafe<SpeechRecognizerImpl>;
   friend class SpeechRecognizerImplTest;
 
   enum FSMState {
@@ -95,6 +90,8 @@ class CONTENT_EXPORT SpeechRecognizerImpl
     content::SpeechRecognitionError engine_error;
   };
 
+  virtual ~SpeechRecognizerImpl();
+
   // Entry point for pushing any new external event into the recognizer FSM.
   void DispatchEvent(const FSMEventArgs& event_args);
 
@@ -113,9 +110,9 @@ class CONTENT_EXPORT SpeechRecognizerImpl
   FSMState StopCaptureAndWaitForResult(const FSMEventArgs& event_args);
   FSMState ProcessIntermediateResult(const FSMEventArgs& event_args);
   FSMState ProcessFinalResult(const FSMEventArgs& event_args);
-  FSMState Abort(const FSMEventArgs& event_args);
-  FSMState AbortWithError(const content::SpeechRecognitionError* error);
-  FSMState AbortWithError(const content::SpeechRecognitionError& error);
+  FSMState AbortSilently(const FSMEventArgs& event_args);
+  FSMState AbortWithError(const FSMEventArgs& event_args);
+  FSMState Abort(const content::SpeechRecognitionError& error);
   FSMState DetectEndOfSpeech(const FSMEventArgs& event_args);
   FSMState DoNothing(const FSMEventArgs& event_args) const;
   FSMState NotFeasible(const FSMEventArgs& event_args);

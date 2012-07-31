@@ -6,66 +6,204 @@
 
 #include "base/logging.h"
 #include "base/message_loop.h"
+#include "base/utf_string_conversions.h"
+#include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/extensions/api/tabs/tabs_constants.h"
+#include "chrome/browser/extensions/extension_window_controller.h"
+#include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/tabs/tab_strip_model.h"
-#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/panels/native_panel.h"
 #include "chrome/browser/ui/panels/panel_manager.h"
 #include "chrome/browser/ui/panels/panel_strip.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
-#include "chrome/browser/ui/window_sizer.h"
+#include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/extensions/extension.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/rect.h"
 
-#if defined(USE_AURA)
-#include "chrome/browser/ui/panels/panel_browser_view.h"
-#endif
-
 using content::RenderViewHost;
-using content::SSLStatus;
-using content::WebContents;
 
-Panel::Panel(Browser* browser, const gfx::Size& requested_size)
-    : browser_(browser),
+namespace panel_internal {
+
+class PanelExtensionWindowController : public ExtensionWindowController {
+ public:
+  PanelExtensionWindowController(Panel* panel, Profile* profile);
+
+  // Overridden from ExtensionWindowController.
+  virtual int GetWindowId() const OVERRIDE;
+  virtual std::string GetWindowTypeText() const OVERRIDE;
+  virtual base::DictionaryValue* CreateWindowValueWithTabs() const OVERRIDE;
+  virtual bool CanClose(Reason* reason) const OVERRIDE;
+  virtual void SetFullscreenMode(bool is_fullscreen,
+                                 const GURL& extension_url) const OVERRIDE;
+  virtual bool IsVisibleToExtension(
+      const extensions::Extension* extension) const OVERRIDE;
+
+ private:
+  Panel* panel_;  // Weak pointer. Owns us.
+  DISALLOW_COPY_AND_ASSIGN(PanelExtensionWindowController);
+};
+
+PanelExtensionWindowController::PanelExtensionWindowController(
+    Panel* panel, Profile* profile)
+    : ExtensionWindowController(panel, profile),
+      panel_(panel) {
+}
+
+int PanelExtensionWindowController::GetWindowId() const {
+  return static_cast<int>(panel_->session_id().id());
+}
+
+std::string PanelExtensionWindowController::GetWindowTypeText() const {
+  return extensions::tabs_constants::kWindowTypeValuePanel;
+}
+
+base::DictionaryValue*
+PanelExtensionWindowController::CreateWindowValueWithTabs() const {
+  return CreateWindowValue();
+}
+
+bool PanelExtensionWindowController::CanClose(Reason* reason) const {
+  return true;
+}
+
+void PanelExtensionWindowController::SetFullscreenMode(
+    bool is_fullscreen, const GURL& extension_url) const {
+  // Do nothing. Panels cannot be fullscreen.
+}
+
+bool PanelExtensionWindowController::IsVisibleToExtension(
+    const extensions::Extension* extension) const {
+  return extension->id() == panel_->extension_id();
+}
+
+}  // namespace internal
+
+Panel::Panel(const std::string& app_name,
+             const gfx::Size& min_size, const gfx::Size& max_size)
+    : app_name_(app_name),
       panel_strip_(NULL),
       initialized_(false),
-      full_size_(requested_size),
+      min_size_(min_size),
+      max_size_(max_size),
       max_size_policy_(DEFAULT_MAX_SIZE),
       auto_resizable_(false),
       always_on_top_(false),
       in_preview_mode_(false),
       native_panel_(NULL),
       attention_mode_(USE_PANEL_ATTENTION),
-      expansion_state_(EXPANDED) {
+      expansion_state_(EXPANDED),
+      command_updater_(this) {
 }
 
 Panel::~Panel() {
   // Invoked by native panel destructor. Do not access native_panel_ here.
+
+  // Remove shutdown prevention.
+  // TODO(jennb): remove guard after refactor
+  if (extension_window_controller_.get())
+    browser::EndKeepAlive();
 }
 
-void Panel::Initialize(const gfx::Rect& bounds) {
+void Panel::Initialize(const gfx::Rect& bounds, Browser* browser) {
   DCHECK(!initialized_);
+  DCHECK(!panel_strip_);  // Cannot be added to a strip until fully created.
+  DCHECK_EQ(EXPANDED, expansion_state_);
   DCHECK(!bounds.IsEmpty());
   initialized_ = true;
-  native_panel_ = CreateNativePanel(browser_, this, bounds);
-  if (panel_strip_ != NULL)
-    native_panel_->PreventActivationByOS(panel_strip_->IsPanelMinimized(this));
+  full_size_ = bounds.size();
+  native_panel_ = CreateNativePanel(browser, this, bounds);
+}
+
+void Panel::Initialize(Profile* profile, const GURL& url,
+                       const gfx::Rect& bounds) {
+  DCHECK(!initialized_);
+  DCHECK(!panel_strip_);  // Cannot be added to a strip until fully created.
+  DCHECK_EQ(EXPANDED, expansion_state_);
+  DCHECK(!bounds.IsEmpty());
+  initialized_ = true;
+  full_size_ = bounds.size();
+  native_panel_ = CreateNativePanel(this, bounds);
+
+  extension_window_controller_.reset(
+      new panel_internal::PanelExtensionWindowController(this, profile));
+
+  InitCommandState();
+
+  // TODO(jennb): setup for hosting web content
+
+  // Close when the extension is unloaded or the browser is exiting.
+  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
+                 content::Source<Profile>(profile));
+  registrar_.Add(this, content::NOTIFICATION_APP_TERMINATING,
+                 content::NotificationService::AllSources());
+
+  // Prevent the browser process from shutting down while this window is open.
+  browser::StartKeepAlive();
+}
+
+void Panel::InitCommandState() {
+  // All supported commands whose state isn't set automagically some other way
+  // (like Stop during a page load) must have their state initialized here,
+  // otherwise they will be forever disabled.
+
+  // Navigation commands
+  command_updater_.UpdateCommandEnabled(IDC_RELOAD, true);
+  command_updater_.UpdateCommandEnabled(IDC_RELOAD_IGNORING_CACHE, true);
+
+  // Window management commands
+  command_updater_.UpdateCommandEnabled(IDC_CLOSE_WINDOW, true);
+  command_updater_.UpdateCommandEnabled(IDC_EXIT, true);
+
+  // Zoom
+  command_updater_.UpdateCommandEnabled(IDC_ZOOM_MENU, true);
+  command_updater_.UpdateCommandEnabled(IDC_ZOOM_PLUS, true);
+  command_updater_.UpdateCommandEnabled(IDC_ZOOM_NORMAL, true);
+  command_updater_.UpdateCommandEnabled(IDC_ZOOM_MINUS, true);
+
+  // Clipboard
+  command_updater_.UpdateCommandEnabled(IDC_COPY, true);
+  command_updater_.UpdateCommandEnabled(IDC_CUT, true);
+  command_updater_.UpdateCommandEnabled(IDC_PASTE, true);
 }
 
 void Panel::OnNativePanelClosed() {
-  if (auto_resizable_)
-    native_panel_->GetPanelBrowser()->tabstrip_model()->RemoveObserver(this);
   manager()->OnPanelClosed(this);
   DCHECK(!panel_strip_);
 }
 
 PanelManager* Panel::manager() const {
   return PanelManager::GetInstance();
+}
+
+Browser* Panel::browser() const {
+  return NULL;
+}
+
+BrowserWindow* Panel::browser_window() const {
+  return NULL;
+}
+
+CommandUpdater* Panel::command_updater() {
+  return &command_updater_;
+}
+
+Profile* Panel::profile() const {
+  return extension_window_controller_->profile();
+}
+
+const std::string Panel::extension_id() const {
+  return web_app::GetExtensionIdFromApplicationName(app_name_);
+}
+
+content::WebContents* Panel::WebContents() const {
+  // TODO(jennb): implement.
+  return NULL;
 }
 
 bool Panel::CanMinimize() const {
@@ -85,20 +223,10 @@ panel::Resizability Panel::CanResizeByMouse() const {
 
 void Panel::SetPanelBounds(const gfx::Rect& bounds) {
   native_panel_->SetPanelBounds(bounds);
-
-  content::NotificationService::current()->Notify(
-      chrome::NOTIFICATION_PANEL_CHANGED_BOUNDS,
-      content::Source<Panel>(this),
-      content::NotificationService::NoDetails());
 }
 
 void Panel::SetPanelBoundsInstantly(const gfx::Rect& bounds) {
   native_panel_->SetPanelBoundsInstantly(bounds);
-
-  content::NotificationService::current()->Notify(
-      chrome::NOTIFICATION_PANEL_CHANGED_BOUNDS,
-      content::Source<Panel>(this),
-      content::NotificationService::NoDetails());
 }
 
 void Panel::LimitSizeToDisplayArea(const gfx::Rect& display_area) {
@@ -127,16 +255,15 @@ void Panel::SetAutoResizable(bool resizable) {
     return;
 
   auto_resizable_ = resizable;
-  WebContents* web_contents = browser()->GetSelectedWebContents();
+  content::WebContents* web_contents = WebContents();
   if (auto_resizable_) {
-    browser()->tabstrip_model()->AddObserver(this);
     if (web_contents)
       EnableWebContentsAutoResize(web_contents);
   } else {
-    browser()->tabstrip_model()->RemoveObserver(this);
-    registrar_.RemoveAll();
-
     if (web_contents) {
+      registrar_.Remove(this, content::NOTIFICATION_WEB_CONTENTS_SWAPPED,
+                        content::Source<content::WebContents>(web_contents));
+
       // NULL might be returned if the tab has not been added.
       RenderViewHost* render_view_host = web_contents->GetRenderViewHost();
       if (render_view_host)
@@ -154,7 +281,7 @@ void Panel::SetSizeRange(const gfx::Size& min_size, const gfx::Size& max_size) {
   min_size_ = min_size;
   max_size_ = max_size;
 
-  ConfigureAutoResize(browser()->GetSelectedWebContents());
+  ConfigureAutoResize(WebContents());
 }
 
 void Panel::IncreaseMaxSize(const gfx::Size& desired_panel_size) {
@@ -211,6 +338,7 @@ void Panel::SetPreviewMode(bool in_preview) {
 void Panel::SetExpansionState(ExpansionState new_state) {
   if (expansion_state_ == new_state)
     return;
+  native_panel_->PanelExpansionStateChanging(expansion_state_, new_state);
   expansion_state_ = new_state;
 
   manager()->OnPanelExpansionStateChanged(this);
@@ -249,10 +377,13 @@ void Panel::ShowInactive() {
 
 void Panel::SetBounds(const gfx::Rect& bounds) {
   // Ignore bounds position as the panel manager controls all positioning.
-  manager()->ResizePanel(this, bounds.size());
+  if (!panel_strip_)
+    return;
+  panel_strip_->ResizePanelWindow(this, bounds.size());
+  SetAutoResizable(false);
 }
 
-// Close() may be called multiple times if the browser window is not ready to
+// Close() may be called multiple times if the panel window is not ready to
 // close on the first attempt.
 void Panel::Close() {
   native_panel_->ClosePanel();
@@ -274,6 +405,9 @@ bool Panel::IsActive() const {
   return native_panel_->IsPanelActive();
 }
 
+void Panel::SetDraggableRegion(SkRegion* region) {
+}
+
 void Panel::FlashFrame(bool draw_attention) {
   if (IsDrawingAttention() == draw_attention || !panel_strip_)
     return;
@@ -293,48 +427,8 @@ bool Panel::IsAlwaysOnTop() const {
   return always_on_top_;
 }
 
-gfx::NativeWindow Panel::GetNativeHandle() {
+gfx::NativeWindow Panel::GetNativeWindow() {
   return native_panel_->GetNativePanelHandle();
-}
-
-BrowserWindowTesting* Panel::GetBrowserWindowTesting() {
-  NOTIMPLEMENTED();
-  return NULL;
-}
-
-StatusBubble* Panel::GetStatusBubble() {
-  // TODO(jennb): Implement. http://crbug.com/102723
-  return NULL;
-}
-
-void Panel::ToolbarSizeChanged(bool is_animating){
-  NOTIMPLEMENTED();
-}
-
-void Panel::UpdateTitleBar() {
-  native_panel_->UpdatePanelTitleBar();
-}
-
-void Panel::BookmarkBarStateChanged(
-    BookmarkBar::AnimateChangeType change_type) {
-  NOTIMPLEMENTED();
-}
-
-void Panel::UpdateDevTools() {
-  NOTIMPLEMENTED();
-}
-
-void Panel::SetDevToolsDockSide(DevToolsDockSide side) {
-  NOTIMPLEMENTED();
-}
-
-void Panel::UpdateLoadingAnimations(bool should_animate) {
-  native_panel_->UpdatePanelLoadingAnimations(should_animate);
-}
-
-void Panel::SetStarredState(bool is_starred) {
-  // Since panels are typically not bookmarked extension UI windows, they don't
-  // have starred state.
 }
 
 gfx::Rect Panel::GetRestoredBounds() const {
@@ -380,342 +474,69 @@ void Panel::Restore() {
     panel_strip_->RestorePanel(this);
 }
 
-void Panel::EnterFullscreen(
-      const GURL& url, FullscreenExitBubbleType type) {
-  NOTIMPLEMENTED();
-}
-
-void Panel::ExitFullscreen() {
-  NOTIMPLEMENTED();
-}
-
-void Panel::UpdateFullscreenExitBubbleContent(
-      const GURL& url,
-      FullscreenExitBubbleType bubble_type) {
-  NOTIMPLEMENTED();
-}
-
 bool Panel::IsFullscreen() const {
   return false;
 }
 
-bool Panel::IsFullscreenBubbleVisible() const {
-  NOTIMPLEMENTED();
-  return false;
-}
-
-LocationBar* Panel::GetLocationBar() const {
-#if defined(USE_AURA)
-  // TODO(stevenjb): Remove this when Aura panels are implemented post R18.
-  PanelBrowserView* panel_view = static_cast<PanelBrowserView*>(native_panel_);
-  return panel_view->GetLocationBar();
-#else
-  // Panels do not have a location bar.
-  return NULL;
-#endif
-}
-
-void Panel::SetFocusToLocationBar(bool select_all) {
-#if defined(USE_AURA)
-  // TODO(stevenjb): Remove this when Aura panels are implemented post R18.
-  PanelBrowserView* panel_view = static_cast<PanelBrowserView*>(native_panel_);
-  panel_view->SetFocusToLocationBar(select_all);
-#else
-  // Panels do not have a location bar.
-#endif
-}
-
-void Panel::UpdateReloadStopState(bool is_loading, bool force) {
-  // Panels don't have stop/reload indicator.
-}
-
-void Panel::UpdateToolbar(TabContentsWrapper* contents,
-                          bool should_restore_state) {
-  // Panels do not have a toolbar.
-}
-
-void Panel::FocusToolbar() {
-  // Panels do not have a toolbar.
-}
-
-void Panel::FocusAppMenu() {
-  NOTIMPLEMENTED();
-}
-
-void Panel::FocusBookmarksToolbar() {
-  NOTIMPLEMENTED();
-}
-
-void Panel::RotatePaneFocus(bool forwards) {
-  NOTIMPLEMENTED();
-}
-
-bool Panel::IsBookmarkBarVisible() const {
-  return false;
-}
-
-bool Panel::IsBookmarkBarAnimating() const {
-  return false;
-}
-
-// This is used by extensions to decide if a window can be closed.
-// Always return true as panels do not have tabs that can be dragged,
-// during which extensions will avoid closing a window.
-bool Panel::IsTabStripEditable() const {
-  return true;
-}
-
-bool Panel::IsToolbarVisible() const {
-  NOTIMPLEMENTED();
-  return false;
-}
-
-gfx::Rect Panel::GetRootWindowResizerRect() const {
-  return gfx::Rect();
-}
-
-bool Panel::IsPanel() const {
-  return true;
-}
-
-void Panel::DisableInactiveFrame() {
-  NOTIMPLEMENTED();
-}
-
-void Panel::ConfirmAddSearchProvider(TemplateURL* template_url,
-                                     Profile* profile) {
-  NOTIMPLEMENTED();
-}
-
-void Panel::ToggleBookmarkBar() {
-  NOTIMPLEMENTED();
-}
-
-void Panel::ShowAboutChromeDialog() {
-  NOTIMPLEMENTED();
-}
-
-void Panel::ShowUpdateChromeDialog() {
-  NOTIMPLEMENTED();
-}
-
-void Panel::ShowTaskManager() {
-  native_panel_->ShowTaskManagerForPanel();
-}
-
-void Panel::ShowBackgroundPages() {
-  NOTIMPLEMENTED();
-}
-
-void Panel::ShowBookmarkBubble(const GURL& url, bool already_bookmarked) {
-  NOTIMPLEMENTED();
-}
-
-void Panel::ShowChromeToMobileBubble() {
-  NOTIMPLEMENTED();
-}
-
-#if defined(ENABLE_ONE_CLICK_SIGNIN)
-void Panel::ShowOneClickSigninBubble(
-      const base::Closure& learn_more_callback,
-      const base::Closure& advanced_callback) {
-  NOTIMPLEMENTED();
-}
-#endif
-
-bool Panel::IsDownloadShelfVisible() const {
-  return false;
-}
-
-DownloadShelf* Panel::GetDownloadShelf() {
-  Browser* panel_browser = native_panel_->GetPanelBrowser();
-  Profile* profile = panel_browser->profile();
-  Browser* tabbed_browser = Browser::GetTabbedBrowser(profile, true);
-
-  if (!tabbed_browser) {
-    // Set initial bounds so window will not be positioned at an offset
-    // to this panel as panels are at the bottom of the screen.
-    gfx::Rect window_bounds;
-    WindowSizer::GetBrowserWindowBounds(std::string(), gfx::Rect(),
-                                        panel_browser, &window_bounds);
-    Browser::CreateParams params(Browser::TYPE_TABBED, profile);
-    params.initial_bounds = window_bounds;
-    tabbed_browser = Browser::CreateWithParams(params);
-    tabbed_browser->NewTab();
-  }
-
-  tabbed_browser->window()->Show();  // Ensure download shelf is visible.
-  return tabbed_browser->window()->GetDownloadShelf();
-}
-
-void Panel::ConfirmBrowserCloseWithPendingDownloads() {
-  NOTIMPLEMENTED();
-}
-
-void Panel::UserChangedTheme() {
-  native_panel_->NotifyPanelOnUserChangedTheme();
-}
-
-int Panel::GetExtraRenderViewHeight() const {
-  // This is currently used only on Linux and that returns the height for
-  // optional elements like bookmark bar, download bar etc.  Not applicable to
-  // panels.
-  return 0;
-}
-
-void Panel::WebContentsFocused(WebContents* contents) {
-  native_panel_->PanelWebContentsFocused(contents);
-}
-
-void Panel::ShowPageInfo(Profile* profile,
-                         const GURL& url,
-                         const SSLStatus& ssl,
-                         bool show_history) {
-  NOTIMPLEMENTED();
-}
-void Panel::ShowWebsiteSettings(Profile* profile,
-                                TabContentsWrapper* tab_contents_wrapper,
-                                const GURL& url,
-                                const content::SSLStatus& ssl,
-                                bool show_history) {
-  NOTIMPLEMENTED();
-}
-
-void Panel::ShowAppMenu() {
-  NOTIMPLEMENTED();
-}
-
-bool Panel::PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
-                                   bool* is_keyboard_shortcut) {
-  return native_panel_->PreHandlePanelKeyboardEvent(event,
-                                                    is_keyboard_shortcut);
-}
-
-void Panel::HandleKeyboardEvent(const NativeWebKeyboardEvent& event) {
-  native_panel_->HandlePanelKeyboardEvent(event);
-}
-
-void Panel::ShowCreateWebAppShortcutsDialog(TabContentsWrapper* tab_contents) {
-  NOTIMPLEMENTED();
-}
-
-void Panel::ShowCreateChromeAppShortcutsDialog(Profile* profile,
-                                               const Extension* app) {
-  NOTIMPLEMENTED();
-}
-
-void Panel::Cut() {
-  native_panel_->PanelCut();
-}
-
-void Panel::Copy() {
-  native_panel_->PanelCopy();
-}
-
-void Panel::Paste() {
-  native_panel_->PanelPaste();
-}
-
-#if defined(OS_MACOSX)
-void Panel::OpenTabpose() {
-  NOTIMPLEMENTED();
-}
-
-void Panel::EnterPresentationMode(
-      const GURL& url,
-      FullscreenExitBubbleType content_type) {
-  NOTIMPLEMENTED();
-}
-
-void Panel::ExitPresentationMode() {
-  NOTIMPLEMENTED();
-}
-
-bool Panel::InPresentationMode() {
-  NOTIMPLEMENTED();
-  return false;
-}
-#endif
-
-void Panel::ShowInstant(TabContentsWrapper* preview) {
-  NOTIMPLEMENTED();
-}
-
-void Panel::HideInstant() {
-  NOTIMPLEMENTED();
-}
-
-gfx::Rect Panel::GetInstantBounds() {
-  NOTIMPLEMENTED();
-  return gfx::Rect();
-}
-
-WindowOpenDisposition Panel::GetDispositionForPopupBounds(
-    const gfx::Rect& bounds) {
-#if defined(USE_AURA)
-  // TODO(stevenjb): Remove this when Aura panels are implemented post R18.
-  PanelBrowserView* panel_view = static_cast<PanelBrowserView*>(native_panel_);
-  return panel_view->GetDispositionForPopupBounds(bounds);
-#else
-  return NEW_POPUP;
-#endif
-}
-
-FindBar* Panel::CreateFindBar() {
-  return native_panel_->CreatePanelFindBar();
-}
-
-#if defined(OS_CHROMEOS)
-void Panel::ShowKeyboardOverlay(gfx::NativeWindow owning_window) {
-  NOTIMPLEMENTED();
-}
-#endif
-
-void Panel::ResizeDueToAutoResize(WebContents* web_contents,
-                                  const gfx::Size& pref_size) {
+void Panel::OnWindowAutoResized(const gfx::Size& preferred_window_size) {
   DCHECK(auto_resizable_);
-  return manager()->OnWindowAutoResized(
-      this,
-      native_panel_->WindowSizeFromContentSize(pref_size));
+  if (panel_strip_)
+    panel_strip_->ResizePanelWindow(this, preferred_window_size);
 }
 
-void Panel::ShowAvatarBubble(WebContents* web_contents, const gfx::Rect& rect) {
-  // Panels will never show a new tab page so this should never be called.
-  NOTREACHED();
+void Panel::OnWindowResizedByMouse(const gfx::Rect& new_bounds) {
+  if (panel_strip_)
+    panel_strip_->OnPanelResizedByMouse(this, new_bounds);
 }
 
-void Panel::ShowAvatarBubbleFromAvatarButton() {
-  // Panels will never show an avatar button so this should never be called.
-  NOTREACHED();
-}
-
-void Panel::TabInsertedAt(TabContentsWrapper* contents,
-                          int index,
-                          bool foreground) {
-  if (auto_resizable_) {
-    DCHECK_EQ(0, index);
-    EnableWebContentsAutoResize(contents->web_contents());
-  }
-}
-
-void Panel::EnableWebContentsAutoResize(WebContents* web_contents) {
+void Panel::EnableWebContentsAutoResize(content::WebContents* web_contents) {
   DCHECK(web_contents);
   ConfigureAutoResize(web_contents);
 
   // We also need to know when the render view host changes in order
   // to turn on auto-resize notifications in the new render view host.
-  registrar_.RemoveAll();  // Stop notifications for previous contents, if any.
-  registrar_.Add(
-      this,
-      content::NOTIFICATION_WEB_CONTENTS_SWAPPED,
-      content::Source<WebContents>(web_contents));
+  if (!registrar_.IsRegistered(
+          this, content::NOTIFICATION_WEB_CONTENTS_SWAPPED,
+          content::Source<content::WebContents>(web_contents))) {
+    registrar_.Add(
+        this,
+        content::NOTIFICATION_WEB_CONTENTS_SWAPPED,
+        content::Source<content::WebContents>(web_contents));
+  }
+}
+
+void Panel::ExecuteCommandWithDisposition(int id,
+                                          WindowOpenDisposition disposition) {
+  // TODO(jennb): implement.
+}
+
+bool Panel::ExecuteCommandIfEnabled(int id) {
+  if (command_updater()->SupportsCommand(id) &&
+      command_updater()->IsCommandEnabled(id)) {
+    ExecuteCommandWithDisposition(id, CURRENT_TAB);
+    return true;
+  }
+  return false;
 }
 
 void Panel::Observe(int type,
                     const content::NotificationSource& source,
                     const content::NotificationDetails& details) {
-  DCHECK_EQ(content::NOTIFICATION_WEB_CONTENTS_SWAPPED, type);
-  ConfigureAutoResize(content::Source<WebContents>(source).ptr());
+  switch (type) {
+    case content::NOTIFICATION_WEB_CONTENTS_SWAPPED:
+      ConfigureAutoResize(content::Source<content::WebContents>(source).ptr());
+      break;
+    case chrome::NOTIFICATION_EXTENSION_UNLOADED:
+      if (content::Details<extensions::UnloadedExtensionInfo>(
+              details)->extension->id() == extension_id())
+        Close();
+      break;
+    case content::NOTIFICATION_APP_TERMINATING:
+      Close();
+      break;
+    default:
+      NOTREACHED() << "Received unexpected notification " << type;
+  }
 }
 
 void Panel::OnActiveStateChanged(bool active) {
@@ -737,7 +558,7 @@ void Panel::OnActiveStateChanged(bool active) {
       content::NotificationService::NoDetails());
 }
 
-void Panel::ConfigureAutoResize(WebContents* web_contents) {
+void Panel::ConfigureAutoResize(content::WebContents* web_contents) {
   if (!auto_resizable_ || !web_contents)
     return;
 
@@ -752,7 +573,7 @@ void Panel::ConfigureAutoResize(WebContents* web_contents) {
 }
 
 void Panel::OnWindowSizeAvailable() {
-  ConfigureAutoResize(browser()->GetSelectedWebContents());
+  ConfigureAutoResize(WebContents());
 }
 
 void Panel::OnTitlebarClicked(panel::ClickModifier modifier) {
@@ -782,13 +603,8 @@ void Panel::OnMinimizeButtonClicked(panel::ClickModifier modifier) {
 }
 
 void Panel::OnRestoreButtonClicked(panel::ClickModifier modifier) {
-  if (!panel_strip_)
-    return;
-
-  if (modifier == panel::APPLY_TO_ALL)
-    panel_strip_->RestoreAll();
-  else
-    Restore();
+  // Clicking the restore button has the same behavior as clicking the titlebar.
+  OnTitlebarClicked(modifier);
 }
 
 void Panel::OnPanelStartUserResizing() {
@@ -801,6 +617,42 @@ void Panel::OnPanelEndUserResizing() {
   SetPreviewMode(false);
 }
 
-void Panel::DestroyBrowser() {
-  native_panel_->DestroyPanelBrowser();
+bool Panel::ShouldCloseWindow() {
+  // TODO(jennb): implement
+  return true;
+}
+
+void Panel::OnWindowClosing() {
+  // TODO(jennb): implement
+}
+
+string16 Panel::GetWindowTitle() const {
+  content::WebContents* contents = WebContents();
+  string16 title;
+
+  // |contents| can be NULL during the window's creation.
+  if (contents) {
+    title = contents->GetTitle();
+    FormatTitleForDisplay(&title);
+  }
+
+  if (title.empty())
+    title = UTF8ToUTF16(app_name());
+
+  return title;
+}
+
+// static
+void Panel::FormatTitleForDisplay(string16* title) {
+  size_t current_index = 0;
+  size_t match_index;
+  while ((match_index = title->find(L'\n', current_index)) != string16::npos) {
+    title->replace(match_index, 1, string16());
+    current_index = match_index;
+  }
+}
+
+SkBitmap Panel::GetCurrentPageIcon() const {
+  // TODO(jennb): implement.
+  return SkBitmap();
 }

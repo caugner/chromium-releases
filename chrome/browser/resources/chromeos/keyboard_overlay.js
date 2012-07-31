@@ -37,13 +37,14 @@ var LABEL_TO_IDENTIFIER = {
   'alt': '38',
   'caps lock': '3A',
   'disabled': 'DISABLED'
-}
+};
 
 var keyboardOverlayId = 'en_US';
 var identifierMap = {};
 
 /**
  * Returns layouts data.
+ * @return {Object} Keyboard layout data.
  */
 function getLayouts() {
   return keyboardOverlayData['layouts'];
@@ -51,6 +52,7 @@ function getLayouts() {
 
 /**
  * Returns shortcut data.
+ * @return {Object} Keyboard shortcut data.
  */
 function getShortcutData() {
   return keyboardOverlayData['shortcut'];
@@ -58,6 +60,7 @@ function getShortcutData() {
 
 /**
  * Returns the keyboard overlay ID.
+ * @return {string} Keyboard overlay ID.
  */
 function getKeyboardOverlayId() {
   return keyboardOverlayId;
@@ -65,6 +68,7 @@ function getKeyboardOverlayId() {
 
 /**
  * Returns keyboard glyph data.
+ * @return {Object} Keyboard glyph data.
  */
 function getKeyboardGlyphData() {
   return keyboardOverlayData['keyboardGlyph'][getKeyboardOverlayId()];
@@ -72,6 +76,8 @@ function getKeyboardGlyphData() {
 
 /**
  * Converts a single hex number to a character.
+ * @param {string} hex Hexadecimal string.
+ * @return {string} Unicode values of hexadecimal string.
  */
 function hex2char(hex) {
   if (!hex) {
@@ -93,11 +99,13 @@ function hex2char(hex) {
 
 /**
  * Returns a list of modifiers from the key event.
+ * @param {Event} e The key event.
+ * @return {Array} List of modifiers based on key event.
  */
 function getModifiers(e) {
-  if (!e) {
+  if (!e)
     return [];
-  }
+
   var isKeyDown = (e.type == 'keydown');
   var keyCodeToModifier = {
     16: 'SHIFT',
@@ -111,9 +119,9 @@ function getModifiers(e) {
   // if e.keyCode is one of Shift, Ctrl and Alt, isPressed should
   // be changed because the key currently pressed
   // does not affect the values of e.shiftKey, e.ctrlKey and e.altKey
-  if(modifierWithKeyCode){
+  if (modifierWithKeyCode)
     isPressed[modifierWithKeyCode] = isKeyDown;
-  }
+
   // make the result array
   return ['SHIFT', 'CTRL', 'ALT'].filter(
       function(modifier) {
@@ -123,6 +131,9 @@ function getModifiers(e) {
 
 /**
  * Returns an ID of the key.
+ * @param {string} identifier Key identifier.
+ * @param {number} i Key number.
+ * @return {string} Key ID.
  */
 function keyId(identifier, i) {
   return identifier + '-key-' + i;
@@ -130,6 +141,9 @@ function keyId(identifier, i) {
 
 /**
  * Returns an ID of the text on the key.
+ * @param {string} identifier Key identifier.
+ * @param {number} i Key number.
+ * @return {string} Key text ID.
  */
 function keyTextId(identifier, i) {
   return identifier + '-key-text-' + i;
@@ -137,6 +151,9 @@ function keyTextId(identifier, i) {
 
 /**
  * Returns an ID of the shortcut text.
+ * @param {string} identifier Key identifier.
+ * @param {number} i Key number.
+ * @return {string} Key shortcut text ID.
  */
 function shortcutTextId(identifier, i) {
   return identifier + '-shortcut-text-' + i;
@@ -144,6 +161,9 @@ function shortcutTextId(identifier, i) {
 
 /**
  * Returns true if |list| contains |e|.
+ * @param {Array} list Container list.
+ * @param {string} e Element string.
+ * @return {boolean} Returns true if the list contains the element.
  */
 function contains(list, e) {
   return list.indexOf(e) != -1;
@@ -152,6 +172,9 @@ function contains(list, e) {
 /**
  * Returns a list of the class names corresponding to the identifier and
  * modifiers.
+ * @param {string} identifier Key identifier.
+ * @param {Array} modifiers List of key modifiers.
+ * @return {Array} List of class names corresponding to specified params.
  */
 function getKeyClasses(identifier, modifiers) {
   var classes = ['keyboard-overlay-key'];
@@ -170,6 +193,8 @@ function getKeyClasses(identifier, modifiers) {
 
 /**
  * Returns true if a character is a ASCII character.
+ * @param {string} c A character to be checked.
+ * @return {boolean} True if the character is an ASCII character.
  */
 function isAscii(c) {
   var charCode = c.charCodeAt(0);
@@ -178,6 +203,8 @@ function isAscii(c) {
 
 /**
  * Returns a remapped identiifer based on the preference.
+ * @param {string} identifier Key identifier.
+ * @return {string} Remapped identifier.
  */
 function remapIdentifier(identifier) {
   return identifierMap[identifier] || identifier;
@@ -185,6 +212,9 @@ function remapIdentifier(identifier) {
 
 /**
  * Returns a label of the key.
+ * @param {string} keyData Key glyph data.
+ * @param {Array} modifiers Key Modifier list.
+ * @return {string} Label of the key.
  */
 function getKeyLabel(keyData, modifiers) {
   if (!keyData) {
@@ -195,7 +225,7 @@ function getKeyLabel(keyData, modifiers) {
   }
   var keyLabel = '';
   for (var j = 1; j <= 9; j++) {
-    var pos =  keyData['p' + j];
+    var pos = keyData['p' + j];
     if (!pos) {
       continue;
     }
@@ -215,26 +245,32 @@ function getKeyLabel(keyData, modifiers) {
  * Returns a normalized string used for a key of shortcutData.
  *
  * Examples:
- *   keycode: 'd', modifiers: ['CTRL', 'SHIFT'] => 'd<>CTRL<>SHIFT'
- *   keycode: 'alt', modifiers: ['ALT', 'SHIFT'] => 'ALT<>SHIFT'
+ *   keyCode: 'd', modifiers: ['CTRL', 'SHIFT'] => 'd<>CTRL<>SHIFT'
+ *   keyCode: 'alt', modifiers: ['ALT', 'SHIFT'] => 'ALT<>SHIFT'
+ *
+ * @param {string} keyCode Key code.
+ * @param {Array} modifiers Key Modifier list.
+ * @return {string} Normalized key shortcut data string.
  */
-function getAction(keycode, modifiers) {
-  const SEPARATOR = '<>';
-  if (keycode.toUpperCase() in MODIFIER_TO_CLASS) {
-    keycode = keycode.toUpperCase();
-    if (keycode in modifiers) {
-      return modifiers.join(SEPARATOR);
+function getAction(keyCode, modifiers) {
+  /** @const */ var separatorStr = '<>';
+  if (keyCode.toUpperCase() in MODIFIER_TO_CLASS) {
+    keyCode = keyCode.toUpperCase();
+    if (keyCode in modifiers) {
+      return modifiers.join(separatorStr);
     } else {
-      var action = [keycode].concat(modifiers)
+      var action = [keyCode].concat(modifiers);
       action.sort();
-      return action.join(SEPARATOR);
+      return action.join(separatorStr);
     }
   }
-  return [keycode].concat(modifiers).join(SEPARATOR);
+  return [keyCode].concat(modifiers).join(separatorStr);
 }
 
 /**
  * Returns a text which displayed on a key.
+ * @param {string} keyData Key glyph data.
+ * @return {string} Key text value.
  */
 function getKeyTextValue(keyData) {
   if (keyData.label) {
@@ -257,9 +293,10 @@ function getKeyTextValue(keyData) {
 
 /**
  * Updates the whole keyboard.
+ * @param {Array} modifiers Key Modifier list.
  */
 function update(modifiers) {
-  var instructions = document.getElementById('instructions');
+  var instructions = $('instructions');
   if (modifiers.length == 0) {
     instructions.style.visibility = 'visible';
   } else {
@@ -289,14 +326,14 @@ function update(modifiers) {
       classes.push('is-shortcut');
     }
 
-    var key = document.getElementById(keyId(identifier, i));
+    var key = $(keyId(identifier, i));
     key.className = classes.join(' ');
 
     if (!keyData) {
       continue;
     }
 
-    var keyText = document.getElementById(keyTextId(identifier, i));
+    var keyText = $(keyTextId(identifier, i));
     var keyTextValue = getKeyTextValue(keyData);
     if (keyTextValue) {
        keyText.style.visibility = 'visible';
@@ -305,10 +342,10 @@ function update(modifiers) {
     }
     keyText.textContent = keyTextValue;
 
-    var shortcutText = document.getElementById(shortcutTextId(identifier, i));
+    var shortcutText = $(shortcutTextId(identifier, i));
     if (shortcutId) {
       shortcutText.style.visibility = 'visible';
-      shortcutText.textContent = templateData[shortcutId];
+      shortcutText.textContent = loadTimeData.getString(shortcutId);
     } else {
       shortcutText.style.visibility = 'hidden';
     }
@@ -325,10 +362,19 @@ function update(modifiers) {
 
 /**
  * A callback function for onkeydown and onkeyup events.
+ * @param {Event} e Key event.
  */
-function handleKeyEvent(e){
+function handleKeyEvent(e) {
   var modifiers = getModifiers(e);
   if (!getKeyboardOverlayId()) {
+    return;
+  }
+  var shortcutData = getShortcutData();
+  var action = getAction(String.fromCharCode(e.keyCode).toLowerCase(),
+                         modifiers);
+  if (e.keyCode == 27 ||  // Escape
+      shortcutData[action]) {
+    chrome.send('DialogClose');
     return;
   }
   update(modifiers);
@@ -412,20 +458,24 @@ function initLayout() {
   var instructionsText = document.createElement('div');
   instructionsText.id = 'instructions-text';
   instructionsText.className = 'keyboard-overlay-instructions-text';
-  instructionsText.innerHTML = templateData.keyboardOverlayInstructions;
+  instructionsText.innerHTML =
+      loadTimeData.getString('keyboardOverlayInstructions');
   instructions.appendChild(instructionsText);
   var instructionsHideText = document.createElement('div');
   instructionsHideText.id = 'instructions-hide-text';
   instructionsHideText.className = 'keyboard-overlay-instructions-hide-text';
-  instructionsHideText.innerHTML = templateData.keyboardOverlayInstructionsHide;
+  instructionsHideText.innerHTML =
+      loadTimeData.getString('keyboardOverlayInstructionsHide');
   instructions.appendChild(instructionsHideText);
   var learnMoreLinkText = document.createElement('div');
   learnMoreLinkText.id = 'learn-more-text';
   learnMoreLinkText.className = 'keyboard-overlay-learn-more-text';
   learnMoreLinkText.addEventListener('click', learnMoreClicked);
   var learnMoreLinkAnchor = document.createElement('a');
-  learnMoreLinkAnchor.href = templateData.keyboardOverlayLearnMoreURL;
-  learnMoreLinkAnchor.textContent = templateData.keyboardOverlayLearnMore;
+  learnMoreLinkAnchor.href =
+      loadTimeData.getString('keyboardOverlayLearnMoreURL');
+  learnMoreLinkAnchor.textContent =
+      loadTimeData.getString('keyboardOverlayLearnMore');
   learnMoreLinkText.appendChild(learnMoreLinkAnchor);
   instructions.appendChild(learnMoreLinkText);
   keyboard.appendChild(instructions);
@@ -444,6 +494,7 @@ function init() {
  * Initializes the global map for remapping identifiers of modifier keys based
  * on the preference.
  * Called after sending the 'getLabelMap' message.
+ * @param {Object} remap Identifier map.
  */
 function initIdentifierMap(remap) {
   for (var key in remap) {
@@ -462,12 +513,14 @@ function initIdentifierMap(remap) {
 /**
  * Initializes the global keyboad overlay ID and the layout of keys.
  * Called after sending the 'getInputMethodId' message.
+ * @param {inputMethodId} inputMethodId Input Method Identifier.
  */
 function initKeyboardOverlayId(inputMethodId) {
   // Libcros returns an empty string when it cannot find the keyboard overlay ID
   // corresponding to the current input method.
   // In such a case, fallback to the default ID (en_US).
-  var inputMethodIdToOverlayId = keyboardOverlayData['inputMethodIdToOverlayId']
+  var inputMethodIdToOverlayId =
+      keyboardOverlayData['inputMethodIdToOverlayId'];
   if (inputMethodId) {
     keyboardOverlayId = inputMethodIdToOverlayId[inputMethodId];
   }
@@ -475,15 +528,19 @@ function initKeyboardOverlayId(inputMethodId) {
     console.error('No keyboard overlay ID for ' + inputMethodId);
     keyboardOverlayId = 'en_US';
   }
-  while(document.body.firstChild) {
+  while (document.body.firstChild) {
     document.body.removeChild(document.body.firstChild);
   }
   initLayout();
   update([]);
+  window.webkitRequestAnimationFrame(function() {
+    chrome.send('didPaint');
+  });
 }
 
 /**
  * Handles click events of the learn more link.
+ * @param {Event} e Mouse click event.
  */
 function learnMoreClicked(e) {
   chrome.send('openLearnMorePage');

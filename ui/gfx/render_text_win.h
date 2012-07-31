@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/scoped_vector.h"
 #include "ui/gfx/render_text.h"
 
 namespace gfx {
@@ -69,9 +70,7 @@ class RenderTextWin : public RenderText {
   virtual base::i18n::TextDirection GetTextDirection() OVERRIDE;
   virtual Size GetStringSize() OVERRIDE;
   virtual SelectionModel FindCursorPosition(const Point& point) OVERRIDE;
-  virtual size_t IndexOfAdjacentGrapheme(
-      size_t index,
-      LogicalCursorDirection direction) OVERRIDE;
+  virtual std::vector<FontSpan> GetFontSpansForTesting() OVERRIDE;
 
  protected:
   // Overridden from RenderText:
@@ -121,13 +120,16 @@ class RenderTextWin : public RenderText {
   // Cached map from font names to vectors of linked fonts.
   static std::map<std::string, std::vector<Font> > cached_linked_fonts_;
 
+  // Cached map of system fonts, from file names to font families.
+  static std::map<std::string, std::string> cached_system_fonts_;
+
   // Cached map from font name to the last successful substitute font used.
   static std::map<std::string, Font> successful_substitute_fonts_;
 
   SCRIPT_CONTROL script_control_;
   SCRIPT_STATE script_state_;
 
-  std::vector<internal::TextRun*> runs_;
+  ScopedVector<internal::TextRun> runs_;
   Size string_size_;
 
   // A common vertical baseline for all the text runs. This is computed as the

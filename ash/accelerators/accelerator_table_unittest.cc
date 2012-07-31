@@ -19,11 +19,7 @@ struct Cmp {
       return lhs.trigger_on_press < rhs.trigger_on_press;
     if (lhs.keycode != rhs.keycode)
       return lhs.keycode < rhs.keycode;
-    if (lhs.shift != rhs.shift)
-      return lhs.shift < rhs.shift;
-    if (lhs.ctrl != rhs.ctrl)
-      return lhs.ctrl < rhs.ctrl;
-    return lhs.alt < rhs.alt;
+    return lhs.modifiers < rhs.modifiers;
     // Do not check |action|.
   }
 };
@@ -36,8 +32,29 @@ TEST(AcceleratorTableTest, CheckDuplicatedAccelerators) {
     const AcceleratorData& entry = kAcceleratorData[i];
     EXPECT_TRUE(acclerators.insert(entry).second)
         << "Duplicated accelerator: " << entry.trigger_on_press << ", "
-        << entry.keycode << ", " << entry.shift << ", " << entry.ctrl << ", "
-        << entry.alt;
+        << entry.keycode << ", " << (entry.modifiers & ui::EF_SHIFT_DOWN)
+        << ", " << (entry.modifiers & ui::EF_CONTROL_DOWN) << ", "
+        << (entry.modifiers & ui::EF_ALT_DOWN);
+  }
+}
+
+TEST(AcceleratorTableTest, CheckDuplicatedReservedActions) {
+  std::set<AcceleratorAction> actions;
+  for (size_t i = 0; i < kReservedActionsLength; ++i) {
+    EXPECT_TRUE(actions.insert(kReservedActions[i]).second)
+        << "Duplicated action: " << kReservedActions[i];
+  }
+}
+
+TEST(AcceleratorTableTest, CheckDuplicatedActionsAllowedAtLoginOrLockScreen) {
+  std::set<AcceleratorAction> actions;
+  for (size_t i = 0; i < kActionsAllowedAtLoginOrLockScreenLength; ++i) {
+    EXPECT_TRUE(actions.insert(kActionsAllowedAtLoginOrLockScreen[i]).second)
+        << "Duplicated action: " << kActionsAllowedAtLoginOrLockScreen[i];
+  }
+  for (size_t i = 0; i < kActionsAllowedAtLockScreenLength; ++i) {
+    EXPECT_TRUE(actions.insert(kActionsAllowedAtLockScreen[i]).second)
+        << "Duplicated action: " << kActionsAllowedAtLockScreen[i];
   }
 }
 

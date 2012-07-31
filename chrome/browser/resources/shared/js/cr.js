@@ -14,16 +14,6 @@ this.cr = (function() {
   'use strict';
 
   /**
-   * Tags the html element with an attribute that allows touch-specific css
-   * rules.
-   * TODO(rbyers): make Chrome always touch-optimized. http://crbug.com/105380
-   */
-  function enableTouchOptimizedCss() {
-    if (cr.isTouchOptimized)
-      doc.documentElement.setAttribute('touch-optimized', '');
-  }
-
-  /**
    * Builds an object structure for the provided namespace path,
    * ensuring that names that already exist are not overwritten. For
    * example:
@@ -331,6 +321,8 @@ this.cr = (function() {
 
     Event.prototype = {__proto__: global.Event.prototype};
 
+    cr.doc = document;
+
     /**
      * Whether we are using a Mac or not.
      */
@@ -360,13 +352,6 @@ this.cr = (function() {
      * Whether this uses the views toolkit or not.
      */
     cr.isViews = /views/.test(chrome.toolkit);
-
-    /**
-     * Whether this window is optimized for touch-based input.
-     */
-    cr.isTouchOptimized = !!chrome.touchOptimized;
-
-    enableTouchOptimizedCss();
   }
 
   return {
@@ -379,15 +364,7 @@ this.cr = (function() {
     Event: Event,
     getUid: getUid,
     initialize: initialize,
-    PropertyKind: PropertyKind,
-
-    /**
-     * The document that we are currently using.
-     * @type {!Document}
-     */
-    get doc() {
-      return document;
-    }
+    PropertyKind: PropertyKind
   };
 })();
 

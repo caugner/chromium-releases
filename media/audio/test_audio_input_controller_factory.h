@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,7 +25,7 @@ class TestAudioInputControllerFactory;
 // Typical usage:
 //   // Create and register factory.
 //   TestAudioInputControllerFactory factory;
-//   AudioInputController::set_factory(&factory);
+//   AudioInputController::set_factory_for_testing(&factory);
 //
 //   // Do something that triggers creation of an AudioInputController.
 //   TestAudioInputController* controller = factory.last_controller();
@@ -41,7 +41,7 @@ class TestAudioInputControllerFactory;
 //   // Make sure consumer of AudioInputController does the right thing.
 //   ...
 //   // Reset factory.
-//   AudioInputController::set_factory(NULL);
+//   AudioInputController::set_factory_for_testing(NULL);
 
 class TestAudioInputController : public AudioInputController {
  public:
@@ -49,7 +49,6 @@ class TestAudioInputController : public AudioInputController {
                            AudioManager* audio_manager,
                            EventHandler* event_handler,
                            SyncWriter* sync_writer);
-  virtual ~TestAudioInputController();
 
   // Returns the event handler installed on the AudioInputController.
   EventHandler* event_handler() const { return event_handler_; }
@@ -60,6 +59,9 @@ class TestAudioInputController : public AudioInputController {
 
   // Ensure that the closure is run on the audio-manager thread.
   virtual void Close(const base::Closure& closed_task) OVERRIDE;
+
+ protected:
+  virtual ~TestAudioInputController();
 
  private:
   // These are not owned by us and expected to be valid for this object's

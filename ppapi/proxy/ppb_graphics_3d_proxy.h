@@ -28,7 +28,7 @@ class Graphics3D : public PPB_Graphics3D_Shared {
   explicit Graphics3D(const HostResource& resource);
   virtual ~Graphics3D();
 
-  bool Init();
+  bool Init(gpu::gles2::GLES2Implementation* share_gles2);
 
   // Graphics3DTrusted API. These are not implemented in the proxy.
   virtual PP_Bool InitCommandBuffer() OVERRIDE;
@@ -61,9 +61,10 @@ class PPB_Graphics3D_Proxy : public InterfaceProxy {
   PPB_Graphics3D_Proxy(Dispatcher* dispatcher);
   virtual ~PPB_Graphics3D_Proxy();
 
-  static PP_Resource CreateProxyResource(PP_Instance instance,
-                                         PP_Resource share_context,
-                                         const int32_t* attrib_list);
+  static PP_Resource CreateProxyResource(
+      PP_Instance instance,
+      PP_Resource share_context,
+      const int32_t* attrib_list);
 
   // InterfaceProxy implementation.
   virtual bool OnMessageReceived(const IPC::Message& msg);
@@ -72,17 +73,20 @@ class PPB_Graphics3D_Proxy : public InterfaceProxy {
 
  private:
   void OnMsgCreate(PP_Instance instance,
+                   HostResource share_context,
                    const std::vector<int32_t>& attribs,
                    HostResource* result);
   void OnMsgInitCommandBuffer(const HostResource& context);
   void OnMsgSetGetBuffer(const HostResource& context,
                          int32 id);
   void OnMsgGetState(const HostResource& context,
-                     gpu::CommandBuffer::State* state);
+                     gpu::CommandBuffer::State* state,
+                     bool* success);
   void OnMsgFlush(const HostResource& context,
                   int32 put_offset,
                   int32 last_known_get,
-                  gpu::CommandBuffer::State* state);
+                  gpu::CommandBuffer::State* state,
+                  bool* success);
   void OnMsgAsyncFlush(const HostResource& context,
                        int32 put_offset);
   void OnMsgCreateTransferBuffer(const HostResource& context,

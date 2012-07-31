@@ -5,29 +5,36 @@
 #import "remoting/host/me2me_preference_pane.h"
 
 #import <Cocoa/Cocoa.h>
+#include <CommonCrypto/CommonHMAC.h>
+#include <errno.h>
 #include <launch.h>
 #import <PreferencePanes/PreferencePanes.h>
 #import <SecurityInterface/SFAuthorizationView.h>
+#include <stdlib.h>
+#include <unistd.h>
+
+#include <fstream>
 
 #include "base/eintr_wrapper.h"
-#include "base/file_path.h"
-#include "base/file_util.h"
-#include "base/logging.h"
-#include "base/mac/authorization_util.h"
-#include "base/mac/foundation_util.h"
-#include "base/mac/launchd.h"
-#include "base/mac/mac_logging.h"
 #include "base/mac/scoped_launch_data.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/stringprintf.h"
-#include "base/sys_string_conversions.h"
 #include "remoting/host/host_config.h"
-#include "remoting/host/json_host_config.h"
-#include "remoting/protocol/me2me_host_authenticator_factory.h"
+#import "remoting/host/me2me_preference_pane_confirm_pin.h"
+#import "remoting/host/me2me_preference_pane_disable.h"
+#include "third_party/jsoncpp/source/include/json/reader.h"
+#include "third_party/jsoncpp/source/include/json/writer.h"
+#include "third_party/modp_b64/modp_b64.h"
 
 namespace {
 // The name of the Remoting Host service that is registered with launchd.
 #define kServiceName "org.chromium.chromoting"
+
+// Use separate named notifications for success and failure because sandboxed
+// components can't include a dictionary when sending distributed notifications.
+// The preferences panel is not yet sandboxed, but err on the side of caution.
+#define kUpdateSucceededNotificationName kServiceName ".update_succeeded"
+#define kUpdateFailedNotificationName kServiceName ".update_failed"
+
 #define kConfigDir "/Library/PrivilegedHelperTools/"
 
 // This helper script is executed as root.  It is passed a command-line option
@@ -35,10 +42,13 @@ namespace {
 // informs the host's launch script of whether the host is enabled or disabled.
 const char kHelperTool[] = kConfigDir kServiceName ".me2me.sh";
 
-bool GetTemporaryConfigFilePath(FilePath* path) {
-  if (!file_util::GetTempDir(path))
+bool GetTemporaryConfigFilePath(std::string* path) {
+  NSString* filename = NSTemporaryDirectory();
+  if (filename == nil)
     return false;
-  *path = path->Append(kServiceName ".json");
+
+  filename = [filename stringByAppendingString:@"/" kServiceName ".json"];
+  *path = [filename UTF8String];
   return true;
 }
 
@@ -51,19 +61,220 @@ bool IsConfigValid(const remoting::JsonHostConfig* config) {
 
 bool IsPinValid(const std::string& pin, const std::string& host_id,
                 const std::string& host_secret_hash) {
-  remoting::protocol::SharedSecretHash hash;
-  if (!hash.Parse(host_secret_hash)) {
-    LOG(ERROR) << "Invalid host_secret_hash.";
+  // TODO(lambroslambrou): Once the "base" target supports building for 64-bit
+  // on Mac OS X, remove this code and replace it with |VerifyHostPinHash()|
+  // from host/pin_hash.h.
+  size_t separator = host_secret_hash.find(':');
+  if (separator == std::string::npos)
+    return false;
+
+  std::string method = host_secret_hash.substr(0, separator);
+  if (method != "hmac") {
+    NSLog(@"Authentication method '%s' not supported", method.c_str());
     return false;
   }
-  std::string result =
-      remoting::protocol::AuthenticationMethod::ApplyHashFunction(
-          hash.hash_function, host_id, pin);
-  return result == hash.value;
+
+  std::string hash_base64 = host_secret_hash.substr(separator + 1);
+
+  // Convert |hash_base64| to |hash|, based on code from base/base64.cc.
+  int hash_base64_size = static_cast<int>(hash_base64.size());
+  std::string hash;
+  hash.resize(modp_b64_decode_len(hash_base64_size));
+
+  // modp_b64_decode_len() returns at least 1, so hash[0] is safe here.
+  int hash_size = modp_b64_decode(&(hash[0]), hash_base64.data(),
+                                  hash_base64_size);
+  if (hash_size < 0) {
+    NSLog(@"Failed to parse host_secret_hash");
+    return false;
+  }
+  hash.resize(hash_size);
+
+  std::string computed_hash;
+  computed_hash.resize(CC_SHA256_DIGEST_LENGTH);
+
+  CCHmac(kCCHmacAlgSHA256,
+         host_id.data(), host_id.size(),
+         pin.data(), pin.size(),
+         &(computed_hash[0]));
+
+  // Normally, a constant-time comparison function would be used, but it is
+  // unnecessary here as the "secret" is already readable by the user
+  // supplying input to this routine.
+  return computed_hash == hash;
 }
 
 }  // namespace
 
+// These methods are copied from base/mac, but with the logging changed to use
+// NSLog().
+//
+// TODO(lambroslambrou): Once the "base" target supports building for 64-bit
+// on Mac OS X, remove these implementations and use the ones in base/mac.
+namespace base {
+namespace mac {
+
+// MessageForJob sends a single message to launchd with a simple dictionary
+// mapping |operation| to |job_label|, and returns the result of calling
+// launch_msg to send that message. On failure, returns NULL. The caller
+// assumes ownership of the returned launch_data_t object.
+launch_data_t MessageForJob(const std::string& job_label,
+                            const char* operation) {
+  // launch_data_alloc returns something that needs to be freed.
+  ScopedLaunchData message(launch_data_alloc(LAUNCH_DATA_DICTIONARY));
+  if (!message) {
+    NSLog(@"launch_data_alloc");
+    return NULL;
+  }
+
+  // launch_data_new_string returns something that needs to be freed, but
+  // the dictionary will assume ownership when launch_data_dict_insert is
+  // called, so put it in a scoper and .release() it when given to the
+  // dictionary.
+  ScopedLaunchData job_label_launchd(launch_data_new_string(job_label.c_str()));
+  if (!job_label_launchd) {
+    NSLog(@"launch_data_new_string");
+    return NULL;
+  }
+
+  if (!launch_data_dict_insert(message,
+                               job_label_launchd.release(),
+                               operation)) {
+    return NULL;
+  }
+
+  return launch_msg(message);
+}
+
+pid_t PIDForJob(const std::string& job_label) {
+  ScopedLaunchData response(MessageForJob(job_label, LAUNCH_KEY_GETJOB));
+  if (!response) {
+    return -1;
+  }
+
+  launch_data_type_t response_type = launch_data_get_type(response);
+  if (response_type != LAUNCH_DATA_DICTIONARY) {
+    if (response_type == LAUNCH_DATA_ERRNO) {
+      NSLog(@"PIDForJob: error %d", launch_data_get_errno(response));
+    } else {
+      NSLog(@"PIDForJob: expected dictionary, got %d", response_type);
+    }
+    return -1;
+  }
+
+  launch_data_t pid_data = launch_data_dict_lookup(response,
+                                                   LAUNCH_JOBKEY_PID);
+  if (!pid_data)
+    return 0;
+
+  if (launch_data_get_type(pid_data) != LAUNCH_DATA_INTEGER) {
+    NSLog(@"PIDForJob: expected integer");
+    return -1;
+  }
+
+  return launch_data_get_integer(pid_data);
+}
+
+OSStatus ExecuteWithPrivilegesAndGetPID(AuthorizationRef authorization,
+                                        const char* tool_path,
+                                        AuthorizationFlags options,
+                                        const char** arguments,
+                                        FILE** pipe,
+                                        pid_t* pid) {
+  // pipe may be NULL, but this function needs one.  In that case, use a local
+  // pipe.
+  FILE* local_pipe;
+  FILE** pipe_pointer;
+  if (pipe) {
+    pipe_pointer = pipe;
+  } else {
+    pipe_pointer = &local_pipe;
+  }
+
+  // AuthorizationExecuteWithPrivileges wants |char* const*| for |arguments|,
+  // but it doesn't actually modify the arguments, and that type is kind of
+  // silly and callers probably aren't dealing with that.  Put the cast here
+  // to make things a little easier on callers.
+  OSStatus status = AuthorizationExecuteWithPrivileges(authorization,
+                                                       tool_path,
+                                                       options,
+                                                       (char* const*)arguments,
+                                                       pipe_pointer);
+  if (status != errAuthorizationSuccess) {
+    return status;
+  }
+
+  long line_pid = -1;
+  size_t line_length = 0;
+  char* line_c = fgetln(*pipe_pointer, &line_length);
+  if (line_c) {
+    if (line_length > 0 && line_c[line_length - 1] == '\n') {
+      // line_c + line_length is the start of the next line if there is one.
+      // Back up one character.
+      --line_length;
+    }
+    std::string line(line_c, line_length);
+
+    // The version in base/mac used base::StringToInt() here.
+    line_pid = strtol(line.c_str(), NULL, 10);
+    if (line_pid == 0) {
+      NSLog(@"ExecuteWithPrivilegesAndGetPid: funny line: %s", line.c_str());
+      line_pid = -1;
+    }
+  } else {
+    NSLog(@"ExecuteWithPrivilegesAndGetPid: no line");
+  }
+
+  if (!pipe) {
+    fclose(*pipe_pointer);
+  }
+
+  if (pid) {
+    *pid = line_pid;
+  }
+
+  return status;
+}
+
+}  // namespace mac
+}  // namespace base
+
+namespace remoting {
+JsonHostConfig::JsonHostConfig(const std::string& filename)
+    : filename_(filename) {
+}
+
+JsonHostConfig::~JsonHostConfig() {
+}
+
+bool JsonHostConfig::Read() {
+  std::ifstream file(filename_.c_str());
+  Json::Reader reader;
+  return reader.parse(file, config_, false /* ignore comments */);
+}
+
+bool JsonHostConfig::GetString(const std::string& path,
+                               std::string* out_value) const {
+  if (!config_.isObject())
+    return false;
+
+  if (!config_.isMember(path))
+    return false;
+
+  Json::Value value = config_[path];
+  if (!value.isString())
+    return false;
+
+  *out_value = value.asString();
+  return true;
+}
+
+std::string JsonHostConfig::GetSerializedData() const {
+  Json::FastWriter writer;
+  return writer.write(config_);
+}
+
+}  // namespace remoting
 
 @implementation Me2MePreferencePane
 
@@ -71,10 +282,15 @@ bool IsPinValid(const std::string& pin, const std::string& host_id,
   [authorization_view_ setDelegate:self];
   [authorization_view_ setString:kAuthorizationRightExecute];
   [authorization_view_ setAutoupdate:YES];
+  confirm_pin_view_ = [[Me2MePreferencePaneConfirmPin alloc] init];
+  [confirm_pin_view_ setDelegate:self];
+  disable_view_ = [[Me2MePreferencePaneDisable alloc] init];
+  [disable_view_ setDelegate:self];
 }
 
 - (void)willSelect {
   have_new_config_ = NO;
+  awaiting_service_stop_ = NO;
 
   NSDistributedNotificationCenter* center =
       [NSDistributedNotificationCenter defaultCenter];
@@ -91,8 +307,16 @@ bool IsPinValid(const std::string& pin, const std::string& host_id,
                                        repeats:YES] retain];
   [self updateServiceStatus];
   [self updateAuthorizationStatus];
-  [self readNewConfig];
+
+  [self checkInstalledVersion];
+  if (!restart_pending_or_canceled_)
+    [self readNewConfig];
+
   [self updateUI];
+}
+
+- (void)didSelect {
+  [self checkInstalledVersion];
 }
 
 - (void)willUnselect {
@@ -103,9 +327,12 @@ bool IsPinValid(const std::string& pin, const std::string& host_id,
   [service_status_timer_ invalidate];
   [service_status_timer_ release];
   service_status_timer_ = nil;
+
+  [self notifyPlugin:kUpdateFailedNotificationName];
 }
 
-- (void)onApply:(id)sender {
+- (void)applyConfiguration:(id)sender
+                       pin:(NSString*)pin {
   if (!have_new_config_) {
     // It shouldn't be possible to hit the button if there is no config to
     // apply, but check anyway just in case it happens somehow.
@@ -116,13 +343,16 @@ bool IsPinValid(const std::string& pin, const std::string& host_id,
   [self updateAuthorizationStatus];
   [self updateUI];
 
-  std::string pin = base::SysNSStringToUTF8([pin_ stringValue]);
+  std::string pin_utf8 = [pin UTF8String];
   std::string host_id, host_secret_hash;
   bool result = (config_->GetString(remoting::kHostIdConfigPath, &host_id) &&
                  config_->GetString(remoting::kHostSecretHashConfigPath,
                                     &host_secret_hash));
-  DCHECK(result);
-  if (!IsPinValid(pin, host_id, host_secret_hash)) {
+  if (!result) {
+    [self showError];
+    return;
+  }
+  if (!IsPinValid(pin_utf8, host_id, host_secret_hash)) {
     [self showIncorrectPinMessage];
     return;
   }
@@ -140,24 +370,34 @@ bool IsPinValid(const std::string& pin, const std::string& host_id,
 
   if (![self runHelperAsRootWithCommand:"--disable"
                               inputData:""]) {
-    LOG(ERROR) << "Failed to run the helper tool";
+    NSLog(@"Failed to run the helper tool");
     [self showError];
+    [self notifyPlugin: kUpdateFailedNotificationName];
     return;
   }
 
   // Stop the launchd job.  This cannot easily be done by the helper tool,
   // since the launchd job runs in the current user's context.
   [self sendJobControlMessage:LAUNCH_KEY_STOPJOB];
+  awaiting_service_stop_ = YES;
 }
 
 - (void)onNewConfigFile:(NSNotification*)notification {
-  [self readNewConfig];
+  [self checkInstalledVersion];
+  if (!restart_pending_or_canceled_)
+    [self readNewConfig];
+
   [self updateUI];
 }
 
 - (void)refreshServiceStatus:(NSTimer*)timer {
   BOOL was_running = is_service_running_;
   [self updateServiceStatus];
+  if (awaiting_service_stop_ && !is_service_running_) {
+    awaiting_service_stop_ = NO;
+    [self notifyPlugin:kUpdateSucceededNotificationName];
+  }
+
   if (was_running != is_service_running_)
     [self updateUI];
 }
@@ -182,13 +422,13 @@ bool IsPinValid(const std::string& pin, const std::string& host_id,
 }
 
 - (void)readNewConfig {
-  FilePath file;
+  std::string file;
   if (!GetTemporaryConfigFilePath(&file)) {
-    LOG(ERROR) << "Failed to get path of configuration data.";
+    NSLog(@"Failed to get path of configuration data.");
     [self showError];
     return;
   }
-  if (!file_util::PathExists(file))
+  if (access(file.c_str(), F_OK) != 0)
     return;
 
   scoped_ptr<remoting::JsonHostConfig> new_config_(
@@ -196,33 +436,45 @@ bool IsPinValid(const std::string& pin, const std::string& host_id,
   if (!new_config_->Read()) {
     // Report the error, because the file exists but couldn't be read.  The
     // case of non-existence is normal and expected.
-    LOG(ERROR) << "Error reading configuration data from " << file.value();
+    NSLog(@"Error reading configuration data from %s", file.c_str());
     [self showError];
     return;
   }
-  file_util::Delete(file, false);
+  remove(file.c_str());
   if (!IsConfigValid(new_config_.get())) {
-    LOG(ERROR) << "Invalid configuration data read.";
+    NSLog(@"Invalid configuration data read.");
     [self showError];
     return;
   }
 
   config_.swap(new_config_);
   have_new_config_ = YES;
+
+  [confirm_pin_view_ resetPin];
 }
 
 - (void)updateUI {
-  // TODO(lambroslambrou): These strings should be localized.
-#ifdef OFFICIAL_BUILD
-  NSString* name = @"Chrome Remote Desktop";
-#else
-  NSString* name = @"Chromoting";
-#endif
+  if (have_new_config_) {
+    [box_ setContentView:[confirm_pin_view_ view]];
+  } else {
+    [box_ setContentView:[disable_view_ view]];
+  }
+
+  // TODO(lambroslambrou): Show "enabled" and "disabled" in bold font.
   NSString* message;
   if (is_service_running_) {
-    message = [NSString stringWithFormat:@"%@ is enabled", name];
+    if (have_new_config_) {
+      message = @"Please confirm your new PIN.";
+    } else {
+      message = @"Remote connections to this computer are enabled.";
+    }
   } else {
-    message = [NSString stringWithFormat:@"%@ is disabled", name];
+    if (have_new_config_) {
+      message = @"Remote connections to this computer are disabled. To enable "
+          "remote connections you must confirm your PIN.";
+    } else {
+      message = @"Remote connections to this computer are disabled.";
+    }
   }
   [status_message_ setStringValue:message];
 
@@ -231,15 +483,21 @@ bool IsPinValid(const std::string& pin, const std::string& host_id,
     bool result = config_->GetString(remoting::kXmppLoginConfigPath, &email);
 
     // The config has already been checked by |IsConfigValid|.
-    DCHECK(result);
+    if (!result) {
+      [self showError];
+      return;
+    }
   }
-  [email_ setStringValue:base::SysUTF8ToNSString(email)];
+  [disable_view_ setEnabled:(is_pane_unlocked_ && is_service_running_ &&
+                             !restart_pending_or_canceled_)];
+  [confirm_pin_view_ setEnabled:(is_pane_unlocked_ &&
+                                 !restart_pending_or_canceled_)];
+  [confirm_pin_view_ setEmail:[NSString stringWithUTF8String:email.c_str()]];
+  NSString* applyButtonText = is_service_running_ ? @"Confirm" : @"Enable";
+  [confirm_pin_view_ setButtonText:applyButtonText];
 
-  [disable_button_ setEnabled:(is_pane_unlocked_ && is_service_running_)];
-  [pin_instruction_message_ setEnabled:have_new_config_];
-  [email_ setEnabled:have_new_config_];
-  [pin_ setEnabled:have_new_config_];
-  [apply_button_ setEnabled:(is_pane_unlocked_ && have_new_config_)];
+  if (restart_pending_or_canceled_)
+    [authorization_view_ setEnabled:NO];
 }
 
 - (void)showError {
@@ -271,7 +529,7 @@ bool IsPinValid(const std::string& pin, const std::string& host_id,
   const char* command = is_service_running_ ? "--save-config" : "--enable";
   if (![self runHelperAsRootWithCommand:command
                               inputData:serialized_config]) {
-    LOG(ERROR) << "Failed to run the helper tool";
+    NSLog(@"Failed to run the helper tool");
     [self showError];
     return;
   }
@@ -285,12 +543,16 @@ bool IsPinValid(const std::string& pin, const std::string& host_id,
     if (job_pid > 0) {
       kill(job_pid, SIGHUP);
     } else {
-      LOG(ERROR) << "Failed to obtain PID of service " << kServiceName;
+      NSLog(@"Failed to obtain PID of service " kServiceName);
       [self showError];
     }
   } else {
     [self sendJobControlMessage:LAUNCH_KEY_STARTJOB];
   }
+
+  // Broadcast a distributed notification to inform the plugin that the
+  // configuration has been applied.
+  [self notifyPlugin: kUpdateSucceededNotificationName];
 }
 
 - (BOOL)runHelperAsRootWithCommand:(const char*)command
@@ -298,7 +560,7 @@ bool IsPinValid(const std::string& pin, const std::string& host_id,
   AuthorizationRef authorization =
       [[authorization_view_ authorization] authorizationRef];
   if (!authorization) {
-    LOG(ERROR) << "Failed to obtain authorizationRef";
+    NSLog(@"Failed to obtain authorizationRef");
     return NO;
   }
 
@@ -316,18 +578,19 @@ bool IsPinValid(const std::string& pin, const std::string& host_id,
       &pipe,
       &pid);
   if (status != errAuthorizationSuccess) {
-    OSSTATUS_LOG(ERROR, status) << "AuthorizationExecuteWithPrivileges";
+    NSLog(@"AuthorizationExecuteWithPrivileges: %s (%d)",
+          GetMacOSStatusErrorString(status), static_cast<int>(status));
     return NO;
   }
   if (pid == -1) {
-    LOG(ERROR) << "Failed to get child PID";
+    NSLog(@"Failed to get child PID");
     if (pipe)
       fclose(pipe);
 
     return NO;
   }
   if (!pipe) {
-    LOG(ERROR) << "Unexpected NULL pipe";
+    NSLog(@"Unexpected NULL pipe");
     return NO;
   }
 
@@ -341,7 +604,7 @@ bool IsPinValid(const std::string& pin, const std::string& host_id,
     // According to the fwrite manpage, a partial count is returned only if a
     // write error has occurred.
     if (bytes_written != input_data.size()) {
-      LOG(ERROR) << "Failed to write data to child process";
+      NSLog(@"Failed to write data to child process");
       error = YES;
     }
   }
@@ -351,14 +614,14 @@ bool IsPinValid(const std::string& pin, const std::string& host_id,
   // waitpid(), since the child reads until EOF on its stdin, so calling
   // waitpid() first would result in deadlock.
   if (fclose(pipe) != 0) {
-    PLOG(ERROR) << "fclose";
+    NSLog(@"fclose failed with error %d", errno);
     error = YES;
   }
 
   int exit_status;
   pid_t wait_result = HANDLE_EINTR(waitpid(pid, &exit_status, 0));
   if (wait_result != pid) {
-    PLOG(ERROR) << "waitpid";
+    NSLog(@"waitpid failed with error %d", errno);
     error = YES;
   }
 
@@ -369,7 +632,7 @@ bool IsPinValid(const std::string& pin, const std::string& host_id,
   if (WIFEXITED(exit_status) && WEXITSTATUS(exit_status) == 0) {
     return YES;
   } else {
-    LOG(ERROR) << kHelperTool << " failed with exit status " << exit_status;
+    NSLog(@"%s failed with exit status %d", kHelperTool, exit_status);
     return NO;
   }
 }
@@ -378,7 +641,7 @@ bool IsPinValid(const std::string& pin, const std::string& host_id,
   base::mac::ScopedLaunchData response(
       base::mac::MessageForJob(kServiceName, launch_key));
   if (!response) {
-    LOG(ERROR) << "Failed to send message to launchd";
+    NSLog(@"Failed to send message to launchd");
     [self showError];
     return NO;
   }
@@ -386,18 +649,125 @@ bool IsPinValid(const std::string& pin, const std::string& host_id,
   // Expect a response of type LAUNCH_DATA_ERRNO.
   launch_data_type_t type = launch_data_get_type(response.get());
   if (type != LAUNCH_DATA_ERRNO) {
-    LOG(ERROR) << "launchd returned unexpected type: " << type;
+    NSLog(@"launchd returned unexpected type: %d", type);
     [self showError];
     return NO;
   }
 
   int error = launch_data_get_errno(response.get());
   if (error) {
-    LOG(ERROR) << "launchd returned error: " << error;
+    NSLog(@"launchd returned error: %d", error);
     [self showError];
     return NO;
   }
   return YES;
+}
+
+- (void)notifyPlugin:(const char*)message {
+  NSDistributedNotificationCenter* center =
+      [NSDistributedNotificationCenter defaultCenter];
+  NSString* name = [NSString stringWithUTF8String:message];
+  [center postNotificationName:name
+                        object:nil
+                      userInfo:nil];
+}
+
+- (void)checkInstalledVersion {
+  // There's no point repeating the check if the pane has already been disabled
+  // from a previous call to this method.  The pane only gets disabled when a
+  // version-mismatch has been detected here, so skip the check, but continue to
+  // handle the version-mismatch case.
+  if (!restart_pending_or_canceled_) {
+    NSBundle* this_bundle = [NSBundle bundleForClass:[self class]];
+    NSDictionary* this_plist = [this_bundle infoDictionary];
+    NSString* this_version = [this_plist objectForKey:@"CFBundleVersion"];
+
+    NSString* bundle_path = [this_bundle bundlePath];
+    NSString* plist_path =
+        [bundle_path stringByAppendingString:@"/Contents/Info.plist"];
+    NSDictionary* disk_plist =
+        [NSDictionary dictionaryWithContentsOfFile:plist_path];
+    NSString* disk_version = [disk_plist objectForKey:@"CFBundleVersion"];
+
+    if (disk_version == nil) {
+      NSLog(@"Failed to get installed version information");
+      [self showError];
+      return;
+    }
+
+    if ([this_version isEqualToString:disk_version])
+      return;
+
+    restart_pending_or_canceled_ = YES;
+    [self updateUI];
+  }
+
+  NSWindow* window = [[self mainView] window];
+  if (window == nil) {
+    // Defer the alert until |didSelect| is called, which happens just after
+    // the window is created.
+    return;
+  }
+
+  // This alert appears as a sheet over the top of the Chromoting pref-pane,
+  // underneath the title, so it's OK to refer to "this preference pane" rather
+  // than repeat the title "Chromoting" here.
+  NSAlert* alert = [[NSAlert alloc] init];
+  [alert setMessageText:@"System update detected"];
+  [alert setInformativeText:@"To use this preference pane, System Preferences "
+      "needs to be restarted"];
+  [alert addButtonWithTitle:@"OK"];
+  NSButton* cancel_button = [alert addButtonWithTitle:@"Cancel"];
+  [cancel_button setKeyEquivalent:@"\e"];
+  [alert setAlertStyle:NSWarningAlertStyle];
+  [alert beginSheetModalForWindow:window
+                    modalDelegate:self
+                   didEndSelector:@selector(
+                       mismatchAlertDidEnd:returnCode:contextInfo:)
+                      contextInfo:nil];
+  [alert release];
+}
+
+- (void)mismatchAlertDidEnd:(NSAlert*)alert
+                 returnCode:(NSInteger)returnCode
+                contextInfo:(void*)contextInfo {
+  if (returnCode == NSAlertFirstButtonReturn) {
+    // OK was pressed.
+
+    // Dismiss the alert window here, so that the application will respond to
+    // the NSApp terminate: message.
+    [[alert window] orderOut:nil];
+    [self restartSystemPreferences];
+  } else {
+    // Cancel was pressed.
+
+    // If there is a new config file, delete it and notify the web-app of
+    // failure to apply the config.  Otherwise, the web-app will remain in a
+    // spinning state until System Preferences eventually gets restarted and
+    // the user visits this pane again.
+    std::string file;
+    if (!GetTemporaryConfigFilePath(&file)) {
+      // There's no point in alerting the user here.  The same error would
+      // happen when the pane is eventually restarted, so the user would be
+      // alerted at that time.
+      NSLog(@"Failed to get path of configuration data.");
+      return;
+    }
+
+    remove(file.c_str());
+    [self notifyPlugin:kUpdateFailedNotificationName];
+  }
+}
+
+- (void)restartSystemPreferences {
+  NSTask* task = [[NSTask alloc] init];
+  NSArray* arguments = [NSArray arrayWithObjects:@"--relaunch-prefpane", nil];
+  [task setLaunchPath:[NSString stringWithUTF8String:kHelperTool]];
+  [task setArguments:arguments];
+  [task setStandardInput:[NSPipe pipe]];
+  [task launch];
+  [task release];
+  [NSApp terminate:nil];
 }
 
 @end

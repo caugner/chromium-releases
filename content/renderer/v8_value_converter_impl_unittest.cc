@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -293,14 +293,14 @@ TEST_F(V8ValueConverterImplTest, WeirdTypes) {
   TestWeirdType(converter, v8::Date::New(1000), Value::TYPE_DICTIONARY, NULL);
   TestWeirdType(converter, regex, Value::TYPE_DICTIONARY, NULL);
 
-  converter.set_allow_undefined(true);
+  converter.SetUndefinedAllowed(true);
   TestWeirdType(converter, v8::Undefined(), Value::TYPE_NULL, NULL);
 
-  converter.set_allow_date(true);
+  converter.SetDateAllowed(true);
   TestWeirdType(converter, v8::Date::New(1000), Value::TYPE_DOUBLE,
                 Value::CreateDoubleValue(1));
 
-  converter.set_allow_regexp(true);
+  converter.SetRegexpAllowed(true);
   TestWeirdType(converter, regex, Value::TYPE_STRING,
                 Value::CreateStringValue("/./"));
 }
@@ -319,6 +319,28 @@ TEST_F(V8ValueConverterImplTest, Prototype) {
   ASSERT_FALSE(object.IsEmpty());
 
   V8ValueConverterImpl converter;
+  scoped_ptr<DictionaryValue> result(
+      static_cast<DictionaryValue*>(converter.FromV8Value(object, context_)));
+  ASSERT_TRUE(result.get());
+  EXPECT_EQ(0u, result->size());
+}
+
+TEST_F(V8ValueConverterImplTest, StripNullFromObjects) {
+  v8::Context::Scope context_scope(context_);
+  v8::HandleScope handle_scope;
+
+  const char* source = "(function() {"
+      "return { foo: undefined, bar: null };"
+      "})();";
+
+  v8::Handle<v8::Script> script(v8::Script::New(v8::String::New(source)));
+  v8::Handle<v8::Object> object = script->Run().As<v8::Object>();
+  ASSERT_FALSE(object.IsEmpty());
+
+  V8ValueConverterImpl converter;
+  converter.SetUndefinedAllowed(true);
+  converter.SetStripNullFromObjects(true);
+
   scoped_ptr<DictionaryValue> result(
       static_cast<DictionaryValue*>(converter.FromV8Value(object, context_)));
   ASSERT_TRUE(result.get());

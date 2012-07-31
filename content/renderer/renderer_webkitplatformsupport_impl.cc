@@ -7,6 +7,7 @@
 #include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/metrics/histogram.h"
 #include "base/platform_file.h"
 #include "base/shared_memory.h"
 #include "base/utf_string_conversions.h"
@@ -22,6 +23,7 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/common/gpu_info.h"
 #include "content/public/renderer/content_renderer_client.h"
+#include "content/renderer/dom_storage/webstoragenamespace_impl.h"
 #include "content/renderer/gamepad_shared_memory_reader.h"
 #include "content/renderer/media/audio_device.h"
 #include "content/renderer/media/audio_hardware.h"
@@ -29,11 +31,11 @@
 #include "content/renderer/render_thread_impl.h"
 #include "content/renderer/render_view_impl.h"
 #include "content/renderer/renderer_clipboard_client.h"
-#include "content/renderer/renderer_webstoragenamespace_impl.h"
 #include "content/renderer/websharedworkerrepository_impl.h"
 #include "googleurl/src/gurl.h"
 #include "ipc/ipc_sync_message_filter.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebBlobRegistry.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFileInfo.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebGamepads.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBFactory.h"
@@ -79,6 +81,7 @@
 
 using WebKit::WebAudioDevice;
 using WebKit::WebBlobRegistry;
+using WebKit::WebFileInfo;
 using WebKit::WebFileSystem;
 using WebKit::WebFrame;
 using WebKit::WebGamepads;
@@ -98,6 +101,8 @@ using WebKit::WebString;
 using WebKit::WebURL;
 using WebKit::WebVector;
 
+static bool g_sandbox_enabled = true;
+
 //------------------------------------------------------------------------------
 
 class RendererWebKitPlatformSupportImpl::MimeRegistry
@@ -112,10 +117,7 @@ class RendererWebKitPlatformSupportImpl::MimeRegistry
 class RendererWebKitPlatformSupportImpl::FileUtilities
     : public webkit_glue::WebFileUtilitiesImpl {
  public:
-  virtual void revealFolderInOS(const WebKit::WebString& path);
-  virtual bool getFileSize(const WebKit::WebString& path, long long& result);
-  virtual bool getFileModificationTime(const WebKit::WebString& path,
-                                       double& result);
+  virtual bool getFileInfo(const WebString& path, WebFileInfo& result);
   virtual base::PlatformFile openFile(const WebKit::WebString& path,
                                       int mode);
 };
@@ -164,15 +166,41 @@ RendererWebKitPlatformSupportImpl::RendererWebKitPlatformSupportImpl()
     : clipboard_client_(new RendererClipboardClient),
       clipboard_(new webkit_glue::WebClipboardImpl(clipboard_client_.get())),
       mime_registry_(new RendererWebKitPlatformSupportImpl::MimeRegistry),
-      sandbox_support_(new RendererWebKitPlatformSupportImpl::SandboxSupport),
       sudden_termination_disables_(0),
       shared_worker_repository_(new WebSharedWorkerRepositoryImpl) {
+  if (g_sandbox_enabled) {
+    sandbox_support_.reset(
+        new RendererWebKitPlatformSupportImpl::SandboxSupport);
+  } else {
+    DVLOG(1) << "Disabling sandbox support for testing.";
+  }
 }
 
 RendererWebKitPlatformSupportImpl::~RendererWebKitPlatformSupportImpl() {
 }
 
 //------------------------------------------------------------------------------
+
+namespace {
+
+bool SendSyncMessageFromAnyThreadInternal(IPC::SyncMessage* msg) {
+  RenderThreadImpl* render_thread = RenderThreadImpl::current();
+  if (render_thread)
+    return render_thread->Send(msg);
+  scoped_refptr<IPC::SyncMessageFilter> sync_msg_filter(
+      ChildThread::current()->sync_message_filter());
+  return sync_msg_filter->Send(msg);
+}
+
+bool SendSyncMessageFromAnyThread(IPC::SyncMessage* msg) {
+  base::TimeTicks begin = base::TimeTicks::Now();
+  const bool success = SendSyncMessageFromAnyThreadInternal(msg);
+  base::TimeDelta delta = base::TimeTicks::Now() - begin;
+  HISTOGRAM_TIMES("RendererSyncIPC.ElapsedTime", delta);
+  return success;
+}
+
+}  // namespace
 
 WebKit::WebClipboard* RendererWebKitPlatformSupportImpl::clipboard() {
   return clipboard_.get();
@@ -214,17 +242,6 @@ bool RendererWebKitPlatformSupportImpl::sandboxEnabled() {
   // this switch unless absolutely necessary, so hopefully we won't end up
   // with too many code paths being different in single-process mode.
   return !CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess);
-}
-
-bool RendererWebKitPlatformSupportImpl::SendSyncMessageFromAnyThread(
-    IPC::SyncMessage* msg) {
-  RenderThreadImpl* render_thread = RenderThreadImpl::current();
-  if (render_thread)
-    return render_thread->Send(msg);
-
-  scoped_refptr<IPC::SyncMessageFilter> sync_msg_filter(
-      ChildThread::current()->sync_message_filter());
-  return sync_msg_filter->Send(msg);
 }
 
 unsigned long long RendererWebKitPlatformSupportImpl::visitedLinkHash(
@@ -310,7 +327,7 @@ void RendererWebKitPlatformSupportImpl::suddenTerminationChanged(bool enabled) {
 WebStorageNamespace*
 RendererWebKitPlatformSupportImpl::createLocalStorageNamespace(
     const WebString& path, unsigned quota) {
-  return new RendererWebStorageNamespaceImpl();
+  return new WebStorageNamespaceImpl();
 }
 
 
@@ -407,39 +424,19 @@ RendererWebKitPlatformSupportImpl::MimeRegistry::preferredExtensionForMIMEType(
 
 //------------------------------------------------------------------------------
 
-bool RendererWebKitPlatformSupportImpl::FileUtilities::getFileSize(
-    const WebString& path, long long& result) {
-  if (SendSyncMessageFromAnyThread(new FileUtilitiesMsg_GetFileSize(
-          webkit_glue::WebStringToFilePath(path),
-          reinterpret_cast<int64*>(&result)))) {
-    return result >= 0;
-  }
-
-  result = -1;
-  return false;
-}
-
-void RendererWebKitPlatformSupportImpl::FileUtilities::revealFolderInOS(
-    const WebString& path) {
-  FilePath file_path(webkit_glue::WebStringToFilePath(path));
-  bool res = file_util::AbsolutePath(&file_path);
-  DCHECK(res);
-  RenderThreadImpl::current()->Send(
-      new ViewHostMsg_RevealFolderInOS(file_path));
-}
-
-bool RendererWebKitPlatformSupportImpl::FileUtilities::getFileModificationTime(
+bool RendererWebKitPlatformSupportImpl::FileUtilities::getFileInfo(
     const WebString& path,
-    double& result) {
-  base::Time time;
-  if (SendSyncMessageFromAnyThread(new FileUtilitiesMsg_GetFileModificationTime(
-          webkit_glue::WebStringToFilePath(path), &time))) {
-    result = time.ToDoubleT();
-    return !time.is_null();
+    WebFileInfo& web_file_info) {
+  base::PlatformFileInfo file_info;
+  base::PlatformFileError status;
+  if (!SendSyncMessageFromAnyThread(new FileUtilitiesMsg_GetFileInfo(
+           webkit_glue::WebStringToFilePath(path), &file_info, &status)) ||
+      status != base::PLATFORM_FILE_OK) {
+    return false;
   }
-
-  result = 0;
-  return false;
+  webkit_glue::PlatformFileInfoToWebFileInfo(file_info, &web_file_info);
+  web_file_info.platformPath = path;
+  return true;
 }
 
 base::PlatformFile RendererWebKitPlatformSupportImpl::FileUtilities::openFile(
@@ -726,6 +723,14 @@ RendererWebKitPlatformSupportImpl::createMediaStreamCenter(
   if (!render_thread)
     return NULL;
   return render_thread->CreateMediaStreamCenter(client);
+}
+
+// static
+bool RendererWebKitPlatformSupportImpl::SetSandboxEnabledForTesting(
+    bool enable) {
+  bool was_enabled = g_sandbox_enabled;
+  g_sandbox_enabled = enable;
+  return was_enabled;
 }
 
 GpuChannelHostFactory*

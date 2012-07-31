@@ -69,8 +69,8 @@ class LocationBarViewMac : public AutocompleteEditController,
   virtual void InvalidatePageActions() OVERRIDE;
   virtual void SaveStateToContents(content::WebContents* contents) OVERRIDE;
   virtual void Revert() OVERRIDE;
-  virtual const OmniboxView* location_entry() const OVERRIDE;
-  virtual OmniboxView* location_entry() OVERRIDE;
+  virtual const OmniboxView* GetLocationEntry() const OVERRIDE;
+  virtual OmniboxView* GetLocationEntry() OVERRIDE;
   virtual LocationBarTesting* GetLocationBarForTesting() OVERRIDE;
 
   // Overridden from LocationBarTesting:
@@ -90,17 +90,17 @@ class LocationBarViewMac : public AutocompleteEditController,
   // Set ChromeToMobileDecoration's lit state (to update the icon).
   void SetChromeToMobileDecorationLit(bool lit);
 
-  // Get the point on the star for the bookmark bubble to aim at.
+  // Get the point in window coordinates on the star for the bookmark bubble to
+  // aim at.
   NSPoint GetBookmarkBubblePoint() const;
 
-  // Get the point on the Chrome To Mobile icon for anchoring its bubble.
+  // Get the point in window coordinates on the Chrome To Mobile icon for
+  // anchoring its bubble.
   NSPoint GetChromeToMobileBubblePoint() const;
 
-  // Get the point in the security icon at which the page info bubble aims.
+  // Get the point in window coordinates in the security icon at which the page
+  // info bubble aims.
   NSPoint GetPageInfoBubblePoint() const;
-
-  // Get the point in the omnibox at which the first run bubble aims.
-  NSPoint GetFirstRunBubblePoint() const;
 
   // Updates the location bar.  Resets the bar's permanent text and
   // security style, and if |should_restore_state| is true, restores
@@ -147,7 +147,7 @@ class LocationBarViewMac : public AutocompleteEditController,
   virtual SkBitmap GetFavicon() const OVERRIDE;
   virtual string16 GetTitle() const OVERRIDE;
   virtual InstantController* GetInstant() OVERRIDE;
-  virtual TabContentsWrapper* GetTabContentsWrapper() const OVERRIDE;
+  virtual TabContents* GetTabContents() const OVERRIDE;
 
   NSImage* GetKeywordImage(const string16& keyword);
 
@@ -218,7 +218,10 @@ class LocationBarViewMac : public AutocompleteEditController,
   // Chrome To Mobile page action icon.
   scoped_ptr<ChromeToMobileDecoration> chrome_to_mobile_decoration_;
 
-  // Any installed Page Actions.
+  // The installed page actions.
+  std::vector<ExtensionAction*> page_actions_;
+
+  // Decorations for the installed Page Actions.
   ScopedVector<PageActionDecoration> page_action_decorations_;
 
   // The content blocked decorations.

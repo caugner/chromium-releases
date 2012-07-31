@@ -104,17 +104,14 @@ class VisitDatabase {
                                int max_count,
                                VisitVector* visits);
 
-  // Fills all visits in the given time ranges into the given vector that should
-  // be user-visible, which excludes things like redirects and subframes. The
+  // Fills all visits in the given time ranges into the given vector that are
+  // visits made directly by the user (typed or bookmarked visits only). The
   // begin time is inclusive, the end time is exclusive.
   //
   // Up to |max_count| visits will be returned. If there are more visits than
   // that, the most recent |max_count| will be returned. If 0, all visits in the
   // range will be computed.
-  //
-  // Only one visit for each URL will be returned, and it will be the most
-  // recent one in the time range.
-  void GetVisibleVisitsDuringTimes(const VisitFilter& time_filter,
+  void GetDirectVisitsDuringTimes(const VisitFilter& time_filter,
                                    int max_count,
                                    VisitVector* visits);
 

@@ -25,6 +25,7 @@
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/ui_controls/ui_controls.h"
@@ -45,12 +46,17 @@ class CommandLine;
 class ExtensionAction;
 class FilePath;
 class GURL;
+class HistoryService;
 class MessageLoop;
 class Profile;
 class ScopedTempDir;
 class SkBitmap;
-class TabContentsWrapper;
+class TabContents;
 class TemplateURLService;
+
+namespace base {
+class WaitableEvent;
+}
 
 namespace browser {
 struct NavigateParams;
@@ -123,6 +129,10 @@ void WaitForLoadStop(content::WebContents* tab);
 // TODO(dubroy): Remove this race hazard (http://crbug.com/119521).
 // Use BrowserAddedObserver instead.
 Browser* WaitForNewBrowser();
+
+// Waits for |event| to be signaled running message loop in the current thread
+// while waiting.
+void WaitEventSignaled(base::WaitableEvent* event);
 
 // Opens |url| in an incognito browser window with the incognito profile of
 // |profile|, blocking until the navigation finishes. This will create a new
@@ -212,7 +222,7 @@ void CrashTab(content::WebContents* tab);
 // Performs a find in the page of the specified tab. Returns the number of
 // matches found.  |ordinal| is an optional parameter which is set to the index
 // of the current match.
-int FindInPage(TabContentsWrapper* tab,
+int FindInPage(TabContents* tab,
                const string16& search_string,
                bool forward,
                bool case_sensitive,
@@ -221,6 +231,11 @@ int FindInPage(TabContentsWrapper* tab,
 // Simulates clicking at the center of the given tab asynchronously. Unlike
 // ClickOnView, this works even if the browser isn't in the foreground.
 void SimulateMouseClick(content::WebContents* tab);
+
+// Simulates asynchronously a mouse enter/move/leave event.
+void SimulateMouseEvent(content::WebContents* tab,
+                        WebKit::WebInputEvent::Type type,
+                        const gfx::Point& point);
 
 // Sends a key press asynchronously. Unlike the SendKeyPress functions, this
 // works even if the browser isn't in the foreground.
@@ -253,8 +268,8 @@ void WaitForBookmarkModelToLoad(BookmarkModel* model);
 // Blocks until |service| finishes loading.
 void WaitForTemplateURLServiceToLoad(TemplateURLService* service);
 
-// Blocks until the |browser|'s history finishes loading.
-void WaitForHistoryToLoad(Browser* browser);
+// Blocks until the |history_service|'s history finishes loading.
+void WaitForHistoryToLoad(HistoryService* history_service);
 
 // Puts the native window for |browser| in |native_window|. Returns true on
 // success.
@@ -395,31 +410,6 @@ class TestWebSocketServer {
   DISALLOW_COPY_AND_ASSIGN(TestWebSocketServer);
 };
 
-// A notification observer which quits the message loop when a notification
-// is received. It also records the source and details of the notification.
-class TestNotificationObserver : public content::NotificationObserver {
- public:
-  TestNotificationObserver();
-  virtual ~TestNotificationObserver();
-
-  const content::NotificationSource& source() const {
-    return source_;
-  }
-
-  const content::NotificationDetails& details() const {
-    return details_;
-  }
-
-  // content::NotificationObserver:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
-
- private:
-  content::NotificationSource source_;
-  content::NotificationDetails details_;
-};
-
 // A WindowedNotificationObserver allows code to watch for a notification
 // over a window of time. Typically testing code will need to do something
 // like this:
@@ -439,13 +429,22 @@ class WindowedNotificationObserver : public content::NotificationObserver {
   // NotificationService::AllSources().
   WindowedNotificationObserver(int notification_type,
                                const content::NotificationSource& source);
-
   virtual ~WindowedNotificationObserver();
 
   // Wait until the specified notification occurs.  If the notification was
   // emitted between the construction of this object and this call then it
   // returns immediately.
   void Wait();
+
+  // Returns NotificationService::AllSources() if we haven't observed a
+  // notification yet.
+  const content::NotificationSource& source() const {
+    return source_;
+  }
+
+  const content::NotificationDetails& details() const {
+    return details_;
+  }
 
   // content::NotificationObserver:
   virtual void Observe(int type,
@@ -455,9 +454,10 @@ class WindowedNotificationObserver : public content::NotificationObserver {
  private:
   bool seen_;
   bool running_;
-  std::set<uintptr_t> sources_seen_;
-  content::NotificationSource waiting_for_;
   content::NotificationRegistrar registrar_;
+
+  content::NotificationSource source_;
+  content::NotificationDetails details_;
 
   DISALLOW_COPY_AND_ASSIGN(WindowedNotificationObserver);
 };

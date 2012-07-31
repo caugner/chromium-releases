@@ -24,13 +24,13 @@
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/sync/sync_global_error.h"
 #include "chrome/browser/sync/sync_ui_util.h"
-#include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/task_manager/task_manager.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/global_error.h"
 #include "chrome/browser/ui/global_error_service.h"
 #include "chrome/browser/ui/global_error_service_factory.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/toolbar/encoding_menu_controller.h"
 #include "chrome/browser/upgrade_detector.h"
 #include "chrome/common/chrome_paths.h"
@@ -46,11 +46,13 @@
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "third_party/skia/include/core/SkBitmap.h"
+#include "grit/theme_resources_standard.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/layout.h"
 #include "ui/base/models/button_menu_item_model.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
+#include "ui/gfx/image/image_skia.h"
 
 #if defined(TOOLKIT_GTK)
 #include <gtk/gtk.h>
@@ -58,6 +60,7 @@
 #endif
 
 #if defined(OS_WIN)
+#include "base/win/windows_version.h"
 #include "chrome/browser/enumerate_modules_model_win.h"
 #endif
 
@@ -105,7 +108,7 @@ void EncodingMenuModel::Build() {
 }
 
 bool EncodingMenuModel::IsCommandIdChecked(int command_id) const {
-  WebContents* current_tab = browser_->GetSelectedWebContents();
+  WebContents* current_tab = browser_->GetActiveWebContents();
   if (!current_tab)
     return false;
   EncodingMenuController controller;
@@ -201,11 +204,11 @@ WrenchMenuModel::WrenchMenuModel(ui::AcceleratorProvider* provider,
     : ALLOW_THIS_IN_INITIALIZER_LIST(ui::SimpleMenuModel(this)),
       provider_(provider),
       browser_(browser),
-      tabstrip_model_(browser_->tabstrip_model()) {
+      tab_strip_model_(browser_->tab_strip_model()) {
   Build();
   UpdateZoomControls();
 
-  tabstrip_model_->AddObserver(this);
+  tab_strip_model_->AddObserver(this);
 
   registrar_.Add(
       this, content::NOTIFICATION_ZOOM_LEVEL_CHANGED,
@@ -216,8 +219,8 @@ WrenchMenuModel::WrenchMenuModel(ui::AcceleratorProvider* provider,
 }
 
 WrenchMenuModel::~WrenchMenuModel() {
-  if (tabstrip_model_)
-    tabstrip_model_->RemoveObserver(this);
+  if (tab_strip_model_)
+    tab_strip_model_->RemoveObserver(this);
 }
 
 bool WrenchMenuModel::DoesCommandIdDismissMenu(int command_id) const {
@@ -280,14 +283,14 @@ string16 WrenchMenuModel::GetLabelForCommandId(int command_id) const {
 }
 
 bool WrenchMenuModel::GetIconForCommandId(int command_id,
-                                          SkBitmap* icon) const {
+                                          gfx::ImageSkia* icon) const {
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   switch (command_id) {
     case IDC_UPGRADE_DIALOG: {
       if (UpgradeDetector::GetInstance()->notify_upgrade()) {
         *icon = *rb.GetNativeImageNamed(
             UpgradeDetector::GetInstance()->GetIconResourceID(
-                UpgradeDetector::UPGRADE_ICON_TYPE_MENU_ICON)).ToSkBitmap();
+                UpgradeDetector::UPGRADE_ICON_TYPE_MENU_ICON)).ToImageSkia();
         return true;
       }
       return false;
@@ -300,7 +303,7 @@ bool WrenchMenuModel::GetIconForCommandId(int command_id,
       if (error && error->HasCustomizedSyncMenuItem()) {
         int icon_id = error->MenuItemIconResourceID();
         if (icon_id) {
-          *icon = *rb.GetNativeImageNamed(icon_id).ToSkBitmap();
+          *icon = *rb.GetNativeImageNamed(icon_id).ToImageSkia();
           return true;
         }
       }
@@ -331,7 +334,7 @@ void WrenchMenuModel::ExecuteCommand(int command_id) {
     }
   }
 
-  if (command_id == IDC_HELP_PAGE)
+  if (command_id == IDC_HELP_PAGE_VIA_MENU)
     content::RecordAction(UserMetricsAction("ShowHelpTabViaWrenchMenu"));
 
   browser_->ExecuteCommand(command_id);
@@ -382,8 +385,8 @@ bool WrenchMenuModel::GetAcceleratorForCommandId(
   return provider_->GetAcceleratorForCommandId(command_id, accelerator);
 }
 
-void WrenchMenuModel::ActiveTabChanged(TabContentsWrapper* old_contents,
-                                       TabContentsWrapper* new_contents,
+void WrenchMenuModel::ActiveTabChanged(TabContents* old_contents,
+                                       TabContents* new_contents,
                                        int index,
                                        bool user_gesture) {
   // The user has switched between tabs and the new tab may have a different
@@ -392,8 +395,8 @@ void WrenchMenuModel::ActiveTabChanged(TabContentsWrapper* old_contents,
 }
 
 void WrenchMenuModel::TabReplacedAt(TabStripModel* tab_strip_model,
-                                    TabContentsWrapper* old_contents,
-                                    TabContentsWrapper* new_contents,
+                                    TabContents* old_contents,
+                                    TabContents* new_contents,
                                     int index) {
   UpdateZoomControls();
 }
@@ -401,8 +404,8 @@ void WrenchMenuModel::TabReplacedAt(TabStripModel* tab_strip_model,
 void WrenchMenuModel::TabStripModelDeleted() {
   // During views shutdown, the tabstrip model/browser is deleted first, while
   // it is the opposite in gtk land.
-  tabstrip_model_->RemoveObserver(this);
-  tabstrip_model_ = NULL;
+  tab_strip_model_->RemoveObserver(this);
+  tab_strip_model_ = NULL;
 }
 
 void WrenchMenuModel::Observe(int type,
@@ -423,10 +426,12 @@ WrenchMenuModel::WrenchMenuModel()
     : ALLOW_THIS_IN_INITIALIZER_LIST(ui::SimpleMenuModel(this)),
       provider_(NULL),
       browser_(NULL),
-      tabstrip_model_(NULL) {
+      tab_strip_model_(NULL) {
 }
 
 void WrenchMenuModel::Build() {
+  bool is_touch_menu = ui::GetDisplayLayout() == ui::LAYOUT_TOUCH;
+
   AddItemWithStringId(IDC_NEW_TAB, IDS_NEW_TAB);
   AddItemWithStringId(IDC_NEW_WINDOW, IDS_NEW_WINDOW);
 #if defined(OS_CHROMEOS)
@@ -436,46 +441,22 @@ void WrenchMenuModel::Build() {
   AddItemWithStringId(IDC_NEW_INCOGNITO_WINDOW, IDS_NEW_INCOGNITO_WINDOW);
 #endif
 
+#if defined(OS_WIN)
+  if (base::win::GetVersion() >= base::win::VERSION_WIN8)
+    AddItemWithStringId(IDC_PIN_TO_START_SCREEN, IDS_PIN_TO_START_SCREEN);
+#endif
+
   bookmark_sub_menu_model_.reset(new BookmarkSubMenuModel(this, browser_));
   AddSubMenuWithStringId(IDC_BOOKMARKS_MENU, IDS_BOOKMARKS_MENU,
                          bookmark_sub_menu_model_.get());
 
-  AddSeparator();
-#if defined(OS_POSIX) && !defined(TOOLKIT_VIEWS)
-  // WARNING: Mac does not use the ButtonMenuItemModel, but instead defines the
-  // layout for this menu item in Toolbar.xib. It does, however, use the
-  // command_id value from AddButtonItem() to identify this special item.
-  edit_menu_item_model_.reset(new ui::ButtonMenuItemModel(IDS_EDIT, this));
-  edit_menu_item_model_->AddGroupItemWithStringId(IDC_CUT, IDS_CUT);
-  edit_menu_item_model_->AddGroupItemWithStringId(IDC_COPY, IDS_COPY);
-  edit_menu_item_model_->AddGroupItemWithStringId(IDC_PASTE, IDS_PASTE);
-  AddButtonItem(IDC_EDIT_MENU, edit_menu_item_model_.get());
-#else
-  // TODO(port): Move to the above.
-  CreateCutCopyPaste();
-#endif
+  // Append the full menu including separators. The final separator only gets
+  // appended when this is a touch menu - otherwise it would get added twice.
+  CreateCutCopyPasteMenu(is_touch_menu);
 
-  AddSeparator();
-#if defined(OS_POSIX) && !defined(TOOLKIT_VIEWS)
-  // WARNING: See above comment.
-  zoom_menu_item_model_.reset(
-      new ui::ButtonMenuItemModel(IDS_ZOOM_MENU, this));
-  zoom_menu_item_model_->AddGroupItemWithStringId(
-      IDC_ZOOM_MINUS, IDS_ZOOM_MINUS2);
-  zoom_menu_item_model_->AddButtonLabel(IDC_ZOOM_PERCENT_DISPLAY,
-                                        IDS_ZOOM_PLUS2);
-  zoom_menu_item_model_->AddGroupItemWithStringId(
-      IDC_ZOOM_PLUS, IDS_ZOOM_PLUS2);
-  zoom_menu_item_model_->AddSpace();
-  zoom_menu_item_model_->AddItemWithImage(
-      IDC_FULLSCREEN, IDR_FULLSCREEN_MENU_BUTTON);
-  AddButtonItem(IDC_ZOOM_MENU, zoom_menu_item_model_.get());
-#else
-  // TODO(port): Move to the above.
-  CreateZoomFullscreen();
-#endif
+  if (!is_touch_menu)
+    CreateZoomMenu();
 
-  AddSeparator();
   AddItemWithStringId(IDC_SAVE_PAGE, IDS_SAVE_PAGE);
   AddItemWithStringId(IDC_FIND, IDS_FIND);
   AddItemWithStringId(IDC_PRINT, IDS_PRINT);
@@ -484,7 +465,10 @@ void WrenchMenuModel::Build() {
   AddSubMenuWithStringId(IDC_ZOOM_MENU, IDS_TOOLS_MENU,
                          tools_menu_model_.get());
 
-  AddSeparator();
+  if (is_touch_menu)
+    CreateZoomMenu();
+  else
+    AddSeparator();
 
   AddItemWithStringId(IDC_SHOW_HISTORY, IDS_SHOW_HISTORY);
   AddItemWithStringId(IDC_SHOW_DOWNLOADS, IDS_SHOW_DOWNLOADS);
@@ -500,11 +484,15 @@ void WrenchMenuModel::Build() {
   }
 
   AddItemWithStringId(IDC_OPTIONS, IDS_SETTINGS);
-  AddItem(IDC_ABOUT, l10n_util::GetStringUTF16(IDS_ABOUT));
-  string16 num_background_pages = base::FormatNumber(
-      TaskManager::GetBackgroundPageCount());
-  AddItem(IDC_VIEW_BACKGROUND_PAGES, l10n_util::GetStringFUTF16(
-      IDS_VIEW_BACKGROUND_PAGES, num_background_pages));
+
+  if (!is_touch_menu) {
+    AddItem(IDC_ABOUT, l10n_util::GetStringUTF16(IDS_ABOUT));
+    string16 num_background_pages = base::FormatNumber(
+        TaskManager::GetBackgroundPageCount());
+    AddItem(IDC_VIEW_BACKGROUND_PAGES, l10n_util::GetStringFUTF16(
+        IDS_VIEW_BACKGROUND_PAGES, num_background_pages));
+  }
+
   if (browser_defaults::kShowUpgradeMenuItem)
     AddItem(IDC_UPGRADE_DIALOG, l10n_util::GetStringUTF16(IDS_UPDATE_NOW));
   AddItem(IDC_VIEW_INCOMPATIBILITIES, l10n_util::GetStringUTF16(
@@ -513,14 +501,17 @@ void WrenchMenuModel::Build() {
 #if defined(OS_WIN)
   SetIcon(GetIndexOfCommandId(IDC_VIEW_INCOMPATIBILITIES),
           *ui::ResourceBundle::GetSharedInstance().
-          GetBitmapNamed(IDR_CONFLICT_MENU));
+          GetImageSkiaNamed(IDR_CONFLICT_MENU));
 #endif
 
-  AddItemWithStringId(IDC_HELP_PAGE, IDS_HELP_PAGE);
-  if (browser_defaults::kShowHelpMenuItemIcon) {
-    ui::ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-    SetIcon(GetIndexOfCommandId(IDC_HELP_PAGE),
-            *rb.GetBitmapNamed(IDR_HELP_MENU));
+  if (!is_touch_menu) {
+    AddItemWithStringId(IDC_HELP_PAGE_VIA_MENU, IDS_HELP_PAGE);
+
+    if (browser_defaults::kShowHelpMenuItemIcon) {
+      ui::ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+      SetIcon(GetIndexOfCommandId(IDC_HELP_PAGE_VIA_MENU),
+              *rb.GetImageSkiaNamed(IDR_HELP_MENU));
+    }
   }
 
   if (browser_defaults::kShowFeedbackMenuItem)
@@ -551,34 +542,73 @@ void WrenchMenuModel::AddGlobalErrorMenuItems() {
       if (icon_id) {
         gfx::Image& image = rb.GetImageNamed(icon_id);
         SetIcon(GetIndexOfCommandId(error->MenuItemCommandID()),
-                *image.ToSkBitmap());
+                *image.ToImageSkia());
       }
     }
   }
 }
 
-void WrenchMenuModel::CreateCutCopyPaste() {
+void WrenchMenuModel::CreateCutCopyPasteMenu(bool append_final_separator) {
+  AddSeparator();
+
+#if defined(OS_POSIX) && !defined(TOOLKIT_VIEWS)
+  // WARNING: Mac does not use the ButtonMenuItemModel, but instead defines the
+  // layout for this menu item in Toolbar.xib. It does, however, use the
+  // command_id value from AddButtonItem() to identify this special item.
+  edit_menu_item_model_.reset(new ui::ButtonMenuItemModel(IDS_EDIT, this));
+  edit_menu_item_model_->AddGroupItemWithStringId(IDC_CUT, IDS_CUT);
+  edit_menu_item_model_->AddGroupItemWithStringId(IDC_COPY, IDS_COPY);
+  edit_menu_item_model_->AddGroupItemWithStringId(IDC_PASTE, IDS_PASTE);
+  AddButtonItem(IDC_EDIT_MENU, edit_menu_item_model_.get());
+#else
   // WARNING: views/wrench_menu assumes these items are added in this order. If
   // you change the order you'll need to update wrench_menu as well.
   AddItemWithStringId(IDC_CUT, IDS_CUT);
   AddItemWithStringId(IDC_COPY, IDS_COPY);
   AddItemWithStringId(IDC_PASTE, IDS_PASTE);
+#endif
+
+  if (append_final_separator)
+    AddSeparator();
 }
 
-void WrenchMenuModel::CreateZoomFullscreen() {
+void WrenchMenuModel::CreateZoomMenu() {
+  // This menu needs to be enclosed by separators.
+  AddSeparator();
+
+#if defined(OS_POSIX) && !defined(TOOLKIT_VIEWS)
+  // WARNING: Mac does not use the ButtonMenuItemModel, but instead defines the
+  // layout for this menu item in Toolbar.xib. It does, however, use the
+  // command_id value from AddButtonItem() to identify this special item.
+  zoom_menu_item_model_.reset(
+      new ui::ButtonMenuItemModel(IDS_ZOOM_MENU, this));
+  zoom_menu_item_model_->AddGroupItemWithStringId(
+      IDC_ZOOM_MINUS, IDS_ZOOM_MINUS2);
+  zoom_menu_item_model_->AddButtonLabel(IDC_ZOOM_PERCENT_DISPLAY,
+                                        IDS_ZOOM_PLUS2);
+  zoom_menu_item_model_->AddGroupItemWithStringId(
+      IDC_ZOOM_PLUS, IDS_ZOOM_PLUS2);
+  zoom_menu_item_model_->AddSpace();
+  zoom_menu_item_model_->AddItemWithImage(
+      IDC_FULLSCREEN, IDR_FULLSCREEN_MENU_BUTTON);
+  AddButtonItem(IDC_ZOOM_MENU, zoom_menu_item_model_.get());
+#else
   // WARNING: views/wrench_menu assumes these items are added in this order. If
   // you change the order you'll need to update wrench_menu as well.
   AddItemWithStringId(IDC_ZOOM_MINUS, IDS_ZOOM_MINUS);
   AddItemWithStringId(IDC_ZOOM_PLUS, IDS_ZOOM_PLUS);
   AddItemWithStringId(IDC_FULLSCREEN, IDS_FULLSCREEN);
+#endif
+
+  AddSeparator();
 }
 
 void WrenchMenuModel::UpdateZoomControls() {
   bool enable_increment = false;
   bool enable_decrement = false;
   int zoom_percent = 100;
-  if (browser_->GetSelectedWebContents()) {
-    zoom_percent = browser_->GetSelectedWebContents()->GetZoomPercent(
+  if (browser_->GetActiveWebContents()) {
+    zoom_percent = browser_->GetActiveWebContents()->GetZoomPercent(
         &enable_increment, &enable_decrement);
   }
   zoom_label_ = l10n_util::GetStringFUTF16(

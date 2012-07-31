@@ -19,12 +19,13 @@
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "grit/theme_resources_standard.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/native_theme/native_theme.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/text/text_elider.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/color_utils.h"
-#include "ui/gfx/native_theme.h"
 
 namespace {
 
@@ -46,7 +47,7 @@ struct AutocompleteResultView::ClassificationData {
   string16 text;
   const gfx::Font* font;
   SkColor color;
-  int pixel_width;
+  gfx::Size pixel_size;
 };
 
 // Precalculated data used to draw a complete visual run within the match.
@@ -103,7 +104,10 @@ AutocompleteResultView::AutocompleteResultView(
     int model_index,
     const gfx::Font& font,
     const gfx::Font& bold_font)
-    : model_(model),
+    : edge_item_padding_(LocationBarView::GetItemPadding()),
+      item_padding_(LocationBarView::GetItemPadding()),
+      minimum_text_vertical_padding_(kMinimumTextVerticalPadding),
+      model_(model),
       model_index_(model_index),
       normal_font_(font),
       bold_font_(bold_font),
@@ -114,11 +118,12 @@ AutocompleteResultView::AutocompleteResultView(
           animation_(new ui::SlideAnimation(this))) {
   CHECK_GE(model_index, 0);
   if (default_icon_size_ == 0) {
-    default_icon_size_ = ui::ResourceBundle::GetSharedInstance().GetBitmapNamed(
+    default_icon_size_ =
+        ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
         AutocompleteMatch::TypeToIcon(AutocompleteMatch::URL_WHAT_YOU_TYPED))->
         width();
   }
-  keyword_icon_->set_parent_owned(false);
+  keyword_icon_->set_owned_by_client();
   keyword_icon_->EnableCanvasFlippingForRTLUI(true);
   keyword_icon_->SetImage(GetKeywordIcon());
   keyword_icon_->SizeToPreferredSize();
@@ -139,11 +144,11 @@ SkColor AutocompleteResultView::GetColor(ResultViewState state,
     colors[NORMAL][TEXT] = color_utils::GetSysSkColor(COLOR_WINDOWTEXT);
     colors[SELECTED][TEXT] = color_utils::GetSysSkColor(COLOR_HIGHLIGHTTEXT);
 #elif defined(USE_AURA)
-    const gfx::NativeTheme* theme = gfx::NativeTheme::instance();
+    const ui::NativeTheme* theme = ui::NativeTheme::instance();
     colors[SELECTED][BACKGROUND] = theme->GetSystemColor(
-        gfx::NativeTheme::kColorId_TextfieldSelectionBackgroundFocused);
+        ui::NativeTheme::kColorId_TextfieldSelectionBackgroundFocused);
     colors[NORMAL][BACKGROUND] = theme->GetSystemColor(
-        gfx::NativeTheme::kColorId_TextfieldDefaultBackground);
+        ui::NativeTheme::kColorId_TextfieldDefaultBackground);
     colors[NORMAL][URL] = SkColorSetARGB(0xff, 0x00, 0x99, 0x33);
     colors[SELECTED][URL] = SkColorSetARGB(0xff, 0x00, 0x66, 0x22);
     colors[HOVERED][URL] = SkColorSetARGB(0xff, 0x00, 0x66, 0x22);
@@ -170,6 +175,12 @@ SkColor AutocompleteResultView::GetColor(ResultViewState state,
       colors[i][URL] = color_utils::GetReadableColor(SkColorSetRGB(0, 128, 0),
                                                      colors[i][BACKGROUND]);
 #endif
+
+      // TODO(joi): Programmatically draw the dropdown border using
+      // this color as well. (Right now it's drawn as black with 25%
+      // alpha.)
+      colors[i][DIVIDER] =
+          color_utils::AlphaBlend(colors[i][TEXT], colors[i][BACKGROUND], 0x34);
     }
     initialized = true;
   }
@@ -208,11 +219,18 @@ void AutocompleteResultView::Invalidate() {
 gfx::Size AutocompleteResultView::GetPreferredSize() {
   return gfx::Size(0, std::max(
       default_icon_size_ + (kMinimumIconVerticalPadding * 2),
-      GetTextHeight() + (kMinimumTextVerticalPadding * 2)));
+      GetTextHeight() + (minimum_text_vertical_padding_ * 2)));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // AutocompleteResultView, protected:
+
+AutocompleteResultView::ResultViewState
+    AutocompleteResultView::GetState() const {
+  if (model_->IsSelectedIndex(model_index_))
+    return SELECTED;
+  return model_->IsHoveredIndex(model_index_) ? HOVERED : NORMAL;
+}
 
 void AutocompleteResultView::PaintMatch(gfx::Canvas* canvas,
                                         const AutocompleteMatch& match,
@@ -259,13 +277,6 @@ bool AutocompleteResultView::SortRunsVisually(const RunData& lhs,
 // static
 int AutocompleteResultView::default_icon_size_ = 0;
 
-AutocompleteResultView::ResultViewState
-    AutocompleteResultView::GetState() const {
-  if (model_->IsSelectedIndex(model_index_))
-    return SELECTED;
-  return model_->IsHoveredIndex(model_index_) ? HOVERED : NORMAL;
-}
-
 const SkBitmap* AutocompleteResultView::GetIcon() const {
   const SkBitmap* bitmap = model_->GetIconIfExtensionMatch(model_index_);
   if (bitmap)
@@ -281,9 +292,6 @@ const SkBitmap* AutocompleteResultView::GetIcon() const {
       case IDR_OMNIBOX_HTTP:
         icon = IDR_OMNIBOX_HTTP_SELECTED;
         break;
-      case IDR_OMNIBOX_HISTORY:
-        icon = IDR_OMNIBOX_HISTORY_SELECTED;
-        break;
       case IDR_OMNIBOX_SEARCH:
         icon = IDR_OMNIBOX_SEARCH_SELECTED;
         break;
@@ -298,10 +306,10 @@ const SkBitmap* AutocompleteResultView::GetIcon() const {
   return ui::ResourceBundle::GetSharedInstance().GetBitmapNamed(icon);
 }
 
-const SkBitmap* AutocompleteResultView::GetKeywordIcon() const {
+const gfx::ImageSkia* AutocompleteResultView::GetKeywordIcon() const {
   // NOTE: If we ever begin returning icons of varying size, then callers need
   // to ensure that |keyword_icon_| is resized each time its image is reset.
-  return ui::ResourceBundle::GetSharedInstance().GetBitmapNamed(
+  return ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
       (GetState() == SELECTED) ? IDR_OMNIBOX_TTS_SELECTED : IDR_OMNIBOX_TTS);
 }
 
@@ -355,7 +363,6 @@ int AutocompleteResultView::DrawString(
     const size_t run_end = current_run->run_start + run_length_int;
     current_run->visual_order = run;
     current_run->is_rtl = !is_url && (run_direction == UBIDI_RTL);
-    current_run->pixel_width = 0;
 
     // Compute classifications for this run.
     for (size_t i = 0; i < classifications.size(); ++i) {
@@ -385,9 +392,12 @@ int AutocompleteResultView::DrawString(
         current_data->color = GetColor(state, DIMMED_TEXT);
       else
         current_data->color = GetColor(state, force_dim ? DIMMED_TEXT : TEXT);
-      current_data->pixel_width =
-          current_data->font->GetStringWidth(current_data->text);
-      current_run->pixel_width += current_data->pixel_width;
+      int width = 0;
+      int height = 0;
+      gfx::Canvas::SizeStringInt(current_data->text, *current_data->font,
+                                 &width, &height, gfx::Canvas::NO_ELLIPSIS);
+      current_data->pixel_size = gfx::Size(width, height);
+      current_run->pixel_width += width;
     }
     DCHECK(!current_run->classifications.empty());
   }
@@ -410,7 +420,7 @@ int AutocompleteResultView::DrawString(
       // This run or one before it needs to be elided.
       for (Classifications::iterator j(i->classifications.begin());
            j != i->classifications.end(); ++j) {
-        if (j->pixel_width > remaining_width) {
+        if (j->pixel_size.width() > remaining_width) {
           // This classification or one before it needs to be elided.  Erase all
           // further classifications and runs so Elide() can simply reverse-
           // iterate over everything to find the specific classification to
@@ -420,7 +430,7 @@ int AutocompleteResultView::DrawString(
           Elide(&runs, remaining_width);
           break;
         }
-        remaining_width -= j->pixel_width;
+        remaining_width -= j->pixel_size.width();
       }
       break;
     }
@@ -441,10 +451,30 @@ int AutocompleteResultView::DrawString(
     }
     for (Classifications::const_iterator j(i->classifications.begin());
          j != i->classifications.end(); ++j) {
-      int left = mirroring_context_->mirrored_left_coord(x, x + j->pixel_width);
-      canvas->DrawStringInt(j->text, *j->font, j->color, left,
-                            y, j->pixel_width, j->font->GetHeight(), flags);
-      x += j->pixel_width;
+      const int left =
+          mirroring_context_->mirrored_left_coord(x, x + j->pixel_size.width());
+      // By passing the same y-coordinate for each run, we vertically align the
+      // tops of successive runs.  This isn't actually what we want; we want to
+      // align the baselines, but Canvas doesn't currently expose text
+      // measurement APIs sufficient to make that happen.  The problem here is
+      // font substitution: if no fonts are substituted, then all runs have the
+      // same font (in bold or normal styles), and thus the same height and same
+      // baseline.  If fonts are substituted within a run, the characters are
+      // baseline-aligned within the run, but using the same top coordinate as
+      // for other runs is only correct if the overall ascent for this run is
+      // the same as for other runs -- that is, if the tallest ascent of all
+      // fonts in the run is equal to the ascent of the normal font.  If this
+      // condition doesn't hold, the baseline for this run will be drawn too
+      // high or too low, depending on whether the run's tallest ascent is
+      // shorter or higher than the normal font's ascent, respectively.
+      //
+      // TODO(asvitkine): Fix this by replacing the SizeStringInt() calls
+      // elsewhere in this file with calls that can calculate actual baselines
+      // even in the face of font fallback. Tracked as: http://crbug.com/128027
+      canvas->DrawStringInt(j->text, *j->font, j->color, left, y,
+                            j->pixel_size.width(), j->pixel_size.height(),
+                            flags);
+      x += j->pixel_size.width();
     }
   }
 
@@ -476,7 +506,7 @@ void AutocompleteResultView::Elide(Runs* runs, int remaining_width) const {
         // We also add this classification's width (sans ellipsis) back to the
         // available width since we want to consider the available space we'll
         // have when we draw this classification.
-        remaining_width += j->pixel_width;
+        remaining_width += j->pixel_size.width();
       }
       first_classification = false;
 
@@ -511,7 +541,11 @@ void AutocompleteResultView::Elide(Runs* runs, int remaining_width) const {
              (prior_classification->font == &normal_font_)))
           j->font = &normal_font_;
 
-        j->pixel_width = j->font->GetStringWidth(elided_text);
+        int width = 0;
+        int height = 0;
+        gfx::Canvas::SizeStringInt(elided_text, *j->font, &width, &height,
+                                   gfx::Canvas::NO_ELLIPSIS);
+        j->pixel_size = gfx::Size(width, height);
 
         // Erase any other classifications that come after the elided one.
         i->classifications.erase(j.base(), i->classifications.end());
@@ -538,33 +572,30 @@ void AutocompleteResultView::Elide(Runs* runs, int remaining_width) const {
 void AutocompleteResultView::Layout() {
   const SkBitmap* icon = GetIcon();
 
-  icon_bounds_.SetRect(LocationBarView::kEdgeItemPadding +
+  icon_bounds_.SetRect(edge_item_padding_ +
       ((icon->width() == default_icon_size_) ?
           0 : LocationBarView::kIconInternalPadding),
       (height() - icon->height()) / 2, icon->width(), icon->height());
 
-  int text_x = LocationBarView::kEdgeItemPadding + default_icon_size_ +
-      LocationBarView::kItemPadding;
+  int text_x = edge_item_padding_ + default_icon_size_ + item_padding_;
   int text_height = GetTextHeight();
   int text_width;
 
   if (match_.associated_keyword.get()) {
-    const int kw_collapsed_size = keyword_icon_->width() +
-        LocationBarView::kEdgeItemPadding;
+    const int kw_collapsed_size =
+        keyword_icon_->width() + edge_item_padding_;
     const int max_kw_x = width() - kw_collapsed_size;
-    const int kw_x = animation_->CurrentValueBetween(max_kw_x,
-        LocationBarView::kEdgeItemPadding);
-    const int kw_text_x = kw_x + keyword_icon_->width() +
-        LocationBarView::kItemPadding;
+    const int kw_x =
+        animation_->CurrentValueBetween(max_kw_x, edge_item_padding_);
+    const int kw_text_x = kw_x + keyword_icon_->width() + item_padding_;
 
-    text_width = kw_x - text_x - LocationBarView::kItemPadding;
-    keyword_text_bounds_.SetRect(kw_text_x, 0, std::max(
-        width() - kw_text_x - LocationBarView::kEdgeItemPadding, 0),
-        text_height);
+    text_width = kw_x - text_x - item_padding_;
+    keyword_text_bounds_.SetRect(kw_text_x, 0,
+        std::max(width() - kw_text_x - edge_item_padding_, 0), text_height);
     keyword_icon_->SetPosition(gfx::Point(kw_x,
         (height() - keyword_icon_->height()) / 2));
   } else {
-    text_width = width() - text_x - LocationBarView::kEdgeItemPadding;
+    text_width = width() - text_x - edge_item_padding_;
   }
 
   text_bounds_.SetRect(text_x, std::max(0, (height() - text_height) / 2),
@@ -584,8 +615,8 @@ void AutocompleteResultView::OnPaint(gfx::Canvas* canvas) {
   if (!match_.associated_keyword.get() ||
       keyword_icon_->x() > icon_bounds_.right()) {
     // Paint the icon.
-    canvas->DrawBitmapInt(*GetIcon(), GetMirroredXForRect(icon_bounds_),
-        icon_bounds_.y());
+    canvas->DrawImageInt(*GetIcon(), GetMirroredXForRect(icon_bounds_),
+                         icon_bounds_.y());
 
     // Paint the text.
     int x = GetMirroredXForRect(text_bounds_);
@@ -606,4 +637,3 @@ void AutocompleteResultView::AnimationProgressed(
   Layout();
   SchedulePaint();
 }
-

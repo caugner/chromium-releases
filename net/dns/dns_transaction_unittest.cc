@@ -13,7 +13,6 @@
 #include "net/base/big_endian.h"
 #include "net/base/dns_util.h"
 #include "net/base/net_log.h"
-#include "net/base/sys_addrinfo.h"
 #include "net/dns/dns_protocol.h"
 #include "net/dns/dns_query.h"
 #include "net/dns/dns_response.h"
@@ -648,7 +647,7 @@ TEST_F(DnsTransactionTest, EmptySuffixSearch) {
   // A single label name is not even attempted.
   TransactionHelper helper1("singlelabel",
                             dns_protocol::kTypeA,
-                            ERR_NAME_NOT_RESOLVED);
+                            ERR_DNS_SEARCH_EMPTY);
 
   helper1.StartTransaction(transaction_factory_.get());
   EXPECT_TRUE(helper1.has_completed());

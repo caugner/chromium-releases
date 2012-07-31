@@ -18,6 +18,7 @@
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/download_manager.h"
+#include "content/public/browser/page_navigator.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
@@ -96,7 +97,8 @@ DownloadShelfView::DownloadShelfView(Browser* browser, BrowserView* parent)
       ALLOW_THIS_IN_INITIALIZER_LIST(
           mouse_watcher_(new views::MouseWatcherViewHost(this, gfx::Insets()),
                          this)) {
-  mouse_watcher_.set_notify_on_exit_time_ms(kNotifyOnExitTimeMS);
+  mouse_watcher_.set_notify_on_exit_time(
+      base::TimeDelta::FromMilliseconds(kNotifyOnExitTimeMS));
   set_id(VIEW_ID_DOWNLOAD_SHELF);
   parent->AddChildView(this);
 }
@@ -182,6 +184,10 @@ void DownloadShelfView::OnPaintBorder(gfx::Canvas* canvas) {
 void DownloadShelfView::OpenedDownload(DownloadItemView* view) {
   if (CanAutoClose())
     mouse_watcher_.Start();
+}
+
+content::PageNavigator* DownloadShelfView::GetNavigator() {
+  return browser_;
 }
 
 gfx::Size DownloadShelfView::GetPreferredSize() {
@@ -307,7 +313,7 @@ void DownloadShelfView::ViewHierarchyChanged(bool is_add,
 
     ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
     arrow_image_ = new views::ImageView();
-    arrow_image_->SetImage(rb.GetBitmapNamed(IDR_DOWNLOADS_FAVICON));
+    arrow_image_->SetImage(rb.GetImageSkiaNamed(IDR_DOWNLOADS_FAVICON));
     AddChildView(arrow_image_);
 
     show_all_view_ = new views::Link(
@@ -320,11 +326,11 @@ void DownloadShelfView::ViewHierarchyChanged(bool is_add,
 
     close_button_ = new views::ImageButton(this);
     close_button_->SetImage(views::CustomButton::BS_NORMAL,
-                            rb.GetBitmapNamed(IDR_CLOSE_BAR));
+                            rb.GetImageSkiaNamed(IDR_CLOSE_BAR));
     close_button_->SetImage(views::CustomButton::BS_HOT,
-                            rb.GetBitmapNamed(IDR_CLOSE_BAR_H));
+                            rb.GetImageSkiaNamed(IDR_CLOSE_BAR_H));
     close_button_->SetImage(views::CustomButton::BS_PUSHED,
-                            rb.GetBitmapNamed(IDR_CLOSE_BAR_P));
+                            rb.GetImageSkiaNamed(IDR_CLOSE_BAR_P));
     close_button_->SetAccessibleName(
         l10n_util::GetStringUTF16(IDS_ACCNAME_CLOSE));
     UpdateButtonColors();
@@ -364,8 +370,8 @@ void DownloadShelfView::UpdateButtonColors() {
   if (GetThemeProvider()) {
     close_button_->SetBackground(
         GetThemeProvider()->GetColor(ThemeService::COLOR_TAB_TEXT),
-        rb.GetBitmapNamed(IDR_CLOSE_BAR),
-        rb.GetBitmapNamed(IDR_CLOSE_BAR_MASK));
+        rb.GetImageSkiaNamed(IDR_CLOSE_BAR),
+        rb.GetImageSkiaNamed(IDR_CLOSE_BAR_MASK));
   }
 }
 

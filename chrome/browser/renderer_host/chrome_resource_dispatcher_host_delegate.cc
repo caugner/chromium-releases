@@ -19,12 +19,10 @@
 #include "chrome/browser/instant/instant_loader.h"
 #include "chrome/browser/net/load_timing_observer.h"
 #include "chrome/browser/prerender/prerender_manager.h"
-#include "chrome/browser/prerender/prerender_manager_factory.h"
 #include "chrome/browser/prerender/prerender_tracker.h"
 #include "chrome/browser/profiles/profile_io_data.h"
 #include "chrome/browser/renderer_host/chrome_url_request_user_data.h"
 #include "chrome/browser/renderer_host/safe_browsing_resource_throttle.h"
-#include "chrome/browser/renderer_host/transfer_navigation_resource_throttle.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/ui/auto_login_prompter.h"
 #include "chrome/browser/ui/login/login_prompt.h"
@@ -56,21 +54,6 @@ using content::ResourceDispatcherHostLoginDelegate;
 using content::ResourceRequestInfo;
 
 namespace {
-
-void AddPrerenderOnUI(
-    int render_process_id, int render_view_id,
-    const GURL& url, const content::Referrer& referrer) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  prerender::PrerenderManager* prerender_manager =
-      prerender::FindPrerenderManagerUsingRenderProcessId(render_process_id);
-  if (!prerender_manager)
-    return;
-
-  prerender_manager->AddPrerenderFromLinkRelPrerender(render_process_id,
-                                                      render_view_id,
-                                                      url,
-                                                      referrer);
-}
 
 void NotifyDownloadInitiatedOnUI(int render_process_id, int render_view_id) {
   RenderViewHost* rvh = RenderViewHost::FromID(render_process_id,
@@ -120,17 +103,6 @@ bool ChromeResourceDispatcherHostDelegate::ShouldBeginRequest(
       return false;
   }
 
-  // Handle a PRERENDER motivated request. Very similar to rel=prefetch, these
-  // rel=prerender requests instead launch an early render of the entire page.
-  if (resource_type == ResourceType::PRERENDER) {
-    if (prerender::PrerenderManager::IsPrerenderingPossible()) {
-      BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-          base::Bind(&AddPrerenderOnUI, child_id, route_id, url, referrer));
-    }
-    // Prerendering or not, this request should be aborted.
-    return false;
-  }
-
   // Abort any prerenders that spawn requests that use invalid HTTP methods.
   if (prerender_tracker_->IsPrerenderingOnIOThread(child_id, route_id) &&
       !prerender::PrerenderManager::IsValidHttpMethod(method)) {
@@ -160,16 +132,14 @@ void ChromeResourceDispatcherHostDelegate::RequestBeginning(
     request->set_priority(net::IDLE);
   }
 
-  if (resource_type == ResourceType::MAIN_FRAME) {
-    throttles->push_back(new TransferNavigationResourceThrottle(request));
-
 #if defined(OS_CHROMEOS)
+  if (resource_type == ResourceType::MAIN_FRAME) {
     // We check offline first, then check safe browsing so that we still can
     // block unsafe site after we remove offline page.
     throttles->push_back(new OfflineResourceThrottle(
         child_id, route_id, request, resource_context));
-#endif
   }
+#endif
 
   AppendChromeMetricsHeaders(request, resource_context, resource_type);
 
@@ -187,27 +157,28 @@ void ChromeResourceDispatcherHostDelegate::DownloadStarting(
     int child_id,
     int route_id,
     int request_id,
-    bool is_new_request,
+    bool is_content_initiated,
     ScopedVector<content::ResourceThrottle>* throttles) {
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
       base::Bind(&NotifyDownloadInitiatedOnUI, child_id, route_id));
 
-  // If this isn't a new request, we've seen this before and added the safe
-  // browsing resource throttle already so no need to add it again. This code
-  // path is only hit for requests initiated through the browser, and not the
-  // web, so no need to add the download throttle.
-  if (is_new_request) {
+  // If it's from the web, we don't trust it, so we push the throttle on.
+  if (is_content_initiated) {
+    throttles->push_back(new DownloadResourceThrottle(
+        download_request_limiter_, child_id, route_id, request_id,
+        request->method()));
+  }
+
+  // If this isn't a new request, we've seen this before and added the standard
+  //  resource throttles already so no need to add it again.
+  if (!request->is_pending()) {
     AppendStandardResourceThrottles(request,
                                     resource_context,
                                     child_id,
                                     route_id,
                                     ResourceType::MAIN_FRAME,
                                     throttles);
-  } else {
-    throttles->push_back(new DownloadResourceThrottle(
-        download_request_limiter_, child_id, route_id, request_id,
-        request->method()));
   }
 }
 
@@ -344,7 +315,7 @@ bool ChromeResourceDispatcherHostDelegate::ShouldForceDownloadResource(
 void ChromeResourceDispatcherHostDelegate::OnResponseStarted(
     net::URLRequest* request,
     content::ResourceResponse* response,
-    IPC::Message::Sender* sender) {
+    IPC::Sender* sender) {
   LoadTimingObserver::PopulateTimingInfo(request, response);
 
   const ResourceRequestInfo* info = ResourceRequestInfo::ForRequest(request);
@@ -392,7 +363,7 @@ void ChromeResourceDispatcherHostDelegate::OnFieldTrialGroupFinalized(
     const std::string& group_name) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   chrome_variations::ID new_id =
-      experiments_helper::GetGoogleExperimentID(trial_name, group_name);
+      experiments_helper::GetGoogleVariationID(trial_name, group_name);
   if (new_id == chrome_variations::kEmptyID)
     return;
   variation_ids_set_.insert(new_id);
@@ -413,7 +384,7 @@ void ChromeResourceDispatcherHostDelegate::InitVariationIDsCacheIfNeeded() {
   for (base::FieldTrial::SelectedGroups::const_iterator it =
        initial_groups.begin(); it != initial_groups.end(); ++it) {
     chrome_variations::ID id =
-        experiments_helper::GetGoogleExperimentID(it->trial, it->group);
+        experiments_helper::GetGoogleVariationID(it->trial, it->group);
     if (id != chrome_variations::kEmptyID)
       variation_ids_set_.insert(id);
   }

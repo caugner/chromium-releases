@@ -11,6 +11,7 @@
 #include "base/scoped_temp_dir.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
+#include "chrome/browser/extensions/extension_event_names.h"
 #include "chrome/browser/extensions/extension_event_router.h"
 #include "chrome/browser/extensions/extension_menu_manager.h"
 #include "chrome/browser/extensions/test_extension_prefs.h"
@@ -21,13 +22,15 @@
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/common/context_menu_params.h"
-#include "content/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using content::BrowserThread;
+using extensions::Extension;
 using testing::_;
 using testing::AtLeast;
+using testing::InSequence;
 using testing::Return;
 using testing::SaveArg;
 
@@ -45,7 +48,18 @@ class ExtensionMenuManagerTest : public testing::Test {
   ExtensionMenuItem* CreateTestItem(Extension* extension) {
     ExtensionMenuItem::Type type = ExtensionMenuItem::NORMAL;
     ExtensionMenuItem::ContextList contexts(ExtensionMenuItem::ALL);
-    ExtensionMenuItem::Id id(NULL, extension->id(), next_id_++);
+    ExtensionMenuItem::Id id(false, extension->id());
+    id.uid = next_id_++;
+    return new ExtensionMenuItem(id, "test", false, true, type, contexts);
+  }
+
+  // Returns a test item with the given string ID.
+  ExtensionMenuItem* CreateTestItemWithID(Extension* extension,
+                                          const std::string& string_id) {
+    ExtensionMenuItem::Type type = ExtensionMenuItem::NORMAL;
+    ExtensionMenuItem::ContextList contexts(ExtensionMenuItem::ALL);
+    ExtensionMenuItem::Id id(false, extension->id());
+    id.string_uid = string_id;
     return new ExtensionMenuItem(id, "test", false, true, type, contexts);
   }
 
@@ -64,7 +78,7 @@ class ExtensionMenuManagerTest : public testing::Test {
   content::TestBrowserThread file_thread_;
 
   ExtensionMenuManager manager_;
-  ExtensionList extensions_;
+  extensions::ExtensionList extensions_;
   TestExtensionPrefs prefs_;
   int next_id_;
 
@@ -87,7 +101,7 @@ TEST_F(ExtensionMenuManagerTest, AddGetRemoveItems) {
   ASSERT_EQ(item1, items->at(0));
 
   // Add a second item, make sure it comes back too.
-  ExtensionMenuItem* item2 = CreateTestItem(extension);
+  ExtensionMenuItem* item2 = CreateTestItemWithID(extension, "id2");
   ASSERT_TRUE(manager_.AddContextItem(extension, item2));
   ASSERT_EQ(item2, manager_.GetItemById(item2->id()));
   items = manager_.MenuItems(item2->extension_id());
@@ -107,8 +121,19 @@ TEST_F(ExtensionMenuManagerTest, AddGetRemoveItems) {
   ASSERT_EQ(2u, manager_.MenuItems(extension_id)->size());
 
   // Make sure removing a non-existent item returns false.
-  ExtensionMenuItem::Id id(NULL, extension->id(), id3.uid + 50);
+  ExtensionMenuItem::Id id(false, extension->id());
+  id.uid = id3.uid + 50;
   ASSERT_FALSE(manager_.RemoveContextMenuItem(id));
+
+  // Make sure adding an item with the same string ID returns false.
+  scoped_ptr<ExtensionMenuItem> item2too(
+      CreateTestItemWithID(extension, "id2"));
+  ASSERT_FALSE(manager_.AddContextItem(extension, item2too.get()));
+
+  // But the same string ID should not collide with another extension.
+  Extension* extension2 = AddExtension("test2");
+  ExtensionMenuItem* item2other = CreateTestItemWithID(extension2, "id2");
+  ASSERT_TRUE(manager_.AddContextItem(extension2, item2other));
 }
 
 // Test adding/removing child items.
@@ -119,7 +144,7 @@ TEST_F(ExtensionMenuManagerTest, ChildFunctions) {
 
   ExtensionMenuItem* item1 = CreateTestItem(extension1);
   ExtensionMenuItem* item2 = CreateTestItem(extension2);
-  ExtensionMenuItem* item2_child = CreateTestItem(extension2);
+  ExtensionMenuItem* item2_child = CreateTestItemWithID(extension2, "2child");
   ExtensionMenuItem* item2_grandchild = CreateTestItem(extension2);
 
   // This third item we expect to fail inserting, so we use a scoped_ptr to make
@@ -173,8 +198,8 @@ TEST_F(ExtensionMenuManagerTest, DeleteParent) {
   // Set up 5 items to add.
   ExtensionMenuItem* item1 = CreateTestItem(extension);
   ExtensionMenuItem* item2 = CreateTestItem(extension);
-  ExtensionMenuItem* item3 = CreateTestItem(extension);
-  ExtensionMenuItem* item4 = CreateTestItem(extension);
+  ExtensionMenuItem* item3 = CreateTestItemWithID(extension, "id3");
+  ExtensionMenuItem* item4 = CreateTestItemWithID(extension, "id4");
   ExtensionMenuItem* item5 = CreateTestItem(extension);
   ExtensionMenuItem* item6 = CreateTestItem(extension);
   ExtensionMenuItem::Id item1_id = item1->id();
@@ -335,11 +360,12 @@ TEST_F(ExtensionMenuManagerTest, ExtensionUnloadRemovesMenuItems) {
 
   // Notify that the extension was unloaded, and make sure the right item is
   // gone.
-  UnloadedExtensionInfo details(
+  extensions::UnloadedExtensionInfo details(
       extension1, extension_misc::UNLOAD_REASON_DISABLE);
   notifier->Notify(chrome::NOTIFICATION_EXTENSION_UNLOADED,
                    content::Source<Profile>(&profile_),
-                   content::Details<UnloadedExtensionInfo>(&details));
+                   content::Details<extensions::UnloadedExtensionInfo>(
+                      &details));
   ASSERT_EQ(NULL, manager_.MenuItems(extension1->id()));
   ASSERT_EQ(1u, manager_.MenuItems(extension2->id())->size());
   ASSERT_TRUE(manager_.GetItemById(id1) == NULL);
@@ -370,7 +396,6 @@ class MockTestingProfile : public TestingProfile {
  public:
   MockTestingProfile() {}
   MOCK_METHOD0(GetExtensionEventRouter, ExtensionEventRouter*());
-  MOCK_CONST_METHOD0(IsOffTheRecord, bool());
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockTestingProfile);
@@ -414,11 +439,14 @@ TEST_F(ExtensionMenuManagerTest, RemoveOneByOne) {
   Extension* extension1 = AddExtension("1111");
   ExtensionMenuItem* item1 = CreateTestItem(extension1);
   ExtensionMenuItem* item2 = CreateTestItem(extension1);
+  ExtensionMenuItem* item3 = CreateTestItemWithID(extension1, "id3");
   ASSERT_TRUE(manager_.AddContextItem(extension1, item1));
   ASSERT_TRUE(manager_.AddContextItem(extension1, item2));
+  ASSERT_TRUE(manager_.AddContextItem(extension1, item3));
 
   ASSERT_FALSE(manager_.context_items_.empty());
 
+  manager_.RemoveContextMenuItem(item3->id());
   manager_.RemoveContextMenuItem(item1->id());
   manager_.RemoveContextMenuItem(item2->id());
 
@@ -450,18 +478,28 @@ TEST_F(ExtensionMenuManagerTest, ExecuteCommand) {
   // Use the magic of googlemock to save a parameter to our mock's
   // DispatchEventToExtension method into event_args.
   std::string event_args;
-  std::string expected_event_name = "contextMenus";
-  EXPECT_CALL(*mock_event_router.get(),
-              DispatchEventToExtension(
-                  item->extension_id(),
-                  expected_event_name,
+  {
+    InSequence s;
+    EXPECT_CALL(*mock_event_router.get(),
+                DispatchEventToExtension(
+                    item->extension_id(),
+                  extension_event_names::kOnContextMenus,
                   _,
                   &profile,
                   GURL(),
                   ExtensionEventRouter::USER_GESTURE_ENABLED))
       .Times(1)
       .WillOnce(SaveArg<2>(&event_args));
-
+  EXPECT_CALL(*mock_event_router.get(),
+              DispatchEventToExtension(
+                  item->extension_id(),
+                  extension_event_names::kOnContextMenuClicked,
+                  _,
+                  &profile,
+                  GURL(),
+                  ExtensionEventRouter::USER_GESTURE_ENABLED))
+      .Times(1);
+  }
   manager_.ExecuteCommand(&profile, NULL /* tab_contents */, params, id);
 
   // Parse the json event_args, which should turn into a 2-element list where

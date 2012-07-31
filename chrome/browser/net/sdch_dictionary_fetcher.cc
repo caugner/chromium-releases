@@ -67,7 +67,7 @@ void SdchDictionaryFetcher::StartFetching() {
 
   DCHECK(context_.get());
   current_fetch_.reset(content::URLFetcher::Create(
-      fetch_queue_.front(), content::URLFetcher::GET, this));
+      fetch_queue_.front(), net::URLFetcher::GET, this));
   fetch_queue_.pop();
   current_fetch_->SetRequestContext(context_.get());
   current_fetch_->SetLoadFlags(net::LOAD_DO_NOT_SEND_COOKIES |
@@ -76,7 +76,7 @@ void SdchDictionaryFetcher::StartFetching() {
 }
 
 void SdchDictionaryFetcher::OnURLFetchComplete(
-    const content::URLFetcher* source) {
+    const net::URLFetcher* source) {
   if ((200 == source->GetResponseCode()) &&
       (source->GetStatus().status() == net::URLRequestStatus::SUCCESS)) {
     std::string data;

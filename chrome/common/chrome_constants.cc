@@ -109,6 +109,7 @@ const wchar_t kBrowserAppName[] = L"Chromium";
 #endif
 
 #if defined(OS_WIN)
+const FilePath::CharType kMetroDriverDll[] = FPL("metro_driver.dll");
 const wchar_t kStatusTrayWindowClass[] = L"Chrome_StatusTrayWindow";
 #endif  // defined(OS_WIN)
 
@@ -160,6 +161,8 @@ const FilePath::CharType kJumpListIconDirname[] = FPL("JumpListIcons");
 const FilePath::CharType kWebAppDirname[] = FPL("Web Applications");
 const FilePath::CharType kServiceStateFileName[] = FPL("Service State");
 const FilePath::CharType kReadmeFilename[] = FPL("README");
+const FilePath::CharType kManagedModePolicyFilename[] =
+    FPL("Managed Mode Settings");
 
 #if defined(OS_CHROMEOS)
 const FilePath::CharType kGDataCacheDirname[] = FPL("GCache");
@@ -180,10 +183,12 @@ const FilePath::CharType kPepperFlashPluginFilename[] =
 // knowing it.  Enable in debug builds.  Playback mode is allowed always,
 // because it is useful for testing and not hazardous by itself.
 #ifndef NDEBUG
-const bool kRecordModeEnabled = true;
+// const bool kRecordModeEnabled = true;
 #else
-const bool kRecordModeEnabled = false;
+// const bool kRecordModeEnabled = false;
 #endif
+
+const bool kRecordModeEnabled = true;
 
 const int kHistogramSynchronizerReservedSequenceNumber = 0;
 

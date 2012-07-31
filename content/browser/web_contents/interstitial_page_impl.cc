@@ -20,6 +20,7 @@
 #include "content/browser/web_contents/navigation_entry_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/common/view_messages.h"
+#include "content/port/browser/render_view_host_delegate_view.h"
 #include "content/port/browser/render_widget_host_view_port.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/dom_operation_notification_details.h"
@@ -30,25 +31,26 @@
 #include "content/public/browser/web_contents_view.h"
 #include "content/public/common/bindings_policy.h"
 #include "content/public/common/page_transition_types.h"
-#include "content/public/common/view_type.h"
 #include "net/base/escape.h"
 #include "net/url_request/url_request_context_getter.h"
-#include "webkit/dom_storage/dom_storage_types.h"
 
 using content::BrowserThread;
 using content::DomOperationNotificationDetails;
 using content::InterstitialPageDelegate;
+using content::NativeWebKeyboardEvent;
 using content::NavigationController;
 using content::NavigationEntry;
 using content::NavigationEntryImpl;
 using content::RenderViewHost;
 using content::RenderViewHostImpl;
 using content::RenderViewHostDelegate;
+using content::RenderViewHostDelegateView;
 using content::RenderWidgetHost;
 using content::RenderWidgetHostImpl;
 using content::RenderWidgetHostView;
 using content::RenderWidgetHostViewPort;
 using content::ResourceDispatcherHostImpl;
+using content::SessionStorageNamespace;
 using content::SiteInstance;
 using content::WebContents;
 using content::WebContentsView;
@@ -78,39 +80,26 @@ void ResourceRequestHelper(ResourceDispatcherHostImpl* rdh,
 
 }  // namespace
 
-class InterstitialPageImpl::InterstitialPageRVHViewDelegate
-    : public RenderViewHostDelegate::View {
+class InterstitialPageImpl::InterstitialPageRVHDelegateView
+  : public content::RenderViewHostDelegateView {
  public:
-  explicit InterstitialPageRVHViewDelegate(InterstitialPageImpl* page);
+  explicit InterstitialPageRVHDelegateView(InterstitialPageImpl* page);
 
-  // RenderViewHostDelegate::View implementation:
-  virtual void CreateNewWindow(
-      int route_id,
-      const ViewHostMsg_CreateWindow_Params& params);
-  virtual void CreateNewWidget(int route_id,
-                               WebKit::WebPopupType popup_type);
-  virtual void CreateNewFullscreenWidget(int route_id);
-  virtual void ShowCreatedWindow(int route_id,
-                                 WindowOpenDisposition disposition,
-                                 const gfx::Rect& initial_pos,
-                                 bool user_gesture);
-  virtual void ShowCreatedWidget(int route_id,
-                                 const gfx::Rect& initial_pos);
-  virtual void ShowCreatedFullscreenWidget(int route_id);
-  virtual void ShowContextMenu(const content::ContextMenuParams& params);
+  // RenderViewHostDelegateView implementation:
   virtual void ShowPopupMenu(const gfx::Rect& bounds,
                              int item_height,
                              double item_font_size,
                              int selected_item,
                              const std::vector<WebMenuItem>& items,
-                             bool right_aligned);
+                             bool right_aligned,
+                             bool allow_multiple_selection) OVERRIDE;
   virtual void StartDragging(const WebDropData& drop_data,
                              WebDragOperationsMask operations_allowed,
                              const SkBitmap& image,
-                             const gfx::Point& image_offset);
-  virtual void UpdateDragCursor(WebDragOperation operation);
-  virtual void GotFocus();
-  virtual void TakeFocus(bool reverse);
+                             const gfx::Point& image_offset) OVERRIDE;
+  virtual void UpdateDragCursor(WebDragOperation operation) OVERRIDE;
+  virtual void GotFocus() OVERRIDE;
+  virtual void TakeFocus(bool reverse) OVERRIDE;
   virtual void OnFindReply(int request_id,
                            int number_of_matches,
                            const gfx::Rect& selection_rect,
@@ -120,7 +109,7 @@ class InterstitialPageImpl::InterstitialPageRVHViewDelegate
  private:
   InterstitialPageImpl* interstitial_page_;
 
-  DISALLOW_COPY_AND_ASSIGN(InterstitialPageRVHViewDelegate);
+  DISALLOW_COPY_AND_ASSIGN(InterstitialPageRVHDelegateView);
 };
 
 
@@ -175,8 +164,8 @@ InterstitialPageImpl::InterstitialPageImpl(WebContents* web_contents,
       should_revert_web_contents_title_(false),
       web_contents_was_loading_(false),
       resource_dispatcher_host_notified_(false),
-      ALLOW_THIS_IN_INITIALIZER_LIST(rvh_view_delegate_(
-          new InterstitialPageRVHViewDelegate(this))),
+      ALLOW_THIS_IN_INITIALIZER_LIST(rvh_delegate_view_(
+          new InterstitialPageRVHDelegateView(this))),
       create_view_(true),
       delegate_(delegate) {
   InitInterstitialPageMap();
@@ -364,8 +353,8 @@ void InterstitialPageImpl::Observe(
   }
 }
 
-RenderViewHostDelegate::View* InterstitialPageImpl::GetViewDelegate() {
-  return rvh_view_delegate_.get();
+RenderViewHostDelegateView* InterstitialPageImpl::GetDelegateView() {
+  return rvh_delegate_view_.get();
 }
 
 const GURL& InterstitialPageImpl::GetURL() const {
@@ -468,7 +457,7 @@ content::RendererPreferences InterstitialPageImpl::GetRendererPrefs(
   return renderer_preferences_;
 }
 
-WebPreferences InterstitialPageImpl::GetWebkitPrefs() {
+webkit_glue::WebPreferences InterstitialPageImpl::GetWebkitPrefs() {
   return WebContentsImpl::GetWebkitPrefs(render_view_host_, url_);
 }
 
@@ -489,8 +478,9 @@ WebContents* InterstitialPageImpl::web_contents() const {
 
 RenderViewHost* InterstitialPageImpl::CreateRenderViewHost() {
   RenderViewHostImpl* render_view_host = new RenderViewHostImpl(
-      SiteInstance::Create(web_contents()->GetBrowserContext()), this,
-      MSG_ROUTING_NONE, false, dom_storage::kInvalidSessionStorageNamespaceId);
+      SiteInstance::Create(web_contents()->GetBrowserContext()), this, this,
+      MSG_ROUTING_NONE, false, NULL);
+  web_contents_->RenderViewForInterstitialPageCreated(render_view_host);
   return render_view_host;
 }
 
@@ -505,8 +495,11 @@ WebContentsView* InterstitialPageImpl::CreateWebContentsView() {
 
   int32 max_page_id = web_contents()->
       GetMaxPageIDForSiteInstance(render_view_host_->GetSiteInstance());
-  render_view_host_->CreateRenderView(string16(), MSG_ROUTING_NONE,
-                                      max_page_id);
+  render_view_host_->CreateRenderView(string16(),
+                                      MSG_ROUTING_NONE,
+                                      max_page_id,
+                                      std::string(),
+                                      -1);
   view->SetSize(web_contents_view->GetContainerSize());
   // Don't show the interstitial until we have navigated to it.
   view->Hide();
@@ -625,12 +618,46 @@ void InterstitialPageImpl::DontCreateViewForTesting() {
   create_view_ = false;
 }
 
-content::ViewType InterstitialPageImpl::GetRenderViewType() const {
-  return content::VIEW_TYPE_INTERSTITIAL_PAGE;
-}
-
 gfx::Rect InterstitialPageImpl::GetRootWindowResizerRect() const {
   return gfx::Rect();
+}
+
+void InterstitialPageImpl::CreateNewWindow(
+    int route_id,
+    const ViewHostMsg_CreateWindow_Params& params,
+    SessionStorageNamespace* session_storage_namespace) {
+  NOTREACHED() << "InterstitialPage does not support showing popups yet.";
+}
+
+void InterstitialPageImpl::CreateNewWidget(int route_id,
+                                           WebKit::WebPopupType popup_type) {
+  NOTREACHED() << "InterstitialPage does not support showing drop-downs yet.";
+}
+
+void InterstitialPageImpl::CreateNewFullscreenWidget(int route_id) {
+  NOTREACHED()
+      << "InterstitialPage does not support showing full screen popups.";
+}
+
+void InterstitialPageImpl::ShowCreatedWindow(int route_id,
+                                             WindowOpenDisposition disposition,
+                                             const gfx::Rect& initial_pos,
+                                             bool user_gesture) {
+  NOTREACHED() << "InterstitialPage does not support showing popups yet.";
+}
+
+void InterstitialPageImpl::ShowCreatedWidget(int route_id,
+                                             const gfx::Rect& initial_pos) {
+  NOTREACHED() << "InterstitialPage does not support showing drop-downs yet.";
+}
+
+void InterstitialPageImpl::ShowCreatedFullscreenWidget(int route_id) {
+  NOTREACHED()
+      << "InterstitialPage does not support showing full screen popups.";
+}
+
+void InterstitialPageImpl::ShowContextMenu(
+    const content::ContextMenuParams& params) {
 }
 
 void InterstitialPageImpl::Disable() {
@@ -669,59 +696,23 @@ void InterstitialPageImpl::TakeActionOnResourceDispatcher(
           action));
 }
 
-InterstitialPageImpl::InterstitialPageRVHViewDelegate::
-    InterstitialPageRVHViewDelegate(InterstitialPageImpl* page)
+InterstitialPageImpl::InterstitialPageRVHDelegateView::
+    InterstitialPageRVHDelegateView(InterstitialPageImpl* page)
     : interstitial_page_(page) {
 }
 
-void InterstitialPageImpl::InterstitialPageRVHViewDelegate::CreateNewWindow(
-    int route_id,
-    const ViewHostMsg_CreateWindow_Params& params) {
-  NOTREACHED() << "InterstitialPage does not support showing popups yet.";
-}
-
-void InterstitialPageImpl::InterstitialPageRVHViewDelegate::CreateNewWidget(
-    int route_id, WebKit::WebPopupType popup_type) {
-  NOTREACHED() << "InterstitialPage does not support showing drop-downs yet.";
-}
-
-void InterstitialPageImpl::InterstitialPageRVHViewDelegate::
-    CreateNewFullscreenWidget(int route_id) {
-  NOTREACHED()
-      << "InterstitialPage does not support showing full screen popups.";
-}
-
-void InterstitialPageImpl::InterstitialPageRVHViewDelegate::ShowCreatedWindow(
-    int route_id, WindowOpenDisposition disposition,
-    const gfx::Rect& initial_pos, bool user_gesture) {
-  NOTREACHED() << "InterstitialPage does not support showing popups yet.";
-}
-
-void InterstitialPageImpl::InterstitialPageRVHViewDelegate::ShowCreatedWidget(
-    int route_id, const gfx::Rect& initial_pos) {
-  NOTREACHED() << "InterstitialPage does not support showing drop-downs yet.";
-}
-
-void InterstitialPageImpl::InterstitialPageRVHViewDelegate::
-    ShowCreatedFullscreenWidget(int route_id) {
-  NOTREACHED()
-      << "InterstitialPage does not support showing full screen popups.";
-}
-
-void InterstitialPageImpl::InterstitialPageRVHViewDelegate::ShowContextMenu(
-    const content::ContextMenuParams& params) {
-}
-
-void InterstitialPageImpl::InterstitialPageRVHViewDelegate::ShowPopupMenu(
+void InterstitialPageImpl::InterstitialPageRVHDelegateView::ShowPopupMenu(
     const gfx::Rect& bounds,
     int item_height,
     double item_font_size,
     int selected_item,
     const std::vector<WebMenuItem>& items,
-    bool right_aligned) {
+    bool right_aligned,
+    bool allow_multiple_selection) {
+  NOTREACHED() << "InterstitialPage does not support showing popup menus.";
 }
 
-void InterstitialPageImpl::InterstitialPageRVHViewDelegate::StartDragging(
+void InterstitialPageImpl::InterstitialPageRVHDelegateView::StartDragging(
     const WebDropData& drop_data,
     WebDragOperationsMask allowed_operations,
     const SkBitmap& image,
@@ -729,27 +720,27 @@ void InterstitialPageImpl::InterstitialPageRVHViewDelegate::StartDragging(
   NOTREACHED() << "InterstitialPage does not support dragging yet.";
 }
 
-void InterstitialPageImpl::InterstitialPageRVHViewDelegate::UpdateDragCursor(
+void InterstitialPageImpl::InterstitialPageRVHDelegateView::UpdateDragCursor(
     WebDragOperation) {
   NOTREACHED() << "InterstitialPage does not support dragging yet.";
 }
 
-void InterstitialPageImpl::InterstitialPageRVHViewDelegate::GotFocus() {
+void InterstitialPageImpl::InterstitialPageRVHDelegateView::GotFocus() {
 }
 
-void InterstitialPageImpl::InterstitialPageRVHViewDelegate::TakeFocus(
+void InterstitialPageImpl::InterstitialPageRVHDelegateView::TakeFocus(
     bool reverse) {
   if (!interstitial_page_->web_contents())
     return;
   WebContentsImpl* web_contents =
       static_cast<WebContentsImpl*>(interstitial_page_->web_contents());
-  if (!web_contents->GetViewDelegate())
+  if (!web_contents->GetDelegateView())
     return;
 
-  web_contents->GetViewDelegate()->TakeFocus(reverse);
+  web_contents->GetDelegateView()->TakeFocus(reverse);
 }
 
-void InterstitialPageImpl::InterstitialPageRVHViewDelegate::OnFindReply(
+void InterstitialPageImpl::InterstitialPageRVHDelegateView::OnFindReply(
     int request_id, int number_of_matches, const gfx::Rect& selection_rect,
     int active_match_ordinal, bool final_update) {
 }

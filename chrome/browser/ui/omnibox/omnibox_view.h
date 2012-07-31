@@ -31,32 +31,19 @@ class WebContents;
 }
 
 #if defined(TOOLKIT_VIEWS)
-
 // TODO(beng): Move all views-related code to a views-specific sub-interface.
-
-class AutocompleteEditController;
-class LocationBarView;
-class Profile;
-class ToolbarModel;
+namespace gfx {
+class Font;
+}
 
 namespace views {
 class DropTargetEvent;
 class View;
-}  // namespace views
-
+}
 #endif
 
 class OmniboxView {
  public:
-#if defined(TOOLKIT_VIEWS)
-  static OmniboxView* CreateOmniboxView(AutocompleteEditController* controller,
-                                        ToolbarModel* toolbar_model,
-                                        Profile* profile,
-                                        CommandUpdater* command_updater,
-                                        bool popup_window_mode,
-                                        LocationBarView* location_bar);
-#endif
-
   // Used by the automation system for getting at the model from the view.
   virtual AutocompleteEditModel* model() = 0;
   virtual const AutocompleteEditModel* model() const = 0;
@@ -120,7 +107,7 @@ class OmniboxView {
   virtual void SetForcedQuery() = 0;
 
   // Returns true if all text is selected or there is no text at all.
-  virtual bool IsSelectAll() = 0;
+  virtual bool IsSelectAll() const = 0;
 
   // Returns true if the user deleted the suggested text.
   virtual bool DeleteAtEndPressed() = 0;
@@ -211,11 +198,23 @@ class OmniboxView {
 
   // Performs the drop of a drag and drop operation on the view.
   virtual int OnPerformDrop(const views::DropTargetEvent& event) = 0;
+
+  // Returns the font.
+  virtual gfx::Font GetFont() = 0;
+
+  // Returns the width in pixels needed to display the text from one character
+  // before the caret to the end of the string.
+  virtual int WidthOfTextAfterCursor() = 0;
 #endif
 
   // Returns a string with any leading javascript schemas stripped from the
   // input text.
   static string16 StripJavascriptSchemas(const string16& text);
+
+  // Returns the current clipboard contents as a string that can be pasted in.
+  // In addition to just getting CF_UNICODETEXT out, this can also extract URLs
+  // from bookmarks on the clipboard.
+  static string16 GetClipboardText();
 
   virtual ~OmniboxView() {}
 };

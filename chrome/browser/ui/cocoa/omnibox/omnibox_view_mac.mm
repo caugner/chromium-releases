@@ -132,42 +132,6 @@ NSRange ComponentToNSRange(const url_parse::Component& component) {
 
 // static
 NSImage* OmniboxViewMac::ImageForResource(int resource_id) {
-  NSString* image_name = nil;
-
-  switch(resource_id) {
-    // From the autocomplete popup, or the star icon at the RHS of the
-    // text field.
-    case IDR_STAR: image_name = @"star.pdf"; break;
-    case IDR_STAR_LIT: image_name = @"star_lit.pdf"; break;
-
-    // Values from |AutocompleteMatch::TypeToIcon()|.
-    case IDR_OMNIBOX_SEARCH:
-      image_name = @"omnibox_search.pdf"; break;
-    case IDR_OMNIBOX_HTTP:
-      image_name = @"omnibox_http.pdf"; break;
-    case IDR_OMNIBOX_HISTORY:
-      image_name = @"omnibox_history.pdf"; break;
-    case IDR_OMNIBOX_EXTENSION_APP:
-      image_name = @"omnibox_extension_app.pdf"; break;
-
-    // Values from |ToolbarModel::GetIcon()|.
-    case IDR_OMNIBOX_HTTPS_VALID:
-      image_name = @"omnibox_https_valid.pdf"; break;
-    case IDR_OMNIBOX_HTTPS_WARNING:
-      image_name = @"omnibox_https_warning.pdf"; break;
-    case IDR_OMNIBOX_HTTPS_INVALID:
-      image_name = @"omnibox_https_invalid.pdf"; break;
-  }
-
-  if (image_name) {
-    if (NSImage* image = gfx::GetCachedImageWithName(image_name)) {
-      return image;
-    } else {
-      NOTREACHED()
-          << "Missing image for " << base::SysNSStringToUTF8(image_name);
-    }
-  }
-
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
   return rb.GetNativeImageNamed(resource_id);
 }
@@ -386,7 +350,7 @@ void OmniboxViewMac::SetForcedQuery() {
   }
 }
 
-bool OmniboxViewMac::IsSelectAll() {
+bool OmniboxViewMac::IsSelectAll() const {
   if (![field_ currentEditor])
     return true;
   const NSRange all_range = NSMakeRange(0, GetTextLength());

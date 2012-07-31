@@ -11,8 +11,6 @@
 #include "content/browser/renderer_host/resource_handler.h"
 #include "content/public/common/resource_response.h"
 
-class ResourceMessageFilter;
-
 namespace IPC {
 class Message;
 }
@@ -23,6 +21,7 @@ class IOBuffer;
 
 namespace content {
 class ResourceDispatcherHostImpl;
+class ResourceMessageFilter;
 
 // Used to complete a synchronous resource request in response to resource load
 // events from the resource dispatcher host.
@@ -32,6 +31,7 @@ class SyncResourceHandler : public ResourceHandler {
                       const GURL& url,
                       IPC::Message* result_message,
                       ResourceDispatcherHostImpl* resource_dispatcher_host);
+  virtual ~SyncResourceHandler();
 
   virtual bool OnUploadProgress(int request_id,
                                 uint64 position,
@@ -41,7 +41,8 @@ class SyncResourceHandler : public ResourceHandler {
                                    ResourceResponse* response,
                                    bool* defer) OVERRIDE;
   virtual bool OnResponseStarted(int request_id,
-                                 ResourceResponse* response) OVERRIDE;
+                                 ResourceResponse* response,
+                                 bool* defer) OVERRIDE;
   virtual bool OnWillStart(int request_id,
                            const GURL& url,
                            bool* defer) OVERRIDE;
@@ -50,16 +51,14 @@ class SyncResourceHandler : public ResourceHandler {
                           int* buf_size,
                           int min_size) OVERRIDE;
   virtual bool OnReadCompleted(int request_id,
-                               int* bytes_read) OVERRIDE;
+                               int* bytes_read,
+                               bool* defer) OVERRIDE;
   virtual bool OnResponseCompleted(int request_id,
                                    const net::URLRequestStatus& status,
                                    const std::string& security_info) OVERRIDE;
-  virtual void OnRequestClosed() OVERRIDE;
 
  private:
   enum { kReadBufSize = 3840 };
-
-  virtual ~SyncResourceHandler();
 
   scoped_refptr<net::IOBuffer> read_buffer_;
 

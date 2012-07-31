@@ -8,11 +8,12 @@
 
 #include "chrome/browser/extensions/extension_function.h"
 
-class Extension;
 class ExtensionHost;
 class Profile;
 
 namespace extensions {
+
+class Extension;
 
 class RuntimeEventRouter {
  public:
@@ -22,9 +23,13 @@ class RuntimeEventRouter {
 };
 
 class RuntimeGetBackgroundPageFunction : public AsyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION_NAME("runtime.getBackgroundPage");
+
  protected:
+  virtual ~RuntimeGetBackgroundPageFunction() {}
   virtual bool RunImpl() OVERRIDE;
-  DECLARE_EXTENSION_FUNCTION_NAME("experimental.runtime.getBackgroundPage");
+
  private:
   void OnPageLoaded(ExtensionHost*);
 };

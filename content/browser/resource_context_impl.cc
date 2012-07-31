@@ -162,8 +162,7 @@ void InitializeRequestContext(
   set_protocol = job_factory->SetProtocolHandler(
       chrome::kFileSystemScheme,
       CreateFileSystemProtocolHandler(
-          GetFileSystemContextForResourceContext(resource_context),
-          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE)));
+          GetFileSystemContextForResourceContext(resource_context)));
   DCHECK(set_protocol);
 
   job_factory->AddInterceptor(new DeveloperProtocolHandler(
@@ -180,9 +179,17 @@ AppCacheService* ResourceContext::GetAppCacheService(ResourceContext* context) {
       context, kAppCacheServicKeyName);
 }
 
-ResourceContext::~ResourceContext() {
+ResourceContext::ResourceContext() {
   if (ResourceDispatcherHostImpl::Get())
-    ResourceDispatcherHostImpl::Get()->CancelRequestsForContext(this);
+    ResourceDispatcherHostImpl::Get()->AddResourceContext(this);
+}
+
+ResourceContext::~ResourceContext() {
+  ResourceDispatcherHostImpl* rdhi = ResourceDispatcherHostImpl::Get();
+  if (rdhi) {
+    rdhi->CancelRequestsForContext(this);
+    rdhi->RemoveResourceContext(this);
+  }
 }
 
 BlobStorageController* GetBlobStorageControllerForResourceContext(

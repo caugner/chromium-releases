@@ -19,11 +19,12 @@
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/omnibox/location_bar.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -64,8 +65,6 @@ class HintInfoBar : public ConfirmInfoBarDelegate {
   void AllowExpiry() { should_expire_ = true; }
 
   // ConfirmInfoBarDelegate:
-  virtual bool ShouldExpire(
-      const content::LoadCommittedDetails& details) const OVERRIDE;
   virtual void InfoBarDismissed() OVERRIDE;
   virtual gfx::Image* GetIcon() const OVERRIDE;
   virtual Type GetInfoBarType() const OVERRIDE;
@@ -73,6 +72,8 @@ class HintInfoBar : public ConfirmInfoBarDelegate {
   virtual int GetButtons() const OVERRIDE;
   virtual string16 GetButtonLabel(InfoBarButton button) const OVERRIDE;
   virtual bool Accept() OVERRIDE;
+  virtual bool ShouldExpireInternal(
+      const content::LoadCommittedDetails& details) const OVERRIDE;
 
   // The omnibox hint that shows us.
   OmniboxSearchHint* omnibox_hint_;
@@ -106,11 +107,6 @@ HintInfoBar::HintInfoBar(OmniboxSearchHint* omnibox_hint)
 HintInfoBar::~HintInfoBar() {
   if (!action_taken_)
     UMA_HISTOGRAM_COUNTS("OmniboxSearchHint.Ignored", 1);
-}
-
-bool HintInfoBar::ShouldExpire(
-    const content::LoadCommittedDetails& details) const {
-  return details.is_navigation_to_different_page() && should_expire_;
 }
 
 void HintInfoBar::InfoBarDismissed() {
@@ -151,10 +147,15 @@ bool HintInfoBar::Accept() {
   return true;
 }
 
+bool HintInfoBar::ShouldExpireInternal(
+    const content::LoadCommittedDetails& details) const {
+  return should_expire_;
+}
+
 
 // OmniboxSearchHint ----------------------------------------------------------
 
-OmniboxSearchHint::OmniboxSearchHint(TabContentsWrapper* tab) : tab_(tab) {
+OmniboxSearchHint::OmniboxSearchHint(TabContents* tab) : tab_(tab) {
   NavigationController* controller = &(tab->web_contents()->GetController());
   notification_registrar_.Add(
       this,
@@ -211,9 +212,9 @@ void OmniboxSearchHint::ShowInfoBar() {
 }
 
 void OmniboxSearchHint::ShowEnteringQuery() {
-  LocationBar* location_bar = BrowserList::GetLastActiveWithProfile(
+  LocationBar* location_bar = browser::FindLastActiveWithProfile(
       tab_->profile())->window()->GetLocationBar();
-  OmniboxView* omnibox_view = location_bar->location_entry();
+  OmniboxView* omnibox_view = location_bar->GetLocationEntry();
   location_bar->FocusLocation(true);
   omnibox_view->SetUserText(
       l10n_util::GetStringUTF16(IDS_OMNIBOX_SEARCH_HINT_OMNIBOX_TEXT));

@@ -4,24 +4,54 @@
 
 #include "chrome/browser/ui/gtk/extensions/shell_window_gtk.h"
 
-#include "chrome/browser/extensions/extension_host.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/common/extensions/extension.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "ui/base/x/active_window_watcher_x.h"
 #include "ui/gfx/rect.h"
 
-ShellWindowGtk::ShellWindowGtk(ExtensionHost* host)
-    : ShellWindow(host),
+ShellWindowGtk::ShellWindowGtk(Profile* profile,
+                               const extensions::Extension* extension,
+                               const GURL& url,
+                               const ShellWindow::CreateParams& params)
+    : ShellWindow(profile, extension, url),
       state_(GDK_WINDOW_STATE_WITHDRAWN),
       is_active_(!ui::ActiveWindowWatcherX::WMSupportsActivation()) {
-  host_->view()->SetContainer(this);
   window_ = GTK_WINDOW(gtk_window_new(GTK_WINDOW_TOPLEVEL));
 
-  gtk_container_add(GTK_CONTAINER(window_), host_->view()->native_view());
+  gfx::NativeView native_view =
+      web_contents()->GetView()->GetNativeView();
+  gtk_container_add(GTK_CONTAINER(window_), native_view);
 
-  gtk_window_set_default_size(window_, kDefaultWidth, kDefaultHeight);
+  gtk_window_set_default_size(
+      window_, params.bounds.width(), params.bounds.height());
 
-  const Extension* extension = host_->extension();
+  int min_width = params.minimum_size.width();
+  int min_height = params.minimum_size.height();
+  int max_width = params.maximum_size.width();
+  int max_height = params.maximum_size.height();
+  GdkGeometry hints;
+  int hints_mask = 0;
+  if (min_width || min_height) {
+    hints.min_height = min_height;
+    hints.min_width = min_width;
+    hints_mask |= GDK_HINT_MIN_SIZE;
+  }
+  if (max_width || max_height) {
+    hints.max_height = max_height ? max_height : G_MAXINT;
+    hints.max_width = max_width ? max_width : G_MAXINT;
+    hints_mask |= GDK_HINT_MAX_SIZE;
+  }
+  if (hints_mask) {
+    gtk_window_set_geometry_hints(
+        window_,
+        GTK_WIDGET(window_),
+        &hints,
+        static_cast<GdkWindowHints>(hints_mask));
+  }
 
   // TODO(mihaip): Mirror contents of <title> tag in window title
   gtk_window_set_title(window_, extension->name().c_str());
@@ -34,8 +64,6 @@ ShellWindowGtk::ShellWindowGtk(ExtensionHost* host)
                    G_CALLBACK(OnWindowStateThunk), this);
 
   ui::ActiveWindowWatcherX::AddObserver(this);
-
-  gtk_window_present(window_);
 }
 
 ShellWindowGtk::~ShellWindowGtk() {
@@ -56,6 +84,10 @@ bool ShellWindowGtk::IsMinimized() const {
 
 bool ShellWindowGtk::IsFullscreen() const {
   return false;
+}
+
+gfx::NativeWindow ShellWindowGtk::GetNativeWindow() {
+  return window_;
 }
 
 gfx::Rect ShellWindowGtk::GetRestoredBounds() const {
@@ -82,7 +114,7 @@ void ShellWindowGtk::Close() {
   window_ = NULL;
 
   gtk_widget_destroy(window);
-  delete this;
+  OnNativeClose();
 }
 
 void ShellWindowGtk::Activate() {
@@ -160,10 +192,34 @@ gboolean ShellWindowGtk::OnConfigure(GtkWidget* widget,
 gboolean ShellWindowGtk::OnWindowState(GtkWidget* sender,
                                        GdkEventWindowState* event) {
   state_ = event->new_window_state;
+
+  if (content_thinks_its_fullscreen_ &&
+      !(state_ & GDK_WINDOW_STATE_FULLSCREEN)) {
+    content_thinks_its_fullscreen_ = false;
+    content::RenderViewHost* rvh = web_contents()->GetRenderViewHost();
+    if (rvh)
+      rvh->ExitFullscreen();
+  }
+
   return FALSE;
 }
 
+void ShellWindowGtk::SetFullscreen(bool fullscreen) {
+  content_thinks_its_fullscreen_ = fullscreen;
+  if (fullscreen)
+    gtk_window_fullscreen(window_);
+  else
+    gtk_window_unfullscreen(window_);
+}
+
+bool ShellWindowGtk::IsFullscreenOrPending() const {
+  return content_thinks_its_fullscreen_;
+}
+
 // static
-ShellWindow* ShellWindow::CreateShellWindow(ExtensionHost* host) {
-  return new ShellWindowGtk(host);
+ShellWindow* ShellWindow::CreateImpl(Profile* profile,
+                                     const extensions::Extension* extension,
+                                     const GURL& url,
+                                     const ShellWindow::CreateParams& params) {
+  return new ShellWindowGtk(profile, extension, url, params);
 }

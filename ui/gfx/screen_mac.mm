@@ -12,7 +12,7 @@
 @end
 
 #include "base/logging.h"
-#include "ui/gfx/monitor.h"
+#include "ui/gfx/display.h"
 
 namespace {
 
@@ -45,10 +45,10 @@ NSScreen* GetMatchingScreen(const gfx::Rect& match_rect) {
   return max_screen;
 }
 
-gfx::Monitor GetMonitorForScreen(NSScreen* screen, bool is_primary) {
+gfx::Display GetDisplayForScreen(NSScreen* screen, bool is_primary) {
   NSRect frame = [screen frame];
   // TODO(oshima): Implement ID and Observer.
-  gfx::Monitor monitor(0, gfx::Rect(NSRectToCGRect(frame)));
+  gfx::Display display(0, gfx::Rect(NSRectToCGRect(frame)));
 
   NSRect visible_frame = [screen visibleFrame];
 
@@ -57,22 +57,27 @@ gfx::Monitor GetMonitorForScreen(NSScreen* screen, bool is_primary) {
     gfx::Rect work_area = gfx::Rect(NSRectToCGRect(visible_frame));
     work_area.set_y(frame.size.height - visible_frame.origin.y -
                     visible_frame.size.height);
-    monitor.set_work_area(work_area);
+    display.set_work_area(work_area);
   } else {
-    monitor.set_work_area(ConvertCoordinateSystem(visible_frame));
+    display.set_work_area(ConvertCoordinateSystem(visible_frame));
   }
   CGFloat scale;
   if ([screen respondsToSelector:@selector(backingScaleFactor)])
     scale = [screen backingScaleFactor];
   else
     scale = [screen userSpaceScaleFactor];
-  monitor.set_device_scale_factor(scale);
-  return monitor;
+  display.set_device_scale_factor(scale);
+  return display;
 }
 
 }  // namespace
 
 namespace gfx {
+
+// static
+bool Screen::IsDIPEnabled() {
+  return true;
+}
 
 // static
 gfx::Point Screen::GetCursorScreenPoint() {
@@ -84,22 +89,31 @@ gfx::Point Screen::GetCursorScreenPoint() {
 }
 
 // static
-gfx::Monitor Screen::GetPrimaryMonitor() {
-  // Primary monitor is defined as the monitor with the menubar,
+gfx::Display Screen::GetDisplayNearestWindow(gfx::NativeView view) {
+  NSWindow* window = [view window];
+  if (!window)
+    return GetPrimaryDisplay();
+  NSScreen* match_screen = [window screen];
+  return GetDisplayForScreen(match_screen, false /* may not be primary */);
+}
+
+// static
+gfx::Display Screen::GetPrimaryDisplay() {
+  // Primary display is defined as the display with the menubar,
   // which is always at index 0.
   NSScreen* primary = [[NSScreen screens] objectAtIndex:0];
-  gfx::Monitor monitor = GetMonitorForScreen(primary, true /* primary */);
-  return monitor;
+  gfx::Display display = GetDisplayForScreen(primary, true /* primary */);
+  return display;
 }
 
 // static
-gfx::Monitor Screen::GetMonitorMatching(const gfx::Rect& match_rect) {
+gfx::Display Screen::GetDisplayMatching(const gfx::Rect& match_rect) {
   NSScreen* match_screen = GetMatchingScreen(match_rect);
-  return GetMonitorForScreen(match_screen, false /* may not be primary */);
+  return GetDisplayForScreen(match_screen, false /* may not be primary */);
 }
 
 // static
-int Screen::GetNumMonitors() {
+int Screen::GetNumDisplays() {
   // Don't just return the number of online displays.  It includes displays
   // that mirror other displays, which are not desired in the count.  It's
   // tempting to use the count returned by CGGetActiveDisplayList, but active
@@ -131,6 +145,19 @@ int Screen::GetNumMonitors() {
   }
 
   return display_count;
+}
+
+// static
+gfx::Display Screen::GetDisplayNearestPoint(const gfx::Point& point) {
+  NSPoint ns_point = NSPointFromCGPoint(point.ToCGPoint());
+
+  NSArray* screens = [NSScreen screens];
+  NSScreen* primary = [screens objectAtIndex:0];
+  for (NSScreen* screen in screens) {
+    if (NSMouseInRect(ns_point, [screen frame], NO))
+      return GetDisplayForScreen(screen, screen == primary);
+  }
+  return GetPrimaryDisplay();
 }
 
 }  // namespace gfx

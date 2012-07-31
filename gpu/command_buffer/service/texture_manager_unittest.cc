@@ -158,9 +158,7 @@ TEST_F(TextureManagerTest, Destroy) {
   EXPECT_CALL(*gl_, DeleteTextures(1, ::testing::Pointee(kService1Id)))
       .Times(1)
       .RetiresOnSaturation();
-  EXPECT_CALL(*gl_, DeleteTextures(8, _))
-      .Times(1)
-      .RetiresOnSaturation();
+  TestHelper::SetupTextureManagerDestructionExpectations(gl_.get(), "");
   manager.Destroy(true);
   // Check that resources got freed.
   info1 = manager.GetTextureInfo(kClient1Id);
@@ -182,11 +180,9 @@ TEST_F(TextureManagerTest, DestroyUnowned) {
   // Check texture got created.
   TextureManager::TextureInfo* info1 = manager.GetTextureInfo(kClient1Id);
   ASSERT_TRUE(info1 != NULL);
-  EXPECT_CALL(*gl_, DeleteTextures(8, _))
-      .Times(1)
-      .RetiresOnSaturation();
 
   // Check that it is not freed if it is not owned.
+  TestHelper::SetupTextureManagerDestructionExpectations(gl_.get(), "");
   manager.Destroy(true);
   info1 = manager.GetTextureInfo(kClient1Id);
   ASSERT_TRUE(info1 == NULL);
@@ -763,6 +759,24 @@ TEST_F(TextureInfoTest, EGLImageExternal) {
   ASSERT_TRUE(info != NULL);
   manager.SetInfoTarget(info, GL_TEXTURE_EXTERNAL_OES);
   EXPECT_EQ(static_cast<GLenum>(GL_TEXTURE_EXTERNAL_OES), info->target());
+  EXPECT_FALSE(manager.CanGenerateMipmaps(info));
+  manager.Destroy(false);
+}
+
+TEST_F(TextureInfoTest, DepthTexture) {
+  TestHelper::SetupFeatureInfoInitExpectations(
+      gl_.get(), "GL_ANGLE_depth_texture");
+  FeatureInfo::Ref feature_info(new FeatureInfo());
+  feature_info->Initialize(NULL);
+  TextureManager manager(
+      feature_info.get(), kMaxTextureSize, kMaxCubeMapTextureSize);
+  manager.CreateTextureInfo(kClient1Id, kService1Id);
+  TextureManager::TextureInfo* info = manager.GetTextureInfo(kClient1Id);
+  ASSERT_TRUE(info != NULL);
+  manager.SetInfoTarget(info, GL_TEXTURE_2D);
+  manager.SetLevelInfo(
+      info, GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, 4, 4, 1, 0,
+      GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, false);
   EXPECT_FALSE(manager.CanGenerateMipmaps(info));
   manager.Destroy(false);
 }

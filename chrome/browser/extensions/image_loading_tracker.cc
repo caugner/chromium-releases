@@ -4,6 +4,9 @@
 
 #include "chrome/browser/extensions/image_loading_tracker.h"
 
+#include <string>
+#include <vector>
+
 #include "base/bind.h"
 #include "base/file_util.h"
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
@@ -15,12 +18,15 @@
 #include "content/public/browser/notification_service.h"
 #include "grit/component_extension_resources_map.h"
 #include "grit/theme_resources.h"
+#include "grit/theme_resources_standard.h"
 #include "skia/ext/image_operations.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/image/image.h"
+#include "ui/gfx/image/image_skia.h"
 #include "webkit/glue/image_decoder.h"
 
 using content::BrowserThread;
+using extensions::Extension;
 
 ////////////////////////////////////////////////////////////////////////////////
 // ImageLoadingTracker::Observer
@@ -212,11 +218,19 @@ void ImageLoadingTracker::LoadImages(const Extension* extension,
 
   for (std::vector<ImageInfo>::const_iterator it = info_list.begin();
        it != info_list.end(); ++it) {
-    // Load resources for WebStore component extension.
+    // Load resources for special component extensions.
     if (load_info.extension_id == extension_misc::kWebStoreAppId) {
       if (!loader_)
         loader_ = new ImageLoader(this);
       loader_->LoadResource(it->resource, it->max_size, id, IDR_WEBSTORE_ICON);
+      continue;
+    } else if (load_info.extension_id == extension_misc::kChromeAppId) {
+      if (!loader_)
+        loader_ = new ImageLoader(this);
+      loader_->LoadResource(it->resource,
+                            it->max_size,
+                            id,
+                            IDR_PRODUCT_LOGO_128);
       continue;
     }
 
@@ -303,13 +317,13 @@ void ImageLoadingTracker::OnImageLoaded(
     std::string extension_id = info->extension_id;
 
     if (info->bitmaps.size() > 0) {
-      std::vector<const SkBitmap*> bitmaps;
+      gfx::ImageSkia image_skia;
       for (std::vector<SkBitmap>::const_iterator it = info->bitmaps.begin();
            it != info->bitmaps.end(); ++it) {
-        // gfx::Image takes ownership of this bitmap.
-        bitmaps.push_back(new SkBitmap(*it));
+        // TODO(pkotwicz): Do something better but ONLY when ENABLE_DIP.
+        image_skia.AddBitmapForScale(*it, 1.0f);
       }
-      image = gfx::Image(bitmaps);
+      image = gfx::Image(image_skia);
     }
 
     load_map_.erase(load_map_it);
@@ -326,7 +340,7 @@ void ImageLoadingTracker::Observe(int type,
   DCHECK(type == chrome::NOTIFICATION_EXTENSION_UNLOADED);
 
   const Extension* extension =
-      content::Details<UnloadedExtensionInfo>(details)->extension;
+      content::Details<extensions::UnloadedExtensionInfo>(details)->extension;
 
   // Remove reference to this extension from all pending load entries. This
   // ensures we don't attempt to cache the image when the load completes.

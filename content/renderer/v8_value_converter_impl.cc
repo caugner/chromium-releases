@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,16 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/values.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebArrayBuffer.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebArrayBufferView.h"
 #include "v8/include/v8.h"
+
+using base::BinaryValue;
+using base::DictionaryValue;
+using base::ListValue;
+using base::StringValue;
+using base::Value;
+
 
 namespace content {
 
@@ -20,9 +29,42 @@ V8ValueConverter* V8ValueConverter::create() {
 }
 
 V8ValueConverterImpl::V8ValueConverterImpl()
-    : allow_undefined_(false),
-      allow_date_(false),
-      allow_regexp_(false) {
+    : undefined_allowed_(false),
+      date_allowed_(false),
+      regexp_allowed_(false),
+      strip_null_from_objects_(false) {
+}
+
+bool V8ValueConverterImpl::GetUndefinedAllowed() const {
+  return undefined_allowed_;
+}
+
+void V8ValueConverterImpl::SetUndefinedAllowed(bool val) {
+  undefined_allowed_ = val;
+}
+
+bool V8ValueConverterImpl::GetDateAllowed() const {
+  return date_allowed_;
+}
+
+void V8ValueConverterImpl::SetDateAllowed(bool val) {
+  date_allowed_ = val;
+}
+
+bool V8ValueConverterImpl::GetRegexpAllowed() const {
+  return regexp_allowed_;
+}
+
+void V8ValueConverterImpl::SetRegexpAllowed(bool val) {
+  regexp_allowed_ = val;
+}
+
+bool V8ValueConverterImpl::GetStripNullFromObjects() const {
+  return strip_null_from_objects_;
+}
+
+void V8ValueConverterImpl::SetStripNullFromObjects(bool val) {
+  strip_null_from_objects_ = val;
 }
 
 v8::Handle<v8::Value> V8ValueConverterImpl::ToV8Value(
@@ -77,6 +119,9 @@ v8::Handle<v8::Value> V8ValueConverterImpl::ToV8ValueImpl(
     case Value::TYPE_DICTIONARY:
       return ToV8Object(static_cast<const DictionaryValue*>(value));
 
+    case Value::TYPE_BINARY:
+      return ToArrayBuffer(static_cast<const BinaryValue*>(value));
+
     default:
       LOG(ERROR) << "Unexpected value type: " << value->GetType();
       return v8::Null();
@@ -127,6 +172,14 @@ v8::Handle<v8::Value> V8ValueConverterImpl::ToV8Object(
   return result;
 }
 
+v8::Handle<v8::Value> V8ValueConverterImpl::ToArrayBuffer(
+    const BinaryValue* value) const {
+  WebKit::WebArrayBuffer buffer =
+      WebKit::WebArrayBuffer::create(value->GetSize(), 1);
+  memcpy(buffer.data(), value->GetBuffer(), value->GetSize());
+  return buffer.toV8Value();
+}
+
 Value* V8ValueConverterImpl::FromV8ValueImpl(v8::Handle<v8::Value> val) const {
   CHECK(!val.IsEmpty());
 
@@ -147,15 +200,15 @@ Value* V8ValueConverterImpl::FromV8ValueImpl(v8::Handle<v8::Value> val) const {
     return Value::CreateStringValue(std::string(*utf8, utf8.length()));
   }
 
-  if (allow_undefined_ && val->IsUndefined())
+  if (undefined_allowed_ && val->IsUndefined())
     return Value::CreateNullValue();
 
-  if (allow_date_ && val->IsDate()) {
+  if (date_allowed_ && val->IsDate()) {
     v8::Date* date = v8::Date::Cast(*val);
     return Value::CreateDoubleValue(date->NumberValue() / 1000.0);
   }
 
-  if (allow_regexp_ && val->IsRegExp()) {
+  if (regexp_allowed_ && val->IsRegExp()) {
     return Value::CreateStringValue(
         *v8::String::Utf8Value(val->ToString()));
   }
@@ -164,9 +217,14 @@ Value* V8ValueConverterImpl::FromV8ValueImpl(v8::Handle<v8::Value> val) const {
   if (val->IsArray())
     return FromV8Array(val.As<v8::Array>());
 
-  if (val->IsObject())
-    return FromV8Object(val->ToObject());
-
+  if (val->IsObject()) {
+    BinaryValue* binary_value = FromV8Buffer(val);
+    if (binary_value) {
+      return binary_value;
+    } else {
+      return FromV8Object(val->ToObject());
+    }
+  }
   LOG(ERROR) << "Unexpected v8 value type encountered.";
   return Value::CreateNullValue();
 }
@@ -194,9 +252,34 @@ ListValue* V8ValueConverterImpl::FromV8Array(v8::Handle<v8::Array> val) const {
   return result;
 }
 
+base::BinaryValue* V8ValueConverterImpl::FromV8Buffer(
+    v8::Handle<v8::Value> val) const {
+  char* data = NULL;
+  size_t length = 0;
+
+  WebKit::WebArrayBuffer* array_buffer =
+      WebKit::WebArrayBuffer::createFromV8Value(val);
+  if (array_buffer) {
+    data = reinterpret_cast<char*>(array_buffer->data());
+    length = array_buffer->byteLength();
+  } else {
+    WebKit::WebArrayBufferView* view =
+        WebKit::WebArrayBufferView::createFromV8Value(val);
+    if (view) {
+      data = reinterpret_cast<char*>(view->baseAddress()) + view->byteOffset();
+      length = view->byteLength();
+    }
+  }
+
+  if (data)
+    return base::BinaryValue::CreateWithCopiedBuffer(data, length);
+  else
+    return NULL;
+}
+
 DictionaryValue* V8ValueConverterImpl::FromV8Object(
     v8::Handle<v8::Object> val) const {
-  DictionaryValue* result = new DictionaryValue();
+  scoped_ptr<DictionaryValue> result(new DictionaryValue());
   v8::Handle<v8::Array> property_names(val->GetPropertyNames());
   for (uint32 i = 0; i < property_names->Length(); ++i) {
     v8::Handle<v8::String> name(property_names->Get(i).As<v8::String>());
@@ -216,11 +299,34 @@ DictionaryValue* V8ValueConverterImpl::FromV8Object(
       child_v8 = v8::Null();
     }
 
-    Value* child = FromV8ValueImpl(child_v8);
-    CHECK(child);
+    scoped_ptr<Value> child(FromV8ValueImpl(child_v8));
+    CHECK(child.get());
+
+    // Strip null if asked (and since undefined is turned into null, undefined
+    // too). The use case for supporting this is JSON-schema support,
+    // specifically for extensions, where "optional" JSON properties may be
+    // represented as null, yet due to buggy legacy code elsewhere isn't
+    // treated as such (potentially causing crashes). For example, the
+    // "tabs.create" function takes an object as its first argument with an
+    // optional "windowId" property.
+    //
+    // Given just
+    //
+    //   tabs.create({})
+    //
+    // this will work as expected on code that only checks for the existence of
+    // a "windowId" property (such as that legacy code). However given
+    //
+    //   tabs.create({windowId: null})
+    //
+    // there *is* a "windowId" property, but since it should be an int, code
+    // on the browser which doesn't additionally check for null will fail.
+    // We can avoid all bugs related to this by stripping null.
+    if (strip_null_from_objects_ && child->IsType(Value::TYPE_NULL))
+      continue;
 
     result->SetWithoutPathExpansion(std::string(*name_utf8, name_utf8.length()),
-                                    child);
+                                    child.release());
   }
-  return result;
+  return result.release();
 }

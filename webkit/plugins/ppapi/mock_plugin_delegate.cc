@@ -37,6 +37,16 @@ void MockPluginDelegate::PluginRequestedCancelComposition(
 void MockPluginDelegate::PluginSelectionChanged(PluginInstance* instance) {
 }
 
+void MockPluginDelegate::SimulateImeSetComposition(
+    const string16& text,
+    const std::vector<WebKit::WebCompositionUnderline>& underlines,
+    int selection_start,
+    int selection_end) {
+}
+
+void MockPluginDelegate::SimulateImeConfirmComposition(const string16& text) {
+}
+
 void MockPluginDelegate::PluginCrashed(PluginInstance* instance) {
 }
 
@@ -192,38 +202,43 @@ void MockPluginDelegate::DidUpdateFile(const GURL& file_path, int64_t delta) {
 }
 
 base::PlatformFileError MockPluginDelegate::OpenFile(
-    const PepperFilePath& path,
+    const ::ppapi::PepperFilePath& path,
     int flags,
     base::PlatformFile* file) {
   return base::PLATFORM_FILE_ERROR_FAILED;
 }
 
 base::PlatformFileError MockPluginDelegate::RenameFile(
-    const PepperFilePath& from_path,
-    const PepperFilePath& to_path) {
+    const ::ppapi::PepperFilePath& from_path,
+    const ::ppapi::PepperFilePath& to_path) {
   return base::PLATFORM_FILE_ERROR_FAILED;
 }
 
 base::PlatformFileError MockPluginDelegate::DeleteFileOrDir(
-    const PepperFilePath& path,
+    const ::ppapi::PepperFilePath& path,
     bool recursive) {
   return base::PLATFORM_FILE_ERROR_FAILED;
 }
 
 base::PlatformFileError MockPluginDelegate::CreateDir(
-    const PepperFilePath& path) {
+    const ::ppapi::PepperFilePath& path) {
   return base::PLATFORM_FILE_ERROR_FAILED;
 }
 
 base::PlatformFileError MockPluginDelegate::QueryFile(
-    const PepperFilePath& path,
+    const ::ppapi::PepperFilePath& path,
     base::PlatformFileInfo* info) {
   return base::PLATFORM_FILE_ERROR_FAILED;
 }
 
 base::PlatformFileError MockPluginDelegate::GetDirContents(
-    const PepperFilePath& path,
-    DirContents* contents) {
+    const ::ppapi::PepperFilePath& path,
+    ::ppapi::DirContents* contents) {
+  return base::PLATFORM_FILE_ERROR_FAILED;
+}
+
+base::PlatformFileError MockPluginDelegate::CreateTemporaryFile(
+    base::PlatformFile* file) {
   return base::PLATFORM_FILE_ERROR_FAILED;
 }
 

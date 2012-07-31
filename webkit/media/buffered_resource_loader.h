@@ -11,6 +11,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/timer.h"
 #include "googleurl/src/gurl.h"
+#include "media/base/seekable_buffer.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLLoader.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLLoaderClient.h"
@@ -64,7 +65,11 @@ class BufferedResourceLoader : public WebKit::WebURLLoaderClient {
     kCacheMiss,
   };
 
+  // Keep in sync with WebMediaPlayer::CORSMode.
+  enum CORSMode { kUnspecified, kAnonymous, kUseCredentials };
+
   // |url| - URL for the resource to be loaded.
+  // |cors_mode| - HTML media element's crossorigin attribute.
   // |first_byte_position| - First byte to start loading from,
   // |kPositionNotSpecified| for not specified.
   // |last_byte_position| - Last byte to be loaded,
@@ -72,13 +77,15 @@ class BufferedResourceLoader : public WebKit::WebURLLoaderClient {
   // |strategy| is the initial loading strategy to use.
   // |bitrate| is the bitrate of the media, 0 if unknown.
   // |playback_rate| is the current playback rate of the media.
-  BufferedResourceLoader(const GURL& url,
-                         int64 first_byte_position,
-                         int64 last_byte_position,
-                         DeferStrategy strategy,
-                         int bitrate,
-                         float playback_rate,
-                         media::MediaLog* media_log);
+  BufferedResourceLoader(
+      const GURL& url,
+      CORSMode cors_mode,
+      int64 first_byte_position,
+      int64 last_byte_position,
+      DeferStrategy strategy,
+      int bitrate,
+      float playback_rate,
+      media::MediaLog* media_log);
   virtual ~BufferedResourceLoader();
 
   // Start the resource loading with the specified URL and range.
@@ -168,7 +175,14 @@ class BufferedResourceLoader : public WebKit::WebURLLoaderClient {
   // Only valid to call after Start() has completed.
   bool HasSingleOrigin() const;
 
-  // Sets the defer strategy to the given value.
+  // Returns true if the media resource passed a CORS access control check.
+  // Only valid to call after Start() has completed.
+  bool DidPassCORSAccessCheck() const;
+
+  // Sets the defer strategy to the given value unless it seems unwise.
+  // Specifically downgrade kNeverDefer to kThresholdDefer if we know the
+  // current response will not be used to satisfy future requests (the cache
+  // won't help us).
   void UpdateDeferStrategy(DeferStrategy strategy);
 
   // Sets the playback rate to the given value and updates buffer window
@@ -178,6 +192,9 @@ class BufferedResourceLoader : public WebKit::WebURLLoaderClient {
   // Sets the bitrate to the given value and updates buffer window
   // accordingly.
   void SetBitrate(int bitrate);
+
+  // Return the |first_byte_position| passed into the ctor.
+  int64 first_byte_position() const;
 
   // Parse a Content-Range header into its component pieces and return true if
   // each of the expected elements was found & parsed correctly.
@@ -254,13 +271,21 @@ class BufferedResourceLoader : public WebKit::WebURLLoaderClient {
   void Log();
 
   // A sliding window of buffer.
-  scoped_ptr<media::SeekableBuffer> buffer_;
+  media::SeekableBuffer buffer_;
 
   // Keeps track of an active WebURLLoader and associated state.
   scoped_ptr<ActiveLoader> active_loader_;
 
+  // Tracks if |active_loader_| failed. If so, then all calls to Read() will
+  // fail.
+  bool loader_failed_;
+
   // Current buffering algorithm in place for resource loading.
   DeferStrategy defer_strategy_;
+
+  // True if the currently-reading response might be used to satisfy a future
+  // request from the cache.
+  bool might_be_reused_from_cache_in_future_;
 
   // True if Range header is supported.
   bool range_supported_;
@@ -269,8 +294,9 @@ class BufferedResourceLoader : public WebKit::WebURLLoaderClient {
   size_t saved_forward_capacity_;
 
   GURL url_;
-  int64 first_byte_position_;
-  int64 last_byte_position_;
+  CORSMode cors_mode_;
+  const int64 first_byte_position_;
+  const int64 last_byte_position_;
   bool single_origin_;
 
   // Closure that listens to network events.

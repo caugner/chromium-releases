@@ -14,15 +14,16 @@
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/extensions/app_sync_data.h"
-#include "chrome/browser/sync/api/syncable_service.h"
+#include "sync/api/syncable_service.h"
 
 class SyncChangeProcessor;
-class Extension;
 class ExtensionService;
 class ExtensionSet;
 class SyncErrorFactory;
 
 namespace extensions {
+
+class Extension;
 
 // Bundle of app specific sync stuff.
 class AppSyncBundle {
