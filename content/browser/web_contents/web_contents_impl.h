@@ -4,9 +4,9 @@
 
 #ifndef CONTENT_BROWSER_WEB_CONTENTS_WEB_CONTENTS_IMPL_H_
 #define CONTENT_BROWSER_WEB_CONTENTS_WEB_CONTENTS_IMPL_H_
-#pragma once
 
 #include <map>
+#include <set>
 #include <string>
 
 #include "base/compiler_specific.h"
@@ -46,6 +46,7 @@ class JavaScriptDialogCreator;
 class RenderViewHost;
 class RenderViewHostDelegateView;
 class RenderViewHostImpl;
+class RenderWidgetHostImpl;
 class SiteInstance;
 class TestWebContents;
 class WebContentsDelegate;
@@ -192,12 +193,9 @@ class CONTENT_EXPORT WebContentsImpl
   virtual base::TerminationStatus GetCrashedStatus() const OVERRIDE;
   virtual bool IsBeingDestroyed() const OVERRIDE;
   virtual void NotifyNavigationStateChanged(unsigned changed_flags) OVERRIDE;
-  virtual void DidBecomeSelected() OVERRIDE;
   virtual base::TimeTicks GetLastSelectedTime() const OVERRIDE;
+  virtual void WasShown() OVERRIDE;
   virtual void WasHidden() OVERRIDE;
-  virtual void WasRestored() OVERRIDE;
-  virtual void ShowContents() OVERRIDE;
-  virtual void HideContents() OVERRIDE;
   virtual bool NeedToFireBeforeUnload() OVERRIDE;
   virtual void Stop() OVERRIDE;
   virtual content::WebContents* Clone() OVERRIDE;
@@ -263,7 +261,8 @@ class CONTENT_EXPORT WebContentsImpl
   virtual content::RenderViewHostDelegateView* GetDelegateView() OVERRIDE;
   virtual content::RenderViewHostDelegate::RendererManagement*
       GetRendererManagementDelegate() OVERRIDE;
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+  virtual bool OnMessageReceived(content::RenderViewHost* render_view_host,
+                                 const IPC::Message& message) OVERRIDE;
   virtual const GURL& GetURL() const OVERRIDE;
   virtual WebContents* GetAsWebContents() OVERRIDE;
   virtual gfx::Rect GetRootWindowResizerRect() const OVERRIDE;
@@ -308,8 +307,10 @@ class CONTENT_EXPORT WebContentsImpl
   virtual void Close(content::RenderViewHost* render_view_host) OVERRIDE;
   virtual void RequestMove(const gfx::Rect& new_bounds) OVERRIDE;
   virtual void SwappedOut(content::RenderViewHost* render_view_host) OVERRIDE;
-  virtual void DidStartLoading() OVERRIDE;
-  virtual void DidStopLoading() OVERRIDE;
+  virtual void DidStartLoading(
+      content::RenderViewHost* render_view_host) OVERRIDE;
+  virtual void DidStopLoading(
+      content::RenderViewHost* render_view_host) OVERRIDE;
   virtual void DidCancelLoading() OVERRIDE;
   virtual void DidChangeLoadProgress(double progress) OVERRIDE;
   virtual void DocumentAvailableInMainFrame(
@@ -366,7 +367,9 @@ class CONTENT_EXPORT WebContentsImpl
   virtual void LostCapture() OVERRIDE;
   virtual void HandleMouseDown() OVERRIDE;
   virtual void HandleMouseUp() OVERRIDE;
-  virtual void HandleMouseActivate() OVERRIDE;
+  virtual void HandlePointerActivate() OVERRIDE;
+  virtual void HandleGestureBegin() OVERRIDE;
+  virtual void HandleGestureEnd() OVERRIDE;
   virtual void RunFileChooser(
       content::RenderViewHost* render_view_host,
       const content::FileChooserParams& params) OVERRIDE;
@@ -399,6 +402,8 @@ class CONTENT_EXPORT WebContentsImpl
 
   // RenderWidgetHostDelegate --------------------------------------------------
 
+  virtual void RenderWidgetDeleted(
+      content::RenderWidgetHostImpl* render_widget_host) OVERRIDE;
   virtual bool PreHandleKeyboardEvent(
       const content::NativeWebKeyboardEvent& event,
       bool* is_keyboard_shortcut) OVERRIDE;
@@ -412,8 +417,6 @@ class CONTENT_EXPORT WebContentsImpl
   virtual void BeforeUnloadFiredFromRenderManager(
       bool proceed,
       bool* proceed_to_fire_unload) OVERRIDE;
-  virtual void DidStartLoadingFromRenderManager(
-      content::RenderViewHost* render_view_host) OVERRIDE;
   virtual void RenderViewGoneFromRenderManager(
       content::RenderViewHost* render_view_host) OVERRIDE;
   virtual void UpdateRenderViewSizeForRenderManager() OVERRIDE;
@@ -665,10 +668,6 @@ class CONTENT_EXPORT WebContentsImpl
   // is closed.
   WebContentsImpl* opener_;
 
-  // User agent to use if a NavigationEntry requires that the default user agent
-  // is overridden.
-  std::string user_agent_override_;
-
   // Helper classes ------------------------------------------------------------
 
   // Manages creation and swapping of render views.
@@ -800,6 +799,14 @@ class CONTENT_EXPORT WebContentsImpl
   // This must be at the end, or else we might get notifications and use other
   // member variables that are gone.
   content::NotificationRegistrar registrar_;
+
+  // Used during IPC message dispatching so that the handlers can get a pointer
+  // to the RVH through which the message was received.
+  content::RenderViewHost* message_source_;
+
+  // All live RenderWidgetHostImpls that are created by this object and may
+  // outlive it.
+  std::set<content::RenderWidgetHostImpl*> created_widgets_;
 
   DISALLOW_COPY_AND_ASSIGN(WebContentsImpl);
 };

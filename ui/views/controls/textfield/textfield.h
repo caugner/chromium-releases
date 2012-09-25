@@ -4,7 +4,6 @@
 
 #ifndef UI_VIEWS_CONTROLS_TEXTFIELD_TEXTFIELD_H_
 #define UI_VIEWS_CONTROLS_TEXTFIELD_TEXTFIELD_H_
-#pragma once
 
 #include <string>
 
@@ -89,8 +88,10 @@ class VIEWS_EXPORT Textfield : public View {
   // Returns the text that is currently selected.
   string16 GetSelectedText() const;
 
-  // Causes the edit field to be fully selected.
-  void SelectAll();
+  // Select the entire text range. If |reversed| is true, the range will end at
+  // the logical beginning of the text; this generally shows the leading portion
+  // of text that overflows its display area.
+  void SelectAll(bool reversed);
 
   // Clears the selection within the edit field and sets the caret to the end.
   void ClearSelection() const;

@@ -4,7 +4,6 @@
 
 #ifndef SYNC_ENGINE_GET_COMMIT_IDS_COMMAND_H_
 #define SYNC_ENGINE_GET_COMMIT_IDS_COMMAND_H_
-#pragma once
 
 #include <utility>
 #include <vector>
@@ -14,11 +13,12 @@
 #include "sync/engine/syncer_util.h"
 #include "sync/sessions/ordered_commit_set.h"
 #include "sync/sessions/sync_session.h"
+#include "sync/syncable/directory.h"
 
 using std::pair;
 using std::vector;
 
-namespace browser_sync {
+namespace syncer {
 
 // A class that contains the code used to search the syncable::Directory for
 // locally modified items that are ready to be committed to the server.
@@ -58,8 +58,8 @@ class GetCommitIdsCommand : public SyncerCommand {
   // 4. It's a delete but has not been committed.
   void FilterUnreadyEntries(
       syncable::BaseTransaction* trans,
-      syncable::ModelTypeSet throttled_types,
-      syncable::ModelTypeSet encrypted_types,
+      ModelTypeSet throttled_types,
+      ModelTypeSet encrypted_types,
       bool passphrase_missing,
       const syncable::Directory::UnsyncedMetaHandles& unsynced_handles,
       std::set<int64>* ready_unsynced_set);
@@ -134,6 +134,6 @@ class GetCommitIdsCommand : public SyncerCommand {
   DISALLOW_COPY_AND_ASSIGN(GetCommitIdsCommand);
 };
 
-}  // namespace browser_sync
+}  // namespace syncer
 
 #endif  // SYNC_ENGINE_GET_COMMIT_IDS_COMMAND_H_

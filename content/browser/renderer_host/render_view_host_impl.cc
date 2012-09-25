@@ -25,6 +25,7 @@
 #include "content/browser/gpu/gpu_surface_tracker.h"
 #include "content/browser/host_zoom_map_impl.h"
 #include "content/browser/power_save_blocker.h"
+#include "content/browser/renderer_host/dip_util.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/renderer_host/render_view_host_delegate.h"
 #include "content/common/accessibility_messages.h"
@@ -52,14 +53,16 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/common/context_menu_params.h"
 #include "content/public/common/result_codes.h"
-#include "content/public/common/selected_file_info.h"
 #include "content/public/common/url_constants.h"
 #include "net/base/net_util.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/base/dialogs/selected_file_info.h"
+#include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/native_widget_types.h"
 #include "webkit/fileapi/isolated_context.h"
 #include "webkit/glue/webdropdata.h"
+#include "webkit/glue/webkit_glue.h"
 
 #if defined(OS_WIN)
 #include "base/win/windows_version.h"
@@ -123,6 +126,14 @@ RenderViewHost* RenderViewHost::From(RenderWidgetHost* rwh) {
   return static_cast<RenderViewHostImpl*>(RenderWidgetHostImpl::From(rwh));
 }
 
+// static
+void RenderViewHost::FilterURL(int renderer_id,
+                               bool empty_allowed,
+                               GURL* url) {
+  RenderViewHostImpl::FilterURL(ChildProcessSecurityPolicyImpl::GetInstance(),
+                                renderer_id, empty_allowed, url);
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // RenderViewHostImpl, public:
 
@@ -163,7 +174,8 @@ RenderViewHostImpl::RenderViewHostImpl(
       render_view_termination_status_(base::TERMINATION_STATUS_STILL_RUNNING) {
   if (!session_storage_namespace_) {
     DOMStorageContext* dom_storage_context =
-        BrowserContext::GetDOMStorageContext(GetProcess()->GetBrowserContext());
+        BrowserContext::GetDOMStorageContext(GetProcess()->GetBrowserContext(),
+                                             instance->GetProcess()->GetID());
     session_storage_namespace_ = new SessionStorageNamespaceImpl(
         static_cast<DOMStorageContextImpl*>(dom_storage_context));
   }
@@ -295,6 +307,13 @@ void RenderViewHostImpl::SyncRendererPrefs() {
 void RenderViewHostImpl::Navigate(const ViewMsg_Navigate_Params& params) {
   ChildProcessSecurityPolicyImpl::GetInstance()->GrantRequestURL(
       GetProcess()->GetID(), params.url);
+  if (params.url.SchemeIs(chrome::kDataScheme) &&
+      params.base_url_for_data_url.SchemeIs(chrome::kFileScheme)) {
+    // If 'data:' is used, and we have a 'file:' base url, grant access to
+    // local files.
+    ChildProcessSecurityPolicyImpl::GetInstance()->GrantRequestURL(
+        GetProcess()->GetID(), params.base_url_for_data_url);
+  }
 
   ViewMsg_Navigate* nav_message = new ViewMsg_Navigate(GetRoutingID(), params);
 
@@ -327,7 +346,7 @@ void RenderViewHostImpl::Navigate(const ViewMsg_Navigate_Params& params) {
   // WebKit doesn't send throb notifications for JavaScript URLs, so we
   // don't want to either.
   if (!params.url.SchemeIs(chrome::kJavaScriptScheme))
-    delegate_->DidStartLoading();
+    delegate_->DidStartLoading(this);
 
   FOR_EACH_OBSERVER(content::RenderViewHostObserver,
                     observers_, Navigate(params.url));
@@ -510,8 +529,8 @@ void RenderViewHostImpl::DragTargetDragEnter(
 
   // The filenames vector, on the other hand, does represent a capability to
   // access the given files.
-  std::set<FilePath> filesets;
-  for (std::vector<WebDropData::FileInfo>::const_iterator iter(
+  fileapi::IsolatedContext::FileInfoSet files;
+  for (std::vector<WebDropData::FileInfo>::iterator iter(
            filtered_data.filenames.begin());
        iter != filtered_data.filenames.end(); ++iter) {
     // A dragged file may wind up as the value of an input element, or it
@@ -520,6 +539,16 @@ void RenderViewHostImpl::DragTargetDragEnter(
     // and request permissions to the specific file to cover both cases.
     // We do not give it the permission to request all file:// URLs.
     FilePath path = FilePath::FromUTF8Unsafe(UTF16ToUTF8(iter->path));
+
+    // Make sure we have the same display_name as the one we register.
+    if (iter->display_name.empty()) {
+      std::string name;
+      files.AddPath(path, &name);
+      iter->display_name = UTF8ToUTF16(name);
+    } else {
+      files.AddPathWithName(path, UTF16ToUTF8(iter->display_name));
+    }
+
     policy->GrantRequestSpecificFileURL(renderer_id,
                                         net::FilePathToFileURL(path));
 
@@ -535,16 +564,17 @@ void RenderViewHostImpl::DragTargetDragEnter(
       // Note that we can't tell a file from a directory at this point.
       policy->GrantReadDirectory(renderer_id, path);
     }
-
-    filesets.insert(path);
   }
 
   fileapi::IsolatedContext* isolated_context =
       fileapi::IsolatedContext::GetInstance();
   DCHECK(isolated_context);
-  std::string filesystem_id = isolated_context->RegisterIsolatedFileSystem(
-      filesets);
-  policy->GrantReadFileSystem(renderer_id, filesystem_id);
+  std::string filesystem_id = isolated_context->RegisterDraggedFileSystem(
+      files);
+  if (!filesystem_id.empty()) {
+    // Grant the permission iff the ID is valid.
+    policy->GrantReadFileSystem(renderer_id, filesystem_id);
+  }
   filtered_data.filesystem_id = UTF8ToUTF16(filesystem_id);
 
   Send(new DragMsg_TargetDragEnter(GetRoutingID(), filtered_data, client_pt,
@@ -762,13 +792,13 @@ void RenderViewHostImpl::SetInitialFocus(bool reverse) {
 }
 
 void RenderViewHostImpl::FilesSelectedInChooser(
-    const std::vector<SelectedFileInfo>& files,
+    const std::vector<ui::SelectedFileInfo>& files,
     int permissions) {
   // Grant the security access requested to the given files.
   for (size_t i = 0; i < files.size(); ++i) {
-    const SelectedFileInfo& file = files[i];
+    const ui::SelectedFileInfo& file = files[i];
     ChildProcessSecurityPolicyImpl::GetInstance()->GrantPermissionsForFile(
-        GetProcess()->GetID(), file.path, permissions);
+        GetProcess()->GetID(), file.local_path, permissions);
   }
   Send(new ViewMsg_RunFileChooserResponse(GetRoutingID(), files));
 }
@@ -831,9 +861,13 @@ bool RenderViewHostImpl::OnMessageReceived(const IPC::Message& msg) {
       return true;
   }
 
-  if (delegate_->OnMessageReceived(msg))
+  if (delegate_->OnMessageReceived(this, msg))
     return true;
 
+  // TODO(jochen): Consider removing message handlers that only add a this
+  // pointer and forward the messages to the RenderViewHostDelegate. The
+  // respective delegates can handle the messages themselves in their
+  // OnMessageReceived implementation.
   bool handled = true;
   bool msg_is_ok = true;
   IPC_BEGIN_MESSAGE_MAP_EX(RenderViewHostImpl, msg, msg_is_ok)
@@ -900,6 +934,9 @@ bool RenderViewHostImpl::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(ViewHostMsg_ScriptEvalResponse, OnScriptEvalResponse)
     IPC_MESSAGE_HANDLER(ViewHostMsg_DidZoomURL, OnDidZoomURL)
     IPC_MESSAGE_HANDLER(ViewHostMsg_MediaNotification, OnMediaNotification)
+#if defined(OS_ANDROID)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_StartContentIntent, OnStartContentIntent)
+#endif
     IPC_MESSAGE_HANDLER(DesktopNotificationHostMsg_RequestPermission,
                         OnRequestDesktopNotificationPermission)
     IPC_MESSAGE_HANDLER(DesktopNotificationHostMsg_Show,
@@ -1001,10 +1038,12 @@ void RenderViewHostImpl::OnMsgRunModal(int opener_id, IPC::Message* reply_msg) {
 
   RenderViewHostImpl* opener =
       RenderViewHostImpl::FromID(GetProcess()->GetID(), run_modal_opener_id_);
-  opener->StopHangMonitorTimeout();
-  // The ack for the mouse down won't come until the dialog closes, so fake it
-  // so that we don't get a timeout.
-  opener->decrement_in_flight_event_count();
+  if (opener) {
+    opener->StopHangMonitorTimeout();
+    // The ack for the mouse down won't come until the dialog closes, so fake it
+    // so that we don't get a timeout.
+    opener->decrement_in_flight_event_count();
+  }
 
   // TODO(darin): Bug 1107929: Need to inform our delegate to show this view in
   // an app-modal fashion.
@@ -1170,11 +1209,11 @@ void RenderViewHostImpl::OnMsgRequestMove(const gfx::Rect& pos) {
 }
 
 void RenderViewHostImpl::OnMsgDidStartLoading() {
-  delegate_->DidStartLoading();
+  delegate_->DidStartLoading(this);
 }
 
 void RenderViewHostImpl::OnMsgDidStopLoading() {
-  delegate_->DidStopLoading();
+  delegate_->DidStopLoading(this);
 }
 
 void RenderViewHostImpl::OnMsgDidChangeLoadProgress(double load_progress) {
@@ -1305,8 +1344,8 @@ void RenderViewHostImpl::OnMsgRunBeforeUnloadConfirm(const GURL& frame_url,
 void RenderViewHostImpl::OnMsgStartDragging(
     const WebDropData& drop_data,
     WebDragOperationsMask drag_operations_mask,
-    const SkBitmap& image,
-    const gfx::Point& image_offset) {
+    const SkBitmap& bitmap,
+    const gfx::Point& bitmap_offset_in_dip) {
   RenderViewHostDelegateView* view = delegate_->GetDelegateView();
   if (!view)
     return;
@@ -1335,7 +1374,11 @@ void RenderViewHostImpl::OnMsgStartDragging(
     if (policy->CanReadFile(GetProcess()->GetID(), path))
       filtered_data.filenames.push_back(*it);
   }
-  view->StartDragging(filtered_data, drag_operations_mask, image, image_offset);
+  ui::ScaleFactor scale_factor = ui::GetScaleFactorFromScale(
+      content::GetDIPScaleFactor(GetView()));
+  gfx::ImageSkia image(gfx::ImageSkiaRep(bitmap, scale_factor));
+  view->StartDragging(filtered_data, drag_operations_mask, image,
+      bitmap_offset_in_dip);
 }
 
 void RenderViewHostImpl::OnUpdateDragCursor(WebDragOperation current_op) {
@@ -1503,8 +1546,8 @@ void RenderViewHostImpl::ForwardMouseEvent(
   }
 }
 
-void RenderViewHostImpl::OnMouseActivate() {
-  delegate_->HandleMouseActivate();
+void RenderViewHostImpl::OnPointerEventActivate() {
+  delegate_->HandlePointerActivate();
 }
 
 void RenderViewHostImpl::ForwardKeyboardEvent(
@@ -1721,17 +1764,17 @@ void RenderViewHostImpl::OnAccessibilityNotifications(
 }
 
 void RenderViewHostImpl::OnScriptEvalResponse(int id, const ListValue& result) {
-  Value* result_value;
+  const Value* result_value;
   if (!result.Get(0, &result_value)) {
     // Programming error or rogue renderer.
     NOTREACHED() << "Got bad arguments for OnScriptEvalResponse";
     return;
   }
-  std::pair<int, Value*> details(id, result_value);
+  std::pair<int, const Value*> details(id, result_value);
   content::NotificationService::current()->Notify(
       content::NOTIFICATION_EXECUTE_JAVASCRIPT_RESULT,
       content::Source<RenderViewHost>(this),
-      content::Details<std::pair<int, Value*> >(&details));
+      content::Details<std::pair<int, const Value*> >(&details));
 }
 
 void RenderViewHostImpl::OnDidZoomURL(double zoom_level,
@@ -1770,6 +1813,13 @@ void RenderViewHostImpl::OnMediaNotification(int64 player_cookie,
     power_save_blockers_.erase(player_cookie);
   }
 }
+
+#if defined(OS_ANDROID)
+void RenderViewHostImpl::OnStartContentIntent(const GURL& content_url) {
+  if (GetView())
+    GetView()->StartContentIntent(content_url);
+}
+#endif
 
 void RenderViewHostImpl::OnRequestDesktopNotificationPermission(
     const GURL& source_origin, int callback_context) {

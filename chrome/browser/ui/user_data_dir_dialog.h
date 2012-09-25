@@ -4,11 +4,10 @@
 
 #ifndef CHROME_BROWSER_UI_USER_DATA_DIR_DIALOG_H_
 #define CHROME_BROWSER_UI_USER_DATA_DIR_DIALOG_H_
-#pragma once
 
 class FilePath;
 
-namespace browser {
+namespace chrome {
 
 // Shows a user data directory picker dialog. The method blocks while the dialog
 // is showing. If the user picks a directory, this method returns the chosen
@@ -16,6 +15,6 @@ namespace browser {
 // use.
 FilePath ShowUserDataDirDialog(const FilePath& user_data_dir);
 
-}  // namespace browser
+}  // namespace chrome
 
 #endif  // CHROME_BROWSER_UI_USER_DATA_DIR_DIALOG_H_

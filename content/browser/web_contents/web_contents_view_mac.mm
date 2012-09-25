@@ -9,6 +9,7 @@
 #include <string>
 
 #import "base/mac/scoped_sending_event.h"
+#include "base/message_loop.h"
 #import "base/message_pump_mac.h"
 #include "content/browser/renderer_host/popup_menu_helper_mac.h"
 #include "content/browser/renderer_host/render_view_host_factory.h"
@@ -25,10 +26,13 @@
 #include "ui/base/clipboard/custom_data_helper.h"
 #import "ui/base/cocoa/focus_tracker.h"
 #include "ui/base/dragdrop/cocoa_dnd_util.h"
+#include "ui/gfx/image/image_skia_util_mac.h"
 
 using WebKit::WebDragOperation;
 using WebKit::WebDragOperationsMask;
+using content::PopupMenuHelper;
 using content::RenderWidgetHostView;
+using content::RenderWidgetHostViewMac;
 using content::WebContents;
 
 // Ensure that the WebKit::WebDragOperation enum values stay in sync with
@@ -168,7 +172,7 @@ void WebContentsViewMac::GetContainerBounds(gfx::Rect* out) const {
 void WebContentsViewMac::StartDragging(
     const WebDropData& drop_data,
     WebDragOperationsMask allowed_operations,
-    const SkBitmap& image,
+    const gfx::ImageSkia& image,
     const gfx::Point& image_offset) {
   // By allowing nested tasks, the code below also allows Close(),
   // which would deallocate |this|.  The same problem can occur while
@@ -184,7 +188,7 @@ void WebContentsViewMac::StartDragging(
   NSPoint offset = NSPointFromCGPoint(image_offset.ToCGPoint());
   [cocoa_view_ startDragWithDropData:drop_data
                    dragOperationMask:mask
-                               image:gfx::SkBitmapToNSImage(image)
+                               image:gfx::NSImageFromImageSkia(image)
                               offset:offset];
 }
 
@@ -408,6 +412,10 @@ void WebContentsViewMac::CloseTab() {
   }
 }
 
+- (void)setMouseDownCanMoveWindow:(BOOL)canMove {
+  mouseDownCanMoveWindow_ = canMove;
+}
+
 - (BOOL)mouseDownCanMoveWindow {
   // This is needed to prevent mouseDowns from moving the window
   // around.  The default implementation returns YES only for opaque
@@ -415,7 +423,7 @@ void WebContentsViewMac::CloseTab() {
   // its subviews do paint their entire frames.  Returning NO here
   // saves us the effort of overriding this method in every possible
   // subview.
-  return NO;
+  return mouseDownCanMoveWindow_;
 }
 
 - (void)pasteboard:(NSPasteboard*)sender provideDataForType:(NSString*)type {

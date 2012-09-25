@@ -4,7 +4,6 @@
 
 #ifndef UI_AURA_SHARED_COMPOUND_EVENT_FILTER_H_
 #define UI_AURA_SHARED_COMPOUND_EVENT_FILTER_H_
-#pragma once
 
 #include "base/compiler_specific.h"
 #include "base/observer_list.h"
@@ -69,7 +68,9 @@ class AURA_EXPORT CompoundEventFilter : public aura::EventFilter {
 
   // Sets the visibility of the cursor if the event is not synthesized and
   // |update_cursor_visibility_| is true.
-  void SetVisibilityOnEvent(aura::LocatedEvent* event, bool show);
+  void SetCursorVisibilityOnEvent(aura::Window* target,
+                                  aura::LocatedEvent* event,
+                                  bool show);
 
   // Additional event filters that pre-handles events.
   ObserverList<aura::EventFilter, true> filters_;

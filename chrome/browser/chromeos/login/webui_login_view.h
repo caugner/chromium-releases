@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_LOGIN_WEBUI_LOGIN_VIEW_H_
 #define CHROME_BROWSER_CHROMEOS_LOGIN_WEBUI_LOGIN_VIEW_H_
-#pragma once
 
 #include <map>
 #include <string>
@@ -65,8 +64,16 @@ class WebUILoginView : public views::WidgetDelegateView,
   // Returns current WebUI.
   content::WebUI* GetWebUI();
 
+  // Returns current WebContents.
+  content::WebContents* GetWebContents();
+
   // Opens proxy settings dialog.
   void OpenProxySettings();
+
+  // Called when WebUI is being shown after being initilized hidden.
+  void OnPostponedShow();
+
+  void set_is_hidden(bool hidden) { is_hidden_ = hidden; }
 
   // Toggles status area visibility.
   void SetStatusAreaVisible(bool visible);
@@ -103,6 +110,10 @@ class WebUILoginView : public views::WidgetDelegateView,
   virtual bool IsPopupOrPanel(
       const content::WebContents* source) const OVERRIDE;
   virtual bool TakeFocus(bool reverse) OVERRIDE;
+  virtual void RequestMediaAccessPermission(
+      content::WebContents* web_contents,
+      const content::MediaStreamRequest* request,
+      const content::MediaResponseCallback& callback) OVERRIDE;
 
   // Performs series of actions when login prompt is considered
   // to be ready and visible.
@@ -132,6 +143,15 @@ class WebUILoginView : public views::WidgetDelegateView,
 
   // Whether the host window is frozen.
   bool host_window_frozen_;
+
+  // True when WebUI is being initialized hidden.
+  bool is_hidden_;
+
+  // True when NOTIFICATION_LOGIN_WEBUI_VISIBLE notification has fired.
+  bool login_visible_notification_fired_;
+
+  // True is login-prompt-visible event has been already handled.
+  bool login_prompt_visible_handled_;
 
   // Should we emit the login-prompt-visible signal when the login page is
   // displayed?

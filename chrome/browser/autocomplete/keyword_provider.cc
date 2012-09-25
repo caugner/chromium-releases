@@ -10,6 +10,7 @@
 #include "base/string16.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
+#include "chrome/browser/autocomplete/autocomplete_provider_listener.h"
 #include "chrome/browser/extensions/api/omnibox/omnibox_api.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
@@ -42,7 +43,8 @@ class KeywordProvider::ScopedEndExtensionKeywordMode {
   KeywordProvider* provider_;
 };
 
-KeywordProvider::KeywordProvider(ACProviderListener* listener, Profile* profile)
+KeywordProvider::KeywordProvider(AutocompleteProviderListener* listener,
+                                 Profile* profile)
     : AutocompleteProvider(listener, profile, "Keyword"),
       model_(NULL),
       current_input_id_(0) {
@@ -59,7 +61,7 @@ KeywordProvider::KeywordProvider(ACProviderListener* listener, Profile* profile)
                  content::Source<Profile>(profile));
 }
 
-KeywordProvider::KeywordProvider(ACProviderListener* listener,
+KeywordProvider::KeywordProvider(AutocompleteProviderListener* listener,
                                  TemplateURLService* model)
     : AutocompleteProvider(listener, NULL, "Keyword"),
       model_(model),
@@ -337,7 +339,7 @@ void KeywordProvider::Start(const AutocompleteInput& input,
   }
 }
 
-void KeywordProvider::Stop() {
+void KeywordProvider::Stop(bool clear_cached_results) {
   done_ = true;
   MaybeEndExtensionKeywordMode();
 }
@@ -396,7 +398,7 @@ void KeywordProvider::FillInURLAndContents(
     // fixup to make the URL valid if necessary.
     DCHECK(element_ref.SupportsReplacement());
     match->destination_url = GURL(element_ref.ReplaceSearchTerms(
-        remaining_input, TemplateURLRef::NO_SUGGESTIONS_AVAILABLE, string16()));
+        TemplateURLRef::SearchTermsArgs(remaining_input)));
     std::vector<size_t> content_param_offsets;
     match->contents.assign(l10n_util::GetStringFUTF16(message_id,
                                                       element->short_name(),

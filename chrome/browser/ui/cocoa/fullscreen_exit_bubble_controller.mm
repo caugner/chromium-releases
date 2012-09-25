@@ -11,13 +11,15 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_commands.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #include "chrome/browser/ui/cocoa/event_utils.h"
 #import "chrome/browser/ui/cocoa/fullscreen_exit_bubble_controller.h"
 #import "chrome/browser/ui/cocoa/hyperlink_text_view.h"
 #import "chrome/browser/ui/cocoa/info_bubble_view.h"
 #import "chrome/browser/ui/cocoa/info_bubble_window.h"
-#include "chrome/browser/ui/fullscreen_exit_bubble_type.h"
+#include "chrome/browser/ui/fullscreen/fullscreen_controller.h"
+#include "chrome/browser/ui/fullscreen/fullscreen_exit_bubble_type.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "grit/generated_resources.h"
@@ -94,13 +96,13 @@ const float kHideDuration = 0.7;
     [[self window] setIgnoresMouseEvents:YES];
 
   DCHECK(fullscreen_bubble::ShowButtonsForType(bubbleType_));
-  browser_->OnAcceptFullscreenPermission(
+  browser_->fullscreen_controller()->OnAcceptFullscreenPermission(
       url_, bubbleType_);
 }
 
 - (void)deny:(id)sender {
   DCHECK(fullscreen_bubble::ShowButtonsForType(bubbleType_));
-  browser_->OnDenyFullscreenPermission(bubbleType_);
+  browser_->fullscreen_controller()->OnDenyFullscreenPermission(bubbleType_);
 }
 
 - (void)showButtons:(BOOL)show {
@@ -150,7 +152,7 @@ const float kHideDuration = 0.7;
 - (BOOL) textView:(NSTextView*)textView
     clickedOnLink:(id)link
           atIndex:(NSUInteger)charIndex {
-  browser_->ExecuteCommand(IDC_FULLSCREEN);
+  chrome::ExecuteCommand(browser_, IDC_FULLSCREEN);
   return YES;
 }
 

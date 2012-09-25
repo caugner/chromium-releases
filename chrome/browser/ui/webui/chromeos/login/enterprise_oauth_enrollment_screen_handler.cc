@@ -10,15 +10,15 @@
 #include "base/command_line.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
-#include "chrome/browser/browsing_data_helper.h"
-#include "chrome/browser/browsing_data_remover.h"
-#include "chrome/browser/chromeos/login/authenticator.h"
+#include "chrome/browser/browsing_data/browsing_data_helper.h"
+#include "chrome/browser/browsing_data/browsing_data_remover.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
 #include "chrome/browser/net/gaia/gaia_oauth_fetcher.h"
 #include "chrome/browser/policy/auto_enrollment_client.h"
 #include "chrome/browser/policy/enterprise_metrics.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/net/gaia/gaia_auth_util.h"
 #include "chrome/common/net/gaia/gaia_constants.h"
 #include "chrome/common/net/gaia/gaia_urls.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
@@ -50,7 +50,7 @@ class TokenRevoker : public GaiaOAuthConsumer {
   TokenRevoker(const std::string& token,
                const std::string& secret,
                Profile* profile)
-      : oauth_fetcher_(this, profile->GetRequestContext(), profile,
+      : oauth_fetcher_(this, profile->GetRequestContext(),
                        kServiceScopeChromeOSDeviceManagement) {
     if (secret.empty())
       oauth_fetcher_.StartOAuthRevokeWrapToken(token);
@@ -141,7 +141,7 @@ void EnterpriseOAuthEnrollmentScreenHandler::Show() {
   std::string user;
   is_auto_enrollment_ = controller_ && controller_->IsAutoEnrollment(&user);
   if (is_auto_enrollment_)
-    user_ = Authenticator::Sanitize(user);
+    user_ = gaia::SanitizeEmail(user);
   enrollment_failed_once_ = false;
 
   DoShow();
@@ -229,6 +229,10 @@ void EnterpriseOAuthEnrollmentScreenHandler::ShowEnrollmentError(
       UMAFailure(policy::kMetricLockboxTimeoutError);
       ShowError(IDS_ENTERPRISE_LOCKBOX_TIMEOUT_ERROR, true);
       break;
+    case DOMAIN_MISMATCH_ERROR:
+      UMAFailure(policy::kMetricEnrollmentWrongUserError);
+      ShowError(IDS_ENTERPRISE_ENROLLMENT_DOMAIN_MISMATCH_ERROR, true);
+      break;
     case MISSING_LICENSES_ERROR:
       UMAFailure(policy::kMetricMissingLicensesError);
       ShowError(IDS_ENTERPRISE_ENROLLMENT_MISSING_LICENSES_ERROR, true);
@@ -284,9 +288,6 @@ void EnterpriseOAuthEnrollmentScreenHandler::GetLocalizedStrings(
   localized_strings->SetString(
       "oauthEnrollExplainButton",
       l10n_util::GetStringUTF16(IDS_ENTERPRISE_ENROLLMENT_EXPLAIN_BUTTON));
-  localized_strings->SetString(
-      "oauthEnrollCancelAutoEnrollment",
-      l10n_util::GetStringUTF16(IDS_ENTERPRISE_ENROLLMENT_CANCEL_AUTO));
   localized_strings->SetString(
       "oauthEnrollCancelAutoEnrollmentReally",
       l10n_util::GetStringUTF16(IDS_ENTERPRISE_ENROLLMENT_CANCEL_AUTO_REALLY));
@@ -420,7 +421,7 @@ void EnterpriseOAuthEnrollmentScreenHandler::HandleCompleteLogin(
     return;
   }
 
-  user_ = Authenticator::Sanitize(user);
+  user_ = gaia::SanitizeEmail(user);
   EnrollAfterLogin();
 }
 
@@ -445,7 +446,6 @@ void EnterpriseOAuthEnrollmentScreenHandler::EnrollAfterLogin() {
   oauth_fetcher_.reset(
       new GaiaOAuthFetcher(this,
                            profile->GetRequestContext(),
-                           profile,
                            GaiaConstants::kDeviceManagementServiceOAuth));
   oauth_fetcher_->SetAutoFetchLimit(
       GaiaOAuthFetcher::OAUTH2_SERVICE_ACCESS_TOKEN);

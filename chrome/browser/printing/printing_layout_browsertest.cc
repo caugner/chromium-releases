@@ -15,6 +15,8 @@
 #include "chrome/browser/printing/print_job.h"
 #include "chrome/browser/printing/print_view_manager.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_commands.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -63,9 +65,9 @@ class PrintingLayoutTest : public PrintingTest<InProcessBrowserTest>,
     registrar_.Add(this, chrome::NOTIFICATION_PRINT_JOB_EVENT,
                    content::NotificationService::AllSources());
 
-    TabContents* tab = browser()->GetActiveTabContents();
+    TabContents* tab = chrome::GetActiveTabContents(browser());
     tab->print_view_manager()->PrintNow();
-    ui_test_utils::RunMessageLoop();
+    content::RunMessageLoop();
     registrar_.RemoveAll();
   }
 
@@ -427,8 +429,8 @@ IN_PROC_BROWSER_TEST_F(PrintingLayoutTest, DISABLED_Delayed) {
     url = test_server()->GetURL("files/printing/test1.html");
     ui_test_utils::NavigateToURL(browser(), url);
   }
-  browser()->CloseWindow();
-  ui_test_utils::RunAllPendingInMessageLoop();
+  chrome::CloseWindow(browser());
+  content::RunAllPendingInMessageLoop();
 
   EXPECT_EQ(0., CompareWithResult(L"popup_delayed_print"))
       << L"popup_delayed_print";
@@ -455,8 +457,8 @@ IN_PROC_BROWSER_TEST_F(PrintingLayoutTest, DISABLED_IFrame) {
     url = test_server()->GetURL("files/printing/test1.html");
     ui_test_utils::NavigateToURL(browser(), url);
   }
-  browser()->CloseWindow();
-  ui_test_utils::RunAllPendingInMessageLoop();
+  chrome::CloseWindow(browser());
+  content::RunAllPendingInMessageLoop();
 
   EXPECT_EQ(0., CompareWithResult(L"iframe")) << L"iframe";
 }

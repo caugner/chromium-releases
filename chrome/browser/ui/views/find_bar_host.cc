@@ -23,14 +23,14 @@
 
 using content::NativeWebKeyboardEvent;
 
-namespace browser {
+namespace chrome {
 
 // Declared in browser_dialogs.h so others don't have to depend on our header.
 FindBar* CreateFindBar(BrowserView* browser_view) {
   return new FindBarHost(browser_view);
 }
 
-}  // namespace browser
+}  // namespace chrome
 
 ////////////////////////////////////////////////////////////////////////////////
 // FindBarHost, public:
@@ -220,7 +220,7 @@ bool FindBarHost::GetFindBarWindowInfo(gfx::Point* position,
     return false;
   }
 
-  gfx::Rect window_rect = host()->GetWindowScreenBounds();
+  gfx::Rect window_rect = host()->GetWindowBoundsInScreen();
   if (position)
     *position = window_rect.origin();
   if (fully_visible)
@@ -331,7 +331,7 @@ void FindBarHost::UnregisterAccelerators() {
 // private:
 
 void FindBarHost::GetWidgetPositionNative(gfx::Rect* avoid_overlapping_rect) {
-  gfx::Rect frame_rect = host()->GetTopLevelWidget()->GetWindowScreenBounds();
+  gfx::Rect frame_rect = host()->GetTopLevelWidget()->GetWindowBoundsInScreen();
   content::WebContentsView* tab_view =
       find_bar_controller_->tab_contents()->web_contents()->GetView();
   gfx::Rect webcontents_rect = tab_view->GetViewBounds();

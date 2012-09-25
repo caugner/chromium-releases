@@ -7,11 +7,13 @@
 #include <string>
 
 #include "base/string_number_conversions.h"
+#include "base/string_piece.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/api/extension_action/extension_page_actions_api_constants.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_tab_helper.h"
+#include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
+#include "chrome/browser/extensions/location_bar_controller.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -43,9 +45,13 @@ ExtensionActionFunction::~ExtensionActionFunction() {
 }
 
 bool ExtensionActionFunction::RunImpl() {
-  extension_action_ = GetExtension()->browser_action();
-  if (!extension_action_)
-    extension_action_ = GetExtension()->page_action();
+  if (base::StringPiece(name()).starts_with("scriptBadge.")) {
+    extension_action_ = GetExtension()->script_badge();
+  } else {
+    extension_action_ = GetExtension()->browser_action();
+    if (!extension_action_)
+      extension_action_ = GetExtension()->page_action();
+  }
   if (!extension_action_) {
     // TODO(kalman): ideally the browserAction/pageAction APIs wouldn't event
     // exist for extensions that don't have one declared. This should come as
@@ -85,6 +91,10 @@ bool ExtensionActionFunction::RunImpl() {
         break;
       }
 
+      case Value::TYPE_NULL:
+        // The tabId might be an optional argument.
+        break;
+
       default:
         EXTENSION_FUNCTION_VALIDATE(false);
     }
@@ -107,12 +117,20 @@ bool ExtensionActionFunction::RunImpl() {
 }
 
 void ExtensionActionFunction::NotifyChange() {
-  if (GetExtension()->browser_action())
-    NotifyBrowserActionChange();
-  else if (GetExtension()->page_action())
-    NotifyPageActionChange();
-  else
-    NOTREACHED();
+  switch (extension_action_->action_type()) {
+    case ExtensionAction::TYPE_BROWSER:
+    case ExtensionAction::TYPE_PAGE:
+      if (extension_->browser_action()) {
+        NotifyBrowserActionChange();
+      } else if (extension_->page_action()) {
+        NotifyLocationBarChange();
+      }
+      return;
+    case ExtensionAction::TYPE_SCRIPT_BADGE:
+      NotifyLocationBarChange();
+      return;
+  }
+  NOTREACHED();
 }
 
 void ExtensionActionFunction::NotifyBrowserActionChange() {
@@ -122,8 +140,8 @@ void ExtensionActionFunction::NotifyBrowserActionChange() {
       content::NotificationService::NoDetails());
 }
 
-void ExtensionActionFunction::NotifyPageActionChange() {
-  contents_->extension_tab_helper()->PageActionStateChanged();
+void ExtensionActionFunction::NotifyLocationBarChange() {
+  contents_->extension_tab_helper()->location_bar_controller()->NotifyChange();
 }
 
 // static
@@ -164,13 +182,15 @@ bool ExtensionActionFunction::ParseCSSColorString(
 }
 
 bool ExtensionActionFunction::SetVisible(bool visible) {
-  // If --enable-script-badges is on there will be a browser_action here
-  // instead of a page action. Disable/renable the browser action perhaps?
-  if (!GetExtension()->page_action())
-    return true;
-  extension_action_->SetIsVisible(tab_id_, visible);
+  extension_action_->SetAppearance(
+      tab_id_, visible ? ExtensionAction::ACTIVE : ExtensionAction::INVISIBLE);
   NotifyChange();
   return true;
+}
+
+extensions::TabHelper& ExtensionActionFunction::tab_helper() const {
+  CHECK(contents_);
+  return *contents_->extension_tab_helper();
 }
 
 bool ExtensionActionShowFunction::RunExtensionAction() {
@@ -192,7 +212,8 @@ bool ExtensionActionSetIconFunction::RunExtensionAction() {
     SkBitmap bitmap;
     EXTENSION_FUNCTION_VALIDATE(
         IPC::ReadParam(&bitmap_pickle, &iter, &bitmap));
-    extension_action_->SetIcon(tab_id_, bitmap);
+    CHECK(!bitmap.isNull());
+    extension_action_->SetIcon(tab_id_, gfx::Image(bitmap));
   } else if (details_->GetInteger("iconIndex", &icon_index)) {
     // If --enable-script-badges is on there might legitimately be an iconIndex
     // set. Until we decide what to do with that, ignore.
@@ -204,7 +225,7 @@ bool ExtensionActionSetIconFunction::RunExtensionAction() {
       error_ = kIconIndexOutOfBounds;
       return false;
     }
-    extension_action_->SetIcon(tab_id_, SkBitmap());
+    extension_action_->SetIcon(tab_id_, gfx::Image());
     extension_action_->SetIconIndex(tab_id_, icon_index);
   } else {
     EXTENSION_FUNCTION_VALIDATE(false);
@@ -271,19 +292,18 @@ bool ExtensionActionSetBadgeBackgroundColorFunction::RunExtensionAction() {
 }
 
 bool ExtensionActionGetTitleFunction::RunExtensionAction() {
-  result_.reset(Value::CreateStringValue(extension_action_->GetTitle(tab_id_)));
+  SetResult(Value::CreateStringValue(extension_action_->GetTitle(tab_id_)));
   return true;
 }
 
 bool ExtensionActionGetPopupFunction::RunExtensionAction() {
-  result_.reset(Value::CreateStringValue(
-                    extension_action_->GetPopupUrl(tab_id_).spec()));
+  SetResult(
+      Value::CreateStringValue(extension_action_->GetPopupUrl(tab_id_).spec()));
   return true;
 }
 
 bool ExtensionActionGetBadgeTextFunction::RunExtensionAction() {
-  result_.reset(Value::CreateStringValue(
-                    extension_action_->GetBadgeText(tab_id_)));
+  SetResult(Value::CreateStringValue(extension_action_->GetBadgeText(tab_id_)));
   return true;
 }
 
@@ -294,6 +314,6 @@ bool ExtensionActionGetBadgeBackgroundColorFunction::RunExtensionAction() {
   list->Append(Value::CreateIntegerValue(SkColorGetG(color)));
   list->Append(Value::CreateIntegerValue(SkColorGetB(color)));
   list->Append(Value::CreateIntegerValue(SkColorGetA(color)));
-  result_.reset(list);
+  SetResult(list);
   return true;
 }

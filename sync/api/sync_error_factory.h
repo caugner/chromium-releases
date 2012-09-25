@@ -4,12 +4,13 @@
 
 #ifndef SYNC_API_SYNC_ERROR_FACTORY_H_
 #define SYNC_API_SYNC_ERROR_FACTORY_H_
-#pragma once
 
 #include <string>
 
 #include "base/location.h"
 #include "sync/api/sync_error.h"
+
+namespace syncer {
 
 class SyncErrorFactory {
  public:
@@ -22,5 +23,6 @@ class SyncErrorFactory {
       const std::string& message) = 0;
 };
 
-#endif  // SYNC_API_SYNC_ERROR_FACTORY_H_
+}  // namespace syncer
 
+#endif  // SYNC_API_SYNC_ERROR_FACTORY_H_

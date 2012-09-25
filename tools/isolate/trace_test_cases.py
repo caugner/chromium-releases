@@ -9,7 +9,6 @@ Gives detailed information about each test case. The logs can be read afterward
 with ./trace_inputs.py read -l /path/to/executable.logs
 """
 
-import fnmatch
 import logging
 import multiprocessing
 import optparse
@@ -18,9 +17,8 @@ import sys
 import time
 
 import isolate_common
-import list_test_cases
+import run_test_cases
 import trace_inputs
-import worker_pool
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(os.path.dirname(BASE_DIR))
@@ -37,7 +35,7 @@ class Tracer(object):
   def map(self, test_case):
     """Traces a single test case and returns its output."""
     cmd = [self.executable, '--gtest_filter=%s' % test_case]
-    cmd = list_test_cases.fix_python_path(cmd)
+    cmd = run_test_cases.fix_python_path(cmd)
     tracename = test_case.replace('/', '-')
 
     out = []
@@ -56,58 +54,36 @@ class Tracer(object):
             'valid': valid,
             'output': output,
           })
-      if not valid:
-        self.progress.increase_count()
+      logging.debug(
+          'Tracing %s done: %d, %.1fs' % (test_case, returncode,  duration))
       if retry:
-        self.progress.update_item('%s - %d' % (test_case, retry))
+        self.progress.update_item(
+            '%s - %d' % (test_case, retry), True, not valid)
       else:
-        self.progress.update_item(test_case)
+        self.progress.update_item(test_case, True, not valid)
       if valid:
         break
     return out
 
 
-def get_test_cases(executable, whitelist, blacklist, index, shards):
-  """Returns the filtered list of test cases.
-
-  This is done synchronously.
-  """
-  try:
-    tests = list_test_cases.list_test_cases(
-        executable, index, shards, False, False, False)
-  except list_test_cases.Failure, e:
-    print e.args[0]
-    return None
-
-  # Filters the test cases with the two lists.
-  if blacklist:
-    tests = [
-      t for t in tests if not any(fnmatch.fnmatch(t, s) for s in blacklist)
-    ]
-  if whitelist:
-    tests = [
-      t for t in tests if any(fnmatch.fnmatch(t, s) for s in whitelist)
-    ]
-  logging.info(
-      'Found %d test cases in %s' % (len(tests), os.path.basename(executable)))
-  return tests
-
-
 def trace_test_cases(
-    executable, root_dir, cwd_dir, variables, whitelist, blacklist, jobs,
-    index, shards, output_file):
+    executable, root_dir, cwd_dir, variables, test_cases, jobs, output_file):
   """Traces test cases one by one."""
-  test_cases = get_test_cases(executable, whitelist, blacklist, index, shards)
+  assert not os.path.isabs(cwd_dir)
+  assert os.path.isabs(root_dir) and os.path.isdir(root_dir)
+  assert os.path.isfile(executable) and os.path.isabs(executable)
+
   if not test_cases:
-    return
+    return 0
 
   # Resolve any symlink.
   root_dir = os.path.realpath(root_dir)
-  full_cwd_dir = os.path.join(root_dir, cwd_dir)
+  full_cwd_dir = os.path.normpath(os.path.join(root_dir, cwd_dir))
+  assert os.path.isdir(full_cwd_dir)
   logname = output_file + '.logs'
 
-  progress = worker_pool.Progress(len(test_cases))
-  with worker_pool.ThreadPool(jobs or multiprocessing.cpu_count()) as pool:
+  progress = run_test_cases.Progress(len(test_cases))
+  with run_test_cases.ThreadPool(jobs or multiprocessing.cpu_count()) as pool:
     api = trace_inputs.get_api()
     api.clean_trace(logname)
     with api.get_tracer(logname) as tracer:
@@ -146,6 +122,7 @@ def trace_test_cases(
         tracename = test_case.replace('/', '-')
         flattened[test_case] = results_processed[tracename].copy()
         item_results = flattened[test_case]['results']
+        tracked, touched = isolate_common.split_touched(item_results.existent)
         flattened[test_case].update({
             'processes': len(list(item_results.process.all)),
             'results': item_results.flatten(),
@@ -154,7 +131,9 @@ def trace_test_cases(
             'valid': item['valid'],
             'variables':
               isolate_common.generate_simplified(
-                  item_results.existent,
+                  tracked,
+                  [],
+                  touched,
                   root_dir,
                   variables,
                   cwd_dir),
@@ -176,9 +155,11 @@ def trace_test_cases(
     files.update((f.full_path, f) for f in item['results'].existent)
   # Convert back to a list, discard the keys.
   files = files.values()
-
+  tracked, touched = isolate_common.split_touched(files)
   value = isolate_common.generate_isolate(
-      files,
+      tracked,
+      [],
+      touched,
       root_dir,
       variables,
       cwd_dir)
@@ -189,6 +170,11 @@ def trace_test_cases(
 
 def main():
   """CLI frontend to validate arguments."""
+  def as_digit(variable, default):
+    if variable.isdigit():
+      return int(variable)
+    return default
+
   default_variables = [('OS', isolate_common.get_flavor())]
   if sys.platform in ('win32', 'cygwin'):
     default_variables.append(('EXECUTABLE_SUFFIX', '.exe'))
@@ -200,7 +186,7 @@ def main():
   parser.format_description = lambda *_: parser.description
   parser.add_option(
       '-c', '--cwd',
-      default='chrome',
+      default='',
       help='Signal to start the process from this relative directory. When '
            'specified, outputs the inputs files in a way compatible for '
            'gyp processing. Should be set to the relative path containing the '
@@ -221,29 +207,9 @@ def main():
       '-o', '--out',
       help='output file, defaults to <executable>.test_cases')
   parser.add_option(
-      '-w', '--whitelist',
-      default=[],
-      action='append',
-      help='filter to apply to test cases to run, wildcard-style, defaults to '
-           'all test')
-  parser.add_option(
-      '-b', '--blacklist',
-      default=[],
-      action='append',
-      help='filter to apply to test cases to skip, wildcard-style, defaults to '
-           'no test')
-  parser.add_option(
       '-j', '--jobs',
       type='int',
       help='number of parallel jobs')
-  parser.add_option(
-      '-i', '--index',
-      type='int',
-      help='Shard index to run')
-  parser.add_option(
-      '-s', '--shards',
-      type='int',
-      help='Total number of shards to calculate from the --index to run')
   parser.add_option(
       '-t', '--timeout',
       default=120,
@@ -254,6 +220,34 @@ def main():
       action='count',
       default=0,
       help='Use multiple times to increase verbosity')
+
+  group = optparse.OptionGroup(parser, 'Which test cases to run')
+  group.add_option(
+      '-w', '--whitelist',
+      default=[],
+      action='append',
+      help='filter to apply to test cases to run, wildcard-style, defaults to '
+           'all test')
+  group.add_option(
+      '-b', '--blacklist',
+      default=[],
+      action='append',
+      help='filter to apply to test cases to skip, wildcard-style, defaults to '
+           'no test')
+  group.add_option(
+      '-i', '--index',
+      type='int',
+      default=as_digit(os.environ.get('GTEST_SHARD_INDEX', ''), None),
+      help='Shard index to run')
+  group.add_option(
+      '-s', '--shards',
+      type='int',
+      default=as_digit(os.environ.get('GTEST_TOTAL_SHARDS', ''), None),
+      help='Total number of shards to calculate from the --index to run')
+  group.add_option(
+      '-T', '--test-case-file',
+      help='File containing the exact list of test cases to run')
+  parser.add_option_group(group)
   options, args = parser.parse_args()
 
   levels = [logging.ERROR, logging.WARNING, logging.INFO, logging.DEBUG]
@@ -270,22 +264,44 @@ def main():
   if bool(options.shards) != bool(options.index is not None):
     parser.error('Use both --index X --shards Y or none of them')
 
+  options.root_dir = os.path.abspath(options.root_dir)
+  if not os.path.isdir(options.root_dir):
+    parser.error('--root-dir "%s" must exist' % options.root_dir)
+  if not os.path.isdir(os.path.join(options.root_dir, options.cwd)):
+    parser.error(
+        '--cwd "%s" must be an existing directory relative to %s' %
+          (options.cwd, options.root_dir))
+
   executable = args[0]
   if not os.path.isabs(executable):
     executable = os.path.abspath(os.path.join(options.root_dir, executable))
+  if not os.path.isfile(executable):
+    parser.error('"%s" doesn\'t exist.' % executable)
+
   if not options.out:
     options.out = '%s.test_cases' % executable
+
+  # First, grab the test cases.
+  if options.test_case_file:
+    with open(options.test_case_file, 'r') as f:
+      test_cases = filter(None, f.read().splitlines())
+  else:
+    test_cases = run_test_cases.get_test_cases(
+        executable,
+        options.whitelist,
+        options.blacklist,
+        options.index,
+        options.shards)
+
+  # Then run them.
   return trace_test_cases(
       executable,
       options.root_dir,
       options.cwd,
       dict(options.variables),
-      options.whitelist,
-      options.blacklist,
+      test_cases,
       options.jobs,
       # TODO(maruel): options.timeout,
-      options.index,
-      options.shards,
       options.out)
 
 

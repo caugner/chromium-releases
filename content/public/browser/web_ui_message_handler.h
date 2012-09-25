@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_PUBLIC_BROWSER_WEB_UI_MESSAGE_HANDLER_H_
 #define CONTENT_PUBLIC_BROWSER_WEB_UI_MESSAGE_HANDLER_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/gtest_prod_util.h"
@@ -43,7 +42,7 @@ class CONTENT_EXPORT WebUIMessageHandler {
   // Adds "url" and "title" keys on incoming dictionary, setting title
   // as the url as a fallback on empty title.
   static void SetURLAndTitle(base::DictionaryValue* dictionary,
-                             string16 title,
+                             const string16& title,
                              const GURL& gurl);
 
   // Extract an integer value from a list Value.

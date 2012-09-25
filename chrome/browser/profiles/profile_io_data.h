@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_PROFILES_PROFILE_IO_DATA_H_
 #define CHROME_BROWSER_PROFILES_PROFILE_IO_DATA_H_
-#pragma once
 
 #include <string>
 
@@ -15,22 +14,25 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/synchronization/lock.h"
+#include "chrome/browser/io_thread.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/browser/prefs/pref_member.h"
 #include "content/public/browser/resource_context.h"
 #include "net/cookies/cookie_monster.h"
+#include "net/url_request/url_request_job_factory.h"
 
 class CookieSettings;
 class DesktopNotificationService;
 class ExtensionInfoMap;
 class HostContentSettingsMap;
-class IOThread;
 class Profile;
 class ProtocolHandlerRegistry;
 class TransportSecurityPersister;
 
 namespace chrome_browser_net {
+class CacheStats;
 class HttpServerPropertiesManager;
+class ResourcePrefetchPredictorObserver;
 }
 
 namespace net {
@@ -103,6 +105,10 @@ class ProfileIOData {
     return &safe_browsing_enabled_;
   }
 
+  BooleanPrefMember* printing_enabled() const {
+    return &printing_enabled_;
+  }
+
   net::TransportSecurityState* transport_security_state() const {
     return transport_security_state_.get();
   }
@@ -112,6 +118,11 @@ class ProfileIOData {
 
   bool is_incognito() const {
     return is_incognito_;
+  }
+
+  chrome_browser_net::ResourcePrefetchPredictorObserver*
+      resource_prefetch_predictor_observer() const {
+    return resource_prefetch_predictor_observer_.get();
   }
 
   // Initialize the member needed to track the metrics enabled state. This is
@@ -126,7 +137,7 @@ class ProfileIOData {
  protected:
   class AppRequestContext : public ChromeURLRequestContext {
    public:
-    AppRequestContext();
+    explicit AppRequestContext(chrome_browser_net::CacheStats* cache_stats);
 
     void SetCookieStore(net::CookieStore* cookie_store);
     void SetHttpTransactionFactory(net::HttpTransactionFactory* http_factory);
@@ -153,12 +164,20 @@ class ProfileIOData {
     scoped_refptr<net::SSLConfigService> ssl_config_service;
     scoped_refptr<net::CookieMonster::Delegate> cookie_monster_delegate;
     scoped_refptr<ExtensionInfoMap> extension_info_map;
+    scoped_ptr<chrome_browser_net::ResourcePrefetchPredictorObserver>
+        resource_prefetch_predictor_observer_;
 
 #if defined(ENABLE_NOTIFICATIONS)
     DesktopNotificationService* notification_service;
 #endif
 
-    scoped_refptr<ProtocolHandlerRegistry> protocol_handler_registry;
+    // This pointer exists only as a means of conveying a url interceptor
+    // pointer from the protocol handler registry on the UI thread to the
+    // the URLRequestJobFactory on the IO thread. The consumer MUST take
+    // ownership of the object by calling release() on this pointer.
+    scoped_ptr<net::URLRequestJobFactory::Interceptor>
+        protocol_handler_url_interceptor;
+
     // We need to initialize the ProxyConfigService from the UI thread
     // because on linux it relies on initializing things through gconf,
     // and needs to be on the main thread.
@@ -175,6 +194,8 @@ class ProfileIOData {
 
   void InitializeOnUIThread(Profile* profile);
   void ApplyProfileParamsToContext(ChromeURLRequestContext* context) const;
+
+  void SetUpJobFactoryDefaults(net::URLRequestJobFactory* job_factory) const;
 
   // Lazy initializes the ProfileIOData object the first time a request context
   // is requested. The lazy logic is implemented here. The actual initialization
@@ -212,15 +233,15 @@ class ProfileIOData {
     return proxy_service_.get();
   }
 
-  net::URLRequestJobFactory* job_factory() const {
-    return job_factory_.get();
-  }
-
   void set_http_server_properties_manager(
       chrome_browser_net::HttpServerPropertiesManager* manager) const;
 
   ChromeURLRequestContext* main_request_context() const {
     return main_request_context_.get();
+  }
+
+  chrome_browser_net::CacheStats* cache_stats() const {
+    return cache_stats_;
   }
 
   // Destroys the ResourceContext first, to cancel any URLRequests that are
@@ -275,6 +296,10 @@ class ProfileIOData {
           ChromeURLRequestContext* main_context,
           const std::string& app_id) const = 0;
 
+  // Returns the CacheStats object to be used for this profile.
+  virtual chrome_browser_net::CacheStats* GetCacheStats(
+      IOThread::Globals* io_thread_globals) const = 0;
+
   // The order *DOES* matter for the majority of these member variables, so
   // don't move them around unless you know what you're doing!
   // General rules:
@@ -298,6 +323,7 @@ class ProfileIOData {
   // Member variables which are pointed to by the various context objects.
   mutable BooleanPrefMember enable_referrers_;
   mutable BooleanPrefMember safe_browsing_enabled_;
+  mutable BooleanPrefMember printing_enabled_;
   // TODO(marja): Remove session_startup_pref_ if no longer needed.
   mutable IntegerPrefMember session_startup_pref_;
 
@@ -322,7 +348,6 @@ class ProfileIOData {
       fraudulent_certificate_reporter_;
   mutable scoped_ptr<net::ProxyService> proxy_service_;
   mutable scoped_ptr<net::TransportSecurityState> transport_security_state_;
-  mutable scoped_ptr<net::URLRequestJobFactory> job_factory_;
   mutable scoped_ptr<chrome_browser_net::HttpServerPropertiesManager>
       http_server_properties_manager_;
 
@@ -344,6 +369,11 @@ class ProfileIOData {
 
   mutable scoped_refptr<ExtensionInfoMap> extension_info_map_;
   mutable scoped_refptr<CookieSettings> cookie_settings_;
+
+  mutable scoped_ptr<chrome_browser_net::ResourcePrefetchPredictorObserver>
+      resource_prefetch_predictor_observer_;
+
+  mutable chrome_browser_net::CacheStats* cache_stats_;
 
   // TODO(jhawkins): Remove once crbug.com/102004 is fixed.
   bool initialized_on_UI_thread_;

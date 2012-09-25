@@ -13,22 +13,22 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/alternate_nav_url_fetcher.h"
 #import "chrome/browser/app_controller_mac.h"
-#import "chrome/browser/autocomplete/autocomplete_popup_model.h"
 #include "chrome/browser/chrome_to_mobile_service.h"
 #include "chrome/browser/chrome_to_mobile_service_factory.h"
 #include "chrome/browser/command_updater.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/extensions/api/tabs/tabs.h"
-#include "chrome/browser/extensions/extension_browser_event_router.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_tab_helper.h"
 #include "chrome/browser/extensions/location_bar_controller.h"
+#include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/instant/instant_controller.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
+#include "chrome/browser/ui/browser_instant_controller.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #import "chrome/browser/ui/cocoa/content_settings/content_setting_bubble_cocoa.h"
 #include "chrome/browser/ui/cocoa/event_utils.h"
 #import "chrome/browser/ui/cocoa/extensions/extension_action_context_menu.h"
@@ -42,22 +42,25 @@
 #import "chrome/browser/ui/cocoa/location_bar/keyword_hint_decoration.h"
 #import "chrome/browser/ui/cocoa/location_bar/location_icon_decoration.h"
 #import "chrome/browser/ui/cocoa/location_bar/page_action_decoration.h"
+#import "chrome/browser/ui/cocoa/location_bar/plus_decoration.h"
 #import "chrome/browser/ui/cocoa/location_bar/selected_keyword_decoration.h"
 #import "chrome/browser/ui/cocoa/location_bar/star_decoration.h"
 #import "chrome/browser/ui/cocoa/omnibox/omnibox_view_mac.h"
 #include "chrome/browser/ui/content_settings/content_setting_bubble_model.h"
 #include "chrome/browser/ui/content_settings/content_setting_image_model.h"
 #include "chrome/browser/ui/omnibox/location_bar_util.h"
+#import "chrome/browser/ui/omnibox/omnibox_popup_model.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/extensions/extension_resource.h"
+#include "chrome/common/extensions/extension_switch_utils.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
-#include "grit/theme_resources_standard.h"
+#include "grit/theme_resources.h"
 #include "net/base/net_util.h"
 #include "skia/ext/skia_utils_mac.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -94,6 +97,7 @@ LocationBarViewMac::LocationBarViewMac(
       ev_bubble_decoration_(
           new EVBubbleDecoration(location_icon_decoration_.get(),
                                  OmniboxViewMac::GetFieldFont())),
+      plus_decoration_(NULL),
       star_decoration_(new StarDecoration(command_updater)),
       chrome_to_mobile_decoration_(nil),
       keyword_hint_decoration_(
@@ -114,6 +118,10 @@ LocationBarViewMac::LocationBarViewMac(
         new ChromeToMobileDecoration(profile, command_updater));
     ChromeToMobileServiceFactory::GetForProfile(profile)->
         RequestMobileListUpdate();
+  }
+
+  if (extensions::switch_utils::IsActionBoxEnabled()) {
+    plus_decoration_.reset(new PlusDecoration(command_updater));
   }
 
   for (size_t i = 0; i < CONTENT_SETTINGS_NUM_TYPES; ++i) {
@@ -160,7 +168,10 @@ void LocationBarViewMac::ShowFirstRunBubbleInternal() {
   const NSPoint kOffset = NSMakePoint(
       info_bubble::kBubbleArrowXOffset + info_bubble::kBubbleArrowWidth/2.0,
       kFirstRunBubbleYOffset);
-  [FirstRunBubbleController showForView:field_ offset:kOffset profile:profile_];
+  [FirstRunBubbleController showForView:field_
+                                 offset:kOffset
+                                browser:browser_
+                                profile:profile_];
 }
 
 string16 LocationBarViewMac::GetInputString() const {
@@ -315,11 +326,11 @@ string16 LocationBarViewMac::GetTitle() const {
 }
 
 InstantController* LocationBarViewMac::GetInstant() {
-  return browser_->instant();
+  return browser_->instant_controller()->instant();
 }
 
 TabContents* LocationBarViewMac::GetTabContents() const {
-  return browser_->GetActiveTabContents();
+  return chrome::GetActiveTabContents(browser_);
 }
 
 void LocationBarViewMac::Revert() {
@@ -353,7 +364,7 @@ int LocationBarViewMac::PageActionVisibleCount() {
 }
 
 WebContents* LocationBarViewMac::GetWebContents() const {
-  return browser_->GetActiveWebContents();
+  return chrome::GetActiveWebContents(browser_);
 }
 
 PageActionDecoration* LocationBarViewMac::GetPageActionDecoration(
@@ -571,7 +582,7 @@ void LocationBarViewMac::PostNotification(NSString* notification) {
 bool LocationBarViewMac::RefreshContentSettingsDecorations() {
   const bool input_in_progress = toolbar_model_->input_in_progress();
   WebContents* web_contents =
-      input_in_progress ? NULL : browser_->GetActiveWebContents();
+      input_in_progress ? NULL : chrome::GetActiveWebContents(browser_);
   bool icons_updated = false;
   for (size_t i = 0; i < content_setting_decorations_.size(); ++i) {
     icons_updated |=
@@ -586,7 +597,7 @@ void LocationBarViewMac::DeletePageActionDecorations() {
   // least fail safe.
   [[field_ cell] clearDecorations];
 
-  page_action_decorations_.reset();
+  page_action_decorations_.clear();
 }
 
 void LocationBarViewMac::RefreshPageActionDecorations() {
@@ -610,7 +621,7 @@ void LocationBarViewMac::RefreshPageActionDecorations() {
     DeletePageActionDecorations();
     for (size_t i = 0; i < page_actions_.size(); ++i) {
       page_action_decorations_.push_back(
-          new PageActionDecoration(this, profile_, page_actions_[i]));
+          new PageActionDecoration(this, browser_, page_actions_[i]));
     }
   }
 
@@ -636,6 +647,8 @@ void LocationBarViewMac::Layout() {
   [cell addLeftDecoration:location_icon_decoration_.get()];
   [cell addLeftDecoration:selected_keyword_decoration_.get()];
   [cell addLeftDecoration:ev_bubble_decoration_.get()];
+  if (plus_decoration_.get())
+    [cell addRightDecoration:plus_decoration_.get()];
   [cell addRightDecoration:star_decoration_.get()];
   if (chrome_to_mobile_decoration_.get())
     [cell addRightDecoration:chrome_to_mobile_decoration_.get()];
@@ -696,6 +709,14 @@ void LocationBarViewMac::Layout() {
   [field_ setNeedsDisplay:YES];
 }
 
+void LocationBarViewMac::RedrawDecoration(LocationBarDecoration* decoration) {
+  AutocompleteTextFieldCell* cell = [field_ cell];
+  NSRect frame = [cell frameForDecoration:decoration
+                                  inFrame:[field_ bounds]];
+  if (!NSIsEmptyRect(frame))
+    [field_ setNeedsDisplayInRect:frame];
+}
+
 bool LocationBarViewMac::IsStarEnabled() {
   return [field_ isEditable] &&
          browser_defaults::bookmarks_enabled &&
@@ -709,7 +730,7 @@ void LocationBarViewMac::UpdateChromeToMobileEnabled() {
 
   DCHECK(ChromeToMobileService::IsChromeToMobileEnabled());
   bool enabled = [field_ isEditable] && !toolbar_model_->input_in_progress() &&
-      ChromeToMobileServiceFactory::GetForProfile(profile_)->HasDevices();
+      ChromeToMobileServiceFactory::GetForProfile(profile_)->HasMobiles();
   chrome_to_mobile_decoration_->SetVisible(enabled);
   command_updater_->UpdateCommandEnabled(IDC_CHROME_TO_MOBILE_PAGE, enabled);
 }

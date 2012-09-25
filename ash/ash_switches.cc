@@ -7,9 +7,8 @@
 namespace ash {
 namespace switches {
 
-// Show only apps result in app list search.
-// TODO(xiyuan): Create an app_list_switches.cc to put all app list switches.
-const char kAppListShowAppsOnly[] = "app-list-show-apps-only";
+// Enable keyboard shortcuts useful for debugging.
+const char kAshDebugShortcuts[] = "ash-debug-shortcuts";
 
 // Enables the Oak tree viewer.
 const char kAshEnableOak[] = "ash-enable-oak";
@@ -37,9 +36,6 @@ const char kAuraLegacyPowerButton[] = "aura-legacy-power-button";
 
 // Avoid drawing drop shadows under windows.
 const char kAuraNoShadows[] = "aura-no-shadows";
-
-// Use Aura to manage windows of type WINDOW_TYPE_PANEL.
-const char kAuraPanelManager[] = "aura-panels";
 
 }  // namespace switches
 }  // namespace ash

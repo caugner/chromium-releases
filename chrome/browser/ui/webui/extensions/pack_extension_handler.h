@@ -4,19 +4,18 @@
 
 #ifndef CHROME_BROWSER_UI_WEBUI_EXTENSIONS_PACK_EXTENSION_HANDLER_H_
 #define CHROME_BROWSER_UI_WEBUI_EXTENSIONS_PACK_EXTENSION_HANDLER_H_
-#pragma once
 
 #include <string>
 
-#include "chrome/browser/browsing_data_remover.h"
+#include "chrome/browser/browsing_data/browsing_data_remover.h"
 #include "chrome/browser/extensions/pack_extension_job.h"
 #include "chrome/browser/plugin_data_remover_helper.h"
-#include "chrome/browser/ui/select_file_dialog.h"
 #include "content/public/browser/web_ui_message_handler.h"
+#include "ui/base/dialogs/select_file_dialog.h"
 
 // Clear browser data handler page UI handler.
 class PackExtensionHandler : public content::WebUIMessageHandler,
-                             public SelectFileDialog::Listener,
+                             public ui::SelectFileDialog::Listener,
                              public PackExtensionJob::Client {
  public:
   PackExtensionHandler();
@@ -32,7 +31,7 @@ class PackExtensionHandler : public content::WebUIMessageHandler,
                              const FilePath& key_file) OVERRIDE;
 
   virtual void OnPackFailure(const std::string& error,
-                             ExtensionCreator::ErrorType) OVERRIDE;
+                             extensions::ExtensionCreator::ErrorType) OVERRIDE;
 
  private:
   // SelectFileDialog::Listener implementation.
@@ -60,7 +59,7 @@ class PackExtensionHandler : public content::WebUIMessageHandler,
 
   // Returned by the SelectFileDialog machinery. Used to initiate the selection
   // dialog.
-  scoped_refptr<SelectFileDialog> load_extension_dialog_;
+  scoped_refptr<ui::SelectFileDialog> load_extension_dialog_;
 
   // Path to root directory of extension
   std::string extension_path_;

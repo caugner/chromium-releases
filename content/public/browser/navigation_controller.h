@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_PUBLIC_BROWSER_NAVIGATION_CONTROLLER_H_
 #define CONTENT_PUBLIC_BROWSER_NAVIGATION_CONTROLLER_H_
-#pragma once
 
 #include <string>
 #include <vector>
@@ -32,9 +31,10 @@ struct Referrer;
 class NavigationController {
  public:
   enum ReloadType {
-    NO_RELOAD,                // Normal load.
-    RELOAD,                   // Normal (cache-validating) reload.
-    RELOAD_IGNORING_CACHE     // Reload bypassing the cache, aka shift-reload.
+    NO_RELOAD,                   // Normal load.
+    RELOAD,                      // Normal (cache-validating) reload.
+    RELOAD_IGNORING_CACHE,       // Reload bypassing the cache (shift-reload).
+    RELOAD_ORIGINAL_REQUEST_URL  // Reload using the original request URL.
   };
 
   // Creates a navigation entry and translates the virtual url to a real one.
@@ -167,6 +167,16 @@ class NavigationController {
                                    PageTransition type,
                                    const std::string& extra_headers) = 0;
 
+  // Same as LoadURL, but allows overriding the user agent of the
+  // NavigationEntry before it loads.
+  // TODO(dfalcantara): Consolidate the LoadURL* interfaces.
+  virtual void LoadURLWithUserAgentOverride(const GURL& url,
+                                            const Referrer& referrer,
+                                            PageTransition type,
+                                            bool is_renderer_initiated,
+                                            const std::string& extra_headers,
+                                            bool is_overriding_user_agent) = 0;
+
   // Behaves like LoadURL() and LoadURLFromRenderer() but marks the new
   // navigation as being transferred from one RVH to another. In this case the
   // browser can recycle the old request once the new renderer wants to
@@ -190,6 +200,7 @@ class NavigationController {
   // Navigation relative to the "current entry"
   virtual bool CanGoBack() const = 0;
   virtual bool CanGoForward() const = 0;
+  virtual bool CanGoToOffset(int offset) const = 0;
   virtual void GoBack() = 0;
   virtual void GoForward() = 0;
 

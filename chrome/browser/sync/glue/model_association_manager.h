@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_SYNC_GLUE_MODEL_ASSOCIATION_MANAGER_H__
 #define CHROME_BROWSER_SYNC_GLUE_MODEL_ASSOCIATION_MANAGER_H__
-#pragma once
 
 #include <list>
 
@@ -48,7 +47,7 @@ class ModelAssociationManager {
   // should be called before communicating with sync server. A subsequent call
   // of Initialize is only allowed if the ModelAssociationManager has invoked
   // |OnModelAssociationDone| on the |ModelAssociationResultProcessor|.
-  void Initialize(syncable::ModelTypeSet desired_types);
+  void Initialize(syncer::ModelTypeSet desired_types);
 
   // Can be called at any time. Synchronously stops all datatypes.
   void Stop();
@@ -97,11 +96,11 @@ class ModelAssociationManager {
   // Callback passed to each data type controller on starting association. This
   // callback will be invoked when the model association is done.
   void TypeStartCallback(DataTypeController::StartResult result,
-                         const SyncError& error);
+                         const syncer::SyncError& error);
 
   // Callback that will be invoked when the models finish loading. This callback
   // will be passed to |LoadModels| function.
-  void ModelLoadCallback(syncable::ModelType type, SyncError error);
+  void ModelLoadCallback(syncer::ModelType type, syncer::SyncError error);
 
   // Calls the |LoadModels| method on the next controller waiting to start.
   void LoadModelForNextType();
@@ -114,15 +113,15 @@ class ModelAssociationManager {
   // do the book keeping and do the UMA reporting.
   void AppendToFailedDatatypesAndLogError(
       DataTypeController::StartResult result,
-      const SyncError& error);
+      const syncer::SyncError& error);
 
-  syncable::ModelTypeSet GetTypesWaitingToLoad();
+  syncer::ModelTypeSet GetTypesWaitingToLoad();
 
 
   State state_;
-  syncable::ModelTypeSet desired_types_;
-  std::list<SyncError> failed_datatypes_info_;
-  std::map<syncable::ModelType, int> start_order_;
+  syncer::ModelTypeSet desired_types_;
+  std::list<syncer::SyncError> failed_datatypes_info_;
+  std::map<syncer::ModelType, int> start_order_;
 
   // This illustration explains the movement of one DTC through various lists.
   // Consider a dataype, say, BOOKMARKS which is NOT_RUNNING and will be

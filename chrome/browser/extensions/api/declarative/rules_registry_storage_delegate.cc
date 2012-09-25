@@ -5,8 +5,11 @@
 #include "chrome/browser/extensions/api/declarative/rules_registry_storage_delegate.h"
 
 #include "base/bind.h"
+#include "chrome/browser/extensions/extension_info_map.h"
+#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/state_store.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "content/public/browser/browser_thread.h"
@@ -52,20 +55,21 @@ std::vector<linked_ptr<RulesRegistry::Rule> > RulesFromValue(
 // should be used on the UI thread unless otherwise noted.
 class RulesRegistryStorageDelegate::Inner
     : public content::NotificationObserver,
-      public base::RefCountedThreadSafe<
-          Inner, content::BrowserThread::DeleteOnUIThread> {
+      public base::RefCountedThreadSafe<Inner> {
  public:
   Inner(Profile* profile,
         RulesRegistryWithCache* rules_registry,
         const std::string& storage_key);
 
  private:
+  friend class base::RefCountedThreadSafe<Inner>;
   friend class RulesRegistryStorageDelegate;
-  friend struct content::BrowserThread::DeleteOnThread<
-      content::BrowserThread::UI>;
-  friend class base::DeleteHelper<Inner>;
 
   ~Inner();
+
+  // Initialization of the storage delegate if it is used in the context of
+  // an incognito profile.
+  void InitForOTRProfile();
 
   // NotificationObserver
   virtual void Observe(
@@ -93,7 +97,7 @@ class RulesRegistryStorageDelegate::Inner
   // Notify the RulesRegistry that we are now ready.
   void NotifyReadyOnRegistryThread();
 
-  content::NotificationRegistrar registrar_;
+  scoped_ptr<content::NotificationRegistrar> registrar_;
   Profile* profile_;
 
   // The key under which rules are stored.
@@ -123,14 +127,20 @@ RulesRegistryStorageDelegate::~RulesRegistryStorageDelegate() {
   inner_->rules_registry_ = NULL;
 }
 
-void RulesRegistryStorageDelegate::Init(Profile* profile,
-                                        RulesRegistryWithCache* rules_registry,
-                                        const std::string& storage_key) {
+void RulesRegistryStorageDelegate::InitOnUIThread(
+    Profile* profile,
+    RulesRegistryWithCache* rules_registry,
+    const std::string& storage_key) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   extensions::StateStore* store = ExtensionSystem::Get(profile)->state_store();
   if (store)
     store->RegisterKey(storage_key);
   inner_ = new Inner(profile, rules_registry, storage_key);
+}
+
+void RulesRegistryStorageDelegate::CleanupOnUIThread() {
+  // The registrar must be deleted on the UI thread.
+  inner_->registrar_.reset();
 }
 
 bool RulesRegistryStorageDelegate::IsReady() {
@@ -155,31 +165,61 @@ RulesRegistryStorageDelegate::Inner::Inner(
     Profile* profile,
     RulesRegistryWithCache* rules_registry,
     const std::string& storage_key)
-    : profile_(profile),
+    : registrar_(new content::NotificationRegistrar()),
+      profile_(profile),
       storage_key_(storage_key),
       rules_registry_thread_(rules_registry->GetOwnerThread()),
       rules_registry_(rules_registry),
       ready_(false) {
-  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
-                 content::Source<Profile>(profile));
-  registrar_.Add(this, chrome::NOTIFICATION_EXTENSIONS_READY,
-                 content::Source<Profile>(profile));
+  if (!profile_->IsOffTheRecord()) {
+    registrar_->Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
+                    content::Source<Profile>(profile));
+    registrar_->Add(this, chrome::NOTIFICATION_EXTENSIONS_READY,
+                    content::Source<Profile>(profile));
+  } else {
+    registrar_->Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
+                    content::Source<Profile>(profile->GetOriginalProfile()));
+    InitForOTRProfile();
+  }
 }
 
-RulesRegistryStorageDelegate::Inner::~Inner() {}
+RulesRegistryStorageDelegate::Inner::~Inner() {
+  DCHECK(!registrar_.get());
+}
+
+void RulesRegistryStorageDelegate::Inner::InitForOTRProfile() {
+  ExtensionService* extension_service =
+      extensions::ExtensionSystem::Get(profile_)->extension_service();
+  const ExtensionSet* extensions = extension_service->extensions();
+  for (ExtensionSet::const_iterator i = extensions->begin();
+       i != extensions->end(); ++i) {
+    if ((*i)->HasAPIPermission(APIPermission::kDeclarativeWebRequest) &&
+        extension_service->IsIncognitoEnabled((*i)->id()))
+      ReadFromStorage((*i)->id());
+  }
+  ready_ = true;
+}
 
 void RulesRegistryStorageDelegate::Inner::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   if (type == chrome::NOTIFICATION_EXTENSION_LOADED) {
     const extensions::Extension* extension =
         content::Details<const extensions::Extension>(details).ptr();
     // TODO(mpcomplete): This API check should generalize to any use of
     // declarative rules, not just webRequest.
     if (extension->HasAPIPermission(
-            ExtensionAPIPermission::kDeclarativeWebRequest)) {
-      ReadFromStorage(extension->id());
+            APIPermission::kDeclarativeWebRequest)) {
+      ExtensionInfoMap* extension_info_map =
+          ExtensionSystem::Get(profile_)->info_map();
+      if (profile_->IsOffTheRecord() &&
+          !extension_info_map->IsIncognitoEnabled(extension->id())) {
+        // Ignore this extension.
+      } else {
+        ReadFromStorage(extension->id());
+      }
     }
   } else if (type == chrome::NOTIFICATION_EXTENSIONS_READY) {
     CheckIfReady();
@@ -188,6 +228,7 @@ void RulesRegistryStorageDelegate::Inner::Observe(
 
 void RulesRegistryStorageDelegate::Inner::ReadFromStorage(
     const std::string& extension_id) {
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   extensions::StateStore* store = ExtensionSystem::Get(profile_)->state_store();
   if (store) {
     waiting_for_extensions_.insert(extension_id);

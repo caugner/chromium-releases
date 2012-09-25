@@ -4,7 +4,6 @@
 
 #ifndef UI_COMPOSITOR_COMPOSITOR_H_
 #define UI_COMPOSITOR_COMPOSITOR_H_
-#pragma once
 
 #include "base/hash_tables.h"
 #include "base/memory/ref_counted.h"
@@ -191,6 +190,10 @@ class COMPOSITOR_EXPORT Compositor
   // and the OnCompositingEnded.
   bool DrawPending() const { return swap_posted_; }
 
+  // Returns whether the drawing is issued from a separate thread
+  // (i.e. |Compositor::Initialize(true)| was called).
+  bool IsThreaded() const;
+
   // Internal functions, called back by command-buffer contexts on swap buffer
   // events.
 
@@ -210,6 +213,7 @@ class COMPOSITOR_EXPORT Compositor
                                    float scaleFactor);
   virtual WebKit::WebGraphicsContext3D* createContext3D();
   virtual void didRebindGraphicsContext(bool success);
+  virtual void didCommit();
   virtual void didCommitAndDrawFrame();
   virtual void didCompleteSwapBuffers();
   virtual void scheduleComposite();
@@ -252,6 +256,8 @@ class COMPOSITOR_EXPORT Compositor
   int last_ended_frame_;
 
   bool disable_schedule_composite_;
+
+  DISALLOW_COPY_AND_ASSIGN(Compositor);
 };
 
 }  // namespace ui

@@ -94,6 +94,13 @@ remoting.ClientSession = function(hostJid, hostPublicKey, sharedSecret,
   this.fullScreen_.addEventListener('click', this.callToggleFullScreen_, false);
   /** @type {number?} @private */
   this.bumpScrollTimer_ = null;
+  /**
+   * Allow error reporting to be suppressed in situations where it would not
+   * be useful, for example, when the device is offline.
+   *
+   * @type {boolean} @private
+   */
+  this.logErrors_ = true;
 };
 
 // Note that the positive values in both of these enums are copied directly
@@ -303,7 +310,9 @@ remoting.ClientSession.prototype.onPluginInitialized_ =
   };
 
   this.plugin.onConnectionStatusUpdateHandler =
-      this.connectionStatusUpdateCallback.bind(this);
+      this.onConnectionStatusUpdate_.bind(this);
+  this.plugin.onConnectionReadyHandler =
+      this.onConnectionReady_.bind(this);
   this.plugin.onDesktopSizeUpdateHandler =
       this.onDesktopSizeChanged_.bind(this);
 
@@ -479,10 +488,11 @@ remoting.ClientSession.prototype.connectPluginToWcs_ =
  * Callback that the plugin invokes to indicate that the connection
  * status has changed.
  *
+ * @private
  * @param {number} status The plugin's status.
  * @param {number} error The plugin's error state, if any.
  */
-remoting.ClientSession.prototype.connectionStatusUpdateCallback =
+remoting.ClientSession.prototype.onConnectionStatusUpdate_ =
     function(status, error) {
   if (status == remoting.ClientSession.State.CONNECTED) {
     this.onDesktopSizeChanged_();
@@ -491,6 +501,21 @@ remoting.ClientSession.prototype.connectionStatusUpdateCallback =
   }
   this.setState_(/** @type {remoting.ClientSession.State} */ (status));
 };
+
+/**
+ * Callback that the plugin invokes to indicate when the connection is
+ * ready.
+ *
+ * @private
+ * @param {boolean} ready True if the connection is ready.
+ */
+remoting.ClientSession.prototype.onConnectionReady_ = function(ready) {
+  if (!ready) {
+    this.plugin.element().classList.add("session-client-inactive");
+  } else {
+    this.plugin.element().classList.remove("session-client-inactive");
+  }
+}
 
 /**
  * @private
@@ -503,8 +528,15 @@ remoting.ClientSession.prototype.setState_ = function(newState) {
   if (this.onStateChange) {
     this.onStateChange(oldState, newState);
   }
-  this.logToServer.logClientSessionStateChange(this.state, this.error,
-      this.mode);
+  // If connection errors are being suppressed from the logs, translate
+  // FAILED to CLOSED here. This ensures that the duration is still logged.
+  var state = this.state;
+  if (this.state == remoting.ClientSession.State.FAILED &&
+      !this.logErrors_) {
+    console.log('Suppressing error.');
+    state = remoting.ClientSession.State.CLOSED;
+  }
+  this.logToServer.logClientSessionStateChange(state, this.error, this.mode);
 };
 
 /**
@@ -555,7 +587,9 @@ remoting.ClientSession.prototype.pauseVideo = function(pause) {
 remoting.ClientSession.prototype.onDesktopSizeChanged_ = function() {
   console.log('desktop size changed: ' +
               this.plugin.desktopWidth + 'x' +
-              this.plugin.desktopHeight);
+              this.plugin.desktopHeight +' @ ' +
+              this.plugin.desktopXDpi + 'x' +
+              this.plugin.desktopYDpi + ' DPI');
   this.updateDimensions();
 };
 
@@ -626,6 +660,17 @@ remoting.ClientSession.prototype.getPerfStats = function() {
  */
 remoting.ClientSession.prototype.logStatistics = function(stats) {
   this.logToServer.logStatistics(stats, this.mode);
+};
+
+/**
+ * Enable or disable logging of connection errors. For example, if attempting
+ * a connection using a cached JID, errors should not be logged because the
+ * JID will be refreshed and the connection retried.
+ *
+ * @param {boolean} enable True to log errors; false to suppress them.
+ */
+remoting.ClientSession.prototype.logErrors = function(enable) {
+  this.logErrors_ = enable;
 };
 
 /**
@@ -705,6 +750,7 @@ remoting.ClientSession.prototype.scroll_ = function(dx, dy) {
 
 /**
  * Enable or disable bump-scrolling.
+ * @private
  * @param {boolean} enable True to enable bump-scrolling, false to disable it.
  */
 remoting.ClientSession.prototype.enableBumpScroll_ = function(enable) {

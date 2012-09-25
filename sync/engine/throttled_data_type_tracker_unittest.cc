@@ -4,28 +4,28 @@
 
 #include "sync/engine/throttled_data_type_tracker.h"
 
-#include "sync/internal_api/public/syncable/model_type.h"
+#include "sync/internal_api/public/base/model_type.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::TimeDelta;
 using base::TimeTicks;
 
-namespace browser_sync {
+namespace syncer {
 
 TEST(ThrottledDataTypeTrackerTest, AddUnthrottleTimeTest) {
-  const syncable::ModelTypeSet types(syncable::BOOKMARKS, syncable::PASSWORDS);
+  const ModelTypeSet types(BOOKMARKS, PASSWORDS);
 
   ThrottledDataTypeTracker throttler(NULL);
   TimeTicks now = TimeTicks::Now();
   throttler.SetUnthrottleTime(types, now);
 
   EXPECT_EQ(throttler.unthrottle_times_.size(), 2U);
-  EXPECT_EQ(throttler.unthrottle_times_[syncable::BOOKMARKS], now);
-  EXPECT_EQ(throttler.unthrottle_times_[syncable::PASSWORDS], now);
+  EXPECT_EQ(throttler.unthrottle_times_[BOOKMARKS], now);
+  EXPECT_EQ(throttler.unthrottle_times_[PASSWORDS], now);
 }
 
 TEST(ThrottledDataTypeTrackerTest, GetCurrentlyThrottledTypesTest) {
-  const syncable::ModelTypeSet types(syncable::BOOKMARKS, syncable::PASSWORDS);
+  const ModelTypeSet types(BOOKMARKS, PASSWORDS);
 
   ThrottledDataTypeTracker throttler(NULL);
   TimeTicks now = TimeTicks::Now();
@@ -44,8 +44,8 @@ TEST(ThrottledDataTypeTrackerTest, GetCurrentlyThrottledTypesTest) {
 
 // Have two data types whose throttling is set to expire at different times.
 TEST(ThrottledDataTypeTrackerTest, UnthrottleSomeTypesTest) {
-  const syncable::ModelTypeSet long_throttled(syncable::BOOKMARKS);
-  const syncable::ModelTypeSet short_throttled(syncable::PASSWORDS);
+  const ModelTypeSet long_throttled(BOOKMARKS);
+  const ModelTypeSet short_throttled(PASSWORDS);
 
   const TimeTicks start_time = TimeTicks::Now();
   const TimeTicks short_throttle_time = start_time + TimeDelta::FromSeconds(1);
@@ -63,5 +63,5 @@ TEST(ThrottledDataTypeTrackerTest, UnthrottleSomeTypesTest) {
   EXPECT_TRUE(throttler.GetThrottledTypes().Equals(long_throttled));
 }
 
-}  // namespace browser_sync
+}  // namespace syncer
 

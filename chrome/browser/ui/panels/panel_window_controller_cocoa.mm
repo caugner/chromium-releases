@@ -22,7 +22,7 @@
 #import "chrome/browser/ui/cocoa/find_bar/find_bar_bridge.h"
 #import "chrome/browser/ui/cocoa/find_bar/find_bar_cocoa_controller.h"
 #import "chrome/browser/ui/cocoa/menu_controller.h"
-#import "chrome/browser/ui/cocoa/tab_contents/favicon_util.h"
+#import "chrome/browser/ui/cocoa/tab_contents/favicon_util_mac.h"
 #import "chrome/browser/ui/cocoa/tab_contents/tab_contents_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/throbber_view.h"
 #include "chrome/browser/ui/panels/native_panel_cocoa.h"
@@ -36,11 +36,12 @@
 #include "chrome/browser/ui/toolbar/encoding_menu_controller.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
-#include "grit/ui_resources_standard.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebCursorInfo.h"
+#include "grit/ui_resources.h"
 #include "skia/ext/skia_utils_mac.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
-#include "ui/gfx/mac/nsimage_cache.h"
+#include "webkit/glue/webcursor.h"
 
 using content::WebContents;
 
@@ -53,16 +54,6 @@ const double kWidthOfMouseResizeArea = 4.0;
 // The distance the user has to move the mouse while keeping the left button
 // down before panel resizing operation actually starts.
 const double kDragThreshold = 3.0;
-
-// Replicate specific 10.6 SDK declarations for building with prior SDKs.
-#if !defined(MAC_OS_X_VERSION_10_6) || \
-    MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_6
-
-enum {
-  NSWindowCollectionBehaviorParticipatesInCycle = 1 << 5
-};
-
-#endif  // MAC_OS_X_VERSION_10_6
 
 @interface PanelWindowControllerCocoa (PanelsCanBecomeKey)
 // Internal helper method for extracting the total number of panel windows
@@ -137,30 +128,27 @@ enum {
 }
 @end
 
+namespace {
+NSCursor* LoadWebKitCursor(WebKit::WebCursorInfo::Type type) {
+    return WebCursor(WebKit::WebCursorInfo(type)).GetNativeCursor();
+}
+}
+
 @implementation PanelResizeByMouseOverlay
 - (PanelResizeByMouseOverlay*)initWithFrame:(NSRect)frame panel:(Panel*)panel {
   if ((self = [super initWithFrame:frame])) {
     panel_ = panel;
-    // Initialize resize cursors, they are very likely to be needed so it's
-    // better to pre-init them then stutter the mouse later when it hovers over
-    // a resize edge. We use WebKit cursors that look similar to what OSX Lion
-    // uses. NSCursor class does not yet have support for those new cursors.
-    NSImage* image = gfx::GetCachedImageWithName(@"eastWestResizeCursor.png");
-    DCHECK(image);
+
     eastWestCursor_.reset(
-        [[NSCursor alloc] initWithImage:image hotSpot:NSMakePoint(8,8)]);
-    image = gfx::GetCachedImageWithName(@"northSouthResizeCursor.png");
-    DCHECK(image);
+        [LoadWebKitCursor(WebKit::WebCursorInfo::TypeEastWestResize) retain]);
     northSouthCursor_.reset(
-        [[NSCursor alloc] initWithImage:image hotSpot:NSMakePoint(8,8)]);
-    image = gfx::GetCachedImageWithName(@"northEastSouthWestResizeCursor.png");
-    DCHECK(image);
+        [LoadWebKitCursor(WebKit::WebCursorInfo::TypeNorthSouthResize) retain]);
     northEastSouthWestCursor_.reset(
-        [[NSCursor alloc] initWithImage:image hotSpot:NSMakePoint(8,8)]);
-    image = gfx::GetCachedImageWithName(@"northWestSouthEastResizeCursor.png");
-    DCHECK(image);
+        [LoadWebKitCursor(WebKit::WebCursorInfo::TypeNorthEastSouthWestResize)
+        retain]);
     northWestSouthEastCursor_.reset(
-        [[NSCursor alloc] initWithImage:image hotSpot:NSMakePoint(8,8)]);
+        [LoadWebKitCursor(WebKit::WebCursorInfo::TypeNorthWestSouthEastResize)
+        retain]);
   }
   return self;
 }
@@ -469,10 +457,7 @@ enum {
 
   [self updateWindowLevel];
 
-  if (base::mac::IsOSSnowLeopardOrLater()) {
-    [window setCollectionBehavior:
-        NSWindowCollectionBehaviorParticipatesInCycle];
-  }
+  [window setCollectionBehavior:NSWindowCollectionBehaviorParticipatesInCycle];
 
   [titlebar_view_ attach];
 
@@ -619,12 +604,12 @@ enum {
   [findBarCocoaController positionFindBarViewAtMaxY:maxY maxWidth:maxWidth];
 }
 
-- (void)tabInserted:(WebContents*)contents {
+- (void)webContentsInserted:(WebContents*)contents {
   [contentsController_ changeWebContents:contents];
   DCHECK(![[contentsController_ view] isHidden]);
 }
 
-- (void)tabDetached:(WebContents*)contents {
+- (void)webContentsDetached:(WebContents*)contents {
   DCHECK(contents == [contentsController_ webContents]);
   [contentsController_ changeWebContents:nil];
   [[contentsController_ view] setHidden:YES];
@@ -732,7 +717,7 @@ enum {
   if (!panel->ShouldCloseWindow())
     return NO;
 
-  if (panel->WebContents()) {
+  if (panel->GetWebContents()) {
     // Terminate any playing animations.
     [self terminateBoundsAnimation];
     animateOnBoundsChange_ = NO;
@@ -749,7 +734,7 @@ enum {
 // When windowShouldClose returns YES (or if controller receives direct 'close'
 // signal), window will be unconditionally closed. Clean up.
 - (void)windowWillClose:(NSNotification*)notification {
-  DCHECK(!windowShim_->panel()->WebContents());
+  DCHECK(!windowShim_->panel()->GetWebContents());
   // Avoid callbacks from a nonblocking animation in progress, if any.
   [self terminateBoundsAnimation];
   windowShim_->DidCloseNativeWindow();

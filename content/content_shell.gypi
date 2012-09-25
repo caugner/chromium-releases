@@ -36,16 +36,14 @@
         '<(webkit_src_dir)/Source/WebKit/chromium/WebKit.gyp:webkit',
         '../ui/ui.gyp:ui',
         '../v8/tools/gyp/v8.gyp:v8',
-        '../webkit/support/webkit_support.gyp:appcache',
-        '../webkit/support/webkit_support.gyp:database',
-        '../webkit/support/webkit_support.gyp:fileapi',
-        '../webkit/support/webkit_support.gyp:glue',
-        '../webkit/support/webkit_support.gyp:quota',
+        '../webkit/support/webkit_support.gyp:webkit_support',
       ],
       'include_dirs': [
         '..',
       ],
       'sources': [
+        'shell/geolocation/shell_access_token_store.cc',
+        'shell/geolocation/shell_access_token_store.h',
         'shell/layout_test_controller.cc',
         'shell/layout_test_controller.h',
         'shell/layout_test_controller_bindings.cc',
@@ -82,9 +80,11 @@
         'shell/shell_download_manager_delegate.h',
         'shell/shell_javascript_dialog_creator.cc',
         'shell/shell_javascript_dialog_creator.h',
+        'shell/shell_javascript_dialog_gtk.cc',
         'shell/shell_javascript_dialog_mac.mm',
         'shell/shell_javascript_dialog_win.cc',
         'shell/shell_javascript_dialog.h',
+        'shell/shell_login_dialog_gtk.cc',
         'shell/shell_login_dialog_mac.mm',
         'shell/shell_login_dialog.cc',
         'shell/shell_login_dialog.h',
@@ -140,11 +140,54 @@
             # this combination is not yet supported on Android.
             '../webkit/support/webkit_support.gyp:webkit_support',
           ],
-        }],  # OS!="android"
+        }, {  # else: OS=="android"
+          'dependencies': [
+            'content_shell_jni_headers',
+          ],
+          'include_dirs': [
+            '<(SHARED_INTERMEDIATE_DIR)/content/shell',
+          ],
+        }],  # OS=="android"
+        ['os_posix==1 and use_aura==1 and linux_use_tcmalloc==1', {
+          'dependencies': [
+            # This is needed by content/app/content_main_runner.cc
+            '../base/allocator/allocator.gyp:allocator',
+          ],
+        }],
         ['use_aura==1', {
+          'dependencies': [
+            '../ui/aura/aura.gyp:aura',
+            '../ui/base/strings/ui_strings.gyp:ui_strings',
+            '../ui/views/views.gyp:views',
+            '../ui/ui.gyp:ui_resources',
+          ],
           'sources/': [
             ['exclude', 'shell/shell_gtk.cc'],
             ['exclude', 'shell/shell_win.cc'],
+          ],
+        }],  # use_aura==1
+        ['chromeos==1', {
+          'dependencies': [
+            '../chromeos/chromeos.gyp:chromeos',
+           ],
+        }], # chromeos==1
+        ['inside_chromium_build==0 or component!="shared_library"', {
+          'dependencies': [
+            '<(webkit_src_dir)/Source/WebCore/WebCore.gyp/WebCore.gyp:webcore_test_support',
+            '<(webkit_src_dir)/Source/WTF/WTF.gyp/WTF.gyp:wtf',
+          ],
+          'include_dirs': [
+            # Required for WebTestingSupport.cpp to find our custom config.h.
+            'shell/',
+            '<(webkit_src_dir)/Source/WebKit/chromium/public',
+            # WARNING: Do not view this particular case as a precedent for
+            # including WebCore headers in the content shell.
+            '<(webkit_src_dir)/Source/WebCore/testing/v8', # for WebCoreTestSupport.h needed  to link in window.internals code.
+          ],
+          'sources': [
+            'shell/config.h',
+            '<(webkit_src_dir)/Source/WebKit/chromium/src/WebTestingSupport.cpp',
+            '<(webkit_src_dir)/Source/WebKit/chromium/public/WebTestingSupport.h',
           ],
         }],
       ],
@@ -194,7 +237,6 @@
         'content_shell_resources',
         '<(DEPTH)/net/net.gyp:net_resources',
         '<(DEPTH)/ui/ui.gyp:ui_resources',
-        '<(DEPTH)/ui/ui.gyp:ui_resources_standard',
       ],
       'variables': {
         'repack_path': '<(DEPTH)/tools/grit/grit/format/repack.py',
@@ -207,11 +249,13 @@
               '<(SHARED_INTERMEDIATE_DIR)/content/content_resources.pak',
               '<(SHARED_INTERMEDIATE_DIR)/content/shell_resources.pak',
               '<(SHARED_INTERMEDIATE_DIR)/net/net_resources.pak',
-              '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources/ui_resources.pak',
-              '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources_standard/ui_resources_standard.pak',
+              '<(SHARED_INTERMEDIATE_DIR)/ui/app_locale_settings/app_locale_settings_en-US.pak',
+              '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources/ui_resources_100_percent.pak',
+              '<(SHARED_INTERMEDIATE_DIR)/ui/ui_strings/ui_strings_en-US.pak',
               '<(SHARED_INTERMEDIATE_DIR)/webkit/devtools_resources.pak',
               '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_chromium_resources.pak',
               '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_resources.pak',
+              '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_strings_en-US.pak',
             ],
           },
           'inputs': [
@@ -395,6 +439,15 @@
             'shell/shell_content_main.cc',
             'shell/shell_content_main.h',
           ],
+          'copies': [
+            {
+              # Copy FFmpeg binaries for audio/video support.
+              'destination': '<(PRODUCT_DIR)/$(CONTENTS_FOLDER_PATH)/Libraries',
+              'files': [
+                '<(PRODUCT_DIR)/ffmpegsumo.so',
+              ],
+            },
+          ],
         },  # target content_shell_framework
         {
           'target_name': 'content_shell_helper_app',
@@ -460,6 +513,17 @@
               ],
             },
           ],
+          'conditions': [
+            ['component=="shared_library"', {
+              'xcode_settings': {
+                'LD_RUNPATH_SEARCH_PATHS': [
+                  # Get back from Content Shell.app/Contents/Frameworks/
+                  #                                 Helper.app/Contents/MacOS
+                  '@loader_path/../../../../../..',
+                ],
+              },
+            }],
+          ],
         },  # target content_shell_helper_app
       ],
     }],  # OS=="mac"
@@ -470,20 +534,17 @@
           # require specifying the java directory and generate the rest.
           'target_name': 'content_shell_jni_headers',
           'type': 'none',
+          'sources': [
+            'shell/android/java/src/org/chromium/content_shell/ShellManager.java',
+            'shell/android/java/src/org/chromium/content_shell/Shell.java',
+          ],
           'variables': {
-            'java_sources': [
-              'shell/android/java/org/chromium/content_shell/ShellManager.java',
-              'shell/android/java/org/chromium/content_shell/ShellView.java',
-            ],
-            'jni_headers': [
-              '<(SHARED_INTERMEDIATE_DIR)/content/shell/jni/shell_manager_jni.h',
-              '<(SHARED_INTERMEDIATE_DIR)/content/shell/jni/shell_view_jni.h',
-            ],
+            'jni_gen_dir': 'content/shell',
           },
           'includes': [ '../build/jni_generator.gypi' ],
         },
         {
-          'target_name': 'content_shell_content_view',
+          'target_name': 'libcontent_shell_content_view',
           'type': 'shared_library',
           'dependencies': [
             'content_shell_jni_headers',
@@ -498,12 +559,23 @@
             '<(SHARED_INTERMEDIATE_DIR)/content/shell',
           ],
           'sources': [
+            'shell/android/draw_context.cc',
+            'shell/android/draw_context.h',
             'shell/android/shell_library_loader.cc',
             'shell/android/shell_library_loader.h',
             'shell/android/shell_manager.cc',
             'shell/android/shell_manager.h',
-            'shell/android/shell_view.cc',
-            'shell/android/shell_view.h',
+          ],
+          'sources!': [
+            'shell/shell_main.cc',
+            'shell/shell_main.h',
+          ],
+          'conditions': [
+            ['android_build_type==1', {
+              'ldflags': [
+                '-lgabi++',  # For rtti
+              ],
+            }],
           ],
         },
         {
@@ -543,20 +615,21 @@
                 '--strip-unneeded',  # All symbols not needed for relocation.
                 '<@(_inputs)',
                 '-o',
-                '<@(_outputs)' 
+                '<@(_outputs)',
               ],
             },
             {
               'action_name': 'content_shell_apk',
               'inputs': [
-                '<(DEPTH)/content/shell/android/content_shell_apk.xml',
-                '<(DEPTH)/content/shell/android/AndroidManifest.xml',
+                'shell/android/java/content_shell_apk.xml',
+                'shell/android/java/AndroidManifest.xml',
                 '<!@(find shell/android/java -name "*.java")',
                 '<!@(find shell/android/res -name "*")',
                 '<(PRODUCT_DIR)/content_shell/java/libs/chromium_base.jar',
                 '<(PRODUCT_DIR)/content_shell/java/libs/chromium_net.jar',
                 '<(PRODUCT_DIR)/content_shell/java/libs/chromium_media.jar',
                 '<(PRODUCT_DIR)/content_shell/java/libs/chromium_content.jar',
+                '<(PRODUCT_DIR)/content_shell/assets/content_shell.pak',
                 '<(PRODUCT_DIR)/content_shell/libs/<(android_app_abi)/libcontent_shell_content_view.so',
               ],
               'outputs': [
@@ -564,15 +637,28 @@
                 # Release mode.  I don't think it matters (e.g. we're
                 # probably happy to not codesign) but naming should be
                 # fixed.
-                '<(PRODUCT_DIR)/ContentShell-debug.apk',
+                '<(PRODUCT_DIR)/content_shell/ContentShell-debug.apk',
               ],
               'action': [
+                # Pass the build type to ant. Currently it only assumes
+                # debug mode in java. Release mode will break the current
+                # workflow.
+                # 'shell/content_shell_ant_helper.sh',
                 'ant',
                 '-DPRODUCT_DIR=<(ant_build_out)',
                 '-DAPP_ABI=<(android_app_abi)',
+                '-DANDROID_SDK=<(android_sdk)',
+                '-DANDROID_SDK_ROOT=<(android_sdk_root)',
+                '-DANDROID_SDK_TOOLS=<(android_sdk_tools)',
+                '-DANDROID_SDK_VERSION=<(android_sdk_version)',
+                '-DANDROID_TOOLCHAIN=<(android_toolchain)',
                 '-buildfile',
-                '<(DEPTH)/content/shell/android/content_shell_apk.xml',
-              ]
+                'shell/android/java/content_shell_apk.xml',
+                # '<(CONFIGURATION_NAME)',
+              ],
+              'dependencies': [
+                'content_java',
+              ],
             }
           ],
         },

@@ -4,7 +4,6 @@
 
 #ifndef IPC_IPC_MESSAGE_UTILS_H_
 #define IPC_IPC_MESSAGE_UTILS_H_
-#pragma once
 
 #include <algorithm>
 #include <map>
@@ -102,7 +101,7 @@ enum IPCMessageStart {
   AccessibilityMsgStart,
   PrerenderMsgStart,
   ChromotingMsgStart,
-  BrowserPluginMsgStart,
+  OldBrowserPluginMsgStart,
   LastIPCMsgStart      // Must come last.
 };
 

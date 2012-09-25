@@ -4,28 +4,35 @@
 
 #ifndef CONTENT_BROWSER_WEB_CONTENTS_WEB_CONTENTS_VIEW_ANDROID_H_
 #define CONTENT_BROWSER_WEB_CONTENTS_WEB_CONTENTS_VIEW_ANDROID_H_
-#pragma once
 
+#include "base/memory/scoped_ptr.h"
 #include "content/port/browser/render_view_host_delegate_view.h"
 #include "content/public/browser/web_contents_view.h"
+#include "content/browser/web_contents/web_contents_impl.h"
+#include "content/public/browser/web_contents_view_delegate.h"
+#include "content/public/common/context_menu_params.h"
 
 namespace content {
-class WebContents;
-}
+class ContentViewCoreImpl;
 
-class WebContentsViewAndroid
-    : public content::WebContentsView,
-      public content::RenderViewHostDelegateView {
+// Android-specific implementation of the WebContentsView.
+class WebContentsViewAndroid : public WebContentsView,
+                               public RenderViewHostDelegateView {
  public:
-  explicit WebContentsViewAndroid(content::WebContents* web_contents);
+  WebContentsViewAndroid(WebContentsImpl* web_contents,
+                         WebContentsViewDelegate* delegate);
   virtual ~WebContentsViewAndroid();
+
+  // Sets the interface to the view system. ContentViewCoreImpl is owned
+  // by its Java ContentViewCore counterpart, whose lifetime is managed
+  // by the UI frontend.
+  void SetContentViewCore(ContentViewCoreImpl* content_view_core);
 
   // WebContentsView implementation --------------------------------------------
 
   virtual void CreateView(const gfx::Size& initial_size) OVERRIDE;
-  virtual content::RenderWidgetHostView* CreateViewForWidget(
-      content::RenderWidgetHost* render_widget_host) OVERRIDE;
-
+  virtual RenderWidgetHostView* CreateViewForWidget(
+      RenderWidgetHost* render_widget_host) OVERRIDE;
   virtual gfx::NativeView GetNativeView() const OVERRIDE;
   virtual gfx::NativeView GetContentNativeView() const OVERRIDE;
   virtual gfx::NativeWindow GetTopLevelNativeWindow() const OVERRIDE;
@@ -34,7 +41,7 @@ class WebContentsViewAndroid
   virtual void OnTabCrashed(base::TerminationStatus status,
                             int error_code) OVERRIDE;
   virtual void SizeContents(const gfx::Size& size) OVERRIDE;
-  virtual void RenderViewCreated(content::RenderViewHost* host) OVERRIDE;
+  virtual void RenderViewCreated(RenderViewHost* host) OVERRIDE;
   virtual void Focus() OVERRIDE;
   virtual void SetInitialFocus() OVERRIDE;
   virtual void StoreFocus() OVERRIDE;
@@ -47,8 +54,7 @@ class WebContentsViewAndroid
   virtual gfx::Rect GetViewBounds() const OVERRIDE;
 
   // Backend implementation of RenderViewHostDelegateView.
-  virtual void ShowContextMenu(
-      const content::ContextMenuParams& params) OVERRIDE;
+  virtual void ShowContextMenu(const ContextMenuParams& params) OVERRIDE;
   virtual void ShowPopupMenu(const gfx::Rect& bounds,
                              int item_height,
                              double item_font_size,
@@ -58,7 +64,7 @@ class WebContentsViewAndroid
                              bool allow_multiple_selection) OVERRIDE;
   virtual void StartDragging(const WebDropData& drop_data,
                              WebKit::WebDragOperationsMask allowed_ops,
-                             const SkBitmap& image,
+                             const gfx::ImageSkia& image,
                              const gfx::Point& image_offset) OVERRIDE;
   virtual void UpdateDragCursor(WebKit::WebDragOperation operation) OVERRIDE;
   virtual void GotFocus() OVERRIDE;
@@ -66,9 +72,17 @@ class WebContentsViewAndroid
 
  private:
   // The WebContents whose contents we display.
-  content::WebContents* web_contents_;
+  WebContentsImpl* web_contents_;
+
+  // ContentViewCoreImpl is our interface to the view system.
+  ContentViewCoreImpl* content_view_core_;
+
+  // Interface for extensions to WebContentsView. Used to show the context menu.
+  scoped_ptr<WebContentsViewDelegate> delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(WebContentsViewAndroid);
 };
+
+} // namespace content
 
 #endif  // CONTENT_BROWSER_WEB_CONTENTS_WEB_CONTENTS_VIEW_ANDROID_H_

@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_CHROME_TO_MOBILE_SERVICE_H_
 #define CHROME_BROWSER_CHROME_TO_MOBILE_SERVICE_H_
-#pragma once
 
 #include <map>
 #include <set>
@@ -16,7 +15,9 @@
 #include "base/memory/weak_ptr.h"
 #include "base/string16.h"
 #include "base/timer.h"
+#include "base/values.h"
 #include "chrome/browser/profiles/profile_keyed_service.h"
+#include "chrome/browser/sessions/session_id.h"
 #include "chrome/common/net/gaia/oauth2_access_token_consumer.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -24,13 +25,11 @@
 #include "net/url_request/url_fetcher_delegate.h"
 
 class OAuth2AccessTokenFetcher;
+class Browser;
 class CloudPrintURL;
 class MockChromeToMobileService;
+class PrefService;
 class Profile;
-
-namespace base {
-class DictionaryValue;
-}
 
 namespace net {
 class URLFetcher;
@@ -64,55 +63,70 @@ class ChromeToMobileService : public ProfileKeyedService,
     SENDING_SNAPSHOT,       // A snapshot was sent along with the page URL.
     SEND_SUCCESS,           // Cloud print responded with success on send.
     SEND_ERROR,             // Cloud print responded with failure on send.
+    LEARN_MORE_CLICKED,     // The "Learn more" help article link was clicked.
     NUM_METRICS
   };
 
-  // The URLFetcher request types.
-  enum RequestType {
-    SEARCH,
-    URL,
+  // The supported mobile device operating systems.
+  enum MobileOS {
+    ANDROID = 0,
+    IOS,
+  };
+
+  // The cloud print job types.
+  enum JobType {
+    URL = 0,
     DELAYED_SNAPSHOT,
     SNAPSHOT,
   };
 
-  // The aggregated URLFetcher submission data.
-  struct RequestData {
-    RequestData();
-    ~RequestData();
+  // The cloud print job submission data.
+  struct JobData {
+    JobData();
+    ~JobData();
 
+    MobileOS mobile_os;
     string16 mobile_id;
     GURL url;
     string16 title;
-    FilePath snapshot_path;
+    FilePath snapshot;
     std::string snapshot_id;
-    RequestType type;
+    JobType type;
   };
 
   // Returns whether Chrome To Mobile is enabled. Check for the 'disable' or
   // 'enable' command line switches, otherwise relay the default enabled state.
   static bool IsChromeToMobileEnabled();
 
+  // Register the user prefs associated with this service.
+  static void RegisterUserPrefs(PrefService* prefs);
+
   explicit ChromeToMobileService(Profile* profile);
   virtual ~ChromeToMobileService();
 
   // Returns true if the service has found any registered mobile devices.
-  bool HasDevices();
+  bool HasMobiles();
 
-  // Get the list of mobile devices.
-  const std::vector<base::DictionaryValue*>& mobiles();
+  // Get the non-NULL ListValue of mobile devices from the cloud print service.
+  // The list is owned by PrefService, which outlives ChromeToMobileService.
+  // Each device DictionaryValue contains strings "type", "name", and "id".
+  // Virtual for unit test mocking.
+  virtual const base::ListValue* GetMobiles() const;
 
   // Request an updated mobile device list, request auth first if needed.
   // Virtual for unit test mocking.
   virtual void RequestMobileListUpdate();
 
-  // Callback with an MHTML snapshot of the profile's selected WebContents.
+  // Callback with an MHTML snapshot of the browser's selected WebContents.
   // Virtual for unit test mocking.
-  virtual void GenerateSnapshot(base::WeakPtr<Observer> observer);
+  virtual void GenerateSnapshot(Browser* browser,
+                                base::WeakPtr<Observer> observer);
 
-  // Send the profile's selected WebContents to the specified mobile device.
+  // Send the browser's selected WebContents to the specified mobile device.
   // Virtual for unit test mocking.
-  virtual void SendToMobile(const string16& mobile_id,
+  virtual void SendToMobile(const base::DictionaryValue& mobile,
                             const FilePath& snapshot,
+                            Browser* browser,
                             base::WeakPtr<Observer> observer);
 
   // Delete the snapshot file (should be called on observer destruction).
@@ -121,7 +135,10 @@ class ChromeToMobileService : public ProfileKeyedService,
 
   // Log a metric for the "ChromeToMobile.Service" histogram.
   // Virtual for unit test mocking.
-  virtual void LogMetric(Metric metric);
+  virtual void LogMetric(Metric metric) const;
+
+  // Opens the "Learn More" help article link in the supplied |browser|.
+  void LearnMore(Browser* browser) const;
 
   // net::URLFetcherDelegate method.
   virtual void OnURLFetchComplete(const net::URLFetcher* source) OVERRIDE;
@@ -132,7 +149,8 @@ class ChromeToMobileService : public ProfileKeyedService,
                        const content::NotificationDetails& details) OVERRIDE;
 
   // OAuth2AccessTokenConsumer methods.
-  virtual void OnGetTokenSuccess(const std::string& access_token) OVERRIDE;
+  virtual void OnGetTokenSuccess(const std::string& access_token,
+                                 const base::Time& expiration_time) OVERRIDE;
   virtual void OnGetTokenFailure(const GoogleServiceAuthError& error) OVERRIDE;
 
  private:
@@ -141,11 +159,18 @@ class ChromeToMobileService : public ProfileKeyedService,
   // Handle the attempted creation of a temporary file for snapshot generation.
   // Alert the observer of failure or generate MHTML with an observer callback.
   void SnapshotFileCreated(base::WeakPtr<Observer> observer,
+                           SessionID::id_type browser_id,
                            const FilePath& path,
                            bool success);
 
-  // Utility function to create URLFetcher requests.
-  net::URLFetcher* CreateRequest(const RequestData& data);
+  // Create a cloud print job submission request for a URL or snapshot.
+  net::URLFetcher* CreateRequest(const JobData& data);
+
+  // Initialize URLFetcher requests (search and jobs submit).
+  void InitRequest(net::URLFetcher* request);
+
+  // Submit a cloud print job request with the requisite data.
+  void SendRequest(net::URLFetcher* request, const JobData& data);
 
   // Send the OAuth2AccessTokenFetcher request.
   // Virtual for unit test mocking.
@@ -172,9 +197,6 @@ class ChromeToMobileService : public ProfileKeyedService,
   scoped_ptr<CloudPrintURL> cloud_print_url_;
   std::string access_token_;
 
-  // The list of mobile devices retrieved from the cloud print service.
-  ScopedVector<base::DictionaryValue> mobiles_;
-
   // The set of snapshots currently available.
   std::set<FilePath> snapshots_;
 
@@ -191,9 +213,8 @@ class ChromeToMobileService : public ProfileKeyedService,
   scoped_ptr<net::URLFetcher> account_info_request_;
   bool cloud_print_accessible_;
 
-  // The pending mobile device search request; and the time of the last request.
+  // The pending mobile device search request.
   scoped_ptr<net::URLFetcher> search_request_;
-  base::TimeTicks previous_search_time_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeToMobileService);
 };

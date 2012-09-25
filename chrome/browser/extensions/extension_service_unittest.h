@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_EXTENSION_SERVICE_UNITTEST_H_
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_SERVICE_UNITTEST_H_
-#pragma once
 
 #include "base/at_exit.h"
 #include "base/file_path.h"
@@ -55,7 +54,7 @@ class ExtensionServiceTestBase : public testing::Test {
   scoped_ptr<TestingProfile> profile_;
   FilePath extensions_install_dir_;
   FilePath data_dir_;
-  // Managed by ExtensionSystemFactory.
+  // Managed by extensions::ExtensionSystemFactory.
   ExtensionService* service_;
   extensions::ManagementPolicy* management_policy_;
   size_t expected_extensions_count_;

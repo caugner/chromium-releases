@@ -56,14 +56,15 @@
 #include "base/message_loop.h"
 #include "googleurl/src/gurl.h"
 #include "media/base/audio_renderer_sink.h"
-#include "media/base/filters.h"
+#include "media/base/decryptor.h"
 #include "media/base/message_loop_factory.h"
 #include "media/base/pipeline.h"
-#include "media/crypto/aes_decryptor.h"
 #include "skia/ext/platform_canvas.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebAudioSourceProvider.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebMediaPlayer.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebMediaPlayerClient.h"
+#include "webkit/media/crypto/key_systems.h"
+#include "webkit/media/crypto/proxy_decryptor.h"
 
 class RenderAudioSourceProvider;
 
@@ -142,9 +143,6 @@ class WebMediaPlayerImpl
   // Methods for painting.
   virtual void setSize(const WebKit::WebSize& size);
 
-  // This variant (without alpha) is just present during staging of this API
-  // change. Later we will again only have one virtual paint().
-  virtual void paint(WebKit::WebCanvas* canvas, const WebKit::WebRect& rect);
   virtual void paint(WebKit::WebCanvas* canvas,
                      const WebKit::WebRect& rect,
                      uint8_t alpha);
@@ -190,18 +188,12 @@ class WebMediaPlayerImpl
 
   virtual WebKit::WebAudioSourceProvider* audioSourceProvider();
 
-  // TODO(acolwell): Remove once new sourceAddId() signature is checked into
-  // WebKit.
-  virtual AddIdStatus sourceAddId(const WebKit::WebString& id,
-                                  const WebKit::WebString& type);
   virtual AddIdStatus sourceAddId(
       const WebKit::WebString& id,
       const WebKit::WebString& type,
       const WebKit::WebVector<WebKit::WebString>& codecs);
   virtual bool sourceRemoveId(const WebKit::WebString& id);
   virtual WebKit::WebTimeRanges sourceBuffered(const WebKit::WebString& id);
-  // TODO(acolwell): Remove non-id version when http://webk.it/83788 fix lands.
-  virtual bool sourceAppend(const unsigned char* data, unsigned length);
   virtual bool sourceAppend(const WebKit::WebString& id,
                             const unsigned char* data,
                             unsigned length);
@@ -240,7 +232,7 @@ class WebMediaPlayerImpl
   void OnKeyAdded(const std::string& key_system, const std::string& session_id);
   void OnKeyError(const std::string& key_system,
                   const std::string& session_id,
-                  media::AesDecryptor::KeyError error_code,
+                  media::Decryptor::KeyError error_code,
                   int system_code);
   void OnKeyMessage(const std::string& key_system,
                     const std::string& session_id,
@@ -255,7 +247,7 @@ class WebMediaPlayerImpl
 
  private:
   // Called after asynchronous initialization of a data source completed.
-  void DataSourceInitialized(const GURL& gurl, media::PipelineStatus status);
+  void DataSourceInitialized(const GURL& gurl, bool success);
 
   // Called when the data source is downloading or paused.
   void NotifyDownloading(bool is_downloading);
@@ -301,8 +293,9 @@ class WebMediaPlayerImpl
   scoped_refptr<media::Pipeline> pipeline_;
   bool started_;
 
-  // The decryptor that manages decryption keys and decrypts encrypted frames.
-  scoped_ptr<media::AesDecryptor> decryptor_;
+  // The currently selected key system. Empty string means that no key system
+  // has been selected.
+  WebKit::WebString current_key_system_;
 
   scoped_ptr<media::MessageLoopFactory> message_loop_factory_;
 
@@ -349,6 +342,9 @@ class WebMediaPlayerImpl
   scoped_refptr<media::AudioRendererSink> audio_renderer_sink_;
 
   bool is_local_source_;
+
+  // The decryptor that manages decryption keys and decrypts encrypted frames.
+  ProxyDecryptor decryptor_;
 
   DISALLOW_COPY_AND_ASSIGN(WebMediaPlayerImpl);
 };

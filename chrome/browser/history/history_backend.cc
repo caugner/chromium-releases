@@ -18,6 +18,7 @@
 #include "base/metrics/histogram.h"
 #include "base/string_util.h"
 #include "base/time.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/history_url_provider.h"
 #include "chrome/browser/bookmarks/bookmark_service.h"
 #include "chrome/browser/cancelable_request.h"
@@ -34,7 +35,7 @@
 #include "googleurl/src/gurl.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
-#include "net/base/registry_controlled_domain.h"
+#include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 
 #if defined(OS_ANDROID)
 #include "chrome/browser/history/android/android_provider_backend.h"
@@ -961,7 +962,8 @@ void HistoryBackend::SetPageTitle(const GURL& url,
   }
 }
 
-void HistoryBackend::AddPageNoVisitForBookmark(const GURL& url) {
+void HistoryBackend::AddPageNoVisitForBookmark(const GURL& url,
+                                               const string16& title) {
   if (!db_.get())
     return;
 
@@ -971,6 +973,13 @@ void HistoryBackend::AddPageNoVisitForBookmark(const GURL& url) {
     // URL is already known, nothing to do.
     return;
   }
+
+  if (!title.empty()) {
+    url_info.set_title(title);
+  } else {
+    url_info.set_title(UTF8ToUTF16(url.spec()));
+  }
+
   url_info.set_last_visit(Time::Now());
   // Mark the page hidden. If the user types it in, it'll unhide.
   url_info.set_hidden(true);
@@ -1485,12 +1494,12 @@ void HistoryBackend::QueryFilteredURLs(
   // currently 24 hours) to use it directly instead of using visits database,
   // which is considerably slower.
   ScopedVector<PageUsageData> data;
-  data->reserve(score_map.size());
+  data.reserve(score_map.size());
   for (std::map<URLID, double>::iterator it = score_map.begin();
        it != score_map.end(); ++it) {
     PageUsageData* pud = new PageUsageData(it->first);
     pud->SetScore(it->second);
-    data->push_back(pud);
+    data.push_back(pud);
   }
 
   // Limit to the top |result_count| results.
@@ -2248,7 +2257,7 @@ void HistoryBackend::DeleteAllHistory() {
   // the original tables directly.
 
   // Get the bookmarked URLs.
-  std::vector<GURL> starred_urls;
+  std::vector<BookmarkService::URLAndTitle> starred_urls;
   BookmarkService* bookmark_service = GetBookmarkService();
   if (bookmark_service)
     bookmark_service_->GetBookmarks(&starred_urls);
@@ -2256,7 +2265,7 @@ void HistoryBackend::DeleteAllHistory() {
   URLRows kept_urls;
   for (size_t i = 0; i < starred_urls.size(); i++) {
     URLRow row;
-    if (!db_->GetRowForURL(starred_urls[i], &row))
+    if (!db_->GetRowForURL(starred_urls[i].url, &row))
       continue;
 
     // Clear the last visit time so when we write these rows they are "clean."

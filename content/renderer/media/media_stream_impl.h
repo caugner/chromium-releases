@@ -85,8 +85,6 @@ class CONTENT_EXPORT MediaStreamImpl
       MediaStreamDependencyFactory* dependency_factory);
   virtual ~MediaStreamImpl();
 
-  virtual WebKit::WebPeerConnectionHandler* CreatePeerConnectionHandler(
-      WebKit::WebPeerConnectionHandlerClient* client);
   virtual WebKit::WebPeerConnection00Handler* CreatePeerConnectionHandlerJsep(
       WebKit::WebPeerConnection00HandlerClient* client);
   // Stops a local MediaStream by notifying the MediaStreamDispatcher that the
@@ -155,20 +153,6 @@ class CONTENT_EXPORT MediaStreamImpl
   virtual WebKit::WebMediaStreamDescriptor GetMediaStream(const GURL& url);
 
  private:
-  class VideoRendererWrapper : public webrtc::VideoRendererWrapperInterface {
-   public:
-    explicit VideoRendererWrapper(RTCVideoDecoder* decoder);
-    virtual cricket::VideoRenderer* renderer() OVERRIDE {
-      return rtc_video_decoder_.get();
-    }
-
-   protected:
-    virtual ~VideoRendererWrapper();
-
-   private:
-    scoped_refptr<RTCVideoDecoder> rtc_video_decoder_;
-  };
-
   // Structure for storing information about a WebKit request to create a
   // MediaStream.
   struct UserMediaRequestInfo {
@@ -196,14 +180,11 @@ class CONTENT_EXPORT MediaStreamImpl
   bool EnsurePeerConnectionFactory();
   void CleanupPeerConnectionFactory();
 
-  PeerConnectionHandlerBase* FindPeerConnectionByStream(
-      const WebKit::WebMediaStreamDescriptor& stream);
   scoped_refptr<media::VideoDecoder> CreateLocalVideoDecoder(
       webrtc::MediaStreamInterface* stream,
       media::MessageLoopFactory* message_loop_factory);
   scoped_refptr<media::VideoDecoder> CreateRemoteVideoDecoder(
       webrtc::MediaStreamInterface* stream,
-      const GURL& url,
       media::MessageLoopFactory* message_loop_factory);
   LocalNativeStreamPtr CreateNativeLocalMediaStream(
       const std::string& label,

@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_NET_CONNECTION_TESTER_H_
 #define CHROME_BROWSER_NET_CONNECTION_TESTER_H_
-#pragma once
 
 #include <vector>
 
@@ -14,6 +13,7 @@
 #include "net/base/completion_callback.h"
 
 namespace net {
+class NetLog;
 class URLRequestContext;
 }  // namespace net
 
@@ -103,8 +103,6 @@ class ConnectionTester {
   // delegate methods.
   class Delegate {
    public:
-    virtual ~Delegate() {}
-
     // Called once the test suite is about to start.
     virtual void OnStartConnectionTestSuite() = 0;
 
@@ -122,13 +120,17 @@ class ConnectionTester {
 
     // Called once ALL tests have completed.
     virtual void OnCompletedConnectionTestSuite() = 0;
+
+   protected:
+    virtual ~Delegate() {}
   };
 
   // Constructs a ConnectionTester that notifies test progress to |delegate|.
   // |delegate| is owned by the caller, and must remain valid for the lifetime
   // of ConnectionTester.
   ConnectionTester(Delegate* delegate,
-                   net::URLRequestContext* proxy_request_context);
+                   net::URLRequestContext* proxy_request_context,
+                   net::NetLog* net_log);
 
   // Note that destruction cancels any in-progress tests.
   ~ConnectionTester();
@@ -175,6 +177,8 @@ class ConnectionTester {
   ExperimentList remaining_experiments_;
 
   net::URLRequestContext* const proxy_request_context_;
+
+  net::NetLog* net_log_;
 
   DISALLOW_COPY_AND_ASSIGN(ConnectionTester);
 };

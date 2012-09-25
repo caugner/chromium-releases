@@ -8,12 +8,19 @@
 
     'linux_link_kerberos%': 0,
     'conditions': [
-      ['chromeos==1 or OS=="android"', {
-        # Disable Kerberos on ChromeOS and Android, at least for now.
+      ['chromeos==1 or OS=="android" or OS=="ios"', {
+        # Disable Kerberos on ChromeOS, Android and iOS, at least for now.
         # It needs configuration (krb5.conf and so on).
         'use_kerberos%': 0,
       }, {  # chromeos == 0
         'use_kerberos%': 1,
+      }],
+      ['OS=="android"', {
+        # The way the cache uses mmap() is inefficient on some Android devices.
+        # If this flag is set, we hackily avoid using mmap() in the disk cache.
+        'posix_avoid_mmap%': 1,
+      }, {
+        'posix_avoid_mmap%': 0,
       }],
     ],
   },
@@ -30,12 +37,10 @@
         '../base/base.gyp:base_i18n',
         '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
         '../build/temp_gyp/googleurl.gyp:googleurl',
-        '../crypto/crypto.gyp:crypto',
         '../sdch/sdch.gyp:sdch',
         '../third_party/icu/icu.gyp:icui18n',
         '../third_party/icu/icu.gyp:icuuc',
         '../third_party/zlib/zlib.gyp:zlib',
-        '../v8/tools/gyp/v8.gyp:v8',
         'net_resources',
       ],
       'sources': [
@@ -50,6 +55,8 @@
         'base/address_family.h',
         'base/address_list.cc',
         'base/address_list.h',
+        'base/address_tracker_linux.cc',
+        'base/address_tracker_linux.h',
         'base/asn1_util.cc',
         'base/asn1_util.h',
         'base/auth.cc',
@@ -187,8 +194,6 @@
         'base/network_change_notifier_linux.h',
         'base/network_change_notifier_mac.cc',
         'base/network_change_notifier_mac.h',
-        'base/network_change_notifier_netlink_linux.cc',
-        'base/network_change_notifier_netlink_linux.h',
         'base/network_change_notifier_win.cc',
         'base/network_change_notifier_win.h',
         'base/network_config_watcher_mac.cc',
@@ -211,8 +216,8 @@
         'base/prioritized_dispatcher.h',
         'base/priority_queue.h',
         'base/rand_callback.h',
-        'base/registry_controlled_domain.cc',
-        'base/registry_controlled_domain.h',
+        'base/registry_controlled_domains/registry_controlled_domain.cc',
+        'base/registry_controlled_domains/registry_controlled_domain.h',
         'base/request_priority.h',
         'base/sdch_filter.cc',
         'base/sdch_filter.h',
@@ -288,6 +293,8 @@
         'base/x509_util_openssl.h',
         'base/zap.cc',
         'base/zap.h',
+        'cookies/canonical_cookie.cc',
+        'cookies/canonical_cookie.h',
         'cookies/cookie_monster.cc',
         'cookies/cookie_monster.h',
         'cookies/cookie_options.h',
@@ -295,6 +302,8 @@
         'cookies/cookie_store.h',
         'cookies/cookie_util.cc',
         'cookies/cookie_util.h',
+        'cookies/parsed_cookie.cc',
+        'cookies/parsed_cookie.h',
         'disk_cache/addr.cc',
         'disk_cache/addr.h',
         'disk_cache/backend_impl.cc',
@@ -331,6 +340,7 @@
         'disk_cache/in_flight_io.h',
         'disk_cache/mapped_file.h',
         'disk_cache/mapped_file_posix.cc',
+        'disk_cache/mapped_file_avoid_mmap_posix.cc',
         'disk_cache/mapped_file_win.cc',
         'disk_cache/mem_backend_impl.cc',
         'disk_cache/mem_backend_impl.h',
@@ -412,8 +422,6 @@
         'ftp/ftp_util.h',
         'http/des.cc',
         'http/des.h',
-        'http/disk_cache_based_ssl_host_info.cc',
-        'http/disk_cache_based_ssl_host_info.h',
         'http/http_atom_list.h',
         'http/http_auth.cc',
         'http/http_auth.h',
@@ -507,6 +515,7 @@
         'http/http_stream_parser.cc',
         'http/http_stream_parser.h',
         'http/http_transaction.h',
+        'http/http_transaction_delegate.h',
         'http/http_transaction_factory.h',
         'http/http_util.cc',
         'http/http_util.h',
@@ -634,8 +643,6 @@
         'socket/ssl_client_socket_win.h',
         'socket/ssl_error_params.cc',
         'socket/ssl_error_params.h',
-        'socket/ssl_host_info.cc',
-        'socket/ssl_host_info.h',
         'socket/ssl_server_socket.h',
         'socket/ssl_server_socket_nss.cc',
         'socket/ssl_server_socket_nss.h',
@@ -669,6 +676,8 @@
         'spdy/buffered_spdy_framer.cc',
         'spdy/buffered_spdy_framer.h',
         'spdy/spdy_bitmasks.h',
+        'spdy/spdy_credential_builder.cc',
+        'spdy/spdy_credential_builder.h',
         'spdy/spdy_credential_state.cc',
         'spdy/spdy_credential_state.h',
         'spdy/spdy_frame_builder.cc',
@@ -714,7 +723,11 @@
         'udp/udp_socket_libevent.h',
         'udp/udp_socket_win.cc',
         'udp/udp_socket_win.h',
+        'url_request/data_protocol_handler.cc',
+        'url_request/data_protocol_handler.h',
         'url_request/fraudulent_certificate_reporter.h',
+        'url_request/ftp_protocol_handler.cc',
+        'url_request/ftp_protocol_handler.h',
         'url_request/url_fetcher.cc',
         'url_request/url_fetcher.h',
         'url_request/url_fetcher_core.cc',
@@ -795,6 +808,15 @@
         '../base/base.gyp:base',
       ],
       'conditions': [
+        ['OS != "ios"', {
+          'dependencies': [
+            # TODO(ios): This is temporary; Move this back to the main
+            # dependencies section once crypto builds for iOS.
+            '../crypto/crypto.gyp:crypto',
+            # The v8 gyp file is not available in the iOS tree.
+            '../v8/tools/gyp/v8.gyp:v8',
+          ],
+        }],
         ['chromeos==1', {
           'sources!': [
              'base/network_change_notifier_linux.cc',
@@ -833,6 +855,23 @@
             'http/http_auth_gssapi_posix.h',
             'http/http_auth_handler_negotiate.h',
             'http/http_auth_handler_negotiate.cc',
+          ],
+        }],
+        ['posix_avoid_mmap==1', {
+          'defines': [
+            'POSIX_AVOID_MMAP',
+          ],
+          'direct_dependent_settings': {
+            'defines': [
+              'POSIX_AVOID_MMAP',
+            ],
+          },
+          'sources!': [
+            'disk_cache/mapped_file_posix.cc',
+          ],
+        }, { # else
+          'sources!': [
+            'disk_cache/mapped_file_avoid_mmap_posix.cc',
           ],
         }],
         ['use_openssl==1', {
@@ -875,6 +914,7 @@
               'base/keygen_handler_openssl.cc',
               'base/openssl_memory_private_key_store.cc',
               'base/openssl_private_key_store.h',
+              'base/openssl_private_key_store_android.cc',
               'base/test_root_certs_openssl.cc',
               'base/x509_certificate_openssl.cc',
               'base/x509_util_openssl.cc',
@@ -993,15 +1033,48 @@
             },
           },
         ],
-        [ 'OS == "android"', {
-            'defines': [
-              # Android can shut down our app at any time, so we persist session cookies.
-              'ENABLE_PERSISTENT_SESSION_COOKIES'
+        [ 'OS == "ios"', {
+            'link_settings': {
+              'libraries': [
+                '$(SDKROOT)/System/Library/Frameworks/CFNetwork.framework',
+                '$(SDKROOT)/System/Library/Frameworks/MobileCoreServices.framework',
+                '$(SDKROOT)/System/Library/Frameworks/SystemConfiguration.framework',
+                '$(SDKROOT)/usr/lib/libresolv.dylib',
+              ],
+            },
+            'sources/': [
+              # TODO(ios): Right now there is only a very limited subset of net
+              # compiled on iOS, just enough to bring up the dependencies needed
+              # by the ui target.
+              ['exclude', '.*'],
+              ['include', '^base/dns_util\\.'],
+              ['include', '^base/escape\\.'],
+              ['include', '^base/ip_endpoint\\.'],
+              ['include', '^base/mime_util\\.'],
+              ['include', '^base/net_errors\\.'],
+              ['include', '^base/net_errors_posix\\.cc$'],
+              ['include', '^base/net_export\\.h$'],
+              ['include', '^base/net_log\\.'],
+              ['include', '^base/net_module\\.'],
+              ['include', '^base/net_util\\.'],
+              ['include', '^base/net_util_posix\\.cc$'],
+              ['include', '^base/platform_mime_util\\.h$'],
+              ['include', '^base/registry_controlled_domains/registry_controlled_domain\\.'],
+              ['include', '^http/http_byte_range\\.'],
+              ['include', '^http/http_content_disposition\\.'],
+              ['include', '^http/http_util\\.'],
+              ['include', '^http/http_util_icu\\.cc$'],
+              ['include', '^http/http_version\\.h$'],
             ],
+          },
+        ],
+        [ 'OS == "android"', {
             'dependencies': [
               '../third_party/openssl/openssl.gyp:openssl',
-              'net_java',
               'net_jni_headers',
+            ],
+            'sources!': [
+              'base/openssl_memory_private_key_store.cc',
             ],
           }, {  # else OS! = "android"
             'defines': [
@@ -1019,9 +1092,18 @@
         ],
       ],
       'target_conditions': [
+        # These source files are excluded by default platform rules, but they
+        # are needed in specific cases on other platforms. Re-including them can
+        # only be done in target_conditions as it is evaluated after the
+        # platform rules.
         ['OS == "android"', {
           'sources/': [
             ['include', '^base/platform_mime_util_linux\\.cc$'],
+          ],
+        }],
+        ['OS == "ios"', {
+          'sources/': [
+            ['include', 'base/platform_mime_util_mac\\.mm$'],
           ],
         }],
       ],
@@ -1030,19 +1112,19 @@
       'target_name': 'net_unittests',
       'type': '<(gtest_target_type)',
       'dependencies': [
-        'net',
-        'net_test_support',
         '../base/base.gyp:base',
         '../base/base.gyp:base_i18n',
         '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
         '../build/temp_gyp/googleurl.gyp:googleurl',
-        '../crypto/crypto.gyp:crypto',
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
         '../third_party/zlib/zlib.gyp:zlib',
+        'net',
+        'net_test_support',
       ],
       'sources': [
         'base/address_list_unittest.cc',
+        'base/address_tracker_linux_unittest.cc',
         'base/backoff_entry_unittest.cc',
         'base/big_endian_unittest.cc',
         'base/cert_database_nss_unittest.cc',
@@ -1079,7 +1161,7 @@
         'base/pem_tokenizer_unittest.cc',
         'base/prioritized_dispatcher_unittest.cc',
         'base/priority_queue_unittest.cc',
-        'base/registry_controlled_domain_unittest.cc',
+        'base/registry_controlled_domains/registry_controlled_domain_unittest.cc',
         'base/run_all_unittests.cc',
         'base/sdch_filter_unittest.cc',
         'base/server_bound_cert_service_unittest.cc',
@@ -1100,9 +1182,11 @@
         'base/x509_cert_types_unittest.cc',
         'base/x509_util_nss_unittest.cc',
         'base/x509_util_openssl_unittest.cc',
+        'cookies/canonical_cookie_unittest.cc',
         'cookies/cookie_monster_unittest.cc',
         'cookies/cookie_store_unittest.h',
         'cookies/cookie_util_unittest.cc',
+        'cookies/parsed_cookie_unittest.cc',
         'disk_cache/addr_unittest.cc',
         'disk_cache/backend_unittest.cc',
         'disk_cache/bitmap_unittest.cc',
@@ -1131,7 +1215,6 @@
         'ftp/ftp_network_transaction_unittest.cc',
         'ftp/ftp_util_unittest.cc',
         'http/des_unittest.cc',
-        'http/disk_cache_based_ssl_host_info_unittest.cc',
         'http/http_auth_cache_unittest.cc',
         'http/http_auth_controller_unittest.cc',
         'http/http_auth_filter_unittest.cc',
@@ -1219,6 +1302,7 @@
         'socket_stream/socket_stream_unittest.cc',
         'spdy/buffered_spdy_framer_spdy3_unittest.cc',
         'spdy/buffered_spdy_framer_spdy2_unittest.cc',
+        'spdy/spdy_credential_builder_unittest.cc',
         'spdy/spdy_credential_state_unittest.cc',
         'spdy/spdy_frame_reader_test.cc',
         'spdy/spdy_framer_test.cc',
@@ -1234,6 +1318,8 @@
         'spdy/spdy_session_spdy2_unittest.cc',
         'spdy/spdy_stream_spdy3_unittest.cc',
         'spdy/spdy_stream_spdy2_unittest.cc',
+        'spdy/spdy_stream_test_util.cc',
+        'spdy/spdy_stream_test_util.h',
         'spdy/spdy_test_util_spdy3.cc',
         'spdy/spdy_test_util_spdy3.h',
         'spdy/spdy_test_util_spdy2.cc',
@@ -1254,6 +1340,8 @@
         'udp/udp_socket_unittest.cc',
         'url_request/url_fetcher_impl_unittest.cc',
         'url_request/url_request_context_builder_unittest.cc',
+        'url_request/url_request_filter_unittest.cc',
+        'url_request/url_request_ftp_job_unittest.cc',
         'url_request/url_request_job_factory_unittest.cc',
         'url_request/url_request_job_unittest.cc',
         'url_request/url_request_throttler_simulation_unittest.cc',
@@ -1271,10 +1359,17 @@
         'websockets/websocket_throttle_unittest.cc',
       ],
       'conditions': [
+        ['OS != "ios"', {
+          'dependencies': [
+            # TODO(ios): This is temporary; Move back to the main dependencies
+            # section as crypto is brought up for iOS.
+            '../crypto/crypto.gyp:crypto',
+          ],
+        }],
         ['chromeos==1', {
           'sources!': [
-             'base/network_change_notifier_linux_unittest.cc',
-             'proxy/proxy_config_service_linux_unittest.cc',
+            'base/network_change_notifier_linux_unittest.cc',
+            'proxy/proxy_config_service_linux_unittest.cc',
           ],
         }],
         [ 'use_glib == 1', {
@@ -1293,7 +1388,7 @@
             ],
           },
         ],
-        [ 'os_posix == 1 and OS != "mac" and OS != "android"', {
+        [ 'os_posix == 1 and OS != "mac" and OS != "android" and OS != "ios"', {
           'conditions': [
             ['linux_use_tcmalloc==1', {
               'dependencies': [
@@ -1352,6 +1447,28 @@
             ],
           },
         ],
+        ['OS == "ios"', {
+          # TODO: For now this only tests the subset of code that is enabled in
+          # the net target.
+          'dependencies': [
+            '../testing/gtest.gyp:gtest_main',
+          ],
+          'dependencies!': [
+            'net_test_support',
+          ],
+          'sources/': [
+            ['exclude', '.*'],
+            ['include', '^base/dns_util_unittest\\.cc$'],
+            ['include', '^base/escape_unittest\\.cc$'],
+            ['include', '^base/ip_endpoint_unittest\\.cc$'],
+            ['include', '^base/mime_util_unittest\\.cc$'],
+            ['include', '^base/net_log_unittest\\.cc$'],
+            ['include', '^base/registry_controlled_domains/registry_controlled_domain_unittest\\.cc$'],
+            ['include', '^http/http_byte_range_unittest\\.cc$'],
+            ['include', '^http/http_content_disposition_unittest\\.cc$'],
+            ['include', '^http/http_util_unittest\\.cc$'],
+          ],
+        }],
         [ 'OS == "linux"', {
             'dependencies': [
               '../build/linux/system.gyp:dbus',
@@ -1377,52 +1494,20 @@
           'sources!': [
             'base/x509_cert_types_unittest.cc',
           ],
-        }]
-      ],
-    },
-    {
-      'target_name': 'net_unittests_run',
-      'type': 'none',
-      'dependencies': [
-        'net_unittests',
-      ],
-      'includes': [
-        'net_unittests.isolate',
-      ],
-      'actions': [
-        {
-          'action_name': 'isolate',
-          'inputs': [
-            'net_unittests.isolate',
-            '<@(isolate_dependency_tracked)',
-          ],
-          'outputs': [
-            '<(PRODUCT_DIR)/net_unittests.results',
-          ],
-          'action': [
-            'python',
-            '../tools/isolate/isolate.py',
-            '--mode', '<(test_isolation_mode)',
-            '--outdir', '<(test_isolation_outdir)',
-            '--variable', 'PRODUCT_DIR', '<(PRODUCT_DIR)',
-            '--variable', 'OS', '<(OS)',
-            '--result', '<@(_outputs)',
-            'net_unittests.isolate',
-          ],
-        },
+        }],
       ],
     },
     {
       'target_name': 'net_perftests',
       'type': 'executable',
       'dependencies': [
-        'net',
-        'net_test_support',
         '../base/base.gyp:base',
         '../base/base.gyp:base_i18n',
         '../base/base.gyp:test_support_perf',
         '../build/temp_gyp/googleurl.gyp:googleurl',
         '../testing/gtest.gyp:gtest',
+        'net',
+        'net_test_support',
       ],
       'sources': [
         'cookies/cookie_monster_perftest.cc',
@@ -1438,66 +1523,26 @@
             ],
           },
         ],
-      ],
-    },
-    {
-      'target_name': 'stress_cache',
-      'type': 'executable',
-      'dependencies': [
-        'net',
-        'net_test_support',
-        '../base/base.gyp:base',
-      ],
-      'sources': [
-        'disk_cache/stress_cache.cc',
-      ],
-    },
-    {
-      'target_name': 'tld_cleanup',
-      'type': 'executable',
-      'dependencies': [
-        '../base/base.gyp:base',
-        '../base/base.gyp:base_i18n',
-        '../build/temp_gyp/googleurl.gyp:googleurl',
-      ],
-      'sources': [
-        'tools/tld_cleanup/tld_cleanup.cc',
-      ],
-    },
-    {
-      'target_name': 'crash_cache',
-      'type': 'executable',
-      'dependencies': [
-        'net',
-        'net_test_support',
-        '../base/base.gyp:base',
-      ],
-      'sources': [
-        'tools/crash_cache/crash_cache.cc',
-      ],
-    },
-    {
-      'target_name': 'run_testserver',
-      'type': 'executable',
-      'dependencies': [
-        'net',
-        'net_test_support',
-        '../base/base.gyp:base',
-        '../build/temp_gyp/googleurl.gyp:googleurl',
-        '../testing/gtest.gyp:gtest',
-      ],
-      'sources': [
-        'tools/testserver/run_testserver.cc',
+        ['OS == "ios"', {
+          'sources!': [
+            # PAC scripts are not supported on iOS.
+            'proxy/proxy_resolver_perftest.cc',
+            # TODO:(ios): Enable these tests once the code to exercise is
+            # present in the net target.
+            'cookies/cookie_monster_perftest.cc',
+            'disk_cache/disk_cache_perftest.cc',
+          ],
+        }],
       ],
     },
     {
       'target_name': 'net_test_support',
       'type': 'static_library',
       'dependencies': [
-        'net',
         '../base/base.gyp:base',
         '../base/base.gyp:test_support_base',
         '../testing/gtest.gyp:gtest',
+        'net',
       ],
       'export_dependent_settings': [
         '../base/base.gyp:base',
@@ -1554,11 +1599,13 @@
         'test/spawner_communicator.cc',
         'test/spawner_communicator.h',
         'test/test_server.h',
+        'url_request/test_url_fetcher_factory.cc',
+        'url_request/test_url_fetcher_factory.h',
         'url_request/url_request_test_util.cc',
         'url_request/url_request_test_util.h',
       ],
       'conditions': [
-        ['inside_chromium_build==1', {
+        ['inside_chromium_build==1 and OS != "ios"', {
           'dependencies': [
             '../chrome/app/policy/cloud_policy_codegen.gyp:cloud_policy_proto_compile',
             # The test server uses Python modules generated by the sync protos.
@@ -1566,7 +1613,7 @@
             '../third_party/protobuf/protobuf.gyp:py_proto',
           ],
         }],
-        ['os_posix == 1 and OS != "mac" and OS != "android"', {
+        ['os_posix == 1 and OS != "mac" and OS != "android" and OS != "ios"', {
           'conditions': [
             ['use_openssl==1', {
               'dependencies': [
@@ -1579,7 +1626,7 @@
             }],
           ],
         }],
-        ['os_posix == 1 and OS != "mac" and OS != "android"', {
+        ['os_posix == 1 and OS != "mac" and OS != "android" and OS != "ios"', {
           'conditions': [
             ['linux_use_tcmalloc==1', {
               'dependencies': [
@@ -1616,62 +1663,12 @@
       'includes': [ '../build/grit_target.gypi' ],
     },
     {
-      'target_name': 'gdig',
-      'type': 'executable',
-      'dependencies': [
-        '../base/base.gyp:base',
-        'net',
-      ],
-      'sources': [
-        'tools/gdig/file_net_log.cc',
-        'tools/gdig/gdig.cc',
-      ],
-    },
-    {
-      'target_name': 'fetch_client',
-      'type': 'executable',
-      'variables': { 'enable_wexit_time_destructors': 1, },
-      'dependencies': [
-        'net',
-        '../base/base.gyp:base',
-        '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
-        '../build/temp_gyp/googleurl.gyp:googleurl',
-        '../testing/gtest.gyp:gtest',
-      ],
-      'sources': [
-        'tools/fetch/fetch_client.cc',
-      ],
-    },
-    {
-      'target_name': 'fetch_server',
-      'type': 'executable',
-      'variables': { 'enable_wexit_time_destructors': 1, },
-      'dependencies': [
-        'net',
-        '../base/base.gyp:base',
-        '../build/temp_gyp/googleurl.gyp:googleurl',
-      ],
-      'sources': [
-        'tools/fetch/fetch_server.cc',
-        'tools/fetch/http_listen_socket.cc',
-        'tools/fetch/http_listen_socket.h',
-        'tools/fetch/http_server.cc',
-        'tools/fetch/http_server.h',
-        'tools/fetch/http_server_request_info.cc',
-        'tools/fetch/http_server_request_info.h',
-        'tools/fetch/http_server_response_info.cc',
-        'tools/fetch/http_server_response_info.h',
-        'tools/fetch/http_session.cc',
-        'tools/fetch/http_session.h',
-      ],
-    },
-    {
       'target_name': 'http_server',
       'type': 'static_library',
       'variables': { 'enable_wexit_time_destructors': 1, },
       'dependencies': [
-        'net',
         '../base/base.gyp:base',
+        'net',
       ],
       'sources': [
         'server/http_connection.cc',
@@ -1684,180 +1681,293 @@
         'server/web_socket.h',
       ],
     },
-    {
-      'target_name': 'dnssec_chain_verify',
-      'type': 'executable',
-      'dependencies': [
-        'net',
-        '../base/base.gyp:base',
-      ],
-      'sources': [
-        'tools/dnssec_chain_verify/dnssec_chain_verify.cc',
-      ],
-    },
-    {
-      'target_name': 'crl_set_dump',
-      'type': 'executable',
-      'dependencies': [
-        'net',
-        '../base/base.gyp:base',
-      ],
-      'sources': [
-        'tools/crl_set_dump/crl_set_dump.cc',
-      ],
-    },
-    {
-      'target_name': 'dns_fuzz_stub',
-      'type': 'executable',
-      'dependencies': [
-        'net',
-        '../base/base.gyp:base',
-      ],
-      'sources': [
-        'tools/dns_fuzz_stub/dns_fuzz_stub.cc',
-      ],
-    },
   ],
   'conditions': [
-     ['os_posix == 1 and OS != "mac" and OS != "android"', {
-       'targets': [
-         {
-           'target_name': 'flip_in_mem_edsm_server',
-           'type': 'executable',
-           'cflags': [
-             '-Wno-deprecated',
-           ],
-           'dependencies': [
-             '../base/base.gyp:base',
-             'net',
-             '../third_party/openssl/openssl.gyp:openssl',
-           ],
-           'sources': [
-             'tools/dump_cache/url_to_filename_encoder.cc',
-             'tools/dump_cache/url_to_filename_encoder.h',
-             'tools/dump_cache/url_utilities.h',
-             'tools/dump_cache/url_utilities.cc',
+    ['OS != "ios"', {
+      'targets': [
+        # iOS doesn't have the concept of simple executables, these targets
+        # can't be compiled on the platform.
+        {
+          'target_name': 'crash_cache',
+          'type': 'executable',
+          'dependencies': [
+            '../base/base.gyp:base',
+            'net',
+            'net_test_support',
+          ],
+          'sources': [
+            'tools/crash_cache/crash_cache.cc',
+          ],
+        },
+        {
+          'target_name': 'crl_set_dump',
+          'type': 'executable',
+          'dependencies': [
+            '../base/base.gyp:base',
+            'net',
+          ],
+          'sources': [
+            'tools/crl_set_dump/crl_set_dump.cc',
+          ],
+        },
+        {
+          'target_name': 'dns_fuzz_stub',
+          'type': 'executable',
+          'dependencies': [
+            '../base/base.gyp:base',
+            'net',
+          ],
+          'sources': [
+            'tools/dns_fuzz_stub/dns_fuzz_stub.cc',
+          ],
+        },
+        {
+          'target_name': 'dnssec_chain_verify',
+          'type': 'executable',
+          'dependencies': [
+            '../base/base.gyp:base',
+            'net',
+          ],
+          'sources': [
+            'tools/dnssec_chain_verify/dnssec_chain_verify.cc',
+          ],
+        },
+        {
+          'target_name': 'fetch_client',
+          'type': 'executable',
+          'variables': { 'enable_wexit_time_destructors': 1, },
+          'dependencies': [
+            '../base/base.gyp:base',
+            '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
+            '../build/temp_gyp/googleurl.gyp:googleurl',
+            '../testing/gtest.gyp:gtest',
+            'net',
+          ],
+          'sources': [
+            'tools/fetch/fetch_client.cc',
+          ],
+        },
+        {
+          'target_name': 'fetch_server',
+          'type': 'executable',
+          'variables': { 'enable_wexit_time_destructors': 1, },
+          'dependencies': [
+            '../base/base.gyp:base',
+            '../build/temp_gyp/googleurl.gyp:googleurl',
+            'net',
+          ],
+          'sources': [
+            'tools/fetch/fetch_server.cc',
+            'tools/fetch/http_listen_socket.cc',
+            'tools/fetch/http_listen_socket.h',
+            'tools/fetch/http_server.cc',
+            'tools/fetch/http_server.h',
+            'tools/fetch/http_server_request_info.cc',
+            'tools/fetch/http_server_request_info.h',
+            'tools/fetch/http_server_response_info.cc',
+            'tools/fetch/http_server_response_info.h',
+            'tools/fetch/http_session.cc',
+            'tools/fetch/http_session.h',
+          ],
+        },
+        {
+          'target_name': 'gdig',
+          'type': 'executable',
+          'dependencies': [
+            '../base/base.gyp:base',
+            'net',
+          ],
+          'sources': [
+            'tools/gdig/file_net_log.cc',
+            'tools/gdig/gdig.cc',
+          ],
+        },
+        {
+          'target_name': 'net_watcher',
+          'type': 'executable',
+          'dependencies': [
+            '../base/base.gyp:base',
+            'net',
+          ],
+          'sources': [
+            'tools/net_watcher/net_watcher.cc',
+          ],
+        },
+        {
+          'target_name': 'run_testserver',
+          'type': 'executable',
+          'dependencies': [
+            '../base/base.gyp:base',
+            '../build/temp_gyp/googleurl.gyp:googleurl',
+            '../testing/gtest.gyp:gtest',
+            'net',
+            'net_test_support',
+          ],
+          'sources': [
+            'tools/testserver/run_testserver.cc',
+          ],
+        },
+        {
+          'target_name': 'stress_cache',
+          'type': 'executable',
+          'dependencies': [
+            '../base/base.gyp:base',
+            'net',
+            'net_test_support',
+          ],
+          'sources': [
+            'disk_cache/stress_cache.cc',
+          ],
+        },
+        {
+          'target_name': 'tld_cleanup',
+          'type': 'executable',
+          'dependencies': [
+            '../base/base.gyp:base',
+            '../base/base.gyp:base_i18n',
+            '../build/temp_gyp/googleurl.gyp:googleurl',
+          ],
+          'sources': [
+            'tools/tld_cleanup/tld_cleanup.cc',
+          ],
+        },
+      ],
+    }],
+    ['os_posix == 1 and OS != "mac" and OS != "ios" and OS != "android"', {
+      'targets': [
+        {
+          'target_name': 'flip_in_mem_edsm_server',
+          'type': 'executable',
+          'cflags': [
+            '-Wno-deprecated',
+          ],
+          'dependencies': [
+            '../base/base.gyp:base',
+            '../third_party/openssl/openssl.gyp:openssl',
+            'net',
+          ],
+          'sources': [
+            'tools/dump_cache/url_to_filename_encoder.cc',
+            'tools/dump_cache/url_to_filename_encoder.h',
+            'tools/dump_cache/url_utilities.h',
+            'tools/dump_cache/url_utilities.cc',
 
-             'tools/flip_server/acceptor_thread.h',
-             'tools/flip_server/acceptor_thread.cc',
-             'tools/flip_server/balsa_enums.h',
-             'tools/flip_server/balsa_frame.cc',
-             'tools/flip_server/balsa_frame.h',
-             'tools/flip_server/balsa_headers.cc',
-             'tools/flip_server/balsa_headers.h',
-             'tools/flip_server/balsa_headers_token_utils.cc',
-             'tools/flip_server/balsa_headers_token_utils.h',
-             'tools/flip_server/balsa_visitor_interface.h',
-             'tools/flip_server/buffer_interface.h',
-             'tools/flip_server/constants.h',
-             'tools/flip_server/create_listener.cc',
-             'tools/flip_server/create_listener.h',
-             'tools/flip_server/epoll_server.cc',
-             'tools/flip_server/epoll_server.h',
-             'tools/flip_server/flip_config.cc',
-             'tools/flip_server/flip_config.h',
-             'tools/flip_server/flip_in_mem_edsm_server.cc',
-             'tools/flip_server/http_interface.cc',
-             'tools/flip_server/http_interface.h',
-             'tools/flip_server/http_message_constants.cc',
-             'tools/flip_server/http_message_constants.h',
-             'tools/flip_server/loadtime_measurement.h',
-             'tools/flip_server/mem_cache.h',
-             'tools/flip_server/mem_cache.cc',
-             'tools/flip_server/output_ordering.cc',
-             'tools/flip_server/output_ordering.h',
-             'tools/flip_server/ring_buffer.cc',
-             'tools/flip_server/ring_buffer.h',
-             'tools/flip_server/simple_buffer.cc',
-             'tools/flip_server/simple_buffer.h',
-             'tools/flip_server/sm_connection.cc',
-             'tools/flip_server/sm_connection.h',
-             'tools/flip_server/sm_interface.h',
-             'tools/flip_server/split.h',
-             'tools/flip_server/split.cc',
-             'tools/flip_server/spdy_ssl.cc',
-             'tools/flip_server/spdy_ssl.h',
-             'tools/flip_server/spdy_interface.cc',
-             'tools/flip_server/spdy_interface.h',
-             'tools/flip_server/spdy_util.cc',
-             'tools/flip_server/spdy_util.h',
-             'tools/flip_server/streamer_interface.cc',
-             'tools/flip_server/streamer_interface.h',
-             'tools/flip_server/string_piece_utils.h',
-           ],
-         },
-         {
-           'target_name': 'curvecp',
-           'type': 'static_library',
-           'variables': { 'enable_wexit_time_destructors': 1, },
-           'dependencies': [
-             '../base/base.gyp:base',
-             'net',
-           ],
-           'sources': [
-             'curvecp/circular_buffer.cc',
-             'curvecp/circular_buffer.h',
-             'curvecp/client_packetizer.cc',
-             'curvecp/client_packetizer.h',
-             'curvecp/connection_key.cc',
-             'curvecp/connection_key.h',
-             'curvecp/curvecp_client_socket.cc',
-             'curvecp/curvecp_client_socket.h',
-             'curvecp/curvecp_server_socket.cc',
-             'curvecp/curvecp_server_socket.h',
-             'curvecp/messenger.h',
-             'curvecp/messenger.cc',
-             'curvecp/packetizer.h',
-             'curvecp/protocol.cc',
-             'curvecp/protocol.h',
-             'curvecp/received_block_list.cc',
-             'curvecp/received_block_list.h',
-             'curvecp/rtt_and_send_rate_calculator.cc',
-             'curvecp/rtt_and_send_rate_calculator.h',
-             'curvecp/sent_block_list.cc',
-             'curvecp/sent_block_list.h',
-             'curvecp/server_messenger.cc',
-             'curvecp/server_messenger.h',
-             'curvecp/server_packetizer.cc',
-             'curvecp/server_packetizer.h',
-           ],
-         },
-         {
-           'target_name': 'curvecp_unittests',
-           'type': 'executable',
-           'dependencies': [
-             '../base/base.gyp:base',
-             'curvecp',
-             'net',
-             'net_test_support',
-             '../testing/gmock.gyp:gmock',
-             '../testing/gtest.gyp:gtest',
-             '../third_party/zlib/zlib.gyp:zlib',
-           ],
-           'sources': [
-             'curvecp/curvecp_transfer_unittest.cc',
-             'curvecp/test_client.cc',
-             'curvecp/test_server.cc',
-           ],
-         },
-       ]
-     }],
+            'tools/flip_server/acceptor_thread.h',
+            'tools/flip_server/acceptor_thread.cc',
+            'tools/flip_server/balsa_enums.h',
+            'tools/flip_server/balsa_frame.cc',
+            'tools/flip_server/balsa_frame.h',
+            'tools/flip_server/balsa_headers.cc',
+            'tools/flip_server/balsa_headers.h',
+            'tools/flip_server/balsa_headers_token_utils.cc',
+            'tools/flip_server/balsa_headers_token_utils.h',
+            'tools/flip_server/balsa_visitor_interface.h',
+            'tools/flip_server/buffer_interface.h',
+            'tools/flip_server/constants.h',
+            'tools/flip_server/create_listener.cc',
+            'tools/flip_server/create_listener.h',
+            'tools/flip_server/epoll_server.cc',
+            'tools/flip_server/epoll_server.h',
+            'tools/flip_server/flip_config.cc',
+            'tools/flip_server/flip_config.h',
+            'tools/flip_server/flip_in_mem_edsm_server.cc',
+            'tools/flip_server/http_interface.cc',
+            'tools/flip_server/http_interface.h',
+            'tools/flip_server/http_message_constants.cc',
+            'tools/flip_server/http_message_constants.h',
+            'tools/flip_server/loadtime_measurement.h',
+            'tools/flip_server/mem_cache.h',
+            'tools/flip_server/mem_cache.cc',
+            'tools/flip_server/output_ordering.cc',
+            'tools/flip_server/output_ordering.h',
+            'tools/flip_server/ring_buffer.cc',
+            'tools/flip_server/ring_buffer.h',
+            'tools/flip_server/simple_buffer.cc',
+            'tools/flip_server/simple_buffer.h',
+            'tools/flip_server/sm_connection.cc',
+            'tools/flip_server/sm_connection.h',
+            'tools/flip_server/sm_interface.h',
+            'tools/flip_server/split.h',
+            'tools/flip_server/split.cc',
+            'tools/flip_server/spdy_ssl.cc',
+            'tools/flip_server/spdy_ssl.h',
+            'tools/flip_server/spdy_interface.cc',
+            'tools/flip_server/spdy_interface.h',
+            'tools/flip_server/spdy_util.cc',
+            'tools/flip_server/spdy_util.h',
+            'tools/flip_server/streamer_interface.cc',
+            'tools/flip_server/streamer_interface.h',
+            'tools/flip_server/string_piece_utils.h',
+          ],
+        },
+        {
+          'target_name': 'curvecp',
+          'type': 'static_library',
+          'variables': { 'enable_wexit_time_destructors': 1, },
+          'dependencies': [
+            '../base/base.gyp:base',
+            'net',
+          ],
+          'sources': [
+            'curvecp/circular_buffer.cc',
+            'curvecp/circular_buffer.h',
+            'curvecp/client_packetizer.cc',
+            'curvecp/client_packetizer.h',
+            'curvecp/connection_key.cc',
+            'curvecp/connection_key.h',
+            'curvecp/curvecp_client_socket.cc',
+            'curvecp/curvecp_client_socket.h',
+            'curvecp/curvecp_server_socket.cc',
+            'curvecp/curvecp_server_socket.h',
+            'curvecp/messenger.h',
+            'curvecp/messenger.cc',
+            'curvecp/packetizer.h',
+            'curvecp/protocol.cc',
+            'curvecp/protocol.h',
+            'curvecp/received_block_list.cc',
+            'curvecp/received_block_list.h',
+            'curvecp/rtt_and_send_rate_calculator.cc',
+            'curvecp/rtt_and_send_rate_calculator.h',
+            'curvecp/sent_block_list.cc',
+            'curvecp/sent_block_list.h',
+            'curvecp/server_messenger.cc',
+            'curvecp/server_messenger.h',
+            'curvecp/server_packetizer.cc',
+            'curvecp/server_packetizer.h',
+          ],
+        },
+        {
+          'target_name': 'curvecp_unittests',
+          'type': 'executable',
+          'dependencies': [
+            '../base/base.gyp:base',
+            '../testing/gmock.gyp:gmock',
+            '../testing/gtest.gyp:gtest',
+            '../third_party/zlib/zlib.gyp:zlib',
+            'curvecp',
+            'net',
+            'net_test_support',
+          ],
+          'sources': [
+            'curvecp/curvecp_transfer_unittest.cc',
+            'curvecp/test_client.cc',
+            'curvecp/test_server.cc',
+          ],
+        },
+      ]
+    }],
     ['OS=="android"', {
       'targets': [
         {
           'target_name': 'net_jni_headers',
           'type': 'none',
+          'sources': [
+            'android/java/src/org/chromium/net/AndroidNetworkLibrary.java',
+            'android/java/src/org/chromium/net/NetworkChangeNotifier.java',
+            'android/java/src/org/chromium/net/ProxyChangeListener.java',
+          ],
           'variables': {
-            'java_sources': [
-              'android/java/org/chromium/net/AndroidNetworkLibrary.java',
-              'android/java/org/chromium/net/NetworkChangeNotifier.java',
-              'android/java/org/chromium/net/ProxyChangeListener.java',
-            ],
-            'jni_headers': [
-              '<(SHARED_INTERMEDIATE_DIR)/net/jni/android_network_library_jni.h',
-              '<(SHARED_INTERMEDIATE_DIR)/net/jni/network_change_notifier_jni.h',
-              '<(SHARED_INTERMEDIATE_DIR)/net/jni/proxy_change_listener_jni.h',
-            ],
+            'jni_gen_dir': 'net',
           },
           'includes': [ '../build/jni_generator.gypi' ],
         },
@@ -1907,9 +2017,9 @@
           'target_name': 'dump_cache',
           'type': 'executable',
           'dependencies': [
+            '../base/base.gyp:base',
             'net',
             'net_test_support',
-            '../base/base.gyp:base',
           ],
           'sources': [
             'tools/dump_cache/cache_dumper.cc',
@@ -1921,6 +2031,42 @@
             'tools/dump_cache/url_to_filename_encoder.h',
             'tools/dump_cache/url_utilities.h',
             'tools/dump_cache/url_utilities.cc',
+          ],
+        },
+      ],
+    }],
+    ['test_isolation_mode != "noop"', {
+      'targets': [
+        {
+          'target_name': 'net_unittests_run',
+          'type': 'none',
+          'dependencies': [
+            'net_unittests',
+          ],
+          'includes': [
+            'net_unittests.isolate',
+          ],
+          'actions': [
+            {
+              'action_name': 'isolate',
+              'inputs': [
+                'net_unittests.isolate',
+                '<@(isolate_dependency_tracked)',
+              ],
+              'outputs': [
+                '<(PRODUCT_DIR)/net_unittests.results',
+              ],
+              'action': [
+                'python',
+                '../tools/isolate/isolate.py',
+                '<(test_isolation_mode)',
+                '--outdir', '<(test_isolation_outdir)',
+                '--variable', 'PRODUCT_DIR', '<(PRODUCT_DIR)',
+                '--variable', 'OS', '<(OS)',
+                '--result', '<@(_outputs)',
+                '--isolate', 'net_unittests.isolate',
+              ],
+            },
           ],
         },
       ],

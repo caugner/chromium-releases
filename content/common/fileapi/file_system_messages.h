@@ -60,6 +60,12 @@ IPC_MESSAGE_CONTROL5(FileSystemHostMsg_Open,
                      int64 /* requested_size */,
                      bool /* create */)
 
+// WebFrameClient::deleteFileSystem() message.
+IPC_MESSAGE_CONTROL3(FileSystemHostMsg_DeleteFileSystem,
+                     int /* request_id */,
+                     GURL /* origin_url */,
+                     fileapi::FileSystemType /* type */)
+
 // WebFileSystem::move() message.
 IPC_MESSAGE_CONTROL3(FileSystemHostMsg_Move,
                      int /* request_id */,
@@ -132,6 +138,10 @@ IPC_MESSAGE_CONTROL3(FileSystemHostMsg_OpenFile,
                      int /* request id */,
                      GURL /* file path */,
                      int /* file flags */)
+
+// Pepper's NotifyCloseFile message.
+IPC_MESSAGE_CONTROL1(FileSystemHostMsg_NotifyCloseFile,
+                     GURL /* file path */)
 
 // WebFileSystem::createSnapshotFileAndReadMetadata() message.
 IPC_MESSAGE_CONTROL3(FileSystemHostMsg_CreateSnapshotFile,

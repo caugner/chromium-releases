@@ -4,13 +4,11 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_OMNIBOX_OMNIBOX_VIEW_VIEWS_H_
 #define CHROME_BROWSER_UI_VIEWS_OMNIBOX_OMNIBOX_VIEW_VIEWS_H_
-#pragma once
 
 #include <string>
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/browser/ui/toolbar/toolbar_model.h"
 #include "ui/base/range/range.h"
@@ -22,10 +20,10 @@
 #include "chrome/browser/chromeos/input_method/input_method_manager.h"
 #endif
 
-class AutocompleteEditController;
-class AutocompleteEditModel;
-class AutocompletePopupView;
 class LocationBarView;
+class OmniboxEditController;
+class OmniboxEditModel;
+class OmniboxPopupView;
 class Profile;
 
 namespace ui {
@@ -52,7 +50,7 @@ class OmniboxViewViews
   // The internal view class name.
   static const char kViewClassName[];
 
-  OmniboxViewViews(AutocompleteEditController* controller,
+  OmniboxViewViews(OmniboxEditController* controller,
                    ToolbarModel* toolbar_model,
                    Profile* profile,
                    CommandUpdater* command_updater,
@@ -61,7 +59,7 @@ class OmniboxViewViews
   virtual ~OmniboxViewViews();
 
   // Initialize, create the underlying views, etc;
-  void Init();
+  void Init(views::View* popup_parent_view);
 
   // Sets the colors of the text view according to the theme.
   void SetBaseColor();
@@ -96,8 +94,8 @@ class OmniboxViewViews
   virtual void OnBoundsChanged(const gfx::Rect& previous_bounds) OVERRIDE;
 
   // OmniboxView:
-  virtual AutocompleteEditModel* model() OVERRIDE;
-  virtual const AutocompleteEditModel* model() const OVERRIDE;
+  virtual OmniboxEditModel* model() OVERRIDE;
+  virtual const OmniboxEditModel* model() const OVERRIDE;
   virtual void SaveStateToTab(content::WebContents* tab) OVERRIDE;
   virtual void Update(
       const content::WebContents* tab_for_state_restoring) OVERRIDE;
@@ -159,6 +157,8 @@ class OmniboxViewViews
   virtual void OnWriteDragData(ui::OSExchangeData* data) OVERRIDE;
   virtual void UpdateContextMenu(ui::SimpleMenuModel* menu_contents) OVERRIDE;
   virtual bool IsCommandIdEnabled(int command_id) const OVERRIDE;
+  virtual bool IsItemForCommandIdDynamic(int command_id) const OVERRIDE;
+  virtual string16 GetLabelForCommandId(int command_id) const OVERRIDE;
   virtual void ExecuteCommand(int command_id) OVERRIDE;
 
 #if defined(OS_CHROMEOS)
@@ -192,9 +192,9 @@ class OmniboxViewViews
   // different presentation (smaller font size). This is used for popups.
   bool popup_window_mode_;
 
-  scoped_ptr<AutocompleteEditModel> model_;
-  scoped_ptr<AutocompletePopupView> popup_view_;
-  AutocompleteEditController* controller_;
+  scoped_ptr<OmniboxEditModel> model_;
+  scoped_ptr<OmniboxPopupView> popup_view_;
+  OmniboxEditController* controller_;
   ToolbarModel* toolbar_model_;
 
   // The object that handles additional command functionality exposed on the

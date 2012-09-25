@@ -5,11 +5,13 @@
 #ifndef CHROME_BROWSER_CHROMEOS_CHROME_BROWSER_MAIN_CHROMEOS_H_
 #define CHROME_BROWSER_CHROMEOS_CHROME_BROWSER_MAIN_CHROMEOS_H_
 
+#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/chrome_browser_main_linux.h"
 
 namespace chromeos {
 class BrightnessObserver;
+class MediaDeviceNotifications;
 class OutputObserver;
 class PowerButtonObserver;
 class PowerStateOverride;
@@ -35,7 +37,6 @@ class ChromeBrowserMainPartsChromeos : public ChromeBrowserMainPartsLinux {
   virtual void PreEarlyInitialization() OVERRIDE;
   virtual void PreMainMessageLoopStart() OVERRIDE;
   virtual void PostMainMessageLoopStart() OVERRIDE;
-  virtual int PreCreateThreads() OVERRIDE;
   virtual void PreMainMessageLoopRun() OVERRIDE;
 
   // Stages called from PreMainMessageLoopRun.
@@ -46,10 +47,12 @@ class ChromeBrowserMainPartsChromeos : public ChromeBrowserMainPartsLinux {
 
   virtual void PostMainMessageLoopRun() OVERRIDE;
 
+  virtual void SetupPlatformFieldTrials() OVERRIDE;
+
+ private:
   // Set up field trial for low memory headroom settings.
   void SetupLowMemoryHeadroomFieldTrial();
 
- private:
   scoped_ptr<chromeos::BrightnessObserver> brightness_observer_;
   scoped_ptr<chromeos::OutputObserver> output_observer_;
   scoped_ptr<chromeos::ResumeObserver> resume_observer_;
@@ -61,6 +64,7 @@ class ChromeBrowserMainPartsChromeos : public ChromeBrowserMainPartsLinux {
   scoped_ptr<chromeos::VideoActivityNotifier> video_activity_notifier_;
   scoped_ptr<chromeos::ScreenDimmingObserver> screen_dimming_observer_;
   scoped_ptr<policy::NetworkConfigurationUpdater> network_config_updater_;
+  scoped_refptr<chromeos::MediaDeviceNotifications> media_device_notifications_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeBrowserMainPartsChromeos);
 };

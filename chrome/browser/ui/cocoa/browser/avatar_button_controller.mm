@@ -15,6 +15,7 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profile_metrics.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_window.h"
 #import "chrome/browser/ui/cocoa/browser/avatar_menu_bubble_controller.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
@@ -37,6 +38,12 @@
 - (NSImage*)compositeImageWithShadow:(NSImage*)image;
 - (void)updateAvatar;
 - (void)addOrRemoveButtonIfNecessary;
+@end
+
+// Declare a 10.7+ private API.
+// NSThemeFrame < NSTitledFrame < NSFrameView < NSView.
+@interface NSView (NSThemeFrame)
+- (void)_tileTitlebarAndRedisplay:(BOOL)redisplay;
 @end
 
 namespace AvatarButtonControllerInternal {
@@ -158,7 +165,7 @@ const CGFloat kMenuYOffsetAdjust = 1.0;
   if (menuController_)
     return;
 
-  DCHECK(browser_->command_updater()->IsCommandEnabled(IDC_SHOW_AVATAR_MENU));
+  DCHECK(chrome::IsCommandEnabled(browser_, IDC_SHOW_AVATAR_MENU));
 
   NSWindowController* wc =
       [browser_->window()->GetNativeWindow() windowController];
@@ -287,6 +294,15 @@ const CGFloat kMenuYOffsetAdjust = 1.0;
   [self.view setHidden:count < 2];
 
   [static_cast<BrowserWindowController*>(wc) layoutSubviews];
+
+  // If the avatar is being added or removed, then the Lion fullscreen button
+  // needs to be adjusted. Since the fullscreen button is positioned by
+  // FramedBrowserWindow using private APIs, the easiest way to update the
+  // position of the button is through this private API. Resizing the window
+  // also works, but invoking |-display| does not.
+  NSView* themeFrame = [[[wc window] contentView] superview];
+  if ([themeFrame respondsToSelector:@selector(_tileTitlebarAndRedisplay:)])
+    [themeFrame _tileTitlebarAndRedisplay:YES];
 }
 
 // Testing /////////////////////////////////////////////////////////////////////

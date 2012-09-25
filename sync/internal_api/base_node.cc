@@ -20,14 +20,16 @@
 #include "sync/protocol/session_specifics.pb.h"
 #include "sync/protocol/theme_specifics.pb.h"
 #include "sync/protocol/typed_url_specifics.pb.h"
-#include "sync/syncable/syncable.h"
+#include "sync/syncable/directory.h"
+#include "sync/syncable/entry.h"
 #include "sync/syncable/syncable_id.h"
 #include "sync/util/time.h"
 
-using syncable::SPECIFICS;
 using sync_pb::AutofillProfileSpecifics;
 
-namespace sync_api {
+namespace syncer {
+
+using syncable::SPECIFICS;
 
 // Helper function to look up the int64 metahandle of an object given the ID
 // string.
@@ -62,11 +64,11 @@ BaseNode::BaseNode() : password_data_(new sync_pb::PasswordSpecificsData) {}
 BaseNode::~BaseNode() {}
 
 std::string BaseNode::GenerateSyncableHash(
-    syncable::ModelType model_type, const std::string& client_tag) {
+    ModelType model_type, const std::string& client_tag) {
   // Blank PB with just the field in it has termination symbol,
   // handy for delimiter.
   sync_pb::EntitySpecifics serialized_type;
-  syncable::AddDefaultFieldValue(model_type, &serialized_type);
+  AddDefaultFieldValue(model_type, &serialized_type);
   std::string hash_input;
   serialized_type.AppendToString(&hash_input);
   hash_input.append(client_tag);
@@ -99,7 +101,7 @@ bool BaseNode::DecryptIfNecessary() {
   // we fill the unencrypted_data_ with a copy of the bookmark specifics that
   // follows the new bookmarks format.
   if (!specifics.has_encrypted()) {
-    if (GetModelType() == syncable::BOOKMARKS &&
+    if (GetModelType() == BOOKMARKS &&
         !specifics.bookmark().has_title() &&
         !GetTitle().empty()) {  // Last check ensures this isn't a new node.
       // We need to fill in the title.
@@ -119,8 +121,8 @@ bool BaseNode::DecryptIfNecessary() {
   std::string plaintext_data = GetTransaction()->GetCryptographer()->
       DecryptToString(encrypted);
   if (plaintext_data.length() == 0) {
-    LOG(ERROR) << "Failed to decrypt encrypted node of type " <<
-      syncable::ModelTypeToString(GetModelType()) << ".";
+    LOG(ERROR) << "Failed to decrypt encrypted node of type "
+               << ModelTypeToString(GetModelType()) << ".";
     // Debugging for crbug.com/123223. We failed to decrypt the data, which
     // means we applied an update without having the key or lost the key at a
     // later point.
@@ -133,7 +135,7 @@ bool BaseNode::DecryptIfNecessary() {
     return false;
   }
   DVLOG(2) << "Decrypted specifics of type "
-           << syncable::ModelTypeToString(GetModelType())
+           << ModelTypeToString(GetModelType())
            << " with content: " << plaintext_data;
   return true;
 }
@@ -142,15 +144,14 @@ const sync_pb::EntitySpecifics& BaseNode::GetUnencryptedSpecifics(
     const syncable::Entry* entry) const {
   const sync_pb::EntitySpecifics& specifics = entry->Get(SPECIFICS);
   if (specifics.has_encrypted()) {
-    DCHECK_NE(syncable::GetModelTypeFromSpecifics(unencrypted_data_),
-              syncable::UNSPECIFIED);
+    DCHECK_NE(GetModelTypeFromSpecifics(unencrypted_data_), UNSPECIFIED);
     return unencrypted_data_;
   } else {
     // Due to the change in bookmarks format, we need to check to see if this is
     // a legacy bookmarks (and has no title field in the proto). If it is, we
     // return the unencrypted_data_, which was filled in with the title by
     // DecryptIfNecessary().
-    if (GetModelType() == syncable::BOOKMARKS) {
+    if (GetModelType() == BOOKMARKS) {
       const sync_pb::BookmarkSpecifics& bookmark_specifics =
           specifics.bookmark();
       if (bookmark_specifics.has_title() ||
@@ -161,13 +162,11 @@ const sync_pb::EntitySpecifics& BaseNode::GetUnencryptedSpecifics(
         // |unencrypted_data_| to be non-empty.
         return specifics;
       } else {
-        DCHECK_EQ(syncable::GetModelTypeFromSpecifics(unencrypted_data_),
-                  syncable::BOOKMARKS);
+        DCHECK_EQ(GetModelTypeFromSpecifics(unencrypted_data_), BOOKMARKS);
         return unencrypted_data_;
       }
     } else {
-      DCHECK_EQ(syncable::GetModelTypeFromSpecifics(unencrypted_data_),
-                syncable::UNSPECIFIED);
+      DCHECK_EQ(GetModelTypeFromSpecifics(unencrypted_data_), UNSPECIFIED);
       return specifics;
     }
   }
@@ -193,7 +192,7 @@ bool BaseNode::GetIsFolder() const {
 std::string BaseNode::GetTitle() const {
   std::string result;
   // TODO(zea): refactor bookmarks to not need this functionality.
-  if (syncable::BOOKMARKS == GetModelType() &&
+  if (BOOKMARKS == GetModelType() &&
       GetEntry()->Get(syncable::SPECIFICS).has_encrypted()) {
     // Special case for legacy bookmarks dealing with encryption.
     ServerNameToSyncAPIName(GetBookmarkSpecifics().title(), &result);
@@ -254,7 +253,7 @@ DictionaryValue* BaseNode::GetDetailsAsValue() const {
   DictionaryValue* node_info = GetSummaryAsValue();
   node_info->SetString(
       "modificationTime",
-      browser_sync::GetTimeDebugString(GetModificationTime()));
+      GetTimeDebugString(GetModificationTime()));
   node_info->SetString("parentId", base::Int64ToString(GetParentId()));
   // Specifics are already in the Entry value, so no need to duplicate
   // it here.
@@ -284,52 +283,52 @@ int64 BaseNode::GetExternalId() const {
 }
 
 const sync_pb::AppSpecifics& BaseNode::GetAppSpecifics() const {
-  DCHECK_EQ(syncable::APPS, GetModelType());
+  DCHECK_EQ(GetModelType(), APPS);
   return GetEntitySpecifics().app();
 }
 
 const sync_pb::AutofillSpecifics& BaseNode::GetAutofillSpecifics() const {
-  DCHECK_EQ(syncable::AUTOFILL, GetModelType());
+  DCHECK_EQ(GetModelType(), AUTOFILL);
   return GetEntitySpecifics().autofill();
 }
 
 const AutofillProfileSpecifics& BaseNode::GetAutofillProfileSpecifics() const {
-  DCHECK_EQ(GetModelType(), syncable::AUTOFILL_PROFILE);
+  DCHECK_EQ(GetModelType(), AUTOFILL_PROFILE);
   return GetEntitySpecifics().autofill_profile();
 }
 
 const sync_pb::BookmarkSpecifics& BaseNode::GetBookmarkSpecifics() const {
-  DCHECK_EQ(syncable::BOOKMARKS, GetModelType());
+  DCHECK_EQ(GetModelType(), BOOKMARKS);
   return GetEntitySpecifics().bookmark();
 }
 
 const sync_pb::NigoriSpecifics& BaseNode::GetNigoriSpecifics() const {
-  DCHECK_EQ(syncable::NIGORI, GetModelType());
+  DCHECK_EQ(GetModelType(), NIGORI);
   return GetEntitySpecifics().nigori();
 }
 
 const sync_pb::PasswordSpecificsData& BaseNode::GetPasswordSpecifics() const {
-  DCHECK_EQ(syncable::PASSWORDS, GetModelType());
+  DCHECK_EQ(GetModelType(), PASSWORDS);
   return *password_data_;
 }
 
 const sync_pb::ThemeSpecifics& BaseNode::GetThemeSpecifics() const {
-  DCHECK_EQ(syncable::THEMES, GetModelType());
+  DCHECK_EQ(GetModelType(), THEMES);
   return GetEntitySpecifics().theme();
 }
 
 const sync_pb::TypedUrlSpecifics& BaseNode::GetTypedUrlSpecifics() const {
-  DCHECK_EQ(syncable::TYPED_URLS, GetModelType());
+  DCHECK_EQ(GetModelType(), TYPED_URLS);
   return GetEntitySpecifics().typed_url();
 }
 
 const sync_pb::ExtensionSpecifics& BaseNode::GetExtensionSpecifics() const {
-  DCHECK_EQ(syncable::EXTENSIONS, GetModelType());
+  DCHECK_EQ(GetModelType(), EXTENSIONS);
   return GetEntitySpecifics().extension();
 }
 
 const sync_pb::SessionSpecifics& BaseNode::GetSessionSpecifics() const {
-  DCHECK_EQ(syncable::SESSIONS, GetModelType());
+  DCHECK_EQ(GetModelType(), SESSIONS);
   return GetEntitySpecifics().session();
 }
 
@@ -337,18 +336,18 @@ const sync_pb::EntitySpecifics& BaseNode::GetEntitySpecifics() const {
   return GetUnencryptedSpecifics(GetEntry());
 }
 
-syncable::ModelType BaseNode::GetModelType() const {
+ModelType BaseNode::GetModelType() const {
   return GetEntry()->GetModelType();
 }
 
 void BaseNode::SetUnencryptedSpecifics(
     const sync_pb::EntitySpecifics& specifics) {
-  syncable::ModelType type = syncable::GetModelTypeFromSpecifics(specifics);
-  DCHECK_NE(syncable::UNSPECIFIED, type);
-  if (GetModelType() != syncable::UNSPECIFIED) {
+  ModelType type = GetModelTypeFromSpecifics(specifics);
+  DCHECK_NE(UNSPECIFIED, type);
+  if (GetModelType() != UNSPECIFIED) {
     DCHECK_EQ(GetModelType(), type);
   }
   unencrypted_data_.CopyFrom(specifics);
 }
 
-}  // namespace sync_api
+}  // namespace syncer

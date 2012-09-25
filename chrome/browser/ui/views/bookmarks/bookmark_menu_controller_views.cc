@@ -7,6 +7,7 @@
 #include "base/stl_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
+#include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/bookmark_node_data.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/event_disposition.h"
@@ -30,13 +31,13 @@ using content::PageNavigator;
 using content::UserMetricsAction;
 using views::MenuItemView;
 
-BookmarkMenuController::BookmarkMenuController(Profile* profile,
+BookmarkMenuController::BookmarkMenuController(Browser* browser,
                                                PageNavigator* page_navigator,
                                                views::Widget* parent,
                                                const BookmarkNode* node,
                                                int start_child_index)
     : menu_delegate_(
-        new BookmarkMenuDelegate(profile, page_navigator, parent, 1)),
+        new BookmarkMenuDelegate(browser, page_navigator, parent, 1)),
       node_(node),
       observer_(NULL),
       for_drop_(false),
@@ -60,7 +61,8 @@ void BookmarkMenuController::RunMenuAt(BookmarkBarView* bookmark_bar,
   gfx::Rect bounds(screen_loc.x(), screen_loc.y(), menu_button->width(),
                    menu_button->height() - 1);
   for_drop_ = for_drop;
-  menu_delegate_->profile()->GetBookmarkModel()->AddObserver(this);
+  BookmarkModelFactory::GetForProfile(
+      menu_delegate_->profile())->AddObserver(this);
   // We only delete ourself after the menu completes, so we can safely ignore
   // the return value.
   ignore_result(menu_runner_->RunMenuAt(menu_delegate_->parent(), menu_button,
@@ -188,7 +190,8 @@ void BookmarkMenuController::BookmarkModelChanged() {
 }
 
 BookmarkMenuController::~BookmarkMenuController() {
-  menu_delegate_->profile()->GetBookmarkModel()->RemoveObserver(this);
+  BookmarkModelFactory::GetForProfile(
+      menu_delegate_->profile())->RemoveObserver(this);
   if (observer_)
     observer_->BookmarkMenuDeleted(this);
 }

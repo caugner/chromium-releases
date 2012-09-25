@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_BLUETOOTH_TEST_MOCK_BLUETOOTH_ADAPTER_H_
 #define CHROME_BROWSER_CHROMEOS_BLUETOOTH_TEST_MOCK_BLUETOOTH_ADAPTER_H_
-#pragma once
 
 #include <string>
 
@@ -19,7 +18,6 @@ namespace chromeos {
 class MockBluetoothAdapter : public BluetoothAdapter {
  public:
   MockBluetoothAdapter();
-  virtual ~MockBluetoothAdapter();
 
   MOCK_CONST_METHOD0(IsPresent, bool());
   MOCK_CONST_METHOD0(IsPowered, bool());
@@ -36,6 +34,8 @@ class MockBluetoothAdapter : public BluetoothAdapter {
       void(const BluetoothAdapter::BluetoothOutOfBandPairingDataCallback&
                callback,
            const BluetoothAdapter::ErrorCallback& error_callback));
+ protected:
+  virtual ~MockBluetoothAdapter();
 };
 
 }  // namespace chromeos

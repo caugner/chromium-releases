@@ -11,10 +11,11 @@
 #include "base/logging.h"
 #include "base/values.h"
 #include "jingle/notifier/listener/push_client.h"
-#include "sync/internal_api/public/syncable/model_type_payload_map.h"
+#include "sync/internal_api/public/base/model_type_payload_map.h"
+#include "sync/notifier/invalidation_util.h"
 #include "sync/notifier/sync_notifier_observer.h"
 
-namespace sync_notifier {
+namespace syncer {
 
 const char* kSyncP2PNotificationChannel = "http://www.google.com/chrome/sync";
 
@@ -64,7 +65,7 @@ P2PNotificationData::P2PNotificationData() : target_(NOTIFY_SELF) {}
 P2PNotificationData::P2PNotificationData(
     const std::string& sender_id,
     P2PNotificationTarget target,
-    syncable::ModelTypeSet changed_types)
+    ModelTypeSet changed_types)
     : sender_id_(sender_id),
       target_(target),
       changed_types_(changed_types) {}
@@ -85,7 +86,7 @@ bool P2PNotificationData::IsTargeted(const std::string& id) const {
   }
 }
 
-syncable::ModelTypeSet P2PNotificationData::GetChangedTypes() const {
+ModelTypeSet P2PNotificationData::GetChangedTypes() const {
   return changed_types_;
 }
 
@@ -101,7 +102,7 @@ std::string P2PNotificationData::ToString() const {
   dict->SetString(kSenderIdKey, sender_id_);
   dict->SetString(kNotificationTypeKey,
                   P2PNotificationTargetToString(target_));
-  dict->Set(kChangedTypesKey, syncable::ModelTypeSetToValue(changed_types_));
+  dict->Set(kChangedTypesKey, ModelTypeSetToValue(changed_types_));
   std::string json;
   base::JSONWriter::Write(dict.get(), &json);
   return json;
@@ -136,7 +137,7 @@ bool P2PNotificationData::ResetFromString(const std::string& str) {
                  << kChangedTypesKey;
     return false;
   }
-  changed_types_ = syncable::ModelTypeSetFromValue(*changed_types_list);
+  changed_types_ = ModelTypeSetFromValue(*changed_types_list);
   return true;
 }
 
@@ -152,33 +153,48 @@ P2PNotifier::P2PNotifier(scoped_ptr<notifier::PushClient> push_client,
 }
 
 P2PNotifier::~P2PNotifier() {
-  DCHECK(non_thread_safe_.CalledOnValidThread());
+  DCHECK(thread_checker_.CalledOnValidThread());
   push_client_->RemoveObserver(this);
 }
 
-void P2PNotifier::AddObserver(SyncNotifierObserver* observer) {
-  DCHECK(non_thread_safe_.CalledOnValidThread());
-  observer_list_.AddObserver(observer);
+void P2PNotifier::RegisterHandler(SyncNotifierObserver* handler) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  registrar_.RegisterHandler(handler);
 }
 
-void P2PNotifier::RemoveObserver(SyncNotifierObserver* observer) {
-  DCHECK(non_thread_safe_.CalledOnValidThread());
-  observer_list_.RemoveObserver(observer);
+void P2PNotifier::UpdateRegisteredIds(SyncNotifierObserver* handler,
+                                      const ObjectIdSet& ids) {
+  // TODO(akalin): Handle arbitrary object IDs (http://crbug.com/140411).
+  DCHECK(thread_checker_.CalledOnValidThread());
+  registrar_.UpdateRegisteredIds(handler, ids);
+  const ModelTypeSet enabled_types =
+      ObjectIdSetToModelTypeSet(registrar_.GetAllRegisteredIds());
+  const ModelTypeSet new_enabled_types =
+      Difference(enabled_types, enabled_types_);
+  const P2PNotificationData notification_data(
+      unique_id_, NOTIFY_SELF, new_enabled_types);
+  SendNotificationData(notification_data);
+  enabled_types_ = enabled_types;
+}
+
+void P2PNotifier::UnregisterHandler(SyncNotifierObserver* handler) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  registrar_.UnregisterHandler(handler);
 }
 
 void P2PNotifier::SetUniqueId(const std::string& unique_id) {
-  DCHECK(non_thread_safe_.CalledOnValidThread());
+  DCHECK(thread_checker_.CalledOnValidThread());
   unique_id_ = unique_id;
 }
 
 void P2PNotifier::SetStateDeprecated(const std::string& state) {
-  DCHECK(non_thread_safe_.CalledOnValidThread());
+  DCHECK(thread_checker_.CalledOnValidThread());
   // Do nothing.
 }
 
 void P2PNotifier::UpdateCredentials(
     const std::string& email, const std::string& token) {
-  DCHECK(non_thread_safe_.CalledOnValidThread());
+  DCHECK(thread_checker_.CalledOnValidThread());
   notifier::Subscription subscription;
   subscription.channel = kSyncP2PNotificationChannel;
   // There may be some subtle issues around case sensitivity of the
@@ -193,32 +209,18 @@ void P2PNotifier::UpdateCredentials(
   logged_in_ = true;
 }
 
-void P2PNotifier::UpdateEnabledTypes(
-    syncable::ModelTypeSet enabled_types) {
-  DCHECK(non_thread_safe_.CalledOnValidThread());
-  const syncable::ModelTypeSet new_enabled_types =
-      Difference(enabled_types, enabled_types_);
-  enabled_types_ = enabled_types;
-  const P2PNotificationData notification_data(
-      unique_id_, NOTIFY_SELF, new_enabled_types);
-  SendNotificationData(notification_data);
-}
-
-void P2PNotifier::SendNotification(
-    syncable::ModelTypeSet changed_types) {
-  DCHECK(non_thread_safe_.CalledOnValidThread());
+void P2PNotifier::SendNotification(ModelTypeSet changed_types) {
+  DCHECK(thread_checker_.CalledOnValidThread());
   const P2PNotificationData notification_data(
       unique_id_, send_notification_target_, changed_types);
   SendNotificationData(notification_data);
 }
 
 void P2PNotifier::OnNotificationsEnabled() {
-  DCHECK(non_thread_safe_.CalledOnValidThread());
+  DCHECK(thread_checker_.CalledOnValidThread());
   bool just_turned_on = (notifications_enabled_ == false);
   notifications_enabled_ = true;
-  FOR_EACH_OBSERVER(
-      SyncNotifierObserver, observer_list_,
-      OnNotificationsEnabled());
+  registrar_.EmitOnNotificationsEnabled();
   if (just_turned_on) {
     const P2PNotificationData notification_data(
         unique_id_, NOTIFY_SELF, enabled_types_);
@@ -228,15 +230,13 @@ void P2PNotifier::OnNotificationsEnabled() {
 
 void P2PNotifier::OnNotificationsDisabled(
     notifier::NotificationsDisabledReason reason) {
-  DCHECK(non_thread_safe_.CalledOnValidThread());
-  FOR_EACH_OBSERVER(
-      SyncNotifierObserver, observer_list_,
-      OnNotificationsDisabled(FromNotifierReason(reason)));
+  DCHECK(thread_checker_.CalledOnValidThread());
+  registrar_.EmitOnNotificationsDisabled(FromNotifierReason(reason));
 }
 
 void P2PNotifier::OnIncomingNotification(
     const notifier::Notification& notification) {
-  DCHECK(non_thread_safe_.CalledOnValidThread());
+  DCHECK(thread_checker_.CalledOnValidThread());
   DVLOG(1) << "Received notification " << notification.ToString();
   if (!logged_in_) {
     DVLOG(1) << "Not logged in yet -- not emitting notification";
@@ -262,26 +262,33 @@ void P2PNotifier::OnIncomingNotification(
              << "not emitting notification";
     return;
   }
-  if (notification_data.GetChangedTypes().Empty()) {
-    DVLOG(1) << "No changed types -- not emitting notification";
+  const ModelTypeSet types_to_notify =
+      Intersection(enabled_types_, notification_data.GetChangedTypes());
+  if (types_to_notify.Empty()) {
+    DVLOG(1) << "No enabled and changed types -- not emitting notification";
     return;
   }
-  const syncable::ModelTypePayloadMap& type_payloads =
-      syncable::ModelTypePayloadMapFromEnumSet(
-          notification_data.GetChangedTypes(), std::string());
-  FOR_EACH_OBSERVER(SyncNotifierObserver, observer_list_,
-                    OnIncomingNotification(type_payloads, REMOTE_NOTIFICATION));
+  const ModelTypePayloadMap& type_payloads = ModelTypePayloadMapFromEnumSet(
+      notification_data.GetChangedTypes(), std::string());
+  registrar_.DispatchInvalidationsToHandlers(
+      ModelTypePayloadMapToObjectIdPayloadMap(type_payloads),
+      REMOTE_NOTIFICATION);
 }
 
 void P2PNotifier::SendNotificationDataForTest(
     const P2PNotificationData& notification_data) {
-  DCHECK(non_thread_safe_.CalledOnValidThread());
+  DCHECK(thread_checker_.CalledOnValidThread());
   SendNotificationData(notification_data);
 }
 
 void P2PNotifier::SendNotificationData(
     const P2PNotificationData& notification_data) {
-  DCHECK(non_thread_safe_.CalledOnValidThread());
+  DCHECK(thread_checker_.CalledOnValidThread());
+  if (notification_data.GetChangedTypes().Empty()) {
+    DVLOG(1) << "Not sending XMPP notification with no changed types: "
+             << notification_data.ToString();
+    return;
+  }
   notifier::Notification notification;
   notification.channel = kSyncP2PNotificationChannel;
   notification.data = notification_data.ToString();
@@ -289,4 +296,4 @@ void P2PNotifier::SendNotificationData(
   push_client_->SendNotification(notification);
 }
 
-}  // namespace sync_notifier
+}  // namespace syncer

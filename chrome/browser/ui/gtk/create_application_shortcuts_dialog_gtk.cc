@@ -12,6 +12,10 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/browser/shell_integration_linux.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_commands.h"
+#include "chrome/browser/ui/browser_dialogs.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/web_applications/web_app_ui.h"
@@ -25,7 +29,7 @@
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
-#include "grit/theme_resources_standard.h"
+#include "grit/theme_resources.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -44,11 +48,14 @@ const int kDescriptionLabelHeightLines = 3;
 
 }  // namespace
 
-// static
-void CreateWebApplicationShortcutsDialogGtk::Show(
-    GtkWindow* parent, TabContents* tab_contents) {
-  new CreateWebApplicationShortcutsDialogGtk(parent, tab_contents);
+namespace chrome {
+
+void ShowCreateWebAppShortcutsDialog(gfx::NativeWindow parent_window,
+                                     TabContents* tab_contents) {
+  new CreateWebApplicationShortcutsDialogGtk(parent_window, tab_contents);
 }
+
+}  // namespace chrome
 
 void CreateChromeApplicationShortcutsDialogGtk::Show(GtkWindow* parent,
                                                      Profile* profile,
@@ -298,9 +305,10 @@ CreateWebApplicationShortcutsDialogGtk::CreateWebApplicationShortcutsDialogGtk(
 }
 
 void CreateWebApplicationShortcutsDialogGtk::OnCreatedShortcut() {
-  if (tab_contents_->web_contents()->GetDelegate())
-    tab_contents_->web_contents()->GetDelegate()->ConvertContentsToApplication(
-        tab_contents_->web_contents());
+  Browser* browser =
+      browser::FindBrowserWithWebContents(tab_contents_->web_contents());
+  if (browser)
+    chrome::ConvertTabToAppWindow(browser, tab_contents_->web_contents());
 }
 
 CreateChromeApplicationShortcutsDialogGtk::
@@ -320,6 +328,7 @@ CreateChromeApplicationShortcutsDialogGtk::
   shortcut_info_.url = GURL(app_->launch_web_url());
   shortcut_info_.title = UTF8ToUTF16(app_->name());
   shortcut_info_.description = UTF8ToUTF16(app_->description());
+  shortcut_info_.profile_path = profile_path_;
 
   // Get the icon.
   const gfx::Size max_size(kIconPreviewSizePixels, kIconPreviewSizePixels);

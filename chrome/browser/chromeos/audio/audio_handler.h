@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_AUDIO_AUDIO_HANDLER_H_
 #define CHROME_BROWSER_CHROMEOS_AUDIO_AUDIO_HANDLER_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/observer_list.h"
@@ -24,6 +23,7 @@ class AudioHandler {
   class VolumeObserver {
    public:
     virtual void OnVolumeChanged() = 0;
+    virtual void OnMuteToggled() = 0;
    protected:
     VolumeObserver() {}
     virtual ~VolumeObserver() {}

@@ -26,6 +26,7 @@
 #include "chrome/common/translate_errors.h"
 #include "content/public/common/common_param_traits.h"
 #include "content/public/common/webkit_param_traits.h"
+#include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_message_macros.h"
 #include "ipc/ipc_platform_file.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -237,10 +238,6 @@ IPC_MESSAGE_ROUTED1(ChromeViewMsg_LoadBlockedPlugins,
 // resource types.
 IPC_MESSAGE_CONTROL0(ChromeViewMsg_GetCacheResourceStats)
 
-// Asks the renderer to send back Histograms.
-IPC_MESSAGE_CONTROL1(ChromeViewMsg_GetRendererHistograms,
-                     int /* sequence number of Renderer Histograms. */)
-
 // Tells the renderer to create a FieldTrial, and by using a 100% probability
 // for the FieldTrial, forces the FieldTrial to have assigned group name.
 IPC_MESSAGE_CONTROL2(ChromeViewMsg_SetFieldTrialGroup,
@@ -331,6 +328,10 @@ IPC_MESSAGE_ROUTED0(ChromeViewMsg_GetFPS)
 
 // Tells the view it is displaying an interstitial page.
 IPC_MESSAGE_ROUTED0(ChromeViewMsg_SetAsInterstitial)
+
+// Tells the renderer to suspend/resume the webkit timers.
+IPC_MESSAGE_CONTROL1(ChromeViewMsg_ToggleWebKitSharedTimer,
+                     bool /* suspend */)
 
 //-----------------------------------------------------------------------------
 // Misc messages
@@ -472,12 +473,25 @@ IPC_MESSAGE_ROUTED3(ChromeViewHostMsg_ForwardMessageToExternalHost,
 
 // A renderer sends this to the browser process when it wants to start
 // a new instance of the Native Client process. The browser will launch
-// the process and return a handle to an IMC channel.
-IPC_SYNC_MESSAGE_CONTROL2_1(ChromeViewHostMsg_LaunchNaCl,
+// the process and return an IPC channel handle. This handle will only
+// be valid if the NaCl IPC proxy is enabled.
+IPC_SYNC_MESSAGE_CONTROL2_2(ChromeViewHostMsg_LaunchNaCl,
                             GURL /* manifest_url */,
                             int /* socket count */,
                             std::vector<nacl::FileDescriptor>
-                                /* imc channel handles */)
+                                /* imc channel handles */,
+                            IPC::ChannelHandle /* ipc_channel_handle */)
+
+// A renderer sends this to the browser process when it wants to
+// open a file for from the Pnacl component directory.
+IPC_SYNC_MESSAGE_CONTROL1_1(ChromeViewHostMsg_GetReadonlyPnaclFD,
+                            std::string /* name of requested PNaCl file */,
+                            IPC::PlatformFileForTransit /* output file */)
+
+// A renderer sends this to the browser process when it wants to
+// create a temporary file.
+IPC_SYNC_MESSAGE_CONTROL0_1(ChromeViewHostMsg_NaClCreateTemporaryFile,
+                            IPC::PlatformFileForTransit /* out file */)
 
 // Notification that the page has an OpenSearch description document
 // associated with it.

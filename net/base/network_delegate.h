@@ -4,7 +4,6 @@
 
 #ifndef NET_BASE_NETWORK_DELEGATE_H_
 #define NET_BASE_NETWORK_DELEGATE_H_
-#pragma once
 
 #include <string>
 
@@ -13,6 +12,7 @@
 #include "base/threading/non_thread_safe.h"
 #include "net/base/auth.h"
 #include "net/base/completion_callback.h"
+#include "net/cookies/canonical_cookie.h"
 
 class FilePath;
 class GURL;
@@ -29,7 +29,6 @@ namespace net {
 // NOTE: It is not okay to add any compile-time dependencies on symbols outside
 // of net/base here, because we have a net_base library. Forward declarations
 // are ok.
-class CookieList;
 class CookieOptions;
 class HttpRequestHeaders;
 class HttpResponseHeaders;
@@ -48,6 +47,12 @@ class NetworkDelegate : public base::NonThreadSafe {
     AUTH_REQUIRED_RESPONSE_IO_PENDING,
   };
   typedef base::Callback<void(AuthRequiredResponse)> AuthCallback;
+
+  enum CacheWaitState {
+    CACHE_WAIT_STATE_START,
+    CACHE_WAIT_STATE_FINISH,
+    CACHE_WAIT_STATE_RESET
+  };
 
   virtual ~NetworkDelegate() {}
 
@@ -90,6 +95,9 @@ class NetworkDelegate : public base::NonThreadSafe {
 
   int NotifyBeforeSocketStreamConnect(SocketStream* socket,
                                       const CompletionCallback& callback);
+
+  void NotifyCacheWaitStateChange(const URLRequest& request,
+                                  CacheWaitState state);
 
  private:
   // This is the interface for subclasses of NetworkDelegate to implement. These
@@ -215,6 +223,17 @@ class NetworkDelegate : public base::NonThreadSafe {
   // Called before a SocketStream tries to connect.
   virtual int OnBeforeSocketStreamConnect(
       SocketStream* socket, const CompletionCallback& callback) = 0;
+
+  // Called when the completion of a URLRequest is blocking on a cache
+  // transaction (CACHE_WAIT_STATE_START), or when a URLRequest is no longer
+  // blocked on a cache transaction (CACHE_WAIT_STATE_FINISH), or when a
+  // URLRequest is reset (CACHE_WAIT_STATE_RESET), indicating
+  // cancellation of any pending cache waits for this request.  Notice that
+  // START can be called several times for the same request.  It is the
+  // responsibility of the delegate to keep track of the number of outstanding
+  // cache transactions.
+  virtual void OnCacheWaitStateChange(const URLRequest& request,
+                                      CacheWaitState state) = 0;
 };
 
 }  // namespace net

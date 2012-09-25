@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_LOGIN_HELP_APP_LAUNCHER_H_
 #define CHROME_BROWSER_CHROMEOS_LOGIN_HELP_APP_LAUNCHER_H_
-#pragma once
 
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
@@ -38,24 +37,21 @@ class HelpAppLauncher : public LoginWebDialog::Delegate,
 
   // Parent window is used to show dialog.
   explicit HelpAppLauncher(gfx::NativeWindow parent_window);
-  virtual ~HelpAppLauncher();
 
   // Shows specified help topic.
   void ShowHelpTopic(HelpTopic help_topic_id);
 
-  // Returns true if the dialog is currently open.
-  bool is_open() const { return dialog_.get() && dialog_->is_open(); }
-
  protected:
+  virtual ~HelpAppLauncher();
+
   // LoginWebDialog::Delegate implementation:
   virtual void OnDialogClosed() OVERRIDE {}
 
  private:
+  friend class base::RefCountedThreadSafe<HelpAppLauncher>;
+
   // Shows help topic dialog for specified GURL.
   void ShowHelpTopicDialog(const GURL& topic_url);
-
-  // Dialog used to display help like "Can't access your account".
-  scoped_ptr<LoginWebDialog> dialog_;
 
   // Parent window which is passed to help dialog.
   gfx::NativeWindow parent_window_;

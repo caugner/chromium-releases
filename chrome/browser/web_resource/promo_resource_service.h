@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_WEB_RESOURCE_PROMO_RESOURCE_SERVICE_H_
 #define CHROME_BROWSER_WEB_RESOURCE_PROMO_RESOURCE_SERVICE_H_
-#pragma once
 
 #include <string>
 
@@ -25,9 +24,6 @@ class Profile;
 // promotional messages to certain groups of Chrome users.
 class PromoResourceService : public WebResourceService {
  public:
-  // Checks for conditions to show promo.
-  static bool CanShowNotificationPromo(Profile* profile);
-
   static void RegisterPrefs(PrefService* local_state);
 
   static void RegisterUserPrefs(PrefService* prefs);
@@ -61,7 +57,7 @@ class PromoResourceService : public WebResourceService {
   // Notify listeners that the state of a web resource has changed.
   void PromoResourceStateChange();
 
-  // WebResourceService override.
+  // WebResourceService override to process the parsed information.
   virtual void Unpack(const base::DictionaryValue& parsed_json) OVERRIDE;
 
   // The profile this service belongs to.
@@ -74,10 +70,6 @@ class PromoResourceService : public WebResourceService {
 
   // Notification type when an update is done.
   int notification_type_;
-
-  // True if a task has been set to update the cache when a new web resource
-  // becomes available.
-  bool web_resource_update_scheduled_;
 
   DISALLOW_COPY_AND_ASSIGN(PromoResourceService);
 };

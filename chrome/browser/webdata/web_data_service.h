@@ -8,7 +8,6 @@
 
 #ifndef CHROME_BROWSER_WEBDATA_WEB_DATA_SERVICE_H__
 #define CHROME_BROWSER_WEBDATA_WEB_DATA_SERVICE_H__
-#pragma once
 
 #include <map>
 #include <string>
@@ -17,8 +16,8 @@
 #include "base/callback_forward.h"
 #include "base/file_path.h"
 #include "base/location.h"
-#include "base/message_loop_helpers.h"
 #include "base/memory/ref_counted.h"
+#include "base/sequenced_task_runner_helpers.h"
 #include "base/synchronization/lock.h"
 #include "chrome/browser/profiles/refcounted_profile_keyed_service.h"
 #include "chrome/browser/search_engines/template_url.h"

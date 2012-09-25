@@ -37,12 +37,17 @@ class FakeManagedMode : public ManagedMode {
   }
 
   // ManagedMode overrides:
-  virtual bool IsInManagedModeImpl() OVERRIDE {
+  virtual bool IsInManagedModeImpl() const OVERRIDE {
     return in_managed_mode_;
   }
 
-  virtual void SetInManagedMode(bool in_managed_mode) OVERRIDE {
-    in_managed_mode_ = in_managed_mode;
+  virtual void SetInManagedMode(Profile* newly_managed_profile) OVERRIDE {
+    if (newly_managed_profile) {
+      ASSERT_TRUE(!managed_profile_ ||
+                  managed_profile_ == newly_managed_profile);
+    }
+    managed_profile_ = newly_managed_profile;
+    in_managed_mode_ = (newly_managed_profile != NULL);
   }
 
   virtual bool PlatformConfirmEnter() OVERRIDE {
@@ -60,20 +65,16 @@ class FakeManagedMode : public ManagedMode {
 
 class MockBrowserWindow : public TestBrowserWindow {
  public:
-  explicit MockBrowserWindow(Browser* browser) : TestBrowserWindow(browser) {
-  }
-
   MOCK_METHOD0(Close, void());
 };
 
 class BrowserFixture {
  public:
   BrowserFixture(FakeManagedMode* managed_mode,
-                 TestingProfile* profile)
-      : browser_(Browser::TYPE_TABBED, profile),
-        window_(&browser_),
-        managed_mode_(managed_mode) {
-    browser_.SetWindowForTesting(&window_);
+                 TestingProfile* profile) {
+    Browser::CreateParams params(profile);
+    params.window = &window_;
+    browser_.reset(new Browser(params));
   }
 
   ~BrowserFixture() {
@@ -84,9 +85,8 @@ class BrowserFixture {
   }
 
  private:
-  Browser browser_;
+  scoped_ptr<Browser> browser_;
   StrictMock<MockBrowserWindow> window_;
-  FakeManagedMode* managed_mode_;
 };
 
 class MockCallback : public base::RefCountedThreadSafe<MockCallback> {
@@ -96,7 +96,7 @@ class MockCallback : public base::RefCountedThreadSafe<MockCallback> {
   }
 
   void CheckManagedMode(bool success) {
-    EXPECT_EQ(managed_mode_->IsInManagedModeImpl(), success);
+    EXPECT_EQ(success, managed_mode_->IsInManagedModeImpl());
     DidEnterManagedMode(success);
   }
 
@@ -117,7 +117,8 @@ class MockCallback : public base::RefCountedThreadSafe<MockCallback> {
 
 class ManagedModeTest : public ::testing::Test {
  public:
-  ManagedModeTest() : ui_thread_(content::BrowserThread::UI, &message_loop_) {
+  ManagedModeTest() : message_loop_(MessageLoop::TYPE_UI),
+                      ui_thread_(content::BrowserThread::UI, &message_loop_) {
   }
 
   scoped_refptr<MockCallback> CreateCallback() {
@@ -151,8 +152,9 @@ TEST_F(ManagedModeTest, AlreadyInManagedMode) {
   BrowserFixture managed_mode_browser(&managed_mode_, &managed_mode_profile_);
   BrowserFixture other_browser(&managed_mode_, &other_profile_);
 
-  // If we're already in managed mode, entering should immediately succeed.
-  managed_mode_.SetInManagedMode(true);
+  // If we're already in managed mode in this profile, entering should
+  // immediately succeed.
+  managed_mode_.SetInManagedMode(&managed_mode_profile_);
   managed_mode_.EnterManagedModeForTesting(&managed_mode_profile_,
                                            CreateExpectedCallback(true));
 }
@@ -227,4 +229,19 @@ TEST_F(ManagedModeTest, Cancelled) {
   managed_mode_.set_should_cancel_enter(true);
   managed_mode_.EnterManagedModeForTesting(&managed_mode_profile_,
                                            CreateExpectedCallback(false));
+}
+
+TEST_F(ManagedModeTest, ExtensionManagementPolicyProvider) {
+  BrowserFixture managed_mode_browser(&managed_mode_, &managed_mode_profile_);
+
+  EXPECT_TRUE(managed_mode_.UserMayLoad(NULL, NULL));
+  EXPECT_TRUE(managed_mode_.UserMayModifySettings(NULL, NULL));
+
+  managed_mode_.SetInManagedMode(&managed_mode_profile_);
+  EXPECT_FALSE(managed_mode_.UserMayLoad(NULL, NULL));
+  EXPECT_FALSE(managed_mode_.UserMayModifySettings(NULL, NULL));
+
+#ifndef NDEBUG
+  EXPECT_FALSE(managed_mode_.GetDebugPolicyProviderName().empty());
+#endif
 }

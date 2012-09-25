@@ -4,7 +4,6 @@
 
 #ifndef CHROMEOS_DBUS_IBUS_IBUS_CLIENT_H_
 #define CHROMEOS_DBUS_IBUS_IBUS_CLIENT_H_
-#pragma once
 
 #include <string>
 
@@ -20,6 +19,10 @@ class Bus;
 
 namespace chromeos {
 
+namespace ibus {
+class IBusComponent;
+}  // namespace ibus
+
 class IBusInputContextClient;
 
 // A class to make the actual DBus calls for IBusBus service.
@@ -29,6 +32,7 @@ class CHROMEOS_EXPORT IBusClient {
  public:
   typedef base::Callback<void(const dbus::ObjectPath&)>
       CreateInputContextCallback;
+  typedef base::Callback<void()> RegisterComponentCallback;
   typedef base::Callback<void()> ErrorCallback;
 
   virtual ~IBusClient();
@@ -39,6 +43,13 @@ class CHROMEOS_EXPORT IBusClient {
   virtual void CreateInputContext(
       const std::string& client_name,
       const CreateInputContextCallback& callback,
+      const ErrorCallback& error_callback) = 0;
+
+  // Requests the ibus-daemon to register new engine object. If succeeded,
+  // |callback| will be called. If failed, |error_callback| is called instead.
+  virtual void RegisterComponent(
+      const ibus::IBusComponent& ibus_component,
+      const RegisterComponentCallback& callback,
       const ErrorCallback& error_callback) = 0;
 
   // Factory function, creates a new instance and returns ownership.

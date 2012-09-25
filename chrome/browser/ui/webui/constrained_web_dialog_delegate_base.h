@@ -4,13 +4,12 @@
 
 #ifndef CHROME_BROWSER_UI_WEBUI_CONSTRAINED_WEB_DIALOG_DELEGATE_BASE_H_
 #define CHROME_BROWSER_UI_WEBUI_CONSTRAINED_WEB_DIALOG_DELEGATE_BASE_H_
-#pragma once
 
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
-#include "chrome/browser/ui/webui/web_dialog_web_contents_delegate.h"
 #include "ui/web_dialogs/constrained_web_dialog_ui.h"
 #include "ui/web_dialogs/web_dialog_ui.h"
+#include "ui/web_dialogs/web_dialog_web_contents_delegate.h"
 
 namespace ui {
 class WebDialogDelegate;
@@ -19,7 +18,7 @@ class WebDialogDelegate;
 // Platform-agnostic base implementation of ConstrainedWebDialogDelegate.
 class ConstrainedWebDialogDelegateBase
     : public ui::ConstrainedWebDialogDelegate,
-      public WebDialogWebContentsDelegate {
+      public ui::WebDialogWebContentsDelegate {
  public:
   ConstrainedWebDialogDelegateBase(
       Profile* profile,

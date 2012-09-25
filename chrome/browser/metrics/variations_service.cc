@@ -8,40 +8,50 @@
 
 #include "base/base64.h"
 #include "base/build_time.h"
+#include "base/command_line.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/field_trial.h"
+#include "base/metrics/histogram.h"
 #include "base/version.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/metrics/proto/trials_seed.pb.h"
 #include "chrome/browser/prefs/pref_service.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/metrics/experiments_helper.h"
 #include "chrome/common/pref_names.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/common/url_fetcher.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/load_flags.h"
 #include "net/base/network_change_notifier.h"
 #include "net/http/http_response_headers.h"
+#include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_status.h"
+
+namespace chrome_variations {
 
 namespace {
 
 // Default server of Variations seed info.
-const char kDefaultVariationsServer[] =
+const char kDefaultVariationsServerURL[] =
     "https://clients4.google.com/chrome-variations/seed";
 const int kMaxRetrySeedFetch = 5;
 
-// Maps chrome_variations::Study_Channel enum values to corresponding
-// chrome::VersionInfo::Channel enum values.
+// Time between seed fetches, in hours.
+const int kSeedFetchPeriodHours = 5;
+
+// Maps Study_Channel enum values to corresponding chrome::VersionInfo::Channel
+// enum values.
 chrome::VersionInfo::Channel ConvertStudyChannelToVersionChannel(
-    chrome_variations::Study_Channel study_channel) {
+    Study_Channel study_channel) {
   switch (study_channel) {
-    case chrome_variations::Study_Channel_CANARY:
+    case Study_Channel_CANARY:
       return chrome::VersionInfo::CHANNEL_CANARY;
-    case chrome_variations::Study_Channel_DEV:
+    case Study_Channel_DEV:
       return chrome::VersionInfo::CHANNEL_DEV;
-    case chrome_variations::Study_Channel_BETA:
+    case Study_Channel_BETA:
       return chrome::VersionInfo::CHANNEL_BETA;
-    case chrome_variations::Study_Channel_STABLE:
+    case Study_Channel_STABLE:
       return chrome::VersionInfo::CHANNEL_STABLE;
   }
   // All enum values of |study_channel| were handled above.
@@ -49,36 +59,55 @@ chrome::VersionInfo::Channel ConvertStudyChannelToVersionChannel(
   return chrome::VersionInfo::CHANNEL_UNKNOWN;
 }
 
-chrome_variations::Study_Platform GetCurrentPlatform() {
+Study_Platform GetCurrentPlatform() {
 #if defined(OS_WIN)
-  return chrome_variations::Study_Platform_PLATFORM_WINDOWS;
+  return Study_Platform_PLATFORM_WINDOWS;
 #elif defined(OS_MACOSX)
-  return chrome_variations::Study_Platform_PLATFORM_MAC;
+  return Study_Platform_PLATFORM_MAC;
 #elif defined(OS_CHROMEOS)
-  return chrome_variations::Study_Platform_PLATFORM_CHROMEOS;
+  return Study_Platform_PLATFORM_CHROMEOS;
 #elif defined(OS_ANDROID)
-  return chrome_variations::Study_Platform_PLATFORM_ANDROID;
+  return Study_Platform_PLATFORM_ANDROID;
+#elif defined(OS_IOS)
+  return Study_Platform_PLATFORM_IOS;
 #elif defined(OS_LINUX) || defined(OS_BSD) || defined(OS_SOLARIS)
   // Default BSD and SOLARIS to Linux to not break those builds, although these
   // platforms are not officially supported by Chrome.
-  return chrome_variations::Study_Platform_PLATFORM_LINUX;
+  return Study_Platform_PLATFORM_LINUX;
 #else
 #error Unknown platform
 #endif
 }
 
-// Converts |date_time| in chrome_variations::Study date format to base::Time.
+// Converts |date_time| in Study date format to base::Time.
 base::Time ConvertStudyDateToBaseTime(int64 date_time) {
   return base::Time::UnixEpoch() + base::TimeDelta::FromSeconds(date_time);
 }
 
+// Determine and return the variations server URL.
+GURL GetVariationsServerURL() {
+  std::string server_url(CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+      switches::kVariationsServerURL));
+  if (server_url.empty())
+    server_url = kDefaultVariationsServerURL;
+  GURL url_as_gurl = GURL(server_url);
+  DCHECK(url_as_gurl.is_valid());
+  return url_as_gurl;
+}
+
 }  // namespace
 
-VariationsService::VariationsService() {}
+VariationsService::VariationsService()
+    : variations_server_url_(GetVariationsServerURL()),
+      create_trials_from_seed_called_(false) {
+}
+
 VariationsService::~VariationsService() {}
 
 bool VariationsService::CreateTrialsFromSeed(PrefService* local_prefs) {
-  chrome_variations::TrialsSeed seed;
+  create_trials_from_seed_called_ = true;
+
+  TrialsSeed seed;
   if (!LoadTrialsSeedFromPref(local_prefs, &seed))
     return false;
 
@@ -103,17 +132,42 @@ bool VariationsService::CreateTrialsFromSeed(PrefService* local_prefs) {
   return true;
 }
 
-void VariationsService::StartFetchingVariationsSeed() {
-  if (net::NetworkChangeNotifier::IsOffline())
-    return;
+void VariationsService::StartRepeatedVariationsSeedFetch() {
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
 
-  pending_seed_request_.reset(content::URLFetcher::Create(
-      GURL(kDefaultVariationsServer), net::URLFetcher::GET, this));
+  // Check that |CreateTrialsFromSeed| was called, which is necessary to
+  // retrieve the serial number that will be sent to the server.
+  DCHECK(create_trials_from_seed_called_);
+
+  // Perform the first fetch.
+  FetchVariationsSeed();
+
+  // Repeat this periodically.
+  timer_.Start(FROM_HERE, base::TimeDelta::FromHours(kSeedFetchPeriodHours),
+               this, &VariationsService::FetchVariationsSeed);
+}
+
+void VariationsService::FetchVariationsSeed() {
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+
+  const bool is_offline = net::NetworkChangeNotifier::IsOffline();
+  UMA_HISTOGRAM_BOOLEAN("Variations.NetworkAvailability", !is_offline);
+  if (is_offline) {
+    DVLOG(1) << "Network was offline.";
+    return;
+  }
+
+  pending_seed_request_.reset(net::URLFetcher::Create(
+      variations_server_url_, net::URLFetcher::GET, this));
   pending_seed_request_->SetLoadFlags(net::LOAD_DO_NOT_SEND_COOKIES |
                                       net::LOAD_DO_NOT_SAVE_COOKIES);
   pending_seed_request_->SetRequestContext(
       g_browser_process->system_request_context());
   pending_seed_request_->SetMaxRetries(kMaxRetrySeedFetch);
+  if (!variations_serial_number_.empty()) {
+    pending_seed_request_->AddExtraRequestHeader("If-Match:" +
+                                                 variations_serial_number_);
+  }
   pending_seed_request_->Start();
 }
 
@@ -122,9 +176,16 @@ void VariationsService::OnURLFetchComplete(const net::URLFetcher* source) {
   // When we're done handling the request, the fetcher will be deleted.
   scoped_ptr<const net::URLFetcher> request(
       pending_seed_request_.release());
-  if (request->GetStatus().status() != net::URLRequestStatus::SUCCESS ||
-      request->GetResponseCode() != 200)
+  if (request->GetStatus().status() != net::URLRequestStatus::SUCCESS) {
+    DVLOG(1) << "Variations server request failed.";
     return;
+  }
+
+  if (request->GetResponseCode() != 200) {
+    DVLOG(1) << "Variations server request returned non-200 response code: "
+             << request->GetResponseCode();
+    return;
+  }
 
   std::string seed_data;
   bool success = request->GetResponseAsString(&seed_data);
@@ -144,37 +205,45 @@ void VariationsService::RegisterPrefs(PrefService* prefs) {
                            base::Time().ToInternalValue());
 }
 
-void VariationsService::StoreSeedData(const std::string& seed_data,
+bool VariationsService::StoreSeedData(const std::string& seed_data,
                                       const base::Time& seed_date,
                                       PrefService* local_prefs) {
   // Only store the seed data if it parses correctly.
-  chrome_variations::TrialsSeed seed;
+  TrialsSeed seed;
   if (!seed.ParseFromString(seed_data)) {
     VLOG(1) << "Variations Seed data from server is not in valid proto format, "
             << "rejecting the seed.";
-    return;
+    return false;
   }
 
   std::string base64_seed_data;
   if (!base::Base64Encode(seed_data, &base64_seed_data)) {
     VLOG(1) << "Variations Seed data from server fails Base64Encode, rejecting "
             << "the seed.";
-    return;
+    return false;
   }
 
   local_prefs->SetString(prefs::kVariationsSeed, base64_seed_data);
   local_prefs->SetInt64(prefs::kVariationsSeedDate,
                         seed_date.ToInternalValue());
+  variations_serial_number_ = seed.serial_number();
+  return true;
 }
 
 // static
 bool VariationsService::ShouldAddStudy(
-    const chrome_variations::Study& study,
+    const Study& study,
     const chrome::VersionInfo& version_info,
     const base::Time& reference_date) {
   if (study.has_filter()) {
     if (!CheckStudyChannel(study.filter(), chrome::VersionInfo::GetChannel())) {
       DVLOG(1) << "Filtered out study " << study.name() << " due to channel.";
+      return false;
+    }
+
+    if (!CheckStudyLocale(study.filter(),
+                          g_browser_process->GetApplicationLocale())) {
+      DVLOG(1) << "Filtered out study " << study.name() << " due to locale.";
       return false;
     }
 
@@ -201,7 +270,7 @@ bool VariationsService::ShouldAddStudy(
 
 // static
 bool VariationsService::CheckStudyChannel(
-    const chrome_variations::Study_Filter& filter,
+    const Study_Filter& filter,
     chrome::VersionInfo::Channel channel) {
   // An empty channel list matches all channels.
   if (filter.channel_size() == 0)
@@ -215,9 +284,24 @@ bool VariationsService::CheckStudyChannel(
 }
 
 // static
-bool VariationsService::CheckStudyPlatform(
+bool VariationsService::CheckStudyLocale(
     const chrome_variations::Study_Filter& filter,
-    chrome_variations::Study_Platform platform) {
+    const std::string& locale) {
+  // An empty locale list matches all locales.
+  if (filter.locale_size() == 0)
+    return true;
+
+  for (int i = 0; i < filter.locale_size(); ++i) {
+    if (filter.locale(i) == locale)
+      return true;
+  }
+  return false;
+}
+
+// static
+bool VariationsService::CheckStudyPlatform(
+    const Study_Filter& filter,
+    Study_Platform platform) {
   // An empty platform list matches all platforms.
   if (filter.platform_size() == 0)
     return true;
@@ -231,7 +315,7 @@ bool VariationsService::CheckStudyPlatform(
 
 // static
 bool VariationsService::CheckStudyVersion(
-    const chrome_variations::Study_Filter& filter,
+    const Study_Filter& filter,
     const std::string& version_string) {
   const Version version(version_string);
   if (!version.IsValid()) {
@@ -240,18 +324,12 @@ bool VariationsService::CheckStudyVersion(
   }
 
   if (filter.has_min_version()) {
-    const Version min_version(filter.min_version());
-    if (!min_version.IsValid())
-      return false;
-    if (version.CompareTo(min_version) < 0)
+    if (version.CompareToWildcardString(filter.min_version()) < 0)
       return false;
   }
 
   if (filter.has_max_version()) {
-    const Version max_version(filter.max_version());
-    if (!max_version.IsValid())
-      return false;
-    if (version.CompareTo(max_version) > 0)
+    if (version.CompareToWildcardString(filter.max_version()) > 0)
       return false;
   }
 
@@ -260,7 +338,7 @@ bool VariationsService::CheckStudyVersion(
 
 // static
 bool VariationsService::CheckStudyStartDate(
-    const chrome_variations::Study_Filter& filter,
+    const Study_Filter& filter,
     const base::Time& date_time) {
   if (filter.has_start_date()) {
     const base::Time start_date =
@@ -271,7 +349,7 @@ bool VariationsService::CheckStudyStartDate(
   return true;
 }
 
-bool VariationsService::IsStudyExpired(const chrome_variations::Study& study,
+bool VariationsService::IsStudyExpired(const Study& study,
                                        const base::Time& date_time) {
   if (study.has_expiry_date()) {
     const base::Time expiry_date =
@@ -284,11 +362,23 @@ bool VariationsService::IsStudyExpired(const chrome_variations::Study& study,
 
 // static
 bool VariationsService::ValidateStudyAndComputeTotalProbability(
-    const chrome_variations::Study& study,
+    const Study& study,
     base::FieldTrial::Probability* total_probability) {
   // At the moment, a missing default_experiment_name makes the study invalid.
   if (study.default_experiment_name().empty()) {
     DVLOG(1) << study.name() << " has no default experiment defined.";
+    return false;
+  }
+  if (study.filter().has_min_version() &&
+      !Version::IsValidWildcardString(study.filter().min_version())) {
+    DVLOG(1) << study.name() << " has invalid min version: "
+             << study.filter().min_version();
+    return false;
+  }
+  if (study.filter().has_max_version() &&
+      !Version::IsValidWildcardString(study.filter().max_version())) {
+    DVLOG(1) << study.name() << " has invalid max version: "
+             << study.filter().max_version();
     return false;
   }
 
@@ -324,9 +414,8 @@ bool VariationsService::ValidateStudyAndComputeTotalProbability(
   return true;
 }
 
-bool VariationsService::LoadTrialsSeedFromPref(
-    PrefService* local_prefs,
-    chrome_variations::TrialsSeed* seed) {
+bool VariationsService::LoadTrialsSeedFromPref(PrefService* local_prefs,
+                                               TrialsSeed* seed) {
   std::string base64_seed_data = local_prefs->GetString(prefs::kVariationsSeed);
   std::string seed_data;
 
@@ -339,12 +428,12 @@ bool VariationsService::LoadTrialsSeedFromPref(
     local_prefs->ClearPref(prefs::kVariationsSeed);
     return false;
   }
+  variations_serial_number_ = seed->serial_number();
   return true;
 }
 
-void VariationsService::CreateTrialFromStudy(
-    const chrome_variations::Study& study,
-    const base::Time& reference_date) {
+void VariationsService::CreateTrialFromStudy(const Study& study,
+                                             const base::Time& reference_date) {
   base::FieldTrial::Probability total_probability = 0;
   if (!ValidateStudyAndComputeTotalProbability(study, &total_probability))
     return;
@@ -358,18 +447,18 @@ void VariationsService::CreateTrialFromStudy(
           base::FieldTrialList::kExpirationYearInFuture, 1, 1, NULL));
 
   if (study.has_consistency() &&
-      study.consistency() == chrome_variations::Study_Consistency_PERMANENT) {
+      study.consistency() == Study_Consistency_PERMANENT) {
     trial->UseOneTimeRandomization();
   }
 
   for (int i = 0; i < study.experiment_size(); ++i) {
-    const chrome_variations::Study_Experiment& experiment = study.experiment(i);
+    const Study_Experiment& experiment = study.experiment(i);
     if (experiment.name() != study.default_experiment_name())
       trial->AppendGroup(experiment.name(), experiment.probability_weight());
 
     if (experiment.has_experiment_id()) {
-      const chrome_variations::ID variation_id =
-          static_cast<chrome_variations::ID>(experiment.experiment_id());
+      const VariationID variation_id =
+          static_cast<VariationID>(experiment.experiment_id());
       experiments_helper::AssociateGoogleVariationIDForce(study.name(),
                                                           experiment.name(),
                                                           variation_id);
@@ -380,3 +469,5 @@ void VariationsService::CreateTrialFromStudy(
   if (IsStudyExpired(study, reference_date))
     trial->Disable();
 }
+
+}  // namespace chrome_variations

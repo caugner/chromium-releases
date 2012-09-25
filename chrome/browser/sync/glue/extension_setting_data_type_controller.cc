@@ -19,7 +19,7 @@ using content::BrowserThread;
 namespace browser_sync {
 
 ExtensionSettingDataTypeController::ExtensionSettingDataTypeController(
-    syncable::ModelType type,
+    syncer::ModelType type,
     ProfileSyncComponentsFactory* profile_sync_factory,
     Profile* profile,
     ProfileSyncService* profile_sync_service)
@@ -30,17 +30,16 @@ ExtensionSettingDataTypeController::ExtensionSettingDataTypeController(
       profile_(profile),
       profile_sync_service_(profile_sync_service) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  DCHECK(type == syncable::EXTENSION_SETTINGS ||
-         type == syncable::APP_SETTINGS);
+  DCHECK(type == syncer::EXTENSION_SETTINGS || type == syncer::APP_SETTINGS);
 }
 
-syncable::ModelType ExtensionSettingDataTypeController::type() const {
+syncer::ModelType ExtensionSettingDataTypeController::type() const {
   return type_;
 }
 
-browser_sync::ModelSafeGroup
+syncer::ModelSafeGroup
 ExtensionSettingDataTypeController::model_safe_group() const {
-  return browser_sync::GROUP_FILE;
+  return syncer::GROUP_FILE;
 }
 
 ExtensionSettingDataTypeController::~ExtensionSettingDataTypeController() {}
@@ -54,7 +53,7 @@ bool ExtensionSettingDataTypeController::PostTaskOnBackendThread(
 
 bool ExtensionSettingDataTypeController::StartModels() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  ExtensionSystem::Get(profile_)->Init(true);
+  extensions::ExtensionSystem::Get(profile_)->InitForRegularProfile(true);
   return true;
 }
 

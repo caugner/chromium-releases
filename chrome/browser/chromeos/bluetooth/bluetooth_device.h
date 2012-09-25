@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_BLUETOOTH_BLUETOOTH_DEVICE_H_
 #define CHROME_BROWSER_CHROMEOS_BLUETOOTH_BLUETOOTH_DEVICE_H_
-#pragma once
 
 #include <string>
 #include <vector>
@@ -165,6 +164,10 @@ class BluetoothDevice : private BluetoothDeviceClient::Observer,
   // that pairing is permanent or temporary.
   virtual bool IsPaired() const;
 
+  // Indicates whether the device is visible to the adapter, this is not
+  // mutually exclusive to being paired.
+  bool IsVisible() const { return visible_; }
+
   // Indicates whether the device is bonded to the adapter, bonding is
   // formed by pairing and exchanging high-security link keys so that
   // connections may be encrypted.
@@ -189,7 +192,8 @@ class BluetoothDevice : private BluetoothDeviceClient::Observer,
   void GetServiceRecords(const ServiceRecordsCallback& callback,
                          const ErrorCallback& error_callback);
 
-  // Indicates whether this device provides the given service.
+  // Indicates whether this device provides the given service.  |uuid| should
+  // be in canonical form (see bluetooth_utils::CanonicalUuid).
   virtual bool ProvidesServiceWithUUID(const std::string& uuid) const;
 
   // The ProvidesServiceCallback is used by ProvidesServiceWithName to indicate
@@ -213,10 +217,6 @@ class BluetoothDevice : private BluetoothDeviceClient::Observer,
   bool ExpectingConfirmation() const {
     return !confirmation_callback_.is_null();
   }
-
-  // The VoidResultCallback is used for methods that do not return any data, to
-  // indicate that the action requested is complete.
-  typedef base::Callback<void()> VoidResultCallback;
 
   // Initiates a connection to the device, pairing first if necessary.
   //
@@ -310,6 +310,13 @@ class BluetoothDevice : private BluetoothDeviceClient::Observer,
   // that the device has gone from being discovered to paired or bonded.
   void SetObjectPath(const dbus::ObjectPath& object_path);
 
+  // Removes the dbus object path from the device, indicating that the
+  // device is no longer paired or bonded, but perhaps still visible.
+  void RemoveObjectPath();
+
+  // Sets whether the device is visible to the owning adapter to |visible|.
+  void SetVisible(bool visible) { visible_ = visible; }
+
   // Updates device information from the properties in |properties|, device
   // state properties such as |paired_| and |connected_| are ignored unless
   // |update_state| is true.
@@ -402,28 +409,30 @@ class BluetoothDevice : private BluetoothDeviceClient::Observer,
   void ForgetCallback(const ErrorCallback& error_callback,
                       const dbus::ObjectPath& adapter_path, bool success);
 
-  // Called by BluetoothDeviceClient when a call to DiscoverServices() that was
-  // initated from ProvidesServiceWithName completes.  The |result_callback| is
-  // called with true if a service with name matching |name| is discovered, or
-  // with false otherwise.  The rest of the parameters are as documented for a
-  // BluetoothDeviceClient::ServicesCallback.
+  // Called if the call to GetServiceRecords from ProvidesServiceWithName fails.
+  void SearchServicesForNameErrorCallback(
+      const ProvidesServiceCallback& callback);
+
+  // Called by GetServiceRecords with the list of BluetoothServiceRecords to
+  // search for |name|.  |callback| is the callback from
+  // ProvidesServiceWithName.
   void SearchServicesForNameCallback(
       const std::string& name,
       const ProvidesServiceCallback& callback,
-      const dbus::ObjectPath& object_path,
-      const BluetoothDeviceClient::ServiceMap& service_map,
-      bool success);
+      const ServiceRecordList& list);
 
-  // Called by BluetoothDeviceClient when a call to DiscoverServices() that was
-  // initated from ConnectToService completes.  The |callback| is called with
-  // true iff a connection was successfully established.  The rest of the
-  // parameters are as documented for a BluetoothDeviceClient::ServicesCallback.
-  void ConnectToMatchingService(
+  // Called if the call to GetServiceRecords from Connect fails.
+  void GetServiceRecordsForConnectErrorCallback(
+      const SocketCallback& callback);
+
+  // Called by GetServiceRecords with the list of BluetoothServiceRecords.
+  // Connections are attempted to each service in the list matching
+  // |service_uuid|, and the socket from the first successful connection is
+  // passed to |callback|.
+  void GetServiceRecordsForConnectCallback(
       const std::string& service_uuid,
       const SocketCallback& callback,
-      const dbus::ObjectPath& object_path,
-      const BluetoothDeviceClient::ServiceMap& service_map,
-      bool success);
+      const ServiceRecordList& list);
 
   // Called by BlueoothDeviceClient in response to the AddRemoteData and
   // RemoveRemoteData method calls.
@@ -545,20 +554,8 @@ class BluetoothDevice : private BluetoothDeviceClient::Observer,
   // the request failed before a reply was returned from the device.
   virtual void Cancel() OVERRIDE;
 
-  // Creates a new BluetoothDevice object bound to the information of the
-  // dbus object path |object_path| and the adapter |adapter|, representing
-  // a paired device, with initial properties set from |properties|.
-  static BluetoothDevice* CreateBound(
-      BluetoothAdapter* adapter,
-      const dbus::ObjectPath& object_path,
-      const BluetoothDeviceClient::Properties* properties);
-
-  // Creates a new BluetoothDevice object not bound to a dbus object path,
-  // but bound to the adapter |adapter|, representing a discovered or unpaired
-  // device, with initial properties set from |properties|.
-  static BluetoothDevice* CreateUnbound(
-      BluetoothAdapter* adapter,
-      const BluetoothDeviceClient::Properties* properties);
+  // Creates a new BluetoothDevice object bound to the adapter |adapter|.
+  static BluetoothDevice* Create(BluetoothAdapter* adapter);
 
   // Weak pointer factory for generating 'this' pointers that might live longer
   // than we do.
@@ -583,6 +580,7 @@ class BluetoothDevice : private BluetoothDeviceClient::Observer,
 
   // Tracked device state, updated by the adapter managing the lifecyle of
   // the device.
+  bool visible_;
   bool bonded_;
   bool connected_;
 

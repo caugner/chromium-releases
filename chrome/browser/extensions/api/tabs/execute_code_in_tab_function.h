@@ -4,13 +4,20 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_API_TABS_EXECUTE_CODE_IN_TAB_FUNCTION_H__
 #define CHROME_BROWSER_EXTENSIONS_API_TABS_EXECUTE_CODE_IN_TAB_FUNCTION_H__
-#pragma once
 
 #include <string>
 
 #include "chrome/browser/extensions/extension_function.h"
 #include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/extensions/user_script.h"
+
+namespace extensions {
+namespace api {
+namespace tabs {
+struct InjectDetails;
+}  // namespace tabs
+}  // namespace api
+}  // namespace extensions
 
 // Implement API call tabs.executeScript and tabs.insertCSS.
 class ExecuteCodeInTabFunction : public AsyncExtensionFunction {
@@ -21,13 +28,19 @@ class ExecuteCodeInTabFunction : public AsyncExtensionFunction {
   virtual ~ExecuteCodeInTabFunction();
 
   // ExtensionFunction:
+  virtual bool HasPermission() OVERRIDE;
   virtual bool RunImpl() OVERRIDE;
 
- private:
   // Message handler.
-  void OnExecuteCodeFinished(bool success,
-                             int32 page_id,
-                             const std::string& error);
+  virtual void OnExecuteCodeFinished(const std::string& error,
+                                     int32 on_page_id,
+                                     const GURL& on_url,
+                                     const ListValue& script_result);
+
+ private:
+  // Initialize the |execute_tab_id_| and |details_| if they haven't already
+  // been. Returns whether initialization was successful.
+  bool Init();
 
   // Called when contents from the file whose path is specified in JSON
   // arguments has been loaded.
@@ -51,21 +64,22 @@ class ExecuteCodeInTabFunction : public AsyncExtensionFunction {
   // Id of tab which executes code.
   int execute_tab_id_;
 
+  // The injection details.
+  scoped_ptr<extensions::api::tabs::InjectDetails> details_;
+
   // Contains extension resource built from path of file which is
   // specified in JSON arguments.
   ExtensionResource resource_;
-
-  // If all_frames_ is true, script or CSS text would be injected
-  // to all frames; Otherwise only injected to top main frame.
-  bool all_frames_;
-
-  // The intended time to run the script.
-  UserScript::RunLocation run_at_;
 };
 
 class TabsExecuteScriptFunction : public ExecuteCodeInTabFunction {
  private:
   virtual ~TabsExecuteScriptFunction() {}
+
+  virtual void OnExecuteCodeFinished(const std::string& error,
+                                     int32 on_page_id,
+                                     const GURL& on_url,
+                                     const ListValue& script_result) OVERRIDE;
 
   DECLARE_EXTENSION_FUNCTION_NAME("tabs.executeScript")
 };

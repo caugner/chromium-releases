@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_PUBLIC_BROWSER_SPEECH_RECOGNITION_SESSION_CONFIG_H_
 #define CONTENT_PUBLIC_BROWSER_SPEECH_RECOGNITION_SESSION_CONFIG_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
@@ -30,6 +29,7 @@ struct CONTENT_EXPORT SpeechRecognitionSessionConfig {
   SpeechRecognitionGrammarArray grammars;
   std::string origin_url;
   bool filter_profanities;
+  uint32 max_hypotheses;
   SpeechRecognitionSessionContext initial_context;
   scoped_refptr<net::URLRequestContextGetter> url_request_context_getter;
   SpeechRecognitionEventListener* event_listener;

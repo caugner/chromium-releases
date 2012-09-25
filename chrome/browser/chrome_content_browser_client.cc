@@ -15,8 +15,8 @@
 #include "chrome/app/breakpad_mac.h"
 #include "chrome/browser/browser_about_handler.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/browsing_data_helper.h"
-#include "chrome/browser/browsing_data_remover.h"
+#include "chrome/browser/browsing_data/browsing_data_helper.h"
+#include "chrome/browser/browsing_data/browsing_data_remover.h"
 #include "chrome/browser/character_encoding.h"
 #include "chrome/browser/chrome_benchmarking_message_filter.h"
 #include "chrome/browser/chrome_quota_permission_context.h"
@@ -29,12 +29,12 @@
 #include "chrome/browser/extensions/api/web_request/web_request_api.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_info_map.h"
-#include "chrome/browser/extensions/extension_message_handler.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_web_ui.h"
 #include "chrome/browser/extensions/extension_webkit_preferences.h"
+#include "chrome/browser/extensions/message_handler.h"
 #include "chrome/browser/geolocation/chrome_access_token_store.h"
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/gpu_util.h"
@@ -93,10 +93,11 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 #include "content/public/common/child_process_host.h"
+#include "content/public/common/content_descriptors.h"
 #include "grit/generated_resources.h"
-#include "grit/ui_resources_standard.h"
+#include "grit/ui_resources.h"
 #include "net/base/ssl_cert_request_info.h"
-#include "net/cookies/cookie_monster.h"
+#include "net/cookies/canonical_cookie.h"
 #include "net/cookies/cookie_options.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -119,7 +120,7 @@
 
 #if defined(OS_LINUX) || defined(OS_OPENBSD) || defined(OS_ANDROID)
 #include "base/linux_util.h"
-#include "chrome/browser/crash_handler_host_linuxish.h"
+#include "chrome/browser/crash_handler_host_linux.h"
 #endif
 
 #if defined(USE_NSS)
@@ -134,6 +135,7 @@ using content::QuotaPermissionContext;
 using content::RenderViewHost;
 using content::SiteInstance;
 using content::WebContents;
+using extensions::APIPermission;
 using extensions::Extension;
 using webkit_glue::WebPreferences;
 
@@ -298,6 +300,33 @@ void FillFontFamilyMap(const PrefService* prefs,
   }
 }
 
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
+int GetCrashSignalFD(const CommandLine& command_line) {
+  if (command_line.HasSwitch(switches::kExtensionProcess)) {
+    ExtensionCrashHandlerHostLinux* crash_handler =
+        ExtensionCrashHandlerHostLinux::GetInstance();
+    return crash_handler->GetDeathSignalSocket();
+  }
+
+  std::string process_type =
+      command_line.GetSwitchValueASCII(switches::kProcessType);
+
+  if (process_type == switches::kRendererProcess)
+    return RendererCrashHandlerHostLinux::GetInstance()->GetDeathSignalSocket();
+
+  if (process_type == switches::kPluginProcess)
+    return PluginCrashHandlerHostLinux::GetInstance()->GetDeathSignalSocket();
+
+  if (process_type == switches::kPpapiPluginProcess)
+    return PpapiCrashHandlerHostLinux::GetInstance()->GetDeathSignalSocket();
+
+  if (process_type == switches::kGpuProcess)
+    return GpuCrashHandlerHostLinux::GetInstance()->GetDeathSignalSocket();
+
+  return -1;
+}
+#endif  // defined(OS_POSIX) && !defined(OS_MACOSX)
+
 }  // namespace
 
 namespace chrome {
@@ -308,6 +337,19 @@ ChromeContentBrowserClient::ChromeContentBrowserClient() {
 }
 
 ChromeContentBrowserClient::~ChromeContentBrowserClient() {
+}
+
+// static
+void ChromeContentBrowserClient::RegisterUserPrefs(PrefService* prefs) {
+  prefs->RegisterBooleanPref(prefs::kDisable3DAPIs,
+                             false,
+                             PrefService::UNSYNCABLE_PREF);
+  prefs->RegisterBooleanPref(prefs::kEnableHyperlinkAuditing,
+                             true,
+                             PrefService::UNSYNCABLE_PREF);
+  prefs->RegisterBooleanPref(prefs::kEnableMemoryInfo,
+                             false,
+                             PrefService::UNSYNCABLE_PREF);
 }
 
 content::BrowserMainParts* ChromeContentBrowserClient::CreateBrowserMainParts(
@@ -337,19 +379,19 @@ content::BrowserMainParts* ChromeContentBrowserClient::CreateBrowserMainParts(
   // Construct additional browser parts. Stages are called in the order in
   // which they are added.
 #if defined(TOOLKIT_GTK)
-  browser::AddGtkToolkitExtraParts(main_parts);
+  chrome::AddGtkToolkitExtraParts(main_parts);
 #endif
 
 #if defined(TOOLKIT_VIEWS)
-  browser::AddViewsToolkitExtraParts(main_parts);
+  chrome::AddViewsToolkitExtraParts(main_parts);
 #endif
 
 #if defined(USE_ASH)
-  browser::AddAshToolkitExtraParts(main_parts);
+  chrome::AddAshToolkitExtraParts(main_parts);
 #endif
 
 #if defined(USE_AURA)
-  browser::AddAuraToolkitExtraParts(main_parts);
+  chrome::AddAuraToolkitExtraParts(main_parts);
 #endif
 
   return main_parts;
@@ -362,10 +404,29 @@ content::WebContentsView*
   return NULL;
 }
 
+std::string ChromeContentBrowserClient::GetStoragePartitionIdForChildProcess(
+    content::BrowserContext* browser_context,
+    int child_process_id) {
+  // In chrome, we use the extension ID as the partition ID. This works well
+  // because the extension ID fits the partition ID pattern and currently only
+  // apps can designate that storage should be isolated.
+  Profile* profile = Profile::FromBrowserContext(browser_context);
+  ExtensionService* extension_service =
+      extensions::ExtensionSystem::Get(profile)->extension_service();
+  if (extension_service) {
+    const extensions::Extension* installed_app = extension_service->
+        GetInstalledAppForRenderer(child_process_id);
+    if (installed_app && installed_app->is_storage_isolated()) {
+      return installed_app->id();
+    }
+  }
+  return std::string();
+}
+
 content::WebContentsViewDelegate*
     ChromeContentBrowserClient::GetWebContentsViewDelegate(
         content::WebContents* web_contents) {
-  return browser::CreateWebContentsViewDelegate(web_contents);
+  return chrome::CreateWebContentsViewDelegate(web_contents);
 }
 
 void ChromeContentBrowserClient::RenderViewHostCreated(
@@ -377,7 +438,7 @@ void ChromeContentBrowserClient::RenderViewHostCreated(
 
   new ChromeRenderViewHostObserver(render_view_host,
                                    profile->GetNetworkPredictor());
-  new ExtensionMessageHandler(render_view_host);
+  new extensions::MessageHandler(render_view_host);
 }
 
 void ChromeContentBrowserClient::RenderProcessHostCreated(
@@ -388,7 +449,7 @@ void ChromeContentBrowserClient::RenderProcessHostCreated(
       id, profile, profile->GetRequestContextForRenderProcess(id)));
   host->GetChannel()->AddFilter(new PluginInfoMessageFilter(id, profile));
 #if defined(ENABLE_PRINTING)
-  host->GetChannel()->AddFilter(new PrintingMessageFilter(id));
+  host->GetChannel()->AddFilter(new PrintingMessageFilter(id, profile));
 #endif
   host->GetChannel()->AddFilter(
       new SearchProviderInstallStateMessageFilter(id, profile));
@@ -468,7 +529,7 @@ bool ChromeContentBrowserClient::ShouldUseProcessPerSite(
   // page, we want to give each instance its own process to improve
   // responsiveness.
   if (extension->GetType() == Extension::TYPE_HOSTED_APP) {
-    if (!extension->HasAPIPermission(ExtensionAPIPermission::kBackground) ||
+    if (!extension->HasAPIPermission(APIPermission::kBackground) ||
         !extension->allow_background_js_access()) {
       return false;
     }
@@ -567,7 +628,7 @@ bool ChromeContentBrowserClient::ShouldTryToUseExistingProcessHost(
     for (ExtensionProcessManager::const_iterator iter =
              epm->background_hosts().begin();
          iter != epm->background_hosts().end(); ++iter) {
-      ExtensionHost* host = *iter;
+      const extensions::ExtensionHost* host = *iter;
       process_ids.insert(host->render_process_host()->GetID());
     }
   }
@@ -602,7 +663,7 @@ void ChromeContentBrowserClient::SiteInstanceGotProcess(
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
       base::Bind(&ExtensionInfoMap::RegisterExtensionProcess,
-                 ExtensionSystem::Get(profile)->info_map(),
+                 extensions::ExtensionSystem::Get(profile)->info_map(),
                  extension->id(),
                  site_instance->GetProcess()->GetID(),
                  site_instance->GetId()));
@@ -631,7 +692,7 @@ void ChromeContentBrowserClient::SiteInstanceDeleting(
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
       base::Bind(&ExtensionInfoMap::UnregisterExtensionProcess,
-                 ExtensionSystem::Get(profile)->info_map(),
+                 extensions::ExtensionSystem::Get(profile)->info_map(),
                  extension->id(),
                  site_instance->GetProcess()->GetID(),
                  site_instance->GetId()));
@@ -732,13 +793,9 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
         command_line->AppendSwitch(
             switches::kDisableClientSidePhishingDetection);
       }
-    }
-    {
-      PrefService* local_state = g_browser_process->local_state();
-      if (local_state &&
-          !local_state->GetBoolean(prefs::kPrintPreviewDisabled)) {
+
+      if (!prefs->GetBoolean(prefs::kPrintPreviewDisabled))
         command_line->AppendSwitch(switches::kRendererPrintPreview);
-      }
     }
 
     // Please keep this in alphabetical order.
@@ -748,23 +805,22 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
       switches::kAllowScriptingGallery,
       switches::kAppsCheckoutURL,
       switches::kAppsGalleryURL,
-      switches::kBrowserPlugin,
       switches::kCloudPrintServiceURL,
       switches::kDebugPrint,
+      switches::kDisableAsynchronousSpellChecking,
       switches::kDisableBundledPpapiFlash,
       switches::kDisableExtensionsResourceWhitelist,
       switches::kDisableInBrowserThumbnailing,
       switches::kDumpHistogramsOnExit,
-      switches::kEnableAsynchronousSpellChecking,
       switches::kEnableBenchmarking,
       switches::kEnableBundledPpapiFlash,
       switches::kEnableCrxlessWebApps,
       switches::kEnableExperimentalExtensionApis,
+      switches::kEnableHighDPIPDFPlugin,
       switches::kEnableIPCFuzzing,
       switches::kEnableNaCl,
       switches::kEnableNaClIPCProxy,
       switches::kEnablePasswordGeneration,
-      switches::kEnablePlatformApps,
       switches::kEnableWatchdog,
       switches::kExperimentalSpellcheckerFeatures,
       switches::kMemoryProfiling,
@@ -789,7 +845,6 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
     static const char* const kSwitchNames[] = {
       switches::kAllowHTTPBackgroundPage,
       switches::kEnableExperimentalExtensionApis,
-      switches::kEnablePlatformApps,
       switches::kWhitelistedExtensionID,
     };
 
@@ -900,6 +955,24 @@ bool ChromeContentBrowserClient::AllowSetCookie(
                  render_view_id, url, first_party, cookie_line, *options,
                  !allow));
   return allow;
+}
+
+bool ChromeContentBrowserClient::AllowPluginLocalDataAccess(
+    const GURL& document_url,
+    const GURL& plugin_url,
+    content::ResourceContext* context) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  ProfileIOData* io_data = ProfileIOData::FromResourceContext(context);
+  return io_data->GetCookieSettings()->IsReadingCookieAllowed(document_url,
+                                                              plugin_url);
+}
+
+bool ChromeContentBrowserClient::AllowPluginLocalDataSessionOnly(
+    const GURL& url,
+    content::ResourceContext* context) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  ProfileIOData* io_data = ProfileIOData::FromResourceContext(context);
+  return io_data->GetCookieSettings()->IsCookieSessionOnly(url);
 }
 
 bool ChromeContentBrowserClient::AllowSaveLocalState(
@@ -1133,7 +1206,7 @@ void ChromeContentBrowserClient::RequestDesktopNotificationPermission(
       service->extensions()->GetExtensionOrAppByURL(ExtensionURLInfo(
           source_origin));
   if (extension &&
-      extension->HasAPIPermission(ExtensionAPIPermission::kNotification)) {
+      extension->HasAPIPermission(APIPermission::kNotification)) {
     RenderViewHost* rvh =
         RenderViewHost::FromID(render_process_id, render_view_id);
     if (rvh)
@@ -1160,7 +1233,7 @@ WebKit::WebNotificationPresenter::Permission
   ProfileIOData* io_data = ProfileIOData::FromResourceContext(context);
   if (io_data->GetExtensionInfoMap()->SecurityOriginHasAPIPermission(
         source_origin, render_process_id,
-        ExtensionAPIPermission::kNotification))
+        APIPermission::kNotification))
     return WebKit::WebNotificationPresenter::PermissionAllowed;
 
   // Fall back to the regular notification preferences, which works on an
@@ -1242,7 +1315,7 @@ bool ChromeContentBrowserClient::CanCreateWindow(
     if (!map->SecurityOriginHasAPIPermission(
             source_origin,
             render_process_id,
-            ExtensionAPIPermission::kBackground)) {
+            APIPermission::kBackground)) {
       return false;
     }
 
@@ -1380,8 +1453,14 @@ void ChromeContentBrowserClient::OverrideWebkitPrefs(
   }
 
   web_prefs->asynchronous_spell_checking_enabled =
-      CommandLine::ForCurrentProcess()->
-          HasSwitch(switches::kEnableAsynchronousSpellChecking);
+#if defined(OS_MACOSX)
+      // TODO(hbono): Bug 107371: Implement asynchronous spellchecking API for
+      // Mac so it uses NSSpellChecker in the background.
+      false;
+#else
+      !CommandLine::ForCurrentProcess()->
+          HasSwitch(switches::kDisableAsynchronousSpellChecking);
+#endif
   web_prefs->unified_textchecker_enabled =
       web_prefs->asynchronous_spell_checking_enabled ||
           CommandLine::ForCurrentProcess()->
@@ -1414,7 +1493,7 @@ void ChromeContentBrowserClient::OverrideWebkitPrefs(
         extension, view_type, web_prefs);
   }
 
-  if (gpu_util::InForceCompositingModeTrial())
+  if (gpu_util::InForceCompositingModeOrThreadTrial())
     web_prefs->force_compositing_mode = true;
 
   if (view_type == chrome::VIEW_TYPE_NOTIFICATION) {
@@ -1545,7 +1624,7 @@ bool ChromeContentBrowserClient::AllowPepperSocketAPI(
   if (!extension)
     return false;
 
-  if (extension->HasAPIPermission(ExtensionAPIPermission::kSocket))
+  if (extension->HasAPIPermission(APIPermission::kSocket))
     return true;
 
   return false;
@@ -1557,30 +1636,14 @@ bool ChromeContentBrowserClient::AllowPepperPrivateFileAPI() {
 }
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
-int ChromeContentBrowserClient::GetCrashSignalFD(
-    const CommandLine& command_line) {
-  if (command_line.HasSwitch(switches::kExtensionProcess)) {
-    ExtensionCrashHandlerHostLinux* crash_handler =
-        ExtensionCrashHandlerHostLinux::GetInstance();
-    return crash_handler->GetDeathSignalSocket();
+void ChromeContentBrowserClient::GetAdditionalMappedFilesForChildProcess(
+    const CommandLine& command_line,
+    base::GlobalDescriptors::Mapping* mappings) {
+  int crash_signal_fd = GetCrashSignalFD(command_line);
+  if (crash_signal_fd >= 0) {
+    mappings->push_back(std::pair<base::GlobalDescriptors::Key, int>(
+        kCrashDumpSignal, crash_signal_fd));
   }
-
-  std::string process_type =
-      command_line.GetSwitchValueASCII(switches::kProcessType);
-
-  if (process_type == switches::kRendererProcess)
-    return RendererCrashHandlerHostLinux::GetInstance()->GetDeathSignalSocket();
-
-  if (process_type == switches::kPluginProcess)
-    return PluginCrashHandlerHostLinux::GetInstance()->GetDeathSignalSocket();
-
-  if (process_type == switches::kPpapiPluginProcess)
-    return PpapiCrashHandlerHostLinux::GetInstance()->GetDeathSignalSocket();
-
-  if (process_type == switches::kGpuProcess)
-    return GpuCrashHandlerHostLinux::GetInstance()->GetDeathSignalSocket();
-
-  return -1;
 }
 #endif  // defined(OS_POSIX) && !defined(OS_MACOSX)
 

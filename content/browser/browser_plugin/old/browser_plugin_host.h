@@ -4,10 +4,10 @@
 
 #ifndef CONTENT_BROWSER_BROWSER_PLUGIN_OLD_BROWSER_PLUGIN_HOST_H__
 #define CONTENT_BROWSER_BROWSER_PLUGIN_OLD_BROWSER_PLUGIN_HOST_H__
-#pragma once
 
 #include <map>
 
+#include "base/compiler_specific.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_contents_delegate.h"
@@ -16,6 +16,10 @@
 #include "ui/gfx/size.h"
 
 class WebContentsImpl;
+
+namespace IPC {
+struct ChannelHandle;
+}
 
 namespace content {
 
@@ -117,7 +121,6 @@ class BrowserPluginHost : public WebContentsObserver,
   // An identifier that uniquely identifies a browser plugin container
   // within an embedder.
   int instance_id_;
-  gfx::Size initial_size_;
   GuestMap guests_;
   ContainerInstanceMap guests_by_container_id_;
 

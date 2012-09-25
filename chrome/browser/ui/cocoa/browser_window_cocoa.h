@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_BROWSER_WINDOW_COCOA_H_
 #define CHROME_BROWSER_UI_COCOA_BROWSER_WINDOW_COCOA_H_
-#pragma once
 
 #include "base/memory/scoped_nsobject.h"
 #include "base/memory/weak_ptr.h"
@@ -49,7 +48,6 @@ class BrowserWindowCocoa : public BrowserWindow,
   virtual gfx::NativeWindow GetNativeWindow() OVERRIDE;
   virtual BrowserWindowTesting* GetBrowserWindowTesting() OVERRIDE;
   virtual StatusBubble* GetStatusBubble() OVERRIDE;
-  virtual void ToolbarSizeChanged(bool is_animating) OVERRIDE;
   virtual void UpdateTitleBar() OVERRIDE;
   virtual void BookmarkBarStateChanged(
       BookmarkBar::AnimateChangeType change_type) OVERRIDE;
@@ -93,7 +91,6 @@ class BrowserWindowCocoa : public BrowserWindow,
   virtual void ConfirmAddSearchProvider(TemplateURL* template_url,
                                         Profile* profile) OVERRIDE;
   virtual void ToggleBookmarkBar() OVERRIDE;
-  virtual void ShowAboutChromeDialog() OVERRIDE;
   virtual void ShowUpdateChromeDialog() OVERRIDE;
   virtual void ShowTaskManager() OVERRIDE;
   virtual void ShowBackgroundPages() OVERRIDE;
@@ -110,7 +107,7 @@ class BrowserWindowCocoa : public BrowserWindow,
   virtual void UserChangedTheme() OVERRIDE;
   virtual int GetExtraRenderViewHeight() const OVERRIDE;
   virtual void WebContentsFocused(content::WebContents* contents) OVERRIDE;
-  virtual void ShowPageInfo(Profile* profile,
+  virtual void ShowPageInfo(content::WebContents* web_contents,
                             const GURL& url,
                             const content::SSLStatus& ssl,
                             bool show_history) OVERRIDE;
@@ -125,8 +122,6 @@ class BrowserWindowCocoa : public BrowserWindow,
       bool* is_keyboard_shortcut) OVERRIDE;
   virtual void HandleKeyboardEvent(
       const content::NativeWebKeyboardEvent& event) OVERRIDE;
-  virtual void ShowCreateWebAppShortcutsDialog(
-      TabContents* tab_contents) OVERRIDE;
   virtual void ShowCreateChromeAppShortcutsDialog(
       Profile* profile,
       const extensions::Extension* app) OVERRIDE;

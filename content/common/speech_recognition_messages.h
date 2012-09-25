@@ -29,7 +29,7 @@ IPC_STRUCT_TRAITS_BEGIN(content::SpeechRecognitionHypothesis)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(content::SpeechRecognitionResult)
-  IPC_STRUCT_TRAITS_MEMBER(provisional)
+  IPC_STRUCT_TRAITS_MEMBER(is_provisional)
   IPC_STRUCT_TRAITS_MEMBER(hypotheses)
 IPC_STRUCT_TRAITS_END()
 
@@ -117,6 +117,8 @@ IPC_STRUCT_BEGIN(SpeechRecognitionHostMsg_StartRequest_Params)
   IPC_STRUCT_MEMBER(std::string, origin_url)
   // One-shot/continuous recognition mode.
   IPC_STRUCT_MEMBER(bool, is_one_shot)
+  // Maximum number of hypotheses allowed for each results.
+  IPC_STRUCT_MEMBER(uint32, max_hypotheses)
 IPC_STRUCT_END()
 
 

@@ -144,10 +144,10 @@ cr.define('login', function() {
 
     /**
      * Shows or hides offline message based on network on/offline state.
-     * @param {Integer} state Current state of the network (see NET_STATE).
+     * @param {number} state Current state of the network (see NET_STATE).
      * @param {string} network Name of the current network.
      * @param {string} reason Reason the callback was called.
-     * @param {int} lastNetworkType Last active network type.
+     * @param {number} lastNetworkType Last active network type.
      */
     updateState_: function(state, network, reason, lastNetworkType) {
       var currentScreen = Oobe.getInstance().currentScreen;
@@ -161,11 +161,13 @@ cr.define('login', function() {
       var isTimeout = false;
       var isShown = !offlineMessage.classList.contains('hidden') &&
           !offlineMessage.classList.contains('faded');
+      var currentScreenReloaded = false;
 
       if (reason == ERROR_REASONS.PROXY_CONFIG_CHANGED && shouldOverlay &&
-          isShown) {
+          !currentScreenReloaded) {
         // Schedules a immediate retry.
         currentScreen.doReload();
+        currentScreenReloaded = true;
         console.log('Retry page load since proxy settings has been changed');
       }
 
@@ -233,11 +235,8 @@ cr.define('login', function() {
         offlineMessage.classList.remove('hidden');
         offlineMessage.classList.remove('faded');
 
-        if (Oobe.getInstance().isNewOobe()) {
-          $('inner-container').style.height =
-              offlineMessage.offsetHeight + 'px';
-          $('inner-container').style.width = offlineMessage.offsetWidth + 'px';
-        }
+        if (Oobe.getInstance().isNewOobe())
+          Oobe.getInstance().updateInnerContainerSize_(offlineMessage);
 
         if (!currentScreen.classList.contains('faded')) {
           currentScreen.classList.add('faded');
@@ -263,25 +262,28 @@ cr.define('login', function() {
           offlineMessage.onBeforeHide();
 
           offlineMessage.classList.add('faded');
-          offlineMessage.addEventListener('webkitTransitionEnd',
-            function f(e) {
-              offlineMessage.removeEventListener('webkitTransitionEnd', f);
-              if (offlineMessage.classList.contains('faded'))
-                offlineMessage.classList.add('hidden');
-            });
+          if (offlineMessage.classList.contains('animated')) {
+            offlineMessage.addEventListener('webkitTransitionEnd',
+              function f(e) {
+                offlineMessage.removeEventListener('webkitTransitionEnd', f);
+                if (offlineMessage.classList.contains('faded'))
+                  offlineMessage.classList.add('hidden');
+              });
+          } else {
+            offlineMessage.classList.add('hidden');
+          }
 
           currentScreen.classList.remove('hidden');
           currentScreen.classList.remove('faded');
 
-          if (Oobe.getInstance().isNewOobe()) {
-            $('inner-container').style.height =
-                currentScreen.offsetHeight + 'px';
-            $('inner-container').style.width = currentScreen.offsetWidth + 'px';
-          }
+          if (Oobe.getInstance().isNewOobe())
+            Oobe.getInstance().updateInnerContainerSize_(currentScreen);
 
           // Forces a reload for Gaia screen on hiding error message.
-          if (currentScreen.id == 'gaia-signin')
+          if (currentScreen.id == 'gaia-signin' && !currentScreenReloaded) {
             currentScreen.doReload();
+            currentScreenReloaded = true;
+          }
         }
       }
     },
@@ -299,10 +301,10 @@ cr.define('login', function() {
 
   /**
    * Network state changed callback.
-   * @param {Integer} state Current state of the network (see NET_STATE).
+   * @param {number} state Current state of the network (see NET_STATE).
    * @param {string} network Name of the current network.
    * @param {string} reason Reason the callback was called.
-   * @param {int} lastNetworkType Last active network type.
+   * @param {number} lastNetworkType Last active network type.
    */
   ErrorMessageScreen.updateState = function(
       state, network, reason, lastNetworkType) {

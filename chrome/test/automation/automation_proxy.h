@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_TEST_AUTOMATION_AUTOMATION_PROXY_H_
 #define CHROME_TEST_AUTOMATION_AUTOMATION_PROXY_H_
-#pragma once
 
 #include <string>
 #include <vector>
@@ -55,7 +54,7 @@ class AutomationMessageSender : public IPC::Sender {
 // a running instance of the app.
 class AutomationProxy : public IPC::Listener, public AutomationMessageSender {
  public:
-  AutomationProxy(int action_timeout_ms, bool disconnect_on_failure);
+  AutomationProxy(base::TimeDelta action_timeout, bool disconnect_on_failure);
   virtual ~AutomationProxy();
 
   // Creates a previously unused channel id.
@@ -133,12 +132,6 @@ class AutomationProxy : public IPC::Listener, public AutomationMessageSender {
   // Window numbers are 0-based.
   scoped_refptr<BrowserProxy> GetBrowserWindow(int window_index);
 
-  // Finds the first browser window that is not incognito mode and of type
-  // TYPE_TABBED, and returns its corresponding BrowserProxy, transferring
-  // ownership of the pointer to the caller.
-  // On failure, returns NULL.
-  scoped_refptr<BrowserProxy> FindTabbedBrowserWindow();
-
   // Sends the browser a new proxy configuration to start using. Returns true
   // if the proxy config was successfully sent, false otherwise.
   bool SendProxyConfig(const std::string& new_proxy_config) WARN_UNUSED_RESULT;
@@ -154,9 +147,6 @@ class AutomationProxy : public IPC::Listener, public AutomationMessageSender {
   // Gets the next extension test result in |result|. Returns false if there
   // was a problem sending the result querying RPC.
   bool GetExtensionTestResult(bool* result, std::string* message);
-
-  // Resets to the default theme. Returns true on success.
-  bool ResetToDefaultTheme();
 
   // Generic pattern for sending automation requests.
   bool SendJSONRequest(const std::string& request,
@@ -199,15 +189,16 @@ class AutomationProxy : public IPC::Listener, public AutomationMessageSender {
       gfx::NativeWindow* external_tab_container,
       gfx::NativeWindow* tab);
 
-  int action_timeout_ms() const {
-    return static_cast<int>(action_timeout_.InMilliseconds());
+  base::TimeDelta action_timeout() const {
+    return action_timeout_;
   }
 
   // Sets the timeout for subsequent automation calls.
-  void set_action_timeout_ms(int timeout_ms) {
-    DCHECK(timeout_ms <= 10 * 60 * 1000 ) << "10+ min of automation timeout "
-        "can make the test hang and be killed by buildbot";
-    action_timeout_ = base::TimeDelta::FromMilliseconds(timeout_ms);
+  void set_action_timeout(base::TimeDelta timeout) {
+    DCHECK(timeout <= base::TimeDelta::FromMinutes(10))
+        << "10+ min of automation timeout "
+           "can make the test hang and be killed by buildbot";
+    action_timeout_ = timeout;
   }
 
   // Returns the server version of the server connected. You may only call this

@@ -16,7 +16,6 @@
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/mac/bundle_locations.h"
-#include "base/mac/cocoa_protocols.h"
 #include "base/mac/mac_util.h"
 #include "base/mac/scoped_nsautorelease_pool.h"
 #include "base/message_loop.h"
@@ -217,7 +216,7 @@ void TestShell::InitializeTestShell(bool layout_test_mode,
       [base::mac::FrameworkBundle() pathForResource:@"test_shell"
                                              ofType:@"pak"];
   FilePath resources_pak_path([resource_path fileSystemRepresentation]);
-  if (!g_resource_data_pack->Load(resources_pak_path)) {
+  if (!g_resource_data_pack->LoadFromPath(resources_pak_path)) {
     LOG(FATAL) << "failed to load test_shell.pak";
   }
 
@@ -555,14 +554,15 @@ bool TestShell::PromptForSaveFile(const wchar_t* prompt_title,
   NSSavePanel* save_panel = [NSSavePanel savePanel];
 
   /* set up new attributes */
-  [save_panel setRequiredFileType:@"txt"];
+  [save_panel setAllowedFileTypes:@[@"txt"]];
   [save_panel setMessage:
       [NSString stringWithUTF8String:WideToUTF8(prompt_title).c_str()]];
 
   /* display the NSSavePanel */
-  if ([save_panel runModalForDirectory:NSHomeDirectory() file:@""] ==
-      NSOKButton) {
-    *result = FilePath([[save_panel filename] fileSystemRepresentation]);
+  [save_panel setDirectoryURL:[NSURL fileURLWithPath:NSHomeDirectory()]];
+  [save_panel setNameFieldStringValue:@""];
+  if ([save_panel runModal] == NSFileHandlingPanelOKButton) {
+    *result = FilePath([[[save_panel URL] path] fileSystemRepresentation]);
     return true;
   }
   return false;

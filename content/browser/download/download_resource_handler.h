@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_BROWSER_DOWNLOAD_DOWNLOAD_RESOURCE_HANDLER_H_
 #define CONTENT_BROWSER_DOWNLOAD_DOWNLOAD_RESOURCE_HANDLER_H_
-#pragma once
 
 #include <string>
 
@@ -71,7 +70,7 @@ class DownloadResourceHandler
                           int* buf_size,
                           int min_size) OVERRIDE;
 
-  virtual bool OnReadCompleted(int request_id, int* bytes_read,
+  virtual bool OnReadCompleted(int request_id, int bytes_read,
                                bool* defer) OVERRIDE;
 
   virtual bool OnResponseCompleted(int request_id,

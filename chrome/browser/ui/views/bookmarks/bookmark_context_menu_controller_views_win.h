@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_BOOKMARKS_BOOKMARK_CONTEXT_MENU_CONTROLLER_VIEWS_WIN_H_
 #define CHROME_BROWSER_UI_VIEWS_BOOKMARKS_BOOKMARK_CONTEXT_MENU_CONTROLLER_VIEWS_WIN_H_
-#pragma once
 
 #include <vector>
 
@@ -16,6 +15,7 @@ class BookmarkContextMenuControllerViewsWin
   BookmarkContextMenuControllerViewsWin(
       views::Widget* parent_widget,
       BookmarkContextMenuControllerViewsDelegate* delegate,
+      Browser* browser,
       Profile* profile,
       content::PageNavigator* navigator,
       const BookmarkNode* parent,

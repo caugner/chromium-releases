@@ -4,7 +4,6 @@
 
 #include "base/callback.h"
 #include "base/logging.h"
-
 #include "chrome/browser/external_protocol/external_protocol_handler.h"
 #include "chrome/browser/importer/importer_progress_dialog.h"
 #include "ui/gfx/native_widget_types.h"
@@ -24,26 +23,32 @@
 class SSLClientAuthHandler;
 class TabContents;
 
+namespace content {
+class WebContents;
+}
+
 namespace net {
 class HttpNetworkSession;
 class SSLCertRequestInfo;
 class X509Certificate;
 }
+
 namespace views {
 class Widget;
 }
 
-namespace browser {
+namespace chrome {
 
 void ShowAboutIPCDialog() {
   // TODO(beng):
   NOTIMPLEMENTED();
 }
 
-}  // namespace browser
+}  // namespace chrome
 
 #if defined(OS_WIN)
-void ShowCertificateViewer(gfx::NativeWindow parent,
+void ShowCertificateViewer(content::WebContents* web_contents,
+                           gfx::NativeWindow parent,
                            net::X509Certificate* cert) {
   // No certificate viewer on Windows.
 }

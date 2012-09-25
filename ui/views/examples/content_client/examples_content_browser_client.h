@@ -4,7 +4,6 @@
 
 #ifndef UI_VIEWS_EXAMPLES_CONTENT_CLIENT_EXAMPLES_CONTENT_BROWSER_CLIENT_H_
 #define UI_VIEWS_EXAMPLES_CONTENT_CLIENT_EXAMPLES_CONTENT_BROWSER_CLIENT_H_
-#pragma once
 
 #include <string>
 
@@ -14,7 +13,6 @@
 
 namespace content {
 class ShellBrowserContext;
-class ShellBrowserMainParts;
 }
 
 namespace views {

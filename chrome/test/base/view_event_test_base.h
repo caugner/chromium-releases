@@ -4,7 +4,6 @@
 
 #ifndef CHROME_TEST_BASE_VIEW_EVENT_TEST_BASE_H_
 #define CHROME_TEST_BASE_VIEW_EVENT_TEST_BASE_H_
-#pragma once
 
 // We only want to use ViewEventTestBase in test targets which properly
 // isolate each test case by running each test in a separate process.
@@ -89,7 +88,6 @@ class ViewEventTestBase : public views::WidgetDelegate,
   // Overridden to do nothing so that this class can be used in runnable tasks.
   void AddRef() {}
   void Release() {}
-  static bool ImplementsThreadSafeReferenceCounting() { return false; }
 
  protected:
   virtual ~ViewEventTestBase();

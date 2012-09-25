@@ -16,6 +16,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/chrome_select_file_policy.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
@@ -23,9 +24,9 @@
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/file_chooser_params.h"
-#include "content/public/common/selected_file_info.h"
 #include "grit/generated_resources.h"
 #include "net/base/mime_util.h"
+#include "ui/base/dialogs/selected_file_info.h"
 #include "ui/base/l10n/l10n_util.h"
 
 using content::BrowserThread;
@@ -42,8 +43,8 @@ namespace {
 const int kFileSelectEnumerationId = -1;
 
 void NotifyRenderViewHost(RenderViewHost* render_view_host,
-                          const std::vector<content::SelectedFileInfo>& files,
-                          SelectFileDialog::Type dialog_type) {
+                          const std::vector<ui::SelectedFileInfo>& files,
+                          ui::SelectFileDialog::Type dialog_type) {
   const int kReadFilePermissions =
       base::PLATFORM_FILE_OPEN |
       base::PLATFORM_FILE_READ |
@@ -61,19 +62,18 @@ void NotifyRenderViewHost(RenderViewHost* render_view_host,
       base::PLATFORM_FILE_ASYNC;
 
   int permissions = kReadFilePermissions;
-  if (dialog_type == SelectFileDialog::SELECT_SAVEAS_FILE)
+  if (dialog_type == ui::SelectFileDialog::SELECT_SAVEAS_FILE)
     permissions = kWriteFilePermissions;
   render_view_host->FilesSelectedInChooser(files, permissions);
 }
 
-// Converts a list of FilePaths to a list of SelectedFileInfo, with the
-// display name field left empty.
-std::vector<content::SelectedFileInfo> ConvertToSelectedFileInfoList(
+// Converts a list of FilePaths to a list of ui::SelectedFileInfo.
+std::vector<ui::SelectedFileInfo> FilePathListToSelectedFileInfoList(
     const std::vector<FilePath>& paths) {
-  std::vector<content::SelectedFileInfo> selected_files;
+  std::vector<ui::SelectedFileInfo> selected_files;
   for (size_t i = 0; i < paths.size(); ++i) {
     selected_files.push_back(
-        content::SelectedFileInfo(paths[i], FilePath::StringType()));
+        ui::SelectedFileInfo(paths[i], paths[i]));
   }
   return selected_files;
 }
@@ -95,7 +95,7 @@ FileSelectHelper::FileSelectHelper(Profile* profile)
       web_contents_(NULL),
       select_file_dialog_(),
       select_file_types_(),
-      dialog_type_(SelectFileDialog::SELECT_OPEN_FILE) {
+      dialog_type_(ui::SelectFileDialog::SELECT_OPEN_FILE) {
 }
 
 FileSelectHelper::~FileSelectHelper() {
@@ -117,27 +117,25 @@ FileSelectHelper::~FileSelectHelper() {
 
 void FileSelectHelper::FileSelected(const FilePath& path,
                                     int index, void* params) {
-  FileSelectedWithExtraInfo(
-      content::SelectedFileInfo(path, FilePath::StringType()),
-      index, params);
+  FileSelectedWithExtraInfo(ui::SelectedFileInfo(path, path), index, params);
 }
 
 void FileSelectHelper::FileSelectedWithExtraInfo(
-    const content::SelectedFileInfo& file,
+    const ui::SelectedFileInfo& file,
     int index,
     void* params) {
   if (!render_view_host_)
     return;
 
-  const FilePath& path = file.path;
-  profile_->set_last_selected_directory(path.DirName());
+  profile_->set_last_selected_directory(file.file_path.DirName());
 
-  if (dialog_type_ == SelectFileDialog::SELECT_FOLDER) {
+  const FilePath& path = file.local_path;
+  if (dialog_type_ == ui::SelectFileDialog::SELECT_FOLDER) {
     StartNewEnumeration(path, kFileSelectEnumerationId, render_view_host_);
     return;
   }
 
-  std::vector<content::SelectedFileInfo> files;
+  std::vector<ui::SelectedFileInfo> files;
   files.push_back(file);
   NotifyRenderViewHost(render_view_host_, files, dialog_type_);
 
@@ -147,16 +145,17 @@ void FileSelectHelper::FileSelectedWithExtraInfo(
 
 void FileSelectHelper::MultiFilesSelected(const std::vector<FilePath>& files,
                                           void* params) {
-  std::vector<content::SelectedFileInfo> selected_files =
-      ConvertToSelectedFileInfoList(files);
+  std::vector<ui::SelectedFileInfo> selected_files =
+      FilePathListToSelectedFileInfoList(files);
+
   MultiFilesSelectedWithExtraInfo(selected_files, params);
 }
 
 void FileSelectHelper::MultiFilesSelectedWithExtraInfo(
-    const std::vector<content::SelectedFileInfo>& files,
+    const std::vector<ui::SelectedFileInfo>& files,
     void* params) {
   if (!files.empty())
-    profile_->set_last_selected_directory(files[0].path.DirName());
+    profile_->set_last_selected_directory(files[0].file_path.DirName());
   if (!render_view_host_)
     return;
 
@@ -173,7 +172,7 @@ void FileSelectHelper::FileSelectionCanceled(void* params) {
   // If the user cancels choosing a file to upload we pass back an
   // empty vector.
   NotifyRenderViewHost(
-      render_view_host_, std::vector<content::SelectedFileInfo>(),
+      render_view_host_, std::vector<ui::SelectedFileInfo>(),
       dialog_type_);
 
   // No members should be accessed from here on.
@@ -226,8 +225,8 @@ void FileSelectHelper::OnListDone(int id, int error) {
     return;
   }
 
-  std::vector<content::SelectedFileInfo> selected_files =
-      ConvertToSelectedFileInfoList(entry->results_);
+  std::vector<ui::SelectedFileInfo> selected_files =
+      FilePathListToSelectedFileInfoList(entry->results_);
 
   if (id == kFileSelectEnumerationId)
     NotifyRenderViewHost(entry->rvh_, selected_files, dialog_type_);
@@ -237,14 +236,15 @@ void FileSelectHelper::OnListDone(int id, int error) {
   EnumerateDirectoryEnd();
 }
 
-SelectFileDialog::FileTypeInfo* FileSelectHelper::GetFileTypesFromAcceptType(
+ui::SelectFileDialog::FileTypeInfo*
+FileSelectHelper::GetFileTypesFromAcceptType(
     const std::vector<string16>& accept_types) {
   if (accept_types.empty())
     return NULL;
 
   // Create FileTypeInfo and pre-allocate for the first extension list.
-  scoped_ptr<SelectFileDialog::FileTypeInfo> file_type(
-      new SelectFileDialog::FileTypeInfo());
+  scoped_ptr<ui::SelectFileDialog::FileTypeInfo> file_type(
+      new ui::SelectFileDialog::FileTypeInfo());
   file_type->include_all_files = true;
   file_type->extensions.resize(1);
   std::vector<FilePath::StringType>* extensions = &file_type->extensions.back();
@@ -371,24 +371,25 @@ void FileSelectHelper::RunFileChooserOnUIThread(
     return;
   }
 
-  if (!select_file_dialog_.get())
-    select_file_dialog_ = SelectFileDialog::Create(this);
+  select_file_dialog_ = ui::SelectFileDialog::Create(
+      this, new ChromeSelectFilePolicy(web_contents_));
 
   switch (params.mode) {
     case FileChooserParams::Open:
-      dialog_type_ = SelectFileDialog::SELECT_OPEN_FILE;
+      dialog_type_ = ui::SelectFileDialog::SELECT_OPEN_FILE;
       break;
     case FileChooserParams::OpenMultiple:
-      dialog_type_ = SelectFileDialog::SELECT_OPEN_MULTI_FILE;
+      dialog_type_ = ui::SelectFileDialog::SELECT_OPEN_MULTI_FILE;
       break;
     case FileChooserParams::OpenFolder:
-      dialog_type_ = SelectFileDialog::SELECT_FOLDER;
+      dialog_type_ = ui::SelectFileDialog::SELECT_FOLDER;
       break;
     case FileChooserParams::Save:
-      dialog_type_ = SelectFileDialog::SELECT_SAVEAS_FILE;
+      dialog_type_ = ui::SelectFileDialog::SELECT_SAVEAS_FILE;
       break;
     default:
-      dialog_type_ = SelectFileDialog::SELECT_OPEN_FILE;  // Prevent warning.
+      // Prevent warning.
+      dialog_type_ = ui::SelectFileDialog::SELECT_OPEN_FILE;
       NOTREACHED();
   }
   FilePath default_file_name = params.default_file_name;
@@ -405,10 +406,9 @@ void FileSelectHelper::RunFileChooserOnUIThread(
       select_file_types_.get(),
       select_file_types_.get() ? 1 : 0,  // 1-based index.
       FILE_PATH_LITERAL(""),
-      web_contents_,
       owning_window,
 #if defined(OS_ANDROID)
-      const_cast<content::FileChooserParams*>(&params);
+      const_cast<content::FileChooserParams*>(&params));
 #else
       NULL);
 #endif

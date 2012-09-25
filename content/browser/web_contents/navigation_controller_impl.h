@@ -4,13 +4,13 @@
 
 #ifndef CONTENT_BROWSER_WEB_CONTENTS_NAVIGATION_CONTROLLER_IMPL_H_
 #define CONTENT_BROWSER_WEB_CONTENTS_NAVIGATION_CONTROLLER_IMPL_H_
-#pragma once
 
 #include "build/build_config.h"
 #include "base/compiler_specific.h"
 #include "base/memory/linked_ptr.h"
 #include "base/time.h"
 #include "content/browser/ssl/ssl_manager.h"
+#include "content/public/browser/android/navigation_controller_webview.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_type.h"
 
@@ -25,7 +25,8 @@ class SiteInstance;
 }
 
 class CONTENT_EXPORT NavigationControllerImpl
-    : public NON_EXPORTED_BASE(content::NavigationController) {
+    : public NON_EXPORTED_BASE(content::NavigationController),
+      public NON_EXPORTED_BASE(content::NavigationControllerWebView) {
  public:
   NavigationControllerImpl(
       WebContentsImpl* web_contents,
@@ -63,6 +64,13 @@ class CONTENT_EXPORT NavigationControllerImpl
                                    const content::Referrer& referrer,
                                    content::PageTransition type,
                                    const std::string& extra_headers) OVERRIDE;
+  virtual void LoadURLWithUserAgentOverride(
+      const GURL& url,
+      const content::Referrer& referrer,
+      content::PageTransition type,
+      bool is_renderer_initiated,
+      const std::string& extra_headers,
+      bool is_overriding_user_agent) OVERRIDE;
   virtual void TransferURL(
       const GURL& url,
       const content::Referrer& referrer,
@@ -73,6 +81,7 @@ class CONTENT_EXPORT NavigationControllerImpl
   virtual void LoadIfNecessary() OVERRIDE;
   virtual bool CanGoBack() const OVERRIDE;
   virtual bool CanGoForward() const OVERRIDE;
+  virtual bool CanGoToOffset(int offset) const OVERRIDE;
   virtual void GoBack() OVERRIDE;
   virtual void GoForward() OVERRIDE;
   virtual void GoToIndex(int index) OVERRIDE;
@@ -96,6 +105,18 @@ class CONTENT_EXPORT NavigationControllerImpl
       content::NavigationController* source) OVERRIDE;
   virtual void PruneAllButActive() OVERRIDE;
 
+  // NavigationControllerWebView implementation.
+  virtual void LoadDataWithBaseURL(
+      const GURL& data_url,
+      const content::Referrer& referrer,
+      const GURL& base_url,
+      const GURL& history_url,
+      bool is_overriding_user_agent) OVERRIDE;
+  virtual void PostURL(const GURL& url,
+                       const content::Referrer& referrer,
+                       const base::RefCountedMemory& http_body,
+                       bool is_overriding_user_agent) OVERRIDE;
+
   // Returns the index of the specified entry, or -1 if entry is not contained
   // in this NavigationController.
   int GetIndexOfEntry(const content::NavigationEntryImpl* entry) const;
@@ -110,6 +131,11 @@ class CONTENT_EXPORT NavigationControllerImpl
   content::NavigationEntryImpl* GetEntryWithPageID(
       content::SiteInstance* instance,
       int32 page_id) const;
+
+  // Reloads the current entry using the original URL used to create it.  This
+  // is used for cases where the user wants to refresh a page using a different
+  // user agent after following a redirect.
+  void ReloadOriginalRequestURL(bool check_for_repost);
 
   // Transient entry -----------------------------------------------------------
 
@@ -262,6 +288,10 @@ class CONTENT_EXPORT NavigationControllerImpl
   // (last_committed_entry_index_, pending_entry_index_ or
   // transient_entry_index_).
   void InsertEntriesFrom(const NavigationControllerImpl& source, int max_index);
+
+  // Returns the navigation index that differs from the current entry by the
+  // specified |offset|.  The index returned is not guaranteed to be valid.
+  int GetIndexForOffset(int offset) const;
 
   // ---------------------------------------------------------------------------
 

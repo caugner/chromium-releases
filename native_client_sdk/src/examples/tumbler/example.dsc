@@ -21,7 +21,7 @@
         'tumbler.h',
         'tumbler_module.cc'
       ],
-      'LDFLAGS': ['$(NACL_LDFLAGS)', '-lppapi_gles2']
+      'LIBS': ['ppapi_gles2', 'ppapi_cpp', 'ppapi', 'pthread']
     }
   ],
   'DATA': [

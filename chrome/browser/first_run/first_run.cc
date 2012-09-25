@@ -9,6 +9,7 @@
 #include "base/file_util.h"
 #include "base/metrics/histogram.h"
 #include "base/path_service.h"
+#include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
@@ -29,8 +30,9 @@
 #include "chrome/browser/shell_integration.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
-#include "chrome/browser/ui/global_error_service.h"
-#include "chrome/browser/ui/global_error_service_factory.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/global_error/global_error_service.h"
+#include "chrome/browser/ui/global_error/global_error_service_factory.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -234,6 +236,12 @@ void SetupMasterPrefsFromInstallPrefs(
           &value) && value) {
     out_prefs->make_chrome_default = true;
   }
+
+  if (install_prefs->GetBool(
+          installer::master_preferences::kSuppressFirstRunDefaultBrowserPrompt,
+          &value) && value) {
+    out_prefs->suppress_first_run_default_browser_prompt = true;
+  }
 }
 
 void SetDefaultBrowser(installer::MasterPreferences* install_prefs){
@@ -408,7 +416,8 @@ MasterPrefs::MasterPrefs()
       homepage_defined(false),
       do_import_items(0),
       dont_import_items(0),
-      make_chrome_default(false) {
+      make_chrome_default(false),
+      suppress_first_run_default_browser_prompt(false) {
 }
 
 MasterPrefs::~MasterPrefs() {}
@@ -432,6 +441,18 @@ bool CreateSentinel() {
   if (!internal::GetFirstRunSentinelFilePath(&first_run_sentinel))
     return false;
   return file_util::WriteFile(first_run_sentinel, "", 0) != -1;
+}
+
+std::string GetPingDelayPrefName() {
+  return base::StringPrintf("%s.%s",
+                            installer::master_preferences::kDistroDict,
+                            installer::master_preferences::kDistroPingDelay);
+}
+
+void RegisterUserPrefs(PrefService* prefs) {
+  prefs->RegisterIntegerPref(GetPingDelayPrefName().c_str(),
+                             0,
+                             PrefService::UNSYNCABLE_PREF);
 }
 
 bool RemoveSentinel() {
@@ -509,10 +530,14 @@ void FirstRunBubbleLauncher::Observe(
     return;
   }
 
-  content::WebContents* contents = browser->GetActiveWebContents();
+  content::WebContents* contents = chrome::GetActiveWebContents(browser);
   if (contents && contents->GetURL().SchemeIs(chrome::kChromeUIScheme)) {
     // Suppress the first run bubble if the sync promo is showing.
     if (contents->GetURL().host() == chrome::kChromeUISyncPromoHost)
+      return;
+
+    // Suppress the first run bubble if 'make chrome metro' flow is showing.
+    if (contents->GetURL().host() == chrome::kChromeUIMetroFlowHost)
       return;
 
     // Suppress the first run bubble if the NTP sync promo bubble is showing.

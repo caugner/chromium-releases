@@ -16,6 +16,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -83,7 +84,7 @@ void MarkAsCleanShutdown() {
 
 void AttemptExitInternal() {
   content::NotificationService::current()->Notify(
-      content::NOTIFICATION_APP_EXITING,
+      chrome::NOTIFICATION_CLOSE_ALL_BROWSERS_REQUEST,
       content::NotificationService::AllSources(),
       content::NotificationService::NoDetails());
 
@@ -196,7 +197,7 @@ void CloseAllBrowsers() {
       // DestroyBrowser to make sure the browser is deleted and cleanup can
       // happen.
       while (browser->tab_count())
-        delete browser->GetTabContentsAt(0);
+        delete chrome::GetTabContentsAt(browser, 0);
       browser->window()->DestroyBrowser();
       i = BrowserList::begin();
       if (i != BrowserList::end() && browser == *i) {
@@ -312,7 +313,7 @@ void SessionEnding() {
   browser_shutdown::OnShutdownStarting(browser_shutdown::END_SESSION);
 
   content::NotificationService::current()->Notify(
-      content::NOTIFICATION_APP_EXITING,
+      chrome::NOTIFICATION_CLOSE_ALL_BROWSERS_REQUEST,
       content::NotificationService::AllSources(),
       content::NotificationService::NoDetails());
 

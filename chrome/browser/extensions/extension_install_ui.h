@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_EXTENSION_INSTALL_UI_H_
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_INSTALL_UI_H_
-#pragma once
 
 #include <string>
 
@@ -13,7 +12,13 @@
 #include "chrome/browser/extensions/crx_installer_error.h"
 
 class Browser;
+class ExtensionInstallPrompt;
+class Profile;
 class SkBitmap;
+
+namespace content {
+class WebContents;
+}
 
 namespace extensions {
 class Extension;
@@ -24,7 +29,7 @@ class ExtensionWebstorePrivateApiTest;
 // around extension installation.
 class ExtensionInstallUI {
  public:
-  static ExtensionInstallUI* Create(Browser* browser);
+  static ExtensionInstallUI* Create(Profile* profile);
 
   virtual ~ExtensionInstallUI();
 
@@ -32,7 +37,7 @@ class ExtensionInstallUI {
   virtual void OnInstallSuccess(const extensions::Extension* extension,
                                 SkBitmap* icon) = 0;
   // Called when an extension failed to install.
-  virtual void OnInstallFailure(const CrxInstallerError& error) = 0;
+  virtual void OnInstallFailure(const extensions::CrxInstallerError& error) = 0;
 
   // Whether or not to show the default UI after completing the installation.
   virtual void SetSkipPostInstallUI(bool skip_ui) = 0;
@@ -50,8 +55,23 @@ class ExtensionInstallUI {
   // in tests.
   static void DisableFailureUIForTests();
 
+  // Creates an ExtensionInstallPrompt from |web_contents|.
+  // Caller assumes ownership.
+  static ExtensionInstallPrompt* CreateInstallPromptWithWebContents(
+      content::WebContents* web_contents);
+
+  // Creates an ExtensionInstallPrompt from |profile|.
+  // Caller assumes ownership. This method is deperecated
+  // and should not be used in new code.
+  static ExtensionInstallPrompt* CreateInstallPromptWithProfile(
+      Profile* profile);
+
+  Profile* profile() { return profile_; }
+
  protected:
   ExtensionInstallUI();
+
+  Profile* profile_;
 };
 
 #endif  // CHROME_BROWSER_EXTENSIONS_EXTENSION_INSTALL_UI_H_

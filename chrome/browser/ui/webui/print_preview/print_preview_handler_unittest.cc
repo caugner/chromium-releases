@@ -5,15 +5,18 @@
 #include "base/json/json_writer.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/printing/background_printing_manager.h"
 #include "chrome/browser/printing/print_preview_tab_controller.h"
-#include "chrome/browser/printing/print_preview_unit_test_base.h"
 #include "chrome/browser/printing/print_view_manager.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_commands.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/webui/print_preview/print_preview_handler.h"
 #include "chrome/browser/ui/webui/print_preview/print_preview_ui.h"
 #include "chrome/browser/ui/webui/print_preview/sticky_settings.h"
+#include "chrome/common/pref_names.h"
+#include "chrome/test/base/browser_with_test_window_test.h"
 #include "content/public/browser/web_contents.h"
 #include "printing/page_size_margins.h"
 #include "printing/print_job_constants.h"
@@ -33,7 +36,7 @@ DictionaryValue* GetCustomMarginsDictionary(
 
 }  // namespace
 
-class PrintPreviewHandlerTest : public PrintPreviewUnitTestBase {
+class PrintPreviewHandlerTest : public BrowserWithTestWindowTest {
  public:
   PrintPreviewHandlerTest() :
       preview_ui_(NULL),
@@ -43,9 +46,11 @@ class PrintPreviewHandlerTest : public PrintPreviewUnitTestBase {
 
  protected:
   virtual void SetUp() OVERRIDE {
-    PrintPreviewUnitTestBase::SetUp();
+    BrowserWithTestWindowTest::SetUp();
 
-    browser()->NewTab();
+    profile()->GetPrefs()->SetBoolean(prefs::kPrintPreviewDisabled, false);
+
+    chrome::NewTab(browser());
     EXPECT_EQ(1, browser()->tab_count());
     OpenPrintPreviewTab();
   }
@@ -54,11 +59,11 @@ class PrintPreviewHandlerTest : public PrintPreviewUnitTestBase {
     DeletePrintPreviewTab();
     ClearStickySettings();
 
-    PrintPreviewUnitTestBase::TearDown();
+    BrowserWithTestWindowTest::TearDown();
   }
 
   void OpenPrintPreviewTab() {
-    TabContents* initiator_tab = browser()->GetActiveTabContents();
+    TabContents* initiator_tab = chrome::GetActiveTabContents(browser());
     ASSERT_TRUE(initiator_tab);
 
     printing::PrintPreviewTabController* controller =

@@ -6,7 +6,6 @@
 
 #ifndef JINGLE_NOTIFIER_BASE_XMPP_CONNECTION_H_
 #define JINGLE_NOTIFIER_BASE_XMPP_CONNECTION_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/gtest_prod_util.h"
@@ -25,9 +24,12 @@ class XmppClientSettings;
 class XmppTaskParentInterface;
 }  // namespace
 
+namespace jingle_glue {
+class TaskPump;
+}  // namespace jingle_glue
+
 namespace notifier {
 
-class TaskPump;
 class WeakXmppClient;
 
 class XmppConnection
@@ -84,7 +86,7 @@ class XmppConnection
 
   void ClearClient();
 
-  scoped_ptr<TaskPump> task_pump_;
+  scoped_ptr<jingle_glue::TaskPump> task_pump_;
   base::WeakPtr<WeakXmppClient> weak_xmpp_client_;
   bool on_connect_called_;
   Delegate* delegate_;

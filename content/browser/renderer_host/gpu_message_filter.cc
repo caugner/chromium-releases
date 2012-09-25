@@ -17,7 +17,7 @@
 #include "content/common/gpu/gpu_messages.h"
 #include "content/public/common/content_switches.h"
 
-using content::BrowserThread;
+namespace content {
 
 struct GpuMessageFilter::CreateViewCommandBufferRequest {
   CreateViewCommandBufferRequest(
@@ -38,10 +38,11 @@ GpuMessageFilter::GpuMessageFilter(int render_process_id,
     : gpu_process_id_(0),
       render_process_id_(render_process_id),
       share_contexts_(false),
-      render_widget_helper_(render_widget_helper) {
+      render_widget_helper_(render_widget_helper),
+      weak_ptr_factory_(this) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-#if defined(USE_AURA)
+#if defined(USE_AURA) || defined(OS_ANDROID)
   // We use the GPU process for UI on Aura, and we need to share renderer GL
   // contexts with the compositor context.
   share_contexts_ = true;
@@ -85,7 +86,7 @@ void GpuMessageFilter::SurfaceUpdated(int32 surface_id) {
 }
 
 void GpuMessageFilter::OnEstablishGpuChannel(
-    content::CauseForGpuLaunch cause_for_gpu_launch,
+    CauseForGpuLaunch cause_for_gpu_launch,
     IPC::Message* reply) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
@@ -113,7 +114,7 @@ void GpuMessageFilter::OnEstablishGpuChannel(
       render_process_id_,
       share_contexts_,
       base::Bind(&GpuMessageFilter::EstablishChannelCallback,
-                 AsWeakPtr(),
+                 weak_ptr_factory_.GetWeakPtr(),
                  reply));
 }
 
@@ -164,14 +165,14 @@ void GpuMessageFilter::OnCreateViewCommandBuffer(
       render_process_id_,
       init_params,
       base::Bind(&GpuMessageFilter::CreateCommandBufferCallback,
-                 AsWeakPtr(),
+                 weak_ptr_factory_.GetWeakPtr(),
                  reply));
 }
 
 void GpuMessageFilter::EstablishChannelCallback(
     IPC::Message* reply,
     const IPC::ChannelHandle& channel,
-    const content::GPUInfo& gpu_info) {
+    const GPUInfo& gpu_info) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   GpuHostMsg_EstablishGpuChannel::WriteReplyParams(
@@ -185,3 +186,5 @@ void GpuMessageFilter::CreateCommandBufferCallback(
   GpuHostMsg_CreateViewCommandBuffer::WriteReplyParams(reply, route_id);
   Send(reply);
 }
+
+}  // namespace content

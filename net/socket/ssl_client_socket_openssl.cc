@@ -490,10 +490,7 @@ bool SSLClientSocketOpenSSL::Init() {
 #endif
 
 #if defined(SSL_OP_NO_COMPRESSION)
-  // If TLS was disabled also disable compression, to provide maximum site
-  // compatibility in the case of protocol fallback. See http://crbug.com/31628
-  options.ConfigureFlag(SSL_OP_NO_COMPRESSION,
-                        ssl_config_.version_max < SSL_PROTOCOL_VERSION_TLS1);
+  options.ConfigureFlag(SSL_OP_NO_COMPRESSION, true);
 #endif
 
   // TODO(joth): Set this conditionally, see http://crbug.com/55410
@@ -591,10 +588,10 @@ int SSLClientSocketOpenSSL::ClientCertRequestCallback(SSL* ssl,
 
 // SSLClientSocket methods
 
-void SSLClientSocketOpenSSL::GetSSLInfo(SSLInfo* ssl_info) {
+bool SSLClientSocketOpenSSL::GetSSLInfo(SSLInfo* ssl_info) {
   ssl_info->Reset();
   if (!server_cert_)
-    return;
+    return false;
 
   ssl_info->cert = server_cert_verify_result_.verified_cert;
   ssl_info->cert_status = server_cert_verify_result_.cert_status;
@@ -602,8 +599,9 @@ void SSLClientSocketOpenSSL::GetSSLInfo(SSLInfo* ssl_info) {
       server_cert_verify_result_.is_issued_by_known_root;
   ssl_info->public_key_hashes =
     server_cert_verify_result_.public_key_hashes;
-  ssl_info->client_cert_sent = WasDomainBoundCertSent() ||
-      (ssl_config_.send_client_cert && ssl_config_.client_cert);
+  ssl_info->client_cert_sent =
+      ssl_config_.send_client_cert && ssl_config_.client_cert;
+  ssl_info->channel_id_sent = WasChannelIDSent();
 
   const SSL_CIPHER* cipher = SSL_get_current_cipher(ssl_);
   CHECK(cipher);
@@ -630,6 +628,7 @@ void SSLClientSocketOpenSSL::GetSSLInfo(SSLInfo* ssl_info) {
       << SSLConnectionStatusToCompression(ssl_info->connection_status)
       << " version = "
       << SSLConnectionStatusToVersion(ssl_info->connection_status);
+  return true;
 }
 
 void SSLClientSocketOpenSSL::GetSSLCertRequestInfo(
@@ -659,6 +658,10 @@ int SSLClientSocketOpenSSL::ExportKeyingMaterial(
     return MapOpenSSLError(ssl_error, err_tracer);
   }
   return OK;
+}
+
+int SSLClientSocketOpenSSL::GetTLSUniqueChannelBinding(std::string* out) {
+  return ERR_NOT_IMPLEMENTED;
 }
 
 SSLClientSocket::NextProtoStatus SSLClientSocketOpenSSL::GetNextProto(

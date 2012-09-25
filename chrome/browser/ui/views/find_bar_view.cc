@@ -22,7 +22,7 @@
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "grit/ui_resources_standard.h"
+#include "grit/ui_resources.h"
 #include "third_party/skia/include/effects/SkGradientShader.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -186,7 +186,7 @@ void FindBarView::UpdateForResult(const FindNotificationDetails& result,
   // update the text only when the IME is not composing text.
   if (find_text_->text() != find_text && !find_text_->IsIMEComposing()) {
     find_text_->SetText(find_text);
-    find_text_->SelectAll();
+    find_text_->SelectAll(true);
   }
 
   if (find_text.empty() || !have_valid_range) {
@@ -220,7 +220,7 @@ void FindBarView::ClearMatchCount() {
 void FindBarView::SetFocusAndSelection(bool select_all) {
   find_text_->RequestFocus();
   if (select_all && !find_text_->text().empty())
-    find_text_->SelectAll();
+    find_text_->SelectAll(true);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -478,7 +478,7 @@ void FindBarView::SearchTextfieldView::RequestFocus() {
   if (HasFocus())
     return;
   views::View::RequestFocus();
-  SelectAll();
+  SelectAll(true);
 }
 
 FindBarHost* FindBarView::find_bar_host() const {

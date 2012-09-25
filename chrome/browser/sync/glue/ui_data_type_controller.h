@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_SYNC_GLUE_UI_DATA_TYPE_CONTROLLER_H__
 #define CHROME_BROWSER_SYNC_GLUE_UI_DATA_TYPE_CONTROLLER_H__
-#pragma once
 
 #include <string>
 
@@ -18,10 +17,16 @@
 class Profile;
 class ProfileSyncService;
 class ProfileSyncComponentsFactory;
+
+namespace base {
+class TimeDelta;
+}
+
+namespace syncer {
 class SyncableService;
 class SyncError;
+}
 
-namespace base { class TimeDelta; }
 namespace browser_sync {
 
 // Implementation for datatypes that reside on the (UI thread). This is the same
@@ -31,7 +36,7 @@ namespace browser_sync {
 class UIDataTypeController : public DataTypeController {
  public:
   UIDataTypeController(
-      syncable::ModelType type,
+      syncer::ModelType type,
       ProfileSyncComponentsFactory* profile_sync_factory,
       Profile* profile,
       ProfileSyncService* sync_service);
@@ -41,8 +46,8 @@ class UIDataTypeController : public DataTypeController {
       const ModelLoadCallback& model_load_callback) OVERRIDE;
   virtual void StartAssociating(const StartCallback& start_callback) OVERRIDE;
   virtual void Stop() OVERRIDE;
-  virtual syncable::ModelType type() const OVERRIDE;
-  virtual browser_sync::ModelSafeGroup model_safe_group() const OVERRIDE;
+  virtual syncer::ModelType type() const OVERRIDE;
+  virtual syncer::ModelSafeGroup model_safe_group() const OVERRIDE;
   virtual std::string name() const OVERRIDE;
   virtual State state() const OVERRIDE;
 
@@ -73,7 +78,7 @@ class UIDataTypeController : public DataTypeController {
   virtual void OnModelLoaded() OVERRIDE;
 
   // Helper methods for cleaning up state and invoking the start callback.
-  virtual void StartFailed(StartResult result, const SyncError& error);
+  virtual void StartFailed(StartResult result, const syncer::SyncError& error);
   virtual void StartDone(StartResult result);
 
   // Record association time.
@@ -91,7 +96,7 @@ class UIDataTypeController : public DataTypeController {
   ModelLoadCallback model_load_callback_;
 
   // The sync datatype being controlled.
-  syncable::ModelType type_;
+  syncer::ModelType type_;
 
   // Sync's interface to the datatype. All sync changes for |type_| are pushed
   // through it to the datatype as well as vice versa.
@@ -104,7 +109,7 @@ class UIDataTypeController : public DataTypeController {
   //
   // Note: we use refcounting here primarily so that we can keep a uniform
   // SyncableService API, whether the datatype lives on the UI thread or not
-  // (a SyncableService takes ownership of its SyncChangeProcessor when
+  // (a syncer::SyncableService takes ownership of its SyncChangeProcessor when
   // MergeDataAndStartSyncing is called). This will help us eventually merge the
   // two datatype controller implementations (for ui and non-ui thread
   // datatypes).
@@ -112,7 +117,7 @@ class UIDataTypeController : public DataTypeController {
 
   // A weak pointer to the actual local syncable service, which performs all the
   // real work. We do not own the object.
-  base::WeakPtr<SyncableService> local_service_;
+  base::WeakPtr<syncer::SyncableService> local_service_;
 
  private:
    // Associate the sync model with the service's model, then start syncing.

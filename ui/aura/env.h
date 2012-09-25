@@ -4,24 +4,22 @@
 
 #ifndef UI_AURA_ENV_H_
 #define UI_AURA_ENV_H_
-#pragma once
 
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/observer_list.h"
 #include "ui/aura/aura_export.h"
-#include "ui/aura/cursor_manager.h"
 #include "ui/aura/client/stacking_client.h"
+#include "ui/gfx/point.h"
 
 namespace aura {
-class CursorManager;
 class EnvObserver;
 class EventFilter;
-class MonitorManager;
+class DisplayManager;
 class Window;
 
 namespace internal {
-class MonitorChangeObserverX11;
+class DisplayChangeObserverX11;
 }
 
 #if !defined(OS_MACOSX)
@@ -47,30 +45,40 @@ class AURA_EXPORT Env {
     mouse_button_flags_ = mouse_button_flags;
   }
 
+  // Gets/sets the last mouse location seen in a mouse event in the screen
+  // coordinates.
+  const gfx::Point& last_mouse_location() const { return last_mouse_location_; }
+  void SetLastMouseLocation(const Window& window,
+                            const gfx::Point& location_in_root);
+
   // Whether any touch device is currently down.
   bool is_touch_down() const { return is_touch_down_; }
   void set_touch_down(bool value) { is_touch_down_ = value; }
+
+  // Whether RenderWidgetHostViewAura::OnPaint() should paint white background
+  // when backing store is not present. Default is true.
+  // In some cases when page is using transparent background painting white
+  // background before backing store is initialized causes a white splash.
+  bool render_white_bg() const { return render_white_bg_; }
+  void set_render_white_bg(bool value) { render_white_bg_ = value; }
 
   client::StackingClient* stacking_client() { return stacking_client_; }
   void set_stacking_client(client::StackingClient* stacking_client) {
     stacking_client_ = stacking_client;
   }
 
-  // Gets/sets MonitorManager. The MonitorManager's ownership is
+  // Gets/sets DisplayManager. The DisplayManager's ownership is
   // transfered.
-  MonitorManager* monitor_manager() { return monitor_manager_.get(); }
-  void SetMonitorManager(MonitorManager* monitor_manager);
+  DisplayManager* display_manager() { return display_manager_.get(); }
+  void SetDisplayManager(DisplayManager* display_manager);
 
   // Env takes ownership of the EventFilter.
   EventFilter* event_filter() { return event_filter_.get(); }
   void SetEventFilter(EventFilter* event_filter);
 
-  CursorManager* cursor_manager() { return &cursor_manager_; }
-
   // Returns the native event dispatcher. The result should only be passed to
-  // MessageLoopForUI::RunWithDispatcher() or
-  // MessageLoopForUI::RunAllPendingWithDispatcher(), or used to dispatch
-  // an event by |Dispatch(const NativeEvent&)| on it. It must never be stored.
+  // base::RunLoop(dispatcher), or used to dispatch an event by
+  // |Dispatch(const NativeEvent&)| on it. It must never be stored.
 #if !defined(OS_MACOSX)
   MessageLoop::Dispatcher* GetDispatcher();
 #endif
@@ -90,14 +98,16 @@ class AURA_EXPORT Env {
 
   static Env* instance_;
   int mouse_button_flags_;
+  // Location of last mouse event, in screen coordinates.
+  gfx::Point last_mouse_location_;
   bool is_touch_down_;
+  bool render_white_bg_;
   client::StackingClient* stacking_client_;
-  scoped_ptr<MonitorManager> monitor_manager_;
+  scoped_ptr<DisplayManager> display_manager_;
   scoped_ptr<EventFilter> event_filter_;
-  CursorManager cursor_manager_;
 
 #if defined(USE_X11)
-  scoped_ptr<internal::MonitorChangeObserverX11> monitor_change_observer_;
+  scoped_ptr<internal::DisplayChangeObserverX11> display_change_observer_;
 #endif
 
   DISALLOW_COPY_AND_ASSIGN(Env);

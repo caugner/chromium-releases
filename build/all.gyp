@@ -11,62 +11,77 @@
       'dependencies': [
         'some.gyp:*',
         '../base/base.gyp:*',
-        '../chrome/chrome.gyp:*',
-        '../content/content.gyp:*',
-        '../crypto/crypto.gyp:*',
-        '../ui/ui.gyp:*',
-        '../gpu/gpu.gyp:*',
-        '../gpu/tools/tools.gyp:*',
-        '../ipc/ipc.gyp:*',
-        '../jingle/jingle.gyp:*',
-        '../media/media.gyp:*',
         '../net/net.gyp:*',
-        '../ppapi/ppapi.gyp:*',
-        '../ppapi/ppapi_internal.gyp:*',
-        '../printing/printing.gyp:*',
-        '../sdch/sdch.gyp:*',
-        '../skia/skia.gyp:*',
         '../sql/sql.gyp:*',
-        '../sync/sync.gyp:*',
-        '../testing/gmock.gyp:*',
         '../testing/gtest.gyp:*',
         '../third_party/bzip2/bzip2.gyp:*',
-        '../third_party/cacheinvalidation/cacheinvalidation.gyp:*',
-        '../third_party/cld/cld.gyp:*',
-        '../third_party/codesighs/codesighs.gyp:*',
-        '../third_party/ffmpeg/ffmpeg.gyp:*',
-        '../third_party/iccjpeg/iccjpeg.gyp:*',
         '../third_party/icu/icu.gyp:*',
-        '../third_party/libpng/libpng.gyp:*',
-        '../third_party/libusb/libusb.gyp:*',
-        '../third_party/libwebp/libwebp.gyp:*',
         '../third_party/libxml/libxml.gyp:*',
-        '../third_party/libxslt/libxslt.gyp:*',
-        '../third_party/lzma_sdk/lzma_sdk.gyp:*',
-        '../third_party/mesa/mesa.gyp:*',
-        '../third_party/modp_b64/modp_b64.gyp:*',
-        '../third_party/npapi/npapi.gyp:*',
-        '../third_party/ots/ots.gyp:*',
-        '../third_party/qcms/qcms.gyp:*',
         '../third_party/sqlite/sqlite.gyp:*',
-        '../third_party/WebKit/Source/WebKit/chromium/All.gyp:*',
-        '../third_party/WebKit/Source/WebKit/chromium/WebKit.gyp:generate_devtools_zip',
         '../third_party/zlib/zlib.gyp:*',
-        '../v8/tools/gyp/v8.gyp:*',
-        '../webkit/support/webkit_support.gyp:*',
-        '../webkit/webkit.gyp:*',
+        '../ui/ui.gyp:*',
         'temp_gyp/googleurl.gyp:*',
-        '<(libjpeg_gyp_path):*',
+        # Add new dependencies to the !ios section just below, not here (see
+        # the comment there).
       ],
       'conditions': [
-        ['os_posix==1 and OS!="android"', {
+        # TODO(ios): This is temporary; currently almost nothing builds with
+        # OS=ios. Move dependencies back to the main dependencies section above
+        # as gyp files come online.
+        ['OS!="ios"', {
+          'dependencies': [
+            '../chrome/chrome.gyp:*',
+            '../content/content.gyp:*',
+            '../crypto/crypto.gyp:*',
+            '../gpu/gpu.gyp:*',
+            '../gpu/tools/tools.gyp:*',
+            '../ipc/ipc.gyp:*',
+            '../jingle/jingle.gyp:*',
+            '../media/media.gyp:*',
+            '../ppapi/ppapi.gyp:*',
+            '../ppapi/ppapi_internal.gyp:*',
+            '../printing/printing.gyp:*',
+            '../sdch/sdch.gyp:*',
+            '../skia/skia.gyp:*',
+            '../sync/sync.gyp:*',
+            '../testing/gmock.gyp:*',
+            '../third_party/cacheinvalidation/cacheinvalidation.gyp:*',
+            '../third_party/cld/cld.gyp:*',
+            '../third_party/codesighs/codesighs.gyp:*',
+            '../third_party/ffmpeg/ffmpeg.gyp:*',
+            '../third_party/iccjpeg/iccjpeg.gyp:*',
+            '../third_party/libpng/libpng.gyp:*',
+            '../third_party/libusb/libusb.gyp:*',
+            '../third_party/libwebp/libwebp.gyp:*',
+            '../third_party/libxslt/libxslt.gyp:*',
+            '../third_party/lzma_sdk/lzma_sdk.gyp:*',
+            '../third_party/mesa/mesa.gyp:*',
+            '../third_party/modp_b64/modp_b64.gyp:*',
+            '../third_party/npapi/npapi.gyp:*',
+            '../third_party/ots/ots.gyp:*',
+            '../third_party/qcms/qcms.gyp:*',
+            '../third_party/re2/re2.gyp:re2',
+            '../third_party/WebKit/Source/WebKit/chromium/All.gyp:*',
+            '../third_party/WebKit/Source/WebKit/chromium/WebKit.gyp:generate_devtools_zip',
+            '../v8/tools/gyp/v8.gyp:*',
+            '../webkit/support/webkit_support.gyp:*',
+            '../webkit/webkit.gyp:*',
+            '<(libjpeg_gyp_path):*',
+          ],
+        }],
+        ['os_posix==1 and OS!="android" and OS!="ios"', {
           'dependencies': [
             '../third_party/yasm/yasm.gyp:*#host',
           ],
         }],
-        ['OS=="mac" or OS=="win"', {
+        ['OS=="mac" or OS=="ios" or OS=="win"', {
           'dependencies': [
             '../third_party/nss/nss.gyp:*',
+           ],
+        }],
+        ['OS=="win" or OS=="ios" or OS=="linux"', {
+          'dependencies': [
+            '../breakpad/breakpad.gyp:*',
            ],
         }],
         ['OS=="mac"', {
@@ -76,7 +91,6 @@
         }],
         ['OS=="linux"', {
           'dependencies': [
-            '../breakpad/breakpad.gyp:*',
             '../courgette/courgette.gyp:*',
             '../dbus/dbus.gyp:*',
             '../sandbox/sandbox.gyp:*',
@@ -104,7 +118,6 @@
             }],
           ],
           'dependencies': [
-            '../breakpad/breakpad.gyp:*',
             '../chrome_frame/chrome_frame.gyp:*',
             '../cloud_print/cloud_print.gyp:*',
             '../courgette/courgette.gyp:*',
@@ -166,45 +179,44 @@
       ],
     }, # target_name: All_syzygy
     {
-      'target_name': 'chromium_swarm_tests',
-      'type': 'none',
-      'dependencies': [
-          '../base/base.gyp:base_unittests_run',
-          '../chrome/chrome.gyp:browser_tests_run',
-          '../chrome/chrome.gyp:unit_tests_run',
-          '../net/net.gyp:net_unittests_run',
-      ],
-    }, # target_name: chromium_swarm_tests
-    {
       'target_name': 'chromium_builder_tests',
       'type': 'none',
       'dependencies': [
         '../base/base.gyp:base_unittests',
-        '../chrome/chrome.gyp:browser_tests',
-        '../chrome/chrome.gyp:interactive_ui_tests',
-        '../chrome/chrome.gyp:safe_browsing_tests',
-        '../chrome/chrome.gyp:sync_integration_tests',
-        '../chrome/chrome.gyp:unit_tests',
-        '../cloud_print/cloud_print.gyp:cloud_print_unittests',
-        '../content/content.gyp:content_browsertests',
-        '../content/content.gyp:content_unittests',
-        '../crypto/crypto.gyp:crypto_unittests',
-        '../ui/ui.gyp:gfx_unittests',
-        '../gpu/gpu.gyp:gpu_unittests',
-        '../gpu/gles2_conform_support/gles2_conform_support.gyp:gles2_conform_support',
-        '../ipc/ipc.gyp:ipc_tests',
-        '../jingle/jingle.gyp:jingle_unittests',
-        '../media/media.gyp:media_unittests',
-        '../net/net.gyp:net_unittests',
-        '../printing/printing.gyp:printing_unittests',
-        '../remoting/remoting.gyp:remoting_unittests',
         '../sql/sql.gyp:sql_unittests',
-        '../sync/sync.gyp:sync_unit_tests',
-        '../third_party/cacheinvalidation/cacheinvalidation.gyp:cacheinvalidation_unittests',
-        '../third_party/libphonenumber/libphonenumber.gyp:libphonenumber_unittests',
-        'temp_gyp/googleurl.gyp:googleurl_unittests',
+        # Add new dependencies to the !ios section just below, not here (see
+        # the comment there).
       ],
       'conditions': [
+        ['OS!="ios"', {
+          'dependencies': [
+            # TODO(ios): This is temporary; currently almost nothing builds with
+            # OS=ios. Move dependencies back to the main dependencies section
+            # above as gyp files come online.
+            '../chrome/chrome.gyp:browser_tests',
+            '../chrome/chrome.gyp:interactive_ui_tests',
+            '../chrome/chrome.gyp:safe_browsing_tests',
+            '../chrome/chrome.gyp:sync_integration_tests',
+            '../chrome/chrome.gyp:unit_tests',
+            '../cloud_print/cloud_print.gyp:cloud_print_unittests',
+            '../content/content.gyp:content_browsertests',
+            '../content/content.gyp:content_unittests',
+            '../crypto/crypto.gyp:crypto_unittests',
+            '../gpu/gpu.gyp:gpu_unittests',
+            '../gpu/gles2_conform_support/gles2_conform_support.gyp:gles2_conform_support',
+            '../ipc/ipc.gyp:ipc_tests',
+            '../jingle/jingle.gyp:jingle_unittests',
+            '../media/media.gyp:media_unittests',
+            '../net/net.gyp:net_unittests',
+            '../printing/printing.gyp:printing_unittests',
+            '../remoting/remoting.gyp:remoting_unittests',
+            '../sync/sync.gyp:sync_unit_tests',
+            '../third_party/cacheinvalidation/cacheinvalidation.gyp:cacheinvalidation_unittests',
+            '../third_party/libphonenumber/libphonenumber.gyp:libphonenumber_unittests',
+            '../ui/ui.gyp:ui_unittests',
+            'temp_gyp/googleurl.gyp:googleurl_unittests',
+          ],
+        }],
         ['OS=="win"', {
           'dependencies': [
             '../chrome/chrome.gyp:installer_util_unittests',
@@ -227,6 +239,11 @@
             '../webkit/webkit.gyp:test_shell_common',
            ],
         }],
+        ['OS=="linux"', {
+          'dependencies': [
+            '../sandbox/sandbox.gyp:sandbox_linux_unittests',
+          ],
+        }],
         ['disable_nacl==0 and disable_nacl_untrusted==0', {
           'dependencies': [
             # TODO(bbudge): drop this when we have switched the NaCl proxy to IPC.
@@ -242,62 +259,80 @@
         'chromium_builder_tests',
       ],
     }, # target_name: chromium_2010_builder_tests
-    {
-      'target_name': 'chromium_builder_nacl_win_integration',
-      'type': 'none',
-      'dependencies': [
-        'chromium_builder_qa', # needed for pyauto
-        'chromium_builder_tests',
-      ],
-    }, # target_name: chromium_builder_nacl_win_integration
-    {
-      'target_name': 'chromium_builder_perf',
-      'type': 'none',
-      'dependencies': [
-        'chromium_builder_qa', # needed for pyauto
-        '../chrome/chrome.gyp:performance_browser_tests',
-        '../chrome/chrome.gyp:performance_ui_tests',
-        '../chrome/chrome.gyp:sync_performance_tests',
-      ],
-    }, # target_name: chromium_builder_perf
-    {
-      'target_name': 'chromium_gpu_builder',
-      'type': 'none',
-      'dependencies': [
-        '../chrome/chrome.gyp:gpu_tests',
-        '../chrome/chrome.gyp:performance_browser_tests',
-        '../chrome/chrome.gyp:performance_ui_tests',
-        '../gpu/gpu.gyp:gl_tests',
-      ],
-    }, # target_name: chromium_gpu_builder
-    {
-      'target_name': 'chromium_gpu_debug_builder',
-      'type': 'none',
-      'dependencies': [
-        '../chrome/chrome.gyp:gpu_tests',
-        '../gpu/gpu.gyp:gl_tests',
-      ],
-    }, # target_name: chromium_gpu_debug_builder
-    {
-      'target_name': 'chromium_builder_qa',
-      'type': 'none',
-      'dependencies': [
-        '../chrome/chrome.gyp:chromedriver',
-        # Dependencies of pyauto_functional tests.
-        '../remoting/remoting.gyp:remoting_webapp',
-      ],
-      'conditions': [
-        # If you change this condition, make sure you also change it
-        # in chrome_tests.gypi
-        ['enable_automation==1 and (OS=="mac" or OS=="win" or (os_posix==1 and target_arch==python_arch))', {
-          'dependencies': [
-            '../chrome/chrome.gyp:pyautolib',
-          ],
-        }],
-      ],
-    }, # target_name: chromium_builder_qa
   ],
   'conditions': [
+    ['OS!="ios"', {
+      'targets': [
+        {
+          'target_name': 'chromium_builder_nacl_win_integration',
+          'type': 'none',
+          'dependencies': [
+            'chromium_builder_qa', # needed for pyauto
+            'chromium_builder_tests',
+          ],
+        }, # target_name: chromium_builder_nacl_win_integration
+        {
+          'target_name': 'chromium_builder_perf',
+          'type': 'none',
+          'dependencies': [
+            'chromium_builder_qa', # needed for pyauto
+            '../chrome/chrome.gyp:performance_browser_tests',
+            '../chrome/chrome.gyp:performance_ui_tests',
+            '../chrome/chrome.gyp:sync_performance_tests',
+          ],
+        }, # target_name: chromium_builder_perf
+        {
+          'target_name': 'chromium_gpu_builder',
+          'type': 'none',
+          'dependencies': [
+            '../chrome/chrome.gyp:gpu_tests',
+            '../chrome/chrome.gyp:performance_browser_tests',
+            '../chrome/chrome.gyp:performance_ui_tests',
+            '../gpu/gpu.gyp:gl_tests',
+          ],
+          'conditions': [
+            ['internal_gles2_conform_tests', {
+              'dependencies': [
+                '../gpu/gles2_conform_test/gles2_conform_test.gyp:gles2_conform_test',
+              ],
+            }], # internal_gles2_conform
+          ],
+        }, # target_name: chromium_gpu_builder
+        {
+          'target_name': 'chromium_gpu_debug_builder',
+          'type': 'none',
+          'dependencies': [
+            '../chrome/chrome.gyp:gpu_tests',
+            '../gpu/gpu.gyp:gl_tests',
+          ],
+          'conditions': [
+            ['internal_gles2_conform_tests', {
+              'dependencies': [
+                '../gpu/gles2_conform_test/gles2_conform_test.gyp:gles2_conform_test',
+              ],
+            }], # internal_gles2_conform
+          ],
+        }, # target_name: chromium_gpu_debug_builder
+        {
+          'target_name': 'chromium_builder_qa',
+          'type': 'none',
+          'dependencies': [
+            '../chrome/chrome.gyp:chromedriver',
+            # Dependencies of pyauto_functional tests.
+            '../remoting/remoting.gyp:remoting_webapp',
+          ],
+          'conditions': [
+            # If you change this condition, make sure you also change it
+            # in chrome_tests.gypi
+            ['enable_automation==1 and (OS=="mac" or OS=="win" or (os_posix==1 and target_arch==python_arch))', {
+              'dependencies': [
+                '../chrome/chrome.gyp:pyautolib',
+              ],
+            }],
+          ],
+        }, # target_name: chromium_builder_qa
+      ],  # targets
+    }],
     ['OS=="mac"', {
       'targets': [
         {
@@ -324,7 +359,7 @@
             '../cloud_print/cloud_print.gyp:cloud_print_unittests',
             '../content/content.gyp:content_browsertests',
             '../content/content.gyp:content_unittests',
-            '../ui/ui.gyp:gfx_unittests',
+            '../ui/ui.gyp:ui_unittests',
             '../gpu/gpu.gyp:gpu_unittests',
             '../ipc/ipc.gyp:ipc_tests',
             '../jingle/jingle.gyp:jingle_unittests',
@@ -352,7 +387,7 @@
             '../cloud_print/cloud_print.gyp:cloud_print_unittests',
             '../content/content.gyp:content_browsertests',
             '../content/content.gyp:content_unittests',
-            '../ui/ui.gyp:gfx_unittests',
+            '../ui/ui.gyp:ui_unittests',
             '../gpu/gpu.gyp:gpu_unittests',
             '../ipc/ipc.gyp:ipc_tests',
             '../jingle/jingle.gyp:jingle_unittests',
@@ -399,7 +434,7 @@
             '../chrome/chrome.gyp:safe_browsing_tests',
             '../chrome/chrome.gyp:unit_tests',
             '../content/content.gyp:content_unittests',
-            '../ui/ui.gyp:gfx_unittests',
+            '../ui/ui.gyp:ui_unittests',
             '../jingle/jingle.gyp:jingle_unittests',
             '../sql/sql.gyp:sql_unittests',
             '../sync/sync.gyp:sync_unit_tests',
@@ -440,7 +475,7 @@
             '../chrome_frame/chrome_frame.gyp:chrome_frame_unittests',
             '../chrome_frame/chrome_frame.gyp:npchrome_frame',
             '../courgette/courgette.gyp:courgette_unittests',
-            '../ui/ui.gyp:gfx_unittests',
+            '../ui/ui.gyp:ui_unittests',
             '../gpu/gpu.gyp:gpu_unittests',
             '../ipc/ipc.gyp:ipc_tests',
             '../jingle/jingle.gyp:jingle_unittests',
@@ -493,7 +528,6 @@
           'type': 'none',
           'dependencies': [
             '../base/base.gyp:base_unittests',
-            '../chrome/chrome.gyp:unit_tests',
             '../cloud_print/cloud_print.gyp:cloud_print_unittests',
             '../content/content.gyp:content_unittests',
             '../crypto/crypto.gyp:crypto_unittests',
@@ -558,7 +592,7 @@
                   ],
                 }], # internal_pdf
                 ['component != "shared_library" and wix_exists == "True" and \
-                    platformsdk_exists == "True"', {
+                    sas_dll_exists == "True"', {
                   'dependencies': [
                     '../remoting/remoting.gyp:remoting_host_installation',
                     '../remoting/remoting.gyp:remoting_host_installation_unittest',
@@ -578,12 +612,13 @@
           'dependencies': [
             '../chrome/chrome.gyp:browser_tests',
             '../chrome/chrome.gyp:chrome',
-            '../chrome/chrome.gyp:interactive_ui_tests',            
+            '../chrome/chrome.gyp:interactive_ui_tests',
             '../chrome/chrome.gyp:unit_tests',
+            '../content/content.gyp:content_browsertests',
             '../remoting/remoting.gyp:remoting_unittests',
             '../ui/aura/aura.gyp:*',
             '../ui/compositor/compositor.gyp:*',
-            '../ui/ui.gyp:gfx_unittests',
+            '../ui/ui.gyp:ui_unittests',
             '../ui/views/views.gyp:views',
             '../ui/views/views.gyp:views_unittests',
             '../webkit/webkit.gyp:pull_in_webkit_unit_tests',
@@ -605,6 +640,11 @@
             ['use_ash==1', {
               'dependencies': [
                 '../ash/ash.gyp:ash_shell',
+                # With aura_shell_unittests as a target ash_unittests (the new
+                # name) will be built as well.  We need both until all build
+                # bots are running ash_unittests as the test target.
+                # TODO(jamescook): Switch to ash_unittests after all bots on
+                # waterfall are using the new name.  crbug.com/110107
                 '../ash/ash.gyp:aura_shell_unittests',
               ],
             }],
@@ -635,5 +675,19 @@
         },
       ],  # targets
     }], # "use_aura==1"
+    ['test_isolation_mode != "noop"', {
+      'targets': [
+        {
+          'target_name': 'chromium_swarm_tests',
+          'type': 'none',
+          'dependencies': [
+            '../base/base.gyp:base_unittests_run',
+            '../chrome/chrome.gyp:browser_tests_run',
+            '../chrome/chrome.gyp:unit_tests_run',
+            '../net/net.gyp:net_unittests_run',
+          ],
+        }, # target_name: chromium_swarm_tests
+      ],
+    }],
   ], # conditions
 }

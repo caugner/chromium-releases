@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_NOTIFICATIONS_SYSTEM_NOTIFICATION_H_
 #define CHROME_BROWSER_CHROMEOS_NOTIFICATIONS_SYSTEM_NOTIFICATION_H_
-#pragma once
 
 #include <string>
 
@@ -13,7 +12,7 @@
 #include "base/string16.h"
 #include "chrome/browser/chromeos/notifications/balloon_view_host_chromeos.h"  // MessageCallback
 #include "chrome/browser/notifications/notification_delegate.h"
-#include "chromeos/dbus/power_manager_client.h"
+#include "chromeos/dbus/session_manager_client.h"
 #include "googleurl/src/gurl.h"
 
 class BalloonCollectionImplAsh;
@@ -24,7 +23,7 @@ namespace chromeos {
 
 // The system notification object handles the display of a system notification
 
-class SystemNotification : public PowerManagerClient::Observer {
+class SystemNotification : public SessionManagerClient::Observer {
  public:
   // The profile is the current user profile. The id is any string used
   // to uniquely identify this notification. The title is the title of
@@ -42,7 +41,7 @@ class SystemNotification : public PowerManagerClient::Observer {
 
   virtual ~SystemNotification();
 
-  // PowerManagerClient::Observer override.
+  // SessionManagerClient::Observer override.
   virtual void UnlockScreen() OVERRIDE;
 
   void set_title(const string16& title) { title_ = title; }
@@ -78,6 +77,9 @@ class SystemNotification : public PowerManagerClient::Observer {
     virtual void Click() OVERRIDE {}
     virtual std::string id() const OVERRIDE;
     virtual content::RenderViewHost* GetRenderViewHost() const OVERRIDE;
+
+   protected:
+    virtual ~Delegate();
 
    private:
     std::string id_;

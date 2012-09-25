@@ -15,7 +15,6 @@
 #include "base/string_util.h"
 #include "base/values.h"
 #include "chrome/browser/ui/webui/print_preview/print_preview_handler.h"
-#include "chrome/browser/ui/webui/print_preview/sticky_settings.h"
 #include "chrome/common/child_process_logging.h"
 #include "printing/backend/print_backend.h"
 #include "printing/print_job_constants.h"
@@ -119,7 +118,6 @@ namespace {
 
 const char kPrinterId[] = "printerId";
 const char kDisableColorOption[] = "disableColorOption";
-const char kSetColorAsDefault[] = "setColorAsDefault";
 const char kSetDuplexAsDefault[] = "setDuplexAsDefault";
 const char kPrinterColorModelForBlack[] = "printerColorModelForBlack";
 const char kPrinterColorModelForColor[] = "printerColorModelForColor";
@@ -315,48 +313,27 @@ PrintSystemTaskProxy::PrintSystemTaskProxy(
       has_logged_printers_count_(has_logged_printers_count) {
 }
 
-#if defined(UNIT_TEST) && defined(USE_CUPS)
-// Only used for testing.
-PrintSystemTaskProxy::PrintSystemTaskProxy() {
-}
-#endif
-
 PrintSystemTaskProxy::~PrintSystemTaskProxy() {
 }
 
 void PrintSystemTaskProxy::GetDefaultPrinter() {
   VLOG(1) << "Get default printer start";
-  printing::StickySettings* sticky_settings =
-      PrintPreviewHandler::GetStickySettings();
-
-  std::string* default_printer = NULL;
-  if (sticky_settings->printer_name() == NULL)
-    default_printer = new std::string(print_backend_->GetDefaultPrinterName());
-  else
-    default_printer = new std::string(*sticky_settings->printer_name());
 
   VLOG(1) << "Get default printer finished, found: "
-          << *default_printer;
-
-  std::string* cloud_print_data = NULL;
-  if (sticky_settings->printer_cloud_print_data() != NULL) {
-    cloud_print_data =
-        new std::string(*sticky_settings->printer_cloud_print_data());
-  } else {
-    cloud_print_data = new std::string;
-  }
+          << print_backend_->GetDefaultPrinterName();
 
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
       base::Bind(&PrintSystemTaskProxy::SendDefaultPrinter, this,
-                 default_printer, cloud_print_data));
+                 print_backend_->GetDefaultPrinterName(),
+                 std::string()));
 }
 
 void PrintSystemTaskProxy::SendDefaultPrinter(
-    const std::string* default_printer, const std::string* cloud_print_data) {
+    const std::string& default_printer,
+    const std::string& cloud_print_data) {
   if (handler_)
-    handler_->SendInitialSettings(*default_printer, *cloud_print_data);
-  delete default_printer;
+    handler_->SendInitialSettings(default_printer, cloud_print_data);
 }
 
 void PrintSystemTaskProxy::EnumeratePrinters() {
@@ -401,9 +378,7 @@ void PrintSystemTaskProxy::SetupPrinterList(ListValue* printers) {
   delete printers;
 }
 
-#if defined(USE_CUPS)
-// static
-bool PrintSystemTaskProxy::GetPrinterCapabilitiesCUPS(
+bool PrintSystemTaskProxy::ParsePrinterCapabilities(
     const printing::PrinterCapsAndDefaults& printer_info,
     const std::string& printer_name,
     bool* set_color_as_default,
@@ -411,6 +386,7 @@ bool PrintSystemTaskProxy::GetPrinterCapabilitiesCUPS(
     int* printer_color_space_for_black,
     bool* set_duplex_as_default,
     int* default_duplex_setting_value) {
+#if defined(USE_CUPS)
   FilePath ppd_file_path;
   if (!file_util::CreateTemporaryFile(&ppd_file_path))
     return false;
@@ -472,17 +448,9 @@ bool PrintSystemTaskProxy::GetPrinterCapabilitiesCUPS(
   }
   file_util::Delete(ppd_file_path, false);
   return true;
-}
-#endif  // defined(USE_CUPS)
 
-#if defined(OS_WIN)
-void PrintSystemTaskProxy::GetPrinterCapabilitiesWin(
-    const printing::PrinterCapsAndDefaults& printer_info,
-    bool* set_color_as_default,
-    int* printer_color_space_for_color,
-    int* printer_color_space_for_black,
-    bool* set_duplex_as_default,
-    int* default_duplex_setting_value) {
+#elif defined(OS_WIN)
+
   // According to XPS 1.0 spec, only color printers have psk:Color.
   // Therefore we don't need to parse the whole XML file, we just need to
   // search the string.  The spec can be found at:
@@ -514,8 +482,16 @@ void PrintSystemTaskProxy::GetPrinterCapabilitiesWin(
         *default_duplex_setting_value = printing::SIMPLEX;
     }
   }
-}
+  return true;
+
+#else
+
+  NOTIMPLEMENTED();
+  return false;
+
 #endif  // defined(OS_WIN)
+}
+
 
 void PrintSystemTaskProxy::GetPrinterCapabilities(
     const std::string& printer_name) {
@@ -523,40 +499,37 @@ void PrintSystemTaskProxy::GetPrinterCapabilities(
   child_process_logging::ScopedPrinterInfoSetter prn_info(
       print_backend_->GetPrinterDriverInfo(printer_name));
 
+  if (!print_backend_->IsValidPrinter(printer_name)) {
+    BrowserThread::PostTask(
+        BrowserThread::UI, FROM_HERE,
+        base::Bind(&PrintSystemTaskProxy::SendFailedToGetPrinterCapabilities,
+        this, printer_name));
+    return;
+  }
+
   bool set_color_as_default = false;
   bool set_duplex_as_default = false;
   int printer_color_space_for_color = printing::UNKNOWN_COLOR_MODEL;
   int printer_color_space_for_black = printing::UNKNOWN_COLOR_MODEL;
   int default_duplex_setting_value = printing::UNKNOWN_DUPLEX_MODE;
+  bool disable_color_options = false;
 
-  printing::PrinterCapsAndDefaults printer_info;
-  if (print_backend_->GetPrinterCapsAndDefaults(printer_name,
-                                                &printer_info)) {
-#if defined(USE_CUPS)
-    if (!GetPrinterCapabilitiesCUPS(printer_info,
-                                    printer_name,
-                                    &set_color_as_default,
-                                    &printer_color_space_for_color,
-                                    &printer_color_space_for_black,
-                                    &set_duplex_as_default,
-                                    &default_duplex_setting_value)) {
-      return;
-    }
-#elif defined(OS_WIN)
-    GetPrinterCapabilitiesWin(printer_info,
-                              &set_color_as_default,
-                              &printer_color_space_for_color,
-                              &printer_color_space_for_black,
-                              &set_duplex_as_default,
-                              &default_duplex_setting_value);
-#else
-    NOTIMPLEMENTED();
-#endif
+  printing::PrinterCapsAndDefaults info;
+  if (print_backend_->GetPrinterCapsAndDefaults(printer_name, &info) &&
+      ParsePrinterCapabilities(info,
+                               printer_name,
+                               &set_color_as_default,
+                               &printer_color_space_for_color,
+                               &printer_color_space_for_black,
+                               &set_duplex_as_default,
+                               &default_duplex_setting_value)) {
+    disable_color_options = (!printer_color_space_for_color ||
+                             !printer_color_space_for_black ||
+                             (printer_color_space_for_color ==
+                              printer_color_space_for_black));
+  } else {
+    VLOG(1) << "Failed to get capabilities for " << printer_name;
   }
-  bool disable_color_options = (!printer_color_space_for_color ||
-                                !printer_color_space_for_black ||
-                                (printer_color_space_for_color ==
-                                 printer_color_space_for_black));
 
   DictionaryValue settings_info;
   settings_info.SetString(kPrinterId, printer_name);
@@ -567,17 +540,8 @@ void PrintSystemTaskProxy::GetPrinterCapabilities(
   if (printer_color_space_for_black == printing::UNKNOWN_COLOR_MODEL)
     printer_color_space_for_black = printing::GRAY;
 
-  if (disable_color_options ||
-      PrintPreviewHandler::GetStickySettings()->color_model() ==
-          printing::UNKNOWN_COLOR_MODEL) {
-    settings_info.SetBoolean(kSetColorAsDefault, set_color_as_default);
-  } else {
-    settings_info.SetBoolean(
-        kSetColorAsDefault,
-        printing::isColorModelSelected(
-            PrintPreviewHandler::GetStickySettings()->color_model()));
-  }
-
+  settings_info.SetBoolean(printing::kSettingSetColorAsDefault,
+                           set_color_as_default);
   settings_info.SetBoolean(kSetDuplexAsDefault, set_duplex_as_default);
   settings_info.SetInteger(kPrinterColorModelForColor,
                            printer_color_space_for_color);
@@ -596,4 +560,10 @@ void PrintSystemTaskProxy::SendPrinterCapabilities(
   if (handler_)
     handler_->SendPrinterCapabilities(*settings_info);
   delete settings_info;
+}
+
+void PrintSystemTaskProxy::SendFailedToGetPrinterCapabilities(
+    const std::string& printer_name) {
+  if (handler_)
+    handler_->SendFailedToGetPrinterCapabilities(printer_name);
 }

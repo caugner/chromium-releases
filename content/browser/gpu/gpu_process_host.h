@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_BROWSER_GPU_GPU_PROCESS_HOST_H_
 #define CONTENT_BROWSER_GPU_GPU_PROCESS_HOST_H_
-#pragma once
 
 #include <map>
 #include <queue>
@@ -19,7 +18,7 @@
 #include "content/common/gpu/gpu_process_launch_causes.h"
 #include "content/public/browser/browser_child_process_host_delegate.h"
 #include "content/public/common/gpu_info.h"
-#include "ipc/ipc_message.h"
+#include "ipc/ipc_sender.h"
 #include "ui/gfx/native_widget_types.h"
 
 class GpuMainThread;
@@ -30,8 +29,12 @@ struct GpuHostMsg_AcceleratedSurfaceRelease_Params;
 
 class BrowserChildProcessHostImpl;
 
+namespace IPC {
+struct ChannelHandle;
+}
+
 class GpuProcessHost : public content::BrowserChildProcessHostDelegate,
-                       public IPC::Message::Sender,
+                       public IPC::Sender,
                        public base::NonThreadSafe {
  public:
   enum GpuProcessKind {
@@ -68,7 +71,7 @@ class GpuProcessHost : public content::BrowserChildProcessHostDelegate,
   static GpuProcessHost* FromID(int host_id);
   int host_id() const { return host_id_; }
 
-  // IPC::Message::Sender implementation.
+  // IPC::Sender implementation.
   virtual bool Send(IPC::Message* msg) OVERRIDE;
 
   // Tells the GPU process to create a new channel for communication with a
@@ -167,6 +170,9 @@ class GpuProcessHost : public content::BrowserChildProcessHostDelegate,
 
   // Qeueud messages to send when the process launches.
   std::queue<IPC::Message*> queued_messages_;
+
+  // Whether the GPU process is valid, set to false after Send() failed.
+  bool valid_;
 
   // Whether we are running a GPU thread inside the browser process instead
   // of a separate GPU process.

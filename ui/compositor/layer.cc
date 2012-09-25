@@ -56,7 +56,10 @@ Layer::Layer()
       background_blur_radius_(0),
       layer_saturation_(0.0f),
       layer_brightness_(0.0f),
+      layer_grayscale_(0.0f),
       layer_inverted_(false),
+      layer_mask_(NULL),
+      layer_mask_back_link_(NULL),
       delegate_(NULL),
       scale_content_(true),
       device_scale_factor_(1.0f) {
@@ -75,7 +78,10 @@ Layer::Layer(LayerType type)
       background_blur_radius_(0),
       layer_saturation_(0.0f),
       layer_brightness_(0.0f),
+      layer_grayscale_(0.0f),
       layer_inverted_(false),
+      layer_mask_(NULL),
+      layer_mask_back_link_(NULL),
       delegate_(NULL),
       scale_content_(true),
       device_scale_factor_(1.0f) {
@@ -91,6 +97,10 @@ Layer::~Layer() {
     compositor_->SetRootLayer(NULL);
   if (parent_)
     parent_->Remove(this);
+  if (layer_mask_)
+    SetMaskLayer(NULL);
+  if (layer_mask_back_link_)
+    layer_mask_back_link_->SetMaskLayer(NULL);
   for (size_t i = 0; i < children_.size(); ++i)
     children_[i]->parent_ = NULL;
   web_layer_.removeFromParent();
@@ -176,8 +186,9 @@ void Layer::SetTransform(const ui::Transform& transform) {
 
 Transform Layer::GetTargetTransform() const {
   if (animator_.get() && animator_->IsAnimatingProperty(
-      LayerAnimationElement::TRANSFORM))
+      LayerAnimationElement::TRANSFORM)) {
     return animator_->GetTargetTransform();
+  }
   return transform_;
 }
 
@@ -187,8 +198,9 @@ void Layer::SetBounds(const gfx::Rect& bounds) {
 
 gfx::Rect Layer::GetTargetBounds() const {
   if (animator_.get() && animator_->IsAnimatingProperty(
-      LayerAnimationElement::BOUNDS))
+      LayerAnimationElement::BOUNDS)) {
     return animator_->GetTargetBounds();
+  }
   return bounds_;
 }
 
@@ -221,13 +233,54 @@ void Layer::SetLayerSaturation(float saturation) {
 }
 
 void Layer::SetLayerBrightness(float brightness) {
-  layer_brightness_ = brightness;
-  SetLayerFilters();
+  GetAnimator()->SetBrightness(brightness);
+}
+
+float Layer::GetTargetBrightness() const {
+  if (animator_.get() && animator_->IsAnimatingProperty(
+      LayerAnimationElement::BRIGHTNESS)) {
+    return animator_->GetTargetBrightness();
+  }
+  return layer_brightness();
+}
+
+void Layer::SetLayerGrayscale(float grayscale) {
+  GetAnimator()->SetGrayscale(grayscale);
+}
+
+float Layer::GetTargetGrayscale() const {
+  if (animator_.get() && animator_->IsAnimatingProperty(
+      LayerAnimationElement::GRAYSCALE)) {
+    return animator_->GetTargetGrayscale();
+  }
+  return layer_grayscale();
 }
 
 void Layer::SetLayerInverted(bool inverted) {
   layer_inverted_ = inverted;
   SetLayerFilters();
+}
+
+void Layer::SetMaskLayer(Layer* layer_mask) {
+  // The provided mask should not have a layer mask itself.
+  DCHECK(!layer_mask ||
+         (!layer_mask->layer_mask_layer() &&
+          layer_mask->children().empty() &&
+          !layer_mask->layer_mask_back_link_));
+  DCHECK(!layer_mask_back_link_);
+  if (layer_mask_ == layer_mask)
+    return;
+  // We need to de-reference the currently linked object so that no problem
+  // arises if the mask layer gets deleted before this object.
+  if (layer_mask_)
+    layer_mask_->layer_mask_back_link_ = NULL;
+  layer_mask_ = layer_mask;
+  web_layer_.setMaskLayer(
+      layer_mask ? layer_mask->web_layer() : WebKit::WebLayer());
+  // We need to reference the linked object so that it can properly break the
+  // link to us when it gets deleted.
+  if (layer_mask)
+    layer_mask->layer_mask_back_link_ = this;
 }
 
 void Layer::SetLayerFilters() {
@@ -236,12 +289,19 @@ void Layer::SetLayerFilters() {
     filters.append(WebKit::WebFilterOperation::createSaturateFilter(
         layer_saturation_));
   }
+  if (layer_grayscale_) {
+    filters.append(WebKit::WebFilterOperation::createGrayscaleFilter(
+        layer_grayscale_));
+  }
+  if (layer_inverted_)
+    filters.append(WebKit::WebFilterOperation::createInvertFilter(1.0));
+  // Brightness goes last, because the resulting colors neeed clamping, which
+  // cause further color matrix filters to be applied separately. In this order,
+  // they all can be combined in a single pass.
   if (layer_brightness_) {
     filters.append(WebKit::WebFilterOperation::createBrightnessFilter(
         layer_brightness_));
   }
-  if (layer_inverted_)
-    filters.append(WebKit::WebFilterOperation::createInvertFilter(1.0));
 
   web_layer_.setFilters(filters);
 }
@@ -285,8 +345,6 @@ void Layer::ConvertPointToLayer(const Layer* source,
   const Layer* root_layer = GetRoot(source);
   CHECK_EQ(root_layer, GetRoot(target));
 
-  // TODO(oshima): We probably need to handle source's root != target's root
-  // case under multi monitor environment.
   if (source != root_layer)
     source->ConvertPointForAncestor(root_layer, point);
   if (target != root_layer)
@@ -423,23 +481,26 @@ void Layer::OnDeviceScaleFactorChanged(float device_scale_factor) {
 }
 
 void Layer::paintContents(WebKit::WebCanvas* web_canvas,
-                          const WebKit::WebRect& clip
-#if WEBCONTENTLAYERCLIENT_HAS_OPAQUE
-                             , WebKit::WebRect& opaque
+                          const WebKit::WebRect& clip,
+#if defined(WEBCONTENTLAYERCLIENT_FLOAT_OPAQUE_RECT)
+                          WebKit::WebFloatRect& opaque) {
+#else
+                          WebKit::WebRect& opaque) {
 #endif
-                          ) {
   TRACE_EVENT0("ui", "Layer::paintContents");
-  gfx::Canvas canvas(web_canvas);
-  bool scale_content = scale_content_;
-  if (scale_content) {
-    canvas.Save();
-    canvas.sk_canvas()->scale(SkFloatToScalar(device_scale_factor_),
-                              SkFloatToScalar(device_scale_factor_));
+  scoped_ptr<gfx::Canvas> canvas(gfx::Canvas::CreateCanvasWithoutScaling(
+      web_canvas, ui::GetScaleFactorFromScale(device_scale_factor_)));
+
+  if (scale_content_) {
+    canvas->Save();
+    canvas->sk_canvas()->scale(SkFloatToScalar(device_scale_factor_),
+                               SkFloatToScalar(device_scale_factor_));
   }
+
   if (delegate_)
-    delegate_->OnPaintLayer(&canvas);
-  if (scale_content)
-    canvas.Restore();
+    delegate_->OnPaintLayer(canvas.get());
+  if (scale_content_)
+    canvas->Restore();
 }
 
 void Layer::SetForceRenderSurface(bool force) {
@@ -567,6 +628,16 @@ void Layer::SetVisibilityImmediately(bool visible) {
   web_layer_.setOpacity(visible_ ? opacity_ : 0.f);
 }
 
+void Layer::SetBrightnessImmediately(float brightness) {
+  layer_brightness_ = brightness;
+  SetLayerFilters();
+}
+
+void Layer::SetGrayscaleImmediately(float grayscale) {
+  layer_grayscale_ = grayscale;
+  SetLayerFilters();
+}
+
 void Layer::SetBoundsFromAnimation(const gfx::Rect& bounds) {
   SetBoundsImmediately(bounds);
 }
@@ -581,6 +652,13 @@ void Layer::SetOpacityFromAnimation(float opacity) {
 
 void Layer::SetVisibilityFromAnimation(bool visibility) {
   SetVisibilityImmediately(visibility);
+}
+
+void Layer::SetBrightnessFromAnimation(float brightness) {
+  SetBrightnessImmediately(brightness);
+}
+void Layer::SetGrayscaleFromAnimation(float grayscale) {
+  SetGrayscaleImmediately(grayscale);
 }
 
 void Layer::ScheduleDrawForAnimation() {
@@ -601,6 +679,14 @@ float Layer::GetOpacityForAnimation() const {
 
 bool Layer::GetVisibilityForAnimation() const {
   return visible();
+}
+
+float Layer::GetBrightnessForAnimation() const {
+  return layer_brightness();
+}
+
+float Layer::GetGrayscaleForAnimation() const {
+  return layer_grayscale();
 }
 
 void Layer::CreateWebLayer() {

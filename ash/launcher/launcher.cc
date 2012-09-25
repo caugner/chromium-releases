@@ -4,6 +4,8 @@
 
 #include "ash/launcher/launcher.h"
 
+#include <algorithm>
+
 #include "ash/focus_cycler.h"
 #include "ash/launcher/launcher_delegate.h"
 #include "ash/launcher/launcher_model.h"
@@ -33,7 +35,7 @@ const int kBackgroundAlpha = 128;
 // The contents view of the Widget. This view contains LauncherView and
 // sizes it to the width of the widget minus the size of the status area.
 class Launcher::DelegateView : public views::WidgetDelegate,
-                               public views::AccessiblePaneView{
+                               public views::AccessiblePaneView {
  public:
   explicit DelegateView(Launcher* launcher);
   virtual ~DelegateView();
@@ -95,7 +97,8 @@ void Launcher::DelegateView::Layout() {
 
 // Launcher --------------------------------------------------------------------
 
-Launcher::Launcher(aura::Window* window_container)
+Launcher::Launcher(aura::Window* window_container,
+                   internal::ShelfLayoutManager* shelf_layout_manager)
     : widget_(NULL),
       window_container_(window_container),
       delegate_view_(NULL),
@@ -119,7 +122,8 @@ Launcher::Launcher(aura::Window* window_container)
   params.parent = Shell::GetContainer(
       window_container_->GetRootWindow(),
       ash::internal::kShellWindowId_LauncherContainer);
-  launcher_view_ = new internal::LauncherView(model_.get(), delegate_.get());
+  launcher_view_ = new internal::LauncherView(
+      model_.get(), delegate_.get(), shelf_layout_manager);
   launcher_view_->Init();
   delegate_view_ = new DelegateView(this);
   delegate_view_->AddChildView(launcher_view_);
@@ -132,7 +136,6 @@ Launcher::Launcher(aura::Window* window_container)
   // The launcher should not take focus when it is initially shown.
   widget_->set_focus_on_creation(false);
   widget_->SetContentsView(delegate_view_);
-  widget_->Show();
   widget_->GetNativeView()->SetName("LauncherView");
 }
 
@@ -207,6 +210,14 @@ void Launcher::RemoveIconObserver(LauncherIconObserver* observer) {
 
 bool Launcher::IsShowingMenu() const {
   return launcher_view_->IsShowingMenu();
+}
+
+bool Launcher::IsShowingOverflowBubble() const {
+  return launcher_view_->IsShowingOverflowBubble();
+}
+
+void Launcher::SetVisible(bool visible) const {
+  delegate_view_->SetVisible(visible);
 }
 
 views::View* Launcher::GetAppListButtonView() const {

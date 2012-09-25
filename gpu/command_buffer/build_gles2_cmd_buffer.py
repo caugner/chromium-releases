@@ -76,6 +76,7 @@ _ENUM_LISTS = {
       'GL_FRAMEBUFFER',
     ],
     'invalid': [
+      'GL_DRAW_FRAMEBUFFER' ,
       'GL_READ_FRAMEBUFFER' ,
     ],
   },
@@ -200,6 +201,9 @@ _ENUM_LISTS = {
       'GL_TEXTURE_BINDING_2D',
       'GL_TEXTURE_BINDING_CUBE_MAP',
       'GL_UNPACK_ALIGNMENT',
+      'GL_UNPACK_FLIP_Y_CHROMIUM',
+      'GL_UNPACK_PREMULTIPLY_ALPHA_CHROMIUM',
+      'GL_UNPACK_UNPREMULTIPLY_ALPHA_CHROMIUM',
       'GL_VIEWPORT',
     ],
     'invalid': [
@@ -210,12 +214,7 @@ _ENUM_LISTS = {
     'type': 'GLenum',
     'valid': [
       'GL_TEXTURE_2D',
-      'GL_TEXTURE_CUBE_MAP_POSITIVE_X',
-      'GL_TEXTURE_CUBE_MAP_NEGATIVE_X',
-      'GL_TEXTURE_CUBE_MAP_POSITIVE_Y',
-      'GL_TEXTURE_CUBE_MAP_NEGATIVE_Y',
-      'GL_TEXTURE_CUBE_MAP_POSITIVE_Z',
-      'GL_TEXTURE_CUBE_MAP_NEGATIVE_Z',
+      'GL_TEXTURE_CUBE_MAP',
     ],
     'invalid': [
       'GL_PROXY_TEXTURE_CUBE_MAP',
@@ -589,6 +588,7 @@ _ENUM_LISTS = {
       'GL_UNPACK_ALIGNMENT',
       'GL_UNPACK_FLIP_Y_CHROMIUM',
       'GL_UNPACK_PREMULTIPLY_ALPHA_CHROMIUM',
+      'GL_UNPACK_UNPREMULTIPLY_ALPHA_CHROMIUM',
     ],
     'invalid': [
       'GL_PACK_SWAP_BYTES',
@@ -782,6 +782,8 @@ _PEPPER_INTERFACES = [
 # This table specifies types and other special data for the commands that
 # will be generated.
 #
+# Must match function names specified in "cmd_buffer_functions.txt".
+#
 # cmd_comment:  A comment added to the cmd format.
 # type:         defines which handler will be used to generate code.
 # decoder_func: defines which function to call in the decoder to execute the
@@ -868,7 +870,10 @@ _FUNCTION_INFO = {
     'error_value': 'GL_FRAMEBUFFER_UNSUPPORTED',
     'result': ['GLenum'],
   },
-  'Clear': {'decoder_func': 'DoClear'},
+  'Clear': {
+    'type': 'Manual',
+    'cmd_args': 'GLbitfield mask'
+  },
   'ClearColor': {'decoder_func': 'DoClearColor'},
   'ClearDepthf': {
     'decoder_func': 'DoClearDepthf',
@@ -993,6 +998,13 @@ _FUNCTION_INFO = {
   'Flush': {
     'impl_func': False,
     'decoder_func': 'DoFlush',
+  },
+  'ShallowFlushCHROMIUM': {
+    'impl_func': False,
+    'gen_cmd': False,
+    'extension': True,
+    'chromium': True,
+    'client_test': False,
   },
   'FramebufferRenderbuffer': {
     'decoder_func': 'DoFramebufferRenderbuffer',
@@ -1697,11 +1709,11 @@ _FUNCTION_INFO = {
     'gl_test_func': 'glGetQueryObjectuiv',
     'pepper_interface': 'Query',
   },
-  'GetUniformLocationsCHROMIUM': {
-    'gen_cmd': False,
-    'extension': True,
-    'chromium': True,
-    'client_test': False,
+  'BindUniformLocationCHROMIUM': {
+    'type': 'GLchar',
+    'bucket': True,
+    'needs_size': True,
+    'gl_test_func': 'DoBindUniformLocationCHROMIUM',
   },
 }
 
@@ -3833,9 +3845,7 @@ TEST_F(%(test_name)s, %(name)sValidArgsCountTooLarge) {
         # the location of the second element of the 2nd uniform.
         # defined in GLES2DecoderBase::SetupShaderForUniform
         gl_arg_strings.append("3")
-        arg_strings.append(
-            "GLES2Util::SwizzleLocation("
-            "GLES2Util::MakeFakeLocation(1, 1))")
+        arg_strings.append("ProgramManager::MakeFakeLocation(1, 1)")
       elif count == 1:
         # the number of elements that gl will be called with.
         gl_arg_strings.append("3")
@@ -4691,14 +4701,13 @@ class UniformLocationArgument(Argument):
 
   def WriteGetCode(self, file):
     """Writes the code to get an argument from a command structure."""
-    code = """  %s %s = GLES2Util::UnswizzleLocation(
-      static_cast<%s>(c.%s));
+    code = """  %s %s = static_cast<%s>(c.%s);
 """
     file.Write(code % (self.type, self.name, self.type, self.name))
 
   def GetValidArg(self, func, offset, index):
     """Gets a valid value for this argument."""
-    return "GLES2Util::SwizzleLocation(%d)" % (offset + 1)
+    return "%d" % (offset + 1)
 
 
 class DataSizeArgument(Argument):
@@ -6108,6 +6117,9 @@ const size_t GLES2Util::enum_to_string_table_len_ =
     file.Write(_LICENSE)
     file.Write(_DO_NOT_EDIT_WARNING)
 
+    file.Write("#ifndef GL_GLEXT_PROTOTYPES\n")
+    file.Write("#define GL_GLEXT_PROTOTYPES\n")
+    file.Write("#endif\n")
     file.Write("#include <GLES2/gl2.h>\n")
     file.Write("#include <GLES2/gl2ext.h>\n")
     file.Write("#include \"ppapi/lib/gl/gles2/gl2ext_ppapi.h\"\n\n")

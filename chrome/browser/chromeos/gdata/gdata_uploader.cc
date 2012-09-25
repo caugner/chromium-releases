@@ -10,7 +10,6 @@
 #include "base/callback.h"
 #include "chrome/browser/chromeos/gdata/gdata_documents_service.h"
 #include "chrome/browser/chromeos/gdata/gdata_files.h"
-#include "chrome/browser/chromeos/gdata/gdata_file_system.h"
 #include "chrome/browser/chromeos/gdata/gdata_upload_file_info.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_item.h"
@@ -32,10 +31,9 @@ const int kMaxFileOpenTries = 5;
 namespace gdata {
 
 GDataUploader::GDataUploader(DocumentsServiceInterface* documents_service)
-  : file_system_(NULL),
-    documents_service_(documents_service),
+  : documents_service_(documents_service),
     next_upload_id_(0),
-    ALLOW_THIS_IN_INITIALIZER_LIST(uploader_factory_(this)) {
+    ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_(this)) {
 }
 
 GDataUploader::~GDataUploader() {
@@ -49,15 +47,10 @@ int GDataUploader::UploadNewFile(scoped_ptr<UploadFileInfo> upload_file_info) {
   DCHECK(!upload_file_info->gdata_path.empty());
   DCHECK(!upload_file_info->title.empty());
   DCHECK(!upload_file_info->content_type.empty());
+  DCHECK(!upload_file_info->initial_upload_location.is_empty());
   DCHECK_EQ(UPLOAD_INVALID, upload_file_info->upload_mode);
 
   upload_file_info->upload_mode = UPLOAD_NEW_FILE;
-
-  // TODO(hshi): Should remove this. crbug.com/133301. We should pass this
-  // URL from callers, instead of getting this here.
-  upload_file_info->initial_upload_location =
-      file_system_->GetUploadUrlForDirectory(
-          upload_file_info->gdata_path.DirName());
 
   // When uploading a new file, we should retry file open as the file may
   // not yet be ready. See comments in OpenCompletionCallback.
@@ -172,9 +165,6 @@ void GDataUploader::UpdateUpload(int upload_id,
     upload_file_info->should_retry_file_open = false;
     OpenFile(upload_file_info);
   }
-
-  if (download->IsComplete())
-    MoveFileToCache(upload_file_info);
 }
 
 int64 GDataUploader::GetUploadedBytes(int upload_id) const {
@@ -204,7 +194,7 @@ void GDataUploader::OpenFile(UploadFileInfo* upload_file_info) {
       base::PLATFORM_FILE_READ |
       base::PLATFORM_FILE_ASYNC,
       base::Bind(&GDataUploader::OpenCompletionCallback,
-                 uploader_factory_.GetWeakPtr(),
+                 weak_ptr_factory_.GetWeakPtr(),
                  upload_file_info->upload_id));
   DCHECK_EQ(net::ERR_IO_PENDING, rv);
 }
@@ -237,7 +227,7 @@ void GDataUploader::OpenCompletionCallback(int upload_id, int result) {
     }
     if (!upload_file_info->should_retry_file_open) {
       UploadFailed(scoped_ptr<UploadFileInfo>(upload_file_info),
-                   base::PLATFORM_FILE_ERROR_NOT_FOUND);
+                   GDATA_FILE_ERROR_NOT_FOUND);
     }
     return;
   }
@@ -246,7 +236,7 @@ void GDataUploader::OpenCompletionCallback(int upload_id, int result) {
   upload_file_info->should_retry_file_open = false;
   if (upload_file_info->initial_upload_location.is_empty()) {
     UploadFailed(scoped_ptr<UploadFileInfo>(upload_file_info),
-                 base::PLATFORM_FILE_ERROR_ABORT);
+                 GDATA_FILE_ERROR_ABORT);
     return;
   }
   documents_service_->InitiateUpload(
@@ -257,7 +247,7 @@ void GDataUploader::OpenCompletionCallback(int upload_id, int result) {
                            upload_file_info->initial_upload_location,
                            upload_file_info->gdata_path),
       base::Bind(&GDataUploader::OnUploadLocationReceived,
-                 uploader_factory_.GetWeakPtr(),
+                 weak_ptr_factory_.GetWeakPtr(),
                  upload_file_info->upload_id));
 }
 
@@ -277,7 +267,7 @@ void GDataUploader::OnUploadLocationReceived(
   if (code != HTTP_SUCCESS) {
     // TODO(achuith): Handle error codes from Google Docs server.
     UploadFailed(scoped_ptr<UploadFileInfo>(upload_file_info),
-                 base::PLATFORM_FILE_ERROR_ABORT);
+                 GDATA_FILE_ERROR_ABORT);
     return;
   }
 
@@ -331,7 +321,7 @@ void GDataUploader::UploadNextChunk(UploadFileInfo* upload_file_info) {
     base::MessageLoopProxy::current()->PostTask(
         FROM_HERE,
         base::Bind(&GDataUploader::ResumeUpload,
-                   uploader_factory_.GetWeakPtr(),
+                   weak_ptr_factory_.GetWeakPtr(),
                    upload_file_info->upload_id));
     return;
   }
@@ -340,7 +330,7 @@ void GDataUploader::UploadNextChunk(UploadFileInfo* upload_file_info) {
       upload_file_info->buf,
       bytes_to_read,
       base::Bind(&GDataUploader::ReadCompletionCallback,
-                 uploader_factory_.GetWeakPtr(),
+                 weak_ptr_factory_.GetWeakPtr(),
                  upload_file_info->upload_id,
                  bytes_to_read));
 }
@@ -385,7 +375,7 @@ void GDataUploader::ResumeUpload(int upload_id) {
                          upload_file_info->upload_location,
                          upload_file_info->gdata_path),
       base::Bind(&GDataUploader::OnResumeUploadResponseReceived,
-                 uploader_factory_.GetWeakPtr(),
+                 weak_ptr_factory_.GetWeakPtr(),
                  upload_file_info->upload_id));
 }
 
@@ -413,7 +403,7 @@ void GDataUploader::OnResumeUploadResponseReceived(
     upload_file_info->entry = entry.Pass();
     if (!upload_file_info->completion_callback.is_null()) {
       upload_file_info->completion_callback.Run(
-          base::PLATFORM_FILE_OK,
+          GDATA_FILE_OK,
           scoped_ptr<UploadFileInfo>(upload_file_info));
     }
     return;
@@ -435,8 +425,8 @@ void GDataUploader::OnResumeUploadResponseReceived(
     UploadFailed(
         scoped_ptr<UploadFileInfo>(upload_file_info),
         response.code == HTTP_FORBIDDEN ?
-            base::PLATFORM_FILE_ERROR_NO_SPACE :
-            base::PLATFORM_FILE_ERROR_ABORT);
+            GDATA_FILE_ERROR_NO_SPACE :
+            GDATA_FILE_ERROR_ABORT);
     return;
   }
 
@@ -448,28 +438,8 @@ void GDataUploader::OnResumeUploadResponseReceived(
   UploadNextChunk(upload_file_info);
 }
 
-void GDataUploader::MoveFileToCache(UploadFileInfo* upload_file_info) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  if (upload_file_info->entry == NULL)
-    return;
-
-  // Remove |upload_id| from the UploadFileInfoMap. The UploadFileInfo object
-  // will be deleted upon completion of AddUploadedFile.
-  RemoveUpload(upload_file_info->upload_id);
-
-  DVLOG(1) << "MoveFileToCache " << upload_file_info->file_path.value();
-  file_system_->AddUploadedFile(
-      UPLOAD_NEW_FILE,
-      upload_file_info->gdata_path.DirName(),
-      upload_file_info->entry.get(),
-      upload_file_info->file_path,
-      GDataCache::FILE_OPERATION_MOVE,
-      base::Bind(&base::DeletePointer<UploadFileInfo>,
-                 upload_file_info));
-}
-
 void GDataUploader::UploadFailed(scoped_ptr<UploadFileInfo> upload_file_info,
-                                 base::PlatformFileError error) {
+                                 GDataFileError error) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   RemoveUpload(upload_file_info->upload_id);

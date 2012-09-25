@@ -22,14 +22,17 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/extensions/extension_resource.h"
+#include "chrome/common/extensions/permissions/permission_set.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "ui/base/l10n/l10n_util_collator.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_skia.h"
 
+using extensions::APIPermission;
 using extensions::Extension;
 using extensions::ExtensionList;
+using extensions::PermissionSet;
 using extensions::UnloadedExtensionInfo;
 using extensions::UpdatedExtensionPermissionsInfo;
 
@@ -274,7 +277,7 @@ bool BackgroundApplicationListModel::IsBackgroundApp(
   //    manifest.
 
   // Not a background app if we don't have the background permission.
-  if (!extension.HasAPIPermission(ExtensionAPIPermission::kBackground))
+  if (!extension.HasAPIPermission(APIPermission::kBackground))
     return false;
 
   // Extensions and packaged apps with background permission are always treated
@@ -363,8 +366,8 @@ void BackgroundApplicationListModel::OnExtensionUnloaded(
 void BackgroundApplicationListModel::OnExtensionPermissionsUpdated(
     const Extension* extension,
     UpdatedExtensionPermissionsInfo::Reason reason,
-    const ExtensionPermissionSet* permissions) {
-  if (permissions->HasAPIPermission(ExtensionAPIPermission::kBackground)) {
+    const PermissionSet* permissions) {
+  if (permissions->HasAPIPermission(APIPermission::kBackground)) {
     switch (reason) {
       case UpdatedExtensionPermissionsInfo::ADDED:
         DCHECK(IsBackgroundApp(*extension, profile_));

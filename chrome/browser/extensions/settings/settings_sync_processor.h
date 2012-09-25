@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_SETTINGS_SETTINGS_SYNC_PROCESSOR_H_
 #define CHROME_BROWSER_EXTENSIONS_SETTINGS_SETTINGS_SYNC_PROCESSOR_H_
-#pragma once
 
 #include <set>
 #include <string>
@@ -12,7 +11,9 @@
 #include "chrome/browser/value_store/value_store_change.h"
 #include "sync/api/sync_error.h"
 
+namespace syncer {
 class SyncChangeProcessor;
+}  // namespace syncer
 
 namespace extensions {
 
@@ -25,31 +26,31 @@ namespace extensions {
 class SettingsSyncProcessor {
  public:
   SettingsSyncProcessor(const std::string& extension_id,
-                        syncable::ModelType type,
-                        SyncChangeProcessor* sync_processor);
+                        syncer::ModelType type,
+                        syncer::SyncChangeProcessor* sync_processor);
   ~SettingsSyncProcessor();
 
   // Initializes this with the initial state of sync.
   void Init(const DictionaryValue& initial_state);
 
   // Sends |changes| to sync.
-  SyncError SendChanges(const ValueStoreChangeList& changes);
+  syncer::SyncError SendChanges(const ValueStoreChangeList& changes);
 
   // Informs this that |changes| have been receieved from sync. No action will
   // be taken, but this must be notified for internal bookkeeping.
   void NotifyChanges(const ValueStoreChangeList& changes);
 
-  syncable::ModelType type() { return type_; }
+  syncer::ModelType type() { return type_; }
 
  private:
   // ID of the extension the changes are for.
   const std::string extension_id_;
 
   // Sync model type. Either EXTENSION_SETTING or APP_SETTING.
-  const syncable::ModelType type_;
+  const syncer::ModelType type_;
 
   // The sync processor used to send changes to sync.
-  SyncChangeProcessor* const sync_processor_;
+  syncer::SyncChangeProcessor* const sync_processor_;
 
   // Whether Init() has been called.
   bool initialized_;

@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_SHELL_LAYOUT_TEST_CONTROLLER_H_
 #define CONTENT_SHELL_LAYOUT_TEST_CONTROLLER_H_
-#pragma once
 
 #include "content/public/renderer/render_view_observer.h"
 
@@ -18,11 +17,13 @@ class LayoutTestController : public RenderViewObserver {
 
   // RenderViewObserver implementation.
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+  virtual void DidClearWindowObject(WebKit::WebFrame* frame) OVERRIDE;
   virtual void DidFinishLoad(WebKit::WebFrame* frame) OVERRIDE;
 
  private:
   // Message handlers.
   void OnCaptureTextDump(bool as_text, bool printing, bool recursive);
+  void OnCaptureImageDump(const std::string& expected_pixel_hash);
 
   DISALLOW_COPY_AND_ASSIGN(LayoutTestController);
 };

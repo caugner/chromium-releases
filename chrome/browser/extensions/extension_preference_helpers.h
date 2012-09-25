@@ -4,11 +4,10 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_EXTENSION_PREFERENCE_HELPERS_H_
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_PREFERENCE_HELPERS_H_
-#pragma once
 
 #include <string>
 
-#include "chrome/common/extensions/extension_permission_set.h"
+#include "chrome/common/extensions/permissions/permission_set.h"
 #include "chrome/browser/extensions/extension_prefs_scope.h"
 
 class Profile;
@@ -19,7 +18,8 @@ class ListValue;
 
 namespace extension_preference_helpers {
 
-bool StringToScope(const std::string& s, ExtensionPrefsScope* scope);
+bool StringToScope(const std::string& s,
+                   extensions::ExtensionPrefsScope* scope);
 
 // Returns a string constant (defined in the API) indicating the level of
 // control this extension has over the specified preference.
@@ -38,7 +38,7 @@ void DispatchEventToExtensions(
     Profile* profile,
     const std::string& event_name,
     base::ListValue* args,
-    ExtensionAPIPermission::ID permission,
+    extensions::APIPermission::ID permission,
     bool incognito,
     const std::string& browser_pref);
 

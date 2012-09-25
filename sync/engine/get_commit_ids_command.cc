@@ -8,16 +8,19 @@
 #include <utility>
 #include <vector>
 
-#include "sync/engine/nigori_util.h"
 #include "sync/engine/syncer_util.h"
 #include "sync/engine/throttled_data_type_tracker.h"
-#include "sync/syncable/syncable.h"
+#include "sync/syncable/entry.h"
+#include "sync/syncable/mutable_entry.h"
+#include "sync/syncable/nigori_util.h"
+#include "sync/syncable/syncable_util.h"
+#include "sync/syncable/write_transaction.h"
 #include "sync/util/cryptographer.h"
 
 using std::set;
 using std::vector;
 
-namespace browser_sync {
+namespace syncer {
 
 using sessions::OrderedCommitSet;
 using sessions::SyncSession;
@@ -37,10 +40,10 @@ SyncerError GetCommitIdsCommand::ExecuteImpl(SyncSession* session) {
   // are not in the correct order for commit.
   std::set<int64> ready_unsynced_set;
   syncable::Directory::UnsyncedMetaHandles all_unsynced_handles;
-  SyncerUtil::GetUnsyncedEntries(session->write_transaction(),
-                                 &all_unsynced_handles);
+  GetUnsyncedEntries(session->write_transaction(),
+                     &all_unsynced_handles);
 
-  syncable::ModelTypeSet encrypted_types;
+  ModelTypeSet encrypted_types;
   bool passphrase_missing = false;
   Cryptographer* cryptographer =
       session->context()->
@@ -50,7 +53,7 @@ SyncerError GetCommitIdsCommand::ExecuteImpl(SyncSession* session) {
     passphrase_missing = cryptographer->has_pending_keys();
   };
 
-  const syncable::ModelTypeSet throttled_types =
+  const ModelTypeSet throttled_types =
        session->context()->throttled_data_type_tracker()->GetThrottledTypes();
   // We filter out all unready entries from the set of unsynced handles. This
   // new set of ready and unsynced items (which excludes throttled items as
@@ -99,20 +102,19 @@ bool IsEntryInConflict(const syncable::Entry& entry) {
 //    encrypted).
 // 3. It's type is currently throttled.
 // 4. It's a delete but has not been committed.
-bool IsEntryReadyForCommit(syncable::ModelTypeSet throttled_types,
-                           syncable::ModelTypeSet encrypted_types,
+bool IsEntryReadyForCommit(ModelTypeSet throttled_types,
+                           ModelTypeSet encrypted_types,
                            bool passphrase_missing,
                            const syncable::Entry& entry) {
   DCHECK(entry.Get(syncable::IS_UNSYNCED));
   if (IsEntryInConflict(entry))
     return false;
 
-  const syncable::ModelType type = entry.GetModelType();
+  const ModelType type = entry.GetModelType();
   // We special case the nigori node because even though it is considered an
   // "encrypted type", not all nigori node changes require valid encryption
   // (ex: sync_tabs).
-  if ((type != syncable::NIGORI) &&
-      encrypted_types.Has(type) &&
+  if ((type != NIGORI) && encrypted_types.Has(type) &&
       (passphrase_missing ||
        syncable::EntryNeedsEncryption(encrypted_types, entry))) {
     // This entry requires encryption but is not properly encrypted (possibly
@@ -157,8 +159,8 @@ bool IsEntryReadyForCommit(syncable::ModelTypeSet throttled_types,
 
 void GetCommitIdsCommand::FilterUnreadyEntries(
     syncable::BaseTransaction* trans,
-    syncable::ModelTypeSet throttled_types,
-    syncable::ModelTypeSet encrypted_types,
+    ModelTypeSet throttled_types,
+    ModelTypeSet encrypted_types,
     bool passphrase_missing,
     const syncable::Directory::UnsyncedMetaHandles& unsynced_handles,
     std::set<int64>* ready_unsynced_set) {
@@ -430,4 +432,4 @@ void GetCommitIdsCommand::BuildCommitIds(
   AddDeletes(write_transaction, ready_unsynced_set);
 }
 
-}  // namespace browser_sync
+}  // namespace syncer

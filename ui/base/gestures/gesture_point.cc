@@ -9,6 +9,7 @@
 #include "base/basictypes.h"
 #include "ui/base/events.h"
 #include "ui/base/gestures/gesture_configuration.h"
+#include "ui/base/gestures/gesture_util.h"
 #include "ui/base/gestures/gesture_types.h"
 
 namespace ui {
@@ -147,22 +148,14 @@ bool GesturePoint::IsInSecondClickTimeWindow() const {
 }
 
 bool GesturePoint::IsInsideManhattanSquare(const TouchEvent& event) const {
-  int manhattanDistance = abs(event.GetLocation().x() -
-                              first_touch_position_.x()) +
-                          abs(event.GetLocation().y() -
-                              first_touch_position_.y());
-  return manhattanDistance <
-      GestureConfiguration::max_touch_move_in_pixels_for_click();
+  return ui::gestures::IsInsideManhattanSquare(event.GetLocation(),
+                                               first_touch_position_);
 }
 
 bool GesturePoint::IsSecondClickInsideManhattanSquare(
     const TouchEvent& event) const {
-  int manhattanDistance = abs(event.GetLocation().x() -
-                              last_tap_position_.x()) +
-                          abs(event.GetLocation().y() -
-                              last_tap_position_.y());
-  return manhattanDistance <
-      GestureConfiguration::max_touch_move_in_pixels_for_click();
+  return ui::gestures::IsInsideManhattanSquare(event.GetLocation(),
+                                               last_tap_position_);
 }
 
 bool GesturePoint::IsOverMinFlickSpeed() {
@@ -194,7 +187,10 @@ void GesturePoint::UpdateEnclosingRectangle(const TouchEvent& event) {
                  event.GetLocation().y() - radius,
                  radius * 2,
                  radius * 2);
-  enclosing_rect_ = enclosing_rect_.Union(rect);
+  if (IsInClickWindow(event))
+    enclosing_rect_ = enclosing_rect_.Union(rect);
+  else
+    enclosing_rect_ = rect;
 }
 
 }  // namespace ui

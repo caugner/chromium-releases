@@ -8,8 +8,8 @@
 #include "base/logging.h"
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_window_controller.h"
-#include "chrome/browser/extensions/extension_window_list.h"
+#include "chrome/browser/extensions/window_controller.h"
+#include "chrome/browser/extensions/window_controller_list.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_host/chrome_render_message_filter.h"
 #include "chrome/browser/ui/browser_finder.h"
@@ -83,6 +83,10 @@ IOThreadExtensionFunction* ExtensionFunction::AsIOThreadExtensionFunction() {
   return NULL;
 }
 
+bool ExtensionFunction::HasPermission() {
+  return extension_->HasAPIPermission(name_);
+}
+
 void ExtensionFunction::OnQuotaExceeded() {
   error_ = QuotaLimitHeuristic::kGenericOverQuotaError;
   SendResponse(false);
@@ -93,8 +97,13 @@ void ExtensionFunction::SetArgs(const base::ListValue* args) {
   args_.reset(args->DeepCopy());
 }
 
-const Value* ExtensionFunction::GetResultValue() {
-  return result_.get();
+void ExtensionFunction::SetResult(base::Value* result) {
+  results_.reset(new base::ListValue());
+  results_->Append(result);
+}
+
+const ListValue* ExtensionFunction::GetResultList() {
+  return results_.get();
 }
 
 const std::string ExtensionFunction::GetError() {
@@ -129,14 +138,12 @@ void ExtensionFunction::SendResponseImpl(base::ProcessHandle process,
     return;
   }
 
-  // Value objects can't be directly serialized in our IPC code, so we wrap the
-  // result_ Value with a ListValue (also transferring ownership of result_).
-  base::ListValue result_wrapper;
-  if (result_.get())
-    result_wrapper.Append(result_.release());
+  // If results were never set, we send an empty argument list.
+  if (!results_.get())
+    results_.reset(new ListValue());
 
   ipc_sender->Send(new ExtensionMsg_Response(
-      routing_id, request_id_, success, result_wrapper, GetError()));
+      routing_id, request_id_, success, *results_, GetError()));
 }
 
 void ExtensionFunction::HandleBadMessage(base::ProcessHandle process) {
@@ -185,12 +192,14 @@ void UIThreadExtensionFunction::SetRenderViewHost(
 // TODO(stevenjb): Replace this with GetExtensionWindowController().
 Browser* UIThreadExtensionFunction::GetCurrentBrowser() {
   // If the delegate has an associated browser, return it.
-  ExtensionWindowController* window_controller =
-      dispatcher()->delegate()->GetExtensionWindowController();
-  if (window_controller) {
-    Browser* browser = window_controller->GetBrowser();
-    if (browser)
-      return browser;
+  if (dispatcher()) {
+    extensions::WindowController* window_controller =
+        dispatcher()->delegate()->GetExtensionWindowController();
+    if (window_controller) {
+      Browser* browser = window_controller->GetBrowser();
+      if (browser)
+        return browser;
+    }
   }
 
   // Otherwise, try to default to a reasonable browser. If |include_incognito_|
@@ -211,19 +220,22 @@ Browser* UIThreadExtensionFunction::GetCurrentBrowser() {
   return browser;
 }
 
-ExtensionWindowController*
+extensions::WindowController*
 UIThreadExtensionFunction::GetExtensionWindowController() {
   // If the delegate has an associated window controller, return it.
-  ExtensionWindowController* window_controller =
-      dispatcher()->delegate()->GetExtensionWindowController();
-  if (window_controller)
-    return window_controller;
+  if (dispatcher()) {
+    extensions::WindowController* window_controller =
+        dispatcher()->delegate()->GetExtensionWindowController();
+    if (window_controller)
+      return window_controller;
+  }
 
-  return ExtensionWindowList::GetInstance()->CurrentWindowForFunction(this);
+  return extensions::WindowControllerList::GetInstance()->
+      CurrentWindowForFunction(this);
 }
 
 bool UIThreadExtensionFunction::CanOperateOnWindow(
-    const ExtensionWindowController* window_controller) const {
+    const extensions::WindowController* window_controller) const {
   const extensions::Extension* extension = GetExtension();
   // |extension| is NULL for unit tests only.
   if (extension != NULL && !window_controller->IsVisibleToExtension(extension))

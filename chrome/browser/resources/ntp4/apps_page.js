@@ -257,12 +257,9 @@ cr.define('ntp', function() {
       this.appContents_.addEventListener('contextmenu',
                                          cr.ui.contextMenuHandler);
 
-      if (this.appData_.is_webstore)
-        this.createAppsPromoExtras_();
-
       this.addEventListener('mousedown', this.onMousedown_, true);
       this.addEventListener('keydown', this.onKeydown_);
-      this.addEventListener('blur', this.onBlur_, true);
+      this.addEventListener('keyup', this.onKeyup_);
     },
 
     /**
@@ -387,49 +384,6 @@ cr.define('ntp', function() {
     },
 
     /**
-     * Creates the apps-promo section of the app (should only be called for the
-     * webstore app).
-     * @private
-     */
-    createAppsPromoExtras_: function() {
-      this.classList.add('webstore');
-
-      this.appsPromoExtras_ = $('apps-promo-extras-template').cloneNode(true);
-      this.appsPromoExtras_.id = '';
-      this.appsPromoHeading_ =
-          this.appsPromoExtras_.querySelector('.apps-promo-heading');
-      this.appsPromoLink_ =
-          this.appsPromoExtras_.querySelector('.apps-promo-link');
-      this.appsPromoLink_.addEventListener('click', this.onClick_.bind(this));
-
-      this.appsPromoLogo_ = this.ownerDocument.createElement('img');
-      this.appsPromoLogo_.className = 'apps-promo-logo';
-      this.appImgContainer_.appendChild(this.appsPromoLogo_);
-
-      this.appendChild(this.appsPromoExtras_);
-    },
-
-    /**
-     * Sets the apps promo appearance. If |data| is null, there is no promo. If
-     * |data| is non-null, it contains strings to be shown for the promo. The
-     * promo is only shown when the webstore app icon is alone on a page.
-     * @param {Object} data A dictionary that contains apps promo strings.
-     */
-    setAppsPromoData: function(data) {
-      if (data) {
-        this.classList.add('has-promo');
-      } else {
-        this.classList.remove('has-promo');
-        return;
-      }
-
-      this.appsPromoHeading_.textContent = data.promoHeader;
-      this.appsPromoLink_.href = data.promoLink;
-      this.appsPromoLink_.textContent = data.promoButton;
-      this.appsPromoLogo_.src = data.promoLogo;
-    },
-
-    /**
      * Set the size and position of the app tile.
      * @param {number} size The total size of |this|.
      * @param {number} x The x-position.
@@ -468,13 +422,10 @@ cr.define('ntp', function() {
      * @private
      */
     onClick_: function(e) {
-      var is_promo = this.appsPromoExtras_ &&
-          window.getComputedStyle(this.appsPromoExtras_).display != 'none';
       var url = !this.appData_.is_webstore ? '' :
-          is_promo ? this.appsPromoLink_.href :
-                     appendParam(this.appData_.url,
-                                 'utm_source',
-                                 'chrome-ntp-icon');
+          appendParam(this.appData_.url,
+                      'utm_source',
+                      'chrome-ntp-icon');
 
       chrome.send('launchApp',
                   [this.appId, APP_LAUNCH.NTP_APPS_MAXIMIZED, url,
@@ -496,6 +447,33 @@ cr.define('ntp', function() {
                      0, e.altKey, e.ctrlKey, e.metaKey, e.shiftKey]);
         e.preventDefault();
         e.stopPropagation();
+      }
+      this.onKeyboardUsed_(e.keyCode);
+    },
+
+    /**
+     * Invoked when the user releases a key while the app is focused.
+     * @param {Event} e The key event.
+     * @private
+     */
+    onKeyup_: function(e) {
+      this.onKeyboardUsed_(e.keyCode);
+    },
+
+    /**
+     * Called when the keyboard has been used (key down or up). The .click-focus
+     * hack is removed if the user presses a key that can change focus.
+     * @param {number} keyCode The key code of the keyboard event.
+     * @private
+     */
+    onKeyboardUsed_: function(keyCode) {
+      switch (keyCode) {
+        case 9:  // Tab.
+        case 37:  // Left arrow.
+        case 38:  // Up arrow.
+        case 39:  // Right arrow.
+        case 40:  // Down arrow.
+          this.classList.remove('click-focus');
       }
     },
 
@@ -530,14 +508,6 @@ cr.define('ntp', function() {
       // This class is here so we don't show the focus state for apps that
       // gain keyboard focus via mouse clicking.
       this.classList.add('click-focus');
-    },
-
-    /**
-     * This app is losing keyboard focus.
-     * @param {Event} e The event.
-     */
-    onBlur_: function(e) {
-      this.classList.remove('click-focus');
     },
 
     /**
@@ -884,12 +854,6 @@ cr.define('ntp', function() {
       else
         ntp.setCurrentDropEffect(dataTransfer, 'copy');
     },
-  };
-
-  AppsPage.setPromo = function(data) {
-    var store = document.querySelector('.webstore');
-    if (store)
-      store.setAppsPromoData(data);
   };
 
   /**

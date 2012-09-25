@@ -17,10 +17,15 @@
 #include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
-#include "grit/theme_resources_standard.h"
+#include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "webkit/plugins/npapi/plugin_group.h"
+
+#if defined(OS_WIN)
+#include <shellapi.h>
+#include "ui/base/win/shell.h"
+#endif
 
 #if defined(ENABLE_PLUGIN_INSTALLATION)
 #include "chrome/browser/plugin_installer.h"
@@ -412,4 +417,76 @@ void PluginInstallerInfoBarDelegate::ReplaceWithInfoBar(
       owner(), installer(), base::Closure(), new_install_, message);
   owner()->ReplaceInfoBar(this, delegate);
 }
+
+// PluginMetroModeInfoBarDelegate ---------------------------------------------
+#if defined(OS_WIN)
+InfoBarDelegate* PluginMetroModeInfoBarDelegate::Create(
+    InfoBarTabHelper* infobar_helper, const string16& plugin_name) {
+  string16 message = l10n_util::GetStringFUTF16(
+      IDS_METRO_MISSING_PLUGIN_PROMPT, plugin_name);
+  return new PluginMetroModeInfoBarDelegate(
+      infobar_helper, message);
+}
+
+PluginMetroModeInfoBarDelegate::PluginMetroModeInfoBarDelegate(
+    InfoBarTabHelper* infobar_helper, const string16& message)
+    : ConfirmInfoBarDelegate(infobar_helper),
+      message_(message) {
+}
+
+PluginMetroModeInfoBarDelegate::~PluginMetroModeInfoBarDelegate() {
+}
+
+gfx::Image* PluginMetroModeInfoBarDelegate::GetIcon() const {
+  return &ResourceBundle::GetSharedInstance().GetNativeImageNamed(
+      IDR_INFOBAR_PLUGIN_INSTALL);
+}
+
+string16 PluginMetroModeInfoBarDelegate::GetMessageText() const {
+  return message_;
+}
+
+int PluginMetroModeInfoBarDelegate::GetButtons() const {
+  return BUTTON_OK;
+}
+
+string16 PluginMetroModeInfoBarDelegate::GetButtonLabel(
+    InfoBarButton button) const {
+  DCHECK_EQ(BUTTON_OK, button);
+  return l10n_util::GetStringUTF16(IDS_METRO_SWITCH_TO_DESKTOP_BUTTON);
+}
+
+bool PluginMetroModeInfoBarDelegate::Accept() {
+  content::WebContents* web_contents = owner()->web_contents();
+  if (!web_contents)
+    return false;
+  // Note that empty urls are not valid.
+  if (!web_contents->GetURL().is_valid())
+    return false;
+  std::string url(web_contents->GetURL().spec());
+  // This obscure use of the 'log usage' mask for windows 8 is documented
+  // here http://goo.gl/HBOe9.
+  ui::win::OpenAnyViaShell(UTF8ToUTF16(url),
+                           string16(),
+                           SEE_MASK_FLAG_LOG_USAGE);
+  return true;
+}
+
+string16 PluginMetroModeInfoBarDelegate::GetLinkText() const {
+  return l10n_util::GetStringUTF16(IDS_METRO_SWITCH_WHY_LINK);
+}
+
+bool PluginMetroModeInfoBarDelegate::LinkClicked(
+    WindowOpenDisposition disposition) {
+  // TODO(cpu): replace with the final url.
+  GURL url = google_util::AppendGoogleLocaleParam(GURL(
+      "https://support.google.com/chrome/?ib_display_in_desktop"));
+  OpenURLParams params(
+      url, Referrer(),
+      (disposition == CURRENT_TAB) ? NEW_FOREGROUND_TAB : disposition,
+      content::PAGE_TRANSITION_LINK, false);
+  owner()->web_contents()->OpenURL(params);
+  return false;
+}
+#endif  // defined(OS_WIN)
 #endif  // defined(ENABLE_PLUGIN_INSTALLATION)

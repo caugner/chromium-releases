@@ -7,10 +7,11 @@
 
 #include <string>
 
-#include "sync/internal_api/public/syncable/model_type.h"
+#include "sync/base/sync_export.h"
+#include "sync/internal_api/public/base/model_type.h"
 #include "sync/protocol/sync_protocol_error.h"
 
-namespace sync_api {
+namespace syncer {
 
 // Status encapsulates detailed state about the internals of the SyncManager.
 //
@@ -18,7 +19,7 @@ namespace sync_api {
 // it to track and report on the sync engine's internal state, and the functions
 // in sync_ui_util.cc which convert the contents of this struct into a
 // DictionaryValue used to populate the about:sync summary tab.
-struct SyncStatus {
+struct SYNC_EXPORT SyncStatus {
   SyncStatus();
   ~SyncStatus();
 
@@ -29,7 +30,7 @@ struct SyncStatus {
   // Notifications counters updated by the actions in synapi.
   int notifications_received;
 
-  browser_sync::SyncProtocolError sync_protocol_error;
+  SyncProtocolError sync_protocol_error;
 
   // Number of encryption conflicts counted during most recent sync cycle.
   int encryption_conflicts;
@@ -80,17 +81,17 @@ struct SyncStatus {
   int useful_sync_cycles;
 
   // Encryption related.
-  syncable::ModelTypeSet encrypted_types;
+  ModelTypeSet encrypted_types;
   bool cryptographer_ready;
   bool crypto_has_pending_keys;
 
   // Per-datatype throttled status.
-  syncable::ModelTypeSet throttled_types;
+  ModelTypeSet throttled_types;
 
   // The unique identifer for this client.
   std::string unique_id;
 };
 
-}  // namespace sync_api
+}  // namespace syncer
 
 #endif  // SYNC_INTERNAL_API_PUBLIC_ENGINE_STATUS_SUMMARY_H_

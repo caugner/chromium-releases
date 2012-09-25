@@ -4,6 +4,7 @@
 
 #include "gpu/command_buffer/common/gles2_cmd_utils.h"
 
+#include <limits>
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
 
@@ -16,6 +17,58 @@ class GLES2UtilTest : public testing:: Test {
  protected:
   GLES2Util util_;
 };
+
+TEST_F(GLES2UtilTest, SafeMultiplyUint32) {
+  uint32 result = 0;
+  EXPECT_TRUE(SafeMultiplyUint32(2u, 3u, &result));
+  EXPECT_EQ(6u, result);
+  EXPECT_FALSE(SafeMultiplyUint32(0x80000000u, 2u, &result));
+  EXPECT_EQ(0u, result);
+  EXPECT_TRUE(SafeMultiplyUint32(0x2u, 0x7FFFFFFFu, &result));
+  EXPECT_EQ(0xFFFFFFFEu, result);
+  EXPECT_FALSE(SafeMultiplyUint32(2u, 0x80000000u, &result));
+  EXPECT_EQ(0u, result);
+}
+
+TEST_F(GLES2UtilTest, SafeAddUint32) {
+  uint32 result = 0;
+  EXPECT_TRUE(SafeAddUint32(2u, 3u, &result));
+  EXPECT_EQ(5u, result);
+  EXPECT_FALSE(SafeAddUint32(0x80000000u, 0x80000000u, &result));
+  EXPECT_EQ(0u, result);
+  EXPECT_TRUE(SafeAddUint32(0xFFFFFFFEu, 0x1u, &result));
+  EXPECT_EQ(0xFFFFFFFFu, result);
+  EXPECT_FALSE(SafeAddUint32(0xFFFFFFFEu, 0x2u, &result));
+  EXPECT_EQ(0u, result);
+  EXPECT_TRUE(SafeAddUint32(0x1u, 0xFFFFFFFEu, &result));
+  EXPECT_EQ(0xFFFFFFFFu, result);
+  EXPECT_FALSE(SafeAddUint32(0x2u, 0xFFFFFFFEu, &result));
+  EXPECT_EQ(0u, result);
+}
+
+TEST_F(GLES2UtilTest, SafeAddInt32) {
+  int32 result = 0;
+  const int32 kMax = std::numeric_limits<int32>::max();
+  const int32 kMin = std::numeric_limits<int32>::min();
+  EXPECT_TRUE(SafeAddInt32(2, 3, &result));
+  EXPECT_EQ(5, result);
+  EXPECT_FALSE(SafeAddInt32(kMax, 1, &result));
+  EXPECT_EQ(0, result);
+  EXPECT_TRUE(SafeAddInt32(kMin + 1, -1, &result));
+  EXPECT_EQ(kMin, result);
+  EXPECT_FALSE(SafeAddInt32(kMin, -1, &result));
+  EXPECT_EQ(0, result);
+  EXPECT_TRUE(SafeAddInt32(kMax - 1, 1, &result));
+  EXPECT_EQ(kMax, result);
+  EXPECT_FALSE(SafeAddInt32(1, kMax, &result));
+  EXPECT_EQ(0, result);
+  EXPECT_TRUE(SafeAddInt32(-1, kMin + 1, &result));
+  EXPECT_EQ(kMin, result);
+  EXPECT_FALSE(SafeAddInt32(-1, kMin, &result));
+  EXPECT_EQ(0, result);
+  EXPECT_TRUE(SafeAddInt32(1, kMax - 1, &result));
+  EXPECT_EQ(kMax, result);
+}
 
 TEST_F(GLES2UtilTest, GLGetNumValuesReturned) {
   EXPECT_EQ(0, util_.GLGetNumValuesReturned(GL_COMPRESSED_TEXTURE_FORMATS));
@@ -181,15 +234,46 @@ TEST_F(GLES2UtilTest, RenderbufferBytesPerPixel) {
    EXPECT_EQ(0u, GLES2Util::RenderbufferBytesPerPixel(-1));
 }
 
-TEST_F(GLES2UtilTest, SwizzleLocation) {
-  GLint power = 1;
-  for (GLint p = 0; p < 5; ++p, power *= 10) {
-    GLint limit = power * 20 + 1;
-    for (GLint ii = -limit; ii < limit; ii += power) {
-      GLint s = GLES2Util::SwizzleLocation(ii);
-      EXPECT_EQ(ii, GLES2Util::UnswizzleLocation(s));
-    }
+namespace {
+
+void CheckParseUniformName(
+    const char* name,
+    bool expected_success,
+    size_t expected_array_pos,
+    int expected_index,
+    bool expected_getting_array) {
+  int index = 1234;
+  size_t array_pos = 1244;
+  bool getting_array = false;
+  bool success = GLES2Util::ParseUniformName(
+      name, &array_pos, &index, &getting_array);
+  EXPECT_EQ(expected_success, success);
+  if (success) {
+    EXPECT_EQ(expected_array_pos, array_pos);
+    EXPECT_EQ(expected_index, index);
+    EXPECT_EQ(expected_getting_array, getting_array);
   }
+}
+
+}  // anonymous namespace
+
+TEST_F(GLES2UtilTest, ParseUniformName) {
+  CheckParseUniformName("u_name", true, std::string::npos, 0, false);
+  CheckParseUniformName("u_name[]", false, std::string::npos, 0, false);
+  CheckParseUniformName("u_name]", false, std::string::npos, 0, false);
+  CheckParseUniformName("u_name[0a]", false, std::string::npos, 0, false);
+  CheckParseUniformName("u_name[a0]", false, std::string::npos, 0, false);
+  CheckParseUniformName("u_name[0a0]", false, std::string::npos, 0, false);
+  CheckParseUniformName("u_name[0]", true, 6u, 0, true);
+  CheckParseUniformName("u_name[2]", true, 6u, 2, true);
+  CheckParseUniformName("u_name[02]", true, 6u, 2, true);
+  CheckParseUniformName("u_name[20]", true, 6u, 20, true);
+  CheckParseUniformName("u_name[020]", true, 6u, 20, true);
+  CheckParseUniformName("u_name[0][0]", true, 9u, 0, true);
+  CheckParseUniformName("u_name[3][2]", true, 9u, 2, true);
+  CheckParseUniformName("u_name[03][02]", true, 10u, 2, true);
+  CheckParseUniformName("u_name[30][20]", true, 10u, 20, true);
+  CheckParseUniformName("u_name[030][020]", true, 11u, 20, true);
 }
 
 }  // namespace gles2

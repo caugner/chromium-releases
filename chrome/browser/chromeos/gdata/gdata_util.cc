@@ -11,18 +11,20 @@
 #include "base/basictypes.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/json/json_reader.h"
 #include "base/logging.h"
-#include "base/stringprintf.h"
+#include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/threading/sequenced_worker_pool.h"
-#include "chrome/common/chrome_version_info.h"
-#include "chrome/common/pref_names.h"
-#include "chrome/common/url_constants.h"
+#include "base/time.h"
+#include "base/tracked_objects.h"
+#include "chrome/browser/chromeos/gdata/file_write_helper.h"
 #include "chrome/browser/chromeos/gdata/gdata.pb.h"
-#include "chrome/browser/chromeos/gdata/gdata_file_system.h"
+#include "chrome/browser/chromeos/gdata/gdata_file_system_interface.h"
 #include "chrome/browser/chromeos/gdata/gdata_system_service.h"
 #include "chrome/browser/chromeos/login/user.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
@@ -30,6 +32,10 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
+#include "chrome/common/chrome_switches.h"
+#include "chrome/common/chrome_version_info.h"
+#include "chrome/common/pref_names.h"
+#include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_security_policy.h"
 #include "net/base/escape.h"
@@ -55,7 +61,7 @@ const int kReadOnlyFilePermissions = base::PLATFORM_FILE_OPEN |
                                      base::PLATFORM_FILE_EXCLUSIVE_READ |
                                      base::PLATFORM_FILE_ASYNC;
 
-GDataFileSystem* GetGDataFileSystem(Profile* profile) {
+GDataFileSystemInterface* GetGDataFileSystem(Profile* profile) {
   GDataSystemService* system_service =
       GDataSystemServiceFactory::GetForProfile(profile);
   return system_service ? system_service->file_system() : NULL;
@@ -65,6 +71,12 @@ GDataCache* GetGDataCache(Profile* profile) {
   GDataSystemService* system_service =
       GDataSystemServiceFactory::GetForProfile(profile);
   return system_service ? system_service->cache() : NULL;
+}
+
+FileWriteHelper* GetFileWriteHelper(Profile* profile) {
+  GDataSystemService* system_service =
+      GDataSystemServiceFactory::GetForProfile(profile);
+  return system_service ? system_service->file_write_helper() : NULL;
 }
 
 void GetHostedDocumentURLBlockingThread(const FilePath& gdata_cache_path,
@@ -98,46 +110,49 @@ void OpenEditURLUIThread(Profile* profile, const GURL* edit_url) {
   }
 }
 
-// Invoked upon completion of GetFileInfoByResourceId initiated by
+// Invoked upon completion of GetEntryInfoByResourceId initiated by
 // ModifyGDataFileResourceUrl.
-void OnGetFileInfoByResourceId(Profile* profile,
+void OnGetEntryInfoByResourceId(Profile* profile,
                                const std::string& resource_id,
-                               base::PlatformFileError error,
+                               GDataFileError error,
                                const FilePath& /* gdata_file_path */,
-                               scoped_ptr<GDataFileProto> file_proto) {
+                               scoped_ptr<GDataEntryProto> entry_proto) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  if (error != base::PLATFORM_FILE_OK)
+  if (error != GDATA_FILE_OK)
     return;
 
-  DCHECK(file_proto.get());
-  const std::string& file_name = file_proto->gdata_entry().file_name();
-  const GURL edit_url = GetFileResourceUrl(resource_id, file_name);
+  DCHECK(entry_proto.get());
+  const std::string& base_name = entry_proto->base_name();
+  const GURL edit_url = GetFileResourceUrl(resource_id, base_name);
   OpenEditURLUIThread(profile, &edit_url);
   DVLOG(1) << "OnFindEntryByResourceId " << edit_url;
 }
 
-// Invoked upon completion of GetFileInfoByPath initiated by
+// Invoked upon completion of GetEntryInfoByPath initiated by
 // InsertGDataCachePathPermissions.
-void OnGetFileInfoForInsertGDataCachePathsPermissions(
+void OnGetEntryInfoForInsertGDataCachePathsPermissions(
     Profile* profile,
     std::vector<std::pair<FilePath, int> >* cache_paths,
     const base::Closure& callback,
-    base::PlatformFileError error,
-    scoped_ptr<GDataFileProto> file_info) {
+    GDataFileError error,
+    scoped_ptr<GDataEntryProto> entry_proto) {
   DCHECK(profile);
   DCHECK(cache_paths);
   DCHECK(!callback.is_null());
 
+  if (entry_proto.get() && !entry_proto->has_file_specific_info())
+    error = GDATA_FILE_ERROR_NOT_FOUND;
+
   GDataCache* cache = GetGDataCache(profile);
-  if (!cache || error != base::PLATFORM_FILE_OK) {
+  if (!cache || error != GDATA_FILE_OK) {
     callback.Run();
     return;
   }
 
-  DCHECK(file_info.get());
-  std::string resource_id = file_info->gdata_entry().resource_id();
-  std::string file_md5 = file_info->file_md5();
+  DCHECK(entry_proto.get());
+  const std::string& resource_id = entry_proto->resource_id();
+  const std::string& file_md5 = entry_proto->file_specific_info().file_md5();
 
   // We check permissions for raw cache file paths only for read-only
   // operations (when fileEntry.file() is called), so read only permissions
@@ -167,6 +182,26 @@ void OnGetFileInfoForInsertGDataCachePathsPermissions(
       kReadOnlyFilePermissions));
 
   callback.Run();
+}
+
+bool ParseTimezone(const base::StringPiece& timezone,
+                   bool ahead,
+                   int* out_offset_to_utc_in_minutes) {
+  DCHECK(out_offset_to_utc_in_minutes);
+
+  std::vector<base::StringPiece> parts;
+  int num_of_token = Tokenize(timezone, ":", &parts);
+
+  int hour = 0;
+  if (!base::StringToInt(parts[0], &hour))
+    return false;
+
+  int minute = 0;
+  if (num_of_token > 1 && !base::StringToInt(parts[1], &minute))
+    return false;
+
+  *out_offset_to_utc_in_minutes = (hour * 60 + minute) * (ahead ? +1 : -1);
+  return true;
 }
 
 }  // namespace
@@ -203,16 +238,15 @@ void ModifyGDataFileResourceUrl(Profile* profile,
                                 GURL* url) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  GDataFileSystem* file_system = GetGDataFileSystem(profile);
+  GDataFileSystemInterface* file_system = GetGDataFileSystem(profile);
   if (!file_system)
     return;
   GDataCache* cache = GetGDataCache(profile);
   if (!cache)
     return;
 
-  if (cache->GetCacheDirectoryPath(
-          GDataCache::CACHE_TYPE_TMP_DOCUMENTS).IsParent(
-      gdata_cache_path)) {
+  if (cache->GetCacheDirectoryPath(GDataCache::CACHE_TYPE_TMP_DOCUMENTS).
+          IsParent(gdata_cache_path)) {
     // Handle hosted documents. The edit url is in the temporary file, so we
     // read it on a blocking thread.
     GURL* edit_url = new GURL();
@@ -221,14 +255,16 @@ void ModifyGDataFileResourceUrl(Profile* profile,
                    gdata_cache_path, edit_url),
         base::Bind(&OpenEditURLUIThread, profile, base::Owned(edit_url)));
     *url = GURL();
-  } else if (cache->GetCacheDirectoryPath(
-      GDataCache::CACHE_TYPE_TMP).IsParent(gdata_cache_path)) {
+  } else if (cache->GetCacheDirectoryPath(GDataCache::CACHE_TYPE_TMP).
+                 IsParent(gdata_cache_path) ||
+             cache->GetCacheDirectoryPath(GDataCache::CACHE_TYPE_PERSISTENT).
+                 IsParent(gdata_cache_path)) {
     // Handle all other gdata files.
     const std::string resource_id =
         gdata_cache_path.BaseName().RemoveExtension().AsUTF8Unsafe();
-    file_system->GetFileInfoByResourceId(
+    file_system->GetEntryInfoByResourceId(
         resource_id,
-        base::Bind(&OnGetFileInfoByResourceId,
+        base::Bind(&OnGetEntryInfoByResourceId,
                    profile,
                    resource_id));
     *url = GURL();
@@ -266,7 +302,7 @@ void InsertGDataCachePathsPermissions(
   DCHECK(cache_paths);
   DCHECK(!callback.is_null());
 
-  GDataFileSystem* file_system = GetGDataFileSystem(profile);
+  GDataFileSystemInterface* file_system = GetGDataFileSystem(profile);
   if (!file_system || gdata_paths->empty()) {
     callback.Run();
     return;
@@ -276,15 +312,15 @@ void InsertGDataCachePathsPermissions(
   FilePath gdata_path = gdata_paths->back();
   gdata_paths->pop_back();
 
-  // Call GetFileInfoByPath() to get file info for |gdata_path| then insert
+  // Call GetEntryInfoByPath() to get file info for |gdata_path| then insert
   // all possible cache paths to the output vector |cache_paths|.
   // Note that we can only process one file path at a time. Upon completion
-  // of OnGetFileInfoForInsertGDataCachePathsPermissions(), we recursively call
+  // of OnGetEntryInfoForInsertGDataCachePathsPermissions(), we recursively call
   // InsertGDataCachePathsPermissions() to process the next file path from the
   // back of the input vector |gdata_paths| until it is empty.
-  file_system->GetFileInfoByPath(
+  file_system->GetEntryInfoByPath(
       gdata_path,
-      base::Bind(&OnGetFileInfoForInsertGDataCachePathsPermissions,
+      base::Bind(&OnGetEntryInfoForInsertGDataCachePathsPermissions,
                  profile,
                  cache_paths,
                  base::Bind(&InsertGDataCachePathsPermissions,
@@ -374,6 +410,251 @@ void ParseCacheFilePath(const FilePath& path,
                                  std::string();
   *extra_extension = (extension_count > 1) ? extensions[extension_count - 2] :
                                              std::string();
+}
+
+bool IsDriveV2ApiEnabled() {
+  static bool enabled = CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kEnableDriveV2Api);
+  return enabled;
+}
+
+base::PlatformFileError GDataFileErrorToPlatformError(
+    gdata::GDataFileError error) {
+  switch (error) {
+    case gdata::GDATA_FILE_OK:
+      return base::PLATFORM_FILE_OK;
+
+    case gdata::GDATA_FILE_ERROR_FAILED:
+      return base::PLATFORM_FILE_ERROR_FAILED;
+
+    case gdata::GDATA_FILE_ERROR_IN_USE:
+      return base::PLATFORM_FILE_ERROR_IN_USE;
+
+    case gdata::GDATA_FILE_ERROR_EXISTS:
+      return base::PLATFORM_FILE_ERROR_EXISTS;
+
+    case gdata::GDATA_FILE_ERROR_NOT_FOUND:
+      return base::PLATFORM_FILE_ERROR_NOT_FOUND;
+
+    case gdata::GDATA_FILE_ERROR_ACCESS_DENIED:
+      return base::PLATFORM_FILE_ERROR_ACCESS_DENIED;
+
+    case gdata::GDATA_FILE_ERROR_TOO_MANY_OPENED:
+      return base::PLATFORM_FILE_ERROR_TOO_MANY_OPENED;
+
+    case gdata::GDATA_FILE_ERROR_NO_MEMORY:
+      return base::PLATFORM_FILE_ERROR_NO_MEMORY;
+
+    case gdata::GDATA_FILE_ERROR_NO_SPACE:
+      return base::PLATFORM_FILE_ERROR_NO_SPACE;
+
+    case gdata::GDATA_FILE_ERROR_NOT_A_DIRECTORY:
+      return base::PLATFORM_FILE_ERROR_NOT_A_DIRECTORY;
+
+    case gdata::GDATA_FILE_ERROR_INVALID_OPERATION:
+      return base::PLATFORM_FILE_ERROR_INVALID_OPERATION;
+
+    case gdata::GDATA_FILE_ERROR_SECURITY:
+      return base::PLATFORM_FILE_ERROR_SECURITY;
+
+    case gdata::GDATA_FILE_ERROR_ABORT:
+      return base::PLATFORM_FILE_ERROR_ABORT;
+
+    case gdata::GDATA_FILE_ERROR_NOT_A_FILE:
+      return base::PLATFORM_FILE_ERROR_NOT_A_FILE;
+
+    case gdata::GDATA_FILE_ERROR_NOT_EMPTY:
+      return base::PLATFORM_FILE_ERROR_NOT_EMPTY;
+
+    case gdata::GDATA_FILE_ERROR_INVALID_URL:
+      return base::PLATFORM_FILE_ERROR_INVALID_URL;
+
+    case gdata::GDATA_FILE_ERROR_NO_CONNECTION:
+      return base::PLATFORM_FILE_ERROR_FAILED;
+  }
+
+  NOTREACHED();
+  return base::PLATFORM_FILE_ERROR_FAILED;
+}
+
+bool GetTimeFromString(const base::StringPiece& raw_value,
+                       base::Time* parsed_time) {
+  base::StringPiece date;
+  base::StringPiece time_and_tz;
+  base::StringPiece time;
+  base::Time::Exploded exploded = {0};
+  bool has_timezone = false;
+  int offset_to_utc_in_minutes = 0;
+
+  // Splits the string into "date" part and "time" part.
+  {
+    std::vector<base::StringPiece> parts;
+    if (Tokenize(raw_value, "T", &parts) != 2)
+      return false;
+    date = parts[0];
+    time_and_tz = parts[1];
+  }
+
+  // Parses timezone suffix on the time part if available.
+  {
+    std::vector<base::StringPiece> parts;
+    if (time_and_tz[time_and_tz.size() - 1] == 'Z') {
+      // Timezone is 'Z' (UTC)
+      has_timezone = true;
+      offset_to_utc_in_minutes = 0;
+      time = time_and_tz;
+      time.remove_suffix(1);
+    } else if (Tokenize(time_and_tz, "+", &parts) == 2) {
+      // Timezone is "+hh:mm" format
+      if (!ParseTimezone(parts[1], true, &offset_to_utc_in_minutes))
+        return false;
+      has_timezone = true;
+      time = parts[0];
+    } else if (Tokenize(time_and_tz, "-", &parts) == 2) {
+      // Timezone is "-hh:mm" format
+      if (!ParseTimezone(parts[1], false, &offset_to_utc_in_minutes))
+        return false;
+      has_timezone = true;
+      time = parts[0];
+    } else {
+      // No timezone (uses local timezone)
+      time = time_and_tz;
+    }
+  }
+
+  // Parses the date part.
+  {
+    std::vector<base::StringPiece> parts;
+    if (Tokenize(date, "-", &parts) != 3)
+      return false;
+
+    if (!base::StringToInt(parts[0], &exploded.year) ||
+        !base::StringToInt(parts[1], &exploded.month) ||
+        !base::StringToInt(parts[2], &exploded.day_of_month)) {
+      return false;
+    }
+  }
+
+  // Parses the time part.
+  {
+    std::vector<base::StringPiece> parts;
+    int num_of_token = Tokenize(time, ":", &parts);
+    if (num_of_token != 3)
+      return false;
+
+    if (!base::StringToInt(parts[0], &exploded.hour) ||
+        !base::StringToInt(parts[1], &exploded.minute)) {
+      return false;
+    }
+
+    std::vector<base::StringPiece> seconds_parts;
+    int num_of_seconds_token = Tokenize(parts[2], ".", &seconds_parts);
+    if (num_of_seconds_token >= 3)
+      return false;
+
+    if (!base::StringToInt(seconds_parts[0], &exploded.second))
+        return false;
+
+    // Only accept milli-seconds (3-digits).
+    if (num_of_seconds_token > 1 &&
+        seconds_parts[1].length() == 3 &&
+        !base::StringToInt(seconds_parts[1], &exploded.millisecond)) {
+      return false;
+    }
+  }
+
+  exploded.day_of_week = 0;
+  if (!exploded.HasValidValues())
+    return false;
+
+  if (has_timezone) {
+    *parsed_time = base::Time::FromUTCExploded(exploded);
+    if (offset_to_utc_in_minutes != 0)
+      *parsed_time -= base::TimeDelta::FromMinutes(offset_to_utc_in_minutes);
+  } else {
+    *parsed_time = base::Time::FromLocalExploded(exploded);
+  }
+
+  return true;
+}
+
+std::string FormatTimeAsString(const base::Time& time) {
+  base::Time::Exploded exploded;
+  time.UTCExplode(&exploded);
+  return base::StringPrintf(
+      "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ",
+      exploded.year, exploded.month, exploded.day_of_month,
+      exploded.hour, exploded.minute, exploded.second, exploded.millisecond);
+}
+
+std::string FormatTimeAsStringLocaltime(const base::Time& time) {
+  base::Time::Exploded exploded;
+  time.LocalExplode(&exploded);
+
+  return base::StringPrintf(
+      "%04d-%02d-%02dT%02d:%02d:%02d.%03d",
+      exploded.year, exploded.month, exploded.day_of_month,
+      exploded.hour, exploded.minute, exploded.second, exploded.millisecond);
+}
+
+void PrepareWritableFileAndRun(Profile* profile,
+                               const FilePath& path,
+                               const OpenFileCallback& callback) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  if (IsUnderGDataMountPoint(path)) {
+    FileWriteHelper* file_write_helper = GetFileWriteHelper(profile);
+    if (!file_write_helper)
+      return;
+    FilePath remote_path(ExtractGDataPath(path));
+    file_write_helper->PrepareWritableFileAndRun(remote_path, callback);
+  } else {
+    if (!callback.is_null()) {
+      content::BrowserThread::GetBlockingPool()->PostTask(
+          FROM_HERE, base::Bind(callback, GDATA_FILE_OK, path));
+    }
+  }
+}
+
+GDataFileError GDataToGDataFileError(GDataErrorCode status) {
+  switch (status) {
+    case HTTP_SUCCESS:
+    case HTTP_CREATED:
+      return GDATA_FILE_OK;
+    case HTTP_UNAUTHORIZED:
+    case HTTP_FORBIDDEN:
+      return GDATA_FILE_ERROR_ACCESS_DENIED;
+    case HTTP_NOT_FOUND:
+      return GDATA_FILE_ERROR_NOT_FOUND;
+    case GDATA_PARSE_ERROR:
+    case GDATA_FILE_ERROR:
+      return GDATA_FILE_ERROR_ABORT;
+    case GDATA_NO_CONNECTION:
+      return GDATA_FILE_ERROR_NO_CONNECTION;
+    default:
+      return GDATA_FILE_ERROR_FAILED;
+  }
+}
+
+void PostBlockingPoolSequencedTask(
+    const tracked_objects::Location& from_here,
+    base::SequencedTaskRunner* blocking_task_runner,
+    const base::Closure& task) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  const bool posted = blocking_task_runner->PostTask(from_here, task);
+  DCHECK(posted);
+}
+
+void PostBlockingPoolSequencedTaskAndReply(
+    const tracked_objects::Location& from_here,
+    base::SequencedTaskRunner* blocking_task_runner,
+    const base::Closure& request_task,
+    const base::Closure& reply_task) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  const bool posted = blocking_task_runner->PostTaskAndReply(
+      from_here, request_task, reply_task);
+  DCHECK(posted);
 }
 
 }  // namespace util

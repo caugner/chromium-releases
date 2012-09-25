@@ -20,9 +20,11 @@ var remoting = remoting || {};
  * @constructor
  * @param {Element} table The HTML <div> to contain host-list.
  * @param {Element} noHosts The HTML <div> containing the "no hosts" message.
- * @param {Element} errorDiv The HTML <div> to display error messages.
+ * @param {Element} errorMsg The HTML <div> to display error messages.
+ * @param {Element} errorButton The HTML <button> to display the error
+ *     resolution action.
  */
-remoting.HostList = function(table, noHosts, errorDiv) {
+remoting.HostList = function(table, noHosts, errorMsg, errorButton) {
   /**
    * @type {Element}
    * @private
@@ -39,7 +41,12 @@ remoting.HostList = function(table, noHosts, errorDiv) {
    * @type {Element}
    * @private
    */
-  this.errorDiv_ = errorDiv;
+  this.errorMsg_ = errorMsg;
+  /**
+   * @type {Element}
+   * @private
+   */
+  this.errorButton_ = errorButton;
   /**
    * @type {Array.<remoting.HostTableEntry>}
    * @private
@@ -55,6 +62,10 @@ remoting.HostList = function(table, noHosts, errorDiv) {
    * @private
    */
   this.lastError_ = '';
+
+  this.errorButton_.addEventListener('click',
+                                     this.onErrorClick_.bind(this),
+                                     false);
 
   // Load the cache of the last host-list, if present.
   var cachedStr = /** @type {string} */
@@ -96,21 +107,20 @@ remoting.HostList.prototype.refresh = function(onDone) {
   var parseHostListResponse = this.parseHostListResponse_.bind(this, onDone);
   /** @type {remoting.HostList} */
   var that = this;
-  /** @param {string?} token The OAuth2 token. */
+  /** @param {string} token The OAuth2 token. */
   var getHosts = function(token) {
-    if (token) {
-      var headers = { 'Authorization': 'OAuth ' + token };
-      remoting.xhr.get(
-          'https://www.googleapis.com/chromoting/v1/@me/hosts',
-          parseHostListResponse, '', headers);
-    } else {
-      that.lastError_ = remoting.Error.AUTHENTICATION_FAILED;
-      onDone(false);
-    }
+    var headers = { 'Authorization': 'OAuth ' + token };
+    remoting.xhr.get(
+        'https://www.googleapis.com/chromoting/v1/@me/hosts',
+        parseHostListResponse, '', headers);
   };
-  this.hosts_ = [];
-  this.lastError_ = '';
-  remoting.oauth2.callWithToken(getHosts);
+  /** @param {remoting.Error} error */
+  var onError = function(error) {
+    that.hosts_ = [];
+    that.lastError_ = error;
+    onDone(false);
+  };
+  remoting.oauth2.callWithToken(getHosts, onError);
 };
 
 /**
@@ -124,36 +134,38 @@ remoting.HostList.prototype.refresh = function(onDone) {
  * @private
  */
 remoting.HostList.prototype.parseHostListResponse_ = function(onDone, xhr) {
+  this.hosts_ = [];
+  this.lastError_ = '';
   try {
     if (xhr.status == 200) {
       var response =
           /** @type {{data: {items: Array}}} */ jsonParseSafe(xhr.responseText);
-      if (response && response.data && response.data.items) {
-        this.hosts_ = response.data.items;
-        /**
-         * @param {remoting.Host} a
-         * @param {remoting.Host} b
-         */
-        var cmp = function(a, b) {
-          if (a.status < b.status) {
-            return 1;
-          } else if (b.status < a.status) {
-            return -1;
-          }
-          return 0;
-        };
-        this.hosts_ = /** @type {Array} */ this.hosts_.sort(cmp);
+      if (response && response.data) {
+        if (response.data.items) {
+          this.hosts_ = response.data.items;
+          /**
+           * @param {remoting.Host} a
+           * @param {remoting.Host} b
+           */
+          var cmp = function(a, b) {
+            if (a.status < b.status) {
+              return 1;
+            } else if (b.status < a.status) {
+              return -1;
+            }
+            return 0;
+          };
+          this.hosts_ = /** @type {Array} */ this.hosts_.sort(cmp);
+        }
       } else {
+        this.lastError_ = remoting.Error.UNEXPECTED;
         console.error('Invalid "hosts" response from server.');
       }
     } else {
       // Some other error.
       console.error('Bad status on host list query: ', xhr);
-      if (xhr.status == 403) {
-        // The user's account is not enabled for Me2Me, so fail silently.
-      } else if (xhr.status >= 400 && xhr.status < 500) {
-        // For other errors, tell the user to re-authorize us.
-        this.lastError_ = remoting.Error.GENERIC;
+      if (xhr.status == 401) {
+        this.lastError_ = remoting.Error.AUTHENTICATION_FAILED;
       } else if (xhr.status == 503) {
         this.lastError_ = remoting.Error.SERVICE_UNAVAILABLE;
       } else {
@@ -178,7 +190,7 @@ remoting.HostList.prototype.parseHostListResponse_ = function(onDone, xhr) {
  */
 remoting.HostList.prototype.display = function(thisHostId) {
   this.table_.innerText = '';
-  this.errorDiv_.innerText = '';
+  this.errorMsg_.innerText = '';
   this.hostTableEntries_ = [];
 
   var noHostsRegistered = (this.hosts_.length == 0);
@@ -203,9 +215,16 @@ remoting.HostList.prototype.display = function(thisHostId) {
   }
 
   if (this.lastError_ != '') {
-    l10n.localizeElementFromTag(this.errorDiv_, this.lastError_);
+    l10n.localizeElementFromTag(this.errorMsg_, this.lastError_);
+    if (this.lastError_ == remoting.Error.AUTHENTICATION_FAILED) {
+      l10n.localizeElementFromTag(this.errorButton_,
+                                  /*i18n-content*/'SIGN_IN_BUTTON');
+    } else {
+      l10n.localizeElementFromTag(this.errorButton_,
+                                  /*i18n-content*/'RETRY');
+    }
   }
-  this.errorDiv_.hidden = (this.lastError_ == '');
+  this.errorMsg_.parentNode.hidden = (this.lastError_ == '');
 };
 
 /**
@@ -229,19 +248,14 @@ remoting.HostList.prototype.deleteHost_ = function(hostTableEntry) {
  * @return {void} Nothing.
  */
 remoting.HostList.unregisterHostById = function(hostId) {
-  /** @param {string?} token The OAuth2 token. */
+  /** @param {string} token The OAuth2 token. */
   var deleteHost = function(token) {
-    if (token) {
-      var headers = { 'Authorization': 'OAuth ' + token };
-      remoting.xhr.remove(
-          'https://www.googleapis.com/chromoting/v1/@me/hosts/' + hostId,
-          function() {}, '', headers);
-    } else {
-      console.error('Could not unregister host. Authentication failure.');
-      // TODO(jamiewalch): Add a callback to signify success/failure?
-    }
+    var headers = { 'Authorization': 'OAuth ' + token };
+    remoting.xhr.remove(
+        'https://www.googleapis.com/chromoting/v1/@me/hosts/' + hostId,
+        function() {}, '', headers);
   }
-  remoting.oauth2.callWithToken(deleteHost);
+  remoting.oauth2.callWithToken(deleteHost, remoting.showErrorMessage);
 };
 
 /**
@@ -281,7 +295,7 @@ remoting.HostList.prototype.renameHost = function(hostTableEntry) {
       console.error('Could not rename host. Authentication failure.');
     }
   }
-  remoting.oauth2.callWithToken(renameHost);
+  remoting.oauth2.callWithToken(renameHost, remoting.showErrorMessage);
 };
 
 /**
@@ -295,6 +309,22 @@ remoting.HostList.prototype.addHost = function(localHost) {
   this.hosts_.push(localHost);
   window.localStorage.setItem(remoting.HostList.HOSTS_KEY,
                               JSON.stringify(this.hosts_));
+};
+
+/**
+ * Called when the user clicks the button next to the error message. The action
+ * depends on the error.
+ *
+ * @private
+ */
+remoting.HostList.prototype.onErrorClick_ = function() {
+  if (this.lastError_ == remoting.Error.AUTHENTICATION_FAILED) {
+    remoting.oauth2.doAuthRedirect();
+  } else {
+    this.lastError_ = '';
+    this.display(null);
+    this.refresh(remoting.extractThisHostAndDisplay);
+  }
 }
 
 /**

@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_CHROME_CONTENT_BROWSER_CLIENT_H_
 #define CHROME_BROWSER_CHROME_CONTENT_BROWSER_CLIENT_H_
-#pragma once
 
 #include <set>
 #include <string>
@@ -18,6 +17,8 @@ namespace content {
 class QuotaPermissionContext;
 }
 
+class PrefService;
+
 namespace chrome {
 
 class ChromeContentBrowserClient : public content::ContentBrowserClient {
@@ -25,12 +26,17 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   ChromeContentBrowserClient();
   virtual ~ChromeContentBrowserClient();
 
+  static void RegisterUserPrefs(PrefService* prefs);
+
   virtual content::BrowserMainParts* CreateBrowserMainParts(
       const content::MainFunctionParams& parameters) OVERRIDE;
   virtual content::WebContentsView* OverrideCreateWebContentsView(
       content::WebContents* web_contents,
       content::RenderViewHostDelegateView** render_view_host_delegate_view)
           OVERRIDE;
+  virtual std::string GetStoragePartitionIdForChildProcess(
+      content::BrowserContext* browser_context,
+      int child_process_id) OVERRIDE;
   virtual content::WebContentsViewDelegate* GetWebContentsViewDelegate(
       content::WebContents* web_contents) OVERRIDE;
   virtual void RenderViewHostCreated(
@@ -83,6 +89,13 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
                               int render_process_id,
                               int render_view_id,
                               net::CookieOptions* options) OVERRIDE;
+  virtual bool AllowPluginLocalDataAccess(
+      const GURL& document_url,
+      const GURL& plugin_url,
+      content::ResourceContext* context) OVERRIDE;
+  virtual bool AllowPluginLocalDataSessionOnly(
+      const GURL& url,
+      content::ResourceContext* context) OVERRIDE;
   virtual bool AllowSaveLocalState(content::ResourceContext* context) OVERRIDE;
   virtual bool AllowWorkerDatabase(
       const GURL& url,
@@ -180,7 +193,9 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   virtual bool AllowPepperPrivateFileAPI() OVERRIDE;
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
-  virtual int GetCrashSignalFD(const CommandLine& command_line) OVERRIDE;
+  virtual void GetAdditionalMappedFilesForChildProcess(
+      const CommandLine& command_line,
+      base::GlobalDescriptors::Mapping* mappings) OVERRIDE;
 #endif
 #if defined(OS_WIN)
   virtual const wchar_t* GetResourceDllName() OVERRIDE;

@@ -3,11 +3,11 @@
 // found in the LICENSE file.
 
 #include "base/bind.h"
+#include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/chromeos/cros/cros_in_process_browser_test.h"
 #include "chrome/browser/chromeos/cros/cros_mock.h"
-#include "chrome/browser/chromeos/cros/mock_cryptohome_library.h"
 #include "chrome/browser/chromeos/cros/mock_network_library.h"
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
 #include "chrome/browser/chromeos/login/helper.h"
@@ -21,6 +21,7 @@
 #include "chrome/browser/chromeos/login/mock_url_fetchers.h"
 #include "chrome/browser/chromeos/login/mock_user_manager.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/net/gaia/mock_url_fetcher_factory.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -34,6 +35,8 @@
 namespace chromeos {
 
 using ::testing::AnyNumber;
+using ::testing::AnyOf;
+using ::testing::Invoke;
 using ::testing::InvokeWithoutArgs;
 using ::testing::Return;
 using ::testing::ReturnNull;
@@ -94,8 +97,7 @@ class MockLoginDisplayHost : public LoginDisplayHost {
 class ExistingUserControllerTest : public CrosInProcessBrowserTest {
  protected:
   ExistingUserControllerTest()
-      : mock_cryptohome_library_(NULL),
-        mock_network_library_(NULL),
+      : mock_network_library_(NULL),
         mock_login_display_(NULL),
         mock_login_display_host_(NULL),
         testing_profile_(NULL) {
@@ -123,18 +125,14 @@ class ExistingUserControllerTest : public CrosInProcessBrowserTest {
     EXPECT_CALL(*mock_session_manager_client, RetrieveDevicePolicy(_))
         .Times(AnyNumber());
 
-    cros_mock_->InitMockCryptohomeLibrary();
-    mock_cryptohome_library_ = cros_mock_->mock_cryptohome_library();
-    EXPECT_CALL(*mock_cryptohome_library_, IsMounted())
-        .Times(AnyNumber())
-        .WillRepeatedly(Return(true));
-
     mock_login_utils_ = new MockLoginUtils();
     LoginUtils::Set(mock_login_utils_);
     EXPECT_CALL(*mock_login_utils_, PrewarmAuthentication())
         .Times(AnyNumber());
     EXPECT_CALL(*mock_login_utils_, StopBackgroundFetchers())
         .Times(AnyNumber());
+    EXPECT_CALL(*mock_login_utils_, DelegateDeleted(_))
+        .Times(1);
 
     mock_login_display_host_.reset(new MockLoginDisplayHost());
 
@@ -166,8 +164,14 @@ class ExistingUserControllerTest : public CrosInProcessBrowserTest {
     EXPECT_CALL(*mock_login_display_host_.get(), GetNativeWindow())
         .Times(1)
         .WillOnce(ReturnNull());
+    EXPECT_CALL(*mock_login_display_host_.get(), OnPreferencesChanged())
+        .Times(1);
     EXPECT_CALL(*mock_login_display_, Init(_, false, true, true))
         .Times(1);
+  }
+
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+    command_line->AppendSwitch(switches::kLoginManager);
   }
 
   virtual void SetUpOnMainThread() OVERRIDE {
@@ -195,7 +199,6 @@ class ExistingUserControllerTest : public CrosInProcessBrowserTest {
   scoped_ptr<ExistingUserController> existing_user_controller_;
 
   // These mocks are owned by CrosLibrary class.
-  MockCryptohomeLibrary* mock_cryptohome_library_;
   MockNetworkLibrary* mock_network_library_;
 
   MockLoginDisplay* mock_login_display_;
@@ -261,8 +264,11 @@ IN_PROC_BROWSER_TEST_F(ExistingUserControllerTest, MAYBE_ExistingUserLogin) {
   EXPECT_CALL(*mock_login_display_host_,
               StartWizard(WizardController::kUserImageScreenName, NULL))
       .Times(0);
+  EXPECT_CALL(*mock_user_manager_.user_manager(), IsCurrentUserNew())
+      .Times(AnyNumber())
+      .WillRepeatedly(Return(false));
   existing_user_controller()->Login(kUsername, kPassword);
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
 }
 
 IN_PROC_BROWSER_TEST_F(ExistingUserControllerTest,
@@ -274,9 +280,12 @@ IN_PROC_BROWSER_TEST_F(ExistingUserControllerTest,
       .Times(1);
   EXPECT_CALL(*mock_login_display_host_.get(), OnCompleteLogin())
       .Times(1);
+  EXPECT_CALL(*mock_user_manager_.user_manager(), IsCurrentUserNew())
+      .Times(AnyNumber())
+      .WillRepeatedly(Return(false));
   existing_user_controller()->DoAutoEnrollment();
   existing_user_controller()->CompleteLogin(kUsername, kPassword);
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
 }
 
 IN_PROC_BROWSER_TEST_F(ExistingUserControllerTest,
@@ -288,7 +297,8 @@ IN_PROC_BROWSER_TEST_F(ExistingUserControllerTest,
   // activated. In a real WizardController instance that is immediately switched
   // to image screen but this tests uses MockLoginDisplayHost instead.
   EXPECT_CALL(*mock_login_display_host_,
-              StartWizard(WizardController::kRegistrationScreenName, _))
+              StartWizard(AnyOf(WizardController::kRegistrationScreenName,
+                                WizardController::kUserImageScreenName), _))
       .Times(1);
   EXPECT_CALL(*mock_login_utils_, CreateAuthenticator(_))
       .Times(1)
@@ -304,8 +314,11 @@ IN_PROC_BROWSER_TEST_F(ExistingUserControllerTest,
       .Times(1);
   EXPECT_CALL(*mock_login_display_host_.get(), OnCompleteLogin())
       .Times(1);
+  EXPECT_CALL(*mock_user_manager_.user_manager(), IsCurrentUserNew())
+      .Times(AnyNumber())
+      .WillRepeatedly(Return(true));
   existing_user_controller()->CompleteLogin(kNewUsername, kPassword);
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
 }
 
 }  // namespace chromeos

@@ -57,11 +57,6 @@ class MockAudioRendererHost : public AudioRendererHost {
   MOCK_METHOD1(OnStreamError, void(int stream_id));
   MOCK_METHOD2(OnStreamVolume, void(int stream_id, double volume));
 
-  base::SharedMemory* shared_memory() { return shared_memory_.get(); }
-  uint32 shared_memory_length() { return shared_memory_length_; }
-
-  base::SyncSocket* sync_socket() { return sync_socket_.get(); }
-
  private:
   virtual ~MockAudioRendererHost() {
     // Make sure all audio streams have been deleted.
@@ -118,20 +113,21 @@ class MockAudioRendererHost : public AudioRendererHost {
   }
 
   void OnStreamStateChanged(const IPC::Message& msg, int stream_id,
-                            AudioStreamState state) {
-    if (state == kAudioStreamPlaying) {
-      OnStreamPlaying(stream_id);
-    } else if (state == kAudioStreamPaused) {
-      OnStreamPaused(stream_id);
-    } else if (state == kAudioStreamError) {
-      OnStreamError(stream_id);
-    } else {
-      FAIL() << "Unknown stream state";
+                            media::AudioOutputIPCDelegate::State state) {
+    switch (state) {
+      case media::AudioOutputIPCDelegate::kPlaying:
+        OnStreamPlaying(stream_id);
+        break;
+      case media::AudioOutputIPCDelegate::kPaused:
+        OnStreamPaused(stream_id);
+        break;
+      case media::AudioOutputIPCDelegate::kError:
+        OnStreamError(stream_id);
+        break;
+      default:
+        FAIL() << "Unknown stream state";
+        break;
     }
-  }
-
-  void OnStreamVolume(const IPC::Message& msg, int stream_id, double volume) {
-    OnStreamVolume(stream_id, volume);
   }
 
   scoped_ptr<base::SharedMemory> shared_memory_;
@@ -300,8 +296,6 @@ class AudioRendererHostTest : public testing::Test {
     message_loop_->Run();
   }
 
-  MessageLoop* message_loop() { return message_loop_.get(); }
-  MockAudioRendererHost* host() { return host_; }
   void EnableRealDevice() { mock_stream_ = false; }
 
  private:

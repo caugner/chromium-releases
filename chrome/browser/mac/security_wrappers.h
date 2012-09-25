@@ -4,29 +4,13 @@
 
 #ifndef CHROME_BROWSER_MAC_SECURITY_WRAPPERS_H_
 #define CHROME_BROWSER_MAC_SECURITY_WRAPPERS_H_
-#pragma once
 
 #include <Security/Security.h>
+#include <Security/SecRequirement.h>
 
 #include "base/basictypes.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "base/memory/scoped_ptr.h"
-
-#if defined(MAC_OS_X_VERSION_10_6) && \
-    MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_6
-
-#include <Security/SecRequirement.h>
-
-#else
-
-typedef struct __SecRequirement* SecRequirementRef;
-typedef uint32_t SecCSFlags;
-
-enum {
-  kSecCSDefaultFlags = 0
-};
-
-#endif
 
 namespace chrome {
 namespace browser {

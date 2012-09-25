@@ -4,7 +4,6 @@
 
 #ifndef CHROME_SERVICE_CLOUD_PRINT_CLOUD_PRINT_URL_FETCHER_H_
 #define CHROME_SERVICE_CLOUD_PRINT_CLOUD_PRINT_URL_FETCHER_H_
-#pragma once
 
 #include <string>
 
@@ -41,7 +40,6 @@ class CloudPrintURLFetcher
 
   class Delegate {
    public:
-    virtual ~Delegate() { }
     // Override this to handle the raw response as it is available. No response
     // error checking is done before this method is called. If the delegate
     // returns CONTINUE_PROCESSING, we will then check for network
@@ -90,6 +88,9 @@ class CloudPrintURLFetcher
     // Authentication information may change between retries.
     // CloudPrintURLFetcher will request auth info before sending any request.
     virtual std::string GetAuthHeader() = 0;
+
+   protected:
+    virtual ~Delegate() {}
   };
   CloudPrintURLFetcher();
 

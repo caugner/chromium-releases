@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_SYNC_GLUE_DATA_TYPE_CONTROLLER_MOCK_H__
 #define CHROME_BROWSER_SYNC_GLUE_DATA_TYPE_CONTROLLER_MOCK_H__
-#pragma once
 
 #include "chrome/browser/sync/glue/data_type_controller.h"
 #include "sync/api/sync_error.h"
@@ -18,7 +17,7 @@ class StartCallbackMock {
   virtual ~StartCallbackMock();
 
   MOCK_METHOD2(Run, void(DataTypeController::StartResult result,
-                         const SyncError& error));
+                         const syncer::SyncError& error));
 };
 
 class ModelLoadCallbackMock {
@@ -26,7 +25,7 @@ class ModelLoadCallbackMock {
   ModelLoadCallbackMock();
   virtual ~ModelLoadCallbackMock();
 
-  MOCK_METHOD2(Run, void(syncable::ModelType, SyncError));
+  MOCK_METHOD2(Run, void(syncer::ModelType, syncer::SyncError));
 };
 
 }  // namespace browser_sync

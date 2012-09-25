@@ -4,13 +4,12 @@
 
 #ifndef CHROME_BROWSER_SYNC_GLUE_THEME_MODEL_ASSOCIATOR_H_
 #define CHROME_BROWSER_SYNC_GLUE_THEME_MODEL_ASSOCIATOR_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "chrome/browser/sync/glue/data_type_error_handler.h"
 #include "chrome/browser/sync/glue/model_associator.h"
-#include "sync/internal_api/public/syncable/model_type.h"
+#include "sync/internal_api/public/base/model_type.h"
 
 class ProfileSyncService;
 
@@ -25,11 +24,11 @@ class ThemeModelAssociator : public AssociatorInterface {
   virtual ~ThemeModelAssociator();
 
   // Used by profile_sync_test_util.h.
-  static syncable::ModelType model_type() { return syncable::THEMES; }
+  static syncer::ModelType model_type() { return syncer::THEMES; }
 
   // AssociatorInterface implementation.
-  virtual SyncError AssociateModels() OVERRIDE;
-  virtual SyncError DisassociateModels() OVERRIDE;
+  virtual syncer::SyncError AssociateModels() OVERRIDE;
+  virtual syncer::SyncError DisassociateModels() OVERRIDE;
   virtual bool SyncModelHasUserCreatedNodes(bool* has_nodes) OVERRIDE;
   virtual void AbortAssociation() OVERRIDE {
     // No implementation needed, this associator runs on the main

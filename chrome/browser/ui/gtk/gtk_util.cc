@@ -16,7 +16,6 @@
 #include "base/nix/xdg_util.h"
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/autocomplete/autocomplete.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
@@ -26,6 +25,7 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
@@ -33,7 +33,6 @@
 #include "content/public/browser/web_contents.h"
 #include "googleurl/src/gurl.h"
 #include "grit/theme_resources.h"
-#include "grit/theme_resources_standard.h"
 #include "ui/base/gtk/gtk_compat.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/gtk/gtk_screen_util.h"
@@ -282,7 +281,7 @@ gboolean PaintNoBackground(GtkWidget* widget,
 WebContents* GetBrowserWindowSelectedWebContents(BrowserWindow* window) {
   BrowserWindowGtk* browser_window = static_cast<BrowserWindowGtk*>(
       window);
-  return browser_window->browser()->GetActiveWebContents();
+  return chrome::GetActiveWebContents(browser_window->browser());
 }
 
 GtkWidget* GetBrowserWindowFocusedWidget(BrowserWindow* window) {

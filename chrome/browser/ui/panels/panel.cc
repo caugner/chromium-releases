@@ -9,10 +9,17 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/extensions/api/tabs/tabs_constants.h"
-#include "chrome/browser/extensions/extension_window_controller.h"
+#include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_system.h"
+#include "chrome/browser/extensions/window_controller.h"
+#include "chrome/browser/extensions/window_controller_list.h"
+#include "chrome/browser/extensions/window_event_router.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/themes/theme_service.h"
+#include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/panels/native_panel.h"
+#include "chrome/browser/ui/panels/panel_host.h"
 #include "chrome/browser/ui/panels/panel_manager.h"
 #include "chrome/browser/ui/panels/panel_strip.h"
 #include "chrome/browser/web_applications/web_app.h"
@@ -22,19 +29,22 @@
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_view_host.h"
+#include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/rect.h"
 
 using content::RenderViewHost;
+using content::UserMetricsAction;
 
 namespace panel_internal {
 
-class PanelExtensionWindowController : public ExtensionWindowController {
+class PanelExtensionWindowController : public extensions::WindowController {
  public:
   PanelExtensionWindowController(Panel* panel, Profile* profile);
+  virtual ~PanelExtensionWindowController();
 
-  // Overridden from ExtensionWindowController.
+  // Overridden from extensions::WindowController.
   virtual int GetWindowId() const OVERRIDE;
   virtual std::string GetWindowTypeText() const OVERRIDE;
   virtual base::DictionaryValue* CreateWindowValueWithTabs() const OVERRIDE;
@@ -51,8 +61,13 @@ class PanelExtensionWindowController : public ExtensionWindowController {
 
 PanelExtensionWindowController::PanelExtensionWindowController(
     Panel* panel, Profile* profile)
-    : ExtensionWindowController(panel, profile),
+    : extensions::WindowController(panel, profile),
       panel_(panel) {
+  extensions::WindowControllerList::GetInstance()->AddExtensionWindow(this);
+}
+
+PanelExtensionWindowController::~PanelExtensionWindowController() {
+  extensions::WindowControllerList::GetInstance()->RemoveExtensionWindow(this);
 }
 
 int PanelExtensionWindowController::GetWindowId() const {
@@ -135,13 +150,19 @@ void Panel::Initialize(Profile* profile, const GURL& url,
 
   InitCommandState();
 
-  // TODO(jennb): setup for hosting web content
+  // Set up hosting for web contents.
+  panel_host_.reset(new PanelHost(this, profile));
+  panel_host_->Init(url);
+  native_panel_->AttachWebContents(GetWebContents());
 
   // Close when the extension is unloaded or the browser is exiting.
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
                  content::Source<Profile>(profile));
   registrar_.Add(this, content::NOTIFICATION_APP_TERMINATING,
                  content::NotificationService::AllSources());
+  registrar_.Add(this, chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
+                 content::Source<ThemeService>(
+                    ThemeServiceFactory::GetForProfile(profile)));
 
   // Prevent the browser process from shutting down while this window is open.
   browser::StartKeepAlive();
@@ -201,9 +222,8 @@ const std::string Panel::extension_id() const {
   return web_app::GetExtensionIdFromApplicationName(app_name_);
 }
 
-content::WebContents* Panel::WebContents() const {
-  // TODO(jennb): implement.
-  return NULL;
+content::WebContents* Panel::GetWebContents() const {
+  return panel_host_.get() ? panel_host_->web_contents() : NULL;
 }
 
 bool Panel::CanMinimize() const {
@@ -255,7 +275,7 @@ void Panel::SetAutoResizable(bool resizable) {
     return;
 
   auto_resizable_ = resizable;
-  content::WebContents* web_contents = WebContents();
+  content::WebContents* web_contents = GetWebContents();
   if (auto_resizable_) {
     if (web_contents)
       EnableWebContentsAutoResize(web_contents);
@@ -281,7 +301,7 @@ void Panel::SetSizeRange(const gfx::Size& min_size, const gfx::Size& max_size) {
   min_size_ = min_size;
   max_size_ = max_size;
 
-  ConfigureAutoResize(WebContents());
+  ConfigureAutoResize(GetWebContents());
 }
 
 void Panel::IncreaseMaxSize(const gfx::Size& desired_panel_size) {
@@ -312,6 +332,10 @@ gfx::Size Panel::ClampSize(const gfx::Size& size) const {
     new_height = min_size_.height();
 
   return gfx::Size(new_width, new_height);
+}
+
+void Panel::HandleKeyboardEvent(const content::NativeWebKeyboardEvent& event) {
+  native_panel_->HandlePanelKeyboardEvent(event);
 }
 
 void Panel::SetAlwaysOnTop(bool on_top) {
@@ -478,10 +502,14 @@ bool Panel::IsFullscreen() const {
   return false;
 }
 
-void Panel::OnWindowAutoResized(const gfx::Size& preferred_window_size) {
+void Panel::OnContentsAutoResized(const gfx::Size& new_content_size) {
   DCHECK(auto_resizable_);
-  if (panel_strip_)
-    panel_strip_->ResizePanelWindow(this, preferred_window_size);
+  if (!panel_strip_)
+    return;
+
+  panel_strip_->ResizePanelWindow(
+      this,
+      native_panel_->WindowSizeFromContentSize(new_content_size));
 }
 
 void Panel::OnWindowResizedByMouse(const gfx::Rect& new_bounds) {
@@ -507,7 +535,52 @@ void Panel::EnableWebContentsAutoResize(content::WebContents* web_contents) {
 
 void Panel::ExecuteCommandWithDisposition(int id,
                                           WindowOpenDisposition disposition) {
-  // TODO(jennb): implement.
+  if (!GetWebContents())
+    return;
+
+  DCHECK(command_updater_.IsCommandEnabled(id)) << "Invalid/disabled command "
+                                                << id;
+  switch (id) {
+    // Navigation
+    case IDC_RELOAD:
+      panel_host_->Reload();
+      break;
+    case IDC_RELOAD_IGNORING_CACHE:
+      panel_host_->ReloadIgnoringCache();
+      break;
+    case IDC_STOP:
+      panel_host_->StopLoading();
+      break;
+
+    // Clipboard
+    case IDC_COPY:
+      content::RecordAction(UserMetricsAction("Copy"));
+      native_panel_->PanelCopy();
+      break;
+    case IDC_CUT:
+      content::RecordAction(UserMetricsAction("Cut"));
+      native_panel_->PanelCut();
+      break;
+    case IDC_PASTE:
+      content::RecordAction(UserMetricsAction("Paste"));
+      native_panel_->PanelPaste();
+      break;
+
+    // Zoom
+    case IDC_ZOOM_PLUS:
+      panel_host_->Zoom(content::PAGE_ZOOM_IN);
+      break;
+    case IDC_ZOOM_NORMAL:
+      panel_host_->Zoom(content::PAGE_ZOOM_RESET);
+      break;
+    case IDC_ZOOM_MINUS:
+      panel_host_->Zoom(content::PAGE_ZOOM_OUT);
+      break;
+
+    default:
+      LOG(WARNING) << "Received unimplemented command: " << id;
+      break;
+  }
 }
 
 bool Panel::ExecuteCommandIfEnabled(int id) {
@@ -534,6 +607,9 @@ void Panel::Observe(int type,
     case content::NOTIFICATION_APP_TERMINATING:
       Close();
       break;
+    case chrome::NOTIFICATION_BROWSER_THEME_CHANGED:
+      native_panel_->NotifyPanelOnUserChangedTheme();
+      break;
     default:
       NOTREACHED() << "Received unexpected notification " << type;
   }
@@ -551,6 +627,17 @@ void Panel::OnActiveStateChanged(bool active) {
 
   if (panel_strip_)
     panel_strip_->OnPanelActiveStateChanged(this);
+
+  // Send extension event about window becoming active.
+  // TODO(jennb): remove extension_window_controller_ guard after refactor.
+  if (active && extension_window_controller_.get()) {
+    ExtensionService* service =
+        extensions::ExtensionSystem::Get(profile())->extension_service();
+    if (service) {
+      service->window_event_router()->OnActiveWindowChanged(
+          extension_window_controller_.get());
+    }
+  }
 
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_PANEL_CHANGED_ACTIVE_STATUS,
@@ -573,7 +660,7 @@ void Panel::ConfigureAutoResize(content::WebContents* web_contents) {
 }
 
 void Panel::OnWindowSizeAvailable() {
-  ConfigureAutoResize(WebContents());
+  ConfigureAutoResize(GetWebContents());
 }
 
 void Panel::OnTitlebarClicked(panel::ClickModifier modifier) {
@@ -618,16 +705,18 @@ void Panel::OnPanelEndUserResizing() {
 }
 
 bool Panel::ShouldCloseWindow() {
-  // TODO(jennb): implement
   return true;
 }
 
 void Panel::OnWindowClosing() {
-  // TODO(jennb): implement
+  if (GetWebContents()) {
+    native_panel_->DetachWebContents(GetWebContents());
+    panel_host_->DestroyWebContents();
+  }
 }
 
 string16 Panel::GetWindowTitle() const {
-  content::WebContents* contents = WebContents();
+  content::WebContents* contents = GetWebContents();
   string16 title;
 
   // |contents| can be NULL during the window's creation.
@@ -653,6 +742,19 @@ void Panel::FormatTitleForDisplay(string16* title) {
 }
 
 SkBitmap Panel::GetCurrentPageIcon() const {
-  // TODO(jennb): implement.
-  return SkBitmap();
+  return panel_host_->GetPageIcon();
+}
+
+void Panel::UpdateTitleBar() {
+  native_panel_->UpdatePanelTitleBar();
+}
+
+void Panel::LoadingStateChanged(bool is_loading) {
+  command_updater_.UpdateCommandEnabled(IDC_STOP, is_loading);
+  native_panel_->UpdatePanelLoadingAnimations(is_loading);
+  UpdateTitleBar();
+}
+
+void Panel::WebContentsFocused(content::WebContents* contents) {
+  native_panel_->PanelWebContentsFocused(contents);
 }

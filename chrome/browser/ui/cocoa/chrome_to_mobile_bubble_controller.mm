@@ -12,6 +12,7 @@
 #import "chrome/browser/ui/cocoa/info_bubble_view.h"
 #import "chrome/browser/ui/cocoa/location_bar/location_bar_view_mac.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/notification_types.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_mac.h"
@@ -71,12 +72,13 @@ void ChromeToMobileBubbleNotificationBridge::OnSendComplete(bool success) {
 @implementation ChromeToMobileBubbleController
 
 - (id)initWithParentWindow:(NSWindow*)parentWindow
-                   profile:(Profile*)profile {
+                   browser:(Browser*)browser {
   self = [super initWithWindowNibPath:@"ChromeToMobileBubble"
                          parentWindow:parentWindow
                            anchoredAt:NSZeroPoint];
   if (self) {
-    service_ = ChromeToMobileServiceFactory::GetForProfile(profile);
+    browser_ = browser;
+    service_ = ChromeToMobileServiceFactory::GetForProfile(browser->profile());
   }
   return self;
 }
@@ -95,29 +97,37 @@ void ChromeToMobileBubbleNotificationBridge::OnSendComplete(bool success) {
 
 // Override -[BaseBubbleController showWindow:] to set up UI elements.
 - (void)showWindow:(id)sender {
+  DCHECK(service_->HasMobiles());
   service_->LogMetric(ChromeToMobileService::BUBBLE_SHOWN);
 
   // Force load the NIB.
   NSWindow* window = [self window];
 
-  // Get the list of mobile devices.
-  mobiles_ = service_->mobiles();
-  DCHECK_GT(mobiles_.size(), 0U);
-  if (mobiles_.size() == 1) {
+  const ListValue* mobiles = service_->GetMobiles();
+  const DictionaryValue* mobile = NULL;
+  string16 name;
+
+  if (mobiles->GetSize() == 1) {
     // Set the single device title; it's for multiple devices by default.
-    string16 name;
-    mobiles_[0]->GetString("name", &name);
-    NSString* title =
-        l10n_util::GetNSStringF(IDS_CHROME_TO_MOBILE_BUBBLE_SINGLE_TITLE, name);
-    [title_ setStringValue:title];
+    if (mobiles->GetDictionary(0, &mobile) &&
+        mobile->GetString("name", &name)) {
+      NSString* title = l10n_util::GetNSStringF(
+          IDS_CHROME_TO_MOBILE_BUBBLE_SINGLE_TITLE, name);
+      [title_ setStringValue:title];
+    } else {
+      NOTREACHED();
+    }
   } else {
     // Initialize the mobile device radio buttons.
-    [mobileRadioGroup_ renewRows:mobiles_.size() columns:1];
+    [mobileRadioGroup_ renewRows:mobiles->GetSize() columns:1];
     NSArray* cellArray = [mobileRadioGroup_ cells];
-    for (NSUInteger i = 0; i < mobiles_.size(); ++i) {
-      string16 name;
-      mobiles_[i]->GetString("name", &name);
-      [[cellArray objectAtIndex:i] setTitle:SysUTF16ToNSString(name)];
+    for (size_t i = 0; i < mobiles->GetSize(); ++i) {
+      if (mobiles->GetDictionary(i, &mobile) &&
+          mobile->GetString("name", &name)) {
+        [[cellArray objectAtIndex:i] setTitle:SysUTF16ToNSString(name)];
+      } else {
+        NOTREACHED();
+      }
     }
     [mobileRadioGroup_ setEnabled:YES];
     [mobileRadioGroup_ setHidden:NO];
@@ -153,7 +163,7 @@ void ChromeToMobileBubbleNotificationBridge::OnSendComplete(bool success) {
       self, @selector(cancel:)));
 
   // Generate the MHTML snapshot now to report its size in the bubble.
-  service_->GenerateSnapshot(bridge_->AsWeakPtr());
+  service_->GenerateSnapshot(browser_, bridge_->AsWeakPtr());
 
   // Request a mobile device list update.
   service_->RequestMobileListUpdate();
@@ -161,14 +171,28 @@ void ChromeToMobileBubbleNotificationBridge::OnSendComplete(bool success) {
   [super showWindow:sender];
 }
 
-- (IBAction)send:(id)sender {
-  int index = (mobiles_.size() > 1) ? [mobileRadioGroup_ selectedRow] : 0;
-  DCHECK_GE(index, 0);
+- (IBAction)learn:(id)sender {
+  service_->LearnMore(browser_);
+  [self close];
+}
 
-  string16 mobileId;
-  mobiles_[index]->GetString("id", &mobileId);
-  FilePath path = ([sendCopy_ state] == NSOnState) ? snapshotPath_ : FilePath();
-  service_->SendToMobile(mobileId, path, bridge_->AsWeakPtr());
+- (IBAction)send:(id)sender {
+  // TODO(msw): Handle updates to the mobile list while the bubble is open.
+  const ListValue* mobiles = service_->GetMobiles();
+  // |mobileRadioGroup_| has a single row by defualt, so these always match.
+  DCHECK_EQ(static_cast<NSInteger>(mobiles->GetSize()),
+            [mobileRadioGroup_ numberOfRows]);
+  // NSMatrix selectedRow is -1 by default (in the single mobile device case).
+  const int selected_index = std::max<int>([mobileRadioGroup_ selectedRow], 0);
+
+  const DictionaryValue* mobile = NULL;
+  if (mobiles->GetDictionary(selected_index, &mobile)) {
+    service_->SendToMobile(*mobile,
+        ([sendCopy_ state] == NSOnState) ? snapshotPath_ : FilePath(),
+        browser_, bridge_->AsWeakPtr());
+  } else {
+    NOTREACHED();
+  }
 
   // Update the bubble's contents to show the "Sending..." progress animation.
   [cancel_ setEnabled:NO];
@@ -255,6 +279,7 @@ void ChromeToMobileBubbleNotificationBridge::OnSendComplete(bool success) {
                          parentWindow:parentWindow
                            anchoredAt:NSZeroPoint];
   if (self) {
+    browser_ = NULL;
     service_ = service;
   }
   return self;

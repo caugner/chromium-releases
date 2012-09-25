@@ -66,14 +66,16 @@ WorkspaceManager::~WorkspaceManager() {
   STLDeleteElements(&copy_to_delete);
 }
 
-bool WorkspaceManager::IsManagedWindow(aura::Window* window) const {
+// static
+bool WorkspaceManager::ShouldManageWindow(aura::Window* window) {
   return window->type() == aura::client::WINDOW_TYPE_NORMAL &&
          !window->transient_parent() &&
          ash::GetTrackedByWorkspace(window) &&
-         !ash::GetPersistsAcrossAllWorkspaces(window);
+         (!ash::GetPersistsAcrossAllWorkspaces(window) ||
+          wm::IsWindowMaximized(window));
 }
 
-bool WorkspaceManager::IsManagingWindow(aura::Window* window) const {
+bool WorkspaceManager::Contains(aura::Window* window) const {
   return FindBy(window) != NULL;
 }
 
@@ -83,7 +85,7 @@ bool WorkspaceManager::IsInMaximizedMode() const {
 }
 
 void WorkspaceManager::AddWindow(aura::Window* window) {
-  DCHECK(IsManagedWindow(window));
+  DCHECK(ShouldManageWindow(window));
 
   Workspace* current_workspace = FindBy(window);
   if (current_workspace) {
@@ -137,11 +139,11 @@ void WorkspaceManager::UpdateShelfVisibility() {
     shelf_->UpdateVisibilityState();
 }
 
-WorkspaceManager::WindowState WorkspaceManager::GetWindowState() {
+WorkspaceWindowState WorkspaceManager::GetWindowState() const {
   if (!shelf_ || !active_workspace_)
-    return WINDOW_STATE_DEFAULT;
+    return WORKSPACE_WINDOW_STATE_DEFAULT;
 
-  // TODO: this code needs to be made multi-monitor aware.
+  // TODO: this code needs to be made multi-display aware.
   gfx::Rect shelf_bounds(shelf_->GetIdealBounds());
   const aura::Window::Windows& windows(contents_view_->children());
   bool window_overlaps_launcher = false;
@@ -156,26 +158,31 @@ WorkspaceManager::WindowState WorkspaceManager::GetWindowState() {
       // we hit a maximized window.
       has_maximized_window = true;
     } else if (wm::IsWindowFullscreen(*i)) {
-      return WINDOW_STATE_FULL_SCREEN;
+      return WORKSPACE_WINDOW_STATE_FULL_SCREEN;
     }
     if (!window_overlaps_launcher && (*i)->bounds().Intersects(shelf_bounds))
       window_overlaps_launcher = true;
   }
   if (has_maximized_window)
-    return WINDOW_STATE_MAXIMIZED;
+    return WORKSPACE_WINDOW_STATE_MAXIMIZED;
 
-  return window_overlaps_launcher ? WINDOW_STATE_WINDOW_OVERLAPS_SHELF :
-      WINDOW_STATE_DEFAULT;
+  return window_overlaps_launcher ?
+      WORKSPACE_WINDOW_STATE_WINDOW_OVERLAPS_SHELF :
+      WORKSPACE_WINDOW_STATE_DEFAULT;
 }
 
 void WorkspaceManager::ShowStateChanged(aura::Window* window) {
-  if (!IsManagedWindow(window) || !FindBy(window))
+  Workspace* workspace = FindBy(window);
+  if (!workspace)
     return;
-
-  Workspace::Type old_type = FindBy(window)->type();
-  Workspace::Type new_type = Workspace::TypeForWindow(window);
-  if (new_type != old_type)
-    OnTypeOfWorkspacedNeededChanged(window);
+  if (!ShouldManageWindow(window)) {
+    RemoveWindow(window);
+  } else {
+    Workspace::Type old_type = workspace->type();
+    Workspace::Type new_type = Workspace::TypeForWindow(window);
+    if (new_type != old_type)
+      OnTypeOfWorkspacedNeededChanged(window);
+  }
   UpdateShelfVisibility();
 }
 
@@ -298,7 +305,7 @@ void WorkspaceManager::SetWindowBounds(aura::Window* window,
 }
 
 void WorkspaceManager::OnTypeOfWorkspacedNeededChanged(aura::Window* window) {
-  DCHECK(IsManagedWindow(window));
+  DCHECK(ShouldManageWindow(window));
   Workspace* current_workspace = FindBy(window);
   DCHECK(current_workspace);
   Workspace* new_workspace = NULL;

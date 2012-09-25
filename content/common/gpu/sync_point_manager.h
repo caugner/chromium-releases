@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_COMMON_GPU_SYNC_POINT_MANAGER_H_
 #define CONTENT_COMMON_GPU_SYNC_POINT_MANAGER_H_
-#pragma once
 
 #include <vector>
 
@@ -16,8 +15,7 @@
 
 // This class manages the sync points, which allow cross-channel
 // synchronization.
-class SyncPointManager : public base::RefCountedThreadSafe<SyncPointManager>,
-                         public base::ThreadChecker {
+class SyncPointManager : public base::RefCountedThreadSafe<SyncPointManager> {
  public:
   SyncPointManager();
 
@@ -41,6 +39,8 @@ class SyncPointManager : public base::RefCountedThreadSafe<SyncPointManager>,
   typedef base::hash_map<uint32, ClosureList > SyncPointMap;
 
   ~SyncPointManager();
+
+  base::ThreadChecker thread_checker_;
 
   // Protects the 2 fields below. Note: callbacks shouldn't be called with this
   // held.

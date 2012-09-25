@@ -15,7 +15,7 @@
 #include "base/metrics/histogram.h"
 #include "base/stl_util.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_tab_helper.h"
+#include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_service.h"
 #include "chrome/browser/sessions/session_service_factory.h"
@@ -219,18 +219,18 @@ void TabRestoreService::RemoveObserver(TabRestoreServiceObserver* observer) {
   observer_list_.RemoveObserver(observer);
 }
 
-void TabRestoreService::CreateHistoricalTab(NavigationController* tab,
+void TabRestoreService::CreateHistoricalTab(content::WebContents* contents,
                                             int index) {
   if (restoring_)
     return;
 
   TabRestoreServiceDelegate* delegate =
-      TabRestoreServiceDelegate::FindDelegateForController(tab, NULL);
+      TabRestoreServiceDelegate::FindDelegateForWebContents(contents);
   if (closing_delegates_.find(delegate) != closing_delegates_.end())
     return;
 
   scoped_ptr<Tab> local_tab(new Tab());
-  PopulateTab(local_tab.get(), index, delegate, tab);
+  PopulateTab(local_tab.get(), index, delegate, &contents->GetController());
   if (local_tab->navigations.empty())
     return;
 
@@ -864,7 +864,7 @@ void TabRestoreService::CreateEntriesFromCommands(
         current_window = new Window();
         current_window->selected_tab_index = payload.selected_tab_index;
         current_window->timestamp = Time::FromInternalValue(payload.timestamp);
-        entries->push_back(current_window);
+        entries.push_back(current_window);
         id_to_entry[payload.window_id] = current_window;
         break;
       }
@@ -897,7 +897,7 @@ void TabRestoreService::CreateEntriesFromCommands(
           current_tab = new Tab();
           id_to_entry[payload.id] = current_tab;
           current_tab->timestamp = Time::FromInternalValue(payload.timestamp);
-          entries->push_back(current_tab);
+          entries.push_back(current_tab);
         }
         current_tab->current_navigation_index = payload.index;
         break;

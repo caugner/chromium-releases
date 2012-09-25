@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_SYNC_GLUE_HISTORY_MODEL_WORKER_H_
 #define CHROME_BROWSER_SYNC_GLUE_HISTORY_MODEL_WORKER_H_
-#pragma once
 
 #include "sync/internal_api/public/engine/model_safe_worker.h"
 
@@ -13,21 +12,22 @@
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "chrome/browser/cancelable_request.h"
+#include "chrome/browser/history/history.h"
 
 class HistoryService;
 
 namespace browser_sync {
 
-// A ModelSafeWorker for history models that accepts requests
+// A syncer::ModelSafeWorker for history models that accepts requests
 // from the syncapi that need to be fulfilled on the history thread.
-class HistoryModelWorker : public browser_sync::ModelSafeWorker {
+class HistoryModelWorker : public syncer::ModelSafeWorker {
  public:
   explicit HistoryModelWorker(HistoryService* history_service);
 
-  // ModelSafeWorker implementation. Called on syncapi SyncerThread.
-  virtual SyncerError DoWorkAndWaitUntilDone(
-      const WorkCallback& work) OVERRIDE;
-  virtual ModelSafeGroup GetModelSafeGroup() OVERRIDE;
+  // syncer::ModelSafeWorker implementation. Called on syncapi SyncerThread.
+  virtual syncer::SyncerError DoWorkAndWaitUntilDone(
+      const syncer::WorkCallback& work) OVERRIDE;
+  virtual syncer::ModelSafeGroup GetModelSafeGroup() OVERRIDE;
 
  private:
   virtual ~HistoryModelWorker();

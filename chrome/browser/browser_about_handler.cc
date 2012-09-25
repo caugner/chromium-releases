@@ -33,7 +33,6 @@ const char* const kChromePaths[] = {
   chrome::kChromeUIFlagsHost,
   chrome::kChromeUIFlashHost,
   chrome::kChromeUIGpuInternalsHost,
-  chrome::kChromeUIHistogramsHost,
   chrome::kChromeUIHistoryHost,
   chrome::kChromeUIIPCHost,
   chrome::kChromeUIInspectHost,
@@ -51,7 +50,9 @@ const char* const kChromePaths[] = {
   chrome::kChromeUISettingsHost,
   chrome::kChromeUIStatsHost,
   chrome::kChromeUISyncInternalsHost,
+#if defined(OS_CHROMEOS)
   chrome::kChromeUITaskManagerHost,
+#endif
   chrome::kChromeUITermsHost,
   chrome::kChromeUITracingHost,
   chrome::kChromeUIVersionHost,
@@ -65,7 +66,9 @@ const char* const kChromePaths[] = {
 #if defined(OS_CHROMEOS)
   chrome::kChromeUIChooseMobileNetworkHost,
   chrome::kChromeUICryptohomeHost,
+  chrome::kChromeUIDiagnosticsHost,
   chrome::kChromeUIDiscardsHost,
+  chrome::kChromeUIDriveInternalsHost,
   chrome::kChromeUIImageBurnerHost,
   chrome::kChromeUIKeyboardOverlayHost,
   chrome::kChromeUILoginHost,
@@ -149,7 +152,7 @@ bool HandleNonNavigationAboutURL(const GURL& url) {
 #if (defined(OS_MACOSX) || defined(OS_WIN)) && defined(IPC_MESSAGE_LOG_ENABLED)
   if (LowerCaseEqualsASCII(url.spec(), chrome::kChromeUIIPCURL)) {
     // Run the dialog. This will re-use the existing one if it's already up.
-    browser::ShowAboutIPCDialog();
+    chrome::ShowAboutIPCDialog();
     return true;
   }
 #endif

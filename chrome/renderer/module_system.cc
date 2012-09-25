@@ -54,23 +54,43 @@ ModuleSystem::NativesEnabledScope::~NativesEnabledScope() {
 // static
 bool ModuleSystem::IsPresentInCurrentContext() {
   v8::Handle<v8::Object> global(v8::Context::GetCurrent()->Global());
-  return !global->GetHiddenValue(v8::String::New(kModuleSystem))->IsUndefined();
+  v8::Handle<v8::Value> module_system =
+      global->GetHiddenValue(v8::String::New(kModuleSystem));
+  return !module_system.IsEmpty() && !module_system->IsUndefined();
 }
 
 // static
-void ModuleSystem::DumpException(v8::Handle<v8::Message> message) {
+void ModuleSystem::DumpException(const v8::TryCatch& try_catch) {
+  v8::HandleScope handle_scope;
+
+  v8::Handle<v8::Message> message(try_catch.Message());
+  if (message.IsEmpty()) {
+    LOG(ERROR) << "try_catch has no message";
+    return;
+  }
+
   std::string resource_name = "<unknown resource>";
   if (!message->GetScriptResourceName().IsEmpty()) {
-    resource_name = *v8::String::Utf8Value(
-        message->GetScriptResourceName()->ToString());
+    resource_name =
+        *v8::String::Utf8Value(message->GetScriptResourceName()->ToString());
   }
 
   std::string error_message = "<no error message>";
   if (!message->Get().IsEmpty())
     error_message = *v8::String::Utf8Value(message->Get());
 
+  std::string stack_trace = "<stack trace unavailable>";
+  if (!try_catch.StackTrace().IsEmpty()) {
+    v8::String::Utf8Value stack_value(try_catch.StackTrace());
+    if (*stack_value)
+      stack_trace.assign(*stack_value, stack_value.length());
+    else
+      stack_trace = "<could not convert stack trace to string>";
+  }
+
   LOG(ERROR) << "[" << resource_name << "(" << message->GetLineNumber() << ")] "
-             << error_message;
+             << error_message
+             << "{" << stack_trace << "}";
 }
 
 void ModuleSystem::Require(const std::string& module_name) {
@@ -101,8 +121,10 @@ v8::Handle<v8::Value> ModuleSystem::RequireForJsInner(
       v8::Handle<v8::String>::Cast(source)));
   v8::Handle<v8::Function> func =
       v8::Handle<v8::Function>::Cast(RunString(wrapped_source, module_name));
-  if (func.IsEmpty())
-    return handle_scope.Close(v8::Handle<v8::Value>());
+  if (func.IsEmpty()) {
+    return ThrowException(std::string(*v8::String::AsciiValue(module_name)) +
+        ": Bad source");
+  }
 
   exports = v8::Object::New();
   v8::Handle<v8::Object> natives(NewInstance());
@@ -113,7 +135,13 @@ v8::Handle<v8::Value> ModuleSystem::RequireForJsInner(
   };
   {
     WebKit::WebScopedMicrotaskSuppression suppression;
+    v8::TryCatch try_catch;
+    try_catch.SetCaptureMessage(true);
     func->Call(global, 3, args);
+    if (try_catch.HasCaught()) {
+      DumpException(try_catch);
+      return v8::Undefined();
+    }
   }
   modules->Set(module_name, exports);
   return handle_scope.Close(exports);
@@ -192,13 +220,13 @@ v8::Handle<v8::Value> ModuleSystem::RunString(v8::Handle<v8::String> code,
   try_catch.SetCaptureMessage(true);
   v8::Handle<v8::Script> script(v8::Script::New(code, name));
   if (try_catch.HasCaught()) {
-    DumpException(try_catch.Message());
+    DumpException(try_catch);
     return handle_scope.Close(result);
   }
 
   result = script->Run();
   if (try_catch.HasCaught())
-    DumpException(try_catch.Message());
+    DumpException(try_catch);
 
   return handle_scope.Close(result);
 }

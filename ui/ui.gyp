@@ -30,8 +30,7 @@
         '../third_party/libpng/libpng.gyp:libpng',
         '../third_party/zlib/zlib.gyp:zlib',
         'base/strings/ui_strings.gyp:ui_strings',
-        'ui_resources_standard',
-        '<(libjpeg_gyp_path):libjpeg',
+        'ui_resources',
       ],
       'defines': [
         'UI_IMPLEMENTATION',
@@ -107,6 +106,26 @@
         'base/cursor/cursor.h',
         'base/cursor/cursor_win.cc',
         'base/cursor/cursor_x11.cc',
+        'base/dialogs/base_shell_dialog.cc',
+        'base/dialogs/base_shell_dialog.h',
+        'base/dialogs/base_shell_dialog_win.cc',
+        'base/dialogs/base_shell_dialog_win.h',
+        'base/dialogs/gtk/select_file_dialog_impl.cc',
+        'base/dialogs/gtk/select_file_dialog_impl.h',
+        'base/dialogs/gtk/select_file_dialog_impl_gtk.cc',
+        'base/dialogs/gtk/select_file_dialog_impl_kde.cc',
+        'base/dialogs/select_file_dialog.cc',
+        'base/dialogs/select_file_dialog.h',
+        'base/dialogs/select_file_dialog_factory.cc',
+        'base/dialogs/select_file_dialog_factory.h',
+        'base/dialogs/select_file_dialog_mac.h',
+        'base/dialogs/select_file_dialog_mac.mm',
+        'base/dialogs/select_file_dialog_win.cc',
+        'base/dialogs/select_file_dialog_win.h',
+        'base/dialogs/select_file_policy.cc',
+        'base/dialogs/select_file_policy.h',
+        'base/dialogs/selected_file_info.cc',
+        'base/dialogs/selected_file_info.h',
         'base/dragdrop/cocoa_dnd_util.h',
         'base/dragdrop/cocoa_dnd_util.mm',
         'base/dragdrop/drag_drop_types_gtk.cc',
@@ -131,6 +150,8 @@
         'base/dragdrop/os_exchange_data_provider_gtk.h',
         'base/dragdrop/os_exchange_data_provider_win.cc',
         'base/dragdrop/os_exchange_data_provider_win.h',
+        'base/event.cc',
+        'base/event.h',
         'base/events.h',
         'base/gestures/gesture_configuration.cc',
         'base/gestures/gesture_configuration.h',
@@ -143,6 +164,8 @@
         'base/gestures/gesture_sequence.h',
         'base/gestures/gesture_types.cc',
         'base/gestures/gesture_types.h',
+        'base/gestures/gesture_util.cc',
+        'base/gestures/gesture_util.h',
         'base/gestures/velocity_calculator.cc',
         'base/gestures/velocity_calculator.h',
         'base/gtk/event_synthesis_gtk.cc',
@@ -197,6 +220,7 @@
         'base/l10n/l10n_util_win.h',
         'base/layout.cc',
         'base/layout.h',
+        'base/layout_mac.mm',
         'base/models/button_menu_item_model.cc',
         'base/models/button_menu_item_model.h',
         'base/models/combobox_model.h',
@@ -271,6 +295,8 @@
         'base/win/extra_sdk_defines.h',
         'base/win/foreground_helper.cc',
         'base/win/foreground_helper.h',
+        'base/win/hidden_window.cc',
+        'base/win/hidden_window.h',
         'base/win/hwnd_util.cc',
         'base/win/hwnd_util.h',
         'base/win/hwnd_subclass.cc',
@@ -304,6 +330,10 @@
         'base/x/x11_util.cc',
         'base/x/x11_util.h',
         'base/x/x11_util_internal.h',
+        'gfx/android/gfx_jni_registrar.cc',
+        'gfx/android/gfx_jni_registrar.h',
+        'gfx/android/java_bitmap.cc',
+        'gfx/android/java_bitmap.h',
         'gfx/blit.cc',
         'gfx/blit.h',
         'gfx/canvas.cc',
@@ -315,13 +345,16 @@
         'gfx/canvas_paint_win.cc',
         'gfx/canvas_skia.cc',
         'gfx/canvas_skia_paint.h',
-        'gfx/canvas_win.cc',
         'gfx/codec/jpeg_codec.cc',
         'gfx/codec/jpeg_codec.h',
         'gfx/codec/png_codec.cc',
         'gfx/codec/png_codec.h',
         'gfx/color_analysis.cc',
         'gfx/color_analysis.h',
+        'gfx/color_profile.cc',
+        'gfx/color_profile.h',
+        'gfx/color_profile_mac.cc',
+        'gfx/color_profile_win.cc',
         'gfx/color_utils.cc',
         'gfx/color_utils.h',
         'gfx/display.cc',
@@ -332,16 +365,25 @@
         'gfx/font.cc',
         'gfx/font_list.h',
         'gfx/font_list.cc',
+        'gfx/font_render_params_android.cc',
         'gfx/font_render_params_linux.cc',
         'gfx/font_render_params_linux.h',
         'gfx/font_smoothing_win.cc',
         'gfx/font_smoothing_win.h',
         'gfx/gfx_paths.cc',
         'gfx/gfx_paths.h',
+        'gfx/image/canvas_image_source.cc',
+        'gfx/image/canvas_image_source.h',
         'gfx/image/image.cc',
         'gfx/image/image.h',
+        'gfx/image/image_mac.mm',
         'gfx/image/image_skia.cc',
         'gfx/image/image_skia.h',
+        'gfx/image/image_skia_operations.cc',
+        'gfx/image/image_skia_operations.h',
+        'gfx/image/image_skia_rep.cc',
+        'gfx/image/image_skia_rep.h',
+        'gfx/image/image_skia_source.h',
         'gfx/image/image_skia_util_mac.h',
         'gfx/image/image_skia_util_mac.mm',
         'gfx/image/image_util.cc',
@@ -372,12 +414,19 @@
         'gfx/point.cc',
         'gfx/point.h',
         'gfx/point_base.h',
+        'gfx/point_f.cc',
+        'gfx/point_f.h',
+        'gfx/point3.h',
         'gfx/rect.cc',
         'gfx/rect.h',
         'gfx/rect_base.h',
         'gfx/rect_base_impl.h',
+        'gfx/rect_f.cc',
+        'gfx/rect_f.h',
         'gfx/render_text.cc',
         'gfx/render_text.h',
+        'gfx/render_text_mac.cc',
+        'gfx/render_text_mac.h',
         'gfx/render_text_linux.cc',
         'gfx/render_text_linux.h',
         'gfx/render_text_win.cc',
@@ -402,6 +451,8 @@
         'gfx/size.h',
         'gfx/size_base.h',
         'gfx/size_base_impl.h',
+        'gfx/size_f.cc',
+        'gfx/size_f.h',
         'gfx/skbitmap_operations.cc',
         'gfx/skbitmap_operations.h',
         'gfx/skia_util.cc',
@@ -410,6 +461,7 @@
         'gfx/skia_utils_gtk.h',
         'gfx/sys_color_change_listener.cc',
         'gfx/sys_color_change_listener.h',
+        'gfx/text_constants.h',
         'gfx/transform.cc',
         'gfx/transform.h',
         'gfx/transform_util.cc',
@@ -425,6 +477,11 @@
         'ui_controls/ui_controls_win.cc',
       ],
       'conditions': [
+        ['OS!="ios"', {
+          'dependencies': [
+            '<(libjpeg_gyp_path):libjpeg',
+          ],
+        }],
         # TODO(asvitkine): Switch all platforms to use canvas_skia.cc.
         #                  http://crbug.com/105550
         ['use_canvas_skia==1', {
@@ -432,7 +489,6 @@
             'gfx/canvas_android.cc',
             'gfx/canvas_linux.cc',
             'gfx/canvas_mac.mm',
-            'gfx/canvas_win.cc',
           ],
         }, {  # use_canvas_skia!=1
           'sources!': [
@@ -446,6 +502,8 @@
             ['exclude', 'gfx/gtk_util.h'],
             ['exclude', 'gfx/screen_gtk.cc'],
             ['exclude', 'gfx/screen_win.cc'],
+            ['exclude', 'base/dialogs/select_file_dialog_mac.mm'],
+            ['exclude', 'base/dialogs/select_file_dialog_win.cc'],
             ['exclude', 'base/dragdrop/drag_utils_win.cc'],
             ['exclude', 'base/win/mouse_wheel_util.cc'],
             ['exclude', 'base/win/mouse_wheel_util.h'],
@@ -506,7 +564,7 @@
           ],
           'link_settings': {
             'libraries': [
-              '-lXcursor',  # For XCursor* function calls in x11_util.cc. 
+              '-lXcursor',  # For XCursor* function calls in x11_util.cc.
               '-lXrender',  # For XRender* function calls in x11_util.cc.
             ],
           },
@@ -635,13 +693,29 @@
             ],
           },
         }],
-        ['OS=="android"', {
-          'sources!': [
-            'gfx/pango_util.h',
-            'gfx/pango_util.cc',
-            'gfx/platform_font_pango.h',
-            'gfx/platform_font_pango.cc',
+        ['OS=="ios"', {
+          'sources/': [
+            # iOS uses so little of ui that it is is easier to simply exclude
+            # everything and then just select the parts needed.
+            # TODO(ios): Add new files as they are made iOS ready.
+            ['exclude', '^base/'],
+            ['exclude', '^ui_controls/'],
+            ['exclude', '^gfx/'],
+            ['include', '^gfx/point\\.'],
+            ['include', '^gfx/point_base\\.h'],
+            ['include', '^gfx/point3\\.h'],
+            ['include', '^gfx/rect\\.'],
+            ['include', '^gfx/rect_base\\.h'],
+            ['include', '^gfx/rect_base_impl\\.h'],
+            ['include', '^gfx/size\\.'],
+            ['include', '^gfx/size_base\\.h'],
+            ['include', '^gfx/size_base_impl\\.h'],
           ],
+          'link_settings': {
+            'libraries': [
+              '$(SDKROOT)/System/Library/Frameworks/CoreGraphics.framework',
+            ],
+          },
         }],
         ['use_x11==1', {
           'all_dependent_settings': {
@@ -662,17 +736,9 @@
         }],
         ['toolkit_views==0', {
           'sources!': [
+            'base/event.cc',
+            'base/event.h',
             'base/x/events_x.cc',
-          ],
-        }],
-        ['toolkit_views==0 and use_canvas_skia==0', {
-          'sources!': [
-            'gfx/render_text.cc',
-            'gfx/render_text.h',
-            'gfx/render_text_linux.cc',
-            'gfx/render_text_linux.h',
-            'gfx/render_text_win.cc',
-            'gfx/render_text_win.h',
           ],
         }],
         ['OS=="android"', {
@@ -685,14 +751,15 @@
             'gfx/platform_font_pango.h',
           ],
         }],
+        ['OS=="android" or OS=="ios"', {
+          'sources!': [
+            'gfx/render_text.cc',
+            'gfx/render_text.h',
+          ],
+        }],
         ['OS=="linux"', {
           'libraries': [
             '-ldl',
-          ],
-        }],
-        ['os_bsd==1 and use_system_libjpeg==1', {
-          'include_dirs': [
-            '/usr/local/include',
           ],
         }],
         ['inside_chromium_build==0', {
@@ -704,39 +771,11 @@
     },
   ],
   'conditions': [
-    ['inside_chromium_build==1', {
+    ['inside_chromium_build == 1 and OS != "ios"', {
+      # TODO(ios): The ui tests do not compile yet on iOS.
       'includes': [
         'ui_unittests.gypi',
-      ],
-      'targets': [
-        {
-          # TODO(rsesek): Remove this target once ui_unittests is run on the
-          # waterfall instead of gfx_unittests.
-          'target_name': 'gfx_unittests',
-          'type': 'none',
-          'dependencies': [
-            'ui_unittests',
-          ],
-          'actions': [
-            {
-              'message': 'TEMPORARY: Copying ui_unittests to gfx_unittests',
-              'variables': {
-                'ui_copy_target': '<(PRODUCT_DIR)/ui_unittests<(EXECUTABLE_SUFFIX)',
-                'ui_copy_dest': '<(PRODUCT_DIR)/gfx_unittests<(EXECUTABLE_SUFFIX)',
-              },
-              'inputs': ['<(ui_copy_target)'],
-              'outputs': ['<(ui_copy_dest)'],
-              'action_name': 'TEMP_copy_ui_unittests',
-              'action': [
-                'python', '-c',
-                'import os, shutil; ' \
-                'shutil.copyfile(\'<(ui_copy_target)\', \'<(ui_copy_dest)\'); ' \
-                'os.chmod(\'<(ui_copy_dest)\', 0700)'
-              ]
-            }
-          ],
-        },
-      ],
-    }],
+      ]},
+    ],
   ],
 }

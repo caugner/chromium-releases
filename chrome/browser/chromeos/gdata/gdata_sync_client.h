@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_GDATA_GDATA_SYNC_CLIENT_H_
 #define CHROME_BROWSER_CHROMEOS_GDATA_GDATA_SYNC_CLIENT_H_
-#pragma once
 
 #include <deque>
 #include <string>
@@ -15,7 +14,7 @@
 #include "base/time.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/chromeos/gdata/gdata_cache.h"
-#include "chrome/browser/chromeos/gdata/gdata_file_system.h"
+#include "chrome/browser/chromeos/gdata/gdata_file_system_interface.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_source.h"
@@ -42,23 +41,10 @@ namespace gdata {
 // TODO(satorux): This client should also upload pinned but dirty (locally
 // edited) files to gdata. Will work on this once downloading is done.
 // crosbug.com/27836.
-//
-// The interface class is defined to make GDataSyncClient mockable.
-class GDataSyncClientInterface {
- public:
-  // Initializes the GDataSyncClient.
-  virtual void Initialize() = 0;
-
-  virtual ~GDataSyncClientInterface() {}
-};
-
-// The production implementation of GDataSyncClientInterface.
-class GDataSyncClient
-    : public GDataSyncClientInterface,
-      public GDataFileSystemInterface::Observer,
-      public GDataCache::Observer,
-      public chromeos::NetworkLibrary::NetworkManagerObserver,
-      public content::NotificationObserver {
+class GDataSyncClient : public GDataFileSystemInterface::Observer,
+                        public GDataCache::Observer,
+                        public chromeos::NetworkLibrary::NetworkManagerObserver,
+                        public content::NotificationObserver {
  public:
   // Types of sync tasks.
   enum SyncType {
@@ -85,8 +71,8 @@ class GDataSyncClient
                   GDataCache* cache);
   virtual ~GDataSyncClient();
 
-  // GDataSyncClientInterface overrides.
-  virtual void Initialize() OVERRIDE;
+  // Initializes the GDataSyncClient.
+  void Initialize();
 
   // GDataFileSystemInterface overrides.
   virtual void OnInitialLoadFinished() OVERRIDE;
@@ -152,31 +138,31 @@ class GDataSyncClient
     const std::vector<std::string>& resource_ids);
 
   // Called when a file entry is obtained.
-  void OnGetFileInfoByResourceId(const std::string& resource_id,
-                                 base::PlatformFileError error,
+  void OnGetEntryInfoByResourceId(const std::string& resource_id,
+                                 GDataFileError error,
                                  const FilePath& file_path,
-                                 scoped_ptr<GDataFileProto> file_proto);
+                                 scoped_ptr<GDataEntryProto> entry_proto);
 
   // Called when a cache entry is obtained.
   void OnGetCacheEntry(const std::string& resource_id,
                        const std::string& latest_md5,
                        bool success,
-                       const GDataCache::CacheEntry& cache_entry);
+                       const GDataCacheEntry& cache_entry);
 
   // Called when an existing cache entry and the local files are removed.
-  void OnRemove(base::PlatformFileError error,
+  void OnRemove(GDataFileError error,
                 const std::string& resource_id,
                 const std::string& md5);
 
   // Called when a file is pinned.
-  void OnPinned(base::PlatformFileError error,
+  void OnPinned(GDataFileError error,
                 const std::string& resource_id,
                 const std::string& md5);
 
   // Called when the file for |resource_id| is fetched.
   // Calls DoSyncLoop() to go back to the sync loop.
-  void OnFetchFileComplete(const std::string& resource_id,
-                           base::PlatformFileError error,
+  void OnFetchFileComplete(const SyncTask& sync_task,
+                           GDataFileError error,
                            const FilePath& local_path,
                            const std::string& ununsed_mime_type,
                            GDataFileType file_type);
@@ -184,7 +170,7 @@ class GDataSyncClient
   // Called when the file for |resource_id| is uploaded.
   // Calls DoSyncLoop() to go back to the sync loop.
   void OnUploadFileComplete(const std::string& resource_id,
-                            base::PlatformFileError error);
+                            GDataFileError error);
 
   // chromeos::NetworkLibrary::NetworkManagerObserver override.
   virtual void OnNetworkManagerChanged(
@@ -210,6 +196,8 @@ class GDataSyncClient
   // True if the sync loop is running.
   bool sync_loop_is_running_;
 
+  // Note: This should remain the last member so it'll be destroyed and
+  // invalidate its weak pointers before any other members are destroyed.
   base::WeakPtrFactory<GDataSyncClient> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(GDataSyncClient);

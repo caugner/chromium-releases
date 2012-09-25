@@ -16,11 +16,13 @@ chromeHidden.registerCustomHook('experimental.mediaGalleries',
   // return an array of file system objects.
   apiFunctions.setCustomCallback('getMediaFileSystems',
                                  function(name, request, response) {
-    var result = [];
-    for (var i = 0; i < response.length; i++) {
-      result.push(
-          mediaGalleriesNatives.GetMediaFileSystemObject(response[i].fsid,
-                                                         response[i].dirname));
+    var result = null;
+    if (response) {
+      result = [];
+      for (var i = 0; i < response.length; i++) {
+        result.push(mediaGalleriesNatives.GetMediaFileSystemObject(
+            response[i].fsid, response[i].name));
+      }
     }
     if (request.callback)
       request.callback(result);
@@ -31,7 +33,7 @@ chromeHidden.registerCustomHook('experimental.mediaGalleries',
   // synchronously return a result.  The result object's state is computable
   // from the function's input.
   apiFunctions.setHandleRequest('extractEmbeddedThumbnails',
-                                 function(fileEntry) {
+                                function(fileEntry) {
     return mediaGalleriesNatives.ExtractEmbeddedThumbnails(fileEntry);
   });
 });

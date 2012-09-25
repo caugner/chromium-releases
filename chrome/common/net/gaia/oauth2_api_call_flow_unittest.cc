@@ -8,16 +8,17 @@
 #include <vector>
 
 #include "base/memory/scoped_ptr.h"
+#include "base/time.h"
 #include "chrome/common/net/gaia/gaia_urls.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
 #include "chrome/common/net/gaia/oauth2_access_token_consumer.h"
 #include "chrome/common/net/gaia/oauth2_access_token_fetcher.h"
 #include "chrome/common/net/gaia/oauth2_api_call_flow.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/public/common/url_fetcher.h"
-#include "content/public/test/test_url_fetcher_factory.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_status_code.h"
+#include "net/url_request/test_url_fetcher_factory.h"
+#include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_fetcher_delegate.h"
 #include "net/url_request/url_fetcher_factory.h"
 #include "net/url_request/url_request.h"
@@ -26,6 +27,8 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 using net::HttpRequestHeaders;
+using net::ScopedURLFetcherFactory;
+using net::TestURLFetcher;
 using net::URLFetcher;
 using net::URLFetcherDelegate;
 using net::URLFetcherFactory;
@@ -192,7 +195,9 @@ TEST_F(OAuth2ApiCallFlowTest, SecondApiCallSucceeds) {
   flow_->OnURLFetchComplete(url_fetcher1);
   TestURLFetcher* url_fetcher2 = SetupApiCall(true, net::HTTP_OK);
   EXPECT_CALL(*flow_, ProcessApiCallSuccess(url_fetcher2));
-  flow_->OnGetTokenSuccess(at);
+  flow_->OnGetTokenSuccess(
+      at,
+      base::Time::Now() + base::TimeDelta::FromMinutes(3600));
   flow_->OnURLFetchComplete(url_fetcher2);
 }
 
@@ -208,7 +213,9 @@ TEST_F(OAuth2ApiCallFlowTest, SecondApiCallFails) {
   flow_->OnURLFetchComplete(url_fetcher1);
   TestURLFetcher* url_fetcher2 = SetupApiCall(false, net::HTTP_UNAUTHORIZED);
   EXPECT_CALL(*flow_, ProcessApiCallFailure(url_fetcher2));
-  flow_->OnGetTokenSuccess(at);
+  flow_->OnGetTokenSuccess(
+      at,
+      base::Time::Now() + base::TimeDelta::FromMinutes(3600));
   flow_->OnURLFetchComplete(url_fetcher2);
 }
 
@@ -238,7 +245,9 @@ TEST_F(OAuth2ApiCallFlowTest, EmptyAccessTokenFirstApiCallSucceeds) {
   TestURLFetcher* url_fetcher = SetupApiCall(true, net::HTTP_OK);
   EXPECT_CALL(*flow_, ProcessApiCallSuccess(url_fetcher));
   flow_->Start();
-  flow_->OnGetTokenSuccess(at);
+  flow_->OnGetTokenSuccess(
+      at,
+      base::Time::Now() + base::TimeDelta::FromMinutes(3600));
   flow_->OnURLFetchComplete(url_fetcher);
 }
 
@@ -252,7 +261,9 @@ TEST_F(OAuth2ApiCallFlowTest, EmptyAccessTokenApiCallFails) {
   TestURLFetcher* url_fetcher = SetupApiCall(false, net::HTTP_BAD_GATEWAY);
   EXPECT_CALL(*flow_, ProcessApiCallFailure(url_fetcher));
   flow_->Start();
-  flow_->OnGetTokenSuccess(at);
+  flow_->OnGetTokenSuccess(
+      at,
+      base::Time::Now() + base::TimeDelta::FromMinutes(3600));
   flow_->OnURLFetchComplete(url_fetcher);
 }
 

@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_SHELL_SHELL_DOWNLOAD_MANAGER_DELEGATE_H_
 #define CONTENT_SHELL_SHELL_DOWNLOAD_MANAGER_DELEGATE_H_
-#pragma once
 
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
@@ -22,8 +21,10 @@ class ShellDownloadManagerDelegate
 
   void SetDownloadManager(DownloadManager* manager);
 
-  virtual bool ShouldStartDownload(int32 download_id) OVERRIDE;
-  virtual void ChooseDownloadPath(DownloadItem* item) OVERRIDE;
+  virtual void Shutdown() OVERRIDE;
+  virtual bool DetermineDownloadTarget(
+      DownloadItem* download,
+      const DownloadTargetCallback& callback) OVERRIDE;
 
  private:
   friend class base::RefCountedThreadSafe<ShellDownloadManagerDelegate>;
@@ -31,9 +32,11 @@ class ShellDownloadManagerDelegate
   virtual ~ShellDownloadManagerDelegate();
 
   void GenerateFilename(int32 download_id,
+                        const DownloadTargetCallback& callback,
                         const FilePath& generated_name);
-  void RestartDownload(int32 download_id,
-                       const FilePath& suggested_path);
+  void ChooseDownloadPath(int32 download_id,
+                          const DownloadTargetCallback& callback,
+                          const FilePath& suggested_path);
 
   DownloadManager* download_manager_;
 

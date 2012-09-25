@@ -13,7 +13,6 @@
 #include "base/threading/sequenced_worker_pool.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/mock_cryptohome_library.h"
-#include "chrome/browser/chromeos/cros/mock_library_loader.h"
 #include "chrome/browser/chromeos/cryptohome/mock_async_method_caller.h"
 #include "chrome/browser/chromeos/input_method/mock_input_method_manager.h"
 #include "chrome/browser/chromeos/login/authenticator.h"
@@ -36,7 +35,7 @@
 #include "chromeos/dbus/mock_session_manager_client.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/test/test_browser_thread.h"
-#include "content/public/test/test_url_fetcher_factory.h"
+#include "net/url_request/test_url_fetcher_factory.h"
 #include "net/url_request/url_fetcher_delegate.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_status.h"
@@ -159,10 +158,6 @@ class LoginUtilsTest : public testing::Test,
     CrosLibrary::TestApi* test_api = CrosLibrary::Get()->GetTestApi();
     ASSERT_TRUE(test_api);
 
-    MockLibraryLoader* loader = new MockLibraryLoader();
-    ON_CALL(*loader, Load(_)).WillByDefault(Return(true));
-    test_api->SetLibraryLoader(loader, true);
-
     cryptohome_ = new MockCryptohomeLibrary();
     EXPECT_CALL(*cryptohome_, InstallAttributesIsReady())
         .WillRepeatedly(Return(true));
@@ -172,8 +167,6 @@ class LoginUtilsTest : public testing::Test,
         .WillRepeatedly(Return(true));
     EXPECT_CALL(*cryptohome_, TpmIsEnabled())
         .WillRepeatedly(Return(false));
-    EXPECT_CALL(*cryptohome_, IsMounted())
-        .WillRepeatedly(Return(true));
     EXPECT_CALL(*cryptohome_, InstallAttributesSet(kAttributeOwned, kTrue))
         .WillRepeatedly(Return(true));
     EXPECT_CALL(*cryptohome_, InstallAttributesSet(kAttributeOwner,
@@ -314,8 +307,8 @@ class LoginUtilsTest : public testing::Test,
     RunAllPending();
   }
 
-  TestURLFetcher* PrepareOAuthFetcher(const std::string& expected_url) {
-    TestURLFetcher* fetcher = test_url_fetcher_factory_.GetFetcherByID(0);
+  net::TestURLFetcher* PrepareOAuthFetcher(const std::string& expected_url) {
+    net::TestURLFetcher* fetcher = test_url_fetcher_factory_.GetFetcherByID(0);
     EXPECT_TRUE(fetcher);
     EXPECT_TRUE(fetcher->delegate());
     EXPECT_TRUE(StartsWithASCII(fetcher->GetOriginalURL().spec(),
@@ -327,10 +320,10 @@ class LoginUtilsTest : public testing::Test,
     return fetcher;
   }
 
-  TestURLFetcher* PrepareDMServiceFetcher(
+  net::TestURLFetcher* PrepareDMServiceFetcher(
       const std::string& expected_url,
       const em::DeviceManagementResponse& response) {
-    TestURLFetcher* fetcher = test_url_fetcher_factory_.GetFetcherByID(0);
+    net::TestURLFetcher* fetcher = test_url_fetcher_factory_.GetFetcherByID(0);
     EXPECT_TRUE(fetcher);
     EXPECT_TRUE(fetcher->delegate());
     EXPECT_TRUE(StartsWithASCII(fetcher->GetOriginalURL().spec(),
@@ -345,7 +338,7 @@ class LoginUtilsTest : public testing::Test,
     return fetcher;
   }
 
-  TestURLFetcher* PrepareDMRegisterFetcher() {
+  net::TestURLFetcher* PrepareDMRegisterFetcher() {
     em::DeviceManagementResponse response;
     em::DeviceRegisterResponse* register_response =
         response.mutable_register_response();
@@ -355,7 +348,7 @@ class LoginUtilsTest : public testing::Test,
     return PrepareDMServiceFetcher(kDMRegisterRequest, response);
   }
 
-  TestURLFetcher* PrepareDMPolicyFetcher() {
+  net::TestURLFetcher* PrepareDMPolicyFetcher() {
     em::DeviceManagementResponse response;
     response.mutable_policy_response()->add_response();
     return PrepareDMServiceFetcher(kDMPolicyRequest, response);
@@ -376,7 +369,7 @@ class LoginUtilsTest : public testing::Test,
 
   MockDBusThreadManager mock_dbus_thread_manager_;
   input_method::MockInputMethodManager mock_input_method_manager_;
-  TestURLFetcherFactory test_url_fetcher_factory_;
+  net::TestURLFetcherFactory test_url_fetcher_factory_;
 
   cryptohome::MockAsyncMethodCaller* mock_async_method_caller_;
 
@@ -399,8 +392,7 @@ class LoginUtilsBlockingLoginTest
 
 TEST_F(LoginUtilsTest, NormalLoginDoesntBlock) {
   UserManager* user_manager = UserManager::Get();
-  ASSERT_TRUE(!user_manager->IsUserLoggedIn() ||
-              user_manager->IsLoggedInAsStub());
+  ASSERT_TRUE(!user_manager->IsUserLoggedIn());
   EXPECT_FALSE(connector_->IsEnterpriseManaged());
   EXPECT_FALSE(prepared_profile_);
 
@@ -408,23 +400,20 @@ TEST_F(LoginUtilsTest, NormalLoginDoesntBlock) {
   PrepareProfile(kUsername);
 
   EXPECT_TRUE(prepared_profile_);
-  ASSERT_TRUE(user_manager->IsUserLoggedIn() &&
-              !user_manager->IsLoggedInAsStub());
+  ASSERT_TRUE(user_manager->IsUserLoggedIn());
   EXPECT_EQ(kUsername, user_manager->GetLoggedInUser().email());
 }
 
 TEST_F(LoginUtilsTest, EnterpriseLoginDoesntBlockForNormalUser) {
   UserManager* user_manager = UserManager::Get();
-  ASSERT_TRUE(!user_manager->IsUserLoggedIn() ||
-              user_manager->IsLoggedInAsStub());
+  ASSERT_TRUE(!user_manager->IsUserLoggedIn());
   EXPECT_FALSE(connector_->IsEnterpriseManaged());
   EXPECT_FALSE(prepared_profile_);
 
   // Enroll the device.
   LockDevice(kUsername);
 
-  ASSERT_TRUE(!user_manager->IsUserLoggedIn() ||
-              user_manager->IsLoggedInAsStub());
+  ASSERT_TRUE(!user_manager->IsUserLoggedIn());
   EXPECT_TRUE(connector_->IsEnterpriseManaged());
   EXPECT_EQ(kDomain, connector_->GetEnterpriseDomain());
   EXPECT_FALSE(prepared_profile_);
@@ -433,23 +422,20 @@ TEST_F(LoginUtilsTest, EnterpriseLoginDoesntBlockForNormalUser) {
   PrepareProfile(kUsernameOtherDomain);
 
   EXPECT_TRUE(prepared_profile_);
-  ASSERT_TRUE(user_manager->IsUserLoggedIn() &&
-              !user_manager->IsLoggedInAsStub());
+  ASSERT_TRUE(user_manager->IsUserLoggedIn());
   EXPECT_EQ(kUsernameOtherDomain, user_manager->GetLoggedInUser().email());
 }
 
 TEST_P(LoginUtilsBlockingLoginTest, EnterpriseLoginBlocksForEnterpriseUser) {
   UserManager* user_manager = UserManager::Get();
-  ASSERT_TRUE(!user_manager->IsUserLoggedIn() ||
-              user_manager->IsLoggedInAsStub());
+  ASSERT_TRUE(!user_manager->IsUserLoggedIn());
   EXPECT_FALSE(connector_->IsEnterpriseManaged());
   EXPECT_FALSE(prepared_profile_);
 
   // Enroll the device.
   LockDevice(kUsername);
 
-  ASSERT_TRUE(!user_manager->IsUserLoggedIn() ||
-              user_manager->IsLoggedInAsStub());
+  ASSERT_TRUE(!user_manager->IsUserLoggedIn());
   EXPECT_TRUE(connector_->IsEnterpriseManaged());
   EXPECT_EQ(kDomain, connector_->GetEnterpriseDomain());
   EXPECT_FALSE(prepared_profile_);
@@ -458,11 +444,10 @@ TEST_P(LoginUtilsBlockingLoginTest, EnterpriseLoginBlocksForEnterpriseUser) {
   PrepareProfile(kUsername);
 
   EXPECT_FALSE(prepared_profile_);
-  ASSERT_TRUE(user_manager->IsUserLoggedIn() &&
-              !user_manager->IsLoggedInAsStub());
+  ASSERT_TRUE(user_manager->IsUserLoggedIn());
 
   GaiaUrls* gaia_urls = GaiaUrls::GetInstance();
-  TestURLFetcher* fetcher;
+  net::TestURLFetcher* fetcher;
 
   // |steps| is the test parameter, and is the number of successful fetches.
   // The first incomplete fetch will fail. In any case, the profile creation
@@ -514,7 +499,7 @@ TEST_P(LoginUtilsBlockingLoginTest, EnterpriseLoginBlocksForEnterpriseUser) {
     EXPECT_FALSE(prepared_profile_);
 
     // Make the current fetcher fail.
-    TestURLFetcher* fetcher = test_url_fetcher_factory_.GetFetcherByID(0);
+    net::TestURLFetcher* fetcher = test_url_fetcher_factory_.GetFetcherByID(0);
     EXPECT_TRUE(fetcher);
     EXPECT_TRUE(fetcher->delegate());
     fetcher->set_url(fetcher->GetOriginalURL());

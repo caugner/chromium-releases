@@ -1,10 +1,10 @@
 {
-  'TOOLS': ['newlib', 'glibc', 'pnacl'],
+  'TOOLS': ['newlib', 'pnacl'],
   'TARGETS': [
     {
-      'NAME' : 'tumbler',
-      'TYPE' : 'main',
-      'SOURCES' : [
+      'NAME': 'fullscreen_tumbler',
+      'TYPE': 'main',
+      'SOURCES': [
         'callback.h',
         'cube.cc',
         'cube.h',
@@ -21,7 +21,7 @@
         'tumbler.h',
         'tumbler_module.cc'
       ],
-      'LDFLAGS': ['$(NACL_LDFLAGS)', '-lppapi_gles2']
+      'LIBS': ['ppapi_gles2', 'ppapi_cpp', 'ppapi', 'pthread']
     }
   ],
   'DATA': [

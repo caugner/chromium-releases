@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_OMNIBOX_OMNIBOX_VIEW_WIN_H_
 #define CHROME_BROWSER_UI_VIEWS_OMNIBOX_OMNIBOX_VIEW_WIN_H_
-#pragma once
 
 #include <atlbase.h>
 #include <atlapp.h>
@@ -16,19 +15,18 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/win/scoped_comptr.h"
-#include "chrome/browser/autocomplete/autocomplete.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/browser/ui/toolbar/toolbar_model.h"
-#include "chrome/browser/ui/views/autocomplete/autocomplete_popup_contents_view.h"
+#include "chrome/browser/ui/views/omnibox/omnibox_popup_contents_view.h"
 #include "ui/base/models/simple_menu_model.h"
 #include "ui/base/win/extra_sdk_defines.h"
 #include "ui/gfx/font.h"
 #include "webkit/glue/window_open_disposition.h"
 
-class AutocompleteEditController;
-class AutocompleteEditModel;
-class AutocompletePopupView;
 class LocationBarView;
+class OmniboxEditController;
+class OmniboxEditModel;
+class OmniboxPopupView;
 
 namespace views {
 class MenuRunner;
@@ -61,12 +59,13 @@ class OmniboxViewWin
 
   DECLARE_WND_CLASS(L"Chrome_OmniboxView");
 
-  OmniboxViewWin(AutocompleteEditController* controller,
+  OmniboxViewWin(OmniboxEditController* controller,
                  ToolbarModel* toolbar_model,
                  LocationBarView* parent_view,
                  CommandUpdater* command_updater,
                  bool popup_window_mode,
-                 views::View* location_bar);
+                 views::View* location_bar,
+                 views::View* popup_parent_view);
   ~OmniboxViewWin();
 
   // Gets the relative window for the specified native view.
@@ -76,8 +75,8 @@ class OmniboxViewWin
   views::View* parent_view() const;
 
   // OmniboxView:
-  virtual AutocompleteEditModel* model() OVERRIDE { return model_.get(); }
-  virtual const AutocompleteEditModel* model() const OVERRIDE {
+  virtual OmniboxEditModel* model() OVERRIDE { return model_.get(); }
+  virtual const OmniboxEditModel* model() const OVERRIDE {
     return model_.get();
   }
   virtual void SaveStateToTab(content::WebContents* tab) OVERRIDE;
@@ -143,11 +142,6 @@ class OmniboxViewWin
 
   // Inserts the text at the specified position.
   void InsertText(int position, const string16& text);
-
-  // Invokes CanPasteAndGo with the specified text, and if successful navigates
-  // to the appropriate URL. The behavior of this is the same as if the user
-  // typed in the specified text and pressed enter.
-  void PasteAndGo(const string16& text);
 
   void set_force_hidden(bool force_hidden) { force_hidden_ = force_hidden; }
 
@@ -365,9 +359,6 @@ class OmniboxViewWin
   // Internally invoked whenever the text changes in some way.
   void TextChanged();
 
-  // Determines whether the user can "paste and go", given the specified text.
-  bool CanPasteAndGo(const string16& text) const;
-
   // Getter for the text_object_model_.  Note that the pointer returned here is
   // only valid as long as the AutocompleteEdit is still alive.  Also, if the
   // underlying call fails, this may return NULL.
@@ -406,11 +397,11 @@ class OmniboxViewWin
   // Common implementation for performing a drop on the edit view.
   int OnPerformDropImpl(const views::DropTargetEvent& event, bool in_drag);
 
-  scoped_ptr<AutocompleteEditModel> model_;
+  scoped_ptr<OmniboxEditModel> model_;
 
-  scoped_ptr<AutocompletePopupView> popup_view_;
+  scoped_ptr<OmniboxPopupView> popup_view_;
 
-  AutocompleteEditController* controller_;
+  OmniboxEditController* controller_;
 
   // The parent view for the edit, used to align the popup and for
   // accessibility.

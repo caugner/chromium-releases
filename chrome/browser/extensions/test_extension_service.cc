@@ -22,7 +22,8 @@ const ExtensionSet* TestExtensionService::disabled_extensions() const {
   return NULL;
 }
 
-PendingExtensionManager* TestExtensionService::pending_extension_manager() {
+extensions::PendingExtensionManager*
+TestExtensionService::pending_extension_manager() {
   ADD_FAILURE();
   return NULL;
 }
@@ -31,7 +32,7 @@ bool TestExtensionService::UpdateExtension(
     const std::string& id,
     const FilePath& path,
     const GURL& download_url,
-    CrxInstaller** out_crx_installer) {
+    extensions::CrxInstaller** out_crx_installer) {
   ADD_FAILURE();
   return false;
 }
@@ -73,30 +74,30 @@ void TestExtensionService::CheckForUpdatesSoon() {
   ADD_FAILURE();
 }
 
-SyncError TestExtensionService::MergeDataAndStartSyncing(
-    syncable::ModelType type,
-    const SyncDataList& initial_sync_data,
-    scoped_ptr<SyncChangeProcessor> sync_processor,
-    scoped_ptr<SyncErrorFactory> sync_error_factory) {
+syncer::SyncError TestExtensionService::MergeDataAndStartSyncing(
+    syncer::ModelType type,
+    const syncer::SyncDataList& initial_sync_data,
+    scoped_ptr<syncer::SyncChangeProcessor> sync_processor,
+    scoped_ptr<syncer::SyncErrorFactory> sync_error_factory) {
   ADD_FAILURE();
-  return SyncError();
+  return syncer::SyncError();
 }
 
-void TestExtensionService::StopSyncing(syncable::ModelType type) {
+void TestExtensionService::StopSyncing(syncer::ModelType type) {
   ADD_FAILURE();
 }
 
-SyncDataList TestExtensionService::GetAllSyncData(
-    syncable::ModelType type) const {
+syncer::SyncDataList TestExtensionService::GetAllSyncData(
+    syncer::ModelType type) const {
   ADD_FAILURE();
-  return SyncDataList();
+  return syncer::SyncDataList();
 }
 
-SyncError TestExtensionService::ProcessSyncChanges(
+syncer::SyncError TestExtensionService::ProcessSyncChanges(
     const tracked_objects::Location& from_here,
-    const SyncChangeList& change_list) {
+    const syncer::SyncChangeList& change_list) {
   ADD_FAILURE();
-  return SyncError();
+  return syncer::SyncError();
 }
 
 bool TestExtensionService::is_ready() {

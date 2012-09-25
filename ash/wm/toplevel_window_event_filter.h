@@ -4,10 +4,10 @@
 
 #ifndef ASH_WM_TOPLEVEL_WINDOW_EVENT_FILTER_H_
 #define ASH_WM_TOPLEVEL_WINDOW_EVENT_FILTER_H_
-#pragma once
 
 #include <set>
 
+#include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "ui/aura/client/window_move_client.h"
@@ -57,7 +57,7 @@ class ASH_EXPORT ToplevelWindowEventFilter :
  protected:
   // Creates a new WindowResizer.
   virtual WindowResizer* CreateWindowResizer(aura::Window* window,
-                                             const gfx::Point& point,
+                                             const gfx::Point& point_in_parent,
                                              int window_component);
 
  private:
@@ -91,6 +91,8 @@ class ASH_EXPORT ToplevelWindowEventFilter :
   int grid_size_;
 
   scoped_ptr<WindowResizer> window_resizer_;
+
+  base::Closure quit_closure_;
 
   DISALLOW_COPY_AND_ASSIGN(ToplevelWindowEventFilter);
 };

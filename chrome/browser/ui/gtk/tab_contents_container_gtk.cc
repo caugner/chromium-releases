@@ -146,7 +146,7 @@ void TabContentsContainerGtk::PackTab(TabContents* tab) {
       gdk_window_lower(content_gdk_window);
   }
 
-  tab->web_contents()->ShowContents();
+  tab->web_contents()->WasShown();
 }
 
 void TabContentsContainerGtk::HideTab(TabContents* tab) {

@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_WEBUI_PREDICTORS_PREDICTORS_HANDLER_H_
 #define CHROME_BROWSER_UI_WEBUI_PREDICTORS_PREDICTORS_HANDLER_H_
-#pragma once
 
 #include "base/compiler_specific.h"
 #include "content/public/browser/web_ui_message_handler.h"
@@ -15,6 +14,7 @@ class ListValue;
 
 namespace predictors {
 class AutocompleteActionPredictor;
+class ResourcePrefetchPredictor;
 }
 
 class Profile;
@@ -33,7 +33,12 @@ class PredictorsHandler : public content::WebUIMessageHandler {
   // calls into JS with the resulting DictionaryValue.
   void RequestAutocompleteActionPredictorDb(const base::ListValue* args);
 
+  // Fetches stats for the ResourcePrefetchPredictor and returns it as a
+  // DictionaryValue to the JS.
+  void RequestResourcePrefetchPredictorDb(const base::ListValue* args);
+
   predictors::AutocompleteActionPredictor* autocomplete_action_predictor_;
+  predictors::ResourcePrefetchPredictor* resource_prefetch_predictor_;
 
   DISALLOW_COPY_AND_ASSIGN(PredictorsHandler);
 };

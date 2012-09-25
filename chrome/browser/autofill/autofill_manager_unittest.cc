@@ -25,6 +25,7 @@
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/profile_sync_service.h"
+#include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/tab_contents/test_tab_contents.h"
@@ -97,11 +98,11 @@ class TestPersonalDataManager : public PersonalDataManager {
   }
 
   void AddProfile(AutofillProfile* profile) {
-    web_profiles_->push_back(profile);
+    web_profiles_.push_back(profile);
   }
 
   void AddCreditCard(CreditCard* credit_card) {
-    credit_cards_->push_back(credit_card);
+    credit_cards_.push_back(credit_card);
   }
 
   virtual void RemoveProfile(const std::string& guid) OVERRIDE {
@@ -121,11 +122,11 @@ class TestPersonalDataManager : public PersonalDataManager {
   }
 
   void ClearAutofillProfiles() {
-    web_profiles_.reset();
+    web_profiles_.clear();
   }
 
   void ClearCreditCards() {
-    credit_cards_.reset();
+    credit_cards_.clear();
   }
 
   void CreateTestCreditCardsYearAndMonth(const char* year, const char* month) {
@@ -135,7 +136,7 @@ class TestPersonalDataManager : public PersonalDataManager {
                                      "4234567890654321", // Visa
                                      month, year);
     credit_card->set_guid("00000000-0000-0000-0000-000000000007");
-    credit_cards_->push_back(credit_card);
+    credit_cards_.push_back(credit_card);
   }
 
  private:
@@ -701,10 +702,6 @@ class AutofillManagerTest : public TabContentsTestHarness {
 
     process()->sink().ClearMessages();
     return true;
-  }
-
-  ProfileSyncService* GetProfileSyncService() {
-    return autofill_manager_->sync_service_;
   }
 
  protected:
@@ -2930,18 +2927,19 @@ TEST_F(AutofillManagerTest, UpdatePasswordSyncState) {
 
   // Sync some things, but not passwords. Shouldn't send anything since
   // password generation is disabled by default.
-  ProfileSyncService* sync_service = GetProfileSyncService();
+  ProfileSyncService* sync_service = ProfileSyncServiceFactory::GetForProfile(
+      profile());
   sync_service->SetSyncSetupCompleted();
-  syncable::ModelTypeSet preferred_set;
-  preferred_set.Put(syncable::EXTENSIONS);
-  preferred_set.Put(syncable::PREFERENCES);
+  syncer::ModelTypeSet preferred_set;
+  preferred_set.Put(syncer::EXTENSIONS);
+  preferred_set.Put(syncer::PREFERENCES);
   sync_service->ChangePreferredDataTypes(preferred_set);
-  syncable::ModelTypeSet new_set = sync_service->GetPreferredDataTypes();
+  syncer::ModelTypeSet new_set = sync_service->GetPreferredDataTypes();
   UpdatePasswordGenerationState(false);
   EXPECT_EQ(0u, autofill_manager_->GetSentStates().size());
 
   // Now sync passwords.
-  preferred_set.Put(syncable::PASSWORDS);
+  preferred_set.Put(syncer::PASSWORDS);
   sync_service->ChangePreferredDataTypes(preferred_set);
   UpdatePasswordGenerationState(false);
   EXPECT_EQ(1u, autofill_manager_->GetSentStates().size());
@@ -2949,7 +2947,7 @@ TEST_F(AutofillManagerTest, UpdatePasswordSyncState) {
   autofill_manager_->ClearSentStates();
 
   // Add some additional synced state. Nothing should be sent.
-  preferred_set.Put(syncable::THEMES);
+  preferred_set.Put(syncer::THEMES);
   sync_service->ChangePreferredDataTypes(preferred_set);
   UpdatePasswordGenerationState(false);
   EXPECT_EQ(0u, autofill_manager_->GetSentStates().size());
@@ -2980,10 +2978,11 @@ TEST_F(AutofillManagerTest, UpdatePasswordGenerationState) {
   // Always set password sync enabled so we can test the behavior of password
   // generation.
   profile()->GetPrefs()->SetBoolean(prefs::kSyncKeepEverythingSynced, false);
-  ProfileSyncService* sync_service = GetProfileSyncService();
+  ProfileSyncService* sync_service = ProfileSyncServiceFactory::GetForProfile(
+      profile());
   sync_service->SetSyncSetupCompleted();
-  syncable::ModelTypeSet preferred_set;
-  preferred_set.Put(syncable::PASSWORDS);
+  syncer::ModelTypeSet preferred_set;
+  preferred_set.Put(syncer::PASSWORDS);
   sync_service->ChangePreferredDataTypes(preferred_set);
 
   // Enabled state remains false, should not sent.

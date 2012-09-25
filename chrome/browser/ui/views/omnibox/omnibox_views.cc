@@ -5,6 +5,7 @@
 #include "chrome/browser/ui/views/omnibox/omnibox_views.h"
 
 #include "base/command_line.h"
+#include "chrome/browser/ui/omnibox/omnibox_edit_controller.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_view_views.h"
 #include "ui/base/ui_base_switches.h"
@@ -32,19 +33,21 @@ OmniboxViewWin* GetOmniboxViewWin(OmniboxView* view) {
 }
 #endif
 
-OmniboxView* CreateOmniboxView(AutocompleteEditController* controller,
+OmniboxView* CreateOmniboxView(OmniboxEditController* controller,
                                ToolbarModel* toolbar_model,
                                Profile* profile,
                                CommandUpdater* command_updater,
                                bool popup_window_mode,
-                               LocationBarView* location_bar) {
+                               LocationBarView* location_bar,
+                               views::View* popup_parent_view) {
 #if defined(OS_WIN) && !defined(USE_AURA)
   if (!UseOmniboxViews())
     return new OmniboxViewWin(controller, toolbar_model, location_bar,
-                              command_updater, popup_window_mode, location_bar);
+                              command_updater, popup_window_mode, location_bar,
+                              popup_parent_view);
 #endif
   OmniboxViewViews* omnibox = new OmniboxViewViews(controller, toolbar_model,
       profile, command_updater, popup_window_mode, location_bar);
-  omnibox->Init();
+  omnibox->Init(popup_parent_view);
   return omnibox;
 }

@@ -18,6 +18,7 @@
             "description": "Information about the frame to retrieve information about.",
             "properties": {
               "tabId": { "type": "integer", "minimum": 0, "description": "The ID of the tab in which the frame is." },
+              "processId": {"type": "integer", "description": "The ID of the process runs the renderer for this tab."},
               "frameId": { "type": "integer", "minimum": 0, "description": "The ID of the frame in the given tab." }
             }
           },
@@ -70,6 +71,10 @@
                       "type": "boolean",
                       "description": "True if the last navigation in this frame was interrupted by an error, i.e. the onErrorOccurred event fired."
                     },
+                    "processId": {
+                      "type": "integer",
+                      "description": "The ID of the process runs the renderer for this tab."
+                    },
                     "frameId": {
                       "type": "integer",
                       "description": "The ID of the frame. 0 indicates that this is the main frame; a positive value indicates the ID of a subframe."
@@ -91,6 +96,11 @@
         "name": "onBeforeNavigate",
         "type": "function",
         "description": "Fired when a navigation is about to occur.",
+        "options": {
+          "supportsFilters": true,
+          "supportsListeners": true,
+          "supportsRules": false
+        },
         "parameters": [
           {
             "type": "object",
@@ -98,7 +108,8 @@
             "properties": {
               "tabId": {"type": "integer", "description": "The ID of the tab in which the navigation is about to occur."},
               "url": {"type": "string"},
-              "frameId": {"type": "integer", "description": "0 indicates the navigation happens in the tab content window; a positive value indicates navigation in a subframe. Frame IDs are unique within a tab."},
+              "processId": {"type": "integer", "description": "The ID of the process runs the renderer for this tab."},
+              "frameId": {"type": "integer", "description": "0 indicates the navigation happens in the tab content window; a positive value indicates navigation in a subframe. Frame IDs are unique for a given tab and process."},
               "timeStamp": {"type": "number", "description": "The time when the browser was about to start the navigation, in milliseconds since the epoch."}
             }
           }
@@ -108,6 +119,11 @@
         "name": "onCommitted",
         "type": "function",
         "description": "Fired when a navigation is committed. The document (and the resources it refers to, such as images and subframes) might still be downloading, but at least part of the document has been received from the server and the browser has decided to switch to the new document.",
+        "options": {
+          "supportsFilters": true,
+          "supportsListeners": true,
+          "supportsRules": false
+        },
         "parameters": [
           {
             "type": "object",
@@ -115,6 +131,7 @@
             "properties": {
               "tabId": {"type": "integer", "description": "The ID of the tab in which the navigation occurs."},
               "url": {"type": "string"},
+              "processId": {"type": "integer", "description": "The ID of the process runs the renderer for this tab."},
               "frameId": {"type": "integer", "description": "0 indicates the navigation happens in the tab content window; a positive value indicates navigation in a subframe. Frame IDs are unique within a tab."},
               "transitionType": {"type": "string", "enum": ["link", "typed", "auto_bookmark", "auto_subframe", "manual_subframe", "generated", "start_page", "form_submit", "reload", "keyword", "keyword_generated"], "description": "Cause of the navigation. The same transition types as defined in the history API are used."},
               "transitionQualifiers": {"type": "array", "description": "A list of transition qualifiers.", "items": {"type": "string", "enum": ["client_redirect", "server_redirect", "forward_back", "from_address_bar"]}},
@@ -127,6 +144,11 @@
         "name": "onDOMContentLoaded",
         "type": "function",
         "description": "Fired when the page's DOM is fully constructed, but the referenced resources may not finish loading.",
+        "options": {
+          "supportsFilters": true,
+          "supportsListeners": true,
+          "supportsRules": false
+        },
         "parameters": [
           {
             "type": "object",
@@ -134,6 +156,7 @@
             "properties": {
               "tabId": {"type": "integer", "description": "The ID of the tab in which the navigation occurs."},
               "url": {"type": "string"},
+              "processId": {"type": "integer", "description": "The ID of the process runs the renderer for this tab."},
               "frameId": {"type": "integer", "description": "0 indicates the navigation happens in the tab content window; a positive value indicates navigation in a subframe. Frame IDs are unique within a tab."},
               "timeStamp": {"type": "number", "description": "The time when the page's DOM was fully constructed, in milliseconds since the epoch."}
             }
@@ -144,6 +167,11 @@
         "name": "onCompleted",
         "type": "function",
         "description": "Fired when a document, including the resources it refers to, is completely loaded and initialized.",
+        "options": {
+          "supportsFilters": true,
+          "supportsListeners": true,
+          "supportsRules": false
+        },
         "parameters": [
           {
             "type": "object",
@@ -151,6 +179,7 @@
             "properties": {
               "tabId": {"type": "integer", "description": "The ID of the tab in which the navigation occurs."},
               "url": {"type": "string"},
+              "processId": {"type": "integer", "description": "The ID of the process runs the renderer for this tab."},
               "frameId": {"type": "integer", "description": "0 indicates the navigation happens in the tab content window; a positive value indicates navigation in a subframe. Frame IDs are unique within a tab."},
               "timeStamp": {"type": "number", "description": "The time when the document finished loading, in milliseconds since the epoch."}
             }
@@ -161,6 +190,11 @@
         "name": "onErrorOccurred",
         "type": "function",
         "description": "Fired when an error occurs and the navigation is aborted. This can happen if either a network error occurred, or the user aborted the navigation.",
+        "options": {
+          "supportsFilters": true,
+          "supportsListeners": true,
+          "supportsRules": false
+        },
         "parameters": [
           {
             "type": "object",
@@ -168,6 +202,7 @@
             "properties": {
               "tabId": {"type": "integer", "description": "The ID of the tab in which the navigation occurs."},
               "url": {"type": "string"},
+              "processId": {"type": "integer", "description": "The ID of the process runs the renderer for this tab."},
               "frameId": {"type": "integer", "description": "0 indicates the navigation happens in the tab content window; a positive value indicates navigation in a subframe. Frame IDs are unique within a tab."},
               "error": {"type": "string", "description": "The error description."},
               "timeStamp": {"type": "number", "description": "The time when the error occurred, in milliseconds since the epoch."}
@@ -179,12 +214,18 @@
         "name": "onCreatedNavigationTarget",
         "type": "function",
         "description": "Fired when a new window, or a new tab in an existing window, is created to host a navigation.",
+        "options": {
+          "supportsFilters": true,
+          "supportsListeners": true,
+          "supportsRules": false
+        },
         "parameters": [
           {
             "type": "object",
             "name": "details",
             "properties": {
               "sourceTabId": {"type": "integer", "description": "The ID of the tab in which the navigation is triggered."},
+              "sourceProcessId": {"type": "integer", "description": "The ID of the process runs the renderer for the source tab."},
               "sourceFrameId": {"type": "integer", "description": "The ID of the frame with sourceTabId in which the navigation is triggered. 0 indicates the main frame."},
               "url": {"type": "string", "description": "The URL to be opened in the new window."},
               "tabId": {"type": "integer", "description": "The ID of the tab in which the url is opened"},
@@ -197,6 +238,11 @@
         "name": "onReferenceFragmentUpdated",
         "type": "function",
         "description": "Fired when the reference fragment of a frame was updated. All future events for that frame will use the updated URL.",
+        "options": {
+          "supportsFilters": true,
+          "supportsListeners": true,
+          "supportsRules": false
+        },
         "parameters": [
           {
             "type": "object",
@@ -204,6 +250,53 @@
             "properties": {
               "tabId": {"type": "integer", "description": "The ID of the tab in which the navigation occurs."},
               "url": {"type": "string"},
+              "processId": {"type": "integer", "description": "The ID of the process runs the renderer for this tab."},
+              "frameId": {"type": "integer", "description": "0 indicates the navigation happens in the tab content window; a positive value indicates navigation in a subframe. Frame IDs are unique within a tab."},
+              "transitionType": {"type": "string", "enum": ["link", "typed", "auto_bookmark", "auto_subframe", "manual_subframe", "generated", "start_page", "form_submit", "reload", "keyword", "keyword_generated"], "description": "Cause of the navigation. The same transition types as defined in the history API are used."},
+              "transitionQualifiers": {"type": "array", "description": "A list of transition qualifiers.", "items": {"type": "string", "enum": ["client_redirect", "server_redirect", "forward_back", "from_address_bar"]}},
+              "timeStamp": {"type": "number", "description": "The time when the navigation was committed, in milliseconds since the epoch."}
+            }
+          }
+        ]
+      },
+      {
+        "name": "onTabReplaced",
+        "type": "function",
+        "description": "Fired when the contents of the tab is replaced by a different (usually previously pre-rendered) tab.",
+        "options": {
+          "supportsFilters": false,
+          "supportsListeners": true,
+          "supportsRules": false
+        },
+        "parameters": [
+          {
+            "type": "object",
+            "name": "details",
+            "properties": {
+              "replacedTabId": {"type": "integer", "description": "The ID of the tab that was replaced."},
+              "tabId": {"type": "integer", "description": "The ID of the tab that replaced the old tab."},
+              "timeStamp": {"type": "number", "description": "The time when the replacement happened, in milliseconds since the epoch."}
+            }
+          }
+        ]
+      },
+      {
+        "name": "onHistoryStateUpdated",
+        "type": "function",
+        "description": "Fired when the frame's history was updated to a new URL. All future events for that frame will use the updated URL.",
+        "options": {
+          "supportsFilters": true,
+          "supportsListeners": true,
+          "supportsRules": false
+        },
+        "parameters": [
+          {
+            "type": "object",
+            "name": "details",
+            "properties": {
+              "tabId": {"type": "integer", "description": "The ID of the tab in which the navigation occurs."},
+              "url": {"type": "string"},
+              "processId": {"type": "integer", "description": "The ID of the process runs the renderer for this tab."},
               "frameId": {"type": "integer", "description": "0 indicates the navigation happens in the tab content window; a positive value indicates navigation in a subframe. Frame IDs are unique within a tab."},
               "transitionType": {"type": "string", "enum": ["link", "typed", "auto_bookmark", "auto_subframe", "manual_subframe", "generated", "start_page", "form_submit", "reload", "keyword", "keyword_generated"], "description": "Cause of the navigation. The same transition types as defined in the history API are used."},
               "transitionQualifiers": {"type": "array", "description": "A list of transition qualifiers.", "items": {"type": "string", "enum": ["client_redirect", "server_redirect", "forward_back", "from_address_bar"]}},

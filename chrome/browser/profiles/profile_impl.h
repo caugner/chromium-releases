@@ -6,7 +6,6 @@
 
 #ifndef CHROME_BROWSER_PROFILES_PROFILE_IMPL_H_
 #define CHROME_BROWSER_PROFILES_PROFILE_IMPL_H_
-#pragma once
 
 #include <string>
 
@@ -22,15 +21,11 @@
 #include "content/public/browser/notification_registrar.h"
 
 class ExtensionNavigationObserver;
-class ExtensionSystem;
 class NetPrefObserver;
 class PrefService;
+class PromoResourceService;
 class SSLConfigServiceManager;
 class VisitedLinkEventListener;
-
-#if defined(ENABLE_PROMO_RESOURCE_SERVICE)
-class PromoResourceService;
-#endif
 
 #if defined(OS_CHROMEOS)
 namespace chromeos {
@@ -42,6 +37,10 @@ class Preferences;
 
 namespace content {
 class SpeechRecognitionPreferences;
+}
+
+namespace extensions {
+class ExtensionSystem;
 }
 
 // The default profile implementation.
@@ -79,16 +78,15 @@ class ProfileImpl : public Profile,
   virtual history::TopSites* GetTopSitesWithoutCreating() OVERRIDE;
   virtual VisitedLinkMaster* GetVisitedLinkMaster() OVERRIDE;
   virtual ExtensionService* GetExtensionService() OVERRIDE;
-  virtual UserScriptMaster* GetUserScriptMaster() OVERRIDE;
+  virtual extensions::UserScriptMaster* GetUserScriptMaster() OVERRIDE;
   virtual ExtensionProcessManager* GetExtensionProcessManager() OVERRIDE;
-  virtual ExtensionEventRouter* GetExtensionEventRouter() OVERRIDE;
+  virtual extensions::EventRouter* GetExtensionEventRouter() OVERRIDE;
   virtual ExtensionSpecialStoragePolicy*
       GetExtensionSpecialStoragePolicy() OVERRIDE;
   virtual FaviconService* GetFaviconService(ServiceAccessType sat) OVERRIDE;
   virtual GAIAInfoUpdateService* GetGAIAInfoUpdateService() OVERRIDE;
   virtual HistoryService* GetHistoryService(ServiceAccessType sat) OVERRIDE;
   virtual HistoryService* GetHistoryServiceWithoutCreating() OVERRIDE;
-  virtual history::ShortcutsBackend* GetShortcutsBackend() OVERRIDE;
   virtual policy::PolicyService* GetPolicyService() OVERRIDE;
   virtual PrefService* GetPrefs() OVERRIDE;
   virtual PrefService* GetOffTheRecordPrefs() OVERRIDE;
@@ -104,7 +102,6 @@ class ProfileImpl : public Profile,
   virtual base::Time GetStartTime() const OVERRIDE;
   virtual void MarkAsCleanShutdown() OVERRIDE;
   virtual void InitPromoResources() OVERRIDE;
-  virtual void InitRegisteredProtocolHandlers() OVERRIDE;
   virtual FilePath last_selected_directory() OVERRIDE;
   virtual void set_last_selected_directory(const FilePath& path) OVERRIDE;
   virtual chrome_browser_net::Predictor* GetNetworkPredictor() OVERRIDE;
@@ -147,9 +144,6 @@ class ProfileImpl : public Profile,
   void DoFinalInit(bool is_new_profile);
 
   void InitHostZoomMap();
-
-  // The installation of any pre-defined protocol handlers.
-  void InstallDefaultProtocolHandlers();
 
   // Does final prefs initialization and calls Init().
   void OnPrefsLoaded(bool success);
@@ -208,15 +202,8 @@ class ProfileImpl : public Profile,
   scoped_refptr<ExtensionSpecialStoragePolicy>
       extension_special_storage_policy_;
   scoped_ptr<NetPrefObserver> net_pref_observer_;
-
-#if defined(ENABLE_PROMO_RESOURCE_SERVICE)
   scoped_refptr<PromoResourceService> promo_resource_service_;
-#endif
-
-  scoped_refptr<ProtocolHandlerRegistry> protocol_handler_registry_;
-
   scoped_ptr<SSLConfigServiceManager> ssl_config_service_manager_;
-
   scoped_refptr<HostContentSettingsMap> host_content_settings_map_;
   scoped_refptr<content::GeolocationPermissionContext>
       geolocation_permission_context_;

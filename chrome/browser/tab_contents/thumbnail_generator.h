@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_TAB_CONTENTS_THUMBNAIL_GENERATOR_H_
 #define CHROME_BROWSER_TAB_CONTENTS_THUMBNAIL_GENERATOR_H_
-#pragma once
 
 #include <map>
 #include <utility>
@@ -56,14 +55,6 @@ class ThumbnailGenerator : public content::NotificationObserver,
     kTallerThanWide,
     // The source and destination aspect ratios are identical.
     kNotClipped,
-  };
-
-  // Bitmasks of options for generating a thumbnail.
-  enum ThumbnailOptions {
-    // No options.
-    kNoOptions = 0,
-    // Request a clipped thumbnail with the aspect ratio preserved.
-    kClippedThumbnail = 1 << 0,
   };
 
   // This class will do nothing until you call StartThumbnailing.
@@ -130,7 +121,8 @@ class ThumbnailGenerator : public content::NotificationObserver,
                                     const GURL& url);
 
   // content::WebContentsObserver overrides.
-  virtual void DidStartLoading() OVERRIDE;
+  virtual void DidStartLoading(
+      content::RenderViewHost* render_view_host) OVERRIDE;
   virtual void StopNavigation() OVERRIDE;
 
  private:
@@ -139,14 +131,22 @@ class ThumbnailGenerator : public content::NotificationObserver,
       int tag,
       const gfx::Size& size);
 
-  // Asynchronously updates the thumbnail of the given tab. This must be called
-  // on the UI thread.
+  // Asynchronously updates the thumbnail of the given tab. The caller must
+  // ensure that |web_contents| outlives ThumbnailGenerator so that the
+  // asynchronous callback can accesses |web_contents|. This must be called on
+  // the UI thread.
   void AsyncUpdateThumbnail(content::WebContents* web_contents);
 
   // Called when the bitmap for generating a thumbnail is ready after the
   // AsyncUpdateThumbnail invocation. This runs on the UI thread.
-  void AsyncUpdateThumbnailFinish(
-      base::WeakPtr<content::WebContents> web_contents,
+  void UpdateThumbnailWithBitmap(
+      content::WebContents* web_contents,
+      const SkBitmap& bitmap);
+
+  // Called when the canvas for generating a thumbnail is ready after the
+  // AsyncUpdateThumbnail invocation. This runs on the UI thread.
+  void UpdateThumbnailWithCanvas(
+      content::WebContents* web_contents,
       skia::PlatformCanvas* temp_canvas,
       bool result);
 
@@ -174,8 +174,6 @@ class ThumbnailGenerator : public content::NotificationObserver,
   bool load_interrupted_;
 
   base::WeakPtrFactory<ThumbnailGenerator> weak_factory_;
-  scoped_ptr<base::WeakPtrFactory<content::WebContents> >
-      web_contents_weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ThumbnailGenerator);
 };

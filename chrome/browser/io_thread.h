@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_IO_THREAD_H_
 #define CHROME_BROWSER_IO_THREAD_H_
-#pragma once
 
 #include <string>
 
@@ -20,13 +19,17 @@
 #include "net/base/network_change_notifier.h"
 
 class ChromeNetLog;
-class ExtensionEventRouterForwarder;
 class PrefProxyConfigTrackerImpl;
 class PrefService;
 class SystemURLRequestContextGetter;
 
 namespace chrome_browser_net {
+class CacheStats;
 class HttpPipeliningCompatibilityClient;
+}
+
+namespace extensions {
+class EventRouterForwarder;
 }
 
 namespace net {
@@ -105,16 +108,17 @@ class IOThread : public content::BrowserThreadDelegate {
     // between |proxy_script_fetcher_context| and |system_request_context|.
     scoped_refptr<net::CookieStore> system_cookie_store;
     scoped_ptr<net::ServerBoundCertService> system_server_bound_cert_service;
-    scoped_refptr<ExtensionEventRouterForwarder>
+    scoped_refptr<extensions::EventRouterForwarder>
         extension_event_router_forwarder;
     scoped_ptr<chrome_browser_net::HttpPipeliningCompatibilityClient>
         http_pipelining_compatibility_client;
+    scoped_ptr<chrome_browser_net::CacheStats> cache_stats;
   };
 
   // |net_log| must either outlive the IOThread or be NULL.
   IOThread(PrefService* local_state,
            ChromeNetLog* net_log,
-           ExtensionEventRouterForwarder* extension_event_router_forwarder);
+           extensions::EventRouterForwarder* extension_event_router_forwarder);
 
   virtual ~IOThread();
 
@@ -169,9 +173,9 @@ class IOThread : public content::BrowserThreadDelegate {
   // threads during shutdown, but is used most frequently on the IOThread.
   ChromeNetLog* net_log_;
 
-  // The ExtensionEventRouterForwarder allows for sending events to extensions
-  // from the IOThread.
-  ExtensionEventRouterForwarder* extension_event_router_forwarder_;
+  // The extensions::EventRouterForwarder allows for sending events to
+  // extensions from the IOThread.
+  extensions::EventRouterForwarder* extension_event_router_forwarder_;
 
   // These member variables are basically global, but their lifetimes are tied
   // to the IOThread.  IOThread owns them all, despite not using scoped_ptr.

@@ -32,6 +32,10 @@
 #include "ui/gfx/rect.h"
 #include "ui/gfx/skbitmap_operations.h"
 
+#if defined(OS_WIN)
+#include "base/win/windows_version.h"
+#endif
+
 // Overview
 // --------
 // This class provides current thumbnails for tabs. The simplest operation is
@@ -93,7 +97,6 @@ SkBitmap CreateThumbnail(
     const SkBitmap& bmp_with_scrollbars,
     int desired_width,
     int desired_height,
-    int options,
     ThumbnailGenerator::ClipResult* clip_result) {
   base::TimeTicks begin_compute_thumbnail = base::TimeTicks::Now();
 
@@ -105,46 +108,32 @@ SkBitmap CreateThumbnail(
         std::max(1, bmp_with_scrollbars.height() - 15) };
   SkBitmap bmp;
   bmp_with_scrollbars.extractSubset(&bmp, scrollbarless_rect);
-  SkBitmap result;
-  // Check if a clipped thumbnail is requested.
-  if (options & ThumbnailGenerator::kClippedThumbnail) {
-    SkBitmap clipped_bitmap = ThumbnailGenerator::GetClippedBitmap(
-        bmp, desired_width, desired_height, clip_result);
 
-    // Need to resize it to the size we want, so downsample until it's
-    // close, and let the caller make it the exact size if desired.
-    result = SkBitmapOperations::DownsampleByTwoUntilSize(
-        clipped_bitmap, desired_width, desired_height);
+  SkBitmap clipped_bitmap = ThumbnailGenerator::GetClippedBitmap(
+      bmp, desired_width, desired_height, clip_result);
+
+  // Need to resize it to the size we want, so downsample until it's
+  // close, and let the caller make it the exact size if desired.
+  SkBitmap result = SkBitmapOperations::DownsampleByTwoUntilSize(
+      clipped_bitmap, desired_width, desired_height);
 #if !defined(USE_AURA)
-    // This is a bit subtle. SkBitmaps are refcounted, but the magic
-    // ones in PlatformCanvas can't be assigned to SkBitmap with proper
-    // refcounting.  If the bitmap doesn't change, then the downsampler
-    // will return the input bitmap, which will be the reference to the
-    // weird PlatformCanvas one insetad of a regular one. To get a
-    // regular refcounted bitmap, we need to copy it.
-    //
-    // On Aura, the PlatformCanvas is platform-independent and does not have
-    // any native platform resources that can't be refounted, so this issue does
-    // not occur.
-    //
-    // Note that GetClippedBitmap() does extractSubset() but it won't copy
-    // the pixels, hence we check result size == clipped_bitmap size here.
-    if (clipped_bitmap.width() == result.width() &&
-        clipped_bitmap.height() == result.height())
-      clipped_bitmap.copyTo(&result, SkBitmap::kARGB_8888_Config);
+  // This is a bit subtle. SkBitmaps are refcounted, but the magic
+  // ones in PlatformCanvas can't be assigned to SkBitmap with proper
+  // refcounting.  If the bitmap doesn't change, then the downsampler
+  // will return the input bitmap, which will be the reference to the
+  // weird PlatformCanvas one insetad of a regular one. To get a
+  // regular refcounted bitmap, we need to copy it.
+  //
+  // On Aura, the PlatformCanvas is platform-independent and does not have
+  // any native platform resources that can't be refounted, so this issue does
+  // not occur.
+  //
+  // Note that GetClippedBitmap() does extractSubset() but it won't copy
+  // the pixels, hence we check result size == clipped_bitmap size here.
+  if (clipped_bitmap.width() == result.width() &&
+      clipped_bitmap.height() == result.height())
+    clipped_bitmap.copyTo(&result, SkBitmap::kARGB_8888_Config);
 #endif
-  } else {
-    // Need to resize it to the size we want, so downsample until it's
-    // close, and let the caller make it the exact size if desired.
-    result = SkBitmapOperations::DownsampleByTwoUntilSize(
-        bmp, desired_width, desired_height);
-#if !defined(USE_AURA)
-    // See comments above about why we are making copy here.
-    if (bmp.width() == result.width() &&
-        bmp.height() == result.height())
-      bmp.copyTo(&result, SkBitmap::kARGB_8888_Config);
-#endif
-  }
 
   HISTOGRAM_TIMES(kThumbnailHistogramName,
                   base::TimeTicks::Now() - begin_compute_thumbnail);
@@ -181,7 +170,8 @@ void ThumbnailGenerator::StartThumbnailing(WebContents* web_contents) {
     // subclass, RenderViewHost when it is in a tab. We don't make thumbnails
     // for RenderViewHosts that aren't in tabs, or RenderWidgetHosts that
     // aren't views like select popups.
-    registrar_.Add(this, content::NOTIFICATION_RENDER_VIEW_HOST_CREATED_FOR_TAB,
+    registrar_.Add(this,
+                   content::NOTIFICATION_WEB_CONTENTS_RENDER_VIEW_HOST_CREATED,
                    content::Source<WebContents>(web_contents));
     registrar_.Add(this, content::NOTIFICATION_WEB_CONTENTS_DISCONNECTED,
                    content::Source<WebContents>(web_contents));
@@ -313,7 +303,7 @@ void ThumbnailGenerator::Observe(int type,
                                  const content::NotificationSource& source,
                                  const content::NotificationDetails& details) {
   switch (type) {
-    case content::NOTIFICATION_RENDER_VIEW_HOST_CREATED_FOR_TAB: {
+    case content::NOTIFICATION_WEB_CONTENTS_RENDER_VIEW_HOST_CREATED: {
       // Install our observer for all new RVHs.
       RenderViewHost* renderer =
           content::Details<RenderViewHost>(details).ptr();
@@ -369,9 +359,6 @@ void ThumbnailGenerator::WebContentsDisconnected(WebContents* contents) {
     }
     ++iterator;
   }
-
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-  web_contents_weak_factory_.reset(NULL);
 }
 
 double ThumbnailGenerator::CalculateBoringScore(const SkBitmap& bitmap) {
@@ -439,13 +426,6 @@ SkBitmap ThumbnailGenerator::GetClippedBitmap(const SkBitmap& bitmap,
 
 void ThumbnailGenerator::UpdateThumbnailIfNecessary(
     WebContents* web_contents) {
-  content::RenderWidgetHostView* view = web_contents->GetRenderWidgetHostView();
-  if (!view)
-    return;
-  bool surface_available = view->IsSurfaceAvailableForCopy();
-  // Skip if we can't update the thumbnail.
-  if (!surface_available)
-    return;
   // Skip if a pending entry exists. WidgetHidden can be called while navigaing
   // pages and this is not a timing when thumbnails should be generated.
   if (web_contents->GetController().GetPendingEntry())
@@ -495,42 +475,65 @@ void ThumbnailGenerator::AsyncUpdateThumbnail(
   content::RenderWidgetHostView* view = render_widget_host->GetView();
   if (!view)
     return;
+  if (!view->IsSurfaceAvailableForCopy()) {
+#if defined(OS_WIN)
+    // On Windows XP, neither the backing store nor the compositing surface is
+    // available in the browser when accelerated compositing is active, so ask
+    // the renderer to send a snapshot for creating the thumbnail.
+    if (base::win::GetVersion() < base::win::VERSION_VISTA) {
+      gfx::Size view_size =
+          render_widget_host->GetView()->GetViewBounds().size();
+      AskForSnapshot(render_widget_host,
+                     base::Bind(&ThumbnailGenerator::UpdateThumbnailWithBitmap,
+                                weak_factory_.GetWeakPtr(),
+                                web_contents),
+                     view_size,
+                     view_size);
+    }
+#endif
+    return;
+  }
 
-  const gfx::Size copy_size =
+  gfx::Size copy_size =
       GetCopySizeForThumbnail(view->GetViewBounds().size(),
                               gfx::Size(kThumbnailWidth, kThumbnailHeight));
   skia::PlatformCanvas* temp_canvas = new skia::PlatformCanvas;
-  web_contents_weak_factory_.reset(
-      new base::WeakPtrFactory<WebContents>(web_contents));
   render_widget_host->CopyFromBackingStore(
-      gfx::Rect(), copy_size, temp_canvas,
-      base::Bind(&ThumbnailGenerator::AsyncUpdateThumbnailFinish,
+      gfx::Rect(),
+      copy_size,
+      base::Bind(&ThumbnailGenerator::UpdateThumbnailWithCanvas,
                  weak_factory_.GetWeakPtr(),
-                 web_contents_weak_factory_->GetWeakPtr(),
-                 base::Owned(temp_canvas)));
+                 web_contents,
+                 base::Owned(temp_canvas)),
+      temp_canvas);
 }
 
-void ThumbnailGenerator::AsyncUpdateThumbnailFinish(
-    base::WeakPtr<WebContents> web_contents,
+void ThumbnailGenerator::UpdateThumbnailWithBitmap(
+    WebContents* web_contents,
+    const SkBitmap& bitmap) {
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  if (bitmap.isNull() || bitmap.empty())
+    return;
+
+  ClipResult clip_result;
+  SkBitmap thumbnail = CreateThumbnail(bitmap,
+                                       kThumbnailWidth,
+                                       kThumbnailHeight,
+                                       &clip_result);
+  UpdateThumbnail(web_contents, thumbnail, clip_result);
+}
+
+void ThumbnailGenerator::UpdateThumbnailWithCanvas(
+    WebContents* web_contents,
     skia::PlatformCanvas* temp_canvas,
     bool succeeded) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-  // The weak pointer can be invalidated by the subsequent AsyncUpdateThumbnail.
-  if (!web_contents.get())
-    return;
-
   if (!succeeded)
     return;
 
   SkBitmap bmp_with_scrollbars =
       skia::GetTopDevice(*temp_canvas)->accessBitmap(false);
-  ClipResult clip_result;
-  SkBitmap thumbnail = CreateThumbnail(bmp_with_scrollbars,
-                                       kThumbnailWidth,
-                                       kThumbnailHeight,
-                                       ThumbnailGenerator::kClippedThumbnail,
-                                       &clip_result);
-  UpdateThumbnail(web_contents.get(), thumbnail, clip_result);
+  UpdateThumbnailWithBitmap(web_contents, bmp_with_scrollbars);
 }
 
 bool ThumbnailGenerator::ShouldUpdateThumbnail(Profile* profile,
@@ -562,7 +565,8 @@ bool ThumbnailGenerator::ShouldUpdateThumbnail(Profile* profile,
   return true;
 }
 
-void ThumbnailGenerator::DidStartLoading() {
+void ThumbnailGenerator::DidStartLoading(
+    content::RenderViewHost* render_view_host) {
   load_interrupted_ = false;
 }
 

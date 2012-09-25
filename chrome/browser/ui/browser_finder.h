@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_BROWSER_FINDER_H_
 #define CHROME_BROWSER_UI_BROWSER_FINDER_H_
-#pragma once
 
 #include "chrome/browser/ui/browser.h"
 #include "ui/gfx/native_widget_types.h"
@@ -37,14 +36,6 @@ Browser* FindOrCreateTabbedBrowser(Profile* profile);
 // additional information.
 Browser* FindAnyBrowser(Profile* profile, bool match_original_profiles);
 
-// Find an existing browser window that can provide the specified type (this
-// uses Browser::CanSupportsWindowFeature, not
-// Browser::SupportsWindowFeature). This searches in the order of last
-// activation. Only browsers that have been active can be returned. Returns
-// NULL if no such browser currently exists.
-Browser* FindBrowserWithFeature(Profile* profile,
-                                Browser::WindowFeature feature);
-
 // Find an existing browser window with the provided profile. Searches in the
 // order of last activation. Only browsers that have been active can be
 // returned. Returns NULL if no such browser currently exists.
@@ -59,15 +50,7 @@ Browser* FindBrowserWithWindow(gfx::NativeWindow window);
 
 // Find the browser containing |web_contents| or NULL if none is found.
 // |web_contents| must not be NULL.
-Browser* FindBrowserWithWebContents(content::WebContents* web_contents);
-
-// Returns the Browser which contains the tab with the given
-// NavigationController, also filling in |index| (if valid) with the tab's index
-// in the tab strip.  Returns NULL if not found.  This call is O(N) in the
-// number of tabs.
-Browser* FindBrowserForController(
-    const content::NavigationController* controller,
-    int* index);
+Browser* FindBrowserWithWebContents(const content::WebContents* web_contents);
 
 // Identical in behavior to BrowserList::GetLastActive(), except that the most
 // recently open browser owned by |profile| is returned. If none exist, returns

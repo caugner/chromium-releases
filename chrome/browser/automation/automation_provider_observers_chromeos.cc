@@ -70,6 +70,8 @@ OOBEWebuiReadyObserver::OOBEWebuiReadyObserver(AutomationProvider* automation)
                    content::NotificationService::AllSources());
     registrar_.Add(this, chrome::NOTIFICATION_LOGIN_WEBUI_LOADED,
                    content::NotificationService::AllSources());
+    registrar_.Add(this, chrome::NOTIFICATION_DEMO_WEBUI_LOADED,
+                   content::NotificationService::AllSources());
   }
 }
 
@@ -79,7 +81,8 @@ void OOBEWebuiReadyObserver::Observe(
     const content::NotificationDetails& details) {
   DCHECK(type == chrome::NOTIFICATION_WIZARD_FIRST_SCREEN_SHOWN ||
          type == chrome::NOTIFICATION_LOGIN_USER_IMAGES_LOADED ||
-         type == chrome::NOTIFICATION_LOGIN_WEBUI_LOADED);
+         type == chrome::NOTIFICATION_LOGIN_WEBUI_LOADED ||
+         type == chrome::NOTIFICATION_DEMO_WEBUI_LOADED);
   OOBEWebuiReady();
 }
 
@@ -515,7 +518,8 @@ void PhotoCaptureObserver::OnCapturingStopped(
 
   // Set up an observer for UserManager (it will delete itself).
   user_manager->AddObserver(this);
-  user_manager->SaveUserImage(user.email(), chromeos::UserImage(photo));
+  user_manager->SaveUserImage(
+      user.email(), chromeos::UserImage::CreateAndEncode(photo));
 }
 
 void PhotoCaptureObserver::LocalStateChanged(

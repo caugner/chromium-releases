@@ -24,7 +24,7 @@ class HeapcheckWrapper(object):
 
   def __init__(self, supp_files):
     self._mode = 'strict'
-    self._timeout = 1200
+    self._timeout = 1800
     self._nocleanup_on_exit = False
     self._suppressions = []
     for fname in supp_files:
@@ -56,6 +56,8 @@ class HeapcheckWrapper(object):
         '/../../third_party/tcmalloc/chromium/src/pprof')
     self.PutEnvAndLog('LD_LIBRARY_PATH',
                       '/usr/lib/debug/:/usr/lib32/debug/')
+    # CHROME_DEVEL_SANDBOX causes problems with heapcheck
+    self.PutEnvAndLog('CHROME_DEVEL_SANDBOX', '');
 
     return common.RunSubprocess(proc, self._timeout)
 

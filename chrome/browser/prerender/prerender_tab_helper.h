@@ -28,7 +28,8 @@ class PrerenderTabHelper : public content::WebContentsObserver {
       const GURL& url,
       const GURL& opener_url,
       content::RenderViewHost* render_view_host) OVERRIDE;
-  virtual void DidStopLoading() OVERRIDE;
+  virtual void DidStopLoading(
+      content::RenderViewHost* render_view_host) OVERRIDE;
   virtual void DidStartProvisionalLoadForFrame(
       int64 frame_id,
       bool is_main_frame,
@@ -59,9 +60,6 @@ class PrerenderTabHelper : public content::WebContentsObserver {
 
   // Returns whether the WebContents being observed was prerendered.
   bool IsPrerendered();
-
-  // TabContents we're created for.
-  TabContents* tab_;
 
   // System time at which the current load was started for the purpose of
   // the perceived page load time (PPLT).

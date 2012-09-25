@@ -16,15 +16,14 @@ namespace extensions {
 
 SettingsSyncProcessor::SettingsSyncProcessor(
     const std::string& extension_id,
-    syncable::ModelType type,
-    SyncChangeProcessor* sync_processor)
+    syncer::ModelType type,
+    syncer::SyncChangeProcessor* sync_processor)
     : extension_id_(extension_id),
       type_(type),
       sync_processor_(sync_processor),
       initialized_(false) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
-  CHECK(type == syncable::EXTENSION_SETTINGS ||
-        type == syncable::APP_SETTINGS);
+  CHECK(type == syncer::EXTENSION_SETTINGS || type == syncer::APP_SETTINGS);
   CHECK(sync_processor);
 }
 
@@ -42,12 +41,12 @@ void SettingsSyncProcessor::Init(const DictionaryValue& initial_state) {
   initialized_ = true;
 }
 
-SyncError SettingsSyncProcessor::SendChanges(
+syncer::SyncError SettingsSyncProcessor::SendChanges(
     const ValueStoreChangeList& changes) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
   CHECK(initialized_) << "Init not called";
 
-  SyncChangeList sync_changes;
+  syncer::SyncChangeList sync_changes;
   std::set<std::string> added_keys;
   std::set<std::string> deleted_keys;
 
@@ -79,9 +78,9 @@ SyncError SettingsSyncProcessor::SendChanges(
   }
 
   if (sync_changes.empty())
-    return SyncError();
+    return syncer::SyncError();
 
-  SyncError error =
+  syncer::SyncError error =
       sync_processor_->ProcessSyncChanges(FROM_HERE, sync_changes);
   if (error.IsSet())
     return error;
@@ -92,7 +91,7 @@ SyncError SettingsSyncProcessor::SendChanges(
     synced_keys_.erase(*i);
   }
 
-  return SyncError();
+  return syncer::SyncError();
 }
 
 void SettingsSyncProcessor::NotifyChanges(const ValueStoreChangeList& changes) {

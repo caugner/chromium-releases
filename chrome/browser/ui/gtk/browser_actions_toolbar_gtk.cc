@@ -15,13 +15,13 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/extensions/api/commands/command_service.h"
 #include "chrome/browser/extensions/api/commands/command_service_factory.h"
-#include "chrome/browser/extensions/extension_browser_event_router.h"
 #include "chrome/browser/extensions/extension_context_menu_model.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/image_loading_tracker.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/restore_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
 #include "chrome/browser/ui/gtk/extensions/extension_popup_gtk.h"
 #include "chrome/browser/ui/gtk/gtk_chrome_button.h"
@@ -40,7 +40,6 @@
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "grit/theme_resources.h"
-#include "grit/theme_resources_standard.h"
 #include "grit/ui_resources.h"
 #include "ui/base/accelerators/accelerator_gtk.h"
 #include "ui/base/gtk/gtk_compat.h"
@@ -93,6 +92,7 @@ using ui::SimpleMenuModel;
 
 class BrowserActionButton : public content::NotificationObserver,
                             public ImageLoadingTracker::Observer,
+                            public ExtensionContextMenuModel::PopupDelegate,
                             public MenuGtk::Delegate {
  public:
   BrowserActionButton(BrowserActionsToolbarGtk* toolbar,
@@ -127,12 +127,6 @@ class BrowserActionButton : public content::NotificationObserver,
                          gfx::Size(Extension::kBrowserActionIconMaxSize,
                                    Extension::kBrowserActionIconMaxSize),
                          ImageLoadingTracker::DONT_CACHE);
-    } else {
-      const SkBitmap* bm =
-          ui::ResourceBundle::GetSharedInstance().GetImageNamed(
-              IDR_EXTENSIONS_FAVICON).ToSkBitmap();
-      default_skbitmap_ = *bm;
-      default_icon_ = gfx::GdkPixbufFromSkBitmap(*bm);
     }
 
     UpdateState();
@@ -163,6 +157,14 @@ class BrowserActionButton : public content::NotificationObserver,
         this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
         content::Source<Profile>(
             toolbar->browser()->profile()->GetOriginalProfile()));
+    registrar_.Add(
+        this, chrome::NOTIFICATION_EXTENSION_COMMAND_ADDED,
+        content::Source<Profile>(
+        toolbar->browser()->profile()->GetOriginalProfile()));
+    registrar_.Add(
+        this, chrome::NOTIFICATION_EXTENSION_COMMAND_REMOVED,
+        content::Source<Profile>(
+        toolbar->browser()->profile()->GetOriginalProfile()));
   }
 
   ~BrowserActionButton() {
@@ -195,6 +197,21 @@ class BrowserActionButton : public content::NotificationObserver,
      case chrome::NOTIFICATION_WINDOW_CLOSED:
       DisconnectBrowserActionPopupAccelerator();
       break;
+     case chrome::NOTIFICATION_EXTENSION_COMMAND_ADDED:
+     case chrome::NOTIFICATION_EXTENSION_COMMAND_REMOVED: {
+      std::pair<const std::string, const std::string>* payload =
+          content::Details<std::pair<const std::string, const std::string> >(
+              details).ptr();
+      if (extension_->id() == payload->first &&
+          payload->second ==
+              extension_manifest_values::kBrowserActionCommandEvent) {
+        if (type == chrome::NOTIFICATION_EXTENSION_COMMAND_ADDED)
+          ConnectBrowserActionPopupAccelerator();
+        else
+          DisconnectBrowserActionPopupAccelerator();
+      }
+      break;
+     }
      default:
       NOTREACHED();
       break;
@@ -205,11 +222,8 @@ class BrowserActionButton : public content::NotificationObserver,
   void OnImageLoaded(const gfx::Image& image,
                      const std::string& extension_id,
                      int index) OVERRIDE {
-    if (!image.IsEmpty()) {
-      default_skbitmap_ = *image.ToSkBitmap();
-      default_icon_ =
-          static_cast<GdkPixbuf*>(g_object_ref(image.ToGdkPixbuf()));
-    }
+    extension_->browser_action()->CacheIcon(
+        extension_->browser_action()->default_icon_path(), image);
     UpdateState();
   }
 
@@ -226,27 +240,18 @@ class BrowserActionButton : public content::NotificationObserver,
     else
       gtk_widget_set_tooltip_text(button(), tooltip.c_str());
 
-    SkBitmap image = extension_->browser_action()->GetIcon(tab_id);
-    if (!image.isNull()) {
-      GdkPixbuf* previous_gdk_icon = tab_specific_icon_;
-      tab_specific_icon_ = gfx::GdkPixbufFromSkBitmap(image);
-      SetImage(tab_specific_icon_);
-      if (previous_gdk_icon)
-        g_object_unref(previous_gdk_icon);
-    } else if (default_icon_) {
-      SetImage(default_icon_);
-    }
+    gfx::Image image = extension_->browser_action()->GetIcon(tab_id);
+    if (!image.IsEmpty())
+      SetImage(image.ToGdkPixbuf());
+    bool enabled = extension_->browser_action()->GetIsVisible(tab_id);
+    gtk_widget_set_sensitive(button(), enabled);
+
     gtk_widget_queue_draw(button());
   }
 
   SkBitmap GetIcon() {
-    const SkBitmap& image = extension_->browser_action()->GetIcon(
-        toolbar_->GetCurrentTabId());
-    if (!image.isNull()) {
-      return image;
-    } else {
-      return default_skbitmap_;
-    }
+    return *extension_->browser_action()->GetIcon(
+        toolbar_->GetCurrentTabId()).ToSkBitmap();
   }
 
   MenuGtk* GetContextMenu() {
@@ -254,7 +259,7 @@ class BrowserActionButton : public content::NotificationObserver,
       return NULL;
 
     context_menu_model_ =
-        new ExtensionContextMenuModel(extension_, toolbar_->browser());
+        new ExtensionContextMenuModel(extension_, toolbar_->browser(), this);
     context_menu_.reset(
         new MenuGtk(this, context_menu_model_.get()));
     return context_menu_.get();
@@ -272,7 +277,8 @@ class BrowserActionButton : public content::NotificationObserver,
       case ExtensionToolbarModel::ACTION_NONE:
         break;
       case ExtensionToolbarModel::ACTION_SHOW_POPUP:
-        ExtensionPopupGtk::Show(popup_url, browser, widget);
+        ExtensionPopupGtk::Show(popup_url, browser, widget,
+                                ExtensionPopupGtk::SHOW);
         break;
     }
   }
@@ -292,6 +298,13 @@ class BrowserActionButton : public content::NotificationObserver,
     // is executed, then stop showing the overflow menu.
     if (toolbar_->overflow_menu_.get())
       toolbar_->overflow_menu_->Cancel();
+  }
+
+  // ExtensionContextMenuModel::PopupDelegate implementation.
+  virtual void InspectPopup(ExtensionAction* action) {
+    GURL popup_url = action->GetPopupUrl(toolbar_->GetCurrentTabId());
+    ExtensionPopupGtk::Show(popup_url, toolbar_->browser(), widget(),
+                            ExtensionPopupGtk::SHOW_AND_INSPECT);
   }
 
   void SetImage(GdkPixbuf* image) {
@@ -377,16 +390,17 @@ class BrowserActionButton : public content::NotificationObserver,
     extensions::CommandService* command_service =
         extensions::CommandServiceFactory::GetForProfile(
             toolbar_->browser()->profile());
-    const extensions::Command* command =
-        command_service->GetBrowserActionCommand(extension_->id(),
-        extensions::CommandService::ACTIVE_ONLY);
-    if (command) {
+    extensions::Command command;
+    if (command_service->GetBrowserActionCommand(extension_->id(),
+        extensions::CommandService::ACTIVE_ONLY,
+        &command,
+        NULL)) {
       // Found the browser action shortcut command, register it.
       keybinding_.reset(new ui::AcceleratorGtk(
-          command->accelerator().key_code(),
-          command->accelerator().IsShiftDown(),
-          command->accelerator().IsCtrlDown(),
-          command->accelerator().IsAltDown()));
+          command.accelerator().key_code(),
+          command.accelerator().IsShiftDown(),
+          command.accelerator().IsCtrlDown(),
+          command.accelerator().IsAltDown()));
 
       gfx::NativeWindow window =
           toolbar_->browser()->window()->GetNativeWindow();
@@ -422,6 +436,11 @@ class BrowserActionButton : public content::NotificationObserver,
       g_object_unref(accel_group_);
       accel_group_ = NULL;
       keybinding_.reset(NULL);
+
+      // We've removed the accelerator, so no need to listen to this anymore.
+      registrar_.Remove(this,
+                        chrome::NOTIFICATION_WINDOW_CLOSED,
+                        content::Source<GtkWindow>(window));
     }
   }
 
@@ -571,8 +590,8 @@ BrowserActionsToolbarGtk::~BrowserActionsToolbarGtk() {
   hbox_.Destroy();
 }
 
-int BrowserActionsToolbarGtk::GetCurrentTabId() {
-  TabContents* active_tab = browser_->GetActiveTabContents();
+int BrowserActionsToolbarGtk::GetCurrentTabId() const {
+  TabContents* active_tab = chrome::GetActiveTabContents(browser_);
   if (!active_tab)
     return -1;
 
@@ -778,7 +797,8 @@ bool BrowserActionsToolbarGtk::IsCommandIdChecked(int command_id) const {
 }
 
 bool BrowserActionsToolbarGtk::IsCommandIdEnabled(int command_id) const {
-  return true;
+  const Extension* extension = model_->GetExtensionByIndex(command_id);
+  return extension->browser_action()->GetIsVisible(GetCurrentTabId());
 }
 
 bool BrowserActionsToolbarGtk::GetAcceleratorForCommandId(
@@ -795,7 +815,8 @@ void BrowserActionsToolbarGtk::ExecuteCommand(int command_id) {
     case ExtensionToolbarModel::ACTION_NONE:
       break;
     case ExtensionToolbarModel::ACTION_SHOW_POPUP:
-      ExtensionPopupGtk::Show(popup_url, browser(), chevron());
+      ExtensionPopupGtk::Show(popup_url, browser(), chevron(),
+                              ExtensionPopupGtk::SHOW);
       break;
   }
 }

@@ -442,7 +442,7 @@ class DnsTransactionImpl : public DnsTransaction,
 
     first_server_index_ = session_->NextFirstServerIndex();
 
-    attempts_.reset();
+    attempts_.clear();
     return MakeAttempt();
   }
 
@@ -504,7 +504,7 @@ class DnsTransactionImpl : public DnsTransaction,
         default:
           // Server failure.
           DCHECK(result.attempt);
-          if (result.attempt != attempts_->back()) {
+          if (result.attempt != attempts_.back()) {
             // This attempt already timed out. Ignore it.
             return AttemptResult(ERR_IO_PENDING, NULL);
           }
@@ -586,4 +586,3 @@ scoped_ptr<DnsTransactionFactory> DnsTransactionFactory::CreateFactory(
 }
 
 }  // namespace net
-

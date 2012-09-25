@@ -10,11 +10,11 @@
 #include <list>
 
 #include "base/callback.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time.h"
 #include "remoting/client/client_config.h"
 #include "remoting/client/chromoting_stats.h"
-#include "remoting/client/chromoting_view.h"
 #include "remoting/protocol/client_stub.h"
 #include "remoting/protocol/clipboard_stub.h"
 #include "remoting/protocol/connection_to_host.h"
@@ -32,6 +32,10 @@ namespace protocol {
 class TransportFactory;
 }  // namespace protocol
 
+class AudioDecodeScheduler;
+class AudioPlayer;
+class ClientContext;
+class ClientUserInterface;
 class RectangleUpdateDecoder;
 
 // TODO(sergeyu): Move VideoStub implementation to RectangleUpdateDecoder.
@@ -41,10 +45,12 @@ class ChromotingClient : public protocol::ConnectionToHost::HostEventCallback,
  public:
   // Objects passed in are not owned by this class.
   ChromotingClient(const ClientConfig& config,
-                   scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+                   ClientContext* client_context,
                    protocol::ConnectionToHost* connection,
-                   ChromotingView* view,
-                   RectangleUpdateDecoder* rectangle_decoder);
+                   ClientUserInterface* user_interface,
+                   RectangleUpdateDecoder* rectangle_decoder,
+                   scoped_ptr<AudioPlayer> audio_player);
+
   virtual ~ChromotingClient();
 
   // Start/stop the client. Must be called on the main thread.
@@ -67,11 +73,12 @@ class ChromotingClient : public protocol::ConnectionToHost::HostEventCallback,
   virtual void OnConnectionState(
       protocol::ConnectionToHost::State state,
       protocol::ErrorCode error) OVERRIDE;
+  virtual void OnConnectionReady(bool ready) OVERRIDE;
 
   // VideoStub implementation.
   virtual void ProcessVideoPacket(scoped_ptr<VideoPacket> packet,
                                   const base::Closure& done) OVERRIDE;
-  virtual int GetPendingPackets() OVERRIDE;
+  virtual int GetPendingVideoPackets() OVERRIDE;
 
  private:
   struct QueuedVideoPacket {
@@ -100,8 +107,11 @@ class ChromotingClient : public protocol::ConnectionToHost::HostEventCallback,
   ClientConfig config_;
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
   protocol::ConnectionToHost* connection_;
-  ChromotingView* view_;
+  ClientUserInterface* user_interface_;
+  // TODO(kxing): Make ChromotingClient own RectangleUpdateDecoder.
   RectangleUpdateDecoder* rectangle_decoder_;
+
+  scoped_ptr<AudioDecodeScheduler> audio_decode_scheduler_;
 
   // If non-NULL, this is called when the client is done.
   base::Closure client_done_;

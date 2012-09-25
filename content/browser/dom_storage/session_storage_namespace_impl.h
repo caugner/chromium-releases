@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_BROWSER_DOM_STORAGE_SESSION_STORAGE_NAMESPACE_IMPL_H_
 #define CONTENT_BROWSER_DOM_STORAGE_SESSION_STORAGE_NAMESPACE_IMPL_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
@@ -36,6 +35,7 @@ class SessionStorageNamespaceImpl
   // content::SessionStorageNamespace implementation.
   virtual int64 id() const OVERRIDE;
   virtual const std::string& persistent_id() const OVERRIDE;
+  virtual void SetShouldPersist(bool should_persist) OVERRIDE;
 
   SessionStorageNamespaceImpl* Clone();
 

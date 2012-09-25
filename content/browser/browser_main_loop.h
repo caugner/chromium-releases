@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_BROWSER_BROWSER_MAIN_LOOP_H_
 #define CONTENT_BROWSER_BROWSER_MAIN_LOOP_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
@@ -28,6 +27,10 @@ namespace media {
 class AudioManager;
 }
 
+namespace media_stream {
+class MediaStreamManager;
+}
+
 namespace net {
 class NetworkChangeNotifier;
 }
@@ -41,9 +44,13 @@ namespace content {
 class BrowserMainParts;
 class BrowserShutdownImpl;
 class BrowserThreadImpl;
-struct MainFunctionParams;
 class ResourceDispatcherHostImpl;
 class WebKitThread;
+struct MainFunctionParams;
+
+#if defined(OS_LINUX)
+class DeviceMonitorLinux;
+#endif
 
 // Implements the main browser loop stages called from BrowserMainRunner.
 // See comments in browser_main_parts.h for additional info.
@@ -73,6 +80,7 @@ class BrowserMainLoop {
 
   // Can be called on any thread.
   static media::AudioManager* GetAudioManager();
+  static media_stream::MediaStreamManager* GetMediaStreamManager();
 
  private:
   // For ShutdownThreadsAndCleanUp.
@@ -96,10 +104,13 @@ class BrowserMainLoop {
   scoped_ptr<HighResolutionTimerManager> hi_res_timer_manager_;
   scoped_ptr<net::NetworkChangeNotifier> network_change_notifier_;
   scoped_ptr<media::AudioManager> audio_manager_;
+  scoped_ptr<media_stream::MediaStreamManager> media_stream_manager_;
   // Per-process listener for online state changes.
   scoped_ptr<BrowserOnlineStateObserver> online_state_observer_;
 #if defined(OS_WIN)
   scoped_ptr<SystemMessageWindowWin> system_message_window_;
+#elif defined(OS_LINUX)
+  scoped_ptr<DeviceMonitorLinux> device_monitor_linux_;
 #endif
 
   // Destroy parts_ before main_message_loop_ (required) and before other

@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_RENDERER_RENDER_THREAD_IMPL_H_
 #define CONTENT_RENDERER_RENDER_THREAD_IMPL_H_
-#pragma once
 
 #include <set>
 #include <string>
@@ -54,6 +53,7 @@ class ScopedCOMInitializer;
 }
 
 namespace content {
+class AudioRendererMixerManager;
 class BrowserPluginChannelManager;
 class BrowserPluginRegistry;
 class MediaStreamCenter;
@@ -84,10 +84,6 @@ class CONTENT_EXPORT RenderThreadImpl : public content::RenderThread,
   explicit RenderThreadImpl(const std::string& channel_name);
   virtual ~RenderThreadImpl();
 
-  // Returns the routing ID of the RenderWidget containing the current script
-  // execution context (corresponding to WebFrame::frameForCurrentContext).
-  static int32 RoutingIDForCurrentContext();
-
   // When initializing WebKit, ensure that any schemes needed for the content
   // module are registered properly.  Static to allow sharing with tests.
   static void RegisterSchemes();
@@ -100,8 +96,7 @@ class CONTENT_EXPORT RenderThreadImpl : public content::RenderThread,
   virtual IPC::SyncMessageFilter* GetSyncMessageFilter() OVERRIDE;
   virtual scoped_refptr<base::MessageLoopProxy> GetIOMessageLoopProxy()
       OVERRIDE;
-  virtual void AddRoute(int32 routing_id,
-                        IPC::Channel::Listener* listener) OVERRIDE;
+  virtual void AddRoute(int32 routing_id, IPC::Listener* listener) OVERRIDE;
   virtual void RemoveRoute(int32 routing_id) OVERRIDE;
   virtual int GenerateRoutingID() OVERRIDE;
   virtual void AddFilter(IPC::ChannelProxy::MessageFilter* filter) OVERRIDE;
@@ -127,6 +122,8 @@ class CONTENT_EXPORT RenderThreadImpl : public content::RenderThread,
   virtual int64 GetIdleNotificationDelayInMs() const OVERRIDE;
   virtual void SetIdleNotificationDelayInMs(
       int64 idle_notification_delay_in_ms) OVERRIDE;
+  virtual void ToggleWebKitSharedTimer(bool suspend) OVERRIDE;
+  virtual void UpdateHistograms(int sequence_number) OVERRIDE;
 #if defined(OS_WIN)
   virtual void PreCacheFont(const LOGFONT& log_font) OVERRIDE;
   virtual void ReleaseCachedFonts() OVERRIDE;
@@ -201,8 +198,6 @@ class CONTENT_EXPORT RenderThreadImpl : public content::RenderThread,
     return vc_manager_.get();
   }
 
-  bool plugin_refresh_allowed() const { return plugin_refresh_allowed_; }
-
   // Get the GPU channel. Returns NULL if the channel is not established or
   // has been lost.
   GpuChannelHost* GetGpuChannel();
@@ -220,9 +215,17 @@ class CONTENT_EXPORT RenderThreadImpl : public content::RenderThread,
   // Returns a graphics context shared among all
   // RendererGpuVideoDecoderFactories, or NULL on error.  Context remains owned
   // by this class and must be null-tested before each use to detect context
-  // loss.  The returned WeakPtr<> is only valid on the compositor thread when
+  // loss.  The returned context is only valid on the compositor thread when
   // threaded compositing is enabled.
-  base::WeakPtr<WebGraphicsContext3DCommandBufferImpl> GetGpuVDAContext3D();
+  WebGraphicsContext3DCommandBufferImpl* GetGpuVDAContext3D();
+
+  // Handle loss of the shared GpuVDAContext3D context above.
+  static void OnGpuVDAContextLoss();
+
+  // AudioRendererMixerManager instance which manages renderer side mixer
+  // instances shared based on configured audio parameters.  Lazily created on
+  // first call.
+  content::AudioRendererMixerManager* GetAudioRendererMixerManager();
 
  private:
   virtual bool OnControlMessageReceived(const IPC::Message& msg) OVERRIDE;
@@ -266,9 +269,6 @@ class CONTENT_EXPORT RenderThreadImpl : public content::RenderThread,
   // Initialize COM when using plugins outside the sandbox (Windows only).
   scoped_ptr<base::win::ScopedCOMInitializer> initialize_com_;
 
-  // If true, then a GetPlugins call is allowed to rescan the disk.
-  bool plugin_refresh_allowed_;
-
   // The count of RenderWidgets running through this thread.
   int widget_count_;
 
@@ -302,7 +302,11 @@ class CONTENT_EXPORT RenderThreadImpl : public content::RenderThread,
 
   ObserverList<content::RenderProcessObserver> observers_;
 
+  class GpuVDAContextLostCallback;
+  scoped_ptr<GpuVDAContextLostCallback> context_lost_cb_;
   scoped_ptr<WebGraphicsContext3DCommandBufferImpl> gpu_vda_context3d_;
+
+  scoped_ptr<content::AudioRendererMixerManager> audio_renderer_mixer_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderThreadImpl);
 };

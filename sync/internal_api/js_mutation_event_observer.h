@@ -4,7 +4,6 @@
 
 #ifndef SYNC_INTERNAL_API_JS_MUTATION_EVENT_OBSERVER_H_
 #define SYNC_INTERNAL_API_JS_MUTATION_EVENT_OBSERVER_H_
-#pragma once
 
 #include <string>
 
@@ -20,7 +19,7 @@ namespace tracked_objects {
 class Location;
 }  // namespace tracked_objects
 
-namespace browser_sync {
+namespace syncer {
 
 class JsEventDetails;
 class JsEventHandler;
@@ -28,7 +27,7 @@ class JsEventHandler;
 // Observes all change- and transaction-related events and routes a
 // summarized version to a JsEventHandler.
 class JsMutationEventObserver
-    : public sync_api::SyncManager::ChangeObserver,
+    : public SyncManager::ChangeObserver,
       public syncable::TransactionObserver,
       public base::NonThreadSafe {
  public:
@@ -42,17 +41,17 @@ class JsMutationEventObserver
 
   void SetJsEventHandler(const WeakHandle<JsEventHandler>& event_handler);
 
-  // sync_api::SyncManager::ChangeObserver implementation.
+  // SyncManager::ChangeObserver implementation.
   virtual void OnChangesApplied(
-      syncable::ModelType model_type,
+      ModelType model_type,
       int64 write_transaction_id,
-      const sync_api::ImmutableChangeRecordList& changes) OVERRIDE;
-  virtual void OnChangesComplete(syncable::ModelType model_type) OVERRIDE;
+      const ImmutableChangeRecordList& changes) OVERRIDE;
+  virtual void OnChangesComplete(ModelType model_type) OVERRIDE;
 
   // syncable::TransactionObserver implementation.
   virtual void OnTransactionWrite(
       const syncable::ImmutableWriteTransactionInfo& write_transaction_info,
-      syncable::ModelTypeSet models_with_changes) OVERRIDE;
+      ModelTypeSet models_with_changes) OVERRIDE;
 
  private:
   base::WeakPtrFactory<JsMutationEventObserver> weak_ptr_factory_;
@@ -65,6 +64,6 @@ class JsMutationEventObserver
   DISALLOW_COPY_AND_ASSIGN(JsMutationEventObserver);
 };
 
-}  // namespace browser_sync
+}  // namespace syncer
 
 #endif  // SYNC_INTERNAL_API_JS_MUTATION_EVENT_OBSERVER_H_

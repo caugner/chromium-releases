@@ -7,26 +7,24 @@
 // "Search <engine> for ...", including searching for the current input string,
 // search history, and search suggestions.  An instance of it gets created and
 // managed by the autocomplete controller.
-//
-// For more information on the autocomplete system in general, including how
-// the autocomplete controller and autocomplete providers work, see
-// chrome/browser/autocomplete.h.
 
 #ifndef CHROME_BROWSER_AUTOCOMPLETE_SEARCH_PROVIDER_H_
 #define CHROME_BROWSER_AUTOCOMPLETE_SEARCH_PROVIDER_H_
-#pragma once
 
 #include <map>
 #include <string>
 #include <vector>
 
+#include "base/basictypes.h"
+#include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/time.h"
-#include "chrome/browser/autocomplete/autocomplete.h"
+#include "base/timer.h"
+#include "chrome/browser/autocomplete/autocomplete_input.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
+#include "chrome/browser/autocomplete/autocomplete_provider.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/search_engines/template_url.h"
-#include "chrome/browser/search_engines/template_url_id.h"
 #include "net/url_request/url_fetcher_delegate.h"
 
 class Profile;
@@ -53,7 +51,7 @@ class URLFetcher;
 class SearchProvider : public AutocompleteProvider,
                        public net::URLFetcherDelegate {
  public:
-  SearchProvider(ACProviderListener* listener, Profile* profile);
+  SearchProvider(AutocompleteProviderListener* listener, Profile* profile);
 
 #if defined(UNIT_TEST)
   static void set_query_suggest_immediately(bool value) {
@@ -71,10 +69,10 @@ class SearchProvider : public AutocompleteProvider,
   void FinalizeInstantQuery(const string16& input_text,
                             const string16& suggest_text);
 
-  // AutocompleteProvider
+  // AutocompleteProvider:
   virtual void Start(const AutocompleteInput& input,
                      bool minimal_changes) OVERRIDE;
-  virtual void Stop() OVERRIDE;
+  virtual void Stop(bool clear_cached_results) OVERRIDE;
 
   // Adds search-provider-specific information to omnibox event logs.
   virtual void AddProviderInfo(ProvidersInfo* provider_info) const OVERRIDE;
@@ -210,6 +208,9 @@ class SearchProvider : public AutocompleteProvider,
   // This does not update |done_|.
   void DoHistoryQuery(bool minimal_changes);
 
+  // Returns the time to delay before sending the Suggest request.
+  base::TimeDelta GetSuggestQueryDelay();
+
   // Determines whether an asynchronous subcomponent query should run for the
   // current input.  If so, starts it if necessary; otherwise stops it.
   // NOTE: This function does not update |done_|.  Callers must do so.
@@ -341,6 +342,10 @@ class SearchProvider : public AutocompleteProvider,
   // A timer to start a query to the suggest server after the user has stopped
   // typing for long enough.
   base::OneShotTimer<SearchProvider> timer_;
+
+  // The suggest field trial group number that we are in.  This will be
+  // removed later after the suggest delay experiments are removed.
+  int suggest_field_trial_group_number_;
 
   // The time at which we sent a query to the suggest server.
   base::TimeTicks time_suggest_request_sent_;

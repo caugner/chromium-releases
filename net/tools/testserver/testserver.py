@@ -409,6 +409,7 @@ class TestPageHandler(BasePageHandler):
       self.FileHandler,
       self.SetCookieHandler,
       self.SetManyCookiesHandler,
+      self.ExpectAndSetCookieHandler,
       self.SetHeaderHandler,
       self.AuthBasicHandler,
       self.AuthDigestHandler,
@@ -1099,6 +1100,38 @@ class TestPageHandler(BasePageHandler):
       self.send_header('Set-Cookie', 'a=')
     self.end_headers()
     self.wfile.write('%d cookies were sent' % num_cookies)
+    return True
+
+  def ExpectAndSetCookieHandler(self):
+    """Expects some cookies to be sent, and if they are, sets more cookies.
+
+    The expect parameter specifies a required cookie.  May be specified multiple
+    times.
+    The set parameter specifies a cookie to set if all required cookies are
+    preset.  May be specified multiple times.
+    The data parameter specifies the response body data to be returned."""
+
+    if not self._ShouldHandleRequest("/expect-and-set-cookie"):
+      return False
+
+    _, _, _, _, query, _ = urlparse.urlparse(self.path)
+    query_dict = cgi.parse_qs(query)
+    cookies = set()
+    if 'Cookie' in self.headers:
+      cookie_header = self.headers.getheader('Cookie')
+      cookies.update([s.strip() for s in cookie_header.split(';')])
+    got_all_expected_cookies = True
+    for expected_cookie in query_dict.get('expect', []):
+      if expected_cookie not in cookies:
+        got_all_expected_cookies = False
+    self.send_response(200)
+    self.send_header('Content-Type', 'text/html')
+    if got_all_expected_cookies:
+      for cookie_value in query_dict.get('set', []):
+        self.send_header('Set-Cookie', '%s' % cookie_value)
+    self.end_headers()
+    for data_value in query_dict.get('data', []):
+      self.wfile.write(data_value)
     return True
 
   def SetHeaderHandler(self):
@@ -2037,15 +2070,18 @@ def main(options, args):
             (host, ocsp_server.server_port))
 
         ocsp_der = None
-        ocsp_revoked = False
-        ocsp_invalid = False
+        ocsp_state = None
 
         if options.ocsp == 'ok':
-          pass
+          ocsp_state = minica.OCSP_STATE_GOOD
         elif options.ocsp == 'revoked':
-          ocsp_revoked = True
+          ocsp_state = minica.OCSP_STATE_REVOKED
         elif options.ocsp == 'invalid':
-          ocsp_invalid = True
+          ocsp_state = minica.OCSP_STATE_INVALID
+        elif options.ocsp == 'unauthorized':
+          ocsp_state = minica.OCSP_STATE_UNAUTHORIZED
+        elif options.ocsp == 'unknown':
+          ocsp_state = minica.OCSP_STATE_UNKNOWN
         else:
           print 'unknown OCSP status: ' + options.ocsp_status
           return
@@ -2055,10 +2091,7 @@ def main(options, args):
                 subject = "127.0.0.1",
                 ocsp_url = ("http://%s:%d/ocsp" %
                     (host, ocsp_server.server_port)),
-                ocsp_revoked = ocsp_revoked)
-
-        if ocsp_invalid:
-          ocsp_der = '3'
+                ocsp_state = ocsp_state)
 
         ocsp_server.ocsp_response = ocsp_der
 

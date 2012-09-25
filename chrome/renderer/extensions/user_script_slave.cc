@@ -42,7 +42,8 @@ using WebKit::WebString;
 using WebKit::WebVector;
 using WebKit::WebView;
 using content::RenderThread;
-using extensions::Extension;
+
+namespace extensions {
 
 // These two strings are injected before and after the Greasemonkey API and
 // user script to wrap it in an anonymous scope.
@@ -234,7 +235,7 @@ bool UserScriptSlave::UpdateScripts(base::SharedMemoryHandle shared_memory) {
   return true;
 }
 
-GURL UserScriptSlave::GetDataSourceURLForFrame(WebFrame* frame) {
+GURL UserScriptSlave::GetDataSourceURLForFrame(const WebFrame* frame) {
   // Normally we would use frame->document().url() to determine the document's
   // URL, but to decide whether to inject a content script, we use the URL from
   // the data source. This "quirk" helps prevents content scripts from
@@ -338,16 +339,14 @@ void UserScriptSlave::InjectScripts(WebFrame* frame,
 
   // Notify the browser if any extensions are now executing scripts.
   if (!extensions_executing_scripts.empty()) {
-    WebKit::WebFrame* target_frame = frame;
-    while (target_frame->parent())
-      target_frame = target_frame->parent();
-
+    WebKit::WebFrame* top_frame = frame->top();
     content::RenderView* render_view =
-        content::RenderView::FromWebView(target_frame->view());
+        content::RenderView::FromWebView(top_frame->view());
     render_view->Send(new ExtensionHostMsg_ContentScriptsExecuting(
         render_view->GetRoutingID(),
         extensions_executing_scripts,
-        render_view->GetPageId()));
+        render_view->GetPageId(),
+        GetDataSourceURLForFrame(top_frame)));
   }
 
   // Log debug info.
@@ -368,3 +367,5 @@ void UserScriptSlave::InjectScripts(WebFrame* frame,
     NOTREACHED();
   }
 }
+
+}  // namespace extensions

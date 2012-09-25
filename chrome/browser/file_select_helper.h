@@ -4,32 +4,35 @@
 
 #ifndef CHROME_BROWSER_FILE_SELECT_HELPER_H_
 #define CHROME_BROWSER_FILE_SELECT_HELPER_H_
-#pragma once
 
 #include <map>
 #include <vector>
 
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
-#include "chrome/browser/ui/select_file_dialog.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "net/base/directory_lister.h"
+#include "ui/base/dialogs/select_file_dialog.h"
 
 class Profile;
 
 namespace content {
 class RenderViewHost;
+class WebContents;
 struct FileChooserParams;
+}
+
+namespace ui {
 struct SelectedFileInfo;
 }
 
 // This class handles file-selection requests coming from WebUI elements
-// (via the ExtensionHost class). It implements both the initialisation
-// and listener functions for file-selection dialogs.
+// (via the extensions::ExtensionHost class). It implements both the
+// initialisation and listener functions for file-selection dialogs.
 class FileSelectHelper
     : public base::RefCountedThreadSafe<FileSelectHelper>,
-      public SelectFileDialog::Listener,
+      public ui::SelectFileDialog::Listener,
       public content::NotificationObserver {
  public:
 
@@ -88,13 +91,13 @@ class FileSelectHelper
   virtual void FileSelected(
       const FilePath& path, int index, void* params) OVERRIDE;
   virtual void FileSelectedWithExtraInfo(
-      const content::SelectedFileInfo& file,
+      const ui::SelectedFileInfo& file,
       int index,
       void* params) OVERRIDE;
   virtual void MultiFilesSelected(const std::vector<FilePath>& files,
                                   void* params) OVERRIDE;
   virtual void MultiFilesSelectedWithExtraInfo(
-      const std::vector<content::SelectedFileInfo>& files,
+      const std::vector<ui::SelectedFileInfo>& files,
       void* params) OVERRIDE;
   virtual void FileSelectionCanceled(void* params) OVERRIDE;
 
@@ -127,7 +130,7 @@ class FileSelectHelper
   //   http://whatwg.org/html/number-state.html#attr-input-accept
   // |accept_types| contains only valid lowercased MIME types or file extensions
   // beginning with a period (.).
-  SelectFileDialog::FileTypeInfo* GetFileTypesFromAcceptType(
+  ui::SelectFileDialog::FileTypeInfo* GetFileTypesFromAcceptType(
       const std::vector<string16>& accept_types);
 
   // Check the accept type is valid. It is expected to be all lower case with
@@ -143,11 +146,11 @@ class FileSelectHelper
   content::WebContents* web_contents_;
 
   // Dialog box used for choosing files to upload from file form fields.
-  scoped_refptr<SelectFileDialog> select_file_dialog_;
-  scoped_ptr<SelectFileDialog::FileTypeInfo> select_file_types_;
+  scoped_refptr<ui::SelectFileDialog> select_file_dialog_;
+  scoped_ptr<ui::SelectFileDialog::FileTypeInfo> select_file_types_;
 
   // The type of file dialog last shown.
-  SelectFileDialog::Type dialog_type_;
+  ui::SelectFileDialog::Type dialog_type_;
 
   // Maintain a list of active directory enumerations.  These could come from
   // the file select dialog or from drag-and-drop of directories, so there could

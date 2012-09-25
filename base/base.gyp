@@ -78,7 +78,7 @@
         }, {  # use_glib!=1
             'sources/': [
               ['exclude', '/xdg_user_dirs/'],
-              ['exclude', '_nss\.cc$'],
+              ['exclude', '_nss\\.cc$'],
             ],
         }],
         ['OS == "android" and _toolset == "host"', {
@@ -125,7 +125,6 @@
             'symbolize',
             '../third_party/ashmem/ashmem.gyp:ashmem',
             '../third_party/icu/icu.gyp:icuuc',
-            'base_java',
             'base_jni_headers',
           ],
           'include_dirs': [
@@ -140,7 +139,6 @@
             'USE_SYMBOLIZE',
           ],
           'sources!': [
-            'debug/stack_trace.cc',
             'debug/stack_trace_posix.cc',
           ],
         }],
@@ -168,6 +166,7 @@
           'link_settings': {
             'libraries': [
               '$(SDKROOT)/System/Library/Frameworks/AppKit.framework',
+              '$(SDKROOT)/System/Library/Frameworks/ApplicationServices.framework',
               '$(SDKROOT)/System/Library/Frameworks/Carbon.framework',
               '$(SDKROOT)/System/Library/Frameworks/CoreFoundation.framework',
               '$(SDKROOT)/System/Library/Frameworks/Foundation.framework',
@@ -178,6 +177,17 @@
           'dependencies': [
             '../third_party/mach_override/mach_override.gyp:mach_override',
           ],
+        }],
+        ['OS == "ios"', {
+          'link_settings': {
+            'libraries': [
+              '$(SDKROOT)/System/Library/Frameworks/CoreFoundation.framework',
+              '$(SDKROOT)/System/Library/Frameworks/CoreGraphics.framework',
+              '$(SDKROOT)/System/Library/Frameworks/CoreText.framework',
+              '$(SDKROOT)/System/Library/Frameworks/Foundation.framework',
+              '$(SDKROOT)/System/Library/Frameworks/UIKit.framework',
+            ],
+          },
         }],
         ['OS != "win"', {
             'dependencies': ['../third_party/libevent/libevent.gyp:libevent'],
@@ -199,8 +209,6 @@
         'third_party/xdg_user_dirs/xdg_user_dir_lookup.cc',
         'third_party/xdg_user_dirs/xdg_user_dir_lookup.h',
         'auto_reset.h',
-        'base64.cc',
-        'base64.h',
         'event_recorder.h',
         'event_recorder_stubs.cc',
         'event_recorder_win.cc',
@@ -225,13 +233,9 @@
         'message_pump_mac.mm',
         'metrics/field_trial.cc',
         'metrics/field_trial.h',
-        'string16.cc',
-        'string16.h',
         'sync_socket.h',
         'sync_socket_win.cc',
         'sync_socket_posix.cc',
-        'time_mac.cc',
-        'time_posix.cc',
       ],
     },
     {
@@ -321,6 +325,10 @@
         'win/pe_image.cc',
         'win/pe_image.h',
       ],
+      'sources!': [
+        # base64.cc depends on modp_b64.
+        'base64.cc',
+      ],
       'include_dirs': [
         '..',
       ],
@@ -374,13 +382,13 @@
         'debug/stack_trace_unittest.cc',
         'debug/trace_event_unittest.cc',
         'debug/trace_event_win_unittest.cc',
-        'dir_reader_posix_unittest.cc',
         'environment_unittest.cc',
         'file_descriptor_shuffle_unittest.cc',
         'file_path_unittest.cc',
         'file_util_proxy_unittest.cc',
         'file_util_unittest.cc',
         'file_version_info_unittest.cc',
+        'files/dir_reader_posix_unittest.cc',
         'gmock_unittest.cc',
         'guid_unittest.cc',
         'hi_res_timer_manager_unittest.cc',
@@ -403,7 +411,7 @@
         'lazy_instance_unittest.cc',
         'linked_list_unittest.cc',
         'logging_unittest.cc',
-        'mac/closure_blocks_leopard_compat_unittest.cc',
+        'mac/bind_objc_block_unittest.mm',
         'mac/foundation_util_unittest.mm',
         'mac/mac_util_unittest.mm',
         'mac/objc_property_releaser_unittest.mm',
@@ -426,21 +434,26 @@
         'message_loop_unittest.cc',
         'message_pump_glib_unittest.cc',
         'message_pump_libevent_unittest.cc',
+        'metrics/bucket_ranges_unittest.cc',
         'metrics/field_trial_unittest.cc',
         'metrics/histogram_unittest.cc',
         'metrics/stats_table_unittest.cc',
+        'metrics/statistics_recorder_unittest.cc',
         'observer_list_unittest.cc',
+        'os_compat_android_unittest.cc',
         'path_service_unittest.cc',
         'pickle_unittest.cc',
         'platform_file_unittest.cc',
         'pr_time_unittest.cc',
         'process_util_unittest.cc',
+        'process_util_unittest_ios.cc',
         'process_util_unittest_mac.h',
         'process_util_unittest_mac.mm',
         'profiler/tracked_time_unittest.cc',
         'property_bag_unittest.cc',
         'rand_util_unittest.cc',
         'scoped_native_library_unittest.cc',
+        'scoped_observer.h',
         'scoped_temp_dir_unittest.cc',
         'sha1_unittest.cc',
         'shared_memory_unittest.cc',
@@ -504,6 +517,7 @@
         'win/scoped_bstr_unittest.cc',
         'win/scoped_comptr_unittest.cc',
         'win/scoped_process_information_unittest.cc',
+        'win/scoped_startup_info_ex_unittest.cc',
         'win/scoped_variant_unittest.cc',
         'win/win_util_unittest.cc',
         'win/wrapped_window_proc_unittest.cc',
@@ -530,8 +544,6 @@
           'sources!': [
             # TODO(michaelbai): Removed the below once the fix upstreamed.
             'debug/stack_trace_unittest.cc',
-            'memory/mru_cache_unittest.cc',
-            'synchronization/cancellation_flag_unittest.cc',
           ],
           'dependencies': [
             'android/jni_generator/jni_generator.gyp:jni_generator_tests',
@@ -541,14 +553,34 @@
               'dependencies': [
                 '../testing/android/native_test.gyp:native_test_native_code',
               ],
-            }, { # gtest_target_type != shared_library
-              'sources!': [
-                # The below files are excluded because of the missing JNI.
-                'android/jni_android_unittest.cc',
-                'android/path_utils_unittest.cc',
-                'android/scoped_java_ref_unittest.cc',
-              ],
             }],
+          ],
+        }],
+        ['OS == "ios"', {
+          'sources/': [
+            # Only test the iOS-meaningful portion of process_utils.
+            ['exclude', '^process_util_unittest'],
+            ['include', '^process_util_unittest_ios\\.cc$'],
+            # Requires spawning processes.
+            ['exclude', '^metrics/stats_table_unittest\\.cc$'],
+            # TODO(ios): Remove these as base/ is unforked.
+            # For now, exclude everything that doesn't build as-is, just to
+            # get a minimal target building.
+            # Unittests that don't pass.
+            ['exclude', '^message_loop_unittest\\.cc$'],
+          ],
+          'actions': [
+            {
+              'action_name': 'copy_test_data',
+              'variables': {
+                'test_data_files': [
+                  'data/json/bom_feff.json',
+                  'data/file_util_unittest',
+                ],
+                'test_data_prefix': 'base',
+              },
+              'includes': [ '../build/copy_test_data_ios.gypi' ],
+            },
           ],
         }],
         ['use_glib==1', {
@@ -588,8 +620,8 @@
             '../third_party/icu/icu.gyp:icudata',
           ],
           'sources!': [
-            'dir_reader_posix_unittest.cc',
             'file_descriptor_shuffle_unittest.cc',
+            'files/dir_reader_posix_unittest.cc',
             'threading/worker_pool_posix_unittest.cc',
             'message_pump_libevent_unittest.cc',
           ],
@@ -606,22 +638,18 @@
             'win/win_util_unittest.cc',
           ],
         }],
-        ['OS=="mac"', {
-          'dependencies': [
-            'closure_blocks_leopard_compat',
+      ],  # conditions
+      'target_conditions': [
+        ['OS == "ios"', {
+          'sources/': [
+            # Pull in specific Mac files for iOS (which have been filtered out
+            # by file name rules).
+            ['include', '^mac/objc_property_releaser_unittest\\.mm$'],
+            ['include', '^mac/bind_objc_block_unittest\\.mm$'],
+            ['include', '^sys_string_conversions_mac_unittest\\.mm$'],
           ],
         }],
-      ],
-    },
-    {
-      'target_name': 'check_example',
-      'type': 'executable',
-      'sources': [
-        'check_example.cc',
-      ],
-      'dependencies': [
-        'base',
-      ],
+      ],  # target_conditions
     },
     {
       'target_name': 'test_support_base',
@@ -657,6 +685,9 @@
       ],
       'sources': [
         'perftimer.cc',
+        'test/main_hook.cc',
+        'test/main_hook.h',
+        'test/main_hook_ios.mm',
         'test/mock_chrome_application_mac.h',
         'test/mock_chrome_application_mac.mm',
         'test/mock_devices_changed_observer.cc',
@@ -679,12 +710,16 @@
         'test/test_file_util_mac.cc',
         'test/test_file_util_posix.cc',
         'test/test_file_util_win.cc',
+        'test/test_listener_ios.h',
+        'test/test_listener_ios.mm',
         'test/test_reg_util_win.cc',
         'test/test_reg_util_win.h',
         'test/test_suite.cc',
         'test/test_suite.h',
         'test/test_support_android.cc',
         'test/test_support_android.h',
+        'test/test_support_ios.h',
+        'test/test_support_ios.mm',
         'test/test_switches.cc',
         'test/test_switches.h',
         'test/test_timeouts.cc',
@@ -695,38 +730,6 @@
         'test/trace_event_analyzer.h',
         'test/values_test_util.cc',
         'test/values_test_util.h',
-      ],
-    },
-    {
-      'target_name': 'base_unittests_run',
-      'type': 'none',
-      'dependencies': [
-        'base_unittests',
-      ],
-      'includes': [
-        'base_unittests.isolate',
-      ],
-      'actions': [
-        {
-          'action_name': 'isolate',
-          'inputs': [
-            'base_unittests.isolate',
-            '<@(isolate_dependency_tracked)',
-          ],
-          'outputs': [
-            '<(PRODUCT_DIR)/base_unittests.results',
-          ],
-          'action': [
-            'python',
-            '../tools/isolate/isolate.py',
-            '--mode', '<(test_isolation_mode)',
-            '--outdir', '<(test_isolation_outdir)',
-            '--variable', 'PRODUCT_DIR', '<(PRODUCT_DIR)',
-            '--variable', 'OS', '<(OS)',
-            '--result', '<@(_outputs)',
-            'base_unittests.isolate',
-          ],
-        },
       ],
     },
     {
@@ -759,6 +762,20 @@
     },
   ],
   'conditions': [
+    ['OS!="ios"', {
+      'targets': [
+        {
+          'target_name': 'check_example',
+          'type': 'executable',
+          'sources': [
+            'check_example.cc',
+          ],
+          'dependencies': [
+            'base',
+          ],
+        },
+      ],
+    }],
     ['OS == "win"', {
       'targets': [
         {
@@ -781,6 +798,10 @@
           },
           'defines': [
             '<@(nacl_win64_defines)',
+          ],
+          'sources!': [
+            # base64.cc depends on modp_b64.
+            'base64.cc',
           ],
           'configurations': {
             'Common_Base': {
@@ -823,7 +844,7 @@
         },
       ],
     }],
-    ['os_posix==1 and OS!="mac"', {
+    ['os_posix==1 and OS!="mac" and OS!="ios"', {
       'targets': [
         {
           'target_name': 'symbolize',
@@ -896,19 +917,15 @@
         {
           'target_name': 'base_jni_headers',
           'type': 'none',
+          'sources': [
+            'android/java/src/org/chromium/base/BuildInfo.java',
+            'android/java/src/org/chromium/base/LocaleUtils.java',
+            'android/java/src/org/chromium/base/PathService.java',
+            'android/java/src/org/chromium/base/PathUtils.java',
+            'android/java/src/org/chromium/base/SystemMessageHandler.java',
+          ],
           'variables': {
-            'java_sources': [
-              'android/java/org/chromium/base/BuildInfo.java',
-              'android/java/org/chromium/base/LocaleUtils.java',
-              'android/java/org/chromium/base/PathUtils.java',
-              'android/java/org/chromium/base/SystemMessageHandler.java',
-            ],
-            'jni_headers': [
-              '<(SHARED_INTERMEDIATE_DIR)/base/jni/build_info_jni.h',
-              '<(SHARED_INTERMEDIATE_DIR)/base/jni/locale_utils_jni.h',
-              '<(SHARED_INTERMEDIATE_DIR)/base/jni/path_utils_jni.h',
-              '<(SHARED_INTERMEDIATE_DIR)/base/jni/system_message_handler_jni.h',
-            ],
+            'jni_gen_dir': 'base',
           },
           'includes': [ '../build/jni_generator.gypi' ],
         },
@@ -939,69 +956,6 @@
         },
       ],
     }],
-    ['OS=="mac"', {
-      'targets': [
-        {
-          'target_name': 'closure_blocks_leopard_compat',
-          'sources': [
-            'mac/closure_blocks_leopard_compat.h',
-          ],
-          'conditions': [
-            ['mac_sdk == "10.5"', {
-              'type': 'shared_library',
-              'product_name': 'closure_blocks_leopard_compat_stub',
-              'variables': {
-                # This target controls stripping directly. See below.
-                'mac_strip': 0,
-              },
-              'sources': [
-                'mac/closure_blocks_leopard_compat.S',
-              ],
-              'xcode_settings': {
-                # These values are taken from libSystem.dylib in the 10.5
-                # SDK. Setting LD_DYLIB_INSTALL_NAME causes anything linked
-                # against this stub library to look for the symbols it
-                # provides in the real libSystem at runtime. When using ld
-                # from Xcode 4 or later (ld64-123.2 and up), giving two
-                # libraries with the same "install name" to the linker will
-                # cause it to print "ld: warning: dylibs with same install
-                # name". This is harmless, and ld will behave as intended
-                # here.
-                #
-                # The real library's compatibility version is used, and the
-                # value of the current version from the SDK is used to make
-                # it appear as though anything linked against this stub was
-                # linked against the real thing.
-                'LD_DYLIB_INSTALL_NAME': '/usr/lib/libSystem.B.dylib',
-                'DYLIB_COMPATIBILITY_VERSION': '1.0.0',
-                'DYLIB_CURRENT_VERSION': '111.1.4',
-
-               # Turn on stripping (yes, even in debug mode), and add the -c
-               # flag. This is what produces a stub library (MH_DYLIB_STUB)
-               # as opposed to a dylib (MH_DYLIB). MH_DYLIB_STUB files
-               # contain symbol tables and everything else needed for
-               # linking, but are stripped of section contents. This is the
-               # same way that the stub libraries in Mac OS X SDKs are
-               # created. dyld will refuse to load a stub library, so this
-               # provides some insurance in case anyone tries to load the
-               # stub at runtime.
-               'DEPLOYMENT_POSTPROCESSING': 'YES',
-               'STRIP_STYLE': 'non-global',
-               'STRIPFLAGS': '-c',
-             },
-           }, {  # else: mac_sdk != "10.5"
-             # When using the 10.6 SDK or newer, the necessary definitions
-             # are already present in libSystem.dylib. There is no need to
-             # build a stub dylib to provide these symbols at link time.
-             # This target is still useful to cause those symbols to be
-             # treated as weak imports in dependents, who still must
-             # #include closure_blocks_leopard_compat.h to get weak imports.
-             'type': 'none',
-           }],
-         ],
-       },
-     ],
-   }],
     # Special target to wrap a gtest_target_type == shared_library
     # base_unittests into an android apk for execution.
     # TODO(jrg): lib.target comes from _InstallableTargetInstallPath()
@@ -1023,6 +977,54 @@
             'input_jars_paths': ['<(PRODUCT_DIR)/lib.java/chromium_base.jar',],
           },
           'includes': [ '../build/apk_test.gypi' ],
+        },
+        {
+          'target_name': 'base_java_test_support',
+          'type': 'none',
+          'dependencies': [
+            'base_java',
+          ],
+          'variables': {
+            'package_name': 'base_javatests',
+            'java_in_dir': '../base/android/javatests',
+          },
+          'includes': [ '../build/java.gypi' ],
+        },
+      ],
+    }],
+    ['test_isolation_mode != "noop"', {
+      'targets': [
+        {
+          'target_name': 'base_unittests_run',
+          'type': 'none',
+          'dependencies': [
+            'base_unittests',
+          ],
+          'includes': [
+            'base_unittests.isolate',
+          ],
+          'actions': [
+            {
+              'action_name': 'isolate',
+              'inputs': [
+                'base_unittests.isolate',
+                '<@(isolate_dependency_tracked)',
+              ],
+              'outputs': [
+                '<(PRODUCT_DIR)/base_unittests.results',
+              ],
+              'action': [
+                'python',
+                '../tools/isolate/isolate.py',
+                '<(test_isolation_mode)',
+                '--outdir', '<(test_isolation_outdir)',
+                '--variable', 'PRODUCT_DIR', '<(PRODUCT_DIR)',
+                '--variable', 'OS', '<(OS)',
+                '--result', '<@(_outputs)',
+                '--isolate', 'base_unittests.isolate',
+              ],
+            },
+          ],
         },
       ],
     }],

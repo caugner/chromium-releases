@@ -10,11 +10,12 @@
 
 #include "chrome/browser/extensions/browser_action_test_util.h"
 #include "chrome/browser/extensions/extension_apitest.h"
-#include "chrome/browser/extensions/extension_browser_event_router.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_commands.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension_action.h"
@@ -22,6 +23,7 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/test/browser_test_utils.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/size.h"
 
@@ -40,7 +42,7 @@ class BrowserActionApiTest : public ExtensionApiTest {
 
   bool OpenPopup(int index) {
     ResultCatcher catcher;
-    ui_test_utils::WindowedNotificationObserver popup_observer(
+    content::WindowedNotificationObserver popup_observer(
         content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME,
         content::NotificationService::AllSources());
     GetBrowserActionsBar().Press(index);
@@ -80,9 +82,9 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, Basic) {
   service->toolbar_model()->ExecuteBrowserAction(extension, browser(), NULL);
 
   // Verify the command worked.
-  WebContents* tab = browser()->GetActiveWebContents();
+  WebContents* tab = chrome::GetActiveWebContents(browser());
   bool result = false;
-  ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
+  ASSERT_TRUE(content::ExecuteJavaScriptAndExtractBool(
       tab->GetRenderViewHost(), L"",
       L"setInterval(function(){"
       L"  if(document.body.bgColor == 'red'){"
@@ -102,7 +104,8 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, DynamicBrowserAction) {
 
   // Set prev_id which holds the id of the previous image, and use it in the
   // next test to see if the image changes.
-  uint32_t prev_id = extension->browser_action()->GetIcon(0).getGenerationID();
+  uint32_t prev_id = extension->browser_action()->GetIcon(0).
+      ToSkBitmap()->getGenerationID();
 
   // Tell the extension to update the icon using setIcon({imageData:...}).
   ResultCatcher catcher;
@@ -112,15 +115,20 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, DynamicBrowserAction) {
 
   // Test that we received the changes.
   EXPECT_TRUE(GetBrowserActionsBar().HasIcon(0));
-  EXPECT_NE(prev_id, extension->browser_action()->GetIcon(0).getGenerationID());
-  prev_id = extension->browser_action()->GetIcon(0).getGenerationID();
+  EXPECT_NE(prev_id,
+            extension->browser_action()->GetIcon(0).
+            ToSkBitmap()->getGenerationID());
+  prev_id = extension->browser_action()->GetIcon(0).
+      ToSkBitmap()->getGenerationID();
 
   // Tell the extension to update the icon using setIcon({path:...}).
   ui_test_utils::NavigateToURL(browser(),
       GURL(extension->GetResourceURL("update2.html")));
   ASSERT_TRUE(catcher.GetNextResult());
   EXPECT_TRUE(GetBrowserActionsBar().HasIcon(0));
-  EXPECT_NE(prev_id, extension->browser_action()->GetIcon(0).getGenerationID());
+  EXPECT_NE(prev_id,
+            extension->browser_action()->GetIcon(0).
+            ToSkBitmap()->getGenerationID());
 }
 
 // This test is flaky as per http://crbug.com/74557.
@@ -142,11 +150,11 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest,
   EXPECT_EQ("Showing icon 2", GetBrowserActionsBar().GetTooltip(0));
 
   // Open a new tab, the title should go back.
-  browser()->NewTab();
+  chrome::NewTab(browser());
   EXPECT_EQ("hi!", GetBrowserActionsBar().GetTooltip(0));
 
   // Go back to first tab, changed title should reappear.
-  browser()->ActivateTabAt(0, true);
+  chrome::ActivateTabAt(browser(), 0, true);
   EXPECT_EQ("Showing icon 2", GetBrowserActionsBar().GetTooltip(0));
 
   // Reload that tab, default title should come back.
@@ -196,7 +204,8 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, BrowserActionAddPopup) {
   const Extension* extension = GetSingleLoadedExtension();
   ASSERT_TRUE(extension) << message_;
 
-  int tab_id = ExtensionTabUtil::GetTabId(browser()->GetActiveWebContents());
+  int tab_id = ExtensionTabUtil::GetTabId(
+      chrome::GetActiveWebContents(browser()));
 
   ExtensionAction* browser_action = extension->browser_action();
   ASSERT_TRUE(browser_action)
@@ -251,7 +260,8 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, BrowserActionRemovePopup) {
   const Extension* extension = GetSingleLoadedExtension();
   ASSERT_TRUE(extension) << message_;
 
-  int tab_id = ExtensionTabUtil::GetTabId(browser()->GetActiveWebContents());
+  int tab_id = ExtensionTabUtil::GetTabId(
+      chrome::GetActiveWebContents(browser()));
 
   ExtensionAction* browser_action = extension->browser_action();
   ASSERT_TRUE(browser_action)
@@ -291,7 +301,8 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, IncognitoBasic) {
   // Open an incognito window and test that the browser action isn't there by
   // default.
   Profile* incognito_profile = browser()->profile()->GetOffTheRecordProfile();
-  Browser* incognito_browser = Browser::Create(incognito_profile);
+  Browser* incognito_browser =
+      new Browser(Browser::CreateParams(incognito_profile));
 
   ASSERT_EQ(0,
             BrowserActionTestUtil(incognito_browser).NumberOfBrowserActions());
@@ -302,8 +313,8 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, IncognitoBasic) {
   browser()->profile()->GetExtensionService()->extension_prefs()->
       SetIsIncognitoEnabled(extension->id(), true);
 
-  incognito_browser->CloseWindow();
-  incognito_browser = Browser::Create(incognito_profile);
+  chrome::CloseWindow(incognito_browser);
+  incognito_browser = new Browser(Browser::CreateParams(incognito_profile));
   ASSERT_EQ(1,
             BrowserActionTestUtil(incognito_browser).NumberOfBrowserActions());
 
@@ -341,7 +352,8 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, IncognitoDragging) {
   service->extension_prefs()->SetIsIncognitoEnabled(extension_c->id(), true);
 
   Profile* incognito_profile = browser()->profile()->GetOffTheRecordProfile();
-  Browser* incognito_browser = Browser::Create(incognito_profile);
+  Browser* incognito_browser =
+      new Browser(Browser::CreateParams(incognito_profile));
   BrowserActionTestUtil incognito_bar(incognito_browser);
 
   // Navigate just to have a tab in this window, otherwise wonky things happen.
@@ -395,7 +407,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, DISABLED_CloseBackgroundPage) {
   ExtensionAction* action = extension->browser_action();
   ASSERT_EQ("", action->GetBadgeText(ExtensionAction::kDefaultTabId));
 
-  ui_test_utils::WindowedNotificationObserver host_destroyed_observer(
+  content::WindowedNotificationObserver host_destroyed_observer(
       chrome::NOTIFICATION_EXTENSION_HOST_DESTROYED,
       content::NotificationService::AllSources());
 

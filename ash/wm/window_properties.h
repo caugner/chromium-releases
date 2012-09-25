@@ -4,7 +4,6 @@
 
 #ifndef ASH_WM_WINDOW_PROPERTIES_H_
 #define ASH_WM_WINDOW_PROPERTIES_H_
-#pragma once
 
 #include "ash/wm/property_util.h"
 #include "ash/wm/shadow_types.h"
@@ -38,6 +37,9 @@ extern const aura::WindowProperty<bool>* const
 extern const aura::WindowProperty<ui::WindowShowState>* const
     kRestoreShowStateKey;
 
+extern const aura::WindowProperty<RootWindowController*>* const
+    kRootWindowControllerKey;
+
 // A property key describing the drop shadow that should be displayed under the
 // window.  If unset, no shadow is displayed.
 extern const aura::WindowProperty<ShadowType>* const kShadowTypeKey;
@@ -46,15 +48,15 @@ extern const aura::WindowProperty<ShadowType>* const kShadowTypeKey;
 extern const aura::WindowProperty<ui_controls::UIControlsAura*>* const
     kUIControlsKey;
 
+// Property to tell if the container uses the screen coordinates.
+extern const aura::WindowProperty<bool>* const kUsesScreenCoordinatesKey;
+
 extern const aura::WindowProperty<WindowPersistsAcrossAllWorkspacesType>* const
     kWindowPersistsAcrossAllWorkspacesKey;
 
 // True if the window is controlled by the workspace manager.
 extern const aura::WindowProperty<bool>* const
     kWindowTrackedByWorkspaceKey;
-
-extern const aura::WindowProperty<RootWindowController*>* const
-    kRootWindowControllerKey;
 
 // Alphabetical sort.
 

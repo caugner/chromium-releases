@@ -16,7 +16,7 @@
 #include "ui/base/ui_base_switches.h"
 
 #if defined(OS_WIN)
-#include "sandbox/src/sandbox.h"
+#include "sandbox/win/src/sandbox.h"
 #endif
 
 #if defined(OS_LINUX)

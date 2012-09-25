@@ -4,7 +4,6 @@
 
 #ifndef UI_COMPOSITOR_LAYER_H_
 #define UI_COMPOSITOR_LAYER_H_
-#pragma once
 
 #include <string>
 #include <vector>
@@ -42,9 +41,9 @@ class Texture;
 // NOTE: unlike Views, each Layer does *not* own its children views. If you
 // delete a Layer and it has children, the parent of each child layer is set to
 // NULL, but the children are not deleted.
-class COMPOSITOR_EXPORT Layer :
-    public LayerAnimationDelegate,
-    NON_EXPORTED_BASE(public WebKit::WebContentLayerClient) {
+class COMPOSITOR_EXPORT Layer
+    : public LayerAnimationDelegate,
+      NON_EXPORTED_BASE(public WebKit::WebContentLayerClient) {
  public:
   Layer();
   explicit Layer(LayerType type);
@@ -135,14 +134,30 @@ class COMPOSITOR_EXPORT Layer :
   void SetBackgroundBlur(int blur_radius);
 
   // Saturate all pixels of this layer by this amount.
-  // This effect will get "combined" with the inverted and brightness setting.
+  // This effect will get "combined" with the inverted,
+  // brightness and grayscale setting.
   float layer_saturation() const { return layer_saturation_; }
   void SetLayerSaturation(float saturation);
 
   // Change the brightness of all pixels from this layer by this amount.
-  // This effect will get "combined" with the inverted and saturate setting.
+  // This effect will get "combined" with the inverted, saturate
+  // and grayscale setting.
   float layer_brightness() const { return layer_brightness_; }
   void SetLayerBrightness(float brightness);
+
+  // Return the target brightness if animator is running, or the current
+  // brightness otherwise.
+  float GetTargetBrightness() const;
+
+  // Change the grayscale of all pixels from this layer by this amount.
+  // This effect will get "combined" with the inverted, saturate
+  // and brightness setting.
+  float layer_grayscale() const { return layer_grayscale_; }
+  void SetLayerGrayscale(float grayscale);
+
+  // Return the target grayscale if animator is running, or the current
+  // grayscale otherwise.
+  float GetTargetGrayscale() const;
 
   // Invert the layer.
   bool layer_inverted() const { return layer_inverted_; }
@@ -151,6 +166,14 @@ class COMPOSITOR_EXPORT Layer :
   // Return the target opacity if animator is running, or the current opacity
   // otherwise.
   float GetTargetOpacity() const;
+
+  // Set a layer mask for a layer.
+  // Note the provided layer mask can neither have a layer mask itself nor can
+  // it have any children. The ownership of |layer_mask| will not be
+  // transferred with this call.
+  // Furthermore: A mask layer can only be set to one layer.
+  void SetMaskLayer(Layer* layer_mask);
+  Layer* layer_mask_layer() { return layer_mask_; }
 
   // Sets the visibility of the Layer. A Layer may be visible but not
   // drawn. This happens if any ancestor of a Layer is not visible.
@@ -228,11 +251,12 @@ class COMPOSITOR_EXPORT Layer :
 
   // WebContentLayerClient
   virtual void paintContents(WebKit::WebCanvas*,
-                             const WebKit::WebRect& clip
-#if WEBCONTENTLAYERCLIENT_HAS_OPAQUE
-                             , WebKit::WebRect& opaque
+                             const WebKit::WebRect& clip,
+#if defined(WEBCONTENTLAYERCLIENT_FLOAT_OPAQUE_RECT)
+                             WebKit::WebFloatRect& opaque);
+#else
+                             WebKit::WebRect& opaque);
 #endif
-                             );
 
   WebKit::WebLayer web_layer() { return web_layer_; }
 
@@ -271,17 +295,23 @@ class COMPOSITOR_EXPORT Layer :
   void SetTransformImmediately(const ui::Transform& transform);
   void SetOpacityImmediately(float opacity);
   void SetVisibilityImmediately(bool visibility);
+  void SetBrightnessImmediately(float brightness);
+  void SetGrayscaleImmediately(float grayscale);
 
   // Implementation of LayerAnimatorDelegate
   virtual void SetBoundsFromAnimation(const gfx::Rect& bounds) OVERRIDE;
   virtual void SetTransformFromAnimation(const Transform& transform) OVERRIDE;
   virtual void SetOpacityFromAnimation(float opacity) OVERRIDE;
   virtual void SetVisibilityFromAnimation(bool visibility) OVERRIDE;
+  virtual void SetBrightnessFromAnimation(float brightness) OVERRIDE;
+  virtual void SetGrayscaleFromAnimation(float grayscale) OVERRIDE;
   virtual void ScheduleDrawForAnimation() OVERRIDE;
   virtual const gfx::Rect& GetBoundsForAnimation() const OVERRIDE;
   virtual const Transform& GetTransformForAnimation() const OVERRIDE;
   virtual float GetOpacityForAnimation() const OVERRIDE;
   virtual bool GetVisibilityForAnimation() const OVERRIDE;
+  virtual float GetBrightnessForAnimation() const OVERRIDE;
+  virtual float GetGrayscaleForAnimation() const OVERRIDE;
 
   void CreateWebLayer();
   void RecomputeTransform();
@@ -327,7 +357,15 @@ class COMPOSITOR_EXPORT Layer :
   // the layer.
   float layer_saturation_;
   float layer_brightness_;
+  float layer_grayscale_;
   bool layer_inverted_;
+
+  // The associated mask layer with this layer.
+  Layer* layer_mask_;
+  // The back link from the mask layer to it's associated masked layer.
+  // We keep this reference for the case that if the mask layer gets deleted
+  // while attached to the main layer before the main layer is deleted.
+  Layer* layer_mask_back_link_;
 
   std::string name_;
 

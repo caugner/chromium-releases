@@ -48,9 +48,10 @@ bool LazyBackgroundTaskQueue::ShouldEnqueueTask(
          ExtensionSystem::Get(profile)->process_manager();
     ExtensionHost* background_host =
         pm->GetBackgroundHostForExtension(extension->id());
-    if (!background_host || !background_host->did_stop_loading() ||
-        pm->IsBackgroundHostClosing(extension->id()))
+    if (!background_host || !background_host->did_stop_loading())
       return true;
+    if (pm->IsBackgroundHostClosing(extension->id()))
+      pm->CancelSuspend(extension);
   }
 
   return false;
@@ -91,9 +92,11 @@ void LazyBackgroundTaskQueue::StartLazyBackgroundPage(
   const Extension* extension =
       ExtensionSystem::Get(profile)->extension_service()->
           extensions()->GetByID(extension_id);
-  DCHECK(extension->has_lazy_background_page());
-  pm->IncrementLazyKeepaliveCount(extension);
-  pm->CreateBackgroundHost(extension, extension->GetBackgroundURL());
+  if (extension) {
+    DCHECK(extension->has_lazy_background_page());
+    pm->IncrementLazyKeepaliveCount(extension);
+    pm->CreateBackgroundHost(extension, extension->GetBackgroundURL());
+  }
 
   pending_page_loads_.erase(PendingTasksKey(profile, extension_id));
 }
@@ -113,14 +116,16 @@ void LazyBackgroundTaskQueue::ProcessPendingTasks(
     return;
   }
 
-  PendingTasksList* tasks = map_it->second.get();
-  for (PendingTasksList::const_iterator it = tasks->begin();
-       it != tasks->end(); ++it) {
+  // Swap the pending tasks to a temporary, to avoid problems if the task
+  // list is modified during processing.
+  PendingTasksList tasks;
+  tasks.swap(*map_it->second);
+  for (PendingTasksList::const_iterator it = tasks.begin();
+       it != tasks.end(); ++it) {
     it->Run(host);
   }
 
-  tasks->clear();
-  pending_tasks_.erase(map_it);
+  pending_tasks_.erase(key);
 
   // Balance the keepalive in AddPendingTask. Note we don't do this on a
   // failure to load, because the keepalive count is reset in that case.
@@ -138,7 +143,8 @@ void LazyBackgroundTaskQueue::Observe(
     case chrome::NOTIFICATION_EXTENSION_HOST_DID_STOP_LOADING: {
       // If an on-demand background page finished loading, dispatch queued up
       // events for it.
-      ExtensionHost* host = content::Details<ExtensionHost>(details).ptr();
+      ExtensionHost* host =
+          content::Details<ExtensionHost>(details).ptr();
       if (host->extension_host_type() ==
               chrome::VIEW_TYPE_EXTENSION_BACKGROUND_PAGE) {
         CHECK(host->did_stop_loading());
@@ -148,7 +154,8 @@ void LazyBackgroundTaskQueue::Observe(
     }
     case chrome::NOTIFICATION_EXTENSION_HOST_DESTROYED: {
       Profile* profile = content::Source<Profile>(source).ptr();
-      ExtensionHost* host = content::Details<ExtensionHost>(details).ptr();
+      ExtensionHost* host =
+           content::Details<ExtensionHost>(details).ptr();
       if (host->extension_host_type() ==
               chrome::VIEW_TYPE_EXTENSION_BACKGROUND_PAGE) {
         PendingTasksKey key(profile,  host->extension()->id());

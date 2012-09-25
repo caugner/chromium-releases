@@ -15,23 +15,6 @@
 #include "third_party/skia/include/core/SkRegion.h"
 #include "third_party/skia/include/utils/mac/SkCGUtils.h"
 
-// 10.6 API that we use if available.
-#if !defined(MAC_OS_X_VERSION_10_6) || \
-    MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_6
-
-@interface NSImageRep (NSObject)
-
-- (BOOL)drawInRect:(NSRect)dstSpacePortionRect
-          fromRect:(NSRect)srcSpacePortionRect
-         operation:(NSCompositingOperation)op
-          fraction:(CGFloat)requestedAlpha
-    respectFlipped:(BOOL)respectContextIsFlipped
-             hints:(NSDictionary*)hints;
-
-@end
-
-#endif // OSes < Mac OS X 10.6
-
 namespace {
 
 // Draws an NSImage or an NSImageRep with a given size into a SkBitmap.
@@ -170,7 +153,7 @@ SkColor CGColorRefToSkColor(CGColorRef color) {
 }
 
 // Converts ARGB to CGColorRef.
-CGColorRef SkColorToCGColorRef(SkColor color) {
+CGColorRef CGColorCreateFromSkColor(SkColor color) {
   return CGColorCreateGenericRGB(SkColorGetR(color) / 255.0,
                                  SkColorGetG(color) / 255.0,
                                  SkColorGetB(color) / 255.0,

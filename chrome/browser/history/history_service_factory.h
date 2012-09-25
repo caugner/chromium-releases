@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_HISTORY_HISTORY_SERVICE_FACTORY_H_
 #define CHROME_BROWSER_HISTORY_HISTORY_SERVICE_FACTORY_H_
-#pragma once
 
 #include "base/memory/singleton.h"
 #include "chrome/browser/profiles/profile.h"
@@ -21,6 +20,9 @@ class HistoryServiceFactory
       Profile* profile, Profile::ServiceAccessType sat);
 
   static scoped_refptr<HistoryService> GetForProfileIfExists(
+      Profile* profile, Profile::ServiceAccessType sat);
+
+  static scoped_refptr<HistoryService> GetForProfileWithoutCreating(
       Profile* profile);
 
   static HistoryServiceFactory* GetInstance();

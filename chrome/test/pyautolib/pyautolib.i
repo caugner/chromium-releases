@@ -275,52 +275,8 @@ class PyUITestBase {
       set_clear_profile;
   void set_clear_profile(bool clear_profile);
 
-  // Navigation Methods
-  %feature("docstring", "Navigate to the given url in the given tab and given "
-           "window (or active tab in first window if indexes not given). "
-           "Note that this method also activates the corresponding tab/window "
-           "if it's not active already. Blocks until page has loaded.")
-      NavigateToURL;
-  void NavigateToURL(const char* url_string);
-  void NavigateToURL(const char* url_string, int window_index);
-  void NavigateToURL(const char* url_string, int window_index, int tab_index);
-
-  %feature("docstring", "Reload the active tab in the given window (or first "
-           "window if index not given). Blocks until page has reloaded.")
-      ReloadActiveTab;
-  void ReloadActiveTab(int window_index = 0);
-
-  // BrowserProxy methods
-  %feature("docstring", "Apply the accelerator with given id "
-           "(IDC_BACK, IDC_NEWTAB ...) to the given or first window. "
-           "The list can be found at chrome/app/chrome_dll_resource.h. "
-           "Note that this method just schedules the accelerator, but does "
-           "not wait for it to actually finish doing anything."
-           "Returns True on success.")
-      ApplyAccelerator;
-  bool ApplyAccelerator(int id, int window_index=0);
-  %feature("docstring", "Like ApplyAccelerator, except that it waits for "
-           "the command to execute.") RunCommand;
-  bool RunCommand(int browser_command, int window_index = 0);
-  %feature("docstring", "Returns true if the given command id is enabled on "
-           "the given window.") IsMenuCommandEnabled;
-  bool IsMenuCommandEnabled(int browser_command, int window_index = 0);
-
-  // Get/fetch properties
-  %feature("docstring",
-           "Get the path to download directory.") GetDownloadDirectory;
-  FilePath GetDownloadDirectory();
-
   %feature("docstring", "Get the path to profile directory.") user_data_dir;
   FilePath user_data_dir() const;
-
-  %feature("docstring", "Set download shelf visibility for the given or "
-           "first browser window.") SetDownloadShelfVisible;
-  void SetDownloadShelfVisible(bool is_visible, int window_index=0);
-
-  %feature("docstring", "Determine if the download shelf is visible in the "
-           "given or first browser window.") IsDownloadShelfVisible;
-  bool IsDownloadShelfVisible(int window_index=0);
 
   %feature("docstring", "Determine if the bookmark bar is visible. "
            "If the NTP is visible, only return true if attached "
@@ -334,87 +290,46 @@ class PyUITestBase {
   %feature("docstring", "Wait for the bookmark bar animation to complete. "
            "|wait_for_open| specifies which kind of change we wait for.")
       WaitForBookmarkBarVisibilityChange;
-  bool WaitForBookmarkBarVisibilityChange(bool wait_for_open);
+  bool WaitForBookmarkBarVisibilityChange(bool wait_for_open,
+                                          int window_index=0);
 
-  %feature("docstring", "Get the bookmarks as a JSON string.  Internal method.")
+  %feature("docstring", "Get the bookmarks as a JSON string. Internal method.")
       _GetBookmarksAsJSON;
-  std::string _GetBookmarksAsJSON();
+  std::string _GetBookmarksAsJSON(int window_index=0);
 
-  %feature("docstring", "Add a bookmark folder with the given index in the parent."
-                        "  |title| is the title/name of the folder.") AddBookmarkGroup;
-  bool AddBookmarkGroup(std::wstring parent_id, int index, std::wstring title);
+  %feature("docstring", "Add a bookmark folder with the given index in the "
+                        " parent. |title| is the title/name of the folder.")
+      AddBookmarkGroup;
+  bool AddBookmarkGroup(std::wstring parent_id,
+                        int index, std::wstring title,
+                        int window_index=0);
 
-  %feature("docstring", "Add a bookmark with the given title and URL.") AddBookmarkURL;
-  bool AddBookmarkURL(std::wstring parent_id, int index,
-                      std::wstring title, const std::wstring url);
+  %feature("docstring", "Add a bookmark with the given title and URL.")
+      AddBookmarkURL;
+  bool AddBookmarkURL(std::wstring parent_id,
+                      int index,
+                      std::wstring title,
+                      const std::wstring url,
+                      int window_index=0);
 
   %feature("docstring", "Move a bookmark to a new parent.") ReparentBookmark;
-  bool ReparentBookmark(std::wstring id, std::wstring new_parent_id, int index);
+  bool ReparentBookmark(std::wstring id,
+                        std::wstring new_parent_id,
+                        int index,
+                        int window_index=0);
 
   %feature("docstring", "Set the title of a bookmark.") SetBookmarkTitle;
-  bool SetBookmarkTitle(std::wstring id, std::wstring title);
+  bool SetBookmarkTitle(std::wstring id,
+                        std::wstring title,
+                        int window_index=0);
 
   %feature("docstring", "Set the URL of a bookmark.") SetBookmarkURL;
-  bool SetBookmarkURL(std::wstring id, const std::wstring url);
+  bool SetBookmarkURL(std::wstring id,
+                      const std::wstring url,
+                      int window_index=0);
 
   %feature("docstring", "Remove (delete) a bookmark.") RemoveBookmark;
-  bool RemoveBookmark(std::wstring id);
-
-  %feature("docstring", "Open the Find box in the given or first browser "
-           "window.") OpenFindInPage;
-  void OpenFindInPage(int window_index=0);
-
-  %feature("docstring", "Determine if the find box is visible in the "
-           "given or first browser window.") IsFindInPageVisible;
-  bool IsFindInPageVisible(int window_index=0);
-
-  // Tabs and windows methods
-  %feature("docstring", "Open a new browser window.") OpenNewBrowserWindow;
-  bool OpenNewBrowserWindow(bool show);
-
-  %feature("docstring", "Close a browser window.") CloseBrowserWindow;
-  bool CloseBrowserWindow(int window_index);
-
-  %feature("docstring", "Fetch the number of browser windows. Includes popups.")
-      GetBrowserWindowCount;
-  int GetBrowserWindowCount();
-
-  %feature("docstring", "Get the index of the active tab in the given or "
-           "first window. Indexes are zero-based.") GetActiveTabIndex;
-  int GetActiveTabIndex(int window_index=0);
-  %feature("docstring", "Activate the tab at the given zero-based index in "
-           "the given or first window.  Also brings the window to the front. "
-           "Returns True on success.") ActivateTab;
-  bool ActivateTab(int tab_index, int window_index=0);
-
-  %feature("docstring", "Get the title of the active tab for the given or "
-           "first window.") GetActiveTabTitle;
-  std::wstring GetActiveTabTitle(int window_index=0);
-
-  %feature("docstring", "Get the URL for the active tab. for the given or "
-           "first window. Returns an instance of GURL") GetActiveTabURL;
-  GURL GetActiveTabURL(int window_index=0);
-
-  %feature("docstring", "Count of the number of tabs in the given or "
-           "first window.") GetTabCount;
-  int GetTabCount(int window_index=0);
-  %feature("docstring", "Create a new tab at the end of given or first browser "
-           "window and activate it. Blocks until the page is loaded. "
-           "Returns True on success.") AppendTab;
-  bool AppendTab(const GURL& tab_url, int window_index=0);
-
-  %feature("docstring", "Set the value of the cookie at cookie_url to value "
-           "for the given window index and tab index. "
-           "Returns True on success.") SetCookie;
-  bool SetCookie(const GURL& cookie_url, const std::string& value,
-                 int window_index=0, int tab_index=0);
-
-  %feature("docstring", "Get the value of the cookie at cookie_url for the "
-           "given window index and tab index. "
-           "Returns empty string on error or if there is no value for the "
-           "cookie.") GetCookie;
-  std::string GetCookie(const GURL& cookie_url, int window_index=0,
-                        int tab_index=0);
+  bool RemoveBookmark(std::wstring id, int window_index=0);
 
   // Misc methods
   %feature("docstring", "Get a proxy to the browser window at the given "
@@ -430,10 +345,6 @@ class PyUITestBase {
   std::string _SendJSONRequest(int window_index,
                                const std::string& request,
                                int timeout);
-
-  %feature("docstring", "Resets to the default theme. "
-           "Returns true on success.") ResetToDefaultTheme;
-  bool ResetToDefaultTheme();
 
   %feature("docstring",
            "Returns empty string if there were no unexpected Chrome asserts or "

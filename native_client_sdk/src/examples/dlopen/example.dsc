@@ -2,17 +2,17 @@
   'TOOLS': ['glibc'],
   'TARGETS': [
     {
-      'NAME' : 'dlopen',
-      'TYPE' : 'main',
-      'SOURCES' : ['dlopen.cc'],
-      'LDFLAGS' : ['-g','-ldl','-lppapi_cpp', '-lppapi']
+      'NAME': 'dlopen',
+      'TYPE': 'main',
+      'SOURCES': ['dlopen.cc'],
+      'LIBS': ['dl', 'ppapi_cpp', 'ppapi', 'pthread']
     },
     {
       'NAME' : 'libeightball',
       'TYPE' : 'so',
       'SOURCES' : ['eightball.cc', 'eightball.h'],
       'CXXFLAGS': ['$(NACL_CXXFLAGS)', '-fPIC'],
-      'LDFLAGS' : ['-g','-ldl','-lppapi_cpp', '-lppapi', '-shared']
+      'LIBS' : ['ppapi_cpp', 'ppapi', 'pthread']
     }
   ],
   'DEST': 'examples',

@@ -31,11 +31,11 @@ TestHttpBridgeFactory::TestHttpBridgeFactory() {}
 
 TestHttpBridgeFactory::~TestHttpBridgeFactory() {}
 
-sync_api::HttpPostProviderInterface* TestHttpBridgeFactory::Create() {
+syncer::HttpPostProviderInterface* TestHttpBridgeFactory::Create() {
   return new TestHttpBridge();
 }
 
-void TestHttpBridgeFactory::Destroy(sync_api::HttpPostProviderInterface* http) {
+void TestHttpBridgeFactory::Destroy(syncer::HttpPostProviderInterface* http) {
   delete static_cast<TestHttpBridge*>(http);
 }
 

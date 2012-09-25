@@ -11,7 +11,6 @@
 #include "base/stl_util.h"
 
 #include "content/common/gpu/gpu_channel.h"
-#include "content/common/gpu/gpu_command_buffer_stub.h"
 #include "content/common/gpu/gpu_messages.h"
 #include "gpu/command_buffer/common/command_buffer.h"
 #include "ipc/ipc_message_macros.h"
@@ -37,32 +36,47 @@
 
 using gpu::gles2::TextureManager;
 
-static bool MakeDecoderContextCurrent(gpu::gles2::GLES2Decoder* decoder) {
-  bool success = decoder->MakeCurrent();
-  if (!success)
+static bool MakeDecoderContextCurrent(
+    const base::WeakPtr<GpuCommandBufferStub> stub) {
+  if (!stub) {
+    DLOG(ERROR) << "Stub is gone; won't MakeCurrent().";
+    return false;
+  }
+
+  if (!stub->decoder()->MakeCurrent()) {
     DLOG(ERROR) << "Failed to MakeCurrent()";
-  return success;
+    return false;
+  }
+
+  return true;
 }
 
 GpuVideoDecodeAccelerator::GpuVideoDecodeAccelerator(
-    IPC::Message::Sender* sender,
+    IPC::Sender* sender,
     int32 host_route_id,
     GpuCommandBufferStub* stub)
     : sender_(sender),
       init_done_msg_(NULL),
       host_route_id_(host_route_id),
-      stub_(stub),
+      stub_(stub->AsWeakPtr()),
       video_decode_accelerator_(NULL) {
+  if (!stub_)
+    return;
+  stub_->AddDestructionObserver(this);
   make_context_current_ =
-      base::Bind(&MakeDecoderContextCurrent, stub_->decoder());
+      base::Bind(&MakeDecoderContextCurrent, stub_->AsWeakPtr());
 }
 
 GpuVideoDecodeAccelerator::~GpuVideoDecodeAccelerator() {
-  if (video_decode_accelerator_)
-    video_decode_accelerator_->Destroy();
+  if (stub_)
+    stub_->RemoveDestructionObserver(this);
+  if (video_decode_accelerator_.get())
+    video_decode_accelerator_.release()->Destroy();
 }
 
 bool GpuVideoDecodeAccelerator::OnMessageReceived(const IPC::Message& msg) {
+  if (!stub_ || !video_decode_accelerator_.get())
+    return false;
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(GpuVideoDecodeAccelerator, msg)
     IPC_MESSAGE_HANDLER(AcceleratedVideoDecoderMsg_Decode, OnDecode)
@@ -115,10 +129,12 @@ void GpuVideoDecodeAccelerator::NotifyError(
   if (init_done_msg_) {
     // If we get an error while we're initializing, NotifyInitializeDone won't
     // be called, so we need to send the reply (with an error) here.
-    init_done_msg_->set_reply_error();
+    GpuCommandBufferMsg_CreateVideoDecoder::WriteReplyParams(
+        init_done_msg_, -1);
     if (!Send(init_done_msg_))
       DLOG(ERROR) << "Send(init_done_msg_) failed";
     init_done_msg_ = NULL;
+    return;
   }
   if (!Send(new AcceleratedVideoDecoderHostMsg_ErrorNotification(
           host_route_id_, error))) {
@@ -134,6 +150,8 @@ void GpuVideoDecodeAccelerator::Initialize(
   DCHECK(!init_done_msg_);
   DCHECK(init_done_msg);
   init_done_msg_ = init_done_msg;
+  if (!stub_)
+    return;
 
 #if !defined(OS_WIN)
   // Ensure we will be able to get a GL context at all before initializing
@@ -151,31 +169,26 @@ void GpuVideoDecodeAccelerator::Initialize(
     return;
   }
   DLOG(INFO) << "Initializing DXVA HW decoder for windows.";
-  scoped_refptr<DXVAVideoDecodeAccelerator> video_decoder(
-      new DXVAVideoDecodeAccelerator(this));
-  video_decode_accelerator_ = video_decoder;
+  video_decode_accelerator_.reset(new DXVAVideoDecodeAccelerator(
+      this, make_context_current_));
 #elif defined(OS_CHROMEOS) && defined(ARCH_CPU_ARMEL)
-  scoped_refptr<OmxVideoDecodeAccelerator> video_decoder(
-      new OmxVideoDecodeAccelerator(this));
-  video_decoder->SetEglState(
+  video_decode_accelerator_.reset(new OmxVideoDecodeAccelerator(
       gfx::GLSurfaceEGL::GetHardwareDisplay(),
-      stub_->decoder()->GetGLContext()->GetHandle());
-  video_decode_accelerator_ = video_decoder;
+      stub_->decoder()->GetGLContext()->GetHandle(),
+      this));
 #elif defined(OS_CHROMEOS) && defined(ARCH_CPU_X86_FAMILY)
-  scoped_refptr<VaapiVideoDecodeAccelerator> video_decoder(
-      new VaapiVideoDecodeAccelerator(this, make_context_current_));
   gfx::GLContextGLX* glx_context =
       static_cast<gfx::GLContextGLX*>(stub_->decoder()->GetGLContext());
   GLXContext glx_context_handle =
       static_cast<GLXContext>(glx_context->GetHandle());
-  video_decoder->SetGlxState(glx_context->display(), glx_context_handle);
-  video_decode_accelerator_ = video_decoder;
+  video_decode_accelerator_.reset(new VaapiVideoDecodeAccelerator(
+      glx_context->display(), glx_context_handle, this,
+      make_context_current_));
 #elif defined(OS_MACOSX)
-  scoped_refptr<MacVideoDecodeAccelerator> video_decoder(
-      new MacVideoDecodeAccelerator(this));
-  video_decoder->SetCGLContext(static_cast<CGLContextObj>(
-      stub_->decoder()->GetGLContext()->GetHandle()));
-  video_decode_accelerator_ = video_decoder;
+  video_decode_accelerator_.reset(new MacVideoDecodeAccelerator(
+      static_cast<CGLContextObj>(
+          stub_->decoder()->GetGLContext()->GetHandle()),
+      this));
 #else
   NOTIMPLEMENTED() << "HW video decode acceleration not available.";
   NotifyError(media::VideoDecodeAccelerator::PLATFORM_FAILURE);
@@ -196,7 +209,6 @@ void GpuVideoDecodeAccelerator::OnAssignPictureBuffers(
       const std::vector<int32>& buffer_ids,
       const std::vector<uint32>& texture_ids,
       const std::vector<gfx::Size>& sizes) {
-  DCHECK(stub_ && stub_->decoder());  // Ensure already Initialize()'d.
   gpu::gles2::GLES2Decoder* command_decoder = stub_->decoder();
   gpu::gles2::TextureManager* texture_manager =
       command_decoder->GetContextGroup()->texture_manager();
@@ -246,7 +258,7 @@ void GpuVideoDecodeAccelerator::OnReset() {
 
 void GpuVideoDecodeAccelerator::OnDestroy() {
   DCHECK(video_decode_accelerator_.get());
-  video_decode_accelerator_->Destroy();
+  video_decode_accelerator_.release()->Destroy();
 }
 
 void GpuVideoDecodeAccelerator::NotifyEndOfBitstreamBuffer(
@@ -260,6 +272,8 @@ void GpuVideoDecodeAccelerator::NotifyEndOfBitstreamBuffer(
 }
 
 void GpuVideoDecodeAccelerator::NotifyInitializeDone() {
+  GpuCommandBufferMsg_CreateVideoDecoder::WriteReplyParams(
+      init_done_msg_, host_route_id_);
   if (!Send(init_done_msg_))
     DLOG(ERROR) << "Send(init_done_msg_) failed";
   init_done_msg_ = NULL;
@@ -273,6 +287,16 @@ void GpuVideoDecodeAccelerator::NotifyFlushDone() {
 void GpuVideoDecodeAccelerator::NotifyResetDone() {
   if (!Send(new AcceleratedVideoDecoderHostMsg_ResetDone(host_route_id_)))
     DLOG(ERROR) << "Send(AcceleratedVideoDecoderHostMsg_ResetDone) failed";
+}
+
+void GpuVideoDecodeAccelerator::OnWillDestroyStub(GpuCommandBufferStub* stub) {
+  DCHECK_EQ(stub, stub_.get());
+  if (video_decode_accelerator_.get())
+    video_decode_accelerator_.release()->Destroy();
+  if (stub_) {
+    stub_->RemoveDestructionObserver(this);
+    stub_.reset();
+  }
 }
 
 bool GpuVideoDecodeAccelerator::Send(IPC::Message* message) {

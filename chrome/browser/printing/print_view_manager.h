@@ -4,10 +4,10 @@
 
 #ifndef CHROME_BROWSER_PRINTING_PRINT_VIEW_MANAGER_H_
 #define CHROME_BROWSER_PRINTING_PRINT_VIEW_MANAGER_H_
-#pragma once
 
 #include "base/memory/ref_counted.h"
 #include "base/string16.h"
+#include "chrome/browser/prefs/pref_member.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_contents_observer.h"
@@ -18,6 +18,7 @@ struct PrintHostMsg_DidPrintPage_Params;
 
 namespace content {
 class RenderProcessHost;
+class RenderViewHost;
 }
 
 namespace printing {
@@ -51,6 +52,11 @@ class PrintViewManager : public content::NotificationObserver,
   // preview tab.
   bool AdvancedPrintNow();
 
+  // Same as PrintNow(), but for the case where we want to send the result to
+  // another destination.
+  // TODO(mad) Add an argument so we can pass the destination interface.
+  bool PrintToDestination();
+
   // Initiate print preview of the current document by first notifying the
   // renderer. Since this happens asynchronous, the print preview tab creation
   // will not be completed on the return of this function. Returns false if
@@ -65,8 +71,8 @@ class PrintViewManager : public content::NotificationObserver,
   // renderer in the case of scripted print preview.
   void PrintPreviewDone();
 
-  // Whether to block scripted printing or not.
-  void SetScriptedPrintingBlocked(bool blocked);
+  // Whether to block scripted printing for our tab or not.
+  void UpdateScriptedPrintingBlocked();
 
   // Sets |observer| as the current PrintViewManagerObserver. Pass in NULL to
   // remove the current observer. |observer| may always be NULL, but |observer_|
@@ -80,6 +86,10 @@ class PrintViewManager : public content::NotificationObserver,
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
+
+  // content::WebContentsObserver implementation.
+  virtual void DidStartLoading(
+      content::RenderViewHost* render_view_host) OVERRIDE;
 
   // content::WebContentsObserver implementation.
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
@@ -198,6 +208,12 @@ class PrintViewManager : public content::NotificationObserver,
 
   // Keeps track of the pending callback during scripted print preview.
   content::RenderProcessHost* scripted_print_preview_rph_;
+
+  // Whether printing is enabled.
+  BooleanPrefMember printing_enabled_;
+
+  // Whether our tab content is in blocked state.
+  bool tab_content_blocked_;
 
   DISALLOW_COPY_AND_ASSIGN(PrintViewManager);
 };

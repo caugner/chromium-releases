@@ -65,7 +65,8 @@ PrefService* TestingBrowserProcess::local_state() {
   return local_state_;
 }
 
-VariationsService* TestingBrowserProcess::variations_service() {
+chrome_variations::VariationsService*
+    TestingBrowserProcess::variations_service() {
   return NULL;
 }
 
@@ -95,10 +96,6 @@ IconManager* TestingBrowserProcess::icon_manager() {
 }
 
 ThumbnailGenerator* TestingBrowserProcess::GetThumbnailGenerator() {
-  return NULL;
-}
-
-TabCloseableStateWatcher* TestingBrowserProcess::tab_closeable_state_watcher() {
   return NULL;
 }
 
@@ -137,7 +134,7 @@ ui::Clipboard* TestingBrowserProcess::clipboard() {
   return clipboard_.get();
 }
 
-ExtensionEventRouterForwarder*
+extensions::EventRouterForwarder*
 TestingBrowserProcess::extension_event_router_forwarder() {
   return NULL;
 }

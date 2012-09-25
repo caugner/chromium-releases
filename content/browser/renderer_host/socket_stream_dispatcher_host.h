@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_BROWSER_RENDERER_HOST_SOCKET_STREAM_DISPATCHER_HOST_H_
 #define CONTENT_BROWSER_RENDERER_HOST_SOCKET_STREAM_DISPATCHER_HOST_H_
-#pragma once
 
 #include <vector>
 
@@ -31,8 +30,7 @@ class ResourceContext;
 class SocketStreamDispatcherHost
     : public BrowserMessageFilter,
       public net::SocketStream::Delegate,
-      public SSLErrorHandler::Delegate,
-      public base::SupportsWeakPtr<SocketStreamDispatcherHost> {
+      public SSLErrorHandler::Delegate {
  public:
   SocketStreamDispatcherHost(
       int render_process_id,
@@ -87,6 +85,8 @@ class SocketStreamDispatcherHost
   const scoped_ptr<ResourceMessageFilter::URLRequestContextSelector>
       url_request_context_selector_;
   ResourceContext* resource_context_;
+
+  base::WeakPtrFactory<SocketStreamDispatcherHost> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(SocketStreamDispatcherHost);
 };

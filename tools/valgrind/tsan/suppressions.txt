@@ -224,9 +224,24 @@
 }
 
 {
-  bug_84467 (Could be benign. See bug for details)
+  bug_84467a (Could be benign. See bug for details)
   ThreadSanitizer:Race
   fun:unixTempFileDir
+}
+
+{
+  bug_84467b
+  ThreadSanitizer:Race
+  fun:getenv
+  fun:unixTempFileDir
+}
+
+{
+  bug_84467c
+  ThreadSanitizer:Race
+  fun:__add_to_environ
+  fun:::EnvironmentImpl::SetVarImpl
+  fun:::EnvironmentImpl::SetVar
 }
 
 {
@@ -572,6 +587,15 @@
   fun:media::FFmpegVideoDecoder::DoReset
 }
 {
+  bug_93932_j
+  ThreadSanitizer:Race
+  ...
+  fun:base::MD5Update
+  fun:media::VideoFrame::HashFrameForTesting
+  fun:media::PipelineIntegrationTestBase::OnVideoRendererPaint
+  fun:base::internal::RunnableAdapter::Run
+}
+{
   bug_100020
   ThreadSanitizer:Race
   fun:linked_ptr_internal::join
@@ -713,7 +737,6 @@
    fun:base::MessagePumpLibevent::Run
    fun:MessageLoop::RunInternal
    fun:MessageLoop::RunHandler
-   fun:MessageLoop::Run
 }
 {
   bug_104776_maybe_benign
@@ -766,8 +789,8 @@
    bug_107903_b
    ThreadSanitizer:Race
    ...
-   fun:sync_api::SyncManager::SyncInternal::ShutdownOnSyncThread
-   fun:sync_api::SyncManager::ShutdownOnSyncThread
+   fun:syncer::SyncManager::SyncInternal::ShutdownOnSyncThread
+   fun:syncer::SyncManager::ShutdownOnSyncThread
    fun:browser_sync::SyncBackendHost::Core::DoShutdown
    fun:base::internal::RunnableAdapter::Run
 }
@@ -775,8 +798,8 @@
    bug_107903_c
    ThreadSanitizer:Race
    fun:syncable::DirectoryChangeDelegate::~DirectoryChangeDelegate
-   fun:sync_api::SyncManager::SyncInternal::~SyncInternal
-   fun:sync_api::SyncManager::~SyncManager
+   fun:syncer::SyncManager::SyncInternal::~SyncInternal
+   fun:syncer::SyncManager::~SyncManager
    fun:scoped_ptr::reset
    fun:browser_sync::SyncBackendHost::Core::DoShutdown
    fun:base::internal::RunnableAdapter::Run
@@ -924,8 +947,8 @@
   fun:file_util::FileEnumerator::ReadDirectory
   fun:file_util::FileEnumerator::Next
   fun:::GetPrefsCandidateFilesFromFolder
-  fun:ExternalPrefExtensionLoader::ReadStandaloneExtensionPrefFiles
-  fun:ExternalPrefExtensionLoader::LoadOnFileThread
+  fun:ExternalPrefLoader::ReadStandaloneExtensionPrefFiles
+  fun:ExternalPrefLoader::LoadOnFileThread
   fun:base::internal::RunnableAdapter::Run
 }
 {
@@ -960,5 +983,46 @@
    bug_132230b
    ThreadSanitizer:Race
    fun:ShellIntegration::DefaultWebClientWorker::ExecuteSetAsDefault
+   fun:base::internal::RunnableAdapter::Run
+}
+{
+   bug_137701
+   ThreadSanitizer:Race
+   ...
+   fun:_output_*
+   fun:_vsnprintf_helper
+}
+{
+   bug_137973_a
+   ThreadSanitizer:Race
+   fun:media::Pipeline::OnVideoTimeUpdate
+   fun:base::internal::RunnableAdapter::Run
+}
+{
+  bug_137973_b
+  ThreadSanitizer:Race
+  fun:media::Pipeline::SetState
+  fun:media::Pipeline::TearDownPipeline
+  fun:media::Pipeline::StopTask
+  fun:base::internal::RunnableAdapter::Run
+}
+{
+  bug_137973_c
+  ThreadSanitizer:Race
+  fun:media::Pipeline::SetState
+  fun:media::Pipeline::TeardownStateTransitionTask
+  fun:base::internal::RunnableAdapter::Run
+}
+{
+   bug_138691
+   ThreadSanitizer:Race
+   ...
+   fun:testing::internal::UntypedFunctionMockerBase::UntypedInvokeWith
+   fun:testing::internal::FunctionMockerBase::InvokeWith
+   fun:testing::internal::FunctionMocker::Invoke
+   fun:browser_sync::NewNonFrontendDataTypeControllerMock::RecordUnrecoverableError
+   fun:browser_sync::::NewNonFrontendDataTypeControllerFake::RecordUnrecoverableError
+   fun:browser_sync::NonFrontendDataTypeController::StartFailed
+   fun:browser_sync::NewNonFrontendDataTypeController::StartAssociationWithSharedChangeProcessor
    fun:base::internal::RunnableAdapter::Run
 }

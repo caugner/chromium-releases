@@ -7,19 +7,18 @@
 #include "base/values.h"
 #include "sync/protocol/proto_enum_conversions.h"
 
-namespace browser_sync {
+namespace syncer {
 namespace sessions {
 
 SyncSourceInfo::SyncSourceInfo()
     : updates_source(sync_pb::GetUpdatesCallerInfo::UNKNOWN) {}
 
-SyncSourceInfo::SyncSourceInfo(
-    const syncable::ModelTypePayloadMap& t)
+SyncSourceInfo::SyncSourceInfo(const ModelTypePayloadMap& t)
     : updates_source(sync_pb::GetUpdatesCallerInfo::UNKNOWN), types(t) {}
 
 SyncSourceInfo::SyncSourceInfo(
     const sync_pb::GetUpdatesCallerInfo::GetUpdatesSource& u,
-    const syncable::ModelTypePayloadMap& t)
+    const ModelTypePayloadMap& t)
     : updates_source(u), types(t) {}
 
 SyncSourceInfo::~SyncSourceInfo() {}
@@ -28,9 +27,9 @@ DictionaryValue* SyncSourceInfo::ToValue() const {
   DictionaryValue* value = new DictionaryValue();
   value->SetString("updatesSource",
                    GetUpdatesSourceString(updates_source));
-  value->Set("types", syncable::ModelTypePayloadMapToValue(types));
+  value->Set("types", ModelTypePayloadMapToValue(types));
   return value;
 }
 
 }  // namespace sessions
-}  // namespace browser_sync
+}  // namespace syncer

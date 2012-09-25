@@ -19,6 +19,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/env_vars.h"
 #include "chrome/test/automation/automation_proxy.h"
+#include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "chrome/test/perf/perf_test.h"
@@ -35,7 +36,9 @@ class StartupTest : public UIPerfTest {
   StartupTest() {
     show_window_ = true;
   }
-  void SetUp() {}
+  void SetUp() {
+    collect_profiling_stats_ = false;
+  }
   void TearDown() {}
 
   enum TestColdness {
@@ -56,6 +59,16 @@ class StartupTest : public UIPerfTest {
         FilePath(FILE_PATH_LITERAL("simple.html")));
     ASSERT_TRUE(file_util::PathExists(file_url));
     launch_arguments_.AppendArgPath(file_url);
+  }
+
+  // Setup the command line arguments to capture profiling data for tasks.
+  void SetUpWithProfiling() {
+    profiling_file_ = ui_test_utils::GetTestFilePath(
+        FilePath(FilePath::kCurrentDirectory),
+        FilePath(FILE_PATH_LITERAL("task_profile.json")));
+    launch_arguments_.AppendSwitchPath(switches::kProfilingOutputFile,
+                                       profiling_file_);
+    collect_profiling_stats_ = true;
   }
 
   // Load a complex html file on startup represented by |which_tab|.
@@ -92,9 +105,11 @@ class StartupTest : public UIPerfTest {
     if (profile_type_ != UITestBase::COMPLEX_THEME)
       return;
 
-    const FilePath pref_template_path(user_data_dir().AppendASCII("Default").
+    const FilePath pref_template_path(user_data_dir().
+        AppendASCII("Default").
         AppendASCII("PreferencesTemplate"));
-    const FilePath pref_path(user_data_dir().AppendASCII("Default").
+    const FilePath pref_path(user_data_dir().
+        AppendASCII(TestingProfile::kTestUserProfileDir).
         AppendASCII("Preferences"));
 
     // Read in preferences template.
@@ -201,7 +216,7 @@ class StartupTest : public UIPerfTest {
         ASSERT_TRUE(browser_proxy.get());
 
         if (browser_proxy->GetInitialLoadTimes(
-              TestTimeouts::action_max_timeout_ms(),
+              TestTimeouts::action_max_timeout(),
               &min_start,
               &max_stop,
               &times) &&
@@ -278,6 +293,9 @@ class StartupTest : public UIPerfTest {
       }
     }
   }
+
+  FilePath profiling_file_;
+  bool collect_profiling_stats_;
 };
 
 TEST_F(StartupTest, PerfWarm) {
@@ -441,6 +459,13 @@ TEST_F(StartupTest, MAYBE_PerfExtensionContentScript50) {
 TEST_F(StartupTest, MAYBE_PerfComplexTheme) {
   RunStartupTest("warm", "t-theme", WARM, NOT_IMPORTANT,
                  UITestBase::COMPLEX_THEME, 0, 0);
+}
+
+TEST_F(StartupTest, ProfilingScript1) {
+  SetUpWithFileURL();
+  SetUpWithProfiling();
+  RunStartupTest("warm", "profiling_scripts1", WARM, NOT_IMPORTANT,
+                 UITestBase::DEFAULT_THEME, 1, 0);
 }
 
 #if defined(TOOLKIT_GTK)

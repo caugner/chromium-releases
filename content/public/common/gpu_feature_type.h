@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_PUBLIC_COMMON_GPU_FEATURE_TYPE_H_
 #define CONTENT_PUBLIC_COMMON_GPU_FEATURE_TYPE_H_
-#pragma once
 
 namespace content {
 
@@ -18,12 +17,16 @@ enum GpuFeatureType {
   GPU_FEATURE_TYPE_MULTISAMPLING = 1 << 3,
   GPU_FEATURE_TYPE_FLASH3D = 1 << 4,
   GPU_FEATURE_TYPE_FLASH_STAGE3D = 1 << 5,
+  GPU_FEATURE_TYPE_TEXTURE_SHARING = 1 << 6,
+  GPU_FEATURE_TYPE_ACCELERATED_VIDEO_DECODE = 1 << 7,
   GPU_FEATURE_TYPE_ALL = GPU_FEATURE_TYPE_ACCELERATED_2D_CANVAS |
                          GPU_FEATURE_TYPE_ACCELERATED_COMPOSITING |
                          GPU_FEATURE_TYPE_WEBGL |
                          GPU_FEATURE_TYPE_MULTISAMPLING |
                          GPU_FEATURE_TYPE_FLASH3D |
-                         GPU_FEATURE_TYPE_FLASH_STAGE3D,
+                         GPU_FEATURE_TYPE_FLASH_STAGE3D |
+                         GPU_FEATURE_TYPE_TEXTURE_SHARING |
+                         GPU_FEATURE_TYPE_ACCELERATED_VIDEO_DECODE,
   // All flags initialized to false, i.e., no feature is blacklisted.
   GPU_FEATURE_TYPE_UNKNOWN = 0
 };

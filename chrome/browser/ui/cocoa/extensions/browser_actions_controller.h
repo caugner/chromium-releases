@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_EXTENSIONS_BROWSER_ACTIONS_CONTROLLER_H_
 #define CHROME_BROWSER_UI_COCOA_EXTENSIONS_BROWSER_ACTIONS_CONTROLLER_H_
-#pragma once
 
 #import <Cocoa/Cocoa.h>
 
@@ -30,7 +29,7 @@ extern NSString* const kBrowserActionVisibilityChangedNotification;
 
 // Handles state and provides an interface for controlling the Browser Actions
 // container within the Toolbar.
-@interface BrowserActionsController : NSObject {
+@interface BrowserActionsController : NSObject<NSMenuDelegate> {
  @private
   // Reference to the current browser. Weak.
   Browser* browser_;
@@ -82,9 +81,6 @@ extern NSString* const kBrowserActionVisibilityChangedNotification;
 // Returns the current number of browser action buttons displayed in the
 // container.
 - (NSUInteger)visibleButtonCount;
-
-// Returns a pointer to the chevron menu button.
-- (MenuButton*)chevronMenuButton;
 
 // Resizes the container given the number of visible buttons, taking into
 // account the size of the grippy. Also updates the persistent width preference.

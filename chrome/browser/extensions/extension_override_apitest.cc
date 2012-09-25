@@ -9,7 +9,7 @@
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/navigation_entry.h"
@@ -25,7 +25,7 @@ class ExtensionOverrideTest : public ExtensionApiTest {
         browser()->profile()->GetPrefs()->GetDictionary(
             ExtensionWebUI::kExtensionURLOverrides);
 
-    ListValue* values = NULL;
+    const ListValue* values = NULL;
     if (!overrides->GetList("history", &values))
       return false;
 
@@ -52,7 +52,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionOverrideTest, OverrideNewtab) {
     // Navigate to the new tab page.  The overridden new tab page
     // will call chrome.test.notifyPass() .
     ui_test_utils::NavigateToURL(browser(), GURL("chrome://newtab/"));
-    WebContents* tab = browser()->GetActiveWebContents();
+    WebContents* tab = chrome::GetActiveWebContents(browser());
     ASSERT_TRUE(tab->GetController().GetActiveEntry());
     EXPECT_TRUE(tab->GetController().GetActiveEntry()->GetURL().
                 SchemeIs(chrome::kExtensionScheme));
@@ -75,11 +75,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionOverrideTest, MAYBE_OverrideNewtabIncognito) {
 
   // Navigate an incognito tab to the new tab page.  We should get the actual
   // new tab page because we can't load chrome-extension URLs in incognito.
-  ui_test_utils::OpenURLOffTheRecord(browser()->profile(),
-                                     GURL("chrome://newtab/"));
-  Browser* otr_browser = browser::FindTabbedBrowser(
-      browser()->profile()->GetOffTheRecordProfile(), false);
-  WebContents* tab = otr_browser->GetActiveWebContents();
+  Browser* otr_browser = ui_test_utils::OpenURLOffTheRecord(
+      browser()->profile(), GURL("chrome://newtab/"));
+  WebContents* tab = chrome::GetActiveWebContents(otr_browser);
   ASSERT_TRUE(tab->GetController().GetActiveEntry());
   EXPECT_FALSE(tab->GetController().GetActiveEntry()->GetURL().
                SchemeIs(chrome::kExtensionScheme));

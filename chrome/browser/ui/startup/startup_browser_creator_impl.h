@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_STARTUP_STARTUP_BROWSER_CREATOR_IMPL_H_
 #define CHROME_BROWSER_UI_STARTUP_STARTUP_BROWSER_CREATOR_IMPL_H_
-#pragma once
 
 #include <string>
 #include <vector>
@@ -35,11 +34,11 @@ class StartupBrowserCreatorImpl {
   // the first run.  |is_first_run| indicates that this is a new profile.
   StartupBrowserCreatorImpl(const FilePath& cur_dir,
                             const CommandLine& command_line,
-                            browser::startup::IsFirstRun is_first_run);
+                            chrome::startup::IsFirstRun is_first_run);
   StartupBrowserCreatorImpl(const FilePath& cur_dir,
                             const CommandLine& command_line,
                             StartupBrowserCreator* browser_creator,
-                            browser::startup::IsFirstRun is_first_run);
+                            chrome::startup::IsFirstRun is_first_run);
   ~StartupBrowserCreatorImpl();
 
   // Creates the necessary windows for startup. Returns true on success,
@@ -123,7 +122,7 @@ class StartupBrowserCreatorImpl {
   // Adds any startup infobars to the selected tab of the given browser.
   void AddInfoBarsIfNecessary(
       Browser* browser,
-      browser::startup::IsProcessStartup is_process_startup);
+      chrome::startup::IsProcessStartup is_process_startup);
 
   // Adds additional startup URLs to the specified vector.
   void AddStartupURLs(std::vector<GURL>* startup_urls) const;

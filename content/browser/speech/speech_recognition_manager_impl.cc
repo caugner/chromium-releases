@@ -7,8 +7,9 @@
 #include "base/bind.h"
 #include "content/browser/browser_main_loop.h"
 #include "content/browser/speech/google_one_shot_remote_engine.h"
+#include "content/browser/speech/google_streaming_remote_engine.h"
 #include "content/browser/speech/speech_recognition_engine.h"
-#include "content/browser/speech/speech_recognizer_impl.h"
+#include "content/browser/speech/speech_recognizer.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/resource_context.h"
@@ -30,8 +31,6 @@ using content::SpeechRecognitionSessionContext;
 using content::SpeechRecognitionSessionConfig;
 
 namespace content {
-const int SpeechRecognitionManager::kSessionIDInvalid = 0;
-
 SpeechRecognitionManager* SpeechRecognitionManager::GetInstance() {
   return speech::SpeechRecognitionManagerImpl::GetInstance();
 }
@@ -93,21 +92,29 @@ int SpeechRecognitionManagerImpl::CreateSession(
   SpeechRecognitionEngineConfig remote_engine_config;
   remote_engine_config.language = config.language;
   remote_engine_config.grammars = config.grammars;
-  remote_engine_config.audio_sample_rate =
-      SpeechRecognizerImpl::kAudioSampleRate;
+  remote_engine_config.audio_sample_rate = SpeechRecognizer::kAudioSampleRate;
   remote_engine_config.audio_num_bits_per_sample =
-     SpeechRecognizerImpl::kNumBitsPerAudioSample;
+     SpeechRecognizer::kNumBitsPerAudioSample;
   remote_engine_config.filter_profanities = config.filter_profanities;
+  remote_engine_config.max_hypotheses = config.max_hypotheses;
   remote_engine_config.hardware_info = hardware_info;
   remote_engine_config.origin_url = can_report_metrics ? config.origin_url : "";
 
-  SpeechRecognitionEngine* google_remote_engine =
+  SpeechRecognitionEngine* google_remote_engine;
+  if (config.is_one_shot) {
+    google_remote_engine =
         new GoogleOneShotRemoteEngine(config.url_request_context_getter);
+  } else {
+    google_remote_engine =
+        new GoogleStreamingRemoteEngine(config.url_request_context_getter);
+  }
+
   google_remote_engine->SetConfig(remote_engine_config);
 
-  session.recognizer = new SpeechRecognizerImpl(this,
-                                                session_id,
-                                                google_remote_engine);
+  session.recognizer = new SpeechRecognizer(this,
+                                            session_id,
+                                            config.is_one_shot,
+                                            google_remote_engine);
   return session_id;
 }
 
@@ -330,6 +337,20 @@ void SpeechRecognitionManagerImpl::AbortAllSessionsForListener(
   }
 }
 
+void SpeechRecognitionManagerImpl::AbortAllSessionsForRenderView(
+    int render_process_id,
+    int render_view_id) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  for (SessionsTable::iterator it = sessions_.begin(); it != sessions_.end();
+       ++it) {
+    Session& session = it->second;
+    if (session.context.render_process_id == render_process_id &&
+        session.context.render_view_id == render_view_id) {
+      AbortSession(session.id);
+    }
+  }
+}
+
 // -----------------------  Core FSM implementation ---------------------------
 void SpeechRecognitionManagerImpl::DispatchEvent(int session_id,
                                                  FSMEvent event) {
@@ -356,7 +377,7 @@ void SpeechRecognitionManagerImpl::DispatchEvent(int session_id,
 // This FSM handles the evolution of each session, from the viewpoint of the
 // interaction with the user (that may be either the browser end-user which
 // interacts with UI bubbles, or JS developer intracting with JS methods).
-// All the events received by the SpeechRecognizerImpl instances (one for each
+// All the events received by the SpeechRecognizer instances (one for each
 // session) are always routed to the SpeechRecognitionEventListener(s)
 // regardless the choices taken in this FSM.
 void SpeechRecognitionManagerImpl::ExecuteTransitionAndGetNextState(

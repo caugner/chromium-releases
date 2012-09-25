@@ -17,6 +17,7 @@
 #include "chrome/browser/chromeos/login/base_login_display_host.h"
 #include "chrome/browser/chromeos/login/proxy_settings_dialog.h"
 #include "chrome/browser/chromeos/login/webui_login_display.h"
+#include "chrome/browser/media/media_stream_devices_controller.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/renderer_preferences_util.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
@@ -32,6 +33,7 @@
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
+#include "ui/aura/env.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/size.h"
 #include "ui/views/controls/webview/webview.h"
@@ -113,6 +115,9 @@ WebUILoginView::WebUILoginView()
     : webui_login_(NULL),
       login_window_(NULL),
       host_window_frozen_(false),
+      is_hidden_(false),
+      login_visible_notification_fired_(false),
+      login_prompt_visible_handled_(false),
       should_emit_login_prompt_visible_(true) {
   registrar_.Add(this,
                  chrome::NOTIFICATION_LOGIN_WEBUI_VISIBLE,
@@ -159,7 +164,7 @@ void WebUILoginView::Init(views::Widget* login_window) {
       ProfileManager::GetDefaultProfile());
 
   registrar_.Add(this,
-                 content::NOTIFICATION_RENDER_VIEW_HOST_CREATED_FOR_TAB,
+                 content::NOTIFICATION_WEB_CONTENTS_RENDER_VIEW_HOST_CREATED,
                  content::Source<WebContents>(web_contents));
 }
 
@@ -201,9 +206,7 @@ void WebUILoginView::LoadURL(const GURL & url) {
   webui_login_->RequestFocus();
 
   CommandLine* command_line = CommandLine::ForCurrentProcess();
-  // Only enable transparency on sign in screen, not on lock screen.
-  if (BaseLoginDisplayHost::default_host() &&
-      command_line->HasSwitch(switches::kEnableNewOobe)) {
+  if (!command_line->HasSwitch(switches::kDisableNewOobe)) {
     // TODO(nkostylev): Use WebContentsObserver::RenderViewCreated to track
     // when RenderView is created.
     // Use a background with transparency to trigger transparency in Webkit.
@@ -221,19 +224,35 @@ content::WebUI* WebUILoginView::GetWebUI() {
   return webui_login_->web_contents()->GetWebUI();
 }
 
+content::WebContents* WebUILoginView::GetWebContents() {
+  return webui_login_->web_contents();
+}
+
 void WebUILoginView::OpenProxySettings() {
   ProxySettingsDialog* dialog =
       new ProxySettingsDialog(NULL, GetNativeWindow());
   dialog->Show();
 }
 
+void WebUILoginView::OnPostponedShow() {
+  set_is_hidden(false);
+  // If notification will happen later let it fire login-prompt-visible signal.
+  if (login_visible_notification_fired_) {
+    LOG(INFO) << "Login WebUI >> postponed show, login_visible already fired";
+    OnLoginPromptVisible();
+  }
+}
+
 void WebUILoginView::SetStatusAreaVisible(bool visible) {
   ash::SystemTray* tray = ash::Shell::GetInstance()->system_tray();
   if (tray) {
-    if (visible)
+    if (visible) {
+      // Tray may have been initialized being hidden.
+      tray->SetVisible(visible);
       tray->GetWidget()->Show();
-    else
+    } else {
       tray->GetWidget()->Hide();
+    }
   }
 }
 
@@ -263,11 +282,12 @@ void WebUILoginView::Observe(int type,
                              const content::NotificationDetails& details) {
   switch (type) {
     case chrome::NOTIFICATION_LOGIN_WEBUI_VISIBLE: {
+      login_visible_notification_fired_ = true;
       OnLoginPromptVisible();
       registrar_.RemoveAll();
       break;
     }
-    case content::NOTIFICATION_RENDER_VIEW_HOST_CREATED_FOR_TAB: {
+    case content::NOTIFICATION_WEB_CONTENTS_RENDER_VIEW_HOST_CREATED: {
       RenderViewHost* render_view_host =
           content::Details<RenderViewHost>(details).ptr();
       new SnifferObserver(render_view_host, GetWebUI());
@@ -319,16 +339,42 @@ bool WebUILoginView::TakeFocus(bool reverse) {
   return true;
 }
 
+void WebUILoginView::RequestMediaAccessPermission(
+    WebContents* web_contents,
+    const content::MediaStreamRequest* request,
+    const content::MediaResponseCallback& callback) {
+  TabContents* tab = TabContents::FromWebContents(web_contents);
+  DCHECK(tab);
+
+  scoped_ptr<MediaStreamDevicesController>
+      controller(new MediaStreamDevicesController(
+          tab->profile(), request, callback));
+  if (!controller->DismissInfoBarAndTakeActionOnSettings())
+    NOTREACHED() << "Media stream not allowed for WebUI";
+}
+
 void WebUILoginView::OnLoginPromptVisible() {
+  // If we're hidden than will generate this signal once we're shown.
+  if (is_hidden_ || login_prompt_visible_handled_) {
+    LOG(INFO) << "Login WebUI >> not emitting signal, hidden: " << is_hidden_;
+    return;
+  }
+
   if (should_emit_login_prompt_visible_) {
+    LOG(INFO) << "Login WebUI >> login-prompt-visible";
     chromeos::DBusThreadManager::Get()->GetSessionManagerClient()->
         EmitLoginPromptVisible();
   }
+  login_prompt_visible_handled_ = true;
 
   OobeUI* oobe_ui = static_cast<OobeUI*>(GetWebUI()->GetController());
   // Notify OOBE that the login frame has been rendered. Currently
   // this is used to start camera presence check.
   oobe_ui->OnLoginPromptVisible();
+
+  // Let RenderWidgetHostViewAura::OnPaint() show white background when
+  // loading page and when backing store is not present.
+  aura::Env::GetInstance()->set_render_white_bg(true);
 }
 
 void WebUILoginView::ReturnFocus(bool reverse) {

@@ -23,8 +23,10 @@
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/browser/ui/webui/sync_promo/sync_promo_ui.h"
@@ -58,14 +60,15 @@ SkBitmap GetGAIAPictureForNTP(const gfx::Image& image) {
   SkBitmap bmp = skia::ImageOperations::Resize(*image.ToSkBitmap(),
       skia::ImageOperations::RESIZE_BEST, kLength, kLength);
 
-  gfx::Canvas canvas(gfx::Size(kLength, kLength), false);
+  gfx::Canvas canvas(gfx::Size(kLength, kLength), ui::SCALE_FACTOR_100P,
+      false);
   canvas.DrawImageInt(bmp, 0, 0);
 
   // Draw a gray border on the inside of the icon.
   SkColor color = SkColorSetARGB(83, 0, 0, 0);
   canvas.DrawRect(gfx::Rect(0, 0, kLength - 1, kLength - 1), color);
 
-  return canvas.ExtractBitmap();
+  return canvas.ExtractImageRep().sk_bitmap();
 }
 
 // Puts the |content| into a span with the given CSS class.
@@ -135,13 +138,12 @@ void NTPLoginHandler::HandleShowSyncLoginUI(const ListValue* args) {
 #if !defined(OS_ANDROID)
     // The user isn't signed in, show the sync promo.
     if (SyncPromoUI::ShouldShowSyncPromo(profile)) {
-      browser->ShowSyncSetup(SyncPromoUI::SOURCE_NTP_LINK);
+      chrome::ShowSyncSetup(browser, SyncPromoUI::SOURCE_NTP_LINK);
       RecordInHistogram(NTP_SIGN_IN_PROMO_CLICKED);
     }
 #endif
   } else if (args->GetSize() == 4 &&
-             browser->command_updater()->IsCommandEnabled(
-                IDC_SHOW_AVATAR_MENU)) {
+             chrome::IsCommandEnabled(browser, IDC_SHOW_AVATAR_MENU)) {
     // The user is signed in, show the profiles menu.
     double x = 0;
     double y = 0;
@@ -187,7 +189,7 @@ void NTPLoginHandler::HandleShowAdvancedLoginUI(const ListValue* args) {
   Browser* browser =
       browser::FindBrowserWithWebContents(web_ui()->GetWebContents());
   if (browser)
-    browser->ShowSyncSetup(SyncPromoUI::SOURCE_NTP_LINK);
+    chrome::ShowSyncSetup(browser, SyncPromoUI::SOURCE_NTP_LINK);
 }
 
 void NTPLoginHandler::UpdateLogin() {

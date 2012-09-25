@@ -12,7 +12,6 @@
 #include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "grit/theme_resources_standard.h"
 #include "ui/base/l10n/l10n_util.h"
 
 using content::WebContents;
@@ -28,6 +27,13 @@ class ContentSettingBlockedImageModel : public ContentSettingImageModel {
 class ContentSettingGeolocationImageModel : public ContentSettingImageModel {
  public:
   ContentSettingGeolocationImageModel();
+
+  virtual void UpdateFromWebContents(WebContents* web_contents) OVERRIDE;
+};
+
+class ContentSettingRPHImageModel : public ContentSettingImageModel {
+ public:
+  ContentSettingRPHImageModel();
 
   virtual void UpdateFromWebContents(WebContents* web_contents) OVERRIDE;
 };
@@ -156,6 +162,27 @@ void ContentSettingGeolocationImageModel::UpdateFromWebContents(
       IDS_GEOLOCATION_ALLOWED_TOOLTIP : IDS_GEOLOCATION_BLOCKED_TOOLTIP));
 }
 
+ContentSettingRPHImageModel::ContentSettingRPHImageModel()
+    : ContentSettingImageModel(
+        CONTENT_SETTINGS_TYPE_PROTOCOL_HANDLERS) {
+  set_icon(IDR_REGISTER_PROTOCOL_HANDLER_LOCATIONBAR_ICON);
+  set_tooltip(l10n_util::GetStringUTF8(IDS_REGISTER_PROTOCOL_HANDLER_TOOLTIP));
+}
+
+void ContentSettingRPHImageModel::UpdateFromWebContents(
+    WebContents* web_contents) {
+  set_visible(false);
+  if (!web_contents)
+    return;
+
+  TabSpecificContentSettings* content_settings =
+      TabContents::FromWebContents(web_contents)->content_settings();
+  if (content_settings->pending_protocol_handler().IsEmpty())
+    return;
+
+  set_visible(true);
+}
+
 ContentSettingNotificationsImageModel::ContentSettingNotificationsImageModel()
     : ContentSettingImageModel(CONTENT_SETTINGS_TYPE_NOTIFICATIONS) {
 }
@@ -183,6 +210,8 @@ ContentSettingImageModel*
       return new ContentSettingGeolocationImageModel();
     case CONTENT_SETTINGS_TYPE_NOTIFICATIONS:
       return new ContentSettingNotificationsImageModel();
+    case CONTENT_SETTINGS_TYPE_PROTOCOL_HANDLERS:
+      return new ContentSettingRPHImageModel();
     default:
       return new ContentSettingBlockedImageModel(content_settings_type);
   }

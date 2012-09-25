@@ -8,6 +8,7 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
+#include "base/path_service.h"
 #include "base/stringprintf.h"
 #include "base/synchronization/lock.h"
 #include "base/utf_string_conversions.h"
@@ -19,26 +20,16 @@
 #include "webkit/chromeos/fileapi/remote_file_stream_writer.h"
 #include "webkit/chromeos/fileapi/remote_file_system_operation.h"
 #include "webkit/fileapi/file_system_file_stream_reader.h"
-#include "webkit/fileapi/file_system_operation.h"
+#include "webkit/fileapi/file_system_operation_context.h"
+#include "webkit/fileapi/file_system_url.h"
 #include "webkit/fileapi/file_system_util.h"
 #include "webkit/fileapi/local_file_stream_writer.h"
+#include "webkit/fileapi/local_file_system_operation.h"
 #include "webkit/glue/webkit_glue.h"
 
 namespace {
 
 const char kChromeUIScheme[] = "chrome";
-
-// Returns the home directory path, or an empty string if the home directory
-// is not found.
-std::string GetHomeDirectory() {
-  if (base::chromeos::IsRunningOnChromeOS())
-    return "/home/chronos/user";
-
-  const char* home = getenv("HOME");
-  if (home)
-    return home;
-  return "";
-}
 
 }  // namespace
 
@@ -61,11 +52,9 @@ CrosMountPointProvider::CrosMountPointProvider(
     : special_storage_policy_(special_storage_policy),
       file_access_permissions_(new FileAccessPermissions()),
       local_file_util_(new fileapi::LocalFileUtil()) {
-  const std::string home = GetHomeDirectory();
-  if (!home.empty()) {
-    AddLocalMountPoint(
-        FilePath::FromUTF8Unsafe(home).AppendASCII("Downloads"));
-  }
+  FilePath home_path;
+  if (PathService::Get(base::DIR_HOME, &home_path))
+    AddLocalMountPoint(home_path.AppendASCII("Downloads"));
   AddLocalMountPoint(FilePath(FILE_PATH_LITERAL("/media/archive")));
   AddLocalMountPoint(FilePath(FILE_PATH_LITERAL("/media/removable")));
 }
@@ -134,6 +123,15 @@ bool CrosMountPointProvider::IsRestrictedFileName(const FilePath& path) const {
 fileapi::FileSystemQuotaUtil* CrosMountPointProvider::GetQuotaUtil() {
   // No quota support.
   return NULL;
+}
+
+void CrosMountPointProvider::DeleteFileSystem(
+    const GURL& origin_url,
+    fileapi::FileSystemType type,
+    fileapi::FileSystemContext* context,
+    const DeleteFileSystemCallback& callback) {
+  NOTREACHED();
+  callback.Run(base::PLATFORM_FILE_ERROR_INVALID_OPERATION);
 }
 
 bool CrosMountPointProvider::HasMountPoint(const FilePath& mount_point) {
@@ -211,7 +209,8 @@ std::vector<FilePath> CrosMountPointProvider::GetRootDirectories() const {
   return root_dirs;
 }
 
-fileapi::FileSystemFileUtil* CrosMountPointProvider::GetFileUtil() {
+fileapi::FileSystemFileUtil* CrosMountPointProvider::GetFileUtil(
+    fileapi::FileSystemType type) {
   return local_file_util_.get();
 }
 
@@ -245,19 +244,20 @@ CrosMountPointProvider::GetMountPoint(const FilePath& virtual_path) const {
 
 fileapi::FileSystemOperationInterface*
 CrosMountPointProvider::CreateFileSystemOperation(
-    const GURL& origin_url,
-    fileapi::FileSystemType file_system_type,
-    const FilePath& virtual_path,
+    const fileapi::FileSystemURL& url,
     fileapi::FileSystemContext* context) const {
-  const MountPoint* mount_point = GetMountPoint(virtual_path);
+  const MountPoint* mount_point = GetMountPoint(url.path());
   if (mount_point && mount_point->location == REMOTE)
     return new chromeos::RemoteFileSystemOperation(mount_point->remote_proxy);
 
-  return new fileapi::FileSystemOperation(context);
+  scoped_ptr<fileapi::FileSystemOperationContext> operation_context(
+      new fileapi::FileSystemOperationContext(context));
+  return new fileapi::LocalFileSystemOperation(context,
+                                               operation_context.Pass());
 }
 
 webkit_blob::FileStreamReader* CrosMountPointProvider::CreateFileStreamReader(
-    const GURL& url,
+    const fileapi::FileSystemURL& url,
     int64 offset,
     fileapi::FileSystemContext* context) const {
   // For now we return a generic Reader implementation which utilizes
@@ -267,13 +267,12 @@ webkit_blob::FileStreamReader* CrosMountPointProvider::CreateFileStreamReader(
 }
 
 fileapi::FileStreamWriter* CrosMountPointProvider::CreateFileStreamWriter(
-    const GURL& url,
+    const fileapi::FileSystemURL& url,
     int64 offset,
     fileapi::FileSystemContext* context) const {
-  FilePath virtual_path;
-  if (!fileapi::CrackFileSystemURL(url, NULL, NULL, &virtual_path))
+  if (!url.is_valid())
     return NULL;
-  const MountPoint* mount_point = GetMountPoint(virtual_path);
+  const MountPoint* mount_point = GetMountPoint(url.path());
   if (!mount_point)
     return NULL;
   if (mount_point->location == REMOTE) {
@@ -283,7 +282,7 @@ fileapi::FileStreamWriter* CrosMountPointProvider::CreateFileStreamWriter(
   }
   FilePath root_path = mount_point->local_root_path;
   return new fileapi::LocalFileStreamWriter(
-      root_path.Append(virtual_path), offset);
+      root_path.Append(url.path()), offset);
 }
 
 bool CrosMountPointProvider::GetVirtualPath(const FilePath& filesystem_path,

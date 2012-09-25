@@ -17,7 +17,6 @@
 
 #ifndef SYNC_SESSIONS_SYNC_SESSION_CONTEXT_H_
 #define SYNC_SESSIONS_SYNC_SESSION_CONTEXT_H_
-#pragma once
 
 #include <map>
 #include <string>
@@ -30,16 +29,16 @@
 #include "sync/internal_api/public/engine/model_safe_worker.h"
 #include "sync/sessions/debug_info_getter.h"
 
-namespace syncable {
-class Directory;
-}
-
-namespace browser_sync {
+namespace syncer {
 
 class ConflictResolver;
 class ExtensionsActivityMonitor;
 class ServerConnectionManager;
 class ThrottledDataTypeTracker;
+
+namespace syncable {
+class Directory;
+}
 
 // Default number of items a client can commit in a single message.
 static const int kDefaultMaxCommitBatchSize = 25;
@@ -52,13 +51,14 @@ class SyncSessionContext {
  public:
   SyncSessionContext(ServerConnectionManager* connection_manager,
                      syncable::Directory* directory,
-                     const ModelSafeRoutingInfo& model_safe_routing_info,
                      const std::vector<ModelSafeWorker*>& workers,
                      ExtensionsActivityMonitor* extensions_activity_monitor,
                      ThrottledDataTypeTracker* throttled_data_type_tracker,
                      const std::vector<SyncEngineEventListener*>& listeners,
                      DebugInfoGetter* debug_info_getter,
-                     browser_sync::TrafficRecorder* traffic_recorder);
+                     TrafficRecorder* traffic_recorder,
+                     bool keystore_encryption_enabled);
+
   ~SyncSessionContext();
 
   ConflictResolver* resolver() { return resolver_; }
@@ -111,21 +111,17 @@ class SyncSessionContext {
   }
   int32 max_commit_batch_size() const { return max_commit_batch_size_; }
 
-  const ModelSafeRoutingInfo& previous_session_routing_info() const {
-    return previous_session_routing_info_;
-  }
-
-  void set_previous_session_routing_info(const ModelSafeRoutingInfo& info) {
-    previous_session_routing_info_ = info;
-  }
-
   void NotifyListeners(const SyncEngineEvent& event) {
     FOR_EACH_OBSERVER(SyncEngineEventListener, listeners_,
                       OnSyncEngineEvent(event));
   }
 
-  browser_sync::TrafficRecorder* traffic_recorder() {
+  TrafficRecorder* traffic_recorder() {
     return traffic_recorder_;
+  }
+
+  bool keystore_encryption_enabled() const {
+    return keystore_encryption_enabled_;
   }
 
  private:
@@ -164,17 +160,18 @@ class SyncSessionContext {
   // The server limits the number of items a client can commit in one batch.
   int max_commit_batch_size_;
 
-  // Some routing info history to help us clean up types that get disabled
-  // by the user.
-  ModelSafeRoutingInfo previous_session_routing_info_;
-
   ThrottledDataTypeTracker* throttled_data_type_tracker_;
 
   // We use this to get debug info to send to the server for debugging
   // client behavior on server side.
   DebugInfoGetter* const debug_info_getter_;
 
-  browser_sync::TrafficRecorder* traffic_recorder_;
+  TrafficRecorder* traffic_recorder_;
+
+  // Temporary variable while keystore encryption is behind a flag. True if
+  // we should attempt performing keystore encryption related work, false if
+  // the experiment is not enabled.
+  bool keystore_encryption_enabled_;
 
   DISALLOW_COPY_AND_ASSIGN(SyncSessionContext);
 };
@@ -203,6 +200,6 @@ class ScopedSessionContextConflictResolver {
 };
 
 }  // namespace sessions
-}  // namespace browser_sync
+}  // namespace syncer
 
 #endif  // SYNC_SESSIONS_SYNC_SESSION_CONTEXT_H_

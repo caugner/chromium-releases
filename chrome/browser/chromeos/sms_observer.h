@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_SMS_OBSERVER_H_
 #define CHROME_BROWSER_CHROMEOS_SMS_OBSERVER_H_
-#pragma once
 
 #include <map>
 #include <string>
@@ -29,11 +28,7 @@ class SmsObserver : public NetworkLibrary::NetworkManagerObserver {
   // NetworkLibrary:NetworkManagerObserver implementation:
   virtual void OnNetworkManagerChanged(NetworkLibrary* obj) OVERRIDE;
 
-  static void StaticCallback(void* object,
-                             const char* modem_device_path,
-                             const SMS* message);
-
-  void OnNewMessage(const char* modem_device_path, const SMS* message);
+  void OnNewMessage(const std::string& modem_device_path, const SMS& message);
 
   void UpdateObservers(NetworkLibrary* library);
   void DisconnectAll();

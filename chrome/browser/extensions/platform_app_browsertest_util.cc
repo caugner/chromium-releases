@@ -13,8 +13,8 @@
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/browser/ui/extensions/shell_window.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/test/test_utils.h"
 
 using content::WebContents;
 using extensions::Extension;
@@ -24,13 +24,12 @@ namespace utils = extension_function_test_utils;
 void PlatformAppBrowserTest::SetUpCommandLine(
     CommandLine* command_line) {
   ExtensionBrowserTest::SetUpCommandLine(command_line);
-  command_line->AppendSwitch(switches::kEnablePlatformApps);
   command_line->AppendSwitch(switches::kEnableExperimentalExtensionApis);
 }
 
 const Extension* PlatformAppBrowserTest::LoadAndLaunchPlatformApp(
     const char* name) {
-  ui_test_utils::WindowedNotificationObserver app_loaded_observer(
+  content::WindowedNotificationObserver app_loaded_observer(
       content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME,
       content::NotificationService::AllSources());
 
@@ -38,13 +37,9 @@ const Extension* PlatformAppBrowserTest::LoadAndLaunchPlatformApp(
       test_data_dir_.AppendASCII("platform_apps").AppendASCII(name));
   EXPECT_TRUE(extension);
 
-  application_launch::OpenApplication(
-      browser()->profile(),
-      extension,
-      extension_misc::LAUNCH_NONE,
-      GURL(),
-      NEW_WINDOW,
-      NULL);
+  application_launch::OpenApplication(application_launch::LaunchParams(
+          browser()->profile(), extension, extension_misc::LAUNCH_NONE,
+          NEW_WINDOW));
 
   app_loaded_observer.Wait();
 
@@ -66,24 +61,26 @@ WebContents* PlatformAppBrowserTest::GetFirstShellWindowWebContents() {
 
 size_t PlatformAppBrowserTest::RunGetWindowsFunctionForExtension(
     const Extension* extension) {
-  GetAllWindowsFunction* function = new GetAllWindowsFunction();
+  scoped_refptr<GetAllWindowsFunction> function = new GetAllWindowsFunction();
   function->set_extension(extension);
   scoped_ptr<base::ListValue> result(utils::ToList(
-      utils::RunFunctionAndReturnResult(function, "[]", browser())));
+      utils::RunFunctionAndReturnSingleResult(function.get(),
+                                              "[]",
+                                              browser())));
   return result->GetSize();
 }
 
 bool PlatformAppBrowserTest::RunGetWindowFunctionForExtension(
     int window_id,
     const Extension* extension) {
-  GetWindowFunction* function = new GetWindowFunction();
+  scoped_refptr<GetWindowFunction> function = new GetWindowFunction();
   function->set_extension(extension);
   utils::RunFunction(
-          function,
+          function.get(),
           base::StringPrintf("[%u]", window_id),
           browser(),
           utils::NONE);
-  return function->GetResultValue() != NULL;
+  return function->GetResultList() != NULL;
 }
 
 size_t PlatformAppBrowserTest::GetShellWindowCount() {
@@ -116,7 +113,7 @@ ShellWindow* PlatformAppBrowserTest::CreateShellWindow(
 }
 
 void PlatformAppBrowserTest::CloseShellWindow(ShellWindow* window) {
-  ui_test_utils::WindowedNotificationObserver destroyed_observer(
+  content::WindowedNotificationObserver destroyed_observer(
       content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
       content::NotificationService::AllSources());
   window->Close();

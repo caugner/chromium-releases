@@ -4,7 +4,6 @@
 
 #ifndef BASE_MAC_FOUNDATION_UTIL_H_
 #define BASE_MAC_FOUNDATION_UTIL_H_
-#pragma once
 
 #include <CoreFoundation/CoreFoundation.h>
 
@@ -18,9 +17,16 @@
 #if defined(__OBJC__)
 #import <Foundation/Foundation.h>
 #else  // __OBJC__
+#include <CoreFoundation/CoreFoundation.h>
 class NSBundle;
 class NSString;
 #endif  // __OBJC__
+
+#if defined(OS_IOS)
+#include <CoreText/CoreText.h>
+#else
+#include <ApplicationServices/ApplicationServices.h>
+#endif
 
 class FilePath;
 
@@ -102,6 +108,11 @@ TYPE_NAME_FOR_CF_TYPE_DECL(CFNull);
 TYPE_NAME_FOR_CF_TYPE_DECL(CFNumber);
 TYPE_NAME_FOR_CF_TYPE_DECL(CFSet);
 TYPE_NAME_FOR_CF_TYPE_DECL(CFString);
+
+TYPE_NAME_FOR_CF_TYPE_DECL(CGColor);
+
+TYPE_NAME_FOR_CF_TYPE_DECL(CTFont);
+TYPE_NAME_FOR_CF_TYPE_DECL(CTRun);
 
 #undef TYPE_NAME_FOR_CF_TYPE_DECL
 
@@ -247,6 +258,11 @@ CF_CAST_DECL(CFNull);
 CF_CAST_DECL(CFNumber);
 CF_CAST_DECL(CFSet);
 CF_CAST_DECL(CFString);
+
+CF_CAST_DECL(CGColor);
+
+CF_CAST_DECL(CTFont);
+CF_CAST_DECL(CTRun);
 
 CF_CAST_DECL(SecACL);
 CF_CAST_DECL(SecTrustedApplication);

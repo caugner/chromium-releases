@@ -4,7 +4,6 @@
 
 #ifndef WEBKIT_MEDIA_ANDROID_WEBMEDIAPLAYER_ANDROID_H_
 #define WEBKIT_MEDIA_ANDROID_WEBMEDIAPLAYER_ANDROID_H_
-#pragma once
 
 #include <jni.h>
 
@@ -152,10 +151,6 @@ class WebMediaPlayerAndroid :
   // Helper methods for posting task for setting states and update WebKit.
   void UpdateNetworkState(WebKit::WebMediaPlayer::NetworkState state);
   void UpdateReadyState(WebKit::WebMediaPlayer::ReadyState state);
-
-  // Methods for creation and deletion of stream texture.
-  void CreateStreamTexture();
-  void DestroyStreamTexture();
 
   // whether the current process is incognito mode
   static bool incognito_mode_;

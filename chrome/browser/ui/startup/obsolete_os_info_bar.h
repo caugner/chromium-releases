@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_STARTUP_OBSOLETE_OS_INFO_BAR_H_
 #define CHROME_BROWSER_UI_STARTUP_OBSOLETE_OS_INFO_BAR_H_
-#pragma once
 
 #include "base/compiler_specific.h"
 #include "base/string16.h"
@@ -13,7 +12,7 @@
 
 class InfoBarTabHelper;
 
-namespace browser {
+namespace chrome {
 
 // An infobar that is run with a string and a "Learn More" link.
 class ObsoleteOSInfoBar : public LinkInfoBarDelegate {
@@ -34,6 +33,6 @@ class ObsoleteOSInfoBar : public LinkInfoBarDelegate {
   DISALLOW_COPY_AND_ASSIGN(ObsoleteOSInfoBar);
 };
 
-}  // namespace browser
+}  // namespace chrome
 
 #endif  // CHROME_BROWSER_UI_STARTUP_OBSOLETE_OS_INFO_BAR_H_

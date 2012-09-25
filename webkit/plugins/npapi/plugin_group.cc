@@ -7,6 +7,7 @@
 #include "webkit/plugins/npapi/plugin_group.h"
 
 #include "base/memory/linked_ptr.h"
+#include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
@@ -100,7 +101,29 @@ bool PluginGroup::Match(const WebPluginInfo& plugin) const {
 }
 
 /* static */
-Version* PluginGroup::CreateVersionFromString(const string16& version_string) {
+std::string PluginGroup::RemoveLeadingZerosFromVersionComponents(
+    const std::string& version) {
+  std::string no_leading_zeros_version;
+  std::vector<std::string> numbers;
+  base::SplitString(version, '.', &numbers);
+  for (size_t i = 0; i < numbers.size(); ++i) {
+    size_t n = numbers[i].size();
+    size_t j = 0;
+    while (j < n && numbers[i][j] == '0') {
+      ++j;
+    }
+    no_leading_zeros_version += (j < n) ? numbers[i].substr(j) : "0";
+    if (i != numbers.size() - 1) {
+      no_leading_zeros_version += ".";
+    }
+  }
+
+  return no_leading_zeros_version;
+}
+
+/* static */
+void PluginGroup::CreateVersionFromString(const string16& version_string,
+                                          Version* parsed_version) {
   // Remove spaces and ')' from the version string,
   // Replace any instances of 'r', ',' or '(' with a dot.
   std::string version = UTF16ToASCII(version_string);
@@ -111,7 +134,10 @@ Version* PluginGroup::CreateVersionFromString(const string16& version_string) {
   std::replace(version.begin(), version.end(), '(', '.');
   std::replace(version.begin(), version.end(), '_', '.');
 
-  return Version::GetVersionFromString(version);
+  // Remove leading zeros from each of the version components.
+  version = RemoveLeadingZerosFromVersionComponents(version);
+
+  *parsed_version = Version(version);
 }
 
 void PluginGroup::AddPlugin(const WebPluginInfo& plugin) {

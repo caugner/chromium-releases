@@ -42,6 +42,12 @@ RulesFunction::RulesFunction() : rules_registry_(NULL) {}
 
 RulesFunction::~RulesFunction() {}
 
+bool RulesFunction::HasPermission() {
+  std::string event_name;
+  EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &event_name));
+  return extension_->HasAPIPermission(event_name);
+}
+
 bool RulesFunction::RunImpl() {
   std::string event_name;
   EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &event_name));
@@ -78,7 +84,7 @@ bool AddRulesFunction::RunImplOnCorrectThread() {
   error_ = rules_registry_->AddRules(extension_id(), params->rules);
 
   if (error_.empty())
-    result_.reset(AddRules::Result::Create(params->rules));
+    results_ = AddRules::Results::Create(params->rules);
 
   return error_.empty();
 }
@@ -111,7 +117,7 @@ bool GetRulesFunction::RunImplOnCorrectThread() {
   }
 
   if (error_.empty())
-    result_.reset(GetRules::Result::Create(rules));
+    results_ = GetRules::Results::Create(rules);
 
   return error_.empty();
 }

@@ -71,7 +71,7 @@ IPC_SYNC_MESSAGE_CONTROL2_2(AutomationMsg_GetCookies,
 // identified by the third parameter. The first parameter is the URL
 // string, and the second parameter is the cookie name and value to be set.
 // The return value is a non-negative value on success.
-IPC_SYNC_MESSAGE_CONTROL3_1(AutomationMsg_SetCookie,
+IPC_SYNC_MESSAGE_CONTROL3_1(AutomationMsg_DEPRECATED_SetCookie,
                             GURL,
                             std::string,
                             int,
@@ -156,7 +156,7 @@ IPC_SYNC_MESSAGE_CONTROL3_1(AutomationMsg_DomOperation,
                                            execution */)
 
 // Is the Download Shelf visible for the specified browser?
-IPC_SYNC_MESSAGE_CONTROL1_1(AutomationMsg_ShelfVisibility,
+IPC_SYNC_MESSAGE_CONTROL1_1(AutomationMsg_DEPRECATED_ShelfVisibility,
                             int /* browser_handle */,
                             bool /* is_visible */)
 
@@ -218,7 +218,7 @@ IPC_MESSAGE_CONTROL1(AutomationMsg_DEPRECATED_SetFilteredInet,
                      bool /* enabled */)
 
 // Gets the directory that downloads will occur in for the active profile.
-IPC_SYNC_MESSAGE_CONTROL1_1(AutomationMsg_DownloadDirectory,
+IPC_SYNC_MESSAGE_CONTROL1_1(AutomationMsg_DEPRECATED_DownloadDirectory,
                             int /* tab_handle */,
                             FilePath /* directory */)
 
@@ -466,7 +466,7 @@ IPC_SYNC_MESSAGE_CONTROL1_1(AutomationMsg_BringBrowserToFront,
 //   - int: IDC message identifier to query if enabled
 // Response:
 //   - bool: True if the command is enabled on the menu
-IPC_SYNC_MESSAGE_CONTROL2_1(AutomationMsg_IsMenuCommandEnabled,
+IPC_SYNC_MESSAGE_CONTROL2_1(AutomationMsg_DEPRECATED_IsMenuCommandEnabled,
                             int,
                             int,
                             bool)
@@ -500,7 +500,7 @@ IPC_SYNC_MESSAGE_CONTROL2_1(AutomationMsg_WindowExecuteCommand,
 
 // This message opens the Find window within a tab corresponding to the
 // supplied tab handle.
-IPC_MESSAGE_CONTROL1(AutomationMsg_OpenFindInPage,
+IPC_MESSAGE_CONTROL1(AutomationMsg_DEPRECATED_OpenFindInPage,
                      int /* tab_handle */)
 
 // Posts a message from external host to chrome renderer.
@@ -578,7 +578,7 @@ IPC_SYNC_MESSAGE_CONTROL1_1(AutomationMsg_TabIndex,
 // This message requests the handle (int64 app-unique identifier) of
 // a valid tabbed browser window, i.e. normal type and non-incognito mode.
 // On error, the returned handle value is 0.
-IPC_SYNC_MESSAGE_CONTROL0_1(AutomationMsg_FindTabbedBrowserWindow,
+IPC_SYNC_MESSAGE_CONTROL0_1(AutomationMsg_DEPRECATED_FindTabbedBrowserWindow,
                             int)
 
 // This message requests the number of normal browser windows, i.e. normal
@@ -594,7 +594,7 @@ IPC_MESSAGE_CONTROL1(AutomationMsg_SetProxyConfig,
                      std::string /* proxy_config_json_string */)
 
 // Sets Download Shelf visibility for the specified browser.
-IPC_SYNC_MESSAGE_CONTROL2_0(AutomationMsg_SetShelfVisibility,
+IPC_SYNC_MESSAGE_CONTROL2_0(AutomationMsg_DEPRECATED_SetShelfVisibility,
                             int /* browser_handle */,
                             bool /* is_visible */)
 
@@ -856,14 +856,14 @@ IPC_MESSAGE_CONTROL1(AutomationMsg_RemoveBrowsingData,
 
 // Generic pyauto pattern to help avoid future addition of
 // automation messages.
-IPC_SYNC_MESSAGE_CONTROL2_2(AutomationMsg_SendJSONRequest,
+IPC_SYNC_MESSAGE_CONTROL2_2(AutomationMsg_SendJSONRequestWithBrowserHandle,
                             int /* browser_handle */,
                             std::string /* JSON request */,
                             std::string /* JSON response */,
                             bool /* success */)
 
 // Resets to the default theme.
-IPC_SYNC_MESSAGE_CONTROL0_0(AutomationMsg_ResetToDefaultTheme)
+IPC_SYNC_MESSAGE_CONTROL0_0(AutomationMsg_DEPRECIATED_ResetToDefaultTheme)
 
 // This message requests the external tab identified by the tab handle
 // passed in be closed.
@@ -949,6 +949,14 @@ IPC_SYNC_MESSAGE_CONTROL0_2(AutomationMsg_GetTracingOutput,
 // process.
 IPC_SYNC_MESSAGE_CONTROL0_1(AutomationMsg_GetMachPortCount,
                             int /* number of Mach ports */)
+
+// Generic pyauto pattern to help avoid future addition of
+// automation messages.
+IPC_SYNC_MESSAGE_CONTROL2_2(AutomationMsg_SendJSONRequest,
+                            int /* window_index */,
+                            std::string /* JSON request */,
+                            std::string /* JSON response */,
+                            bool /* success */)
 
 // Browser -> renderer messages.
 

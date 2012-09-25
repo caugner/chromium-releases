@@ -25,6 +25,7 @@
 #include "native_client/src/trusted/plugin/service_runtime.h"
 #include "native_client/src/trusted/plugin/utility.h"
 
+#include "ppapi/c/private/ppb_nacl_private.h"
 #include "ppapi/cpp/private/var_private.h"
 // for pp::VarPrivate
 #include "ppapi/cpp/private/instance_private.h"
@@ -201,11 +202,13 @@ class Plugin : public pp::InstancePrivate {
   // plugin_base_url is the URL used for resolving relative URLs used in
   // src="...".
   nacl::string plugin_base_url() const { return plugin_base_url_; }
-  void set_plugin_base_url(nacl::string url) { plugin_base_url_ = url; }
+  void set_plugin_base_url(const nacl::string& url) { plugin_base_url_ = url; }
   // manifest_base_url is the URL used for resolving relative URLs mentioned
   // in manifest files.  If the manifest is a data URI, this is an empty string.
   nacl::string manifest_base_url() const { return manifest_base_url_; }
-  void set_manifest_base_url(nacl::string url) { manifest_base_url_ = url; }
+  void set_manifest_base_url(const nacl::string& url) {
+    manifest_base_url_ = url;
+  }
 
   // The URL of the manifest file as set by the "src" attribute.
   // It is not the fully resolved URL if it was set as relative.
@@ -316,6 +319,8 @@ class Plugin : public pp::InstancePrivate {
     return main_service_runtime()->exit_status();
   }
 
+  const PPB_NaCl_Private* nacl_interface() { return nacl_interface_; }
+
  private:
   NACL_DISALLOW_COPY_AND_ASSIGN(Plugin);
   // Prevent construction and destruction from outside the class:
@@ -417,6 +422,12 @@ class Plugin : public pp::InstancePrivate {
   // Shuts down the proxy for PPAPI nexes.
   void ShutdownProxy();  // Nexe shutdown + proxy deletion.
 
+  // Copy the main service runtime's most recent NaClLog output to the
+  // JavaScript console.  Valid to use only after a crash, e.g., via a
+  // detail level LOG_FATAL NaClLog entry.  If the crash was not due
+  // to a LOG_FATAL this method will do nothing.
+  void CopyCrashLogToJsConsole();
+
   ScriptablePlugin* scriptable_plugin_;
 
   int argc_;
@@ -517,6 +528,11 @@ class Plugin : public pp::InstancePrivate {
   const FileDownloader* FindFileDownloader(PP_Resource url_loader) const;
 
   int64_t time_of_last_progress_event_;
+
+  // Whether we are using IPC-based PPAPI proxy.
+  bool using_ipc_proxy_;
+
+  const PPB_NaCl_Private* nacl_interface_;
 };
 
 }  // namespace plugin

@@ -6,7 +6,6 @@
 
 #ifndef CHROME_BROWSER_DOWNLOAD_DOWNLOAD_UTIL_H_
 #define CHROME_BROWSER_DOWNLOAD_DOWNLOAD_UTIL_H_
-#pragma once
 
 #include <string>
 
@@ -44,12 +43,6 @@ const FilePath& GetDefaultDownloadDirectory();
 
 // Return true if the |download_path| is dangerous path.
 bool DownloadPathIsDangerous(const FilePath& download_path);
-
-// Generate a filename based on the response from the server.  Similar
-// in operation to net::GenerateFileName(), but uses a localized
-// default name.
-void GenerateFileNameFromRequest(const content::DownloadItem& download_item,
-                                 FilePath* generated_name);
 
 // Download progress animations ------------------------------------------------
 
@@ -153,12 +146,6 @@ string16 GetProgressStatusText(content::DownloadItem* download);
 void UpdateAppIconDownloadProgress(int download_count,
                                    bool progress_known,
                                    float progress);
-
-// Same as GetUniquePathNumber, except that it also checks the existence
-// of its .crdownload intermediate path.
-// If |path| does not exist, 0 is returned.  If it fails to find such
-// a number, -1 is returned.
-int GetUniquePathNumberWithCrDownload(const FilePath& path);
 
 // Returns a .crdownload intermediate path for the |suggested_path|.
 FilePath GetCrDownloadPath(const FilePath& suggested_path);

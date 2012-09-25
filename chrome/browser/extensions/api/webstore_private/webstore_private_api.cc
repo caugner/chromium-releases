@@ -260,7 +260,7 @@ bool BeginInstallWithManifestFunction::RunImpl() {
 
   EXTENSION_FUNCTION_VALIDATE(details->GetString(kIdKey, &id_));
   if (!extensions::Extension::IdIsValid(id_)) {
-    SetResult(INVALID_ID);
+    SetResultCode(INVALID_ID);
     error_ = kInvalidIdError;
     return false;
   }
@@ -268,7 +268,7 @@ bool BeginInstallWithManifestFunction::RunImpl() {
   EXTENSION_FUNCTION_VALIDATE(details->GetString(kManifestKey, &manifest_));
 
   if (details->HasKey(kIconDataKey) && details->HasKey(kIconUrlKey)) {
-    SetResult(ICON_ERROR);
+    SetResultCode(ICON_ERROR);
     error_ = kCannotSpecifyIconDataAndUrlError;
     return false;
   }
@@ -282,7 +282,7 @@ bool BeginInstallWithManifestFunction::RunImpl() {
     EXTENSION_FUNCTION_VALIDATE(details->GetString(kIconUrlKey, &tmp_url));
     icon_url = source_url().Resolve(tmp_url);
     if (!icon_url.is_valid()) {
-      SetResult(INVALID_ICON_URL);
+      SetResultCode(INVALID_ICON_URL);
       error_ = kInvalidIconUrlError;
       return false;
     }
@@ -316,31 +316,31 @@ bool BeginInstallWithManifestFunction::RunImpl() {
 }
 
 
-void BeginInstallWithManifestFunction::SetResult(ResultCode code) {
+void BeginInstallWithManifestFunction::SetResultCode(ResultCode code) {
   switch (code) {
     case ERROR_NONE:
-      result_.reset(Value::CreateStringValue(""));
+      SetResult(Value::CreateStringValue(""));
       break;
     case UNKNOWN_ERROR:
-      result_.reset(Value::CreateStringValue("unknown_error"));
+      SetResult(Value::CreateStringValue("unknown_error"));
       break;
     case USER_CANCELLED:
-      result_.reset(Value::CreateStringValue("user_cancelled"));
+      SetResult(Value::CreateStringValue("user_cancelled"));
       break;
     case MANIFEST_ERROR:
-      result_.reset(Value::CreateStringValue("manifest_error"));
+      SetResult(Value::CreateStringValue("manifest_error"));
       break;
     case ICON_ERROR:
-      result_.reset(Value::CreateStringValue("icon_error"));
+      SetResult(Value::CreateStringValue("icon_error"));
       break;
     case INVALID_ID:
-      result_.reset(Value::CreateStringValue("invalid_id"));
+      SetResult(Value::CreateStringValue("invalid_id"));
       break;
     case PERMISSION_DENIED:
-      result_.reset(Value::CreateStringValue("permission_denied"));
+      SetResult(Value::CreateStringValue("permission_denied"));
       break;
     case INVALID_ICON_URL:
-      result_.reset(Value::CreateStringValue("invalid_icon_url"));
+      SetResult(Value::CreateStringValue("invalid_icon_url"));
       break;
     default:
       CHECK(false);
@@ -358,7 +358,12 @@ void BeginInstallWithManifestFunction::OnWebstoreParseSuccess(
 
   std::string error;
   dummy_extension_ = ExtensionInstallPrompt::GetLocalizedExtensionForDisplay(
-      parsed_manifest_.get(), id, localized_name_, "", &error);
+      parsed_manifest_.get(),
+      Extension::FROM_WEBSTORE,
+      id,
+      localized_name_,
+      "",
+      &error);
 
   if (!dummy_extension_) {
     OnWebstoreParseFailure(id_, WebstoreInstallHelper::Delegate::MANIFEST_ERROR,
@@ -366,7 +371,8 @@ void BeginInstallWithManifestFunction::OnWebstoreParseSuccess(
     return;
   }
 
-  install_prompt_.reset(new ExtensionInstallPrompt(GetCurrentBrowser()));
+  install_prompt_.reset(
+      chrome::CreateExtensionInstallPromptWithBrowser(GetCurrentBrowser()));
   install_prompt_->ConfirmWebstoreInstall(this, dummy_extension_, &icon_);
   // Control flow finishes up in InstallUIProceed or InstallUIAbort.
 }
@@ -380,13 +386,13 @@ void BeginInstallWithManifestFunction::OnWebstoreParseFailure(
   // Map from WebstoreInstallHelper's result codes to ours.
   switch (result_code) {
     case WebstoreInstallHelper::Delegate::UNKNOWN_ERROR:
-      SetResult(UNKNOWN_ERROR);
+      SetResultCode(UNKNOWN_ERROR);
       break;
     case WebstoreInstallHelper::Delegate::ICON_ERROR:
-      SetResult(ICON_ERROR);
+      SetResultCode(ICON_ERROR);
       break;
     case WebstoreInstallHelper::Delegate::MANIFEST_ERROR:
-      SetResult(MANIFEST_ERROR);
+      SetResultCode(MANIFEST_ERROR);
       break;
     default:
       CHECK(false);
@@ -406,9 +412,10 @@ void BeginInstallWithManifestFunction::InstallUIProceed() {
       WebstoreInstaller::Approval::CreateWithNoInstallPrompt(
           profile(), id_, parsed_manifest_.Pass()));
   approval->use_app_installed_bubble = use_app_installed_bubble_;
+  approval->record_oauth2_grant = install_prompt_->record_oauth2_grant();
   g_pending_approvals.Get().PushApproval(approval.Pass());
 
-  SetResult(ERROR_NONE);
+  SetResultCode(ERROR_NONE);
   SendResponse(true);
 
   // The Permissions_Install histogram is recorded from the ExtensionService
@@ -423,7 +430,7 @@ void BeginInstallWithManifestFunction::InstallUIProceed() {
 
 void BeginInstallWithManifestFunction::InstallUIAbort(bool user_initiated) {
   error_ = kUserCancelledError;
-  SetResult(USER_CANCELLED);
+  SetResultCode(USER_CANCELLED);
   SendResponse(false);
 
   // The web store install histograms are a subset of the install histograms.
@@ -550,7 +557,7 @@ void SilentlyInstallFunction::OnExtensionInstallFailure(
 }
 
 bool GetBrowserLoginFunction::RunImpl() {
-  result_.reset(CreateLoginResult(profile_->GetOriginalProfile()));
+  SetResult(CreateLoginResult(profile_->GetOriginalProfile()));
   return true;
 }
 
@@ -559,9 +566,9 @@ bool GetStoreLoginFunction::RunImpl() {
   ExtensionPrefs* prefs = service->extension_prefs();
   std::string login;
   if (prefs->GetWebStoreLogin(&login)) {
-    result_.reset(Value::CreateStringValue(login));
+    SetResult(Value::CreateStringValue(login));
   } else {
-    result_.reset(Value::CreateStringValue(std::string()));
+    SetResult(Value::CreateStringValue(std::string()));
   }
   return true;
 }
@@ -575,66 +582,27 @@ bool SetStoreLoginFunction::RunImpl() {
   return true;
 }
 
-GetWebGLStatusFunction::GetWebGLStatusFunction() {}
+GetWebGLStatusFunction::GetWebGLStatusFunction() {
+  feature_checker_ = new GPUFeatureChecker(
+      content::GPU_FEATURE_TYPE_WEBGL,
+      base::Bind(&GetWebGLStatusFunction::OnFeatureCheck, this));
+}
+
 GetWebGLStatusFunction::~GetWebGLStatusFunction() {}
 
-// static
-bool GetWebGLStatusFunction::IsWebGLAllowed(GpuDataManager* manager) {
-  bool webgl_allowed = true;
-  if (!manager->GpuAccessAllowed()) {
-    webgl_allowed = false;
-  } else {
-    uint32 blacklist_type = manager->GetGpuFeatureType();
-    if (blacklist_type & content::GPU_FEATURE_TYPE_WEBGL)
-      webgl_allowed = false;
-  }
-  return webgl_allowed;
-}
-
-void GetWebGLStatusFunction::OnGpuInfoUpdate() {
-  GpuDataManager* manager = GpuDataManager::GetInstance();
-  manager->RemoveObserver(this);
-  bool webgl_allowed = IsWebGLAllowed(manager);
-  CreateResult(webgl_allowed);
-  SendResponse(true);
-
-  // Matches the AddRef in RunImpl().
-  Release();
-}
-
 void GetWebGLStatusFunction::CreateResult(bool webgl_allowed) {
-  result_.reset(Value::CreateStringValue(
+  SetResult(Value::CreateStringValue(
       webgl_allowed ? "webgl_allowed" : "webgl_blocked"));
 }
 
 bool GetWebGLStatusFunction::RunImpl() {
-  bool finalized = true;
-#if defined(OS_LINUX)
-  // On Windows and Mac, so far we can always make the final WebGL blacklisting
-  // decision based on partial GPU info; on Linux, we need to launch the GPU
-  // process to collect full GPU info and make the final decision.
-  finalized = false;
-#endif
-
-  GpuDataManager* manager = GpuDataManager::GetInstance();
-  if (manager->IsCompleteGPUInfoAvailable())
-    finalized = true;
-
-  bool webgl_allowed = IsWebGLAllowed(manager);
-  if (!webgl_allowed)
-    finalized = true;
-
-  if (finalized) {
-    CreateResult(webgl_allowed);
-    SendResponse(true);
-  } else {
-    // Matched with a Release in OnGpuInfoUpdate.
-    AddRef();
-
-    manager->AddObserver(this);
-    manager->RequestCompleteGpuInfoIfNeeded();
-  }
+  feature_checker_->CheckGPUFeatureAvailability();
   return true;
+}
+
+void GetWebGLStatusFunction::OnFeatureCheck(bool feature_allowed) {
+  CreateResult(feature_allowed);
+  SendResponse(true);
 }
 
 }  // namespace extensions

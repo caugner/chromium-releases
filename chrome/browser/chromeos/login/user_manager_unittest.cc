@@ -11,13 +11,13 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/mock_cert_library.h"
-#include "chrome/browser/chromeos/cros_settings.h"
-#include "chrome/browser/chromeos/cros_settings_names.h"
-#include "chrome/browser/chromeos/cros_settings_provider.h"
 #include "chrome/browser/chromeos/login/user.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/login/user_manager_impl.h"
-#include "chrome/browser/chromeos/stub_cros_settings_provider.h"
+#include "chrome/browser/chromeos/settings/cros_settings.h"
+#include "chrome/browser/chromeos/settings/cros_settings_names.h"
+#include "chrome/browser/chromeos/settings/cros_settings_provider.h"
+#include "chrome/browser/chromeos/settings/stub_cros_settings_provider.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_pref_service.h"
@@ -62,7 +62,6 @@ class UserManagerTest : public testing::Test {
     UserManager::RegisterPrefs(local_state_.get());
 
     old_user_manager_ = UserManager::Get();
-    // A stub user is automatically logged in by UserManager. Reset this.
     ResetUserManager();
   }
 
@@ -101,11 +100,6 @@ class UserManagerTest : public testing::Test {
 
   void ResetUserManager() {
     user_manager_impl.reset(new UserManagerImpl());
-    // Clean up the stub user that gets created in the UserManagerImpl
-    // constructor.
-    delete user_manager_impl->logged_in_user_;
-    user_manager_impl->logged_in_user_ = NULL;
-    user_manager_impl->is_current_user_ephemeral_ = false;
     UserManager::Set(user_manager_impl.get());
   }
 

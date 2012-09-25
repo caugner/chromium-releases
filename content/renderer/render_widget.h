@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_RENDERER_RENDER_WIDGET_H_
 #define CONTENT_RENDERER_RENDER_WIDGET_H_
-#pragma once
 
 #include <deque>
 #include <vector>
@@ -18,6 +17,7 @@
 #include "content/common/content_export.h"
 #include "content/renderer/paint_aggregator.h"
 #include "ipc/ipc_channel.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebRenderingStats.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCompositionUnderline.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPopupType.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebTextDirection.h"
@@ -74,8 +74,8 @@ class PluginInstance;
 // RenderWidget provides a communication bridge between a WebWidget and
 // a RenderWidgetHost, the latter of which lives in a different process.
 class CONTENT_EXPORT RenderWidget
-    : public IPC::Channel::Listener,
-      public IPC::Message::Sender,
+    : public IPC::Listener,
+      public IPC::Sender,
       NON_EXPORTED_BASE(virtual public WebKit::WebWidgetClient),
       public base::RefCounted<RenderWidget> {
  public:
@@ -111,10 +111,10 @@ class CONTENT_EXPORT RenderWidget
   bool is_fullscreen() const { return is_fullscreen_; }
   bool is_hidden() const { return is_hidden_; }
 
-  // IPC::Channel::Listener
+  // IPC::Listener
   virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
 
-  // IPC::Message::Sender
+  // IPC::Sender
   virtual bool Send(IPC::Message* msg) OVERRIDE;
 
   // WebKit::WebWidgetClient
@@ -152,6 +152,16 @@ class CONTENT_EXPORT RenderWidget
   // Called when a plugin window has been destroyed, to make sure the currently
   // pending moves don't try to reference it.
   void CleanupWindowInPluginMoves(gfx::PluginWindowHandle window);
+
+  // Fills in a WebRenderingStats struct containing information about
+  // rendering, e.g. count of frames rendered, time spent painting.
+  // This call is relatively expensive in threaded compositing mode,
+  // as it blocks on the compositor thread.
+  void GetRenderingStats(WebKit::WebRenderingStats&) const;
+
+  // Directs the host to begin a smooth scroll. This scroll should have the same
+  // performance characteristics as a user-initiated scroll.
+  void BeginSmoothScroll(bool scroll_down, bool scroll_far);
 
   // Close the underlying WebWidget.
   virtual void Close();
@@ -232,7 +242,7 @@ class CONTENT_EXPORT RenderWidget
                         bool is_fullscreen);
   void OnChangeResizeRect(const gfx::Rect& resizer_rect);
   virtual void OnWasHidden();
-  virtual void OnWasRestored(bool needs_repainting);
+  virtual void OnWasShown(bool needs_repainting);
   virtual void OnWasSwappedOut();
   void OnUpdateRectAck();
   void OnCreateVideoAck(int32 video_id);
@@ -540,6 +550,8 @@ class CONTENT_EXPORT RenderWidget
   bool has_disable_gpu_vsync_switch_;
   base::TimeTicks last_do_deferred_update_time_;
 
+  WebKit::WebRenderingStats software_stats_;
+
   // UpdateRect parameters for the current compositing pass. This is used to
   // pass state between DoDeferredUpdate and OnSwapBuffersPosted.
   scoped_ptr<ViewHostMsg_UpdateRect_Params> pending_update_params_;
@@ -556,7 +568,7 @@ class CONTENT_EXPORT RenderWidget
 
   // The device scale factor. This value is computed from the DPI entries in
   // |screen_info_| on some platforms, and defaults to 1 on other platforms.
-  int device_scale_factor_;
+  float device_scale_factor_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidget);
 };

@@ -4,7 +4,6 @@
 
 #ifndef ASH_SHELL_DELEGATE_H_
 #define ASH_SHELL_DELEGATE_H_
-#pragma once
 
 #include <vector>
 
@@ -33,10 +32,20 @@ namespace ash {
 class LauncherDelegate;
 class LauncherModel;
 struct LauncherItem;
-class ScreenshotDelegate;
 class SystemTray;
 class SystemTrayDelegate;
 class UserWallpaperDelegate;
+
+enum UserMetricsAction {
+  UMA_ACCEL_PREVWINDOW_TAB,
+  UMA_ACCEL_NEXTWINDOW_TAB,
+  UMA_ACCEL_PREVWINDOW_F5,
+  UMA_ACCEL_NEXTWINDOW_F5,
+  UMA_ACCEL_NEWTAB_T,
+  UMA_ACCEL_SEARCH_LWIN,
+  UMA_MOUSE_DOWN,
+  UMA_TOUCHSCREEN_TAP_DOWN,
+};
 
 // Delegate of the Shell.
 class ASH_EXPORT ShellDelegate {
@@ -46,6 +55,9 @@ class ASH_EXPORT ShellDelegate {
 
   // Returns true if user has logged in.
   virtual bool IsUserLoggedIn() = 0;
+
+  // Returns true if we're logged in and browser has been started
+  virtual bool IsSessionStarted() = 0;
 
   // Invoked when a user locks the screen.
   virtual void LockScreen() = 0;
@@ -104,10 +116,6 @@ class ASH_EXPORT ShellDelegate {
   // the created delegate.
   virtual app_list::AppListViewDelegate* CreateAppListViewDelegate() = 0;
 
-  // Invoked to start taking partial screenshot.
-  virtual void StartPartialScreenshot(
-      ScreenshotDelegate* screenshot_delegate) = 0;
-
   // Creates a new LauncherDelegate. Shell takes ownership of the returned
   // value.
   virtual LauncherDelegate* CreateLauncherDelegate(
@@ -121,6 +129,12 @@ class ASH_EXPORT ShellDelegate {
 
   // Creates a user action client. Shell takes ownership of the object.
   virtual aura::client::UserActionClient* CreateUserActionClient() = 0;
+
+  // Opens the feedback page for "Report Issue".
+  virtual void OpenFeedbackPage() = 0;
+
+  // Records that the user performed an action.
+  virtual void RecordUserMetricsAction(UserMetricsAction action) = 0;
 };
 
 }  // namespace ash

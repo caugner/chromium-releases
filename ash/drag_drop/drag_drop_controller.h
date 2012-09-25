@@ -4,9 +4,9 @@
 
 #ifndef ASH_DRAG_DROP_DRAG_DROP_CONTROLLER_H_
 #define ASH_DRAG_DROP_DRAG_DROP_CONTROLLER_H_
-#pragma once
 
 #include "ash/ash_export.h"
+#include "base/callback.h"
 #include "ui/aura/client/drag_drop_client.h"
 #include "ui/aura/event.h"
 #include "ui/aura/event_filter.h"
@@ -57,6 +57,7 @@ class ASH_EXPORT DragDropController
                     const aura::LocatedEvent& event) OVERRIDE;
   virtual void DragCancel() OVERRIDE;
   virtual bool IsDragDropInProgress() OVERRIDE;
+  virtual gfx::NativeCursor GetDragCursor() OVERRIDE;
 
   // Overridden from aura::EventFilter:
   virtual bool PreHandleKeyEvent(aura::Window* target,
@@ -88,6 +89,7 @@ class ASH_EXPORT DragDropController
   gfx::Point drag_image_offset_;
   const ui::OSExchangeData* drag_data_;
   int drag_operation_;
+  gfx::NativeCursor drag_cursor_;
 
   // Window that is currently under the drag cursor.
   aura::Window* drag_window_;
@@ -98,6 +100,9 @@ class ASH_EXPORT DragDropController
   // Indicates whether the caller should be blocked on a drag/drop session.
   // Only be used for tests.
   bool should_block_during_drag_drop_;
+
+  // Closure for quitting nested message loop.
+  base::Closure quit_closure_;
 
   DISALLOW_COPY_AND_ASSIGN(DragDropController);
 };

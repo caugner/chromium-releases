@@ -23,7 +23,6 @@
 #include "chrome/browser/chromeos/boot_times_loader.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
-#include "chrome/browser/chromeos/cros_settings.h"
 #include "chrome/browser/chromeos/customization_document.h"
 #include "chrome/browser/chromeos/kiosk_mode/kiosk_mode_settings.h"
 #include "chrome/browser/chromeos/login/helper.h"
@@ -31,6 +30,7 @@
 #include "chrome/browser/chromeos/login/login_utils.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
+#include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/system/statistics_provider.h"
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/policy/policy_service.h"
@@ -472,8 +472,23 @@ void ExistingUserController::OnStartEnterpriseEnrollment() {
 void ExistingUserController::OnEnrollmentOwnershipCheckCompleted(
     OwnershipService::Status status,
     bool current_user_is_owner) {
-  if (status == OwnershipService::OWNERSHIP_NONE)
+  if (status == OwnershipService::OWNERSHIP_NONE) {
     ShowEnrollmentScreen(false, std::string());
+  } else if (status == OwnershipService::OWNERSHIP_TAKEN) {
+    // On a device that is already owned we might want to allow users to
+    // re-enroll if the policy information is invalid.
+    CrosSettingsProvider::TrustedStatus trusted_status =
+        CrosSettings::Get()->PrepareTrustedValues(
+            base::Bind(
+                &ExistingUserController::OnEnrollmentOwnershipCheckCompleted,
+                weak_factory_.GetWeakPtr(), status, current_user_is_owner));
+    if (trusted_status == CrosSettingsProvider::PERMANENTLY_UNTRUSTED)
+      ShowEnrollmentScreen(false, std::string());
+  } else {
+    // OwnershipService::GetStatusAsync is supposed to return either
+    // OWNERSHIP_NONE or OWNERSHIP_TAKEN.
+    NOTREACHED();
+  }
 }
 
 void ExistingUserController::ShowEnrollmentScreen(bool is_auto_enrollment,

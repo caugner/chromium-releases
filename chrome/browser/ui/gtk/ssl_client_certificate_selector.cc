@@ -345,7 +345,8 @@ void SSLClientCertificateSelector::OnViewClicked(GtkWidget* button) {
   net::X509Certificate* cert = GetSelectedCert();
   if (cert) {
     GtkWidget* toplevel = gtk_widget_get_toplevel(root_widget_.get());
-    ShowCertificateViewer(GTK_WINDOW(toplevel), cert);
+    ShowCertificateViewer(
+        tab_contents_->web_contents(), GTK_WINDOW(toplevel), cert);
   }
 }
 
@@ -382,10 +383,7 @@ void SSLClientCertificateSelector::OnPromptShown(GtkWidget* widget,
 
 }  // namespace
 
-///////////////////////////////////////////////////////////////////////////////
-// SSLClientAuthHandler platform specific implementation:
-
-namespace browser {
+namespace chrome {
 
 void ShowSSLClientCertificateSelector(
     TabContents* tab_contents,
@@ -397,4 +395,4 @@ void ShowSSLClientCertificateSelector(
       tab_contents, network_session, cert_request_info, callback))->Show();
 }
 
-}  // namespace browser
+}  // namespace chrome

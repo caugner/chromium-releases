@@ -7,7 +7,6 @@
 
 #ifndef CHROME_BROWSER_CONTENT_SETTINGS_HOST_CONTENT_SETTINGS_MAP_H_
 #define CHROME_BROWSER_CONTENT_SETTINGS_HOST_CONTENT_SETTINGS_MAP_H_
-#pragma once
 
 #include <map>
 #include <string>
@@ -164,6 +163,9 @@ class HostContentSettingsMap
   static bool IsSettingAllowedForType(PrefService* prefs,
                                       ContentSetting setting,
                                       ContentSettingsType content_type);
+
+  // Returns true if the values for content type are of type dictionary/map.
+  static bool ContentTypeHasCompoundValue(ContentSettingsType type);
 
   // Detaches the HostContentSettingsMap from all Profile-related objects like
   // PrefService. This methods needs to be called before destroying the Profile.

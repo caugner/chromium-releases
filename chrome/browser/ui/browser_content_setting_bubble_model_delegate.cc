@@ -6,6 +6,10 @@
 
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_dialogs.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/chrome_pages.h"
+#include "chrome/common/url_constants.h"
 
 // The URL for when the user clicks "learn more" on the mixed scripting page
 // icon bubble.
@@ -22,7 +26,7 @@ BrowserContentSettingBubbleModelDelegate::
 
 void BrowserContentSettingBubbleModelDelegate::ShowCollectedCookiesDialog(
     TabContents* contents) {
-  browser_->ShowCollectedCookiesDialog(contents);
+  chrome::ShowCollectedCookiesDialog(contents);
 }
 
 void BrowserContentSettingBubbleModelDelegate::ShowContentSettingsPage(
@@ -32,8 +36,14 @@ void BrowserContentSettingBubbleModelDelegate::ShowContentSettingsPage(
     // blocking, so bounce to an explanatory page for now.
     GURL url(google_util::AppendGoogleLocaleParam(
         GURL(kInsecureScriptHelpUrl)));
-    browser_->AddSelectedTabWithURL(url, content::PAGE_TRANSITION_LINK);
-  } else {
-    browser_->ShowContentSettingsPage(type);
+    chrome::AddSelectedTabWithURL(browser_, url, content::PAGE_TRANSITION_LINK);
+    return;
   }
+
+  if (type == CONTENT_SETTINGS_TYPE_PROTOCOL_HANDLERS) {
+    chrome::ShowSettingsSubPage(browser_, chrome::kHandlerSettingsSubPage);
+    return;
+  }
+
+  chrome::ShowContentSettings(browser_, type);
 }

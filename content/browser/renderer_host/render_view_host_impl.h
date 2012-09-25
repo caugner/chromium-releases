@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_BROWSER_RENDERER_HOST_RENDER_VIEW_HOST_IMPL_H_
 #define CONTENT_BROWSER_RENDERER_HOST_RENDER_VIEW_HOST_IMPL_H_
-#pragma once
 
 #include <string>
 #include <vector>
@@ -51,6 +50,7 @@ class PowerSaveBlocker;
 
 namespace ui {
 class Range;
+struct SelectedFileInfo;
 }
 
 namespace content {
@@ -61,7 +61,6 @@ class RenderWidgetHostDelegate;
 struct FileChooserParams;
 struct ContextMenuParams;
 struct Referrer;
-struct SelectedFileInfo;
 struct ShowDesktopNotificationHostMsgParams;
 
 // NotificationObserver used to listen for EXECUTE_JAVASCRIPT_RESULT
@@ -201,7 +200,7 @@ class CONTENT_EXPORT RenderViewHostImpl
   virtual void StopFinding(StopFindAction action) OVERRIDE;
   virtual void FirePageBeforeUnload(bool for_cross_site_transition) OVERRIDE;
   virtual void FilesSelectedInChooser(
-      const std::vector<SelectedFileInfo>& files,
+      const std::vector<ui::SelectedFileInfo>& files,
       int permissions) OVERRIDE;
   virtual RenderViewHostDelegate* GetDelegate() const OVERRIDE;
   virtual int GetEnabledBindings() const OVERRIDE;
@@ -367,7 +366,7 @@ class CONTENT_EXPORT RenderViewHostImpl
   virtual void LostMouseLock() OVERRIDE;
   virtual void ForwardMouseEvent(
       const WebKit::WebMouseEvent& mouse_event) OVERRIDE;
-  virtual void OnMouseActivate() OVERRIDE;
+  virtual void OnPointerEventActivate() OVERRIDE;
   virtual void ForwardKeyboardEvent(
       const content::NativeWebKeyboardEvent& key_event) OVERRIDE;
   virtual gfx::Rect GetRootWindowResizerRect() const OVERRIDE;
@@ -513,8 +512,8 @@ class CONTENT_EXPORT RenderViewHostImpl
                                    IPC::Message* reply_msg);
   void OnMsgStartDragging(const WebDropData& drop_data,
                           WebKit::WebDragOperationsMask operations_allowed,
-                          const SkBitmap& image,
-                          const gfx::Point& image_offset);
+                          const SkBitmap& bitmap,
+                          const gfx::Point& bitmap_offset_in_dip);
   void OnUpdateDragCursor(WebKit::WebDragOperation drag_operation);
   void OnTargetDropACK();
   void OnTakeFocus(bool reverse);
@@ -549,6 +548,10 @@ class CONTENT_EXPORT RenderViewHostImpl
 
 #if defined(OS_MACOSX) || defined(OS_ANDROID)
   void OnMsgShowPopup(const ViewHostMsg_ShowPopup_Params& params);
+#endif
+
+#if defined(OS_ANDROID)
+  void OnStartContentIntent(const GURL& content_url);
 #endif
 
  private:

@@ -112,14 +112,13 @@ void TestURLRequestContext::Init() {
     context_storage_.set_job_factory(new net::URLRequestJobFactory);
 }
 
-TestURLRequest::TestURLRequest(const GURL& url, Delegate* delegate)
-    : net::URLRequest(url, delegate),
-      context_(new TestURLRequestContext) {
-  set_context(context_.get());
+TestURLRequest::TestURLRequest(const GURL& url,
+                               Delegate* delegate,
+                               TestURLRequestContext* context)
+    : net::URLRequest(url, delegate, context) {
 }
 
 TestURLRequest::~TestURLRequest() {
-  set_context(NULL);
 }
 
 TestURLRequestContextGetter::TestURLRequestContextGetter(
@@ -476,9 +475,6 @@ bool TestNetworkDelegate::OnCanSetCookie(const net::URLRequest& request,
   if (cookie_options_bit_mask_ & NO_SET_COOKIE)
     allow = false;
 
-  if (cookie_options_bit_mask_ & FORCE_SESSION)
-    options->set_force_session();
-
   if (!allow) {
     blocked_set_cookie_count_++;
   } else {
@@ -502,6 +498,10 @@ int TestNetworkDelegate::OnBeforeSocketStreamConnect(
     net::SocketStream* socket,
     const net::CompletionCallback& callback) {
   return net::OK;
+}
+
+void TestNetworkDelegate::OnCacheWaitStateChange(const net::URLRequest& request,
+                                                 CacheWaitState state) {
 }
 
 // static

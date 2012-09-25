@@ -4,14 +4,15 @@
 
 #ifndef ASH_WM_SHELF_LAYOUT_MANAGER_H_
 #define ASH_WM_SHELF_LAYOUT_MANAGER_H_
-#pragma once
 
 #include "ash/ash_export.h"
 #include "ash/launcher/launcher.h"
 #include "ash/shell_observer.h"
-#include "ash/wm/shelf_auto_hide_behavior.h"
+#include "ash/wm/shelf_types.h"
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "base/gtest_prod_util.h"
+#include "base/observer_list.h"
 #include "base/timer.h"
 #include "ui/aura/client/activation_change_observer.h"
 #include "ui/aura/layout_manager.h"
@@ -27,10 +28,11 @@ class Widget;
 }
 
 namespace ash {
+class ScreenAsh;
 namespace internal {
 
 class ShelfLayoutManagerTest;
-class WorkspaceManager;
+class WorkspaceController;
 
 // ShelfLayoutManager is the layout manager responsible for the launcher and
 // status widgets. The launcher is given the total available width and told the
@@ -59,6 +61,18 @@ class ASH_EXPORT ShelfLayoutManager :
     AUTO_HIDE_HIDDEN,
   };
 
+  class ASH_EXPORT Observer {
+   public:
+    // Called when the target ShelfLayoutManager will be deleted.
+    virtual void WillDeleteShelf() {}
+
+    // Called when the visibility change is scheduled.
+    virtual void WillChangeVisibilityState(VisibilityState new_state) {}
+
+    // Called when the auto hide state is changed.
+    virtual void OnAutoHideStateChanged(AutoHideState new_state) {}
+  };
+
   // We reserve a small area at the bottom of the workspace area to ensure that
   // the bottom-of-window resize handle can be hit.
   // TODO(jamescook): Some day we may want the workspace area to be an even
@@ -84,8 +98,8 @@ class ASH_EXPORT ShelfLayoutManager :
   bool SetAlignment(ShelfAlignment alignment);
   ShelfAlignment alignment() const { return alignment_; }
 
-  void set_workspace_manager(WorkspaceManager* manager) {
-    workspace_manager_ = manager;
+  void set_workspace_controller(WorkspaceController* controller) {
+    workspace_controller_ = controller;
   }
 
   views::Widget* launcher_widget() {
@@ -102,10 +116,7 @@ class ASH_EXPORT ShelfLayoutManager :
   // on the screen.
   bool IsVisible() const;
 
-  // Returns the bounds the specified window should be when maximized.
-  gfx::Rect GetMaximizedWindowBounds(aura::Window* window);
-  gfx::Rect GetUnmaximizedWorkAreaBounds(aura::Window* window);
-
+ public:
   // The launcher is typically created after the layout manager.
   void SetLauncher(Launcher* launcher);
   Launcher* launcher() { return launcher_; }
@@ -130,6 +141,9 @@ class ASH_EXPORT ShelfLayoutManager :
   // the shelf renders slightly differently.
   void SetWindowOverlapsShelf(bool value);
 
+  void AddObserver(Observer* observer);
+  void RemoveObserver(Observer* observer);
+
   // Overridden from aura::LayoutManager:
   virtual void OnWindowResized() OVERRIDE;
   virtual void OnWindowAddedToLayout(aura::Window* child) OVERRIDE;
@@ -149,14 +163,16 @@ class ASH_EXPORT ShelfLayoutManager :
 
  private:
   class AutoHideEventFilter;
+  friend class ash::ScreenAsh;
   friend class ShelfLayoutManagerTest;
+  FRIEND_TEST_ALL_PREFIXES(ShelfLayoutManagerTest, SetAutoHideBehavior);
 
   struct TargetBounds {
     TargetBounds() : opacity(0.0f) {}
 
     float opacity;
-    gfx::Rect launcher_bounds;
-    gfx::Rect status_bounds;
+    gfx::Rect launcher_bounds_in_root;
+    gfx::Rect status_bounds_in_root;
     gfx::Insets work_area_insets;
   };
 
@@ -179,6 +195,10 @@ class ASH_EXPORT ShelfLayoutManager :
     AutoHideState auto_hide_state;
     bool is_screen_locked;
   };
+
+  // Returns the bounds the specified window should be when maximized.
+  gfx::Rect GetMaximizedWindowBounds(aura::Window* window);
+  gfx::Rect GetUnmaximizedWorkAreaBounds(aura::Window* window);
 
   // Sets the visibility of the shelf to |state|.
   void SetState(VisibilityState visibility_state);
@@ -241,7 +261,7 @@ class ASH_EXPORT ShelfLayoutManager :
   Launcher* launcher_;
   views::Widget* status_;
 
-  WorkspaceManager* workspace_manager_;
+  WorkspaceController* workspace_controller_;
 
   // Do any windows overlap the shelf? This is maintained by WorkspaceManager.
   bool window_overlaps_shelf_;
@@ -251,6 +271,8 @@ class ASH_EXPORT ShelfLayoutManager :
   // EventFilter used to detect when user moves the mouse over the launcher to
   // trigger showing the launcher.
   scoped_ptr<AutoHideEventFilter> event_filter_;
+
+  ObserverList<Observer> observers_;
 
   DISALLOW_COPY_AND_ASSIGN(ShelfLayoutManager);
 };

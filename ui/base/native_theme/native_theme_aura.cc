@@ -5,7 +5,7 @@
 #include "ui/base/native_theme/native_theme_aura.h"
 
 #include "base/logging.h"
-#include "grit/ui_resources_standard.h"
+#include "grit/ui_resources.h"
 #include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image_skia.h"
@@ -227,7 +227,8 @@ void NativeThemeAura::PaintArrowButton(SkCanvas* canvas,
                                        const gfx::Rect& rect,
                                        Part part,
                                        State state) const {
-  DCHECK(rect.IsEmpty());
+  // TODO(jamescook): Should this paint something?  We used to DCHECK() here
+  // that the rect was empty, but that was failing on about: UI pages.
 }
 
 void NativeThemeAura::PaintScrollbarThumb(SkCanvas* canvas,

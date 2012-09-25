@@ -5,6 +5,7 @@
 #include "content/public/test/mock_render_thread.h"
 
 #include "base/process_util.h"
+#include "base/message_loop_proxy.h"
 #include "content/common/view_messages.h"
 #include "ipc/ipc_message_utils.h"
 #include "ipc/ipc_sync_message.h"
@@ -76,8 +77,7 @@ scoped_refptr<base::MessageLoopProxy>
   return scoped_refptr<base::MessageLoopProxy>();
 }
 
-void MockRenderThread::AddRoute(int32 routing_id,
-                                IPC::Channel::Listener* listener) {
+void MockRenderThread::AddRoute(int32 routing_id, IPC::Listener* listener) {
   // We may hear this for views created from OnMsgCreateWindow as well,
   // in which case we don't want to track the new widget.
   if (routing_id_ == routing_id)
@@ -163,6 +163,12 @@ int64 MockRenderThread::GetIdleNotificationDelayInMs() const {
 
 void MockRenderThread::SetIdleNotificationDelayInMs(
     int64 idle_notification_delay_in_ms) {
+}
+
+void MockRenderThread::ToggleWebKitSharedTimer(bool suspend) {
+}
+
+void MockRenderThread::UpdateHistograms(int sequence_number) {
 }
 
 #if defined(OS_WIN)

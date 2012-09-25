@@ -10,6 +10,7 @@
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "content/public/test/browser_test_utils.h"
 
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ExceptionInHandlerShouldNotCrash) {
   ASSERT_TRUE(RunExtensionSubtest(
@@ -26,10 +27,10 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, LastError) {
   // Get the ExtensionHost that is hosting our background page.
   ExtensionProcessManager* manager =
       browser()->profile()->GetExtensionProcessManager();
-  ExtensionHost* host = FindHostWithPath(manager, "/bg.html", 1);
+  extensions::ExtensionHost* host = FindHostWithPath(manager, "/bg.html", 1);
 
   bool result = false;
-  ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
+  ASSERT_TRUE(content::ExecuteJavaScriptAndExtractBool(
       host->render_view_host(), L"", L"testLastError()", &result));
   EXPECT_TRUE(result);
 }

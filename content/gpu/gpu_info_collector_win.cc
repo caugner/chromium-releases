@@ -136,12 +136,12 @@ content::GpuPerformanceStats RetrieveGpuPerformanceStats() {
   if (stats.gaming == 0.0)
     LOG(ERROR) << "Could not read gaming score from assessment results.";
 
-  UMA_HISTOGRAM_CUSTOM_COUNTS("GPU.WinSAT.OverallScore",
-                              stats.overall, 0.0, 50.0, 50);
-  UMA_HISTOGRAM_CUSTOM_COUNTS("GPU.WinSAT.GraphicsScore",
-                              stats.graphics, 0.0, 50.0, 50);
-  UMA_HISTOGRAM_CUSTOM_COUNTS("GPU.WinSAT.GamingScore",
-                              stats.gaming, 0.0, 50.0, 50);
+  UMA_HISTOGRAM_CUSTOM_COUNTS("GPU.WinSAT.OverallScore2",
+                              stats.overall * 10, 10, 200, 50);
+  UMA_HISTOGRAM_CUSTOM_COUNTS("GPU.WinSAT.GraphicsScore2",
+                              stats.graphics * 10, 10, 200, 50);
+  UMA_HISTOGRAM_CUSTOM_COUNTS("GPU.WinSAT.GamingScore2",
+                              stats.gaming * 10, 10, 200, 50);
 
   UMA_HISTOGRAM_TIMES("GPU.WinSAT.ReadResultsFileTime",
                       base::TimeTicks::Now() - start_time);
@@ -152,6 +152,16 @@ content::GpuPerformanceStats RetrieveGpuPerformanceStats() {
 }  // namespace anonymous
 
 namespace gpu_info_collector {
+
+#if !defined(GOOGLE_CHROME_BUILD)
+AMDVideoCardType GetAMDVideocardType() {
+  return UNKNOWN;
+}
+#else
+// This function has a real implementation for official builds that can
+// be found in src/third_party/amd.
+AMDVideoCardType GetAMDVideocardType();
+#endif
 
 bool CollectGraphicsInfo(content::GPUInfo* gpu_info) {
   TRACE_EVENT0("gpu", "CollectGraphicsInfo");
@@ -344,12 +354,16 @@ bool CollectDriverInfoD3D(const std::wstring& device_id,
             reinterpret_cast<LPBYTE>(value), &dwcb_data);
         if (result == ERROR_SUCCESS) {
           driver_vendor = WideToASCII(std::wstring(value));
-          // If it's an Intel GPU with a driver provided by AMD then it's
-          // probably AMD's Dynamic Switchable Graphics.
-          // TODO: detect only AMD switchable
-          gpu_info->amd_switchable =
-              driver_vendor == "Advanced Micro Devices, Inc." ||
-              driver_vendor == "ATI Technologies Inc.";
+          if (driver_vendor == "Advanced Micro Devices, Inc." ||
+              driver_vendor == "ATI Technologies Inc.") {
+            // We are conservative and assume that in the absence of a clear
+            // signal the videocard is assumed to be switchable. Additionally,
+            // some switchable systems with Intel GPUs aren't correctly
+            // detected, so always count them.
+            AMDVideoCardType amd_card_type = GetAMDVideocardType();
+            gpu_info->amd_switchable = (gpu_info->gpu.vendor_id == 0x8086) ||
+                                       (amd_card_type != STANDALONE);
+          }
         }
 
         gpu_info->driver_vendor = driver_vendor;

@@ -9,6 +9,7 @@ extern "C" {
 #include "ui/gl/gl_surface_glx.h"
 
 #include "base/basictypes.h"
+#include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
@@ -36,7 +37,7 @@ Display* g_display;
 const char* g_glx_extensions = NULL;
 bool g_glx_create_context_robustness_supported = false;
 
-}  // namespace anonymous
+}  // namespace
 
 GLSurfaceGLX::GLSurfaceGLX() {}
 
@@ -77,17 +78,7 @@ const char* GLSurfaceGLX::GetGLXExtensions() {
 
 // static
 bool GLSurfaceGLX::HasGLXExtension(const char* name) {
-  DCHECK(name);
-  const char* c_extensions = GetGLXExtensions();
-  if (!c_extensions)
-    return false;
-  std::string extensions(c_extensions);
-  extensions += " ";
-
-  std::string delimited_name(name);
-  delimited_name += " ";
-
-  return extensions.find(delimited_name) != std::string::npos;
+  return ExtensionsContain(GetGLXExtensions(), name);
 }
 
 // static
@@ -135,6 +126,8 @@ bool NativeViewGLSurfaceGLX::IsOffscreen() {
 
 bool NativeViewGLSurfaceGLX::SwapBuffers() {
   glXSwapBuffers(g_display, window_);
+  // For latency_tests.cc:
+  UNSHIPPED_TRACE_EVENT_INSTANT0("test_gpu", "CompositorSwapBuffersComplete");
   return true;
 }
 

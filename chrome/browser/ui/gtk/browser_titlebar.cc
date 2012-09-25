@@ -25,6 +25,8 @@
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_commands.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/gtk/accelerators_gtk.h"
 #include "chrome/browser/ui/gtk/avatar_menu_button_gtk.h"
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
@@ -47,9 +49,7 @@
 #include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "grit/theme_resources_standard.h"
 #include "grit/ui_resources.h"
-#include "grit/ui_resources_standard.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -179,7 +179,6 @@ void PopupPageMenuModel::Build() {
   AddItemWithStringId(IDC_RELOAD, IDS_APP_MENU_RELOAD);
   AddSeparator();
   AddItemWithStringId(IDC_SHOW_AS_TAB, IDS_SHOW_AS_TAB);
-  AddItemWithStringId(IDC_COPY_URL, IDS_APP_MENU_COPY_URL);
   AddSeparator();
   AddItemWithStringId(IDC_CUT, IDS_CUT);
   AddItemWithStringId(IDC_COPY, IDS_COPY);
@@ -887,9 +886,9 @@ gboolean BrowserTitlebar::OnScroll(GtkWidget* widget, GdkEventScroll* event) {
   if (event->direction == GDK_SCROLL_LEFT ||
       event->direction == GDK_SCROLL_UP) {
     if (index != 0)
-      browser->SelectPreviousTab();
+      chrome::SelectPreviousTab(browser);
   } else if (index + 1 < browser->tab_count()) {
-    browser->SelectNextTab();
+    chrome::SelectNextTab(browser);
   }
   return TRUE;
 }
@@ -937,8 +936,7 @@ bool BrowserTitlebar::IsCommandIdEnabled(int command_id) const {
   if (command_id == kShowWindowDecorationsCommand)
     return true;
 
-  return browser_window_->browser()->command_updater()->
-      IsCommandEnabled(command_id);
+  return chrome::IsCommandEnabled(browser_window_->browser(), command_id);
 }
 
 bool BrowserTitlebar::IsCommandIdChecked(int command_id) const {
@@ -950,7 +948,7 @@ bool BrowserTitlebar::IsCommandIdChecked(int command_id) const {
   EncodingMenuController controller;
   if (controller.DoesCommandBelongToEncodingMenu(command_id)) {
     WebContents* web_contents =
-        browser_window_->browser()->GetActiveWebContents();
+        chrome::GetActiveWebContents(browser_window_->browser());
     if (web_contents) {
       return controller.IsItemChecked(browser_window_->browser()->profile(),
                                       web_contents->GetEncoding(),
@@ -971,7 +969,7 @@ void BrowserTitlebar::ExecuteCommand(int command_id) {
     return;
   }
 
-  browser_window_->browser()->ExecuteCommand(command_id);
+  chrome::ExecuteCommand(browser_window_->browser(), command_id);
 }
 
 bool BrowserTitlebar::GetAcceleratorForCommandId(

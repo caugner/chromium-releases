@@ -4,6 +4,7 @@ URL: http://gperftools.googlecode.com/
 Version: unknown
 Revision: 144
 Security Critical: yes
+License: BSD
 
 Description:
 This contains Chromium's locally patched copy of tcmalloc.
@@ -81,3 +82,7 @@ HOWTOs:
         $ gcl change CL
         $ gcl upload CL
         $ gcl commit CL
+
+
+Modifications:
+- Converted to utf-8 with: vim +"argdo write ++enc=utf-8" *.h *.c

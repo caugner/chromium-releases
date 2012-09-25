@@ -139,17 +139,10 @@ void ChromeWebContentsViewDelegateViews::ShowContextMenu(
   aura::Window* web_contents_window =
       web_contents_->GetView()->GetNativeView();
   aura::RootWindow* root_window = web_contents_window->GetRootWindow();
-  aura::Window::ConvertPointToWindow(web_contents_window, root_window,
-                                     &screen_point);
-
-  // If we are on the desktop, transform the data from our toplevel window
-  // coordinates to screen coordinates.
-  aura::Window* toplevel_window =
-      web_contents_->GetView()->GetTopLevelNativeWindow();
   aura::client::ScreenPositionClient* screen_position_client =
-      aura::client::GetScreenPositionClient(toplevel_window);
-  if (screen_position_client)
-    screen_position_client->ConvertToScreenPoint(&screen_point);
+      aura::client::GetScreenPositionClient(root_window);
+  screen_position_client->ConvertPointToScreen(web_contents_window,
+                                               &screen_point);
 #else
   POINT temp = screen_point.ToPOINT();
   ClientToScreen(web_contents_->GetView()->GetNativeView(), &temp);
@@ -193,11 +186,11 @@ void ChromeWebContentsViewDelegateViews::SetInitialFocus() {
   }
 }
 
-namespace browser {
+namespace chrome {
 
 content::WebContentsViewDelegate* CreateWebContentsViewDelegate(
     content::WebContents* web_contents) {
   return new ChromeWebContentsViewDelegateViews(web_contents);
 }
 
-}  // namespace browser
+}  // namespace chrome

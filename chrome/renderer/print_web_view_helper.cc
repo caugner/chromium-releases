@@ -24,7 +24,10 @@
 #include "printing/page_size_margins.h"
 #include "printing/print_job_constants.h"
 #include "printing/units.h"
+#include "skia/ext/vector_canvas.h"
+#include "skia/ext/vector_platform_device_skia.h"
 #include "third_party/skia/include/core/SkRect.h"
+#include "third_party/skia/include/core/SkTypeface.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebCanvas.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebSize.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLRequest.h"
@@ -34,37 +37,29 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebElement.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPlugin.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPrintScalingOption.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/layout.h"
 #include "ui/gfx/rect.h"
+#include "ui/gfx/skia_util.h"
 #include "webkit/glue/webpreferences.h"
 
 #if defined(OS_POSIX)
 #include "base/process_util.h"
 #endif
 
-#if defined(USE_SKIA)
-#include "skia/ext/vector_canvas.h"
-#include "skia/ext/vector_platform_device_skia.h"
-#include "third_party/skia/include/core/SkTypeface.h"
 #if defined(OS_WIN)  // Currently Windows only
+#define USE_RENDER_TEXT
+#endif
+
+#if defined(USE_RENDER_TEXT)
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/render_text.h"
-#endif  // USE_SKIA && defined(OS_WIN)
-#elif defined(OS_MACOSX)
-#include <CoreGraphics/CGContext.h>
-
-#include "base/mac/scoped_cftyperef.h"
-#include "base/sys_string_conversions.h"
-#include "ui/gfx/scoped_cg_context_save_gstate_mac.h"
 #endif
 
-#if defined(OS_MACOSX)
-using base::mac::ScopedCFTypeRef;
-#endif
 using printing::ConvertPixelsToPoint;
 using printing::ConvertPixelsToPointDouble;
 using printing::ConvertPointsToPixelDouble;
@@ -87,18 +82,13 @@ using WebKit::WebView;
 
 namespace {
 
-#if defined(USE_SKIA)
+#if defined(USE_RENDER_TEXT)
+typedef gfx::RenderText* HeaderFooterPaint;
+#else
 typedef SkPaint HeaderFooterPaint;
-#elif defined(OS_MACOSX)
-typedef CFDictionaryRef HeaderFooterPaint;
 #endif
 
 const double kMinDpi = 1.0;
-
-#if defined(OS_MACOSX) && !defined(USE_SKIA)
-const double kBlackGrayLevel = 0.0;
-const double kOpaqueLevel = 1.0;
-#endif  // OS_MACOSX && !USE_SKIA
 
 int GetDPI(const PrintMsg_Print_Params* print_params) {
 #if defined(OS_MACOSX)
@@ -434,61 +424,6 @@ SkPoint GetHeaderFooterPosition(
   return point;
 }
 
-#if defined(USE_SKIA) && defined(OS_WIN)
-void PrintHeaderFooterByRenderText(
-    const string16& text,
-    WebKit::WebCanvas* canvas,
-    HeaderFooterPaint paint,
-    float webkit_scale_factor,
-    const PageSizeMargins& page_layout,
-    printing::HorizontalHeaderFooterPosition horizontal_position,
-    printing::VerticalHeaderFooterPosition vertical_position,
-    double offset_to_baseline) {
-  // TODO(arthurhsu): Following code works on Windows only so far.
-  // See crbug.com/108599 and its blockers for more information.
-  scoped_ptr<gfx::RenderText> render_text(gfx::RenderText::CreateRenderText());
-  render_text->SetText(text);
-  int font_size = printing::kSettingHeaderFooterFontSize / webkit_scale_factor;
-  render_text->SetFontSize(font_size);
-  gfx::Size text_size = render_text->GetStringSize();
-  // Text height includes the configured gap between header/footer and the
-  // context, plus the 1 point that we later substracted for ensuring the
-  // overlapping between RenderText rect and the content area.
-  int text_height = text_size.height() + 1 +
-                    printing::kSettingHeaderFooterInterstice;
-  SkScalar margin_left = page_layout.margin_left / webkit_scale_factor;
-  SkScalar margin_top = page_layout.margin_top / webkit_scale_factor;
-  SkScalar content_height = page_layout.content_height / webkit_scale_factor;
-
-  int text_width = text_size.width();
-  SkPoint point = GetHeaderFooterPosition(webkit_scale_factor, page_layout,
-                                          horizontal_position,
-                                          vertical_position, offset_to_baseline,
-                                          SkScalarToDouble(text_width));
-  // Workaround clipping issue of RenderText to make sure that display rect
-  // overlaps with content area.
-  int rect_y;
-  if (vertical_position == printing::TOP) {
-    // Bottom of display rect must overlap with content.
-    rect_y = margin_top - text_height + 1;
-  } else {  // BOTTOM
-    // Top of display rect must overlap with content.
-    rect_y = margin_top + content_height - 1;
-  }
-
-  gfx::Rect rect(point.x() + margin_left, rect_y, text_width, text_height);
-  render_text->SetDisplayRect(rect);
-
-  int save_count = canvas->save();
-  canvas->translate(-margin_left, -margin_top);
-  {
-    gfx::Canvas gfx_canvas(canvas);
-    render_text->Draw(&gfx_canvas);
-  }
-  canvas->restoreToCount(save_count);
-}
-#endif
-
 // Given a text, the positions, and the paint object, this method gets the
 // coordinates and prints the text at those coordinates on the canvas.
 void PrintHeaderFooterText(
@@ -500,10 +435,33 @@ void PrintHeaderFooterText(
     printing::HorizontalHeaderFooterPosition horizontal_position,
     printing::VerticalHeaderFooterPosition vertical_position,
     double offset_to_baseline) {
-#if defined(USE_SKIA)
-#if defined(OS_WIN)
-  PrintHeaderFooterByRenderText(text, canvas, paint, webkit_scale_factor,
-      page_layout, horizontal_position, vertical_position, offset_to_baseline);
+#if defined(USE_RENDER_TEXT)
+  paint->SetText(text);
+  paint->SetFontSize(printing::kSettingHeaderFooterFontSize);
+  double text_width_in_points = paint->GetStringSize().width();
+  SkPoint point = GetHeaderFooterPosition(webkit_scale_factor, page_layout,
+                                          horizontal_position,
+                                          vertical_position, offset_to_baseline,
+                                          text_width_in_points);
+  // Set the scaled font size before drawing the text.
+  // This creates a new font instead of calling |paint->SetFontSize()| to work
+  // around a Windows 8 bug. See: http://crbug.com/139206
+  gfx::FontList font_list(
+      gfx::Font(printing::kSettingHeaderFooterFontFamilyName,
+                printing::kSettingHeaderFooterFontSize / webkit_scale_factor));
+  paint->SetFontList(font_list);
+  gfx::Size size(paint->GetStringSize());
+  gfx::Rect rect(point.x(), point.y() - paint->GetBaseline(),
+                 size.width(), size.height());
+  paint->SetDisplayRect(rect);
+  {
+    SkMatrix m = canvas->getTotalMatrix();
+    ui::ScaleFactor device_scale_factor = ui::GetScaleFactorFromScale(
+        SkScalarAbs(m.getScaleX()));
+    scoped_ptr<gfx::Canvas> gfx_canvas(gfx::Canvas::CreateCanvasWithoutScaling(
+        canvas, device_scale_factor));
+    paint->Draw(gfx_canvas.get());
+  }
 #else
   // TODO(arthurhsu): following code has issues with i18n BiDi, see
   //                  crbug.com/108599.
@@ -518,22 +476,6 @@ void PrintHeaderFooterText(
       paint.getTextSize() / webkit_scale_factor));
   canvas->drawText(text.c_str(), text_byte_length, point.x(), point.y(),
                    paint);
-#endif  // USE_SKIA && OS_WIN
-#elif defined(OS_MACOSX)
-  ScopedCFTypeRef<CFStringRef> cf_text(base::SysUTF16ToCFStringRef(text));
-  ScopedCFTypeRef<CFAttributedStringRef> cf_attr_text(
-      CFAttributedStringCreate(NULL, cf_text, paint));
-  ScopedCFTypeRef<CTLineRef> line(CTLineCreateWithAttributedString(
-      cf_attr_text));
-  double text_width_in_points =
-      CTLineGetTypographicBounds(line, NULL, NULL, NULL) * webkit_scale_factor;
-  SkPoint point = GetHeaderFooterPosition(webkit_scale_factor,
-                                          page_layout, horizontal_position,
-                                          vertical_position, offset_to_baseline,
-                                          text_width_in_points);
-  CGContextSetTextPosition(canvas, SkScalarToDouble(point.x()),
-                           SkScalarToDouble(point.y()));
-  CTLineDraw(line, canvas);
 #endif
 }
 
@@ -595,38 +537,26 @@ void PrintWebViewHelper::PrintHeaderAndFooter(
     float webkit_scale_factor,
     const PageSizeMargins& page_layout,
     const DictionaryValue& header_footer_info) {
-#if defined(USE_SKIA)
   skia::VectorPlatformDeviceSkia* device =
       static_cast<skia::VectorPlatformDeviceSkia*>(canvas->getTopDevice());
   device->setDrawingArea(SkPDFDevice::kMargin_DrawingArea);
 
+#if defined(USE_RENDER_TEXT)
+  scoped_ptr<gfx::RenderText> render_text(gfx::RenderText::CreateInstance());
+  // TODO(asvitkine): The below line is to workaround http://crbug.com/133548.
+  //                  Remove it when the underlying Skia bug has been fixed.
+  render_text->set_clip_to_display_rect(false);
+  gfx::FontList font_list(
+      gfx::Font(printing::kSettingHeaderFooterFontFamilyName,
+                printing::kSettingHeaderFooterFontSize));
+  gfx::RenderText* paint = render_text.get();
+#else
   SkPaint paint;
   paint.setColor(SK_ColorBLACK);
   paint.setTextEncoding(SkPaint::kUTF16_TextEncoding);
   paint.setTextSize(SkDoubleToScalar(printing::kSettingHeaderFooterFontSize));
   paint.setTypeface(SkTypeface::CreateFromName(
       printing::kSettingHeaderFooterFontFamilyName, SkTypeface::kNormal));
-#elif defined(OS_MACOSX)
-  gfx::ScopedCGContextSaveGState CGContextSaveGState(canvas);
-  CGContextSetCharacterSpacing(canvas,
-                               printing::kSettingHeaderFooterCharacterSpacing);
-  CGContextSetTextDrawingMode(canvas, kCGTextFill);
-  CGContextSetGrayFillColor(canvas, kBlackGrayLevel, kOpaqueLevel);
-  CGContextSelectFont(canvas, printing::kSettingHeaderFooterFontName,
-                      printing::kSettingHeaderFooterFontSize,
-                      kCGEncodingFontSpecific);
-  ScopedCFTypeRef<CFStringRef> font_name(base::SysUTF8ToCFStringRef(
-      printing::kSettingHeaderFooterFontName));
-  // Flip the text (makes it appear upright as we would expect it to).
-  const CGAffineTransform flip_text =  CGAffineTransformMakeScale(1.0f, -1.0f);
-  ScopedCFTypeRef<CTFontRef> ct_font(CTFontCreateWithName(
-      font_name,
-      printing::kSettingHeaderFooterFontSize / webkit_scale_factor,
-      &flip_text));
-  const void* keys[] = {kCTFontAttributeName};
-  const void* values[] = {ct_font};
-  ScopedCFTypeRef<CFDictionaryRef> paint(CFDictionaryCreate(
-      NULL, keys, values, sizeof(keys) / sizeof(keys[0]), NULL, NULL));
 #endif
 
   // Print the headers onto the |canvas| if there is enough space to print
@@ -643,14 +573,19 @@ void PrintWebViewHelper::PrintHeaderAndFooter(
 
   // Used for height calculations. Note that the width may be undefined.
   SkRect header_vertical_bounds;
-#if defined(USE_SKIA)
+#if defined(USE_RENDER_TEXT)
+  paint->SetFontList(font_list);
+  paint->SetText(header_text);
+  {
+    gfx::Rect rect(gfx::Point(), paint->GetStringSize());
+    header_vertical_bounds = gfx::RectToSkRect(rect);
+    header_vertical_bounds.offset(0, -render_text->GetBaseline());
+  }
+#else
   paint.measureText(header_text.c_str(), header_text.length() * sizeof(char16),
                     &header_vertical_bounds, 0);
-#elif defined(OS_MACOSX)
-  header_vertical_bounds.fTop = CTFontGetAscent(ct_font) * webkit_scale_factor;
-  header_vertical_bounds.fBottom = -CTFontGetDescent(ct_font) *
-                                   webkit_scale_factor;
 #endif
+
   double text_height = printing::kSettingHeaderFooterInterstice +
                        header_vertical_bounds.height();
   if (text_height <= page_layout.margin_top) {
@@ -676,13 +611,19 @@ void PrintWebViewHelper::PrintHeaderAndFooter(
 
   // Used for height calculations. Note that the width may be undefined.
   SkRect footer_vertical_bounds;
-#if defined(USE_SKIA)
+#if defined(USE_RENDER_TEXT)
+  paint->SetFontList(font_list);
+  paint->SetText(footer_text);
+  {
+    gfx::Rect rect(gfx::Point(), paint->GetStringSize());
+    footer_vertical_bounds = gfx::RectToSkRect(rect);
+    footer_vertical_bounds.offset(0, -paint->GetBaseline());
+  }
+#else
   paint.measureText(footer_text.c_str(), footer_text.length() * sizeof(char16),
                     &footer_vertical_bounds, 0);
-#elif defined(OS_MACOSX)
-  footer_vertical_bounds.fTop = header_vertical_bounds.fTop;
-  footer_vertical_bounds.fBottom = header_vertical_bounds.fBottom;
 #endif
+
   text_height = printing::kSettingHeaderFooterInterstice +
                 footer_vertical_bounds.height();
   if (text_height <= page_layout.margin_bottom) {
@@ -694,9 +635,7 @@ void PrintWebViewHelper::PrintHeaderAndFooter(
                           footer_vertical_bounds.bottom());
   }
 
-#if defined(USE_SKIA)
   device->setDrawingArea(SkPDFDevice::kContent_DrawingArea);
-#endif
 }
 
 PrepareFrameAndViewForPrint::PrepareFrameAndViewForPrint(
@@ -1498,8 +1437,8 @@ bool PrintWebViewHelper::UpdatePrintSettings(
 
   if (!print_for_preview_) {
     // Validate expected print preview settings.
-    if (!job_settings->GetString(printing::kPreviewUIAddr,
-                                 &(settings.params.preview_ui_addr)) ||
+    if (!job_settings->GetInteger(printing::kPreviewUIID,
+                                  &(settings.params.preview_ui_id)) ||
         !job_settings->GetInteger(printing::kPreviewRequestID,
                                   &(settings.params.preview_request_id)) ||
         !job_settings->GetBoolean(printing::kIsFirstRequest,
@@ -1669,12 +1608,12 @@ void PrintWebViewHelper::RequestPrintPreview(PrintPreviewRequestType type) {
 }
 
 bool PrintWebViewHelper::CheckForCancel() {
+  const PrintMsg_Print_Params& print_params = print_pages_params_->params;
   bool cancel = false;
-  Send(new PrintHostMsg_CheckForCancel(
-      routing_id(),
-      print_pages_params_->params.preview_ui_addr,
-      print_pages_params_->params.preview_request_id,
-      &cancel));
+  Send(new PrintHostMsg_CheckForCancel(routing_id(),
+                                       print_params.preview_ui_id,
+                                       print_params.preview_request_id,
+                                       &cancel));
   if (cancel)
     notify_browser_of_print_failure_ = false;
   return cancel;

@@ -29,6 +29,7 @@
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/common/content_constants.h"
+#include "content/public/common/url_constants.h"
 #include "net/base/escape.h"
 #include "net/base/mime_util.h"
 #include "net/base/net_util.h"
@@ -114,6 +115,12 @@ bool AreURLsInPageNavigation(const GURL& existing_url, const GURL& new_url) {
       new_url.ReplaceComponents(replacements);
 }
 
+// Determines whether or not we should be carrying over a user agent override
+// between two NavigationEntries.
+bool ShouldKeepOverride(const content::NavigationEntry* last_entry) {
+  return last_entry && last_entry->GetIsOverridingUserAgent();
+}
+
 }  // namespace
 
 // NavigationControllerImpl ----------------------------------------------------
@@ -188,7 +195,7 @@ NavigationControllerImpl::NavigationControllerImpl(
   if (!session_storage_namespace_) {
     session_storage_namespace_ = new SessionStorageNamespaceImpl(
         static_cast<DOMStorageContextImpl*>(
-            BrowserContext::GetDOMStorageContext(browser_context_)));
+            BrowserContext::GetDefaultDOMStorageContext(browser_context_)));
   }
 }
 
@@ -235,6 +242,9 @@ void NavigationControllerImpl::Reload(bool check_for_repost) {
 }
 void NavigationControllerImpl::ReloadIgnoringCache(bool check_for_repost) {
   ReloadInternal(check_for_repost, RELOAD_IGNORING_CACHE);
+}
+void NavigationControllerImpl::ReloadOriginalRequestURL(bool check_for_repost) {
+  ReloadInternal(check_for_repost, RELOAD_ORIGINAL_REQUEST_URL);
 }
 
 void NavigationControllerImpl::ReloadInternal(bool check_for_repost,
@@ -422,13 +432,17 @@ NavigationEntry* NavigationControllerImpl::GetEntryAtIndex(
 
 NavigationEntry* NavigationControllerImpl::GetEntryAtOffset(
     int offset) const {
-  int index = (transient_entry_index_ != -1) ?
-                  transient_entry_index_ + offset :
-                  last_committed_entry_index_ + offset;
+  int index = GetIndexForOffset(offset);
   if (index < 0 || index >= GetEntryCount())
     return NULL;
 
   return entries_[index].get();
+}
+
+int NavigationControllerImpl::GetIndexForOffset(int offset) const {
+  return (transient_entry_index_ != -1) ?
+             transient_entry_index_ + offset :
+             last_committed_entry_index_ + offset;
 }
 
 bool NavigationControllerImpl::CanGoBack() const {
@@ -438,6 +452,11 @@ bool NavigationControllerImpl::CanGoBack() const {
 bool NavigationControllerImpl::CanGoForward() const {
   int index = GetCurrentEntryIndex();
   return index >= 0 && index < (static_cast<int>(entries_.size()) - 1);
+}
+
+bool NavigationControllerImpl::CanGoToOffset(int offset) const {
+  int index = GetIndexForOffset(offset);
+  return index >= 0 && index < GetEntryCount();
 }
 
 void NavigationControllerImpl::GoBack() {
@@ -513,13 +532,10 @@ void NavigationControllerImpl::GoToIndex(int index) {
 }
 
 void NavigationControllerImpl::GoToOffset(int offset) {
-  int index = (transient_entry_index_ != -1) ?
-                  transient_entry_index_ + offset :
-                  last_committed_entry_index_ + offset;
-  if (index < 0 || index >= GetEntryCount())
+  if (!CanGoToOffset(offset))
     return;
 
-  GoToIndex(index);
+  GoToIndex(GetIndexForOffset(offset));
 }
 
 void NavigationControllerImpl::RemoveEntryAtIndex(int index) {
@@ -577,14 +593,9 @@ void NavigationControllerImpl::LoadURL(
   if (content::HandleDebugURL(url, transition))
     return;
 
-  // The user initiated a load, we don't need to reload anymore.
-  needs_reload_ = false;
-
-  NavigationEntryImpl* entry = NavigationEntryImpl::FromNavigationEntry(
-      CreateNavigationEntry(
-          url, referrer, transition, false, extra_headers, browser_context_));
-
-  LoadEntry(entry);
+  bool override = ShouldKeepOverride(GetLastCommittedEntry());
+  LoadURLWithUserAgentOverride(url, referrer, transition, false, extra_headers,
+      override);
 }
 
 void NavigationControllerImpl::LoadURLFromRenderer(
@@ -592,12 +603,84 @@ void NavigationControllerImpl::LoadURLFromRenderer(
     const content::Referrer& referrer,
     content::PageTransition transition,
     const std::string& extra_headers) {
+  bool override = ShouldKeepOverride(GetLastCommittedEntry());
+  LoadURLWithUserAgentOverride(url, referrer, transition, true, extra_headers,
+      override);
+}
+
+void NavigationControllerImpl::LoadURLWithUserAgentOverride(
+    const GURL& url,
+    const content::Referrer& referrer,
+    content::PageTransition transition,
+    bool is_renderer_initiated,
+    const std::string& extra_headers,
+    bool is_overriding_user_agent) {
   // The user initiated a load, we don't need to reload anymore.
   needs_reload_ = false;
 
   NavigationEntryImpl* entry = NavigationEntryImpl::FromNavigationEntry(
       CreateNavigationEntry(
-          url, referrer, transition, true, extra_headers, browser_context_));
+          url, referrer, transition, is_renderer_initiated, extra_headers,
+          browser_context_));
+  entry->SetIsOverridingUserAgent(is_overriding_user_agent);
+
+  LoadEntry(entry);
+}
+
+void NavigationControllerImpl::LoadDataWithBaseURL(
+    const GURL& data_url,
+    const content::Referrer& referrer,
+    const GURL& base_url,
+    const GURL& history_url,
+    bool is_overriding_user_agent) {
+  // Make sure we don't allow non-'data:' URLs.
+  if (!data_url.SchemeIs(chrome::kDataScheme)) {
+    NOTREACHED();
+    return;
+  }
+
+  needs_reload_ = false;
+
+  NavigationEntryImpl* entry = NavigationEntryImpl::FromNavigationEntry(
+      CreateNavigationEntry(
+          data_url,
+          referrer,
+          content::PAGE_TRANSITION_TYPED,
+          false,
+          std::string(),
+          browser_context_));
+  entry->SetIsOverridingUserAgent(is_overriding_user_agent);
+  entry->SetBaseURLForDataURL(base_url);
+  entry->SetVirtualURL(history_url);
+
+  LoadEntry(entry);
+}
+
+void NavigationControllerImpl::PostURL(
+    const GURL& url,
+    const content::Referrer& referrer,
+    const base::RefCountedMemory& http_body,
+    bool is_overriding_user_agent) {
+  // Must be http scheme for a post request.
+  if (!url.SchemeIs(chrome::kHttpScheme) &&
+      !url.SchemeIs(chrome::kHttpsScheme)) {
+    NOTREACHED();
+    return;
+  }
+
+  needs_reload_ = false;
+
+  NavigationEntryImpl* entry = NavigationEntryImpl::FromNavigationEntry(
+      CreateNavigationEntry(
+          url,
+          referrer,
+          content::PAGE_TRANSITION_TYPED,
+          false,
+          std::string(),
+          browser_context_));
+  entry->SetIsOverridingUserAgent(is_overriding_user_agent);
+  entry->SetHasPostData(true);
+  entry->SetBrowserInitiatedPostData(&http_body);
 
   LoadEntry(entry);
 }
@@ -678,6 +761,9 @@ bool NavigationControllerImpl::RendererDidNavigate(
   NavigationEntryImpl* active_entry =
       NavigationEntryImpl::FromNavigationEntry(GetActiveEntry());
   active_entry->SetContentState(params.content_state);
+  // No longer needed since content state will hold the post data if any.
+  active_entry->SetBrowserInitiatedPostData(NULL);
+
 
   // Once committed, we do not need to track if the entry was initiated by
   // the renderer.
@@ -868,11 +954,8 @@ void NavigationControllerImpl::RendererDidNavigateToNewPage(
       static_cast<SiteInstanceImpl*>(web_contents_->GetSiteInstance()));
   new_entry->SetHasPostData(params.is_post);
   new_entry->SetPostID(params.post_id);
-
-  if (params.redirects.size() > 0)
-    new_entry->SetOriginalRequestURL(params.redirects[0]);
-  else
-    new_entry->SetOriginalRequestURL(params.url);
+  new_entry->SetOriginalRequestURL(params.original_request_url);
+  new_entry->SetIsOverridingUserAgent(params.is_overriding_user_agent);
 
   InsertOrReplaceEntry(new_entry, *did_replace_entry);
 }

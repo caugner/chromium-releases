@@ -28,6 +28,7 @@
 #include "content/public/browser/notification_source.h"
 #include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/codec/jpeg_codec.h"
 #include "ui/gfx/image/image.h"
 
@@ -1549,6 +1550,27 @@ TEST_F(HistoryBackendTest, MigrationVisitDuration) {
       "SELECT visit_duration FROM visits LIMIT 1"));
   ASSERT_TRUE(s1.Step());
   EXPECT_EQ(0, s1.ColumnInt(0));
+}
+
+TEST_F(HistoryBackendTest, AddPageNoVisitForBookmark) {
+    ASSERT_TRUE(backend_.get());
+
+    GURL url("http://www.google.com");
+    string16 title(UTF8ToUTF16("Bookmark title"));
+    backend_->AddPageNoVisitForBookmark(url, title);
+
+    URLRow row;
+    backend_->GetURL(url, &row);
+    EXPECT_EQ(url, row.url());
+    EXPECT_EQ(title, row.title());
+    EXPECT_EQ(0, row.visit_count());
+
+    backend_->DeleteURL(url);
+    backend_->AddPageNoVisitForBookmark(url, string16());
+    backend_->GetURL(url, &row);
+    EXPECT_EQ(url, row.url());
+    EXPECT_EQ(UTF8ToUTF16(url.spec()), row.title());
+    EXPECT_EQ(0, row.visit_count());
 }
 
 }  // namespace history

@@ -36,6 +36,7 @@ class PbufferImageTransportSurface
   // gfx::GLSurface implementation
   virtual bool Initialize() OVERRIDE;
   virtual void Destroy() OVERRIDE;
+  virtual bool DeferDraws() OVERRIDE;
   virtual bool IsOffscreen() OVERRIDE;
   virtual bool SwapBuffers() OVERRIDE;
   virtual bool PostSubBuffer(int x, int y, int width, int height) OVERRIDE;
@@ -45,12 +46,10 @@ class PbufferImageTransportSurface
 
  protected:
   // ImageTransportSurface implementation
-  virtual void OnNewSurfaceACK(uint64 surface_handle,
-                               TransportDIB::Handle shm_handle) OVERRIDE;
-  virtual void OnBuffersSwappedACK() OVERRIDE;
-  virtual void OnPostSubBufferACK() OVERRIDE;
+  virtual void OnBufferPresented(uint32 sync_point) OVERRIDE;
   virtual void OnResizeViewACK() OVERRIDE;
   virtual void OnResize(gfx::Size size) OVERRIDE;
+  virtual gfx::Size GetSize() OVERRIDE;
 
  private:
   virtual ~PbufferImageTransportSurface();
@@ -60,6 +59,12 @@ class PbufferImageTransportSurface
   // Tracks the current buffer allocation state.
   bool backbuffer_suggested_allocation_;
   bool frontbuffer_suggested_allocation_;
+
+  // Whether a SwapBuffers is pending.
+  bool is_swap_buffers_pending_;
+
+  // Whether we unscheduled command buffer because of pending SwapBuffers.
+  bool did_unschedule_;
 
   // Size to resize to when the surface becomes visible.
   gfx::Size visible_size_;
@@ -74,7 +79,9 @@ PbufferImageTransportSurface::PbufferImageTransportSurface(
     GpuCommandBufferStub* stub)
     : GLSurfaceAdapter(new gfx::PbufferGLSurfaceEGL(false, gfx::Size(1, 1))),
       backbuffer_suggested_allocation_(true),
-      frontbuffer_suggested_allocation_(true) {
+      frontbuffer_suggested_allocation_(true),
+      is_swap_buffers_pending_(false),
+      did_unschedule_(false) {
   helper_.reset(new ImageTransportHelper(this,
                                          manager,
                                          stub,
@@ -103,6 +110,21 @@ void PbufferImageTransportSurface::Destroy() {
   GLSurfaceAdapter::Destroy();
 }
 
+bool PbufferImageTransportSurface::DeferDraws() {
+  // The command buffer hit a draw/clear command that could clobber the
+  // IOSurface in use by an earlier SwapBuffers. If a Swap is pending, abort
+  // processing of the command by returning true and unschedule until the Swap
+  // Ack arrives.
+  if (did_unschedule_)
+    return true;
+  if (is_swap_buffers_pending_) {
+    did_unschedule_ = true;
+    helper_->SetScheduled(false);
+    return true;
+  }
+  return false;
+}
+
 bool PbufferImageTransportSurface::IsOffscreen() {
   return false;
 }
@@ -116,6 +138,10 @@ bool PbufferImageTransportSurface::SwapBuffers() {
   if (!surface_handle)
     return false;
 
+  // Don't send the surface to the browser until we hit the fence that
+  // indicates the drawing to the surface has been completed.
+  // TODO(jbates) unscheduling should be deferred until draw commands from the
+  // next frame -- otherwise the GPU is potentially sitting idle.
   helper_->DeferToFence(base::Bind(
       &PbufferImageTransportSurface::SendBuffersSwapped,
       AsWeakPtr()));
@@ -167,24 +193,21 @@ std::string PbufferImageTransportSurface::GetExtensions() {
 void PbufferImageTransportSurface::SendBuffersSwapped() {
   GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params params;
   params.surface_handle = reinterpret_cast<int64>(GetShareHandle());
+  CHECK(params.surface_handle);
+
   params.size = GetSize();
   helper_->SendAcceleratedSurfaceBuffersSwapped(params);
 
-  helper_->SetScheduled(false);
+  DCHECK(!is_swap_buffers_pending_);
+  is_swap_buffers_pending_ = true;
 }
 
-void PbufferImageTransportSurface::OnBuffersSwappedACK() {
-  helper_->SetScheduled(true);
-}
-
-void PbufferImageTransportSurface::OnPostSubBufferACK() {
-  NOTREACHED();
-}
-
-void PbufferImageTransportSurface::OnNewSurfaceACK(
-    uint64 surface_handle,
-    TransportDIB::Handle shm_handle) {
-  NOTREACHED();
+void PbufferImageTransportSurface::OnBufferPresented(uint32 sync_point) {
+  is_swap_buffers_pending_ = false;
+  if (did_unschedule_) {
+    did_unschedule_ = false;
+    helper_->SetScheduled(true);
+  }
 }
 
 void PbufferImageTransportSurface::OnResizeViewACK() {
@@ -199,6 +222,10 @@ void PbufferImageTransportSurface::OnResize(gfx::Size size) {
   DestroySurface();
 
   visible_size_ = size;
+}
+
+gfx::Size PbufferImageTransportSurface::GetSize() {
+  return GLSurfaceAdapter::GetSize();
 }
 
 }  // namespace anonymous

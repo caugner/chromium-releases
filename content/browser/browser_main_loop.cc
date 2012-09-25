@@ -12,6 +12,7 @@
 #include "base/message_loop.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
+#include "base/run_loop.h"
 #include "base/string_number_conversions.h"
 #include "base/threading/thread_restrictions.h"
 #include "content/browser/browser_thread_impl.h"
@@ -21,9 +22,13 @@
 #include "content/browser/gpu/browser_gpu_channel_host_factory.h"
 #include "content/browser/gpu/gpu_process_host.h"
 #include "content/browser/gpu/gpu_process_host_ui_shim.h"
+#include "content/browser/histogram_synchronizer.h"
 #include "content/browser/in_process_webkit/webkit_thread.h"
 #include "content/browser/net/browser_online_state_observer.h"
 #include "content/browser/plugin_service_impl.h"
+#include "content/browser/renderer_host/media/audio_input_device_manager.h"
+#include "content/browser/renderer_host/media/media_stream_manager.h"
+#include "content/browser/renderer_host/media/video_capture_manager.h"
 #include "content/browser/renderer_host/resource_dispatcher_host_impl.h"
 #include "content/browser/speech/speech_recognition_manager_impl.h"
 #include "content/browser/trace_controller_impl.h"
@@ -61,6 +66,10 @@
 #include <glib-object.h>
 #endif
 
+#if defined(OS_LINUX)
+#include "content/browser/device_monitor_linux.h"
+#endif
+
 #if defined(OS_CHROMEOS)
 #include <dbus/dbus-glib.h>
 #endif
@@ -72,7 +81,7 @@
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
 #include <sys/stat.h>
 #include "content/browser/renderer_host/render_sandbox_host_linux.h"
-#include "content/browser/zygote_host_impl_linux.h"
+#include "content/browser/zygote_host/zygote_host_impl_linux.h"
 #endif
 
 #if defined(USE_X11)
@@ -209,6 +218,10 @@ media::AudioManager* BrowserMainLoop::GetAudioManager() {
   return g_current_browser_main_loop->audio_manager_.get();
 }
 
+// static
+media_stream::MediaStreamManager* BrowserMainLoop::GetMediaStreamManager() {
+  return g_current_browser_main_loop->media_stream_manager_.get();
+}
 // BrowserMainLoop construction / destruction =============================
 
 BrowserMainLoop::BrowserMainLoop(const content::MainFunctionParams& parameters)
@@ -324,6 +337,13 @@ void BrowserMainLoop::MainMessageLoopStart() {
   network_change_notifier_.reset(net::NetworkChangeNotifier::Create());
   audio_manager_.reset(media::AudioManager::Create());
   online_state_observer_.reset(new BrowserOnlineStateObserver);
+  scoped_refptr<media_stream::AudioInputDeviceManager>
+      audio_input_device_manager(
+          new media_stream::AudioInputDeviceManager(audio_manager_.get()));
+  scoped_refptr<media_stream::VideoCaptureManager> video_capture_manager(
+      new media_stream::VideoCaptureManager());
+  media_stream_manager_.reset(new media_stream::MediaStreamManager(
+      audio_input_device_manager, video_capture_manager));
 
 #if defined(OS_WIN)
   system_message_window_.reset(new SystemMessageWindowWin);
@@ -416,15 +436,26 @@ void BrowserMainLoop::CreateThreads() {
     }
   }
 
-  BrowserGpuChannelHostFactory::Initialize();
-#if defined(USE_AURA)
-  ImageTransportFactory::Initialize();
-#endif
-
   BrowserThreadsStarted();
 
   if (parts_.get())
     parts_->PreMainMessageLoopRun();
+
+  // When running the GPU thread in-process, avoid optimistically starting it
+  // since creating the GPU thread races against creation of the one-and-only
+  // ChildProcess instance which is created by the renderer thread.
+  GpuDataManager* gpu_data_manager = content::GpuDataManager::GetInstance();
+  if (gpu_data_manager->GpuAccessAllowed() &&
+      !parsed_command_line_.HasSwitch(switches::kDisableGpuProcessPrelaunch) &&
+      !parsed_command_line_.HasSwitch(switches::kSingleProcess) &&
+      !parsed_command_line_.HasSwitch(switches::kInProcessGPU)) {
+    TRACE_EVENT_INSTANT0("gpu", "Post task to launch GPU process");
+    BrowserThread::PostTask(
+        BrowserThread::IO, FROM_HERE, base::Bind(
+            base::IgnoreResult(&GpuProcessHost::Get),
+            GpuProcessHost::GPU_PROCESS_KIND_SANDBOXED,
+            content::CAUSE_FOR_GPU_LAUNCH_BROWSER_STARTUP));
+  }
 
   // If the UI thread blocks, the whole UI is unresponsive.
   // Do not allow disk IO from the UI thread.
@@ -466,8 +497,6 @@ void BrowserMainLoop::ShutdownThreadsAndCleanUp() {
   // Cancel pending requests and prevent new requests.
   if (resource_dispatcher_host_.get())
     resource_dispatcher_host_.get()->Shutdown();
-
-  speech_recognition_manager_.reset();
 
 #if defined(USE_AURA)
   ImageTransportFactory::Terminate();
@@ -581,6 +610,17 @@ void BrowserMainLoop::InitializeMainThread() {
 
 
 void BrowserMainLoop::BrowserThreadsStarted() {
+  HistogramSynchronizer::GetInstance();
+
+  content::BrowserGpuChannelHostFactory::Initialize();
+#if defined(USE_AURA)
+  ImageTransportFactory::Initialize();
+#endif
+
+#if defined(OS_LINUX)
+  device_monitor_linux_.reset(new DeviceMonitorLinux());
+#endif
+
   // RDH needs the IO thread to be created.
   resource_dispatcher_host_.reset(new ResourceDispatcherHostImpl());
 
@@ -634,16 +674,16 @@ void BrowserMainLoop::InitializeToolkit() {
 }
 
 void BrowserMainLoop::MainMessageLoopRun() {
-  if (parameters_.ui_task)
-    MessageLoopForUI::current()->PostTask(FROM_HERE, *parameters_.ui_task);
-
-#if defined(OS_MACOSX)
-  MessageLoopForUI::current()->Run();
-#elif defined(OS_ANDROID)
+#if defined(OS_ANDROID)
   // Android's main message loop is the Java message loop.
   NOTREACHED();
 #else
-  MessageLoopForUI::current()->RunWithDispatcher(NULL);
+  DCHECK_EQ(MessageLoop::TYPE_UI, MessageLoop::current()->type());
+  if (parameters_.ui_task)
+    MessageLoopForUI::current()->PostTask(FROM_HERE, *parameters_.ui_task);
+
+  base::RunLoop run_loop;
+  run_loop.Run();
 #endif
 }
 

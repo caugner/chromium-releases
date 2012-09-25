@@ -18,14 +18,16 @@
 #include "chrome/test/base/testing_pref_service.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/test/test_browser_thread.h"
-#include "content/public/test/test_url_fetcher_factory.h"
 #include "googleurl/src/gurl.h"
+#include "net/url_request/test_url_fetcher_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using content::BrowserThread;
 using testing::_;
 using testing::Return;
+
+namespace extensions {
 
 namespace {
 
@@ -256,7 +258,7 @@ class AppNotifyChannelSetupTest : public testing::Test {
   TestProfile profile_;
   TestDelegate delegate_;
   scoped_ptr<TestUI> ui_;
-  FakeURLFetcherFactory factory_;
+  net::FakeURLFetcherFactory factory_;
 };
 
 TEST_F(AppNotifyChannelSetupTest, LoginFailure) {
@@ -316,3 +318,5 @@ TEST_F(AppNotifyChannelSetupTest, SecondFetchAccessTokenSuccess) {
   scoped_refptr<AppNotifyChannelSetup> setup = CreateInstance();
   RunServerTest(setup, "dummy_do_not_use", "");
 }
+
+}  // namespace extensions

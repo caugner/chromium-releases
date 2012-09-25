@@ -5,11 +5,13 @@
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "content/public/test/browser_test_utils.h"
 
 using extensions::Extension;
 
@@ -37,8 +39,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, DISABLED_OptionsPage) {
   // Go to the Extension Settings page and click the Options button.
   ui_test_utils::NavigateToURL(browser(), GURL(chrome::kChromeUIExtensionsURL));
   TabStripModel* tab_strip = browser()->tab_strip_model();
-  ASSERT_TRUE(ui_test_utils::ExecuteJavaScript(
-      browser()->GetActiveWebContents()->GetRenderViewHost(), L"",
+  ASSERT_TRUE(content::ExecuteJavaScript(
+      chrome::GetActiveWebContents(browser())->GetRenderViewHost(), L"",
       jscript_click_option_button));
 
   // If the options page hasn't already come up, wait for it.

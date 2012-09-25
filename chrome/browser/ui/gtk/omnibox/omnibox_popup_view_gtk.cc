@@ -14,21 +14,20 @@
 #include "base/logging.h"
 #include "base/stl_util.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/autocomplete/autocomplete.h"
-#include "chrome/browser/autocomplete/autocomplete_edit.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
-#include "chrome/browser/autocomplete/autocomplete_popup_model.h"
+#include "chrome/browser/autocomplete/autocomplete_result.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
+#include "chrome/browser/ui/omnibox/omnibox_edit_model.h"
+#include "chrome/browser/ui/omnibox/omnibox_popup_model.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_source.h"
 #include "grit/theme_resources.h"
-#include "grit/theme_resources_standard.h"
 #include "ui/base/gtk/gtk_compat.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/gtk/gtk_screen_util.h"
@@ -266,10 +265,10 @@ void OmniboxPopupViewGtk::SetupLayoutForMatch(
 
 OmniboxPopupViewGtk::OmniboxPopupViewGtk(const gfx::Font& font,
                                          OmniboxView* omnibox_view,
-                                         AutocompleteEditModel* edit_model,
+                                         OmniboxEditModel* edit_model,
                                          GtkWidget* location_bar)
     : signal_registrar_(new ui::GtkSignalRegistrar),
-      model_(new AutocompletePopupModel(this, edit_model)),
+      model_(new OmniboxPopupModel(this, edit_model)),
       omnibox_view_(omnibox_view),
       location_bar_(location_bar),
       window_(gtk_window_new(GTK_WINDOW_POPUP)),
@@ -540,7 +539,7 @@ void OmniboxPopupViewGtk::GetVisibleMatchForInput(
 
   if (result.match_at(index).associated_keyword.get() &&
       model_->selected_line() == index &&
-      model_->selected_line_state() == AutocompletePopupModel::KEYWORD) {
+      model_->selected_line_state() == OmniboxPopupModel::KEYWORD) {
     *match = result.match_at(index).associated_keyword.get();
     *is_selected_keyword = true;
     return;

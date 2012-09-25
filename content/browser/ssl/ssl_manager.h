@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_BROWSER_SSL_SSL_MANAGER_H_
 #define CONTENT_BROWSER_SSL_SSL_MANAGER_H_
-#pragma once
 
 #include <string>
 
@@ -21,12 +20,12 @@
 #include "net/base/cert_status_flags.h"
 #include "net/base/net_errors.h"
 
-class LoadFromMemoryCacheDetails;
 class NavigationControllerImpl;
 class SSLPolicy;
 
 namespace content {
 class NavigationEntryImpl;
+struct LoadFromMemoryCacheDetails;
 struct ResourceRedirectDetails;
 struct ResourceRequestDetails;
 }
@@ -99,7 +98,7 @@ class SSLManager : public content::NotificationObserver {
   // DidCommitProvisionalLoad uses the abstract NotificationDetails type since
   // the type we need is in NavigationController which would create a circular
   // header file dependency.
-  void DidLoadFromMemoryCache(LoadFromMemoryCacheDetails* details);
+  void DidLoadFromMemoryCache(content::LoadFromMemoryCacheDetails* details);
   void DidStartResourceResponse(content::ResourceRequestDetails* details);
   void DidReceiveResourceRedirect(content::ResourceRedirectDetails* details);
   void DidChangeSSLInternalState();

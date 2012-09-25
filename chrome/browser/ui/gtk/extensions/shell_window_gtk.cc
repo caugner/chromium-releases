@@ -19,7 +19,8 @@ ShellWindowGtk::ShellWindowGtk(Profile* profile,
                                const ShellWindow::CreateParams& params)
     : ShellWindow(profile, extension, url),
       state_(GDK_WINDOW_STATE_WITHDRAWN),
-      is_active_(!ui::ActiveWindowWatcherX::WMSupportsActivation()) {
+      is_active_(!ui::ActiveWindowWatcherX::WMSupportsActivation()),
+      content_thinks_its_fullscreen_(false) {
   window_ = GTK_WINDOW(gtk_window_new(GTK_WINDOW_TOPLEVEL));
 
   gfx::NativeView native_view =
@@ -28,6 +29,10 @@ ShellWindowGtk::ShellWindowGtk(Profile* profile,
 
   gtk_window_set_default_size(
       window_, params.bounds.width(), params.bounds.height());
+
+  // Hide titlebar when {frame: 'none'} specified on ShellWindow.
+  if (params.frame == ShellWindow::CreateParams::FRAME_NONE)
+    gtk_window_set_decorated(window_, false);
 
   int min_width = params.minimum_size.width();
   int min_height = params.minimum_size.height();
@@ -113,8 +118,11 @@ void ShellWindowGtk::Close() {
   // destruction, set window_ to NULL before any handlers will run.
   window_ = NULL;
 
-  gtk_widget_destroy(window);
+  // OnNativeClose does a delete this so no other members should
+  // be accessed after. gtk_widget_destroy is safe (and must
+  // be last).
   OnNativeClose();
+  gtk_widget_destroy(window);
 }
 
 void ShellWindowGtk::Activate() {

@@ -4,14 +4,15 @@
 
 #ifndef CONTENT_BROWSER_RENDERER_HOST_CROSS_SITE_RESOURCE_HANDLER_H_
 #define CONTENT_BROWSER_RENDERER_HOST_CROSS_SITE_RESOURCE_HANDLER_H_
-#pragma once
 
 #include "content/browser/renderer_host/layered_resource_handler.h"
 #include "net/url_request/url_request_status.h"
 
+namespace net {
+class URLRequest;
+}
+
 namespace content {
-class ResourceDispatcherHostImpl;
-struct GlobalRequestID;
 
 // Ensures that cross-site responses are delayed until the onunload handler of
 // the previous page is allowed to run.  This handler wraps an
@@ -23,7 +24,7 @@ class CrossSiteResourceHandler : public LayeredResourceHandler {
   CrossSiteResourceHandler(scoped_ptr<ResourceHandler> next_handler,
                            int render_process_host_id,
                            int render_view_id,
-                           ResourceDispatcherHostImpl* rdh);
+                           net::URLRequest* request);
   virtual ~CrossSiteResourceHandler();
 
   // ResourceHandler implementation:
@@ -35,7 +36,7 @@ class CrossSiteResourceHandler : public LayeredResourceHandler {
                                  ResourceResponse* response,
                                  bool* defer) OVERRIDE;
   virtual bool OnReadCompleted(int request_id,
-                               int* bytes_read,
+                               int bytes_read,
                                bool* defer) OVERRIDE;
   virtual bool OnResponseCompleted(int request_id,
                                    const net::URLRequestStatus& status,
@@ -50,14 +51,13 @@ class CrossSiteResourceHandler : public LayeredResourceHandler {
   // telling the old RenderViewHost to run its onunload handler.
   void StartCrossSiteTransition(
       int request_id,
-      ResourceResponse* response,
-      const GlobalRequestID& global_id,
-      bool* defer);
+      ResourceResponse* response);
 
   void ResumeIfDeferred();
 
   int render_process_host_id_;
   int render_view_id_;
+  net::URLRequest* request_;
   bool has_started_response_;
   bool in_cross_site_transition_;
   int request_id_;
@@ -66,7 +66,6 @@ class CrossSiteResourceHandler : public LayeredResourceHandler {
   net::URLRequestStatus completed_status_;
   std::string completed_security_info_;
   ResourceResponse* response_;
-  ResourceDispatcherHostImpl* rdh_;
 
   DISALLOW_COPY_AND_ASSIGN(CrossSiteResourceHandler);
 };

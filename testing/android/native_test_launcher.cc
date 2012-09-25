@@ -13,12 +13,14 @@
 #include <signal.h>
 #include <stdio.h>
 
+#include "base/android/base_jni_registrar.h"
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
 #include "base/android/locale_utils.h"
 #include "base/android/path_utils.h"
 #include "base/android/scoped_java_ref.h"
 #include "base/at_exit.h"
+#include "base/base_switches.h"
 #include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
@@ -27,12 +29,16 @@
 #include "base/string_tokenizer.h"
 #include "base/string_util.h"
 #include "gtest/gtest.h"
-#include "testing/android/jni/chrome_native_test_activity_jni.h"
+#include "testing/jni/ChromeNativeTestActivity_jni.h"
 
 // The main function of the program to be wrapped as a test apk.
 extern int main(int argc, char** argv);
 
 namespace {
+
+void log_write(int level, const char* msg) {
+  __android_log_write(level, "chromium", msg);
+}
 
 // The list of signals which are considered to be crashes.
 const int kExceptionSignals[] = {
@@ -45,7 +51,7 @@ struct sigaction g_old_sa[NSIG];
 void SignalHandler(int sig, siginfo_t *info, void *reserved)
 {
   // Output the crash marker.
-  __android_log_write(ANDROID_LOG_ERROR, "chromium", "[ CRASHED      ]");
+  log_write(ANDROID_LOG_ERROR, "[ CRASHED      ]");
   g_old_sa[sig].sa_sigaction(sig, info, reserved);
 }
 
@@ -84,13 +90,17 @@ void ParseArgsFromCommandLineFile(std::vector<std::string>* args) {
   }
 }
 
-void ArgsToArgv(const std::vector<std::string>& args,
+int ArgsToArgv(const std::vector<std::string>& args,
                 std::vector<char*>* argv) {
   // We need to pass in a non-const char**.
   int argc = args.size();
-  argv->resize(argc);
+
+  argv->resize(argc + 1);
   for (int i = 0; i < argc; ++i)
     (*argv)[i] = const_cast<char*>(args[i].c_str());
+  (*argv)[argc] = NULL;  // argv must be NULL terminated.
+
+  return argc;
 }
 
 // As we are the native side of an Android app, we don't have any 'console', so
@@ -124,13 +134,13 @@ void AndroidLogPrinter::OnTestProgramStart(
     const ::testing::UnitTest& unit_test) {
   std::string msg = StringPrintf("[ START      ] %d",
                                  unit_test.test_to_run_count());
-  LOG(ERROR) << msg;
+  log_write(ANDROID_LOG_VERBOSE, msg.c_str());
 }
 
 void AndroidLogPrinter::OnTestStart(const ::testing::TestInfo& test_info) {
   std::string msg = StringPrintf("[ RUN      ] %s.%s",
                                  test_info.test_case_name(), test_info.name());
-  LOG(ERROR) << msg;
+  log_write(ANDROID_LOG_VERBOSE, msg.c_str());
 }
 
 void AndroidLogPrinter::OnTestPartResult(
@@ -141,21 +151,21 @@ void AndroidLogPrinter::OnTestPartResult(
       test_part_result.file_name(),
       test_part_result.line_number(),
       test_part_result.summary());
-  LOG(ERROR) << msg;
+  log_write(ANDROID_LOG_VERBOSE, msg.c_str());
 }
 
 void AndroidLogPrinter::OnTestEnd(const ::testing::TestInfo& test_info) {
   std::string msg = StringPrintf("%s %s.%s",
       test_info.result()->Failed() ? "[  FAILED  ]" : "[       OK ]",
       test_info.test_case_name(), test_info.name());
-  LOG(ERROR) << msg;
+  log_write(ANDROID_LOG_VERBOSE, msg.c_str());
 }
 
 void AndroidLogPrinter::OnTestProgramEnd(
     const ::testing::UnitTest& unit_test) {
   std::string msg = StringPrintf("[ END      ] %d",
          unit_test.successful_test_count());
-  LOG(ERROR) << msg;
+  log_write(ANDROID_LOG_VERBOSE, msg.c_str());
 }
 
 }  // namespace
@@ -168,6 +178,7 @@ static void RunTests(JNIEnv* env,
                      jobject app_context) {
   base::AtExitManager exit_manager;
 
+  // Command line initialized basically, will be fully initialized later.
   static const char* const kInitialArgv[] = { "ChromeTestActivity" };
   CommandLine::Init(arraysize(kInitialArgv), kInitialArgv);
 
@@ -175,9 +186,7 @@ static void RunTests(JNIEnv* env,
   base::android::ScopedJavaLocalRef<jobject> scoped_context(
       env, env->NewLocalRef(app_context));
   base::android::InitApplicationContext(scoped_context);
-
-  base::android::RegisterLocaleUtils(env);
-  base::android::RegisterPathUtils(env);
+  base::android::RegisterJni(env);
 
   FilePath files_dir(base::android::ConvertJavaStringToUTF8(env, jfiles_dir));
   // A few options, such "--gtest_list_tests", will just use printf directly
@@ -190,12 +199,23 @@ static void RunTests(JNIEnv* env,
 
   // We need to pass in a non-const char**.
   std::vector<char*> argv;
-  ArgsToArgv(args, &argv);
+  int argc = ArgsToArgv(args, &argv);
 
-  int argc = argv.size();
   // This object is owned by gtest.
   AndroidLogPrinter* log = new AndroidLogPrinter();
   log->Init(&argc, &argv[0]);
+
+  // Fully initialize command line with arguments.
+  CommandLine::ForCurrentProcess()->AppendArguments(
+      CommandLine(argc, &argv[0]), false);
+  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  if (command_line.HasSwitch(switches::kWaitForDebugger)) {
+    std::string msg = StringPrintf("Native test waiting for GDB because "
+                                   "flag %s was supplied",
+                                   switches::kWaitForDebugger);
+    log_write(ANDROID_LOG_VERBOSE, msg.c_str());
+    base::debug::WaitForDebugger(24 * 60 * 60, false);
+  }
 
   main(argc, &argv[0]);
 }

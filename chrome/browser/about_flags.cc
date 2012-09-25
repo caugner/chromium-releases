@@ -21,6 +21,7 @@
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/user_metrics.h"
 #include "grit/generated_resources.h"
+#include "ui/app_list/app_list_switches.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/ui_base_switches.h"
 #include "ui/gl/gl_switches.h"
@@ -82,14 +83,17 @@ const Experiment::Choice kOmniboxHistoryQuickProviderNewScoringChoices[] = {
     switches::kOmniboxHistoryQuickProviderNewScoringDisabled }
 };
 
-const Experiment::Choice kBrowserPluginChoices[] = {
-  { IDS_FLAGS_BROWSER_PLUGIN_DISABLED, "", "" },
-  { IDS_FLAGS_BROWSER_PLUGIN_PLATFORM_APPS,
-    switches::kBrowserPlugin,
-    switches::kBrowserPluginPlatformApps },
-  { IDS_FLAGS_BROWSER_PLUGIN_ENABLED,
-    switches::kBrowserPlugin,
-    switches::kBrowserPluginEnabled },
+const Experiment::Choice
+    kOmniboxHistoryQuickProviderReorderForInliningChoices[] = {
+  { IDS_FLAGS_OMNIBOX_HISTORY_QUICK_PROVIDER_REORDER_FOR_INLINING_AUTOMATIC,
+    "",
+    "" },
+  { IDS_FLAGS_OMNIBOX_HISTORY_QUICK_PROVIDER_REORDER_FOR_INLINING_ENABLED,
+    switches::kOmniboxHistoryQuickProviderReorderForInlining,
+    switches::kOmniboxHistoryQuickProviderReorderForInliningEnabled },
+  { IDS_FLAGS_OMNIBOX_HISTORY_QUICK_PROVIDER_REORDER_FOR_INLINING_DISABLED,
+    switches::kOmniboxHistoryQuickProviderReorderForInlining,
+    switches::kOmniboxHistoryQuickProviderReorderForInliningDisabled }
 };
 
 const Experiment::Choice kOmniboxInlineHistoryQuickProviderChoices[] = {
@@ -102,30 +106,46 @@ const Experiment::Choice kOmniboxInlineHistoryQuickProviderChoices[] = {
     switches::kOmniboxInlineHistoryQuickProviderProhibited }
 };
 
+const Experiment::Choice kFixedPositionCreatesStackingContextChoices[] = {
+  { IDS_GENERIC_EXPERIMENT_CHOICE_DEFAULT, "", "" },
+  { IDS_GENERIC_EXPERIMENT_CHOICE_ENABLED,
+    switches::kEnableFixedPositionCreatesStackingContext, ""},
+  { IDS_GENERIC_EXPERIMENT_CHOICE_DISABLED,
+    switches::kDisableFixedPositionCreatesStackingContext, ""}
+};
+
 const Experiment::Choice kForceCompositingModeChoices[] = {
-  { IDS_FLAGS_FORCE_COMPOSITING_MODE_DEFAULT, "", "" },
-  { IDS_FLAGS_FORCE_COMPOSITING_MODE_ENABLED,
+  { IDS_GENERIC_EXPERIMENT_CHOICE_DEFAULT, "", "" },
+  { IDS_GENERIC_EXPERIMENT_CHOICE_ENABLED,
     switches::kForceCompositingMode, ""},
-  { IDS_FLAGS_FORCE_COMPOSITING_MODE_DISABLED,
+  { IDS_GENERIC_EXPERIMENT_CHOICE_DISABLED,
     switches::kDisableForceCompositingMode, ""}
 };
 
 const Experiment::Choice kThreadedCompositingModeChoices[] = {
-  { IDS_FLAGS_THREADED_COMPOSITING_MODE_DEFAULT, "", "" },
-  { IDS_FLAGS_THREADED_COMPOSITING_MODE_DISABLED,
+  { IDS_GENERIC_EXPERIMENT_CHOICE_DEFAULT, "", "" },
+  { IDS_GENERIC_EXPERIMENT_CHOICE_DISABLED,
     switches::kDisableThreadedCompositing, ""},
-  { IDS_FLAGS_THREADED_COMPOSITING_MODE_ENABLED,
+  { IDS_GENERIC_EXPERIMENT_CHOICE_ENABLED,
     switches::kEnableThreadedCompositing, ""}
 };
 
 const Experiment::Choice kTouchOptimizedUIChoices[] = {
   { IDS_FLAGS_TOUCH_OPTIMIZED_UI_AUTOMATIC, "", "" },
-  { IDS_FLAGS_TOUCH_OPTIMIZED_UI_ENABLED,
+  { IDS_GENERIC_EXPERIMENT_CHOICE_ENABLED,
     switches::kTouchOptimizedUI,
     switches::kTouchOptimizedUIEnabled },
-  { IDS_FLAGS_TOUCH_OPTIMIZED_UI_DISABLED,
+  { IDS_GENERIC_EXPERIMENT_CHOICE_DISABLED,
     switches::kTouchOptimizedUI,
     switches::kTouchOptimizedUIDisabled }
+};
+
+const Experiment::Choice kPointerLockUIChoices[] = {
+  { IDS_GENERIC_EXPERIMENT_CHOICE_DEFAULT, "", "" },
+  { IDS_GENERIC_EXPERIMENT_CHOICE_ENABLED,
+    switches::kEnablePointerLock, ""},
+  { IDS_GENERIC_EXPERIMENT_CHOICE_DISABLED,
+    switches::kDisablePointerLock, ""}
 };
 
 
@@ -195,6 +215,13 @@ const Experiment kExperiments[] = {
     0,
 #endif
     SINGLE_VALUE_TYPE(switches::kEnableCloudPrintProxy)
+  },
+  {
+    "print-setting-reset",  // FLAGS:RECORD_UMA
+    IDS_FLAGS_PRINT_SETTING_RESET_NAME,
+    IDS_FLAGS_PRINT_SETTING_RESET_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kPrintSettingsReset)
   },
   {
     "crxless-web-apps",
@@ -274,18 +301,11 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kDisableExperimentalWebGL)
   },
   {
-    "enable-browser-plugin",
-    IDS_FLAGS_ENABLE_BROWSER_PLUGIN_NAME,
-    IDS_FLAGS_ENABLE_BROWSER_PLUGIN_DESCRIPTION,
-    kOsAll,
-    MULTI_VALUE_TYPE(kBrowserPluginChoices)
-  },
-  {
     "fixed-position-creates-stacking-context",
     IDS_FLAGS_FIXED_POSITION_CREATES_STACKING_CONTEXT_NAME,
     IDS_FLAGS_FIXED_POSITION_CREATES_STACKING_CONTEXT_DESCRIPTION,
     kOsAll,
-    SINGLE_VALUE_TYPE(switches::kFixedPositionCreatesStackingContext)
+    MULTI_VALUE_TYPE(kFixedPositionCreatesStackingContextChoices)
   },
   // TODO(dspringer): When NaCl is on by default, remove this flag entry.
   {
@@ -361,26 +381,21 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kExperimentalLocationFeatures)
   },
   {
-    "disable-interactive-form-validation",
-    IDS_FLAGS_DISABLE_INTERACTIVE_FORM_VALIDATION_NAME,
-    IDS_FLAGS_DISABLE_INTERACTIVE_FORM_VALIDATION_DESCRIPTION,
-    kOsAll,
-    SINGLE_VALUE_TYPE(switches::kDisableInteractiveFormValidation)
-  },
-  {
-    "focus-existing-tab-on-open",  // FLAGS:RECORD_UMA
-    IDS_FLAGS_FOCUS_EXISTING_TAB_ON_OPEN_NAME,
-    IDS_FLAGS_FOCUS_EXISTING_TAB_ON_OPEN_DESCRIPTION,
-    kOsAll,
-    SINGLE_VALUE_TYPE(switches::kFocusExistingTabOnOpen)
-  },
-  {
     "tab-groups-context-menu",
     IDS_FLAGS_TAB_GROUPS_CONTEXT_MENU_NAME,
     IDS_FLAGS_TAB_GROUPS_CONTEXT_MENU_DESCRIPTION,
     kOsWin,
     SINGLE_VALUE_TYPE(switches::kEnableTabGroupsContextMenu)
   },
+#if defined(OS_CHROMEOS)
+  {
+    "enable-instant-extended-api",
+    IDS_FLAGS_ENABLE_INSTANT_EXTENDED_API,
+    IDS_FLAGS_ENABLE_INSTANT_EXTENDED_API_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kEnableInstantExtendedAPI)
+  },
+#endif
   {
     "static-ip-config",
     IDS_FLAGS_STATIC_IP_CONFIG_NAME,
@@ -431,6 +446,13 @@ const Experiment kExperiments[] = {
     MULTI_VALUE_TYPE(kOmniboxHistoryQuickProviderNewScoringChoices)
   },
   {
+    "omnibox-history-quick-provider-reorder-for-inlining",
+    IDS_FLAGS_OMNIBOX_HISTORY_QUICK_PROVIDER_REORDER_FOR_INLINING_NAME,
+    IDS_FLAGS_OMNIBOX_HISTORY_QUICK_PROVIDER_REORDER_FOR_INLINING_DESCRIPTION,
+    kOsAll,
+    MULTI_VALUE_TYPE(kOmniboxHistoryQuickProviderReorderForInliningChoices)
+  },
+  {
     "omnibox-inline-history-quick-provider",
     IDS_FLAGS_OMNIBOX_INLINE_HISTORY_QUICK_PROVIDER_NAME,
     IDS_FLAGS_OMNIBOX_INLINE_HISTORY_QUICK_PROVIDER_DESCRIPTION,
@@ -445,20 +467,7 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kEnablePanels)
   },
   {
-    "disable-shortcuts-provider",
-    IDS_FLAGS_DISABLE_SHORTCUTS_PROVIDER,
-    IDS_FLAGS_DISABLE_SHORTCUTS_PROVIDER_DESCRIPTION,
-    kOsAll,
-    SINGLE_VALUE_TYPE(switches::kDisableShortcutsProvider)
-  },
-  {
-    "downloads-new-ui",  // FLAGS:RECORD_UMA
-    IDS_FLAGS_DOWNLOADS_NEW_UI_NAME,
-    IDS_FLAGS_DOWNLOADS_NEW_UI_DESCRIPTION,
-    kOsAll,
-    SINGLE_VALUE_TYPE(switches::kDownloadsNewUI)
-  },
-  {
+    // See http://crbug.com/120416 for how to remove this flag.
     "save-page-as-mhtml",  // FLAGS:RECORD_UMA
     IDS_FLAGS_SAVE_PAGE_AS_MHTML_NAME,
     IDS_FLAGS_SAVE_PAGE_AS_MHTML_DESCRIPTION,
@@ -519,7 +528,7 @@ const Experiment kExperiments[] = {
     IDS_FLAGS_ENABLE_POINTER_LOCK_NAME,
     IDS_FLAGS_ENABLE_POINTER_LOCK_DESCRIPTION,
     kOsAll,
-    SINGLE_VALUE_TYPE(switches::kEnablePointerLock)
+    MULTI_VALUE_TYPE(kPointerLockUIChoices)
   },
 #if defined(USE_ASH)
   {
@@ -530,13 +539,6 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(ash::switches::kAuraGoogleDialogFrames)
   },
 #endif
-  {
-    "enable-gamepad",
-    IDS_FLAGS_ENABLE_GAMEPAD_NAME,
-    IDS_FLAGS_ENABLE_GAMEPAD_DESCRIPTION,
-    kOsAll,
-    SINGLE_VALUE_TYPE(switches::kEnableGamepad)
-  },
   {
     "per-tile-painting",
     IDS_FLAGS_PER_TILE_PAINTING_NAME,
@@ -609,6 +611,13 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kEnableCssRegions)
   },
   {
+    "enable-css-variables",
+    IDS_FLAGS_CSS_VARIABLES_NAME,
+    IDS_FLAGS_CSS_VARIABLES_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kEnableCssVariables)
+  },
+  {
     "enable-extension-activity-ui",
     IDS_FLAGS_ENABLE_EXTENSION_ACTIVITY_UI_NAME,
     IDS_FLAGS_ENABLE_EXTENSION_ACTIVITY_UI_DESCRIPTION,
@@ -646,26 +655,26 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kEnableSuggestionsTabPage)
   },
   {
+    "enable-discovery-ntp",
+    IDS_FLAGS_ENABLE_NTP_DISCOVERY_NAME,
+    IDS_FLAGS_ENABLE_NTP_DISCOVERY_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kEnableDiscoveryInNewTabPage)
+  },
+  {
     "enable-chrome-to-mobile",  // FLAGS:RECORD_UMA
     IDS_FLAGS_ENABLE_CHROME_TO_MOBILE_NAME,
     IDS_FLAGS_ENABLE_CHROME_TO_MOBILE_DESCRIPTION,
     kOsAll,
     SINGLE_VALUE_TYPE(switches::kEnableChromeToMobile)
   },
-  {
-    "enable-captive-portal-detection",
-    IDS_FLAGS_CAPTIVE_PORTAL_CHECK_ON_ERROR_NAME,
-    IDS_FLAGS_CAPTIVE_PORTAL_CHECK_ON_ERROR_DESCRIPTION,
-    kOsMac | kOsWin | kOsLinux | kOsCrOS,
-    SINGLE_VALUE_TYPE(switches::kCaptivePortalDetection)
-  },
 #if defined(GOOGLE_CHROME_BUILD)
   {
-    "enable-asynchronous-spellchecking",
-    IDS_FLAGS_ENABLE_ASYNCHRONOUS_SPELLCHECKING,
-    IDS_FLAGS_ENABLE_ASYNCHRONOUS_SPELLCHECKING_DESCRIPTION,
-    kOsAll,
-    SINGLE_VALUE_TYPE(switches::kEnableAsynchronousSpellChecking)
+    "disable-asynchronous-spellchecking",
+    IDS_FLAGS_DISABLE_ASYNCHRONOUS_SPELLCHECKING,
+    IDS_FLAGS_DISABLE_ASYNCHRONOUS_SPELLCHECKING_DESCRIPTION,
+    kOsWin | kOsLinux | kOsCrOS,
+    SINGLE_VALUE_TYPE(switches::kDisableAsynchronousSpellChecking)
   },
 #endif
   {
@@ -711,6 +720,13 @@ const Experiment kExperiments[] = {
     IDS_FLAGS_FORCE_HIGH_DPI_DESCRIPTION,
     kOsCrOS,
     SINGLE_VALUE_TYPE_AND_VALUE(switches::kForceDeviceScaleFactor, "2")
+  },
+  {
+    "enable-hidpi-pdf-plugin",
+    IDS_FLAGS_ENABLE_HIGH_DPI_PDF_PLUGIN_NAME,
+    IDS_FLAGS_ENABLE_HIGH_DPI_PDF_PLUGIN_DESCRIPTION,
+    kOsCrOS | kOsMac,
+    SINGLE_VALUE_TYPE(switches::kEnableHighDPIPDFPlugin)
   },
 #if defined(OS_CHROMEOS)
   {
@@ -762,7 +778,7 @@ const Experiment kExperiments[] = {
     IDS_FLAGS_ENABLE_APP_LIST_SHOW_APPS_ONLY_NAME,
     IDS_FLAGS_ENABLE_APP_LIST_SHOW_APPS_ONLY_DESCRIPTION,
     kOsAll,
-    SINGLE_VALUE_TYPE(ash::switches::kAppListShowAppsOnly),
+    SINGLE_VALUE_TYPE(app_list::switches::kAppListShowAppsOnly),
   },
   {
     "ash-extended-desktop",
@@ -781,11 +797,39 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kExperimentalWallpaperUI)
   },
   {
-    "enable-new-oobe",
-    IDS_FLAGS_ENABLE_NEW_OOBE,
-    IDS_FLAGS_ENABLE_NEW_OOBE_DESCRIPTION,
+    "enable-drive-v2-api",
+    IDS_FLAGS_ENABLE_DRIVE_V2_API,
+    IDS_FLAGS_ENABLE_DRIVE_V2_API_DESCRIPTION,
     kOsCrOS,
-    SINGLE_VALUE_TYPE(switches::kEnableNewOobe),
+    SINGLE_VALUE_TYPE(switches::kEnableDriveV2Api),
+  },
+  {
+    "use-leveldb-for-gdata",
+    IDS_FLAGS_USE_LEVELDB_FOR_GDATA_NAME,
+    IDS_FLAGS_USE_LEVELDB_FOR_GDATA_DESCRIPTION,
+    kOsCrOS,
+    SINGLE_VALUE_TYPE(switches::kUseLevelDBForGData),
+  },
+  {
+    "disable-html5-camera",
+    IDS_FLAGS_DISABLE_HTML5_CAMERA,
+    IDS_FLAGS_DISABLE_HTML5_CAMERA_DESCRIPTION,
+    kOsCrOS,
+    SINGLE_VALUE_TYPE(switches::kDisableHtml5Camera),
+  },
+  {
+    "disable-new-oobe",
+    IDS_FLAGS_DISABLE_NEW_OOBE,
+    IDS_FLAGS_DISABLE_NEW_OOBE_DESCRIPTION,
+    kOsCrOS,
+    SINGLE_VALUE_TYPE(switches::kDisableNewOobe),
+  },
+  {
+    "disable-boot-animation",
+    IDS_FLAGS_DISABLE_BOOT_ANIMATION,
+    IDS_FLAGS_DISABLE_BOOT_ANIMATION_DESCRIPTION,
+    kOsCrOS,
+    SINGLE_VALUE_TYPE(switches::kDisableBootAnimation),
   },
 #endif
   {
@@ -796,11 +840,18 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kEnableViewsTextfield),
   },
   {
-    "new-checkbox-style",
-    IDS_FLAGS_NEW_CHECKBOX_STYLE,
-    IDS_FLAGS_NEW_CHECKBOX_STYLE_DESCRIPTION,
+    "old-checkbox-style",
+    IDS_FLAGS_OLD_CHECKBOX_STYLE,
+    IDS_FLAGS_OLD_CHECKBOX_STYLE_DESCRIPTION,
     kOsLinux | kOsCrOS,
-    SINGLE_VALUE_TYPE(switches::kNewCheckboxStyle),
+    SINGLE_VALUE_TYPE(switches::kOldCheckboxStyle),
+  },
+  {
+    "enable-frameless-constrained-dialogs",
+    IDS_FLAGS_ENABLE_FRAMELESS_DIALOG_NAME,
+    IDS_FLAGS_ENABLE_FRAMELESS_DIALOG_DESCRIPTION,
+    kOsWin | kOsCrOS,
+    SINGLE_VALUE_TYPE(switches::kEnableFramelessConstrainedDialogs),
   },
   {
     "disable-non-fullscreen-mouse-lock",
@@ -818,11 +869,27 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kEnableUnsupportedBluetoothDevices)
   },
 #endif
-  { "enable-accelerated-video-decode",
-    IDS_FLAGS_ENABLE_ACCELERATED_VIDEO_DECODE_NAME,
-    IDS_FLAGS_ENABLE_ACCELERATED_VIDEO_DECODE_DESCRIPTION,
+  { "disable-accelerated-video-decode",
+    IDS_FLAGS_DISABLE_ACCELERATED_VIDEO_DECODE_NAME,
+    IDS_FLAGS_DISABLE_ACCELERATED_VIDEO_DECODE_DESCRIPTION,
     kOsAll,
-    SINGLE_VALUE_TYPE(switches::kEnableAcceleratedVideoDecode),
+    SINGLE_VALUE_TYPE(switches::kDisableAcceleratedVideoDecode),
+  },
+#if defined(USE_ASH)
+  {
+    "ash-debug-shortcuts",
+    IDS_FLAGS_DEBUG_SHORTCUTS_NAME,
+    IDS_FLAGS_DEBUG_SHORTCUTS_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(ash::switches::kAshDebugShortcuts),
+  },
+#endif
+  {
+    "enable-website-settings",  // FLAGS:RECORD_UMA
+    IDS_FLAGS_ENABLE_WEBSITE_SETTINGS_NAME,
+    IDS_FLAGS_ENABLE_WEBSITE_SETTINGS_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kEnableWebsiteSettings),
   },
 };
 
@@ -945,7 +1012,8 @@ void SanitizeList(PrefService* prefs) {
       enabled_experiments.begin(), enabled_experiments.end(),
       std::inserter(new_enabled_experiments, new_enabled_experiments.begin()));
 
-  SetEnabledFlags(prefs, new_enabled_experiments);
+  if (new_enabled_experiments != enabled_experiments)
+    SetEnabledFlags(prefs, new_enabled_experiments);
 }
 
 void GetSanitizedEnabledFlags(

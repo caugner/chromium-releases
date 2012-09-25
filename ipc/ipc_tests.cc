@@ -28,6 +28,7 @@
 #include "ipc/ipc_channel.h"
 #include "ipc/ipc_channel_proxy.h"
 #include "ipc/ipc_message_utils.h"
+#include "ipc/ipc_multiprocess_test.h"
 #include "ipc/ipc_sender.h"
 #include "ipc/ipc_switches.h"
 #include "testing/multiprocess_func_list.h"
@@ -181,7 +182,7 @@ static void Send(IPC::Sender* sender, const char* text) {
   sender->Send(message);
 }
 
-class MyChannelListener : public IPC::Channel::Listener {
+class MyChannelListener : public IPC::Listener {
  public:
   virtual bool OnMessageReceived(const IPC::Message& message) {
     IPC::MessageIterator iter(message);
@@ -237,7 +238,8 @@ TEST_F(IPCChannelTest, ChannelTest) {
   chan.Close();
 
   // Cleanup child process.
-  EXPECT_TRUE(base::WaitForSingleProcess(process_handle, 5000));
+  EXPECT_TRUE(base::WaitForSingleProcess(
+      process_handle, base::TimeDelta::FromSeconds(5)));
   base::CloseProcessHandle(process_handle);
 }
 
@@ -277,7 +279,8 @@ TEST_F(IPCChannelTest, ChannelTestExistingPipe) {
   chan.Close();
 
   // Cleanup child process.
-  EXPECT_TRUE(base::WaitForSingleProcess(process_handle, 5000));
+  EXPECT_TRUE(base::WaitForSingleProcess(
+      process_handle, base::TimeDelta::FromSeconds(5)));
   base::CloseProcessHandle(process_handle);
 }
 #endif  // defined (OS_WIN)
@@ -322,13 +325,14 @@ TEST_F(IPCChannelTest, ChannelProxyTest) {
     MessageLoop::current()->Run();
 
     // cleanup child process
-    EXPECT_TRUE(base::WaitForSingleProcess(process_handle, 5000));
+    EXPECT_TRUE(base::WaitForSingleProcess(
+        process_handle, base::TimeDelta::FromSeconds(5)));
     base::CloseProcessHandle(process_handle);
   }
   thread.Stop();
 }
 
-class ChannelListenerWithOnConnectedSend : public IPC::Channel::Listener {
+class ChannelListenerWithOnConnectedSend : public IPC::Listener {
  public:
   virtual void OnChannelConnected(int32 peer_pid) OVERRIDE {
     SendNextMessage();
@@ -398,11 +402,12 @@ TEST_F(IPCChannelTest, MAYBE_SendMessageInChannelConnected) {
   channel.Close();
 
   // Cleanup child process.
-  EXPECT_TRUE(base::WaitForSingleProcess(process_handle, 5000));
+  EXPECT_TRUE(base::WaitForSingleProcess(
+      process_handle, base::TimeDelta::FromSeconds(5)));
   base::CloseProcessHandle(process_handle);
 }
 
-MULTIPROCESS_TEST_MAIN(RunTestClient) {
+MULTIPROCESS_IPC_TEST_MAIN(RunTestClient) {
   MessageLoopForIO main_message_loop;
   MyChannelListener channel_listener;
 
@@ -438,7 +443,7 @@ MULTIPROCESS_TEST_MAIN(RunTestClient) {
 // This channel listener just replies to all messages with the exact same
 // message. It assumes each message has one string parameter. When the string
 // "quit" is sent, it will exit.
-class ChannelReflectorListener : public IPC::Channel::Listener {
+class ChannelReflectorListener : public IPC::Listener {
  public:
   explicit ChannelReflectorListener(IPC::Channel *channel) :
     channel_(channel),
@@ -480,7 +485,7 @@ class ChannelReflectorListener : public IPC::Channel::Listener {
   int latency_messages_;
 };
 
-class ChannelPerfListener : public IPC::Channel::Listener {
+class ChannelPerfListener : public IPC::Listener {
  public:
   ChannelPerfListener(IPC::Channel* channel, int msg_count, int msg_size) :
        count_down_(msg_count),
@@ -572,7 +577,7 @@ TEST_F(IPCChannelTest, Performance) {
 }
 
 // This message loop bounces all messages back to the sender
-MULTIPROCESS_TEST_MAIN(RunReflector) {
+MULTIPROCESS_IPC_TEST_MAIN(RunReflector) {
   MessageLoopForIO main_message_loop;
   IPC::Channel chan(kReflectorChannel, IPC::Channel::MODE_CLIENT, NULL);
   ChannelReflectorListener channel_reflector_listener(&chan);

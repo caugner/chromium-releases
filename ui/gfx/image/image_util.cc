@@ -7,23 +7,28 @@
 #include "base/memory/scoped_ptr.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/codec/jpeg_codec.h"
-#include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/image/image.h"
+#include "ui/gfx/image/image_skia.h"
 
 namespace gfx {
 
 Image* ImageFromPNGEncodedData(const unsigned char* input, size_t input_size) {
-  SkBitmap favicon_bitmap;
-  if (gfx::PNGCodec::Decode(input, input_size, &favicon_bitmap))
-    return new Image(favicon_bitmap);
+  Image* image = new Image(input, input_size);
+  return image;
+}
 
-  return NULL;
+Image ImageFromJPEGEncodedData(const unsigned char* input, size_t input_size) {
+  scoped_ptr<SkBitmap> bitmap(gfx::JPEGCodec::Decode(input, input_size));
+  if (bitmap.get())
+    return Image(*bitmap);
+
+  return Image();
 }
 
 bool PNGEncodedDataFromImage(const Image& image,
                              std::vector<unsigned char>* dst) {
-  const SkBitmap& bitmap = *image.ToSkBitmap();
-  return gfx::PNGCodec::EncodeBGRASkBitmap(bitmap, false, dst);
+  *dst = *image.ToImagePNG();
+  return !dst->empty();
 }
 
 bool JPEGEncodedDataFromImage(const Image& image, int quality,

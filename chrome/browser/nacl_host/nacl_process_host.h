@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_NACL_HOST_NACL_PROCESS_HOST_H_
 #define CHROME_BROWSER_NACL_HOST_NACL_PROCESS_HOST_H_
-#pragma once
 
 #include "build/build_config.h"
 
@@ -17,6 +16,7 @@
 #include "chrome/common/nacl_types.h"
 #include "content/public/browser/browser_child_process_host_delegate.h"
 #include "googleurl/src/gurl.h"
+#include "ipc/ipc_channel_handle.h"
 
 class ChromeRenderMessageFilter;
 class CommandLine;
@@ -86,7 +86,7 @@ class NaClProcessHost : public content::BrowserChildProcessHostDelegate {
 
   // Sends the reply message to the renderer who is waiting for the plugin
   // to load. Returns true on success.
-  bool ReplyToRenderer();
+  bool ReplyToRenderer(const IPC::ChannelHandle& channel_handle);
 
   // Sends the message to the NaCl process to load the plugin. Returns true
   // on success.
@@ -113,6 +113,8 @@ class NaClProcessHost : public content::BrowserChildProcessHostDelegate {
                                    IPC::Message* reply_msg);
 #endif
 
+  void OnPpapiChannelCreated(const IPC::ChannelHandle& channel_handle);
+
   GURL manifest_url_;
 
 #if defined(OS_WIN)
@@ -122,7 +124,9 @@ class NaClProcessHost : public content::BrowserChildProcessHostDelegate {
 #elif defined(OS_LINUX)
   bool wait_for_nacl_gdb_;
   MessageLoopForIO::FileDescriptorWatcher nacl_gdb_watcher_;
-  scoped_ptr<MessageLoopForIO::Watcher> nacl_gdb_watcher_delegate_;
+
+  class NaClGdbWatchDelegate;
+  scoped_ptr<NaClGdbWatchDelegate> nacl_gdb_watcher_delegate_;
 #endif
   // The ChromeRenderMessageFilter that requested this NaCl process.  We use
   // this for sending the reply once the process has started.
@@ -151,6 +155,8 @@ class NaClProcessHost : public content::BrowserChildProcessHostDelegate {
   bool enable_exception_handling_;
 
   bool off_the_record_;
+
+  bool enable_ipc_proxy_;
 
   DISALLOW_COPY_AND_ASSIGN(NaClProcessHost);
 };

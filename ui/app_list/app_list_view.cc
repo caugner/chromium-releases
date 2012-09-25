@@ -12,7 +12,7 @@
 #include "ui/app_list/pagination_model.h"
 #include "ui/app_list/search_box_model.h"
 #include "ui/app_list/search_box_view.h"
-#include "ui/gfx/screen.h"
+#include "ui/gfx/insets.h"
 #include "ui/views/bubble/bubble_frame_view.h"
 #include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/layout/box_layout.h"
@@ -25,6 +25,9 @@ namespace {
 // Inner padding space in pixels of bubble contents.
 const int kInnerPadding = 1;
 
+// The distance between the arrow tip and edge of the anchor view.
+const int kArrowOffset = 10;
+
 }  // namespace
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -32,7 +35,6 @@ const int kInnerPadding = 1;
 
 AppListView::AppListView(AppListViewDelegate* delegate)
     : delegate_(delegate),
-      pagination_model_(new PaginationModel),
       bubble_border_(NULL),
       search_box_view_(NULL),
       contents_view_(NULL) {
@@ -45,6 +47,7 @@ AppListView::~AppListView() {
 
 void AppListView::InitAsBubble(
     gfx::NativeView parent,
+    PaginationModel* pagination_model,
     views::View* anchor,
     views::BubbleBorder::ArrowLocation arrow_location) {
   set_background(NULL);
@@ -57,25 +60,27 @@ void AppListView::InitAsBubble(
   search_box_view_ = new SearchBoxView(this);
   AddChildView(search_box_view_);
 
-  contents_view_ = new ContentsView(this, pagination_model_.get());
+  contents_view_ = new ContentsView(this, pagination_model);
   AddChildView(contents_view_);
 
   search_box_view_->set_contents_view(contents_view_);
 
   set_anchor_view(anchor);
-  set_margin(0);
+  set_margins(gfx::Insets());
   set_move_with_anchor(true);
   set_parent_window(parent);
   set_close_on_deactivate(false);
+  set_anchor_insets(gfx::Insets(kArrowOffset, kArrowOffset, kArrowOffset,
+      kArrowOffset));
   views::BubbleDelegateView::CreateBubble(this);
-
-  // Resets default background since AppListBubbleBorder paints background.
-  GetBubbleFrameView()->set_background(NULL);
 
   // Overrides border with AppListBubbleBorder.
   bubble_border_ = new AppListBubbleBorder(this, search_box_view_);
   GetBubbleFrameView()->SetBubbleBorder(bubble_border_);
   SetBubbleArrowLocation(arrow_location);
+
+  // Resets default background since AppListBubbleBorder paints background.
+  GetBubbleFrameView()->set_background(NULL);
 
   CreateModel();
 }
@@ -151,36 +156,15 @@ gfx::Rect AppListView::GetBubbleBounds() {
   if (!bubble_border_)
     return views::BubbleDelegateView::GetBubbleBounds();
 
-  const gfx::Point old_offset = bubble_border_->offset();
   const gfx::Rect anchor_rect = GetAnchorRect();
-
-  bubble_border_->set_offset(gfx::Point());
   gfx::Rect bubble_rect = GetBubbleFrameView()->GetUpdatedWindowBounds(
       anchor_rect,
       GetPreferredSize(),
       false /* try_mirroring_arrow */);
 
-  gfx::Rect monitor_rect = gfx::Screen::GetDisplayNearestPoint(
-      anchor_rect.CenterPoint()).work_area();
-  if (monitor_rect.IsEmpty() || monitor_rect.Contains(bubble_rect))
-    return bubble_rect;
-
-  gfx::Point offset;
-
-  if (bubble_border_->ArrowAtTopOrBottom()) {
-    if (bubble_rect.x() < monitor_rect.x())
-      offset.set_x(monitor_rect.x() - bubble_rect.x());
-    else if (bubble_rect.right() > monitor_rect.right())
-      offset.set_x(monitor_rect.right() - bubble_rect.right());
-  } else if (bubble_border_->ArrowOnLeftOrRight()) {
-    if (bubble_rect.y() < monitor_rect.y())
-      offset.set_y(monitor_rect.y() - bubble_rect.y());
-    else if (bubble_rect.bottom() > monitor_rect.bottom())
-      offset.set_y(monitor_rect.bottom() - bubble_rect.bottom());
-  }
-
-  bubble_rect.Offset(offset);
-  bubble_border_->set_offset(offset);
+  const gfx::Point old_offset = bubble_border_->offset();
+  bubble_rect = bubble_border_->ComputeOffsetAndUpdateBubbleRect(bubble_rect,
+      anchor_rect);
 
   // Repaints border if arrow offset is changed.
   if (bubble_border_->offset() != old_offset)

@@ -9,11 +9,11 @@
 #include "chrome/browser/ui/panels/panel_manager.h"
 #include "chrome/browser/ui/panels/test_panel_mouse_watcher.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/test/test_utils.h"
 
-// Refactor has only been done for Mac panels so far.
-#if defined(OS_MACOSX)
+// Refactor has only been done for Win and Mac panels so far.
+#if defined(OS_WIN) || defined(OS_MACOSX)
 
 class DockedPanelBrowserTest : public BasePanelBrowserTest {
  public:
@@ -183,7 +183,7 @@ IN_PROC_BROWSER_TEST_F(DockedPanelBrowserTest, MinimizeSqueezedActive) {
   EXPECT_EQ(width_of_panel3_squeezed, panel3->GetBounds().width());
 
   // Minimize the active panel. It should become inactive and shrink in width.
-  ui_test_utils::WindowedNotificationObserver signal(
+  content::WindowedNotificationObserver signal(
       chrome::NOTIFICATION_PANEL_STRIP_UPDATED,
       content::NotificationService::AllSources());
   panel7->Minimize();
@@ -239,7 +239,7 @@ IN_PROC_BROWSER_TEST_F(DockedPanelBrowserTest, CloseSqueezedPanels) {
   EXPECT_LT(panel_6_orig_width, panel6->GetRestoredBounds().width());
 
   // Close one panel.
-  panel2->Close();
+  CloseWindowAndWait(panel2);
 
   // Wait for all processing to finish.
   MessageLoopForUI::current()->RunAllPending();
@@ -255,9 +255,9 @@ IN_PROC_BROWSER_TEST_F(DockedPanelBrowserTest, CloseSqueezedPanels) {
   EXPECT_EQ(panel7->GetBounds().width(), panel_7_orig_width);
 
   // Close several panels.
-  panel3->Close();
-  panel5->Close();
-  panel7->Close();
+  CloseWindowAndWait(panel3);
+  CloseWindowAndWait(panel5);
+  CloseWindowAndWait(panel7);
 
   // Wait for all processing to finish.
   MessageLoopForUI::current()->RunAllPending();
@@ -270,4 +270,4 @@ IN_PROC_BROWSER_TEST_F(DockedPanelBrowserTest, CloseSqueezedPanels) {
   panel_manager->CloseAll();
 }
 
-#endif // OS_MACOSX
+#endif // OS_WIN || OS_MACOSX

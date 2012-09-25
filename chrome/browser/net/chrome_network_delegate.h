@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_NET_CHROME_NETWORK_DELEGATE_H_
 #define CHROME_BROWSER_NET_CHROME_NETWORK_DELEGATE_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -12,12 +11,19 @@
 #include "net/base/network_delegate.h"
 
 class CookieSettings;
-class ExtensionEventRouterForwarder;
 class ExtensionInfoMap;
 class PrefService;
 template<class T> class PrefMember;
 
 typedef PrefMember<bool> BooleanPrefMember;
+
+namespace chrome_browser_net {
+class CacheStats;
+}
+
+namespace extensions {
+class EventRouterForwarder;
+}
 
 namespace policy {
 class URLBlacklistManager;
@@ -34,12 +40,13 @@ class ChromeNetworkDelegate : public net::NetworkDelegate {
   // shutdown. If |cookie_settings| is NULL, all cookies are enabled,
   // otherwise, the settings are enforced on all observed network requests.
   ChromeNetworkDelegate(
-      ExtensionEventRouterForwarder* event_router,
+      extensions::EventRouterForwarder* event_router,
       ExtensionInfoMap* extension_info_map,
       const policy::URLBlacklistManager* url_blacklist_manager,
       void* profile,
       CookieSettings* cookie_settings,
-      BooleanPrefMember* enable_referrers);
+      BooleanPrefMember* enable_referrers,
+      chrome_browser_net::CacheStats* cache_stats);
   virtual ~ChromeNetworkDelegate();
 
   // Causes |OnCanThrottleRequest| to always return false, for all
@@ -97,8 +104,10 @@ class ChromeNetworkDelegate : public net::NetworkDelegate {
   virtual int OnBeforeSocketStreamConnect(
       net::SocketStream* stream,
       const net::CompletionCallback& callback) OVERRIDE;
+  virtual void OnCacheWaitStateChange(const net::URLRequest& request,
+                                      CacheWaitState state) OVERRIDE;
 
-  scoped_refptr<ExtensionEventRouterForwarder> event_router_;
+  scoped_refptr<extensions::EventRouterForwarder> event_router_;
   void* profile_;
   scoped_refptr<CookieSettings> cookie_settings_;
 
@@ -120,6 +129,9 @@ class ChromeNetworkDelegate : public net::NetworkDelegate {
   // set this variable once at start-up time.  It is effectively
   // static anyway since it is based on a command-line flag.
   static bool g_never_throttle_requests_;
+
+  // Pointer to IOThread global, should outlive ChromeNetworkDelegate.
+  chrome_browser_net::CacheStats* cache_stats_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeNetworkDelegate);
 };

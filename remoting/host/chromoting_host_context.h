@@ -8,9 +8,13 @@
 #include <string>
 
 #include "base/gtest_prod_util.h"
+#include "base/memory/ref_counted.h"
 #include "base/threading/platform_thread.h"
 #include "base/threading/thread.h"
-#include "remoting/jingle_glue/jingle_thread.h"
+
+namespace base {
+class SingleThreadTaskRunner;
+}  // namespace base
 
 namespace net {
 class URLRequestContextGetter;
@@ -23,7 +27,8 @@ namespace remoting {
 class ChromotingHostContext {
  public:
   // Create a context.
-  ChromotingHostContext(base::MessageLoopProxy* ui_message_loop);
+  ChromotingHostContext(
+      scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner);
   virtual ~ChromotingHostContext();
 
   // TODO(ajwong): Move the Start method out of this class. Then
@@ -33,15 +38,33 @@ class ChromotingHostContext {
   // this API.
   virtual bool Start();
 
-  virtual JingleThread* jingle_thread();
+  // Task runner for the thread that is used for the UI. In the NPAPI
+  // plugin this corresponds to the main plugin thread.
+  virtual base::SingleThreadTaskRunner* ui_task_runner();
 
-  virtual MessageLoop* main_message_loop();
-  virtual MessageLoop* encode_message_loop();
-  virtual base::MessageLoopProxy* network_message_loop();
-  virtual MessageLoop* desktop_message_loop();
-  virtual base::MessageLoopProxy* ui_message_loop();
-  virtual base::MessageLoopProxy* io_message_loop();
-  virtual base::MessageLoopProxy* file_message_loop();
+  // Task runner for the thread used by the ScreenRecorder to capture
+  // the screen.
+  virtual base::SingleThreadTaskRunner* capture_task_runner();
+
+  // Task runner for the thread used to encode video streams.
+  virtual base::SingleThreadTaskRunner* encode_task_runner();
+
+  // Task runner for the thread used for network IO. This thread runs
+  // a libjingle message loop, and is the only thread on which
+  // libjingle code may be run.
+  virtual base::SingleThreadTaskRunner* network_task_runner();
+
+  // Task runner for the thread that is used by the EventExecutor.
+  //
+  // TODO(sergeyu): Do we need a separate thread for EventExecutor?
+  // Can we use some other thread instead?
+  virtual base::SingleThreadTaskRunner* desktop_task_runner();
+
+  // Task runner for the thread that is used for blocking file
+  // IO. This thread is used by the URLRequestContext to read proxy
+  // configuration and by NatConfig to read policy configs.
+  virtual base::SingleThreadTaskRunner* file_task_runner();
+
   const scoped_refptr<net::URLRequestContextGetter>&
       url_request_context_getter();
 
@@ -49,26 +72,21 @@ class ChromotingHostContext {
   FRIEND_TEST_ALL_PREFIXES(ChromotingHostContextTest, StartAndStop);
 
   // A thread that hosts all network operations.
-  JingleThread jingle_thread_;
+  base::Thread network_thread_;
 
-  // TODO(sergeyu): The "main" thread is used just by the
-  // capturer. Consider renaming it.
-  base::Thread main_thread_;
+  // A thread that hosts screen capture.
+  base::Thread capture_thread_;
 
   // A thread that hosts all encode operations.
   base::Thread encode_thread_;
 
-  // A thread that hosts desktop integration (capture, input injection, etc)
-  // This is NOT a Chrome-style UI thread.
+  // A thread that hosts input injection.
   base::Thread desktop_thread_;
-
-  // Thread for non-blocking IO operations.
-  base::Thread io_thread_;
 
   // Thread for blocking IO operations.
   base::Thread file_thread_;
 
-  scoped_refptr<base::MessageLoopProxy> ui_message_loop_;
+  scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner_;
 
   scoped_refptr<net::URLRequestContextGetter> url_request_context_getter_;
 

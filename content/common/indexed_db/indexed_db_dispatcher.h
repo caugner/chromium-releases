@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_COMMON_INDEXED_DB_INDEXED_DB_DISPATCHER_H_
 #define CONTENT_COMMON_INDEXED_DB_INDEXED_DB_DISPATCHER_H_
-#pragma once
 
 #include <map>
 #include <vector>
@@ -25,6 +24,7 @@ struct IndexedDBMsg_CallbacksSuccessCursorContinue_Params;
 struct IndexedDBMsg_CallbacksSuccessCursorPrefetch_Params;
 struct IndexedDBMsg_CallbacksSuccessIDBCursor_Params;
 class RendererWebIDBCursorImpl;
+class RendererWebIDBDatabaseImpl;
 
 namespace IPC {
 class Message;
@@ -38,6 +38,7 @@ class WebIDBTransaction;
 
 namespace content {
 class IndexedDBKey;
+class IndexedDBKeyPath;
 class IndexedDBKeyRange;
 class SerializedScriptValue;
 }
@@ -70,6 +71,7 @@ class CONTENT_EXPORT IndexedDBDispatcher
 
   void RequestIDBFactoryOpen(
       const string16& name,
+      int64 version,
       WebKit::WebIDBCallbacks* callbacks,
       const string16& origin,
       WebKit::WebFrame* web_frame);
@@ -79,12 +81,6 @@ class CONTENT_EXPORT IndexedDBDispatcher
       WebKit::WebIDBCallbacks* callbacks,
       const string16& origin,
       WebKit::WebFrame* web_frame);
-
-  void RequestIDBCursorUpdate(
-      const content::SerializedScriptValue& value,
-      WebKit::WebIDBCallbacks* callbacks_ptr,
-      int32 idb_cursor_id,
-      WebKit::WebExceptionCode* ec);
 
   void RequestIDBCursorAdvance(
       unsigned long count,
@@ -169,22 +165,18 @@ class CONTENT_EXPORT IndexedDBDispatcher
       const WebKit::WebIDBTransaction& transaction,
       WebKit::WebExceptionCode* ec);
 
-  void RequestIDBObjectStorePut(const content::SerializedScriptValue& value,
-                                const content::IndexedDBKey& key,
-                                WebKit::WebIDBObjectStore::PutMode putMode,
-                                WebKit::WebIDBCallbacks* callbacks,
-                                int32 idb_object_store_id,
-                                const WebKit::WebIDBTransaction& transaction,
-                                WebKit::WebExceptionCode* ec);
-
-  void RequestIDBObjectStoreDelete(
+  void RequestIDBObjectStorePut(
+      const content::SerializedScriptValue& value,
       const content::IndexedDBKey& key,
+      WebKit::WebIDBObjectStore::PutMode putMode,
       WebKit::WebIDBCallbacks* callbacks,
       int32 idb_object_store_id,
       const WebKit::WebIDBTransaction& transaction,
+      const WebKit::WebVector<WebKit::WebString>& indexNames,
+      const WebKit::WebVector<WebKit::WebVector<WebKit::WebIDBKey> >& indexKeys,
       WebKit::WebExceptionCode* ec);
 
-  void RequestIDBObjectStoreDeleteRange(
+  void RequestIDBObjectStoreDelete(
       const content::IndexedDBKeyRange& key_range,
       WebKit::WebIDBCallbacks* callbacks,
       int32 idb_object_store_id,
@@ -217,6 +209,7 @@ class CONTENT_EXPORT IndexedDBDispatcher
       int32 id);
 
   void CursorDestroyed(int32 cursor_id);
+  void DatabaseDestroyed(int32 database_id);
 
   static int32 TransactionId(const WebKit::WebIDBTransaction& transaction);
 
@@ -247,16 +240,32 @@ class CONTENT_EXPORT IndexedDBDispatcher
       int32 thread_id,
       int32 response_id,
       const content::SerializedScriptValue& value);
+  void OnSuccessSerializedScriptValueWithKey(
+      int32 thread_id,
+      int32 response_id,
+      const content::SerializedScriptValue& value,
+      const content::IndexedDBKey& primary_key,
+      const content::IndexedDBKeyPath& key_path);
   void OnError(int32 thread_id,
                int32 response_id,
                int code,
                const string16& message);
   void OnBlocked(int32 thread_id, int32 response_id);
+  void OnIntBlocked(int32 thread_id, int32 response_id, int64 existing_version);
+  void OnUpgradeNeeded(int32 thread_id,
+                       int32 response_id,
+                       int32 transaction_id,
+                       int32 database_id,
+                       int64 old_version);
   void OnAbort(int32 thread_id, int32 transaction_id);
   void OnComplete(int32 thread_id, int32 transaction_id);
   void OnVersionChange(int32 thread_id,
                        int32 database_id,
                        const string16& newVersion);
+  void OnIntVersionChange(int32 thread_id,
+                          int32 database_id,
+                          int64 old_version,
+                          int64 new_version);
 
   // Reset cursor prefetch caches for all cursors except exception_cursor_id.
   void ResetCursorPrefetchCaches(int32 exception_cursor_id = -1);
@@ -271,6 +280,8 @@ class CONTENT_EXPORT IndexedDBDispatcher
 
   // Map from cursor id to RendererWebIDBCursorImpl.
   std::map<int32, RendererWebIDBCursorImpl*> cursors_;
+
+  std::map<int32, RendererWebIDBDatabaseImpl*> databases_;
 
   DISALLOW_COPY_AND_ASSIGN(IndexedDBDispatcher);
 };

@@ -4,20 +4,23 @@
 
 #ifndef CHROME_BROWSER_DOWNLOAD_SAVE_PACKAGE_FILE_PICKER_CHROMEOS_H_
 #define CHROME_BROWSER_DOWNLOAD_SAVE_PACKAGE_FILE_PICKER_CHROMEOS_H_
-#pragma once
 
 #include "base/memory/ref_counted.h"
-#include "chrome/browser/ui/select_file_dialog.h"
 #include "content/public/browser/download_manager_delegate.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "ui/base/dialogs/select_file_dialog.h"
 
 namespace gdata {
 class GDataFileSystem;
 }
 
+namespace ui {
+struct SelectedFileInfo;
+}
+
 // Handles showing a dialog to the user to ask for the filename to save a page
 // on ChromeOS.
-class SavePackageFilePickerChromeOS : public SelectFileDialog::Listener,
+class SavePackageFilePickerChromeOS : public ui::SelectFileDialog::Listener,
                                       public content::WebContentsObserver {
  public:
   SavePackageFilePickerChromeOS(
@@ -33,15 +36,19 @@ class SavePackageFilePickerChromeOS : public SelectFileDialog::Listener,
   virtual ~SavePackageFilePickerChromeOS();
 
   // SelectFileDialog::Listener implementation.
-  virtual void FileSelected(const FilePath& path,
+  virtual void FileSelected(const FilePath& selected_path,
                             int unused_index,
                             void* unused_params) OVERRIDE;
+  virtual void FileSelectedWithExtraInfo(
+      const ui::SelectedFileInfo& selected_file_info,
+      int unused_index,
+      void* unused_params) OVERRIDE;
   virtual void FileSelectionCanceled(void* params) OVERRIDE;
 
   content::SavePackagePathPickedCallback callback_;
 
   // For managing select file dialogs.
-  scoped_refptr<SelectFileDialog> select_file_dialog_;
+  scoped_refptr<ui::SelectFileDialog> select_file_dialog_;
   FilePath selected_path_;
 
   DISALLOW_COPY_AND_ASSIGN(SavePackageFilePickerChromeOS);

@@ -4,9 +4,12 @@
 
 #ifndef CONTENT_SHELL_SHELL_JAVASCRIPT_DIALOG_H_
 #define CONTENT_SHELL_SHELL_JAVASCRIPT_DIALOG_H_
-#pragma once
 
 #include "content/public/browser/javascript_dialogs.h"
+
+#if defined(TOOLKIT_GTK)
+#include "ui/base/gtk/gtk_signal.h"
+#endif
 
 #if defined(OS_MACOSX)
 #if __OBJC__
@@ -24,6 +27,7 @@ class ShellJavaScriptDialog {
  public:
   ShellJavaScriptDialog(
       ShellJavaScriptDialogCreator* creator,
+      gfx::NativeWindow parent_window,
       JavaScriptMessageType message_type,
       const string16& message_text,
       const string16& default_prompt_text,
@@ -46,6 +50,10 @@ class ShellJavaScriptDialog {
   string16 default_prompt_text_;
   static INT_PTR CALLBACK DialogProc(HWND dialog, UINT message, WPARAM wparam,
                                      LPARAM lparam);
+#elif defined(TOOLKIT_GTK)
+  GtkWidget* gtk_dialog_;
+  gfx::NativeWindow parent_window_;
+  CHROMEGTK_CALLBACK_1(ShellJavaScriptDialog, void, OnResponse, int);
 #endif
 
   DISALLOW_COPY_AND_ASSIGN(ShellJavaScriptDialog);

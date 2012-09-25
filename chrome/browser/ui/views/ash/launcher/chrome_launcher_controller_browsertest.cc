@@ -20,7 +20,7 @@
 #include "chrome/browser/extensions/shell_window_registry.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/browser/ui/extensions/shell_window.h"
@@ -66,14 +66,8 @@ class LauncherAppBrowserTest : public ExtensionBrowserTest {
         service->GetExtensionById(last_loaded_extension_id_, false);
     EXPECT_TRUE(extension);
 
-    application_launch::OpenApplication(
-        browser()->profile(),
-        extension,
-        // Overriding manifest to open in a panel.
-        container,
-        GURL(),
-        disposition,
-        NULL);
+    application_launch::OpenApplication(application_launch::LaunchParams(
+            browser()->profile(), extension, container, disposition));
     return extension;
   }
 
@@ -440,7 +434,7 @@ IN_PROC_BROWSER_TEST_F(LauncherAppBrowserTest, LaunchPinned) {
   EXPECT_EQ(++tab_count, tab_strip->count());
   EXPECT_EQ(ash::STATUS_ACTIVE, (*model_->ItemByID(shortcut_id)).status);
   TabContents* tab = tab_strip->GetActiveTabContents();
-  ui_test_utils::WindowedNotificationObserver close_observer(
+  content::WindowedNotificationObserver close_observer(
       chrome::NOTIFICATION_TAB_CONTENTS_DESTROYED,
       content::Source<TabContents>(tab));
   browser()->tab_strip_model()->CloseSelectedTabs();
@@ -459,7 +453,7 @@ IN_PROC_BROWSER_TEST_F(LauncherAppBrowserTest, LaunchUnpinned) {
   ash::LauncherID shortcut_id = CreateShortcut("app1");
   EXPECT_EQ(ash::STATUS_ACTIVE, (*model_->ItemByID(shortcut_id)).status);
   TabContents* tab = tab_strip->GetActiveTabContents();
-  ui_test_utils::WindowedNotificationObserver close_observer(
+  content::WindowedNotificationObserver close_observer(
       chrome::NOTIFICATION_TAB_CONTENTS_DESTROYED,
       content::Source<TabContents>(tab));
   browser()->tab_strip_model()->CloseSelectedTabs();
@@ -484,12 +478,12 @@ IN_PROC_BROWSER_TEST_F(LauncherAppBrowserTest, LaunchInBackground) {
 IN_PROC_BROWSER_TEST_F(LauncherAppBrowserTest, LaunchMaximized) {
   aura::Window* window1 = browser()->window()->GetNativeWindow();
   ash::wm::MaximizeWindow(window1);
-  ui_test_utils::WindowedNotificationObserver open_observer(
+  content::WindowedNotificationObserver open_observer(
       chrome::NOTIFICATION_BROWSER_WINDOW_READY,
       content::NotificationService::AllSources());
-  Browser::NewEmptyWindow(browser()->profile());
+  chrome::NewEmptyWindow(browser()->profile());
   open_observer.Wait();
-  Browser* browser2 = browser::FindLastActiveWithProfile(browser()->profile());
+  Browser* browser2 = content::Source<Browser>(open_observer.source()).ptr();
   aura::Window* window2 = browser2->window()->GetNativeWindow();
   TabStripModel* tab_strip = browser2->tab_strip_model();
   int tab_count = tab_strip->count();

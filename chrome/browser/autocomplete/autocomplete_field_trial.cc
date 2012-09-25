@@ -32,11 +32,11 @@ const base::FieldTrial::Probability
 // will decide what behavior (if any) to change based on the group.
 const int kSuggestFieldTrialNumberOfGroups = 20;
 
-// For History Quick Provider new scoring field trial, put 0% ( = 0/100 )
+// For History Quick Provider new scoring field trial, put 25% ( = 25/100 )
 // of the users in the new scoring experiment group.
 const base::FieldTrial::Probability kHQPNewScoringFieldTrialDivisor = 100;
 const base::FieldTrial::Probability
-    kHQPNewScoringFieldTrialExperimentFraction = 0;
+    kHQPNewScoringFieldTrialExperimentFraction = 25;
 
 // Field trial IDs.
 // Though they are not literally "const", they are set only once, in
@@ -97,7 +97,7 @@ void AutocompleteFieldTrial::Activate() {
     trial->AppendGroup(group_name, 1);
     experiments_helper::AssociateGoogleVariationID(
         kSuggestFieldTrialName, group_name,
-        static_cast<chrome_variations::ID>(
+        static_cast<chrome_variations::VariationID>(
             chrome_variations::kSuggestIDMin + i));
   }
 

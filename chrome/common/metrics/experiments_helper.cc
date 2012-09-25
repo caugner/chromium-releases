@@ -4,6 +4,7 @@
 
 #include "chrome/common/metrics/experiments_helper.h"
 
+#include <map>
 #include <vector>
 
 #include "base/memory/singleton.h"
@@ -31,7 +32,7 @@ class GroupMapAccessor {
   // Note that this normally only sets the ID for a group the first time, unless
   // |force| is set to true, in which case it will always override it.
   void AssociateID(const experiments_helper::SelectedGroupId& group_identifier,
-                   chrome_variations::ID id,
+                   chrome_variations::VariationID id,
                    const bool force) {
     base::AutoLock scoped_lock(lock_);
     if (force ||
@@ -39,7 +40,7 @@ class GroupMapAccessor {
       group_to_id_map_[group_identifier] = id;
   }
 
-  chrome_variations::ID GetID(
+  chrome_variations::VariationID GetID(
       const experiments_helper::SelectedGroupId& group_identifier) {
     base::AutoLock scoped_lock(lock_);
     GroupToIDMap::const_iterator it = group_to_id_map_.find(group_identifier);
@@ -50,7 +51,7 @@ class GroupMapAccessor {
 
  private:
   typedef std::map<experiments_helper::SelectedGroupId,
-      chrome_variations::ID,
+      chrome_variations::VariationID,
       experiments_helper::SelectedGroupIdCompare> GroupToIDMap;
 
   base::Lock lock_;
@@ -112,22 +113,42 @@ void GetFieldTrialSelectedGroupIds(
 
 void AssociateGoogleVariationID(const std::string& trial_name,
                                 const std::string& group_name,
-                                chrome_variations::ID id) {
+                                chrome_variations::VariationID id) {
   GroupMapAccessor::GetInstance()->AssociateID(
       MakeSelectedGroupId(trial_name, group_name), id, false);
 }
 
 void AssociateGoogleVariationIDForce(const std::string& trial_name,
                                      const std::string& group_name,
-                                     chrome_variations::ID id) {
+                                     chrome_variations::VariationID id) {
   GroupMapAccessor::GetInstance()->AssociateID(
       MakeSelectedGroupId(trial_name, group_name), id, true);
 }
 
-chrome_variations::ID GetGoogleVariationID(const std::string& trial_name,
-                                           const std::string& group_name) {
+chrome_variations::VariationID GetGoogleVariationID(
+    const std::string& trial_name,
+    const std::string& group_name) {
   return GroupMapAccessor::GetInstance()->GetID(
       MakeSelectedGroupId(trial_name, group_name));
+}
+
+void GenerateExperimentChunks(const std::vector<string16>& experiments,
+                              std::vector<string16>* chunks) {
+  string16 current_chunk;
+  for (size_t i = 0; i < experiments.size(); ++i) {
+    const size_t needed_length =
+        (current_chunk.empty() ? 1 : 0) + experiments[i].length();
+    if (current_chunk.length() + needed_length > kMaxExperimentChunkSize) {
+      chunks->push_back(current_chunk);
+      current_chunk = experiments[i];
+    } else {
+      if (!current_chunk.empty())
+        current_chunk.push_back(',');
+      current_chunk += experiments[i];
+    }
+  }
+  if (!current_chunk.empty())
+    chunks->push_back(current_chunk);
 }
 
 void SetChildProcessLoggingExperimentList() {
@@ -135,9 +156,8 @@ void SetChildProcessLoggingExperimentList() {
   GetFieldTrialSelectedGroupIds(&name_group_ids);
   std::vector<string16> experiment_strings(name_group_ids.size());
   for (size_t i = 0; i < name_group_ids.size(); ++i) {
-    // Wish there was a StringPrintf for string16... :-(
-    experiment_strings[i] = WideToUTF16(base::StringPrintf(
-        L"%x-%x", name_group_ids[i].name, name_group_ids[i].group));
+    experiment_strings[i] = UTF8ToUTF16(base::StringPrintf(
+        "%x-%x", name_group_ids[i].name, name_group_ids[i].group));
   }
   child_process_logging::SetExperimentList(experiment_strings);
 }

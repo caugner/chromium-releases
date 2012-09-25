@@ -165,6 +165,48 @@ TEST(URLMatcherConditionFactoryTest, GURLCharacterSet) {
   EXPECT_FALSE(IsStringASCII(url.ref()));
 }
 
+TEST(URLMatcherConditionFactoryTest, Criteria) {
+  URLMatcherConditionFactory factory;
+  EXPECT_EQ(URLMatcherCondition::HOST_PREFIX,
+            factory.CreateHostPrefixCondition("foo").criterion());
+  EXPECT_EQ(URLMatcherCondition::HOST_SUFFIX,
+            factory.CreateHostSuffixCondition("foo").criterion());
+  EXPECT_EQ(URLMatcherCondition::HOST_CONTAINS,
+            factory.CreateHostContainsCondition("foo").criterion());
+  EXPECT_EQ(URLMatcherCondition::HOST_EQUALS,
+            factory.CreateHostEqualsCondition("foo").criterion());
+  EXPECT_EQ(URLMatcherCondition::PATH_PREFIX,
+            factory.CreatePathPrefixCondition("foo").criterion());
+  EXPECT_EQ(URLMatcherCondition::PATH_SUFFIX,
+            factory.CreatePathSuffixCondition("foo").criterion());
+  EXPECT_EQ(URLMatcherCondition::PATH_CONTAINS,
+            factory.CreatePathContainsCondition("foo").criterion());
+  EXPECT_EQ(URLMatcherCondition::PATH_EQUALS,
+            factory.CreatePathEqualsCondition("foo").criterion());
+  EXPECT_EQ(URLMatcherCondition::QUERY_PREFIX,
+            factory.CreateQueryPrefixCondition("foo").criterion());
+  EXPECT_EQ(URLMatcherCondition::QUERY_SUFFIX,
+            factory.CreateQuerySuffixCondition("foo").criterion());
+  EXPECT_EQ(URLMatcherCondition::QUERY_CONTAINS,
+            factory.CreateQueryContainsCondition("foo").criterion());
+  EXPECT_EQ(URLMatcherCondition::QUERY_EQUALS,
+            factory.CreateQueryEqualsCondition("foo").criterion());
+  EXPECT_EQ(URLMatcherCondition::HOST_SUFFIX_PATH_PREFIX,
+            factory.CreateHostSuffixPathPrefixCondition("foo",
+                                                        "bar").criterion());
+  EXPECT_EQ(URLMatcherCondition::HOST_EQUALS_PATH_PREFIX,
+            factory.CreateHostEqualsPathPrefixCondition("foo",
+                                                        "bar").criterion());
+  EXPECT_EQ(URLMatcherCondition::URL_PREFIX,
+            factory.CreateURLPrefixCondition("foo").criterion());
+  EXPECT_EQ(URLMatcherCondition::URL_SUFFIX,
+            factory.CreateURLSuffixCondition("foo").criterion());
+  EXPECT_EQ(URLMatcherCondition::URL_CONTAINS,
+            factory.CreateURLContainsCondition("foo").criterion());
+  EXPECT_EQ(URLMatcherCondition::URL_EQUALS,
+            factory.CreateURLEqualsCondition("foo").criterion());
+}
+
 TEST(URLMatcherConditionFactoryTest, TestSingletonProperty) {
   URLMatcherConditionFactory factory;
   URLMatcherCondition c1 = factory.CreateHostEqualsCondition("www.google.com");
@@ -188,7 +230,7 @@ TEST(URLMatcherConditionFactoryTest, TestSingletonProperty) {
 }
 
 TEST(URLMatcherConditionFactoryTest, TestComponentSearches) {
-  GURL gurl("https://www.google.com/webhp?sourceid=chrome-instant&ie=UTF-8"
+  GURL gurl("https://www.google.com:1234/webhp?sourceid=chrome-instant&ie=UTF-8"
       "&ion=1#hl=en&output=search&sclient=psy-ab&q=chrome%20is%20awesome");
   URLMatcherConditionFactory factory;
   std::string url = factory.CanonicalizeURLForComponentSearches(gurl);
@@ -272,21 +314,33 @@ TEST(URLMatcherConditionFactoryTest, TestComponentSearches) {
         "google.com", ""), url));
   EXPECT_FALSE(Matches(factory.CreateHostSuffixPathPrefixCondition(
         "www", ""), url));
+
+  EXPECT_TRUE(Matches(factory.CreateHostEqualsPathPrefixCondition(
+      "www.google.com", "/webhp"), url));
+  EXPECT_FALSE(Matches(factory.CreateHostEqualsPathPrefixCondition(
+        "", "/webhp"), url));
+  EXPECT_TRUE(Matches(factory.CreateHostEqualsPathPrefixCondition(
+        "www.google.com", ""), url));
+  EXPECT_FALSE(Matches(factory.CreateHostEqualsPathPrefixCondition(
+        "google.com", ""), url));
 }
 
 TEST(URLMatcherConditionFactoryTest, TestFullSearches) {
-  GURL gurl("https://www.google.com/webhp?sourceid=chrome-instant&ie=UTF-8"
+  // The Port 443 is stripped because it is the default port for https.
+  GURL gurl("https://www.google.com:443/webhp?sourceid=chrome-instant&ie=UTF-8"
       "&ion=1#hl=en&output=search&sclient=psy-ab&q=chrome%20is%20awesome");
   URLMatcherConditionFactory factory;
   std::string url = factory.CanonicalizeURLForFullSearches(gurl);
 
   EXPECT_TRUE(Matches(factory.CreateURLPrefixCondition(""), url));
-  EXPECT_TRUE(Matches(factory.CreateURLPrefixCondition("www.goog"), url));
-  EXPECT_TRUE(Matches(factory.CreateURLPrefixCondition("www.google.com"), url));
-  EXPECT_TRUE(
-      Matches(factory.CreateURLPrefixCondition(".www.google.com"), url));
-  EXPECT_TRUE(
-      Matches(factory.CreateURLPrefixCondition("www.google.com/"), url));
+  EXPECT_TRUE(Matches(factory.CreateURLPrefixCondition(
+      "https://www.goog"), url));
+  EXPECT_TRUE(Matches(factory.CreateURLPrefixCondition(
+      "https://www.google.com"), url));
+  EXPECT_TRUE(Matches(factory.CreateURLPrefixCondition(
+      "https://www.google.com/webhp?"), url));
+  EXPECT_FALSE(Matches(factory.CreateURLPrefixCondition(
+      "http://www.google.com"), url));
   EXPECT_FALSE(Matches(factory.CreateURLPrefixCondition("webhp"), url));
 
   EXPECT_TRUE(Matches(factory.CreateURLSuffixCondition(""), url));
@@ -295,18 +349,29 @@ TEST(URLMatcherConditionFactoryTest, TestFullSearches) {
 
   EXPECT_TRUE(Matches(factory.CreateURLContainsCondition(""), url));
   EXPECT_TRUE(Matches(factory.CreateURLContainsCondition("www.goog"), url));
-  EXPECT_TRUE(Matches(factory.CreateURLContainsCondition(".www.goog"), url));
   EXPECT_TRUE(Matches(factory.CreateURLContainsCondition("webhp"), url));
   EXPECT_TRUE(Matches(factory.CreateURLContainsCondition("?"), url));
   EXPECT_TRUE(Matches(factory.CreateURLContainsCondition("sourceid"), url));
   EXPECT_TRUE(Matches(factory.CreateURLContainsCondition("ion=1"), url));
+  EXPECT_FALSE(Matches(factory.CreateURLContainsCondition(".www.goog"), url));
   EXPECT_FALSE(Matches(factory.CreateURLContainsCondition("foobar"), url));
   EXPECT_FALSE(Matches(factory.CreateURLContainsCondition("search"), url));
+  EXPECT_FALSE(Matches(factory.CreateURLContainsCondition(":443"), url));
 
   EXPECT_TRUE(Matches(factory.CreateURLEqualsCondition(
-      "www.google.com/webhp?sourceid=chrome-instant&ie=UTF-8&ion=1"), url));
+      "https://www.google.com/webhp?sourceid=chrome-instant&ie=UTF-8&ion=1"),
+      url));
   EXPECT_FALSE(
-      Matches(factory.CreateURLEqualsCondition("www.google.com"), url));
+      Matches(factory.CreateURLEqualsCondition("https://www.google.com"), url));
+
+  // Same as above but this time with a non-standard port.
+  gurl = GURL("https://www.google.com:1234/webhp?sourceid=chrome-instant&"
+      "ie=UTF-8&ion=1#hl=en&output=search&sclient=psy-ab&q=chrome%20is%20"
+      "awesome");
+  url = factory.CanonicalizeURLForFullSearches(gurl);
+  EXPECT_TRUE(Matches(factory.CreateURLPrefixCondition(
+      "https://www.google.com:1234/webhp?"), url));
+  EXPECT_TRUE(Matches(factory.CreateURLContainsCondition(":1234"), url));
 }
 
 

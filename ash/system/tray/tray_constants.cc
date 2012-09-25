@@ -9,10 +9,17 @@
 namespace ash {
 
 const int kPaddingFromRightEdgeOfScreenBottomAlignment = 15;
-const int kPaddingFromBottomOfScreenBottomAlignment = 10;
-const int kPaddingFromEdgeOfScreenVerticalAlignment = 4;
-const int kPaddingFromEdgeOfLauncherVerticalAlignment = 4;
+const int kPaddingFromBottomOfScreenBottomAlignment = 9;
+const int kPaddingFromOuterEdgeOfLauncherVerticalAlignment = 8;
+const int kPaddingFromInnerEdgeOfLauncherVerticalAlignment = 9;
 const int kPaddingFromBottomOfScreenVerticalAlignment = 10;
+
+const int kTrayImageItemHorizontalPaddingBottomAlignment = 1;
+const int kTrayImageItemHorizontalPaddingVerticalAlignment = 1;
+const int kTrayImageItemVerticalPaddingVerticalAlignment = 1;
+
+const int kTrayLabelItemHorizontalPaddingBottomAlignment = 7;
+const int kTrayLabelItemVerticalPaddingVeriticalAlignment = 4;
 
 const int kTrayPopupAutoCloseDelayInSeconds = 2;
 const int kTrayPopupAutoCloseDelayForTextInSeconds = 5;
@@ -23,6 +30,7 @@ const int kTrayPopupTextSpacingVertical = 4;
 const int kTrayPopupItemHeight = 48;
 const int kTrayPopupDetailsIconWidth = 27;
 const int kTrayRoundedBorderRadius = 2;
+const int kTrayBarButtonWidth = 39;
 
 const SkColor kBackgroundColor = SkColorSetRGB(0xfe, 0xfe, 0xfe);
 const SkColor kHoverBackgroundColor = SkColorSetRGB(0xf5, 0xf5, 0xf5);
@@ -30,7 +38,7 @@ const SkColor kHoverBackgroundColor = SkColorSetRGB(0xf5, 0xf5, 0xf5);
 const SkColor kHeaderBackgroundColorLight = SkColorSetRGB(0xf1, 0xf1, 0xf1);
 const SkColor kHeaderBackgroundColorDark = SkColorSetRGB(0xe7, 0xe7, 0xe7);
 
-const SkColor kBorderDarkColor = SkColorSetRGB(0xbb, 0xbb, 0xbb);
+const SkColor kBorderDarkColor = SkColorSetRGB(0xaa, 0xaa, 0xaa);
 const SkColor kBorderLightColor = SkColorSetRGB(0xeb, 0xeb, 0xeb);
 const SkColor kButtonStrokeColor = SkColorSetRGB(0xdd, 0xdd, 0xdd);
 

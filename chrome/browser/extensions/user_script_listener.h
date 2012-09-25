@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_USER_SCRIPT_LISTENER_H_
 #define CHROME_BROWSER_EXTENSIONS_USER_SCRIPT_LISTENER_H_
-#pragma once
 
 #include <deque>
 #include <list>
@@ -27,7 +26,6 @@ class ResourceThrottle;
 
 namespace extensions {
 class Extension;
-}
 
 // This class handles delaying of resource loads that depend on unloaded user
 // scripts. For each request that comes in, we check if it depends on a user
@@ -98,7 +96,7 @@ class UserScriptListener
 
   // Helper to collect the extension's user script URL patterns in a list and
   // return it.
-  void CollectURLPatterns(const extensions::Extension* extension,
+  void CollectURLPatterns(const Extension* extension,
                           URLPatterns* patterns);
 
   // content::NotificationObserver
@@ -110,5 +108,7 @@ class UserScriptListener
 
   DISALLOW_COPY_AND_ASSIGN(UserScriptListener);
 };
+
+}  // namespace extensions
 
 #endif  // CHROME_BROWSER_EXTENSIONS_USER_SCRIPT_LISTENER_H_

@@ -4,12 +4,11 @@
 
 #ifndef ASH_TOUCH_TOUCH_OBSERVER_HUD_H_
 #define ASH_TOUCH_TOUCH_OBSERVER_HUD_H_
-#pragma once
 
 #include "ash/shell.h"
 #include "ui/aura/event_filter.h"
 #include "ui/gfx/point.h"
-#include "ui/views/widget/widget.h"
+#include "ui/views/widget/widget_observer.h"
 
 namespace aura {
 class MouseEvent;
@@ -29,7 +28,7 @@ class TouchHudCanvas;
 
 // An event filter which handles system level gesture events.
 class TouchObserverHUD : public aura::EventFilter,
-                         public views::Widget::Observer {
+                         public views::WidgetObserver {
  public:
   TouchObserverHUD();
   virtual ~TouchObserverHUD();
@@ -48,7 +47,7 @@ class TouchObserverHUD : public aura::EventFilter,
       aura::Window* target,
       aura::GestureEvent* event) OVERRIDE;
 
-  // Overridden from views::Widget::Observer.
+  // Overridden from views::WidgetObserver:
   virtual void OnWidgetClosing(views::Widget* widget) OVERRIDE;
 
   static const int kMaxTouchPoints = 32;

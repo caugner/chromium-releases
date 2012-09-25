@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_PUBLIC_TEST_MOCK_RENDER_THREAD_H_
 #define CONTENT_PUBLIC_TEST_MOCK_RENDER_THREAD_H_
-#pragma once
 
 #include "base/shared_memory.h"
 #include "base/string16.h"
@@ -45,8 +44,7 @@ class MockRenderThread : public RenderThread {
   virtual IPC::SyncMessageFilter* GetSyncMessageFilter() OVERRIDE;
   virtual scoped_refptr<base::MessageLoopProxy> GetIOMessageLoopProxy()
       OVERRIDE;
-  virtual void AddRoute(int32 routing_id,
-                        IPC::Channel::Listener* listener) OVERRIDE;
+  virtual void AddRoute(int32 routing_id, IPC::Listener* listener) OVERRIDE;
   virtual void RemoveRoute(int32 routing_id) OVERRIDE;
   virtual int GenerateRoutingID() OVERRIDE;
   virtual void AddFilter(IPC::ChannelProxy::MessageFilter* filter) OVERRIDE;
@@ -71,6 +69,8 @@ class MockRenderThread : public RenderThread {
   virtual int64 GetIdleNotificationDelayInMs() const OVERRIDE;
   virtual void SetIdleNotificationDelayInMs(
       int64 idle_notification_delay_in_ms) OVERRIDE;
+  virtual void ToggleWebKitSharedTimer(bool suspend) OVERRIDE;
+  virtual void UpdateHistograms(int sequence_number) OVERRIDE;
 #if defined(OS_WIN)
   virtual void PreCacheFont(const LOGFONT& log_font) OVERRIDE;
   virtual void ReleaseCachedFonts() OVERRIDE;
@@ -143,7 +143,7 @@ class MockRenderThread : public RenderThread {
   // We only keep track of one Widget, we learn its pointer when it
   // adds a new route.  We do not keep track of Widgets created with
   // OnMsgCreateWindow.
-  IPC::Channel::Listener* widget_;
+  IPC::Listener* widget_;
 
   // Routing id that will be assigned to a CreateWindow Widget.
   int32 new_window_routing_id_;

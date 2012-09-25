@@ -4,7 +4,6 @@
 
 #ifndef SYNC_TEST_ENGINE_SYNCER_COMMAND_TEST_H_
 #define SYNC_TEST_ENGINE_SYNCER_COMMAND_TEST_H_
-#pragma once
 
 #include <algorithm>
 #include <string>
@@ -30,9 +29,9 @@
 
 using ::testing::NiceMock;
 
-namespace browser_sync {
+namespace syncer {
 
-class MockDebugInfoGetter : public browser_sync::sessions::DebugInfoGetter {
+class MockDebugInfoGetter : public sessions::DebugInfoGetter {
  public:
   MockDebugInfoGetter();
   virtual ~MockDebugInfoGetter();
@@ -101,9 +100,8 @@ class SyncerCommandTestBase : public testing::Test,
 
   // Lazily create a session requesting all datatypes with no payload.
   sessions::SyncSession* session() {
-    syncable::ModelTypePayloadMap types =
-        syncable::ModelTypePayloadMapFromRoutingInfo(routing_info_,
-                                                     std::string());
+    ModelTypePayloadMap types =
+        ModelSafeRoutingInfoToPayloadMap(routing_info_, std::string());
     return session(sessions::SyncSourceInfo(types));
   }
 
@@ -125,11 +123,12 @@ class SyncerCommandTestBase : public testing::Test,
     throttled_data_type_tracker_.reset(new ThrottledDataTypeTracker(NULL));
     context_.reset(new sessions::SyncSessionContext(
             mock_server_.get(), directory(),
-            routing_info_, GetWorkers(), &extensions_activity_monitor_,
+            GetWorkers(), &extensions_activity_monitor_,
             throttled_data_type_tracker_.get(),
             std::vector<SyncEngineEventListener*>(),
             &mock_debug_info_getter_,
-            &traffic_recorder_));
+            &traffic_recorder_,
+            true  /* enable keystore encryption*/ ));
     context_->set_account_name(directory()->name());
     ClearSession();
   }
@@ -211,7 +210,7 @@ class SyncerCommandTest : public SyncerCommandTestBase {
  public:
   virtual void SetUp() OVERRIDE;
   virtual void TearDown() OVERRIDE;
-  virtual Directory* directory() OVERRIDE;
+  virtual syncable::Directory* directory() OVERRIDE;
 
  private:
   TestDirectorySetterUpper dir_maker_;
@@ -221,18 +220,18 @@ class MockDirectorySyncerCommandTest : public SyncerCommandTestBase {
  public:
   MockDirectorySyncerCommandTest();
   virtual ~MockDirectorySyncerCommandTest();
-  virtual Directory* directory() OVERRIDE;
+  virtual syncable::Directory* directory() OVERRIDE;
 
-  MockDirectory* mock_directory() {
-    return static_cast<MockDirectory*>(directory());
+  syncable::MockDirectory* mock_directory() {
+    return static_cast<syncable::MockDirectory*>(directory());
   }
 
   virtual void SetUp() OVERRIDE;
 
   TestUnrecoverableErrorHandler handler_;
-  MockDirectory mock_directory_;
+  syncable::MockDirectory mock_directory_;
 };
 
-}  // namespace browser_sync
+}  // namespace syncer
 
 #endif  // SYNC_TEST_ENGINE_SYNCER_COMMAND_TEST_H_

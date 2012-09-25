@@ -4,7 +4,6 @@
 
 #ifndef ASH_WM_SYSTEM_MODAL_CONTAINER_LAYOUT_MANAGER_H_
 #define ASH_WM_SYSTEM_MODAL_CONTAINER_LAYOUT_MANAGER_H_
-#pragma once
 
 #include <vector>
 
@@ -57,6 +56,9 @@ class ASH_EXPORT SystemModalContainerLayoutManager
 
   // Overridden from SystemModalContainerEventFilterDelegate:
   virtual bool CanWindowReceiveEvents(aura::Window* window) OVERRIDE;
+
+  // Is the |window| modal screen?
+  static bool IsModalScreen(aura::Window* window);
 
  private:
   void AddModalWindow(aura::Window* window);

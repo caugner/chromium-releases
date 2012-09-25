@@ -7,8 +7,9 @@
 #include "base/bind.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
-#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_dialogs.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/tab_modal_confirm_dialog_delegate.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -39,14 +40,14 @@ TabModalConfirmDialogTest::TabModalConfirmDialogTest()
 
 void TabModalConfirmDialogTest::SetUpOnMainThread() {
   delegate_ = new MockTabModalConfirmDialogDelegate(
-      browser()->GetActiveWebContents());
+      chrome::GetActiveWebContents(browser()));
   dialog_ = CreateTestDialog(delegate_,
-                             browser()->GetActiveTabContents());
-  ui_test_utils::RunAllPendingInMessageLoop();
+                             chrome::GetActiveTabContents(browser()));
+  content::RunAllPendingInMessageLoop();
 }
 
 void TabModalConfirmDialogTest::CleanUpOnMainThread() {
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
   ::testing::Mock::VerifyAndClearExpectations(delegate_);
 }
 
@@ -92,5 +93,5 @@ IN_PROC_BROWSER_TEST_F(TabModalConfirmDialogTest, Quit) {
   EXPECT_CALL(*delegate_, OnCanceled());
   MessageLoopForUI::current()->PostTask(FROM_HERE,
                                         base::Bind(&browser::AttemptExit));
-  ui_test_utils::RunMessageLoop();
+  content::RunMessageLoop();
 }

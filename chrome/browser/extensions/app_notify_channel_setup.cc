@@ -25,16 +25,18 @@
 #include "chrome/common/net/gaia/gaia_urls.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/common/url_fetcher.h"
 #include "net/base/escape.h"
 #include "net/base/load_flags.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_status_code.h"
+#include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_status.h"
 
 using base::StringPrintf;
 using content::BrowserThread;
 using net::URLFetcher;
+
+namespace extensions {
 
 namespace {
 
@@ -56,8 +58,8 @@ static const char kOAuth2IssueTokenScope[] =
 static const char kCWSChannelServiceURL[] =
     "https://www.googleapis.com/chromewebstore/v1.1/channels/id";
 
-static AppNotifyChannelSetup::InterceptorForTests* g_interceptor_for_tests =
-    NULL;
+static AppNotifyChannelSetup::InterceptorForTests*
+    g_interceptor_for_tests = NULL;
 
 }  // namespace.
 
@@ -113,7 +115,8 @@ void AppNotifyChannelSetup::Start() {
 }
 
 void AppNotifyChannelSetup::OnGetTokenSuccess(
-    const std::string& access_token) {
+    const std::string& access_token,
+    const base::Time& expiration_time) {
   oauth2_access_token_ = access_token;
   EndGetAccessToken(true);
 }
@@ -147,7 +150,7 @@ URLFetcher* AppNotifyChannelSetup::CreateURLFetcher(
   CHECK(url.is_valid());
   URLFetcher::RequestType type =
       body.empty() ? URLFetcher::GET : URLFetcher::POST;
-  URLFetcher* fetcher = content::URLFetcher::Create(0, url, type, this);
+  URLFetcher* fetcher = net::URLFetcher::Create(0, url, type, this);
   fetcher->SetRequestContext(profile_->GetRequestContext());
   // Always set flags to neither send nor save cookies.
   fetcher->SetLoadFlags(
@@ -406,14 +409,8 @@ bool AppNotifyChannelSetup::ParseCWSChannelServiceResponse(
   if (!value.get() || value->GetType() != base::Value::TYPE_DICTIONARY)
     return false;
 
-  Value* channel_id_value;
   DictionaryValue* dict = static_cast<DictionaryValue*>(value.get());
-  if (!dict->Get("id", &channel_id_value))
-    return false;
-  if (channel_id_value->GetType() != base::Value::TYPE_STRING)
-    return false;
-
-  StringValue* channel_id = static_cast<StringValue*>(channel_id_value);
-  channel_id->GetAsString(result);
-  return true;
+  return dict->GetString("id", result);
 }
+
+}  // namespace extensions

@@ -13,6 +13,7 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/browser_thread.h"
@@ -131,7 +132,7 @@ void MediaPlayer::PopupMediaPlayer() {
                          kPopupHeight);
 
   Profile* profile = ProfileManager::GetDefaultProfileOrOffTheRecord();
-  mediaplayer_browser_ = Browser::CreateWithParams(
+  mediaplayer_browser_ = new Browser(
       Browser::CreateParams::CreateForApp(Browser::TYPE_PANEL,
                                           kMediaPlayerAppName,
                                           bounds,
@@ -140,8 +141,8 @@ void MediaPlayer::PopupMediaPlayer() {
                  chrome::NOTIFICATION_BROWSER_CLOSED,
                  content::Source<Browser>(mediaplayer_browser_));
 
-  mediaplayer_browser_->AddSelectedTabWithURL(GetMediaPlayerUrl(),
-                                              content::PAGE_TRANSITION_LINK);
+  chrome::AddSelectedTabWithURL(mediaplayer_browser_, GetMediaPlayerUrl(),
+                                content::PAGE_TRANSITION_LINK);
   mediaplayer_browser_->window()->Show();
 }
 

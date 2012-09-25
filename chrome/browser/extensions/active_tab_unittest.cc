@@ -9,16 +9,22 @@
 #include "base/message_loop.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/active_tab_permission_manager.h"
-#include "chrome/browser/extensions/extension_tab_helper.h"
+#include "chrome/browser/extensions/tab_helper.h"
+#include "chrome/browser/sessions/session_id.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/tab_contents/test_tab_contents.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/extension_builder.h"
 #include "chrome/common/extensions/features/feature.h"
+#include "chrome/common/extensions/value_builder.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/navigation_details.h"
+#include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/frame_navigate_params.h"
 #include "content/public/common/page_transition_types.h"
 #include "content/public/test/test_browser_thread.h"
 
@@ -31,45 +37,38 @@ namespace extensions {
 namespace {
 
 scoped_refptr<const Extension> CreateTestExtension(
-    const std::string& name,
+    const std::string& id,
     bool has_active_tab_permission) {
-  DictionaryValue manifest;
-  manifest.SetString("name", name);
-  manifest.SetString("version", "1.0.0");
-  manifest.SetInteger("manifest_version", 2);
-
-  if (has_active_tab_permission) {
-    scoped_ptr<ListValue> permissions(new ListValue());
-    permissions->Append(Value::CreateStringValue("activeTab"));
-    manifest.Set("permissions", permissions.release());
-  }
-
-  std::string error;
-  scoped_refptr<const Extension> extension = Extension::Create(
-      FilePath(),
-      Extension::INTERNAL,
-      manifest,
-      0,  // no flags.
-      name,
-      &error);
-  CHECK_EQ("", error);
-  return extension;
+  ListBuilder permissions;
+  if (has_active_tab_permission)
+    permissions.Append("activeTab");
+  return ExtensionBuilder()
+      .SetManifest(DictionaryBuilder()
+          .Set("name", "Extension with ID " + id)
+          .Set("version", "1.0")
+          .Set("manifest_version", 2)
+          .Set("permissions", permissions))
+      .SetID(id)
+      .Build();
 }
 
 class ActiveTabTest : public TabContentsTestHarness {
  public:
   ActiveTabTest()
-      : extension(CreateTestExtension("extension", true)),
-        another_extension(CreateTestExtension("another", true)),
-        extension_without_active_tab(
-            CreateTestExtension("without activeTab", false)),
+      : extension(CreateTestExtension("deadbeef", true)),
+        another_extension(CreateTestExtension("feedbeef", true)),
+        extension_without_active_tab(CreateTestExtension("badbeef", false)),
         ui_thread_(BrowserThread::UI, MessageLoop::current()) {
+  }
+
+  virtual void SetUp() {
+    TabContentsTestHarness::SetUp();
     Feature::SetChannelForTesting(chrome::VersionInfo::CHANNEL_UNKNOWN);
   }
 
  protected:
   int tab_id() {
-    return tab_contents()->extension_tab_helper()->tab_id();
+    return SessionID::IdForTab(tab_contents());
   }
 
   ActiveTabPermissionManager* active_tab_permission_manager() {
@@ -85,8 +84,9 @@ class ActiveTabTest : public TabContentsTestHarness {
   bool IsAllowed(const scoped_refptr<const Extension>& extension,
                  const GURL& url,
                  int tab_id) {
-    return (extension->CanExecuteScriptOnPage(url, tab_id, NULL, NULL) &&
-            extension->CanCaptureVisiblePage(url, tab_id, NULL));
+    return extension->CanExecuteScriptOnPage(url, tab_id, NULL, NULL) &&
+           extension->CanCaptureVisiblePage(url, tab_id, NULL) &&
+           HasTabsPermission(extension, tab_id);
   }
 
   bool IsBlocked(const scoped_refptr<const Extension>& extension,
@@ -97,21 +97,18 @@ class ActiveTabTest : public TabContentsTestHarness {
   bool IsBlocked(const scoped_refptr<const Extension>& extension,
                  const GURL& url,
                  int tab_id) {
-    return (!extension->CanExecuteScriptOnPage(url, tab_id, NULL, NULL) &&
-            !extension->CanCaptureVisiblePage(url, tab_id, NULL));
+    // Note: can't check HasTabsPermission because it isn't URL specific.
+    return !extension->CanExecuteScriptOnPage(url, tab_id, NULL, NULL) &&
+           !extension->CanCaptureVisiblePage(url, tab_id, NULL);
   }
 
-  // Fakes loading a new frame on the page using the WebContentsObserver
-  // interface.
-  // TODO(kalman): if somebody can tell me a way to do this from the
-  // TabContentsTestHarness (or any other test harness) then pray tell.
-  void AddFrame(const GURL& url) {
-    active_tab_permission_manager()->DidCommitProvisionalLoadForFrame(
-        0,      // frame_id
-        false,  // is_main_frame
-        url,
-        content::PAGE_TRANSITION_AUTO_SUBFRAME,
-        NULL);  // render_view_host
+  bool HasTabsPermission(const scoped_refptr<const Extension>& extension) {
+    return HasTabsPermission(extension, tab_id());
+  }
+
+  bool HasTabsPermission(const scoped_refptr<const Extension>& extension,
+                         int tab_id) {
+    return extension->HasAPIPermissionForTab(tab_id, APIPermission::kTab);
   }
 
   // An extension with the activeTab permission.
@@ -127,7 +124,7 @@ class ActiveTabTest : public TabContentsTestHarness {
   content::TestBrowserThread ui_thread_;
 };
 
-TEST_F(ActiveTabTest, DISABLED_GrantToSinglePage) {
+TEST_F(ActiveTabTest, GrantToSinglePage) {
   GURL google("http://www.google.com");
   NavigateAndCommit(google);
 
@@ -135,6 +132,10 @@ TEST_F(ActiveTabTest, DISABLED_GrantToSinglePage) {
   EXPECT_TRUE(IsBlocked(extension, google));
   EXPECT_TRUE(IsBlocked(another_extension, google));
   EXPECT_TRUE(IsBlocked(extension_without_active_tab, google));
+
+  EXPECT_FALSE(HasTabsPermission(extension));
+  EXPECT_FALSE(HasTabsPermission(another_extension));
+  EXPECT_FALSE(HasTabsPermission(extension_without_active_tab));
 
   active_tab_permission_manager()->GrantIfRequested(extension);
   active_tab_permission_manager()->GrantIfRequested(
@@ -149,8 +150,8 @@ TEST_F(ActiveTabTest, DISABLED_GrantToSinglePage) {
   // Other subdomains shouldn't be given access.
   GURL mail_google("http://mail.google.com");
   EXPECT_TRUE(IsBlocked(extension, mail_google));
-  EXPECT_TRUE(IsBlocked(another_extension, google));
-  EXPECT_TRUE(IsBlocked(extension_without_active_tab, google));
+  EXPECT_TRUE(IsBlocked(another_extension, mail_google));
+  EXPECT_TRUE(IsBlocked(extension_without_active_tab, mail_google));
 
   // Reloading the page should clear the active permissions.
   Reload();
@@ -158,6 +159,10 @@ TEST_F(ActiveTabTest, DISABLED_GrantToSinglePage) {
   EXPECT_TRUE(IsBlocked(extension, google));
   EXPECT_TRUE(IsBlocked(another_extension, google));
   EXPECT_TRUE(IsBlocked(extension_without_active_tab, google));
+
+  EXPECT_FALSE(HasTabsPermission(extension));
+  EXPECT_FALSE(HasTabsPermission(another_extension));
+  EXPECT_FALSE(HasTabsPermission(extension_without_active_tab));
 
   // But they should still be able to be granted again.
   active_tab_permission_manager()->GrantIfRequested(extension);
@@ -193,6 +198,10 @@ TEST_F(ActiveTabTest, DISABLED_GrantToSinglePage) {
   EXPECT_TRUE(IsBlocked(another_extension, chromium));
   EXPECT_TRUE(IsBlocked(extension_without_active_tab, chromium));
 
+  EXPECT_FALSE(HasTabsPermission(extension));
+  EXPECT_FALSE(HasTabsPermission(another_extension));
+  EXPECT_FALSE(HasTabsPermission(extension_without_active_tab));
+
   // Should be able to grant to multiple extensions at the same time (if they
   // have the activeTab permission, of course).
   active_tab_permission_manager()->GrantIfRequested(extension);
@@ -225,172 +234,15 @@ TEST_F(ActiveTabTest, DISABLED_GrantToSinglePage) {
   EXPECT_TRUE(IsBlocked(extension_without_active_tab, chromium));
 };
 
-TEST_F(ActiveTabTest, DISABLED_GrantToMultiplePages) {
-  GURL google("http://www.google.com");
-  NavigateAndCommit(google);
-
-  active_tab_permission_manager()->GrantIfRequested(extension);
-
-  // Adding a frame after access was granted shouldn't give it access.
-  GURL chromium("http://www.chromium.org");
-  AddFrame(chromium);
-
-  EXPECT_TRUE(IsAllowed(extension, google));
-  EXPECT_TRUE(IsBlocked(extension, chromium));
-
-  // Granting access to another extension should give it access to both the
-  // main and sub-frames, but still not to the first extension.
-  active_tab_permission_manager()->GrantIfRequested(another_extension);
-
-  EXPECT_TRUE(IsAllowed(extension, google));
-  EXPECT_TRUE(IsBlocked(extension, chromium));
-  EXPECT_TRUE(IsAllowed(another_extension, google));
-  EXPECT_TRUE(IsAllowed(another_extension, chromium));
-
-  // Granting access to the first extension should now give it access to the
-  // frame.
-  active_tab_permission_manager()->GrantIfRequested(extension);
-
-  EXPECT_TRUE(IsAllowed(extension, google));
-  EXPECT_TRUE(IsAllowed(extension, chromium));
-  EXPECT_TRUE(IsAllowed(another_extension, google));
-  EXPECT_TRUE(IsAllowed(another_extension, chromium));
-
-  // Reloading should clear all access.
-  Reload();
-
-  EXPECT_TRUE(IsBlocked(extension, google));
-  EXPECT_TRUE(IsBlocked(extension, chromium));
-  EXPECT_TRUE(IsBlocked(another_extension, google));
-  EXPECT_TRUE(IsBlocked(another_extension, chromium));
-
-  // And after granting, no access to the frames that were there.
-  active_tab_permission_manager()->GrantIfRequested(extension);
-
-  EXPECT_TRUE(IsAllowed(extension, google));
-  EXPECT_TRUE(IsBlocked(extension, chromium));
-  EXPECT_TRUE(IsBlocked(another_extension, google));
-  EXPECT_TRUE(IsBlocked(another_extension, chromium));
-
-  // Having lots of frames on the same page should behave as expected.
-  GURL chromium_index("http://www.chromium.org/index.html");
-  GURL chromium_about("http://www.chromium.org/about.html");
-  GURL chromium_blank("http://www.chromium.org/blank.html");
-  GURL gmail("http://www.gmail.com");
-  GURL mail_google("http://mail.google.com");
-  GURL plus_google("http://plus.google.com");
-  GURL codereview_appspot("http://codereview.appspot.com");
-  GURL omahaproxy_appspot("http://omahaproxy.appspot.com");
-
-  AddFrame(chromium_index);
-  AddFrame(chromium_about);
-  AddFrame(gmail);
-  AddFrame(mail_google);
-
-  EXPECT_TRUE(IsBlocked(extension, chromium_index));
-  EXPECT_TRUE(IsBlocked(extension, chromium_about));
-  EXPECT_TRUE(IsBlocked(extension, chromium_blank));
-  EXPECT_TRUE(IsBlocked(extension, gmail));
-  EXPECT_TRUE(IsBlocked(extension, mail_google));
-  EXPECT_TRUE(IsBlocked(extension, plus_google));
-  EXPECT_TRUE(IsBlocked(extension, codereview_appspot));
-  EXPECT_TRUE(IsBlocked(extension, omahaproxy_appspot));
-
-  EXPECT_TRUE(IsBlocked(another_extension, chromium_index));
-  EXPECT_TRUE(IsBlocked(another_extension, chromium_about));
-  EXPECT_TRUE(IsBlocked(another_extension, chromium_blank));
-  EXPECT_TRUE(IsBlocked(another_extension, gmail));
-  EXPECT_TRUE(IsBlocked(another_extension, mail_google));
-  EXPECT_TRUE(IsBlocked(another_extension, plus_google));
-  EXPECT_TRUE(IsBlocked(another_extension, codereview_appspot));
-  EXPECT_TRUE(IsBlocked(another_extension, omahaproxy_appspot));
-
-  active_tab_permission_manager()->GrantIfRequested(extension);
-
-  AddFrame(chromium_blank);
-  AddFrame(plus_google);
-  AddFrame(codereview_appspot);
-
-  EXPECT_TRUE(IsAllowed(extension, chromium_index));
-  EXPECT_TRUE(IsAllowed(extension, chromium_about));
-  // Even though chromium_blank hasn't been given granted, this will work
-  // because it's on the same origin as the other codereview URLs.
-  // because k$b
-  EXPECT_TRUE(IsAllowed(extension, chromium_blank));
-  EXPECT_TRUE(IsAllowed(extension, gmail));
-  EXPECT_TRUE(IsAllowed(extension, mail_google));
-  EXPECT_TRUE(IsBlocked(extension, plus_google));
-  EXPECT_TRUE(IsBlocked(extension, codereview_appspot));
-  EXPECT_TRUE(IsBlocked(extension, omahaproxy_appspot));
-
-  EXPECT_TRUE(IsBlocked(another_extension, chromium_index));
-  EXPECT_TRUE(IsBlocked(another_extension, chromium_about));
-  EXPECT_TRUE(IsBlocked(another_extension, chromium_blank));
-  EXPECT_TRUE(IsBlocked(another_extension, gmail));
-  EXPECT_TRUE(IsBlocked(another_extension, mail_google));
-  EXPECT_TRUE(IsBlocked(another_extension, plus_google));
-  EXPECT_TRUE(IsBlocked(another_extension, codereview_appspot));
-  EXPECT_TRUE(IsBlocked(another_extension, omahaproxy_appspot));
-
-  active_tab_permission_manager()->GrantIfRequested(another_extension);
-
-  AddFrame(omahaproxy_appspot);
-
-  EXPECT_TRUE(IsAllowed(extension, chromium_index));
-  EXPECT_TRUE(IsAllowed(extension, chromium_about));
-  EXPECT_TRUE(IsAllowed(extension, chromium_blank));
-  EXPECT_TRUE(IsAllowed(extension, gmail));
-  EXPECT_TRUE(IsAllowed(extension, mail_google));
-  EXPECT_TRUE(IsBlocked(extension, plus_google));
-  EXPECT_TRUE(IsBlocked(extension, codereview_appspot));
-  EXPECT_TRUE(IsBlocked(extension, omahaproxy_appspot));
-
-  EXPECT_TRUE(IsAllowed(another_extension, chromium_index));
-  EXPECT_TRUE(IsAllowed(another_extension, chromium_about));
-  EXPECT_TRUE(IsAllowed(another_extension, chromium_blank));
-  EXPECT_TRUE(IsAllowed(another_extension, gmail));
-  EXPECT_TRUE(IsAllowed(another_extension, mail_google));
-  EXPECT_TRUE(IsAllowed(another_extension, plus_google));
-  EXPECT_TRUE(IsAllowed(another_extension, codereview_appspot));
-  EXPECT_TRUE(IsBlocked(another_extension, omahaproxy_appspot));
-
-  active_tab_permission_manager()->GrantIfRequested(extension);
-
-  EXPECT_TRUE(IsAllowed(extension, chromium_index));
-  EXPECT_TRUE(IsAllowed(extension, chromium_about));
-  EXPECT_TRUE(IsAllowed(extension, chromium_blank));
-  EXPECT_TRUE(IsAllowed(extension, gmail));
-  EXPECT_TRUE(IsAllowed(extension, mail_google));
-  EXPECT_TRUE(IsAllowed(extension, plus_google));
-  EXPECT_TRUE(IsAllowed(extension, codereview_appspot));
-  EXPECT_TRUE(IsAllowed(extension, omahaproxy_appspot));
-
-  EXPECT_TRUE(IsAllowed(another_extension, chromium_index));
-  EXPECT_TRUE(IsAllowed(another_extension, chromium_about));
-  EXPECT_TRUE(IsAllowed(another_extension, chromium_blank));
-  EXPECT_TRUE(IsAllowed(another_extension, gmail));
-  EXPECT_TRUE(IsAllowed(another_extension, mail_google));
-  EXPECT_TRUE(IsAllowed(another_extension, plus_google));
-  EXPECT_TRUE(IsAllowed(another_extension, codereview_appspot));
-  EXPECT_TRUE(IsBlocked(another_extension, omahaproxy_appspot));
-}
-
-TEST_F(ActiveTabTest, DISABLED_Uninstalling) {
+TEST_F(ActiveTabTest, Uninstalling) {
   // Some semi-arbitrary setup.
   GURL google("http://www.google.com");
   NavigateAndCommit(google);
 
-  GURL chromium("http://www.chromium.org");
-  AddFrame(chromium);
-
   active_tab_permission_manager()->GrantIfRequested(extension);
 
-  GURL gmail("http://www.gmail.com");
-  AddFrame(gmail);
-
+  EXPECT_TRUE(active_tab_permission_manager()->IsGranted(extension));
   EXPECT_TRUE(IsAllowed(extension, google));
-  EXPECT_TRUE(IsAllowed(extension, chromium));
-  EXPECT_TRUE(IsBlocked(extension, gmail));
 
   // Uninstalling the extension should clear its tab permissions.
   UnloadedExtensionInfo details(
@@ -401,19 +253,19 @@ TEST_F(ActiveTabTest, DISABLED_Uninstalling) {
       content::Source<Profile>(tab_contents()->profile()),
       content::Details<UnloadedExtensionInfo>(&details));
 
-  EXPECT_TRUE(IsBlocked(extension, google));
-  EXPECT_TRUE(IsBlocked(extension, chromium));
-  EXPECT_TRUE(IsBlocked(extension, gmail));
+  EXPECT_FALSE(active_tab_permission_manager()->IsGranted(extension));
+  // Note: can't EXPECT_FALSE(IsAllowed) here because uninstalled extensions
+  // are just that... considered to be uninstalled, and the manager might
+  // just ignore them from here on.
 
   // Granting the extension again should give them back.
   active_tab_permission_manager()->GrantIfRequested(extension);
 
+  EXPECT_TRUE(active_tab_permission_manager()->IsGranted(extension));
   EXPECT_TRUE(IsAllowed(extension, google));
-  EXPECT_TRUE(IsAllowed(extension, chromium));
-  EXPECT_TRUE(IsAllowed(extension, gmail));
 }
 
-TEST_F(ActiveTabTest, DISABLED_OnlyActiveTab) {
+TEST_F(ActiveTabTest, OnlyActiveTab) {
   GURL google("http://www.google.com");
   NavigateAndCommit(google);
 
@@ -421,6 +273,50 @@ TEST_F(ActiveTabTest, DISABLED_OnlyActiveTab) {
 
   EXPECT_TRUE(IsAllowed(extension, google, tab_id()));
   EXPECT_TRUE(IsBlocked(extension, google, tab_id() + 1));
+  EXPECT_FALSE(HasTabsPermission(extension, tab_id() + 1));
+}
+
+TEST_F(ActiveTabTest, NavigateInPage) {
+  GURL google("http://www.google.com");
+  NavigateAndCommit(google);
+
+  active_tab_permission_manager()->GrantIfRequested(extension);
+
+  // Perform an in-page navigation. The extension should not lose the temporary
+  // permission.
+  GURL google_h1("http://www.google.com#h1");
+  NavigateAndCommit(google_h1);
+
+  EXPECT_TRUE(IsAllowed(extension, google, tab_id()));
+  EXPECT_TRUE(IsAllowed(extension, google_h1, tab_id()));
+
+  GURL chromium("http://www.chromium.org");
+  NavigateAndCommit(chromium);
+
+  EXPECT_FALSE(IsAllowed(extension, google, tab_id()));
+  EXPECT_FALSE(IsAllowed(extension, google_h1, tab_id()));
+  EXPECT_FALSE(IsAllowed(extension, chromium, tab_id()));
+
+  active_tab_permission_manager()->GrantIfRequested(extension);
+
+  EXPECT_FALSE(IsAllowed(extension, google, tab_id()));
+  EXPECT_FALSE(IsAllowed(extension, google_h1, tab_id()));
+  EXPECT_TRUE(IsAllowed(extension, chromium, tab_id()));
+
+  GURL chromium_h1("http://www.chromium.org#h1");
+  NavigateAndCommit(chromium_h1);
+
+  EXPECT_FALSE(IsAllowed(extension, google, tab_id()));
+  EXPECT_FALSE(IsAllowed(extension, google_h1, tab_id()));
+  EXPECT_TRUE(IsAllowed(extension, chromium, tab_id()));
+  EXPECT_TRUE(IsAllowed(extension, chromium_h1, tab_id()));
+
+  Reload();
+
+  EXPECT_FALSE(IsAllowed(extension, google, tab_id()));
+  EXPECT_FALSE(IsAllowed(extension, google_h1, tab_id()));
+  EXPECT_FALSE(IsAllowed(extension, chromium, tab_id()));
+  EXPECT_FALSE(IsAllowed(extension, chromium_h1, tab_id()));
 }
 
 }  // namespace

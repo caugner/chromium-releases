@@ -7,30 +7,79 @@
 #include "base/bind.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/logging.h"
+#include "base/path_service.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/extensions/shell_window_registry.h"
 #include "chrome/browser/platform_util.h"
+#include "chrome/browser/ui/chrome_select_file_policy.h"
 #include "chrome/browser/ui/extensions/shell_window.h"
-#include "chrome/browser/ui/select_file_dialog.h"
 #include "chrome/common/extensions/api/file_system.h"
+#include "chrome/common/extensions/permissions/api_permission.h"
 #include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
+#include "webkit/fileapi/file_system_types.h"
 #include "webkit/fileapi/file_system_util.h"
 #include "webkit/fileapi/isolated_context.h"
+
+using fileapi::IsolatedContext;
 
 const char kInvalidParameters[] = "Invalid parameters";
 const char kSecurityError[] = "Security error";
 const char kInvalidCallingPage[] = "Invalid calling page";
 const char kUserCancelled[] = "User cancelled";
 const char kWritableFileError[] = "Invalid file for writing";
+const char kRequiresFileSystemWriteError[] =
+    "Operation requires fileSystemWrite permission";
+const char kUnknownChooseFileType[] = "Unknown type";
 
+const char kOpenFileOption[] = "openFile";
+const char kOpenWritableFileOption[] ="openWritableFile";
 const char kSaveFileOption[] = "saveFile";
 
 namespace file_system = extensions::api::file_system;
 namespace ChooseFile = file_system::ChooseFile;
 
 namespace {
+
+struct RewritePair {
+  int path_key;
+  const char* output;
+};
+
+const RewritePair g_rewrite_pairs[] = {
+#if defined(OS_WIN)
+  {base::DIR_PROFILE, "~"},
+#elif defined(OS_POSIX)
+  {base::DIR_HOME, "~"},
+#endif
+};
+
+FilePath PrettifyPath(const FilePath& file_path) {
+#if defined(OS_WIN) || defined(OS_POSIX)
+  for (size_t i = 0; i < arraysize(g_rewrite_pairs); ++i) {
+    FilePath candidate_path;
+    if (!PathService::Get(g_rewrite_pairs[i].path_key, &candidate_path))
+      continue;  // We don't DCHECK this value, as Get will return false even
+                 // if the path_key gives a blank string as a result.
+
+    FilePath output = FilePath::FromUTF8Unsafe(g_rewrite_pairs[i].output);
+    if (candidate_path.AppendRelativePath(file_path, &output)) {
+      // The output path must not be absolute, as it might collide with the
+      // real filesystem.
+      DCHECK(!output.IsAbsolute());
+      return output;
+    }
+  }
+#endif
+
+  return file_path;
+}
+
+bool g_skip_picker_for_test = false;
+FilePath* g_path_to_be_picked_for_test;
 
 bool GetFilePathOfFileEntry(const std::string& filesystem_name,
                             const std::string& filesystem_path,
@@ -53,10 +102,10 @@ bool GetFilePathOfFileEntry(const std::string& filesystem_name,
     return false;
   }
 
-  fileapi::IsolatedContext* context = fileapi::IsolatedContext::GetInstance();
+  IsolatedContext* context = IsolatedContext::GetInstance();
   FilePath relative_path = FilePath::FromUTF8Unsafe(filesystem_path);
-  FilePath virtual_path = context->CreateVirtualPath(filesystem_id,
-                                                     relative_path);
+  FilePath virtual_path = context->CreateVirtualRootPath(filesystem_id)
+      .Append(relative_path);
   if (!context->CrackIsolatedPath(virtual_path,
                                   &filesystem_id,
                                   NULL,
@@ -95,28 +144,135 @@ bool FileSystemGetDisplayPathFunction::RunImpl() {
 
   FilePath file_path;
   if (!GetFilePathOfFileEntry(filesystem_name, filesystem_path,
-                              render_view_host_, &file_path, &error_)) {
+                              render_view_host_, &file_path, &error_))
+    return false;
+
+  file_path = PrettifyPath(file_path);
+  SetResult(base::Value::CreateStringValue(file_path.value()));
+  return true;
+}
+
+bool FileSystemEntryFunction::HasFileSystemWritePermission() {
+  const extensions::Extension* extension = GetExtension();
+  if (!extension)
+    return false;
+
+  return extension->HasAPIPermission(APIPermission::kFileSystemWrite);
+}
+
+void FileSystemEntryFunction::CheckWritableFile(const FilePath& path) {
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::FILE));
+  if (DoCheckWritableFile(path)) {
+    content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
+        base::Bind(&FileSystemEntryFunction::RegisterFileSystemAndSendResponse,
+            this, path, WRITABLE));
+    return;
+  }
+
+  content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
+      base::Bind(&FileSystemEntryFunction::HandleWritableFileError, this));
+}
+
+void FileSystemEntryFunction::RegisterFileSystemAndSendResponse(
+    const FilePath& path, EntryType entry_type) {
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+
+  fileapi::IsolatedContext* isolated_context =
+      fileapi::IsolatedContext::GetInstance();
+  DCHECK(isolated_context);
+
+  std::string registered_name;
+  std::string filesystem_id = isolated_context->RegisterFileSystemForPath(
+      fileapi::kFileSystemTypeIsolated, path, &registered_name);
+
+  content::ChildProcessSecurityPolicy* policy =
+      content::ChildProcessSecurityPolicy::GetInstance();
+  int renderer_id = render_view_host_->GetProcess()->GetID();
+  if (entry_type == WRITABLE)
+    policy->GrantReadWriteFileSystem(renderer_id, filesystem_id);
+  else
+    policy->GrantReadFileSystem(renderer_id, filesystem_id);
+
+  // We only need file level access for reading FileEntries. Saving FileEntries
+  // just needs the file system to have read/write access, which is granted
+  // above if required.
+  if (!policy->CanReadFile(renderer_id, path))
+    policy->GrantReadFile(renderer_id, path);
+
+  DictionaryValue* dict = new DictionaryValue();
+  SetResult(dict);
+  dict->SetString("fileSystemId", filesystem_id);
+  dict->SetString("baseName", registered_name);
+  SendResponse(true);
+}
+
+void FileSystemEntryFunction::HandleWritableFileError() {
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  error_ = kWritableFileError;
+  SendResponse(false);
+}
+
+bool FileSystemGetWritableFileEntryFunction::RunImpl() {
+  std::string filesystem_name;
+  std::string filesystem_path;
+  EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &filesystem_name));
+  EXTENSION_FUNCTION_VALIDATE(args_->GetString(1, &filesystem_path));
+
+  if (!HasFileSystemWritePermission()) {
+    error_ = kRequiresFileSystemWriteError;
     return false;
   }
 
-  result_.reset(base::Value::CreateStringValue(file_path.value()));
+  FilePath path;
+  if (!GetFilePathOfFileEntry(filesystem_name, filesystem_path,
+                              render_view_host_, &path, &error_))
+    return false;
+
+  content::BrowserThread::PostTask(content::BrowserThread::FILE, FROM_HERE,
+      base::Bind(&FileSystemGetWritableFileEntryFunction::CheckWritableFile,
+          this, path));
+  return true;
+}
+
+bool FileSystemIsWritableFileEntryFunction::RunImpl() {
+  std::string filesystem_name;
+  std::string filesystem_path;
+  EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &filesystem_name));
+  EXTENSION_FUNCTION_VALIDATE(args_->GetString(1, &filesystem_path));
+
+  std::string filesystem_id;
+  if (!fileapi::CrackIsolatedFileSystemName(filesystem_name, &filesystem_id)) {
+    error_ = kInvalidParameters;
+    return false;
+  }
+
+  content::ChildProcessSecurityPolicy* policy =
+      content::ChildProcessSecurityPolicy::GetInstance();
+  int renderer_id = render_view_host_->GetProcess()->GetID();
+  bool is_writable = policy->CanReadWriteFileSystem(renderer_id,
+                                                    filesystem_id);
+
+  SetResult(base::Value::CreateBooleanValue(is_writable));
   return true;
 }
 
 // Handles showing a dialog to the user to ask for the filename for a file to
-// save.
-class FileSystemPickerFunction::FilePicker : public SelectFileDialog::Listener {
+// save or open.
+class FileSystemChooseFileFunction::FilePicker
+    : public ui::SelectFileDialog::Listener {
  public:
-  FilePicker(FileSystemPickerFunction* function,
+  FilePicker(FileSystemChooseFileFunction* function,
              content::WebContents* web_contents,
-             const FilePath& suggested_path,
-             bool for_save)
-      : suggested_path_(suggested_path),
-        for_save_(for_save),
+             const FilePath& suggested_name,
+             ui::SelectFileDialog::Type picker_type,
+             EntryType entry_type)
+      : suggested_name_(suggested_name),
+        entry_type_(entry_type),
         function_(function) {
-    select_file_dialog_ = SelectFileDialog::Create(this);
-    SelectFileDialog::FileTypeInfo file_type_info;
-    FilePath::StringType extension = suggested_path.Extension();
+    select_file_dialog_ = ui::SelectFileDialog::Create(
+        this, new ChromeSelectFilePolicy(web_contents));
+    ui::SelectFileDialog::FileTypeInfo file_type_info;
+    FilePath::StringType extension = suggested_name.Extension();
     if (!extension.empty()) {
       extension.erase(extension.begin());  // drop the .
       file_type_info.extensions.resize(1);
@@ -126,13 +282,28 @@ class FileSystemPickerFunction::FilePicker : public SelectFileDialog::Listener {
     gfx::NativeWindow owning_window = web_contents ?
         platform_util::GetTopLevel(web_contents->GetNativeView()) : NULL;
 
-    select_file_dialog_->SelectFile(for_save ?
-                                        SelectFileDialog::SELECT_SAVEAS_FILE :
-                                        SelectFileDialog::SELECT_OPEN_FILE,
+    if (g_skip_picker_for_test) {
+      if (g_path_to_be_picked_for_test) {
+        content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
+            base::Bind(
+                &FileSystemChooseFileFunction::FilePicker::FileSelected,
+                base::Unretained(this), *g_path_to_be_picked_for_test, 1,
+                static_cast<void*>(NULL)));
+      } else {
+        content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
+            base::Bind(
+                &FileSystemChooseFileFunction::FilePicker::
+                    FileSelectionCanceled,
+                base::Unretained(this), static_cast<void*>(NULL)));
+      }
+      return;
+    }
+
+    select_file_dialog_->SelectFile(picker_type,
                                     string16(),
-                                    suggested_path,
+                                    suggested_name,
                                     &file_type_info, 0, FILE_PATH_LITERAL(""),
-                                    web_contents, owning_window, NULL);
+                                    owning_window, NULL);
   }
 
   virtual ~FilePicker() {}
@@ -142,7 +313,7 @@ class FileSystemPickerFunction::FilePicker : public SelectFileDialog::Listener {
   virtual void FileSelected(const FilePath& path,
                             int index,
                             void* params) OVERRIDE {
-    function_->FileSelected(path, for_save_);
+    function_->FileSelected(path, entry_type_);
     delete this;
   }
 
@@ -151,21 +322,20 @@ class FileSystemPickerFunction::FilePicker : public SelectFileDialog::Listener {
     delete this;
   }
 
-  FilePath suggested_path_;
+  FilePath suggested_name_;
 
-  // for_save_ is false when using the picker to open a file, and true
-  // when saving. It affects the style of the dialog and also what happens
-  // after a file is selected by the user.
-  bool for_save_;
+  EntryType entry_type_;
 
-  scoped_refptr<SelectFileDialog> select_file_dialog_;
-  scoped_refptr<FileSystemPickerFunction> function_;
+  scoped_refptr<ui::SelectFileDialog> select_file_dialog_;
+  scoped_refptr<FileSystemChooseFileFunction> function_;
 
   DISALLOW_COPY_AND_ASSIGN(FilePicker);
 };
 
-bool FileSystemPickerFunction::ShowPicker(const FilePath& suggested_path,
-                                          bool for_save) {
+bool FileSystemChooseFileFunction::ShowPicker(
+    const FilePath& suggested_name,
+    ui::SelectFileDialog::Type picker_type,
+    EntryType entry_type) {
   ShellWindowRegistry* registry = ShellWindowRegistry::Get(profile());
   DCHECK(registry);
   ShellWindow* shell_window = registry->GetShellWindowForRenderViewHost(
@@ -179,106 +349,90 @@ bool FileSystemPickerFunction::ShowPicker(const FilePath& suggested_path,
   // its destruction (and subsequent sending of the function response) until the
   // user has selected a file or cancelled the picker. At that point, the picker
   // will delete itself, which will also free the function instance.
-  new FilePicker(this, shell_window->web_contents(), suggested_path, for_save);
+  new FilePicker(this, shell_window->web_contents(), suggested_name,
+      picker_type, entry_type);
   return true;
 }
 
-void FileSystemPickerFunction::FileSelected(const FilePath& path,
-                                            bool for_save) {
-  if (for_save) {
+// static
+void FileSystemChooseFileFunction::SkipPickerAndAlwaysSelectPathForTest(
+    FilePath* path) {
+  g_skip_picker_for_test = true;
+  g_path_to_be_picked_for_test = path;
+}
+
+// static
+void FileSystemChooseFileFunction::SkipPickerAndAlwaysCancelForTest() {
+  g_skip_picker_for_test = true;
+  g_path_to_be_picked_for_test = NULL;
+}
+
+// static
+void FileSystemChooseFileFunction::StopSkippingPickerForTest() {
+  g_skip_picker_for_test = false;
+}
+
+void FileSystemChooseFileFunction::FileSelected(const FilePath& path,
+                                                EntryType entry_type) {
+  if (entry_type == WRITABLE) {
     content::BrowserThread::PostTask(content::BrowserThread::FILE, FROM_HERE,
-        base::Bind(&FileSystemPickerFunction::CheckWritableFile, this, path));
+        base::Bind(&FileSystemChooseFileFunction::CheckWritableFile,
+            this, path));
     return;
   }
 
   // Don't need to check the file, it's for reading.
-  RegisterFileSystemAndSendResponse(path, false);
+  RegisterFileSystemAndSendResponse(path, READ_ONLY);
 }
 
-void FileSystemPickerFunction::FileSelectionCanceled() {
+void FileSystemChooseFileFunction::FileSelectionCanceled() {
   error_ = kUserCancelled;
   SendResponse(false);
-}
-
-void FileSystemPickerFunction::CheckWritableFile(const FilePath& path) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::FILE));
-  if (DoCheckWritableFile(path)) {
-    content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
-        base::Bind(&FileSystemPickerFunction::RegisterFileSystemAndSendResponse,
-            this, path, true));
-    return;
-  }
-
-  content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
-      base::Bind(&FileSystemPickerFunction::HandleWritableFileError, this));
-}
-
-void FileSystemPickerFunction::RegisterFileSystemAndSendResponse(
-    const FilePath& path, bool for_save) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-  std::set<FilePath> filesets;
-  filesets.insert(path);
-
-  fileapi::IsolatedContext* isolated_context =
-      fileapi::IsolatedContext::GetInstance();
-  DCHECK(isolated_context);
-  std::string filesystem_id = isolated_context->RegisterIsolatedFileSystem(
-      filesets);
-
-  content::ChildProcessSecurityPolicy* policy =
-      content::ChildProcessSecurityPolicy::GetInstance();
-  int renderer_id = render_view_host_->GetProcess()->GetID();
-  if (for_save)
-    policy->GrantReadWriteFileSystem(renderer_id, filesystem_id);
-  else
-    policy->GrantReadFileSystem(renderer_id, filesystem_id);
-
-  // We only need file level access for reading FileEntries. Saving FileEntries
-  // just needs the file system to have read/write access, which is granted
-  // above if required.
-  if (!policy->CanReadFile(renderer_id, path))
-    policy->GrantReadFile(renderer_id, path);
-
-  DictionaryValue* dict = new DictionaryValue();
-  result_.reset(dict);
-  dict->SetString("fileSystemId", filesystem_id);
-  dict->SetString("baseName", path.BaseName().AsUTF8Unsafe());
-  SendResponse(true);
-}
-
-void FileSystemPickerFunction::HandleWritableFileError() {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-  error_ = kWritableFileError;
-  SendResponse(false);
-}
-
-bool FileSystemGetWritableFileEntryFunction::RunImpl() {
-  std::string filesystem_name;
-  std::string filesystem_path;
-  EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &filesystem_name));
-  EXTENSION_FUNCTION_VALIDATE(args_->GetString(1, &filesystem_path));
-
-  FilePath suggested_path;
-  if (!GetFilePathOfFileEntry(filesystem_name, filesystem_path,
-                              render_view_host_, &suggested_path, &error_)) {
-    return false;
-  }
-
-  return ShowPicker(suggested_path, true);
 }
 
 bool FileSystemChooseFileFunction::RunImpl() {
   scoped_ptr<ChooseFile::Params> params(ChooseFile::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
-  bool for_save = false;
+  FilePath suggested_name;
+  EntryType entry_type = READ_ONLY;
+  ui::SelectFileDialog::Type picker_type =
+      ui::SelectFileDialog::SELECT_OPEN_FILE;
+
   file_system::ChooseFileOptions* options = params->options.get();
   if (options) {
-    if (options->type.get() &&  *options->type == kSaveFileOption)
-      for_save = true;
+    if (options->type.get()) {
+      if (*options->type == kOpenWritableFileOption) {
+        entry_type = WRITABLE;
+      } else if (*options->type == kSaveFileOption) {
+        entry_type = WRITABLE;
+        picker_type = ui::SelectFileDialog::SELECT_SAVEAS_FILE;
+      } else if (*options->type != kOpenFileOption) {
+        error_ = kUnknownChooseFileType;
+        return false;
+      }
+    }
+
+    if (options->suggested_name.get()) {
+      suggested_name = FilePath::FromUTF8Unsafe(
+          *options->suggested_name.get());
+
+      // Don't allow any path components; shorten to the base name. This should
+      // result in a relative path, but in some cases may not. Clear the
+      // suggestion for safety if this is the case.
+      suggested_name = suggested_name.BaseName();
+      if (suggested_name.IsAbsolute()) {
+        suggested_name = FilePath();
+      }
+    }
   }
 
-  return ShowPicker(FilePath(), for_save);
+  if (entry_type == WRITABLE && !HasFileSystemWritePermission()) {
+    error_ = kRequiresFileSystemWriteError;
+    return false;
+  }
+
+  return ShowPicker(suggested_name, picker_type, entry_type);
 }
 
 }  // namespace extensions

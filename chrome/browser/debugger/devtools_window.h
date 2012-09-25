@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_DEBUGGER_DEVTOOLS_WINDOW_H_
 #define CHROME_BROWSER_DEBUGGER_DEVTOOLS_WINDOW_H_
-#pragma once
 
 #include <string>
 #include <vector>
@@ -36,6 +35,7 @@ class Value;
 namespace content {
 class DevToolsAgentHost;
 class DevToolsClientHost;
+struct FileChooserParams;
 class RenderViewHost;
 class WebContents;
 }
@@ -121,6 +121,9 @@ class DevToolsWindow : private content::NotificationObserver,
       const content::NativeWebKeyboardEvent& event) OVERRIDE;
   virtual content::JavaScriptDialogCreator*
       GetJavaScriptDialogCreator() OVERRIDE;
+  virtual void RunFileChooser(
+      content::WebContents* web_contents,
+      const content::FileChooserParams& params) OVERRIDE;
 
   virtual void FrameNavigating(const std::string& url) OVERRIDE {}
 
@@ -149,6 +152,8 @@ class DevToolsWindow : private content::NotificationObserver,
   virtual void AppendedTo(const std::string& url)  OVERRIDE;
 
   void RequestSetDocked(bool docked);
+
+  void UpdateBrowserToolbar();
 
   Profile* profile_;
   TabContents* inspected_tab_;

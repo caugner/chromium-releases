@@ -194,24 +194,32 @@ if sys.platform == 'win32':
     return os.path.isabs(path) or len(path) == 2 and path[1] == ':'
 
 
-  def get_native_path_case(path):
+  def get_native_path_case(p):
     """Returns the native path case for an existing file.
 
     On Windows, removes any leading '\\?\'.
     """
-    if not isabs(path):
+    if not isabs(p):
       raise ValueError(
-          'Can\'t get native path case for a non-absolute path: %s' % path,
-          path)
+          'Can\'t get native path case for a non-absolute path: %s' % p,
+          p)
     # Windows used to have an option to turn on case sensitivity on non Win32
     # subsystem but that's out of scope here and isn't supported anymore.
     # Go figure why GetShortPathName() is needed.
-    path = GetLongPathName(GetShortPathName(path))
-    if path.startswith('\\\\?\\'):
-      path = path[4:]
+    try:
+      out = GetLongPathName(GetShortPathName(p))
+    except OSError, e:
+      if e.args[0] in (2, 3, 5):
+        # The path does not exist. Try to recurse and reconstruct the path.
+        base = os.path.dirname(p)
+        rest = os.path.basename(p)
+        return os.path.join(get_native_path_case(base), rest)
+      raise
+    if out.startswith('\\\\?\\'):
+      out = out[4:]
     # Always upper case the first letter since GetLongPathName() will return the
     # drive letter in the case it was given.
-    return path[0].upper() + path[1:]
+    return out[0].upper() + out[1:]
 
 
   def CommandLineToArgvW(command_line):
@@ -232,8 +240,57 @@ elif sys.platform == 'darwin':
   isabs = os.path.isabs
 
 
+  def _find_item_native_case(root_path, item):
+    """Gets the native path case of a single item based at root_path.
+
+    There is no API to get the native path case of symlinks on OSX. So it
+    needs to be done the slow way.
+    """
+    item = item.lower()
+    for element in os.listdir(root_path):
+      if element.lower() == item:
+        return element
+
+
+  def _native_case(p):
+    """Gets the native path case. Warning: this function resolves symlinks."""
+    logging.debug('native_case(%s)' % p)
+    try:
+      rel_ref, _ = Carbon.File.FSPathMakeRef(p)
+      out = rel_ref.FSRefMakePath()
+      if p.endswith(os.path.sep) and not out.endswith(os.path.sep):
+        return out + os.path.sep
+      return out
+    except MacOS.Error, e:
+      if e.args[0] in (-43, -120):
+        # The path does not exist. Try to recurse and reconstruct the path.
+        # -43 means file not found.
+        # -120 means directory not found.
+        base = os.path.dirname(p)
+        rest = os.path.basename(p)
+        return os.path.join(_native_case(base), rest)
+      raise OSError(
+          e.args[0], 'Failed to get native path for %s' % p, p, e.args[1])
+
+
+  def _split_at_symlink_native(base_path, rest):
+    """Returns the native path for a symlink."""
+    base, symlink, rest = split_at_symlink(base_path, rest)
+    if symlink:
+      if not base_path:
+        base_path = base
+      else:
+        base_path = safe_join(base_path, base)
+      symlink = _find_item_native_case(base_path, symlink)
+    return base, symlink, rest
+
+
   def get_native_path_case(path):
-    """Returns the native path case for an existing file."""
+    """Returns the native path case for an existing file.
+
+    Technically, it's only HFS+ on OSX that is case preserving and
+    insensitive. It's the default setting on HFS+ but can be changed.
+    """
     if not isabs(path):
       raise ValueError(
           'Can\'t get native path case for a non-absolute path: %s' % path,
@@ -241,14 +298,30 @@ elif sys.platform == 'darwin':
     if path.startswith('/dev'):
       # /dev is not visible from Carbon, causing an exception.
       return path
-    # Technically, it's only HFS+ on OSX that is case insensitive. It's the
-    # default setting on HFS+ but can be changed.
-    try:
-      rel_ref, _ = Carbon.File.FSPathMakeRef(path)
-      return rel_ref.FSRefMakePath()
-    except MacOS.Error, e:
-      raise OSError(
-          e.args[0], 'Failed to get native path for %s' % path, path, e.args[1])
+
+    # Starts assuming there is no symlink along the path.
+    resolved = _native_case(path)
+    if resolved.lower() == path.lower():
+      # This code path is incredibly faster.
+      return resolved
+
+    # There was a symlink, process it.
+    base, symlink, rest = _split_at_symlink_native(None, path)
+    assert symlink, (path, base, symlink, rest, resolved)
+    prev = base
+    base = safe_join(_native_case(base), symlink)
+    assert len(base) > len(prev)
+    while rest:
+      prev = base
+      relbase, symlink, rest = _split_at_symlink_native(base, rest)
+      base = safe_join(base, relbase)
+      assert len(base) > len(prev), (prev, base, symlink)
+      if symlink:
+        base = safe_join(base, symlink)
+      assert len(base) > len(prev), (prev, base, symlink)
+    # Make sure no symlink was resolved.
+    assert base.lower() == path.lower(), (base, path)
+    return base
 
 
 else:  # OSes other than Windows and OSX.
@@ -271,7 +344,79 @@ else:  # OSes other than Windows and OSX.
           'Can\'t get native path case for a non-absolute path: %s' % path,
           path)
     # Give up on cygwin, as GetLongPathName() can't be called.
-    return path
+    # Linux traces tends to not be normalized so use this occasion to normalize
+    # it. This function implementation already normalizes the path on the other
+    # OS so this needs to be done here to be coherent between OSes.
+    out = os.path.normpath(path)
+    if path.endswith(os.path.sep) and not out.endswith(os.path.sep):
+      return out + os.path.sep
+    return out
+
+
+if sys.platform != 'win32':  # All non-Windows OSes.
+
+
+  def safe_join(*args):
+    """Joins path elements like os.path.join() but doesn't abort on absolute
+    path.
+
+    os.path.join('foo', '/bar') == '/bar'
+    but safe_join('foo', '/bar') == 'foo/bar'.
+    """
+    out = ''
+    for element in args:
+      if element.startswith(os.path.sep):
+        if out.endswith(os.path.sep):
+          out += element[1:]
+        else:
+          out += element
+      else:
+        if out.endswith(os.path.sep):
+          out += element
+        else:
+          out += os.path.sep + element
+    return out
+
+
+  def split_at_symlink(base_dir, relfile):
+    """Scans each component of relfile and cut the string at the symlink if
+    there is any.
+
+    Returns a tuple (base_path, symlink, rest), with symlink == rest == None if
+    not symlink was found.
+    """
+    if base_dir:
+      assert relfile
+      assert os.path.isabs(base_dir)
+      index = 0
+    else:
+      assert os.path.isabs(relfile)
+      index = 1
+
+    def at_root(rest):
+      if base_dir:
+        return safe_join(base_dir, rest)
+      return rest
+
+    while True:
+      try:
+        index = relfile.index(os.path.sep, index)
+      except ValueError:
+        index = len(relfile)
+      full = at_root(relfile[:index])
+      if os.path.islink(full):
+        # A symlink!
+        base = os.path.dirname(relfile[:index])
+        symlink = os.path.basename(relfile[:index])
+        rest = relfile[index:]
+        logging.debug(
+            'split_at_symlink(%s, %s) -> (%s, %s, %s)' %
+            (base_dir, relfile, base, symlink, rest))
+        return base, symlink, rest
+      if index == len(relfile):
+        break
+      index += 1
+    return relfile, None, None
 
 
 def fix_python_path(cmd):
@@ -284,7 +429,7 @@ def fix_python_path(cmd):
   return out
 
 
-def process_quoted_arguments(text):
+def strace_process_quoted_arguments(text):
   """Extracts quoted arguments on a string and return the arguments as a list.
 
   Implemented as an automaton. Supports incomplete strings in the form
@@ -298,26 +443,29 @@ def process_quoted_arguments(text):
   # All the possible states of the DFA.
   ( NEED_QUOTE,         # Begining of a new arguments.
     INSIDE_STRING,      # Inside an argument.
+    ESCAPED,            # Found a '\' inside a quote. Treat the next char as-is.
     NEED_COMMA_OR_DOT,  # Right after the closing quote of an argument. Could be
                         # a serie of 3 dots or a comma.
     NEED_SPACE,         # Right after a comma
     NEED_DOT_2,         # Found a dot, need a second one.
     NEED_DOT_3,         # Found second dot, need a third one.
     NEED_COMMA,         # Found third dot, need a comma.
-    ) = range(7)
+    ) = range(8)
 
   state = NEED_QUOTE
-  current_argument = ''
   out = []
   for index, char in enumerate(text):
     if char == '"':
       if state == NEED_QUOTE:
         state = INSIDE_STRING
+        # A new argument was found.
+        out.append('')
       elif state == INSIDE_STRING:
         # The argument is now closed.
-        out.append(current_argument)
-        current_argument = ''
         state = NEED_COMMA_OR_DOT
+      elif state == ESCAPED:
+        out[-1] += char
+        state = INSIDE_STRING
       else:
         raise ValueError(
             'Can\'t process char at column %d for: %r' % (index, text),
@@ -326,6 +474,11 @@ def process_quoted_arguments(text):
     elif char == ',':
       if state in (NEED_COMMA_OR_DOT, NEED_COMMA):
         state = NEED_SPACE
+      elif state == INSIDE_STRING:
+        out[-1] += char
+      elif state == ESCAPED:
+        out[-1] += char
+        state = INSIDE_STRING
       else:
         raise ValueError(
             'Can\'t process char at column %d for: %r' % (index, text),
@@ -334,8 +487,16 @@ def process_quoted_arguments(text):
     elif char == ' ':
       if state == NEED_SPACE:
         state = NEED_QUOTE
-      if state == INSIDE_STRING:
-        current_argument += char
+      elif state == INSIDE_STRING:
+        out[-1] += char
+      elif state == ESCAPED:
+        out[-1] += char
+        state = INSIDE_STRING
+      else:
+        raise ValueError(
+            'Can\'t process char at column %d for: %r' % (index, text),
+            index,
+            text)
     elif char == '.':
       if state == NEED_COMMA_OR_DOT:
         # The string is incomplete, this mean the strace -s flag should be
@@ -346,7 +507,21 @@ def process_quoted_arguments(text):
       elif state == NEED_DOT_3:
         state = NEED_COMMA
       elif state == INSIDE_STRING:
-        current_argument += char
+        out[-1] += char
+      elif state == ESCAPED:
+        out[-1] += char
+        state = INSIDE_STRING
+      else:
+        raise ValueError(
+            'Can\'t process char at column %d for: %r' % (index, text),
+            index,
+            text)
+    elif char == '\\':
+      if state == ESCAPED:
+        out[-1] += char
+        state = INSIDE_STRING
+      elif state == INSIDE_STRING:
+        state = ESCAPED
       else:
         raise ValueError(
             'Can\'t process char at column %d for: %r' % (index, text),
@@ -354,7 +529,7 @@ def process_quoted_arguments(text):
             text)
     else:
       if state == INSIDE_STRING:
-        current_argument += char
+        out[-1] += char
       else:
         raise ValueError(
             'Can\'t process char at column %d for: %r' % (index, text),
@@ -393,34 +568,45 @@ def write_json(filepath_or_handle, data, dense):
 class Results(object):
   """Results of a trace session."""
 
-  class File(object):
-    """A file that was accessed.
-
-    If tainted is true, it means it is not a real path anymore as a variable
-    replacement occured.
-    """
-    def __init__(self, root, path, tainted=False):
-      """Represents a file accessed. May not be present anymore."""
-      logging.debug('%s(%s, %s)' % (self.__class__.__name__, root, path))
+  class _TouchedObject(object):
+    """Something, a file or a directory, that was accessed."""
+    def __init__(self, root, path, tainted, size, nb_files):
+      logging.debug(
+          '%s(%s, %s, %s, %s, %s)' %
+          (self.__class__.__name__, root, path, tainted, size, nb_files))
       self.root = root
       self.path = path
-
       self.tainted = tainted
-      self._size = None
-      # For compatibility with Directory object interface.
-      # Shouldn't be used normally, only exists to simplify algorithms.
-      self.nb_files = 1
+      self.nb_files = nb_files
+      # Can be used as a cache or a default value, depending on context.
+      self._size = size
+      # These are cache only.
+      self._real_path = None
 
       # Check internal consistency.
       assert path, path
       assert tainted or bool(root) != bool(isabs(path)), (root, path)
       assert tainted or (
           not os.path.exists(self.full_path) or
-          self.full_path == get_native_path_case(self.full_path))
+          (self.full_path == get_native_path_case(self.full_path))), (
+              tainted, self.full_path, get_native_path_case(self.full_path))
 
     @property
     def existent(self):
       return self.size != -1
+
+    @property
+    def full_path(self):
+      if self.root:
+        return os.path.join(self.root, self.path)
+      return self.path
+
+    @property
+    def real_path(self):
+      """Returns the path with symlinks resolved."""
+      if not self._real_path:
+        self._real_path = os.path.realpath(self.full_path)
+      return self._real_path
 
     @property
     def size(self):
@@ -432,25 +618,15 @@ class Results(object):
           self._size = -1
       return self._size
 
-    @property
-    def full_path(self):
-      if self.root:
-        return os.path.join(self.root, self.path)
-      return self.path
-
     def flatten(self):
+      """Returns a dict representing this object.
+
+      A 'size' of 0 means the file was only touched and not read.
+      """
       return {
         'path': self.path,
         'size': self.size,
       }
-
-    def strip_root(self, root):
-      """Returns a clone of itself with 'root' stripped off."""
-      # Check internal consistency.
-      assert self.tainted or (isabs(root) and root.endswith(os.path.sep)), root
-      if not self.full_path.startswith(root):
-        return None
-      return self._clone(root, self.full_path[len(root):], self.tainted)
 
     def replace_variables(self, variables):
       """Replaces the root of this File with one of the variables if it matches.
@@ -464,21 +640,57 @@ class Results(object):
       # No need to clone, returns ourself.
       return self
 
+    def strip_root(self, root):
+      """Returns a clone of itself with 'root' stripped off."""
+      # Check internal consistency.
+      assert self.tainted or (isabs(root) and root.endswith(os.path.sep)), root
+      if not self.full_path.startswith(root):
+        # Now try to resolve the symlinks to see if it can be reached this way.
+        # Only try *after* trying without resolving symlink.
+        if not self.real_path.startswith(root):
+          return None
+        path = self.real_path
+      else:
+        path = self.full_path
+      return self._clone(root, path[len(root):], self.tainted)
+
+    def _clone(self, new_root, new_path, tainted):
+      raise NotImplementedError(self.__class__.__name__)
+
+  class File(_TouchedObject):
+    """A file that was accessed. May not be present anymore.
+
+    If tainted is true, it means it is not a real path anymore as a variable
+    replacement occured.
+
+    If touched_only is True, this means the file was probed for existence, and
+    it is existent, but was never _opened_. If touched_only is True, the file
+    must have existed.
+    """
+    def __init__(self, root, path, tainted, size):
+      super(Results.File, self).__init__(root, path, tainted, size, 1)
+
     def _clone(self, new_root, new_path, tainted):
       """Clones itself keeping meta-data."""
-      out = self.__class__(new_root, new_path, tainted)
-      out._size = self.size
+      # Keep the self.size and self._real_path caches for performance reason. It
+      # is also important when the file becomes tainted (with a variable instead
+      # of the real path) since self.path is not an on-disk path anymore so
+      # out._size cannot be updated.
+      out = self.__class__(new_root, new_path, tainted, self.size)
+      out._real_path = self._real_path
       return out
 
-  class Directory(File):
+  class Directory(_TouchedObject):
     """A directory of files. Must exist."""
     def __init__(self, root, path, tainted, size, nb_files):
       """path='.' is a valid value and must be handled appropriately."""
-      super(Results.Directory, self).__init__(root, path, tainted)
-      assert not self.path.endswith(os.path.sep), self.path
-      self.path = self.path + os.path.sep
-      self.nb_files = nb_files
-      self._size = size
+      assert not path.endswith(os.path.sep), path
+      super(Results.Directory, self).__init__(
+          root, path + os.path.sep, tainted, size, nb_files)
+      # In that case, it's not a cache, it's an actual value that is never
+      # modified and represents the total size of the files contained in this
+      # directory.
+      assert size
 
     def flatten(self):
       out = super(Results.Directory, self).flatten()
@@ -487,32 +699,32 @@ class Results(object):
 
     def _clone(self, new_root, new_path, tainted):
       """Clones itself keeping meta-data."""
-      return self.__class__(
+      out = self.__class__(
           new_root,
           new_path.rstrip(os.path.sep),
           tainted,
           self.size,
           self.nb_files)
+      out._real_path = self._real_path
+      return out
 
   class Process(object):
     """A process that was traced.
 
     Contains references to the files accessed by this process and its children.
     """
-    def __init__(
-        self, pid, files, executable, command, initial_cwd, children):
+    def __init__(self, pid, files, executable, command, initial_cwd, children):
       logging.debug('Process(%s, %d, ...)' % (pid, len(files)))
       self.pid = pid
-      self.files = sorted(
-          (Results.File(None, f) for f in files), key=lambda x: x.path)
+      self.files = sorted(files, key=lambda x: x.path)
       self.children = children
       self.executable = executable
       self.command = command
       self.initial_cwd = initial_cwd
 
       # Check internal consistency.
-      assert len(set(f.path for f in self.files)) == len(self.files), [
-          f.path for f in self.files]
+      assert len(set(f.path for f in self.files)) == len(self.files), sorted(
+          f.path for f in self.files)
       assert isinstance(self.children, list)
       assert isinstance(self.files, list)
 
@@ -535,19 +747,17 @@ class Results(object):
 
     def strip_root(self, root):
       assert isabs(root) and root.endswith(os.path.sep), root
+      # Loads the files after since they are constructed as objects.
       out = self.__class__(
           self.pid,
-          [],
+          filter(None, (f.strip_root(root) for f in self.files)),
           self.executable,
           self.command,
           self.initial_cwd,
           [c.strip_root(root) for c in self.children])
-      # Override the files property.
-      out.files = filter(None, (f.strip_root(root) for f in self.files))
       logging.debug(
           'strip_root(%s) %d -> %d' % (root, len(self.files), len(out.files)))
       return out
-
 
   def __init__(self, process):
     self.process = process
@@ -590,70 +800,112 @@ class ApiBase(object):
   """OS-agnostic API to trace a process and its children."""
   class Context(object):
     """Processes one log line at a time and keeps the list of traced processes.
+
+    The parsing is complicated by the fact that logs are traced out of order for
+    strace but in-order for dtrace and logman. In addition, on Windows it is
+    very frequent that processids are reused so a flat list cannot be used. But
+    at the same time, it is impossible to faithfully construct a graph when the
+    logs are processed out of order. So both a tree and a flat mapping are used,
+    the tree is the real process tree, while the flat mapping stores the last
+    valid process for the corresponding processid. For the strace case, the
+    tree's head is guessed at the last moment.
     """
     class Process(object):
       """Keeps context for one traced child process.
 
       Logs all the files this process touched. Ignores directories.
       """
-      def __init__(self, root, pid, initial_cwd, parentid):
-        """root is a reference to the Context."""
+      def __init__(self, blacklist, pid, initial_cwd):
         # Check internal consistency.
-        assert isinstance(root, ApiBase.Context)
         assert isinstance(pid, int), repr(pid)
-        self.root = weakref.ref(root)
         self.pid = pid
-        # Children are pids.
+        # children are Process instances.
         self.children = []
-        self.parentid = parentid
         self.initial_cwd = initial_cwd
         self.cwd = None
         self.files = set()
+        self.only_touched = set()
         self.executable = None
         self.command = None
-
-        if parentid:
-          self.root().processes[parentid].children.append(pid)
+        self._blacklist = blacklist
 
       def to_results_process(self):
         """Resolves file case sensitivity and or late-bound strings."""
-        children = [
-          self.root().processes[c].to_results_process() for c in self.children
-        ]
         # When resolving files, it's normal to get dupe because a file could be
         # opened multiple times with different case. Resolve the deduplication
         # here.
-        def render_to_string_and_fix_case(x):
-          """Returns the native file path case if the file exists.
+        def fix_path(x):
+          """Returns the native file path case.
 
           Converts late-bound strings.
           """
           if not x:
+            # Do not convert None instance to 'None'.
             return x
           # TODO(maruel): Do not upconvert to unicode here, on linux we don't
           # know the file path encoding so they must be treated as bytes.
           x = unicode(x)
-          if not os.path.exists(x):
-            return x
-          return get_native_path_case(x)
+          if os.path.isabs(x):
+            # If the path is not absolute, which tends to happen occasionally on
+            # Windows, it is not possible to get the native path case so ignore
+            # that trace. It mostly happens for 'executable' value.
+            x = get_native_path_case(x)
+          return x
 
+        def fix_and_blacklist_path(x):
+          x = fix_path(x)
+          if not x:
+            return
+          # The blacklist needs to be reapplied, since path casing could
+          # influence blacklisting.
+          if self._blacklist(x):
+            return
+          return x
+
+        # Filters out directories. Some may have passed through.
+        files = set(f for f in map(fix_and_blacklist_path, self.files) if f)
+        only_touched = set(
+            f for f in map(fix_and_blacklist_path, self.only_touched) if f)
+        only_touched -= files
+
+        files = [
+          Results.File(None, f, False, None) for f in files
+          if not os.path.isdir(f)
+        ]
+        # Using 0 as size means the file's content is ignored since the file was
+        # never opened for I/O.
+        files.extend(
+          Results.File(None, f, False, 0) for f in only_touched
+          if not os.path.isdir(f)
+        )
         return Results.Process(
             self.pid,
-            set(map(render_to_string_and_fix_case, self.files)),
-            render_to_string_and_fix_case(self.executable),
+            files,
+            fix_path(self.executable),
             self.command,
-            render_to_string_and_fix_case(self.initial_cwd),
-            children)
+            fix_path(self.initial_cwd),
+            [c.to_results_process() for c in self.children])
 
-      def add_file(self, filepath):
-        if self.root().blacklist(unicode(filepath)):
+      def add_file(self, filepath, touch_only):
+        """Adds a file if it passes the blacklist."""
+        if self._blacklist(unicode(filepath)):
           return
-        logging.debug('add_file(%d, %s)' % (self.pid, filepath))
-        self.files.add(filepath)
+        logging.debug('add_file(%d, %s, %s)' % (self.pid, filepath, touch_only))
+        # Note that filepath and not unicode(filepath) is added. It is because
+        # filepath could be something else than a string, like a RelativePath
+        # instance for dtrace logs.
+        if touch_only:
+          self.only_touched.add(filepath)
+        else:
+          self.files.add(filepath)
 
     def __init__(self, blacklist):
       self.blacklist = blacklist
-      self.processes = {}
+      # Initial process.
+      self.root_process = None
+      # dict to accelerate process lookup, to not have to lookup the whole graph
+      # each time.
+      self._process_lookup = {}
 
   class Tracer(object):
     """During it's lifetime, the tracing subsystem is enabled."""
@@ -786,12 +1038,38 @@ class Strace(ApiBase):
       # Happens when strace fails to even get the function name.
       UNNAMED_FUNCTION = '????'
 
-      # Arguments parsing.
-      RE_CHDIR = re.compile(r'^\"(.+?)\"$')
-      RE_EXECVE = re.compile(r'^\"(.+?)\", \[(.+)\], \[\/\* \d+ vars? \*\/\]$')
-      RE_OPEN2 = re.compile(r'^\"(.*?)\", ([A-Z\_\|]+)$')
-      RE_OPEN3 = re.compile(r'^\"(.*?)\", ([A-Z\_\|]+), (\d+)$')
-      RE_RENAME = re.compile(r'^\"(.+?)\", \"(.+?)\"$')
+      # Corner-case in python, a class member function decorator must not be
+      # @staticmethod.
+      def parse_args(regexp, expect_zero):  # pylint: disable=E0213
+        """Automatically convert the str 'args' into a list of processed
+        arguments.
+
+        Arguments:
+        - regexp is used to parse args.
+        - expect_zero: one of True, False or None.
+          - True: will check for result.startswith('0') first and will ignore
+            the trace line completely otherwise. This is important because for
+            many functions, the regexp will not process if the call failed.
+          - False: will check for not result.startswith(('?', '-1')) for the
+            same reason than with True.
+          - None: ignore result.
+        """
+        def meta_hook(function):
+          assert function.__name__.startswith('handle_')
+          def hook(self, args, result):
+            if expect_zero is True and not result.startswith('0'):
+              return
+            if expect_zero is False and result.startswith(('?', '-1')):
+              return
+            match = re.match(regexp, args)
+            if not match:
+              raise TracingFailure(
+                  'Failed to parse %s(%s) = %s' %
+                  (function.__name__[len('handle_'):], args, result),
+                  None, None, None)
+            return function(self, match.groups(), result)
+          return hook
+        return meta_hook
 
       class RelativePath(object):
         """A late-bound relative path."""
@@ -821,14 +1099,24 @@ class Strace(ApiBase):
           return str(self.render())
 
       def __init__(self, root, pid):
+        """Keeps enough information to be able to guess the original process
+        root.
+
+        strace doesn't store which process was the initial process. So more
+        information needs to be kept so the graph can be reconstructed from the
+        flat map.
+        """
         logging.info('%s(%d)' % (self.__class__.__name__, pid))
-        super(Strace.Context.Process, self).__init__(root, pid, None, None)
+        super(Strace.Context.Process, self).__init__(root.blacklist, pid, None)
+        assert isinstance(root, ApiBase.Context)
+        self._root = weakref.ref(root)
         # The dict key is the function name of the pending call, like 'open'
         # or 'execve'.
         self._pending_calls = {}
         self._line_number = 0
         # Current directory when the process started.
-        self.initial_cwd = self.RelativePath(self.root(), None)
+        self.initial_cwd = self.RelativePath(self._root(), None)
+        self.parentid = None
 
       def get_cwd(self):
         """Returns the best known value of cwd."""
@@ -894,12 +1182,11 @@ class Strace(ApiBase):
                 None, None, None)
           if match.group(1) == self.UNNAMED_FUNCTION:
             return
+
+          # It's a valid line, handle it.
           handler = getattr(self, 'handle_%s' % match.group(1), None)
           if not handler:
-            raise TracingFailure(
-                'Found a unhandled trace: %s' % match.group(1),
-                None, None, None)
-
+            self._handle_unknown(match.group(1), match.group(2), match.group(3))
           return handler(match.group(2), match.group(3))
         except TracingFailure, e:
           # Hack in the values since the handler could be a static function.
@@ -917,82 +1204,120 @@ class Strace(ApiBase):
               line,
               e)
 
-      def handle_chdir(self, args, result):
+      @parse_args(r'^\"(.+?)\", [FKORWX_|]+$', True)
+      def handle_access(self, args, _result):
+        self._handle_file(args[0], True)
+
+      @parse_args(r'^\"(.+?)\"$', True)
+      def handle_chdir(self, args, _result):
         """Updates cwd."""
-        if not result.startswith('0'):
-          return
-        cwd = self.RE_CHDIR.match(args).group(1)
-        self.cwd = self.RelativePath(self, cwd)
+        self.cwd = self.RelativePath(self, args[0])
         logging.debug('handle_chdir(%d, %s)' % (self.pid, self.cwd))
 
       def handle_clone(self, _args, result):
         """Transfers cwd."""
-        if result == '? ERESTARTNOINTR (To be restarted)':
+        if result.startswith(('?', '-1')):
+          # The call failed.
           return
         # Update the other process right away.
         childpid = int(result)
-        child = self.root().get_or_set_proc(childpid)
+        child = self._root().get_or_set_proc(childpid)
         if child.parentid is not None or childpid in self.children:
           raise TracingFailure(
-              'Found internal inconsitency in process lifetime detection',
+              'Found internal inconsitency in process lifetime detection '
+              'during a clone() call',
               None, None, None)
 
         # Copy the cwd object.
         child.initial_cwd = self.get_cwd()
         child.parentid = self.pid
         # It is necessary because the logs are processed out of order.
-        self.children.append(childpid)
+        self.children.append(child)
 
       def handle_close(self, _args, _result):
         pass
 
-      def handle_execve(self, args, result):
-        if result != '0':
-          return
-        match = self.RE_EXECVE.match(args)
-        if not match:
-          raise TracingFailure(
-              'Failed to process execve(%s)' % args,
-              None, None, None)
-        filepath = match.group(1)
-        self._handle_file(filepath)
+      def handle_creat(self, _args, _result):
+        # Ignore files created, since they didn't need to exist.
+        pass
+
+      @parse_args(r'^\"(.+?)\", \[(.+)\], \[\/\* \d+ vars? \*\/\]$', True)
+      def handle_execve(self, args, _result):
+        # Even if in practice execve() doesn't returns when it succeeds, strace
+        # still prints '0' as the result.
+        filepath = args[0]
+        self._handle_file(filepath, False)
         self.executable = self.RelativePath(self.get_cwd(), filepath)
-        self.command = process_quoted_arguments(match.group(2))
+        self.command = strace_process_quoted_arguments(args[1])
 
       def handle_exit_group(self, _args, _result):
         """Removes cwd."""
         self.cwd = None
 
-      @staticmethod
-      def handle_fork(_args, _result):
-        raise NotImplementedError('Unexpected/unimplemented trace fork()')
+      def handle_fork(self, args, result):
+        self._handle_unknown('fork', args, result)
 
-      def handle_open(self, args, result):
-        if result.startswith('-1'):
-          return
-        args = (self.RE_OPEN3.match(args) or self.RE_OPEN2.match(args)).groups()
+      def handle_getcwd(self, _args, _result):
+        pass
+
+      @parse_args(r'^\"(.+?)\", \"(.+?)\"$', True)
+      def handle_link(self, args, _result):
+        self._handle_file(args[0], False)
+        self._handle_file(args[1], False)
+
+      @parse_args(r'\"(.+?)\", \{.+?, \.\.\.\}', True)
+      def handle_lstat(self, args, _result):
+        self._handle_file(args[0], True)
+
+      def handle_mkdir(self, _args, _result):
+        pass
+
+      @parse_args(r'^\"(.*?)\", ([A-Z\_\|]+)(|, \d+)$', False)
+      def handle_open(self, args, _result):
         if 'O_DIRECTORY' in args[1]:
           return
-        self._handle_file(args[0])
+        self._handle_file(args[0], False)
 
-      def handle_rename(self, args, result):
-        if result.startswith('-1'):
-          return
-        args = self.RE_RENAME.match(args).groups()
-        self._handle_file(args[0])
-        self._handle_file(args[1])
+      @parse_args(r'^\"(.+?)\", \".+?\"(\.\.\.)?, \d+$', False)
+      def handle_readlink(self, args, _result):
+        self._handle_file(args[0], False)
+
+      @parse_args(r'^\"(.+?)\", \"(.+?)\"$', True)
+      def handle_rename(self, args, _result):
+        self._handle_file(args[0], False)
+        self._handle_file(args[1], False)
+
+      def handle_rmdir(self, _args, _result):
+        pass
+
+      @parse_args(r'\"(.+?)\", \{.+?, \.\.\.\}', True)
+      def handle_stat(self, args, _result):
+        self._handle_file(args[0], True)
+
+      def handle_symlink(self, _args, _result):
+        pass
+
+      def handle_unlink(self, _args, _result):
+        # In theory, the file had to be created anyway.
+        pass
+
+      def handle_statfs(self, _args, _result):
+        pass
+
+      def handle_vfork(self, args, result):
+        self._handle_unknown('vfork', args, result)
 
       @staticmethod
-      def handle_stat64(_args, _result):
-        raise NotImplementedError('Unexpected/unimplemented trace stat64()')
+      def _handle_unknown(function, args, result):
+        raise TracingFailure(
+            'Unexpected/unimplemented trace %s(%s)= %s' %
+            (function, args, result),
+            None, None, None)
 
-      @staticmethod
-      def handle_vfork(_args, _result):
-        raise NotImplementedError('Unexpected/unimplemented trace vfork()')
-
-      def _handle_file(self, filepath):
+      def _handle_file(self, filepath, touch_only):
         filepath = self.RelativePath(self.get_cwd(), filepath)
-        self.add_file(filepath)
+        #assert not touch_only, unicode(filepath)
+        self.add_file(filepath, touch_only)
 
     def __init__(self, blacklist, initial_cwd):
       super(Strace.Context, self).__init__(blacklist)
@@ -1012,22 +1337,25 @@ class Strace(ApiBase):
     def to_results(self):
       """Finds back the root process and verify consistency."""
       # TODO(maruel): Absolutely unecessary, fix me.
-      root = [p for p in self.processes.itervalues() if not p.parentid]
+      root = [p for p in self._process_lookup.itervalues() if not p.parentid]
       if len(root) != 1:
         raise TracingFailure(
-            'Found internal inconsitency in process lifetime detection',
+            'Found internal inconsitency in process lifetime detection '
+            'while finding the root process',
             None,
             None,
             None,
-            root)
-      process = root[0].to_results_process()
-      if sorted(self.processes) != sorted(p.pid for p in process.all):
+            sorted(p.pid for p in root))
+      self.root_process = root[0]
+      process = self.root_process.to_results_process()
+      if sorted(self._process_lookup) != sorted(p.pid for p in process.all):
         raise TracingFailure(
-            'Found internal inconsitency in process lifetime detection',
+            'Found internal inconsitency in process lifetime detection '
+            'while looking for len(tree) == len(list)',
             None,
             None,
             None,
-            sorted(self.processes),
+            sorted(self._process_lookup),
             sorted(p.pid for p in process.all))
       return Results(process)
 
@@ -1041,9 +1369,9 @@ class Strace(ApiBase):
             None,
             None,
             pid)
-      if pid not in self.processes:
-        self.processes[pid] = self.Process(self, pid)
-      return self.processes[pid]
+      if pid not in self._process_lookup:
+        self._process_lookup[pid] = self.Process(self, pid)
+      return self._process_lookup[pid]
 
     @classmethod
     def traces(cls):
@@ -1054,9 +1382,14 @@ class Strace(ApiBase):
       return [i[len(prefix):] for i in dir(cls.Process) if i.startswith(prefix)]
 
   class Tracer(ApiBase.Tracer):
+    MAX_LEN = 256
+
     def trace(self, cmd, cwd, tracename, output):
       """Runs strace on an executable."""
       logging.info('trace(%s, %s, %s, %s)' % (cmd, cwd, tracename, output))
+      assert os.path.isabs(cmd[0]), cmd[0]
+      assert os.path.isabs(cwd), cwd
+      assert os.path.normpath(cwd) == cwd, cwd
       with self._lock:
         if not self._initialized:
           raise TracingFailure(
@@ -1067,11 +1400,12 @@ class Strace(ApiBase):
       if output:
         stdout = subprocess.PIPE
         stderr = subprocess.STDOUT
-      traces = ','.join(Strace.Context.traces())
+      # Ensure all file related APIs are hooked.
+      traces = ','.join(Strace.Context.traces() + ['file'])
       trace_cmd = [
         'strace',
         '-ff',
-        '-s', '256',
+        '-s', '%d' % self.MAX_LEN,
         '-e', 'trace=%s' % traces,
         '-o', self._logname + '.' + tracename,
       ]
@@ -1146,7 +1480,7 @@ class Dtrace(ApiBase):
   https://discussions.apple.com/thread/1980539. So resort to handling execve()
   manually.
 
-  errno is not printed in the log since this implementation currently care only
+  errno is not printed in the log since this implementation currently only cares
   about files that were successfully opened.
   """
   class Context(ApiBase.Context):
@@ -1164,7 +1498,9 @@ class Dtrace(ApiBase):
     O_DIRECTORY = 0x100000
 
     class Process(ApiBase.Context.Process):
-      pass
+      def __init__(self, *args):
+        super(Dtrace.Context.Process, self).__init__(*args)
+        self.cwd = self.initial_cwd
 
     def __init__(self, blacklist, tracer_pid, initial_cwd):
       logging.info(
@@ -1173,8 +1509,6 @@ class Dtrace(ApiBase):
       # Process ID of the trace_child_process.py wrapper script instance.
       self._tracer_pid = tracer_pid
       self._initial_cwd = initial_cwd
-      # First process to be started by self._tracer_pid.
-      self._initial_pid = None
       self._line_number = 0
 
     def on_line(self, line):
@@ -1212,16 +1546,16 @@ class Dtrace(ApiBase):
             e)
 
     def to_results(self):
-      """Uses self._initial_pid to determine the initial process."""
-      process = self.processes[self._initial_pid].to_results_process()
+      process = self.root_process.to_results_process()
       # Internal concistency check.
-      if sorted(self.processes) != sorted(p.pid for p in process.all):
+      if sorted(self._process_lookup) != sorted(p.pid for p in process.all):
         raise TracingFailure(
-            'Found internal inconsitency in process lifetime detection',
+            'Found internal inconsitency in process lifetime detection '
+            'while looking for len(tree) == len(list)',
             None,
             None,
             None,
-            sorted(self.processes),
+            sorted(self._process_lookup),
             sorted(p.pid for p in process.all))
       return Results(process)
 
@@ -1238,7 +1572,7 @@ class Dtrace(ApiBase):
       are child of the traced processes so there is no need to verify the
       process hierarchy.
       """
-      if pid in self.processes:
+      if pid in self._process_lookup:
         raise TracingFailure(
             'Found internal inconsitency in proc_start: %d started two times' %
                 pid,
@@ -1249,25 +1583,25 @@ class Dtrace(ApiBase):
             'Failed to parse arguments: %s' % args,
             None, None, None)
       ppid = int(match.group(1))
-      if ppid == self._tracer_pid and not self._initial_pid:
-        self._initial_pid = pid
-        ppid = None
-        cwd = self._initial_cwd
-      elif ppid in self.processes:
-        parent = self.processes[ppid]
-        cwd = parent.cwd
+      if ppid == self._tracer_pid and not self.root_process:
+        proc = self.root_process = self.Process(
+            self.blacklist, pid, self._initial_cwd)
+      elif ppid in self._process_lookup:
+        proc = self.Process(self.blacklist, pid, self._process_lookup[ppid].cwd)
+        self._process_lookup[ppid].children.append(proc)
       else:
         # Another process tree, ignore.
         return
-      proc = self.processes[pid] = self.Process(self, pid, cwd, ppid)
-      proc.cwd = cwd
-      logging.debug('New child: %s -> %d  cwd:%s' % (ppid, pid, unicode(cwd)))
+      self._process_lookup[pid] = proc
+      logging.debug(
+          'New child: %s -> %d  cwd:%s' %
+          (ppid, pid, unicode(proc.initial_cwd)))
 
     def handle_proc_exit(self, pid, _args):
       """Removes cwd."""
-      if pid in self.processes:
+      if pid in self._process_lookup:
         # self._tracer_pid is not traced itself and other traces run neither.
-        self.processes[pid].cwd = None
+        self._process_lookup[pid].cwd = None
 
     def handle_execve(self, pid, args):
       """Sets the process' executable.
@@ -1279,17 +1613,17 @@ class Dtrace(ApiBase):
       Will have to put the answer at http://stackoverflow.com/questions/7556249.
       :)
       """
-      if not pid in self.processes:
+      if not pid in self._process_lookup:
         # Another process tree, ignore.
         return
       match = self.RE_EXECVE.match(args)
       if not match:
         raise TracingFailure(
-            'Failed to parse arguments: %s' % args,
+            'Failed to parse arguments: %r' % args,
             None, None, None)
-      proc = self.processes[pid]
+      proc = self._process_lookup[pid]
       proc.executable = match.group(1)
-      proc.command = process_quoted_arguments(match.group(3))
+      proc.command = self.process_escaped_arguments(match.group(3))
       if int(match.group(2)) != len(proc.command):
         raise TracingFailure(
             'Failed to parse execve() arguments: %s' % args,
@@ -1297,24 +1631,24 @@ class Dtrace(ApiBase):
 
     def handle_chdir(self, pid, args):
       """Updates cwd."""
-      if pid not in self.processes:
+      if pid not in self._process_lookup:
         # Another process tree, ignore.
         return
       cwd = self.RE_CHDIR.match(args).group(1)
       if not cwd.startswith('/'):
-        cwd2 = os.path.join(self.processes[pid].cwd, cwd)
+        cwd2 = os.path.join(self._process_lookup[pid].cwd, cwd)
         logging.debug('handle_chdir(%d, %s) -> %s' % (pid, cwd, cwd2))
       else:
         logging.debug('handle_chdir(%d, %s)' % (pid, cwd))
         cwd2 = cwd
-      self.processes[pid].cwd = cwd2
+      self._process_lookup[pid].cwd = cwd2
 
     def handle_open_nocancel(self, pid, args):
       """Redirects to handle_open()."""
       return self.handle_open(pid, args)
 
     def handle_open(self, pid, args):
-      if pid not in self.processes:
+      if pid not in self._process_lookup:
         # Another process tree, ignore.
         return
       match = self.RE_OPEN.match(args)
@@ -1329,7 +1663,7 @@ class Dtrace(ApiBase):
       self._handle_file(pid, match.group(1))
 
     def handle_rename(self, pid, args):
-      if pid not in self.processes:
+      if pid not in self._process_lookup:
         # Another process tree, ignore.
         return
       match = self.RE_RENAME.match(args)
@@ -1342,14 +1676,14 @@ class Dtrace(ApiBase):
 
     def _handle_file(self, pid, filepath):
       if not filepath.startswith('/'):
-        filepath = os.path.join(self.processes[pid].cwd, filepath)
+        filepath = os.path.join(self._process_lookup[pid].cwd, filepath)
       # We can get '..' in the path.
       filepath = os.path.normpath(filepath)
       # Sadly, still need to filter out directories here;
       # saw open_nocancel(".", 0, 0) = 0 lines.
       if os.path.isdir(filepath):
         return
-      self.processes[pid].add_file(filepath)
+      self._process_lookup[pid].add_file(filepath, False)
 
     def handle_ftruncate(self, pid, args):
       """Just used as a signal to kill dtrace, ignoring."""
@@ -1359,6 +1693,35 @@ class Dtrace(ApiBase):
     def _handle_ignored(pid, args):
       """Is called for all the event traces that are not handled."""
       raise NotImplementedError('Please implement me')
+
+    @staticmethod
+    def process_escaped_arguments(text):
+      """Extracts escaped arguments on a string and return the arguments as a
+      list.
+
+      Implemented as an automaton.
+
+      Example:
+        With text = '\\001python2.7\\001-c\\001print(\\"hi\\")\\0', the
+        function will return ['python2.7', '-c', 'print("hi")]
+      """
+      if not text.endswith('\\0'):
+        raise ValueError('String is not null terminated: %r' % text, text)
+      text = text[:-2]
+
+      def unescape(x):
+        """Replaces '\\' with '\' and '\?' (where ? is anything) with ?."""
+        out = []
+        escaped = False
+        for i in x:
+          if i == '\\' and not escaped:
+            escaped = True
+            continue
+          escaped = False
+          out.append(i)
+        return ''.join(out)
+
+      return [unescape(i) for i in text.split('\\001')]
 
   class Tracer(ApiBase.Tracer):
     # pylint: disable=C0301
@@ -1407,6 +1770,9 @@ class Dtrace(ApiBase):
     # The script will kill itself only once waiting_to_die == 1 and
     # current_processes == 0, so that both getlogin() was called and that
     # all traced processes exited.
+    #
+    # TODO(maruel): Use cacheable predicates. See
+    # https://wikis.oracle.com/display/DTrace/Performance+Considerations
     D_CODE = """
       dtrace:::BEGIN {
         waiting_to_die = 0;
@@ -1577,39 +1943,38 @@ class Dtrace(ApiBase):
       }
       syscall::exec*:return /trackedpid[pid] && errno == 0/ {
         /* We need to join strings here, as using multiple printf() would
-         * cause tearing when multiple threads/processes are traced. */
+         * cause tearing when multiple threads/processes are traced.
+         * Since it is impossible to escape a string and join it to another one,
+         * like sprintf("%s%S", previous, more), use hackery.
+         * Each of the elements are split with a \\1. \\0 cannot be used because
+         * it is simply ignored. This will conflict with any program putting a
+         * \\1 in their execve() string but this should be "rare enough" */
         this->args = "";
         /* Process exec_argv[0] */
         this->args = strjoin(
-            this->args, (self->exec_argc > 0) ? ", \\"" : "");
-        this->args = strjoin(
             this->args, (self->exec_argc > 0) ? self->exec_argv0 : "");
-        this->args = strjoin(this->args, (self->exec_argc > 0) ? "\\"" : "");
 
         /* Process exec_argv[1] */
         this->args = strjoin(
-            this->args, (self->exec_argc > 1) ? ", \\"" : "");
+            this->args, (self->exec_argc > 1) ? "\\1" : "");
         this->args = strjoin(
             this->args, (self->exec_argc > 1) ? self->exec_argv1 : "");
-        this->args = strjoin(this->args, (self->exec_argc > 1) ? "\\"" : "");
 
         /* Process exec_argv[2] */
         this->args = strjoin(
-            this->args, (self->exec_argc > 2) ? ", \\"" : "");
+            this->args, (self->exec_argc > 2) ? "\\1" : "");
         this->args = strjoin(
             this->args, (self->exec_argc > 2) ? self->exec_argv2 : "");
-        this->args = strjoin(this->args, (self->exec_argc > 2) ? "\\"" : "");
 
         /* Process exec_argv[3] */
         this->args = strjoin(
-            this->args, (self->exec_argc > 3) ? ", \\"" : "");
+            this->args, (self->exec_argc > 3) ? "\\1" : "");
         this->args = strjoin(
             this->args, (self->exec_argc > 3) ? self->exec_argv3 : "");
-        this->args = strjoin(this->args, (self->exec_argc > 3) ? "\\"" : "");
 
         /* Prints self->exec_argc to permits verifying the internal
          * consistency since this code is quite fishy. */
-        printf("%d %d %s(\\"%s\\", [%d%s])\\n",
+        printf("%d %d %s(\\"%s\\", [%d, %S])\\n",
                logindex, pid, probefunc,
                self->exec_arg0,
                self->exec_argc,
@@ -1629,7 +1994,7 @@ class Dtrace(ApiBase):
 
     # Code currently not used.
     D_EXTRANEOUS = """
-      /* These are a good learning experience, since it traces a lot of things
+      /* This is a good learning experience, since it traces a lot of things
        * related to the process and child processes.
        * Warning: it generates a gigantic log. For example, tracing
        * "data/trace_inputs/child1.py --child" generates a 2mb log and takes
@@ -1742,13 +2107,11 @@ class Dtrace(ApiBase):
           'inline string SCRIPT = "%s";\n'
           'inline int FILE_ID = %d;\n'
           '\n'
-          '%s\n'
           '%s') % (
               os.getpid(),
               self._script,
               self._dummy_file_id,
-              self.D_CODE,
-              self.D_CODE_EXECVE)
+              self.D_CODE) + self.D_CODE_EXECVE
 
     def trace(self, cmd, cwd, tracename, output):
       """Runs dtrace on an executable.
@@ -1759,8 +2122,9 @@ class Dtrace(ApiBase):
       trace_child_process.py starts the executable to trace.
       """
       logging.info('trace(%s, %s, %s, %s)' % (cmd, cwd, tracename, output))
-      logging.info('Running: %s' % cmd)
-      logging.debug('Our pid: %d' % os.getpid())
+      assert os.path.isabs(cmd[0]), cmd[0]
+      assert os.path.isabs(cwd), cwd
+      assert os.path.normpath(cwd) == cwd, cwd
       with self._lock:
         if not self._initialized:
           raise TracingFailure(
@@ -1872,11 +2236,16 @@ class Dtrace(ApiBase):
 
   @classmethod
   def parse_log(cls, logname, blacklist):
-    logging.info('parse_log(%s, %s)' % (logname, blacklist))
+    logging.info('parse_log(%s, ...)' % logname)
+
+    def blacklist_more(filepath):
+      # All the HFS metadata is in the form /.vol/...
+      return blacklist(filepath) or re.match(r'^\/\.vol\/.+$', filepath)
+
     data = read_json(logname)
     out = []
     for item in data['traces']:
-      context = cls.Context(blacklist, item['pid'], item['cwd'])
+      context = cls.Context(blacklist_more, item['pid'], item['cwd'])
       for line in open(logname + '.log', 'rb'):
         context.on_line(line)
       out.append(
@@ -1928,9 +2297,6 @@ class LogmanTrace(ApiBase):
       self._threads_active = {}
       # Process ID of the tracer, e.g. tracer_inputs.py
       self._tracer_pid = tracer_pid
-      # First process to be started by self._tracer_pid is the executable
-      # traced.
-      self._initial_pid = None
       self._line_number = 0
 
     def on_line(self, line):
@@ -1965,23 +2331,20 @@ class LogmanTrace(ApiBase):
             e)
 
     def to_results(self):
-      """Uses self._initial_pid to determine the initial process."""
-      process = self.processes[self._initial_pid].to_results_process()
-      # Internal concistency check.
-      if sorted(self.processes) != sorted(p.pid for p in process.all):
+      if not self.root_process:
         raise TracingFailure(
-            'Found internal inconsitency in process lifetime detection',
-            None,
-            None,
-            None,
-            sorted(self.processes),
-            sorted(p.pid for p in process.all))
+            'Failed to detect the initial process',
+            None, None, None)
+      process = self.root_process.to_results_process()
       return Results(process)
 
     def _thread_to_process(self, tid):
       """Finds the process from the thread id."""
       tid = int(tid, 16)
-      return self.processes.get(self._threads_active.get(tid))
+      pid = self._threads_active.get(tid)
+      if not pid or not self._process_lookup.get(pid):
+        return
+      return self._process_lookup[pid]
 
     @classmethod
     def handle_EventTrace_Header(cls, line):
@@ -2030,7 +2393,7 @@ class LogmanTrace(ApiBase):
         return
       file_object = line[FILE_OBJECT]
       if file_object in proc.file_objects:
-        proc.add_file(proc.file_objects.pop(file_object))
+        proc.add_file(proc.file_objects.pop(file_object), False)
 
     def handle_FileIo_Create(self, line):
       """Handles a file open.
@@ -2084,9 +2447,11 @@ class LogmanTrace(ApiBase):
 
     def handle_Process_End(self, line):
       pid = line[self.PID]
-      if pid in self.processes:
+      if pid in self._process_lookup:
         logging.info('Terminated: %d' % pid)
-        self.processes[pid].cwd = None
+        self._process_lookup[pid] = None
+      else:
+        logging.debug('Terminated: %d' % pid)
 
     def handle_Process_Start(self, line):
       """Handles a new child process started by PID."""
@@ -2102,24 +2467,28 @@ class LogmanTrace(ApiBase):
 
       ppid = line[self.PID]
       pid = int(line[PROCESS_ID], 16)
+      logging.debug(
+          'New process %d->%d (%s) %s' %
+            (ppid, pid, line[IMAGE_FILE_NAME], line[COMMAND_LINE]))
+
       if ppid == self._tracer_pid:
         # Need to ignore processes we don't know about because the log is
         # system-wide. self._tracer_pid shall start only one process.
-        if self._initial_pid:
+        if self.root_process:
           raise TracingFailure(
-              ( 'Parent process is _tracer_pid(%d) but _initial_pid(%d) is '
-                'already set') % (self._tracer_pid, self._initial_pid),
+              ( 'Parent process is _tracer_pid(%d) but root_process(%d) is '
+                'already set') % (self._tracer_pid, self.root_process.pid),
               None, None, None)
-        self._initial_pid = pid
+        proc = self.Process(self.blacklist, pid, None)
+        self.root_process = proc
         ppid = None
-      elif ppid not in self.processes:
+      elif ppid in self._process_lookup:
+        proc = self.Process(self.blacklist, pid, None)
+        self._process_lookup[ppid].children.append(proc)
+      else:
         # Ignore
         return
-      if pid in self.processes:
-        raise TracingFailure(
-            'Process %d started two times' % pid,
-            None, None, None)
-      proc = self.processes[pid] = self.Process(self, pid, None, ppid)
+      self._process_lookup[pid] = proc
 
       if (not line[IMAGE_FILE_NAME].startswith('"') or
           not line[IMAGE_FILE_NAME].endswith('"')):
@@ -2179,6 +2548,7 @@ class LogmanTrace(ApiBase):
       # the parent process.
       pid = int(line[PROCESS_ID], 16)
       tid = int(line[TTHREAD_ID], 16)
+      logging.debug('New thread pid:%d, tid:%d' % (pid, tid))
       self._threads_active[tid] = pid
 
     @classmethod
@@ -2270,6 +2640,9 @@ class LogmanTrace(ApiBase):
 
     def trace(self, cmd, cwd, tracename, output):
       logging.info('trace(%s, %s, %s, %s)' % (cmd, cwd, tracename, output))
+      assert os.path.isabs(cmd[0]), cmd[0]
+      assert os.path.isabs(cwd), cwd
+      assert os.path.normpath(cwd) == cwd, cwd
       with self._lock:
         if not self._initialized:
           raise TracingFailure(
@@ -2530,7 +2903,7 @@ def get_api():
   return flavors.get(sys.platform, Strace)()
 
 
-def extract_directories(root_dir, files):
+def extract_directories(root_dir, files, blacklist):
   """Detects if all the files in a directory are in |files| and if so, replace
   the individual files by a Results.Directory instance.
 
@@ -2540,7 +2913,12 @@ def extract_directories(root_dir, files):
   Arguments:
     - root_dir: Optional base directory that shouldn't be search further.
     - files: list of Results.File instances.
+    - blacklist: regexp of files to ignore, for example r'.+\.pyc'.
   """
+  logging.info(
+      'extract_directories(%s, %d files, ...)' % (root_dir, len(files)))
+  assert not (root_dir or '').endswith(os.path.sep), root_dir
+  assert not root_dir or (get_native_path_case(root_dir) == root_dir)
   assert not any(isinstance(f, Results.Directory) for f in files)
   # Remove non existent files.
   files = [f for f in files if f.existent]
@@ -2549,16 +2927,14 @@ def extract_directories(root_dir, files):
   # All files must share the same root, which can be None.
   assert len(set(f.root for f in files)) == 1, set(f.root for f in files)
 
-  def blacklist(f):
-    return f in ('.git', '.svn') or f.endswith('.pyc')
-
   # Creates a {directory: {filename: File}} mapping, up to root.
   buckets = {}
   if root_dir:
-    buckets[root_dir.rstrip(os.path.sep)] = {}
+    buckets[root_dir] = {}
   for fileobj in files:
     path = fileobj.full_path
     directory = os.path.dirname(path)
+    assert directory
     # Do not use os.path.basename() so trailing os.path.sep is kept.
     basename = path[len(directory)+1:]
     files_in_directory = buckets.setdefault(directory, {})
@@ -2588,9 +2964,8 @@ def extract_directories(root_dir, files):
 
   # Reverse the mapping with what remains. The original instances are returned,
   # so the cached meta data is kept.
-  return sorted(
-      sum((x.values() for x in buckets.itervalues()), []),
-      key=lambda x: x.path)
+  files = sum((x.values() for x in buckets.itervalues()), [])
+  return sorted(files, key=lambda x: x.path)
 
 
 def trace(logfile, cmd, cwd, api, output):
@@ -2604,7 +2979,6 @@ def trace(logfile, cmd, cwd, api, output):
   - output: if True, returns output, otherwise prints it at the console.
   """
   cmd = fix_python_path(cmd)
-  assert os.path.isabs(cmd[0]), cmd[0]
   api.clean_trace(logfile)
   with api.get_tracer(logfile) as tracer:
     return tracer.trace(cmd, cwd, 'default', output)
@@ -2622,22 +2996,27 @@ def load_trace(logfile, root_dir, api, blacklist):
   """
   data = api.parse_log(logfile, (blacklist or (lambda _: False)))
   assert len(data) == 1, 'More than one trace was detected!'
+  if 'exception' in data[0]:
+    # It got an exception, raise it.
+    raise data[0]['exception']
   results = data[0]['results']
   if root_dir:
     results = results.strip_root(root_dir)
   return results
 
 
-def CMDclean(parser, args):
+def CMDclean(args):
   """Cleans up traces."""
+  parser = OptionParserTraceInputs(command='clean')
   options, args = parser.parse_args(args)
   api = get_api()
   api.clean_trace(options.log)
   return 0
 
 
-def CMDtrace(parser, args):
+def CMDtrace(args):
   """Traces an executable."""
+  parser = OptionParserTraceInputs(command='trace')
   parser.allow_interspersed_args = False
   parser.add_option(
       '-q', '--quiet', action='store_true',
@@ -2651,16 +3030,12 @@ def CMDtrace(parser, args):
     args[0] = os.path.abspath(args[0])
 
   api = get_api()
-  try:
-    return trace(options.log, args, os.getcwd(), api, options.quiet)[0]
-  except TracingFailure, e:
-    print >> sys.stderr, 'Failed to trace executable'
-    print >> sys.stderr, e
-    return 1
+  return trace(options.log, args, os.getcwd(), api, options.quiet)[0]
 
 
-def CMDread(parser, args):
+def CMDread(args):
   """Reads the logs and prints the result."""
+  parser = OptionParserTraceInputs(command='read')
   parser.add_option(
       '-V', '--variable',
       nargs=2,
@@ -2688,109 +3063,137 @@ def CMDread(parser, args):
 
   variables = dict(options.variables)
   api = get_api()
-  try:
-    def blacklist(f):
-      return any(re.match(b, f) for b in options.blacklist)
-    results = load_trace(options.log, options.root_dir, api, blacklist)
-    simplified = extract_directories(options.root_dir, results.files)
-    simplified = [f.replace_variables(variables) for f in simplified]
+  def blacklist(f):
+    return any(re.match(b, f) for b in options.blacklist)
+  results = load_trace(options.log, options.root_dir, api, blacklist)
+  simplified = extract_directories(options.root_dir, results.files, blacklist)
+  simplified = [f.replace_variables(variables) for f in simplified]
 
-    if options.json:
-      write_json(sys.stdout, results.flatten(), False)
-    else:
-      print('Total: %d' % len(results.files))
-      print('Non existent: %d' % len(results.non_existent))
-      for f in results.non_existent:
-        print('  %s' % f.path)
-      print(
-          'Interesting: %d reduced to %d' % (
-              len(results.existent), len(simplified)))
-      for f in simplified:
-        print('  %s' % f.path)
-    return 0
-  except TracingFailure, e:
-    print >> sys.stderr, 'Failed to read trace'
-    print >> sys.stderr, e
-    return 1
-
-
-def CMDhelp(parser, args):
-  """Prints list of commands or help for a specific command"""
-  _, args = parser.parse_args(args)
-  if len(args) == 1:
-    # The command was "%prog help command", replaces ourself with
-    # "%prog command --help" so help is correctly printed out.
-    return main(args + ['--help'])
-  parser.print_help()
+  if options.json:
+    write_json(sys.stdout, results.flatten(), False)
+  else:
+    print('Total: %d' % len(results.files))
+    print('Non existent: %d' % len(results.non_existent))
+    for f in results.non_existent:
+      print('  %s' % f.path)
+    print(
+        'Interesting: %d reduced to %d' % (
+            len(results.existent), len(simplified)))
+    for f in simplified:
+      print('  %s' % f.path)
   return 0
 
 
-def get_command_handler(name):
-  """Returns the command handler or CMDhelp if it doesn't exist."""
-  return getattr(sys.modules[__name__], 'CMD%s' % name, CMDhelp)
+class OptionParserWithNiceDescription(optparse.OptionParser):
+  """Generates the description with the command's docstring."""
+  def __init__(self, *args, **kwargs):
+    """Sets 'description' and 'usage' if not already specified."""
+    command = kwargs.pop('command', 'help')
+    kwargs.setdefault(
+        'description',
+        re.sub('[\r\n ]{2,}', ' ', get_command_handler(command).__doc__))
+    kwargs.setdefault('usage', '%%prog %s [options]' % command)
+    optparse.OptionParser.__init__(self, *args, **kwargs)
 
 
-def gen_parser(command):
-  """Returns the default OptionParser instance for the corresponding command
-  handler.
-  """
-  more = getattr(command, 'usage_more', '')
-  command_display = command_name = command.__name__[3:]
-  if command_name == 'help':
-    command_display = '<command>'
-    description = None
-  else:
-    # OptParser.description prefer nicely non-formatted strings.
-    description = re.sub('[\r\n ]{2,}', ' ', command.__doc__)
+class OptionParserWithLogging(OptionParserWithNiceDescription):
+  """Adds automatic --verbose handling."""
+  def __init__(self, *args, **kwargs):
+    OptionParserWithNiceDescription.__init__(self, *args, **kwargs)
+    self.add_option(
+        '-v', '--verbose',
+        action='count',
+        default=0,
+        help='Use multiple times to increase verbosity')
 
-  parser = optparse.OptionParser(
-      usage='usage: %%prog %s [options] %s' % (command_display, more),
-      description=description)
-
-  # Default options.
-  parser.add_option(
-      '-v', '--verbose', action='count', default=0,
-      help='Use multiple times to increase verbosity')
-  if command_name != 'help':
-    parser.add_option(
-        '-l', '--log', help='Log file to generate or read, required')
-
-  old_parser_args = parser.parse_args
-  def parse_args_with_logging(args=None):
-    """Processes the default options.
-
-    Enforces and sets options.log to an absolute path.
-    Configures logging.
-    """
-    options, args = old_parser_args(args)
+  def parse_args(self, *args, **kwargs):
+    options, args = OptionParserWithNiceDescription.parse_args(
+        self, *args, **kwargs)
     level = [
       logging.ERROR, logging.INFO, logging.DEBUG,
     ][min(2, options.verbose)]
     logging.basicConfig(
           level=level,
           format='%(levelname)5s %(module)15s(%(lineno)3d):%(message)s')
-    if command_name != 'help':
-      if not options.log:
-        parser.error('Must supply a log file with -l')
-      options.log = os.path.abspath(options.log)
     return options, args
-  parser.parse_args = parse_args_with_logging
-  return parser
+
+
+class OptionParserTraceInputs(OptionParserWithLogging):
+  """Adds automatic --log handling."""
+  def __init__(self, *args, **kwargs):
+    OptionParserWithLogging.__init__(self, *args, **kwargs)
+    self.add_option(
+        '-l', '--log', help='Log file to generate or read, required')
+
+  def parse_args(self, *args, **kwargs):
+    """Makes sure the paths make sense.
+
+    On Windows, / and \ are often mixed together in a path.
+    """
+    options, args = OptionParserWithLogging.parse_args(self, *args, **kwargs)
+
+    if not options.log:
+      self.error('Must supply a log file with -l')
+    options.log = os.path.abspath(options.log)
+
+    # Still returns args to stay consistent even if guaranteed to be empty.
+    return options, args
+
+
+def extract_documentation():
+  """Returns a dict {command: description} for each of documented command."""
+  commands = (
+      fn[3:]
+      for fn in dir(sys.modules[__name__])
+      if fn.startswith('CMD') and get_command_handler(fn[3:]).__doc__)
+  return dict((fn, get_command_handler(fn).__doc__) for fn in commands)
+
+
+def CMDhelp(args):
+  """Prints list of commands or help for a specific command."""
+  doc = extract_documentation()
+  # Calculates the optimal offset.
+  offset = max(len(cmd) for cmd in doc)
+  format_str = '  %-' + str(offset + 2) + 's %s'
+  # Generate a one-liner documentation of each commands.
+  commands_description = '\n'.join(
+       format_str % (cmd, doc[cmd].split('\n')[0]) for cmd in sorted(doc))
+
+  parser = OptionParserWithLogging(
+      usage='%prog <command> [options]',
+      description='Commands are:\n%s\n' % commands_description)
+  parser.format_description = lambda _: parser.description
+
+  # Strip out any -h or --help argument.
+  _, args = parser.parse_args([i for i in args if not i in ('-h', '--help')])
+  if len(args) == 1:
+    if not get_command_handler(args[0]):
+      parser.error('Unknown command %s' % args[0])
+    # The command was "%prog help command", replaces ourself with
+    # "%prog command --help" so help is correctly printed out.
+    return main(args + ['--help'])
+  elif args:
+    parser.error('Unknown argument "%s"' % ' '.join(args))
+  parser.print_help()
+  return 0
+
+
+def get_command_handler(name):
+  """Returns the command handler or CMDhelp if it doesn't exist."""
+  return getattr(sys.modules[__name__], 'CMD%s' % name, None)
 
 
 def main(argv):
-  # Generates the command help late so all commands are listed.
-  CMDhelp.usage_more = (
-      '\n\nCommands are:\n' +
-      '\n'.join(
-        '  %-10s %s' % (
-          fn[3:], get_command_handler(fn[3:]).__doc__.split('\n')[0].strip())
-      for fn in dir(sys.modules[__name__])
-      if fn.startswith('CMD')))
-
-  command = get_command_handler(argv[0] if argv else None)
-  parser = gen_parser(command)
-  return command(parser, argv[1:])
+  command = get_command_handler(argv[0] if argv else 'help')
+  if not command:
+    return CMDhelp(argv)
+  try:
+    return command(argv[1:])
+  except TracingFailure, e:
+    sys.stderr.write('\nError: ')
+    sys.stderr.write(str(e))
+    sys.stderr.write('\n')
+    return 1
 
 
 if __name__ == '__main__':

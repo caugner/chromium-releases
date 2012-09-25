@@ -13,6 +13,7 @@
 #include "base/metrics/histogram.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/autocomplete/autocomplete_provider_listener.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/history/history_backend.h"
@@ -30,7 +31,7 @@
 #include "googleurl/src/url_parse.h"
 #include "googleurl/src/url_util.h"
 #include "net/base/net_util.h"
-#include "net/base/registry_controlled_domain.h"
+#include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 
 namespace {
 
@@ -237,7 +238,7 @@ HistoryURLProviderParams::HistoryURLProviderParams(
 HistoryURLProviderParams::~HistoryURLProviderParams() {
 }
 
-HistoryURLProvider::HistoryURLProvider(ACProviderListener* listener,
+HistoryURLProvider::HistoryURLProvider(AutocompleteProviderListener* listener,
                                        Profile* profile)
     : HistoryProvider(listener, profile, "HistoryURL"),
       params_(NULL) {
@@ -305,12 +306,12 @@ void HistoryURLProvider::Start(const AutocompleteInput& input,
   // re-run the query from scratch and ignore |minimal_changes|.
 
   // Cancel any in-progress query.
-  Stop();
+  Stop(false);
 
   RunAutocompletePasses(input, true);
 }
 
-void HistoryURLProvider::Stop() {
+void HistoryURLProvider::Stop(bool clear_cached_results) {
   done_ = true;
 
   if (params_)
@@ -934,6 +935,10 @@ AutocompleteMatch HistoryURLProvider::HistoryMatchToACMatch(
                                            info.title(),
                                            ACMatchClassification::NONE,
                                            &match.description_class);
+
+  match.RecordAdditionalInfo("typed count", info.typed_count());
+  match.RecordAdditionalInfo("visit count", info.visit_count());
+  match.RecordAdditionalInfo("last visit", info.last_visit());
 
   return match;
 }

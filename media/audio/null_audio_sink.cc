@@ -13,7 +13,6 @@ namespace media {
 
 NullAudioSink::NullAudioSink()
     : initialized_(false),
-      playback_rate_(0.0),
       playing_(false),
       callback_(NULL),
       thread_("NullAudioThread"),
@@ -62,19 +61,9 @@ void NullAudioSink::Pause(bool /* flush */) {
   SetPlaying(false);
 }
 
-void NullAudioSink::SetPlaybackRate(float rate) {
-  base::AutoLock auto_lock(lock_);
-  playback_rate_ = rate;
-}
-
 bool NullAudioSink::SetVolume(double volume) {
   // Audio is always muted.
   return volume == 0.0;
-}
-
-void NullAudioSink::GetVolume(double* volume) {
-  // Audio is always muted.
-  *volume = 0.0;
 }
 
 void NullAudioSink::SetPlaying(bool is_playing) {
@@ -94,7 +83,6 @@ void NullAudioSink::FillBufferTask() {
   base::TimeDelta delay;
   // Only consume buffers when actually playing.
   if (playing_)  {
-    DCHECK_GT(playback_rate_, 0.0f);
     int requested_frames = params_.frames_per_buffer();
     int frames_received = callback_->Render(audio_data_, requested_frames, 0);
     int frames_per_millisecond =
@@ -104,10 +92,11 @@ void NullAudioSink::FillBufferTask() {
       DCHECK_EQ(sizeof(float), sizeof(uint32));
       int channels = audio_data_.size();
       for (int channel_idx = 0; channel_idx < channels; ++channel_idx) {
+        float* channel = audio_data_[channel_idx];
         for (int frame_idx = 0; frame_idx < frames_received; frame_idx++) {
           // Convert float to uint32 w/o conversion loss.
-          uint32 frame = base::ByteSwapToLE32(*reinterpret_cast<uint32*>(
-              &audio_data_[channel_idx][frame_idx]));
+          uint32 frame = base::ByteSwapToLE32(
+              bit_cast<uint32>(channel[frame_idx]));
           base::MD5Update(
               &md5_channel_contexts_[channel_idx], base::StringPiece(
                   reinterpret_cast<char*>(&frame), sizeof(frame)));
@@ -115,9 +104,9 @@ void NullAudioSink::FillBufferTask() {
       }
     }
 
-    // Calculate our sleep duration, taking playback rate into consideration.
+    // Calculate our sleep duration.
     delay = base::TimeDelta::FromMilliseconds(
-        frames_received / (frames_per_millisecond * playback_rate_));
+        frames_received / frames_per_millisecond);
   } else {
     // If paused, sleep for 10 milliseconds before polling again.
     delay = base::TimeDelta::FromMilliseconds(10);

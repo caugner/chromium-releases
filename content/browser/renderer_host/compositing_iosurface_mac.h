@@ -6,14 +6,24 @@
 #define CONTENT_BROWSER_RENDERER_HOST_ACCELERATED_COMPOSITING_VIEW_MAC_H
 
 #import <Cocoa/Cocoa.h>
+#import <QuartzCore/CVDisplayLink.h>
 #include <QuartzCore/QuartzCore.h>
 
 #include "base/mac/scoped_cftyperef.h"
 #include "base/memory/scoped_nsobject.h"
+#include "base/synchronization/lock.h"
+#include "base/time.h"
+#include "base/timer.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/size.h"
 
 class IOSurfaceSupport;
+
+namespace gfx {
+class Rect;
+}
+
+namespace content {
 
 // This class manages an OpenGL context and IOSurface for the accelerated
 // compositing code path. The GL context is attached to
@@ -33,10 +43,14 @@ class CompositingIOSurfaceMac {
   void DrawIOSurface(NSView* view, float scale_factor);
 
   // Copy the data of the "live" OpenGL texture referring to this IOSurfaceRef
-  // into |out|. The image data is transformed so that it fits in |dst_size|.
+  // into |out|. The copied region is specified with |src_pixel_subrect| and
+  // the data is transformed so that it fits in |dst_pixel_size|.
+  // |src_pixel_subrect| and |dst_pixel_size| are not in DIP but in pixel.
   // Caller must ensure that |out| is allocated with the size no less than
-  // |4 * dst_size.width() * dst_size.height()| bytes.
-  bool CopyTo(const gfx::Size& dst_size, void* out);
+  // |4 * dst_pixel_size.width() * dst_pixel_size.height()| bytes.
+  bool CopyTo(const gfx::Rect& src_pixel_subrect,
+              const gfx::Size& dst_pixel_size,
+              void* out);
 
   // Unref the IOSurface and delete the associated GL texture. If the GPU
   // process is no longer referencing it, this will delete the IOSurface.
@@ -59,11 +73,22 @@ class CompositingIOSurfaceMac {
 
   bool is_vsync_disabled() const { return is_vsync_disabled_; }
 
+  // Get vsync scheduling parameters.
+  void GetVSyncParameters(base::TimeTicks* timebase,
+                          uint32* interval_numerator,
+                          uint32* interval_denominator);
+
  private:
+  friend CVReturn DisplayLinkCallback(CVDisplayLinkRef,
+                                      const CVTimeStamp*,
+                                      const CVTimeStamp*,
+                                      CVOptionFlags,
+                                      CVOptionFlags*,
+                                      void*);
+
   // Vertex structure for use in glDraw calls.
   struct SurfaceVertex {
     SurfaceVertex() : x_(0.0f), y_(0.0f), tx_(0.0f), ty_(0.0f) { }
-    // Currently the texture coords are always the same as vertex coords.
     void set(float x, float y, float tx, float ty) {
       x_ = x;
       y_ = y;
@@ -73,6 +98,10 @@ class CompositingIOSurfaceMac {
     void set_position(float x, float y) {
       x_ = x;
       y_ = y;
+    }
+    void set_texcoord(float tx, float ty) {
+      tx_ = tx;
+      ty_ = ty;
     }
     float x_;
     float y_;
@@ -100,6 +129,14 @@ class CompositingIOSurfaceMac {
       verts_[2].set_position(x2, y2);
       verts_[3].set_position(x2, y1);
     }
+    void set_texcoord_rect(float tx1, float ty1, float tx2, float ty2) {
+      // Texture coordinates are flipped vertically so they can be drawn on
+      // a projection with a flipped y-axis (origin is top left).
+      verts_[0].set_texcoord(tx1, ty2);
+      verts_[1].set_texcoord(tx1, ty1);
+      verts_[2].set_texcoord(tx2, ty1);
+      verts_[3].set_texcoord(tx2, ty2);
+    }
     SurfaceVertex verts_[4];
   };
 
@@ -109,7 +146,8 @@ class CompositingIOSurfaceMac {
                           GLuint shader_program_blit_rgb,
                           GLint blit_rgb_sampler_location,
                           GLuint shader_program_white,
-                          bool is_vsync_disabled);
+                          bool is_vsync_disabled,
+                          CVDisplayLinkRef display_link);
 
   // Returns true if IOSurface is ready to render. False otherwise.
   bool MapIOSurfaceToTexture(uint64 io_surface_handle);
@@ -117,6 +155,19 @@ class CompositingIOSurfaceMac {
   void UnrefIOSurfaceWithContextCurrent();
 
   void DrawQuad(const SurfaceQuad& quad);
+
+  // Called on display-link thread.
+  void DisplayLinkTick(CVDisplayLinkRef display_link,
+                       const CVTimeStamp* output_time);
+
+  void CalculateVsyncParametersLockHeld(const CVTimeStamp* time);
+
+  // Prevent from spinning on CGLFlushDrawable when it fails to throttle to
+  // VSync frequency.
+  void RateLimitDraws();
+
+  void StartOrContinueDisplayLink();
+  void StopDisplayLink();
 
   // Cached pointer to IOSurfaceSupport Singleton.
   IOSurfaceSupport* io_surface_support_;
@@ -148,6 +199,26 @@ class CompositingIOSurfaceMac {
   SurfaceQuad quad_;
 
   bool is_vsync_disabled_;
+
+  // CVDisplayLink for querying Vsync timing info and throttling swaps.
+  CVDisplayLinkRef display_link_;
+
+  // Timer for stopping display link after a timeout with no swaps.
+  base::DelayTimer<CompositingIOSurfaceMac> display_link_stop_timer_;
+
+  // Lock for sharing data between UI thread and display-link thread.
+  base::Lock lock_;
+
+  // Counts for throttling swaps.
+  int64 vsync_count_;
+  int64 swap_count_;
+
+  // Vsync timing data.
+  base::TimeTicks vsync_timebase_;
+  uint32 vsync_interval_numerator_;
+  uint32 vsync_interval_denominator_;
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_RENDERER_HOST_ACCELERATED_COMPOSITING_VIEW_MAC_H

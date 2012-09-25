@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_SYNC_GLUE_AUTOFILL_DATA_TYPE_CONTROLLER_H__
 #define CHROME_BROWSER_SYNC_GLUE_AUTOFILL_DATA_TYPE_CONTROLLER_H__
-#pragma once
 
 #include <string>
 
@@ -29,8 +28,8 @@ class AutofillDataTypeController : public NewNonFrontendDataTypeController,
       ProfileSyncService* sync_service);
 
   // NewNonFrontendDataTypeController implementation.
-  virtual syncable::ModelType type() const OVERRIDE;
-  virtual browser_sync::ModelSafeGroup model_safe_group() const OVERRIDE;
+  virtual syncer::ModelType type() const OVERRIDE;
+  virtual syncer::ModelSafeGroup model_safe_group() const OVERRIDE;
 
   // content::NotificationObserver implementation.
   virtual void Observe(int notification_type,

@@ -14,12 +14,34 @@
 #include "build/build_config.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/browser_window_state.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "ui/gfx/rect.h"
+
+// On GTK, resizing happens asynchronously and we currently don't have a way to
+// get called back (it's probably possible, but we don't have that code). Since
+// the GTK code is going away, not spending more time on this.
+#if !defined(TOOLKIT_GTK)
+
+typedef InProcessBrowserTest PreservedWindowPlacement;
+
+IN_PROC_BROWSER_TEST_F(PreservedWindowPlacement, PRE_Test) {
+  browser()->window()->SetBounds(gfx::Rect(20, 30, 400, 500));
+}
+
+IN_PROC_BROWSER_TEST_F(PreservedWindowPlacement, Test) {
+  gfx::Rect bounds = browser()->window()->GetBounds();
+
+  gfx::Rect expected_bounds(gfx::Rect(20, 30, 400, 500));
+  ASSERT_EQ(expected_bounds, bounds);
+}
+
+#endif  // defined(TOOLKIT_GTK)
 
 class PreferenceServiceTest : public InProcessBrowserTest {
  public:
@@ -37,7 +59,8 @@ class PreferenceServiceTest : public InProcessBrowserTest {
                      AppendASCII("window_placement").
                      AppendASCII("Default"),
           FilePath().Append(chrome::kPreferencesFilename));
-      tmp_pref_file_ = user_data_directory.AppendASCII("Default");
+      tmp_pref_file_ =
+          user_data_directory.AppendASCII(TestingProfile::kTestUserProfileDir);
       CHECK(file_util::CreateDirectory(tmp_pref_file_));
       tmp_pref_file_ = tmp_pref_file_.Append(chrome::kPreferencesFilename);
     } else {
@@ -120,7 +143,7 @@ IN_PROC_BROWSER_TEST_F(PreservedWindowPlacementIsLoaded, Test) {
 
   // Find if launched window is maximized.
   bool is_window_maximized =
-      browser()->GetSavedWindowShowState() == ui::SHOW_STATE_MAXIMIZED;
+      chrome::GetSavedWindowShowState(browser()) == ui::SHOW_STATE_MAXIMIZED;
   bool is_maximized = false;
   EXPECT_TRUE(root_dict->GetBoolean(kBrowserWindowPlacement + ".maximized",
       &is_maximized));
@@ -179,7 +202,7 @@ IN_PROC_BROWSER_TEST_F(PreservedWindowPlacementIsMigrated, Test) {
 
   // Find if launched window is maximized.
   bool is_window_maximized =
-      browser()->GetSavedWindowShowState() == ui::SHOW_STATE_MAXIMIZED;
+      chrome::GetSavedWindowShowState(browser()) == ui::SHOW_STATE_MAXIMIZED;
   bool is_maximized = false;
   EXPECT_TRUE(root_dict->GetBoolean(kBrowserWindowPlacement + ".maximized",
       &is_maximized));

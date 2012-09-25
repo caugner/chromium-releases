@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_NOTIFICATIONS_DESKTOP_NOTIFICATION_SERVICE_H_
 #define CHROME_BROWSER_NOTIFICATIONS_DESKTOP_NOTIFICATION_SERVICE_H_
-#pragma once
 
 #include <string>
 #include <vector>
@@ -52,9 +51,7 @@ class DesktopNotificationService : public content::NotificationObserver,
 
   // Requests permission (using an info-bar) for a given origin.
   // |callback_context| contains an opaque value to pass back to the
-  // requesting process when the info-bar finishes.  A NULL tab can be given if
-  // none exist (i.e. background tab), in which case the currently selected tab
-  // will be used.
+  // requesting process when the info-bar finishes.
   void RequestPermission(const GURL& origin,
                          int process_id,
                          int route_id,

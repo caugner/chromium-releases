@@ -4,14 +4,12 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_CHROME_TO_MOBILE_BUBBLE_CONTROLLER_H_
 #define CHROME_BROWSER_UI_COCOA_CHROME_TO_MOBILE_BUBBLE_CONTROLLER_H_
-#pragma once
 
 #import <Cocoa/Cocoa.h>
 
 #include <vector>
 
 #include "base/file_path.h"
-#import "base/mac/cocoa_protocols.h"
 #include "base/memory/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/chrome_to_mobile_service.h"
@@ -19,9 +17,9 @@
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 
+class Browser;
 @class ChromeToMobileBubbleController;
 class ChromeToMobileService;
-class Profile;
 
 namespace base {
 class DictionaryValue;
@@ -88,14 +86,14 @@ class ChromeToMobileBubbleNotificationBridge
   // A bridge used to observe Chrome and Service changes.
   scoped_ptr<ChromeToMobileBubbleNotificationBridge> bridge_;
 
+  // The browser that opened this bubble.
+  Browser* browser_;
+
   // The Chrome To Mobile service associated with this bubble.
   ChromeToMobileService* service_;
 
   // The file path for the MHTML page snapshot.
   FilePath snapshotPath_;
-
-  // The list of mobile devices, in the same order as the radio buttons.
-  std::vector<base::DictionaryValue*> mobiles_;
 
   // An animation used to cycle through the "Sending..." status messages.
   scoped_nsobject<NSAnimation> progressAnimation_;
@@ -104,9 +102,10 @@ class ChromeToMobileBubbleNotificationBridge
 // The owner of this object is responsible for showing the bubble. It is not
 // shown by the init routine. The window closes automatically on deallocation.
 - (id)initWithParentWindow:(NSWindow*)parentWindow
-                   profile:(Profile*)profile;
+                   browser:(Browser*)browser;
 
 // Actions for buttons in the dialog.
+- (IBAction)learn:(id)sender;
 - (IBAction)send:(id)sender;
 - (IBAction)cancel:(id)sender;
 

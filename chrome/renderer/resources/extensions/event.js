@@ -2,9 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+  var DCHECK = requireNative('logging').DCHECK;
   var eventBindingsNatives = requireNative('event_bindings');
   var AttachEvent = eventBindingsNatives.AttachEvent;
   var DetachEvent = eventBindingsNatives.DetachEvent;
+  var AttachFilteredEvent = eventBindingsNatives.AttachFilteredEvent;
+  var DetachFilteredEvent = eventBindingsNatives.DetachFilteredEvent;
+  var MatchAgainstEventFilter = eventBindingsNatives.MatchAgainstEventFilter;
   var sendRequest = require('sendRequest').sendRequest;
   var utils = require('utils');
   var validate = require('schemaUtils').validate;
@@ -75,6 +79,85 @@
     };
   })();
 
+  // A map of event names to the event object that is registered to that name.
+  var attachedNamedEvents = {};
+
+  // An array of all attached event objects, used for detaching on unload.
+  var allAttachedEvents = [];
+
+  // A map of functions that massage event arguments before they are dispatched.
+  // Key is event name, value is function.
+  var eventArgumentMassagers = {};
+
+  // Handles adding/removing/dispatching listeners for unfiltered events.
+  var UnfilteredAttachmentStrategy = function(event) {
+    this.event_ = event;
+  };
+
+  UnfilteredAttachmentStrategy.prototype.onAddedListener =
+      function(listener) {
+    // Only attach / detach on the first / last listener removed.
+    if (this.event_.listeners_.length == 0)
+      AttachEvent(this.event_.eventName_);
+  };
+
+  UnfilteredAttachmentStrategy.prototype.onRemovedListener =
+      function(listener) {
+    if (this.event_.listeners_.length == 0)
+      this.detach(true);
+  };
+
+  UnfilteredAttachmentStrategy.prototype.detach = function(manual) {
+    DetachEvent(this.event_.eventName_, manual);
+  };
+
+  UnfilteredAttachmentStrategy.prototype.getListenersByIDs = function(ids) {
+    return this.event_.listeners_;
+  };
+
+  var FilteredAttachmentStrategy = function(event) {
+    this.event_ = event;
+    this.listenerMap_ = {};
+  };
+
+  FilteredAttachmentStrategy.idToEventMap = {};
+
+  FilteredAttachmentStrategy.prototype.onAddedListener = function(listener) {
+    var id = AttachFilteredEvent(this.event_.eventName_,
+        listener.filters || {});
+    if (id == -1)
+      throw new Error("Can't add listener");
+    listener.id = id;
+    this.listenerMap_[id] = listener;
+    FilteredAttachmentStrategy.idToEventMap[id] = this.event_;
+  };
+
+  FilteredAttachmentStrategy.prototype.onRemovedListener = function(listener) {
+    this.detachListener(listener, true);
+  };
+
+  FilteredAttachmentStrategy.prototype.detachListener =
+      function(listener, manual) {
+    if (listener.id == undefined)
+      throw new Error("listener.id undefined - '" + listener + "'");
+    var id = listener.id;
+    delete this.listenerMap_[id];
+    delete FilteredAttachmentStrategy.idToEventMap[id];
+    DetachFilteredEvent(id, manual);
+  };
+
+  FilteredAttachmentStrategy.prototype.detach = function(manual) {
+    for (var i in this.listenerMap_)
+      this.detachListener(this.listenerMap_[i], manual);
+  };
+
+  FilteredAttachmentStrategy.prototype.getListenersByIDs = function(ids) {
+    var result = [];
+    for (var i = 0; i < ids.length; i++)
+      result.push(this.listenerMap_[ids[i]]);
+    return result;
+  };
+
   // Event object.  If opt_eventName is provided, this object represents
   // the unique instance of that named event, and dispatching an event
   // with that name will route through this object's listeners. Note that
@@ -92,10 +175,19 @@
     this.eventName_ = opt_eventName;
     this.listeners_ = [];
     this.eventOptions_ = opt_eventOptions ||
-        {"supportsListeners": true, "supportsRules": false};
+        {supportsFilters: false,
+         supportsListeners: true,
+         supportsRules: false,
+        };
 
     if (this.eventOptions_.supportsRules && !opt_eventName)
       throw new Error("Events that support rules require an event name.");
+
+    if (this.eventOptions_.supportsFilters) {
+      this.attachmentStrategy_ = new FilteredAttachmentStrategy(this);
+    } else {
+      this.attachmentStrategy_ = new UnfilteredAttachmentStrategy(this);
+    }
 
     // Validate event arguments (the data that is passed to the callbacks)
     // if we are in debug.
@@ -115,52 +207,46 @@
     }
   };
 
-  // A map of event names to the event object that is registered to that name.
-  var attachedNamedEvents = {};
-
-  // An array of all attached event objects, used for detaching on unload.
-  var allAttachedEvents = [];
-
-  // A map of functions that massage event arguments before they are dispatched.
-  // Key is event name, value is function.
-  var eventArgumentMassagers = {};
-
   chromeHidden.Event = {};
 
-  chromeHidden.Event.registerArgumentMassager = function(name, fn) {
+  // callback is a function(args, dispatch). args are the args we receive from
+  // dispatchJSON(), and dispatch is a function(args) that dispatches args to
+  // its listeners.
+  chromeHidden.Event.registerArgumentMassager = function(name, callback) {
     if (eventArgumentMassagers[name])
       throw new Error("Massager already registered for event: " + name);
-    eventArgumentMassagers[name] = fn;
+    eventArgumentMassagers[name] = callback;
   };
 
   // Dispatches a named event with the given JSON array, which is deserialized
   // before dispatch. The JSON array is the list of arguments that will be
   // sent with the event callback.
-  chromeHidden.Event.dispatchJSON = function(name, args) {
-    if (attachedNamedEvents[name]) {
-      if (args) {
-        // TODO(asargent): This is an antiquity. Until all callers of
-        // dispatchJSON use actual values, this must remain here to catch the
-        // cases where a caller has hard-coded a JSON string to pass in.
-        if (typeof(args) == "string") {
-          args = chromeHidden.JSON.parse(args);
-        }
-        if (eventArgumentMassagers[name])
-          eventArgumentMassagers[name](args);
-      }
-      var result = attachedNamedEvents[name].dispatch.apply(
-          attachedNamedEvents[name], args);
-      if (result && result.validationErrors)
-        return result.validationErrors;
-    }
-  };
+  chromeHidden.Event.dispatchJSON = function(name, args, filteringInfo) {
+    var listenerIDs = null;
 
-  // Dispatches a named event with the given arguments, supplied as an array.
-  chromeHidden.Event.dispatch = function(name, args) {
-    if (attachedNamedEvents[name]) {
-      attachedNamedEvents[name].dispatch.apply(
-          attachedNamedEvents[name], args);
-    }
+    if (filteringInfo)
+      listenerIDs = MatchAgainstEventFilter(name, filteringInfo);
+
+    var event = attachedNamedEvents[name];
+    if (!event)
+      return;
+
+    // TODO(asargent): This is an antiquity. Until all callers of
+    // dispatchJSON use actual values, this must remain here to catch the
+    // cases where a caller has hard-coded a JSON string to pass in.
+    if (typeof(args) == "string")
+      args = chromeHidden.JSON.parse(args);
+
+    var dispatchArgs = function(args) {
+      result = event.dispatch_(args, listenerIDs);
+      if (result)
+        DCHECK(!result.validationErrors, result.validationErrors);
+    };
+
+    if (eventArgumentMassagers[name])
+      eventArgumentMassagers[name](args, dispatchArgs);
+    else
+      dispatchArgs(args);
   };
 
   // Test if a named event has any listeners.
@@ -170,13 +256,37 @@
   };
 
   // Registers a callback to be called when this event is dispatched.
-  chrome.Event.prototype.addListener = function(cb) {
+  chrome.Event.prototype.addListener = function(cb, filters) {
     if (!this.eventOptions_.supportsListeners)
       throw new Error("This event does not support listeners.");
-    if (this.listeners_.length == 0) {
-      this.attach_();
+    if (this.eventOptions_.maxListeners &&
+        this.getListenerCount() >= this.eventOptions_.maxListeners)
+      throw new Error("Too many listeners for " + this.eventName_);
+    if (filters) {
+      if (!this.eventOptions_.supportsFilters)
+        throw new Error("This event does not support filters.");
+      if (filters.url && !(filters.url instanceof Array))
+        throw new Error("filters.url should be an array");
     }
-    this.listeners_.push(cb);
+    var listener = {callback: cb, filters: filters};
+    this.attach_(listener);
+    this.listeners_.push(listener);
+  };
+
+  chrome.Event.prototype.attach_ = function(listener) {
+    this.attachmentStrategy_.onAddedListener(listener);
+    if (this.listeners_.length == 0) {
+      allAttachedEvents[allAttachedEvents.length] = this;
+      if (!this.eventName_)
+        return;
+
+      if (attachedNamedEvents[this.eventName_]) {
+        throw new Error("chrome.Event '" + this.eventName_ +
+                        "' is already attached.");
+      }
+
+      attachedNamedEvents[this.eventName_] = this;
+    }
   };
 
   // Unregisters a callback.
@@ -188,9 +298,22 @@
       return;
     }
 
-    this.listeners_.splice(idx, 1);
+    var removedListener = this.listeners_.splice(idx, 1)[0];
+    this.attachmentStrategy_.onRemovedListener(removedListener);
+
     if (this.listeners_.length == 0) {
-      this.detach_(true);
+      var i = allAttachedEvents.indexOf(this);
+      if (i >= 0)
+        delete allAttachedEvents[i];
+      if (!this.eventName_)
+        return;
+
+      if (!attachedNamedEvents[this.eventName_]) {
+        throw new Error("chrome.Event '" + this.eventName_ +
+                        "' is not attached.");
+      }
+
+      delete attachedNamedEvents[this.eventName_];
     }
   };
 
@@ -203,16 +326,21 @@
 
   // Test if any callbacks are registered for this event.
   chrome.Event.prototype.hasListeners = function() {
+    return this.getListenerCount() > 0;
+  };
+
+  // Return the number of listeners on this event.
+  chrome.Event.prototype.getListenerCount = function() {
     if (!this.eventOptions_.supportsListeners)
       throw new Error("This event does not support listeners.");
-    return this.listeners_.length > 0;
+    return this.listeners_.length;
   };
 
   // Returns the index of the given callback if registered, or -1 if not
   // found.
   chrome.Event.prototype.findListener_ = function(cb) {
     for (var i = 0; i < this.listeners_.length; i++) {
-      if (this.listeners_[i] == cb) {
+      if (this.listeners_[i].callback == cb) {
         return i;
       }
     }
@@ -220,21 +348,21 @@
     return -1;
   };
 
-  // Dispatches this event object to all listeners, passing all supplied
-  // arguments to this function each listener.
-  chrome.Event.prototype.dispatch = function(varargs) {
+  chrome.Event.prototype.dispatch_ = function(args, listenerIDs) {
     if (!this.eventOptions_.supportsListeners)
       throw new Error("This event does not support listeners.");
-    var args = Array.prototype.slice.call(arguments);
     var validationErrors = this.validateEventArgs_(args);
     if (validationErrors) {
       console.error(validationErrors);
       return {validationErrors: validationErrors};
     }
+
+    var listeners = this.attachmentStrategy_.getListenersByIDs(listenerIDs);
+
     var results = [];
-    for (var i = 0; i < this.listeners_.length; i++) {
+    for (var i = 0; i < listeners.length; i++) {
       try {
-        var result = this.listeners_[i].apply(null, args);
+        var result = this.dispatchToListener(listeners[i].callback, args);
         if (result !== undefined)
           results.push(result);
       } catch (e) {
@@ -244,39 +372,22 @@
     }
     if (results.length)
       return {results: results};
-  };
+  }
 
-  // Attaches this event object to its name.  Only one object can have a given
-  // name.
-  chrome.Event.prototype.attach_ = function() {
-    AttachEvent(this.eventName_);
-    allAttachedEvents[allAttachedEvents.length] = this;
-    if (!this.eventName_)
-      return;
+  // Can be overridden to support custom dispatching.
+  chrome.Event.prototype.dispatchToListener = function(callback, args) {
+    return callback.apply(null, args);
+  }
 
-    if (attachedNamedEvents[this.eventName_]) {
-      throw new Error("chrome.Event '" + this.eventName_ +
-                      "' is already attached.");
-    }
-
-    attachedNamedEvents[this.eventName_] = this;
+  // Dispatches this event object to all listeners, passing all supplied
+  // arguments to this function each listener.
+  chrome.Event.prototype.dispatch = function(varargs) {
+    return this.dispatch_(Array.prototype.slice.call(arguments), undefined);
   };
 
   // Detaches this event object from its name.
-  chrome.Event.prototype.detach_ = function(manual) {
-    var i = allAttachedEvents.indexOf(this);
-    if (i >= 0)
-      delete allAttachedEvents[i];
-    DetachEvent(this.eventName_, manual);
-    if (!this.eventName_)
-      return;
-
-    if (!attachedNamedEvents[this.eventName_]) {
-      throw new Error("chrome.Event '" + this.eventName_ +
-                      "' is not attached.");
-    }
-
-    delete attachedNamedEvents[this.eventName_];
+  chrome.Event.prototype.detach_ = function() {
+    this.attachmentStrategy_.detach(false);
   };
 
   chrome.Event.prototype.destroy_ = function() {
@@ -363,7 +474,7 @@
     for (var i = 0; i < allAttachedEvents.length; ++i) {
       var event = allAttachedEvents[i];
       if (event)
-        event.detach_(false);
+        event.detach_();
     }
   };
 

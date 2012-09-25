@@ -12,9 +12,10 @@
 #include "chrome/browser/bookmarks/bookmark_extension_api_constants.h"
 #include "chrome/browser/bookmarks/bookmark_extension_helpers.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
+#include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/bookmark_node_data.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
-#include "chrome/browser/extensions/extension_event_router.h"
+#include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
 #include "chrome/browser/extensions/extension_web_ui.h"
 #include "chrome/browser/prefs/pref_service.h"
@@ -57,7 +58,7 @@ const BookmarkNode* GetNodeFromArguments(BookmarkModel* model,
 bool GetNodesFromArguments(BookmarkModel* model, const ListValue* args,
     size_t args_index, std::vector<const BookmarkNode*>* nodes) {
 
-  ListValue* ids;
+  const ListValue* ids;
   if (!args->GetList(args_index, &ids))
     return false;
 
@@ -173,7 +174,7 @@ void BookmarkManagerExtensionEventRouter::DispatchEvent(const char* event_name,
   std::string json_args;
   base::JSONWriter::Write(args, &json_args);
   profile_->GetExtensionEventRouter()->DispatchEventToRenderers(
-      event_name, json_args, NULL, GURL());
+      event_name, json_args, NULL, GURL(), extensions::EventFilteringInfo());
 }
 
 void BookmarkManagerExtensionEventRouter::DispatchDragEvent(
@@ -223,7 +224,7 @@ void BookmarkManagerExtensionEventRouter::ClearBookmarkNodeData() {
 }
 
 bool ClipboardBookmarkManagerFunction::CopyOrCut(bool cut) {
-  BookmarkModel* model = profile()->GetBookmarkModel();
+  BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile());
   std::vector<const BookmarkNode*> nodes;
   EXTENSION_FUNCTION_VALIDATE(GetNodesFromArguments(model, args_.get(),
                                                     0, &nodes));
@@ -244,7 +245,7 @@ bool CutBookmarkManagerFunction::RunImpl() {
 bool PasteBookmarkManagerFunction::RunImpl() {
   if (!EditBookmarksEnabled())
     return false;
-  BookmarkModel* model = profile()->GetBookmarkModel();
+  BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile());
   const BookmarkNode* parent_node = GetNodeFromArguments(model, args_.get());
   if (!parent_node) {
     error_ = keys::kNoParentError;
@@ -273,21 +274,21 @@ bool PasteBookmarkManagerFunction::RunImpl() {
 bool CanPasteBookmarkManagerFunction::RunImpl() {
   if (!EditBookmarksEnabled())
     return false;
-  BookmarkModel* model = profile()->GetBookmarkModel();
+  BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile());
   const BookmarkNode* parent_node = GetNodeFromArguments(model, args_.get());
   if (!parent_node) {
     error_ = keys::kNoParentError;
     return false;
   }
   bool can_paste = bookmark_utils::CanPasteFromClipboard(parent_node);
-  result_.reset(Value::CreateBooleanValue(can_paste));
+  SetResult(Value::CreateBooleanValue(can_paste));
   return true;
 }
 
 bool SortChildrenBookmarkManagerFunction::RunImpl() {
   if (!EditBookmarksEnabled())
     return false;
-  BookmarkModel* model = profile()->GetBookmarkModel();
+  BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile());
   const BookmarkNode* parent_node = GetNodeFromArguments(model, args_.get());
   if (!parent_node) {
     error_ = keys::kNoParentError;
@@ -371,7 +372,7 @@ bool BookmarkManagerGetStringsFunction::RunImpl() {
 
   ChromeURLDataManager::DataSource::SetFontAndTextDirection(localized_strings);
 
-  result_.reset(localized_strings);
+  SetResult(localized_strings);
 
   // This is needed because unlike the rest of these functions, this class
   // inherits from AsyncFunction directly, rather than BookmarkFunction.
@@ -383,7 +384,7 @@ bool BookmarkManagerGetStringsFunction::RunImpl() {
 bool StartDragBookmarkManagerFunction::RunImpl() {
   if (!EditBookmarksEnabled())
     return false;
-  BookmarkModel* model = profile()->GetBookmarkModel();
+  BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile());
   std::vector<const BookmarkNode*> nodes;
   EXTENSION_FUNCTION_VALIDATE(
       GetNodesFromArguments(model, args_.get(), 0, &nodes));
@@ -408,7 +409,7 @@ bool DropBookmarkManagerFunction::RunImpl() {
   if (!EditBookmarksEnabled())
     return false;
 
-  BookmarkModel* model = profile()->GetBookmarkModel();
+  BookmarkModel* model =BookmarkModelFactory::GetForProfile(profile());
 
   int64 id;
   std::string id_string;
@@ -462,7 +463,7 @@ bool DropBookmarkManagerFunction::RunImpl() {
 }
 
 bool GetSubtreeBookmarkManagerFunction::RunImpl() {
-  BookmarkModel* model = profile()->GetBookmarkModel();
+  BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile());
   const BookmarkNode* node;
   int64 id;
   std::string id_string;
@@ -490,12 +491,12 @@ bool GetSubtreeBookmarkManagerFunction::RunImpl() {
   } else {
     bookmark_extension_helpers::AddNode(node, json.get(), true);
   }
-  result_.reset(json.release());
+  SetResult(json.release());
   return true;
 }
 
 bool CanEditBookmarkManagerFunction::RunImpl() {
-  result_.reset(Value::CreateBooleanValue(
+  SetResult(Value::CreateBooleanValue(
       profile_->GetPrefs()->GetBoolean(prefs::kEditBookmarksEnabled)));
   return true;
 }
@@ -513,6 +514,6 @@ bool CanOpenNewWindowsBookmarkFunction::RunImpl() {
     can_open_new_windows = false;
 #endif  // OS_WIN
 
-  result_.reset(Value::CreateBooleanValue(can_open_new_windows));
+  SetResult(Value::CreateBooleanValue(can_open_new_windows));
   return true;
 }

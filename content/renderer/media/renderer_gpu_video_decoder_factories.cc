@@ -4,6 +4,9 @@
 
 #include "content/renderer/media/renderer_gpu_video_decoder_factories.h"
 
+#include <GLES2/gl2.h>
+#include <GLES2/gl2ext.h>
+
 #include "base/bind.h"
 #include "base/synchronization/waitable_event.h"
 #include "content/common/child_thread.h"
@@ -15,14 +18,11 @@
 RendererGpuVideoDecoderFactories::~RendererGpuVideoDecoderFactories() {}
 RendererGpuVideoDecoderFactories::RendererGpuVideoDecoderFactories(
     GpuChannelHost* gpu_channel_host, MessageLoop* message_loop,
-    const base::WeakPtr<WebGraphicsContext3DCommandBufferImpl>& context)
+    WebGraphicsContext3DCommandBufferImpl* context)
     : message_loop_(message_loop),
-      gpu_channel_host_(gpu_channel_host),
-      context_(context) {
-  DCHECK(context_);
-  context_->DetachFromThread();
+      gpu_channel_host_(gpu_channel_host) {
   if (MessageLoop::current() == message_loop_) {
-    AsyncGetContext(NULL);
+    AsyncGetContext(context, NULL);
     return;
   }
   // Threaded compositor requires us to wait for the context to be acquired.
@@ -32,12 +32,20 @@ RendererGpuVideoDecoderFactories::RendererGpuVideoDecoderFactories(
       // Unretained to avoid ref/deref'ing |*this|, which is not yet stored in a
       // scoped_refptr.  Safe because the Wait() below keeps us alive until this
       // task completes.
-      base::Unretained(this), &waiter));
+      base::Unretained(this),
+      // OK to pass raw because the pointee is only deleted on the compositor
+      // thread, and only as the result of a PostTask from the render thread
+      // which can only happen after this function returns, so our PostTask will
+      // run first.
+      context,
+      &waiter));
   waiter.Wait();
 }
 
 void RendererGpuVideoDecoderFactories::AsyncGetContext(
+    WebGraphicsContext3DCommandBufferImpl* context,
     base::WaitableEvent* waiter) {
+  context_ = context->AsWeakPtr();
   if (context_)
     context_->makeContextCurrent();
   if (waiter)
@@ -64,7 +72,7 @@ void RendererGpuVideoDecoderFactories::AsyncCreateVideoDecodeAccelerator(
       media::VideoDecodeAccelerator** vda,
       base::WaitableEvent* waiter) {
   DCHECK_EQ(MessageLoop::current(), message_loop_);
-  if (context_) {
+  if (context_ && context_->GetCommandBufferProxy()) {
     *vda = gpu_channel_host_->CreateVideoDecoder(
         context_->GetCommandBufferProxy()->GetRouteID(),
         profile, client);
@@ -109,8 +117,10 @@ void RendererGpuVideoDecoderFactories::AsyncCreateTextures(
     gles2->TexParameteri(texture_target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     gles2->TexParameterf(texture_target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     gles2->TexParameterf(texture_target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    gles2->TexImage2D(texture_target, 0, GL_RGBA, size.width(), size.height(),
-                      0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+    if (texture_target == GL_TEXTURE_2D) {
+      gles2->TexImage2D(texture_target, 0, GL_RGBA, size.width(), size.height(),
+                        0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+    }
   }
   // We need a glFlush here to guarantee the decoder (in the GPU process) can
   // use the texture ids we return here.  Since textures are expected to be

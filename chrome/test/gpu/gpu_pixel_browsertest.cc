@@ -9,6 +9,7 @@
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/window_snapshot/window_snapshot.h"
 #include "chrome/common/chrome_paths.h"
@@ -20,6 +21,7 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/test/browser_test_utils.h"
 #include "content/test/gpu/test_switches.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_util.h"
@@ -94,12 +96,8 @@ class GpuPixelBrowserTest : public InProcessBrowserTest {
   }
 
   virtual void SetUpCommandLine(CommandLine* command_line) {
-    InProcessBrowserTest::SetUpCommandLine(command_line);
     command_line->AppendSwitchASCII(switches::kTestGLLib,
                                     "libllvmpipe.so");
-
-    // This enables DOM automation for tab contents.
-    EnableDOMAutomation();
   }
 
   virtual void SetUpInProcessBrowserTestFixture() {
@@ -165,8 +163,8 @@ class GpuPixelBrowserTest : public InProcessBrowserTest {
     js_call << new_bounds.width() << ", " << new_bounds.height();
     js_call << ");";
 
-    ASSERT_TRUE(ui_test_utils::ExecuteJavaScript(
-        browser()->GetActiveWebContents()->GetRenderViewHost(),
+    ASSERT_TRUE(content::ExecuteJavaScript(
+        chrome::GetActiveWebContents(browser())->GetRenderViewHost(),
         L"", js_call.str()));
 
     std::string message;
@@ -373,7 +371,7 @@ class GpuPixelBrowserTest : public InProcessBrowserTest {
   // have if the tab contents have the desired size.
   gfx::Rect GetNewTabContainerBounds(const gfx::Size& desired_size) {
     gfx::Rect container_rect;
-    browser()->GetActiveWebContents()->GetContainerBounds(&container_rect);
+    chrome::GetActiveWebContents(browser())->GetContainerBounds(&container_rect);
     // Size cannot be negative, so use a point.
     gfx::Point correction(
         desired_size.width() - container_rect.size().width(),
@@ -393,7 +391,7 @@ class GpuPixelBrowserTest : public InProcessBrowserTest {
 
     gfx::Rect root_bounds = browser()->window()->GetBounds();
     gfx::Rect tab_contents_bounds;
-    browser()->GetActiveWebContents()->GetContainerBounds(
+    chrome::GetActiveWebContents(browser())->GetContainerBounds(
         &tab_contents_bounds);
 
     gfx::Rect snapshot_bounds(tab_contents_bounds.x() - root_bounds.x(),
@@ -402,7 +400,8 @@ class GpuPixelBrowserTest : public InProcessBrowserTest {
                               tab_contents_bounds.height());
 
     gfx::NativeWindow native_window = browser()->window()->GetNativeWindow();
-    if (!browser::GrabWindowSnapshot(native_window, &png, snapshot_bounds)) {
+    if (!chrome::GrabWindowSnapshotForUser(native_window, &png,
+                                           snapshot_bounds)) {
       LOG(ERROR) << "browser::GrabWindowSnapShot() failed";
       return false;
     }
@@ -451,7 +450,21 @@ class GpuPixelBrowserTest : public InProcessBrowserTest {
   DISALLOW_COPY_AND_ASSIGN(GpuPixelBrowserTest);
 };
 
-IN_PROC_BROWSER_TEST_F(GpuPixelBrowserTest, WebGLGreenTriangle) {
+// http://crbug.com/
+#if defined(OS_WIN)
+#define MAYBE_WebGLGreenTriangle DISABLED_WebGLGreenTriangle
+#else
+#define MAYBE_WebGLGreenTriangle WebGLGreenTriangle
+#endif
+
+// http://crbug.com/136430
+#if defined(OS_WIN)
+#define MAYBE_CSS3DBlueBox FLAKY_CSS3DBlueBox
+#else
+#define MAYBE_CSS3DBlueBox CSS3DBlueBox
+#endif
+
+IN_PROC_BROWSER_TEST_F(GpuPixelBrowserTest, MAYBE_WebGLGreenTriangle) {
   // If test baseline needs to be updated after a given revision, update the
   // following number. If no revision requirement, then 0.
   const int64 ref_img_revision_update = 123489;
@@ -462,7 +475,7 @@ IN_PROC_BROWSER_TEST_F(GpuPixelBrowserTest, WebGLGreenTriangle) {
   RunPixelTest(container_size, url, ref_img_revision_update);
 }
 
-IN_PROC_BROWSER_TEST_F(GpuPixelBrowserTest, CSS3DBlueBox) {
+IN_PROC_BROWSER_TEST_F(GpuPixelBrowserTest, MAYBE_CSS3DBlueBox) {
   // If test baseline needs to be updated after a given revision, update the
   // following number. If no revision requirement, then 0.
   const int64 ref_img_revision_update = 123489;

@@ -160,7 +160,8 @@ std::string ConnectionStateString(ConnectionState state) {
     case STATE_ONLINE:
       return l10n_util::GetStringUTF8(IDS_CHROMEOS_NETWORK_STATE_ONLINE);
     case STATE_CONNECT_REQUESTED:
-      return "Connect Requested";
+      return l10n_util::GetStringUTF8(
+          IDS_CHROMEOS_NETWORK_STATE_CONNECT_REQUESTED);
   }
   return l10n_util::GetStringUTF8(IDS_CHROMEOS_NETWORK_STATE_UNRECOGNIZED);
 }
@@ -298,8 +299,7 @@ void Network::SetState(ConnectionState new_state) {
     set_connection_started(false);
   if (new_state == STATE_FAILURE) {
     VLOG(2) << "Detected Failure state.";
-    if (old_state != STATE_UNKNOWN &&
-        old_state != STATE_IDLE) {
+    if (old_state != STATE_UNKNOWN && old_state != STATE_IDLE) {
       // New failure, the user needs to be notified.
       // Transition STATE_IDLE -> STATE_FAILURE sometimes happens on resume
       // but is not an actual failure as network device is not ready yet.
@@ -311,13 +311,20 @@ void Network::SetState(ConnectionState new_state) {
         error_ = ERROR_UNKNOWN;
       }
     }
-  } else {
+  } else if (new_state != STATE_UNKNOWN) {
+    notify_failure_ = false;
     // State changed, so refresh IP address.
     // Note: blocking DBus call. TODO(stevenjb): refactor this.
     InitIPAddress();
   }
   VLOG(1) << name() << ".State [" << service_path() << "]: " << GetStateString()
           << " (was: " << ConnectionStateString(old_state) << ")";
+}
+
+void Network::SetError(ConnectionError error) {
+  error_ = error;
+  if (error == ERROR_NO_ERROR)
+    notify_failure_ = false;
 }
 
 void Network::SetName(const std::string& name) {

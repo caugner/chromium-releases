@@ -6,7 +6,6 @@
 
 #ifndef CHROME_BROWSER_PROFILES_PROFILE_MANAGER_H_
 #define CHROME_BROWSER_PROFILES_PROFILE_MANAGER_H_
-#pragma once
 
 #include <list>
 #include <vector>
@@ -20,7 +19,7 @@
 #include "base/message_loop.h"
 #include "base/threading/non_thread_safe.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_list_observer.h"
 #include "chrome/browser/ui/startup/startup_types.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -77,7 +76,9 @@ class ProfileManager : public base::NonThreadSafe,
   // If the profile has already been created then callback is called
   // immediately. Should be called on the UI thread.
   void CreateProfileAsync(const FilePath& profile_path,
-                          const CreateCallback& callback);
+                          const CreateCallback& callback,
+                          const string16& name,
+                          const string16& icon_url);
 
   // Initiates default profile creation. If default profile has already been
   // created then the callback is called immediately. Should be called on the
@@ -147,8 +148,8 @@ class ProfileManager : public base::NonThreadSafe,
   // creation of a window from the multi-profile dropdown menu.
   static void FindOrCreateNewWindowForProfile(
       Profile* profile,
-      browser::startup::IsProcessStartup process_startup,
-      browser::startup::IsFirstRun is_first_run,
+      chrome::startup::IsProcessStartup process_startup,
+      chrome::startup::IsFirstRun is_first_run,
       bool always_create);
 
   // Profile::Delegate implementation:
@@ -165,7 +166,8 @@ class ProfileManager : public base::NonThreadSafe,
   // Directories are named "profile_1", "profile_2", etc., in sequence of
   // creation. (Because directories can be removed, however, it may be the case
   // that at some point the list of numbered profiles is not continuous.)
-  static void CreateMultiProfileAsync();
+  static void CreateMultiProfileAsync(const string16& name,
+                                     const string16& icon_url);
 
   // Register multi-profile related preferences in Local State.
   static void RegisterPrefs(PrefService* prefs);
@@ -313,12 +315,12 @@ class ProfileManager : public base::NonThreadSafe,
 #endif
 
 #if !defined(OS_ANDROID)
-  class BrowserListObserver : public BrowserList::Observer {
+  class BrowserListObserver : public chrome::BrowserListObserver {
    public:
     explicit BrowserListObserver(ProfileManager* manager);
     virtual ~BrowserListObserver();
 
-    // BrowserList::Observer implementation.
+    // chrome::BrowserListObserver implementation.
     virtual void OnBrowserAdded(Browser* browser) OVERRIDE;
     virtual void OnBrowserRemoved(Browser* browser) OVERRIDE;
     virtual void OnBrowserSetLastActive(Browser* browser) OVERRIDE;
@@ -336,7 +338,7 @@ class ProfileManager : public base::NonThreadSafe,
   // On startup we launch the active profiles in the order they became active
   // during the last run. This is why they are kept in a list, not in a set.
   std::vector<Profile*> active_profiles_;
-  bool shutdown_started_;
+  bool closing_all_browsers_;
 
   DISALLOW_COPY_AND_ASSIGN(ProfileManager);
 };

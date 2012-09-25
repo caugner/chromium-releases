@@ -13,9 +13,11 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/panels/native_panel.h"
 #include "chrome/browser/ui/panels/panel_manager.h"
 #include "chrome/browser/ui/panels/panel_mouse_watcher.h"
+#include "chrome/browser/ui/panels/test_panel_active_state_observer.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
@@ -216,7 +218,6 @@ bool BasePanelBrowserTest::SkipTestIfCompizWM() {
 }
 
 void BasePanelBrowserTest::SetUpCommandLine(CommandLine* command_line) {
-  EnableDOMAutomation();
   command_line->AppendSwitch(switches::kEnablePanels);
 }
 
@@ -245,20 +246,14 @@ void BasePanelBrowserTest::WaitForPanelActiveState(
     Panel* panel, ActiveState expected_state) {
   DCHECK(expected_state == SHOW_AS_ACTIVE ||
          expected_state == SHOW_AS_INACTIVE);
-  ui_test_utils::WindowedNotificationObserver signal(
-      chrome::NOTIFICATION_PANEL_CHANGED_ACTIVE_STATUS,
-      content::Source<Panel>(panel));
-  if (panel->IsActive() == (expected_state == SHOW_AS_ACTIVE))
-    return;  // Already in required state.
+  PanelActiveStateObserver signal(panel, expected_state == SHOW_AS_ACTIVE);
   signal.Wait();
-  // Verify that transition happened in the desired direction.
-  EXPECT_TRUE(panel->IsActive() == (expected_state == SHOW_AS_ACTIVE));
 }
 
 void BasePanelBrowserTest::WaitForWindowSizeAvailable(Panel* panel) {
   scoped_ptr<NativePanelTesting> panel_testing(
       CreateNativePanelTesting(panel));
-  ui_test_utils::WindowedNotificationObserver signal(
+  content::WindowedNotificationObserver signal(
       chrome::NOTIFICATION_PANEL_WINDOW_SIZE_KNOWN,
       content::Source<Panel>(panel));
   if (panel_testing->IsWindowSizeKnown())
@@ -270,7 +265,7 @@ void BasePanelBrowserTest::WaitForWindowSizeAvailable(Panel* panel) {
 void BasePanelBrowserTest::WaitForBoundsAnimationFinished(Panel* panel) {
   scoped_ptr<NativePanelTesting> panel_testing(
       CreateNativePanelTesting(panel));
-  ui_test_utils::WindowedNotificationObserver signal(
+  content::WindowedNotificationObserver signal(
       chrome::NOTIFICATION_PANEL_BOUNDS_ANIMATIONS_FINISHED,
       content::Source<Panel>(panel));
   if (!panel_testing->IsAnimatingBounds())
@@ -281,7 +276,7 @@ void BasePanelBrowserTest::WaitForBoundsAnimationFinished(Panel* panel) {
 
 void BasePanelBrowserTest::WaitForExpansionStateChanged(
     Panel* panel, Panel::ExpansionState expansion_state) {
-  ui_test_utils::WindowedNotificationObserver signal(
+  content::WindowedNotificationObserver signal(
       chrome::NOTIFICATION_PANEL_CHANGED_EXPANSION_STATE,
       content::Source<Panel>(panel));
   if (panel->expansion_state() == expansion_state)
@@ -302,7 +297,7 @@ Panel* BasePanelBrowserTest::CreatePanelWithParams(
   base::mac::ScopedNSAutoreleasePool autorelease_pool;
 #endif
 
-  ui_test_utils::WindowedNotificationObserver observer(
+  content::WindowedNotificationObserver observer(
       content::NOTIFICATION_LOAD_STOP,
       content::NotificationService::AllSources());
 
@@ -335,6 +330,10 @@ Panel* BasePanelBrowserTest::CreatePanelWithParams(
     // browser to "deactivate" the newly created panel.
     if (params.expected_active_state == SHOW_AS_INACTIVE &&
         ui::GuessWindowManager() == ui::WM_ICE_WM) {
+      // Wait for new panel to become active before deactivating to ensure
+      // the activated notification is consumed before we wait for the panel
+      // to become inactive.
+      WaitForPanelActiveState(panel, SHOW_AS_ACTIVE);
       browser()->window()->Activate();
     }
 #endif
@@ -396,7 +395,7 @@ NativePanelTesting* BasePanelBrowserTest::CreateNativePanelTesting(
 void BasePanelBrowserTest::CreateTestTabContents(Browser* browser) {
   TabContents* tab_contents = new TabContents(
       WebContentsTester::CreateTestWebContents(browser->profile(), NULL));
-  browser->AddTab(tab_contents, content::PAGE_TRANSITION_LINK);
+  chrome::AddTab(browser, tab_contents, content::PAGE_TRANSITION_LINK);
 }
 
 scoped_refptr<Extension> BasePanelBrowserTest::CreateExtension(
@@ -437,7 +436,7 @@ void BasePanelBrowserTest::CloseWindowAndWait(Panel* panel) {
   // message pump and wait for the notification.
   PanelManager* manager = PanelManager::GetInstance();
   int panel_count = manager->num_panels();
-  ui_test_utils::WindowedNotificationObserver signal(
+  content::WindowedNotificationObserver signal(
       chrome::NOTIFICATION_PANEL_CLOSED,
       content::Source<Panel>(panel));
   panel->Close();
@@ -460,7 +459,7 @@ void BasePanelBrowserTest::CloseWindowAndWait(Panel* panel) {
 void BasePanelBrowserTest::MoveMouseAndWaitForExpansionStateChange(
     Panel* panel,
     const gfx::Point& position) {
-  ui_test_utils::WindowedNotificationObserver signal(
+  content::WindowedNotificationObserver signal(
       chrome::NOTIFICATION_PANEL_CHANGED_EXPANSION_STATE,
       content::Source<Panel>(panel));
   MoveMouse(position);

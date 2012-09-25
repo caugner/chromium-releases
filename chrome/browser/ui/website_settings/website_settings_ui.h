@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_WEBSITE_SETTINGS_WEBSITE_SETTINGS_UI_H_
 #define CHROME_BROWSER_UI_WEBSITE_SETTINGS_WEBSITE_SETTINGS_UI_H_
-#pragma once
 
 #include <string>
 #include <vector>
@@ -15,12 +14,10 @@
 #include "chrome/common/content_settings_types.h"
 #include "ui/gfx/native_widget_types.h"
 
-class CookieInfoList;
+
 class GURL;
-class PermissionInfoList;
 class Profile;
 class WebsiteSettings;
-
 namespace content {
 struct SSLStatus;
 }
@@ -61,6 +58,8 @@ class WebsiteSettingsUI {
     ContentSetting setting;
     // The global default settings for this permission |type|.
     ContentSetting default_setting;
+    // The settings source e.g. user, extensions, policy, ... .
+    content_settings::SettingSource source;
   };
 
   // |IdentityInfo| contains information about the site's identity and
@@ -72,6 +71,8 @@ class WebsiteSettingsUI {
     std::string site_identity;
     // Status of the site's identity.
     WebsiteSettings::SiteIdentityStatus identity_status;
+    // Helper to get the status text to display to the user.
+    string16 GetIdentityStatusText() const;
     // Textual description of the site's identity status that is displayed to
     // the user.
     std::string identity_status_description;
@@ -84,17 +85,30 @@ class WebsiteSettingsUI {
     std::string connection_status_description;
   };
 
+  typedef std::vector<CookieInfo> CookieInfoList;
+  typedef std::vector<PermissionInfo> PermissionInfoList;
+
   virtual ~WebsiteSettingsUI();
 
-  // Returns the resource ID of the UI string for the given permission |type|.
-  static int PermissionTypeToUIStringID(ContentSettingsType type);
+  // Returns the UI string for the given permission |type|.
+  static string16 PermissionTypeToUIString(ContentSettingsType type);
 
-  // Returns the resource ID of the UI string for the given permission |value|.
-  static int PermissionValueToUIStringID(ContentSetting value);
+  // Returns the UI string for the given permission |value|, used in the
+  // permission-changing menu. Generally this will be a verb in the imperative
+  // form, e.g. "ask", "allow", "block".
+  static string16 PermissionValueToUIString(ContentSetting value);
+
+  // Returns the UI string describing the action taken for a permission,
+  // including why that action was taken. E.g. "Allowed by you",
+  // "Blocked by default".
+  static string16 PermissionActionToUIString(
+      ContentSetting setting,
+      ContentSetting default_setting,
+      content_settings::SettingSource source);
 
   // Returns the icon for the given permission |type| and |setting|.
   static const gfx::Image& GetPermissionIcon(ContentSettingsType type,
-                                       ContentSetting setting);
+                                             ContentSetting setting);
 
   // Returns the identity icon for the given identity |status|.
   static const gfx::Image& GetIdentityIcon(
@@ -103,6 +117,9 @@ class WebsiteSettingsUI {
   // Returns the connection icon for the given connection |status|.
   static const gfx::Image& GetConnectionIcon(
       WebsiteSettings::SiteConnectionStatus status);
+
+  // Returns the icon to show along with the first visit information.
+  static const gfx::Image& GetFirstVisitIcon(const string16& first_visit);
 
   // Sets cookie information.
   virtual void SetCookieInfo(const CookieInfoList& cookie_info_list) = 0;
@@ -118,11 +135,7 @@ class WebsiteSettingsUI {
   virtual void SetFirstVisit(const string16& first_visit) = 0;
 };
 
-class CookieInfoList : public std::vector<WebsiteSettingsUI::CookieInfo> {
-};
-
-class PermissionInfoList
-    : public std::vector<WebsiteSettingsUI::PermissionInfo> {
-};
+typedef WebsiteSettingsUI::CookieInfoList CookieInfoList;
+typedef WebsiteSettingsUI::PermissionInfoList PermissionInfoList;
 
 #endif  // CHROME_BROWSER_UI_WEBSITE_SETTINGS_WEBSITE_SETTINGS_UI_H_

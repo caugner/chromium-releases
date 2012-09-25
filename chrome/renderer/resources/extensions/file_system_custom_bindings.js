@@ -7,6 +7,7 @@
 var chromeHidden = requireNative('chrome_hidden').GetChromeHidden();
 var fileSystemNatives = requireNative('file_system_natives');
 var GetIsolatedFileSystem = fileSystemNatives.GetIsolatedFileSystem;
+var lastError = require('lastError');
 
 chromeHidden.registerCustomHook('fileSystem', function(bindingsAPI) {
   var apiFunctions = bindingsAPI.apiFunctions;
@@ -18,7 +19,8 @@ chromeHidden.registerCustomHook('fileSystem', function(bindingsAPI) {
       return [fileSystemName, relativePath, callback];
     });
   }
-  ['getDisplayPath', 'getWritableFileEntry'].forEach(bindFileEntryFunction);
+  ['getDisplayPath', 'getWritableFileEntry', 'isWritableFileEntry']
+      .forEach(bindFileEntryFunction);
 
   function bindFileEntryCallback(functionName) {
     apiFunctions.setCustomCallback(functionName,
@@ -35,13 +37,11 @@ chromeHidden.registerCustomHook('fileSystem', function(bindingsAPI) {
           fs.root.getFile(baseName, {}, function(fileEntry) {
             callback(fileEntry);
           }, function(fileError) {
-            chrome.extension.lastError = {"message":
-                'Error getting fileEntry, code: ' + fileError.code};
+            lastError.set('Error getting fileEntry, code: ' + fileError.code);
             callback();
           });
         } catch (e) {
-          chrome.extension.lastError = {"message":
-              'Error in event handler for onLaunched: ' + e.stack};
+          lastError.set('Error in event handler for onLaunched: ' + e.stack);
           callback();
         }
       }

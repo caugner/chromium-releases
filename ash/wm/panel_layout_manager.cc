@@ -128,7 +128,7 @@ void PanelLayoutManager::ToggleMinimize(aura::Window* panel) {
     panel->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_NORMAL);
 
     gfx::Rect new_bounds(old_bounds);
-    const gfx::Rect* restore_bounds = GetRestoreBounds(panel);
+    const gfx::Rect* restore_bounds = GetRestoreBoundsInScreen(panel);
     if (restore_bounds) {
       new_bounds.set_height(restore_bounds->height());
       new_bounds.set_y(old_bounds.bottom() - restore_bounds->height());
@@ -138,7 +138,7 @@ void PanelLayoutManager::ToggleMinimize(aura::Window* panel) {
   } else {
     const gfx::Rect& old_bounds = panel->bounds();
     panel->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_MINIMIZED);
-    SetRestoreBounds(panel, old_bounds);
+    SetRestoreBoundsInParent(panel, old_bounds);
     SetChildBounds(panel,
                    gfx::Rect(old_bounds.x(),
                              old_bounds.bottom() - kMinimizedHeight,
@@ -243,11 +243,14 @@ void PanelLayoutManager::OnWindowActivated(aura::Window* active,
 ////////////////////////////////////////////////////////////////////////////////
 // PanelLayoutManager private implementation:
 void PanelLayoutManager::Relayout() {
+  if (!launcher_ || !launcher_->widget())
+    return;
+
   if (in_layout_)
     return;
   AutoReset<bool> auto_reset_in_layout(&in_layout_, true);
 
-  int launcher_top = launcher_->widget()->GetWindowScreenBounds().y();
+  int launcher_top = launcher_->widget()->GetWindowBoundsInScreen().y();
   aura::Window* active_panel = NULL;
   for (PanelList::iterator iter = panel_windows_.begin();
        iter != panel_windows_.end(); ++iter) {
@@ -351,7 +354,7 @@ void PanelLayoutManager::UpdateCallout(aura::Window* active_panel) {
 void PanelLayoutManager::ShowCalloutHelper(aura::Window* active_panel) {
   DCHECK(active_panel);
   gfx::Rect bounds = active_panel->GetBoundsInRootWindow();
-  gfx::Rect callout_bounds = callout_widget_->GetWindowScreenBounds();
+  gfx::Rect callout_bounds = callout_widget_->GetWindowBoundsInScreen();
   callout_bounds.set_x(
       bounds.x() + (bounds.width() - callout_bounds.width()) / 2);
   callout_bounds.set_y(bounds.bottom());

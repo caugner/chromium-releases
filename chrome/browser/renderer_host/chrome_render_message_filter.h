@@ -4,14 +4,13 @@
 
 #ifndef CHROME_BROWSER_RENDERER_HOST_CHROME_RENDER_MESSAGE_FILTER_H_
 #define CHROME_BROWSER_RENDERER_HOST_CHROME_RENDER_MESSAGE_FILTER_H_
-#pragma once
 
 #include <string>
 #include <vector>
 
 #include "base/file_path.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop_helpers.h"
+#include "base/sequenced_task_runner_helpers.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/content_settings.h"
 #include "content/public/browser/browser_message_filter.h"
@@ -77,10 +76,11 @@ class ChromeRenderMessageFilter : public content::BrowserMessageFilter {
   void OnLaunchNaCl(const GURL& manifest_url,
                     int socket_count,
                     IPC::Message* reply_msg);
+  void OnGetReadonlyPnaclFd(const std::string& filename,
+                            IPC::Message* reply_msg);
+  void OnNaClCreateTemporaryFile(IPC::Message* reply_msg);
 #endif
   void OnDnsPrefetch(const std::vector<std::string>& hostnames);
-  void OnRendererHistograms(int sequence_number,
-                            const std::vector<std::string>& histogram_info);
   void OnResourceTypeStats(const WebKit::WebCache::ResourceTypeStats& stats);
   void OnUpdatedCacheStats(const WebKit::WebCache::UsageStats& stats);
   void OnFPS(int routing_id, float fps);
@@ -117,6 +117,14 @@ class ChromeRenderMessageFilter : public content::BrowserMessageFilter {
                                   const std::string& event_name);
   void OnExtensionRemoveLazyListener(const std::string& extension_id,
                                      const std::string& event_name);
+  void OnExtensionAddFilteredListener(const std::string& extension_id,
+                                      const std::string& event_name,
+                                      const base::DictionaryValue& filter,
+                                      bool lazy);
+  void OnExtensionRemoveFilteredListener(const std::string& extension_id,
+                                         const std::string& event_name,
+                                         const base::DictionaryValue& filter,
+                                         bool lazy);
   void OnExtensionCloseChannel(int port_id, bool connection_error);
   void OnExtensionRequestForIOThread(
       int routing_id,
@@ -125,6 +133,7 @@ class ChromeRenderMessageFilter : public content::BrowserMessageFilter {
                                   int sequence_id);
   void OnExtensionUnloadAck(const std::string& extension_id);
   void OnExtensionGenerateUniqueID(int* unique_id);
+  void OnExtensionResumeRequests(int route_id);
   void OnAllowDatabase(int render_view_id,
                        const GURL& origin_url,
                        const GURL& top_origin_url,

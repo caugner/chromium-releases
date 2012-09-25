@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_LOGIN_WEBUI_LOGIN_DISPLAY_H_
 #define CHROME_BROWSER_CHROMEOS_LOGIN_WEBUI_LOGIN_DISPLAY_H_
-#pragma once
 
 #include <string>
 #include <vector>
@@ -51,7 +50,8 @@ class WebUILoginDisplay : public LoginDisplay,
   virtual void LoginAsGuest() OVERRIDE;
   virtual void Signout() OVERRIDE;
   virtual void CreateAccount() OVERRIDE;
-  virtual void UserSelected(const std::string& username) OVERRIDE;
+  virtual void OnUserDeselected() OVERRIDE;
+  virtual void OnUserSelected(const std::string& username) OVERRIDE;
   virtual void RemoveUser(const std::string& username) OVERRIDE;
   virtual void ShowEnterpriseEnrollmentScreen() OVERRIDE;
   virtual void SetWebUIHandler(

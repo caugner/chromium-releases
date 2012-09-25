@@ -30,6 +30,7 @@
           'dependencies': [
             'installer_util',
             '../base/base.gyp:base',
+            '../chrome/chrome.gyp:launcher_support',
             '../google_update/google_update.gyp:google_update',
           ],
           'include_dirs': [
@@ -87,8 +88,8 @@
           'sources': [
             'installer/setup/compat_checks_unittest.cc',
             'installer/setup/setup_constants.cc',
-            'installer/util/browser_distribution_unittest.cc',
             'installer/util/channel_info_unittest.cc',
+            'installer/util/callback_work_item_unittest.cc',
             'installer/util/copy_reg_key_work_item_unittest.cc',
             'installer/util/copy_tree_work_item_unittest.cc',
             'installer/util/create_dir_work_item_unittest.cc',
@@ -153,6 +154,7 @@
                 # (generated_resources.grd) doesn't match the generated file
                 # (installer_util_strings.h).
                 '<(SHARED_INTERMEDIATE_DIR)/installer_util_strings/installer_util_strings.h',
+                '<(SHARED_INTERMEDIATE_DIR)/installer_util_strings/installer_util_strings.rc',
               ],
               'action': ['python',
                          '<(create_string_rc_py)',
@@ -169,6 +171,52 @@
               '<(SHARED_INTERMEDIATE_DIR)/installer_util_strings',
             ],
           },
+        },
+        {
+          'target_name': 'launcher_support',
+          'type': 'static_library',
+          'include_dirs': [
+            '..',
+          ],
+          'direct_dependent_settings': {
+            'include_dirs': [
+              '..',
+            ],
+          },
+          'dependencies': [
+            '<(DEPTH)/base/base.gyp:base',
+          ],
+          'sources': [
+            'installer/launcher_support/chrome_launcher_support.cc',
+            'installer/launcher_support/chrome_launcher_support.h',
+          ],
+        },
+        {
+          'target_name': 'launcher_support64',
+          'type': 'static_library',
+          'include_dirs': [
+            '..',
+          ],
+          'direct_dependent_settings': {
+            'include_dirs': [
+              '..',
+            ],
+          },
+          'defines': [
+              '<@(nacl_win64_defines)',
+          ], 
+              'dependencies': [
+              '<(DEPTH)/base/base.gyp:base_nacl_win64',
+          ],
+          'configurations': {
+            'Common_Base': {
+              'msvs_target_platform': 'x64',
+            },
+          },
+          'sources': [
+            'installer/launcher_support/chrome_launcher_support.cc',
+            'installer/launcher_support/chrome_launcher_support.h',
+          ],
         },
         {
           'target_name': 'mini_installer_test',
@@ -214,6 +262,7 @@
             'installer_util_strings',
             '../base/base.gyp:base',
             '../build/temp_gyp/googleurl.gyp:googleurl',
+            '../chrome/chrome.gyp:common_constants',
             '../chrome_frame/chrome_frame.gyp:chrome_tab_idl',
             '../chrome_frame/chrome_frame.gyp:npchrome_frame',
             '../breakpad/breakpad.gyp:breakpad_handler',
@@ -932,12 +981,12 @@
             ['branding=="Chrome" and buildtype=="Official"', {
               'actions': [
                 {
-		  # copy_keychain_reauthorize.sh explains why this isn't in a
-		  # 'copies' block, but briefly: this is a prebuilt signed
-		  # binary component that relies on a correct signature to
-		  # function properly, and a normal 'copies' block sadly makes
-		  # a trivial modification to the file such that its signature
-		  # is no longer valid.
+                  # copy_keychain_reauthorize.sh explains why this isn't in a
+                  # 'copies' block, but briefly: this is a prebuilt signed
+                  # binary component that relies on a correct signature to
+                  # function properly, and a normal 'copies' block sadly makes
+                  # a trivial modification to the file such that its signature
+                  # is no longer valid.
                   'action_name': 'Copy keychain_reauthorize',
                   'variables': {
                     'keychain_reauthorize_path': 'tools/build/mac/copy_keychain_reauthorize.sh',

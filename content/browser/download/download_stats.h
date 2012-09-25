@@ -6,7 +6,6 @@
 
 #ifndef CONTENT_BROWSER_DOWNLOAD_DOWNLOAD_STATS_H_
 #define CONTENT_BROWSER_DOWNLOAD_DOWNLOAD_STATS_H_
-#pragma once
 
 #include <string>
 
@@ -141,10 +140,11 @@ void RecordOpensOutstanding(int size);
 // Record how long we block the file thread at a time.
 void RecordContiguousWriteTime(base::TimeDelta time_blocked);
 
-// Record overall bandwidth stats at the network end.
-void RecordNetworkBandwidth(size_t length,
-                            base::TimeDelta elapsed_time,
-                            base::TimeDelta paused_time);
+// Record the percentage of time we had to block the network (i.e.
+// how often, for each download, something other than the network
+// was the bottleneck).
+void RecordNetworkBlockage(base::TimeDelta resource_handler_lifetime,
+                           base::TimeDelta resource_handler_blocked_time);
 
 // Record overall bandwidth stats at the file end.
 void RecordFileBandwidth(size_t length,

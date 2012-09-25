@@ -202,7 +202,7 @@ class ChromeEndureBaseTest(perf.BasePerfTest):
       })
 
   def _RunEndureTest(self, webapp_name, tab_title_substring, test_description,
-                     do_scenario):
+                     do_scenario, frame_xpath=''):
     """The main test harness function to run a general Chrome Endure test.
 
     After a test has performed any setup work and has navigated to the proper
@@ -219,6 +219,9 @@ class ChromeEndureBaseTest(perf.BasePerfTest):
       do_scenario: A callable to be invoked that implements the scenario to be
           performed by this test.  The callable is invoked iteratively for the
           duration of the test.
+      frame_xpath: The string xpath of the frame in which to inject javascript
+          to clear chromedriver's cache (a temporary workaround until the
+          WebDriver team changes how they handle their DOM node cache).
     """
     self._num_errors = 0
     self._test_start_time = time.time()
@@ -254,6 +257,21 @@ class ChromeEndureBaseTest(perf.BasePerfTest):
                      (self._iteration_num, remaining_time))
 
       do_scenario()
+      # Clear ChromeDriver's DOM node cache so its growth doesn't affect the
+      # results of Chrome Endure.
+      # TODO(dennisjeffrey): Once the WebDriver team implements changes to
+      # handle their DOM node cache differently, we need to revisit this.  It
+      # may no longer be necessary at that point to forcefully delete the cache.
+      # Additionally, the Javascript below relies on an internal property of
+      # WebDriver that may change at any time.  This is only a temporary
+      # workaround to stabilize the Chrome Endure test results.
+      js = """
+        (function() {
+          delete document.$wdc_;
+          window.domAutomationController.send('done');
+        })();
+      """
+      self.ExecuteJavascript(js, frame_xpath=frame_xpath)
 
     self._remote_inspector_client.StopTimelineEventMonitoring()
     # TODO(dmikurube): Call HeapProfilerDump when PyAuto supports dumping for
@@ -427,6 +445,13 @@ class ChromeEndureBaseTest(perf.BasePerfTest):
         graph_name='%s%s-V8MemUsed' % (webapp_name, test_description),
         units_x='seconds')
 
+    # V8 memory allocated.
+    v8_mem_allocated = v8_info['v8_memory_allocated'] / 1024.0  # Convert to KB.
+    self._OutputPerfGraphValue(
+        'V8MemoryAllocated', [(elapsed_time, v8_mem_allocated)], 'KB',
+        graph_name='%s%s-V8MemAllocated' % (webapp_name, test_description),
+        units_x='seconds')
+
     # Deep Memory Profiler result.
     if self._deep_memory_profile:
       deep_memory_profile_results = {}
@@ -454,6 +479,7 @@ class ChromeEndureBaseTest(perf.BasePerfTest):
     logging.info('  Tab process private memory: %d KB' %
                  proc_info['tab_private_mem'])
     logging.info('  V8 memory used: %f KB' % v8_mem_used)
+    logging.info('  V8 memory allocated: %f KB' % v8_mem_allocated)
 
     # Output any new timeline events that have occurred.
     if self._events_to_output:
@@ -711,7 +737,8 @@ class ChromeEndureGmailTest(ChromeEndureBaseTest):
                            self._driver.find_element_by_name, 'to'))
 
     self._RunEndureTest(self._WEBAPP_NAME, self._TAB_TITLE_SUBSTRING,
-                        test_description, scenario)
+                        test_description, scenario,
+                        frame_xpath=self._FRAME_XPATH)
 
   # TODO(dennisjeffrey): Remove this test once the Gmail team is done analyzing
   # the results after the test runs for a period of time.
@@ -762,7 +789,8 @@ class ChromeEndureGmailTest(ChromeEndureBaseTest):
         time.sleep(120)
 
     self._RunEndureTest(self._WEBAPP_NAME, self._TAB_TITLE_SUBSTRING,
-                        test_description, scenario)
+                        test_description, scenario,
+                        frame_xpath=self._FRAME_XPATH)
 
   def testGmailAlternateThreadlistConversation(self):
     """Alternates between threadlist view and conversation view.
@@ -805,7 +833,8 @@ class ChromeEndureGmailTest(ChromeEndureBaseTest):
       time.sleep(1)
 
     self._RunEndureTest(self._WEBAPP_NAME, self._TAB_TITLE_SUBSTRING,
-                        test_description, scenario)
+                        test_description, scenario,
+                        frame_xpath=self._FRAME_XPATH)
 
   def testGmailAlternateTwoLabels(self):
     """Continuously alternates between two labels.
@@ -844,7 +873,8 @@ class ChromeEndureGmailTest(ChromeEndureBaseTest):
       time.sleep(1)
 
     self._RunEndureTest(self._WEBAPP_NAME, self._TAB_TITLE_SUBSTRING,
-                        test_description, scenario)
+                        test_description, scenario,
+                        frame_xpath=self._FRAME_XPATH)
 
   def testGmailExpandCollapseConversation(self):
     """Continuously expands/collapses all messages in a conversation.
@@ -895,7 +925,8 @@ class ChromeEndureGmailTest(ChromeEndureBaseTest):
       time.sleep(1)
 
     self._RunEndureTest(self._WEBAPP_NAME, self._TAB_TITLE_SUBSTRING,
-                        test_description, scenario)
+                        test_description, scenario,
+                        frame_xpath=self._FRAME_XPATH)
 
 
 class ChromeEndureDocsTest(ChromeEndureBaseTest):
@@ -928,6 +959,16 @@ class ChromeEndureDocsTest(ChromeEndureBaseTest):
     """
     test_description = 'AlternateLists'
 
+    def sort_menu_setup():
+      # Open and close the "Sort" menu to get some DOM nodes to appear that are
+      # used by the scenario in this test.
+      sort_xpath = '//div[text()="Sort"]'
+      self.WaitForDomNode(sort_xpath)
+      sort_button = self._GetElement(self._driver.find_element_by_xpath,
+                                     sort_xpath)
+      sort_button.click()
+      sort_button.click()
+
     def scenario():
       # Click the "Shared with me" button, wait for 1 second, click the
       # "My Drive" button, wait for 1 second.
@@ -936,24 +977,25 @@ class ChromeEndureDocsTest(ChromeEndureBaseTest):
       if not self._ClickElementByXpath(
           self._driver, '//span[starts-with(text(), "Shared with me")]'):
         self._num_errors += 1
-      self.WaitForDomNode('//div[text()="Share date"]')
+      try:
+        self.WaitForDomNode('//div[text()="Share date"]')
+      except pyauto_errors.JSONInterfaceError:
+        # This case can occur when the page reloads; set things up again.
+        sort_menu_setup()
       time.sleep(1)
 
       # Click the "My Drive" button and wait for a resulting div to appear.
       if not self._ClickElementByXpath(
           self._driver, '//span[starts-with(text(), "My Drive")]'):
         self._num_errors += 1
-      self.WaitForDomNode('//div[text()="Quota used"]')
+      try:
+        self.WaitForDomNode('//div[text()="Quota used"]')
+      except pyauto_errors.JSONInterfaceError:
+        # This case can occur when the page reloads; set things up again.
+        sort_menu_setup()
       time.sleep(1)
 
-    # Open and close the "Sort" menu to get some DOM nodes to appear that are
-    # used by the scenario in this test.
-    sort_xpath = '//div[text()="Sort"]'
-    self.WaitForDomNode(sort_xpath)
-    sort_button = self._GetElement(self._driver.find_element_by_xpath,
-                                   sort_xpath)
-    sort_button.click()
-    sort_button.click()
+    sort_menu_setup()
 
     self._RunEndureTest(self._WEBAPP_NAME, self._TAB_TITLE_SUBSTRING,
                         test_description, scenario)
@@ -999,7 +1041,7 @@ class ChromeEndurePlusTest(ChromeEndureBaseTest):
         self._num_errors += 1
 
       try:
-        self.WaitForDomNode('//div[text()="Friends"]')
+        self.WaitForDomNode('//span[contains(., "in Friends")]')
       except (pyauto_errors.JSONInterfaceError,
               pyauto_errors.JavascriptRuntimeError):
         self._num_errors += 1
@@ -1014,7 +1056,7 @@ class ChromeEndurePlusTest(ChromeEndureBaseTest):
         self._num_errors += 1
 
       try:
-        self.WaitForDomNode('//div[text()="Family"]')
+        self.WaitForDomNode('//span[contains(., "in Family")]')
       except (pyauto_errors.JSONInterfaceError,
               pyauto_errors.JavascriptRuntimeError):
         self._num_errors += 1

@@ -4,7 +4,6 @@
 
 #ifndef UI_VIEWS_BUTTON_DRAG_UTILS_H_
 #define UI_VIEWS_BUTTON_DRAG_UTILS_H_
-#pragma once
 
 #include "base/string16.h"
 #include "ui/views/views_export.h"
@@ -19,6 +18,10 @@ namespace ui {
 class OSExchangeData;
 }
 
+namespace views {
+class Widget;
+}
+
 namespace button_drag_utils {
 
 // Sets url and title on data as well as setting a suitable image for dragging.
@@ -26,7 +29,8 @@ namespace button_drag_utils {
 VIEWS_EXPORT void SetURLAndDragImage(const GURL& url,
                                      const string16& title,
                                      const gfx::ImageSkia& icon,
-                                     ui::OSExchangeData* data);
+                                     ui::OSExchangeData* data,
+                                     views::Widget* widget);
 
 }  // namespace drag_utils
 

@@ -4,7 +4,6 @@
 
 #ifndef WEBKIT_PLUGINS_NPAPI_PLUGIN_GROUP_H_
 #define WEBKIT_PLUGINS_NPAPI_PLUGIN_GROUP_H_
-#pragma once
 
 #include <string>
 #include <vector>
@@ -88,7 +87,8 @@ class WEBKIT_PLUGINS_EXPORT PluginGroup {
 
   // Parse a version string as used by a plug-in. This method is more lenient
   // in accepting weird version strings than Version::GetFromString().
-  static Version* CreateVersionFromString(const string16& version_string);
+  static void CreateVersionFromString(const string16& version_string,
+                                      Version* version);
 
   const std::vector<webkit::WebPluginInfo>& web_plugin_infos() const {
     return web_plugin_infos_;
@@ -128,6 +128,11 @@ class WEBKIT_PLUGINS_EXPORT PluginGroup {
   std::vector<webkit::WebPluginInfo>& GetPluginsContainer() {
     return web_plugin_infos_;
   }
+
+  // Removes leading zeros from each of the components of a version string.
+  // The input version string should be in this format: XXX.YYY.ZZZ...etc.
+  static std::string RemoveLeadingZerosFromVersionComponents(
+      const std::string& version);
 
   std::string identifier_;
   string16 group_name_;

@@ -69,12 +69,15 @@ bool ResourceDispatcherHostDelegate::ShouldForceDownloadResource(
 
 void ResourceDispatcherHostDelegate::OnResponseStarted(
     net::URLRequest* request,
+    ResourceContext* resource_context,
     ResourceResponse* response,
-    IPC::Message::Sender* sender) {
+    IPC::Sender* sender) {
 }
 
 void ResourceDispatcherHostDelegate::OnRequestRedirected(
+    const GURL& redirect_url,
     net::URLRequest* request,
+    ResourceContext* resource_context,
     ResourceResponse* response) {
 }
 

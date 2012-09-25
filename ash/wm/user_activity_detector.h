@@ -4,7 +4,6 @@
 
 #ifndef ASH_WM_USER_ACTIVITY_DETECTOR_H_
 #define ASH_WM_USER_ACTIVITY_DETECTOR_H_
-#pragma once
 
 #include "ash/ash_export.h"
 #include "base/basictypes.h"
@@ -22,13 +21,14 @@ class ASH_EXPORT UserActivityDetector : public aura::EventFilter {
  public:
   // Minimum amount of time between notifications to observers that a video is
   // playing.
-  static const double kNotifyIntervalSec;
+  static const double kNotifyIntervalMs;
 
   UserActivityDetector();
   virtual ~UserActivityDetector();
 
   void set_now_for_test(base::TimeTicks now) { now_for_test_ = now; }
 
+  bool HasObserver(UserActivityObserver* observer) const;
   void AddObserver(UserActivityObserver* observer);
   void RemoveObserver(UserActivityObserver* observer);
 

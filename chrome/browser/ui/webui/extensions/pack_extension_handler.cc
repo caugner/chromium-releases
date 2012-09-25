@@ -5,6 +5,7 @@
 #include "chrome/browser/ui/webui/extensions/pack_extension_handler.h"
 
 #include "chrome/browser/extensions/extension_creator.h"
+#include "chrome/browser/ui/chrome_select_file_policy.h"
 #include "base/bind.h"
 #include "base/utf_string_conversions.h"
 #include "content/public/browser/web_contents.h"
@@ -74,13 +75,15 @@ void PackExtensionHandler::OnPackSuccess(const FilePath& crx_file,
       "PackExtensionOverlay.showSuccessMessage", arguments);
 }
 
-void PackExtensionHandler::OnPackFailure(const std::string& error,
-                                         ExtensionCreator::ErrorType type) {
-  if (type == ExtensionCreator::kCRXExists) {
+void PackExtensionHandler::OnPackFailure(
+    const std::string& error,
+    extensions::ExtensionCreator::ErrorType type) {
+  if (type == extensions::ExtensionCreator::kCRXExists) {
     base::StringValue error_str(error);
     base::StringValue extension_path_str(extension_path_);
     base::StringValue key_path_str(private_key_path_);
-    base::FundamentalValue overwrite_flag(ExtensionCreator::kOverwriteCRX);
+    base::FundamentalValue overwrite_flag(
+        extensions::ExtensionCreator::kOverwriteCRX);
 
     web_ui()->CallJavascriptFunction(
         "ExtensionSettings.askToOverrideWarning", error_str, extension_path_str,
@@ -154,11 +157,11 @@ void PackExtensionHandler::HandleSelectFilePathMessage(
   if (!args->GetString(1, &operation))
     NOTREACHED();
 
-  SelectFileDialog::Type type = SelectFileDialog::SELECT_FOLDER;
-  SelectFileDialog::FileTypeInfo info;
+  ui::SelectFileDialog::Type type = ui::SelectFileDialog::SELECT_FOLDER;
+  ui::SelectFileDialog::FileTypeInfo info;
   int file_type_index = 0;
   if (select_type == "file")
-    type = SelectFileDialog::SELECT_OPEN_FILE;
+    type = ui::SelectFileDialog::SELECT_OPEN_FILE;
 
   string16 select_title;
   if (operation == "load") {
@@ -177,11 +180,13 @@ void PackExtensionHandler::HandleSelectFilePathMessage(
     NOTREACHED();
   }
 
-  load_extension_dialog_ = SelectFileDialog::Create(this);
+  load_extension_dialog_ = ui::SelectFileDialog::Create(
+      this, new ChromeSelectFilePolicy(web_ui()->GetWebContents()));
   load_extension_dialog_->SelectFile(
       type, select_title, FilePath(), &info, file_type_index,
-      FILE_PATH_LITERAL(""), web_ui()->GetWebContents(),
-      web_ui()->GetWebContents()->GetView()->GetTopLevelNativeWindow(), NULL);
+      FILE_PATH_LITERAL(""),
+      web_ui()->GetWebContents()->GetView()->GetTopLevelNativeWindow(),
+      NULL);
 }
 
 void PackExtensionHandler::ShowAlert(const std::string& message) {

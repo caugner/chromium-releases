@@ -5,80 +5,119 @@
 #include "content/browser/web_contents/web_contents_view_android.h"
 
 #include "base/logging.h"
+#include "content/browser/android/content_view_core_impl.h"
+#include "content/browser/renderer_host/render_widget_host_view_android.h"
+#include "content/browser/renderer_host/render_view_host_factory.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
+#include "content/public/browser/interstitial_page.h"
+#include "content/public/browser/web_contents_delegate.h"
 
 namespace content {
 WebContentsView* CreateWebContentsView(
     WebContentsImpl* web_contents,
     WebContentsViewDelegate* delegate,
     RenderViewHostDelegateView** render_view_host_delegate_view) {
-  WebContentsViewAndroid* rv = new WebContentsViewAndroid(web_contents);
+  WebContentsViewAndroid* rv = new WebContentsViewAndroid(
+      web_contents, delegate);
   *render_view_host_delegate_view = rv;
   return rv;
 }
-}
 
 WebContentsViewAndroid::WebContentsViewAndroid(
-    content::WebContents* web_contents)
-    : web_contents_(web_contents) {
+    WebContentsImpl* web_contents,
+    WebContentsViewDelegate* delegate)
+    : web_contents_(web_contents),
+      delegate_(delegate) {
 }
 
 WebContentsViewAndroid::~WebContentsViewAndroid() {
 }
 
-void WebContentsViewAndroid::CreateView(const gfx::Size& initial_size) {
-  NOTIMPLEMENTED();
+void WebContentsViewAndroid::SetContentViewCore(
+    ContentViewCoreImpl* content_view_core) {
+  content_view_core_ = content_view_core;
+  RenderWidgetHostViewAndroid* rwhv = static_cast<RenderWidgetHostViewAndroid*>(
+      web_contents_->GetRenderWidgetHostView());
+  if (rwhv)
+    rwhv->SetContentViewCore(content_view_core_);
+  if (web_contents_->ShowingInterstitialPage()) {
+    NOTIMPLEMENTED() << "not upstreamed yet";
+  }
 }
 
-content::RenderWidgetHostView* WebContentsViewAndroid::CreateViewForWidget(
-    content::RenderWidgetHost* render_widget_host) {
-  NOTIMPLEMENTED();
-  return NULL;
+void WebContentsViewAndroid::CreateView(const gfx::Size& initial_size) {
+}
+
+RenderWidgetHostView* WebContentsViewAndroid::CreateViewForWidget(
+    RenderWidgetHost* render_widget_host) {
+  if (render_widget_host->GetView()) {
+    // During testing, the view will already be set up in most cases to the
+    // test view, so we don't want to clobber it with a real one. To verify that
+    // this actually is happening (and somebody isn't accidentally creating the
+    // view twice), we check for the RVH Factory, which will be set when we're
+    // making special ones (which go along with the special views).
+    DCHECK(RenderViewHostFactory::has_factory());
+    return render_widget_host->GetView();
+  }
+  // Note that while this instructs the render widget host to reference
+  // |native_view_|, this has no effect without also instructing the
+  // native view (i.e. ContentView) how to obtain a reference to this widget in
+  // order to paint it. See ContentView::GetRenderWidgetHostViewAndroid for an
+  // example of how this is achieved for InterstitialPages.
+  RenderWidgetHostImpl* rwhi = RenderWidgetHostImpl::From(render_widget_host);
+  return new RenderWidgetHostViewAndroid(rwhi, content_view_core_);
 }
 
 gfx::NativeView WebContentsViewAndroid::GetNativeView() const {
-  NOTIMPLEMENTED();
-  return NULL;
+  return content_view_core_;
 }
 
 gfx::NativeView WebContentsViewAndroid::GetContentNativeView() const {
-  NOTIMPLEMENTED();
-  return NULL;
+  return content_view_core_;
 }
 
 gfx::NativeWindow WebContentsViewAndroid::GetTopLevelNativeWindow() const {
-  NOTIMPLEMENTED();
-  return NULL;
+  return content_view_core_;
 }
 
 void WebContentsViewAndroid::GetContainerBounds(gfx::Rect* out) const {
-  NOTIMPLEMENTED();
+  if (content_view_core_)
+    *out = content_view_core_->GetBounds();
 }
 
 void WebContentsViewAndroid::SetPageTitle(const string16& title) {
-  NOTIMPLEMENTED();
+  if (content_view_core_)
+    content_view_core_->SetTitle(title);
 }
 
 void WebContentsViewAndroid::OnTabCrashed(base::TerminationStatus status,
                                           int error_code) {
-  NOTIMPLEMENTED();
+  NOTIMPLEMENTED() << "not upstreamed yet";
 }
 
 void WebContentsViewAndroid::SizeContents(const gfx::Size& size) {
-  NOTIMPLEMENTED();
+  // TODO(klobag): Do we need to do anything else?
+  RenderWidgetHostView* rwhv = web_contents_->GetRenderWidgetHostView();
+  if (rwhv)
+    rwhv->SetSize(size);
 }
 
-void WebContentsViewAndroid::RenderViewCreated(content::RenderViewHost* host) {
-  NOTIMPLEMENTED();
+void WebContentsViewAndroid::RenderViewCreated(RenderViewHost* host) {
 }
 
 void WebContentsViewAndroid::Focus() {
-  NOTIMPLEMENTED();
+  if (web_contents_->ShowingInterstitialPage())
+    web_contents_->GetInterstitialPage()->Focus();
+  else
+    web_contents_->GetRenderWidgetHostView()->Focus();
 }
 
 void WebContentsViewAndroid::SetInitialFocus() {
-  NOTIMPLEMENTED();
+  if (web_contents_->FocusLocationBarByDefault())
+    web_contents_->SetFocusToLocationBar(false);
+  else
+    Focus();
 }
 
 void WebContentsViewAndroid::StoreFocus() {
@@ -113,13 +152,15 @@ void WebContentsViewAndroid::CloseTabAfterEventTracking() {
 }
 
 gfx::Rect WebContentsViewAndroid::GetViewBounds() const {
-  NOTIMPLEMENTED();
-  return gfx::Rect();
+  if (content_view_core_)
+    return content_view_core_->GetBounds();
+  else
+    return gfx::Rect();
 }
 
-void WebContentsViewAndroid::ShowContextMenu(
-    const content::ContextMenuParams& params) {
-  NOTIMPLEMENTED();
+void WebContentsViewAndroid::ShowContextMenu(const ContextMenuParams& params) {
+  if (delegate_.get())
+    delegate_->ShowContextMenu(params);
 }
 
 void WebContentsViewAndroid::ShowPopupMenu(
@@ -130,13 +171,16 @@ void WebContentsViewAndroid::ShowPopupMenu(
     const std::vector<WebMenuItem>& items,
     bool right_aligned,
     bool allow_multiple_selection) {
-  NOTIMPLEMENTED();
+  if (content_view_core_) {
+    content_view_core_->ShowSelectPopupMenu(
+        items, selected_item, allow_multiple_selection);
+  }
 }
 
 void WebContentsViewAndroid::StartDragging(
     const WebDropData& drop_data,
     WebKit::WebDragOperationsMask allowed_ops,
-    const SkBitmap& image,
+    const gfx::ImageSkia& image,
     const gfx::Point& image_offset) {
   NOTIMPLEMENTED();
 }
@@ -146,9 +190,17 @@ void WebContentsViewAndroid::UpdateDragCursor(WebKit::WebDragOperation op) {
 }
 
 void WebContentsViewAndroid::GotFocus() {
-  NOTIMPLEMENTED();
+  // This is only used in the views FocusManager stuff but it bleeds through
+  // all subclasses. http://crbug.com/21875
 }
 
+// This is called when we the renderer asks us to take focus back (i.e., it has
+// iterated past the last focusable element on the page).
 void WebContentsViewAndroid::TakeFocus(bool reverse) {
-  NOTIMPLEMENTED();
+  if (web_contents_->GetDelegate() &&
+      web_contents_->GetDelegate()->TakeFocus(reverse))
+    return;
+  web_contents_->GetRenderWidgetHostView()->Focus();
 }
+
+} // namespace content

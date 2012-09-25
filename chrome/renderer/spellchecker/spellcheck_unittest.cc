@@ -18,7 +18,6 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebTextCheckingCompletion.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebTextCheckingResult.h"
 
-
 namespace {
 
 FilePath GetHunspellDirectory() {
@@ -52,7 +51,8 @@ class SpellCheckTest : public testing::Test {
     FilePath hunspell_directory = GetHunspellDirectory();
     EXPECT_FALSE(hunspell_directory.empty());
     base::PlatformFile file = base::CreatePlatformFile(
-        SpellCheckCommon::GetVersionedFileName(language, hunspell_directory),
+        chrome::spellcheck_common::GetVersionedFileName(language,
+            hunspell_directory),
         base::PLATFORM_FILE_OPEN | base::PLATFORM_FILE_READ, NULL, NULL);
     spell_check_->Init(
         file, std::vector<std::string>(), language);
@@ -339,6 +339,25 @@ TEST_F(SpellCheckTest, SpellCheckStrings_EN_US) {
     // acknowledgement but not acknowledgements" <http://crbug.com/128896>
     {L"acknowledgement", true},
     {L"acknowledgements", true},
+
+    // Issue 123290: "Spellchecker should treat numbers as word characters"
+    {L"0th", true},
+    {L"1st", true},
+    {L"2nd", true},
+    {L"3rd", true},
+    {L"4th", true},
+    {L"5th", true},
+    {L"6th", true},
+    {L"7th", true},
+    {L"8th", true},
+    {L"9th", true},
+    {L"10th", true},
+    {L"100th", true},
+    {L"1000th", true},
+    {L"25", true},
+    {L"2012", true},
+    {L"100,000,000", true},
+    {L"3.141592653", true},
   };
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kTestCases); ++i) {
@@ -771,6 +790,55 @@ TEST_F(SpellCheckTest, GetAutoCorrectionWord_EN_US) {
 
     // Check for spelling.
     EXPECT_EQ(expected_autocorrect_word, autocorrect_word);
+  }
+}
+
+// Verify that our SpellCheck::SpellCheckWord() returns false when it checks
+// misspelled words.
+TEST_F(SpellCheckTest, MisspelledWords) {
+  static const struct {
+    const char* language;
+    const wchar_t* input;
+  } kTestCases[] = {
+    {
+      // A misspelled word for English
+      "en-US",
+      L"aaaaaaaaaa",
+    }, {
+      // A misspelled word for Greek.
+      "el-GR",
+      L"\x03B1\x03B1\x03B1\x03B1\x03B1\x03B1\x03B1\x03B1\x03B1\x03B1",
+    }, {
+      // A misspelled word for Hebrew
+      "he-IL",
+      L"\x05D0\x05D0\x05D0\x05D0\x05D0\x05D0\x05D0\x05D0\x05D0\x05D0",
+    }, {
+      // Hindi
+      "hi-IN",
+      L"\x0905\x0905\x0905\x0905\x0905\x0905\x0905\x0905\x0905\x0905",
+    }, {
+      // A misspelled word for Russian
+      "ru-RU",
+      L"\x0430\x0430\x0430\x0430\x0430\x0430\x0430\x0430\x0430\x0430",
+    },
+  };
+
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kTestCases); ++i) {
+    ReinitializeSpellCheck(kTestCases[i].language);
+
+    string16 word(WideToUTF16(kTestCases[i].input));
+    int word_length = static_cast<int>(word.length());
+    int misspelling_start = 0;
+    int misspelling_length = 0;
+    bool result = spell_check()->SpellCheckWord(word.c_str(),
+                                                word_length,
+                                                0,
+                                                &misspelling_start,
+                                                &misspelling_length,
+                                                NULL);
+    EXPECT_FALSE(result);
+    EXPECT_EQ(0, misspelling_start);
+    EXPECT_EQ(word_length, misspelling_length);
   }
 }
 

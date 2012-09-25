@@ -23,8 +23,8 @@
 #include "chrome/browser/ui/tab_contents/core_tab_helper_delegate.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/webui/chrome_web_contents_handler.h"
 #include "chrome/browser/ui/webui/print_preview/print_preview_ui.h"
-#include "chrome/browser/ui/webui/web_dialog_web_contents_delegate.h"
 #include "chrome/common/chrome_content_client.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
@@ -40,6 +40,7 @@
 #include "content/public/browser/web_contents_delegate.h"
 #include "ui/web_dialogs/constrained_web_dialog_ui.h"
 #include "ui/web_dialogs/web_dialog_delegate.h"
+#include "ui/web_dialogs/web_dialog_web_contents_delegate.h"
 #include "webkit/plugins/webplugininfo.h"
 
 using content::NativeWebKeyboardEvent;
@@ -48,6 +49,7 @@ using content::WebContents;
 using content::WebUIMessageHandler;
 using ui::ConstrainedWebDialogDelegate;
 using ui::WebDialogDelegate;
+using ui::WebDialogWebContentsDelegate;
 
 namespace {
 
@@ -175,7 +177,7 @@ class PrintPreviewWebContentDelegate : public WebDialogWebContentsDelegate,
 PrintPreviewWebContentDelegate::PrintPreviewWebContentDelegate(
     Profile* profile,
     TabContents* initiator_tab)
-    : WebDialogWebContentsDelegate(profile),
+    : WebDialogWebContentsDelegate(profile, new ChromeWebContentsHandler),
       tab_(initiator_tab) {}
 
 PrintPreviewWebContentDelegate::~PrintPreviewWebContentDelegate() {}
@@ -417,19 +419,13 @@ TabContents* PrintPreviewTabController::CreatePrintPreviewTab(
     TabContents* initiator_tab) {
   AutoReset<bool> auto_reset(&is_creating_print_preview_tab_, true);
   WebContents* web_contents = initiator_tab->web_contents();
-  Browser* current_browser =
-      browser::FindBrowserWithWebContents(web_contents);
-  if (!current_browser) {
-    if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kChromeFrame)) {
-      Profile* profile =
-          Profile::FromBrowserContext(web_contents->GetBrowserContext());
-      current_browser = Browser::CreateWithParams(
-          Browser::CreateParams(Browser::TYPE_POPUP, profile));
-      if (!current_browser) {
-        NOTREACHED() << "Failed to create popup browser window";
-        return NULL;
-      }
-    } else {
+  Profile* profile =
+      Profile::FromBrowserContext(web_contents->GetBrowserContext());
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kChromeFrame)) {
+    Browser* current_browser = new Browser(
+        Browser::CreateParams(Browser::TYPE_POPUP, profile));
+    if (!current_browser) {
+      NOTREACHED() << "Failed to create popup browser window";
       return NULL;
     }
   }
@@ -440,11 +436,10 @@ TabContents* PrintPreviewTabController::CreatePrintPreviewTab(
       new PrintPreviewTabDelegate(initiator_tab);
   // |web_tab_content_delegate|'s owner is |constrained_web_ui_delegate|.
   PrintPreviewWebContentDelegate* pp_wcd =
-      new PrintPreviewWebContentDelegate(current_browser->profile(),
-                                         initiator_tab);
+      new PrintPreviewWebContentDelegate(profile, initiator_tab);
   ConstrainedWebDialogDelegate* constrained_delegate =
       ui::CreateConstrainedWebDialog(
-          current_browser->profile(),
+          profile,
           web_dialog_delegate,
           pp_wcd,
           initiator_tab);

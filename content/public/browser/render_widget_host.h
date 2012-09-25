@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_PUBLIC_BROWSER_RENDER_WIDGET_HOST_H_
 #define CONTENT_PUBLIC_BROWSER_RENDER_WIDGET_HOST_H_
-#pragma once
 
 #include "base/callback.h"
 #include "content/common/content_export.h"
@@ -181,8 +180,8 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Sender {
   // and synchronously on the other platforms.
   virtual void CopyFromBackingStore(const gfx::Rect& src_rect,
                                     const gfx::Size& accelerated_dest_size,
-                                    skia::PlatformCanvas* output,
-                                    base::Callback<void(bool)> callback) = 0;
+                                    const base::Callback<void(bool)>& callback,
+                                    skia::PlatformCanvas* output) = 0;
 #if defined(TOOLKIT_GTK)
   // Paint the backing store into the target's |dest_rect|.
   virtual bool CopyFromBackingStoreToGtkWindow(const gfx::Rect& dest_rect,
@@ -260,9 +259,8 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Sender {
   // Called to notify the RenderWidget that it has been resized.
   virtual void WasResized() = 0;
 
-  // Access to the implementation's
-  // IPC::Channel::Listener::OnMessageReceived.  Intended only for
-  // test code.
+  // Access to the implementation's IPC::Listener::OnMessageReceived. Intended
+  // only for test code.
 
   // Add a keyboard listener that can handle key presses without requiring
   // focus.

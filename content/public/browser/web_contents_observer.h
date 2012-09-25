@@ -9,7 +9,8 @@
 #include "content/common/content_export.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/common/page_transition_types.h"
-#include "ipc/ipc_channel.h"
+#include "ipc/ipc_listener.h"
+#include "ipc/ipc_sender.h"
 #include "webkit/glue/window_open_disposition.h"
 
 class WebContentsImpl;
@@ -24,8 +25,8 @@ struct Referrer;
 
 // An observer API implemented by classes which are interested in various page
 // load events from WebContents.  They also get a chance to filter IPC messages.
-class CONTENT_EXPORT WebContentsObserver : public IPC::Channel::Listener,
-                                           public IPC::Message::Sender {
+class CONTENT_EXPORT WebContentsObserver : public IPC::Listener,
+                                           public IPC::Sender {
  public:
   // Only one of the two methods below will be called when a RVH is created for
   // a WebContents, depending on whether it's for an interstitial or not.
@@ -35,6 +36,8 @@ class CONTENT_EXPORT WebContentsObserver : public IPC::Channel::Listener,
   virtual void RenderViewDeleted(RenderViewHost* render_view_host) {}
   virtual void RenderViewReady() {}
   virtual void RenderViewGone(base::TerminationStatus status) {}
+  virtual void AboutToNavigateRenderView(
+      RenderViewHost* render_view_host) {}
   virtual void NavigateToPendingEntry(
       const GURL& url,
       NavigationController::ReloadType reload_type) {}
@@ -69,21 +72,23 @@ class CONTENT_EXPORT WebContentsObserver : public IPC::Channel::Listener,
                                       const string16& error_description,
                                       RenderViewHost* render_view_host) {}
   virtual void DocumentAvailableInMainFrame() {}
-  virtual void DocumentLoadedInFrame(int64 frame_id) {}
+  virtual void DocumentLoadedInFrame(int64 frame_id,
+                                     RenderViewHost* render_view_host) {}
   virtual void DidFinishLoad(int64 frame_id,
                              const GURL& validated_url,
-                             bool is_main_frame) {}
+                             bool is_main_frame,
+                             RenderViewHost* render_view_host) {}
   virtual void DidFailLoad(int64 frame_id,
                            const GURL& validated_url,
                            bool is_main_frame,
                            int error_code,
-                           const string16& error_description) {}
+                           const string16& error_description,
+                           RenderViewHost* render_view_host) {}
+  virtual void DidStartLoading(RenderViewHost* render_view_host) {}
+  virtual void DidStopLoading(RenderViewHost* render_view_host) {}
+
   virtual void DidGetUserGesture() {}
   virtual void DidGetIgnoredUIEvent() {}
-  virtual void DidBecomeSelected() {}
-
-  virtual void DidStartLoading() {}
-  virtual void DidStopLoading() {}
   virtual void StopNavigation() {}
 
   virtual void DidOpenURL(const GURL& url,
@@ -97,6 +102,8 @@ class CONTENT_EXPORT WebContentsObserver : public IPC::Channel::Listener,
                                    WindowOpenDisposition disposition,
                                    PageTransition transition,
                                    int64 source_frame_id) {}
+
+  virtual void WasShown() {}
 
   virtual void AppCacheAccessed(const GURL& manifest_url,
                                 bool blocked_by_policy) {}
@@ -119,10 +126,10 @@ class CONTENT_EXPORT WebContentsObserver : public IPC::Channel::Listener,
   // It is safe to delete 'this' from here.
   virtual void WebContentsDestroyed(WebContents* web_contents) {}
 
-  // IPC::Channel::Listener implementation.
+  // IPC::Listener implementation.
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
-  // IPC::Message::Sender implementation.
+  // IPC::Sender implementation.
   virtual bool Send(IPC::Message* message) OVERRIDE;
   int routing_id() const;
 

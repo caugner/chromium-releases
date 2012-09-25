@@ -2,15 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-
 #include "sync/internal_api/debug_info_event_listener.h"
+
 #include "testing/gtest/include/gtest/gtest.h"
+
+namespace syncer {
 
 typedef testing::Test DebugInfoEventListenerTest;
 
-namespace sync_api {
 TEST_F(DebugInfoEventListenerTest, VerifyEventsAdded) {
-  sync_api::DebugInfoEventListener debug_info_event_listener;
+  DebugInfoEventListener debug_info_event_listener;
   debug_info_event_listener.CreateAndAddEvent(
       sync_pb::DebugEventInfo::ENCRYPTION_COMPLETE);
   ASSERT_EQ(debug_info_event_listener.events_.size(), 1U);
@@ -21,17 +22,16 @@ TEST_F(DebugInfoEventListenerTest, VerifyEventsAdded) {
 }
 
 TEST_F(DebugInfoEventListenerTest, VerifyQueueSize) {
-  sync_api::DebugInfoEventListener debug_info_event_listener;
+  DebugInfoEventListener debug_info_event_listener;
   for (int i = 0; i < 10; ++i) {
     debug_info_event_listener.CreateAndAddEvent(
         sync_pb::DebugEventInfo::ENCRYPTION_COMPLETE);
   }
-  ASSERT_EQ(debug_info_event_listener.events_.size(),
-      sync_api::kMaxEntries);
+  ASSERT_EQ(debug_info_event_listener.events_.size(), kMaxEntries);
 }
 
 TEST_F(DebugInfoEventListenerTest, VerifyGetAndClearEvents) {
-  sync_api::DebugInfoEventListener debug_info_event_listener;
+  DebugInfoEventListener debug_info_event_listener;
   debug_info_event_listener.CreateAndAddEvent(
       sync_pb::DebugEventInfo::ENCRYPTION_COMPLETE);
   ASSERT_EQ(debug_info_event_listener.events_.size(), 1U);
@@ -44,4 +44,4 @@ TEST_F(DebugInfoEventListenerTest, VerifyGetAndClearEvents) {
       sync_pb::DebugEventInfo::ENCRYPTION_COMPLETE);
 }
 
-}  // namespace sync_api
+}  // namespace syncer

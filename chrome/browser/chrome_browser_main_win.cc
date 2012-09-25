@@ -91,30 +91,18 @@ void RecordBreakpadStatusUMA(MetricsService* metrics) {
 
 void WarnAboutMinimumSystemRequirements() {
   if (base::win::GetVersion() < base::win::VERSION_XP) {
-    const string16 title = l10n_util::GetStringUTF16(IDS_PRODUCT_NAME);
-    const string16 message =
-        l10n_util::GetStringUTF16(IDS_UNSUPPORTED_OS_PRE_WIN_XP);
-    browser::ShowMessageBox(NULL, title, message,
-                            browser::MESSAGE_BOX_TYPE_WARNING);
+    chrome::ShowMessageBox(NULL,
+        l10n_util::GetStringUTF16(IDS_PRODUCT_NAME),
+        l10n_util::GetStringUTF16(IDS_UNSUPPORTED_OS_PRE_WIN_XP),
+        chrome::MESSAGE_BOX_TYPE_WARNING);
   }
 }
 
-void RecordBrowserStartupTime() {
-  // Calculate the time that has elapsed from our own process creation.
-  FILETIME creation_time = {};
-  FILETIME ignore = {};
-  ::GetProcessTimes(::GetCurrentProcess(), &creation_time, &ignore, &ignore,
-      &ignore);
-
-  RecordPreReadExperimentTime("Startup.BrowserMessageLoopStartTime",
-      base::Time::Now() - base::Time::FromFileTime(creation_time));
-}
-
 void ShowCloseBrowserFirstMessageBox() {
-  const string16 title = l10n_util::GetStringUTF16(IDS_PRODUCT_NAME);
-  const string16 message = l10n_util::GetStringUTF16(IDS_UNINSTALL_CLOSE_APP);
-  browser::ShowMessageBox(NULL, title, message,
-                          browser::MESSAGE_BOX_TYPE_WARNING);
+  chrome::ShowMessageBox(NULL,
+                         l10n_util::GetStringUTF16(IDS_PRODUCT_NAME),
+                         l10n_util::GetStringUTF16(IDS_UNINSTALL_CLOSE_APP),
+                         chrome::MESSAGE_BOX_TYPE_WARNING);
 }
 
 int DoUninstallTasks(bool chrome_still_running) {
@@ -126,7 +114,7 @@ int DoUninstallTasks(bool chrome_still_running) {
     ShowCloseBrowserFirstMessageBox();
     return chrome::RESULT_CODE_UNINSTALL_CHROME_ALIVE;
   }
-  int result = browser::ShowUninstallBrowserPrompt();
+  int result = chrome::ShowUninstallBrowserPrompt();
   if (browser_util::IsBrowserAlreadyRunning()) {
     ShowCloseBrowserFirstMessageBox();
     return chrome::RESULT_CODE_UNINSTALL_CHROME_ALIVE;
@@ -162,6 +150,23 @@ int DoUninstallTasks(bool chrome_still_running) {
 ChromeBrowserMainPartsWin::ChromeBrowserMainPartsWin(
     const content::MainFunctionParams& parameters)
     : ChromeBrowserMainParts(parameters) {
+  if ((base::win::GetVersion() >= base::win::VERSION_WIN7) &&
+      (base::win::IsTouchEnabled())) {
+    CommandLine::ForCurrentProcess()->AppendSwitch(
+        switches::kEnableTouchEvents);
+  }
+  if (base::win::IsMetroProcess()) {
+    typedef const wchar_t* (*GetMetroSwitches)(void);
+    GetMetroSwitches metro_switches_proc = reinterpret_cast<GetMetroSwitches>(
+        GetProcAddress(base::win::GetMetroModule(),
+                       "GetMetroCommandLineSwitches"));
+    string16 metro_switches = (*metro_switches_proc)();
+    if (!metro_switches.empty()) {
+      CommandLine extra_switches(CommandLine::NO_PROGRAM);
+      extra_switches.ParseFromString(metro_switches);
+      CommandLine::ForCurrentProcess()->AppendArguments(extra_switches, false);
+    }
+  }
 }
 
 ChromeBrowserMainPartsWin::~ChromeBrowserMainPartsWin() {
@@ -183,8 +188,8 @@ void ChromeBrowserMainPartsWin::PreMainMessageLoopStart() {
     // Make sure that we know how to handle exceptions from the message loop.
     InitializeWindowProcExceptions();
   }
-  media_device_notifications_window_.reset(
-      new chrome::MediaDeviceNotificationsWindowWin());
+  media_device_notifications_window_ =
+    new chrome::MediaDeviceNotificationsWindowWin();
 }
 
 // static
@@ -295,8 +300,9 @@ bool ChromeBrowserMainPartsWin::CheckMachineLevelInstall() {
   // TODO(tommi): Check if using the default distribution is always the right
   // thing to do.
   BrowserDistribution* dist = BrowserDistribution::GetDistribution();
-  scoped_ptr<Version> version(InstallUtil::GetChromeVersion(dist, true));
-  if (version.get()) {
+  Version version;
+  InstallUtil::GetChromeVersion(dist, true, &version);
+  if (version.IsValid()) {
     FilePath exe_path;
     PathService::Get(base::DIR_EXE, &exe_path);
     std::wstring exe = exe_path.value();

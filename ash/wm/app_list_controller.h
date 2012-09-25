@@ -4,7 +4,6 @@
 
 #ifndef ASH_WM_APP_LIST_CONTROLLER_H_
 #define ASH_WM_APP_LIST_CONTROLLER_H_
-#pragma once
 
 #include "ash/launcher/launcher_icon_observer.h"
 #include "ash/shell_observer.h"
@@ -15,10 +14,11 @@
 #include "ui/aura/focus_change_observer.h"
 #include "ui/aura/root_window_observer.h"
 #include "ui/compositor/layer_animation_observer.h"
-#include "ui/views/widget/widget.h"
+#include "ui/views/widget/widget_observer.h"
 
 namespace app_list {
 class AppListView;
+class PaginationModel;
 }
 
 namespace aura {
@@ -36,7 +36,7 @@ class AppListController : public aura::EventFilter,
                           public aura::FocusChangeObserver,
                           public aura::RootWindowObserver,
                           public ui::ImplicitAnimationObserver,
-                          public views::Widget::Observer,
+                          public views::WidgetObserver,
                           public ShellObserver,
                           public LauncherIconObserver {
  public:
@@ -67,7 +67,8 @@ class AppListController : public aura::EventFilter,
   // Starts show/hide animation.
   void ScheduleAnimation();
 
-  void ProcessLocatedEvent(const aura::LocatedEvent& event);
+  void ProcessLocatedEvent(aura::Window* target,
+                           const aura::LocatedEvent& event);
 
   // Makes app list bubble update its bounds.
   void UpdateBounds();
@@ -93,7 +94,7 @@ class AppListController : public aura::EventFilter,
   // ui::ImplicitAnimationObserver overrides:
   virtual void OnImplicitAnimationsCompleted() OVERRIDE;
 
-  // views::Widget::Observer overrides:
+  // views::WidgetObserver overrides:
   virtual void OnWidgetClosing(views::Widget* widget) OVERRIDE;
 
   // ShellObserver overrides:
@@ -102,15 +103,13 @@ class AppListController : public aura::EventFilter,
   // LauncherIconObserver overrides:
   virtual void OnLauncherIconPositionsChanged() OVERRIDE;
 
+  scoped_ptr<app_list::PaginationModel> pagination_model_;
+
   // Whether we should show or hide app list widget.
   bool is_visible_;
 
   // The AppListView this class manages, owned by its widget.
   app_list::AppListView* view_;
-
-  // Timer to schedule the 2nd step animation, started when the first step
-  // animation is scheduled in ScheduleAnimation.
-  base::OneShotTimer<AppListController> second_animation_timer_;
 
   DISALLOW_COPY_AND_ASSIGN(AppListController);
 };

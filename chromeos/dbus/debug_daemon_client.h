@@ -11,6 +11,8 @@
 #include "chromeos/chromeos_export.h"
 #include "chromeos/dbus/dbus_client_implementation_type.h"
 
+#include <map>
+
 namespace dbus {
 class Bus;
 }  // namespace dbus
@@ -40,6 +42,44 @@ class CHROMEOS_EXPORT DebugDaemonClient {
   // following: "wifi", "ethernet", "cellular" or "none".
   virtual void SetDebugMode(const std::string& subsystem,
                             const SetDebugModeCallback& callback) = 0;
+
+  // Called once GetRoutes() is complete.
+  typedef base::Callback<void(bool succeeded,
+                              const std::vector<std::string>& routes)>
+      GetRoutesCallback;
+  virtual void GetRoutes(bool numeric, bool ipv6,
+                         const GetRoutesCallback& callback) = 0;
+
+  // Called once GetNetworkStatus() is complete.
+  typedef base::Callback<void(bool succeeded, const std::string& status)>
+      GetNetworkStatusCallback;
+
+  // Gets information about network status as json.
+  virtual void GetNetworkStatus(const GetNetworkStatusCallback& callback) = 0;
+
+  // Called once GetModemStatus() is complete.
+  typedef base::Callback<void(bool succeeded, const std::string& status)>
+      GetModemStatusCallback;
+
+  // Gets information about modem status as json.
+  virtual void GetModemStatus(const GetModemStatusCallback& callback) = 0;
+
+  // Called once GetNetworkInterfaces() is complete. Takes two parameters:
+  // - succeeded: information was obtained successfully.
+  // - status: network interfaces information in json. For details, please refer
+  //   to http://gerrit.chromium.org/gerrit/#/c/28045/5/src/helpers/netif.cc
+  typedef base::Callback<void(bool succeeded, const std::string& status)>
+      GetNetworkInterfacesCallback;
+
+  // Gets information about network interfaces as json.
+  virtual void GetNetworkInterfaces(
+      const GetNetworkInterfacesCallback& callback) = 0;
+
+  // Called once GetAllLogs() is complete.
+  typedef base::Callback<void(bool succeeded,
+                              const std::map<std::string, std::string>& logs)>
+      GetAllLogsCallback;
+  virtual void GetAllLogs(const GetAllLogsCallback& callback) = 0;
 
   // Requests to start system/kernel tracing.
   virtual void StartSystemTracing() = 0;

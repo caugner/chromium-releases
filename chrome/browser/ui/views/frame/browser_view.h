@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_FRAME_BROWSER_VIEW_H_
 #define CHROME_BROWSER_UI_VIEWS_FRAME_BROWSER_VIEW_H_
-#pragma once
 
 #include <map>
 #include <string>
@@ -17,6 +16,7 @@
 #include "chrome/browser/infobars/infobar_container.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/search/search_types.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 #include "chrome/browser/ui/views/frame/browser_frame.h"
 #include "chrome/browser/ui/views/unhandled_keyboard_event_handler.h"
@@ -27,6 +27,7 @@
 #include "ui/views/controls/button/button.h"
 #include "ui/views/controls/single_split_view_listener.h"
 #include "ui/views/widget/widget_delegate.h"
+#include "ui/views/widget/widget_observer.h"
 #include "ui/views/window/client_view.h"
 
 #if defined(OS_WIN)
@@ -56,10 +57,15 @@ class JumpList;
 
 #if defined(USE_AURA)
 class BrowserLauncherItemController;
+class SearchViewController;
 #endif
 
 namespace autofill {
 class PasswordGenerator;
+}
+
+namespace content {
+class RenderWidgetHost;
 }
 
 namespace extensions {
@@ -83,7 +89,7 @@ class BrowserView : public BrowserWindow,
                     public TabStripModelObserver,
                     public ui::AcceleratorProvider,
                     public views::WidgetDelegate,
-                    public views::Widget::Observer,
+                    public views::WidgetObserver,
                     public views::ClientView,
                     public InfoBarContainer::Delegate,
                     public views::SingleSplitViewListener,
@@ -210,6 +216,20 @@ class BrowserView : public BrowserWindow,
 
   void SetWindowSwitcherButton(views::Button* button);
 
+  views::Button* window_switcher_button() {
+    return window_switcher_button_;
+  }
+
+  // Called from BookmarkBarView/DownloadShelfView during their show/hide
+  // animations.
+  void ToolbarSizeChanged(bool is_animating);
+
+  // Returns the toolbar background color.
+  SkColor GetToolbarBackgroundColor(chrome::search::Mode::Type mode);
+
+  // Returns the toolbar background image.
+  gfx::ImageSkia* GetToolbarBackgroundImage(chrome::search::Mode::Type mode);
+
 #if defined(USE_ASH)
   BrowserLauncherItemController* launcher_item_controller() const {
     return launcher_item_controller_.get();
@@ -229,7 +249,6 @@ class BrowserView : public BrowserWindow,
   virtual gfx::NativeWindow GetNativeWindow() OVERRIDE;
   virtual BrowserWindowTesting* GetBrowserWindowTesting() OVERRIDE;
   virtual StatusBubble* GetStatusBubble() OVERRIDE;
-  virtual void ToolbarSizeChanged(bool is_animating) OVERRIDE;
   virtual void UpdateTitleBar() OVERRIDE;
   virtual void BookmarkBarStateChanged(
       BookmarkBar::AnimateChangeType change_type) OVERRIDE;
@@ -237,7 +256,8 @@ class BrowserView : public BrowserWindow,
   virtual void SetDevToolsDockSide(DevToolsDockSide side) OVERRIDE;
   virtual void UpdateLoadingAnimations(bool should_animate) OVERRIDE;
   virtual void SetStarredState(bool is_starred) OVERRIDE;
-  virtual void SetZoomIconState(ZoomController::ZoomIconState state) OVERRIDE;
+  virtual void SetZoomIconState(
+      ZoomController::ZoomIconState zoom_icon_state) OVERRIDE;
   virtual void SetZoomIconTooltipPercent(int zoom_percent) OVERRIDE;
   virtual void ShowZoomBubble(int zoom_percent) OVERRIDE;
   virtual gfx::Rect GetRestoredBounds() const OVERRIDE;
@@ -278,7 +298,6 @@ class BrowserView : public BrowserWindow,
   virtual void ConfirmAddSearchProvider(TemplateURL* template_url,
                                         Profile* profile) OVERRIDE;
   virtual void ToggleBookmarkBar() OVERRIDE;
-  virtual void ShowAboutChromeDialog() OVERRIDE;
   virtual void ShowUpdateChromeDialog() OVERRIDE;
   virtual void ShowTaskManager() OVERRIDE;
   virtual void ShowBackgroundPages() OVERRIDE;
@@ -297,7 +316,7 @@ class BrowserView : public BrowserWindow,
   virtual void UserChangedTheme() OVERRIDE;
   virtual int GetExtraRenderViewHeight() const OVERRIDE;
   virtual void WebContentsFocused(content::WebContents* contents) OVERRIDE;
-  virtual void ShowPageInfo(Profile* profile,
+  virtual void ShowPageInfo(content::WebContents* web_contents,
                             const GURL& url,
                             const content::SSLStatus& ssl,
                             bool show_history) OVERRIDE;
@@ -312,8 +331,6 @@ class BrowserView : public BrowserWindow,
       bool* is_keyboard_shortcut) OVERRIDE;
   virtual void HandleKeyboardEvent(
       const content::NativeWebKeyboardEvent& event) OVERRIDE;
-  virtual void ShowCreateWebAppShortcutsDialog(
-      TabContents* tab_contents) OVERRIDE;
   virtual void ShowCreateChromeAppShortcutsDialog(
       Profile*, const extensions::Extension* app) OVERRIDE;
   virtual void Cut() OVERRIDE;
@@ -381,7 +398,7 @@ class BrowserView : public BrowserWindow,
   virtual views::Widget* GetWidget() OVERRIDE;
   virtual const views::Widget* GetWidget() const OVERRIDE;
 
-  // Overridden from views::Widget::Observer
+  // Overridden from views::WidgetObserver:
   virtual void OnWidgetActivationChanged(views::Widget* widget,
                                          bool active) OVERRIDE;
 
@@ -430,11 +447,6 @@ class BrowserView : public BrowserWindow,
   // Returns a new LayoutManager for this browser view. A subclass may
   // override to implement different layout policy.
   virtual views::LayoutManager* CreateLayoutManager() const;
-
-  // Factory Method.
-  // Returns a new ToolbarView for this browser view. A subclass may
-  // override to implement different layout policy.
-  virtual ToolbarView* CreateToolbar() const;
 
   // Browser window related initializations.
   virtual void Init();
@@ -542,11 +554,17 @@ class BrowserView : public BrowserWindow,
   // Exposes resize corner size to BrowserViewLayout.
   gfx::Size GetResizeCornerSize() const;
 
-  // Set the value of |toolbar_| and hook it into the views hierarchy
-  void SetToolbar(ToolbarView* toolbar);
-
   // Create an icon for this window in the launcher (currently only for Ash).
   void CreateLauncherIcon();
+
+  // Forces the LocationBarContainer to the top of the native window stacking
+  // order. This is needed for the Instant extended API when the location bar
+  // can be placed over web contents.
+  void RestackLocationBarContainer();
+
+  // Calls |method| which is either RenderWidgetHost::Cut, ::Copy, or ::Paste
+  // and returns true if the focus is currently on a WebContent.
+  bool DoCutCopyPaste(void (content::RenderWidgetHost::*method)());
 
   // Last focused view that issued a tab traversal.
   int last_focused_view_storage_id_;
@@ -696,6 +714,10 @@ class BrowserView : public BrowserWindow,
   PendingFullscreenRequest fullscreen_request_;
 
   gfx::ScopedSysColorChangeListener color_change_listener_;
+
+#if defined(USE_AURA)
+  scoped_ptr<SearchViewController> search_view_controller_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(BrowserView);
 };

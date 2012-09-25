@@ -29,6 +29,7 @@
 #include "webkit/fileapi/file_system_context.h"
 #include "webkit/fileapi/file_system_file_util.h"
 #include "webkit/fileapi/file_system_operation_context.h"
+#include "webkit/fileapi/file_system_task_runners.h"
 #include "webkit/fileapi/mock_file_system_options.h"
 #include "webkit/fileapi/sandbox_mount_point_provider.h"
 #include "webkit/quota/mock_special_storage_policy.h"
@@ -72,8 +73,7 @@ class FileSystemURLRequestJobTest : public testing::Test {
     // TODO(adamk): Run this on the FILE thread we've created as well.
     file_system_context_ =
         new FileSystemContext(
-            base::MessageLoopProxy::current(),
-            base::MessageLoopProxy::current(),
+            FileSystemTaskRunners::CreateMockTaskRunners(),
             special_storage_policy_, NULL,
             temp_dir_.path(),
             CreateDisallowFileAccessOptions());
@@ -110,7 +110,8 @@ class FileSystemURLRequestJobTest : public testing::Test {
     // Make delegate_ exit the MessageLoop when the request is done.
     delegate_->set_quit_on_complete(true);
     delegate_->set_quit_on_redirect(true);
-    request_.reset(new net::URLRequest(url, delegate_.get()));
+    request_.reset(
+        new net::URLRequest(url, delegate_.get(), &empty_context_));
     if (headers)
       request_->SetExtraRequestHeaders(*headers);
     ASSERT_TRUE(!job_);
@@ -140,17 +141,17 @@ class FileSystemURLRequestJobTest : public testing::Test {
 
   void CreateDirectory(const base::StringPiece& dir_name) {
     FileSystemFileUtil* file_util = file_system_context_->
-        sandbox_provider()->GetFileUtil();
-    FileSystemPath path(GURL("http://remote"),
-                        kFileSystemTypeTemporary,
-                        FilePath().AppendASCII(dir_name));
+        sandbox_provider()->GetFileUtil(kFileSystemTypeTemporary);
+    FileSystemURL url(GURL("http://remote"),
+                      kFileSystemTypeTemporary,
+                      FilePath().AppendASCII(dir_name));
 
     FileSystemOperationContext context(file_system_context_);
     context.set_allowed_bytes_growth(1024);
 
     ASSERT_EQ(base::PLATFORM_FILE_OK, file_util->CreateDirectory(
         &context,
-        path,
+        url,
         false /* exclusive */,
         false /* recursive */));
   }
@@ -158,10 +159,10 @@ class FileSystemURLRequestJobTest : public testing::Test {
   void WriteFile(const base::StringPiece& file_name,
                  const char* buf, int buf_size) {
     FileSystemFileUtil* file_util = file_system_context_->
-        sandbox_provider()->GetFileUtil();
-    FileSystemPath path(GURL("http://remote"),
-                        kFileSystemTypeTemporary,
-                        FilePath().AppendASCII(file_name));
+        sandbox_provider()->GetFileUtil(kFileSystemTypeTemporary);
+    FileSystemURL url(GURL("http://remote"),
+                      kFileSystemTypeTemporary,
+                      FilePath().AppendASCII(file_name));
 
     FileSystemOperationContext context(file_system_context_);
     context.set_allowed_bytes_growth(1024);
@@ -170,7 +171,7 @@ class FileSystemURLRequestJobTest : public testing::Test {
     bool created = false;
     ASSERT_EQ(base::PLATFORM_FILE_OK, file_util->CreateOrOpen(
         &context,
-        path,
+        url,
         base::PLATFORM_FILE_CREATE | base::PLATFORM_FILE_WRITE,
         &handle,
         &created));
@@ -208,6 +209,8 @@ class FileSystemURLRequestJobTest : public testing::Test {
   scoped_refptr<quota::MockSpecialStoragePolicy> special_storage_policy_;
   scoped_refptr<FileSystemContext> file_system_context_;
   base::WeakPtrFactory<FileSystemURLRequestJobTest> weak_factory_;
+
+  net::URLRequestContext empty_context_;
 
   // NOTE: order matters, request must die before delegate
   scoped_ptr<TestDelegate> delegate_;

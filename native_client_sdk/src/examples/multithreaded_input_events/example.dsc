@@ -9,8 +9,8 @@
         'custom_events.h',
         'mt_input_events.cc',
         'shared_queue.h',
-        'thread_safe_ref_count.h'
-      ]
+      ],
+      'LIBS': ['ppapi_cpp', 'ppapi', 'pthread']
     }
   ],
   'DEST': 'examples',

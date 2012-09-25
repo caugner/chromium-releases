@@ -15,7 +15,7 @@
 #include "base/message_loop.h"
 #include "base/string_number_conversions.h"
 #include "base/string_split.h"
-#include "chrome/browser/browser_process_impl.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/audio/audio_handler.h"
 #include "chrome/browser/chromeos/boot_times_loader.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
@@ -32,10 +32,10 @@
 #include "chrome/browser/chromeos/login/authenticator.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
 #include "chrome/browser/chromeos/login/login_wizard.h"
-#include "chrome/browser/chromeos/login/ownership_service.h"
 #include "chrome/browser/chromeos/login/screen_locker.h"
-#include "chrome/browser/chromeos/login/session_manager_observer.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
+#include "chrome/browser/chromeos/login/wallpaper_manager.h"
+#include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/low_memory_observer.h"
 #include "chrome/browser/chromeos/net/cros_network_change_notifier_factory.h"
 #include "chrome/browser/chromeos/net/network_change_notifier_chromeos.h"
@@ -50,12 +50,15 @@
 #include "chrome/browser/chromeos/power/screen_lock_observer.h"
 #include "chrome/browser/chromeos/power/user_activity_notifier.h"
 #include "chrome/browser/chromeos/power/video_activity_notifier.h"
+#include "chrome/browser/chromeos/settings/ownership_service.h"
+#include "chrome/browser/chromeos/settings/session_manager_observer.h"
 #include "chrome/browser/chromeos/system/statistics_provider.h"
 #include "chrome/browser/chromeos/system_key_event_listener.h"
 #include "chrome/browser/chromeos/upgrade_detector_chromeos.h"
 #include "chrome/browser/chromeos/web_socket_proxy_controller.h"
 #include "chrome/browser/chromeos/xinput_hierarchy_changed_event_listener.h"
 #include "chrome/browser/defaults.h"
+#include "chrome/browser/media_gallery/media_device_notifications_chromeos.h"
 #include "chrome/browser/metrics/metrics_service.h"
 #include "chrome/browser/net/chrome_network_delegate.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
@@ -229,12 +232,32 @@ ChromeBrowserMainPartsChromeos::~ChromeBrowserMainPartsChromeos() {
 // content::BrowserMainParts and ChromeBrowserMainExtraParts overrides ---------
 
 void ChromeBrowserMainPartsChromeos::PreEarlyInitialization() {
+  CommandLine* singleton_command_line = CommandLine::ForCurrentProcess();
+
   if (parsed_command_line().HasSwitch(switches::kGuestSession)) {
     // Disable sync and extensions if we're in "browse without sign-in" mode.
-    CommandLine* singleton_command_line = CommandLine::ForCurrentProcess();
     singleton_command_line->AppendSwitch(switches::kDisableSync);
     singleton_command_line->AppendSwitch(switches::kDisableExtensions);
     browser_defaults::bookmarks_enabled = false;
+  }
+
+  // If we're not running on real ChromeOS hardware (or under VM), and are not
+  // showing the login manager or attempting a command line login, login with a
+  // stub user.
+  if (!base::chromeos::IsRunningOnChromeOS() &&
+      !parsed_command_line().HasSwitch(switches::kLoginManager) &&
+      !parsed_command_line().HasSwitch(switches::kLoginUser) &&
+      !parsed_command_line().HasSwitch(switches::kGuestSession)) {
+    singleton_command_line->AppendSwitchASCII(
+        switches::kLoginUser, chromeos::UserManager::kStubUser);
+    if (!parsed_command_line().HasSwitch(switches::kLoginProfile)) {
+      // This must be kept in sync with TestingProfile::kTestUserProfileDir.
+      singleton_command_line->AppendSwitchASCII(
+          switches::kLoginProfile, "test-user");
+    }
+    LOG(INFO) << "Running as stub user with profile dir: "
+              << singleton_command_line->GetSwitchValuePath(
+                     switches::kLoginProfile).value();
   }
 
   ChromeBrowserMainPartsLinux::PreEarlyInitialization();
@@ -244,7 +267,7 @@ void ChromeBrowserMainPartsChromeos::PreMainMessageLoopStart() {
   // Initialize CrosLibrary only for the browser, unless running tests
   // (which do their own CrosLibrary setup).
   if (!parameters().ui_task) {
-    bool use_stub = parameters().command_line.HasSwitch(switches::kStubCros);
+    const bool use_stub = !base::chromeos::IsRunningOnChromeOS();
     chromeos::CrosLibrary::Initialize(use_stub);
   }
   // Replace the default NetworkChangeNotifierFactory with ChromeOS specific
@@ -262,6 +285,10 @@ void ChromeBrowserMainPartsChromeos::PostMainMessageLoopStart() {
   // Initialize DBusThreadManager for the browser. This must be done after
   // the main message loop is started, as it uses the message loop.
   chromeos::DBusThreadManager::Initialize();
+  // Add observers for WallpaperManager. WallpaperManager is initialized before
+  // DBusThreadManager.
+  chromeos::WallpaperManager::Get()->AddObservers();
+
   chromeos::CrosDBusService::Initialize();
 
   // Initialize the session manager observer so that we'll take actions
@@ -290,13 +317,6 @@ void ChromeBrowserMainPartsChromeos::PostMainMessageLoopStart() {
   }
 
   ChromeBrowserMainPartsLinux::PostMainMessageLoopStart();
-}
-
-int ChromeBrowserMainPartsChromeos::PreCreateThreads() {
-  // Set up field trial for low memory headroom settings.
-  SetupLowMemoryHeadroomFieldTrial();
-
-  return ChromeBrowserMainPartsLinux::PreCreateThreads();
 }
 
 // Threads are initialized MainMessageLoopStart and MainMessageLoopRun.
@@ -333,7 +353,7 @@ void ChromeBrowserMainPartsChromeos::PreProfileInit() {
   // Initialize the screen locker now so that it can receive
   // LOGIN_USER_CHANGED notification from UserManager.
   if (chromeos::KioskModeSettings::Get()->IsKioskModeEnabled()) {
-    chromeos::InitializeKioskModeIdleLogout();
+    chromeos::KioskModeIdleLogout::Initialize();
   } else {
     chromeos::ScreenLocker::InitClass();
   }
@@ -400,6 +420,12 @@ void ChromeBrowserMainPartsChromeos::PostProfileInit() {
             chromeos::CrosLibrary::Get()->GetNetworkLibrary()));
   }
 
+  // Make sure that wallpaper boot transition and other delays in OOBE
+  // are disabled for tests by default.
+  // Individual tests may enable them if they want.
+  if (parsed_command_line().HasSwitch(switches::kTestType))
+    chromeos::WizardController::SetZeroDelays();
+
   // Tests should be able to tune login manager before showing it.
   // Thus only show login manager in normal (non-testing) mode.
   if (!parameters().ui_task)
@@ -416,6 +442,8 @@ void ChromeBrowserMainPartsChromeos::PostProfileInit() {
   screen_lock_observer_.reset(new chromeos::ScreenLockObserver());
   if (chromeos::KioskModeSettings::Get()->IsKioskModeEnabled())
     power_state_override_.reset(new chromeos::PowerStateOverride());
+
+  media_device_notifications_ = new chromeos::MediaDeviceNotifications();
 
   ChromeBrowserMainPartsLinux::PostProfileInit();
 }
@@ -518,6 +546,10 @@ void ChromeBrowserMainPartsChromeos::PostMainMessageLoopRun() {
   ChromeBrowserMainPartsLinux::PostMainMessageLoopRun();
 }
 
+void ChromeBrowserMainPartsChromeos::SetupPlatformFieldTrials() {
+  SetupLowMemoryHeadroomFieldTrial();
+}
+
 void ChromeBrowserMainPartsChromeos::SetupLowMemoryHeadroomFieldTrial() {
   chrome::VersionInfo::Channel channel = chrome::VersionInfo::GetChannel();
   // Only enable this experiment on Canary and Dev, since it's possible
@@ -533,7 +565,7 @@ void ChromeBrowserMainPartsChromeos::SetupLowMemoryHeadroomFieldTrial() {
     const base::FieldTrial::Probability kEnableProbability = 1;
     scoped_refptr<base::FieldTrial> trial =
         base::FieldTrialList::FactoryGetFieldTrial(
-            "LowMemoryMargin", kDivisor, "default", 2012, 6, 30, NULL);
+            "LowMemoryMargin", kDivisor, "default", 2012, 7, 30, NULL);
     int disable = trial->AppendGroup("off", kEnableProbability);
     int margin_0mb = trial->AppendGroup("0mb", kEnableProbability);
     int margin_25mb = trial->AppendGroup("25mb", kEnableProbability);

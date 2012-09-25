@@ -20,7 +20,6 @@
 #include "content/public/common/page_zoom.h"
 #include "content/public/common/referrer.h"
 #include "content/public/common/renderer_preferences.h"
-#include "content/public/common/selected_file_info.h"
 #include "content/public/common/stop_find_action.h"
 #include "content/public/common/webkit_param_traits.h"
 #include "content/public/common/window_container_type.h"
@@ -38,6 +37,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginAction.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPopupType.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScreenInfo.h"
+#include "ui/base/dialogs/selected_file_info.h"
 #include "ui/base/ime/text_input_type.h"
 #include "ui/base/range/range.h"
 #include "ui/gfx/point.h"
@@ -49,6 +49,10 @@
 
 #if defined(OS_MACOSX)
 #include "content/common/mac/font_descriptor.h"
+#endif
+
+#if defined(OS_ANDROID)
+#include "webkit/media/android/media_metadata_android.h"
 #endif
 
 #undef IPC_MESSAGE_EXPORT
@@ -184,6 +188,7 @@ IPC_STRUCT_TRAITS_BEGIN(webkit_glue::WebPreferences)
   IPC_STRUCT_TRAITS_MEMBER(show_composited_layer_tree)
   IPC_STRUCT_TRAITS_MEMBER(show_fps_counter)
   IPC_STRUCT_TRAITS_MEMBER(show_paint_rects)
+  IPC_STRUCT_TRAITS_MEMBER(render_vsync_enabled)
   IPC_STRUCT_TRAITS_MEMBER(asynchronous_spell_checking_enabled)
   IPC_STRUCT_TRAITS_MEMBER(unified_textchecker_enabled)
   IPC_STRUCT_TRAITS_MEMBER(accelerated_compositing_enabled)
@@ -198,7 +203,6 @@ IPC_STRUCT_TRAITS_BEGIN(webkit_glue::WebPreferences)
   IPC_STRUCT_TRAITS_MEMBER(accelerated_animation_enabled)
   IPC_STRUCT_TRAITS_MEMBER(accelerated_video_enabled)
   IPC_STRUCT_TRAITS_MEMBER(memory_info_enabled)
-  IPC_STRUCT_TRAITS_MEMBER(interactive_form_validation_enabled)
   IPC_STRUCT_TRAITS_MEMBER(fullscreen_enabled)
   IPC_STRUCT_TRAITS_MEMBER(allow_displaying_insecure_content)
   IPC_STRUCT_TRAITS_MEMBER(allow_running_insecure_content)
@@ -207,7 +211,9 @@ IPC_STRUCT_TRAITS_BEGIN(webkit_glue::WebPreferences)
   IPC_STRUCT_TRAITS_MEMBER(password_echo_enabled)
   IPC_STRUCT_TRAITS_MEMBER(css_regions_enabled)
   IPC_STRUCT_TRAITS_MEMBER(css_shaders_enabled)
+  IPC_STRUCT_TRAITS_MEMBER(css_variables_enabled)
   IPC_STRUCT_TRAITS_MEMBER(device_supports_touch)
+  IPC_STRUCT_TRAITS_MEMBER(device_supports_mouse)
 #if !defined(WEBCOMPOSITOR_OWNS_SETTINGS)
   IPC_STRUCT_TRAITS_MEMBER(threaded_animation_enabled)
   IPC_STRUCT_TRAITS_MEMBER(partial_swap_enabled)
@@ -220,6 +226,7 @@ IPC_STRUCT_TRAITS_BEGIN(webkit_glue::WebPreferences)
   IPC_STRUCT_TRAITS_MEMBER(fixed_position_creates_stacking_context)
   IPC_STRUCT_TRAITS_MEMBER(sync_xhr_in_documents_enabled)
   IPC_STRUCT_TRAITS_MEMBER(number_of_cpu_cores)
+  IPC_STRUCT_TRAITS_MEMBER(cookie_enabled)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(WebMenuItem)
@@ -298,6 +305,8 @@ IPC_STRUCT_TRAITS_BEGIN(content::RendererPreferences)
   IPC_STRUCT_TRAITS_MEMBER(can_accept_load_drops)
   IPC_STRUCT_TRAITS_MEMBER(should_antialias_text)
   IPC_STRUCT_TRAITS_MEMBER(hinting)
+  IPC_STRUCT_TRAITS_MEMBER(use_autohinter)
+  IPC_STRUCT_TRAITS_MEMBER(use_bitmaps)
   IPC_STRUCT_TRAITS_MEMBER(subpixel_rendering)
   IPC_STRUCT_TRAITS_MEMBER(use_subpixel_positioning)
   IPC_STRUCT_TRAITS_MEMBER(focus_ring_color)
@@ -313,6 +322,7 @@ IPC_STRUCT_TRAITS_BEGIN(content::RendererPreferences)
   IPC_STRUCT_TRAITS_MEMBER(caret_blink_interval)
   IPC_STRUCT_TRAITS_MEMBER(enable_referrers)
   IPC_STRUCT_TRAITS_MEMBER(default_zoom_level)
+  IPC_STRUCT_TRAITS_MEMBER(user_agent_override)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(content::SSLStatus)
@@ -351,10 +361,24 @@ IPC_STRUCT_TRAITS_BEGIN(media::MediaLogEvent)
   IPC_STRUCT_TRAITS_MEMBER(time)
 IPC_STRUCT_TRAITS_END()
 
-IPC_STRUCT_TRAITS_BEGIN(content::SelectedFileInfo)
-  IPC_STRUCT_TRAITS_MEMBER(path)
+IPC_STRUCT_TRAITS_BEGIN(ui::SelectedFileInfo)
+  IPC_STRUCT_TRAITS_MEMBER(file_path)
+  IPC_STRUCT_TRAITS_MEMBER(local_path)
   IPC_STRUCT_TRAITS_MEMBER(display_name)
 IPC_STRUCT_TRAITS_END()
+
+#if defined(OS_ANDROID)
+IPC_STRUCT_TRAITS_BEGIN(webkit_media::MediaMetadataAndroid)
+  IPC_STRUCT_TRAITS_MEMBER(width)
+  IPC_STRUCT_TRAITS_MEMBER(height)
+  IPC_STRUCT_TRAITS_MEMBER(duration)
+  IPC_STRUCT_TRAITS_MEMBER(current_time)
+  IPC_STRUCT_TRAITS_MEMBER(paused)
+  IPC_STRUCT_TRAITS_MEMBER(can_pause)
+  IPC_STRUCT_TRAITS_MEMBER(can_seek_forward)
+  IPC_STRUCT_TRAITS_MEMBER(can_seek_backward)
+IPC_STRUCT_TRAITS_END()
+#endif
 
 IPC_STRUCT_BEGIN(ViewHostMsg_CreateWindow_Params)
   // Routing ID of the view initiating the open.
@@ -452,6 +476,12 @@ IPC_STRUCT_BEGIN_WITH_PARENT(ViewHostMsg_FrameNavigate_Params,
 
   // Serialized history item state to store in the navigation entry.
   IPC_STRUCT_MEMBER(std::string, content_state)
+
+  // Original request's URL.
+  IPC_STRUCT_MEMBER(GURL, original_request_url)
+
+  // User agent override used to navigate.
+  IPC_STRUCT_MEMBER(bool, is_overriding_user_agent)
 IPC_STRUCT_END()
 
 // This message is used for supporting popup menus on Mac OS X using native
@@ -521,7 +551,7 @@ IPC_STRUCT_BEGIN(ViewHostMsg_UpdateRect_Params)
   //     Indicates that this is a response to a ViewMsg_Resize message.
   //
   //   ViewHostMsg_UpdateRect_Flags::IS_RESTORE_ACK
-  //     Indicates that this is a response to a ViewMsg_WasRestored message.
+  //     Indicates that this is a response to a ViewMsg_WasShown message.
   //
   //   ViewHostMsg_UpdateRect_Flags::IS_REPAINT_ACK
   //     Indicates that this is a response to a ViewMsg_Repaint message.
@@ -618,6 +648,14 @@ IPC_STRUCT_BEGIN(ViewMsg_Navigate_Params)
   // The URL to load.
   IPC_STRUCT_MEMBER(GURL, url)
 
+  // Base URL for use in WebKit's SubstituteData.
+  // Is only used with data: URLs.
+  IPC_STRUCT_MEMBER(GURL, base_url_for_data_url)
+
+  // History URL for use in WebKit's SubstituteData.
+  // Is only used with data: URLs.
+  IPC_STRUCT_MEMBER(GURL, history_url_for_data_url)
+
   // The URL to send in the "Referer" header field. Can be empty if there is
   // no referrer.
   IPC_STRUCT_MEMBER(content::Referrer, referrer)
@@ -656,6 +694,16 @@ IPC_STRUCT_BEGIN(ViewMsg_Navigate_Params)
   // guest RenderView. The embedder_channel_name and embedder_container_id
   // together uniquely identify a browser plugin instance.
   IPC_STRUCT_MEMBER(int, embedder_container_id)
+
+  // Whether or not the user agent override string should be used.
+  IPC_STRUCT_MEMBER(bool, is_overriding_user_agent)
+
+  // True if this was a post request.
+  IPC_STRUCT_MEMBER(bool, is_post)
+
+  // If is_post is true, holds the post_data information from browser. Empty
+  // otherwise.
+  IPC_STRUCT_MEMBER(std::vector<unsigned char>, browser_initiated_post_data)
 IPC_STRUCT_END()
 
 IPC_STRUCT_BEGIN(ViewMsg_New_Params)
@@ -758,6 +806,10 @@ IPC_SYNC_MESSAGE_CONTROL0_1(ViewHostMsg_GetHardwareInputChannelLayout,
 IPC_SYNC_MESSAGE_CONTROL0_1(ViewHostMsg_GetCPUUsage,
                             int /* CPU usage in percents */)
 
+// Asks the browser for the user's monitor profile.
+IPC_SYNC_MESSAGE_CONTROL0_1(ViewHostMsg_GetMonitorColorProfile,
+                            std::vector<char> /* profile */)
+
 // Tells the renderer to create a new view.
 // This message is slightly different, the view it takes (via
 // ViewMsg_New_Params) is the view to create, the message itself is sent as a
@@ -805,7 +857,7 @@ IPC_MESSAGE_ROUTED0(ViewMsg_WasHidden)
 // is true.  In that case, the generated ViewHostMsg_PaintRect message will
 // have the IS_RESTORE_ACK flag set.  If needs_repainting is false, then this
 // message does not trigger a message in response.
-IPC_MESSAGE_ROUTED1(ViewMsg_WasRestored,
+IPC_MESSAGE_ROUTED1(ViewMsg_WasShown,
                     bool /* needs_repainting */)
 
 // Sent to inform the view that it was swapped out.  This allows the process to
@@ -829,6 +881,14 @@ IPC_MESSAGE_ROUTED4(ViewMsg_PaintAtSize,
 // Tells the render view that a ViewHostMsg_UpdateRect message was processed.
 // This signals the render view that it can send another UpdateRect message.
 IPC_MESSAGE_ROUTED0(ViewMsg_UpdateRect_ACK)
+
+// Tells the render view that a SwapBuffers was completed. Typically,
+// SwapBuffers requests go from renderer -> GPU process -> browser. Most
+// platforms still use the GfxCxt3D Echo for receiving the SwapBuffers Ack.
+// Using Echo routes the ack from browser -> GPU process -> renderer, while this
+// Ack goes directly from browser -> renderer. This is not used for the threaded
+// compositor path.
+IPC_MESSAGE_ROUTED0(ViewMsg_SwapBuffers_ACK)
 
 // Message payload includes:
 // 1. A blob that should be cast to WebInputEvent
@@ -924,6 +984,9 @@ IPC_MESSAGE_ROUTED1(ViewMsg_Replace,
                     string16)
 IPC_MESSAGE_ROUTED0(ViewMsg_Delete)
 IPC_MESSAGE_ROUTED0(ViewMsg_SelectAll)
+
+// Replaces all text in the current input field with the specified string.
+IPC_MESSAGE_ROUTED0(ViewMsg_Unselect)
 
 // Requests the renderer to select the region between two points.
 IPC_MESSAGE_ROUTED2(ViewMsg_SelectRange,
@@ -1091,7 +1154,7 @@ IPC_MESSAGE_ROUTED2(ViewMsg_DidChooseColorResponse, unsigned, SkColor)
 IPC_MESSAGE_ROUTED1(ViewMsg_DidEndColorChooser, unsigned)
 
 IPC_MESSAGE_ROUTED1(ViewMsg_RunFileChooserResponse,
-                    std::vector<content::SelectedFileInfo>)
+                    std::vector<ui::SelectedFileInfo>)
 
 // Provides the results of directory enumeration.
 IPC_MESSAGE_ROUTED2(ViewMsg_EnumerateDirectoryResponse,
@@ -1538,6 +1601,10 @@ IPC_MESSAGE_ROUTED2(ViewHostMsg_HandleInputEvent_ACK,
                     WebKit::WebInputEvent::Type,
                     bool /* processed */)
 
+IPC_MESSAGE_ROUTED2(ViewHostMsg_BeginSmoothScroll,
+                    bool /* scroll_down */,
+                    bool /* scroll_far */)
+
 IPC_MESSAGE_ROUTED0(ViewHostMsg_Focus)
 IPC_MESSAGE_ROUTED0(ViewHostMsg_Blur)
 
@@ -1721,9 +1788,9 @@ IPC_MESSAGE_ROUTED2(ViewHostMsg_DidChangeScrollbarsForMainFrame,
 IPC_MESSAGE_ROUTED1(ViewHostMsg_DidChangeNumWheelEvents,
                     int /* count */)
 
-// Notifies that the number of JavaScript touch event handlers changed.
-IPC_MESSAGE_ROUTED1(ViewHostMsg_DidChangeNumTouchEvents,
-                    int /* count */)
+// Notifies whether there are JavaScript touche event handlers or not.
+IPC_MESSAGE_ROUTED1(ViewHostMsg_HasTouchEventHandlers,
+                    bool /* has_handlers */)
 
 // A message from HTML-based UI.  When (trusted) Javascript calls
 // send(message, args), this message is sent to the browser.
@@ -2074,6 +2141,12 @@ IPC_MESSAGE_ROUTED3(ViewHostMsg_SendSerializedHtmlData,
                     GURL /* frame's url */,
                     std::string /* data buffer */,
                     int32 /* complete status */)
+
+#if defined(OS_ANDROID)
+// Start an android intent with the given URI.
+IPC_MESSAGE_ROUTED1(ViewHostMsg_StartContentIntent,
+                    GURL /* content_url */)
+#endif
 
 // Notifies the browser of an event occurring in the media pipeline.
 IPC_MESSAGE_CONTROL1(ViewHostMsg_MediaLogEvent,

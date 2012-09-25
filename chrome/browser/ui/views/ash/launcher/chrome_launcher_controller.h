@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_ASH_LAUNCHER_CHROME_LAUNCHER_CONTROLLER_H_
 #define CHROME_BROWSER_UI_VIEWS_ASH_LAUNCHER_CHROME_LAUNCHER_CONTROLLER_H_
-#pragma once
 
 #include <list>
 #include <map>
@@ -13,7 +12,8 @@
 #include "ash/launcher/launcher_delegate.h"
 #include "ash/launcher/launcher_model_observer.h"
 #include "ash/launcher/launcher_types.h"
-#include "ash/wm/shelf_auto_hide_behavior.h"
+#include "ash/shell_observer.h"
+#include "ash/wm/shelf_types.h"
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
@@ -46,12 +46,14 @@ class TabContents;
 
 // ChromeLauncherController manages the launcher items needed for tabbed
 // browsers (BrowserLauncherItemController) and browser shortcuts.
-class ChromeLauncherController : public ash::LauncherDelegate,
-                                 public ash::LauncherModelObserver,
-                                 public content::NotificationObserver,
-                                 public ShellWindowRegistry::Observer,
-                                 public aura::client::ActivationChangeObserver,
-                                 public aura::WindowObserver {
+class ChromeLauncherController
+    : public ash::LauncherDelegate,
+      public ash::LauncherModelObserver,
+      public ash::ShellObserver,
+      public content::NotificationObserver,
+      public ShellWindowRegistry::Observer,
+      public aura::client::ActivationChangeObserver,
+      public aura::WindowObserver {
  public:
   // Indicates if a launcher item is incognito or not.
   enum IncognitoState {
@@ -67,11 +69,10 @@ class ChromeLauncherController : public ash::LauncherDelegate,
     APP_STATE_REMOVED
   };
 
-  // Interface used to load app icons. This is in it's own class so that it can
-  // be mocked.
-  class AppIconLoader {
+  // Mockable interface to get app ids from tabs.
+  class AppTabHelper {
    public:
-    virtual ~AppIconLoader() {}
+    virtual ~AppTabHelper() {}
 
     // Returns the app id of the specified tab, or an empty string if there is
     // no app.
@@ -80,6 +81,13 @@ class ChromeLauncherController : public ash::LauncherDelegate,
     // Returns true if |id| is valid. Used during restore to ignore no longer
     // valid extensions.
     virtual bool IsValidID(const std::string& id) = 0;
+  };
+
+  // Interface used to load app icons. This is in it's own class so that it can
+  // be mocked.
+  class AppIconLoader {
+   public:
+    virtual ~AppIconLoader() {}
 
     // Fetches the image for the specified id. When done (which may be
     // synchronous), this should invoke SetAppImage() on the LauncherUpdater.
@@ -144,7 +152,7 @@ class ChromeLauncherController : public ash::LauncherDelegate,
   bool IsOpen(ash::LauncherID id);
 
   // Returns the launch type of app for the specified id.
-  ExtensionPrefs::LaunchType GetLaunchType(ash::LauncherID id);
+  extensions::ExtensionPrefs::LaunchType GetLaunchType(ash::LauncherID id);
 
   // Returns the id of the app for the specified tab.
   std::string GetAppID(TabContents* tab);
@@ -153,7 +161,7 @@ class ChromeLauncherController : public ash::LauncherDelegate,
 
   // Sets the image for an app tab. This is intended to be invoked from the
   // AppIconLoader.
-  void SetAppImage(const std::string& app_id, const SkBitmap* image);
+  void SetAppImage(const std::string& app_id, const gfx::ImageSkia& image);
 
   // Returns true if a pinned launcher item with given |app_id| could be found.
   bool IsAppPinned(const std::string& app_id);
@@ -165,7 +173,7 @@ class ChromeLauncherController : public ash::LauncherDelegate,
 
   // Updates the launche type of the app for the specified id to |launch_type|.
   void SetLaunchType(ash::LauncherID id,
-                     ExtensionPrefs::LaunchType launch_type);
+                     extensions::ExtensionPrefs::LaunchType launch_type);
 
   // Unpins any app items whose id is |app_id|.
   void UnpinAppsWithID(const std::string& app_id);
@@ -236,6 +244,9 @@ class ChromeLauncherController : public ash::LauncherDelegate,
   // Overriden from aura::WindowObserver:
   virtual void OnWindowRemovingFromRootWindow(aura::Window* window) OVERRIDE;
 
+  // Overriden from ash::ShellObserver:
+  virtual void OnShelfAlignmentChanged() OVERRIDE;
+
  private:
   friend class BrowserLauncherItemControllerTest;
   friend class ChromeLauncherControllerTest;
@@ -268,8 +279,9 @@ class ChromeLauncherController : public ash::LauncherDelegate,
   typedef std::map<std::string, TabContentsList> AppIDToTabContentsListMap;
   typedef std::map<TabContents*, std::string> TabContentsToAppIDMap;
 
-  // Sets the AppIconLoader, taking ownership of |loader|. This is intended for
-  // testing.
+  // Sets the AppTabHelper/AppIconLoader, taking ownership of the helper class.
+  // These are intended for testing.
+  void SetAppTabHelperForTest(AppTabHelper* helper);
   void SetAppIconLoaderForTest(AppIconLoader* loader);
 
   // Returns the profile used for new windows.
@@ -289,6 +301,12 @@ class ChromeLauncherController : public ash::LauncherDelegate,
 
   // Re-syncs launcher model with prefs::kPinnedLauncherApps.
   void UpdateAppLaunchersFromPref();
+
+  // Sets the shelf auto-hide behavior from prefs.
+  void SetShelfAutoHideBehaviorFromPrefs();
+
+  // Sets the shelf alignment from prefs.
+  void SetShelfAlignmentFromPrefs();
 
   // Returns the most recently active tab contents for an app.
   TabContents* GetLastActiveTabContents(const std::string& app_id);
@@ -325,7 +343,10 @@ class ChromeLauncherController : public ash::LauncherDelegate,
   // Currently only used for platform app windows.
   WindowList platform_app_windows_;
 
-  // Used to load the image for an app tab.
+  // Used to get app info for tabs.
+  scoped_ptr<AppTabHelper> app_tab_helper_;
+
+  // Used to load the image for an app item.
   scoped_ptr<AppIconLoader> app_icon_loader_;
 
   content::NotificationRegistrar notification_registrar_;

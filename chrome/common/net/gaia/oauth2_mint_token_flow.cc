@@ -14,12 +14,13 @@
 #include "base/message_loop.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
+#include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/net/gaia/gaia_urls.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
-#include "content/public/common/url_fetcher.h"
 #include "net/base/escape.h"
+#include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_status.h"
 
@@ -63,8 +64,6 @@ static GoogleServiceAuthError CreateAuthError(URLRequestStatus status) {
   }
 }
 
-OAuth2MintTokenFlow::InterceptorForTests* g_interceptor_for_tests = NULL;
-
 }  // namespace
 
 IssueAdviceInfoEntry::IssueAdviceInfoEntry() {}
@@ -91,14 +90,6 @@ OAuth2MintTokenFlow::Parameters::Parameters(
 
 OAuth2MintTokenFlow::Parameters::~Parameters() {}
 
-// static
-void OAuth2MintTokenFlow::SetInterceptorForTests(
-    OAuth2MintTokenFlow::InterceptorForTests* interceptor) {
-  CHECK(CommandLine::ForCurrentProcess()->HasSwitch(switches::kTestType));
-  CHECK(NULL == g_interceptor_for_tests);  // Only one at a time.
-  g_interceptor_for_tests = interceptor;
-}
-
 OAuth2MintTokenFlow::OAuth2MintTokenFlow(
     URLRequestContextGetter* context,
     Delegate* delegate,
@@ -108,53 +99,45 @@ OAuth2MintTokenFlow::OAuth2MintTokenFlow(
           "", std::vector<std::string>()),
       context_(context),
       delegate_(delegate),
-      parameters_(parameters) {
+      parameters_(parameters),
+      delete_when_done_(false),
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
 }
 
 OAuth2MintTokenFlow::~OAuth2MintTokenFlow() { }
 
-void OAuth2MintTokenFlow::Start() {
-  if (g_interceptor_for_tests) {
-    std::string auth_token;
-    GoogleServiceAuthError error = GoogleServiceAuthError::None();
-
-    // We use PostTask, instead of calling the delegate directly, because the
-    // message loop will run a few times before we notify the delegate in the
-    // real implementation.
-    if (g_interceptor_for_tests->DoIntercept(this, &auth_token, &error)) {
-      MessageLoop::current()->PostTask(
-          FROM_HERE,
-          base::Bind(&OAuth2MintTokenFlow::Delegate::OnMintTokenSuccess,
-                     base::Unretained(delegate_), auth_token));
-    } else {
-      MessageLoop::current()->PostTask(
-          FROM_HERE,
-          base::Bind(&OAuth2MintTokenFlow::Delegate::OnMintTokenFailure,
-                     base::Unretained(delegate_), error));
-    }
-    return;
-  }
-
-  OAuth2ApiCallFlow::Start();
+void OAuth2MintTokenFlow::FireAndForget() {
+  delete_when_done_ = true;
+  Start();
 }
 
 void OAuth2MintTokenFlow::ReportSuccess(const std::string& access_token) {
-  if (delegate_) {
+  scoped_ptr<OAuth2MintTokenFlow> will_delete(delete_when_done_ ? this : NULL);
+
+  if (delegate_)
     delegate_->OnMintTokenSuccess(access_token);
-  }
+
+  // |this| may already be deleted.
 }
 
-void OAuth2MintTokenFlow::ReportSuccess(const IssueAdviceInfo& issue_advice) {
-  if (delegate_) {
+void OAuth2MintTokenFlow::ReportIssueAdviceSuccess(
+    const IssueAdviceInfo& issue_advice) {
+  scoped_ptr<OAuth2MintTokenFlow> will_delete(delete_when_done_ ? this : NULL);
+
+  if (delegate_)
     delegate_->OnIssueAdviceSuccess(issue_advice);
-  }
+
+  // |this| may already be deleted.
 }
 
 void OAuth2MintTokenFlow::ReportFailure(
     const GoogleServiceAuthError& error) {
-  if (delegate_) {
+  scoped_ptr<OAuth2MintTokenFlow> will_delete(delete_when_done_ ? this : NULL);
+
+  if (delegate_)
     delegate_->OnMintTokenFailure(error);
-  }
+
+  // |this| may already be deleted.
 }
 
 GURL OAuth2MintTokenFlow::CreateApiCallUrl() {
@@ -201,7 +184,7 @@ void OAuth2MintTokenFlow::ProcessApiCallSuccess(
   if (issue_advice == kIssueAdviceValueConsent) {
     IssueAdviceInfo issue_advice;
     if (ParseIssueAdviceResponse(dict, &issue_advice))
-      ReportSuccess(issue_advice);
+      ReportIssueAdviceSuccess(issue_advice);
     else
       ReportFailure(GoogleServiceAuthError::FromConnectionError(101));
   } else {
@@ -211,6 +194,8 @@ void OAuth2MintTokenFlow::ProcessApiCallSuccess(
     else
       ReportFailure(GoogleServiceAuthError::FromConnectionError(101));
   }
+
+  // |this| may be deleted!
 }
 
 void OAuth2MintTokenFlow::ProcessApiCallFailure(
@@ -242,19 +227,19 @@ bool OAuth2MintTokenFlow::ParseIssueAdviceResponse(
   CHECK(dict);
   CHECK(issue_advice);
 
-  base::DictionaryValue* consent_dict = NULL;
+  const base::DictionaryValue* consent_dict = NULL;
   if (!dict->GetDictionary(kConsentKey, &consent_dict))
     return false;
 
-  base::ListValue* scopes_list = NULL;
+  const base::ListValue* scopes_list = NULL;
   if (!consent_dict->GetList(kScopesKey, &scopes_list))
     return false;
 
   bool success = true;
   for (size_t index = 0; index < scopes_list->GetSize(); ++index) {
-    base::DictionaryValue* scopes_entry = NULL;
+    const base::DictionaryValue* scopes_entry = NULL;
     IssueAdviceInfoEntry entry;
-    std::string detail;
+    string16 detail;
     if (!scopes_list->GetDictionary(index, &scopes_entry) ||
         !scopes_entry->GetString(kDescriptionKey, &entry.description) ||
         !scopes_entry->GetString(kDetailKey, &detail)) {
@@ -262,7 +247,11 @@ bool OAuth2MintTokenFlow::ParseIssueAdviceResponse(
       break;
     }
 
-    Tokenize(detail, kDetailSeparators, &entry.details);
+    TrimWhitespace(entry.description, TRIM_ALL, &entry.description);
+    static const string16 detail_separators = ASCIIToUTF16(kDetailSeparators);
+    Tokenize(detail, detail_separators, &entry.details);
+    for (size_t i = 0; i < entry.details.size(); i++)
+      TrimWhitespace(entry.details[i], TRIM_ALL, &entry.details[i]);
     issue_advice->push_back(entry);
   }
 

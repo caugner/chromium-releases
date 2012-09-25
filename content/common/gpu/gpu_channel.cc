@@ -18,7 +18,6 @@
 #include "content/common/gpu/gpu_channel_manager.h"
 #include "content/common/gpu/gpu_messages.h"
 #include "content/common/gpu/sync_point_manager.h"
-#include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
 #include "gpu/command_buffer/service/mailbox_manager.h"
 #include "gpu/command_buffer/service/gpu_scheduler.h"
@@ -31,13 +30,11 @@
 #include "ipc/ipc_channel_posix.h"
 #endif
 
-namespace {
-// The first time polling a fence, delay some extra time to allow other
-// stubs to process some work, or else the timing of the fences could
-// allow a pattern of alternating fast and slow frames to occur.
-const int64 kHandleMoreWorkPeriodMs = 2;
-const int64 kHandleMoreWorkPeriodBusyMs = 1;
+#if defined(OS_ANDROID)
+#include "content/common/gpu/stream_texture_manager_android.h"
+#endif
 
+namespace {
 // This filter does two things:
 // - it counts the number of messages coming in on the channel
 // - it handles the GpuCommandBufferMsg_InsertSyncPoint message on the IO
@@ -169,6 +166,9 @@ GpuChannel::GpuChannel(GpuChannelManager* gpu_channel_manager,
   log_messages_ = command_line->HasSwitch(switches::kLogPluginMessages);
   disallowed_features_.multisampling =
       command_line->HasSwitch(switches::kDisableGLMultisampling);
+#if defined(OS_ANDROID)
+  stream_texture_manager_.reset(new content::StreamTextureManagerAndroid(this));
+#endif
 }
 
 
@@ -312,7 +312,6 @@ void GpuChannel::CreateViewCommandBuffer(
                surface_id);
 
   *route_id = MSG_ROUTING_NONE;
-  content::GetContentClient()->SetActiveURL(init_params.active_url);
 
 #if defined(ENABLE_GPU)
 
@@ -332,7 +331,8 @@ void GpuChannel::CreateViewCommandBuffer(
       *route_id,
       surface_id,
       watchdog_,
-      software_));
+      software_,
+      init_params.active_url));
   if (preempt_by_counter_.get())
     stub->SetPreemptByCounter(preempt_by_counter_);
   router_.AddRoute(*route_id, stub.get());
@@ -358,7 +358,7 @@ int GpuChannel::GenerateRouteID() {
   return ++last_id;
 }
 
-void GpuChannel::AddRoute(int32 route_id, IPC::Channel::Listener* listener) {
+void GpuChannel::AddRoute(int32 route_id, IPC::Listener* listener) {
   router_.AddRoute(route_id, listener);
 }
 
@@ -394,6 +394,12 @@ bool GpuChannel::OnControlMessageReceived(const IPC::Message& msg) {
                                     OnCreateOffscreenCommandBuffer)
     IPC_MESSAGE_HANDLER_DELAY_REPLY(GpuChannelMsg_DestroyCommandBuffer,
                                     OnDestroyCommandBuffer)
+#if defined(OS_ANDROID)
+    IPC_MESSAGE_HANDLER(GpuChannelMsg_RegisterStreamTextureProxy,
+                        OnRegisterStreamTextureProxy)
+    IPC_MESSAGE_HANDLER(GpuChannelMsg_EstablishStreamTexture,
+                        OnEstablishStreamTexture)
+#endif
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   DCHECK(handled) << msg.type();
@@ -442,35 +448,12 @@ void GpuChannel::HandleMessage() {
               stub->route_id()));
           unprocessed_messages_->IncCount();
         }
-
-        ScheduleDelayedWork(stub, kHandleMoreWorkPeriodMs);
       }
     }
   }
 
   if (!deferred_messages_.empty()) {
     OnScheduled();
-  }
-}
-
-void GpuChannel::PollWork(int route_id) {
-  GpuCommandBufferStub* stub = stubs_.Lookup(route_id);
-  if (stub) {
-    stub->PollWork();
-
-    ScheduleDelayedWork(stub, kHandleMoreWorkPeriodBusyMs);
-  }
-}
-
-void GpuChannel::ScheduleDelayedWork(GpuCommandBufferStub *stub,
-                                     int64 delay) {
-  if (stub->HasMoreWork()) {
-    MessageLoop::current()->PostDelayedTask(
-        FROM_HERE,
-        base::Bind(&GpuChannel::PollWork,
-                   weak_factory_.GetWeakPtr(),
-                   stub->route_id()),
-        base::TimeDelta::FromMilliseconds(delay));
   }
 }
 
@@ -482,7 +465,6 @@ void GpuChannel::OnCreateOffscreenCommandBuffer(
 
   int32 route_id = MSG_ROUTING_NONE;
 
-  content::GetContentClient()->SetActiveURL(init_params.active_url);
 #if defined(ENABLE_GPU)
   GpuCommandBufferStub* share_group = stubs_.Lookup(init_params.share_group_id);
 
@@ -500,7 +482,8 @@ void GpuChannel::OnCreateOffscreenCommandBuffer(
       init_params.gpu_preference,
       route_id,
       0, watchdog_,
-      software_));
+      software_,
+      init_params.active_url));
   if (preempt_by_counter_.get())
     stub->SetPreemptByCounter(preempt_by_counter_);
   router_.AddRoute(route_id, stub.get());
@@ -534,4 +517,23 @@ void GpuChannel::OnDestroyCommandBuffer(int32 route_id,
   if (reply_message)
     Send(reply_message);
 }
+
+#if defined(OS_ANDROID)
+void GpuChannel::OnRegisterStreamTextureProxy(
+    int32 stream_id,  const gfx::Size& initial_size, int32* route_id) {
+  // Note that route_id is only used for notifications sent out from here.
+  // StreamTextureManager owns all texture objects and for incoming messages
+  // it finds the correct object based on stream_id.
+  *route_id = GenerateRouteID();
+  stream_texture_manager_->RegisterStreamTextureProxy(
+      stream_id, initial_size, *route_id);
+}
+
+void GpuChannel::OnEstablishStreamTexture(
+    int32 stream_id, content::SurfaceTexturePeer::SurfaceTextureTarget type,
+    int32 primary_id, int32 secondary_id) {
+  stream_texture_manager_->EstablishStreamTexture(
+      stream_id, type, primary_id, secondary_id);
+}
+#endif
 

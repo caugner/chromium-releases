@@ -4,10 +4,10 @@
 
 #include "chrome/browser/chromeos/disks/disk_mount_manager.h"
 
+#include <sys/statvfs.h>
+
 #include <map>
 #include <set>
-
-#include <sys/statvfs.h>
 
 #include "base/bind.h"
 #include "base/memory/weak_ptr.h"
@@ -230,6 +230,12 @@ class DiskMountManagerImpl : public DiskMountManager {
   // DiskMountManager override.
   const DiskMap& disks() const OVERRIDE { return disks_; }
 
+  // DiskMountManager override.
+  virtual const Disk* FindDiskBySourcePath(const std::string& source_path)
+      const OVERRIDE {
+    DiskMap::const_iterator disk_it = disks_.find(source_path);
+    return disk_it == disks_.end() ? NULL : disk_it->second;
+  }
 
   // DiskMountManager override.
   const MountPointMap& mount_points() const OVERRIDE { return mount_points_; }
@@ -275,10 +281,12 @@ class DiskMountManagerImpl : public DiskMountManager {
                         const std::string& mount_path) {
     MountCondition mount_condition = MOUNT_CONDITION_NONE;
     if (mount_type == MOUNT_TYPE_DEVICE) {
-      if (error_code == MOUNT_ERROR_UNKNOWN_FILESYSTEM)
+      if (error_code == MOUNT_ERROR_UNKNOWN_FILESYSTEM) {
         mount_condition = MOUNT_CONDITION_UNKNOWN_FILESYSTEM;
-      if (error_code == MOUNT_ERROR_UNSUPORTED_FILESYSTEM)
+      }
+      if (error_code == MOUNT_ERROR_UNSUPPORTED_FILESYSTEM) {
         mount_condition = MOUNT_CONDITION_UNSUPPORTED_FILESYSTEM;
+      }
     }
     const MountPointInfo mount_info(source_path, mount_path, mount_type,
                                     mount_condition);
@@ -314,13 +322,12 @@ class DiskMountManagerImpl : public DiskMountManager {
     if (mount_points_it == mount_points_.end())
       return;
     // TODO(tbarzic): Add separate, PathUnmounted event to Observer.
-    NotifyMountCompleted(UNMOUNTING,
-                         MOUNT_ERROR_NONE,
-                         MountPointInfo(mount_points_it->second.source_path,
-                                        mount_points_it->second.mount_path,
-                                        mount_points_it->second.mount_type,
-                                        mount_points_it->second.mount_condition)
-                         );
+    NotifyMountCompleted(
+        UNMOUNTING, MOUNT_ERROR_NONE,
+        MountPointInfo(mount_points_it->second.source_path,
+                       mount_points_it->second.mount_path,
+                       mount_points_it->second.mount_type,
+                       mount_points_it->second.mount_condition));
     std::string path(mount_points_it->second.source_path);
     mount_points_.erase(mount_points_it);
     DiskMap::iterator iter = disks_.find(path);
@@ -375,6 +382,7 @@ class DiskMountManagerImpl : public DiskMountManager {
                           disk_info.file_path(),
                           disk_info.label(),
                           disk_info.drive_label(),
+                          disk_info.uuid(),
                           FindSystemPathPrefix(disk_info.system_path()),
                           disk_info.device_type(),
                           disk_info.total_size_in_bytes(),
@@ -557,7 +565,7 @@ class DiskMountManagerImpl : public DiskMountManager {
   DISALLOW_COPY_AND_ASSIGN(DiskMountManagerImpl);
 };
 
-} // namespace
+}  // namespace
 
 DiskMountManager::Disk::Disk(const std::string& device_path,
                              const std::string& mount_path,
@@ -565,6 +573,7 @@ DiskMountManager::Disk::Disk(const std::string& device_path,
                              const std::string& file_path,
                              const std::string& device_label,
                              const std::string& drive_label,
+                             const std::string& fs_uuid,
                              const std::string& system_path_prefix,
                              DeviceType device_type,
                              uint64 total_size_in_bytes,
@@ -579,6 +588,7 @@ DiskMountManager::Disk::Disk(const std::string& device_path,
       file_path_(file_path),
       device_label_(device_label),
       drive_label_(drive_label),
+      fs_uuid_(fs_uuid),
       system_path_prefix_(system_path_prefix),
       device_type_(device_type),
       total_size_in_bytes_(total_size_in_bytes),

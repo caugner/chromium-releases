@@ -4,9 +4,9 @@
 
 #ifndef UI_VIEWS_CONTROLS_BUTTON_IMAGE_BUTTON_H_
 #define UI_VIEWS_CONTROLS_BUTTON_IMAGE_BUTTON_H_
-#pragma once
 
 #include "base/gtest_prod_util.h"
+#include "base/memory/scoped_ptr.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/views/controls/button/custom_button.h"
 
@@ -66,10 +66,12 @@ class VIEWS_EXPORT ImageButton : public CustomButton {
   // from images.
   virtual gfx::ImageSkia GetImageToPaint();
 
+  // Updates button background for |scale_factor|.
+  void UpdateButtonBackground(ui::ScaleFactor scale_factor);
+
   // The images used to render the different states of this button.
   gfx::ImageSkia images_[BS_COUNT];
 
-  // The background image.
   gfx::ImageSkia background_image_;
 
   // Image to draw on top of normal / hot / pushed image.  Usually empty.

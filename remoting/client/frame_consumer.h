@@ -17,9 +17,6 @@ namespace remoting {
 
 class FrameConsumer {
  public:
-  FrameConsumer() {}
-  virtual ~FrameConsumer() {}
-
   // Accepts a buffer to be painted to the screen. The buffer's dimensions and
   // relative position within the frame are specified by |clip_area|. Only
   // pixels falling within |region| and the current clipping area are painted.
@@ -39,7 +36,12 @@ class FrameConsumer {
   virtual void ReturnBuffer(pp::ImageData* buffer) = 0;
 
   // Set the dimension of the entire host screen.
-  virtual void SetSourceSize(const SkISize& source_size) = 0;
+  virtual void SetSourceSize(const SkISize& source_size,
+                             const SkIPoint& dpi) = 0;
+
+ protected:
+  FrameConsumer() {}
+  virtual ~FrameConsumer() {}
 
  private:
   DISALLOW_COPY_AND_ASSIGN(FrameConsumer);

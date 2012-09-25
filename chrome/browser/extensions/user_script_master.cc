@@ -21,13 +21,15 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_file_util.h"
-#include "chrome/common/extensions/extension_message_bundle.h"
 #include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/extensions/extension_set.h"
+#include "chrome/common/extensions/message_bundle.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
 
 using content::BrowserThread;
+
+namespace extensions {
 
 // Helper function to parse greasesmonkey headers
 static bool GetDeclarationValue(const base::StringPiece& line,
@@ -107,9 +109,9 @@ bool UserScriptMaster::ScriptReloader::ParseMetadataHeader(
       } else if (GetDeclarationValue(line, kNameDeclaration, &value)) {
         script->set_name(value);
       } else if (GetDeclarationValue(line, kVersionDeclaration, &value)) {
-        scoped_ptr<Version> version(Version::GetVersionFromString(value));
-        if (version.get())
-          script->set_version(version->GetString());
+        Version version(value);
+        if (version.IsValid())
+          script->set_version(version.GetString());
       } else if (GetDeclarationValue(line, kDescriptionDeclaration, &value)) {
         script->set_description(value);
       } else if (GetDeclarationValue(line, kMatchDeclaration, &value)) {
@@ -194,7 +196,7 @@ static bool LoadScriptContent(UserScript::File* script_file,
   // Localize the content.
   if (localization_messages) {
     std::string error;
-    ExtensionMessageBundle::ReplaceMessagesWithExternalDictionary(
+    MessageBundle::ReplaceMessagesWithExternalDictionary(
         *localization_messages, &content, &error);
     if (!error.empty()) {
       LOG(WARNING) << "Failed to replace messages in script: " << error;
@@ -237,7 +239,7 @@ SubstitutionMap* UserScriptMaster::ScriptReloader::GetLocalizationMessages(
     return NULL;
   }
 
-  return extension_file_util::LoadExtensionMessageBundleSubstitutionMap(
+  return extension_file_util::LoadMessageBundleSubstitutionMap(
       extensions_info_[extension_id].first,
       extension_id,
       extensions_info_[extension_id].second);
@@ -350,8 +352,8 @@ void UserScriptMaster::Observe(int type,
       break;
     case chrome::NOTIFICATION_EXTENSION_LOADED: {
       // Add any content scripts inside the extension.
-      const extensions::Extension* extension =
-          content::Details<const extensions::Extension>(details).ptr();
+      const Extension* extension =
+          content::Details<const Extension>(details).ptr();
       extensions_info_[extension->id()] =
           ExtensionSet::ExtensionPathAndDefaultLocale(
               extension->path(), extension->default_locale());
@@ -369,9 +371,8 @@ void UserScriptMaster::Observe(int type,
     }
     case chrome::NOTIFICATION_EXTENSION_UNLOADED: {
       // Remove any content scripts.
-      const extensions::Extension* extension =
-          content::Details<extensions::UnloadedExtensionInfo>(
-              details)->extension;
+      const Extension* extension =
+          content::Details<UnloadedExtensionInfo>(details)->extension;
       extensions_info_.erase(extension->id());
       UserScriptList new_user_scripts;
       for (UserScriptList::iterator iter = user_scripts_.begin();
@@ -438,3 +439,5 @@ void UserScriptMaster::SendUpdate(content::RenderProcessHost* process,
   if (base::SharedMemory::IsHandleValid(handle_for_process))
     process->Send(new ExtensionMsg_UpdateUserScripts(handle_for_process));
 }
+
+}  // namespace extensions

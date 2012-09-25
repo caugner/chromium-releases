@@ -12,22 +12,25 @@
 #include "ui/aura/desktop/desktop_screen.h"
 #include "ui/aura/desktop/desktop_stacking_client.h"
 #include "ui/aura/env.h"
-#include "ui/aura/single_monitor_manager.h"
+#include "ui/aura/single_display_manager.h"
 #include "ui/gfx/screen.h"
 #include "ui/views/widget/native_widget_aura.h"
 #if defined(OS_LINUX)
-#include "ui/base/linux_ui.h"
 #include "chrome/browser/ui/libgtk2ui/gtk2_ui.h"
+#include "ui/base/linux_ui.h"
 #endif
 #endif  // !USE_ASH
 
 ChromeBrowserMainExtraPartsAura::ChromeBrowserMainExtraPartsAura() {
 }
 
+ChromeBrowserMainExtraPartsAura::~ChromeBrowserMainExtraPartsAura() {
+}
+
 void ChromeBrowserMainExtraPartsAura::PreProfileInit() {
 #if !defined(USE_ASH)
   gfx::Screen::SetInstance(aura::CreateDesktopScreen());
-  aura::Env::GetInstance()->SetMonitorManager(new aura::SingleMonitorManager);
+  aura::Env::GetInstance()->SetDisplayManager(new aura::SingleDisplayManager);
   stacking_client_.reset(new aura::DesktopStackingClient);
 #endif  // !USE_ASH
 
@@ -46,10 +49,10 @@ void ChromeBrowserMainExtraPartsAura::PostMainMessageLoopRun() {
   // after the metrics service is deleted.
 }
 
-namespace browser {
+namespace chrome {
 
 void AddAuraToolkitExtraParts(ChromeBrowserMainParts* main_parts) {
   main_parts->AddParts(new ChromeBrowserMainExtraPartsAura());
 }
 
-}  // namespace browser
+}  // namespace chrome

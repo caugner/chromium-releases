@@ -9,12 +9,10 @@
 #include "sync/internal_api/public/http_post_provider_factory.h"
 #include "sync/internal_api/public/http_post_provider_interface.h"
 
-using browser_sync::HttpResponse;
-
-namespace sync_api {
+namespace syncer {
 
 SyncAPIBridgedConnection::SyncAPIBridgedConnection(
-    browser_sync::ServerConnectionManager* scm,
+    ServerConnectionManager* scm,
     HttpPostProviderFactory* factory)
     : Connection(scm), factory_(factory) {
   post_provider_ = factory_->Create();
@@ -37,7 +35,6 @@ bool SyncAPIBridgedConnection::Init(const char* path,
   std::string connection_url = MakeConnectionURL(sync_server, path, use_ssl);
 
   HttpPostProviderInterface* http = post_provider_;
-  http->SetUserAgent(scm_->user_agent().c_str());
   http->SetURL(connection_url.c_str(), sync_server_port);
 
   if (!auth_token.empty()) {
@@ -90,18 +87,17 @@ SyncAPIServerConnectionManager::SyncAPIServerConnectionManager(
     const std::string& server,
     int port,
     bool use_ssl,
-    const std::string& client_version,
     HttpPostProviderFactory* factory)
-    : ServerConnectionManager(server, port, use_ssl, client_version),
+    : ServerConnectionManager(server, port, use_ssl),
       post_provider_factory_(factory) {
   DCHECK(post_provider_factory_.get());
 }
 
 SyncAPIServerConnectionManager::~SyncAPIServerConnectionManager() {}
 
-browser_sync::ServerConnectionManager::Connection*
+ServerConnectionManager::Connection*
 SyncAPIServerConnectionManager::MakeConnection() {
   return new SyncAPIBridgedConnection(this, post_provider_factory_.get());
 }
 
-}  // namespace sync_api
+}  // namespace syncer

@@ -7,6 +7,8 @@
 #include <string>
 #include <vector>
 
+#include "ash/desktop_background/desktop_background_controller.h"
+#include "ash/shell.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/lazy_instance.h"
@@ -28,6 +30,7 @@
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -49,7 +52,7 @@ using content::UserMetricsAction;
 namespace {
 
 // Observer to start ScreenLocker when the screen lock
-class ScreenLockObserver : public chromeos::PowerManagerClient::Observer,
+class ScreenLockObserver : public chromeos::SessionManagerClient::Observer,
                            public content::NotificationObserver {
  public:
   ScreenLockObserver() : session_started_(false) {
@@ -68,10 +71,10 @@ class ScreenLockObserver : public chromeos::PowerManagerClient::Observer,
     switch (type) {
       case chrome::NOTIFICATION_LOGIN_USER_CHANGED: {
         // Register Screen Lock only after a user has logged in.
-        chromeos::PowerManagerClient* power_manager =
-            chromeos::DBusThreadManager::Get()->GetPowerManagerClient();
-        if (!power_manager->HasObserver(this))
-          power_manager->AddObserver(this);
+        chromeos::SessionManagerClient* session_manager =
+            chromeos::DBusThreadManager::Get()->GetSessionManagerClient();
+        if (!session_manager->HasObserver(this))
+          session_manager->AddObserver(this);
         break;
       }
 
@@ -101,10 +104,6 @@ class ScreenLockObserver : public chromeos::PowerManagerClient::Observer,
 
   virtual void UnlockScreen() OVERRIDE {
     chromeos::ScreenLocker::Hide();
-  }
-
-  virtual void UnlockScreenFailed() OVERRIDE {
-    chromeos::ScreenLocker::UnlockScreenFailed();
   }
 
  private:
@@ -137,7 +136,8 @@ ScreenLocker::ScreenLocker(const User& user)
       unlock_on_input_(user_.email().empty()),
       locked_(false),
       start_time_(base::Time::Now()),
-      login_status_consumer_(NULL) {
+      login_status_consumer_(NULL),
+      incorrect_passwords_count_(0) {
   DCHECK(!screen_locker_);
   screen_locker_ = this;
 }
@@ -163,7 +163,9 @@ void ScreenLocker::OnLoginFailure(const LoginFailure& error) {
   // Don't enable signout button here as we're showing
   // MessageBubble.
 
-  delegate_->ShowErrorMessage(IDS_LOGIN_ERROR_AUTHENTICATING,
+  delegate_->ShowErrorMessage(incorrect_passwords_count_++ ?
+                                  IDS_LOGIN_ERROR_AUTHENTICATING_2ND_TIME :
+                                  IDS_LOGIN_ERROR_AUTHENTICATING,
                               HelpAppLauncher::HELP_CANT_ACCESS_ACCOUNT);
 
   if (login_status_consumer_)
@@ -176,6 +178,7 @@ void ScreenLocker::OnLoginSuccess(
     bool pending_requests,
     bool using_oauth) {
   VLOG(1) << "OnLoginSuccess: Sending Unlock request.";
+  incorrect_passwords_count_ = 0;
   if (authentication_start_time_.is_null()) {
     if (!username.empty())
       LOG(WARNING) << "authentication_start_time_ is not set";
@@ -199,8 +202,7 @@ void ScreenLocker::OnLoginSuccess(
         content::Source<Profile>(profile),
         content::Details<const GoogleServiceSigninSuccessDetails>(&details));
   }
-  DBusThreadManager::Get()->GetPowerManagerClient()->
-      NotifyScreenUnlockRequested();
+  DBusThreadManager::Get()->GetSessionManagerClient()->RequestUnlockScreen();
 
   if (login_status_consumer_)
     login_status_consumer_->OnLoginSuccess(username, password, pending_requests,
@@ -277,7 +279,7 @@ void ScreenLocker::Show() {
   // browser can be NULL if we receive a lock request before the first browser
   // window is shown.
   if (browser && browser->window()->IsFullscreen()) {
-    browser->ToggleFullscreenMode();
+    chrome::ToggleFullscreenMode(browser);
   }
 
   if (!screen_locker_) {
@@ -286,9 +288,6 @@ void ScreenLocker::Show() {
         new ScreenLocker(UserManager::Get()->GetLoggedInUser());
     locker->Init();
   } else {
-    // PowerManager re-sends lock screen signal if it doesn't
-    // receive the response within timeout. Just send complete
-    // signal.
     DVLOG(1) << "Show: locker already exists. Just sending completion event.";
     DBusThreadManager::Get()->GetPowerManagerClient()->
         NotifyScreenLockCompleted();
@@ -311,24 +310,6 @@ void ScreenLocker::Hide() {
 }
 
 // static
-void ScreenLocker::UnlockScreenFailed() {
-  DCHECK(MessageLoop::current()->type() == MessageLoop::TYPE_UI);
-  if (screen_locker_) {
-    // Power manager decided no to unlock the screen even if a user
-    // typed in password, for example, when a user closed the lid
-    // immediately after typing in the password.
-    VLOG(1) << "UnlockScreenFailed: re-enabling screen locker.";
-    screen_locker_->EnableInput();
-  } else {
-    // This can happen when a user requested unlock, but PowerManager
-    // rejected because the computer is closed, then PowerManager unlocked
-    // because it's open again and the above failure message arrives.
-    // This'd be extremely rare, but may still happen.
-    VLOG(1) << "UnlockScreenFailed: screen is already unlocked.";
-  }
-}
-
-// static
 void ScreenLocker::InitClass() {
   g_screen_lock_observer.Get();
 }
@@ -339,6 +320,8 @@ void ScreenLocker::InitClass() {
 ScreenLocker::~ScreenLocker() {
   DCHECK(MessageLoop::current()->type() == MessageLoop::TYPE_UI);
   ClearErrors();
+  ash::Shell::GetInstance()->
+      desktop_background_controller()->MoveDesktopToUnlockedContainer();
 
   screen_locker_ = NULL;
   bool state = false;
@@ -360,6 +343,9 @@ void ScreenLocker::ScreenLockReady() {
   base::TimeDelta delta = base::Time::Now() - start_time_;
   VLOG(1) << "Screen lock time: " << delta.InSecondsF();
   UMA_HISTOGRAM_TIMES("ScreenLocker.ScreenLockTime", delta);
+
+  ash::Shell::GetInstance()->
+      desktop_background_controller()->MoveDesktopToLockedContainer();
 
   bool state = true;
   content::NotificationService::current()->Notify(

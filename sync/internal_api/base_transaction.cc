@@ -4,12 +4,10 @@
 
 #include "sync/internal_api/public/base_transaction.h"
 
-#include "sync/syncable/syncable.h"
+#include "sync/syncable/directory.h"
 #include "sync/util/cryptographer.h"
 
-using browser_sync::Cryptographer;
-
-namespace sync_api {
+namespace syncer {
 
 //////////////////////////////////////////////////////////////////////////
 // BaseTransaction member definitions
@@ -20,13 +18,12 @@ BaseTransaction::BaseTransaction(UserShare* share) {
 BaseTransaction::~BaseTransaction() {
 }
 
-browser_sync::Cryptographer* BaseTransaction::GetCryptographer() const {
+Cryptographer* BaseTransaction::GetCryptographer() const {
   return directory_->GetCryptographer(this->GetWrappedTrans());
 }
 
-syncable::ModelTypeSet GetEncryptedTypes(
-    const sync_api::BaseTransaction* trans) {
+ModelTypeSet GetEncryptedTypes(const BaseTransaction* trans) {
   return trans->GetCryptographer()->GetEncryptedTypes();
 }
 
-} // namespace sync_api
+}  // namespace syncer

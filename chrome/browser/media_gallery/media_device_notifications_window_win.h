@@ -4,28 +4,34 @@
 
 #ifndef CHROME_BROWSER_MEDIA_GALLERY_MEDIA_DEVICE_NOTIFICATIONS_WINDOW_WIN_H_
 #define CHROME_BROWSER_MEDIA_GALLERY_MEDIA_DEVICE_NOTIFICATIONS_WINDOW_WIN_H_
-#pragma once
 
 #include <windows.h>
 
+#include <string>
+
 #include "base/basictypes.h"
+#include "base/file_path.h"
+#include "base/memory/ref_counted.h"
 
 typedef LRESULT (*VolumeNameFunc)(LPCWSTR drive,
                                   LPWSTR volume_name,
                                   unsigned int volume_name_len);
 namespace chrome {
 
-class MediaDeviceNotificationsWindowWin {
+class MediaDeviceNotificationsWindowWin
+    : public base::RefCountedThreadSafe<MediaDeviceNotificationsWindowWin> {
  public:
   MediaDeviceNotificationsWindowWin();
   // Only for use in unit tests.
   explicit MediaDeviceNotificationsWindowWin(VolumeNameFunc volumeNameFunc);
 
-  ~MediaDeviceNotificationsWindowWin();
-
   LRESULT OnDeviceChange(UINT event_type, DWORD data);
 
  private:
+  friend class base::RefCountedThreadSafe<MediaDeviceNotificationsWindowWin>;
+
+  virtual ~MediaDeviceNotificationsWindowWin();
+
   void Init();
 
   LRESULT CALLBACK WndProc(HWND hwnd,
@@ -37,6 +43,15 @@ class MediaDeviceNotificationsWindowWin {
                                        UINT message,
                                        WPARAM wparam,
                                        LPARAM lparam);
+
+  void CheckDeviceTypeOnFileThread(const std::string& id,
+                                   const FilePath::StringType& device_name,
+                                   const FilePath& path);
+
+  void ProcessMediaDeviceAttachedOnUIThread(
+      const std::string& id,
+      const FilePath::StringType& device_name,
+      const FilePath& path);
 
   // The window class of |window_|.
   ATOM atom_;

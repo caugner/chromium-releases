@@ -29,16 +29,24 @@ table.aboutDetails tr:nth-child(odd) {
   background: #eff3ff;
 }
 
-table#routingInfo tr:nth-child(odd) {
-  background: #ccffcc;
-}
-
 div#aboutInfo div.section > td#detail {
   width: 50%;
 }
 
 div#aboutInfo div.section > td#value {
   width: 50%;
+}
+
+table#typeInfo tr.error {
+ background: #ffcccc;
+}
+
+table#typeInfo tr.warning {
+ background: #ffffcc;
+}
+
+table#typeInfo tr.ok {
+ background: #ccffcc;
 }
 
 @-webkit-keyframes highlight1 {
@@ -62,13 +70,20 @@ table.aboutDetails tr[highlighted]:nth-child(odd) {
   -webkit-animation-duration: 3s;
   -webkit-animation-timing-function: linear;
 }
+
+table.aboutDetails tr.uninitialized {
+  color: #7f7f7f;
+}
+
 </style>
 
 <div id='aboutInfo'>
   <div class="section" jsselect="details">
     <h2 jscontent="title"></h2>
     <table class="aboutDetails">
-      <tr jsselect="data" jseval='highlightIfChanged(this, this.children[1].innerText, stat_value)'>
+      <tr jsselect="data"
+            jsvalues="class:$this.is_valid ? '' : 'uninitialized'"
+            jseval='highlightIfChanged(this, this.children[1].innerText, stat_value)'>
         <td class="detail" jscontent="stat_name" width=50%></td>
         <td class="value" jscontent="stat_value" width=50%></td>
       </tr>
@@ -76,11 +91,11 @@ table.aboutDetails tr[highlighted]:nth-child(odd) {
   </div>
 
   <div class="section">
-    <h2>Routing Info</h2>
-    <table id="routingInfo">
-      <tr jsselect="routing_info">
-        <td jscontent="model_type"/>
-        <td jscontent="group"/>
+    <h2>Type Info</h2>
+    <table id="typeInfo">
+      <tr jsselect="type_status" jsvalues="class:$this.status">
+        <td jscontent="name" width=50% />
+        <td jscontent="value" width=50% />
       </tr>
     </table>
   </div>
@@ -91,20 +106,9 @@ table.aboutDetails tr[highlighted]:nth-child(odd) {
     </p>
   </div>
 
-  <div class="section" jsdisplay="failed_data_types_detected">
-    <p>
-      <span class="err" jscontent="failed_data_types"></span>
-    </p>
-  </div>
-
-  <div class="section" jsdisplay="throttled_data_types">
-    <h2>Throttled Types</h2>
-    <span jscontent="throttled_data_types"></span>
-  </div>
-
   <div class="section" jsdisplay="actionable_error_detected">
-    <p jsdisplay="actionable_error_detected">
-      <h2 jsdisplay="actionable_error_detected">Actionable Error</h2>
+    <p>
+      <h2>Actionable Error</h2>
       <table id="actionableError">
         <tr jsselect="actionable_error">
           <td jscontent="stat_name"/>

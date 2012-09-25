@@ -16,9 +16,9 @@ namespace browser_sync {
 class WorkerTask : public HistoryDBTask {
  public:
   WorkerTask(
-      const WorkCallback& work,
+      const syncer::WorkCallback& work,
       WaitableEvent* done,
-      SyncerError* error)
+      syncer::SyncerError* error)
     : work_(work), done_(done), error_(error) {}
 
   virtual bool RunOnDBThread(history::HistoryBackend* backend,
@@ -35,9 +35,9 @@ class WorkerTask : public HistoryDBTask {
  protected:
   virtual ~WorkerTask() {}
 
-  WorkCallback work_;
+  syncer::WorkCallback work_;
   WaitableEvent* done_;
-  SyncerError* error_;
+  syncer::SyncerError* error_;
 };
 
 
@@ -46,18 +46,18 @@ HistoryModelWorker::HistoryModelWorker(HistoryService* history_service)
   CHECK(history_service);
 }
 
-SyncerError HistoryModelWorker::DoWorkAndWaitUntilDone(
-    const WorkCallback& work) {
+syncer::SyncerError HistoryModelWorker::DoWorkAndWaitUntilDone(
+    const syncer::WorkCallback& work) {
   WaitableEvent done(false, false);
-  SyncerError error = UNSET;
+  syncer::SyncerError error = syncer::UNSET;
   scoped_refptr<WorkerTask> task(new WorkerTask(work, &done, &error));
   history_service_->ScheduleDBTask(task.get(), &cancelable_consumer_);
   done.Wait();
   return error;
 }
 
-ModelSafeGroup HistoryModelWorker::GetModelSafeGroup() {
-  return GROUP_HISTORY;
+syncer::ModelSafeGroup HistoryModelWorker::GetModelSafeGroup() {
+  return syncer::GROUP_HISTORY;
 }
 
 HistoryModelWorker::~HistoryModelWorker() {}

@@ -4,11 +4,11 @@
 
 #ifndef CHROME_TEST_BASE_TEST_BROWSER_WINDOW_H_
 #define CHROME_TEST_BASE_TEST_BROWSER_WINDOW_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "build/build_config.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/test/base/test_location_bar.h"
 
@@ -21,7 +21,7 @@ class Extension;
 // See BrowserWithTestWindowTest for an example of using this class.
 class TestBrowserWindow : public BrowserWindow {
  public:
-  explicit TestBrowserWindow(Browser* browser);
+  TestBrowserWindow();
   virtual ~TestBrowserWindow();
 
   // BrowserWindow:
@@ -37,7 +37,6 @@ class TestBrowserWindow : public BrowserWindow {
   virtual gfx::NativeWindow GetNativeWindow() OVERRIDE;
   virtual BrowserWindowTesting* GetBrowserWindowTesting() OVERRIDE;
   virtual StatusBubble* GetStatusBubble() OVERRIDE;
-  virtual void ToolbarSizeChanged(bool is_animating) OVERRIDE {}
   virtual void UpdateTitleBar() OVERRIDE {}
   virtual void BookmarkBarStateChanged(
       BookmarkBar::AnimateChangeType change_type) OVERRIDE {}
@@ -82,8 +81,6 @@ class TestBrowserWindow : public BrowserWindow {
       bool* is_keyboard_shortcut) OVERRIDE;
   virtual void HandleKeyboardEvent(
       const content::NativeWebKeyboardEvent& event) OVERRIDE {}
-  virtual void ShowCreateWebAppShortcutsDialog(
-      TabContents* tab_contents) OVERRIDE {}
   virtual void ShowCreateChromeAppShortcutsDialog(
       Profile* profile,
       const extensions::Extension* app) OVERRIDE {}
@@ -97,7 +94,6 @@ class TestBrowserWindow : public BrowserWindow {
   virtual void ConfirmAddSearchProvider(TemplateURL* template_url,
                                         Profile* profile) OVERRIDE {}
   virtual void ToggleBookmarkBar() OVERRIDE {}
-  virtual void ShowAboutChromeDialog() OVERRIDE;
   virtual void ShowUpdateChromeDialog() OVERRIDE {}
   virtual void ShowTaskManager() OVERRIDE {}
   virtual void ShowBackgroundPages() OVERRIDE {}
@@ -114,7 +110,7 @@ class TestBrowserWindow : public BrowserWindow {
   virtual void UserChangedTheme() OVERRIDE {}
   virtual int GetExtraRenderViewHeight() const OVERRIDE;
   virtual void WebContentsFocused(content::WebContents* contents) OVERRIDE {}
-  virtual void ShowPageInfo(Profile* profile,
+  virtual void ShowPageInfo(content::WebContents* web_contents,
                             const GURL& url,
                             const content::SSLStatus& ssl,
                             bool show_history) OVERRIDE {}
@@ -153,5 +149,13 @@ class TestBrowserWindow : public BrowserWindow {
 
   DISALLOW_COPY_AND_ASSIGN(TestBrowserWindow);
 };
+
+namespace chrome {
+
+// Helpers that handle the lifetime of TestBrowserWindow instances.
+Browser* CreateBrowserWithTestWindowForProfile(Profile* profile);
+Browser* CreateBrowserWithTestWindowForParams(Browser::CreateParams* params);
+
+}  // namespace chrome
 
 #endif  // CHROME_TEST_BASE_TEST_BROWSER_WINDOW_H_

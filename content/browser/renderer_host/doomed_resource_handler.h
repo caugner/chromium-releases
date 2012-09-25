@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_BROWSER_RENDERER_HOST_DOOMED_RESOURCE_HANDLER_H_
 #define CONTENT_BROWSER_RENDERER_HOST_DOOMED_RESOURCE_HANDLER_H_
-#pragma once
 
 #include "base/memory/scoped_ptr.h"
 #include "content/browser/renderer_host/resource_handler.h"
@@ -42,7 +41,7 @@ class DoomedResourceHandler : public ResourceHandler {
                           int* buf_size,
                           int min_size) OVERRIDE;
   virtual bool OnReadCompleted(int request_id,
-                               int* bytes_read,
+                               int bytes_read,
                                bool* defer) OVERRIDE;
   virtual bool OnResponseCompleted(int request_id,
                                    const net::URLRequestStatus& status,

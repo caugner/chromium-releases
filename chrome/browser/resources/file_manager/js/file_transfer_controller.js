@@ -14,25 +14,18 @@ var DRAG_AND_DROP_GLOBAL_DATA = '__drag_and_drop_global_data';
 
 /**
  * @constructor
- * @param {cr.ui.ArrayDataModel} fileList Files in the current directory.
- * @param {cr.ui.ListSelectionModel} fileListSelection Selection in the
- *     fileList.
  * @param {function} dragNodeConstructor Constructor for draggable node.
  * @param {FileCopyManager} copyManager Copy manager instance.
  * @param {DirectoryModel} directoryModel Directory model instance.
  */
-function FileTransferController(fileList,
-                                fileListSelection,
-                                dragNodeConstructor,
+function FileTransferController(dragNodeConstructor,
                                 copyManager,
                                 directoryModel) {
-  this.fileList_ = fileList;
-  this.fileListSelection_ = fileListSelection;
   this.dragNodeConstructor_ = dragNodeConstructor;
   this.copyManager_ = copyManager;
   this.directoryModel_ = directoryModel;
 
-  this.fileListSelection_.addEventListener('change',
+  this.directoryModel_.getFileListSelection().addEventListener('change',
       this.onSelectionChanged_.bind(this));
 
   /**
@@ -47,8 +40,7 @@ function FileTransferController(fileList,
    * @type {Array.<File>}
    * @private
    */
-  this.files_ = [];
-
+  this.selectedFileObjects_ = [];
 }
 
 FileTransferController.prototype = {
@@ -79,14 +71,15 @@ FileTransferController.prototype = {
                           !!opt_onlyIntoDirectories));
   },
 
-  attachBreadcrumbsDropTarget: function(breadcrumbs) {
-    breadcrumbs.addEventListener('dragover',
+  attachBreadcrumbsDropTarget: function(breadcrumbsController) {
+    var container = breadcrumbsController.getContainer();
+    container.addEventListener('dragover',
         this.onDragOver_.bind(this, true, null));
-    breadcrumbs.addEventListener('dragenter',
-        this.onDragEnterBreadcrumbs_.bind(this, breadcrumbs));
-    breadcrumbs.addEventListener('dragleave',
+    container.addEventListener('dragenter',
+        this.onDragEnterBreadcrumbs_.bind(this, breadcrumbsController));
+    container.addEventListener('dragleave',
         this.onDragLeave_.bind(this, null));
-    breadcrumbs.addEventListener('drop', this.onDrop_.bind(this, true));
+    container.addEventListener('drop', this.onDrop_.bind(this, true));
   },
 
   /**
@@ -111,7 +104,7 @@ FileTransferController.prototype = {
    * @param {string} effectAllowed Value must be valid for the
    *     |dataTransfer.effectAllowed| property ('move', 'copy', 'copyMove').
    */
-  cutOrCopy: function(dataTransfer, effectAllowed) {
+  cutOrCopy_: function(dataTransfer, effectAllowed) {
     var directories = [];
     var files = [];
     var entries = this.selectedEntries_;
@@ -130,8 +123,8 @@ FileTransferController.prototype = {
     dataTransfer.effectAllowed = effectAllowed;
     dataTransfer.setData('fs/effectallowed', effectAllowed);
 
-    for (var i = 0; i < this.files_.length; i++) {
-      dataTransfer.items.add(this.files_[i]);
+    for (var i = 0; i < this.selectedFileObjects_.length; i++) {
+      dataTransfer.items.add(this.selectedFileObjects_[i]);
     }
   },
 
@@ -143,7 +136,7 @@ FileTransferController.prototype = {
   getSourceRoot_: function(dataTransfer) {
     var sourceDir = dataTransfer.getData('fs/sourceDir');
     if (sourceDir)
-      return DirectoryModel.getRootPath(sourceDir);
+      return PathUtil.getRootPath(sourceDir);
 
     // For drive search, sourceDir will be set to null, so we should double
     // check that we are not on drive.
@@ -194,8 +187,8 @@ FileTransferController.prototype = {
     };
 
     if (!toMove || operationInfo.sourceDir != destinationPath) {
-      var targetOnGData = DirectoryModel.getRootType(destinationPath) ==
-          DirectoryModel.RootType.GDATA;
+      var targetOnGData = (PathUtil.getRootType(destinationPath) ===
+                           RootType.GDATA);
       this.copyManager_.paste(operationInfo,
                               destinationPath,
                               targetOnGData);
@@ -221,9 +214,9 @@ FileTransferController.prototype = {
 
     if (this.canCopyOrDrag_(dt)) {
       if (this.canCutOrDrag_(dt))
-        this.cutOrCopy(dt, 'copyMove');
+        this.cutOrCopy_(dt, 'copyMove');
       else
-        this.cutOrCopy(dt, 'copy');
+        this.cutOrCopy_(dt, 'copy');
     } else {
       event.preventDefault();
     }
@@ -276,20 +269,12 @@ FileTransferController.prototype = {
     }
   },
 
-  onDragEnterBreadcrumbs_: function(breadcrumbs, event) {
-    if (!event.target.classList.contains('breadcrumb-path'))
+  onDragEnterBreadcrumbs_: function(breadcrumbsContainer, event) {
+    var path = breadcrumbsContainer.getTargetPath(event);
+    if (!path)
       return;
+
     this.dragEnterCount_++;
-
-    var items = breadcrumbs.querySelectorAll('.breadcrumb-path');
-    var path = this.directoryModel_.getCurrentRootPath();
-
-    if (event.target != items[0]) {
-      for (var i = 1; items[i - 1] != event.target; i++) {
-        path += '/' + items[i].textContent;
-      }
-    }
-
     this.setDropTarget_(event.target, true, event.dataTransfer, path);
   },
 
@@ -361,7 +346,7 @@ FileTransferController.prototype = {
       return;
     }
     event.preventDefault();
-    this.cutOrCopy(event.clipboardData, 'copy');
+    this.cutOrCopy_(event.clipboardData, 'copy');
     this.notify_('selection-copied');
   },
 
@@ -387,7 +372,7 @@ FileTransferController.prototype = {
       return;
     }
     event.preventDefault();
-    this.cutOrCopy(event.clipboardData, 'move');
+    this.cutOrCopy_(event.clipboardData, 'move');
     this.notify_('selection-cut');
   },
 
@@ -486,22 +471,28 @@ FileTransferController.prototype = {
   onSelectionChanged_: function(event) {
     var entries = this.selectedEntries_;
     var dragNodes = this.dragNodes_ = [];
-    var files = this.files_ = [];
+    var files = this.selectedFileObjects_ = [];
 
+    var fileEntries = [];
     for (var i = 0; i < entries.length; i++) {
-      // File object must be prepeared in advance for clipboard operations
-      // (copy, paste and drag). DataTransfer object closes for write after
-      // returning control from that handlers so they may not have
-      // asynchronous operations.
-      if (!this.isOnGData && entries[i].isFile)
-        entries[i].file(function(file) { files.push(file); });
-
+      if (entries[i].isFile)
+        fileEntries.push(entries[i]);
       // Items to drag are created in advance. Images must be loaded
       // at the time the 'dragstart' event comes. Otherwise draggable
       // image will be rendered without IMG tags.
       if (dragNodes.length < MAX_DRAG_THUMBAIL_COUNT)
         dragNodes.push(new this.dragNodeConstructor_(entries[i]));
     }
+
+    // File object must be prepeared in advance for clipboard operations
+    // (copy, paste and drag). DataTransfer object closes for write after
+    // returning control from that handlers so they may not have
+    // asynchronous operations.
+    function prepareFileObjects() {
+      for (var i = 0; i < fileEntries.length; i++) {
+        fileEntries[i].file(function(file) { files.push(file); });
+      }
+    };
 
     if (this.isOnGData) {
       this.allGDataFilesAvailable = false;
@@ -516,7 +507,12 @@ FileTransferController.prototype = {
         // |Copy| is the only menu item affected by allGDataFilesAvailable.
         // It could be open right now, update its UI.
         this.copyCommand_.disabled = !this.canCopyOrDrag_();
+
+        if (this.allGDataFilesAvailable)
+          prepareFileObjects();
       }.bind(this));
+    } else {
+      prepareFileObjects();
     }
   },
 
@@ -531,7 +527,7 @@ FileTransferController.prototype = {
   },
 
   get isOnGData() {
-    return this.directoryModel_.getRootType() == DirectoryModel.RootType.GDATA;
+    return this.directoryModel_.getCurrentRootType() === RootType.GDATA;
   },
 
   notify_: function(eventName) {
@@ -546,8 +542,9 @@ FileTransferController.prototype = {
    * @type {Array.<Entry>}
    */
   get selectedEntries_() {
-    var list = this.fileList_;
-    var selectedIndexes = this.fileListSelection_.selectedIndexes;
+    var list = this.directoryModel_.getFileList();
+    var selectedIndexes = this.directoryModel_.getFileListSelection().
+                               selectedIndexes;
     var entries = selectedIndexes.map(function(index) {
       return list.item(index);
     });
@@ -569,7 +566,7 @@ FileTransferController.prototype = {
       return 'none';
     if (event.dataTransfer.effectAllowed == 'copyMove' &&
         this.getSourceRoot_(event.dataTransfer) ==
-            DirectoryModel.getRootPath(destinationPath) &&
+            PathUtil.getRootPath(destinationPath) &&
         !event.ctrlKey) {
       return 'move';
     }

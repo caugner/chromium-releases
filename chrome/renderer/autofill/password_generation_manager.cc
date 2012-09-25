@@ -6,6 +6,8 @@
 
 #include "base/logging.h"
 #include "chrome/common/autofill_messages.h"
+#include "chrome/common/net/gaia/gaia_urls.h"
+#include "chrome/common/password_generation_util.h"
 #include "content/public/renderer/render_view.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputElement.h"
@@ -27,21 +29,6 @@ namespace {
 bool GetAccountCreationPasswordFields(
     const WebKit::WebFormElement& form,
     std::vector<WebKit::WebInputElement>* passwords) {
-  // Ignore forms with autocomplete turned off for now. We may remove this in
-  // the future, as we only want to avoid creating passwords if the signin
-  // form has autocomplete turned off.
-  if (form.isNull() || !form.autoComplete())
-    return false;
-
-  // Bail out if |form| is not a valid PasswordForm. In this case the password
-  // wouldn't get saved even if generated.
-  scoped_ptr<webkit::forms::PasswordForm> password_form(
-      webkit::forms::PasswordFormDomManager::CreatePasswordForm(form));
-  if (!password_form.get()) {
-    DVLOG(2) << "Invalid action on form";
-    return false;
-  }
-
   // Grab all of the passwords for the form.
   WebKit::WebVector<WebKit::WebFormControlElement> control_elements;
   form.getFormControlElements(control_elements);
@@ -71,15 +58,29 @@ bool GetAccountCreationPasswordFields(
 PasswordGenerationManager::PasswordGenerationManager(
     content::RenderView* render_view)
     : content::RenderViewObserver(render_view),
+      render_view_(render_view),
       enabled_(false) {
-  render_view->GetWebView()->addTextFieldDecoratorClient(this);
+  render_view_->GetWebView()->addTextFieldDecoratorClient(this);
 }
 PasswordGenerationManager::~PasswordGenerationManager() {}
 
-void PasswordGenerationManager::DidFinishLoad(WebKit::WebFrame* frame) {
-  // Clear previous state.
-  passwords_.clear();
+void PasswordGenerationManager::DidFinishDocumentLoad(WebKit::WebFrame* frame) {
+  // In every navigation, the IPC message sent by the password autofill manager
+  // to query whether the current form is blacklisted or not happens when the
+  // document load finishes, so we need to clear previous states here before we
+  // hear back from the browser. We only clear this state on main frame load
+  // as we don't want subframe loads to clear state that we have recieved from
+  // the main frame. Note that we assume there is only one account creation
+  // form, but there could be multiple password forms in each frame.
+  if (!frame->parent()) {
+    not_blacklisted_password_form_origins_.clear();
+    // Initialize to an empty and invalid GURL.
+    account_creation_form_origin_ = GURL();
+    passwords_.clear();
+  }
+}
 
+void PasswordGenerationManager::DidFinishLoad(WebKit::WebFrame* frame) {
   // We don't want to generate passwords if the browser won't store or sync
   // them.
   if (!enabled_)
@@ -91,17 +92,41 @@ void PasswordGenerationManager::DidFinishLoad(WebKit::WebFrame* frame) {
   WebKit::WebVector<WebKit::WebFormElement> forms;
   frame->document().forms(forms);
   for (size_t i = 0; i < forms.size(); ++i) {
+    // Ignore forms with autocomplete turned off for now. We may remove this in
+    // the future, as we only want to avoid creating passwords if the signin
+    // form has autocomplete turned off.
+    if (forms[i].isNull() || !forms[i].autoComplete())
+      continue;
+
+    // If we can't get a valid PasswordForm, we skip this form because the
+    // the password won't get saved even if we generate it.
+    scoped_ptr<webkit::forms::PasswordForm> password_form(
+        webkit::forms::PasswordFormDomManager::CreatePasswordForm(forms[i]));
+    if (!password_form.get()) {
+      DVLOG(2) << "Invalid action on form";
+      continue;
+    }
+
+    // Do not generate password for GAIA since it is used to retrieve the
+    // generated paswords.
+    GURL realm(password_form->signon_realm);
+    if (realm == GURL(GaiaUrls::GetInstance()->gaia_login_form_realm()))
+      continue;
+
     std::vector<WebKit::WebInputElement> passwords;
     if (GetAccountCreationPasswordFields(forms[i], &passwords)) {
       DVLOG(2) << "Account creation form detected";
+      password_generation::LogPasswordGenerationEvent(
+          password_generation::SIGN_UP_DETECTED);
       passwords_ = passwords;
-      // Make the decoration visible for this element.
-      passwords[0].decorationElementFor(this).setAttribute("style",
-                                                           "display:block");
+      account_creation_form_origin_ = password_form->origin;
+      MaybeShowIcon();
       // We assume that there is only one account creation field per URL.
       return;
     }
   }
+  password_generation::LogPasswordGenerationEvent(
+      password_generation::NO_SIGN_UP_DETECTED);
 }
 
 bool PasswordGenerationManager::ShouldAnalyzeDocument(
@@ -148,6 +173,8 @@ void PasswordGenerationManager::handleClick(WebKit::WebInputElement& element) {
                                                          rect,
                                                          element.maxLength(),
                                                          *password_form));
+    password_generation::LogPasswordGenerationEvent(
+        password_generation::BUBBLE_SHOWN);
   }
 }
 
@@ -159,6 +186,8 @@ void PasswordGenerationManager::willDetach(
 bool PasswordGenerationManager::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(PasswordGenerationManager, message)
+    IPC_MESSAGE_HANDLER(AutofillMsg_FormNotBlacklisted,
+                        OnFormNotBlacklisted)
     IPC_MESSAGE_HANDLER(AutofillMsg_GeneratedPasswordAccepted,
                         OnPasswordAccepted)
     IPC_MESSAGE_HANDLER(AutofillMsg_PasswordGenerationEnabled,
@@ -168,16 +197,48 @@ bool PasswordGenerationManager::OnMessageReceived(const IPC::Message& message) {
   return handled;
 }
 
+void PasswordGenerationManager::OnFormNotBlacklisted(
+    const webkit::forms::PasswordForm& form) {
+  not_blacklisted_password_form_origins_.push_back(form.origin);
+  MaybeShowIcon();
+}
+
 void PasswordGenerationManager::OnPasswordAccepted(const string16& password) {
   for (std::vector<WebKit::WebInputElement>::iterator it = passwords_.begin();
        it != passwords_.end(); ++it) {
     it->setValue(password);
     it->setAutofilled(true);
+    // Advance focus to the next input field. We assume password fields in
+    // an account creation form are always adjacent.
+    render_view_->GetWebView()->advanceFocus(false);
   }
 }
 
 void PasswordGenerationManager::OnPasswordGenerationEnabled(bool enabled) {
   enabled_ = enabled;
+}
+
+void PasswordGenerationManager::MaybeShowIcon() {
+  // We should show the password generation icon only when we have detected
+  // account creation form and we have confirmed from browser that this form
+  // is not blacklisted by the users.
+  if (!account_creation_form_origin_.is_valid() ||
+      passwords_.empty() ||
+      not_blacklisted_password_form_origins_.empty()) {
+    return;
+  }
+
+  for (std::vector<GURL>::iterator it =
+           not_blacklisted_password_form_origins_.begin();
+       it != not_blacklisted_password_form_origins_.end(); ++it) {
+    if (*it == account_creation_form_origin_) {
+      passwords_[0].decorationElementFor(this).setAttribute("style",
+                                                            "display:block");
+      password_generation::LogPasswordGenerationEvent(
+          password_generation::ICON_SHOWN);
+      return;
+    }
+  }
 }
 
 }  // namespace autofill

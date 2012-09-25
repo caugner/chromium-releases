@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_PEPPER_FLASH_SETTINGS_MANAGER_H_
 #define CHROME_BROWSER_PEPPER_FLASH_SETTINGS_MANAGER_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
@@ -43,6 +42,12 @@ class PepperFlashSettingsManager {
 
     virtual void OnSetSitePermissionCompleted(uint32 request_id,
                                               bool success) {}
+
+    virtual void OnGetSitesWithDataCompleted(
+        uint32 request_id,
+        const std::vector<std::string>& sites) {}
+
+    virtual void OnClearSiteDataCompleted(uint32 request_id, bool success) {}
   };
 
   // |client| must outlive this object. It is guaranteed that |client| won't
@@ -84,6 +89,16 @@ class PepperFlashSettingsManager {
   // is completed.
   uint32 SetSitePermission(PP_Flash_BrowserOperations_SettingType setting_type,
                            const ppapi::FlashSiteSettings& sites);
+
+  // Gets a list of sites that have stored data.
+  // Client::OnGetSitesWithDataCompleted() will be called when the operation is
+  // completed.
+  uint32 GetSitesWithData();
+
+  // Clears data for a certain site.
+  // Client::OnClearSiteDataompleted() will be called when the operation is
+  // completed.
+  uint32 ClearSiteData(const std::string& site, uint64 flags, uint64 max_age);
 
  private:
   // Core does most of the work. It is ref-counted so that its lifespan can be

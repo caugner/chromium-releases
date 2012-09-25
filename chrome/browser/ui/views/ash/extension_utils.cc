@@ -23,32 +23,24 @@ void OpenExtension(Profile* profile,
   DCHECK(extension);
 
   WindowOpenDisposition disposition =
-      browser::DispositionFromEventFlags(event_flags);
-
-  GURL url;
-  if (extension->id() == extension_misc::kWebStoreAppId)
-    url = extension->GetFullLaunchURL();
+      chrome::DispositionFromEventFlags(event_flags);
+  extension_misc::LaunchContainer container;
 
   if (disposition == NEW_FOREGROUND_TAB || disposition == NEW_BACKGROUND_TAB) {
-    // Opens in a tab.
-    application_launch::OpenApplication(
-        profile, extension, extension_misc::LAUNCH_TAB, url, disposition, NULL);
+    container = extension_misc::LAUNCH_TAB;
   } else if (disposition == NEW_WINDOW) {
-    // Force a new window open.
-    application_launch::OpenApplication(
-        profile, extension, extension_misc::LAUNCH_WINDOW, url,
-        disposition, NULL);
+    container = extension_misc::LAUNCH_WINDOW;
   } else {
     // Look at preference to find the right launch container.  If no preference
     // is set, launch as a regular tab.
-    extension_misc::LaunchContainer launch_container =
+    container =
         profile->GetExtensionService()->extension_prefs()->GetLaunchContainer(
-            extension, ExtensionPrefs::LAUNCH_DEFAULT);
-
-    application_launch::OpenApplication(
-        profile, extension, launch_container, GURL(url),
-        NEW_FOREGROUND_TAB, NULL);
+            extension, extensions::ExtensionPrefs::LAUNCH_DEFAULT);
+    disposition = NEW_FOREGROUND_TAB;
   }
+
+  application_launch::OpenApplication(application_launch::LaunchParams(
+          profile, extension, container, disposition));
 }
 
 }  // namespace extension_utils

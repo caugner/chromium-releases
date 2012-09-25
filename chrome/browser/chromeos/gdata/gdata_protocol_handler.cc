@@ -18,7 +18,7 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/gdata/gdata.pb.h"
 #include "chrome/browser/chromeos/gdata/gdata_documents_service.h"
-#include "chrome/browser/chromeos/gdata/gdata_file_system.h"
+#include "chrome/browser/chromeos/gdata/gdata_file_system_interface.h"
 #include "chrome/browser/chromeos/gdata/gdata_files.h"
 #include "chrome/browser/chromeos/gdata/gdata_operation_registry.h"
 #include "chrome/browser/chromeos/gdata/gdata_system_service.h"
@@ -34,6 +34,7 @@
 #include "net/http/http_response_headers.h"
 #include "net/http/http_response_info.h"
 #include "net/url_request/url_request.h"
+#include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_job.h"
 
 using content::BrowserThread;
@@ -57,8 +58,27 @@ const char kHTTPNotAllowedText[] = "Not Allowed";
 const char kHTTPNotFoundText[] = "Not Found";
 const char kHTTPInternalErrorText[] = "Internal Error";
 
+const int64 kInvalidFileSize = -1;
+
 // Initial size of download buffer, same as kBufferSize used for URLFetcherCore.
 const int kInitialDownloadBufferSizeInBytes = 4096;
+
+struct MimeTypeReplacement {
+  const char* original_type;
+  const char* new_type;
+};
+
+const MimeTypeReplacement kMimeTypeReplacements[] = {
+    {"message/rfc822","multipart/related"} // Fixes MHTML
+};
+
+std::string FixupMimeType(const std::string& type) {
+  for (size_t i = 0; i < arraysize(kMimeTypeReplacements); i++) {
+    if (type == kMimeTypeReplacements[i].original_type)
+      return kMimeTypeReplacements[i].new_type;
+  }
+  return type;
+}
 
 // Empty callback for net::FileStream::Close().
 void EmptyCompletionCallback(int) {
@@ -68,7 +88,7 @@ void EmptyCompletionCallback(int) {
 void GetFileSizeOnBlockingPool(const FilePath& file_path,
                                int64* file_size) {
   if (!file_util::GetFileSize(file_path, file_size))
-    *file_size = 0;
+    *file_size = kInvalidFileSize;
 }
 
 // Helper function that extracts and unescapes resource_id from drive urls
@@ -92,7 +112,7 @@ GDataSystemService* GetSystemService() {
 }
 
 // Helper function to get GDataFileSystem from Profile on UI thread.
-void GetFileSystemOnUIThread(GDataFileSystem** file_system) {
+void GetFileSystemOnUIThread(GDataFileSystemInterface** file_system) {
   GDataSystemService* system_service = GetSystemService();
   *file_system = system_service ? system_service->file_system() : NULL;
 }
@@ -111,7 +131,6 @@ void CancelGDataDownloadOnUIThread(const FilePath& gdata_file_path) {
 class GDataURLRequestJob : public net::URLRequestJob {
  public:
   explicit GDataURLRequestJob(net::URLRequest* request);
-  virtual ~GDataURLRequestJob();
 
   // net::URLRequestJob overrides:
   virtual void Start() OVERRIDE;
@@ -123,9 +142,12 @@ class GDataURLRequestJob : public net::URLRequestJob {
                            int buf_size,
                            int* bytes_read) OVERRIDE;
 
+ protected:
+  virtual ~GDataURLRequestJob();
+
  private:
   // Helper for Start() to let us start asynchronously.
-  void StartAsync(GDataFileSystem** file_system);
+  void StartAsync(GDataFileSystemInterface** file_system);
 
   // Helper methods for Delegate::OnUrlFetchDownloadData and ReadRawData to
   // receive download data and copy to response buffer.
@@ -141,7 +163,7 @@ class GDataURLRequestJob : public net::URLRequestJob {
 
   // Helper callback for handling async responses from
   // GDataFileSystem::GetFileByResourceId().
-  void OnGetFileByResourceId(base::PlatformFileError error,
+  void OnGetFileByResourceId(GDataFileError error,
                              const FilePath& local_file_path,
                              const std::string& mime_type,
                              GDataFileType file_type);
@@ -150,11 +172,11 @@ class GDataURLRequestJob : public net::URLRequestJob {
   // to |file_size|, and notifies result for Start().
   void OnGetFileSize(int64 *file_size);
 
-  // Helper callback for GetFileInfoByResourceId invoked by StartAsync.
-  void OnGetFileInfoByResourceId(const std::string& resource_id,
-                                 base::PlatformFileError error,
-                                 const FilePath& gdata_file_path,
-                                 scoped_ptr<GDataFileProto> file_proto);
+  // Helper callback for GetEntryInfoByResourceId invoked by StartAsync.
+  void OnGetEntryInfoByResourceId(const std::string& resource_id,
+                                  GDataFileError error,
+                                  const FilePath& gdata_file_path,
+                                  scoped_ptr<GDataEntryProto> entry_proto);
 
   // Helper methods for ReadRawData to open file and read from its corresponding
   // stream in a streaming fashion.
@@ -182,7 +204,7 @@ class GDataURLRequestJob : public net::URLRequestJob {
   void CloseFileStream();
 
   scoped_ptr<base::WeakPtrFactory<GDataURLRequestJob> > weak_ptr_factory_;
-  GDataFileSystem* file_system_;
+  GDataFileSystemInterface* file_system_;
 
   bool error_;  // True if we've encountered an error.
   bool headers_set_;  // True if headers have been set.
@@ -203,7 +225,7 @@ class GDataURLRequestJob : public net::URLRequestJob {
 };
 
 GDataURLRequestJob::GDataURLRequestJob(net::URLRequest* request)
-    : net::URLRequestJob(request),
+    : net::URLRequestJob(request, request->context()->network_delegate()),
       weak_ptr_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(
           new base::WeakPtrFactory<GDataURLRequestJob>(this))),
       file_system_(NULL),
@@ -216,10 +238,6 @@ GDataURLRequestJob::GDataURLRequestJob(net::URLRequest* request)
   download_growable_buf_->SetCapacity(kInitialDownloadBufferSizeInBytes);
   download_drainable_buf_ = new net::DrainableIOBuffer(
       download_growable_buf_, download_growable_buf_->capacity());
-}
-
-GDataURLRequestJob::~GDataURLRequestJob() {
-  CloseFileStream();
 }
 
 void GDataURLRequestJob::Start() {
@@ -245,7 +263,7 @@ void GDataURLRequestJob::Start() {
   //    GetDownloadDataCallback - this would either get it from cache or
   //    download it from gdata.
   // 7) If file is downloaded from gdata:
-  //    7.1) Whenever content::URLFetcherCore::OnReadCompleted() receives a part
+  //    7.1) Whenever net::URLFetcherCore::OnReadCompleted() receives a part
   //         of the response, it invokes
   //         constent::URLFetcherDelegate::OnURLFetchDownloadData() if
   //         net::URLFetcherDelegate::ShouldSendDownloadData() is true.
@@ -261,7 +279,7 @@ void GDataURLRequestJob::Start() {
   //    7.4) Copies the formal download data into a growable-drainable dowload
   //         IOBuffer
   //         - IOBuffer has initial size 4096, same as buffer used in
-  //           content::URLFetcherCore::OnReadCompleted.
+  //           net::URLFetcherCore::OnReadCompleted.
   //         - We may end up with multiple chunks, so we use GrowableIOBuffer.
   //         - We then wrap the growable buffer within a DrainableIOBuffer for
   //           ease of progressively writing into the buffer.
@@ -283,12 +301,11 @@ void GDataURLRequestJob::Start() {
   // UI thread; StartAsync reply task will proceed with actually starting the
   // request.
 
-  GDataFileSystem** file_system = new GDataFileSystem*(NULL);
+  GDataFileSystemInterface** file_system = new GDataFileSystemInterface*(NULL);
   BrowserThread::PostTaskAndReply(
       BrowserThread::UI,
       FROM_HERE,
-      base::Bind(&GetFileSystemOnUIThread,
-                 file_system),
+      base::Bind(&GetFileSystemOnUIThread, file_system),
       base::Bind(&GDataURLRequestJob::StartAsync,
                  weak_ptr_factory_->GetWeakPtr(),
                  base::Owned(file_system)));
@@ -327,7 +344,7 @@ void GDataURLRequestJob::Kill() {
 
 bool GDataURLRequestJob::GetMimeType(std::string* mime_type) const {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  mime_type->assign(mime_type_);
+  mime_type->assign(FixupMimeType(mime_type_));
   return !mime_type->empty();
 }
 
@@ -446,9 +463,15 @@ bool GDataURLRequestJob::ReadRawData(net::IOBuffer* dest,
   return rc;
 }
 
+//======================= GDataURLRequestJob protected methods ================
+
+GDataURLRequestJob::~GDataURLRequestJob() {
+  CloseFileStream();
+}
+
 //======================= GDataURLRequestJob private methods ===================
 
-void GDataURLRequestJob::StartAsync(GDataFileSystem** file_system) {
+void GDataURLRequestJob::StartAsync(GDataFileSystemInterface** file_system) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   file_system_ = *file_system;
@@ -476,23 +499,26 @@ void GDataURLRequestJob::StartAsync(GDataFileSystem** file_system) {
     return;
   }
 
-  file_system_->GetFileInfoByResourceId(
+  file_system_->GetEntryInfoByResourceId(
       resource_id,
-      base::Bind(&GDataURLRequestJob::OnGetFileInfoByResourceId,
+      base::Bind(&GDataURLRequestJob::OnGetEntryInfoByResourceId,
                  weak_ptr_factory_->GetWeakPtr(),
                  resource_id));
 }
 
-void GDataURLRequestJob::OnGetFileInfoByResourceId(
+void GDataURLRequestJob::OnGetEntryInfoByResourceId(
     const std::string& resource_id,
-    base::PlatformFileError error,
+    GDataFileError error,
     const FilePath& gdata_file_path,
-    scoped_ptr<GDataFileProto> file_proto) {
-  if (error == base::PLATFORM_FILE_OK) {
-    DCHECK(file_proto.get());
-    mime_type_ = file_proto->content_mime_type();
+    scoped_ptr<GDataEntryProto> entry_proto) {
+  if (entry_proto.get() && !entry_proto->has_file_specific_info())
+    error = GDATA_FILE_ERROR_NOT_FOUND;
+
+  if (error == GDATA_FILE_OK) {
+    DCHECK(entry_proto.get());
+    mime_type_ = entry_proto->file_specific_info().content_mime_type();
     gdata_file_path_ = gdata_file_path;
-    initial_file_size_ = file_proto->gdata_entry().file_info().size();
+    initial_file_size_ = entry_proto->file_info().size();
   } else {
     mime_type_.clear();
     gdata_file_path_.clear();
@@ -628,14 +654,14 @@ bool GDataURLRequestJob::ReadFromDownloadData() {
 }
 
 void GDataURLRequestJob::OnGetFileByResourceId(
-    base::PlatformFileError error,
+    GDataFileError error,
     const FilePath& local_file_path,
     const std::string& mime_type,
     GDataFileType file_type) {
   DVLOG(1) << "Got OnGetFileByResourceId";
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
-  if (error != base::PLATFORM_FILE_OK || file_type != REGULAR_FILE) {
+  if (error != GDATA_FILE_OK || file_type != REGULAR_FILE) {
     LOG(WARNING) << "Failed to start request: can't get file for resource id";
     NotifyStartError(net::URLRequestStatus(net::URLRequestStatus::FAILED,
                                            net::ERR_FILE_NOT_FOUND));
@@ -651,7 +677,7 @@ void GDataURLRequestJob::OnGetFileByResourceId(
   // Even though we're already on BrowserThread::IO thread,
   // file_util::GetFileSize can only be called on a thread with file
   // operations allowed, so post a task to blocking pool instead.
-  int64* file_size = new int64(0);
+  int64* file_size = new int64(kInvalidFileSize);
   BrowserThread::GetBlockingPool()->PostTaskAndReply(
       FROM_HERE,
       base::Bind(&GetFileSizeOnBlockingPool,
@@ -665,7 +691,7 @@ void GDataURLRequestJob::OnGetFileByResourceId(
 void GDataURLRequestJob::OnGetFileSize(int64 *file_size) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
-  if (*file_size == 0) {
+  if (*file_size == kInvalidFileSize) {
     LOG(WARNING) << "Failed to open " << local_file_path_.value();
     NotifyStartError(net::URLRequestStatus(net::URLRequestStatus::FAILED,
                                            net::ERR_FILE_NOT_FOUND));

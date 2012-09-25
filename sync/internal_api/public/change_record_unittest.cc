@@ -14,7 +14,7 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace sync_api {
+namespace syncer {
 namespace {
 
 using base::ExpectDictDictionaryValue;
@@ -55,13 +55,13 @@ void CheckChangeRecordValue(
     if (record.extra.get()) {
       expected_extra_value.reset(record.extra->ToValue());
     }
-    base::Value* extra_value = NULL;
+    const base::Value* extra_value = NULL;
     EXPECT_EQ(record.extra.get() != NULL,
               value.Get("extra", &extra_value));
     EXPECT_TRUE(Value::Equals(extra_value, expected_extra_value.get()));
 
     scoped_ptr<DictionaryValue> expected_specifics_value(
-        browser_sync::EntitySpecificsToValue(record.specifics));
+        EntitySpecificsToValue(record.specifics));
     ExpectDictDictionaryValue(*expected_specifics_value,
                               value, "specifics");
   }
@@ -134,4 +134,4 @@ TEST_F(ChangeRecordTest, ChangeRecordToValue) {
 }
 
 }  // namespace
-}  // namespace sync_api
+}  // namespace syncer

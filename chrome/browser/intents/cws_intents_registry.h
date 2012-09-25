@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_INTENTS_CWS_INTENTS_REGISTRY_H_
 #define CHROME_BROWSER_INTENTS_CWS_INTENTS_REGISTRY_H_
-#pragma once
 
 #include "base/callback_forward.h"
 #include "base/gtest_prod_util.h"
@@ -17,6 +16,8 @@
 namespace net {
 class URLRequestContextGetter;
 }
+
+class CWSIntentsRegistryForTest;
 
 // Handles storing and retrieving of web intents in the web database.
 // The registry provides filtering logic to retrieve specific types of intents.
@@ -57,8 +58,7 @@ class CWSIntentsRegistry : public ProfileKeyedService,
   // Make sure that only CWSIntentsRegistryFactory can create an instance of
   // CWSIntentsRegistry.
   friend class CWSIntentsRegistryFactory;
-  FRIEND_TEST_ALL_PREFIXES(CWSIntentsRegistryTest, ValidQuery);
-  FRIEND_TEST_ALL_PREFIXES(CWSIntentsRegistryTest, InvalidQuery);
+  friend class ::CWSIntentsRegistryForTest;
 
   struct IntentsQuery;
 

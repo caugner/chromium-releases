@@ -4,12 +4,11 @@
 
 #ifndef SYNC_NOTIFIER_SYNC_NOTIFIER_OBSERVER_H_
 #define SYNC_NOTIFIER_SYNC_NOTIFIER_OBSERVER_H_
-#pragma once
 
-#include "sync/internal_api/public/syncable/model_type_payload_map.h"
+#include "sync/notifier/object_id_payload_map.h"
 #include "sync/notifier/notifications_disabled_reason.h"
 
-namespace sync_notifier {
+namespace syncer {
 
 enum IncomingNotificationSource {
   // The server is notifying us that one or more datatypes have stale data.
@@ -28,16 +27,16 @@ class SyncNotifierObserver {
   virtual void OnNotificationsDisabled(
       NotificationsDisabledReason reason) = 0;
 
-  // Called when a notification is received.  The per-type payloads
+  // Called when a notification is received.  The per-id payloads
   // are in |type_payloads| and the source is in |source|.
   virtual void OnIncomingNotification(
-      const syncable::ModelTypePayloadMap& type_payloads,
+      const ObjectIdPayloadMap& id_payloads,
       IncomingNotificationSource source) = 0;
 
  protected:
   virtual ~SyncNotifierObserver() {}
 };
 
-}  // namespace sync_notifier
+}  // namespace syncer
 
 #endif  // SYNC_NOTIFIER_SYNC_NOTIFIER_OBSERVER_H_

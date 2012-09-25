@@ -4,16 +4,15 @@
 
 #ifndef SYNC_INTERNAL_API_PUBLIC_READ_NODE_H_
 #define SYNC_INTERNAL_API_PUBLIC_READ_NODE_H_
-#pragma once
 
 #include <string>
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "sync/internal_api/public/base/model_type.h"
 #include "sync/internal_api/public/base_node.h"
-#include "sync/internal_api/public/syncable/model_type.h"
 
-namespace sync_api {
+namespace syncer {
 
 // ReadNode wraps a syncable::Entry to provide the functionality of a
 // read-only BaseNode.
@@ -30,7 +29,7 @@ class ReadNode : public BaseNode {
   // BaseNode implementation.
   virtual InitByLookupResult InitByIdLookup(int64 id) OVERRIDE;
   virtual InitByLookupResult InitByClientTagLookup(
-      syncable::ModelType model_type,
+      ModelType model_type,
       const std::string& tag) OVERRIDE;
 
   // There is always a root node, so this can't fail.  The root node is
@@ -61,6 +60,6 @@ class ReadNode : public BaseNode {
   DISALLOW_COPY_AND_ASSIGN(ReadNode);
 };
 
-}  // namespace sync_api
+}  // namespace syncer
 
 #endif  // SYNC_INTERNAL_API_PUBLIC_READ_NODE_H_

@@ -198,9 +198,11 @@ bool WebAppShortcutCreator::UpdateIcon(const FilePath& app_path) const {
 
   scoped_nsobject<IconFamily> icon_family([[IconFamily alloc] init]);
   bool image_added = false;
-  const std::vector<SkBitmap> bitmaps = info_.favicon.ToImageSkia()->bitmaps();
-  for (size_t i = 0; i < bitmaps.size(); ++i) {
-    NSBitmapImageRep* image_rep = SkBitmapToImageRep(bitmaps[i]);
+  std::vector<gfx::ImageSkiaRep> image_reps =
+      info_.favicon.ToImageSkia()->GetRepresentations();
+  for (size_t i = 0; i < image_reps.size(); ++i) {
+    NSBitmapImageRep* image_rep = SkBitmapToImageRep(
+        image_reps[i].sk_bitmap());
     if (!image_rep)
       continue;
 
@@ -258,6 +260,12 @@ bool CreatePlatformShortcut(
   WebAppShortcutCreator shortcut_creator(web_app_path, shortcut_info,
                             bundle_id);
   return shortcut_creator.CreateShortcut();
+}
+
+void DeletePlatformShortcuts(const FilePath& profile_path,
+                             const std::string& extension_id) {
+  // TODO(benwells): Implement this when shortcuts / weblings are enabled on
+  // mac.
 }
 
 }  // namespace internals

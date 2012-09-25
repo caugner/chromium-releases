@@ -4,7 +4,6 @@
 
 #ifndef WEBKIT_FILEAPI_FILE_SYSTEM_DIR_URL_REQUEST_JOB_H_
 #define WEBKIT_FILEAPI_FILE_SYSTEM_DIR_URL_REQUEST_JOB_H_
-#pragma once
 
 #include <string>
 #include <vector>
@@ -15,6 +14,7 @@
 #include "base/message_loop_proxy.h"
 #include "base/platform_file.h"
 #include "net/url_request/url_request_job.h"
+#include "webkit/fileapi/file_system_url.h"
 #include "webkit/fileapi/fileapi_export.h"
 
 namespace fileapi {
@@ -51,9 +51,10 @@ class FILEAPI_EXPORT_PRIVATE FileSystemDirURLRequestJob
   void DidReadDirectory(base::PlatformFileError result,
                         const std::vector<base::FileUtilProxy::Entry>& entries,
                         bool has_more);
-  FileSystemOperationInterface* GetNewOperation(const GURL& url);
+  FileSystemOperationInterface* GetNewOperation();
 
   std::string data_;
+  FileSystemURL url_;
   FileSystemContext* file_system_context_;
   base::WeakPtrFactory<FileSystemDirURLRequestJob> weak_factory_;
 

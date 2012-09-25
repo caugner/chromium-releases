@@ -7,14 +7,13 @@
 #include "base/bind.h"
 #include "base/json/json_writer.h"
 #include "base/values.h"
-#include "chrome/browser/extensions/extension_event_router.h"
+#include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/profiles/profile.h"
 #include "content/public/browser/browser_thread.h"
 
 using content::BrowserThread;
 
 namespace events {
-const char kExperimentalSocketOnEvent[] = "experimental.socket.onEvent";
 const char kExperimentalUsbOnEvent[] = "experimental.usb.onEvent";
 };
 
@@ -35,9 +34,10 @@ const char kResultCodeKey[] = "resultCode";
 const char kDataKey[] = "data";
 const char kAddressKey[] = "address";
 const char kPortKey[] = "port";
+const char kErrorKey[] = "error";
 
-APIResourceEventNotifier::APIResourceEventNotifier(
-    ExtensionEventRouter* router,
+ApiResourceEventNotifier::ApiResourceEventNotifier(
+    EventRouter* router,
     Profile* profile,
     const std::string& src_extension_id,
     int src_id,
@@ -49,62 +49,29 @@ APIResourceEventNotifier::APIResourceEventNotifier(
       src_url_(src_url) {
 }
 
-void APIResourceEventNotifier::OnConnectComplete(int result_code) {
-  SendEventWithResultCode(events::kExperimentalSocketOnEvent,
-                          API_RESOURCE_EVENT_CONNECT_COMPLETE, result_code);
-}
-
-void APIResourceEventNotifier::OnDataRead(int result_code,
-                                          base::ListValue* data,
-                                          const std::string& address,
-                                          int port) {
-  // Do we have a destination for this event? There will be one if a source id
-  // was injected by the request handler for the resource's create method in
-  // schema_generated_bindings.js, which will in turn be the case if the caller
-  // of the create method provided an onEvent closure.
-  if (src_id_ < 0) {
-    delete data;
-    return;
-  }
-
-  DictionaryValue* event = CreateAPIResourceEvent(
-      API_RESOURCE_EVENT_DATA_READ);
-  event->SetInteger(kResultCodeKey, result_code);
-  event->Set(kDataKey, data);
-  event->SetString(kAddressKey, address);
-  event->SetInteger(kPortKey, port);
-  DispatchEvent(events::kExperimentalSocketOnEvent, event);
-}
-
-void APIResourceEventNotifier::OnWriteComplete(int result_code) {
-  SendEventWithResultCode(events::kExperimentalSocketOnEvent,
-                          API_RESOURCE_EVENT_WRITE_COMPLETE, result_code);
-}
-
-void APIResourceEventNotifier::OnTransferComplete(int result_code,
+void ApiResourceEventNotifier::OnTransferComplete(UsbTransferStatus status,
+                                                  const std::string& error,
                                                   base::BinaryValue* data) {
   if (src_id_ < 0) {
     delete data;
     return;
   }
 
-  DictionaryValue* event = CreateAPIResourceEvent(
+  DictionaryValue* event = CreateApiResourceEvent(
       API_RESOURCE_EVENT_TRANSFER_COMPLETE);
-  event->SetInteger(kResultCodeKey, result_code);
+  event->SetInteger(kResultCodeKey, status);
   event->Set(kDataKey, data);
+  if (!error.empty()) {
+    event->SetString(kErrorKey, error);
+  }
+
   DispatchEvent(events::kExperimentalUsbOnEvent, event);
 }
 
 // static
-std::string APIResourceEventNotifier::APIResourceEventTypeToString(
-    APIResourceEventType event_type) {
+std::string ApiResourceEventNotifier::ApiResourceEventTypeToString(
+    ApiResourceEventType event_type) {
   switch (event_type) {
-    case API_RESOURCE_EVENT_CONNECT_COMPLETE:
-      return kEventTypeConnectComplete;
-    case API_RESOURCE_EVENT_DATA_READ:
-      return kEventTypeDataRead;
-    case API_RESOURCE_EVENT_WRITE_COMPLETE:
-      return kEventTypeWriteComplete;
     case API_RESOURCE_EVENT_TRANSFER_COMPLETE:
       return kEventTypeTransferComplete;
   }
@@ -113,18 +80,18 @@ std::string APIResourceEventNotifier::APIResourceEventTypeToString(
   return std::string();
 }
 
-APIResourceEventNotifier::~APIResourceEventNotifier() {}
+ApiResourceEventNotifier::~ApiResourceEventNotifier() {}
 
-void APIResourceEventNotifier::DispatchEvent(const std::string &extension,
+void ApiResourceEventNotifier::DispatchEvent(const std::string &extension,
                                              DictionaryValue* event) {
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
       base::Bind(
-          &APIResourceEventNotifier::DispatchEventOnUIThread, this, extension,
+          &ApiResourceEventNotifier::DispatchEventOnUIThread, this, extension,
           event));
 }
 
-void APIResourceEventNotifier::DispatchEventOnUIThread(
+void ApiResourceEventNotifier::DispatchEventOnUIThread(
     const std::string &extension, DictionaryValue* event) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
@@ -134,10 +101,10 @@ void APIResourceEventNotifier::DispatchEventOnUIThread(
                                     profile_, src_url_);
 }
 
-DictionaryValue* APIResourceEventNotifier::CreateAPIResourceEvent(
-    APIResourceEventType event_type) {
+DictionaryValue* ApiResourceEventNotifier::CreateApiResourceEvent(
+    ApiResourceEventType event_type) {
   DictionaryValue* event = new DictionaryValue();
-  event->SetString(kEventTypeKey, APIResourceEventTypeToString(event_type));
+  event->SetString(kEventTypeKey, ApiResourceEventTypeToString(event_type));
   event->SetInteger(kSrcIdKey, src_id_);
 
   // TODO(miket): Signal that it's OK to clean up onEvent listeners. This is
@@ -149,14 +116,14 @@ DictionaryValue* APIResourceEventNotifier::CreateAPIResourceEvent(
   return event;
 }
 
-void APIResourceEventNotifier::SendEventWithResultCode(
+void ApiResourceEventNotifier::SendEventWithResultCode(
     const std::string &extension,
-    APIResourceEventType event_type,
+    ApiResourceEventType event_type,
     int result_code) {
   if (src_id_ < 0)
     return;
 
-  DictionaryValue* event = CreateAPIResourceEvent(event_type);
+  DictionaryValue* event = CreateApiResourceEvent(event_type);
   event->SetInteger(kResultCodeKey, result_code);
   DispatchEvent(extension, event);
 }

@@ -146,6 +146,12 @@ Chrome supports. -->
         <message name="IDS_PRODUCT_FRAME_NAME" desc="The Chrome Frame application name">
           Google Chrome Frame
         </message>
+        <message name="IDS_PRODUCT_APP_HOST_NAME" desc="The Chrome App Host application name">
+          Google Chrome App Host
+        </message>
+        <message name="IDS_PRODUCT_BINARIES_NAME" desc="The Chrome Binaries application name">
+          Google Chrome Binaries
+        </message>
         <message name="IDS_VERSIONMISMATCH_HEADER">
           Chrome Frame Update.
         </message>
@@ -168,10 +174,6 @@ Chrome supports. -->
       <message name="IDS_INSTANT_OPT_IN_TITLE" desc="Title of the instant confirm dialog">
         Google Chrome Instant
       </message>
-      <!-- Session restore & conflicting content settings -->
-      <message name="IDS_SESSION_RESTORE_OVERLAY_MESSAGE" desc="Message of the session restore conflicts with content settings dialog">
-        Google Chrome will restore your previous session on startup. Some of your session-based settings, such as those that clear data on exit, will be disabled.
-      </message>
       <message name="IDS_CERT_ERROR_COMMON_NAME_INVALID_EXTRA_INFO_2" desc="2nd paragraph of extra information for an unsafe common name in an X509 certificate">
         In this case, the address listed in the certificate does not match the address of the website your browser tried to go to. One possible reason for this is that your communications are being intercepted by an attacker who is presenting a certificate for a different website, which would cause a mismatch. Another possible reason is that the server is set up to return the same certificate for multiple websites, including the one you are attempting to visit, even though that certificate is not valid for all of those websites. Google Chrome can say for sure that you reached &lt;strong&gt;<ph name="DOMAIN2">$1<ex>paypal.com</ex></ph>&lt;/strong&gt;, but cannot verify that that is the same site as &lt;strong&gt;<ph name="DOMAIN">$2<ex>www.paypal.com</ex></ph>&lt;/strong&gt; which you intended to reach. If you proceed, Chrome will not check for any further name mismatches.
       </message>
@@ -179,7 +181,7 @@ Chrome supports. -->
         You attempted to reach &lt;strong&gt;<ph name="DOMAIN">$1<ex>paypal.com</ex></ph>&lt;/strong&gt;, but the server presented an expired certificate. No information is available to indicate whether that certificate has been compromised since its expiration. This means Google Chrome cannot guarantee that you are communicating with &lt;strong&gt;<ph name="DOMAIN2">$2<ex>paypal.com</ex></ph>&lt;/strong&gt; and not an attacker. Your computer's clock is currently set to <ph name="CURRENT_TIME">$3<ex>Monday, July 18th, 2012 12:31PM</ex></ph>. Does that look right? If not, you should correct the error and refresh this page.
       </message>
       <message name="IDS_CERT_ERROR_NOT_YET_VALID_DETAILS" desc="Details for an X509 certificate that is not yet valid">
-        You attempted to reach &lt;strong&gt;<ph name="DOMAIN">$1<ex>paypal.com</ex></ph>&lt;/strong&gt;, but the server presented a certificate that is not yet valid. No information is available to indicate whether that certificate can be trusted. Google Chrome cannot reliably guarantee that you are communicating with &lt;strong&gt;<ph name="DOMAIN2">$2<ex>paypal.com</ex></ph>&lt;/strong&gt; and not an attacker. Your computer's clock is currently set to <ph name="CURRENT_TIME">$3<ex>Monday, July 18th, 2012 12:31PM</ex></ph>. Does that look right? If not, you should correct any error the refresh this page.
+        You attempted to reach &lt;strong&gt;<ph name="DOMAIN">$1<ex>paypal.com</ex></ph>&lt;/strong&gt;, but the server presented a certificate that is not yet valid. No information is available to indicate whether that certificate can be trusted. Google Chrome cannot reliably guarantee that you are communicating with &lt;strong&gt;<ph name="DOMAIN2">$2<ex>paypal.com</ex></ph>&lt;/strong&gt; and not an attacker. Your computer's clock is currently set to <ph name="CURRENT_TIME">$3<ex>Monday, July 18th, 2012 12:31PM</ex></ph>. Does that look right? If not, you should correct your system's clock and then refresh this page.
       </message>
       <message name="IDS_CERT_ERROR_AUTHORITY_INVALID_DETAILS" desc="Details for an X509 certificate with an invalid authority">
         You attempted to reach &lt;strong&gt;<ph name="DOMAIN">$1<ex>paypal.com</ex></ph>&lt;/strong&gt;, but the server presented a certificate issued by an entity that is not trusted by your computer's operating system. This may mean that the server has generated its own security credentials, which Google Chrome cannot rely on for identity information, or an attacker may be trying to intercept your communications.
@@ -358,9 +360,16 @@ Google Chrome is unable to recover your settings.
       <message name="IDS_CRASH_RECOVERY_CONTENT" desc="Text content telling the user the browser has crashed.">
         Whoa! Google Chrome has crashed. Relaunch now?
       </message>
-      <message name="IDS_PASSWORD_MANAGER_SAVE_PASSWORD_PROMPT" desc="Info bar message to save a password">
-        Do you want Google Chrome to save your password?
-      </message>
+      <if expr="not pp_ifdef('android')">
+        <message name="IDS_PASSWORD_MANAGER_SAVE_PASSWORD_PROMPT" desc="Info bar message to save a password">
+          Do you want Google Chrome to save your password?
+        </message>
+      </if>
+      <if expr="pp_ifdef('android')">
+        <message name="IDS_PASSWORD_MANAGER_SAVE_PASSWORD_PROMPT" desc="Mobile: Info bar message to save a password">
+          Do you want Google Chrome to save your password for this site?
+        </message>
+      </if>
       <message name="IDS_FR_BUBBLE_QUESTION" desc="Main text for the bubble">
         Google Chrome uses your default search engine, which is currently set to <ph name="PAGE_TITLE">$1<ex>Google</ex></ph>. Do you want to keep your default search engine?
       </message>
@@ -372,6 +381,9 @@ Google Chrome is unable to recover your settings.
       </message>
       <message name="IDS_INSTALL_HIGHER_VERSION" desc="Error displayed when higher version already exists.">
         This computer already has a more recent version of Google Chrome. If the software is not working, please uninstall Google Chrome and try again.
+      </message>
+      <message name="IDS_INSTALL_HIGHER_VERSION_APP_HOST" desc="Error displayed when higher version of the Chrome App Host already exists.">
+        This computer already has a more recent version of the Google Chrome components. Please use a more recent installer.
       </message>
       <message name="IDS_INSTALL_HIGHER_VERSION_CF" desc="Error displayed when higher version of Chrome Frame already exists">
         This computer already has a more recent version of Google Chrome Frame. If the software is not working, please uninstall Google Chrome Frame and try again.
@@ -559,6 +571,22 @@ Google Chrome is unable to recover your settings.
       <message name="IDS_SYSTEM_OBSOLETE_MESSAGE" desc="Message shown when your OS is no longer supported. This messages is followed by a 'Learn more' link.">
          Google Chrome is no longer updating because your operating system is obsolete.
       </message>
+
+      <!-- about:memory -->
+      <if expr="not pp_ifdef('android')">
+        <message name="IDS_MEMORY_USAGE_SUMMARY_DESC" desc="Describes the browser summary table in the about memory page, which shows memory usage for Google Chrome and any other active browsers." translateable="false">
+Summary of memory used by currently active browsers. For browsers which use multiple processes, memory reflects aggregate memory used across all browser processes.
+
+For Google Chrome, processes used to display diagnostics information (such as this "about:memory") are excluded.
+        </message>
+      </if>
+      <if expr="pp_ifdef('android')">
+        <message name="IDS_MEMORY_USAGE_SUMMARY_DESC" desc="Describes the browser summary table in the about memory page, which shows memory usage for Google Chrome." translateable="false">
+Summary of memory used by Google Chrome. Since Google Chrome uses multiple processes, memory reflects aggregate memory used across all browser processes.
+
+For Google Chrome, processes used to display diagnostics information (such as this "about:memory") are excluded.
+        </message>
+      </if>
 
       <!-- About Chrome page -->
       <if expr="not pp_ifdef('chromeos')">

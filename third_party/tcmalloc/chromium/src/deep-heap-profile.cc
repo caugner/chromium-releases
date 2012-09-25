@@ -20,6 +20,7 @@
 
 #include "base/cycleclock.h"
 #include "base/sysinfo.h"
+#include "internal_logging.h"  // for ASSERT, etc
 
 static const int kProfilerBufferSize = 1 << 20;
 static const int kHashTableSize = 179999;  // The same as heap-profile-table.cc.
@@ -29,10 +30,9 @@ static const uint64 MAX_ADDRESS = kuint64max;
 
 // Header strings of the dumped heap profile.
 static const char kProfileHeader[] = "heap profile: ";
-static const char kProfileVersion[] = "DUMP_DEEP_4";
+static const char kProfileVersion[] = "DUMP_DEEP_5";
 static const char kGlobalStatsHeader[] = "GLOBAL_STATS:\n";
-static const char kMMapStacktraceHeader[] = "MMAP_STACKTRACES:\n";
-static const char kAllocStacktraceHeader[] = "MALLOC_STACKTRACES:\n";
+static const char kStacktraceHeader[] = "STACKTRACES:\n";
 static const char kProcSelfMapsHeader[] = "\nMAPPED_LIBRARIES:\n";
 
 static const char kVirtualLabel[] = "virtual";
@@ -48,8 +48,10 @@ DeepHeapProfile::DeepHeapProfile(HeapProfileTable* heap_profile,
       profiler_buffer_(NULL),
       bucket_id_(0),
       heap_profile_(heap_profile) {
-  deep_bucket_map_ = new(heap_profile_->alloc_(sizeof(DeepBucketMap)))
-      DeepBucketMap(heap_profile_->alloc_, heap_profile_->dealloc_);
+  const int deep_table_bytes = kHashTableSize * sizeof(*deep_table_);
+  deep_table_ = reinterpret_cast<DeepBucket**>(
+      heap_profile->alloc_(deep_table_bytes));
+  memset(deep_table_, 0, deep_table_bytes);
 
   // Copy filename prefix.
   const int prefix_length = strlen(prefix);
@@ -65,8 +67,8 @@ DeepHeapProfile::DeepHeapProfile(HeapProfileTable* heap_profile,
 DeepHeapProfile::~DeepHeapProfile() {
   heap_profile_->dealloc_(profiler_buffer_);
   heap_profile_->dealloc_(filename_prefix_);
-  deep_bucket_map_->~DeepBucketMap();
-  heap_profile_->dealloc_(deep_bucket_map_);
+  DeallocateDeepBucketTable(deep_table_, heap_profile_);
+  deep_table_ = NULL;
 }
 
 int DeepHeapProfile::FillOrderedProfile(char buffer[], int buffer_size) {
@@ -80,15 +82,20 @@ int DeepHeapProfile::FillOrderedProfile(char buffer[], int buffer_size) {
     most_recent_pid_ = getpid();
     pagemap_fd_ = OpenProcPagemap();
 
-    deep_bucket_map_->Iterate(ClearIsLogged, this);
+    for (int i = 0; i < kHashTableSize; i++) {
+      for (DeepBucket* deep_bucket = deep_table_[i];
+           deep_bucket != NULL;
+           deep_bucket = deep_bucket->next) {
+        deep_bucket->is_logged = false;
+      }
+    }
 
     // Write maps into a .maps file with using the global buffer.
     WriteMapsToFile(filename_prefix_, kProfilerBufferSize, profiler_buffer_);
   }
 
   // Reset committed sizes of buckets.
-  ResetCommittedSize(heap_profile_->alloc_table_);
-  ResetCommittedSize(heap_profile_->mmap_table_);
+  ResetCommittedSize(deep_table_);
 
   // Allocate a list for mmap'ed regions.
   num_mmap_allocations_ = 0;
@@ -150,9 +157,8 @@ int DeepHeapProfile::FillOrderedProfile(char buffer[], int buffer_size) {
 
   used_in_buffer = UnparseGlobalStats(used_in_buffer, buffer_size, buffer);
 
-  // Fill buffer with the header for buckets of mmap'ed regions.
   printed = snprintf(buffer + used_in_buffer, buffer_size - used_in_buffer,
-                     kMMapStacktraceHeader);
+                     kStacktraceHeader);
   if (IsPrintedStringValid(printed, buffer_size, used_in_buffer)) {
     return used_in_buffer;
   }
@@ -165,29 +171,8 @@ int DeepHeapProfile::FillOrderedProfile(char buffer[], int buffer_size) {
   }
   used_in_buffer += printed;
 
-  // Fill buffer with stack trace buckets of mmap'ed regions.
-  used_in_buffer = SnapshotBucketTableWithoutMalloc(heap_profile_->mmap_table_,
-                                                    used_in_buffer,
-                                                    buffer_size,
-                                                    buffer);
-
-  // Fill buffer with the header for buckets of allocated regions.
-  printed = snprintf(buffer + used_in_buffer, buffer_size - used_in_buffer,
-                     kAllocStacktraceHeader);
-  if (IsPrintedStringValid(printed, buffer_size, used_in_buffer)) {
-    return used_in_buffer;
-  }
-  used_in_buffer += printed;
-
-  printed = snprintf(buffer + used_in_buffer, buffer_size - used_in_buffer,
-                     "%10s %10s\n", kVirtualLabel, kCommittedLabel);
-  if (IsPrintedStringValid(printed, buffer_size, used_in_buffer)) {
-    return used_in_buffer;
-  }
-  used_in_buffer += printed;
-
-  // Fill buffer with stack trace buckets of allocated regions.
-  used_in_buffer = SnapshotBucketTableWithoutMalloc(heap_profile_->alloc_table_,
+  // Fill buffer.
+  used_in_buffer = SnapshotBucketTableWithoutMalloc(deep_table_,
                                                     used_in_buffer,
                                                     buffer_size,
                                                     buffer);
@@ -223,19 +208,24 @@ void DeepHeapProfile::RegionStats::Record(
 }
 
 // static
+void DeepHeapProfile::DeallocateDeepBucketTable(
+    DeepBucket** deep_table, HeapProfileTable* heap_profile) {
+  ASSERT(deep_table != NULL);
+  for (int db = 0; db < kHashTableSize; db++) {
+    for (DeepBucket* x = deep_table[db]; x != 0; /**/) {
+      DeepBucket* db = x;
+      x = x->next;
+      heap_profile->dealloc_(db);
+    }
+  }
+  heap_profile->dealloc_(deep_table);
+}
+
+// static
 bool DeepHeapProfile::IsPrintedStringValid(int printed,
                                            int buffer_size,
                                            int used_in_buffer) {
   return printed < 0 || printed >= buffer_size - used_in_buffer;
-}
-
-// TODO(dmikurube): Avoid calling ClearIsLogged to rewrite buckets by add a
-// reference to a previous file in a .heap file.
-// static
-void DeepHeapProfile::ClearIsLogged(const void* pointer,
-                                    DeepHeapProfile::DeepBucket* deep_bucket,
-                                    DeepHeapProfile* deep_profile) {
-  deep_bucket->is_logged = false;
 }
 
 // static
@@ -431,44 +421,78 @@ void DeepHeapProfile::SnapshotGlobalStatsWithoutMalloc(int pagemap_fd,
   }
 }
 
-DeepHeapProfile::DeepBucket* DeepHeapProfile::GetDeepBucket(Bucket* bucket) {
-  DeepBucket* found = deep_bucket_map_->FindMutable(bucket);
-  if (found != NULL)
-    return found;
-
-  DeepBucket created;
-  created.bucket = bucket;
-  created.committed_size = 0;
-  created.id = (bucket_id_++);
-  created.is_logged = false;
-  deep_bucket_map_->Insert(bucket, created);
-  return deep_bucket_map_->FindMutable(bucket);
+// This hash function is from heap-profile-table:GetBucket.
+// static
+void DeepHeapProfile::AddIntegerToHashValue(
+    uintptr_t add, uintptr_t* hash_value) {
+  *hash_value += add;
+  *hash_value += *hash_value << 10;
+  *hash_value ^= *hash_value >> 6;
 }
 
-void DeepHeapProfile::ResetCommittedSize(Bucket** bucket_table) {
+// GetDeepBucket is implemented as almost copy of heap-profile-table:GetBucket.
+// It's to avoid modifying heap-profile-table.  Performance issues can be
+// ignored in usual Chromium runs.  Another hash function can be tried in an
+// easy way in future.
+DeepHeapProfile::DeepBucket* DeepHeapProfile::GetDeepBucket(
+    Bucket* bucket, bool is_mmap, DeepBucket **table) {
+  // Make hash-value
+  uintptr_t h = 0;
+
+  AddIntegerToHashValue(reinterpret_cast<uintptr_t>(bucket), &h);
+  if (is_mmap)
+    AddIntegerToHashValue(1, &h);
+  else
+    AddIntegerToHashValue(0, &h);
+
+  h += h << 3;
+  h ^= h >> 11;
+
+  // Lookup stack trace in table
+  unsigned int buck = ((unsigned int) h) % kHashTableSize;
+  for (DeepBucket* db = table[buck]; db != 0; db = db->next) {
+    if (db->bucket == bucket) {
+      return db;
+    }
+  }
+
+  // Create new bucket
+  DeepBucket* db =
+      reinterpret_cast<DeepBucket*>(heap_profile_->alloc_(sizeof(DeepBucket)));
+  memset(db, 0, sizeof(*db));
+  db->bucket         = bucket;
+  db->committed_size = 0;
+  db->is_mmap        = is_mmap;
+  db->id             = (bucket_id_++);
+  db->is_logged      = false;
+  db->next           = table[buck];
+  table[buck] = db;
+  return db;
+}
+
+void DeepHeapProfile::ResetCommittedSize(DeepBucket** deep_table) {
   for (int i = 0; i < kHashTableSize; i++) {
-    for (Bucket* bucket = bucket_table[i];
-         bucket != NULL;
-         bucket = bucket->next) {
-      DeepBucket* deep_bucket = GetDeepBucket(bucket);
+    for (DeepBucket* deep_bucket = deep_table[i];
+         deep_bucket != NULL;
+         deep_bucket = deep_bucket->next) {
       deep_bucket->committed_size = 0;
     }
   }
 }
 
 // TODO(dmikurube): Eliminate dynamic memory allocation caused by snprintf.
-int DeepHeapProfile::SnapshotBucketTableWithoutMalloc(Bucket** bucket_table,
+int DeepHeapProfile::SnapshotBucketTableWithoutMalloc(DeepBucket** deep_table,
                                                       int used_in_buffer,
                                                       int buffer_size,
                                                       char buffer[]) {
   for (int i = 0; i < kHashTableSize; i++) {
-    for (Bucket* bucket = bucket_table[i];
-         bucket != NULL;
-         bucket = bucket->next) {
+    for (DeepBucket* deep_bucket = deep_table[i];
+         deep_bucket != NULL;
+         deep_bucket = deep_bucket->next) {
+      Bucket* bucket = deep_bucket->bucket;
       if (bucket->alloc_size - bucket->free_size == 0) {
         continue;  // Skip empty buckets.
       }
-      const DeepBucket* deep_bucket = GetDeepBucket(bucket);
       used_in_buffer = UnparseBucket(
           *deep_bucket, "", used_in_buffer, buffer_size, buffer, NULL);
     }
@@ -496,7 +520,8 @@ void DeepHeapProfile::RecordAlloc(const void* pointer,
   size_t committed = GetCommittedSize(deep_profile->pagemap_fd_,
       address, address + alloc_value->bytes - 1);
 
-  DeepBucket* deep_bucket = deep_profile->GetDeepBucket(alloc_value->bucket());
+  DeepBucket* deep_bucket = deep_profile->GetDeepBucket(
+      alloc_value->bucket(), /* is_mmap */ false, deep_profile->deep_table_);
   deep_bucket->committed_size += committed;
   deep_profile->stats_.profiled_malloc.AddToVirtualBytes(alloc_value->bytes);
   deep_profile->stats_.profiled_malloc.AddToCommittedBytes(committed);
@@ -509,7 +534,8 @@ void DeepHeapProfile::RecordMMap(const void* pointer,
   size_t committed = GetCommittedSize(deep_profile->pagemap_fd_,
       address, address + alloc_value->bytes - 1);
 
-  DeepBucket* deep_bucket = deep_profile->GetDeepBucket(alloc_value->bucket());
+  DeepBucket* deep_bucket = deep_profile->GetDeepBucket(
+      alloc_value->bucket(), /* is_mmap */ true, deep_profile->deep_table_);
   deep_bucket->committed_size += committed;
   deep_profile->stats_.profiled_mmap.AddToVirtualBytes(alloc_value->bytes);
   deep_profile->stats_.profiled_mmap.AddToCommittedBytes(committed);
@@ -550,6 +576,13 @@ int DeepHeapProfile::FillBucketForBucketFile(const DeepBucket* deep_bucket,
   }
   int used_in_buffer = printed;
 
+  printed = snprintf(buffer + used_in_buffer, buffer_size - used_in_buffer,
+                     " %s", deep_bucket->is_mmap ? "mmap" : "malloc");
+  if (IsPrintedStringValid(printed, buffer_size, used_in_buffer)) {
+    return used_in_buffer;
+  }
+  used_in_buffer += printed;
+
   for (int depth = 0; depth < bucket->depth; depth++) {
     printed = snprintf(buffer + used_in_buffer, buffer_size - used_in_buffer,
                        " 0x%08" PRIxPTR,
@@ -569,7 +602,7 @@ int DeepHeapProfile::FillBucketForBucketFile(const DeepBucket* deep_bucket,
   return used_in_buffer;
 }
 
-void DeepHeapProfile::WriteBucketsTableToBucketFile(Bucket** bucket_table,
+void DeepHeapProfile::WriteBucketsTableToBucketFile(DeepBucket** deep_table,
                                                     RawFD bucket_fd) {
   // We will use the global buffer here.
   char* buffer = profiler_buffer_;
@@ -577,10 +610,10 @@ void DeepHeapProfile::WriteBucketsTableToBucketFile(Bucket** bucket_table,
   int used_in_buffer = 0;
 
   for (int i = 0; i < kHashTableSize; i++) {
-    for (Bucket* bucket = bucket_table[i];
-         bucket != NULL;
-         bucket = bucket->next) {
-      DeepBucket* deep_bucket = GetDeepBucket(bucket);
+    for (DeepBucket* deep_bucket = deep_table[i];
+         deep_bucket != NULL;
+         deep_bucket = deep_bucket->next) {
+      Bucket* bucket = deep_bucket->bucket;
       if (deep_bucket->is_logged) {
         continue;  // Skip the bucket if it is already logged.
       }
@@ -610,8 +643,7 @@ void DeepHeapProfile::WriteBucketsToBucketFile() {
   RawFD bucket_fd = RawOpenForWriting(filename);
   RAW_DCHECK(bucket_fd != kIllegalRawFD, "");
 
-  WriteBucketsTableToBucketFile(heap_profile_->alloc_table_, bucket_fd);
-  WriteBucketsTableToBucketFile(heap_profile_->mmap_table_, bucket_fd);
+  WriteBucketsTableToBucketFile(deep_table_, bucket_fd);
 
   RawClose(bucket_fd);
 }

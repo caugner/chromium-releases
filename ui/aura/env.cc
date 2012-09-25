@@ -4,16 +4,18 @@
 
 #include "ui/aura/env.h"
 
-#include "ui/aura/cursor_manager.h"
+#include "base/command_line.h"
+#include "ui/aura/client/screen_position_client.h"
 #include "ui/aura/env_observer.h"
 #include "ui/aura/event_filter.h"
-#include "ui/aura/monitor_manager.h"
+#include "ui/aura/display_manager.h"
 #include "ui/aura/root_window_host.h"
 #include "ui/aura/window.h"
 #include "ui/compositor/compositor.h"
+#include "ui/compositor/compositor_switches.h"
 
 #if defined(USE_X11)
-#include "ui/aura/monitor_change_observer_x11.h"
+#include "ui/aura/display_change_observer_x11.h"
 #endif
 
 namespace aura {
@@ -27,6 +29,7 @@ Env* Env::instance_ = NULL;
 Env::Env()
     : mouse_button_flags_(0),
       is_touch_down_(false),
+      render_white_bg_(true),
       stacking_client_(NULL) {
 }
 
@@ -57,11 +60,20 @@ void Env::RemoveObserver(EnvObserver* observer) {
   observers_.RemoveObserver(observer);
 }
 
-void Env::SetMonitorManager(MonitorManager* monitor_manager) {
-  monitor_manager_.reset(monitor_manager);
+void Env::SetLastMouseLocation(const Window& window,
+                               const gfx::Point& location_in_root) {
+  last_mouse_location_ = location_in_root;
+  client::ScreenPositionClient* client =
+      client::GetScreenPositionClient(window.GetRootWindow());
+  if (client)
+    client->ConvertPointToScreen(&window, &last_mouse_location_);
+}
+
+void Env::SetDisplayManager(DisplayManager* display_manager) {
+  display_manager_.reset(display_manager);
 #if defined(USE_X11)
-  // Update the monitor manager with latest info.
-  monitor_change_observer_->NotifyDisplayChange();
+  // Update the display manager with latest info.
+  display_change_observer_->NotifyDisplayChange();
 #endif
 }
 
@@ -83,9 +95,11 @@ void Env::Init() {
   dispatcher_.reset(CreateDispatcher());
 #endif
 #if defined(USE_X11)
-  monitor_change_observer_.reset(new internal::MonitorChangeObserverX11);
+  display_change_observer_.reset(new internal::DisplayChangeObserverX11);
 #endif
-  ui::Compositor::Initialize(false);
+  ui::Compositor::Initialize(
+      CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kUIEnableThreadedCompositing));
 }
 
 void Env::NotifyWindowInitialized(Window* window) {

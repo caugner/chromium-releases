@@ -24,8 +24,8 @@
 #include "ppapi/c/dev/ppb_file_chooser_dev.h"
 #include "ppapi/c/dev/ppb_find_dev.h"
 #include "ppapi/c/dev/ppb_font_dev.h"
-#include "ppapi/c/dev/ppb_fullscreen_dev.h"
 #include "ppapi/c/dev/ppb_gles_chromium_texture_mapping_dev.h"
+#include "ppapi/c/dev/ppb_graphics_2d_dev.h"
 #include "ppapi/c/dev/ppb_layer_compositor_dev.h"
 #include "ppapi/c/dev/ppb_memory_dev.h"
 #include "ppapi/c/dev/ppb_opengles2ext_dev.h"
@@ -39,6 +39,7 @@
 #include "ppapi/c/dev/ppb_video_capture_dev.h"
 #include "ppapi/c/dev/ppb_video_decoder_dev.h"
 #include "ppapi/c/dev/ppb_video_layer_dev.h"
+#include "ppapi/c/dev/ppb_view_dev.h"
 #include "ppapi/c/dev/ppb_widget_dev.h"
 #include "ppapi/c/dev/ppb_zoom_dev.h"
 #include "ppapi/c/pp_module.h"
@@ -154,12 +155,6 @@ PluginModuleSet* GetLivePluginSet() {
   return &live_plugin_libs;
 }
 
-base::MessageLoopProxy* GetMainThreadMessageLoop() {
-  CR_DEFINE_STATIC_LOCAL(scoped_refptr<base::MessageLoopProxy>, proxy,
-                         (base::MessageLoopProxy::current()));
-  return proxy.get();
-}
-
 // PPB_Core --------------------------------------------------------------------
 
 void AddRefResource(PP_Resource resource) {
@@ -182,7 +177,7 @@ void CallOnMainThread(int delay_in_msec,
                       PP_CompletionCallback callback,
                       int32_t result) {
   if (callback.func) {
-    GetMainThreadMessageLoop()->PostDelayedTask(
+    PpapiGlobals::Get()->GetMainThreadMessageLoop()->PostDelayedTask(
         FROM_HERE,
         base::Bind(callback.func, callback.user_data, result),
         base::TimeDelta::FromMilliseconds(delay_in_msec));
@@ -190,7 +185,8 @@ void CallOnMainThread(int delay_in_msec,
 }
 
 PP_Bool IsMainThread() {
-  return BoolToPPBool(GetMainThreadMessageLoop()->BelongsToCurrentThread());
+  return BoolToPPBool(PpapiGlobals::Get()->
+      GetMainThreadMessageLoop()->BelongsToCurrentThread());
 }
 
 const PPB_Core core_interface = {
@@ -275,10 +271,7 @@ const PPB_Testing_Dev testing_interface = {
 
 // GetInterface ----------------------------------------------------------------
 
-const void* GetInterface(const char* name) {
-  // All interfaces should be used on the main thread.
-  CHECK(IsMainThread());
-
+const void* InternalGetInterface(const char* name) {
   // Allow custom interface factories first stab at the GetInterface call.
   const void* custom_interface =
       PpapiInterfaceFactoryManager::GetInstance()->GetInterface(name);
@@ -310,8 +303,6 @@ const void* GetInterface(const char* name) {
     return ::ppapi::thunk::GetPPB_BufferTrusted_0_1_Thunk();
   if (strcmp(name, PPB_CORE_INTERFACE_1_0) == 0)
     return &core_interface;
-  if (strcmp(name, PPB_FULLSCREEN_DEV_INTERFACE_0_5) == 0)
-    return ::ppapi::thunk::GetPPB_Fullscreen_1_0_Thunk();
   if (strcmp(name, PPB_GPU_BLACKLIST_INTERFACE) == 0)
     return PPB_GpuBlacklist_Private_Impl::GetInterface();
   if (strcmp(name, PPB_GRAPHICS_3D_TRUSTED_INTERFACE_1_0) == 0)
@@ -366,6 +357,13 @@ const void* GetInterface(const char* name) {
   return NULL;
 }
 
+const void* GetInterface(const char* name) {
+  // All interfaces should be used on the main thread.
+  CHECK(IsMainThread());
+
+  return InternalGetInterface(name);
+}
+
 // Gets the PPAPI entry points from the given library and places them into the
 // given structure. Returns true on success.
 bool LoadEntryPointsFromLibrary(const base::NativeLibrary& library,
@@ -410,7 +408,8 @@ PluginModule::EntryPoints::EntryPoints()
 
 PluginModule::PluginModule(const std::string& name,
                            const FilePath& path,
-                           PluginDelegate::ModuleLifetime* lifetime_delegate)
+                           PluginDelegate::ModuleLifetime* lifetime_delegate,
+                           const ::ppapi::PpapiPermissions& perms)
     : lifetime_delegate_(lifetime_delegate),
       callback_tracker_(new ::ppapi::CallbackTracker),
       is_in_destructor_(false),
@@ -419,14 +418,15 @@ PluginModule::PluginModule(const std::string& name,
       library_(NULL),
       name_(name),
       path_(path),
-      reserve_instance_id_(NULL) {
+      permissions_(perms),
+      reserve_instance_id_(NULL),
+      nacl_ipc_proxy_(false) {
   // Ensure the globals object is created.
   if (!host_globals)
     host_globals = new HostGlobals;
 
   memset(&entry_points_, 0, sizeof(entry_points_));
   pp_module_ = HostGlobals::Get()->AddModule(this);
-  GetMainThreadMessageLoop();  // Initialize the main thread message loop.
   GetLivePluginSet()->insert(this);
 }
 
@@ -495,6 +495,29 @@ void PluginModule::InitAsProxied(
   out_of_process_proxy_.reset(out_of_process_proxy);
 }
 
+void PluginModule::InitAsProxiedNaCl(
+    scoped_ptr<PluginDelegate::OutOfProcessProxy> out_of_process_proxy,
+    PP_Instance instance) {
+  // TODO(bbudge) We need to switch the mode of the PluginModule on a
+  // per-instance basis. Fix this so out_of_process_proxy and other
+  // state is stored in a map, indexed by instance.
+  nacl_ipc_proxy_ = true;
+  InitAsProxied(out_of_process_proxy.release());
+  // InitAsProxied (for the trusted/out-of-process case) initializes only the
+  // module, and one or more instances are added later. In this case, the
+  // PluginInstance was already created as in-process, so we missed the proxy
+  // AddInstance step and must do it now.
+  out_of_process_proxy_->AddInstance(instance);
+
+  // In NaCl, we need to tell the instance to reset itself as proxied. This will
+  // clear cached interface pointers and send DidCreate (etc) to the plugin
+  // side of the proxy.
+  PluginInstance* plugin_instance = host_globals->GetInstance(instance);
+  if (!plugin_instance)
+    return;
+  plugin_instance->ResetAsProxied();
+}
+
 // static
 const PPB_Core* PluginModule::GetCore() {
   return &core_interface;
@@ -505,15 +528,13 @@ PluginModule::GetInterfaceFunc PluginModule::GetLocalGetInterfaceFunc() {
   return &GetInterface;
 }
 
-PluginInstance* PluginModule::CreateInstance(PluginDelegate* delegate) {
-  PluginInstance* instance(NULL);
-  const void* ppp_instance = GetPluginInterface(PPP_INSTANCE_INTERFACE_1_1);
-  if (ppp_instance) {
-    instance = PluginInstance::Create1_1(delegate, this, ppp_instance);
-  } else if ((ppp_instance = GetPluginInterface(PPP_INSTANCE_INTERFACE_1_0))) {
-    instance = PluginInstance::Create1_0(delegate, this, ppp_instance);
-  }
+// static
+bool PluginModule::SupportsInterface(const char* name) {
+  return !!InternalGetInterface(name);
+}
 
+PluginInstance* PluginModule::CreateInstance(PluginDelegate* delegate) {
+  PluginInstance* instance = PluginInstance::Create(delegate, this);
   if (!instance) {
     LOG(WARNING) << "Plugin doesn't support instance interface, failing.";
     return NULL;
@@ -548,6 +569,11 @@ void PluginModule::InstanceDeleted(PluginInstance* instance) {
   if (out_of_process_proxy_.get())
     out_of_process_proxy_->RemoveInstance(instance->pp_instance());
   instances_.erase(instance);
+
+  if (nacl_ipc_proxy_) {
+    out_of_process_proxy_.reset();
+    reserve_instance_id_ = NULL;
+  }
 }
 
 scoped_refptr< ::ppapi::CallbackTracker> PluginModule::GetCallbackTracker() {

@@ -6,10 +6,9 @@
 
 #include "base/bind.h"
 #include "media/base/decoder_buffer.h"
-#include "media/base/mock_filters.h"
+#include "media/base/decryptor_client.h"
 #include "media/base/test_data_util.h"
 #include "media/crypto/aes_decryptor.h"
-#include "media/crypto/decryptor_client.h"
 #include "media/filters/chunk_demuxer_client.h"
 
 namespace media {
@@ -17,6 +16,12 @@ namespace media {
 static const char kSourceId[] = "SourceId";
 static const char kClearKeySystem[] = "org.w3.clearkey";
 static const uint8 kInitData[] = { 0x69, 0x6e, 0x69, 0x74 };
+
+// Key used to encrypt video track in test file "bear-320x240-encrypted.webm".
+static const uint8 kSecretKey[] = {
+  0xeb, 0xdd, 0x62, 0xf1, 0x68, 0x14, 0xd2, 0x7b,
+  0x68, 0xef, 0x12, 0x2a, 0xfc, 0xe4, 0xae, 0x3c
+};
 
 // Helper class that emulates calls made on the ChunkDemuxer by the
 // Media Source API.
@@ -40,8 +45,6 @@ class MockMediaSource : public ChunkDemuxerClient {
   void set_decryptor_client(DecryptorClient* decryptor_client) {
     decryptor_client_ = decryptor_client;
   }
-
-  const std::string& url() const { return url_; }
 
   void Seek(int new_position, int seek_append_size) {
     chunk_demuxer_->StartWaitingForSeek();
@@ -96,7 +99,7 @@ class MockMediaSource : public ChunkDemuxerClient {
   virtual void DemuxerNeedKey(scoped_array<uint8> init_data,
                               int init_data_size) {
     DCHECK(init_data.get());
-    DCHECK_EQ(init_data_size, 16);
+    DCHECK_GT(init_data_size, 0);
     DCHECK(decryptor_client_);
     decryptor_client_->NeedKey("", "", init_data.Pass(), init_data_size);
   }
@@ -112,9 +115,9 @@ class MockMediaSource : public ChunkDemuxerClient {
   DecryptorClient* decryptor_client_;
 };
 
-class MockDecryptorClientImpl : public DecryptorClient {
+class FakeDecryptorClient : public DecryptorClient {
  public:
-  MockDecryptorClientImpl() : decryptor_(this) {}
+  FakeDecryptorClient() : decryptor_(this) {}
 
   AesDecryptor* decryptor() {
     return &decryptor_;
@@ -166,9 +169,7 @@ class MockDecryptorClientImpl : public DecryptorClient {
 
     EXPECT_FALSE(current_key_system_.empty());
     EXPECT_FALSE(current_session_id_.empty());
-    // In test file bear-320x240-encrypted.webm, the decryption key is equal to
-    // |init_data|.
-    decryptor_.AddKey(current_key_system_, init_data.get(), init_data_length,
+    decryptor_.AddKey(current_key_system_, kSecretKey, arraysize(kSecretKey),
                       init_data.get(), init_data_length, current_session_id_);
   }
 
@@ -196,7 +197,7 @@ class PipelineIntegrationTest
 
   void StartPipelineWithEncryptedMedia(
       MockMediaSource* source,
-      MockDecryptorClientImpl* encrypted_media) {
+      FakeDecryptorClient* encrypted_media) {
     pipeline_->Start(
         CreateFilterCollection(source),
         base::Bind(&PipelineIntegrationTest::OnEnded, base::Unretained(this)),
@@ -263,9 +264,33 @@ TEST_F(PipelineIntegrationTest, BasicPlaybackHashed) {
   EXPECT_EQ(GetAudioHash(), "6138555be3389e6aba4c8e6f70195d50");
 }
 
+TEST_F(PipelineIntegrationTest, BasicPlayback_MediaSource) {
+  MockMediaSource source("bear-320x240.webm", 219229, true, true);
+  StartPipelineWithMediaSource(&source);
+  source.EndOfStream();
+  ASSERT_EQ(pipeline_status_, PIPELINE_OK);
+
+  EXPECT_EQ(pipeline_->GetBufferedTimeRanges().size(), 1u);
+  EXPECT_EQ(pipeline_->GetBufferedTimeRanges().start(0).InMilliseconds(), 0);
+  EXPECT_EQ(pipeline_->GetBufferedTimeRanges().end(0).InMilliseconds(), 2737);
+
+  Play();
+
+  ASSERT_TRUE(WaitUntilOnEnded());
+  source.Abort();
+  Stop();
+}
+
+TEST_F(PipelineIntegrationTest, BasicPlayback_16x9AspectRatio) {
+  ASSERT_TRUE(Start(GetTestDataURL("bear-320x240-16x9-aspect.webm"),
+                    PIPELINE_OK));
+  Play();
+  ASSERT_TRUE(WaitUntilOnEnded());
+}
+
 TEST_F(PipelineIntegrationTest, EncryptedPlayback) {
-  MockMediaSource source("bear-320x240-encrypted.webm", 219726, true, true);
-  MockDecryptorClientImpl encrypted_media;
+  MockMediaSource source("bear-320x240-encrypted.webm", 220788, true, true);
+  FakeDecryptorClient encrypted_media;
   StartPipelineWithEncryptedMedia(&source, &encrypted_media);
 
   source.EndOfStream();
@@ -290,14 +315,14 @@ TEST_F(PipelineIntegrationTest, DISABLED_SeekWhilePaused) {
   ASSERT_TRUE(WaitUntilCurrentTimeIsAfter(start_seek_time));
   Pause();
   ASSERT_TRUE(Seek(seek_time));
-  EXPECT_EQ(pipeline_->GetCurrentTime(), seek_time);
+  EXPECT_EQ(pipeline_->GetMediaTime(), seek_time);
   Play();
   ASSERT_TRUE(WaitUntilOnEnded());
 
   // Make sure seeking after reaching the end works as expected.
   Pause();
   ASSERT_TRUE(Seek(seek_time));
-  EXPECT_EQ(pipeline_->GetCurrentTime(), seek_time);
+  EXPECT_EQ(pipeline_->GetMediaTime(), seek_time);
   Play();
   ASSERT_TRUE(WaitUntilOnEnded());
 }
@@ -313,12 +338,12 @@ TEST_F(PipelineIntegrationTest, DISABLED_SeekWhilePlaying) {
   Play();
   ASSERT_TRUE(WaitUntilCurrentTimeIsAfter(start_seek_time));
   ASSERT_TRUE(Seek(seek_time));
-  EXPECT_GE(pipeline_->GetCurrentTime(), seek_time);
+  EXPECT_GE(pipeline_->GetMediaTime(), seek_time);
   ASSERT_TRUE(WaitUntilOnEnded());
 
   // Make sure seeking after reaching the end works as expected.
   ASSERT_TRUE(Seek(seek_time));
-  EXPECT_GE(pipeline_->GetCurrentTime(), seek_time);
+  EXPECT_GE(pipeline_->GetMediaTime(), seek_time);
   ASSERT_TRUE(WaitUntilOnEnded());
 }
 

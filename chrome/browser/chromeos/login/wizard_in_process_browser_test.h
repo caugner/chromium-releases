@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_LOGIN_WIZARD_IN_PROCESS_BROWSER_TEST_H_
 #define CHROME_BROWSER_CHROMEOS_LOGIN_WIZARD_IN_PROCESS_BROWSER_TEST_H_
-#pragma once
 
 #include <string>
 
@@ -26,6 +25,9 @@ class WizardController;
 class WizardInProcessBrowserTest : public CrosInProcessBrowserTest {
  public:
   explicit WizardInProcessBrowserTest(const char* screen_name);
+
+  // Overriden from InProcessBrowserTest:
+  virtual void SetUp() OVERRIDE;
 
  protected:
   // Can be overriden by derived test fixtures to set up environment after

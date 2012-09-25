@@ -9,8 +9,15 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/simple_message_box.h"
 #include "chrome/common/chrome_switches.h"
+
+namespace {
+
+void PrintPackExtensionMessage(const std::string& message) {
+  base::StringPrintf("%s\n", message.c_str());
+}
+
+}  // namespace
 
 ExtensionsStartupUtil::ExtensionsStartupUtil() : pack_job_succeeded_(false) {}
 
@@ -18,16 +25,16 @@ void ExtensionsStartupUtil::OnPackSuccess(
     const FilePath& crx_path,
     const FilePath& output_private_key_path) {
   pack_job_succeeded_ = true;
-  browser::ShowMessageBox(NULL, ASCIIToUTF16("Extension Packaging Success"),
-      PackExtensionJob::StandardSuccessMessage(crx_path,
-                                               output_private_key_path),
-      browser::MESSAGE_BOX_TYPE_INFORMATION);
+  PrintPackExtensionMessage(
+      UTF16ToUTF8(
+          PackExtensionJob::StandardSuccessMessage(crx_path,
+                                                   output_private_key_path)));
 }
 
-void ExtensionsStartupUtil::OnPackFailure(const std::string& error_message,
-                                          ExtensionCreator::ErrorType type) {
-  browser::ShowMessageBox(NULL, ASCIIToUTF16("Extension Packaging Error"),
-      UTF8ToUTF16(error_message), browser::MESSAGE_BOX_TYPE_WARNING);
+void ExtensionsStartupUtil::OnPackFailure(
+    const std::string& error_message,
+    extensions::ExtensionCreator::ErrorType type) {
+  PrintPackExtensionMessage(error_message);
 }
 
 bool ExtensionsStartupUtil::PackExtension(const CommandLine& cmd_line) {
@@ -44,7 +51,7 @@ bool ExtensionsStartupUtil::PackExtension(const CommandLine& cmd_line) {
   // Launch a job to perform the packing on the file thread.  Ignore warnings
   // from the packing process. (e.g. Overwrite any existing crx file.)
   pack_job_ = new PackExtensionJob(this, src_dir, private_key_path,
-                                   ExtensionCreator::kOverwriteCRX);
+                                   extensions::ExtensionCreator::kOverwriteCRX);
   pack_job_->set_asynchronous(false);
   pack_job_->Start();
 

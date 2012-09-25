@@ -18,6 +18,7 @@
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/render_text.h"
+#include "ui/gfx/text_constants.h"
 #include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/views_delegate.h"
 
@@ -282,7 +283,7 @@ TextfieldViewsModel::Delegate::~Delegate() {
 
 TextfieldViewsModel::TextfieldViewsModel(Delegate* delegate)
     : delegate_(delegate),
-      render_text_(gfx::RenderText::CreateRenderText()),
+      render_text_(gfx::RenderText::CreateInstance()),
       current_edit_(edit_history_.end()) {
   const ui::NativeTheme* theme = ui::NativeTheme::instance();
   render_text_->set_selection_color(
@@ -317,7 +318,7 @@ bool TextfieldViewsModel::SetText(const string16& text) {
     size_t old_cursor = GetCursorPosition();
     // SetText moves the cursor to the end.
     size_t new_cursor = text.length();
-    SelectAll();
+    SelectAll(false);
     // If there is a composition text, don't merge with previous edit.
     // Otherwise, force merge the edits.
     ExecuteAndRecordReplace(
@@ -439,10 +440,10 @@ void TextfieldViewsModel::SelectSelectionModel(const gfx::SelectionModel& sel) {
   render_text_->MoveCursorTo(sel);
 }
 
-void TextfieldViewsModel::SelectAll() {
+void TextfieldViewsModel::SelectAll(bool reversed) {
   if (HasCompositionText())
     ConfirmCompositionText();
-  render_text_->SelectAll();
+  render_text_->SelectAll(reversed);
 }
 
 void TextfieldViewsModel::SelectWord() {

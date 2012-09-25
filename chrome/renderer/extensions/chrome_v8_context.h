@@ -4,7 +4,6 @@
 
 #ifndef CHROME_RENDERER_EXTENSIONS_CHROME_V8_CONTEXT_H_
 #define CHROME_RENDERER_EXTENSIONS_CHROME_V8_CONTEXT_H_
-#pragma once
 
 #include <string>
 
@@ -83,9 +82,7 @@ class ChromeV8Context {
 
   // Fires the onload and onunload events on the chromeHidden object.
   // TODO(aa): Move this to EventBindings.
-  void DispatchOnLoadEvent(bool is_extension_process,
-                           bool is_incognito_process,
-                           int manifest_version);
+  void DispatchOnLoadEvent(bool is_incognito_process, int manifest_version);
   void DispatchOnUnloadEvent();
 
   // Call the named method of the chromeHidden object in this context.
@@ -101,6 +98,9 @@ class ChromeV8Context {
   // Returns the set of extension APIs that are available to this context. If no
   // APIs are available, returns an empty set.
   const std::set<std::string>& GetAvailableExtensionAPIs();
+
+  // Returns a string description of the type of context this is.
+  std::string GetContextTypeDescription();
 
  private:
   // The v8 context the bindings are accessible to. We keep a strong reference

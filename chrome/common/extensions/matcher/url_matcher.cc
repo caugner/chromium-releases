@@ -8,7 +8,9 @@
 #include <iterator>
 
 #include "base/logging.h"
+#include "content/public/common/url_constants.h"
 #include "googleurl/src/gurl.h"
+#include "googleurl/src/url_canon.h"
 
 namespace extensions {
 
@@ -88,19 +90,23 @@ namespace extensions {
 // Case 2: url_{prefix,suffix,equals,contains} searches.
 // =====================================================
 //
-// Step 1: as above
+// Step 1: as above, except that
+// - the scheme is not removed
+// - the port is not removed if it is specified and does not match the default
+//   port for the given scheme.
 //
 // Step 2:
 // Translate URL to String and add the following position markers:
 // - BU = Beginning of URL
 // - EU = End of URL
-// Furthermore, the hostname is canonicalized to start with a ".".
 //
-// -> www.example.com/index.html?search=foo becomes
-// BU .www.example.com/index.html?search=foo EU
+// -> http://www.example.com:8080/index.html?search=foo#first_match becomes
+// BU http://www.example.com:8080/index.html?search=foo EU
+// -> http://www.example.com:80/index.html?search=foo#first_match becomes
+// BU http://www.example.com/index.html?search=foo EU
 //
-// url_prefix(prefix) = BU add_missing_dot_prefix(prefix)
-// -> url_prefix("www.example") = BU .www.example
+// url_prefix(prefix) = BU prefix
+// -> url_prefix("http://www.example") = BU http://www.example
 //
 // url_contains(substring) = substring
 // -> url_contains("index") = index
@@ -113,7 +119,7 @@ namespace extensions {
 // by a combination of a url_contains() query followed by an explicit test:
 //
 // host_contains(str) = url_contains(str) followed by test whether str occurs
-//   in host comonent of original URL.
+//   in host component of original URL.
 // -> host_contains("example.co") = example.co
 //    followed by gurl.host().find("example.co");
 //
@@ -160,7 +166,7 @@ bool URLMatcherCondition::operator<(const URLMatcherCondition& rhs) const {
 
 bool URLMatcherCondition::IsFullURLCondition() const {
   // For these criteria the SubstringMatcher needs to be executed on the
-  // GURL that is canonlizaliced with
+  // GURL that is canonicalized with
   // URLMatcherConditionFactory::CanonicalizeURLForFullSearches.
   switch (criterion_) {
     case HOST_CONTAINS:
@@ -209,10 +215,10 @@ bool URLMatcherCondition::IsMatch(
 
 namespace {
 // These are symbols that are not contained in 7-bit ASCII used in GURLs.
-const char kBeginningOfURL[] = {-1, 0};
-const char kEndOfDomain[] = {-2, 0};
-const char kEndOfPath[] = {-3, 0};
-const char kEndOfURL[] = {-4, 0};
+const char kBeginningOfURL[] = {static_cast<char>(-1), 0};
+const char kEndOfDomain[] = {static_cast<char>(-2), 0};
+const char kEndOfPath[] = {static_cast<char>(-3), 0};
+const char kEndOfURL[] = {static_cast<char>(-4), 0};
 }  // namespace
 
 URLMatcherConditionFactory::URLMatcherConditionFactory() : id_counter_(0) {}
@@ -259,7 +265,7 @@ URLMatcherCondition URLMatcherConditionFactory::CreatePathPrefixCondition(
 
 URLMatcherCondition URLMatcherConditionFactory::CreatePathSuffixCondition(
     const std::string& suffix) {
-  return CreateCondition(URLMatcherCondition::HOST_SUFFIX, suffix + kEndOfPath);
+  return CreateCondition(URLMatcherCondition::PATH_SUFFIX, suffix + kEndOfPath);
 }
 
 URLMatcherCondition URLMatcherConditionFactory::CreatePathContainsCondition(
@@ -303,16 +309,37 @@ URLMatcherCondition
       host_suffix + kEndOfDomain + path_prefix);
 }
 
+URLMatcherCondition
+URLMatcherConditionFactory::CreateHostEqualsPathPrefixCondition(
+    const std::string& host,
+    const std::string& path_prefix) {
+  return CreateCondition(URLMatcherCondition::HOST_EQUALS_PATH_PREFIX,
+      kBeginningOfURL + CanonicalizeHostname(host) + kEndOfDomain +
+      path_prefix);
+}
+
 std::string URLMatcherConditionFactory::CanonicalizeURLForFullSearches(
     const GURL& url) {
-  return kBeginningOfURL + CanonicalizeHostname(url.host()) + url.path() +
-      (url.has_query() ? "?" + url.query() : "") + kEndOfURL;
+  GURL::Replacements replacements;
+  replacements.ClearPassword();
+  replacements.ClearUsername();
+  replacements.ClearRef();
+  // Clear port if it is implicit from scheme.
+  if (url.has_port()) {
+    const std::string& port = url.scheme();
+    if (url_canon::DefaultPortForScheme(port.c_str(), port.size()) ==
+            url.EffectiveIntPort()) {
+      replacements.ClearPort();
+    }
+  }
+  return kBeginningOfURL + url.ReplaceComponents(replacements).spec() +
+      kEndOfURL;
 }
 
 URLMatcherCondition URLMatcherConditionFactory::CreateURLPrefixCondition(
     const std::string& prefix) {
   return CreateCondition(URLMatcherCondition::URL_PREFIX,
-      kBeginningOfURL + CanonicalizeHostname(prefix));
+      kBeginningOfURL + prefix);
 }
 
 URLMatcherCondition URLMatcherConditionFactory::CreateURLSuffixCondition(
@@ -327,8 +354,8 @@ URLMatcherCondition URLMatcherConditionFactory::CreateURLContainsCondition(
 
 URLMatcherCondition URLMatcherConditionFactory::CreateURLEqualsCondition(
     const std::string& str) {
-  return CreateCondition(URLMatcherCondition::QUERY_EQUALS,
-      kBeginningOfURL + CanonicalizeHostname(str) + kEndOfURL);
+  return CreateCondition(URLMatcherCondition::URL_EQUALS,
+      kBeginningOfURL + str + kEndOfURL);
 }
 
 void URLMatcherConditionFactory::ForgetUnusedPatterns(

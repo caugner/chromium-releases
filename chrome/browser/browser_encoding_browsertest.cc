@@ -10,6 +10,8 @@
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_commands.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -39,10 +41,10 @@ class BrowserEncodingTest : public InProcessBrowserTest {
     // We save the page as way of complete HTML file, which requires a directory
     // name to save sub resources in it. Although this test file does not have
     // sub resources, but the directory name is still required.
-    ui_test_utils::WindowedNotificationObserver observer(
+    content::WindowedNotificationObserver observer(
         content::NOTIFICATION_SAVE_PACKAGE_SUCCESSFULLY_FINISHED,
         content::NotificationService::AllSources());
-    browser()->GetActiveWebContents()->SavePage(
+    chrome::GetActiveWebContents(browser())->SavePage(
         full_file_name, temp_sub_resource_dir_,
         content::SAVE_PAGE_TYPE_AS_COMPLETE_HTML);
     observer.Wait();
@@ -138,8 +140,8 @@ IN_PROC_BROWSER_TEST_F(BrowserEncodingTest, MAYBE_TestEncodingAliasMapping) {
         ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
 
     EXPECT_EQ(kEncodingTestDatas[i].encoding_name,
-              browser()->GetActiveWebContents()->GetEncoding());
-    browser()->CloseTab();
+              chrome::GetActiveWebContents(browser())->GetEncoding());
+    chrome::CloseTab(browser());
   }
 }
 
@@ -154,7 +156,7 @@ IN_PROC_BROWSER_TEST_F(BrowserEncodingTest, TestOverrideEncoding) {
   test_dir_path = test_dir_path.AppendASCII(kTestFileName);
   GURL url = URLRequestMockHTTPJob::GetMockUrl(test_dir_path);
   ui_test_utils::NavigateToURL(browser(), url);
-  content::WebContents* web_contents = browser()->GetActiveWebContents();
+  content::WebContents* web_contents = chrome::GetActiveWebContents(browser());
   EXPECT_EQ("ISO-8859-1", web_contents->GetEncoding());
 
   // Override the encoding to "gb18030".
@@ -258,7 +260,7 @@ IN_PROC_BROWSER_TEST_F(BrowserEncodingTest, MAYBE_TestEncodingAutoDetect) {
   browser()->profile()->GetPrefs()->SetString(prefs::kDefaultCharset,
                                               "ISO-8859-4");
 
-  content::WebContents* web_contents = browser()->GetActiveWebContents();
+  content::WebContents* web_contents = chrome::GetActiveWebContents(browser());
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kTestDatas); ++i) {
     // Disable auto detect if it is on.
     browser()->profile()->GetPrefs()->SetBoolean(
@@ -280,7 +282,7 @@ IN_PROC_BROWSER_TEST_F(BrowserEncodingTest, MAYBE_TestEncodingAutoDetect) {
     content::TestNavigationObserver observer(
         content::Source<content::NavigationController>(
             &web_contents->GetController()));
-    browser()->Reload(CURRENT_TAB);
+    chrome::Reload(browser(), CURRENT_TAB);
     observer.Wait();
 
     // Re-get the encoding of page. It should return the real encoding now.

@@ -4,8 +4,8 @@
 
 #ifndef SYNC_SYNCABLE_DIR_OPEN_RESULT_H_
 #define SYNC_SYNCABLE_DIR_OPEN_RESULT_H_
-#pragma once
 
+namespace syncer {
 namespace syncable {
 enum DirOpenResult { NOT_INITIALIZED,
                      OPENED,   // success.
@@ -18,5 +18,6 @@ enum DirOpenResult { NOT_INITIALIZED,
                      FAILED_IN_UNITTEST, // For tests.
 };
 }  // namespace syncable
+}  // namespace syncer
 
 #endif  // SYNC_SYNCABLE_DIR_OPEN_RESULT_H_

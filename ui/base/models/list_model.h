@@ -4,7 +4,6 @@
 
 #ifndef UI_BASE_MODELS_LIST_MODEL_H_
 #define UI_BASE_MODELS_LIST_MODEL_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/logging.h"
@@ -26,7 +25,7 @@ class ListModel {
   // Adds |item| to the model at given |index|.
   void AddAt(size_t index, ItemType* item) {
     DCHECK_LE(index, item_count());
-    items_->insert(items_.begin() + index, item);
+    items_.insert(items_.begin() + index, item);
     NotifyItemsAdded(index, 1);
   }
 
@@ -40,7 +39,7 @@ class ListModel {
   ItemType* RemoveAt(size_t index) {
     DCHECK_LT(index, item_count());
     ItemType* item = items_[index];
-    items_->erase(items_.begin() + index);
+    items_.weak_erase(items_.begin() + index);
     NotifyItemsRemoved(index, 1);
     return item;
   }
@@ -48,7 +47,7 @@ class ListModel {
   // Removes all items from the model. This does NOT delete the items.
   void RemoveAll() {
     size_t count = item_count();
-    items_->clear();
+    items_.weak_clear();
     NotifyItemsRemoved(0, count);
   }
 

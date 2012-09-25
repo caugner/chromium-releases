@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_PUBLIC_BROWSER_RENDER_WIDGET_HOST_VIEW_H_
 #define CONTENT_PUBLIC_BROWSER_RENDER_WIDGET_HOST_VIEW_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "content/common/content_export.h"
@@ -18,6 +17,7 @@
 #endif
 
 class BrowserAccessibilityManager;
+class GURL;
 
 namespace gfx {
 class Rect;
@@ -118,7 +118,7 @@ class CONTENT_EXPORT RenderWidgetHostView {
   // TODO(stuartmorgan): This is a temporary plugin-specific workaround for
   // <http://crbug.com/34266>. Once that is fixed, this (and the corresponding
   // message and renderer-side handling) can be removed in favor of using
-  // WasHidden/DidBecomeSelected.
+  // WasHidden/WasShown.
   virtual void SetWindowVisibility(bool visible) = 0;
 
   // Informs the view that its containing window's frame changed.
@@ -131,6 +131,10 @@ class CONTENT_EXPORT RenderWidgetHostView {
   // Builds a submenu containing all the gtk input method commands.
   virtual gfx::NativeView BuildInputMethodsGtkMenu() = 0;
 #endif  // defined(TOOLKIT_GTK)
+
+#if defined(OS_ANDROID)
+  virtual void StartContentIntent(const GURL& content_url) = 0;
+#endif
 
   // Subclasses should override this method to do what is appropriate to set
   // the custom background for their platform.

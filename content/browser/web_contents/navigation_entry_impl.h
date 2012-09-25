@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_BROWSER_WEB_CONTENTS_NAVIGATION_ENTRY_IMPL_H_
 #define CONTENT_BROWSER_WEB_CONTENTS_NAVIGATION_ENTRY_IMPL_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
@@ -36,6 +35,8 @@ class CONTENT_EXPORT NavigationEntryImpl
   virtual PageType GetPageType() const OVERRIDE;
   virtual void SetURL(const GURL& url) OVERRIDE;
   virtual const GURL& GetURL() const OVERRIDE;
+  virtual void SetBaseURLForDataURL(const GURL& url) OVERRIDE;
+  virtual const GURL& GetBaseURLForDataURL() const OVERRIDE;
   virtual void SetReferrer(const Referrer& referrer) OVERRIDE;
   virtual const Referrer& GetReferrer() const OVERRIDE;
   virtual void SetVirtualURL(const GURL& url) OVERRIDE;
@@ -56,6 +57,10 @@ class CONTENT_EXPORT NavigationEntryImpl
   virtual bool GetHasPostData() const OVERRIDE;
   virtual void SetPostID(int64 post_id) OVERRIDE;
   virtual int64 GetPostID() const OVERRIDE;
+  virtual void SetBrowserInitiatedPostData(
+      const base::RefCountedMemory* data) OVERRIDE;
+  virtual const base::RefCountedMemory*
+      GetBrowserInitiatedPostData() const OVERRIDE;
   virtual const FaviconStatus& GetFavicon() const OVERRIDE;
   virtual FaviconStatus& GetFavicon() OVERRIDE;
   virtual const SSLStatus& GetSSL() const OVERRIDE;
@@ -184,8 +189,17 @@ class CONTENT_EXPORT NavigationEntryImpl
   GURL original_request_url_;
   bool is_overriding_user_agent_;
 
-  // This member is not persisted with sesssion restore.
+  // This member is not persisted with session restore because it is transient.
+  // If the post request succeeds, this field is cleared since the same
+  // information is stored in |content_state_| above. It is also only shallow
+  // copied with compiler provided copy constructor.
+  scoped_refptr<const base::RefCountedMemory> browser_initiated_post_data_;
+
+  // This member is not persisted with session restore.
   std::string extra_headers_;
+
+  // Used for specifying base URL for pages loaded via data URLs. Not persisted.
+  GURL base_url_for_data_url_;
 
   // Whether the entry, while loading, was created for a renderer-initiated
   // navigation.  This dictates whether the URL should be displayed before the

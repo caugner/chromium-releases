@@ -7,7 +7,9 @@
 #include <algorithm>
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/stl_util.h"
+#include "content/common/gpu/gl_scoped_binders.h"
 #include "content/common/gpu/media/vaapi_h264_decoder.h"
 #include "third_party/libva/va/va.h"
 #include "third_party/libva/va/va_x11.h"
@@ -19,7 +21,7 @@
       DVLOG(1) << err_msg                                  \
                << " VA error: " << VAAPI_ErrorStr(va_res); \
     }                                                      \
-  } while(0)
+  } while (0)
 
 #define VA_SUCCESS_OR_RETURN(va_res, err_msg, ret)         \
   do {                                                     \
@@ -32,11 +34,10 @@
 
 namespace content {
 
-void *vaapi_handle = dlopen("libva.so", RTLD_NOW);
-void *vaapi_x11_handle = dlopen("libva-x11.so", RTLD_NOW);
-void *vaapi_glx_handle = dlopen("libva-glx.so", RTLD_NOW);
+void *vaapi_handle = NULL;
+void *vaapi_x11_handle = NULL;
 
-typedef VADisplay (*VaapiGetDisplayGLX)(Display *dpy);
+typedef VADisplay (*VaapiGetDisplay)(Display *dpy);
 typedef int (*VaapiDisplayIsValid)(VADisplay dpy);
 typedef VAStatus (*VaapiInitialize)(VADisplay dpy,
                                     int *major_version,
@@ -105,51 +106,30 @@ typedef VAStatus (*VaapiCreateBuffer)(VADisplay dpy,
 typedef VAStatus (*VaapiDestroyBuffer)(VADisplay dpy, VABufferID buffer_id);
 typedef const char* (*VaapiErrorStr)(VAStatus error_status);
 
-#define VAAPI_DLSYM(name, handle)                                 \
-    Vaapi##name VAAPI_##name =                                    \
-        reinterpret_cast<Vaapi##name>(dlsym((handle), "va"#name))
+#define VAAPI_SYM(name, handle) Vaapi##name VAAPI_##name = NULL
 
-VAAPI_DLSYM(GetDisplayGLX, vaapi_glx_handle);
-VAAPI_DLSYM(DisplayIsValid, vaapi_handle);
-VAAPI_DLSYM(Initialize, vaapi_handle);
-VAAPI_DLSYM(Terminate, vaapi_handle);
-VAAPI_DLSYM(GetConfigAttributes, vaapi_handle);
-VAAPI_DLSYM(CreateConfig, vaapi_handle);
-VAAPI_DLSYM(DestroyConfig, vaapi_handle);
-VAAPI_DLSYM(CreateSurfaces, vaapi_handle);
-VAAPI_DLSYM(DestroySurfaces, vaapi_handle);
-VAAPI_DLSYM(CreateContext, vaapi_handle);
-VAAPI_DLSYM(DestroyContext, vaapi_handle);
-VAAPI_DLSYM(PutSurface, vaapi_x11_handle);
-VAAPI_DLSYM(SyncSurface, vaapi_x11_handle);
-VAAPI_DLSYM(BeginPicture, vaapi_handle);
-VAAPI_DLSYM(RenderPicture, vaapi_handle);
-VAAPI_DLSYM(EndPicture, vaapi_handle);
-VAAPI_DLSYM(CreateBuffer, vaapi_handle);
-VAAPI_DLSYM(DestroyBuffer, vaapi_handle);
-VAAPI_DLSYM(ErrorStr, vaapi_handle);
+VAAPI_SYM(GetDisplay, vaapi_x11_handle);
+VAAPI_SYM(DisplayIsValid, vaapi_handle);
+VAAPI_SYM(Initialize, vaapi_handle);
+VAAPI_SYM(Terminate, vaapi_handle);
+VAAPI_SYM(GetConfigAttributes, vaapi_handle);
+VAAPI_SYM(CreateConfig, vaapi_handle);
+VAAPI_SYM(DestroyConfig, vaapi_handle);
+VAAPI_SYM(CreateSurfaces, vaapi_handle);
+VAAPI_SYM(DestroySurfaces, vaapi_handle);
+VAAPI_SYM(CreateContext, vaapi_handle);
+VAAPI_SYM(DestroyContext, vaapi_handle);
+VAAPI_SYM(PutSurface, vaapi_x11_handle);
+VAAPI_SYM(SyncSurface, vaapi_x11_handle);
+VAAPI_SYM(BeginPicture, vaapi_handle);
+VAAPI_SYM(RenderPicture, vaapi_handle);
+VAAPI_SYM(EndPicture, vaapi_handle);
+VAAPI_SYM(CreateBuffer, vaapi_handle);
+VAAPI_SYM(DestroyBuffer, vaapi_handle);
+VAAPI_SYM(ErrorStr, vaapi_handle);
 
-static bool AreVaapiFunctionPointersInitialized() {
-  return VAAPI_GetDisplayGLX &&
-      VAAPI_DisplayIsValid &&
-      VAAPI_Initialize &&
-      VAAPI_Terminate &&
-      VAAPI_GetConfigAttributes &&
-      VAAPI_CreateConfig &&
-      VAAPI_DestroyConfig &&
-      VAAPI_CreateSurfaces &&
-      VAAPI_DestroySurfaces &&
-      VAAPI_CreateContext &&
-      VAAPI_DestroyContext &&
-      VAAPI_PutSurface &&
-      VAAPI_SyncSurface &&
-      VAAPI_BeginPicture &&
-      VAAPI_RenderPicture &&
-      VAAPI_EndPicture &&
-      VAAPI_CreateBuffer &&
-      VAAPI_DestroyBuffer &&
-      VAAPI_ErrorStr;
-}
+// static
+bool VaapiH264Decoder::pre_sandbox_init_done_ = false;
 
 class VaapiH264Decoder::DecodeSurface {
  public:
@@ -185,10 +165,6 @@ class VaapiH264Decoder::DecodeSurface {
 
   int poc() {
     return poc_;
-  }
-
-  Pixmap x_pixmap() {
-    return x_pixmap_;
   }
 
   // Associate the surface with |input_id| and |poc|, and make it unavailable
@@ -242,11 +218,13 @@ VaapiH264Decoder::DecodeSurface::DecodeSurface(
       va_display_(va_display),
       make_context_current_(make_context_current),
       va_surface_id_(va_surface_id),
+      input_id_(0),
       picture_buffer_id_(picture_buffer_id),
       texture_id_(texture_id),
       width_(width),
       height_(height),
       available_(false),
+      poc_(0),
       x_pixmap_(0),
       glx_pixmap_(0) {
   // Bind the surface to a texture of the given width and height,
@@ -254,14 +232,14 @@ VaapiH264Decoder::DecodeSurface::DecodeSurface(
   if (!make_context_current_.Run())
     return;
 
-  glEnable(GL_TEXTURE_2D);
-  glBindTexture(GL_TEXTURE_2D, texture_id_);
+  content::ScopedTextureBinder texture_binder(texture_id_);
   glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
   glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
   XWindowAttributes win_attr;
   int screen = DefaultScreen(x_display_);
   XGetWindowAttributes(x_display_, RootWindow(x_display_, screen), &win_attr);
+  //TODO(posciak): pass the depth required by libva, not the RootWindow's depth
   x_pixmap_ = XCreatePixmap(x_display_, RootWindow(x_display_, screen),
                             width_, height_, win_attr.depth);
   if (!x_pixmap_) {
@@ -282,7 +260,6 @@ VaapiH264Decoder::DecodeSurface::DecodeSurface(
     return;
   }
 
-  glBindTexture(GL_TEXTURE_2D, texture_id_);
   glXBindTexImageEXT(x_display_, glx_pixmap_, GLX_FRONT_LEFT_EXT, NULL);
 
   available_ = true;
@@ -292,7 +269,7 @@ VaapiH264Decoder::DecodeSurface::~DecodeSurface() {
   // Unbind surface from texture and deallocate resources.
   if (glx_pixmap_ && make_context_current_.Run()) {
     glXReleaseTexImageEXT(x_display_, glx_pixmap_, GLX_FRONT_LEFT_EXT);
-    glXDestroyGLXPixmap(x_display_, glx_pixmap_);
+    glXDestroyPixmap(x_display_, glx_pixmap_);
   }
 
   if (x_pixmap_)
@@ -332,6 +309,10 @@ bool VaapiH264Decoder::DecodeSurface::Sync() {
 
 VaapiH264Decoder::VaapiH264Decoder() {
   Reset();
+  curr_input_id_ = -1;
+  x_display_ = NULL;
+  fb_config_ = NULL;
+  va_display_ = NULL;
   curr_sps_id_ = -1;
   curr_pps_id_ = -1;
   pic_width_ = -1;
@@ -342,6 +323,7 @@ VaapiH264Decoder::VaapiH264Decoder() {
   max_pic_order_cnt_lsb_ = 0;
   state_ = kUninitialized;
   num_available_decode_surfaces_ = 0;
+  va_context_created_ = false;
 }
 
 VaapiH264Decoder::~VaapiH264Decoder() {
@@ -365,6 +347,10 @@ void VaapiH264Decoder::Reset() {
   prev_ref_pic_order_cnt_msb_ = -1;
   prev_ref_pic_order_cnt_lsb_ = -1;
   prev_ref_field_ = H264Picture::FIELD_NONE;
+
+  // When called from the constructor, although va_display_ is invalid,
+  // |pending_slice_bufs_| and |pending_va_bufs_| are empty.
+  DestroyPendingBuffers();
 
   pending_slice_bufs_ = std::queue<VABufferID>();
   pending_va_bufs_ = std::queue<VABufferID>();
@@ -395,20 +381,23 @@ void VaapiH264Decoder::Reset() {
 }
 
 void VaapiH264Decoder::Destroy() {
-  VAStatus va_res;
-
   if (state_ == kUninitialized)
     return;
 
+  VAStatus va_res;
+  bool destroy_surfaces = false;
   switch (state_) {
     case kDecoding:
     case kAfterReset:
     case kError:
-      DestroyVASurfaces();
+      destroy_surfaces = true;
       // fallthrough
     case kInitialized:
       if (!make_context_current_.Run())
         break;
+      if (destroy_surfaces)
+        DestroyVASurfaces();
+      DestroyPendingBuffers();
       va_res = VAAPI_DestroyConfig(va_display_, va_config_id_);
       VA_LOG_ON_ERROR(va_res, "vaDestroyConfig failed");
       va_res = VAAPI_Terminate(va_display_);
@@ -489,17 +478,12 @@ bool VaapiH264Decoder::Initialize(
     return false;
   }
 
-  if (!AreVaapiFunctionPointersInitialized()) {
-    DVLOG(1) << "Could not load libva";
-    return false;
-  }
-
   if (!InitializeFBConfig()) {
     DVLOG(1) << "Could not get a usable FBConfig";
     return false;
   }
 
-  va_display_ = VAAPI_GetDisplayGLX(x_display_);
+  va_display_ = VAAPI_GetDisplay(x_display_);
   if (!VAAPI_DisplayIsValid(va_display_)) {
     DVLOG(1) << "Could not get a valid VA display";
     return false;
@@ -576,9 +560,9 @@ bool VaapiH264Decoder::AssignPictureBuffer(int32 picture_buffer_id,
 bool VaapiH264Decoder::CreateVASurfaces() {
   DCHECK_NE(pic_width_, -1);
   DCHECK_NE(pic_height_, -1);
+  if (state_ == kAfterReset)
+    return true;
   DCHECK_EQ(state_, kInitialized);
-  if (!make_context_current_.Run())
-    return false;
 
   // Allocate VASurfaces in driver.
   VAStatus va_res = VAAPI_CreateSurfaces(va_display_, pic_width_,
@@ -588,13 +572,20 @@ bool VaapiH264Decoder::CreateVASurfaces() {
   VA_SUCCESS_OR_RETURN(va_res, "vaCreateSurfaces failed", false);
 
   DCHECK(decode_surfaces_.empty());
-
   // And create a context associated with them.
   va_res = VAAPI_CreateContext(va_display_, va_config_id_,
                                pic_width_, pic_height_, VA_PROGRESSIVE,
                                va_surface_ids_, GetRequiredNumOfPictures(),
                                &va_context_id_);
-  VA_SUCCESS_OR_RETURN(va_res, "vaCreateContext failed", false);
+
+  if (va_res != VA_STATUS_SUCCESS) {
+    DVLOG(1) << "Error creating a decoding surface (binding to texture?)";
+    VAAPI_DestroySurfaces(va_display_, va_surface_ids_,
+                          GetRequiredNumOfPictures());
+    return false;
+  }
+
+  va_context_created_ = true;
 
   return true;
 }
@@ -603,7 +594,8 @@ void VaapiH264Decoder::DestroyVASurfaces() {
   DCHECK(state_ == kDecoding || state_ == kError || state_ == kAfterReset);
   decode_surfaces_.clear();
 
-  if (!make_context_current_.Run())
+  // This can happen if we fail during DecodeInitial.
+  if (!va_context_created_)
     return;
 
   VAStatus va_res = VAAPI_DestroyContext(va_display_, va_context_id_);
@@ -612,6 +604,23 @@ void VaapiH264Decoder::DestroyVASurfaces() {
   va_res = VAAPI_DestroySurfaces(va_display_, va_surface_ids_,
                                  GetRequiredNumOfPictures());
   VA_LOG_ON_ERROR(va_res, "vaDestroySurfaces failed");
+
+  va_context_created_ = false;
+}
+
+void VaapiH264Decoder::DestroyPendingBuffers() {
+  while (!pending_slice_bufs_.empty()) {
+    VABufferID buffer = pending_slice_bufs_.front();
+    VAStatus va_res = VAAPI_DestroyBuffer(va_display_, buffer);
+    VA_LOG_ON_ERROR(va_res, "vaDestroyBuffer failed");
+    pending_slice_bufs_.pop();
+  }
+  while (!pending_va_bufs_.empty()) {
+    VABufferID buffer = pending_va_bufs_.front();
+    VAStatus va_res = VAAPI_DestroyBuffer(va_display_, buffer);
+    VA_LOG_ON_ERROR(va_res, "vaDestroyBuffer failed");
+    pending_va_bufs_.pop();
+  }
 }
 
 // Fill |va_pic| with default/neutral values.
@@ -622,6 +631,7 @@ static void InitVAPicture(VAPictureH264* va_pic) {
 }
 
 void VaapiH264Decoder::FillVAPicture(VAPictureH264 *va_pic, H264Picture* pic) {
+  DCHECK(pic);
   POCToDecodeSurfaces::iterator iter = poc_to_decode_surfaces_.find(
       pic->pic_order_cnt);
   if (iter == poc_to_decode_surfaces_.end()) {
@@ -675,24 +685,27 @@ int VaapiH264Decoder::FillVARefFramesFromDPB(VAPictureH264 *va_pics,
 // Can only be called when all surfaces are already bound
 // to textures (cannot be run at the same time as AssignPictureBuffer).
 bool VaapiH264Decoder::AssignSurfaceToPoC(int poc) {
+  DCHECK_GT(num_available_decode_surfaces_, 0) << decode_surfaces_.size();
+
   // Find a surface not currently holding data used for reference and/or
   // to be displayed and mark it as used.
   DecodeSurfaces::iterator iter = decode_surfaces_.begin();
   for (; iter != decode_surfaces_.end(); ++iter) {
-    if (iter->second->available()) {
-      --num_available_decode_surfaces_;
-      DCHECK_GE(num_available_decode_surfaces_, 0);
+    if (!iter->second->available())
+      continue;
 
-      // Associate with input id and poc and mark as unavailable.
-      iter->second->Acquire(curr_input_id_, poc);
-      DVLOG(4) << "Will use surface " << iter->second->va_surface_id()
-               << " for POC " << iter->second->poc()
-               << " input ID: " << iter->second->input_id();
-      bool inserted = poc_to_decode_surfaces_.insert(std::make_pair(poc,
-          iter->second.get())).second;
-      DCHECK(inserted);
-      return true;
-    }
+    --num_available_decode_surfaces_;
+    DCHECK_GE(num_available_decode_surfaces_, 0);
+
+    // Associate with input id and poc and mark as unavailable.
+    iter->second->Acquire(curr_input_id_, poc);
+    DVLOG(4) << "Will use surface " << iter->second->va_surface_id()
+             << " for POC " << iter->second->poc()
+             << " input ID: " << iter->second->input_id();
+    bool inserted = poc_to_decode_surfaces_.insert(std::make_pair(
+        poc, iter->second.get())).second;
+    DCHECK(inserted);
+    return true;
   }
 
   // Could not find an available surface.
@@ -718,9 +731,6 @@ VaapiH264Decoder::DecodeSurface* VaapiH264Decoder::UnassignSurfaceFromPoC(
 
 // Fill a VAPictureParameterBufferH264 to be later sent to the HW decoder.
 bool VaapiH264Decoder::SendPPS() {
-  if (!make_context_current_.Run())
-    return false;
-
   const H264PPS* pps = parser_.GetPPS(curr_pps_id_);
   DCHECK(pps);
 
@@ -818,9 +828,6 @@ bool VaapiH264Decoder::SendPPS() {
 
 // Fill a VAIQMatrixBufferH264 to be later sent to the HW decoder.
 bool VaapiH264Decoder::SendIQMatrix() {
-  if (!make_context_current_.Run())
-    return false;
-
   const H264PPS* pps = parser_.GetPPS(curr_pps_id_);
   DCHECK(pps);
 
@@ -867,9 +874,6 @@ bool VaapiH264Decoder::SendIQMatrix() {
 }
 
 bool VaapiH264Decoder::SendVASliceParam(H264SliceHeader* slice_hdr) {
-  if (!make_context_current_.Run())
-    return false;
-
   const H264PPS* pps = parser_.GetPPS(slice_hdr->pic_parameter_set_id);
   DCHECK(pps);
 
@@ -900,7 +904,7 @@ bool VaapiH264Decoder::SendVASliceParam(H264SliceHeader* slice_hdr) {
   SHDRToSP(slice_beta_offset_div2);
 
   if (((slice_hdr->IsPSlice() || slice_hdr->IsSPSlice()) &&
-        pps->weighted_pred_flag) ||
+       pps->weighted_pred_flag) ||
       (slice_hdr->IsBSlice() && pps->weighted_bipred_idc == 1)) {
     SHDRToSP(luma_log2_weight_denom);
     SHDRToSP(chroma_log2_weight_denom);
@@ -971,11 +975,7 @@ bool VaapiH264Decoder::SendVASliceParam(H264SliceHeader* slice_hdr) {
   return true;
 }
 
-bool VaapiH264Decoder::SendSliceData(const uint8* ptr, size_t size)
-{
-    if (!make_context_current_.Run())
-      return false;
-
+bool VaapiH264Decoder::SendSliceData(const uint8* ptr, size_t size) {
     // Can't help it, blame libva...
     void* non_const_ptr = const_cast<uint8*>(ptr);
 
@@ -1002,14 +1002,20 @@ bool VaapiH264Decoder::QueueSlice(H264SliceHeader* slice_hdr) {
   return true;
 }
 
+void VaapiH264Decoder::DestroyBuffers(size_t num_va_buffers,
+                                      const VABufferID* va_buffers) {
+  for (size_t i = 0; i < num_va_buffers; ++i) {
+    VAStatus va_res = VAAPI_DestroyBuffer(va_display_, va_buffers[i]);
+    VA_LOG_ON_ERROR(va_res, "vaDestroyBuffer failed");
+  }
+}
+
 // TODO(posciak) start using vaMapBuffer instead of vaCreateBuffer wherever
 // possible.
 
 bool VaapiH264Decoder::DecodePicture() {
   DCHECK(!frame_ready_at_hw_);
   DCHECK(curr_pic_.get());
-  if (!make_context_current_.Run())
-    return false;
 
   static const size_t kMaxVABuffers = 32;
   DCHECK_LE(pending_va_bufs_.size(), kMaxVABuffers);
@@ -1030,44 +1036,43 @@ bool VaapiH264Decoder::DecodePicture() {
                                        dec_surface->va_surface_id());
   VA_SUCCESS_OR_RETURN(va_res, "vaBeginPicture failed", false);
 
-  // Put buffer IDs for pending parameter buffers into buffers[].
-  VABufferID buffers[kMaxVABuffers];
-  size_t num_buffers = pending_va_bufs_.size();
-  for (size_t i = 0; i < num_buffers && i < kMaxVABuffers; ++i) {
-    buffers[i] = pending_va_bufs_.front();
+  // Put buffer IDs for pending parameter buffers into va_buffers[].
+  VABufferID va_buffers[kMaxVABuffers];
+  size_t num_va_buffers = pending_va_bufs_.size();
+  for (size_t i = 0; i < num_va_buffers && i < kMaxVABuffers; ++i) {
+    va_buffers[i] = pending_va_bufs_.front();
     pending_va_bufs_.pop();
   }
+  base::Closure va_buffers_callback =
+      base::Bind(&VaapiH264Decoder::DestroyBuffers, base::Unretained(this),
+                 num_va_buffers, va_buffers);
+  base::ScopedClosureRunner va_buffers_deleter(va_buffers_callback);
 
   // And send them to the HW decoder.
-  va_res = VAAPI_RenderPicture(va_display_, va_context_id_, buffers,
-                               num_buffers);
+  va_res = VAAPI_RenderPicture(va_display_, va_context_id_, va_buffers,
+                               num_va_buffers);
   VA_SUCCESS_OR_RETURN(va_res, "vaRenderPicture for va_bufs failed", false);
 
-  DVLOG(4) << "Committed " << num_buffers << "VA buffers";
+  DVLOG(4) << "Committed " << num_va_buffers << "VA buffers";
 
-  for (size_t i = 0; i < num_buffers; ++i) {
-    va_res = VAAPI_DestroyBuffer(va_display_, buffers[i]);
-    VA_SUCCESS_OR_RETURN(va_res, "vaDestroyBuffer for va_bufs failed", false);
-  }
-
-  // Put buffer IDs for pending slice data buffers into buffers[].
-  num_buffers = pending_slice_bufs_.size();
-  for (size_t i = 0; i < num_buffers && i < kMaxVABuffers; ++i) {
-    buffers[i] = pending_slice_bufs_.front();
+  // Put buffer IDs for pending slice data buffers into slice_buffers[].
+  VABufferID slice_buffers[kMaxVABuffers];
+  size_t num_slice_buffers = pending_slice_bufs_.size();
+  for (size_t i = 0; i < num_slice_buffers && i < kMaxVABuffers; ++i) {
+    slice_buffers[i] = pending_slice_bufs_.front();
     pending_slice_bufs_.pop();
   }
+  base::Closure va_slices_callback =
+      base::Bind(&VaapiH264Decoder::DestroyBuffers, base::Unretained(this),
+                 num_slice_buffers, slice_buffers);
+  base::ScopedClosureRunner slice_buffers_deleter(va_slices_callback);
 
   // And send them to the Hw decoder.
-  va_res = VAAPI_RenderPicture(va_display_, va_context_id_, buffers,
-                               num_buffers);
+  va_res = VAAPI_RenderPicture(va_display_, va_context_id_, slice_buffers,
+                               num_slice_buffers);
   VA_SUCCESS_OR_RETURN(va_res, "vaRenderPicture for slices failed", false);
 
-  DVLOG(4) << "Committed " << num_buffers << "slice buffers";
-
-  for (size_t i = 0; i < num_buffers; ++i) {
-    va_res = VAAPI_DestroyBuffer(va_display_, buffers[i]);
-    VA_SUCCESS_OR_RETURN(va_res, "vaDestroyBuffer for slices failed", false);
-  }
+  DVLOG(4) << "Committed " << num_slice_buffers << "slice buffers";
 
   // Instruct HW decoder to start processing committed buffers (decode this
   // picture). This does not block until the end of decode.
@@ -1128,62 +1133,161 @@ bool VaapiH264Decoder::InitCurrPicture(H264SliceHeader* slice_hdr) {
 
 bool VaapiH264Decoder::CalculatePicOrderCounts(H264SliceHeader* slice_hdr) {
   DCHECK_NE(curr_sps_id_, -1);
+  const H264SPS* sps = parser_.GetSPS(curr_sps_id_);
 
   int pic_order_cnt_lsb = slice_hdr->pic_order_cnt_lsb;
   curr_pic_->pic_order_cnt_lsb = pic_order_cnt_lsb;
-  if (parser_.GetSPS(curr_sps_id_)->pic_order_cnt_type != 0) {
-    DVLOG(1) << "Unsupported pic_order_cnt_type";
-    return false;
-  }
 
-  // See spec 8.2.1.1.
-  int prev_pic_order_cnt_msb, prev_pic_order_cnt_lsb;
-  if (slice_hdr->idr_pic_flag) {
-    prev_pic_order_cnt_msb = prev_pic_order_cnt_lsb = 0;
-  } else {
-    if (prev_ref_has_memmgmnt5_) {
-      if (prev_ref_field_ != H264Picture::FIELD_BOTTOM) {
-        prev_pic_order_cnt_msb = 0;
-        prev_pic_order_cnt_lsb = prev_ref_top_field_order_cnt_;
+  switch (sps->pic_order_cnt_type) {
+    case 0:
+      // See spec 8.2.1.1.
+      int prev_pic_order_cnt_msb, prev_pic_order_cnt_lsb;
+      if (slice_hdr->idr_pic_flag) {
+        prev_pic_order_cnt_msb = prev_pic_order_cnt_lsb = 0;
       } else {
-        prev_pic_order_cnt_msb = 0;
-        prev_pic_order_cnt_lsb = 0;
+        if (prev_ref_has_memmgmnt5_) {
+          if (prev_ref_field_ != H264Picture::FIELD_BOTTOM) {
+            prev_pic_order_cnt_msb = 0;
+            prev_pic_order_cnt_lsb = prev_ref_top_field_order_cnt_;
+          } else {
+            prev_pic_order_cnt_msb = 0;
+            prev_pic_order_cnt_lsb = 0;
+          }
+        } else {
+          prev_pic_order_cnt_msb = prev_ref_pic_order_cnt_msb_;
+          prev_pic_order_cnt_lsb = prev_ref_pic_order_cnt_lsb_;
+        }
       }
-    } else {
-      prev_pic_order_cnt_msb = prev_ref_pic_order_cnt_msb_;
-      prev_pic_order_cnt_lsb = prev_ref_pic_order_cnt_lsb_;
-    }
-  }
 
-  DCHECK_NE(max_pic_order_cnt_lsb_, 0);
-  if ((pic_order_cnt_lsb < prev_pic_order_cnt_lsb) &&
-      (prev_pic_order_cnt_lsb - pic_order_cnt_lsb >=
-       max_pic_order_cnt_lsb_ / 2)) {
-    curr_pic_->pic_order_cnt_msb = prev_pic_order_cnt_msb +
-        max_pic_order_cnt_lsb_;
-  } else if ((pic_order_cnt_lsb > prev_pic_order_cnt_lsb) &&
-      (pic_order_cnt_lsb - prev_pic_order_cnt_lsb >
-       max_pic_order_cnt_lsb_ / 2)) {
-    curr_pic_->pic_order_cnt_msb = prev_pic_order_cnt_msb -
-        max_pic_order_cnt_lsb_;
-  } else {
-    curr_pic_->pic_order_cnt_msb = prev_pic_order_cnt_msb;
-  }
+      DCHECK_NE(max_pic_order_cnt_lsb_, 0);
+      if ((pic_order_cnt_lsb < prev_pic_order_cnt_lsb) &&
+          (prev_pic_order_cnt_lsb - pic_order_cnt_lsb >=
+           max_pic_order_cnt_lsb_ / 2)) {
+        curr_pic_->pic_order_cnt_msb = prev_pic_order_cnt_msb +
+          max_pic_order_cnt_lsb_;
+      } else if ((pic_order_cnt_lsb > prev_pic_order_cnt_lsb) &&
+          (pic_order_cnt_lsb - prev_pic_order_cnt_lsb >
+           max_pic_order_cnt_lsb_ / 2)) {
+        curr_pic_->pic_order_cnt_msb = prev_pic_order_cnt_msb -
+          max_pic_order_cnt_lsb_;
+      } else {
+        curr_pic_->pic_order_cnt_msb = prev_pic_order_cnt_msb;
+      }
 
-  if (curr_pic_->field != H264Picture::FIELD_BOTTOM) {
-    curr_pic_->top_field_order_cnt = curr_pic_->pic_order_cnt_msb +
-        pic_order_cnt_lsb;
-  }
-
-  if (curr_pic_->field != H264Picture::FIELD_TOP) {
-    // TODO posciak: perhaps replace with pic->field?
-    if (!slice_hdr->field_pic_flag) {
-      curr_pic_->bottom_field_order_cnt = curr_pic_->top_field_order_cnt +
-          slice_hdr->delta_pic_order_cnt_bottom;
-    } else {
-      curr_pic_->bottom_field_order_cnt = curr_pic_->pic_order_cnt_msb +
+      if (curr_pic_->field != H264Picture::FIELD_BOTTOM) {
+        curr_pic_->top_field_order_cnt = curr_pic_->pic_order_cnt_msb +
           pic_order_cnt_lsb;
+      }
+
+      if (curr_pic_->field != H264Picture::FIELD_TOP) {
+        // TODO posciak: perhaps replace with pic->field?
+        if (!slice_hdr->field_pic_flag) {
+          curr_pic_->bottom_field_order_cnt = curr_pic_->top_field_order_cnt +
+            slice_hdr->delta_pic_order_cnt_bottom;
+        } else {
+          curr_pic_->bottom_field_order_cnt = curr_pic_->pic_order_cnt_msb +
+            pic_order_cnt_lsb;
+        }
+      }
+      break;
+
+    case 1: {
+      // See spec 8.2.1.2.
+      if (prev_has_memmgmnt5_)
+        prev_frame_num_offset_ = 0;
+
+      if (slice_hdr->idr_pic_flag)
+        curr_pic_->frame_num_offset = 0;
+      else if (prev_frame_num_ > slice_hdr->frame_num)
+        curr_pic_->frame_num_offset = prev_frame_num_offset_ + max_frame_num_;
+      else
+        curr_pic_->frame_num_offset = prev_frame_num_offset_;
+
+      int abs_frame_num = 0;
+      if (sps->num_ref_frames_in_pic_order_cnt_cycle != 0)
+        abs_frame_num = curr_pic_->frame_num_offset + slice_hdr->frame_num;
+      else
+        abs_frame_num = 0;
+
+      if (slice_hdr->nal_ref_idc == 0 && abs_frame_num > 0)
+        --abs_frame_num;
+
+      int expected_pic_order_cnt = 0;
+      if (abs_frame_num > 0) {
+        if (sps->num_ref_frames_in_pic_order_cnt_cycle == 0) {
+          DVLOG(1) << "Invalid num_ref_frames_in_pic_order_cnt_cycle "
+                   << "in stream";
+          return false;
+        }
+
+        int pic_order_cnt_cycle_cnt = (abs_frame_num - 1) /
+            sps->num_ref_frames_in_pic_order_cnt_cycle;
+        int frame_num_in_pic_order_cnt_cycle = (abs_frame_num - 1) %
+            sps->num_ref_frames_in_pic_order_cnt_cycle;
+
+        expected_pic_order_cnt = pic_order_cnt_cycle_cnt *
+            sps->expected_delta_per_pic_order_cnt_cycle;
+        // frame_num_in_pic_order_cnt_cycle is verified < 255 in parser
+        for (int i = 0; i <= frame_num_in_pic_order_cnt_cycle; ++i)
+          expected_pic_order_cnt += sps->offset_for_ref_frame[i];
+      }
+
+      if (!slice_hdr->nal_ref_idc)
+        expected_pic_order_cnt += sps->offset_for_non_ref_pic;
+
+      if (!slice_hdr->field_pic_flag) {
+        curr_pic_->top_field_order_cnt = expected_pic_order_cnt +
+            slice_hdr->delta_pic_order_cnt[0];
+        curr_pic_->bottom_field_order_cnt = curr_pic_->top_field_order_cnt +
+            sps->offset_for_top_to_bottom_field +
+            slice_hdr->delta_pic_order_cnt[1];
+      } else if (!slice_hdr->bottom_field_flag) {
+        curr_pic_->top_field_order_cnt = expected_pic_order_cnt +
+            slice_hdr->delta_pic_order_cnt[0];
+      } else {
+        curr_pic_->bottom_field_order_cnt = expected_pic_order_cnt +
+            sps->offset_for_top_to_bottom_field +
+            slice_hdr->delta_pic_order_cnt[0];
+      }
+      break;
     }
+
+    case 2:
+      // See spec 8.2.1.3.
+      if (prev_has_memmgmnt5_)
+        prev_frame_num_offset_ = 0;
+
+      if (slice_hdr->idr_pic_flag)
+        curr_pic_->frame_num_offset = 0;
+      else if (prev_frame_num_ > slice_hdr->frame_num)
+        curr_pic_->frame_num_offset = prev_frame_num_offset_ + max_frame_num_;
+      else
+        curr_pic_->frame_num_offset = prev_frame_num_offset_;
+
+      int temp_pic_order_cnt;
+      if (slice_hdr->idr_pic_flag) {
+        temp_pic_order_cnt = 0;
+      } else if (!slice_hdr->nal_ref_idc) {
+        temp_pic_order_cnt =
+            2 * (curr_pic_->frame_num_offset + slice_hdr->frame_num) - 1;
+      } else {
+        temp_pic_order_cnt = 2 * (curr_pic_->frame_num_offset +
+            slice_hdr->frame_num);
+      }
+
+      if (!slice_hdr->field_pic_flag) {
+        curr_pic_->top_field_order_cnt = temp_pic_order_cnt;
+        curr_pic_->bottom_field_order_cnt = temp_pic_order_cnt;
+      } else if (slice_hdr->bottom_field_flag) {
+        curr_pic_->bottom_field_order_cnt = temp_pic_order_cnt;
+      } else {
+        curr_pic_->top_field_order_cnt = temp_pic_order_cnt;
+      }
+      break;
+
+    default:
+      DVLOG(1) << "Invalid pic_order_cnt_type: " << sps->pic_order_cnt_type;
+      return false;
   }
 
   switch (curr_pic_->field) {
@@ -1351,15 +1455,20 @@ int VaapiH264Decoder::LongTermPicNumF(H264Picture *pic) {
 
 // Shift elements on the |v| starting from |from| to |to|, inclusive,
 // one position to the right and insert pic at |from|.
-static void ShiftRightAndInsert(H264Picture::PtrVector& v,
+static void ShiftRightAndInsert(H264Picture::PtrVector *v,
                                 int from,
                                 int to,
                                 H264Picture* pic) {
   DCHECK(pic);
-  for (int i = to + 1; i > from; --i)
-    v[i] = v[i - 1];
+  DCHECK((to + 1 == static_cast<int>(v->size())) ||
+         (to + 2 == static_cast<int>(v->size())));
 
-  v[from] = pic;
+  v->resize(to + 2);
+
+  for (int i = to + 1; i > from; --i)
+    (*v)[i] = (*v)[i - 1];
+
+  (*v)[from] = pic;
 }
 
 bool VaapiH264Decoder::ModifyReferencePicList(H264SliceHeader *slice_hdr,
@@ -1396,8 +1505,9 @@ bool VaapiH264Decoder::ModifyReferencePicList(H264SliceHeader *slice_hdr,
   int ref_idx_lx = 0;
   int pic_num_lx_no_wrap;
   int pic_num_lx;
+  bool done = false;
   H264Picture *pic ;
-  for (int i = 0; i < H264SliceHeader::kRefListModSize; ++i) {
+  for (int i = 0; i < H264SliceHeader::kRefListModSize && !done; ++i) {
     switch (list_mod->modification_of_pic_nums_idc) {
       case 0:
       case 1:
@@ -1435,7 +1545,7 @@ bool VaapiH264Decoder::ModifyReferencePicList(H264SliceHeader *slice_hdr,
           DVLOG(1) << "Malformed stream, no pic num " << pic_num_lx;
           return false;
         }
-        ShiftRightAndInsert(*ref_pic_listx, ref_idx_lx,
+        ShiftRightAndInsert(ref_pic_listx, ref_idx_lx,
                             num_ref_idx_lX_active_minus1, pic);
         ref_idx_lx++;
 
@@ -1455,7 +1565,7 @@ bool VaapiH264Decoder::ModifyReferencePicList(H264SliceHeader *slice_hdr,
           DVLOG(1) << "Malformed stream, no pic num " << pic_num_lx;
           return false;
         }
-        ShiftRightAndInsert(*ref_pic_listx, ref_idx_lx,
+        ShiftRightAndInsert(ref_pic_listx, ref_idx_lx,
                             num_ref_idx_lX_active_minus1, pic);
         ref_idx_lx++;
 
@@ -1469,7 +1579,8 @@ bool VaapiH264Decoder::ModifyReferencePicList(H264SliceHeader *slice_hdr,
 
       case 3:
         // End of modification list.
-        return true;
+        done = true;
+        break;
 
       default:
         // May be recoverable.
@@ -1481,6 +1592,11 @@ bool VaapiH264Decoder::ModifyReferencePicList(H264SliceHeader *slice_hdr,
 
     ++list_mod;
   }
+
+  // Per NOTE 2 in 8.2.4.3.2, the ref_pic_listx size in the above loop is
+  // temporarily made one element longer than the required final list.
+  // Resize the list back to its required size.
+  ref_pic_listx->resize(num_ref_idx_lX_active_minus1 + 1);
 
   return true;
 }
@@ -1502,6 +1618,8 @@ bool VaapiH264Decoder::OutputPic(H264Picture* pic) {
   // No longer need to keep POC->surface mapping, since for decoder this POC
   // is finished with. When the client returns this surface via
   // ReusePictureBuffer(), it will be marked back as available for use.
+  DCHECK(!pic->outputted);
+  pic->outputted = true;
   DecodeSurface* dec_surface = UnassignSurfaceFromPoC(pic->pic_order_cnt);
   if (!dec_surface)
     return false;
@@ -1518,6 +1636,7 @@ bool VaapiH264Decoder::OutputPic(H264Picture* pic) {
 
 bool VaapiH264Decoder::Flush() {
   // Output all pictures that are waiting to be outputted.
+  FinishPrevFrameIfPresent();
   H264Picture::PtrVector to_output;
   dpb_.GetNotOutputtedPicsAppending(to_output);
   // Sort them by ascending POC to output in order.
@@ -1775,6 +1894,8 @@ bool VaapiH264Decoder::FinishPicture() {
     prev_ref_pic_order_cnt_lsb_ = curr_pic_->pic_order_cnt_lsb;
     prev_ref_field_ = curr_pic_->field;
   }
+  prev_has_memmgmnt5_ = curr_pic_->mem_mgmt_5;
+  prev_frame_num_offset_ = curr_pic_->frame_num_offset;
 
   // Remove unused (for reference or later output) pictures from DPB.
   dpb_.RemoveUnused();
@@ -1782,6 +1903,13 @@ bool VaapiH264Decoder::FinishPicture() {
   DVLOG(4) << "Finishing picture, DPB entries: " << dpb_.size()
            << " Num available dec surfaces: "
            << num_available_decode_surfaces_;
+
+  // Whatever happens below, curr_pic_ will stop managing the pointer to the
+  // picture after this function returns. The ownership will either be
+  // transferred to DPB, if the image is still needed (for output and/or
+  // reference), or the memory will be released if we manage to output it here
+  // without having to store it for future reference.
+  scoped_ptr<H264Picture> pic(curr_pic_.release());
 
   if (dpb_.IsFull()) {
     // DPB is full, we have to make space for the new picture.
@@ -1797,15 +1925,16 @@ bool VaapiH264Decoder::FinishPicture() {
     // is not a reference picture, thus making space for the current one.
     while (dpb_.IsFull()) {
       // Maybe outputted enough to output current picture.
-      if (!curr_pic_->ref && (output_candidate == not_outputted.end() ||
-          curr_pic_->pic_order_cnt < (*output_candidate)->pic_order_cnt)) {
-        // curr_pic_ is not a reference picture and no preceding pictures are
+      if (!pic->ref && (output_candidate == not_outputted.end() ||
+          pic->pic_order_cnt < (*output_candidate)->pic_order_cnt)) {
+        // pic is not a reference picture and no preceding pictures are
         // waiting for output in DPB, so it can be outputted and discarded
         // without storing in DPB.
-        if (!OutputPic(curr_pic_.get()))
+        if (!OutputPic(pic.get()))
           return false;
 
         // Managed to output current picture, return without adding to DPB.
+        // This will release current picture (stored in pic).
         return true;
       }
 
@@ -1825,13 +1954,14 @@ bool VaapiH264Decoder::FinishPicture() {
         DVLOG(1) << "Could not free up space in DPB!";
         return false;
       }
+
+      ++output_candidate;
     }
-    ++output_candidate;
   }
 
   // Store current picture for later output and/or reference (ownership now
   // with the DPB).
-  dpb_.StorePic(curr_pic_.release());
+  dpb_.StorePic(pic.release());
 
   return true;
 }
@@ -1848,11 +1978,6 @@ bool VaapiH264Decoder::ProcessSPS(int sps_id) {
 
   if (sps->gaps_in_frame_num_value_allowed_flag) {
     DVLOG(1) << "Gaps in frame numbers not supported";
-    return false;
-  }
-
-  if (sps->pic_order_cnt_type != 0) {
-    DVLOG(1) << "Unsupported pic_order_cnt_type";
     return false;
   }
 
@@ -1997,7 +2122,7 @@ VaapiH264Decoder::DecResult VaapiH264Decoder::DecodeInitial(int32 input_id) {
         // have all reference pictures that they may require.
         // fallthrough
       default:
-        // Skip everything unless it's PPS or an IDR slice (if after reset).
+        // Skip everything unless it's SPS or an IDR slice (if after reset).
         DVLOG(4) << "Skipping NALU";
         break;
     }
@@ -2025,9 +2150,6 @@ VaapiH264Decoder::DecResult VaapiH264Decoder::DecodeOneFrame(int32 input_id) {
   if (state_ != kDecoding) {
     DVLOG(1) << "Decoder not ready: error in stream or not initialized";
     return kDecodeError;
-  } else if (num_available_decode_surfaces_ < 1) {
-    DVLOG(4) << "No output surfaces available";
-    return kNoOutputAvailable;
   }
 
   // All of the actions below might result in decoding a picture from
@@ -2036,6 +2158,10 @@ VaapiH264Decoder::DecResult VaapiH264Decoder::DecodeOneFrame(int32 input_id) {
   // Note: this may drop some already decoded frames if there are errors
   // further in the stream, but we are OK with that.
   while (1) {
+    if (num_available_decode_surfaces_ < 1) {
+      DVLOG(4) << "No output surfaces available";
+      return kNoOutputAvailable;
+    }
     par_res = parser_.AdvanceToNextNALU(&nalu);
     if (par_res == H264Parser::kEOStream)
       return kNeedMoreStreamData;
@@ -2103,6 +2229,63 @@ VaapiH264Decoder::DecResult VaapiH264Decoder::DecodeOneFrame(int32 input_id) {
 // static
 size_t VaapiH264Decoder::GetRequiredNumOfPictures() {
   return kNumReqPictures;
+}
+
+// static
+void VaapiH264Decoder::PreSandboxInitialization() {
+  DCHECK(!pre_sandbox_init_done_);
+  vaapi_handle = dlopen("libva.so", RTLD_NOW);
+  vaapi_x11_handle = dlopen("libva-x11.so", RTLD_NOW);
+  pre_sandbox_init_done_ = vaapi_handle && vaapi_x11_handle;
+}
+
+// static
+bool VaapiH264Decoder::PostSandboxInitialization() {
+  if (!pre_sandbox_init_done_)
+    return false;
+#define VAAPI_DLSYM(name, handle)                                       \
+  VAAPI_##name = reinterpret_cast<Vaapi##name>(dlsym((handle), "va"#name)) \
+
+  VAAPI_DLSYM(GetDisplay, vaapi_x11_handle);
+  VAAPI_DLSYM(DisplayIsValid, vaapi_handle);
+  VAAPI_DLSYM(Initialize, vaapi_handle);
+  VAAPI_DLSYM(Terminate, vaapi_handle);
+  VAAPI_DLSYM(GetConfigAttributes, vaapi_handle);
+  VAAPI_DLSYM(CreateConfig, vaapi_handle);
+  VAAPI_DLSYM(DestroyConfig, vaapi_handle);
+  VAAPI_DLSYM(CreateSurfaces, vaapi_handle);
+  VAAPI_DLSYM(DestroySurfaces, vaapi_handle);
+  VAAPI_DLSYM(CreateContext, vaapi_handle);
+  VAAPI_DLSYM(DestroyContext, vaapi_handle);
+  VAAPI_DLSYM(PutSurface, vaapi_x11_handle);
+  VAAPI_DLSYM(SyncSurface, vaapi_x11_handle);
+  VAAPI_DLSYM(BeginPicture, vaapi_handle);
+  VAAPI_DLSYM(RenderPicture, vaapi_handle);
+  VAAPI_DLSYM(EndPicture, vaapi_handle);
+  VAAPI_DLSYM(CreateBuffer, vaapi_handle);
+  VAAPI_DLSYM(DestroyBuffer, vaapi_handle);
+  VAAPI_DLSYM(ErrorStr, vaapi_handle);
+#undef VAAPI_DLSYM
+
+  return VAAPI_GetDisplay &&
+      VAAPI_DisplayIsValid &&
+      VAAPI_Initialize &&
+      VAAPI_Terminate &&
+      VAAPI_GetConfigAttributes &&
+      VAAPI_CreateConfig &&
+      VAAPI_DestroyConfig &&
+      VAAPI_CreateSurfaces &&
+      VAAPI_DestroySurfaces &&
+      VAAPI_CreateContext &&
+      VAAPI_DestroyContext &&
+      VAAPI_PutSurface &&
+      VAAPI_SyncSurface &&
+      VAAPI_BeginPicture &&
+      VAAPI_RenderPicture &&
+      VAAPI_EndPicture &&
+      VAAPI_CreateBuffer &&
+      VAAPI_DestroyBuffer &&
+      VAAPI_ErrorStr;
 }
 
 }  // namespace content

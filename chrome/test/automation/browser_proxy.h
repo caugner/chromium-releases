@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_TEST_AUTOMATION_BROWSER_PROXY_H_
 #define CHROME_TEST_AUTOMATION_BROWSER_PROXY_H_
-#pragma once
 
 #include <string>
 #include <vector>
@@ -41,10 +40,6 @@ class BrowserProxy : public AutomationResourceProxy {
   // Bring the browser window to the front, activating it. Returns true on
   // success.
   bool BringToFront() WARN_UNUSED_RESULT;
-
-  // Checks to see if a command is enabled or not. If the call was successful,
-  // puts the result in |enabled| and returns true.
-  bool IsMenuCommandEnabled(int id, bool* enabled) WARN_UNUSED_RESULT;
 
   // Append a new tab to the TabStrip.  The new tab is selected.
   // The new tab navigates to the given tab_url.
@@ -107,11 +102,9 @@ class BrowserProxy : public AutomationResourceProxy {
   // Block the thread until the specified tab is the active tab.
   // |wait_timeout| is the timeout, in milliseconds, for waiting.
   // Returns false if the tab does not become active.
-  bool WaitForTabToBecomeActive(int tab, int wait_timeout) WARN_UNUSED_RESULT;
-
-  // Opens the FindInPage box. Note: If you just want to search within a tab
-  // you don't need to call this function, just use FindInPage(...) directly.
-  bool OpenFindInPage() WARN_UNUSED_RESULT;
+  bool WaitForTabToBecomeActive(
+      int tab,
+      base::TimeDelta wait_timeout) WARN_UNUSED_RESULT;
 
   // Returns whether the Find window is fully visible If animating, |is_visible|
   // will be false. Returns false on failure.
@@ -158,14 +151,6 @@ class BrowserProxy : public AutomationResourceProxy {
   // Finally, bookmark deletion:
   bool RemoveBookmark(int64 id) WARN_UNUSED_RESULT;
 
-  // Fills |*is_visible| with whether the browser's download shelf is currently
-  // visible. The return value indicates success. On failure, |*is_visible| is
-  // unchanged.
-  bool IsShelfVisible(bool* is_visible) WARN_UNUSED_RESULT;
-
-  // Shows or hides the download shelf.
-  bool SetShelfVisible(bool is_visible) WARN_UNUSED_RESULT;
-
   // Simulates a termination the browser session (as if the user logged off the
   // mahine).
   bool TerminateSession() WARN_UNUSED_RESULT;
@@ -181,7 +166,7 @@ class BrowserProxy : public AutomationResourceProxy {
   // the delay that WaitForInitialLoads waits for), and a list of all
   // finished timestamps into |stop_times|. Returns true on success.
   bool GetInitialLoadTimes(
-      int timeout_ms,
+      base::TimeDelta timeout,
       float* min_start_time,
       float* max_stop_time,
       std::vector<float>* stop_times);

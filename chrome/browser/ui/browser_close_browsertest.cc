@@ -15,6 +15,8 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/pref_names.h"
@@ -23,6 +25,7 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/common/page_transition_types.h"
+#include "content/public/test/browser_test_utils.h"
 #include "content/test/net/url_request_slow_download_job.h"
 
 using content::BrowserContext;
@@ -116,8 +119,7 @@ class BrowserCloseTest : public InProcessBrowserTest {
         BrowserContext::GetDownloadManager(browser->profile());
     scoped_ptr<DownloadTestObserver> observer(
         new DownloadTestObserverInProgress(download_manager,
-                                           num_downloads,
-                                           true));  // Bail on select file.
+                                           num_downloads));
 
     // Set of that number of downloads.
     size_t count_downloads = num_downloads;
@@ -169,11 +171,10 @@ class BrowserCloseTest : public InProcessBrowserTest {
 
   // Create a Browser (with associated window) on the specified profile.
   Browser* CreateBrowserOnProfile(Profile* profile) {
-    Browser* new_browser = Browser::Create(profile);
-    new_browser->AddSelectedTabWithURL(GURL(chrome::kAboutBlankURL),
-                                       content::PAGE_TRANSITION_START_PAGE);
-    ui_test_utils::WaitForLoadStop(
-        new_browser->GetActiveWebContents());
+    Browser* new_browser = new Browser(Browser::CreateParams(profile));
+    chrome::AddSelectedTabWithURL(new_browser, GURL(chrome::kAboutBlankURL),
+                                  content::PAGE_TRANSITION_START_PAGE);
+    content::WaitForLoadStop(chrome::GetActiveWebContents(new_browser));
     new_browser->window()->Show();
     return new_browser;
   }
@@ -237,6 +238,8 @@ class BrowserCloseTest : public InProcessBrowserTest {
     EXPECT_TRUE(second_profile_);
     if (!second_profile_) return false;
 
+    DownloadTestFileChooserObserver(first_profile_) .EnableFileChooser(false);
+    DownloadTestFileChooserObserver(second_profile_).EnableFileChooser(false);
     return true;
   }
 
@@ -274,6 +277,10 @@ class BrowserCloseTest : public InProcessBrowserTest {
     Profile* first_profile_incognito = first_profile_->GetOffTheRecordProfile();
     Profile* second_profile_incognito =
         second_profile_->GetOffTheRecordProfile();
+    DownloadTestFileChooserObserver(first_profile_incognito)
+        .EnableFileChooser(false);
+    DownloadTestFileChooserObserver(second_profile_incognito)
+        .EnableFileChooser(false);
 
     // For simplicty of coding, we create a window on each profile so that
     // we can easily create downloads, then we destroy or create windows
@@ -316,7 +323,7 @@ class BrowserCloseTest : public InProcessBrowserTest {
       if (!result)
         return false;
     }
-    ui_test_utils::RunAllPendingInMessageLoop();
+    content::RunAllPendingInMessageLoop();
 
     // All that work, for this one little test.
     EXPECT_TRUE((check_case.window_to_probe ==
@@ -358,7 +365,7 @@ class BrowserCloseTest : public InProcessBrowserTest {
         (*bit)->window()->Close();
       }
     }
-    ui_test_utils::RunAllPendingInMessageLoop();
+    content::RunAllPendingInMessageLoop();
 
     return true;
   }

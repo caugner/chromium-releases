@@ -32,29 +32,11 @@ cr.define('options', function() {
     instantConfirmDialogShown_: false,
 
     /**
-     * True if the default cookie settings is session only. Used for deciding
-     * whether to show the session restore info dialog. The value is undefined
-     * until the preference has been read.
-     * @type {bool}
-     * @private
-     */
-    sessionOnlyCookies_: undefined,
-
-    /**
      * The cached value of the spellcheck.confirm_dialog_shown preference.
      * @type {bool}
      * @private
      */
     spellcheckConfirmDialogShown_: false,
-
-    /**
-     * True if the "clear cookies and other site data on exit" setting is
-     * selected. Used for deciding whether to show the session restore info
-     * dialog. The value is undefined until the preference has been read.
-     * @type {bool}
-     * @private
-     */
-    clearCookiesOnExit_: undefined,
 
     /**
      * Keeps track of whether |onShowHomeButtonChanged_| has been called. See
@@ -105,16 +87,27 @@ cr.define('options', function() {
       this.updateSyncState_(loadTimeData.getValue('syncData'));
 
       $('sync-action-link').onclick = function(event) {
-        SyncSetupOverlay.showErrorUI();
+        if (cr.isChromeOS) {
+          // On Chrome OS, sign out the user and sign in again to get fresh
+          // credentials on auth errors.
+          SyncSetupOverlay.doSignOutOnAuthError();
+        } else {
+          SyncSetupOverlay.showErrorUI();
+        }
       };
       $('start-stop-sync').onclick = function(event) {
         if (self.syncSetupCompleted)
           SyncSetupOverlay.showStopSyncingUI();
+        else if (cr.isChromeOS)
+          SyncSetupOverlay.showSetupUIWithoutLogin();
         else
           SyncSetupOverlay.showSetupUI();
       };
       $('customize-sync').onclick = function(event) {
-        SyncSetupOverlay.showSetupUI();
+        if (cr.isChromeOS)
+          SyncSetupOverlay.showSetupUIWithoutLogin();
+        else
+          SyncSetupOverlay.showSetupUI();
       };
 
       // Internet connection section (ChromeOS only).
@@ -132,26 +125,6 @@ cr.define('options', function() {
         OptionsPage.navigateToPage('startup');
       };
 
-      // Session restore.
-      // TODO(marja): clean up the options UI after the decision on the session
-      // restore changes has stabilized. For now, only the startup option is
-      // renamed to "continue where I left off", but the session related content
-      // settings are not disabled or overridden (because
-      // 'enable_restore_session_state' is forced to false).
-      this.sessionRestoreEnabled_ =
-          loadTimeData.getBoolean('enable_restore_session_state');
-      if (this.sessionRestoreEnabled_) {
-        $('startup-restore-session').onclick = function(event) {
-          if (!event.currentTarget.checked)
-            return;
-
-          if (!BrowserOptions.getInstance().maybeShowSessionRestoreDialog_()) {
-            // The dialog is not shown; handle the event normally.
-            event.currentTarget.savePrefState();
-          }
-        };
-      }
-
       // Appearance section.
       Preferences.getInstance().addEventListener('browser.show_home_button',
           this.onShowHomeButtonChanged_.bind(this));
@@ -167,7 +140,7 @@ cr.define('options', function() {
 
       if ($('set-wallpaper')) {
         $('set-wallpaper').onclick = function(event) {
-          OptionsPage.navigateToPage('setWallpaper');
+          chrome.send('openWallpaperManager');
         };
       }
 
@@ -209,17 +182,6 @@ cr.define('options', function() {
       };
       Preferences.getInstance().addEventListener('instant.confirm_dialog_shown',
           this.onInstantConfirmDialogShownChanged_.bind(this));
-      Preferences.getInstance().addEventListener(
-          'restore_session_state.dialog_shown',
-          this.onSessionRestoreDialogShownChanged_.bind(this));
-      var self = this;
-      Preferences.getInstance().addEventListener(
-          'profile.clear_site_data_on_exit',
-          function(event) {
-            if (event.value && typeof event.value['value'] != 'undefined') {
-              self.clearCookiesOnExit_ = event.value['value'] == true;
-            }
-          });
 
       // Users section.
       if (loadTimeData.valueExists('profilesInfo')) {
@@ -234,7 +196,7 @@ cr.define('options', function() {
         profilesList.addEventListener('change',
             this.setProfileViewButtonsStatus_);
         $('profiles-create').onclick = function(event) {
-          chrome.send('createProfile');
+          chrome.send('createProfileInfo');
         };
         $('profiles-manage').onclick = function(event) {
           ManageProfileOverlay.showManageDialog();
@@ -287,6 +249,11 @@ cr.define('options', function() {
       }
 
       // Privacy section.
+      var winVerMatch = /Windows NT (\d+(?:\.\d+))?/.exec(navigator.userAgent);
+      var isWin8 = winVerMatch && winVerMatch[1] >= 6.2;
+      var win8Element = $('privacy-win8-data-settings');
+      if (win8Element)
+        win8Element.hidden = !isWin8;
       $('privacyContentSettingsButton').onclick = function(event) {
         OptionsPage.navigateToPage('content');
         OptionsPage.showTab($('cookies-nav-tab'));
@@ -402,7 +369,7 @@ cr.define('options', function() {
       $('defaultFontSize').onchange = function(event) {
         var value = event.target.options[event.target.selectedIndex].value;
         Preferences.setIntegerPref(
-             'webkit.webprefs.global.default_fixed_font_size',
+             'webkit.webprefs.default_fixed_font_size',
              value - OptionsPage.SIZE_DIFFERENCE_FIXED_STANDARD, '');
         chrome.send('defaultFontSizeAction', [String(value)]);
       };
@@ -478,6 +445,20 @@ cr.define('options', function() {
           chrome.send('highContrastChange',
                       [$('accessibility-high-contrast-check').checked]);
         };
+
+        $('accessibility-screen-magnifier-check').onchange = function(event) {
+          chrome.send('screenMagnifierChange',
+                      [$('accessibility-screen-magnifier-check').checked]);
+        };
+      }
+
+      // Display management section (CrOS only).
+      if (cr.isChromeOS) {
+        $('display-options-button').onclick = function(event) {
+          OptionsPage.navigateToPage('display');
+          chrome.send('coreOptionsUserMetricsAction',
+                      ['Options_Display']);
+        }
       }
 
       // Background mode section.
@@ -769,16 +750,6 @@ cr.define('options', function() {
     },
 
     /**
-     * Called when the value of the restore_session_state.dialog_shown
-     * preference changes.
-     * @param {Event} event Change event.
-     * @private
-     */
-    onSessionRestoreDialogShownChanged_: function(event) {
-      this.sessionRestoreDialogShown_ = event.value['value'];
-    },
-
-    /**
      * Called when the value of the spellcheck.confirm_dialog_shown preference
      * changes. Cache this value.
      * @param {Event} event Change event.
@@ -802,61 +773,6 @@ cr.define('options', function() {
         $('downloadLocationPath').value = $('downloadLocationPath').value.
             replace(/^\/(special|home\/chronos\/user)/, '');
       }
-    },
-
-    /**
-     * Displays the session restore info dialog if options depending on sessions
-     * (session only cookies or clearning data on exit) are selected, and the
-     * dialog has never been shown.
-     * @private
-     * @return {boolean} True if the dialog is shown, false otherwise.
-     */
-    maybeShowSessionRestoreDialog_: function() {
-      // Don't show this dialog in Guest mode.
-      if (cr.isChromeOS && UIAccountTweaks.loggedInAsGuest())
-        return false;
-      // If some of the needed preferences haven't been read yet, the
-      // corresponding member variable will be undefined and we won't display
-      // the dialog yet.
-      if (this.userHasSelectedSessionContentSettings_() &&
-          this.sessionRestoreDialogShown_ === false) {
-        OptionsPage.showPageByName('sessionRestoreOverlay', false);
-        return true;
-      }
-      return false;
-    },
-
-    /**
-     * Called when the user clicks the "ok" button in the session restore
-     * dialog.
-     */
-    sessionRestoreDialogOk: function() {
-      // Set the preference.
-      $('startup-restore-session').savePrefState();
-      this.sessionRestoreDialogShown_ = true;
-      Preferences.setBooleanPref('restore_session_state.dialog_shown', true);
-    },
-
-    /**
-     * Called when the user clicks the "cancel" button in the session restore
-     * dialog.
-     */
-    sessionRestoreDialogCancel: function() {
-      // The preference was never set to "continue where I left off". Update the
-      // UI to reflect the preference.
-      $('startup-newtab').resetPrefState();
-      $('startup-restore-session').resetPrefState();
-      $('startup-show-pages').resetPrefState();
-    },
-
-    /**
-     * Returns true if the user has selected content settings which rely on
-     * sessions: clearning the browsing data on exit or defaulting the cookie
-     * content setting to session only.
-     * @private
-     */
-    userHasSelectedSessionContentSettings_: function() {
-      return this.clearCookiesOnExit_ || this.sessionOnlyCookies_;
     },
 
     /**
@@ -1256,7 +1172,7 @@ cr.define('options', function() {
      * @private
      */
     setScreenMagnifierCheckboxState_: function(checked) {
-      // TODO(zork): Update UI
+      $('accessibility-screen-magnifier-check').checked = checked;
     },
 
     /**
@@ -1281,6 +1197,14 @@ cr.define('options', function() {
      */
     showTouchpadControls_: function(show) {
       $('touchpad-settings').hidden = !show;
+    },
+
+    /**
+     * Show/hide the display options button on the System settings page.
+     * @private
+     */
+    showDisplayOptions_: function(show) {
+      $('display-options-section').hidden = !show;
     },
 
     /**
@@ -1340,6 +1264,12 @@ cr.define('options', function() {
         if (index != undefined)
           $('bluetooth-unpaired-devices-list').deleteItemAtIndex(index);
         list = $('bluetooth-paired-devices-list');
+      } else {
+        // Test to see if the device is currently in the paired list, in which
+        // case it should be removed from that list.
+        var index = $('bluetooth-paired-devices-list').find(device.address);
+        if (index != undefined)
+          $('bluetooth-paired-devices-list').deleteItemAtIndex(index);
       }
       list.appendDevice(device);
 
@@ -1363,17 +1293,6 @@ cr.define('options', function() {
         if (index != undefined)
           $('bluetooth-paired-devices-list').deleteItemAtIndex(index);
       }
-    },
-
-    /**
-     * Called when the default content setting value for a content type changes.
-     * @param {Object} dict A mapping content setting types to the default
-     * value.
-     * @private
-     */
-    setContentFilterSettingsValue_: function(dict) {
-      if ('cookies' in dict && 'value' in dict['cookies'])
-        this.sessionOnlyCookies_ = dict['cookies']['value'] == 'session';
     }
 
   };
@@ -1390,7 +1309,6 @@ cr.define('options', function() {
     'setBackgroundModeCheckboxState',
     'setBluetoothState',
     'setCheckRevocationCheckboxState',
-    'setContentFilterSettingsValue',
     'setFontSize',
     'setGtkThemeButtonEnabled',
     'setHighContrastCheckboxState',
@@ -1406,6 +1324,7 @@ cr.define('options', function() {
     'setupProxySettingsSection',
     'setVirtualKeyboardCheckboxState',
     'showBluetoothSettings',
+    'showDisplayOptions',
     'showMouseControls',
     'showTouchpadControls',
     'updateAccountPicture',

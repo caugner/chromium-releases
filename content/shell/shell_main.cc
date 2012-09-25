@@ -5,7 +5,7 @@
 #include "content/public/app/content_main.h"
 
 #include "content/shell/shell_main_delegate.h"
-#include "sandbox/src/sandbox_types.h"
+#include "sandbox/win/src/sandbox_types.h"
 
 #if defined(OS_WIN)
 #include "content/public/app/startup_helper_win.h"
@@ -20,7 +20,7 @@
 int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, wchar_t*, int) {
   sandbox::SandboxInterfaceInfo sandbox_info = {0};
   content::InitializeSandboxInfo(&sandbox_info);
-  ShellMainDelegate delegate;
+  content::ShellMainDelegate delegate;
   return content::ContentMain(instance, &sandbox_info, &delegate);
 }
 
@@ -32,7 +32,7 @@ int main(int argc, const char** argv) {
   // delegate types.
   return ::ContentMain(argc, argv);
 #else
-  ShellMainDelegate delegate;
+  content::ShellMainDelegate delegate;
   return content::ContentMain(argc, argv, &delegate);
 #endif  // OS_MACOSX
 }

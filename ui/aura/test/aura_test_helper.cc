@@ -5,13 +5,14 @@
 #include "ui/aura/test/aura_test_helper.h"
 
 #include "base/message_loop.h"
+#include "base/run_loop.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/env.h"
 #include "ui/aura/focus_manager.h"
-#include "ui/aura/monitor_manager.h"
+#include "ui/aura/display_manager.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/shared/root_window_capture_client.h"
-#include "ui/aura/single_monitor_manager.h"
+#include "ui/aura/single_display_manager.h"
 #include "ui/aura/test/test_activation_client.h"
 #include "ui/aura/test/test_screen.h"
 #include "ui/aura/test/test_stacking_client.h"
@@ -43,8 +44,8 @@ AuraTestHelper::~AuraTestHelper() {
 
 void AuraTestHelper::SetUp() {
   setup_called_ = true;
-  Env::GetInstance()->SetMonitorManager(new SingleMonitorManager);
-  root_window_.reset(aura::MonitorManager::CreateRootWindowForPrimaryMonitor());
+  Env::GetInstance()->SetDisplayManager(new SingleDisplayManager);
+  root_window_.reset(aura::DisplayManager::CreateRootWindowForPrimaryDisplay());
   gfx::Screen::SetInstance(new aura::TestScreen(root_window_.get()));
   ui_controls::InstallUIControlsAura(CreateUIControlsAura(root_window_.get()));
 
@@ -78,8 +79,10 @@ void AuraTestHelper::TearDown() {
 
 void AuraTestHelper::RunAllPendingInMessageLoop() {
 #if !defined(OS_MACOSX)
-  message_loop_->RunAllPendingWithDispatcher(
-      Env::GetInstance()->GetDispatcher());
+  // TODO(jbates) crbug.com/134753 Find quitters of this RunLoop and have them
+  //              use run_loop.QuitClosure().
+  base::RunLoop run_loop(Env::GetInstance()->GetDispatcher());
+  run_loop.RunUntilIdle();
 #endif
 }
 

@@ -4,7 +4,6 @@
 
 #ifndef UI_VIEWS_WIDGET_DESKTOP_NATIVE_WIDGET_HELPER_AURA_H_
 #define UI_VIEWS_WIDGET_DESKTOP_NATIVE_WIDGET_HELPER_AURA_H_
-#pragma once
 
 #include "ui/aura/root_window_observer.h"
 #include "ui/gfx/rect.h"
@@ -14,6 +13,7 @@
 
 namespace aura {
 class RootWindow;
+class DesktopCursorClient;
 namespace client {
 class ScreenPositionClient;
 }
@@ -89,6 +89,9 @@ class VIEWS_EXPORT DesktopNativeWidgetHelperAura
   // In some cases, we set a screen position client on |root_window_|. If we
   // do, we're responsible for the lifetime.
   scoped_ptr<aura::client::ScreenPositionClient> position_client_;
+
+  // A simple cursor client which just forwards events to the RootWindow.
+  scoped_ptr<aura::DesktopCursorClient> cursor_client_;
 
 #if defined(OS_WIN)
   scoped_ptr<ui::HWNDMessageFilter> hwnd_message_filter_;

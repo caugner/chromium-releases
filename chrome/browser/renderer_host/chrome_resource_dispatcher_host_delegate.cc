@@ -18,6 +18,7 @@
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/instant/instant_loader.h"
 #include "chrome/browser/net/load_timing_observer.h"
+#include "chrome/browser/net/resource_prefetch_predictor_observer.h"
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/prerender/prerender_tracker.h"
 #include "chrome/browser/profiles/profile_io_data.h"
@@ -28,6 +29,7 @@
 #include "chrome/browser/ui/login/login_prompt.h"
 #include "chrome/browser/ui/sync/one_click_signin_helper.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/user_script.h"
 #include "chrome/common/metrics/experiments_helper.h"
 #include "chrome/common/metrics/proto/chrome_experiments.pb.h"
@@ -40,6 +42,7 @@
 #include "content/public/browser/resource_request_info.h"
 #include "net/base/load_flags.h"
 #include "net/base/ssl_config_service.h"
+#include "net/http/http_response_headers.h"
 #include "net/url_request/url_request.h"
 #include "third_party/protobuf/src/google/protobuf/repeated_field.h"
 
@@ -73,7 +76,7 @@ ChromeResourceDispatcherHostDelegate::ChromeResourceDispatcherHostDelegate(
     prerender::PrerenderTracker* prerender_tracker)
     : download_request_limiter_(g_browser_process->download_request_limiter()),
       safe_browsing_(g_browser_process->safe_browsing_service()),
-      user_script_listener_(new UserScriptListener()),
+      user_script_listener_(new extensions::UserScriptListener()),
       prerender_tracker_(prerender_tracker),
       variation_ids_cache_initialized_(false) {
 }
@@ -149,6 +152,12 @@ void ChromeResourceDispatcherHostDelegate::RequestBeginning(
                                   route_id,
                                   resource_type,
                                   throttles);
+
+  ProfileIOData* io_data = ProfileIOData::FromResourceContext(resource_context);
+  if (io_data->resource_prefetch_predictor_observer()) {
+    io_data->resource_prefetch_predictor_observer()->OnRequestStarted(
+        request, resource_type, child_id, route_id);
+  }
 }
 
 void ChromeResourceDispatcherHostDelegate::DownloadStarting(
@@ -278,6 +287,12 @@ void ChromeResourceDispatcherHostDelegate::AppendChromeMetricsHeaders(
     net::URLRequest* request,
     content::ResourceContext* resource_context,
     ResourceType::Type resource_type) {
+  // Don't attempt to append headers to requests that have already started.
+  // TODO(stevet): Remove this once we've resolved the request ordering issues
+  // in crbug.com/128048.
+  if (request->is_pending())
+    return;
+
   // Note our criteria for attaching Chrome experiment headers:
   // 1. We only transmit to *.google.<TLD> domains. NOTE that this use of
   //    google_util helpers to check this does not guarantee that the URL is
@@ -309,11 +324,12 @@ void ChromeResourceDispatcherHostDelegate::AppendChromeMetricsHeaders(
 bool ChromeResourceDispatcherHostDelegate::ShouldForceDownloadResource(
     const GURL& url, const std::string& mime_type) {
   // Special-case user scripts to get downloaded instead of viewed.
-  return UserScript::IsURLUserScript(url, mime_type);
+  return extensions::UserScript::IsURLUserScript(url, mime_type);
 }
 
 void ChromeResourceDispatcherHostDelegate::OnResponseStarted(
     net::URLRequest* request,
+    content::ResourceContext* resource_context,
     content::ResourceResponse* response,
     IPC::Sender* sender) {
   LoadTimingObserver::PopulateTimingInfo(request, response);
@@ -340,10 +356,27 @@ void ChromeResourceDispatcherHostDelegate::OnResponseStarted(
   // suggest auto-login, if available.
   AutoLoginPrompter::ShowInfoBarIfPossible(request, info->GetChildID(),
                                            info->GetRouteID());
+
+  // Build in additional protection for the chrome web store origin.
+  GURL webstore_url(extension_urls::GetWebstoreLaunchURL());
+  if (request->url().DomainIs(webstore_url.host().c_str())) {
+    net::HttpResponseHeaders* response_headers = request->response_headers();
+    if (!response_headers->HasHeaderValue("x-frame-options", "deny") &&
+        !response_headers->HasHeaderValue("x-frame-options", "sameorigin")) {
+      response_headers->RemoveHeader("x-frame-options");
+      response_headers->AddHeader("x-frame-options: sameorigin");
+    }
+  }
+
+  ProfileIOData* io_data = ProfileIOData::FromResourceContext(resource_context);
+  if (io_data->resource_prefetch_predictor_observer())
+    io_data->resource_prefetch_predictor_observer()->OnResponseStarted(request);
 }
 
 void ChromeResourceDispatcherHostDelegate::OnRequestRedirected(
+    const GURL& redirect_url,
     net::URLRequest* request,
+    content::ResourceContext* resource_context,
     content::ResourceResponse* response) {
   LoadTimingObserver::PopulateTimingInfo(request, response);
 
@@ -356,13 +389,19 @@ void ChromeResourceDispatcherHostDelegate::OnRequestRedirected(
   OneClickSigninHelper::ShowInfoBarIfPossible(request, info->GetChildID(),
                                               info->GetRouteID());
 #endif
+
+  ProfileIOData* io_data = ProfileIOData::FromResourceContext(resource_context);
+  if (io_data->resource_prefetch_predictor_observer()) {
+    io_data->resource_prefetch_predictor_observer()->OnRequestRedirected(
+        redirect_url, request);
+  }
 }
 
 void ChromeResourceDispatcherHostDelegate::OnFieldTrialGroupFinalized(
     const std::string& trial_name,
     const std::string& group_name) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  chrome_variations::ID new_id =
+  chrome_variations::VariationID new_id =
       experiments_helper::GetGoogleVariationID(trial_name, group_name);
   if (new_id == chrome_variations::kEmptyID)
     return;
@@ -383,7 +422,7 @@ void ChromeResourceDispatcherHostDelegate::InitVariationIDsCacheIfNeeded() {
   base::FieldTrialList::GetFieldTrialSelectedGroups(&initial_groups);
   for (base::FieldTrial::SelectedGroups::const_iterator it =
        initial_groups.begin(); it != initial_groups.end(); ++it) {
-    chrome_variations::ID id =
+    chrome_variations::VariationID id =
         experiments_helper::GetGoogleVariationID(it->trial, it->group);
     if (id != chrome_variations::kEmptyID)
       variation_ids_set_.insert(id);
@@ -399,7 +438,7 @@ void ChromeResourceDispatcherHostDelegate::UpdateVariationIDsHeaderValue() {
   if (variation_ids_set_.empty())
     return;
   metrics::ChromeVariations proto;
-  for (std::set<chrome_variations::ID>::const_iterator it =
+  for (std::set<chrome_variations::VariationID>::const_iterator it =
       variation_ids_set_.begin(); it != variation_ids_set_.end(); ++it)
     proto.add_variation_id(*it);
 

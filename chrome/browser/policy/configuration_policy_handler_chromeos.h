@@ -4,10 +4,14 @@
 
 #ifndef CHROME_BROWSER_POLICY_CONFIGURATION_POLICY_HANDLER_CHROMEOS_H_
 #define CHROME_BROWSER_POLICY_CONFIGURATION_POLICY_HANDLER_CHROMEOS_H_
-#pragma once
 
 #include "chrome/browser/chromeos/cros/network_ui_data.h"
 #include "chrome/browser/policy/configuration_policy_handler.h"
+
+namespace base {
+class DictionaryValue;
+class Value;
+}
 
 namespace policy {
 
@@ -33,11 +37,11 @@ class NetworkConfigurationPolicyHandler : public TypeCheckingPolicyHandler {
   // that contains a pretty-printed and sanitized version. In particular, we
   // remove any Passphrases that may be contained in the JSON. Ownership of the
   // return value is transferred to the caller.
-  static Value* SanitizeNetworkConfig(const Value* config);
+  static base::Value* SanitizeNetworkConfig(const base::Value* config);
 
   // Filters a network dictionary to remove all sensitive fields and replace
   // their values with placeholders.
-  static void StripSensitiveValues(DictionaryValue* network_dict);
+  static void MaskSensitiveValues(base::DictionaryValue* network_dict);
 
   chromeos::NetworkUIData::ONCSource onc_source_;
 

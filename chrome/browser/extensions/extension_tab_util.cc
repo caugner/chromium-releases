@@ -5,14 +5,18 @@
 #include "chrome/browser/extensions/extension_tab_util.h"
 
 #include "chrome/browser/extensions/api/tabs/tabs_constants.h"
-#include "chrome/browser/extensions/extension_tab_helper.h"
+#include "chrome/browser/extensions/tab_helper.h"
+#include "chrome/browser/extensions/window_controller.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sessions/restore_tab_helper.h"
+#include "chrome/browser/sessions/session_id.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_iterator.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
@@ -23,7 +27,6 @@
 #include "googleurl/src/gurl.h"
 
 namespace keys = extensions::tabs_constants;
-namespace errors = extension_manifest_errors;
 
 using content::NavigationEntry;
 using content::WebContents;
@@ -43,8 +46,7 @@ int ExtensionTabUtil::GetWindowIdOfTabStripModel(
 }
 
 int ExtensionTabUtil::GetTabId(const WebContents* web_contents) {
-  const TabContents* tab = TabContents::FromWebContents(web_contents);
-  return tab ? tab->extension_tab_helper()->tab_id() : -1;
+  return SessionID::IdForTab(TabContents::FromWebContents(web_contents));
 }
 
 std::string ExtensionTabUtil::GetTabStatusText(bool is_loading) {
@@ -52,8 +54,8 @@ std::string ExtensionTabUtil::GetTabStatusText(bool is_loading) {
 }
 
 int ExtensionTabUtil::GetWindowIdOfTab(const WebContents* web_contents) {
-  const TabContents* tab = TabContents::FromWebContents(web_contents);
-  return tab ? tab->extension_tab_helper()->window_id() : -1;
+  return SessionID::IdForWindowContainingTab(
+      TabContents::FromWebContents(web_contents));
 }
 
 DictionaryValue* ExtensionTabUtil::CreateTabValue(const WebContents* contents) {
@@ -156,7 +158,7 @@ bool ExtensionTabUtil::GetDefaultTab(Browser* browser,
   DCHECK(browser);
   DCHECK(contents);
 
-  *contents = browser->GetActiveTabContents();
+  *contents = chrome::GetActiveTabContents(browser);
   if (*contents) {
     if (tab_id)
       *tab_id = ExtensionTabUtil::GetTabId((*contents)->web_contents());
@@ -184,8 +186,7 @@ bool ExtensionTabUtil::GetTabById(int tab_id,
       TabStripModel* target_tab_strip = target_browser->tab_strip_model();
       for (int i = 0; i < target_tab_strip->count(); ++i) {
         TabContents* target_contents = target_tab_strip->GetTabContentsAt(i);
-        if (target_contents->restore_tab_helper()->session_id().id() ==
-            tab_id) {
+        if (SessionID::IdForTab(target_contents) == tab_id) {
           if (browser)
             *browser = target_browser;
           if (tab_strip)
@@ -218,4 +219,54 @@ bool ExtensionTabUtil::IsCrashURL(const GURL& url) {
   return (fixed_url.SchemeIs(chrome::kChromeUIScheme) &&
           (fixed_url.host() == chrome::kChromeUIBrowserCrashHost ||
            fixed_url.host() == chrome::kChromeUICrashHost));
+}
+
+void ExtensionTabUtil::CreateTab(WebContents* web_contents,
+                                 const std::string& extension_id,
+                                 WindowOpenDisposition disposition,
+                                 const gfx::Rect& initial_pos,
+                                 bool user_gesture) {
+  Profile* profile =
+      Profile::FromBrowserContext(web_contents->GetBrowserContext());
+  Browser* browser = browser::FindTabbedBrowser(profile, false);
+  const bool browser_created = !browser;
+  if (!browser)
+    browser = new Browser(Browser::CreateParams(profile));
+  TabContents* tab_contents = new TabContents(web_contents);
+  chrome::NavigateParams params(browser, tab_contents);
+
+  // The extension_app_id parameter ends up as app_name in the Browser
+  // which causes the Browser to return true for is_app().  This affects
+  // among other things, whether the location bar gets displayed.
+  // TODO(mpcomplete): This seems wrong. What if the extension content is hosted
+  // in a tab?
+  if (disposition == NEW_POPUP)
+    params.extension_app_id = extension_id;
+
+  params.disposition = disposition;
+  params.window_bounds = initial_pos;
+  params.window_action = chrome::NavigateParams::SHOW_WINDOW;
+  params.user_gesture = user_gesture;
+  chrome::Navigate(&params);
+
+  // Close the browser if chrome::Navigate created a new one.
+  if (browser_created && (browser != params.browser))
+    browser->window()->Close();
+}
+
+// static
+void ExtensionTabUtil::ForEachTab(
+    const base::Callback<void(WebContents*)>& callback) {
+  for (TabContentsIterator iterator; !iterator.done(); ++iterator)
+    callback.Run((*iterator)->web_contents());
+}
+
+// static
+extensions::WindowController* ExtensionTabUtil::GetWindowControllerOfTab(
+    const WebContents* web_contents) {
+  Browser* browser = browser::FindBrowserWithWebContents(web_contents);
+  if (browser != NULL)
+    return browser->extension_window_controller();
+
+  return NULL;
 }

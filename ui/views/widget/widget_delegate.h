@@ -4,7 +4,6 @@
 
 #ifndef UI_VIEWS_WIDGET_WIDGET_DELEGATE_H_
 #define UI_VIEWS_WIDGET_WIDGET_DELEGATE_H_
-#pragma once
 
 #include <string>
 
@@ -25,7 +24,6 @@ class NonClientFrameView;
 class View;
 class Widget;
 
-// WidgetDelegate interface
 // Handles events on Widgets in context-specific ways.
 class VIEWS_EXPORT WidgetDelegate {
  public:
@@ -44,9 +42,6 @@ class VIEWS_EXPORT WidgetDelegate {
   // Returns the view that should have the focus when the widget is shown.  If
   // NULL no view is focused.
   virtual View* GetInitiallyFocusedView();
-
-  // Moved from WindowDelegate: ------------------------------------------------
-  // TODO(beng): sort
 
   virtual BubbleDelegateView* AsBubbleDelegate();
   virtual DialogDelegate* AsDialogDelegate();

@@ -8,12 +8,12 @@
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
-namespace browser {
+namespace chrome {
 
 string16 LocalizedObsoleteOSString() {
   // TODO(mark): Change kEndOfTheLine to true immediately prior to the last
   // build on the Chrome 21 branch.
-  const bool kEndOfTheLine = true;
+  const bool kEndOfTheLine = false;
 
   return l10n_util::GetStringFUTF16(
       kEndOfTheLine ? IDS_MAC_10_5_LEOPARD_OBSOLETE_NOW :
@@ -21,4 +21,4 @@ string16 LocalizedObsoleteOSString() {
       l10n_util::GetStringUTF16(IDS_PRODUCT_NAME));
 }
 
-}  // namespace browser
+}  // namespace chrome

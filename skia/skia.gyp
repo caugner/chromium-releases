@@ -176,6 +176,7 @@
         '../third_party/skia/src/core/Sk64.cpp',
         '../third_party/skia/src/core/SkAAClip.cpp',
         '../third_party/skia/src/core/SkAdvancedTypefaceMetrics.cpp',
+        '../third_party/skia/src/core/SkAnnotation.cpp',
         '../third_party/skia/src/core/SkAlphaRuns.cpp',
         '../third_party/skia/src/core/SkAntiRun.h',
         '../third_party/skia/src/core/SkBitmap.cpp',
@@ -247,11 +248,14 @@
         '../third_party/skia/src/core/SkGlyphCache.cpp',
         '../third_party/skia/src/core/SkGlyphCache.h',
         '../third_party/skia/src/core/SkGraphics.cpp',
+        '../third_party/skia/src/core/SkInstCnt.cpp',
         '../third_party/skia/src/core/SkLineClipper.cpp',
         '../third_party/skia/src/core/SkMMapStream.cpp',
         '../third_party/skia/src/core/SkMallocPixelRef.cpp',
         '../third_party/skia/src/core/SkMask.cpp',
         '../third_party/skia/src/core/SkMaskFilter.cpp',
+        '../third_party/skia/src/core/SkMaskGamma.cpp',
+        '../third_party/skia/src/core/SkMaskGamma.h',
         '../third_party/skia/src/core/SkMath.cpp',
         '../third_party/skia/src/core/SkMatrix.cpp',
         '../third_party/skia/src/core/SkMetaData.cpp',
@@ -323,14 +327,11 @@
         '../third_party/skia/src/effects/Sk1DPathEffect.cpp',
         '../third_party/skia/src/effects/Sk2DPathEffect.cpp',
         '../third_party/skia/src/effects/SkAvoidXfermode.cpp',
-        '../third_party/skia/src/effects/SkBitmapCache.cpp',
-        '../third_party/skia/src/effects/SkBitmapCache.h',
         '../third_party/skia/src/effects/SkBlurDrawLooper.cpp',
         '../third_party/skia/src/effects/SkBlurImageFilter.cpp',
         '../third_party/skia/src/effects/SkBlurMask.cpp',
         '../third_party/skia/src/effects/SkBlurMask.h',
         '../third_party/skia/src/effects/SkBlurMaskFilter.cpp',
-        '../third_party/skia/src/effects/SkClampRange.cpp',
         '../third_party/skia/src/effects/SkColorFilters.cpp',
         '../third_party/skia/src/effects/SkColorMatrixFilter.cpp',
         '../third_party/skia/src/effects/SkCornerPathEffect.cpp',
@@ -340,17 +341,32 @@
         '../third_party/skia/src/effects/SkEmbossMask.h',
         '../third_party/skia/src/effects/SkEmbossMask_Table.h',
         '../third_party/skia/src/effects/SkEmbossMaskFilter.cpp',
-        '../third_party/skia/src/effects/SkGradientShader.cpp',
         '../third_party/skia/src/effects/SkKernel33MaskFilter.cpp',
         '../third_party/skia/src/effects/SkLayerDrawLooper.cpp',
         '../third_party/skia/src/effects/SkLayerRasterizer.cpp',
+        '../third_party/skia/src/effects/SkLightingImageFilter.cpp',
         '../third_party/skia/src/effects/SkMorphologyImageFilter.cpp',
         '../third_party/skia/src/effects/SkPaintFlagsDrawFilter.cpp',
         '../third_party/skia/src/effects/SkPorterDuff.cpp',
         '../third_party/skia/src/effects/SkPixelXorXfermode.cpp',
-        '../third_party/skia/src/effects/SkRadialGradient_Table.h',
         '../third_party/skia/src/effects/SkTableColorFilter.cpp',
         '../third_party/skia/src/effects/SkTransparentShader.cpp',
+
+        '../third_party/skia/src/effects/gradients/SkBitmapCache.cpp',
+        '../third_party/skia/src/effects/gradients/SkBitmapCache.h',
+        '../third_party/skia/src/effects/gradients/SkClampRange.cpp',
+        '../third_party/skia/src/effects/gradients/SkGradientShader.cpp',
+        '../third_party/skia/src/effects/gradients/SkLinearGradient.cpp',
+        '../third_party/skia/src/effects/gradients/SkLinearGradient.h',
+        '../third_party/skia/src/effects/gradients/SkRadialGradient.cpp',
+        '../third_party/skia/src/effects/gradients/SkRadialGradient.h',
+        '../third_party/skia/src/effects/gradients/SkTwoPointRadialGradient.cpp',
+        '../third_party/skia/src/effects/gradients/SkTwoPointRadialGradient.h',
+        '../third_party/skia/src/effects/gradients/SkTwoPointConicalGradient.cpp',
+        '../third_party/skia/src/effects/gradients/SkTwoPointConicalGradient.h',
+        '../third_party/skia/src/effects/gradients/SkSweepGradient.cpp',
+        '../third_party/skia/src/effects/gradients/SkSweepGradient.h',
+        '../third_party/skia/src/effects/gradients/SkGradientShaderPriv.h',
 
         '../third_party/skia/src/gpu/GrAAConvexPathRenderer.cpp',
         '../third_party/skia/src/gpu/GrAAConvexPathRenderer.h',
@@ -363,20 +379,16 @@
         '../third_party/skia/src/gpu/GrAllocator.h',
         '../third_party/skia/src/gpu/GrAtlas.cpp',
         '../third_party/skia/src/gpu/GrAtlas.h',
-        '../third_party/skia/src/gpu/GrBatchedTextContext.cpp',
-        '../third_party/skia/src/gpu/GrBatchedTextContext.h',
         '../third_party/skia/src/gpu/GrBinHashKey.h',
         '../third_party/skia/src/gpu/GrBufferAllocPool.cpp',
         '../third_party/skia/src/gpu/GrBufferAllocPool.h',
-        '../third_party/skia/src/gpu/GrClip.cpp',
+        '../third_party/skia/src/gpu/GrClipData.cpp',
         '../third_party/skia/src/gpu/GrClipMaskManager.cpp',
         '../third_party/skia/src/gpu/GrClipMaskManager.h',
         '../third_party/skia/src/gpu/GrContext.cpp',
         '../third_party/skia/src/gpu/GrCustomStage.cpp',
         '../third_party/skia/src/gpu/GrDefaultPathRenderer.cpp',
         '../third_party/skia/src/gpu/GrDefaultPathRenderer.h',
-        '../third_party/skia/src/gpu/GrDefaultTextContext.cpp',
-        '../third_party/skia/src/gpu/GrDefaultTextContext.h',
         '../third_party/skia/src/gpu/GrDrawTarget.cpp',
         '../third_party/skia/src/gpu/GrDrawTarget.h',
         '../third_party/skia/src/gpu/GrGeometryBuffer.h',
@@ -388,12 +400,16 @@
         '../third_party/skia/src/gpu/GrIndexBuffer.h',
         '../third_party/skia/src/gpu/GrMatrix.cpp',
         '../third_party/skia/src/gpu/GrMemory.cpp',
+        '../third_party/skia/src/gpu/GrMemoryPool.cpp',
+        '../third_party/skia/src/gpu/GrMemoryPool.h',
         '../third_party/skia/src/gpu/GrPathRenderer.cpp',
         '../third_party/skia/src/gpu/GrPathRenderer.h',
         '../third_party/skia/src/gpu/GrPathRendererChain.cpp',
         '../third_party/skia/src/gpu/GrPathRendererChain.h',
         '../third_party/skia/src/gpu/GrSoftwarePathRenderer.cpp',
         '../third_party/skia/src/gpu/GrSoftwarePathRenderer.h',
+        '../third_party/skia/src/gpu/GrSWMaskHelper.cpp',
+        '../third_party/skia/src/gpu/GrSWMaskHelper.h',
         '../third_party/skia/src/gpu/GrPath.h',
         '../third_party/skia/src/gpu/GrPathUtils.cpp',
         '../third_party/skia/src/gpu/GrPlotMgr.h',
@@ -406,13 +422,17 @@
         '../third_party/skia/src/gpu/GrResourceCache.h',
         '../third_party/skia/src/gpu/GrStencil.cpp',
         '../third_party/skia/src/gpu/GrStencil.h',
+        '../third_party/skia/src/gpu/GrStencilAndCoverPathRenderer.cpp',
+        '../third_party/skia/src/gpu/GrStencilAndCoverPathRenderer.h',
         '../third_party/skia/src/gpu/GrStencilBuffer.cpp',
         '../third_party/skia/src/gpu/GrStencilBuffer.h',
-        '../third_party/skia/src/gpu/GrStringBuilder.h',
+        '../third_party/skia/src/gpu/GrSurface.cpp',
         '../third_party/skia/src/gpu/GrTBSearch.h',
         '../third_party/skia/src/gpu/GrTDArray.h',
         '../third_party/skia/src/gpu/GrTHashCache.h',
         '../third_party/skia/src/gpu/GrTLList.h',
+        '../third_party/skia/src/gpu/GrTemplates.h',
+        '../third_party/skia/src/gpu/GrTextContext.cpp',
         '../third_party/skia/src/gpu/GrTextStrike.cpp',
         '../third_party/skia/src/gpu/GrTextStrike.h',
         '../third_party/skia/src/gpu/GrTextStrike_impl.h',
@@ -422,14 +442,19 @@
         '../third_party/skia/src/gpu/SkGpuDevice.cpp',
         '../third_party/skia/src/gpu/SkGr.cpp',
         '../third_party/skia/src/gpu/SkGrFontScaler.cpp',
+        '../third_party/skia/src/gpu/SkGrPixelRef.cpp',
         '../third_party/skia/src/gpu/SkGrTexturePixelRef.cpp',
         '../third_party/skia/src/gpu/effects/Gr1DKernelEffect.h',
+        '../third_party/skia/src/gpu/effects/GrColorTableEffect.cpp',
+        '../third_party/skia/src/gpu/effects/GrColorTableEffect.h',
         '../third_party/skia/src/gpu/effects/GrConvolutionEffect.cpp',
         '../third_party/skia/src/gpu/effects/GrConvolutionEffect.h',
         '../third_party/skia/src/gpu/effects/GrMorphologyEffect.cpp',
         '../third_party/skia/src/gpu/effects/GrMorphologyEffect.h',
-        '../third_party/skia/src/gpu/effects/GrGradientEffects.cpp',
-        '../third_party/skia/src/gpu/effects/GrGradientEffects.h',
+        '../third_party/skia/src/gpu/effects/GrSingleTextureEffect.cpp',
+        '../third_party/skia/src/gpu/effects/GrSingleTextureEffect.h',
+        '../third_party/skia/src/gpu/effects/GrTextureDomainEffect.cpp',
+        '../third_party/skia/src/gpu/effects/GrTextureDomainEffect.h',
         '../third_party/skia/src/gpu/gl/GrGLCaps.cpp',
         '../third_party/skia/src/gpu/gl/GrGLCaps.h',
         '../third_party/skia/src/gpu/gl/GrGLContextInfo.cpp',
@@ -456,6 +481,9 @@
         '../third_party/skia/src/gpu/gl/GrGLStencilBuffer.cpp',
         '../third_party/skia/src/gpu/gl/GrGLTexture.cpp',
         '../third_party/skia/src/gpu/gl/GrGLTexture.h',
+        '../third_party/skia/src/gpu/gl/GrGLUniformManager.cpp',
+        '../third_party/skia/src/gpu/gl/GrGLUniformManager.h',
+        '../third_party/skia/src/gpu/gl/GrGLUniformHandle.h',
         '../third_party/skia/src/gpu/gl/GrGLUtil.cpp',
         '../third_party/skia/src/gpu/gl/GrGLUtil.h',
         '../third_party/skia/src/gpu/gl/GrGLVertexBuffer.cpp',
@@ -522,8 +550,6 @@
         '../third_party/skia/src/ports/SkFontHost_android.cpp',
         #'../third_party/skia/src/ports/SkFontHost_ascender.cpp',
         '../third_party/skia/src/ports/SkFontHost_tables.cpp',
-        '../third_party/skia/src/ports/SkFontHost_gamma.cpp',
-        '../third_party/skia/src/ports/SkFontHost_gamma_none.cpp',
         #'../third_party/skia/src/ports/SkFontHost_linux.cpp',
         '../third_party/skia/src/ports/SkFontHost_mac.cpp',
         #'../third_party/skia/src/ports/SkFontHost_none.cpp',
@@ -545,7 +571,6 @@
         #'../third_party/skia/src/ports/SkXMLParser_expat.cpp',
         #'../third_party/skia/src/ports/SkXMLParser_tinyxml.cpp',
         #'../third_party/skia/src/ports/SkXMLPullParser_expat.cpp',
-        '../third_party/skia/src/ports/sk_predefined_gamma.h',
 
         '../third_party/skia/src/sfnt/SkOTUtils.cpp',
         '../third_party/skia/src/sfnt/SkOTUtils.h',
@@ -566,6 +591,7 @@
 
         '../third_party/skia/include/core/Sk64.h',
         '../third_party/skia/include/core/SkAdvancedTypefaceMetrics.h',
+        '../third_party/skia/include/core/SkAnnotation.h',
         '../third_party/skia/include/core/SkAutoKern.h',
         '../third_party/skia/include/core/SkBitmap.h',
         '../third_party/skia/include/core/SkBlitRow.h',
@@ -667,6 +693,7 @@
         '../third_party/skia/include/effects/SkKernel33MaskFilter.h',
         '../third_party/skia/include/effects/SkLayerDrawLooper.h',
         '../third_party/skia/include/effects/SkLayerRasterizer.h',
+        '../third_party/skia/include/effects/SkLightingImageFilter.h',
         '../third_party/skia/include/effects/SkMorphologyImageFilter.h',
         '../third_party/skia/include/effects/SkPaintFlagsDrawFilter.h',
         '../third_party/skia/include/effects/SkPixelXorXfermode.h',
@@ -674,8 +701,7 @@
         '../third_party/skia/include/effects/SkTransparentShader.h',
 
         '../third_party/skia/include/gpu/GrAARectRenderer.h',
-        '../third_party/skia/include/gpu/GrClip.h',
-        '../third_party/skia/include/gpu/GrClipIterator.h',
+        '../third_party/skia/include/gpu/GrClipData.h',
         '../third_party/skia/include/gpu/GrColor.h',
         '../third_party/skia/include/gpu/GrConfig.h',
         '../third_party/skia/include/gpu/GrContext.h',
@@ -698,6 +724,7 @@
         '../third_party/skia/include/gpu/GrRenderTarget.h',
         '../third_party/skia/include/gpu/GrSamplerState.h',
         '../third_party/skia/include/gpu/GrScalar.h',
+        '../third_party/skia/include/gpu/GrSurface.h',
         '../third_party/skia/include/gpu/GrTextContext.h',
         '../third_party/skia/include/gpu/GrTexture.h',
         '../third_party/skia/include/gpu/GrTypes.h',
@@ -705,10 +732,13 @@
         '../third_party/skia/include/gpu/SkGpuCanvas.h',
         '../third_party/skia/include/gpu/SkGpuDevice.h',
         '../third_party/skia/include/gpu/SkGr.h',
+        '../third_party/skia/include/gpu/SkGrPixelRef.h',
         '../third_party/skia/include/gpu/SkGrTexturePixelRef.h',
 
         '../third_party/skia/include/pdf/SkPDFDevice.h',
         '../third_party/skia/include/pdf/SkPDFDocument.h',
+
+        '../third_party/skia/include/pipe/SkGPipe.h',
 
         '../third_party/skia/include/ports/SkStream_Win.h',
         '../third_party/skia/include/ports/SkTypeface_win.h',
@@ -775,12 +805,12 @@
         'config',
         '../third_party/skia/include/config',
         '../third_party/skia/include/core',
-        '../third_party/skia/include/pipe',
         '../third_party/skia/include/effects',
         '../third_party/skia/include/gpu',
         '../third_party/skia/include/gpu/gl',
         '../third_party/skia/include/images',
         '../third_party/skia/include/pdf',
+        '../third_party/skia/include/pipe',
         '../third_party/skia/include/ports',
         '../third_party/skia/include/utils',
         '../third_party/skia/src/core',
@@ -790,12 +820,14 @@
       ],
       'msvs_disabled_warnings': [4244, 4267, 4341, 4345, 4390, 4554, 4800],
       'defines': [
+        #'SK_GAMMA_SRGB',
+        #'SK_GAMMA_APPLY_TO_A8',
         'SK_BUILD_NO_IMAGE_ENCODE',
         'GR_GL_CUSTOM_SETUP_HEADER="GrGLConfig_chrome.h"',
         'GR_STATIC_RECT_VB=1',
         'GR_AGGRESSIVE_SHADER_OPTS=1',
         'SK_DISABLE_FAST_AA_STROKE_RECT',
-        'SK_DEFAULT_FONT_CACHE_LIMIT=(20*1024*1024)',
+        'SK_DEFERRED_CANVAS_USES_GPIPE=1',
 
         # temporary for landing Skia rev 3077 with minimal layout test breakage
         'SK_SIMPLE_TWOCOLOR_VERTICAL_GRADIENTS',
@@ -811,7 +843,7 @@
         # fix will require substantial rebaselining.
         'SK_DRAW_POS_TEXT_IGNORE_SUBPIXEL_LEFT_ALIGN_FIX',
 
-        # Temporarily ignore fix to antialias coverage, until we can rebaseline	 
+        # Temporarily ignore fix to antialias coverage, until we can rebaseline
         'SK_USE_LEGACY_AA_COVERAGE',
       ],
       'sources!': [
@@ -825,6 +857,26 @@
             }],
           ],
         }],
+        #Settings for text blitting, chosen to approximate the system browser.
+        [ 'OS == "linux"', {
+          'defines': [
+            'SK_GAMMA_EXPONENT=1.2',
+            'SK_GAMMA_CONTRAST=0.2',
+          ],
+        }],
+        ['OS == "android" or OS == "win"', {
+          'defines': [
+            'SK_GAMMA_SRGB',
+            'SK_GAMMA_CONTRAST=0.5',
+          ],
+        }],
+        ['OS == "mac"', {
+          'defines': [
+            'SK_GAMMA_SRGB',
+            'SK_GAMMA_CONTRAST=0.0',
+          ],
+        }],
+        
         # For POSIX platforms, prefer the Mutex implementation provided by Skia
         # since it does not generate static initializers.
         [ 'OS == "android" or OS == "linux" or OS == "mac"', {
@@ -839,9 +891,8 @@
           'sources/': [
             ['exclude', '_android\\.(cc|cpp)$'],
           ],
-          'sources!': [
-            # Below files are only used by Android
-            '../third_party/skia/src/ports/SkFontHost_gamma.cpp',
+          'defines': [
+            'SK_DEFAULT_FONT_CACHE_LIMIT=(20*1024*1024)',
           ],
         }],
         [ 'OS != "mac"', {
@@ -892,15 +943,6 @@
           'sources/': [ ['exclude', '_linux\\.(cc|cpp)$'] ],
           'sources!': [
             '../third_party/skia/src/ports/SkFontHost_FreeType.cpp',
-            '../third_party/skia/src/ports/SkFontHost_TryeType_Tables.cpp',
-            '../third_party/skia/src/ports/SkFontHost_gamma_none.cpp',
-          ],
-        }],
-        [ 'OS == "android"', {
-          'sources/': [
-            ['exclude', '_linux\\.(cc|cpp)$'],
-            ['include', 'ext/platform_device_linux\\.cc$'],
-            ['include', 'ext/platform_canvas_linux\\.cc$'],
           ],
         }],
         [ 'use_aura == 1 and use_canvas_skia == 1', {
@@ -920,21 +962,24 @@
           'sources/': [ ['exclude', '_gtk\\.(cc|cpp)$'] ],
         }],
         [ 'OS == "android"', {
-          'defines': [
-            'SK_BUILD_FOR_ANDROID_NDK',
+          'sources/': [
+            ['exclude', '_linux\\.(cc|cpp)$'],
           ],
           'conditions': [
             [ '_toolset == "target"', {
               'defines': [
-                'HAVE_ENDIAN_H',
                 'HAVE_PTHREADS',
                 'OS_ANDROID',
+                'SK_BUILD_FOR_ANDROID_NDK',
+                # Android devices are typically more memory constrained, so
+                # use a smaller glyph cache.
+                'SK_DEFAULT_FONT_CACHE_LIMIT=(8*1024*1024)',
                 'USE_CHROMIUM_SKIA',
               ],
               'dependencies': [
+                '../third_party/expat/expat.gyp:expat',
                 '../third_party/freetype/freetype.gyp:ft2',
                 '../third_party/harfbuzz/harfbuzz.gyp:harfbuzz',
-                '../third_party/expat/expat.gyp:expat',
                 'skia_opts'
               ],
               'dependencies!': [
@@ -948,12 +993,21 @@
               'include_dirs': [
                 '../third_party/expat/files/lib',
               ],
+              'sources/': [
+                ['include', 'ext/platform_device_linux\\.cc$'],
+                ['include', 'ext/platform_canvas_linux\\.cc$'],
+              ],
               'sources!': [
                 'ext/vector_platform_device_skia.cc',
-                '../third_party/skia/src/ports/SkFontHost_gamma_none.cpp',
+                '../third_party/skia/src/pdf/SkPDFFont.cpp',
               ],
               'export_dependent_settings': [
                 '../third_party/harfbuzz/harfbuzz.gyp:harfbuzz',
+              ],
+            }],
+            [ '_toolset == "target" and android_build_type == 0', {
+              'defines': [
+                'HAVE_ENDIAN_H',
               ],
             }],
             [ '_toolset=="host" and host_os=="linux"', {
@@ -962,6 +1016,15 @@
                 'ext/platform_canvas_linux.cc',
               ],
             }],
+          ],
+        }],
+        [ 'OS == "ios"', {
+          'sources/': [
+            # iOS does not require most of skia and only needs a single file.
+            # Rather than creating a separate top-level target, simply exclude
+            # all files except for the one that is needed.
+            ['exclude', '.*'],
+            ['include', '^ext/google_logging\\.cc$'],
           ],
         }],
         [ 'OS == "mac"', {
@@ -1033,45 +1096,54 @@
             ],
           },
         }],
-      ],
-      'dependencies': [
-        'skia_opts',
-        '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
-        '../third_party/sfntly/sfntly.gyp:sfntly',
-        '../third_party/zlib/zlib.gyp:zlib',
+        ['OS != "ios"', {
+
+          'dependencies': [
+            'skia_opts',
+            '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
+            '../third_party/sfntly/sfntly.gyp:sfntly',
+            '../third_party/zlib/zlib.gyp:zlib',
+          ],
+        }],
       ],
       'direct_dependent_settings': {
         'include_dirs': [
           'config',
+
+          #temporary until we can hide SkFontHost
+          '../third_party/skia/src/core',
+
           '../third_party/skia/include/config',
           '../third_party/skia/include/core',
           '../third_party/skia/include/effects',
           '../third_party/skia/include/pdf',
           '../third_party/skia/include/gpu',
           '../third_party/skia/include/gpu/gl',
+          '../third_party/skia/include/pipe',
           '../third_party/skia/include/ports',
           '../third_party/skia/include/utils',
           'ext',
         ],
         'defines': [
           'SK_BUILD_NO_IMAGE_ENCODE',
+          'SK_DEFERRED_CANVAS_USES_GPIPE=1',
           'GR_GL_CUSTOM_SETUP_HEADER="GrGLConfig_chrome.h"',
           'GR_AGGRESSIVE_SHADER_OPTS=1',
         ],
         'conditions': [
           ['OS=="android"', {
+            'dependencies!': [
+              'skia_opts',
+              '../third_party/zlib/zlib.gyp:zlib',
+            ],
             'defines': [
+              # Don't use non-NDK available stuff.
               'SK_BUILD_FOR_ANDROID_NDK',
             ],
             'conditions': [
-              [ '_toolset == "target"', {
+              [ '_toolset == "target" and android_build_type == 0', {
                 'defines': [
                   'HAVE_ENDIAN_H',
-                  'SK_RELEASE',  # Assume platform has a release build.
-                ],
-                'dependencies!': [
-                  'skia_opts',
-                  '../third_party/zlib/zlib.gyp:zlib',
                 ],
               }],
             ],
@@ -1205,6 +1277,9 @@
           'sources': [
             '../third_party/skia/src/opts/memset16_neon.S',
             '../third_party/skia/src/opts/memset32_neon.S',
+            '../third_party/skia/src/opts/SkBitmapProcState_matrixProcs_neon.cpp',
+            '../third_party/skia/src/opts/SkBitmapProcState_matrix_clamp_neon.h',
+            '../third_party/skia/src/opts/SkBitmapProcState_matrix_repeat_neon.h',
         ],
         }],
         [ 'target_arch == "arm" and armv7 != 1', {

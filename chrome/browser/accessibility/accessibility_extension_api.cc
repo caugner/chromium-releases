@@ -9,7 +9,7 @@
 #include "base/values.h"
 #include "chrome/browser/accessibility/accessibility_extension_api_constants.h"
 #include "chrome/browser/extensions/api/tabs/tabs_constants.h"
-#include "chrome/browser/extensions/extension_event_router.h"
+#include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/infobars/infobar_delegate.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
@@ -164,7 +164,7 @@ void ExtensionAccessibilityEventRouter::DispatchEvent(
     const std::string& json_args) {
   if (enabled_ && profile && profile->GetExtensionEventRouter()) {
     profile->GetExtensionEventRouter()->DispatchEventToRenderers(
-        event_name, json_args, NULL, GURL());
+        event_name, json_args, NULL, GURL(), extensions::EventFilteringInfo());
   }
 }
 
@@ -185,9 +185,9 @@ bool GetFocusedControlFunction::RunImpl() {
   DictionaryValue *last_focused_control_dict =
       accessibility_event_router->last_focused_control_dict();
   if (last_focused_control_dict->size()) {
-    result_.reset(last_focused_control_dict->DeepCopyWithoutEmptyChildren());
+    SetResult(last_focused_control_dict->DeepCopyWithoutEmptyChildren());
   } else {
-    result_.reset(Value::CreateNullValue());
+    SetResult(Value::CreateNullValue());
   }
   return true;
 }
@@ -223,6 +223,6 @@ bool GetAlertsForTabFunction::RunImpl() {
     }
   }
 
-  result_.reset(alerts_value);
+  SetResult(alerts_value);
   return true;
 }

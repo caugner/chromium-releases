@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_RENDERER_EXTENSIONS_USER_SCRIPT_SLAVE_H_
 #define CHROME_RENDERER_EXTENSIONS_USER_SCRIPT_SLAVE_H_
-#pragma once
 
 #include <map>
 #include <set>
@@ -21,22 +20,21 @@
 class ExtensionSet;
 class GURL;
 
-namespace extensions {
-class Extension;
-}
-
 namespace WebKit {
 class WebFrame;
 }
 
 using WebKit::WebScriptSource;
 
+namespace extensions {
+class Extension;
+
 // Manages installed UserScripts for a render process.
 class UserScriptSlave {
  public:
   // Utility to get the URL we will match against for a frame. If the frame has
   // committed, this is the commited URL. Otherwise it is the provisional URL.
-  static GURL GetDataSourceURLForFrame(WebKit::WebFrame* frame);
+  static GURL GetDataSourceURLForFrame(const WebKit::WebFrame* frame);
 
   explicit UserScriptSlave(const ExtensionSet* extensions);
   ~UserScriptSlave();
@@ -55,7 +53,7 @@ class UserScriptSlave {
   // Gets the isolated world ID to use for the given |extension| in the given
   // |frame|. If no isolated world has been created for that extension,
   // one will be created and initialized.
-  int GetIsolatedWorldIdForExtension(const extensions::Extension* extension,
+  int GetIsolatedWorldIdForExtension(const Extension* extension,
                                      WebKit::WebFrame* frame);
 
   // Gets the id of the extension running in a given isolated world. If no such
@@ -67,7 +65,7 @@ class UserScriptSlave {
 
  private:
   static void InitializeIsolatedWorld(int isolated_world_id,
-                                      const extensions::Extension* extension);
+                                      const Extension* extension);
 
   // Shared memory containing raw script data.
   scoped_ptr<base::SharedMemory> shared_memory_;
@@ -87,5 +85,7 @@ class UserScriptSlave {
 
   DISALLOW_COPY_AND_ASSIGN(UserScriptSlave);
 };
+
+}  // namespace extensions
 
 #endif  // CHROME_RENDERER_EXTENSIONS_USER_SCRIPT_SLAVE_H_

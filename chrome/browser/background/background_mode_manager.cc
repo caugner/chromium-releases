@@ -25,13 +25,16 @@
 #include "chrome/browser/status_icons/status_icon.h"
 #include "chrome/browser/status_icons/status_tray.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
+#include "chrome/common/extensions/permissions/permission_set.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
@@ -92,11 +95,7 @@ void BackgroundModeManager::BackgroundModeData::ExecuteCommand(int item) {
 
 Browser* BackgroundModeManager::BackgroundModeData::GetBrowserWindow() {
   Browser* browser = browser::FindLastActiveWithProfile(profile_);
-  if (!browser) {
-    Browser::OpenEmptyWindow(profile_);
-    browser = browser::FindLastActiveWithProfile(profile_);
-  }
-  return browser;
+  return browser ? browser : chrome::OpenEmptyWindow(profile_);
 }
 
 int BackgroundModeManager::BackgroundModeData::GetBackgroundAppCount() const {
@@ -265,9 +264,9 @@ void BackgroundModeManager::LaunchBackgroundApplication(
   ExtensionService* service = profile->GetExtensionService();
   extension_misc::LaunchContainer launch_container =
       service->extension_prefs()->GetLaunchContainer(
-          extension, ExtensionPrefs::LAUNCH_REGULAR);
-  application_launch::OpenApplication(profile, extension, launch_container,
-                                      GURL(), NEW_FOREGROUND_TAB, NULL);
+          extension, extensions::ExtensionPrefs::LAUNCH_REGULAR);
+  application_launch::OpenApplication(application_launch::LaunchParams(
+          profile, extension, launch_container, NEW_FOREGROUND_TAB));
 }
 
 bool BackgroundModeManager::IsBackgroundModeActiveForTest() {
@@ -315,7 +314,7 @@ void BackgroundModeManager::Observe(
         UpdatedExtensionPermissionsInfo* info =
             content::Details<UpdatedExtensionPermissionsInfo>(details).ptr();
         if (info->permissions->HasAPIPermission(
-                ExtensionAPIPermission::kBackground) &&
+                extensions::APIPermission::kBackground) &&
             info->reason == UpdatedExtensionPermissionsInfo::ADDED) {
           // Turned on background permission, so treat this as a new install.
           OnBackgroundAppInstalled(info->extension);
@@ -492,10 +491,10 @@ void BackgroundModeManager::ExecuteCommand(int command_id) {
   BackgroundModeData* bmd = background_mode_data_.begin()->second.get();
   switch (command_id) {
     case IDC_ABOUT:
-      bmd->GetBrowserWindow()->OpenAboutChromeDialog();
+      chrome::ShowAboutChrome(bmd->GetBrowserWindow());
       break;
     case IDC_TASK_MANAGER:
-      bmd->GetBrowserWindow()->OpenTaskManager(true);
+      chrome::OpenTaskManager(bmd->GetBrowserWindow(), true);
       break;
     case IDC_EXIT:
       content::RecordAction(UserMetricsAction("Exit"));

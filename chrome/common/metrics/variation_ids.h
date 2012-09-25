@@ -4,7 +4,6 @@
 
 #ifndef CHROME_COMMON_METRICS_VARIATION_IDS_H_
 #define CHROME_COMMON_METRICS_VARIATION_IDS_H_
-#pragma once
 
 namespace chrome_variations {
 
@@ -17,10 +16,11 @@ namespace chrome_variations {
 // global range of permitted values.
 //
 // When you want to create a FieldTrial that needs to be recognized by Google
-// properties, reserve an ID by declaring them below. Please add a short
-// description of the associate FieldTrial.
+// properties, reserve an ID by declaring them below. Please start with the name
+// of the FieldTrial followed a short description.
 //
 // Ex:
+// // Name: Instant-Field-Trial
 // // The Omnibox Instant Trial.
 // kInstantTrialOn  = 3300123,
 // kInstantTrialOff = 3300124,
@@ -30,13 +30,15 @@ namespace chrome_variations {
 // comment.
 //
 // Ex:
+// // Name: UMA-Uniformity-Trial-5-Percent
+// // Range: 330000 - 3300099
 // // The 5% Uniformity Trial. This is a reserved range.
 // kUniformityTrial5PercentStart = 330000,
 // kUniformirtTrial5PercentEnd   = 330099,
 //
 // Anything within the range of a uint32 should be castable to an ID, but
 // please ensure that they are within the range of the min and max values.
-enum ID {
+enum VariationID {
   // Used to represent no associated Chrome variation ID.
   kEmptyID = 0,
 
@@ -45,12 +47,42 @@ enum ID {
   // use. Please do not use values in this range.
   kMinimumID = 3300000,
 
-  kUniformity1PercentBase  = kMinimumID,
-  kUniformity5PercentBase  = kUniformity1PercentBase + 100,
-  kUniformity10PercentBase = kUniformity5PercentBase + 20,
-  kUniformity20PercentBase = kUniformity10PercentBase + 10,
-  kUniformity50PercentBase = kUniformity20PercentBase + 5,
-  kUniformityTrialsMax     = 3300136,
+  // Name: UMA-Uniformity-Trial-1-Percent
+  // Range: 3300000 - 3300099
+  kUniformity1PercentBase   = kMinimumID,
+  kUniformity1PercentLimit  = kUniformity1PercentBase + 100,
+  // Name: UMA-Uniformity-Trial-5-Percent
+  // Range: 3300100 - 3300119
+  kUniformity5PercentBase   = kUniformity1PercentLimit,
+  kUniformity5PercentLimit  = kUniformity5PercentBase + 20,
+  // Name: UMA-Uniformity-Trial-10-Percent
+  // Range: 3300120 - 3300129
+  kUniformity10PercentBase  = kUniformity5PercentLimit,
+  kUniformity10PercentLimit = kUniformity10PercentBase + 10,
+  // Name: UMA-Uniformity-Trial-20-Percent
+  // Range: 3300130 - 3300134
+  kUniformity20PercentBase  = kUniformity10PercentLimit,
+  kUniformity20PercentLimit = kUniformity20PercentBase + 5,
+  // Name: UMA-Uniformity-Trial-50-Percent
+  // Range: 3300135 - 3300136
+  kUniformity50PercentBase  = kUniformity20PercentLimit,
+  kUniformity50PercentLimit = kUniformity50PercentBase + 2,
+
+  // Name: UMA-Dynamic-Binary-Uniformity-Trial
+  // The dynamic uniformity trial is only specified on the server, this is just
+  // to reserve the id.
+  kDynamicUniformityDefault = 3300137,
+  kDynamicUniformityGroup01 = 3300138,
+
+  // Name: UMA-Session-Randomized-Uniformity-Trial-5-Percent
+  // Range: 3300139 - 3300158
+  // A uniformity trial used to compare one-time-randomized and
+  // session-randomized FieldTrials.
+  kUniformitySessionRandomized5PercentBase  = 3300139,
+  kUniformitySessionRandomized5PercentLimit =
+      kUniformitySessionRandomized5PercentBase + 20,
+
+  kUniformityTrialsMax      = 3300158,
 
   // Some values reserved for unit and integration tests.
   kTestValueA = 3300200,
@@ -65,6 +97,8 @@ enum ID {
 
   // Add new variation IDs below.
 
+  // Name: OmniboxSearchSuggest
+  // Range: 3310000 - 3310019
   // Suggest (Autocomplete) field trial, 20 IDs.
   kSuggestIDMin = 3310000,
   kSuggestIDMax = 3310019,

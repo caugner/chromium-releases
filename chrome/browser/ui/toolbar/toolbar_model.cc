@@ -5,8 +5,7 @@
 #include "chrome/browser/ui/toolbar/toolbar_model.h"
 
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/autocomplete/autocomplete.h"
-#include "chrome/browser/autocomplete/autocomplete_edit.h"
+#include "chrome/browser/autocomplete/autocomplete_input.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ssl/ssl_error_info.h"
@@ -22,7 +21,7 @@
 #include "content/public/common/content_constants.h"
 #include "content/public/common/ssl_status.h"
 #include "grit/generated_resources.h"
-#include "grit/theme_resources_standard.h"
+#include "grit/theme_resources.h"
 #include "net/base/cert_status_flags.h"
 #include "net/base/net_util.h"
 #include "ui/base/l10n/l10n_util.h"

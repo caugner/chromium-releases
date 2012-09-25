@@ -65,7 +65,7 @@
 #include "net/base/load_flags.h"
 #include "net/base/mime_util.h"
 #include "net/base/net_errors.h"
-#include "net/base/registry_controlled_domain.h"
+#include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "net/base/request_priority.h"
 #include "net/base/ssl_cert_request_info.h"
 #include "net/base/upload_data.h"
@@ -98,10 +98,6 @@ static ResourceDispatcherHostImpl* g_resource_dispatcher_host;
 
 // The interval for calls to ResourceDispatcherHostImpl::UpdateLoadStates
 const int kUpdateLoadStatesIntervalMsec = 100;
-
-// Maximum number of pending data messages sent to the renderer at any
-// given time for a given request.
-const int kMaxPendingDataMessages = 20;
 
 // Maximum byte "cost" of all the outstanding requests for a renderer.
 // See delcaration of |max_outstanding_requests_cost_per_process_| for details.
@@ -252,11 +248,9 @@ net::RequestPriority DetermineRequestPriority(ResourceType::Type type) {
     case ResourceType::FAVICON:
       return net::LOWEST;
 
-    // Prefetches and prerenders are at a lower priority than even
-    // LOWEST, since they are not even required for rendering of the
-    // current page.
+    // Prefetches are at a lower priority than even LOWEST, since they are not
+    // even required for rendering of the current page.
     case ResourceType::PREFETCH:
-    case ResourceType::PRERENDER:
       return net::IDLE;
 
     default:
@@ -517,9 +511,7 @@ net::Error ResourceDispatcherHostImpl::BeginDownload(
   base::debug::Alias(url_buf);
   CHECK(ContainsKey(active_resource_contexts_, context));
 
-  const net::URLRequestContext* request_context = context->GetRequestContext();
   request->set_referrer(MaybeStripReferrer(GURL(request->referrer())).spec());
-  request->set_context(request_context);
   int extra_load_flags = net::LOAD_IS_DOWNLOAD;
   if (prefer_cache) {
     // If there is upload data attached, only retrieve from cache because there
@@ -544,6 +536,7 @@ net::Error ResourceDispatcherHostImpl::BeginDownload(
 
   request_id_--;
 
+  const net::URLRequestContext* request_context = context->GetRequestContext();
   if (!request_context->job_factory()->IsHandledURL(url)) {
     VLOG(1) << "Download request for unsupported protocol: "
             << url.possibly_invalid_spec();
@@ -931,22 +924,6 @@ void ResourceDispatcherHostImpl::BeginRequest(
     return;
   }
 
-  // Construct the event handler.
-  scoped_ptr<ResourceHandler> handler;
-  if (sync_result) {
-    handler.reset(new SyncResourceHandler(
-        filter_, request_data.url, sync_result, this));
-  } else {
-    handler.reset(new AsyncResourceHandler(
-        filter_, route_id, request_data.url, this));
-  }
-
-  // The RedirectToFileResourceHandler depends on being next in the chain.
-  if (request_data.download_to_file) {
-    handler.reset(
-        new RedirectToFileResourceHandler(handler.Pass(), child_id, this));
-  }
-
   int load_flags =
       BuildLoadFlagsForRequest(request_data, child_id, sync_result != NULL);
 
@@ -955,8 +932,15 @@ void ResourceDispatcherHostImpl::BeginRequest(
   net::URLRequest* request;
   if (deferred_loader.get()) {
     request = deferred_loader->request();
+
+    // Give the ResourceLoader (or any of the ResourceHandlers held by it) a
+    // chance to reset some state before we complete the transfer.
+    deferred_loader->WillCompleteTransfer();
   } else {
-    new_request.reset(new net::URLRequest(request_data.url, NULL));
+    new_request.reset(new net::URLRequest(
+        request_data.url,
+        NULL,
+        filter_->GetURLRequestContext(request_data.resource_type)));
     request = new_request.get();
 
     request->set_method(request_data.method);
@@ -974,8 +958,6 @@ void ResourceDispatcherHostImpl::BeginRequest(
 
   request->set_load_flags(load_flags);
 
-  request->set_context(
-      filter_->GetURLRequestContext(request_data.resource_type));
   request->set_priority(DetermineRequestPriority(request_data.resource_type));
 
   // Set upload data.
@@ -987,52 +969,9 @@ void ResourceDispatcherHostImpl::BeginRequest(
     upload_size = request_data.upload_data->GetContentLengthSync();
   }
 
-  // Install a CrossSiteResourceHandler if this request is coming from a
-  // RenderViewHost with a pending cross-site request.  We only check this for
-  // MAIN_FRAME requests. Unblock requests only come from a blocked page, do
-  // not count as cross-site, otherwise it gets blocked indefinitely.
-  if (request_data.resource_type == ResourceType::MAIN_FRAME &&
-      process_type == PROCESS_TYPE_RENDERER &&
-      CrossSiteRequestManager::GetInstance()->
-          HasPendingCrossSiteRequest(child_id, route_id)) {
-    // Wrap the event handler to be sure the current page's onunload handler
-    // has a chance to run before we render the new page.
-    handler.reset(
-        new CrossSiteResourceHandler(handler.Pass(), child_id, route_id, this));
-  }
-
-  // Insert a buffered event handler before the actual one.
-  handler.reset(
-      new BufferedResourceHandler(handler.Pass(), this, request));
-
-  ScopedVector<ResourceThrottle> throttles;
-  if (delegate_) {
-    bool is_continuation_of_transferred_request =
-        (deferred_loader.get() != NULL);
-
-    delegate_->RequestBeginning(request,
-                                resource_context,
-                                request_data.resource_type,
-                                child_id,
-                                route_id,
-                                is_continuation_of_transferred_request,
-                                &throttles);
-  }
-
-  if (request_data.resource_type == ResourceType::MAIN_FRAME) {
-    throttles.insert(
-        throttles.begin(),
-        new TransferNavigationResourceThrottle(request));
-  }
-
-  if (!throttles.empty()) {
-    handler.reset(
-        new ThrottlingResourceHandler(handler.Pass(), child_id, request_id,
-                                      throttles.Pass()));
-  }
-
   bool allow_download = request_data.allow_download &&
       ResourceType::IsFrame(request_data.resource_type);
+
   // Make extra info and read footer (contains request ID).
   ResourceRequestInfoImpl* extra_info =
       new ResourceRequestInfoImpl(
@@ -1069,6 +1008,66 @@ void ResourceDispatcherHostImpl::BeginRequest(
       request, ResourceContext::GetAppCacheService(resource_context), child_id,
       request_data.appcache_host_id, request_data.resource_type);
 
+  // Construct the IPC resource handler.
+  scoped_ptr<ResourceHandler> handler;
+  if (sync_result) {
+    handler.reset(new SyncResourceHandler(
+        filter_, request, sync_result, this));
+  } else {
+    handler.reset(new AsyncResourceHandler(
+        filter_, route_id, request, this));
+  }
+
+  // The RedirectToFileResourceHandler depends on being next in the chain.
+  if (request_data.download_to_file) {
+    handler.reset(
+        new RedirectToFileResourceHandler(handler.Pass(), child_id, this));
+  }
+
+  // Install a CrossSiteResourceHandler if this request is coming from a
+  // RenderViewHost with a pending cross-site request.  We only check this for
+  // MAIN_FRAME requests. Unblock requests only come from a blocked page, do
+  // not count as cross-site, otherwise it gets blocked indefinitely.
+  if (request_data.resource_type == ResourceType::MAIN_FRAME &&
+      process_type == PROCESS_TYPE_RENDERER &&
+      CrossSiteRequestManager::GetInstance()->
+          HasPendingCrossSiteRequest(child_id, route_id)) {
+    // Wrap the event handler to be sure the current page's onunload handler
+    // has a chance to run before we render the new page.
+    handler.reset(new CrossSiteResourceHandler(handler.Pass(), child_id,
+                                               route_id, request));
+  }
+
+  // Insert a buffered event handler before the actual one.
+  handler.reset(
+      new BufferedResourceHandler(handler.Pass(), this, request));
+
+  ScopedVector<ResourceThrottle> throttles;
+  if (delegate_) {
+    bool is_continuation_of_transferred_request =
+        (deferred_loader.get() != NULL);
+
+    delegate_->RequestBeginning(request,
+                                resource_context,
+                                request_data.resource_type,
+                                child_id,
+                                route_id,
+                                is_continuation_of_transferred_request,
+                                &throttles);
+  }
+
+  if (request_data.resource_type == ResourceType::MAIN_FRAME) {
+    throttles.insert(
+        throttles.begin(),
+        new TransferNavigationResourceThrottle(request));
+  }
+
+  if (!throttles.empty()) {
+    handler.reset(
+        new ThrottlingResourceHandler(handler.Pass(), child_id, request_id,
+                                      throttles.Pass()));
+  }
+
   if (deferred_loader.get()) {
     pending_loaders_[extra_info->GetGlobalRequestID()] = deferred_loader;
     deferred_loader->CompleteTransfer(handler.Pass());
@@ -1082,33 +1081,13 @@ void ResourceDispatcherHostImpl::OnReleaseDownloadedFile(int request_id) {
 }
 
 void ResourceDispatcherHostImpl::OnDataReceivedACK(int request_id) {
-  DataReceivedACK(filter_->child_id(), request_id);
-}
-
-void ResourceDispatcherHostImpl::DataReceivedACK(int child_id,
-                                                 int request_id) {
-  ResourceLoader* loader = GetLoader(child_id, request_id);
+  ResourceLoader* loader = GetLoader(filter_->child_id(), request_id);
   if (!loader)
     return;
 
   ResourceRequestInfoImpl* info = loader->GetRequestInfo();
-
-  // Decrement the number of pending data messages.
-  info->DecrementPendingDataCount();
-
-  // If the pending data count was higher than the max, resume the request.
-  if (info->pending_data_count() == kMaxPendingDataMessages) {
-    // Decrement the pending data count one more time because we also
-    // incremented it before pausing the request.
-    info->DecrementPendingDataCount();
-
-    // Resume the request.
-    //
-    // TODO(darin): Make the AsyncResourceHandler be responsible for resuming
-    // via its controller().  This static_cast is here as a temporary measure.
-    //
-    static_cast<ResourceController*>(loader)->Resume();
-  }
+  if (info->async_handler())
+    info->async_handler()->OnDataReceivedACK();
 }
 
 void ResourceDispatcherHostImpl::OnDataDownloadedACK(int request_id) {
@@ -1172,8 +1151,12 @@ void ResourceDispatcherHostImpl::OnFollowRedirect(
     return;
   }
 
-  loader->OnFollowRedirect(has_new_first_party_for_cookies,
-                           new_first_party_for_cookies);
+  ResourceRequestInfoImpl* info = loader->GetRequestInfo();
+  if (info->async_handler()) {
+    info->async_handler()->OnFollowRedirect(
+        has_new_first_party_for_cookies,
+        new_first_party_for_cookies);
+  }
 }
 
 ResourceRequestInfoImpl* ResourceDispatcherHostImpl::CreateRequestInfo(
@@ -1270,7 +1253,8 @@ void ResourceDispatcherHostImpl::BeginSaveFile(
     return;
   }
 
-  scoped_ptr<net::URLRequest> request(new net::URLRequest(url, NULL));
+  scoped_ptr<net::URLRequest> request(
+      new net::URLRequest(url, NULL, request_context));
   request->set_method("GET");
   request->set_referrer(MaybeStripReferrer(referrer.url).spec());
   webkit_glue::ConfigureURLRequestForReferrerPolicy(request.get(),
@@ -1278,7 +1262,6 @@ void ResourceDispatcherHostImpl::BeginSaveFile(
   // So far, for saving page, we need fetch content from cache, in the
   // future, maybe we can use a configuration to configure this behavior.
   request->set_load_flags(net::LOAD_PREFERRING_CACHE);
-  request->set_context(context->GetRequestContext());
 
   // Since we're just saving some resources we need, disallow downloading.
   ResourceRequestInfoImpl* extra_info =
@@ -1286,28 +1269,6 @@ void ResourceDispatcherHostImpl::BeginSaveFile(
   extra_info->AssociateWithRequest(request.get());  // Request takes ownership.
 
   BeginRequestInternal(request.Pass(), handler.Pass());
-}
-
-bool ResourceDispatcherHostImpl::WillSendData(int child_id, int request_id,
-                                              bool* defer) {
-  ResourceLoader* loader = GetLoader(child_id, request_id);
-  if (!loader) {
-    NOTREACHED() << "WillSendData for invalid request";
-    return false;
-  }
-
-  ResourceRequestInfoImpl* info = loader->GetRequestInfo();
-
-  info->IncrementPendingDataCount();
-  if (info->pending_data_count() > kMaxPendingDataMessages) {
-    // We reached the max number of data messages that can be sent to
-    // the renderer for a given request. Pause the request and wait for
-    // the renderer to start processing them before resuming it.
-    *defer = true;
-    return false;
-  }
-
-  return true;
 }
 
 void ResourceDispatcherHostImpl::MarkAsTransferredNavigation(
@@ -1518,6 +1479,9 @@ void ResourceDispatcherHostImpl::BeginRequestInternal(
 
     IncrementOutstandingRequestsMemoryCost(-1 * info->memory_cost(),
                                            info->GetChildID());
+
+    // A ResourceHandler must not outlive its associated URLRequest.
+    handler.reset();
     return;
   }
 
@@ -1669,6 +1633,7 @@ void ResourceDispatcherHostImpl::UpdateLoadStates() {
 
 void ResourceDispatcherHostImpl::BlockRequestsForRoute(int child_id,
                                                        int route_id) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   ProcessRouteIDs key(child_id, route_id);
   DCHECK(blocked_loaders_map_.find(key) == blocked_loaders_map_.end()) <<
       "BlockRequestsForRoute called  multiple time for the same RVH";

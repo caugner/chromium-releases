@@ -5,9 +5,13 @@
 #include "remoting/client/chromoting_client.h"
 
 #include "base/bind.h"
-#include "remoting/client/chromoting_view.h"
+#include "remoting/client/audio_decode_scheduler.h"
+#include "remoting/client/audio_player.h"
 #include "remoting/client/client_context.h"
+#include "remoting/client/client_user_interface.h"
 #include "remoting/client/rectangle_update_decoder.h"
+#include "remoting/proto/audio.pb.h"
+#include "remoting/proto/video.pb.h"
 #include "remoting/protocol/authentication_method.h"
 #include "remoting/protocol/connection_to_host.h"
 #include "remoting/protocol/negotiating_authenticator.h"
@@ -28,18 +32,23 @@ ChromotingClient::QueuedVideoPacket::~QueuedVideoPacket() {
 
 ChromotingClient::ChromotingClient(
     const ClientConfig& config,
-    scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+    ClientContext* client_context,
     protocol::ConnectionToHost* connection,
-    ChromotingView* view,
-    RectangleUpdateDecoder* rectangle_decoder)
+    ClientUserInterface* user_interface,
+    RectangleUpdateDecoder* rectangle_decoder,
+    scoped_ptr<AudioPlayer> audio_player)
     : config_(config),
-      task_runner_(task_runner),
+      task_runner_(client_context->main_task_runner()),
       connection_(connection),
-      view_(view),
+      user_interface_(user_interface),
       rectangle_decoder_(rectangle_decoder),
       packet_being_processed_(false),
       last_sequence_number_(0),
       weak_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
+  audio_decode_scheduler_.reset(new AudioDecodeScheduler(
+      client_context->main_task_runner(),
+      client_context->audio_decode_task_runner(),
+      audio_player.Pass()));
 }
 
 ChromotingClient::~ChromotingClient() {
@@ -60,9 +69,8 @@ void ChromotingClient::Start(
 
   connection_->Connect(xmpp_proxy, config_.local_jid, config_.host_jid,
                        config_.host_public_key, transport_factory.Pass(),
-                       authenticator.Pass(), this, this, this, this);
-
-  view_->Initialize();
+                       authenticator.Pass(), this, this, this, this,
+                       audio_decode_scheduler_.get());
 }
 
 void ChromotingClient::Stop(const base::Closure& shutdown_task) {
@@ -80,8 +88,6 @@ void ChromotingClient::Stop(const base::Closure& shutdown_task) {
 }
 
 void ChromotingClient::OnDisconnected(const base::Closure& shutdown_task) {
-  view_->TearDown();
-
   shutdown_task.Run();
 }
 
@@ -93,12 +99,12 @@ ChromotingStats* ChromotingClient::GetStats() {
 void ChromotingClient::InjectClipboardEvent(
     const protocol::ClipboardEvent& event) {
   DCHECK(task_runner_->BelongsToCurrentThread());
-  view_->GetClipboardStub()->InjectClipboardEvent(event);
+  user_interface_->GetClipboardStub()->InjectClipboardEvent(event);
 }
 
 void ChromotingClient::SetCursorShape(
     const protocol::CursorShapeInfo& cursor_shape) {
-  view_->GetCursorShapeStub()->SetCursorShape(cursor_shape);
+  user_interface_->GetCursorShapeStub()->SetCursorShape(cursor_shape);
 }
 
 void ChromotingClient::ProcessVideoPacket(scoped_ptr<VideoPacket> packet,
@@ -135,7 +141,7 @@ void ChromotingClient::ProcessVideoPacket(scoped_ptr<VideoPacket> packet,
     DispatchPacket();
 }
 
-int ChromotingClient::GetPendingPackets() {
+int ChromotingClient::GetPendingVideoPackets() {
   DCHECK(task_runner_->BelongsToCurrentThread());
   return received_packets_.size();
 }
@@ -172,7 +178,12 @@ void ChromotingClient::OnConnectionState(
   VLOG(1) << "ChromotingClient::OnConnectionState(" << state << ")";
   if (state == protocol::ConnectionToHost::CONNECTED)
     Initialize();
-  view_->SetConnectionState(state, error);
+  user_interface_->OnConnectionState(state, error);
+}
+
+void ChromotingClient::OnConnectionReady(bool ready) {
+  VLOG(1) << "ChromotingClient::OnConnectionReady(" << ready << ")";
+  user_interface_->OnConnectionReady(ready);
 }
 
 void ChromotingClient::OnPacketDone(bool last_packet,
@@ -205,6 +216,8 @@ void ChromotingClient::Initialize() {
 
   // Initialize the decoder.
   rectangle_decoder_->Initialize(connection_->config());
+  if (connection_->config().is_audio_enabled())
+    audio_decode_scheduler_->Initialize(connection_->config());
 }
 
 }  // namespace remoting

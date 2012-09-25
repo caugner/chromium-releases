@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_WEBUI_UBER_UBER_UI_H_
 #define CHROME_BROWSER_UI_WEBUI_UBER_UBER_UI_H_
-#pragma once
 
 #include <string>
 
@@ -31,8 +30,13 @@ class UberUI : public content::WebUIController {
   // We forward these to |sub_uis_|.
   virtual void RenderViewCreated(
       content::RenderViewHost* render_view_host) OVERRIDE;
+  virtual void RenderViewReused(
+      content::RenderViewHost* render_view_host) OVERRIDE;
 
  private:
+  // Clear a virtual URL from the pending navigation entry.
+  void ClearPendingVirtualURL();
+
   // A map from URL origin to WebUI instance.
   typedef std::map<std::string, content::WebUI*> SubpageMap;
 

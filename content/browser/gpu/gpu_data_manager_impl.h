@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_BROWSER_GPU_GPU_DATA_MANAGER_IMPL_H_
 #define CONTENT_BROWSER_GPU_GPU_DATA_MANAGER_IMPL_H_
-#pragma once
 
 #include <set>
 #include <string>
@@ -64,6 +63,12 @@ class CONTENT_EXPORT GpuDataManagerImpl
   // Force the current card to be blacklisted (usually due to GPU process
   // crashes).
   void BlacklistCard();
+
+#if defined(OS_WIN)
+  // Is the GPU process using the accelerated surface to present, instead of
+  // presenting by itself.
+  bool IsUsingAcceleratedSurface();
+#endif
 
  private:
   typedef ObserverListThreadSafe<content::GpuDataManagerObserver>

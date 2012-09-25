@@ -111,7 +111,6 @@ Error* Session::Init(const DictionaryValue* capabilities_dict) {
   browser_options.user_data_dir = capabilities_.profile;
   if (!capabilities_.no_website_testing_defaults) {
     browser_options.ignore_certificate_errors = true;
-    browser_options.disable_popup_blocking = true;
   }
   RunSessionTask(base::Bind(
       &Session::InitOnSessionThread,
@@ -576,6 +575,9 @@ Error* Session::DeleteCookie(const std::string& url,
   return error;
 }
 
+// Note that when this is called from CookieCommand::ExecutePost then
+// |cookie_dict| is destroyed as soon as the caller finishes. Therefore
+// it is essential that RunSessionTask executes synchronously.
 Error* Session::SetCookie(const std::string& url,
                           DictionaryValue* cookie_dict) {
   Error* error = NULL;
@@ -1364,7 +1366,8 @@ Error* Session::RemoveStorageItem(StorageType type,
       CreateDirectValueParser(value));
 }
 
-Error* Session::GetGeolocation(scoped_ptr<base::DictionaryValue>* geolocation) {
+Error* Session::GetGeolocation(
+    scoped_ptr<base::DictionaryValue>* geolocation) {
   Error* error = NULL;
   RunSessionTask(base::Bind(
       &Automation::GetGeolocation,
@@ -1374,7 +1377,7 @@ Error* Session::GetGeolocation(scoped_ptr<base::DictionaryValue>* geolocation) {
   return error;
 }
 
-Error* Session::OverrideGeolocation(base::DictionaryValue* geolocation) {
+Error* Session::OverrideGeolocation(const base::DictionaryValue* geolocation) {
   Error* error = NULL;
   RunSessionTask(base::Bind(
       &Automation::OverrideGeolocation,
@@ -1431,6 +1434,7 @@ void Session::RunSessionTask(const base::Closure& task) {
       base::Unretained(this),
       task,
       &done_event));
+  // See SetCookie for why it is essential that we wait here.
   done_event.Wait();
 }
 
@@ -1895,11 +1899,28 @@ Error* Session::InitForWebsiteTesting() {
   if (error)
     return error;
 
-  // Allow certain content by default.
+  // Allow content by default.
+  // Media-stream cannot be enabled by default; we must specify
+  // particular host patterns and devices.
+  DictionaryValue* devices = new DictionaryValue();
+  devices->SetString("audio", "Default");
+  devices->SetString("video", "Default");
+  DictionaryValue* content_settings = new DictionaryValue();
+  content_settings->Set("media-stream", devices);
+  DictionaryValue* pattern_pairs = new DictionaryValue();
+  pattern_pairs->Set("https://*,*", content_settings);
+  error = SetPreference(
+      "profile.content_settings.pattern_pairs",
+      true /* is_user_pref */,
+      pattern_pairs);
+  if (error)
+    return error;
   const int kAllowContent = 1;
   DictionaryValue* default_content_settings = new DictionaryValue();
   default_content_settings->SetInteger("geolocation", kAllowContent);
+  default_content_settings->SetInteger("mouselock", kAllowContent);
   default_content_settings->SetInteger("notifications", kAllowContent);
+  default_content_settings->SetInteger("popups", kAllowContent);
   return SetPreference(
       "profile.default_content_settings",
       true /* is_user_pref */,

@@ -81,18 +81,9 @@ class MockAudioInputDeviceManagerEventHandler
   DISALLOW_COPY_AND_ASSIGN(MockAudioInputDeviceManagerEventHandler);
 };
 
-ACTION_P(ExitMessageLoop, message_loop) {
-  message_loop->PostTask(FROM_HERE, MessageLoop::QuitClosure());
-}
-
 class AudioInputDeviceManagerTest : public testing::Test {
  public:
-  AudioInputDeviceManagerTest()
-      : message_loop_(),
-        io_thread_(),
-        manager_(),
-        audio_input_listener_() {
-  }
+  AudioInputDeviceManagerTest() {}
 
   // Returns true iff machine has an audio input device.
   bool CanRunAudioInputDeviceTests() {
@@ -100,27 +91,28 @@ class AudioInputDeviceManagerTest : public testing::Test {
   }
 
  protected:
-  virtual void SetUp() {
+  virtual void SetUp() OVERRIDE {
     // The test must run on Browser::IO.
     message_loop_.reset(new MessageLoop(MessageLoop::TYPE_IO));
     io_thread_.reset(new BrowserThreadImpl(BrowserThread::IO,
                                            message_loop_.get()));
-    audio_manager_.reset(media::AudioManager::Create());
 
+    audio_manager_.reset(media::AudioManager::Create());
     manager_ = new AudioInputDeviceManager(audio_manager_.get());
     audio_input_listener_.reset(new MockAudioInputDeviceManagerListener());
-    manager_->Register(audio_input_listener_.get());
+    manager_->Register(audio_input_listener_.get(),
+                       message_loop_->message_loop_proxy());
 
     // Gets the enumerated device list from the AudioInputDeviceManager.
     manager_->EnumerateDevices();
     EXPECT_CALL(*audio_input_listener_, DevicesEnumerated(_))
         .Times(1);
 
-    // Waits for the callback.
+    // Wait until we get the list.
     message_loop_->RunAllPending();
   }
 
-  virtual void TearDown() {
+  virtual void TearDown() OVERRIDE {
     manager_->Unregister();
     io_thread_.reset();
   }
@@ -463,8 +455,7 @@ TEST_F(AudioInputDeviceManagerTest, StartInvalidSession) {
   int invalid_session_id = session_id + 1;
   manager_->Start(invalid_session_id, audio_input_event_handler.get());
   EXPECT_CALL(*audio_input_event_handler,
-              DeviceStarted(invalid_session_id,
-                            AudioInputDeviceManager::kInvalidDeviceId))
+              DeviceStarted(invalid_session_id, std::string()))
       .Times(1);
   message_loop_->RunAllPending();
 
@@ -509,8 +500,7 @@ TEST_F(AudioInputDeviceManagerTest, StartSessionTwice) {
   // Starts the session for the second time, it should fail.
   manager_->Start(session_id, audio_input_event_handler.get());
   EXPECT_CALL(*audio_input_event_handler,
-              DeviceStarted(session_id,
-                            AudioInputDeviceManager::kInvalidDeviceId))
+              DeviceStarted(session_id, std::string()))
       .Times(1);
 
   manager_->Stop(session_id);

@@ -22,8 +22,9 @@
 #include "content/public/browser/notification_source.h"
 #include "ui/base/l10n/l10n_util.h"
 
-ExtensionAppProvider::ExtensionAppProvider(ACProviderListener* listener,
-                                           Profile* profile)
+ExtensionAppProvider::ExtensionAppProvider(
+    AutocompleteProviderListener* listener,
+    Profile* profile)
     : AutocompleteProvider(listener, profile, "ExtensionApps") {
   // Notifications of extensions loading and unloading always come from the
   // non-incognito profile, but we need to see them regardless, as the incognito
@@ -41,7 +42,8 @@ void ExtensionAppProvider::LaunchAppFromOmnibox(
     Profile* profile,
     WindowOpenDisposition disposition) {
   ExtensionService* service =
-      ExtensionSystemFactory::GetForProfile(profile)->extension_service();
+      extensions::ExtensionSystemFactory::GetForProfile(profile)->
+      extension_service();
   const extensions::Extension* extension =
       service->GetInstalledApp(match.destination_url);
   // While the Omnibox popup is open, the extension can be updated, changing
@@ -57,10 +59,10 @@ void ExtensionAppProvider::LaunchAppFromOmnibox(
   // preference is set, launch as a regular tab.
   extension_misc::LaunchContainer launch_container =
       service->extension_prefs()->GetLaunchContainer(
-          extension, ExtensionPrefs::LAUNCH_REGULAR);
+          extension, extensions::ExtensionPrefs::LAUNCH_REGULAR);
 
-  application_launch::OpenApplication(profile, extension, launch_container,
-                                      GURL(), disposition, NULL);
+  application_launch::OpenApplication(application_launch::LaunchParams(
+          profile, extension, launch_container, disposition));
 }
 
 void ExtensionAppProvider::AddExtensionAppForTesting(
@@ -148,7 +150,8 @@ ExtensionAppProvider::~ExtensionAppProvider() {
 
 void ExtensionAppProvider::RefreshAppList() {
   ExtensionService* extension_service =
-      ExtensionSystemFactory::GetForProfile(profile_)->extension_service();
+      extensions::ExtensionSystemFactory::GetForProfile(profile_)->
+      extension_service();
   if (!extension_service)
     return;  // During testing, there is no extension service.
   const ExtensionSet* extensions = extension_service->extensions();

@@ -25,7 +25,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "grit/generated_resources.h"
-#include "grit/theme_resources_standard.h"
+#include "grit/theme_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -175,7 +175,7 @@ ProfileInfoCache::ProfileInfoCache(PrefService* prefs,
   for (DictionaryValue::key_iterator it = cache->begin_keys();
        it != cache->end_keys(); ++it) {
     std::string key = *it;
-    DictionaryValue* info = NULL;
+    const DictionaryValue* info = NULL;
     cache->GetDictionary(key, &info);
     string16 name;
     info->GetString(kNameKey, &name);
@@ -713,7 +713,7 @@ const DictionaryValue* ProfileInfoCache::GetInfoForProfileAtIndex(
   DCHECK_LT(index, GetNumberOfProfiles());
   const DictionaryValue* cache =
       prefs_->GetDictionary(prefs::kProfileInfoCache);
-  DictionaryValue* info = NULL;
+  const DictionaryValue* info = NULL;
   cache->GetDictionary(sorted_keys_[index], &info);
   return info;
 }
@@ -782,7 +782,7 @@ std::vector<string16> ProfileInfoCache::GetProfileNames() {
   for (base::DictionaryValue::key_iterator it = cache->begin_keys();
        it != cache->end_keys();
        ++it) {
-    base::DictionaryValue* info = NULL;
+    const base::DictionaryValue* info = NULL;
     cache->GetDictionary(*it, &info);
     info->GetString(kNameKey, &name);
     names.push_back(name);

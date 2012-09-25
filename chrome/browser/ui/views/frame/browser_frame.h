@@ -4,15 +4,14 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_FRAME_BROWSER_FRAME_H_
 #define CHROME_BROWSER_UI_VIEWS_FRAME_BROWSER_FRAME_H_
-#pragma once
 
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "build/build_config.h"
+#include "chrome/browser/ui/views/frame/browser_non_client_frame_view.h"
 #include "ui/views/widget/widget.h"
 
 class AvatarMenuButton;
-class BrowserNonClientFrameView;
 class BrowserRootView;
 class BrowserView;
 class NativeBrowserFrame;
@@ -53,7 +52,8 @@ class BrowserFrame : public views::Widget {
   // Returns the y coordinate within the window at which the horizontal TabStrip
   // begins (or would begin).  If |force_restored| is true, this is calculated
   // as if we were in restored mode regardless of the current mode.
-  int GetHorizontalTabStripVerticalOffset(bool force_restored) const;
+  BrowserNonClientFrameView::TabStripInsets GetTabStripInsets(
+      bool force_restored) const;
 
   // Tells the frame to update the throbber.
   void UpdateThrobber(bool running);

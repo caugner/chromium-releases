@@ -52,8 +52,8 @@
 
 using content::BrowserThread;
 using content::UserMetricsAction;
-using extensions::Extension;
-using extensions::PermissionsUpdater;
+
+namespace extensions {
 
 namespace {
 
@@ -82,9 +82,10 @@ scoped_refptr<CrxInstaller> CrxInstaller::Create(
   return new CrxInstaller(frontend->AsWeakPtr(), client, approval);
 }
 
-CrxInstaller::CrxInstaller(base::WeakPtr<ExtensionService> frontend_weak,
-                           ExtensionInstallPrompt* client,
-                           const WebstoreInstaller::Approval* approval)
+CrxInstaller::CrxInstaller(
+    base::WeakPtr<ExtensionService> frontend_weak,
+    ExtensionInstallPrompt* client,
+    const WebstoreInstaller::Approval* approval)
     : install_directory_(frontend_weak->install_directory()),
       install_source_(Extension::INTERNAL),
       approved_(false),
@@ -99,7 +100,8 @@ CrxInstaller::CrxInstaller(base::WeakPtr<ExtensionService> frontend_weak,
       install_cause_(extension_misc::INSTALL_CAUSE_UNSET),
       creation_flags_(Extension::NO_FLAGS),
       off_store_install_allow_reason_(OffStoreInstallDisallowed),
-      did_handle_successfully_(true) {
+      did_handle_successfully_(true),
+      record_oauth2_grant_(false) {
   if (!approval)
     return;
 
@@ -114,6 +116,7 @@ CrxInstaller::CrxInstaller(base::WeakPtr<ExtensionService> frontend_weak,
     approved_ = true;
     expected_manifest_.reset(approval->parsed_manifest->DeepCopy());
     expected_id_ = approval->extension_id;
+    record_oauth2_grant_ = approval->record_oauth2_grant;
   }
 }
 
@@ -139,8 +142,8 @@ CrxInstaller::~CrxInstaller() {
 void CrxInstaller::InstallCrx(const FilePath& source_file) {
   source_file_ = source_file;
 
-  scoped_refptr<SandboxedExtensionUnpacker> unpacker(
-      new SandboxedExtensionUnpacker(
+  scoped_refptr<SandboxedUnpacker> unpacker(
+      new SandboxedUnpacker(
           source_file,
           content::ResourceDispatcherHost::Get() != NULL,
           install_source_,
@@ -149,8 +152,7 @@ void CrxInstaller::InstallCrx(const FilePath& source_file) {
 
   if (!BrowserThread::PostTask(
           BrowserThread::FILE, FROM_HERE,
-          base::Bind(
-              &SandboxedExtensionUnpacker::Start, unpacker.get())))
+          base::Bind(&SandboxedUnpacker::Start, unpacker.get())))
     NOTREACHED();
 }
 
@@ -169,8 +171,8 @@ void CrxInstaller::InstallUserScript(const FilePath& source_file,
 
 void CrxInstaller::ConvertUserScriptOnFileThread() {
   string16 error;
-  scoped_refptr<Extension> extension =
-      ConvertUserScriptToExtension(source_file_, download_url_, &error);
+  scoped_refptr<Extension> extension = ConvertUserScriptToExtension(
+      source_file_, download_url_, &error);
   if (!extension) {
     ReportFailureFromFileThread(CrxInstallerError(error));
     return;
@@ -235,7 +237,7 @@ CrxInstallerError CrxInstaller::AllowInstall(const Extension* extension) {
   // The checks below are skipped for themes and external installs.
   // TODO(pamg): After ManagementPolicy refactoring is complete, remove this
   // and other uses of install_source_ that are no longer needed now that the
-  // SandboxedExtensionUnpacker sets extension->location.
+  // SandboxedUnpacker sets extension->location.
   if (extension->is_theme() || Extension::IsExternalLocation(install_source_))
     return CrxInstallerError();
 
@@ -245,7 +247,7 @@ CrxInstallerError CrxInstaller::AllowInstall(const Extension* extension) {
   }
 
   if (install_cause_ == extension_misc::INSTALL_CAUSE_USER_DOWNLOAD) {
-    if (extensions::switch_utils::IsEasyOffStoreInstallEnabled()) {
+    if (switch_utils::IsEasyOffStoreInstallEnabled()) {
       const char* kHistogramName = "Extensions.OffStoreInstallDecisionEasy";
       if (is_gallery_install()) {
         UMA_HISTOGRAM_ENUMERATION(kHistogramName, OnStoreInstall,
@@ -404,8 +406,8 @@ void CrxInstaller::ConfirmInstall() {
   }
 
   string16 error;
-  if (!ExtensionSystem::Get(profile_)->management_policy()->UserMayLoad(
-      extension_, &error)) {
+  if (!ExtensionSystem::Get(profile_)->management_policy()->
+      UserMayLoad(extension_, &error)) {
     ReportFailureFromUIThread(CrxInstallerError(error));
     return;
   }
@@ -474,9 +476,8 @@ void CrxInstaller::CompleteInstall() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
 
   if (!current_version_.empty()) {
-    scoped_ptr<Version> current_version(
-        Version::GetVersionFromString(current_version_));
-    if (current_version->CompareTo(*(extension_->version())) > 0) {
+    Version current_version(current_version_);
+    if (current_version.CompareTo(*(extension_->version())) > 0) {
       ReportFailureFromFileThread(
           CrxInstallerError(
               l10n_util::GetStringUTF16(IDS_EXTENSION_CANT_DOWNGRADE_VERSION)));
@@ -504,6 +505,8 @@ void CrxInstaller::CompleteInstall() {
     return;
   }
 
+  std::string extension_id = extension_->id();
+
   // This is lame, but we must reload the extension because absolute paths
   // inside the content scripts are established inside InitFromValue() and we
   // just moved the extension.
@@ -517,9 +520,13 @@ void CrxInstaller::CompleteInstall() {
       install_source_,
       extension_->creation_flags() | Extension::REQUIRE_KEY,
       &error);
-  CHECK(error.empty()) << error;
 
-  ReportSuccessFromFileThread();
+  if (extension_) {
+    ReportSuccessFromFileThread();
+  } else {
+    LOG(ERROR) << error << " " << extension_id << " " << download_url_.spec();
+    ReportFailureFromFileThread(CrxInstallerError(UTF8ToUTF16(error)));
+  }
 }
 
 void CrxInstaller::ReportFailureFromFileThread(const CrxInstallerError& error) {
@@ -588,12 +595,15 @@ void CrxInstaller::ReportSuccessFromUIThread() {
     client_->OnInstallSuccess(extension_.get(), install_icon_.get());
   }
 
+  if (client_ && !approved_)
+    record_oauth2_grant_ = client_->record_oauth2_grant();
+
   // We update the extension's granted permissions if the user already approved
   // the install (client_ is non NULL), or we are allowed to install this
   // silently.
   if (client_ || allow_silent_install_) {
     PermissionsUpdater perms_updater(profile());
-    perms_updater.GrantActivePermissions(extension_);
+    perms_updater.GrantActivePermissions(extension_, record_oauth2_grant_);
   }
 
   // Tell the frontend about the installation and hand off ownership of
@@ -620,3 +630,5 @@ void CrxInstaller::NotifyCrxInstallComplete(const Extension* extension) {
       content::Source<CrxInstaller>(this),
       content::Details<const Extension>(extension));
 }
+
+}  // namespace extensions

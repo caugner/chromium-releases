@@ -4,6 +4,7 @@
 
 #include "tools/json_schema_compiler/test/objects.h"
 
+#include "base/json/json_writer.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using namespace test::api::objects;
@@ -46,14 +47,30 @@ TEST(JsonSchemaCompilerObjectsTest, ObjectParamParamsCreate) {
 }
 
 TEST(JsonSchemaCompilerObjectsTest, ReturnsObjectResultCreate) {
-  scoped_ptr<ReturnsObject::Result::Info> info(
-      new ReturnsObject::Result::Info());
-  info->state = ReturnsObject::Result::Info::STATE_FOO;
-  scoped_ptr<Value> result_value(
-      ReturnsObject::Result::Create(*info));
-  DictionaryValue* result_dict = NULL;
-  EXPECT_TRUE(result_value->GetAsDictionary(&result_dict));
-  std::string state;
-  EXPECT_TRUE(result_dict->GetString("state", &state));
-  EXPECT_EQ("foo", state);
+  ReturnsObject::Results::Info info;
+  info.state = ReturnsObject::Results::Info::STATE_FOO;
+  scoped_ptr<ListValue> results = ReturnsObject::Results::Create(info);
+
+  DictionaryValue expected;
+  expected.SetString("state", "foo");
+  DictionaryValue* result = NULL;
+  ASSERT_TRUE(results->GetDictionary(0, &result));
+  ASSERT_TRUE(result->Equals(&expected));
+}
+
+TEST(JsonSchemaCompilerObjectsTest, OnObjectFiredCreate) {
+  OnObjectFired::SomeObject object;
+  object.state = OnObjectFired::SomeObject::STATE_BAR;
+  scoped_ptr<ListValue> results(OnObjectFired::Create(object));
+
+  DictionaryValue expected;
+  expected.SetString("state", "bar");
+  DictionaryValue* result = NULL;
+  ASSERT_TRUE(results->GetDictionary(0, &result));
+  ASSERT_TRUE(result->Equals(&expected));
+
+  std::string json1 = OnObjectFired::ToJson(object);
+  std::string json2;
+  base::JSONWriter::Write(results.get(), &json2);
+  ASSERT_EQ(json1, json2);
 }

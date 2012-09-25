@@ -14,6 +14,7 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_expanded_state_tracker.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
+#include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/net/url_fixer_upper.h"
@@ -277,7 +278,7 @@ BookmarkEditorGtk::~BookmarkEditorGtk() {
 }
 
 void BookmarkEditorGtk::Init(GtkWindow* parent_window) {
-  bb_model_ = profile_->GetBookmarkModel();
+  bb_model_ = BookmarkModelFactory::GetForProfile(profile_);
   DCHECK(bb_model_);
   bb_model_->AddObserver(this);
 
@@ -344,10 +345,8 @@ void BookmarkEditorGtk::Init(GtkWindow* parent_window) {
   } else if (details_.type == EditDetails::NEW_FOLDER) {
     title = l10n_util::GetStringUTF8(IDS_BOOKMARK_EDITOR_NEW_FOLDER_NAME);
   } else if (details_.type == EditDetails::NEW_URL) {
-    string16 title16;
-    bookmark_utils::GetURLAndTitleToBookmarkFromCurrentTab(profile_,
-        &url, &title16);
-    title = UTF16ToUTF8(title16);
+    url = details_.url;
+    title = UTF16ToUTF8(details_.title);
   }
   gtk_entry_set_text(GTK_ENTRY(name_entry_), title.c_str());
   g_signal_connect(name_entry_, "changed",

@@ -16,10 +16,15 @@
 #include "content/common/gpu/gpu_messages.h"
 #include "gpu/command_buffer/service/gpu_scheduler.h"
 #include "ui/gl/gl_switches.h"
+#include "ui/gl/gl_implementation.h"
 
 ImageTransportSurface::ImageTransportSurface() {}
 
 ImageTransportSurface::~ImageTransportSurface() {}
+
+void ImageTransportSurface::OnSetFrontSurfaceIsProtected(
+    bool is_protected, uint32 protection_state_id) {
+}
 
 void ImageTransportSurface::GetRegionsToCopy(
     const gfx::Rect& previous_damage_rect,
@@ -90,12 +95,10 @@ void ImageTransportHelper::Destroy() {}
 bool ImageTransportHelper::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(ImageTransportHelper, message)
-    IPC_MESSAGE_HANDLER(AcceleratedSurfaceMsg_BuffersSwappedACK,
-                        OnBuffersSwappedACK)
-    IPC_MESSAGE_HANDLER(AcceleratedSurfaceMsg_PostSubBufferACK,
-                        OnPostSubBufferACK)
-    IPC_MESSAGE_HANDLER(AcceleratedSurfaceMsg_NewACK,
-                        OnNewSurfaceACK)
+    IPC_MESSAGE_HANDLER(AcceleratedSurfaceMsg_BufferPresented,
+                        OnBufferPresented)
+    IPC_MESSAGE_HANDLER(AcceleratedSurfaceMsg_SetFrontSurfaceIsProtected,
+                        OnSetFrontSurfaceIsProtected)
     IPC_MESSAGE_HANDLER(AcceleratedSurfaceMsg_ResizeViewACK, OnResizeViewACK);
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
@@ -114,6 +117,10 @@ void ImageTransportHelper::SendAcceleratedSurfaceNew(
 
 void ImageTransportHelper::SendAcceleratedSurfaceBuffersSwapped(
     GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params params) {
+  // TRACE_EVENT for gpu tests:
+  TRACE_EVENT_INSTANT2("test_gpu", "SwapBuffers",
+                       "GLImpl", static_cast<int>(gfx::GetGLImplementation()),
+                       "width", surface_->GetSize().width());
   params.surface_id = stub_->surface_id();
   params.route_id = route_id_;
 #if defined(OS_MACOSX)
@@ -195,18 +202,13 @@ gpu::gles2::GLES2Decoder* ImageTransportHelper::Decoder() {
   return stub_->decoder();
 }
 
-void ImageTransportHelper::OnNewSurfaceACK(
-    uint64 surface_handle,
-    TransportDIB::Handle shm_handle) {
-  surface_->OnNewSurfaceACK(surface_handle, shm_handle);
+void ImageTransportHelper::OnSetFrontSurfaceIsProtected(
+    bool is_protected, uint32 protection_state_id) {
+  surface_->OnSetFrontSurfaceIsProtected(is_protected, protection_state_id);
 }
 
-void ImageTransportHelper::OnBuffersSwappedACK() {
-  surface_->OnBuffersSwappedACK();
-}
-
-void ImageTransportHelper::OnPostSubBufferACK() {
-  surface_->OnPostSubBufferACK();
+void ImageTransportHelper::OnBufferPresented(uint32 sync_point) {
+  surface_->OnBufferPresented(sync_point);
 }
 
 void ImageTransportHelper::OnResizeViewACK() {
@@ -225,7 +227,7 @@ void ImageTransportHelper::Resize(gfx::Size size) {
   surface_->OnResize(size);
 
 #if defined(OS_ANDROID)
-  manager_->gpu_memory_manager()->ScheduleManage();
+  manager_->gpu_memory_manager()->ScheduleManage(true);
 #endif
 
 #if defined(OS_WIN)
@@ -304,17 +306,7 @@ bool PassThroughImageTransportSurface::OnMakeCurrent(gfx::GLContext* context) {
   return true;
 }
 
-void PassThroughImageTransportSurface::OnNewSurfaceACK(
-    uint64 surface_handle,
-    TransportDIB::Handle shm_handle) {
-}
-
-void PassThroughImageTransportSurface::OnBuffersSwappedACK() {
-  DCHECK(transport_);
-  helper_->SetScheduled(true);
-}
-
-void PassThroughImageTransportSurface::OnPostSubBufferACK() {
+void PassThroughImageTransportSurface::OnBufferPresented(uint32 sync_point) {
   DCHECK(transport_);
   helper_->SetScheduled(true);
 }
@@ -335,6 +327,10 @@ void PassThroughImageTransportSurface::OnResize(gfx::Size size) {
   } else {
     Resize(new_size_);
   }
+}
+
+gfx::Size PassThroughImageTransportSurface::GetSize() {
+  return GLSurfaceAdapter::GetSize();
 }
 
 PassThroughImageTransportSurface::~PassThroughImageTransportSurface() {}

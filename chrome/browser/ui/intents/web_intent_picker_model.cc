@@ -9,7 +9,9 @@
 #include "base/logging.h"
 #include "base/stl_util.h"
 #include "chrome/browser/ui/intents/web_intent_picker_model_observer.h"
-#include "grit/ui_resources_standard.h"
+#include "grit/generated_resources.h"
+#include "grit/ui_resources.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
 
@@ -30,6 +32,13 @@ WebIntentPickerModel::~WebIntentPickerModel() {
 void WebIntentPickerModel::AddInstalledService(const string16& title,
                                                const GURL& url,
                                                Disposition disposition) {
+  // TODO(groby): Revisit to remove O(n^2) complexity.
+  for (size_t i = 0; i < installed_services_.size(); ++i) {
+    InstalledService* service = installed_services_[i];
+    if (service->title == title && service->url == url &&
+        service->disposition == disposition)
+      return;
+  }
   installed_services_.push_back(new InstalledService(title, url, disposition));
   if (observer_)
     observer_->OnModelChanged(this);
@@ -109,6 +118,15 @@ size_t WebIntentPickerModel::GetSuggestedExtensionCount() const {
   return std::min(suggested_extensions_.size(), kMaxSuggestionCount);
 }
 
+string16 WebIntentPickerModel::GetSuggestionsLinkText() const {
+  if (suggested_extensions_.size() <= kMaxSuggestionCount)
+    return string16();
+
+  return l10n_util::GetStringUTF16(GetInstalledServiceCount() == 0 ?
+      IDS_INTENT_PICKER_GET_MORE_SERVICES_NONE_INSTALLED :
+      IDS_INTENT_PICKER_GET_MORE_SERVICES);
+}
+
 void WebIntentPickerModel::SetSuggestedExtensionIconWithId(
     const string16& id,
     const gfx::Image& image) {
@@ -126,8 +144,11 @@ void WebIntentPickerModel::SetSuggestedExtensionIconWithId(
 
 void WebIntentPickerModel::SetInlineDisposition(const GURL& url) {
   inline_disposition_url_ = url;
-  if (observer_)
-    observer_->OnInlineDisposition(this, url);
+  if (observer_) {
+    const InstalledService* service = GetInstalledServiceWithURL(url);
+    DCHECK(service);
+    observer_->OnInlineDisposition(service->title, url);
+  }
 }
 
 bool WebIntentPickerModel::IsInlineDisposition() const {

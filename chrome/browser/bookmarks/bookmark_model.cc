@@ -19,6 +19,7 @@
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/history/history_notifications.h"
+#include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -27,7 +28,7 @@
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_collator.h"
-#include "ui/gfx/codec/png_codec.h"
+#include "ui/gfx/image/image_util.h"
 
 using base::Time;
 
@@ -74,7 +75,7 @@ void BookmarkNode::Initialize(int64 id) {
 }
 
 void BookmarkNode::InvalidateFavicon() {
-  favicon_ = SkBitmap();
+  favicon_ = gfx::Image();
   is_favicon_loaded_ = false;
 }
 
@@ -290,7 +291,7 @@ void BookmarkModel::Copy(const BookmarkNode* node,
     store_->ScheduleSave();
 }
 
-const SkBitmap& BookmarkModel::GetFavicon(const BookmarkNode* node) {
+const gfx::Image& BookmarkModel::GetFavicon(const BookmarkNode* node) {
   DCHECK(node);
   if (!node->is_favicon_loaded()) {
     BookmarkNode* mutable_node = AsMutable(node);
@@ -399,15 +400,20 @@ bool BookmarkModel::IsBookmarked(const GURL& url) {
   return IsBookmarkedNoLock(url);
 }
 
-void BookmarkModel::GetBookmarks(std::vector<GURL>* urls) {
+void BookmarkModel::GetBookmarks(
+    std::vector<BookmarkService::URLAndTitle>* bookmarks) {
   base::AutoLock url_lock(url_lock_);
   const GURL* last_url = NULL;
   for (NodesOrderedByURLSet::iterator i = nodes_ordered_by_url_set_.begin();
        i != nodes_ordered_by_url_set_.end(); ++i) {
     const GURL* url = &((*i)->url());
     // Only add unique URLs.
-    if (!last_url || *url != *last_url)
-      urls->push_back(*url);
+    if (!last_url || *url != *last_url) {
+      BookmarkService::URLAndTitle bookmark;
+      bookmark.url = *url;
+      bookmark.title = (*i)->GetTitle();
+      bookmarks->push_back(bookmark);
+    }
     last_url = url;
   }
 }
@@ -679,7 +685,8 @@ void BookmarkModel::RemoveAndDeleteNode(BookmarkNode* delete_me) {
 
   if (profile_) {
     HistoryService* history =
-        profile_->GetHistoryService(Profile::EXPLICIT_ACCESS);
+        HistoryServiceFactory::GetForProfile(profile_,
+                                             Profile::EXPLICIT_ACCESS);
     if (history)
       history->URLsNoLongerBookmarked(details.changed_urls);
   }
@@ -770,17 +777,19 @@ BookmarkPermanentNode* BookmarkModel::CreatePermanentNode(
 void BookmarkModel::OnFaviconDataAvailable(
     FaviconService::Handle handle,
     history::FaviconData favicon) {
-  SkBitmap favicon_bitmap;
   BookmarkNode* node =
       load_consumer_.GetClientData(
           profile_->GetFaviconService(Profile::EXPLICIT_ACCESS), handle);
   DCHECK(node);
   node->set_favicon_load_handle(0);
-  if (favicon.is_valid() && gfx::PNGCodec::Decode(favicon.image_data->front(),
-                                                  favicon.image_data->size(),
-                                                  &favicon_bitmap)) {
-    node->set_favicon(favicon_bitmap);
-    FaviconLoaded(node);
+  if (favicon.is_valid()) {
+    scoped_ptr<gfx::Image> favicon_image(
+        gfx::ImageFromPNGEncodedData(favicon.image_data->front(),
+                                     favicon.image_data->size()));
+    if (favicon_image.get()) {
+      node->set_favicon(*favicon_image.get());
+      FaviconLoaded(node);
+    }
   }
 }
 

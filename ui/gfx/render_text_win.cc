@@ -7,6 +7,7 @@
 #include <algorithm>
 
 #include "base/i18n/break_iterator.h"
+#include "base/i18n/rtl.h"
 #include "base/logging.h"
 #include "base/string_split.h"
 #include "base/string_util.h"
@@ -240,7 +241,10 @@ bool IsUnicodeBidiControlCharacter(char16 c) {
 namespace internal {
 
 TextRun::TextRun()
-  : strike(false),
+  : foreground(0),
+    font_style(0),
+    strike(false),
+    diagonal_strike(false),
     underline(false),
     width(0),
     preceding_run_widths(0),
@@ -301,17 +305,14 @@ RenderTextWin::RenderTextWin()
 RenderTextWin::~RenderTextWin() {
 }
 
-base::i18n::TextDirection RenderTextWin::GetTextDirection() {
-  // TODO(benrg): Code moved from RenderText::GetTextDirection. Needs to be
-  // replaced by a correct Windows implementation.
-  if (base::i18n::IsRTL())
-    return base::i18n::RIGHT_TO_LEFT;
-  return base::i18n::LEFT_TO_RIGHT;
-}
-
 Size RenderTextWin::GetStringSize() {
   EnsureLayout();
   return string_size_;
+}
+
+int RenderTextWin::GetBaseline() {
+  EnsureLayout();
+  return common_baseline_;
 }
 
 SelectionModel RenderTextWin::FindCursorPosition(const Point& point) {
@@ -360,12 +361,13 @@ SelectionModel RenderTextWin::AdjacentCharSelectionModel(
   DCHECK(!needs_layout_);
   internal::TextRun* run;
   size_t run_index = GetRunContainingCaret(selection);
-  if (run_index == runs_.size()) {
+  if (run_index >= runs_.size()) {
     // The cursor is not in any run: we're at the visual and logical edge.
     SelectionModel edge = EdgeSelectionModel(direction);
     if (edge.caret_pos() == selection.caret_pos())
       return edge;
-    run = direction == CURSOR_RIGHT ? runs_.front() : runs_.back();
+    int visual_index = (direction == CURSOR_RIGHT) ? 0 : runs_.size() - 1;
+    run = runs_[visual_to_logical_[visual_index]];
   } else {
     // If the cursor is moving within the current run, just move it by one
     // grapheme in the appropriate direction.
@@ -588,9 +590,14 @@ void RenderTextWin::DrawVisualText(Canvas* canvas) {
 }
 
 void RenderTextWin::ItemizeLogicalText() {
-  runs_.reset();
+  runs_.clear();
   string_size_ = Size(0, GetFont().GetHeight());
   common_baseline_ = 0;
+
+  // Set Uniscribe's base text direction.
+  script_state_.uBidiLevel =
+      (GetTextDirection() == base::i18n::RIGHT_TO_LEFT) ? 1 : 0;
+
   if (text().empty())
     return;
 
@@ -667,6 +674,12 @@ void RenderTextWin::LayoutVisualText() {
     size_t linked_font_index = 0;
     const std::vector<Font>* linked_fonts = NULL;
     Font original_font = run->font;
+    // Keep track of the font that is able to display the greatest number of
+    // characters for which ScriptShape() returned S_OK. This font will be used
+    // in the case where no font is able to display the entire run.
+    int best_partial_font_missing_char_count = INT_MAX;
+    Font best_partial_font = run->font;
+    bool using_best_partial_font = false;
 
     // Select the font desired for glyph generation.
     SelectObject(cached_hdc_, run->font.GetNativeFont());
@@ -699,13 +712,20 @@ void RenderTextWin::LayoutVisualText() {
       } else if (hr == S_OK) {
         // If |hr| is S_OK, there could still be missing glyphs in the output,
         // see: http://msdn.microsoft.com/en-us/library/windows/desktop/dd368564.aspx
-        glyphs_missing = HasMissingGlyphs(run);
+        const int missing_count = CountCharsWithMissingGlyphs(run);
+        // Track the font that produced the least missing glyphs.
+        if (missing_count < best_partial_font_missing_char_count) {
+          best_partial_font_missing_char_count = missing_count;
+          best_partial_font = run->font;
+        }
+        glyphs_missing = (missing_count != 0);
       }
 
-      // Skip font substitution if there are no missing glyphs.
-      if (!glyphs_missing) {
+      // Skip font substitution if there are no missing glyphs or if the font
+      // with the least missing glyphs is being used as a last resort.
+      if (!glyphs_missing || using_best_partial_font) {
         // Save the successful fallback font that was chosen.
-        if (tried_fallback)
+        if (tried_fallback && !using_best_partial_font)
           successful_substitute_fonts_[original_font.GetFontName()] = run->font;
         break;
       }
@@ -753,8 +773,24 @@ void RenderTextWin::LayoutVisualText() {
           linked_fonts = GetLinkedFonts(run->font);
       }
 
-      // None of the linked fonts worked, break out of the loop.
+      // None of the fallback fonts were able to display the entire run.
       if (linked_font_index == linked_fonts->size()) {
+        // If a font was able to partially display the run, use that now.
+        if (best_partial_font_missing_char_count != INT_MAX) {
+          ApplySubstituteFont(run, best_partial_font);
+          using_best_partial_font = true;
+          continue;
+        }
+
+        // If no font was able to partially display the run, replace all glyphs
+        // with |wgDefault| to ensure they don't hold garbage values.
+        SCRIPT_FONTPROPERTIES properties;
+        memset(&properties, 0, sizeof(properties));
+        properties.cBytes = sizeof(properties);
+        ScriptGetFontProperties(cached_hdc_, &run->script_cache, &properties);
+        for (int i = 0; i < run->glyph_count; ++i)
+          run->glyphs[i] = properties.wgDefault;
+
         // TODO(msw): Don't use SCRIPT_UNDEFINED. Apparently Uniscribe can
         //            crash on certain surrogate pairs with SCRIPT_UNDEFINED.
         //            See https://bugzilla.mozilla.org/show_bug.cgi?id=341500
@@ -829,7 +865,8 @@ void RenderTextWin::ApplySubstituteFont(internal::TextRun* run,
   SelectObject(cached_hdc_, run->font.GetNativeFont());
 }
 
-bool RenderTextWin::HasMissingGlyphs(internal::TextRun* run) const {
+int RenderTextWin::CountCharsWithMissingGlyphs(internal::TextRun* run) const {
+  int chars_not_missing_glyphs = 0;
   SCRIPT_FONTPROPERTIES properties;
   memset(&properties, 0, sizeof(properties));
   properties.cBytes = sizeof(properties);
@@ -842,7 +879,7 @@ bool RenderTextWin::HasMissingGlyphs(internal::TextRun* run) const {
     DCHECK_LT(glyph_index, run->glyph_count);
 
     if (run->glyphs[glyph_index] == properties.wgDefault)
-      return true;
+      continue;
 
     // Windows Vista sometimes returns glyphs equal to wgBlank (instead of
     // wgDefault), with fZeroWidth set. Treat such cases as having missing
@@ -852,11 +889,14 @@ bool RenderTextWin::HasMissingGlyphs(internal::TextRun* run) const {
         run->visible_attributes[glyph_index].fZeroWidth &&
         !IsWhitespace(run_text[char_index]) &&
         !IsUnicodeBidiControlCharacter(run_text[char_index])) {
-      return true;
+      continue;
     }
+
+    ++chars_not_missing_glyphs;
   }
 
-  return false;
+  DCHECK_LE(chars_not_missing_glyphs, static_cast<int>(run->range.length()));
+  return run->range.length() - chars_not_missing_glyphs;
 }
 
 const std::vector<Font>* RenderTextWin::GetLinkedFonts(const Font& font) const {
@@ -906,7 +946,7 @@ SelectionModel RenderTextWin::LastSelectionModelInsideRun(
   return SelectionModel(caret, CURSOR_FORWARD);
 }
 
-RenderText* RenderText::CreateRenderText() {
+RenderText* RenderText::CreateInstance() {
   return new RenderTextWin;
 }
 

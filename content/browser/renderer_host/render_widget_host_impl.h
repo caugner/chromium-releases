@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_BROWSER_RENDERER_HOST_RENDER_WIDGET_HOST_IMPL_H_
 #define CONTENT_BROWSER_RENDERER_HOST_RENDER_WIDGET_HOST_IMPL_H_
-#pragma once
 
 #include <deque>
 #include <string>
@@ -25,7 +24,6 @@
 #include "ui/base/ime/text_input_type.h"
 #include "ui/gfx/native_widget_types.h"
 
-class BackingStore;
 class MockRenderWidgetHost;
 class WebCursor;
 struct EditCommand;
@@ -47,18 +45,21 @@ struct WebScreenInfo;
 }
 
 namespace content {
-
+class BackingStore;
 class RenderWidgetHostDelegate;
 class RenderWidgetHostViewPort;
+class SmoothScrollGesture;
 class TapSuppressionController;
 
 // This implements the RenderWidgetHost interface that is exposed to
 // embedders of content, and adds things only visible to content.
 class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
-                                            public IPC::Channel::Listener {
+                                            public IPC::Listener {
  public:
   // routing_id can be MSG_ROUTING_NONE, in which case the next available
   // routing id is taken from the RenderProcessHost.
+  // If this object outlives |delegate|, DetachDelegate() must be called when
+  // |delegate| goes away.
   RenderWidgetHostImpl(RenderWidgetHostDelegate* delegate,
                        RenderProcessHost* process,
                        int routing_id);
@@ -84,9 +85,9 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   virtual void Blur() OVERRIDE;
   virtual void CopyFromBackingStore(
       const gfx::Rect& src_rect,
-      const gfx::Size& accelerated_dest_size,
-      skia::PlatformCanvas* output,
-      base::Callback<void(bool)> callback) OVERRIDE;
+      const gfx::Size& accelerated_dst_size,
+      const base::Callback<void(bool)>& callback,
+      skia::PlatformCanvas* output) OVERRIDE;
 #if defined(TOOLKIT_GTK)
   virtual bool CopyFromBackingStoreToGtkWindow(const gfx::Rect& dest_rect,
                                                GdkWindow* target) OVERRIDE;
@@ -146,7 +147,7 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   // Tells the renderer to die and then calls Destroy().
   virtual void Shutdown();
 
-  // IPC::Channel::Listener
+  // IPC::Listener
   virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
 
   // Sends a message to the corresponding object in the renderer.
@@ -155,7 +156,10 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   // Called to notify the RenderWidget that it has been hidden or restored from
   // having been hidden.
   void WasHidden();
-  void WasRestored();
+  void WasShown();
+
+  // Returns true if the RenderWidget is hidden.
+  bool is_hidden() const { return is_hidden_; }
 
   // Called to notify the RenderWidget that its associated native window got
   // focused.
@@ -238,8 +242,8 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
 
   void CancelUpdateTextDirection();
 
-  // Called when a mouse click activates the renderer.
-  virtual void OnMouseActivate();
+  // Called when a mouse click/gesture tap activates the renderer.
+  virtual void OnPointerEventActivate();
 
   // Notifies the renderer whether or not the input method attached to this
   // process is activated.
@@ -356,9 +360,29 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   // locked.
   bool GotResponseToLockMouseRequest(bool allowed);
 
-  // Called by the view in response to AcceleratedSurfaceBuffersSwapped.
-  static void AcknowledgeSwapBuffers(int32 route_id, int gpu_host_id);
-  static void AcknowledgePostSubBuffer(int32 route_id, int gpu_host_id);
+  // Called by the view in response to AcceleratedSurfaceBuffersSwapped or
+  // AcceleratedSurfacePostSubBuffer.
+  static void AcknowledgeBufferPresent(
+      int32 route_id,
+      int gpu_host_id,
+      uint32 sync_point);
+
+  // Called by the view in response to AcceleratedSurfaceBuffersSwapped for
+  // platforms that support deferred GPU process descheduling. This does
+  // nothing if the compositor thread is enabled.
+  // TODO(jbates) Once the compositor thread is always on, this can be removed.
+  void AcknowledgeSwapBuffersToRenderer();
+
+#if defined(USE_AURA)
+  // Called by the view in response to visibility changes:
+  // 1. After the front surface is guarenteed to no longer be in use by the ui
+  //    (protected false),
+  // 2. When the ui expects to have a valid front surface (protected true).
+  static void SendFrontSurfaceIsProtected(bool is_protected,
+                                          uint32 protection_state_id,
+                                          int32 route_id,
+                                          int gpu_host_id);
+#endif
 
   // Signals that the compositing surface was updated, e.g. after a lost context
   // event.
@@ -367,6 +391,8 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   void set_allow_privileged_mouse_lock(bool allow) {
     allow_privileged_mouse_lock_ = allow;
   }
+
+  void DetachDelegate();
 
  protected:
   virtual RenderWidgetHostImpl* AsRenderWidgetHostImpl() OVERRIDE;
@@ -388,10 +414,9 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   // when accelerated compositing is enabled.
   gfx::GLSurfaceHandle GetCompositingSurface();
 
-  // "RenderWidgetHostDelegate" ------------------------------------------------
-  // There is no RenderWidgetHostDelegate but the following methods serve the
-  // same purpose. They are overridden by RenderViewHost to send upwards to its
-  // delegate.
+  // ---------------------------------------------------------------------------
+  // The following methods are overridden by RenderViewHost to send upwards to
+  // its delegate.
 
   // Called when a mousewheel event was not processed by the renderer.
   virtual void UnhandledWheelEvent(const WebKit::WebMouseWheelEvent& event) {}
@@ -482,9 +507,10 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   void OnMsgUpdateIsDelayed();
   void OnMsgInputEventAck(WebKit::WebInputEvent::Type event_type,
                           bool processed);
+  void OnMsgBeginSmoothScroll(bool scroll_down, bool scroll_far);
   virtual void OnMsgFocus();
   virtual void OnMsgBlur();
-  void OnMsgDidChangeNumTouchEvents(int count);
+  void OnMsgHasTouchEventHandlers(bool has_handlers);
 
   void OnMsgSetCursor(const WebCursor& cursor);
   void OnMsgTextInputStateChanged(ui::TextInputType type,
@@ -564,6 +590,8 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   // previously queued coalesced gesture if it exists.
   void ProcessGestureAck(bool processed, int type);
 
+  void SimulateTouchGestureWithMouse(const WebKit::WebMouseEvent& mouse_event);
+
   // Called on OnMsgInputEventAck() to process a touch event ack message.
   // This can result in a gesture event being generated and sent back to the
   // renderer.
@@ -573,7 +601,12 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   // which may get in recursive loops).
   void DelayedAutoResized();
 
+  // Called periodically to advance the active scroll gesture after being
+  // initiated by OnMsgBeginSmoothScroll.
+  void TickActiveSmoothScrollGesture();
+
   // Our delegate, which wants to know mainly about keyboard events.
+  // It will remain non-NULL until DetachDelegate() is called.
   RenderWidgetHostDelegate* delegate_;
 
   // Created during construction but initialized during Init*(). Therefore, it
@@ -749,6 +782,8 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   base::WeakPtrFactory<RenderWidgetHostImpl> weak_factory_;
 
   scoped_ptr<TapSuppressionController> tap_suppression_controller_;
+
+  scoped_ptr<SmoothScrollGesture> active_smooth_scroll_gesture_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostImpl);
 };

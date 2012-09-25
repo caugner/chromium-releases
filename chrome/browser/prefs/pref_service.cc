@@ -534,6 +534,16 @@ void PrefService::RegisterInt64Pref(const char* path,
       sync_status);
 }
 
+void PrefService::RegisterUint64Pref(const char* path,
+                                     uint64 default_value,
+                                     PrefSyncStatus sync_status) {
+  DCHECK(IsProfilePrefService(this));
+  RegisterPreference(
+      path,
+      Value::CreateStringValue(base::Uint64ToString(default_value)),
+      sync_status);
+}
+
 bool PrefService::GetBoolean(const char* path) const {
   DCHECK(CalledOnValidThread());
 
@@ -865,6 +875,27 @@ int64 PrefService::GetInt64(const char* path) const {
   return val;
 }
 
+void PrefService::SetUint64(const char* path, uint64 value) {
+  SetUserPrefValue(path, Value::CreateStringValue(base::Uint64ToString(value)));
+}
+
+uint64 PrefService::GetUint64(const char* path) const {
+  DCHECK(CalledOnValidThread());
+
+  const Preference* pref = FindPreference(path);
+  if (!pref) {
+    NOTREACHED() << "Trying to read an unregistered pref: " << path;
+    return 0;
+  }
+  std::string result("0");
+  bool rv = pref->GetValue()->GetAsString(&result);
+  DCHECK(rv);
+
+  uint64 val;
+  base::StringToUint64(result, &val);
+  return val;
+}
+
 Value* PrefService::GetMutableUserPref(const char* path,
                                        base::Value::Type type) {
   CHECK(type == Value::TYPE_DICTIONARY || type == Value::TYPE_LIST);
@@ -920,7 +951,7 @@ void PrefService::SetUserPrefValue(const char* path, Value* new_value) {
   user_pref_store_->SetValue(path, owned_value.release());
 }
 
-SyncableService* PrefService::GetSyncableService() {
+syncer::SyncableService* PrefService::GetSyncableService() {
   return pref_sync_associator_.get();
 }
 
@@ -961,6 +992,20 @@ const Value* PrefService::Preference::GetValue() const {
 
   // Every registered preference has at least a default value.
   NOTREACHED() << "no valid value found for registered pref " << name_;
+  return NULL;
+}
+
+const Value* PrefService::Preference::GetRecommendedValue() const {
+  DCHECK(pref_service_->FindPreference(name_.c_str())) <<
+      "Must register pref before getting its value";
+
+  const Value* found_value = NULL;
+  if (pref_value_store()->GetRecommendedValue(name_, type_, &found_value)) {
+    DCHECK(found_value->IsType(type_));
+    return found_value;
+  }
+
+  // The pref has no recommended value.
   return NULL;
 }
 

@@ -14,6 +14,7 @@
 #include "base/string_number_conversions.h"
 #include "base/test/test_file_util.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/captive_portal/captive_portal_service.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/profiles/profile.h"
@@ -21,6 +22,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_navigator.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_constants.h"
@@ -36,6 +38,7 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_browser_thread.h"
 #include "content/public/test/test_launcher.h"
 #include "net/base/mock_host_resolver.h"
@@ -56,8 +59,7 @@ const char kBrowserTestType[] = "browser";
 }  // namespace
 
 InProcessBrowserTest::InProcessBrowserTest()
-    : browser_(NULL),
-      dom_automation_enabled_(false)
+    : browser_(NULL)
 #if defined(OS_POSIX)
       , handle_sigterm_(true)
 #endif
@@ -77,11 +79,7 @@ InProcessBrowserTest::InProcessBrowserTest()
   chrome_path = chrome_path.Append(chrome::kBrowserProcessExecutablePath);
   CHECK(PathService::Override(base::FILE_EXE, chrome_path));
 #endif  // defined(OS_MACOSX)
-
-  test_server_.reset(new net::TestServer(
-      net::TestServer::TYPE_HTTP,
-      net::TestServer::kLocalhost,
-      FilePath(FILE_PATH_LITERAL("chrome/test/data"))));
+  CreateTestServer("chrome/test/data");
 }
 
 InProcessBrowserTest::~InProcessBrowserTest() {
@@ -148,6 +146,11 @@ void InProcessBrowserTest::SetUp() {
   // time code is directly executed.
   autorelease_pool_ = new base::mac::ScopedNSAutoreleasePool;
 #endif
+
+#if defined(ENABLE_CAPTIVE_PORTAL_DETECTION)
+  captive_portal::CaptivePortalService::set_is_disabled_for_testing(true);
+#endif
+
   BrowserTestBase::SetUp();
 }
 
@@ -155,23 +158,14 @@ void InProcessBrowserTest::PrepareTestCommandLine(CommandLine* command_line) {
   // Propagate commandline settings from test_launcher_utils.
   test_launcher_utils::PrepareBrowserCommandLineForTests(command_line);
 
-  if (dom_automation_enabled_)
-    command_line->AppendSwitch(switches::kDomAutomationController);
-
   // This is a Browser test.
   command_line->AppendSwitchASCII(switches::kTestType, kBrowserTestType);
 
-#if defined(OS_WIN)
-  // The Windows sandbox requires that the browser and child processes are the
-  // same binary.  So we launch browser_process.exe which loads chrome.dll
-  command_line->AppendSwitchPath(switches::kBrowserSubprocessPath,
-                                 command_line->GetProgram());
-#else
+#if defined(OS_MACOSX)
   // Explicitly set the path of the binary used for child processes, otherwise
   // they'll try to use browser_tests which doesn't contain ChromeMain.
   FilePath subprocess_path;
   PathService::Get(base::FILE_EXE, &subprocess_path);
-#if defined(OS_MACOSX)
   // Recreate the real environment, run the helper within the app bundle.
   subprocess_path = subprocess_path.DirName().DirName();
   DCHECK_EQ(subprocess_path.BaseName().value(), "Contents");
@@ -179,7 +173,6 @@ void InProcessBrowserTest::PrepareTestCommandLine(CommandLine* command_line) {
       subprocess_path.Append("Versions").Append(chrome::kChromeVersion);
   subprocess_path =
       subprocess_path.Append(chrome::kHelperProcessExecutablePath);
-#endif
   command_line->AppendSwitchPath(switches::kBrowserSubprocessPath,
                                  subprocess_path);
 #endif
@@ -188,8 +181,8 @@ void InProcessBrowserTest::PrepareTestCommandLine(CommandLine* command_line) {
   command_line->AppendSwitch(switches::kDisableZeroBrowsersOpenForTests);
 
   if (!command_line->HasSwitch(switches::kHomePage)) {
-      command_line->AppendSwitchASCII(
-          switches::kHomePage, chrome::kAboutBlankURL);
+    command_line->AppendSwitchASCII(
+        switches::kHomePage, chrome::kAboutBlankURL);
   }
   if (command_line->GetArgs().empty())
     command_line->AppendArg(chrome::kAboutBlankURL);
@@ -230,10 +223,10 @@ void InProcessBrowserTest::AddTabAtIndexToBrowser(
     int index,
     const GURL& url,
     content::PageTransition transition) {
-  browser::NavigateParams params(browser, url, transition);
+  chrome::NavigateParams params(browser, url, transition);
   params.tabstrip_index = index;
   params.disposition = NEW_FOREGROUND_TAB;
-  browser::Navigate(&params);
+  chrome::Navigate(&params);
 }
 
 void InProcessBrowserTest::AddTabAtIndex(
@@ -250,22 +243,22 @@ bool InProcessBrowserTest::SetUpUserDataDirectory() {
 // Creates a browser with a single tab (about:blank), waits for the tab to
 // finish loading and shows the browser.
 Browser* InProcessBrowserTest::CreateBrowser(Profile* profile) {
-  Browser* browser = Browser::Create(profile);
+  Browser* browser = new Browser(Browser::CreateParams(profile));
   AddBlankTabAndShow(browser);
   return browser;
 }
 
 Browser* InProcessBrowserTest::CreateIncognitoBrowser() {
   // Create a new browser with using the incognito profile.
-  Browser* incognito =
-      Browser::Create(browser()->profile()->GetOffTheRecordProfile());
+  Browser* incognito = new Browser(
+      Browser::CreateParams(browser()->profile()->GetOffTheRecordProfile()));
   AddBlankTabAndShow(incognito);
   return incognito;
 }
 
 Browser* InProcessBrowserTest::CreateBrowserForPopup(Profile* profile) {
-  Browser* browser = Browser::CreateWithParams(
-      Browser::CreateParams(Browser::TYPE_POPUP, profile));
+  Browser* browser =
+      new Browser(Browser::CreateParams(Browser::TYPE_POPUP, profile));
   AddBlankTabAndShow(browser);
   return browser;
 }
@@ -273,7 +266,7 @@ Browser* InProcessBrowserTest::CreateBrowserForPopup(Profile* profile) {
 Browser* InProcessBrowserTest::CreateBrowserForApp(
     const std::string& app_name,
     Profile* profile) {
-  Browser* browser = Browser::CreateWithParams(
+  Browser* browser = new Browser(
       Browser::CreateParams::CreateForApp(
           Browser::TYPE_POPUP, app_name, gfx::Rect(), profile));
   AddBlankTabAndShow(browser);
@@ -281,11 +274,11 @@ Browser* InProcessBrowserTest::CreateBrowserForApp(
 }
 
 void InProcessBrowserTest::AddBlankTabAndShow(Browser* browser) {
-  ui_test_utils::WindowedNotificationObserver observer(
+  content::WindowedNotificationObserver observer(
       content::NOTIFICATION_LOAD_STOP,
-       content::NotificationService::AllSources());
-  browser->AddSelectedTabWithURL(
-      GURL(chrome::kAboutBlankURL), content::PAGE_TRANSITION_START_PAGE);
+      content::NotificationService::AllSources());
+  chrome::AddSelectedTabWithURL(browser, GURL(chrome::kAboutBlankURL),
+                                content::PAGE_TRANSITION_START_PAGE);
   observer.Wait();
 
   browser->window()->Show();
@@ -340,7 +333,7 @@ void InProcessBrowserTest::RunTestOnMainThreadLoop() {
 #endif  // defined(OS_POSIX)
 
   // Pump startup related events.
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
 
 #if defined(OS_MACOSX)
   autorelease_pool_->Recycle();
@@ -348,12 +341,12 @@ void InProcessBrowserTest::RunTestOnMainThreadLoop() {
 
   if (!BrowserList::empty()) {
     browser_ = *BrowserList::begin();
-    ui_test_utils::WaitForLoadStop(browser_->GetActiveWebContents());
+    content::WaitForLoadStop(chrome::GetActiveWebContents(browser_));
   }
 
   // Pump any pending events that were created as a result of creating a
   // browser.
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
 
   SetUpOnMainThread();
 #if defined(OS_MACOSX)
@@ -373,6 +366,12 @@ void InProcessBrowserTest::RunTestOnMainThreadLoop() {
   autorelease_pool_->Recycle();
 #endif
 
+  // Sometimes tests leave Quit tasks in the MessageLoop (for shame), so let's
+  // run all pending messages here to avoid preempting the QuitBrowsers tasks.
+  // TODO(jbates) Once crbug.com/134753 is fixed, this can be removed because it
+  // will not be possible to post Quit tasks.
+  content::RunAllPendingInMessageLoop();
+
   QuitBrowsers();
   CHECK(BrowserList::empty());
 }
@@ -386,7 +385,7 @@ void InProcessBrowserTest::QuitBrowsers() {
   // shut down properly.
   MessageLoopForUI::current()->PostTask(FROM_HERE,
                                         base::Bind(&browser::AttemptExit));
-  ui_test_utils::RunMessageLoop();
+  content::RunMessageLoop();
 
 #if defined(OS_MACOSX)
   // browser::AttemptExit() will attempt to close all browsers by deleting
@@ -398,7 +397,7 @@ void InProcessBrowserTest::QuitBrowsers() {
   // -autorelease on itself to ultimately destroy the Browser object. The line
   // below is necessary to pump these pending messages to ensure all Browsers
   // get deleted.
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
   delete autorelease_pool_;
   autorelease_pool_ = NULL;
 #endif

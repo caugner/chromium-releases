@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_PUBLIC_BROWSER_RESOURCE_DISPATCHER_HOST_DELEGATE_H_
 #define CONTENT_PUBLIC_BROWSER_RESOURCE_DISPATCHER_HOST_DELEGATE_H_
-#pragma once
 
 #include <string>
 
@@ -104,12 +103,15 @@ class CONTENT_EXPORT ResourceDispatcherHostDelegate {
   // Informs the delegate that a response has started.
   virtual void OnResponseStarted(
       net::URLRequest* request,
+      ResourceContext* resource_context,
       ResourceResponse* response,
-      IPC::Message::Sender* sender);
+      IPC::Sender* sender);
 
   // Informs the delegate that a request has been redirected.
   virtual void OnRequestRedirected(
+      const GURL& redirect_url,
       net::URLRequest* request,
+      ResourceContext* resource_context,
       ResourceResponse* response);
 
  protected:

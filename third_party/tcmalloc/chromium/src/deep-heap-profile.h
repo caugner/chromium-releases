@@ -86,10 +86,12 @@ class DeepHeapProfile {
  private:
 #ifdef DEEP_HEAP_PROFILE
   struct DeepBucket {
-    Bucket* bucket;
-    size_t committed_size;
-    int   id;         // Unique ID of the bucket.
-    bool  is_logged;  // True if the stracktrace is logged to a file.
+    Bucket*     bucket;
+    size_t      committed_size;
+    bool        is_mmap;
+    int         id;         // Unique ID of the bucket.
+    bool        is_logged;  // True if the stracktrace is logged to a file.
+    DeepBucket* next;       // Next entry in hash-table.
   };
 
   typedef AddressMap<DeepBucket> DeepBucketMap;
@@ -161,16 +163,13 @@ class DeepHeapProfile {
     MapsRegionType type;
   };
 
+  static void DeallocateDeepBucketTable(DeepBucket** deep_table,
+                                        HeapProfileTable* heap_profile);
+
   // Checks if the length of |printed| characters by snprintf is valid.
   static bool IsPrintedStringValid(int printed,
                                    int buffer_size,
                                    int used_in_buffer);
-
-  // Clear the is_logged flag in a DeepBucket object as a callback function
-  // for DeepBucketMap::Iterate().
-  static void ClearIsLogged(const void* pointer,
-                            DeepBucket* db,
-                            DeepHeapProfile* deep_profile);
 
   // Open /proc/pid/pagemap and return its file descriptor.
   // File descriptors need to be refreshed after each fork.
@@ -203,17 +202,21 @@ class DeepHeapProfile {
                                                MMapListEntry* mmap_list,
                                                int mmap_list_length);
 
+  // Add a uintptr_t integer to a hash-value for GetDeepBucket.
+  inline static void AddIntegerToHashValue(
+      uintptr_t add, uintptr_t* hash_value);
+
   // Get the DeepBucket object corresponding to the given |bucket|.
   // DeepBucket is an extension to Bucket which is declared above.
-  DeepBucket* GetDeepBucket(Bucket* bucket);
+  DeepBucket* GetDeepBucket(Bucket* bucket, bool is_mmap, DeepBucket** table);
 
   // Reset committed_size member variables in DeepBucket objects to 0.
-  void ResetCommittedSize(Bucket** bucket_table);
+  void ResetCommittedSize(DeepBucket** deep_table);
 
   // Fill bucket data in |bucket_table| into buffer |buffer| of size
   // |buffer_size|, and return the size occupied by the bucket data in
   // |buffer|.  |bucket_length| is the offset for |buffer| to start filling.
-  int SnapshotBucketTableWithoutMalloc(Bucket** bucket_table,
+  int SnapshotBucketTableWithoutMalloc(DeepBucket** deep_table,
                                        int used_in_buffer,
                                        int buffer_size,
                                        char buffer[]);
@@ -243,7 +246,7 @@ class DeepHeapProfile {
                               char buffer[]);
 
   // Write a |bucket_table| into a file of |bucket_fd|.
-  void WriteBucketsTableToBucketFile(Bucket** bucket_table, RawFD bucket_fd);
+  void WriteBucketsTableToBucketFile(DeepBucket** deep_table, RawFD bucket_fd);
 
   // Write both malloc and mmap bucket tables into a "bucket file".
   void WriteBucketsToBucketFile();
@@ -278,7 +281,7 @@ class DeepHeapProfile {
   char* profiler_buffer_;  // Buffer we use many times.
 
   int bucket_id_;
-  DeepBucketMap* deep_bucket_map_;
+  DeepBucket** deep_table_;
   MMapListEntry* mmap_list_;
   int mmap_list_length_;
   int num_mmap_allocations_;

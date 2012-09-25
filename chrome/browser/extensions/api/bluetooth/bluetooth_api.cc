@@ -22,6 +22,7 @@
 #include "chrome/browser/chromeos/bluetooth/bluetooth_adapter.h"
 #include "chrome/browser/chromeos/bluetooth/bluetooth_device.h"
 #include "chrome/browser/chromeos/bluetooth/bluetooth_socket.h"
+#include "chrome/browser/chromeos/bluetooth/bluetooth_utils.h"
 #include "chrome/browser/chromeos/extensions/bluetooth_event_router.h"
 #include "chromeos/dbus/bluetooth_out_of_band_client.h"
 
@@ -50,6 +51,7 @@ const char kCouldNotSetOutOfBandPairingData[] =
     "Could not set Out Of Band Pairing Data";
 const char kFailedToConnect[] = "Connection failed";
 const char kInvalidDevice[] = "Invalid device";
+const char kInvalidUuid[] = "Invalid UUID";
 const char kServiceDiscoveryFailed[] = "Service discovery failed";
 const char kSocketNotFoundError[] = "Socket not found: invalid socket id";
 const char kStartDiscoveryFailed[] =
@@ -73,17 +75,17 @@ namespace api {
 #if defined(OS_CHROMEOS)
 
 bool BluetoothIsAvailableFunction::RunImpl() {
-  result_.reset(Value::CreateBooleanValue(GetAdapter(profile())->IsPresent()));
+  SetResult(Value::CreateBooleanValue(GetAdapter(profile())->IsPresent()));
   return true;
 }
 
 bool BluetoothIsPoweredFunction::RunImpl() {
-  result_.reset(Value::CreateBooleanValue(GetAdapter(profile())->IsPowered()));
+  SetResult(Value::CreateBooleanValue(GetAdapter(profile())->IsPowered()));
   return true;
 }
 
 bool BluetoothGetAddressFunction::RunImpl() {
-  result_.reset(Value::CreateStringValue(GetAdapter(profile())->address()));
+  SetResult(Value::CreateStringValue(GetAdapter(profile())->address()));
   return true;
 }
 
@@ -100,10 +102,8 @@ void BluetoothGetDevicesFunction::AddDeviceIfTrueCallback(
     list->Append(experimental_bluetooth::BluetoothDeviceToValue(*device));
 
   callbacks_pending_--;
-  if (callbacks_pending_ == -1) {
+  if (callbacks_pending_ == -1)
     SendResponse(true);
-    Release();  // Added in RunImpl
-  }
 }
 
 bool BluetoothGetDevicesFunction::RunImpl() {
@@ -113,15 +113,19 @@ bool BluetoothGetDevicesFunction::RunImpl() {
   EXTENSION_FUNCTION_VALIDATE(params.get() != NULL);
   const experimental_bluetooth::GetDevicesOptions& options = params->options;
 
+  std::string uuid;
+  if (options.uuid.get() != NULL) {
+    uuid = chromeos::bluetooth_utils::CanonicalUuid(*options.uuid.get());
+    if (uuid.empty()) {
+      SetError(kInvalidUuid);
+      return false;
+    }
+  }
+
   ListValue* matches = new ListValue;
-  result_.reset(matches);
+  SetResult(matches);
 
   CHECK_EQ(0, callbacks_pending_);
-
-  // This will be released when callbacks_pending_ == -1.  The count is checked
-  // for -1 because of the extra decrement after the for-loop, which ensures
-  // that all requests have been made before the Release happens.
-  AddRef();
 
   chromeos::BluetoothAdapter::DeviceList devices =
       GetMutableAdapter(profile())->GetDevices();
@@ -129,8 +133,7 @@ bool BluetoothGetDevicesFunction::RunImpl() {
       i != devices.end(); ++i) {
     chromeos::BluetoothDevice* device = *i;
 
-    if (options.uuid.get() != NULL &&
-        !(device->ProvidesServiceWithUUID(*(options.uuid))))
+    if (!uuid.empty() && !(device->ProvidesServiceWithUUID(uuid)))
       continue;
 
     if (options.name.get() == NULL) {
@@ -148,10 +151,11 @@ bool BluetoothGetDevicesFunction::RunImpl() {
   }
   callbacks_pending_--;
 
-  if (callbacks_pending_ == -1) {
+  // The count is checked for -1 because of the extra decrement after the
+  // for-loop, which ensures that all requests have been made before
+  // SendResponse happens.
+  if (callbacks_pending_ == -1)
     SendResponse(true);
-    Release();
-  }
 
   return true;
 }
@@ -170,13 +174,11 @@ void BluetoothGetServicesFunction::GetServiceRecordsCallback(
   }
 
   SendResponse(true);
-  Release();  // Added in RunImpl
 }
 
 void BluetoothGetServicesFunction::OnErrorCallback() {
   SetError(kServiceDiscoveryFailed);
   SendResponse(false);
-  Release();  // Added in RunImpl
 }
 
 bool BluetoothGetServicesFunction::RunImpl() {
@@ -187,15 +189,13 @@ bool BluetoothGetServicesFunction::RunImpl() {
   chromeos::BluetoothDevice* device =
       GetMutableAdapter(profile())->GetDevice(options.device_address);
   if (!device) {
-    SendResponse(false);
     SetError(kInvalidDevice);
     return false;
   }
 
   ListValue* services = new ListValue;
-  result_.reset(services);
+  SetResult(services);
 
-  AddRef();  // Released in GetServiceRecordsCallback or OnErrorCallback
   device->GetServiceRecords(
       base::Bind(&BluetoothGetServicesFunction::GetServiceRecordsCallback,
                  this,
@@ -218,14 +218,12 @@ void BluetoothConnectFunction::ConnectToServiceCallback(
         *device, &result_socket.device);
     result_socket.service_uuid = service_uuid;
     result_socket.id = socket_id;
-    result_.reset(result_socket.ToValue().release());
+    SetResult(result_socket.ToValue().release());
     SendResponse(true);
   } else {
     SetError(kFailedToConnect);
     SendResponse(false);
   }
-
-  Release();  // Added in RunImpl
 }
 
 bool BluetoothConnectFunction::RunImpl() {
@@ -233,20 +231,25 @@ bool BluetoothConnectFunction::RunImpl() {
   EXTENSION_FUNCTION_VALIDATE(params.get() != NULL);
   const experimental_bluetooth::ConnectOptions& options = params->options;
 
+  std::string uuid = chromeos::bluetooth_utils::CanonicalUuid(
+      options.service_uuid);
+  if (uuid.empty()) {
+    SetError(kInvalidUuid);
+    return false;
+  }
+
   chromeos::BluetoothDevice* device =
       GetMutableAdapter(profile())->GetDevice(options.device_address);
   if (!device) {
-    SendResponse(false);
     SetError(kInvalidDevice);
     return false;
   }
 
-  AddRef();  // Released in ConnectToServiceCallback
-  device->ConnectToService(options.service_uuid,
+  device->ConnectToService(uuid,
       base::Bind(&BluetoothConnectFunction::ConnectToServiceCallback,
                  this,
                  device,
-                 options.service_uuid));
+                 uuid));
   return true;
 }
 
@@ -297,7 +300,7 @@ void BluetoothReadFunction::Work() {
 
   if (total_bytes_read > 0) {
     success_ = true;
-    result_.reset(base::BinaryValue::Create(all_bytes, total_bytes_read));
+    SetResult(base::BinaryValue::Create(all_bytes, total_bytes_read));
   } else {
     success_ = (errsv == EAGAIN || errsv == EWOULDBLOCK);
     free(all_bytes);
@@ -344,10 +347,10 @@ void BluetoothWriteFunction::Work() {
   int errsv = errno;
 
   if (bytes_written > 0) {
-    result_.reset(Value::CreateIntegerValue(bytes_written));
+    SetResult(Value::CreateIntegerValue(bytes_written));
     success_ = true;
   } else {
-    result_.reset(0);
+    results_.reset();
     success_ = (errsv == EAGAIN || errsv == EWOULDBLOCK);
   }
 
@@ -361,13 +364,11 @@ bool BluetoothWriteFunction::Respond() {
 
 void BluetoothSetOutOfBandPairingDataFunction::OnSuccessCallback() {
   SendResponse(true);
-  Release();  // Added in RunImpl
 }
 
 void BluetoothSetOutOfBandPairingDataFunction::OnErrorCallback() {
   SetError(kCouldNotSetOutOfBandPairingData);
   SendResponse(false);
-  Release();  // Added in RunImpl
 }
 
 bool BluetoothSetOutOfBandPairingDataFunction::RunImpl() {
@@ -381,12 +382,10 @@ bool BluetoothSetOutOfBandPairingDataFunction::RunImpl() {
   chromeos::BluetoothDevice* device =
       GetMutableAdapter(profile())->GetDevice(address);
   if (!device) {
-    SendResponse(false);
     SetError(kInvalidDevice);
     return false;
   }
 
-  AddRef();  // Released in OnSuccessCallback or OnErrorCallback
   if (options->HasKey("data")) {
     DictionaryValue* data_in;
     EXTENSION_FUNCTION_VALIDATE(options->GetDictionary("data", &data_in));
@@ -440,20 +439,17 @@ void BluetoothGetLocalOutOfBandPairingDataFunction::ReadCallback(
   result->Set("hash", hash);
   result->Set("randomizer", randomizer);
 
-  result_.reset(result);
+  SetResult(result);
 
   SendResponse(true);
-  Release();  // Added in RunImpl
 }
 
 void BluetoothGetLocalOutOfBandPairingDataFunction::ErrorCallback() {
   SetError(kCouldNotGetLocalOutOfBandPairingData);
   SendResponse(false);
-  Release();  // Added in RunImpl
 }
 
 bool BluetoothGetLocalOutOfBandPairingDataFunction::RunImpl() {
-  AddRef();  // Released in one of the callbacks below
   GetMutableAdapter(profile())->ReadLocalOutOfBandPairingData(
       base::Bind(&BluetoothGetLocalOutOfBandPairingDataFunction::ReadCallback,
           this),
@@ -464,13 +460,11 @@ bool BluetoothGetLocalOutOfBandPairingDataFunction::RunImpl() {
 
 void BluetoothStartDiscoveryFunction::OnSuccessCallback() {
   SendResponse(true);
-  Release();  // Added in RunImpl
 }
 
 void BluetoothStartDiscoveryFunction::OnErrorCallback() {
   SetError(kStartDiscoveryFailed);
   SendResponse(false);
-  Release();  // Added in RunImpl
 }
 
 bool BluetoothStartDiscoveryFunction::RunImpl() {
@@ -483,7 +477,6 @@ bool BluetoothStartDiscoveryFunction::RunImpl() {
     return true;
   }
 
-  AddRef();  // Removed in whichever callback is called.
   GetMutableAdapter(profile())->SetDiscovering(true,
       base::Bind(&BluetoothStartDiscoveryFunction::OnSuccessCallback, this),
       base::Bind(&BluetoothStartDiscoveryFunction::OnErrorCallback, this));
@@ -492,18 +485,15 @@ bool BluetoothStartDiscoveryFunction::RunImpl() {
 
 void BluetoothStopDiscoveryFunction::OnSuccessCallback() {
   SendResponse(true);
-  Release();  // Added in RunImpl
 }
 
 void BluetoothStopDiscoveryFunction::OnErrorCallback() {
   SetError(kStopDiscoveryFailed);
   SendResponse(false);
-  Release();  // Added in RunImpl
 }
 
 bool BluetoothStopDiscoveryFunction::RunImpl() {
   GetEventRouter(profile())->SetSendDiscoveryEvents(false);
-  AddRef();  // Removed in whichever callback is called.
   GetMutableAdapter(profile())->SetDiscovering(false,
       base::Bind(&BluetoothStopDiscoveryFunction::OnSuccessCallback, this),
       base::Bind(&BluetoothStopDiscoveryFunction::OnErrorCallback, this));

@@ -10,7 +10,10 @@
 #include "skia/ext/platform_canvas.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "ui/gfx/canvas.h"
+#include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/rect.h"
+
+namespace content {
 
 // Assume that somewhere along the line, someone will do width * height * 4
 // with signed numbers. If the maximum value is 2**31, then 2**31 / 4 =
@@ -19,10 +22,10 @@
 // Max height and width for layers
 static const int kMaxVideoLayerSize = 23170;
 
-BackingStoreAura::BackingStoreAura(content::RenderWidgetHost* widget,
+BackingStoreAura::BackingStoreAura(RenderWidgetHost* widget,
                                    const gfx::Size& size)
     : BackingStore(widget, size),
-      device_scale_factor_(content::GetDIPScaleFactor(widget->GetView())) {
+      device_scale_factor_(GetDIPScaleFactor(widget->GetView())) {
   gfx::Size pixel_size = size.Scale(device_scale_factor_);
   bitmap_.setConfig(SkBitmap::kARGB_8888_Config,
       pixel_size.width(), pixel_size.height());
@@ -35,9 +38,9 @@ BackingStoreAura::~BackingStoreAura() {
 
 void BackingStoreAura::SkiaShowRect(const gfx::Point& point,
                                     gfx::Canvas* canvas) {
-  const gfx::Point scaled_point = point.Scale(device_scale_factor_);
-  canvas->sk_canvas()->drawBitmap(bitmap_,
-      SkIntToScalar(scaled_point.x()), SkIntToScalar(scaled_point.y()));
+  gfx::ImageSkia image = gfx::ImageSkia(gfx::ImageSkiaRep(bitmap_,
+      ui::GetScaleFactorFromScale(device_scale_factor_)));
+  canvas->DrawImageInt(image, point.x(), point.y());
 }
 
 void BackingStoreAura::ScaleFactorChanged(float device_scale_factor) {
@@ -73,7 +76,7 @@ size_t BackingStoreAura::MemorySize() {
 }
 
 void BackingStoreAura::PaintToBackingStore(
-    content::RenderProcessHost* process,
+    RenderProcessHost* process,
     TransportDIB::Id bitmap,
     const gfx::Rect& bitmap_rect,
     const std::vector<gfx::Rect>& copy_rects,
@@ -126,12 +129,15 @@ void BackingStoreAura::ScrollBackingStore(int dx, int dy,
                                           const gfx::Rect& clip_rect,
                                           const gfx::Size& view_size) {
   gfx::Rect pixel_rect = clip_rect.Scale(device_scale_factor_);
-  int x = std::min(pixel_rect.x(), pixel_rect.x() - dx);
-  int y = std::min(pixel_rect.y(), pixel_rect.y() - dy);
-  int w = pixel_rect.width() + abs(dx);
-  int h = pixel_rect.height() + abs(dy);
+  int pixel_dx = dx * device_scale_factor_;
+  int pixel_dy = dy * device_scale_factor_;
+
+  int x = std::min(pixel_rect.x(), pixel_rect.x() - pixel_dx);
+  int y = std::min(pixel_rect.y(), pixel_rect.y() - pixel_dy);
+  int w = pixel_rect.width() + abs(pixel_dx);
+  int h = pixel_rect.height() + abs(pixel_dy);
   SkIRect rect = SkIRect::MakeXYWH(x, y, w, h);
-  bitmap_.scrollRect(&rect, dx, dy);
+  bitmap_.scrollRect(&rect, pixel_dx, pixel_dy);
 }
 
 bool BackingStoreAura::CopyFromBackingStore(const gfx::Rect& rect,
@@ -151,3 +157,5 @@ bool BackingStoreAura::CopyFromBackingStore(const gfx::Rect& rect,
   output->writePixels(b, rect.x(), rect.y());
   return true;
 }
+
+}  // namespace content

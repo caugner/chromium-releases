@@ -100,8 +100,7 @@ void DownloadFileManager::CreateDownloadFile(
       info.get(), stream.Pass(), download_manager, get_hash, bound_net_log));
 
   content::DownloadInterruptReason interrupt_reason(
-      content::ConvertNetErrorToInterruptReason(
-          download_file->Initialize(), content::DOWNLOAD_INTERRUPT_FROM_DISK));
+      download_file->Initialize());
   if (interrupt_reason == content::DOWNLOAD_INTERRUPT_REASON_NONE) {
     DCHECK(GetDownloadFile(info->download_id) == NULL);
     downloads_[info->download_id] = download_file.release();
@@ -115,25 +114,6 @@ DownloadFile* DownloadFileManager::GetDownloadFile(
     DownloadId global_id) {
   DownloadFileMap::iterator it = downloads_.find(global_id);
   return it == downloads_.end() ? NULL : it->second;
-}
-
-void DownloadFileManager::UpdateInProgressDownloads() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
-  for (DownloadFileMap::iterator i = downloads_.begin();
-       i != downloads_.end(); ++i) {
-    DownloadId global_id = i->first;
-    DownloadFile* download_file = i->second;
-    DownloadManager* manager = download_file->GetDownloadManager();
-    if (manager) {
-      BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-          base::Bind(&DownloadManager::UpdateDownload,
-                     manager,
-                     global_id.local(),
-                     download_file->BytesSoFar(),
-                     download_file->CurrentSpeed(),
-                     download_file->GetHashState()));
-    }
-  }
 }
 
 // This method will be sent via a user action, or shutdown on the UI thread, and
@@ -154,7 +134,8 @@ void DownloadFileManager::CancelDownload(DownloadId global_id) {
   EraseDownload(global_id);
 }
 
-void DownloadFileManager::CompleteDownload(DownloadId global_id) {
+void DownloadFileManager::CompleteDownload(
+    DownloadId global_id, const base::Closure& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
 
   if (!ContainsKey(downloads_, global_id))
@@ -166,9 +147,20 @@ void DownloadFileManager::CompleteDownload(DownloadId global_id) {
            << " id = " << global_id
            << " download_file = " << download_file->DebugString();
 
+  // Done here on Windows so that anti-virus scanners invoked by
+  // the attachment service actually see the data; see
+  // http://crbug.com/127999.
+  // Done here for mac because we only want to do this once; see
+  // http://crbug.com/13120 for details.
+  // Other platforms don't currently do source annotation.
+  download_file->AnnotateWithSourceInformation();
+
   download_file->Detach();
 
   EraseDownload(global_id);
+
+  // Notify our caller we've let it go.
+  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE, callback);
 }
 
 void DownloadFileManager::OnDownloadManagerShutdown(DownloadManager* manager) {
@@ -195,149 +187,26 @@ void DownloadFileManager::OnDownloadManagerShutdown(DownloadManager* manager) {
 
 // Actions from the UI thread and run on the download thread
 
-// The DownloadManager in the UI thread has provided an intermediate .crdownload
-// name for the download specified by 'id'. Rename the in progress download.
-//
-// There are 2 possible rename cases where this method can be called:
-// 1. tmp -> foo.crdownload (not final, safe)
-// 2. tmp-> Unconfirmed.xxx.crdownload (not final, dangerous)
-// TODO(asanka): Merge with RenameCompletingDownloadFile() and move
-//               uniquification logic into DownloadFile.
-void DownloadFileManager::RenameInProgressDownloadFile(
+void DownloadFileManager::RenameDownloadFile(
     DownloadId global_id,
     const FilePath& full_path,
     bool overwrite_existing_file,
     const RenameCompletionCallback& callback) {
-  VLOG(20) << __FUNCTION__ << "()" << " id = " << global_id
-           << " full_path = \"" << full_path.value() << "\"";
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
-
   DownloadFile* download_file = GetDownloadFile(global_id);
   if (!download_file) {
-    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                            base::Bind(callback, FilePath()));
+    BrowserThread::PostTask(
+        BrowserThread::UI, FROM_HERE,
+        base::Bind(callback, content::DOWNLOAD_INTERRUPT_REASON_FILE_FAILED,
+                   FilePath()));
     return;
   }
 
-  VLOG(20) << __FUNCTION__ << "()"
-           << " download_file = " << download_file->DebugString();
-  FilePath new_path(full_path);
-  if (!overwrite_existing_file) {
-    int uniquifier =
-        file_util::GetUniquePathNumber(new_path, FILE_PATH_LITERAL(""));
-    if (uniquifier > 0) {
-      new_path = new_path.InsertBeforeExtensionASCII(
-          StringPrintf(" (%d)", uniquifier));
-    }
-  }
-
-  net::Error rename_error = download_file->Rename(new_path);
-  if (net::OK != rename_error) {
-    CancelDownloadOnRename(global_id, rename_error);
-    new_path.clear();
-  }
-  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                          base::Bind(callback, new_path));
-}
-
-// The DownloadManager in the UI thread has provided a final name for the
-// download specified by 'id'. Rename the download that's in the process
-// of completing.
-//
-// There are 2 possible rename cases where this method can be called:
-// 1. foo.crdownload -> foo (final, safe)
-// 2. Unconfirmed.xxx.crdownload -> xxx (final, validated)
-void DownloadFileManager::RenameCompletingDownloadFile(
-    DownloadId global_id,
-    const FilePath& full_path,
-    bool overwrite_existing_file,
-    const RenameCompletionCallback& callback) {
-  VLOG(20) << __FUNCTION__ << "()" << " id = " << global_id
-           << " overwrite_existing_file = " << overwrite_existing_file
-           << " full_path = \"" << full_path.value() << "\"";
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
-
-  DownloadFile* download_file = GetDownloadFile(global_id);
-  if (!download_file) {
-    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                            base::Bind(callback, FilePath()));
-    return;
-  }
-
-  VLOG(20) << __FUNCTION__ << "()"
-           << " download_file = " << download_file->DebugString();
-
-  FilePath new_path = full_path;
-  if (!overwrite_existing_file) {
-    // Make our name unique at this point, as if a dangerous file is
-    // downloading and a 2nd download is started for a file with the same
-    // name, they would have the same path.  This is because we uniquify
-    // the name on download start, and at that time the first file does
-    // not exists yet, so the second file gets the same name.
-    // This should not happen in the SAFE case, and we check for that in the UI
-    // thread.
-    int uniquifier =
-        file_util::GetUniquePathNumber(new_path, FILE_PATH_LITERAL(""));
-    if (uniquifier > 0) {
-      new_path = new_path.InsertBeforeExtensionASCII(
-          StringPrintf(" (%d)", uniquifier));
-    }
-  }
-
-  // Rename the file, overwriting if necessary.
-  net::Error rename_error = download_file->Rename(new_path);
-  if (net::OK != rename_error) {
-    // Error. Between the time the UI thread generated 'full_path' to the time
-    // this code runs, something happened that prevents us from renaming.
-    CancelDownloadOnRename(global_id, rename_error);
-    new_path.clear();
-  } else {
-#if defined(OS_MACOSX)
-    // Done here because we only want to do this once; see
-    // http://crbug.com/13120 for details.
-    download_file->AnnotateWithSourceInformation();
-#endif
-  }
-
-  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                          base::Bind(callback, new_path));
+  download_file->Rename(full_path, overwrite_existing_file, callback);
 }
 
 int DownloadFileManager::NumberOfActiveDownloads() const {
   return downloads_.size();
-}
-
-// Called only from RenameInProgressDownloadFile and
-// RenameCompletingDownloadFile on the FILE thread.
-// TODO(asanka): Use the RenameCompletionCallback instead of a separate
-//               OnDownloadInterrupted call.
-void DownloadFileManager::CancelDownloadOnRename(
-    DownloadId global_id, net::Error rename_error) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
-
-  DownloadFile* download_file = GetDownloadFile(global_id);
-  if (!download_file)
-    return;
-
-  DownloadManager* download_manager = download_file->GetDownloadManager();
-  if (!download_manager) {
-    // Without a download manager, we can't cancel the request normally, so we
-    // need to do it here.  The normal path will also update the download
-    // history before canceling the request.
-    download_file->CancelDownloadRequest();
-    return;
-  }
-
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
-      base::Bind(&DownloadManager::OnDownloadInterrupted,
-                 download_manager,
-                 global_id.local(),
-                 download_file->BytesSoFar(),
-                 download_file->GetHashState(),
-                 content::ConvertNetErrorToInterruptReason(
-                     rename_error,
-                     content::DOWNLOAD_INTERRUPT_FROM_DISK)));
 }
 
 void DownloadFileManager::EraseDownload(DownloadId global_id) {

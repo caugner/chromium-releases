@@ -28,13 +28,13 @@ PasswordDataTypeController::PasswordDataTypeController(
                                     sync_service) {
 }
 
-syncable::ModelType PasswordDataTypeController::type() const {
-  return syncable::PASSWORDS;
+syncer::ModelType PasswordDataTypeController::type() const {
+  return syncer::PASSWORDS;
 }
 
-browser_sync::ModelSafeGroup PasswordDataTypeController::model_safe_group()
+syncer::ModelSafeGroup PasswordDataTypeController::model_safe_group()
     const {
-  return browser_sync::GROUP_PASSWORD;
+  return syncer::GROUP_PASSWORD;
 }
 
 PasswordDataTypeController::~PasswordDataTypeController() {}
@@ -53,7 +53,7 @@ bool PasswordDataTypeController::StartModels() {
   password_store_ = PasswordStoreFactory::GetForProfile(
       profile(), Profile::EXPLICIT_ACCESS);
   if (!password_store_.get()) {
-    SyncError error(
+    syncer::SyncError error(
         FROM_HERE,
         "PasswordStore not initialized, password datatype controller aborting.",
         type());

@@ -11,13 +11,13 @@
 #include "base/file_util.h"
 #include "base/message_loop_proxy.h"
 #include "base/path_service.h"
+#include "base/run_loop.h"
 #include "base/string_number_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
-#include "chrome/browser/custom_handlers/protocol_handler_registry.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_special_storage_policy.h"
 #include "chrome/browser/extensions/extension_system.h"
@@ -28,6 +28,8 @@
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/history/history_backend.h"
 #include "chrome/browser/history/history_service_factory.h"
+#include "chrome/browser/history/shortcuts_backend.h"
+#include "chrome/browser/history/shortcuts_backend_factory.h"
 #include "chrome/browser/history/top_sites.h"
 #include "chrome/browser/net/proxy_service_factory.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
@@ -50,7 +52,9 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/render_process_host.h"
 #include "content/public/test/mock_resource_context.h"
+#include "content/public/test/test_utils.h"
 #include "net/cookies/cookie_monster.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -139,6 +143,15 @@ ProfileKeyedService* CreateTestDesktopNotificationService(Profile* profile) {
 
 }  // namespace
 
+// static
+#if defined(OS_CHROMEOS)
+// Must be kept in sync with
+// ChromeBrowserMainPartsChromeos::PreEarlyInitialization.
+const char TestingProfile::kTestUserProfileDir[] = "test-user";
+#else
+const char TestingProfile::kTestUserProfileDir[] = "Default";
+#endif
+
 TestingProfile::TestingProfile()
     : start_time_(Time::Now()),
       testing_prefs_(NULL),
@@ -211,8 +224,8 @@ void TestingProfile::Init() {
   if (!file_util::PathExists(profile_path_))
     file_util::CreateDirectory(profile_path_);
 
-  ExtensionSystemFactory::GetInstance()->SetTestingFactory(
-      this, TestExtensionSystem::Build);
+  extensions::ExtensionSystemFactory::GetInstance()->SetTestingFactory(
+      this, extensions::TestExtensionSystem::Build);
 
   profile_dependency_manager_->CreateProfileServices(this, true);
 
@@ -235,11 +248,7 @@ void TestingProfile::FinishInit() {
 }
 
 TestingProfile::~TestingProfile() {
-  DCHECK(content::NotificationService::current());
-  content::NotificationService::current()->Notify(
-      chrome::NOTIFICATION_PROFILE_DESTROYED,
-      content::Source<Profile>(static_cast<Profile*>(this)),
-      content::NotificationService::NoDetails());
+  MaybeSendDestroyedNotification();
 
   profile_dependency_manager_->DestroyProfileServices(this);
 
@@ -282,7 +291,7 @@ void TestingProfile::CreateHistoryService(bool delete_file, bool no_db) {
 
 void TestingProfile::DestroyHistoryService() {
   scoped_refptr<HistoryService> history_service =
-      HistoryServiceFactory::GetForProfileIfExists(this);
+      HistoryServiceFactory::GetForProfileWithoutCreating(this);
   if (!history_service.get())
     return;
 
@@ -347,18 +356,13 @@ void TestingProfile::CreateBookmarkModel(bool delete_file) {
               this, BuildBookmarkModel));
 
   HistoryService* history_service =
-      HistoryServiceFactory::GetForProfileIfExists(this).get();
+      HistoryServiceFactory::GetForProfileWithoutCreating(this).get();
   if (history_service) {
     history_service->history_backend_->bookmark_service_ =
         bookmark_service;
     history_service->history_backend_->expirer_.bookmark_service_ =
         bookmark_service;
   }
-}
-
-void TestingProfile::CreateProtocolHandlerRegistry() {
-  protocol_handler_registry_ = new ProtocolHandlerRegistry(this,
-      new ProtocolHandlerRegistry::Delegate());
 }
 
 static scoped_refptr<RefcountedProfileKeyedService> BuildWebDataService(
@@ -378,16 +382,17 @@ void TestingProfile::BlockUntilBookmarkModelLoaded() {
   DCHECK(GetBookmarkModel());
   if (GetBookmarkModel()->IsLoaded())
     return;
-  BookmarkLoadObserver observer;
+  base::RunLoop run_loop;
+  BookmarkLoadObserver observer(content::GetQuitTaskForRunLoop(&run_loop));
   GetBookmarkModel()->AddObserver(&observer);
-  MessageLoop::current()->Run();
+  run_loop.Run();
   GetBookmarkModel()->RemoveObserver(&observer);
   DCHECK(GetBookmarkModel()->IsLoaded());
 }
 
 // TODO(phajdan.jr): Doesn't this hang if Top Sites are already loaded?
 void TestingProfile::BlockUntilTopSitesLoaded() {
-  ui_test_utils::WindowedNotificationObserver top_sites_loaded_observer(
+  content::WindowedNotificationObserver top_sites_loaded_observer(
       chrome::NOTIFICATION_TOP_SITES_LOADED,
       content::NotificationService::AllSources());
   if (!GetHistoryService(Profile::EXPLICIT_ACCESS))
@@ -443,19 +448,19 @@ VisitedLinkMaster* TestingProfile::GetVisitedLinkMaster() {
 }
 
 ExtensionService* TestingProfile::GetExtensionService() {
-  return ExtensionSystem::Get(this)->extension_service();
+  return extensions::ExtensionSystem::Get(this)->extension_service();
 }
 
-UserScriptMaster* TestingProfile::GetUserScriptMaster() {
-  return ExtensionSystem::Get(this)->user_script_master();
+extensions::UserScriptMaster* TestingProfile::GetUserScriptMaster() {
+  return extensions::ExtensionSystem::Get(this)->user_script_master();
 }
 
 ExtensionProcessManager* TestingProfile::GetExtensionProcessManager() {
-  return ExtensionSystem::Get(this)->process_manager();
+  return extensions::ExtensionSystem::Get(this)->process_manager();
 }
 
-ExtensionEventRouter* TestingProfile::GetExtensionEventRouter() {
-  return ExtensionSystem::Get(this)->event_router();
+extensions::EventRouter* TestingProfile::GetExtensionEventRouter() {
+  return extensions::ExtensionSystem::Get(this)->event_router();
 }
 
 void TestingProfile::SetExtensionSpecialStoragePolicy(
@@ -475,11 +480,11 @@ FaviconService* TestingProfile::GetFaviconService(ServiceAccessType access) {
 }
 
 HistoryService* TestingProfile::GetHistoryService(ServiceAccessType access) {
-  return HistoryServiceFactory::GetForProfileIfExists(this);
+  return HistoryServiceFactory::GetForProfileIfExists(this, access);
 }
 
 HistoryService* TestingProfile::GetHistoryServiceWithoutCreating() {
-  return HistoryServiceFactory::GetForProfileIfExists(this);
+  return HistoryServiceFactory::GetForProfileWithoutCreating(this);
 }
 
 net::CookieMonster* TestingProfile::GetCookieMonster() {
@@ -501,10 +506,6 @@ policy::PolicyService* TestingProfile::GetPolicyService() {
   return policy_service_.get();
 }
 
-history::ShortcutsBackend* TestingProfile::GetShortcutsBackend() {
-  return NULL;
-}
-
 void TestingProfile::SetPrefService(PrefService* prefs) {
 #if defined(ENABLE_PROTECTOR_SERVICE)
   // ProtectorService binds itself very closely to the PrefService at the moment
@@ -522,7 +523,7 @@ void TestingProfile::CreateTestingPrefService() {
   testing_prefs_ = new TestingPrefService();
   prefs_.reset(testing_prefs_);
   Profile::RegisterUserPrefs(prefs_.get());
-  browser::RegisterUserPrefs(prefs_.get());
+  chrome::RegisterUserPrefs(prefs_.get());
 }
 
 PrefService* TestingProfile::GetPrefs() {
@@ -551,12 +552,24 @@ net::URLRequestContextGetter* TestingProfile::GetRequestContext() {
 net::URLRequestContextGetter* TestingProfile::GetRequestContextForRenderProcess(
     int renderer_child_id) {
   ExtensionService* extension_service =
-      ExtensionSystem::Get(this)->extension_service();
+      extensions::ExtensionSystem::Get(this)->extension_service();
   if (extension_service) {
     const extensions::Extension* installed_app = extension_service->
         GetInstalledAppForRenderer(renderer_child_id);
     if (installed_app != NULL && installed_app->is_storage_isolated())
       return GetRequestContextForIsolatedApp(installed_app->id());
+  }
+
+  content::RenderProcessHost* rph = content::RenderProcessHost::FromID(
+      renderer_child_id);
+  if (rph && rph->IsGuest()) {
+    // For guest processes (used by the browser tag), we need to isolate the
+    // storage.
+    // TODO(nasko): Until we have proper storage partitions, create a
+    // non-persistent context using the RPH's id.
+    std::string id("guest-");
+    id.append(base::IntToString(renderer_child_id));
+    return GetRequestContextForIsolatedApp(id);
   }
 
   return GetRequestContext();
@@ -661,7 +674,7 @@ base::Time TestingProfile::GetStartTime() const {
 }
 
 ProtocolHandlerRegistry* TestingProfile::GetProtocolHandlerRegistry() {
-  return protocol_handler_registry_.get();
+  return NULL;
 }
 
 FilePath TestingProfile::last_selected_directory() {
@@ -682,7 +695,7 @@ PrefProxyConfigTracker* TestingProfile::GetProxyConfigTracker() {
 
 void TestingProfile::BlockUntilHistoryProcessesPendingRequests() {
   scoped_refptr<HistoryService> history_service =
-      HistoryServiceFactory::GetForProfileIfExists(this);
+      HistoryServiceFactory::GetForProfile(this, Profile::EXPLICIT_ACCESS);
   DCHECK(history_service.get());
   DCHECK(MessageLoop::current());
 

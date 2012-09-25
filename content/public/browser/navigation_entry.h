@@ -4,10 +4,10 @@
 
 #ifndef CONTENT_PUBLIC_BROWSER_NAVIGATION_ENTRY_H_
 #define CONTENT_PUBLIC_BROWSER_NAVIGATION_ENTRY_H_
-#pragma once
 
 #include <string>
 
+#include "base/memory/ref_counted_memory.h"
 #include "base/string16.h"
 #include "content/common/content_export.h"
 #include "content/public/common/page_transition_types.h"
@@ -48,6 +48,10 @@ class NavigationEntry {
   // the user.
   virtual void SetURL(const GURL& url) = 0;
   virtual const GURL& GetURL() const = 0;
+
+  // Used for specifying a base URL for pages loaded via data URLs.
+  virtual void SetBaseURLForDataURL(const GURL& url) = 0;
+  virtual const GURL& GetBaseURLForDataURL() const = 0;
 
   // The referring URL. Can be empty.
   virtual void SetReferrer(const content::Referrer& referrer) = 0;
@@ -122,14 +126,27 @@ class NavigationEntry {
   // have to be reposted to reload the page properly. This flag indicates
   // whether the page had post data.
   //
-  // The actual post data is stored in the content_state and is extracted by
-  // WebKit to actually make the request.
+  // The actual post data is stored either in
+  // 1) browser_initiated_post_data when a new post data request is started.
+  // 2) content_state when a post request has started and is extracted by
+  //    WebKit to actually make the request.
   virtual void SetHasPostData(bool has_post_data) = 0;
   virtual bool GetHasPostData() const = 0;
 
   // The Post identifier associated with the page.
   virtual void SetPostID(int64 post_id) = 0;
   virtual int64 GetPostID() const = 0;
+
+  // Holds the raw post data of a browser initiated post request.
+  // For efficiency, this should be cleared when content_state is populated
+  // since the data is duplicated.
+  // Note, this field:
+  // 1) is not persisted in session restore.
+  // 2) is shallow copied with the static copy Create method above.
+  // 3) may be NULL so check before use.
+  virtual void SetBrowserInitiatedPostData(
+      const base::RefCountedMemory* data) = 0;
+  virtual const base::RefCountedMemory* GetBrowserInitiatedPostData() const = 0;
 
   // The favicon data and tracking information. See content::FaviconStatus.
   virtual const FaviconStatus& GetFavicon() const = 0;

@@ -4,24 +4,23 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_STATUS_DATA_PROMO_NOTIFICATION_H_
 #define CHROME_BROWSER_CHROMEOS_STATUS_DATA_PROMO_NOTIFICATION_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/memory/weak_ptr.h"
-#include "ui/views/widget/widget.h"
+#include "ui/views/widget/widget_observer.h"
 
 class PrefService;
 
 namespace views {
 class View;
-}  // namespace views
+}
 
 namespace chromeos {
 class MessageBubble;
 class MessageBubbleLinkListener;
 class NetworkLibrary;
 
-class DataPromoNotification : public views::Widget::Observer {
+class DataPromoNotification : public views::WidgetObserver {
  public:
   DataPromoNotification();
   virtual ~DataPromoNotification();
@@ -41,7 +40,7 @@ class DataPromoNotification : public views::Widget::Observer {
   void CloseNotification();
 
  private:
-  // Overridden from views::Widget::Observer.
+  // Overridden from views::WidgetObserver:
   virtual void OnWidgetClosing(views::Widget* widget) OVERRIDE;
 
   // Notification bubble for 3G promo.

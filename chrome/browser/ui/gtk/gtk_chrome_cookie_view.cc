@@ -7,6 +7,8 @@
 #include "base/i18n/time_formatting.h"
 #include "base/utf_string_conversions.h"
 #include "grit/generated_resources.h"
+#include "net/cookies/canonical_cookie.h"
+#include "net/cookies/parsed_cookie.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/text/bytes_formatting.h"
@@ -463,7 +465,7 @@ void gtk_chrome_cookie_view_clear(GtkChromeCookieView* self) {
 void gtk_chrome_cookie_view_display_cookie(
     GtkChromeCookieView* self,
     const std::string& domain,
-    const net::CookieMonster::CanonicalCookie& cookie) {
+    const net::CanonicalCookie& cookie) {
   UpdateVisibleDetailedInfo(self, self->cookie_details_table_);
 
   gtk_entry_set_text(GTK_ENTRY(self->cookie_name_entry_),
@@ -478,7 +480,7 @@ void gtk_chrome_cookie_view_display_cookie(
                      UTF16ToUTF8(base::TimeFormatFriendlyDateAndTime(
                          cookie.CreationDate())).c_str());
 
-  std::string expire_text = cookie.DoesExpire() ?
+  std::string expire_text = cookie.IsPersistent() ?
       UTF16ToUTF8(base::TimeFormatFriendlyDateAndTime(cookie.ExpiryDate())) :
       l10n_util::GetStringUTF8(IDS_COOKIES_COOKIE_EXPIRES_SESSION);
 
@@ -490,7 +492,7 @@ void gtk_chrome_cookie_view_display_cookie(
     GtkTreeIter iter;
     gtk_list_store_clear(store);
 
-    if (cookie.DoesExpire()) {
+    if (cookie.IsPersistent()) {
       gtk_list_store_append(store, &iter);
       gtk_list_store_set(store, &iter, 0, expire_text.c_str(), -1);
     }
@@ -517,8 +519,8 @@ void gtk_chrome_cookie_view_display_cookie_string(
     GtkChromeCookieView* self,
     const GURL& url,
     const std::string& cookie_line) {
-  net::CookieMonster::ParsedCookie pc(cookie_line);
-  net::CookieMonster::CanonicalCookie cookie(url, pc);
+  net::ParsedCookie pc(cookie_line);
+  net::CanonicalCookie cookie(url, pc);
 
   gtk_chrome_cookie_view_display_cookie(
       self,

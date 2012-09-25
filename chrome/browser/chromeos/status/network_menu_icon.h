@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_STATUS_NETWORK_MENU_ICON_H_
 #define CHROME_BROWSER_CHROMEOS_STATUS_NETWORK_MENU_ICON_H_
-#pragma once
 
 // NetworkMenuIcon Manages an icon that reflects the current state of the
 // network (see chromeos::NetworkLibrary). It takes an optional Delegate
@@ -87,6 +86,9 @@ class NetworkMenuIcon : public ui::AnimationDelegate {
   // Sets the resource color theme (e.g. light or dark icons).
   void SetResourceColorTheme(ResourceColorTheme color);
 
+  // Returns true if the icon should be visible in a system tray.
+  bool ShouldShowIconInTray();
+
   // Generates and returns the icon image. If |text| is not NULL, sets it to
   // the tooltip or display text to show, based on the value of mode_.
   const gfx::ImageSkia GetIconAndText(string16* text);
@@ -108,14 +110,12 @@ class NetworkMenuIcon : public ui::AnimationDelegate {
 
   // Returns a modified version of |source| representing the connecting state
   // of a network. Public for unit tests.
-  static const SkBitmap GenerateConnectingBitmap(const gfx::ImageSkia& source);
+  static const gfx::ImageSkia GenerateConnectingImage(
+      const gfx::ImageSkia& source);
 
   // Returns an image associated with |network|, reflecting its current state.
   static const gfx::ImageSkia GetImage(const Network* network,
                                        ResourceColorTheme color);
-
-  // Returns an image representing an unconnected VPN.
-  static const gfx::ImageSkia GetVpnImage();
 
   // Access a specific image of the specified color theme. If index is out of
   // range, an empty image will be returned.

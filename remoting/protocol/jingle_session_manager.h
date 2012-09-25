@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef REMOTING_PROTOCOL_PEPPER_SESSION_MANAGER_H_
-#define REMOTING_PROTOCOL_PEPPER_SESSION_MANAGER_H_
+#ifndef REMOTING_PROTOCOL_JINGLE_SESSION_MANAGER_H_
+#define REMOTING_PROTOCOL_JINGLE_SESSION_MANAGER_H_
 
 #include <map>
 #include <list>
@@ -61,8 +61,7 @@ class JingleSessionManager : public SessionManager,
   virtual scoped_ptr<Session> Connect(
       const std::string& host_jid,
       scoped_ptr<Authenticator> authenticator,
-      scoped_ptr<CandidateSessionConfig> config,
-      const Session::StateChangeCallback& state_change_callback) OVERRIDE;
+      scoped_ptr<CandidateSessionConfig> config) OVERRIDE;
   virtual void Close() OVERRIDE;
   virtual void set_authenticator_factory(
       scoped_ptr<AuthenticatorFactory> authenticator_factory) OVERRIDE;
@@ -110,4 +109,4 @@ class JingleSessionManager : public SessionManager,
 }  // namespace protocol
 }  // namespace remoting
 
-#endif  // REMOTING_PROTOCOL_PEPPER_SESSION_MANAGER_H_
+#endif  // REMOTING_PROTOCOL_JINGLE_SESSION_MANAGER_H_

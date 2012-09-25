@@ -6,12 +6,12 @@
 
 #include "ash/shell.h"
 #include "ash/system/tray/system_tray.h"
-#include "ash/wm/shelf_auto_hide_behavior.h"
+#include "ash/wm/shelf_types.h"
 #include "ui/base/animation/slide_animation.h"
 #include "ui/compositor/layer.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
-#include "ui/views/layout/fill_layout.h"
+#include "ui/views/layout/box_layout.h"
 #include "ui/views/widget/widget.h"
 
 namespace {
@@ -28,7 +28,8 @@ TrayItemView::TrayItemView()
       image_view_(NULL) {
   SetPaintToLayer(true);
   SetFillsBoundsOpaquely(false);
-  SetLayoutManager(new views::FillLayout);
+  SetLayoutManager(
+      new views::BoxLayout(views::BoxLayout::kHorizontal, 0, 0, 0));
 }
 
 TrayItemView::~TrayItemView() {}

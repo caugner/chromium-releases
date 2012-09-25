@@ -19,12 +19,15 @@
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
+#include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/history/history_notifications.h"
+#include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
 #include "chrome/browser/ui/webui/favicon_source.h"
@@ -42,11 +45,15 @@
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
-#include "grit/theme_resources_standard.h"
 #include "net/base/escape.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
+
+#if defined(OS_ANDROID)
+#include "chrome/browser/ui/android/tab_model/tab_model.h"
+#include "chrome/browser/ui/android/tab_model/tab_model_list.h"
+#endif
 
 using content::UserMetricsAction;
 using content::WebContents;
@@ -203,8 +210,8 @@ void BrowsingHistoryHandler::HandleGetHistory(const ListValue* args) {
   // Need to remember the query string for our results.
   search_text_ = string16();
 
-  HistoryService* hs =
-      Profile::FromWebUI(web_ui())->GetHistoryService(Profile::EXPLICIT_ACCESS);
+  HistoryService* hs = HistoryServiceFactory::GetForProfile(
+      Profile::FromWebUI(web_ui()), Profile::EXPLICIT_ACCESS);
   hs->QueryHistory(search_text_,
       options,
       &cancelable_search_consumer_,
@@ -229,8 +236,8 @@ void BrowsingHistoryHandler::HandleSearchHistory(const ListValue* args) {
 
   // Need to remember the query string for our results.
   search_text_ = query;
-  HistoryService* hs =
-      Profile::FromWebUI(web_ui())->GetHistoryService(Profile::EXPLICIT_ACCESS);
+  HistoryService* hs = HistoryServiceFactory::GetForProfile(
+      Profile::FromWebUI(web_ui()), Profile::EXPLICIT_ACCESS);
   hs->QueryHistory(search_text_,
       options,
       &cancelable_search_consumer_,
@@ -272,8 +279,8 @@ void BrowsingHistoryHandler::HandleRemoveURLsOnOneDay(const ListValue* args) {
     urls_to_be_deleted_.insert(GURL(string16_value));
   }
 
-  HistoryService* hs =
-      Profile::FromWebUI(web_ui())->GetHistoryService(Profile::EXPLICIT_ACCESS);
+  HistoryService* hs = HistoryServiceFactory::GetForProfile(
+      Profile::FromWebUI(web_ui()), Profile::EXPLICIT_ACCESS);
   hs->ExpireHistoryBetween(
       urls_to_be_deleted_, begin_time, end_time, &cancelable_delete_consumer_,
       base::Bind(&BrowsingHistoryHandler::RemoveComplete,
@@ -282,21 +289,24 @@ void BrowsingHistoryHandler::HandleRemoveURLsOnOneDay(const ListValue* args) {
 
 void BrowsingHistoryHandler::HandleClearBrowsingData(const ListValue* args) {
 #if defined(OS_ANDROID)
-  NOTIMPLEMENTED() << "TODO(yfriedman): Upstream the Android version.";
+  Profile* profile = Profile::FromWebUI(web_ui());
+  const TabModel* tab_model =
+      TabModelList::GetTabModelWithProfile(profile);
+  if (tab_model)
+    tab_model->OpenClearBrowsingData();
 #else
   // TODO(beng): This is an improper direct dependency on Browser. Route this
   // through some sort of delegate.
-  Profile* profile = Profile::FromWebUI(web_ui());
-  Browser* browser = browser::FindBrowserWithProfile(profile);
-  if (browser)
-    browser->OpenClearBrowsingDataDialog();
+  Browser* browser = browser::FindBrowserWithWebContents(
+      web_ui()->GetWebContents());
+  chrome::ShowClearBrowsingDataDialog(browser);
 #endif
 }
 
 void BrowsingHistoryHandler::HandleRemoveBookmark(const ListValue* args) {
   string16 url = ExtractStringValue(args);
   Profile* profile = Profile::FromWebUI(web_ui());
-  BookmarkModel* model = profile->GetBookmarkModel();
+  BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile);
   bookmark_utils::RemoveAllBookmarks(model, GURL(url));
 }
 
@@ -344,7 +354,8 @@ void BrowsingHistoryHandler::QueryComplete(
     }
     Profile* profile = Profile::FromWebUI(web_ui());
     page_value->SetBoolean("starred",
-        profile->GetBookmarkModel()->IsBookmarked(page.url()));
+        BookmarkModelFactory::GetForProfile(profile)->IsBookmarked(
+            page.url()));
     results_value.Append(page_value);
   }
 
@@ -367,7 +378,7 @@ void BrowsingHistoryHandler::ExtractSearchHistoryArguments(
     int* month,
     string16* query) {
   *month = 0;
-  Value* list_member;
+  const Value* list_member;
 
   // Get search string.
   if (args->Get(0, &list_member) &&

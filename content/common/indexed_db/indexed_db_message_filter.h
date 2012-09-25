@@ -4,17 +4,20 @@
 
 #ifndef CONTENT_COMMON_INDEXED_DB_INDEXED_DB_MESSAGE_FILTER_H_
 #define CONTENT_COMMON_INDEXED_DB_INDEXED_DB_MESSAGE_FILTER_H_
-#pragma once
 
 #include "ipc/ipc_channel_proxy.h"
 
 class IndexedDBDispatcher;
 
+namespace base {
+class MessageLoopProxy;
+}  // namespace base
+
 class IndexedDBMessageFilter : public IPC::ChannelProxy::MessageFilter {
  public:
   IndexedDBMessageFilter();
 
-  // IPC::Channel::Listener implementation.
+  // IPC::Listener implementation.
   virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
 
  protected:

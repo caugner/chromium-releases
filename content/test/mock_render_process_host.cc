@@ -79,6 +79,10 @@ int MockRenderProcessHost::VisibleWidgetCount() const {
   return 1;
 }
 
+bool MockRenderProcessHost::IsGuest() const {
+  return false;
+}
+
 void MockRenderProcessHost::AddWord(const string16& word) {
 }
 
@@ -202,6 +206,9 @@ base::TimeDelta MockRenderProcessHost::GetChildProcessIdleTime() const {
 }
 
 void MockRenderProcessHost::SurfaceUpdated(int32 surface_id) {
+}
+
+void MockRenderProcessHost::ResumeRequestsForView(int route_id) {
 }
 
 RenderProcessHost::RenderWidgetHostsIterator

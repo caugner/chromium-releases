@@ -4,10 +4,10 @@
 
 #ifndef CHROME_TEST_BASE_TEST_WEB_DIALOG_OBSERVER_H_
 #define CHROME_TEST_BASE_TEST_WEB_DIALOG_OBSERVER_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "base/memory/ref_counted.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "ui/web_dialogs/web_dialog_observer.h"
@@ -15,6 +15,7 @@
 
 namespace content {
 class JsInjectionReadyObserver;
+class MessageLoopRunner;
 class RenderViewHost;
 class WebUI;
 }
@@ -55,6 +56,7 @@ class TestWebDialogObserver : public content::NotificationObserver,
   content::WebUI* web_ui_;
   bool done_;
   bool running_;
+  scoped_refptr<content::MessageLoopRunner> message_loop_runner_;
 
   DISALLOW_COPY_AND_ASSIGN(TestWebDialogObserver);
 };

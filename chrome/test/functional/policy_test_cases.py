@@ -66,6 +66,14 @@ class PolicyPrefsTestCases(object):
     # TODO(frankf): Enable on all OS after crbug.com/121066 is fixed.
     'RemoteAccessHostFirewallTraversal':
         ('kRemoteAccessHostFirewallTraversal', True, [], []),
+#    'RemoteAccessHostRequireTwoFactor':
+#        ('kRemoteAccessHostRequireTwoFactor', False, [],
+#         ['win', 'mac', 'linux']),
+#    'RemoteAccessHostDomain':
+#        ('kRemoteAccessHostDomain', '', [], ['win', 'mac', 'linux']),
+#    'RemoteAccessHostTalkGadgetPrefix':
+#        ('kRemoteAccessHostTalkGadgetPrefix', 'chromoting-host', [],
+#         ['win', 'mac', 'linux']),
     'PrintingEnabled': ('kPrintingEnabled', False, [], OS_ALL),
     # Note: supported_on is empty for this policy.
     'CloudPrintProxyEnabled': ('kCloudPrintProxyEnabled', True, [], []),
@@ -98,7 +106,7 @@ class PolicyPrefsTestCases(object):
     'MediaCacheSize': ('kMediaCacheSize', 200, [], ['win', 'mac', 'linux']),
     'DownloadDirectory': (None, '${user_home}/test-downloads', [BROWSER],
                           ['win', 'mac', 'linux']),
-    'ClearSiteDataOnExit': ('kClearSiteDataOnExit', True, [CONTENT], OS_ALL),
+    'ClearSiteDataOnExit': (None, True, [CONTENT], OS_ALL),
     # TODO(joaodasilva): Should be BROWSER. http://crbug.com/97749
     'ProxyMode': (None, 'direct', [], ['win', 'mac', 'linux']),
     # TODO(joaodasilva): Should be BROWSER. http://crbug.com/97749
@@ -176,6 +184,8 @@ class PolicyPrefsTestCases(object):
         ('kManagedDefaultNotificationsSetting', 2, [CONTENT], OS_ALL),
     'DefaultGeolocationSetting':
         ('kManagedDefaultGeolocationSetting', 2, [CONTENT], OS_ALL),
+    'DefaultMediaStreamSetting':
+        ('kManagedDefaultMediaStreamSetting', 2, [CONTENT], OS_ALL),
     'AutoSelectCertificateForUrls':
         ('kManagedAutoSelectCertificateForUrls',
          ['{\'pattern\':\'https://example.com\',' +
@@ -229,7 +239,7 @@ class PolicyPrefsTestCases(object):
     'ImportSavedPasswords':
         ('kImportSavedPasswords', False, [], ['win', 'mac', 'linux']),
     'MaxConnectionsPerProxy': ('kMaxConnectionsPerProxy', 32, [], OS_ALL),
-    'HideWebStorePromo': ('kNtpHideWebStorePromo', True, [], OS_ALL),
+    'HideWebStorePromo': (None, True, [], OS_ALL),
     'URLBlacklist': ('kUrlBlacklist', ['google.com'], [], OS_ALL),
     'URLWhitelist': ('kUrlWhitelist', ['google.com'], [], OS_ALL),
     'EnterpriseWebStoreURL': ('kEnterpriseWebStoreURL', '', [], OS_ALL),
@@ -241,6 +251,13 @@ class PolicyPrefsTestCases(object):
         ('kBackgroundModeEnabled', True, [BROWSER], ['win', 'linux']),
     'RestrictSigninToPattern': ('kGoogleServicesUsernamePattern',
                                 '.*@google.com', [], ['win', 'mac', 'linux']),
+    'DisableSafeBrowsingProceedAnyway':
+        ('kSafeBrowsingProceedAnywayDisabled', True, [], OS_ALL),
+    # TODO(joaodasilva): this policy affects the BROWSER settings page but
+    # is only included in official builds.
+    'SpellCheckServiceEnabled':
+        ('kSpellCheckUseSpellingService', False, [], OS_ALL),
+    'DisableScreenshots': ('kDisableScreenshots', False, [], OS_ALL),
 
     # ChromeOS-only policies:
     # TODO(frankf): Add prefs for these after crosbug.com/28756 is fixed.
@@ -253,6 +270,7 @@ class PolicyPrefsTestCases(object):
     'GDataDisabledOverCellular':
         (None, True, [], ['chromeos']),
     'PinnedLauncherApps': (None, [], [], ['chromeos']),
+    'ExternalStorageDisabled': (None, True, [], ['chromeos']),
 
     # ChromeOS Device policies:
     'DevicePolicyRefreshRate': (None, 300000, [], ['chromeos']),

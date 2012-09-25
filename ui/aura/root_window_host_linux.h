@@ -4,7 +4,6 @@
 
 #ifndef UI_AURA_ROOT_WINDOW_HOST_LINUX_H_
 #define UI_AURA_ROOT_WINDOW_HOST_LINUX_H_
-#pragma once
 
 #include <X11/Xlib.h>
 
@@ -26,7 +25,8 @@ namespace aura {
 class RootWindowHostLinux : public RootWindowHost,
                             public MessageLoop::Dispatcher {
  public:
-  explicit RootWindowHostLinux(const gfx::Rect& bounds);
+  RootWindowHostLinux(RootWindowHostDelegate* delegate,
+                      const gfx::Rect& bounds);
   virtual ~RootWindowHostLinux();
 
   // Overridden from Dispatcher overrides:
@@ -34,7 +34,6 @@ class RootWindowHostLinux : public RootWindowHost,
 
  private:
   // RootWindowHost Overrides.
-  virtual void SetRootWindow(RootWindow* root_window) OVERRIDE;
   virtual RootWindow* GetRootWindow() OVERRIDE;
   virtual gfx::AcceleratedWidget GetAcceleratedWidget() OVERRIDE;
   virtual void Show() OVERRIDE;
@@ -46,7 +45,7 @@ class RootWindowHostLinux : public RootWindowHost,
   virtual void ReleaseCapture() OVERRIDE;
   virtual void SetCursor(gfx::NativeCursor cursor_type) OVERRIDE;
   virtual void ShowCursor(bool show) OVERRIDE;
-  virtual gfx::Point QueryMouseLocation() OVERRIDE;
+  virtual bool QueryMouseLocation(gfx::Point* location_return) OVERRIDE;
   virtual bool ConfineCursorToRootWindow() OVERRIDE;
   virtual void UnConfineCursor() OVERRIDE;
   virtual void MoveCursorTo(const gfx::Point& location) OVERRIDE;
@@ -66,7 +65,7 @@ class RootWindowHostLinux : public RootWindowHost,
   // |current_cursor_|.
   void SetCursorInternal(gfx::NativeCursor cursor);
 
-  RootWindow* root_window_;
+  RootWindowHostDelegate* delegate_;
 
   // The display and the native X window hosting the root window.
   Display* xdisplay_;

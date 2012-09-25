@@ -30,7 +30,6 @@ class PanelLayoutManagerTest : public ash::test::AshTestBase {
   virtual ~PanelLayoutManagerTest() {}
 
   virtual void SetUp() OVERRIDE {
-    CommandLine::ForCurrentProcess()->AppendSwitch(switches::kAuraPanelManager);
     ash::test::AshTestBase::SetUp();
     ASSERT_TRUE(ash::test::TestLauncherDelegate::instance());
 
@@ -89,7 +88,7 @@ class PanelLayoutManagerTest : public ash::test::AshTestBase {
     EXPECT_NEAR(icon_bounds.CenterPoint().x(),
                 window_bounds.CenterPoint().x(),
                 1);
-    EXPECT_EQ(launcher->widget()->GetWindowScreenBounds().y(),
+    EXPECT_EQ(launcher->widget()->GetWindowBoundsInScreen().y(),
               window_bounds.bottom());
   }
 
@@ -100,9 +99,9 @@ class PanelLayoutManagerTest : public ash::test::AshTestBase {
     GetCalloutWidget(&widget);
     EXPECT_TRUE(widget->IsVisible());
     EXPECT_EQ(panel->GetBoundsInRootWindow().bottom(),
-              widget->GetWindowScreenBounds().y());
+              widget->GetWindowBoundsInScreen().y());
     EXPECT_NEAR(panel->GetBoundsInRootWindow().CenterPoint().x(),
-                widget->GetWindowScreenBounds().CenterPoint().x(),
+                widget->GetWindowBoundsInScreen().CenterPoint().x(),
                 1);
   }
 

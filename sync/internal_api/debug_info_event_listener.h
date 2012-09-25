@@ -17,47 +17,44 @@
 #include "sync/sessions/debug_info_getter.h"
 #include "sync/sessions/session_state.h"
 
-namespace sync_api {
+namespace syncer {
 
 const unsigned int kMaxEntries = 6;
 
 // Listens to events and records them in a queue. And passes the events to
 // syncer when requested.
-class DebugInfoEventListener : public sync_api::SyncManager::Observer,
-                               public browser_sync::sessions::DebugInfoGetter {
+class DebugInfoEventListener : public SyncManager::Observer,
+                               public sessions::DebugInfoGetter {
  public:
   DebugInfoEventListener();
   virtual ~DebugInfoEventListener();
 
   // SyncManager::Observer implementation.
   virtual void OnSyncCycleCompleted(
-    const browser_sync::sessions::SyncSessionSnapshot& snapshot) OVERRIDE;
+    const sessions::SyncSessionSnapshot& snapshot) OVERRIDE;
   virtual void OnInitializationComplete(
-    const browser_sync::WeakHandle<browser_sync::JsBackend>& js_backend,
-      bool success) OVERRIDE;
+      const syncer::WeakHandle<JsBackend>& js_backend,
+      bool success, ModelTypeSet restored_types) OVERRIDE;
   virtual void OnConnectionStatusChange(
-      sync_api::ConnectionStatus connection_status) OVERRIDE;
+      ConnectionStatus connection_status) OVERRIDE;
   virtual void OnPassphraseRequired(
-      sync_api::PassphraseRequiredReason reason,
+      PassphraseRequiredReason reason,
       const sync_pb::EncryptedData& pending_keys) OVERRIDE;
   virtual void OnPassphraseAccepted() OVERRIDE;
   virtual void OnBootstrapTokenUpdated(
       const std::string& bootstrap_token) OVERRIDE;
   virtual void OnStopSyncingPermanently() OVERRIDE;
   virtual void OnUpdatedToken(const std::string& token) OVERRIDE;
-  virtual void OnClearServerDataFailed() OVERRIDE;
-  virtual void OnClearServerDataSucceeded() OVERRIDE;
   virtual void OnEncryptedTypesChanged(
-      syncable::ModelTypeSet encrypted_types,
+      ModelTypeSet encrypted_types,
       bool encrypt_everything) OVERRIDE;
   virtual void OnEncryptionComplete() OVERRIDE;
   virtual void OnActionableError(
-      const browser_sync::SyncProtocolError& sync_error) OVERRIDE;
+      const SyncProtocolError& sync_error) OVERRIDE;
 
   // Sync manager events.
-  void OnNudgeFromDatatype(syncable::ModelType datatype);
-  void OnIncomingNotification(
-      const syncable::ModelTypePayloadMap& type_payloads);
+  void OnNudgeFromDatatype(ModelType datatype);
+  void OnIncomingNotification(const ModelTypePayloadMap& type_payloads);
 
   // DebugInfoGetter Implementation.
   virtual void GetAndClearDebugInfo(sync_pb::DebugInfo* debug_info) OVERRIDE;
@@ -88,5 +85,6 @@ class DebugInfoEventListener : public sync_api::SyncManager::Observer,
   DISALLOW_COPY_AND_ASSIGN(DebugInfoEventListener);
 };
 
-}  // namespace sync_api
+}  // namespace syncer
+
 #endif  // SYNC_INTERNAL_API_DEBUG_INFO_EVENT_LISTENER_H_

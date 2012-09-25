@@ -22,9 +22,9 @@ remoting.Error = {
   BAD_PLUGIN_VERSION: /*i18n-content*/'ERROR_BAD_PLUGIN_VERSION',
   NETWORK_FAILURE: /*i18n-content*/'ERROR_NETWORK_FAILURE',
   HOST_OVERLOAD: /*i18n-content*/'ERROR_HOST_OVERLOAD',
-  GENERIC: /*i18n-content*/'ERROR_GENERIC',
   UNEXPECTED: /*i18n-content*/'ERROR_UNEXPECTED',
-  SERVICE_UNAVAILABLE: /*i18n-content*/'ERROR_SERVICE_UNAVAILABLE'
+  SERVICE_UNAVAILABLE: /*i18n-content*/'ERROR_SERVICE_UNAVAILABLE',
+  NOT_AUTHENTICATED: /*i18n-content*/'ERROR_NOT_AUTHENTICATED'
 };
 
 /**
@@ -41,16 +41,20 @@ remoting.init = function() {
   remoting.hostList = new remoting.HostList(
       document.getElementById('host-list'),
       document.getElementById('host-list-empty'),
-      document.getElementById('host-list-error'));
+      document.getElementById('host-list-error-message'),
+      document.getElementById('host-list-refresh-failed-button'));
   remoting.toolbar = new remoting.Toolbar(
       document.getElementById('session-toolbar'));
   remoting.clipboard = new remoting.Clipboard();
+  remoting.suspendMonitor = new remoting.SuspendMonitor(
+      function() {
+        if (remoting.clientSession) {
+          remoting.clientSession.logErrors(false);
+        }
+      }
+  );
 
-  refreshEmail_();
-  var email = remoting.oauth2.getCachedEmail();
-  if (email) {
-    document.getElementById('current-email').innerText = email;
-  }
+  remoting.oauth2.getEmail(remoting.onEmail, remoting.showErrorMessage);
 
   remoting.showOrHideIt2MeUi();
   remoting.showOrHideMe2MeUi();
@@ -84,6 +88,19 @@ remoting.init = function() {
   remoting.initDaemonUi();
 };
 
+/**
+ * Display the user's email address and allow access to the rest of the app,
+ * including parsing URL parameters.
+ *
+ * @param {string} email The user's email address.
+ * @return {void} Nothing.
+ */
+remoting.onEmail = function(email) {
+  document.getElementById('current-email').innerText = email;
+  document.getElementById('get-started-it2me').disabled = false;
+  document.getElementById('get-started-me2me').disabled = false;
+};
+
 // initDaemonUi is called if the app is not starting up in session mode, and
 // also if the user cancels pin entry or the connection in session mode.
 remoting.initDaemonUi = function () {
@@ -92,6 +109,7 @@ remoting.initDaemonUi = function () {
   remoting.setMode(getAppStartupMode_());
   remoting.hostSetupDialog =
       new remoting.HostSetupDialog(remoting.hostController);
+  // Display the cached host list, then asynchronously update and re-display it.
   remoting.extractThisHostAndDisplay(true);
   remoting.hostList.refresh(remoting.extractThisHostAndDisplay);
 };
@@ -210,48 +228,6 @@ function pluginGotCopy_(eventUncast) {
 }
 
 /**
- * If the user is authenticated, but there is no email address cached, get one.
- */
-function refreshEmail_() {
-  if (!getEmail_() && remoting.oauth2.isAuthenticated()) {
-    remoting.oauth2.getEmail(setEmail_);
-  }
-}
-
-/**
- * The key under which the email address is stored.
- * @private
- */
-var KEY_EMAIL_ = 'remoting-email';
-
-/**
- * Save the user's email address in local storage.
- *
- * @param {?string} email The email address to place in local storage.
- * @return {void} Nothing.
- */
-function setEmail_(email) {
-  if (email) {
-    document.getElementById('current-email').innerText = email;
-  } else {
-    var e = document.getElementById('auth-error-message');
-    e.innerText = chrome.i18n.getMessage(remoting.Error.SERVICE_UNAVAILABLE);
-    e.classList.add('error-state');
-    remoting.setMode(remoting.AppMode.UNAUTHENTICATED);
-  }
-}
-
-/**
- * Read the user's email address from local storage.
- *
- * @return {?string} The email address associated with the auth credentials.
- */
-function getEmail_() {
-  var result = window.localStorage.getItem(KEY_EMAIL_);
-  return typeof result == 'string' ? result : null;
-}
-
-/**
  * Gets the major-mode that this application should start up in.
  *
  * @return {remoting.AppMode} The mode to start in.
@@ -322,4 +298,21 @@ remoting.timestamp = function() {
       pad(now.getHours(), 2) + pad(now.getMinutes(), 2) +
       pad(now.getSeconds(), 2) + '.' + pad(now.getMilliseconds(), 3);
   return '[' + timestamp + ']';
+};
+
+/**
+ * Show an error message, optionally including a short-cut for signing in to
+ * Chromoting again.
+ *
+ * @param {remoting.Error} error
+ * @return {void} Nothing.
+ */
+remoting.showErrorMessage = function(error) {
+  l10n.localizeElementFromTag(
+      document.getElementById('token-refresh-error-message'),
+      error);
+  var auth_failed = (error == remoting.Error.AUTHENTICATION_FAILED);
+  document.getElementById('token-refresh-auth-failed').hidden = !auth_failed;
+  document.getElementById('token-refresh-other-error').hidden = auth_failed;
+  remoting.setMode(remoting.AppMode.TOKEN_REFRESH_FAILED);
 };

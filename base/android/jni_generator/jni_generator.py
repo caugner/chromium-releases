@@ -43,7 +43,6 @@ class Param(object):
   def __init__(self, **kwargs):
     self.datatype = kwargs['datatype']
     self.name = kwargs['name']
-    self.cpp_class_name = kwargs.get('cpp_class_name', None)
 
 
 class NativeMethod(object):
@@ -62,12 +61,9 @@ class NativeMethod(object):
         self.params[0].datatype == 'int' and
         self.params[0].name.startswith('native')):
       self.type = 'method'
-      if self.params[0].cpp_class_name:
-        self.p0_type = self.params[0].cpp_class_name
-      else:
-        self.p0_type = self.params[0].name[len('native'):]
-    elif self.static:
-      self.type = 'function'
+      self.p0_type = self.params[0].name[len('native'):]
+      if kwargs.get('native_class_name'):
+        self.p0_type = kwargs['native_class_name']
     else:
       self.type = 'function'
     self.method_id_var_name = kwargs.get('method_id_var_name', None)
@@ -164,25 +160,24 @@ def JavaParamToJni(param):
        'PasswordListObserver'),
       'Lorg/chromium/base/SystemMessageHandler',
       'Lorg/chromium/chrome/browser/JSModalDialog',
+      'Lorg/chromium/chrome/browser/ProcessUtils',
       'Lorg/chromium/chrome/browser/SelectFileDialog',
-      'Lorg/chromium/content/browser/ChromeVideoView',
-      'Lorg/chromium/content/browser/ContentView',
-      ('Lorg/chromium/content/browser/ContentView$'
-       'FindResultReceivedListener$FindNotificationDetails'),
+      'Lorg/chromium/content/browser/ContentVideoView',
       'Lorg/chromium/content/browser/ContentViewClient',
-      'Lorg/chromium/content/browser/ContentHttpAuthHandler',
-      'Lorg/chromium/content/browser/DeviceInfo',
+      'Lorg/chromium/content/browser/ContentViewCore',
       'Lorg/chromium/content/browser/DeviceOrientation',
       'Lorg/chromium/content/browser/FileChooserParams',
+      'Lorg/chromium/content/browser/FindNotificationDetails',
       'Lorg/chromium/content/browser/InterceptedRequestData',
       'Lorg/chromium/content/browser/JavaInputStream',
       'Lorg/chromium/content/browser/LocationProvider',
       'Lorg/chromium/content/browser/SandboxedProcessArgs',
       'Lorg/chromium/content/browser/SandboxedProcessConnection',
       'Lorg/chromium/content/app/SandboxedProcessService',
-      'Lorg/chromium/content/browser/SurfaceTextureListener',
       'Lorg/chromium/content/browser/TouchPoint',
       'Lorg/chromium/content/browser/WaitableNativeEvent',
+      'Lorg/chromium/content/common/DeviceInfo',
+      'Lorg/chromium/content/common/SurfaceTextureListener',
       'Lorg/chromium/media/MediaPlayerListener',
       'Lorg/chromium/net/NetworkChangeNotifier',
       'Lorg/chromium/net/ProxyChangeListener',
@@ -224,16 +219,13 @@ def ParseParams(params):
   if not params:
     return []
   ret = []
-  re_comment = re.compile(r'.*?\/\* (.*) \*\/')
   for p in [p.strip() for p in params.split(',')]:
     items = p.split(' ')
     if 'final' in items:
       items.remove('final')
-    comment = re.match(re_comment, p)
     param = Param(
         datatype=items[0],
         name=(items[1] if len(items) > 1 else 'p%s' % len(ret)),
-        cpp_class_name=comment.group(1) if comment else None
     )
     ret += [param]
   return ret
@@ -253,6 +245,14 @@ def GetUnknownDatatypes(items):
   return unknown_types
 
 
+def ExtractJNINamespace(contents):
+  re_jni_namespace = re.compile('.*?@JNINamespace\("(.*?)"\)')
+  m = re.findall(re_jni_namespace, contents)
+  if not m:
+    return ''
+  return m[0]
+
+
 def ExtractFullyQualifiedJavaClassName(java_file_name, contents):
   re_package = re.compile('.*?package (.*?);')
   matches = re.findall(re_package, contents)
@@ -266,16 +266,20 @@ def ExtractNatives(contents):
   """Returns a list of dict containing information about a native method."""
   contents = contents.replace('\n', '')
   natives = []
-  re_native = re.compile(r'(@NativeCall(\(\"(.*?)\"\)))?\s*'
-                         '(\w+\s\w+|\w+|\s+)\s*?native (\S*?) (\w+?)\((.*?)\);')
-  matches = re.findall(re_native, contents)
-  for match in matches:
+  re_native = re.compile(r'(@NativeClassQualifiedName'
+                         '\(\"(?P<native_class_name>.*?)\"\))?\s*'
+                         '(@NativeCall(\(\"(?P<java_class_name>.*?)\"\)))?\s*'
+                         '(?P<qualifiers>\w+\s\w+|\w+|\s+)\s*?native '
+                         '(?P<return>\S*?) '
+                         '(?P<name>\w+?)\((?P<params>.*?)\);')
+  for match in re.finditer(re_native, contents):
     native = NativeMethod(
-        static='static' in match[3],
-        java_class_name=match[2],
-        return_type=match[4],
-        name=match[5].replace('native', ''),
-        params=ParseParams(match[6]))
+        static='static' in match.group('qualifiers'),
+        java_class_name=match.group('java_class_name'),
+        native_class_name=match.group('native_class_name'),
+        return_type=match.group('return'),
+        name=match.group('name').replace('native', ''),
+        params=ParseParams(match.group('params')))
     natives += [native]
   return natives
 
@@ -435,18 +439,33 @@ class JNIFromJavaSource(object):
 
   def __init__(self, contents, fully_qualified_class):
     contents = self._RemoveComments(contents)
+    jni_namespace = ExtractJNINamespace(contents)
     natives = ExtractNatives(contents)
     called_by_natives = ExtractCalledByNatives(contents)
+    if len(natives) == 0 and len(called_by_natives) == 0:
+      raise SyntaxError('Unable to find any JNI methods for %s.' %
+                        fully_qualified_class)
     inl_header_file_generator = InlHeaderFileGenerator(
-        '', fully_qualified_class, natives, called_by_natives)
+        jni_namespace, fully_qualified_class, natives, called_by_natives)
     self.content = inl_header_file_generator.GetContent()
 
   def _RemoveComments(self, contents):
-    ret = []
-    for c in [c.strip() for c in contents.split('\n')]:
-      if not c.startswith('//'):
-        ret += [c]
-    return '\n'.join(ret)
+    # We need to support both inline and block comments, and we need to handle
+    # strings that contain '//' or '/*'. Rather than trying to do all that with
+    # regexps, we just pipe the contents through the C preprocessor. We tell cpp
+    # the file has already been preprocessed, so it just removes comments and
+    # doesn't try to parse #include, #pragma etc.
+    #
+    # TODO(husky): This is a bit hacky. It would be cleaner to use a real Java
+    # parser. Maybe we could ditch JNIFromJavaSource and just always use
+    # JNIFromJavaP; or maybe we could rewrite this script in Java and use APT.
+    # http://code.google.com/p/chromium/issues/detail?id=138941
+    p = subprocess.Popen(args=['cpp', '-fpreprocessed'],
+                         stdin=subprocess.PIPE,
+                         stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE)
+    stdout, _ = p.communicate(contents)
+    return stdout
 
   def GetContent(self):
     return self.content
@@ -511,20 +530,20 @@ using base::android::ScopedJavaLocalRef;
 namespace {
 $CLASS_PATH_DEFINITIONS
 }  // namespace
+
+$OPEN_NAMESPACE
 $FORWARD_DECLARATIONS
 
 // Step 2: method stubs.
 $METHOD_STUBS
 
 // Step 3: GetMethodIDs and RegisterNatives.
-$OPEN_NAMESPACE
-
 static void GetMethodIDsImpl(JNIEnv* env) {
 $GET_METHOD_IDS_IMPL
 }
 
 static bool RegisterNativesImpl(JNIEnv* env) {
-  ${NAMESPACE}GetMethodIDsImpl(env);
+  GetMethodIDsImpl(env);
 $REGISTER_NATIVES_IMPL
   return true;
 }
@@ -541,7 +560,6 @@ $CLOSE_NAMESPACE
         'FORWARD_DECLARATIONS': self.GetForwardDeclarationsString(),
         'METHOD_STUBS': self.GetMethodStubsString(),
         'OPEN_NAMESPACE': self.GetOpenNamespaceString(),
-        'NAMESPACE': self.GetNamespaceString(),
         'GET_METHOD_IDS_IMPL': self.GetMethodIDsImplString(),
         'REGISTER_NATIVES_IMPL': self.GetRegisterNativesImplString(),
         'CLOSE_NAMESPACE': self.GetCloseNamespaceString(),
@@ -614,17 +632,17 @@ ${KMETHODS}
 
   def GetOpenNamespaceString(self):
     if self.namespace:
-      return 'namespace %s {' % self.namespace
-    return ''
-
-  def GetNamespaceString(self):
-    if self.namespace:
-      return '%s::' % self.namespace
+      all_namespaces = ['namespace %s {' % ns
+                        for ns in self.namespace.split('::')]
+      return '\n'.join(all_namespaces)
     return ''
 
   def GetCloseNamespaceString(self):
     if self.namespace:
-      return '}  // namespace %s\n' % self.namespace
+      all_namespaces = ['}  // namespace %s' % ns
+                        for ns in self.namespace.split('::')]
+      all_namespaces.reverse()
+      return '\n'.join(all_namespaces) + '\n'
     return ''
 
   def GetJNIFirstParam(self, native):
@@ -861,8 +879,11 @@ jclass g_${JAVA_CLASS}_clazz = NULL;""")
 def WrapOutput(output):
   ret = []
   for line in output.splitlines():
-    if len(line) < 80:
-      ret.append(line.rstrip())
+    # Do not wrap lines under 80 characters or preprocessor directives.
+    if len(line) < 80 or line.lstrip()[:1] == '#':
+      stripped = line.rstrip()
+      if len(ret) == 0 or len(ret[-1]) or len(stripped):
+        ret.append(stripped)
     else:
       first_line_indent = ' ' * (len(line) - len(line.lstrip()))
       subsequent_indent =  first_line_indent + ' ' * 4
@@ -876,114 +897,86 @@ def WrapOutput(output):
   return '\n'.join(ret)
 
 
-def ExtractInputFiles(jar_file, input_files, out_dirs):
-  """Extracts input files from jar and returns them as list of filenames.
+def ExtractJarInputFile(jar_file, input_file, out_dir):
+  """Extracts input file from jar and returns the filename.
 
-  The input files are extracted to the same directory that the generated jni
+  The input file is extracted to the same directory that the generated jni
   headers will be placed in.  This is passed as an argument to script.
 
   Args:
-    jar_file: the jar file containing the input files to extract
-    input_files: the list of files to extract from the jar file
-    out_dirs: the name of the directories to extract to
+    jar_file: the jar file containing the input files to extract.
+    input_files: the list of files to extract from the jar file.
+    out_dir: the name of the directories to extract to.
 
   Returns:
-    a list of file names of extracted input files
+    the name of extracted input file.
   """
   jar_file = zipfile.ZipFile(jar_file)
-  extracted_file_names = []
 
-  for (input_file, out_dir) in zip(input_files, out_dirs):
-    out_dir = os.path.join(out_dir, os.path.dirname(input_file))
-    if not os.path.exists(out_dir):
-      os.makedirs(out_dir)
-    extracted_file_name = os.path.join(out_dir, os.path.basename(input_file))
-    with open(extracted_file_name, 'w') as outfile:
-      outfile.write(jar_file.read(input_file))
-    extracted_file_names.append(extracted_file_name)
+  out_dir = os.path.join(out_dir, os.path.dirname(input_file))
+  if not os.path.exists(out_dir):
+    os.makedirs(out_dir)
+  extracted_file_name = os.path.join(out_dir, os.path.basename(input_file))
+  with open(extracted_file_name, 'w') as outfile:
+    outfile.write(jar_file.read(input_file))
 
-  return extracted_file_names
+  return extracted_file_name
 
 
-def GenerateJNIHeaders(input_files, output_files, namespace):
-  for i in xrange(len(input_files)):
-    try:
-      if os.path.splitext(input_files[i])[1] == '.class':
-        jni_from_javap = JNIFromJavaP.CreateFromClass(input_files[i], namespace)
-        output = jni_from_javap.GetContent()
-      else:
-        jni_from_java_source = JNIFromJavaSource.CreateFromFile(input_files[i])
-        output = jni_from_java_source.GetContent()
-    except ParseError, e:
-      print e
-      sys.exit(1)
-    if output_files:
-      header_name = output_files[i]
-      if not os.path.exists(os.path.dirname(os.path.abspath(header_name))):
-        os.makedirs(os.path.dirname(os.path.abspath(header_name)))
-      if (not os.path.exists(header_name) or
-          file(header_name).read() != output):
-        output_file = file(header_name, 'w')
-        output_file.write(output)
-        output_file.close()
+def GenerateJNIHeader(input_file, output_file, namespace):
+  try:
+    if os.path.splitext(input_file)[1] == '.class':
+      jni_from_javap = JNIFromJavaP.CreateFromClass(input_file, namespace)
+      content = jni_from_javap.GetContent()
     else:
-      print output
-
-
-def CheckFilenames(input_files, output_files):
-  """Make sure the input and output have consistent names."""
-  if len(input_files) != len(output_files):
-    sys.exit('Input files length %d must match output length %d' %
-             (len(input_files), len(output_files)))
-  for i in xrange(len(input_files)):
-    input_prefix = os.path.splitext(os.path.basename(input_files[i]))[0]
-    output_prefix = os.path.splitext(os.path.basename(output_files[i]))[0]
-    if input_prefix.lower() + 'jni' != output_prefix.replace('_', '').lower():
-      sys.exit('\n'.join([
-          '*** Error ***',
-          'Input and output files have inconsistent names:',
-          '\t' + os.path.basename(input_files[i]),
-          '\t' + os.path.basename(output_files[i]),
-          '',
-          'Input "FooBar.java" must be converted to output "foo_bar_jni.h"',
-          '',
-      ]))
+      jni_from_java_source = JNIFromJavaSource.CreateFromFile(input_file)
+      content = jni_from_java_source.GetContent()
+  except ParseError, e:
+    print e
+    sys.exit(1)
+  if output_file:
+    if not os.path.exists(os.path.dirname(os.path.abspath(output_file))):
+      os.makedirs(os.path.dirname(os.path.abspath(output_file)))
+    with file(output_file, 'w') as f:
+      f.write(content)
+  else:
+    print output
 
 
 def main(argv):
-  usage = """usage: %prog [OPTION] file1[ file2...] [output1[ output2...]]
+  usage = """usage: %prog [OPTIONS]
 This script will parse the given java source code extracting the native
 declarations and print the header file to stdout (or a file).
 See SampleForTests.java for more details.
   """
   option_parser = optparse.OptionParser(usage=usage)
-  option_parser.add_option('-o', dest='output_files',
-                           action='store_true',
-                           default=False,
-                           help='Saves the output to file(s) (the first half of'
-                           ' args specify the java input files, the second'
-                           ' half specify the header output files.')
   option_parser.add_option('-j', dest='jar_file',
                            help='Extract the list of input files from'
                            ' a specified jar file.'
                            ' Uses javap to extract the methods from a'
-                           ' pre-compiled class. Input files should point'
+                           ' pre-compiled class. --input should point'
                            ' to pre-compiled Java .class files.')
   option_parser.add_option('-n', dest='namespace',
                            help='Uses as a namespace in the generated header,'
                            ' instead of the javap class name.')
+  option_parser.add_option('--input_file',
+                           help='Single input file name. The output file name '
+                           'will be derived from it. Must be used with '
+                           '--output_dir.')
+  option_parser.add_option('--output_dir',
+                           help='The output directory. Must be used with '
+                           '--input')
   options, args = option_parser.parse_args(argv)
-  input_files = args[1:]
-  output_files = []
-  if options.output_files:
-    output_files = input_files[len(input_files) / 2:]
-    input_files = input_files[:len(input_files) / 2]
-  CheckFilenames(input_files, output_files)
   if options.jar_file:
-    # CheckFileNames guarantees same length for inputs and outputs
-    out_dirs = map(os.path.dirname, output_files)
-    input_files = ExtractInputFiles(options.jar_file, input_files, out_dirs)
-  GenerateJNIHeaders(input_files, output_files, options.namespace)
+    input_file = ExtractJarInputFile(options.jar_file, options.input_file,
+                                     options.output_dir)
+  else:
+    input_file = options.input_file
+  output_file = None
+  if options.output_dir:
+    root_name = os.path.splitext(os.path.basename(input_file))[0]
+    output_file = os.path.join(options.output_dir, root_name) + '_jni.h'
+  GenerateJNIHeader(input_file, output_file, options.namespace)
 
 
 if __name__ == '__main__':

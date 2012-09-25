@@ -16,20 +16,16 @@
 #include "sync/internal_api/public/http_post_provider_interface.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using base::TimeDelta;
-using browser_sync::HttpResponse;
-using browser_sync::ServerConnectionManager;
-using browser_sync::ScopedServerStatusWatcher;
-
-namespace sync_api {
+namespace syncer {
 namespace {
+
+using base::TimeDelta;
 
 class BlockingHttpPost : public HttpPostProviderInterface {
  public:
   BlockingHttpPost() : wait_for_abort_(false, false) {}
   virtual ~BlockingHttpPost() {}
 
-  virtual void SetUserAgent(const char* user_agent) OVERRIDE {}
   virtual void SetExtraRequestHeaders(const char* headers) OVERRIDE {}
   virtual void SetURL(const char* url, int port) OVERRIDE {}
   virtual void SetPostPayload(const char* content_type,
@@ -37,8 +33,7 @@ class BlockingHttpPost : public HttpPostProviderInterface {
                               const char* content) OVERRIDE {}
   virtual bool MakeSynchronousPost(int* error_code, int* response_code)
       OVERRIDE {
-    wait_for_abort_.TimedWait(TimeDelta::FromMilliseconds(
-        TestTimeouts::action_max_timeout_ms()));
+    wait_for_abort_.TimedWait(TestTimeouts::action_max_timeout());
     *error_code = net::ERR_ABORTED;
     return false;
   }
@@ -74,7 +69,7 @@ class BlockingHttpPostFactory : public HttpPostProviderFactory {
 
 TEST(SyncAPIServerConnectionManagerTest, EarlyAbortPost) {
   SyncAPIServerConnectionManager server(
-      "server", 0, true, "1", new BlockingHttpPostFactory());
+      "server", 0, true, new BlockingHttpPostFactory());
 
   ServerConnectionManager::PostBufferParams params;
   ScopedServerStatusWatcher watcher(&server, &params.response);
@@ -90,7 +85,7 @@ TEST(SyncAPIServerConnectionManagerTest, EarlyAbortPost) {
 
 TEST(SyncAPIServerConnectionManagerTest, AbortPost) {
   SyncAPIServerConnectionManager server(
-      "server", 0, true, "1", new BlockingHttpPostFactory());
+      "server", 0, true, new BlockingHttpPostFactory());
 
   ServerConnectionManager::PostBufferParams params;
   ScopedServerStatusWatcher watcher(&server, &params.response);
@@ -112,4 +107,4 @@ TEST(SyncAPIServerConnectionManagerTest, AbortPost) {
   abort_thread.Stop();
 }
 
-}  // namespace sync_api
+}  // namespace syncer

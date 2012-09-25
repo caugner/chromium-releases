@@ -97,7 +97,7 @@ class AutomationMessageFilter : public IPC::ChannelProxy::MessageFilter {
 }  // anonymous namespace
 
 
-AutomationProxy::AutomationProxy(int action_timeout_ms,
+AutomationProxy::AutomationProxy(base::TimeDelta action_timeout,
                                  bool disconnect_on_failure)
     : app_launched_(true, false),
       initial_loads_complete_(true, false),
@@ -106,13 +106,12 @@ AutomationProxy::AutomationProxy(int action_timeout_ms,
       perform_version_check_(false),
       disconnect_on_failure_(disconnect_on_failure),
       channel_disconnected_on_failure_(false),
-      action_timeout_(
-          TimeDelta::FromMilliseconds(action_timeout_ms)),
+      action_timeout_(action_timeout),
       listener_thread_id_(0) {
   // base::WaitableEvent::TimedWait() will choke if we give it a negative value.
   // Zero also seems unreasonable, since we need to wait for IPC, but at
   // least it is legal... ;-)
-  DCHECK_GE(action_timeout_ms, 0);
+  DCHECK_GE(action_timeout.InMilliseconds(), 0);
   listener_thread_id_ = base::PlatformThread::CurrentId();
   InitializeHandleTracker();
   InitializeThread();
@@ -331,14 +330,6 @@ scoped_refptr<BrowserProxy> AutomationProxy::GetBrowserWindow(
   return ProxyObjectFromHandle<BrowserProxy>(handle);
 }
 
-scoped_refptr<BrowserProxy> AutomationProxy::FindTabbedBrowserWindow() {
-  int handle = 0;
-  if (!Send(new AutomationMsg_FindTabbedBrowserWindow(&handle)))
-    return NULL;
-
-  return ProxyObjectFromHandle<BrowserProxy>(handle);
-}
-
 IPC::SyncChannel* AutomationProxy::channel() {
   return channel_.get();
 }
@@ -473,10 +464,6 @@ bool AutomationProxy::EndTracing(std::string* json_trace_output) {
 
   *json_trace_output = output.json_output;
   return true;
-}
-
-bool AutomationProxy::ResetToDefaultTheme() {
-  return Send(new AutomationMsg_ResetToDefaultTheme());
 }
 
 bool AutomationProxy::SendJSONRequest(const std::string& request,

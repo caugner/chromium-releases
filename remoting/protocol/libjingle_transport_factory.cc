@@ -8,12 +8,13 @@
 #include "base/thread_task_runner_handle.h"
 #include "jingle/glue/channel_socket_adapter.h"
 #include "jingle/glue/pseudotcp_adapter.h"
+#include "jingle/glue/thread_wrapper.h"
 #include "jingle/glue/utils.h"
 #include "net/base/net_errors.h"
 #include "remoting/base/constants.h"
 #include "remoting/protocol/channel_authenticator.h"
 #include "remoting/protocol/transport_config.h"
-#include "third_party/libjingle/source/talk/base/basicpacketsocketfactory.h"
+#include "remoting/jingle_glue/chromium_socket_factory.h"
 #include "third_party/libjingle/source/talk/base/network.h"
 #include "third_party/libjingle/source/talk/p2p/base/constants.h"
 #include "third_party/libjingle/source/talk/p2p/base/p2ptransportchannel.h"
@@ -58,6 +59,7 @@ class LibjingleStreamTransport : public StreamTransport,
                         const cricket::Candidate& candidate);
   void OnRouteChange(cricket::TransportChannel* channel,
                      const cricket::Candidate& candidate);
+  void OnWritableState(cricket::TransportChannel* channel);
 
   void OnTcpConnected(int result);
   void OnAuthenticationDone(net::Error error,
@@ -137,7 +139,7 @@ void LibjingleStreamTransport::Connect(
   // Create P2PTransportChannel, attach signal handlers and connect it.
   // TODO(sergeyu): Specify correct component ID for the channel.
   channel_.reset(new cricket::P2PTransportChannel(
-      0, NULL, port_allocator_));
+      "", 0, NULL, port_allocator_));
   channel_->SetIceUfrag(ice_username_fragment_);
   channel_->SetIcePwd(ice_password_);
   channel_->SignalRequestSignaling.connect(
@@ -146,6 +148,8 @@ void LibjingleStreamTransport::Connect(
       this, &LibjingleStreamTransport::OnCandidateReady);
   channel_->SignalRouteChange.connect(
       this, &LibjingleStreamTransport::OnRouteChange);
+  channel_->SignalWritableState.connect(
+      this, &LibjingleStreamTransport::OnWritableState);
   channel_->set_incoming_only(incoming_only_);
 
   channel_->Connect();
@@ -238,6 +242,11 @@ void LibjingleStreamTransport::OnRouteChange(
   event_handler_->OnTransportRouteChange(this, route);
 }
 
+void LibjingleStreamTransport::OnWritableState(
+    cricket::TransportChannel* channel) {
+  event_handler_->OnTransportReady(this, channel->writable());
+}
+
 void LibjingleStreamTransport::OnTcpConnected(int result) {
   DCHECK(CalledOnValidThread());
 
@@ -303,15 +312,22 @@ LibjingleTransportFactory::LibjingleTransportFactory(
     : http_port_allocator_(port_allocator.get()),
       port_allocator_(port_allocator.Pass()),
       incoming_only_(incoming_only) {
+  jingle_glue::JingleThreadWrapper::EnsureForCurrentThread();
 }
 
 LibjingleTransportFactory::LibjingleTransportFactory()
     : network_manager_(new talk_base::BasicNetworkManager()),
-      socket_factory_(new talk_base::BasicPacketSocketFactory()),
+      socket_factory_(new remoting::ChromiumPacketSocketFactory()),
       http_port_allocator_(NULL),
       port_allocator_(new cricket::BasicPortAllocator(
           network_manager_.get(), socket_factory_.get())),
       incoming_only_(false) {
+  jingle_glue::JingleThreadWrapper::EnsureForCurrentThread();
+  port_allocator_->set_flags(
+      cricket::PORTALLOCATOR_DISABLE_TCP |
+      cricket::PORTALLOCATOR_DISABLE_STUN |
+      cricket::PORTALLOCATOR_DISABLE_RELAY |
+      cricket::PORTALLOCATOR_ENABLE_SHARED_UFRAG);
 }
 
 LibjingleTransportFactory::~LibjingleTransportFactory() {

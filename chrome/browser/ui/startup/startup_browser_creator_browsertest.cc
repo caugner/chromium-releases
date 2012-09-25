@@ -19,6 +19,8 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_list_observer.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/startup/startup_browser_creator.h"
 #include "chrome/browser/ui/startup/startup_browser_creator_impl.h"
@@ -66,7 +68,7 @@ class StartupBrowserCreatorTest : public ExtensionBrowserTest {
   }
 
   void SetAppLaunchPref(const std::string& app_id,
-                        ExtensionPrefs::LaunchType launch_type) {
+                        extensions::ExtensionPrefs::LaunchType launch_type) {
     ExtensionService* service = browser()->profile()->GetExtensionService();
     service->extension_prefs()->SetLaunchType(app_id, launch_type);
   }
@@ -99,7 +101,7 @@ class StartupBrowserCreatorTest : public ExtensionBrowserTest {
   }
 };
 
-class OpenURLsPopupObserver : public BrowserList::Observer {
+class OpenURLsPopupObserver : public chrome::BrowserListObserver {
  public:
   OpenURLsPopupObserver() : added_browser_(NULL) { }
 
@@ -127,15 +129,14 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest, OpenURLsPopup) {
   OpenURLsPopupObserver observer;
   BrowserList::AddObserver(&observer);
 
-  Browser* popup = Browser::CreateWithParams(
+  Browser* popup = new Browser(
       Browser::CreateParams(Browser::TYPE_POPUP, browser()->profile()));
   ASSERT_TRUE(popup->is_type_popup());
   ASSERT_EQ(popup, observer.added_browser_);
 
   CommandLine dummy(CommandLine::NO_PROGRAM);
-  browser::startup::IsFirstRun first_run = first_run::IsChromeFirstRun() ?
-      browser::startup::IS_FIRST_RUN :
-      browser::startup::IS_NOT_FIRST_RUN;
+  chrome::startup::IsFirstRun first_run = first_run::IsChromeFirstRun() ?
+      chrome::startup::IS_FIRST_RUN : chrome::startup::IS_NOT_FIRST_RUN;
   StartupBrowserCreatorImpl launch(FilePath(), dummy, first_run);
   // This should create a new window, but re-use the profile from |popup|. If
   // it used a NULL or invalid profile, it would crash.
@@ -169,9 +170,8 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest,
 
   // Do a simple non-process-startup browser launch.
   CommandLine dummy(CommandLine::NO_PROGRAM);
-  browser::startup::IsFirstRun first_run = first_run::IsChromeFirstRun() ?
-      browser::startup::IS_FIRST_RUN :
-      browser::startup::IS_NOT_FIRST_RUN;
+  chrome::startup::IsFirstRun first_run = first_run::IsChromeFirstRun() ?
+      chrome::startup::IS_FIRST_RUN : chrome::startup::IS_NOT_FIRST_RUN;
   StartupBrowserCreatorImpl launch(FilePath(), dummy, first_run);
   ASSERT_TRUE(launch.Launch(browser()->profile(), std::vector<GURL>(), false));
 
@@ -183,13 +183,13 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest,
   // The new browser should have one tab for each URL.
   ASSERT_EQ(static_cast<int>(urls.size()), new_browser->tab_count());
   for (size_t i=0; i < urls.size(); i++) {
-    EXPECT_EQ(urls[i], new_browser->GetWebContentsAt(i)->GetURL());
+    EXPECT_EQ(urls[i], chrome::GetWebContentsAt(new_browser, i)->GetURL());
   }
 
   // The two tabs, despite having the same site, should be in different
   // SiteInstances.
-  EXPECT_NE(new_browser->GetWebContentsAt(0)->GetSiteInstance(),
-            new_browser->GetWebContentsAt(1)->GetSiteInstance());
+  EXPECT_NE(chrome::GetWebContentsAt(new_browser, 0)->GetSiteInstance(),
+            chrome::GetWebContentsAt(new_browser, 1)->GetSiteInstance());
 }
 
 // Verify that startup URLs aren't used when the process already exists
@@ -213,8 +213,8 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest,
 
   // Do a simple non-process-startup browser launch.
   CommandLine dummy(CommandLine::NO_PROGRAM);
-  browser::startup::IsFirstRun first_run = first_run::IsChromeFirstRun() ?
-      browser::startup::IS_FIRST_RUN : browser::startup::IS_NOT_FIRST_RUN;
+  chrome::startup::IsFirstRun first_run = first_run::IsChromeFirstRun() ?
+      chrome::startup::IS_FIRST_RUN : chrome::startup::IS_NOT_FIRST_RUN;
   StartupBrowserCreatorImpl launch(FilePath(), dummy, first_run);
   ASSERT_TRUE(launch.Launch(browser()->profile(), std::vector<GURL>(), false));
 
@@ -237,8 +237,8 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest, OpenAppShortcutNoPref) {
   CommandLine command_line(CommandLine::NO_PROGRAM);
   command_line.AppendSwitchASCII(switches::kAppId, extension_app->id());
 
-  browser::startup::IsFirstRun first_run = first_run::IsChromeFirstRun() ?
-      browser::startup::IS_FIRST_RUN : browser::startup::IS_NOT_FIRST_RUN;
+  chrome::startup::IsFirstRun first_run = first_run::IsChromeFirstRun() ?
+      chrome::startup::IS_FIRST_RUN : chrome::startup::IS_NOT_FIRST_RUN;
   StartupBrowserCreatorImpl launch(FilePath(), command_line, first_run);
   ASSERT_TRUE(launch.Launch(browser()->profile(), std::vector<GURL>(), false));
 
@@ -261,12 +261,13 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest, OpenAppShortcutWindowPref) {
   ASSERT_NO_FATAL_FAILURE(LoadApp("app_with_tab_container", &extension_app));
 
   // Set a pref indicating that the user wants to open this app in a window.
-  SetAppLaunchPref(extension_app->id(), ExtensionPrefs::LAUNCH_WINDOW);
+  SetAppLaunchPref(extension_app->id(),
+                   extensions::ExtensionPrefs::LAUNCH_WINDOW);
 
   CommandLine command_line(CommandLine::NO_PROGRAM);
   command_line.AppendSwitchASCII(switches::kAppId, extension_app->id());
-  browser::startup::IsFirstRun first_run = first_run::IsChromeFirstRun() ?
-      browser::startup::IS_FIRST_RUN : browser::startup::IS_NOT_FIRST_RUN;
+  chrome::startup::IsFirstRun first_run = first_run::IsChromeFirstRun() ?
+      chrome::startup::IS_FIRST_RUN : chrome::startup::IS_NOT_FIRST_RUN;
   StartupBrowserCreatorImpl launch(FilePath(), command_line, first_run);
   ASSERT_TRUE(launch.Launch(browser()->profile(), std::vector<GURL>(), false));
 
@@ -291,12 +292,13 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest, OpenAppShortcutTabPref) {
   ASSERT_NO_FATAL_FAILURE(LoadApp("app_with_tab_container", &extension_app));
 
   // Set a pref indicating that the user wants to open this app in a window.
-  SetAppLaunchPref(extension_app->id(), ExtensionPrefs::LAUNCH_REGULAR);
+  SetAppLaunchPref(extension_app->id(),
+                   extensions::ExtensionPrefs::LAUNCH_REGULAR);
 
   CommandLine command_line(CommandLine::NO_PROGRAM);
   command_line.AppendSwitchASCII(switches::kAppId, extension_app->id());
-  browser::startup::IsFirstRun first_run = first_run::IsChromeFirstRun() ?
-      browser::startup::IS_FIRST_RUN : browser::startup::IS_NOT_FIRST_RUN;
+  chrome::startup::IsFirstRun first_run = first_run::IsChromeFirstRun() ?
+      chrome::startup::IS_FIRST_RUN : chrome::startup::IS_NOT_FIRST_RUN;
   StartupBrowserCreatorImpl launch(FilePath(), command_line, first_run);
   ASSERT_TRUE(launch.Launch(browser()->profile(), std::vector<GURL>(), false));
 
@@ -313,31 +315,6 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest, OpenAppShortcutTabPref) {
   // The browser's app_name should not include the app's ID: It is in a
   // normal browser.
   EXPECT_EQ(
-      new_browser->app_name_.find(extension_app->id()),
-      std::string::npos) << new_browser->app_name_;
-}
-
-IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest, OpenAppShortcutPanel) {
-  // Load an app with launch.container = 'panel'.
-  const Extension* extension_app = NULL;
-  ASSERT_NO_FATAL_FAILURE(LoadApp("app_with_panel_container", &extension_app));
-
-  CommandLine command_line(CommandLine::NO_PROGRAM);
-  command_line.AppendSwitchASCII(switches::kAppId, extension_app->id());
-  browser::startup::IsFirstRun first_run = first_run::IsChromeFirstRun() ?
-      browser::startup::IS_FIRST_RUN : browser::startup::IS_NOT_FIRST_RUN;
-  StartupBrowserCreatorImpl launch(FilePath(), command_line, first_run);
-  ASSERT_TRUE(launch.Launch(browser()->profile(), std::vector<GURL>(), false));
-
-  // The launch should have created a new browser, with a panel type.
-  Browser* new_browser = NULL;
-  ASSERT_NO_FATAL_FAILURE(FindOneOtherBrowser(&new_browser));
-
-  // Expect an app panel.
-  EXPECT_TRUE(new_browser->is_type_panel() && new_browser->is_app());
-
-  // The new browser's app_name should include the app's ID.
-  EXPECT_NE(
       new_browser->app_name_.find(extension_app->id()),
       std::string::npos) << new_browser->app_name_;
 }
@@ -423,13 +400,13 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest, StartupURLsForTwoProfiles) {
   new_browser = FindOneOtherBrowserForProfile(default_profile, browser());
   ASSERT_TRUE(new_browser);
   ASSERT_EQ(1, new_browser->tab_count());
-  EXPECT_EQ(urls1[0], new_browser->GetWebContentsAt(0)->GetURL());
+  EXPECT_EQ(urls1[0], chrome::GetWebContentsAt(new_browser, 0)->GetURL());
 
   ASSERT_EQ(1u, browser::GetBrowserCount(other_profile));
   new_browser = FindOneOtherBrowserForProfile(other_profile, NULL);
   ASSERT_TRUE(new_browser);
   ASSERT_EQ(1, new_browser->tab_count());
-  EXPECT_EQ(urls2[0], new_browser->GetWebContentsAt(0)->GetURL());
+  EXPECT_EQ(urls2[0], chrome::GetWebContentsAt(new_browser, 0)->GetURL());
 }
 
 IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest, UpdateWithTwoProfiles) {
@@ -494,14 +471,14 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest, UpdateWithTwoProfiles) {
   ASSERT_TRUE(new_browser);
   ASSERT_EQ(1, new_browser->tab_count());
   EXPECT_EQ(GURL(chrome::kAboutBlankURL),
-            new_browser->GetWebContentsAt(0)->GetURL());
+            chrome::GetWebContentsAt(new_browser, 0)->GetURL());
 
   ASSERT_EQ(1u, browser::GetBrowserCount(profile2));
   new_browser = FindOneOtherBrowserForProfile(profile2, NULL);
   ASSERT_TRUE(new_browser);
   ASSERT_EQ(1, new_browser->tab_count());
   EXPECT_EQ(GURL(chrome::kAboutBlankURL),
-            new_browser->GetWebContentsAt(0)->GetURL());
+            chrome::GetWebContentsAt(new_browser, 0)->GetURL());
 }
 
 IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest,
@@ -579,14 +556,14 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest,
   ASSERT_TRUE(new_browser);
   ASSERT_EQ(1, new_browser->tab_count());
   EXPECT_EQ(GURL(chrome::kChromeUINewTabURL),
-            new_browser->GetWebContentsAt(0)->GetURL());
+            chrome::GetWebContentsAt(new_browser, 0)->GetURL());
 
   // profile_urls opened the urls.
   ASSERT_EQ(1u, browser::GetBrowserCount(profile_urls));
   new_browser = FindOneOtherBrowserForProfile(profile_urls, NULL);
   ASSERT_TRUE(new_browser);
   ASSERT_EQ(1, new_browser->tab_count());
-  EXPECT_EQ(urls[0], new_browser->GetWebContentsAt(0)->GetURL());
+  EXPECT_EQ(urls[0], chrome::GetWebContentsAt(new_browser, 0)->GetURL());
 
   // profile_last opened the last open pages.
   ASSERT_EQ(1u, browser::GetBrowserCount(profile_last));
@@ -594,7 +571,7 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest,
   ASSERT_TRUE(new_browser);
   ASSERT_EQ(1, new_browser->tab_count());
   EXPECT_EQ(GURL(chrome::kAboutBlankURL),
-            new_browser->GetWebContentsAt(0)->GetURL());
+            chrome::GetWebContentsAt(new_browser, 0)->GetURL());
 
   // profile_home2 was not launched since it would've only opened the home page.
   ASSERT_EQ(0u, browser::GetBrowserCount(profile_home2));
@@ -666,8 +643,8 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest, ProfilesLaunchedAfterCrash) {
   ASSERT_TRUE(new_browser);
   ASSERT_EQ(1, new_browser->tab_count());
   EXPECT_EQ(GURL(chrome::kChromeUINewTabURL),
-            new_browser->GetWebContentsAt(0)->GetURL());
-  EXPECT_EQ(1U, new_browser->GetTabContentsAt(0)->infobar_tab_helper()->
+            chrome::GetWebContentsAt(new_browser, 0)->GetURL());
+  EXPECT_EQ(1U, chrome::GetTabContentsAt(new_browser, 0)->infobar_tab_helper()->
             infobar_count());
 
   // The profile which normally opens last open pages displays the new tab page.
@@ -676,8 +653,8 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest, ProfilesLaunchedAfterCrash) {
   ASSERT_TRUE(new_browser);
   ASSERT_EQ(1, new_browser->tab_count());
   EXPECT_EQ(GURL(chrome::kChromeUINewTabURL),
-            new_browser->GetWebContentsAt(0)->GetURL());
-  EXPECT_EQ(1U, new_browser->GetTabContentsAt(0)->infobar_tab_helper()->
+            chrome::GetWebContentsAt(new_browser, 0)->GetURL());
+  EXPECT_EQ(1U, chrome::GetTabContentsAt(new_browser, 0)->infobar_tab_helper()->
             infobar_count());
 
   // The profile which normally opens URLs displays the new tab page.
@@ -686,8 +663,8 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest, ProfilesLaunchedAfterCrash) {
   ASSERT_TRUE(new_browser);
   ASSERT_EQ(1, new_browser->tab_count());
   EXPECT_EQ(GURL(chrome::kChromeUINewTabURL),
-            new_browser->GetWebContentsAt(0)->GetURL());
-  EXPECT_EQ(1U, new_browser->GetTabContentsAt(0)->infobar_tab_helper()->
+            chrome::GetWebContentsAt(new_browser, 0)->GetURL());
+  EXPECT_EQ(1U, chrome::GetTabContentsAt(new_browser, 0)->infobar_tab_helper()->
             infobar_count());
 }
 #endif  // !OS_CHROMEOS

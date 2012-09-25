@@ -100,9 +100,10 @@ BackingStore* TestRenderWidgetHostView::AllocBackingStore(
 }
 
 void TestRenderWidgetHostView::CopyFromCompositingSurface(
-    const gfx::Size& size,
-    skia::PlatformCanvas* output,
-    base::Callback<void(bool)> callback) {
+    const gfx::Rect& src_subrect,
+    const gfx::Size& dst_size,
+    const base::Callback<void(bool)>& callback,
+    skia::PlatformCanvas* output) {
   callback.Run(false);
 }
 
@@ -176,11 +177,14 @@ void TestRenderWidgetHostView::AcceleratedSurfaceSetTransportDIB(
 #elif defined(OS_WIN) && !defined(USE_AURA)
 void TestRenderWidgetHostView::WillWmDestroy() {
 }
+#endif
 
+#if defined(OS_ANDROID)
+void TestRenderWidgetHostView::StartContentIntent(const GURL&) {}
 #endif
 
 #if defined(OS_POSIX) || defined(USE_AURA)
-gfx::Rect TestRenderWidgetHostView::GetRootWindowBounds() {
+gfx::Rect TestRenderWidgetHostView::GetBoundsInRootWindow() {
   return gfx::Rect();
 }
 #endif
@@ -258,9 +262,24 @@ void TestRenderViewHost::SendNavigate(int page_id, const GURL& url) {
 
 void TestRenderViewHost::SendNavigateWithTransition(
     int page_id, const GURL& url, PageTransition transition) {
+  OnMsgDidStartProvisionalLoadForFrame(0, true, GURL(), url);
+  SendNavigateWithParameters(page_id, url, transition, url);
+}
+
+void TestRenderViewHost::SendNavigateWithOriginalRequestURL(
+    int page_id, const GURL& url, const GURL& original_request_url) {
+  OnMsgDidStartProvisionalLoadForFrame(0, true, GURL(), url);
+  SendNavigateWithParameters(page_id, url, PAGE_TRANSITION_LINK,
+      original_request_url);
+}
+
+void TestRenderViewHost::SendNavigateWithParameters(
+    int page_id, const GURL& url, PageTransition transition,
+    const GURL& original_request_url) {
   ViewHostMsg_FrameNavigate_Params params;
 
   params.page_id = page_id;
+  params.frame_id = 0;
   params.url = url;
   params.referrer = Referrer();
   params.transition = transition;
@@ -279,6 +298,7 @@ void TestRenderViewHost::SendNavigateWithTransition(
   params.socket_address.set_port(80);
   params.was_fetched_via_proxy = simulate_fetch_via_proxy_;
   params.content_state = webkit_glue::CreateHistoryStateForURL(GURL(url));
+  params.original_request_url = original_request_url;
 
   ViewHostMsg_FrameNavigate msg(1, params);
   OnMsgNavigate(msg);
@@ -300,8 +320,8 @@ void TestRenderViewHost::SimulateWasHidden() {
   WasHidden();
 }
 
-void TestRenderViewHost::SimulateWasRestored() {
-  WasRestored();
+void TestRenderViewHost::SimulateWasShown() {
+  WasShown();
 }
 
 void TestRenderViewHost::TestOnMsgStartDragging(

@@ -10,7 +10,7 @@
 <translation id="5048533449481078685">marcador de listas</translation>
 <translation id="4202807286478387388">saltar</translation>
 <translation id="4611115858363067980"><ph name="FILENAME"/><ph name="WIDTH"/>×<ph name="HEIGHT"/></translation>
-<translation id="795667975304826397">No se ha seleccionado ningun archivo</translation>
+<translation id="795667975304826397">No se ha seleccionado ningún archivo</translation>
 <translation id="8141602879876242471">Se trata de un índice que admite búsquedas. Introduce las palabras clave de búsqueda:</translation>
 <translation id="370665806235115550">Cargando...</translation>
 <translation id="6845533974506654842">pulsar</translation>
@@ -47,6 +47,7 @@
 <translation id="835897206747267392">Valor no válido</translation>
 <translation id="1842960171412779397">seleccionar</translation>
 <translation id="3450233048674729344">El valor debe inferior o igual a <ph name="MAXIMUM"/></translation>
+<translation id="668171684555832681">Otros...</translation>
 <translation id="6119846243427417423">activar</translation>
 <translation id="8444882422881193423"><ph name="NUMBER_OF_FILES"/> archivos</translation>
 <translation id="6643016212128521049">Eliminar</translation>

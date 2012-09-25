@@ -4,13 +4,12 @@
 
 #ifndef CHROME_BROWSER_USER_STYLE_SHEET_WATCHER_H_
 #define CHROME_BROWSER_USER_STYLE_SHEET_WATCHER_H_
-#pragma once
 
 #include "base/file_path.h"
 #include "base/files/file_path_watcher.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop_helpers.h"
+#include "base/sequenced_task_runner_helpers.h"
 #include "chrome/browser/profiles/refcounted_profile_keyed_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_observer.h"

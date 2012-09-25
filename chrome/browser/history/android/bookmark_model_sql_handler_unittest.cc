@@ -7,6 +7,7 @@
 #include "base/synchronization/waitable_event.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
+#include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/history/history_database.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_constants.h"
@@ -50,7 +51,7 @@ class BookmarkModelSQLHandlerTest : public testing::Test {
     // how the BookmarkModelSQLHandler gets the BookmarkModel.
     Profile* profile = ProfileManager::GetLastUsedProfile();
     ASSERT_TRUE(profile);
-    bookmark_model_ = profile->GetBookmarkModel();
+    bookmark_model_ = BookmarkModelFactory::GetForProfile(profile);
     ASSERT_TRUE(bookmark_model_);
 
     // Create the directory for history database.
@@ -63,7 +64,7 @@ class BookmarkModelSQLHandlerTest : public testing::Test {
   // Runs the MessageLoopForUI, and return till all pending messages were
   // processed.
   void RunMessageLoopForUI() {
-    ui_test_utils::RunAllPendingInMessageLoop();
+    content::RunAllPendingInMessageLoop();
   }
 
   TestingProfileManager profile_manager_;
@@ -137,10 +138,12 @@ TEST_F(BookmarkModelSQLHandlerTest, UpdateHistoryToBookmark) {
   ASSERT_TRUE(handler.Update(row, id_rows));
   RunMessageLoopForUI();
   // Get all bookmarks and verify there is only one.
-  std::vector<GURL> urls;
-  bookmark_model_->GetBookmarks(&urls);
-  EXPECT_EQ(1u, urls.size());
-  EXPECT_EQ(url_row.url(), urls[0]);
+  std::vector<BookmarkService::URLAndTitle> bookmarks;
+  bookmark_model_->GetBookmarks(&bookmarks);
+  ASSERT_EQ(1u, bookmarks.size());
+  EXPECT_EQ(url_row.url(), bookmarks[0].url);
+  EXPECT_EQ(url_row.title(), bookmarks[0].title);
+
   // Get the bookmark node.
   std::vector<const BookmarkNode*> nodes;
   bookmark_model_->GetNodesByURL(row.url(), &nodes);
@@ -154,9 +157,9 @@ TEST_F(BookmarkModelSQLHandlerTest, UpdateHistoryToBookmark) {
   row.set_is_bookmark(false);
   ASSERT_TRUE(handler.Update(row, id_rows));
   RunMessageLoopForUI();
-  urls.clear();
-  bookmark_model_->GetBookmarks(&urls);
-  EXPECT_TRUE(urls.empty());
+  bookmarks.clear();
+  bookmark_model_->GetBookmarks(&bookmarks);
+  EXPECT_TRUE(bookmarks.empty());
 
   // Update with the parent id.
   row.set_parent_id(bookmark_model_->other_node()->id());
@@ -164,10 +167,11 @@ TEST_F(BookmarkModelSQLHandlerTest, UpdateHistoryToBookmark) {
   ASSERT_TRUE(handler.Update(row, id_rows));
   RunMessageLoopForUI();
   // Get all bookmarks and verify there is only one.
-  urls.clear();
-  bookmark_model_->GetBookmarks(&urls);
-  EXPECT_EQ(1u, urls.size());
-  EXPECT_EQ(url_row.url(), urls[0]);
+  bookmarks.clear();
+  bookmark_model_->GetBookmarks(&bookmarks);
+  ASSERT_EQ(1u, bookmarks.size());
+  EXPECT_EQ(url_row.url(), bookmarks[0].url);
+  EXPECT_EQ(url_row.title(), bookmarks[0].title);
   // Get the bookmark node.
   nodes.clear();
   bookmark_model_->GetNodesByURL(row.url(), &nodes);
@@ -185,10 +189,11 @@ TEST_F(BookmarkModelSQLHandlerTest, UpdateHistoryToBookmark) {
   ASSERT_TRUE(handler.Update(update_title, id_rows));
   RunMessageLoopForUI();
   // Get all bookmarks and verify there is only one.
-  urls.clear();
-  bookmark_model_->GetBookmarks(&urls);
-  EXPECT_EQ(1u, urls.size());
-  EXPECT_EQ(url_row.url(), urls[0]);
+  bookmarks.clear();
+  bookmark_model_->GetBookmarks(&bookmarks);
+  ASSERT_EQ(1u, bookmarks.size());
+  EXPECT_EQ(url_row.url(), bookmarks[0].url);
+  EXPECT_EQ(url_row.title(), bookmarks[0].title);
   // Get the bookmark node.
   nodes.clear();
   bookmark_model_->GetNodesByURL(row.url(), &nodes);

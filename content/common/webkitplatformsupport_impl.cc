@@ -13,6 +13,10 @@
 
 namespace content {
 
+namespace {
+WebKitPlatformSupportImpl::OffscreenContextFactory* g_context_factory = NULL;
+}
+
 WebKitPlatformSupportImpl::WebKitPlatformSupportImpl() {
 }
 
@@ -55,6 +59,8 @@ WebKitPlatformSupportImpl::CreateWebSocketBridge(
 WebKit::WebGraphicsContext3D*
 WebKitPlatformSupportImpl::createOffscreenGraphicsContext3D(
     const WebGraphicsContext3D::Attributes& attributes) {
+  if (g_context_factory)
+    return g_context_factory();
   // The WebGraphicsContext3DInProcessImpl code path is used for
   // layout tests (though not through this code) as well as for
   // debugging and bringing up new ports.
@@ -62,9 +68,17 @@ WebKitPlatformSupportImpl::createOffscreenGraphicsContext3D(
     return webkit::gpu::WebGraphicsContext3DInProcessImpl::CreateForWebView(
             attributes, false);
   } else {
+    // Intentionally blank URL provided for offscreen contexts -- blank URLs are
+    // ignored in the GPU process for crash reporting.
     return WebGraphicsContext3DCommandBufferImpl::CreateOffscreenContext(
-        GetGpuChannelHostFactory(), attributes);
+        GetGpuChannelHostFactory(), attributes, GURL());
   }
+}
+
+// static
+void WebKitPlatformSupportImpl::SetOffscreenContextFactoryForTest(
+      OffscreenContextFactory factory) {
+  g_context_factory = factory;
 }
 
 GpuChannelHostFactory* WebKitPlatformSupportImpl::GetGpuChannelHostFactory() {

@@ -4,8 +4,14 @@
 
 #include "chrome/browser/extensions/script_badge_controller.h"
 
+#include "base/logging.h"
+#include "base/string_util.h"
+#include "base/stringprintf.h"
+#include "chrome/browser/extensions/browser_event_router.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
+#include "chrome/browser/extensions/tab_helper.h"
+#include "chrome/browser/sessions/session_id.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_action.h"
@@ -13,17 +19,20 @@
 #include "chrome/common/extensions/extension_set.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/navigation_details.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_contents.h"
+#include "googleurl/src/gurl.h"
 #include "ipc/ipc_message.h"
 #include "ipc/ipc_message_macros.h"
 
 namespace extensions {
 
-ScriptBadgeController::ScriptBadgeController(TabContents* tab_contents)
-    : content::WebContentsObserver(tab_contents->web_contents()),
-      script_executor_(tab_contents->web_contents()),
+ScriptBadgeController::ScriptBadgeController(TabContents* tab_contents,
+                                             ScriptExecutor* script_executor)
+    : ScriptExecutor::Observer(script_executor),
+      content::WebContentsObserver(tab_contents->web_contents()),
       tab_contents_(tab_contents) {
   registrar_.Add(this,
                  chrome::NOTIFICATION_EXTENSION_UNLOADED,
@@ -32,8 +41,23 @@ ScriptBadgeController::ScriptBadgeController(TabContents* tab_contents)
 
 ScriptBadgeController::~ScriptBadgeController() {}
 
-std::vector<ExtensionAction*> ScriptBadgeController::GetCurrentActions() {
+std::vector<ExtensionAction*> ScriptBadgeController::GetCurrentActions() const {
   return current_actions_;
+}
+
+void ScriptBadgeController::GetAttentionFor(
+    const std::string& extension_id) {
+  ExtensionAction* script_badge = AddExtensionToCurrentActions(extension_id);
+  if (!script_badge)
+    return;
+
+  // TODO(jyasskin): Modify the icon's appearance to indicate that the
+  // extension is merely asking for permission to run:
+  // http://crbug.com/133142
+  script_badge->SetAppearance(SessionID::IdForTab(tab_contents_),
+                              ExtensionAction::WANTS_ATTENTION);
+
+  NotifyChange();
 }
 
 LocationBarController::Action ScriptBadgeController::OnClicked(
@@ -44,13 +68,36 @@ LocationBarController::Action ScriptBadgeController::OnClicked(
 
   const Extension* extension = service->extensions()->GetByID(extension_id);
   CHECK(extension);
+  ExtensionAction* script_badge = extension->script_badge();
+  CHECK(script_badge);
 
   switch (mouse_button) {
     case 1:  // left
     case 2:  // middle
-      // TODO(kalman): decide what to do here.
-      return ACTION_NONE;
+      tab_contents_->extension_tab_helper()->active_tab_permission_manager()->
+          GrantIfRequested(extension);
+
+      // Even if clicking the badge doesn't immediately cause the extension to
+      // run script on the page, we want to help users associate clicking with
+      // the extension having permission to modify the page, so we make the icon
+      // full-colored immediately.
+      if (script_badge->SetAppearance(SessionID::IdForTab(tab_contents_),
+                                      ExtensionAction::ACTIVE))
+        NotifyChange();
+
+      // Fire the scriptBadge.onClicked event.
+      GetExtensionService()->browser_event_router()->ScriptBadgeExecuted(
+          tab_contents_->profile(),
+          *script_badge,
+          SessionID::IdForTab(tab_contents_));
+
+      // TODO(jyasskin): The fallback order should be user-defined popup ->
+      // onClicked handler -> default popup.
+      return ACTION_SHOW_SCRIPT_POPUP;
     case 3:  // right
+      // Don't grant access on right clicks, so users can investigate
+      // the extension without danger.
+
       return extension->ShowConfigureContextMenus() ?
           ACTION_SHOW_CONTEXT_MENU : ACTION_NONE;
   }
@@ -58,53 +105,46 @@ LocationBarController::Action ScriptBadgeController::OnClicked(
   return ACTION_NONE;
 }
 
-void ScriptBadgeController::ExecuteScript(
-    const std::string& extension_id,
-    ScriptExecutor::ScriptType script_type,
-    const std::string& code,
-    ScriptExecutor::FrameScope frame_scope,
-    UserScript::RunLocation run_at,
-    ScriptExecutor::WorldType world_type,
-    const ExecuteScriptCallback& callback) {
-  ExecuteScriptCallback this_callback = base::Bind(
-      &ScriptBadgeController::OnExecuteScriptFinished,
-      this,
-      extension_id,
-      callback);
-
-  script_executor_.ExecuteScript(extension_id,
-                                 script_type,
-                                 code,
-                                 frame_scope,
-                                 run_at,
-                                 world_type,
-                                 this_callback);
-}
-
 void ScriptBadgeController::OnExecuteScriptFinished(
     const std::string& extension_id,
-    const ExecuteScriptCallback& callback,
-    bool success,
-    int32 page_id,
-    const std::string& error) {
-  if (success && page_id == GetPageID()) {
-    if (InsertExtension(extension_id))
-      Notify();
-  }
+    const std::string& error,
+    int32 on_page_id,
+    const GURL& on_url,
+    const base::ListValue& script_results) {
+  if (!error.empty())
+    return;
 
-  callback.Run(success, page_id, error);
+  int32 current_page_id = GetPageID();
+
+  if (on_page_id == current_page_id) {
+    if (MarkExtensionExecuting(extension_id))
+      NotifyChange();
+  } else if (current_page_id < 0) {
+    // Tracking down http://crbug.com/138323.
+    std::string message = base::StringPrintf(
+        "Expected a page ID of %d but there was no navigation entry. "
+        "Extension ID is %s.",
+        on_page_id,
+        extension_id.c_str());
+    char buf[1024];
+    base::snprintf(buf, arraysize(buf), "%s", message.c_str());
+    LOG(ERROR) << message;
+    return;
+  }
 }
 
 ExtensionService* ScriptBadgeController::GetExtensionService() {
-  return ExtensionSystem::Get(tab_contents_->profile())->extension_service();
+  return extensions::ExtensionSystem::Get(
+      tab_contents_->profile())->extension_service();
 }
 
 int32 ScriptBadgeController::GetPageID() {
-  return tab_contents_->web_contents()->GetController().GetActiveEntry()->
-      GetPageID();
+  content::NavigationEntry* nav_entry =
+      tab_contents_->web_contents()->GetController().GetActiveEntry();
+  return nav_entry ? nav_entry->GetPageID() : -1;
 }
 
-void ScriptBadgeController::Notify() {
+void ScriptBadgeController::NotifyChange() {
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_EXTENSION_LOCATION_BAR_UPDATED,
       content::Source<Profile>(tab_contents_->profile()),
@@ -114,7 +154,9 @@ void ScriptBadgeController::Notify() {
 void ScriptBadgeController::DidNavigateMainFrame(
     const content::LoadCommittedDetails& details,
     const content::FrameNavigateParams& params) {
-  extensions_executing_scripts_.clear();
+  if (details.is_in_page)
+    return;
+  extensions_in_current_actions_.clear();
   current_actions_.clear();
 }
 
@@ -126,7 +168,7 @@ void ScriptBadgeController::Observe(
   const Extension* extension =
       content::Details<UnloadedExtensionInfo>(details)->extension;
   if (EraseExtension(extension))
-    Notify();
+    NotifyChange();
 }
 
 bool ScriptBadgeController::OnMessageReceived(const IPC::Message& message) {
@@ -139,39 +181,74 @@ bool ScriptBadgeController::OnMessageReceived(const IPC::Message& message) {
   return handled;
 }
 
+namespace {
+std::string JoinExtensionIDs(const std::set<std::string>& ids) {
+  std::vector<std::string> as_vector(ids.begin(), ids.end());
+  return "[" + JoinString(as_vector, ',') + "]";
+}
+}  // namespace
+
 void ScriptBadgeController::OnContentScriptsExecuting(
-    const std::set<std::string>& extension_ids, int32 page_id) {
-  if (page_id != GetPageID())
+    const std::set<std::string>& extension_ids,
+    int32 on_page_id,
+    const GURL& on_url) {
+  int32 current_page_id = GetPageID();
+  if (on_page_id != current_page_id)
     return;
+
+  if (current_page_id < 0) {
+    // Tracking down http://crbug.com/138323.
+    std::string message = base::StringPrintf(
+        "Expected a page ID of %d but there was no navigation entry. "
+        "Extension IDs are %s.",
+        on_page_id,
+        JoinExtensionIDs(extension_ids).c_str());
+    char buf[1024];
+    base::snprintf(buf, arraysize(buf), "%s", message.c_str());
+    LOG(ERROR) << message;
+    return;
+  }
 
   bool changed = false;
   for (std::set<std::string>::const_iterator it = extension_ids.begin();
        it != extension_ids.end(); ++it) {
-    changed |= InsertExtension(*it);
+    changed |= MarkExtensionExecuting(*it);
   }
   if (changed)
-    Notify();
+    NotifyChange();
 }
 
-bool ScriptBadgeController::InsertExtension(const std::string& extension_id) {
-  if (!extensions_executing_scripts_.insert(extension_id).second)
-    return false;
+ExtensionAction* ScriptBadgeController::AddExtensionToCurrentActions(
+    const std::string& extension_id) {
+  if (!extensions_in_current_actions_.insert(extension_id).second)
+    return NULL;
 
   ExtensionService* service = GetExtensionService();
   if (!service)
-    return  false;
+    return NULL;
 
   const Extension* extension = service->extensions()->GetByID(extension_id);
   if (!extension)
+    return NULL;
+
+  ExtensionAction* script_badge = extension->script_badge();
+  current_actions_.push_back(script_badge);
+  return script_badge;
+}
+
+bool ScriptBadgeController::MarkExtensionExecuting(
+    const std::string& extension_id) {
+  ExtensionAction* script_badge = AddExtensionToCurrentActions(extension_id);
+  if (!script_badge)
     return false;
 
-  current_actions_.push_back(extension->GetScriptBadge());
+  script_badge->SetAppearance(SessionID::IdForTab(tab_contents_),
+                              ExtensionAction::ACTIVE);
   return true;
 }
 
-
 bool ScriptBadgeController::EraseExtension(const Extension* extension) {
-  if (extensions_executing_scripts_.erase(extension->id()) == 0)
+  if (extensions_in_current_actions_.erase(extension->id()) == 0)
     return false;
 
   size_t size_before = current_actions_.size();

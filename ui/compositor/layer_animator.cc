@@ -26,15 +26,14 @@ static const base::TimeDelta kDefaultTransitionDuration =
 static const base::TimeDelta kTimerInterval =
     base::TimeDelta::FromMilliseconds(10);
 
-// For visual debugging, slow animations down by this factor.
-const int kSlowAnimationScaleFactor = 4;
-
 }  // namespace
 
 // static
 bool LayerAnimator::disable_animations_for_test_ = false;
 // static
 bool LayerAnimator::slow_animation_mode_ = false;
+// static
+int LayerAnimator::slow_animation_scale_factor_ = 4;
 
 // LayerAnimator public --------------------------------------------------------
 
@@ -118,6 +117,34 @@ bool LayerAnimator::GetTargetVisibility() const {
   LayerAnimationElement::TargetValue target(delegate());
   GetTargetValue(&target);
   return target.visibility;
+}
+
+void LayerAnimator::SetBrightness(float brightness) {
+  base::TimeDelta duration = GetTransitionDuration();
+  scoped_ptr<LayerAnimationElement> element(
+      LayerAnimationElement::CreateBrightnessElement(brightness, duration));
+  element->set_tween_type(tween_type_);
+  StartAnimation(new LayerAnimationSequence(element.release()));
+}
+
+float LayerAnimator::GetTargetBrightness() const {
+  LayerAnimationElement::TargetValue target(delegate());
+  GetTargetValue(&target);
+  return target.brightness;
+}
+
+void LayerAnimator::SetGrayscale(float grayscale) {
+  base::TimeDelta duration = GetTransitionDuration();
+  scoped_ptr<LayerAnimationElement> element(
+      LayerAnimationElement::CreateGrayscaleElement(grayscale, duration));
+  element->set_tween_type(tween_type_);
+  StartAnimation(new LayerAnimationSequence(element.release()));
+}
+
+float LayerAnimator::GetTargetGrayscale() const {
+  LayerAnimationElement::TargetValue target(delegate());
+  GetTargetValue(&target);
+  return target.grayscale;
 }
 
 void LayerAnimator::SetDelegate(LayerAnimationDelegate* delegate) {
@@ -231,10 +258,6 @@ void LayerAnimator::RemoveObserver(LayerAnimationObserver* observer) {
   }
 }
 
-int LayerAnimator::slow_animation_scale_factor() {
-  return kSlowAnimationScaleFactor;
-}
-
 // LayerAnimator protected -----------------------------------------------------
 
 bool LayerAnimator::ProgressAnimation(LayerAnimationSequence* sequence,
@@ -275,7 +298,7 @@ void LayerAnimator::Step(base::TimeTicks now) {
       needs_redraw = true;
   }
 
-  if (needs_redraw)
+  if (needs_redraw && delegate())
     delegate()->ScheduleDrawForAnimation();
 }
 

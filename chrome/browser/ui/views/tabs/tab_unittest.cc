@@ -33,12 +33,9 @@ class FakeTabController : public TabController {
     return false;
   }
   virtual bool IsTabPinned(const BaseTab* tab) const OVERRIDE { return false; }
-  virtual bool IsTabCloseable(const BaseTab* tab) const OVERRIDE {
-    return true;
-  }
   virtual void MaybeStartDrag(
       BaseTab* tab,
-      const views::MouseEvent& event,
+      const views::LocatedEvent& event,
       const TabStripSelectionModel& original_selection) OVERRIDE {}
   virtual void ContinueDrag(views::View* view,
                             const gfx::Point& location) OVERRIDE {}
@@ -52,6 +49,9 @@ class FakeTabController : public TabController {
                                  const views::MouseEvent& event) OVERRIDE {}
   virtual bool ShouldPaintTab(const BaseTab* tab, gfx::Rect* clip) OVERRIDE {
     return true;
+  }
+  virtual bool IsInstantExtendedAPIEnabled() OVERRIDE {
+    return false;
   }
 
  private:

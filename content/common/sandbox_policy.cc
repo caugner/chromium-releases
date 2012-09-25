@@ -25,9 +25,9 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/common/process_type.h"
 #include "content/public/common/sandbox_init.h"
-#include "sandbox/src/sandbox.h"
-#include "sandbox/src/sandbox_nt_util.h"
-#include "sandbox/src/win_utils.h"
+#include "sandbox/win/src/sandbox.h"
+#include "sandbox/win/src/sandbox_nt_util.h"
+#include "sandbox/win/src/win_utils.h"
 #include "ui/gl/gl_switches.h"
 
 static sandbox::BrokerServices* g_broker_services = NULL;
@@ -343,7 +343,8 @@ bool AddPolicyForGPU(CommandLine* cmd_line, sandbox::TargetPolicy* policy) {
     } else {
       if (cmd_line->GetSwitchValueASCII(switches::kUseGL) ==
           gfx::kGLImplementationSwiftShaderName ||
-          cmd_line->HasSwitch(switches::kReduceGpuSandbox)) {
+          cmd_line->HasSwitch(switches::kReduceGpuSandbox) ||
+          cmd_line->HasSwitch(switches::kDisableImageTransportSurface)) {
         // Swiftshader path.
         policy->SetTokenLevel(sandbox::USER_RESTRICTED_SAME_ACCESS,
                               sandbox::USER_LIMITED);
@@ -724,9 +725,11 @@ base::ProcessHandle StartProcessWithAccess(CommandLine* cmd_line,
     if (type == content::PROCESS_TYPE_RENDERER ||
         type == content::PROCESS_TYPE_WORKER) {
       AddBaseHandleClosePolicy(policy);
+    }
 
     // Pepper uses the renderer's policy, whith some tweaks.
-    } else if (type == content::PROCESS_TYPE_PPAPI_PLUGIN) {
+    if (cmd_line->HasSwitch(switches::kGuestRenderer) ||
+        type == content::PROCESS_TYPE_PPAPI_PLUGIN) {
       if (!AddPolicyForPepperPlugin(policy))
         return 0;
     }

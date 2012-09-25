@@ -6,6 +6,8 @@
 #import "chrome/browser/ui/cocoa/cocoa_test_helper.h"
 #include "chrome/browser/ui/cocoa/content_settings/cookie_details.h"
 #include "googleurl/src/gurl.h"
+#include "net/cookies/canonical_cookie.h"
+#include "net/cookies/parsed_cookie.h"
 #import "testing/gtest_mac.h"
 
 namespace {
@@ -25,18 +27,16 @@ TEST_F(CookiesDetailsTest, CreateForCookie) {
   GURL url("http://chromium.org");
   std::string cookieLine(
       "PHPSESSID=0123456789abcdef0123456789abcdef; path=/");
-  net::CookieMonster::ParsedCookie pc(cookieLine);
-  net::CookieMonster::CanonicalCookie cookie(url, pc);
-  NSString* origin = base::SysUTF8ToNSString("http://chromium.org");
+  net::ParsedCookie pc(cookieLine);
+  net::CanonicalCookie cookie(url, pc);
   details.reset([[CocoaCookieDetails alloc] initWithCookie:&cookie
-                                                    origin:origin
                                          canEditExpiration:NO]);
 
   EXPECT_EQ([details.get() type], kCocoaCookieDetailsTypeCookie);
   EXPECT_NSEQ(@"PHPSESSID", [details.get() name]);
   EXPECT_NSEQ(@"0123456789abcdef0123456789abcdef",
       [details.get() content]);
-  EXPECT_NSEQ(@"http://chromium.org", [details.get() domain]);
+  EXPECT_NSEQ(@"chromium.org", [details.get() domain]);
   EXPECT_NSEQ(@"/", [details.get() path]);
   EXPECT_NSNE(@"", [details.get() lastModified]);
   EXPECT_NSNE(@"", [details.get() created]);

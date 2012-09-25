@@ -17,7 +17,6 @@
 #include "base/threading/sequenced_worker_pool.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/gdata/gdata.pb.h"
-#include "chrome/browser/chromeos/gdata/gdata_file_system.h"
 #include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
@@ -183,7 +182,7 @@ void GDataSyncClient::DoSyncLoop() {
         sync_task.resource_id,
         base::Bind(&GDataSyncClient::OnFetchFileComplete,
                    weak_ptr_factory_.GetWeakPtr(),
-                   sync_task.resource_id),
+                   sync_task),
         GetDownloadDataCallback());
   } else if (sync_task.sync_type == UPLOAD) {
     DVLOG(1) << "Uploading " << sync_task.resource_id;
@@ -312,22 +311,25 @@ void GDataSyncClient::OnGetResourceIdsOfExistingPinnedFiles(
 
   for (size_t i = 0; i < resource_ids.size(); ++i) {
     const std::string& resource_id = resource_ids[i];
-    file_system_->GetFileInfoByResourceId(
+    file_system_->GetEntryInfoByResourceId(
         resource_id,
-        base::Bind(&GDataSyncClient::OnGetFileInfoByResourceId,
+        base::Bind(&GDataSyncClient::OnGetEntryInfoByResourceId,
                    weak_ptr_factory_.GetWeakPtr(),
                    resource_id));
   }
 }
 
-void GDataSyncClient::OnGetFileInfoByResourceId(
+void GDataSyncClient::OnGetEntryInfoByResourceId(
     const std::string& resource_id,
-    base::PlatformFileError error,
+    GDataFileError error,
     const FilePath& /* gdata_file_path */,
-    scoped_ptr<GDataFileProto> file_proto) {
+    scoped_ptr<GDataEntryProto> entry_proto) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  if (error != base::PLATFORM_FILE_OK) {
+  if (entry_proto.get() && !entry_proto->has_file_specific_info())
+    error = GDATA_FILE_ERROR_NOT_FOUND;
+
+  if (error != GDATA_FILE_OK) {
     LOG(WARNING) << "Entry not found: " << resource_id;
     return;
   }
@@ -338,14 +340,14 @@ void GDataSyncClient::OnGetFileInfoByResourceId(
       base::Bind(&GDataSyncClient::OnGetCacheEntry,
                  weak_ptr_factory_.GetWeakPtr(),
                  resource_id,
-                 file_proto->file_md5()));
+                 entry_proto->file_specific_info().file_md5()));
 }
 
 void GDataSyncClient::OnGetCacheEntry(
     const std::string& resource_id,
     const std::string& latest_md5,
     bool success,
-    const GDataCache::CacheEntry& cache_entry) {
+    const GDataCacheEntry& cache_entry) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   if (!success) {
@@ -356,7 +358,7 @@ void GDataSyncClient::OnGetCacheEntry(
   // If MD5s don't match, it indicates the local cache file is stale, unless
   // the file is dirty (the MD5 is "local"). We should never re-fetch the
   // file when we have a locally modified version.
-  if (latest_md5 != cache_entry.md5 && !cache_entry.IsDirty()) {
+  if (latest_md5 != cache_entry.md5() && !cache_entry.is_dirty()) {
     cache_->RemoveOnUIThread(
         resource_id,
         base::Bind(&GDataSyncClient::OnRemove,
@@ -364,12 +366,12 @@ void GDataSyncClient::OnGetCacheEntry(
   }
 }
 
-void GDataSyncClient::OnRemove(base::PlatformFileError error,
+void GDataSyncClient::OnRemove(GDataFileError error,
                                const std::string& resource_id,
                                const std::string& md5) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  if (error != base::PLATFORM_FILE_OK) {
+  if (error != GDATA_FILE_OK) {
     LOG(WARNING) << "Failed to remove cache entry: " << resource_id;
     return;
   }
@@ -382,12 +384,12 @@ void GDataSyncClient::OnRemove(base::PlatformFileError error,
                                    weak_ptr_factory_.GetWeakPtr()));
 }
 
-void GDataSyncClient::OnPinned(base::PlatformFileError error,
+void GDataSyncClient::OnPinned(GDataFileError error,
                                const std::string& resource_id,
                                const std::string& /* md5 */) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  if (error != base::PLATFORM_FILE_OK) {
+  if (error != GDATA_FILE_OK) {
     LOG(WARNING) << "Failed to pin cache entry: " << resource_id;
     return;
   }
@@ -397,18 +399,26 @@ void GDataSyncClient::OnPinned(base::PlatformFileError error,
   StartSyncLoop();
 }
 
-void GDataSyncClient::OnFetchFileComplete(const std::string& resource_id,
-                                          base::PlatformFileError error,
+void GDataSyncClient::OnFetchFileComplete(const SyncTask& sync_task,
+                                          GDataFileError error,
                                           const FilePath& local_path,
                                           const std::string& ununsed_mime_type,
                                           GDataFileType file_type) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  if (error == base::PLATFORM_FILE_OK) {
-    DVLOG(1) << "Fetched " << resource_id << ": " << local_path.value();
+  if (error == GDATA_FILE_OK) {
+    DVLOG(1) << "Fetched " << sync_task.resource_id << ": "
+             << local_path.value();
   } else {
-    // TODO(satorux): We should re-queue if the error is recoverable.
-    LOG(WARNING) << "Failed to fetch " << resource_id << ": " << error;
+    switch (error) {
+      case GDATA_FILE_ERROR_NO_CONNECTION:
+        // Re-queue the task so that we'll retry once the connection is back.
+        queue_.push_front(sync_task);
+        break;
+      default:
+        LOG(WARNING) << "Failed to fetch " << sync_task.resource_id
+                     << ": " << error;
+    }
   }
 
   // Continue the loop.
@@ -416,10 +426,10 @@ void GDataSyncClient::OnFetchFileComplete(const std::string& resource_id,
 }
 
 void GDataSyncClient::OnUploadFileComplete(const std::string& resource_id,
-                                           base::PlatformFileError error) {
+                                           GDataFileError error) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  if (error == base::PLATFORM_FILE_OK) {
+  if (error == GDATA_FILE_OK) {
     DVLOG(1) << "Uploaded " << resource_id;
   } else {
     // TODO(satorux): We should re-queue if the error is recoverable.

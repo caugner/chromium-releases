@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_INPUT_METHOD_INPUT_METHOD_MANAGER_H_
 #define CHROME_BROWSER_CHROMEOS_INPUT_METHOD_INPUT_METHOD_MANAGER_H_
-#pragma once
 
 #include <map>
 #include <string>
@@ -138,13 +137,6 @@ class InputMethodManager {
 
   // Returns an InputMethodUtil object.
   virtual InputMethodUtil* GetInputMethodUtil() = 0;
-
-  // Enables all input method hotkeys such as Alt+Shift. Note that all hotkeys
-  // are enabled on startup.
-  virtual void EnableHotkeys() = 0;
-
-  // Disables all input method hotkeys.
-  virtual void DisableHotkeys() = 0;
 
   // Switches the current input method (or keyboard layout) to the next one.
   virtual bool SwitchToNextInputMethod() = 0;

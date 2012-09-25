@@ -129,6 +129,8 @@ void SpellCheck::Init(base::PlatformFile file,
       file == base::kInvalidPlatformFileValue && !language.empty();
 
   character_attributes_.SetDefaultLanguage(language);
+  text_iterator_.Reset();
+  contraction_iterator_.Reset();
 
   custom_words_.insert(custom_words_.end(),
                        custom_words.begin(), custom_words.end());
@@ -245,15 +247,18 @@ string16 SpellCheck::GetAutoCorrectionWord(const string16& word, int tag) {
     return autocorrect_word;  // Return the empty string.
 
   int word_length = static_cast<int>(word.size());
-  if (word_length < 2 || word_length > SpellCheckCommon::kMaxAutoCorrectWordSize)
+  if (word_length < 2 ||
+      word_length > chrome::spellcheck_common::kMaxAutoCorrectWordSize)
     return autocorrect_word;
 
   if (InitializeIfNeeded())
     return autocorrect_word;
 
-  char16 misspelled_word[SpellCheckCommon::kMaxAutoCorrectWordSize + 1];
+  char16 misspelled_word[
+      chrome::spellcheck_common::kMaxAutoCorrectWordSize + 1];
   const char16* word_char = word.c_str();
-  for (int i = 0; i <= SpellCheckCommon::kMaxAutoCorrectWordSize; i++) {
+  for (int i = 0; i <= chrome::spellcheck_common::kMaxAutoCorrectWordSize;
+       ++i) {
     if (i >= word_length)
       misspelled_word[i] = 0;
     else
@@ -347,7 +352,7 @@ void SpellCheck::InitializeHunspell() {
 }
 
 void SpellCheck::AddWordToHunspell(const std::string& word) {
-  if (!word.empty() && word.length() < MAXWORDUTF8LEN)
+  if (!word.empty() && word.length() < MAXWORDLEN)
     hunspell_->add(word.c_str());
 }
 
@@ -383,7 +388,7 @@ bool SpellCheck::CheckSpelling(const string16& word_to_check, int tag) {
   } else {
     std::string word_to_check_utf8(UTF16ToUTF8(word_to_check));
     // Hunspell shouldn't let us exceed its max, but check just in case
-    if (word_to_check_utf8.length() < MAXWORDUTF8LEN) {
+    if (word_to_check_utf8.length() < MAXWORDLEN) {
       if (hunspell_.get()) {
         // |hunspell_->spell| returns 0 if the word is spelled correctly and
         // non-zero otherwsie.
@@ -453,8 +458,8 @@ void SpellCheck::FillSuggestionList(
       hunspell_->suggest(&suggestions, UTF16ToUTF8(wrong_word).c_str());
 
   // Populate the vector of WideStrings.
-  for (int i = 0; i < number_of_suggestions; i++) {
-    if (i < SpellCheckCommon::kMaxSuggestions)
+  for (int i = 0; i < number_of_suggestions; ++i) {
+    if (i < chrome::spellcheck_common::kMaxSuggestions)
       optional_suggestions->push_back(UTF8ToUTF16(suggestions[i]));
     free(suggestions[i]);
   }

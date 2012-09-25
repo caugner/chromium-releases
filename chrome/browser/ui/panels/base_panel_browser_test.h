@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_PANELS_BASE_PANEL_BROWSER_TEST_H_
 #define CHROME_BROWSER_UI_PANELS_BASE_PANEL_BROWSER_TEST_H_
-#pragma once
 
 #include "base/values.h"
 #include "base/memory/ref_counted.h"
@@ -41,7 +40,7 @@ class BasePanelBrowserTest : public InProcessBrowserTest {
   // Linux bots use icewm which activate windows in ways that break
   // certain panel tests. Skip those tests when running on the bots.
   // We do not disable the tests to make it easy for developers to run
-  // them locally.
+  // them locally. [Icewm always activates a window when shown.]
   bool SkipTestIfIceWM();
 
   // Gnome running compiz refuses to activate a window that was initially

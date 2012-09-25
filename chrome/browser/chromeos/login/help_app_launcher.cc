@@ -32,8 +32,6 @@ HelpAppLauncher::HelpAppLauncher(gfx::NativeWindow parent_window)
     : parent_window_(parent_window) {
 }
 
-HelpAppLauncher::~HelpAppLauncher() {}
-
 void HelpAppLauncher::ShowHelpTopic(HelpTopic help_topic_id) {
   Profile* profile = ProfileManager::GetDefaultProfile();
   ExtensionService* service = profile->GetExtensionService();
@@ -51,17 +49,23 @@ void HelpAppLauncher::ShowHelpTopic(HelpTopic help_topic_id) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+// HelpApp, protected:
+
+HelpAppLauncher::~HelpAppLauncher() {}
+
+///////////////////////////////////////////////////////////////////////////////
 // HelpApp, private:
 
 void HelpAppLauncher::ShowHelpTopicDialog(const GURL& topic_url) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  dialog_.reset(new LoginWebDialog(
+  LoginWebDialog* dialog = new LoginWebDialog(
       this,
       parent_window_,
       l10n_util::GetStringUTF16(IDS_LOGIN_OOBE_HELP_DIALOG_TITLE),
       topic_url,
-      LoginWebDialog::STYLE_BUBBLE));
-  dialog_->Show();
+      LoginWebDialog::STYLE_BUBBLE);
+  dialog->Show();
+  // The dialog object will be deleted on dialog close.
 }
 
 }  // namespace chromeos

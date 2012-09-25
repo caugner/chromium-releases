@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_EXTENSIONS_SHELL_WINDOW_H_
 #define CHROME_BROWSER_UI_EXTENSIONS_SHELL_WINDOW_H_
-#pragma once
 
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
@@ -17,7 +16,6 @@
 #include "content/public/common/console_message_level.h"
 #include "ui/gfx/rect.h"
 
-class ExtensionWindowController;
 class GURL;
 class Profile;
 class TabContents;
@@ -28,6 +26,7 @@ class WebContents;
 
 namespace extensions {
 class Extension;
+class WindowController;
 }
 
 // ShellWindow is the type of window used by platform apps. Shell windows
@@ -41,7 +40,7 @@ class ShellWindow : public content::NotificationObserver,
   struct CreateParams {
     enum Frame {
       FRAME_CHROME, // Chrome-style window frame.
-      FRAME_CUSTOM, // Chromeless frame.
+      FRAME_NONE, // Frameless window.
     };
 
     CreateParams();
@@ -61,6 +60,7 @@ class ShellWindow : public content::NotificationObserver,
 
   const SessionID& session_id() const { return session_id_; }
   const extensions::Extension* extension() const { return extension_; }
+  const TabContents* tab_contents() const { return contents_.get(); }
   content::WebContents* web_contents() const { return web_contents_; }
 
  protected:
@@ -134,7 +134,7 @@ class ShellWindow : public content::NotificationObserver,
                        const content::NotificationDetails& details) OVERRIDE;
 
   // ExtensionFunctionDispatcher::Delegate implementation.
-  virtual ExtensionWindowController* GetExtensionWindowController() const
+  virtual extensions::WindowController* GetExtensionWindowController() const
       OVERRIDE;
 
   // Message handlers.

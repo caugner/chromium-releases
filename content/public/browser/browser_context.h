@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_PUBLIC_BROWSER_BROWSER_CONTEXT_H_
 #define CONTENT_PUBLIC_BROWSER_BROWSER_CONTEXT_H_
-#pragma once
 
 #include "base/hash_tables.h"
 #include "base/supports_user_data.h"
@@ -44,13 +43,16 @@ class ResourceContext;
 class SpeechRecognitionPreferences;
 
 // This class holds the context needed for a browsing session.
-// It lives on the UI thread.
+// It lives on the UI thread. All these methods must only be called on the UI
+// thread.
 class CONTENT_EXPORT BrowserContext : public base::SupportsUserData {
  public:
   static DownloadManager* GetDownloadManager(BrowserContext* browser_context);
   static quota::QuotaManager* GetQuotaManager(BrowserContext* browser_context);
-  static DOMStorageContext* GetDOMStorageContext(
+  static DOMStorageContext* GetDefaultDOMStorageContext(
       BrowserContext* browser_context);
+  static DOMStorageContext* GetDOMStorageContext(
+      BrowserContext* browser_context, int renderer_child_id);
   static IndexedDBContext* GetIndexedDBContext(BrowserContext* browser_context);
   static webkit_database::DatabaseTracker* GetDatabaseTracker(
       BrowserContext* browser_context);

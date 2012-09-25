@@ -47,7 +47,8 @@ class MEDIA_EXPORT VideoDecoder
   // frames contain decoded video data or may indicate the end of the stream.
   // NULL video frames indicate an aborted read. This can happen if the
   // DemuxerStream gets flushed and doesn't have any more data to return.
-  typedef base::Callback<void(DecoderStatus, scoped_refptr<VideoFrame>)> ReadCB;
+  typedef base::Callback<void(DecoderStatus,
+                              const scoped_refptr<VideoFrame>&)> ReadCB;
   virtual void Read(const ReadCB& read_cb) = 0;
 
   // Reset decoder state, fulfilling all pending ReadCB and dropping extra
@@ -58,15 +59,6 @@ class MEDIA_EXPORT VideoDecoder
   // Stop decoder and set it to an uninitialized state. Note that a VideoDecoder
   // should/could not be re-initialized after it has been stopped.
   virtual void Stop(const base::Closure& closure) = 0;
-
-  // Returns the natural width and height of decoded video in pixels.
-  //
-  // Clients should NOT rely on these values to remain constant. Instead, use
-  // the width/height from decoded video frames themselves.
-  //
-  // TODO(scherkus): why not rely on prerolling and decoding a single frame to
-  // get dimensions?
-  virtual const gfx::Size& natural_size() = 0;
 
   // Returns true if the output format has an alpha channel. Most formats do not
   // have alpha so the default is false. Override and return true for decoders

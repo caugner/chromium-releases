@@ -31,8 +31,9 @@ def run_executable(cmd, env):
   """
   # Many tests assume a English interface...
   env['LANGUAGE'] = 'en_US.UTF-8'
-  # Used by base/base_paths_linux.cc
-  env['CR_SOURCE_ROOT'] = os.path.abspath(ROOT_DIR).encode('utf-8')
+  # Used by base/base_paths_linux.cc as an override. Just make sure the default
+  # logic is used.
+  env.pop('CR_SOURCE_ROOT', None)
   # Ensure paths are correctly separated on windows.
   cmd[0] = cmd[0].replace('/', os.path.sep)
   cmd = fix_python_path(cmd)

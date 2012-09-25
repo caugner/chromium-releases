@@ -5,12 +5,15 @@
 #include "media/mp4/box_definitions.h"
 
 #include "base/logging.h"
-#include "media/mp4/box_reader.h"
-#include "media/mp4/fourccs.h"
+#include "media/mp4/es_descriptor.h"
 #include "media/mp4/rcheck.h"
 
 namespace media {
 namespace mp4 {
+
+FileType::FileType() {}
+FileType::~FileType() {}
+FourCC FileType::BoxType() const { return FOURCC_FTYP; }
 
 bool FileType::Parse(BoxReader* reader) {
   RCHECK(reader->ReadFourCC(&major_brand) && reader->Read4(&minor_version));
@@ -24,7 +27,7 @@ FourCC ProtectionSystemSpecificHeader::BoxType() const { return FOURCC_PSSH; }
 
 bool ProtectionSystemSpecificHeader::Parse(BoxReader* reader) {
   uint32 size;
-  return reader->SkipBytes(4) &&
+  return reader->ReadFullBoxHeader() &&
          reader->ReadVec(&system_id, 16) &&
          reader->Read4(&size) &&
          reader->ReadVec(&data, size);
@@ -72,7 +75,7 @@ bool SampleAuxiliaryInformationSize::Parse(BoxReader* reader) {
   return true;
 }
 
-OriginalFormat::OriginalFormat() {}
+OriginalFormat::OriginalFormat() : format(FOURCC_NULL) {}
 OriginalFormat::~OriginalFormat() {}
 FourCC OriginalFormat::BoxType() const { return FOURCC_FRMA; }
 
@@ -80,15 +83,14 @@ bool OriginalFormat::Parse(BoxReader* reader) {
   return reader->ReadFourCC(&format);
 }
 
-SchemeType::SchemeType() {}
+SchemeType::SchemeType() : type(FOURCC_NULL), version(0) {}
 SchemeType::~SchemeType() {}
 FourCC SchemeType::BoxType() const { return FOURCC_SCHM; }
 
 bool SchemeType::Parse(BoxReader* reader) {
-  RCHECK(reader->SkipBytes(4) &&
+  RCHECK(reader->ReadFullBoxHeader() &&
          reader->ReadFourCC(&type) &&
          reader->Read4(&version));
-  RCHECK(type == FOURCC_CENC);
   return true;
 }
 
@@ -100,7 +102,8 @@ FourCC TrackEncryption::BoxType() const { return FOURCC_TENC; }
 
 bool TrackEncryption::Parse(BoxReader* reader) {
   uint8 flag;
-  RCHECK(reader->SkipBytes(2) &&
+  RCHECK(reader->ReadFullBoxHeader() &&
+         reader->SkipBytes(2) &&
          reader->Read1(&flag) &&
          reader->Read1(&default_iv_size) &&
          reader->ReadVec(&default_kid, 16));
@@ -126,12 +129,26 @@ ProtectionSchemeInfo::~ProtectionSchemeInfo() {}
 FourCC ProtectionSchemeInfo::BoxType() const { return FOURCC_SINF; }
 
 bool ProtectionSchemeInfo::Parse(BoxReader* reader) {
-  return reader->ScanChildren() &&
-         reader->ReadChild(&type) &&
-         reader->ReadChild(&info);
+  RCHECK(reader->ScanChildren() &&
+         reader->ReadChild(&format) &&
+         reader->ReadChild(&type));
+  if (type.type == FOURCC_CENC)
+    RCHECK(reader->ReadChild(&info));
+  // Other protection schemes are silently ignored. Since the protection scheme
+  // type can't be determined until this box is opened, we return 'true' for
+  // non-CENC protection scheme types. It is the parent box's responsibility to
+  // ensure that this scheme type is a supported one.
+  return true;
 }
 
-MovieHeader::MovieHeader() {}
+MovieHeader::MovieHeader()
+    : creation_time(0),
+      modification_time(0),
+      timescale(0),
+      duration(0),
+      rate(-1),
+      volume(-1),
+      next_track_id(0) {}
 MovieHeader::~MovieHeader() {}
 FourCC MovieHeader::BoxType() const { return FOURCC_MVHD; }
 
@@ -159,7 +176,16 @@ bool MovieHeader::Parse(BoxReader* reader) {
   return true;
 }
 
-TrackHeader::TrackHeader() {}
+TrackHeader::TrackHeader()
+    : creation_time(0),
+      modification_time(0),
+      track_id(0),
+      duration(0),
+      layer(-1),
+      alternate_group(-1),
+      volume(-1),
+      width(0),
+      height(0) {}
 TrackHeader::~TrackHeader() {}
 FourCC TrackHeader::BoxType() const { return FOURCC_TKHD; }
 
@@ -192,7 +218,7 @@ bool TrackHeader::Parse(BoxReader* reader) {
   return true;
 }
 
-SampleDescription::SampleDescription() {}
+SampleDescription::SampleDescription() : type(kInvalid) {}
 SampleDescription::~SampleDescription() {}
 FourCC SampleDescription::BoxType() const { return FOURCC_STSD; }
 
@@ -261,7 +287,7 @@ bool Edit::Parse(BoxReader* reader) {
   return reader->ScanChildren() && reader->ReadChild(&list);
 }
 
-HandlerReference::HandlerReference() {}
+HandlerReference::HandlerReference() : type(kInvalid) {}
 HandlerReference::~HandlerReference() {}
 FourCC HandlerReference::BoxType() const { return FOURCC_HDLR; }
 
@@ -279,7 +305,13 @@ bool HandlerReference::Parse(BoxReader* reader) {
   return true;
 }
 
-AVCDecoderConfigurationRecord::AVCDecoderConfigurationRecord() {}
+AVCDecoderConfigurationRecord::AVCDecoderConfigurationRecord()
+    : version(0),
+      profile_indication(0),
+      profile_compatibility(0),
+      avc_level(0),
+      length_size(0) {}
+
 AVCDecoderConfigurationRecord::~AVCDecoderConfigurationRecord() {}
 FourCC AVCDecoderConfigurationRecord::BoxType() const { return FOURCC_AVCC; }
 
@@ -318,7 +350,22 @@ bool AVCDecoderConfigurationRecord::Parse(BoxReader* reader) {
   return true;
 }
 
-VideoSampleEntry::VideoSampleEntry() {}
+PixelAspectRatioBox::PixelAspectRatioBox() : h_spacing(1), v_spacing(1) {}
+PixelAspectRatioBox::~PixelAspectRatioBox() {}
+FourCC PixelAspectRatioBox::BoxType() const { return FOURCC_PASP; }
+
+bool PixelAspectRatioBox::Parse(BoxReader* reader) {
+  RCHECK(reader->Read4(&h_spacing) &&
+         reader->Read4(&v_spacing));
+  return true;
+}
+
+VideoSampleEntry::VideoSampleEntry()
+    : format(FOURCC_NULL),
+      data_reference_index(0),
+      width(0),
+      height(0) {}
+
 VideoSampleEntry::~VideoSampleEntry() {}
 FourCC VideoSampleEntry::BoxType() const {
   DCHECK(false) << "VideoSampleEntry should be parsed according to the "
@@ -335,24 +382,58 @@ bool VideoSampleEntry::Parse(BoxReader* reader) {
          reader->Read2(&height) &&
          reader->SkipBytes(50));
 
-  RCHECK(reader->ScanChildren());
+  RCHECK(reader->ScanChildren() &&
+         reader->MaybeReadChild(&pixel_aspect));
+
   if (format == FOURCC_ENCV) {
-    RCHECK(reader->ReadChild(&sinf));
+    // Continue scanning until a recognized protection scheme is found, or until
+    // we run out of protection schemes.
+    while (sinf.type.type != FOURCC_CENC) {
+      if (!reader->ReadChild(&sinf))
+        return false;
+    }
   }
 
-  // TODO(strobe): finalize format signaling for encrypted media
-  // (http://crbug.com/132351)
-  //
-  //  if (format == FOURCC_AVC1 ||
-  //      (format == FOURCC_ENCV &&
-  //       sinf.format.format == FOURCC_AVC1)) {
+  if (format == FOURCC_AVC1 ||
+      (format == FOURCC_ENCV && sinf.format.format == FOURCC_AVC1)) {
     RCHECK(reader->ReadChild(&avcc));
-  //  }
+  }
   return true;
 }
 
-AudioSampleEntry::AudioSampleEntry() {}
+ElementaryStreamDescriptor::ElementaryStreamDescriptor()
+    : object_type(kForbidden) {}
+
+ElementaryStreamDescriptor::~ElementaryStreamDescriptor() {}
+
+FourCC ElementaryStreamDescriptor::BoxType() const {
+  return FOURCC_ESDS;
+}
+
+bool ElementaryStreamDescriptor::Parse(BoxReader* reader) {
+  std::vector<uint8> data;
+  ESDescriptor es_desc;
+
+  RCHECK(reader->ReadFullBoxHeader());
+  RCHECK(reader->ReadVec(&data, reader->size() - reader->pos()));
+  RCHECK(es_desc.Parse(data));
+
+  object_type = es_desc.object_type();
+
+  RCHECK(aac.Parse(es_desc.decoder_specific_info()));
+
+  return true;
+}
+
+AudioSampleEntry::AudioSampleEntry()
+    : format(FOURCC_NULL),
+      data_reference_index(0),
+      channelcount(0),
+      samplesize(0),
+      samplerate(0) {}
+
 AudioSampleEntry::~AudioSampleEntry() {}
+
 FourCC AudioSampleEntry::BoxType() const {
   DCHECK(false) << "AudioSampleEntry should be parsed according to the "
                 << "handler type recovered in its Media ancestor.";
@@ -373,12 +454,23 @@ bool AudioSampleEntry::Parse(BoxReader* reader) {
 
   RCHECK(reader->ScanChildren());
   if (format == FOURCC_ENCA) {
-    RCHECK(reader->ReadChild(&sinf));
+    // Continue scanning until a recognized protection scheme is found, or until
+    // we run out of protection schemes.
+    while (sinf.type.type != FOURCC_CENC) {
+      if (!reader->ReadChild(&sinf))
+        return false;
+    }
   }
+
+  RCHECK(reader->ReadChild(&esds));
   return true;
 }
 
-MediaHeader::MediaHeader() {}
+MediaHeader::MediaHeader()
+    : creation_time(0),
+      modification_time(0),
+      timescale(0),
+      duration(0) {}
 MediaHeader::~MediaHeader() {}
 FourCC MediaHeader::BoxType() const { return FOURCC_MDHD; }
 
@@ -441,16 +533,26 @@ bool Track::Parse(BoxReader* reader) {
   return true;
 }
 
-MovieExtendsHeader::MovieExtendsHeader() {}
+MovieExtendsHeader::MovieExtendsHeader() : fragment_duration(0) {}
 MovieExtendsHeader::~MovieExtendsHeader() {}
 FourCC MovieExtendsHeader::BoxType() const { return FOURCC_MEHD; }
 
 bool MovieExtendsHeader::Parse(BoxReader* reader) {
-  RCHECK(reader->Read8(&fragment_duration));
+  RCHECK(reader->ReadFullBoxHeader());
+  if (reader->version() == 1) {
+    RCHECK(reader->Read8(&fragment_duration));
+  } else {
+    RCHECK(reader->Read4Into8(&fragment_duration));
+  }
   return true;
 }
 
-TrackExtends::TrackExtends() {}
+TrackExtends::TrackExtends()
+    : track_id(0),
+      default_sample_description_index(0),
+      default_sample_duration(0),
+      default_sample_size(0),
+      default_sample_flags(0) {}
 TrackExtends::~TrackExtends() {}
 FourCC TrackExtends::BoxType() const { return FOURCC_TREX; }
 
@@ -475,7 +577,7 @@ bool MovieExtends::Parse(BoxReader* reader) {
          reader->ReadChildren(&tracks);
 }
 
-Movie::Movie() {}
+Movie::Movie() : fragmented(false) {}
 Movie::~Movie() {}
 FourCC Movie::BoxType() const { return FOURCC_MOOV; }
 
@@ -488,7 +590,7 @@ bool Movie::Parse(BoxReader* reader) {
          reader->MaybeReadChildren(&pssh);
 }
 
-TrackFragmentDecodeTime::TrackFragmentDecodeTime() {}
+TrackFragmentDecodeTime::TrackFragmentDecodeTime() : decode_time(0) {}
 TrackFragmentDecodeTime::~TrackFragmentDecodeTime() {}
 FourCC TrackFragmentDecodeTime::BoxType() const { return FOURCC_TFDT; }
 
@@ -500,7 +602,7 @@ bool TrackFragmentDecodeTime::Parse(BoxReader* reader) {
     return reader->Read4Into8(&decode_time);
 }
 
-MovieFragmentHeader::MovieFragmentHeader() {}
+MovieFragmentHeader::MovieFragmentHeader() : sequence_number(0) {}
 MovieFragmentHeader::~MovieFragmentHeader() {}
 FourCC MovieFragmentHeader::BoxType() const { return FOURCC_MFHD; }
 
@@ -508,7 +610,14 @@ bool MovieFragmentHeader::Parse(BoxReader* reader) {
   return reader->SkipBytes(4) && reader->Read4(&sequence_number);
 }
 
-TrackFragmentHeader::TrackFragmentHeader() {}
+TrackFragmentHeader::TrackFragmentHeader()
+    : track_id(0),
+      sample_description_index(0),
+      default_sample_duration(0),
+      default_sample_size(0),
+      default_sample_flags(0),
+      has_default_sample_flags(false) {}
+
 TrackFragmentHeader::~TrackFragmentHeader() {}
 FourCC TrackFragmentHeader::BoxType() const { return FOURCC_TFHD; }
 
@@ -523,8 +632,11 @@ bool TrackFragmentHeader::Parse(BoxReader* reader) {
   //  RCHECK((flags & 0x020000) && !(flags & 0x1));
   RCHECK(!(reader->flags() & 0x1));
 
-  if (reader->flags() & 0x2)
-    RCHECK(reader->SkipBytes(4));  // sample_description_index
+  if (reader->flags() & 0x2) {
+    RCHECK(reader->Read4(&sample_description_index));
+  } else {
+    sample_description_index = 0;
+  }
 
   if (reader->flags() & 0x8) {
     RCHECK(reader->Read4(&default_sample_duration));
@@ -548,7 +660,8 @@ bool TrackFragmentHeader::Parse(BoxReader* reader) {
   return true;
 }
 
-TrackFragmentRun::TrackFragmentRun() {}
+TrackFragmentRun::TrackFragmentRun()
+    : sample_count(0), data_offset(0) {}
 TrackFragmentRun::~TrackFragmentRun() {}
 FourCC TrackFragmentRun::BoxType() const { return FOURCC_TRUN; }
 
@@ -595,7 +708,7 @@ bool TrackFragmentRun::Parse(BoxReader* reader) {
     if (sample_flags_present)
       RCHECK(reader->Read4(&sample_flags[i]));
     if (sample_composition_time_offsets_present)
-      RCHECK(reader->Read4(&sample_composition_time_offsets[i]));
+      RCHECK(reader->Read4s(&sample_composition_time_offsets[i]));
   }
 
   if (first_sample_flags_present) {

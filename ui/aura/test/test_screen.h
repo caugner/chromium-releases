@@ -4,7 +4,6 @@
 
 #ifndef UI_AURA_TEST_TEST_SCREEN_H_
 #define UI_AURA_TEST_TEST_SCREEN_H_
-#pragma once
 
 #include "base/compiler_specific.h"
 #include "ui/gfx/screen_impl.h"
@@ -27,6 +26,8 @@ class TestScreen : public gfx::ScreenImpl {
       gfx::NativeView view) const OVERRIDE;
   virtual gfx::Display GetDisplayNearestPoint(
       const gfx::Point& point) const OVERRIDE;
+  virtual gfx::Display GetDisplayMatching(
+      const gfx::Rect& match_rect) const OVERRIDE;
   virtual gfx::Display GetPrimaryDisplay() const OVERRIDE;
 
  private:

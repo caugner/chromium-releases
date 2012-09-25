@@ -5,6 +5,7 @@
 #include "content/public/test/test_renderer_host.h"
 
 #include "content/browser/renderer_host/render_view_host_factory.h"
+#include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/browser/renderer_host/test_render_view_host.h"
 #include "content/browser/site_instance_impl.h"
 #include "content/browser/web_contents/navigation_entry_impl.h"
@@ -49,6 +50,12 @@ bool RenderViewHostTester::IsRenderViewHostSwappedOut(RenderViewHost* rvh) {
 bool RenderViewHostTester::TestOnMessageReceived(RenderViewHost* rvh,
                                                  const IPC::Message& msg) {
   return static_cast<RenderViewHostImpl*>(rvh)->OnMessageReceived(msg);
+}
+
+// static
+bool RenderViewHostTester::HasTouchEventHandler(RenderViewHost* rvh) {
+  RenderWidgetHostImpl* host_impl = RenderWidgetHostImpl::From(rvh);
+  return host_impl->has_touch_handler();
 }
 
 RenderViewHostTestEnabler::RenderViewHostTestEnabler()
@@ -142,6 +149,10 @@ void RenderViewHostTestHarness::TearDown() {
   // Make sure that we flush any messages related to WebContentsImpl destruction
   // before we destroy the browser context.
   MessageLoop::current()->RunAllPending();
+
+  // Delete any RenderProcessHosts before the BrowserContext goes away.
+  if (rvh_test_enabler_.rph_factory_.get())
+    rvh_test_enabler_.rph_factory_.reset();
 
   // Release the browser context on the UI thread.
   message_loop_.DeleteSoon(FROM_HERE, browser_context_.release());

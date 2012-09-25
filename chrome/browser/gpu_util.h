@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_GPU_UTIL_H_
 #define CHROME_BROWSER_GPU_UTIL_H_
-#pragma once
 
 #include <string>
 
@@ -51,7 +50,9 @@ std::string GpuFeatureTypeToString(content::GpuFeatureType feature);
 //    'webgl',
 //    'multisampling',
 //    'flash_3d',
-//    'flash_stage3d'
+//    'flash_stage3d',
+//    'texture_sharing'
+//    'video_decode'
 //
 // Each problems has:
 // {
@@ -69,12 +70,15 @@ base::DictionaryValue* GpuInfoAsDictionaryValue();
 // Send UMA histograms about the enabled features.
 void UpdateStats();
 
-// Returs whether this client has been selected for the force-compositing-mode
-// trial.
-bool InForceCompositingModeTrial();
+// Returns whether this client has been selected for the force-compositing-mode
+// or threaded-compositor trial.
+bool InForceCompositingModeOrThreadTrial();
 
 // Sets up the force-compositing-mode field trial.
 void InitializeForceCompositingModeFieldTrial();
+
+// Sets up Stage3D on XP field trial
+void InitializeStage3DFieldTrial();
 
 }  // namespace gpu_util
 

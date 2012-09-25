@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_OPTIONS_NETWORK_CONFIG_VIEW_H_
 #define CHROME_BROWSER_CHROMEOS_OPTIONS_NETWORK_CONFIG_VIEW_H_
-#pragma once
 
 #include <string>
 
@@ -65,7 +64,6 @@ class NetworkConfigView : public views::DialogDelegateView,
   // views::WidgetDelegate methods.
   virtual ui::ModalType GetModalType() const OVERRIDE;
   virtual views::View* GetContentsView() OVERRIDE;
-  virtual string16 GetWindowTitle() const OVERRIDE;
 
   // views::View overrides.
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
@@ -122,9 +120,6 @@ class ChildNetworkConfigView : public views::View {
   explicit ChildNetworkConfigView(NetworkConfigView* parent)
       : parent_(parent) {}
   virtual ~ChildNetworkConfigView() {}
-
-  // Called to get title for parent NetworkConfigView dialog box.
-  virtual string16 GetTitle() = 0;
 
   // Returns view that should be focused on dialog activation.
   virtual views::View* GetInitiallyFocusedView() = 0;

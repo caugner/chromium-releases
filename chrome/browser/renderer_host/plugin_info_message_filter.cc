@@ -160,8 +160,14 @@ void PluginInfoMessageFilter::Context::DecidePluginStatus(
   DCHECK(plugin_setting != CONTENT_SETTING_DEFAULT);
 
 #if defined(ENABLE_PLUGIN_INSTALLATION)
+#if defined(OS_LINUX)
+  // On Linux, unknown plugins require authorization.
+  PluginInstaller::SecurityStatus plugin_status =
+      PluginInstaller::SECURITY_STATUS_REQUIRES_AUTHORIZATION;
+#else
   PluginInstaller::SecurityStatus plugin_status =
       PluginInstaller::SECURITY_STATUS_UP_TO_DATE;
+#endif
   PluginInstaller* installer =
       plugin_finder->FindPluginWithIdentifier(group->identifier());
   if (installer)
@@ -179,11 +185,19 @@ void PluginInfoMessageFilter::Context::DecidePluginStatus(
   }
 
   // Check if the plug-in requires authorization.
-  if ((plugin_status ==
-           PluginInstaller::SECURITY_STATUS_REQUIRES_AUTHORIZATION ||
-       PluginService::GetInstance()->IsPluginUnstable(plugin.path)) &&
+  if (plugin_status ==
+          PluginInstaller::SECURITY_STATUS_REQUIRES_AUTHORIZATION &&
       plugin.type != WebPluginInfo::PLUGIN_TYPE_PEPPER_IN_PROCESS &&
       plugin.type != WebPluginInfo::PLUGIN_TYPE_PEPPER_OUT_OF_PROCESS &&
+      !always_authorize_plugins_.GetValue() &&
+      plugin_setting != CONTENT_SETTING_BLOCK &&
+      uses_default_content_setting) {
+    status->value = ChromeViewHostMsg_GetPluginInfo_Status::kUnauthorized;
+    return;
+  }
+
+  // Check if the plug-in is crashing too much.
+  if (PluginService::GetInstance()->IsPluginUnstable(plugin.path) &&
       !always_authorize_plugins_.GetValue() &&
       plugin_setting != CONTENT_SETTING_BLOCK &&
       uses_default_content_setting) {

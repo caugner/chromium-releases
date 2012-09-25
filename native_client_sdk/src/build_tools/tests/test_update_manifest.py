@@ -36,7 +36,7 @@ CANARY = 'canary'
 
 
 def GetArchiveUrl(host_os, version):
-  basename = 'naclsdk_%s.bz2' % (host_os,)
+  basename = 'naclsdk_%s.tar.bz2' % (host_os,)
   return urlparse.urljoin(HTTPS_BASE_URL, posixpath.join(version, basename))
 
 
@@ -324,15 +324,15 @@ class TestUpdateManifest(unittest.TestCase):
 
   def testUpdateTwoBundles(self):
     self.manifest = MakeManifest(B18_R1_NONE, B19_R1_NONE)
-    self.history.Add(OS_MLW, BETA, V19_0_1084_41)
-    self.history.Add(OS_MLW, STABLE, V18_0_1025_163)
+    self.history.Add(OS_MLW, DEV, V19_0_1084_41)
+    self.history.Add(OS_MLW, BETA, V18_0_1025_163)
     self.files.Add(B18_0_1025_163_R1_MLW)
     self.files.Add(B19_0_1084_41_R1_MLW)
     self._MakeDelegate()
     self._Run(OS_MLW)
     self._ReadUploadedManifest()
-    self._AssertUploadedManifestHasBundle(B18_0_1025_163_R1_MLW, STABLE)
-    self._AssertUploadedManifestHasBundle(B19_0_1084_41_R1_MLW, BETA)
+    self._AssertUploadedManifestHasBundle(B18_0_1025_163_R1_MLW, BETA)
+    self._AssertUploadedManifestHasBundle(B19_0_1084_41_R1_MLW, DEV)
     self.assertEqual(len(self.uploaded_manifest.GetBundles()), 2)
 
   def testUpdateWithMissingPlatformsInArchives(self):
@@ -359,20 +359,22 @@ class TestUpdateManifest(unittest.TestCase):
     self._AssertUploadedManifestHasBundle(B18_0_1025_163_R1_MLW, BETA)
     self.assertEqual(len(self.uploaded_manifest.GetBundles()), 1)
 
-  def testRecommendedIsMaintained(self):
-    for recommended in 'yes', 'no':
+  def testRecommendedIsStable(self):
+    for channel in STABLE, BETA, DEV, CANARY:
       self.setUp()
       bundle = copy.deepcopy(B18_R1_NONE)
-      bundle.recommended = recommended
       self.manifest = MakeManifest(bundle)
-      self.history.Add(OS_MLW, BETA, V18_0_1025_163)
+      self.history.Add(OS_MLW, channel, V18_0_1025_163)
       self.files.Add(B18_0_1025_163_R1_MLW)
       self._MakeDelegate()
       self._Run(OS_MLW)
       self._ReadUploadedManifest()
       self.assertEqual(len(self.uploaded_manifest.GetBundles()), 1)
       uploaded_bundle = self.uploaded_manifest.GetBundle('pepper_18')
-      self.assertEqual(uploaded_bundle.recommended, recommended)
+      if channel == STABLE:
+        self.assertEqual(uploaded_bundle.recommended, 'yes')
+      else:
+        self.assertEqual(uploaded_bundle.recommended, 'no')
 
   def testNoUpdateWithNonPepperBundle(self):
     self.manifest = MakeManifest(NON_PEPPER_BUNDLE_NOARCHIVES,
@@ -495,6 +497,21 @@ mac,canary,21.0.1156.0,2012-05-30 12:14:21.305090"""
     self._Run(OS_MLW)
     self._ReadUploadedManifest()
     self._AssertUploadedManifestHasBundle(my_bundle, CANARY)
+
+  def testExtensionWorksAsBz2(self):
+    # Allow old bundles with just .bz2 extension to work
+    self.manifest = MakeManifest(B18_R1_NONE)
+    self.history.Add(OS_MLW, BETA, V18_0_1025_163)
+    bundle = copy.deepcopy(B18_0_1025_163_R1_MLW)
+    archive_url = bundle.GetArchive('mac').url
+    bundle.GetArchive('mac').url = archive_url.replace('.tar', '')
+    self.files.Add(bundle)
+    self._MakeDelegate()
+    self._Run(OS_MLW)
+    self._ReadUploadedManifest()
+    self._AssertUploadedManifestHasBundle(bundle, BETA)
+    self.assertEqual(len(self.uploaded_manifest.GetBundles()), 1)
+
 
 def main():
   suite = unittest.defaultTestLoader.loadTestsFromModule(sys.modules[__name__])

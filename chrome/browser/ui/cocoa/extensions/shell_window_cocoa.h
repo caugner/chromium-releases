@@ -4,11 +4,9 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_EXTENSIONS_SHELL_WINDOW_COCOA_H_
 #define CHROME_BROWSER_UI_COCOA_EXTENSIONS_SHELL_WINDOW_COCOA_H_
-#pragma once
 
 #import <Cocoa/Cocoa.h>
 
-#import "base/mac/cocoa_protocols.h"
 #include "base/memory/scoped_nsobject.h"
 #include "chrome/browser/ui/extensions/shell_window.h"
 #include "ui/gfx/rect.h"
@@ -59,10 +57,29 @@ class ShellWindowCocoa : public ShellWindow {
   // Called when the window is about to be closed.
   void WindowWillClose();
 
+  // Called when the window is focused.
+  void WindowDidBecomeKey();
+
+  // Called when the window is defocused.
+  void WindowDidResignKey();
+
+ protected:
+  // ShellWindow implementation.
+  virtual void SetFullscreen(bool fullscreen) OVERRIDE;
+  virtual bool IsFullscreenOrPending() const OVERRIDE;
+
  private:
   virtual ~ShellWindowCocoa();
 
   NSWindow* window() const;
+
+  void InstallView();
+  void UninstallView();
+
+  bool has_frame_;
+
+  bool is_fullscreen_;
+  NSRect restored_bounds_;
 
   scoped_nsobject<ShellWindowController> window_controller_;
   NSInteger attention_request_id_;  // identifier from requestUserAttention

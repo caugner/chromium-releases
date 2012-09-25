@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/file_path.h"
 #include "content/test/layout_browsertest.h"
 
 class IndexedDBLayoutTest : public InProcessBrowserLayoutTest {
@@ -73,10 +72,10 @@ static const char* kKeyTests[] = {
 };
 
 static const char* kTransactionTests[] = {
-//  "transaction-abort.html", // Flaky, http://crbug.com/83226
-  "transaction-abort-with-js-recursion-cross-frame.html",
-  "transaction-abort-with-js-recursion.html",
-  "transaction-abort-workers.html",
+  "transaction-abort.html",
+  "transaction-complete-with-js-recursion-cross-frame.html",
+  "transaction-complete-with-js-recursion.html",
+  "transaction-complete-workers.html",
   "transaction-after-close.html",
   "transaction-and-objectstore-calls.html",
   "transaction-basics.html",
@@ -115,6 +114,7 @@ IN_PROC_BROWSER_TEST_F(IndexedDBLayoutTest, TransactionTests) {
   RunLayoutTests(kTransactionTests);
 }
 
+// Frequent flaky timeouts.  http://crbug.com/123685
 IN_PROC_BROWSER_TEST_F(IndexedDBLayoutTest, RegressionTests) {
   RunLayoutTests(kRegressionTests);
 }

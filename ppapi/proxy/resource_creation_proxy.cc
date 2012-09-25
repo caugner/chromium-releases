@@ -7,6 +7,7 @@
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/c/pp_size.h"
 #include "ppapi/c/trusted/ppb_image_data_trusted.h"
+#include "ppapi/proxy/file_chooser_resource.h"
 #include "ppapi/proxy/plugin_dispatcher.h"
 #include "ppapi/proxy/plugin_resource_tracker.h"
 #include "ppapi/proxy/ppapi_messages.h"
@@ -14,7 +15,6 @@
 #include "ppapi/proxy/ppb_audio_proxy.h"
 #include "ppapi/proxy/ppb_buffer_proxy.h"
 #include "ppapi/proxy/ppb_broker_proxy.h"
-#include "ppapi/proxy/ppb_file_chooser_proxy.h"
 #include "ppapi/proxy/ppb_file_io_proxy.h"
 #include "ppapi/proxy/ppb_file_ref_proxy.h"
 #include "ppapi/proxy/ppb_file_system_proxy.h"
@@ -118,6 +118,15 @@ PP_Resource ResourceCreationProxy::CreateMouseInputEvent(
       mouse_button, mouse_position, click_count, mouse_movement);
 }
 
+PP_Resource ResourceCreationProxy::CreateTouchInputEvent(
+    PP_Instance instance,
+    PP_InputEvent_Type type,
+    PP_TimeTicks time_stamp,
+    uint32_t modifiers) {
+  return PPB_InputEvent_Shared::CreateTouchInputEvent(
+      OBJECT_IS_PROXY, instance, type, time_stamp, modifiers);
+}
+
 PP_Resource ResourceCreationProxy::CreateResourceArray(
     PP_Instance instance,
     const PP_Resource elements[],
@@ -159,6 +168,11 @@ PP_Resource ResourceCreationProxy::CreateAudio(
                                               audio_callback, user_data);
 }
 
+PP_Resource ResourceCreationProxy::CreateAudioTrusted(PP_Instance instance) {
+  // Proxied plugins can't create trusted audio devices.
+  return 0;
+}
+
 PP_Resource ResourceCreationProxy::CreateAudioConfig(
     PP_Instance instance,
     PP_AudioSampleRate sample_rate,
@@ -175,12 +189,25 @@ PP_Resource ResourceCreationProxy::CreateImageData(PP_Instance instance,
                                                   init_to_zero);
 }
 
-#if !defined(OS_NACL)
-PP_Resource ResourceCreationProxy::CreateAudioTrusted(PP_Instance instance) {
-  // Proxied plugins can't create trusted audio devices.
-  return 0;
+PP_Resource ResourceCreationProxy::CreateImageDataNaCl(
+    PP_Instance instance,
+    PP_ImageDataFormat format,
+    const PP_Size& size,
+    PP_Bool init_to_zero) {
+  // These really only are different on the host side. On the plugin side, we
+  // always request a "platform" ImageData if we're trusted, or a "NaCl" one
+  // if we're untrusted (see PPB_ImageData_Proxy::CreateProxyResource()).
+  return CreateImageData(instance, format, size, init_to_zero);
 }
 
+PP_Resource ResourceCreationProxy::CreateGraphics2D(PP_Instance instance,
+                                                    const PP_Size& size,
+                                                    PP_Bool is_always_opaque) {
+  return PPB_Graphics2D_Proxy::CreateProxyResource(instance, size,
+                                                   is_always_opaque);
+}
+
+#if !defined(OS_NACL)
 PP_Resource ResourceCreationProxy::CreateAudioInput0_1(
     PP_Instance instance,
     PP_Resource config_id,
@@ -225,8 +252,8 @@ PP_Resource ResourceCreationProxy::CreateFileChooser(
     PP_Instance instance,
     PP_FileChooserMode_Dev mode,
     const char* accept_types) {
-  return PPB_FileChooser_Proxy::CreateProxyResource(instance, mode,
-                                                    accept_types);
+  return (new FileChooserResource(dispatcher(), instance, mode,
+                                  accept_types))->GetReference();
 }
 
 PP_Resource ResourceCreationProxy::CreateFlashDeviceID(PP_Instance instance) {
@@ -242,13 +269,6 @@ PP_Resource ResourceCreationProxy::CreateFlashMenu(
 PP_Resource ResourceCreationProxy::CreateFlashMessageLoop(
     PP_Instance instance) {
   return PPB_Flash_MessageLoop_Proxy::CreateProxyResource(instance);
-}
-
-PP_Resource ResourceCreationProxy::CreateGraphics2D(PP_Instance instance,
-                                                    const PP_Size& size,
-                                                    PP_Bool is_always_opaque) {
-  return PPB_Graphics2D_Proxy::CreateProxyResource(instance, size,
-                                                   is_always_opaque);
 }
 
 PP_Resource ResourceCreationProxy::CreateHostResolverPrivate(

@@ -15,7 +15,7 @@
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chrome/browser/chromeos/login/language_switch_menu.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
-#include "chrome/browser/ui/webui/options2/chromeos/cros_language_options_handler2.h"
+#include "chrome/browser/ui/webui/options2/chromeos/cros_language_options_handler.h"
 #include "content/public/browser/web_ui.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -47,6 +47,8 @@ NetworkScreenHandler::NetworkScreenHandler()
 }
 
 NetworkScreenHandler::~NetworkScreenHandler() {
+  if (screen_)
+    screen_->OnActorDestroyed(this);
 }
 
 // NetworkScreenHandler, NetworkScreenActor implementation: --------------------
@@ -110,6 +112,8 @@ void NetworkScreenHandler::EnableContinue(bool enabled) {
 
 void NetworkScreenHandler::GetLocalizedStrings(
     base::DictionaryValue* localized_strings) {
+  localized_strings->SetString("networkScreenGreeting",
+      l10n_util::GetStringUTF16(IDS_WELCOME_SCREEN_GREETING));
   localized_strings->SetString("networkScreenTitle",
       l10n_util::GetStringUTF16(IDS_WELCOME_SCREEN_TITLE));
   localized_strings->SetString("selectLanguage",
@@ -151,7 +155,8 @@ void NetworkScreenHandler::RegisterMessages() {
 
 void NetworkScreenHandler::HandleOnExit(const ListValue* args) {
   ClearErrors();
-  screen_->OnContinuePressed();
+  if (screen_)
+    screen_->OnContinuePressed();
 }
 
 void NetworkScreenHandler::HandleOnLanguageChanged(const ListValue* args) {

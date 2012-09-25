@@ -4,7 +4,6 @@
 
 #ifndef UI_GFX_COMPOSITOR_TEST_TEST_LAYER_ANIMATION_DELEGATE_H_
 #define UI_GFX_COMPOSITOR_TEST_TEST_LAYER_ANIMATION_DELEGATE_H_
-#pragma once
 
 #include "base/compiler_specific.h"
 #include "ui/compositor/layer_animation_delegate.h"
@@ -24,17 +23,23 @@ class TestLayerAnimationDelegate : public LayerAnimationDelegate {
   virtual void SetTransformFromAnimation(const Transform& transform) OVERRIDE;
   virtual void SetOpacityFromAnimation(float opacity) OVERRIDE;
   virtual void SetVisibilityFromAnimation(bool visibility) OVERRIDE;
+  virtual void SetBrightnessFromAnimation(float brightness) OVERRIDE;
+  virtual void SetGrayscaleFromAnimation(float grayscale) OVERRIDE;
   virtual void ScheduleDrawForAnimation() OVERRIDE;
   virtual const gfx::Rect& GetBoundsForAnimation() const OVERRIDE;
   virtual const Transform& GetTransformForAnimation() const OVERRIDE;
   virtual float GetOpacityForAnimation() const OVERRIDE;
   virtual bool GetVisibilityForAnimation() const OVERRIDE;
+  virtual float GetBrightnessForAnimation() const OVERRIDE;
+  virtual float GetGrayscaleForAnimation() const OVERRIDE;
 
  private:
   gfx::Rect bounds_;
   Transform transform_;
   float opacity_;
   bool visibility_;
+  float brightness_;
+  float grayscale_;
 
   // Allow copy and assign.
 };

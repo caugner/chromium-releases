@@ -4,7 +4,6 @@
 
 #ifndef UI_VIEWS_VIEW_H_
 #define UI_VIEWS_VIEW_H_
-#pragma once
 
 #include <algorithm>
 #include <map>
@@ -131,11 +130,6 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // the views are deleted, unless marked as not parent owned.
   void RemoveAllChildViews(bool delete_children);
 
-  // STL-style accessors.
-  Views::const_iterator children_begin() { return children_.begin(); }
-  Views::const_iterator children_end() { return children_.end(); }
-  Views::const_reverse_iterator children_rbegin() { return children_.rbegin(); }
-  Views::const_reverse_iterator children_rend() { return children_.rend(); }
   int child_count() const { return static_cast<int>(children_.size()); }
   bool has_children() const { return !children_.empty(); }
 
@@ -210,7 +204,7 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   gfx::Rect GetVisibleBounds() const;
 
   // Return the bounds of the View in screen coordinate system.
-  gfx::Rect GetScreenBounds() const;
+  gfx::Rect GetBoundsInScreen() const;
 
   // Returns the baseline of this view, or -1 if this view has no baseline. The
   // return value is relative to the preferred height.
@@ -581,6 +575,17 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
 
   // This method is invoked for each GestureEvent created by GestureRecognizer.
   // Default implementation does nothing. Override as needed.
+  // If a View returns ui::GESTURE_STATUS_CONSUMED from OnGestureEvent, then
+  // subsequent gestures will be dispatched to the same View, until the gesture
+  // ends (i.e. all touch-points are released).
+  // Scroll gesture events are handled slightly differently: if a View starts
+  // processing gesture events, but does not process an ET_GESTURE_SCROLL_BEGIN
+  // gesture, then the scroll-gesture event will bubble up (i.e. will be sent to
+  // the parent view for processing). If a View then returns
+  // GESTURE_STATUS_CONSUMED from OnGestureEvent, then the subsequent
+  // scroll-gesture events will be sent to this View. However all the other
+  // gesture-events (e.g. ET_GESTURE_END, ET_GESTURE_PINCH_BEGIN etc.) will
+  // continue to be dispatched to the first View.
   virtual ui::GestureStatus OnGestureEvent(const GestureEvent& event);
 
   // Set the MouseHandler for a drag session.
@@ -616,6 +621,12 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // if the view is focused. If the event has not been processed, the parent
   // will be given a chance.
   virtual bool OnMouseWheel(const MouseWheelEvent& event);
+
+  // Invoked when user scrolls (e.g. using two-finger scroll on touch pad).
+  // Returns true if the event has been processed and false otherwise. The event
+  // is sent to the view where the event happens first. If it has not been
+  // processed, the parent will be given a chance.
+  virtual bool OnScrollEvent(const ScrollEvent& event);
 
   // See field for description.
   void set_notify_enter_exit_on_child(bool notify) {
@@ -1102,9 +1113,7 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
  private:
   friend class internal::RootView;
   friend class FocusManager;
-  friend class ViewStorage;
   friend class Widget;
-  friend class PaintLock;
 
   // Used to track a drag. RootView passes this into
   // ProcessMousePressed/Dragged.
@@ -1227,11 +1236,6 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   bool ConvertPointFromAncestor(const View* ancestor, gfx::Point* point) const;
 
   // Accelerated painting ------------------------------------------------------
-
-  // Disables painting during time critical operations. Used by PaintLock.
-  // TODO(vollick) Ideally, the widget would not dispatch paints into the
-  // hierarchy during time critical operations and this would not be needed.
-  void set_painting_enabled(bool enabled) { painting_enabled_ = enabled; }
 
   // Creates the layer and related fields for this view.
   void CreateLayer();
@@ -1361,9 +1365,6 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
 
   // Whether this view is enabled.
   bool enabled_;
-
-  // Whether this view is painting.
-  bool painting_enabled_;
 
   // When this flag is on, a View receives a mouse-enter and mouse-leave event
   // even if a descendant View is the event-recipient for the real mouse

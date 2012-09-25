@@ -7,15 +7,18 @@
 #include "base/bind.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/message_loop_proxy.h"
 #include "base/platform_file.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/extensions/file_handler_util.h"
 #include "chrome/browser/chromeos/extensions/file_manager_util.h"
+#include "chrome/browser/chromeos/gdata/gdata_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/select_file_dialog.h"
+#include "chrome/browser/ui/chrome_select_file_policy.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/extensions/api/file_browser_handler_internal.h"
 #include "content/public/browser/browser_thread.h"
@@ -25,6 +28,7 @@
 #include "googleurl/src/gurl.h"
 #include "webkit/fileapi/file_system_context.h"
 #include "webkit/fileapi/file_system_mount_point_provider.h"
+#include "ui/base/dialogs/select_file_dialog.h"
 
 using content::BrowserContext;
 using extensions::api::file_browser_handler_internal::FileEntryInfo;
@@ -45,7 +49,7 @@ const char kNoUserGestureError[] =
 // |OnFilePathSelected| method will be called with the result.
 // When |SelectFile| is called, the class instance takes ownership of itself.
 class FileSelectorImpl : public FileSelector,
-                         public SelectFileDialog::Listener {
+                         public ui::SelectFileDialog::Listener {
  public:
   explicit FileSelectorImpl(FileHandlerSelectFileFunction* function);
   virtual ~FileSelectorImpl() OVERRIDE;
@@ -61,7 +65,7 @@ class FileSelectorImpl : public FileSelector,
   virtual void set_function_for_test(
       FileHandlerSelectFileFunction* function) OVERRIDE;
 
-  // SelectFileDialog::Listener overrides.
+  // ui::SelectFileDialog::Listener overrides.
   virtual void FileSelected(const FilePath& path,
                             int index,
                             void* params) OVERRIDE;
@@ -74,7 +78,7 @@ class FileSelectorImpl : public FileSelector,
   void SendResponse(bool success, const FilePath& selected_path);
 
   // Dialog that is shown by selector.
-  scoped_refptr<SelectFileDialog> dialog_;
+  scoped_refptr<ui::SelectFileDialog> dialog_;
 
   // Extension function that uses the selector.
   scoped_refptr<FileHandlerSelectFileFunction> function_;
@@ -119,15 +123,17 @@ bool FileSelectorImpl::DoSelectFile(const FilePath& suggested_name,
   if (!browser->window())
     return false;
 
-  TabContents* tab_contents = browser->GetActiveTabContents();
+  TabContents* tab_contents = chrome::GetActiveTabContents(browser);
   if (!tab_contents)
     return false;
 
-  dialog_ = SelectFileDialog::Create(this);
-  dialog_->SelectFile(SelectFileDialog::SELECT_SAVEAS_FILE,
+  dialog_ = ui::SelectFileDialog::Create(
+      this, new ChromeSelectFilePolicy(tab_contents->web_contents()));
+
+  dialog_->SelectFile(ui::SelectFileDialog::SELECT_SAVEAS_FILE,
       string16() /* dialog title*/, suggested_name,
       NULL /* allowed file types */, 0 /* file type index */,
-      std::string() /* default file extension */, tab_contents->web_contents(),
+      std::string() /* default file extension */,
       browser->window()->GetNativeWindow(), NULL /* params */);
 
   return dialog_->IsRunning(browser->window()->GetNativeWindow());
@@ -165,19 +171,30 @@ typedef base::Callback<void (bool success,
                              const GURL& file_system_root)>
     FileSystemOpenCallback;
 
-void RelayOpenFileSystemCallbackToFileThread(
+void RunOpenFileSystemCallback(
     const FileSystemOpenCallback& callback,
     base::PlatformFileError error,
     const std::string& file_system_name,
     const GURL& file_system_root) {
   bool success = (error == base::PLATFORM_FILE_OK);
-  content::BrowserThread::PostTask(content::BrowserThread::FILE, FROM_HERE,
-      base::Bind(callback, success, file_system_name, file_system_root));
+  callback.Run(success, file_system_name, file_system_root);
 }
 
 }  // namespace
 
 FileHandlerSelectFileFunction::FileHandlerSelectFileFunction() {}
+
+// static
+void FileHandlerSelectFileFunction::set_file_selector_for_test(
+    FileSelector* file_selector) {
+  FileHandlerSelectFileFunction::file_selector_for_test_ = file_selector;
+}
+
+// static
+void FileHandlerSelectFileFunction::set_gesture_check_disabled_for_test(
+    bool disabled) {
+  FileHandlerSelectFileFunction::gesture_check_disabled_for_test_ = disabled;
+}
 
 FileHandlerSelectFileFunction::~FileHandlerSelectFileFunction() {}
 
@@ -198,18 +215,6 @@ bool FileHandlerSelectFileFunction::RunImpl() {
   return true;
 }
 
-// static
-void FileHandlerSelectFileFunction::set_file_selector_for_test(
-    FileSelector* file_selector) {
-  FileHandlerSelectFileFunction::file_selector_for_test_ = file_selector;
-}
-
-// static
-void FileHandlerSelectFileFunction::set_gesture_check_disabled_for_test(
-    bool disabled) {
-  FileHandlerSelectFileFunction::gesture_check_disabled_for_test_ = disabled;
-}
-
 void FileHandlerSelectFileFunction::OnFilePathSelected(
     bool success,
     const FilePath& full_path) {
@@ -222,53 +227,28 @@ void FileHandlerSelectFileFunction::OnFilePathSelected(
 
   BrowserContext::GetFileSystemContext(profile_)->OpenFileSystem(
       source_url_.GetOrigin(), fileapi::kFileSystemTypeExternal, false,
-      base::Bind(&RelayOpenFileSystemCallbackToFileThread,
-          base::Bind(&FileHandlerSelectFileFunction::CreateFileOnFileThread,
+      base::Bind(&RunOpenFileSystemCallback,
+          base::Bind(&FileHandlerSelectFileFunction::OnFileSystemOpened,
                      this)));
 };
 
-void FileHandlerSelectFileFunction::CreateFileOnFileThread(
-    bool success,
-    const std::string& file_system_name,
-    const GURL& file_system_root) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::FILE));
-
-  if (success)
-    success = DoCreateFile();
-  content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
-      base::Bind(&FileHandlerSelectFileFunction::OnFileCreated, this,
-          success, file_system_name, file_system_root));
-}
-
-bool FileHandlerSelectFileFunction::DoCreateFile() {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::FILE));
-
-  // Don't allow links.
-  if (file_util::PathExists(full_path_) && file_util::IsLink(full_path_))
-    return false;
-
-  bool created = false;
-  base::PlatformFileError error = base::PLATFORM_FILE_OK;
-  int creation_flags = base::PLATFORM_FILE_CREATE_ALWAYS |
-                       base::PLATFORM_FILE_READ |
-                       base::PLATFORM_FILE_WRITE;
-  base::CreatePlatformFile(full_path_, creation_flags, &created, &error);
-  return error == base::PLATFORM_FILE_OK;
-}
-
-void FileHandlerSelectFileFunction::OnFileCreated(
+void FileHandlerSelectFileFunction::OnFileSystemOpened(
     bool success,
     const std::string& file_system_name,
     const GURL& file_system_root) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
 
-  FilePath virtual_path;
-  if (success)
-    virtual_path = GrantPermissions();
-  Respond(success, file_system_name, file_system_root, virtual_path);
+  if (success) {
+    GrantPermissions(base::Bind(
+        &FileHandlerSelectFileFunction::Respond, this,
+            success, file_system_name, file_system_root));
+    return;
+  }
+  Respond(success, file_system_name, file_system_root, FilePath());
 }
 
-FilePath FileHandlerSelectFileFunction::GrantPermissions() {
+void FileHandlerSelectFileFunction::GrantPermissions(
+    const GrantPermissionsCallback& callback) {
   fileapi::ExternalFileSystemMountPointProvider* external_provider =
       BrowserContext::GetFileSystemContext(profile_)->external_provider();
   DCHECK(external_provider);
@@ -281,12 +261,39 @@ FilePath FileHandlerSelectFileFunction::GrantPermissions() {
   // ensure that the target extension can access only this FS entry and
   // prevent from traversing FS hierarchy upward.
   external_provider->GrantFileAccessToExtension(extension_id(), virtual_path);
-  content::ChildProcessSecurityPolicy::GetInstance()->GrantPermissionsForFile(
-      render_view_host()->GetProcess()->GetID(),
-      full_path_,
-      file_handler_util::GetReadWritePermissions());
 
-  return virtual_path;
+  // Give read write permissions for the file.
+  permissions_to_grant_.push_back(std::make_pair(
+      full_path_,
+      file_handler_util::GetReadWritePermissions()));
+
+  if (!gdata::util::IsUnderGDataMountPoint(full_path_)) {
+    OnGotPermissionsToGrant(callback, virtual_path);
+    return;
+  }
+
+  // For drive files, we also have to grant permissions for cache paths.
+  scoped_ptr<std::vector<FilePath> > gdata_paths(new std::vector<FilePath>());
+  gdata_paths->push_back(virtual_path);
+
+  gdata::util::InsertGDataCachePathsPermissions(
+      profile(),
+      gdata_paths.Pass(),
+      &permissions_to_grant_,
+      base::Bind(&FileHandlerSelectFileFunction::OnGotPermissionsToGrant,
+          this, callback, virtual_path));
+}
+
+void FileHandlerSelectFileFunction::OnGotPermissionsToGrant(
+    const GrantPermissionsCallback& callback,
+    const FilePath& virtual_path) {
+  for (size_t i = 0; i < permissions_to_grant_.size(); i++) {
+    content::ChildProcessSecurityPolicy::GetInstance()->GrantPermissionsForFile(
+        render_view_host()->GetProcess()->GetID(),
+        permissions_to_grant_[i].first,
+        permissions_to_grant_[i].second);
+  }
+  callback.Run(virtual_path);
 }
 
 void FileHandlerSelectFileFunction::Respond(
@@ -294,8 +301,8 @@ void FileHandlerSelectFileFunction::Respond(
     const std::string& file_system_name,
     const GURL& file_system_root,
     const FilePath& virtual_path) {
-  scoped_ptr<SelectFile::Result::Result> result(
-      new SelectFile::Result::Result());
+  scoped_ptr<SelectFile::Results::Result> result(
+      new SelectFile::Results::Result());
   result->success = success;
   if (success) {
     result->entry.reset(new FileEntryInfo());
@@ -305,7 +312,7 @@ void FileHandlerSelectFileFunction::Respond(
     result->entry->file_is_directory = false;
   }
 
-  result_.reset(SelectFile::Result::Create(*result));
+  results_ = SelectFile::Results::Create(*result);
   SendResponse(true);
 }
 

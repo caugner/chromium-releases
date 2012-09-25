@@ -13,7 +13,6 @@
 #include "chrome/browser/ui/views/tabs/tab_controller.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "grit/theme_resources_standard.h"
 #include "grit/ui_resources.h"
 #include "third_party/skia/include/effects/SkGradientShader.h"
 #include "ui/base/animation/multi_animation.h"
@@ -23,8 +22,8 @@
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/favicon_size.h"
 #include "ui/gfx/font.h"
+#include "ui/gfx/image/image_skia_operations.h"
 #include "ui/gfx/path.h"
-#include "ui/gfx/skbitmap_operations.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/widget/tooltip_manager.h"
 #include "ui/views/widget/widget.h"
@@ -209,10 +208,11 @@ static const SkColor kMiniTitleChangeGradientColor2 =
 
 Tab::TabImage Tab::tab_alpha_ = {0};
 Tab::TabImage Tab::tab_active_ = {0};
+Tab::TabImage Tab::tab_active_search_ = {0};
 Tab::TabImage Tab::tab_inactive_ = {0};
 
 // static
-const char Tab::kViewClassName[] = "browser/tabs/Tab";
+const char Tab::kViewClassName[] = "BrowserTab";
 
 ////////////////////////////////////////////////////////////////////////////////
 // Tab, public:
@@ -493,9 +493,56 @@ void Tab::OnMouseMoved(const views::MouseEvent& event) {
 ////////////////////////////////////////////////////////////////////////////////
 // Tab, private
 
+gfx::ImageSkia* Tab::GetTabBackgroundImage(
+    chrome::search::Mode::Type mode) const {
+  ui::ThemeProvider* tp = GetThemeProvider();
+  if (!tp) {
+    DCHECK(tp) << "Unable to get theme provider";
+    return NULL;
+  }
+
+  if (!controller() || !controller()->IsInstantExtendedAPIEnabled())
+    return tp->GetImageSkiaNamed(IDR_THEME_TOOLBAR);
+
+  switch (mode) {
+    case chrome::search::Mode::MODE_NTP:
+      return tp->GetImageSkiaNamed(IDR_THEME_NTP_BACKGROUND);
+
+    case chrome::search::Mode::MODE_SEARCH:
+    case chrome::search::Mode::MODE_DEFAULT:
+    default:
+      return tp->GetImageSkiaNamed(IDR_THEME_TOOLBAR_SEARCH);
+  }
+}
+
 void Tab::PaintTabBackground(gfx::Canvas* canvas) {
   if (IsActive()) {
-    PaintActiveTabBackground(canvas);
+    bool fading_in = false;
+    // If mode is SEARCH, we might be waiting to fade in or fading in new
+    // background, in which case, the previous background needs to be painted.
+    if (data().mode == chrome::search::Mode::MODE_SEARCH &&
+        data().background_state &
+            chrome::search::ToolbarSearchAnimator::BACKGROUND_STATE_NTP) {
+      // Paint background for NTP mode.
+      PaintActiveTabBackground(canvas,
+          GetTabBackgroundImage(chrome::search::Mode::MODE_NTP));
+      // We're done if we're not showing background for |MODE_SEARCH|.
+      if (!(data().background_state & chrome::search::ToolbarSearchAnimator::
+            BACKGROUND_STATE_SEARCH)) {
+        return;
+      }
+      // Otherwise, we're fading in the background for |MODE_SEARCH| at
+      // |data().search_background_opacity|.
+      fading_in = true;
+      canvas->SaveLayerAlpha(
+          static_cast<uint8>(data().search_background_opacity * 0xFF),
+          gfx::Rect(width(), height()));
+    }
+    // Paint the background for the current mode.
+    PaintActiveTabBackground(canvas, GetTabBackgroundImage(data().mode));
+    // If we're fading in and have saved canvas, restore it now.
+    if (fading_in)
+      canvas->Restore();
   } else {
     if (mini_title_animation_.get() && mini_title_animation_->is_animating())
       PaintInactiveTabBackgroundWithTitleChange(canvas);
@@ -507,7 +554,7 @@ void Tab::PaintTabBackground(gfx::Canvas* canvas) {
       canvas->SaveLayerAlpha(static_cast<int>(throb_value * 0xff),
                              gfx::Rect(width(), height()));
       canvas->sk_canvas()->drawARGB(0, 255, 255, 255, SkXfermode::kClear_Mode);
-      PaintActiveTabBackground(canvas);
+      PaintActiveTabBackground(canvas, GetTabBackgroundImage(data().mode));
       canvas->Restore();
     }
   }
@@ -515,13 +562,13 @@ void Tab::PaintTabBackground(gfx::Canvas* canvas) {
 
 void Tab::PaintInactiveTabBackgroundWithTitleChange(gfx::Canvas* canvas) {
   // Render the inactive tab background. We'll use this for clipping.
-  gfx::Canvas background_canvas(size(), false);
+  gfx::Canvas background_canvas(size(), canvas->scale_factor(), false);
   PaintInactiveTabBackground(&background_canvas);
 
-  gfx::ImageSkia background_image = background_canvas.ExtractBitmap();
+  gfx::ImageSkia background_image(background_canvas.ExtractImageRep());
 
   // Draw a radial gradient to hover_canvas.
-  gfx::Canvas hover_canvas(size(), false);
+  gfx::Canvas hover_canvas(size(), canvas->scale_factor(), false);
   int radius = kMiniTitleChangeGradientRadius;
   int x0 = width() + radius - kMiniTitleChangeInitialXOffset;
   int x1 = radius;
@@ -547,8 +594,8 @@ void Tab::PaintInactiveTabBackgroundWithTitleChange(gfx::Canvas* canvas) {
                         paint);
 
   // Draw the radial gradient clipped to the background into hover_image.
-  gfx::ImageSkia hover_image = SkBitmapOperations::CreateMaskedBitmap(
-      hover_canvas.ExtractBitmap(), background_image);
+  gfx::ImageSkia hover_image = gfx::ImageSkiaOperations::CreateMaskedImage(
+      gfx::ImageSkia(hover_canvas.ExtractImageRep()), background_image);
 
   // Draw the tab background to the canvas.
   canvas->DrawImageInt(background_image, 0, 0);
@@ -579,7 +626,9 @@ void Tab::PaintInactiveTabBackground(gfx::Canvas* canvas) {
 
   gfx::ImageSkia* tab_bg = GetThemeProvider()->GetImageSkiaNamed(tab_id);
 
-  TabImage* tab_image = &tab_active_;
+  TabImage* tab_image =
+      controller() && controller()->IsInstantExtendedAPIEnabled() ?
+          &tab_active_search_ : &tab_active_;
   TabImage* tab_inactive_image = &tab_inactive_;
   TabImage* alpha = &tab_alpha_;
 
@@ -592,25 +641,25 @@ void Tab::PaintInactiveTabBackground(gfx::Canvas* canvas) {
   // We need a gfx::Canvas object to be able to extract the image from.
   // We draw everything to this canvas and then output it to the canvas
   // parameter in addition to using it to mask the hover glow if needed.
-  gfx::Canvas background_canvas(size(), false);
+  gfx::Canvas background_canvas(size(), canvas->scale_factor(), false);
 
   // Draw left edge.  Don't draw over the toolbar, as we're not the foreground
   // tab.
-  gfx::ImageSkia tab_l = SkBitmapOperations::CreateTiledBitmap(
+  gfx::ImageSkia tab_l = gfx::ImageSkiaOperations::CreateTiledImage(
       *tab_bg, offset, bg_offset_y, tab_image->l_width, height());
   gfx::ImageSkia theme_l =
-      SkBitmapOperations::CreateMaskedBitmap(tab_l, *alpha->image_l);
+      gfx::ImageSkiaOperations::CreateMaskedImage(tab_l, *alpha->image_l);
   background_canvas.DrawImageInt(theme_l,
       0, 0, theme_l.width(), theme_l.height() - kToolbarOverlap,
       0, 0, theme_l.width(), theme_l.height() - kToolbarOverlap,
       false);
 
   // Draw right edge.  Again, don't draw over the toolbar.
-  gfx::ImageSkia tab_r = SkBitmapOperations::CreateTiledBitmap(*tab_bg,
+  gfx::ImageSkia tab_r = gfx::ImageSkiaOperations::CreateTiledImage(*tab_bg,
       offset + width() - tab_image->r_width, bg_offset_y,
       tab_image->r_width, height());
   gfx::ImageSkia theme_r =
-      SkBitmapOperations::CreateMaskedBitmap(tab_r, *alpha->image_r);
+      gfx::ImageSkiaOperations::CreateMaskedImage(tab_r, *alpha->image_r);
   background_canvas.DrawImageInt(theme_r,
       0, 0, theme_r.width(), theme_r.height() - kToolbarOverlap,
       width() - theme_r.width(), 0, theme_r.width(),
@@ -627,11 +676,12 @@ void Tab::PaintInactiveTabBackground(gfx::Canvas* canvas) {
      width() - tab_image->l_width - tab_image->r_width,
      height() - drop_shadow_height() - kToolbarOverlap - tab_image->y_offset);
 
-  canvas->DrawImageInt(background_canvas.ExtractBitmap(), 0, 0);
+  canvas->DrawImageInt(
+      gfx::ImageSkia(background_canvas.ExtractImageRep()), 0, 0);
 
   if (!GetThemeProvider()->HasCustomImage(tab_id) &&
       hover_controller().ShouldDraw()) {
-    hover_controller().Draw(canvas, background_canvas.ExtractBitmap());
+    hover_controller().Draw(canvas, background_canvas.ExtractImageRep());
   }
 
   // Now draw the highlights/shadows around the tab edge.
@@ -645,34 +695,35 @@ void Tab::PaintInactiveTabBackground(gfx::Canvas* canvas) {
                        width() - tab_inactive_image->r_width, 0);
 }
 
-void Tab::PaintActiveTabBackground(gfx::Canvas* canvas) {
+void Tab::PaintActiveTabBackground(gfx::Canvas* canvas,
+                                   gfx::ImageSkia* tab_background) {
+  DCHECK(tab_background);
+
   int offset = GetMirroredX() + background_offset_.x();
-  ui::ThemeProvider* tp = GetThemeProvider();
-  DCHECK(tp) << "Unable to get theme provider";
 
-  gfx::ImageSkia* tab_bg =
-      GetThemeProvider()->GetImageSkiaNamed(IDR_THEME_TOOLBAR);
-
-  TabImage* tab_image = &tab_active_;
+  TabImage* tab_image =
+      controller() && controller()->IsInstantExtendedAPIEnabled() ?
+          &tab_active_search_ : &tab_active_;
   TabImage* alpha = &tab_alpha_;
 
   // Draw left edge.
-  gfx::ImageSkia tab_l = SkBitmapOperations::CreateTiledBitmap(
-      *tab_bg, offset, 0, tab_image->l_width, height());
+  gfx::ImageSkia tab_l = gfx::ImageSkiaOperations::CreateTiledImage(
+      *tab_background, offset, 0, tab_image->l_width, height());
   gfx::ImageSkia theme_l =
-      SkBitmapOperations::CreateMaskedBitmap(tab_l, *alpha->image_l);
+      gfx::ImageSkiaOperations::CreateMaskedImage(tab_l, *alpha->image_l);
   canvas->DrawImageInt(theme_l, 0, 0);
 
   // Draw right edge.
-  gfx::ImageSkia tab_r = SkBitmapOperations::CreateTiledBitmap(*tab_bg,
+  gfx::ImageSkia tab_r = gfx::ImageSkiaOperations::CreateTiledImage(
+      *tab_background,
       offset + width() - tab_image->r_width, 0, tab_image->r_width, height());
   gfx::ImageSkia theme_r =
-      SkBitmapOperations::CreateMaskedBitmap(tab_r, *alpha->image_r);
+      gfx::ImageSkiaOperations::CreateMaskedImage(tab_r, *alpha->image_r);
   canvas->DrawImageInt(theme_r, width() - tab_image->r_width, 0);
 
   // Draw center.  Instead of masking out the top portion we simply skip over it
   // by incrementing by GetDropShadowHeight(), since it's a simple rectangle.
-  canvas->TileImageInt(*tab_bg,
+  canvas->TileImageInt(*tab_background,
      offset + tab_image->l_width,
      drop_shadow_height() + tab_image->y_offset,
      tab_image->l_width,
@@ -708,7 +759,7 @@ bool Tab::ShouldShowIcon() const {
 
 bool Tab::ShouldShowCloseBox() const {
   // The active tab never clips close button.
-  return !data().mini && IsCloseable() && (IsActive() || IconCapacity() >= 3);
+  return !data().mini && (IsActive() || IconCapacity() >= 3);
 }
 
 double Tab::GetThrobValue() {
@@ -755,6 +806,15 @@ void Tab::LoadTabImages() {
   tab_active_.image_r = rb.GetImageSkiaNamed(IDR_TAB_ACTIVE_RIGHT);
   tab_active_.l_width = tab_active_.image_l->width();
   tab_active_.r_width = tab_active_.image_r->width();
+
+  tab_active_search_.image_l =
+      rb.GetImageSkiaNamed(IDR_TAB_ACTIVE_LEFT_SEARCH);
+  tab_active_search_.image_c =
+      rb.GetImageSkiaNamed(IDR_TAB_ACTIVE_CENTER_SEARCH);
+  tab_active_search_.image_r =
+      rb.GetImageSkiaNamed(IDR_TAB_ACTIVE_RIGHT_SEARCH);
+  tab_active_search_.l_width = tab_active_search_.image_l->width();
+  tab_active_search_.r_width = tab_active_search_.image_r->width();
 
   tab_inactive_.image_l = rb.GetImageSkiaNamed(IDR_TAB_INACTIVE_LEFT);
   tab_inactive_.image_c = rb.GetImageSkiaNamed(IDR_TAB_INACTIVE_CENTER);

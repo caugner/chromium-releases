@@ -11,8 +11,11 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/printing/printer_query.h"
 #include "chrome/browser/printing/print_job_manager.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_io_data.h"
 #include "chrome/browser/ui/webui/print_preview/print_preview_ui.h"
 #include "chrome/common/print_messages.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
@@ -79,8 +82,11 @@ void RenderParamsFromPrintSettings(const printing::PrintSettings& settings,
 
 }  // namespace
 
-PrintingMessageFilter::PrintingMessageFilter(int render_process_id)
+PrintingMessageFilter::PrintingMessageFilter(int render_process_id,
+                                             Profile* profile)
     : print_job_manager_(g_browser_process->print_job_manager()),
+      profile_io_data_(ProfileIOData::FromResourceContext(
+          profile->GetResourceContext())),
       render_process_id_(render_process_id) {
 }
 
@@ -226,14 +232,16 @@ void PrintingMessageFilter::GetPrintSettingsForRenderView(
 void PrintingMessageFilter::OnGetDefaultPrintSettings(IPC::Message* reply_msg) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   scoped_refptr<printing::PrinterQuery> printer_query;
-  if (!print_job_manager_->printing_enabled()) {
+  if (!profile_io_data_->printing_enabled()->GetValue()) {
     // Reply with NULL query.
     OnGetDefaultPrintSettingsReply(printer_query, reply_msg);
     return;
   }
   print_job_manager_->PopPrinterQuery(0, &printer_query);
-  if (!printer_query.get())
+  if (!printer_query.get()) {
     printer_query = new printing::PrinterQuery;
+    printer_query->SetWorkerDestination(print_job_manager_->destination());
+  }
 
   // Loads default settings. This is asynchronous, only the IPC message sender
   // will hang until the settings are retrieved.
@@ -282,6 +290,7 @@ void PrintingMessageFilter::OnScriptedPrint(
   print_job_manager_->PopPrinterQuery(params.cookie, &printer_query);
   if (!printer_query.get()) {
     printer_query = new printing::PrinterQuery;
+    printer_query->SetWorkerDestination(print_job_manager_->destination());
   }
   GetPrintSettingsForRenderViewParams settings_params;
   settings_params.ask_user_for_settings = printing::PrinterQuery::ASK_USER;
@@ -324,16 +333,17 @@ void PrintingMessageFilter::OnUpdatePrintSettings(
     int document_cookie, const DictionaryValue& job_settings,
     IPC::Message* reply_msg) {
   scoped_refptr<printing::PrinterQuery> printer_query;
-  if (!print_job_manager_->printing_enabled()) {
+  if (!profile_io_data_->printing_enabled()->GetValue()) {
     // Reply with NULL query.
     OnUpdatePrintSettingsReply(printer_query, reply_msg);
     return;
   }
 
   print_job_manager_->PopPrinterQuery(document_cookie, &printer_query);
-  if (!printer_query.get())
+  if (!printer_query.get()) {
     printer_query = new printing::PrinterQuery;
-
+    printer_query->SetWorkerDestination(print_job_manager_->destination());
+  }
   printer_query->SetSettings(
       job_settings,
       base::Bind(&PrintingMessageFilter::OnUpdatePrintSettingsReply, this,
@@ -364,10 +374,10 @@ void PrintingMessageFilter::OnUpdatePrintSettingsReply(
   }
 }
 
-void PrintingMessageFilter::OnCheckForCancel(const std::string& preview_ui_addr,
+void PrintingMessageFilter::OnCheckForCancel(int32 preview_ui_id,
                                              int preview_request_id,
                                              bool* cancel) {
-  PrintPreviewUI::GetCurrentPrintPreviewStatus(preview_ui_addr,
+  PrintPreviewUI::GetCurrentPrintPreviewStatus(preview_ui_id,
                                                preview_request_id,
                                                cancel);
 }

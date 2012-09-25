@@ -10,12 +10,14 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/extensions/extension_event_router.h"
+#include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
+#include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "content/public/browser/notification_service.h"
@@ -74,8 +76,18 @@ bool ExtensionOmniboxEventRouter::OnInputChanged(
 
 // static
 void ExtensionOmniboxEventRouter::OnInputEntered(
-    Profile* profile, const std::string& extension_id,
+    TabContents* tab_contents,
+    const std::string& extension_id,
     const std::string& input) {
+  Profile* profile = tab_contents->profile();
+
+  const Extension* extension =
+      ExtensionSystem::Get(profile)->extension_service()->extensions()->
+          GetByID(extension_id);
+  CHECK(extension);
+  tab_contents->extension_tab_helper()->active_tab_permission_manager()->
+      GrantIfRequested(extension);
+
   ListValue args;
   args.Set(0, Value::CreateStringValue(input));
   std::string json_args;
@@ -154,20 +166,20 @@ bool ExtensionOmniboxSuggestion::Populate(const base::DictionaryValue& value,
   description_styles.clear();
   if (value.HasKey(kSuggestionDescriptionStyles)) {
     // This version comes from the extension.
-    ListValue* styles = NULL;
+    const ListValue* styles = NULL;
     if (!value.GetList(kSuggestionDescriptionStyles, &styles) ||
         !ReadStylesFromValue(*styles)) {
       return false;
     }
   } else if (value.HasKey(kSuggestionDescriptionStylesRaw)) {
     // This version comes from ToValue(), which we use to persist to disk.
-    ListValue* styles = NULL;
+    const ListValue* styles = NULL;
     if (!value.GetList(kSuggestionDescriptionStylesRaw, &styles) ||
         styles->empty()) {
       return false;
     }
     for (size_t i = 0; i < styles->GetSize(); ++i) {
-      base::DictionaryValue* style = NULL;
+      const base::DictionaryValue* style = NULL;
       int offset, type;
       if (!styles->GetDictionary(i, &style))
         return false;
@@ -194,7 +206,7 @@ bool ExtensionOmniboxSuggestion::ReadStylesFromValue(
   styles.resize(description.length());  // sets all styles to 0
 
   for (size_t i = 0; i < styles_value.GetSize(); ++i) {
-    DictionaryValue* style;
+    const DictionaryValue* style;
     std::string type;
     int offset;
     int length;

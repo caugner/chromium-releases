@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_GTK_AUTOFILL_AUTOFILL_POPUP_VIEW_GTK_H_
 #define CHROME_BROWSER_UI_GTK_AUTOFILL_AUTOFILL_POPUP_VIEW_GTK_H_
-#pragma once
 
 #include <pango/pango.h>
 #include <vector>
@@ -14,7 +13,6 @@
 #include "ui/base/glib/glib_integers.h"
 #include "ui/base/gtk/gtk_signal.h"
 #include "ui/gfx/font.h"
-#include "ui/gfx/rect.h"
 
 class GtkThemeService;
 class Profile;
@@ -64,8 +62,14 @@ class AutofillPopupViewGtk : public AutofillPopupView,
   //  KeyboardListener implementation.
   virtual bool HandleKeyPressEvent(GdkEventKey* event) OVERRIDE;
 
-  // Setup the pango layout to display the autofill results.
-  void SetupLayout(const gfx::Rect& window_rect, const GdkColor& text_color);
+  // Set up the pango layout to display the autofill results.
+  void SetupLayout(const gfx::Rect& window_rect);
+
+  // Set up the pango layout to print the given text and have it's width match
+  // the text's (this gives us better control when placing the text box).
+  void SetLayoutText(const string16& text,
+                     const gfx::Font& font,
+                     const GdkColor text_color);
 
   // Draw the separator as the given |separator_rect|.
   void DrawSeparator(cairo_t* cairo_context, const gfx::Rect& separator_rect);
@@ -73,7 +77,6 @@ class AutofillPopupViewGtk : public AutofillPopupView,
   // Draw the given autofill entry in |entry_rect|.
   void DrawAutofillEntry(cairo_t* cairo_context,
                          size_t index,
-                         int actual_content_height,
                          const gfx::Rect& entry_rect);
 
   // Set the bounds of the popup to show, including the placement of it.
@@ -98,8 +101,11 @@ class AutofillPopupViewGtk : public AutofillPopupView,
   GtkWidget* parent_;  // Weak reference.
   GtkWidget* window_;  // Strong reference.
   PangoLayout* layout_;  // Strong reference
-  gfx::Font font_;
   GtkThemeService* theme_service_;
+
+  // The fonts for the popup text.
+  gfx::Font value_font_;
+  gfx::Font label_font_;
 
   // The size of the popup.
   gfx::Rect bounds_;

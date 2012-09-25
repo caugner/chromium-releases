@@ -4,206 +4,13 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_GDATA_GDATA_OPERATIONS_H_
 #define CHROME_BROWSER_CHROMEOS_GDATA_GDATA_OPERATIONS_H_
-#pragma once
 
 #include <string>
 #include <vector>
 
-#include "base/callback.h"
-#include "base/logging.h"
-#include "base/message_loop_proxy.h"
-#include "base/stringprintf.h"
-#include "chrome/browser/chromeos/gdata/gdata_operation_registry.h"
-#include "chrome/browser/chromeos/gdata/gdata_params.h"
-#include "chrome/browser/profiles/profile.h"
-#include "chrome/common/net/gaia/oauth2_access_token_consumer.h"
-#include "chrome/common/net/gaia/oauth2_access_token_fetcher.h"
-#include "content/public/browser/browser_thread.h"
-#include "net/base/load_flags.h"
-#include "net/http/http_response_headers.h"
-#include "net/url_request/url_fetcher.h"
+#include "chrome/browser/chromeos/gdata/operations_base.h"
 
 namespace gdata {
-
-//================================ AuthOperation ===============================
-
-// OAuth2 authorization token retrieval operation.
-class AuthOperation : public GDataOperationRegistry::Operation,
-                      public OAuth2AccessTokenConsumer {
- public:
-  AuthOperation(GDataOperationRegistry* registry,
-                Profile* profile,
-                const AuthStatusCallback& callback,
-                const std::string& refresh_token);
-  virtual ~AuthOperation();
-  void Start();
-
-  // Overridden from OAuth2AccessTokenConsumer:
-  virtual void OnGetTokenSuccess(const std::string& access_token) OVERRIDE;
-  virtual void OnGetTokenFailure(const GoogleServiceAuthError& error) OVERRIDE;
-
-  // Overridden from GDataOpertionRegistry::Operation
-  virtual void DoCancel() OVERRIDE;
-
- private:
-  Profile* profile_;
-  std::string token_;
-  AuthStatusCallback callback_;
-  scoped_ptr<OAuth2AccessTokenFetcher> oauth2_access_token_fetcher_;
-
-  DISALLOW_COPY_AND_ASSIGN(AuthOperation);
-};
-
-//=========================== GDataOperationInterface ==========================
-
-// An interface for implementing an operation used by DocumentsService.
-class GDataOperationInterface {
- public:
-  // Callback to DocumentsService upon for re-authentication.
-  typedef base::Callback<void(GDataOperationInterface* operation)>
-      ReAuthenticateCallback;
-
-  virtual ~GDataOperationInterface() {}
-
-  // Starts the actual operation after obtaining an authentication token
-  // |auth_token|.
-  virtual void Start(const std::string& auth_token) = 0;
-
-  // Invoked when the authentication failed with an error code |code|.
-  virtual void OnAuthFailed(GDataErrorCode code) = 0;
-
-  // Sets the callback to DocumentsService when the operation restarts due to
-  // an authentication failure.
-  virtual void SetReAuthenticateCallback(
-      const ReAuthenticateCallback& callback) = 0;
-};
-
-//============================ UrlFetchOperationBase ===========================
-
-// Base class for operations that are fetching URLs.
-class UrlFetchOperationBase : public GDataOperationInterface,
-                              public GDataOperationRegistry::Operation,
-                              public net::URLFetcherDelegate {
- public:
-  // Overridden from GDataOperationInterface.
-  virtual void Start(const std::string& auth_token) OVERRIDE;
-
-  // Overridden from GDataOperationInterface.
-  virtual void SetReAuthenticateCallback(
-      const ReAuthenticateCallback& callback) OVERRIDE;
-
- protected:
-  UrlFetchOperationBase(GDataOperationRegistry* registry, Profile* profile);
-  UrlFetchOperationBase(GDataOperationRegistry* registry,
-                        GDataOperationRegistry::OperationType type,
-                        const FilePath& path,
-                        Profile* profile);
-  virtual ~UrlFetchOperationBase();
-
-  // Gets URL for the request.
-  virtual GURL GetURL() const = 0;
-  // Returns the request type. A derived class should override this method
-  // for a request type other than HTTP GET.
-  virtual net::URLFetcher::RequestType GetRequestType() const;
-  // Returns the extra HTTP headers for the request. A derived class should
-  // override this method to specify any extra headers needed for the request.
-  virtual std::vector<std::string> GetExtraRequestHeaders() const;
-  // Used by a derived class to add any content data to the request.
-  // Returns true if |upload_content_type| and |upload_content| are updated
-  // with the content type and data for the request.
-  virtual bool GetContentData(std::string* upload_content_type,
-                              std::string* upload_content);
-
-  // Invoked by OnURLFetchComplete when the operation completes without an
-  // authentication error. Must be implemented by a derived class.
-  virtual bool ProcessURLFetchResults(const net::URLFetcher* source) = 0;
-
-  // Invoked when it needs to notify the status. Chunked operations that
-  // constructs a logically single operation from multiple physical operations
-  // should notify resume/suspend instead of start/finish.
-  virtual void NotifyStartToOperationRegistry();
-  virtual void NotifySuccessToOperationRegistry();
-
-  // Invoked by this base class upon an authentication error or cancel by
-  // an user operation. Must be implemented by a derived class.
-  virtual void RunCallbackOnPrematureFailure(GDataErrorCode code) = 0;
-
-  // Implement GDataOperationRegistry::Operation
-  virtual void DoCancel() OVERRIDE;
-
-  // Overridden from URLFetcherDelegate.
-  virtual void OnURLFetchComplete(const net::URLFetcher* source) OVERRIDE;
-
-  // Overridden from GDataOperationInterface.
-  virtual void OnAuthFailed(GDataErrorCode code) OVERRIDE;
-
-  // Returns an appropriate GDataErrorCode based on the HTTP response code and
-  // the status of the URLFetcher.
-  GDataErrorCode GetErrorCode(const net::URLFetcher* source) const;
-
-  std::string GetResponseHeadersAsString(
-      const net::URLFetcher* url_fetcher);
-
-  Profile* profile_;
-  ReAuthenticateCallback re_authenticate_callback_;
-  int re_authenticate_count_;
-  bool save_temp_file_;
-  FilePath output_file_path_;
-  scoped_ptr<net::URLFetcher> url_fetcher_;
-  bool started_;
-};
-
-//============================ EntryActionOperation ============================
-
-// This class performs a simple action over a given entry (document/file).
-// It is meant to be used for operations that return no JSON blobs.
-class EntryActionOperation : public UrlFetchOperationBase {
- public:
-  EntryActionOperation(GDataOperationRegistry* registry,
-                       Profile* profile,
-                       const EntryActionCallback& callback,
-                       const GURL& document_url);
-  virtual ~EntryActionOperation();
-
- protected:
-  // Overridden from UrlFetchOperationBase.
-  virtual GURL GetURL() const OVERRIDE;
-  virtual bool ProcessURLFetchResults(const net::URLFetcher* source)
-      OVERRIDE;
-  virtual void RunCallbackOnPrematureFailure(GDataErrorCode code) OVERRIDE;
-
-  const GURL& document_url() const { return document_url_; }
-
- private:
-  EntryActionCallback callback_;
-  GURL document_url_;
-
-  DISALLOW_COPY_AND_ASSIGN(EntryActionOperation);
-};
-
-//============================== GetDataOperation ==============================
-
-// This class performs the operation for fetching and parsing JSON data content.
-class GetDataOperation : public UrlFetchOperationBase {
- public:
-  GetDataOperation(GDataOperationRegistry* registry,
-                   Profile* profile,
-                   const GetDataCallback& callback);
-  virtual ~GetDataOperation();
-
-  // Parse GData JSON response.
-  static base::Value* ParseResponse(const std::string& data);
-
- protected:
-  // Overridden from UrlFetchOperationBase.
-  virtual bool ProcessURLFetchResults(const net::URLFetcher* source)
-      OVERRIDE;
-  virtual void RunCallbackOnPrematureFailure(GDataErrorCode code) OVERRIDE;
-
- private:
-  GetDataCallback callback_;
-  DISALLOW_COPY_AND_ASSIGN(GetDataOperation);
-};
 
 //============================ GetDocumentsOperation ===========================
 
@@ -211,7 +18,6 @@ class GetDataOperation : public UrlFetchOperationBase {
 class GetDocumentsOperation : public GetDataOperation {
  public:
   GetDocumentsOperation(GDataOperationRegistry* registry,
-                        Profile* profile,
                         int start_changestamp,
                         const std::string& search_string,
                         const std::string& directory_resource_id,
@@ -241,7 +47,6 @@ class GetDocumentsOperation : public GetDataOperation {
 class GetDocumentEntryOperation : public GetDataOperation {
  public:
   GetDocumentEntryOperation(GDataOperationRegistry* registry,
-                            Profile* profile,
                             const std::string& resource_id,
                             const GetDataCallback& callback);
   virtual ~GetDocumentEntryOperation();
@@ -263,7 +68,6 @@ class GetDocumentEntryOperation : public GetDataOperation {
 class GetAccountMetadataOperation : public GetDataOperation {
  public:
   GetAccountMetadataOperation(GDataOperationRegistry* registry,
-                              Profile* profile,
                               const GetDataCallback& callback);
   virtual ~GetAccountMetadataOperation();
 
@@ -282,7 +86,6 @@ class DownloadFileOperation : public UrlFetchOperationBase {
  public:
   DownloadFileOperation(
       GDataOperationRegistry* registry,
-      Profile* profile,
       const DownloadActionCallback& download_action_callback,
       const GetDownloadDataCallback& get_download_data_callback,
       const GURL& document_url,
@@ -293,8 +96,7 @@ class DownloadFileOperation : public UrlFetchOperationBase {
  protected:
   // Overridden from UrlFetchOperationBase.
   virtual GURL GetURL() const OVERRIDE;
-  virtual bool ProcessURLFetchResults(const net::URLFetcher* source)
-      OVERRIDE;
+  virtual void ProcessURLFetchResults(const net::URLFetcher* source) OVERRIDE;
   virtual void RunCallbackOnPrematureFailure(GDataErrorCode code) OVERRIDE;
 
   // Overridden from net::URLFetcherDelegate.
@@ -319,12 +121,14 @@ class DownloadFileOperation : public UrlFetchOperationBase {
 class DeleteDocumentOperation : public EntryActionOperation {
  public:
   DeleteDocumentOperation(GDataOperationRegistry* registry,
-                          Profile* profile,
                           const EntryActionCallback& callback,
                           const GURL& document_url);
   virtual ~DeleteDocumentOperation();
 
  protected:
+  // Overridden from UrlFetchOperationBase.
+  virtual GURL GetURL() const OVERRIDE;
+
   // Overridden from EntryActionOperation.
   virtual net::URLFetcher::RequestType GetRequestType() const OVERRIDE;
   virtual std::vector<std::string> GetExtraRequestHeaders() const OVERRIDE;
@@ -340,7 +144,6 @@ class CreateDirectoryOperation : public GetDataOperation {
  public:
   // Empty |parent_content_url| will create the directory in the root folder.
   CreateDirectoryOperation(GDataOperationRegistry* registry,
-                           Profile* profile,
                            const GetDataCallback& callback,
                            const GURL& parent_content_url,
                            const FilePath::StringType& directory_name);
@@ -368,7 +171,6 @@ class CreateDirectoryOperation : public GetDataOperation {
 class CopyDocumentOperation : public GetDataOperation {
  public:
   CopyDocumentOperation(GDataOperationRegistry* registry,
-                        Profile* profile,
                         const GetDataCallback& callback,
                         const std::string& resource_id,
                         const FilePath::StringType& new_name);
@@ -396,7 +198,6 @@ class CopyDocumentOperation : public GetDataOperation {
 class RenameResourceOperation : public EntryActionOperation {
  public:
   RenameResourceOperation(GDataOperationRegistry* registry,
-                          Profile* profile,
                           const EntryActionCallback& callback,
                           const GURL& document_url,
                           const FilePath::StringType& new_name);
@@ -408,6 +209,7 @@ class RenameResourceOperation : public EntryActionOperation {
   virtual std::vector<std::string> GetExtraRequestHeaders() const OVERRIDE;
 
   // Overridden from UrlFetchOperationBase.
+  virtual GURL GetURL() const OVERRIDE;
   virtual bool GetContentData(std::string* upload_content_type,
                               std::string* upload_content) OVERRIDE;
 
@@ -417,6 +219,40 @@ class RenameResourceOperation : public EntryActionOperation {
   DISALLOW_COPY_AND_ASSIGN(RenameResourceOperation);
 };
 
+//=========================== AuthorizeAppOperation ==========================
+
+// This class performs the operation for renaming a document/file/directory.
+class AuthorizeAppsOperation : public GetDataOperation {
+ public:
+  AuthorizeAppsOperation(GDataOperationRegistry* registry,
+                          const GetDataCallback& callback,
+                          const GURL& document_url,
+                          const std::string& app_ids);
+  virtual ~AuthorizeAppsOperation();
+ protected:
+  // Overridden from EntryActionOperation.
+  virtual net::URLFetcher::RequestType GetRequestType() const OVERRIDE;
+
+  // Overridden from UrlFetchOperationBase.
+  virtual bool GetContentData(std::string* upload_content_type,
+                              std::string* upload_content) OVERRIDE;
+  virtual std::vector<std::string> GetExtraRequestHeaders() const OVERRIDE;
+
+  // Overridden from GetDataOperation.
+  virtual GURL GetURL() const OVERRIDE;
+  virtual void ProcessURLFetchResults(const net::URLFetcher* source) OVERRIDE;
+
+  // Must override GetDataOperation's ParseResponse because the response is XML
+  // not JSON.
+  virtual void ParseResponse(GDataErrorCode fetch_error_code,
+                             const std::string& data) OVERRIDE;
+ private:
+  std::string app_id_;
+  GURL document_url_;
+
+  DISALLOW_COPY_AND_ASSIGN(AuthorizeAppsOperation);
+};
+
 //======================= AddResourceToDirectoryOperation ======================
 
 // This class performs the operation for adding a document/file/directory
@@ -424,17 +260,14 @@ class RenameResourceOperation : public EntryActionOperation {
 class AddResourceToDirectoryOperation : public EntryActionOperation {
  public:
   AddResourceToDirectoryOperation(GDataOperationRegistry* registry,
-                                  Profile* profile,
                                   const EntryActionCallback& callback,
                                   const GURL& parent_content_url,
                                   const GURL& document_url);
   virtual ~AddResourceToDirectoryOperation();
 
  protected:
-  // Overridden from EntryActionOperation.
-  virtual GURL GetURL() const OVERRIDE;
-
   // Overridden from UrlFetchOperationBase.
+  virtual GURL GetURL() const OVERRIDE;
   virtual net::URLFetcher::RequestType GetRequestType() const OVERRIDE;
   virtual bool GetContentData(std::string* upload_content_type,
                               std::string* upload_content) OVERRIDE;
@@ -452,7 +285,6 @@ class AddResourceToDirectoryOperation : public EntryActionOperation {
 class RemoveResourceFromDirectoryOperation : public EntryActionOperation {
  public:
   RemoveResourceFromDirectoryOperation(GDataOperationRegistry* registry,
-                                       Profile* profile,
                                        const EntryActionCallback& callback,
                                        const GURL& parent_content_url,
                                        const GURL& document_url,
@@ -460,10 +292,8 @@ class RemoveResourceFromDirectoryOperation : public EntryActionOperation {
   virtual ~RemoveResourceFromDirectoryOperation();
 
  protected:
-  // Overridden from EntryActionOperation.
-  virtual GURL GetURL() const OVERRIDE;
-
   // Overridden from UrlFetchOperationBase.
+  virtual GURL GetURL() const OVERRIDE;
   virtual net::URLFetcher::RequestType GetRequestType() const OVERRIDE;
   virtual std::vector<std::string> GetExtraRequestHeaders() const OVERRIDE;
 
@@ -480,7 +310,6 @@ class RemoveResourceFromDirectoryOperation : public EntryActionOperation {
 class InitiateUploadOperation : public UrlFetchOperationBase {
  public:
   InitiateUploadOperation(GDataOperationRegistry* registry,
-                          Profile* profile,
                           const InitiateUploadCallback& callback,
                           const InitiateUploadParams& params);
   virtual ~InitiateUploadOperation();
@@ -488,8 +317,7 @@ class InitiateUploadOperation : public UrlFetchOperationBase {
  protected:
   // Overridden from UrlFetchOperationBase.
   virtual GURL GetURL() const OVERRIDE;
-  virtual bool ProcessURLFetchResults(const net::URLFetcher* source)
-      OVERRIDE;
+  virtual void ProcessURLFetchResults(const net::URLFetcher* source) OVERRIDE;
   virtual void NotifySuccessToOperationRegistry() OVERRIDE;
   virtual void RunCallbackOnPrematureFailure(GDataErrorCode code) OVERRIDE;
 
@@ -513,7 +341,6 @@ class InitiateUploadOperation : public UrlFetchOperationBase {
 class ResumeUploadOperation : public UrlFetchOperationBase {
  public:
   ResumeUploadOperation(GDataOperationRegistry* registry,
-                        Profile* profile,
                         const ResumeUploadCallback& callback,
                         const ResumeUploadParams& params);
   virtual ~ResumeUploadOperation();
@@ -521,8 +348,7 @@ class ResumeUploadOperation : public UrlFetchOperationBase {
  protected:
   // Overridden from UrlFetchOperationBase.
   virtual GURL GetURL() const OVERRIDE;
-  virtual bool ProcessURLFetchResults(const net::URLFetcher* source)
-      OVERRIDE;
+  virtual void ProcessURLFetchResults(const net::URLFetcher* source) OVERRIDE;
   virtual void NotifyStartToOperationRegistry() OVERRIDE;
   virtual void NotifySuccessToOperationRegistry() OVERRIDE;
   virtual void RunCallbackOnPrematureFailure(GDataErrorCode code) OVERRIDE;
@@ -543,6 +369,61 @@ class ResumeUploadOperation : public UrlFetchOperationBase {
   bool last_chunk_completed_;
 
   DISALLOW_COPY_AND_ASSIGN(ResumeUploadOperation);
+};
+
+//============================ GetContactsOperation ============================
+
+// This class fetches a user's contacts.
+class GetContactsOperation : public GetDataOperation {
+ public:
+  GetContactsOperation(GDataOperationRegistry* registry,
+                       const base::Time& min_update_time,
+                       const GetDataCallback& callback);
+  virtual ~GetContactsOperation();
+
+  void set_feed_url_for_testing(const GURL& url) {
+    feed_url_for_testing_ = url;
+  }
+
+ protected:
+  // Overridden from GetDataOperation.
+  virtual GURL GetURL() const OVERRIDE;
+
+ private:
+  // If non-empty, URL of the feed to fetch.
+  GURL feed_url_for_testing_;
+
+  // If is_null() is false, contains a minimum last-updated time that will be
+  // used to filter contacts.
+  base::Time min_update_time_;
+
+  DISALLOW_COPY_AND_ASSIGN(GetContactsOperation);
+};
+
+//========================== GetContactPhotoOperation ==========================
+
+// This class fetches a contact's photo.
+class GetContactPhotoOperation : public UrlFetchOperationBase {
+ public:
+  GetContactPhotoOperation(GDataOperationRegistry* registry,
+                           const GURL& photo_url,
+                           const GetDownloadDataCallback& callback);
+  virtual ~GetContactPhotoOperation();
+
+ protected:
+  // Overridden from UrlFetchOperationBase.
+  virtual GURL GetURL() const OVERRIDE;
+  virtual void ProcessURLFetchResults(const net::URLFetcher* source) OVERRIDE;
+  virtual void RunCallbackOnPrematureFailure(GDataErrorCode code) OVERRIDE;
+
+ private:
+  // Location of the photo to fetch.
+  GURL photo_url_;
+
+  // Callback to which the photo data is passed.
+  GetDownloadDataCallback callback_;
+
+  DISALLOW_COPY_AND_ASSIGN(GetContactPhotoOperation);
 };
 
 }  // namespace gdata

@@ -4,11 +4,9 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_EXTENSIONS_EXTENSION_POPUP_CONTROLLER_H_
 #define CHROME_BROWSER_UI_COCOA_EXTENSIONS_EXTENSION_POPUP_CONTROLLER_H_
-#pragma once
 
 #import <Cocoa/Cocoa.h>
 
-#import "base/mac/cocoa_protocols.h"
 #import "base/memory/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
 #import "chrome/browser/ui/cocoa/base_bubble_controller.h"
@@ -18,11 +16,14 @@
 
 class Browser;
 class DevtoolsNotificationBridge;
-class ExtensionHost;
 class ExtensionPopupContainer;
 
 namespace content {
 class NotificationRegistrar;
+}
+
+namespace extensions {
+class ExtensionHost;
 }
 
 // This controller manages a single browser action popup that can appear once a
@@ -42,7 +43,7 @@ class NotificationRegistrar;
   NSRect extensionFrame_;
 
   // The extension host object.
-  scoped_ptr<ExtensionHost> host_;
+  scoped_ptr<extensions::ExtensionHost> host_;
 
   scoped_ptr<content::NotificationRegistrar> registrar_;
   scoped_ptr<DevtoolsNotificationBridge> notificationBridge_;
@@ -56,7 +57,7 @@ class NotificationRegistrar;
 }
 
 // Returns the ExtensionHost object associated with this popup.
-- (ExtensionHost*)extensionHost;
+- (extensions::ExtensionHost*)extensionHost;
 
 // Starts the process of showing the given popup URL. Instantiates an
 // ExtensionPopupController with the parent window retrieved from |browser|, a

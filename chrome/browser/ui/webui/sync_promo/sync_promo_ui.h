@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_WEBUI_SYNC_PROMO_SYNC_PROMO_UI_H_
 #define CHROME_BROWSER_UI_WEBUI_SYNC_PROMO_SYNC_PROMO_UI_H_
-#pragma once
 
 #include "content/public/browser/web_ui_controller.h"
 
@@ -53,7 +52,9 @@ class SyncPromoUI : public content::WebUIController {
   // promo. If an empty URL is given then the promo will navigate to the NTP.
   // |source| identifies from where the sync promo is being called, and is used
   // to record sync promo UMA stats in the context of the source.
-  static GURL GetSyncPromoURL(const GURL& next_page, Source source);
+  // |auto_close| whether to close the sync promo automatically when done.
+  static GURL GetSyncPromoURL(
+      const GURL& next_page, Source source, bool auto_close);
 
   // Gets the next page URL from the query portion of the sync promo URL.
   static GURL GetNextPageURLForSyncPromoURL(const GURL& url);
@@ -61,6 +62,9 @@ class SyncPromoUI : public content::WebUIController {
   // Gets the source from the query portion of the sync promo URL.
   // The source identifies from where the sync promo was opened.
   static Source GetSourceForSyncPromoURL(const GURL& url);
+
+  // Returns whether the given sync URL contains auto_close parameter.
+  static bool GetAutoCloseForSyncPromoURL(const GURL& url);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(SyncPromoUI);

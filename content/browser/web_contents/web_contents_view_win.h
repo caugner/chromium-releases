@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_BROWSER_WEB_CONTENTS_WEB_CONTENTS_VIEW_WIN_H_
 #define CONTENT_BROWSER_WEB_CONTENTS_WEB_CONTENTS_VIEW_WIN_H_
-#pragma once
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
@@ -15,12 +14,12 @@
 #include "content/public/browser/web_contents_view.h"
 #include "ui/base/win/window_impl.h"
 
-class RenderWidgetHostViewWin;
 class WebDragDest;
 class WebContentsDragWin;
 class WebContentsImpl;
 
 namespace content {
+class RenderWidgetHostViewWin;
 class WebContentsViewDelegate;
 }
 
@@ -32,7 +31,7 @@ class HWNDMessageFilter;
 class CONTENT_EXPORT WebContentsViewWin
     : public content::WebContentsView,
       public content::RenderViewHostDelegateView,
-                                          public ui::WindowImpl {
+      public ui::WindowImpl {
  public:
   WebContentsViewWin(WebContentsImpl* web_contents,
                      content::WebContentsViewDelegate* delegate);
@@ -91,7 +90,7 @@ class CONTENT_EXPORT WebContentsViewWin
                              bool allow_multiple_selection) OVERRIDE;
   virtual void StartDragging(const WebDropData& drop_data,
                              WebKit::WebDragOperationsMask operations,
-                             const SkBitmap& image,
+                             const gfx::ImageSkia& image,
                              const gfx::Point& image_offset) OVERRIDE;
   virtual void UpdateDragCursor(WebKit::WebDragOperation operation) OVERRIDE;
   virtual void GotFocus() OVERRIDE;
@@ -129,7 +128,7 @@ class CONTENT_EXPORT WebContentsViewWin
   // The WebContentsImpl whose contents we display.
   WebContentsImpl* web_contents_;
 
-  RenderWidgetHostViewWin* view_;
+  content::RenderWidgetHostViewWin* view_;
 
   scoped_ptr<content::WebContentsViewDelegate> delegate_;
 

@@ -9,6 +9,8 @@
 #include "chrome/browser/tab_contents/render_view_context_menu.h"
 #include "chrome/browser/tab_contents/render_view_context_menu_browsertest_util.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_commands.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -16,6 +18,7 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/test/browser_test_utils.h"
 #include "net/test/test_server.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 
@@ -86,7 +89,7 @@ class ReferrerPolicyTest : public InProcessBrowserTest {
   // Adds all possible titles to the TitleWatcher, so we don't time out
   // waiting for the title if the test fails.
   void AddAllPossibleTitles(const GURL& url,
-                            ui_test_utils::TitleWatcher* title_watcher) {
+                            content::TitleWatcher* title_watcher) {
     title_watcher->AlsoWaitForTitle(
         GetExpectedTitle(url, EXPECT_EMPTY_REFERRER));
     title_watcher->AlsoWaitForTitle(
@@ -137,8 +140,8 @@ class ReferrerPolicyTest : public InProcessBrowserTest {
         content::NotificationService::AllSources());
 
     string16 expected_title = GetExpectedTitle(start_url, expected_referrer);
-    content::WebContents* tab = browser()->GetActiveWebContents();
-    ui_test_utils::TitleWatcher title_watcher(tab, expected_title);
+    content::WebContents* tab = chrome::GetActiveWebContents(browser());
+    content::TitleWatcher title_watcher(tab, expected_title);
 
     // Watch for all possible outcomes to avoid timeouts if something breaks.
     AddAllPossibleTitles(start_url, &title_watcher);
@@ -161,7 +164,7 @@ class ReferrerPolicyTest : public InProcessBrowserTest {
       tab_added_observer.Wait();
       tab = tab_added_observer.GetTab();
       EXPECT_TRUE(tab);
-      ui_test_utils::WaitForLoadStop(tab);
+      content::WaitForLoadStop(tab);
       EXPECT_EQ(expected_title, tab->GetTitle());
     } else {
       EXPECT_EQ(expected_title, title_watcher.WaitAndGetTitle());
@@ -254,8 +257,7 @@ IN_PROC_BROWSER_TEST_F(ReferrerPolicyTest, HttpsMiddleClickTargetBlankOrigin) {
 // Context menu, from HTTP to HTTP.
 IN_PROC_BROWSER_TEST_F(ReferrerPolicyTest, MAYBE_ContextMenuOrigin) {
   ContextMenuNotificationObserver context_menu_observer(
-      IDC_CONTENT_CONTEXT_OPENLINKNEWTAB,
-      chrome::NOTIFICATION_TAB_ADDED);
+      IDC_CONTENT_CONTEXT_OPENLINKNEWTAB);
   RunReferrerTest("origin", false, false, false, true,
                   WebKit::WebMouseEvent::ButtonRight,
                   EXPECT_ORIGIN_AS_REFERRER);
@@ -264,8 +266,7 @@ IN_PROC_BROWSER_TEST_F(ReferrerPolicyTest, MAYBE_ContextMenuOrigin) {
 // Context menu, from HTTPS to HTTP.
 IN_PROC_BROWSER_TEST_F(ReferrerPolicyTest, MAYBE_HttpsContextMenuOrigin) {
   ContextMenuNotificationObserver context_menu_observer(
-      IDC_CONTENT_CONTEXT_OPENLINKNEWTAB,
-      chrome::NOTIFICATION_TAB_ADDED);
+      IDC_CONTENT_CONTEXT_OPENLINKNEWTAB);
   RunReferrerTest("origin", true, false, false, true,
                   WebKit::WebMouseEvent::ButtonRight,
                   EXPECT_ORIGIN_AS_REFERRER);
@@ -351,8 +352,7 @@ IN_PROC_BROWSER_TEST_F(ReferrerPolicyTest,
 // Context menu, from HTTP to HTTP via server redirect.
 IN_PROC_BROWSER_TEST_F(ReferrerPolicyTest, MAYBE_ContextMenuRedirect) {
   ContextMenuNotificationObserver context_menu_observer(
-      IDC_CONTENT_CONTEXT_OPENLINKNEWTAB,
-      chrome::NOTIFICATION_TAB_ADDED);
+      IDC_CONTENT_CONTEXT_OPENLINKNEWTAB);
   RunReferrerTest("origin", false, false, true, true,
                   WebKit::WebMouseEvent::ButtonRight,
                   EXPECT_ORIGIN_AS_REFERRER);
@@ -361,8 +361,7 @@ IN_PROC_BROWSER_TEST_F(ReferrerPolicyTest, MAYBE_ContextMenuRedirect) {
 // Context menu, from HTTPS to HTTP via server redirect.
 IN_PROC_BROWSER_TEST_F(ReferrerPolicyTest, MAYBE_HttpsContextMenuRedirect) {
   ContextMenuNotificationObserver context_menu_observer(
-      IDC_CONTENT_CONTEXT_OPENLINKNEWTAB,
-      chrome::NOTIFICATION_TAB_ADDED);
+      IDC_CONTENT_CONTEXT_OPENLINKNEWTAB);
   RunReferrerTest("origin", true, false, true, true,
                   WebKit::WebMouseEvent::ButtonRight,
                   EXPECT_ORIGIN_AS_REFERRER);
@@ -381,28 +380,28 @@ IN_PROC_BROWSER_TEST_F(ReferrerPolicyTest, History) {
 
   string16 expected_title =
       GetExpectedTitle(start_url, EXPECT_ORIGIN_AS_REFERRER);
-  content::WebContents* tab = browser()->GetActiveWebContents();
-  scoped_ptr<ui_test_utils::TitleWatcher> title_watcher(
-      new ui_test_utils::TitleWatcher(tab, expected_title));
+  content::WebContents* tab = chrome::GetActiveWebContents(browser());
+  scoped_ptr<content::TitleWatcher> title_watcher(
+      new content::TitleWatcher(tab, expected_title));
 
   // Watch for all possible outcomes to avoid timeouts if something breaks.
   AddAllPossibleTitles(start_url, title_watcher.get());
 
   // Go back to B.
-  browser()->GoBack(CURRENT_TAB);
+  chrome::GoBack(browser(), CURRENT_TAB);
   EXPECT_EQ(expected_title, title_watcher->WaitAndGetTitle());
 
-  title_watcher.reset(new ui_test_utils::TitleWatcher(tab, expected_title));
+  title_watcher.reset(new content::TitleWatcher(tab, expected_title));
   AddAllPossibleTitles(start_url, title_watcher.get());
 
   // Reload to B.
-  browser()->Reload(CURRENT_TAB);
+  chrome::Reload(browser(), CURRENT_TAB);
   EXPECT_EQ(expected_title, title_watcher->WaitAndGetTitle());
 
-  title_watcher.reset(new ui_test_utils::TitleWatcher(tab, expected_title));
+  title_watcher.reset(new content::TitleWatcher(tab, expected_title));
   AddAllPossibleTitles(start_url, title_watcher.get());
 
   // Shift-reload to B.
-  browser()->ReloadIgnoringCache(CURRENT_TAB);
+  chrome::ReloadIgnoringCache(browser(), CURRENT_TAB);
   EXPECT_EQ(expected_title, title_watcher->WaitAndGetTitle());
 }

@@ -11,7 +11,7 @@
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_infobar_delegate.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
-#include "chrome/browser/extensions/extension_window_controller.h"
+#include "chrome/browser/extensions/window_controller.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
 #include "chrome/browser/ui/browser.h"
@@ -74,7 +74,7 @@ bool ShowInfoBarFunction::RunImpl() {
 
   // TODO(finnur): Return the actual DOMWindow object. Bug 26463.
   DCHECK(browser->extension_window_controller());
-  result_.reset(browser->extension_window_controller()->CreateWindowValue());
+  SetResult(browser->extension_window_controller()->CreateWindowValue());
 
   return true;
 }

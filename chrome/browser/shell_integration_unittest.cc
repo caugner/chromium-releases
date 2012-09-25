@@ -139,7 +139,7 @@ TEST(ShellIntegrationTest, GetDesktopShortcutTemplate) {
   }
 }
 
-TEST(ShellIntegrationTest, GetDesktopShortcutFilename) {
+TEST(ShellIntegrationTest, GetWebShortcutFilename) {
   const struct {
     const FilePath::CharType* path;
     const char* url;
@@ -156,7 +156,7 @@ TEST(ShellIntegrationTest, GetDesktopShortcutFilename) {
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(test_cases); i++) {
     EXPECT_EQ(std::string(chrome::kBrowserProcessExecutableName) + "-" +
               test_cases[i].path,
-              ShellIntegrationLinux::GetDesktopShortcutFilename(
+              ShellIntegrationLinux::GetWebShortcutFilename(
                   GURL(test_cases[i].url)).value()) <<
         " while testing " << test_cases[i].url;
   }
@@ -361,7 +361,8 @@ TEST(ShellIntegrationTest, GetDesktopFileContents) {
             false,
             FilePath(),
             ASCIIToUTF16(test_cases[i].title),
-            test_cases[i].icon_name));
+            test_cases[i].icon_name,
+            FilePath()));
   }
 }
 #elif defined(OS_WIN)

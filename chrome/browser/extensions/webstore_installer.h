@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_WEBSTORE_INSTALLER_H_
 #define CHROME_BROWSER_EXTENSIONS_WEBSTORE_INSTALLER_H_
-#pragma once
 
 #include <string>
 #include <vector>
@@ -13,6 +12,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/values.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_id.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/notification_observer.h"
@@ -27,10 +27,13 @@ namespace content {
 class NavigationController;
 }
 
+namespace extensions {
+
 // Downloads and installs extensions from the web store.
-class WebstoreInstaller : public content::NotificationObserver,
-                          public content::DownloadItem::Observer,
-                          public base::RefCounted<WebstoreInstaller> {
+class WebstoreInstaller :public content::NotificationObserver,
+                         public content::DownloadItem::Observer,
+                         public base::RefCountedThreadSafe<
+  WebstoreInstaller, content::BrowserThread::DeleteOnUIThread> {
  public:
   enum Flag {
     FLAG_NONE = 0,
@@ -45,6 +48,9 @@ class WebstoreInstaller : public content::NotificationObserver,
     virtual void OnExtensionInstallSuccess(const std::string& id) = 0;
     virtual void OnExtensionInstallFailure(const std::string& id,
                                            const std::string& error) = 0;
+
+   protected:
+    virtual ~Delegate() {}
   };
 
   // Contains information about what parts of the extension install process can
@@ -82,6 +88,9 @@ class WebstoreInstaller : public content::NotificationObserver,
     // so there's no need to show it again.
     bool skip_install_dialog;
 
+    // Whether we should record an oauth2 grant for the extensions.
+    bool record_oauth2_grant;
+
    private:
     Approval();
   };
@@ -118,7 +127,9 @@ class WebstoreInstaller : public content::NotificationObserver,
   static void SetDownloadDirectoryForTests(FilePath* directory);
 
  private:
-  friend class base::RefCounted<WebstoreInstaller>;
+  friend struct content::BrowserThread::DeleteOnThread<
+   content::BrowserThread::UI>;
+  friend class base::DeleteHelper<WebstoreInstaller>;
   virtual ~WebstoreInstaller();
 
   // DownloadManager::DownloadUrl callback.
@@ -153,5 +164,7 @@ class WebstoreInstaller : public content::NotificationObserver,
   scoped_ptr<Approval> approval_;
   GURL download_url_;
 };
+
+}  // namespace extensions
 
 #endif  // CHROME_BROWSER_EXTENSIONS_WEBSTORE_INSTALLER_H_

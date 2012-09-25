@@ -4,7 +4,6 @@
 
 #ifndef UI_BASE_X_X11_UTIL_H_
 #define UI_BASE_X_X11_UTIL_H_
-#pragma once
 
 // This file declares utility functions for X11 (Linux only).
 //
@@ -121,8 +120,14 @@ UI_EXPORT GtkWindow* GetGtkWindowFromX11Window(XID xid);
 UI_EXPORT void* GetVisualFromGtkWidget(GtkWidget* widget);
 #endif  // defined(TOOLKIT_GTK)
 
+enum HideTitlebarWhenMaximized {
+  SHOW_TITLEBAR_WHEN_MAXIMIZED = 0,
+  HIDE_TITLEBAR_WHEN_MAXIMIZED = 1,
+};
 // Sets _GTK_HIDE_TITLEBAR_WHEN_MAXIMIZED on |window|.
-UI_EXPORT void SetHideTitlebarWhenMaximizedProperty(XID window);
+UI_EXPORT void SetHideTitlebarWhenMaximizedProperty(
+    XID window,
+    HideTitlebarWhenMaximized property);
 
 // Return the number of bits-per-pixel for a pixmap of the given depth
 UI_EXPORT int BitsPerPixelForPixmapDepth(Display* display, int depth);

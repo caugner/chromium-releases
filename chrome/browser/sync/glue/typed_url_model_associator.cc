@@ -138,9 +138,9 @@ bool TypedUrlModelAssociator::ShouldIgnoreUrl(
   return true;
 }
 
-SyncError TypedUrlModelAssociator::AssociateModels() {
+syncer::SyncError TypedUrlModelAssociator::AssociateModels() {
   ClearErrorStats();
-  SyncError error = DoAssociateModels();
+  syncer::SyncError error = DoAssociateModels();
   UMA_HISTOGRAM_PERCENTAGE("Sync.TypedUrlModelAssociationErrors",
                            GetErrorPercentage());
   ClearErrorStats();
@@ -156,12 +156,12 @@ int TypedUrlModelAssociator::GetErrorPercentage() const {
   return num_db_accesses_ ? (100 * num_db_errors_ / num_db_accesses_) : 0;
 }
 
-SyncError TypedUrlModelAssociator::DoAssociateModels() {
+syncer::SyncError TypedUrlModelAssociator::DoAssociateModels() {
   DVLOG(1) << "Associating TypedUrl Models";
-  SyncError error;
+  syncer::SyncError error;
   DCHECK(expected_loop_ == MessageLoop::current());
   if (IsAbortPending())
-    return SyncError();
+    return syncer::SyncError();
   history::URLRows typed_urls;
   ++num_db_accesses_;
   if (!history_backend_->GetAllTypedURLs(&typed_urls)) {
@@ -177,7 +177,7 @@ SyncError TypedUrlModelAssociator::DoAssociateModels() {
   for (history::URLRows::iterator ix = typed_urls.begin();
        ix != typed_urls.end();) {
     if (IsAbortPending())
-      return SyncError();
+      return syncer::SyncError();
     DCHECK_EQ(0U, visit_vectors.count(ix->id()));
     if (!FixupURLAndGetVisits(&(*ix), &(visit_vectors[ix->id()])) ||
         ShouldIgnoreUrl(*ix, visit_vectors[ix->id()])) {
@@ -194,10 +194,10 @@ SyncError TypedUrlModelAssociator::DoAssociateModels() {
   TypedUrlUpdateVector updated_urls;
 
   {
-    sync_api::WriteTransaction trans(FROM_HERE, sync_service_->GetUserShare());
-    sync_api::ReadNode typed_url_root(&trans);
+    syncer::WriteTransaction trans(FROM_HERE, sync_service_->GetUserShare());
+    syncer::ReadNode typed_url_root(&trans);
     if (typed_url_root.InitByTagLookup(kTypedUrlTag) !=
-            sync_api::BaseNode::INIT_OK) {
+            syncer::BaseNode::INIT_OK) {
       return error_handler_->CreateAndUploadError(
           FROM_HERE,
           "Server did not create the top-level typed_url node. We "
@@ -209,15 +209,15 @@ SyncError TypedUrlModelAssociator::DoAssociateModels() {
     for (history::URLRows::iterator ix = typed_urls.begin();
          ix != typed_urls.end(); ++ix) {
       if (IsAbortPending())
-        return SyncError();
+        return syncer::SyncError();
       std::string tag = ix->url().spec();
       // Empty URLs should be filtered out by ShouldIgnoreUrl() previously.
       DCHECK(!tag.empty());
       history::VisitVector& visits = visit_vectors[ix->id()];
 
-      sync_api::ReadNode node(&trans);
-      if (node.InitByClientTagLookup(syncable::TYPED_URLS, tag) ==
-              sync_api::BaseNode::INIT_OK) {
+      syncer::ReadNode node(&trans);
+      if (node.InitByClientTagLookup(syncer::TYPED_URLS, tag) ==
+              syncer::BaseNode::INIT_OK) {
         // Same URL exists in sync data and in history data - compare the
         // entries to see if there's any difference.
         sync_pb::TypedUrlSpecifics typed_url(
@@ -235,9 +235,9 @@ SyncError TypedUrlModelAssociator::DoAssociateModels() {
         MergeResult difference =
             MergeUrls(typed_url, *ix, &visits, &new_url, &added_visits);
         if (difference & DIFF_UPDATE_NODE) {
-          sync_api::WriteNode write_node(&trans);
-          if (write_node.InitByClientTagLookup(syncable::TYPED_URLS, tag) !=
-                  sync_api::BaseNode::INIT_OK) {
+          syncer::WriteNode write_node(&trans);
+          if (write_node.InitByClientTagLookup(syncer::TYPED_URLS, tag) !=
+                  syncer::BaseNode::INIT_OK) {
             return error_handler_->CreateAndUploadError(
                 FROM_HERE,
                 "Failed to edit typed_url sync node.",
@@ -272,11 +272,11 @@ SyncError TypedUrlModelAssociator::DoAssociateModels() {
         }
       } else {
         // Sync has never seen this URL before.
-        sync_api::WriteNode node(&trans);
-        sync_api::WriteNode::InitUniqueByCreationResult result =
-            node.InitUniqueByCreation(syncable::TYPED_URLS,
+        syncer::WriteNode node(&trans);
+        syncer::WriteNode::InitUniqueByCreationResult result =
+            node.InitUniqueByCreation(syncer::TYPED_URLS,
                                       typed_url_root, tag);
-        if (result != sync_api::WriteNode::INIT_SUCCESS) {
+        if (result != syncer::WriteNode::INIT_SUCCESS) {
           return error_handler_->CreateAndUploadError(
               FROM_HERE,
               "Failed to create typed_url sync node: " + tag,
@@ -294,12 +294,12 @@ SyncError TypedUrlModelAssociator::DoAssociateModels() {
     // the history DB, so we can add them to our local history DB.
     std::vector<int64> obsolete_nodes;
     int64 sync_child_id = typed_url_root.GetFirstChildId();
-    while (sync_child_id != sync_api::kInvalidId) {
+    while (sync_child_id != syncer::kInvalidId) {
       if (IsAbortPending())
-        return SyncError();
-      sync_api::ReadNode sync_child_node(&trans);
+        return syncer::SyncError();
+      syncer::ReadNode sync_child_node(&trans);
       if (sync_child_node.InitByIdLookup(sync_child_id) !=
-              sync_api::BaseNode::INIT_OK) {
+              syncer::BaseNode::INIT_OK) {
         return error_handler_->CreateAndUploadError(
             FROM_HERE,
             "Failed to fetch child node.",
@@ -357,9 +357,9 @@ SyncError TypedUrlModelAssociator::DoAssociateModels() {
            it != obsolete_nodes.end();
            ++it) {
           if (IsAbortPending())
-            return SyncError();
-        sync_api::WriteNode sync_node(&trans);
-        if (sync_node.InitByIdLookup(*it) != sync_api::BaseNode::INIT_OK) {
+            return syncer::SyncError();
+        syncer::WriteNode sync_node(&trans);
+        if (sync_node.InitByIdLookup(*it) != syncer::BaseNode::INIT_OK) {
           return error_handler_->CreateAndUploadError(
               FROM_HERE,
               "Failed to fetch obsolete node.",
@@ -435,21 +435,21 @@ sync_pb::TypedUrlSpecifics TypedUrlModelAssociator::FilterExpiredVisits(
 }
 
 bool TypedUrlModelAssociator::DeleteAllNodes(
-    sync_api::WriteTransaction* trans) {
+    syncer::WriteTransaction* trans) {
   DCHECK(expected_loop_ == MessageLoop::current());
 
   // Just walk through all our child nodes and delete them.
-  sync_api::ReadNode typed_url_root(trans);
+  syncer::ReadNode typed_url_root(trans);
   if (typed_url_root.InitByTagLookup(kTypedUrlTag) !=
-          sync_api::BaseNode::INIT_OK) {
+          syncer::BaseNode::INIT_OK) {
     LOG(ERROR) << "Could not lookup root node";
     return false;
   }
   int64 sync_child_id = typed_url_root.GetFirstChildId();
-  while (sync_child_id != sync_api::kInvalidId) {
-    sync_api::WriteNode sync_child_node(trans);
+  while (sync_child_id != syncer::kInvalidId) {
+    syncer::WriteNode sync_child_node(trans);
     if (sync_child_node.InitByIdLookup(sync_child_id) !=
-            sync_api::BaseNode::INIT_OK) {
+            syncer::BaseNode::INIT_OK) {
       LOG(ERROR) << "Typed url node lookup failed.";
       return false;
     }
@@ -459,8 +459,8 @@ bool TypedUrlModelAssociator::DeleteAllNodes(
   return true;
 }
 
-SyncError TypedUrlModelAssociator::DisassociateModels() {
-  return SyncError();
+syncer::SyncError TypedUrlModelAssociator::DisassociateModels() {
+  return syncer::SyncError();
 }
 
 void TypedUrlModelAssociator::AbortAssociation() {
@@ -476,9 +476,9 @@ bool TypedUrlModelAssociator::IsAbortPending() {
 bool TypedUrlModelAssociator::SyncModelHasUserCreatedNodes(bool* has_nodes) {
   DCHECK(has_nodes);
   *has_nodes = false;
-  sync_api::ReadTransaction trans(FROM_HERE, sync_service_->GetUserShare());
-  sync_api::ReadNode sync_node(&trans);
-  if (sync_node.InitByTagLookup(kTypedUrlTag) != sync_api::BaseNode::INIT_OK) {
+  syncer::ReadTransaction trans(FROM_HERE, sync_service_->GetUserShare());
+  syncer::ReadNode sync_node(&trans);
+  if (sync_node.InitByTagLookup(kTypedUrlTag) != syncer::BaseNode::INIT_OK) {
     LOG(ERROR) << "Server did not create the top-level typed_url node. We "
                << "might be running against an out-of-date server.";
     return false;
@@ -661,7 +661,7 @@ TypedUrlModelAssociator::MergeResult TypedUrlModelAssociator::MergeUrls(
 void TypedUrlModelAssociator::WriteToSyncNode(
     const history::URLRow& url,
     const history::VisitVector& visits,
-    sync_api::WriteNode* node) {
+    syncer::WriteNode* node) {
   sync_pb::TypedUrlSpecifics typed_url;
   WriteToTypedUrlSpecifics(url, visits, &typed_url);
   node->SetTypedUrlSpecifics(typed_url);
@@ -821,10 +821,10 @@ void TypedUrlModelAssociator::UpdateURLRowFromTypedUrlSpecifics(
 
 bool TypedUrlModelAssociator::CryptoReadyIfNecessary() {
   // We only access the cryptographer while holding a transaction.
-  sync_api::ReadTransaction trans(FROM_HERE, sync_service_->GetUserShare());
-  const syncable::ModelTypeSet encrypted_types =
-      sync_api::GetEncryptedTypes(&trans);
-  return !encrypted_types.Has(syncable::TYPED_URLS) ||
+  syncer::ReadTransaction trans(FROM_HERE, sync_service_->GetUserShare());
+  const syncer::ModelTypeSet encrypted_types =
+      syncer::GetEncryptedTypes(&trans);
+  return !encrypted_types.Has(syncer::TYPED_URLS) ||
          sync_service_->IsCryptographerReady(&trans);
 }
 

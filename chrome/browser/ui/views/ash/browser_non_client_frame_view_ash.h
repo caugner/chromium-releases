@@ -4,13 +4,16 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_ASH_BROWSER_NON_CLIENT_FRAME_VIEW_ASH_H_
 #define CHROME_BROWSER_UI_VIEWS_ASH_BROWSER_NON_CLIENT_FRAME_VIEW_ASH_H_
-#pragma once
 
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
+#include "chrome/browser/ui/search/search_types.h"
+#include "chrome/browser/ui/search/toolbar_search_animator_observer.h"
 #include "chrome/browser/ui/views/frame/browser_non_client_frame_view.h"
-#include "chrome/browser/ui/views/tab_icon_view.h"
+#include "chrome/browser/ui/views/tab_icon_view_model.h"
 #include "ui/views/controls/button/button.h"  // ButtonListener
+
+class TabIconView;
 
 namespace ash {
 class FramePainter;
@@ -19,9 +22,11 @@ namespace views {
 class ImageButton;
 }
 
-class BrowserNonClientFrameViewAsh : public BrowserNonClientFrameView,
-                                     public views::ButtonListener,
-                                     public TabIconView::TabIconViewModel {
+class BrowserNonClientFrameViewAsh
+    : public BrowserNonClientFrameView,
+      public views::ButtonListener,
+      public chrome::TabIconViewModel,
+      public chrome::search::ToolbarSearchAnimatorObserver {
  public:
   static const char kViewClassName[];
 
@@ -32,8 +37,7 @@ class BrowserNonClientFrameViewAsh : public BrowserNonClientFrameView,
 
   // BrowserNonClientFrameView overrides:
   virtual gfx::Rect GetBoundsForTabStrip(views::View* tabstrip) const OVERRIDE;
-  virtual int GetHorizontalTabStripVerticalOffset(
-      bool force_restored) const OVERRIDE;
+  virtual TabStripInsets GetTabStripInsets(bool force_restored) const OVERRIDE;
   virtual void UpdateThrobber(bool running) OVERRIDE;
 
   // views::NonClientFrameView overrides:
@@ -58,9 +62,14 @@ class BrowserNonClientFrameViewAsh : public BrowserNonClientFrameView,
   virtual void ButtonPressed(views::Button* sender,
                              const views::Event& event) OVERRIDE;
 
-  // Overridden from TabIconView::TabIconViewModel:
+  // Overridden from chrome::TabIconViewModel:
   virtual bool ShouldTabIconViewAnimate() const OVERRIDE;
   virtual gfx::ImageSkia GetFaviconForTabIconView() OVERRIDE;
+
+  // Overridden from chrome::search::ToolbarSearchAnimatorObserver:
+  virtual void OnToolbarBackgroundAnimatorProgressed() OVERRIDE;
+  virtual void OnToolbarBackgroundAnimatorCanceled(
+      TabContents* tab_contents) OVERRIDE;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(BrowserNonClientFrameViewAshTest, UseShortHeader);
@@ -75,7 +84,8 @@ class BrowserNonClientFrameViewAsh : public BrowserNonClientFrameView,
   void LayoutAvatar();
 
   void PaintTitleBar(gfx::Canvas* canvas);
-  void PaintToolbarBackground(gfx::Canvas* canvas);
+  void PaintToolbarBackground(gfx::Canvas* canvas,
+                              chrome::search::Mode::Type mode);
 
   // Windows without a toolbar need to draw their own line under the header,
   // above the content area.

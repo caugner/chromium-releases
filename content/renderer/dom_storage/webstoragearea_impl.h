@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_RENDERER_DOM_STORAGE_WEBSTORAGEAREA_IMPL_H_
 #define CONTENT_RENDERER_DOM_STORAGE_WEBSTORAGEAREA_IMPL_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
@@ -34,6 +33,7 @@ class WebStorageAreaImpl : public WebKit::WebStorageArea {
   virtual void removeItem(
       const WebKit::WebString& key, const WebKit::WebURL& page_url);
   virtual void clear(const WebKit::WebURL& url);
+  virtual size_t memoryBytesUsedByCache() const;
 
  private:
   int connection_id_;

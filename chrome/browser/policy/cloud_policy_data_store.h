@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_POLICY_CLOUD_POLICY_DATA_STORE_H_
 #define CHROME_BROWSER_POLICY_CLOUD_POLICY_DATA_STORE_H_
-#pragma once
 
 #include <string>
 
@@ -78,6 +77,7 @@ class CloudPolicyDataStore {
   void set_known_machine_id(bool known_machine_id);
   void set_policy_fetching_enabled(bool policy_fetching_enabled);
   void set_device_mode(DeviceMode device_mode);
+  void set_reregister(bool reregister);
 
 #if defined(OS_CHROMEOS)
   void set_device_status_collector(DeviceStatusCollector* collector);
@@ -100,6 +100,7 @@ class CloudPolicyDataStore {
   UserAffiliation user_affiliation() const;
   bool known_machine_id() const;
   DeviceMode device_mode() const;
+  bool reregister() const;
 
   void AddObserver(Observer* observer);
   void RemoveObserver(Observer* observer);
@@ -131,6 +132,7 @@ class CloudPolicyDataStore {
   std::string machine_model_;
   std::string machine_id_;
   bool known_machine_id_;
+  bool reregister_;
 
   bool token_cache_loaded_;
   bool policy_fetching_enabled_;

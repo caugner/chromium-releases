@@ -4,11 +4,9 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_MENU_CONTROLLER_H_
 #define CHROME_BROWSER_UI_COCOA_MENU_CONTROLLER_H_
-#pragma once
 
 #import <Cocoa/Cocoa.h>
 
-#import "base/mac/cocoa_protocols.h"
 #include "base/memory/scoped_nsobject.h"
 
 namespace ui {

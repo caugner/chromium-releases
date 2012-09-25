@@ -4,6 +4,7 @@
 
 #include "chrome/browser/spellchecker/spelling_service_client.h"
 
+#include "base/command_line.h"
 #include "base/json/json_reader.h"
 #include "base/json/string_escape.h"
 #include "base/logging.h"
@@ -13,11 +14,12 @@
 #include "base/values.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/spellcheck_result.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/common/url_fetcher.h"
 #include "net/base/load_flags.h"
+#include "net/url_request/url_fetcher.h"
 #include "unicode/uloc.h"
 
 #if defined(GOOGLE_CHROME_BUILD)
@@ -72,7 +74,7 @@ bool SpellingServiceClient::RequestTextCheck(
     uloc_getLanguage(id, language, arraysize(language), &error);
     country = uloc_getISO3Country(id);
   }
-  if (type == SPELLCHECK && base::strcasecmp(language, ULOC_ENGLISH))
+  if (!IsAvailable(profile, type))
     return false;
 
   // Format the JSON request to be sent to the Spelling service.
@@ -112,6 +114,32 @@ bool SpellingServiceClient::RequestTextCheck(
   return true;
 }
 
+bool SpellingServiceClient::IsAvailable(Profile* profile, ServiceType type) {
+  const PrefService* pref = profile->GetPrefs();
+  if (!pref->GetBoolean(prefs::kEnableSpellCheck) ||
+      !pref->GetBoolean(prefs::kSpellCheckUseSpellingService))
+    return false;
+
+  // The spellchecking service should be avilable only when asynchronous
+  // spellchecking is enabled because this service depends on it.
+  const CommandLine* command_line = CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(switches::kDisableAsynchronousSpellChecking))
+    return type == SUGGEST;
+
+  // Enable the suggest service only on languages not supported by the
+  // spellcheck service. When this client calls the spellcheck service, it
+  // returns not only spellcheck results but also spelling suggestions provided
+  // by the suggest service. That is, it is not useful to use the suggest
+  // service when this client can use the spellcheck service.
+  std::string locale = pref->GetString(prefs::kSpellCheckDictionary);
+#if defined(OS_MACOSX)
+  bool spellcheck_available = locale.empty();
+#else
+  bool spellcheck_available = locale.empty() || !locale.compare(0, 2, "en");
+#endif
+  return type == SUGGEST ? !spellcheck_available : spellcheck_available;
+}
+
 void SpellingServiceClient::OnURLFetchComplete(
     const net::URLFetcher* source) {
   scoped_ptr<net::URLFetcher> clean_up_fetcher(fetcher_.release());
@@ -126,7 +154,7 @@ void SpellingServiceClient::OnURLFetchComplete(
 }
 
 net::URLFetcher* SpellingServiceClient::CreateURLFetcher(const GURL& url) {
-  return content::URLFetcher::Create(url, net::URLFetcher::POST, this);
+  return net::URLFetcher::Create(url, net::URLFetcher::POST, this);
 }
 
 bool SpellingServiceClient::ParseResponse(

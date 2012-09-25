@@ -316,6 +316,10 @@ cr.define('options.network', function() {
       return null;
     },
 
+    canUpdateMenu: function() {
+      return false;
+    },
+
     /**
      * Displays a popup menu.
      */
@@ -329,8 +333,11 @@ cr.define('options.network', function() {
       if (!this.menu_) {
         rebuild = true;
         var existing = $(this.getMenuName_());
-        if (existing)
+        if (existing) {
+          if (this.updateMenu())
+            return;
           closeMenu_();
+        }
         this.menu_ = this.createMenu();
         this.menu_.addEventListener('mousedown', function(e) {
           // Prevent blurring of list, which would close the menu.
@@ -408,9 +415,6 @@ cr.define('options.network', function() {
       if (policyManaged)
         this.showManagedNetworkIndicator();
 
-      // TODO(kevers): Add default icon for VPN when disconnected or in the
-      // process of connecting.
-
       if (activeMenu_ == this.getMenuName_()) {
         // Menu is already showing and needs to be updated. Explicitly calling
         // show menu will force the existing menu to be replaced.  The call
@@ -449,13 +453,13 @@ cr.define('options.network', function() {
           entry.tooltip =
               loadTimeData.getString('dataRoamingDisableToggleTooltip');
         } else {
+          var self = this;
           entry.command = function() {
             options.Preferences.setBooleanPref(
                 'cros.signed.data_roaming_enabled',
                 !enableDataRoaming_);
-            // Force revalidation of the menu the next time it is
-            // displayed.
-            this.menu_ = null;
+            // Force revalidation of the menu the next time it is displayed.
+            self.menu_ = null;
           };
         }
         addendum.push(entry);
@@ -475,31 +479,13 @@ cr.define('options.network', function() {
 
       var networkGroup = this.ownerDocument.createElement('div');
       networkGroup.className = 'network-menu-group';
-      var empty = true;
       list = this.data.networkList;
+      var empty = !list || list.length == 0;
       if (list) {
         for (var i = 0; i < list.length; i++) {
           var data = list[i];
-          if (!data.connected && !data.connecting) {
-            if (data.networkType != Constants.TYPE_ETHERNET) {
-              if (data.networkType == Constants.TYPE_CELLULAR) {
-                // Test if cellular network has an activated data plan.
-                var activate = data.needs_new_plan ||
-                   (data.activation_state !=
-                   Constants.ACTIVATION_STATE_ACTIVATED &&
-                   data.activation_state !=
-                   Constants.ACTIVATION_STATE_ACTIVATING);
-                var cmd = activate ? 'activate' : 'connect';
-                this.createConnectCallback_(networkGroup, data, cmd);
-              } else {
-                this.createConnectCallback_(networkGroup, data);
-              }
-              empty = false;
-            }
-          } else if (data.connected) {
-            addendum.push({label: loadTimeData.getString('networkOptions'),
-                           command: 'options',
-                           data: data});
+          this.createNetworkOptionsCallback_(networkGroup, data);
+          if (data.connected) {
             if (data.networkType == Constants.TYPE_VPN) {
               // Add separator
               addendum.push({});
@@ -507,13 +493,6 @@ cr.define('options.network', function() {
               addendum.push({label: loadTimeData.getString(i18nKey),
                              command: 'disconnect',
                              data: data});
-            }
-            if (data.networkType != Constants.TYPE_ETHERNET) {
-              var onlineMessage = this.ownerDocument.createElement('div');
-              onlineMessage.textContent =
-                  loadTimeData.getString('networkOnline');
-              onlineMessage.className = 'network-menu-header';
-              menu.insertBefore(onlineMessage, menu.firstChild);
             }
           }
         }
@@ -553,9 +532,7 @@ cr.define('options.network', function() {
         for (var i = 0; i < addendum.length; i++) {
           var value = addendum[i];
           if (value.data) {
-            var item = this.createCallback_(menu,
-                                            value.data,
-                                            value.label,
+            var item = this.createCallback_(menu, value.data, value.label,
                                             value.command);
             if (value.tooltip)
               item.title = value.tooltip;
@@ -567,6 +544,80 @@ cr.define('options.network', function() {
         }
       }
       return menu;
+    },
+
+    /**
+     * Determines if a menu can be updated on the fly. Menus that cannot be
+     * updated are fully regenerated using createMenu. The advantage of
+     * updating a menu is that it can preserve ordering of networks avoiding
+     * entries from jumping around after an update.
+     */
+    canUpdateMenu: function() {
+      return this.data_.key == 'wifi' && activeMenu_ == this.getMenuName_();
+    },
+
+    /**
+     * Updates an existing menu.  Updated menus preserve ordering of prior
+     * entries.  During the update process, the ordering may differ from the
+     * preferred ordering as determined by the network library.  If the
+     * ordering becomes potentially out of sync, then the updated menu is
+     * marked for disposal on close.  Reopening the menu will force a
+     * regeneration, which will in turn fix the ordering.
+     * @return {boolean} True if successfully updated.
+     */
+    updateMenu: function() {
+      if (!this.canUpdateMenu())
+        return false;
+      var oldMenu = $(this.getMenuName_());
+      var group = oldMenu.getElementsByClassName('network-menu-group')[0];
+      if (!group)
+        return false;
+      var newMenu = this.createMenu();
+      var discardOnClose = false;
+      var oldNetworkButtons = this.extractNetworkConnectButtons_(oldMenu);
+      var newNetworkButtons = this.extractNetworkConnectButtons_(newMenu);
+      for (var key in oldNetworkButtons) {
+        if (newNetworkButtons[key]) {
+          group.replaceChild(newNetworkButtons[key].button,
+                             oldNetworkButtons[key].button);
+          if (newNetworkButtons[key].index != oldNetworkButtons[key].index)
+            discardOnClose = true;
+          newNetworkButtons[key] = null;
+        } else {
+          // Leave item in list to prevent network items from jumping due to
+          // deletions.
+          oldNetworkButtons[key].disabled = true;
+          discardOnClose = true;
+        }
+      }
+      for (var key in newNetworkButtons) {
+        var entry = newNetworkButtons[key];
+        if (entry) {
+          group.appendChild(entry.button);
+          discardOnClose = true;
+        }
+      }
+      oldMenu.data = {discardOnClose: discardOnClose};
+      return true;
+    },
+
+    /**
+     * Extracts a mapping of network names to menu element and position.
+     * @param {!Element} menu The menu to process.
+     * @return {Object.<string, Element>} Network mapping.
+     * @private
+     */
+    extractNetworkConnectButtons_: function(menu) {
+      var group = menu.getElementsByClassName('network-menu-group')[0];
+      var networkButtons = {};
+      if (!group)
+        return networkButtons;
+      var buttons = group.getElementsByClassName('network-menu-item');
+      for (var i = 0; i < buttons.length; i++) {
+        var label = buttons[i].data.label;
+        networkButtons[label] = {index: i, button: buttons[i]};
+      }
+      return networkButtons;
     },
 
     /**
@@ -605,45 +656,32 @@ cr.define('options.network', function() {
         button.addEventListener('click', callback);
       else
         buttonLabel.classList.add('network-disabled-control');
+
+      button.data = {label: label};
       MenuItem.decorate(button);
       menu.appendChild(button);
       return button;
     },
 
     /**
-     * Adds a menu item for connecting to a network.
-     * @param {!Element} menu Parent menu.
+     * Adds a menu item for showing network details.
+     * @param {!Element} parent The parent element.
      * @param {Object} data Description of the network.
-     * @param {string=} opt_connect Optional connection method.
      * @private
      */
-    createConnectCallback_: function(menu, data, opt_connect) {
-      var cmd = opt_connect ? opt_connect : 'connect';
-      var label = data.networkName;
-      if (cmd == 'activate') {
-        label = loadTimeData.getString('activateNetwork');
-        label = label.replace('$1', data.networkName);
-      }
-      var menuItem = this.createCallback_(menu,
+    createNetworkOptionsCallback_: function(parent, data) {
+      var menuItem = this.createCallback_(parent,
                                           data,
-                                          label,
-                                          cmd);
+                                          data.networkName,
+                                          'options');
       menuItem.style.backgroundImage = url(data.iconURL);
-
       if (data.policyManaged)
         menuItem.appendChild(new ManagedNetworkIndicator());
-
-      var optionsButton = this.ownerDocument.createElement('div');
-      optionsButton.className = 'network-options-button';
-      var type = String(data.networkType);
-      var path = data.servicePath;
-      optionsButton.addEventListener('click', function(event) {
-        event.stopPropagation();
-        chrome.send('networkCommand',
-                    [type, path, 'options']);
-        closeMenu_();
-      });
-      menuItem.appendChild(optionsButton);
+      if (data.connected || data.connecting) {
+        var label = menuItem.getElementsByClassName(
+            'network-menu-item-label')[0];
+        label.classList.add('active-network');
+      }
     }
   };
 
@@ -998,7 +1036,10 @@ cr.define('options.network', function() {
    */
   function closeMenu_() {
     if (activeMenu_) {
-      $(activeMenu_).hidden = true;
+      var menu = $(activeMenu_);
+      menu.hidden = true;
+      if (menu.data && menu.data.discardOnClose)
+        menu.parentNode.removeChild(menu);
       activeMenu_ = null;
     }
   }

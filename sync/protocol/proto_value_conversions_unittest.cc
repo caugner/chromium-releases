@@ -8,7 +8,7 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/values.h"
-#include "sync/internal_api/public/syncable/model_type.h"
+#include "sync/internal_api/public/base/model_type.h"
 #include "sync/protocol/app_notification_specifics.pb.h"
 #include "sync/protocol/app_setting_specifics.pb.h"
 #include "sync/protocol/app_specifics.pb.h"
@@ -27,7 +27,7 @@
 #include "sync/protocol/typed_url_specifics.pb.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace browser_sync {
+namespace syncer {
 namespace {
 
 class ProtoValueConversionsTest : public testing::Test {
@@ -47,7 +47,7 @@ TEST_F(ProtoValueConversionsTest, ProtoChangeCheck) {
   // If this number changes, that means we added or removed a data
   // type.  Don't forget to add a unit test for {New
   // type}SpecificsToValue below.
-  EXPECT_EQ(17, syncable::MODEL_TYPE_COUNT);
+  EXPECT_EQ(17, MODEL_TYPE_COUNT);
 
   // We'd also like to check if we changed any field in our messages.
   // However, that's hard to do: sizeof could work, but it's
@@ -183,7 +183,7 @@ TEST_F(ProtoValueConversionsTest, EntitySpecificsToValue) {
 #undef SET_FIELD
 
   scoped_ptr<DictionaryValue> value(EntitySpecificsToValue(specifics));
-  EXPECT_EQ(syncable::MODEL_TYPE_COUNT - syncable::FIRST_REAL_MODEL_TYPE,
+  EXPECT_EQ(MODEL_TYPE_COUNT - FIRST_REAL_MODEL_TYPE,
             static_cast<int>(value->size()));
 }
 
@@ -192,9 +192,9 @@ namespace {
 // path.
 bool ValueHasSpecifics(const DictionaryValue& value,
                        const std::string& path) {
-  ListValue* entities_list = NULL;
-  DictionaryValue* entry_dictionary = NULL;
-  DictionaryValue* specifics_dictionary = NULL;
+  const ListValue* entities_list = NULL;
+  const DictionaryValue* entry_dictionary = NULL;
+  const DictionaryValue* specifics_dictionary = NULL;
 
   if (!value.GetList(path, &entities_list))
     return false;
@@ -250,4 +250,4 @@ TEST_F(ProtoValueConversionsTest, ClientToServerResponseToValue) {
 }
 
 }  // namespace
-}  // namespace browser_sync
+}  // namespace syncer

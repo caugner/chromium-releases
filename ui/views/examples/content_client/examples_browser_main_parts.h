@@ -4,7 +4,6 @@
 
 #ifndef UI_VIEWS_EXAMPLES_CONTENT_CLIENT_EXAMPLES_BROWSER_MAIN_PARTS_H_
 #define UI_VIEWS_EXAMPLES_CONTENT_CLIENT_EXAMPLES_BROWSER_MAIN_PARTS_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
@@ -17,13 +16,13 @@ class StackingClient;
 }
 
 namespace content {
-
 class ShellBrowserContext;
 struct MainFunctionParams;
 }
 
 namespace views {
 class ViewsDelegate;
+
 namespace examples {
 
 class ExamplesBrowserMainParts : public content::BrowserMainParts {
@@ -44,7 +43,7 @@ class ExamplesBrowserMainParts : public content::BrowserMainParts {
  private:
   scoped_ptr<content::ShellBrowserContext> browser_context_;
 
-  scoped_ptr<views::ViewsDelegate> views_delegate_;
+  scoped_ptr<ViewsDelegate> views_delegate_;
 #if defined(USE_AURA)
   scoped_ptr<aura::client::StackingClient> stacking_client_;
 #endif

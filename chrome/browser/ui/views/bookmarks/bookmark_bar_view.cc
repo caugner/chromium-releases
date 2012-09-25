@@ -15,6 +15,7 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
+#include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/defaults.h"
@@ -27,8 +28,11 @@
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/ui/bookmarks/bookmark_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/view_ids.h"
+#include "chrome/browser/ui/views/bookmarks/bookmark_bar_instructions_view.h"
 #include "chrome/browser/ui/views/bookmarks/bookmark_context_menu.h"
 #include "chrome/browser/ui/views/event_utils.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
@@ -48,8 +52,7 @@
 #include "content/public/common/page_transition_types.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "grit/theme_resources_standard.h"
-#include "grit/ui_resources_standard.h"
+#include "grit/ui_resources.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/animation/slide_animation.h"
 #include "ui/base/dragdrop/drag_utils.h"
@@ -62,6 +65,7 @@
 #include "ui/views/controls/button/menu_button.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/controls/menu/menu_item_view.h"
+#include "ui/views/drag_utils.h"
 #include "ui/views/metrics.h"
 #include "ui/views/view_constants.h"
 #include "ui/views/widget/tooltip_manager.h"
@@ -224,7 +228,7 @@ class BookmarkFolderButton : public views::MenuButton {
       return false;
 
     if (e.IsMouseEvent())
-      return browser::DispositionFromEventFlags(e.flags()) != CURRENT_TAB;
+      return chrome::DispositionFromEventFlags(e.flags()) != CURRENT_TAB;
     return false;
   }
 
@@ -370,7 +374,7 @@ static const gfx::ImageSkia& GetFolderIcon() {
   return *kFolderIcon;
 }
 
-BookmarkBarView::BookmarkBarView(Browser* browser)
+BookmarkBarView::BookmarkBarView(Browser* browser, BrowserView* browser_view)
     : page_navigator_(NULL),
       model_(NULL),
       bookmark_menu_(NULL),
@@ -381,6 +385,7 @@ BookmarkBarView::BookmarkBarView(Browser* browser)
       instructions_(NULL),
       bookmarks_separator_view_(NULL),
       browser_(browser),
+      browser_view_(browser_view),
       infobar_visible_(false),
       throbbing_view_(NULL),
       bookmark_bar_state_(BookmarkBar::SHOW),
@@ -820,15 +825,17 @@ void BookmarkBarView::GetAccessibleState(ui::AccessibleViewState* state) {
 }
 
 void BookmarkBarView::AnimationProgressed(const ui::Animation* animation) {
-  if (browser_)
-    browser_->BookmarkBarSizeChanged(true);
+  // |browser_view_| can be NULL during tests.
+  if (browser_view_)
+    browser_view_->ToolbarSizeChanged(true);
 }
 
 void BookmarkBarView::AnimationEnded(const ui::Animation* animation) {
-  if (browser_)
-    browser_->BookmarkBarSizeChanged(false);
-
-  SchedulePaint();
+  // |browser_view_| can be NULL during tests.
+  if (browser_view_) {
+    browser_view_->ToolbarSizeChanged(true);
+    SchedulePaint();
+  }
 }
 
 void BookmarkBarView::BookmarkMenuDeleted(BookmarkMenuController* controller) {
@@ -839,7 +846,7 @@ void BookmarkBarView::BookmarkMenuDeleted(BookmarkMenuController* controller) {
 }
 
 void BookmarkBarView::ShowImportDialog() {
-  browser_->OpenImportSettingsDialog();
+  chrome::ShowImportDialog(browser_);
 }
 
 void BookmarkBarView::Loaded(BookmarkModel* model, bool ids_reassigned) {
@@ -941,9 +948,10 @@ void BookmarkBarView::WriteDragDataForView(View* sender,
   for (int i = 0; i < GetBookmarkButtonCount(); ++i) {
     if (sender == GetBookmarkButton(i)) {
       views::TextButton* button = GetBookmarkButton(i);
-      gfx::Canvas canvas(button->size(), false);
-      button->PaintButton(&canvas, views::TextButton::PB_FOR_DRAG);
-      drag_utils::SetDragImageOnDataObject(canvas, button->size(), press_pt,
+      scoped_ptr<gfx::Canvas> canvas(
+          views::GetCanvasForDragImage(button->GetWidget(), button->size()));
+      button->PaintButton(canvas.get(), views::TextButton::PB_FOR_DRAG);
+      drag_utils::SetDragImageOnDataObject(*canvas, button->size(), press_pt,
                                            data);
       WriteBookmarkDragData(model_->bookmark_bar_node()->GetChild(i), data);
       return;
@@ -1014,7 +1022,7 @@ void BookmarkBarView::OnMenuButtonClicked(views::View* view,
     node = model_->bookmark_bar_node()->GetChild(button_index);
   }
 
-  bookmark_menu_ = new BookmarkMenuController(browser_->profile(),
+  bookmark_menu_ = new BookmarkMenuController(browser_,
       page_navigator_, GetWidget(), node, start_index);
   bookmark_menu_->set_observer(this);
   bookmark_menu_->RunMenuAt(this, false);
@@ -1033,18 +1041,18 @@ void BookmarkBarView::ButtonPressed(views::Button* sender,
   DCHECK(page_navigator_);
 
   WindowOpenDisposition disposition_from_event_flags =
-      browser::DispositionFromEventFlags(sender->mouse_event_flags());
+      chrome::DispositionFromEventFlags(sender->mouse_event_flags());
 
-  Profile* profile = browser_->profile();
   if (node->is_url()) {
-    RecordAppLaunch(profile, node->url());
+    RecordAppLaunch(browser_->profile(), node->url());
     OpenURLParams params(
         node->url(), Referrer(), disposition_from_event_flags,
         content::PAGE_TRANSITION_AUTO_BOOKMARK, false);
     page_navigator_->OpenURL(params);
   } else {
-    bookmark_utils::OpenAll(GetWidget()->GetNativeWindow(), profile,
-        page_navigator_, node, disposition_from_event_flags);
+    bookmark_utils::OpenAll(
+        GetWidget()->GetNativeWindow(), page_navigator_, node,
+        disposition_from_event_flags);
   }
 
   bookmark_utils::RecordBookmarkLaunch(IsDetached() ?
@@ -1083,10 +1091,10 @@ void BookmarkBarView::ShowContextMenuForView(views::View* source,
   }
   Profile* profile = browser_->profile();
   bool close_on_remove =
-      (parent == profile->GetBookmarkModel()->other_node()) &&
+      (parent == BookmarkModelFactory::GetForProfile(profile)->other_node()) &&
       (parent->child_count() == 1);
-  context_menu_.reset(new BookmarkContextMenu(GetWidget(), profile,
-      browser_->GetActiveWebContents(), parent, nodes, close_on_remove));
+  context_menu_.reset(new BookmarkContextMenu(GetWidget(), browser_, profile,
+    chrome::GetActiveWebContents(browser_), parent, nodes, close_on_remove));
   context_menu_->RunMenuAt(point);
 }
 
@@ -1155,7 +1163,7 @@ void BookmarkBarView::Init() {
   registrar_.Add(this, chrome::NOTIFICATION_BOOKMARK_BUBBLE_SHOWN, ns_source);
   registrar_.Add(this, chrome::NOTIFICATION_BOOKMARK_BUBBLE_HIDDEN, ns_source);
 
-  model_ = profile->GetBookmarkModel();
+  model_ = BookmarkModelFactory::GetForProfile(profile);
   if (model_) {
     model_->AddObserver(this);
     if (model_->IsLoaded())
@@ -1247,8 +1255,9 @@ void BookmarkBarView::ConfigureButton(const BookmarkNode* node,
   button->set_context_menu_controller(this);
   button->set_drag_controller(this);
   if (node->is_url()) {
-    if (model_->GetFavicon(node).width() != 0)
-      button->SetIcon(model_->GetFavicon(node));
+    const gfx::Image& favicon = model_->GetFavicon(node);
+    if (!favicon.IsEmpty())
+      button->SetIcon(*favicon.ToImageSkia());
     else
       button->SetIcon(*kDefaultFavicon);
   }
@@ -1334,7 +1343,7 @@ void BookmarkBarView::ShowDropFolderForNode(const BookmarkNode* node) {
     start_index = GetFirstHiddenNodeIndex();
 
   drop_info_->is_menu_showing = true;
-  bookmark_drop_menu_ = new BookmarkMenuController(browser_->profile(),
+  bookmark_drop_menu_ = new BookmarkMenuController(browser_,
       page_navigator_, GetWidget(), node, start_index);
   bookmark_drop_menu_->set_observer(this);
   bookmark_drop_menu_->RunMenuAt(this, true);

@@ -7,8 +7,8 @@
 
 #include <set>
 
+#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "remoting/host/url_fetcher.h"
 #include "third_party/libjingle/source/talk/p2p/client/httpportallocator.h"
 
 namespace net {
@@ -34,6 +34,7 @@ class HostPortAllocator : public cricket::HttpPortAllocatorBase {
 
   // cricket::HttpPortAllocatorBase overrides.
   virtual cricket::PortAllocatorSession* CreateSessionInternal(
+      const std::string& content_name,
       int component,
       const std::string& ice_username_fragment,
       const std::string& ice_password) OVERRIDE;

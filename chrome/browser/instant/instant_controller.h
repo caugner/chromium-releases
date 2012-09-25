@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_INSTANT_INSTANT_CONTROLLER_H_
 #define CHROME_BROWSER_INSTANT_INSTANT_CONTROLLER_H_
-#pragma once
 
 #include <set>
 #include <string>
@@ -24,7 +23,7 @@
 #include "ui/gfx/rect.h"
 
 struct AutocompleteMatch;
-class InstantDelegate;
+class InstantControllerDelegate;
 class InstantLoader;
 class InstantTest;
 class PrefService;
@@ -62,7 +61,7 @@ class InstantController : public InstantLoaderDelegate {
     SILENT
   };
 
-  InstantController(InstantDelegate* delegate, Mode mode);
+  InstantController(InstantControllerDelegate* delegate, Mode mode);
   virtual ~InstantController();
 
   // Registers instant related preferences.
@@ -129,15 +128,14 @@ class InstantController : public InstantLoaderDelegate {
   // Returns false if there is no instant preview showing.
   bool CommitIfCurrent();
 
-  // Sets InstantController so that when the mouse is released the preview is
-  // committed.
-  void SetCommitOnMouseUp();
+  // Sets InstantController so that when the mouse is released or the
+  // touch-gesture ends, the preview is committed.
+  void SetCommitOnPointerRelease();
 
-  bool commit_on_mouse_up() const { return commit_on_mouse_up_; }
+  bool commit_on_pointer_release() const { return commit_on_pointer_release_; }
 
-  // Returns true if the mouse is down as the result of activating the preview
-  // content.
-  bool IsMouseDownFromActivate();
+  // Calls through to method of same name on loader.
+  bool IsPointerDownFromActivate();
 
   // The autocomplete edit that was initiating the current instant session has
   // lost focus. Commit or discard the preview accordingly.
@@ -180,7 +178,7 @@ class InstantController : public InstantLoaderDelegate {
                                    const string16& text,
                                    InstantCompleteBehavior behavior) OVERRIDE;
   virtual gfx::Rect GetInstantBounds() OVERRIDE;
-  virtual bool ShouldCommitInstantOnMouseUp() OVERRIDE;
+  virtual bool ShouldCommitInstantOnPointerRelease() OVERRIDE;
   virtual void CommitInstantLoader(InstantLoader* loader) OVERRIDE;
   virtual void InstantLoaderDoesntSupportInstant(
       InstantLoader* loader) OVERRIDE;
@@ -230,7 +228,7 @@ class InstantController : public InstantLoaderDelegate {
   // Destroys all loaders scheduled for destruction in |ScheduleForDestroy|.
   void DestroyLoaders();
 
-  InstantDelegate* delegate_;
+  InstantControllerDelegate* delegate_;
 
   // True if |loader_| is ready to be displayed.
   bool is_displayable_;
@@ -244,8 +242,8 @@ class InstantController : public InstantLoaderDelegate {
   // See description above setter.
   gfx::Rect omnibox_bounds_;
 
-  // See description above CommitOnMouseUp.
-  bool commit_on_mouse_up_;
+  // See descritopn above for SetCommitOnPointerRelease.
+  bool commit_on_pointer_release_;
 
   // See description above getter.
   content::PageTransition last_transition_type_;

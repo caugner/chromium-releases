@@ -4,18 +4,16 @@
 
 #ifndef CHROME_BROWSER_UI_STARTUP_OBSOLETE_OS_PROMPT_H_
 #define CHROME_BROWSER_UI_STARTUP_OBSOLETE_OS_PROMPT_H_
-#pragma once
 
 #include "build/build_config.h"
 
 class Browser;
 class PrefService;
 
-namespace browser {
+namespace chrome {
 
 #if defined(OS_MACOSX)
-// Registers the Mac-specific preference about when to show obsolete OS
-// prompts.
+// Registers the Mac-specific preference about when to show obsolete OS prompts.
 void RegisterObsoleteOSInfobarPrefs(PrefService* local_state);
 #endif
 
@@ -23,6 +21,6 @@ void RegisterObsoleteOSInfobarPrefs(PrefService* local_state);
 // unsupported operating system.
 void ShowObsoleteOSPrompt(Browser* browser);
 
-}  // namespace browser
+}  // namespace chrome
 
 #endif  // CHROME_BROWSER_UI_STARTUP_OBSOLETE_OS_PROMPT_H_

@@ -8,8 +8,10 @@
 #include <deque>
 #include <list>
 #include <map>
+#include <utility>
 
 #include "media/base/pipeline_status.h"
+#include "media/base/demuxer_stream.h"
 #include "media/base/video_decoder.h"
 #include "media/video/video_decode_accelerator.h"
 
@@ -65,7 +67,6 @@ class MEDIA_EXPORT GpuVideoDecoder
   virtual void Read(const ReadCB& read_cb) OVERRIDE;
   virtual void Reset(const base::Closure& closure) OVERRIDE;
   virtual void Stop(const base::Closure& closure) OVERRIDE;
-  virtual const gfx::Size& natural_size() OVERRIDE;
   virtual bool HasAlpha() const OVERRIDE;
   virtual void PrepareForShutdownHack() OVERRIDE;
 
@@ -101,7 +102,8 @@ class MEDIA_EXPORT GpuVideoDecoder
   void EnsureDemuxOrDecode();
 
   // Callback to pass to demuxer_stream_->Read() for receiving encoded bits.
-  void RequestBufferDecode(const scoped_refptr<DecoderBuffer>& buffer);
+  void RequestBufferDecode(DemuxerStream::Status status,
+                           const scoped_refptr<DecoderBuffer>& buffer);
 
   // Enqueue a frame for later delivery (or drop it on the floor if a
   // vda->Reset() is in progress) and trigger out-of-line delivery of the oldest
@@ -114,10 +116,18 @@ class MEDIA_EXPORT GpuVideoDecoder
   // Indicate the picturebuffer can be reused by the decoder.
   void ReusePictureBuffer(int64 picture_buffer_id);
 
-  void RecordBufferTimeData(
+  void RecordBufferData(
       const BitstreamBuffer& bitstream_buffer, const Buffer& buffer);
-  void GetBufferTimeData(
-      int32 id, base::TimeDelta* timestamp, base::TimeDelta* duration);
+  void GetBufferData(int32 id, base::TimeDelta* timetamp,
+                     gfx::Size* natural_size);
+
+  // Set |vda_| and |weak_vda_| on the VDA thread (in practice the render
+  // thread).
+  void SetVDA(VideoDecodeAccelerator* vda);
+
+  // Call VDA::Destroy() on |vda_loop_proxy_| ensuring that |this| outlives the
+  // Destroy() call.
+  void DestroyVDA();
 
   // A shared memory segment and its allocated size.
   struct SHMBuffer {
@@ -136,14 +146,6 @@ class MEDIA_EXPORT GpuVideoDecoder
 
   StatisticsCB statistics_cb_;
 
-  // TODO(scherkus): I think this should be calculated by VideoRenderers based
-  // on information provided by VideoDecoders (i.e., aspect ratio).
-  gfx::Size natural_size_;
-
-  // Frame duration specified in the video stream's configuration, or 0 if not
-  // present.
-  base::TimeDelta config_frame_duration_;
-
   // Pointer to the demuxer stream that will feed us compressed buffers.
   scoped_refptr<DemuxerStream> demuxer_stream_;
 
@@ -158,8 +160,11 @@ class MEDIA_EXPORT GpuVideoDecoder
 
   scoped_refptr<Factories> factories_;
 
-  // Populated during Initialize() (on success) and unchanged thereafter.
-  scoped_refptr<VideoDecodeAccelerator> vda_;
+  // Populated during Initialize() via SetVDA() (on success) and unchanged
+  // until an error occurs
+  scoped_ptr<VideoDecodeAccelerator> vda_;
+  // Used to post tasks from the GVD thread to the VDA thread safely.
+  base::WeakPtr<VideoDecodeAccelerator> weak_vda_;
 
   // Callbacks that are !is_null() only during their respective operation being
   // asynchronously executed.
@@ -189,14 +194,15 @@ class MEDIA_EXPORT GpuVideoDecoder
   // The texture target used for decoded pictures.
   uint32 decoder_texture_target_;
 
-  struct BufferTimeData {
-    BufferTimeData(int32 bbid, base::TimeDelta ts, base::TimeDelta dur);
-    ~BufferTimeData();
+  struct BufferData {
+    BufferData(int32 bbid, base::TimeDelta ts,
+               const gfx::Size& natural_size);
+    ~BufferData();
     int32 bitstream_buffer_id;
     base::TimeDelta timestamp;
-    base::TimeDelta duration;
+    gfx::Size natural_size;
   };
-  std::list<BufferTimeData> input_buffer_time_data_;
+  std::list<BufferData> input_buffer_data_;
 
   // picture_buffer_id and the frame wrapping the corresponding Picture, for
   // frames that have been decoded but haven't been requested by a Read() yet.

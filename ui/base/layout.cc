@@ -4,11 +4,19 @@
 
 #include "ui/base/layout.h"
 
+#include <cmath>
+#include <limits>
+
 #include "base/basictypes.h"
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "build/build_config.h"
 #include "ui/base/ui_base_switches.h"
+
+#if defined(USE_AURA) && !defined(OS_WIN)
+#include "ui/aura/root_window.h"
+#include "ui/compositor/compositor.h"
+#endif  // defined(USE_AURA) && !defined(OS_WIN)
 
 #if defined(USE_AURA) && defined(USE_X11)
 #include "ui/base/touch/touch_factory.h"
@@ -68,8 +76,9 @@ bool UseTouchOptimizedUI() {
 }
 
 const float kScaleFactorScales[] = {1.0, 2.0};
+const size_t kScaleFactorScalesLength = arraysize(kScaleFactorScales);
 
-}
+}  // namespace
 
 namespace ui {
 
@@ -90,8 +99,33 @@ DisplayLayout GetDisplayLayout() {
 #endif
 }
 
+ScaleFactor GetScaleFactorFromScale(float scale) {
+  size_t closest_match = 0;
+  float smallest_diff =  std::numeric_limits<float>::max();
+  for (size_t i = 0; i < kScaleFactorScalesLength; ++i) {
+    float diff = std::abs(kScaleFactorScales[i] - scale);
+    if (diff < smallest_diff) {
+      closest_match = i;
+      smallest_diff = diff;
+    }
+  }
+  return static_cast<ui::ScaleFactor>(closest_match);
+}
+
 float GetScaleFactorScale(ScaleFactor scale_factor) {
   return kScaleFactorScales[scale_factor];
 }
+
+#if !defined(OS_MACOSX)
+ScaleFactor GetScaleFactorForNativeView(gfx::NativeView view) {
+#if defined(USE_AURA) && !defined(OS_WIN)
+  return GetScaleFactorFromScale(
+      view->GetRootWindow()->compositor()->device_scale_factor());
+#else
+  NOTIMPLEMENTED();
+  return SCALE_FACTOR_NONE;
+#endif
+}
+#endif  // !defined(OS_MACOSX)
 
 }  // namespace ui

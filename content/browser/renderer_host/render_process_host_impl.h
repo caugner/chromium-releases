@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_BROWSER_RENDERER_HOST_BROWSER_RENDER_PROCESS_HOST_IMPL_H_
 #define CONTENT_BROWSER_RENDERER_HOST_BROWSER_RENDER_PROCESS_HOST_IMPL_H_
-#pragma once
 
 #include <map>
 #include <queue>
@@ -12,7 +11,6 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/process.h"
-#include "base/synchronization/waitable_event_watcher.h"
 #include "base/timer.h"
 #include "content/browser/child_process_launcher.h"
 #include "content/common/content_export.h"
@@ -21,15 +19,11 @@
 #include "ui/surface/transport_dib.h"
 
 class CommandLine;
-class GpuMessageFilter;
-class RenderWidgetHelper;
-
-namespace base {
-class WaitableEvent;
-}
 
 namespace content {
+class GpuMessageFilter;
 class RendererMainThread;
+class RenderWidgetHelper;
 class RenderWidgetHost;
 class RenderWidgetHostImpl;
 
@@ -49,10 +43,9 @@ class RenderWidgetHostImpl;
 // communicate through the two process objects.
 class CONTENT_EXPORT RenderProcessHostImpl
     : public RenderProcessHost,
-      public ChildProcessLauncher::Client,
-      public base::WaitableEventWatcher::Delegate {
+      public ChildProcessLauncher::Client {
  public:
-  explicit RenderProcessHostImpl(BrowserContext* browser_context);
+  RenderProcessHostImpl(BrowserContext* browser_context, bool is_guest);
   virtual ~RenderProcessHostImpl();
 
   // RenderProcessHost implementation (public portion).
@@ -69,6 +62,7 @@ class CONTENT_EXPORT RenderProcessHostImpl
   virtual void WidgetRestored() OVERRIDE;
   virtual void WidgetHidden() OVERRIDE;
   virtual int VisibleWidgetCount() const OVERRIDE;
+  virtual bool IsGuest() const OVERRIDE;
   virtual bool FastShutdownIfPossible() OVERRIDE;
   virtual void DumpHandles() OVERRIDE;
   virtual base::ProcessHandle GetHandle() OVERRIDE;
@@ -94,6 +88,7 @@ class CONTENT_EXPORT RenderProcessHostImpl
   virtual bool FastShutdownStarted() const OVERRIDE;
   virtual base::TimeDelta GetChildProcessIdleTime() const OVERRIDE;
   virtual void SurfaceUpdated(int32 surface_id) OVERRIDE;
+  virtual void ResumeRequestsForView(int route_id) OVERRIDE;
 
   // IPC::Sender via RenderProcessHost.
   virtual bool Send(IPC::Message* msg) OVERRIDE;
@@ -105,10 +100,6 @@ class CONTENT_EXPORT RenderProcessHostImpl
 
   // ChildProcessLauncher::Client implementation.
   virtual void OnProcessLaunched() OVERRIDE;
-
-  // base::WaitableEventWatcher::Delegate implementation.
-  virtual void OnWaitableEventSignaled(
-      base::WaitableEvent* waitable_event) OVERRIDE;
 
   // Call this function when it is evident that the child process is actively
   // performing some operation, for example if we just received an IPC message.
@@ -130,6 +121,32 @@ class CONTENT_EXPORT RenderProcessHostImpl
   static bool IsSuitableHost(RenderProcessHost* host,
                              BrowserContext* browser_context,
                              const GURL& site_url);
+
+  // Returns whether the process-per-site model is in use (globally or just for
+  // the current site), in which case we should ensure there is only one
+  // RenderProcessHost per site for the entire browser context.
+  static bool ShouldUseProcessPerSite(BrowserContext* browser_context,
+                                      const GURL& url);
+
+  // Returns an existing RenderProcessHost for |url| in |browser_context|,
+  // if one exists.  Otherwise a new RenderProcessHost should be created and
+  // registered using RegisterProcessHostForSite().
+  // This should only be used for process-per-site mode, which can be enabled
+  // globally with a command line flag or per-site, as determined by
+  // SiteInstanceImpl::ShouldUseProcessPerSite.
+  static RenderProcessHost* GetProcessHostForSite(
+      BrowserContext* browser_context,
+      const GURL& url);
+
+  // Registers the given |process| to be used for any instance of |url|
+  // within |browser_context|.
+  // This should only be used for process-per-site mode, which can be enabled
+  // globally with a command line flag or per-site, as determined by
+  // SiteInstanceImpl::ShouldUseProcessPerSite.
+  static void RegisterProcessHostForSite(
+      BrowserContext* browser_context,
+      RenderProcessHost* process,
+      const GURL& url);
 
  protected:
   // A proxy for our IPC::Channel that lives on the IO thread (see
@@ -183,12 +200,8 @@ class CONTENT_EXPORT RenderProcessHostImpl
   // Callers can reduce the RenderProcess' priority.
   void SetBackgrounded(bool backgrounded);
 
-  // Handle termination of our process. |was_alive| indicates that when we
-  // tried to retrieve the exit code the process had not finished yet.
-  void ProcessDied(base::ProcessHandle handle,
-                   base::TerminationStatus status,
-                   int exit_code,
-                   bool was_alive);
+  // Handle termination of our process.
+  void ProcessDied();
 
   // The count of currently visible widgets.  Since the host can be a container
   // for multiple widgets, it uses this count to determine when it should be
@@ -241,11 +254,6 @@ class CONTENT_EXPORT RenderProcessHostImpl
   // because the queued messages may have dependencies on the init messages.
   std::queue<IPC::Message*> queued_messages_;
 
-#if defined(OS_WIN)
-  // Used to wait until the renderer dies to get an accurrate exit code.
-  base::WaitableEventWatcher child_process_watcher_;
-#endif
-
   // The globally-unique identifier for this RPH.
   int id_;
 
@@ -265,6 +273,10 @@ class CONTENT_EXPORT RenderProcessHostImpl
 
   // Records the last time we regarded the child process active.
   base::TimeTicks child_process_activity_time_;
+
+  // Indicates whether this is a RenderProcessHost of a Browser Plugin guest
+  // renderer.
+  bool is_guest_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderProcessHostImpl);
 };

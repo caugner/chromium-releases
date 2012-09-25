@@ -31,19 +31,19 @@
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/cryptohome_library.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
-#include "chrome/browser/chromeos/cros_settings.h"
-#include "chrome/browser/chromeos/cros_settings_names.h"
 #include "chrome/browser/chromeos/input_method/input_method_manager.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chrome/browser/chromeos/login/language_switch_menu.h"
 #include "chrome/browser/chromeos/login/login_display_host.h"
 #include "chrome/browser/chromeos/login/oauth1_token_fetcher.h"
 #include "chrome/browser/chromeos/login/oauth_login_verifier.h"
-#include "chrome/browser/chromeos/login/ownership_service.h"
 #include "chrome/browser/chromeos/login/parallel_authenticator.h"
 #include "chrome/browser/chromeos/login/policy_oauth_fetcher.h"
 #include "chrome/browser/chromeos/login/screen_locker.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
+#include "chrome/browser/chromeos/settings/cros_settings.h"
+#include "chrome/browser/chromeos/settings/cros_settings_names.h"
+#include "chrome/browser/chromeos/settings/ownership_service.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
@@ -72,6 +72,7 @@
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/session_manager_client.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_service.h"
 #include "googleurl/src/gurl.h"
 #include "media/base/media_switches.h"
@@ -106,12 +107,6 @@ const char kSwitchFormatString[] = " --%s=\"%s\"";
 
 // User name which is used in the Guest session.
 const char kGuestUserName[] = "";
-
-// TODO(zelidrag): Figure out if we need to add more services here.
-const char kServiceScopeChromeOSDocuments[] =
-    "https://docs.google.com/feeds/ "
-    "https://spreadsheets.google.com/feeds/ "
-    "https://docs.googleusercontent.com/";
 
 class InitializeCookieMonsterHelper {
  public:
@@ -197,6 +192,10 @@ class JobRestartRequest
   }
 
  private:
+  friend class base::RefCountedThreadSafe<JobRestartRequest>;
+
+  ~JobRestartRequest() {}
+
   void RestartJob() {
     if (BrowserThread::CurrentlyOn(BrowserThread::UI)) {
       DBusThreadManager::Get()->GetSessionManagerClient()->RestartJob(
@@ -222,6 +221,7 @@ class LoginUtilsImpl
       public OAuth1TokenFetcher::Delegate,
       public OAuthLoginVerifier::Delegate,
       public net::NetworkChangeNotifier::ConnectionTypeObserver,
+      public content::NotificationObserver,
       public base::SupportsWeakPtr<LoginUtilsImpl> {
  public:
   LoginUtilsImpl()
@@ -230,8 +230,17 @@ class LoginUtilsImpl
         has_cookies_(false),
         delegate_(NULL),
         job_restart_request_(NULL),
-        should_restore_auth_session_(false) {
+        should_restore_auth_session_(false),
+        url_request_context_getter_(NULL) {
     net::NetworkChangeNotifier::AddConnectionTypeObserver(this);
+    // During tests, the browser_process may not be initialized yet causing
+    // this to fail.
+    if (g_browser_process) {
+      registrar_.Add(
+          this,
+          chrome::NOTIFICATION_PROFILE_URL_REQUEST_CONTEXT_GETTER_INITIALIZED,
+          content::Source<Profile>(ProfileManager::GetDefaultProfile()));
+    }
   }
 
   virtual ~LoginUtilsImpl() {
@@ -281,6 +290,11 @@ class LoginUtilsImpl
   // net::NetworkChangeNotifier::ConnectionTypeObserver overrides.
   virtual void OnConnectionTypeChanged(
       net::NetworkChangeNotifier::ConnectionType type) OVERRIDE;
+
+  // content::NotificationObserver overrides.
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
  protected:
   virtual std::string GetOffTheRecordCommandLine(
@@ -350,6 +364,12 @@ class LoginUtilsImpl
   // online state change.
   bool should_restore_auth_session_;
 
+  content::NotificationRegistrar registrar_;
+
+  // This is set via a notification after the profile has initialized the
+  // getter.
+  net::URLRequestContextGetter* url_request_context_getter_;
+
   DISALLOW_COPY_AND_ASSIGN(LoginUtilsImpl);
 };
 
@@ -394,13 +414,12 @@ void LoginUtilsImpl::DoBrowserLaunch(Profile* profile,
   VLOG(1) << "Launching browser...";
   StartupBrowserCreator browser_creator;
   int return_code;
-  browser::startup::IsFirstRun first_run = first_run::IsChromeFirstRun() ?
-      browser::startup::IS_FIRST_RUN :
-      browser::startup::IS_NOT_FIRST_RUN;
+  chrome::startup::IsFirstRun first_run = first_run::IsChromeFirstRun() ?
+      chrome::startup::IS_FIRST_RUN : chrome::startup::IS_NOT_FIRST_RUN;
   browser_creator.LaunchBrowser(*CommandLine::ForCurrentProcess(),
                                 profile,
                                 FilePath(),
-                                browser::startup::IS_PROCESS_STARTUP,
+                                chrome::startup::IS_PROCESS_STARTUP,
                                 first_run,
                                 &return_code);
 
@@ -710,22 +729,25 @@ std::string LoginUtilsImpl::GetOffTheRecordCommandLine(
     const CommandLine& base_command_line,
     CommandLine* command_line) {
   static const char* kForwardSwitches[] = {
+      ::switches::kAllowWebUICompositing,
       ::switches::kCompressSystemFeedback,
       ::switches::kDeviceManagementUrl,
       ::switches::kForceDeviceScaleFactor,
       ::switches::kDisableAccelerated2dCanvas,
       ::switches::kDisableAcceleratedPlugins,
+      ::switches::kDisableAcceleratedVideoDecode,
       ::switches::kDisableGpuWatchdog,
       ::switches::kDisableLoginAnimations,
+      ::switches::kDisableOobeAnimation,
       ::switches::kDisableSeccompFilterSandbox,
       ::switches::kDisableSeccompSandbox,
       ::switches::kDisableThreadedAnimation,
-      ::switches::kEnableAcceleratedVideoDecode,
       ::switches::kEnableDevicePolicy,
       ::switches::kEnableGView,
+      ::switches::kEnableHighDPIPDFPlugin,
       ::switches::kEnableLogging,
-      ::switches::kEnableMobileSetupDialog,
       ::switches::kEnablePartialSwap,
+      ::switches::kEnableUIReleaseFrontSurface,
       ::switches::kEnablePinch,
       ::switches::kEnableSmoothScrolling,
       ::switches::kEnableThreadedCompositing,
@@ -734,6 +756,7 @@ std::string LoginUtilsImpl::GetOffTheRecordCommandLine(
       ::switches::kDisableThreadedCompositing,
       ::switches::kForceCompositingMode,
       ::switches::kGpuStartupDialog,
+      ::switches::kLoad2xResources,
       ::switches::kLoginProfile,
       ::switches::kScrollPixels,
       ::switches::kNoFirstRun,
@@ -747,12 +770,11 @@ std::string LoginUtilsImpl::GetOffTheRecordCommandLine(
       ::switches::kFlingTapSuppressMaxGap,
       ::switches::kTouchDevices,
       ::switches::kTouchOptimizedUI,
-      ::switches::kNewCheckboxStyle,
+      ::switches::kOldCheckboxStyle,
       ash::switches::kAshTouchHud,
       ash::switches::kAshWindowAnimationsDisabled,
       ash::switches::kAuraLegacyPowerButton,
       ash::switches::kAuraNoShadows,
-      ash::switches::kAuraPanelManager,
       ash::switches::kAshNotify,
       ::switches::kUIEnablePartialSwap,
       ::switches::kUIPrioritizeInGpuProcess,
@@ -857,11 +879,21 @@ scoped_refptr<Authenticator> LoginUtilsImpl::CreateAuthenticator(
 // We use a special class for this so that it can be safely leaked if we
 // never connect. At shutdown the order is not well defined, and it's possible
 // for the infrastructure needed to unregister might be unstable and crash.
-class WarmingObserver : public NetworkLibrary::NetworkManagerObserver {
+class WarmingObserver : public NetworkLibrary::NetworkManagerObserver,
+                        public content::NotificationObserver {
  public:
-  WarmingObserver() {
+  WarmingObserver()
+      : url_request_context_getter_(NULL) {
     NetworkLibrary *netlib = CrosLibrary::Get()->GetNetworkLibrary();
     netlib->AddNetworkManagerObserver(this);
+    // During tests, the browser_process may not be initialized yet causing
+    // this to fail.
+    if (g_browser_process) {
+      registrar_.Add(
+          this,
+          chrome::NOTIFICATION_PROFILE_URL_REQUEST_CONTEXT_GETTER_INITIALIZED,
+          content::Source<Profile>(ProfileManager::GetDefaultProfile()));
+    }
   }
 
   virtual ~WarmingObserver() {}
@@ -874,11 +906,34 @@ class WarmingObserver : public NetworkLibrary::NetworkManagerObserver {
           GURL(GaiaUrls::GetInstance()->client_login_url()),
           chrome_browser_net::UrlInfo::EARLY_LOAD_MOTIVATED,
           kConnectionsNeeded,
-          make_scoped_refptr(Profile::GetDefaultRequestContextDeprecated()));
+          url_request_context_getter_);
       netlib->RemoveNetworkManagerObserver(this);
       delete this;
     }
   }
+
+  // content::NotificationObserver overrides.
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) {
+  switch (type) {
+    case chrome::NOTIFICATION_PROFILE_URL_REQUEST_CONTEXT_GETTER_INITIALIZED: {
+      Profile* profile = content::Source<Profile>(source).ptr();
+      url_request_context_getter_ = profile->GetRequestContext();
+      registrar_.Remove(
+          this,
+          chrome::NOTIFICATION_PROFILE_URL_REQUEST_CONTEXT_GETTER_INITIALIZED,
+          content::Source<Profile>(profile));
+
+      break;
+    }
+    default:
+      NOTREACHED();
+  }
+}
+ private:
+  net::URLRequestContextGetter* url_request_context_getter_;
+  content::NotificationRegistrar registrar_;
 };
 
 void LoginUtilsImpl::PrewarmAuthentication() {
@@ -889,7 +944,7 @@ void LoginUtilsImpl::PrewarmAuthentication() {
         GURL(GaiaUrls::GetInstance()->client_login_url()),
         chrome_browser_net::UrlInfo::EARLY_LOAD_MOTIVATED,
         kConnectionsNeeded,
-        make_scoped_refptr(Profile::GetDefaultRequestContextDeprecated()));
+        url_request_context_getter_);
   } else {
     new WarmingObserver();
   }
@@ -1100,6 +1155,24 @@ void LoginUtilsImpl::OnConnectionTypeChanged(
       Profile* user_profile = ProfileManager::GetDefaultProfile();
       KickStartAuthentication(user_profile);
     }
+  }
+}
+
+void LoginUtilsImpl::Observe(int type,
+                             const content::NotificationSource& source,
+                             const content::NotificationDetails& details) {
+  switch (type) {
+    case chrome::NOTIFICATION_PROFILE_URL_REQUEST_CONTEXT_GETTER_INITIALIZED: {
+      Profile* profile = content::Source<Profile>(source).ptr();
+      url_request_context_getter_ = profile->GetRequestContext();
+      registrar_.Remove(
+          this,
+          chrome::NOTIFICATION_PROFILE_URL_REQUEST_CONTEXT_GETTER_INITIALIZED,
+          content::Source<Profile>(profile));
+      break;
+    }
+    default:
+      NOTREACHED();
   }
 }
 

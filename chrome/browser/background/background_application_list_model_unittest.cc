@@ -20,6 +20,7 @@
 #include "chrome/browser/extensions/permissions_updater.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
+#include "chrome/common/extensions/permissions/permission_set.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_types.h"
@@ -98,7 +99,7 @@ void AddBackgroundPermission(ExtensionService* service,
 
   static scoped_refptr<Extension> temporary =
       CreateExtension(GenerateUniqueExtensionName(), true);
-  scoped_refptr<const ExtensionPermissionSet> permissions =
+  scoped_refptr<const extensions::PermissionSet> permissions =
       temporary->GetActivePermissions();
   extensions::PermissionsUpdater(service->profile()).AddPermissions(
       extension, permissions.get());

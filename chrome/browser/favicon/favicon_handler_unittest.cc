@@ -13,6 +13,7 @@
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/favicon_size.h"
 #include "ui/gfx/image/image.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 
 class TestFaviconHandler;
 
@@ -152,9 +153,10 @@ class TestFaviconHandlerDelegate : public FaviconHandlerDelegate {
     return NULL;
   }
 
-  virtual void StartDownload(int id, const GURL& url, int image_size) {
+  virtual int StartDownload(const GURL& url, int image_size) {
     ADD_FAILURE() << "TestFaviconHandlerDelegate::StartDownload() "
                   << "should never be called in tests.";
+    return -1;
   }
 
   virtual void NotifyFaviconUpdated() {
@@ -299,7 +301,8 @@ void DownloadHandler::InvokeCallback() {
   FillDataToBitmap(bitmap_size, bitmap_size, &bitmap);
   gfx::Image image(bitmap);
   favicon_helper_->OnDidDownloadFavicon(
-      download_->download_id, download_->image_url, failed_, image);
+      download_->download_id, download_->image_url, failed_, image,
+      download_->image_size == gfx::kFaviconSize);
 }
 
 class FaviconHandlerTest : public ChromeRenderViewHostTestHarness {
@@ -418,7 +421,7 @@ TEST_F(FaviconHandlerTest, DownloadFavicon) {
   // Verify NavigationEntry.
   EXPECT_EQ(icon_url, helper.GetEntry()->GetFavicon().url);
   EXPECT_TRUE(helper.GetEntry()->GetFavicon().valid);
-  EXPECT_FALSE(helper.GetEntry()->GetFavicon().bitmap.empty());
+  EXPECT_FALSE(helper.GetEntry()->GetFavicon().image.IsEmpty());
 }
 
 TEST_F(FaviconHandlerTest, UpdateAndDownloadFavicon) {
@@ -508,7 +511,7 @@ TEST_F(FaviconHandlerTest, UpdateAndDownloadFavicon) {
   // Verify NavigationEntry.
   EXPECT_EQ(new_icon_url, helper.GetEntry()->GetFavicon().url);
   EXPECT_TRUE(helper.GetEntry()->GetFavicon().valid);
-  EXPECT_FALSE(helper.GetEntry()->GetFavicon().bitmap.empty());
+  EXPECT_FALSE(helper.GetEntry()->GetFavicon().image.IsEmpty());
 }
 
 TEST_F(FaviconHandlerTest, UpdateFavicon) {
@@ -583,7 +586,7 @@ TEST_F(FaviconHandlerTest, UpdateFavicon) {
   // Verify the favicon status.
   EXPECT_EQ(new_icon_url, helper.GetEntry()->GetFavicon().url);
   EXPECT_TRUE(helper.GetEntry()->GetFavicon().valid);
-  EXPECT_FALSE(helper.GetEntry()->GetFavicon().bitmap.empty());
+  EXPECT_FALSE(helper.GetEntry()->GetFavicon().image.IsEmpty());
 }
 
 TEST_F(FaviconHandlerTest, Download2ndFaviconURLCandidate) {
@@ -891,8 +894,9 @@ TEST_F(FaviconHandlerTest, MultipleFavicon) {
   // Verify correct icon size chosen.
   EXPECT_EQ(icon_url_preferred1, handler.GetEntry()->GetFavicon().url);
   EXPECT_TRUE(handler.GetEntry()->GetFavicon().valid);
-  EXPECT_FALSE(handler.GetEntry()->GetFavicon().bitmap.empty());
-  EXPECT_EQ(gfx::kFaviconSize, handler.GetEntry()->GetFavicon().bitmap.width());
+  EXPECT_FALSE(handler.GetEntry()->GetFavicon().image.IsEmpty());
+  EXPECT_EQ(gfx::kFaviconSize,
+            handler.GetEntry()->GetFavicon().image.ToSkBitmap()->width());
 }
 
 TEST_F(FaviconHandlerTest, FirstFavicon) {
@@ -946,8 +950,9 @@ TEST_F(FaviconHandlerTest, FirstFavicon) {
   // Verify correct icon size chosen.
   EXPECT_EQ(icon_url_preferred1, handler.GetEntry()->GetFavicon().url);
   EXPECT_TRUE(handler.GetEntry()->GetFavicon().valid);
-  EXPECT_FALSE(handler.GetEntry()->GetFavicon().bitmap.empty());
-  EXPECT_EQ(gfx::kFaviconSize, handler.GetEntry()->GetFavicon().bitmap.width());
+  EXPECT_FALSE(handler.GetEntry()->GetFavicon().image.IsEmpty());
+  EXPECT_EQ(gfx::kFaviconSize,
+            handler.GetEntry()->GetFavicon().image.ToSkBitmap()->width());
 }
 
 }  // namespace.

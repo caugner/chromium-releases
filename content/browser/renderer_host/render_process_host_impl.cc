@@ -35,6 +35,7 @@
 #include "base/rand_util.h"
 #include "base/stl_util.h"
 #include "base/string_util.h"
+#include "base/supports_user_data.h"
 #include "base/sys_info.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
@@ -44,7 +45,7 @@
 #include "content/browser/browser_main.h"
 #include "content/browser/browser_main_loop.h"
 #include "content/browser/child_process_security_policy_impl.h"
-#include "content/browser/device_orientation/message_filter.h"
+#include "content/browser/device_orientation/orientation_message_filter.h"
 #include "content/browser/dom_storage/dom_storage_context_impl.h"
 #include "content/browser/dom_storage/dom_storage_message_filter.h"
 #include "content/browser/download/mhtml_generation_manager.h"
@@ -53,6 +54,7 @@
 #include "content/browser/geolocation/geolocation_dispatcher_host.h"
 #include "content/browser/gpu/gpu_data_manager_impl.h"
 #include "content/browser/gpu/gpu_process_host.h"
+#include "content/browser/histogram_message_filter.h"
 #include "content/browser/in_process_webkit/indexed_db_context_impl.h"
 #include "content/browser/in_process_webkit/indexed_db_dispatcher_host.h"
 #include "content/browser/mime_registry_message_filter.h"
@@ -68,8 +70,8 @@
 #include "content/browser/renderer_host/media/media_stream_dispatcher_host.h"
 #include "content/browser/renderer_host/media/video_capture_host.h"
 #include "content/browser/renderer_host/p2p/socket_dispatcher_host.h"
-#include "content/browser/renderer_host/pepper_file_message_filter.h"
-#include "content/browser/renderer_host/pepper_message_filter.h"
+#include "content/browser/renderer_host/pepper/pepper_file_message_filter.h"
+#include "content/browser/renderer_host/pepper/pepper_message_filter.h"
 #include "content/browser/renderer_host/quota_dispatcher_host.h"
 #include "content/browser/renderer_host/render_message_filter.h"
 #include "content/browser/renderer_host/render_view_host_delegate.h"
@@ -91,6 +93,7 @@
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/render_process_host_factory.h"
 #include "content/public/browser/resource_context.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_ui_controller_factory.h"
@@ -98,6 +101,7 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/common/process_type.h"
 #include "content/public/common/result_codes.h"
+#include "content/public/common/url_constants.h"
 #include "content/renderer/render_process_impl.h"
 #include "content/renderer/render_thread_impl.h"
 #include "ipc/ipc_channel.h"
@@ -113,13 +117,14 @@
 #include "webkit/plugins/plugin_switches.h"
 
 #if defined(OS_WIN)
-#include "base/synchronization/waitable_event.h"
 #include "content/common/font_cache_dispatcher_win.h"
 #endif
 
 #include "third_party/skia/include/core/SkBitmap.h"
 
 extern bool g_exited_main_message_loop;
+
+static const char* kSiteProcessMapKeyName = "content_site_process_map";
 
 namespace content {
 
@@ -207,6 +212,61 @@ class RendererURLRequestContextSelector
 base::LazyInstance<IDMap<RenderProcessHost> >::Leaky
     g_all_hosts = LAZY_INSTANCE_INITIALIZER;
 
+// Map of site to process, to ensure we only have one RenderProcessHost per
+// site in process-per-site mode.  Each map is specific to a BrowserContext.
+class SiteProcessMap : public base::SupportsUserData::Data {
+ public:
+  typedef base::hash_map<std::string, RenderProcessHost*> SiteToProcessMap;
+  SiteProcessMap() {}
+
+  void RegisterProcess(const std::string& site, RenderProcessHost* process) {
+    map_[site] = process;
+  }
+
+  RenderProcessHost* FindProcess(const std::string& site) {
+    SiteToProcessMap::iterator i = map_.find(site);
+    if (i != map_.end())
+      return i->second;
+    return NULL;
+  }
+
+  void RemoveProcess(RenderProcessHost* host) {
+    // Find all instances of this process in the map, then separately remove
+    // them.
+    std::set<std::string> sites;
+    for (SiteToProcessMap::const_iterator i = map_.begin();
+         i != map_.end();
+         i++) {
+      if (i->second == host)
+        sites.insert(i->first);
+    }
+    for (std::set<std::string>::iterator i = sites.begin();
+         i != sites.end();
+         i++) {
+      SiteToProcessMap::iterator iter = map_.find(*i);
+      if (iter != map_.end()) {
+        DCHECK_EQ(iter->second, host);
+        map_.erase(iter);
+      }
+    }
+  }
+
+ private:
+  SiteToProcessMap map_;
+};
+
+// Find the SiteProcessMap specific to the given context.
+SiteProcessMap* GetSiteProcessMapForBrowserContext(BrowserContext* context) {
+  DCHECK(context);
+  SiteProcessMap* map = static_cast<SiteProcessMap*>(
+      context->GetUserData(kSiteProcessMapKeyName));
+  if (!map) {
+    map = new SiteProcessMap();
+    context->SetUserData(kSiteProcessMapKeyName, map);
+  }
+  return map;
+}
+
 }  // namespace
 
 // Stores the maximum number of renderer processes the content module can
@@ -261,7 +321,7 @@ void RenderProcessHost::SetMaxRendererProcessCount(size_t count) {
 }
 
 RenderProcessHostImpl::RenderProcessHostImpl(
-    BrowserContext* browser_context)
+    BrowserContext* browser_context, bool is_guest)
         : fast_shutdown_started_(false),
           deleting_soon_(false),
           pending_views_(0),
@@ -274,7 +334,8 @@ RenderProcessHostImpl::RenderProcessHostImpl(
           id_(ChildProcessHostImpl::GenerateChildProcessUniqueId()),
           browser_context_(browser_context),
           sudden_termination_allowed_(true),
-          ignore_input_events_(false) {
+          ignore_input_events_(false),
+          is_guest_(is_guest) {
   widget_helper_ = new RenderWidgetHelper();
 
   ChildProcessSecurityPolicyImpl::GetInstance()->Add(GetID());
@@ -333,6 +394,13 @@ RenderProcessHostImpl::~RenderProcessHostImpl() {
   while (!queued_messages_.empty()) {
     delete queued_messages_.front();
     queued_messages_.pop();
+  }
+
+  if (run_renderer_in_process()) {
+    // In single process mode, need to set IO allowed in browser main thread
+    // before joining the renderer thread
+    base::ThreadRestrictions::ScopedAllowIO allow_io;
+    in_process_renderer_.reset();
   }
 
   ClearTransportDIBCache();
@@ -454,15 +522,13 @@ void RenderProcessHostImpl::CreateMessageFilters() {
       new RendererURLRequestContextSelector(browser_context, GetID()));
 
   channel_->AddFilter(resource_message_filter);
-#if !defined(OS_ANDROID)
-  // TODO(dtrainor, klobag): Enable this when BrowserMainLoop gets
-  // included in Android builds.  Tracked via 115941.
   media::AudioManager* audio_manager = BrowserMainLoop::GetAudioManager();
-  channel_->AddFilter(new AudioInputRendererHost(
-      resource_context, audio_manager));
+  media_stream::MediaStreamManager* media_stream_manager =
+      BrowserMainLoop::GetMediaStreamManager();
+  channel_->AddFilter(new AudioInputRendererHost(audio_manager,
+                                                 media_stream_manager));
   channel_->AddFilter(new AudioRendererHost(audio_manager, media_observer));
-  channel_->AddFilter(new VideoCaptureHost(resource_context, audio_manager));
-#endif
+  channel_->AddFilter(new VideoCaptureHost());
   channel_->AddFilter(new AppCacheDispatcherHost(
       static_cast<ChromeAppCacheService*>(
           BrowserContext::GetAppCacheService(browser_context)),
@@ -470,7 +536,7 @@ void RenderProcessHostImpl::CreateMessageFilters() {
   channel_->AddFilter(new ClipboardMessageFilter());
   channel_->AddFilter(new DOMStorageMessageFilter(GetID(),
       static_cast<DOMStorageContextImpl*>(
-          BrowserContext::GetDOMStorageContext(browser_context))));
+          BrowserContext::GetDOMStorageContext(browser_context, GetID()))));
   channel_->AddFilter(new IndexedDBDispatcherHost(GetID(),
       static_cast<IndexedDBContextImpl*>(
           BrowserContext::GetIndexedDBContext(browser_context))));
@@ -479,8 +545,7 @@ void RenderProcessHostImpl::CreateMessageFilters() {
   gpu_message_filter_ = new GpuMessageFilter(GetID(), widget_helper_.get());
   channel_->AddFilter(gpu_message_filter_);
 #if defined(ENABLE_WEBRTC)
-  channel_->AddFilter(new media_stream::MediaStreamDispatcherHost(
-      resource_context, GetID(), BrowserMainLoop::GetAudioManager()));
+  channel_->AddFilter(new media_stream::MediaStreamDispatcherHost(GetID()));
 #endif
   channel_->AddFilter(
       GetContentClient()->browser()->AllowPepperPrivateFileAPI() ?
@@ -501,7 +566,7 @@ void RenderProcessHostImpl::CreateMessageFilters() {
       browser_context->GetRequestContext(),
       BrowserContext::GetFileSystemContext(browser_context),
       ChromeBlobStorageContext::GetFor(browser_context)));
-  channel_->AddFilter(new device_orientation::MessageFilter());
+  channel_->AddFilter(new device_orientation::OrientationMessageFilter());
   channel_->AddFilter(new FileUtilitiesMessageFilter(GetID()));
   channel_->AddFilter(new MimeRegistryMessageFilter());
   channel_->AddFilter(new DatabaseMessageFilter(
@@ -535,6 +600,7 @@ void RenderProcessHostImpl::CreateMessageFilters() {
       GetContentClient()->browser()->CreateQuotaPermissionContext()));
   channel_->AddFilter(new GamepadBrowserMessageFilter(this));
   channel_->AddFilter(new ProfilerMessageFilter(PROCESS_TYPE_RENDERER));
+  channel_->AddFilter(new content::HistogramMessageFilter());
 }
 
 int RenderProcessHostImpl::GetNextRoutingID() {
@@ -599,11 +665,17 @@ int RenderProcessHostImpl::VisibleWidgetCount() const {
   return visible_widgets_;
 }
 
+bool RenderProcessHostImpl::IsGuest() const {
+  return is_guest_;
+}
+
 void RenderProcessHostImpl::AppendRendererCommandLine(
     CommandLine* command_line) const {
   // Pass the process type first, so it shows first in process listings.
   command_line->AppendSwitchASCII(switches::kProcessType,
                                   switches::kRendererProcess);
+  if (is_guest_)
+    command_line->AppendSwitch(switches::kGuestRenderer);
 
   // Now send any options from our own command line we want to propagate.
   const CommandLine& browser_command_line = *CommandLine::ForCurrentProcess();
@@ -643,10 +715,10 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
     // renderer is not run in the sandbox.
     switches::kAuditAllHandles,
     switches::kAuditHandles,
-    switches::kBrowserPlugin,
     switches::kChromeFrame,
     switches::kDisable3DAPIs,
     switches::kDisableAcceleratedCompositing,
+    switches::kDisableAcceleratedVideoDecode,
     switches::kDisableApplicationCache,
     switches::kDisableAudio,
     switches::kDisableBreakpad,
@@ -664,6 +736,7 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
     switches::kDisableJavaScriptI18NAPI,
     switches::kDisableLocalStorage,
     switches::kDisableLogging,
+    switches::kDisablePointerLock,
     switches::kDisableSeccompFilterSandbox,
     switches::kDisableSeccompSandbox,
     switches::kDisableSessionStorage,
@@ -671,15 +744,17 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
     switches::kDisableSpeechInput,
     switches::kEnableScriptedSpeech,
     switches::kDisableThreadedAnimation,
+#if defined(OS_ANDROID)
+    switches::kEnableWebAudio,
+#else
     switches::kDisableWebAudio,
+#endif
     switches::kDisableWebSockets,
     switches::kDomAutomationController,
-    switches::kEnableAcceleratedVideoDecode,
     switches::kEnableAccessibilityLogging,
     switches::kEnableDCHECK,
     switches::kEnableEncryptedMedia,
     switches::kEnableFixedLayout,
-    switches::kEnableGamepad,
     switches::kEnableGPUServiceLogging,
     switches::kEnableGPUClientLogging,
     switches::kEnableGpuBenchmarking,
@@ -688,6 +763,7 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
     switches::kEnablePartialSwap,
     switches::kEnablePeerConnection,
     switches::kEnablePerTilePainting,
+    switches::kEnableRendererSideMixing,
     switches::kEnableShadowDOM,
     switches::kEnableStrictSiteIsolation,
     switches::kEnableStyleScoped,
@@ -708,6 +784,7 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
     switches::kEnableTouchEvents,
     switches::kEnableVideoTrack,
     switches::kEnableViewport,
+    switches::kForceDeviceScaleFactor,
     switches::kFullMemoryCrashReport,
 #if !defined (GOOGLE_CHROME_BUILD)
     // These are unsupported and not fully tested modes, so don't enable them
@@ -716,15 +793,16 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
 #endif  // GOOGLE_CHROME_BUILD
     switches::kInProcessWebGL,
     switches::kJavaScriptFlags,
+    switches::kLoad2xResources,
     switches::kLoggingLevel,
-    switches::kNewCheckboxStyle,
+    switches::kOldCheckboxStyle,
     switches::kNoReferrers,
     switches::kNoSandbox,
     switches::kPpapiOutOfProcess,
     switches::kRegisterPepperPlugins,
     switches::kRendererAssertTest,
 #if defined(OS_POSIX)
-    switches::kRendererCleanExit,
+    switches::kChildCleanExit,
 #endif
     switches::kRendererStartupDialog,
     switches::kShowPaintRects,
@@ -779,9 +857,7 @@ bool RenderProcessHostImpl::FastShutdownIfPossible() {
   if (!SuddenTerminationAllowed())
     return false;
 
-  // Store the handle before it gets changed.
-  base::ProcessHandle handle = GetHandle();
-  ProcessDied(handle, base::TERMINATION_STATUS_NORMAL_TERMINATION, 0, false);
+  ProcessDied();
   fast_shutdown_started_ = true;
   return true;
 }
@@ -951,44 +1027,7 @@ void RenderProcessHostImpl::OnChannelConnected(int32 peer_pid) {
 }
 
 void RenderProcessHostImpl::OnChannelError() {
-  if (!channel_.get())
-    return;
-
-  // Store the handle before it gets changed.
-  base::ProcessHandle handle = GetHandle();
-
-  // child_process_launcher_ can be NULL in single process mode or if fast
-  // termination happened.
-  int exit_code = 0;
-  base::TerminationStatus status =
-      child_process_launcher_.get() ?
-      child_process_launcher_->GetChildTerminationStatus(&exit_code) :
-      base::TERMINATION_STATUS_NORMAL_TERMINATION;
-
-#if defined(OS_WIN)
-  if (!run_renderer_in_process()) {
-    if (status == base::TERMINATION_STATUS_STILL_RUNNING) {
-      HANDLE process = child_process_launcher_->GetHandle();
-      child_process_watcher_.StartWatching(
-          new base::WaitableEvent(process), this);
-      return;
-    }
-  }
-#endif
-  ProcessDied(handle, status, exit_code, false);
-}
-
-// Called when the renderer process handle has been signaled.
-void RenderProcessHostImpl::OnWaitableEventSignaled(
-    base::WaitableEvent* waitable_event) {
-#if defined (OS_WIN)
-  base::ProcessHandle handle = GetHandle();
-  int exit_code = 0;
-  base::TerminationStatus status =
-      base::GetTerminationStatus(waitable_event->Release(), &exit_code);
-  delete waitable_event;
-  ProcessDied(handle, status, exit_code, true);
-#endif
+  ProcessDied();
 }
 
 BrowserContext* RenderProcessHostImpl::GetBrowserContext() const {
@@ -1063,7 +1102,7 @@ void RenderProcessHostImpl::Cleanup() {
 
     // Remove ourself from the list of renderer processes so that we can't be
     // reused in between now and when the Delete task runs.
-    g_all_hosts.Get().Remove(GetID());
+    UnregisterHost(GetID());
   }
 }
 
@@ -1097,6 +1136,10 @@ void RenderProcessHostImpl::SurfaceUpdated(int32 surface_id) {
       surface_id));
 }
 
+void RenderProcessHostImpl::ResumeRequestsForView(int route_id) {
+  widget_helper_->ResumeRequestsForView(route_id);
+}
+
 IPC::ChannelProxy* RenderProcessHostImpl::GetChannel() {
   return channel_.get();
 }
@@ -1123,8 +1166,18 @@ void RenderProcessHostImpl::RegisterHost(int host_id, RenderProcessHost* host) {
 
 // static
 void RenderProcessHostImpl::UnregisterHost(int host_id) {
-  if (g_all_hosts.Get().Lookup(host_id))
-    g_all_hosts.Get().Remove(host_id);
+  RenderProcessHost* host = g_all_hosts.Get().Lookup(host_id);
+  if (!host)
+    return;
+
+  g_all_hosts.Get().Remove(host_id);
+
+  // Look up the map of site to process for the given browser_context,
+  // in case we need to remove this process from it.  It will be registered
+  // under any sites it rendered that use process-per-site mode.
+  SiteProcessMap* map =
+      GetSiteProcessMapForBrowserContext(host->GetBrowserContext());
+  map->RemoveProcess(host);
 }
 
 // static
@@ -1136,6 +1189,16 @@ bool RenderProcessHostImpl::IsSuitableHost(
     return true;
 
   if (host->GetBrowserContext() != browser_context)
+    return false;
+
+  // All URLs are suitable if this is associated with a guest renderer process.
+  // TODO(fsamuel, creis): Further validation is needed to ensure that only
+  // normal web URLs are permitted in guest processes. We need to investigate
+  // where this validation should happen.
+  if (host->IsGuest())
+    return true;
+
+  if (!host->IsGuest() && site_url.SchemeIs(chrome::kGuestScheme))
     return false;
 
   WebUIControllerFactory* factory =
@@ -1217,17 +1280,87 @@ RenderProcessHost* RenderProcessHost::GetExistingProcessHost(
   return NULL;
 }
 
-void RenderProcessHostImpl::ProcessDied(base::ProcessHandle handle,
-                                           base::TerminationStatus status,
-                                           int exit_code,
-                                           bool was_alive) {
+// static
+bool RenderProcessHostImpl::ShouldUseProcessPerSite(
+    BrowserContext* browser_context,
+    const GURL& url) {
+  // Returns true if we should use the process-per-site model.  This will be
+  // the case if the --process-per-site switch is specified, or in
+  // process-per-site-instance for particular sites (e.g., WebUI).
+
+  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  if (command_line.HasSwitch(switches::kProcessPerSite))
+    return true;
+
+  // We want to consolidate particular sites like WebUI when we are using
+  // process-per-tab or process-per-site-instance models.
+  // Note that --single-process is handled in ShouldTryToUseExistingProcessHost.
+
+  if (GetContentClient()->browser()->
+          ShouldUseProcessPerSite(browser_context, url)) {
+    return true;
+  }
+
+  // DevTools pages have WebUI type but should not reuse the same host.
+  WebUIControllerFactory* factory =
+      GetContentClient()->browser()->GetWebUIControllerFactory();
+  if (factory &&
+      factory->UseWebUIForURL(browser_context, url) &&
+      !url.SchemeIs(chrome::kChromeDevToolsScheme)) {
+    return true;
+  }
+
+  // In all other cases, don't use process-per-site logic.
+  return false;
+}
+
+// static
+RenderProcessHost* RenderProcessHostImpl::GetProcessHostForSite(
+    BrowserContext* browser_context,
+    const GURL& url) {
+  // Look up the map of site to process for the given browser_context.
+  SiteProcessMap* map =
+      GetSiteProcessMapForBrowserContext(browser_context);
+
+  // See if we have an existing process for this site.  If not, the caller
+  // should create a new process and register it.
+  std::string site = SiteInstanceImpl::GetSiteForURL(browser_context, url)
+      .possibly_invalid_spec();
+  return map->FindProcess(site);
+}
+
+void RenderProcessHostImpl::RegisterProcessHostForSite(
+    BrowserContext* browser_context,
+    RenderProcessHost* process,
+    const GURL& url) {
+  // Look up the map of site to process for the given browser_context.
+  SiteProcessMap* map =
+      GetSiteProcessMapForBrowserContext(browser_context);
+
+  // TODO(creis): Determine if it's better to allow registration of
+  // empty sites or not.  For now, group anything from which we can't parse
+  // a site into the same process, when using --process-per-site.
+  std::string site = SiteInstanceImpl::GetSiteForURL(browser_context, url)
+      .possibly_invalid_spec();
+  map->RegisterProcess(site, process);
+}
+
+void RenderProcessHostImpl::ProcessDied() {
   // Our child process has died.  If we didn't expect it, it's a crash.
   // In any case, we need to let everyone know it's gone.
   // The OnChannelError notification can fire multiple times due to nested sync
   // calls to a renderer. If we don't have a valid channel here it means we
   // already handled the error.
 
-  RendererClosedDetails details(handle, status, exit_code, was_alive);
+  // child_process_launcher_ can be NULL in single process mode or if fast
+  // termination happened.
+  int exit_code = 0;
+  base::TerminationStatus status =
+      child_process_launcher_.get() ?
+      child_process_launcher_->GetChildTerminationStatus(&exit_code) :
+      base::TERMINATION_STATUS_NORMAL_TERMINATION;
+
+  RendererClosedDetails details(GetHandle(), status, exit_code);
   NotificationService::current()->Notify(
       NOTIFICATION_RENDERER_PROCESS_CLOSED,
       Source<RenderProcessHost>(this),
@@ -1375,8 +1508,9 @@ void RenderProcessHostImpl::OnCompositorSurfaceBuffersSwappedNoHost(
       int32 gpu_process_host_id) {
   TRACE_EVENT0("renderer_host",
                "RenderWidgetHostImpl::OnCompositorSurfaceBuffersSwappedNoHost");
-  RenderWidgetHostImpl::AcknowledgeSwapBuffers(route_id,
-                                               gpu_process_host_id);
+  RenderWidgetHostImpl::AcknowledgeBufferPresent(route_id,
+                                                 gpu_process_host_id,
+                                                 0);
 }
 
 }  // namespace content

@@ -13,7 +13,6 @@
 
 #ifndef NET_HTTP_HTTP_CACHE_H_
 #define NET_HTTP_HTTP_CACHE_H_
-#pragma once
 
 #include <list>
 #include <set>
@@ -192,7 +191,8 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory,
   void OnExternalCacheHit(const GURL& url, const std::string& http_method);
 
   // HttpTransactionFactory implementation:
-  virtual int CreateTransaction(scoped_ptr<HttpTransaction>* trans) OVERRIDE;
+  virtual int CreateTransaction(scoped_ptr<HttpTransaction>* trans,
+                                HttpTransactionDelegate* delegate) OVERRIDE;
   virtual HttpCache* GetCache() OVERRIDE;
   virtual HttpNetworkSession* GetSession() OVERRIDE;
 
@@ -212,7 +212,6 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory,
   // Types --------------------------------------------------------------------
 
   class MetadataWriter;
-  class SSLHostInfoFactoryAdaptor;
   class Transaction;
   class WorkItem;
   friend class Transaction;
@@ -379,8 +378,6 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory,
   bool building_backend_;
 
   Mode mode_;
-
-  const scoped_ptr<SSLHostInfoFactoryAdaptor> ssl_host_info_factory_;
 
   const scoped_ptr<HttpTransactionFactory> network_layer_;
   scoped_ptr<disk_cache::Backend> disk_cache_;

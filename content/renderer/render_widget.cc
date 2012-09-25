@@ -23,6 +23,7 @@
 #include "ipc/ipc_sync_message.h"
 #include "skia/ext/platform_canvas.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCursorInfo.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebHelperPlugin.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPagePopup.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPopupMenu.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPopupMenuInfo.h"
@@ -33,6 +34,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebSize.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 #include "third_party/skia/include/core/SkShader.h"
+#include "ui/base/ui_base_switches.h"
 #include "ui/gfx/point.h"
 #include "ui/gfx/size.h"
 #include "ui/gfx/skia_util.h"
@@ -70,7 +72,7 @@ using WebKit::WebVector;
 using WebKit::WebWidget;
 using content::RenderThread;
 
-static const int kStandardDPI = 160;
+static const float kStandardDPI = 160;
 
 RenderWidget::RenderWidget(WebKit::WebPopupType popup_type,
                            const WebKit::WebScreenInfo& screen_info,
@@ -113,7 +115,13 @@ RenderWidget::RenderWidget(WebKit::WebPopupType popup_type,
   has_disable_gpu_vsync_switch_ = CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kDisableGpuVsync);
 #if defined(OS_CHROMEOS) || defined(OS_MACOSX)
-  device_scale_factor_ = std::max(1, screen_info.verticalDPI / kStandardDPI);
+  device_scale_factor_ = screen_info.verticalDPI / kStandardDPI;
+  // Unless an explicit scale factor was provided for testing, ensure the scale
+  // is integral.
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kForceDeviceScaleFactor))
+    device_scale_factor_ = static_cast<int>(device_scale_factor_);
+  device_scale_factor_ = std::max(1.0f, device_scale_factor_);
 #endif
 }
 
@@ -150,6 +158,8 @@ WebWidget* RenderWidget::CreateWebWidget(RenderWidget* render_widget) {
       return WebPopupMenu::create(render_widget);
     case WebKit::WebPopupTypePage:
       return WebPagePopup::create(render_widget);
+    case WebKit::WebPopupTypeHelperPlugin:
+      return WebKit::WebHelperPlugin::create(render_widget);
     default:
       NOTREACHED();
   }
@@ -224,9 +234,10 @@ bool RenderWidget::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(ViewMsg_Resize, OnResize)
     IPC_MESSAGE_HANDLER(ViewMsg_ChangeResizeRect, OnChangeResizeRect)
     IPC_MESSAGE_HANDLER(ViewMsg_WasHidden, OnWasHidden)
-    IPC_MESSAGE_HANDLER(ViewMsg_WasRestored, OnWasRestored)
+    IPC_MESSAGE_HANDLER(ViewMsg_WasShown, OnWasShown)
     IPC_MESSAGE_HANDLER(ViewMsg_WasSwappedOut, OnWasSwappedOut)
     IPC_MESSAGE_HANDLER(ViewMsg_UpdateRect_ACK, OnUpdateRectAck)
+    IPC_MESSAGE_HANDLER(ViewMsg_SwapBuffers_ACK, OnSwapBuffersComplete)
     IPC_MESSAGE_HANDLER(ViewMsg_HandleInputEvent, OnHandleInputEvent)
     IPC_MESSAGE_HANDLER(ViewMsg_MouseCaptureLost, OnMouseCaptureLost)
     IPC_MESSAGE_HANDLER(ViewMsg_SetFocus, OnSetFocus)
@@ -378,8 +389,8 @@ void RenderWidget::OnWasHidden() {
   SetHidden(true);
 }
 
-void RenderWidget::OnWasRestored(bool needs_repainting) {
-  TRACE_EVENT0("renderer", "RenderWidget::OnWasRestored");
+void RenderWidget::OnWasShown(bool needs_repainting) {
+  TRACE_EVENT0("renderer", "RenderWidget::OnWasShown");
   // During shutdown we can just ignore this message.
   if (!webwidget_)
     return;
@@ -572,7 +583,7 @@ void RenderWidget::OnHandleInputEvent(const IPC::Message& message) {
       input_event->type == WebInputEvent::MouseWheel ||
       WebInputEvent::isTouchEventType(input_event->type);
   bool is_input_throttled =
-      webwidget_->isInputThrottled() ||
+      (webwidget_ ? webwidget_->isInputThrottled() : false) ||
       paint_aggregator_.HasPendingUpdate();
 
   if (event_type_gets_rate_limited && is_input_throttled && !is_hidden_) {
@@ -677,11 +688,19 @@ void RenderWidget::PaintRect(const gfx::Rect& rect,
     // WebKit and filling the background (which can be slow) and just painting
     // the plugin. Unlike the DoDeferredUpdate case, an extra copy is still
     // required.
+    base::TimeTicks paint_begin_ticks = base::TimeTicks::Now();
     optimized_instance->Paint(webkit_glue::ToWebCanvas(canvas),
                               optimized_copy_location, rect);
+    base::TimeDelta paint_time = base::TimeTicks::Now() - paint_begin_ticks;
+    if (!is_accelerated_compositing_active_)
+      software_stats_.totalPaintTimeInSeconds += paint_time.InSecondsF();
   } else {
     // Normal painting case.
+    base::TimeTicks paint_begin_ticks = base::TimeTicks::Now();
     webwidget_->paint(webkit_glue::ToWebCanvas(canvas), rect);
+    base::TimeDelta paint_time = base::TimeTicks::Now() - paint_begin_ticks;
+    if (!is_accelerated_compositing_active_)
+      software_stats_.totalPaintTimeInSeconds += paint_time.InSecondsF();
 
     // Flush to underlying bitmap.  TODO(darin): is this needed?
     skia::GetTopDevice(*canvas)->accessBitmap(false);
@@ -861,14 +880,14 @@ void RenderWidget::DoDeferredUpdate() {
       UMA_HISTOGRAM_CUSTOM_TIMES("Renderer4.AccelDoDeferredUpdateDelay",
                                  delay,
                                  base::TimeDelta::FromMilliseconds(1),
-                                 base::TimeDelta::FromMilliseconds(60),
-                                 30);
+                                 base::TimeDelta::FromMilliseconds(120),
+                                 60);
     } else {
       UMA_HISTOGRAM_CUSTOM_TIMES("Renderer4.SoftwareDoDeferredUpdateDelay",
                                  delay,
                                  base::TimeDelta::FromMilliseconds(1),
-                                 base::TimeDelta::FromMilliseconds(60),
-                                 30);
+                                 base::TimeDelta::FromMilliseconds(120),
+                                 60);
     }
 
     // Calculate filtered time per frame:
@@ -877,6 +896,11 @@ void RenderWidget::DoDeferredUpdate() {
         0.9f * filtered_time_per_frame_ + 0.1f * frame_time_elapsed;
   }
   last_do_deferred_update_time_ = frame_begin_ticks;
+
+  if (!is_accelerated_compositing_active_) {
+    software_stats_.numAnimationFrames++;
+    software_stats_.numFramesSentToScreen++;
+  }
 
   // OK, save the pending update to a local since painting may cause more
   // invalidation.  Some WebCore rendering objects only layout when painted.
@@ -1681,7 +1705,7 @@ ui::TextInputType RenderWidget::GetTextInputType() {
   if (webwidget_) {
     int type = webwidget_->textInputType();
     // Check the type is in the range representable by ui::TextInputType.
-    DCHECK_LE(type, ui::TEXT_INPUT_TYPE_WEEK) <<
+    DCHECK_LE(type, ui::TEXT_INPUT_TYPE_MAX) <<
       "WebKit::WebTextInputType and ui::TextInputType not synchronized";
     return static_cast<ui::TextInputType>(type);
   }
@@ -1756,6 +1780,17 @@ void RenderWidget::CleanupWindowInPluginMoves(gfx::PluginWindowHandle window) {
       break;
     }
   }
+}
+
+void RenderWidget::GetRenderingStats(WebKit::WebRenderingStats& stats) const {
+  webwidget()->renderingStats(stats);
+  stats.numAnimationFrames += software_stats_.numAnimationFrames;
+  stats.numFramesSentToScreen += software_stats_.numFramesSentToScreen;
+  stats.totalPaintTimeInSeconds += software_stats_.totalPaintTimeInSeconds;
+}
+
+void RenderWidget::BeginSmoothScroll(bool down, bool scroll_far) {
+  Send(new ViewHostMsg_BeginSmoothScroll(routing_id_, down, scroll_far));
 }
 
 bool RenderWidget::WillHandleMouseEvent(const WebKit::WebMouseEvent& event) {

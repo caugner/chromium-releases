@@ -11,7 +11,6 @@
 #include "chrome/browser/ui/views/browser_dialogs.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "grit/theme_resources_standard.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -45,10 +44,10 @@ void StarView::GetAccessibleState(ui::AccessibleViewState* state) {
 
 bool StarView::GetTooltipText(const gfx::Point& p, string16* tooltip) const {
   // Don't show tooltip to distract user if BookmarkBubbleView is showing.
-  if (browser::IsBookmarkBubbleViewShowing())
+  if (chrome::IsBookmarkBubbleViewShowing())
     return false;
 
-  return ImageView::GetTooltipText(p, tooltip);
+  return views::ImageView::GetTooltipText(p, tooltip);
 }
 
 bool StarView::OnMousePressed(const views::MouseEvent& event) {

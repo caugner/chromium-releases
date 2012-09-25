@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_CHROME_BROWSER_MAIN_H_
 #define CHROME_BROWSER_CHROME_BROWSER_MAIN_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/gtest_prod_util.h"
@@ -12,6 +11,7 @@
 #include "base/memory/scoped_vector.h"
 #include "base/metrics/field_trial.h"
 #include "base/tracked_objects.h"
+#include "chrome/browser/chrome_browser_field_trials.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/process_singleton.h"
 #include "chrome/browser/task_profiler/auto_tracking.h"
@@ -22,7 +22,6 @@
 class BrowserProcessImpl;
 class ChromeBrowserMainExtraParts;
 class FieldTrialSynchronizer;
-class HistogramSynchronizer;
 class MetricsService;
 class PrefService;
 class Profile;
@@ -81,6 +80,9 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
   // Runs the PageCycler; called if the switch kVisitURLs is present.
   virtual void RunPageCycler();
 
+  // Override this in subclasses to initialize platform specific field trials.
+  virtual void SetupPlatformFieldTrials();
+
   // Displays a warning message that we can't find any locale data files.
   virtual void ShowMissingLocaleMessageBox() = 0;
 
@@ -96,45 +98,6 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
   const PrefService* local_state() const { return local_state_; }
 
  private:
-  // Methods for |EarlyInitialization()| ---------------------------------------
-
-  // A/B test for the maximum number of persistent connections per host.
-  void ConnectionFieldTrial();
-
-  // A/B test for determining a value for unused socket timeout.
-  void SocketTimeoutFieldTrial();
-
-  // A/B test for the maximum number of connections per proxy server.
-  void ProxyConnectionsFieldTrial();
-
-  // A/B test for spdy when --use-spdy not set.
-  void SpdyFieldTrial();
-
-  // A/B test for warmest socket vs. most recently used socket.
-  void WarmConnectionFieldTrial();
-
-  // A/B test for automatically establishing a backup TCP connection when a
-  // specified timeout value is reached.
-  void ConnectBackupJobsFieldTrial();
-
-  // Field trial to see what disabling DNS pre-resolution does to
-  // latency of page loads.
-  void PredictorFieldTrial();
-
-  // Field trial to see what effect installing defaults in the NTP apps pane
-  // has on retention and general apps/webstore usage.
-  void DefaultAppsFieldTrial();
-
-  // A field trial to see what effects launching Chrome automatically on
-  // computer startup has on retention and usage of Chrome.
-  void AutoLaunchChromeFieldTrial();
-
-  // A collection of field trials intended to test the uniformity and
-  // correctness of the field trial control, bucketing and reporting systems.
-  void SetupUniformityFieldTrials();
-
-  // Disables the new tab field trial if not running in desktop mode.
-  void DisableNewTabFieldTrialIfNecesssary();
 
   // Methods for |SetupMetricsAndFieldTrials()| --------------------------------
 
@@ -142,10 +105,6 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
   // creation of field trials. Call only after labs have been converted to
   // switches.
   void SetupMetricsAndFieldTrials();
-
-  // Add an invocation of your field trial init function to this method.
-  void SetupFieldTrials(bool metrics_recording_enabled,
-                        bool proxy_policy_is_set);
 
   // Starts recording of metrics. This can only be called after we have a file
   // thread.
@@ -182,6 +141,8 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
   // SetupMetricsAndFieldTrials is called.
   scoped_ptr<base::FieldTrialList> field_trial_list_;
 
+  ChromeBrowserFieldTrials browser_field_trials_;
+
   // Vector of additional ChromeBrowserMainExtraParts.
   // Parts are deleted in the inverse order they are added.
   std::vector<ChromeBrowserMainExtraParts*> chrome_extra_parts_;
@@ -190,7 +151,6 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
 
   scoped_ptr<StartupBrowserCreator> browser_creator_;
   scoped_ptr<BrowserProcessImpl> browser_process_;
-  scoped_refptr<HistogramSynchronizer> histogram_synchronizer_;
   scoped_refptr<chrome_browser_metrics::TrackingSynchronizer>
       tracking_synchronizer_;
   scoped_ptr<ProcessSingleton> process_singleton_;
@@ -237,7 +197,7 @@ void RecordBreakpadStatusUMA(MetricsService* metrics);
 void WarnAboutMinimumSystemRequirements();
 
 // Records the time from our process' startup to the present time in
-// the UMA histogram |metric_name|.
+// the Startup.BrowserMessageLoopStartTime UMA histogram.
 void RecordBrowserStartupTime();
 
 // Records a time value to an UMA histogram in the context of the

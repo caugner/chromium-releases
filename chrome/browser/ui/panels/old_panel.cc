@@ -5,6 +5,9 @@
 #include "chrome/browser/ui/panels/old_panel.h"
 
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_command_controller.h"
+#include "chrome/browser/ui/browser_commands.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/panels/panel_browser_window.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 
@@ -25,7 +28,7 @@ BrowserWindow* OldPanel::browser_window() const {
 }
 
 CommandUpdater* OldPanel::command_updater() {
-  return browser_->command_updater();
+  return browser_->command_controller()->command_updater();
 }
 
 Profile* OldPanel::profile() const {
@@ -38,8 +41,8 @@ void OldPanel::Initialize(const gfx::Rect& bounds, Browser* browser) {
       new PanelBrowserWindow(browser, this, native_panel()));
 }
 
-content::WebContents* OldPanel::WebContents() const {
-  return browser_->GetActiveWebContents();
+content::WebContents* OldPanel::GetWebContents() const {
+  return chrome::GetActiveWebContents(browser_);
 }
 
 bool OldPanel::ShouldCloseWindow() {
@@ -51,8 +54,8 @@ void OldPanel::OnWindowClosing() {
 }
 
 void OldPanel::ExecuteCommandWithDisposition(
-  int id, WindowOpenDisposition disposition) {
-  browser_->ExecuteCommandWithDisposition(id, disposition);
+    int id, WindowOpenDisposition disposition) {
+  chrome::ExecuteCommandWithDisposition(browser_, id, disposition);
 }
 
 SkBitmap OldPanel::GetCurrentPageIcon() const {

@@ -6,7 +6,6 @@
 #include "base/time.h"
 #include "chrome/browser/chromeos/cros/cros_in_process_browser_test.h"
 #include "chrome/browser/chromeos/cros/mock_cryptohome_library.h"
-#include "chrome/browser/chromeos/cros/mock_library_loader.h"
 #include "chrome/browser/chromeos/cros/mock_network_library.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
@@ -36,8 +35,6 @@ class LoginTestBase : public CrosInProcessBrowserTest {
     cros_mock_->InitMockCryptohomeLibrary();
     mock_cryptohome_library_ = cros_mock_->mock_cryptohome_library();
     mock_network_library_ = cros_mock_->mock_network_library();
-    EXPECT_CALL(*mock_cryptohome_library_, IsMounted())
-        .WillRepeatedly(Return(true));
     EXPECT_CALL(*mock_cryptohome_library_, GetSystemSalt())
         .WillRepeatedly(Return(std::string("stub_system_salt")));
     EXPECT_CALL(*mock_network_library_, AddUserActionObserver(_))
@@ -64,9 +61,11 @@ class LoginUserTest : public LoginTestBase {
   }
 };
 
-class LoginProfileTest : public LoginUserTest {
+class LoginGuestTest : public LoginTestBase {
  protected:
   virtual void SetUpCommandLine(CommandLine* command_line) {
+    command_line->AppendSwitch(switches::kGuestSession);
+    command_line->AppendSwitch(switches::kIncognito);
     command_line->AppendSwitchASCII(switches::kLoginProfile, "user");
     command_line->AppendSwitch(switches::kNoFirstRun);
   }
@@ -81,8 +80,8 @@ IN_PROC_BROWSER_TEST_F(LoginUserTest, UserPassed) {
   EXPECT_FALSE(profile->IsOffTheRecord());
 }
 
-// On initial launch, we should get the OTR default profile.
-IN_PROC_BROWSER_TEST_F(LoginProfileTest, UserNotPassed) {
+// After a guest login, we should get the OTR default profile.
+IN_PROC_BROWSER_TEST_F(LoginGuestTest, GuestIsOTR) {
   Profile* profile = browser()->profile();
   EXPECT_EQ("Default", profile->GetPath().BaseName().value());
   EXPECT_TRUE(profile->IsOffTheRecord());

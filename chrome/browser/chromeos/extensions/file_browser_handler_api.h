@@ -4,9 +4,9 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_EXTENSIONS_FILE_BROWSER_HANDLER_API_H_
 #define CHROME_BROWSER_CHROMEOS_EXTENSIONS_FILE_BROWSER_HANDLER_API_H_
-#pragma once
 
 #include <string>
+#include <vector>
 
 #include "base/file_path.h"
 #include "chrome/browser/extensions/extension_function.h"
@@ -32,8 +32,9 @@ class FileSelector {
 
 class FileHandlerSelectFileFunction : public AsyncExtensionFunction {
  public:
+  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserHandlerInternal.selectFile");
+
   FileHandlerSelectFileFunction();
-  virtual ~FileHandlerSelectFileFunction() OVERRIDE;
 
   // Called by FileSelector implementation when the user selects new file's
   // file path.
@@ -47,26 +48,27 @@ class FileHandlerSelectFileFunction : public AsyncExtensionFunction {
   static void set_gesture_check_disabled_for_test(bool disabled);
 
  protected:
+  virtual ~FileHandlerSelectFileFunction() OVERRIDE;
   virtual bool RunImpl() OVERRIDE;
 
  private:
-  // Calls |DoCreateFile| on file thread and invokes the callback.
-  void CreateFileOnFileThread(bool success,
-                              const std::string& file_system_name,
-                              const GURL& file_system_root);
-
-  // Creates file on provided file path.
-  bool DoCreateFile();
+  typedef base::Callback<void(const FilePath& virtual_path)>
+      GrantPermissionsCallback;
 
   // Called on UI thread after the file gets created.
-  void OnFileCreated(bool success,
-                     const std::string& file_system_name,
-                     const GURL& file_system_root);
+  void OnFileSystemOpened(bool success,
+                          const std::string& file_system_name,
+                          const GURL& file_system_root);
 
   // Grants file access permissions for the created file to the extension with
   // cros mount point provider and child process security policy.
-  // Returns virtual path for which has been given permission.
-  FilePath GrantPermissions();
+  void GrantPermissions(const GrantPermissionsCallback& callback);
+
+  // Callback called when we collect all paths and permissions that should be
+  // given to the caller render process in order for it to normally access file.
+  void OnGotPermissionsToGrant(
+      const GrantPermissionsCallback& callback,
+      const FilePath& virtual_path);
 
   // Sends response to the extension.
   void Respond(bool success,
@@ -81,14 +83,16 @@ class FileHandlerSelectFileFunction : public AsyncExtensionFunction {
   // Full file system path of the selected file.
   FilePath full_path_;
 
+  // List of permissions and paths that have to be granted for the selected
+  // files.
+  std::vector<std::pair<FilePath, int> > permissions_to_grant_;
+
   // |file_selector_for_test_| and |disable_geture_check_for_test_| are used
   // primary in testing to override file selector to be used in the function
   // implementation and disable user gesture check.
   // Once set they will be used for every extension function call.
   static file_handler::FileSelector* file_selector_for_test_;
   static bool gesture_check_disabled_for_test_;
-
-  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserHandlerInternal.selectFile");
 };
 
 #endif  // CHROME_BROWSER_CHROMEOS_EXTENSIONS_FILE_BROWSER_HANDLER_API_H_

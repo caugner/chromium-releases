@@ -76,6 +76,9 @@ class PPB_Flash_Proxy : public InterfaceProxy, public PPB_Flash_Shared {
                                 PP_FlashSetting setting) OVERRIDE;
   virtual PP_Var GetSetting(PP_Instance instance,
                             PP_FlashSetting setting) OVERRIDE;
+  virtual PP_Bool SetCrashData(PP_Instance instance,
+                               PP_FlashCrashKey key,
+                               PP_Var value) OVERRIDE;
   virtual PP_Bool IsClipboardFormatAvailable(
       PP_Instance instance,
       PP_Flash_Clipboard_Type clipboard_type,
@@ -175,6 +178,9 @@ class PPB_Flash_Proxy : public InterfaceProxy, public PPB_Flash_Shared {
                              int32_t* result);
   void OnHostMsgGetDeviceID(PP_Instance instance,
                             SerializedVarReturnValue id);
+  void OnHostMsgGetSetting(PP_Instance instance,
+                           PP_FlashSetting setting,
+                           SerializedVarReturnValue result);
   void OnHostMsgInvokePrinting(PP_Instance instance);
 
   DISALLOW_COPY_AND_ASSIGN(PPB_Flash_Proxy);

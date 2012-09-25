@@ -21,6 +21,8 @@
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_commands.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -99,14 +101,14 @@ class SavePageBrowserTest : public InProcessBrowserTest {
   }
 
   WebContents* GetCurrentTab() const {
-    WebContents* current_tab = browser()->GetActiveWebContents();
+    WebContents* current_tab = chrome::GetActiveWebContents(browser());
     EXPECT_TRUE(current_tab);
     return current_tab;
   }
 
 
   GURL WaitForSavePackageToFinish() const {
-    ui_test_utils::WindowedNotificationObserver observer(
+    content::WindowedNotificationObserver observer(
         content::NOTIFICATION_SAVE_PACKAGE_SUCCESSFULLY_FINISHED,
         content::NotificationService::AllSources());
     observer.Wait();
@@ -132,7 +134,7 @@ class SavePageBrowserTest : public InProcessBrowserTest {
 
     // Run message loop until a quit message is sent from
     // OnQueryDownloadEntriesComplete().
-    ui_test_utils::RunMessageLoop();
+    content::RunMessageLoop();
   }
 
   void OnQueryDownloadEntriesComplete(
@@ -283,8 +285,7 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, SaveCompleteHTML) {
 
 IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, NoSave) {
   ui_test_utils::NavigateToURL(browser(), GURL(chrome::kAboutBlankURL));
-  ASSERT_TRUE(browser()->command_updater()->SupportsCommand(IDC_SAVE_PAGE));
-  EXPECT_FALSE(browser()->command_updater()->IsCommandEnabled(IDC_SAVE_PAGE));
+  EXPECT_FALSE(chrome::CanSavePage(browser()));
 }
 
 IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, FileNameFromPageTitle) {
@@ -362,10 +363,10 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, CleanFilenameFromPageTitle) {
   ui_test_utils::NavigateToURL(browser(), url);
 
   SavePackageFilePicker::SetShouldPromptUser(false);
-  ui_test_utils::WindowedNotificationObserver observer(
+  content::WindowedNotificationObserver observer(
         content::NOTIFICATION_SAVE_PACKAGE_SUCCESSFULLY_FINISHED,
         content::NotificationService::AllSources());
-  browser()->SavePage();
+  chrome::SavePage(browser());
   observer.Wait();
 
   EXPECT_TRUE(file_util::PathExists(full_file_name));
@@ -402,10 +403,10 @@ IN_PROC_BROWSER_TEST_F(SavePageAsMHTMLBrowserTest, SavePageAsMHTML) {
 #else
   SavePackageFilePicker::SetShouldPromptUser(false);
 #endif
-  ui_test_utils::WindowedNotificationObserver observer(
+  content::WindowedNotificationObserver observer(
         content::NOTIFICATION_SAVE_PACKAGE_SUCCESSFULLY_FINISHED,
         content::NotificationService::AllSources());
-  browser()->SavePage();
+  chrome::SavePage(browser());
   observer.Wait();
   CheckDownloadHistory(url, full_file_name, -1);
 

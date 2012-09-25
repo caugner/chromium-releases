@@ -4,7 +4,8 @@
 
 #ifndef CHROME_BROWSER_NACL_HOST_NACL_BROKER_HOST_WIN_H_
 #define CHROME_BROWSER_NACL_HOST_NACL_BROKER_HOST_WIN_H_
-#pragma once
+
+#include <string>
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"

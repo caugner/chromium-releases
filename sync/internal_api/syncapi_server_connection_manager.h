@@ -4,7 +4,6 @@
 
 #ifndef SYNC_INTERNAL_API_SYNCAPI_SERVER_CONNECTION_MANAGER_H_
 #define SYNC_INTERNAL_API_SYNCAPI_SERVER_CONNECTION_MANAGER_H_
-#pragma once
 
 #include <string>
 
@@ -13,17 +12,16 @@
 #include "base/memory/scoped_ptr.h"
 #include "sync/engine/net/server_connection_manager.h"
 
-namespace sync_api {
+namespace syncer {
 
 class HttpPostProviderFactory;
 class HttpPostProviderInterface;
 
 // This provides HTTP Post functionality through the interface provided
 // to the sync API by the application hosting the syncer backend.
-class SyncAPIBridgedConnection
-    : public browser_sync::ServerConnectionManager::Connection {
+class SyncAPIBridgedConnection : public ServerConnectionManager::Connection {
  public:
-  SyncAPIBridgedConnection(browser_sync::ServerConnectionManager* scm,
+  SyncAPIBridgedConnection(ServerConnectionManager* scm,
                            HttpPostProviderFactory* factory);
 
   virtual ~SyncAPIBridgedConnection();
@@ -31,7 +29,7 @@ class SyncAPIBridgedConnection
   virtual bool Init(const char* path,
                     const std::string& auth_token,
                     const std::string& payload,
-                    browser_sync::HttpResponse* response) OVERRIDE;
+                    HttpResponse* response) OVERRIDE;
 
   virtual void Abort() OVERRIDE;
 
@@ -48,14 +46,12 @@ class SyncAPIBridgedConnection
 // A ServerConnectionManager subclass used by the syncapi layer. We use a
 // subclass so that we can override MakePost() to generate a POST object using
 // an instance of the HttpPostProviderFactory class.
-class SyncAPIServerConnectionManager
-    : public browser_sync::ServerConnectionManager {
+class SyncAPIServerConnectionManager : public ServerConnectionManager {
  public:
   // Takes ownership of factory.
   SyncAPIServerConnectionManager(const std::string& server,
                                  int port,
                                  bool use_ssl,
-                                 const std::string& client_version,
                                  HttpPostProviderFactory* factory);
   virtual ~SyncAPIServerConnectionManager();
 
@@ -73,6 +69,6 @@ class SyncAPIServerConnectionManager
   DISALLOW_COPY_AND_ASSIGN(SyncAPIServerConnectionManager);
 };
 
-}  // namespace sync_api
+}  // namespace syncer
 
 #endif  // SYNC_INTERNAL_API_SYNCAPI_SERVER_CONNECTION_MANAGER_H_

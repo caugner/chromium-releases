@@ -74,20 +74,8 @@ class CHROMEOS_EXPORT PowerManagerClient {
     virtual void LockButtonStateChanged(bool down,
                                         const base::TimeTicks& timestamp) {}
 
-    // Called when the screen is locked.
-    virtual void LockScreen() {}
-
-    // Called when the screen is unlocked.
-    virtual void UnlockScreen() {}
-
-    // Called when the screen fails to unlock.
-    virtual void UnlockScreenFailed() {}
-
     // Called when we go idle for threshold time.
     virtual void IdleNotify(int64 threshold_secs) {}
-
-    // Called when we go from idle to active.
-    virtual void ActiveNotify() {}
 
     // Called when a request is received to dim or undim the screen in software
     // (as opposed to the more-common method of adjusting the backlight).
@@ -128,6 +116,12 @@ class CHROMEOS_EXPORT PowerManagerClient {
   virtual void GetScreenBrightnessPercent(
       const GetScreenBrightnessPercentCallback& callback) = 0;
 
+  // Decreases the keyboard brightness.
+  virtual void DecreaseKeyboardBrightness() = 0;
+
+  // Increases the keyboard brightness.
+  virtual void IncreaseKeyboardBrightness() = 0;
+
   // Request for power supply status update.
   virtual void RequestStatusUpdate(UpdateRequestType update_type) = 0;
 
@@ -137,22 +131,11 @@ class CHROMEOS_EXPORT PowerManagerClient {
   // Requests shutdown of the system.
   virtual void RequestShutdown() = 0;
 
-  // Notifies PowerManager that a user requested to lock the screen.
-  virtual void NotifyScreenLockRequested() = 0;
-
   // Notifies PowerManager that screen lock has been completed.
   virtual void NotifyScreenLockCompleted() = 0;
 
-  // Notifies PowerManager that a user unlocked the screen.
-  virtual void NotifyScreenUnlockRequested() = 0;
-
   // Notifies PowerManager that screen is unlocked.
   virtual void NotifyScreenUnlockCompleted() = 0;
-
-  // Return whether or not the screen is locked. Implementation should cache
-  // this state so that it can return immediately. Useful for observers that
-  // need to know the current screen lock state when they are added.
-  virtual bool GetIsScreenLocked() = 0;
 
   // Idle management functions:
 
@@ -167,10 +150,6 @@ class CHROMEOS_EXPORT PowerManagerClient {
   // removed from the notification queue. If you wish notifications the next
   // time the machine goes idle for that much time, request again.
   virtual void RequestIdleNotification(int64 threshold_secs) = 0;
-
-  // Requests that the observers be notified in case of an Idle->Active event.
-  // NOTE: Like the previous request, this will also get triggered exactly once.
-  virtual void RequestActiveNotification() = 0;
 
   // Notifies the power manager that the user is active (i.e. generating input
   // events).

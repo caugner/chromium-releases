@@ -10,6 +10,7 @@
 #include "chrome/browser/download/download_item_model.h"
 #include "chrome/browser/download/download_util.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
 #include "chrome/browser/ui/gtk/custom_button.h"
 #include "chrome/browser/ui/gtk/download/download_item_gtk.h"
@@ -23,8 +24,7 @@
 #include "content/public/browser/page_navigator.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "grit/theme_resources_standard.h"
-#include "grit/ui_resources_standard.h"
+#include "grit/ui_resources.h"
 #include "ui/base/gtk/gtk_screen_util.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -308,7 +308,7 @@ void DownloadShelfGtk::OnButtonClick(GtkWidget* button) {
     Close();
   } else {
     // The link button was clicked.
-    browser_->ShowDownloadsTab();
+    chrome::ShowDownloads(browser_);
   }
 }
 
@@ -375,6 +375,13 @@ void DownloadShelfGtk::DidProcessEvent(GdkEvent* event) {
 
 bool DownloadShelfGtk::IsCursorInShelfZone(
     const gfx::Point& cursor_screen_coords) {
+  bool realized = (shelf_.get() &&
+                   gtk_widget_get_window(shelf_.get()));
+  // Do nothing if we've been unrealized in order to avoid a NOTREACHED in
+  // GetWidgetScreenPosition.
+  if (!realized)
+    return false;
+
   GtkAllocation allocation;
   gtk_widget_get_allocation(shelf_.get(), &allocation);
 

@@ -73,7 +73,7 @@ LoginAttemptObserver::~LoginAttemptObserver() {
 void LoginAttemptObserver::WaitForAttempt() {
   if (!login_attempted_) {
     waiting_ = true;
-    ui_test_utils::RunMessageLoop();
+    content::RunMessageLoop();
     waiting_ = false;
   }
   ASSERT_TRUE(login_attempted_);
@@ -119,8 +119,7 @@ class WebUIScreenLockerTester : public ScreenLockerTester {
 
 void WebUIScreenLockerTester::SetPassword(const std::string& password) {
   delete ExecuteJavascriptAndGetValue(StringPrintf(
-      "$('pod-row').pods[0].passwordElement.value = '%s';"
-      "$('pod-row').pods[0].passwordEmpty = false;",
+      "$('pod-row').pods[0].passwordElement.value = '%s';",
       password.c_str()));
 }
 

@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_POLICY_POLICY_SERVICE_STUB_H_
 #define CHROME_BROWSER_POLICY_POLICY_SERVICE_STUB_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "chrome/browser/policy/policy_map.h"
@@ -20,11 +19,9 @@ class PolicyServiceStub : public PolicyService {
   virtual ~PolicyServiceStub();
 
   virtual void AddObserver(PolicyDomain domain,
-                           const std::string& component_id,
                            Observer* observer) OVERRIDE;
 
   virtual void RemoveObserver(PolicyDomain domain,
-                              const std::string& component_id,
                               Observer* observer) OVERRIDE;
 
   virtual const PolicyMap& GetPolicies(

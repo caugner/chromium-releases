@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_SESSIONS_SESSION_TYPES_H_
 #define CHROME_BROWSER_SESSIONS_SESSION_TYPES_H_
-#pragma once
 
 #include <string>
 #include <vector>
@@ -171,6 +170,9 @@ struct SessionTab {
   base::Time timestamp;
 
   std::vector<TabNavigation> navigations;
+
+  // For reassociating sessionStorage.
+  std::string session_storage_persistent_id;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(SessionTab);

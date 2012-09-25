@@ -21,7 +21,7 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/notification_service.h"
-#include "grit/theme_resources_standard.h"
+#include "grit/theme_resources.h"
 #include "grit/ui_resources.h"
 #include "ui/base/gtk/gtk_compat.h"
 #include "ui/gfx/canvas.h"
@@ -48,9 +48,9 @@ const SkColor kDividerColor = SkColorSetRGB(0x2a, 0x2c, 0x2c);
 const int kMinWindowWidth = 26;
 
 gfx::Image* CreateImageForColor(SkColor color) {
-  gfx::Canvas canvas(gfx::Size(1, 1), true);
+  gfx::Canvas canvas(gfx::Size(1, 1), ui::SCALE_FACTOR_100P, true);
   canvas.DrawColor(color);
-  return new gfx::Image(canvas.ExtractBitmap());
+  return new gfx::Image(gfx::ImageSkia(canvas.ExtractImageRep()));
 }
 
 const gfx::Image* GetActiveBackgroundDefaultImage() {
@@ -143,7 +143,8 @@ bool PanelBrowserWindowGtk::UsingDefaultTheme() const {
     return true;
 
   GtkThemeService* theme_provider = GtkThemeService::GetFrom(panel_->profile());
-  return theme_provider->UsingDefaultTheme();
+  return theme_provider->UsingDefaultTheme() ||
+         theme_provider->UsingNativeTheme();
 }
 
 bool PanelBrowserWindowGtk::GetWindowEdge(int x, int y, GdkWindowEdge* edge) {

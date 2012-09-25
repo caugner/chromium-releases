@@ -13,9 +13,7 @@
 #include "ui/aura/env.h"
 #include "ui/aura/event.h"
 #include "ui/aura/layout_manager.h"
-#include "ui/aura/monitor_manager.h"
 #include "ui/aura/root_window.h"
-#include "ui/aura/single_monitor_manager.h"
 #include "ui/aura/test/aura_test_helper.h"
 #include "ui/aura/window.h"
 #include "ui/gfx/screen.h"
@@ -83,13 +81,29 @@ TEST_F(NativeWidgetAuraTest, CenterWindowSmallParent) {
   parent->Init(ui::LAYER_NOT_DRAWN);
   parent->SetBounds(gfx::Rect(0, 0, 480, 320));
   scoped_ptr<Widget> widget(new Widget());
-  NativeWidgetAura* window  = Init(parent.get(), widget.get());
+  NativeWidgetAura* window = Init(parent.get(), widget.get());
 
   window->CenterWindow(gfx::Size(100, 100));
   EXPECT_EQ(gfx::Rect( (480 - 100) / 2,
                        (320 - 100) / 2,
                        100, 100),
             window->GetNativeWindow()->bounds());
+  widget->CloseNow();
+}
+
+// Verifies CenterWindow() constrains to parent size.
+TEST_F(NativeWidgetAuraTest, CenterWindowSmallParentNotAtOrigin) {
+  // Make a parent window smaller than the host represented by rootwindow and
+  // offset it slightly from the origin.
+  scoped_ptr<aura::Window> parent(new aura::Window(NULL));
+  parent->Init(ui::LAYER_NOT_DRAWN);
+  parent->SetBounds(gfx::Rect(20, 40, 480, 320));
+  scoped_ptr<Widget> widget(new Widget());
+  NativeWidgetAura* window = Init(parent.get(), widget.get());
+  window->CenterWindow(gfx::Size(500, 600));
+
+  // |window| should be no bigger than |parent|.
+  EXPECT_EQ("20,40 480x320", window->GetNativeWindow()->bounds().ToString());
   widget->CloseNow();
 }
 
@@ -174,7 +188,7 @@ TEST_F(NativeWidgetAuraTest, GetClientAreaScreenBounds) {
   widget->Init(params);
 
   // For Aura, client area bounds match window bounds.
-  gfx::Rect client_bounds = widget->GetClientAreaScreenBounds();
+  gfx::Rect client_bounds = widget->GetClientAreaBoundsInScreen();
   EXPECT_EQ(10, client_bounds.x());
   EXPECT_EQ(20, client_bounds.y());
   EXPECT_EQ(300, client_bounds.width());
@@ -223,8 +237,6 @@ class GestureTrackingView : public views::View {
 // Verifies a capture isn't set on touch press and that the view that gets
 // the press gets the release.
 TEST_F(NativeWidgetAuraTest, DontCaptureOnGesture) {
-  CommandLine::ForCurrentProcess()->AppendSwitch(
-      switches::kAuraDisableMouseEventsFromTouch);
   // Create two views (both sized the same). |child| is configured not to
   // consume the gesture event.
   GestureTrackingView* view = new GestureTrackingView();
@@ -242,7 +254,7 @@ TEST_F(NativeWidgetAuraTest, DontCaptureOnGesture) {
 
   aura::TouchEvent press(ui::ET_TOUCH_PRESSED, gfx::Point(41, 51), 1,
                          base::TimeDelta());
-  root_window()->DispatchTouchEvent(&press);
+  root_window()->AsRootWindowHostDelegate()->OnHostTouchEvent(&press);
   // Both views should get the press.
   EXPECT_TRUE(view->got_gesture_event());
   EXPECT_TRUE(child->got_gesture_event());
@@ -255,7 +267,7 @@ TEST_F(NativeWidgetAuraTest, DontCaptureOnGesture) {
   // the press.
   aura::TouchEvent release(ui::ET_TOUCH_RELEASED, gfx::Point(250, 251), 1,
                            base::TimeDelta());
-  root_window()->DispatchTouchEvent(&release);
+  root_window()->AsRootWindowHostDelegate()->OnHostTouchEvent(&release);
   EXPECT_TRUE(view->got_gesture_event());
   EXPECT_FALSE(child->got_gesture_event());
   view->clear_got_gesture_event();
@@ -266,8 +278,6 @@ TEST_F(NativeWidgetAuraTest, DontCaptureOnGesture) {
 }
 
 TEST_F(NativeWidgetAuraTest, ReleaseCaptureOnTouchRelease) {
-  CommandLine::ForCurrentProcess()->AppendSwitch(
-      switches::kAuraDisableMouseEventsFromTouch);
   GestureTrackingView* view = new GestureTrackingView();
   scoped_ptr<TestWidget> widget(new TestWidget());
   Widget::InitParams params(Widget::InitParams::TYPE_WINDOW);
@@ -279,7 +289,7 @@ TEST_F(NativeWidgetAuraTest, ReleaseCaptureOnTouchRelease) {
 
   aura::TouchEvent press(ui::ET_TOUCH_PRESSED, gfx::Point(41, 51), 1,
                          base::TimeDelta());
-  root_window()->DispatchTouchEvent(&press);
+  root_window()->AsRootWindowHostDelegate()->OnHostTouchEvent(&press);
   EXPECT_TRUE(view->got_gesture_event());
   view->clear_got_gesture_event();
   // Set the capture.
@@ -289,7 +299,7 @@ TEST_F(NativeWidgetAuraTest, ReleaseCaptureOnTouchRelease) {
   // Generate a release, this should trigger releasing capture.
   aura::TouchEvent release(ui::ET_TOUCH_RELEASED, gfx::Point(41, 51), 1,
                            base::TimeDelta());
-  root_window()->DispatchTouchEvent(&release);
+  root_window()->AsRootWindowHostDelegate()->OnHostTouchEvent(&release);
   EXPECT_TRUE(view->got_gesture_event());
   view->clear_got_gesture_event();
   EXPECT_FALSE(widget->HasCapture());

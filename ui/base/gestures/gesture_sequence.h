@@ -4,7 +4,6 @@
 
 #ifndef UI_BASE_GESTURES_GESTURE_SEQUENCE_H_
 #define UI_BASE_GESTURES_GESTURE_SEQUENCE_H_
-#pragma once
 
 #include "base/timer.h"
 #include "ui/base/events.h"
@@ -76,13 +75,24 @@ class UI_EXPORT GestureSequence {
 
   bool IsSecondTouchDownCloseEnoughForTwoFingerTap();
 
+  // Creates a gesture event with the specified parameters. The function
+  // includes some common information (e.g. number of touch-points in the
+  // gesture etc.) in the gesture event as well.
+  GestureEvent* CreateGestureEvent(const GestureEventDetails& details,
+                                   const gfx::Point& location,
+                                   int flags,
+                                   base::Time timestamp,
+                                   unsigned int touch_id_bitmask);
+
   // Functions to be called to add GestureEvents, after successful recognition.
 
   // Tap gestures.
   void AppendTapDownGestureEvent(const GesturePoint& point, Gestures* gestures);
   void AppendBeginGestureEvent(const GesturePoint& point, Gestures* gestures);
   void AppendEndGestureEvent(const GesturePoint& point, Gestures* gestures);
-  void AppendClickGestureEvent(const GesturePoint& point, Gestures* gestures);
+  void AppendClickGestureEvent(const GesturePoint& point,
+                               int tap_count,
+                               Gestures* gestures);
   void AppendDoubleClickGestureEvent(const GesturePoint& point,
                                      Gestures* gestures);
   void AppendLongPressGestureEvent();
@@ -164,6 +174,8 @@ class UI_EXPORT GestureSequence {
   bool MaybeSwipe(const TouchEvent& event,
                   const GesturePoint& point,
                   Gestures* gestures);
+
+  void StopLongPressTimerIfRequired(const TouchEvent& event);
 
   // Current state of gesture recognizer.
   GestureState state_;

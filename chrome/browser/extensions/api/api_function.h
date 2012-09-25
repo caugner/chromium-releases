@@ -4,25 +4,24 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_API_API_FUNCTION_H_
 #define CHROME_BROWSER_EXTENSIONS_API_API_FUNCTION_H_
-#pragma once
 
 #include "chrome/browser/extensions/extension_function.h"
-#include "chrome/browser/extensions/api/api_resource.h"
 #include "content/public/browser/browser_thread.h"
-
-class ExtensionService;
 
 namespace extensions {
 
-class APIResourceController;
-class APIResourceEventNotifier;
+class ApiResourceEventNotifier;
 
-// AsyncAPIFunction provides convenient thread management for APIs that need to
+// AsyncApiFunction provides convenient thread management for APIs that need to
 // do essentially all their work on a thread other than the UI thread.
-class AsyncAPIFunction : public AsyncExtensionFunction {
+class AsyncApiFunction : public AsyncExtensionFunction {
  protected:
-  AsyncAPIFunction();
-  virtual ~AsyncAPIFunction() {}
+  AsyncApiFunction();
+  virtual ~AsyncApiFunction() {}
+
+  // Like Prepare(). A useful place to put common work in an ApiFunction
+  // superclass that multiple API functions want to share.
+  virtual bool PrePrepare();
 
   // Set up for work (e.g., validate arguments). Guaranteed to happen on UI
   // thread.
@@ -35,7 +34,7 @@ class AsyncAPIFunction : public AsyncExtensionFunction {
   // Start the asynchronous work. Guraranteed to happen on requested thread.
   virtual void AsyncWorkStart();
 
-  // Notify AsyncIOAPIFunction that the work is completed
+  // Notify AsyncIOApiFunction that the work is completed
   void AsyncWorkCompleted();
 
   // Respond. Guaranteed to happen on UI thread.
@@ -43,13 +42,16 @@ class AsyncAPIFunction : public AsyncExtensionFunction {
 
   // Looks for a kSrcId key that might have been added to a create method's
   // options object.
-  int ExtractSrcId(size_t argument_position);
+  int ExtractSrcId(const DictionaryValue* options);
+
+  // Deprecated. If you're still using this method, you should be converting
+  // your calling code to the new-style argument-parsing code, which won't work
+  // with this method. See the version that takes an options dictionary
+  // instead (above).
+  int DeprecatedExtractSrcId(size_t argument_position);
 
   // Utility.
-  APIResourceEventNotifier* CreateEventNotifier(int src_id);
-
-  // Access to the controller singleton.
-  APIResourceController* controller();
+  ApiResourceEventNotifier* CreateEventNotifier(int src_id);
 
   // ExtensionFunction::RunImpl()
   virtual bool RunImpl() OVERRIDE;
@@ -66,8 +68,6 @@ class AsyncAPIFunction : public AsyncExtensionFunction {
   // If you don't want your Work() method to happen on the IO thread, then set
   // this to the thread that you do want, preferably in Prepare().
   content::BrowserThread::ID work_thread_id_;
-
-  ExtensionService* extension_service_;
 };
 
 }  // namespace extensions

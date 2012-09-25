@@ -16,6 +16,7 @@
 #include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_thread.h"
@@ -23,7 +24,6 @@
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "grit/theme_resources_standard.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -34,11 +34,17 @@ namespace {
 // Calls the appropriate function for setting Chrome as the default browser.
 // This requires IO access (registry) and may result in interaction with a
 // modal system UI.
-void SetChromeAsDefaultBrowser(bool interactive_flow) {
+void SetChromeAsDefaultBrowser(bool interactive_flow, PrefService* prefs) {
   if (interactive_flow) {
     UMA_HISTOGRAM_COUNTS("DefaultBrowserWarning.SetAsDefaultUI", 1);
-    if (!ShellIntegration::SetAsDefaultBrowserInteractive())
+    if (!ShellIntegration::SetAsDefaultBrowserInteractive()) {
       UMA_HISTOGRAM_COUNTS("DefaultBrowserWarning.SetAsDefaultUIFailed", 1);
+    } else if (!ShellIntegration::IsDefaultBrowser()) {
+      // If the interaction succeeded but we are still not the default browser
+      // it likely means the user simply selected another browser from the
+      // panel. We will respect this choice and write it down as 'no, thanks'.
+      UMA_HISTOGRAM_COUNTS("DefaultBrowserWarning.DontSetAsDefault", 1);
+    }
   } else {
     UMA_HISTOGRAM_COUNTS("DefaultBrowserWarning.SetAsDefault", 1);
     ShellIntegration::SetAsDefaultBrowser();
@@ -134,7 +140,8 @@ bool DefaultBrowserInfoBarDelegate::Accept() {
   BrowserThread::PostTask(
       BrowserThread::FILE,
       FROM_HERE,
-      base::Bind(&SetChromeAsDefaultBrowser, interactive_flow_required_));
+      base::Bind(&SetChromeAsDefaultBrowser, interactive_flow_required_,
+                 prefs_));
 
   return true;
 }
@@ -159,24 +166,22 @@ void CheckDefaultBrowserCallback() {
 
     if (default_change_mode != ShellIntegration::SET_DEFAULT_NOT_ALLOWED) {
       BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-          base::Bind(&browser::internal::NotifyNotDefaultBrowserCallback));
+          base::Bind(&chrome::internal::NotifyNotDefaultBrowserCallback));
     }
   }
 }
 
 }  // namespace
 
-namespace browser {
+namespace chrome {
 
 void ShowDefaultBrowserPrompt(Profile* profile) {
   // We do not check if we are the default browser if:
   // - the user said "don't ask me again" on the infobar earlier.
-  // - this is the first launch after the first run flow.
   // - There is a policy in control of this setting.
-  if (!profile->GetPrefs()->GetBoolean(prefs::kCheckDefaultBrowser) ||
-      first_run::IsChromeFirstRun()) {
+  if (!profile->GetPrefs()->GetBoolean(prefs::kCheckDefaultBrowser))
     return;
-  }
+
   if (g_browser_process->local_state()->IsManagedPreference(
       prefs::kDefaultBrowserSettingEnabled)) {
     if (g_browser_process->local_state()->GetBoolean(
@@ -196,6 +201,12 @@ void ShowDefaultBrowserPrompt(Profile* profile) {
 
 }
 
+#if !defined(OS_WIN)
+bool ShowFirstRunDefaultBrowserPrompt(Profile* profile) {
+  return false;
+}
+#endif
+
 namespace internal {
 
 void NotifyNotDefaultBrowserCallback() {
@@ -205,7 +216,7 @@ void NotifyNotDefaultBrowserCallback() {
 
   // In ChromeBot tests, there might be a race. This line appears to get
   // called during shutdown and |tab| can be NULL.
-  TabContents* tab = browser->GetActiveTabContents();
+  TabContents* tab = chrome::GetActiveTabContents(browser);
   if (!tab)
     return;
 
@@ -223,4 +234,4 @@ void NotifyNotDefaultBrowserCallback() {
 }
 
 }  // namespace internal
-}  // namespace browser
+}  // namespace chrome

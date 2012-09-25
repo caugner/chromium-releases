@@ -14,18 +14,18 @@
 #include "base/message_loop.h"
 #include "chrome/browser/icon_loader.h"
 #include "grit/component_extension_resources.h"
-#include "skia/ext/image_operations.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/image/image.h"
+#include "ui/gfx/image/image_skia_operations.h"
 #include "webkit/glue/image_decoder.h"
 
 namespace {
 
-// Used with GenerateBitmapWithSize() to indicate that the image shouldn't be
+// Used with GenerateImageWithSize() to indicate that the image shouldn't be
 // resized.
 const int kDoNotResize = -1;
 
@@ -61,11 +61,6 @@ const IdrBySize kGenericIdrs = {
   IDR_FILE_MANAGER_IMG_FILETYPE_LARGE_GENERIC,
   IDR_FILE_MANAGER_IMG_FILETYPE_LARGE_GENERIC
 };
-const IdrBySize kHtmlIdrs = {
-  IDR_FILE_MANAGER_IMG_FILETYPE_HTML,
-  IDR_FILE_MANAGER_IMG_FILETYPE_HTML,
-  IDR_FILE_MANAGER_IMG_FILETYPE_HTML
-};
 const IdrBySize kImageIdrs = {
   IDR_FILE_MANAGER_IMG_FILETYPE_IMAGE,
   IDR_FILE_MANAGER_IMG_FILETYPE_IMAGE,
@@ -75,11 +70,6 @@ const IdrBySize kPdfIdrs = {
   IDR_FILE_MANAGER_IMG_FILETYPE_PDF,
   IDR_FILE_MANAGER_IMG_FILETYPE_PDF,
   IDR_FILE_MANAGER_IMG_FILETYPE_PDF
-};
-const IdrBySize kTextIdrs = {
-  IDR_FILE_MANAGER_IMG_FILETYPE_TEXT,
-  IDR_FILE_MANAGER_IMG_FILETYPE_TEXT,
-  IDR_FILE_MANAGER_IMG_FILETYPE_TEXT
 };
 const IdrBySize kVideoIdrs = {
   IDR_FILE_MANAGER_IMG_FILETYPE_VIDEO,
@@ -117,8 +107,6 @@ IconMapper::IconMapper() {
     std::make_pair(".oga", kAudioIdrs),
     std::make_pair(".ogg", kAudioIdrs),
     std::make_pair(".wav", kAudioIdrs),
-    std::make_pair(".htm", kHtmlIdrs),
-    std::make_pair(".html", kHtmlIdrs),
     std::make_pair(".bmp", kImageIdrs),
     std::make_pair(".gif", kImageIdrs),
     std::make_pair(".ico", kImageIdrs),
@@ -126,10 +114,6 @@ IconMapper::IconMapper() {
     std::make_pair(".jpg", kImageIdrs),
     std::make_pair(".png", kImageIdrs),
     std::make_pair(".webp", kImageIdrs),
-    std::make_pair(".log", kTextIdrs),
-    std::make_pair(".pod", kTextIdrs),
-    std::make_pair(".rst", kTextIdrs),
-    std::make_pair(".txt", kTextIdrs),
     std::make_pair(".ogm", kVideoIdrs),
     std::make_pair(".ogv", kVideoIdrs),
     std::make_pair(".ogx", kVideoIdrs),
@@ -162,21 +146,21 @@ int IconMapper::Lookup(const std::string& extension,
   return idr;
 }
 
-// Returns a copy of |source| that is |pixel_size| in width and height. If
-// |pixel_size| is |kDoNotResize|, returns an unmodified copy of |source|.
+// Returns a copy of |source| that is |dip_size| in width and height. If
+// |dip_size| is |kDoNotResize|, returns an unmodified copy of |source|.
 // |source| must be a square image (width == height).
-SkBitmap GenerateBitmapWithSize(const SkBitmap& source, int pixel_size) {
+gfx::ImageSkia ResizeImage(const gfx::ImageSkia& source, int dip_size) {
   DCHECK(!source.isNull());
   DCHECK(source.width() == source.height());
 
-  if (pixel_size == kDoNotResize || source.width() == pixel_size)
+  if (dip_size == kDoNotResize || source.width() == dip_size)
     return source;
 
-  return skia::ImageOperations::Resize(
-      source, skia::ImageOperations::RESIZE_BEST, pixel_size, pixel_size);
+  return gfx::ImageSkiaOperations::CreateResizedImage(source,
+      gfx::Size(dip_size, dip_size));
 }
 
-int IconSizeToPixelSize(IconLoader::IconSize size) {
+int IconSizeToDIPSize(IconLoader::IconSize size) {
   switch (size) {
     case IconLoader::SMALL:  return 16;
     case IconLoader::NORMAL: return 32;
@@ -197,14 +181,9 @@ void IconLoader::ReadIcon() {
       LAZY_INSTANCE_INITIALIZER;
   int idr = icon_mapper.Get().Lookup(group_, icon_size_);
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  scoped_refptr<base::RefCountedStaticMemory> bytes(
-      rb.LoadDataResourceBytes(idr, ui::SCALE_FACTOR_100P));
-  DCHECK(bytes.get());
-  SkBitmap bitmap;
-  if (!gfx::PNGCodec::Decode(bytes->front(), bytes->size(), &bitmap))
-    NOTREACHED();
+  const gfx::ImageSkia* image_skia = rb.GetImageNamed(idr).ToImageSkia();
   image_.reset(new gfx::Image(
-      GenerateBitmapWithSize(bitmap, IconSizeToPixelSize(icon_size_))));
+      ResizeImage(*image_skia, IconSizeToDIPSize(icon_size_))));
   target_message_loop_->PostTask(
       FROM_HERE, base::Bind(&IconLoader::NotifyDelegate, this));
 }

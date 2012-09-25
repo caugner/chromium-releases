@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_API_SOCKET_TCP_SOCKET_H_
 #define CHROME_BROWSER_EXTENSIONS_API_SOCKET_TCP_SOCKET_H_
-#pragma once
 
 #include <string>
 
@@ -20,11 +19,11 @@ class Socket;
 
 namespace extensions {
 
-class APIResourceEventNotifier;
+class ApiResourceEventNotifier;
 
 class TCPSocket : public Socket {
  public:
-  explicit TCPSocket(APIResourceEventNotifier* event_notifier);
+  explicit TCPSocket(ApiResourceEventNotifier* event_notifier);
   virtual ~TCPSocket();
 
   virtual void Connect(const std::string& address,
@@ -43,10 +42,13 @@ class TCPSocket : public Socket {
                       const CompletionCallback& callback) OVERRIDE;
   virtual bool SetKeepAlive(bool enable, int delay) OVERRIDE;
   virtual bool SetNoDelay(bool no_delay) OVERRIDE;
+  virtual bool IsTCPSocket() OVERRIDE;
+  virtual bool GetPeerAddress(net::IPEndPoint* address) OVERRIDE;
+  virtual bool GetLocalAddress(net::IPEndPoint* address) OVERRIDE;
 
   static TCPSocket* CreateSocketForTesting(
       net::TCPClientSocket* tcp_client_socket,
-      APIResourceEventNotifier* event_notifier);
+      ApiResourceEventNotifier* event_notifier);
 
  protected:
   virtual int WriteImpl(net::IOBuffer* io_buffer,
@@ -59,7 +61,7 @@ class TCPSocket : public Socket {
                       int result);
 
   TCPSocket(net::TCPClientSocket* tcp_client_socket,
-            APIResourceEventNotifier* event_notifier);
+            ApiResourceEventNotifier* event_notifier);
 
   scoped_ptr<net::TCPClientSocket> socket_;
 

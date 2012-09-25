@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_RENDERER_RENDERER_WEBKITPLATFORMSUPPORT_IMPL_H_
 #define CONTENT_RENDERER_RENDERER_WEBKITPLATFORMSUPPORT_IMPL_H_
-#pragma once
 
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
@@ -31,6 +30,9 @@ class CONTENT_EXPORT RendererWebKitPlatformSupportImpl
   RendererWebKitPlatformSupportImpl();
   virtual ~RendererWebKitPlatformSupportImpl();
 
+  void set_plugin_refresh_allowed(bool plugin_refresh_allowed) {
+    plugin_refresh_allowed_ = plugin_refresh_allowed;
+  }
   // WebKitPlatformSupport methods:
   virtual WebKit::WebClipboard* clipboard() OVERRIDE;
   virtual WebKit::WebMimeRegistry* mimeRegistry() OVERRIDE;
@@ -63,6 +65,7 @@ class CONTENT_EXPORT RendererWebKitPlatformSupportImpl
       unsigned key_size_index,
       const WebKit::WebString& challenge,
       const WebKit::WebURL& url) OVERRIDE;
+  virtual void screenColorProfile(WebKit::WebVector<char>* to_profile) OVERRIDE;
   virtual WebKit::WebIDBFactory* idbFactory() OVERRIDE;
   virtual void createIDBKeysFromSerializedValuesAndKeyPath(
       const WebKit::WebVector<WebKit::WebSerializedScriptValue>& values,
@@ -85,8 +88,6 @@ class CONTENT_EXPORT RendererWebKitPlatformSupportImpl
   virtual WebKit::WebString userAgent(const WebKit::WebURL& url) OVERRIDE;
   virtual void GetPlugins(bool refresh,
                           std::vector<webkit::WebPluginInfo>* plugins) OVERRIDE;
-  virtual WebKit::WebPeerConnectionHandler* createPeerConnectionHandler(
-      WebKit::WebPeerConnectionHandlerClient* client) OVERRIDE;
   virtual WebKit::WebPeerConnection00Handler* createPeerConnection00Handler(
       WebKit::WebPeerConnection00HandlerClient* client) OVERRIDE;
   virtual WebKit::WebMediaStreamCenter* createMediaStreamCenter(
@@ -124,6 +125,9 @@ class CONTENT_EXPORT RendererWebKitPlatformSupportImpl
   // increments by 1, for every enable decrements by 1. When it reaches 0,
   // we tell the browser to enable fast termination.
   int sudden_termination_disables_;
+
+  // If true, then a GetPlugins call is allowed to rescan the disk.
+  bool plugin_refresh_allowed_;
 
   // Implementation of the WebSharedWorkerRepository APIs (provides an interface
   // to WorkerService on the browser thread.

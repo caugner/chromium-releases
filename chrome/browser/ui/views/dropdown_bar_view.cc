@@ -8,7 +8,7 @@
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "grit/generated_resources.h"
-#include "grit/theme_resources_standard.h"
+#include "grit/theme_resources.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkRect.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -56,7 +56,7 @@ DropdownBackground::DropdownBackground(BrowserView* browser_view,
 void DropdownBackground::Paint(gfx::Canvas* canvas, views::View* view) const {
   // Find the offset from which to tile the toolbar background image.
   // First, get the origin with respect to the screen.
-  gfx::Point origin = view->GetWidget()->GetWindowScreenBounds().origin();
+  gfx::Point origin = view->GetWidget()->GetWindowBoundsInScreen().origin();
   // Now convert from screen to parent coordinates.
   view->ConvertPointToView(NULL, browser_view_, &origin);
   // Finally, calculate the background image tiling offset.
@@ -111,11 +111,13 @@ void DropdownBarView::OnPaint(gfx::Canvas* canvas) {
 
   if (animation_offset() > 0) {
      gfx::Canvas animating_edges(
-         gfx::Size(bounds().width(), kAnimatingEdgeHeight), false);
+         gfx::Size(bounds().width(), kAnimatingEdgeHeight),
+         canvas->scale_factor(),
+         false);
      canvas->Translate(bounds().origin());
      OnPaintBackground(&animating_edges);
      OnPaintBorder(&animating_edges);
-     canvas->DrawImageInt(animating_edges.ExtractBitmap(), bounds().x(),
+     canvas->DrawImageInt(animating_edges.ExtractImageRep(), bounds().x(),
          animation_offset());
   }
 }

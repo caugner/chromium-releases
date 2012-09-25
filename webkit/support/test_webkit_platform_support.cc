@@ -68,8 +68,10 @@
 
 using WebKit::WebScriptController;
 
-TestWebKitPlatformSupport::TestWebKitPlatformSupport(bool unit_test_mode)
-      : unit_test_mode_(unit_test_mode) {
+TestWebKitPlatformSupport::TestWebKitPlatformSupport(bool unit_test_mode,
+    WebKit::Platform* shadow_platform_delegate)
+    : unit_test_mode_(unit_test_mode),
+      shadow_platform_delegate_(shadow_platform_delegate) {
   v8::V8::SetCounterFunction(base::StatsTable::FindLocation);
 
   WebKit::initialize(this);
@@ -351,11 +353,12 @@ class TestWebIDBFactory : public WebKit::WebIDBFactory {
   }
 
   virtual void open(const WebString& name,
+                    long long version,
                     WebKit::WebIDBCallbacks* callbacks,
                     const WebKit::WebSecurityOrigin& origin,
                     WebKit::WebFrame* frame,
                     const WebString& dataDir) {
-    factory_->open(name, callbacks, origin, frame,
+    factory_->open(name, version, callbacks, origin, frame,
                    dataDir.isEmpty() ? data_dir_ : dataDir);
   }
 
@@ -496,4 +499,24 @@ TestWebKitPlatformSupport::CreateWebSocketBridge(
     WebKit::WebSocketStreamHandle* handle,
     webkit_glue::WebSocketStreamHandleDelegate* delegate) {
   return SimpleSocketStreamBridge::Create(handle, delegate);
+}
+
+WebKit::WebMediaStreamCenter*
+TestWebKitPlatformSupport::createMediaStreamCenter(
+    WebKit::WebMediaStreamCenterClient* client) {
+  if (shadow_platform_delegate_)
+    return shadow_platform_delegate_->createMediaStreamCenter(client);
+
+  return webkit_glue::WebKitPlatformSupportImpl::createMediaStreamCenter(
+      client);
+}
+
+WebKit::WebRTCPeerConnectionHandler*
+TestWebKitPlatformSupport::createRTCPeerConnectionHandler(
+    WebKit::WebRTCPeerConnectionHandlerClient* client) {
+  if (shadow_platform_delegate_)
+    return shadow_platform_delegate_->createRTCPeerConnectionHandler(client);
+
+  return webkit_glue::WebKitPlatformSupportImpl::createRTCPeerConnectionHandler(
+      client);
 }

@@ -10,9 +10,8 @@
 #include "base/compiler_specific.h"
 #include "base/message_loop.h"
 #include "base/time.h"
-#include "sync/engine/syncproto.h"
 #include "sync/engine/throttled_data_type_tracker.h"
-#include "sync/internal_api/public/syncable/model_type_test_util.h"
+#include "sync/internal_api/public/base/model_type_test_util.h"
 #include "sync/protocol/bookmark_specifics.pb.h"
 #include "sync/protocol/password_specifics.pb.h"
 #include "sync/protocol/sync.pb.h"
@@ -20,17 +19,21 @@
 #include "sync/sessions/session_state.h"
 #include "sync/sessions/sync_session_context.h"
 #include "sync/syncable/blob.h"
-#include "sync/syncable/syncable.h"
+#include "sync/syncable/directory.h"
 #include "sync/test/engine/mock_connection_manager.h"
 #include "sync/test/engine/test_directory_setter_upper.h"
-
 #include "testing/gtest/include/gtest/gtest.h"
 
-using syncable::Blob;
 using ::testing::_;
 
-namespace browser_sync {
+using sync_pb::ClientToServerMessage;
+using sync_pb::CommitResponse_EntryResponse;
+using sync_pb::SyncEntity;
+
+namespace syncer {
+
 using sessions::SyncSessionContext;
+using syncable::Blob;
 
 class MockDelegate : public sessions::SyncSession::Delegate {
  public:
@@ -172,7 +175,7 @@ class SyncerProtoUtilTest : public testing::Test {
 TEST_F(SyncerProtoUtilTest, VerifyResponseBirthday) {
   // Both sides empty
   EXPECT_TRUE(directory()->store_birthday().empty());
-  ClientToServerResponse response;
+  sync_pb::ClientToServerResponse response;
   EXPECT_FALSE(SyncerProtoUtil::VerifyResponseBirthday(directory(), &response));
 
   // Remote set, local empty
@@ -204,10 +207,10 @@ TEST_F(SyncerProtoUtilTest, AddRequestBirthday) {
   EXPECT_EQ(msg.store_birthday(), "meat");
 }
 
-class DummyConnectionManager : public browser_sync::ServerConnectionManager {
+class DummyConnectionManager : public ServerConnectionManager {
  public:
   DummyConnectionManager()
-      : ServerConnectionManager("unused", 0, false, "version"),
+      : ServerConnectionManager("unused", 0, false),
         send_error_(false),
         access_denied_(false) {}
 
@@ -219,7 +222,7 @@ class DummyConnectionManager : public browser_sync::ServerConnectionManager {
       return false;
     }
 
-    ClientToServerResponse response;
+    sync_pb::ClientToServerResponse response;
     if (access_denied_) {
       response.set_error_code(sync_pb::SyncEnums::ACCESS_DENIED);
     }
@@ -244,9 +247,10 @@ class DummyConnectionManager : public browser_sync::ServerConnectionManager {
 TEST_F(SyncerProtoUtilTest, PostAndProcessHeaders) {
   DummyConnectionManager dcm;
   ClientToServerMessage msg;
+  SyncerProtoUtil::SetProtocolVersion(&msg);
   msg.set_share("required");
   msg.set_message_contents(ClientToServerMessage::GET_UPDATES);
-  ClientToServerResponse response;
+  sync_pb::ClientToServerResponse response;
 
   dcm.set_send_error(true);
   EXPECT_FALSE(SyncerProtoUtil::PostAndProcessHeaders(&dcm, NULL,
@@ -264,10 +268,10 @@ TEST_F(SyncerProtoUtilTest, PostAndProcessHeaders) {
 TEST_F(SyncerProtoUtilTest, HandleThrottlingWithDatatypes) {
   ThrottledDataTypeTracker tracker(NULL);
   SyncProtocolError error;
-  error.error_type = browser_sync::THROTTLED;
-  syncable::ModelTypeSet types;
-  types.Put(syncable::BOOKMARKS);
-  types.Put(syncable::PASSWORDS);
+  error.error_type = THROTTLED;
+  ModelTypeSet types;
+  types.Put(BOOKMARKS);
+  types.Put(PASSWORDS);
   error.error_data_types = types;
 
   base::TimeTicks ticks = base::TimeTicks::FromInternalValue(1);
@@ -279,7 +283,7 @@ TEST_F(SyncerProtoUtilTest, HandleThrottlingNoDatatypes) {
   ThrottledDataTypeTracker tracker(NULL);
   MockDelegate delegate;
   SyncProtocolError error;
-  error.error_type = browser_sync::THROTTLED;
+  error.error_type = THROTTLED;
 
   base::TimeTicks ticks = base::TimeTicks::FromInternalValue(1);
 
@@ -288,4 +292,4 @@ TEST_F(SyncerProtoUtilTest, HandleThrottlingNoDatatypes) {
   SyncerProtoUtil::HandleThrottleError(error, ticks, &tracker, &delegate);
   EXPECT_TRUE(tracker.GetThrottledTypes().Empty());
 }
-}  // namespace browser_sync
+}  // namespace syncer

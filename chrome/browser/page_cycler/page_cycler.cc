@@ -13,6 +13,10 @@
 #include "base/string_split.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_commands.h"
+#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/test/base/chrome_process_util.h"
 #include "chrome/test/perf/perf_test.h"
@@ -29,12 +33,10 @@ using content::WebContents;
 
 PageCycler::PageCycler(Browser* browser,
                        const FilePath& urls_file)
-    : content::WebContentsObserver(browser->GetActiveWebContents()),
+    : content::WebContentsObserver(chrome::GetActiveWebContents(browser)),
       browser_(browser),
       urls_file_(urls_file),
       url_index_(0),
-      total_iterations_(0),
-      current_iteration_(0),
       aborted_(false) {
   BrowserList::AddObserver(this);
   AddRef();  // Balanced in Finish()/Abort() (only one should be called).
@@ -59,7 +61,8 @@ bool PageCycler::IsLoadCallbackValid(const GURL& validated_url,
 
 void PageCycler::DidFinishLoad(int64 frame_id,
                                const GURL& validated_url,
-                               bool is_main_frame) {
+                               bool is_main_frame,
+                               content::RenderViewHost* render_view_host) {
   if (IsLoadCallbackValid(validated_url, is_main_frame))
     LoadSucceeded();
 }
@@ -75,8 +78,7 @@ void PageCycler::DidFailProvisionalLoad(
     LoadFailed(validated_url, error_description);
 }
 
-void PageCycler::Run(const int& total_iterations) {
-  total_iterations_ = total_iterations;
+void PageCycler::Run() {
   if (browser_)
     content::BrowserThread::PostBlockingPoolTask(
         FROM_HERE,
@@ -132,7 +134,7 @@ void PageCycler::BeginCycle() {
   // result in the browser being in a state of loading when PageCycler is ready
   // to start. Instead of interrupting the load, we wait for it to finish, and
   // will call LoadNextURL() from DidFinishLoad() or DidFailProvisionalLoad().
-  if (browser_->GetActiveWebContents()->IsLoading())
+  if (chrome::GetActiveWebContents(browser_)->IsLoading())
     return;
   LoadNextURL();
 }
@@ -140,17 +142,12 @@ void PageCycler::BeginCycle() {
 void PageCycler::LoadNextURL() {
   CHECK(browser_);
   if (url_index_ >= urls_.size()) {
-    if (current_iteration_ < total_iterations_ - 1) {
-      ++current_iteration_;
-      url_index_ = 0;
-    } else {
-      content::BrowserThread::PostBlockingPoolTask(
-          FROM_HERE,
-          base::Bind(&PageCycler::PrepareResultsOnBackgroundThread, this));
-      return;
-    }
+    content::BrowserThread::PostBlockingPoolTask(
+        FROM_HERE,
+        base::Bind(&PageCycler::PrepareResultsOnBackgroundThread, this));
+    return;
   }
-  if (url_index_ || current_iteration_) {
+  if (url_index_) {
     timings_string_.append(", ");
     urls_string_.append(", ");
   }
@@ -209,7 +206,12 @@ void PageCycler::WriteResultsOnBackgroundThread(const std::string& output) {
 
   if (!output.empty()) {
     CHECK(!stats_file_.empty());
-    file_util::WriteFile(stats_file_, output.c_str(), output.size());
+    if (file_util::PathExists(stats_file_)) {
+      VLOG(1) << "PageCycler: Previous stats file found; appending.";
+      file_util::AppendToFile(stats_file_, output.c_str(), output.size());
+    } else {
+      file_util::WriteFile(stats_file_, output.c_str(), output.size());
+    }
   }
   if (!errors_file_.empty()) {
     if (!error_.empty()) {
@@ -235,7 +237,7 @@ void PageCycler::Finish() {
   CHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   BrowserList::RemoveObserver(this);
   browser_->OnWindowClosing();
-  browser_->ExecuteCommand(IDC_EXIT);
+  chrome::ExecuteCommand(browser_, IDC_EXIT);
   Release();  // Balanced in PageCycler constructor;
               // (only one of Finish/Abort should be called).
 }

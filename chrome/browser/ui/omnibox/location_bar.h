@@ -10,12 +10,11 @@
 
 #ifndef CHROME_BROWSER_UI_OMNIBOX_LOCATION_BAR_H_
 #define CHROME_BROWSER_UI_OMNIBOX_LOCATION_BAR_H_
-#pragma once
 
 #include <string>
 
 #include "base/string16.h"
-#include "chrome/browser/instant/instant_delegate.h"
+#include "chrome/common/instant_types.h"
 #include "content/public/common/page_transition_types.h"
 #include "webkit/glue/window_open_disposition.h"
 

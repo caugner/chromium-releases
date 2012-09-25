@@ -4,6 +4,7 @@
 
 #include "chrome/browser/web_resource/promo_resource_service.h"
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/message_loop.h"
 #include "base/threading/thread_restrictions.h"
@@ -30,6 +31,14 @@ static const int kTestCacheUpdateDelay = 3 * 60 * 1000;
 // The version of the service (used to expire the cache when upgrading Chrome
 // to versions with different types of promos).
 static const int kPromoServiceVersion = 7;
+
+// The promotion type used for Unpack() and ScheduleNotificationOnInit.
+static const NotificationPromo::PromoType kDefaultPromoType =
+#if defined(OS_ANDROID) || defined(OS_IOS)
+    NotificationPromo::MOBILE_NTP_SYNC_PROMO;
+#else
+    NotificationPromo::NTP_NOTIFICATION_PROMO;
+#endif
 
 GURL GetPromoResourceURL() {
   const std::string promo_server_url = CommandLine::ForCurrentProcess()->
@@ -81,8 +90,7 @@ PromoResourceService::PromoResourceService(Profile* profile)
                          GetCacheUpdateDelay()),
                          profile_(profile),
                          ALLOW_THIS_IN_INITIALIZER_LIST(
-                             weak_ptr_factory_(this)),
-                         web_resource_update_scheduled_(false) {
+                             weak_ptr_factory_(this)) {
   ScheduleNotificationOnInit();
 }
 
@@ -103,12 +111,18 @@ void PromoResourceService::ScheduleNotification(double promo_start,
       PostNotification(ms_until_start);
     } else if (ms_until_end > 0) {
       if (ms_until_start <= 0) {
-        // Notify immediately if time is between start and end.
+        // The promo is active.  Notify immediately.
         PostNotification(0);
       }
       // Schedule the next notification to happen at the end of promotion.
       PostNotification(ms_until_end);
+    } else {
+      // The promo (if any) has finished.  Notify immediately.
+      PostNotification(0);
     }
+  } else {
+      // The promo (if any) was apparently cancelled.  Notify immediately.
+      PostNotification(0);
   }
 }
 
@@ -129,19 +143,21 @@ void PromoResourceService::ScheduleNotificationOnInit() {
   } else {
     // If the promo start is in the future, set a notification task to
     // invalidate the NTP cache at the time of the promo start.
-    double promo_start = prefs_->GetDouble(prefs::kNtpPromoStart);
-    double promo_end = prefs_->GetDouble(prefs::kNtpPromoEnd);
-    ScheduleNotification(promo_start, promo_end);
+    NotificationPromo notification_promo(profile_);
+    notification_promo.InitFromPrefs(kDefaultPromoType);
+    ScheduleNotification(notification_promo.StartTimeForGroup(),
+                         notification_promo.EndTime());
   }
 }
 
 void PromoResourceService::PostNotification(int64 delay_ms) {
-  if (web_resource_update_scheduled_)
-    return;
+  // Note that this could cause re-issuing a notification every time
+  // we receive an update from a server if something goes wrong.
+  // Given that this couldn't happen more frequently than every
+  // kCacheUpdateDelay milliseconds, we should be fine.
   // TODO(achuith): This crashes if we post delay_ms = 0 to the message loop.
   // during startup.
   if (delay_ms > 0) {
-    web_resource_update_scheduled_ = true;
     MessageLoop::current()->PostDelayedTask(
         FROM_HERE,
         base::Bind(&PromoResourceService::PromoResourceStateChange,
@@ -153,7 +169,6 @@ void PromoResourceService::PostNotification(int64 delay_ms) {
 }
 
 void PromoResourceService::PromoResourceStateChange() {
-  web_resource_update_scheduled_ = false;
   content::NotificationService* service =
       content::NotificationService::current();
   service->Notify(chrome::NOTIFICATION_PROMO_RESOURCE_STATE_CHANGED,
@@ -173,16 +188,10 @@ std::string PromoResourceService::GetPromoLocale() {
 
 void PromoResourceService::Unpack(const DictionaryValue& parsed_json) {
   NotificationPromo notification_promo(profile_);
-  notification_promo.InitFromJson(parsed_json);
+  notification_promo.InitFromJson(parsed_json, kDefaultPromoType);
 
   if (notification_promo.new_notification()) {
     ScheduleNotification(notification_promo.StartTimeForGroup(),
                          notification_promo.EndTime());
   }
-}
-
-bool PromoResourceService::CanShowNotificationPromo(Profile* profile) {
-  NotificationPromo notification_promo(profile);
-  notification_promo.InitFromPrefs();
-  return notification_promo.CanShow();
 }

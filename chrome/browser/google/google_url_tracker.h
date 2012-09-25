@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_GOOGLE_GOOGLE_URL_TRACKER_H_
 #define CHROME_BROWSER_GOOGLE_GOOGLE_URL_TRACKER_H_
-#pragma once
 
 #include <map>
 #include <string>
@@ -18,9 +17,9 @@
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_source.h"
-#include "content/public/common/url_fetcher.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/network_change_notifier.h"
+#include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_fetcher_delegate.h"
 
 class GoogleURLTrackerInfoBarDelegate;
@@ -157,12 +156,11 @@ class GoogleURLTracker : public net::URLFetcherDelegate,
   // notification.  |navigation_controller_source| and |tab_contents_source| are
   // NotificationSources pointing to the associated NavigationController and
   // TabContents, respectively, for this load; |infobar_helper| is the
-  // InfoBarTabHelper of the associated tab; and |search_url| is the actual
-  // search performed by the user, which if necessary we'll re-do on a new
-  // domain later.  If there is already a visible GoogleURLTracker infobar for
-  // this tab, this function resets its associated navigation entry to point at
-  // the new pending entry.  Otherwise this function creates a (still-invisible)
-  // InfoBarDelegate for the associated tab.
+  // InfoBarTabHelper of the associated tab; and |pending_id| is the unique ID
+  // of the newly pending NavigationEntry.  If there is already a visible
+  // GoogleURLTracker infobar for this tab, this function resets its associated
+  // pending entry ID to the new ID.  Otherwise this function creates a
+  // (still-invisible) InfoBarDelegate for the associated tab.
   void OnNavigationPending(
       const content::NotificationSource& navigation_controller_source,
       const content::NotificationSource& tab_contents_source,
@@ -177,14 +175,26 @@ class GoogleURLTracker : public net::URLFetcherDelegate,
   void OnNavigationCommittedOrTabClosed(const InfoBarTabHelper* infobar_helper,
                                         const GURL& search_url);
 
+  // Called by Observe() when an instant navigation occurs.  This will call
+  // OnNavigationPending(), and, depending on whether this is a search we were
+  // listening for, may then also call OnNavigationCommittedOrTabClosed().
+  void OnInstantCommitted(
+    const content::NotificationSource& navigation_controller_source,
+    const content::NotificationSource& tab_contents_source,
+    InfoBarTabHelper* infobar_helper,
+    const GURL& search_url);
+
   // Closes all open infobars.  If |redo_searches| is true, this also triggers
   // each tab to re-perform the user's search, but on the new Google TLD.
   void CloseAllInfoBars(bool redo_searches);
 
   // Unregisters any listeners for the notification sources in |map_entry|.
-  // This also sanity-DCHECKs that these are registered (or not) in the specific
+  // This sanity-DCHECKs that these are registered (or not) in the specific
   // cases we expect.  (|must_be_listening_for_commit| is used purely for this
-  // sanity-checking.)
+  // sanity-checking.)  This also unregisters our global NAV_ENTRY_PENDING/
+  // INSTANT_COMMITTED listeners if there are no remaining listeners for
+  // NAV_ENTRY_COMMITTED, as we no longer need them until another search is
+  // committed.
   void UnregisterForEntrySpecificNotifications(
       const MapEntry& map_entry,
       bool must_be_listening_for_commit);

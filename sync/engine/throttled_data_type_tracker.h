@@ -4,14 +4,13 @@
 
 #ifndef SYNC_ENGINE_THROTTLED_DATA_TYPE_TRACKER_H_
 #define SYNC_ENGINE_THROTTLED_DATA_TYPE_TRACKER_H_
-#pragma once
 
 #include <map>
 
 #include "base/gtest_prod_util.h"
-#include "sync/internal_api/public/syncable/model_type.h"
+#include "sync/internal_api/public/base/model_type.h"
 
-namespace browser_sync {
+namespace syncer {
 
 class AllStatus;
 
@@ -23,15 +22,14 @@ class ThrottledDataTypeTracker {
   ~ThrottledDataTypeTracker();
 
   // Throttles a set of data types until the specified time is reached.
-  void SetUnthrottleTime(syncable::ModelTypeSet types,
-                         const base::TimeTicks& time);
+  void SetUnthrottleTime(ModelTypeSet types, const base::TimeTicks& time);
 
   // Given an input of the current time (usually from time::Now()), removes from
   // the set of throttled types any types whose throttling period has expired.
   void PruneUnthrottledTypes(const base::TimeTicks& time);
 
   // Returns the set of types which are currently throttled.
-  syncable::ModelTypeSet GetThrottledTypes() const;
+  ModelTypeSet GetThrottledTypes() const;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(ThrottledDataTypeTrackerTest,
@@ -39,7 +37,7 @@ class ThrottledDataTypeTracker {
   FRIEND_TEST_ALL_PREFIXES(ThrottledDataTypeTrackerTest,
                            GetCurrentlyThrottledTypesTest);
 
-  typedef std::map<syncable::ModelType, base::TimeTicks> UnthrottleTimes;
+  typedef std::map<ModelType, base::TimeTicks> UnthrottleTimes;
 
   // This is a map from throttled data types to the time at which they can be
   // unthrottled.
@@ -50,6 +48,6 @@ class ThrottledDataTypeTracker {
   DISALLOW_COPY_AND_ASSIGN(ThrottledDataTypeTracker);
 };
 
-}  // namespace browser_sync
+}  // namespace syncer
 
 #endif  // SYNC_ENGINE_THROTTLED_DATA_TYPE_TRACKER_H_

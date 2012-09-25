@@ -4,10 +4,10 @@
 
 #ifndef SYNC_SYNCABLE_SYNCABLE_INL_H_
 #define SYNC_SYNCABLE_SYNCABLE_INL_H_
-#pragma once
 
-#include "sync/syncable/syncable.h"
+#include "sync/syncable/entry_kernel.h"
 
+namespace syncer {
 namespace syncable {
 
 template <typename FieldType, FieldType field_index>
@@ -20,5 +20,6 @@ class LessField {
 };
 
 }  // namespace syncable
+}  // namespace syncer
 
 #endif  // SYNC_SYNCABLE_SYNCABLE_INL_H_

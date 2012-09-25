@@ -6,7 +6,6 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_API_WEB_NAVIGATION_WEB_NAVIGATION_API_CONSTANTS_H_
 #define CHROME_BROWSER_EXTENSIONS_API_WEB_NAVIGATION_WEB_NAVIGATION_API_CONSTANTS_H_
-#pragma once
 
 namespace extensions {
 
@@ -15,8 +14,11 @@ namespace web_navigation_api_constants {
 // Keys.
 extern const char kErrorKey[];
 extern const char kFrameIdKey[];
-extern const char kSourceTabIdKey[];
+extern const char kProcessIdKey[];
+extern const char kReplacedTabIdKey[];
 extern const char kSourceFrameIdKey[];
+extern const char kSourceProcessIdKey[];
+extern const char kSourceTabIdKey[];
 extern const char kTabIdKey[];
 extern const char kTimeStampKey[];
 extern const char kTransitionTypeKey[];
@@ -30,7 +32,9 @@ extern const char kOnCompleted[];
 extern const char kOnCreatedNavigationTarget[];
 extern const char kOnDOMContentLoaded[];
 extern const char kOnErrorOccurred[];
+extern const char kOnHistoryStateUpdated[];
 extern const char kOnReferenceFragmentUpdated[];
+extern const char kOnTabReplaced[];
 
 }  // namespace web_navigation_api_constants
 

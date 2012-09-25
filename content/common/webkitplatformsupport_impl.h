@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_COMMON_CONTENT_WEBKITPLATFORMSUPPORT_IMPL_H_
 #define CONTENT_COMMON_CONTENT_WEBKITPLATFORMSUPPORT_IMPL_H_
-#pragma once
 
 #include "base/compiler_specific.h"
 #include "content/common/content_export.h"
@@ -20,6 +19,8 @@ namespace content {
 class CONTENT_EXPORT WebKitPlatformSupportImpl
     : NON_EXPORTED_BASE(public webkit_glue::WebKitPlatformSupportImpl) {
  public:
+  typedef WebKit::WebGraphicsContext3D* (OffscreenContextFactory)();
+
   WebKitPlatformSupportImpl();
   virtual ~WebKitPlatformSupportImpl();
 
@@ -38,6 +39,9 @@ class CONTENT_EXPORT WebKitPlatformSupportImpl
   virtual WebKit::WebGraphicsContext3D* createOffscreenGraphicsContext3D(
       const WebKit::WebGraphicsContext3D::Attributes& attributes);
 
+  static void SetOffscreenContextFactoryForTest(
+      OffscreenContextFactory factory);
+
  protected:
   virtual GpuChannelHostFactory* GetGpuChannelHostFactory();
 };
@@ -45,4 +49,3 @@ class CONTENT_EXPORT WebKitPlatformSupportImpl
 }  // namespace content
 
 #endif  // CONTENT_COMMON_CONTENT_WEBKITPLATFORMSUPPORT_IMPL_H_
-

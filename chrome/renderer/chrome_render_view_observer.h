@@ -4,7 +4,6 @@
 
 #ifndef CHROME_RENDERER_CHROME_RENDER_VIEW_OBSERVER_H_
 #define CHROME_RENDERER_CHROME_RENDER_VIEW_OBSERVER_H_
-#pragma once
 
 #include <set>
 #include <string>
@@ -13,6 +12,7 @@
 #include "base/memory/linked_ptr.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/timer.h"
+#include "chrome/common/extensions/permissions/api_permission.h"
 #include "content/public/renderer/render_view_observer.h"
 #include "googleurl/src/gurl.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPermissionClient.h"
@@ -35,7 +35,7 @@ class PhishingClassifierDelegate;
 }
 
 namespace webkit_glue {
-class ImageResourceFetcher;
+class MultiResolutionImageResourceFetcher;
 }
 
 // This class holds the Chrome specific parts of RenderView, and has the same
@@ -105,6 +105,8 @@ class ChromeRenderViewObserver : public content::RenderViewObserver,
   virtual bool allowWriteToClipboard(WebKit::WebFrame* frame,
                                      bool default_value) OVERRIDE;
   virtual bool allowWebComponents(const WebKit::WebDocument&, bool) OVERRIDE;
+  virtual bool allowHTMLNotifications(
+      const WebKit::WebDocument& document) OVERRIDE;
   virtual void didNotAllowPlugins(WebKit::WebFrame* frame) OVERRIDE;
   virtual void didNotAllowScript(WebKit::WebFrame* frame) OVERRIDE;
   virtual bool allowDisplayingInsecureContent(
@@ -165,8 +167,10 @@ class ChromeRenderViewObserver : public content::RenderViewObserver,
   // This callback is triggered when DownloadFavicon completes, either
   // succesfully or with a failure. See DownloadFavicon for more
   // details.
-  void DidDownloadFavicon(webkit_glue::ImageResourceFetcher* fetcher,
-                          const SkBitmap& image);
+  void DidDownloadFavicon(
+      int requested_size,
+      webkit_glue::MultiResolutionImageResourceFetcher* fetcher,
+      const std::vector<SkBitmap>& images);
 
   // Requests to download a favicon image. When done, the RenderView
   // is notified by way of DidDownloadFavicon. Returns true if the
@@ -183,8 +187,10 @@ class ChromeRenderViewObserver : public content::RenderViewObserver,
   // Determines if a host is in the strict security host set.
   bool IsStrictSecurityHost(const std::string& host);
 
-  // Determines if the document has a permission to use experimental Web API
-  bool IsExperimentalWebFeatureAllowed(const WebKit::WebDocument& document);
+  // Checks if |origin| correponds to an installed extension that has been
+  // granted the |permission|.
+  bool HasExtensionPermission(const WebKit::WebSecurityOrigin& origin,
+                              extensions::APIPermission::ID permission) const;
 
   // Save the JavaScript to preload if a ViewMsg_WebUIJavaScript is received.
   scoped_ptr<WebUIJavaScript> webui_javascript_;
@@ -214,8 +220,9 @@ class ChromeRenderViewObserver : public content::RenderViewObserver,
   // External host exposed through automation controller.
   scoped_ptr<ExternalHostBindings> external_host_bindings_;
 
-  typedef std::vector<linked_ptr<webkit_glue::ImageResourceFetcher> >
-      ImageResourceFetcherList;
+  typedef std::vector<
+      linked_ptr<webkit_glue::MultiResolutionImageResourceFetcher> >
+    ImageResourceFetcherList;
 
   // ImageResourceFetchers schedule via DownloadImage.
   ImageResourceFetcherList image_fetchers_;

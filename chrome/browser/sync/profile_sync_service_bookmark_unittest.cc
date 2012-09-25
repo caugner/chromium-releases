@@ -21,6 +21,7 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/base_bookmark_model_observer.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
+#include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/sync/abstract_profile_sync_service_test.h"
 #include "chrome/browser/sync/glue/bookmark_change_processor.h"
 #include "chrome/browser/sync/glue/bookmark_model_associator.h"
@@ -36,7 +37,7 @@
 #include "sync/internal_api/public/test/test_user_share.h"
 #include "sync/internal_api/public/write_node.h"
 #include "sync/internal_api/public/write_transaction.h"
-#include "sync/syncable/syncable.h"  // TODO(tim): Remove. Bug 131130.
+#include "sync/syncable/mutable_entry.h"  // TODO(tim): Remove. Bug 131130.
 #include "sync/test/engine/test_id_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -44,21 +45,27 @@
 namespace browser_sync {
 
 using content::BrowserThread;
-using sync_api::BaseNode;
+using syncer::BaseNode;
 using testing::_;
 using testing::InvokeWithoutArgs;
 using testing::Mock;
 using testing::StrictMock;
 
+#if defined(OS_ANDROID)
+static const bool kExpectMobileBookmarks = true;
+#else
+static const bool kExpectMobileBookmarks = false;
+#endif  // defined(OS_ANDROID)
+
 class TestBookmarkModelAssociator : public BookmarkModelAssociator {
  public:
   TestBookmarkModelAssociator(
       BookmarkModel* bookmark_model,
-      sync_api::UserShare* user_share,
+      syncer::UserShare* user_share,
       DataTypeErrorHandler* error_handler)
       : BookmarkModelAssociator(bookmark_model, user_share,
                                 error_handler,
-                                true /* expect_mobile_bookmarks_folder */),
+                                kExpectMobileBookmarks),
         user_share_(user_share) {}
 
   // TODO(akalin): This logic lazily creates any tagged node that is
@@ -67,13 +74,13 @@ class TestBookmarkModelAssociator : public BookmarkModelAssociator {
   virtual bool GetSyncIdForTaggedNode(const std::string& tag, int64* sync_id) {
     std::string tag_str = std::string(tag.c_str(), tag.length());
     bool root_exists = false;
-    syncable::ModelType type = model_type();
+    syncer::ModelType type = model_type();
     {
-      sync_api::WriteTransaction trans(FROM_HERE, user_share_);
-      sync_api::ReadNode uber_root(&trans);
+      syncer::WriteTransaction trans(FROM_HERE, user_share_);
+      syncer::ReadNode uber_root(&trans);
       uber_root.InitByRootLookup();
 
-      sync_api::ReadNode root(&trans);
+      syncer::ReadNode root(&trans);
       root_exists = root.InitByTagLookup(
           ProfileSyncServiceTestHelper::GetTagForType(type)) ==
               BaseNode::INIT_OK;
@@ -88,17 +95,17 @@ class TestBookmarkModelAssociator : public BookmarkModelAssociator {
         return false;
     }
 
-    sync_api::WriteTransaction trans(FROM_HERE, user_share_);
-    sync_api::ReadNode root(&trans);
+    syncer::WriteTransaction trans(FROM_HERE, user_share_);
+    syncer::ReadNode root(&trans);
     EXPECT_EQ(BaseNode::INIT_OK, root.InitByTagLookup(
         ProfileSyncServiceTestHelper::GetTagForType(type)));
 
     // First, try to find a node with the title among the root's children.
     // This will be the case if we are testing model persistence, and
     // are reloading a sync repository created earlier in the test.
-    int64 last_child_id = sync_api::kInvalidId;
-    for (int64 id = root.GetFirstChildId(); id != sync_api::kInvalidId; /***/) {
-      sync_api::ReadNode child(&trans);
+    int64 last_child_id = syncer::kInvalidId;
+    for (int64 id = root.GetFirstChildId(); id != syncer::kInvalidId; /***/) {
+      syncer::ReadNode child(&trans);
       EXPECT_EQ(BaseNode::INIT_OK, child.InitByIdLookup(id));
       last_child_id = id;
       if (tag_str == child.GetTitle()) {
@@ -108,18 +115,19 @@ class TestBookmarkModelAssociator : public BookmarkModelAssociator {
       id = child.GetSuccessorId();
     }
 
-    sync_api::ReadNode predecessor_node(&trans);
-    sync_api::ReadNode* predecessor = NULL;
-    if (last_child_id != sync_api::kInvalidId) {
+    syncer::ReadNode predecessor_node(&trans);
+    syncer::ReadNode* predecessor = NULL;
+    if (last_child_id != syncer::kInvalidId) {
       EXPECT_EQ(BaseNode::INIT_OK,
                 predecessor_node.InitByIdLookup(last_child_id));
       predecessor = &predecessor_node;
     }
-    sync_api::WriteNode node(&trans);
+    syncer::WriteNode node(&trans);
     // Create new fake tagged nodes at the end of the ordering.
     node.InitByCreation(type, root, predecessor);
     node.SetIsFolder(true);
-    node.entry_->Put(syncable::UNIQUE_SERVER_TAG, tag);
+    node.GetMutableEntryForTest()->Put(
+        syncer::syncable::UNIQUE_SERVER_TAG, tag);
     node.SetTitle(UTF8ToWide(tag_str));
     node.SetExternalId(0);
     *sync_id = node.GetId();
@@ -127,21 +135,21 @@ class TestBookmarkModelAssociator : public BookmarkModelAssociator {
   }
 
  private:
-  sync_api::UserShare* user_share_;
-  browser_sync::TestIdFactory id_factory_;
+  syncer::UserShare* user_share_;
+  syncer::TestIdFactory id_factory_;
 };
 
 namespace {
 
-// FakeServerChange constructs a list of sync_api::ChangeRecords while modifying
+// FakeServerChange constructs a list of syncer::ChangeRecords while modifying
 // the sync model, and can pass the ChangeRecord list to a
-// sync_api::SyncObserver (i.e., the ProfileSyncService) to test the client
+// syncer::SyncObserver (i.e., the ProfileSyncService) to test the client
 // change-application behavior.
 // Tests using FakeServerChange should be careful to avoid back-references,
 // since FakeServerChange will send the edits in the order specified.
 class FakeServerChange {
  public:
-  explicit FakeServerChange(sync_api::WriteTransaction* trans) : trans_(trans) {
+  explicit FakeServerChange(syncer::WriteTransaction* trans) : trans_(trans) {
   }
 
   // Pretend that the server told the syncer to add a bookmark object.
@@ -150,16 +158,16 @@ class FakeServerChange {
             bool is_folder,
             int64 parent_id,
             int64 predecessor_id) {
-    sync_api::ReadNode parent(trans_);
+    syncer::ReadNode parent(trans_);
     EXPECT_EQ(BaseNode::INIT_OK, parent.InitByIdLookup(parent_id));
-    sync_api::WriteNode node(trans_);
+    syncer::WriteNode node(trans_);
     if (predecessor_id == 0) {
-      EXPECT_TRUE(node.InitByCreation(syncable::BOOKMARKS, parent, NULL));
+      EXPECT_TRUE(node.InitByCreation(syncer::BOOKMARKS, parent, NULL));
     } else {
-      sync_api::ReadNode predecessor(trans_);
+      syncer::ReadNode predecessor(trans_);
       EXPECT_EQ(BaseNode::INIT_OK, predecessor.InitByIdLookup(predecessor_id));
       EXPECT_EQ(predecessor.GetParentId(), parent.GetId());
-      EXPECT_TRUE(node.InitByCreation(syncable::BOOKMARKS, parent,
+      EXPECT_TRUE(node.InitByCreation(syncer::BOOKMARKS, parent,
                                       &predecessor));
     }
     EXPECT_EQ(node.GetPredecessorId(), predecessor_id);
@@ -168,8 +176,8 @@ class FakeServerChange {
     node.SetTitle(title);
     if (!is_folder)
       node.SetURL(GURL(url));
-    sync_api::ChangeRecord record;
-    record.action = sync_api::ChangeRecord::ACTION_ADD;
+    syncer::ChangeRecord record;
+    record.action = syncer::ChangeRecord::ACTION_ADD;
     record.id = node.GetId();
     changes_.push_back(record);
     return node.GetId();
@@ -194,19 +202,19 @@ class FakeServerChange {
   void Delete(int64 id) {
     {
       // Delete the sync node.
-      sync_api::WriteNode node(trans_);
+      syncer::WriteNode node(trans_);
       EXPECT_EQ(BaseNode::INIT_OK, node.InitByIdLookup(id));
       EXPECT_FALSE(node.GetFirstChildId());
       node.Remove();
     }
     {
       // Verify the deletion.
-      sync_api::ReadNode node(trans_);
+      syncer::ReadNode node(trans_);
       EXPECT_EQ(BaseNode::INIT_FAILED_ENTRY_IS_DEL, node.InitByIdLookup(id));
     }
 
-    sync_api::ChangeRecord record;
-    record.action = sync_api::ChangeRecord::ACTION_DELETE;
+    syncer::ChangeRecord record;
+    record.action = syncer::ChangeRecord::ACTION_DELETE;
     record.id = id;
     // Deletions are always first in the changelist, but we can't actually do
     // WriteNode::Remove() on the node until its children are moved. So, as
@@ -218,7 +226,7 @@ class FakeServerChange {
 
   // Set a new title value, and return the old value.
   std::wstring ModifyTitle(int64 id, const std::wstring& new_title) {
-    sync_api::WriteNode node(trans_);
+    syncer::WriteNode node(trans_);
     EXPECT_EQ(BaseNode::INIT_OK, node.InitByIdLookup(id));
     std::string old_title = node.GetTitle();
     node.SetTitle(new_title);
@@ -230,15 +238,15 @@ class FakeServerChange {
   // We could return the old predecessor id, but it turns out not to be
   // very useful for assertions.
   int64 ModifyPosition(int64 id, int64 parent_id, int64 predecessor_id) {
-    sync_api::ReadNode parent(trans_);
+    syncer::ReadNode parent(trans_);
     EXPECT_EQ(BaseNode::INIT_OK, parent.InitByIdLookup(parent_id));
-    sync_api::WriteNode node(trans_);
+    syncer::WriteNode node(trans_);
     EXPECT_EQ(BaseNode::INIT_OK, node.InitByIdLookup(id));
     int64 old_parent_id = node.GetParentId();
     if (predecessor_id == 0) {
       EXPECT_TRUE(node.SetPosition(parent, NULL));
     } else {
-      sync_api::ReadNode predecessor(trans_);
+      syncer::ReadNode predecessor(trans_);
       EXPECT_EQ(BaseNode::INIT_OK, predecessor.InitByIdLookup(predecessor_id));
       EXPECT_EQ(predecessor.GetParentId(), parent.GetId());
       EXPECT_TRUE(node.SetPosition(parent, &predecessor));
@@ -250,10 +258,10 @@ class FakeServerChange {
   // Pass the fake change list to |service|.
   void ApplyPendingChanges(ChangeProcessor* processor) {
     processor->ApplyChangesFromSyncModel(
-        trans_, sync_api::ImmutableChangeRecordList(&changes_));
+        trans_, syncer::ImmutableChangeRecordList(&changes_));
   }
 
-  const sync_api::ChangeRecordList& changes() {
+  const syncer::ChangeRecordList& changes() {
     return changes_;
   }
 
@@ -264,19 +272,19 @@ class FakeServerChange {
     // Coalesce multi-property edits.
     if (!changes_.empty() && changes_.back().id == id &&
         changes_.back().action ==
-        sync_api::ChangeRecord::ACTION_UPDATE)
+        syncer::ChangeRecord::ACTION_UPDATE)
       return;
-    sync_api::ChangeRecord record;
-    record.action = sync_api::ChangeRecord::ACTION_UPDATE;
+    syncer::ChangeRecord record;
+    record.action = syncer::ChangeRecord::ACTION_UPDATE;
     record.id = id;
     changes_.push_back(record);
   }
 
   // The transaction on which everything happens.
-  sync_api::WriteTransaction *trans_;
+  syncer::WriteTransaction *trans_;
 
   // The change list we construct.
-  sync_api::ChangeRecordList changes_;
+  syncer::ChangeRecordList changes_;
 };
 
 class ExtensiveChangesBookmarkModelObserver : public BaseBookmarkModelObserver {
@@ -349,7 +357,7 @@ class ProfileSyncServiceBookmarkTest : public testing::Test {
   void LoadBookmarkModel(LoadOption load, SaveOption save) {
     bool delete_bookmarks = load == DELETE_EXISTING_STORAGE;
     profile_.CreateBookmarkModel(delete_bookmarks);
-    model_ = profile_.GetBookmarkModel();
+    model_ = BookmarkModelFactory::GetForProfile(&profile_);
     // Wait for the bookmarks model to load.
     profile_.BlockUntilBookmarkModelLoaded();
     // This noticeably speeds up the unit tests that request it.
@@ -361,10 +369,10 @@ class ProfileSyncServiceBookmarkTest : public testing::Test {
   void StartSync() {
     // Set up model associator.
     model_associator_.reset(new TestBookmarkModelAssociator(
-        profile_.GetBookmarkModel(),
+        BookmarkModelFactory::GetForProfile(&profile_),
         test_user_share_.user_share(),
         &mock_error_handler_));
-    SyncError error = model_associator_->AssociateModels();
+    syncer::SyncError error = model_associator_->AssociateModels();
     EXPECT_FALSE(error.IsSet());
     MessageLoop::current()->RunAllPending();
 
@@ -378,7 +386,7 @@ class ProfileSyncServiceBookmarkTest : public testing::Test {
   void StopSync() {
     change_processor_->Stop();
     change_processor_.reset();
-    SyncError error = model_associator_->DisassociateModels();
+    syncer::SyncError error = model_associator_->DisassociateModels();
     EXPECT_FALSE(error.IsSet());
     model_associator_.reset();
 
@@ -396,14 +404,14 @@ class ProfileSyncServiceBookmarkTest : public testing::Test {
   }
 
   bool InitSyncNodeFromChromeNode(const BookmarkNode* bnode,
-                                  sync_api::BaseNode* sync_node) {
+                                  syncer::BaseNode* sync_node) {
     return model_associator_->InitSyncNodeFromChromeId(bnode->id(),
                                                        sync_node);
   }
 
-  void ExpectSyncerNodeMatching(sync_api::BaseTransaction* trans,
+  void ExpectSyncerNodeMatching(syncer::BaseTransaction* trans,
                                 const BookmarkNode* bnode) {
-    sync_api::ReadNode gnode(trans);
+    syncer::ReadNode gnode(trans);
     ASSERT_TRUE(InitSyncNodeFromChromeNode(bnode, &gnode));
     // Non-root node titles and parents must match.
     if (!model_->is_permanent_node(bnode)) {
@@ -423,7 +431,7 @@ class ProfileSyncServiceBookmarkTest : public testing::Test {
     } else {
       const BookmarkNode* bprev =
           bnode->parent()->GetChild(browser_index - 1);
-      sync_api::ReadNode gprev(trans);
+      syncer::ReadNode gprev(trans);
       ASSERT_TRUE(InitSyncNodeFromChromeNode(bprev, &gprev));
       EXPECT_EQ(gnode.GetPredecessorId(), gprev.GetId());
       EXPECT_EQ(gnode.GetParentId(), gprev.GetParentId());
@@ -433,7 +441,7 @@ class ProfileSyncServiceBookmarkTest : public testing::Test {
     } else {
       const BookmarkNode* bnext =
           bnode->parent()->GetChild(browser_index + 1);
-      sync_api::ReadNode gnext(trans);
+      syncer::ReadNode gnext(trans);
       ASSERT_TRUE(InitSyncNodeFromChromeNode(bnext, &gnext));
       EXPECT_EQ(gnode.GetSuccessorId(), gnext.GetId());
       EXPECT_EQ(gnode.GetParentId(), gnext.GetParentId());
@@ -443,11 +451,11 @@ class ProfileSyncServiceBookmarkTest : public testing::Test {
   }
 
   void ExpectSyncerNodeMatching(const BookmarkNode* bnode) {
-    sync_api::ReadTransaction trans(FROM_HERE, test_user_share_.user_share());
+    syncer::ReadTransaction trans(FROM_HERE, test_user_share_.user_share());
     ExpectSyncerNodeMatching(&trans, bnode);
   }
 
-  void ExpectBrowserNodeMatching(sync_api::BaseTransaction* trans,
+  void ExpectBrowserNodeMatching(syncer::BaseTransaction* trans,
                                  int64 sync_id) {
     EXPECT_TRUE(sync_id);
     const BookmarkNode* bnode =
@@ -468,12 +476,12 @@ class ProfileSyncServiceBookmarkTest : public testing::Test {
 
   void ExpectSyncerNodeKnown(const BookmarkNode* node) {
     int64 sync_id = model_associator_->GetSyncIdFromChromeId(node->id());
-    EXPECT_NE(sync_id, sync_api::kInvalidId);
+    EXPECT_NE(sync_id, syncer::kInvalidId);
   }
 
   void ExpectSyncerNodeUnknown(const BookmarkNode* node) {
     int64 sync_id = model_associator_->GetSyncIdFromChromeId(node->id());
-    EXPECT_EQ(sync_id, sync_api::kInvalidId);
+    EXPECT_EQ(sync_id, syncer::kInvalidId);
   }
 
   void ExpectBrowserNodeTitle(int64 sync_id, const std::wstring& title) {
@@ -500,7 +508,7 @@ class ProfileSyncServiceBookmarkTest : public testing::Test {
     EXPECT_EQ(node->parent(), parent);
   }
 
-  void ExpectModelMatch(sync_api::BaseTransaction* trans) {
+  void ExpectModelMatch(syncer::BaseTransaction* trans) {
     const BookmarkNode* root = model_->root_node();
     EXPECT_EQ(root->GetIndexOf(model_->bookmark_bar_node()), 0);
     EXPECT_EQ(root->GetIndexOf(model_->other_node()), 1);
@@ -515,7 +523,7 @@ class ProfileSyncServiceBookmarkTest : public testing::Test {
 
       ExpectBrowserNodeMatching(trans, id);
 
-      sync_api::ReadNode gnode(trans);
+      syncer::ReadNode gnode(trans);
       ASSERT_EQ(BaseNode::INIT_OK, gnode.InitByIdLookup(id));
       stack.push(gnode.GetFirstChildId());
       stack.push(gnode.GetSuccessorId());
@@ -523,7 +531,7 @@ class ProfileSyncServiceBookmarkTest : public testing::Test {
   }
 
   void ExpectModelMatch() {
-    sync_api::ReadTransaction trans(FROM_HERE, test_user_share_.user_share());
+    syncer::ReadTransaction trans(FROM_HERE, test_user_share_.user_share());
     ExpectModelMatch(&trans);
   }
 
@@ -554,7 +562,7 @@ class ProfileSyncServiceBookmarkTest : public testing::Test {
 
  protected:
   BookmarkModel* model_;
-  TestUserShare test_user_share_;
+  syncer::TestUserShare test_user_share_;
   scoped_ptr<BookmarkChangeProcessor> change_processor_;
   StrictMock<DataTypeErrorHandlerMock> mock_error_handler_;
 };
@@ -632,7 +640,7 @@ TEST_F(ProfileSyncServiceBookmarkTest, ServerChangeProcessing) {
   LoadBookmarkModel(DELETE_EXISTING_STORAGE, DONT_SAVE_TO_STORAGE);
   StartSync();
 
-  sync_api::WriteTransaction trans(FROM_HERE, test_user_share_.user_share());
+  syncer::WriteTransaction trans(FROM_HERE, test_user_share_.user_share());
 
   FakeServerChange adds(&trans);
   int64 f1 = adds.AddFolder(L"Server Folder B", bookmark_bar_id(), 0);
@@ -655,7 +663,7 @@ TEST_F(ProfileSyncServiceBookmarkTest, ServerChangeProcessing) {
   int64 u6 = adds.AddURL(L"Sync1", "http://www.syncable.edu/",
                          mobile_bookmarks_id(), 0);
 
-  sync_api::ChangeRecordList::const_iterator it;
+  syncer::ChangeRecordList::const_iterator it;
   // The bookmark model shouldn't yet have seen any of the nodes of |adds|.
   for (it = adds.changes().begin(); it != adds.changes().end(); ++it)
     ExpectBrowserNodeUnknown(it->id);
@@ -729,7 +737,7 @@ TEST_F(ProfileSyncServiceBookmarkTest, ServerChangeRequiringFosterParent) {
   LoadBookmarkModel(DELETE_EXISTING_STORAGE, DONT_SAVE_TO_STORAGE);
   StartSync();
 
-  sync_api::WriteTransaction trans(FROM_HERE, test_user_share_.user_share());
+  syncer::WriteTransaction trans(FROM_HERE, test_user_share_.user_share());
 
   // Stress the immediate children of other_node because that's where
   // ApplyModelChanges puts a temporary foster parent node.
@@ -744,7 +752,7 @@ TEST_F(ProfileSyncServiceBookmarkTest, ServerChangeRequiringFosterParent) {
   int64 f6 = adds.AddFolder(L"f6",      f1, u5);   //     + f6
   int64 u7 = adds.AddURL(   L"u7", url, f0, f1);   //   + u7        NOLINT
 
-  sync_api::ChangeRecordList::const_iterator it;
+  syncer::ChangeRecordList::const_iterator it;
   // The bookmark model shouldn't yet have seen any of the nodes of |adds|.
   for (it = adds.changes().begin(); it != adds.changes().end(); ++it)
     ExpectBrowserNodeUnknown(it->id);
@@ -778,7 +786,7 @@ TEST_F(ProfileSyncServiceBookmarkTest, ServerChangeWithNonCanonicalURL) {
   StartSync();
 
   {
-    sync_api::WriteTransaction trans(FROM_HERE, test_user_share_.user_share());
+    syncer::WriteTransaction trans(FROM_HERE, test_user_share_.user_share());
 
     FakeServerChange adds(&trans);
     std::string url("http://dev.chromium.org");
@@ -809,7 +817,7 @@ TEST_F(ProfileSyncServiceBookmarkTest, DISABLED_ServerChangeWithInvalidURL) {
 
   int child_count = 0;
   {
-    sync_api::WriteTransaction trans(FROM_HERE, test_user_share_.user_share());
+    syncer::WriteTransaction trans(FROM_HERE, test_user_share_.user_share());
 
     FakeServerChange adds(&trans);
     std::string url("x");
@@ -926,8 +934,8 @@ TEST_F(ProfileSyncServiceBookmarkTest, UnrecoverableErrorSuspendsService) {
   // updating the ProfileSyncService state.  This should introduce
   // inconsistency between the two models.
   {
-    sync_api::WriteTransaction trans(FROM_HERE, test_user_share_.user_share());
-    sync_api::WriteNode sync_node(&trans);
+    syncer::WriteTransaction trans(FROM_HERE, test_user_share_.user_share());
+    syncer::WriteNode sync_node(&trans);
     ASSERT_TRUE(InitSyncNodeFromChromeNode(node, &sync_node));
     sync_node.Remove();
   }

@@ -66,7 +66,7 @@ class ModelTest(unittest.TestCase):
   def testPropertyNotImplemented(self):
     (self.permissions_json[0]['types'][0]
         ['properties']['permissions']['type']) = 'something'
-    self.assertRaises(model.ParseException, self.model.AddNamespace,
+    self.assertRaises(NotImplementedError, self.model.AddNamespace,
         self.permissions_json[0], 'path/to/something.json')
 
   def testDescription(self):
@@ -78,8 +78,6 @@ class ModelTest(unittest.TestCase):
   def testPropertyUnixName(self):
     param = self.tabs.functions['move'].params[0]
     self.assertEquals('tab_ids', param.unix_name)
-    self.assertRaises(AttributeError,
-        param.choices[model.PropertyType.INTEGER].GetUnixName)
     param.choices[model.PropertyType.INTEGER].unix_name = 'asdf'
     param.choices[model.PropertyType.INTEGER].unix_name = 'tab_ids_integer'
     self.assertEquals('tab_ids_integer',

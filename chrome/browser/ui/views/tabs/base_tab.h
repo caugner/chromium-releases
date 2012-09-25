@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_TABS_BASE_TAB_H_
 #define CHROME_BROWSER_UI_VIEWS_TABS_BASE_TAB_H_
-#pragma once
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
@@ -75,9 +74,6 @@ class BaseTab : public ui::AnimationDelegate,
     theme_provider_ = provider;
   }
 
-  // Returns true if the tab is closeable.
-  bool IsCloseable() const;
-
   // Returns true if this tab is the active tab.
   bool IsActive() const;
 
@@ -93,6 +89,8 @@ class BaseTab : public ui::AnimationDelegate,
   virtual void OnMouseEntered(const views::MouseEvent& event) OVERRIDE;
   virtual void OnMouseMoved(const views::MouseEvent& event) OVERRIDE;
   virtual void OnMouseExited(const views::MouseEvent& event) OVERRIDE;
+  virtual ui::GestureStatus OnGestureEvent(
+      const views::GestureEvent& event) OVERRIDE;
   virtual bool GetTooltipText(const gfx::Point& p,
                               string16* tooltip) const OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;

@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_SYNC_GLUE_APP_NOTIFICATION_DATA_TYPE_CONTROLLER_H__
 #define CHROME_BROWSER_SYNC_GLUE_APP_NOTIFICATION_DATA_TYPE_CONTROLLER_H__
-#pragma once
 
 #include <string>
 
@@ -13,7 +12,9 @@
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 
+namespace extensions {
 class AppNotificationManager;
+}
 
 namespace browser_sync {
 
@@ -32,7 +33,7 @@ class AppNotificationDataTypeController
                        const content::NotificationDetails& details) OVERRIDE;
 
   // Overridden in test to control creation and init order.
-  virtual AppNotificationManager* GetAppNotificationManager();
+  virtual extensions::AppNotificationManager* GetAppNotificationManager();
 
  private:
   friend class TestAppNotificationDataTypeController;

@@ -6,7 +6,6 @@
 
 #ifndef CHROME_BROWSER_PROFILES_PROFILE_H_
 #define CHROME_BROWSER_PROFILES_PROFILE_H_
-#pragma once
 
 #include <string>
 
@@ -20,7 +19,6 @@
 class BookmarkModel;
 class ChromeAppCacheService;
 class ChromeURLDataManager;
-class ExtensionEventRouter;
 class ExtensionProcessManager;
 class ExtensionService;
 class ExtensionSpecialStoragePolicy;
@@ -33,7 +31,6 @@ class PrefService;
 class PromoCounter;
 class ProtocolHandlerRegistry;
 class TestingProfile;
-class UserScriptMaster;
 class VisitedLinkMaster;
 class WebDataService;
 
@@ -54,9 +51,13 @@ class LibCrosServiceLibraryImpl;
 class ResetDefaultProxyConfigServiceTask;
 }
 
-
 namespace content {
 class WebUI;
+}
+
+namespace extensions {
+class EventRouter;
+class UserScriptMaster;
 }
 
 namespace fileapi {
@@ -147,12 +148,6 @@ class Profile : public content::BrowserContext {
   // Returns the profile corresponding to the given WebUI.
   static Profile* FromWebUI(content::WebUI* web_ui);
 
-  // TODO(rlp): Please do not use this function. It is a temporary fix
-  // for M19 stable. See crbug.com/125292.
-  static net::URLRequestContextGetter* GetDefaultRequestContextDeprecated() {
-    return Profile::GetDefaultRequestContext();
-  }
-
   // content::BrowserContext implementation ------------------------------------
 
   // Typesafe upcast.
@@ -200,11 +195,11 @@ class Profile : public content::BrowserContext {
   virtual ExtensionService* GetExtensionService() = 0;
 
   // DEPRECATED. Instead, use ExtensionSystem::user_script_master().
-  // Retrieves a pointer to the UserScriptMaster associated with this
-  // profile.  The UserScriptMaster is lazily created the first time
-  // that this method is called.
+  // Retrieves a pointer to the extensions::UserScriptMaster associated with
+  // this profile.  The extensions::UserScriptMaster is lazily created the first
+  // time that this method is called.
   // TODO(yoz): remove this accessor (bug 104095).
-  virtual UserScriptMaster* GetUserScriptMaster() = 0;
+  virtual extensions::UserScriptMaster* GetUserScriptMaster() = 0;
 
   // DEPRECATED. Instead, use ExtensionSystem::process_manager().
   // Retrieves a pointer to the ExtensionProcessManager associated with this
@@ -215,7 +210,7 @@ class Profile : public content::BrowserContext {
   // DEPRECATED. Instead, use ExtensionSystem::event_router().
   // Accessor. The instance is created at startup.
   // TODO(yoz): remove this accessor (bug 104095).
-  virtual ExtensionEventRouter* GetExtensionEventRouter() = 0;
+  virtual extensions::EventRouter* GetExtensionEventRouter() = 0;
 
   // Accessor. The instance is created upon first access.
   virtual ExtensionSpecialStoragePolicy*
@@ -254,11 +249,6 @@ class Profile : public content::BrowserContext {
   // doesn't already exist.
   virtual HistoryService* GetHistoryServiceWithoutCreating() = 0;
 
-  // Returns the ShortcutsBackend for this profile. This is owned by
-  // the Profile and created on the first call. Callers that outlive the life of
-  // this profile need to be sure they refcount the returned value.
-  virtual history::ShortcutsBackend* GetShortcutsBackend() = 0;
-
   // Returns the PolicyService that provides policies for this profile.
   virtual policy::PolicyService* GetPolicyService() = 0;
 
@@ -270,6 +260,9 @@ class Profile : public content::BrowserContext {
   // for OffTheRecord Profiles.  This PrefService is lazily created the first
   // time that this method is called.
   virtual PrefService* GetOffTheRecordPrefs() = 0;
+
+  // Returns the main request context.
+  virtual net::URLRequestContextGetter* GetRequestContext() = 0;
 
   // Returns the request context used for extension-related requests.  This
   // is only used for a separate cookie store currently.
@@ -290,6 +283,7 @@ class Profile : public content::BrowserContext {
   virtual BookmarkModel* GetBookmarkModel() = 0;
 
   // Returns the ProtocolHandlerRegistry, creating if not yet created.
+  // TODO(smckay): replace this with access via ProtocolHandlerRegistryFactory.
   virtual ProtocolHandlerRegistry* GetProtocolHandlerRegistry() = 0;
 
   // Return whether 2 profiles are the same. 2 profiles are the same if they
@@ -312,10 +306,6 @@ class Profile : public content::BrowserContext {
 
   // Start up service that gathers data from a promo resource feed.
   virtual void InitPromoResources() = 0;
-
-  // Register URLRequestFactories for protocols registered with
-  // registerProtocolHandler.
-  virtual void InitRegisteredProtocolHandlers() = 0;
 
   // Returns the last directory that was chosen for uploading or opening a file.
   virtual FilePath last_selected_directory() = 0;
@@ -400,6 +390,11 @@ class Profile : public content::BrowserContext {
   // disabled or controlled by configuration management.
   bool IsSyncAccessible();
 
+  // Send NOTIFICATION_PROFILE_DESTROYED for this Profile, if it has not
+  // already been sent. It is necessary because most Profiles are destroyed by
+  // ProfileDestroyer, but in tests, some are not.
+  void MaybeSendDestroyedNotification();
+
   // Creates an OffTheRecordProfile which points to this Profile.
   Profile* CreateOffTheRecordProfile();
 
@@ -416,19 +411,12 @@ class Profile : public content::BrowserContext {
   virtual base::Callback<ChromeURLDataManagerBackend*(void)>
       GetChromeURLDataManagerBackendGetter() const = 0;
 
-  static net::URLRequestContextGetter* default_request_context_;
-
  private:
-  // ***DEPRECATED**: You should be passing in the specific profile's
-  // URLRequestContextGetter or using the system URLRequestContextGetter.
-  //
-  // Returns the request context for the "default" profile.  This may be called
-  // from any thread.  This CAN return NULL if a first request context has not
-  // yet been created.  If necessary, listen on the UI thread for
-  // NOTIFY_DEFAULT_REQUEST_CONTEXT_AVAILABLE.
-  static net::URLRequestContextGetter* GetDefaultRequestContext();
-
   bool restored_last_session_;
+
+  // Used to prevent the notification that this Profile is destroyed from
+  // being sent twice.
+  bool sent_destroyed_notification_;
 
   // Accessibility events will only be propagated when the pause
   // level is zero.  PauseAccessibilityEvents and ResumeAccessibilityEvents

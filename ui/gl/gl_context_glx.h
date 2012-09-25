@@ -4,7 +4,6 @@
 
 #ifndef UI_GL_GL_CONTEXT_GLX_H_
 #define UI_GL_GL_CONTEXT_GLX_H_
-#pragma once
 
 #include <string>
 
@@ -34,7 +33,7 @@ class GL_EXPORT GLContextGLX : public GLContext {
   virtual void* GetHandle() OVERRIDE;
   virtual void SetSwapInterval(int interval) OVERRIDE;
   virtual std::string GetExtensions() OVERRIDE;
-  virtual bool WasAllocatedUsingARBRobustness() OVERRIDE;
+  virtual bool WasAllocatedUsingRobustnessExtension() OVERRIDE;
 
  protected:
   virtual ~GLContextGLX();

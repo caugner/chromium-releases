@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_COMMON_INDEXED_DB_PROXY_WEBIDBOBJECTSTORE_IMPL_H_
 #define CONTENT_COMMON_INDEXED_DB_PROXY_WEBIDBOBJECTSTORE_IMPL_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBCallbacks.h"
@@ -24,25 +23,19 @@ class RendererWebIDBObjectStoreImpl : public WebKit::WebIDBObjectStore {
   virtual ~RendererWebIDBObjectStoreImpl();
 
   // WebKit::WebIDBObjectStore
-  virtual WebKit::WebString name() const;
-  virtual WebKit::WebIDBKeyPath keyPath() const;
-  virtual WebKit::WebDOMStringList indexNames() const;
-  virtual bool autoIncrement() const;
-
   virtual void get(const WebKit::WebIDBKeyRange& key_range,
                    WebKit::WebIDBCallbacks* callbacks,
                    const WebKit::WebIDBTransaction& transaction,
                    WebKit::WebExceptionCode& ec);
-  virtual void put(const WebKit::WebSerializedScriptValue& value,
-                   const WebKit::WebIDBKey& key,
-                   PutMode put_mode,
-                   WebKit::WebIDBCallbacks* callbacks,
-                   const WebKit::WebIDBTransaction& transaction,
-                   WebKit::WebExceptionCode& ec);
-  virtual void deleteFunction(const WebKit::WebIDBKey& key,
-                              WebKit::WebIDBCallbacks* callbacks,
-                              const WebKit::WebIDBTransaction& transaction,
-                              WebKit::WebExceptionCode& ec);
+  virtual void putWithIndexKeys(
+      const WebKit::WebSerializedScriptValue&,
+      const WebKit::WebIDBKey&,
+      PutMode,
+      WebKit::WebIDBCallbacks*,
+      const WebKit::WebIDBTransaction&,
+      const WebKit::WebVector<WebKit::WebString>&,
+      const WebKit::WebVector<WebKit::WebIDBObjectStore::WebIndexKeys>&,
+      WebKit::WebExceptionCode&);
   virtual void deleteFunction(const WebKit::WebIDBKeyRange& key_range,
                               WebKit::WebIDBCallbacks* callbacks,
                               const WebKit::WebIDBTransaction& transaction,

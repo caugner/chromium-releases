@@ -121,11 +121,11 @@ class NotSendingTestReporter : public TestReporter {
 // This class doesn't do anything now, but in near future versions it will.
 class MockURLRequest : public net::URLRequest {
  public:
-  MockURLRequest() : net::URLRequest(GURL(""), NULL), passed_(false) {
+  explicit MockURLRequest(net::URLRequestContext* context)
+      : net::URLRequest(GURL(""), NULL, context) {
   }
 
  private:
-  bool passed_;
 };
 
 // A ChromeFraudulentCertificateReporter that uses a MockURLRequest, but is
@@ -135,8 +135,9 @@ class MockReporter : public ChromeFraudulentCertificateReporter {
   explicit MockReporter(net::URLRequestContext* request_context)
     : ChromeFraudulentCertificateReporter(request_context) {}
 
-  virtual net::URLRequest* CreateURLRequest() OVERRIDE {
-    return new MockURLRequest();
+  virtual net::URLRequest* CreateURLRequest(
+      net::URLRequestContext* context) OVERRIDE {
+    return new MockURLRequest(context);
   }
 
   virtual void SendReport(
@@ -151,21 +152,24 @@ class MockReporter : public ChromeFraudulentCertificateReporter {
 };
 
 static void DoReportIsSent() {
-  ChromeURLRequestContext context;
+  ChromeURLRequestContext context(ChromeURLRequestContext::CONTEXT_TYPE_MAIN,
+                                  NULL);
   SendingTestReporter reporter(&context);
   SSLInfo info = GetGoodSSLInfo();
   reporter.SendReport("mail.google.com", info, true);
 }
 
 static void DoReportIsNotSent() {
-  ChromeURLRequestContext context;
+  ChromeURLRequestContext context(ChromeURLRequestContext::CONTEXT_TYPE_MAIN,
+                                  NULL);
   NotSendingTestReporter reporter(&context);
   SSLInfo info = GetBadSSLInfo();
   reporter.SendReport("www.example.com", info, true);
 }
 
 static void DoMockReportIsSent() {
-  ChromeURLRequestContext context;
+  ChromeURLRequestContext context(ChromeURLRequestContext::CONTEXT_TYPE_MAIN,
+                                  NULL);
   MockReporter reporter(&context);
   SSLInfo info = GetGoodSSLInfo();
   reporter.SendReport("mail.google.com", info, true);

@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_SYNC_GLUE_SHARED_CHANGE_PROCESSOR_MOCK_H_
 #define CHROME_BROWSER_SYNC_GLUE_SHARED_CHANGE_PROCESSOR_MOCK_H_
-#pragma once
 
 #include "chrome/browser/sync/glue/shared_change_processor.h"
 #include "sync/api/sync_change.h"
@@ -17,22 +16,22 @@ class SharedChangeProcessorMock : public SharedChangeProcessor {
  public:
   SharedChangeProcessorMock();
 
-  MOCK_METHOD4(Connect, base::WeakPtr<SyncableService>(
+  MOCK_METHOD4(Connect, base::WeakPtr<syncer::SyncableService>(
       ProfileSyncComponentsFactory*,
       ProfileSyncService*,
       DataTypeErrorHandler*,
-      syncable::ModelType));
+      syncer::ModelType));
   MOCK_METHOD0(Disconnect, bool());
   MOCK_METHOD2(ProcessSyncChanges,
-               SyncError(const tracked_objects::Location&,
-                         const SyncChangeList&));
+               syncer::SyncError(const tracked_objects::Location&,
+                         const syncer::SyncChangeList&));
   MOCK_METHOD1(GetSyncData,
-               SyncError(SyncDataList*));
+               syncer::SyncError(syncer::SyncDataList*));
   MOCK_METHOD1(SyncModelHasUserCreatedNodes,
                bool(bool*));
   MOCK_METHOD0(CryptoReadyIfNecessary, bool());
   MOCK_METHOD1(ActivateDataType,
-               void(browser_sync::ModelSafeGroup));
+               void(syncer::ModelSafeGroup));
 
  protected:
   virtual ~SharedChangeProcessorMock();

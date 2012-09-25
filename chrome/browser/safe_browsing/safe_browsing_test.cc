@@ -38,12 +38,12 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/browser_context.h"
-#include "content/public/common/url_fetcher.h"
 #include "content/public/test/test_browser_thread.h"
 #include "net/base/host_resolver.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_log.h"
 #include "net/test/python_utils.h"
+#include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_fetcher_delegate.h"
 #include "net/url_request/url_request_status.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -173,7 +173,7 @@ class SafeBrowsingTestServer {
       return true;
 
     // First check if the process has already terminated.
-    if (!base::WaitForSingleProcess(server_handle_, 0) &&
+    if (!base::WaitForSingleProcess(server_handle_, base::TimeDelta()) &&
         !base::KillProcess(server_handle_, 1, true)) {
       VLOG(1) << "Kill failed?";
       return false;
@@ -384,7 +384,7 @@ class SafeBrowsingServiceTestHelper
         base::Bind(&SafeBrowsingServiceTestHelper::ForceUpdateInIOThread,
                    this));
     // Will continue after OnForceUpdateDone().
-    ui_test_utils::RunMessageLoop();
+    content::RunMessageLoop();
   }
   void ForceUpdateInIOThread() {
     EXPECT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::IO));
@@ -403,7 +403,7 @@ class SafeBrowsingServiceTestHelper
     BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
         base::Bind(&SafeBrowsingServiceTestHelper::CheckUrlOnIOThread,
                    this, url));
-    ui_test_utils::RunMessageLoop();
+    content::RunMessageLoop();
   }
   void CheckUrlOnIOThread(const GURL& url) {
     EXPECT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::IO));
@@ -445,15 +445,15 @@ class SafeBrowsingServiceTestHelper
   }
 
   // Wait for a given period to get safebrowsing status updated.
-  void WaitForStatusUpdate(int64 wait_time_msec) {
+  void WaitForStatusUpdate(base::TimeDelta wait_time) {
     BrowserThread::PostDelayedTask(
         BrowserThread::IO,
         FROM_HERE,
         base::Bind(&SafeBrowsingServiceTestHelper::CheckStatusOnIOThread,
                    this),
-        base::TimeDelta::FromMilliseconds(wait_time_msec));
+        wait_time);
     // Will continue after OnWaitForStatusUpdateDone().
-    ui_test_utils::RunMessageLoop();
+    content::RunMessageLoop();
   }
 
   void WaitTillServerReady(const char* host, int port) {
@@ -528,12 +528,12 @@ class SafeBrowsingServiceTestHelper
   // Fetch a URL. If message_loop_started is true, starts the message loop
   // so the caller could wait till OnURLFetchComplete is called.
   net::URLRequestStatus::Status FetchUrl(const GURL& url) {
-    url_fetcher_.reset(content::URLFetcher::Create(
+    url_fetcher_.reset(net::URLFetcher::Create(
         url, net::URLFetcher::GET, this));
     url_fetcher_->SetLoadFlags(net::LOAD_DISABLE_CACHE);
     url_fetcher_->SetRequestContext(request_context_);
     url_fetcher_->Start();
-    ui_test_utils::RunMessageLoop();
+    content::RunMessageLoop();
     return response_status_;
   }
 
@@ -570,7 +570,7 @@ IN_PROC_BROWSER_TEST_F(SafeBrowsingServiceTest,
   // The wait will stop once OnWaitForStatusUpdateDone in
   // safe_browsing_helper is called and status from safe_browsing_service_
   // is checked.
-  safe_browsing_helper->WaitForStatusUpdate(0);
+  safe_browsing_helper->WaitForStatusUpdate(base::TimeDelta());
   EXPECT_TRUE(is_database_ready());
   EXPECT_FALSE(is_update_scheduled());
   EXPECT_TRUE(last_update().is_null());
@@ -591,10 +591,11 @@ IN_PROC_BROWSER_TEST_F(SafeBrowsingServiceTest,
     SetTestStep(step);
     safe_browsing_helper->ForceUpdate();
 
+    // TODO(mattm): use NOTIFICATION_SAFE_BROWSING_UPDATE_COMPLETE instead.
     do {
       // Periodically pull the status.
       safe_browsing_helper->WaitForStatusUpdate(
-          TestTimeouts::tiny_timeout_ms());
+          TestTimeouts::tiny_timeout());
     } while (is_update_scheduled() || !is_database_ready());
 
 

@@ -4,16 +4,12 @@
 
 #ifndef UI_GFX_VIDEO_DECODE_ACCELERATION_SUPPORT_MAC_H_
 #define UI_GFX_VIDEO_DECODE_ACCELERATION_SUPPORT_MAC_H_
-#pragma once
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <CoreVideo/CoreVideo.h>
 #include <map>
 
-#if defined(MAC_OS_X_VERSION_10_6) && \
-    MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_6
 #include <VideoDecodeAcceleration/VDADecoder.h>
-#endif
 
 #include "base/basictypes.h"
 #include "base/callback.h"
@@ -24,11 +20,6 @@
 
 class FrameCallbackUtil;
 class VideoDecodeAccelerationSupportTest;
-
-#if !defined(MAC_OS_X_VERSION_10_6) || \
-    MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_6
-typedef struct OpaqueVDADecoder*  VDADecoder;
-#endif
 
 namespace gfx {
 

@@ -4,7 +4,6 @@
 
 #ifndef CHROME_RENDERER_CHROME_CONTENT_RENDERER_CLIENT_H_
 #define CHROME_RENDERER_CHROME_CONTENT_RENDERER_CLIENT_H_
-#pragma once
 
 #include <set>
 #include <string>
@@ -17,7 +16,6 @@
 class ChromeRenderProcessObserver;
 class ExtensionDispatcher;
 class ExtensionSet;
-class RendererHistogramSnapshots;
 class RendererNetPredictor;
 class SpellCheck;
 class SpellCheckProvider;
@@ -165,7 +163,6 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
 
   scoped_ptr<ChromeRenderProcessObserver> chrome_observer_;
   scoped_ptr<ExtensionDispatcher> extension_dispatcher_;
-  scoped_ptr<RendererHistogramSnapshots> histogram_snapshots_;
   scoped_ptr<RendererNetPredictor> net_predictor_;
   scoped_ptr<SpellCheck> spellcheck_;
   scoped_ptr<VisitedLinkSlave> visited_link_slave_;

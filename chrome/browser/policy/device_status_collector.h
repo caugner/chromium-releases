@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_POLICY_DEVICE_STATUS_COLLECTOR_H_
 #define CHROME_BROWSER_POLICY_DEVICE_STATUS_COLLECTOR_H_
-#pragma once
 
 #include <string>
 
@@ -88,9 +87,9 @@ class DeviceStatusCollector : public content::NotificationObserver {
 
   // Callbacks from chromeos::VersionLoader.
   void OnOSVersion(chromeos::VersionLoader::Handle handle,
-                   std::string version);
+                   const std::string& version);
   void OnOSFirmware(chromeos::VersionLoader::Handle handle,
-                    std::string version);
+                    const std::string& version);
 
   // Helpers for the various portions of the status.
   void GetActivityTimes(

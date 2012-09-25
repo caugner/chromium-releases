@@ -9,6 +9,7 @@
 #endif
 
 #include "base/command_line.h"
+#include "base/logging.h"
 #include "base/memory/scoped_vector.h"
 #include "base/string16.h"
 #include "base/string_piece.h"
@@ -71,8 +72,8 @@ struct PrepopulatedEngine {
   // must use two different unique IDs (and different keywords).
   //
   // The following unique IDs are available:
-  //    50, 52, 53, 56, 58, 60, 61, 64, 65, 66, 70, 74, 78, 79, 80, 81, 84, 86,
-  //    88, 91, 92, 93, 94, 95, 96, 97, 98, 99, 102+
+  //    53, 56, 58, 60, 61, 64, 65, 66, 70, 74, 78, 79, 80, 81, 84, 86, 88, 91,
+  //    92, 93, 94, 95, 96, 97, 98, 99, 102+
   //
   // IDs > 1000 are reserved for distribution custom engines.
   //
@@ -1091,7 +1092,8 @@ const PrepopulatedEngine google = {
   "http://www.google.com/favicon.ico",
   "{google:baseURL}search?q={searchTerms}&{google:RLZ}"
       "{google:acceptedSuggestion}{google:originalQueryForSuggestion}"
-      "{google:searchFieldtrialParameter}sourceid=chrome&ie={inputEncoding}",
+      "{google:assistedQueryStats}{google:searchFieldtrialParameter}"
+      "sourceid=chrome&ie={inputEncoding}",
   "UTF-8",
   "{google:baseSuggestURL}search?{google:searchFieldtrialParameter}"
       "client=chrome&hl={language}&q={searchTerms}",
@@ -2131,6 +2133,30 @@ const PrepopulatedEngine aport = {
   34,
 };
 
+const PrepopulatedEngine avg = {
+  L"AVG Secure Search",
+  L"search.avg.com",
+  NULL,
+  "http://search.avg.com/route/?q={searchTerms}&lng={language}",
+  "UTF-8",
+  NULL,
+  NULL,
+  SEARCH_ENGINE_AVG,
+  50,
+};
+
+const PrepopulatedEngine avg_i = {
+  L"AVG Secure Search",
+  L"isearch.avg.com",
+  NULL,
+  "http://isearch.avg.com/search?q={searchTerms}&lng={language}",
+  "UTF-8",
+  NULL,
+  NULL,
+  SEARCH_ENGINE_AVG,
+  52,
+};
+
 const PrepopulatedEngine conduit = {
   L"Conduit",
   L"conduit.com",
@@ -2709,8 +2735,8 @@ const PrepopulatedEngine* kAllEngines[] =
       &yahoo_sg, &yahoo_th, &yahoo_tw, &yahoo_uk, &yahoo_ve, &yahoo_vn, &yamli,
       &yandex_ru, &yandex_ua, &zoznam,
       // UMA-only engines:
-      &all_by, &aport, &conduit, &icq, &meta_ua, &metabot_ru, &nigma, &qip,
-      &ukr_net, &webalta, &yandex_tr };
+      &all_by, &aport, &avg, &avg_i, &conduit, &icq, &meta_ua, &metabot_ru,
+      &nigma, &qip, &ukr_net, &webalta, &yandex_tr };
 
 
 // Geographic mappings /////////////////////////////////////////////////////////
@@ -2721,6 +2747,7 @@ const PrepopulatedEngine* kAllEngines[] =
 // value we call the CountryID.
 
 const int kCountryIDUnknown = -1;
+const int kCountryIDNotSet = 0;
 
 inline int CountryCharsToCountryID(char c1, char c2) {
   return c1 << 8 | c2;
@@ -2828,12 +2855,12 @@ int GetCurrentCountryID() {
 
 #elif defined(OS_ANDROID)
 
+// Initialized by InitCountryCode().
+int g_country_code_at_install = kCountryIDNotSet;
+
 int GetCurrentCountryID() {
-  const std::string country_code_at_install =
-      TemplateURLPrepopulateData::GetCountryCodeAtInstall();
-  return country_code_at_install.empty() ? kCountryIDUnknown :
-      CountryCharsToCountryIDWithUpdate(country_code_at_install[0],
-                                        country_code_at_install[1]);
+  DCHECK(g_country_code_at_install != kCountryIDNotSet);
+  return g_country_code_at_install;
 }
 
 #elif defined(OS_POSIX)
@@ -3337,8 +3364,8 @@ void GetPrepopulatedTemplateFromPrefs(Profile* profile,
 
   size_t num_engines = list->GetSize();
   for (size_t i = 0; i != num_engines; ++i) {
-    Value* val;
-    DictionaryValue* engine;
+    const Value* val;
+    const DictionaryValue* engine;
     if (list->GetDictionary(i, &engine) &&
         engine->Get("name", &val) && val->GetAsString(&name) &&
         engine->Get("keyword", &val) && val->GetAsString(&keyword) &&
@@ -3418,8 +3445,8 @@ SearchEngineType GetEngineType(const std::string& url) {
   TemplateURLData data;
   data.SetURL(url);
   TemplateURL turl(NULL, data);
-  GURL as_gurl(turl.url_ref().ReplaceSearchTerms(ASCIIToUTF16("x"),
-      TemplateURLRef::NO_SUGGESTIONS_AVAILABLE, string16()));
+  GURL as_gurl(turl.url_ref().ReplaceSearchTerms(
+      TemplateURLRef::SearchTermsArgs(ASCIIToUTF16("x"))));
   if (!as_gurl.is_valid())
     return SEARCH_ENGINE_OTHER;
 
@@ -3443,5 +3470,19 @@ SearchEngineType GetEngineType(const std::string& url) {
 
   return SEARCH_ENGINE_OTHER;
 }
+
+#if defined(OS_ANDROID)
+
+void InitCountryCode(const std::string& country_code) {
+  if (country_code.size() != 2) {
+    DLOG(ERROR) << "Invalid country code: " << country_code;
+    g_country_code_at_install = kCountryIDUnknown;
+  } else {
+    g_country_code_at_install =
+        CountryCharsToCountryIDWithUpdate(country_code[0], country_code[1]);
+  }
+}
+
+#endif
 
 }  // namespace TemplateURLPrepopulateData

@@ -12,11 +12,10 @@
 #include "sync/test/engine/test_id_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using std::vector;
-
+namespace syncer {
 namespace syncable {
 
-using browser_sync::TestIdFactory;
+using std::vector;
 
 class SyncableIdTest : public testing::Test { };
 
@@ -94,3 +93,4 @@ TEST(SyncableIdTest, ToValue) {
 }
 
 }  // namespace syncable
+}  // namespace syncer

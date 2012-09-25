@@ -102,7 +102,6 @@ View::View()
       parent_(NULL),
       visible_(true),
       enabled_(true),
-      painting_enabled_(true),
       notify_enter_exit_on_child_(false),
       registered_for_visible_bounds_notification_(false),
       clip_insets_(0, 0, 0, 0),
@@ -349,7 +348,7 @@ gfx::Rect View::GetVisibleBounds() const {
   return vis_bounds;
 }
 
-gfx::Rect View::GetScreenBounds() const {
+gfx::Rect View::GetBoundsInScreen() const {
   gfx::Point origin;
   View::ConvertPointToScreen(this, &origin);
   return gfx::Rect(origin, size());
@@ -622,7 +621,7 @@ void View::ConvertPointToView(const View* source,
   // API defines NULL |source| as returning the point in screen coordinates.
   if (!source) {
     *point = point->Subtract(
-        root->GetWidget()->GetClientAreaScreenBounds().origin());
+        root->GetWidget()->GetClientAreaBoundsInScreen().origin());
   }
 }
 
@@ -651,7 +650,7 @@ void View::ConvertPointToScreen(const View* src, gfx::Point* p) {
   const Widget* widget = src->GetWidget();
   if (widget) {
     ConvertPointToWidget(src, p);
-    gfx::Rect r = widget->GetClientAreaScreenBounds();
+    gfx::Rect r = widget->GetClientAreaBoundsInScreen();
     p->SetPoint(p->x() + r.x(), p->y() + r.y());
   }
 }
@@ -664,7 +663,7 @@ void View::ConvertPointFromScreen(const View* dst, gfx::Point* p) {
   const views::Widget* widget = dst->GetWidget();
   if (!widget)
     return;
-  const gfx::Rect r = widget->GetClientAreaScreenBounds();
+  const gfx::Rect r = widget->GetClientAreaBoundsInScreen();
   p->Offset(-r.x(), -r.y());
   views::View::ConvertPointFromWidget(dst, p);
 }
@@ -690,7 +689,7 @@ void View::SchedulePaint() {
 }
 
 void View::SchedulePaintInRect(const gfx::Rect& rect) {
-  if (!visible_ || !painting_enabled_)
+  if (!visible_)
     return;
 
   if (layer()) {
@@ -729,7 +728,7 @@ void View::Paint(gfx::Canvas* canvas) {
   PaintCommon(canvas);
 }
 
-ThemeProvider* View::GetThemeProvider() const {
+ui::ThemeProvider* View::GetThemeProvider() const {
   const Widget* widget = GetWidget();
   return widget ? widget->GetThemeProvider() : NULL;
 }
@@ -843,6 +842,10 @@ bool View::OnKeyReleased(const KeyEvent& event) {
 }
 
 bool View::OnMouseWheel(const MouseWheelEvent& event) {
+  return false;
+}
+
+bool View::OnScrollEvent(const ScrollEvent& event) {
   return false;
 }
 
@@ -1497,7 +1500,7 @@ void View::SchedulePaintBoundsChanged(SchedulePaintType type) {
 }
 
 void View::PaintCommon(gfx::Canvas* canvas) {
-  if (!visible_ || !painting_enabled_)
+  if (!visible_)
     return;
 
   {
@@ -1956,7 +1959,9 @@ ui::TouchStatus View::ProcessTouchEvent(const TouchEvent& event) {
 }
 
 ui::GestureStatus View::ProcessGestureEvent(const GestureEvent& event) {
-  if (context_menu_controller_ && event.type() == ui::ET_GESTURE_LONG_PRESS) {
+  if (context_menu_controller_ &&
+      (event.type() == ui::ET_GESTURE_LONG_PRESS ||
+       event.type() == ui::ET_GESTURE_TWO_FINGER_TAP)) {
     gfx::Point location(event.location());
     ConvertPointToScreen(this, &location);
     ShowContextMenu(location, true);

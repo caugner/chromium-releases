@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_GTK_EXTENSIONS_EXTENSION_KEYBINDING_REGISTRY_GTK_H_
 #define CHROME_BROWSER_UI_GTK_EXTENSIONS_EXTENSION_KEYBINDING_REGISTRY_GTK_H_
-#pragma once
 
 #include <map>
 #include <string>
@@ -53,9 +52,11 @@ class ExtensionKeybindingRegistryGtk
  protected:
   // Overridden from ExtensionKeybindingRegistry:
   virtual void AddExtensionKeybinding(
-      const extensions::Extension* extension) OVERRIDE;
+      const extensions::Extension* extension,
+      const std::string& command_name) OVERRIDE;
   virtual void RemoveExtensionKeybinding(
-      const extensions::Extension* extension) OVERRIDE;
+      const extensions::Extension* extension,
+      const std::string& command_name) OVERRIDE;
 
  private:
   // The accelerator handler for when the extension command shortcuts are

@@ -4,11 +4,10 @@
 
 #ifndef SYNC_INTERNAL_API_PUBLIC_HTTP_POST_PROVIDER_INTERFACE_H_
 #define SYNC_INTERNAL_API_PUBLIC_HTTP_POST_PROVIDER_INTERFACE_H_
-#pragma once
 
 #include <string>
 
-namespace sync_api {
+namespace syncer {
 
 // An interface the embedding application (e.g. Chromium) implements to provide
 // required HTTP POST functionality to the syncer backend. This interface is
@@ -16,10 +15,6 @@ namespace sync_api {
 // want to make a subsequent POST.
 class HttpPostProviderInterface {
  public:
-  // Use specified user agent string when POSTing. If not called a default UA
-  // may be used.
-  virtual void SetUserAgent(const char* user_agent) = 0;
-
   // Add additional headers to the request.
   virtual void SetExtraRequestHeaders(const char* headers) = 0;
 
@@ -62,6 +57,6 @@ class HttpPostProviderInterface {
   virtual ~HttpPostProviderInterface() {}
 };
 
-}  // namespace sync_api
+}  // namespace syncer
 
 #endif  // SYNC_INTERNAL_API_PUBLIC_HTTP_POST_PROVIDER_INTERFACE_H_

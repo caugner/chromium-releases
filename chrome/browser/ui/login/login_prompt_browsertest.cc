@@ -9,6 +9,8 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_commands.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/login/login_prompt.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -17,6 +19,7 @@
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_browser_thread.h"
 #include "net/base/auth.h"
 #include "net/base/mock_host_resolver.h"
@@ -161,10 +164,10 @@ void LoginPromptBrowserTestObserver::Register(
 
 template <int T>
 class WindowedNavigationObserver
-    : public ui_test_utils::WindowedNotificationObserver {
+    : public content::WindowedNotificationObserver {
  public:
   explicit WindowedNavigationObserver(NavigationController* controller)
-      : ui_test_utils::WindowedNotificationObserver(
+      : content::WindowedNotificationObserver(
           T, content::Source<NavigationController>(controller)) {}
 };
 
@@ -253,7 +256,7 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, PrefetchAuthCancels) {
     prerender::PrerenderManager::PrerenderManagerMode old_mode_;
   } set_prefetch_for_test(true);
 
-  content::WebContents* contents = browser()->GetActiveWebContents();
+  content::WebContents* contents = chrome::GetActiveWebContents(browser());
   NavigationController* controller = &contents->GetController();
   LoginPromptBrowserTestObserver observer;
 
@@ -274,7 +277,7 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, TestBasicAuth) {
   ASSERT_TRUE(test_server()->Start());
   GURL test_page = test_server()->GetURL(kAuthBasicPage);
 
-  content::WebContents* contents = browser()->GetActiveWebContents();
+  content::WebContents* contents = chrome::GetActiveWebContents(browser());
   NavigationController* controller = &contents->GetController();
   LoginPromptBrowserTestObserver observer;
 
@@ -312,7 +315,7 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, TestBasicAuth) {
 
   string16 expected_title =
       ExpectedTitleFromAuth(ASCIIToUTF16("basicuser"), ASCIIToUTF16("secret"));
-  ui_test_utils::TitleWatcher title_watcher(contents, expected_title);
+  content::TitleWatcher title_watcher(contents, expected_title);
   EXPECT_EQ(expected_title, title_watcher.WaitAndGetTitle());
 }
 
@@ -321,7 +324,7 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, TestDigestAuth) {
   ASSERT_TRUE(test_server()->Start());
   GURL test_page = test_server()->GetURL(kAuthDigestPage);
 
-  content::WebContents* contents = browser()->GetActiveWebContents();
+  content::WebContents* contents = chrome::GetActiveWebContents(browser());
   NavigationController* controller = &contents->GetController();
   LoginPromptBrowserTestObserver observer;
 
@@ -361,14 +364,14 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, TestDigestAuth) {
   auth_supplied_waiter.Wait();
 
   string16 expected_title = ExpectedTitleFromAuth(username, password);
-  ui_test_utils::TitleWatcher title_watcher(contents, expected_title);
+  content::TitleWatcher title_watcher(contents, expected_title);
   EXPECT_EQ(expected_title, title_watcher.WaitAndGetTitle());
 }
 
 IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, TestTwoAuths) {
   ASSERT_TRUE(test_server()->Start());
 
-  content::WebContents* contents1 = browser()->GetActiveWebContents();
+  content::WebContents* contents1 = chrome::GetActiveWebContents(browser());
   NavigationController* controller1 = &contents1->GetController();
   LoginPromptBrowserTestObserver observer;
 
@@ -381,7 +384,7 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, TestTwoAuths) {
       NEW_FOREGROUND_TAB,
       ui_test_utils::BROWSER_TEST_WAIT_FOR_TAB);
 
-  content::WebContents* contents2 = browser()->GetActiveWebContents();
+  content::WebContents* contents2 = chrome::GetActiveWebContents(browser());
   ASSERT_NE(contents1, contents2);
   NavigationController* controller2 = &contents2->GetController();
   observer.Register(content::Source<NavigationController>(controller2));
@@ -411,8 +414,8 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, TestTwoAuths) {
       UTF8ToUTF16(username_basic_), UTF8ToUTF16(password_));
   string16 expected_title2 = ExpectedTitleFromAuth(
       UTF8ToUTF16(username_digest_), UTF8ToUTF16(password_));
-  ui_test_utils::TitleWatcher title_watcher1(contents1, expected_title1);
-  ui_test_utils::TitleWatcher title_watcher2(contents2, expected_title2);
+  content::TitleWatcher title_watcher1(contents1, expected_title1);
+  content::TitleWatcher title_watcher2(contents2, expected_title2);
 
   handler1->SetAuth(UTF8ToUTF16(username_basic_), UTF8ToUTF16(password_));
   handler2->SetAuth(UTF8ToUTF16(username_digest_), UTF8ToUTF16(password_));
@@ -429,7 +432,7 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, TestCancelAuth) {
   GURL no_auth_page_2 = test_server()->GetURL("b");
   GURL no_auth_page_3 = test_server()->GetURL("c");
 
-  content::WebContents* contents = browser()->GetActiveWebContents();
+  content::WebContents* contents = chrome::GetActiveWebContents(browser());
   NavigationController* controller = &contents->GetController();
 
   LoginPromptBrowserTestObserver observer;
@@ -467,8 +470,8 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, TestCancelAuth) {
         false));
     auth_needed_waiter.Wait();
     WindowedAuthCancelledObserver auth_cancelled_waiter(controller);
-    ASSERT_TRUE(browser()->CanGoBack());
-    browser()->GoBack(CURRENT_TAB);
+    ASSERT_TRUE(chrome::CanGoBack(browser()));
+    chrome::GoBack(browser(), CURRENT_TAB);
     auth_cancelled_waiter.Wait();
     load_stop_waiter.Wait();
     EXPECT_TRUE(observer.handlers_.empty());
@@ -478,7 +481,7 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, TestCancelAuth) {
   ui_test_utils::NavigateToURL(browser(), no_auth_page_3);
   {
     WindowedLoadStopObserver load_stop_waiter(controller, 1);
-    browser()->GoBack(CURRENT_TAB);  // Should take us to page 1
+    chrome::GoBack(browser(), CURRENT_TAB);  // Should take us to page 1
     load_stop_waiter.Wait();
   }
 
@@ -491,8 +494,8 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, TestCancelAuth) {
         false));
     auth_needed_waiter.Wait();
     WindowedAuthCancelledObserver auth_cancelled_waiter(controller);
-    ASSERT_TRUE(browser()->CanGoForward());
-    browser()->GoForward(CURRENT_TAB);  // Should take us to page 3
+    ASSERT_TRUE(chrome::CanGoForward(browser()));
+    chrome::GoForward(browser(), CURRENT_TAB);  // Should take us to page 3
     auth_cancelled_waiter.Wait();
     load_stop_waiter.Wait();
     EXPECT_TRUE(observer.handlers_.empty());
@@ -525,7 +528,7 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, MultipleRealmCancellation) {
   ASSERT_TRUE(test_server()->Start());
   GURL test_page = test_server()->GetURL(kMultiRealmTestPage);
 
-  content::WebContents* contents = browser()->GetActiveWebContents();
+  content::WebContents* contents = chrome::GetActiveWebContents(browser());
   NavigationController* controller = &contents->GetController();
   LoginPromptBrowserTestObserver observer;
 
@@ -575,7 +578,7 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, MultipleRealmConfirmation) {
   ASSERT_TRUE(test_server()->Start());
   GURL test_page = test_server()->GetURL(kMultiRealmTestPage);
 
-  content::WebContents* contents = browser()->GetActiveWebContents();
+  content::WebContents* contents = chrome::GetActiveWebContents(browser());
   NavigationController* controller = &contents->GetController();
   LoginPromptBrowserTestObserver observer;
 
@@ -625,7 +628,7 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, IncorrectConfirmation) {
   ASSERT_TRUE(test_server()->Start());
   GURL test_page = test_server()->GetURL(kSingleRealmTestPage);
 
-  content::WebContents* contents = browser()->GetActiveWebContents();
+  content::WebContents* contents = chrome::GetActiveWebContents(browser());
   NavigationController* controller = &contents->GetController();
   LoginPromptBrowserTestObserver observer;
 
@@ -694,7 +697,7 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, NoLoginPromptForFavicon) {
 
   ASSERT_TRUE(test_server()->Start());
 
-  content::WebContents* contents = browser()->GetActiveWebContents();
+  content::WebContents* contents = chrome::GetActiveWebContents(browser());
   NavigationController* controller = &contents->GetController();
   LoginPromptBrowserTestObserver observer;
 
@@ -749,7 +752,7 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, BlockCrossdomainPrompt) {
   host_resolver()->AddRule("www.b.com", "127.0.0.1");
   ASSERT_TRUE(test_server()->Start());
 
-  content::WebContents* contents = browser()->GetActiveWebContents();
+  content::WebContents* contents = chrome::GetActiveWebContents(browser());
   NavigationController* controller = &contents->GetController();
   LoginPromptBrowserTestObserver observer;
   observer.Register(content::Source<NavigationController>(controller));
@@ -814,7 +817,7 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, SupplyRedundantAuths) {
   ASSERT_TRUE(test_server()->Start());
 
   // Get NavigationController for tab 1.
-  content::WebContents* contents_1 = browser()->GetActiveWebContents();
+  content::WebContents* contents_1 = chrome::GetActiveWebContents(browser());
   NavigationController* controller_1 = &contents_1->GetController();
 
   // Open a new tab.
@@ -825,7 +828,7 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, SupplyRedundantAuths) {
       ui_test_utils::BROWSER_TEST_WAIT_FOR_TAB);
 
   // Get NavigationController for tab 2.
-  content::WebContents* contents_2 = browser()->GetActiveWebContents();
+  content::WebContents* contents_2 = chrome::GetActiveWebContents(browser());
   ASSERT_NE(contents_1, contents_2);
   NavigationController* controller_2 = &contents_2->GetController();
 
@@ -876,7 +879,7 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, CancelRedundantAuths) {
   ASSERT_TRUE(test_server()->Start());
 
   // Get NavigationController for tab 1.
-  content::WebContents* contents_1 = browser()->GetActiveWebContents();
+  content::WebContents* contents_1 = chrome::GetActiveWebContents(browser());
   NavigationController* controller_1 = &contents_1->GetController();
 
   // Open a new tab.
@@ -887,7 +890,7 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, CancelRedundantAuths) {
       ui_test_utils::BROWSER_TEST_WAIT_FOR_TAB);
 
   // Get NavigationController for tab 2.
-  content::WebContents* contents_2 = browser()->GetActiveWebContents();
+  content::WebContents* contents_2 = chrome::GetActiveWebContents(browser());
   ASSERT_NE(contents_1, contents_2);
   NavigationController* controller_2 = &contents_2->GetController();
 
@@ -939,7 +942,7 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest,
   ASSERT_TRUE(test_server()->Start());
 
   // Get NavigationController for regular tab.
-  content::WebContents* contents = browser()->GetActiveWebContents();
+  content::WebContents* contents = chrome::GetActiveWebContents(browser());
   NavigationController* controller = &contents->GetController();
 
   // Open an incognito window.
@@ -947,7 +950,7 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest,
 
   // Get NavigationController for incognito tab.
   content::WebContents* contents_incognito =
-      browser_incognito->GetActiveWebContents();
+      chrome::GetActiveWebContents(browser_incognito);
   ASSERT_NE(contents, contents_incognito);
   NavigationController* controller_incognito =
       &contents_incognito->GetController();
@@ -994,7 +997,7 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest,
     // nothing".  Run anything pending in the message loop just to be sure.
     // (This shouldn't be necessary since notifications are synchronous, but
     // maybe it will help avoid flake someday in the future..)
-    ui_test_utils::RunAllPendingInMessageLoop();
+    content::RunAllPendingInMessageLoop();
   }
 
   EXPECT_EQ(1, observer.auth_needed_count_);

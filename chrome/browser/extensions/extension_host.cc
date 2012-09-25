@@ -14,12 +14,12 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_shutdown.h"
-#include "chrome/browser/extensions/extension_event_router.h"
+#include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
-#include "chrome/browser/extensions/extension_window_controller.h"
+#include "chrome/browser/extensions/window_controller.h"
 #include "chrome/browser/file_select_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/app_modal_dialogs/javascript_dialog_creator.h"
@@ -60,6 +60,8 @@ using content::OpenURLParams;
 using content::RenderViewHost;
 using content::SiteInstance;
 using content::WebContents;
+
+namespace extensions {
 
 // Helper class that rate-limits the creation of renderer processes for
 // ExtensionHosts, to avoid blocking the UI.
@@ -121,7 +123,7 @@ class ExtensionHost::ProcessCreationQueue {
 ////////////////
 // ExtensionHost
 
-ExtensionHost::ExtensionHost(const extensions::Extension* extension,
+ExtensionHost::ExtensionHost(const Extension* extension,
                              SiteInstance* site_instance,
                              const GURL& url,
                              chrome::ViewType host_type)
@@ -229,7 +231,8 @@ void ExtensionHost::CreateRenderViewNow() {
   }
 }
 
-ExtensionWindowController* ExtensionHost::GetExtensionWindowController() const {
+extensions::WindowController*
+ExtensionHost::GetExtensionWindowController() const {
   return view() && view()->browser() ?
       view()->browser()->extension_window_controller() : NULL;
 }
@@ -243,7 +246,7 @@ void ExtensionHost::LoadInitialURL() {
       !profile_->GetExtensionService()->IsBackgroundPageReady(extension_)) {
     // Make sure the background page loads before any others.
     registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_BACKGROUND_PAGE_READY,
-                   content::Source<extensions::Extension>(extension_));
+                   content::Source<Extension>(extension_));
     return;
   }
 
@@ -273,9 +276,8 @@ void ExtensionHost::Observe(int type,
       // sent. NULL it out so that dirty pointer issues don't arise in cases
       // when multiple ExtensionHost objects pointing to the same Extension are
       // present.
-      if (extension_ ==
-          content::Details<extensions::UnloadedExtensionInfo>(
-              details)->extension) {
+      if (extension_ == content::Details<UnloadedExtensionInfo>(details)->
+          extension) {
         extension_ = NULL;
       }
       break;
@@ -332,7 +334,7 @@ void ExtensionHost::InsertInfobarCSS() {
   render_view_host()->InsertCSS(string16(), css.as_string());
 }
 
-void ExtensionHost::DidStopLoading() {
+void ExtensionHost::DidStopLoading(content::RenderViewHost* render_view_host) {
   bool notify = !did_stop_loading_;
   did_stop_loading_ = true;
   if (extension_host_type_ == chrome::VIEW_TYPE_EXTENSION_POPUP ||
@@ -500,7 +502,8 @@ void ExtensionHost::OnRequest(const ExtensionHostMsg_Request_Params& params) {
 }
 
 void ExtensionHost::OnEventAck() {
-  ExtensionEventRouter* router = ExtensionSystem::Get(profile_)->event_router();
+  extensions::EventRouter* router =
+      ExtensionSystem::Get(profile_)->event_router();
   if (router)
     router->OnEventAck(profile_, extension_id());
 }
@@ -535,7 +538,7 @@ void ExtensionHost::RenderViewCreated(RenderViewHost* render_view_host) {
 
   // If the host is bound to a window, then extract its id. Extensions hosted
   // in ExternalTabContainer objects may not have an associated window.
-  ExtensionWindowController* window = GetExtensionWindowController();
+  extensions::WindowController* window = GetExtensionWindowController();
   if (window) {
     render_view_host->Send(new ExtensionMsg_UpdateBrowserWindowId(
         render_view_host->GetRoutingID(), window->GetWindowId()));
@@ -586,30 +589,8 @@ void ExtensionHost::AddNewContents(WebContents* source,
     }
   }
 
-  // Find a browser with a profile that matches the new tab. If none is found,
-  // NULL argument to NavigateParams is valid.
-  Profile* profile =
-      Profile::FromBrowserContext(new_contents->GetBrowserContext());
-  Browser* browser = browser::FindTabbedBrowser(
-      profile, false);  // Match incognito exactly.
-  TabContents* tab_contents = new TabContents(new_contents);
-  browser::NavigateParams params(browser, tab_contents);
-
-  // The extension_app_id parameter ends up as app_name in the Browser
-  // which causes the Browser to return true for is_app().  This affects
-  // among other things, whether the location bar gets displayed.
-  // TODO(mpcomplete): This seems wrong. What if the extension content is hosted
-  // in a tab?
-  if (disposition == NEW_POPUP)
-    params.extension_app_id = extension_id_;
-
-  if (!browser)
-    params.profile = profile;
-  params.disposition = disposition;
-  params.window_bounds = initial_pos;
-  params.window_action = browser::NavigateParams::SHOW_WINDOW;
-  params.user_gesture = user_gesture;
-  browser::Navigate(&params);
+  ExtensionTabUtil::CreateTab(new_contents, extension_id_, disposition,
+                              initial_pos, user_gesture);
 }
 
 void ExtensionHost::RenderViewReady() {
@@ -618,3 +599,5 @@ void ExtensionHost::RenderViewReady() {
       content::Source<Profile>(profile_),
       content::Details<ExtensionHost>(this));
 }
+
+}  // namespace extensions

@@ -13,7 +13,7 @@
 #include "content/common/injection_test_dll.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/renderer/render_thread.h"
-#include "sandbox/src/sandbox.h"
+#include "sandbox/win/src/sandbox.h"
 #include "skia/ext/skia_sandbox_support_win.h"
 #include "unicode/timezone.h"
 
@@ -65,7 +65,7 @@ void EnableThemeSupportForRenderer(bool no_sandbox) {
 }
 
 // Windows-only skia sandbox support
-void SkiaPreCacheFont(LOGFONT logfont) {
+void SkiaPreCacheFont(const LOGFONT& logfont) {
   content::RenderThread* render_thread = content::RenderThread::Get();
   if (render_thread) {
     render_thread->PreCacheFont(logfont);

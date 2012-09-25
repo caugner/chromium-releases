@@ -4,8 +4,6 @@
 
 #include "content/shell/shell.h"
 
-#include <iostream>
-
 #include "base/auto_reset.h"
 #include "base/command_line.h"
 #include "base/message_loop.h"
@@ -31,6 +29,7 @@ static const int kTestWindowHeight = 600;
 namespace content {
 
 std::vector<Shell*> Shell::windows_;
+base::Callback<void(Shell*)> Shell::shell_created_callback_;
 
 bool Shell::quit_message_loop_ = true;
 
@@ -41,9 +40,14 @@ Shell::Shell(WebContents* web_contents)
       , default_edit_wnd_proc_(0)
 #endif
   {
-    registrar_.Add(this, NOTIFICATION_WEB_CONTENTS_TITLE_UPDATED,
-        Source<WebContents>(web_contents));
-    windows_.push_back(this);
+  registrar_.Add(this, NOTIFICATION_WEB_CONTENTS_TITLE_UPDATED,
+      Source<WebContents>(web_contents));
+  windows_.push_back(this);
+
+  if (!shell_created_callback_.is_null()) {
+    shell_created_callback_.Run(this);
+    shell_created_callback_.Reset();
+  }
 }
 
 Shell::~Shell() {
@@ -81,6 +85,12 @@ void Shell::CloseAllWindows() {
   MessageLoop::current()->RunAllPending();
 }
 
+void Shell::SetShellCreatedCallback(
+    base::Callback<void(Shell*)> shell_created_callback) {
+  DCHECK(shell_created_callback_.is_null());
+  shell_created_callback_ = shell_created_callback;
+}
+
 Shell* Shell::FromRenderViewHost(RenderViewHost* rvh) {
   for (size_t i = 0; i < windows_.size(); ++i) {
     if (windows_[i]->web_contents() &&
@@ -91,7 +101,7 @@ Shell* Shell::FromRenderViewHost(RenderViewHost* rvh) {
   return NULL;
 }
 
-Shell* Shell::CreateNewWindow(content::BrowserContext* browser_context,
+Shell* Shell::CreateNewWindow(BrowserContext* browser_context,
                               const GURL& url,
                               SiteInstance* site_instance,
                               int routing_id,
@@ -111,8 +121,8 @@ Shell* Shell::CreateNewWindow(content::BrowserContext* browser_context,
 void Shell::LoadURL(const GURL& url) {
   web_contents_->GetController().LoadURL(
       url,
-      content::Referrer(),
-      content::PAGE_TRANSITION_TYPED,
+      Referrer(),
+      PAGE_TRANSITION_TYPED,
       std::string());
   web_contents_->Focus();
 }
@@ -147,9 +157,22 @@ gfx::NativeView Shell::GetContentView() {
   return web_contents_->GetNativeView();
 }
 
+WebContents* Shell::OpenURLFromTab(WebContents* source,
+                                   const OpenURLParams& params) {
+  // The only one we implement for now.
+  DCHECK(params.disposition == CURRENT_TAB);
+  source->GetController().LoadURL(
+      params.url, params.referrer, params.transition, std::string());
+  return source;
+}
+
 void Shell::LoadingStateChanged(WebContents* source) {
   UpdateNavigationControls();
   PlatformSetIsLoading(source->IsLoading());
+}
+
+void Shell::CloseContents(WebContents* source) {
+  Close();
 }
 
 void Shell::WebContentsCreated(WebContents* source_contents,
@@ -177,10 +200,10 @@ bool Shell::AddMessageToConsole(WebContents* source,
   if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpRenderTree))
     return false;
 
-  std::cout << "CONSOLE MESSAGE: ";
+  printf("CONSOLE MESSAGE: ");
   if (line_no)
-    std::cout << "line " << line_no << ": ";
-  std::cout << UTF16ToUTF8(message) << "\n";
+    printf("line %d: ", line_no);
+  printf("%s\n", UTF16ToUTF8(message).c_str());
   return true;
 }
 

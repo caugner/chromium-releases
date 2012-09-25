@@ -197,7 +197,7 @@ class RenderViewHostManagerTest
 // a regression test for bug 9364.
 TEST_F(RenderViewHostManagerTest, NewTabPageProcesses) {
   BrowserThreadImpl ui_thread(BrowserThread::UI, MessageLoop::current());
-  const GURL kNtpUrl(chrome::kTestNewTabURL);
+  const GURL kNtpUrl(content::kTestNewTabURL);
   const GURL kDestUrl("http://www.google.com/");
 
   // Navigate our first tab to the new tab page and then to the destination.
@@ -238,7 +238,7 @@ TEST_F(RenderViewHostManagerTest, NewTabPageProcesses) {
                    dest_rvh2->GetSiteInstance()));
 
   // Navigate both to the new tab page, and verify that they share a
-  // SiteInstance.
+  // RenderProcessHost (not a SiteInstance).
   NavigateActiveAndCommit(kNtpUrl);
 
   contents2.GetController().LoadURL(
@@ -249,8 +249,10 @@ TEST_F(RenderViewHostManagerTest, NewTabPageProcesses) {
      pending_render_view_host())->SendNavigate(102, kNtpUrl);
   dest_rvh2->OnSwapOutACK();
 
-  EXPECT_EQ(active_rvh()->GetSiteInstance(),
-      contents2.GetRenderViewHost()->GetSiteInstance());
+  EXPECT_NE(active_rvh()->GetSiteInstance(),
+            contents2.GetRenderViewHost()->GetSiteInstance());
+  EXPECT_EQ(active_rvh()->GetSiteInstance()->GetProcess(),
+            contents2.GetRenderViewHost()->GetSiteInstance()->GetProcess());
 }
 
 // Ensure that the browser ignores most IPC messages that arrive from a
@@ -260,7 +262,7 @@ TEST_F(RenderViewHostManagerTest, NewTabPageProcesses) {
 // renderer in a stuck state.  See http://crbug.com/93427.
 TEST_F(RenderViewHostManagerTest, FilterMessagesWhileSwappedOut) {
   BrowserThreadImpl ui_thread(BrowserThread::UI, MessageLoop::current());
-  const GURL kNtpUrl(chrome::kTestNewTabURL);
+  const GURL kNtpUrl(content::kTestNewTabURL);
   const GURL kDestUrl("http://www.google.com/");
 
   // Navigate our first tab to the new tab page and then to the destination.
@@ -338,7 +340,7 @@ TEST_F(RenderViewHostManagerTest, FilterMessagesWhileSwappedOut) {
 // RenderView is being newly created or reused.
 TEST_F(RenderViewHostManagerTest, AlwaysSendEnableViewSourceMode) {
   BrowserThreadImpl ui_thread(BrowserThread::UI, MessageLoop::current());
-  const GURL kNtpUrl(chrome::kTestNewTabURL);
+  const GURL kNtpUrl(content::kTestNewTabURL);
   const GURL kUrl("view-source:http://foo");
 
   // We have to navigate to some page at first since without this, the first
@@ -659,7 +661,7 @@ TEST_F(RenderViewHostManagerTest, WebUI) {
 
   manager.Init(browser_context(), instance, MSG_ROUTING_NONE);
 
-  const GURL kUrl(chrome::kTestNewTabURL);
+  const GURL kUrl(content::kTestNewTabURL);
   NavigationEntryImpl entry(NULL /* instance */, -1 /* page_id */, kUrl,
                             content::Referrer(), string16() /* title */,
                             content::PAGE_TRANSITION_TYPED,
@@ -779,7 +781,7 @@ TEST_F(RenderViewHostManagerTest, NavigateAfterMissingSwapOutACK) {
 TEST_F(RenderViewHostManagerTest, CreateSwappedOutOpenerRVHs) {
   const GURL kUrl1("http://www.google.com/");
   const GURL kUrl2("http://www.chromium.org/");
-  const GURL kNtpUrl(chrome::kTestNewTabURL);
+  const GURL kNtpUrl(content::kTestNewTabURL);
 
   // Navigate to an initial URL.
   contents()->NavigateAndCommit(kUrl1);
@@ -873,4 +875,64 @@ TEST_F(RenderViewHostManagerTest, EnableWebUIWithSwappedOutOpener) {
 
   // Ensure the new RVH has WebUI bindings.
   EXPECT_TRUE(rvh2->GetEnabledBindings() & content::BINDINGS_POLICY_WEB_UI);
+}
+
+// Test that we reuse the same guest SiteInstance if we navigate across sites.
+TEST_F(RenderViewHostManagerTest, NoSwapOnGuestNavigations) {
+  content::TestNotificationTracker notifications;
+
+  GURL guest_url("guest://abc123");
+  SiteInstance* instance =
+      SiteInstance::CreateForURL(browser_context(), guest_url);
+  TestWebContents web_contents(browser_context(), instance);
+
+  // Create.
+  RenderViewHostManager manager(&web_contents, &web_contents, &web_contents);
+
+  manager.Init(browser_context(), instance, MSG_ROUTING_NONE);
+
+  RenderViewHost* host;
+
+  // 1) The first navigation. --------------------------
+  const GURL kUrl1("http://www.google.com/");
+  NavigationEntryImpl entry1(
+      NULL /* instance */, -1 /* page_id */, kUrl1, content::Referrer(),
+      string16() /* title */, content::PAGE_TRANSITION_TYPED,
+      false /* is_renderer_init */);
+  host = manager.Navigate(entry1);
+
+  // The RenderViewHost created in Init will be reused.
+  EXPECT_TRUE(host == manager.current_host());
+  EXPECT_FALSE(manager.pending_render_view_host());
+  EXPECT_EQ(manager.current_host()->GetSiteInstance(), instance);
+
+  // Commit.
+  manager.DidNavigateMainFrame(host);
+  // Commit to SiteInstance should be delayed until RenderView commit.
+  EXPECT_EQ(host, manager.current_host());
+  ASSERT_TRUE(host);
+  EXPECT_TRUE(static_cast<SiteInstanceImpl*>(host->GetSiteInstance())->
+      HasSite());
+
+  // 2) Navigate to a different domain. -------------------------
+  // Guests stay in the same process on navigation.
+  const GURL kUrl2("http://www.chromium.org");
+  NavigationEntryImpl entry2(
+      NULL /* instance */, -1 /* page_id */, kUrl2,
+      content::Referrer(kUrl1, WebKit::WebReferrerPolicyDefault),
+      string16() /* title */, content::PAGE_TRANSITION_LINK,
+      true /* is_renderer_init */);
+  host = manager.Navigate(entry2);
+
+  // The RenderViewHost created in Init will be reused.
+  EXPECT_EQ(host, manager.current_host());
+  EXPECT_FALSE(manager.pending_render_view_host());
+
+  // Commit.
+  manager.DidNavigateMainFrame(host);
+  EXPECT_EQ(host, manager.current_host());
+  ASSERT_TRUE(host);
+  EXPECT_EQ(static_cast<SiteInstanceImpl*>(host->GetSiteInstance()),
+      instance);
+
 }

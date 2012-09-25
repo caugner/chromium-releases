@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_WEBUI_NTP_APP_LAUNCHER_HANDLER_H_
 #define CHROME_BROWSER_UI_WEBUI_NTP_APP_LAUNCHER_HANDLER_H_
-#pragma once
 
 #include <string>
 
@@ -21,10 +20,13 @@
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_ui_message_handler.h"
 
-class AppNotification;
 class ExtensionService;
 class PrefChangeRegistrar;
 class Profile;
+
+namespace extensions {
+class AppNotification;
+}
 
 // The handler for Javascript messages related to the "apps" view.
 class AppLauncherHandler : public content::WebUIMessageHandler,
@@ -38,7 +40,7 @@ class AppLauncherHandler : public content::WebUIMessageHandler,
   // Populate a dictionary with the information from an extension.
   static void CreateAppInfo(
       const extensions::Extension* extension,
-      const AppNotification* notification,
+      const extensions::AppNotification* notification,
       ExtensionService* service,
       base::DictionaryValue* value);
 
@@ -82,9 +84,6 @@ class AppLauncherHandler : public content::WebUIMessageHandler,
   // Callback for the "setPageIndex" message.
   void HandleSetPageIndex(const base::ListValue* args);
 
-  // Callback for the "promoSeen" message.
-  void HandlePromoSeen(const base::ListValue* args);
-
   // Callback for the "saveAppPageName" message.
   void HandleSaveAppPageName(const base::ListValue* args);
 
@@ -122,9 +121,8 @@ class AppLauncherHandler : public content::WebUIMessageHandler,
   // Reset some instance flags we use to track the currently uninstalling app.
   void CleanupAfterUninstall();
 
-  // Records a web store launch in the appropriate histograms. |promo_active|
-  // specifies if the web store promotion was active.
-  static void RecordWebStoreLaunch(bool promo_active);
+  // Records a web store launch in the appropriate histograms.
+  static void RecordWebStoreLaunch();
 
   // Records an app launch in the corresponding |bucket| of the app launch
   // histogram. |promo_active| specifies if the web store promotion was active.
@@ -155,9 +153,6 @@ class AppLauncherHandler : public content::WebUIMessageHandler,
   // needed.
   ExtensionInstallPrompt* GetExtensionInstallPrompt();
 
-  // Helper that uninstalls all the default apps.
-  void UninstallDefaultApps();
-
   // Continuation for installing a bookmark app after favicon lookup.
   void OnFaviconForApp(FaviconService::Handle handle,
                        history::FaviconData data);
@@ -181,6 +176,9 @@ class AppLauncherHandler : public content::WebUIMessageHandler,
 
   // Used to show confirmation UI for enabling extensions in incognito mode.
   scoped_ptr<ExtensionInstallPrompt> extension_install_ui_;
+
+  // The ids of apps to show on the NTP.
+  std::set<std::string> visible_apps_;
 
   // The id of the extension we are prompting the user about.
   std::string extension_id_prompting_;

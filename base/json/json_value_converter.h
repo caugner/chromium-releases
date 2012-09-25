@@ -4,7 +4,6 @@
 
 #ifndef BASE_JSON_JSON_VALUE_CONVERTER_H_
 #define BASE_JSON_JSON_VALUE_CONVERTER_H_
-#pragma once
 
 #include <string>
 #include <vector>
@@ -274,7 +273,7 @@ class RepeatedValueConverter : public ValueConverter<ScopedVector<Element> > {
 
     field->reserve(list->GetSize());
     for (size_t i = 0; i < list->GetSize(); ++i) {
-      base::Value* element = NULL;
+      const base::Value* element = NULL;
       if (!list->Get(i, &element))
         continue;
 
@@ -308,7 +307,7 @@ class RepeatedMessageConverter
 
     field->reserve(list->GetSize());
     for (size_t i = 0; i < list->GetSize(); ++i) {
-      base::Value* element = NULL;
+      const base::Value* element = NULL;
       if (!list->Get(i, &element))
         continue;
 
@@ -345,7 +344,7 @@ class RepeatedCustomValueConverter
 
     field->reserve(list->GetSize());
     for (size_t i = 0; i < list->GetSize(); ++i) {
-      base::Value* element = NULL;
+      const base::Value* element = NULL;
       if (!list->Get(i, &element))
         continue;
 
@@ -506,7 +505,7 @@ class JSONValueConverter {
     for(size_t i = 0; i < fields_.size(); ++i) {
       const internal::FieldConverterBase<StructType>* field_converter =
           fields_[i];
-      base::Value* field = NULL;
+      const base::Value* field = NULL;
       if (dictionary_value->Get(field_converter->field_path(), &field)) {
         if (!field_converter->ConvertField(*field, output)) {
           DVLOG(1) << "failure at field " << field_converter->field_path();

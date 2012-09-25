@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_TABS_TAB_STRIP_MODEL_DELEGATE_H_
 #define CHROME_BROWSER_UI_TABS_TAB_STRIP_MODEL_DELEGATE_H_
-#pragma once
 
 #include <vector>
 
@@ -41,6 +40,8 @@ class TabStripModelDelegate {
     TAB_MOVE_ACTION = 1,
     TAB_TEAROFF_ACTION = 2
   };
+
+  virtual ~TabStripModelDelegate() {}
 
   // Adds what the delegate considers to be a blank tab to the model.
   virtual TabContents* AddBlankTab(bool foreground) = 0;
@@ -101,26 +102,12 @@ class TabStripModelDelegate {
   // Restores the last closed tab if CanRestoreTab would return true.
   virtual void RestoreTab() = 0;
 
-  // Returns true if all contents in array of |indices| can be closed.
-  // Returns false if one or more of the contents can't be closed.
-  // Indices of contents that cannot be closed will be removed from |indices|.
-  virtual bool CanCloseContents(std::vector<int>* indices) = 0;
-
   // Returns true if we should allow "bookmark all tabs" in this window; this is
   // true when there is more than one bookmarkable tab open.
   virtual bool CanBookmarkAllTabs() const = 0;
 
   // Creates a bookmark folder containing a bookmark for all open tabs.
   virtual void BookmarkAllTabs() = 0;
-
-  // Returns true if any of the tabs can be closed.
-  virtual bool CanCloseTab() const = 0;
-
-  // Returns true if the tab strip can use large icons.
-  virtual bool LargeIconsPermitted() const = 0;
-
- protected:
-  virtual ~TabStripModelDelegate() {}
 };
 
 #endif  // CHROME_BROWSER_UI_TABS_TAB_STRIP_MODEL_DELEGATE_H_

@@ -51,6 +51,12 @@ bool PanelCocoa::isClosed() {
 void PanelCocoa::ShowPanel() {
   ShowPanelInactive();
   ActivatePanel();
+
+  // |-makeKeyAndOrderFront:| won't send |-windowDidBecomeKey:| until we
+  // return to the runloop. This causes extension tests that wait for the
+  // active status change notification to fail, so we send an active status
+  // notification here.
+  panel_->OnActiveStateChanged(true);
 }
 
 void PanelCocoa::ShowPanelInactive() {
@@ -199,13 +205,19 @@ bool PanelCocoa::IsDrawingAttention() const {
 
 bool PanelCocoa::PreHandlePanelKeyboardEvent(
     const NativeWebKeyboardEvent& event, bool* is_keyboard_shortcut) {
-  // TODO(jennb): any shortcut handling needed for Panel?
+  // No need to prehandle as no keys are reserved.
   return false;
 }
 
 void PanelCocoa::HandlePanelKeyboardEvent(
     const NativeWebKeyboardEvent& event) {
-  // TODO(jennb): any shortcut handling needed for Panel?
+  if (event.skip_in_browser || event.type == NativeWebKeyboardEvent::Char)
+    return;
+
+  ChromeEventProcessingWindow* event_window =
+      static_cast<ChromeEventProcessingWindow*>([controller_ window]);
+  DCHECK([event_window isKindOfClass:[ChromeEventProcessingWindow class]]);
+  [event_window redispatchKeyEvent:event.os_event];
 }
 
 void PanelCocoa::FullScreenModeChanged(
@@ -237,6 +249,14 @@ void PanelCocoa::UpdatePanelMinimizeRestoreButtonVisibility() {
 void PanelCocoa::PanelExpansionStateChanging(
     Panel::ExpansionState old_state, Panel::ExpansionState new_state) {
   [controller_ updateWindowLevel:(new_state != Panel::EXPANDED)];
+}
+
+void PanelCocoa::AttachWebContents(content::WebContents* contents) {
+  [controller_ webContentsInserted:contents];
+}
+
+void PanelCocoa::DetachWebContents(content::WebContents* contents) {
+  [controller_ webContentsDetached:contents];
 }
 
 gfx::Size PanelCocoa::WindowSizeFromContentSize(

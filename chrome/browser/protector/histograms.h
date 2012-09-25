@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_PROTECTOR_HISTOGRAMS_H_
 #define CHROME_BROWSER_PROTECTOR_HISTOGRAMS_H_
-#pragma once
 
 class TemplateURL;
 
@@ -24,6 +23,7 @@ enum ProtectorError {
   kProtectorErrorValueValid,
   kProtectorErrorValueValidZero,
   kProtectorErrorForcedUpdate,
+  kProtectorErrorOverwrittenByMigration,
 
   // This is for convenience only, must always be the last.
   kProtectorErrorCount

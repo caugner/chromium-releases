@@ -6,7 +6,6 @@
 
 #ifndef CONTENT_PUBLIC_COMMON_CONTENT_SWITCHES_H_
 #define CONTENT_PUBLIC_COMMON_CONTENT_SWITCHES_H_
-#pragma once
 
 #include "build/build_config.h"
 #include "content/common/content_export.h"
@@ -31,21 +30,23 @@ CONTENT_EXPORT extern const char kDisableAcceleratedPlugins[];
 CONTENT_EXPORT extern const char kDisableAcceleratedVideo[];
 CONTENT_EXPORT extern const char kDisableAltWinstation[];
 CONTENT_EXPORT extern const char kDisableApplicationCache[];
-extern const char kDisableAudio[];
+CONTENT_EXPORT extern const char kDisableAudio[];
 extern const char kDisableBackingStoreLimit[];
-CONTENT_EXPORT extern const char kDisableBrowserPlugin[];
 CONTENT_EXPORT extern const char kDisableDatabases[];
 extern const char kDisableDataTransferItems[];
 CONTENT_EXPORT extern const char kEnableDeferred2dCanvas[];
 extern const char kDisableDesktopNotifications[];
 CONTENT_EXPORT extern const char kDisableDeviceOrientation[];
+#if defined(OS_ANDROID)
+CONTENT_EXPORT extern const char kEnableExperimentalWebGL[];
+#else
 CONTENT_EXPORT extern const char kDisableExperimentalWebGL[];
+#endif
 CONTENT_EXPORT extern const char kBlacklistAcceleratedCompositing[];
 CONTENT_EXPORT extern const char kBlacklistWebGL[];
-CONTENT_EXPORT extern const char kBrowserPlugin[];
-CONTENT_EXPORT extern const char kBrowserPluginEnabled[];
 extern const char kDisableFileSystem[];
 CONTENT_EXPORT extern const char kDisableFlash3d[];
+extern const char kDisableFlashFullscreen3d[];
 CONTENT_EXPORT extern const char kDisableFlashStage3d[];
 CONTENT_EXPORT extern const char kDisableForceCompositingMode[];
 extern const char kDisableGeolocation[];
@@ -58,7 +59,6 @@ extern const char kEnableGpuSandbox[];
 extern const char kDisableGpuWatchdog[];
 CONTENT_EXPORT extern const char kDisableHangMonitor[];
 extern const char kDisableImageTransportSurface[];
-CONTENT_EXPORT extern const char kDisableInteractiveFormValidation[];
 CONTENT_EXPORT extern const char kDisableJava[];
 CONTENT_EXPORT extern const char kDisableJavaScript[];
 extern const char kDisableJavaScriptI18NAPI[];
@@ -66,7 +66,7 @@ CONTENT_EXPORT extern const char kDisableLocalStorage[];
 CONTENT_EXPORT extern const char kDisableLogging[];
 CONTENT_EXPORT extern const char kDisableSmoothScrolling[];
 CONTENT_EXPORT extern const char kDisablePlugins[];
-CONTENT_EXPORT extern const char kDisablePopupBlocking[];
+extern const char kDisablePointerLock[];
 extern const char kDisableRemoteFonts[];
 extern const char kDisableRendererAccessibility[];
 extern const char kDisableSSLFalseStart[];
@@ -77,36 +77,44 @@ extern const char kDisableSharedWorkers[];
 extern const char kDisableSiteSpecificQuirks[];
 CONTENT_EXPORT extern const char kDisableSpeechInput[];
 CONTENT_EXPORT extern const char kEnableScriptedSpeech[];
+extern const char kSpeechRecognitionWebserviceURL[];
+extern const char kSpeechRecognitionWebserviceKey[];
 CONTENT_EXPORT extern const char kDisableThreadedAnimation[];
+#if defined(OS_ANDROID)
+CONTENT_EXPORT extern const char kEnableWebAudio[];
+#else
 CONTENT_EXPORT extern const char kDisableWebAudio[];
+#endif
 extern const char kDisableWebSecurity[];
 extern const char kDisableWebSockets[];
 extern const char kDisableXSSAuditor[];
 CONTENT_EXPORT extern const char kDomAutomationController[];
 CONTENT_EXPORT extern const char kEnableAcceleratedPainting[];
 CONTENT_EXPORT extern const char kEnableAcceleratedFilters[];
+extern const char kEnableAcceleratedPlugins[];
 extern const char kEnableAccessibilityLogging[];
 CONTENT_EXPORT extern const char kEnableCompositingForFixedPosition[];
 extern const char kEnableCssRegions[];
 extern const char kEnableCssShaders[];
+extern const char kEnableCssVariables[];
 CONTENT_EXPORT extern const char kEnableDeviceMotion[];
 extern const char kEnableEncryptedMedia[];
 extern const char kEnableFastback[];
 CONTENT_EXPORT extern const char kEnableFixedLayout[];
 CONTENT_EXPORT extern const char kDisableFullScreen[];
 extern const char kEnablePointerLock[];
-extern const char kEnableGamepad[];
 extern const char kEnableGpuBenchmarking[];
 CONTENT_EXPORT extern const char kEnableLogging[];
 extern const char kEnableMediaSource[];
 extern const char kEnablePeerConnection[];
 extern const char kEnableMonitorProfile[];
-extern const char kEnableOriginBoundCerts[];
 extern const char kEnablePartialSwap[];
+extern const char kEnableUIReleaseFrontSurface[];
 extern const char kEnablePinch[];
 extern const char kEnablePreparsedJsCaching[];
 CONTENT_EXPORT extern const char kEnablePrivilegedWebGLExtensions[];
 extern const char kEnablePruneGpuCommandBuffers[];
+extern const char kEnableRendererSideMixing[];
 extern const char kEnableSSLCachedInfo[];
 extern const char kEnableSandboxLogging[];
 extern const char kEnableSeccompSandbox[];
@@ -118,20 +126,22 @@ extern const char kEnableStrictSiteIsolation[];
 CONTENT_EXPORT extern const char kEnableThreadedCompositing[];
 CONTENT_EXPORT extern const char kDisableThreadedCompositing[];
 CONTENT_EXPORT extern const char kEnableTcpFastOpen[];
-CONTENT_EXPORT extern const char kEnableAcceleratedVideoDecode[];
+CONTENT_EXPORT extern const char kDisableAcceleratedVideoDecode[];
 CONTENT_EXPORT extern const char kEnableVideoTrack[];
 extern const char kEnableViewport[];
 CONTENT_EXPORT extern const char kExperimentalLocationFeatures[];
-extern const char kExtraPluginDir[];
+CONTENT_EXPORT extern const char kExtraPluginDir[];
 CONTENT_EXPORT extern const char kForceCompositingMode[];
 extern const char kForceFieldTrials[];
 CONTENT_EXPORT extern const char kForceRendererAccessibility[];
 extern const char kGpuDeviceID[];
+extern const char kGpuDriverVendor[];
 extern const char kGpuDriverVersion[];
 extern const char kGpuLauncher[];
 CONTENT_EXPORT extern const char kGpuProcess[];
 extern const char kGpuStartupDialog[];
 extern const char kGpuVendorID[];
+CONTENT_EXPORT extern const char kGuestRenderer[];
 extern const char kInProcessGPU[];
 extern const char kInProcessPlugins[];
 CONTENT_EXPORT extern const char kInProcessWebGL[];
@@ -149,21 +159,16 @@ CONTENT_EXPORT extern const char kPluginPath[];
 CONTENT_EXPORT extern const char kPluginProcess[];
 extern const char kPluginStartupDialog[];
 CONTENT_EXPORT extern const char kPpapiBrokerProcess[];
-CONTENT_EXPORT extern const char kPpapiFlashPath[];
-CONTENT_EXPORT extern const char kPpapiFlashVersion[];
 CONTENT_EXPORT extern const char kPpapiOutOfProcess[];
 extern const char kPpapiPluginLauncher[];
 CONTENT_EXPORT extern const char kPpapiPluginProcess[];
 extern const char kPpapiStartupDialog[];
-extern const char kProcessPerSite[];
+CONTENT_EXPORT extern const char kProcessPerSite[];
 CONTENT_EXPORT extern const char kProcessPerTab[];
 CONTENT_EXPORT extern const char kProcessType[];
 CONTENT_EXPORT extern const char kRegisterPepperPlugins[];
 CONTENT_EXPORT extern const char kRemoteDebuggingPort[];
 CONTENT_EXPORT extern const char kRendererAssertTest[];
-#if defined(OS_POSIX)
-extern const char kRendererCleanExit[];
-#endif
 extern const char kRendererCmdPrefix[];
 CONTENT_EXPORT extern const char kRendererProcess[];
 extern const char kRendererProcessLimit[];
@@ -174,6 +179,7 @@ extern const char kShowCompositedLayerBorders[];
 extern const char kShowCompositedLayerTree[];
 extern const char kShowFPSCounter[];
 extern const char kShowPaintRects[];
+CONTENT_EXPORT extern const char kSimulateTouchScreenWithMouse[];
 CONTENT_EXPORT extern const char kSingleProcess[];
 CONTENT_EXPORT extern const char kSkipGpuDataLoading[];
 CONTENT_EXPORT extern const char kTestSandbox[];
@@ -197,9 +203,22 @@ extern const char kDefaultTileWidth[];
 extern const char kDefaultTileHeight[];
 extern const char kMaxUntiledLayerWidth[];
 extern const char kMaxUntiledLayerHeight[];
-CONTENT_EXPORT extern const char kFixedPositionCreatesStackingContext[];
+CONTENT_EXPORT extern const char kEnableFixedPositionCreatesStackingContext[];
+CONTENT_EXPORT extern const char kDisableFixedPositionCreatesStackingContext[];
 
 extern const char kEnableVisualWordMovement[];
+
+#if defined(OS_ANDROID)
+extern const char kUseMobileUserAgent[];
+extern const char kGraphicsMode[];
+// Not actual flags, just values: for example, --graphics-mode=compositor
+extern const char kGraphicsModeValueBasic[];
+extern const char kGraphicsModeValueCompositor[];
+#endif
+
+#if defined(OS_POSIX)
+extern const char kChildCleanExit[];
+#endif
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
 extern const char kScrollPixels[];

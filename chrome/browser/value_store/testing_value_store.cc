@@ -8,7 +8,7 @@
 
 namespace {
 
-const char* kGenericErrorMessage = "TestingValueStore configured to error";
+const char kGenericErrorMessage[] = "TestingValueStore configured to error";
 
 ValueStore::ReadResult ReadResultError() {
   return ValueStore::MakeReadResult(kGenericErrorMessage);
@@ -54,8 +54,7 @@ size_t TestingValueStore::GetBytesInUse() {
   return 0;
 }
 
-ValueStore::ReadResult TestingValueStore::Get(
-    const std::string& key) {
+ValueStore::ReadResult TestingValueStore::Get(const std::string& key) {
   return Get(CreateVector(key));
 }
 
@@ -99,8 +98,8 @@ ValueStore::WriteResult TestingValueStore::Set(
   scoped_ptr<ValueStoreChangeList> changes(new ValueStoreChangeList());
   for (DictionaryValue::Iterator it(settings); it.HasNext(); it.Advance()) {
     Value* old_value = NULL;
-    storage_.GetWithoutPathExpansion(it.key(), &old_value);
-    if (!old_value || !old_value->Equals(&it.value())) {
+    if (!storage_.GetWithoutPathExpansion(it.key(), &old_value) ||
+        !old_value->Equals(&it.value())) {
       changes->push_back(
           ValueStoreChange(
               it.key(),
@@ -112,8 +111,7 @@ ValueStore::WriteResult TestingValueStore::Set(
   return MakeWriteResult(changes.release());
 }
 
-ValueStore::WriteResult TestingValueStore::Remove(
-    const std::string& key) {
+ValueStore::WriteResult TestingValueStore::Remove(const std::string& key) {
   return Remove(CreateVector(key));
 }
 

@@ -175,9 +175,6 @@ class SigIntTestRunner : public TestRunner {
     // Send SingInt and verify the process exited.
     EXPECT_TRUE(registry->SendInput(pid_, "\003"));
   }
-
- private:
-  bool output_received_;
 };
 
 }  // namespace
@@ -218,14 +215,14 @@ class ProcessProxyTest : public InProcessBrowserTest {
 
     // Wait until all data from output watcher is received (QuitTask will be
     // fired on watcher thread).
-    ui_test_utils::RunMessageLoop();
+    content::RunMessageLoop();
 
     BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
          base::Bind(&ProcessProxyTest::EndRegistryTest,
                     base::Unretained(this)));
 
     // Wait until we clean up the process proxy.
-    ui_test_utils::RunMessageLoop();
+    content::RunMessageLoop();
   }
 
   scoped_ptr<TestRunner> test_runner_;

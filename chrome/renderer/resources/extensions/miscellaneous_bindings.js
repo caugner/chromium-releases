@@ -9,6 +9,7 @@
 
   require('json_schema');
   require('event_bindings');
+  var lastError = require('lastError');
   var miscNatives = requireNative('miscellaneous_bindings');
   var CloseChannel = miscNatives.CloseChannel;
   var PortAddRef = miscNatives.PortAddRef;
@@ -17,8 +18,10 @@
   var BindToGC = miscNatives.BindToGC;
 
   var chromeHidden = requireNative('chrome_hidden').GetChromeHidden();
-  var manifestVersion;
-  var extensionId;
+
+  var processNatives = requireNative('process');
+  var manifestVersion = processNatives.GetManifestVersion();
+  var extensionId = processNatives.GetExtensionId();
 
   // The reserved channel name for the sendRequest/sendMessage APIs.
   // Note: sendRequest is deprecated.
@@ -116,7 +119,7 @@
     if (sourceExtensionId != targetExtensionId)
       errorMsg += " for extension " + targetExtensionId;
     errorMsg += ").";
-    chrome.extension.lastError = {"message": errorMsg};
+    lastError.set(errorMsg);
     console.error("Could not send response: " + errorMsg);
   }
 
@@ -228,14 +231,14 @@
       if (connectionInvalid) {
         var errorMsg =
             "Could not establish connection. Receiving end does not exist.";
-        chrome.extension.lastError = {"message": errorMsg};
+        lastError.set(errorMsg);
         console.error("Port error: " + errorMsg);
       }
       try {
         port.onDisconnect.dispatch(port);
       } finally {
         port.destroy_();
-        delete chrome.extension.lastError;
+        lastError.clear();
       }
     }
   };
@@ -272,7 +275,7 @@
     port.onDisconnect.addListener(function() {
       // For onDisconnects, we only notify the callback if there was an error
       try {
-        if (chrome.extension.lastError)
+        if (chrome.runtime.lastError)
           responseCallback();
       } finally {
         port = null;
@@ -287,22 +290,3 @@
       }
     });
   }
-
-  // This function is called on context initialization for both content scripts
-  // and extension contexts.
-  chromeHidden.onLoad.addListener(function(tempExtensionId,
-                                           isExtensionProcess,
-                                           inIncognitoContext,
-                                           tempManifestVersion) {
-    extensionId = tempExtensionId;
-    manifestVersion = tempManifestVersion;
-
-    chrome.extension = chrome.extension || {};
-
-    if (manifestVersion < 2) {
-      chrome.self = chrome.extension;
-      chrome.extension.inIncognitoTab = inIncognitoContext;
-    }
-
-    chrome.extension.inIncognitoContext = inIncognitoContext;
-  });

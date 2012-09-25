@@ -13,6 +13,7 @@
 #include "chrome/browser/download/download_util.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/download/download_item_view.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
@@ -21,8 +22,7 @@
 #include "content/public/browser/page_navigator.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "grit/theme_resources_standard.h"
-#include "grit/ui_resources_standard.h"
+#include "grit/ui_resources.h"
 #include "ui/base/animation/slide_animation.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -380,7 +380,7 @@ void DownloadShelfView::OnThemeChanged() {
 }
 
 void DownloadShelfView::LinkClicked(views::Link* source, int event_flags) {
-  browser_->ShowDownloadsTab();
+  chrome::ShowDownloads(browser_);
 }
 
 void DownloadShelfView::ButtonPressed(

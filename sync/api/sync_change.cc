@@ -6,11 +6,17 @@
 
 #include <ostream>
 
+namespace syncer {
+
 SyncChange::SyncChange() : change_type_(ACTION_INVALID) {
 }
 
-SyncChange::SyncChange(SyncChangeType change_type, const SyncData& sync_data)
-    : change_type_(change_type),
+SyncChange::SyncChange(
+    const tracked_objects::Location& from_here,
+    SyncChangeType change_type,
+    const SyncData& sync_data)
+    : location_(from_here),
+      change_type_(change_type),
       sync_data_(sync_data) {
   DCHECK(IsValid());
 }
@@ -23,11 +29,11 @@ bool SyncChange::IsValid() const {
 
   // Data from the syncer must always have valid specifics.
   if (!sync_data_.IsLocal())
-    return syncable::IsRealDataType(sync_data_.GetDataType());
+    return IsRealDataType(sync_data_.GetDataType());
 
   // Local changes must always have a tag and specify a valid datatype.
   if (sync_data_.GetTag().empty() ||
-      !syncable::IsRealDataType(sync_data_.GetDataType())) {
+      !IsRealDataType(sync_data_.GetDataType())) {
     return false;
   }
 
@@ -44,6 +50,10 @@ SyncChange::SyncChangeType SyncChange::change_type() const {
 
 SyncData SyncChange::sync_data() const {
   return sync_data_;
+}
+
+tracked_objects::Location SyncChange::location() const {
+  return location_;
 }
 
 // static
@@ -64,10 +74,13 @@ std::string SyncChange::ChangeTypeToString(SyncChangeType change_type) {
 }
 
 std::string SyncChange::ToString() const {
-  return "{ changeType: " + ChangeTypeToString(change_type_) +
-      ", syncData: " + sync_data_.ToString() + "}";
+  return "{ " + location_.ToString() + ", changeType: " +
+      ChangeTypeToString(change_type_) + ", syncData: " +
+      sync_data_.ToString() + "}";
 }
 
 void PrintTo(const SyncChange& sync_change, std::ostream* os) {
   *os << sync_change.ToString();
 }
+
+}  // namespace syncer

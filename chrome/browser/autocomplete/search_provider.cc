@@ -21,6 +21,8 @@
 #include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
 #include "chrome/browser/autocomplete/autocomplete_field_trial.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
+#include "chrome/browser/autocomplete/autocomplete_provider_listener.h"
+#include "chrome/browser/autocomplete/autocomplete_result.h"
 #include "chrome/browser/autocomplete/history_url_provider.h"
 #include "chrome/browser/autocomplete/keyword_provider.h"
 #include "chrome/browser/autocomplete/url_prefix.h"
@@ -36,13 +38,13 @@
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "content/public/common/url_fetcher.h"
 #include "googleurl/src/url_util.h"
 #include "grit/generated_resources.h"
 #include "net/base/escape.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_util.h"
 #include "net/http/http_response_headers.h"
+#include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_status.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -95,21 +97,22 @@ const int SearchProvider::kKeywordProviderURLFetcherID = 2;
 // static
 bool SearchProvider::query_suggest_immediately_ = false;
 
-SearchProvider::SearchProvider(ACProviderListener* listener, Profile* profile)
+SearchProvider::SearchProvider(AutocompleteProviderListener* listener,
+                               Profile* profile)
     : AutocompleteProvider(listener, profile, "Search"),
       providers_(TemplateURLServiceFactory::GetForProfile(profile)),
       suggest_results_pending_(0),
+      suggest_field_trial_group_number_(
+          AutocompleteFieldTrial::GetSuggestNumberOfGroups()),
       has_suggested_relevance_(false),
       verbatim_relevance_(-1),
       have_suggest_results_(false),
       instant_finalized_(false) {
-  // We use GetSuggestNumberOfGroups() as the group ID to mean "not in field
-  // trial."  Field trial groups run from 0 to GetSuggestNumberOfGroups() - 1
-  // (inclusive).
-  int suggest_field_trial_group_number =
-      AutocompleteFieldTrial::GetSuggestNumberOfGroups();
+  // Above, we default |suggest_field_trial_group_number_| to the number of
+  // groups to mean "not in field trial."  Field trial groups run from 0 to
+  // GetSuggestNumberOfGroups() - 1 (inclusive).
   if (AutocompleteFieldTrial::InSuggestFieldTrial()) {
-    suggest_field_trial_group_number =
+    suggest_field_trial_group_number_ =
         AutocompleteFieldTrial::GetSuggestGroupNameAsNumber();
   }
   // Add a beacon to the logs that'll allow us to identify later what
@@ -118,7 +121,7 @@ SearchProvider::SearchProvider(ACProviderListener* listener, Profile* profile)
   // suggest group id.
   UMA_HISTOGRAM_ENUMERATION(
       "Omnibox.SuggestFieldTrialBeacon",
-      suggest_field_trial_group_number,
+      suggest_field_trial_group_number_,
       AutocompleteFieldTrial::GetSuggestNumberOfGroups() + 1);
 }
 
@@ -186,7 +189,7 @@ void SearchProvider::Start(const AutocompleteInput& input,
 
   // Can't return search/suggest results for bogus input or without a profile.
   if (!profile_ || (input.type() == AutocompleteInput::INVALID)) {
-    Stop();
+    Stop(false);
     return;
   }
 
@@ -209,7 +212,7 @@ void SearchProvider::Start(const AutocompleteInput& input,
 
   if (!default_provider && !keyword_provider) {
     // No valid providers.
-    Stop();
+    Stop(false);
     return;
   }
 
@@ -224,7 +227,7 @@ void SearchProvider::Start(const AutocompleteInput& input,
     if (done_)
       default_provider_suggest_text_.clear();
     else
-      Stop();
+      Stop(false);
   }
 
   providers_.set(default_provider_keyword, keyword_provider_keyword);
@@ -241,7 +244,7 @@ void SearchProvider::Start(const AutocompleteInput& input,
       match.keyword = providers_.default_provider();
       matches_.push_back(match);
     }
-    Stop();
+    Stop(false);
     return;
   }
 
@@ -310,10 +313,13 @@ void SearchProvider::Run() {
   }
 }
 
-void SearchProvider::Stop() {
+void SearchProvider::Stop(bool clear_cached_results) {
   StopSuggest();
   done_ = true;
   default_provider_suggest_text_.clear();
+
+  if (clear_cached_results)
+    ClearResults();
 }
 
 void SearchProvider::AddProviderInfo(ProvidersInfo* provider_info) const {
@@ -356,7 +362,7 @@ void SearchProvider::OnURLFetchComplete(const net::URLFetcher* source) {
   const TemplateURL* default_url = providers_.GetDefaultProviderURL();
   if (!is_keyword && default_url &&
       (default_url->prepopulate_id() == SEARCH_ENGINE_GOOGLE)) {
-    const base::TimeDelta elapsed_time =
+    const TimeDelta elapsed_time =
         base::TimeTicks::Now() - time_suggest_request_sent_;
     if (request_succeeded) {
       UMA_HISTOGRAM_TIMES("Omnibox.SuggestRequest.Success.GoogleResponseTime",
@@ -421,12 +427,34 @@ void SearchProvider::DoHistoryQuery(bool minimal_changes) {
   }
 }
 
-void SearchProvider::StartOrStopSuggestQuery(bool minimal_changes) {
-  // Don't send any queries to the server until some time has elapsed after
-  // the last keypress, to avoid flooding the server with requests we are
-  // likely to end up throwing away anyway.
-  const int kQueryDelayMs = 200;
+base::TimeDelta SearchProvider::GetSuggestQueryDelay() {
+  if (query_suggest_immediately_)
+    return TimeDelta();
 
+  // By default, wait 200ms after the last keypress before sending the suggest
+  // request.  However, in the following field trials, we test different
+  // behavior:
+  // 17 - Wait 200ms since the last suggest request
+  // 18 - Wait 100ms since the last keypress
+  // 19 - Wait 100ms since the last suggest request
+  TimeDelta delay(TimeDelta::FromMilliseconds(200));
+
+  // Set the delay to 100ms if we are in field trial 18 or 19.
+  if (suggest_field_trial_group_number_ == 18 ||
+      suggest_field_trial_group_number_ == 19)
+    delay = TimeDelta::FromMilliseconds(100);
+
+  if (suggest_field_trial_group_number_ != 17 &&
+      suggest_field_trial_group_number_ != 19)
+    return delay;
+
+  // Use the time since last suggest request if we are in field trial 17 or 19.
+  TimeDelta time_since_last_suggest_request =
+      base::TimeTicks::Now() - time_suggest_request_sent_;
+  return std::max(TimeDelta(), delay - time_since_last_suggest_request);
+}
+
+void SearchProvider::StartOrStopSuggestQuery(bool minimal_changes) {
   if (!IsQuerySuitableForSuggest()) {
     StopSuggest();
     ClearResults();
@@ -459,10 +487,10 @@ void SearchProvider::StartOrStopSuggestQuery(bool minimal_changes) {
   suggest_results_pending_ = 1;
 
   // Kick off a timer that will start the URL fetch if it completes before
-  // the user types another character.
-  int delay = query_suggest_immediately_ ? 0 : kQueryDelayMs;
-  timer_.Start(FROM_HERE, TimeDelta::FromMilliseconds(delay), this,
-               &SearchProvider::Run);
+  // the user types another character.  Requests may be delayed to avoid
+  // flooding the server with requests that are likely to be thrown away later
+  // anyway.
+  timer_.Start(FROM_HERE, GetSuggestQueryDelay(), this, &SearchProvider::Run);
 }
 
 bool SearchProvider::IsQuerySuitableForSuggest() const {
@@ -592,9 +620,9 @@ net::URLFetcher* SearchProvider::CreateSuggestFetcher(
     const TemplateURLRef& suggestions_url,
     const string16& text) {
   DCHECK(suggestions_url.SupportsReplacement());
-  net::URLFetcher* fetcher = content::URLFetcher::Create(id,
-      GURL(suggestions_url.ReplaceSearchTerms(text,
-          TemplateURLRef::NO_SUGGESTIONS_AVAILABLE, string16())),
+  net::URLFetcher* fetcher = net::URLFetcher::Create(id,
+      GURL(suggestions_url.ReplaceSearchTerms(
+          TemplateURLRef::SearchTermsArgs(text))),
       net::URLFetcher::GET, this);
   fetcher->SetRequestContext(profile_->GetRequestContext());
   fetcher->SetLoadFlags(net::LOAD_DO_NOT_SAVE_COOKIES);
@@ -1091,8 +1119,15 @@ void SearchProvider::AddMatchToMap(const string16& query_string,
 
   const TemplateURLRef& search_url = provider_url->url_ref();
   DCHECK(search_url.SupportsReplacement());
-  match.destination_url = GURL(search_url.ReplaceSearchTerms(query_string,
-      accepted_suggestion, input_text));
+  match.search_terms_args.reset(
+      new TemplateURLRef::SearchTermsArgs(query_string));
+  match.search_terms_args->original_query = input_text;
+  match.search_terms_args->accepted_suggestion = accepted_suggestion;
+  // This is the destination URL sans assisted query stats.  This must be set
+  // so the AutocompleteController can properly de-dupe; the controller will
+  // eventually overwrite it before it reaches the user.
+  match.destination_url =
+      GURL(search_url.ReplaceSearchTerms(*match.search_terms_args.get()));
 
   // Search results don't look like URLs.
   match.transition = is_keyword ?

@@ -8,17 +8,18 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/threading/thread.h"
+#include "google/cacheinvalidation/types.pb.h"
 #include "jingle/notifier/base/fake_base_task.h"
 #include "net/url_request/url_request_test_util.h"
-#include "sync/internal_api/public/syncable/model_type.h"
-#include "sync/internal_api/public/syncable/model_type_payload_map.h"
+#include "sync/internal_api/public/base/model_type.h"
+#include "sync/internal_api/public/base/model_type_payload_map.h"
 #include "sync/internal_api/public/util/weak_handle.h"
 #include "sync/notifier/invalidation_state_tracker.h"
 #include "sync/notifier/mock_sync_notifier_observer.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace sync_notifier {
+namespace syncer {
 
 namespace {
 
@@ -43,14 +44,13 @@ class NonBlockingInvalidationNotifierTest : public testing::Test {
             notifier_options,
             InvalidationVersionMap(),
             std::string(),  // initial_invalidation_state
-            browser_sync::MakeWeakHandle(
-                base::WeakPtr<sync_notifier::InvalidationStateTracker>()),
+            MakeWeakHandle(base::WeakPtr<InvalidationStateTracker>()),
             "fake_client_info"));
-    invalidation_notifier_->AddObserver(&mock_observer_);
+    invalidation_notifier_->RegisterHandler(&mock_observer_);
   }
 
   virtual void TearDown() {
-    invalidation_notifier_->RemoveObserver(&mock_observer_);
+    invalidation_notifier_->UnregisterHandler(&mock_observer_);
     invalidation_notifier_.reset();
     request_context_getter_ = NULL;
     io_thread_.Stop();
@@ -65,30 +65,34 @@ class NonBlockingInvalidationNotifierTest : public testing::Test {
   notifier::FakeBaseTask fake_base_task_;
 };
 
+// TODO(akalin): Add real unit tests (http://crbug.com/140410).
+
 TEST_F(NonBlockingInvalidationNotifierTest, Basic) {
   InSequence dummy;
 
-  syncable::ModelTypePayloadMap type_payloads;
-  type_payloads[syncable::PREFERENCES] = "payload";
-  type_payloads[syncable::BOOKMARKS] = "";
-  type_payloads[syncable::AUTOFILL] = "";
-
+  const ModelTypeSet models(PREFERENCES, BOOKMARKS, AUTOFILL);
+  const ModelTypePayloadMap& type_payloads =
+      ModelTypePayloadMapFromEnumSet(models, "payload");
   EXPECT_CALL(mock_observer_, OnNotificationsEnabled());
-  EXPECT_CALL(mock_observer_,
-              OnIncomingNotification(type_payloads,
-                                     REMOTE_NOTIFICATION));
+  EXPECT_CALL(mock_observer_, OnIncomingNotification(
+      ModelTypePayloadMapToObjectIdPayloadMap(type_payloads),
+      REMOTE_NOTIFICATION));
   EXPECT_CALL(mock_observer_,
               OnNotificationsDisabled(TRANSIENT_NOTIFICATION_ERROR));
   EXPECT_CALL(mock_observer_,
               OnNotificationsDisabled(NOTIFICATION_CREDENTIALS_REJECTED));
+
+  invalidation_notifier_->UpdateRegisteredIds(
+      &mock_observer_, ModelTypeSetToObjectIdSet(models));
 
   invalidation_notifier_->SetStateDeprecated("fake_state");
   invalidation_notifier_->SetUniqueId("fake_id");
   invalidation_notifier_->UpdateCredentials("foo@bar.com", "fake_token");
 
   invalidation_notifier_->OnNotificationsEnabled();
-  invalidation_notifier_->OnIncomingNotification(type_payloads,
-                                                 REMOTE_NOTIFICATION);
+  invalidation_notifier_->OnIncomingNotification(
+      ModelTypePayloadMapToObjectIdPayloadMap(type_payloads),
+      REMOTE_NOTIFICATION);
   invalidation_notifier_->OnNotificationsDisabled(
       TRANSIENT_NOTIFICATION_ERROR);
   invalidation_notifier_->OnNotificationsDisabled(
@@ -99,4 +103,4 @@ TEST_F(NonBlockingInvalidationNotifierTest, Basic) {
 
 }  // namespace
 
-}  // namespace sync_notifier
+}  // namespace syncer

@@ -18,6 +18,7 @@
     
     <link rel="stylesheet" href="css/combobutton.css"></link>
     <link rel="stylesheet" href="css/file_manager.css"></link>
+    <link rel="stylesheet" href="css/file_types.css"></link>
     <link rel="stylesheet" href="css/common.css"></link>
 
     <script src="js/main_scripts.js"></script>
@@ -67,14 +68,19 @@
 
       <script src="js/combobutton.js"></script>
 
+      <script src="js/path_util.js"></script>
       <script src="js/util.js"></script>
-      <script src="js/volume_manager.js"></script>
+      <script src="js/breadcrumbs_controller.js"></script>
+      <script src="js/butter_bar.js"></script>
+      <script src="js/directory_contents.js"></script>
       <script src="js/directory_model.js"></script>
-      <script src="js/file_copy_manager.js"></script>
+      <script src="js/file_copy_manager_wrapper.js"></script>
       <script src="js/file_manager.js"></script>
       <script src="js/file_manager_pyauto.js"></script>
+      <script src="js/file_tasks.js"></script>
       <script src="js/file_transfer_controller.js"></script>
       <script src="js/file_type.js"></script>
+      <script src="js/volume_manager.js"></script>
       <script src="js/media/media_util.js"></script>
       <script src="js/metadata/metadata_cache.js"></script>
       <script src="js/default_action_dialog.js"></script>
@@ -93,42 +99,69 @@
       <command id="rename" i18n-values="label:RENAME_BUTTON_LABEL"></command>
       <command id="delete" i18n-values="label:DELETE_BUTTON_LABEL"></command>
       <command id="newfolder" i18n-values="label:NEW_FOLDER_BUTTON_LABEL"
-      ></command>
+          ></command>
 
       <command id="unmount" i18n-values="label:UNMOUNT_DEVICE_BUTTON_LABEL"
-      ></command>
+          ></command>
       <command id="format" i18n-values="label:FORMAT_DEVICE_BUTTON_LABEL"
-      ></command>
+          ></command>
+      <command id="import-photos" i18n-values="label:IMPORT_PHOTOS_BUTTON_LABEL"
+          ></command>
+
+      <command id="gdata-buy-more-space"
+          i18n-values="label:GDATA_BUY_MORE_SPACE"
+          ></command>
+      <command id="gdata-help" i18n-values="label:GDATA_MENU_HELP"
+          ></command>
+      <command id="gdata-clear-local-cache"
+          i18n-values="label:GDATA_CLEAR_LOCAL_CACHE"></command>
     </commands>
 
     <menu class="file-context-menu chrome-menu">
-      <menuitem command='#cut' visibleif='full-page'></menuitem>
-      <menuitem command='#copy' visibleif='full-page'></menuitem>
-      <menuitem command='#paste' visibleif='full-page'></menuitem>
-      <hr visibleif='full-page'>
-      <menuitem command='#rename'></menuitem>
-      <menuitem command='#delete'></menuitem>
-      <hr visibleif='saveas-file full-page'>
-      <menuitem command='#newfolder'
-          visibleif='saveas-file full-page'></menuitem>
+      <menuitem id="default-action"
+          visibleif="full-page" hidden></menuitem>
+      <hr id="default-action-separator" visibleif="full-page" hidden>
+      <menuitem command="#cut" visibleif="full-page"></menuitem>
+      <menuitem command="#copy" visibleif="full-page"></menuitem>
+      <menuitem command="#paste" visibleif="full-page"></menuitem>
+      <hr visibleif="full-page">
+      <menuitem command="#rename"></menuitem>
+      <menuitem command="#delete"></menuitem>
+      <hr visibleif="saveas-file full-page">
+      <menuitem command="#newfolder"
+          visibleif="saveas-file full-page"></menuitem>
     </menu>
 
     <menu class="roots-context-menu chrome-menu" >
-      <menuitem command='#unmount'></menuitem>
-      <menuitem command='#format'></menuitem>
+      <menuitem command="#import-photos"></menuitem>
+      <menuitem command="#unmount"></menuitem>
+      <menuitem command="#format"></menuitem>
     </menu>
-    
-    <menu id=docs-settings class="chrome-menu">
-      <menuitem id=gdata-sync-settings
+
+    <menu id="docs-settings" class="chrome-menu">
+      <menuitem id="gdata-sync-settings"
           i18n-content=GDATA_MOBILE_CONNECTION_OPTION></menuitem>
-      <menuitem id=gdata-hosted-settings
+      <menuitem id="gdata-hosted-settings"
           i18n-content=GDATA_SHOW_HOSTED_FILES_OPTION></menuitem>
+      <hr visibleif="ctrl">
+      <menuitem id="gdata-clear-local-cache" visibleif="ctrl"
+          command="#gdata-clear-local-cache"></menuitem>
+      <hr>
+      <div id="gdata-space-info" disabled>
+        <span id="gdata-space-info-label"
+            i18n-content=GDATA_WAITING_FOR_SPACE_INFO
+            ></span>
+        <div><div id="gdata-space-info-bar" style="width:100%" pending></div
+            ></div>
+      </div>
+      <menuitem command="#gdata-buy-more-space"></menuitem>
+      <menuitem command="#gdata-help"></menuitem>
     </menu>
 
     <menu id="tasks-menu" class="chrome-menu">
     </menu>
 
-    <div class=dialog-title invisibleif='full-page'>[TITLE]</div>
+    <div class=dialog-title invisibleif="full-page">[TITLE]</div>
     <div class=dialog-container>
       <div class=dialog-sidebar>
         <list id="roots-list"></list>
@@ -136,92 +169,95 @@
       <div class=sidebar-splitter></div>
       <div class=dialog-main>
         <div class=dialog-header>
-          <div class=breadcrumbs></div>
+          <div id="dir-breadcrumbs" class="breadcrumbs"></div>
           <input id="search-box" type="search" tabindex="4"
               i18n-values="aria-label:SEARCH_TEXT_LABEL">
 
           <div class="right buttonbar">
             <div>
               <button class="left small" id="detail-view" tabindex="5"
-                  i18n-values="aria-label:DETAIL_VIEW_TOOLTIP">
-                <img src="images/view_list_black_12x12.png">
+                      i18n-values="aria-label:DETAIL_VIEW_TOOLTIP">
               </button>
               <div class="tooltip" i18n-content=DETAIL_VIEW_TOOLTIP
                    >[DETAIL VIEW]</div>
             </div>
-              <div>
-               <button class="right small" id="thumbnail-view" tabindex="6"
-                   i18n-values="aria-label:THUMBNAIL_VIEW_TOOLTIP">
-                <img src="images/view_thumbs_black_12x12.png">
+            <div>
+              <button class="right small" id="thumbnail-view" tabindex="6"
+                      i18n-values="aria-label:THUMBNAIL_VIEW_TOOLTIP">
               </button>
               <div class="tooltip" i18n-content=THUMBNAIL_VIEW_TOOLTIP
                    >[THUMBNAIL VIEW]</div>
             </div>
             <button class="menubutton" id="gdata-settings" tabindex="7"
                     menu="#docs-settings" visibleif="full-page">
-              <img src="images/settings.svg">
               <span class="disclosureindicator"></span>
             </button>
           </div>
 
         </div>
         <div class="gdrive-welcome header"></div>
+        <div class="gdrive-space-warning" hidden></div>
         <div class=dialog-body>
           <div class=filelist-panel>
             <div id="list-container">
               <div class=detail-table tabindex=0></div>
               <grid class=thumbnail-grid tabindex=0></grid>
-              <div class=spinner></div>
+              <div id="spinner-container">
+                <div id="spinner-with-text"></div>
+              </div>
               <div class="gdrive-welcome page"></div>
               <div id="no-search-results"></div>
             </div>
-            <div class=downloads-warning hidden>
-              <img src=images/warning_icon_square_26x26.png>
-              <div></div>
-            </div>
+            <div class=downloads-warning hidden></div>
           </div>
-          <div class=preview-panel visibility=hidden>
+          <div class="preview-panel" visibility="hidden">
             <div>
-              <div class=preview-thumbnails></div>
+              <div class="preview-thumbnails"></div>
             </div>
-            <div class=preview-summary></div>
+            <div id="preview-lines"> 
+              <div class="preview-summary"></div>
+              <div id="search-breadcrumbs" class="breadcrumbs"></div>
+            </div>
             <div class="right buttonbar" visibleif="full-page">
               <button id="tasks" class="combobutton" menu="#tasks-menu">
               </button>
               <button id="delete-button" command="#delete"
-                      i18n-content="DELETE_BUTTON_LABEL">
+                  i18n-content="DELETE_BUTTON_LABEL">
               </button>
             </div>
           </div>
-          <div id='unmounted-panel'></div>
+          <div id="unmounted-panel"></div>
         </div>
       </div>
     </div>
-    <div class=dialog-footer invisibleif='full-page'>
-      <div id=filename-input-box>
-        <div class=filename-label i18n-content=FILENAME_LABEL
-             >[FILENAME]</div>
+    <div class=dialog-footer invisibleif="full-page">
+      <button id="new-folder" i18n-content=NEW_FOLDER_BUTTON_LABEL
+              visibleif="saveas-file">[NEW FOLDER]</button>
+      <div id="filename-input-box">
+        <div class=filename-label i18n-content=FILENAME_LABEL>[FILENAME]</div>
         <input type=text spellcheck=false>
       </div>
       <div class=horizontal-spacer></div>
+      <select id="file-type"></select>
       <button class=ok disabled>[OK]</button>
       <div class=preparing-label i18n-content=PREPARING_LABEL>[PREPARING]</div>
       <div class=progress-bar>
         <div class=progress-track></div>
       </div>
-      <button class=cancel i18n-content=CANCEL_LABEL
-              >[CANCEL]</button>
+      <button class=cancel i18n-content=CANCEL_LABEL>[CANCEL]</button>
     </div>
-    <div class="butter-bar before-show">
-      <div class="content">
-        <div class="butter-message"></div>
-        <div class="progress-bar hide-in-butter">
-          <div class="progress-track"></div>
+    <div id="butter-bar-container">
+      <div id="butter-bar">
+        <div class="content">
+          <div class="butter-message"></div>
+          <div class="progress-bar" hidden>
+            <div class="progress-track"></div>
+          </div>
         </div>
+        <div class="actions" hidden></div>
       </div>
-      <div class="actions hide-in-butter"></div>
     </div>
-    <div id=drag-image-container></div>
-    <iframe id=command-dispatcher hidden></iframe>
+    <div id="drag-image-container"></div>
+    <iframe id="command-dispatcher" hidden></iframe>
   </body>
 </html>

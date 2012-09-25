@@ -4,7 +4,6 @@
 
 #ifndef UI_VIEWS_EVENTS_EVENT_H_
 #define UI_VIEWS_EVENTS_EVENT_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -87,6 +86,12 @@ class VIEWS_EXPORT Event {
            type_ == ui::ET_TOUCH_MOVED ||
            type_ == ui::ET_TOUCH_STATIONARY ||
            type_ == ui::ET_TOUCH_CANCELLED;
+  }
+
+  bool IsScrollGestureEvent() const {
+    return type_ == ui::ET_GESTURE_SCROLL_BEGIN ||
+           type_ == ui::ET_GESTURE_SCROLL_UPDATE ||
+           type_ == ui::ET_GESTURE_SCROLL_END;
   }
 
  protected:
@@ -391,10 +396,19 @@ class VIEWS_EXPORT DropTargetEvent : public LocatedEvent {
 class VIEWS_EXPORT ScrollEvent : public MouseEvent {
  public:
   explicit ScrollEvent(const NativeEvent& native_event);
+
   float x_offset() const { return x_offset_; }
   float y_offset() const { return y_offset_; }
 
  private:
+  friend class internal::RootView;
+
+  ScrollEvent(const ScrollEvent& model, View* root)
+      : MouseEvent(model, root),
+        x_offset_(model.x_offset()),
+        y_offset_(model.y_offset()) {
+  }
+
   float x_offset_;
   float y_offset_;
 

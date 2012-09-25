@@ -6,6 +6,7 @@
 
 #include "base/auto_reset.h"
 #include "base/command_line.h"
+#include "base/compiler_specific.h"
 #include "base/environment.h"
 #include "base/guid.h"
 #include "base/i18n/case_conversion.h"
@@ -86,6 +87,20 @@ bool TemplateURLsHaveSamePrefs(const TemplateURL* url1,
       (url1->input_encodings() == url2->input_encodings());
 }
 
+const char kFirstPotentialEngineHistogramName[] =
+    "Search.FirstPotentialEngineCalled";
+
+// Values for an enumerated histogram used to track whenever
+// FirstPotentialDefaultEngine is called, and from where.
+enum FirstPotentialEngineCaller {
+  FIRST_POTENTIAL_CALLSITE_FIND_NEW_DSP,
+  FIRST_POTENTIAL_CALLSITE_FIND_NEW_DSP_PROCESSING_SYNC_CHANGES,
+  FIRST_POTENTIAL_CALLSITE_ON_LOAD,
+  FIRST_POTENTIAL_CALLSITE_FIND_NEW_DSP_SYNCING,
+  FIRST_POTENTIAL_CALLSITE_FIND_NEW_DSP_NOT_SYNCING,
+  FIRST_POTENTIAL_CALLSITE_MAX,
+};
+
 TemplateURL* FirstPotentialDefaultEngine(
     const TemplateURLService::TemplateURLVector& template_urls) {
   for (TemplateURLService::TemplateURLVector::const_iterator i(
@@ -110,24 +125,24 @@ TemplateURL* FirstPotentialDefaultEngine(
 //  3) There is an update after an update for the same GUID. We prune earlier
 //     ones just to save bandwidth (Sync would normally coalesce them).
 bool ShouldRemoveSyncChange(size_t index,
-                            SyncChangeList* change_list,
+                            syncer::SyncChangeList* change_list,
                             const SyncDataMap* sync_data) {
   DCHECK(index < change_list->size());
-  const SyncChange& change_i = (*change_list)[index];
+  const syncer::SyncChange& change_i = (*change_list)[index];
   const std::string guid = change_i.sync_data().GetSpecifics()
       .search_engine().sync_guid();
-  SyncChange::SyncChangeType type = change_i.change_type();
-  if ((type == SyncChange::ACTION_UPDATE ||
-       type == SyncChange::ACTION_DELETE) &&
+  syncer::SyncChange::SyncChangeType type = change_i.change_type();
+  if ((type == syncer::SyncChange::ACTION_UPDATE ||
+       type == syncer::SyncChange::ACTION_DELETE) &&
        sync_data->find(guid) == sync_data->end())
     return true;
-  if (type == SyncChange::ACTION_ADD &&
+  if (type == syncer::SyncChange::ACTION_ADD &&
       sync_data->find(guid) != sync_data->end())
     return true;
-  if (type == SyncChange::ACTION_UPDATE) {
+  if (type == syncer::SyncChange::ACTION_UPDATE) {
     for (size_t j = index + 1; j < change_list->size(); j++) {
-      const SyncChange& change_j = (*change_list)[j];
-      if ((SyncChange::ACTION_UPDATE == change_j.change_type()) &&
+      const syncer::SyncChange& change_j = (*change_list)[j];
+      if ((syncer::SyncChange::ACTION_UPDATE == change_j.change_type()) &&
           (change_j.sync_data().GetSpecifics().search_engine().sync_guid() ==
               guid))
         return true;
@@ -142,7 +157,7 @@ bool ShouldRemoveSyncChange(size_t index,
 // from Sync or originally from the local model. This also removes changes that
 // would be otherwise be coalesced by Sync in order to save bandwidth.
 void PruneSyncChanges(const SyncDataMap* sync_data,
-                      SyncChangeList* change_list) {
+                      syncer::SyncChangeList* change_list) {
   for (size_t i = 0; i < change_list->size(); ) {
     if (ShouldRemoveSyncChange(i, change_list, sync_data))
       change_list->erase(change_list->begin() + i);
@@ -318,8 +333,8 @@ GURL TemplateURLService::GenerateSearchURLUsingTermsData(
     return GURL(t_url->url());
 
   return GURL(search_ref.ReplaceSearchTermsUsingTermsData(
-      ASCIIToUTF16(kReplacementTerm), TemplateURLRef::NO_SUGGESTIONS_AVAILABLE,
-      string16(), search_terms_data));
+      TemplateURLRef::SearchTermsArgs(ASCIIToUTF16(kReplacementTerm)),
+      search_terms_data));
 }
 
 bool TemplateURLService::CanReplaceKeyword(
@@ -599,6 +614,25 @@ TemplateURL* TemplateURLService::FindNewDefaultSearchProvider() {
   }
   // If not, use the first non-extension keyword of the templates that supports
   // search term replacement.
+  if (processing_syncer_changes_) {
+    UMA_HISTOGRAM_ENUMERATION(
+        kFirstPotentialEngineHistogramName,
+        FIRST_POTENTIAL_CALLSITE_FIND_NEW_DSP_PROCESSING_SYNC_CHANGES,
+        FIRST_POTENTIAL_CALLSITE_MAX);
+  } else {
+    if (sync_processor_.get()) {
+      // We're not currently in a sync cycle, but we're syncing.
+      UMA_HISTOGRAM_ENUMERATION(kFirstPotentialEngineHistogramName,
+                                FIRST_POTENTIAL_CALLSITE_FIND_NEW_DSP_SYNCING,
+                                FIRST_POTENTIAL_CALLSITE_MAX);
+    } else {
+      // We're not syncing at all.
+      UMA_HISTOGRAM_ENUMERATION(
+          kFirstPotentialEngineHistogramName,
+          FIRST_POTENTIAL_CALLSITE_FIND_NEW_DSP_NOT_SYNCING,
+          FIRST_POTENTIAL_CALLSITE_MAX);
+    }
+  }
   return FirstPotentialDefaultEngine(template_urls_);
 }
 
@@ -721,6 +755,8 @@ void TemplateURLService::OnWebDataServiceRequestDone(
       pending_synced_default_search_ = false;
     } else if (database_specified_a_default &&
                default_search_provider == NULL) {
+      UMA_HISTOGRAM_ENUMERATION(kFirstPotentialEngineHistogramName,
+          FIRST_POTENTIAL_CALLSITE_ON_LOAD, FIRST_POTENTIAL_CALLSITE_MAX);
       default_search_provider = FirstPotentialDefaultEngine(template_urls);
     }
 
@@ -759,11 +795,13 @@ void TemplateURLService::OnWebDataServiceRequestDone(
 
   bool check_if_default_search_valid = !is_default_search_managed_;
 
-#if defined(ENABLE_PROTECTOR_SERVICE)
   // Don't do anything if the default search provider has been changed since the
   // check at the beginning (overridden by Sync).
   if (is_default_search_hijacked &&
       default_search_provider_ == hijacked_default_search_provider) {
+    // Put the #if defined(ENABLE_PROTECTOR_SERVICE) inside the 'if' block to
+    // avoid 'unused-but-set-variable' error.
+#if defined(ENABLE_PROTECTOR_SERVICE)
     // The histograms should be reported even when Protector is disabled.
     scoped_ptr<protector::BaseSettingChange> change(
         protector::CreateDefaultSearchProviderChange(
@@ -783,8 +821,8 @@ void TemplateURLService::OnWebDataServiceRequestDone(
     // The default search provider sanity check makes no sense in this case
     // because ProtectorService is going to change default search eventually.
     check_if_default_search_valid = false;
-  }
 #endif
+  }
 
   if (check_if_default_search_valid) {
     bool has_default_search_provider = default_search_provider_ != NULL &&
@@ -863,11 +901,11 @@ void TemplateURLService::Observe(int type,
   }
 }
 
-SyncDataList TemplateURLService::GetAllSyncData(
-    syncable::ModelType type) const {
-  DCHECK_EQ(syncable::SEARCH_ENGINES, type);
+syncer::SyncDataList TemplateURLService::GetAllSyncData(
+    syncer::ModelType type) const {
+  DCHECK_EQ(syncer::SEARCH_ENGINES, type);
 
-  SyncDataList current_data;
+  syncer::SyncDataList current_data;
   for (TemplateURLVector::const_iterator iter = template_urls_.begin();
       iter != template_urls_.end(); ++iter) {
     // We don't sync extension keywords.
@@ -884,12 +922,12 @@ SyncDataList TemplateURLService::GetAllSyncData(
   return current_data;
 }
 
-SyncError TemplateURLService::ProcessSyncChanges(
+syncer::SyncError TemplateURLService::ProcessSyncChanges(
     const tracked_objects::Location& from_here,
-    const SyncChangeList& change_list) {
+    const syncer::SyncChangeList& change_list) {
   if (!models_associated_) {
-    SyncError error(FROM_HERE, "Models not yet associated.",
-                    syncable::SEARCH_ENGINES);
+    syncer::SyncError error(FROM_HERE, "Models not yet associated.",
+                    syncer::SEARCH_ENGINES);
     return error;
   }
   DCHECK(loaded_);
@@ -902,11 +940,11 @@ SyncError TemplateURLService::ProcessSyncChanges(
   AutoReset<DefaultSearchChangeOrigin> change_origin(&dsp_change_origin_,
       DSP_CHANGE_SYNC_UNINTENTIONAL);
 
-  SyncChangeList new_changes;
-  SyncError error;
-  for (SyncChangeList::const_iterator iter = change_list.begin();
+  syncer::SyncChangeList new_changes;
+  syncer::SyncError error;
+  for (syncer::SyncChangeList::const_iterator iter = change_list.begin();
       iter != change_list.end(); ++iter) {
-    DCHECK_EQ(syncable::SEARCH_ENGINES, iter->sync_data().GetDataType());
+    DCHECK_EQ(syncer::SEARCH_ENGINES, iter->sync_data().GetDataType());
 
     std::string guid =
         iter->sync_data().GetSpecifics().search_engine().sync_guid();
@@ -923,7 +961,7 @@ SyncError TemplateURLService::ProcessSyncChanges(
     // need to undergo conflict resolution.
     TemplateURL* existing_keyword_turl =
         FindNonExtensionTemplateURLForKeyword(turl->keyword());
-    if (iter->change_type() == SyncChange::ACTION_DELETE) {
+    if (iter->change_type() == syncer::SyncChange::ACTION_DELETE) {
       if (!existing_turl) {
         NOTREACHED() << "Unexpected sync change state.";
         error = sync_error_factory_->CreateAndUploadError(
@@ -932,23 +970,40 @@ SyncError TemplateURLService::ProcessSyncChanges(
         LOG(ERROR) << "Trying to delete a non-existent TemplateURL.";
         continue;
       }
-      bool delete_default = (existing_turl == GetDefaultSearchProvider());
+      if (existing_turl == GetDefaultSearchProvider()) {
+        // The only way Sync can attempt to delete the default search provider
+        // is if we had changed the kSyncedDefaultSearchProviderGUID
+        // preference, but perhaps it has not yet been received. To avoid
+        // situations where this has come in erroneously, we will un-delete
+        // the current default search from the Sync data. If the pref really
+        // does arrive later, then default search will change to the correct
+        // entry, but we'll have this extra entry sitting around. The result is
+        // not ideal, but it prevents a far more severe bug where the default is
+        // unexpectedly swapped to something else. The user can safely delete
+        // the extra entry again later, if they choose. Most users who do not
+        // look at the search engines UI will not notice this.
+        // Note that we append a special character to the end of the keyword in
+        // an attempt to avoid a ping-poinging situation where receiving clients
+        // may try to continually delete the resurrected entry.
+        string16 updated_keyword = UniquifyKeyword(*existing_turl, true);
+        TemplateURLData data(existing_turl->data());
+        data.SetKeyword(updated_keyword);
+        TemplateURL new_turl(existing_turl->profile(), data);
+        UIThreadSearchTermsData search_terms_data(existing_turl->profile());
+        if (UpdateNoNotify(existing_turl, new_turl, search_terms_data))
+          NotifyObservers();
 
-      if (delete_default && is_default_search_managed_) {
-        NOTREACHED() << "Tried to delete managed default search provider";
-      } else {
-        if (delete_default)
-          default_search_provider_ = NULL;
-
-        Remove(existing_turl);
-
-        if (delete_default) {
-          AutoReset<DefaultSearchChangeOrigin> change_origin(
-              &dsp_change_origin_, DSP_CHANGE_SYNC_DELETE);
-          SetDefaultSearchProvider(FindNewDefaultSearchProvider());
-        }
+        syncer::SyncData sync_data = CreateSyncDataFromTemplateURL(new_turl);
+        new_changes.push_back(syncer::SyncChange(FROM_HERE,
+                                                 syncer::SyncChange::ACTION_ADD,
+                                                 sync_data));
+        // Ignore the delete attempt. This means we never end up reseting the
+        // default search provider due to an ACTION_DELETE from sync.
+        continue;
       }
-    } else if (iter->change_type() == SyncChange::ACTION_ADD) {
+
+      Remove(existing_turl);
+    } else if (iter->change_type() == syncer::SyncChange::ACTION_ADD) {
       if (existing_turl) {
         NOTREACHED() << "Unexpected sync change state.";
         error = sync_error_factory_->CreateAndUploadError(
@@ -968,7 +1023,7 @@ SyncError TemplateURLService::ProcessSyncChanges(
         // Possibly set the newly added |turl| as the default search provider.
         SetDefaultSearchProviderIfNewlySynced(guid);
       }
-    } else if (iter->change_type() == SyncChange::ACTION_UPDATE) {
+    } else if (iter->change_type() == syncer::SyncChange::ACTION_UPDATE) {
       if (!existing_turl) {
         NOTREACHED() << "Unexpected sync change state.";
         error = sync_error_factory_->CreateAndUploadError(
@@ -1010,13 +1065,13 @@ SyncError TemplateURLService::ProcessSyncChanges(
   return error;
 }
 
-SyncError TemplateURLService::MergeDataAndStartSyncing(
-    syncable::ModelType type,
-    const SyncDataList& initial_sync_data,
-    scoped_ptr<SyncChangeProcessor> sync_processor,
-    scoped_ptr<SyncErrorFactory> sync_error_factory) {
+syncer::SyncError TemplateURLService::MergeDataAndStartSyncing(
+    syncer::ModelType type,
+    const syncer::SyncDataList& initial_sync_data,
+    scoped_ptr<syncer::SyncChangeProcessor> sync_processor,
+    scoped_ptr<syncer::SyncErrorFactory> sync_error_factory) {
   DCHECK(loaded_);
-  DCHECK_EQ(type, syncable::SEARCH_ENGINES);
+  DCHECK_EQ(type, syncer::SEARCH_ENGINES);
   DCHECK(!sync_processor_.get());
   DCHECK(sync_processor.get());
   DCHECK(sync_error_factory.get());
@@ -1045,11 +1100,11 @@ SyncError TemplateURLService::MergeDataAndStartSyncing(
   AutoReset<DefaultSearchChangeOrigin> change_origin(&dsp_change_origin_,
       DSP_CHANGE_SYNC_UNINTENTIONAL);
 
-  SyncChangeList new_changes;
+  syncer::SyncChangeList new_changes;
 
-  // Build maps of our sync GUIDs to SyncData.
+  // Build maps of our sync GUIDs to syncer::SyncData.
   SyncDataMap local_data_map = CreateGUIDToSyncDataMap(
-      GetAllSyncData(syncable::SEARCH_ENGINES));
+      GetAllSyncData(syncer::SEARCH_ENGINES));
   SyncDataMap sync_data_map = CreateGUIDToSyncDataMap(initial_sync_data);
 
   for (SyncDataMap::const_iterator iter = sync_data_map.begin();
@@ -1066,8 +1121,10 @@ SyncError TemplateURLService::MergeDataAndStartSyncing(
       // This entry was deleted before the initial sync began (possibly through
       // preprocessing in TemplateURLService's loading code). Ignore it and send
       // an ACTION_DELETE up to the server.
-      new_changes.push_back(SyncChange(SyncChange::ACTION_DELETE,
-                                       iter->second));
+      new_changes.push_back(
+          syncer::SyncChange(FROM_HERE,
+                             syncer::SyncChange::ACTION_DELETE,
+                             iter->second));
       continue;
     }
 
@@ -1087,8 +1144,10 @@ SyncError TemplateURLService::MergeDataAndStartSyncing(
       } else if (sync_turl->last_modified() < local_turl->last_modified()) {
         // Otherwise, we know we have newer data, so update Sync with our
         // data fields.
-        new_changes.push_back(SyncChange(SyncChange::ACTION_UPDATE,
-            local_data_map[local_turl->sync_guid()]));
+        new_changes.push_back(
+            syncer::SyncChange(FROM_HERE,
+                               syncer::SyncChange::ACTION_UPDATE,
+                               local_data_map[local_turl->sync_guid()]));
       }
       local_data_map.erase(iter->first);
     } else {
@@ -1129,14 +1188,18 @@ SyncError TemplateURLService::MergeDataAndStartSyncing(
   // be pushed as ADDs to sync.
   for (SyncDataMap::const_iterator iter = local_data_map.begin();
       iter != local_data_map.end(); ++iter) {
-    new_changes.push_back(SyncChange(SyncChange::ACTION_ADD, iter->second));
+    new_changes.push_back(
+        syncer::SyncChange(FROM_HERE,
+                           syncer::SyncChange::ACTION_ADD,
+                           iter->second));
   }
 
   // Do some post-processing on the change list to ensure that we are sending
   // valid changes to sync_processor_.
   PruneSyncChanges(&sync_data_map, &new_changes);
 
-  SyncError error = sync_processor_->ProcessSyncChanges(FROM_HERE, new_changes);
+  syncer::SyncError error =
+      sync_processor_->ProcessSyncChanges(FROM_HERE, new_changes);
   if (error.IsSet())
     return error;
 
@@ -1145,20 +1208,21 @@ SyncError TemplateURLService::MergeDataAndStartSyncing(
   pre_sync_deletes_.clear();
 
   models_associated_ = true;
-  return SyncError();
+  return syncer::SyncError();
 }
 
-void TemplateURLService::StopSyncing(syncable::ModelType type) {
-  DCHECK_EQ(type, syncable::SEARCH_ENGINES);
+void TemplateURLService::StopSyncing(syncer::ModelType type) {
+  DCHECK_EQ(type, syncer::SEARCH_ENGINES);
   models_associated_ = false;
   sync_processor_.reset();
   sync_error_factory_.reset();
 }
 
 void TemplateURLService::ProcessTemplateURLChange(
+    const tracked_objects::Location& from_here,
     const TemplateURL* turl,
-    SyncChange::SyncChangeType type) {
-  DCHECK_NE(type, SyncChange::ACTION_INVALID);
+    syncer::SyncChange::SyncChangeType type) {
+  DCHECK_NE(type, syncer::SyncChange::ACTION_INVALID);
   DCHECK(turl);
 
   if (!models_associated_)
@@ -1177,16 +1241,18 @@ void TemplateURLService::ProcessTemplateURLChange(
   if (turl->created_by_policy())
     return;
 
-  SyncChangeList changes;
+  syncer::SyncChangeList changes;
 
-  SyncData sync_data = CreateSyncDataFromTemplateURL(*turl);
-  changes.push_back(SyncChange(type, sync_data));
+  syncer::SyncData sync_data = CreateSyncDataFromTemplateURL(*turl);
+  changes.push_back(syncer::SyncChange(from_here,
+                                       type,
+                                       sync_data));
 
   sync_processor_->ProcessSyncChanges(FROM_HERE, changes);
 }
 
 // static
-SyncData TemplateURLService::CreateSyncDataFromTemplateURL(
+syncer::SyncData TemplateURLService::CreateSyncDataFromTemplateURL(
     const TemplateURL& turl) {
   sync_pb::EntitySpecifics specifics;
   sync_pb::SearchEngineSpecifics* se_specifics =
@@ -1205,7 +1271,7 @@ SyncData TemplateURLService::CreateSyncDataFromTemplateURL(
   se_specifics->set_instant_url(turl.instant_url());
   se_specifics->set_last_modified(turl.last_modified().ToInternalValue());
   se_specifics->set_sync_guid(turl.sync_guid());
-  return SyncData::CreateLocalData(se_specifics->sync_guid(),
+  return syncer::SyncData::CreateLocalData(se_specifics->sync_guid(),
                                    se_specifics->keyword(),
                                    specifics);
 }
@@ -1214,8 +1280,8 @@ SyncData TemplateURLService::CreateSyncDataFromTemplateURL(
 TemplateURL* TemplateURLService::CreateTemplateURLFromTemplateURLAndSyncData(
     Profile* profile,
     TemplateURL* existing_turl,
-    const SyncData& sync_data,
-    SyncChangeList* change_list) {
+    const syncer::SyncData& sync_data,
+    syncer::SyncChangeList* change_list) {
   DCHECK(change_list);
 
   sync_pb::SearchEngineSpecifics specifics =
@@ -1224,7 +1290,10 @@ TemplateURL* TemplateURLService::CreateTemplateURLFromTemplateURLAndSyncData(
   // Past bugs might have caused either of these fields to be empty.  Just
   // delete this data off the server.
   if (specifics.url().empty() || specifics.sync_guid().empty()) {
-    change_list->push_back(SyncChange(SyncChange::ACTION_DELETE, sync_data));
+    change_list->push_back(
+        syncer::SyncChange(FROM_HERE,
+                           syncer::SyncChange::ACTION_DELETE,
+                           sync_data));
     return NULL;
   }
 
@@ -1265,8 +1334,11 @@ TemplateURL* TemplateURLService::CreateTemplateURLFromTemplateURLAndSyncData(
   if (reset_keyword || deduped) {
     if (reset_keyword)
       turl->ResetKeywordIfNecessary(true);
-    SyncData sync_data = CreateSyncDataFromTemplateURL(*turl);
-    change_list->push_back(SyncChange(SyncChange::ACTION_UPDATE, sync_data));
+    syncer::SyncData sync_data = CreateSyncDataFromTemplateURL(*turl);
+    change_list->push_back(
+        syncer::SyncChange(FROM_HERE,
+                           syncer::SyncChange::ACTION_UPDATE,
+                           sync_data));
   } else if (turl->IsGoogleSearchURLWithReplaceableKeyword()) {
     if (!existing_turl) {
       // We're adding a new TemplateURL that uses the Google base URL, so set
@@ -1287,9 +1359,10 @@ TemplateURL* TemplateURLService::CreateTemplateURLFromTemplateURLAndSyncData(
 
 // static
 SyncDataMap TemplateURLService::CreateGUIDToSyncDataMap(
-    const SyncDataList& sync_data) {
+    const syncer::SyncDataList& sync_data) {
   SyncDataMap data_map;
-  for (SyncDataList::const_iterator i(sync_data.begin()); i != sync_data.end();
+  for (syncer::SyncDataList::const_iterator i(sync_data.begin());
+       i != sync_data.end();
        ++i)
     data_map[i->GetSpecifics().search_engine().sync_guid()] = *i;
   return data_map;
@@ -1721,11 +1794,13 @@ bool TemplateURLService::UpdateNoNotify(
     service_->UpdateKeyword(existing_turl->data());
 
   // Inform sync of the update.
-  ProcessTemplateURLChange(existing_turl, SyncChange::ACTION_UPDATE);
+  ProcessTemplateURLChange(FROM_HERE,
+                           existing_turl,
+                           syncer::SyncChange::ACTION_UPDATE);
 
   if (default_search_provider_ == existing_turl) {
-      bool success = SetDefaultSearchProviderNoNotify(existing_turl);
-      DCHECK(success);
+    bool success = SetDefaultSearchProviderNoNotify(existing_turl);
+    DCHECK(success);
   }
   return true;
 }
@@ -2000,10 +2075,15 @@ bool TemplateURLService::SetDefaultSearchProviderNoNotify(TemplateURL* url) {
     DCHECK(!url->IsExtensionKeyword());
   }
 
-  UMA_HISTOGRAM_ENUMERATION(kDSPChangeHistogramName, dsp_change_origin_,
-                            DSP_CHANGE_MAX);
-
-  default_search_provider_ = url;
+  // Only bother reassigning |url| if it has changed. Notice that we don't just
+  // early exit if they are equal, because |url| may have had its fields
+  // changed, and needs to be persisted below (for example, when this is called
+  // from UpdateNoNotify).
+  if (default_search_provider_ != url) {
+    UMA_HISTOGRAM_ENUMERATION(kDSPChangeHistogramName, dsp_change_origin_,
+                              DSP_CHANGE_MAX);
+    default_search_provider_ = url;
+  }
 
   if (url) {
     // Don't mark the url as edited, otherwise we won't be able to rev the
@@ -2047,7 +2127,9 @@ bool TemplateURLService::SetDefaultSearchProviderNoNotify(TemplateURL* url) {
 
   // Inform sync the change to the show_in_default_list flag.
   if (url)
-    ProcessTemplateURLChange(url, SyncChange::ACTION_UPDATE);
+    ProcessTemplateURLChange(FROM_HERE,
+                             url,
+                             syncer::SyncChange::ACTION_UPDATE);
   return true;
 }
 
@@ -2076,7 +2158,7 @@ bool TemplateURLService::AddNoNotify(TemplateURL* template_url,
         delete template_url;
         return false;
       } else {
-        string16 new_keyword = UniquifyKeyword(*existing_keyword_turl);
+        string16 new_keyword = UniquifyKeyword(*existing_keyword_turl, false);
         ResetTemplateURL(existing_keyword_turl,
                          existing_keyword_turl->short_name(), new_keyword,
                          existing_keyword_turl->url());
@@ -2096,7 +2178,9 @@ bool TemplateURLService::AddNoNotify(TemplateURL* template_url,
 
     // Inform sync of the addition. Note that this will assign a GUID to
     // template_url and add it to the guid_to_template_map_.
-    ProcessTemplateURLChange(template_url, SyncChange::ACTION_ADD);
+    ProcessTemplateURLChange(FROM_HERE,
+                             template_url,
+                             syncer::SyncChange::ACTION_ADD);
   }
 
   return true;
@@ -2126,7 +2210,9 @@ void TemplateURLService::RemoveNoNotify(TemplateURL* template_url) {
     service_->RemoveKeyword(template_url->id());
 
   // Inform sync of the deletion.
-  ProcessTemplateURLChange(template_url, SyncChange::ACTION_DELETE);
+  ProcessTemplateURLChange(FROM_HERE,
+                           template_url,
+                           syncer::SyncChange::ACTION_DELETE);
 
   if (profile_) {
     content::Source<Profile> source(profile_);
@@ -2211,17 +2297,20 @@ void TemplateURLService::ResetTemplateURLGUID(TemplateURL* url,
   UpdateNoNotify(url, new_url, search_terms_data);
 }
 
-string16 TemplateURLService::UniquifyKeyword(const TemplateURL& turl) {
-  // Already unique.
-  if (!GetTemplateURLForKeyword(turl.keyword()))
-    return turl.keyword();
+string16 TemplateURLService::UniquifyKeyword(const TemplateURL& turl,
+                                             bool force) {
+  if (!force) {
+    // Already unique.
+    if (!GetTemplateURLForKeyword(turl.keyword()))
+      return turl.keyword();
 
-  // First, try to return the generated keyword for the TemplateURL.
-  GURL gurl(turl.url());
-  if (gurl.is_valid()) {
-    string16 keyword_candidate = GenerateKeyword(gurl);
-    if (!GetTemplateURLForKeyword(keyword_candidate))
-      return keyword_candidate;
+    // First, try to return the generated keyword for the TemplateURL.
+    GURL gurl(turl.url());
+    if (gurl.is_valid()) {
+      string16 keyword_candidate = GenerateKeyword(gurl);
+      if (!GetTemplateURLForKeyword(keyword_candidate))
+        return keyword_candidate;
+    }
   }
 
   // We try to uniquify the keyword by appending a special character to the end.
@@ -2238,7 +2327,7 @@ string16 TemplateURLService::UniquifyKeyword(const TemplateURL& turl) {
 bool TemplateURLService::ResolveSyncKeywordConflict(
     TemplateURL* sync_turl,
     TemplateURL* local_turl,
-    SyncChangeList* change_list) {
+    syncer::SyncChangeList* change_list) {
   DCHECK(loaded_);
   DCHECK(sync_turl);
   DCHECK(local_turl);
@@ -2252,8 +2341,10 @@ bool TemplateURLService::ResolveSyncKeywordConflict(
       (local_turl == GetDefaultSearchProvider());
   const bool can_replace_local = CanReplace(local_turl);
   if (CanReplace(sync_turl) && (local_is_better || !can_replace_local)) {
-    SyncData sync_data = CreateSyncDataFromTemplateURL(*sync_turl);
-    change_list->push_back(SyncChange(SyncChange::ACTION_DELETE, sync_data));
+    syncer::SyncData sync_data = CreateSyncDataFromTemplateURL(*sync_turl);
+    change_list->push_back(syncer::SyncChange(FROM_HERE,
+                                              syncer::SyncChange::ACTION_DELETE,
+                                              sync_data));
     return false;
   }
   if (can_replace_local) {
@@ -2264,19 +2355,23 @@ bool TemplateURLService::ResolveSyncKeywordConflict(
     // than having just been brought down, then this is wrong, because the
     // server doesn't yet know about this entity; but in this case,
     // PruneSyncChanges() will prune out the ACTION_DELETE we create here.
-    SyncData sync_data = CreateSyncDataFromTemplateURL(*local_turl);
-    change_list->push_back(SyncChange(SyncChange::ACTION_DELETE, sync_data));
+    syncer::SyncData sync_data = CreateSyncDataFromTemplateURL(*local_turl);
+    change_list->push_back(syncer::SyncChange(FROM_HERE,
+                                              syncer::SyncChange::ACTION_DELETE,
+                                              sync_data));
     Remove(local_turl);
   } else if (local_is_better) {
-    string16 new_keyword = UniquifyKeyword(*sync_turl);
+    string16 new_keyword = UniquifyKeyword(*sync_turl, false);
     DCHECK(!GetTemplateURLForKeyword(new_keyword));
     sync_turl->data_.SetKeyword(new_keyword);
     // If we update the cloud TURL, we need to push an update back to sync
     // informing it that something has changed.
-    SyncData sync_data = CreateSyncDataFromTemplateURL(*sync_turl);
-    change_list->push_back(SyncChange(SyncChange::ACTION_UPDATE, sync_data));
+    syncer::SyncData sync_data = CreateSyncDataFromTemplateURL(*sync_turl);
+    change_list->push_back(syncer::SyncChange(FROM_HERE,
+                                              syncer::SyncChange::ACTION_UPDATE,
+                                              sync_data));
   } else {
-    string16 new_keyword = UniquifyKeyword(*local_turl);
+    string16 new_keyword = UniquifyKeyword(*local_turl, false);
     TemplateURLData data(local_turl->data());
     data.SetKeyword(new_keyword);
     TemplateURL new_turl(local_turl->profile(), data);
@@ -2291,8 +2386,10 @@ bool TemplateURLService::ResolveSyncKeywordConflict(
     // server won't know about this entity until it processes the ACTION_ADD our
     // caller will later generate; but in this case, PruneSyncChanges() will
     // prune out the ACTION_UPDATE we create here.
-    SyncData sync_data = CreateSyncDataFromTemplateURL(*local_turl);
-    change_list->push_back(SyncChange(SyncChange::ACTION_UPDATE, sync_data));
+    syncer::SyncData sync_data = CreateSyncDataFromTemplateURL(*local_turl);
+    change_list->push_back(syncer::SyncChange(FROM_HERE,
+                                              syncer::SyncChange::ACTION_UPDATE,
+                                              sync_data));
   }
   return true;
 }
@@ -2307,7 +2404,7 @@ TemplateURL* TemplateURLService::FindDuplicateOfSyncTemplateURL(
 void TemplateURLService::MergeSyncAndLocalURLDuplicates(
     TemplateURL* sync_turl,
     TemplateURL* local_turl,
-    SyncChangeList* change_list) {
+    syncer::SyncChangeList* change_list) {
   DCHECK(loaded_);
   DCHECK(sync_turl);
   DCHECK(local_turl);
@@ -2325,8 +2422,10 @@ void TemplateURLService::MergeSyncAndLocalURLDuplicates(
 
     // See comments in ResolveSyncKeywordConflict() regarding generating an
     // ACTION_DELETE manually since Remove() won't do it.
-    SyncData sync_data = CreateSyncDataFromTemplateURL(*local_turl);
-    change_list->push_back(SyncChange(SyncChange::ACTION_DELETE, sync_data));
+    syncer::SyncData sync_data = CreateSyncDataFromTemplateURL(*local_turl);
+    change_list->push_back(syncer::SyncChange(FROM_HERE,
+                                              syncer::SyncChange::ACTION_DELETE,
+                                              sync_data));
     Remove(local_turl);
 
     // Force the local ID to kInvalidTemplateURLID so we can add it.
@@ -2340,8 +2439,10 @@ void TemplateURLService::MergeSyncAndLocalURLDuplicates(
     // the server, and the next time local_url is synced, it is recognized by
     // having the same GUID.
     ResetTemplateURLGUID(local_turl, sync_turl->sync_guid());
-    SyncData sync_data = CreateSyncDataFromTemplateURL(*local_turl);
-    change_list->push_back(SyncChange(SyncChange::ACTION_UPDATE, sync_data));
+    syncer::SyncData sync_data = CreateSyncDataFromTemplateURL(*local_turl);
+    change_list->push_back(syncer::SyncChange(FROM_HERE,
+                                              syncer::SyncChange::ACTION_UPDATE,
+                                              sync_data));
   }
 }
 

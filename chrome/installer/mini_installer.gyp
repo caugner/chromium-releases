@@ -16,6 +16,7 @@
     ['OS=="win"', {
       'target_defaults': {
         'dependencies': [
+          '../chrome.gyp:app_host',
           '../chrome.gyp:chrome',
           '../chrome.gyp:chrome_nacl_win64',
           '../chrome.gyp:chrome_dll',
@@ -223,9 +224,18 @@
                     'component_build_flag': '',
                   },
                 }],
+                ['disable_nacl==1', {
+                  'inputs!': [
+                    '<(PRODUCT_DIR)/nacl64.exe',
+                    '<(PRODUCT_DIR)/ppGoogleNaClPluginChrome.dll',
+                    '<(PRODUCT_DIR)/nacl_irt_x86_32.nexe',
+                    '<(PRODUCT_DIR)/nacl_irt_x86_64.nexe',
+                  ],
+                }],
               ],
               'inputs': [
                 '<(create_installer_archive_py_path)',
+                '<(PRODUCT_DIR)/app_host.exe',
                 '<(PRODUCT_DIR)/chrome.exe',
                 '<(PRODUCT_DIR)/chrome.dll',
                 '<(PRODUCT_DIR)/nacl64.exe',

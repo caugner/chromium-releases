@@ -702,7 +702,8 @@ IN_PROC_BROWSER_TEST_F(OldPanelDragBrowserTest, DragOneDetachedPanel) {
   PanelManager::GetInstance()->CloseAll();
 }
 
-IN_PROC_BROWSER_TEST_F(OldPanelDragBrowserTest, CloseDetachedPanelOnDrag) {
+IN_PROC_BROWSER_TEST_F(OldPanelDragBrowserTest,
+    DISABLED_CloseDetachedPanelOnDrag) {
   PanelManager* panel_manager = PanelManager::GetInstance();
   PanelDragController* drag_controller = panel_manager->drag_controller();
   DetachedPanelStrip* detached_strip = panel_manager->detached_strip();
@@ -841,7 +842,13 @@ IN_PROC_BROWSER_TEST_F(OldPanelDragBrowserTest, CloseDetachedPanelOnDrag) {
   panel_manager->CloseAll();
 }
 
-IN_PROC_BROWSER_TEST_F(OldPanelDragBrowserTest, Detach) {
+// http://crbug.com/133462
+#if defined(OS_LINUX)
+#define MAYBE_Detach DISABLED_Detach
+#else
+#define MAYBE_Detach Detach
+#endif
+IN_PROC_BROWSER_TEST_F(OldPanelDragBrowserTest, MAYBE_Detach) {
   PanelManager* panel_manager = PanelManager::GetInstance();
   DockedPanelStrip* docked_strip = panel_manager->docked_strip();
   DetachedPanelStrip* detached_strip = panel_manager->detached_strip();

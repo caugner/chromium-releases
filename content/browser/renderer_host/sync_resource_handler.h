@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_BROWSER_RENDERER_HOST_SYNC_RESOURCE_HANDLER_H_
 #define CONTENT_BROWSER_RENDERER_HOST_SYNC_RESOURCE_HANDLER_H_
-#pragma once
 
 #include <string>
 
@@ -17,6 +16,7 @@ class Message;
 
 namespace net {
 class IOBuffer;
+class URLRequest;
 }
 
 namespace content {
@@ -28,7 +28,7 @@ class ResourceMessageFilter;
 class SyncResourceHandler : public ResourceHandler {
  public:
   SyncResourceHandler(ResourceMessageFilter* filter,
-                      const GURL& url,
+                      net::URLRequest* request,
                       IPC::Message* result_message,
                       ResourceDispatcherHostImpl* resource_dispatcher_host);
   virtual ~SyncResourceHandler();
@@ -51,7 +51,7 @@ class SyncResourceHandler : public ResourceHandler {
                           int* buf_size,
                           int min_size) OVERRIDE;
   virtual bool OnReadCompleted(int request_id,
-                               int* bytes_read,
+                               int bytes_read,
                                bool* defer) OVERRIDE;
   virtual bool OnResponseCompleted(int request_id,
                                    const net::URLRequestStatus& status,
@@ -64,6 +64,7 @@ class SyncResourceHandler : public ResourceHandler {
 
   SyncLoadResult result_;
   scoped_refptr<ResourceMessageFilter> filter_;
+  net::URLRequest* request_;
   IPC::Message* result_message_;
   ResourceDispatcherHostImpl* rdh_;
 };

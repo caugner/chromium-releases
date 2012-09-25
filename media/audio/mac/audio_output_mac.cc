@@ -38,13 +38,6 @@ struct AudioQueueUserData {
 // 6) The same thread that called stop will call Close() where we cleanup
 // and notifiy the audio manager, which likley will destroy this object.
 
-#if !defined(MAC_OS_X_VERSION_10_6) || \
-    MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_6
-enum {
-  kAudioQueueErr_EnqueueDuringReset = -66632
-};
-#endif
-
 PCMQueueOutAudioOutputStream::PCMQueueOutAudioOutputStream(
     AudioManagerMac* manager, const AudioParameters& params)
     : audio_queue_(NULL),
@@ -125,6 +118,8 @@ bool PCMQueueOutAudioOutputStream::Open() {
   // TODO(annacc): AudioDeviceGetPropertyInfo() is deprecated, but its
   // replacement, AudioObjectGetPropertyDataSize(), doesn't work yet with
   // kAudioDevicePropertyPreferredChannelLayout.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
   err = AudioDeviceGetPropertyInfo(device_id, 0, false,
                                    kAudioDevicePropertyPreferredChannelLayout,
                                    &core_layout_size, NULL);
@@ -148,6 +143,7 @@ bool PCMQueueOutAudioOutputStream::Open() {
     HandleError(err);
     return false;
   }
+#pragma clang diagnostic pop
 
   num_core_channels_ =
       static_cast<int>(core_channel_layout->mNumberChannelDescriptions);

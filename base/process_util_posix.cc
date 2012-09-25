@@ -21,9 +21,9 @@
 #include "base/compiler_specific.h"
 #include "base/debug/debugger.h"
 #include "base/debug/stack_trace.h"
-#include "base/dir_reader_posix.h"
 #include "base/eintr_wrapper.h"
 #include "base/file_util.h"
+#include "base/files/dir_reader_posix.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/process_util.h"
@@ -253,11 +253,7 @@ bool KillProcess(ProcessHandle process_id, int exit_code, bool wait) {
   DCHECK_GT(process_id, 1) << " tried to kill invalid process_id";
   if (process_id <= 1)
     return false;
-  static unsigned kMaxSleepMs = 1000;
-  unsigned sleep_ms = 4;
-
   bool result = kill(process_id, SIGTERM) == 0;
-
   if (result && wait) {
     int tries = 60;
 
@@ -266,6 +262,8 @@ bool KillProcess(ProcessHandle process_id, int exit_code, bool wait) {
       // processes may take some time doing leak checking.
       tries *= 2;
     }
+
+    unsigned sleep_ms = 4;
 
     // The process may not end immediately due to pending I/O
     bool exited = false;
@@ -286,6 +284,7 @@ bool KillProcess(ProcessHandle process_id, int exit_code, bool wait) {
       }
 
       usleep(sleep_ms * 1000);
+      const unsigned kMaxSleepMs = 1000;
       if (sleep_ms < kMaxSleepMs)
         sleep_ms *= 2;
     }
@@ -886,9 +885,9 @@ bool WaitForExitCode(ProcessHandle handle, int* exit_code) {
 }
 
 bool WaitForExitCodeWithTimeout(ProcessHandle handle, int* exit_code,
-                                int64 timeout_milliseconds) {
+                                base::TimeDelta timeout) {
   bool waitpid_success = false;
-  int status = WaitpidWithTimeout(handle, timeout_milliseconds,
+  int status = WaitpidWithTimeout(handle, timeout.InMilliseconds(),
                                   &waitpid_success);
   if (status == -1)
     return false;
@@ -996,11 +995,6 @@ static bool WaitForSingleNonChildProcess(ProcessHandle handle,
   return true;
 }
 #endif  // OS_MACOSX
-
-bool WaitForSingleProcess(ProcessHandle handle, int64 wait_milliseconds) {
-  return WaitForSingleProcess(
-      handle, base::TimeDelta::FromMilliseconds(wait_milliseconds));
-}
 
 bool WaitForSingleProcess(ProcessHandle handle, base::TimeDelta wait) {
   ProcessHandle parent_pid = GetParentProcessId(handle);
@@ -1211,15 +1205,14 @@ bool GetAppOutputWithExitCode(const CommandLine& cl,
 }
 
 bool WaitForProcessesToExit(const FilePath::StringType& executable_name,
-                            int64 wait_milliseconds,
+                            base::TimeDelta wait,
                             const ProcessFilter* filter) {
   bool result = false;
 
   // TODO(port): This is inefficient, but works if there are multiple procs.
   // TODO(port): use waitpid to avoid leaving zombies around
 
-  base::Time end_time = base::Time::Now() +
-      base::TimeDelta::FromMilliseconds(wait_milliseconds);
+  base::Time end_time = base::Time::Now() + wait;
   do {
     NamedProcessIterator iter(executable_name, filter);
     if (!iter.NextProcessEntry()) {
@@ -1233,12 +1226,10 @@ bool WaitForProcessesToExit(const FilePath::StringType& executable_name,
 }
 
 bool CleanupProcesses(const FilePath::StringType& executable_name,
-                      int64 wait_milliseconds,
+                      base::TimeDelta wait,
                       int exit_code,
                       const ProcessFilter* filter) {
-  bool exited_cleanly =
-      WaitForProcessesToExit(executable_name, wait_milliseconds,
-                             filter);
+  bool exited_cleanly = WaitForProcessesToExit(executable_name, wait, filter);
   if (!exited_cleanly)
     KillProcesses(executable_name, exit_code, filter);
   return exited_cleanly;
@@ -1272,7 +1263,8 @@ class BackgroundReaper : public PlatformThread::Delegate {
         timeout_(timeout) {
   }
 
-  void ThreadMain() {
+  // Overridden from PlatformThread::Delegate:
+  virtual void ThreadMain() OVERRIDE {
     WaitForChildToDie();
     delete this;
   }

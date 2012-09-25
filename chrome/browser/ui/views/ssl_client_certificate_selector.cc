@@ -229,6 +229,7 @@ void SSLClientCertificateSelector::ButtonPressed(
     net::X509Certificate* cert = GetSelectedCert();
     if (cert)
       ShowCertificateViewer(
+          tab_contents_->web_contents(),
           tab_contents_->web_contents()->GetView()->GetTopLevelNativeWindow(),
           cert);
   }
@@ -278,10 +279,7 @@ void SSLClientCertificateSelector::CreateViewCertButton() {
   layout->AddView(view_cert_button_);
 }
 
-///////////////////////////////////////////////////////////////////////////////
-// SSLClientCertificateSelector public interface:
-
-namespace browser {
+namespace chrome {
 
 void ShowSSLClientCertificateSelector(
     TabContents* tab_contents,
@@ -294,4 +292,4 @@ void ShowSSLClientCertificateSelector(
        tab_contents, network_session, cert_request_info, callback))->Init();
 }
 
-}  // namespace browser
+}  // namespace chrome

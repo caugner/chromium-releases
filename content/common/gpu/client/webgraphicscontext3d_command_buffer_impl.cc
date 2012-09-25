@@ -20,11 +20,13 @@
 #include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
+#include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
 #include "base/synchronization/lock.h"
 #include "content/common/gpu/gpu_memory_allocation.h"
 #include "content/common/gpu/client/gpu_channel_host.h"
 #include "content/common/gpu/gpu_process_launch_causes.h"
+#include "content/public/common/content_constants.h"
 #include "content/public/common/content_switches.h"
 #include "gpu/command_buffer/client/gles2_cmd_helper.h"
 #include "gpu/command_buffer/client/gles2_implementation.h"
@@ -519,9 +521,24 @@ void WebGraphicsContext3DCommandBufferImpl::prepareTexture() {
   if (command_buffer_->GetLastState().error == gpu::error::kNoError)
     gl_->SwapBuffers();
 
-  command_buffer_->Echo(base::Bind(
-      &WebGraphicsContext3DCommandBufferImpl::OnSwapBuffersComplete,
-      weak_ptr_factory_.GetWeakPtr()));
+  bool use_echo_for_swap_ack = true;
+#if defined(OS_MACOSX) || defined(OS_WIN)
+  // Get ViewMsg_SwapBuffers_ACK from browser for single-threaded path.
+  base::FieldTrial* trial =
+      base::FieldTrialList::Find(content::kGpuCompositingFieldTrialName);
+  bool thread_trial = trial && trial->group_name() ==
+      content::kGpuCompositingFieldTrialThreadEnabledName;
+  use_echo_for_swap_ack = thread_trial ||
+      (CommandLine::ForCurrentProcess()->HasSwitch(
+           switches::kEnableThreadedCompositing) &&
+       !CommandLine::ForCurrentProcess()->HasSwitch(
+           switches::kDisableThreadedCompositing));
+#endif
+  if (use_echo_for_swap_ack) {
+    command_buffer_->Echo(base::Bind(
+        &WebGraphicsContext3DCommandBufferImpl::OnSwapBuffersComplete,
+        weak_ptr_factory_.GetWeakPtr()));
+  }
 #if defined(OS_MACOSX)
   // It appears that making the compositor's on-screen context current on
   // other platforms implies this flush. TODO(kbr): this means that the
@@ -1464,13 +1481,14 @@ WebGraphicsContext3DCommandBufferImpl::CreateViewContext(
 WebGraphicsContext3DCommandBufferImpl*
 WebGraphicsContext3DCommandBufferImpl::CreateOffscreenContext(
     GpuChannelHostFactory* factory,
-    const WebGraphicsContext3D::Attributes& attributes) {
+    const WebGraphicsContext3D::Attributes& attributes,
+    const GURL& active_url) {
   if (!factory)
     return NULL;
   base::WeakPtr<WebGraphicsContext3DSwapBuffersClient> null_client;
   scoped_ptr<WebGraphicsContext3DCommandBufferImpl> context(
       new WebGraphicsContext3DCommandBufferImpl(
-          0, GURL(), factory, null_client));
+          0, active_url, factory, null_client));
   content::CauseForGpuLaunch cause =
       content::CAUSE_FOR_GPU_LAUNCH_WEBGRAPHICSCONTEXT3DCOMMANDBUFFERIMPL_INITIALIZE;
   if (context->Initialize(attributes, false, cause))
@@ -1510,6 +1528,17 @@ DELEGATE_TO_GL_3(getQueryObjectuivEXT, GetQueryObjectuivEXT,
 
 DELEGATE_TO_GL_5(copyTextureCHROMIUM, CopyTextureCHROMIUM,  WGC3Denum,
                  WebGLId, WebGLId, WGC3Dint, WGC3Denum);
+
+DELEGATE_TO_GL_3(bindUniformLocationCHROMIUM, BindUniformLocationCHROMIUM,
+                 WebGLId, WGC3Dint, const WGC3Dchar*)
+
+DELEGATE_TO_GL(shallowFlushCHROMIUM,ShallowFlushCHROMIUM);
+
+DELEGATE_TO_GL_1(genMailboxCHROMIUM, GenMailboxCHROMIUM, WGC3Dbyte*)
+DELEGATE_TO_GL_2(produceTextureCHROMIUM, ProduceTextureCHROMIUM,
+                 WGC3Denum, const WGC3Dbyte*)
+DELEGATE_TO_GL_2(consumeTextureCHROMIUM, ConsumeTextureCHROMIUM,
+                 WGC3Denum, const WGC3Dbyte*)
 
 GrGLInterface* WebGraphicsContext3DCommandBufferImpl::onCreateGrGLInterface() {
   return webkit_glue::CreateCommandBufferSkiaGLBinding();

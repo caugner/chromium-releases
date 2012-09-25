@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_POLICY_BROWSER_POLICY_CONNECTOR_H_
 #define CHROME_BROWSER_POLICY_BROWSER_POLICY_CONNECTOR_H_
-#pragma once
 
 #include <string>
 
@@ -78,7 +77,8 @@ class BrowserPolicyConnector : public content::NotificationObserver {
   // on the machine_id used for the request.
   void RegisterForDevicePolicy(const std::string& owner_email,
                                const std::string& token,
-                               bool known_machine_id);
+                               bool known_machine_id,
+                               bool reregister);
 
   // Returns true if this device is managed by an enterprise (as opposed to
   // a local owner).
@@ -139,6 +139,14 @@ class BrowserPolicyConnector : public content::NotificationObserver {
   UserAffiliation GetUserAffiliation(const std::string& user_name);
 
   AppPackUpdater* GetAppPackUpdater();
+
+  // Sets a |provider| that will be included in PolicyServices returned by
+  // CreatePolicyService. This is a static method because local state is
+  // created immediately after the connector, and tests don't have a chance to
+  // inject the provider otherwise. |provider| must outlive the connector, and
+  // its ownership is not taken.
+  static void SetPolicyProviderForTesting(
+      ConfigurationPolicyProvider* provider);
 
  private:
   // content::NotificationObserver method overrides:

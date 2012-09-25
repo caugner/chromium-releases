@@ -18,7 +18,6 @@
         '../compositor/compositor.gyp:compositor',
         '../ui.gyp:ui',
         '../ui.gyp:ui_resources',
-        '../ui.gyp:ui_resources_standard',
       ],
       'defines': [
         'AURA_IMPLEMENTATION',
@@ -35,6 +34,8 @@
         'client/capture_client.cc',
         'client/capture_client.h',
         'client/capture_delegate.h',
+        'client/cursor_client.cc',
+        'client/cursor_client.h',
         'client/dispatcher_client.cc',
         'client/dispatcher_client.h',
         'client/drag_drop_client.cc',
@@ -56,11 +57,10 @@
         'client/window_move_client.cc',
         'client/window_move_client.h',
         'client/window_types.h',
-        'cursor_delegate.h',
-        'cursor_manager.cc',
-        'cursor_manager.h',
         'desktop/desktop_activation_client.cc',
         'desktop/desktop_activation_client.h',
+        'desktop/desktop_cursor_client.cc',
+        'desktop/desktop_cursor_client.h',
         'desktop/desktop_dispatcher_client.cc',
         'desktop/desktop_dispatcher_client.h',
         'desktop/desktop_screen.h',
@@ -87,11 +87,12 @@
         'focus_manager.h',
         'layout_manager.cc',
         'layout_manager.h',
-        'monitor_change_observer_x11.cc',
-        'monitor_change_observer_x11.h',
-        'monitor_manager.cc',
-        'monitor_manager.h',
+        'display_change_observer_x11.cc',
+        'display_change_observer_x11.h',
+        'display_manager.cc',
+        'display_manager.h',
         'root_window_host.h',
+        'root_window_host_delegate.h',
         'root_window_host_linux.cc',
         'root_window_host_linux.h',
         'root_window_host_mac.h',
@@ -110,8 +111,8 @@
         'shared/input_method_event_filter.h',
         'shared/root_window_capture_client.cc',
         'shared/root_window_capture_client.h',
-        'single_monitor_manager.cc',
-        'single_monitor_manager.h',
+        'single_display_manager.cc',
+        'single_display_manager.h',
         'ui_controls_win.cc',
         'ui_controls_x11.cc',
         'window.cc',
@@ -182,7 +183,7 @@
       'target_name': 'test_support_aura_pak',
       'type': 'none',
       'dependencies': [
-        '<(DEPTH)/ui/ui.gyp:ui_resources_standard',
+        '<(DEPTH)/ui/ui.gyp:ui_resources',
       ],
       'variables': {
         'repack_path': '<(DEPTH)/tools/grit/grit/format/repack.py',
@@ -192,7 +193,7 @@
           'action_name': 'repack_test_support_aura_pack',
           'variables': {
             'pak_inputs': [
-              '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources_standard/ui_resources_standard.pak',
+              '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources/ui_resources_100_percent.pak',
             ],
           },
           'inputs': [
@@ -220,7 +221,6 @@
         '../compositor/compositor.gyp:compositor_test_support',
         '../ui.gyp:ui',
         '../ui.gyp:ui_resources',
-        '../ui.gyp:ui_resources_standard',
         'aura',
       ],
       'include_dirs': [
@@ -228,8 +228,6 @@
       ],
       'sources': [
         'demo/demo_main.cc',
-        '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources/ui_resources.rc',
-        '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources_standard/ui_resources_standard.rc',
       ],
     },
     {
@@ -245,7 +243,6 @@
         '../compositor/compositor.gyp:compositor_test_support',
         '../ui.gyp:ui',
         '../ui.gyp:ui_resources',
-        '../ui.gyp:ui_resources_standard',
         'aura',
       ],
       'include_dirs': [
@@ -253,8 +250,6 @@
       ],
       'sources': [
         'bench/bench_main.cc',
-        '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources/ui_resources.rc',
-        '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources_standard/ui_resources_standard.rc',
       ],
     },
     {
@@ -270,7 +265,6 @@
         '../gl/gl.gyp:gl',
         '../ui.gyp:ui',
         '../ui.gyp:ui_resources',
-        '../ui.gyp:ui_resources_standard',
         '../ui.gyp:ui_test_support',
         'test_support_aura',
         'aura',
@@ -289,8 +283,6 @@
         'event_filter_unittest.cc',
         'event_unittest.cc',
         'window_unittest.cc',
-        '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources/ui_resources.rc',
-        '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources_standard/ui_resources_standard.rc',
       ],
       'conditions': [
         # osmesa GL implementation is used on linux.

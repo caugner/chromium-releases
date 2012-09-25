@@ -12,8 +12,10 @@
 #import "chrome/browser/chrome_browser_application_mac.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_navigator.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/cocoa/applescript/constants_applescript.h"
 #include "chrome/browser/ui/cocoa/applescript/error_applescript.h"
@@ -68,8 +70,8 @@
   }
 
   if ((self = [super init])) {
-    browser_ = Browser::Create(aProfile);
-    browser_->NewTab();
+    browser_ = new Browser(Browser::CreateParams(aProfile));
+    chrome::NewTab(browser_);
     browser_->window()->Show();
     scoped_nsobject<NSNumber> numID(
         [[NSNumber alloc] initWithInt:browser_->session_id().id()]);
@@ -116,7 +118,7 @@
   // Note: applescript is 1-based, that is lists begin with index 1.
   int atIndex = [anActiveTabIndex intValue] - 1;
   if (atIndex >= 0 && atIndex < browser_->tab_count())
-    browser_->ActivateTabAt(atIndex, true);
+    chrome::ActivateTabAt(browser_, atIndex, true);
   else
     AppleScript::SetError(AppleScript::errInvalidTabIndex);
 }
@@ -138,7 +140,7 @@
 - (TabAppleScript*)activeTab {
   TabAppleScript* currentTab =
       [[[TabAppleScript alloc]
-          initWithTabContent:browser_->GetActiveTabContents()]
+          initWithTabContent:chrome::GetActiveTabContents(browser_)]
               autorelease];
   [currentTab setContainer:self
                   property:AppleScript::kTabsProperty];
@@ -151,7 +153,7 @@
 
   for (int i = 0; i < browser_->tab_count(); ++i) {
     // Check to see if tab is closing.
-    TabContents* tab_contents = browser_->GetTabContentsAt(i);
+    TabContents* tab_contents = chrome::GetTabContentsAt(browser_, i);
     if (tab_contents->in_destructor()) {
       continue;
     }
@@ -173,9 +175,10 @@
 
   // Set how long it takes a tab to be created.
   base::TimeTicks newTabStartTime = base::TimeTicks::Now();
-  TabContents* contents =
-      browser_->AddSelectedTabWithURL(GURL(chrome::kChromeUINewTabURL),
-                                      content::PAGE_TRANSITION_TYPED);
+  TabContents* contents = chrome::AddSelectedTabWithURL(
+      browser_,
+      GURL(chrome::kChromeUINewTabURL),
+      content::PAGE_TRANSITION_TYPED);
   contents->web_contents()->SetNewTabStartTime(newTabStartTime);
   [aTab setTabContent:contents];
 }
@@ -188,12 +191,11 @@
 
   // Set how long it takes a tab to be created.
   base::TimeTicks newTabStartTime = base::TimeTicks::Now();
-  browser::NavigateParams params(browser_,
-                                 GURL(chrome::kChromeUINewTabURL),
-                                 content::PAGE_TRANSITION_TYPED);
+  chrome::NavigateParams params(browser_, GURL(chrome::kChromeUINewTabURL),
+                                content::PAGE_TRANSITION_TYPED);
   params.disposition = NEW_FOREGROUND_TAB;
   params.tabstrip_index = index;
-  browser::Navigate(&params);
+  chrome::Navigate(&params);
   params.target_contents->web_contents()->SetNewTabStartTime(
       newTabStartTime);
 
@@ -201,7 +203,7 @@
 }
 
 - (void)removeFromTabsAtIndex:(int)index {
-  browser_->CloseTabContents(browser_->GetWebContentsAt(index));
+  chrome::CloseWebContents(browser_, chrome::GetWebContentsAt(browser_, index));
 }
 
 - (NSNumber*)orderedIndex {

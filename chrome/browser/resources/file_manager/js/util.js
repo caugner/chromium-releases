@@ -498,8 +498,16 @@ util.readFileBytes = function(file, begin, end, callback, onError) {
   fileReader.onloadend = function() {
     callback(file, new ByteReader(fileReader.result));
   };
-  fileReader.readAsArrayBuffer(file.webkitSlice(begin, end));
+  fileReader.readAsArrayBuffer(file.slice(begin, end));
 };
+
+if (!Blob.prototype.slice) {
+  /**
+   * This code might run in the test harness on older versions of Chrome where
+   * Blob.slice is still called Blob.webkitSlice.
+   */
+  Blob.prototype.slice = Blob.prototype.webkitSlice;
+}
 
 /**
  * Write a blob to a file.
@@ -559,3 +567,74 @@ util.applyTransform = function(element, transform) {
 util.makeFilesystemUrl = function(path) {
   return 'filesystem:' + chrome.extension.getURL('external' + path);
 };
+
+/**
+ * Traverses a tree up to a certain depth.
+ * @param {FileEntry} root Root entry.
+ * @param {function(Array.<Entry>)} callback The callback is called at the very
+ *     end with a list of entries found.
+ * @param {number?} max_depth Maximum depth. Pass zero to traverse everything.
+ */
+util.traverseTree = function(root, callback, max_depth) {
+  if (root.isFile) {
+    callback([root]);
+    return;
+  }
+
+  var result = [];
+  var pending = 0;
+
+  function maybeDone() {
+    if (pending == 0)
+      callback(result);
+  }
+
+  function readEntry(entry, depth) {
+    result.push(entry);
+
+    // Do not recurse too deep and into files.
+    if (entry.isFile || (max_depth != 0 && depth >= max_depth))
+      return;
+
+    pending++;
+    util.forEachDirEntry(entry, function(childEntry) {
+      if (childEntry == null) {
+        // Null entry indicates we're done scanning this directory.
+        pending--;
+        maybeDone();
+      } else {
+        readEntry(childEntry, depth + 1);
+      }
+    });
+  }
+
+  readEntry(root, 0);
+};
+
+/**
+ * Return a translated string.
+ *
+ * Wrapper function to make dealing with translated strings more concise.
+ * Equivalent to loadTimeData.getString(id).
+ *
+ * @param {string} id The id of the string to return.
+ * @return {string} The translated string.
+ */
+function str(id) {
+  return loadTimeData.getString(id);
+}
+
+/**
+ * Return a translated string with arguments replaced.
+ *
+ * Wrapper function to make dealing with translated strings more concise.
+ * Equivilant to loadTimeData.getStringF(id, ...).
+ *
+ * @param {string} id The id of the string to return.
+ * @param {...string} var_args The values to replace into the string.
+ * @return {string} The translated string with replaced values.
+ */
+function strf(id, var_args) {
+  return loadTimeData.getStringF.apply(loadTimeData, arguments);
+}
+

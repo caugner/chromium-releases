@@ -4,7 +4,6 @@
 
 #import "chrome/browser/ui/cocoa/confirm_bubble_cocoa.h"
 
-#import "base/mac/cocoa_protocols.h"
 #include "base/string16.h"
 #include "chrome/browser/themes/theme_service.h"
 #import "chrome/browser/ui/cocoa/confirm_bubble_controller.h"
@@ -50,7 +49,7 @@ const int kButtonHEdgeMargin = 7;
 
 }  // namespace
 
-namespace browser {
+namespace chrome {
 
 void ShowConfirmBubble(gfx::NativeView view,
                        const gfx::Point& origin,
@@ -68,7 +67,7 @@ void ShowConfirmBubble(gfx::NativeView view,
   [[view window] makeFirstResponder:[controller view]];
 }
 
-}  // namespace browser
+}  // namespace chrome
 
 // An interface that is derived from NSTextView and does not accept
 // first-responder status, i.e. a NSTextView-derived class that never becomes

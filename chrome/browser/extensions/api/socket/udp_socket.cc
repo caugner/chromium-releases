@@ -13,7 +13,7 @@
 
 namespace extensions {
 
-UDPSocket::UDPSocket(APIResourceEventNotifier* event_notifier)
+UDPSocket::UDPSocket(ApiResourceEventNotifier* event_notifier)
     : Socket(event_notifier),
       socket_(net::DatagramSocket::DEFAULT_BIND,
               net::RandIntCallback(),
@@ -183,6 +183,18 @@ void UDPSocket::SendTo(scoped_refptr<net::IOBuffer> io_buffer,
 
   if (result != net::ERR_IO_PENDING)
     OnSendToComplete(result);
+}
+
+bool UDPSocket::IsTCPSocket() {
+  return false;
+}
+
+bool UDPSocket::GetPeerAddress(net::IPEndPoint* address) {
+  return !socket_.GetPeerAddress(address);
+}
+
+bool UDPSocket::GetLocalAddress(net::IPEndPoint* address) {
+  return !socket_.GetLocalAddress(address);
 }
 
 void UDPSocket::OnReadComplete(scoped_refptr<net::IOBuffer> io_buffer,

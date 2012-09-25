@@ -4,18 +4,21 @@
 
 #ifndef SYNC_ENGINE_BUILD_COMMIT_COMMAND_H_
 #define SYNC_ENGINE_BUILD_COMMIT_COMMAND_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "base/gtest_prod_util.h"
 #include "sync/engine/syncer_command.h"
-#include "sync/engine/syncproto.h"
-#include "sync/syncable/syncable.h"
+#include "sync/syncable/entry_kernel.h"
 
-namespace browser_sync {
+namespace syncer {
 
 namespace sessions {
 class OrderedCommitSet;
+}
+
+namespace syncable {
+class Entry;
 }
 
 // A class that contains the code used to serialize a set of sync items into a
@@ -33,7 +36,7 @@ class BuildCommitCommand : public SyncerCommand {
   // The commit_message parameter is an output parameter which will contain the
   // fully initialized commit message once ExecuteImpl() has been called.
   BuildCommitCommand(const sessions::OrderedCommitSet& batch_commit_set,
-                     ClientToServerMessage* commit_message);
+                     sync_pb::ClientToServerMessage* commit_message);
   virtual ~BuildCommitCommand();
 
   // SyncerCommand implementation.
@@ -48,7 +51,7 @@ class BuildCommitCommand : public SyncerCommand {
   static int64 GetGap();
 
   void AddExtensionsActivityToMessage(sessions::SyncSession* session,
-                                      CommitMessage* message);
+                                      sync_pb::CommitMessage* message);
   // Helper for computing position.  Find the numeric position value
   // of the closest already-synced entry.  |direction| must be one of
   // NEXT_ID or PREV_ID; this parameter controls the search direction.
@@ -66,9 +69,9 @@ class BuildCommitCommand : public SyncerCommand {
   const sessions::OrderedCommitSet& batch_commit_set_;
 
   // Output parameter; see constructor comment.
-  ClientToServerMessage* commit_message_;
+  sync_pb::ClientToServerMessage* commit_message_;
 };
 
-}  // namespace browser_sync
+}  // namespace syncer
 
 #endif  // SYNC_ENGINE_BUILD_COMMIT_COMMAND_H_

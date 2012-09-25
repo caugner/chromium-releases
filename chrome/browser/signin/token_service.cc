@@ -123,6 +123,9 @@ void TokenService::UpdateCredentials(
   for (size_t i = 0; i < arraysize(kServices); i++) {
     fetchers_[i].reset();
   }
+
+  // Notify the CredentialCacheService that a new lsid and sid are available.
+  FireCredentialsUpdatedNotification(credentials.lsid, credentials.sid);
 }
 
 void TokenService::UpdateCredentialsWithOAuth2(
@@ -224,6 +227,16 @@ const std::string& TokenService::GetOAuth2LoginAccessToken() const {
 void TokenService::GetServiceNamesForTesting(std::vector<std::string>* names) {
   names->resize(arraysize(kServices));
   std::copy(kServices, kServices + arraysize(kServices), names->begin());
+}
+
+void TokenService::FireCredentialsUpdatedNotification(
+    const std::string& lsid,
+    const std::string& sid) {
+  CredentialsUpdatedDetails details(lsid, sid);
+  content::NotificationService::current()->Notify(
+      chrome::NOTIFICATION_TOKEN_SERVICE_CREDENTIALS_UPDATED,
+      content::Source<TokenService>(this),
+      content::Details<const CredentialsUpdatedDetails>(&details));
 }
 
 // Note that this can fire twice or more for any given service.
@@ -334,6 +347,11 @@ void TokenService::OnWebDataServiceRequestDone(WebDataService::Handle h,
 void TokenService::LoadTokensIntoMemory(
     const std::map<std::string, std::string>& db_tokens,
     std::map<std::string, std::string>* in_memory_tokens) {
+  // Ensure that there are no active fetchers at the time we first load
+  // tokens from the DB into memory.
+  for (size_t i = 0; i < arraysize(kServices); ++i) {
+    DCHECK(NULL == fetchers_[i].get());
+  }
 
   for (size_t i = 0; i < arraysize(kServices); i++) {
     LoadSingleTokenIntoMemory(db_tokens, in_memory_tokens, kServices[i]);
@@ -356,10 +374,10 @@ void TokenService::LoadTokensIntoMemory(
       sid = db_tokens.find(GaiaConstants::kGaiaSid)->second;
 
     if (!lsid.empty() && !sid.empty()) {
-      UpdateCredentials(GaiaAuthConsumer::ClientLoginResult(sid,
-                                                            lsid,
-                                                            std::string(),
-                                                            std::string()));
+      credentials_ = GaiaAuthConsumer::ClientLoginResult(sid,
+                                                         lsid,
+                                                         std::string(),
+                                                         std::string());
     }
   }
 }

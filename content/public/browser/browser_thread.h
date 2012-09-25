@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_PUBLIC_BROWSER_BROWSER_THREAD_H_
 #define CONTENT_PUBLIC_BROWSER_BROWSER_THREAD_H_
-#pragma once
 
 #include <string>
 
@@ -110,19 +109,10 @@ class CONTENT_EXPORT BrowserThread {
   static bool PostDelayedTask(ID identifier,
                               const tracked_objects::Location& from_here,
                               const base::Closure& task,
-                              int64 delay_ms);
-  static bool PostDelayedTask(ID identifier,
-                              const tracked_objects::Location& from_here,
-                              const base::Closure& task,
                               base::TimeDelta delay);
   static bool PostNonNestableTask(ID identifier,
                                   const tracked_objects::Location& from_here,
                                   const base::Closure& task);
-  static bool PostNonNestableDelayedTask(
-      ID identifier,
-      const tracked_objects::Location& from_here,
-      const base::Closure& task,
-      int64 delay_ms);
   static bool PostNonNestableDelayedTask(
       ID identifier,
       const tracked_objects::Location& from_here,
@@ -271,7 +261,7 @@ class CONTENT_EXPORT BrowserThread {
   // ...
   //  private:
   //   friend struct BrowserThread::DeleteOnThread<BrowserThread::IO>;
-  //   friend class DeleteTask<Foo>;
+  //   friend class base::DeleteHelper<Foo>;
   //
   //   ~Foo();
   struct DeleteOnUIThread : public DeleteOnThread<UI> { };

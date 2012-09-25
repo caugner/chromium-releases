@@ -4,21 +4,20 @@
 
 #ifndef CONTENT_BROWSER_WEBUI_WEB_UI_IMPL_H_
 #define CONTENT_BROWSER_WEBUI_WEB_UI_IMPL_H_
-#pragma once
 
 #include <map>
 
 #include "base/compiler_specific.h"
 #include "base/memory/weak_ptr.h"
 #include "content/public/browser/web_ui.h"
-#include "ipc/ipc_channel.h"
+#include "ipc/ipc_listener.h"
 
 namespace content {
 class RenderViewHost;
 }
 
 class CONTENT_EXPORT WebUIImpl : public content::WebUI,
-                                 public IPC::Channel::Listener,
+                                 public IPC::Listener,
                                  public base::SupportsWeakPtr<WebUIImpl> {
  public:
   explicit WebUIImpl(content::WebContents* contents);
@@ -76,7 +75,7 @@ class CONTENT_EXPORT WebUIImpl : public content::WebUI,
       const std::string& function_name,
       const std::vector<const base::Value*>& args) OVERRIDE;
 
-  // IPC::Channel::Listener implementation:
+  // IPC::Listener implementation:
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
  private:

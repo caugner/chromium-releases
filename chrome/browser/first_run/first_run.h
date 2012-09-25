@@ -4,8 +4,8 @@
 
 #ifndef CHROME_BROWSER_FIRST_RUN_FIRST_RUN_H_
 #define CHROME_BROWSER_FIRST_RUN_FIRST_RUN_H_
-#pragma once
 
+#include <string>
 #include <vector>
 
 #include "base/basictypes.h"
@@ -19,6 +19,7 @@
 class CommandLine;
 class FilePath;
 class GURL;
+class PrefService;
 class Profile;
 class ProcessSingleton;
 
@@ -49,6 +50,7 @@ struct MasterPrefs {
   int do_import_items;
   int dont_import_items;
   bool make_chrome_default;
+  bool suppress_first_run_default_browser_prompt;
   std::vector<GURL> new_tabs;
   std::vector<GURL> bookmarks;
 };
@@ -58,6 +60,12 @@ bool IsChromeFirstRun();
 
 // Creates the sentinel file that signals that chrome has been configured.
 bool CreateSentinel();
+
+// Get RLZ ping delay pref name.
+std::string GetPingDelayPrefName();
+
+// Register user preferences used by the MasterPrefs structure.
+void RegisterUserPrefs(PrefService* prefs);
 
 // Removes the sentinel file created in ConfigDone(). Returns false if the
 // sentinel file could not be removed.

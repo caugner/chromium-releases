@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_TAB_CONTENTS_TAB_CONTENTS_H_
 #define CHROME_BROWSER_UI_TAB_CONTENTS_TAB_CONTENTS_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -22,13 +21,14 @@ class BlockedContentTabHelper;
 class BookmarkTabHelper;
 class ConstrainedWindowTabHelper;
 class CoreTabHelper;
-class ExtensionTabHelper;
 class ExternalProtocolObserver;
 class FaviconTabHelper;
 class FindTabHelper;
 class HistoryTabHelper;
 class HungPluginTabHelper;
 class InfoBarTabHelper;
+class MetroPinTabHelper;
+class NavigationMetricsRecorder;
 class OmniboxSearchHint;
 class PasswordManager;
 class PasswordManagerDelegate;
@@ -59,7 +59,18 @@ namespace captive_portal {
 class CaptivePortalTabHelper;
 }
 
+namespace chrome {
+namespace search {
+class SearchTabHelper;
+}
+}
+
+namespace chrome_browser_net {
+class CacheStatsTabHelper;
+}
+
 namespace extensions {
+class TabHelper;
 class WebNavigationTabObserver;
 }
 
@@ -154,11 +165,11 @@ class TabContents : public content::WebContentsObserver {
 
   CoreTabHelper* core_tab_helper() { return core_tab_helper_.get(); }
 
-  ExtensionTabHelper* extension_tab_helper() {
+  extensions::TabHelper* extension_tab_helper() {
     return extension_tab_helper_.get();
   }
 
-  const ExtensionTabHelper* extension_tab_helper() const {
+  const extensions::TabHelper* extension_tab_helper() const {
     return extension_tab_helper_.get();
   }
 
@@ -169,6 +180,10 @@ class TabContents : public content::WebContentsObserver {
     return hung_plugin_tab_helper_.get();
   }
   InfoBarTabHelper* infobar_tab_helper() { return infobar_tab_helper_.get(); }
+
+  MetroPinTabHelper* metro_pin_tab_helper() {
+    return metro_pin_tab_helper_.get();
+  }
 
 #if defined(ENABLE_ONE_CLICK_SIGNIN)
   OneClickSigninHelper* one_click_signin_helper() {
@@ -199,6 +214,10 @@ class TabContents : public content::WebContentsObserver {
 
   SearchEngineTabHelper* search_engine_tab_helper() {
     return search_engine_tab_helper_.get();
+  }
+
+  chrome::search::SearchTabHelper* search_tab_helper() {
+    return search_tab_helper_.get();
   }
 
   SnapshotTabHelper* snapshot_tab_helper() {
@@ -252,17 +271,19 @@ class TabContents : public content::WebContentsObserver {
   scoped_ptr<AutomationTabHelper> automation_tab_helper_;
   scoped_ptr<BlockedContentTabHelper> blocked_content_tab_helper_;
   scoped_ptr<BookmarkTabHelper> bookmark_tab_helper_;
+  scoped_ptr<chrome_browser_net::CacheStatsTabHelper> cache_stats_tab_helper_;
 #if defined(ENABLE_CAPTIVE_PORTAL_DETECTION)
   scoped_ptr<captive_portal::CaptivePortalTabHelper> captive_portal_tab_helper_;
 #endif
   scoped_ptr<ConstrainedWindowTabHelper> constrained_window_tab_helper_;
   scoped_ptr<CoreTabHelper> core_tab_helper_;
-  scoped_ptr<ExtensionTabHelper> extension_tab_helper_;
+  scoped_ptr<extensions::TabHelper> extension_tab_helper_;
   scoped_ptr<FaviconTabHelper> favicon_tab_helper_;
   scoped_ptr<FindTabHelper> find_tab_helper_;
   scoped_ptr<HistoryTabHelper> history_tab_helper_;
   scoped_ptr<HungPluginTabHelper> hung_plugin_tab_helper_;
   scoped_ptr<InfoBarTabHelper> infobar_tab_helper_;
+  scoped_ptr<MetroPinTabHelper> metro_pin_tab_helper_;
 
   // PasswordManager and its delegate. The delegate must outlive the manager,
   // per documentation in password_manager.h.
@@ -278,6 +299,7 @@ class TabContents : public content::WebContentsObserver {
   scoped_ptr<RestoreTabHelper> restore_tab_helper_;
   scoped_ptr<SadTabHelper> sad_tab_helper_;
   scoped_ptr<SearchEngineTabHelper> search_engine_tab_helper_;
+  scoped_ptr<chrome::search::SearchTabHelper> search_tab_helper_;
   scoped_ptr<SnapshotTabHelper> snapshot_tab_helper_;
   scoped_ptr<TabContentsSSLHelper> ssl_helper_;
   scoped_ptr<browser_sync::SyncedTabDelegate> synced_tab_delegate_;
@@ -301,6 +323,7 @@ class TabContents : public content::WebContentsObserver {
   scoped_ptr<AlternateErrorPageTabObserver> alternate_error_page_tab_observer_;
   scoped_ptr<extensions::WebNavigationTabObserver> webnavigation_observer_;
   scoped_ptr<ExternalProtocolObserver> external_protocol_observer_;
+  scoped_ptr<NavigationMetricsRecorder> navigation_metrics_recorder_;
   scoped_ptr<OmniboxSearchHint> omnibox_search_hint_;
 #if defined(ENABLE_ONE_CLICK_SIGNIN)
   scoped_ptr<OneClickSigninHelper> one_click_signin_helper_;

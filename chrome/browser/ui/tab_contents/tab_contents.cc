@@ -13,11 +13,12 @@
 #include "chrome/browser/captive_portal/captive_portal_tab_helper.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/extensions/api/web_navigation/web_navigation_api.h"
-#include "chrome/browser/extensions/extension_tab_helper.h"
+#include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/external_protocol/external_protocol_observer.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/history/history_tab_helper.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
+#include "chrome/browser/net/cache_stats.h"
 #include "chrome/browser/omnibox_search_hint.h"
 #include "chrome/browser/password_manager/password_manager.h"
 #include "chrome/browser/password_manager/password_manager_delegate_impl.h"
@@ -27,6 +28,7 @@
 #include "chrome/browser/printing/print_view_manager.h"
 #include "chrome/browser/safe_browsing/safe_browsing_tab_observer.h"
 #include "chrome/browser/sessions/restore_tab_helper.h"
+#include "chrome/browser/tab_contents/navigation_metrics_recorder.h"
 #include "chrome/browser/tab_contents/tab_contents_ssl_helper.h"
 #include "chrome/browser/tab_contents/thumbnail_generator.h"
 #include "chrome/browser/translate/translate_tab_helper.h"
@@ -37,9 +39,12 @@
 #include "chrome/browser/ui/find_bar/find_tab_helper.h"
 #include "chrome/browser/ui/hung_plugin_tab_helper.h"
 #include "chrome/browser/ui/intents/web_intent_picker_controller.h"
+#include "chrome/browser/ui/metro_pin_tab_helper.h"
 #include "chrome/browser/ui/pdf/pdf_tab_observer.h"
 #include "chrome/browser/ui/prefs/prefs_tab_helper.h"
 #include "chrome/browser/ui/sad_tab_helper.h"
+#include "chrome/browser/ui/search/search.h"
+#include "chrome/browser/ui/search/search_tab_helper.h"
 #include "chrome/browser/ui/search_engines/search_engine_tab_helper.h"
 #include "chrome/browser/ui/snapshot_tab_helper.h"
 #include "chrome/browser/ui/sync/one_click_signin_helper.h"
@@ -52,10 +57,6 @@
 #include "chrome/common/thumbnail_support.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_contents.h"
-
-#if defined(OS_WIN)
-#include "base/win/metro.h"
-#endif
 
 using content::WebContents;
 
@@ -83,6 +84,10 @@ TabContents::TabContents(WebContents* contents)
   property_accessor()->SetProperty(contents->GetPropertyBag(), this);
 
   // Create the tab helpers.
+  // restore_tab_helper because it sets up the tab ID, and other helpers may
+  // rely on that.
+  restore_tab_helper_.reset(new RestoreTabHelper(contents));
+
   autocomplete_history_manager_.reset(new AutocompleteHistoryManager(contents));
   autofill_manager_ = new AutofillManager(this);
   if (CommandLine::ForCurrentProcess()->HasSwitch(
@@ -98,34 +103,40 @@ TabContents::TabContents(WebContents* contents)
 #endif
   blocked_content_tab_helper_.reset(new BlockedContentTabHelper(this));
   bookmark_tab_helper_.reset(new BookmarkTabHelper(this));
+  cache_stats_tab_helper_.reset(
+      new chrome_browser_net::CacheStatsTabHelper(this));
 #if defined(ENABLE_CAPTIVE_PORTAL_DETECTION)
   captive_portal_tab_helper_.reset(
       new captive_portal::CaptivePortalTabHelper(profile(), web_contents()));
 #endif
   constrained_window_tab_helper_.reset(new ConstrainedWindowTabHelper(this));
   core_tab_helper_.reset(new CoreTabHelper(contents));
-  extension_tab_helper_.reset(new ExtensionTabHelper(this));
+  extension_tab_helper_.reset(new extensions::TabHelper(this));
   favicon_tab_helper_.reset(new FaviconTabHelper(contents));
   find_tab_helper_.reset(new FindTabHelper(contents));
   history_tab_helper_.reset(new HistoryTabHelper(contents));
   hung_plugin_tab_helper_.reset(new HungPluginTabHelper(contents));
   infobar_tab_helper_.reset(new InfoBarTabHelper(contents));
+  metro_pin_tab_helper_.reset(new MetroPinTabHelper(contents));
   password_manager_delegate_.reset(new PasswordManagerDelegateImpl(this));
   password_manager_.reset(
       new PasswordManager(contents, password_manager_delegate_.get()));
   prefs_tab_helper_.reset(new PrefsTabHelper(contents));
   prerender_tab_helper_.reset(new prerender::PrerenderTabHelper(this));
-  restore_tab_helper_.reset(new RestoreTabHelper(contents));
   search_engine_tab_helper_.reset(new SearchEngineTabHelper(contents));
+  bool is_search_enabled =
+      chrome::search::IsInstantExtendedAPIEnabled(profile());
+  search_tab_helper_.reset(
+      new chrome::search::SearchTabHelper(this, is_search_enabled));
   snapshot_tab_helper_.reset(new SnapshotTabHelper(contents));
   ssl_helper_.reset(new TabContentsSSLHelper(this));
   synced_tab_delegate_.reset(new TabContentsSyncedTabDelegate(this));
   content_settings_.reset(new TabSpecificContentSettings(contents));
   translate_tab_helper_.reset(new TranslateTabHelper(contents));
-  web_intent_picker_controller_.reset(new WebIntentPickerController(this));
   zoom_controller_.reset(new ZoomController(this));
 
 #if !defined(OS_ANDROID)
+  web_intent_picker_controller_.reset(new WebIntentPickerController(this));
   sad_tab_helper_.reset(new SadTabHelper(contents));
 #endif
 
@@ -135,18 +146,12 @@ TabContents::TabContents(WebContents* contents)
   webnavigation_observer_.reset(
       new extensions::WebNavigationTabObserver(contents));
   external_protocol_observer_.reset(new ExternalProtocolObserver(contents));
+  navigation_metrics_recorder_.reset(new NavigationMetricsRecorder(contents));
   pdf_tab_observer_.reset(new PDFTabObserver(this));
   safe_browsing_tab_observer_.reset(
       new safe_browsing::SafeBrowsingTabObserver(this));
 
-#if defined(OS_WIN)
-  // Metro mode Chrome on Windows does not support plugins. Avoid registering
-  // the PluginObserver so we don't popup plugin-related infobars.
-  if (!base::win::IsMetroProcess())
-    plugin_observer_.reset(new PluginObserver(this));
-#else
   plugin_observer_.reset(new PluginObserver(this));
-#endif
 
 #if !defined(OS_ANDROID)
   if (OmniboxSearchHint::IsEnabled(profile()))
@@ -170,7 +175,7 @@ TabContents::TabContents(WebContents* contents)
   // one-click signin helper attached does not cause problems if the profile
   // happens to be already connected.
 #if defined(ENABLE_ONE_CLICK_SIGNIN)
-  if (OneClickSigninHelper::CanOffer(contents, false))
+  if (OneClickSigninHelper::CanOffer(contents, "", false))
       one_click_signin_helper_.reset(new OneClickSigninHelper(contents));
 #endif
 }

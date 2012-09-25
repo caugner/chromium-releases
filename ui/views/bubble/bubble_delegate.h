@@ -4,17 +4,16 @@
 
 #ifndef UI_VIEWS_BUBBLE_BUBBLE_DELEGATE_H_
 #define UI_VIEWS_BUBBLE_BUBBLE_DELEGATE_H_
-#pragma once
 
 #include "base/gtest_prod_util.h"
 #include "ui/base/animation/animation_delegate.h"
 #include "ui/views/bubble/bubble_border.h"
-#include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
+#include "ui/views/widget/widget_observer.h"
 
 namespace ui {
 class SlideAnimation;
-}  // namespace ui
+}
 
 namespace views {
 
@@ -26,7 +25,7 @@ class BubbleFrameView;
 ///////////////////////////////////////////////////////////////////////////////
 class VIEWS_EXPORT BubbleDelegateView : public WidgetDelegateView,
                                         public ui::AnimationDelegate,
-                                        public Widget::Observer {
+                                        public WidgetObserver {
  public:
   // The default bubble background color.
   static const SkColor kBackgroundColor;
@@ -42,12 +41,10 @@ class VIEWS_EXPORT BubbleDelegateView : public WidgetDelegateView,
   // WidgetDelegate overrides:
   virtual View* GetInitiallyFocusedView() OVERRIDE;
   virtual BubbleDelegateView* AsBubbleDelegate() OVERRIDE;
-  virtual void WindowClosing() OVERRIDE;
   virtual View* GetContentsView() OVERRIDE;
-  virtual NonClientFrameView* CreateNonClientFrameView(
-      views::Widget* widget) OVERRIDE;
+  virtual NonClientFrameView* CreateNonClientFrameView(Widget* widget) OVERRIDE;
 
-  // Widget::Observer overrides:
+  // WidgetObserver overrides:
   virtual void OnWidgetClosing(Widget* widget) OVERRIDE;
   virtual void OnWidgetVisibilityChanged(Widget* widget, bool visible) OVERRIDE;
   virtual void OnWidgetActivationChanged(Widget* widget, bool active) OVERRIDE;
@@ -72,8 +69,11 @@ class VIEWS_EXPORT BubbleDelegateView : public WidgetDelegateView,
   SkColor color() const { return color_; }
   void set_color(SkColor color) { color_ = color; }
 
-  int margin() const { return margin_; }
-  void set_margin(int margin) { margin_ = margin; }
+  const gfx::Insets& margins() const { return margins_; }
+  void set_margins(const gfx::Insets& margins) { margins_ = margins; }
+
+  void set_anchor_insets(const gfx::Insets& insets) { anchor_insets_ = insets; }
+  const gfx::Insets& anchor_insets() const { return anchor_insets_; }
 
   gfx::NativeView parent_window() const { return parent_window_; }
   void set_parent_window(gfx::NativeView window) { parent_window_ = window; }
@@ -81,6 +81,11 @@ class VIEWS_EXPORT BubbleDelegateView : public WidgetDelegateView,
   bool use_focusless() const { return use_focusless_; }
   void set_use_focusless(bool use_focusless) {
     use_focusless_ = use_focusless;
+  }
+
+  bool try_mirroring_arrow() const { return try_mirroring_arrow_; }
+  void set_try_mirroring_arrow(bool try_mirroring_arrow) {
+    try_mirroring_arrow_ = try_mirroring_arrow;
   }
 
   // Get the arrow's anchor rect in screen space.
@@ -157,8 +162,11 @@ class VIEWS_EXPORT BubbleDelegateView : public WidgetDelegateView,
   // The background color of the bubble.
   SkColor color_;
 
-  // The margin between the content and the inside of the border, in pixels.
-  int margin_;
+  // The margins between the content and the inside of the border.
+  gfx::Insets margins_;
+
+  // Insets applied to the |anchor_view_| bounds.
+  gfx::Insets anchor_insets_;
 
   // Original opacity of the bubble.
   int original_opacity_;
@@ -169,6 +177,10 @@ class VIEWS_EXPORT BubbleDelegateView : public WidgetDelegateView,
   // Create a popup window for focusless bubbles on Linux/ChromeOS.
   // These bubbles are not interactive and should not gain focus.
   bool use_focusless_;
+
+  // If true (defaults to true), the arrow may be mirrored to fit the
+  // bubble on screen better.
+  bool try_mirroring_arrow_;
 
   // Parent native window of the bubble.
   gfx::NativeView parent_window_;

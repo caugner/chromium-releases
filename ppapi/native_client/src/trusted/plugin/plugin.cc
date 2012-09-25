@@ -34,6 +34,7 @@
 #include "native_client/src/trusted/desc/nacl_desc_wrapper.h"
 #include "native_client/src/trusted/nonnacl_util/sel_ldr_launcher.h"
 #include "native_client/src/trusted/plugin/json_manifest.h"
+#include "native_client/src/trusted/plugin/nacl_entry_points.h"
 #include "native_client/src/trusted/plugin/nacl_subprocess.h"
 #include "native_client/src/trusted/plugin/nexe_arch.h"
 #include "native_client/src/trusted/plugin/plugin_error.h"
@@ -54,6 +55,7 @@
 #include "ppapi/c/ppp_input_event.h"
 #include "ppapi/c/ppp_instance.h"
 #include "ppapi/c/ppp_mouse_lock.h"
+#include "ppapi/c/private/ppb_nacl_private.h"
 #include "ppapi/c/private/ppb_uma_private.h"
 #include "ppapi/cpp/dev/find_dev.h"
 #include "ppapi/cpp/dev/printing_dev.h"
@@ -119,6 +121,13 @@ const uint32_t kTimeLargeBuckets = 100;
 const int64_t kSizeKBMin = 1;
 const int64_t kSizeKBMax = 512*1024;     // very large .nexe
 const uint32_t kSizeKBBuckets = 100;
+
+const PPB_NaCl_Private* GetNaClInterface() {
+  pp::Module *module = pp::Module::Get();
+  CHECK(module);
+  return static_cast<const PPB_NaCl_Private*>(
+      module->GetBrowserInterface(PPB_NACL_PRIVATE_INTERFACE));
+}
 
 const PPB_UMA_Private* GetUMAInterface() {
   pp::Module *module = pp::Module::Get();
@@ -603,11 +612,24 @@ bool Plugin::LoadNaClModuleCommon(nacl::DescWrapper* wrapper,
   }
 
   bool service_runtime_started =
-      new_service_runtime->Start(wrapper, error_info, manifest_base_url());
+      new_service_runtime->Start(wrapper,
+                                 error_info,
+                                 manifest_base_url(),
+                                 crash_cb);
   PLUGIN_PRINTF(("Plugin::LoadNaClModuleCommon (service_runtime_started=%d)\n",
                  service_runtime_started));
   if (!service_runtime_started) {
     return false;
+  }
+
+  // Try to start the Chrome IPC-based proxy.
+  if (nacl_interface_->StartPpapiProxy(pp_instance())) {
+    using_ipc_proxy_ = true;
+    // We need to explicitly schedule this here. It is normally called in
+    // response to starting the SRPC proxy.
+    CHECK(init_done_cb.pp_completion_callback().func != NULL);
+    PLUGIN_PRINTF(("Plugin::LoadNaClModuleCommon, started ipc proxy.\n"));
+    pp::Module::Get()->core()->CallOnMainThread(0, init_done_cb, PP_OK);
   }
   return true;
 }
@@ -631,6 +653,11 @@ bool Plugin::LoadNaClModule(nacl::DescWrapper* wrapper,
 }
 
 bool Plugin::LoadNaClModuleContinuationIntern(ErrorInfo* error_info) {
+  // If we are using the IPC proxy, StartSrpcServices and StartJSObjectProxy
+  // don't makes sense. Return 'true' so that the plugin continues loading.
+  if (using_ipc_proxy_)
+    return true;
+
   if (!main_subprocess_.StartSrpcServices()) {
     error_info->SetReport(ERROR_SRPC_CONNECTION_FAIL,
                           "SRPC connection failure for " +
@@ -862,11 +889,15 @@ Plugin::Plugin(PP_Instance pp_instance)
       init_time_(0),
       ready_time_(0),
       nexe_size_(0),
-      time_of_last_progress_event_(0) {
+      time_of_last_progress_event_(0),
+      using_ipc_proxy_(false),
+      nacl_interface_(NULL) {
   PLUGIN_PRINTF(("Plugin::Plugin (this=%p, pp_instance=%"
                  NACL_PRId32")\n", static_cast<void*>(this), pp_instance));
   callback_factory_.Initialize(this);
   nexe_downloader_.Initialize(this);
+  nacl_interface_ = GetNaClInterface();
+  CHECK(nacl_interface_ != NULL);
 }
 
 
@@ -1116,6 +1147,28 @@ void Plugin::NexeFileDidOpenContinuation(int32_t pp_error) {
   NaClLog(4, "Leaving NexeFileDidOpenContinuation\n");
 }
 
+static void LogLineToConsole(Plugin* plugin, const nacl::string& one_line) {
+  PLUGIN_PRINTF(("LogLineToConsole: %s\n",
+                 one_line.c_str()));
+  plugin->AddToConsole(one_line);
+}
+
+void Plugin::CopyCrashLogToJsConsole() {
+  nacl::string fatal_msg(main_service_runtime()->GetCrashLogOutput());
+  size_t ix_start = 0;
+  size_t ix_end;
+
+  PLUGIN_PRINTF(("Plugin::CopyCrashLogToJsConsole: got %d bytes\n",
+                 fatal_msg.size()));
+  while (nacl::string::npos != (ix_end = fatal_msg.find('\n', ix_start))) {
+    LogLineToConsole(this, fatal_msg.substr(ix_start, ix_end - ix_start));
+    ix_start = ix_end + 1;
+  }
+  if (ix_start != fatal_msg.size()) {
+    LogLineToConsole(this, fatal_msg.substr(ix_start));
+  }
+}
+
 void Plugin::NexeDidCrash(int32_t pp_error) {
   PLUGIN_PRINTF(("Plugin::NexeDidCrash (pp_error=%"NACL_PRId32")\n",
                  pp_error));
@@ -1140,16 +1193,27 @@ void Plugin::NexeDidCrash(int32_t pp_error) {
   if (nexe_error_reported()) {
     PLUGIN_PRINTF(("Plugin::NexeDidCrash: error already reported;"
                    " suppressing\n"));
-    return;
-  }
-  if (nacl_ready_state() == DONE) {
-    ReportDeadNexe();
   } else {
-    ErrorInfo error_info;
-    error_info.SetReport(ERROR_START_PROXY_CRASH,  // Not quite right.
-                         "Nexe crashed during startup");
-    ReportLoadError(error_info);
+    if (nacl_ready_state() == DONE) {
+      ReportDeadNexe();
+    } else {
+      ErrorInfo error_info;
+      // The error is not quite right.  In particular, the crash
+      // reported by this path could be due to NaCl application
+      // crashes that occur after the pepper proxy has started.
+      error_info.SetReport(ERROR_START_PROXY_CRASH,
+                           "Nexe crashed during startup");
+      ReportLoadError(error_info);
+    }
   }
+
+  // In all cases, try to grab the crash log.  The first error
+  // reported may have come from the start_module RPC reply indicating
+  // a validation error or something similar, which wouldn't grab the
+  // crash log.  In the event that this is called twice, the second
+  // invocation will just be a no-op, since all the crash log will
+  // have been received and we'll just get an EOF indication.
+  CopyCrashLogToJsConsole();
 }
 
 void Plugin::BitcodeDidTranslate(int32_t pp_error) {

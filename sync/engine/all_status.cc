@@ -9,10 +9,10 @@
 #include "base/logging.h"
 #include "base/port.h"
 #include "sync/engine/net/server_connection_manager.h"
-#include "sync/internal_api/public/syncable/model_type.h"
+#include "sync/internal_api/public/base/model_type.h"
 #include "sync/sessions/session_state.h"
 
-namespace browser_sync {
+namespace syncer {
 
 AllStatus::AllStatus() {
   status_.initial_sync_ended = true;
@@ -24,11 +24,11 @@ AllStatus::AllStatus() {
 AllStatus::~AllStatus() {
 }
 
-sync_api::SyncStatus AllStatus::CreateBlankStatus() const {
+SyncStatus AllStatus::CreateBlankStatus() const {
   // Status is initialized with the previous status value.  Variables
   // whose values accumulate (e.g. lifetime counters like updates_received)
   // are not to be cleared here.
-  sync_api::SyncStatus status = status_;
+  SyncStatus status = status_;
   status.encryption_conflicts = 0;
   status.hierarchy_conflicts = 0;
   status.simple_conflicts = 0;
@@ -39,15 +39,15 @@ sync_api::SyncStatus AllStatus::CreateBlankStatus() const {
   return status;
 }
 
-sync_api::SyncStatus AllStatus::CalcSyncing(
-    const SyncEngineEvent &event) const {
-  sync_api::SyncStatus status = CreateBlankStatus();
+SyncStatus AllStatus::CalcSyncing(const SyncEngineEvent &event) const {
+  SyncStatus status = CreateBlankStatus();
   const sessions::SyncSessionSnapshot& snapshot = event.snapshot;
   status.encryption_conflicts = snapshot.num_encryption_conflicts();
   status.hierarchy_conflicts = snapshot.num_hierarchy_conflicts();
   status.simple_conflicts = snapshot.num_simple_conflicts();
   status.server_conflicts = snapshot.num_server_conflicts();
-  status.committed_count = snapshot.syncer_status().num_successful_commits;
+  status.committed_count =
+      snapshot.model_neutral_state().num_successful_commits;
 
   if (event.what_happened == SyncEngineEvent::SYNC_CYCLE_BEGIN) {
     status.syncing = true;
@@ -58,36 +58,37 @@ sync_api::SyncStatus AllStatus::CalcSyncing(
   status.initial_sync_ended |= snapshot.is_share_usable();
 
   status.updates_available += snapshot.num_server_changes_remaining();
-  status.sync_protocol_error = snapshot.errors().sync_protocol_error;
+  status.sync_protocol_error =
+      snapshot.model_neutral_state().sync_protocol_error;
 
   // Accumulate update count only once per session to avoid double-counting.
   // TODO(ncarter): Make this realtime by having the syncer_status
   // counter preserve its value across sessions.  http://crbug.com/26339
   if (event.what_happened == SyncEngineEvent::SYNC_CYCLE_ENDED) {
     status.updates_received +=
-        snapshot.syncer_status().num_updates_downloaded_total;
+        snapshot.model_neutral_state().num_updates_downloaded_total;
     status.tombstone_updates_received +=
-        snapshot.syncer_status().num_tombstone_updates_downloaded_total;
+        snapshot.model_neutral_state().num_tombstone_updates_downloaded_total;
     status.reflected_updates_received +=
-        snapshot.syncer_status().num_reflected_updates_downloaded_total;
+        snapshot.model_neutral_state().num_reflected_updates_downloaded_total;
     status.num_commits_total +=
-        snapshot.syncer_status().num_successful_commits;
+        snapshot.model_neutral_state().num_successful_commits;
     status.num_local_overwrites_total +=
-        snapshot.syncer_status().num_local_overwrites;
+        snapshot.model_neutral_state().num_local_overwrites;
     status.num_server_overwrites_total +=
-        snapshot.syncer_status().num_server_overwrites;
-    if (snapshot.syncer_status().num_updates_downloaded_total == 0) {
+        snapshot.model_neutral_state().num_server_overwrites;
+    if (snapshot.model_neutral_state().num_updates_downloaded_total == 0) {
       ++status.empty_get_updates;
     } else {
       ++status.nonempty_get_updates;
     }
-    if (snapshot.syncer_status().num_successful_commits == 0) {
+    if (snapshot.model_neutral_state().num_successful_commits == 0) {
       ++status.sync_cycles_without_commits;
     } else {
       ++status.sync_cycles_with_commits;
     }
-    if (snapshot.syncer_status().num_successful_commits == 0 &&
-        snapshot.syncer_status().num_updates_downloaded_total == 0) {
+    if (snapshot.model_neutral_state().num_successful_commits == 0 &&
+        snapshot.model_neutral_state().num_updates_downloaded_total == 0) {
       ++status.useless_sync_cycles;
     } else {
       ++status.useful_sync_cycles;
@@ -106,12 +107,11 @@ void AllStatus::OnSyncEngineEvent(const SyncEngineEvent& event) {
       break;
     case SyncEngineEvent::STOP_SYNCING_PERMANENTLY:
     case SyncEngineEvent::UPDATED_TOKEN:
-    case SyncEngineEvent::CLEAR_SERVER_DATA_FAILED:
-    case SyncEngineEvent::CLEAR_SERVER_DATA_SUCCEEDED:
        break;
     case SyncEngineEvent::ACTIONABLE_ERROR:
       status_ = CreateBlankStatus();
-      status_.sync_protocol_error = event.snapshot.errors().sync_protocol_error;
+      status_.sync_protocol_error =
+          event.snapshot.model_neutral_state().sync_protocol_error;
       break;
     default:
       LOG(ERROR) << "Unrecognized Syncer Event: " << event.what_happened;
@@ -119,7 +119,7 @@ void AllStatus::OnSyncEngineEvent(const SyncEngineEvent& event) {
   }
 }
 
-sync_api::SyncStatus AllStatus::status() const {
+SyncStatus AllStatus::status() const {
   base::AutoLock lock(mutex_);
   return status_;
 }
@@ -134,12 +134,12 @@ void AllStatus::IncrementNotificationsReceived() {
   ++status_.notifications_received;
 }
 
-void AllStatus::SetEncryptedTypes(syncable::ModelTypeSet types) {
+void AllStatus::SetEncryptedTypes(ModelTypeSet types) {
   ScopedStatusLock lock(this);
   status_.encrypted_types = types;
 }
 
-void AllStatus::SetThrottledTypes(const syncable::ModelTypeSet& types) {
+void AllStatus::SetThrottledTypes(const ModelTypeSet& types) {
   ScopedStatusLock lock(this);
   status_.throttled_types = types;
 }
@@ -168,4 +168,4 @@ ScopedStatusLock::~ScopedStatusLock() {
   allstatus_->mutex_.Release();
 }
 
-}  // namespace browser_sync
+}  // namespace syncer

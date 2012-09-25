@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_INSTANT_INSTANT_LOADER_H_
 #define CHROME_BROWSER_INSTANT_INSTANT_LOADER_H_
-#pragma once
 
 #include <string>
 
@@ -70,9 +69,9 @@ class InstantLoader : public content::NotificationObserver {
   // when showing results for a search provider that supports instant.
   void SetOmniboxBounds(const gfx::Rect& bounds);
 
-  // Returns true if the mouse is down as the result of activating the preview
-  // content.
-  bool IsMouseDownFromActivate();
+  // Returns true if the mouse or a touch-pointer is down as the result of
+  // activating the preview content.
+  bool IsPointerDownFromActivate();
 
   // Releases the preview TabContents passing ownership to the caller.
   // This is intended to be called when the preview TabContents is
@@ -84,7 +83,7 @@ class InstantLoader : public content::NotificationObserver {
                                       TabContents* tab_contents);
 
   // Calls through to method of same name on delegate.
-  bool ShouldCommitInstantOnMouseUp();
+  bool ShouldCommitInstantOnPointerRelease();
   void CommitInstantLoader();
 
   // Preload |template_url|'s instant URL, if the loader doesn't already have
@@ -142,7 +141,7 @@ class InstantLoader : public content::NotificationObserver {
   friend class InstantTest;
   class FrameLoadObserver;
   class PaintObserverImpl;
-  class TabContentsDelegateImpl;
+  class WebContentsDelegateImpl;
 
   // Invoked when the page wants to update the suggested text. If |user_text_|
   // starts with |suggested_text|, then the delegate is notified of the change,
@@ -196,7 +195,8 @@ class InstantLoader : public content::NotificationObserver {
   void LoadInstantURL(const TemplateURL* template_url,
                       content::PageTransition transition_type,
                       const string16& user_text,
-                      bool verbatim);
+                      bool verbatim,
+                      bool override_user_agent);
 
   InstantLoaderDelegate* delegate_;
 
@@ -209,7 +209,7 @@ class InstantLoader : public content::NotificationObserver {
 
   // Delegate of the preview WebContents. Used to detect when the user does some
   // gesture on the WebContents and the preview needs to be activated.
-  scoped_ptr<TabContentsDelegateImpl> preview_tab_contents_delegate_;
+  scoped_ptr<WebContentsDelegateImpl> preview_tab_contents_delegate_;
 
   // The preview TabContents; may be null.
   scoped_ptr<TabContents> preview_contents_;

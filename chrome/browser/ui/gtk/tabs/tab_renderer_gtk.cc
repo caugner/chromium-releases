@@ -10,7 +10,7 @@
 #include "base/debug/trace_event.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/defaults.h"
-#include "chrome/browser/extensions/extension_tab_helper.h"
+#include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -25,9 +25,7 @@
 #include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "grit/theme_resources_standard.h"
 #include "grit/ui_resources.h"
-#include "grit/ui_resources_standard.h"
 #include "skia/ext/image_operations.h"
 #include "ui/base/animation/slide_animation.h"
 #include "ui/base/animation/throb_animation.h"
@@ -339,7 +337,8 @@ void TabRendererGtk::UpdateData(WebContents* contents,
     if (app_icon) {
       data_.favicon = *app_icon;
     } else {
-      data_.favicon = tab_contents->favicon_tab_helper()->GetFavicon();
+      data_.favicon =
+          tab_contents->favicon_tab_helper()->GetFavicon().AsBitmap();
     }
 
     data_.app = app;

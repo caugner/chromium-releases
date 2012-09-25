@@ -17,12 +17,12 @@
 #include "remoting/protocol/fake_authenticator.h"
 #include "remoting/protocol/jingle_session_manager.h"
 #include "remoting/protocol/libjingle_transport_factory.h"
-#include "remoting/jingle_glue/jingle_thread.h"
 #include "remoting/jingle_glue/fake_signal_strategy.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using testing::_;
+using testing::AtLeast;
 using testing::AtMost;
 using testing::DeleteArg;
 using testing::DoAll;
@@ -71,9 +71,11 @@ class MockSessionManagerListener : public SessionManager::Listener {
                     SessionManager::IncomingSessionResponse*));
 };
 
-class MockSessionCallback {
+class MockSessionEventHandler : public Session::EventHandler {
  public:
-  MOCK_METHOD1(OnStateChange, void(Session::State));
+  MOCK_METHOD1(OnSessionStateChange, void(Session::State));
+  MOCK_METHOD2(OnSessionRouteChange, void(const std::string& channel_name,
+                                          const TransportRoute& route));
 };
 
 class MockStreamChannelCallback {
@@ -86,18 +88,14 @@ class MockStreamChannelCallback {
 class JingleSessionTest : public testing::Test {
  public:
   JingleSessionTest() {
-    talk_base::ThreadManager::Instance()->WrapCurrentThread();
-    message_loop_.reset(
-        new JingleThreadMessageLoop(talk_base::Thread::Current()));
+    message_loop_.reset(new MessageLoopForIO());
   }
 
   // Helper method that handles OnIncomingSession().
   void SetHostSession(Session* session) {
     DCHECK(session);
     host_session_.reset(session);
-    host_session_->SetStateChangeCallback(
-        base::Bind(&MockSessionCallback::OnStateChange,
-                   base::Unretained(&host_connection_callback_)));
+    host_session_->SetEventHandler(&host_session_event_handler_);
 
     session->set_config(SessionConfig::GetDefault());
   }
@@ -179,20 +177,20 @@ class JingleSessionTest : public testing::Test {
     {
       InSequence dummy;
 
-      EXPECT_CALL(host_connection_callback_,
-                  OnStateChange(Session::CONNECTED))
+      EXPECT_CALL(host_session_event_handler_,
+                  OnSessionStateChange(Session::CONNECTED))
           .Times(AtMost(1));
       if (expect_fail) {
-        EXPECT_CALL(host_connection_callback_,
-                    OnStateChange(Session::FAILED))
+        EXPECT_CALL(host_session_event_handler_,
+                    OnSessionStateChange(Session::FAILED))
             .Times(1);
       } else {
-        EXPECT_CALL(host_connection_callback_,
-                    OnStateChange(Session::AUTHENTICATED))
+        EXPECT_CALL(host_session_event_handler_,
+                    OnSessionStateChange(Session::AUTHENTICATED))
             .Times(1);
         // Expect that the connection will be closed eventually.
-        EXPECT_CALL(host_connection_callback_,
-                    OnStateChange(Session::CLOSED))
+        EXPECT_CALL(host_session_event_handler_,
+                    OnSessionStateChange(Session::CLOSED))
             .Times(AtMost(1));
       }
     }
@@ -200,23 +198,20 @@ class JingleSessionTest : public testing::Test {
     {
       InSequence dummy;
 
-      EXPECT_CALL(client_connection_callback_,
-                  OnStateChange(Session::CONNECTING))
-          .Times(1);
-      EXPECT_CALL(client_connection_callback_,
-                  OnStateChange(Session::CONNECTED))
+      EXPECT_CALL(client_session_event_handler_,
+                  OnSessionStateChange(Session::CONNECTED))
           .Times(AtMost(1));
       if (expect_fail) {
-        EXPECT_CALL(client_connection_callback_,
-                    OnStateChange(Session::FAILED))
+        EXPECT_CALL(client_session_event_handler_,
+                    OnSessionStateChange(Session::FAILED))
             .Times(1);
       } else {
-        EXPECT_CALL(client_connection_callback_,
-                    OnStateChange(Session::AUTHENTICATED))
+        EXPECT_CALL(client_session_event_handler_,
+                    OnSessionStateChange(Session::AUTHENTICATED))
             .Times(1);
         // Expect that the connection will be closed eventually.
-        EXPECT_CALL(client_connection_callback_,
-                    OnStateChange(Session::CLOSED))
+        EXPECT_CALL(client_session_event_handler_,
+                    OnSessionStateChange(Session::CLOSED))
             .Times(AtMost(1));
       }
     }
@@ -226,9 +221,8 @@ class JingleSessionTest : public testing::Test {
 
     client_session_ = client_server_->Connect(
         kHostJid, authenticator.Pass(),
-        CandidateSessionConfig::CreateDefault(),
-        base::Bind(&MockSessionCallback::OnStateChange,
-                   base::Unretained(&client_connection_callback_)));
+        CandidateSessionConfig::CreateDefault());
+    client_session_->SetEventHandler(&client_session_event_handler_);
 
     message_loop_->RunAllPending();
   }
@@ -240,6 +234,7 @@ class JingleSessionTest : public testing::Test {
         &JingleSessionTest::OnHostChannelCreated, base::Unretained(this)));
 
     int counter = 2;
+    ExpectRouteChange();
     EXPECT_CALL(client_channel_callback_, OnDone(_))
         .WillOnce(QuitThreadOnCounter(&counter));
     EXPECT_CALL(host_channel_callback_, OnDone(_))
@@ -250,7 +245,16 @@ class JingleSessionTest : public testing::Test {
     EXPECT_TRUE(host_socket_.get());
   }
 
-  scoped_ptr<JingleThreadMessageLoop> message_loop_;
+  void ExpectRouteChange() {
+    EXPECT_CALL(host_session_event_handler_,
+                OnSessionRouteChange(kChannelName, _))
+        .Times(AtLeast(1));
+    EXPECT_CALL(client_session_event_handler_,
+                OnSessionRouteChange(kChannelName, _))
+        .Times(AtLeast(1));
+  }
+
+  scoped_ptr<MessageLoopForIO> message_loop_;
 
   scoped_ptr<FakeSignalStrategy> host_signal_strategy_;
   scoped_ptr<FakeSignalStrategy> client_signal_strategy_;
@@ -261,9 +265,9 @@ class JingleSessionTest : public testing::Test {
   MockSessionManagerListener client_server_listener_;
 
   scoped_ptr<Session> host_session_;
-  MockSessionCallback host_connection_callback_;
+  MockSessionEventHandler host_session_event_handler_;
   scoped_ptr<Session> client_session_;
-  MockSessionCallback client_connection_callback_;
+  MockSessionEventHandler client_session_event_handler_;
 
   MockStreamChannelCallback client_channel_callback_;
   MockStreamChannelCallback host_channel_callback_;
@@ -290,21 +294,16 @@ TEST_F(JingleSessionTest, RejectConnection) {
 
   {
     InSequence dummy;
-
-    EXPECT_CALL(client_connection_callback_,
-                OnStateChange(Session::CONNECTING))
-        .Times(1);
-    EXPECT_CALL(client_connection_callback_,
-                OnStateChange(Session::FAILED))
+    EXPECT_CALL(client_session_event_handler_,
+                OnSessionStateChange(Session::FAILED))
         .Times(1);
   }
 
   scoped_ptr<Authenticator> authenticator(new FakeAuthenticator(
       FakeAuthenticator::CLIENT, 1, FakeAuthenticator::ACCEPT, true));
   client_session_ = client_server_->Connect(
-      kHostJid, authenticator.Pass(), CandidateSessionConfig::CreateDefault(),
-      base::Bind(&MockSessionCallback::OnStateChange,
-                 base::Unretained(&client_connection_callback_)));
+      kHostJid, authenticator.Pass(), CandidateSessionConfig::CreateDefault());
+  client_session_->SetEventHandler(&client_session_event_handler_);
 
   message_loop_->RunAllPending();
 }
@@ -390,6 +389,7 @@ TEST_F(JingleSessionTest, TestFailedChannelAuth) {
       .WillOnce(QuitThread());
   EXPECT_CALL(client_channel_callback_, OnDone(_))
       .Times(AtMost(1));
+  ExpectRouteChange();
 
   message_loop_->Run();
 

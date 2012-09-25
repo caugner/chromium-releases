@@ -352,7 +352,7 @@ TEST_F(NativeTextfieldViewsTest, ModelChangesTest) {
   EXPECT_TRUE(last_contents_.empty());
 
   EXPECT_EQ(string16(), textfield_->GetSelectedText());
-  textfield_->SelectAll();
+  textfield_->SelectAll(false);
   EXPECT_STR_EQ("this is a test", textfield_->GetSelectedText());
   EXPECT_TRUE(last_contents_.empty());
 }
@@ -523,7 +523,7 @@ TEST_F(NativeTextfieldViewsTest, InsertionDeletionTest) {
   EXPECT_STR_EQ("this is ", textfield_->text());
 
   // Select all and replace with "k".
-  textfield_->SelectAll();
+  textfield_->SelectAll(false);
   SendKeyEvent(ui::VKEY_K);
   EXPECT_STR_EQ("k", textfield_->text());
 
@@ -573,7 +573,7 @@ TEST_F(NativeTextfieldViewsTest, PasswordTest) {
   EXPECT_TRUE(last_contents_.empty());
 
   // Cut and copy should be disabled in the context menu.
-  model_->SelectAll();
+  model_->SelectAll(false);
   EXPECT_FALSE(IsCommandIdEnabled(IDS_APP_CUT));
   EXPECT_FALSE(IsCommandIdEnabled(IDS_APP_COPY));
 
@@ -756,7 +756,7 @@ TEST_F(NativeTextfieldViewsTest, ContextMenuDisplayTest) {
   EXPECT_TRUE(GetContextMenuModel());
   VerifyTextfieldContextMenuContents(false, GetContextMenuModel());
 
-  textfield_->SelectAll();
+  textfield_->SelectAll(false);
   VerifyTextfieldContextMenuContents(true, GetContextMenuModel());
 }
 
@@ -1075,7 +1075,7 @@ TEST_F(NativeTextfieldViewsTest, ReadOnlyTest) {
   EXPECT_EQ(5U, textfield_->GetCursorPosition());
   EXPECT_STR_EQ("two ", textfield_->GetSelectedText());
 
-  textfield_->SelectAll();
+  textfield_->SelectAll(false);
   EXPECT_STR_EQ(" one two three ", textfield_->GetSelectedText());
 
   // CUT&PASTE does not work, but COPY works
@@ -1099,7 +1099,7 @@ TEST_F(NativeTextfieldViewsTest, ReadOnlyTest) {
   EXPECT_STR_EQ(" four five six ", textfield_->text());
   EXPECT_TRUE(textfield_->GetSelectedText().empty());
 
-  textfield_->SelectAll();
+  textfield_->SelectAll(false);
   EXPECT_STR_EQ(" four five six ", textfield_->GetSelectedText());
 
   // Text field is unmodifiable and selection shouldn't change.
@@ -1407,14 +1407,7 @@ TEST_F(NativeTextfieldViewsTest, TextCursorDisplayInRTLTest) {
   SendKeyEvent('a');
   EXPECT_EQ(WideToUTF16(L"\x05E1\x5E2"L"a"), textfield_->text());
   x = GetCursorBounds().x();
-#if defined(OS_WIN)
-  // In Windows, the text is always in LTR directionality even in RTL UI.
-  // TODO(xji): it should change if we fix the directionality in Window's
-  // NativeTextfieldViews
-  EXPECT_LT(prev_x, x);
-#else
   EXPECT_EQ(prev_x, x);
-#endif
   prev_x = x;
 
   SendKeyEvent('b');
@@ -1504,20 +1497,12 @@ TEST_F(NativeTextfieldViewsTest, HitOutsideTextAreaTest) {
 
   SendKeyEvent(ui::VKEY_HOME);
   bound = GetCursorBounds();
-#if defined(OS_WIN)
-  MouseClick(bound, -10);
-#else
   MouseClick(bound, 10);
-#endif
   EXPECT_EQ(bound, GetCursorBounds());
 
   SendKeyEvent(ui::VKEY_END);
   bound = GetCursorBounds();
-#if defined(OS_WIN)
-  MouseClick(bound, 10);
-#else
   MouseClick(bound, -10);
-#endif
   EXPECT_EQ(bound, GetCursorBounds());
 }
 
@@ -1545,20 +1530,12 @@ TEST_F(NativeTextfieldViewsTest, HitOutsideTextAreaInRTLTest) {
   textfield_->SetText(WideToUTF16(L"ab\x05E1\x5E2"));
   SendKeyEvent(ui::VKEY_HOME);
   bound = GetCursorBounds();
-#if defined(OS_WIN)
-  MouseClick(bound, 10);
-#else
   MouseClick(bound, -10);
-#endif
   EXPECT_EQ(bound, GetCursorBounds());
 
   SendKeyEvent(ui::VKEY_END);
   bound = GetCursorBounds();
-#if defined(OS_WIN)
-  MouseClick(bound, -10);
-#else
   MouseClick(bound, 10);
-#endif
   EXPECT_EQ(bound, GetCursorBounds());
 
   // Reset locale.
@@ -1642,14 +1619,7 @@ TEST_F(NativeTextfieldViewsTest, OverflowInRTLTest) {
   NonClientMouseClick();
 
   MouseClick(bound, 1);
-#if defined(OS_WIN)
-  // In Windows, the text is always in LTR directionality even in RTL UI.
-  // TODO(xji): it should change if we fix the directionality in Window's
-  // NativeTextfieldViews
-  EXPECT_EQ(0U, textfield_->GetCursorPosition());
-#else
   EXPECT_EQ(500U, textfield_->GetCursorPosition());
-#endif
 #endif  // !defined(OS_WIN)
 
   // Reset locale.

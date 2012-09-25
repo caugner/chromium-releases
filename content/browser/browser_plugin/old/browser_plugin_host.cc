@@ -7,7 +7,8 @@
 #include "content/browser/browser_plugin/old/browser_plugin_host_helper.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
-#include "content/common/browser_plugin_messages.h"
+#include "content/common/old_browser_plugin_messages.h"
+#include "content/public/common/url_constants.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
@@ -32,7 +33,7 @@ BrowserPluginHost::BrowserPluginHost(
   // Construct plumbing helpers when a new RenderViewHost is created for
   // this BrowserPluginHost's WebContentsImpl.
   registrar_.Add(this,
-                 NOTIFICATION_RENDER_VIEW_HOST_CREATED_FOR_TAB,
+                 NOTIFICATION_WEB_CONTENTS_RENDER_VIEW_HOST_CREATED,
                  Source<WebContents>(web_contents));
 }
 
@@ -57,14 +58,14 @@ void BrowserPluginHost::RegisterContainerInstance(
 
 bool BrowserPluginHost::TakeFocus(bool reverse) {
   embedder_render_process_host()->Send(
-      new BrowserPluginMsg_AdvanceFocus(instance_id(), reverse));
+      new OldBrowserPluginMsg_AdvanceFocus(instance_id(), reverse));
   return true;
 }
 
 bool BrowserPluginHost::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(BrowserPluginHost, message)
-    IPC_MESSAGE_HANDLER(BrowserPluginHostMsg_NavigateFromGuest,
+    IPC_MESSAGE_HANDLER(OldBrowserPluginHostMsg_NavigateFromGuest,
                         OnNavigateFromGuest)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
@@ -81,12 +82,22 @@ void BrowserPluginHost::NavigateGuestFromEmbedder(
   WebContentsImpl* guest_web_contents =
       guest_observer ?
           static_cast<WebContentsImpl*>(guest_observer->web_contents()): NULL;
+  GURL url(src);
   if (!guest_observer) {
+    std::string host = render_view_host->GetSiteInstance()->GetSite().host();
+    GURL guest_url(
+        base::StringPrintf("%s://%s", chrome::kGuestScheme, host.c_str()));
+    // The SiteInstance of a given guest is based on the fact that it's a guest
+    // in addition to which platform application the guest belongs to, rather
+    // than the URL that the guest is being navigated to.
+    SiteInstance* guest_site_instance =
+        SiteInstance::CreateForURL(web_contents()->GetBrowserContext(),
+        guest_url);
     guest_web_contents =
         static_cast<WebContentsImpl*>(
             WebContents::Create(
                 web_contents()->GetBrowserContext(),
-                render_view_host->GetSiteInstance(),
+                guest_site_instance,
                 MSG_ROUTING_NONE,
                 NULL, // base WebContents
                 NULL  // session storage namespace
@@ -99,7 +110,6 @@ void BrowserPluginHost::NavigateGuestFromEmbedder(
     RegisterContainerInstance(container_instance_id, guest_observer);
     AddGuest(guest_web_contents, frame_id);
   }
-  GURL url(src);
   guest_observer->web_contents()->SetDelegate(guest_observer);
   guest_observer->web_contents()->GetController().LoadURL(
       url,
@@ -127,7 +137,7 @@ void BrowserPluginHost::ConnectEmbedderToChannel(
   // Tell the BrowserPlugin in the embedder that we're done and that it can
   // begin using the guest renderer.
   embedder_render_process_host()->Send(
-      new BrowserPluginMsg_LoadGuest(
+      new OldBrowserPluginMsg_LoadGuest(
           instance_id(),
           render_view_host->GetProcess()->
               GetID(),
@@ -198,7 +208,7 @@ void BrowserPluginHost::Observe(
     const NotificationSource& source,
     const NotificationDetails& details) {
   switch (type) {
-    case NOTIFICATION_RENDER_VIEW_HOST_CREATED_FOR_TAB: {
+    case NOTIFICATION_WEB_CONTENTS_RENDER_VIEW_HOST_CREATED: {
       RenderViewHost* render_view_host =
           Details<RenderViewHost>(details).ptr();
       // BrowserPluginHostHelper is destroyed when its associated RenderViewHost
@@ -213,9 +223,9 @@ void BrowserPluginHost::Observe(
           it != guests_.end(); ++it) {
         WebContentsImpl* web_contents = it->first;
         if (visible)
-          web_contents->ShowContents();
+          web_contents->WasShown();
         else
-          web_contents->HideContents();
+          web_contents->WasHidden();
       }
       break;
     }

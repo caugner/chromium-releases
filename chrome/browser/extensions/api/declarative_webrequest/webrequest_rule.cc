@@ -8,6 +8,9 @@
 #include "chrome/browser/extensions/api/declarative_webrequest/webrequest_action.h"
 #include "chrome/browser/extensions/api/declarative_webrequest/webrequest_condition.h"
 #include "chrome/browser/extensions/api/web_request/web_request_api_helpers.h"
+#include "chrome/browser/extensions/api/web_request/web_request_permissions.h"
+#include "chrome/browser/extensions/extension_info_map.h"
+#include "chrome/common/extensions/extension.h"
 
 namespace {
 const char kInvalidActionDatatype[] = "An action of a rule set had an invalid "
@@ -86,11 +89,12 @@ scoped_ptr<WebRequestRule> WebRequestRule::Create(
 }
 
 std::list<LinkedPtrEventResponseDelta> WebRequestRule::CreateDeltas(
-    net::URLRequest* request,
-    RequestStages request_stage,
-    const OptionalRequestData& optional_request_data) const {
-  return actions_->CreateDeltas(request, request_stage, optional_request_data,
-      id_.first, extension_installation_time_);
+    const ExtensionInfoMap* extension_info_map,
+    const RequestData& request_data,
+    bool crosses_incognito) const {
+  return actions_->CreateDeltas(extension_info_map, extension_id(),
+                                request_data, crosses_incognito,
+                                extension_installation_time_);
 }
 
 int WebRequestRule::GetMinimumPriority() const {

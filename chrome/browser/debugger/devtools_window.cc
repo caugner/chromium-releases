@@ -14,6 +14,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/debugger/devtools_window.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/file_select_helper.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
@@ -22,6 +23,7 @@
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -56,6 +58,7 @@ using content::DevToolsAgentHost;
 using content::DevToolsAgentHostRegistry;
 using content::DevToolsClientHost;
 using content::DevToolsManager;
+using content::FileChooserParams;
 using content::NativeWebKeyboardEvent;
 using content::NavigationController;
 using content::NavigationEntry;
@@ -173,7 +176,7 @@ DevToolsWindow* DevToolsWindow::Create(
     bool shared_worker_frontend) {
   // Create TabContents with devtools.
   TabContents* tab_contents =
-      Browser::TabContentsFactory(profile, NULL, MSG_ROUTING_NONE, NULL, NULL);
+      chrome::TabContentsFactory(profile, NULL, MSG_ROUTING_NONE, NULL, NULL);
   tab_contents->web_contents()->GetRenderViewHost()->AllowBindings(
       content::BINDINGS_POLICY_WEB_UI);
   tab_contents->web_contents()->GetController().LoadURL(
@@ -204,7 +207,7 @@ DevToolsWindow::DevToolsWindow(TabContents* tab_contents,
   // Wipe out page icon so that the default application icon is used.
   NavigationEntry* entry =
       tab_contents_->web_contents()->GetController().GetActiveEntry();
-  entry->GetFavicon().bitmap = SkBitmap();
+  entry->GetFavicon().image = gfx::Image();
   entry->GetFavicon().valid = true;
 
   // Register on-load actions.
@@ -241,9 +244,10 @@ DevToolsWindow::~DevToolsWindow() {
 }
 
 void DevToolsWindow::InspectedContentsClosing() {
+  UpdateBrowserToolbar();
+
   if (docked_) {
     // Update dev tools to reflect removed dev tools window.
-
     BrowserWindow* inspected_window = GetInspectedBrowserWindow();
     if (inspected_window)
       inspected_window->UpdateDevTools();
@@ -257,7 +261,7 @@ void DevToolsWindow::InspectedContentsClosing() {
     // for us.
     Browser* browser = browser_;
     delete this;
-    browser->CloseAllTabs();
+    chrome::CloseAllTabs(browser);
   }
 }
 
@@ -376,8 +380,7 @@ void DevToolsWindow::CreateDevToolsBrowser() {
     defaults->SetBoolean("always_on_top", false);
   }
 
-  browser_ = Browser::CreateWithParams(
-      Browser::CreateParams::CreateForDevTools(profile_));
+  browser_ = new Browser(Browser::CreateParams::CreateForDevTools(profile_));
   browser_->tab_strip_model()->AddTabContents(
       tab_contents_, -1, content::PAGE_TRANSITION_START_PAGE,
       TabStripModel::ADD_ACTIVE);
@@ -388,11 +391,9 @@ bool DevToolsWindow::FindInspectedBrowserAndTabIndex(Browser** browser,
   if (!inspected_tab_)
     return false;
 
-  const NavigationController& controller =
-      inspected_tab_->web_contents()->GetController();
   for (BrowserList::const_iterator it = BrowserList::begin();
        it != BrowserList::end(); ++it) {
-    int tab_index = (*it)->GetIndexOfController(&controller);
+    int tab_index = chrome::GetIndexOfTab(*it, inspected_tab_->web_contents());
     if (tab_index != TabStripModel::kNoTab) {
       *browser = *it;
       *tab = tab_index;
@@ -447,7 +448,7 @@ void DevToolsWindow::AddDevToolsExtensionsToClient() {
         new StringValue((*extension)->devtools_url().spec()));
     extension_info->Set("name", new StringValue((*extension)->name()));
     bool allow_experimental = (*extension)->HasAPIPermission(
-        ExtensionAPIPermission::kExperimental);
+        extensions::APIPermission::kExperimental);
     extension_info->Set("exposeExperimentalAPIs",
         new base::FundamentalValue(allow_experimental));
     results.Append(extension_info);
@@ -490,6 +491,7 @@ void DevToolsWindow::Observe(int type,
       // Notify manager that this DevToolsClientHost no longer exists and
       // initiate self-destuct here.
       DevToolsManager::GetInstance()->ClientHostClosing(frontend_host_);
+      UpdateBrowserToolbar();
       delete this;
     }
   } else if (type == chrome::NOTIFICATION_BROWSER_THEME_CHANGED) {
@@ -634,6 +636,9 @@ DevToolsWindow* DevToolsWindow::ToggleDevToolsWindow(
     do_open = true;
   }
 
+  // Update toolbar to reflect DevTools changes.
+  window->UpdateBrowserToolbar();
+
   // If window is docked and visible, we hide it on toggle. If window is
   // undocked, we show (activate) it.
   if (!window->is_docked() || do_open)
@@ -752,3 +757,17 @@ content::JavaScriptDialogCreator* DevToolsWindow::GetJavaScriptDialogCreator() {
   }
   return content::WebContentsDelegate::GetJavaScriptDialogCreator();
 }
+
+void DevToolsWindow::RunFileChooser(WebContents* web_contents,
+                                    const FileChooserParams& params) {
+  FileSelectHelper::RunFileChooser(web_contents, params);
+}
+
+void DevToolsWindow::UpdateBrowserToolbar() {
+  if (!inspected_tab_)
+    return;
+  BrowserWindow* inspected_window = GetInspectedBrowserWindow();
+  if (inspected_window)
+    inspected_window->UpdateToolbar(inspected_tab_, false);
+}
+

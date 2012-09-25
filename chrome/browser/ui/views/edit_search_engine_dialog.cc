@@ -11,7 +11,7 @@
 #include "chrome/browser/ui/search_engines/edit_search_engine_controller.h"
 #include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
-#include "grit/theme_resources_standard.h"
+#include "grit/theme_resources.h"
 #include "grit/ui_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -24,11 +24,9 @@
 #include "ui/views/widget/widget.h"
 
 using views::GridLayout;
-using views::ImageView;
 using views::Textfield;
 
-
-namespace browser {
+namespace chrome {
 
 void EditSearchEngine(gfx::NativeWindow parent,
                       TemplateURL* template_url,
@@ -37,7 +35,7 @@ void EditSearchEngine(gfx::NativeWindow parent,
   EditSearchEngineDialog::Show(parent, template_url, delegate, profile);
 }
 
-}  // namespace browser
+}  // namespace chrome
 
 EditSearchEngineDialog::EditSearchEngineDialog(
     TemplateURL* template_url,
@@ -64,7 +62,7 @@ void EditSearchEngineDialog::Show(gfx::NativeWindow parent,
   views::Widget::CreateWindowWithParent(contents, parent);
   contents->GetWidget()->Show();
   contents->GetDialogClientView()->UpdateDialogButtons();
-  contents->title_tf_->SelectAll();
+  contents->title_tf_->SelectAll(true);
   contents->title_tf_->RequestFocus();
 }
 
@@ -131,9 +129,9 @@ void EditSearchEngineDialog::Init() {
     keyword_tf_ = CreateTextfield(string16(), true);
     url_tf_ = CreateTextfield(string16(), false);
   }
-  title_iv_ = new ImageView();
-  keyword_iv_ = new ImageView();
-  url_iv_ = new ImageView();
+  title_iv_ = new views::ImageView();
+  keyword_iv_ = new views::ImageView();
+  url_iv_ = new views::ImageView();
 
   UpdateImageViews();
 
@@ -245,7 +243,7 @@ void EditSearchEngineDialog::UpdateImageViews() {
                   IDS_SEARCH_ENGINES_INVALID_TITLE_TT);
 }
 
-void EditSearchEngineDialog::UpdateImageView(ImageView* image_view,
+void EditSearchEngineDialog::UpdateImageView(views::ImageView* image_view,
                                              bool is_valid,
                                              int invalid_message_id) {
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();

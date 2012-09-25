@@ -149,6 +149,13 @@ var SourceEntry = (function() {
         case EventSourceType.FILESTREAM:
           this.description_ = e.params.file_name;
           break;
+        case EventSourceType.IPV6_PROBE_JOB:
+          if (e.type == EventType.IPV6_PROBE_RUNNING &&
+              e.phase == EventPhase.PHASE_END) {
+            this.description_ = e.params.ipv6_supported ? 'IPv6 Supported' :
+                                                          'IPv6 Not Supported';
+          }
+          break;
       }
 
       if (this.description_ == undefined)
@@ -208,6 +215,8 @@ var SourceEntry = (function() {
           }
           return this.entries_[start_index];
         }
+        if (this.entries_[1].type == EventType.IPV6_PROBE_RUNNING)
+          return this.entries_[1];
       }
       return this.entries_[0];
     },
@@ -279,7 +288,7 @@ var SourceEntry = (function() {
         return timeutil.getCurrentTime();
       } else {
         var endTicks = this.entries_[this.entries_.length - 1].time;
-        return timeutil.convertTimeTicksToDate(endTicks).getTime();
+        return timeutil.convertTimeTicksToTime(endTicks);
       }
     },
 
@@ -290,7 +299,7 @@ var SourceEntry = (function() {
      */
     getDuration: function() {
       var startTicks = this.entries_[0].time;
-      var startTime = timeutil.convertTimeTicksToDate(startTicks).getTime();
+      var startTime = timeutil.convertTimeTicksToTime(startTicks);
       var endTime = this.getEndTime();
       return endTime - startTime;
     },
@@ -300,8 +309,10 @@ var SourceEntry = (function() {
      * of |parent|.
      */
     printAsText: function(parent) {
+      // The date will be undefined if not viewing a loaded log file.
       printLogEntriesAsText(this.entries_, parent,
-                            SourceTracker.getInstance().getSecurityStripping());
+                            SourceTracker.getInstance().getSecurityStripping(),
+                            Constants.clientInfo.numericDate);
     }
   };
 

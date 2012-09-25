@@ -84,7 +84,6 @@ class Worker : public Listener, public Sender {
   }
   void AddRef() { }
   void Release() { }
-  static bool ImplementsThreadSafeReferenceCounting() { return true; }
   bool Send(Message* msg) { return channel_->Send(msg); }
   bool SendWithTimeout(Message* msg, int timeout_ms) {
     return channel_->SendWithTimeout(msg, timeout_ms);
@@ -1430,8 +1429,7 @@ class RestrictedDispatchDeadlockServer : public Worker {
         server_num_(server_num),
         server_ready_event_(server_ready_event),
         events_(events),
-        peer_(peer),
-        client_kicked_(false) { }
+        peer_(peer) { }
 
   void OnDoServerTask() {
     events_[3]->Signal();
@@ -1474,7 +1472,6 @@ class RestrictedDispatchDeadlockServer : public Worker {
   WaitableEvent* server_ready_event_;
   WaitableEvent** events_;
   RestrictedDispatchDeadlockServer* peer_;
-  bool client_kicked_;
 };
 
 class RestrictedDispatchDeadlockClient2 : public Worker {
@@ -1483,7 +1480,6 @@ class RestrictedDispatchDeadlockClient2 : public Worker {
                                     WaitableEvent* server_ready_event,
                                     WaitableEvent** events)
       : Worker("channel2", Channel::MODE_CLIENT),
-        server_(server),
         server_ready_event_(server_ready_event),
         events_(events),
         received_msg_(false),
@@ -1529,7 +1525,6 @@ class RestrictedDispatchDeadlockClient2 : public Worker {
     }
   }
 
-  RestrictedDispatchDeadlockServer* server_;
   WaitableEvent* server_ready_event_;
   WaitableEvent** events_;
   bool received_msg_;
@@ -1912,6 +1907,9 @@ class VerifiedClient : public Worker {
     bool result = Send(msg);
     DCHECK(result);
     DCHECK_EQ(response, expected_text_);
+    // expected_text_ is only used in the above DCHECK. This line suppresses the
+    // "unused private field" warning in release builds.
+    (void)expected_text_;
 
     VLOG(1) << __FUNCTION__ << " Received reply: " << response;
     ASSERT_EQ(channel()->peer_pid(), base::GetCurrentProcId());
@@ -1919,7 +1917,6 @@ class VerifiedClient : public Worker {
   }
 
  private:
-  bool pump_during_send_;
   std::string expected_text_;
 };
 

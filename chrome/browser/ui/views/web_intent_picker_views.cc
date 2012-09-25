@@ -9,6 +9,7 @@
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/tab_contents/tab_util.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/intents/web_intent_inline_disposition_delegate.h"
 #include "chrome/browser/ui/intents/web_intent_picker.h"
@@ -26,9 +27,10 @@
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/google_chrome_strings.h"
+#include "grit/shared_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/ui_resources.h"
-#include "grit/ui_resources_standard.h"
+#include "ipc/ipc_message.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -52,11 +54,6 @@
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/dialog_delegate.h"
 #include "ui/views/window/non_client_view.h"
-
-// TODO(binji): The current constrained dialog implementation already has a
-// close button. Remove this define and the #if checks below when we switch to
-// the new implementation.
-// #define USE_CLOSE_BUTTON
 
 using content::WebContents;
 using views::GridLayout;
@@ -688,6 +685,7 @@ class WebIntentPickerViews : public views::ButtonListener,
   virtual void OnExtensionInstallSuccess(const std::string& id) OVERRIDE;
   virtual void OnExtensionInstallFailure(const std::string& id) OVERRIDE;
   virtual void OnInlineDispositionAutoResize(const gfx::Size& size) OVERRIDE;
+  virtual void OnPendingAsyncCompleted() OVERRIDE;
   virtual void OnInlineDispositionWebContentsLoaded(
       content::WebContents* web_contents) OVERRIDE;
 
@@ -697,7 +695,7 @@ class WebIntentPickerViews : public views::ButtonListener,
                                 size_t index) OVERRIDE;
   virtual void OnExtensionIconChanged(WebIntentPickerModel* model,
                                       const string16& extension_id) OVERRIDE;
-  virtual void OnInlineDisposition(WebIntentPickerModel* model,
+  virtual void OnInlineDisposition(const string16& title,
                                    const GURL& url) OVERRIDE;
 
   // ServiceButtonsView::Delegate implementation.
@@ -719,10 +717,8 @@ class WebIntentPickerViews : public views::ButtonListener,
   // Resize the constrained window to the size of its contents.
   void SizeToContents();
 
-#if defined(USE_CLOSE_BUTTON)
   // Returns a new close button.
   views::ImageButton* CreateCloseButton();
-#endif
 
   // A weak pointer to the WebIntentPickerDelegate to notify when the user
   // chooses a service or cancels.
@@ -822,9 +818,7 @@ WebIntentPickerViews::~WebIntentPickerViews() {
 
 void WebIntentPickerViews::ButtonPressed(views::Button* sender,
                                          const views::Event& event) {
-#if defined(USE_CLOSE_BUTTON)
-  delegate_->OnPickerCancelled();
-#endif
+  delegate_->OnPickerClosed();
 }
 
 void WebIntentPickerViews::WindowClosing() {
@@ -891,6 +885,51 @@ void WebIntentPickerViews::OnInlineDispositionAutoResize(
   SizeToContents();
 }
 
+void WebIntentPickerViews::OnPendingAsyncCompleted() {
+  // Requests to both the WebIntentService and the Chrome Web Store have
+  // completed. If there are any services, installed or suggested, there's
+  // nothing to do.
+  if (model_->GetInstalledServiceCount() ||
+      model_->GetSuggestedExtensionCount())
+    return;
+
+  // If there are no installed or suggested services at this point,
+  // inform the user about it.
+  contents_->RemoveAllChildViews(true);
+  more_suggestions_link_ = NULL;
+
+  views::GridLayout* grid_layout = new views::GridLayout(contents_);
+  contents_->SetLayoutManager(grid_layout);
+
+  grid_layout->SetInsets(kContentAreaBorder, kContentAreaBorder,
+                         kContentAreaBorder, kContentAreaBorder);
+  views::ColumnSet* main_cs = grid_layout->AddColumnSet(0);
+  main_cs->AddColumn(GridLayout::FILL, GridLayout::LEADING, 1,
+                     GridLayout::USE_PREF, 0, 0);
+
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+
+  grid_layout->StartRow(0, 0);
+  views::Label* header = new views::Label();
+  header->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+  header->SetFont(rb.GetFont(ui::ResourceBundle::MediumFont));
+  header->SetText(l10n_util::GetStringUTF16(
+      IDS_INTENT_PICKER_NO_SERVICES_TITLE));
+  grid_layout->AddView(header);
+
+  grid_layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
+
+  grid_layout->StartRow(0, 0);
+  views::Label* body = new views::Label();
+  body->SetMultiLine(true);
+  body->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+  body->SetText(l10n_util::GetStringUTF16(IDS_INTENT_PICKER_NO_SERVICES));
+  grid_layout->AddView(body);
+
+  contents_->Layout();
+  SizeToContents();
+}
+
 void WebIntentPickerViews::OnInlineDispositionWebContentsLoaded(
     content::WebContents* web_contents) {
   if (displaying_web_contents_)
@@ -915,10 +954,8 @@ void WebIntentPickerViews::OnInlineDispositionWebContentsLoaded(
   header_cs->AddColumn(GridLayout::CENTER, GridLayout::CENTER, 0,
                        GridLayout::USE_PREF, 0, 0);  // Link.
   header_cs->AddPaddingColumn(1, views::kUnrelatedControlHorizontalSpacing);
-#if defined(USE_CLOSE_BUTTON)
   header_cs->AddColumn(GridLayout::CENTER, GridLayout::CENTER, 0,
                        GridLayout::USE_PREF, 0, 0);  // Close Button.
-#endif
 
   views::ColumnSet* full_cs = grid_layout->AddColumnSet(1);
   full_cs->AddColumn(GridLayout::FILL, GridLayout::FILL, 1.0,
@@ -937,16 +974,17 @@ void WebIntentPickerViews::OnInlineDispositionWebContentsLoaded(
       service->title, gfx::Font(), kTitleLinkMaxWidth, ui::ELIDE_AT_END);
   views::Label* title = new views::Label(elided_title);
   grid_layout->AddView(title);
-  if (model_->GetSuggestedExtensionCount()) {
+  // Add link for "choose another service" if other suggestions are available
+  // or if more than one (the current) service is installed.
+  if (model_->GetInstalledServiceCount() > 1 ||
+       model_->GetSuggestedExtensionCount()) {
     choose_another_service_link_ = new views::Link(
         l10n_util::GetStringUTF16(IDS_INTENT_PICKER_USE_ALTERNATE_SERVICE));
     grid_layout->AddView(choose_another_service_link_);
     choose_another_service_link_->set_listener(this);
   }
 
-#if defined(USE_CLOSE_BUTTON)
   grid_layout->AddView(CreateCloseButton());
-#endif
 
   // Inline web contents row.
   grid_layout->StartRow(0, 1);
@@ -958,12 +996,10 @@ void WebIntentPickerViews::OnInlineDispositionWebContentsLoaded(
 }
 
 void WebIntentPickerViews::OnModelChanged(WebIntentPickerModel* model) {
-  suggestions_label_->SetText(l10n_util::GetStringUTF16(
-      model->GetInstalledServiceCount() ?
-          IDS_INTENT_PICKER_GET_MORE_SERVICES :
-          IDS_INTENT_PICKER_GET_MORE_SERVICES_NONE_INSTALLED));
+  string16 label_text = model->GetSuggestionsLinkText();
+  suggestions_label_->SetText(label_text);
 
-  suggestions_label_->SetVisible(model->GetSuggestedExtensionCount() > 0);
+  suggestions_label_->SetVisible(!label_text.empty());
 
   service_buttons_->Update();
   extensions_->Update();
@@ -987,7 +1023,7 @@ void WebIntentPickerViews::OnExtensionIconChanged(
 }
 
 void WebIntentPickerViews::OnInlineDisposition(
-    WebIntentPickerModel* model, const GURL& url) {
+    const string16&, const GURL& url) {
   if (!webview_)
     webview_ = new views::WebView(tab_contents_->profile());
 
@@ -998,14 +1034,12 @@ void WebIntentPickerViews::OnInlineDisposition(
   // Does not take ownership, so we keep a scoped_ptr
   // for the WebContents locally.
   webview_->SetWebContents(inline_web_contents_.get());
+  Browser* browser = browser::FindBrowserWithWebContents(
+      tab_contents_->web_contents());
   inline_disposition_delegate_.reset(
       new WebIntentInlineDispositionDelegate(this, inline_web_contents_.get(),
-                                             tab_contents_->profile()));
+                                             browser));
   content::WebContents* web_contents = webview_->GetWebContents();
-
-  const WebIntentPickerModel::InstalledService* service =
-      model->GetInstalledServiceWithURL(url);
-  DCHECK(service);
 
   // Must call this immediately after WebContents creation to avoid race
   // with load.
@@ -1067,10 +1101,8 @@ void WebIntentPickerViews::InitContents() {
   header_cs->AddColumn(GridLayout::CENTER, GridLayout::CENTER, 0,
                        GridLayout::USE_PREF, 0, 0);  // Title.
   header_cs->AddPaddingColumn(1, views::kUnrelatedControlHorizontalSpacing);
-#if defined(USE_CLOSE_BUTTON)
   header_cs->AddColumn(GridLayout::CENTER, GridLayout::CENTER, 0,
                        GridLayout::USE_PREF, 0, 0);  // Close Button.
-#endif
 
   views::ColumnSet* full_cs = grid_layout->AddColumnSet(kFullWidthColumnSet);
   full_cs->AddColumn(GridLayout::FILL, GridLayout::CENTER, 1,
@@ -1091,9 +1123,7 @@ void WebIntentPickerViews::InitContents() {
   action_label_->SetFont(rb.GetFont(ui::ResourceBundle::MediumFont));
   grid_layout->AddView(action_label_);
 
-#if defined(USE_CLOSE_BUTTON)
   grid_layout->AddView(CreateCloseButton());
-#endif
 
   // Padding row.
   grid_layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
@@ -1147,7 +1177,6 @@ void WebIntentPickerViews::ResetContents() {
   action_label_->SetText(action_text_);
   contents_->Layout();
   SizeToContents();
-
 }
 
 void WebIntentPickerViews::SizeToContents() {
@@ -1158,16 +1187,14 @@ void WebIntentPickerViews::SizeToContents() {
   window_->CenterWindow(new_window_bounds.size());
 }
 
-#if defined(USE_CLOSE_BUTTON)
 views::ImageButton* WebIntentPickerViews::CreateCloseButton() {
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   views::ImageButton* close_button = new views::ImageButton(this);
   close_button->SetImage(views::CustomButton::BS_NORMAL,
-                          rb.GetImageSkiaNamed(IDR_CLOSE_BAR));
+                          rb.GetImageSkiaNamed(IDR_SHARED_IMAGES_X));
   close_button->SetImage(views::CustomButton::BS_HOT,
-                          rb.GetImageSkiaNamed(IDR_CLOSE_BAR_H));
+                          rb.GetImageSkiaNamed(IDR_SHARED_IMAGES_X_HOVER));
   close_button->SetImage(views::CustomButton::BS_PUSHED,
-                          rb.GetImageSkiaNamed(IDR_CLOSE_BAR_P));
+                          rb.GetImageSkiaNamed(IDR_SHARED_IMAGES_X_HOVER));
   return close_button;
 }
-#endif

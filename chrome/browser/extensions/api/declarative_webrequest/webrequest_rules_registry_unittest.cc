@@ -11,6 +11,7 @@
 #include "base/values.h"
 #include "chrome/common/extensions/matcher/url_matcher_constants.h"
 #include "chrome/browser/extensions/api/declarative_webrequest/webrequest_constants.h"
+#include "chrome/browser/extensions/api/declarative_webrequest/webrequest_rule.h"
 #include "chrome/browser/extensions/api/web_request/web_request_api_helpers.h"
 #include "content/public/test/test_browser_thread.h"
 #include "net/url_request/url_request_test_util.h"
@@ -213,8 +214,10 @@ TEST_F(WebRequestRulesRegistryTest, AddRulesImpl) {
   std::set<WebRequestRule::GlobalRuleId> matches;
 
   GURL http_url("http://www.example.com");
-  TestURLRequest http_request(http_url, NULL);
-  matches = registry->GetMatches(&http_request, ON_BEFORE_REQUEST);
+  TestURLRequestContext context;
+  TestURLRequest http_request(http_url, NULL, &context);
+  matches = registry->GetMatches(
+      WebRequestRule::RequestData(&http_request, ON_BEFORE_REQUEST));
   EXPECT_EQ(2u, matches.size());
   EXPECT_TRUE(matches.find(std::make_pair(kExtensionId, kRuleId1)) !=
       matches.end());
@@ -222,8 +225,9 @@ TEST_F(WebRequestRulesRegistryTest, AddRulesImpl) {
       matches.end());
 
   GURL foobar_url("http://www.foobar.com");
-  TestURLRequest foobar_request(foobar_url, NULL);
-  matches = registry->GetMatches(&foobar_request, ON_BEFORE_REQUEST);
+  TestURLRequest foobar_request(foobar_url, NULL, &context);
+  matches = registry->GetMatches(
+      WebRequestRule::RequestData(&foobar_request, ON_BEFORE_REQUEST));
   EXPECT_EQ(1u, matches.size());
   EXPECT_TRUE(matches.find(std::make_pair(kExtensionId, kRuleId2)) !=
       matches.end());
@@ -334,10 +338,13 @@ TEST_F(WebRequestRulesRegistryTest, Precedences) {
   EXPECT_EQ("", error);
 
   GURL url("http://www.google.com");
-  TestURLRequest request(url, NULL);
+  TestURLRequestContext context;
+  TestURLRequest request(url, NULL, &context);
   std::list<LinkedPtrEventResponseDelta> deltas =
-      registry->CreateDeltas(&request, ON_BEFORE_REQUEST,
-          WebRequestRule::OptionalRequestData());
+      registry->CreateDeltas(
+          NULL,
+          WebRequestRule::RequestData(&request, ON_BEFORE_REQUEST),
+          false);
 
   // The second extension is installed later and will win for this reason
   // in conflict resolution.
@@ -381,10 +388,13 @@ TEST_F(WebRequestRulesRegistryTest, Priorities) {
   EXPECT_EQ("", error);
 
   GURL url("http://www.google.com/index.html");
-  TestURLRequest request(url, NULL);
+  TestURLRequestContext context;
+  TestURLRequest request(url, NULL, &context);
   std::list<LinkedPtrEventResponseDelta> deltas =
-      registry->CreateDeltas(&request, ON_BEFORE_REQUEST,
-          WebRequestRule::OptionalRequestData());
+      registry->CreateDeltas(
+          NULL,
+          WebRequestRule::RequestData(&request, ON_BEFORE_REQUEST),
+          false);
 
   // The redirect by the first extension is ignored due to the ignore rule.
   ASSERT_EQ(1u, deltas.size());

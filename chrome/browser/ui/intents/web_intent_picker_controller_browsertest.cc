@@ -15,6 +15,7 @@
 #include "chrome/browser/intents/default_web_intent_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/intents/web_intent_picker.h"
 #include "chrome/browser/ui/intents/web_intent_picker_controller.h"
 #include "chrome/browser/ui/intents/web_intent_picker_model.h"
@@ -28,9 +29,9 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_intents_dispatcher.h"
-#include "content/public/test/test_url_fetcher_factory.h"
 #include "net/base/escape.h"
 #include "net/base/mock_host_resolver.h"
+#include "net/url_request/test_url_fetcher_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/image/image_unittest_util.h"
 #include "ui/gfx/image/image_util.h"
@@ -86,7 +87,7 @@ class DummyURLFetcherFactory : public net::URLFetcherFactory {
        const GURL& url,
        net::URLFetcher::RequestType request_type,
        net::URLFetcherDelegate* d) OVERRIDE {
-     return new TestURLFetcher(id, url, d);
+     return new net::TestURLFetcher(id, url, d);
    }
 };
 
@@ -135,14 +136,14 @@ class WebIntentPickerMock : public WebIntentPicker,
     num_extension_icons_changed_++;
   }
   virtual void OnInlineDisposition(
-      WebIntentPickerModel* model, const GURL& url) OVERRIDE {
+      const string16& title, const GURL& url) OVERRIDE {
     num_inline_disposition_++;
   }
 
   void Wait() {
     if (!pending_async_completed_) {
       message_loop_started_ = true;
-      ui_test_utils::RunMessageLoop();
+      content::RunMessageLoop();
       pending_async_completed_ = false;
     }
   }
@@ -207,8 +208,6 @@ class WebIntentPickerControllerBrowserTest : public InProcessBrowserTest {
     // SetUpInProcessBrowserTestFixture so that we can get its port number.
     ASSERT_TRUE(test_server()->Start());
 
-    InProcessBrowserTest::SetUpCommandLine(command_line);
-
     net::HostPortPair host_port = test_server()->host_port_pair();
     command_line->AppendSwitchASCII(
         switches::kAppsGalleryDownloadURL,
@@ -223,20 +222,25 @@ class WebIntentPickerControllerBrowserTest : public InProcessBrowserTest {
     host_resolver()->AddRule("www.example.com", "127.0.0.1");
   }
 
+  content::WebContents* GetWindowDispositionTarget(
+      WebIntentPickerController* controller) {
+    return controller->window_disposition_source_;
+  }
+
   virtual void SetUpOnMainThread() OVERRIDE {
     // The FakeURLFetcherFactory will return a NULL URLFetcher if a request is
     // created for a URL it doesn't know and there is no default factory.
     // Instead, use this dummy factory to infinitely delay the request.
     default_url_fetcher_factory_.reset(new DummyURLFetcherFactory);
     fake_url_fetcher_factory_.reset(
-        new FakeURLFetcherFactory(default_url_fetcher_factory_.get()));
+        new net::FakeURLFetcherFactory(default_url_fetcher_factory_.get()));
 
     web_data_service_ = WebDataServiceFactory::GetForProfile(
         GetBrowser()->profile(), Profile::EXPLICIT_ACCESS);
     favicon_service_ =
         GetBrowser()->profile()->GetFaviconService(Profile::EXPLICIT_ACCESS);
-    controller_ = GetBrowser()->
-        GetActiveTabContents()->web_intent_picker_controller();
+    controller_ = chrome::GetActiveTabContents(GetBrowser())->
+        web_intent_picker_controller();
 
     SetupMockPicker();
     controller_->set_model_observer(&picker_);
@@ -328,7 +332,7 @@ class WebIntentPickerControllerBrowserTest : public InProcessBrowserTest {
   FaviconService* favicon_service_;
   WebIntentPickerController* controller_;
   scoped_ptr<DummyURLFetcherFactory> default_url_fetcher_factory_;
-  scoped_ptr<FakeURLFetcherFactory> fake_url_fetcher_factory_;
+  scoped_ptr<net::FakeURLFetcherFactory> fake_url_fetcher_factory_;
   std::string icon_response_;
 };
 
@@ -351,7 +355,10 @@ IN_PROC_BROWSER_TEST_F(WebIntentPickerControllerBrowserTest, ChooseService) {
   OnServiceChosen(kServiceURL2, WebIntentPickerModel::DISPOSITION_WINDOW);
   ASSERT_EQ(2, browser()->tab_count());
   EXPECT_EQ(GURL(kServiceURL2),
-            browser()->GetActiveWebContents()->GetURL());
+            chrome::GetActiveWebContents(browser())->GetURL());
+
+  EXPECT_TRUE(GetWindowDispositionTarget(
+      chrome::GetActiveTabContents(browser())->web_intent_picker_controller()));
 
   EXPECT_TRUE(dispatcher.dispatched_);
 
@@ -390,14 +397,14 @@ IN_PROC_BROWSER_TEST_F(WebIntentPickerControllerBrowserTest,
   AddWebIntentService(kAction1, kServiceURL1);
   AddCWSExtensionServiceEmpty(kAction1);
 
-  GURL original = browser()->GetActiveWebContents()->GetURL();
+  GURL original = chrome::GetActiveWebContents(browser())->GetURL();
 
   // Open a new page, but keep focus on original.
   ui_test_utils::NavigateToURLWithDisposition(
       browser(), GURL(chrome::kChromeUINewTabURL), NEW_BACKGROUND_TAB,
       ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
   ASSERT_EQ(2, browser()->tab_count());
-  EXPECT_EQ(original, browser()->GetActiveWebContents()->GetURL());
+  EXPECT_EQ(original, chrome::GetActiveWebContents(browser())->GetURL());
 
   controller_->ShowDialog(kAction1, kType1);
   picker_.Wait();
@@ -412,13 +419,13 @@ IN_PROC_BROWSER_TEST_F(WebIntentPickerControllerBrowserTest,
   OnServiceChosen(kServiceURL1, WebIntentPickerModel::DISPOSITION_WINDOW);
   ASSERT_EQ(3, browser()->tab_count());
   EXPECT_EQ(GURL(kServiceURL1),
-            browser()->GetActiveWebContents()->GetURL());
+            chrome::GetActiveWebContents(browser())->GetURL());
 
   EXPECT_TRUE(dispatcher.dispatched_);
 
   OnSendReturnMessage(webkit_glue::WEB_INTENT_REPLY_SUCCESS);
   ASSERT_EQ(2, browser()->tab_count());
-  EXPECT_EQ(original, browser()->GetActiveWebContents()->GetURL());
+  EXPECT_EQ(original, chrome::GetActiveWebContents(browser())->GetURL());
 }
 
 class WebIntentPickerControllerIncognitoBrowserTest :
@@ -460,6 +467,7 @@ IN_PROC_BROWSER_TEST_F(WebIntentPickerControllerBrowserTest,
   IntentsDispatcherMock dispatcher(intent);
   controller_->SetIntentsDispatcher(&dispatcher);
 
+  ASSERT_EQ(1, browser()->tab_count());
   OnExtensionInstallRequested(extension_id);
   picker_.Wait();
   EXPECT_EQ(1, picker_.num_extensions_installed_);
@@ -469,7 +477,37 @@ IN_PROC_BROWSER_TEST_F(WebIntentPickerControllerBrowserTest,
 
   // Installing an extension should also choose it. Since this extension uses
   // window disposition, it will create a new tab.
-  ASSERT_EQ(2, browser()->tab_count());
+  EXPECT_EQ(2, browser()->tab_count());
+  EXPECT_EQ(0, picker_.num_inline_disposition_);
+}
+
+// Tests that inline install of an extension using inline disposition works
+// and brings up content as inline content.
+IN_PROC_BROWSER_TEST_F(WebIntentPickerControllerBrowserTest,
+                       ExtensionInstallSuccessInline) {
+  const char extension_id[] = "nnhendkbgefomfgdlnmfhhmihihlljpi";
+  AddCWSExtensionServiceWithResult(extension_id, kAction1, kType2);
+
+  controller_->ShowDialog(kAction1, kType2);
+  picker_.Wait();
+
+  webkit_glue::WebIntentData intent;
+  intent.action = kAction1;
+  intent.type = kType2;
+  IntentsDispatcherMock dispatcher(intent);
+  controller_->SetIntentsDispatcher(&dispatcher);
+
+  OnExtensionInstallRequested(extension_id);
+  picker_.Wait();
+  EXPECT_EQ(1, picker_.num_extensions_installed_);
+  const extensions::Extension* extension = browser()->profile()->
+      GetExtensionService()->GetExtensionById(extension_id, false);
+  EXPECT_TRUE(extension);
+
+  // Installing an extension should also choose it. Since this extension uses
+  // inline disposition, it will create no tabs and invoke OnInlineDisposition.
+  EXPECT_EQ(1, browser()->tab_count());
+  EXPECT_EQ(1, picker_.num_inline_disposition_);
 }
 
 // Test that an explicit intent does not trigger loading intents from the
@@ -596,7 +634,7 @@ IN_PROC_BROWSER_TEST_F(WebIntentPickerControllerBrowserTest,
   // The tab is shown immediately without needing to call OnServiceChosen.
   ASSERT_EQ(2, browser()->tab_count());
   EXPECT_EQ(GURL(kServiceURL1),
-            browser()->GetActiveWebContents()->GetURL());
+            chrome::GetActiveWebContents(browser())->GetURL());
 
   EXPECT_TRUE(dispatcher.dispatched_);
 }

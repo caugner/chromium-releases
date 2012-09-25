@@ -5,6 +5,8 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_commands.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -33,7 +35,7 @@ IN_PROC_BROWSER_TEST_F(ViewSourceTest, DoesBrowserRenderInViewSource) {
   // Check that the title didn't get set.  It should not be there (because we
   // are in view-source mode).
   EXPECT_NE(ASCIIToUTF16("foo"),
-            browser()->GetActiveWebContents()->GetTitle());
+            chrome::GetActiveWebContents(browser())->GetTitle());
 }
 
 // This test renders a page normally and then renders the same page in
@@ -54,7 +56,7 @@ IN_PROC_BROWSER_TEST_F(ViewSourceTest, DoesBrowserConsumeViewSourcePrefix) {
 
   // The URL should still be prefixed with "view-source:".
   EXPECT_EQ(url_viewsource.spec(),
-            browser()->GetActiveWebContents()->GetURL().spec());
+            chrome::GetActiveWebContents(browser())->GetURL().spec());
 }
 
 // Make sure that when looking at the actual page, we can select "View Source"
@@ -65,7 +67,7 @@ IN_PROC_BROWSER_TEST_F(ViewSourceTest, ViewSourceInMenuEnabledOnANormalPage) {
   GURL url(test_server()->GetURL(kTestHtml));
   ui_test_utils::NavigateToURL(browser(), url);
 
-  EXPECT_TRUE(browser()->command_updater()->IsCommandEnabled(IDC_VIEW_SOURCE));
+  EXPECT_TRUE(chrome::CanViewSource(browser()));
 }
 
 // Make sure that when looking at the page source, we can't select "View Source"
@@ -80,5 +82,5 @@ IN_PROC_BROWSER_TEST_F(ViewSourceTest,
       test_server()->GetURL(kTestHtml).spec());
   ui_test_utils::NavigateToURL(browser(), url_viewsource);
 
-  EXPECT_FALSE(browser()->command_updater()->IsCommandEnabled(IDC_VIEW_SOURCE));
+  EXPECT_FALSE(chrome::CanViewSource(browser()));
 }

@@ -15,7 +15,6 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_DOWNLOAD_DOWNLOAD_ITEM_VIEW_H__
 #define CHROME_BROWSER_UI_VIEWS_DOWNLOAD_DOWNLOAD_ITEM_VIEW_H__
-#pragma once
 
 #include <string>
 
@@ -31,6 +30,7 @@
 #include "content/public/browser/download_manager.h"
 #include "ui/base/animation/animation_delegate.h"
 #include "ui/gfx/font.h"
+#include "ui/views/context_menu_controller.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/events/event.h"
 #include "ui/views/view.h"
@@ -55,6 +55,7 @@ class TextButton;
 
 class DownloadItemView : public views::ButtonListener,
                          public views::View,
+                         public views::ContextMenuController,
                          public content::DownloadItem::Observer,
                          public ui::AnimationDelegate {
  public:
@@ -88,11 +89,15 @@ class DownloadItemView : public views::ButtonListener,
   virtual void OnMouseMoved(const views::MouseEvent& event) OVERRIDE;
   virtual void OnMouseExited(const views::MouseEvent& event) OVERRIDE;
   virtual bool OnKeyPressed(const views::KeyEvent& event) OVERRIDE;
+  virtual ui::GestureStatus OnGestureEvent(
+      const views::GestureEvent& event) OVERRIDE;
   virtual bool GetTooltipText(const gfx::Point& p,
                               string16* tooltip) const OVERRIDE;
-  virtual void ShowContextMenu(const gfx::Point& p,
-                               bool is_mouse_gesture) OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
+
+  // Overridden from views::ContextMenuController.
+  virtual void ShowContextMenuForView(View* source,
+                                      const gfx::Point& point) OVERRIDE;
 
   // ButtonListener implementation.
   virtual void ButtonPressed(views::Button* sender,
@@ -142,6 +147,14 @@ class DownloadItemView : public views::ButtonListener,
 
   void LoadIcon();
   void LoadIconIfItemPathChanged();
+
+  // Shows the context menu at the specified location. |point| is in the view's
+  // coordinate system.
+  void ShowContextMenuImpl(const gfx::Point& point, bool is_mouse_gesture);
+
+  // Common code for handling pointer events (i.e. mouse or gesture).
+  void HandlePressEvent(const views::LocatedEvent& event, bool active_event);
+  void HandleClickEvent(const views::LocatedEvent& event, bool active_event);
 
   // Convenience method to paint the 3 vertical images (bottom, middle, top)
   // that form the background.

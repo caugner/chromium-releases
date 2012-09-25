@@ -6,6 +6,8 @@
 
 #include "chrome/installer/setup/setup_util.h"
 
+#include <windows.h>
+
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/string_util.h"
@@ -61,7 +63,7 @@ Version* GetMaxVersionFromArchiveDir(const FilePath& chrome_path) {
   // TODO(tommi): The version directory really should match the version of
   // setup.exe.  To begin with, we should at least DCHECK that that's true.
 
-  scoped_ptr<Version> max_version(Version::GetVersionFromString("0.0.0.0"));
+  scoped_ptr<Version> max_version(new Version("0.0.0.0"));
   bool version_found = false;
 
   while (!version_enum.Next().empty()) {
@@ -70,8 +72,8 @@ Version* GetMaxVersionFromArchiveDir(const FilePath& chrome_path) {
     VLOG(1) << "directory found: " << find_data.cFileName;
 
     scoped_ptr<Version> found_version(
-        Version::GetVersionFromString(WideToASCII(find_data.cFileName)));
-    if (found_version.get() != NULL &&
+        new Version(WideToASCII(find_data.cFileName)));
+    if (found_version->IsValid() &&
         found_version->CompareTo(*max_version.get()) > 0) {
       max_version.reset(found_version.release());
       version_found = true;
@@ -136,6 +138,48 @@ bool DeleteFileFromTempProcess(const FilePath& path,
   }
 
   return ok != FALSE;
+}
+
+string16 GetActiveSetupPath(BrowserDistribution* dist) {
+  static const wchar_t kInstalledComponentsPath[] =
+      L"Software\\Microsoft\\Active Setup\\Installed Components\\";
+  return kInstalledComponentsPath + dist->GetAppGuid();
+}
+
+ScopedTokenPrivilege::ScopedTokenPrivilege(const wchar_t* privilege_name)
+    : is_enabled_(false) {
+  if (!::OpenProcessToken(::GetCurrentProcess(),
+      TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, token_.Receive())) {
+    return;
+  }
+
+  LUID privilege_luid;
+  if (!::LookupPrivilegeValue(NULL, privilege_name, &privilege_luid)) {
+    token_.Close();
+    return;
+  }
+
+  // Adjust the token's privileges to enable |privilege_name|. If this privilege
+  // was already enabled, |previous_privileges_|.PrivilegeCount will be set to 0
+  // and we then know not to disable this privilege upon destruction.
+  TOKEN_PRIVILEGES tp;
+  tp.PrivilegeCount = 1;
+  tp.Privileges[0].Luid = privilege_luid;
+  tp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
+  DWORD return_length;
+  if (!::AdjustTokenPrivileges(token_, FALSE, &tp, sizeof(TOKEN_PRIVILEGES),
+                               &previous_privileges_, &return_length)) {
+    token_.Close();
+  } else {
+    is_enabled_ = true;
+  }
+}
+
+ScopedTokenPrivilege::~ScopedTokenPrivilege() {
+  if (is_enabled_ && previous_privileges_.PrivilegeCount != 0) {
+    ::AdjustTokenPrivileges(token_, FALSE, &previous_privileges_,
+                            sizeof(TOKEN_PRIVILEGES), NULL, NULL);
+  }
 }
 
 }  // namespace installer

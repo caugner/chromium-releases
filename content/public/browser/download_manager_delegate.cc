@@ -9,21 +9,14 @@
 
 namespace content {
 
-DownloadManagerDelegate::~DownloadManagerDelegate() {
-}
-
 DownloadId DownloadManagerDelegate::GetNextId() {
   return DownloadId::Invalid();
 }
 
-bool DownloadManagerDelegate::ShouldStartDownload(int32 download_id) {
-  return true;
-}
-
-FilePath DownloadManagerDelegate::GetIntermediatePath(
-    const DownloadItem& item,
-    bool* ok_to_overwrite) {
-  return item.GetTargetFilePath();
+bool DownloadManagerDelegate::DetermineDownloadTarget(
+    DownloadItem* item,
+    const DownloadTargetCallback& callback) {
+  return false;
 }
 
 WebContents* DownloadManagerDelegate::
@@ -49,5 +42,7 @@ bool DownloadManagerDelegate::ShouldOpenDownload(DownloadItem* item) {
 bool DownloadManagerDelegate::GenerateFileHash() {
   return false;
 }
+
+DownloadManagerDelegate::~DownloadManagerDelegate() {}
 
 }  // namespace content

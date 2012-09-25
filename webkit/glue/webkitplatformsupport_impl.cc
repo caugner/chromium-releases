@@ -170,6 +170,8 @@ static int ToMessageID(WebLocalizedString::Name name) {
       return IDS_PLUGIN_INITIALIZATION_ERROR;
     case WebLocalizedString::MultipleFileUploadText:
       return IDS_FORM_FILE_MULTIPLE_UPLOAD;
+    case WebLocalizedString::OtherColorLabel:
+      return IDS_FORM_OTHER_COLOR_LABEL;
     case WebLocalizedString::ResetButtonDefaultLabel:
       return IDS_FORM_RESET_LABEL;
     case WebLocalizedString::SearchableIndexIntroduction:
@@ -390,9 +392,6 @@ struct DataResource {
 const DataResource kDataResources[] = {
   { "missingImage", IDR_BROKENIMAGE, ui::SCALE_FACTOR_100P },
   { "missingImage@2x", IDR_BROKENIMAGE, ui::SCALE_FACTOR_200P },
-#if defined(OS_ANDROID)
-  { "mediaFullscreen", IDR_MEDIA_FULLSCREEN_BUTTON, ui::SCALE_FACTOR_100P },
-#endif
   { "mediaPause", IDR_MEDIA_PAUSE_BUTTON, ui::SCALE_FACTOR_100P },
   { "mediaPlay", IDR_MEDIA_PLAY_BUTTON, ui::SCALE_FACTOR_100P },
   { "mediaPlayDisabled",
@@ -463,6 +462,10 @@ const DataResource kDataResources[] = {
     IDR_MEDIAPLAYER_FULLSCREEN_BUTTON_DOWN, ui::SCALE_FACTOR_100P },
   { "mediaplayerFullscreenDisabled",
     IDR_MEDIAPLAYER_FULLSCREEN_BUTTON_DISABLED, ui::SCALE_FACTOR_100P },
+#if defined(OS_ANDROID)
+  { "mediaplayerOverlayPlay",
+    IDR_MEDIAPLAYER_OVERLAY_PLAY_BUTTON, ui::SCALE_FACTOR_100P },
+#endif
 #if defined(OS_MACOSX)
   { "overhangPattern", IDR_OVERHANG_PATTERN, ui::SCALE_FACTOR_100P },
 #endif
@@ -474,7 +477,6 @@ const DataResource kDataResources[] = {
     IDR_SEARCH_MAGNIFIER_RESULTS, ui::SCALE_FACTOR_100P },
   { "textAreaResizeCorner", IDR_TEXTAREA_RESIZER, ui::SCALE_FACTOR_100P },
   { "textAreaResizeCorner@2x", IDR_TEXTAREA_RESIZER, ui::SCALE_FACTOR_200P },
-  { "tickmarkDash", IDR_TICKMARK_DASH, ui::SCALE_FACTOR_100P },
   { "inputSpeech", IDR_INPUT_SPEECH, ui::SCALE_FACTOR_100P },
   { "inputSpeechRecording", IDR_INPUT_SPEECH_RECORDING, ui::SCALE_FACTOR_100P },
   { "inputSpeechWaiting", IDR_INPUT_SPEECH_WAITING, ui::SCALE_FACTOR_100P },

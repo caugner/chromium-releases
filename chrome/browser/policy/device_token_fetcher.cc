@@ -185,6 +185,8 @@ void DeviceTokenFetcher::FetchTokenInternal() {
     request->set_machine_model(data_store_->machine_model());
   if (data_store_->known_machine_id())
     request->set_auto_enrolled(true);
+  if (data_store_->reregister())
+    request->set_reregister(true);
   request_job_->Start(base::Bind(&DeviceTokenFetcher::OnTokenFetchCompleted,
                                  base::Unretained(this)));
   UMA_HISTOGRAM_ENUMERATION(kMetricToken, kMetricTokenFetchRequested,
@@ -199,6 +201,8 @@ void DeviceTokenFetcher::OnTokenFetchCompleted(
     status = DM_STATUS_RESPONSE_DECODING_ERROR;
   }
 
+  LOG_IF(ERROR, status != DM_STATUS_SUCCESS) << "DMServer returned error code: "
+                                             << status;
   SampleErrorStatus(status);
 
   switch (status) {
@@ -211,8 +215,6 @@ void DeviceTokenFetcher::OnTokenFetchCompleted(
 
         if (data_store_->policy_register_type() ==
                 em::DeviceRegisterRequest::DEVICE) {
-          // TODO(pastarmovj): Default to DEVICE_MODE_UNKNOWN once DM server has
-          // been updated. http://crosbug.com/26624
           DeviceMode mode = DEVICE_MODE_ENTERPRISE;
           if (register_response.has_enrollment_type()) {
             mode = TranslateProtobufDeviceMode(

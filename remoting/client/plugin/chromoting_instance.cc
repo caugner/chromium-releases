@@ -31,6 +31,7 @@
 #include "remoting/client/client_config.h"
 #include "remoting/client/chromoting_client.h"
 #include "remoting/client/frame_consumer_proxy.h"
+#include "remoting/client/plugin/pepper_audio_player.h"
 #include "remoting/client/plugin/pepper_input_handler.h"
 #include "remoting/client/plugin/pepper_port_allocator.h"
 #include "remoting/client/plugin/pepper_view.h"
@@ -56,40 +57,57 @@ const int kBytesPerPixel = 4;
 
 const int kPerfStatsIntervalMs = 1000;
 
-std::string ConnectionStateToString(ChromotingInstance::ConnectionState state) {
+std::string ConnectionStateToString(protocol::ConnectionToHost::State state) {
+  // Values returned by this function must match the
+  // remoting.ClientSession.State enum in JS code.
   switch (state) {
-    case ChromotingInstance::STATE_CONNECTING:
-      return "CONNECTING";
-    case ChromotingInstance::STATE_INITIALIZING:
+    case protocol::ConnectionToHost::INITIALIZING:
       return "INITIALIZING";
-    case ChromotingInstance::STATE_CONNECTED:
+    case protocol::ConnectionToHost::CONNECTING:
+      return "CONNECTING";
+    case protocol::ConnectionToHost::CONNECTED:
       return "CONNECTED";
-    case ChromotingInstance::STATE_CLOSED:
+    case protocol::ConnectionToHost::CLOSED:
       return "CLOSED";
-    case ChromotingInstance::STATE_FAILED:
+    case protocol::ConnectionToHost::FAILED:
       return "FAILED";
   }
   NOTREACHED();
   return "";
 }
 
-std::string ConnectionErrorToString(ChromotingInstance::ConnectionError error) {
+// TODO(sergeyu): Ideally we should just pass ErrorCode to the webapp
+// and let it handle it, but it would be hard to fix it now because
+// client plugin and webapp versions may not be in sync. It should be
+// easy to do after we are finished moving the client plugin to NaCl.
+std::string ConnectionErrorToString(protocol::ErrorCode error) {
+  // Values returned by this function must match the
+  // remoting.ClientSession.Error enum in JS code.
   switch (error) {
-    case ChromotingInstance::ERROR_NONE:
+    case protocol::OK:
       return "NONE";
-    case ChromotingInstance::ERROR_HOST_IS_OFFLINE:
+
+    case protocol::PEER_IS_OFFLINE:
       return "HOST_IS_OFFLINE";
-    case ChromotingInstance::ERROR_SESSION_REJECTED:
+
+    case protocol::SESSION_REJECTED:
+    case protocol::AUTHENTICATION_FAILED:
       return "SESSION_REJECTED";
-    case ChromotingInstance::ERROR_INCOMPATIBLE_PROTOCOL:
+
+    case protocol::INCOMPATIBLE_PROTOCOL:
       return "INCOMPATIBLE_PROTOCOL";
-    case ChromotingInstance::ERROR_NETWORK_FAILURE:
-      return "NETWORK_FAILURE";
-    case ChromotingInstance::ERROR_HOST_OVERLOAD:
+
+    case protocol::HOST_OVERLOAD:
       return "HOST_OVERLOAD";
+
+    case protocol::CHANNEL_CONNECTION_ERROR:
+    case protocol::SIGNALING_ERROR:
+    case protocol::SIGNALING_TIMEOUT:
+    case protocol::UNKNOWN_ERROR:
+      return "NETWORK_FAILURE";
   }
-  NOTREACHED();
-  return "";
+  DLOG(FATAL) << "Unknown error code" << error;
+  return  "";
 }
 
 // This flag blocks LOGs to the UI if we're already in the middle of logging
@@ -134,9 +152,9 @@ bool ChromotingInstance::ParseAuthMethods(const std::string& auth_methods_str,
 ChromotingInstance::ChromotingInstance(PP_Instance pp_instance)
     : pp::Instance(pp_instance),
       initialized_(false),
-      plugin_message_loop_(
-          new PluginMessageLoopProxy(&plugin_thread_delegate_)),
-      context_(plugin_message_loop_),
+      plugin_task_runner_(
+          new PluginThreadTaskRunner(&plugin_thread_delegate_)),
+      context_(plugin_task_runner_),
       weak_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
   RequestInputEvents(PP_INPUTEVENT_CLASS_MOUSE | PP_INPUTEVENT_CLASS_WHEEL);
   RequestFilteringInputEvents(PP_INPUTEVENT_CLASS_KEYBOARD);
@@ -153,11 +171,14 @@ ChromotingInstance::ChromotingInstance(PP_Instance pp_instance)
 }
 
 ChromotingInstance::~ChromotingInstance() {
-  DCHECK(plugin_message_loop_->BelongsToCurrentThread());
+  DCHECK(plugin_task_runner_->BelongsToCurrentThread());
 
   // Unregister this instance so that debug log messages will no longer be sent
   // to it. This will stop all logging in all Chromoting instances.
   UnregisterLoggingInstance();
+
+  // PepperView must be destroyed before the client.
+  view_.reset();
 
   if (client_.get()) {
     base::WaitableEvent done_event(true, false);
@@ -170,7 +191,7 @@ ChromotingInstance::~ChromotingInstance() {
   context_.Stop();
 
   // Ensure that nothing touches the plugin thread delegate after this point.
-  plugin_message_loop_->Detach();
+  plugin_task_runner_->Detach();
 }
 
 bool ChromotingInstance::Init(uint32_t argc,
@@ -202,7 +223,7 @@ bool ChromotingInstance::Init(uint32_t argc,
   // RectangleUpdateDecoder runs on a separate thread so for now we wrap
   // PepperView with a ref-counted proxy object.
   scoped_refptr<FrameConsumerProxy> consumer_proxy =
-      new FrameConsumerProxy(plugin_message_loop_);
+      new FrameConsumerProxy(plugin_task_runner_);
   rectangle_decoder_ = new RectangleUpdateDecoder(
       context_.decode_task_runner(), consumer_proxy);
   view_.reset(new PepperView(this, &context_, rectangle_decoder_.get()));
@@ -320,23 +341,18 @@ void ChromotingInstance::HandleMessage(const pp::Var& message) {
   }
 }
 
-void ChromotingInstance::DidChangeView(const pp::Rect& position,
-                                       const pp::Rect& clip) {
-  DCHECK(plugin_message_loop_->BelongsToCurrentThread());
+void ChromotingInstance::DidChangeView(const pp::View& view) {
+  DCHECK(plugin_task_runner_->BelongsToCurrentThread());
 
-  SkISize new_size = SkISize::Make(position.width(), position.height());
-  SkIRect new_clip =
-    SkIRect::MakeXYWH(clip.x(), clip.y(), clip.width(), clip.height());
-
-  view_->SetView(new_size, new_clip);
+  view_->SetView(view);
 
   if (mouse_input_filter_.get()) {
-    mouse_input_filter_->set_input_size(view_->get_view_size());
+    mouse_input_filter_->set_input_size(view_->get_view_size_dips());
   }
 }
 
 bool ChromotingInstance::HandleInputEvent(const pp::InputEvent& event) {
-  DCHECK(plugin_message_loop_->BelongsToCurrentThread());
+  DCHECK(plugin_task_runner_->BelongsToCurrentThread());
 
   if (!IsConnected())
     return false;
@@ -350,20 +366,97 @@ bool ChromotingInstance::HandleInputEvent(const pp::InputEvent& event) {
   return input_handler_->HandleInputEvent(event);
 }
 
-void ChromotingInstance::SetDesktopSize(int width, int height) {
+void ChromotingInstance::SetDesktopSize(const SkISize& size,
+                                        const SkIPoint& dpi) {
   scoped_ptr<base::DictionaryValue> data(new base::DictionaryValue());
-  data->SetInteger("width", width);
-  data->SetInteger("height", height);
+  data->SetInteger("width", size.width());
+  data->SetInteger("height", size.height());
+  if (dpi.x())
+    data->SetInteger("x_dpi", dpi.x());
+  if (dpi.y())
+    data->SetInteger("y_dpi", dpi.y());
   PostChromotingMessage("onDesktopSize", data.Pass());
 }
 
-void ChromotingInstance::SetConnectionState(
-    ConnectionState state,
-    ConnectionError error) {
+void ChromotingInstance::OnConnectionState(
+    protocol::ConnectionToHost::State state,
+    protocol::ErrorCode error) {
   scoped_ptr<base::DictionaryValue> data(new base::DictionaryValue());
   data->SetString("state", ConnectionStateToString(state));
   data->SetString("error", ConnectionErrorToString(error));
   PostChromotingMessage("onConnectionStatus", data.Pass());
+}
+
+void ChromotingInstance::OnConnectionReady(bool ready) {
+  scoped_ptr<base::DictionaryValue> data(new base::DictionaryValue());
+  data->SetBoolean("ready", ready);
+  PostChromotingMessage("onConnectionReady", data.Pass());
+}
+
+protocol::ClipboardStub* ChromotingInstance::GetClipboardStub() {
+  // TODO(sergeyu): Move clipboard handling to a separate class.
+  // crbug.com/138108
+  return this;
+}
+
+protocol::CursorShapeStub* ChromotingInstance::GetCursorShapeStub() {
+  // TODO(sergeyu): Move cursor shape code to a separate class.
+  // crbug.com/138108
+  return this;
+}
+
+void ChromotingInstance::InjectClipboardEvent(
+    const protocol::ClipboardEvent& event) {
+  scoped_ptr<base::DictionaryValue> data(new base::DictionaryValue());
+  data->SetString("mimeType", event.mime_type());
+  data->SetString("item", event.data());
+  PostChromotingMessage("injectClipboardItem", data.Pass());
+}
+
+void ChromotingInstance::SetCursorShape(
+    const protocol::CursorShapeInfo& cursor_shape) {
+  if (!cursor_shape.has_data() ||
+      !cursor_shape.has_width() ||
+      !cursor_shape.has_height() ||
+      !cursor_shape.has_hotspot_x() ||
+      !cursor_shape.has_hotspot_y()) {
+    return;
+  }
+
+  if (pp::ImageData::GetNativeImageDataFormat() !=
+      PP_IMAGEDATAFORMAT_BGRA_PREMUL) {
+    VLOG(2) << "Unable to set cursor shape - non-native image format";
+    return;
+  }
+
+  int width = cursor_shape.width();
+  int height = cursor_shape.height();
+
+  if (width > 32 || height > 32) {
+    VLOG(2) << "Cursor too large for SetCursor: "
+            << width << "x" << height << " > 32x32";
+    return;
+  }
+
+  int hotspot_x = cursor_shape.hotspot_x();
+  int hotspot_y = cursor_shape.hotspot_y();
+
+  pp::ImageData cursor_image(this, PP_IMAGEDATAFORMAT_BGRA_PREMUL,
+                             pp::Size(width, height), false);
+
+  int bytes_per_row = width * kBytesPerPixel;
+  const uint8* src_row_data = reinterpret_cast<const uint8*>(
+      cursor_shape.data().data());
+  uint8* dst_row_data = reinterpret_cast<uint8*>(cursor_image.data());
+  for (int row = 0; row < height; row++) {
+    memcpy(dst_row_data, src_row_data, bytes_per_row);
+    src_row_data += bytes_per_row;
+    dst_row_data += cursor_image.stride();
+  }
+
+  pp::MouseCursor::SetCursor(this, PP_MOUSECURSOR_TYPE_CUSTOM,
+                             cursor_image,
+                             pp::Point(hotspot_x, hotspot_y));
 }
 
 void ChromotingInstance::OnFirstFrameReceived() {
@@ -372,19 +465,21 @@ void ChromotingInstance::OnFirstFrameReceived() {
 }
 
 void ChromotingInstance::Connect(const ClientConfig& config) {
-  DCHECK(plugin_message_loop_->BelongsToCurrentThread());
+  DCHECK(plugin_task_runner_->BelongsToCurrentThread());
 
   jingle_glue::JingleThreadWrapper::EnsureForCurrentThread();
 
   host_connection_.reset(new protocol::ConnectionToHost(true));
-  client_.reset(new ChromotingClient(config, context_.main_task_runner(),
-                                     host_connection_.get(), view_.get(),
-                                     rectangle_decoder_.get()));
+  scoped_ptr<AudioPlayer> audio_player(new PepperAudioPlayer(this));
+  client_.reset(new ChromotingClient(config, &context_,
+                                     host_connection_.get(), this,
+                                     rectangle_decoder_.get(),
+                                     audio_player.Pass()));
 
   // Construct the input pipeline
   mouse_input_filter_.reset(
       new protocol::MouseInputFilter(host_connection_->input_stub()));
-  mouse_input_filter_->set_input_size(view_->get_view_size());
+  mouse_input_filter_->set_input_size(view_->get_view_size_dips());
   input_tracker_.reset(
       new protocol::InputEventTracker(mouse_input_filter_.get()));
 
@@ -406,7 +501,7 @@ void ChromotingInstance::Connect(const ClientConfig& config) {
   // Setup the XMPP Proxy.
   xmpp_proxy_ = new PepperXmppProxy(
       base::Bind(&ChromotingInstance::SendOutgoingIq, AsWeakPtr()),
-      plugin_message_loop_, context_.main_task_runner());
+      plugin_task_runner_, context_.main_task_runner());
 
   scoped_ptr<cricket::HttpPortAllocatorBase> port_allocator(
       PepperPortAllocator::Create(this));
@@ -417,16 +512,16 @@ void ChromotingInstance::Connect(const ClientConfig& config) {
   client_->Start(xmpp_proxy_, transport_factory.Pass());
 
   // Start timer that periodically sends perf stats.
-  plugin_message_loop_->PostDelayedTask(
+  plugin_task_runner_->PostDelayedTask(
       FROM_HERE, base::Bind(&ChromotingInstance::SendPerfStats, AsWeakPtr()),
       base::TimeDelta::FromMilliseconds(kPerfStatsIntervalMs));
-
-  VLOG(1) << "Connection status: Initializing";
-  SetConnectionState(STATE_INITIALIZING, ERROR_NONE);
 }
 
 void ChromotingInstance::Disconnect() {
-  DCHECK(plugin_message_loop_->BelongsToCurrentThread());
+  DCHECK(plugin_task_runner_->BelongsToCurrentThread());
+
+  // PepperView must be destroyed before the client.
+  view_.reset();
 
   LOG(INFO) << "Disconnecting from host.";
   if (client_.get()) {
@@ -442,8 +537,6 @@ void ChromotingInstance::Disconnect() {
   input_tracker_.reset();
   mouse_input_filter_.reset();
   host_connection_.reset();
-
-  SetConnectionState(STATE_CLOSED, ERROR_NONE);
 }
 
 void ChromotingInstance::OnIncomingIq(const std::string& iq) {
@@ -536,7 +629,7 @@ void ChromotingInstance::SendPerfStats() {
     return;
   }
 
-  plugin_message_loop_->PostDelayedTask(
+  plugin_task_runner_->PostDelayedTask(
       FROM_HERE, base::Bind(&ChromotingInstance::SendPerfStats, AsWeakPtr()),
       base::TimeDelta::FromMilliseconds(kPerfStatsIntervalMs));
 
@@ -550,60 +643,6 @@ void ChromotingInstance::SendPerfStats() {
   data->SetDouble("renderLatency", stats->video_paint_ms()->Average());
   data->SetDouble("roundtripLatency", stats->round_trip_ms()->Average());
   PostChromotingMessage("onPerfStats", data.Pass());
-}
-
-void ChromotingInstance::InjectClipboardEvent(
-    const protocol::ClipboardEvent& event) {
-  scoped_ptr<base::DictionaryValue> data(new base::DictionaryValue());
-  data->SetString("mimeType", event.mime_type());
-  data->SetString("item", event.data());
-  PostChromotingMessage("injectClipboardItem", data.Pass());
-}
-
-void ChromotingInstance::SetCursorShape(
-    const protocol::CursorShapeInfo& cursor_shape) {
-  if (!cursor_shape.has_data() ||
-      !cursor_shape.has_width() ||
-      !cursor_shape.has_height() ||
-      !cursor_shape.has_hotspot_x() ||
-      !cursor_shape.has_hotspot_y()) {
-    return;
-  }
-
-  if (pp::ImageData::GetNativeImageDataFormat() !=
-      PP_IMAGEDATAFORMAT_BGRA_PREMUL) {
-    VLOG(2) << "Unable to set cursor shape - non-native image format";
-    return;
-  }
-
-  int width = cursor_shape.width();
-  int height = cursor_shape.height();
-
-  if (width > 32 || height > 32) {
-    VLOG(2) << "Cursor too large for SetCursor: "
-            << width << "x" << height << " > 32x32";
-    return;
-  }
-
-  int hotspot_x = cursor_shape.hotspot_x();
-  int hotspot_y = cursor_shape.hotspot_y();
-
-  pp::ImageData cursor_image(this, PP_IMAGEDATAFORMAT_BGRA_PREMUL,
-                             pp::Size(width, height), false);
-
-  int bytes_per_row = width * kBytesPerPixel;
-  const uint8* src_row_data = reinterpret_cast<const uint8*>(
-      cursor_shape.data().data());
-  uint8* dst_row_data = reinterpret_cast<uint8*>(cursor_image.data());
-  for (int row = 0; row < height; row++) {
-    memcpy(dst_row_data, src_row_data, bytes_per_row);
-    src_row_data += bytes_per_row;
-    dst_row_data += cursor_image.stride();
-  }
-
-  pp::MouseCursor::SetCursor(this, PP_MOUSECURSOR_TYPE_CUSTOM,
-                             cursor_image,
-                             pp::Point(hotspot_x, hotspot_y));
 }
 
 // static
@@ -628,7 +667,7 @@ void ChromotingInstance::RegisterLoggingInstance() {
   // If multiple plugins are run, then the last one registered will handle all
   // logging for all instances.
   g_logging_instance.Get() = weak_factory_.GetWeakPtr();
-  g_logging_task_runner.Get() = plugin_message_loop_;
+  g_logging_task_runner.Get() = plugin_task_runner_;
   g_has_logging_instance = true;
 }
 
@@ -695,7 +734,7 @@ bool ChromotingInstance::LogToUI(int severity, const char* file, int line,
 }
 
 void ChromotingInstance::ProcessLogToUI(const std::string& message) {
-  DCHECK(plugin_message_loop_->BelongsToCurrentThread());
+  DCHECK(plugin_task_runner_->BelongsToCurrentThread());
 
   // This flag (which is set only here) is used to prevent LogToUI from posting
   // new tasks while we're in the middle of servicing a LOG call. This can

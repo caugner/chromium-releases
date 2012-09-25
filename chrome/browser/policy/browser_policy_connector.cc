@@ -98,6 +98,9 @@ const char* kMachineInfoSerialNumberKeys[] = {
 };
 #endif
 
+// Used in BrowserPolicyConnector::SetPolicyProviderForTesting.
+ConfigurationPolicyProvider* g_testing_provider = NULL;
+
 }  // namespace
 
 BrowserPolicyConnector::BrowserPolicyConnector()
@@ -170,6 +173,8 @@ PolicyService* BrowserPolicyConnector::CreatePolicyService(
     Profile* profile) {
   // |providers| in decreasing order of priority.
   PolicyServiceImpl::Providers providers;
+  if (g_testing_provider)
+    providers.push_back(g_testing_provider);
   if (platform_provider_.get())
     providers.push_back(platform_provider_.get());
   if (managed_cloud_provider_.get())
@@ -197,15 +202,21 @@ PolicyService* BrowserPolicyConnector::CreatePolicyService(
 void BrowserPolicyConnector::RegisterForDevicePolicy(
     const std::string& owner_email,
     const std::string& token,
-    bool known_machine_id) {
+    bool known_machine_id,
+    bool reregister) {
 #if defined(OS_CHROMEOS)
   if (device_data_store_.get()) {
     if (!device_data_store_->device_token().empty()) {
       LOG(ERROR) << "Device policy data store already has a DMToken; "
                  << "RegisterForDevicePolicy won't trigger a new registration.";
     }
+
     device_data_store_->set_user_name(owner_email);
     device_data_store_->set_known_machine_id(known_machine_id);
+    if (reregister) {
+      device_data_store_->set_device_id(install_attributes_->GetDeviceId());
+      device_data_store_->set_reregister(true);
+    }
     device_data_store_->set_policy_fetching_enabled(false);
     device_data_store_->SetOAuthToken(token);
   }
@@ -465,6 +476,13 @@ AppPackUpdater* BrowserPolicyConnector::GetAppPackUpdater() {
 #else
   return NULL;
 #endif
+}
+
+// static
+void BrowserPolicyConnector::SetPolicyProviderForTesting(
+    ConfigurationPolicyProvider* provider) {
+  DCHECK(!g_testing_provider);
+  g_testing_provider = provider;
 }
 
 void BrowserPolicyConnector::Observe(

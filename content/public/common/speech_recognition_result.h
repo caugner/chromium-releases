@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_PUBLIC_COMMON_SPEECH_RECOGNITION_RESULT_H_
 #define CONTENT_PUBLIC_COMMON_SPEECH_RECOGNITION_RESULT_H_
-#pragma once
 
 #include <vector>
 
@@ -32,7 +31,7 @@ typedef std::vector<SpeechRecognitionHypothesis>
 
 struct CONTENT_EXPORT SpeechRecognitionResult {
   SpeechRecognitionHypothesisArray hypotheses;
-  bool provisional;
+  bool is_provisional;
 
   SpeechRecognitionResult();
   ~SpeechRecognitionResult();

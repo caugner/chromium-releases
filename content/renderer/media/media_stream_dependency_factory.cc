@@ -113,13 +113,6 @@ MediaStreamDependencyFactory::CreatePeerConnection(
   return pc_factory_->CreatePeerConnection(config, observer);
 }
 
-talk_base::scoped_refptr<webrtc::PeerConnectionInterface>
-MediaStreamDependencyFactory::CreateRoapPeerConnection(
-    const std::string& config,
-    webrtc::PeerConnectionObserver* observer) {
-  return pc_factory_->CreateRoapPeerConnection(config, observer);
-}
-
 talk_base::scoped_refptr<webrtc::LocalMediaStreamInterface>
 MediaStreamDependencyFactory::CreateLocalMediaStream(
     const std::string& label) {
@@ -152,7 +145,8 @@ MediaStreamDependencyFactory::CreateSessionDescription(const std::string& sdp) {
 }
 
 webrtc::IceCandidateInterface* MediaStreamDependencyFactory::CreateIceCandidate(
-    const std::string& label,
+    const std::string& sdp_mid,
+    int sdp_mline_index,
     const std::string& sdp) {
-  return webrtc::CreateIceCandidate(label, sdp);
+  return webrtc::CreateIceCandidate(sdp_mid, sdp_mline_index, sdp);
 }

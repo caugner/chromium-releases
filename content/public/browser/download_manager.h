@@ -26,7 +26,6 @@
 
 #ifndef CONTENT_PUBLIC_BROWSER_DOWNLOAD_MANAGER_H_
 #define CONTENT_PUBLIC_BROWSER_DOWNLOAD_MANAGER_H_
-#pragma once
 
 #include <string>
 #include <vector>
@@ -35,7 +34,7 @@
 #include "base/callback.h"
 #include "base/file_path.h"
 #include "base/gtest_prod_util.h"
-#include "base/message_loop_helpers.h"
+#include "base/sequenced_task_runner_helpers.h"
 #include "base/time.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_id.h"
@@ -80,19 +79,24 @@ class CONTENT_EXPORT DownloadManager
   // to the DownloadManager's collection of downloads.
   class CONTENT_EXPORT Observer {
    public:
+    // A DownloadItem was created.  Unlike ModelChanged, this item may be
+    // visible before the filename is determined; in this case the return value
+    // of GetTargetFileName() will be null.  This method may be called an
+    // arbitrary number of times, e.g. when loading history on startup.  As a
+    // result, consumers should avoid doing large amounts of work in
+    // OnDownloadCreated().  TODO(<whoever>): When we've fully specified the
+    // possible states of the DownloadItem in download_item.h and removed
+    // ModelChanged, we should remove the caveat above.
+    virtual void OnDownloadCreated(
+        DownloadManager* manager, DownloadItem* item) {}
+
     // New or deleted download, observers should query us for the current set
     // of downloads.
-    virtual void ModelChanged(DownloadManager* manager) = 0;
+    virtual void ModelChanged(DownloadManager* manager) {}
 
     // Called when the DownloadManager is being destroyed to prevent Observers
     // from calling back to a stale pointer.
     virtual void ManagerGoingDown(DownloadManager* manager) {}
-
-    // Called immediately after the DownloadManager puts up a select file
-    // dialog.
-    // |id| indicates which download opened the dialog.
-    virtual void SelectFileDialogDisplayed(
-        DownloadManager* manager, int32 id) {}
 
    protected:
     virtual ~Observer() {}
@@ -124,9 +128,9 @@ class CONTENT_EXPORT DownloadManager
   // to initiate the non-source portions of a download.
   // Returns the id assigned to the download.  If the DownloadCreateInfo
   // specifies an id, that id will be used.
-  virtual content::DownloadId StartDownload(
+  virtual DownloadId StartDownload(
       scoped_ptr<DownloadCreateInfo> info,
-      scoped_ptr<content::ByteStreamReader> stream) = 0;
+      scoped_ptr<ByteStreamReader> stream) = 0;
 
   // Notifications sent from the download thread to the UI thread
   virtual void UpdateDownload(int32 download_id,
@@ -153,8 +157,6 @@ class CONTENT_EXPORT DownloadManager
   // |reason| is a download interrupt reason code.
   virtual void OnDownloadInterrupted(
       int32 download_id,
-      int64 size,
-      const std::string& hash_state,
       DownloadInterruptReason reason) = 0;
 
   // Remove downloads after remove_begin (inclusive) and before remove_end
@@ -196,33 +198,6 @@ class CONTENT_EXPORT DownloadManager
 
   virtual BrowserContext* GetBrowserContext() const = 0;
 
-  virtual FilePath LastDownloadPath() = 0;
-
-  // Creates the download item.  Must be called on the UI thread.
-  // Returns the |BoundNetLog| used by the |DownloadItem|.
-  virtual net::BoundNetLog CreateDownloadItem(DownloadCreateInfo* info) = 0;
-
-  // Creates a download item for the SavePackage system.
-  // Must be called on the UI thread.  Note that the DownloadManager
-  // retains ownership.
-  virtual DownloadItem* CreateSavePackageDownloadItem(
-      const FilePath& main_file_path,
-      const GURL& page_url,
-      bool is_otr,
-      const std::string& mime_type,
-      DownloadItem::Observer* observer) = 0;
-
-  // Clears the last download path, used to initialize "save as" dialogs.
-  virtual void ClearLastDownloadPath() = 0;
-
-  // Called by the delegate after the save as dialog is closed.
-  virtual void FileSelected(const FilePath& path, int32 download_id) = 0;
-  virtual void FileSelectionCanceled(int32 download_id) = 0;
-
-  // Called by the delegate if it delayed the download in
-  // DownloadManagerDelegate::ShouldStartDownload and now is ready.
-  virtual void RestartDownload(int32 download_id) = 0;
-
   // Checks whether downloaded files still exist. Updates state of downloads
   // that refer to removed files. The check runs in the background and may
   // finish asynchronously after this method returns.
@@ -231,6 +206,10 @@ class CONTENT_EXPORT DownloadManager
   // Get the download item from the history map.  Useful after the item has
   // been removed from the active map, or was retrieved from the history DB.
   virtual DownloadItem* GetDownloadItem(int id) = 0;
+
+  // Get the download item for |id| if present, no matter what type of download
+  // it is or state it's in.
+  virtual DownloadItem* GetDownload(int id) = 0;
 
   // Called when Save Page download is done.
   virtual void SavePageDownloadFinished(DownloadItem* download) = 0;

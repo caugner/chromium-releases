@@ -4,12 +4,10 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_EXTENSIONS_SHELL_WINDOW_VIEWS_H_
 #define CHROME_BROWSER_UI_VIEWS_EXTENSIONS_SHELL_WINDOW_VIEWS_H_
-#pragma once
 
 #include "chrome/browser/ui/extensions/shell_window.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/scoped_sk_region.h"
-#include "ui/views/controls/button/button.h"
 #include "ui/views/widget/widget_delegate.h"
 
 class Profile;
@@ -23,8 +21,7 @@ class WebView;
 }
 
 class ShellWindowViews : public ShellWindow,
-                         public views::WidgetDelegateView,
-                         public views::ButtonListener {
+                         public views::WidgetDelegateView {
  public:
   ShellWindowViews(Profile* profile,
                    const extensions::Extension* extension,
@@ -62,12 +59,16 @@ class ShellWindowViews : public ShellWindow,
   virtual const views::Widget* GetWidget() const OVERRIDE;
   virtual string16 GetWindowTitle() const OVERRIDE;
   virtual void DeleteDelegate() OVERRIDE;
+  virtual views::View* GetInitiallyFocusedView() OVERRIDE;
 
  protected:
   // views::View implementation.
   virtual void Layout() OVERRIDE;
   virtual void ViewHierarchyChanged(
       bool is_add, views::View *parent, views::View *child) OVERRIDE;
+  virtual gfx::Size GetMinimumSize() OVERRIDE;
+  virtual gfx::Size GetMaximumSize() OVERRIDE;
+  virtual void OnFocus() OVERRIDE;
 
   // ShellWindow implementation.
   virtual void UpdateWindowTitle() OVERRIDE;
@@ -81,11 +82,6 @@ class ShellWindowViews : public ShellWindow,
 
   void OnViewWasResized();
 
-  // views::ButtonListener implementation.
-  virtual void ButtonPressed(views::Button* sender, const views::Event& event)
-      OVERRIDE;
-
-  views::View* title_view_;
   views::WebView* web_view_;
   views::Widget* window_;
   bool is_fullscreen_;

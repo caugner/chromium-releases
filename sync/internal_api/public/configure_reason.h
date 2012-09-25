@@ -4,9 +4,8 @@
 
 #ifndef SYNC_INTERNAL_API_PUBLIC_CONFIGURE_REASON_H_
 #define SYNC_INTERNAL_API_PUBLIC_CONFIGURE_REASON_H_
-#pragma once
 
-namespace sync_api {
+namespace syncer {
 
 // Note: This should confirm with the enums in sync.proto for
 // GetUpdatesCallerInfo. They will have 1:1 mapping but this will only map
@@ -31,6 +30,6 @@ enum ConfigureReason {
   CONFIGURE_REASON_NEWLY_ENABLED_DATA_TYPE,
 };
 
-} // namespace sync_api
+}  // namespace syncer
 
 #endif  // SYNC_INTERNAL_API_PUBLIC_CONFIGURE_REASON_H_

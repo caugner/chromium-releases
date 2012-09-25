@@ -51,7 +51,7 @@ ScopedJavaLocalRef<jobject> GetContentResolver(JNIEnv* env) {
 
 }
 
-namespace browser_sync {
+namespace syncer {
 namespace internal {
 
 std::string GetAndroidId() {
@@ -67,10 +67,5 @@ std::string GetModel() {
   return model;
 }
 
-bool IsTabletUi() {
-  NOTIMPLEMENTED() << "TODO(yfriedman): Upstream this";
-  return true;
-}
-
 }  // namespace internal
-}  // namespace browser_sync
+}  // namespace syncer

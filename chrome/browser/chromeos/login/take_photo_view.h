@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_LOGIN_TAKE_PHOTO_VIEW_H_
 #define CHROME_BROWSER_CHROMEOS_LOGIN_TAKE_PHOTO_VIEW_H_
-#pragma once
 
 #include "base/compiler_specific.h"
 #include "ui/views/controls/button/button.h"
@@ -45,7 +44,7 @@ class TakePhotoView : public views::View,
   virtual ~TakePhotoView();
 
   // Initializes this view, its children and layout.
-  void Init();
+  void Init(int image_width, int image_height);
 
   // Updates image from camera.
   void UpdateVideoFrame(const SkBitmap& frame);

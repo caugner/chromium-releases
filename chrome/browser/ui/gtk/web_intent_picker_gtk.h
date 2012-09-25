@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_GTK_WEB_INTENT_PICKER_GTK_H_
 #define CHROME_BROWSER_UI_GTK_WEB_INTENT_PICKER_GTK_H_
-#pragma once
 
 #include <gtk/gtk.h>
 
@@ -52,7 +51,7 @@ class WebIntentPickerGtk : public WebIntentPicker,
                                 size_t index) OVERRIDE;
   virtual void OnExtensionIconChanged(WebIntentPickerModel* model,
                                       const string16& extension_id) OVERRIDE;
-  virtual void OnInlineDisposition(WebIntentPickerModel* model,
+  virtual void OnInlineDisposition(const string16& title,
                                    const GURL& url) OVERRIDE;
   virtual void OnInlineDispositionAutoResize(const gfx::Size& size) OVERRIDE;
 
@@ -82,10 +81,15 @@ class WebIntentPickerGtk : public WebIntentPicker,
   CHROMEGTK_CALLBACK_0(WebIntentPickerGtk, void, OnExtensionInstallButtonClick);
   // Callback when "more suggestions" link is clicked.
   CHROMEGTK_CALLBACK_0(WebIntentPickerGtk, void, OnMoreSuggestionsLinkClick);
+  // Callback when "or choose another service" link is clicked.
+  CHROMEGTK_CALLBACK_0(WebIntentPickerGtk, void, OnChooseAnotherServiceClick);
 
   // Initialize the contents of the picker. After this call, contents_ will be
   // non-NULL.
   void InitContents();
+
+  // Reset contents to the initial picker state.
+  void ResetContents();
 
   // Create the (inset relative to |box|) container for dialog elements.
   GtkWidget* CreateSubContents(GtkWidget* box);
@@ -131,6 +135,9 @@ class WebIntentPickerGtk : public WebIntentPicker,
 
   // A weak pointer to the header label.
   GtkWidget* header_label_;
+
+  // The text displayed in the header label.
+  string16 header_label_text_;
 
   // A weak pointer to the vbox that contains the buttons used to choose the
   // service.

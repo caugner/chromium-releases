@@ -11,13 +11,14 @@
 #include "ash/system/power/power_supply_status.h"
 #include "ash/system/tray/system_tray_delegate.h"
 #include "ash/system/tray/tray_constants.h"
+#include "ash/system/tray/tray_notification_view.h"
 #include "ash/system/tray/tray_views.h"
 #include "base/command_line.h"
 #include "base/string_number_conversions.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "grit/ash_strings.h"
-#include "grit/ui_resources_standard.h"
+#include "grit/ui_resources.h"
 #include "third_party/skia/include/core/SkRect.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -91,8 +92,7 @@ class PowerTrayView : public views::ImageView {
 class PowerNotificationView : public TrayNotificationView {
  public:
   explicit PowerNotificationView(TrayPower* tray)
-      : TrayNotificationView(0),
-        tray_(tray) {
+      : TrayNotificationView(tray, 0) {
     power_status_view_ =
         new PowerStatusView(PowerStatusView::VIEW_NOTIFICATION);
     InitView(power_status_view_);
@@ -103,13 +103,7 @@ class PowerNotificationView : public TrayNotificationView {
     power_status_view_->UpdatePowerStatus(status);
   }
 
-  // Overridden from TrayNotificationView:
-  virtual void OnClose() OVERRIDE {
-    tray_->HideNotificationView();
-  }
-
  private:
-  TrayPower* tray_;
   PowerStatusView* power_status_view_;
 
   DISALLOW_COPY_AND_ASSIGN(PowerNotificationView);
@@ -202,6 +196,10 @@ void TrayPower::DestroyNotificationView() {
 }
 
 void TrayPower::UpdateAfterLoginStatusChange(user::LoginStatus status) {
+}
+
+void TrayPower::UpdateAfterShelfAlignmentChange(ShelfAlignment alignment) {
+  SetTrayImageItemBorder(power_tray_, alignment);
 }
 
 void TrayPower::OnPowerStatusChanged(const PowerSupplyStatus& status) {

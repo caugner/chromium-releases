@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_API_EXTENSION_ACTION_EXTENSION_ACTIONS_API_H_
 #define CHROME_BROWSER_EXTENSIONS_API_EXTENSION_ACTION_EXTENSION_ACTIONS_API_H_
-#pragma once
 
 #include "chrome/browser/extensions/extension_function.h"
 #include "chrome/common/extensions/extension_action.h"
@@ -12,14 +11,17 @@
 namespace base {
 class DictionaryValue;
 }
+namespace extensions {
+class TabHelper;
+}
 class TabContents;
 
-// Implementation of both the browserAction and pageAction APIs.
+// Implementation of the browserAction, pageAction, and scriptBadge APIs.
 //
-// Divergent behaviour between the two is minimal (pageAction has required
-// tabIds while browserAction's are optional, they have different internal
-// browser notification requirements, and not all functions are defined for
-// both APIs).
+// Divergent behaviour between the three is minimal (pageAction and scriptBadge
+// have required tabIds while browserAction's are optional, they have different
+// internal browser notification requirements, and not all functions are defined
+// for all APIs).
 class ExtensionActionFunction : public SyncExtensionFunction {
  public:
   static bool ParseCSSColorString(const std::string& color_string,
@@ -32,8 +34,12 @@ class ExtensionActionFunction : public SyncExtensionFunction {
   virtual bool RunExtensionAction() = 0;
   void NotifyChange();
   void NotifyBrowserActionChange();
-  void NotifyPageActionChange();
+  void NotifyLocationBarChange();
   bool SetVisible(bool visible);
+
+  // Extension-related information for |tab_id_|.
+  // CHECK-fails if there is no tab.
+  extensions::TabHelper& tab_helper() const;
 
   // All the extension action APIs take a single argument called details that
   // is a dictionary.

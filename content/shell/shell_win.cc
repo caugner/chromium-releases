@@ -4,9 +4,12 @@
 
 #include "content/shell/shell.h"
 
-#include <windows.h>
 #include <commctrl.h>
+#include <fcntl.h>
+#include <io.h>
+#include <windows.h>
 
+#include "base/command_line.h"
 #include "base/string_piece.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/resource_util.h"
@@ -14,6 +17,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 #include "content/shell/resource.h"
+#include "content/shell/shell_switches.h"
 #include "googleurl/src/gurl.h"
 #include "grit/webkit_resources.h"
 #include "grit/webkit_chromium_resources.h"
@@ -47,6 +51,8 @@ namespace content {
 HINSTANCE Shell::instance_handle_;
 
 void Shell::PlatformInitialize() {
+  _setmode(_fileno(stdout), _O_BINARY);
+  _setmode(_fileno(stderr), _O_BINARY);
   INITCOMMONCONTROLSEX InitCtrlEx;
   InitCtrlEx.dwSize = sizeof(INITCOMMONCONTROLSEX);
   InitCtrlEx.dwICC  = ICC_STANDARD_CLASSES;
@@ -169,8 +175,13 @@ void Shell::SizeTo(int width, int height) {
   // Add space for the url bar.
   window_height += kURLBarHeight;
 
-  SetWindowPos(window_, NULL, 0, 0, window_width, window_height,
-               SWP_NOMOVE | SWP_NOZORDER);
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpRenderTree)) {
+    SetWindowPos(window_, NULL, -window_width, -window_height,
+                 window_width, window_height, SWP_NOZORDER);
+  } else {
+    SetWindowPos(window_, NULL, 0, 0, window_width, window_height,
+                 SWP_NOMOVE | SWP_NOZORDER);
+  }
 }
 
 void Shell::PlatformResizeSubViews() {

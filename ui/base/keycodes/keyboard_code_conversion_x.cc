@@ -64,10 +64,10 @@ KeyboardCode KeyboardCodeFromXKeysym(unsigned int keysym) {
     case XK_KP_End:
       return VKEY_END;
     case XK_Page_Up:
-    case XK_KP_Page_Up:
+    case XK_KP_Page_Up:  // aka XK_KP_Prior
       return VKEY_PRIOR;
     case XK_Page_Down:
-    case XK_KP_Page_Down:
+    case XK_KP_Page_Down:  // aka XK_KP_Next
       return VKEY_NEXT;
     case XK_Left:
     case XK_KP_Left:
@@ -235,6 +235,7 @@ KeyboardCode KeyboardCodeFromXKeysym(unsigned int keysym) {
       return VKEY_DECIMAL;
     case XK_KP_Divide:
       return VKEY_DIVIDE;
+    case XK_KP_Equal:
     case XK_equal:
     case XK_plus:
       return VKEY_OEM_PLUS;
@@ -329,6 +330,11 @@ KeyboardCode KeyboardCodeFromXKeysym(unsigned int keysym) {
     case XK_F23:
     case XK_F24:
       return static_cast<KeyboardCode>(VKEY_F1 + (keysym - XK_F1));
+    case XK_KP_F1:
+    case XK_KP_F2:
+    case XK_KP_F3:
+    case XK_KP_F4:
+      return static_cast<KeyboardCode>(VKEY_F1 + (keysym - XK_KP_F1));
 
 #if defined(TOOLKIT_GTK)
     case XF86XK_Refresh:
@@ -365,18 +371,33 @@ KeyboardCode KeyboardCodeFromXKeysym(unsigned int keysym) {
       return VKEY_VOLUME_DOWN;
     case XF86XK_AudioRaiseVolume:
       return VKEY_VOLUME_UP;
+    case XF86XK_AudioNext:
+      return VKEY_MEDIA_NEXT_TRACK;
+    case XF86XK_AudioPrev:
+      return VKEY_MEDIA_PREV_TRACK;
     case XF86XK_AudioStop:
       return VKEY_MEDIA_STOP;
     case XF86XK_AudioPlay:
       return VKEY_MEDIA_PLAY_PAUSE;
     case XF86XK_Mail:
       return VKEY_MEDIA_LAUNCH_MAIL;
+    case XF86XK_LaunchA:  // F3 on an Apple keyboard.
+      return VKEY_MEDIA_LAUNCH_APP1;
+    case XF86XK_LaunchB:  // F4 on an Apple keyboard.
     case XF86XK_Calculator:
       return VKEY_MEDIA_LAUNCH_APP2;
+    case XF86XK_WLAN:
+      return VKEY_WLAN;
+    case XF86XK_PowerOff:
+      return VKEY_POWER;
     case XF86XK_MonBrightnessDown:
       return VKEY_BRIGHTNESS_DOWN;
     case XF86XK_MonBrightnessUp:
       return VKEY_BRIGHTNESS_UP;
+    case XF86XK_KbdBrightnessDown:
+      return VKEY_KBD_BRIGHTNESS_DOWN;
+    case XF86XK_KbdBrightnessUp:
+      return VKEY_KBD_BRIGHTNESS_UP;
 
     // TODO(sad): some keycodes are still missing.
   }
@@ -709,18 +730,32 @@ int XKeysymForWindowsKeyCode(KeyboardCode keycode, bool shift) {
       return XF86XK_AudioLowerVolume;
     case VKEY_VOLUME_UP:
       return XF86XK_AudioRaiseVolume;
+    case VKEY_MEDIA_NEXT_TRACK:
+      return XF86XK_AudioNext;
+    case VKEY_MEDIA_PREV_TRACK:
+      return XF86XK_AudioPrev;
     case VKEY_MEDIA_STOP:
       return XF86XK_AudioStop;
     case VKEY_MEDIA_PLAY_PAUSE:
       return XF86XK_AudioPlay;
     case VKEY_MEDIA_LAUNCH_MAIL:
       return XF86XK_Mail;
+    case VKEY_MEDIA_LAUNCH_APP1:
+      return XF86XK_LaunchA;
     case VKEY_MEDIA_LAUNCH_APP2:
-      return XF86XK_Calculator;
+      return XF86XK_LaunchB;
+    case VKEY_WLAN:
+      return XF86XK_WLAN;
+    case VKEY_POWER:
+      return XF86XK_PowerOff;
     case VKEY_BRIGHTNESS_DOWN:
       return XF86XK_MonBrightnessDown;
     case VKEY_BRIGHTNESS_UP:
       return XF86XK_MonBrightnessUp;
+    case VKEY_KBD_BRIGHTNESS_DOWN:
+      return XF86XK_KbdBrightnessDown;
+    case VKEY_KBD_BRIGHTNESS_UP:
+      return XF86XK_KbdBrightnessUp;
 
     default:
       LOG(WARNING) << "Unknown keycode:" << keycode;

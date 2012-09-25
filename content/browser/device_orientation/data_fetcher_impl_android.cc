@@ -9,7 +9,7 @@
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "content/browser/device_orientation/orientation.h"
-#include "jni/device_orientation_jni.h"
+#include "jni/DeviceOrientation_jni.h"
 
 using base::android::AttachCurrentThread;
 using base::android::CheckException;
@@ -54,7 +54,14 @@ DataFetcherImplAndroid::~DataFetcherImplAndroid() {
   Stop();
 }
 
-bool DataFetcherImplAndroid::GetOrientation(Orientation* orientation) {
+const DeviceData* DataFetcherImplAndroid::GetDeviceData(
+    DeviceData::Type type) {
+  if (type != DeviceData::kTypeOrientation)
+    return NULL;
+  return GetOrientation();
+}
+
+const Orientation* DataFetcherImplAndroid::GetOrientation() {
   // Do we have a new orientation value? (It's safe to do this outside the lock
   // because we only skip the lock if the value is null. We always enter the
   // lock if we're going to make use of the new value.)
@@ -62,16 +69,21 @@ bool DataFetcherImplAndroid::GetOrientation(Orientation* orientation) {
     base::AutoLock autolock(next_orientation_lock_);
     next_orientation_.swap(current_orientation_);
   }
-  if (current_orientation_.get())
-    *orientation = *current_orientation_;
-  return true;
+  if (!current_orientation_.get())
+    return new Orientation();
+  return current_orientation_.get();
 }
 
 void DataFetcherImplAndroid::GotOrientation(
     JNIEnv*, jobject, double alpha, double beta, double gamma) {
   base::AutoLock autolock(next_orientation_lock_);
-  next_orientation_.reset(
-      new Orientation(true, alpha, true, beta, true, gamma, true, true));
+
+  Orientation* orientation = new Orientation();
+  orientation->set_alpha(alpha);
+  orientation->set_beta(beta);
+  orientation->set_gamma(gamma);
+  orientation->set_absolute(true);
+  next_orientation_ = orientation;
 }
 
 bool DataFetcherImplAndroid::Start(int rate_in_milliseconds) {

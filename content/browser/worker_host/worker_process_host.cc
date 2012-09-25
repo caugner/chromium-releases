@@ -45,7 +45,7 @@
 #include "content/public/common/result_codes.h"
 #include "ipc/ipc_switches.h"
 #include "net/base/mime_util.h"
-#include "net/base/registry_controlled_domain.h"
+#include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "ui/base/ui_base_switches.h"
 #include "webkit/fileapi/file_system_context.h"
 #include "webkit/fileapi/sandbox_mount_point_provider.h"
@@ -622,7 +622,8 @@ bool WorkerProcessHost::WorkerInstance::Matches(
   if (closed_)
     return false;
 
-  // Have to match the same ResourceContext.
+  // ResourceContext equivalence is being used as a proxy to ensure we only
+  // matched shared workers within the same BrowserContext.
   if (resource_context_ != resource_context)
     return false;
 

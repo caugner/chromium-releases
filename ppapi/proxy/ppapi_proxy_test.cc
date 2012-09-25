@@ -237,6 +237,10 @@ void PluginProxyTestHarness::PluginDelegateMock::PreCacheFont(
     const void* logfontw) {
 }
 
+void PluginProxyTestHarness::PluginDelegateMock::SetActiveURL(
+    const std::string& url) {
+}
+
 // PluginProxyTest -------------------------------------------------------------
 
 PluginProxyTest::PluginProxyTest() {
@@ -280,7 +284,7 @@ void HostProxyTestHarness::SetUpHarness() {
   host_dispatcher_.reset(new HostDispatcher(
       pp_module(),
       &MockGetInterface,
-      status_receiver_.get()));
+      status_receiver_.release()));
   host_dispatcher_->InitWithTestSink(&sink());
   HostDispatcher::SetForInstance(pp_instance(), host_dispatcher_.get());
 }
@@ -297,7 +301,7 @@ void HostProxyTestHarness::SetUpHarnessWithChannel(
   host_dispatcher_.reset(new HostDispatcher(
       pp_module(),
       &MockGetInterface,
-      status_receiver_.get()));
+      status_receiver_.release()));
   ppapi::Preferences preferences;
   host_dispatcher_->InitHostWithChannel(&delegate_mock_, channel_handle,
                                         is_client, preferences);
@@ -405,7 +409,6 @@ void TwoWayTest::TearDown() {
 
   io_thread_.Stop();
 }
-
 
 }  // namespace proxy
 }  // namespace ppapi

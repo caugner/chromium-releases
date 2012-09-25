@@ -12,6 +12,7 @@
 #include "base/file_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
+#include "base/string_number_conversions.h"
 #include "base/string_tokenizer.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
@@ -26,9 +27,11 @@
 #include "chrome/browser/content_settings/cookie_settings.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
+#include "chrome/browser/custom_handlers/protocol_handler_registry_factory.h"
+#include "chrome/browser/download/chrome_download_manager_delegate.h"
 #include "chrome/browser/download/download_service.h"
 #include "chrome/browser/download/download_service_factory.h"
-#include "chrome/browser/extensions/extension_event_router.h"
+#include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/extensions/extension_pref_store.h"
 #include "chrome/browser/extensions/extension_pref_value_map.h"
 #include "chrome/browser/extensions/extension_pref_value_map_factory.h"
@@ -83,6 +86,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/host_zoom_map.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/render_process_host.h"
 #include "content/public/browser/user_metrics.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -216,9 +220,32 @@ void ProfileImpl::RegisterUserPrefs(PrefService* prefs) {
   prefs->RegisterStringPref(prefs::kProfileName,
                             "",
                             PrefService::SYNCABLE_PREF);
-  prefs->RegisterBooleanPref(prefs::kRestoreSessionStateDialogShown,
+  prefs->RegisterStringPref(prefs::kHomePage,
+                            std::string(),
+                            PrefService::SYNCABLE_PREF);
+#if defined(ENABLE_PRINTING)
+  prefs->RegisterBooleanPref(prefs::kPrintingEnabled,
+                             true,
+                             PrefService::UNSYNCABLE_PREF);
+#endif
+  prefs->RegisterBooleanPref(prefs::kPrintPreviewDisabled,
+#if defined(GOOGLE_CHROME_BUILD)
                              false,
-                             PrefService::SYNCABLE_PREF);
+#else
+                             true,
+#endif
+                             PrefService::UNSYNCABLE_PREF);
+
+  // Initialize the cache prefs.
+  prefs->RegisterFilePathPref(prefs::kDiskCacheDir,
+                              FilePath(),
+                              PrefService::UNSYNCABLE_PREF);
+  prefs->RegisterIntegerPref(prefs::kDiskCacheSize,
+                             0,
+                             PrefService::UNSYNCABLE_PREF);
+  prefs->RegisterIntegerPref(prefs::kMediaCacheSize,
+                             0,
+                             PrefService::UNSYNCABLE_PREF);
 
   // Deprecated. Kept around for migration.
   prefs->RegisterBooleanPref(prefs::kClearSiteDataOnExit,
@@ -337,8 +364,6 @@ void ProfileImpl::DoFinalInit(bool is_new_profile) {
       g_browser_process->background_mode_manager()->RegisterProfile(this);
   }
 
-  InitRegisteredProtocolHandlers();
-
   InstantController::RecordMetrics(this);
 
   FilePath cookie_path = GetPath();
@@ -434,40 +459,10 @@ void ProfileImpl::InitHostZoomMap() {
 }
 
 void ProfileImpl::InitPromoResources() {
-#if defined(ENABLE_PROMO_RESOURCE_SERVICE)
   if (promo_resource_service_)
     return;
-
   promo_resource_service_ = new PromoResourceService(this);
   promo_resource_service_->StartAfterDelay();
-#endif
-}
-
-void ProfileImpl::InitRegisteredProtocolHandlers() {
-  if (protocol_handler_registry_)
-    return;
-  protocol_handler_registry_ = new ProtocolHandlerRegistry(this,
-      new ProtocolHandlerRegistry::Delegate());
-
-  // Install predefined protocol handlers.
-  InstallDefaultProtocolHandlers();
-
-  protocol_handler_registry_->Load();
-}
-
-void ProfileImpl::InstallDefaultProtocolHandlers() {
-#if defined(OS_CHROMEOS)
-  protocol_handler_registry_->AddPredefinedHandler(
-      ProtocolHandler::CreateProtocolHandler(
-          "mailto",
-          GURL(l10n_util::GetStringUTF8(IDS_GOOGLE_MAILTO_HANDLER_URL)),
-          l10n_util::GetStringUTF16(IDS_GOOGLE_MAILTO_HANDLER_NAME)));
-  protocol_handler_registry_->AddPredefinedHandler(
-      ProtocolHandler::CreateProtocolHandler(
-          "webcal",
-          GURL(l10n_util::GetStringUTF8(IDS_GOOGLE_WEBCAL_HANDLER_URL)),
-          l10n_util::GetStringUTF16(IDS_GOOGLE_WEBCAL_HANDLER_NAME)));
-#endif
 }
 
 FilePath ProfileImpl::last_selected_directory() {
@@ -479,10 +474,8 @@ void ProfileImpl::set_last_selected_directory(const FilePath& path) {
 }
 
 ProfileImpl::~ProfileImpl() {
-  content::NotificationService::current()->Notify(
-      chrome::NOTIFICATION_PROFILE_DESTROYED,
-      content::Source<Profile>(this),
-      content::NotificationService::NoDetails());
+  MaybeSendDestroyedNotification();
+
   bool prefs_loaded = prefs_->GetInitializationStatus() !=
       PrefService::INITIALIZATION_STATUS_WAITING;
 
@@ -495,11 +488,6 @@ ProfileImpl::~ProfileImpl() {
 
   ChromePluginServiceFilter::GetInstance()->UnregisterResourceContext(
       io_data_.GetResourceContextNoInit());
-
-  if (io_data_.HasMainRequestContext() &&
-      default_request_context_ == GetRequestContext()) {
-    default_request_context_ = NULL;
-  }
 
   // Destroy OTR profile and its profile services first.
   if (off_the_record_profile_.get()) {
@@ -528,9 +516,6 @@ ProfileImpl::~ProfileImpl() {
 
   if (pref_proxy_config_tracker_.get())
     pref_proxy_config_tracker_->DetachFromPrefService();
-
-  if (protocol_handler_registry_)
-    protocol_handler_registry_->Finalize();
 
   if (host_content_settings_map_)
     host_content_settings_map_->ShutdownOnUIThread();
@@ -592,19 +577,19 @@ VisitedLinkMaster* ProfileImpl::GetVisitedLinkMaster() {
 }
 
 ExtensionService* ProfileImpl::GetExtensionService() {
-  return ExtensionSystem::Get(this)->extension_service();
+  return extensions::ExtensionSystem::Get(this)->extension_service();
 }
 
-UserScriptMaster* ProfileImpl::GetUserScriptMaster() {
-  return ExtensionSystem::Get(this)->user_script_master();
+extensions::UserScriptMaster* ProfileImpl::GetUserScriptMaster() {
+  return extensions::ExtensionSystem::Get(this)->user_script_master();
 }
 
 ExtensionProcessManager* ProfileImpl::GetExtensionProcessManager() {
-  return ExtensionSystem::Get(this)->process_manager();
+  return extensions::ExtensionSystem::Get(this)->process_manager();
 }
 
-ExtensionEventRouter* ProfileImpl::GetExtensionEventRouter() {
-  return ExtensionSystem::Get(this)->event_router();
+extensions::EventRouter* ProfileImpl::GetExtensionEventRouter() {
+  return extensions::ExtensionSystem::Get(this)->event_router();
 }
 
 ExtensionSpecialStoragePolicy*
@@ -626,10 +611,10 @@ void ProfileImpl::OnPrefsLoaded(bool success) {
   // The Profile class and ProfileManager class may read some prefs so
   // register known prefs as soon as possible.
   Profile::RegisterUserPrefs(prefs_.get());
-  browser::RegisterUserPrefs(prefs_.get());
+  chrome::RegisterUserPrefs(prefs_.get());
   // TODO(mirandac): remove migration code after 6 months (crbug.com/69995).
   if (g_browser_process->local_state())
-    browser::MigrateBrowserPrefs(this, g_browser_process->local_state());
+    chrome::MigrateBrowserPrefs(this, g_browser_process->local_state());
 
   // The last session exited cleanly if there is no pref for
   // kSessionExitedCleanly or the value for kSessionExitedCleanly is true.
@@ -686,21 +671,13 @@ FilePath ProfileImpl::GetPrefFilePath() {
 }
 
 net::URLRequestContextGetter* ProfileImpl::GetRequestContext() {
-  net::URLRequestContextGetter* request_context =
-      io_data_.GetMainRequestContextGetter();
-  // The first request context is always a normal (non-OTR) request context.
-  // Even when Chromium is started in OTR mode, a normal profile is always
-  // created first.
-  if (!default_request_context_)
-    default_request_context_ = request_context;
-
-  return request_context;
+  return io_data_.GetMainRequestContextGetter();
 }
 
 net::URLRequestContextGetter* ProfileImpl::GetRequestContextForRenderProcess(
     int renderer_child_id) {
   ExtensionService* extension_service =
-      ExtensionSystem::Get(this)->extension_service();
+      extensions::ExtensionSystem::Get(this)->extension_service();
   if (extension_service) {
     const extensions::Extension* installed_app = extension_service->
         GetInstalledAppForRenderer(renderer_child_id);
@@ -708,6 +685,19 @@ net::URLRequestContextGetter* ProfileImpl::GetRequestContextForRenderProcess(
       return GetRequestContextForIsolatedApp(installed_app->id());
     }
   }
+
+  content::RenderProcessHost* rph = content::RenderProcessHost::FromID(
+      renderer_child_id);
+  if (rph && rph->IsGuest()) {
+    // For guest processes (used by the browser tag), we need to isolate the
+    // storage.
+    // TODO(nasko): Until we have proper storage partitions, create a
+    // non-persistent context using the RPH's id.
+    std::string id("guest-");
+    id.append(base::IntToString(renderer_child_id));
+    return GetRequestContextForIsolatedApp(id);
+  }
+
   return GetRequestContext();
 }
 
@@ -778,17 +768,7 @@ HistoryService* ProfileImpl::GetHistoryService(ServiceAccessType sat) {
 }
 
 HistoryService* ProfileImpl::GetHistoryServiceWithoutCreating() {
-  return HistoryServiceFactory::GetForProfileIfExists(this).get();
-}
-
-history::ShortcutsBackend* ProfileImpl::GetShortcutsBackend() {
-  // This is called on one thread only - UI, so no magic is needed to protect
-  // against the multiple concurrent calls.
-  if (!shortcuts_backend_.get()) {
-    shortcuts_backend_ = new history::ShortcutsBackend(GetPath(), this);
-    CHECK(shortcuts_backend_->Init());
-  }
-  return shortcuts_backend_.get();
+  return HistoryServiceFactory::GetForProfileWithoutCreating(this).get();
 }
 
 DownloadManagerDelegate* ProfileImpl::GetDownloadManagerDelegate() {
@@ -812,7 +792,11 @@ BookmarkModel* ProfileImpl::GetBookmarkModel() {
 }
 
 ProtocolHandlerRegistry* ProfileImpl::GetProtocolHandlerRegistry() {
-  return protocol_handler_registry_.get();
+  // TODO(smckay): Update all existing callers to use
+  // ProtocolHandlerRegistryFactory. Once that's done, this method
+  // can be nuked from Profile and ProfileImpl.
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  return ProtocolHandlerRegistryFactory::GetForProfile(this);
 }
 
 bool ProfileImpl::IsSameProfile(Profile* profile) {

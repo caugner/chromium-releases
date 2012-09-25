@@ -11,6 +11,7 @@
 #include "chrome/browser/renderer_preferences_util.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_controller_factory.h"
 #include "chrome/browser/view_type_utils.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -48,7 +49,8 @@ void BalloonHost::Shutdown() {
   web_contents_.reset();
 }
 
-ExtensionWindowController* BalloonHost::GetExtensionWindowController() const {
+extensions::WindowController*
+BalloonHost::GetExtensionWindowController() const {
   // Notifications don't have a window controller.
   return NULL;
 }
@@ -82,9 +84,10 @@ void BalloonHost::AddNewContents(WebContents* source,
                                  bool user_gesture) {
   Browser* browser = browser::FindLastActiveWithProfile(
       Profile::FromBrowserContext(new_contents->GetBrowserContext()));
-  if (!browser)
-    return;
-  browser->AddWebContents(new_contents, disposition, initial_pos, user_gesture);
+  if (browser) {
+    chrome::AddWebContents(browser, NULL, new_contents, disposition,
+                           initial_pos, user_gesture);
+  }
 }
 
 void BalloonHost::RenderViewCreated(content::RenderViewHost* render_view_host) {
@@ -135,6 +138,9 @@ void BalloonHost::Init() {
   chrome::SetViewType(web_contents_.get(), chrome::VIEW_TYPE_NOTIFICATION);
   web_contents_->SetDelegate(this);
   Observe(web_contents_.get());
+  renderer_preferences_util::UpdateFromSystemSettings(
+      web_contents_->GetMutableRendererPrefs(), balloon_->profile());
+  web_contents_->GetRenderViewHost()->SyncRendererPrefs();
 
   web_contents_->GetController().LoadURL(
       balloon_->notification().content_url(), content::Referrer(),

@@ -12,6 +12,7 @@
 #include "chrome/browser/automation/automation_tab_helper.h"
 #include "chrome/browser/automation/mock_tab_event_observer.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
@@ -25,6 +26,7 @@
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/test/browser_test_utils.h"
 #include "net/base/net_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -52,10 +54,8 @@ class MockNotificationObserver : public content::NotificationObserver {
 
 class AutomationTabHelperBrowserTest : public InProcessBrowserTest {
  public:
-  AutomationTabHelperBrowserTest() {
-    EnableDOMAutomation();
-  }
-  virtual ~AutomationTabHelperBrowserTest() { }
+  AutomationTabHelperBrowserTest() {}
+  virtual ~AutomationTabHelperBrowserTest() {}
 
   void SetUpInProcessBrowserTestFixture() {
     EXPECT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir_));
@@ -91,9 +91,9 @@ class AutomationTabHelperBrowserTest : public InProcessBrowserTest {
     std::string script = base::StringPrintf("runTestCase(%d);",
                                             test_case_number);
     content::RenderViewHost* host =
-        browser()->GetActiveWebContents()->GetRenderViewHost();
+        chrome::GetActiveWebContents(browser())->GetRenderViewHost();
     if (wait_for_response) {
-      ASSERT_TRUE(ui_test_utils::ExecuteJavaScript(
+      ASSERT_TRUE(content::ExecuteJavaScript(
           host, L"", ASCIIToWide(script)));
     } else {
       script += "window.domAutomationController.setAutomationId(0);"
@@ -104,7 +104,7 @@ class AutomationTabHelperBrowserTest : public InProcessBrowserTest {
 
   // Returns the |AutomationTabHelper| for the first browser's first tab.
   AutomationTabHelper* tab_helper() {
-    return browser()->GetTabContentsAt(0)->automation_tab_helper();
+    return chrome::GetTabContentsAt(browser(), 0)->automation_tab_helper();
   }
 
  protected:
@@ -121,7 +121,7 @@ IN_PROC_BROWSER_TEST_F(AutomationTabHelperBrowserTest, FormSubmission) {
   ExpectClientRedirectAndBreak(&mock_observer, &mock_notification_observer);
 
   ASSERT_NO_FATAL_FAILURE(RunTestCaseInJavaScript(1, false));
-  ui_test_utils::RunMessageLoop();
+  content::RunMessageLoop();
 }
 
 IN_PROC_BROWSER_TEST_F(AutomationTabHelperBrowserTest,
@@ -149,7 +149,7 @@ IN_PROC_BROWSER_TEST_F(AutomationTabHelperBrowserTest,
   ExpectClientRedirectAndBreak(&mock_observer, &mock_notification_observer);
 
   ASSERT_NO_FATAL_FAILURE(RunTestCaseInJavaScript(3, false));
-  ui_test_utils::RunMessageLoop();
+  content::RunMessageLoop();
 }
 
 IN_PROC_BROWSER_TEST_F(AutomationTabHelperBrowserTest,
@@ -163,7 +163,7 @@ IN_PROC_BROWSER_TEST_F(AutomationTabHelperBrowserTest,
   ExpectClientRedirectAndBreak(&mock_observer, &mock_notification_observer);
 
   ASSERT_NO_FATAL_FAILURE(RunTestCaseInJavaScript(4, false));
-  ui_test_utils::RunMessageLoop();
+  content::RunMessageLoop();
 }
 
 IN_PROC_BROWSER_TEST_F(AutomationTabHelperBrowserTest,

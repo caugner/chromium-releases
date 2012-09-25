@@ -20,16 +20,15 @@
 #include "base/threading/thread_restrictions.h"
 #include "chrome/browser/automation/automation_provider_list.h"
 #include "chrome/browser/background/background_mode_manager.h"
-#include "chrome/browser/browser_trial.h"
-#include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/chrome_browser_main.h"
+#include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/chrome_plugin_service_filter.h"
 #include "chrome/browser/component_updater/component_updater_configurator.h"
 #include "chrome/browser/component_updater/component_updater_service.h"
 #include "chrome/browser/debugger/remote_debugging_server.h"
 #include "chrome/browser/download/download_request_limiter.h"
 #include "chrome/browser/download/download_status_updater.h"
-#include "chrome/browser/extensions/extension_event_router_forwarder.h"
+#include "chrome/browser/extensions/event_router_forwarder.h"
 #include "chrome/browser/extensions/extension_tab_id_map.h"
 #include "chrome/browser/first_run/upgrade_util.h"
 #include "chrome/browser/icon_manager.h"
@@ -56,7 +55,6 @@
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/browser/status_icons/status_tray.h"
-#include "chrome/browser/tab_closeable_state_watcher.h"
 #include "chrome/browser/tab_contents/thumbnail_generator.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/common/chrome_constants.h"
@@ -157,7 +155,7 @@ BrowserProcessImpl::BrowserProcessImpl(const CommandLine& command_line)
   ChildProcessSecurityPolicy::GetInstance()->RegisterWebSafeScheme(
       chrome::kExtensionResourceScheme);
 
-  extension_event_router_forwarder_ = new ExtensionEventRouterForwarder;
+  extension_event_router_forwarder_ = new extensions::EventRouterForwarder;
 
   ExtensionTabIdMap::GetInstance()->Init();
 }
@@ -397,10 +395,10 @@ net::URLRequestContextGetter* BrowserProcessImpl::system_request_context() {
   return io_thread()->system_url_request_context_getter();
 }
 
-VariationsService* BrowserProcessImpl::variations_service() {
+chrome_variations::VariationsService* BrowserProcessImpl::variations_service() {
   DCHECK(CalledOnValidThread());
   if (!variations_service_.get())
-    variations_service_.reset(new VariationsService());
+    variations_service_.reset(new chrome_variations::VariationsService());
   return variations_service_.get();
 }
 
@@ -413,7 +411,7 @@ chromeos::OomPriorityManager* BrowserProcessImpl::oom_priority_manager() {
 }
 #endif  // defined(OS_CHROMEOS)
 
-ExtensionEventRouterForwarder*
+extensions::EventRouterForwarder*
 BrowserProcessImpl::extension_event_router_forwarder() {
   return extension_event_router_forwarder_.get();
 }
@@ -552,13 +550,6 @@ DownloadRequestLimiter* BrowserProcessImpl::download_request_limiter() {
   if (!download_request_limiter_)
     download_request_limiter_ = new DownloadRequestLimiter();
   return download_request_limiter_;
-}
-
-TabCloseableStateWatcher* BrowserProcessImpl::tab_closeable_state_watcher() {
-  DCHECK(CalledOnValidThread());
-  if (!tab_closeable_state_watcher_.get())
-    CreateTabCloseableStateWatcher();
-  return tab_closeable_state_watcher_.get();
 }
 
 BackgroundModeManager* BrowserProcessImpl::background_mode_manager() {
@@ -712,13 +703,9 @@ void BrowserProcessImpl::CreateLocalState() {
                                      false));
 
   // Initialize the prefs of the local state.
-  browser::RegisterLocalState(local_state_.get());
+  chrome::RegisterLocalState(local_state_.get());
 
   pref_change_registrar_.Init(local_state_.get());
-
-#if defined(ENABLE_PRINTING)
-  print_job_manager_->InitOnUIThread(local_state_.get());
-#endif
 
   // Initialize the notification for the default browser setting policy.
   local_state_->RegisterBooleanPref(prefs::kDefaultBrowserSettingEnabled,
@@ -767,7 +754,7 @@ void BrowserProcessImpl::PreMainMessageLoopRun() {
   FilePath path;
   if (!CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kDisableInternalFlash) &&
-      PathService::Get(chrome::FILE_FLASH_PLUGIN, &path)) {
+      PathService::Get(chrome::FILE_FLASH_PLUGIN_EXISTING, &path)) {
     plugin_service->AddExtraPluginPath(path);
   }
 
@@ -814,11 +801,6 @@ void BrowserProcessImpl::CreateNotificationUIManager() {
   notification_ui_manager_.reset(NotificationUIManager::Create(local_state()));
   created_notification_ui_manager_ = true;
 #endif
-}
-
-void BrowserProcessImpl::CreateTabCloseableStateWatcher() {
-  DCHECK(tab_closeable_state_watcher_.get() == NULL);
-  tab_closeable_state_watcher_.reset(TabCloseableStateWatcher::Create());
 }
 
 void BrowserProcessImpl::CreateBackgroundModeManager() {

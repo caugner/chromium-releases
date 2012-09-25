@@ -6,7 +6,6 @@
 
 #ifndef CHROME_COMMON_URL_CONSTANTS_H_
 #define CHROME_COMMON_URL_CONSTANTS_H_
-#pragma once
 
 #include "build/build_config.h"
 #include "content/public/common/url_constants.h"
@@ -33,6 +32,7 @@ extern const char kChromeUIDownloadsURL[];
 extern const char kChromeUIEditSearchEngineDialogURL[];
 extern const char kChromeUIExtensionActivityURL[];
 extern const char kChromeUIExtensionIconURL[];
+extern const char kChromeUIExtensionInfoURL[];
 extern const char kChromeUIExtensionsFrameURL[];
 extern const char kChromeUIExtensionsURL[];
 extern const char kChromeUIFaviconURL[];
@@ -44,10 +44,12 @@ extern const char kChromeUIHistoryURL[];
 extern const char kChromeUIHistoryFrameURL[];
 extern const char kChromeUIInputWindowDialogURL[];
 extern const char kChromeUIInspectURL[];
+extern const char kChromeUIInstantURL[];
 extern const char kChromeUIIPCURL[];
 extern const char kChromeUIKeyboardURL[];
 extern const char kChromeUIMemoryRedirectURL[];
 extern const char kChromeUIMemoryURL[];
+extern const char kChromeUIMetroFlowURL[];
 extern const char kChromeUINetInternalsURL[];
 extern const char kChromeUINewProfile[];
 extern const char kChromeUINewTabURL[];
@@ -71,6 +73,7 @@ extern const char kChromeUIVersionURL[];
 #if defined(OS_CHROMEOS)
 extern const char kChromeUIActivationMessage[];
 extern const char kChromeUIChooseMobileNetworkURL[];
+extern const char kChromeUIDiagnosticsURL[];
 extern const char kChromeUIDiscardsURL[];
 extern const char kChromeUIIdleLogoutDialogURL[];
 extern const char kChromeUIImageBurnerURL[];
@@ -88,6 +91,7 @@ extern const char kChromeUISystemInfoURL[];
 extern const char kChromeUITermsOemURL[];
 extern const char kChromeUIUserImageURL[];
 extern const char kChromeUIWallpaperURL[];
+extern const char kChromeUIWallpaperImageURL[];
 extern const char kChromeUIWallpaperThumbnailURL[];
 #endif
 
@@ -130,9 +134,11 @@ extern const char kChromeUIDevToolsHost[];
 extern const char kChromeUIDialogHost[];
 extern const char kChromeUIDNSHost[];
 extern const char kChromeUIDownloadsHost[];
+extern const char kChromeUIDriveInternalsHost[];
 extern const char kChromeUIEditSearchEngineDialogHost[];
 extern const char kChromeUIExtensionActivityHost[];
 extern const char kChromeUIExtensionIconHost[];
+extern const char kChromeUIExtensionInfoHost[];
 extern const char kChromeUIExtensionsFrameHost[];
 extern const char kChromeUIExtensionsHost[];
 extern const char kChromeUIFaviconHost[];
@@ -144,17 +150,18 @@ extern const char kChromeUIHelpHost[];
 extern const char kChromeUIGpuHost[];
 extern const char kChromeUIGpuInternalsHost[];
 extern const char kChromeUIHangHost[];
-extern const char kChromeUIHistogramsHost[];
 extern const char kChromeUIHistoryHost[];
 extern const char kChromeUIHistoryFrameHost[];
 extern const char kChromeUIInputWindowDialogHost[];
 extern const char kChromeUIInspectHost[];
+extern const char kChromeUIInstantHost[];
 extern const char kChromeUIIPCHost[];
 extern const char kChromeUIKeyboardHost[];
 extern const char kChromeUIKillHost[];
 extern const char kChromeUIMediaInternalsHost[];
 extern const char kChromeUIMemoryHost[];
 extern const char kChromeUIMemoryRedirectHost[];
+extern const char kChromeUIMetroFlowHost[];
 extern const char kChromeUINetInternalsHost[];
 extern const char kChromeUINewTabHost[];
 extern const char kChromeUIOmniboxHost[];
@@ -198,6 +205,7 @@ extern const char kChromeUISandboxHost[];
 extern const char kChromeUIActivationMessageHost[];
 extern const char kChromeUIChooseMobileNetworkHost[];
 extern const char kChromeUICryptohomeHost[];
+extern const char kChromeUIDiagnosticsHost[];
 extern const char kChromeUIDiscardsHost[];
 extern const char kChromeUIIdleLogoutDialogHost[];
 extern const char kChromeUIImageBurnerHost[];
@@ -218,6 +226,7 @@ extern const char kChromeUISlideshowHost[];
 extern const char kChromeUISystemInfoHost[];
 extern const char kChromeUIUserImageHost[];
 extern const char kChromeUIWallpaperHost[];
+extern const char kChromeUIWallpaperImageHost[];
 extern const char kChromeUIWallpaperThumbnailHost[];
 
 extern const char kChromeUIMenu[];
@@ -303,6 +312,11 @@ extern const char kCrashReasonURL[];
 // "Learn more" URL for killed tab page.
 extern const char kKillReasonURL[];
 
+#if defined(OS_WIN)
+// "Learn more" URL for the Win8 Data Privacy section under Options.
+extern const char kPrivacyWin8DataLearnMoreURL[];
+#endif
+
 // "Learn more" URL for the Privacy section under Options.
 extern const char kPrivacyLearnMoreURL[];
 
@@ -355,6 +369,9 @@ extern const char kSyncErrorsHelpURL[];
 // The URL to create a new Google account via sync.
 extern const char kSyncCreateNewAccountURL[];
 
+// The URL for the "Learn more" link in the Chrome To Mobile bubble.
+extern const char kChromeToMobileLearnMoreURL[];
+
 #if defined(OS_CHROMEOS)
 // The URL for the "Learn more" link for natural scrolling on ChromeOS.
 extern const char kNaturalScrollHelpURL[];
@@ -380,6 +397,9 @@ extern const char kDriveScheme[];
 #endif
 #if defined(OS_ANDROID)
 extern const char kContentScheme[];
+// Special Android file paths.
+extern const char kAndroidAssetPath[];
+extern const char kAndroidResourcePath[];
 #endif
 
 #if defined(OS_CHROMEOS)

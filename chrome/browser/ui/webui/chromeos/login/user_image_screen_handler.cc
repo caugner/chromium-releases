@@ -61,24 +61,39 @@ void UserImageScreenHandler::GetLocalizedStrings(
       l10n_util::GetStringUTF16(IDS_OPTIONS_CHANGE_PICTURE_DIALOG_TEXT));
   localized_strings->SetString("takePhoto",
       l10n_util::GetStringUTF16(IDS_OPTIONS_CHANGE_PICTURE_TAKE_PHOTO));
+  localized_strings->SetString("discardPhoto",
+      l10n_util::GetStringUTF16(IDS_OPTIONS_CHANGE_PICTURE_DISCARD_PHOTO));
+  localized_strings->SetString("flipPhoto",
+      l10n_util::GetStringUTF16(IDS_OPTIONS_CHANGE_PICTURE_FLIP_PHOTO));
   localized_strings->SetString("profilePhoto",
       l10n_util::GetStringUTF16(IDS_IMAGE_SCREEN_PROFILE_PHOTO));
   localized_strings->SetString("profilePhotoLoading",
       l10n_util::GetStringUTF16(IDS_IMAGE_SCREEN_PROFILE_LOADING_PHOTO));
   localized_strings->SetString("okButtonText",
       l10n_util::GetStringUTF16(IDS_OK));
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableHtml5Camera))
+  localized_strings->SetString("authorCredit",
+      l10n_util::GetStringUTF16(IDS_OPTIONS_SET_WALLPAPER_AUTHOR_TEXT));
+  if (!CommandLine::ForCurrentProcess()->
+          HasSwitch(switches::kDisableHtml5Camera)) {
     localized_strings->SetString("cameraType", "webrtc");
-  else
+  } else {
     localized_strings->SetString("cameraType", "old");
+  }
 }
 
 void UserImageScreenHandler::Initialize() {
-  ListValue image_urls;
-  for (int i = 0; i < kDefaultImagesCount; ++i) {
-    image_urls.Append(new StringValue(GetDefaultImageUrl(i)));
+  base::ListValue image_urls;
+  for (int i = kFirstDefaultImageIndex; i < kDefaultImagesCount; ++i) {
+    scoped_ptr<base::DictionaryValue> image_data(new base::DictionaryValue);
+    image_data->SetString("url", GetDefaultImageUrl(i));
+    image_data->SetString(
+        "author", l10n_util::GetStringUTF16(kDefaultImageAuthorIDs[i]));
+    image_data->SetString(
+        "website", l10n_util::GetStringUTF16(kDefaultImageWebsiteIDs[i]));
+    image_data->SetString("title", GetDefaultImageDescription(i));
+    image_urls.Append(image_data.release());
   }
-  web_ui()->CallJavascriptFunction("oobe.UserImageScreen.setUserImages",
+  web_ui()->CallJavascriptFunction("oobe.UserImageScreen.setDefaultImages",
                                    image_urls);
 
   if (selected_image_ != User::kInvalidImageIndex)
@@ -139,8 +154,10 @@ void UserImageScreenHandler::ShowCameraInitializing() {
 
 void UserImageScreenHandler::CheckCameraPresence() {
   // For WebRTC, camera presence checked is done on JS side.
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableHtml5Camera))
+  if (!CommandLine::ForCurrentProcess()->
+          HasSwitch(switches::kDisableHtml5Camera)) {
     return;
+  }
   CameraDetector::StartPresenceCheck(
       base::Bind(&UserImageScreenHandler::OnCameraPresenceCheckDone,
                  weak_factory_.GetWeakPtr()));

@@ -4,7 +4,6 @@
 
 #ifndef UI_GFX_DISPLAY_H_
 #define UI_GFX_DISPLAY_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -30,11 +29,11 @@ class UI_EXPORT Display {
   ~Display();
 
   // Sets/Gets unique identifier associated with the display.
+  // -1 means invalid display and it doesn't not exit.
   int id() const { return id_; }
   void set_id(int id) { id_ = id; }
 
   // Gets/Sets the display's bounds in gfx::Screen's coordinates.
-  // -1 means invalid display and it doesn't not exit.
   const Rect& bounds() const { return bounds_; }
   void set_bounds(const Rect& bounds) { bounds_ = bounds; }
 
@@ -75,9 +74,8 @@ class UI_EXPORT Display {
   gfx::Size GetSizeInPixel() const;
 
 #if defined(USE_AURA)
-  // TODO(oshima): |bounds()| on ash is not screen's coordinate and
-  // this is an workaround for this. This will be removed when ash
-  // has true multi display support. crbug.com/119268.
+  // TODO(oshima|skuhne): Eliminate the use of bounds_in_pixel in events_x.cc
+  // and remove bounds_in_pixel from gfx::Display.
   // Returns the display's bounds in pixel coordinates.
   const Rect& bounds_in_pixel() const { return bounds_in_pixel_; }
 #endif

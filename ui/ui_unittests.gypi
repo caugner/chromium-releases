@@ -28,7 +28,7 @@
       'conditions': [
         ['chromeos==1', {
           'dependencies': [
-            '../chromeos/chromeos.gyp:chromeos_test_support',
+            '../chromeos/chromeos.gyp:chromeos_test_support_without_gmock',
             '../skia/skia.gyp:skia',
           ]
         }],
@@ -51,7 +51,7 @@
         '../third_party/icu/icu.gyp:icuuc',
         '../third_party/libpng/libpng.gyp:libpng',
         'ui',
-        'ui_resources_standard',
+        'ui_resources',
         'ui_test_support',
       ],
       'sources': [
@@ -66,6 +66,8 @@
         'base/cocoa/fullscreen_window_manager_unittest.mm',
         'base/cocoa/events_mac_unittest.mm',
         'base/cocoa/focus_tracker_unittest.mm',
+        'base/dialogs/select_file_dialog_win_unittest.cc',
+        'base/event_unittest.cc',
         'base/gtk/gtk_expanded_container_unittest.cc',
         'base/gtk/gtk_im_context_util_unittest.cc',
         'base/gtk/menu_label_accelerator_util_unittest.cc',
@@ -95,11 +97,15 @@
         'gfx/font_list_unittest.cc',
         'gfx/font_unittest.cc',
         'gfx/image/image_mac_unittest.mm',
+        'gfx/image/image_skia_unittest.cc',
         'gfx/image/image_unittest.cc',
         'gfx/image/image_unittest_util.cc',
         'gfx/image/image_unittest_util.h',
+        'gfx/image/image_unittest_util_mac.mm',
+        'gfx/image/image_util_unittest.cc',
         'gfx/insets_unittest.cc',
         'gfx/rect_unittest.cc',
+        'gfx/render_text_unittest.cc',
         'gfx/screen_unittest.cc',
         'gfx/shadow_value_unittest.cc',
         'gfx/skbitmap_operations_unittest.cc',
@@ -109,7 +115,6 @@
         'test/run_all_unittests.cc',
         'test/test_suite.cc',
         'test/test_suite.h',
-        '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources_standard/ui_resources_standard.rc',
       ],
       'include_dirs': [
         '../',
@@ -194,8 +199,8 @@
             '../build/linux/system.gyp:gtk',
           ],
         }],
-        ['toolkit_views==1 and OS!="mac"', {
-          'sources': [
+        ['OS=="android" or OS=="ios"', {
+          'sources!': [
             'gfx/render_text_unittest.cc',
           ],
         }],
@@ -204,16 +209,21 @@
             'base/view_prop_unittest.cc',
           ],
         }],
+        ['use_aura==1 or toolkit_views==1',  {
+          'sources': [
+            'base/gestures/velocity_calculator_unittest.cc',
+          ],
+        }, {
+          'sources!': [
+            'base/event_unittest.cc',
+          ],
+        }],
         ['use_aura==1', {
           'sources!': [
+            'base/dialogs/select_file_dialog_win_unittest.cc',
             'base/dragdrop/os_exchange_data_win_unittest.cc',
             'base/native_theme/native_theme_win_unittest.cc',
             'gfx/screen_unittest.cc',
-          ],
-        }],
-        ['use_aura==1 or toolkit_views==1', {
-          'sources': [
-            'base/gestures/velocity_calculator_unittest.cc',
           ],
         }],
       ],

@@ -57,12 +57,14 @@ class PrerenderTabHelper::PixelStats {
 
     skia::PlatformCanvas* temp_canvas = new skia::PlatformCanvas;
     web_contents->GetRenderViewHost()->CopyFromBackingStore(
-        gfx::Rect(), gfx::Size(), temp_canvas,
+        gfx::Rect(),
+        gfx::Size(),
         base::Bind(&PrerenderTabHelper::PixelStats::HandleBitmapResult,
                    weak_factory_.GetWeakPtr(),
                    bitmap_type,
                    web_contents,
-                   base::Owned(temp_canvas)));
+                   base::Owned(temp_canvas)),
+        temp_canvas);
   }
 
  private:
@@ -129,8 +131,7 @@ class PrerenderTabHelper::PixelStats {
 };
 
 PrerenderTabHelper::PrerenderTabHelper(TabContents* tab)
-    : content::WebContentsObserver(tab->web_contents()),
-      tab_(tab) {
+    : content::WebContentsObserver(tab->web_contents()) {
 }
 
 PrerenderTabHelper::~PrerenderTabHelper() {
@@ -166,7 +167,8 @@ void PrerenderTabHelper::DidCommitProvisionalLoadForFrame(
   prerender_manager->RecordNavigation(validated_url);
 }
 
-void PrerenderTabHelper::DidStopLoading() {
+void PrerenderTabHelper::DidStopLoading(
+    content::RenderViewHost* render_view_host) {
   // Compute the PPLT metric and report it in a histogram, if needed.
   // We include pages that are still prerendering and have just finished
   // loading -- PrerenderManager will sort this out and handle it correctly

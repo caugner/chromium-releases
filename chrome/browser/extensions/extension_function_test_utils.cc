@@ -29,7 +29,7 @@ class TestFunctionDispatcherDelegate
   virtual ~TestFunctionDispatcherDelegate() {}
 
  private:
-  virtual ExtensionWindowController* GetExtensionWindowController()
+  virtual extensions::WindowController* GetExtensionWindowController()
       const OVERRIDE {
     return browser_->extension_window_controller();
   }
@@ -129,26 +129,36 @@ std::string RunFunctionAndReturnError(UIThreadExtensionFunction* function,
                                       Browser* browser,
                                       RunFunctionFlags flags) {
   scoped_refptr<ExtensionFunction> function_owner(function);
+  // Without a callback the function will not generate a result.
+  function->set_has_callback(true);
   RunFunction(function, args, browser, flags);
-  EXPECT_FALSE(function->GetResultValue()) << "Did not expect a result";
+  EXPECT_FALSE(function->GetResultList()) << "Did not expect a result";
   return function->GetError();
 }
 
-base::Value* RunFunctionAndReturnResult(UIThreadExtensionFunction* function,
-                                        const std::string& args,
-                                        Browser* browser) {
-  return RunFunctionAndReturnResult(function, args, browser, NONE);
+base::Value* RunFunctionAndReturnSingleResult(
+    UIThreadExtensionFunction* function,
+    const std::string& args,
+    Browser* browser) {
+  return RunFunctionAndReturnSingleResult(function, args, browser, NONE);
 }
-base::Value* RunFunctionAndReturnResult(UIThreadExtensionFunction* function,
-                                        const std::string& args,
-                                        Browser* browser,
-                                        RunFunctionFlags flags) {
+base::Value* RunFunctionAndReturnSingleResult(
+    UIThreadExtensionFunction* function,
+    const std::string& args,
+    Browser* browser,
+    RunFunctionFlags flags) {
   scoped_refptr<ExtensionFunction> function_owner(function);
+  // Without a callback the function will not generate a result.
+  function->set_has_callback(true);
   RunFunction(function, args, browser, flags);
   EXPECT_TRUE(function->GetError().empty()) << "Unexpected error: "
       << function->GetError();
-  return (function->GetResultValue() == NULL) ? NULL :
-      function->GetResultValue()->DeepCopy();
+  const base::Value* single_result = NULL;
+  if (function->GetResultList() != NULL &&
+      function->GetResultList()->Get(0, &single_result)) {
+    return single_result->DeepCopy();
+  }
+  return NULL;
 }
 
 // This helps us be able to wait until an AsyncExtensionFunction calls
@@ -214,7 +224,7 @@ bool RunFunction(UIThreadExtensionFunction* function,
   // message loop until they do.
   if (!response_delegate.HasResponse()) {
     response_delegate.set_should_post_quit(true);
-    ui_test_utils::RunMessageLoop();
+    content::RunMessageLoop();
   }
 
   EXPECT_TRUE(response_delegate.HasResponse());

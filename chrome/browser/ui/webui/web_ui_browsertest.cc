@@ -17,11 +17,13 @@
 #include "chrome/browser/printing/print_preview_tab_controller.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_navigator.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/browser/ui/webui/test_chrome_web_ui_controller_factory.h"
 #include "chrome/browser/ui/webui/web_ui_test_handler.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/test_tab_strip_model_observer.h"
@@ -196,14 +198,14 @@ void WebUIBrowserTest::PreLoadJavascriptLibraries(
 void WebUIBrowserTest::BrowsePreload(const GURL& browse_to) {
   content::TestNavigationObserver navigation_observer(
       content::Source<NavigationController>(
-          &browser()->GetActiveWebContents()->GetController()),
+          &chrome::GetActiveWebContents(browser())->GetController()),
       this, 1);
-  browser::NavigateParams params(
-      browser(), GURL(browse_to), content::PAGE_TRANSITION_TYPED);
+  chrome::NavigateParams params(browser(), GURL(browse_to),
+                                content::PAGE_TRANSITION_TYPED);
   params.disposition = CURRENT_TAB;
-  browser::Navigate(&params);
+  chrome::Navigate(&params);
   navigation_observer.WaitForObservation(
-      base::Bind(&ui_test_utils::RunMessageLoop),
+      base::Bind(&content::RunMessageLoop),
       base::Bind(&MessageLoop::Quit,
                  base::Unretained(MessageLoopForUI::current())));
 }
@@ -213,9 +215,9 @@ void WebUIBrowserTest::BrowsePrintPreload(const GURL& browse_to) {
 
   TestTabStripModelObserver tabstrip_observer(
       browser()->tab_strip_model(), this);
-  browser()->Print();
+  chrome::Print(browser());
   tabstrip_observer.WaitForObservation(
-      base::Bind(&ui_test_utils::RunMessageLoop),
+      base::Bind(&content::RunMessageLoop),
       base::Bind(&MessageLoop::Quit,
                  base::Unretained(MessageLoopForUI::current())));
 
@@ -223,7 +225,7 @@ void WebUIBrowserTest::BrowsePrintPreload(const GURL& browse_to) {
       printing::PrintPreviewTabController::GetInstance();
   ASSERT_TRUE(tab_controller);
   TabContents* preview_tab = tab_controller->GetPrintPreviewForTab(
-      browser()->GetActiveTabContents());
+      chrome::GetActiveTabContents(browser()));
   ASSERT_TRUE(preview_tab);
   SetWebUIInstance(preview_tab->web_contents()->GetWebUI());
 }
@@ -324,7 +326,7 @@ void WebUIBrowserTest::SetUpInProcessBrowserTestFixture() {
   // TODO(dtseng): should this be part of every BrowserTest or just WebUI test.
   FilePath resources_pack_path;
   PathService::Get(chrome::FILE_RESOURCES_PACK, &resources_pack_path);
-  ResourceBundle::GetSharedInstance().AddDataPack(
+  ResourceBundle::GetSharedInstance().AddDataPackFromPath(
       resources_pack_path, ui::SCALE_FACTOR_100P);
 
   FilePath mockPath;
@@ -464,7 +466,7 @@ bool WebUIBrowserTest::RunJavascriptUsingHandler(
 void WebUIBrowserTest::SetupHandlers() {
   content::WebUI* web_ui_instance = override_selected_web_ui_ ?
       override_selected_web_ui_ :
-      browser()->GetActiveWebContents()->GetWebUI();
+      chrome::GetActiveWebContents(browser())->GetWebUI();
   ASSERT_TRUE(web_ui_instance != NULL);
 
   test_handler_->set_web_ui(web_ui_instance);
@@ -585,7 +587,7 @@ class WebUIBrowserAsyncTest : public WebUIBrowserTest {
 
     // Starts the test in |list_value|[0] with the runAsync wrapper.
     void HandleStartAsyncTest(const ListValue* list_value) {
-      Value* test_name;
+      const Value* test_name;
       ASSERT_TRUE(list_value->Get(0, &test_name));
       web_ui()->CallJavascriptFunction("runAsync", *test_name);
     }

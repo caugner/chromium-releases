@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_CROS_CRYPTOHOME_LIBRARY_H_
 #define CHROME_BROWSER_CHROMEOS_CROS_CRYPTOHOME_LIBRARY_H_
-#pragma once
 
 #include <string>
 
@@ -17,13 +16,7 @@ class CryptohomeLibrary {
   CryptohomeLibrary();
   virtual ~CryptohomeLibrary();
 
-  // Asks cryptohomed if a drive is currently mounted.
-  virtual bool IsMounted() = 0;
-
   // Wrappers of the functions for working with Tpm.
-
-  // Returns whether Tpm is ready.
-  virtual bool TpmIsReady() = 0;
 
   // Returns whether Tpm is presented and enabled.
   virtual bool TpmIsEnabled() = 0;
@@ -33,10 +26,6 @@ class CryptohomeLibrary {
 
   // Returns whether device is being owned (Tpm password is generating).
   virtual bool TpmIsBeingOwned() = 0;
-
-  // Returns Tpm password (if password was cleared empty one is returned).
-  // Return value is true if password was successfully acquired.
-  virtual bool TpmGetPassword(std::string* password) = 0;
 
   // Attempts to start owning (if device isn't owned and isn't being owned).
   virtual void TpmCanAttemptOwnership() = 0;
@@ -53,9 +42,6 @@ class CryptohomeLibrary {
   virtual bool InstallAttributesIsReady() = 0;
   virtual bool InstallAttributesIsInvalid() = 0;
   virtual bool InstallAttributesIsFirstInstall() = 0;
-
-  // Returns hash of |password|, salted with the system salt.
-  virtual std::string HashPassword(const std::string& password) = 0;
 
   // Returns system hash in hex encoded ascii format.
   virtual std::string GetSystemSalt() = 0;

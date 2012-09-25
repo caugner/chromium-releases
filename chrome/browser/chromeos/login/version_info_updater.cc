@@ -13,9 +13,8 @@
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chromeos/cros/cros_library.h"
-#include "chrome/browser/chromeos/cros_settings.h"
-#include "chrome/browser/chromeos/cros_settings_names.h"
+#include "chrome/browser/chromeos/settings/cros_settings.h"
+#include "chrome/browser/chromeos/settings/cros_settings_names.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_version_info.h"
@@ -92,14 +91,6 @@ void VersionInfoUpdater::StartUpdate(bool is_official_build) {
 }
 
 void VersionInfoUpdater::UpdateVersionLabel() {
-  if (!base::chromeos::IsRunningOnChromeOS()) {
-    if (delegate_) {
-      delegate_->OnOSVersionLabelTextUpdated(
-          CrosLibrary::Get()->load_error_string());
-    }
-    return;
-  }
-
   if (version_text_.empty())
     return;
 
@@ -200,8 +191,8 @@ void VersionInfoUpdater::SetEnterpriseInfo(const std::string& domain_name,
 }
 
 void VersionInfoUpdater::OnVersion(
-    VersionLoader::Handle handle, std::string version) {
-  version_text_.swap(version);
+    VersionLoader::Handle handle, const std::string& version) {
+  version_text_ = version;
   UpdateVersionLabel();
 }
 

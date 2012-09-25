@@ -16,7 +16,8 @@
 #include "base/time.h"
 #include "base/timer.h"
 #include "base/utf_string_conversions.h"
-#include "grit/ui_resources_standard.h"
+#include "grit/ash_strings.h"
+#include "grit/ui_resources.h"
 #include "third_party/skia/include/core/SkRect.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
@@ -69,7 +70,8 @@ class DateDefaultView : public views::View,
         IDR_AURA_UBER_TRAY_HELP,
         IDR_AURA_UBER_TRAY_HELP,
         IDR_AURA_UBER_TRAY_HELP_HOVER,
-        IDR_AURA_UBER_TRAY_HELP_HOVER);
+        IDR_AURA_UBER_TRAY_HELP_HOVER,
+        IDS_ASH_STATUS_TRAY_HELP);
     view->AddButton(help_);
 
     if (login != ash::user::LOGGED_IN_LOCKED &&
@@ -78,7 +80,8 @@ class DateDefaultView : public views::View,
           IDR_AURA_UBER_TRAY_SHUTDOWN,
           IDR_AURA_UBER_TRAY_SHUTDOWN,
           IDR_AURA_UBER_TRAY_SHUTDOWN_HOVER,
-          IDR_AURA_UBER_TRAY_SHUTDOWN_HOVER);
+          IDR_AURA_UBER_TRAY_SHUTDOWN_HOVER,
+          IDS_ASH_STATUS_TRAY_SHUTDOWN);
       view->AddButton(shutdown_);
 
       if (login != ash::user::LOGGED_IN_GUEST) {
@@ -86,7 +89,8 @@ class DateDefaultView : public views::View,
             IDR_AURA_UBER_TRAY_LOCKSCREEN,
             IDR_AURA_UBER_TRAY_LOCKSCREEN,
             IDR_AURA_UBER_TRAY_LOCKSCREEN_HOVER,
-            IDR_AURA_UBER_TRAY_LOCKSCREEN_HOVER);
+            IDR_AURA_UBER_TRAY_LOCKSCREEN_HOVER,
+            IDS_ASH_STATUS_TRAY_LOCK);
         view->AddButton(lock_);
       }
     }
@@ -130,16 +134,11 @@ TrayDate::~TrayDate() {
 
 views::View* TrayDate::CreateTrayView(user::LoginStatus status) {
   CHECK(time_tray_ == NULL);
-  time_tray_ = new tray::TimeView();
   ClockLayout clock_layout =
       ash::Shell::GetInstance()->system_tray()->shelf_alignment() ==
          SHELF_ALIGNMENT_BOTTOM ?
       HORIZONTAL_CLOCK : VERTICAL_CLOCK;
-  time_tray_->UpdateClockLayout(clock_layout);
-  SetupLabelForTimeTray(time_tray_->label());
-  SetupLabelForTimeTray(time_tray_->label_hour());
-  SetupLabelForTimeTray(time_tray_->label_minute());
-
+  time_tray_ = new tray::TimeView(clock_layout);
   views::View* view = new TrayItemView;
   view->AddChildView(time_tray_);
   return view;
@@ -182,12 +181,6 @@ void TrayDate::OnDateFormatChanged() {
 void TrayDate::Refresh() {
   if (time_tray_)
     time_tray_->UpdateText();
-}
-
-void TrayDate::SetupLabelForTimeTray(views::Label* label) {
-  SetupLabelForTray(label);
-  gfx::Font font = label->font();
-  label->SetFont(font.DeriveFont(0, font.GetStyle() & ~gfx::Font::BOLD));
 }
 
 }  // namespace internal

@@ -4,18 +4,36 @@
 
 #include "chrome/browser/performance_monitor/metric_details.h"
 
+#include "base/logging.h"
+#include "chrome/browser/performance_monitor/constants.h"
+
 namespace performance_monitor {
+namespace {
 
-MetricDetails::MetricDetails() {
-}
+// Keep this array synced with MetricTypes in the header file.
+// TODO(mtytel): i18n.
+const MetricDetails kMetricDetailsList[] = {
+  {
+    kMetricCPUUsageName,
+    kMetricCPUUsageDescription,
+    kMetricCPUUsageUnits,
+    kMetricCPUUsageTickSize,
+  },
+  {
+    kMetricPrivateMemoryUsageName,
+    kMetricPrivateMemoryUsageDescription,
+    kMetricPrivateMemoryUsageUnits,
+    kMetricPrivateMemoryUsageTickSize
+  },
+};
+COMPILE_ASSERT(ARRAYSIZE_UNSAFE(kMetricDetailsList) == METRIC_NUMBER_OF_METRICS,
+               metric_names_incorrect_size);
 
-MetricDetails::MetricDetails(const std::string& metric_name,
-                             const std::string& metric_description)
-    : name(metric_name),
-      description(metric_description) {
-}
+}  // namespace
 
-MetricDetails::~MetricDetails() {
+const MetricDetails* GetMetricDetails(MetricType metric_type) {
+  DCHECK_GT(METRIC_NUMBER_OF_METRICS, metric_type);
+  return &kMetricDetailsList[metric_type];
 }
 
 }  // namespace performance_monitor

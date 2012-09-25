@@ -37,6 +37,10 @@
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/dialog_delegate.h"
 
+#if defined(OS_WIN)
+#include "base/win/metro.h"
+#endif
+
 // The task manager window default size.
 static const int kDefaultWidth = 460;
 static const int kDefaultHeight = 270;
@@ -574,6 +578,9 @@ gfx::Size TaskManagerView::GetPreferredSize() {
 
 // static
 void TaskManagerView::Show(bool highlight_background_resources) {
+  // In Windows Metro it's not good to open this native window.
+  DCHECK(!base::win::IsMetroProcess());
+
   if (instance_) {
     if (instance_->highlight_background_resources_ !=
         highlight_background_resources) {
@@ -710,8 +717,8 @@ void TaskManagerView::ShowContextMenuForView(views::View* source,
   UpdateStatsCounters();
   scoped_ptr<views::Menu> menu(views::Menu::Create(
       this, views::Menu::TOPLEFT, source->GetWidget()->GetNativeView()));
-  for (std::vector<ui::TableColumn>::iterator i =
-       columns_.begin(); i != columns_.end(); ++i) {
+  for (std::vector<ui::TableColumn>::iterator i(columns_.begin());
+       i != columns_.end(); ++i) {
     menu->AppendMenuItem(i->id, l10n_util::GetStringUTF16(i->id),
         views::Menu::CHECKBOX);
   }
@@ -788,7 +795,7 @@ bool TaskManagerView::GetSavedAlwaysOnTopState(bool* always_on_top) const {
 
 }  // namespace
 
-namespace browser {
+namespace chrome {
 
 // Declared in browser_dialogs.h so others don't need to depend on our header.
 void ShowTaskManager() {
@@ -799,4 +806,4 @@ void ShowBackgroundPages() {
   TaskManagerView::Show(true);
 }
 
-}  // namespace browser
+}  // namespace chrome

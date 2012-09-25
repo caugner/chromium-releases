@@ -66,7 +66,7 @@ AppStateMap GetAppStates(Profile* profile) {
     }
   }
 
-  const PendingExtensionManager* pending_extension_manager =
+  const extensions::PendingExtensionManager* pending_extension_manager =
       extension_service->pending_extension_manager();
 
   std::list<std::string> pending_crx_ids;
@@ -93,9 +93,11 @@ void SyncAppHelper::SetupIfNecessary(SyncTest* test) {
     return;
 
   for (int i = 0; i < test->num_clients(); ++i) {
-    ExtensionSystem::Get(test->GetProfile(i))->Init(true);
+    extensions::ExtensionSystem::Get(
+        test->GetProfile(i))->InitForRegularProfile(true);
   }
-  ExtensionSystem::Get(test->verifier())->Init(true);
+  extensions::ExtensionSystem::Get(
+      test->verifier())->InitForRegularProfile(true);
 
   setup_completed_ = true;
 }

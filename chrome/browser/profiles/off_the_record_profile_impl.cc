@@ -11,12 +11,14 @@
 #include "base/file_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
+#include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "build/build_config.h"
 #include "chrome/browser/background/background_contents_service_factory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_plugin_service_filter.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
+#include "chrome/browser/download/chrome_download_manager_delegate.h"
 #include "chrome/browser/download/download_service.h"
 #include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/extensions/api/web_request/web_request_api.h"
@@ -36,7 +38,6 @@
 #include "chrome/browser/ui/webui/chrome_url_data_manager_factory.h"
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
@@ -46,6 +47,8 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/host_zoom_map.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/notification_types.h"
+#include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
 #include "net/base/transport_security_state.h"
 #include "net/http/http_server_properties.h"
@@ -86,6 +89,8 @@ OffTheRecordProfileImpl::OffTheRecordProfileImpl(Profile* real_profile)
 void OffTheRecordProfileImpl::Init() {
   ProfileDependencyManager::GetInstance()->CreateProfileServices(this, false);
 
+  extensions::ExtensionSystem::Get(this)->InitForOTRProfile();
+
   DCHECK_NE(IncognitoModePrefs::DISABLED,
             IncognitoModePrefs::GetAvailability(profile_->GetPrefs()));
 
@@ -112,15 +117,13 @@ void OffTheRecordProfileImpl::Init() {
 }
 
 OffTheRecordProfileImpl::~OffTheRecordProfileImpl() {
-  content::NotificationService::current()->Notify(
-    chrome::NOTIFICATION_PROFILE_DESTROYED, content::Source<Profile>(this),
-    content::NotificationService::NoDetails());
+  MaybeSendDestroyedNotification();
 
   ChromePluginServiceFilter::GetInstance()->UnregisterResourceContext(
     io_data_.GetResourceContextNoInit());
 
   ExtensionService* extension_service =
-      ExtensionSystem::Get(this)->extension_service();
+      extensions::ExtensionSystem::Get(this)->extension_service();
   if (extension_service && extension_service->extensions_enabled()) {
     extension_service->extension_prefs()->
         ClearIncognitoSessionOnlyContentSettings();
@@ -191,20 +194,20 @@ VisitedLinkMaster* OffTheRecordProfileImpl::GetVisitedLinkMaster() {
 }
 
 ExtensionService* OffTheRecordProfileImpl::GetExtensionService() {
-  return ExtensionSystem::Get(this)->extension_service();
+  return extensions::ExtensionSystem::Get(this)->extension_service();
 }
 
-UserScriptMaster* OffTheRecordProfileImpl::GetUserScriptMaster() {
-  return ExtensionSystem::Get(this)->user_script_master();
+extensions::UserScriptMaster* OffTheRecordProfileImpl::GetUserScriptMaster() {
+  return extensions::ExtensionSystem::Get(this)->user_script_master();
 }
 
 ExtensionProcessManager*
     OffTheRecordProfileImpl::GetExtensionProcessManager() {
-  return ExtensionSystem::Get(this)->process_manager();
+  return extensions::ExtensionSystem::Get(this)->process_manager();
 }
 
-ExtensionEventRouter* OffTheRecordProfileImpl::GetExtensionEventRouter() {
-  return ExtensionSystem::Get(this)->event_router();
+extensions::EventRouter* OffTheRecordProfileImpl::GetExtensionEventRouter() {
+  return extensions::ExtensionSystem::Get(this)->event_router();
 }
 
 ExtensionSpecialStoragePolicy*
@@ -235,10 +238,6 @@ FaviconService* OffTheRecordProfileImpl::GetFaviconService(
     return profile_->GetFaviconService(sat);
 
   NOTREACHED() << "This profile is OffTheRecord";
-  return NULL;
-}
-
-history::ShortcutsBackend* OffTheRecordProfileImpl::GetShortcutsBackend() {
   return NULL;
 }
 
@@ -273,6 +272,19 @@ net::URLRequestContextGetter*
       return GetRequestContextForIsolatedApp(installed_app->id());
     }
   }
+
+  content::RenderProcessHost* rph = content::RenderProcessHost::FromID(
+      renderer_child_id);
+  if (rph && rph->IsGuest()) {
+    // For guest processes (used by the browser tag), we need to isolate the
+    // storage.
+    // TODO(nasko): Until we have proper storage partitions, create a
+    // non-persistent context using the RPH's id.
+    std::string id("guest-");
+    id.append(base::IntToString(renderer_child_id));
+    return GetRequestContextForIsolatedApp(id);
+  }
+
   return GetRequestContext();
 }
 
@@ -307,7 +319,9 @@ HostContentSettingsMap* OffTheRecordProfileImpl::GetHostContentSettingsMap() {
   profile_->GetHostContentSettingsMap();
   if (!host_content_settings_map_.get()) {
     host_content_settings_map_ = new HostContentSettingsMap(GetPrefs(), true);
-    host_content_settings_map_->RegisterExtensionService(GetExtensionService());
+    ExtensionService* extension_service = GetExtensionService();
+    if (extension_service)
+      host_content_settings_map_->RegisterExtensionService(extension_service);
   }
   return host_content_settings_map_.get();
 }
@@ -359,10 +373,6 @@ void OffTheRecordProfileImpl::MarkAsCleanShutdown() {
 }
 
 void OffTheRecordProfileImpl::InitPromoResources() {
-  NOTREACHED();
-}
-
-void OffTheRecordProfileImpl::InitRegisteredProtocolHandlers() {
   NOTREACHED();
 }
 

@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_PROTECTOR_PROTECTOR_SERVICE_H_
 #define CHROME_BROWSER_PROTECTOR_PROTECTOR_SERVICE_H_
-#pragma once
 
 #include <vector>
 
@@ -12,7 +11,7 @@
 #include "base/compiler_specific.h"
 #include "base/memory/linked_ptr.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop_helpers.h"
+#include "base/sequenced_task_runner_helpers.h"
 #include "chrome/browser/profiles/profile_keyed_service.h"
 #include "chrome/browser/protector/base_setting_change.h"
 #include "chrome/browser/protector/settings_change_global_error_delegate.h"

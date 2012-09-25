@@ -6,7 +6,7 @@
 
 #include "base/json/json_writer.h"
 #include "base/values.h"
-#include "chrome/browser/extensions/extension_event_router.h"
+#include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/prefs/pref_service.h"
@@ -30,15 +30,16 @@ const char kControlledByThisExtension[] = "controlled_by_this_extension";
 
 namespace extension_preference_helpers {
 
-bool StringToScope(const std::string& s, ExtensionPrefsScope* scope) {
+bool StringToScope(const std::string& s,
+                   extensions::ExtensionPrefsScope* scope) {
   if (s == kRegular)
-    *scope = kExtensionPrefsScopeRegular;
+    *scope = extensions::kExtensionPrefsScopeRegular;
   else if (s == kRegularOnly)
-    *scope = kExtensionPrefsScopeRegularOnly;
+    *scope = extensions::kExtensionPrefsScopeRegularOnly;
   else if (s == kIncognitoPersistent)
-    *scope = kExtensionPrefsScopeIncognitoPersistent;
+    *scope = extensions::kExtensionPrefsScopeIncognitoPersistent;
   else if (s == kIncognitoSessionOnly)
-    *scope = kExtensionPrefsScopeIncognitoSessionOnly;
+    *scope = extensions::kExtensionPrefsScopeIncognitoSessionOnly;
   else
     return false;
   return true;
@@ -51,16 +52,22 @@ const char* GetLevelOfControl(
     bool incognito) {
   PrefService* prefs = incognito ? profile->GetOffTheRecordPrefs()
                                  : profile->GetPrefs();
+  bool from_incognito = false;
+  bool* from_incognito_ptr = incognito ? &from_incognito : NULL;
   const PrefService::Preference* pref =
       prefs->FindPreference(browser_pref.c_str());
   CHECK(pref);
-  ExtensionPrefs* ep = profile->GetExtensionService()->extension_prefs();
+  extensions::ExtensionPrefs* ep =
+      profile->GetExtensionService()->extension_prefs();
 
   if (!pref->IsExtensionModifiable())
     return kNotControllable;
 
-  if (ep->DoesExtensionControlPref(extension_id, browser_pref, incognito))
+  if (ep->DoesExtensionControlPref(extension_id,
+                                   browser_pref,
+                                   from_incognito_ptr)) {
     return kControlledByThisExtension;
+  }
 
   if (ep->CanExtensionControlPref(extension_id, browser_pref, incognito))
     return kControllableByThisExtension;
@@ -72,21 +79,24 @@ void DispatchEventToExtensions(
     Profile* profile,
     const std::string& event_name,
     ListValue* args,
-    ExtensionAPIPermission::ID permission,
+    extensions::APIPermission::ID permission,
     bool incognito,
     const std::string& browser_pref) {
-  ExtensionEventRouter* router = profile->GetExtensionEventRouter();
+  extensions::EventRouter* router = profile->GetExtensionEventRouter();
   if (!router || !router->HasEventListener(event_name))
     return;
   ExtensionService* extension_service = profile->GetExtensionService();
   const ExtensionSet* extensions = extension_service->extensions();
+  extensions::ExtensionPrefs* extension_prefs =
+      extension_service->extension_prefs();
   for (ExtensionSet::const_iterator it = extensions->begin();
        it != extensions->end(); ++it) {
     std::string extension_id = (*it)->id();
     // TODO(bauerb): Only iterate over registered event listeners.
     if (router->ExtensionHasEventListener(extension_id, event_name) &&
         (*it)->HasAPIPermission(permission) &&
-        (!incognito || extension_service->CanCrossIncognito(*it))) {
+        (!incognito || (*it)->incognito_split_mode() ||
+         extension_service->CanCrossIncognito(*it))) {
       // Inject level of control key-value.
       DictionaryValue* dict;
       bool rv = args->GetDictionary(0, &dict);
@@ -94,11 +104,30 @@ void DispatchEventToExtensions(
       std::string level_of_control =
           GetLevelOfControl(profile, extension_id, browser_pref, incognito);
       dict->SetString(kLevelOfControlKey, level_of_control);
-
       std::string json_args;
       base::JSONWriter::Write(args, &json_args);
+
+      // If the extension is in incognito split mode,
+      // a) incognito pref changes are visible only to the incognito tabs
+      // b) regular pref changes are visible only to the incognito tabs if the
+      //    incognito pref has not alredy been set
+      Profile* restrict_to_profile = NULL;
+      bool from_incognito = false;
+      if ((*it)->incognito_split_mode()) {
+        if (incognito && extension_service->IsIncognitoEnabled(extension_id)) {
+          restrict_to_profile = profile->GetOffTheRecordProfile();
+        } else if (!incognito &&
+                   extension_prefs->DoesExtensionControlPref(
+                       extension_id,
+                       browser_pref,
+                       &from_incognito) &&
+                   from_incognito) {
+          restrict_to_profile = profile;
+        }
+      }
+
       router->DispatchEventToExtension(
-          extension_id, event_name, json_args, NULL, GURL());
+          extension_id, event_name, json_args, restrict_to_profile, GURL());
     }
   }
 }

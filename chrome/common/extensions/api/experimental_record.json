@@ -37,10 +37,6 @@
             "name": "cacheDirectoryPath"
           },
           {
-            "type": "integer", 
-            "name": "repeatCount" 
-          },
-          {
             "name": "callback",
             "type": "function",
             "description": "Called when capture has completed.",
@@ -71,7 +67,9 @@
           },
           {
             "type": "integer", 
-            "name": "repeatCount" 
+            "name": "repeatCount",
+            "minimum": 0,
+            "maximum": 100
           },
           {
             "$ref": "SessionDetails",

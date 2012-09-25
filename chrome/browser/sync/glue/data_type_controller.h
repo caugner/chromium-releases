@@ -4,21 +4,22 @@
 
 #ifndef CHROME_BROWSER_SYNC_GLUE_DATA_TYPE_CONTROLLER_H__
 #define CHROME_BROWSER_SYNC_GLUE_DATA_TYPE_CONTROLLER_H__
-#pragma once
 
 #include <map>
 #include <string>
 
 #include "base/callback.h"
 #include "base/location.h"
-#include "base/message_loop_helpers.h"
+#include "base/sequenced_task_runner_helpers.h"
 #include "chrome/browser/sync/glue/data_type_error_handler.h"
 #include "content/public/browser/browser_thread.h"
+#include "sync/internal_api/public/base/model_type.h"
 #include "sync/internal_api/public/engine/model_safe_worker.h"
-#include "sync/internal_api/public/syncable/model_type.h"
 #include "sync/internal_api/public/util/unrecoverable_error_handler.h"
 
+namespace syncer {
 class SyncError;
+}
 
 namespace browser_sync {
 
@@ -61,14 +62,15 @@ class DataTypeController
     MAX_START_RESULT
   };
 
-  typedef base::Callback<void(StartResult, const SyncError&)> StartCallback;
+  typedef base::Callback<void(StartResult,
+                              const syncer::SyncError&)> StartCallback;
 
-  typedef base::Callback<void(syncable::ModelType,
-                              SyncError)> ModelLoadCallback;
+  typedef base::Callback<void(syncer::ModelType,
+                              syncer::SyncError)> ModelLoadCallback;
 
-  typedef std::map<syncable::ModelType,
+  typedef std::map<syncer::ModelType,
                    scoped_refptr<DataTypeController> > TypeMap;
-  typedef std::map<syncable::ModelType, DataTypeController::State> StateMap;
+  typedef std::map<syncer::ModelType, DataTypeController::State> StateMap;
 
   // Returns true if the start result should trigger an unrecoverable error.
   // Public so unit tests can use this function as well.
@@ -92,7 +94,7 @@ class DataTypeController
   virtual void Stop() = 0;
 
   // Unique model type for this data type controller.
-  virtual syncable::ModelType type() const = 0;
+  virtual syncer::ModelType type() const = 0;
 
   // Name of this data type.  For logging purposes only.
   virtual std::string name() const = 0;
@@ -100,17 +102,17 @@ class DataTypeController
   // The model safe group of this data type.  This should reflect the
   // thread that should be used to modify the data type's native
   // model.
-  virtual browser_sync::ModelSafeGroup model_safe_group() const = 0;
+  virtual syncer::ModelSafeGroup model_safe_group() const = 0;
 
   // Current state of the data type controller.
   virtual State state() const = 0;
 
   // Partial implementation of DataTypeErrorHandler.
   // This is thread safe.
-  virtual SyncError CreateAndUploadError(
+  virtual syncer::SyncError CreateAndUploadError(
       const tracked_objects::Location& location,
       const std::string& message,
-      syncable::ModelType type) OVERRIDE;
+      syncer::ModelType type) OVERRIDE;
 
  protected:
   friend struct content::BrowserThread::DeleteOnThread<

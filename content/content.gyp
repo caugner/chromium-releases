@@ -175,6 +175,15 @@
         'content_utility.gypi',
         'content_worker.gypi',
        ],
+       'msvs_settings': {
+         'VCLinkerTool': {
+           'conditions': [
+             ['incremental_chrome_dll==1', {
+               'UseLibraryDependencyInputs': "true",
+             }],
+           ],
+         },
+       },
       },
       {'target_name': 'content_app',
        'type': 'none',
@@ -221,11 +230,11 @@
          'target_name': 'common_aidl',
          'type': 'none',
          'variables': {
-           'aidl_interface_file': '../content/public/android/java/org/chromium/content/common/common.aidl',
+           'aidl_interface_file': 'public/android/java/src/org/chromium/content/common/common.aidl',
          },
          'sources': [
-           '../content/public/android/java/org/chromium/content/common/ISandboxedProcessCallback.aidl',
-           '../content/public/android/java/org/chromium/content/common/ISandboxedProcessService.aidl',
+           'public/android/java/src/org/chromium/content/common/ISandboxedProcessCallback.aidl',
+           'public/android/java/src/org/chromium/content/common/ISandboxedProcessService.aidl',
          ],
          'includes': [ '../build/java_aidl.gypi' ],
        },
@@ -234,6 +243,7 @@
          'type': 'none',
          'dependencies': [
            '../base/base.gyp:base_java',
+           '../net/net.gyp:net_java',
            'content_common',
          ],
          'variables': {

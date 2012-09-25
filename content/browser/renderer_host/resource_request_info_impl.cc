@@ -25,12 +25,14 @@ const ResourceRequestInfo* ResourceRequestInfo::ForRequest(
 void ResourceRequestInfo::AllocateForTesting(
     net::URLRequest* request,
     ResourceType::Type resource_type,
-    ResourceContext* context) {
+    ResourceContext* context,
+    int render_process_id,
+    int render_view_id) {
   ResourceRequestInfoImpl* info =
       new ResourceRequestInfoImpl(
           PROCESS_TYPE_RENDERER,             // process_type
-          -1,                                // child_id
-          MSG_ROUTING_NONE,                  // route_id
+          render_process_id,                 // child_id
+          render_view_id,                    // route_id
           0,                                 // origin_pid
           0,                                 // request_id
           resource_type == ResourceType::MAIN_FRAME,  // is_main_frame
@@ -96,6 +98,7 @@ ResourceRequestInfoImpl::ResourceRequestInfoImpl(
     WebKit::WebReferrerPolicy referrer_policy,
     ResourceContext* context)
     : cross_site_handler_(NULL),
+      async_handler_(NULL),
       process_type_(process_type),
       child_id_(child_id),
       route_id_(route_id),
@@ -105,7 +108,6 @@ ResourceRequestInfoImpl::ResourceRequestInfoImpl(
       frame_id_(frame_id),
       parent_is_main_frame_(parent_is_main_frame),
       parent_frame_id_(parent_frame_id),
-      pending_data_count_(0),
       is_download_(is_download),
       allow_download_(allow_download),
       has_user_gesture_(has_user_gesture),
@@ -166,6 +168,10 @@ WebKit::WebReferrerPolicy ResourceRequestInfoImpl::GetReferrerPolicy() const {
 
 uint64 ResourceRequestInfoImpl::GetUploadSize() const {
   return upload_size_;
+}
+
+bool ResourceRequestInfoImpl::HasUserGesture() const {
+  return has_user_gesture_;
 }
 
 bool ResourceRequestInfoImpl::GetAssociatedRenderView(

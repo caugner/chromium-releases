@@ -13,7 +13,6 @@
 #include "base/json/json_reader.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/browser_process_impl.h"
 #include "chrome/browser/debugger/devtools_window.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/prefs/pref_service.h"
@@ -38,6 +37,11 @@
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "webkit/glue/webpreferences.h"
+
+#if defined(USE_AURA)
+#include "ui/aura/root_window.h"
+#include "ui/aura/window.h"
+#endif
 
 #if defined(OS_WIN)
 #include "ui/base/win/foreground_helper.h"
@@ -682,9 +686,25 @@ void CreateDialogImpl(content::BrowserContext* browser_context,
           delete_on_close,
           close_after_signin,
           callback);
-  browser::ShowWebDialog(modal_parent,
-                         Profile::FromBrowserContext(browser_context),
-                         dialog_delegate);
+#if defined(OS_WIN)
+  gfx::NativeWindow window =
+#endif
+      chrome::ShowWebDialog(modal_parent,
+                            Profile::FromBrowserContext(browser_context),
+                            dialog_delegate);
+#if defined(OS_WIN)
+  if (!path_to_file.empty() && window) {
+    HWND dialog_handle;
+#if defined(USE_AURA)
+    dialog_handle = window->GetRootWindow()->GetAcceleratedWidget();
+#else
+    dialog_handle = window;
+#endif
+    if (::GetForegroundWindow() != dialog_handle) {
+      ui::ForegroundHelper::SetForeground(dialog_handle);
+    }
+  }
+#endif
 }
 
 void CreateDialogSigninImpl(content::BrowserContext* browser_context,

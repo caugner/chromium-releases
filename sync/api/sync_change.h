@@ -4,13 +4,15 @@
 
 #ifndef SYNC_API_SYNC_CHANGE_H_
 #define SYNC_API_SYNC_CHANGE_H_
-#pragma once
 
 #include <iosfwd>
 #include <string>
 #include <vector>
 
+#include "base/location.h"
 #include "sync/api/sync_data.h"
+
+namespace syncer {
 
 // A SyncChange object reflects a change to a piece of synced data. The change
 // can be either a delete, add, or an update. All data relevant to the change
@@ -29,7 +31,10 @@ class SyncChange {
   // Default constructor creates an invalid change.
   SyncChange();
   // Create a new change with the specified sync data.
-  SyncChange(SyncChangeType change_type, const SyncData& sync_data);
+  SyncChange(
+      const tracked_objects::Location& from_here,
+      SyncChangeType change_type,
+      const SyncData& sync_data);
   ~SyncChange();
 
   // Copy constructor and assignment operator welcome.
@@ -45,6 +50,7 @@ class SyncChange {
   // Getters.
   SyncChangeType change_type() const;
   SyncData sync_data() const;
+  tracked_objects::Location location() const;
 
   // Returns a string representation of |change_type|.
   static std::string ChangeTypeToString(SyncChangeType change_type);
@@ -54,6 +60,8 @@ class SyncChange {
   std::string ToString() const;
 
  private:
+  tracked_objects::Location location_;
+
   SyncChangeType change_type_;
 
   // An immutable container for the data of this SyncChange. Whenever
@@ -63,5 +71,7 @@ class SyncChange {
 
 // gmock printer helper.
 void PrintTo(const SyncChange& sync_change, std::ostream* os);
+
+}  // namespace syncer
 
 #endif  // SYNC_API_SYNC_CHANGE_H_

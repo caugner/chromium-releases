@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_BACKGROUND_BACKGROUND_APPLICATION_LIST_MODEL_H_
 #define CHROME_BROWSER_BACKGROUND_BACKGROUND_APPLICATION_LIST_MODEL_H_
-#pragma once
 
 #include <map>
 #include <string>
@@ -135,7 +134,7 @@ class BackgroundApplicationListModel : public content::NotificationObserver {
   void OnExtensionPermissionsUpdated(
       const extensions::Extension* extension,
       extensions::UpdatedExtensionPermissionsInfo::Reason reason,
-      const ExtensionPermissionSet* permissions);
+      const extensions::PermissionSet* permissions);
 
   // Refresh the list of background applications and generate notifications.
   void Update();

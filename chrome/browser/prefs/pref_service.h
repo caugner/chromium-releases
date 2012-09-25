@@ -10,7 +10,6 @@
 
 #ifndef CHROME_BROWSER_PREFS_PREF_SERVICE_H_
 #define CHROME_BROWSER_PREFS_PREF_SERVICE_H_
-#pragma once
 
 #include <set>
 #include <string>
@@ -29,13 +28,16 @@ class PrefNotifier;
 class PrefNotifierImpl;
 class PrefStore;
 class PrefValueStore;
-class SyncableService;
 
 namespace content {
 class NotificationObserver;
 }
 
-namespace policy{
+namespace syncer {
+class SyncableService;
+}
+
+namespace policy {
 class PolicyService;
 }
 
@@ -83,6 +85,9 @@ class PrefService : public base::NonThreadSafe {
     // Returns the value of the Preference, falling back to the registered
     // default value if no other has been set.
     const base::Value* GetValue() const;
+
+    // Returns the value recommended by the admin, if any.
+    const base::Value* GetRecommendedValue() const;
 
     // Returns true if the Preference is managed, i.e. set by an admin policy.
     // Since managed prefs have the highest priority, this also indicates
@@ -253,6 +258,9 @@ class PrefService : public base::NonThreadSafe {
   void RegisterInt64Pref(const char* path,
                          int64 default_value,
                          PrefSyncStatus sync_status);
+  void RegisterUint64Pref(const char* path,
+                          uint64 default_value,
+                          PrefSyncStatus sync_status);
   // Unregisters a preference.
   void UnregisterPreference(const char* path);
 
@@ -300,6 +308,10 @@ class PrefService : public base::NonThreadSafe {
   void SetInt64(const char* path, int64 value);
   int64 GetInt64(const char* path) const;
 
+  // As above, but for unsigned values.
+  void SetUint64(const char* path, uint64 value);
+  uint64 GetUint64(const char* path) const;
+
   // Returns true if a value has been set for the specified path.
   // NOTE: this is NOT the same as FindPreference. In particular
   // FindPreference returns whether RegisterXXX has been invoked, where as
@@ -318,9 +330,9 @@ class PrefService : public base::NonThreadSafe {
 
   PrefInitializationStatus GetInitializationStatus() const;
 
-  // SyncableService getter.
-  // TODO(zea): Have PrefService implement SyncableService directly.
-  SyncableService* GetSyncableService();
+  // syncer::SyncableService getter.
+  // TODO(zea): Have PrefService implement syncer::SyncableService directly.
+  syncer::SyncableService* GetSyncableService();
 
   // Tell our PrefValueStore to update itself using |command_line|.
   // Do not call this after having derived an incognito or per tab pref service.

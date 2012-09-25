@@ -47,6 +47,7 @@
 #include "chrome/common/pref_names.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/power_manager_client.h"
+#include "chromeos/dbus/session_manager_client.h"
 #include "chromeos/dbus/update_engine_client.h"
 #include "content/public/browser/web_contents.h"
 #include "net/base/network_change_notifier.h"
@@ -283,7 +284,11 @@ void TestingAutomationProvider::CancelOOBEUpdate(DictionaryValue* args,
                                                  IPC::Message* reply_message) {
   WizardController* wizard_controller = WizardController::default_controller();
   if (wizard_controller && wizard_controller->IsOobeCompleted()) {
-    AutomationJSONReply(this, reply_message).SendSuccess(NULL);
+    // Update already finished.
+    scoped_ptr<DictionaryValue> return_value(new DictionaryValue);
+    return_value->SetString("next_screen",
+                            WizardController::kLoginScreenName);
+    AutomationJSONReply(this, reply_message).SendSuccess(return_value.get());
     return;
   }
   if (!wizard_controller || wizard_controller->current_screen()->GetName() !=
@@ -515,8 +520,7 @@ void TestingAutomationProvider::GetOOBEScreenInfo(DictionaryValue* args,
 void TestingAutomationProvider::LockScreen(DictionaryValue* args,
                                            IPC::Message* reply_message) {
   new ScreenLockUnlockObserver(this, reply_message, true);
-  DBusThreadManager::Get()->GetPowerManagerClient()->
-      NotifyScreenLockRequested();
+  DBusThreadManager::Get()->GetSessionManagerClient()->RequestLockScreen();
 }
 
 void TestingAutomationProvider::UnlockScreen(DictionaryValue* args,

@@ -6,6 +6,7 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram.h"
+#include "base/metrics/statistics_recorder.h"
 #include "base/pickle.h"
 #include "base/stringprintf.h"
 #include "base/string_number_conversions.h"
@@ -167,7 +168,7 @@ struct GurlAndString {
 
 class URLRequestThrottlerEntryTest : public testing::Test {
  protected:
-  URLRequestThrottlerEntryTest() : request_(GURL(), NULL) {
+  URLRequestThrottlerEntryTest() : request_(GURL(), NULL, &context_) {
   }
 
   virtual void SetUp();
@@ -183,6 +184,7 @@ class URLRequestThrottlerEntryTest : public testing::Test {
   std::map<std::string, Histogram::SampleSet> original_samples_;
   std::map<std::string, Histogram::SampleSet> samples_;
 
+  TestURLRequestContext context_;
   TestURLRequest request_;
 };
 
@@ -206,8 +208,8 @@ void URLRequestThrottlerEntryTest::SetUp() {
     // as other tests may affect them.
     const char* name = kHistogramNames[i];
     Histogram::SampleSet& original = original_samples_[name];
-    Histogram* histogram;
-    if (StatisticsRecorder::FindHistogram(name, &histogram)) {
+    Histogram* histogram = StatisticsRecorder::FindHistogram(name);
+    if (histogram) {
       histogram->SnapshotSample(&original);
     }
   }
@@ -219,14 +221,14 @@ void URLRequestThrottlerEntryTest::CalculateHistogramDeltas() {
     Histogram::SampleSet& original = original_samples_[name];
     Histogram::SampleSet& sample = samples_[name];
 
-    Histogram* histogram;
-    if (StatisticsRecorder::FindHistogram(name, &histogram)) {
+    Histogram* histogram = StatisticsRecorder::FindHistogram(name);
+    if (histogram) {
       ASSERT_EQ(Histogram::kUmaTargetedHistogramFlag, histogram->flags());
 
       histogram->SnapshotSample(&sample);
       // Ensure |original| size is same as |sample|, then subtract original
       // values.
-      original.Resize(*histogram);
+      original.Resize(histogram->bucket_count());
       sample.Subtract(original);
     }
   }
@@ -379,13 +381,15 @@ TEST_F(URLRequestThrottlerEntryTest, ExplicitUserRequest) {
 class URLRequestThrottlerManagerTest : public testing::Test {
  protected:
   URLRequestThrottlerManagerTest()
-      : request_(GURL(), NULL) {
+      : request_(GURL(), NULL, &context_) {
   }
 
   virtual void SetUp() {
     request_.set_load_flags(0);
   }
 
+  // context_ must be declared before request_.
+  TestURLRequestContext context_;
   TestURLRequest request_;
 };
 

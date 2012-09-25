@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_BUNDLE_INSTALLER_H_
 #define CHROME_BROWSER_EXTENSIONS_BUNDLE_INSTALLER_H_
-#pragma once
 
 #include <string>
 #include <vector>
@@ -15,7 +14,7 @@
 #include "chrome/browser/extensions/extension_install_prompt.h"
 #include "chrome/browser/extensions/webstore_installer.h"
 #include "chrome/browser/extensions/webstore_install_helper.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_list_observer.h"
 #include "chrome/common/extensions/extension.h"
 
 namespace base {
@@ -40,7 +39,7 @@ namespace extensions {
 class BundleInstaller : public WebstoreInstallHelper::Delegate,
                         public ExtensionInstallPrompt::Delegate,
                         public WebstoreInstaller::Delegate,
-                        public BrowserList::Observer,
+                        public chrome::BrowserListObserver,
                         public base::RefCountedThreadSafe<BundleInstaller> {
  public:
   // Auto approve or cancel the permission prompt.
@@ -51,6 +50,9 @@ class BundleInstaller : public WebstoreInstallHelper::Delegate,
     virtual void OnBundleInstallApproved() {}
     virtual void OnBundleInstallCanceled(bool user_initiated) {}
     virtual void OnBundleInstallCompleted() {}
+
+   protected:
+    virtual ~Delegate() {}
   };
 
   // Represents an individual member of the bundle.
@@ -162,7 +164,7 @@ class BundleInstaller : public WebstoreInstallHelper::Delegate,
   virtual void OnExtensionInstallFailure(const std::string& id,
                                          const std::string& error) OVERRIDE;
 
-  // BrowserList::observer implementation:
+  // chrome::BrowserListObserver implementation:
   virtual void OnBrowserAdded(Browser* browser) OVERRIDE;
   virtual void OnBrowserRemoved(Browser* browser) OVERRIDE;
   virtual void OnBrowserSetLastActive(Browser* browser) OVERRIDE;

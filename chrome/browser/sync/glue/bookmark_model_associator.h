@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_SYNC_GLUE_BOOKMARK_MODEL_ASSOCIATOR_H_
 #define CHROME_BROWSER_SYNC_GLUE_BOOKMARK_MODEL_ASSOCIATOR_H_
-#pragma once
 
 #include <map>
 #include <set>
@@ -21,7 +20,7 @@
 class BookmarkModel;
 class BookmarkNode;
 
-namespace sync_api {
+namespace syncer {
 class BaseNode;
 struct UserShare;
 }
@@ -35,13 +34,13 @@ namespace browser_sync {
 class BookmarkModelAssociator
     : public PerDataTypeAssociatorInterface<BookmarkNode, int64> {
  public:
-  static syncable::ModelType model_type() { return syncable::BOOKMARKS; }
+  static syncer::ModelType model_type() { return syncer::BOOKMARKS; }
   // |expect_mobile_bookmarks_folder| controls whether or not we
   // expect the mobile bookmarks permanent folder to be created.
   // Should be set to true only by mobile clients.
   BookmarkModelAssociator(
       BookmarkModel* bookmark_model,
-      sync_api::UserShare* user_share,
+      syncer::UserShare* user_share,
       DataTypeErrorHandler* unrecoverable_error_handler,
       bool expect_mobile_bookmarks_folder);
   virtual ~BookmarkModelAssociator();
@@ -58,16 +57,16 @@ class BookmarkModelAssociator
   // node.  After successful completion, the models should be identical and
   // corresponding. Returns true on success.  On failure of this step, we
   // should abort the sync operation and report an error to the user.
-  virtual SyncError AssociateModels() OVERRIDE;
+  virtual syncer::SyncError AssociateModels() OVERRIDE;
 
-  virtual SyncError DisassociateModels() OVERRIDE;
+  virtual syncer::SyncError DisassociateModels() OVERRIDE;
 
   // The has_nodes out param is true if the sync model has nodes other
   // than the permanent tagged nodes.
   virtual bool SyncModelHasUserCreatedNodes(bool* has_nodes) OVERRIDE;
 
   // Returns sync id for the given bookmark node id.
-  // Returns sync_api::kInvalidId if the sync node is not found for the given
+  // Returns syncer::kInvalidId if the sync node is not found for the given
   // bookmark node id.
   virtual int64 GetSyncIdFromChromeId(const int64& node_id) OVERRIDE;
 
@@ -80,7 +79,7 @@ class BookmarkModelAssociator
   // if the initialization of sync node fails.
   virtual bool InitSyncNodeFromChromeId(
       const int64& node_id,
-      sync_api::BaseNode* sync_node) OVERRIDE;
+      syncer::BaseNode* sync_node) OVERRIDE;
 
   // Associates the given bookmark node with the given sync id.
   virtual void Associate(const BookmarkNode* node, int64 sync_id) OVERRIDE;
@@ -118,23 +117,24 @@ class BookmarkModelAssociator
 
   // Matches up the bookmark model and the sync model to build model
   // associations.
-  SyncError BuildAssociations();
+  syncer::SyncError BuildAssociations();
 
   // Associate a top-level node of the bookmark model with a permanent node in
   // the sync domain.  Such permanent nodes are identified by a tag that is
   // well known to the server and the client, and is unique within a particular
   // user's share.  For example, "other_bookmarks" is the tag for the Other
   // Bookmarks folder.  The sync nodes are server-created.
-  SyncError AssociateTaggedPermanentNode(
+  // Returns true on success, false if association failed.
+  bool AssociateTaggedPermanentNode(
       const BookmarkNode* permanent_node,
       const std::string& tag) WARN_UNUSED_RESULT;
 
   // Compare the properties of a pair of nodes from either domain.
   bool NodesMatch(const BookmarkNode* bookmark,
-                  const sync_api::BaseNode* sync_node) const;
+                  const syncer::BaseNode* sync_node) const;
 
   BookmarkModel* bookmark_model_;
-  sync_api::UserShare* user_share_;
+  syncer::UserShare* user_share_;
   DataTypeErrorHandler* unrecoverable_error_handler_;
   const bool expect_mobile_bookmarks_folder_;
   BookmarkIdToSyncIdMap id_map_;

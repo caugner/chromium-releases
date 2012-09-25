@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_BROWSER_RENDERER_HOST_IMAGE_TRANSPORT_FACTORY_H_
 #define CONTENT_BROWSER_RENDERER_HOST_IMAGE_TRANSPORT_FACTORY_H_
-#pragma once
 
 #include "base/memory/ref_counted.h"
 #include "ui/gfx/native_widget_types.h"
@@ -27,8 +26,6 @@ class Texture;
 namespace WebKit {
 class WebGraphicsContext3D;
 }
-
-class ImageTransportClient;
 
 // This class provides a way to get notified when surface handles get lost.
 class ImageTransportFactoryObserver {
@@ -75,21 +72,18 @@ class ImageTransportFactory {
   // Destroys a shared surface handle.
   virtual void DestroySharedSurfaceHandle(gfx::GLSurfaceHandle surface) = 0;
 
-  // Creates a transport client of a given size, and using the opaque handle
+  // Creates a transport texture of a given size, and using the opaque handle
   // sent by the GPU process.
-  virtual scoped_refptr<ImageTransportClient> CreateTransportClient(
+  virtual scoped_refptr<ui::Texture> CreateTransportClient(
       const gfx::Size& size,
-      uint64* transport_handle) = 0;
+      uint64 transport_handle) = 0;
 
   // Gets a GLHelper instance, associated with the compositor context. This
   // GLHelper will get destroyed whenever the context is lost (
   virtual content::GLHelper* GetGLHelper(ui::Compositor* compositor) = 0;
 
-  // Returns a ScopedMakeCurrent that can be used to make current a context that
-  // is shared with the compositor context, e.g. to create a texture in its
-  // namespace. The caller gets ownership of the object.
-  // This will return NULL when using out-of-process (command buffer) contexts.
-  virtual gfx::ScopedMakeCurrent* GetScopedMakeCurrent() = 0;
+  // Inserts a SyncPoint into the compositor's context.
+  virtual uint32 InsertSyncPoint(ui::Compositor* compositor) = 0;
 
   virtual void AddObserver(ImageTransportFactoryObserver* observer) = 0;
   virtual void RemoveObserver(ImageTransportFactoryObserver* observer) = 0;

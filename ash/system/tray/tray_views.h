@@ -4,11 +4,12 @@
 
 #ifndef ASH_SYSTEM_TRAY_TRAY_VIEWS_H_
 #define ASH_SYSTEM_TRAY_TRAY_VIEWS_H_
-#pragma once
 
 #include "ash/ash_export.h"
+#include "ash/wm/shelf_types.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/size.h"
+#include "ui/views/controls/button/custom_button.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/controls/button/text_button.h"
 #include "ui/views/controls/image_view.h"
@@ -29,6 +30,8 @@ class BoxLayout;
 
 namespace ash {
 namespace internal {
+
+class TrayItemView;
 
 // An image view with a specified width and height (kTrayPopupDetailsIconWidth).
 // If the specified width or height is zero, then the image size is used for
@@ -63,6 +66,8 @@ class ASH_EXPORT ActionableView : public views::View {
   const string16& accessible_name() const { return accessible_name_; }
 
  protected:
+  void DrawBorder(gfx::Canvas* canvas, const gfx::Rect& bounds);
+
   // Performs an action when user clicks on the view (on mouse-press event), or
   // presses a key when this view is in focus. Returns true if the event has
   // been handled and an action was performed. Returns false otherwise.
@@ -213,7 +218,8 @@ class TrayPopupHeaderButton : public views::ToggleImageButton {
                         int enabled_resource_id,
                         int disabled_resource_id,
                         int enabled_resource_id_hover,
-                        int disabled_resource_id_hover);
+                        int disabled_resource_id_hover,
+                        int accessible_name_id);
   virtual ~TrayPopupHeaderButton();
 
  private:
@@ -226,6 +232,33 @@ class TrayPopupHeaderButton : public views::ToggleImageButton {
   virtual void StateChanged() OVERRIDE;
 
   DISALLOW_COPY_AND_ASSIGN(TrayPopupHeaderButton);
+};
+
+// A button with a bar image and title text below the bar image. These buttons
+// will be used in audio and brightness control UI, which can be toggled with
+// on/off states.
+class TrayBarButtonWithTitle : public views::CustomButton {
+ public:
+  TrayBarButtonWithTitle(views::ButtonListener* listener,
+                                  int title_id,
+                                  int width);
+  virtual ~TrayBarButtonWithTitle();
+
+  // Overridden from views::View:
+  virtual gfx::Size GetPreferredSize() OVERRIDE;
+  virtual void Layout() OVERRIDE;
+
+  void UpdateButton(bool control_on);
+
+ private:
+  class TrayBarButton;
+
+  TrayBarButton* image_;
+  views::Label* title_;
+  int width_;
+  int image_height_;
+
+  DISALLOW_COPY_AND_ASSIGN(TrayBarButtonWithTitle);
 };
 
 // The 'special' looking row in the uber-tray popups. This is usually the bottom
@@ -253,49 +286,17 @@ class SpecialPopupRow : public views::View {
   DISALLOW_COPY_AND_ASSIGN(SpecialPopupRow);
 };
 
-// A view for closable notification views, laid out like:
-//  -------------------
-// | icon  contents  x |
-//  ----------------v--
-// The close button will call OnClose() when clicked.
-class TrayNotificationView : public views::View,
-                             public views::ButtonListener {
- public:
-  // If icon_id is 0, no icon image will be set. SetIconImage can be called
-  // to later set the icon image.
-  explicit TrayNotificationView(int icon_id);
-  virtual ~TrayNotificationView();
-
-  // InitView must be called once with the contents to be displayed.
-  void InitView(views::View* contents);
-
-  // Sets/updates the icon image.
-  void SetIconImage(const gfx::ImageSkia& image);
-
-  // Replaces the contents view.
-  void UpdateView(views::View* new_contents);
-
-  // Replaces the contents view and updates the icon image.
-  void UpdateViewAndImage(views::View* new_contents,
-                          const gfx::ImageSkia& image);
-
-  // Overridden from ButtonListener.
-  virtual void ButtonPressed(views::Button* sender,
-                             const views::Event& event) OVERRIDE;
-
- protected:
-  // Called when the closed button is pressed.
-  virtual void OnClose() = 0;
-
- private:
-  int icon_id_;
-  views::ImageView* icon_;
-
-  DISALLOW_COPY_AND_ASSIGN(TrayNotificationView);
-};
-
 // Sets up a Label properly for the tray (sets color, font etc.).
 void SetupLabelForTray(views::Label* label);
+
+// TODO(jennyz): refactor these two functions to SystemTrayItem.
+// Sets the empty border of an image tray item for adjusting the space
+// around it.
+void SetTrayImageItemBorder(views::View* tray_view, ShelfAlignment alignment);
+// Sets the empty border around a label tray item for adjusting the space
+// around it.
+void SetTrayLabelItemBorder(TrayItemView* tray_view,
+                            ShelfAlignment alignment);
 
 }  // namespace internal
 }  // namespace ash

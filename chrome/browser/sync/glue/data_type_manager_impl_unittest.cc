@@ -15,20 +15,20 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/test/mock_notification_observer.h"
 #include "content/public/test/test_browser_thread.h"
+#include "sync/internal_api/public/base/model_type.h"
 #include "sync/internal_api/public/configure_reason.h"
-#include "sync/internal_api/public/syncable/model_type.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace browser_sync {
 
-using syncable::ModelType;
-using syncable::ModelTypeSet;
-using syncable::ModelTypeToString;
-using syncable::BOOKMARKS;
-using syncable::APPS;
-using syncable::PASSWORDS;
-using syncable::PREFERENCES;
+using syncer::ModelType;
+using syncer::ModelTypeSet;
+using syncer::ModelTypeToString;
+using syncer::BOOKMARKS;
+using syncer::APPS;
+using syncer::PASSWORDS;
+using syncer::PREFERENCES;
 using testing::_;
 using testing::Mock;
 using testing::ResultOf;
@@ -41,12 +41,12 @@ class FakeBackendDataTypeConfigurer : public BackendDataTypeConfigurer {
   virtual ~FakeBackendDataTypeConfigurer() {}
 
   virtual void ConfigureDataTypes(
-      sync_api::ConfigureReason reason,
+      syncer::ConfigureReason reason,
       ModelTypeSet types_to_add,
       ModelTypeSet types_to_remove,
       NigoriState nigori_state,
-      base::Callback<void(ModelTypeSet)> ready_task,
-      base::Callback<void()> retry_callback) OVERRIDE {
+      const base::Callback<void(ModelTypeSet)>& ready_task,
+      const base::Callback<void()>& retry_callback) OVERRIDE {
     last_nigori_state_ = nigori_state;
     last_ready_task_ = ready_task;
   }
@@ -118,8 +118,8 @@ class SyncDataTypeManagerImplTest
   // Configure the given DTM with the given desired types.
   void Configure(DataTypeManagerImpl* dtm,
                  const DataTypeManager::TypeSet& desired_types) {
-    const sync_api::ConfigureReason kReason =
-        sync_api::CONFIGURE_REASON_RECONFIGURATION;
+    const syncer::ConfigureReason kReason =
+        syncer::CONFIGURE_REASON_RECONFIGURATION;
     if (GetNigoriState() == BackendDataTypeConfigurer::WITH_NIGORI) {
       dtm->Configure(desired_types, kReason);
     } else {
@@ -215,7 +215,7 @@ TEST_P(SyncDataTypeManagerImplTest, ConfigureSlowLoadingType) {
   SetConfigureStartExpectation();
   SetConfigureDoneExpectation(DataTypeManager::PARTIAL_SUCCESS);
 
-  syncable::ModelTypeSet types;
+  syncer::ModelTypeSet types;
   types.Put(BOOKMARKS);
   types.Put(APPS);
 

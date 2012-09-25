@@ -173,7 +173,7 @@
    bug_119677
    Heapcheck:Leak
    ...
-   fun:MonitorChangeObserverX11
+   fun:DisplayChangeObserverX11
    fun:aura::Env::Init
    fun:aura::Env::GetInstance
 }
@@ -263,28 +263,21 @@
    ...
    fun:tracked_objects::ThreadData::TallyA*
 }
+{
+   NSS is initialized (LeakyLazyInstance) but intentionally never shut down
+   Heapcheck:Leak
+   ...
+   fun:InitSessionCacheLocks
+   fun:initSessionCacheLocksLazily
+   ...
+   fun:ssl_InitSessionCacheLocks
+}
 
 #-----------------------------------------------------------------------
 # 3. Suppressions for real chromium bugs that are not yet fixed.
 # These should all be in chromium's bug tracking system (but a few aren't yet).
 # Periodically we should sweep this file and the bug tracker clean by
 # running overnight and removing outdated bugs/suppressions.
-{
-   bug_32623
-   Heapcheck:Leak
-   ...
-   fun:InitSessionCacheLocks
-   fun:initSessionCacheLocksLazily
-   ...
-   fun:lock_cache
-   fun:ssl_LookupSID
-   fun:ssl2_BeginClientHandshake
-   fun:ssl_Do1stHandshake
-   fun:SSL_ForceHandshake
-   fun:net::SSLClientSocketNSS::Core::DoHandshake
-   fun:net::SSLClientSocketNSS::Core::DoHandshakeLoop
-   fun:net::SSLClientSocketNSS::Core::Connect
-}
 {
    bug_17540
    Heapcheck:Leak
@@ -640,6 +633,24 @@
    fun:ReloadButtonGtkTest_*_Test::TestBody
 }
 {
+   bug_65940_a
+   Heapcheck:Leak
+   ...
+   fun:IPC::SyncChannel::SyncChannel
+   fun:ChildThread::Init
+   fun:ChildThread::ChildThread
+   fun:RenderThreadImpl::RenderThreadImpl
+}
+{
+   bug_65940_b
+   Heapcheck:Leak
+   fun:__gnu_cxx::new_allocator::allocate
+   fun:std::_Vector_base::_M_allocate
+   fun:std::vector::_M_insert_aux
+   fun:std::vector::push_back
+   fun:IPC::ChannelProxy::Context::OnAddFilter
+}
+{
    bug_66054_a
    Heapcheck:Leak
    ...
@@ -676,14 +687,6 @@
    fun:ResourceDispatcherHostTest::MakeTestRequest
 }
 {
-   Bug_70062
-   Heapcheck:Leak
-   fun:PR_NewLock
-   fun:InitSessionCacheLocks
-   fun:initSessionCacheLocksLazily
-   fun:PR_CallOnce
-}
-{
    bug_70327
    Heapcheck:Leak
    ...
@@ -700,15 +703,6 @@
    fun:MockService
    ...
    fun:ExtensionUpdaterTest*
-}
-{
-   bug_73358
-   Heapcheck:Leak
-   fun:TestingProfile::GetRequestContextForExtensions
-   fun:ExtensionDataDeleter
-   fun:ExtensionService::ClearExtensionData
-   fun:ExtensionService::UninstallExtension
-   fun:BackgroundApplicationListModelTest_Load*Extension*_Test::TestBody
 }
 {
    bug_79322a
@@ -1013,8 +1007,8 @@
    fun:TestURLRequestContextGetter::GetURLRequestContext
    fun:*SingleLoginAttempt
    fun:notifier::Login::StartConnection
-   fun:sync_notifier::InvalidationNotifier::UpdateCredentials
-   fun:sync_notifier::NonBlockingInvalidationNotifier::Core::UpdateCredentials
+   fun:syncer::InvalidationNotifier::UpdateCredentials
+   fun:syncer::NonBlockingInvalidationNotifier::Core::UpdateCredentials
    fun:void DispatchToMethod
 }
 {
@@ -1360,8 +1354,8 @@
    fun:TestURLRequestContextGetter::GetURLRequestContext
    ...
    fun:notifier::Login::StartConnection
-   fun:sync_notifier::InvalidationNotifier::UpdateCredentials
-   fun:sync_notifier::NonBlockingInvalidationNotifier::Core::UpdateCredentials
+   fun:syncer::InvalidationNotifier::UpdateCredentials
+   fun:syncer::NonBlockingInvalidationNotifier::Core::UpdateCredentials
 }
 {
    bug_124758
@@ -1398,14 +1392,6 @@
    fun:SiteInstanceImpl::GetProcess
    ...
    fun:*_*_Test::TestBody
-}
-{
-   bug_127717
-   Heapcheck:Leak
-   ...
-   fun:SkBitmap::HeapAllocator::allocPixelRef
-   fun:SkBitmap::allocPixels
-   fun:SkBitmap::allocPixels
 }
 {
    bug_128145
@@ -1478,4 +1464,47 @@
    fun:content::RenderViewHostTestHarness::SetUp
    fun:ChromeRenderViewHostTestHarness::SetUp
    fun:TabContentsTestHarness::SetUp
+}
+{
+   bug_134527
+   Heapcheck:Leak
+   fun:IA__FcMatrixCopy
+   fun:gfx::RenderTextLinux::EnsureLayout
+   fun:gfx::RenderText::IndexOfAdjacentGrapheme
+   fun:gfx::RenderTextTest_GraphemePositions_Test::TestBody
+}
+{
+   bug_134717
+   Heapcheck:Leak
+   fun:ui::InputMethodIBus::CreateContext
+   fun:ui::InputMethodIBus::Init
+}
+{
+   bug_136936
+   Heapcheck:Leak
+   ...
+   fun:std::basic_string::_Rep::_S_create
+   ...
+   fun:base::PlatformThread::SetName
+}
+{
+   bug_140628_a
+   Heapcheck:Leak
+   ...
+   fun:ExtensionAction::RunIconAnimation
+   fun:ExtensionAction::SetAppearance
+}
+{
+   bug_140628_b
+   Heapcheck:Leak
+   ...
+   fun:ExtensionAction::GetIconAnimation
+}
+{
+   bug_141037
+   Heapcheck:Leak
+   ...
+   fun:ReloadButton::CreateMenuModel
+   fun:ReloadButton::ReloadButton
+   fun:ReloadButtonTest::ReloadButtonTest
 }

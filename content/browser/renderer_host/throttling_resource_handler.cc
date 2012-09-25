@@ -16,7 +16,6 @@ ThrottlingResourceHandler::ThrottlingResourceHandler(
     ScopedVector<ResourceThrottle> throttles)
     : LayeredResourceHandler(next_handler.Pass()),
       deferred_stage_(DEFERRED_NONE),
-      child_id_(child_id),
       request_id_(request_id),
       throttles_(throttles.Pass()),
       index_(0) {
@@ -97,7 +96,9 @@ void ThrottlingResourceHandler::Cancel() {
 }
 
 void ThrottlingResourceHandler::Resume() {
-  switch (deferred_stage_) {
+  DeferredStage last_deferred_stage = deferred_stage_;
+  deferred_stage_ = DEFERRED_NONE;
+  switch (last_deferred_stage) {
     case DEFERRED_NONE:
       NOTREACHED();
       break;
@@ -111,7 +112,6 @@ void ThrottlingResourceHandler::Resume() {
       ResumeResponse();
       break;
   }
-  deferred_stage_ = DEFERRED_NONE;
 }
 
 void ThrottlingResourceHandler::ResumeStart() {

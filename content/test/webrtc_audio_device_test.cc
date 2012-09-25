@@ -12,16 +12,21 @@
 #include "base/synchronization/waitable_event.h"
 #include "base/test/test_timeouts.h"
 #include "base/win/scoped_com_initializer.h"
+#include "content/browser/renderer_host/media/audio_input_device_manager.h"
 #include "content/browser/renderer_host/media/audio_input_renderer_host.h"
 #include "content/browser/renderer_host/media/audio_renderer_host.h"
 #include "content/browser/renderer_host/media/media_stream_manager.h"
 #include "content/browser/renderer_host/media/mock_media_observer.h"
+#include "content/browser/renderer_host/media/video_capture_manager.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/content_paths.h"
 #include "content/public/test/mock_resource_context.h"
 #include "content/public/test/test_browser_thread.h"
+#include "content/renderer/media/audio_device_factory.h"
 #include "content/renderer/media/audio_hardware.h"
+#include "content/renderer/media/audio_input_message_filter.h"
+#include "content/renderer/media/audio_message_filter.h"
 #include "content/renderer/media/webrtc_audio_device_impl.h"
 #include "content/renderer/render_process.h"
 #include "content/renderer/render_thread_impl.h"
@@ -48,15 +53,16 @@ class WebRTCMockRenderProcess : public RenderProcess {
   virtual ~WebRTCMockRenderProcess() {}
 
   // RenderProcess implementation.
-  virtual skia::PlatformCanvas* GetDrawingCanvas(TransportDIB** memory,
-                                                 const gfx::Rect& rect) {
+  virtual skia::PlatformCanvas* GetDrawingCanvas(
+      TransportDIB** memory, const gfx::Rect& rect) OVERRIDE {
     return NULL;
   }
-  virtual void ReleaseTransportDIB(TransportDIB* memory) {}
-  virtual bool UseInProcessPlugins() const { return false; }
-  virtual void AddBindings(int bindings) {}
+  virtual void ReleaseTransportDIB(TransportDIB* memory) OVERRIDE {}
+  virtual bool UseInProcessPlugins() const OVERRIDE { return false; }
+  virtual void AddBindings(int bindings) OVERRIDE {}
   virtual int GetEnabledBindings() const { return 0; }
-  virtual bool HasInitializedMediaLibrary() const { return false; }
+  virtual TransportDIB* CreateTransportDIB(size_t size)  { return NULL; }
+  virtual void FreeTransportDIB(TransportDIB*) {}
 
  private:
   DISALLOW_COPY_AND_ASSIGN(WebRTCMockRenderProcess);
@@ -129,6 +135,17 @@ void WebRTCAudioDeviceTest::SetUp() {
   ui_thread_.reset(new content::TestBrowserThread(content::BrowserThread::UI,
                                                   MessageLoop::current()));
 
+  // Create our own AudioManager and MediaStreamManager.
+  audio_manager_.reset(media::AudioManager::Create());
+
+  scoped_refptr<media_stream::AudioInputDeviceManager>
+      audio_input_device_manager(new media_stream::AudioInputDeviceManager(
+          audio_manager_.get()));
+  scoped_refptr<media_stream::VideoCaptureManager> video_capture_manager(
+      new media_stream::VideoCaptureManager());
+  media_stream_manager_.reset(new media_stream::MediaStreamManager(
+      audio_input_device_manager, video_capture_manager));
+
   // Construct the resource context on the UI thread.
   resource_context_.reset(new MockResourceContext);
 
@@ -169,6 +186,8 @@ void WebRTCAudioDeviceTest::TearDown() {
                  base::Unretained((this))));
   WaitForIOThreadCompletion();
   mock_process_.reset();
+  media_stream_manager_.reset();
+  audio_manager_.reset();
   RendererWebKitPlatformSupportImpl::SetSandboxEnabledForTesting(
       sandbox_was_enabled_);
 }
@@ -193,8 +212,6 @@ void WebRTCAudioDeviceTest::InitializeIOThread(const char* thread_name) {
   io_thread_.reset(new content::TestBrowserThread(content::BrowserThread::IO,
                                                   MessageLoop::current()));
 
-  audio_manager_.reset(media::AudioManager::Create());
-
   // Populate our resource context.
   test_request_context_.reset(new TestURLRequestContext());
   MockResourceContext* resource_context =
@@ -212,7 +229,6 @@ void WebRTCAudioDeviceTest::InitializeIOThread(const char* thread_name) {
 void WebRTCAudioDeviceTest::UninitializeIOThread() {
   resource_context_.reset();
 
-  audio_manager_.reset();
   test_request_context_.reset();
   initialize_com_.reset();
 }
@@ -224,7 +240,7 @@ void WebRTCAudioDeviceTest::CreateChannel(const char* name) {
   audio_render_host_->OnChannelConnected(base::GetCurrentProcId());
 
   audio_input_renderer_host_ = new AudioInputRendererHost(
-      resource_context_.get(), audio_manager_.get());
+      audio_manager_.get(), media_stream_manager_.get());
   audio_input_renderer_host_->OnChannelConnected(base::GetCurrentProcId());
 
   channel_.reset(new IPC::Channel(name, IPC::Channel::MODE_SERVER, this));
@@ -266,7 +282,7 @@ void WebRTCAudioDeviceTest::OnGetHardwareInputChannelLayout(
           media::AudioManagerBase::kDefaultDeviceId) : CHANNEL_LAYOUT_NONE;
 }
 
-// IPC::Channel::Listener implementation.
+// IPC::Listener implementation.
 bool WebRTCAudioDeviceTest::OnMessageReceived(const IPC::Message& message) {
   if (render_thread_) {
     IPC::ChannelProxy::MessageFilter* filter =
@@ -324,8 +340,7 @@ void WebRTCAudioDeviceTest::WaitForMessageLoopCompletion(
   base::WaitableEvent* event = new base::WaitableEvent(false, false);
   loop->PostTask(FROM_HERE, base::Bind(&base::WaitableEvent::Signal,
                  base::Unretained(event)));
-  if (event->TimedWait(base::TimeDelta::FromMilliseconds(
-          TestTimeouts::action_max_timeout_ms()))) {
+  if (event->TimedWait(TestTimeouts::action_max_timeout())) {
     delete event;
   } else {
     // Don't delete the event object in case the message ever gets processed.

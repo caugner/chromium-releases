@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_PUBLIC_TEST_MOCK_RENDER_PROCESS_HOST_H_
 #define CONTENT_PUBLIC_TEST_MOCK_RENDER_PROCESS_HOST_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_vector.h"
@@ -46,6 +45,7 @@ class MockRenderProcessHost : public RenderProcessHost {
   virtual void WidgetRestored() OVERRIDE;
   virtual void WidgetHidden() OVERRIDE;
   virtual int VisibleWidgetCount() const OVERRIDE;
+  virtual bool IsGuest() const OVERRIDE;
   virtual void AddWord(const string16& word);
   virtual bool FastShutdownIfPossible() OVERRIDE;
   virtual bool FastShutdownStarted() const OVERRIDE;
@@ -71,6 +71,7 @@ class MockRenderProcessHost : public RenderProcessHost {
   virtual bool FastShutdownForPageCount(size_t count) OVERRIDE;
   virtual base::TimeDelta GetChildProcessIdleTime() const OVERRIDE;
   virtual void SurfaceUpdated(int32 surface_id) OVERRIDE;
+  virtual void ResumeRequestsForView(int route_id) OVERRIDE;
 
   // IPC::Sender via RenderProcessHost.
   virtual bool Send(IPC::Message* msg) OVERRIDE;

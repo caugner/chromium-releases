@@ -11,10 +11,10 @@
 #include "base/memory/scoped_nsobject.h"
 #include "base/sys_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
+#include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_controller.h"
-#include "skia/ext/skia_utils_mac.h"
-#include "grit/ui_resources_standard.h"
+#include "grit/ui_resources.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/mac/nsimage_cache.h"
 #include "ui/gfx/scoped_ns_graphics_context_save_gstate_mac.h"
@@ -250,8 +250,9 @@ NSImage* MakeDragImage(BookmarkModel* model,
                        const std::vector<const BookmarkNode*>& nodes) {
   if (nodes.size() == 1) {
     const BookmarkNode* node = nodes[0];
+    const gfx::Image& favicon = model->GetFavicon(node);
     return bookmark_pasteboard_helper_mac::DragImageForBookmark(
-        gfx::SkBitmapToNSImage(model->GetFavicon(node)), node->GetTitle());
+        favicon.IsEmpty() ? nil : favicon.ToNSImage(), node->GetTitle());
   } else {
     // TODO(feldstein): Do something better than this. Should have badging
     // and a single drag image.
@@ -422,7 +423,8 @@ void StartDrag(Profile* profile,
                                            pressure:1.0];
 
   // TODO(avi): Do better than this offset.
-  NSImage* drag_image = MakeDragImage(profile->GetBookmarkModel(), nodes);
+  NSImage* drag_image =
+      MakeDragImage(BookmarkModelFactory::GetForProfile(profile), nodes);
   NSSize image_size = [drag_image size];
   position.x -= std::floor(image_size.width / 2);
   position.y -= std::floor(image_size.height / 5);

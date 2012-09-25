@@ -58,9 +58,6 @@
 
 #pragma comment(lib, "dwmapi.lib")
 
-// From msdn:
-#define MOUSEEVENTF_FROMTOUCH 0xFF515700
-
 using ui::ViewProp;
 
 namespace views {
@@ -801,13 +798,13 @@ void NativeWidgetWin::InitModalType(ui::ModalType modal_type) {
   }
 }
 
-gfx::Rect NativeWidgetWin::GetWindowScreenBounds() const {
+gfx::Rect NativeWidgetWin::GetWindowBoundsInScreen() const {
   RECT r;
   GetWindowRect(&r);
   return gfx::Rect(r);
 }
 
-gfx::Rect NativeWidgetWin::GetClientAreaScreenBounds() const {
+gfx::Rect NativeWidgetWin::GetClientAreaBoundsInScreen() const {
   RECT r;
   GetClientRect(&r);
   POINT point = { r.left, r.top };
@@ -1631,14 +1628,8 @@ LRESULT NativeWidgetWin::OnMouseRange(UINT message,
   MSG msg = { hwnd(), message, w_param, l_param, 0,
               { GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param) } };
   MouseEvent event(msg);
-  // Only button up/down have MOUSEEVENTF_FROMTOUCH set.
-  if (!touch_ids_.empty() ||
-      ((message == WM_LBUTTONDOWN || message == WM_LBUTTONUP ||
-        message == WM_RBUTTONDOWN || message == WM_RBUTTONUP) &&
-       (GetMessageExtraInfo() & MOUSEEVENTF_FROMTOUCH) ==
-       MOUSEEVENTF_FROMTOUCH)) {
+  if (!touch_ids_.empty() || ui::IsMouseEventFromTouch(message))
     event.set_flags(event.flags() | ui::EF_FROM_TOUCH);
-  }
 
   if (!(event.flags() & ui::EF_IS_NON_CLIENT))
     if (tooltip_manager_.get())
@@ -1721,8 +1712,10 @@ LRESULT NativeWidgetWin::OnNCActivate(BOOL active) {
   if (IsActive())
     delegate_->EnableInactiveRendering();
 
-  // Avoid DefWindowProc non-client rendering over our custom frame.
-  if (!GetWidget()->ShouldUseNativeFrame()) {
+  // Avoid DefWindowProc non-client rendering over our custom frame on newer
+  // Windows versions only (breaks taskbar activation indication on XP/Vista).
+  if (!GetWidget()->ShouldUseNativeFrame() &&
+      base::win::GetVersion() > base::win::VERSION_VISTA) {
     SetMsgHandled(TRUE);
     return TRUE;
   }
@@ -2013,9 +2006,14 @@ void NativeWidgetWin::OnSetFocus(HWND old_focused_window) {
   SetMsgHandled(FALSE);
 }
 
+LRESULT NativeWidgetWin::OnSetIcon(UINT size_type, HICON new_icon) {
+  // Use a ScopedRedrawLock to avoid weird non-client painting.
+  return DefWindowProcWithRedrawLock(WM_SETICON, size_type,
+                                     reinterpret_cast<LPARAM>(new_icon));
+}
+
 LRESULT NativeWidgetWin::OnSetText(const wchar_t* text) {
-  // DefWindowProc for WM_SETTEXT does weird non-client painting, so we need to
-  // call it inside a ScopedRedrawLock.
+  // Use a ScopedRedrawLock to avoid weird non-client painting.
   return DefWindowProcWithRedrawLock(WM_SETTEXT, NULL,
                                      reinterpret_cast<LPARAM>(text));
 }
@@ -2225,7 +2223,7 @@ void NativeWidgetWin::OnWindowPosChanged(WINDOWPOS* window_pos) {
 void NativeWidgetWin::OnFinalMessage(HWND window) {
   // We don't destroy props in WM_DESTROY as we may still get messages after
   // WM_DESTROY that assume the properties are still valid (such as WM_CLOSE).
-  props_.reset();
+  props_.clear();
   delegate_->OnNativeWidgetDestroyed();
   if (ownership_ == Widget::InitParams::NATIVE_WIDGET_OWNS_WIDGET)
     delete this;
@@ -2502,16 +2500,20 @@ bool NativeWidgetWin::WidgetSizeIsClientSize() const {
 }
 
 void NativeWidgetWin::ClientAreaSizeChanged() {
-  RECT r;
-  if (WidgetSizeIsClientSize())
-    GetClientRect(&r);
-  else
+  RECT r = {0, 0, 0, 0};
+  if (WidgetSizeIsClientSize()) {
+    // TODO(beng): investigate whether this could be done
+    // from other branch of if-else.
+    if (!IsMinimized())
+      GetClientRect(&r);
+  } else
     GetWindowRect(&r);
   gfx::Size s(std::max(0, static_cast<int>(r.right - r.left)),
               std::max(0, static_cast<int>(r.bottom - r.top)));
   delegate_->OnNativeWidgetSizeChanged(s);
   if (use_layered_buffer_)
-    layered_window_contents_.reset(new gfx::Canvas(s, false));
+    layered_window_contents_.reset(
+        new gfx::Canvas(s, ui::SCALE_FACTOR_100P, false));
 }
 
 void NativeWidgetWin::UpdateDWMFrame() {

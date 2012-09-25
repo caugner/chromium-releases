@@ -12,8 +12,6 @@
 #include "build/build_config.h"
 #include "sync/engine/apply_updates_command.h"
 #include "sync/engine/build_commit_command.h"
-#include "sync/engine/cleanup_disabled_types_command.h"
-#include "sync/engine/clear_data_command.h"
 #include "sync/engine/commit.h"
 #include "sync/engine/conflict_resolver.h"
 #include "sync/engine/download_updates_command.h"
@@ -23,16 +21,21 @@
 #include "sync/engine/resolve_conflicts_command.h"
 #include "sync/engine/store_timestamps_command.h"
 #include "sync/engine/syncer_types.h"
-#include "sync/engine/syncproto.h"
 #include "sync/engine/throttled_data_type_tracker.h"
 #include "sync/engine/verify_updates_command.h"
+#include "sync/syncable/mutable_entry.h"
 #include "sync/syncable/syncable-inl.h"
-#include "sync/syncable/syncable.h"
 
 using base::Time;
 using base::TimeDelta;
 using sync_pb::ClientCommand;
-using syncable::Blob;
+
+namespace syncer {
+
+using sessions::ScopedSessionContextConflictResolver;
+using sessions::StatusController;
+using sessions::SyncSession;
+using sessions::ConflictProgress;
 using syncable::IS_UNAPPLIED_UPDATE;
 using syncable::SERVER_CTIME;
 using syncable::SERVER_IS_DEL;
@@ -43,22 +46,12 @@ using syncable::SERVER_PARENT_ID;
 using syncable::SERVER_POSITION_IN_PARENT;
 using syncable::SERVER_SPECIFICS;
 using syncable::SERVER_VERSION;
-using syncable::SYNCER;
-using syncable::WriteTransaction;
-
-namespace browser_sync {
-
-using sessions::ScopedSessionContextConflictResolver;
-using sessions::StatusController;
-using sessions::SyncSession;
-using sessions::ConflictProgress;
 
 #define ENUM_CASE(x) case x: return #x
 const char* SyncerStepToString(const SyncerStep step)
 {
   switch (step) {
     ENUM_CASE(SYNCER_BEGIN);
-    ENUM_CASE(CLEANUP_DISABLED_TYPES);
     ENUM_CASE(DOWNLOAD_UPDATES);
     ENUM_CASE(PROCESS_CLIENT_COMMAND);
     ENUM_CASE(VERIFY_UPDATES);
@@ -68,7 +61,6 @@ const char* SyncerStepToString(const SyncerStep step)
     ENUM_CASE(COMMIT);
     ENUM_CASE(RESOLVE_CONFLICTS);
     ENUM_CASE(APPLY_UPDATES_TO_RESOLVE_CONFLICTS);
-    ENUM_CASE(CLEAR_PRIVATE_DATA);
     ENUM_CASE(SYNCER_END);
   }
   NOTREACHED();
@@ -112,14 +104,8 @@ void Syncer::SyncShare(sessions::SyncSession* session,
             PruneUnthrottledTypes(base::TimeTicks::Now());
         session->SendEventNotification(SyncEngineEvent::SYNC_CYCLE_BEGIN);
 
-        next_step = CLEANUP_DISABLED_TYPES;
-        break;
-      case CLEANUP_DISABLED_TYPES: {
-        CleanupDisabledTypesCommand cleanup;
-        cleanup.Execute(session);
         next_step = DOWNLOAD_UPDATES;
         break;
-      }
       case DOWNLOAD_UPDATES: {
         // TODO(akalin): We may want to propagate this switch up
         // eventually.
@@ -154,6 +140,7 @@ void Syncer::SyncShare(sessions::SyncSession* session,
       case STORE_TIMESTAMPS: {
         StoreTimestampsCommand store_timestamps;
         store_timestamps.Execute(session);
+        session->SendEventNotification(SyncEngineEvent::STATUS_CHANGED);
         // We download all of the updates before attempting to apply them.
         if (!session->status_controller().download_updates_succeeded()) {
           // We may have downloaded some updates, but if the latest download
@@ -173,6 +160,7 @@ void Syncer::SyncShare(sessions::SyncSession* session,
       case APPLY_UPDATES: {
         ApplyUpdatesCommand apply_updates;
         apply_updates.Execute(session);
+        session->SendEventNotification(SyncEngineEvent::STATUS_CHANGED);
         if (last_step == APPLY_UPDATES) {
           // We're in configuration mode, but we still need to run the
           // SYNCER_END step.
@@ -226,12 +214,6 @@ void Syncer::SyncShare(sessions::SyncSession* session,
         next_step = SYNCER_END;
         break;
       }
-      case CLEAR_PRIVATE_DATA: {
-        ClearDataCommand clear_data_command;
-        clear_data_command.Execute(session);
-        next_step = SYNCER_END;
-        break;
-      }
       case SYNCER_END: {
         session->SendEventNotification(SyncEngineEvent::SYNC_CYCLE_ENDED);
         next_step = SYNCER_END;
@@ -253,7 +235,7 @@ void Syncer::SyncShare(sessions::SyncSession* session,
 }
 
 void Syncer::ProcessClientCommand(sessions::SyncSession* session) {
-  const ClientToServerResponse& response =
+  const sync_pb::ClientToServerResponse& response =
       session->status_controller().updates_response();
   if (!response.has_client_command())
     return;
@@ -305,4 +287,4 @@ void ClearServerData(syncable::MutableEntry* entry) {
   entry->Put(SERVER_POSITION_IN_PARENT, 0);
 }
 
-}  // namespace browser_sync
+}  // namespace syncer

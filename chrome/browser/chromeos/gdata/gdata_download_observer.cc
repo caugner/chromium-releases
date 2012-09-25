@@ -8,7 +8,7 @@
 #include "base/file_util.h"
 #include "chrome/browser/chromeos/gdata/gdata.pb.h"
 #include "chrome/browser/chromeos/gdata/gdata_documents_service.h"
-#include "chrome/browser/chromeos/gdata/gdata_file_system.h"
+#include "chrome/browser/chromeos/gdata/gdata_file_system_interface.h"
 #include "chrome/browser/chromeos/gdata/gdata_system_service.h"
 #include "chrome/browser/chromeos/gdata/gdata_upload_file_info.h"
 #include "chrome/browser/chromeos/gdata/gdata_uploader.h"
@@ -34,18 +34,25 @@ const char kGDataPathKey[] = "GDataPath";
 // External Data stored in DownloadItem for ongoing uploads.
 class UploadingExternalData : public DownloadCompletionBlocker {
  public:
-  UploadingExternalData(GDataUploader* uploader, int upload_id)
+  explicit UploadingExternalData(GDataUploader* uploader)
       : uploader_(uploader),
-        upload_id_(upload_id) {
+        upload_id_(-1) {
   }
   virtual ~UploadingExternalData() {}
 
-  int upload_id() const { return upload_id_; }
   GDataUploader* uploader() { return uploader_; }
+  void set_upload_id(int upload_id) { upload_id_ = upload_id; }
+  int upload_id() const { return upload_id_; }
+  void set_virtual_dir_path(const FilePath& path) { virtual_dir_path_ = path; }
+  const FilePath& virtual_dir_path() const { return virtual_dir_path_; }
+  void set_entry(scoped_ptr<DocumentEntry> entry) { entry_ = entry.Pass(); }
+  scoped_ptr<DocumentEntry> entry_passed() { return entry_.Pass(); }
 
  private:
   GDataUploader* uploader_;
   int upload_id_;
+  FilePath virtual_dir_path_;
+  scoped_ptr<DocumentEntry> entry_;
 
   DISALLOW_COPY_AND_ASSIGN(UploadingExternalData);
 };
@@ -111,9 +118,9 @@ void SubstituteGDataDownloadPathInternal(Profile* profile,
 
 // Callback for GDataFileSystem::CreateDirectory.
 void OnCreateDirectory(const base::Closure& substitute_callback,
-                       base::PlatformFileError error) {
+                       GDataFileError error) {
   DVLOG(1) << "OnCreateDirectory " << error;
-  if (error == base::PLATFORM_FILE_OK) {
+  if (error == GDATA_FILE_OK) {
     substitute_callback.Run();
   } else {
     // TODO(achuith): Handle this.
@@ -125,18 +132,15 @@ void OnCreateDirectory(const base::Closure& substitute_callback,
 void OnEntryFound(Profile* profile,
     const FilePath& gdata_dir_path,
     const base::Closure& substitute_callback,
-    base::PlatformFileError error,
-    const FilePath& entry_path,
+    GDataFileError error,
     scoped_ptr<gdata::GDataEntryProto> entry_proto) {
-  DVLOG(1) << "GDataDownloadObserver OnEntryFound " << entry_path.value();
-
-  if (error == base::PLATFORM_FILE_ERROR_NOT_FOUND) {
+  if (error == GDATA_FILE_ERROR_NOT_FOUND) {
     // Destination gdata directory doesn't exist, so create it.
     const bool is_exclusive = false, is_recursive = true;
     GetSystemService(profile)->file_system()->CreateDirectory(
         gdata_dir_path, is_exclusive, is_recursive,
         base::Bind(&OnCreateDirectory, substitute_callback));
-  } else if (error == base::PLATFORM_FILE_OK) {
+  } else if (error == GDATA_FILE_OK) {
     substitute_callback.Run();
   } else {
     // TODO(achuith): Handle this.
@@ -169,8 +173,11 @@ void OnAuthenticate(Profile* profile,
 
 }  // namespace
 
-GDataDownloadObserver::GDataDownloadObserver()
-    : gdata_uploader_(NULL),
+GDataDownloadObserver::GDataDownloadObserver(
+    GDataUploader* uploader,
+    GDataFileSystemInterface* file_system)
+    : gdata_uploader_(uploader),
+      file_system_(file_system),
       download_manager_(NULL),
       ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_(this)) {
 }
@@ -186,12 +193,9 @@ GDataDownloadObserver::~GDataDownloadObserver() {
 }
 
 void GDataDownloadObserver::Initialize(
-    GDataUploader* gdata_uploader,
     DownloadManager* download_manager,
     const FilePath& gdata_tmp_download_path) {
-  DCHECK(gdata_uploader);
   DCHECK(!gdata_tmp_download_path.empty());
-  gdata_uploader_ = gdata_uploader;
   download_manager_ = download_manager;
   if (download_manager_)
     download_manager_->AddObserver(this);
@@ -353,6 +357,7 @@ void GDataDownloadObserver::OnDownloadUpdated(DownloadItem* download) {
 
     case DownloadItem::COMPLETE:
       UploadDownloadItem(download);
+      MoveFileToGDataCache(download);
       RemovePendingDownload(download);
       break;
 
@@ -366,6 +371,7 @@ void GDataDownloadObserver::OnDownloadUpdated(DownloadItem* download) {
     default:
       NOTREACHED();
   }
+
   DVLOG(1) << "Number of pending downloads=" << pending_downloads_.size();
 }
 
@@ -406,15 +412,12 @@ void GDataDownloadObserver::UploadDownloadItem(DownloadItem* download) {
   if (!ShouldUpload(download))
     return;
 
-  scoped_ptr<UploadFileInfo> upload_file_info = CreateUploadFileInfo(download);
-  const int upload_id = gdata_uploader_->UploadNewFile(
-      upload_file_info.Pass());
-
-  // TODO(achuith): Fix this.
-  // We won't know the upload ID until the after the
-  // GDataUploader::UploadNewFile() call.
+  // Initialize uploading external data.
   download->SetExternalData(&kUploadingKey,
-      new UploadingExternalData(gdata_uploader_, upload_id));
+                            new UploadingExternalData(gdata_uploader_));
+
+  // Create UploadFileInfo structure for the download item.
+  CreateUploadFileInfo(download);
 }
 
 void GDataDownloadObserver::UpdateUpload(DownloadItem* download) {
@@ -441,8 +444,9 @@ bool GDataDownloadObserver::ShouldUpload(DownloadItem* download) {
          (GetUploadingExternalData(download) == NULL);
 }
 
-scoped_ptr<UploadFileInfo> GDataDownloadObserver::CreateUploadFileInfo(
-    DownloadItem* download) {
+void GDataDownloadObserver::CreateUploadFileInfo(DownloadItem* download) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
   scoped_ptr<UploadFileInfo> upload_file_info(new UploadFileInfo());
 
   // GetFullPath will be a temporary location if we're streaming.
@@ -466,14 +470,66 @@ scoped_ptr<UploadFileInfo> GDataDownloadObserver::CreateUploadFileInfo(
                  weak_ptr_factory_.GetWeakPtr(),
                  download->GetId());
 
-  return upload_file_info.Pass();
+  // Get the GDataDirectory proto for the upload directory, then extract the
+  // initial upload URL in OnReadDirectoryByPath().
+  const FilePath upload_dir = upload_file_info->gdata_path.DirName();
+  file_system_->GetEntryInfoByPath(
+      upload_dir,
+      base::Bind(&GDataDownloadObserver::OnGetEntryInfoByPath,
+                 weak_ptr_factory_.GetWeakPtr(),
+                 download->GetId(),
+                 base::Passed(&upload_file_info)));
+}
+
+void GDataDownloadObserver::OnGetEntryInfoByPath(
+    int32 download_id,
+    scoped_ptr<UploadFileInfo> upload_file_info,
+    GDataFileError error,
+    scoped_ptr<GDataEntryProto> entry_proto) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(upload_file_info.get());
+
+  // TODO(hshi): if the upload directory is no longer valid, use the root
+  // directory instead.
+  upload_file_info->initial_upload_location =
+      entry_proto.get() ? GURL(entry_proto->upload_url()) : GURL();
+
+  StartUpload(download_id, upload_file_info.Pass());
+}
+
+void GDataDownloadObserver::StartUpload(
+    int32 download_id,
+    scoped_ptr<UploadFileInfo> upload_file_info) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(upload_file_info.get());
+
+  // Look up the DownloadItem for the |download_id|.
+  DownloadMap::iterator iter = pending_downloads_.find(download_id);
+  if (iter == pending_downloads_.end()) {
+    DVLOG(1) << "Pending download not found" << download_id;
+    return;
+  }
+  DVLOG(1) << "Starting upload for download ID " << download_id;
+  DownloadItem* download_item = iter->second;
+
+  UploadingExternalData* upload_data = GetUploadingExternalData(download_item);
+  DCHECK(upload_data);
+  upload_data->set_virtual_dir_path(upload_file_info->gdata_path.DirName());
+
+  // Start upload and save the upload id for future reference.
+  const int upload_id = gdata_uploader_->UploadNewFile(upload_file_info.Pass());
+  upload_data->set_upload_id(upload_id);
 }
 
 void GDataDownloadObserver::OnUploadComplete(
     int32 download_id,
-    base::PlatformFileError error,
+    GDataFileError error,
     scoped_ptr<UploadFileInfo> upload_file_info) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(upload_file_info.get());
+  DCHECK(upload_file_info->entry.get());
+
+  // Look up the DownloadItem for the |download_id|.
   DownloadMap::iterator iter = pending_downloads_.find(download_id);
   if (iter == pending_downloads_.end()) {
     DVLOG(1) << "Pending download not found" << download_id;
@@ -481,9 +537,43 @@ void GDataDownloadObserver::OnUploadComplete(
   }
   DVLOG(1) << "Completing upload for download ID " << download_id;
   DownloadItem* download_item = iter->second;
+
   UploadingExternalData* upload_data = GetUploadingExternalData(download_item);
   DCHECK(upload_data);
+
+  // Take ownership of the DocumentEntry from UploadFileInfo. This is used by
+  // GDataFileSystem::AddUploadedFile() to add the entry to GDataCache after the
+  // upload completes.
+  upload_data->set_entry(upload_file_info->entry.Pass());
+
+  // Allow the download item to complete.
   upload_data->CompleteDownload();
+}
+
+void GDataDownloadObserver::MoveFileToGDataCache(DownloadItem* download) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  UploadingExternalData* upload_data = GetUploadingExternalData(download);
+  if (!upload_data) {
+    NOTREACHED();
+    return;
+  }
+
+  // Pass ownership of the DocumentEntry object to AddUploadedFile().
+  scoped_ptr<DocumentEntry> entry = upload_data->entry_passed();
+  if (!entry.get()) {
+    NOTREACHED();
+    return;
+  }
+
+  // Move downloaded file to gdata cache. Note that |content_file_path| should
+  // use the final target path when the download item is in COMPLETE state.
+  file_system_->AddUploadedFile(UPLOAD_NEW_FILE,
+                                upload_data->virtual_dir_path(),
+                                entry.Pass(),
+                                download->GetTargetFilePath(),
+                                GDataCache::FILE_OPERATION_MOVE,
+                                base::Bind(&base::DoNothing));
 }
 
 }  // namespace gdata

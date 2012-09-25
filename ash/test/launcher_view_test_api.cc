@@ -6,6 +6,7 @@
 
 #include "ash/launcher/launcher_button.h"
 #include "ash/launcher/launcher_view.h"
+#include "ash/launcher/overflow_button.h"
 #include "base/message_loop.h"
 #include "ui/views/animation/bounds_animator.h"
 #include "ui/views/controls/button/image_button.h"
@@ -61,6 +62,14 @@ int LauncherViewTestAPI::GetLastVisibleIndex() {
 
 bool LauncherViewTestAPI::IsOverflowButtonVisible() {
   return launcher_view_->overflow_button_->visible();
+}
+
+const gfx::Rect& LauncherViewTestAPI::GetBoundsByIndex(int index) {
+  return launcher_view_->view_model_->view_at(index)->bounds();
+}
+
+const gfx::Rect& LauncherViewTestAPI::GetIdealBoundsByIndex(int index) {
+  return launcher_view_->view_model_->ideal_bounds(index);
 }
 
 void LauncherViewTestAPI::SetAnimationDuration(int duration_ms) {

@@ -15,6 +15,8 @@
 #include "base/values.h"
 #include "chrome/browser/chromeos/extensions/file_handler_util.h"
 #include "chrome/browser/chromeos/gdata/gdata.pb.h"
+#include "chrome/browser/chromeos/gdata/gdata_file_system.h"
+#include "chrome/browser/chromeos/gdata/gdata_files.h"
 #include "chrome/browser/chromeos/gdata/gdata_operation_registry.h"
 #include "chrome/browser/chromeos/gdata/gdata_system_service.h"
 #include "chrome/browser/chromeos/gdata/gdata_util.h"
@@ -27,6 +29,8 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/browser/ui/simple_message_box.h"
@@ -144,26 +148,26 @@ int UMAExtensionIndex(const char *file_extension,
 
 // Convert numeric dialog type to a string.
 std::string GetDialogTypeAsString(
-    SelectFileDialog::Type dialog_type) {
+    ui::SelectFileDialog::Type dialog_type) {
   std::string type_str;
   switch (dialog_type) {
-    case SelectFileDialog::SELECT_NONE:
+    case ui::SelectFileDialog::SELECT_NONE:
       type_str = "full-page";
       break;
 
-    case SelectFileDialog::SELECT_FOLDER:
+    case ui::SelectFileDialog::SELECT_FOLDER:
       type_str = "folder";
       break;
 
-    case SelectFileDialog::SELECT_SAVEAS_FILE:
+    case ui::SelectFileDialog::SELECT_SAVEAS_FILE:
       type_str = "saveas-file";
       break;
 
-    case SelectFileDialog::SELECT_OPEN_FILE:
+    case ui::SelectFileDialog::SELECT_OPEN_FILE:
       type_str = "open-file";
       break;
 
-    case SelectFileDialog::SELECT_OPEN_MULTI_FILE:
+    case ui::SelectFileDialog::SELECT_OPEN_MULTI_FILE:
       type_str = "open-multi-file";
       break;
 
@@ -202,7 +206,7 @@ void OpenNewTab(const GURL& url, Profile* profile) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   Browser* browser = browser::FindOrCreateTabbedBrowser(
       profile ? profile : ProfileManager::GetDefaultProfileOrOffTheRecord());
-  browser->AddSelectedTabWithURL(url, content::PAGE_TRANSITION_LINK);
+  chrome::AddSelectedTabWithURL(browser, url, content::PAGE_TRANSITION_LINK);
   // If the current browser is not tabbed then the new tab will be created
   // in a different browser. Make sure it is visible.
   browser->window()->Show();
@@ -213,13 +217,13 @@ void ShowWarningMessageBox(Profile* profile, const FilePath& path) {
   // TODO: if FindOrCreateTabbedBrowser creates a new browser the returned
   // browser is leaked.
   Browser* browser = browser::FindOrCreateTabbedBrowser(profile);
-  browser::ShowMessageBox(
+  chrome::ShowMessageBox(
       browser->window()->GetNativeWindow(),
       l10n_util::GetStringFUTF16(
           IDS_FILE_BROWSER_ERROR_VIEWING_FILE_TITLE,
           UTF8ToUTF16(path.BaseName().value())),
       l10n_util::GetStringUTF16(IDS_FILE_BROWSER_ERROR_VIEWING_FILE),
-      browser::MESSAGE_BOX_TYPE_WARNING);
+      chrome::MESSAGE_BOX_TYPE_WARNING);
 }
 
 // Called when a file on GData was found. Opens the file found at |file_path|
@@ -227,18 +231,21 @@ void ShowWarningMessageBox(Profile* profile, const FilePath& path) {
 void OnGDataFileFound(Profile* profile,
                       const FilePath& file_path,
                       gdata::GDataFileType file_type,
-                      base::PlatformFileError error,
-                      scoped_ptr<gdata::GDataFileProto> file_proto) {
+                      gdata::GDataFileError error,
+                      scoped_ptr<gdata::GDataEntryProto> entry_proto) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  if (error == base::PLATFORM_FILE_OK) {
+  if (entry_proto.get() && !entry_proto->has_file_specific_info())
+    error = gdata::GDATA_FILE_ERROR_NOT_FOUND;
+
+  if (error == gdata::GDATA_FILE_OK) {
     GURL page_url;
     if (file_type == gdata::REGULAR_FILE) {
       page_url = gdata::util::GetFileResourceUrl(
-          file_proto->gdata_entry().resource_id(),
-          file_proto->gdata_entry().file_name());
+          entry_proto->resource_id(),
+          entry_proto->base_name());
     } else if (file_type == gdata::HOSTED_DOCUMENT) {
-      page_url = GURL(file_proto->alternate_url());
+      page_url = GURL(entry_proto->file_specific_info().alternate_url());
     } else {
       NOTREACHED();
     }
@@ -296,10 +303,10 @@ bool ConvertFileToRelativeFileSystemPath(
 }
 
 GURL GetFileBrowserUrlWithParams(
-    SelectFileDialog::Type type,
+    ui::SelectFileDialog::Type type,
     const string16& title,
     const FilePath& default_virtual_path,
-    const SelectFileDialog::FileTypeInfo* file_types,
+    const ui::SelectFileDialog::FileTypeInfo* file_types,
     int file_type_index,
     const FilePath::StringType& default_extension) {
   DictionaryValue arg_value;
@@ -313,8 +320,8 @@ GURL GetFileBrowserUrlWithParams(
     for (size_t i = 0; i < file_types->extensions.size(); ++i) {
       ListValue* extensions_list = new ListValue();
       for (size_t j = 0; j < file_types->extensions[i].size(); ++j) {
-        extensions_list->Set(
-            i, Value::CreateStringValue(file_types->extensions[i][j]));
+        extensions_list->Append(
+            Value::CreateStringValue(file_types->extensions[i][j]));
       }
 
       DictionaryValue* dict = new DictionaryValue();
@@ -325,12 +332,15 @@ GURL GetFileBrowserUrlWithParams(
         dict->SetString("description", desc);
       }
 
+      // file_type_index is 1-based. 0 means no selection at all.
       dict->SetBoolean("selected",
-                       (static_cast<size_t>(file_type_index) == i));
+                       (static_cast<size_t>(file_type_index) == (i + 1)));
 
       types_list->Set(i, dict);
     }
     arg_value.Set("typeList", types_list);
+
+    arg_value.SetBoolean("includeAllFiles", file_types->include_all_files);
   }
 
   std::string json_args;
@@ -343,29 +353,29 @@ GURL GetFileBrowserUrlWithParams(
   return GURL(url);
 }
 
-string16 GetTitleFromType(SelectFileDialog::Type dialog_type) {
+string16 GetTitleFromType(ui::SelectFileDialog::Type dialog_type) {
   string16 title;
   switch (dialog_type) {
-    case SelectFileDialog::SELECT_NONE:
+    case ui::SelectFileDialog::SELECT_NONE:
       // Full page file manager doesn't need a title.
       break;
 
-    case SelectFileDialog::SELECT_FOLDER:
+    case ui::SelectFileDialog::SELECT_FOLDER:
       title = l10n_util::GetStringUTF16(
           IDS_FILE_BROWSER_SELECT_FOLDER_TITLE);
       break;
 
-    case SelectFileDialog::SELECT_SAVEAS_FILE:
+    case ui::SelectFileDialog::SELECT_SAVEAS_FILE:
       title = l10n_util::GetStringUTF16(
           IDS_FILE_BROWSER_SELECT_SAVEAS_FILE_TITLE);
       break;
 
-    case SelectFileDialog::SELECT_OPEN_FILE:
+    case ui::SelectFileDialog::SELECT_OPEN_FILE:
       title = l10n_util::GetStringUTF16(
           IDS_FILE_BROWSER_SELECT_OPEN_FILE_TITLE);
       break;
 
-    case SelectFileDialog::SELECT_OPEN_MULTI_FILE:
+    case ui::SelectFileDialog::SELECT_OPEN_MULTI_FILE:
       title = l10n_util::GetStringUTF16(
           IDS_FILE_BROWSER_SELECT_OPEN_MULTI_FILE_TITLE);
       break;
@@ -448,8 +458,11 @@ void OpenFileBrowser(const FilePath& path,
     return;
 
   content::RecordAction(UserMetricsAction("ShowFileBrowserFullTab"));
-  application_launch::OpenApplication(profile, extension,
-      extension_misc::LAUNCH_WINDOW, GURL(url), NEW_FOREGROUND_TAB, NULL);
+  application_launch::LaunchParams params(profile, extension,
+                                          extension_misc::LAUNCH_WINDOW,
+                                          NEW_FOREGROUND_TAB);
+  params.override_url = GURL(url);
+  application_launch::OpenApplication(params);
 }
 
 void ViewRemovableDrive(const FilePath& path) {
@@ -469,23 +482,6 @@ void OpenApplication() {
   OpenFileBrowser(FilePath(), REUSE_NEVER, std::string());
 }
 
-class StandaloneExecutor : public FileTaskExecutor {
- public:
-  StandaloneExecutor(Profile * profile,
-                     const GURL& source_url,
-                     const std::string& extension_id,
-                     const std::string& action_id)
-    : FileTaskExecutor(profile, source_url, extension_id, action_id)
-  {}
-
- protected :
-  // FileTaskExecutor overrides.
-  virtual Browser* browser() {
-    return browser::FindOrCreateTabbedBrowser(profile());
-  }
-  virtual void Done(bool) {}
-};
-
 bool ExecuteDefaultHandler(Profile* profile, const FilePath& path) {
   GURL url;
   if (!ConvertFileToFileSystemUrl(profile, path,
@@ -499,6 +495,12 @@ bool ExecuteDefaultHandler(Profile* profile, const FilePath& path) {
   std::string extension_id = handler->extension_id();
   std::string action_id = handler->id();
   Browser* browser = browser::FindLastActiveWithProfile(profile);
+
+  // If there is no browsers for the profile, bail out. Return true so warning
+  // about file type not being supported is not displayed.
+  if (!browser)
+    return true;
+
   if (extension_id == kFileBrowserDomain) {
     // Only two of the built-in File Browser tasks require opening the File
     // Browser tab.
@@ -527,7 +529,7 @@ bool ExecuteDefaultHandler(Profile* profile, const FilePath& path) {
 
     std::vector<GURL> urls;
     urls.push_back(url);
-    scoped_refptr<StandaloneExecutor> executor = new StandaloneExecutor(
+    scoped_refptr<FileTaskExecutor> executor = FileTaskExecutor::Create(
         profile, source_url, extension_id, action_id);
     executor->Execute(urls);
     return true;
@@ -605,7 +607,7 @@ bool ExecuteBuiltinHandler(Browser* browser, const FilePath& path,
         return false;
 
       // Open the file once the file is found.
-      system_service->file_system()->GetFileInfoByPath(
+      system_service->file_system()->GetEntryInfoByPath(
           gdata::util::ExtractGDataPath(path),
           base::Bind(&OnGDataFileFound, profile, path, gdata::REGULAR_FILE));
       return true;
@@ -622,7 +624,7 @@ bool ExecuteBuiltinHandler(Browser* browser, const FilePath& path,
       if (!system_service)
         return false;
 
-      system_service->file_system()->GetFileInfoByPath(
+      system_service->file_system()->GetEntryInfoByPath(
           gdata::util::ExtractGDataPath(path),
           base::Bind(&OnGDataFileFound, profile, path,
                      gdata::HOSTED_DOCUMENT));
@@ -660,9 +662,11 @@ bool ExecuteBuiltinHandler(Browser* browser, const FilePath& path,
     if (!extension)
       return false;
 
-    application_launch::OpenApplication(
-        profile, extension, extension_misc::LAUNCH_WINDOW,
-        GetVideoPlayerUrl(url), NEW_FOREGROUND_TAB, NULL);
+    application_launch::LaunchParams params(profile, extension,
+                                            extension_misc::LAUNCH_WINDOW,
+                                            NEW_FOREGROUND_TAB);
+    params.override_url = GetVideoPlayerUrl(url);
+    application_launch::OpenApplication(params);
     return true;
   }
 
@@ -685,8 +689,10 @@ void InstallCRX(Browser* browser, const FilePath& path) {
   ExtensionService* service = browser->profile()->GetExtensionService();
   CHECK(service);
 
-  scoped_refptr<CrxInstaller> installer(
-      CrxInstaller::Create(service, new ExtensionInstallPrompt(browser)));
+  scoped_refptr<extensions::CrxInstaller> installer(
+      extensions::CrxInstaller::Create(
+          service,
+          chrome::CreateExtensionInstallPromptWithBrowser(browser)));
   installer->set_is_gallery_install(false);
   installer->set_allow_silent_install(false);
   installer->InstallCrx(path);

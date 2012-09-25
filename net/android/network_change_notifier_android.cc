@@ -6,7 +6,7 @@
 
 #include "base/logging.h"
 #include "base/android/jni_android.h"
-#include "jni/network_change_notifier_jni.h"
+#include "jni/NetworkChangeNotifier_jni.h"
 
 namespace net {
 namespace android {
@@ -18,7 +18,7 @@ NetworkChangeNotifier::NetworkChangeNotifier() {
 
 NetworkChangeNotifier::~NetworkChangeNotifier() {
   JNIEnv* env = base::android::AttachCurrentThread();
-  Java_NetworkChangeNotifier_unregisterReceiver(
+  Java_NetworkChangeNotifier_destroy(
       env, java_network_change_notifier_.obj());
 }
 

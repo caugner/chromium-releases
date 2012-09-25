@@ -29,6 +29,7 @@
 #endif
 
 using base::TimeDelta;
+using content::BackingStore;
 using content::BrowserThread;
 using content::BrowserThreadImpl;
 using content::MockRenderProcessHost;
@@ -488,7 +489,7 @@ TEST_F(RenderWidgetHostTest, Background) {
   host_->SetView(view.get());
 
   // Create a checkerboard background to test with.
-  gfx::Canvas canvas(gfx::Size(4, 4), true);
+  gfx::Canvas canvas(gfx::Size(4, 4), ui::SCALE_FACTOR_100P, true);
   canvas.FillRect(gfx::Rect(0, 0, 2, 2), SK_ColorBLACK);
   canvas.FillRect(gfx::Rect(2, 0, 2, 2), SK_ColorWHITE);
   canvas.FillRect(gfx::Rect(0, 2, 2, 2), SK_ColorWHITE);
@@ -623,15 +624,15 @@ TEST_F(RenderWidgetHostTest, HiddenPaint) {
 
   // Now unhide.
   process_->sink().ClearMessages();
-  host_->WasRestored();
+  host_->WasShown();
   EXPECT_FALSE(host_->is_hidden_);
 
   // It should have sent out a restored message with a request to paint.
   const IPC::Message* restored = process_->sink().GetUniqueMessageMatching(
-      ViewMsg_WasRestored::ID);
+      ViewMsg_WasShown::ID);
   ASSERT_TRUE(restored);
   Tuple1<bool> needs_repaint;
-  ViewMsg_WasRestored::Read(restored, &needs_repaint);
+  ViewMsg_WasShown::Read(restored, &needs_repaint);
   EXPECT_TRUE(needs_repaint.a);
 }
 
@@ -884,6 +885,23 @@ TEST_F(RenderWidgetHostTest, StopAndStartHangMonitorTimeout) {
   // Wait long enough for first timeout and see if it fired.
   MessageLoop::current()->PostDelayedTask(
       FROM_HERE, MessageLoop::QuitClosure(), TimeDelta::FromMilliseconds(40));
+  MessageLoop::current()->Run();
+  EXPECT_TRUE(host_->unresponsive_timer_fired());
+}
+
+// Test that the hang monitor timer expires properly if it is started, then
+// updated to a shorter duration.
+TEST_F(RenderWidgetHostTest, ShorterDelayHangMonitorTimeout) {
+  // Start with a timeout.
+  host_->StartHangMonitorTimeout(TimeDelta::FromMilliseconds(100));
+
+  // Start it again with shorter delay.
+  EXPECT_FALSE(host_->unresponsive_timer_fired());
+  host_->StartHangMonitorTimeout(TimeDelta::FromMilliseconds(20));
+
+  // Wait long enough for the second timeout and see if it fired.
+  MessageLoop::current()->PostDelayedTask(
+      FROM_HERE, MessageLoop::QuitClosure(), TimeDelta::FromMilliseconds(25));
   MessageLoop::current()->Run();
   EXPECT_TRUE(host_->unresponsive_timer_fired());
 }

@@ -138,25 +138,29 @@ TEST_F(SystemTrayTest, TrayWidgetAutoResizes) {
   SystemTray* tray = GetSystemTray();
   ASSERT_TRUE(tray->GetWidget());
 
-  gfx::Size widget_size = tray->GetWidget()->GetWindowScreenBounds().size();
+  // Add an initial tray item so that the tray gets laid out correctly.
+  TestItem* initial_item = new TestItem;
+  tray->AddTrayItem(initial_item);
 
-  TestItem* test_item = new TestItem;
-  tray->AddTrayItem(test_item);
+  gfx::Size initial_size = tray->GetWidget()->GetWindowBoundsInScreen().size();
 
-  gfx::Size new_size = tray->GetWidget()->GetWindowScreenBounds().size();
+  TestItem* new_item = new TestItem;
+  tray->AddTrayItem(new_item);
+
+  gfx::Size new_size = tray->GetWidget()->GetWindowBoundsInScreen().size();
 
   // Adding the new item should change the size of the tray.
-  EXPECT_NE(widget_size.ToString(), new_size.ToString());
+  EXPECT_NE(initial_size.ToString(), new_size.ToString());
 
   // Hiding the tray view of the new item should also change the size of the
   // tray.
-  test_item->tray_view()->SetVisible(false);
-  EXPECT_EQ(widget_size.ToString(),
-            tray->GetWidget()->GetWindowScreenBounds().size().ToString());
+  new_item->tray_view()->SetVisible(false);
+  EXPECT_EQ(initial_size.ToString(),
+            tray->GetWidget()->GetWindowBoundsInScreen().size().ToString());
 
-  test_item->tray_view()->SetVisible(true);
+  new_item->tray_view()->SetVisible(true);
   EXPECT_EQ(new_size.ToString(),
-            tray->GetWidget()->GetWindowScreenBounds().size().ToString());
+            tray->GetWidget()->GetWindowBoundsInScreen().size().ToString());
 }
 
 TEST_F(SystemTrayTest, SystemTrayNotifications) {
@@ -209,7 +213,7 @@ TEST_F(SystemTrayTest, BubbleCreationTypesTest) {
   RunAllPendingInMessageLoop();
 
   views::Widget* widget = test_item->default_view()->GetWidget();
-  gfx::Rect bubble_bounds = widget->GetWindowScreenBounds();
+  gfx::Rect bubble_bounds = widget->GetWindowBoundsInScreen();
 
   tray->ShowDetailedView(test_item, 0, true, BUBBLE_USE_EXISTING);
   RunAllPendingInMessageLoop();
@@ -217,14 +221,14 @@ TEST_F(SystemTrayTest, BubbleCreationTypesTest) {
   EXPECT_FALSE(test_item->default_view());
 
   EXPECT_EQ(bubble_bounds.ToString(), test_item->detailed_view()->GetWidget()->
-      GetWindowScreenBounds().ToString());
+      GetWindowBoundsInScreen().ToString());
   EXPECT_EQ(widget, test_item->detailed_view()->GetWidget());
 
   tray->ShowDefaultView(BUBBLE_USE_EXISTING);
   RunAllPendingInMessageLoop();
 
   EXPECT_EQ(bubble_bounds.ToString(), test_item->default_view()->GetWidget()->
-      GetWindowScreenBounds().ToString());
+      GetWindowBoundsInScreen().ToString());
   EXPECT_EQ(widget, test_item->default_view()->GetWidget());
 }
 

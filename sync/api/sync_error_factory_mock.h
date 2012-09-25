@@ -4,11 +4,12 @@
 
 #ifndef SYNC_API_SYNC_ERROR_FACTORY_MOCK_H_
 #define SYNC_API_SYNC_ERROR_FACTORY_MOCK_H_
-#pragma once
 
 #include "sync/api/sync_error_factory.h"
 
 #include "testing/gmock/include/gmock/gmock.h"
+
+namespace syncer {
 
 class SyncErrorFactoryMock : public SyncErrorFactory {
  public:
@@ -19,5 +20,7 @@ class SyncErrorFactoryMock : public SyncErrorFactory {
       const tracked_objects::Location& location,
       const std::string& message));
 };
+
+}  // namespace syncer
 
 #endif  // SYNC_API_SYNC_ERROR_FACTORY_MOCK_H_

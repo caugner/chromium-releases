@@ -4,7 +4,6 @@
 
 #ifndef UI_VIEWS_WIDGET_WIDGET_H_
 #define UI_VIEWS_WIDGET_WIDGET_H_
-#pragma once
 
 #include <set>
 #include <stack>
@@ -50,7 +49,6 @@ class OSExchangeData;
 class ThemeProvider;
 enum TouchStatus;
 }
-using ui::ThemeProvider;
 
 namespace views {
 
@@ -61,6 +59,8 @@ class NonClientFrameView;
 class ScopedEvent;
 class View;
 class WidgetDelegate;
+class WidgetObserver;
+
 namespace internal {
 class NativeWidgetPrivate;
 class RootView;
@@ -94,17 +94,6 @@ class RootView;
 class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
                             public FocusTraversable {
  public:
-  // Observers can listen to various events on the Widgets.
-  class VIEWS_EXPORT Observer {
-   public:
-    virtual void OnWidgetClosing(Widget* widget) {}
-    virtual void OnWidgetVisibilityChanged(Widget* widget, bool visible) {}
-    virtual void OnWidgetActivationChanged(Widget* widget, bool active) {}
-    virtual void OnWidgetMoved(Widget* widget) {}
-   protected:
-    virtual ~Observer() {}
-  };
-
   typedef std::set<Widget*> Widgets;
 
   enum FrameType {
@@ -182,7 +171,9 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
     gfx::NativeView parent;
     Widget* parent_widget;
     // Specifies the initial bounds of the Widget. Default is empty, which means
-    // the NativeWidget may specify a default size.
+    // the NativeWidget may specify a default size. If the parent is specified,
+    // |bounds| is in the parent's coordinate system. If the parent is not
+    // specified, it's in screen's global coordinate system.
     gfx::Rect bounds;
     // When set, this value is used as the Widget's NativeWidget implementation.
     // The Widget will not construct a default one. Default is NULL.
@@ -270,9 +261,9 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   gfx::NativeWindow GetNativeWindow() const;
 
   // Add/remove observer.
-  void AddObserver(Observer* observer);
-  void RemoveObserver(Observer* observer);
-  bool HasObserver(Observer* observer);
+  void AddObserver(WidgetObserver* observer);
+  void RemoveObserver(WidgetObserver* observer);
+  bool HasObserver(WidgetObserver* observer);
 
   // Returns the accelerator given a command id. Returns false if there is
   // no accelerator associated with a given id, which is a common condition.
@@ -302,10 +293,10 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   View* GetContentsView();
 
   // Returns the bounds of the Widget in screen coordinates.
-  gfx::Rect GetWindowScreenBounds() const;
+  gfx::Rect GetWindowBoundsInScreen() const;
 
   // Returns the bounds of the Widget's client area in screen coordinates.
-  gfx::Rect GetClientAreaScreenBounds() const;
+  gfx::Rect GetClientAreaBoundsInScreen() const;
 
   // Retrieves the restored bounds for the window.
   gfx::Rect GetRestoredBounds() const;
@@ -428,7 +419,7 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   bool IsAccessibleWidget() const;
 
   // Returns the ThemeProvider that provides theme resources for this Widget.
-  virtual ThemeProvider* GetThemeProvider() const;
+  virtual ui::ThemeProvider* GetThemeProvider() const;
 
   // Returns the FocusManager for this widget.
   // Note that all widgets in a widget hierarchy share the same focus manager.
@@ -576,7 +567,7 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
 
   // Sets capture to the specified view. This makes it so that all mouse, touch
   // and gesture events go to |view|.
-  void SetCapture(views::View* view);
+  void SetCapture(View* view);
 
   // Releases capture.
   void ReleaseCapture();
@@ -614,7 +605,7 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   // with it. TYPE_CONTROL and TYPE_TOOLTIP is not considered top level.
   bool is_top_level() const { return is_top_level_; }
 
-  // Returns the bounds of work area in the screen that Widget belongs to.
+  // Returns the work are bounds of the screen the Widget belongs to.
   gfx::Rect GetWorkAreaBoundsInScreen() const;
 
   // Notification that our owner is closing.
@@ -710,7 +701,7 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
 
   internal::NativeWidgetPrivate* native_widget_;
 
-  ObserverList<Observer> observers_;
+  ObserverList<WidgetObserver> observers_;
 
   // Non-owned pointer to the Widget's delegate.  May be NULL if no delegate is
   // being used.

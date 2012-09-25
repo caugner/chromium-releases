@@ -5,14 +5,14 @@
 #include "sync/internal_api/public/sessions/sync_session_snapshot.h"
 
 #include "base/json/json_writer.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/values.h"
 
-namespace browser_sync {
+namespace syncer {
 namespace sessions {
 
 SyncSessionSnapshot::SyncSessionSnapshot()
-    : num_server_changes_remaining_(0),
-      is_share_usable_(false),
+    : is_share_usable_(false),
       has_more_to_sync_(false),
       is_silenced_(false),
       num_encryption_conflicts_(0),
@@ -21,16 +21,15 @@ SyncSessionSnapshot::SyncSessionSnapshot()
       num_server_conflicts_(0),
       notifications_enabled_(false),
       num_entries_(0),
-      retry_scheduled_(false) {
+      retry_scheduled_(false),
+      is_initialized_(false) {
 }
 
 SyncSessionSnapshot::SyncSessionSnapshot(
-    const SyncerStatus& syncer_status,
-    const ErrorCounters& errors,
-    int64 num_server_changes_remaining,
+    const ModelNeutralState& model_neutral_state,
     bool is_share_usable,
-    syncable::ModelTypeSet initial_sync_ended,
-    const syncable::ModelTypePayloadMap& download_progress_markers,
+    ModelTypeSet initial_sync_ended,
+    const ModelTypePayloadMap& download_progress_markers,
     bool more_to_sync,
     bool is_silenced,
     int num_encryption_conflicts,
@@ -42,9 +41,7 @@ SyncSessionSnapshot::SyncSessionSnapshot(
     size_t num_entries,
     base::Time sync_start_time,
     bool retry_scheduled)
-    : syncer_status_(syncer_status),
-      errors_(errors),
-      num_server_changes_remaining_(num_server_changes_remaining),
+    : model_neutral_state_(model_neutral_state),
       is_share_usable_(is_share_usable),
       initial_sync_ended_(initial_sync_ended),
       download_progress_markers_(download_progress_markers),
@@ -58,22 +55,36 @@ SyncSessionSnapshot::SyncSessionSnapshot(
       notifications_enabled_(notifications_enabled),
       num_entries_(num_entries),
       sync_start_time_(sync_start_time),
-      retry_scheduled_(retry_scheduled) {
+      retry_scheduled_(retry_scheduled),
+      is_initialized_(true) {
 }
 
 SyncSessionSnapshot::~SyncSessionSnapshot() {}
 
 DictionaryValue* SyncSessionSnapshot::ToValue() const {
   DictionaryValue* value = new DictionaryValue();
-  value->Set("syncerStatus", syncer_status_.ToValue());
-  // We don't care too much if we lose precision here.
-  value->SetInteger("numServerChangesRemaining",
-                    static_cast<int>(num_server_changes_remaining_));
+  value->SetInteger("numSuccessfulCommits",
+                    model_neutral_state_.num_successful_commits);
+  value->SetInteger("numSuccessfulBookmarkCommits",
+                model_neutral_state_.num_successful_bookmark_commits);
+  value->SetInteger("numUpdatesDownloadedTotal",
+                model_neutral_state_.num_updates_downloaded_total);
+  value->SetInteger("numTombstoneUpdatesDownloadedTotal",
+                model_neutral_state_.num_tombstone_updates_downloaded_total);
+  value->SetInteger("numReflectedUpdatesDownloadedTotal",
+                model_neutral_state_.num_reflected_updates_downloaded_total);
+  value->SetInteger("numLocalOverwrites",
+                    model_neutral_state_.num_local_overwrites);
+  value->SetInteger("numServerOverwrites",
+                    model_neutral_state_.num_server_overwrites);
+  value->SetInteger(
+      "numServerChangesRemaining",
+      static_cast<int>(model_neutral_state_.num_server_changes_remaining));
   value->SetBoolean("isShareUsable", is_share_usable_);
   value->Set("initialSyncEnded",
-             syncable::ModelTypeSetToValue(initial_sync_ended_));
+             ModelTypeSetToValue(initial_sync_ended_));
   value->Set("downloadProgressMarkers",
-             syncable::ModelTypePayloadMapToValue(download_progress_markers_));
+             ModelTypePayloadMapToValue(download_progress_markers_));
   value->SetBoolean("hasMoreToSync", has_more_to_sync_);
   value->SetBoolean("isSilenced", is_silenced_);
   // We don't care too much if we lose precision here, also.
@@ -100,28 +111,19 @@ std::string SyncSessionSnapshot::ToString() const {
   return json;
 }
 
-SyncerStatus SyncSessionSnapshot::syncer_status() const {
-  return syncer_status_;
-}
-
-ErrorCounters SyncSessionSnapshot::errors() const {
-  return errors_;
-}
-
 int64 SyncSessionSnapshot::num_server_changes_remaining() const {
-  return num_server_changes_remaining_;
+  return model_neutral_state().num_server_changes_remaining;
 }
 
 bool SyncSessionSnapshot::is_share_usable() const {
   return is_share_usable_;
 }
 
-syncable::ModelTypeSet SyncSessionSnapshot::initial_sync_ended() const {
+ModelTypeSet SyncSessionSnapshot::initial_sync_ended() const {
   return initial_sync_ended_;
 }
 
-syncable::ModelTypePayloadMap
-    SyncSessionSnapshot::download_progress_markers() const {
+ModelTypePayloadMap SyncSessionSnapshot::download_progress_markers() const {
   return download_progress_markers_;
 }
 
@@ -169,5 +171,9 @@ bool SyncSessionSnapshot::retry_scheduled() const {
   return retry_scheduled_;
 }
 
+bool SyncSessionSnapshot::is_initialized() const {
+  return is_initialized_;
+}
+
 }  // namespace sessions
-}  // namespace browser_sync
+}  // namespace syncer

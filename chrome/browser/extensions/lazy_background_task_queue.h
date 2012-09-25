@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_LAZY_BACKGROUND_TASK_QUEUE_H_
 #define CHROME_BROWSER_EXTENSIONS_LAZY_BACKGROUND_TASK_QUEUE_H_
-#pragma once
 
 #include <map>
 #include <set>
@@ -17,12 +16,11 @@
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 
-class ExtensionHost;
 class Profile;
 
 namespace extensions {
-
 class Extension;
+class ExtensionHost;
 
 // This class maintains a queue of tasks that should execute when an
 // extension's lazy background page is loaded. It is also in charge of loading
@@ -40,7 +38,9 @@ class LazyBackgroundTaskQueue
   virtual ~LazyBackgroundTaskQueue();
 
   // Returns true if the task should be added to the queue (that is, if the
-  // extension has a lazy background page that isn't ready yet).
+  // extension has a lazy background page that isn't ready yet). If the
+  // extension has a lazy background page that is being suspended this method
+  // cancels that suspension.
   bool ShouldEnqueueTask(Profile* profile, const Extension* extension);
 
   // Adds a task to the queue for a given extension. If this is the first

@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_GPU_BLACKLIST_H_
 #define CHROME_BROWSER_GPU_BLACKLIST_H_
-#pragma once
 
 #include <string>
 #include <vector>
@@ -229,7 +228,7 @@ class GpuBlacklist : public content::GpuDataManagerObserver {
     // Constructs GpuBlacklistEntry from DictionaryValue loaded from json.
     // Top-level entry must have an id number.  Others are exceptions.
     static ScopedGpuBlacklistEntry GetGpuBlacklistEntryFromValue(
-        base::DictionaryValue* value, bool top_level);
+        const base::DictionaryValue* value, bool top_level);
 
     // Determines if a given os/gc/driver is included in the Entry set.
     bool Contains(OsType os_type,
@@ -273,6 +272,13 @@ class GpuBlacklist : public content::GpuDataManagerObserver {
       kMultiGpuStyleNone
     };
 
+    enum MultiGpuCategory {
+      kMultiGpuCategoryPrimary,
+      kMultiGpuCategorySecondary,
+      kMultiGpuCategoryAny,
+      kMultiGpuCategoryNone
+    };
+
     GpuBlacklistEntry();
     ~GpuBlacklistEntry() { }
 
@@ -290,6 +296,8 @@ class GpuBlacklist : public content::GpuDataManagerObserver {
     bool AddDeviceId(const std::string& device_id_string);
 
     bool SetMultiGpuStyle(const std::string& multi_gpu_style_string);
+
+    bool SetMultiGpuCategory(const std::string& multi_gpu_category_string);
 
     bool SetDriverVendorInfo(const std::string& vendor_op,
                              const std::string& vendor_value);
@@ -328,6 +336,9 @@ class GpuBlacklist : public content::GpuDataManagerObserver {
 
     static MultiGpuStyle StringToMultiGpuStyle(const std::string& style);
 
+    static MultiGpuCategory StringToMultiGpuCategory(
+        const std::string& category);
+
     uint32 id_;
     bool disabled_;
     std::string description_;
@@ -337,6 +348,7 @@ class GpuBlacklist : public content::GpuDataManagerObserver {
     uint32 vendor_id_;
     std::vector<uint32> device_id_list_;
     MultiGpuStyle multi_gpu_style_;
+    MultiGpuCategory multi_gpu_category_;
     scoped_ptr<StringInfo> driver_vendor_info_;
     scoped_ptr<VersionInfo> driver_version_info_;
     scoped_ptr<VersionInfo> driver_date_info_;
@@ -369,7 +381,7 @@ class GpuBlacklist : public content::GpuDataManagerObserver {
   // By default, if there is no browser version information in the entry,
   // return kSupported;
   BrowserVersionSupport IsEntrySupportedByCurrentBrowserVersion(
-      base::DictionaryValue* value);
+      const base::DictionaryValue* value);
 
   // GpuDataManager::Observer implementation.
   virtual void OnGpuInfoUpdate() OVERRIDE;

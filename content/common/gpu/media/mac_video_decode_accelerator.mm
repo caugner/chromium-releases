@@ -93,25 +93,24 @@ static bool BindImageToTexture(CGLContextObj context,
 }
 
 MacVideoDecodeAccelerator::MacVideoDecodeAccelerator(
-    media::VideoDecodeAccelerator::Client* client)
+    CGLContextObj cgl_context, media::VideoDecodeAccelerator::Client* client)
     : client_(client),
-      cgl_context_(NULL) {
-}
-
-void MacVideoDecodeAccelerator::SetCGLContext(CGLContextObj cgl_context) {
-  DCHECK(CalledOnValidThread());
-  cgl_context_ = cgl_context;
+      cgl_context_(cgl_context),
+      did_build_config_record_(false) {
 }
 
 bool MacVideoDecodeAccelerator::Initialize(media::VideoCodecProfile profile) {
   DCHECK(CalledOnValidThread());
+
+  if (profile < media::H264PROFILE_MIN || profile > media::H264PROFILE_MAX)
+    return false;
 
   IOSurfaceSupport* io_surface_support = IOSurfaceSupport::Initialize();
   if (!io_surface_support)
     return false;
 
   MessageLoop::current()->PostTask(FROM_HERE, base::Bind(
-      &MacVideoDecodeAccelerator::NotifyInitializeDone, this));
+      &MacVideoDecodeAccelerator::NotifyInitializeDone, base::AsWeakPtr(this)));
   return true;
 }
 
@@ -131,9 +130,11 @@ void MacVideoDecodeAccelerator::Decode(
     content::H264NALU nalu;
     content::H264Parser::Result result = h264_parser_.AdvanceToNextNALU(&nalu);
     if (result == content::H264Parser::kEOStream) {
-      MessageLoop::current()->PostTask(FROM_HERE, base::Bind(
-          &MacVideoDecodeAccelerator::NotifyInputBufferRead, this,
-          bitstream_buffer.id()));
+      if (bitstream_nalu_count_.count(bitstream_buffer.id()) == 0) {
+        MessageLoop::current()->PostTask(FROM_HERE, base::Bind(
+            &MacVideoDecodeAccelerator::NotifyInputBufferRead,
+            base::AsWeakPtr(this), bitstream_buffer.id()));
+      }
       return;
     }
     RETURN_ON_FAILURE(result == content::H264Parser::kOk,
@@ -154,6 +155,7 @@ void MacVideoDecodeAccelerator::Decode(
     // to the decoder.
     if (vda_support_.get() && nalu.nal_unit_type >= 1 &&
         nalu.nal_unit_type <= 5) {
+      bitstream_nalu_count_[bitstream_buffer.id()]++;
       DecodeNALU(nalu, bitstream_buffer.id());
     }
   }
@@ -193,7 +195,7 @@ void MacVideoDecodeAccelerator::Flush() {
                     "Call to Flush() during invalid state.", ILLEGAL_STATE,);
   vda_support_->Flush(true);
   MessageLoop::current()->PostTask(FROM_HERE, base::Bind(
-      &MacVideoDecodeAccelerator::NotifyFlushDone, this));
+      &MacVideoDecodeAccelerator::NotifyFlushDone, base::AsWeakPtr(this)));
 }
 
 void MacVideoDecodeAccelerator::Reset() {
@@ -202,10 +204,10 @@ void MacVideoDecodeAccelerator::Reset() {
                     "Call to Reset() during invalid state.", ILLEGAL_STATE,);
   vda_support_->Flush(false);
   MessageLoop::current()->PostTask(FROM_HERE, base::Bind(
-      &MacVideoDecodeAccelerator::NotifyResetDone, this));
+      &MacVideoDecodeAccelerator::NotifyResetDone, base::AsWeakPtr(this)));
 }
 
-void MacVideoDecodeAccelerator::Destroy() {
+void MacVideoDecodeAccelerator::Cleanup() {
   DCHECK(CalledOnValidThread());
   if (vda_support_) {
     vda_support_->Destroy();
@@ -215,9 +217,17 @@ void MacVideoDecodeAccelerator::Destroy() {
   decoded_images_.clear();
 }
 
+void MacVideoDecodeAccelerator::Destroy() {
+  DCHECK(CalledOnValidThread());
+  Cleanup();
+  delete this;
+}
+
 MacVideoDecodeAccelerator::~MacVideoDecodeAccelerator() {
   DCHECK(CalledOnValidThread());
-  Destroy();
+  DCHECK(!vda_support_);
+  DCHECK(!client_);
+  DCHECK(decoded_images_.empty());
 }
 
 void MacVideoDecodeAccelerator::OnFrameReady(
@@ -238,10 +248,14 @@ void MacVideoDecodeAccelerator::OnFrameReady(
     decoded_images_.push_back(info);
     SendImages();
   }
-  // TODO(sail): this assumes Decode() is handed a single NALU at a time. Make
-  // that assumption go away. See VideoDecodeAcceleratorTest.DecodeVariations
-  // for an example of a test the fails due to this assumption.
-  client_->NotifyEndOfBitstreamBuffer(bitstream_buffer_id);
+  std::map<int32, int>::iterator bitstream_count_it =
+      bitstream_nalu_count_.find(bitstream_buffer_id);
+  if (--bitstream_count_it->second == 0) {
+    bitstream_nalu_count_.erase(bitstream_count_it);
+    MessageLoop::current()->PostTask(FROM_HERE, base::Bind(
+        &MacVideoDecodeAccelerator::NotifyInputBufferRead,
+        base::AsWeakPtr(this), bitstream_buffer_id));
+  }
 }
 
 void MacVideoDecodeAccelerator::SendImages() {
@@ -271,7 +285,7 @@ void MacVideoDecodeAccelerator::StopOnError(
     media::VideoDecodeAccelerator::Error error) {
   if (client_)
     client_->NotifyError(error);
-  Destroy();
+  Cleanup();
 }
 
 bool MacVideoDecodeAccelerator::CreateDecoder(
@@ -290,7 +304,7 @@ bool MacVideoDecodeAccelerator::CreateDecoder(
                     PLATFORM_FAILURE, false);
 
   MessageLoop::current()->PostTask(FROM_HERE, base::Bind(
-      &MacVideoDecodeAccelerator::RequestPictures, this));
+      &MacVideoDecodeAccelerator::RequestPictures, base::AsWeakPtr(this)));
   return true;
 }
 
@@ -313,9 +327,9 @@ void MacVideoDecodeAccelerator::DecodeNALU(const content::H264NALU& nalu,
   // Keep a ref counted copy of the buffer.
   scoped_refptr<base::RefCountedBytes> bytes(
       base::RefCountedBytes::TakeVector(&data));
-  vda_support_->Decode(bytes->front(), bytes->size(),
-                       base::Bind(&MacVideoDecodeAccelerator::OnFrameReady,
-                                  this, bitstream_buffer_id, bytes));
+  vda_support_->Decode(bytes->front(), bytes->size(), base::Bind(
+      &MacVideoDecodeAccelerator::OnFrameReady,
+      base::AsWeakPtr(this), bitstream_buffer_id, bytes));
 }
 
 void MacVideoDecodeAccelerator::NotifyInitializeDone() {

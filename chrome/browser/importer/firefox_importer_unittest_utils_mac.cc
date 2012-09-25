@@ -15,6 +15,7 @@
 #include "ipc/ipc_channel.h"
 #include "ipc/ipc_descriptors.h"
 #include "ipc/ipc_message.h"
+#include "ipc/ipc_multiprocess_test.h"
 #include "ipc/ipc_switches.h"
 #include "testing/multiprocess_func_list.h"
 
@@ -151,7 +152,7 @@ FFUnitTestDecryptorProxy::~FFUnitTestDecryptorProxy() {
   channel_->Close();
 
   if (child_process_) {
-    base::WaitForSingleProcess(child_process_, 5000);
+    base::WaitForSingleProcess(child_process_, base::TimeDelta::FromSeconds(5));
     base::CloseProcessHandle(child_process_);
   }
 }
@@ -263,7 +264,7 @@ class FFDecryptorClientChannelListener : public IPC::Listener {
 };
 
 // Entry function in child process.
-MULTIPROCESS_TEST_MAIN(NSSDecrypterChildProcess) {
+MULTIPROCESS_IPC_TEST_MAIN(NSSDecrypterChildProcess) {
   MessageLoopForIO main_message_loop;
   FFDecryptorClientChannelListener listener;
 

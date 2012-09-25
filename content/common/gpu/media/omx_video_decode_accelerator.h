@@ -15,7 +15,6 @@
 
 #include "base/compiler_specific.h"
 #include "base/logging.h"
-#include "base/memory/ref_counted.h"
 #include "base/message_loop.h"
 #include "base/shared_memory.h"
 #include "content/common/content_export.h"
@@ -32,16 +31,16 @@ class Gles2TextureToEglImageTranslator;
 // The implementation assumes an OpenMAX IL 1.1.2 implementation conforming to
 // http://www.khronos.org/registry/omxil/specs/OpenMAX_IL_1_1_2_Specification.pdf
 //
-// This class lives on a single thread and DCHECKs that it is never accessed
-// from any other.  OMX callbacks are trampolined from the OMX component's
-// thread to maintain this invariant.  The only exception to thread-unsafety is
-// that references can be added from any thread (practically used only by the
-// OMX thread).
+// This class lives on a single thread (the GPU process ChildThread) and DCHECKs
+// that it is never accessed from any other.  OMX callbacks are trampolined from
+// the OMX component's thread to maintain this invariant, using |weak_this()|.
 class CONTENT_EXPORT OmxVideoDecodeAccelerator :
     public media::VideoDecodeAccelerator {
  public:
   // Does not take ownership of |client| which must outlive |*this|.
-  OmxVideoDecodeAccelerator(media::VideoDecodeAccelerator::Client* client);
+  OmxVideoDecodeAccelerator(EGLDisplay egl_display, EGLContext egl_context,
+                            media::VideoDecodeAccelerator::Client* client);
+  virtual ~OmxVideoDecodeAccelerator();
 
   // media::VideoDecodeAccelerator implementation.
   bool Initialize(media::VideoCodecProfile profile) OVERRIDE;
@@ -53,11 +52,12 @@ class CONTENT_EXPORT OmxVideoDecodeAccelerator :
   void Reset() OVERRIDE;
   void Destroy() OVERRIDE;
 
-  void SetEglState(EGLDisplay egl_display, EGLContext egl_context);
+  base::WeakPtr<OmxVideoDecodeAccelerator> weak_this() { return weak_this_; }
+
+  // Do any necessary initialization before the sandbox is enabled.
+  static void PreSandboxInitialization();
 
  private:
-  virtual ~OmxVideoDecodeAccelerator();
-
   // Because OMX state-transitions are described solely by the "state reached"
   // (3.1.2.9.1, table 3-7 of the spec), we track what transition was requested
   // using this enum.  Note that it is an error to request a transition while
@@ -70,6 +70,14 @@ class CONTENT_EXPORT OmxVideoDecodeAccelerator :
     RESETTING,
     DESTROYING,
     ERRORING,  // Trumps all other transitions; no recovery is possible.
+  };
+
+  // Add codecs as we get HW that supports them (and which are supported by SW
+  // decode!).
+  enum Codec {
+    UNKNOWN,
+    H264,
+    VP8
   };
 
   // Helper struct for keeping track of the relationship between an OMX output
@@ -114,7 +122,7 @@ class CONTENT_EXPORT OmxVideoDecodeAccelerator :
   void OnReachedEOSInFlushing();
   void OnReachedInvalidInErroring();
   void ShutdownComponent();
-  void BusyLoopInDestroying();
+  void BusyLoopInDestroying(scoped_ptr<OmxVideoDecodeAccelerator> self);
 
   // Port-flushing helpers.
   void FlushIOPorts();
@@ -137,6 +145,19 @@ class CONTENT_EXPORT OmxVideoDecodeAccelerator :
 
   // Decode bitstream buffers that were queued (see queued_bitstream_buffers_).
   void DecodeQueuedBitstreamBuffers();
+
+  // Lazily initialize static data after sandbox is enabled.  Return false on
+  // init failure.
+  static bool PostSandboxInitialization();
+
+  // Weak pointer to |this|; used to safely trampoline calls from the OMX thread
+  // to the ChildThread.  Since |this| is kept alive until OMX is fully shut
+  // down, only the OMX->Child thread direction needs to be guarded this way.
+  base::WeakPtr<OmxVideoDecodeAccelerator> weak_this_;
+
+  // True once Initialize() has returned true; before this point there's never a
+  // point in calling client_->NotifyError().
+  bool init_begun_;
 
   // IL-client state.
   OMX_STATETYPE client_state_;
@@ -189,9 +210,12 @@ class CONTENT_EXPORT OmxVideoDecodeAccelerator :
   scoped_ptr<Gles2TextureToEglImageTranslator> texture_to_egl_image_translator_;
 
   // These members are only used during Initialization.
-  // OMX_AVCProfile requested during Initialization.
-  uint32 profile_;
+  Codec codec_;
+  uint32 h264_profile_;  // OMX_AVCProfile requested during Initialization.
   bool component_name_is_nvidia_h264ext_;
+
+  // Has static initialization of pre-sandbox components completed successfully?
+  static bool pre_sandbox_init_done_;
 
   // Method to handle events
   void EventHandlerCompleteTask(OMX_EVENTTYPE event,

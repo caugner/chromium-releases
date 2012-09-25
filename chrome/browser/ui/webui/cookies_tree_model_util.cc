@@ -14,6 +14,7 @@
 #include "base/values.h"
 #include "chrome/browser/cookies_tree_model.h"
 #include "grit/generated_resources.h"
+#include "net/cookies/canonical_cookie.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/text/bytes_formatting.h"
 
@@ -25,6 +26,9 @@ const char kKeyIcon[] = "icon";
 const char kKeyType[] = "type";
 const char kKeyHasChildren[] = "hasChildren";
 
+const char kKeyAppId[] = "appId";
+
+const char kKeyAppsProtectingThis[] = "appsProtectingThis";
 const char kKeyName[] = "name";
 const char kKeyContent[] = "content";
 const char kKeyDomain[] = "domain";
@@ -92,8 +96,9 @@ bool CookiesTreeModelUtil::GetCookieTreeNodeDictionary(
   dict->SetBoolean(kKeyHasChildren, !node.empty());
 
   switch (node.GetDetailedInfo().node_type) {
-    case CookieTreeNode::DetailedInfo::TYPE_ORIGIN: {
+    case CookieTreeNode::DetailedInfo::TYPE_HOST: {
       dict->SetString(kKeyType, "origin");
+      dict->SetString(kKeyAppId, node.GetDetailedInfo().app_id);
 #if defined(OS_MACOSX)
       dict->SetString(kKeyIcon, "chrome://theme/IDR_BOOKMARK_BAR_FOLDER");
 #endif
@@ -103,8 +108,7 @@ bool CookiesTreeModelUtil::GetCookieTreeNodeDictionary(
       dict->SetString(kKeyType, "cookie");
       dict->SetString(kKeyIcon, "chrome://theme/IDR_COOKIE_ICON");
 
-      const net::CookieMonster::CanonicalCookie& cookie =
-          *node.GetDetailedInfo().cookie;
+      const net::CanonicalCookie& cookie = *node.GetDetailedInfo().cookie;
 
       dict->SetString(kKeyName, cookie.Name());
       dict->SetString(kKeyContent, cookie.Value());
@@ -119,7 +123,7 @@ bool CookiesTreeModelUtil::GetCookieTreeNodeDictionary(
       dict->SetString(kKeyAccessibleToScript, accessible);
       dict->SetString(kKeyCreated, UTF16ToUTF8(
           base::TimeFormatFriendlyDateAndTime(cookie.CreationDate())));
-      dict->SetString(kKeyExpires, cookie.DoesExpire() ? UTF16ToUTF8(
+      dict->SetString(kKeyExpires, cookie.IsPersistent() ? UTF16ToUTF8(
           base::TimeFormatFriendlyDateAndTime(cookie.ExpiryDate())) :
           l10n_util::GetStringUTF8(IDS_COOKIES_COOKIE_EXPIRES_SESSION));
 
@@ -250,12 +254,33 @@ bool CookiesTreeModelUtil::GetCookieTreeNodeDictionary(
               server_bound_cert.expiration_time())));
       break;
     }
+    case CookieTreeNode::DetailedInfo::TYPE_FLASH_LSO: {
+      dict->SetString(kKeyType, "flash_lso");
+      dict->SetString(kKeyIcon, "chrome://theme/IDR_COOKIE_ICON");
+
+      dict->SetString(kKeyDomain, node.GetDetailedInfo().flash_lso_domain);
+    }
     default:
 #if defined(OS_MACOSX)
       dict->SetString(kKeyIcon, "chrome://theme/IDR_BOOKMARK_BAR_FOLDER");
 #endif
       break;
   }
+
+  const ExtensionSet* protecting_apps =
+      node.GetModel()->ExtensionsProtectingNode(node);
+  if (protecting_apps && !protecting_apps->is_empty()) {
+    base::ListValue* app_infos = new base::ListValue;
+    for (ExtensionSet::const_iterator it = protecting_apps->begin();
+         it != protecting_apps->end(); ++it) {
+      base::DictionaryValue* app_info = new base::DictionaryValue();
+      app_info->SetString(kKeyId, (*it)->id());
+      app_info->SetString(kKeyName, (*it)->name());
+      app_infos->Append(app_info);
+    }
+    dict->Set(kKeyAppsProtectingThis, app_infos);
+  }
+
   return true;
 }
 

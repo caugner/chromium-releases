@@ -8,6 +8,7 @@
 #include "base/file_path.h"
 #include "base/logging.h"
 #include "base/memory/singleton.h"
+#include "base/message_loop.h"
 #include "base/message_pump_android.h"
 #include "base/path_service.h"
 #include "base/synchronization/waitable_event.h"
@@ -131,6 +132,9 @@ class MessagePumpForUIStub : public base::MessagePumpForUI {
       const base::TimeTicks& delayed_work_time) OVERRIDE {
     Waitable::GetInstance()->Signal();
   }
+
+ protected:
+  virtual ~MessagePumpForUIStub() {}
 };
 
 base::MessagePump* CreateMessagePumpForUIStub() {
@@ -144,14 +148,6 @@ bool GetTestProviderPath(int key, FilePath* result) {
       *result = FilePath(kAndroidTestTempDirectory);
       return true;
     }
-#if !defined(ANDROID_APK_TEST_TARGET)
-    // When running as executable we need to use /data/local/tmp as the
-    // cache directory.
-    case base::DIR_CACHE: {
-      *result = FilePath(kAndroidTestTempDirectory);
-      return true;
-    }
-#endif  // !defined(ANDROID_APK_TEST_TARGET)
     case base::DIR_ANDROID_APP_DATA: {
       *result = FilePath(kAndroidTestTempDirectory);
       return true;

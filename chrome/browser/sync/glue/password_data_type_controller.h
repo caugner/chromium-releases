@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_SYNC_GLUE_PASSWORD_DATA_TYPE_CONTROLLER_H__
 #define CHROME_BROWSER_SYNC_GLUE_PASSWORD_DATA_TYPE_CONTROLLER_H__
-#pragma once
 
 #include <string>
 
@@ -25,8 +24,8 @@ class PasswordDataTypeController : public NonFrontendDataTypeController {
       ProfileSyncService* sync_service);
 
   // NonFrontendDataTypeController implementation
-  virtual syncable::ModelType type() const OVERRIDE;
-  virtual browser_sync::ModelSafeGroup model_safe_group() const OVERRIDE;
+  virtual syncer::ModelType type() const OVERRIDE;
+  virtual syncer::ModelSafeGroup model_safe_group() const OVERRIDE;
 
  protected:
   virtual ~PasswordDataTypeController();

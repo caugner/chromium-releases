@@ -41,6 +41,7 @@ cr.define('options', function() {
                           ['certType', 'label_server_bound_cert_type'],
                           ['created', 'label_server_bound_cert_created'],
                           ['expires', 'label_server_bound_cert_expires']],
+    'flash_lso': [['domain', 'label_cookie_domain']],
   };
 
   /**
@@ -75,6 +76,22 @@ cr.define('options', function() {
     // Remove the [start, 0] prefix and return the array of nodes.
     nodes.splice(0, 2);
     return nodes;
+  }
+
+  /**
+   * Adds information about an app that protects this data item to the
+   * @{code element}.
+   * @param {Element} element The DOM element the information should be
+         appended to.
+   * @param {{id: string, name: string}} appInfo Information about an app.
+   */
+  function addAppInfo(element, appInfo) {
+    var img = element.ownerDocument.createElement('img');
+    img.src = 'chrome://extension-icon/' + appInfo.id + '/16/1';
+    img.title = loadTimeData.getString('label_protected_by_apps') +
+                ' ' + appInfo.name;
+    img.className = 'protecting-app';
+    element.appendChild(img);
   }
 
   var parentLookup = {};
@@ -128,6 +145,12 @@ cr.define('options', function() {
       this.infoChild = this.ownerDocument.createElement('div');
       this.infoChild.className = 'cookie-details';
       this.infoChild.hidden = true;
+
+      if (this.origin.data.appId) {
+        this.siteChild.classList.add('app-cookie-site');
+        this.itemsChild.classList.add('app-cookie-items');
+      }
+
       var remove = this.ownerDocument.createElement('button');
       remove.textContent = loadTimeData.getString('remove_cookie');
       remove.onclick = this.removeCookie_.bind(this);
@@ -233,6 +256,7 @@ cr.define('options', function() {
       };
       if (this.origin)
         this.origin.collectSummaryInfo(info);
+
       var list = [];
       if (info.cookies > 1)
         list.push(loadTimeData.getStringF('cookie_plural', info.cookies));
@@ -248,16 +272,24 @@ cr.define('options', function() {
         list.push(loadTimeData.getString('cookie_file_system'));
       if (info.serverBoundCerts)
         list.push(loadTimeData.getString('cookie_server_bound_cert'));
+      if (info.flashLSO)
+        list.push(loadTimeData.getString('cookie_flash_lso'));
+
       var text = '';
-      for (var i = 0; i < list.length; ++i)
+      for (var i = 0; i < list.length; ++i) {
         if (text.length > 0)
           text += ', ' + list[i];
         else
           text = list[i];
-      this.dataChild.textContent = text;
-      if (info.quota && info.quota.totalUsage) {
-        this.sizeChild.textContent = info.quota.totalUsage;
       }
+      this.dataChild.textContent = text;
+
+      for (var key in info.appsProtectingThis) {
+        addAppInfo(this.dataChild, apps[key]);
+      }
+
+      if (info.quota && info.quota.totalUsage)
+        this.sizeChild.textContent = info.quota.totalUsage;
 
       if (this.expanded)
         this.updateItems_();
@@ -455,6 +487,17 @@ cr.define('options', function() {
           info.quota = this.data;
         } else if (this.data.type == 'server_bound_cert') {
           info.serverBoundCerts++;
+        } else if (this.data.type == 'flash_lso') {
+          info.flashLSO = true;
+        }
+
+        var apps = this.data.appsProtectingThis;
+        if (apps) {
+          if (!info.appsProtectingThis)
+            info.appsProtectingThis = {};
+          apps.forEach(function(appInfo) {
+            info.appsProtectingThis[appInfo.id] = appInfo;
+          });
         }
       }
     },
@@ -468,44 +511,38 @@ cr.define('options', function() {
       if (this.children.length > 0) {
         for (var i = 0; i < this.children.length; ++i)
           this.children[i].createItems(item);
-      } else if (this.data && !this.data.hasChildren) {
-        var text = '';
-        switch (this.data.type) {
-          case 'cookie':
-          case 'database':
-            text = this.data.name;
-            break;
-          case 'local_storage':
-            text = loadTimeData.getString('cookie_local_storage');
-            break;
-          case 'app_cache':
-            text = loadTimeData.getString('cookie_app_cache');
-            break;
-          case 'indexed_db':
-            text = loadTimeData.getString('cookie_indexed_db');
-            break;
-          case 'file_system':
-            text = loadTimeData.getString('cookie_file_system');
-            break;
-          case 'server_bound_cert':
-            text = loadTimeData.getString('cookie_server_bound_cert');
-            break;
-        }
-        if (!text)
-          return;
-        var div = item.ownerDocument.createElement('div');
-        div.className = 'cookie-item';
-        // Help out screen readers and such: this is a clickable thing.
-        div.setAttribute('role', 'button');
-        div.textContent = text;
-        var index = item.appendItem(this, div);
-        div.onclick = function() {
-          if (item.selectedIndex == index)
-            item.selectedIndex = -1;
-          else
-            item.selectedIndex = index;
-        };
+        return;
       }
+
+      if (!this.data || this.data.hasChildren)
+        return;
+
+      var text = '';
+      switch (this.data.type) {
+        case 'cookie':
+        case 'database':
+          text = this.data.name;
+          break;
+        default:
+          text = loadTimeData.getString('cookie_' + this.data.type);
+      }
+      if (!text)
+        return;
+
+      var div = item.ownerDocument.createElement('div');
+      div.className = 'cookie-item';
+      // Help out screen readers and such: this is a clickable thing.
+      div.setAttribute('role', 'button');
+      div.tabIndex = 0;
+      div.textContent = text;
+      var apps = this.data.appsProtectingThis;
+      if (apps)
+        apps.forEach(addAppInfo.bind(null, div));
+
+      var index = item.appendItem(this, div);
+      div.onclick = function() {
+        item.selectedIndex = (item.selectedIndex == index) ? -1 : index;
+      };
     },
 
     /**
@@ -520,22 +557,22 @@ cr.define('options', function() {
      */
     setDetailText: function(element, infoNodes) {
       var table;
-      if (this.data && !this.data.hasChildren) {
-        if (cookieInfo[this.data.type]) {
-          var info = cookieInfo[this.data.type];
-          var nodes = infoNodes[this.data.type].info;
-          for (var i = 0; i < info.length; ++i) {
-            var name = info[i][0];
-            if (name != 'id' && this.data[name])
-              nodes[name].textContent = this.data[name];
-            else
-              nodes[name].textContent = '';
-          }
-          table = infoNodes[this.data.type].table;
+      if (this.data && !this.data.hasChildren && cookieInfo[this.data.type]) {
+        var info = cookieInfo[this.data.type];
+        var nodes = infoNodes[this.data.type].info;
+        for (var i = 0; i < info.length; ++i) {
+          var name = info[i][0];
+          if (name != 'id' && this.data[name])
+            nodes[name].textContent = this.data[name];
+          else
+            nodes[name].textContent = '';
         }
+        table = infoNodes[this.data.type].table;
       }
+
       while (element.childNodes.length > 1)
         element.removeChild(element.firstChild);
+
       if (table)
         element.insertBefore(table, element.firstChild);
     },
@@ -553,6 +590,7 @@ cr.define('options', function() {
     set parent(parent) {
       if (parent == this.parent)
         return;
+
       if (parent instanceof CookieListItem) {
         // If the parent is to be a CookieListItem, then we keep the reference
         // to it by its containing list and list index, rather than directly.
@@ -566,12 +604,14 @@ cr.define('options', function() {
       } else {
         this.parent_ = parent;
       }
+
       if (this.data && this.data.id) {
         if (parent)
           parentLookup[this.data.id] = this;
         else
           delete parentLookup[this.data.id];
       }
+
       if (this.data && this.data.hasChildren &&
           !this.children.length && !lookupRequests[this.data.id]) {
         lookupRequests[this.data.id] = true;

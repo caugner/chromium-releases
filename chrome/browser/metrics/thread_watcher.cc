@@ -32,49 +32,47 @@ namespace {
 //
 // We disable optimizations for this block of functions so the compiler doesn't
 // merge them all together.
-
-// TODO(eroman): What is the equivalent for other compilers?
-#if defined(COMPILER_MSVC)
-#pragma optimize("", off)
+MSVC_DISABLE_OPTIMIZE()
 MSVC_PUSH_DISABLE_WARNING(4748)
-#endif
 
-void ThreadUnresponsive_UI() {
-  CHECK(false);
+int* NullPointer() {
+  return reinterpret_cast<int*>(NULL);
 }
 
-void ThreadUnresponsive_DB() {
-  CHECK(false);
+NOINLINE void ThreadUnresponsive_UI() {
+  *NullPointer() = __LINE__;
 }
 
-void ThreadUnresponsive_WEBKIT() {
-  CHECK(false);
+NOINLINE void ThreadUnresponsive_DB() {
+  *NullPointer() = __LINE__;
 }
 
-void ThreadUnresponsive_FILE() {
-  CHECK(false);
+NOINLINE void ThreadUnresponsive_WEBKIT() {
+  *NullPointer() = __LINE__;
 }
 
-void ThreadUnresponsive_FILE_USER_BLOCKING() {
-  CHECK(false);
+NOINLINE void ThreadUnresponsive_FILE() {
+  *NullPointer() = __LINE__;
 }
 
-void ThreadUnresponsive_PROCESS_LAUNCHER() {
-  CHECK(false);
+NOINLINE void ThreadUnresponsive_FILE_USER_BLOCKING() {
+  *NullPointer() = __LINE__;
 }
 
-void ThreadUnresponsive_CACHE() {
-  CHECK(false);
+NOINLINE void ThreadUnresponsive_PROCESS_LAUNCHER() {
+  *NullPointer() = __LINE__;
 }
 
-void ThreadUnresponsive_IO() {
-  CHECK(false);
+NOINLINE void ThreadUnresponsive_CACHE() {
+  *NullPointer() = __LINE__;
 }
 
-#if defined(COMPILER_MSVC)
+NOINLINE void ThreadUnresponsive_IO() {
+  *NullPointer() = __LINE__;
+}
+
 MSVC_POP_WARNING()
-#pragma optimize("", on)
-#endif
+MSVC_ENABLE_OPTIMIZE();
 
 void CrashBecauseThreadWasUnresponsive(BrowserThread::ID thread_id) {
   base::debug::Alias(&thread_id);
@@ -104,7 +102,7 @@ void CrashBecauseThreadWasUnresponsive(BrowserThread::ID thread_id) {
     // should warn if our switch becomes outdated.
   }
 
-  CHECK(false);  // Shouldn't be reached.
+  CHECK(false) << "Unknown thread was unresponsive.";  // Shouldn't be reached.
 }
 
 }  // namespace

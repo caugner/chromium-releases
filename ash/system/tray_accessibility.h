@@ -4,7 +4,6 @@
 
 #ifndef ASH_SYSTEM_TRAY_ACCESSIBILITY_H_
 #define ASH_SYSTEM_TRAY_ACCESSIBILITY_H_
-#pragma once
 
 #include "ash/system/tray/tray_image_item.h"
 
@@ -19,10 +18,8 @@ class ASH_EXPORT AccessibilityObserver {
  public:
   virtual ~AccessibilityObserver() {}
 
-  // Notifies when accessibilty mode changes. Also sends a string-id to display
-  // to the user.
-  virtual void OnAccessibilityModeChanged(bool enabled,
-                                          int string_id) = 0;
+  // Notifies when accessibilty mode changes.
+  virtual void OnAccessibilityModeChanged(bool enabled) = 0;
 };
 
 namespace internal {
@@ -42,12 +39,10 @@ class TrayAccessibility : public TrayImageItem,
   virtual void DestroyDetailedView() OVERRIDE;
 
   // Overridden from AccessibilityObserver.
-  virtual void OnAccessibilityModeChanged(bool enabled,
-                                          int string_id) OVERRIDE;
+  virtual void OnAccessibilityModeChanged(bool enabled) OVERRIDE;
 
   views::View* default_;
   views::View* detailed_;
-  int string_id_;
 
   DISALLOW_COPY_AND_ASSIGN(TrayAccessibility);
 };

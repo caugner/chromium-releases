@@ -4,10 +4,12 @@
 
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/test/browser_test_utils.h"
 
 using content::WebContents;
 using extensions::Extension;
@@ -80,7 +82,7 @@ bool ValidatePageElement(WebContents* tab,
   std::string returned_value;
   std::string error;
 
-  if (!ui_test_utils::ExecuteJavaScriptAndExtractString(
+  if (!content::ExecuteJavaScriptAndExtractString(
           tab->GetRenderViewHost(),
           frame,
           javascript, &returned_value))
@@ -111,7 +113,7 @@ void NavigateToFeedAndValidate(net::TestServer* server,
   ui_test_utils::NavigateToURL(browser,
                                GetFeedUrl(server, url, true, extension_id));
 
-  WebContents* tab = browser->GetActiveWebContents();
+  WebContents* tab = chrome::GetActiveWebContents(browser);
   ASSERT_TRUE(ValidatePageElement(tab,
                                   L"",
                                   jscript_feed_title,

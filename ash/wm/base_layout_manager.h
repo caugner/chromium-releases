@@ -4,7 +4,6 @@
 
 #ifndef ASH_WM_BASE_LAYOUT_MANAGER_H_
 #define ASH_WM_BASE_LAYOUT_MANAGER_H_
-#pragma once
 
 #include <set>
 
@@ -57,7 +56,7 @@ class ASH_EXPORT BaseLayoutManager : public aura::LayoutManager,
                                    const gfx::Size& old_size) OVERRIDE;
 
   // ash::ShellObserver overrides:
-  virtual void OnMonitorWorkAreaInsetsChanged() OVERRIDE;
+  virtual void OnDisplayWorkAreaInsetsChanged() OVERRIDE;
 
   // WindowObserver overrides:
   virtual void OnWindowPropertyChanged(aura::Window* window,

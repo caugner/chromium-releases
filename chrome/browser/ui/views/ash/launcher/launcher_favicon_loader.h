@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_ASH_LAUNCHER_LAUNCHER_FAVICON_LOADER_H_
 #define CHROME_BROWSER_UI_VIEWS_ASH_LAUNCHER_LAUNCHER_FAVICON_LOADER_H_
-#pragma once
 
 #include <vector>
 
@@ -56,7 +55,8 @@ class LauncherFaviconLoader : public content::WebContentsObserver {
   void OnDidDownloadFavicon(int id,
                             const GURL& image_url,
                             bool errored,
-                            const SkBitmap& bitmap);
+                            int requested_size,
+                            const std::vector<SkBitmap>& bitmaps);
 
   scoped_ptr<internal::FaviconBitmapHandler> favicon_handler_;
 

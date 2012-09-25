@@ -4,7 +4,6 @@
 
 #ifndef ASH_SYSTEM_TRAY_TRAY_ITEM_VIEW_H_
 #define ASH_SYSTEM_TRAY_TRAY_ITEM_VIEW_H_
-#pragma once
 
 #include "ui/base/animation/animation_delegate.h"
 #include "ui/views/view.h"
@@ -30,7 +29,7 @@ class TrayItemView : public views::View,
   TrayItemView();
   virtual ~TrayItemView();
 
-  // Conveniece function for creating a child Label or ImageView.
+  // Convenience function for creating a child Label or ImageView.
   void CreateLabel();
   void CreateImageView();
 
@@ -39,6 +38,7 @@ class TrayItemView : public views::View,
 
   // Overridden from views::View.
   virtual void SetVisible(bool visible) OVERRIDE;
+  virtual gfx::Size GetPreferredSize() OVERRIDE;
 
  protected:
   // Makes sure the widget relayouts after the size/visibility of the view
@@ -56,7 +56,6 @@ class TrayItemView : public views::View,
 
  private:
   // Overridden from views::View.
-  virtual gfx::Size GetPreferredSize() OVERRIDE;
   virtual void ChildPreferredSizeChanged(View* child) OVERRIDE;
 
   // Overridden from ui::AnimationDelegate.

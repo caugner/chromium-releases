@@ -37,7 +37,6 @@
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
-#include "grit/theme_resources_standard.h"
 #include "net/base/net_util.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
@@ -613,7 +612,7 @@ void ChromeGeolocationPermissionContext::RequestGeolocationPermission(
                     UTF8ToUTF16(requesting_frame.spec())),
                 requesting_frame));
     if (extension &&
-        extension->HasAPIPermission(ExtensionAPIPermission::kGeolocation)) {
+        extension->HasAPIPermission(extensions::APIPermission::kGeolocation)) {
       // Make sure the extension is in the calling process.
       if (extension_service->process_map()->Contains(
               extension->id(), render_process_id)) {

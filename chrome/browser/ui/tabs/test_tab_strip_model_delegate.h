@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_TABS_TEST_TAB_STRIP_MODEL_DELEGATE_H_
 #define CHROME_BROWSER_UI_TABS_TEST_TAB_STRIP_MODEL_DELEGATE_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -39,11 +38,8 @@ class TestTabStripModelDelegate : public TabStripModelDelegate {
   virtual bool RunUnloadListenerBeforeClosing(TabContents* contents) OVERRIDE;
   virtual bool CanRestoreTab() OVERRIDE;
   virtual void RestoreTab() OVERRIDE;
-  virtual bool CanCloseContents(std::vector<int>* indices) OVERRIDE;
   virtual bool CanBookmarkAllTabs() const OVERRIDE;
   virtual void BookmarkAllTabs() OVERRIDE;
-  virtual bool CanCloseTab() const OVERRIDE;
-  virtual bool LargeIconsPermitted() const OVERRIDE;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TestTabStripModelDelegate);

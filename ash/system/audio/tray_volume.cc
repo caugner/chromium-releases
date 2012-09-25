@@ -4,13 +4,15 @@
 
 #include "ash/system/audio/tray_volume.h"
 
+#include <cmath>
+
 #include "ash/shell.h"
 #include "ash/system/tray/system_tray_delegate.h"
 #include "ash/system/tray/tray_constants.h"
 #include "ash/system/tray/tray_views.h"
 #include "base/utf_string_conversions.h"
 #include "grit/ash_strings.h"
-#include "grit/ui_resources_standard.h"
+#include "grit/ui_resources.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkPaint.h"
 #include "third_party/skia/include/core/SkRect.h"
@@ -18,6 +20,7 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/image/image.h"
+#include "ui/gfx/image/image_skia_operations.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
@@ -31,7 +34,11 @@ namespace internal {
 namespace {
 const int kVolumeImageWidth = 25;
 const int kVolumeImageHeight = 25;
-const int kVolumeLevel = 4;
+
+// IDR_AURA_UBER_TRAY_VOLUME_LEVELS contains 5 images,
+// The one for mute is at the 0 index and the other
+// four are used for ascending volume levels.
+const int kVolumeLevels = 4;
 }
 
 namespace tray {
@@ -53,24 +60,16 @@ class VolumeButton : public views::ToggleImageButton {
   void Update() {
     ash::SystemTrayDelegate* delegate =
         ash::Shell::GetInstance()->tray_delegate();
-    int level = static_cast<int>(delegate->GetVolumeLevel() * 100);
-    int image_index = level / (100 / kVolumeLevel);
-    if (level > 0 && image_index == 0)
-      ++image_index;
-    if (level == 100)
-      image_index = kVolumeLevel - 1;
-    else if (image_index == kVolumeLevel - 1)
-      --image_index;
-    // Index 0 is reserved for mute.
-    if (delegate->IsAudioMuted())
-      image_index = 0;
-    else
-      ++image_index;
+    float level = delegate->GetVolumeLevel();
+    int image_index = delegate->IsAudioMuted() ?
+        0 : (level == 1.0 ?
+             kVolumeLevels :
+             std::max(1, int(std::ceil(level * (kVolumeLevels - 1)))));
     if (image_index != image_index_) {
-      SkIRect region = SkIRect::MakeXYWH(0, image_index * kVolumeImageHeight,
-          kVolumeImageWidth, kVolumeImageHeight);
-      gfx::ImageSkia image_skia;
-      image_.ToImageSkia()->extractSubset(&image_skia, region);
+      gfx::Rect region(0, image_index * kVolumeImageHeight,
+                       kVolumeImageWidth, kVolumeImageHeight);
+      gfx::ImageSkia image_skia = gfx::ImageSkiaOperations::ExtractSubset(
+          *(image_.ToImageSkia()), region);
       SetImage(views::CustomButton::BS_NORMAL, &image_skia);
       image_index_ = image_index;
     }
@@ -91,6 +90,46 @@ class VolumeButton : public views::ToggleImageButton {
   DISALLOW_COPY_AND_ASSIGN(VolumeButton);
 };
 
+class MuteButton : public ash::internal::TrayBarButtonWithTitle {
+ public:
+  explicit MuteButton(views::ButtonListener* listener)
+      : TrayBarButtonWithTitle(listener,
+            IDS_ASH_STATUS_TRAY_VOLUME_MUTE,
+            kTrayBarButtonWidth) {
+    Update();
+  }
+  virtual ~MuteButton() {}
+
+  void Update() {
+    ash::SystemTrayDelegate* delegate =
+        ash::Shell::GetInstance()->tray_delegate();
+    UpdateButton(delegate->IsAudioMuted());
+    SchedulePaint();
+  }
+
+  DISALLOW_COPY_AND_ASSIGN(MuteButton);
+};
+
+class VolumeSlider : public views::Slider {
+ public:
+  explicit VolumeSlider(views::SliderListener* listener)
+      : views::Slider(listener, views::Slider::HORIZONTAL) {
+    set_focus_border_color(kFocusBorderColor);
+    SetValue(ash::Shell::GetInstance()->tray_delegate()->GetVolumeLevel());
+    SetAccessibleName(
+            ui::ResourceBundle::GetSharedInstance().GetLocalizedString(
+                IDS_ASH_STATUS_TRAY_VOLUME));
+    Update();
+  }
+  virtual ~VolumeSlider() {}
+
+  void Update() {
+    UpdateState(!ash::Shell::GetInstance()->tray_delegate()->IsAudioMuted());
+  }
+
+  DISALLOW_COPY_AND_ASSIGN(VolumeSlider);
+};
+
 class VolumeView : public views::View,
                    public views::ButtonListener,
                    public views::SliderListener {
@@ -102,19 +141,20 @@ class VolumeView : public views::View,
     icon_ = new VolumeButton(this);
     AddChildView(icon_);
 
-    ash::SystemTrayDelegate* delegate =
-        ash::Shell::GetInstance()->tray_delegate();
-    slider_ = new views::Slider(this, views::Slider::HORIZONTAL);
-    slider_->set_focus_border_color(kFocusBorderColor);
-    slider_->SetValue(
-        delegate->IsAudioMuted() ? 0.0 : delegate->GetVolumeLevel());
-    slider_->SetAccessibleName(
-        ui::ResourceBundle::GetSharedInstance().GetLocalizedString(
-            IDS_ASH_STATUS_TRAY_VOLUME));
+    mute_ = new MuteButton(this);
+    AddChildView(mute_);
+
+    slider_ = new VolumeSlider(this);
     AddChildView(slider_);
   }
 
   virtual ~VolumeView() {}
+
+  void Update() {
+    icon_->Update();
+    mute_->Update();
+    slider_->Update();
+  }
 
   void SetVolumeLevel(float percent) {
     // The change in volume will be reflected via accessibility system events,
@@ -124,7 +164,7 @@ class VolumeView : public views::View,
     // It is possible that the volume was (un)muted, but the actual volume level
     // did not change. In that case, setting the value of the slider won't
     // trigger an update. So explicitly trigger an update.
-    icon_->Update();
+    Update();
     slider_->set_enable_accessibility_events(true);
   }
 
@@ -138,7 +178,7 @@ class VolumeView : public views::View,
   // Overridden from views::ButtonListener.
   virtual void ButtonPressed(views::Button* sender,
                              const views::Event& event) OVERRIDE {
-    CHECK(sender == icon_);
+    CHECK(sender == icon_ || sender == mute_);
     ash::SystemTrayDelegate* delegate =
         ash::Shell::GetInstance()->tray_delegate();
     delegate->SetAudioMuted(!delegate->IsAudioMuted());
@@ -158,7 +198,8 @@ class VolumeView : public views::View,
   }
 
   VolumeButton* icon_;
-  views::Slider* slider_;
+  MuteButton* mute_;
+  VolumeSlider* slider_;
 
   DISALLOW_COPY_AND_ASSIGN(VolumeView);
 };
@@ -177,7 +218,7 @@ TrayVolume::~TrayVolume() {
 bool TrayVolume::GetInitialVisibility() {
   ash::SystemTrayDelegate* delegate =
       ash::Shell::GetInstance()->tray_delegate();
-  return delegate->GetVolumeLevel() == 0.0 || delegate->IsAudioMuted();
+  return delegate->IsAudioMuted();
 }
 
 views::View* TrayVolume::CreateDefaultView(user::LoginStatus status) {
@@ -214,6 +255,16 @@ void TrayVolume::OnVolumeChanged(float percent) {
     return;
   }
   PopupDetailedView(kTrayPopupAutoCloseDelayInSeconds, false);
+}
+
+void TrayVolume::OnMuteToggled() {
+  if (tray_view())
+      tray_view()->SetVisible(GetInitialVisibility());
+
+  if (volume_view_)
+    volume_view_->Update();
+  else
+    PopupDetailedView(kTrayPopupAutoCloseDelayInSeconds, false);
 }
 
 }  // namespace internal

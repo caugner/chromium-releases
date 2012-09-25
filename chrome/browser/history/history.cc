@@ -403,12 +403,13 @@ void HistoryService::AddPage(const history::HistoryAddPageArgs& add_page_args) {
                         add_page_args.Clone()));
 }
 
-void HistoryService::AddPageNoVisitForBookmark(const GURL& url) {
+void HistoryService::AddPageNoVisitForBookmark(const GURL& url,
+                                               const string16& title) {
   if (!CanAddURL(url))
     return;
 
   ScheduleAndForget(PRIORITY_NORMAL,
-                    &HistoryBackend::AddPageNoVisitForBookmark, url);
+                    &HistoryBackend::AddPageNoVisitForBookmark, url, title);
 }
 
 void HistoryService::SetPageTitle(const GURL& url,
@@ -746,14 +747,18 @@ bool HistoryService::Init(const FilePath& history_dir,
   bookmark_service_ = bookmark_service;
   no_db_ = no_db;
 
-  if (profile_ && !CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableHistoryQuickProvider)) {
+#if !defined(OS_ANDROID)
+  // History quick provider is enabled on all platforms other than Android.
+  // TODO(jcivelli): Enable the History Quick Provider on Android and figure out
+  // why it reports the wrong results for some pages.
+  if (profile_) {
     std::string languages =
         profile_->GetPrefs()->GetString(prefs::kAcceptLanguages);
     in_memory_url_index_.reset(
         new history::InMemoryURLIndex(profile_, history_dir_, languages));
     in_memory_url_index_->Init();
   }
+#endif  // !OS_ANDROID
 
   // Create the history backend.
   LoadBackendIfNecessary();

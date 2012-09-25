@@ -29,7 +29,9 @@
       'type': 'none',
       'dependencies': [
         '../base/base.gyp:base_unittests',
+        '../content/content.gyp:content_shell_test_apk',
         '../content/content.gyp:content_unittests',
+        '../chrome/chrome.gyp:unit_tests',
         '../gpu/gpu.gyp:gpu_unittests',
         '../sql/sql.gyp:sql_unittests',
         '../sync/sync.gyp:sync_unit_tests',
@@ -39,6 +41,7 @@
         '../third_party/WebKit/Source/WebKit/chromium/All.gyp:*',
         # From here down: not added to run_tests.py yet.
         '../jingle/jingle.gyp:jingle_unittests',
+        '../tools/android/device_stats_monitor/device_stats_monitor.gyp:device_stats_monitor',
         '../tools/android/fake_dns/fake_dns.gyp:fake_dns',
         '../tools/android/forwarder/forwarder.gyp:forwarder',
         '../media/media.gyp:media_unittests',
@@ -59,11 +62,13 @@
             # Unit test bundles packaged as an apk.
             '../base/base.gyp:base_unittests_apk',
             '../content/content.gyp:content_unittests_apk',
+            '../chrome/chrome.gyp:unit_tests_apk',
             '../gpu/gpu.gyp:gpu_unittests_apk',
+            '../ipc/ipc.gyp:ipc_tests_apk',
+            '../media/media.gyp:media_unittests_apk',
+            '../net/net.gyp:net_unittests_apk',
             '../sql/sql.gyp:sql_unittests_apk',
             '../sync/sync.gyp:sync_unit_tests_apk',
-            '../ipc/ipc.gyp:ipc_tests_apk',
-            '../net/net.gyp:net_unittests_apk',
             '../ui/ui.gyp:ui_unittests_apk',
           ],
         }]

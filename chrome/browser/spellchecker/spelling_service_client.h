@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_SPELLCHECKER_SPELLING_SERVICE_CLIENT_H_
 #define CHROME_BROWSER_SPELLCHECKER_SPELLING_SERVICE_CLIENT_H_
-#pragma once
 
 #include <string>
 #include <vector>
@@ -88,6 +87,9 @@ class SpellingServiceClient : public net::URLFetcherDelegate {
                         ServiceType type,
                         const string16& text,
                         const TextCheckCompleteCallback& callback);
+
+  // Returns whether the specified service is available for the given profile.
+  static bool IsAvailable(Profile* profile, ServiceType type);
 
  private:
   // Creates a URLFetcher object used for sending a JSON-RPC request. This

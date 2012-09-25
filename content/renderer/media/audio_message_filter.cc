@@ -9,19 +9,54 @@
 #include "base/time.h"
 #include "content/common/child_process.h"
 #include "content/common/media/audio_messages.h"
+#include "content/renderer/render_thread_impl.h"
 #include "ipc/ipc_logging.h"
+
+AudioMessageFilter* AudioMessageFilter::filter_ = NULL;
+
+// static
+AudioMessageFilter* AudioMessageFilter::Get() {
+  return filter_;
+}
 
 AudioMessageFilter::AudioMessageFilter()
     : channel_(NULL) {
-  VLOG(1) << "AudioMessageFilter::AudioMessageFilter()";
+  DVLOG(1) << "AudioMessageFilter::AudioMessageFilter()";
+  DCHECK(!filter_);
+  filter_ = this;
 }
 
-int32 AudioMessageFilter::AddDelegate(Delegate* delegate) {
+int AudioMessageFilter::AddDelegate(media::AudioOutputIPCDelegate* delegate) {
   return delegates_.Add(delegate);
 }
 
-void AudioMessageFilter::RemoveDelegate(int32 id) {
+void AudioMessageFilter::RemoveDelegate(int id) {
   delegates_.Remove(id);
+}
+
+void AudioMessageFilter::CreateStream(int stream_id,
+                                      const media::AudioParameters& params) {
+  Send(new AudioHostMsg_CreateStream(stream_id, params));
+}
+
+void AudioMessageFilter::PlayStream(int stream_id) {
+  Send(new AudioHostMsg_PlayStream(stream_id));
+}
+
+void AudioMessageFilter::PauseStream(int stream_id) {
+  Send(new AudioHostMsg_PauseStream(stream_id));
+}
+
+void AudioMessageFilter::FlushStream(int stream_id) {
+  Send(new AudioHostMsg_FlushStream(stream_id));
+}
+
+void AudioMessageFilter::CloseStream(int stream_id) {
+  Send(new AudioHostMsg_CloseStream(stream_id));
+}
+
+void AudioMessageFilter::SetVolume(int stream_id, double volume) {
+  Send(new AudioHostMsg_SetVolume(stream_id, volume));
 }
 
 bool AudioMessageFilter::Send(IPC::Message* message) {
@@ -54,8 +89,7 @@ bool AudioMessageFilter::OnMessageReceived(const IPC::Message& message) {
 }
 
 void AudioMessageFilter::OnFilterAdded(IPC::Channel* channel) {
-  VLOG(1) << "AudioMessageFilter::OnFilterAdded()";
-  // Captures the channel for IPC.
+  DVLOG(1) << "AudioMessageFilter::OnFilterAdded()";
   channel_ = channel;
 }
 
@@ -65,10 +99,26 @@ void AudioMessageFilter::OnFilterRemoved() {
 
 void AudioMessageFilter::OnChannelClosing() {
   channel_ = NULL;
+  LOG_IF(WARNING, !delegates_.IsEmpty())
+      << "Not all audio devices have been closed.";
+
+  IDMap<media::AudioOutputIPCDelegate>::iterator it(&delegates_);
+  while (!it.IsAtEnd()) {
+    it.GetCurrentValue()->OnIPCClosed();
+    delegates_.Remove(it.GetCurrentKey());
+    it.Advance();
+  }
 }
 
 AudioMessageFilter::~AudioMessageFilter() {
-  VLOG(1) << "AudioMessageFilter::~AudioMessageFilter()";
+  DVLOG(1) << "AudioMessageFilter::~AudioMessageFilter()";
+
+  // Just in case the message filter is deleted before the channel
+  // is closed and there are still living audio devices.
+  OnChannelClosing();
+
+  DCHECK(filter_);
+  filter_ = NULL;
 }
 
 void AudioMessageFilter::OnStreamCreated(
@@ -83,10 +133,10 @@ void AudioMessageFilter::OnStreamCreated(
 #if !defined(OS_WIN)
   base::SyncSocket::Handle socket_handle = socket_descriptor.fd;
 #endif
-  Delegate* delegate = delegates_.Lookup(stream_id);
+  media::AudioOutputIPCDelegate* delegate = delegates_.Lookup(stream_id);
   if (!delegate) {
     DLOG(WARNING) << "Got audio stream event for a non-existent or removed"
-        " audio renderer. (stream_id=" << stream_id << ").";
+                    " audio renderer. (stream_id=" << stream_id << ").";
     base::SharedMemory::CloseHandle(handle);
     base::SyncSocket socket(socket_handle);
     return;
@@ -95,11 +145,10 @@ void AudioMessageFilter::OnStreamCreated(
 }
 
 void AudioMessageFilter::OnStreamStateChanged(
-    int stream_id, AudioStreamState state) {
-  Delegate* delegate = delegates_.Lookup(stream_id);
+    int stream_id, media::AudioOutputIPCDelegate::State state) {
+  media::AudioOutputIPCDelegate* delegate = delegates_.Lookup(stream_id);
   if (!delegate) {
-    DLOG(WARNING) << "Got audio stream event for a non-existent or removed"
-        " audio renderer.";
+    DLOG(WARNING) << "No delegate found for state change. " << state;
     return;
   }
   delegate->OnStateChanged(state);

@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_BROWSER_PEPPER_FLASH_SETTINGS_HELPER_IMPL_H_
 #define CONTENT_BROWSER_PEPPER_FLASH_SETTINGS_HELPER_IMPL_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -15,7 +14,7 @@ namespace content {
 
 class CONTENT_EXPORT PepperFlashSettingsHelperImpl
     : public PepperFlashSettingsHelper,
-      public PpapiPluginProcessHost::BrokerClient {
+      NON_EXPORTED_BASE(public PpapiPluginProcessHost::BrokerClient) {
  public:
   PepperFlashSettingsHelperImpl();
 

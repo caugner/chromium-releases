@@ -26,31 +26,136 @@ class TraceInputs(unittest.TestCase):
       ('"foo", "bar"', ['foo', 'bar']),
       ('"foo"..., "bar"', ['foo', 'bar']),
       ('"foo", "bar"...', ['foo', 'bar']),
+      (
+        '"/browser_tests", "--type=use,comma"',
+        ['/browser_tests', '--type=use,comma']
+      ),
+      (
+        '"/browser_tests", "--ignored=\\" --type=renderer \\""',
+        ['/browser_tests', '--ignored=" --type=renderer "']
+      ),
     )
     for actual, expected in test_cases:
-      self.assertEquals(expected, trace_inputs.process_quoted_arguments(actual))
+      self.assertEquals(
+          expected, trace_inputs.strace_process_quoted_arguments(actual))
+
+  def test_process_escaped_arguments(self):
+    test_cases = (
+      ('foo\\0', ['foo']),
+      ('foo\\001bar\\0', ['foo', 'bar']),
+      ('\\"foo\\"\\0', ['"foo"']),
+    )
+    for actual, expected in test_cases:
+      self.assertEquals(
+          expected,
+          trace_inputs.Dtrace.Context.process_escaped_arguments(actual))
 
   def test_variable_abs(self):
-    value = trace_inputs.Results.File(None, '/foo/bar', False)
+    value = trace_inputs.Results.File(None, '/foo/bar', False, False)
     actual = value.replace_variables({'$FOO': '/foo'})
     self.assertEquals('$FOO/bar', actual.path)
     self.assertEquals('$FOO/bar', actual.full_path)
     self.assertEquals(True, actual.tainted)
 
   def test_variable_rel(self):
-    value = trace_inputs.Results.File('/usr', 'foo/bar', False)
+    value = trace_inputs.Results.File('/usr', 'foo/bar', False, False)
     actual = value.replace_variables({'$FOO': 'foo'})
     self.assertEquals('$FOO/bar', actual.path)
     self.assertEquals(os.path.join('/usr', '$FOO/bar'), actual.full_path)
     self.assertEquals(True, actual.tainted)
 
-  def test_native_case_windows(self):
-    if sys.platform != 'win32':
-      return
-    windows_path = os.environ['SystemRoot']
-    self.assertEquals(
-        trace_inputs.get_native_path_case(windows_path.lower()),
-        trace_inputs.get_native_path_case(windows_path.upper()))
+  def test_native_case_end_with_os_path_sep(self):
+    # Make sure the trailing os.path.sep is kept.
+    path = trace_inputs.get_native_path_case(ROOT_DIR) + os.path.sep
+    self.assertEquals(trace_inputs.get_native_path_case(path), path)
+
+  def test_native_case_non_existing(self):
+    # Make sure it doesn't throw on non-existing files.
+    non_existing = 'trace_input_test_this_file_should_not_exist'
+    path = os.path.expanduser('~/' + non_existing)
+    self.assertFalse(os.path.exists(path))
+    path = trace_inputs.get_native_path_case(ROOT_DIR) + os.path.sep
+    self.assertEquals(trace_inputs.get_native_path_case(path), path)
+
+  if sys.platform in ('darwin', 'win32'):
+    def test_native_case_not_sensitive(self):
+      # The home directory is almost guaranteed to have mixed upper/lower case
+      # letters on both Windows and OSX.
+      # This test also ensures that the output is independent on the input
+      # string case.
+      path = os.path.expanduser('~')
+      self.assertTrue(os.path.isdir(path))
+      # This test assumes the variable is in the native path case on disk, this
+      # should be the case. Verify this assumption:
+      self.assertEquals(path, trace_inputs.get_native_path_case(path))
+      self.assertEquals(
+          trace_inputs.get_native_path_case(path.lower()),
+          trace_inputs.get_native_path_case(path.upper()))
+
+    def test_native_case_not_sensitive_non_existent(self):
+      # This test also ensures that the output is independent on the input
+      # string case.
+      non_existing = os.path.join(
+          'trace_input_test_this_dir_should_not_exist', 'really not', '')
+      path = os.path.expanduser(os.path.join('~', non_existing))
+      self.assertFalse(os.path.exists(path))
+      lower = trace_inputs.get_native_path_case(path.lower())
+      upper = trace_inputs.get_native_path_case(path.upper())
+      # Make sure non-existing element is not modified:
+      self.assertTrue(lower.endswith(non_existing.lower()))
+      self.assertTrue(upper.endswith(non_existing.upper()))
+      self.assertEquals(lower[:-len(non_existing)], upper[:-len(non_existing)])
+
+  if sys.platform != 'win32':
+    def test_symlink(self):
+      # This test will fail if the checkout is in a symlink.
+      actual = trace_inputs.split_at_symlink(None, ROOT_DIR)
+      expected = (ROOT_DIR, None, None)
+      self.assertEquals(expected, actual)
+
+      actual = trace_inputs.split_at_symlink(
+          None, os.path.join(ROOT_DIR, 'data', 'trace_inputs'))
+      expected = (
+          os.path.join(ROOT_DIR, 'data', 'trace_inputs'), None, None)
+      self.assertEquals(expected, actual)
+
+      actual = trace_inputs.split_at_symlink(
+          None, os.path.join(ROOT_DIR, 'data', 'trace_inputs', 'files2'))
+      expected = (
+          os.path.join(ROOT_DIR, 'data', 'trace_inputs'), 'files2', '')
+      self.assertEquals(expected, actual)
+
+      actual = trace_inputs.split_at_symlink(
+          ROOT_DIR, os.path.join('data', 'trace_inputs', 'files2'))
+      expected = (
+          os.path.join('data', 'trace_inputs'), 'files2', '')
+      self.assertEquals(expected, actual)
+      actual = trace_inputs.split_at_symlink(
+          ROOT_DIR, os.path.join('data', 'trace_inputs', 'files2', 'bar'))
+      expected = (
+          os.path.join('data', 'trace_inputs'), 'files2', '/bar')
+      self.assertEquals(expected, actual)
+
+    def test_native_case_symlink_right_case(self):
+      actual = trace_inputs.get_native_path_case(
+          os.path.join(ROOT_DIR, 'data', 'trace_inputs'))
+      self.assertEquals('trace_inputs', os.path.basename(actual))
+
+      # Make sure the symlink is not resolved.
+      actual = trace_inputs.get_native_path_case(
+          os.path.join(ROOT_DIR, 'data', 'trace_inputs', 'files2'))
+      self.assertEquals('files2', os.path.basename(actual))
+
+  if sys.platform == 'darwin':
+    def test_native_case_symlink_wrong_case(self):
+      actual = trace_inputs.get_native_path_case(
+          os.path.join(ROOT_DIR, 'data', 'trace_inputs'))
+      self.assertEquals('trace_inputs', os.path.basename(actual))
+
+      # Make sure the symlink is not resolved.
+      actual = trace_inputs.get_native_path_case(
+          os.path.join(ROOT_DIR, 'data', 'trace_inputs', 'Files2'))
+      self.assertEquals('files2', os.path.basename(actual))
 
 
 if sys.platform != 'win32':
@@ -115,7 +220,8 @@ if sys.platform != 'win32':
         self.fail()
       except trace_inputs.TracingFailure, e:
         expected = (
-          'Found internal inconsitency in process lifetime detection',
+          'Found internal inconsitency in process lifetime detection '
+          'while finding the root process',
           None,
           None,
           None,

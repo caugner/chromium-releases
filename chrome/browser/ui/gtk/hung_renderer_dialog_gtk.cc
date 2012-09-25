@@ -11,8 +11,8 @@
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_iterator.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_iterator.h"
 #include "chrome/common/logging_chrome.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
@@ -20,7 +20,7 @@
 #include "content/public/common/result_codes.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
-#include "grit/theme_resources_standard.h"
+#include "grit/theme_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/gtk/gtk_signal.h"
@@ -191,7 +191,7 @@ void HungRendererDialogGtk::ShowForWebContents(WebContents* hung_contents) {
       std::string title = UTF16ToUTF8(it->web_contents()->GetTitle());
       if (title.empty())
         title = UTF16ToUTF8(CoreTabHelper::GetDefaultTitle());
-      SkBitmap favicon = it->favicon_tab_helper()->GetFavicon();
+      SkBitmap favicon = it->favicon_tab_helper()->GetFavicon().AsBitmap();
 
       GdkPixbuf* pixbuf = NULL;
       if (favicon.width() > 0)
@@ -252,7 +252,7 @@ void HungRendererDialogGtk::OnResponse(GtkWidget* dialog, int response_id) {
 
 }  // namespace
 
-namespace browser {
+namespace chrome {
 
 void ShowHungRendererDialog(WebContents* contents) {
   if (!logging::DialogsAreSuppressed()) {
@@ -267,4 +267,4 @@ void HideHungRendererDialog(WebContents* contents) {
     g_instance->EndForWebContents(contents);
 }
 
-}  // namespace browser
+}  // namespace chrome

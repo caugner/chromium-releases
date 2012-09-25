@@ -4,9 +4,9 @@
 
 #ifndef BASE_WIN_METRO_H_
 #define BASE_WIN_METRO_H_
-#pragma once
 
 #include <windows.h>
+#include <wpcapi.h>
 
 #include "base/base_export.h"
 #include "base/string16.h"
@@ -61,6 +61,23 @@ BASE_EXPORT wchar_t* LocalAllocAndCopyString(const string16& src);
 
 // Returns true if the screen supports touch.
 BASE_EXPORT bool IsTouchEnabled();
+
+// Returns true if Windows Parental control activity logging is enabled. This
+// feature is available on Windows Vista and beyond.
+// This function should ideally be called on the UI thread.
+BASE_EXPORT bool IsParentalControlActivityLoggingOn();
+
+// Handler function for the buttons on a metro dialog box
+typedef void (*MetroDialogButtonPressedHandler)();
+
+// Function to display metro style notifications.
+typedef void (*MetroNotification)(const char* origin_url,
+                                  const char* icon_url,
+                                  const wchar_t* title,
+                                  const wchar_t* body,
+                                  const wchar_t* display_source,
+                                  const char* notification_id);
+
 
 }  // namespace win
 }  // namespace base

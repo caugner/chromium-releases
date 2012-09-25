@@ -9,7 +9,6 @@
 
 #ifndef CHROME_BROWSER_BROWSER_PROCESS_IMPL_H_
 #define CHROME_BROWSER_BROWSER_PROCESS_IMPL_H_
-#pragma once
 
 #include <string>
 
@@ -28,7 +27,6 @@ class ChromeNetLog;
 class ChromeResourceDispatcherHostDelegate;
 class CommandLine;
 class RemoteDebuggingServer;
-class TabCloseableStateWatcher;
 
 namespace policy {
 class BrowserPolicyConnector;
@@ -68,11 +66,11 @@ class BrowserProcessImpl : public BrowserProcess,
   virtual PrefService* local_state() OVERRIDE;
   virtual ui::Clipboard* clipboard() OVERRIDE;
   virtual net::URLRequestContextGetter* system_request_context() OVERRIDE;
-  virtual VariationsService* variations_service() OVERRIDE;
+  virtual chrome_variations::VariationsService* variations_service() OVERRIDE;
 #if defined(OS_CHROMEOS)
   virtual chromeos::OomPriorityManager* oom_priority_manager() OVERRIDE;
 #endif  // defined(OS_CHROMEOS)
-  virtual ExtensionEventRouterForwarder*
+  virtual extensions::EventRouterForwarder*
         extension_event_router_forwarder() OVERRIDE;
   virtual NotificationUIManager* notification_ui_manager() OVERRIDE;
   virtual policy::BrowserPolicyConnector* browser_policy_connector() OVERRIDE;
@@ -98,7 +96,6 @@ class BrowserProcessImpl : public BrowserProcess,
   virtual void SetApplicationLocale(const std::string& locale) OVERRIDE;
   virtual DownloadStatusUpdater* download_status_updater() OVERRIDE;
   virtual DownloadRequestLimiter* download_request_limiter() OVERRIDE;
-  virtual TabCloseableStateWatcher* tab_closeable_state_watcher() OVERRIDE;
   virtual BackgroundModeManager* background_mode_manager() OVERRIDE;
   virtual StatusTray* status_tray() OVERRIDE;
   virtual SafeBrowsingService* safe_browsing_service() OVERRIDE;
@@ -133,7 +130,6 @@ class BrowserProcessImpl : public BrowserProcess,
   void CreateIntranetRedirectDetector();
   void CreateNotificationUIManager();
   void CreateStatusTrayManager();
-  void CreateTabCloseableStateWatcher();
   void CreatePrintPreviewTabController();
   void CreateBackgroundPrintingManager();
   void CreateSafeBrowsingService();
@@ -170,7 +166,7 @@ class BrowserProcessImpl : public BrowserProcess,
   bool created_icon_manager_;
   scoped_ptr<IconManager> icon_manager_;
 
-  scoped_refptr<ExtensionEventRouterForwarder>
+  scoped_refptr<extensions::EventRouterForwarder>
       extension_event_router_forwarder_;
 
   scoped_ptr<RemoteDebuggingServer> remote_debugging_server_;
@@ -182,7 +178,7 @@ class BrowserProcessImpl : public BrowserProcess,
 
   scoped_ptr<ui::Clipboard> clipboard_;
 
-  scoped_ptr<VariationsService> variations_service_;
+  scoped_ptr<chrome_variations::VariationsService> variations_service_;
 
   // Manager for desktop notification UI.
   bool created_notification_ui_manager_;
@@ -193,8 +189,6 @@ class BrowserProcessImpl : public BrowserProcess,
 #endif
 
   scoped_ptr<IntranetRedirectDetector> intranet_redirect_detector_;
-
-  scoped_ptr<TabCloseableStateWatcher> tab_closeable_state_watcher_;
 
   scoped_ptr<StatusTray> status_tray_;
 

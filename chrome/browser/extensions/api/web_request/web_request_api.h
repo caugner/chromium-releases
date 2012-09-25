@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_API_WEB_REQUEST_WEB_REQUEST_API_H_
 #define CHROME_BROWSER_EXTENSIONS_API_WEB_REQUEST_WEB_REQUEST_API_H_
-#pragma once
 
 #include <list>
 #include <map>
@@ -15,8 +14,9 @@
 #include "base/memory/singleton.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time.h"
-#include "chrome/browser/extensions/api/declarative_webrequest/request_stages.h"
+#include "chrome/browser/extensions/api/declarative_webrequest/request_stage.h"
 #include "chrome/browser/extensions/api/web_request/web_request_api_helpers.h"
+#include "chrome/browser/extensions/api/web_request/web_request_permissions.h"
 #include "chrome/browser/extensions/extension_function.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/extensions/url_pattern_set.h"
@@ -133,7 +133,10 @@ class ExtensionWebRequestEventRouter
 
   static ExtensionWebRequestEventRouter* GetInstance();
 
+  // Registers a rule registry. Pass null for |rules_registry| to unregister
+  // the rule registry for |profile|.
   void RegisterRulesRegistry(
+      void* profile,
       scoped_refptr<extensions::WebRequestRulesRegistry> rules_registry);
 
   // Dispatches the OnBeforeRequest event to any extensions whose filters match
@@ -337,10 +340,19 @@ class ExtensionWebRequestEventRouter
   // deltas were generated.
   bool ProcessDeclarativeRules(
       void* profile,
+      ExtensionInfoMap* extension_info_map,
       const std::string& event_name,
       net::URLRequest* request,
-      extensions::RequestStages request_stage,
+      extensions::RequestStage request_stage,
       net::HttpResponseHeaders* original_response_headers);
+
+  // Called when the RulesRegistry is ready to unblock a request that was
+  // waiting for said event.
+  void OnRulesRegistryReady(
+      void* profile,
+      const std::string& event_name,
+      uint64 request_id,
+      extensions::RequestStage request_stage);
 
   // Sets the flag that |event_type| has been signaled for |request_id|.
   // Returns the value of the flag before setting it.
@@ -354,6 +366,10 @@ class ExtensionWebRequestEventRouter
 
   // Called on a page load to process all registered callbacks.
   void NotifyPageLoad();
+
+  // Returns the matching cross profile (the regular profile if |profile| is
+  // OTR and vice versa).
+  void* GetCrossProfile(void* profile) const;
 
   // A map for each profile that maps an event name to a set of extensions that
   // are listening to that event.
@@ -377,7 +393,9 @@ class ExtensionWebRequestEventRouter
 
   CallbacksForPageLoad callbacks_for_page_load_;
 
-  scoped_refptr<extensions::WebRequestRulesRegistry> rules_registry_;
+  // Maps each profile (and OTRProfile) to its respective rules registry.
+  std::map<void*, scoped_refptr<extensions::WebRequestRulesRegistry> >
+      rules_registries_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionWebRequestEventRouter);
 };

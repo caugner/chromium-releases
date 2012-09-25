@@ -5,6 +5,32 @@ This page lists the API and manifest changes
 made in recent releases.
 </p>
 
+<h2 id="22"> Google Chrome 22 </h2>
+
+<h4> New APIs </h4>
+  <ul>
+    <li>The
+      <a href="alarms.html">alarms API</a>
+      lets you schedule code to run
+      periodically or at a specified time
+      in the future.</li>
+  </ul>
+  <ul>
+    <li>The
+      <a href="runtime.html">runtime API</a>
+      contains useful methods for dealing
+      with system-wide events.
+  </ul>
+
+<h4> Additions to Existing Features </h4>
+  <ul>
+    <li>Background pages can optionally be
+      non-persistent, using a feature we call
+      <a href="event_pages.html">event pages</a>.
+      Event pages run only while they're being used,
+      and will unload when idle to save resources.
+  </ul>
+
 <h2 id="21"> Google Chrome 21 </h2>
 
 <h4> New Features </h4>
@@ -12,8 +38,7 @@ made in recent releases.
     <li>The <a href="manifest.html#sandbox">sandbox manifest entry</a> allows
       you to define some pages within your extension that are automatically run
       in a low-privilege sandbox. This sandbox is not bound by the
-      <a href="manifest.html#content_security_policy"
-      >content_security_policy</a>.
+      <a href="contentSecurityPolicy.html">content_security_policy</a>.
     <li>The <a href="input.ime.html">IME</a> API allows extensions to implement
       <a href="http://en.wikipedia.org/wiki/Input_method">input method
       editors</a> on Chrome OS.
@@ -35,18 +60,18 @@ made in recent releases.
       IDs for each item. This is intended to be used with the new
       <a href="contextMenus.html#event-onClicked"
       >contextMenus.onClicked</a> event, to distinguish the clicked item.
-    <li>The a href="browserAction.html#method-setIcon"
+    <li>The <a href="browserAction.html#method-setIcon"
       >browserAction.setIcon()</a> and
       <a href="pageAction.html#method-setIcon"
       >pageAction.setIcon()</a> methods now accept optional callbacks.
     <li>The <a href="privacy.html#property-websites"
-      >privacy.website</a> namespace now has a <code
+      >privacy.websites</a> namespace now has a <code
       >protectedContentEnabled</code> property.
     <li>The <code>index</code> parameter to the <a href="tabs.html#method-move"
       >tabs.move()</a> method now accepts <code>-1</code> to indicate
       that the tab should be placed at the end.
     <li>The <code>windowId</code> parameter to the
-      <a href="tabs.html#method-highlight">tabs.highlight()</a><
+      <a href="tabs.html#method-highlight">tabs.highlight()</a>
       method is now optional.
     <li><a href="manifest.html#intents">Web intents</a> can now be used to
       register content-type viewers.

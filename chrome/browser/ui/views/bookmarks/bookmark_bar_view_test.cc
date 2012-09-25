@@ -9,14 +9,17 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
+#include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/views/bookmarks/bookmark_bar_view.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/test/base/test_browser_window.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -174,12 +177,13 @@ class BookmarkBarViewEventTestBase : public ViewEventTestBase {
     profile_->BlockUntilBookmarkModelLoaded();
     profile_->GetPrefs()->SetBoolean(prefs::kShowBookmarkBar, true);
 
-    browser_.reset(new Browser(Browser::TYPE_TABBED, profile_.get()));
+    browser_.reset(
+        chrome::CreateBrowserWithTestWindowForProfile(profile_.get()));
 
-    model_ = profile_->GetBookmarkModel();
+    model_ = BookmarkModelFactory::GetForProfile(profile_.get());
     model_->ClearStore();
 
-    bb_view_.reset(new BookmarkBarView(browser_.get()));
+    bb_view_.reset(new BookmarkBarView(browser_.get(), NULL));
     bb_view_->set_owned_by_client();
     bb_view_->SetPageNavigator(&navigator_);
 
@@ -216,7 +220,7 @@ class BookmarkBarViewEventTestBase : public ViewEventTestBase {
   virtual void TearDown() {
     // Destroy everything, then run the message loop to ensure we delete all
     // Tasks and fully shut down.
-    browser_->CloseAllTabs();
+    chrome::CloseAllTabs(browser_.get());
     bb_view_.reset();
     browser_.reset();
     profile_.reset();
@@ -1552,8 +1556,8 @@ class BookmarkBarViewTest17 : public BookmarkBarViewEventTestBase {
     // The context menu and child_menu can be overlapped, calculate the
     // non-intersected Rect of the child menu and click on its center to make
     // sure the click is always on the child menu.
-    gfx::Rect context_rect = context_menu->GetSubmenu()->GetScreenBounds();
-    gfx::Rect child_menu_rect = child_menu->GetScreenBounds();
+    gfx::Rect context_rect = context_menu->GetSubmenu()->GetBoundsInScreen();
+    gfx::Rect child_menu_rect = child_menu->GetBoundsInScreen();
     gfx::Rect clickable_rect = child_menu_rect.Subtract(context_rect);
     ASSERT_FALSE(clickable_rect.IsEmpty());
     observer_.set_task(CreateEventTask(this, &BookmarkBarViewTest17::Step4));

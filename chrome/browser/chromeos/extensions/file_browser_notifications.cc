@@ -20,7 +20,6 @@
 #include "content/public/browser/browser_thread.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "grit/theme_resources_standard.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -104,7 +103,6 @@ class FileBrowserNotifications::NotificationMessage {
              const std::string& id)
         : host_(host),
           id_(id) {}
-    virtual ~Delegate() {}
     virtual void Display() OVERRIDE {}
     virtual void Error() OVERRIDE {}
     virtual void Close(bool by_user) OVERRIDE {
@@ -120,6 +118,8 @@ class FileBrowserNotifications::NotificationMessage {
     }
 
    private:
+    virtual ~Delegate() {}
+
     base::WeakPtr<FileBrowserNotifications> host_;
     std::string id_;
 
@@ -153,14 +153,18 @@ class FileBrowserNotifications::NotificationMessage {
   }
 
   ~NotificationMessage() {
-    if (system_notification_.get() && system_notification_->visible())
-      system_notification_->Hide();
   }
 
   void Show() {
     if (system_notification_.get())
       system_notification_->Show(message_, false, false);
     // Ash notifications are shown automatically (only) when created.
+  }
+
+  void Hide() {
+    if (system_notification_.get() && system_notification_->visible())
+      system_notification_->Hide();
+    // Ash notifications are hidden automatically.
   }
 
   void set_message(const string16& message) { message_ = message; }
@@ -391,6 +395,7 @@ void FileBrowserNotifications::ShowNotificationById(
 void FileBrowserNotifications::HideNotificationById(const std::string& id) {
   NotificationMap::iterator it = notification_map_.find(id);
   if (it != notification_map_.end()) {
+    it->second->Hide();
     delete it->second;
     notification_map_.erase(it);
   } else {

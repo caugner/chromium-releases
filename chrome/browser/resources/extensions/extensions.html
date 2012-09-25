@@ -42,6 +42,13 @@
       <input id="toggle-dev-on" type="checkbox">
       <span i18n-content="extensionSettingsDeveloperMode">
     </label></div>
+    <div id="managed-mode-banner"
+        class="page-banner managed-mode-banner">
+      <div class="page-banner-gradient">
+        <span id="managed-prefs-text" class="page-banner-text"
+            i18n-content="extensionSettingsManagedMode"></span>
+      </div>
+    </div>
   </header>
   <div id="dev-controls" hidden>
     <button id="load-unpacked"
@@ -56,17 +63,18 @@
   <div id="no-extensions">
     <span id="no-extensions-message"
         i18n-content="extensionSettingsNoExtensions"></span>
-    <span id="suggest-gallery"
+    <span id="suggest-gallery" class="more-extensions-link"
         i18n-values=".innerHTML:extensionSettingsSuggestGallery">
     </span>
   </div>
   <div id="footer-section">
-    <a target="blank_"
+    <a target="blank_" class="more-extensions-link"
         i18n-values="href:extensionSettingsGetMoreExtensionsUrl"
         i18n-content="extensionSettingsGetMoreExtensions"></a>
     <a target="blank_" hidden
         class="extension-commands-config"
-        i18n-content="extensionSettingsCommandsLink"></a>
+        i18n-content="extensionSettingsCommandsLink"
+        href="#"></a>
   </div>
 </div>
 

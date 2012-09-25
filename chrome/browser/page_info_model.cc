@@ -13,6 +13,7 @@
 #include "base/string16.h"
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/page_info_model_observer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ssl/ssl_error_info.h"
@@ -22,7 +23,6 @@
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "grit/theme_resources_standard.h"
 #include "net/base/cert_status_flags.h"
 #include "net/base/ssl_cipher_suite_names.h"
 #include "net/base/ssl_connection_status_flags.h"
@@ -276,8 +276,8 @@ PageInfoModel::PageInfoModel(Profile* profile,
   }
 
   // Request the number of visits.
-  HistoryService* history = profile->GetHistoryService(
-      Profile::EXPLICIT_ACCESS);
+  HistoryService* history = HistoryServiceFactory::GetForProfile(
+      profile, Profile::EXPLICIT_ACCESS);
   if (show_history && history) {
     history->GetVisibleVisitCountToHost(
         url,

@@ -272,13 +272,14 @@ class TestViewConsumeGesture : public TestView {
   TestViewConsumeGesture() : TestView() {}
   virtual ~TestViewConsumeGesture() {}
 
- private:
+ protected:
   virtual ui::GestureStatus OnGestureEvent(const GestureEvent& event) OVERRIDE {
     last_gesture_event_type_ = event.type();
     location_.SetPoint(event.x(), event.y());
     return ui::GESTURE_STATUS_CONSUMED;
   }
 
+ private:
   DISALLOW_COPY_AND_ASSIGN(TestViewConsumeGesture);
 };
 
@@ -294,6 +295,23 @@ class TestViewIgnoreGesture: public TestView {
   }
 
   DISALLOW_COPY_AND_ASSIGN(TestViewIgnoreGesture);
+};
+
+// A view subclass that ignores all scroll-gesture events, but consume all other
+// gesture events.
+class TestViewIgnoreScrollGestures : public TestViewConsumeGesture {
+ public:
+  TestViewIgnoreScrollGestures() {}
+  virtual ~TestViewIgnoreScrollGestures() {}
+
+ private:
+  virtual ui::GestureStatus OnGestureEvent(const GestureEvent& event) OVERRIDE {
+    if (event.IsScrollGestureEvent())
+      return ui::GESTURE_STATUS_UNKNOWN;
+    return TestViewConsumeGesture::OnGestureEvent(event);
+  }
+
+  DISALLOW_COPY_AND_ASSIGN(TestViewIgnoreScrollGestures);
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -629,6 +647,97 @@ TEST_F(ViewTest, GestureEvent) {
   widget->CloseNow();
 }
 
+TEST_F(ViewTest, ScrollGestureEvent) {
+  // Views hierarchy for non delivery of GestureEvent.
+  TestView* v1 = new TestViewConsumeGesture();
+  v1->SetBoundsRect(gfx::Rect(0, 0, 300, 300));
+
+  TestView* v2 = new TestViewIgnoreScrollGestures();
+  v2->SetBoundsRect(gfx::Rect(100, 100, 100, 100));
+
+  TestView* v3 = new TestViewIgnoreGesture();
+  v3->SetBoundsRect(gfx::Rect(0, 0, 100, 100));
+
+  scoped_ptr<Widget> widget(new Widget());
+  Widget::InitParams params(Widget::InitParams::TYPE_POPUP);
+  params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
+  params.bounds = gfx::Rect(50, 50, 650, 650);
+  widget->Init(params);
+  View* root = widget->GetRootView();
+
+  root->AddChildView(v1);
+  v1->AddChildView(v2);
+  v2->AddChildView(v3);
+
+  // |v3| completely obscures |v2|, but all the gesture events on |v3| should
+  // reach |v2| because |v3| doesn't process any gesture events. However, since
+  // |v2| does process gesture events, gesture events on |v3| or |v2| should not
+  // reach |v1|.
+
+  v1->Reset();
+  v2->Reset();
+  v3->Reset();
+
+  // Gesture on |v3|
+  GestureEventForTest g1(ui::ET_GESTURE_TAP, 110, 110, 0);
+  root->OnGestureEvent(g1);
+  EXPECT_EQ(ui::ET_GESTURE_TAP, v2->last_gesture_event_type_);
+  EXPECT_EQ(gfx::Point(10, 10), v2->location_);
+  EXPECT_EQ(ui::ET_UNKNOWN, v1->last_gesture_event_type_);
+
+  v2->Reset();
+
+  // Send scroll gestures on |v3|. The gesture should reach |v2|, however,
+  // since it does not process scroll-gesture events, these events should reach
+  // |v1|.
+  GestureEventForTest gscroll_begin(ui::ET_GESTURE_SCROLL_BEGIN, 115, 115, 0);
+  root->OnGestureEvent(gscroll_begin);
+  EXPECT_EQ(ui::ET_UNKNOWN, v2->last_gesture_event_type_);
+  EXPECT_EQ(ui::ET_GESTURE_SCROLL_BEGIN, v1->last_gesture_event_type_);
+  v1->Reset();
+
+  // Send a second tap on |v1|. The event should reach |v2| since it is the
+  // default gesture handler, and not |v1| (even though it is the view under the
+  // point, and is the scroll event handler).
+  GestureEventForTest second_tap(ui::ET_GESTURE_TAP, 70, 70, 0);
+  root->OnGestureEvent(second_tap);
+  EXPECT_EQ(ui::ET_GESTURE_TAP, v2->last_gesture_event_type_);
+  EXPECT_EQ(ui::ET_UNKNOWN, v1->last_gesture_event_type_);
+  v2->Reset();
+
+  GestureEventForTest gscroll_end(ui::ET_GESTURE_SCROLL_END, 50, 50, 0);
+  root->OnGestureEvent(gscroll_end);
+  EXPECT_EQ(ui::ET_GESTURE_SCROLL_END, v1->last_gesture_event_type_);
+  v1->Reset();
+
+  // Simulate an up so that RootView is no longer targetting |v3|.
+  GestureEventForTest g1_up(ui::ET_GESTURE_END, 110, 110, 0);
+  root->OnGestureEvent(g1_up);
+  EXPECT_EQ(ui::ET_GESTURE_END, v2->last_gesture_event_type_);
+
+  v1->Reset();
+  v2->Reset();
+  v3->Reset();
+
+  // Gesture on |v1|
+  GestureEventForTest g2(ui::ET_GESTURE_TAP, 80, 80, 0);
+  root->OnGestureEvent(g2);
+  EXPECT_EQ(ui::ET_GESTURE_TAP, v1->last_gesture_event_type_);
+  EXPECT_EQ(gfx::Point(80, 80), v1->location_);
+  EXPECT_EQ(ui::ET_UNKNOWN, v2->last_gesture_event_type_);
+
+  // Send event |g1| again. Even though the coordinates target |v3| it should go
+  // to |v1| as that is the view the touch was initially down on.
+  v1->last_gesture_event_type_ = ui::ET_UNKNOWN;
+  v3->last_gesture_event_type_ = ui::ET_UNKNOWN;
+  root->OnGestureEvent(g1);
+  EXPECT_EQ(ui::ET_GESTURE_TAP, v1->last_gesture_event_type_);
+  EXPECT_EQ(ui::ET_UNKNOWN, v3->last_gesture_event_type_);
+  EXPECT_EQ("110,110", v1->location_.ToString());
+
+  widget->CloseNow();
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Painting
 ////////////////////////////////////////////////////////////////////////////////
@@ -709,13 +818,7 @@ TEST_F(ViewTest, DISABLED_Painting) {
 }
 */
 
-#if defined(OS_WIN)
 TEST_F(ViewTest, RemoveNotification) {
-#else
-// TODO(beng): stopped working with widget hierarchy split,
-//             http://crbug.com/82364
-TEST_F(ViewTest, DISABLED_RemoveNotification) {
-#endif
   ViewStorage* vs = ViewStorage::GetInstance();
   Widget* widget = new Widget;
   widget->Init(Widget::InitParams(Widget::InitParams::TYPE_POPUP));
@@ -842,16 +945,16 @@ gfx::Point ConvertPointToView(View* view, const gfx::Point& p) {
   return tmp;
 }
 
-void RotateCounterclockwise(ui::Transform& transform) {
-  transform.matrix().set3x3(0, -1, 0,
-                            1,  0, 0,
-                            0,  0, 1);
+void RotateCounterclockwise(ui::Transform* transform) {
+  transform->matrix().set3x3(0, -1, 0,
+                             1,  0, 0,
+                             0,  0, 1);
 }
 
-void RotateClockwise(ui::Transform& transform) {
-  transform.matrix().set3x3( 0, 1, 0,
-                            -1, 0, 0,
-                             0, 0, 1);
+void RotateClockwise(ui::Transform* transform) {
+  transform->matrix().set3x3( 0, 1, 0,
+                             -1, 0, 0,
+                              0, 0, 1);
 }
 
 }  // namespace
@@ -1044,7 +1147,7 @@ TEST_F(ViewTest, Textfield) {
   // Test selection related methods.
   textfield->SetText(kText);
   EXPECT_EQ(kEmptyString, textfield->GetSelectedText());
-  textfield->SelectAll();
+  textfield->SelectAll(false);
   EXPECT_EQ(kText, textfield->text());
   textfield->ClearSelection();
   EXPECT_EQ(kEmptyString, textfield->GetSelectedText());
@@ -1085,7 +1188,7 @@ TEST_F(ViewTest, TextfieldCutCopyPaste) {
   // Test cut.
   //
   ASSERT_TRUE(normal->GetTestingHandle());
-  normal->SelectAll();
+  normal->SelectAll(false);
   ::SendMessage(normal->GetTestingHandle(), WM_CUT, 0, 0);
 
   string16 result;
@@ -1094,7 +1197,7 @@ TEST_F(ViewTest, TextfieldCutCopyPaste) {
   normal->SetText(kNormalText);  // Let's revert to the original content.
 
   ASSERT_TRUE(read_only->GetTestingHandle());
-  read_only->SelectAll();
+  read_only->SelectAll(false);
   ::SendMessage(read_only->GetTestingHandle(), WM_CUT, 0, 0);
   result.clear();
   clipboard.ReadText(ui::Clipboard::BUFFER_STANDARD, &result);
@@ -1102,7 +1205,7 @@ TEST_F(ViewTest, TextfieldCutCopyPaste) {
   EXPECT_EQ(kNormalText, result);
 
   ASSERT_TRUE(password->GetTestingHandle());
-  password->SelectAll();
+  password->SelectAll(false);
   ::SendMessage(password->GetTestingHandle(), WM_CUT, 0, 0);
   result.clear();
   clipboard.ReadText(ui::Clipboard::BUFFER_STANDARD, &result);
@@ -1115,19 +1218,19 @@ TEST_F(ViewTest, TextfieldCutCopyPaste) {
 
   // Let's start with read_only as the clipboard already contains the content
   // of normal.
-  read_only->SelectAll();
+  read_only->SelectAll(false);
   ::SendMessage(read_only->GetTestingHandle(), WM_COPY, 0, 0);
   result.clear();
   clipboard.ReadText(ui::Clipboard::BUFFER_STANDARD, &result);
   EXPECT_EQ(kReadOnlyText, result);
 
-  normal->SelectAll();
+  normal->SelectAll(false);
   ::SendMessage(normal->GetTestingHandle(), WM_COPY, 0, 0);
   result.clear();
   clipboard.ReadText(ui::Clipboard::BUFFER_STANDARD, &result);
   EXPECT_EQ(kNormalText, result);
 
-  password->SelectAll();
+  password->SelectAll(false);
   ::SendMessage(password->GetTestingHandle(), WM_COPY, 0, 0);
   result.clear();
   clipboard.ReadText(ui::Clipboard::BUFFER_STANDARD, &result);
@@ -1143,22 +1246,22 @@ TEST_F(ViewTest, TextfieldCutCopyPaste) {
   // WM_KEYDOWN messages that we are not simulating here.
 
   // Attempting to copy kNormalText in a read-only text-field should fail.
-  read_only->SelectAll();
+  read_only->SelectAll(false);
   ::SendMessage(read_only->GetTestingHandle(), WM_KEYDOWN, 0, 0);
   wchar_t buffer[1024] = { 0 };
   ::GetWindowText(read_only->GetTestingHandle(), buffer, 1024);
   EXPECT_EQ(kReadOnlyText, string16(buffer));
 
-  password->SelectAll();
+  password->SelectAll(false);
   ::SendMessage(password->GetTestingHandle(), WM_PASTE, 0, 0);
   ::GetWindowText(password->GetTestingHandle(), buffer, 1024);
   EXPECT_EQ(kNormalText, string16(buffer));
 
   // Copy from read_only so the string we are pasting is not the same as the
   // current one.
-  read_only->SelectAll();
+  read_only->SelectAll(false);
   ::SendMessage(read_only->GetTestingHandle(), WM_COPY, 0, 0);
-  normal->SelectAll();
+  normal->SelectAll(false);
   ::SendMessage(normal->GetTestingHandle(), WM_PASTE, 0, 0);
   ::GetWindowText(normal->GetTestingHandle(), buffer, 1024);
   EXPECT_EQ(kReadOnlyText, string16(buffer));
@@ -1903,7 +2006,7 @@ TEST_F(ViewTest, TransformPaint) {
 
   // Rotate |v1| counter-clockwise.
   ui::Transform transform;
-  RotateCounterclockwise(transform);
+  RotateCounterclockwise(&transform);
   transform.SetTranslateY(500.0f);
   v1->SetTransform(transform);
 
@@ -1937,7 +2040,7 @@ TEST_F(ViewTest, TransformEvent) {
 
   // Rotate |v1| counter-clockwise.
   ui::Transform transform(v1->GetTransform());
-  RotateCounterclockwise(transform);
+  RotateCounterclockwise(&transform);
   transform.SetTranslateY(500.0f);
   v1->SetTransform(transform);
 
@@ -1959,7 +2062,7 @@ TEST_F(ViewTest, TransformEvent) {
 
   // Now rotate |v2| inside |v1| clockwise.
   transform = v2->GetTransform();
-  RotateClockwise(transform);
+  RotateClockwise(&transform);
   transform.SetTranslateX(100.0f);
   v2->SetTransform(transform);
 
@@ -1989,7 +2092,7 @@ TEST_F(ViewTest, TransformEvent) {
 
   // Rotate |v3| clockwise with respect to |v2|.
   transform = v1->GetTransform();
-  RotateClockwise(transform);
+  RotateClockwise(&transform);
   transform.SetTranslateX(30.0f);
   v3->SetTransform(transform);
 
@@ -2025,7 +2128,7 @@ TEST_F(ViewTest, TransformEvent) {
 
   // Rotate |v3| clockwise with respect to |v2|, and scale it along both axis.
   transform = v3->GetTransform();
-  RotateClockwise(transform);
+  RotateClockwise(&transform);
   transform.SetTranslateX(30.0f);
   // Rotation sets some scaling transformation. Using SetScale would overwrite
   // that and pollute the rotation. So combine the scaling with the existing
@@ -2078,7 +2181,7 @@ TEST_F(ViewTest, TransformVisibleBound) {
 
   // Rotate |child| counter-clockwise
   ui::Transform transform;
-  RotateCounterclockwise(transform);
+  RotateCounterclockwise(&transform);
   transform.SetTranslateY(50.0f);
   child->SetTransform(transform);
   EXPECT_EQ(gfx::Rect(40, 0, 10, 50), child->GetVisibleBounds());
@@ -2314,7 +2417,7 @@ TEST_F(ViewTest, ConvertRectWithTransform) {
 
   // Rotate |v2|
   ui::Transform t2;
-  RotateCounterclockwise(t2);
+  RotateCounterclockwise(&t2);
   t2.SetTranslateY(100.0f);
   v2->SetTransform(t2);
 
@@ -3235,7 +3338,7 @@ TEST_F(ViewLayerTest, RecreateLayer) {
   v->layer()->set_scale_content(false);
   scoped_ptr<ui::Layer> old_layer(v->RecreateLayer());
   ui::Layer* new_layer = v->layer();
-  EXPECT_EQ(false, new_layer->scale_content());
+  EXPECT_FALSE(new_layer->scale_content());
 }
 
 #endif  // USE_AURA

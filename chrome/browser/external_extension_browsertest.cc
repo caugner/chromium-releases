@@ -6,11 +6,13 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/url_constants.h"
+#include "content/public/test/browser_test_utils.h"
 #include "net/test/test_server.h"
 
 namespace {
@@ -59,7 +61,7 @@ class SearchProviderTest : public InProcessBrowserTest {
         ui_test_utils::BROWSER_TEST_WAIT_FOR_TAB);
 
     // Bundle up information needed to verify the result.
-    content::WebContents* tab = browser->GetActiveWebContents();
+    content::WebContents* tab = chrome::GetActiveWebContents(browser);
     return IsSearchProviderTestData(tab, host, test_url);
   }
 
@@ -67,7 +69,7 @@ class SearchProviderTest : public InProcessBrowserTest {
       const IsSearchProviderTestData& data) {
     string16 title = data.tab->GetTitle();
     if (title.empty()) {
-      ui_test_utils::TitleWatcher title_watcher(data.tab, ASCIIToUTF16("OK"));
+      content::TitleWatcher title_watcher(data.tab, ASCIIToUTF16("OK"));
       title_watcher.AlsoWaitForTitle(ASCIIToUTF16("FAIL"));
       title = title_watcher.WaitAndGetTitle();
     }

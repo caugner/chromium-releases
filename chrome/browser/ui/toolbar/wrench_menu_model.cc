@@ -26,10 +26,14 @@
 #include "chrome/browser/sync/sync_ui_util.h"
 #include "chrome/browser/task_manager/task_manager.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_commands.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/global_error.h"
-#include "chrome/browser/ui/global_error_service.h"
-#include "chrome/browser/ui/global_error_service_factory.h"
+#include "chrome/browser/ui/global_error/global_error.h"
+#include "chrome/browser/ui/global_error/global_error_service.h"
+#include "chrome/browser/ui/global_error/global_error_service_factory.h"
+#include "chrome/browser/ui/metro_pin_tab_helper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/toolbar/encoding_menu_controller.h"
 #include "chrome/browser/upgrade_detector.h"
@@ -46,7 +50,6 @@
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "grit/theme_resources_standard.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/layout.h"
 #include "ui/base/models/button_menu_item_model.h"
@@ -60,6 +63,7 @@
 #endif
 
 #if defined(OS_WIN)
+#include "base/win/metro.h"
 #include "base/win/windows_version.h"
 #include "chrome/browser/enumerate_modules_model_win.h"
 #endif
@@ -108,7 +112,7 @@ void EncodingMenuModel::Build() {
 }
 
 bool EncodingMenuModel::IsCommandIdChecked(int command_id) const {
-  WebContents* current_tab = browser_->GetActiveWebContents();
+  WebContents* current_tab = chrome::GetActiveWebContents(browser_);
   if (!current_tab)
     return false;
   EncodingMenuController controller;
@@ -117,12 +121,12 @@ bool EncodingMenuModel::IsCommandIdChecked(int command_id) const {
 }
 
 bool EncodingMenuModel::IsCommandIdEnabled(int command_id) const {
-  bool enabled = browser_->command_updater()->IsCommandEnabled(command_id);
+  bool enabled = chrome::IsCommandEnabled(browser_, command_id);
   // Special handling for the contents of the Encoding submenu. On Mac OS,
   // instead of enabling/disabling the top-level menu item, the submenu's
   // contents get disabled, per Apple's HIG.
 #if defined(OS_MACOSX)
-  enabled &= browser_->command_updater()->IsCommandEnabled(IDC_ENCODING_MENU);
+  enabled &= chrome::IsCommandEnabled(browser_, IDC_ENCODING_MENU);
 #endif
   return enabled;
 }
@@ -134,7 +138,7 @@ bool EncodingMenuModel::GetAcceleratorForCommandId(
 }
 
 void EncodingMenuModel::ExecuteCommand(int command_id) {
-  browser_->ExecuteCommand(command_id);
+  chrome::ExecuteCommand(browser_, command_id);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -172,7 +176,10 @@ void ToolsMenuModel::Build(Browser* browser) {
 #endif
 
   AddItemWithStringId(IDC_MANAGE_EXTENSIONS, IDS_SHOW_EXTENSIONS);
-  AddItemWithStringId(IDC_TASK_MANAGER, IDS_TASK_MANAGER);
+
+  if (chrome::CanOpenTaskManager())
+    AddItemWithStringId(IDC_TASK_MANAGER, IDS_TASK_MANAGER);
+
   AddItemWithStringId(IDC_CLEAR_BROWSING_DATA, IDS_CLEAR_BROWSING_DATA);
 
   AddSeparator();
@@ -234,7 +241,8 @@ bool WrenchMenuModel::IsItemForCommandIdDynamic(int command_id) const {
 #endif
          command_id == IDC_VIEW_BACKGROUND_PAGES ||
          command_id == IDC_UPGRADE_DIALOG ||
-         command_id == IDC_SHOW_SYNC_SETUP;
+         command_id == IDC_SHOW_SYNC_SETUP ||
+         command_id == IDC_PIN_TO_START_SCREEN;
 }
 
 string16 WrenchMenuModel::GetLabelForCommandId(int command_id) const {
@@ -275,6 +283,14 @@ string16 WrenchMenuModel::GetLabelForCommandId(int command_id) const {
       }
       return l10n_util::GetStringFUTF16(IDS_SYNC_MENU_PRE_SYNCED_LABEL,
           l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME));
+    }
+    case IDC_PIN_TO_START_SCREEN: {
+      int string_id = IDS_PIN_TO_START_SCREEN;
+      TabContents* tab_contents = chrome::GetActiveTabContents(browser_);
+      if (tab_contents && tab_contents->metro_pin_tab_helper()->is_pinned()) {
+        string_id = IDS_UNPIN_FROM_START_SCREEN;
+      }
+      return l10n_util::GetStringUTF16(string_id);
     }
     default:
       NOTREACHED();
@@ -337,7 +353,7 @@ void WrenchMenuModel::ExecuteCommand(int command_id) {
   if (command_id == IDC_HELP_PAGE_VIA_MENU)
     content::RecordAction(UserMetricsAction("ShowHelpTabViaWrenchMenu"));
 
-  browser_->ExecuteCommand(command_id);
+  chrome::ExecuteCommand(browser_, command_id);
 }
 
 bool WrenchMenuModel::IsCommandIdChecked(int command_id) const {
@@ -356,23 +372,27 @@ bool WrenchMenuModel::IsCommandIdEnabled(int command_id) const {
   if (error)
     return true;
 
-  return browser_->command_updater()->IsCommandEnabled(command_id);
+  return chrome::IsCommandEnabled(browser_, command_id);
 }
 
 bool WrenchMenuModel::IsCommandIdVisible(int command_id) const {
-  if (command_id == IDC_UPGRADE_DIALOG) {
-    return UpgradeDetector::GetInstance()->notify_upgrade();
-  } else if (command_id == IDC_VIEW_INCOMPATIBILITIES) {
 #if defined(OS_WIN)
+  if (command_id == IDC_VIEW_INCOMPATIBILITIES) {
     EnumerateModulesModel* loaded_modules =
         EnumerateModulesModel::GetInstance();
     if (loaded_modules->confirmed_bad_modules_detected() <= 0)
       return false;
     loaded_modules->AcknowledgeConflictNotification();
     return true;
+  } else if (command_id == IDC_PIN_TO_START_SCREEN) {
+    return base::win::IsMetroProcess();
 #else
+  if (command_id == IDC_VIEW_INCOMPATIBILITIES ||
+      command_id == IDC_PIN_TO_START_SCREEN) {
     return false;
 #endif
+  } else if (command_id == IDC_UPGRADE_DIALOG) {
+    return UpgradeDetector::GetInstance()->notify_upgrade();
   } else if (command_id == IDC_VIEW_BACKGROUND_PAGES) {
     return TaskManager::GetBackgroundPageCount() > 0;
   }
@@ -441,11 +461,7 @@ void WrenchMenuModel::Build() {
   AddItemWithStringId(IDC_NEW_INCOGNITO_WINDOW, IDS_NEW_INCOGNITO_WINDOW);
 #endif
 
-#if defined(OS_WIN)
-  if (base::win::GetVersion() >= base::win::VERSION_WIN8)
-    AddItemWithStringId(IDC_PIN_TO_START_SCREEN, IDS_PIN_TO_START_SCREEN);
-#endif
-
+  AddItemWithStringId(IDC_PIN_TO_START_SCREEN, IDS_PIN_TO_START_SCREEN);
   bookmark_sub_menu_model_.reset(new BookmarkSubMenuModel(this, browser_));
   AddSubMenuWithStringId(IDC_BOOKMARKS_MENU, IDS_BOOKMARKS_MENU,
                          bookmark_sub_menu_model_.get());
@@ -462,8 +478,11 @@ void WrenchMenuModel::Build() {
   AddItemWithStringId(IDC_PRINT, IDS_PRINT);
 
   tools_menu_model_.reset(new ToolsMenuModel(this, browser_));
-  AddSubMenuWithStringId(IDC_ZOOM_MENU, IDS_TOOLS_MENU,
-                         tools_menu_model_.get());
+  // In case of touch this is the last item.
+  if (!is_touch_menu) {
+    AddSubMenuWithStringId(IDC_ZOOM_MENU, IDS_TOOLS_MENU,
+                           tools_menu_model_.get());
+  }
 
   if (is_touch_menu)
     CreateZoomMenu();
@@ -485,12 +504,19 @@ void WrenchMenuModel::Build() {
 
   AddItemWithStringId(IDC_OPTIONS, IDS_SETTINGS);
 
-  if (!is_touch_menu) {
+// On ChromeOS-Touch, we don't want the about/background pages menu options.
+#if defined(OS_CHROMEOS)
+  if (!is_touch_menu)
+#endif
+  {
     AddItem(IDC_ABOUT, l10n_util::GetStringUTF16(IDS_ABOUT));
-    string16 num_background_pages = base::FormatNumber(
-        TaskManager::GetBackgroundPageCount());
-    AddItem(IDC_VIEW_BACKGROUND_PAGES, l10n_util::GetStringFUTF16(
-        IDS_VIEW_BACKGROUND_PAGES, num_background_pages));
+    // We use the task manager to show background pages.
+    if (chrome::CanOpenTaskManager()) {
+      string16 num_background_pages = base::FormatNumber(
+          TaskManager::GetBackgroundPageCount());
+      AddItem(IDC_VIEW_BACKGROUND_PAGES, l10n_util::GetStringFUTF16(
+          IDS_VIEW_BACKGROUND_PAGES, num_background_pages));
+    }
   }
 
   if (browser_defaults::kShowUpgradeMenuItem)
@@ -519,9 +545,19 @@ void WrenchMenuModel::Build() {
 
   AddGlobalErrorMenuItems();
 
+  if (is_touch_menu) {
+    AddSubMenuWithStringId(IDC_ZOOM_MENU, IDS_MORE_TOOLS_MENU,
+                           tools_menu_model_.get());
+  }
+
   if (browser_defaults::kShowExitMenuItem) {
-    AddSeparator();
-    AddItemWithStringId(IDC_EXIT, IDS_EXIT);
+#if defined(OS_WIN)
+    if (!base::win::IsMetroProcess())
+#endif
+    {
+      AddSeparator();
+      AddItemWithStringId(IDC_EXIT, IDS_EXIT);
+    }
   }
 }
 
@@ -607,8 +643,8 @@ void WrenchMenuModel::UpdateZoomControls() {
   bool enable_increment = false;
   bool enable_decrement = false;
   int zoom_percent = 100;
-  if (browser_->GetActiveWebContents()) {
-    zoom_percent = browser_->GetActiveWebContents()->GetZoomPercent(
+  if (chrome::GetActiveWebContents(browser_)) {
+    zoom_percent = chrome::GetActiveWebContents(browser_)->GetZoomPercent(
         &enable_increment, &enable_decrement);
   }
   zoom_label_ = l10n_util::GetStringFUTF16(

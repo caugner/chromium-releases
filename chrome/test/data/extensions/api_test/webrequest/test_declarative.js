@@ -21,6 +21,12 @@ var RemoveResponseHeader =
     chrome.declarativeWebRequest.RemoveResponseHeader;
 var IgnoreRules =
     chrome.declarativeWebRequest.IgnoreRules;
+var AddRequestCookie = chrome.declarativeWebRequest.AddRequestCookie;
+var AddResponseCookie = chrome.declarativeWebRequest.AddResponseCookie;
+var EditRequestCookie = chrome.declarativeWebRequest.EditRequestCookie;
+var EditResponseCookie = chrome.declarativeWebRequest.EditResponseCookie;
+var RemoveRequestCookie = chrome.declarativeWebRequest.RemoveRequestCookie;
+var RemoveResponseCookie = chrome.declarativeWebRequest.RemoveResponseCookie;
 
 // Constants as functions, not to be called until after runTests.
 function getURLEchoUserAgent() {
@@ -45,11 +51,36 @@ function getURLHttpRedirectTest() {
       "files/extensions/api_test/webrequest/declarative/a.html");
 }
 
+function getURLHttpWithHeaders() {
+  return getServerURL(
+      "files/extensions/api_test/webrequest/declarative/headers.html");
+}
+
 function getURLSetCookie() {
   return getServerURL('set-cookie?Foo=Bar');
 }
 
+function getURLSetCookie2() {
+  return getServerURL('set-cookie?passedCookie=Foo&editedCookie=Foo&' +
+                      'deletedCookie=Foo');
+}
+
+function getURLEchoCookie() {
+  return getServerURL('echoheader?Cookie');
+}
+
+function getURLHttpXHRData() {
+  return getServerURL("files/extensions/api_test/webrequest/xhr/data.json",
+                      "b.com");
+}
+
+function getURLHttpSimpleOnB() {
+  return getServerURL("files/extensions/api_test/webrequest/simpleLoad/a.html",
+                      "b.com");
+}
+
 runTests([
+
   function testCancelRequest() {
     ignoreUnexpected = true;
     expect(
@@ -57,7 +88,7 @@ runTests([
         { label: "onErrorOccurred",
           event: "onErrorOccurred",
           details: {
-            url: getURLHttpSimple(),
+            url: getURLHttpWithHeaders(),
             fromCache: false,
             error: "net::ERR_BLOCKED_BY_CLIENT"
           }
@@ -72,10 +103,11 @@ runTests([
                  'ports': [testServerPort, [1000, 2000]],
                  'schemes': ["http"]
              },
-             'resourceType': ["main_frame"]})],
+             'resourceType': ["main_frame"],
+             'contentType': ["text/html"]})],
          'actions': [new CancelRequest()]}
       ],
-      function() {navigateAndWait(getURLHttpSimple());}
+      function() {navigateAndWait(getURLHttpWithHeaders());}
     );
   },
 
@@ -332,4 +364,113 @@ runTests([
     );
   },
 
+  function testEditRequestCookies() {
+    ignoreUnexpected = true;
+    expect();
+    var cookie1 = {name: "requestCookie1", value: "foo"};
+    var cookie2 = {name: "requestCookie2", value: "foo"};
+    onRequest.addRules(
+      [ {conditions: [new RequestMatcher({})],
+         actions: [
+           // We exploit the fact that cookies are first added, then modified
+           // and finally removed.
+           new AddRequestCookie({cookie: cookie1}),
+           new AddRequestCookie({cookie: cookie2}),
+           new EditRequestCookie({filter: {name: "requestCookie1"},
+                                  modification: {value: "bar"}}),
+           new RemoveRequestCookie({filter: {name: "requestCookie2"}})
+         ]}
+      ],
+      function() {
+        navigateAndWait(getURLEchoCookie(), function() {
+          chrome.test.listenOnce(chrome.extension.onRequest, function(request) {
+            chrome.test.assertTrue(request.pass, "Invalid cookies. " +
+                JSON.stringify(request.cookies));
+          });
+          chrome.tabs.executeScript(tabId, {code:
+              "function hasCookie(name, value) {" +
+              "  var entry = name + '=' + value;" +
+              "  return document.body.innerText.indexOf(entry) >= 0;" +
+              "};" +
+              "var result = {};" +
+              "result.pass = hasCookie('requestCookie1', 'bar') && " +
+              "              !hasCookie('requestCookie1', 'foo') && " +
+              "              !hasCookie('requestCookie2', 'foo');" +
+              "result.cookies = document.body.innerText;" +
+              "chrome.extension.sendRequest(result);"});
+        });
+      }
+    );
+  },
+
+  function testEditResponseCookies() {
+    ignoreUnexpected = true;
+    expect();
+    onRequest.addRules(
+      [ {conditions: [new RequestMatcher({})],
+         actions: [
+           new AddResponseCookie({cookie: {name: "addedCookie", value: "Foo"}}),
+           new EditResponseCookie({filter: {name: "editedCookie"},
+                                   modification: {value: "bar"}}),
+           new RemoveResponseCookie({filter: {name: "deletedCookie"}})
+         ]}
+      ],
+      function() {
+        navigateAndWait(getURLSetCookie2(), function() {
+          chrome.test.listenOnce(chrome.extension.onRequest, function(request) {
+            chrome.test.assertTrue(request.pass, "Invalid cookies. " +
+                JSON.stringify(request.cookies));
+          });
+          chrome.tabs.executeScript(tabId, {code:
+              "var cookies = document.cookie.split('; ');" +
+              "var cookieMap = {};" +
+              "for (var i = 0; i < cookies.length; ++i) {" +
+              "  var cookieParts = cookies[i].split('=');" +
+              "  cookieMap[cookieParts[0]] = cookieParts[1];" +
+              "}" +
+              "var result = {};" +
+              "result.cookies = cookieMap;" +
+              "result.pass = (cookieMap.passedCookie === 'Foo') &&" +
+              "              (cookieMap.addedCookie === 'Foo') &&" +
+              "              (cookieMap.editedCookie === 'bar') &&" +
+              "              !cookieMap.hasOwnProperty('deletedCookie');" +
+              "chrome.extension.sendRequest(result);"});
+        });
+      }
+    );
+  },
+
+  function testPermission() {
+    // Test that a redirect is ignored if the extension has no permission.
+    // we load a.html from a.com and issue an XHR to b.com, which is not
+    // contained in the extension's host permissions. Therefore, we cannot
+    // redirect it and the request succeeds.
+    ignoreUnexpected = true;
+    expect();
+    onRequest.addRules(
+      [ {'conditions': [new RequestMatcher({'url': {'pathContains': ".json"}})],
+         'actions': [
+             new RedirectRequest({'redirectUrl': getURLHttpSimpleOnB()})]}
+      ],
+      function() {
+        var callback = chrome.test.callbackAdded();
+        navigateAndWait(getURL("simpleLoad/a.html"), function() {
+          var asynchronous = false;
+          var req = new XMLHttpRequest();
+          req.onreadystatechange = function() {
+            if (this.readyState != this.DONE)
+              return;
+            if (this.status == 200 && this.responseText == "{}\n") {
+              callback();
+            } else {
+              chrome.test.fail("Redirect was not prevented. Status: " +
+                  this.status + ", responseText: " + this.responseText);
+            }
+          }
+          req.open("GET", getURLHttpXHRData(), asynchronous);
+          req.send(null);
+        });
+      }
+    );
+  },
   ]);

@@ -6,7 +6,6 @@
 
 #include "base/command_line.h"
 #include "chrome/browser/about_flags.h"
-#include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_web_ui.h"
 #include "chrome/browser/history/history_types.h"
@@ -21,6 +20,7 @@
 #include "chrome/browser/ui/webui/devtools_ui.h"
 #include "chrome/browser/ui/webui/downloads_ui.h"
 #include "chrome/browser/ui/webui/extensions/extension_activity_ui.h"
+#include "chrome/browser/ui/webui/extensions/extension_info_ui.h"
 #include "chrome/browser/ui/webui/extensions/extensions_ui.h"
 #include "chrome/browser/ui/webui/feedback_ui.h"
 #include "chrome/browser/ui/webui/flags_ui.h"
@@ -30,11 +30,12 @@
 #include "chrome/browser/ui/webui/help/help_ui.h"
 #include "chrome/browser/ui/webui/history_ui.h"
 #include "chrome/browser/ui/webui/inspect_ui.h"
+#include "chrome/browser/ui/webui/instant_ui.h"
 #include "chrome/browser/ui/webui/media/media_internals_ui.h"
 #include "chrome/browser/ui/webui/net_internals/net_internals_ui.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/browser/ui/webui/omnibox/omnibox_ui.h"
-#include "chrome/browser/ui/webui/options2/options_ui2.h"
+#include "chrome/browser/ui/webui/options2/options_ui.h"
 #include "chrome/browser/ui/webui/plugins_ui.h"
 #include "chrome/browser/ui/webui/policy_ui.h"
 #include "chrome/browser/ui/webui/predictors/predictors_ui.h"
@@ -49,6 +50,7 @@
 #include "chrome/browser/ui/webui/uber/uber_ui.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_constants.h"
+#include "chrome/common/extensions/extension_switch_utils.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/web_contents.h"
@@ -59,7 +61,10 @@
 #include "ui/web_dialogs/web_dialog_ui.h"
 
 #if defined(OS_CHROMEOS)
+#include "chrome/browser/ui/webui/chromeos/drive_internals_ui.h"
 #include "chrome/browser/ui/webui/chromeos/choose_mobile_network_ui.h"
+#include "chrome/browser/ui/webui/chromeos/cryptohome_ui.h"
+#include "chrome/browser/ui/webui/chromeos/diagnostics/diagnostics_ui.h"
 #include "chrome/browser/ui/webui/chromeos/imageburner/imageburner_ui.h"
 #include "chrome/browser/ui/webui/chromeos/keyboard_overlay_ui.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
@@ -80,6 +85,7 @@
 
 #if defined(OS_WIN)
 #include "chrome/browser/ui/webui/conflicts_ui.h"
+#include "chrome/browser/ui/webui/set_as_default_browser_ui.h"
 #endif
 
 #if (defined(USE_NSS) || defined(USE_OPENSSL)) && defined(USE_AURA)
@@ -105,11 +111,17 @@ WebUIController* NewWebUI(WebUI* web_ui, const GURL& url) {
   return new T(web_ui);
 }
 
-// Special case for extensions.
+// Special cases for extensions.
 template<>
 WebUIController* NewWebUI<ExtensionWebUI>(WebUI* web_ui,
                                           const GURL& url) {
   return new ExtensionWebUI(web_ui, url);
+}
+
+template<>
+WebUIController* NewWebUI<ExtensionInfoUI>(WebUI* web_ui,
+                                           const GURL& url) {
+  return new ExtensionInfoUI(web_ui, url);
 }
 
 // Special case for older about: handlers.
@@ -180,14 +192,14 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
     return &NewWebUI<DevToolsUI>;
   if (url.host() == chrome::kChromeUIDialogHost)
     return &NewWebUI<ConstrainedWebDialogUI>;
-  if (url.host() == chrome::kChromeUIExtensionsFrameHost)
-    return &NewWebUI<ExtensionsUI>;
   if (url.host() == chrome::kChromeUIFlashHost)
     return &NewWebUI<FlashUI>;
   if (url.host() == chrome::kChromeUIGpuInternalsHost)
     return &NewWebUI<GpuInternalsUI>;
   if (url.host() == chrome::kChromeUIHistoryFrameHost)
     return &NewWebUI<HistoryUI>;
+  if (url.host() == chrome::kChromeUIInstantHost)
+    return &NewWebUI<InstantUI>;
   if (url.host() == chrome::kChromeUIMediaInternalsHost)
     return &NewWebUI<MediaInternalsUI>;
   if (url.host() == chrome::kChromeUINetInternalsHost)
@@ -200,8 +212,6 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
     return &NewWebUI<ProfilerUI>;
   if (url.host() == chrome::kChromeUIQuotaInternalsHost)
     return &NewWebUI<QuotaInternalsUI>;
-  if (url.host() == chrome::kChromeUISuggestionsInternalsHost)
-    return &NewWebUI<SuggestionsInternalsUI>;
   if (url.host() == chrome::kChromeUISyncInternalsHost)
     return &NewWebUI<SyncInternalsUI>;
   if (url.host() == chrome::kChromeUISyncResourcesHost)
@@ -226,6 +236,8 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
     return &NewWebUI<HelpUI>;
   if (url.host() == chrome::kChromeUISettingsFrameHost)
     return &NewWebUI<options2::OptionsUI>;
+  if (url.host() == chrome::kChromeUISuggestionsInternalsHost)
+    return &NewWebUI<SuggestionsInternalsUI>;
   // chrome://flags is currently unsupported on Android.
   if (url.host() == chrome::kChromeUIFlagsHost)
     return &NewWebUI<FlagsUI>;
@@ -238,16 +250,20 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
   if (url.host() == chrome::kChromeUIPluginsHost)
     return &NewWebUI<PluginsUI>;
 #endif
+#if defined(ENABLE_EXTENSIONS)
+  if (url.host() == chrome::kChromeUIExtensionsFrameHost)
+    return &NewWebUI<ExtensionsUI>;
+#endif
 #if defined(ENABLE_PRINTING)
   if (url.host() == chrome::kChromeUIPrintHost &&
-      !g_browser_process->local_state()->GetBoolean(
-          prefs::kPrintPreviewDisabled)) {
+      !profile->GetPrefs()->GetBoolean(prefs::kPrintPreviewDisabled))
     return &NewWebUI<PrintPreviewUI>;
-  }
 #endif
 #if defined(OS_WIN)
   if (url.host() == chrome::kChromeUIConflictsHost)
     return &NewWebUI<ConflictsUI>;
+  if (url.host() == chrome::kChromeUIMetroFlowHost)
+    return &NewWebUI<SetAsDefaultBrowserUI>;
 #endif
 #if (defined(USE_NSS) || defined(USE_OPENSSL)) && defined(USE_AURA)
   if (url.host() == chrome::kChromeUICertificateViewerHost)
@@ -256,6 +272,12 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
 #if defined(OS_CHROMEOS)
   if (url.host() == chrome::kChromeUIChooseMobileNetworkHost)
     return &NewWebUI<chromeos::ChooseMobileNetworkUI>;
+  if (url.host() == chrome::kChromeUICryptohomeHost)
+    return &NewWebUI<chromeos::CryptohomeUI>;
+  if (url.host() == chrome::kChromeUIDriveInternalsHost)
+    return &NewWebUI<chromeos::DriveInternalsUI>;
+  if (url.host() == chrome::kChromeUIDiagnosticsHost)
+    return &NewWebUI<chromeos::DiagnosticsUI>;
   if (url.host() == chrome::kChromeUIImageBurnerHost)
     return &NewWebUI<ImageBurnUI>;
   if (url.host() == chrome::kChromeUIKeyboardOverlayHost)
@@ -315,7 +337,6 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
   if (url.host() == chrome::kChromeUIChromeURLsHost ||
       url.host() == chrome::kChromeUICreditsHost ||
       url.host() == chrome::kChromeUIDNSHost ||
-      url.host() == chrome::kChromeUIHistogramsHost ||
       url.host() == chrome::kChromeUIMemoryHost ||
       url.host() == chrome::kChromeUIMemoryRedirectHost ||
       url.host() == chrome::kChromeUIStatsHost ||
@@ -326,7 +347,6 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
       || url.host() == chrome::kChromeUISandboxHost
 #endif
 #if defined(OS_CHROMEOS)
-      || url.host() == chrome::kChromeUICryptohomeHost
       || url.host() == chrome::kChromeUIDiscardsHost
       || url.host() == chrome::kChromeUINetworkHost
       || url.host() == chrome::kChromeUIOSCreditsHost
@@ -343,6 +363,10 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
       CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kEnableExtensionActivityUI)) {
     return &NewWebUI<ExtensionActivityUI>;
+  }
+  if (url.host() == chrome::kChromeUIExtensionInfoHost &&
+      extensions::switch_utils::AreScriptBadgesEnabled()) {
+    return &NewWebUI<ExtensionInfoUI>;
   }
 
   DLOG(WARNING) << "Unknown WebUI:" << url;

@@ -5,9 +5,10 @@
 #ifndef CONTENT_BROWSER_FILEAPI_FILEAPI_MESSAGE_FILTER_H_
 #define CONTENT_BROWSER_FILEAPI_FILEAPI_MESSAGE_FILTER_H_
 
+#include <set>
 #include <string>
 
-#include "base/basictypes.h"
+#include "base/callback.h"
 #include "base/file_util_proxy.h"
 #include "base/hash_tables.h"
 #include "base/id_map.h"
@@ -26,6 +27,7 @@ class Time;
 }
 
 namespace fileapi {
+class FileSystemURL;
 class FileSystemContext;
 class FileSystemOperationInterface;
 }
@@ -76,6 +78,9 @@ class FileAPIMessageFilter : public content::BrowserMessageFilter {
               fileapi::FileSystemType type,
               int64 requested_size,
               bool create);
+  void OnDeleteFileSystem(int request_id,
+                          const GURL& origin_url,
+                          fileapi::FileSystemType type);
   void OnMove(int request_id,
               const GURL& src_path,
               const GURL& dest_path);
@@ -102,6 +107,7 @@ class FileAPIMessageFilter : public content::BrowserMessageFilter {
                    const base::Time& last_modified_time);
   void OnCancel(int request_id, int request_to_cancel);
   void OnOpenFile(int request_id, const GURL& path, int file_flags);
+  void OnNotifyCloseFile(const GURL& path);
   void OnWillUpdate(const GURL& path);
   void OnDidUpdate(const GURL& path, int64 delta);
   void OnSyncGetPlatformPath(const GURL& path,
@@ -131,6 +137,7 @@ class FileAPIMessageFilter : public content::BrowserMessageFilter {
                         const std::vector<base::FileUtilProxy::Entry>& entries,
                         bool has_more);
   void DidOpenFile(int request_id,
+                   const GURL& path,
                    base::PlatformFileError result,
                    base::PlatformFile file,
                    base::ProcessHandle peer_handle);
@@ -142,22 +149,30 @@ class FileAPIMessageFilter : public content::BrowserMessageFilter {
                          base::PlatformFileError result,
                          const std::string& name,
                          const GURL& root);
+  void DidDeleteFileSystem(int request_id,
+                           base::PlatformFileError result);
   void DidCreateSnapshot(
       int request_id,
-      const GURL& blob_url,
+      const base::Callback<void(const FilePath&)>& register_file_callback,
       base::PlatformFileError result,
       const base::PlatformFileInfo& info,
       const FilePath& platform_path,
       const scoped_refptr<webkit_blob::ShareableFileReference>& file_ref);
 
+  // Registers the given file pointed by |virtual_path| and backed by
+  // |platform_path| as the |blob_url|.  Called by DidCreateSnapshot.
+  void RegisterFileAsBlob(const GURL& blob_url,
+                          const FilePath& virtual_path,
+                          const FilePath& platform_path);
+
   // Checks renderer's access permissions for single file.
-  bool HasPermissionsForFile(const GURL& path,
+  bool HasPermissionsForFile(const fileapi::FileSystemURL& url,
                              int permissions,
                              base::PlatformFileError* error);
 
-  // Creates a new FileSystemOperationInterface based on |target_path|.
+  // Creates a new FileSystemOperationInterface based on |target_url|.
   fileapi::FileSystemOperationInterface* GetNewOperation(
-      const GURL& target_path,
+      const fileapi::FileSystemURL& target_url,
       int request_id);
 
   int process_id_;
@@ -178,6 +193,10 @@ class FileAPIMessageFilter : public content::BrowserMessageFilter {
   // Keep track of blob URLs registered in this process. Need to unregister
   // all of them when the renderer process dies.
   base::hash_set<std::string> blob_urls_;
+
+  // Keep track of file system file URLs opened by OpenFile() in this process.
+  // Need to close all of them when the renderer process dies.
+  std::multiset<GURL> open_filesystem_urls_;
 
   DISALLOW_COPY_AND_ASSIGN(FileAPIMessageFilter);
 };

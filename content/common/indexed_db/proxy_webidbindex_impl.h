@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_COMMON_INDEXED_DB_PROXY_WEBIDBINDEX_IMPL_H_
 #define CONTENT_COMMON_INDEXED_DB_PROXY_WEBIDBINDEX_IMPL_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBCallbacks.h"
@@ -16,11 +15,6 @@ class RendererWebIDBIndexImpl : public WebKit::WebIDBIndex {
   virtual ~RendererWebIDBIndexImpl();
 
   // WebKit::WebIDBIndex
-  virtual WebKit::WebString name() const;
-  virtual WebKit::WebIDBKeyPath keyPath() const;
-  virtual bool unique() const;
-  virtual bool multiEntry() const;
-
   virtual void openObjectCursor(const WebKit::WebIDBKeyRange& range,
                                 unsigned short direction,
                                 WebKit::WebIDBCallbacks* callbacks,

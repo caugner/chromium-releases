@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_API_SOCKET_UDP_SOCKET_H_
 #define CHROME_BROWSER_EXTENSIONS_API_SOCKET_UDP_SOCKET_H_
-#pragma once
 
 #include <string>
 
@@ -13,11 +12,11 @@
 
 namespace extensions {
 
-class APIResourceEventNotifier;
+class ApiResourceEventNotifier;
 
 class UDPSocket : public Socket {
  public:
-  explicit UDPSocket(APIResourceEventNotifier* event_notifier);
+  explicit UDPSocket(ApiResourceEventNotifier* event_notifier);
   virtual ~UDPSocket();
 
   virtual void Connect(const std::string& address,
@@ -34,6 +33,9 @@ class UDPSocket : public Socket {
                       const std::string& address,
                       int port,
                       const CompletionCallback& callback) OVERRIDE;
+  virtual bool IsTCPSocket() OVERRIDE;
+  virtual bool GetPeerAddress(net::IPEndPoint* address) OVERRIDE;
+  virtual bool GetLocalAddress(net::IPEndPoint* address) OVERRIDE;
 
  protected:
   virtual int WriteImpl(net::IOBuffer* io_buffer,

@@ -13,11 +13,11 @@
 #include "base/values.h"
 #include "base/version.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chromeos/cros_settings.h"
-#include "chrome/browser/chromeos/cros_settings_names.h"
+#include "chrome/browser/chromeos/settings/cros_settings.h"
+#include "chrome/browser/chromeos/settings/cros_settings_names.h"
 #include "chrome/browser/extensions/crx_installer.h"
-#include "chrome/browser/extensions/external_extension_loader.h"
-#include "chrome/browser/extensions/external_extension_provider_impl.h"
+#include "chrome/browser/extensions/external_loader.h"
+#include "chrome/browser/extensions/external_provider_impl.h"
 #include "chrome/browser/extensions/updater/extension_downloader.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -45,24 +45,23 @@ const char kCRXFileExtension[] = ".crx";
 const char AppPackUpdater::kExtensionId[] = "extension-id";
 const char AppPackUpdater::kUpdateUrl[]   = "update-url";
 
-// A custom ExternalExtensionLoader that the AppPackUpdater creates and uses to
-// publish AppPack updates to the extensions system.
-class AppPackExternalExtensionLoader
-    : public ExternalExtensionLoader,
-      public base::SupportsWeakPtr<AppPackExternalExtensionLoader> {
+// A custom extensions::ExternalLoader that the AppPackUpdater creates and uses
+// to publish AppPack updates to the extensions system.
+class AppPackExternalLoader
+    : public extensions::ExternalLoader,
+      public base::SupportsWeakPtr<AppPackExternalLoader> {
  public:
-  AppPackExternalExtensionLoader() {}
-  virtual ~AppPackExternalExtensionLoader() {}
+  AppPackExternalLoader() {}
 
   // Used by the AppPackUpdater to update the current list of extensions.
-  // The format of |prefs| is detailed in the ExternalExtensionLoader/Provider
-  // headers.
+  // The format of |prefs| is detailed in the extensions::ExternalLoader/
+  // Provider headers.
   void SetCurrentAppPackExtensions(scoped_ptr<base::DictionaryValue> prefs) {
     app_pack_prefs_.Swap(prefs.get());
     StartLoading();
   }
 
-  // Implementation of ExternalExtensionLoader:
+  // Implementation of extensions::ExternalLoader:
   virtual void StartLoading() OVERRIDE {
     prefs_.reset(app_pack_prefs_.DeepCopy());
     VLOG(1) << "AppPack extension loader publishing "
@@ -70,10 +69,13 @@ class AppPackExternalExtensionLoader
     LoadFinished();
   }
 
+ protected:
+  virtual ~AppPackExternalLoader() {}
+
  private:
   base::DictionaryValue app_pack_prefs_;
 
-  DISALLOW_COPY_AND_ASSIGN(AppPackExternalExtensionLoader);
+  DISALLOW_COPY_AND_ASSIGN(AppPackExternalLoader);
 };
 
 AppPackUpdater::AppPackUpdater(net::URLRequestContextGetter* request_context,
@@ -103,13 +105,13 @@ AppPackUpdater::~AppPackUpdater() {
   net::NetworkChangeNotifier::RemoveIPAddressObserver(this);
 }
 
-ExternalExtensionLoader* AppPackUpdater::CreateExternalExtensionLoader() {
+extensions::ExternalLoader* AppPackUpdater::CreateExternalLoader() {
   if (created_extension_loader_) {
     NOTREACHED();
     return NULL;
   }
   created_extension_loader_ = true;
-  AppPackExternalExtensionLoader* loader = new AppPackExternalExtensionLoader();
+  AppPackExternalLoader* loader = new AppPackExternalLoader();
   extension_loader_ = loader->AsWeakPtr();
 
   // The cache may have been already checked. In that case, load the current
@@ -160,7 +162,8 @@ void AppPackUpdater::Observe(int type,
       break;
 
     case chrome::NOTIFICATION_EXTENSION_INSTALL_ERROR:
-      OnCrxInstallFailed(content::Source<CrxInstaller>(source).ptr());
+      OnCrxInstallFailed(
+          content::Source<extensions::CrxInstaller>(source).ptr());
       break;
 
     default:
@@ -379,8 +382,9 @@ void AppPackUpdater::UpdateExtensionLoader() {
     return;
   }
 
-  // Build a DictionaryValue with the format that ExternalExtensionProviderImpl
-  // expects, containing info about the locally cached extensions.
+  // Build a DictionaryValue with the format that
+  // extensions::ExternalProviderImpl expects, containing info about the locally
+  // cached extensions.
 
   scoped_ptr<base::DictionaryValue> prefs(new base::DictionaryValue());
   for (CacheEntryMap::iterator it = cached_extensions_.begin();
@@ -390,9 +394,9 @@ void AppPackUpdater::UpdateExtensionLoader() {
       continue;
 
     base::DictionaryValue* dict = new base::DictionaryValue();
-    dict->SetString(ExternalExtensionProviderImpl::kExternalCrx,
+    dict->SetString(extensions::ExternalProviderImpl::kExternalCrx,
                     it->second.path);
-    dict->SetString(ExternalExtensionProviderImpl::kExternalVersion,
+    dict->SetString(extensions::ExternalProviderImpl::kExternalVersion,
                     it->second.cached_version);
     prefs->Set(it->first, dict);
 
@@ -543,7 +547,7 @@ void AppPackUpdater::OnCacheEntryInstalled(const std::string& id,
   }
 }
 
-void AppPackUpdater::OnCrxInstallFailed(CrxInstaller* installer) {
+void AppPackUpdater::OnCrxInstallFailed(extensions::CrxInstaller* installer) {
   FilePath path = installer->source_file();
 
   // Search for |path| in |cached_extensions_|, and delete it if found.

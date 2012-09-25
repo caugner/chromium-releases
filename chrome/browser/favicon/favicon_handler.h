@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_FAVICON_FAVICON_HANDLER_H_
 #define CHROME_BROWSER_FAVICON_FAVICON_HANDLER_H_
-#pragma once
 
 #include <map>
 
@@ -116,7 +115,8 @@ class FaviconHandler {
   void OnDidDownloadFavicon(int id,
                             const GURL& image_url,
                             bool errored,
-                            const gfx::Image& image);
+                            const gfx::Image& image,
+                            float score);
 
   // For testing.
   const std::deque<FaviconURL>& image_urls() const { return image_urls_; }
@@ -187,13 +187,13 @@ class FaviconHandler {
     FaviconCandidate(const GURL& url,
                      const GURL& image_url,
                      const gfx::Image& image,
-                     int bitmap_size,
+                     float score,
                      history::IconType icon_type);
 
     GURL url;
     GURL image_url;
     gfx::Image image;
-    int bitmap_size;
+    float score;
     history::IconType icon_type;
   };
 
@@ -224,6 +224,7 @@ class FaviconHandler {
   bool UpdateFaviconCandidate(const GURL& url,
                               const GURL& image_url,
                               const gfx::Image& image,
+                              float score,
                               history::IconType icon_type);
 
   // Sets the image data for the favicon.

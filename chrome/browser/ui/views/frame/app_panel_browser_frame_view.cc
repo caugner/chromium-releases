@@ -8,12 +8,12 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/ui/views/frame/browser_frame.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
+#include "chrome/browser/ui/views/tab_icon_view.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
-#include "grit/theme_resources_standard.h"
+#include "grit/theme_resources.h"
 #include "grit/ui_resources.h"
-#include "grit/ui_resources_standard.h"
 #include "ui/base/hit_test.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -101,10 +101,10 @@ gfx::Rect AppPanelBrowserFrameView::GetBoundsForTabStrip(
   return gfx::Rect();
 }
 
-int AppPanelBrowserFrameView::GetHorizontalTabStripVerticalOffset(
-    bool restored) const {
+BrowserNonClientFrameView::TabStripInsets
+AppPanelBrowserFrameView::GetTabStripInsets(bool restored) const {
   // App panels are not themed and don't need this.
-  return 0;
+  return TabStripInsets();
 }
 
 void AppPanelBrowserFrameView::UpdateThrobber(bool running) {

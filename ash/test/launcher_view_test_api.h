@@ -4,9 +4,12 @@
 
 #ifndef ASH_TEST_LAUNCHER_VIEW_TEST_API_H_
 #define ASH_TEST_LAUNCHER_VIEW_TEST_API_H_
-#pragma once
 
 #include "base/basictypes.h"
+
+namespace gfx {
+class Rect;
+}
 
 namespace ash {
 
@@ -31,6 +34,10 @@ class LauncherViewTestAPI {
 
   // Last visible button index.
   int GetLastVisibleIndex();
+
+  // Gets current/ideal bounds for button at |index|.
+  const gfx::Rect& GetBoundsByIndex(int index);
+  const gfx::Rect& GetIdealBoundsByIndex(int index);
 
   // Returns true if overflow button is visible.
   bool IsOverflowButtonVisible();

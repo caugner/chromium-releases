@@ -4,13 +4,13 @@
 
 #include "chrome/browser/ui/views/collected_cookies_views.h"
 
-#include "chrome/browser/browsing_data_appcache_helper.h"
-#include "chrome/browser/browsing_data_cookie_helper.h"
-#include "chrome/browser/browsing_data_database_helper.h"
-#include "chrome/browser/browsing_data_file_system_helper.h"
-#include "chrome/browser/browsing_data_indexed_db_helper.h"
-#include "chrome/browser/browsing_data_local_storage_helper.h"
-#include "chrome/browser/browsing_data_server_bound_cert_helper.h"
+#include "chrome/browser/browsing_data/browsing_data_appcache_helper.h"
+#include "chrome/browser/browsing_data/browsing_data_cookie_helper.h"
+#include "chrome/browser/browsing_data/browsing_data_database_helper.h"
+#include "chrome/browser/browsing_data/browsing_data_file_system_helper.h"
+#include "chrome/browser/browsing_data/browsing_data_indexed_db_helper.h"
+#include "chrome/browser/browsing_data/browsing_data_local_storage_helper.h"
+#include "chrome/browser/browsing_data/browsing_data_server_bound_cert_helper.h"
 #include "chrome/browser/content_settings/cookie_settings.h"
 #include "chrome/browser/content_settings/local_shared_objects_container.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
@@ -30,7 +30,8 @@
 #include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
-#include "grit/theme_resources_standard.h"
+#include "grit/theme_resources.h"
+#include "net/cookies/canonical_cookie.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/color_utils.h"
@@ -44,18 +45,24 @@
 #include "ui/views/layout/layout_constants.h"
 #include "ui/views/widget/widget.h"
 
-namespace browser {
+// TODO(markusheintz): This should be removed once the native Windows tabbed
+// pane is not used anymore (http://crbug.com/138059)
+#if defined(OS_WIN) && !defined(USE_AURA)
+#include "ui/views/controls/tabbed_pane/native_tabbed_pane_win.h"
+#endif
+
+namespace chrome {
 
 // Declared in browser_dialogs.h so others don't have to depend on our header.
-void ShowCollectedCookiesDialog(gfx::NativeWindow parent_window,
-                                TabContents* tab_contents) {
+void ShowCollectedCookiesDialog(TabContents* tab_contents) {
   // Deletes itself on close.
   new CollectedCookiesViews(tab_contents);
 }
 
-}  // namespace browser
+}  // namespace chrome
 
 namespace {
+
 // Spacing between the infobar frame and its contents.
 const int kInfobarVerticalPadding = 3;
 const int kInfobarHorizontalPadding = 8;
@@ -296,6 +303,10 @@ void CollectedCookiesViews::Init() {
 
   layout->StartRow(0, single_column_layout_id);
   views::TabbedPane* tabbed_pane = new views::TabbedPane();
+#if defined(OS_WIN) && !defined(USE_AURA)
+  // "set_use_native_win_control" must be called before the first tab is added.
+  tabbed_pane->set_use_native_win_control(true);
+#endif
   layout->AddView(tabbed_pane);
   // NOTE: the panes need to be added after the tabbed_pane has been added to
   // its parent.
@@ -330,19 +341,9 @@ views::View* CollectedCookiesViews::CreateAllowedPane() {
   allowed_label_ = new views::Label(l10n_util::GetStringUTF16(
       IDS_COLLECTED_COOKIES_ALLOWED_COOKIES_LABEL));
 
-  const LocalSharedObjectsContainer& allowed_lsos =
+  const LocalSharedObjectsContainer& allowed_data =
       content_settings->allowed_local_shared_objects();
-  allowed_cookies_tree_model_.reset(
-      new CookiesTreeModel(allowed_lsos.cookies()->Clone(),
-                           allowed_lsos.databases()->Clone(),
-                           allowed_lsos.local_storages()->Clone(),
-                           allowed_lsos.session_storages()->Clone(),
-                           allowed_lsos.appcaches()->Clone(),
-                           allowed_lsos.indexed_dbs()->Clone(),
-                           allowed_lsos.file_systems()->Clone(),
-                           NULL,
-                           allowed_lsos.server_bound_certs()->Clone(),
-                           true));
+  allowed_cookies_tree_model_ = allowed_data.CreateCookiesTreeModel();
   allowed_cookies_tree_ = new views::TreeView();
   allowed_cookies_tree_->SetModel(allowed_cookies_tree_model_.get());
   allowed_cookies_tree_->SetRootShown(false);
@@ -398,19 +399,9 @@ views::View* CollectedCookiesViews::CreateBlockedPane() {
               IDS_COLLECTED_COOKIES_BLOCKED_COOKIES_LABEL));
   blocked_label_->SetMultiLine(true);
   blocked_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
-  const LocalSharedObjectsContainer& blocked_lsos =
+  const LocalSharedObjectsContainer& blocked_data =
       content_settings->blocked_local_shared_objects();
-  blocked_cookies_tree_model_.reset(
-      new CookiesTreeModel(blocked_lsos.cookies()->Clone(),
-                           blocked_lsos.databases()->Clone(),
-                           blocked_lsos.local_storages()->Clone(),
-                           blocked_lsos.session_storages()->Clone(),
-                           blocked_lsos.appcaches()->Clone(),
-                           blocked_lsos.indexed_dbs()->Clone(),
-                           blocked_lsos.file_systems()->Clone(),
-                           NULL,
-                           blocked_lsos.server_bound_certs()->Clone(),
-                           true));
+  blocked_cookies_tree_model_ = blocked_data.CreateCookiesTreeModel();
   blocked_cookies_tree_ = new views::TreeView();
   blocked_cookies_tree_->SetModel(blocked_cookies_tree_model_.get());
   blocked_cookies_tree_->SetRootShown(false);
@@ -468,8 +459,8 @@ void CollectedCookiesViews::EnableControls() {
   if (node) {
     CookieTreeNode* cookie_node = static_cast<CookieTreeNode*>(node);
     if (cookie_node->GetDetailedInfo().node_type ==
-        CookieTreeNode::DetailedInfo::TYPE_ORIGIN) {
-      enable_allowed_buttons = static_cast<CookieTreeOriginNode*>(
+        CookieTreeNode::DetailedInfo::TYPE_HOST) {
+      enable_allowed_buttons = static_cast<CookieTreeHostNode*>(
           cookie_node)->CanCreateContentException();
     }
   }
@@ -480,8 +471,8 @@ void CollectedCookiesViews::EnableControls() {
   if (node) {
     CookieTreeNode* cookie_node = static_cast<CookieTreeNode*>(node);
     if (cookie_node->GetDetailedInfo().node_type ==
-        CookieTreeNode::DetailedInfo::TYPE_ORIGIN) {
-      enable_blocked_buttons = static_cast<CookieTreeOriginNode*>(
+        CookieTreeNode::DetailedInfo::TYPE_HOST) {
+      enable_blocked_buttons = static_cast<CookieTreeHostNode*>(
           cookie_node)->CanCreateContentException();
     }
   }
@@ -512,12 +503,12 @@ void CollectedCookiesViews::ShowCookieInfo() {
 
 void CollectedCookiesViews::AddContentException(views::TreeView* tree_view,
                                                 ContentSetting setting) {
-  CookieTreeOriginNode* origin_node =
-      static_cast<CookieTreeOriginNode*>(tree_view->GetSelectedNode());
+  CookieTreeHostNode* host_node =
+      static_cast<CookieTreeHostNode*>(tree_view->GetSelectedNode());
   Profile* profile = tab_contents_->profile();
-  origin_node->CreateContentException(
+  host_node->CreateContentException(
       CookieSettings::Factory::GetForProfile(profile), setting);
-  infobar_->UpdateVisibility(true, setting, origin_node->GetTitle());
+  infobar_->UpdateVisibility(true, setting, host_node->GetTitle());
   status_changed_ = true;
 }
 

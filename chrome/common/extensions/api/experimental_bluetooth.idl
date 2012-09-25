@@ -5,7 +5,7 @@
 // Bluetooth API.
 // TODO(bryeung): mark this API as ChromeOS only (see crbug.com/119398).
 
-[nodoc] namespace experimental.bluetooth {
+namespace experimental.bluetooth {
   dictionary Device {
     // The address of the device, in the format 'XX:XX:XX:XX:XX:XX'.
     DOMString address;
@@ -142,6 +142,7 @@
     static void getAddress(AddressCallback callback);
 
     // Get a list of bluetooth devices.
+    // NOTE: This API is likely to change.  Please see crbug.com/134545
     // |options|  : Controls which devices are returned.
     // |callback| : Called with an array of Device objects.
     static void getDevices(GetDevicesOptions options,
@@ -212,8 +213,9 @@
     // |powered| : True if bluetooth is powered, false otherwise.
     static void onPowerChanged(boolean has_power);
 
-    // Used to return discovered devices to the extension. Users should not
-    // add listeners to this event directly.
-    static void onDeviceDiscovered_(Device device);
+    // Fired when the discovering state of the system changes.
+    // |discovering| : True if the system is currently in discovery mode, false
+    //                 otherwise.
+    static void onDiscoveringChanged(boolean discovering);
   };
 };

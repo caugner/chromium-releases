@@ -4,23 +4,21 @@
 
 #ifndef SYNC_INTERNAL_API_PUBLIC_SESSIONS_SYNC_SESSION_SNAPSHOT_H_
 #define SYNC_INTERNAL_API_PUBLIC_SESSIONS_SYNC_SESSION_SNAPSHOT_H_
-#pragma once
 
 #include <string>
 
 #include "base/basictypes.h"
 #include "base/time.h"
-#include "sync/internal_api/public/sessions/error_counters.h"
+#include "sync/internal_api/public/base/model_type.h"
+#include "sync/internal_api/public/base/model_type_payload_map.h"
+#include "sync/internal_api/public/sessions/model_neutral_state.h"
 #include "sync/internal_api/public/sessions/sync_source_info.h"
-#include "sync/internal_api/public/sessions/syncer_status.h"
-#include "sync/internal_api/public/syncable/model_type.h"
-#include "sync/internal_api/public/syncable/model_type_payload_map.h"
 
 namespace base {
 class DictionaryValue;
 }
 
-namespace browser_sync {
+namespace syncer {
 namespace sessions {
 
 // An immutable snapshot of state from a SyncSession.  Convenient to use as
@@ -32,12 +30,10 @@ class SyncSessionSnapshot {
  public:
   SyncSessionSnapshot();
   SyncSessionSnapshot(
-      const SyncerStatus& syncer_status,
-      const ErrorCounters& errors,
-      int64 num_server_changes_remaining,
+      const ModelNeutralState& model_neutral_state,
       bool is_share_usable,
-      syncable::ModelTypeSet initial_sync_ended,
-      const syncable::ModelTypePayloadMap& download_progress_markers,
+      ModelTypeSet initial_sync_ended,
+      const ModelTypePayloadMap& download_progress_markers,
       bool more_to_sync,
       bool is_silenced,
       int num_encryption_conflicts,
@@ -56,12 +52,13 @@ class SyncSessionSnapshot {
 
   std::string ToString() const;
 
-  SyncerStatus syncer_status() const;
-  ErrorCounters errors() const;
+  ModelNeutralState model_neutral_state() const {
+    return model_neutral_state_;
+  }
   int64 num_server_changes_remaining() const;
   bool is_share_usable() const;
-  syncable::ModelTypeSet initial_sync_ended() const;
-  syncable::ModelTypePayloadMap download_progress_markers() const;
+  ModelTypeSet initial_sync_ended() const;
+  ModelTypePayloadMap download_progress_markers() const;
   bool has_more_to_sync() const;
   bool is_silenced() const;
   int num_encryption_conflicts() const;
@@ -74,13 +71,14 @@ class SyncSessionSnapshot {
   base::Time sync_start_time() const;
   bool retry_scheduled() const;
 
+  // Set iff this snapshot was not built using the default constructor.
+  bool is_initialized() const;
+
  private:
-  SyncerStatus syncer_status_;
-  ErrorCounters errors_;
-  int64 num_server_changes_remaining_;
+  ModelNeutralState model_neutral_state_;
   bool is_share_usable_;
-  syncable::ModelTypeSet initial_sync_ended_;
-  syncable::ModelTypePayloadMap download_progress_markers_;
+  ModelTypeSet initial_sync_ended_;
+  ModelTypePayloadMap download_progress_markers_;
   bool has_more_to_sync_;
   bool is_silenced_;
   int num_encryption_conflicts_;
@@ -92,9 +90,11 @@ class SyncSessionSnapshot {
   size_t num_entries_;
   base::Time sync_start_time_;
   bool retry_scheduled_;
+
+  bool is_initialized_;
 };
 
 }  // namespace sessions
-}  // namespace browser_sync
+}  // namespace syncer
 
 #endif  // SYNC_INTERNAL_API_PUBLIC_SESSIONS_SYNC_SESSION_SNAPSHOT_H_

@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_WEBSTORE_INSTALL_HELPER_H_
 #define CHROME_BROWSER_EXTENSIONS_WEBSTORE_INSTALL_HELPER_H_
-#pragma once
 
 #include <vector>
 
@@ -30,6 +29,8 @@ namespace net {
 class URLFetcher;
 class URLRequestContextGetter;
 }
+
+namespace extensions {
 
 // This is a class to help dealing with webstore-provided data. It manages
 // sending work to the utility process for parsing manifests and
@@ -59,6 +60,9 @@ class WebstoreInstallHelper : public content::UtilityProcessHostClient,
         const std::string& id,
         InstallHelperResultCode result_code,
         const std::string& error_message) = 0;
+
+   protected:
+    virtual ~Delegate() {}
   };
 
   // Only one of |icon_data| (based64-encoded icon data) or |icon_url| can be
@@ -129,5 +133,7 @@ class WebstoreInstallHelper : public content::UtilityProcessHostClient,
   // manifest.
   Delegate::InstallHelperResultCode parse_error_;
 };
+
+}  // namespace extensions
 
 #endif  // CHROME_BROWSER_EXTENSIONS_WEBSTORE_INSTALL_HELPER_H_

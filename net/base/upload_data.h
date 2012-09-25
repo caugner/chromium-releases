@@ -4,7 +4,6 @@
 
 #ifndef NET_BASE_UPLOAD_DATA_H_
 #define NET_BASE_UPLOAD_DATA_H_
-#pragma once
 
 #include <vector>
 
@@ -224,7 +223,11 @@ class NET_EXPORT UploadData
   // reused for a new UploadDataStream.
   void ResetOffset();
 
-  std::vector<Element>* elements() {
+  const std::vector<Element>* elements() const {
+    return &elements_;
+  }
+
+  std::vector<Element>* elements_mutable() {
     return &elements_;
   }
 

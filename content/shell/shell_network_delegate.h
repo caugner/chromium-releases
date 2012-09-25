@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_SHELL_SHELL_NETWORK_DELEGATE_H_
 #define CONTENT_SHELL_SHELL_NETWORK_DELEGATE_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -59,6 +58,8 @@ class ShellNetworkDelegate : public net::NetworkDelegate {
   virtual int OnBeforeSocketStreamConnect(
       net::SocketStream* stream,
       const net::CompletionCallback& callback) OVERRIDE;
+  virtual void OnCacheWaitStateChange(const net::URLRequest& request,
+                                      CacheWaitState state) OVERRIDE;
 
   DISALLOW_COPY_AND_ASSIGN(ShellNetworkDelegate);
 };

@@ -9,8 +9,9 @@
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
 #include "content/browser/android/content_util.h"
-#include "content/browser/android/content_view_impl.h"
+#include "content/browser/android/content_view_core_impl.h"
 #include "content/browser/android/download_controller.h"
+#include "content/browser/android/ime_utils.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/common/find_match_rect_android.h"
 #include "content/public/browser/render_widget_host_view.h"
@@ -22,7 +23,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/page_transition_types.h"
 #include "content/public/common/referrer.h"
-#include "jni/content_view_client_jni.h"
+#include "jni/ContentViewClient_jni.h"
 #include "net/http/http_request_headers.h"
 #include "ui/gfx/rect.h"
 #include "webkit/glue/window_open_disposition.h"
@@ -41,7 +42,8 @@ namespace content {
 ContentViewClient::ContentViewClient(JNIEnv* env, jobject obj)
     : weak_java_client_(env, obj),
       find_helper_(NULL),
-      javascript_dialog_creator_(NULL) {
+      javascript_dialog_creator_(NULL),
+      load_progress_(0) {
 }
 
 ContentViewClient::~ContentViewClient() {
@@ -94,16 +96,6 @@ void ContentViewClient::OnReceivedError(int error_code,
       env, weak_java_client_.get(env).obj(),
       ToContentViewClientError(error_code),
       jstring_error_description.obj(), jstring_url.obj());
-}
-
-void ContentViewClient::OnReceivedHttpAuthRequest(
-    jobject auth_handler,
-    const string16& host,
-    const string16& realm) {
-  /* TODO(jrg): upstream this once ContentHttpAuthHandler.java is
-     upstreamed, and onReceivedHttpAuthRequest() is upstreamed in
-     ContentViewClient.java */
-  NOTREACHED();
 }
 
 void ContentViewClient::OnDidCommitMainFrame(const GURL& url,
@@ -309,11 +301,16 @@ void ContentViewClient::LoadingStateChanged(WebContents* source) {
 }
 
 void ContentViewClient::LoadProgressChanged(double progress) {
+  load_progress_ = progress;
   JNIEnv* env = AttachCurrentThread();
   Java_ContentViewClient_onLoadProgressChanged(
       env,
       weak_java_client_.get(env).obj(),
       progress);
+}
+
+double ContentViewClient::GetLoadProgress() const {
+  return load_progress_;
 }
 
 void ContentViewClient::CloseContents(WebContents* source) {
@@ -437,14 +434,14 @@ bool ContentViewClient::ShouldOverrideLoading(const GURL& url) {
 
 void ContentViewClient::HandleKeyboardEvent(
     const NativeWebKeyboardEvent& event) {
-  /* TODO(jrg): to upstream this implementation, we need these files as well:
-     browser/android/ime_helper.cc
-     browser/android/ime_helper.h
-     browser/renderer_host/native_web_keyboard_event_android.h
-     browser/renderer_host/native_web_keyboard_event_android.cc
-     Also the @CalledByNative handleKeyboardEvent() in ContentViewClient.java.
-  */
-  NOTREACHED();
+  jobject key_event = KeyEventFromNative(event);
+  if (key_event) {
+    JNIEnv* env = AttachCurrentThread();
+    Java_ContentViewClient_handleKeyboardEvent(
+        env,
+        weak_java_client_.get(env).obj(),
+        key_event);
+  }
 }
 
 bool ContentViewClient::TakeFocus(bool reverse) {
@@ -546,7 +543,6 @@ ContentViewClientError ContentViewClient::ToContentViewClientError(
     case net::ERR_CERT_REVOKED:
     case net::ERR_CERT_INVALID:
     case net::ERR_CERT_WEAK_SIGNATURE_ALGORITHM:
-    case net::ERR_CERT_NOT_IN_DNS:
     case net::ERR_CERT_NON_UNIQUE_NAME:
       return CONTENT_VIEW_CLIENT_ERROR_OK;
 

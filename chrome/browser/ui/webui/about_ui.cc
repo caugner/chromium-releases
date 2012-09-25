@@ -18,7 +18,7 @@
 #include "base/json/json_writer.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/memory/singleton.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/statistics_recorder.h"
 #include "base/metrics/stats_table.h"
 #include "base/path_service.h"
 #include "base/string_number_conversions.h"
@@ -33,7 +33,6 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/memory_details.h"
-#include "chrome/browser/metrics/histogram_synchronizer.h"
 #include "chrome/browser/net/predictor.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/plugin_prefs.h"
@@ -56,7 +55,6 @@
 #include "content/public/browser/web_ui.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/process_type.h"
-#include "crypto/nss_util.h"
 #include "googleurl/src/gurl.h"
 #include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
@@ -72,6 +70,10 @@
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/plugins/webplugininfo.h"
 
+#if defined(ENABLE_THEMES)
+#include "chrome/browser/ui/webui/theme_source.h"
+#endif
+
 #if defined(OS_LINUX) || defined(OS_OPENBSD)
 #include "content/public/browser/zygote_host_linux.h"
 #include "content/public/common/sandbox_linux.h"
@@ -83,14 +85,11 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/cros/cros_library.h"
-#include "chrome/browser/chromeos/cros/cryptohome_library.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/chromeos/customization_document.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/oom_priority_manager.h"
 #include "chrome/browser/chromeos/version_loader.h"
-#include "chromeos/dbus/cryptohome_client.h"
-#include "chromeos/dbus/dbus_thread_manager.h"
 #endif
 
 #if defined(USE_ASH)
@@ -163,7 +162,7 @@ class ChromeOSAboutVersionHandler {
 
   // Callback from chromeos::VersionLoader giving the version.
   void OnVersion(chromeos::VersionLoader::Handle handle,
-                 std::string version);
+                 const std::string& version);
 
  private:
   // Where the results are fed to.
@@ -193,6 +192,8 @@ class ChromeOSTermsHandler
   }
 
  private:
+  friend class base::RefCountedThreadSafe<ChromeOSTermsHandler>;
+
   ChromeOSTermsHandler(AboutUIHTMLSource* source,
                        const std::string& path,
                        int request_id)
@@ -201,6 +202,8 @@ class ChromeOSTermsHandler
       request_id_(request_id),
       locale_(chromeos::WizardController::GetInitialLocale()) {
   }
+
+  ~ChromeOSTermsHandler() {}
 
   void StartOnUIThread() {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -245,10 +248,8 @@ class ChromeOSTermsHandler
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
     // If we fail to load Chrome OS EULA from disk, load it from resources.
     // Do nothing if OEM EULA load failed.
-    if (contents_.empty() && path_ != chrome::kOemEulaURLPath) {
-      contents_ = ResourceBundle::GetSharedInstance().GetRawDataResource(
-          IDR_TERMS_HTML, ui::SCALE_FACTOR_NONE).as_string();
-    }
+    if (contents_.empty() && path_ != chrome::kOemEulaURLPath)
+      contents_ = l10n_util::GetStringUTF8(IDS_TERMS_HTML);
     source_->FinishDataRequest(contents_, request_id_);
   }
 
@@ -505,71 +506,11 @@ std::string AboutNetwork(const std::string& query) {
   return GetNetworkHtmlInfo(refresh);
 }
 
-std::string AddBoolRow(const std::string& name, bool value) {
-  std::string row;
-  row.append(WrapWithTD(name));
-  row.append(WrapWithTD(value ? "true" : "false"));
-  return WrapWithTR(row);
-}
-
 std::string AddStringRow(const std::string& name, const std::string& value) {
   std::string row;
   row.append(WrapWithTD(name));
   row.append(WrapWithTD(value));
   return WrapWithTR(row);
-}
-
-void FinishCryptohomeDataRequestInternal(
-    scoped_refptr<AboutUIHTMLSource> source,
-    int refresh,
-    int request_id,
-    chromeos::DBusMethodCallStatus call_status,
-    bool is_tpm_token_ready) {
-  if (call_status != chromeos::DBUS_METHOD_CALL_SUCCESS)
-    is_tpm_token_ready = false;
-
-  chromeos::CryptohomeLibrary* cryptohome =
-      chromeos::CrosLibrary::Get()->GetCryptohomeLibrary();
-  std::string output;
-  AppendHeader(&output, refresh, "About Cryptohome");
-  AppendBody(&output);
-  AppendRefresh(&output, refresh, "cryptohome");
-
-  output.append("<h3>CryptohomeLibrary:</h3>");
-  output.append("<table>");
-  output.append(AddBoolRow("IsMounted", cryptohome->IsMounted()));
-  output.append(AddBoolRow("TpmIsReady", cryptohome->TpmIsReady()));
-  output.append(AddBoolRow("TpmIsEnabled", cryptohome->TpmIsEnabled()));
-  output.append(AddBoolRow("TpmIsOwned", cryptohome->TpmIsOwned()));
-  output.append(AddBoolRow("TpmIsBeingOwned", cryptohome->TpmIsBeingOwned()));
-  output.append(AddBoolRow("Pkcs11IsTpmTokenReady", is_tpm_token_ready));
-  output.append("</table>");
-
-  output.append("<h3>crypto:</h3>");
-  output.append("<table>");
-  output.append(AddBoolRow("IsTPMTokenReady", crypto::IsTPMTokenReady()));
-  std::string token_name, user_pin;
-  if (crypto::IsTPMTokenReady())
-    crypto::GetTPMTokenInfo(&token_name, &user_pin);
-  output.append(AddStringRow("token_name", token_name));
-  output.append(AddStringRow("user_pin", std::string(user_pin.length(), '*')));
-  output.append("</table>");
-  AppendFooter(&output);
-
-  source->FinishDataRequest(output, request_id);
-}
-
-void FinishCryptohomeDataRequest(scoped_refptr<AboutUIHTMLSource> source,
-                                 const std::string& query,
-                                 int request_id) {
-  int refresh;
-  base::StringToInt(query, &refresh);
-
-  chromeos::DBusThreadManager::Get()->GetCryptohomeClient()->
-      Pkcs11IsTpmTokenReady(base::Bind(&FinishCryptohomeDataRequestInternal,
-                                       source,
-                                       refresh,
-                                       request_id));
 }
 
 std::string AboutDiscardsRun() {
@@ -797,34 +738,6 @@ class AboutDnsHandler : public base::RefCountedThreadSafe<AboutDnsHandler> {
 
   DISALLOW_COPY_AND_ASSIGN(AboutDnsHandler);
 };
-
-std::string AboutHistograms(const std::string& query) {
-  TimeDelta wait_time = TimeDelta::FromMilliseconds(10000);
-
-#ifndef NDEBUG
-  base::StatisticsRecorder::CollectHistogramStats("Browser");
-#endif
-
-  HistogramSynchronizer* current_synchronizer =
-      HistogramSynchronizer::CurrentSynchronizer();
-  DCHECK(current_synchronizer != NULL);
-  current_synchronizer->FetchRendererHistogramsSynchronously(wait_time);
-
-  std::string unescaped_query;
-  std::string unescaped_title("About Histograms");
-  if (!query.empty()) {
-    unescaped_query = net::UnescapeURLComponent(query,
-                                                net::UnescapeRule::NORMAL);
-    unescaped_title += " - " + unescaped_query;
-  }
-
-  std::string data;
-  AppendHeader(&data, 0, unescaped_title);
-  AppendBody(&data);
-  base::StatisticsRecorder::WriteHTMLGraph(unescaped_query, &data);
-  AppendFooter(&data);
-  return data;
-}
 
 void FinishMemoryDataRequest(const std::string& path,
                              AboutUIHTMLSource* source,
@@ -1062,14 +975,19 @@ std::string AboutSandbox() {
                   status & content::kSandboxLinuxPIDNS);
   AboutSandboxRow(&data, "&nbsp;&nbsp;", IDS_ABOUT_SANDBOX_NET_NAMESPACES,
                   status & content::kSandboxLinuxNetNS);
-  AboutSandboxRow(&data, "", IDS_ABOUT_SANDBOX_SECCOMP_SANDBOX,
-                  status & content::kSandboxLinuxSeccomp);
+  AboutSandboxRow(&data, "", IDS_ABOUT_SANDBOX_SECCOMP_LEGACY_SANDBOX,
+                  status & content::kSandboxLinuxSeccompLegacy);
+  AboutSandboxRow(&data, "", IDS_ABOUT_SANDBOX_SECCOMP_BPF_SANDBOX,
+                  status & content::kSandboxLinuxSeccompBpf);
 
   data.append("</table>");
 
+  // We do not consider the seccomp-bpf status here as the renderers
+  // policy is weak at the moment.
+  // TODO(jln): fix when whe have better renderer policies.
   bool good = ((status & content::kSandboxLinuxSUID) &&
                (status & content::kSandboxLinuxPIDNS)) ||
-              (status & content::kSandboxLinuxSeccomp);
+              (status & content::kSandboxLinuxSeccompLegacy);
   if (good) {
     data.append("<p style=\"color: green\">");
     data.append(l10n_util::GetStringUTF8(IDS_ABOUT_SANDBOX_OK));
@@ -1116,6 +1034,7 @@ std::string AboutVersionStrings(DictionaryValue* localized_strings,
   localized_strings->SetString("js_engine", "V8");
   localized_strings->SetString("js_version", v8::V8::GetVersion());
 
+#if !defined(OS_ANDROID)
   // Obtain the version of the first enabled Flash plugin.
   std::vector<webkit::WebPluginInfo> info_array;
   PluginService::GetInstance()->GetPluginInfoArray(
@@ -1133,6 +1052,7 @@ std::string AboutVersionStrings(DictionaryValue* localized_strings,
   }
   localized_strings->SetString("flash_plugin", "Flash");
   localized_strings->SetString("flash_version", flash_version);
+#endif
   localized_strings->SetString("company",
       l10n_util::GetStringUTF16(IDS_ABOUT_VERSION_COMPANY_NAME));
   localized_strings->SetString("copyright",
@@ -1330,6 +1250,10 @@ void AboutMemoryHandler::OnDetailsAvailable() {
 
   root.SetBoolean("show_other_browsers",
       browser_defaults::kShowOtherBrowsersInAboutMemory);
+  root.SetString("summary_desc",
+                 l10n_util::GetStringUTF16(IDS_MEMORY_USAGE_SUMMARY_DESC));
+
+  ChromeWebUIDataSource::SetFontAndTextDirection(&root);
 
   std::string data;
   jstemplate_builder::AppendJsonJS(&root, &data);
@@ -1352,7 +1276,7 @@ ChromeOSAboutVersionHandler::ChromeOSAboutVersionHandler(
 
 void ChromeOSAboutVersionHandler::OnVersion(
     chromeos::VersionLoader::Handle handle,
-    std::string version) {
+    const std::string& version) {
   DictionaryValue localized_strings;
   localized_strings.SetString("os_version", version);
   source_->FinishDataRequest(AboutVersionStrings(
@@ -1391,9 +1315,6 @@ void AboutUIHTMLSource::StartDataRequest(const std::string& path,
     response = ResourceBundle::GetSharedInstance().GetRawDataResource(
         idr, ui::SCALE_FACTOR_NONE).as_string();
 #if defined(OS_CHROMEOS)
-  } else if (host == chrome::kChromeUICryptohomeHost) {
-    FinishCryptohomeDataRequest(this, path, request_id);
-    return;
   } else if (host == chrome::kChromeUIDiscardsHost) {
     response = AboutDiscards(path);
 #endif
@@ -1404,8 +1325,6 @@ void AboutUIHTMLSource::StartDataRequest(const std::string& path,
   } else if (host == chrome::kChromeUIDNSHost) {
     AboutDnsHandler::Start(this, request_id);
     return;
-  } else if (host == chrome::kChromeUIHistogramsHost) {
-    response = AboutHistograms(path);
 #if defined(OS_LINUX) || defined(OS_OPENBSD)
   } else if (host == chrome::kChromeUILinuxProxyConfigHost) {
     response = AboutLinuxProxyConfig();
@@ -1433,8 +1352,7 @@ void AboutUIHTMLSource::StartDataRequest(const std::string& path,
     ChromeOSTermsHandler::Start(this, path, request_id);
     return;
 #else
-    response = ResourceBundle::GetSharedInstance().GetRawDataResource(
-        IDR_TERMS_HTML, ui::SCALE_FACTOR_NONE).as_string();
+    response = l10n_util::GetStringUTF8(IDS_TERMS_HTML);
 #endif
   } else if (host == chrome::kChromeUIVersionHost) {
     if (path == kStringsJsPath) {
@@ -1472,6 +1390,13 @@ std::string AboutUIHTMLSource::GetMimeType(const std::string& path) const {
 AboutUI::AboutUI(content::WebUI* web_ui, const std::string& name)
     : WebUIController(web_ui) {
   Profile* profile = Profile::FromWebUI(web_ui);
+
+#if defined(ENABLE_THEMES)
+  // Set up the chrome://theme/ source.
+  ThemeSource* theme = new ThemeSource(profile);
+  ChromeURLDataManager::AddDataSource(profile, theme);
+#endif
+
   ChromeURLDataManager::DataSource* source =
       new AboutUIHTMLSource(name, profile);
   if (source) {

@@ -68,7 +68,7 @@ class FFmpegAudioDecoderTest : public testing::Test {
 
   void Initialize() {
     EXPECT_CALL(*demuxer_, audio_decoder_config())
-        .WillOnce(ReturnRef(config_));
+        .WillRepeatedly(ReturnRef(config_));
 
     decoder_->Initialize(demuxer_,
                          NewExpectedStatusCB(PIPELINE_OK),
@@ -82,8 +82,10 @@ class FFmpegAudioDecoderTest : public testing::Test {
     CHECK(!encoded_audio_.empty()) << "ReadPacket() called too many times";
 
     scoped_refptr<DecoderBuffer> buffer(encoded_audio_.front());
+    DemuxerStream::Status status =
+        buffer ? DemuxerStream::kOk : DemuxerStream::kAborted;
     encoded_audio_.pop_front();
-    read_cb.Run(buffer);
+    read_cb.Run(status, buffer);
   }
 
   void Read() {
@@ -92,7 +94,8 @@ class FFmpegAudioDecoderTest : public testing::Test {
     message_loop_.RunAllPending();
   }
 
-  void DecodeFinished(scoped_refptr<Buffer> buffer) {
+  void DecodeFinished(AudioDecoder::Status status,
+                      const scoped_refptr<Buffer>& buffer) {
     decoded_audio_.push_back(buffer);
   }
 
@@ -148,13 +151,10 @@ TEST_F(FFmpegAudioDecoderTest, ProduceAudioSamples) {
   Read();
   Read();
 
-  // We should have three decoded audio buffers.
-  //
-  // TODO(scherkus): timestamps are off by one packet due to decoder delay.
   ASSERT_EQ(3u, decoded_audio_.size());
   ExpectDecodedAudio(0, 0, 2902);
-  ExpectDecodedAudio(1, 0, 13061);
-  ExpectDecodedAudio(2, 2902, 23219);
+  ExpectDecodedAudio(1, 2902, 13061);
+  ExpectDecodedAudio(2, 15963, 23220);
 
   // Call one more time to trigger EOS.
   Read();

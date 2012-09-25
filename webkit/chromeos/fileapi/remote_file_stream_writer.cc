@@ -10,23 +10,14 @@
 #include "webkit/chromeos/fileapi/remote_file_system_proxy.h"
 #include "webkit/fileapi/local_file_stream_writer.h"
 
-namespace {
-
-int PlatformFileErrorToNetError(base::PlatformFileError error) {
-  // TODO(kinuko): Move this static method to more convenient place.
-  return webkit_blob::LocalFileStreamReader::PlatformFileErrorToNetError(error);
-}
-
-}  // namespace
-
 namespace fileapi {
 
 RemoteFileStreamWriter::RemoteFileStreamWriter(
     const scoped_refptr<RemoteFileSystemProxyInterface>& remote_filesystem,
-    const GURL& path,
+    const FileSystemURL& url,
     int64 offset)
     : remote_filesystem_(remote_filesystem),
-      path_(path),
+      url_(url),
       initial_offset_(offset),
       has_pending_create_snapshot_(false),
       weak_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
@@ -48,7 +39,7 @@ int RemoteFileStreamWriter::Write(net::IOBuffer* buf,
     // triggered by a refcounted |file_ref_| passed to OnFileOpened, from the
     // destructor of RemoteFileStreamWriter.
     remote_filesystem_->CreateWritableSnapshotFile(
-        path_,
+        url_,
         base::Bind(&RemoteFileStreamWriter::OnFileOpened,
                    weak_factory_.GetWeakPtr(),
                    make_scoped_refptr(buf),
@@ -73,7 +64,7 @@ void RemoteFileStreamWriter::OnFileOpened(
   }
 
   if (open_result != base::PLATFORM_FILE_OK) {
-    callback.Run(PlatformFileErrorToNetError(open_result));
+    callback.Run(net::PlatformFileErrorToNetError(open_result));
     return;
   }
 

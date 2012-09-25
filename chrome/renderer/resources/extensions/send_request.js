@@ -3,35 +3,32 @@
 // found in the LICENSE file.
 
 var chromeHidden = requireNative('chrome_hidden').GetChromeHidden();
+var lastError = require('lastError');
 var natives = requireNative('sendRequest');
 var validate = require('schemaUtils').validate;
 
 // Callback handling.
 var requests = [];
 chromeHidden.handleResponse = function(requestId, name,
-                                       success, response, error) {
+                                       success, responseList, error) {
   try {
     var request = requests[requestId];
     if (success) {
-      delete chrome.extension.lastError;
+      lastError.clear();
     } else {
       if (!error) {
         error = "Unknown error.";
       }
       console.error("Error during " + name + ": " + error);
-      chrome.extension.lastError = {
-        "message": error
-      };
+      lastError.set(error);
     }
 
     if (request.customCallback) {
-      request.customCallback(name, request, response);
+      var customCallbackArgs = [name, request].concat(responseList);
+      request.customCallback.apply(request, customCallbackArgs);
     }
 
     if (request.callback) {
-      // Callbacks currently only support one callback argument.
-      var callbackArgs = typeof(response) != "undefined" ? [response] : [];
-
       // Validate callback in debug only -- and only when the
       // caller has provided a callback. Implementations of api
       // calls my not return data if they observe the caller
@@ -42,25 +39,18 @@ chromeHidden.handleResponse = function(requestId, name,
             throw new Error("No callback schemas defined");
           }
 
-          if (request.callbackSchema.parameters.length > 1) {
-            throw new Error("Callbacks may only define one parameter");
-          }
-          validate(callbackArgs, request.callbackSchema.parameters);
+          validate(responseList, request.callbackSchema.parameters);
         } catch (exception) {
           return "Callback validation error during " + name + " -- " +
                  exception.stack;
         }
       }
 
-      if (typeof(response) != "undefined") {
-        request.callback(callbackArgs[0]);
-      } else {
-        request.callback();
-      }
+      request.callback.apply(request, responseList);
     }
   } finally {
     delete requests[requestId];
-    delete chrome.extension.lastError;
+    lastError.clear();
   }
 
   return undefined;

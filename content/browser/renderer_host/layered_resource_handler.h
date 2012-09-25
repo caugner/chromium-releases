@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_BROWSER_RENDERER_HOST_LAYERED_RESOURCE_HANDLER_H_
 #define CONTENT_BROWSER_RENDERER_HOST_LAYERED_RESOURCE_HANDLER_H_
-#pragma once
 
 #include "base/memory/scoped_ptr.h"
 #include "content/browser/renderer_host/resource_handler.h"
@@ -33,7 +32,7 @@ class CONTENT_EXPORT LayeredResourceHandler : public ResourceHandler {
                            bool* defer) OVERRIDE;
   virtual bool OnWillRead(int request_id, net::IOBuffer** buf, int* buf_size,
                           int min_size) OVERRIDE;
-  virtual bool OnReadCompleted(int request_id, int* bytes_read,
+  virtual bool OnReadCompleted(int request_id, int bytes_read,
                                bool* defer) OVERRIDE;
   virtual bool OnResponseCompleted(int request_id,
                                    const net::URLRequestStatus& status,

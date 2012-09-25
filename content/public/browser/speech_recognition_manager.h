@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_PUBLIC_BROWSER_SPEECH_RECOGNITION_MANAGER_H_
 #define CONTENT_PUBLIC_BROWSER_SPEECH_RECOGNITION_MANAGER_H_
-#pragma once
 
 #include "base/string16.h"
 #include "base/callback.h"
@@ -30,7 +29,7 @@ struct SpeechRecognitionSessionContext;
 // operations that must be carried out, that will be handled by inner classes.
 class SpeechRecognitionManager {
  public:
-  CONTENT_EXPORT static const int kSessionIDInvalid;
+  enum { kSessionIDInvalid = 0 };
 
   // Returns the singleton instance.
   static CONTENT_EXPORT SpeechRecognitionManager* GetInstance();
@@ -48,6 +47,10 @@ class SpeechRecognitionManager {
   // Aborts all sessions for a given listener, without providing any result.
   virtual void AbortAllSessionsForListener(
       SpeechRecognitionEventListener* listener) = 0;
+
+  // Aborts all sessions for a given RenderView, without providing any result.
+  virtual void AbortAllSessionsForRenderView(int render_process_id,
+                                             int render_view_id) = 0;
 
   // Stops audio capture for an existing session. The audio captured before the
   // call will be processed, possibly ending up with a result.

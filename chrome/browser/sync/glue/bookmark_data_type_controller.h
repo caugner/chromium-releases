@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_SYNC_GLUE_BOOKMARK_DATA_TYPE_CONTROLLER_H__
 #define CHROME_BROWSER_SYNC_GLUE_BOOKMARK_DATA_TYPE_CONTROLLER_H__
-#pragma once
 
 #include <string>
 
@@ -25,7 +24,7 @@ class BookmarkDataTypeController : public FrontendDataTypeController,
       ProfileSyncService* sync_service);
 
   // FrontendDataTypeController interface.
-  virtual syncable::ModelType type() const OVERRIDE;
+  virtual syncer::ModelType type() const OVERRIDE;
 
   // content::NotificationObserver interface.
   virtual void Observe(int type,

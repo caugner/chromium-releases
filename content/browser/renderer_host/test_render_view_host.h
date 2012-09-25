@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_BROWSER_RENDERER_HOST_TEST_RENDER_VIEW_HOST_H_
 #define CONTENT_BROWSER_RENDERER_HOST_TEST_RENDER_VIEW_HOST_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/gtest_prod_util.h"
@@ -78,7 +77,7 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
                            const gfx::Rect& pos) OVERRIDE {}
   virtual void InitAsFullscreen(
       RenderWidgetHostView* reference_host_view) OVERRIDE {}
-  virtual void DidBecomeSelected() OVERRIDE {}
+  virtual void WasShown() OVERRIDE {}
   virtual void WasHidden() OVERRIDE {}
   virtual void MovePluginWindows(
       const std::vector<webkit::npapi::WebPluginGeometry>& moves) OVERRIDE {}
@@ -99,9 +98,10 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
   virtual void SetTooltipText(const string16& tooltip_text) OVERRIDE {}
   virtual BackingStore* AllocBackingStore(const gfx::Size& size) OVERRIDE;
   virtual void CopyFromCompositingSurface(
-      const gfx::Size& size,
-      skia::PlatformCanvas* output,
-      base::Callback<void(bool)> callback) OVERRIDE;
+      const gfx::Rect& src_subrect,
+      const gfx::Size& dst_size,
+      const base::Callback<void(bool)>& callback,
+      skia::PlatformCanvas* output) OVERRIDE;
   virtual void OnAcceleratedCompositingStateChange() OVERRIDE;
   virtual void AcceleratedSurfaceBuffersSwapped(
       const GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params& params,
@@ -131,12 +131,14 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
       int32 width,
       int32 height,
       TransportDIB::Handle transport_dib) OVERRIDE;
+#elif defined(OS_ANDROID)
+  virtual void StartContentIntent(const GURL&) OVERRIDE;
 #elif defined(OS_WIN) && !defined(USE_AURA)
   virtual void WillWmDestroy() OVERRIDE;
 #endif
 #if defined(OS_POSIX) || defined(USE_AURA)
   virtual void GetScreenInfo(WebKit::WebScreenInfo* results) OVERRIDE {}
-  virtual gfx::Rect GetRootWindowBounds() OVERRIDE;
+  virtual gfx::Rect GetBoundsInRootWindow() OVERRIDE;
 #endif
   virtual void ProcessTouchAck(WebKit::WebInputEvent::Type type,
                                bool processed) OVERRIDE { }
@@ -147,8 +149,7 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
 
 #if defined(USE_AURA)
   virtual void AcceleratedSurfaceNew(
-      int32 width, int32 height, uint64* surface_id,
-      TransportDIB::Handle* surface_handle) OVERRIDE { }
+      int32 width, int32 height, uint64 surface_id) OVERRIDE { }
   virtual void AcceleratedSurfaceRelease(uint64 surface_id) OVERRIDE { }
 #endif
 
@@ -233,7 +234,21 @@ class TestRenderViewHost
   virtual void SetContentsMimeType(const std::string& mime_type) OVERRIDE;
   virtual void SimulateSwapOutACK() OVERRIDE;
   virtual void SimulateWasHidden() OVERRIDE;
-  virtual void SimulateWasRestored() OVERRIDE;
+  virtual void SimulateWasShown() OVERRIDE;
+
+  // Calls OnMsgNavigate on the RenderViewHost with the given information,
+  // including a custom original request URL.  Sets the rest of the
+  // parameters in the message to the "typical" values.  This is a helper
+  // function for simulating the most common types of loads.
+  void SendNavigateWithOriginalRequestURL(
+      int page_id, const GURL& url, const GURL& original_request_url);
+
+  // Calls OnMsgNavigate on the RenderViewHost with the given information.
+  // Sets the rest of the parameters in the message to the "typical" values.
+  // This is a helper function for simulating the most common types of loads.
+  void SendNavigateWithParameters(
+      int page_id, const GURL& url, PageTransition transition,
+      const GURL& original_request_url);
 
   void TestOnMsgStartDragging(const WebDropData& drop_data);
 

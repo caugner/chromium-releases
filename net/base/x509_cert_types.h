@@ -4,7 +4,6 @@
 
 #ifndef NET_BASE_X509_CERT_TYPES_H_
 #define NET_BASE_X509_CERT_TYPES_H_
-#pragma once
 
 #include <string.h>
 
@@ -16,7 +15,7 @@
 #include "build/build_config.h"
 #include "net/base/net_export.h"
 
-#if defined(OS_MACOSX)
+#if defined(OS_MACOSX) && !defined(OS_IOS)
 #include <Security/x509defs.h>
 #endif
 
@@ -64,7 +63,7 @@ struct NET_EXPORT CertPrincipal {
   explicit CertPrincipal(const std::string& name);
   ~CertPrincipal();
 
-#if defined(OS_MACOSX) || defined(OS_WIN)
+#if (defined(OS_MACOSX) && !defined(OS_IOS)) || defined(OS_WIN)
   // Parses a BER-format DistinguishedName.
   bool ParseDistinguishedName(const void* ber_name_data, size_t length);
 #endif
@@ -137,7 +136,7 @@ class NET_EXPORT CertPolicy {
   std::set<SHA1Fingerprint, SHA1FingerprintLessThan> denied_;
 };
 
-#if defined(OS_MACOSX)
+#if defined(OS_MACOSX) && !defined(OS_IOS)
 // Compares two OIDs by value.
 inline bool CSSMOIDEqual(const CSSM_OID* oid1, const CSSM_OID* oid2) {
   return oid1->Length == oid2->Length &&

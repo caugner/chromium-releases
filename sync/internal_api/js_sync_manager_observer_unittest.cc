@@ -8,15 +8,16 @@
 #include "base/location.h"
 #include "base/message_loop.h"
 #include "base/values.h"
+#include "sync/internal_api/public/base/model_type.h"
 #include "sync/internal_api/public/sessions/sync_session_snapshot.h"
-#include "sync/internal_api/public/syncable/model_type.h"
+#include "sync/internal_api/public/util/sync_string_conversions.h"
 #include "sync/internal_api/public/util/weak_handle.h"
 #include "sync/js/js_event_details.h"
 #include "sync/js/js_test_util.h"
 #include "sync/protocol/sync_protocol_error.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace browser_sync {
+namespace syncer {
 namespace {
 
 using ::testing::InSequence;
@@ -47,37 +48,38 @@ TEST_F(JsSyncManagerObserverTest, NoArgNotifiations) {
   InSequence dummy;
 
   EXPECT_CALL(mock_js_event_handler_,
-              HandleJsEvent("onInitializationComplete",
-                            HasDetails(JsEventDetails())));
-  EXPECT_CALL(mock_js_event_handler_,
               HandleJsEvent("onStopSyncingPermanently",
-                            HasDetails(JsEventDetails())));
-  EXPECT_CALL(mock_js_event_handler_,
-              HandleJsEvent("onClearServerDataSucceeded",
-                            HasDetails(JsEventDetails())));
-  EXPECT_CALL(mock_js_event_handler_,
-              HandleJsEvent("onClearServerDataFailed",
                             HasDetails(JsEventDetails())));
   EXPECT_CALL(mock_js_event_handler_,
               HandleJsEvent("onEncryptionComplete",
                             HasDetails(JsEventDetails())));
 
-  js_sync_manager_observer_.OnInitializationComplete(WeakHandle<JsBackend>(),
-      true);
   js_sync_manager_observer_.OnStopSyncingPermanently();
-  js_sync_manager_observer_.OnClearServerDataSucceeded();
-  js_sync_manager_observer_.OnClearServerDataFailed();
   js_sync_manager_observer_.OnEncryptionComplete();
   PumpLoop();
 }
 
+TEST_F(JsSyncManagerObserverTest, OnInitializationComplete) {
+  DictionaryValue expected_details;
+  syncer::ModelTypeSet restored_types;
+  restored_types.Put(BOOKMARKS);
+  restored_types.Put(NIGORI);
+  expected_details.Set("restoredTypes", ModelTypeSetToValue(restored_types));
+
+  EXPECT_CALL(mock_js_event_handler_,
+              HandleJsEvent("onInitializationComplete",
+                            HasDetailsAsDictionary(expected_details)));
+
+  js_sync_manager_observer_.OnInitializationComplete(
+      WeakHandle<JsBackend>(), true, restored_types);
+  PumpLoop();
+}
+
 TEST_F(JsSyncManagerObserverTest, OnSyncCycleCompleted) {
-  syncable::ModelTypePayloadMap download_progress_markers;
-  sessions::SyncSessionSnapshot snapshot(sessions::SyncerStatus(),
-                                         sessions::ErrorCounters(),
-                                         100,
+  ModelTypePayloadMap download_progress_markers;
+  sessions::SyncSessionSnapshot snapshot(sessions::ModelNeutralState(),
                                          false,
-                                         syncable::ModelTypeSet(),
+                                         ModelTypeSet(),
                                          download_progress_markers,
                                          false,
                                          true,
@@ -102,9 +104,9 @@ TEST_F(JsSyncManagerObserverTest, OnSyncCycleCompleted) {
 }
 
 TEST_F(JsSyncManagerObserverTest, OnActionableError) {
-  browser_sync::SyncProtocolError sync_error;
-  sync_error.action = browser_sync::CLEAR_USER_DATA_AND_RESYNC;
-  sync_error.error_type = browser_sync::TRANSIENT_ERROR;
+  SyncProtocolError sync_error;
+  sync_error.action = CLEAR_USER_DATA_AND_RESYNC;
+  sync_error.error_type = TRANSIENT_ERROR;
   DictionaryValue expected_details;
   expected_details.Set("syncError", sync_error.ToValue());
 
@@ -118,11 +120,10 @@ TEST_F(JsSyncManagerObserverTest, OnActionableError) {
 
 
 TEST_F(JsSyncManagerObserverTest, OnConnectionStatusChange) {
-  const sync_api::ConnectionStatus kStatus =
-      sync_api::CONNECTION_AUTH_ERROR;
+  const ConnectionStatus kStatus = CONNECTION_AUTH_ERROR;
   DictionaryValue expected_details;
   expected_details.SetString("status",
-                             sync_api::ConnectionStatusToString(kStatus));
+                             ConnectionStatusToString(kStatus));
 
   EXPECT_CALL(mock_js_event_handler_,
               HandleJsEvent("onConnectionStatusChange",
@@ -141,14 +142,13 @@ TEST_F(JsSyncManagerObserverTest, OnPassphraseRequired) {
 
   reason_passphrase_not_required_details.SetString(
       "reason",
-      sync_api::PassphraseRequiredReasonToString(
-          sync_api::REASON_PASSPHRASE_NOT_REQUIRED));
+      PassphraseRequiredReasonToString(REASON_PASSPHRASE_NOT_REQUIRED));
   reason_encryption_details.SetString(
       "reason",
-      sync_api::PassphraseRequiredReasonToString(sync_api::REASON_ENCRYPTION));
+      PassphraseRequiredReasonToString(REASON_ENCRYPTION));
   reason_decryption_details.SetString(
       "reason",
-      sync_api::PassphraseRequiredReasonToString(sync_api::REASON_DECRYPTION));
+      PassphraseRequiredReasonToString(REASON_DECRYPTION));
 
   EXPECT_CALL(mock_js_event_handler_,
               HandleJsEvent("onPassphraseRequired",
@@ -162,11 +162,11 @@ TEST_F(JsSyncManagerObserverTest, OnPassphraseRequired) {
                            HasDetailsAsDictionary(reason_decryption_details)));
 
   js_sync_manager_observer_.OnPassphraseRequired(
-      sync_api::REASON_PASSPHRASE_NOT_REQUIRED,
+      REASON_PASSPHRASE_NOT_REQUIRED,
       sync_pb::EncryptedData());
-  js_sync_manager_observer_.OnPassphraseRequired(sync_api::REASON_ENCRYPTION,
+  js_sync_manager_observer_.OnPassphraseRequired(REASON_ENCRYPTION,
                                                  sync_pb::EncryptedData());
-  js_sync_manager_observer_.OnPassphraseRequired(sync_api::REASON_DECRYPTION,
+  js_sync_manager_observer_.OnPassphraseRequired(REASON_DECRYPTION,
                                                  sync_pb::EncryptedData());
   PumpLoop();
 }
@@ -196,14 +196,13 @@ TEST_F(JsSyncManagerObserverTest, OnEncryptedTypesChanged) {
   const bool encrypt_everything = false;
   expected_details.Set("encryptedTypes", encrypted_type_values);
   expected_details.SetBoolean("encryptEverything", encrypt_everything);
-  syncable::ModelTypeSet encrypted_types;
+  ModelTypeSet encrypted_types;
 
-  for (int i = syncable::FIRST_REAL_MODEL_TYPE;
-       i < syncable::MODEL_TYPE_COUNT; ++i) {
-    syncable::ModelType type = syncable::ModelTypeFromInt(i);
+  for (int i = FIRST_REAL_MODEL_TYPE; i < MODEL_TYPE_COUNT; ++i) {
+    ModelType type = ModelTypeFromInt(i);
     encrypted_types.Put(type);
     encrypted_type_values->Append(Value::CreateStringValue(
-        syncable::ModelTypeToString(type)));
+        ModelTypeToString(type)));
   }
 
   EXPECT_CALL(mock_js_event_handler_,
@@ -216,4 +215,4 @@ TEST_F(JsSyncManagerObserverTest, OnEncryptedTypesChanged) {
 }
 
 }  // namespace
-}  // namespace browser_sync
+}  // namespace syncer

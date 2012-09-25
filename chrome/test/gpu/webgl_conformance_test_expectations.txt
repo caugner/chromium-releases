@@ -23,6 +23,8 @@
 //  91531 MAC WIN LINUX : conformance_more_* = SKIP
 //  91532 MAC NVIDIA 0x0640 : tex_image_and_sub_image_2d_with_video = PASS FAIL
 
+134743 WIN : conformance_extensions_oes_standard_derivatives = FAIL
+
 UNFILED MAC WIN LINUX : conformance_more_* = SKIP
 UNFILED MAC WIN LINUX : conformance_ogles_* = SKIP
 
@@ -84,7 +86,6 @@ UNFILED XP NVIDIA : conformance_textures_texture_mips = FAIL
 UNFILED WIN7 INTEL : conformance_context_context_attributes_alpha_depth_stencil_antialias = FAIL
 UNFILED WIN7 INTEL : conformance_context_context_lost_restored = FAIL
 UNFILED WIN7 INTEL : conformance_context_premultiplyalpha_test = FAIL
-UNFILED WIN7 INTEL : conformance_extensions_oes_standard_derivatives = FAIL
 UNFILED WIN7 INTEL : conformance_extensions_oes_texture_float = FAIL
 UNFILED WIN7 INTEL : conformance_limits_gl_min_attribs = FAIL
 UNFILED WIN7 INTEL : conformance_limits_gl_max_texture_dimensions = FAIL
@@ -168,6 +169,15 @@ UNFILED LINUX AMD : conformance_textures_texture_mips = FAIL
 121139 MAC : conformance_textures_texture_size = FAIL
 121139 WIN INTEL : conformance_textures_texture_size = FAIL
 121139 LINUX AMD : conformance_textures_texture_size = FAIL
+
+137892 LINUX INTEL : conformance_glsl_functions_glsl_function_acos = FAIL
+137892 LINUX INTEL : conformance_glsl_functions_glsl_function_asin = FAIL
+137892 LINUX INTEL : conformance_glsl_functions_glsl_function_atan = FAIL
+137892 LINUX INTEL : conformance_glsl_functions_glsl_function_atan_xy = FAIL
+137892 LINUX INTEL : conformance_glsl_functions_glsl_function_sin = FAIL
+137892 LINUX INTEL : conformance_reading_read_pixels_test = FAIL
+137892 LINUX INTEL : conformance_rendering_point_size = FAIL
+137892 LINUX INTEL : conformance_textures_texture_mips = FAIL
 
 ////////////////////////////////////////////////////////////////////////////////
 //

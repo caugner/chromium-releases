@@ -17,22 +17,24 @@
 #include "base/string_tokenizer.h"
 #include "base/string_util.h"
 #include "base/tracked_objects.h"
-#include "content/app/android/content_jni_registrar.h"
+#include "content/app/android/app_jni_registrar.h"
+#include "content/browser/android/browser_jni_registrar.h"
+#include "content/common/android/common_jni_registrar.h"
 #include "content/common/android/command_line.h"
 #include "content/public/common/content_switches.h"
 #include "media/base/android/media_jni_registrar.h"
 #include "net/android/net_jni_registrar.h"
-#include "jni/library_loader_jni.h"
+#include "jni/LibraryLoader_jni.h"
+#include "ui/gfx/android/gfx_jni_registrar.h"
 
 namespace {
 base::AtExitManager* g_at_exit_manager = NULL;
 }
 
-jboolean LibraryLoadedOnMainThread(JNIEnv* env, jclass clazz,
-                                   jobjectArray init_command_line) {
-  // We need the Chrome AtExitManager to be created before we do any tracing or
-  // logging.
-  g_at_exit_manager = new base::AtExitManager();
+namespace content {
+
+static jboolean LibraryLoadedOnMainThread(JNIEnv* env, jclass clazz,
+                                          jobjectArray init_command_line) {
   InitNativeCommandLineFromJavaArray(env, init_command_line);
 
   CommandLine* command_line = CommandLine::ForCurrentProcess();
@@ -64,16 +66,23 @@ jboolean LibraryLoadedOnMainThread(JNIEnv* env, jclass clazz,
   if (!net::android::RegisterJni(env))
     return JNI_FALSE;
 
-  if (!content::android::RegisterJni(env))
+  if (!content::android::RegisterCommonJni(env))
+    return JNI_FALSE;
+
+  if (!content::android::RegisterBrowserJni(env))
+    return JNI_FALSE;
+
+  if (!content::android::RegisterAppJni(env))
     return JNI_FALSE;
 
   if (!media::RegisterJni(env))
     return JNI_FALSE;
 
+  if (!gfx::RegisterJni(env))
+    return JNI_FALSE;
+
   return JNI_TRUE;
 }
-
-namespace content {
 
 void LibraryLoaderExitHook() {
   if (g_at_exit_manager) {
@@ -83,6 +92,9 @@ void LibraryLoaderExitHook() {
 }
 
 bool RegisterLibraryLoaderEntryHook(JNIEnv* env) {
+  // We need the AtExitManager to be created at the very beginning.
+  g_at_exit_manager = new base::AtExitManager();
+
   return RegisterNativesImpl(env);
 }
 

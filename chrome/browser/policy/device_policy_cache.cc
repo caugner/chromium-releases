@@ -15,17 +15,18 @@
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/values.h"
-#include "chrome/browser/chromeos/cros_settings.h"
-#include "chrome/browser/chromeos/login/authenticator.h"
-#include "chrome/browser/chromeos/login/ownership_service.h"
-#include "chrome/browser/chromeos/login/signed_settings_helper.h"
+#include "chrome/browser/chromeos/settings/cros_settings.h"
+#include "chrome/browser/chromeos/settings/ownership_service.h"
+#include "chrome/browser/chromeos/settings/signed_settings_helper.h"
 #include "chrome/browser/policy/app_pack_updater.h"
 #include "chrome/browser/policy/cloud_policy_data_store.h"
 #include "chrome/browser/policy/enterprise_install_attributes.h"
 #include "chrome/browser/policy/enterprise_metrics.h"
 #include "chrome/browser/policy/policy_map.h"
+#include "chrome/browser/policy/proto/chrome_device_policy.pb.h"
 #include "chrome/browser/policy/proto/device_management_backend.pb.h"
 #include "chrome/browser/policy/proto/device_management_local.pb.h"
+#include "chrome/common/net/gaia/gaia_auth_util.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/update_engine_client.h"
 #include "policy/policy_constants.h"
@@ -167,8 +168,8 @@ bool DevicePolicyCache::SetPolicy(const em::PolicyFetchResponse& policy) {
   DCHECK(IsReady());
 
   // Make sure we have an enterprise device.
-  std::string registration_user(install_attributes_->GetRegistrationUser());
-  if (registration_user.empty()) {
+  std::string registration_domain(install_attributes_->GetDomain());
+  if (registration_domain.empty()) {
     LOG(WARNING) << "Refusing to accept policy on non-enterprise device.";
     UMA_HISTOGRAM_ENUMERATION(kMetricPolicy,
                               kMetricPolicyFetchNonEnterpriseDevice,
@@ -190,11 +191,10 @@ bool DevicePolicyCache::SetPolicy(const em::PolicyFetchResponse& policy) {
   }
 
   // Existing installations may not have a canonicalized version of the
-  // registration user name in install attributes, so re-canonicalize here.
-  if (chromeos::Authenticator::Canonicalize(registration_user) !=
-      chromeos::Authenticator::Canonicalize(policy_data.username())) {
+  // registration domain in install attributes, so lower-case the data here.
+  if (registration_domain != gaia::ExtractDomainName(policy_data.username())) {
     LOG(WARNING) << "Refusing policy blob for " << policy_data.username()
-                 << " which doesn't match " << registration_user;
+                 << " which doesn't match domain " << registration_domain;
     UMA_HISTOGRAM_ENUMERATION(kMetricPolicy, kMetricPolicyFetchUserMismatch,
                               kMetricPolicySize);
     InformNotifier(CloudPolicySubsystem::LOCAL_ERROR,

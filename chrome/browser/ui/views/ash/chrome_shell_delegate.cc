@@ -6,7 +6,6 @@
 
 #include "ash/launcher/launcher_types.h"
 #include "ash/system/tray/system_tray_delegate.h"
-#include "ash/wm/partial_screenshot_view.h"
 #include "ash/wm/window_util.h"
 #include "base/command_line.h"
 #include "chrome/browser/chromeos/login/screen_locker.h"
@@ -15,13 +14,15 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/sessions/tab_restore_service.h"
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
+#include "chrome/browser/ui/ash/app_list/app_list_view_delegate.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
-#include "chrome/browser/ui/views/ash/app_list/app_list_view_delegate.h"
 #include "chrome/browser/ui/views/ash/launcher/chrome_launcher_controller.h"
 #include "chrome/browser/ui/views/ash/user_action_handler.h"
 #include "chrome/browser/ui/views/ash/window_positioner.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
+#include "chrome/browser/ui/webui/chrome_web_contents_handler.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
@@ -33,6 +34,7 @@
 #include "ui/aura/window.h"
 
 #if defined(OS_CHROMEOS)
+#include "ash/keyboard_overlay/keyboard_overlay_view.h"
 #include "base/chromeos/chromeos_version.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_util.h"
 #include "chrome/browser/chromeos/background/ash_user_wallpaper_delegate.h"
@@ -41,11 +43,11 @@
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/login/webui_login_display_host.h"
 #include "chrome/browser/chromeos/system/ash_system_tray_delegate.h"
-#include "chrome/browser/ui/views/keyboard_overlay_dialog_view.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "chrome/browser/ui/webui/chromeos/mobile_setup_dialog.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/power_manager_client.h"
+#include "chromeos/dbus/session_manager_client.h"
 #endif
 
 namespace {
@@ -73,6 +75,10 @@ ChromeShellDelegate::ChromeShellDelegate()
       this,
       chrome::NOTIFICATION_LOGIN_USER_PROFILE_PREPARED,
       content::NotificationService::AllSources());
+  registrar_.Add(
+      this,
+      chrome::NOTIFICATION_SESSION_STARTED,
+      content::NotificationService::AllSources());
 #endif
 }
 
@@ -97,12 +103,21 @@ bool ChromeShellDelegate::IsUserLoggedIn() {
 #endif
 }
 
+  // Returns true if we're logged in and browser has been started
+bool ChromeShellDelegate::IsSessionStarted() {
+#if defined(OS_CHROMEOS)
+  return chromeos::UserManager::Get()->IsSessionStarted();
+#else
+  return true;
+#endif
+}
+
 void ChromeShellDelegate::LockScreen() {
 #if defined(OS_CHROMEOS)
   if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kGuestSession) &&
       !chromeos::KioskModeSettings::Get()->IsKioskModeEnabled()) {
-    chromeos::DBusThreadManager::Get()->GetPowerManagerClient()->
-        NotifyScreenLockRequested();
+    chromeos::DBusThreadManager::Get()->GetSessionManagerClient()->
+        RequestLockScreen();
   }
 #endif
 }
@@ -136,13 +151,17 @@ void ChromeShellDelegate::Exit() {
 
 void ChromeShellDelegate::NewTab() {
   Browser* browser = GetTargetBrowser();
-  browser->NewTab();
-  browser->window()->Show();
+  // If the browser was not active, we call BrowserWindow::Show to make it
+  // visible. Otherwise, we let Browser::NewTab handle the active window change.
+  const bool was_active = browser->window()->IsActive();
+  chrome::NewTab(browser);
+  if (!was_active)
+    browser->window()->Show();
 }
 
 void ChromeShellDelegate::NewWindow(bool is_incognito) {
   Profile* profile = ProfileManager::GetDefaultProfileOrOffTheRecord();
-  Browser::NewEmptyWindow(
+  chrome::NewEmptyWindow(
       is_incognito ? profile->GetOffTheRecordProfile() : profile);
 }
 
@@ -180,21 +199,7 @@ void ChromeShellDelegate::OpenCrosh() {
 
 void ChromeShellDelegate::OpenMobileSetup(const std::string& service_path) {
 #if defined(OS_CHROMEOS)
-  Browser* browser = GetTargetBrowser();
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableMobileSetupDialog)) {
-    MobileSetupDialog::Show(service_path);
-  } else {
-    std::string url(chrome::kChromeUIMobileSetupURL);
-    url.append(service_path);
-    browser->OpenURL(
-        content::OpenURLParams(GURL(url),
-                               content::Referrer(),
-                               NEW_FOREGROUND_TAB,
-                               content::PAGE_TRANSITION_LINK,
-                               false));
-    browser->window()->Activate();
-  }
+  MobileSetupDialog::Show(service_path);
 #endif
 }
 
@@ -208,7 +213,7 @@ void ChromeShellDelegate::RestoreTab() {
   if (!service)
     return;
   if (service->IsLoaded()) {
-    browser->RestoreTab();
+    chrome::RestoreTab(browser);
   } else {
     service->LoadTabsFromLastSession();
     // LoadTabsFromLastSession is asynchronous, so TabRestoreService has not
@@ -232,10 +237,10 @@ bool ChromeShellDelegate::RotatePaneFocus(ash::Shell::Direction direction) {
 
   switch (direction) {
     case ash::Shell::FORWARD:
-      browser->FocusNextPane();
+      chrome::FocusNextPane(browser);
       break;
     case ash::Shell::BACKWARD:
-      browser->FocusPreviousPane();
+      chrome::FocusPreviousPane(browser);
       break;
   }
   return true;
@@ -243,15 +248,19 @@ bool ChromeShellDelegate::RotatePaneFocus(ash::Shell::Direction direction) {
 
 void ChromeShellDelegate::ShowKeyboardOverlay() {
 #if defined(OS_CHROMEOS)
-  KeyboardOverlayDialogView::ShowDialog(
-      ProfileManager::GetDefaultProfileOrOffTheRecord());
+  // TODO(mazda): Move the show logic to ash (http://crbug.com/124222).
+  Profile* profile = ProfileManager::GetDefaultProfileOrOffTheRecord();
+  std::string url(chrome::kChromeUIKeyboardOverlayURL);
+  KeyboardOverlayView::ShowDialog(profile,
+                                  new ChromeWebContentsHandler,
+                                  GURL(url));
 #endif
 }
 
 void ChromeShellDelegate::ShowTaskManager() {
   Browser* browser = browser::FindOrCreateTabbedBrowser(
       ProfileManager::GetDefaultProfileOrOffTheRecord());
-  browser->OpenTaskManager(false);
+  chrome::OpenTaskManager(browser, false);
 }
 
 content::BrowserContext* ChromeShellDelegate::GetCurrentBrowserContext() {
@@ -284,11 +293,6 @@ app_list::AppListViewDelegate*
   return new AppListViewDelegate;
 }
 
-void ChromeShellDelegate::StartPartialScreenshot(
-    ash::ScreenshotDelegate* screenshot_delegate) {
-  ash::PartialScreenshotView::StartPartialScreenshot(screenshot_delegate);
-}
-
 ash::LauncherDelegate* ChromeShellDelegate::CreateLauncherDelegate(
     ash::LauncherModel* model) {
   ChromeLauncherController* controller =
@@ -318,6 +322,40 @@ aura::client::UserActionClient* ChromeShellDelegate::CreateUserActionClient() {
   return new UserActionHandler;
 }
 
+void ChromeShellDelegate::OpenFeedbackPage() {
+  chrome::OpenFeedbackDialog(GetTargetBrowser());
+}
+
+void ChromeShellDelegate::RecordUserMetricsAction(
+    ash::UserMetricsAction action) {
+  switch (action) {
+    case ash::UMA_ACCEL_PREVWINDOW_TAB:
+      content::RecordAction(content::UserMetricsAction("Accel_PrevWindow_Tab"));
+      break;
+    case ash::UMA_ACCEL_NEXTWINDOW_TAB:
+      content::RecordAction(content::UserMetricsAction("Accel_NextWindow_Tab"));
+      break;
+    case ash::UMA_ACCEL_PREVWINDOW_F5:
+      content::RecordAction(content::UserMetricsAction("Accel_PrevWindow_F5"));
+      break;
+    case ash::UMA_ACCEL_NEXTWINDOW_F5:
+      content::RecordAction(content::UserMetricsAction("Accel_NextWindow_F5"));
+      break;
+    case ash::UMA_ACCEL_NEWTAB_T:
+      content::RecordAction(content::UserMetricsAction("Accel_NewTab_T"));
+      break;
+    case ash::UMA_ACCEL_SEARCH_LWIN:
+      content::RecordAction(content::UserMetricsAction("Accel_Search_LWin"));
+      break;
+    case ash::UMA_MOUSE_DOWN:
+      content::RecordAction(content::UserMetricsAction("Mouse_Down"));
+      break;
+    case ash::UMA_TOUCHSCREEN_TAP_DOWN:
+      content::RecordAction(content::UserMetricsAction("Touchscreen_Down"));
+      break;
+  }
+}
+
 void ChromeShellDelegate::Observe(int type,
                                   const content::NotificationSource& source,
                                   const content::NotificationDetails& details) {
@@ -325,6 +363,9 @@ void ChromeShellDelegate::Observe(int type,
   switch (type) {
     case chrome::NOTIFICATION_LOGIN_USER_PROFILE_PREPARED:
       ash::Shell::GetInstance()->CreateLauncher();
+      break;
+    case chrome::NOTIFICATION_SESSION_STARTED:
+      ash::Shell::GetInstance()->ShowLauncher();
       break;
     default:
       NOTREACHED() << "Unexpected notification " << type;

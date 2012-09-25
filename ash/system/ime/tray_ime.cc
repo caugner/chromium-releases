@@ -13,12 +13,15 @@
 #include "ash/system/tray/tray_details_view.h"
 #include "ash/system/tray/tray_item_more.h"
 #include "ash/system/tray/tray_item_view.h"
+#include "ash/system/tray/tray_notification_view.h"
 #include "ash/system/tray/tray_views.h"
+#include "ash/wm/shelf_layout_manager.h"
 #include "base/logging.h"
 #include "base/timer.h"
 #include "base/utf_string_conversions.h"
 #include "grit/ash_strings.h"
-#include "grit/ui_resources_standard.h"
+#include "grit/ui_resources.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/image/image.h"
@@ -168,11 +171,13 @@ class IMEDetailedView : public TrayDetailsView,
 class IMENotificationView : public TrayNotificationView {
  public:
   explicit IMENotificationView(TrayIME* tray)
-      : TrayNotificationView(IDR_AURA_UBER_TRAY_IME),
-        tray_(tray) {
-    InitView(new views::Label(
-        ui::ResourceBundle::GetSharedInstance().GetLocalizedString(
-            IDS_ASH_STATUS_TRAY_IME_TURNED_ON_BUBBLE)));
+      : TrayNotificationView(tray, IDR_AURA_UBER_TRAY_IME) {
+    InitView(GetLabel());
+  }
+
+  void UpdateLabel() {
+    RestartAutoCloseTimer();
+    UpdateView(GetLabel());
   }
 
   void StartAutoCloseTimer(int seconds) {
@@ -194,17 +199,29 @@ class IMENotificationView : public TrayNotificationView {
       StartAutoCloseTimer(autoclose_delay_);
   }
 
-  // Overridden from TrayNotificationView:
-  virtual void OnClose() OVERRIDE {
-    Close();
+  // Overridden from TrayNotificationView.
+  virtual void OnClickAction() OVERRIDE {
+    tray()->PopupDetailedView(0, true);
   }
 
  private:
   void Close() {
-    tray_->HideNotificationView();
+    tray()->HideNotificationView();
   }
 
-  TrayIME* tray_;
+  views::Label* GetLabel() {
+    SystemTrayDelegate* delegate = Shell::GetInstance()->tray_delegate();
+    IMEInfo current;
+    delegate->GetCurrentIME(&current);
+
+    // TODO(zork): Use IDS_ASH_STATUS_TRAY_THIRD_PARTY_IME_TURNED_ON_BUBBLE for
+    // third party IMEs
+    return new views::Label(
+        l10n_util::GetStringFUTF16(
+            IDS_ASH_STATUS_TRAY_IME_TURNED_ON_BUBBLE,
+            current.short_name));
+  }
+
 
   int autoclose_delay_;
   base::OneShotTimer<IMENotificationView> autoclose_;
@@ -234,6 +251,9 @@ void TrayIME::UpdateTrayLabel(const IMEInfo& current, size_t count) {
       tray_label_->label()->SetText(current.short_name);
     }
     tray_label_->SetVisible(count > 1);
+    SetTrayLabelItemBorder(tray_label_,
+        ash::Shell::GetInstance()->system_tray()->shelf_alignment());
+    tray_label_->Layout();
   }
 }
 
@@ -242,8 +262,6 @@ views::View* TrayIME::CreateTrayView(user::LoginStatus status) {
   tray_label_ = new TrayItemView;
   tray_label_->CreateLabel();
   SetupLabelForTray(tray_label_->label());
-  tray_label_->label()->set_border(
-      views::Border::CreateEmptyBorder(0, 2, 0, 2));
   return tray_label_;
 }
 
@@ -292,6 +310,10 @@ void TrayIME::DestroyNotificationView() {
 void TrayIME::UpdateAfterLoginStatusChange(user::LoginStatus status) {
 }
 
+void TrayIME::UpdateAfterShelfAlignmentChange(ShelfAlignment alignment) {
+  SetTrayLabelItemBorder(tray_label_, alignment);
+}
+
 void TrayIME::OnIMERefresh(bool show_message) {
   SystemTrayDelegate* delegate = Shell::GetInstance()->tray_delegate();
   IMEInfoList list;
@@ -308,8 +330,12 @@ void TrayIME::OnIMERefresh(bool show_message) {
   if (detailed_)
     detailed_->Update(list, property_list);
 
-  if (show_message && !message_shown_) {
-    if (!notification_) {
+  if (list.size() > 1 && show_message) {
+    // If the notification is still visible, hide it and clear the flag so it is
+    // refreshed.
+    if (notification_) {
+      notification_->UpdateLabel();
+    } else if (!Shell::GetInstance()->shelf()->IsVisible() || !message_shown_) {
       ShowNotificationView();
       message_shown_ = true;
     }

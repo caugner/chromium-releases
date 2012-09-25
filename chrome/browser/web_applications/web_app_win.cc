@@ -190,7 +190,8 @@ bool CreatePlatformShortcut(
 
   CommandLine cmd_line(CommandLine::NO_PROGRAM);
   cmd_line = ShellIntegration::CommandLineArgsForLauncher(shortcut_info.url,
-      shortcut_info.extension_id, shortcut_info.is_platform_app);
+      shortcut_info.extension_id, shortcut_info.is_platform_app,
+      shortcut_info.profile_path);
 
   // TODO(evan): we rely on the fact that command_line_string() is
   // properly quoted for a Windows command line.  The method on
@@ -252,6 +253,11 @@ bool CreatePlatformShortcut(
   }
 
   return success;
+}
+
+void DeletePlatformShortcuts(const FilePath& profile_path,
+                             const std::string& extension_id) {
+  // TODO(benwells): Implement this.
 }
 
 }  // namespace internals

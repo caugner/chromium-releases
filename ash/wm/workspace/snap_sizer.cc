@@ -110,7 +110,7 @@ gfx::Rect SnapSizer::GetTargetBounds() const {
 }
 
 gfx::Rect SnapSizer::GetTargetBoundsForPercent(int percent_index) const {
-  gfx::Rect work_area(ScreenAsh::GetUnmaximizedWorkAreaBounds(window_));
+  gfx::Rect work_area(ScreenAsh::GetUnmaximizedWorkAreaBoundsInParent(window_));
   int y = WindowResizer::AlignToGridRoundUp(work_area.y(), grid_size_);
   // We don't align to the bottom of the grid as the launcher may not
   // necessarily align to the grid (happens when auto-hidden).
@@ -129,8 +129,7 @@ gfx::Rect SnapSizer::GetTargetBoundsForPercent(int percent_index) const {
 }
 
 bool SnapSizer::AlongEdge(int x) const {
-  // TODO: need to support multi-monitor.
-  gfx::Rect area(gfx::Screen::GetDisplayNearestWindow(window_).bounds());
+  gfx::Rect area(ScreenAsh::GetDisplayBoundsInParent(window_));
   return (x <= area.x()) || (x >= area.right() - 1);
 }
 

@@ -19,10 +19,10 @@
 #include "chrome/common/net/gaia/gaia_constants.h"
 #include "chrome/common/net/gaia/gaia_urls.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
-#include "content/public/common/url_fetcher.h"
 #include "net/base/escape.h"
 #include "net/base/load_flags.h"
 #include "net/http/http_status_code.h"
+#include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_status.h"
 
@@ -205,7 +205,7 @@ net::URLFetcher* GaiaAuthFetcher::CreateGaiaFetcher(
     const GURL& gaia_gurl,
     int load_flags,
     net::URLFetcherDelegate* delegate) {
-  net::URLFetcher* to_return = content::URLFetcher::Create(
+  net::URLFetcher* to_return = net::URLFetcher::Create(
       0, gaia_gurl,
       body == "" ? net::URLFetcher::GET : net::URLFetcher::POST,
       delegate);
@@ -512,22 +512,18 @@ GaiaAuthFetcher::GenerateClientOAuthError(const std::string& data,
 
   std::string cause;
   if (!dict->GetStringWithoutPathExpansion("cause", &cause))
-    return GenerateAuthError(data, status);
+    return GoogleServiceAuthError::FromClientOAuthError(data);
 
-  if (cause == kBadAuthenticationError) {
-    return GoogleServiceAuthError(
-        GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS);
-  } else if (cause != kNeedsAdditional) {
-    return GenerateAuthError(data, status);
-  }
+  if (cause != kNeedsAdditional)
+    return GoogleServiceAuthError::FromClientOAuthError(data);
 
   DictionaryValue* challenge;
   if (!dict->GetDictionaryWithoutPathExpansion("challenge", &challenge))
-    return GenerateAuthError(data, status);
+    return GoogleServiceAuthError::FromClientOAuthError(data);
 
   std::string name;
   if (!challenge->GetStringWithoutPathExpansion("name", &name))
-    return GenerateAuthError(data, status);
+    return GoogleServiceAuthError::FromClientOAuthError(data);
 
   if (name == kCaptcha) {
     std::string token;
@@ -542,7 +538,7 @@ GaiaAuthFetcher::GenerateClientOAuthError(const std::string& data,
                                                    &image_width) ||
         !challenge->GetIntegerWithoutPathExpansion("image_height",
                                                    &image_height)) {
-      return GenerateAuthError(data, status);
+      return GoogleServiceAuthError::FromClientOAuthError(data);
     }
     return GoogleServiceAuthError::FromCaptchaChallenge(token, GURL(audio_url),
                                                         GURL(image_url),
@@ -560,14 +556,14 @@ GaiaAuthFetcher::GenerateClientOAuthError(const std::string& data,
     challenge->GetStringWithoutPathExpansion("alternate_text", &alternate_text);
     challenge->GetIntegerWithoutPathExpansion("field_length", &field_length);
     if (!challenge->GetStringWithoutPathExpansion("challenge_token", &token))
-      return GenerateAuthError(data, status);
+      return GoogleServiceAuthError::FromClientOAuthError(data);
 
     return GoogleServiceAuthError::FromSecondFactorChallenge(token, prompt_text,
                                                              alternate_text,
                                                              field_length);
   }
 
-  return GenerateAuthError(data, status);
+  return GoogleServiceAuthError::FromClientOAuthError(data);
 }
 
 void GaiaAuthFetcher::StartClientLogin(

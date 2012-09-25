@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_TABS_TAB_STRIP_CONTROLLER_H_
 #define CHROME_BROWSER_UI_VIEWS_TABS_TAB_STRIP_CONTROLLER_H_
-#pragma once
 
 class BaseTab;
 class GURL;
@@ -42,9 +41,6 @@ class TabStripController {
 
   // Returns true if the selected index is pinned.
   virtual bool IsTabPinned(int index) const = 0;
-
-  // Returns true if the selected index is closeable.
-  virtual bool IsTabCloseable(int index) const = 0;
 
   // Returns true if the selected index is the new tab page.
   virtual bool IsNewTabPage(int index) const = 0;

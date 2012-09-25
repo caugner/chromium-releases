@@ -9,13 +9,18 @@ in manifest.
 
 import buildbot_common
 import csv
+import cStringIO
+import email
 import manifest_util
+import optparse
 import os
 import posixpath
 import re
+import smtplib
 import subprocess
 import sys
 import time
+import traceback
 import urllib2
 
 
@@ -64,7 +69,7 @@ def GetPlatformFromArchiveUrl(url):
     url: An archive url.
   Returns:
     A platform name (e.g. 'linux')."""
-  match = re.match(r'naclsdk_(.*)\.bz2', posixpath.basename(url))
+  match = re.match(r'naclsdk_(.*?)(?:\.tar)?\.bz2', posixpath.basename(url))
   if not match:
     return None
   return match.group(1)
@@ -159,8 +164,12 @@ class Delegate(object):
 
 
 class RealDelegate(Delegate):
-  def __init__(self):
-    pass
+  def __init__(self, dryrun=False, gsutil=None):
+    self.dryrun = dryrun
+    if gsutil:
+      self.gsutil = gsutil
+    else:
+      self.gsutil = buildbot_common.GetGsutil()
 
   def GetRepoManifest(self):
     """See Delegate.GetRepoManifest"""
@@ -184,7 +193,10 @@ class RealDelegate(Delegate):
 
   def GsUtil_ls(self, url):
     """See Delegate.GsUtil_ls"""
-    stdout = self._RunGsUtil(None, 'ls', url)
+    try:
+      stdout = self._RunGsUtil(None, 'ls', url)
+    except subprocess.CalledProcessError:
+      return []
 
     # filter out empty lines
     return filter(None, stdout.split('\n'))
@@ -195,6 +207,9 @@ class RealDelegate(Delegate):
 
   def GsUtil_cp(self, src, dest, stdin=None):
     """See Delegate.GsUtil_cp"""
+    if self.dryrun:
+      return
+
     # -p ensures we keep permissions when copying "in-the-cloud".
     return self._RunGsUtil(stdin, 'cp', '-p', '-a', 'public-read', src, dest)
 
@@ -210,16 +225,18 @@ class RealDelegate(Delegate):
           operation such as ls, cp or cat.
     Returns:
       The stdout from the process."""
-    cmd = [buildbot_common.GetGsutil()] + list(args)
+    cmd = [self.gsutil] + list(args)
     if stdin:
       stdin_pipe = subprocess.PIPE
     else:
       stdin_pipe = None
 
-    process = subprocess.Popen(cmd, stdin=stdin_pipe, stdout=subprocess.PIPE)
-    stdout, _ = process.communicate(stdin)
+    process = subprocess.Popen(cmd, stdin=stdin_pipe, stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE)
+    stdout, stderr = process.communicate(stdin)
 
     if process.returncode != 0:
+      sys.stderr.write(stderr)
       raise subprocess.CalledProcessError(process.returncode, ' '.join(cmd))
     return stdout
 
@@ -412,7 +429,8 @@ class VersionFinder(object):
       version_string: The version to find archives for. (e.g. "18.0.1025.164")
     Returns:
       A list of strings, each of which is a platform-specific archive URL. (e.g.
-      "gs://nativeclient_mirror/nacl/nacl_sdk/18.0.1025.164/naclsdk_linux.bz2").
+      "gs://nativeclient_mirror/nacl/nacl_sdk/18.0.1025.164/"
+      "naclsdk_linux.tar.bz2").
 
       All returned URLs will use the gs:// schema."""
     files = self.delegate.GsUtil_ls(GS_BUCKET_PATH + version_string)
@@ -450,7 +468,6 @@ class Updater(object):
     for bundle_name, version, channel, archives in self.versions_to_update:
       self.delegate.Print('Updating %s to %s...' % (bundle_name, version))
       bundle = manifest.GetBundle(bundle_name)
-      bundle_recommended = bundle.recommended
       for archive in archives:
         platform_bundle = self._GetPlatformArchiveBundle(archive)
         # Normally the manifest snippet's bundle name matches our bundle name.
@@ -459,7 +476,11 @@ class Updater(object):
         platform_bundle.name = bundle_name
         bundle.MergeWithBundle(platform_bundle)
       bundle.stability = channel
-      bundle.recommended = bundle_recommended
+      # We always recommend the stable version.
+      if channel == 'stable':
+        bundle.recommended = 'yes'
+      else:
+        bundle.recommended = 'no'
       manifest.MergeBundle(bundle)
     self._UploadManifest(manifest)
     self.delegate.Print('Done.')
@@ -532,9 +553,78 @@ def Run(delegate, platforms):
   updater.Update(manifest)
 
 
+def SendMail(send_from, send_to, subject, text, smtp='localhost'):
+  """Send an email.
+
+  Args:
+    send_from: The sender's email address.
+    send_to: A list of addresses to send to.
+    subject: The subject of the email.
+    text: The text of the email.
+    smtp: The smtp server to use. Default is localhost.
+  """
+  msg = email.MIMEMultipart.MIMEMultipart()
+  msg['From'] = send_from
+  msg['To'] = ', '.join(send_to)
+  msg['Date'] = email.Utils.formatdate(localtime=True)
+  msg['Subject'] = subject
+  msg.attach(email.MIMEText.MIMEText(text))
+  smtp_obj = smtplib.SMTP(smtp)
+  smtp_obj.sendmail(send_from, send_to, msg.as_string())
+  smtp_obj.close()
+
+
+class CapturedFile(object):
+  """A file-like object that captures text written to it, but also passes it
+  through to an underlying file-like object."""
+  def __init__(self, passthrough):
+    self.passthrough = passthrough
+    self.written = cStringIO.StringIO()
+
+  def write(self, s):
+    self.written.write(s)
+    if self.passthrough:
+      self.passthrough.write(s)
+
+  def getvalue(self):
+    return self.written.getvalue()
+
+
 def main(args):
-  delegate = RealDelegate()
-  Run(delegate, ('mac', 'win', 'linux'))
+  parser = optparse.OptionParser()
+  parser.add_option('--gsutil', help='path to gsutil', dest='gsutil',
+      default=None)
+  parser.add_option('--mailfrom', help='email address of sender',
+      dest='mailfrom', default=None)
+  parser.add_option('--mailto', help='send error mails to...', dest='mailto',
+      default=[], action='append')
+  parser.add_option('--dryrun', help='don\'t upload the manifest.',
+      dest='dryrun', action='store_true', default=False)
+  options, args = parser.parse_args(args[1:])
+
+  if (options.mailfrom is None) != (not options.mailto):
+    options.mailfrom = None
+    options.mailto = None
+    sys.stderr.write('warning: Disabling email, one of --mailto or --mailfrom '
+        'was missing.\n')
+
+  if options.mailfrom and options.mailto:
+    # Capture stderr so it can be emailed, if necessary.
+    sys.stderr = CapturedFile(sys.stderr)
+
+  try:
+    delegate = RealDelegate(dryrun=options.dryrun, gsutil=options.gsutil)
+    Run(delegate, ('mac', 'win', 'linux'))
+  except Exception, e:
+    if options.mailfrom and options.mailto:
+      traceback.print_exc()
+      scriptname = os.path.basename(sys.argv[0])
+      subject = '[%s] Failed to update manifest' % (scriptname,)
+      text = '%s failed.\n\nSTDERR:\n%s\n' % (scriptname, sys.stderr.getvalue())
+      SendMail(options.mailfrom, options.mailto, subject, text)
+      sys.exit(1)
+    else:
+      raise
 
 
 if __name__ == '__main__':

@@ -22,10 +22,8 @@ using content::BrowserThread;
 namespace chromeos {
 
 UserImageLoader::ImageInfo::ImageInfo(int size,
-                                      bool load_raw_image,
                                       const LoadedCallback& loaded_cb)
     : size(size),
-      load_raw_image(load_raw_image),
       loaded_cb(loaded_cb) {
 }
 
@@ -41,11 +39,10 @@ UserImageLoader::~UserImageLoader() {
 
 void UserImageLoader::Start(const std::string& filepath,
                             int size,
-                            bool load_raw_image,
                             const LoadedCallback& loaded_cb) {
   target_message_loop_ = MessageLoop::current();
 
-  ImageInfo image_info(size, load_raw_image, loaded_cb);
+  ImageInfo image_info(size, loaded_cb);
   BrowserThread::PostTask(
       BrowserThread::FILE, FROM_HERE,
       base::Bind(&UserImageLoader::LoadImage, this, filepath, image_info));
@@ -79,28 +76,27 @@ void UserImageLoader::OnImageDecoded(const ImageDecoder* decoder,
 
   if (image_info.size > 0) {
     // Auto crop the image, taking the largest square in the center.
-    // Also make the image smaller to save space and memory.
     int size = std::min(decoded_image.width(), decoded_image.height());
     int x = (decoded_image.width() - size) / 2;
     int y = (decoded_image.height() - size) / 2;
     SkBitmap cropped_image =
         SkBitmapOperations::CreateTiledBitmap(decoded_image, x, y, size, size);
-    final_image =
-        skia::ImageOperations::Resize(cropped_image,
-                                      skia::ImageOperations::RESIZE_LANCZOS3,
-                                      image_info.size,
-                                      image_info.size);
+    if (size > image_info.size) {
+      // Also downsize the image to save space and memory.
+      final_image =
+          skia::ImageOperations::Resize(cropped_image,
+                                        skia::ImageOperations::RESIZE_LANCZOS3,
+                                        image_info.size,
+                                        image_info.size);
+    } else {
+      final_image = cropped_image;
+    }
   }
-
-  scoped_ptr<UserImage> user_image;
-  if (image_info.load_raw_image)
-    user_image.reset(new UserImage(final_image, decoder->get_image_data()));
-  else
-    user_image.reset(new UserImage(final_image));
 
   target_message_loop_->PostTask(
       FROM_HERE,
-      base::Bind(image_info.loaded_cb, *user_image));
+      base::Bind(image_info.loaded_cb,
+                 UserImage(final_image, decoder->get_image_data())));
 
   image_info_map_.erase(info_it);
 }

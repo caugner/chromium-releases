@@ -12,7 +12,8 @@
 #include "ui/aura/env.h"
 #include "ui/aura/event.h"
 #include "ui/aura/root_window.h"
-#include "ui/aura/single_monitor_manager.h"
+#include "ui/aura/single_display_manager.h"
+#include "ui/aura/shared/root_window_capture_client.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_delegate.h"
 #include "ui/base/hit_test.h"
@@ -72,7 +73,7 @@ class DemoWindowDelegate : public aura::WindowDelegate {
   virtual void OnDeviceScaleFactorChanged(float device_scale_factor) OVERRIDE {}
   virtual void OnWindowDestroying() OVERRIDE {}
   virtual void OnWindowDestroyed() OVERRIDE {}
-  virtual void OnWindowVisibilityChanged(bool visible) OVERRIDE {}
+  virtual void OnWindowTargetVisibilityChanged(bool visible) OVERRIDE {}
   virtual bool HasHitTestMask() const OVERRIDE { return false; }
   virtual void GetHitTestMask(gfx::Path* mask) const OVERRIDE {}
 
@@ -94,12 +95,20 @@ class DemoStackingClient : public aura::client::StackingClient {
   }
 
   // Overridden from aura::client::StackingClient:
-  virtual aura::Window* GetDefaultParent(aura::Window* window) OVERRIDE {
+  virtual aura::Window* GetDefaultParent(aura::Window* window,
+                                         const gfx::Rect& bounds) OVERRIDE {
+
+    if (!capture_client_.get()) {
+      capture_client_.reset(
+          new aura::shared::RootWindowCaptureClient(root_window_));
+    }
     return root_window_;
   }
 
  private:
   aura::RootWindow* root_window_;
+
+  scoped_ptr<aura::shared::RootWindowCaptureClient> capture_client_;
 
   DISALLOW_COPY_AND_ASSIGN(DemoStackingClient);
 };
@@ -119,9 +128,9 @@ int main(int argc, char** argv) {
   // Create the message-loop here before creating the root window.
   MessageLoop message_loop(MessageLoop::TYPE_UI);
   ui::CompositorTestSupport::Initialize();
-  aura::Env::GetInstance()->SetMonitorManager(new aura::SingleMonitorManager);
+  aura::Env::GetInstance()->SetDisplayManager(new aura::SingleDisplayManager);
   scoped_ptr<aura::RootWindow> root_window(
-      aura::MonitorManager::CreateRootWindowForPrimaryMonitor());
+      aura::DisplayManager::CreateRootWindowForPrimaryDisplay());
   scoped_ptr<DemoStackingClient> stacking_client(new DemoStackingClient(
       root_window.get()));
 

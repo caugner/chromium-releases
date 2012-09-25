@@ -10,14 +10,16 @@
 #include "chrome/browser/extensions/default_apps_trial.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_tab_helper.h"
 #include "chrome/browser/extensions/platform_app_launcher.h"
+#include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/panels/panel_manager.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_switches.h"
@@ -41,6 +43,7 @@
 
 using content::WebContents;
 using extensions::Extension;
+using extensions::ExtensionPrefs;
 
 namespace {
 
@@ -54,7 +57,8 @@ GURL UrlForExtension(const Extension* extension,
 
   GURL url;
   if (!override_url.is_empty()) {
-    DCHECK(extension->web_extent().MatchesURL(override_url));
+    DCHECK(extension->web_extent().MatchesURL(override_url) ||
+           override_url.GetOrigin() == extension->url());
     url = override_url;
   } else {
     url = extension->GetFullLaunchURL();
@@ -73,89 +77,6 @@ GURL UrlForExtension(const Extension* extension,
 bool AllowPanels(const std::string& app_name) {
   return PanelManager::ShouldUsePanels(
       web_app::GetExtensionIdFromApplicationName(app_name));
-}
-
-}  // namespace
-
-namespace application_launch {
-
-WebContents* OpenApplication(Profile* profile,
-                             const Extension* extension,
-                             extension_misc::LaunchContainer container,
-                             const GURL& override_url,
-                             WindowOpenDisposition disposition,
-                             const CommandLine* command_line) {
-  WebContents* tab = NULL;
-  ExtensionPrefs* prefs = profile->GetExtensionService()->extension_prefs();
-  prefs->SetActiveBit(extension->id(), true);
-
-  UMA_HISTOGRAM_ENUMERATION("Extensions.AppLaunchContainer", container, 100);
-#if defined(OS_CHROMEOS)
-  if (chromeos::KioskModeSettings::Get()->IsKioskModeEnabled())
-    chromeos::KioskModeMetrics::Get()->UserOpenedApp();
-#endif
-
-  if (extension->is_platform_app()) {
-    extensions::LaunchPlatformApp(profile, extension, command_line);
-    return NULL;
-  }
-
-  switch (container) {
-    case extension_misc::LAUNCH_NONE: {
-      NOTREACHED();
-      break;
-    }
-    case extension_misc::LAUNCH_PANEL: {
-      bool open_panel = false;
-#if defined(USE_ASH)
-      open_panel = CommandLine::ForCurrentProcess()->HasSwitch(
-          ash::switches::kAuraPanelManager);
-#else
-      open_panel = CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kBrowserlessPanels);
-#endif
-      if (open_panel) {
-        tab = OpenApplicationPanel(profile, extension, override_url);
-        break;
-      }
-      // else fall through to LAUNCH_WINDOW
-    }
-    case extension_misc::LAUNCH_WINDOW:
-      tab = OpenApplicationWindow(profile, extension, container,
-                                  override_url, NULL);
-      break;
-    case extension_misc::LAUNCH_TAB: {
-      tab = OpenApplicationTab(profile, extension, override_url,
-                               disposition);
-      break;
-    }
-    default:
-      NOTREACHED();
-      break;
-  }
-  return tab;
-}
-
-WebContents* OpenApplicationPanel(
-    Profile* profile,
-    const Extension* extension,
-    const GURL& url_input) {
-  GURL url = UrlForExtension(extension, url_input);
-  std::string app_name =
-      web_app::GenerateApplicationNameFromExtensionId(extension->id());
-  gfx::Rect panel_bounds;
-  panel_bounds.set_width(extension->launch_width());
-  panel_bounds.set_height(extension->launch_height());
-#if defined(USE_ASH)
-  PanelViewAura* panel_view = new PanelViewAura(app_name);
-  panel_view->Init(profile, url, panel_bounds);
-  return panel_view->WebContents();
-#else
-  Panel* panel = PanelManager::GetInstance()->CreatePanel(
-      app_name, profile, url, panel_bounds.size());
-  panel->Show();
-  return panel->WebContents();
-#endif
 }
 
 WebContents* OpenApplicationWindow(
@@ -204,13 +125,13 @@ WebContents* OpenApplicationWindow(
   }
 #endif
 
-  Browser* browser = Browser::CreateWithParams(params);
+  Browser* browser = new Browser(params);
 
   if (app_browser)
     *app_browser = browser;
 
-  TabContents* tab_contents =
-      browser->AddSelectedTabWithURL(url, content::PAGE_TRANSITION_START_PAGE);
+  TabContents* tab_contents = chrome::AddSelectedTabWithURL(
+      browser, url, content::PAGE_TRANSITION_START_PAGE);
   WebContents* contents = tab_contents->web_contents();
   contents->GetMutableRendererPrefs()->can_accept_load_drops = false;
   contents->GetRenderViewHost()->SyncRendererPrefs();
@@ -229,32 +150,6 @@ WebContents* OpenApplicationWindow(
   return contents;
 }
 
-WebContents* OpenAppShortcutWindow(Profile* profile,
-                                   const GURL& url,
-                                   bool update_shortcut) {
-  Browser* app_browser;
-  WebContents* tab = OpenApplicationWindow(
-      profile,
-      NULL,  // this is a URL app.  No extension.
-      extension_misc::LAUNCH_WINDOW,
-      url,
-      &app_browser);
-
-  if (!tab)
-    return NULL;
-
-  if (update_shortcut) {
-    // Set UPDATE_SHORTCUT as the pending web app action. This action is picked
-    // up in LoadingStateChanged to schedule a GetApplicationInfo. And when
-    // the web app info is available, ExtensionTabHelper notifies Browser via
-    // OnDidGetApplicationInfo, which calls
-    // web_app::UpdateShortcutForTabContents when it sees UPDATE_SHORTCUT as
-    // pending web app action.
-    app_browser->set_pending_web_app_action(Browser::UPDATE_SHORTCUT);
-  }
-  return tab;
-}
-
 WebContents* OpenApplicationTab(Profile* profile,
                                 const Extension* extension,
                                 const GURL& override_url,
@@ -263,7 +158,7 @@ WebContents* OpenApplicationTab(Profile* profile,
   WebContents* contents = NULL;
   if (!browser) {
     // No browser for this profile, need to open a new one.
-    browser = Browser::Create(profile);
+    browser = new Browser(Browser::CreateParams(profile));
     browser->window()->Show();
     // There's no current tab in this browser window, so add a new one.
     disposition = NEW_FOREGROUND_TAB;
@@ -297,13 +192,13 @@ WebContents* OpenApplicationTab(Profile* profile,
   GURL extension_url = UrlForExtension(extension, override_url);
   // TODO(erikkay): START_PAGE doesn't seem like the right transition in all
   // cases.
-  browser::NavigateParams params(browser, extension_url,
-                                 content::PAGE_TRANSITION_START_PAGE);
+  chrome::NavigateParams params(browser, extension_url,
+                                content::PAGE_TRANSITION_START_PAGE);
   params.tabstrip_add_types = add_type;
   params.disposition = disposition;
 
   if (disposition == CURRENT_TAB) {
-    WebContents* existing_tab = browser->GetActiveWebContents();
+    WebContents* existing_tab = chrome::GetActiveWebContents(browser);
     TabStripModel* model = browser->tab_strip_model();
     int tab_index = model->GetIndexOfWebContents(existing_tab);
 
@@ -313,7 +208,7 @@ WebContents* OpenApplicationTab(Profile* profile,
                             WebKit::WebReferrerPolicyDefault),
           disposition, content::PAGE_TRANSITION_LINK, false));
     // Reset existing_tab as OpenURL() may have clobbered it.
-    existing_tab = browser->GetActiveWebContents();
+    existing_tab = chrome::GetActiveWebContents(browser);
     if (params.tabstrip_add_types & TabStripModel::ADD_PINNED) {
       model->SetTabPinned(tab_index, true);
       // Pinning may have moved the tab.
@@ -324,7 +219,7 @@ WebContents* OpenApplicationTab(Profile* profile,
 
     contents = existing_tab;
   } else {
-    browser::Navigate(&params);
+    chrome::Navigate(&params);
     contents = params.target_contents->web_contents();
   }
 
@@ -339,11 +234,118 @@ WebContents* OpenApplicationTab(Profile* profile,
   // full screen mode in this case?
   if (launch_type == ExtensionPrefs::LAUNCH_FULLSCREEN &&
       !browser->window()->IsFullscreen()) {
-    browser->ToggleFullscreenMode();
+    chrome::ToggleFullscreenMode(browser);
   }
 #endif
 
   return contents;
+}
+
+WebContents* OpenApplicationPanel(
+    Profile* profile,
+    const Extension* extension,
+    const GURL& url_input) {
+  GURL url = UrlForExtension(extension, url_input);
+  std::string app_name =
+      web_app::GenerateApplicationNameFromExtensionId(extension->id());
+  gfx::Rect panel_bounds;
+  panel_bounds.set_width(extension->launch_width());
+  panel_bounds.set_height(extension->launch_height());
+#if defined(USE_ASH)
+  PanelViewAura* panel_view = new PanelViewAura(app_name);
+  panel_view->Init(profile, url, panel_bounds);
+  return panel_view->WebContents();
+#else
+  Panel* panel = PanelManager::GetInstance()->CreatePanel(
+      app_name, profile, url, panel_bounds.size());
+  panel->Show();
+  return panel->GetWebContents();
+#endif
+}
+
+}  // namespace
+
+namespace application_launch {
+
+LaunchParams::LaunchParams(Profile* profile,
+                           const extensions::Extension* extension,
+                           extension_misc::LaunchContainer container,
+                           WindowOpenDisposition disposition)
+    : profile(profile),
+      extension(extension),
+      container(container),
+      disposition(disposition),
+      override_url(),
+      command_line(NULL) {}
+
+WebContents* OpenApplication(const LaunchParams& params) {
+  Profile* profile = params.profile;
+  const extensions::Extension* extension = params.extension;
+  extension_misc::LaunchContainer container = params.container;
+  const GURL& override_url = params.override_url;
+
+  WebContents* tab = NULL;
+  ExtensionPrefs* prefs = profile->GetExtensionService()->extension_prefs();
+  prefs->SetActiveBit(extension->id(), true);
+
+  UMA_HISTOGRAM_ENUMERATION("Extensions.AppLaunchContainer", container, 100);
+#if defined(OS_CHROMEOS)
+  if (chromeos::KioskModeSettings::Get()->IsKioskModeEnabled())
+    chromeos::KioskModeMetrics::Get()->UserOpenedApp();
+#endif
+
+  if (extension->is_platform_app()) {
+    extensions::LaunchPlatformApp(profile, extension, params.command_line,
+                                  params.current_directory);
+    return NULL;
+  }
+
+  switch (container) {
+    case extension_misc::LAUNCH_NONE: {
+      NOTREACHED();
+      break;
+    }
+    case extension_misc::LAUNCH_PANEL:
+    case extension_misc::LAUNCH_WINDOW:
+      tab = OpenApplicationWindow(profile, extension, container,
+                                  override_url, NULL);
+      break;
+    case extension_misc::LAUNCH_TAB: {
+      tab = OpenApplicationTab(profile, extension, override_url,
+                               params.disposition);
+      break;
+    }
+    default:
+      NOTREACHED();
+      break;
+  }
+  return tab;
+}
+
+WebContents* OpenAppShortcutWindow(Profile* profile,
+                                   const GURL& url) {
+  Browser* app_browser;
+  WebContents* tab = OpenApplicationWindow(
+      profile,
+      NULL,  // this is a URL app.  No extension.
+      extension_misc::LAUNCH_WINDOW,
+      url,
+      &app_browser);
+
+  if (!tab)
+    return NULL;
+
+  TabContents* tab_contents = TabContents::FromWebContents(tab);
+  // Set UPDATE_SHORTCUT as the pending web app action. This action is picked
+  // up in LoadingStateChanged to schedule a GetApplicationInfo. And when
+  // the web app info is available, extensions::TabHelper notifies Browser via
+  // OnDidGetApplicationInfo, which calls
+  // web_app::UpdateShortcutForTabContents when it sees UPDATE_SHORTCUT as
+  // pending web app action.
+  tab_contents->extension_tab_helper()->set_pending_web_app_action(
+      extensions::TabHelper::UPDATE_SHORTCUT);
+
+  return tab;
 }
 
 }  // namespace application_launch

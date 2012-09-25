@@ -11,7 +11,6 @@
 
 #ifndef CONTENT_BROWSER_RENDERER_HOST_RESOURCE_DISPATCHER_HOST_IMPL_H_
 #define CONTENT_BROWSER_RENDERER_HOST_RESOURCE_DISPATCHER_HOST_IMPL_H_
-#pragma once
 
 #include <map>
 #include <set>
@@ -22,7 +21,6 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/linked_ptr.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/memory/weak_ptr.h"
 #include "base/time.h"
 #include "base/timer.h"
 #include "content/browser/download/download_resource_handler.h"
@@ -33,6 +31,7 @@
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/resource_dispatcher_host.h"
 #include "ipc/ipc_message.h"
+#include "net/cookies/canonical_cookie.h"
 #include "net/url_request/url_request.h"
 #include "webkit/glue/resource_type.h"
 
@@ -44,7 +43,6 @@ struct ResourceHostMsg_Request;
 struct ViewMsg_SwapOut_Params;
 
 namespace net {
-class CookieList;
 class URLRequestJobFactory;
 }
 
@@ -63,8 +61,7 @@ struct Referrer;
 
 class CONTENT_EXPORT ResourceDispatcherHostImpl
     : public ResourceDispatcherHost,
-      public ResourceLoaderDelegate,
-      public base::SupportsWeakPtr<ResourceDispatcherHostImpl> {
+      public ResourceLoaderDelegate {
  public:
   ResourceDispatcherHostImpl();
   virtual ~ResourceDispatcherHostImpl();
@@ -86,6 +83,9 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
       const DownloadSaveInfo& save_info,
       const DownloadStartedCallback& started_callback) OVERRIDE;
   virtual void ClearLoginDelegateForRequest(net::URLRequest* request) OVERRIDE;
+  virtual void BlockRequestsForRoute(int child_id, int route_id) OVERRIDE;
+  virtual void ResumeBlockedRequestsForRoute(
+      int child_id, int route_id) OVERRIDE;
 
   // Puts the resource dispatcher host in an inactive state (unable to begin
   // new requests).  Cancels all pending requests.
@@ -121,11 +121,6 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
   void CancelRequest(int child_id,
                      int request_id,
                      bool from_renderer);
-
-  // Returns true if it's ok to send the data. If there are already too many
-  // data messages pending, it pauses the request and returns false. In this
-  // case the caller should not send the data.
-  bool WillSendData(int child_id, int request_id, bool* defer);
 
   // Marks the request as "parked". This happens if a request is
   // redirected cross-site and needs to be resumed by a new render view.
@@ -181,22 +176,8 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
 
   void RemovePendingRequest(int child_id, int request_id);
 
-  // Causes all new requests for the route identified by
-  // |child_id| and |route_id| to be blocked (not being
-  // started) until ResumeBlockedRequestsForRoute or
-  // CancelBlockedRequestsForRoute is called.
-  void BlockRequestsForRoute(int child_id, int route_id);
-
-  // Resumes any blocked request for the specified route id.
-  void ResumeBlockedRequestsForRoute(int child_id, int route_id);
-
   // Cancels any blocked request for the specified route id.
   void CancelBlockedRequestsForRoute(int child_id, int route_id);
-
-  // Decrements the pending_data_count for the request and resumes
-  // the request if it was paused due to too many pending data
-  // messages sent.
-  void DataReceivedACK(int child_id, int request_id);
 
   // Maintains a collection of temp files created in support of
   // the download_to_file capability. Used to grant access to the

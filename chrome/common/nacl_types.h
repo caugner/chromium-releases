@@ -4,7 +4,6 @@
 
 #ifndef CHROME_COMMON_NACL_TYPES_H_
 #define CHROME_COMMON_NACL_TYPES_H_
-#pragma once
 
 #include <string>
 #include <vector>
@@ -55,6 +54,7 @@ struct NaClStartParams {
 
   bool enable_exception_handling;
   bool enable_debug_stub;
+  bool enable_ipc_proxy;
 };
 
 }  // namespace nacl

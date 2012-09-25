@@ -56,11 +56,18 @@ class IdlSchemaTest(unittest.TestCase):
                           'parameters':[{'type':'integer', 'name':'x'}]}}]
     self.assertEquals(expected, getParams(schema, 'whatever'))
 
+  def testLegalValues(self):
+    self.assertEquals({
+        'x': {'name': 'x', 'type': 'integer', 'enum': [1,2],
+              'description': 'This comment tests \\\"double-quotes\\\".'},
+        'y': {'name': 'y', 'type': 'string'}},
+      getType(self.idl_basics, 'idl_basics.MyType1')['properties'])
+
   def testEnum(self):
     schema = self.idl_basics
-    expected = {'enum': ['name1', 'name2'],
+    expected = {'enum': ['name1', 'name2'], 'description': 'Enum description',
                 'type': 'string', 'id': 'idl_basics.EnumType'}
-    self.assertEquals(expected, getType(schema, 'idl_basics.EnumType'))
+    self.assertEquals(expected, getType(schema, expected['id']))
 
     expected = [{'name':'type', '$ref':'idl_basics.EnumType'},
                 {'type':'function', 'name':'Callback5',
@@ -76,6 +83,29 @@ class IdlSchemaTest(unittest.TestCase):
     func = getFunction(schema, 'function15')
     self.assertTrue(func is not None)
     self.assertTrue(func['nocompile'])
+
+  def testInternalNamespace(self):
+    idl_basics  = self.idl_basics
+    self.assertEquals('idl_basics', idl_basics['namespace'])
+    self.assertTrue(idl_basics['internal'])
+    self.assertFalse(idl_basics['nodoc'])
+
+  def testFunctionComment(self):
+    schema = self.idl_basics
+    func = getFunction(schema, 'function3')
+    self.assertEquals(('This comment should appear in the documentation, '
+                       'despite occupying multiple lines.'),
+                      func['description'])
+    self.assertEquals(
+        [{'description': ('So should this comment about the argument. '
+                          '<em>HTML</em> is fine too.'),
+          'name': 'arg',
+          '$ref': 'idl_basics.MyType1'}],
+        func['parameters'])
+    func = getFunction(schema, 'function4')
+    self.assertEquals(('This tests if \\\"double-quotes\\\" are escaped '
+                       'correctly.'),
+                      func['description'])
 
 if __name__ == '__main__':
   unittest.main()

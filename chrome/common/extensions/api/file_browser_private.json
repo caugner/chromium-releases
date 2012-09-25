@@ -15,6 +15,7 @@
           "taskId": {"type": "string", "description": "The unique identifier of the task."},
           "title": {"type": "string", "description": "Task title."},
           "iconUrl": {"type": "string", "description": "Task icon url (from chrome://extension-icon/...)"},
+          "driveApp": {"type": "boolean", "description": "True if this is Drive App."},
           "patterns": {
             "type": "array",
             "items": { "type": "string" },
@@ -66,6 +67,16 @@
           "appName": {
             "type": "string",
             "description": "WebApp name."
+          },
+          "appIcon": {
+            "type": "string",
+            "optional": true,
+            "description": "URL to the GData application icon for this application."
+          },
+          "docIcon": {
+            "type": "string",
+            "optional": true,
+            "description": "URL to the GData document icon for documents associated with this application."
           },
           "objectType": {
             "type": "string",
@@ -266,9 +277,8 @@
             "type": "string",
             "enum": ["success", "error_unknown", "error_internal",
                      "error_unknown_filesystem", "error_unsuported_filesystem",
-                     "error_invalid_archive", "error_libcros_missing",
-                     "error_authentication", "error_network",
-                     "error_path_unmounted"],
+                     "error_invalid_archive", "error_authentication",
+                     "error_network", "error_path_unmounted"],
             "description": "Event type that tells listeners if mount was successful or an error occurred. It also specifies the error."
           },
           "sourcePath": {
@@ -909,28 +919,6 @@
         ]
       },
       {
-        "name": "getPathForDriveSearchResult",
-        "description": "Gets file path for a given drive search result filesystem url.",
-        "parameters": [
-          {
-            "name": "fileURL",
-            "type": "string",
-            "description": "Url of the drive search result"
-          },
-          {
-            "name": "callback",
-            "type": "function",
-            "parameters": [
-              {
-                "name": "filePath",
-                "type": "string",
-                "description": "File path of the search result"
-              }  
-            ]
-          }
-        ]
-      },
-      {
         "name": "searchGData",
         "type": "function",
         "description": "Performs drive content search.",
@@ -939,6 +927,11 @@
             "name": "query",
             "description": "Search query.",
             "type": "string"
+          },
+          {
+            "name": "nextFeed",
+            "type": "string",
+            "description": "ID of the search feed that should be fetched next. Value passed here should be gotten from previous searchGData call. It can be empty for the initial search request."
           },
           {
             "name": "callback",
@@ -951,11 +944,21 @@
                   "type": "object",
                   "isInstanceOf": "Entry",
                   "description": "Entry representing a search result."
-                }  
+                }
+              },
+              {
+                "name": "nextFeed",
+                "type": "string",
+                "description": "ID of the feed that contains next chunk of the search result. Should be sent to the next searchGData request to perform incremental search."
               }
             ]
           }
         ]
+      },
+      {
+        "name": "clearDriveCache",
+        "description": "Clear all GData local caches.",
+        "parameters": []
       },
       {
         "name": "getNetworkConnectionState",

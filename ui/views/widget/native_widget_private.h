@@ -4,7 +4,6 @@
 
 #ifndef UI_VIEWS_WIDGET_NATIVE_WIDGET_PRIVATE_H_
 #define UI_VIEWS_WIDGET_NATIVE_WIDGET_PRIVATE_H_
-#pragma once
 
 #include "base/string16.h"
 #include "ui/base/ui_base_types.h"
@@ -168,8 +167,8 @@ class VIEWS_EXPORT NativeWidgetPrivate : public NativeWidget,
   virtual void InitModalType(ui::ModalType modal_type) = 0;
 
   // See method documentation in Widget.
-  virtual gfx::Rect GetWindowScreenBounds() const = 0;
-  virtual gfx::Rect GetClientAreaScreenBounds() const = 0;
+  virtual gfx::Rect GetWindowBoundsInScreen() const = 0;
+  virtual gfx::Rect GetClientAreaBoundsInScreen() const = 0;
   virtual gfx::Rect GetRestoredBounds() const = 0;
   virtual void SetBounds(const gfx::Rect& bounds) = 0;
   virtual void SetSize(const gfx::Size& size) = 0;

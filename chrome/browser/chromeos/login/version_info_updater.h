@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_LOGIN_VERSION_INFO_UPDATER_H_
 #define CHROME_BROWSER_CHROMEOS_LOGIN_VERSION_INFO_UPDATER_H_
-#pragma once
 
 #include <string>
 
@@ -74,7 +73,7 @@ class VersionInfoUpdater : public policy::CloudPolicySubsystem::Observer,
                          bool reporting_hint);
 
   // Callback from chromeos::VersionLoader giving the version.
-  void OnVersion(VersionLoader::Handle handle, std::string version);
+  void OnVersion(VersionLoader::Handle handle, const std::string& version);
   // Callback from chromeos::InfoLoader giving the boot times.
   void OnBootTimes(
       BootTimesLoader::Handle handle, BootTimesLoader::BootTimes boot_times);

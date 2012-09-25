@@ -8,16 +8,19 @@
 
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/certificate_viewer.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/toolbar_view.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/cert_store.h"
+#include "content/public/browser/web_contents.h"
 #include "content/public/common/ssl_status.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "net/base/x509_certificate.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/range/range.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/image/image.h"
 #include "ui/views/controls/image_view.h"
@@ -30,6 +33,7 @@
 using content::OpenURLParams;
 using content::Referrer;
 using content::SSLStatus;
+using content::WebContents;
 
 namespace {
 
@@ -46,7 +50,7 @@ const int kIconVerticalOffset = -7;
 
 // The duration of the animation that resizes the bubble once the async
 // information is provided through the ModelChanged event.
-const int kPageInfoSlideDuration = 1450;
+const int kPageInfoSlideDuration = 250;
 
 // A section contains an image that shows a status (good or bad), a title, an
 // optional head-line (in bold) and a description.
@@ -65,9 +69,9 @@ class Section : public views::View,
   void SetAnimationStage(double animation_stage);
 
   // views::View methods:
-  virtual int GetHeightForWidth(int w);
-  virtual void Layout();
-  virtual void Paint(gfx::Canvas* canvas);
+  virtual int GetHeightForWidth(int w) OVERRIDE;
+  virtual void Layout() OVERRIDE;
+  virtual void Paint(gfx::Canvas* canvas) OVERRIDE;
 
   // views::LinkListener methods:
   virtual void LinkClicked(views::Link* source, int event_flags) OVERRIDE;
@@ -102,20 +106,21 @@ class Section : public views::View,
 // PageInfoBubbleView
 
 PageInfoBubbleView::PageInfoBubbleView(views::View* anchor_view,
-                                       Profile* profile,
+                                       WebContents* web_contents,
                                        const GURL& url,
                                        const SSLStatus& ssl,
                                        bool show_history,
                                        content::PageNavigator* navigator)
     : BubbleDelegateView(anchor_view, views::BubbleBorder::TOP_LEFT),
-      ALLOW_THIS_IN_INITIALIZER_LIST(model_(profile, url, ssl,
-                                            show_history, this)),
+      ALLOW_THIS_IN_INITIALIZER_LIST(model_(
+          Profile::FromBrowserContext(web_contents->GetBrowserContext()), url,
+          ssl, show_history, this)),
       cert_id_(ssl.cert_id),
       help_center_link_(NULL),
       ALLOW_THIS_IN_INITIALIZER_LIST(resize_animation_(this)),
       animation_start_height_(0),
-      navigator_(navigator) {
-
+      navigator_(navigator),
+      web_contents_(web_contents) {
   if (cert_id_ > 0) {
     scoped_refptr<net::X509Certificate> cert;
     content::CertStore::GetInstance()->RetrieveCert(cert_id_, &cert);
@@ -135,7 +140,7 @@ PageInfoBubbleView::~PageInfoBubbleView() {
 void PageInfoBubbleView::ShowCertDialog() {
   gfx::NativeWindow parent =
       anchor_view() ? anchor_view()->GetWidget()->GetNativeWindow() : NULL;
-  ShowCertificateViewerByID(parent, cert_id_);
+  ShowCertificateViewerByID(web_contents_, parent, cert_id_);
 }
 
 gfx::Size PageInfoBubbleView::GetSeparatorSize() {
@@ -420,6 +425,12 @@ gfx::Size Section::LayoutItems(bool compute_bounds_only, int width) {
     if (!compute_bounds_only)
       headline_label_->SetBounds(x, y, w > 0 ? w : 0, size.height());
     y += size.height();
+
+    // Show the leading headline text by moving the textfield cursor there,
+    // otherwise long headlines may initially show the leading text truncated.
+    // This can only be done after the textfield is initialized with the Widget.
+    if (GetWidget())
+      headline_label_->SelectRange(ui::Range());
   } else {
     if (!compute_bounds_only)
       headline_label_->SetBounds(x, y, 0, 0);
@@ -450,23 +461,22 @@ gfx::Size Section::LayoutItems(bool compute_bounds_only, int width) {
   return gfx::Size(width, y);
 }
 
-namespace browser {
+namespace chrome {
 
 void ShowPageInfoBubble(views::View* anchor_view,
-                        Profile* profile,
+                        WebContents* web_contents,
                         const GURL& url,
                         const SSLStatus& ssl,
                         bool show_history,
                         content::PageNavigator* navigator) {
-  PageInfoBubbleView* page_info_bubble =
-      new PageInfoBubbleView(anchor_view,
-                             profile,
-                             url,
-                             ssl,
-                             show_history,
-                             navigator);
+  PageInfoBubbleView* page_info_bubble = new PageInfoBubbleView(anchor_view,
+                                                                web_contents,
+                                                                url,
+                                                                ssl,
+                                                                show_history,
+                                                                navigator);
   views::BubbleDelegateView::CreateBubble(page_info_bubble);
   page_info_bubble->Show();
 }
 
-}
+}  // namespace chrome

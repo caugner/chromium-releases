@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_UPDATER_EXTENSION_UPDATER_H_
 #define CHROME_BROWSER_EXTENSIONS_UPDATER_EXTENSION_UPDATER_H_
-#pragma once
 
 #include <list>
 #include <stack>
@@ -23,7 +22,6 @@
 #include "content/public/browser/notification_registrar.h"
 #include "googleurl/src/gurl.h"
 
-class ExtensionPrefs;
 class ExtensionServiceInterface;
 class ExtensionSet;
 class PrefService;
@@ -32,6 +30,7 @@ class Profile;
 namespace extensions {
 
 class ExtensionDownloader;
+class ExtensionPrefs;
 class ExtensionUpdaterTest;
 
 // A class for doing auto-updates of installed Extensions. Used like this:

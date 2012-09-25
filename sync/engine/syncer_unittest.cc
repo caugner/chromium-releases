@@ -25,23 +25,24 @@
 #include "build/build_config.h"
 #include "sync/engine/get_commit_ids_command.h"
 #include "sync/engine/net/server_connection_manager.h"
-#include "sync/engine/nigori_util.h"
 #include "sync/engine/process_updates_command.h"
-#include "sync/engine/sync_scheduler.h"
+#include "sync/engine/sync_scheduler_impl.h"
 #include "sync/engine/syncer.h"
 #include "sync/engine/syncer_proto_util.h"
-#include "sync/engine/syncer_util.h"
-#include "sync/engine/syncproto.h"
 #include "sync/engine/throttled_data_type_tracker.h"
 #include "sync/engine/traffic_recorder.h"
+#include "sync/internal_api/public/base/model_type.h"
 #include "sync/internal_api/public/engine/model_safe_worker.h"
-#include "sync/internal_api/public/syncable/model_type.h"
 #include "sync/protocol/bookmark_specifics.pb.h"
 #include "sync/protocol/nigori_specifics.pb.h"
 #include "sync/protocol/preference_specifics.pb.h"
 #include "sync/protocol/sync.pb.h"
 #include "sync/sessions/sync_session_context.h"
-#include "sync/syncable/syncable.h"
+#include "sync/syncable/mutable_entry.h"
+#include "sync/syncable/nigori_util.h"
+#include "sync/syncable/read_transaction.h"
+#include "sync/syncable/syncable_util.h"
+#include "sync/syncable/write_transaction.h"
 #include "sync/test/engine/fake_model_worker.h"
 #include "sync/test/engine/mock_connection_manager.h"
 #include "sync/test/engine/test_directory_setter_upper.h"
@@ -60,7 +61,7 @@ using std::multimap;
 using std::set;
 using std::string;
 
-namespace browser_sync {
+namespace syncer {
 
 using syncable::BaseTransaction;
 using syncable::Blob;
@@ -72,12 +73,10 @@ using syncable::GetOnlyEntryWithName;
 using syncable::Id;
 using syncable::kEncryptedString;
 using syncable::MutableEntry;
-using syncable::ReadTransaction;
 using syncable::WriteTransaction;
 
 using syncable::BASE_VERSION;
 using syncable::CREATE;
-using syncable::CREATE_NEW_UPDATE_ITEM;
 using syncable::GET_BY_HANDLE;
 using syncable::GET_BY_ID;
 using syncable::GET_BY_CLIENT_TAG;
@@ -95,7 +94,6 @@ using syncable::PARENT_ID;
 using syncable::PREV_ID;
 using syncable::BASE_SERVER_SPECIFICS;
 using syncable::SERVER_IS_DEL;
-using syncable::SERVER_NON_UNIQUE_NAME;
 using syncable::SERVER_PARENT_ID;
 using syncable::SERVER_POSITION_IN_PARENT;
 using syncable::SERVER_SPECIFICS;
@@ -154,7 +152,7 @@ class SyncerTest : public testing::Test,
   void GetModelSafeRoutingInfo(ModelSafeRoutingInfo* out) {
     // We're just testing the sync engine here, so we shunt everything to
     // the SyncerThread.  Datatypes which aren't enabled aren't in the map.
-    for (syncable::ModelTypeSet::Iterator it = enabled_datatypes_.First();
+    for (ModelTypeSet::Iterator it = enabled_datatypes_.First();
          it.Good(); it.Inc()) {
       (*out)[it.Get()] = GROUP_PASSIVE;
     }
@@ -179,18 +177,18 @@ class SyncerTest : public testing::Test,
     std::vector<ModelSafeWorker*> workers;
     GetModelSafeRoutingInfo(&info);
     GetWorkers(&workers);
-    syncable::ModelTypePayloadMap types =
-        syncable::ModelTypePayloadMapFromRoutingInfo(info, std::string());
+    ModelTypePayloadMap types =
+        ModelSafeRoutingInfoToPayloadMap(info, std::string());
     return new SyncSession(context_.get(), this,
         sessions::SyncSourceInfo(sync_pb::GetUpdatesCallerInfo::UNKNOWN, types),
         info, workers);
   }
 
   bool SyncShareAsDelegate(
-      SyncScheduler::SyncSessionJob::SyncSessionJobPurpose purpose) {
+      SyncSchedulerImpl::SyncSessionJob::SyncSessionJobPurpose purpose) {
     SyncerStep start;
     SyncerStep end;
-    SyncScheduler::SetSyncerStepsForPurpose(purpose, &start, &end);
+    SyncSchedulerImpl::SetSyncerStepsForPurpose(purpose, &start, &end);
 
     session_.reset(MakeSession());
     syncer_->SyncShare(session_.get(), start, end);
@@ -199,12 +197,13 @@ class SyncerTest : public testing::Test,
 
   bool SyncShareNudge() {
     session_.reset(MakeSession());
-    return SyncShareAsDelegate(SyncScheduler::SyncSessionJob::NUDGE);
+    return SyncShareAsDelegate(SyncSchedulerImpl::SyncSessionJob::NUDGE);
   }
 
   bool SyncShareConfigure() {
     session_.reset(MakeSession());
-    return SyncShareAsDelegate(SyncScheduler::SyncSessionJob::CONFIGURATION);
+    return SyncShareAsDelegate(
+        SyncSchedulerImpl::SyncSessionJob::CONFIGURATION);
   }
 
   void LoopSyncShare() {
@@ -219,10 +218,10 @@ class SyncerTest : public testing::Test,
   virtual void SetUp() {
     dir_maker_.SetUp();
     mock_server_.reset(new MockConnectionManager(directory()));
-    EnableDatatype(syncable::BOOKMARKS);
-    EnableDatatype(syncable::NIGORI);
-    EnableDatatype(syncable::PREFERENCES);
-    EnableDatatype(syncable::NIGORI);
+    EnableDatatype(BOOKMARKS);
+    EnableDatatype(NIGORI);
+    EnableDatatype(PREFERENCES);
+    EnableDatatype(NIGORI);
     worker_ = new FakeModelWorker(GROUP_PASSIVE);
     std::vector<SyncEngineEventListener*> listeners;
     listeners.push_back(this);
@@ -237,14 +236,16 @@ class SyncerTest : public testing::Test,
 
     context_.reset(
         new SyncSessionContext(
-            mock_server_.get(), directory(), routing_info, workers,
+            mock_server_.get(), directory(), workers,
             &extensions_activity_monitor_, throttled_data_type_tracker_.get(),
-            listeners, NULL, &traffic_recorder_));
+            listeners, NULL, &traffic_recorder_,
+            true  /* enable keystore encryption */));
+    context_->set_routing_info(routing_info);
     ASSERT_FALSE(context_->resolver());
     syncer_ = new Syncer();
     session_.reset(MakeSession());
 
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
     syncable::Directory::ChildHandles children;
     directory()->GetChildHandlesById(&trans, trans.root_id(), &children);
     ASSERT_EQ(0u, children.size());
@@ -252,6 +253,8 @@ class SyncerTest : public testing::Test,
     root_id_ = TestIdFactory::root();
     parent_id_ = ids_.MakeServer("parent id");
     child_id_ = ids_.MakeServer("child id");
+    directory()->set_store_birthday(mock_server_->store_birthday());
+    mock_server_->SetKeystoreKey("encryption_key");
   }
 
   virtual void TearDown() {
@@ -281,7 +284,7 @@ class SyncerTest : public testing::Test,
     EXPECT_EQ("http://demo/", specifics.bookmark().url());
   }
 
-  bool initial_sync_ended_for_type(syncable::ModelType type) {
+  bool initial_sync_ended_for_type(ModelType type) {
     return directory()->initial_sync_ended_for_type(type);
   }
 
@@ -298,13 +301,13 @@ class SyncerTest : public testing::Test,
   }
   sync_pb::EntitySpecifics DefaultBookmarkSpecifics() {
     sync_pb::EntitySpecifics result;
-    AddDefaultFieldValue(syncable::BOOKMARKS, &result);
+    AddDefaultFieldValue(BOOKMARKS, &result);
     return result;
   }
 
   sync_pb::EntitySpecifics DefaultPreferencesSpecifics() {
     sync_pb::EntitySpecifics result;
-    AddDefaultFieldValue(syncable::PREFERENCES, &result);
+    AddDefaultFieldValue(PREFERENCES, &result);
     return result;
   }
   // Enumeration of alterations to entries for commit ordering tests.
@@ -407,8 +410,8 @@ class SyncerTest : public testing::Test,
       sessions::OrderedCommitSet output_set(routes);
       GetCommitIdsCommand command(limit, &output_set);
       std::set<int64> ready_unsynced_set;
-      command.FilterUnreadyEntries(&wtrans, syncable::ModelTypeSet(),
-                                   syncable::ModelTypeSet(), false,
+      command.FilterUnreadyEntries(&wtrans, ModelTypeSet(),
+                                   ModelTypeSet(), false,
                                    unsynced_handle_view, &ready_unsynced_set);
       command.BuildCommitIds(session_->write_transaction(), routes,
                              ready_unsynced_set);
@@ -459,7 +462,7 @@ class SyncerTest : public testing::Test,
     return entry.Get(META_HANDLE);
   }
 
-  void EnableDatatype(syncable::ModelType model_type) {
+  void EnableDatatype(ModelType model_type) {
     enabled_datatypes_.Put(model_type);
 
     ModelSafeRoutingInfo routing_info;
@@ -472,7 +475,7 @@ class SyncerTest : public testing::Test,
     mock_server_->ExpectGetUpdatesRequestTypes(enabled_datatypes_);
   }
 
-  void DisableDatatype(syncable::ModelType model_type) {
+  void DisableDatatype(ModelType model_type) {
     enabled_datatypes_.Remove(model_type);
 
     ModelSafeRoutingInfo routing_info;
@@ -488,7 +491,7 @@ class SyncerTest : public testing::Test,
   template<typename FieldType, typename ValueType>
   ValueType GetField(int64 metahandle, FieldType field,
       ValueType default_value) {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
     Entry entry(&trans, GET_BY_HANDLE, metahandle);
     EXPECT_TRUE(entry.good());
     if (!entry.good()) {
@@ -560,8 +563,8 @@ class SyncerTest : public testing::Test,
   base::TimeDelta last_sessions_commit_delay_seconds_;
   scoped_refptr<ModelSafeWorker> worker_;
 
-  syncable::ModelTypeSet enabled_datatypes_;
-  browser_sync::TrafficRecorder traffic_recorder_;
+  ModelTypeSet enabled_datatypes_;
+  TrafficRecorder traffic_recorder_;
 
   DISALLOW_COPY_AND_ASSIGN(SyncerTest);
 };
@@ -570,8 +573,8 @@ TEST_F(SyncerTest, TestCallGatherUnsyncedEntries) {
   {
     Syncer::UnsyncedMetaHandles handles;
     {
-      ReadTransaction trans(FROM_HERE, directory());
-      SyncerUtil::GetUnsyncedEntries(&trans, &handles);
+      syncable::ReadTransaction trans(FROM_HERE, directory());
+      GetUnsyncedEntries(&trans, &handles);
     }
     ASSERT_EQ(0u, handles.size());
   }
@@ -621,8 +624,8 @@ TEST_F(SyncerTest, GetCommitIdsCommandTruncates) {
   vector<int64> unsynced_handle_view;
   vector<syncable::Id> expected_order;
   {
-    ReadTransaction rtrans(FROM_HERE, directory());
-    SyncerUtil::GetUnsyncedEntries(&rtrans, &unsynced_handle_view);
+    syncable::ReadTransaction rtrans(FROM_HERE, directory());
+    GetUnsyncedEntries(&rtrans, &unsynced_handle_view);
   }
   // The expected order is "x", "b", "c", "d", "e", truncated appropriately.
   expected_order.push_back(ids_.MakeServer("x"));
@@ -634,9 +637,9 @@ TEST_F(SyncerTest, GetCommitIdsCommandTruncates) {
 }
 
 TEST_F(SyncerTest, GetCommitIdsFiltersThrottledEntries) {
-  const syncable::ModelTypeSet throttled_types(syncable::BOOKMARKS);
+  const ModelTypeSet throttled_types(BOOKMARKS);
   sync_pb::EntitySpecifics bookmark_data;
-  AddDefaultFieldValue(syncable::BOOKMARKS, &bookmark_data);
+  AddDefaultFieldValue(BOOKMARKS, &bookmark_data);
 
   mock_server_->AddUpdateDirectory(1, 0, "A", 10, 10);
   SyncShareNudge();
@@ -658,7 +661,7 @@ TEST_F(SyncerTest, GetCommitIdsFiltersThrottledEntries) {
 
   {
     // Nothing should have been committed as bookmarks is throttled.
-    ReadTransaction rtrans(FROM_HERE, directory());
+    syncable::ReadTransaction rtrans(FROM_HERE, directory());
     Entry entryA(&rtrans, syncable::GET_BY_ID, ids_.FromNumber(1));
     ASSERT_TRUE(entryA.good());
     EXPECT_TRUE(entryA.Get(IS_UNSYNCED));
@@ -671,7 +674,7 @@ TEST_F(SyncerTest, GetCommitIdsFiltersThrottledEntries) {
   SyncShareNudge();
   {
     // It should have been committed.
-    ReadTransaction rtrans(FROM_HERE, directory());
+    syncable::ReadTransaction rtrans(FROM_HERE, directory());
     Entry entryA(&rtrans, syncable::GET_BY_ID, ids_.FromNumber(1));
     ASSERT_TRUE(entryA.good());
     EXPECT_FALSE(entryA.Get(IS_UNSYNCED));
@@ -689,7 +692,7 @@ TEST_F(SyncerTest, GetCommitIdsFiltersThrottledEntries) {
     EXPECT_TRUE(is_unsynced == entryA.Get(IS_UNSYNCED)); \
     EXPECT_TRUE(is_unapplied == entryA.Get(IS_UNAPPLIED_UPDATE)); \
     EXPECT_TRUE(prev_initialized == \
-              syncable::IsRealDataType(syncable::GetModelTypeFromSpecifics( \
+              IsRealDataType(GetModelTypeFromSpecifics( \
                   entryA.Get(BASE_SERVER_SPECIFICS)))); \
     EXPECT_TRUE(parent_id == -1 || \
                 entryA.Get(PARENT_ID) == id_fac.FromNumber(parent_id)); \
@@ -703,7 +706,7 @@ TEST_F(SyncerTest, GetCommitIdsFiltersUnreadyEntries) {
   sync_pb::EntitySpecifics bookmark, encrypted_bookmark;
   bookmark.mutable_bookmark()->set_url("url");
   bookmark.mutable_bookmark()->set_title("title");
-  AddDefaultFieldValue(syncable::BOOKMARKS, &encrypted_bookmark);
+  AddDefaultFieldValue(BOOKMARKS, &encrypted_bookmark);
   mock_server_->AddUpdateDirectory(1, 0, "A", 10, 10);
   mock_server_->AddUpdateDirectory(2, 0, "B", 10, 10);
   mock_server_->AddUpdateDirectory(3, 0, "C", 10, 10);
@@ -715,7 +718,7 @@ TEST_F(SyncerTest, GetCommitIdsFiltersUnreadyEntries) {
     // Mark bookmarks as encrypted and set the cryptographer to have pending
     // keys.
     WriteTransaction wtrans(FROM_HERE, UNITTEST, directory());
-    browser_sync::Cryptographer other_cryptographer(&encryptor_);
+    Cryptographer other_cryptographer(&encryptor_);
     other_cryptographer.AddKey(other_params);
     sync_pb::EntitySpecifics specifics;
     sync_pb::NigoriSpecifics* nigori = specifics.mutable_nigori();
@@ -756,7 +759,7 @@ TEST_F(SyncerTest, GetCommitIdsFiltersUnreadyEntries) {
     // Nothing should have commited due to bookmarks being encrypted and
     // the cryptographer having pending keys. A would have been resolved
     // as a simple conflict, but still be unsynced until the next sync cycle.
-    ReadTransaction rtrans(FROM_HERE, directory());
+    syncable::ReadTransaction rtrans(FROM_HERE, directory());
     VERIFY_ENTRY(1, false, true, false, 0, 20, 20, ids_, &rtrans);
     VERIFY_ENTRY(2, false, true, false, 0, 10, 10, ids_, &rtrans);
     VERIFY_ENTRY(3, false, true, false, 0, 10, 10, ids_, &rtrans);
@@ -770,7 +773,7 @@ TEST_F(SyncerTest, GetCommitIdsFiltersUnreadyEntries) {
     // All properly encrypted and non-conflicting items should commit. "A" was
     // conflicting, but last sync cycle resolved it as simple conflict, so on
     // this sync cycle it committed succesfullly.
-    ReadTransaction rtrans(FROM_HERE, directory());
+    syncable::ReadTransaction rtrans(FROM_HERE, directory());
     // Committed successfully.
     VERIFY_ENTRY(1, false, false, false, 0, 21, 21, ids_, &rtrans);
     // Committed successfully.
@@ -796,9 +799,9 @@ TEST_F(SyncerTest, GetCommitIdsFiltersUnreadyEntries) {
   {
     const StatusController& status_controller = session_->status_controller();
     // Expect success.
-    EXPECT_EQ(status_controller.error().commit_result, SYNCER_OK);
+    EXPECT_EQ(status_controller.model_neutral_state().commit_result, SYNCER_OK);
     // None should be unsynced anymore.
-    ReadTransaction rtrans(FROM_HERE, directory());
+    syncable::ReadTransaction rtrans(FROM_HERE, directory());
     VERIFY_ENTRY(1, false, false, false, 0, 21, 21, ids_, &rtrans);
     VERIFY_ENTRY(2, false, false, false, 0, 11, 11, ids_, &rtrans);
     VERIFY_ENTRY(3, false, false, false, 0, 11, 11, ids_, &rtrans);
@@ -808,19 +811,19 @@ TEST_F(SyncerTest, GetCommitIdsFiltersUnreadyEntries) {
 
 TEST_F(SyncerTest, EncryptionAwareConflicts) {
   KeyParams key_params = {"localhost", "dummy", "foobar"};
-  browser_sync::Cryptographer other_cryptographer(&encryptor_);
+  Cryptographer other_cryptographer(&encryptor_);
   other_cryptographer.AddKey(key_params);
   sync_pb::EntitySpecifics bookmark, encrypted_bookmark, modified_bookmark;
   bookmark.mutable_bookmark()->set_title("title");
   other_cryptographer.Encrypt(bookmark,
                               encrypted_bookmark.mutable_encrypted());
-  AddDefaultFieldValue(syncable::BOOKMARKS, &encrypted_bookmark);
+  AddDefaultFieldValue(BOOKMARKS, &encrypted_bookmark);
   modified_bookmark.mutable_bookmark()->set_title("title2");
   other_cryptographer.Encrypt(modified_bookmark,
                               modified_bookmark.mutable_encrypted());
   sync_pb::EntitySpecifics pref, encrypted_pref, modified_pref;
   pref.mutable_preference()->set_name("name");
-  AddDefaultFieldValue(syncable::PREFERENCES, &encrypted_pref);
+  AddDefaultFieldValue(PREFERENCES, &encrypted_pref);
   other_cryptographer.Encrypt(pref,
                               encrypted_pref.mutable_encrypted());
   modified_pref.mutable_preference()->set_name("name2");
@@ -846,7 +849,7 @@ TEST_F(SyncerTest, EncryptionAwareConflicts) {
   SyncShareNudge();
   {
     // Initial state. Everything is normal.
-    ReadTransaction rtrans(FROM_HERE, directory());
+    syncable::ReadTransaction rtrans(FROM_HERE, directory());
     VERIFY_ENTRY(1, false, false, false, 0, 10, 10, ids_, &rtrans);
     VERIFY_ENTRY(2, false, false, false, 1, 10, 10, ids_, &rtrans);
     VERIFY_ENTRY(3, false, false, false, 1, 10, 10, ids_, &rtrans);
@@ -867,7 +870,7 @@ TEST_F(SyncerTest, EncryptionAwareConflicts) {
   {
     // All should be unapplied due to being undecryptable and have a valid
     // BASE_SERVER_SPECIFICS.
-    ReadTransaction rtrans(FROM_HERE, directory());
+    syncable::ReadTransaction rtrans(FROM_HERE, directory());
     VERIFY_ENTRY(1, true, false, true, 0, 10, 20, ids_, &rtrans);
     VERIFY_ENTRY(2, true, false, true, 1, 10, 20, ids_, &rtrans);
     VERIFY_ENTRY(3, true, false, true, 1, 10, 20, ids_, &rtrans);
@@ -887,7 +890,7 @@ TEST_F(SyncerTest, EncryptionAwareConflicts) {
   {
     // Items 1, 2, and 4 should have newer server versions, 3 remains the same.
     // All should remain unapplied due to be undecryptable.
-    ReadTransaction rtrans(FROM_HERE, directory());
+    syncable::ReadTransaction rtrans(FROM_HERE, directory());
     VERIFY_ENTRY(1, true, false, true, 0, 10, 30, ids_, &rtrans);
     VERIFY_ENTRY(2, true, false, true, 1, 10, 30, ids_, &rtrans);
     VERIFY_ENTRY(3, true, false, true, 1, 10, 20, ids_, &rtrans);
@@ -905,7 +908,7 @@ TEST_F(SyncerTest, EncryptionAwareConflicts) {
   {
     // Items 2 and 4 should be the only ones with BASE_SERVER_SPECIFICS set.
     // Items 1 is now unencrypted, so should have applied normally.
-    ReadTransaction rtrans(FROM_HERE, directory());
+    syncable::ReadTransaction rtrans(FROM_HERE, directory());
     VERIFY_ENTRY(1, false, false, false, 0, 40, 40, ids_, &rtrans);
     VERIFY_ENTRY(2, true, false, true, 1, 10, 30, ids_, &rtrans);
     VERIFY_ENTRY(3, true, false, false, 1, 10, 30, ids_, &rtrans);
@@ -940,7 +943,7 @@ TEST_F(SyncerTest, EncryptionAwareConflicts) {
   {
     // Item 1 remains unsynced due to there being pending keys.
     // Items 2, 3, 4 should remain unsynced since they were not up to date.
-    ReadTransaction rtrans(FROM_HERE, directory());
+    syncable::ReadTransaction rtrans(FROM_HERE, directory());
     VERIFY_ENTRY(1, false, true, false, 0, 40, 40, ids_, &rtrans);
     VERIFY_ENTRY(2, true, true, true, 1, 10, 30, ids_, &rtrans);
     VERIFY_ENTRY(3, true, true, false, 1, 10, 30, ids_, &rtrans);
@@ -948,25 +951,25 @@ TEST_F(SyncerTest, EncryptionAwareConflicts) {
   }
 
   {
-    ReadTransaction rtrans(FROM_HERE, directory());
+    syncable::ReadTransaction rtrans(FROM_HERE, directory());
     // Resolve the pending keys.
     cryptographer(&rtrans)->DecryptPendingKeys(key_params);
   }
   // First cycle resolves conflicts, second cycle commits changes.
   SyncShareNudge();
-  EXPECT_EQ(2, status().syncer_status().num_server_overwrites);
-  EXPECT_EQ(1, status().syncer_status().num_local_overwrites);
+  EXPECT_EQ(2, status().model_neutral_state().num_server_overwrites);
+  EXPECT_EQ(1, status().model_neutral_state().num_local_overwrites);
   // We successfully commited item(s).
-  EXPECT_EQ(status().error().commit_result, SYNCER_OK);
+  EXPECT_EQ(status().model_neutral_state().commit_result, SYNCER_OK);
   SyncShareNudge();
 
   // Everything should be resolved now. The local changes should have
   // overwritten the server changes for 2 and 4, while the server changes
   // overwrote the local for entry 3.
-  EXPECT_EQ(0, status().syncer_status().num_server_overwrites);
-  EXPECT_EQ(0, status().syncer_status().num_local_overwrites);
-  EXPECT_EQ(status().error().commit_result, SYNCER_OK);
-  ReadTransaction rtrans(FROM_HERE, directory());
+  EXPECT_EQ(0, status().model_neutral_state().num_server_overwrites);
+  EXPECT_EQ(0, status().model_neutral_state().num_local_overwrites);
+  EXPECT_EQ(status().model_neutral_state().commit_result, SYNCER_OK);
+  syncable::ReadTransaction rtrans(FROM_HERE, directory());
   VERIFY_ENTRY(1, false, false, false, 0, 41, 41, ids_, &rtrans);
   VERIFY_ENTRY(2, false, false, false, 1, 31, 31, ids_, &rtrans);
   VERIFY_ENTRY(3, false, false, false, 1, 30, 30, ids_, &rtrans);
@@ -982,7 +985,7 @@ TEST_F(SyncerTest, ReceiveOldNigori) {
   KeyParams current_key = {"localhost", "dummy", "cur"};
 
   // Data for testing encryption/decryption.
-  browser_sync::Cryptographer other_cryptographer(&encryptor_);
+  Cryptographer other_cryptographer(&encryptor_);
   other_cryptographer.AddKey(old_key);
   sync_pb::EntitySpecifics other_encrypted_specifics;
   other_encrypted_specifics.mutable_bookmark()->set_title("title");
@@ -991,7 +994,7 @@ TEST_F(SyncerTest, ReceiveOldNigori) {
       other_encrypted_specifics.mutable_encrypted());
   sync_pb::EntitySpecifics our_encrypted_specifics;
   our_encrypted_specifics.mutable_bookmark()->set_title("title2");
-  syncable::ModelTypeSet encrypted_types = syncable::ModelTypeSet::All();
+  ModelTypeSet encrypted_types = ModelTypeSet::All();
 
 
   // Receive the initial nigori node.
@@ -1016,7 +1019,7 @@ TEST_F(SyncerTest, ReceiveOldNigori) {
     cryptographer(&wtrans)->set_encrypt_everything();
     cryptographer(&wtrans)->UpdateNigoriFromEncryptedTypes(nigori);
     MutableEntry nigori_entry(&wtrans, GET_BY_SERVER_TAG,
-                              syncable::ModelTypeToRootTag(syncable::NIGORI));
+                              ModelTypeToRootTag(NIGORI));
     ASSERT_TRUE(nigori_entry.good());
     nigori_entry.Put(SPECIFICS, specifics);
     nigori_entry.Put(IS_UNSYNCED, true);
@@ -1040,9 +1043,9 @@ TEST_F(SyncerTest, ReceiveOldNigori) {
     // Ensure everything is committed and stable now. The cryptographer
     // should be able to decrypt both sets of keys and still be encrypting with
     // the newest, and the encrypted types should be the most recent
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
     Entry nigori_entry(&trans, GET_BY_SERVER_TAG,
-                       syncable::ModelTypeToRootTag(syncable::NIGORI));
+                       ModelTypeToRootTag(NIGORI));
     ASSERT_TRUE(nigori_entry.good());
     EXPECT_FALSE(nigori_entry.Get(IS_UNAPPLIED_UPDATE));
     EXPECT_FALSE(nigori_entry.Get(IS_UNSYNCED));
@@ -1065,9 +1068,9 @@ TEST_F(SyncerTest, ReceiveOldNigori) {
 TEST_F(SyncerTest, NigoriConflicts) {
   KeyParams local_key_params = {"localhost", "dummy", "blargle"};
   KeyParams other_key_params = {"localhost", "dummy", "foobar"};
-  browser_sync::Cryptographer other_cryptographer(&encryptor_);
+  Cryptographer other_cryptographer(&encryptor_);
   other_cryptographer.AddKey(other_key_params);
-  syncable::ModelTypeSet encrypted_types(syncable::PASSWORDS, syncable::NIGORI);
+  ModelTypeSet encrypted_types(PASSWORDS, NIGORI);
   sync_pb::EntitySpecifics initial_nigori_specifics;
   initial_nigori_specifics.mutable_nigori();
   mock_server_->SetNigori(1, 10, 10, initial_nigori_specifics);
@@ -1083,7 +1086,7 @@ TEST_F(SyncerTest, NigoriConflicts) {
 
   // Receive the initial nigori node.
   SyncShareNudge();
-  encrypted_types = syncable::ModelTypeSet::All();
+  encrypted_types = ModelTypeSet::All();
   {
     // Local changes with different passphrase, different types.
     WriteTransaction wtrans(FROM_HERE, UNITTEST, directory());
@@ -1098,7 +1101,7 @@ TEST_F(SyncerTest, NigoriConflicts) {
     cryptographer(&wtrans)->UpdateNigoriFromEncryptedTypes(nigori);
     cryptographer(&wtrans)->set_encrypt_everything();
     MutableEntry nigori_entry(&wtrans, GET_BY_SERVER_TAG,
-                              syncable::ModelTypeToRootTag(syncable::NIGORI));
+                              ModelTypeToRootTag(NIGORI));
     ASSERT_TRUE(nigori_entry.good());
     nigori_entry.Put(SPECIFICS, specifics);
     nigori_entry.Put(IS_UNSYNCED, true);
@@ -1128,7 +1131,7 @@ TEST_F(SyncerTest, NigoriConflicts) {
     // Ensure the nigori data merged (encrypted types).
     WriteTransaction wtrans(FROM_HERE, UNITTEST, directory());
     MutableEntry nigori_entry(&wtrans, GET_BY_SERVER_TAG,
-                              syncable::ModelTypeToRootTag(syncable::NIGORI));
+                              ModelTypeToRootTag(NIGORI));
     ASSERT_TRUE(nigori_entry.good());
     EXPECT_FALSE(nigori_entry.Get(IS_UNAPPLIED_UPDATE));
     EXPECT_FALSE(nigori_entry.Get(IS_UNSYNCED));
@@ -1159,7 +1162,7 @@ TEST_F(SyncerTest, NigoriConflicts) {
     // should have been unioned.
     WriteTransaction wtrans(FROM_HERE, UNITTEST, directory());
     MutableEntry nigori_entry(&wtrans, GET_BY_SERVER_TAG,
-                              syncable::ModelTypeToRootTag(syncable::NIGORI));
+                              ModelTypeToRootTag(NIGORI));
     ASSERT_TRUE(nigori_entry.good());
     EXPECT_FALSE(nigori_entry.Get(IS_UNAPPLIED_UPDATE));
     EXPECT_FALSE(nigori_entry.Get(IS_UNSYNCED));
@@ -1200,7 +1203,7 @@ TEST_F(SyncerTest, TestGetUnsyncedAndSimpleCommit) {
   EXPECT_TRUE(parent_id_ == mock_server_->committed_ids()[0]);
   EXPECT_TRUE(child_id_ == mock_server_->committed_ids()[1]);
   {
-    ReadTransaction rt(FROM_HERE, directory());
+    syncable::ReadTransaction rt(FROM_HERE, directory());
     Entry entry(&rt, syncable::GET_BY_ID, child_id_);
     ASSERT_TRUE(entry.good());
     VerifyTestDataInEntry(&rt, &entry);
@@ -1234,8 +1237,7 @@ TEST_F(SyncerTest, TestPurgeWhileUnsynced) {
     parent2.Put(syncable::ID, pref_node_id);
   }
 
-  directory()->PurgeEntriesWithTypeIn(
-      syncable::ModelTypeSet(syncable::PREFERENCES));
+  directory()->PurgeEntriesWithTypeIn(ModelTypeSet(PREFERENCES));
 
   SyncShareNudge();
   ASSERT_EQ(2U, mock_server_->committed_ids().size());
@@ -1243,14 +1245,14 @@ TEST_F(SyncerTest, TestPurgeWhileUnsynced) {
   EXPECT_TRUE(parent_id_ == mock_server_->committed_ids()[0]);
   EXPECT_TRUE(child_id_ == mock_server_->committed_ids()[1]);
   {
-    ReadTransaction rt(FROM_HERE, directory());
+    syncable::ReadTransaction rt(FROM_HERE, directory());
     Entry entry(&rt, syncable::GET_BY_ID, child_id_);
     ASSERT_TRUE(entry.good());
     VerifyTestDataInEntry(&rt, &entry);
   }
   directory()->SaveChanges();
   {
-    ReadTransaction rt(FROM_HERE, directory());
+    syncable::ReadTransaction rt(FROM_HERE, directory());
     Entry entry(&rt, syncable::GET_BY_ID, pref_node_id);
     ASSERT_FALSE(entry.good());
   }
@@ -1270,12 +1272,12 @@ TEST_F(SyncerTest, TestPurgeWhileUnapplied) {
   }
 
   directory()->PurgeEntriesWithTypeIn(
-      syncable::ModelTypeSet(syncable::BOOKMARKS));
+      ModelTypeSet(BOOKMARKS));
 
   SyncShareNudge();
   directory()->SaveChanges();
   {
-    ReadTransaction rt(FROM_HERE, directory());
+    syncable::ReadTransaction rt(FROM_HERE, directory());
     Entry entry(&rt, syncable::GET_BY_ID, parent_id_);
     ASSERT_FALSE(entry.good());
   }
@@ -1632,7 +1634,7 @@ TEST_F(SyncerTest, TestCommitListOrderingAndNewParent) {
   EXPECT_TRUE(parent2_id == mock_server_->committed_ids()[1]);
   EXPECT_TRUE(child_id == mock_server_->committed_ids()[2]);
   {
-    ReadTransaction rtrans(FROM_HERE, directory());
+    syncable::ReadTransaction rtrans(FROM_HERE, directory());
     // Check that things committed correctly.
     Entry entry_1(&rtrans, syncable::GET_BY_ID, parent_id_);
     EXPECT_EQ(entry_1.Get(NON_UNIQUE_NAME), parent1_name);
@@ -1702,7 +1704,7 @@ TEST_F(SyncerTest, TestCommitListOrderingAndNewParentAndChild) {
   EXPECT_TRUE(parent2_local_id == mock_server_->committed_ids()[1]);
   EXPECT_TRUE(child_local_id == mock_server_->committed_ids()[2]);
   {
-    ReadTransaction rtrans(FROM_HERE, directory());
+    syncable::ReadTransaction rtrans(FROM_HERE, directory());
 
     Entry parent(&rtrans, syncable::GET_BY_ID,
                  GetOnlyEntryWithName(&rtrans, rtrans.root_id(), parent_name));
@@ -1845,7 +1847,7 @@ TEST_F(SyncerTest, IllegalAndLegalUpdates) {
   mock_server_->AddUpdateDirectory(4, 0, "old_version", 10, 10);
   SyncShareNudge();
   {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
 
     Entry still_a_dir(&trans, GET_BY_ID, ids_.FromNumber(10));
     ASSERT_TRUE(still_a_dir.good());
@@ -1930,7 +1932,7 @@ TEST_F(SyncerTest, CommitTimeRename) {
 
   // Verify it was correctly renamed.
   {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
     Entry entry_folder(&trans, GET_BY_HANDLE, metahandle_folder);
     ASSERT_TRUE(entry_folder.good());
     EXPECT_EQ("renamed_Folder", entry_folder.Get(NON_UNIQUE_NAME));
@@ -1971,7 +1973,7 @@ TEST_F(SyncerTest, CommitTimeRenameI18N) {
 
   // Verify it was correctly renamed.
   {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
     string expected_folder_name(i18nString);
     expected_folder_name.append("Folder");
 
@@ -2001,7 +2003,7 @@ TEST_F(SyncerTest, CommitReuniteUpdateAdjustsChildren) {
   syncable::Id folder_id;
   int64 metahandle_entry;
   {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
     Entry entry(&trans, GET_BY_HANDLE, metahandle_folder);
     ASSERT_TRUE(entry.good());
     folder_id = entry.Get(ID);
@@ -2020,7 +2022,7 @@ TEST_F(SyncerTest, CommitReuniteUpdateAdjustsChildren) {
   // Verify it and pull the ID out of the entry.
   syncable::Id entry_id;
   {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
     Entry entry(&trans, syncable::GET_BY_HANDLE, metahandle_entry);
     ASSERT_TRUE(entry.good());
     EXPECT_EQ(folder_id, entry.Get(PARENT_ID));
@@ -2050,7 +2052,7 @@ TEST_F(SyncerTest, CommitReuniteUpdateAdjustsChildren) {
   SyncShareNudge();
   {
     // The folder's ID should have been updated.
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
     Entry folder(&trans, GET_BY_HANDLE, metahandle_folder);
     ASSERT_TRUE(folder.good());
     EXPECT_EQ("new_folder", folder.Get(NON_UNIQUE_NAME));
@@ -2089,7 +2091,7 @@ TEST_F(SyncerTest, CommitReuniteUpdate) {
   // Verify it and pull the ID out.
   syncable::Id entry_id;
   {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
 
     Entry entry(&trans, GET_BY_HANDLE, entry_metahandle);
     ASSERT_TRUE(entry.good());
@@ -2115,7 +2117,7 @@ TEST_F(SyncerTest, CommitReuniteUpdate) {
   // Alright! Apply that update!
   SyncShareNudge();
   {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
     Entry entry(&trans, GET_BY_HANDLE, entry_metahandle);
     ASSERT_TRUE(entry.good());
     EXPECT_TRUE(new_version == entry.Get(BASE_VERSION));
@@ -2142,7 +2144,7 @@ TEST_F(SyncerTest, CommitReuniteUpdateDoesNotChokeOnDeletedLocalEntry) {
   // Verify it and pull the ID out.
   syncable::Id entry_id;
   {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
     Entry entry(&trans, GET_BY_HANDLE, entry_metahandle);
     ASSERT_TRUE(entry.good());
     entry_id = entry.Get(ID);
@@ -2178,7 +2180,7 @@ TEST_F(SyncerTest, CommitReuniteUpdateDoesNotChokeOnDeletedLocalEntry) {
   // Just don't CHECK fail in sync, have the update split.
   SyncShareNudge();
   {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
     Id new_entry_id = GetOnlyEntryWithName(
         &trans, trans.root_id(), "new_entry");
     Entry entry(&trans, GET_BY_ID, new_entry_id);
@@ -2216,7 +2218,7 @@ TEST_F(SyncerTest, ConflictMatchingEntryHandlesUnsanitizedNames) {
   mock_server_->set_conflict_all_commits(false);
 
   {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
 
     Entry A(&trans, GET_BY_ID, ids_.FromNumber(1));
     ASSERT_TRUE(A.good());
@@ -2256,7 +2258,7 @@ TEST_F(SyncerTest, ConflictMatchingEntryHandlesNormalNames) {
   mock_server_->set_conflict_all_commits(false);
 
   {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
 
     Entry A(&trans, GET_BY_ID, ids_.FromNumber(1));
     ASSERT_TRUE(A.good());
@@ -2279,7 +2281,7 @@ TEST_F(SyncerTest, ReverseFolderOrderingTest) {
   mock_server_->AddUpdateDirectory(2, 1, "child", 10, 10);
   mock_server_->AddUpdateDirectory(1, 0, "parent", 10, 10);
   LoopSyncShare();
-  ReadTransaction trans(FROM_HERE, directory());
+  syncable::ReadTransaction trans(FROM_HERE, directory());
 
   Id child_id = GetOnlyEntryWithName(
         &trans, ids_.FromNumber(4), "gggchild");
@@ -2308,7 +2310,6 @@ class EntryCreatedInNewFolderTest : public SyncerTest {
 };
 
 TEST_F(EntryCreatedInNewFolderTest, EntryCreatedInNewFolderMidSync) {
-  directory()->set_store_birthday(mock_server_->store_birthday());
   {
     WriteTransaction trans(FROM_HERE, UNITTEST, directory());
     MutableEntry entry(&trans, syncable::CREATE, trans.root_id(),
@@ -2326,7 +2327,7 @@ TEST_F(EntryCreatedInNewFolderTest, EntryCreatedInNewFolderMidSync) {
   // We loop until no unsynced handles remain, so we will commit both ids.
   EXPECT_EQ(2u, mock_server_->committed_ids().size());
   {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
     Entry parent_entry(&trans, syncable::GET_BY_ID,
         GetOnlyEntryWithName(&trans, TestIdFactory::root(), "bob"));
     ASSERT_TRUE(parent_entry.good());
@@ -2403,7 +2404,7 @@ TEST_F(SyncerTest, DoublyChangedWithResolver) {
   LoopSyncShare();
   syncable::Directory::ChildHandles children;
   {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
     directory()->GetChildHandlesById(&trans, parent_id_, &children);
     // We expect the conflict resolver to preserve the local entry.
     Entry child(&trans, syncable::GET_BY_ID, child_id_);
@@ -2441,7 +2442,7 @@ TEST_F(SyncerTest, CommitsUpdateDoesntAlterEntry) {
   int64 version;
   int64 server_position_in_parent;
   {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
     Entry entry(&trans, syncable::GET_BY_HANDLE, entry_metahandle);
     ASSERT_TRUE(entry.good());
     id = entry.Get(ID);
@@ -2457,7 +2458,7 @@ TEST_F(SyncerTest, CommitsUpdateDoesntAlterEntry) {
   EXPECT_EQ(server_position_in_parent, update->position_in_parent());
   SyncShareNudge();
   {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
     Entry entry(&trans, syncable::GET_BY_ID, id);
     ASSERT_TRUE(entry.good());
     EXPECT_TRUE(entry.Get(MTIME) == test_time);
@@ -2465,8 +2466,7 @@ TEST_F(SyncerTest, CommitsUpdateDoesntAlterEntry) {
 }
 
 TEST_F(SyncerTest, ParentAndChildBothMatch) {
-  const syncable::FullModelTypeSet all_types =
-      syncable::FullModelTypeSet::All();
+  const FullModelTypeSet all_types = FullModelTypeSet::All();
   syncable::Id parent_id = ids_.NewServerId();
   syncable::Id child_id = ids_.NewServerId();
 
@@ -2494,7 +2494,7 @@ TEST_F(SyncerTest, ParentAndChildBothMatch) {
   SyncShareNudge();
   SyncShareNudge();
   {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
     Directory::ChildHandles children;
     directory()->GetChildHandlesById(&trans, root_id_, &children);
     EXPECT_EQ(1u, children.size());
@@ -2613,7 +2613,7 @@ TEST_F(SyncerTest, DeletingEntryWithLocalEdits) {
   mock_server_->SetLastUpdateDeleted();
   syncer_->SyncShare(session_.get(), SYNCER_BEGIN, APPLY_UPDATES);
   {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
     Entry entry(&trans, syncable::GET_BY_HANDLE, newfolder_metahandle);
     ASSERT_TRUE(entry.good());
   }
@@ -2627,7 +2627,7 @@ TEST_F(SyncerTest, FolderSwapUpdate) {
   mock_server_->AddUpdateDirectory(7801, 0, "fred", 2, 20);
   SyncShareNudge();
   {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
     Entry id1(&trans, GET_BY_ID, ids_.FromNumber(7801));
     ASSERT_TRUE(id1.good());
     EXPECT_TRUE("fred" == id1.Get(NON_UNIQUE_NAME));
@@ -2646,7 +2646,7 @@ TEST_F(SyncerTest, NameCollidingFolderSwapWorksFine) {
   mock_server_->AddUpdateDirectory(4096, 0, "alice", 1, 10);
   SyncShareNudge();
   {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
     Entry id1(&trans, GET_BY_ID, ids_.FromNumber(7801));
     ASSERT_TRUE(id1.good());
     EXPECT_TRUE("bob" == id1.Get(NON_UNIQUE_NAME));
@@ -2665,7 +2665,7 @@ TEST_F(SyncerTest, NameCollidingFolderSwapWorksFine) {
   mock_server_->AddUpdateDirectory(4096, 0, "bob", 2, 20);
   SyncShareNudge();
   {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
     Entry id1(&trans, GET_BY_ID, ids_.FromNumber(7801));
     ASSERT_TRUE(id1.good());
     EXPECT_TRUE("fred" == id1.Get(NON_UNIQUE_NAME));
@@ -2732,7 +2732,7 @@ TEST_F(SyncerTest, CommitManyItemsInOneGo_PostBufferFail) {
   EXPECT_EQ(1U, mock_server_->commit_messages().size());
   EXPECT_FALSE(session_->Succeeded());
   EXPECT_EQ(SYNC_SERVER_ERROR,
-            session_->status_controller().error().commit_result);
+            session_->status_controller().model_neutral_state().commit_result);
   EXPECT_EQ(items_to_commit - kDefaultMaxCommitBatchSize,
             directory()->unsynced_entity_count());
 }
@@ -2788,7 +2788,7 @@ TEST_F(SyncerTest, HugeConflict) {
 
   // Check they're in the expected conflict state.
   {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
     for (int i = 0; i < item_count; i++) {
       Entry e(&trans, GET_BY_ID, tree_ids[i]);
       // They should all exist but none should be applied.
@@ -2805,7 +2805,7 @@ TEST_F(SyncerTest, HugeConflict) {
 
   // Now they should all be OK.
   {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
     for (int i = 0; i < item_count; i++) {
       Entry e(&trans, GET_BY_ID, tree_ids[i]);
       ASSERT_TRUE(e.good());
@@ -3036,7 +3036,7 @@ TEST_F(SyncerTest, DualDeletionWithNewItemNameClash) {
   mock_server_->SetLastUpdateDeleted();
   SyncShareNudge();
   {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
     Entry B(&trans, GET_BY_ID, ids_.FromNumber(2));
     ASSERT_TRUE(B.good());
     EXPECT_FALSE(B.Get(IS_UNSYNCED));
@@ -3063,7 +3063,7 @@ TEST_F(SyncerTest, ResolveWeWroteTheyDeleted) {
   SyncShareNudge();
   SyncShareNudge();
   {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
     Entry bob(&trans, GET_BY_HANDLE, bob_metahandle);
     ASSERT_TRUE(bob.good());
     EXPECT_TRUE(bob.Get(IS_UNSYNCED));
@@ -3139,7 +3139,7 @@ TEST_F(SyncerTest, ConflictResolverMergesLocalDeleteAndServerUpdate) {
   SyncShareNudge();
 
   {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
     Entry local_deleted(&trans, GET_BY_ID, ids_.FromNumber(1));
     EXPECT_TRUE(local_deleted.Get(BASE_VERSION) == 10);
     EXPECT_TRUE(local_deleted.Get(IS_UNAPPLIED_UPDATE) == false);
@@ -3175,7 +3175,7 @@ TEST_F(SyncerTest, UpdateFlipsTheFolderBit) {
   SyncShareNudge();
 
   {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
     Entry local_deleted(&trans, GET_BY_ID, ids_.FromNumber(1));
     EXPECT_TRUE(local_deleted.Get(BASE_VERSION) == 1);
     EXPECT_TRUE(local_deleted.Get(IS_UNAPPLIED_UPDATE) == false);
@@ -3229,7 +3229,7 @@ TEST_F(SyncerTest, LongChangelistWithApplicationConflict) {
 
   // Ensure our folder hasn't somehow applied.
   {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
     Entry child(&trans, GET_BY_ID, stuck_entry_id);
     EXPECT_TRUE(child.good());
     EXPECT_TRUE(child.Get(IS_UNAPPLIED_UPDATE));
@@ -3245,7 +3245,7 @@ TEST_F(SyncerTest, LongChangelistWithApplicationConflict) {
   LoopSyncShare();
   // Check that everything is as expected after the commit.
   {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
     Entry entry(&trans, GET_BY_ID, folder_id);
     ASSERT_TRUE(entry.good());
     Entry child(&trans, GET_BY_ID, stuck_entry_id);
@@ -3270,7 +3270,7 @@ TEST_F(SyncerTest, DontMergeTwoExistingItems) {
   mock_server_->AddUpdateBookmark(1, 0, "Copy of base", 50, 50);
   SyncRepeatedlyToTriggerConflictResolution(session_.get());
   {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
     Entry entry1(&trans, GET_BY_ID, ids_.FromNumber(1));
     EXPECT_FALSE(entry1.Get(IS_UNAPPLIED_UPDATE));
     EXPECT_FALSE(entry1.Get(IS_UNSYNCED));
@@ -3294,7 +3294,7 @@ TEST_F(SyncerTest, TestUndeleteUpdate) {
 
   int64 metahandle;
   {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
     Entry entry(&trans, GET_BY_ID, ids_.FromNumber(2));
     ASSERT_TRUE(entry.good());
     EXPECT_TRUE(entry.Get(IS_DEL));
@@ -3308,7 +3308,7 @@ TEST_F(SyncerTest, TestUndeleteUpdate) {
   mock_server_->AddUpdateDirectory(2, 1, "bar", 3, 5);
   SyncShareNudge();
   {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
     Entry entry(&trans, GET_BY_ID, ids_.FromNumber(2));
     ASSERT_TRUE(entry.good());
     EXPECT_TRUE(entry.Get(IS_DEL));
@@ -3342,7 +3342,7 @@ TEST_F(SyncerTest, UpdateWhereParentIsNotAFolder) {
   // Used to cause a CHECK
   SyncShareNudge();
   {
-    ReadTransaction rtrans(FROM_HERE, directory());
+    syncable::ReadTransaction rtrans(FROM_HERE, directory());
     Entry good_entry(&rtrans, syncable::GET_BY_ID, ids_.FromNumber(1));
     ASSERT_TRUE(good_entry.good());
     EXPECT_FALSE(good_entry.Get(IS_UNAPPLIED_UPDATE));
@@ -3364,7 +3364,7 @@ TEST_F(SyncerTest, DirectoryUpdateTest) {
                                    "in_in_root_name", 3, 3);
   SyncShareNudge();
   {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
     Entry in_root(&trans, GET_BY_ID, in_root_id);
     ASSERT_TRUE(in_root.good());
     EXPECT_EQ("in_root_name", in_root.Get(NON_UNIQUE_NAME));
@@ -3402,7 +3402,7 @@ TEST_F(SyncerTest, DirectoryCommitTest) {
   }
   SyncShareNudge();
   {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
     Entry fail_by_old_id_entry(&trans, GET_BY_ID, in_root_id);
     ASSERT_FALSE(fail_by_old_id_entry.good());
 
@@ -3496,7 +3496,7 @@ TEST_F(SyncerTest, Test64BitVersionSupport) {
     item_metahandle = entry.Get(META_HANDLE);
   }
   // Now read it back out and make sure the value is max int64.
-  ReadTransaction rtrans(FROM_HERE, directory());
+  syncable::ReadTransaction rtrans(FROM_HERE, directory());
   Entry entry(&rtrans, syncable::GET_BY_HANDLE, item_metahandle);
   ASSERT_TRUE(entry.good());
   EXPECT_TRUE(really_big_int == entry.Get(syncable::BASE_VERSION));
@@ -3522,7 +3522,7 @@ TEST_F(SyncerTest, TestSimpleUndelete) {
   SyncShareNudge();
   // Confirm we see IS_DEL and not SERVER_IS_DEL.
   {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
     Entry entry(&trans, GET_BY_ID, id);
     ASSERT_TRUE(entry.good());
     EXPECT_FALSE(entry.Get(IS_UNAPPLIED_UPDATE));
@@ -3537,7 +3537,7 @@ TEST_F(SyncerTest, TestSimpleUndelete) {
   SyncShareNudge();
   // IS_DEL AND SERVER_IS_DEL now both true.
   {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
     Entry entry(&trans, GET_BY_ID, id);
     ASSERT_TRUE(entry.good());
     EXPECT_FALSE(entry.Get(IS_UNAPPLIED_UPDATE));
@@ -3550,7 +3550,7 @@ TEST_F(SyncerTest, TestSimpleUndelete) {
   SyncShareNudge();
   // IS_DEL and SERVER_IS_DEL now both false.
   {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
     Entry entry(&trans, GET_BY_ID, id);
     ASSERT_TRUE(entry.good());
     EXPECT_FALSE(entry.Get(IS_UNAPPLIED_UPDATE));
@@ -3580,7 +3580,7 @@ TEST_F(SyncerTest, TestUndeleteWithMissingDeleteUpdate) {
   SyncShareNudge();
   // Confirm we see IS_DEL and not SERVER_IS_DEL.
   {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
     Entry entry(&trans, GET_BY_ID, id);
     ASSERT_TRUE(entry.good());
     EXPECT_FALSE(entry.Get(IS_UNAPPLIED_UPDATE));
@@ -3595,7 +3595,7 @@ TEST_F(SyncerTest, TestUndeleteWithMissingDeleteUpdate) {
   SyncShareNudge();
   // IS_DEL and SERVER_IS_DEL now both false.
   {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
     Entry entry(&trans, GET_BY_ID, id);
     ASSERT_TRUE(entry.good());
     EXPECT_FALSE(entry.Get(IS_UNAPPLIED_UPDATE));
@@ -3624,7 +3624,7 @@ TEST_F(SyncerTest, ClientTagServerCreatedUpdatesWork) {
   SyncShareNudge();
 
   {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
     Entry perm_folder(&trans, GET_BY_CLIENT_TAG, "permfolder");
     ASSERT_TRUE(perm_folder.good());
     EXPECT_FALSE(perm_folder.Get(IS_DEL));
@@ -3639,7 +3639,7 @@ TEST_F(SyncerTest, ClientTagServerCreatedUpdatesWork) {
   SyncShareNudge();
 
   {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
 
     Entry perm_folder(&trans, GET_BY_CLIENT_TAG, "permfolder");
     ASSERT_TRUE(perm_folder.good());
@@ -3658,7 +3658,7 @@ TEST_F(SyncerTest, ClientTagIllegalUpdateIgnored) {
   SyncShareNudge();
 
   {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
     Entry perm_folder(&trans, GET_BY_CLIENT_TAG, "permfolder");
     ASSERT_TRUE(perm_folder.good());
     EXPECT_FALSE(perm_folder.Get(IS_UNAPPLIED_UPDATE));
@@ -3673,7 +3673,7 @@ TEST_F(SyncerTest, ClientTagIllegalUpdateIgnored) {
   SyncShareNudge();
 
   {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
 
     // This update is rejected because it has the same ID, but a
     // different tag than one that is already on the client.
@@ -3718,7 +3718,7 @@ TEST_F(SyncerTest, ClientTagUncommittedTagMatchesUpdate) {
   SyncShareNudge();
   // This should cause client tag reunion, preserving the metahandle.
   {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
 
     Entry perm_folder(&trans, GET_BY_CLIENT_TAG, "clientperm");
     ASSERT_TRUE(perm_folder.good());
@@ -3741,7 +3741,7 @@ TEST_F(SyncerTest, ClientTagUncommittedTagMatchesUpdate) {
 
   // The resolved entry ought to commit cleanly.
   {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
 
     Entry perm_folder(&trans, GET_BY_CLIENT_TAG, "clientperm");
     ASSERT_TRUE(perm_folder.good());
@@ -3784,7 +3784,7 @@ TEST_F(SyncerTest, ClientTagConflictWithDeletedLocalEntry) {
   SyncShareNudge();
   // The local entry will be overwritten.
   {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
 
     Entry perm_folder(&trans, GET_BY_CLIENT_TAG, "clientperm");
     ASSERT_TRUE(perm_folder.good());
@@ -3815,7 +3815,7 @@ TEST_F(SyncerTest, ClientTagUpdateClashesWithLocalEntry) {
   int64 tag2_metahandle = syncable::kInvalidMetaHandle;
   // This should cause client tag overwrite.
   {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
 
     Entry tag1(&trans, GET_BY_CLIENT_TAG, "tag1");
     ASSERT_TRUE(tag1.good());
@@ -3853,7 +3853,7 @@ TEST_F(SyncerTest, ClientTagUpdateClashesWithLocalEntry) {
   SyncShareNudge();
 
   {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
 
     Entry tag1(&trans, GET_BY_CLIENT_TAG, "tag1");
     ASSERT_TRUE(tag1.good());
@@ -3925,7 +3925,7 @@ TEST_F(SyncerTest, ClientTagClashWithinBatchOfUpdates) {
   SyncShareNudge();
   // This should cause client tag overwrite.
   {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
 
     Entry tag_a(&trans, GET_BY_CLIENT_TAG, "tag a");
     ASSERT_TRUE(tag_a.good());
@@ -3971,7 +3971,7 @@ TEST_F(SyncerTest, UniqueServerTagUpdates) {
   // we'll use later.
   int64 hurdle_handle = CreateUnsyncedDirectory("bob", "id_bob");
   {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
     Entry hurdle(&trans, GET_BY_HANDLE, hurdle_handle);
     ASSERT_TRUE(hurdle.good());
     ASSERT_TRUE(!hurdle.Get(IS_DEL));
@@ -3993,7 +3993,7 @@ TEST_F(SyncerTest, UniqueServerTagUpdates) {
   SyncShareNudge();
 
   {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
 
     // The new items should be applied as new entries, and we should be able
     // to look them up by their tag values.
@@ -4020,28 +4020,28 @@ TEST_F(SyncerTest, GetUpdatesSetsRequestedTypes) {
   // The expectations of this test happen in the MockConnectionManager's
   // GetUpdates handler.  EnableDatatype sets the expectation value from our
   // set of enabled/disabled datatypes.
-  EnableDatatype(syncable::BOOKMARKS);
+  EnableDatatype(BOOKMARKS);
   SyncShareNudge();
   EXPECT_EQ(1, mock_server_->GetAndClearNumGetUpdatesRequests());
 
-  EnableDatatype(syncable::AUTOFILL);
+  EnableDatatype(AUTOFILL);
   SyncShareNudge();
   EXPECT_EQ(1, mock_server_->GetAndClearNumGetUpdatesRequests());
 
-  EnableDatatype(syncable::PREFERENCES);
+  EnableDatatype(PREFERENCES);
   SyncShareNudge();
   EXPECT_EQ(1, mock_server_->GetAndClearNumGetUpdatesRequests());
 
-  DisableDatatype(syncable::BOOKMARKS);
+  DisableDatatype(BOOKMARKS);
   SyncShareNudge();
   EXPECT_EQ(1, mock_server_->GetAndClearNumGetUpdatesRequests());
 
-  DisableDatatype(syncable::AUTOFILL);
+  DisableDatatype(AUTOFILL);
   SyncShareNudge();
   EXPECT_EQ(1, mock_server_->GetAndClearNumGetUpdatesRequests());
 
-  DisableDatatype(syncable::PREFERENCES);
-  EnableDatatype(syncable::AUTOFILL);
+  DisableDatatype(PREFERENCES);
+  EnableDatatype(AUTOFILL);
   SyncShareNudge();
   EXPECT_EQ(1, mock_server_->GetAndClearNumGetUpdatesRequests());
 }
@@ -4056,7 +4056,7 @@ TEST_F(SyncerTest, UpdateThenCommit) {
   int64 commit_handle = CreateUnsyncedDirectory("y", to_commit);
   SyncShareNudge();
 
-  ReadTransaction trans(FROM_HERE, directory());
+  syncable::ReadTransaction trans(FROM_HERE, directory());
 
   Entry received(&trans, GET_BY_ID, to_receive);
   ASSERT_TRUE(received.good());
@@ -4081,7 +4081,7 @@ TEST_F(SyncerTest, UpdateFailsThenDontCommit) {
   mock_server_->FailNextPostBufferToPathCall();
   SyncShareNudge();
 
-  ReadTransaction trans(FROM_HERE, directory());
+  syncable::ReadTransaction trans(FROM_HERE, directory());
 
   // We did not receive this update.
   Entry received(&trans, GET_BY_ID, to_receive);
@@ -4100,7 +4100,7 @@ TEST_F(SyncerTest, UpdateFailsThenDontCommit) {
 // Downloads two updates and applies them successfully.
 // This is the "happy path" alternative to ConfigureFailsDontApplyUpdates.
 TEST_F(SyncerTest, ConfigureDownloadsTwoBatchesSuccess) {
-  EXPECT_FALSE(initial_sync_ended_for_type(syncable::BOOKMARKS));
+  EXPECT_FALSE(initial_sync_ended_for_type(BOOKMARKS));
 
   syncable::Id node1 = ids_.NewServerId();
   syncable::Id node2 = ids_.NewServerId();
@@ -4115,7 +4115,7 @@ TEST_F(SyncerTest, ConfigureDownloadsTwoBatchesSuccess) {
 
   SyncShareConfigure();
 
-  ReadTransaction trans(FROM_HERE, directory());
+  syncable::ReadTransaction trans(FROM_HERE, directory());
   // Both nodes should be downloaded and applied.
 
   Entry n1(&trans, GET_BY_ID, node1);
@@ -4126,12 +4126,12 @@ TEST_F(SyncerTest, ConfigureDownloadsTwoBatchesSuccess) {
   ASSERT_TRUE(n2.good());
   EXPECT_FALSE(n2.Get(IS_UNAPPLIED_UPDATE));
 
-  EXPECT_TRUE(initial_sync_ended_for_type(syncable::BOOKMARKS));
+  EXPECT_TRUE(initial_sync_ended_for_type(BOOKMARKS));
 }
 
 // Same as the above case, but this time the second batch fails to download.
 TEST_F(SyncerTest, ConfigureFailsDontApplyUpdates) {
-  EXPECT_FALSE(initial_sync_ended_for_type(syncable::BOOKMARKS));
+  EXPECT_FALSE(initial_sync_ended_for_type(BOOKMARKS));
 
   syncable::Id node1 = ids_.NewServerId();
   syncable::Id node2 = ids_.NewServerId();
@@ -4152,7 +4152,7 @@ TEST_F(SyncerTest, ConfigureFailsDontApplyUpdates) {
 
   SyncShareConfigure();
 
-  ReadTransaction trans(FROM_HERE, directory());
+  syncable::ReadTransaction trans(FROM_HERE, directory());
 
   // The first node was downloaded, but not applied.
   Entry n1(&trans, GET_BY_ID, node1);
@@ -4166,7 +4166,38 @@ TEST_F(SyncerTest, ConfigureFailsDontApplyUpdates) {
   // One update remains undownloaded.
   mock_server_->ClearUpdatesQueue();
 
-  EXPECT_FALSE(initial_sync_ended_for_type(syncable::BOOKMARKS));
+  EXPECT_FALSE(initial_sync_ended_for_type(BOOKMARKS));
+}
+
+TEST_F(SyncerTest, GetKeySuccess) {
+  {
+    syncable::ReadTransaction rtrans(FROM_HERE, directory());
+    EXPECT_FALSE(cryptographer(&rtrans)->HasKeystoreKey());
+  }
+
+  SyncShareConfigure();
+
+  EXPECT_EQ(session_->status_controller().last_get_key_result(), SYNCER_OK);
+  {
+    syncable::ReadTransaction rtrans(FROM_HERE, directory());
+    EXPECT_TRUE(cryptographer(&rtrans)->HasKeystoreKey());
+  }
+}
+
+TEST_F(SyncerTest, GetKeyEmpty) {
+  {
+    syncable::ReadTransaction rtrans(FROM_HERE, directory());
+    EXPECT_FALSE(cryptographer(&rtrans)->HasKeystoreKey());
+  }
+
+  mock_server_->SetKeystoreKey("");
+  SyncShareConfigure();
+
+  EXPECT_NE(session_->status_controller().last_get_key_result(), SYNCER_OK);
+  {
+    syncable::ReadTransaction rtrans(FROM_HERE, directory());
+    EXPECT_FALSE(cryptographer(&rtrans)->HasKeystoreKey());
+  }
 }
 
 // Test what happens if a client deletes, then recreates, an object very
@@ -4230,7 +4261,7 @@ class SyncerUndeletionTest : public SyncerTest {
   }
 
   int64 GetMetahandleOfTag() {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
     Entry entry(&trans, GET_BY_CLIENT_TAG, client_tag_);
     EXPECT_TRUE(entry.good());
     if (!entry.good()) {
@@ -4629,7 +4660,7 @@ class SyncerPositionUpdateTest : public SyncerTest {
     if (position_map_.empty())
       return;
 
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
 
     Id prev_id;
     DCHECK(prev_id.IsRoot());
@@ -4755,7 +4786,7 @@ class SyncerPositionTiebreakingTest : public SyncerTest {
   }
 
   void ExpectLocalOrderIsByServerId() {
-    ReadTransaction trans(FROM_HERE, directory());
+    syncable::ReadTransaction trans(FROM_HERE, directory());
     Id null_id;
     Entry low(&trans, GET_BY_ID, low_id_);
     Entry mid(&trans, GET_BY_ID, mid_id_);
@@ -4832,4 +4863,4 @@ TEST_F(SyncerPositionTiebreakingTest, MidLowHigh) {
   ExpectLocalOrderIsByServerId();
 }
 
-}  // namespace browser_sync
+}  // namespace syncer

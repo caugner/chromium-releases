@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_GTK_LOCATION_BAR_VIEW_GTK_H_
 #define CHROME_BROWSER_UI_GTK_LOCATION_BAR_VIEW_GTK_H_
-#pragma once
 
 #include <gtk/gtk.h>
 
@@ -16,20 +15,22 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/autocomplete/autocomplete_edit.h"
-#include "chrome/browser/command_updater.h"
+#include "chrome/browser/command_observer.h"
 #include "chrome/browser/extensions/extension_context_menu_model.h"
 #include "chrome/browser/extensions/image_loading_tracker.h"
 #include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/ui/gtk/bubble/bubble_gtk.h"
 #include "chrome/browser/ui/gtk/menu_gtk.h"
 #include "chrome/browser/ui/omnibox/location_bar.h"
+#include "chrome/browser/ui/omnibox/omnibox_edit_controller.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/zoom/zoom_controller.h"
 #include "chrome/common/content_settings_types.h"
+#include "chrome/common/extensions/extension_action.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/common/page_transition_types.h"
+#include "googleurl/src/gurl.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/animation/animation_delegate.h"
 #include "ui/base/animation/slide_animation.h"
@@ -37,13 +38,14 @@
 #include "ui/base/gtk/owned_widget_gtk.h"
 #include "webkit/glue/window_open_disposition.h"
 
-class OmniboxViewGtk;
+class ActionBoxButtonGtk;
 class Browser;
 class CommandUpdater;
 class ContentSettingImageModel;
 class ContentSettingBubbleGtk;
 class ExtensionAction;
 class GtkThemeService;
+class OmniboxViewGtk;
 class SkBitmap;
 class ToolbarModel;
 
@@ -55,11 +57,11 @@ namespace ui {
 class AcceleratorGtk;
 }
 
-class LocationBarViewGtk : public AutocompleteEditController,
+class LocationBarViewGtk : public OmniboxEditController,
                            public LocationBar,
                            public LocationBarTesting,
                            public content::NotificationObserver,
-                           public CommandUpdater::CommandObserver {
+                           public CommandObserver {
  public:
   explicit LocationBarViewGtk(Browser* browser);
   virtual ~LocationBarViewGtk();
@@ -115,7 +117,7 @@ class LocationBarViewGtk : public AutocompleteEditController,
   // Set the starred state of the bookmark star.
   void SetStarred(bool starred);
 
-  // Implement the AutocompleteEditController interface.
+  // OmniboxEditController:
   virtual void OnAutocompleteAccept(const GURL& url,
                                     WindowOpenDisposition disposition,
                                     content::PageTransition transition,
@@ -130,7 +132,7 @@ class LocationBarViewGtk : public AutocompleteEditController,
   virtual InstantController* GetInstant() OVERRIDE;
   virtual TabContents* GetTabContents() const OVERRIDE;
 
-  // Implement the LocationBar interface.
+  // LocationBar:
   virtual void ShowFirstRunBubble() OVERRIDE;
   virtual void SetSuggestedText(const string16& text,
                                 InstantCompleteBehavior behavior) OVERRIDE;
@@ -149,74 +151,70 @@ class LocationBarViewGtk : public AutocompleteEditController,
   virtual OmniboxView* GetLocationEntry() OVERRIDE;
   virtual LocationBarTesting* GetLocationBarForTesting() OVERRIDE;
 
-  // Implement the LocationBarTesting interface.
+  // LocationBarTesting:
   virtual int PageActionCount() OVERRIDE;
   virtual int PageActionVisibleCount() OVERRIDE;
   virtual ExtensionAction* GetPageAction(size_t index) OVERRIDE;
   virtual ExtensionAction* GetVisiblePageAction(size_t index) OVERRIDE;
   virtual void TestPageActionPressed(size_t index) OVERRIDE;
 
-  // Implement the content::NotificationObserver interface.
+  // content::NotificationObserver:
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
-  // Implement the CommandUpdater::CommandObserver interface.
+  // CommandObserver:
   virtual void EnabledStateChangedForCommand(int id, bool enabled) OVERRIDE;
 
   // Edit background color.
   static const GdkColor kBackgroundColor;
 
- private:
-  class ContentSettingImageViewGtk : public BubbleDelegateGtk,
-                                     public ui::AnimationDelegate {
+  // Superclass for content settings icons shown at the left side of the
+  // location bar.
+  class PageToolViewGtk : public ui::AnimationDelegate {
    public:
-    ContentSettingImageViewGtk(ContentSettingsType content_type,
-                               const LocationBarViewGtk* parent);
-    virtual ~ContentSettingImageViewGtk();
+    explicit PageToolViewGtk(const LocationBarViewGtk* parent);
+    virtual ~PageToolViewGtk();
 
-    GtkWidget* widget() { return alignment_.get(); }
+    GtkWidget* widget();
 
     bool IsVisible();
-    void UpdateFromWebContents(content::WebContents* web_contents);
+    virtual void Update(TabContents* tab_contents) = 0;
 
     // Overridden from ui::AnimationDelegate:
     virtual void AnimationProgressed(const ui::Animation* animation) OVERRIDE;
     virtual void AnimationEnded(const ui::Animation* animation) OVERRIDE;
     virtual void AnimationCanceled(const ui::Animation* animation) OVERRIDE;
 
-   private:
+   protected:
+    // Theme constants for solid background elements.
+    virtual GdkColor button_border_color() const = 0;
+    virtual GdkColor gradient_top_color() const = 0;
+    virtual GdkColor gradient_bottom_color() const = 0;
+
+    // Delegate for ButtonPressed message.
+    virtual void OnClick(GtkWidget* sender) = 0;
+
     // Start the process of showing the label.
     void StartAnimating();
 
     // Slide the label shut.
     void CloseAnimation();
 
-    CHROMEGTK_CALLBACK_1(ContentSettingImageViewGtk, gboolean, OnButtonPressed,
-                         GdkEvent*);
-    CHROMEGTK_CALLBACK_1(ContentSettingImageViewGtk, gboolean, OnExpose,
-                         GdkEventExpose*);
+    CHROMEGTK_CALLBACK_1(PageToolViewGtk, gboolean, OnButtonPressed, GdkEvent*);
+    CHROMEGTK_CALLBACK_1(PageToolViewGtk, gboolean, OnExpose, GdkEventExpose*);
 
-    // BubbleDelegateGtk overrides:
-    virtual void BubbleClosing(BubbleGtk* bubble,
-                               bool closed_by_escape) OVERRIDE;
-
-    scoped_ptr<ContentSettingImageModel> content_setting_image_model_;
-
-    // The widgets for this content settings view.
+    // The widgets for this view.
     ui::OwnedWidgetGtk alignment_;
     ui::OwnedWidgetGtk event_box_;
     GtkWidget* hbox_;
     ui::OwnedWidgetGtk image_;
 
-    // Explanatory text ("popup blocked").
+    // Explanatory text (e.g. "popup blocked").
     ui::OwnedWidgetGtk label_;
 
     // The owning LocationBarViewGtk.
     const LocationBarViewGtk* parent_;
-
-    // The currently shown bubble if any.
-    ContentSettingBubbleGtk* content_setting_bubble_;
 
     // When we show explanatory text, we slide it in/out.
     ui::SlideAnimation animation_;
@@ -224,13 +222,18 @@ class LocationBarViewGtk : public AutocompleteEditController,
     // The label's default requisition (cached so we can animate accordingly).
     GtkRequisition label_req_;
 
-    base::WeakPtrFactory<ContentSettingImageViewGtk> weak_factory_;
+    base::WeakPtrFactory<PageToolViewGtk> weak_factory_;
 
-    DISALLOW_COPY_AND_ASSIGN(ContentSettingImageViewGtk);
+   private:
+    DISALLOW_COPY_AND_ASSIGN(PageToolViewGtk);
   };
 
-  class PageActionViewGtk : public ImageLoadingTracker::Observer,
-                            public content::NotificationObserver {
+ private:
+  class PageActionViewGtk :
+       public ImageLoadingTracker::Observer,
+       public content::NotificationObserver,
+       public ExtensionContextMenuModel::PopupDelegate,
+       public ExtensionAction::IconAnimation::Observer {
    public:
     PageActionViewGtk(LocationBarViewGtk* owner, ExtensionAction* page_action);
     virtual ~PageActionViewGtk();
@@ -263,6 +266,9 @@ class LocationBarViewGtk : public AutocompleteEditController,
                          const content::NotificationSource& source,
                          const content::NotificationDetails& details) OVERRIDE;
 
+    // Overridden from ExtensionContextMenuModel::PopupDelegate:
+    virtual void InspectPopup(ExtensionAction* action) OVERRIDE;
+
    private:
     // Connect the accelerator for the page action popup.
     void ConnectPageActionAccelerator();
@@ -284,22 +290,16 @@ class LocationBarViewGtk : public AutocompleteEditController,
                                      GdkModifierType modifier,
                                      void* user_data);
 
+    // ExtensionAction::IconAnimationDelegate implementation.
+    virtual void OnIconChanged(
+        const ExtensionAction::IconAnimation& animation) OVERRIDE;
+
     // The location bar view that owns us.
     LocationBarViewGtk* owner_;
 
     // The PageAction that this view represents. The PageAction is not owned by
     // us, it resides in the extension of this particular profile.
     ExtensionAction* page_action_;
-
-    // A cache of all the different icon paths associated with this page action.
-    typedef std::map<std::string, GdkPixbuf*> PixbufMap;
-    PixbufMap pixbufs_;
-
-    // A cache of the last dynamically generated bitmap and the pixbuf that
-    // corresponds to it. We keep track of both so we can free old pixbufs as
-    // their icons are replaced.
-    SkBitmap last_icon_skbitmap_;
-    GdkPixbuf* last_icon_pixbuf_;
 
     // The object that is waiting for the image loading to complete
     // asynchronously.
@@ -325,7 +325,9 @@ class LocationBarViewGtk : public AutocompleteEditController,
     GtkAccelGroup* accel_group_;
 
     // The keybinding accelerator registered to show the page action popup.
-    scoped_ptr<ui::AcceleratorGtk> keybinding_;
+    scoped_ptr<ui::AcceleratorGtk> page_action_keybinding_;
+    // The keybinding accelerator registered to show the script badge popup.
+    scoped_ptr<ui::AcceleratorGtk> script_badge_keybinding_;
 
     // This is used for post-install visual feedback. The page_action icon
     // is briefly shown even if it hasn't been enabled by its extension.
@@ -334,6 +336,10 @@ class LocationBarViewGtk : public AutocompleteEditController,
     // The context menu view and model for this extension action.
     scoped_ptr<MenuGtk> context_menu_;
     scoped_refptr<ExtensionContextMenuModel> context_menu_model_;
+
+    // Fade-in animation for the icon with observer scoped to this.
+    ExtensionAction::IconAnimation::ScopedObserver
+        scoped_icon_animation_observer_;
 
     DISALLOW_COPY_AND_ASSIGN(PageActionViewGtk);
   };
@@ -447,7 +453,7 @@ class LocationBarViewGtk : public AutocompleteEditController,
 
   // Content setting icons.
   ui::OwnedWidgetGtk content_setting_hbox_;
-  ScopedVector<ContentSettingImageViewGtk> content_setting_views_;
+  ScopedVector<PageToolViewGtk> content_setting_views_;
 
   // Extension page actions.
   std::vector<ExtensionAction*> page_actions_;
@@ -476,6 +482,8 @@ class LocationBarViewGtk : public AutocompleteEditController,
 
   // Alignment used to wrap |location_entry_|.
   GtkWidget* location_entry_alignment_;
+
+  scoped_ptr<ActionBoxButtonGtk> action_box_button_;
 
   CommandUpdater* command_updater_;
   ToolbarModel* toolbar_model_;
@@ -522,6 +530,10 @@ class LocationBarViewGtk : public AutocompleteEditController,
 
   // Used to change the visibility of the star decoration.
   BooleanPrefMember edit_bookmarks_enabled_;
+
+  // Used to remember the URL and title text when drag&drop has begun.
+  GURL drag_url_;
+  string16 drag_title_;
 
   DISALLOW_COPY_AND_ASSIGN(LocationBarViewGtk);
 };

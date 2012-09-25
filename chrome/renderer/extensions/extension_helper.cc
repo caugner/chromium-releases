@@ -32,6 +32,10 @@
 #include "webkit/glue/image_resource_fetcher.h"
 #include "webkit/glue/resource_fetcher.h"
 
+namespace base {
+class ListValue;
+}  // namespace base
+
 using content::ConsoleMessageLevel;
 using extensions::MiscellaneousBindings;
 using WebKit::WebConsoleMessage;
@@ -48,7 +52,7 @@ namespace {
 // We store this mapping per process, because a frame can jump from one
 // document to another with adoptNode, and so having the object be a
 // RenderViewObserver means it might miss some notifications after it moves.
-typedef std::map<WebFrame*, UserScriptScheduler*> SchedulerMap;
+typedef std::map<WebFrame*, extensions::UserScriptScheduler*> SchedulerMap;
 static base::LazyInstance<SchedulerMap> g_schedulers =
     LAZY_INSTANCE_INITIALIZER;
 
@@ -112,7 +116,7 @@ class ExtensionViewAccumulator : public content::RenderViewVisitor {
   std::vector<content::RenderView*> views_;
 };
 
-}
+}  // namespace
 
 // static
 std::vector<content::RenderView*> ExtensionHelper::GetExtensionViews(
@@ -225,7 +229,7 @@ bool ExtensionHelper::OnMessageReceived(const IPC::Message& message) {
 
 void ExtensionHelper::DidFinishDocumentLoad(WebFrame* frame) {
   extension_dispatcher_->user_script_slave()->InjectScripts(
-      frame, UserScript::DOCUMENT_END);
+      frame, extensions::UserScript::DOCUMENT_END);
 
   SchedulerMap::iterator i = g_schedulers.Get().find(frame);
   if (i != g_schedulers.Get().end())
@@ -240,7 +244,7 @@ void ExtensionHelper::DidFinishLoad(WebKit::WebFrame* frame) {
 
 void ExtensionHelper::DidCreateDocumentElement(WebFrame* frame) {
   extension_dispatcher_->user_script_slave()->InjectScripts(
-      frame, UserScript::DOCUMENT_START);
+      frame, extensions::UserScript::DOCUMENT_START);
   SchedulerMap::iterator i = g_schedulers.Get().find(frame);
   if (i != g_schedulers.Get().end())
     i->second->DidCreateDocumentElement();
@@ -276,7 +280,7 @@ void ExtensionHelper::DidCreateDataSource(WebFrame* frame, WebDataSource* ds) {
   if (g_schedulers.Get().count(frame))
     return;
 
-  g_schedulers.Get()[frame] = new UserScriptScheduler(
+  g_schedulers.Get()[frame] = new extensions::UserScriptScheduler(
       frame, extension_dispatcher_);
 }
 
@@ -339,8 +343,9 @@ void ExtensionHelper::OnExecuteCode(
   WebView* webview = render_view()->GetWebView();
   WebFrame* main_frame = webview->mainFrame();
   if (!main_frame) {
+    ListValue val;
     Send(new ExtensionHostMsg_ExecuteCodeFinished(
-        routing_id(), params.request_id, false, -1, ""));
+        routing_id(), params.request_id, "No main frame", -1, GURL(""), val));
     return;
   }
 

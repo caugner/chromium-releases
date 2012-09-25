@@ -22,6 +22,7 @@
 #include "content/public/browser/download_save_info.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
+#include "content/public/browser/resource_context.h"
 #include "content/public/browser/resource_dispatcher_host.h"
 #include "content/public/browser/web_contents.h"
 #include "net/url_request/url_request.h"
@@ -44,7 +45,10 @@ void BeginDownload(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   ResourceDispatcherHost* rdh = ResourceDispatcherHost::Get();
-  scoped_ptr<net::URLRequest> request(new net::URLRequest(url, NULL));
+  scoped_ptr<net::URLRequest> request(new net::URLRequest(
+      url,
+      NULL,
+      resource_context->GetRequestContext()));
   net::Error error = rdh->BeginDownload(
       request.Pass(),
       false,  // is_content_initiated
@@ -92,14 +96,14 @@ PluginInstaller::SecurityStatus PluginInstaller::GetSecurityStatus(
   if (versions_.empty())
     return SECURITY_STATUS_REQUIRES_AUTHORIZATION;
 
-  scoped_ptr<Version> version(
-      webkit::npapi::PluginGroup::CreateVersionFromString(plugin.version));
-  if (!version.get())
-    version.reset(new Version("0"));
+  Version version;
+  webkit::npapi::PluginGroup::CreateVersionFromString(plugin.version, &version);
+  if (!version.IsValid())
+    version = Version("0");
 
   // |lower_bound| returns the latest version that is not newer than |version|.
   std::map<Version, SecurityStatus, VersionComparator>::const_iterator it =
-      versions_.lower_bound(*version);
+      versions_.lower_bound(version);
   // If there is at least one version defined, everything older than the oldest
   // defined version is considered out-of-date.
   if (it == versions_.end())

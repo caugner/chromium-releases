@@ -8,10 +8,12 @@
 #include "base/bind_helpers.h"
 #include "base/i18n/rtl.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/web_contents.h"
@@ -160,8 +162,8 @@ void CustomHomePagesTableModel::Remove(int index) {
   // Cancel any pending load requests now so we don't deref a bogus pointer when
   // we get the loaded notification.
   if (entry->title_handle) {
-    HistoryService* history_service =
-        profile_->GetHistoryService(Profile::EXPLICIT_ACCESS);
+    HistoryService* history_service = HistoryServiceFactory::GetForProfile(
+        profile_, Profile::EXPLICIT_ACCESS);
     if (history_service)
       history_service->CancelRequest(entry->title_handle);
   }
@@ -184,7 +186,7 @@ void CustomHomePagesTableModel::SetToCurrentlyOpenPages() {
       continue;  // Skip incognito browsers.
 
     for (int tab_index = 0; tab_index < browser->tab_count(); ++tab_index) {
-      const GURL url = browser->GetWebContentsAt(tab_index)->GetURL();
+      const GURL url = chrome::GetWebContentsAt(browser, tab_index)->GetURL();
       if (ShouldAddPage(url))
         Add(add_index++, url);
     }
@@ -219,8 +221,8 @@ void CustomHomePagesTableModel::SetObserver(ui::TableModelObserver* observer) {
 }
 
 void CustomHomePagesTableModel::LoadTitle(Entry* entry) {
-  HistoryService* history_service =
-      profile_->GetHistoryService(Profile::EXPLICIT_ACCESS);
+    HistoryService* history_service = HistoryServiceFactory::GetForProfile(
+        profile_, Profile::EXPLICIT_ACCESS);
   if (history_service) {
     entry->title_handle = history_service->QueryURL(entry->url, false,
         &history_query_consumer_,

@@ -247,16 +247,6 @@ Value* TabProxy::ExecuteAndExtractValue(const std::wstring& frame_xpath,
   return deserializer.Deserialize(NULL, NULL);
 }
 
-DOMElementProxyRef TabProxy::GetDOMDocument() {
-  if (!is_valid())
-    return NULL;
-
-  int element_handle;
-  if (!ExecuteJavaScriptAndGetReturn("document", &element_handle))
-    return NULL;
-  return GetObjectProxy<DOMElementProxy>(element_handle);
-}
-
 bool TabProxy::GetCookies(const GURL& url, std::string* cookies) {
   if (!is_valid())
     return false;
@@ -283,21 +273,6 @@ bool TabProxy::GetCookieByName(const GURL& url,
   }
 
   return true;
-}
-
-bool TabProxy::SetCookie(const GURL& url, const std::string& value) {
-  int response_value = 0;
-  return sender_->Send(new AutomationMsg_SetCookie(url, value, handle_,
-                                                   &response_value));
-}
-
-bool TabProxy::GetDownloadDirectory(FilePath* directory) {
-  DCHECK(directory);
-  if (!is_valid())
-    return false;
-
-  return sender_->Send(new AutomationMsg_DownloadDirectory(handle_,
-                                                           directory));
 }
 
 bool TabProxy::Close() {
@@ -546,19 +521,6 @@ void TabProxy::OnChannelError() {
 }
 
 TabProxy::~TabProxy() {}
-
-bool TabProxy::ExecuteJavaScriptAndGetJSON(const std::string& script,
-                                           std::string* json) {
-  if (!is_valid())
-    return false;
-  if (!json) {
-    NOTREACHED();
-    return false;
-  }
-  return sender_->Send(new AutomationMsg_DomOperation(handle_, L"",
-                                                      UTF8ToWide(script),
-                                                      json));
-}
 
 void TabProxy::FirstObjectAdded() {
   AddRef();

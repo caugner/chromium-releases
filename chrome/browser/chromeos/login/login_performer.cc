@@ -15,19 +15,20 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/boot_times_loader.h"
-#include "chrome/browser/chromeos/cros_settings.h"
-#include "chrome/browser/chromeos/cros_settings_names.h"
 #include "chrome/browser/chromeos/kiosk_mode/kiosk_mode_metrics.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
 #include "chrome/browser/chromeos/login/screen_locker.h"
+#include "chrome/browser/chromeos/settings/cros_settings.h"
+#include "chrome/browser/chromeos/settings/cros_settings_names.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/net/gaia/gaia_auth_util.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
-#include "chromeos/dbus/power_manager_client.h"
+#include "chromeos/dbus/session_manager_client.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
@@ -290,7 +291,7 @@ void LoginPerformer::CompleteLogin(const std::string& username,
   }
 
   bool is_whitelisted = LoginUtils::IsWhitelisted(
-      Authenticator::Canonicalize(username));
+      gaia::CanonicalizeEmail(username));
   if (ScreenLocker::default_screen_locker() || is_whitelisted) {
     // Starts authentication if guest login is allowed or online auth pending.
     StartLoginCompletion();
@@ -385,16 +386,14 @@ void LoginPerformer::RequestScreenLock() {
     ResolveScreenLocked();
   } else {
     screen_lock_requested_ = true;
-    DBusThreadManager::Get()->GetPowerManagerClient()->
-        NotifyScreenLockRequested();
+    DBusThreadManager::Get()->GetSessionManagerClient()->RequestLockScreen();
   }
 }
 
 void LoginPerformer::RequestScreenUnlock() {
   DVLOG(1) << "Screen unlock requested";
   if (ScreenLocker::default_screen_locker()) {
-    DBusThreadManager::Get()->GetPowerManagerClient()->
-        NotifyScreenUnlockRequested();
+    DBusThreadManager::Get()->GetSessionManagerClient()->RequestUnlockScreen();
     // Will unsubscribe from notifications once unlock is successful.
   } else {
     LOG(ERROR) << "Screen is not locked";

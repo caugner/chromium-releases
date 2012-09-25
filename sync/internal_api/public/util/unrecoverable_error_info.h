@@ -6,13 +6,12 @@
 #define SYNC_UTIL_UNRECOVERABLE_ERROR_INFO_H_
 // TODO(lipalani): Figure out the right location for this class so it is
 // accessible outside of sync engine as well.
-#pragma once
 
 #include <string>
 
 #include "base/location.h"
 
-namespace browser_sync {
+namespace syncer {
 
 class UnrecoverableErrorInfo {
  public:
@@ -36,6 +35,6 @@ class UnrecoverableErrorInfo {
   bool is_set_;
 };
 
-}  // namespace browser_sync
+}  // namespace syncer
 
 #endif  // SYNC_UTIL_UNRECOVERABLE_ERROR_INFO_H_

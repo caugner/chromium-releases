@@ -23,6 +23,8 @@
 #include "ppapi/proxy/ppb_instance_proxy.h"
 #include "ppapi/proxy/ppp_class_proxy.h"
 #include "ppapi/proxy/resource_creation_proxy.h"
+#include "ppapi/proxy/resource_message_params.h"
+#include "ppapi/shared_impl/ppapi_globals.h"
 #include "ppapi/shared_impl/proxy_lock.h"
 #include "ppapi/shared_impl/resource.h"
 
@@ -45,17 +47,13 @@ DispatcherSet* g_live_dispatchers = NULL;
 }  // namespace
 
 InstanceData::InstanceData()
-    : flash_fullscreen(PP_FALSE),
-      mouse_lock_callback(PP_BlockUntilComplete()) {
+    : flash_fullscreen(PP_FALSE) {
 }
 
 InstanceData::~InstanceData() {
   // Run any pending mouse lock callback to prevent leaks.
-  if (mouse_lock_callback.func) {
-    CallWhileUnlocked(PP_RunAndClearCompletionCallback,
-                      &mouse_lock_callback,
-                      static_cast<int32_t>(PP_ERROR_ABORTED));
-  }
+  if (mouse_lock_callback)
+    mouse_lock_callback->Abort();
 }
 
 PluginDispatcher::PluginDispatcher(PP_GetInterface_Func get_interface,
@@ -193,10 +191,12 @@ bool PluginDispatcher::OnMessageReceived(const IPC::Message& msg) {
   TRACE_EVENT2("ppapi proxy", "PluginDispatcher::OnMessageReceived",
                "Class", IPC_MESSAGE_ID_CLASS(msg.type()),
                "Line", IPC_MESSAGE_ID_LINE(msg.type()));
+
   if (msg.routing_id() == MSG_ROUTING_CONTROL) {
     // Handle some plugin-specific control messages.
     bool handled = true;
     IPC_BEGIN_MESSAGE_MAP(PluginDispatcher, msg)
+      IPC_MESSAGE_HANDLER(PpapiPluginMsg_ResourceReply, OnMsgResourceReply)
       IPC_MESSAGE_HANDLER(PpapiMsg_SupportsInterface, OnMsgSupportsInterface)
       IPC_MESSAGE_HANDLER(PpapiMsg_SetPreferences, OnMsgSetPreferences)
       IPC_MESSAGE_UNHANDLED(handled = false);
@@ -273,6 +273,19 @@ void PluginDispatcher::ForceFreeAllInstances() {
       OnMessageReceived(msg);
     }
   }
+}
+
+void PluginDispatcher::OnMsgResourceReply(
+    const ppapi::proxy::ResourceMessageReplyParams& reply_params,
+    const IPC::Message& nested_msg) {
+  Resource* resource = PpapiGlobals::Get()->GetResourceTracker()->GetResource(
+      reply_params.pp_resource());
+  if (!resource) {
+    NOTREACHED();
+    return;
+  }
+  resource->OnReplyReceived(reply_params.sequence(), reply_params.result(),
+                            nested_msg);
 }
 
 void PluginDispatcher::OnMsgSupportsInterface(

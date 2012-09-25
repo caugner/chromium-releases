@@ -58,7 +58,8 @@ IN_PROC_BROWSER_TEST_F(OldDetachedPanelBrowserTest, DrawAttentionOnActive) {
   panel->Close();
 }
 
-IN_PROC_BROWSER_TEST_F(OldDetachedPanelBrowserTest, DrawAttentionOnInactive) {
+IN_PROC_BROWSER_TEST_F(OldDetachedPanelBrowserTest,
+                       DrawAttentionOnInactive) {
   // Create an inactive detached panel.
   Panel* panel = CreateDetachedPanel("1", gfx::Rect(300, 200, 250, 200));
   panel->Deactivate();
@@ -84,8 +85,15 @@ IN_PROC_BROWSER_TEST_F(OldDetachedPanelBrowserTest, DrawAttentionOnInactive) {
   panel->Close();
 }
 
+// http://crbug.com/133464
+#if defined(OS_LINUX)
+#define MAYBE_DrawAttentionResetOnActivate DISABLED_DrawAttentionResetOnActivate
+#else
+#define MAYBE_DrawAttentionResetOnActivate DrawAttentionResetOnActivate
+#endif
+
 IN_PROC_BROWSER_TEST_F(OldDetachedPanelBrowserTest,
-                       DrawAttentionResetOnActivate) {
+                       MAYBE_DrawAttentionResetOnActivate) {
   // Create 2 panels so we end up with an inactive panel that can
   // be made to draw attention.
   Panel* panel1 = CreatePanel("test panel1");
@@ -134,7 +142,7 @@ IN_PROC_BROWSER_TEST_F(OldDetachedPanelBrowserTest, ClickTitlebar) {
 
   // Create a second panel to cause the first to become inactive.
   CreateDetachedPanel("2", gfx::Rect(100, 200, 230, 345));
-  EXPECT_FALSE(panel->IsActive());
+  WaitForPanelActiveState(panel, SHOW_AS_INACTIVE);
 
   // Clicking on an inactive detached panel's titlebar activates it.
   test_panel->PressLeftMouseButtonTitlebar(panel->GetBounds().origin());

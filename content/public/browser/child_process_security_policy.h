@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_PUBLIC_BROWSER_CHILD_PROCESS_SECURITY_POLICY_H_
 #define CONTENT_PUBLIC_BROWSER_CHILD_PROCESS_SECURITY_POLICY_H_
-#pragma once
 
 #include <set>
 #include <string>
@@ -101,6 +100,11 @@ class ChildProcessSecurityPolicy {
   // |filesystem_id|.
   virtual bool CanReadFileSystem(int child_id,
                                  const std::string& filesystem_id) = 0;
+
+  // Returns true iff read and write access has been granted to the filesystem
+  // with |filesystem_id|.
+  virtual bool CanReadWriteFileSystem(int child_id,
+                                      const std::string& filesystem_id) = 0;
 };
 
 };  // namespace content

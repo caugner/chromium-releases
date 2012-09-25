@@ -41,11 +41,11 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/test/automation/automation_proxy.h"
 #include "chrome/test/automation/browser_proxy.h"
-#include "chrome/test/automation/javascript_execution_controller.h"
 #include "chrome/test/automation/proxy_launcher.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/automation/window_proxy.h"
 #include "chrome/test/base/chrome_process_util.h"
+#include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/test_switches.h"
 #include "content/common/debug_flags.h"
 #include "googleurl/src/gurl.h"
@@ -118,8 +118,6 @@ void UITestBase::SetUp() {
   launcher_->AssertAppNotRunning("Please close any other instances "
                                  "of the app before testing.");
 
-  JavaScriptExecutionController::set_timeout(
-      TestTimeouts::action_max_timeout_ms());
   test_start_time_ = Time::NowFromSystemTime();
 
   SetLaunchSwitches();
@@ -138,13 +136,22 @@ AutomationProxy* UITestBase::automation() const {
   return launcher_->automation();
 }
 
+base::TimeDelta UITestBase::action_timeout() {
+  return automation()->action_timeout();
+}
+
 int UITestBase::action_timeout_ms() {
-  return automation()->action_timeout_ms();
+  return action_timeout().InMilliseconds();
+}
+
+void UITestBase::set_action_timeout(base::TimeDelta timeout) {
+  automation()->set_action_timeout(timeout);
+  VLOG(1) << "Automation action timeout set to "
+          << timeout.InMilliseconds() << " ms";
 }
 
 void UITestBase::set_action_timeout_ms(int timeout) {
-  automation()->set_action_timeout_ms(timeout);
-  VLOG(1) << "Automation action timeout set to " << timeout << " ms";
+  set_action_timeout(base::TimeDelta::FromMilliseconds(timeout));
 }
 
 ProxyLauncher* UITestBase::CreateProxyLauncher() {
@@ -414,7 +421,7 @@ bool UITestBase::CloseBrowser(BrowserProxy* browser,
   if (*application_closed) {
     int exit_code = -1;
     EXPECT_TRUE(launcher_->WaitForBrowserProcessToQuit(
-        TestTimeouts::action_max_timeout_ms(), &exit_code));
+        TestTimeouts::action_max_timeout(), &exit_code));
     EXPECT_EQ(0, exit_code);  // Expect a clean shutown.
   }
 
@@ -584,7 +591,7 @@ DictionaryValue* UITest::GetLocalState() {
 DictionaryValue* UITest::GetDefaultProfilePreferences() {
   FilePath path;
   PathService::Get(chrome::DIR_USER_DATA, &path);
-  path = path.AppendASCII(chrome::kInitialProfile);
+  path = path.AppendASCII(TestingProfile::kTestUserProfileDir);
   return LoadDictionaryValueFromPath(path.Append(chrome::kPreferencesFilename));
 }
 
@@ -593,7 +600,7 @@ void UITest::WaitForFinish(const std::string &name,
                            const GURL &url,
                            const std::string& test_complete_cookie,
                            const std::string& expected_cookie_value,
-                           const int wait_time) {
+                           const base::TimeDelta wait_time) {
   // The webpage being tested has javascript which sets a cookie
   // which signals completion of the test.  The cookie name is
   // a concatenation of the test name and the test id.  This allows
@@ -627,9 +634,9 @@ bool UITest::EvictFileFromSystemCacheWrapper(const FilePath& path) {
 bool UITest::WaitUntilJavaScriptCondition(TabProxy* tab,
                                           const std::wstring& frame_xpath,
                                           const std::wstring& jscript,
-                                          int timeout_ms) {
+                                          base::TimeDelta timeout) {
   const TimeDelta kDelay = TimeDelta::FromMilliseconds(250);
-  const int kMaxDelays = timeout_ms / kDelay.InMilliseconds();
+  const int kMaxDelays = timeout / kDelay;
 
   // Wait until the test signals it has completed.
   for (int i = 0; i < kMaxDelays; ++i) {
@@ -652,10 +659,10 @@ bool UITest::WaitUntilJavaScriptCondition(TabProxy* tab,
 bool UITest::WaitUntilCookieValue(TabProxy* tab,
                                   const GURL& url,
                                   const char* cookie_name,
-                                  int timeout_ms,
+                                  base::TimeDelta timeout,
                                   const char* expected_value) {
   const TimeDelta kDelay = TimeDelta::FromMilliseconds(250);
-  const int kMaxDelays = timeout_ms / kDelay.InMilliseconds();
+  const int kMaxDelays = timeout / kDelay;
 
   std::string cookie_value;
   for (int i = 0; i < kMaxDelays; ++i) {
@@ -673,9 +680,9 @@ bool UITest::WaitUntilCookieValue(TabProxy* tab,
 std::string UITest::WaitUntilCookieNonEmpty(TabProxy* tab,
                                             const GURL& url,
                                             const char* cookie_name,
-                                            int timeout_ms) {
+                                            base::TimeDelta timeout) {
   const TimeDelta kDelay = TimeDelta::FromMilliseconds(250);
-  const int kMaxDelays = timeout_ms / kDelay.InMilliseconds();
+  const int kMaxDelays = timeout / kDelay;
 
   for (int i = 0; i < kMaxDelays; ++i) {
     std::string cookie_value;

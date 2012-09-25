@@ -25,6 +25,7 @@ void AuraTestBase::SetUp() {
   // tests to fail, so we use a separate set of parameters for unit
   // testing.
   ui::GestureConfiguration::set_long_press_time_in_seconds(1.0);
+  ui::GestureConfiguration::set_semi_long_press_time_in_seconds(0.5);
   ui::GestureConfiguration::set_max_distance_for_two_finger_tap_in_pixels(300);
   ui::GestureConfiguration::set_max_seconds_between_double_click(0.7);
   ui::GestureConfiguration::
@@ -42,6 +43,7 @@ void AuraTestBase::SetUp() {
   ui::GestureConfiguration::set_points_buffered_for_velocity(10);
   ui::GestureConfiguration::set_rail_break_proportion(15);
   ui::GestureConfiguration::set_rail_start_proportion(2);
+  ui::GestureConfiguration::set_default_radius(0);
   helper_.reset(new AuraTestHelper(&message_loop_));
   helper_->SetUp();
 }

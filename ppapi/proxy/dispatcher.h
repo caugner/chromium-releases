@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "base/callback_forward.h"
+#include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "base/tracked_objects.h"
 #include "ipc/ipc_channel_proxy.h"
@@ -50,6 +51,8 @@ class PPAPI_PROXY_EXPORT Dispatcher : public ProxyChannel {
   // browser side.
   virtual bool IsPlugin() const = 0;
 
+  void AddFilter(IPC::Listener* listener);
+
   VarSerializationRules* serialization_rules() const {
     return serialization_rules_.get();
   }
@@ -73,8 +76,8 @@ class PPAPI_PROXY_EXPORT Dispatcher : public ProxyChannel {
   // so we don't have to query for each one. We'll pre-create proxies for
   // each of the given interfaces.
 
-  // IPC::Channel::Listener implementation.
-  virtual bool OnMessageReceived(const IPC::Message& msg);
+  // IPC::Listener implementation.
+  virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
 
   PP_GetInterface_Func local_get_interface() const {
     return local_get_interface_;
@@ -94,6 +97,9 @@ class PPAPI_PROXY_EXPORT Dispatcher : public ProxyChannel {
   bool disallow_trusted_interfaces() const {
     return disallow_trusted_interfaces_;
   }
+
+ protected:
+  std::vector<IPC::Listener*> filters_;
 
  private:
   friend class HostDispatcherTest;

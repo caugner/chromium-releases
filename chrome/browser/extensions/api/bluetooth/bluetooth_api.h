@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_API_BLUETOOTH_BLUETOOTH_API_H_
 #define CHROME_BROWSER_EXTENSIONS_API_BLUETOOTH_BLUETOOTH_API_H_
-#pragma once
 
 #include <string>
 
@@ -94,7 +93,6 @@ class BluetoothGetServicesFunction : public AsyncExtensionFunction {
   // ExtensionFunction:
   virtual bool RunImpl() OVERRIDE;
 
-
 #if defined(OS_CHROMEOS)
  private:
   void GetServiceRecordsCallback(
@@ -133,7 +131,7 @@ class BluetoothDisconnectFunction : public SyncExtensionFunction {
   virtual bool RunImpl() OVERRIDE;
 };
 
-class BluetoothReadFunction : public AsyncAPIFunction {
+class BluetoothReadFunction : public AsyncApiFunction {
  public:
   DECLARE_EXTENSION_FUNCTION_NAME("experimental.bluetooth.read")
   BluetoothReadFunction();
@@ -141,19 +139,19 @@ class BluetoothReadFunction : public AsyncAPIFunction {
  protected:
   virtual ~BluetoothReadFunction();
 
-  // AsyncAPIFunction:
+  // AsyncApiFunction:
   virtual bool Prepare() OVERRIDE;
   virtual bool Respond() OVERRIDE;
   virtual void Work() OVERRIDE;
 
  private:
-  bool success_;
 #if defined(OS_CHROMEOS)
+  bool success_;
   scoped_refptr<chromeos::BluetoothSocket> socket_;
 #endif
 };
 
-class BluetoothWriteFunction : public AsyncAPIFunction {
+class BluetoothWriteFunction : public AsyncApiFunction {
  public:
   DECLARE_EXTENSION_FUNCTION_NAME("experimental.bluetooth.write")
   BluetoothWriteFunction();
@@ -161,15 +159,15 @@ class BluetoothWriteFunction : public AsyncAPIFunction {
  protected:
   virtual ~BluetoothWriteFunction();
 
-  // AsyncAPIFunction:
+  // AsyncApiFunction:
   virtual bool Prepare() OVERRIDE;
   virtual bool Respond() OVERRIDE;
   virtual void Work() OVERRIDE;
 
  private:
+#if defined(OS_CHROMEOS)
   bool success_;
   const base::BinaryValue* data_to_write_;  // memory is owned by args_
-#if defined(OS_CHROMEOS)
   scoped_refptr<chromeos::BluetoothSocket> socket_;
 #endif
 };

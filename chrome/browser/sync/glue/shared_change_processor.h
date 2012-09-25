@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_SYNC_GLUE_SHARED_CHANGE_PROCESSOR_H_
 #define CHROME_BROWSER_SYNC_GLUE_SHARED_CHANGE_PROCESSOR_H_
-#pragma once
 
 #include "base/location.h"
 #include "base/memory/ref_counted.h"
@@ -19,10 +18,13 @@
 
 class ProfileSyncComponentsFactory;
 class ProfileSyncService;
+
+namespace syncer {
 class SyncData;
 class SyncableService;
 
-typedef std::vector<SyncData> SyncDataList;
+typedef std::vector<syncer::SyncData> SyncDataList;
+}  // namespace
 
 namespace browser_sync {
 
@@ -54,14 +56,14 @@ class SharedChangeProcessor
 
   // Connect to the Syncer and prepare to handle changes for |type|. Will
   // create and store a new GenericChangeProcessor and return a weak pointer to
-  // the SyncableService associated with |type|.
+  // the syncer::SyncableService associated with |type|.
   // Note: If this SharedChangeProcessor has been disconnected, or the
-  // SyncableService was not alive, will return a null weak pointer.
-  virtual base::WeakPtr<SyncableService> Connect(
+  // syncer::SyncableService was not alive, will return a null weak pointer.
+  virtual base::WeakPtr<syncer::SyncableService> Connect(
     ProfileSyncComponentsFactory* sync_factory,
     ProfileSyncService* sync_service,
     DataTypeErrorHandler* error_handler,
-    syncable::ModelType type);
+    syncer::ModelType type);
 
   // Disconnects from the generic change processor. May be called from any
   // thread. After this, all attempts to interact with the change processor by
@@ -75,19 +77,20 @@ class SharedChangeProcessor
 
   // GenericChangeProcessor stubs (with disconnect support).
   // Should only be called on the same thread the datatype resides.
-  virtual SyncError GetSyncData(SyncDataList* current_sync_data);
-  virtual SyncError ProcessSyncChanges(
+  virtual syncer::SyncError GetSyncData(
+      syncer::SyncDataList* current_sync_data);
+  virtual syncer::SyncError ProcessSyncChanges(
       const tracked_objects::Location& from_here,
-      const SyncChangeList& change_list);
+      const syncer::SyncChangeList& change_list);
   virtual bool SyncModelHasUserCreatedNodes(bool* has_nodes);
   virtual bool CryptoReadyIfNecessary();
 
   // Register |generic_change_processor_| as the change processor for the
   // current type on |model_safe_group|.
   // Does nothing if |disconnected_| is true.
-  virtual void ActivateDataType(browser_sync::ModelSafeGroup model_safe_group);
+  virtual void ActivateDataType(syncer::ModelSafeGroup model_safe_group);
 
-  virtual SyncError CreateAndUploadError(
+  virtual syncer::SyncError CreateAndUploadError(
       const tracked_objects::Location& location,
       const std::string& message);
 
@@ -105,7 +108,7 @@ class SharedChangeProcessor
   bool disconnected_;
 
   // The sync datatype we were last connected to.
-  syncable::ModelType type_;
+  syncer::ModelType type_;
 
   // The ProfileSyncService we're currently connected to.
   ProfileSyncService* sync_service_;

@@ -9,7 +9,7 @@
 
 #include "base/sys_byteorder.h"
 #include "content/common/p2p_messages.h"
-#include "ipc/ipc_message.h"
+#include "ipc/ipc_sender.h"
 #include "ipc/ipc_message_utils.h"
 #include "net/base/address_list.h"
 #include "net/base/completion_callback.h"
@@ -33,7 +33,7 @@ const uint16 kStunBindingResponse = 0x0102;
 const uint16 kStunBindingError = 0x0111;
 const uint32 kStunMagicCookie = 0x2112A442;
 
-class MockIPCSender : public IPC::Message::Sender {
+class MockIPCSender : public IPC::Sender {
  public:
   MockIPCSender();
   virtual ~MockIPCSender();
@@ -75,7 +75,9 @@ class FakeSocket : public net::StreamSocket {
   virtual bool UsingTCPFastOpen() const OVERRIDE;
   virtual int64 NumBytesRead() const OVERRIDE;
   virtual base::TimeDelta GetConnectTimeMicros() const OVERRIDE;
+  virtual bool WasNpnNegotiated() const OVERRIDE;
   virtual net::NextProto GetNegotiatedProtocol() const OVERRIDE;
+  virtual bool GetSSLInfo(net::SSLInfo* ssl_info) OVERRIDE;
 
  private:
   bool read_pending_;
@@ -219,8 +221,16 @@ base::TimeDelta FakeSocket::GetConnectTimeMicros() const {
   return base::TimeDelta::FromMicroseconds(-1);
 }
 
+bool FakeSocket::WasNpnNegotiated() const {
+  return false;
+}
+
 net::NextProto FakeSocket::GetNegotiatedProtocol() const {
   return net::kProtoUnknown;
+}
+
+bool FakeSocket::GetSSLInfo(net::SSLInfo* ssl_info) {
+  return false;
 }
 
 void CreateRandomPacket(std::vector<char>* packet) {

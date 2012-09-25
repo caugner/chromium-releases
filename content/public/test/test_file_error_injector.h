@@ -4,14 +4,13 @@
 
 #ifndef CONTENT_PUBLIC_TEST_TEST_FILE_ERROR_INJECTOR_H_
 #define CONTENT_PUBLIC_TEST_TEST_FILE_ERROR_INJECTOR_H_
-#pragma once
 
 #include <map>
 #include <string>
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "net/base/net_errors.h"
+#include "content/public/browser/download_interrupt_reasons.h"
 
 class GURL;
 
@@ -60,7 +59,7 @@ class TestFileErrorInjector
     std::string url;  // Full URL of the download.  Identifies the download.
     FileOperationCode code;  // Operation to affect.
     int operation_instance;  // 0-based count of operation calls, for each code.
-    net::Error net_error;  // Error to inject.
+    content::DownloadInterruptReason error;  // Error to inject.
   };
 
   typedef std::map<std::string, FileErrorInfo> ErrorMap;

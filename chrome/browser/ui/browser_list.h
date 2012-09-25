@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_BROWSER_LIST_H_
 #define CHROME_BROWSER_UI_BROWSER_LIST_H_
-#pragma once
 
 #include <vector>
 
@@ -14,10 +13,6 @@
 class Browser;
 class Profile;
 
-namespace content {
-class WebContents;
-}
-
 namespace browser {
 class BrowserActivityObserver;
 #if defined(OS_MACOSX)
@@ -26,6 +21,10 @@ Browser* GetLastActiveBrowser();
 #if defined(TOOLKIT_GTK)
 class ExtensionInstallDialog;
 #endif
+}
+
+namespace chrome {
+class BrowserListObserver;
 namespace internal {
 void NotifyNotDefaultBrowserCallback();
 }
@@ -36,6 +35,14 @@ namespace chromeos {
 class ScreenLocker;
 }
 #endif
+
+namespace content {
+class WebContents;
+}
+
+namespace web_intents {
+Browser* GetBrowserForBackgroundWebIntentDelivery(Profile*);
+}
 
 #if defined(USE_ASH)
 content::WebContents* GetActiveWebContents();
@@ -49,31 +56,14 @@ class BrowserList {
   typedef BrowserVector::const_iterator const_iterator;
   typedef BrowserVector::const_reverse_iterator const_reverse_iterator;
 
-  // It is not allowed to change the global window list (add or remove any
-  // browser windows while handling observer callbacks.
-  class Observer {
-   public:
-    // Called immediately after a browser is added to the list
-    virtual void OnBrowserAdded(Browser* browser) = 0;
-
-    // Called immediately after a browser is removed from the list
-    virtual void OnBrowserRemoved(Browser* browser) = 0;
-
-    // Called immediately after a browser is set active (SetLastActive)
-    virtual void OnBrowserSetLastActive(Browser* browser) {}
-
-   protected:
-    virtual ~Observer() {}
-  };
-
   // Adds and removes browsers from the global list. The browser object should
   // be valid BEFORE these calls (for the benefit of observers), so notify and
   // THEN delete the object.
   static void AddBrowser(Browser* browser);
   static void RemoveBrowser(Browser* browser);
 
-  static void AddObserver(Observer* observer);
-  static void RemoveObserver(Observer* observer);
+  static void AddObserver(chrome::BrowserListObserver* observer);
+  static void RemoveObserver(chrome::BrowserListObserver* observer);
 
   // Called by Browser objects when their window is activated (focused).  This
   // allows us to determine what the last active Browser was.
@@ -108,9 +98,7 @@ class BrowserList {
   // time by wiring context through to the relevant code rather than using
   // GetLastActive().
   friend class BrowserView;
-  friend class CertificateViewerDialog;
   friend class ChromeShellDelegate;
-  friend class FeedbackHandler;
   friend class NetworkProfileBubble;
   friend class PrintPreviewHandler;
   friend class SelectFileDialogExtension;
@@ -118,6 +106,8 @@ class BrowserList {
   friend class TaskManager;
   friend class WindowSizer;
   friend class browser::BrowserActivityObserver;
+  friend Browser* web_intents::GetBrowserForBackgroundWebIntentDelivery(
+      Profile*);
 #if defined(OS_CHROMEOS)
   friend class chromeos::ScreenLocker;
 #endif
@@ -127,7 +117,7 @@ class BrowserList {
 #if defined(USE_ASH)
   friend content::WebContents* GetActiveWebContents();
 #endif
-  friend void browser::internal::NotifyNotDefaultBrowserCallback();
+  friend void chrome::internal::NotifyNotDefaultBrowserCallback();
   // DO NOT ADD MORE FRIENDS TO THIS LIST.
 
   // Returns the Browser object whose window was most recently active.  If the
@@ -142,9 +132,6 @@ class BrowserList {
   // THIS FUNCTION IS PRIVATE AND NOT TO BE USED AS A REPLACEMENT FOR RELEVANT
   // CONTEXT.
   static Browser* GetLastActive();
-
-  // Helper method to remove a browser instance from a list of browsers
-  static void RemoveBrowserFrom(Browser* browser, BrowserVector* browser_list);
 };
 
 #endif  // CHROME_BROWSER_UI_BROWSER_LIST_H_

@@ -4,14 +4,12 @@
 
 #ifndef CHROME_BROWSER_APP_CONTROLLER_MAC_H_
 #define CHROME_BROWSER_APP_CONTROLLER_MAC_H_
-#pragma once
 
 #if defined(__OBJC__)
 
 #import <Cocoa/Cocoa.h>
 #include <vector>
 
-#import "base/mac/cocoa_protocols.h"
 #include "base/memory/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"

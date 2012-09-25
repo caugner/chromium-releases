@@ -8,39 +8,41 @@
 #include "native_client/src/trusted/plugin/plugin.h"
 #include "native_client/src/trusted/plugin/pnacl_resources.h"
 #include "native_client/src/trusted/plugin/srpc_params.h"
+#include "native_client/src/trusted/plugin/temporary_file.h"
 #include "native_client/src/trusted/plugin/utility.h"
 
 namespace plugin {
 
-PnaclTranslateThread::PnaclTranslateThread() : subprocesses_should_die_(false),
+PnaclTranslateThread::PnaclTranslateThread() : llc_subprocess_active_(false),
+                                               ld_subprocess_active_(false),
+                                               done_(false),
                                                manifest_(NULL),
                                                ld_manifest_(NULL),
                                                obj_file_(NULL),
                                                nexe_file_(NULL),
-                                               pexe_wrapper_(NULL),
-                                               error_info_(NULL),
+                                               coordinator_error_info_(NULL),
                                                resources_(NULL),
                                                plugin_(NULL) {
   NaClXMutexCtor(&subprocess_mu_);
+  NaClXMutexCtor(&cond_mu_);
+  NaClXCondVarCtor(&buffer_cond_);
 }
 
 void PnaclTranslateThread::RunTranslate(
     const pp::CompletionCallback& finish_callback,
     const Manifest* manifest,
     const Manifest* ld_manifest,
-    LocalTempFile* obj_file,
-    LocalTempFile* nexe_file,
-    nacl::DescWrapper* pexe_wrapper,
+    TempFile* obj_file,
+    TempFile* nexe_file,
     ErrorInfo* error_info,
     PnaclResources* resources,
     Plugin* plugin) {
-  PLUGIN_PRINTF(("PnaclTranslateThread::RunTranslate)\n"));
+  PLUGIN_PRINTF(("PnaclStreamingTranslateThread::RunTranslate)\n"));
   manifest_ = manifest;
   ld_manifest_ = ld_manifest;
   obj_file_ = obj_file;
   nexe_file_ = nexe_file;
-  pexe_wrapper_ = pexe_wrapper;
-  error_info_ = error_info;
+  coordinator_error_info_ = error_info;
   resources_ = resources;
   plugin_ = plugin;
 
@@ -58,17 +60,52 @@ void PnaclTranslateThread::RunTranslate(
                                 this,
                                 kArbitraryStackSize)) {
     TranslateFailed("could not create thread.");
+    translate_thread_.reset(NULL);
   }
+}
+
+// Called from main thread to send bytes to the translator.
+void PnaclTranslateThread::PutBytes(std::vector<char>* bytes,
+                                             int count) {
+  PLUGIN_PRINTF(("PutBytes, this %p bytes %p, size %d, count %d\n", this, bytes,
+                 bytes ? bytes->size(): 0, count));
+  size_t buffer_size = 0;
+  // If we are done (error or not), Signal the translation thread to stop.
+  if (count <= PP_OK) {
+    NaClXMutexLock(&cond_mu_);
+    done_ = true;
+    NaClXCondVarSignal(&buffer_cond_);
+    NaClXMutexUnlock(&cond_mu_);
+    return;
+  }
+
+  CHECK(bytes != NULL);
+  // Ensure that the buffer we send to the translation thread is the right size
+  // (count can be < the buffer size). This can be done without the lock.
+  buffer_size = bytes->size();
+  bytes->resize(count);
+
+  NaClXMutexLock(&cond_mu_);
+
+  data_buffers_.push_back(std::vector<char>());
+  bytes->swap(data_buffers_.back()); // Avoid copying the buffer data.
+
+  NaClXCondVarSignal(&buffer_cond_);
+  NaClXMutexUnlock(&cond_mu_);
+
+  // Ensure the buffer we send back to the coordinator is the expected size
+  bytes->resize(buffer_size);
 }
 
 NaClSubprocess* PnaclTranslateThread::StartSubprocess(
     const nacl::string& url_for_nexe,
-    const Manifest* manifest) {
+    const Manifest* manifest,
+    ErrorInfo* error_info) {
   PLUGIN_PRINTF(("PnaclTranslateThread::StartSubprocess (url_for_nexe=%s)\n",
                  url_for_nexe.c_str()));
   nacl::DescWrapper* wrapper = resources_->WrapperForUrl(url_for_nexe);
   nacl::scoped_ptr<NaClSubprocess> subprocess(
-      plugin_->LoadHelperNaClModule(wrapper, manifest, error_info_));
+      plugin_->LoadHelperNaClModule(wrapper, manifest, error_info));
   if (subprocess.get() == NULL) {
     PLUGIN_PRINTF((
         "PnaclTranslateThread::StartSubprocess: subprocess creation failed\n"));
@@ -84,25 +121,83 @@ void WINAPI PnaclTranslateThread::DoTranslateThread(void* arg) {
 }
 
 void PnaclTranslateThread::DoTranslate() {
-  nacl::scoped_ptr<NaClSubprocess> llc_subprocess(
-      StartSubprocess(PnaclUrls::GetLlcUrl(), manifest_));
-  if (llc_subprocess == NULL) {
-    TranslateFailed("Compile process could not be created.");
-    return;
-  }
-  // Run LLC.
+  ErrorInfo error_info;
   SrpcParams params;
   nacl::DescWrapper* llc_out_file = obj_file_->write_wrapper();
-  PluginReverseInterface* llc_reverse =
-      llc_subprocess->service_runtime()->rev_interface();
-  llc_reverse->AddQuotaManagedFile(obj_file_->identifier(),
-                                   obj_file_->write_file_io());
-  if (!llc_subprocess->InvokeSrpcMethod("RunWithDefaultCommandLine",
-                                        "hh",
-                                        &params,
-                                        pexe_wrapper_->desc(),
-                                        llc_out_file->desc())) {
-    TranslateFailed("compile failed.");
+
+  {
+    nacl::MutexLocker ml(&subprocess_mu_);
+    llc_subprocess_.reset(
+      StartSubprocess(PnaclUrls::GetLlcUrl(), manifest_, &error_info));
+    if (llc_subprocess_ == NULL) {
+      TranslateFailed("Compile process could not be created: " +
+                      error_info.message());
+      return;
+    }
+    llc_subprocess_active_ = true;
+    // Run LLC.
+    PluginReverseInterface* llc_reverse =
+        llc_subprocess_->service_runtime()->rev_interface();
+    llc_reverse->AddTempQuotaManagedFile(obj_file_->identifier());
+  }
+
+  if (!llc_subprocess_->InvokeSrpcMethod("StreamInit",
+                                         "h",
+                                         &params,
+                                         llc_out_file->desc())) {
+    if (llc_subprocess_->srpc_client()->GetLastError() ==
+        NACL_SRPC_RESULT_APP_ERROR) {
+      // The error message is only present if the error was returned from llc
+      TranslateFailed(nacl::string("Stream init failed: ") +
+                      nacl::string(params.outs()[0]->arrays.str));
+    } else {
+      TranslateFailed("Stream init internal error");
+    }
+    return;
+  }
+
+  PLUGIN_PRINTF(("PnaclCoordinator: StreamInit successful\n"));
+
+  // llc process is started.
+  while(!done_ || data_buffers_.size() > 0) {
+    NaClXMutexLock(&cond_mu_);
+    while(!done_ && data_buffers_.size() == 0) {
+      NaClXCondVarWait(&buffer_cond_, &cond_mu_);
+    }
+    PLUGIN_PRINTF(("PnaclTranslateThread awake, done %d, size %d\n",
+                   done_, data_buffers_.size()));
+    if (data_buffers_.size() > 0) {
+      std::vector<char> data;
+      data.swap(data_buffers_.front());
+      data_buffers_.pop_front();
+      NaClXMutexUnlock(&cond_mu_);
+      PLUGIN_PRINTF(("StreamChunk\n"));
+      if (!llc_subprocess_->InvokeSrpcMethod("StreamChunk",
+                                             "C",
+                                             &params,
+                                             &data[0],
+                                             data.size())) {
+        TranslateFailed("Compile stream chunk failed.");
+        return;
+      }
+      PLUGIN_PRINTF(("StreamChunk Successful\n"));
+    } else {
+      NaClXMutexUnlock(&cond_mu_);
+    }
+  }
+  PLUGIN_PRINTF(("PnaclTranslateThread done with chunks\n"));
+  // Finish llc.
+  if(!llc_subprocess_->InvokeSrpcMethod("StreamEnd",
+                                       "",
+                                       &params)) {
+    PLUGIN_PRINTF(("PnaclTranslateThread StreamEnd failed\n"));
+    if (llc_subprocess_->srpc_client()->GetLastError() ==
+        NACL_SRPC_RESULT_APP_ERROR) {
+      // The error string is only present if the error was sent back from llc
+      TranslateFailed(params.outs()[3]->arrays.str);
+    } else {
+      TranslateFailed("Compile StreamEnd internal error");
+    }
     return;
   }
   // LLC returns values that are used to determine how linking is done.
@@ -113,12 +208,13 @@ void PnaclTranslateThread::DoTranslate() {
                  " is_shared_library=%d, soname='%s', lib_dependencies='%s')\n",
                  this, is_shared_library, soname.c_str(),
                  lib_dependencies.c_str()));
+
   // Shut down the llc subprocess.
-  llc_subprocess.reset(NULL);
-  if (SubprocessesShouldDie()) {
-    TranslateFailed("stopped by coordinator.");
-    return;
-  }
+  NaClXMutexLock(&subprocess_mu_);
+  llc_subprocess_active_ = false;
+  llc_subprocess_.reset(NULL);
+  NaClXMutexUnlock(&subprocess_mu_);
+
   if(!RunLdSubprocess(is_shared_library, soname, lib_dependencies)) {
     return;
   }
@@ -130,21 +226,33 @@ bool PnaclTranslateThread::RunLdSubprocess(int is_shared_library,
                                            const nacl::string& soname,
                                            const nacl::string& lib_dependencies
                                            ) {
-  nacl::scoped_ptr<NaClSubprocess> ld_subprocess(
-      StartSubprocess(PnaclUrls::GetLdUrl(), ld_manifest_));
-  if (ld_subprocess == NULL) {
-    TranslateFailed("Link process could not be created.");
+  ErrorInfo error_info;
+  SrpcParams params;
+  // Reset object file for reading first.
+  if (!obj_file_->Reset()) {
+    TranslateFailed("Link process could not reset object file");
     return false;
   }
-  // Run LD.
-  SrpcParams params;
   nacl::DescWrapper* ld_in_file = obj_file_->read_wrapper();
   nacl::DescWrapper* ld_out_file = nexe_file_->write_wrapper();
-  PluginReverseInterface* ld_reverse =
-      ld_subprocess->service_runtime()->rev_interface();
-  ld_reverse->AddQuotaManagedFile(nexe_file_->identifier(),
-                                  nexe_file_->write_file_io());
-  if (!ld_subprocess->InvokeSrpcMethod("RunWithDefaultCommandLine",
+
+  {
+    // Create LD process
+    nacl::MutexLocker ml(&subprocess_mu_);
+    ld_subprocess_.reset(
+      StartSubprocess(PnaclUrls::GetLdUrl(), ld_manifest_, &error_info));
+    if (ld_subprocess_ == NULL) {
+      TranslateFailed("Link process could not be created: " +
+                      error_info.message());
+      return false;
+    }
+    ld_subprocess_active_ = true;
+    PluginReverseInterface* ld_reverse =
+        ld_subprocess_->service_runtime()->rev_interface();
+    ld_reverse->AddTempQuotaManagedFile(nexe_file_->identifier());
+  }
+  // Run LD.
+  if (!ld_subprocess_->InvokeSrpcMethod("RunWithDefaultCommandLine",
                                        "hhiss",
                                        &params,
                                        ld_in_file->desc(),
@@ -158,11 +266,10 @@ bool PnaclTranslateThread::RunLdSubprocess(int is_shared_library,
   PLUGIN_PRINTF(("PnaclCoordinator: link (translator=%p) succeeded\n",
                  this));
   // Shut down the ld subprocess.
-  ld_subprocess.reset(NULL);
-  if (SubprocessesShouldDie()) {
-    TranslateFailed("stopped by coordinator.");
-    return false;
-  }
+  NaClXMutexLock(&subprocess_mu_);
+  ld_subprocess_active_ = false;
+  ld_subprocess_.reset(NULL);
+  NaClXMutexUnlock(&subprocess_mu_);
   return true;
 }
 
@@ -170,30 +277,42 @@ void PnaclTranslateThread::TranslateFailed(const nacl::string& error_string) {
   PLUGIN_PRINTF(("PnaclTranslateThread::TranslateFailed (error_string='%s')\n",
                  error_string.c_str()));
   pp::Core* core = pp::Module::Get()->core();
-  error_info_->SetReport(ERROR_UNKNOWN,
-                        nacl::string("PnaclCoordinator: ") + error_string);
+  if (coordinator_error_info_->message().empty()) {
+    // Only use our message if one hasn't already been set by the coordinator
+    // (e.g. pexe load failed).
+    coordinator_error_info_->SetReport(ERROR_UNKNOWN,
+                                       nacl::string("PnaclCoordinator: ") +
+                                       error_string);
+  }
   core->CallOnMainThread(0, report_translate_finished_, PP_ERROR_FAILED);
 }
 
-bool PnaclTranslateThread::SubprocessesShouldDie() {
-  nacl::MutexLocker ml(&subprocess_mu_);
-  return subprocesses_should_die_;
-}
-
-void PnaclTranslateThread::SetSubprocessesShouldDie() {
-  PLUGIN_PRINTF(("PnaclTranslateThread::SetSubprocessesShouldDie\n"));
-  nacl::MutexLocker ml(&subprocess_mu_);
-  subprocesses_should_die_ = true;
+void PnaclTranslateThread::AbortSubprocesses() {
+  PLUGIN_PRINTF(("PnaclTranslateThread::AbortSubprocesses\n"));
+  NaClXMutexLock(&subprocess_mu_);
+  if (llc_subprocess_ != NULL && llc_subprocess_active_) {
+    llc_subprocess_->service_runtime()->Shutdown();
+    llc_subprocess_active_ = false;
+  }
+  if (ld_subprocess_ != NULL && ld_subprocess_active_) {
+    ld_subprocess_->service_runtime()->Shutdown();
+    ld_subprocess_active_ = false;
+  }
+  NaClXMutexUnlock(&subprocess_mu_);
+  nacl::MutexLocker ml(&cond_mu_);
+  done_ = true;
+  // Free all buffered bitcode chunks
+  data_buffers_.clear();
+  NaClXCondVarSignal(&buffer_cond_);
 }
 
 PnaclTranslateThread::~PnaclTranslateThread() {
-  PLUGIN_PRINTF(("~PnaclTranslateThread (translate_thread=%p)\n",
-                 translate_thread_.get()));
-  if (translate_thread_ != NULL) {
-    SetSubprocessesShouldDie();
-    NaClThreadJoin(translate_thread_.get());
-    PLUGIN_PRINTF(("~PnaclTranslateThread joined\n"));
-  }
+  PLUGIN_PRINTF(("~PnaclTranslateThread (translate_thread=%p)\n", this));
+  AbortSubprocesses();
+  NaClThreadJoin(translate_thread_.get());
+  PLUGIN_PRINTF(("~PnaclTranslateThread joined\n"));
+  NaClCondVarDtor(&buffer_cond_);
+  NaClMutexDtor(&cond_mu_);
   NaClMutexDtor(&subprocess_mu_);
 }
 

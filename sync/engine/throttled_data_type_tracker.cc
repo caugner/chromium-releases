@@ -5,23 +5,22 @@
 #include "sync/engine/throttled_data_type_tracker.h"
 
 #include "sync/engine/all_status.h"
-#include "sync/internal_api/public/syncable/model_type.h"
+#include "sync/internal_api/public/base/model_type.h"
 
-namespace browser_sync {
+namespace syncer {
 
 ThrottledDataTypeTracker::ThrottledDataTypeTracker(AllStatus *allstatus)
     : allstatus_(allstatus) {
   if (allstatus_) {
-    allstatus_->SetThrottledTypes(syncable::ModelTypeSet());
+    allstatus_->SetThrottledTypes(ModelTypeSet());
   }
 }
 
 ThrottledDataTypeTracker::~ThrottledDataTypeTracker() { }
 
-void ThrottledDataTypeTracker::SetUnthrottleTime(syncable::ModelTypeSet types,
+void ThrottledDataTypeTracker::SetUnthrottleTime(ModelTypeSet types,
                                                  const base::TimeTicks& time) {
-  for (syncable::ModelTypeSet::Iterator it = types.First();
-       it.Good(); it.Inc()) {
+  for (ModelTypeSet::Iterator it = types.First(); it.Good(); it.Inc()) {
     unthrottle_times_[it.Get()] = time;
   }
 
@@ -60,8 +59,8 @@ void ThrottledDataTypeTracker::PruneUnthrottledTypes(
   }
 }
 
-syncable::ModelTypeSet ThrottledDataTypeTracker::GetThrottledTypes() const {
-  syncable::ModelTypeSet types;
+ModelTypeSet ThrottledDataTypeTracker::GetThrottledTypes() const {
+  ModelTypeSet types;
   for (UnthrottleTimes::const_iterator it = unthrottle_times_.begin();
        it != unthrottle_times_.end(); ++it) {
     types.Put(it->first);
@@ -69,4 +68,4 @@ syncable::ModelTypeSet ThrottledDataTypeTracker::GetThrottledTypes() const {
   return types;
 }
 
-}  // namespace browser_sync
+}  // namespace syncer

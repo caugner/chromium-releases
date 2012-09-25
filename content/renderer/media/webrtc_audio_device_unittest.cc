@@ -24,10 +24,6 @@ using testing::StrEq;
 
 namespace {
 
-ACTION_P(QuitMessageLoop, loop_or_proxy) {
-  loop_or_proxy->PostTask(FROM_HERE, MessageLoop::QuitClosure());
-}
-
 class AudioUtil : public AudioUtilInterface {
  public:
   AudioUtil() {}
@@ -167,11 +163,6 @@ class WebRTCMediaProcessImpl : public webrtc::VoEMediaProcess {
     return sample_rate_;
   }
 
-  int channels() const {
-    base::AutoLock auto_lock(lock_);
-    return channels_;
-  }
-
  private:
   base::WaitableEvent* event_;
   int channel_id_;
@@ -232,16 +223,16 @@ TEST_F(WebRTCAudioDeviceTest, TestValidOutputRates) {
 TEST_F(WebRTCAudioDeviceTest, Construct) {
   AudioUtilNoHardware audio_util(48000, 48000, CHANNEL_LAYOUT_MONO);
   SetAudioUtilCallback(&audio_util);
-  scoped_refptr<WebRtcAudioDeviceImpl> audio_device(
+  scoped_refptr<WebRtcAudioDeviceImpl> webrtc_audio_device(
       new WebRtcAudioDeviceImpl());
 
-  audio_device->SetSessionId(1);
+  webrtc_audio_device->SetSessionId(1);
 
   WebRTCAutoDelete<webrtc::VoiceEngine> engine(webrtc::VoiceEngine::Create());
   ASSERT_TRUE(engine.valid());
 
   ScopedWebRTCPtr<webrtc::VoEBase> base(engine.get());
-  int err = base->Init(audio_device);
+  int err = base->Init(webrtc_audio_device);
   EXPECT_EQ(0, err);
   EXPECT_EQ(0, base->Terminate());
 }
@@ -273,15 +264,15 @@ TEST_F(WebRTCAudioDeviceTest, StartPlayout) {
   EXPECT_CALL(media_observer(),
       OnDeleteAudioStream(_, 1)).Times(AnyNumber());
 
-  scoped_refptr<WebRtcAudioDeviceImpl> audio_device(
+  scoped_refptr<WebRtcAudioDeviceImpl> webrtc_audio_device(
       new WebRtcAudioDeviceImpl());
-  audio_device->SetSessionId(1);
+  webrtc_audio_device->SetSessionId(1);
   WebRTCAutoDelete<webrtc::VoiceEngine> engine(webrtc::VoiceEngine::Create());
   ASSERT_TRUE(engine.valid());
 
   ScopedWebRTCPtr<webrtc::VoEBase> base(engine.get());
   ASSERT_TRUE(base.valid());
-  int err = base->Init(audio_device);
+  int err = base->Init(webrtc_audio_device);
   ASSERT_EQ(0, err);
 
   int ch = base->CreateChannel();
@@ -298,12 +289,11 @@ TEST_F(WebRTCAudioDeviceTest, StartPlayout) {
 
   EXPECT_EQ(0, base->StartPlayout(ch));
 
-  EXPECT_TRUE(event.TimedWait(
-      base::TimeDelta::FromMilliseconds(TestTimeouts::action_timeout_ms())));
+  EXPECT_TRUE(event.TimedWait(TestTimeouts::action_timeout()));
   WaitForIOThreadCompletion();
 
-  EXPECT_TRUE(audio_device->playing());
-  EXPECT_FALSE(audio_device->recording());
+  EXPECT_TRUE(webrtc_audio_device->playing());
+  EXPECT_FALSE(webrtc_audio_device->recording());
   EXPECT_EQ(ch, media_process->channel_id());
   EXPECT_EQ(webrtc::kPlaybackPerChannel, media_process->type());
   EXPECT_EQ(80, media_process->packet_size());
@@ -342,15 +332,15 @@ TEST_F(WebRTCAudioDeviceTest, StartRecording) {
   // for new interfaces, like OnSetAudioStreamRecording(). When done, add
   // EXPECT_CALL() macros here.
 
-  scoped_refptr<WebRtcAudioDeviceImpl> audio_device(
+  scoped_refptr<WebRtcAudioDeviceImpl> webrtc_audio_device(
       new WebRtcAudioDeviceImpl());
-  audio_device->SetSessionId(1);
+  webrtc_audio_device->SetSessionId(1);
   WebRTCAutoDelete<webrtc::VoiceEngine> engine(webrtc::VoiceEngine::Create());
   ASSERT_TRUE(engine.valid());
 
   ScopedWebRTCPtr<webrtc::VoEBase> base(engine.get());
   ASSERT_TRUE(base.valid());
-  int err = base->Init(audio_device);
+  int err = base->Init(webrtc_audio_device);
   ASSERT_EQ(0, err);
 
   int ch = base->CreateChannel();
@@ -374,12 +364,11 @@ TEST_F(WebRTCAudioDeviceTest, StartRecording) {
   EXPECT_EQ(0, network->RegisterExternalTransport(ch, *transport.get()));
   EXPECT_EQ(0, base->StartSend(ch));
 
-  EXPECT_TRUE(event.TimedWait(
-      base::TimeDelta::FromMilliseconds(TestTimeouts::action_timeout_ms())));
+  EXPECT_TRUE(event.TimedWait(TestTimeouts::action_timeout()));
   WaitForIOThreadCompletion();
 
-  EXPECT_FALSE(audio_device->playing());
-  EXPECT_TRUE(audio_device->recording());
+  EXPECT_FALSE(webrtc_audio_device->playing());
+  EXPECT_TRUE(webrtc_audio_device->recording());
   EXPECT_EQ(ch, media_process->channel_id());
   EXPECT_EQ(webrtc::kRecordingPerChannel, media_process->type());
   EXPECT_EQ(80, media_process->packet_size());
@@ -419,16 +408,16 @@ TEST_F(WebRTCAudioDeviceTest, PlayLocalFile) {
   EXPECT_CALL(media_observer(),
       OnDeleteAudioStream(_, 1)).Times(AnyNumber());
 
-  scoped_refptr<WebRtcAudioDeviceImpl> audio_device(
+  scoped_refptr<WebRtcAudioDeviceImpl> webrtc_audio_device(
       new WebRtcAudioDeviceImpl());
-  audio_device->SetSessionId(1);
+  webrtc_audio_device->SetSessionId(1);
 
   WebRTCAutoDelete<webrtc::VoiceEngine> engine(webrtc::VoiceEngine::Create());
   ASSERT_TRUE(engine.valid());
 
   ScopedWebRTCPtr<webrtc::VoEBase> base(engine.get());
   ASSERT_TRUE(base.valid());
-  int err = base->Init(audio_device);
+  int err = base->Init(webrtc_audio_device);
   ASSERT_EQ(0, err);
 
   int ch = base->CreateChannel();
@@ -487,15 +476,15 @@ TEST_F(WebRTCAudioDeviceTest, FullDuplexAudioWithAGC) {
   EXPECT_CALL(media_observer(),
       OnDeleteAudioStream(_, 1)).Times(AnyNumber());
 
-  scoped_refptr<WebRtcAudioDeviceImpl> audio_device(
+  scoped_refptr<WebRtcAudioDeviceImpl> webrtc_audio_device(
       new WebRtcAudioDeviceImpl());
-  audio_device->SetSessionId(1);
+  webrtc_audio_device->SetSessionId(1);
   WebRTCAutoDelete<webrtc::VoiceEngine> engine(webrtc::VoiceEngine::Create());
   ASSERT_TRUE(engine.valid());
 
   ScopedWebRTCPtr<webrtc::VoEBase> base(engine.get());
   ASSERT_TRUE(base.valid());
-  int err = base->Init(audio_device);
+  int err = base->Init(webrtc_audio_device);
   ASSERT_EQ(0, err);
 
   ScopedWebRTCPtr<webrtc::VoEAudioProcessing> audio_processing(engine.get());

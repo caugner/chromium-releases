@@ -13,22 +13,31 @@
 #include "base/message_loop.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
-#include "base/utf_string_conversions.h"
 #include "base/time.h"
+#include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/download/download_util.h"
+#include "chrome/browser/browser_process.h"
+#include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/feedback/feedback_data.h"
 #include "chrome/browser/feedback/feedback_util.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/signin/signin_manager.h"
+#include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/chrome_pages.h"
+#include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
 #include "chrome/browser/ui/webui/screenshot_source.h"
 #include "chrome/browser/ui/window_snapshot/window_snapshot.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_controller.h"
@@ -45,6 +54,7 @@
 
 #if defined(OS_CHROMEOS)
 #include "ash/shell.h"
+#include "ash/shell_delegate.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
@@ -66,6 +76,9 @@ const char kCurrentScreenshotUrl[] = "chrome://screenshots/current";
 
 const char kCategoryTagParameter[] = "categoryTag=";
 const char kDescriptionParameter[] = "description=";
+const char kSessionIDParameter[] = "session_id=";
+const char kTabIndexParameter[] = "tab_index=";
+const char kCustomPageUrlParameter[] = "customPageUrl=";
 
 #if defined(OS_CHROMEOS)
 const char kSavedScreenshotsUrl[] = "chrome://screenshots/saved/";
@@ -89,8 +102,10 @@ bool ScreenshotTimestampComp(const std::string& filepath1,
 void GetSavedScreenshots(std::vector<std::string>* saved_screenshots) {
   saved_screenshots->clear();
 
+  DownloadPrefs* download_prefs = DownloadPrefs::FromBrowserContext(
+      ash::Shell::GetInstance()->delegate()->GetCurrentBrowserContext());
   FeedbackUI::GetMostRecentScreenshots(
-      download_util::GetDefaultDownloadDirectory(),
+      download_prefs->DownloadPath(),
       saved_screenshots,
       kMaxSavedScreenshots);
 }
@@ -103,13 +118,27 @@ std::string GetUserEmail() {
     return manager->GetLoggedInUser().display_email();
 }
 
+#else
+
+std::string GetUserEmail() {
+  Profile* profile = ProfileManager::GetLastUsedProfile();
+  if (!profile)
+    return std::string();
+
+  SigninManager* signin = SigninManagerFactory::GetForProfile(profile);
+  if (!signin)
+    return std::string();
+
+  return signin->GetAuthenticatedUsername();
+}
+
 #endif  // OS_CHROMEOS
 
 // Returns the index of the feedback tab if already open, -1 otherwise
 int GetIndexOfFeedbackTab(Browser* browser) {
   GURL feedback_url(chrome::kChromeUIFeedbackURL);
   for (int i = 0; i < browser->tab_count(); ++i) {
-    WebContents* tab = browser->GetWebContentsAt(i);
+    WebContents* tab = chrome::GetWebContentsAt(browser, i);
     if (tab && tab->GetURL().GetWithEmptyPath() == feedback_url)
       return i;
   }
@@ -119,12 +148,11 @@ int GetIndexOfFeedbackTab(Browser* browser) {
 
 }  // namespace
 
+namespace chrome {
 
-namespace browser {
-
-void ShowWebFeedbackView(Browser* browser,
-                         const std::string& description_template,
-                         const std::string& category_tag) {
+void ShowFeedbackPage(Browser* browser,
+                      const std::string& description_template,
+                      const std::string& category_tag) {
 #if defined(OS_CHROMEOS)
   // Grab the timestamp before we do anything else - this is crucial to help
   // diagnose some hardware issues.
@@ -139,7 +167,7 @@ void ShowWebFeedbackView(Browser* browser,
   int feedback_tab_index = GetIndexOfFeedbackTab(browser);
   if (feedback_tab_index >= 0) {
     // Do not refresh screenshot, do not create a new tab
-    browser->ActivateTabAt(feedback_tab_index, true);
+    chrome::ActivateTabAt(browser, feedback_tab_index, true);
     return;
   }
 
@@ -160,14 +188,15 @@ void ShowWebFeedbackView(Browser* browser,
   native_window = browser->window()->GetNativeWindow();
   snapshot_bounds = gfx::Rect(browser->window()->GetBounds().size());
 #endif
-  bool success = browser::GrabWindowSnapshot(native_window,
-                                             last_screenshot_png,
-                                             snapshot_bounds);
+  bool success = chrome::GrabWindowSnapshotForUser(native_window,
+                                                   last_screenshot_png,
+                                                   snapshot_bounds);
   FeedbackUtil::SetScreenshotSize(success ? snapshot_bounds : gfx::Rect());
 
-  std::string feedback_url = std::string(chrome::kChromeUIFeedbackURL) +
-      "#" + base::IntToString(browser->active_index()) + "?" +
-      kDescriptionParameter +
+  std::string feedback_url = std::string(chrome::kChromeUIFeedbackURL) + "?" +
+      kSessionIDParameter + base::IntToString(browser->session_id().id()) +
+      "&" + kTabIndexParameter + base::IntToString(browser->active_index()) +
+      "&" + kDescriptionParameter +
       net::EscapeUrlEncodedData(description_template, false) + "&" +
       kCategoryTagParameter + net::EscapeUrlEncodedData(category_tag, false);
 
@@ -175,10 +204,10 @@ void ShowWebFeedbackView(Browser* browser,
   feedback_url = feedback_url + "&" + kTimestampParameter +
                  net::EscapeUrlEncodedData(timestamp, false);
 #endif
-  browser->ShowSingletonTab(GURL(feedback_url));
+  chrome::ShowSingletonTab(browser, GURL(feedback_url));
 }
 
-}  // namespace browser
+}  // namespace chrome
 
 // The handler for Javascript messages related to the "bug report" dialog
 class FeedbackHandler : public WebUIMessageHandler,
@@ -241,8 +270,9 @@ ChromeWebUIDataSource* CreateFeedbackUIHTMLSource(bool successful_init) {
                              IDS_FEEDBACK_SCREENSHOT_LABEL);
   source->AddLocalizedString("saved-screenshot",
                              IDS_FEEDBACK_SAVED_SCREENSHOT_LABEL);
-#if defined(OS_CHROMEOS)
   source->AddLocalizedString("user-email", IDS_FEEDBACK_USER_EMAIL_LABEL);
+
+#if defined(OS_CHROMEOS)
   source->AddLocalizedString("sysinfo",
                              IDS_FEEDBACK_INCLUDE_SYSTEM_INFORMATION_CHKBOX);
   source->AddLocalizedString("currentscreenshots",
@@ -333,47 +363,71 @@ bool FeedbackHandler::Init() {
   ParseStandardURL(page_url.c_str(), page_url.length(), &parts);
 
   size_t params_start = page_url.find("?");
-  std::string index_str = page_url.substr(parts.ref.begin,
-                                          params_start - parts.ref.begin);
   std::string query = page_url.substr(params_start + 1);
 
-  int index = 0;
-  if (!base::StringToInt(index_str, &index))
-    return false;
+  int session_id = -1;
+  int index = -1;
 
-#if defined(OS_CHROMEOS)
   std::vector<std::string> params;
+  std::string custom_page_url;
   if (Tokenize(query, std::string("&"), &params)) {
     for (std::vector<std::string>::iterator it = params.begin();
          it != params.end(); ++it) {
-      if (StartsWithASCII(*it, std::string(kTimestampParameter), true)) {
-        timestamp_ = *it;
-        ReplaceFirstSubstringAfterOffset(&timestamp_,
-                                         0,
-                                         kTimestampParameter,
-                                         "");
-        break;
+      std::string query_str = *it;
+      if (StartsWithASCII(query_str, std::string(kSessionIDParameter), true)) {
+        ReplaceFirstSubstringAfterOffset(
+            &query_str, 0, kSessionIDParameter, "");
+        if (!base::StringToInt(query_str, &session_id))
+          return false;
+        continue;
       }
+      if (StartsWithASCII(*it, std::string(kTabIndexParameter), true)) {
+        ReplaceFirstSubstringAfterOffset(
+            &query_str, 0, kTabIndexParameter, "");
+        if (!base::StringToInt(query_str, &index))
+          return false;
+        continue;
+      }
+      if (StartsWithASCII(*it, std::string(kCustomPageUrlParameter), true)) {
+        ReplaceFirstSubstringAfterOffset(
+            &query_str, 0, kCustomPageUrlParameter, "");
+        custom_page_url = query_str;
+        continue;
+      }
+#if defined(OS_CHROMEOS)
+      if (StartsWithASCII(*it, std::string(kTimestampParameter), true)) {
+        ReplaceFirstSubstringAfterOffset(
+            &query_str, 0, kTimestampParameter, "");
+        timestamp_ = query_str;
+        continue;
+      }
+#endif
     }
   }
-#endif
 
-  // TODO(beng): Replace GetLastActive with a more specific method of locating
-  //             the target contents.
-  Browser* browser = BrowserList::GetLastActive();
-  // Sanity checks.
-  if (((index == 0) && (index_str != "0")) || !browser ||
-      index >= browser->tab_count()) {
-    return false;
+  // If we don't have a page url specified, get it from the tab index.
+  if (custom_page_url.empty()) {
+    if (session_id == -1)
+      return false;
+
+    Browser* browser = browser::FindBrowserWithID(session_id);
+    // Sanity checks.
+    if (!browser || index >= browser->tab_count())
+      return false;
+
+    if (index >= 0) {
+      WebContents* target_tab = chrome::GetWebContentsAt(browser, index);
+      if (target_tab)
+        target_tab_url_ = target_tab->GetURL().spec();
+    }
+
+    // Note: We don't need to setup a screenshot source if we're using a
+    // custom page URL since we were invoked from JS/an extension, in which
+    // case we don't actually have a screenshot anyway.
+    SetupScreenshotsSource();
+  } else {
+    target_tab_url_ = custom_page_url;
   }
-
-  WebContents* target_tab = browser->GetWebContentsAt(index);
-  if (target_tab) {
-    target_tab_url_ = target_tab->GetURL().spec();
-  }
-
-  // Setup the screenshot source after we've verified input is legit.
-  SetupScreenshotsSource();
 
   return true;
 }
@@ -407,18 +461,32 @@ void FeedbackHandler::HandleGetDialogDefaults(const ListValue*) {
   // Will delete itself when feedback_data_->SendReport() is called.
   feedback_data_ = new FeedbackData();
 
-  // send back values which the dialog js needs initially
-  ListValue dialog_defaults;
+  // Send back values which the dialog js needs initially.
+  DictionaryValue dialog_defaults;
 
-  // 0: current url
-  if (target_tab_url_.length())
-    dialog_defaults.Append(new StringValue(target_tab_url_));
-  else
-    dialog_defaults.Append(new StringValue(""));
+  // Current url.
+  dialog_defaults.SetString("currentUrl", target_tab_url_);
+
+  // Are screenshots disabled?
+  dialog_defaults.SetBoolean(
+      "disableScreenshots",
+      g_browser_process->local_state()->GetBoolean(prefs::kDisableScreenshots));
+
+  // User e-mail
+  std::string user_email = GetUserEmail();
+  dialog_defaults.SetString("userEmail", user_email);
+
+  // Set email checkbox to checked by default for cros, unchecked for Chrome.
+  dialog_defaults.SetBoolean(
+      "emailCheckboxDefault",
+#if defined(OS_CHROMEOS)
+      true);
+#else
+      false);
+#endif
+
 
 #if defined(OS_CHROMEOS)
-  // 1: about:system
-  dialog_defaults.Append(new StringValue(chrome::kChromeUISystemInfoURL));
   // Trigger the request for system information here.
   chromeos::system::SyslogsProvider* provider =
       chromeos::system::SyslogsProvider::GetInstance();
@@ -430,8 +498,10 @@ void FeedbackHandler::HandleGetDialogDefaults(const ListValue*) {
         base::Bind(&FeedbackData::SyslogsComplete,
                    base::Unretained(feedback_data_)));
   }
-  // 2: user e-mail
-  dialog_defaults.Append(new StringValue(GetUserEmail()));
+
+  // On ChromeOS if the user's email is blank, it means we don't
+  // have a logged in user, hence don't use saved screenshots.
+  dialog_defaults.SetBoolean("useSaved", !user_email.empty());
 #endif
 
   web_ui()->CallJavascriptFunction("setupDialogDefaults", dialog_defaults);
@@ -473,7 +543,7 @@ void FeedbackHandler::HandleSendReport(const ListValue* list_value) {
 #if defined(OS_CHROMEOS)
   if (list_value->GetSize() != 6) {
 #else
-  if (list_value->GetSize() != 4) {
+  if (list_value->GetSize() != 5) {
 #endif
     LOG(ERROR) << "Feedback data corrupt! Feedback not sent.";
     return;
@@ -486,18 +556,18 @@ void FeedbackHandler::HandleSendReport(const ListValue* list_value) {
   (*i++)->GetAsString(&category_tag);
   std::string description;
   (*i++)->GetAsString(&description);
+  std::string user_email;
+  (*i++)->GetAsString(&user_email);
   std::string screenshot_path;
   (*i++)->GetAsString(&screenshot_path);
   screenshot_path.erase(0, strlen(kScreenshotBaseUrl));
 
   // Get the image to send in the report.
   ScreenshotDataPtr image_ptr;
-  if (!screenshot_path.empty())
+  if (!screenshot_path.empty() &&  screenshot_source_)
     image_ptr = screenshot_source_->GetCachedScreenshot(screenshot_path);
 
 #if defined(OS_CHROMEOS)
-  std::string user_email;
-  (*i++)->GetAsString(&user_email);
   std::string sys_info_checkbox;
   (*i++)->GetAsString(&sys_info_checkbox);
   bool send_sys_info = (sys_info_checkbox == "true");
@@ -513,9 +583,9 @@ void FeedbackHandler::HandleSendReport(const ListValue* list_value) {
                                , std::string()
                                , page_url
                                , description
+                               , user_email
                                , image_ptr
 #if defined(OS_CHROMEOS)
-                               , user_email
                                , send_sys_info
                                , false  // sent_report
                                , timestamp_

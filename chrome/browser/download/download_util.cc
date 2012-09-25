@@ -39,7 +39,7 @@
 #include "content/public/common/url_constants.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
-#include "grit/theme_resources_standard.h"
+#include "grit/theme_resources.h"
 #include "net/base/mime_util.h"
 #include "net/base/net_util.h"
 #include "skia/ext/image_operations.h"
@@ -166,25 +166,17 @@ bool DownloadPathIsDangerous(const FilePath& download_path) {
   }
 #endif
 
+#if defined(OS_ANDROID)
+  // Android does not have a desktop dir.
+  return false;
+#else
   FilePath desktop_dir;
   if (!PathService::Get(chrome::DIR_USER_DESKTOP, &desktop_dir)) {
     NOTREACHED();
     return false;
   }
   return (download_path == desktop_dir);
-}
-
-void GenerateFileNameFromRequest(const DownloadItem& download_item,
-                                 FilePath* generated_name) {
-  std::string default_file_name(
-      l10n_util::GetStringUTF8(IDS_DEFAULT_DOWNLOAD_FILENAME));
-
-  *generated_name = net::GenerateFileName(download_item.GetURL(),
-                                          download_item.GetContentDisposition(),
-                                          download_item.GetReferrerCharset(),
-                                          download_item.GetSuggestedFilename(),
-                                          download_item.GetMimeType(),
-                                          default_file_name);
+#endif
 }
 
 // Download progress painting --------------------------------------------------
@@ -610,11 +602,6 @@ void UpdateAppIconDownloadProgress(int download_count,
 #endif
 }
 #endif
-
-int GetUniquePathNumberWithCrDownload(const FilePath& path) {
-  return file_util::GetUniquePathNumber(
-      path, FILE_PATH_LITERAL(".crdownload"));
-}
 
 FilePath GetCrDownloadPath(const FilePath& suggested_path) {
   return FilePath(suggested_path.value() + FILE_PATH_LITERAL(".crdownload"));

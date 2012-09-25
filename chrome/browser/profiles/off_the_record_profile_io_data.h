@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_PROFILES_OFF_THE_RECORD_PROFILE_IO_DATA_H_
 #define CHROME_BROWSER_PROFILES_OFF_THE_RECORD_PROFILE_IO_DATA_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/callback.h"
@@ -108,10 +107,19 @@ class OffTheRecordProfileIOData : public ProfileIOData {
           ChromeURLRequestContext* main_context,
           const std::string& app_id) const OVERRIDE;
 
+  void CreateFtpProtocolHandler(net::URLRequestJobFactory* job_factory,
+                                net::FtpAuthCache* ftp_auth_cache) const;
+
+  virtual chrome_browser_net::CacheStats* GetCacheStats(
+      IOThread::Globals* io_thread_globals) const OVERRIDE;
+
   mutable scoped_ptr<net::HttpServerPropertiesImpl> http_server_properties_;
 
   mutable scoped_ptr<net::HttpTransactionFactory> main_http_factory_;
   mutable scoped_ptr<net::FtpTransactionFactory> ftp_factory_;
+
+  mutable scoped_ptr<net::URLRequestJobFactory> main_job_factory_;
+  mutable scoped_ptr<net::URLRequestJobFactory> extensions_job_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(OffTheRecordProfileIOData);
 };

@@ -11,13 +11,12 @@
 #include "base/message_loop.h"
 #include "base/string_util.h"
 #include "media/base/data_buffer.h"
-#include "media/base/filters.h"
 #include "media/base/limits.h"
 #include "media/base/mock_callback.h"
 #include "media/base/mock_filters.h"
 #include "media/base/video_frame.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/libjingle/source/talk/session/phone/videoframe.h"
+#include "third_party/libjingle/source/talk/media/base/videoframe.h"
 
 using ::testing::_;
 using ::testing::AnyNumber;
@@ -116,17 +115,75 @@ class NullVideoFrame : public cricket::VideoFrame {
   }
 };
 
+class MockVideoTrack : public webrtc::VideoTrackInterface {
+ public:
+  static MockVideoTrack* Create() {
+    return new talk_base::RefCountedObject<MockVideoTrack>();
+  }
+
+  virtual std::string kind() const OVERRIDE {
+    NOTIMPLEMENTED();
+    return "";
+  }
+  virtual std::string label() const OVERRIDE {
+    NOTIMPLEMENTED();
+    return "";
+  }
+  virtual bool enabled() const OVERRIDE {
+    NOTIMPLEMENTED();
+    return false;
+  }
+  virtual TrackState state() const OVERRIDE {
+    NOTIMPLEMENTED();
+    return kEnded;
+  }
+  virtual bool set_enabled(bool enable) OVERRIDE {
+    NOTIMPLEMENTED();
+    return false;
+  }
+  virtual bool set_state(TrackState new_state) OVERRIDE {
+    NOTIMPLEMENTED();
+    return false;
+  }
+  virtual void RegisterObserver(webrtc::ObserverInterface* observer) OVERRIDE {
+    NOTIMPLEMENTED();
+  }
+  virtual void UnregisterObserver(
+      webrtc::ObserverInterface* observer) OVERRIDE {
+    NOTIMPLEMENTED();
+  }
+  MOCK_METHOD1(AddRenderer, void(webrtc::VideoRendererInterface* renderer));
+  MOCK_METHOD1(RemoveRenderer, void(webrtc::VideoRendererInterface* renderer));
+
+  virtual cricket::VideoRenderer* FrameInput() OVERRIDE {
+    NOTIMPLEMENTED();
+    return NULL;
+  }
+
+ protected:
+  MockVideoTrack() {}
+  ~MockVideoTrack() {}
+};
+
 }  // namespace
 
 class RTCVideoDecoderTest : public testing::Test {
  protected:
   static const int kWidth;
   static const int kHeight;
-  static const char* kUrl;
   static const PipelineStatistics kStatistics;
 
   RTCVideoDecoderTest() {
-    decoder_ = new RTCVideoDecoder(&message_loop_, kUrl);
+  }
+
+  virtual ~RTCVideoDecoderTest() {
+  }
+
+  virtual void SetUp() OVERRIDE {
+    video_track_ = MockVideoTrack::Create();
+    decoder_ = new RTCVideoDecoder(message_loop_.message_loop_proxy(),
+                                   message_loop_.message_loop_proxy(),
+                                   video_track_);
     renderer_ = new MockVideoRenderer();
     read_cb_ = base::Bind(&RTCVideoDecoderTest::FrameReady,
                           base::Unretained(this));
@@ -137,12 +194,16 @@ class RTCVideoDecoderTest : public testing::Test {
         .Times(AnyNumber());
   }
 
-  virtual ~RTCVideoDecoderTest() {
-    // Finish up any remaining tasks.
+  virtual void TearDown() OVERRIDE {
+    EXPECT_CALL(*video_track_, RemoveRenderer(decoder_.get()));
+    decoder_->Stop(media::NewExpectedClosure());
+
     message_loop_.RunAllPending();
+    EXPECT_EQ(RTCVideoDecoder::kStopped, decoder_->state_);
   }
 
   void InitializeDecoderSuccessfully() {
+    EXPECT_CALL(*video_track_, AddRenderer(decoder_.get()));
     // Test successful initialization.
     decoder_->Initialize(
         NULL, NewExpectedStatusCB(PIPELINE_OK), NewStatisticsCB());
@@ -154,10 +215,16 @@ class RTCVideoDecoderTest : public testing::Test {
                       base::Unretained(&statistics_cb_));
   }
 
+  void RenderFrame() {
+    NullVideoFrame video_frame;
+    decoder_->RenderFrame(&video_frame);
+  }
+
   MOCK_METHOD2(FrameReady, void(media::VideoDecoder::DecoderStatus status,
-                                scoped_refptr<media::VideoFrame>));
+                                const scoped_refptr<media::VideoFrame>&));
 
   // Fixture members.
+  scoped_refptr<MockVideoTrack> video_track_;
   scoped_refptr<RTCVideoDecoder> decoder_;
   scoped_refptr<MockVideoRenderer> renderer_;
   MockStatisticsCB statistics_cb_;
@@ -170,22 +237,33 @@ class RTCVideoDecoderTest : public testing::Test {
 
 const int RTCVideoDecoderTest::kWidth = 640;
 const int RTCVideoDecoderTest::kHeight = 480;
-const char* RTCVideoDecoderTest::kUrl = "media://remote/0";
 const PipelineStatistics RTCVideoDecoderTest::kStatistics;
+
+MATCHER_P2(HasSize, width, height, "") {
+  EXPECT_EQ(arg->data_size().width(), width);
+  EXPECT_EQ(arg->data_size().height(), height);
+  EXPECT_EQ(arg->natural_size().width(), width);
+  EXPECT_EQ(arg->natural_size().height(), height);
+  return (arg->data_size().width() == width) &&
+      (arg->data_size().height() == height) &&
+      (arg->natural_size().width() == width) &&
+      (arg->natural_size().height() == height);
+}
 
 TEST_F(RTCVideoDecoderTest, Initialize_Successful) {
   InitializeDecoderSuccessfully();
 
-  // Test that the output media format is an uncompressed video surface that
-  // matches the dimensions specified by RTC.
-  EXPECT_EQ(kWidth, decoder_->natural_size().width());
-  EXPECT_EQ(kHeight, decoder_->natural_size().height());
+  EXPECT_CALL(*this, FrameReady(media::VideoDecoder::kOk,
+                                HasSize(kWidth, kHeight)));
+  decoder_->Read(read_cb_);
+  RenderFrame();
 }
 
 TEST_F(RTCVideoDecoderTest, DoReset) {
   InitializeDecoderSuccessfully();
 
-  EXPECT_CALL(*this, FrameReady(media::VideoDecoder::kOk, _));
+  EXPECT_CALL(*this, FrameReady(media::VideoDecoder::kOk,
+                                scoped_refptr<media::VideoFrame>()));
   decoder_->Read(read_cb_);
   decoder_->Reset(media::NewExpectedClosure());
 
@@ -196,11 +274,8 @@ TEST_F(RTCVideoDecoderTest, DoReset) {
 TEST_F(RTCVideoDecoderTest, DoRenderFrame) {
   InitializeDecoderSuccessfully();
 
-  NullVideoFrame video_frame;
-
-  for (size_t i = 0; i < media::limits::kMaxVideoFrames; ++i) {
-    decoder_->RenderFrame(&video_frame);
-  }
+  for (size_t i = 0; i < media::limits::kMaxVideoFrames; ++i)
+    RenderFrame();
 
   message_loop_.RunAllPending();
   EXPECT_EQ(RTCVideoDecoder::kNormal, decoder_->state_);
@@ -209,15 +284,35 @@ TEST_F(RTCVideoDecoderTest, DoRenderFrame) {
 TEST_F(RTCVideoDecoderTest, DoSetSize) {
   InitializeDecoderSuccessfully();
 
+  EXPECT_CALL(*this, FrameReady(media::VideoDecoder::kOk,
+                                HasSize(kWidth, kHeight)));
+  decoder_->Read(read_cb_);
+  RenderFrame();
+  message_loop_.RunAllPending();
+
   int new_width = kWidth * 2;
   int new_height = kHeight * 2;
-  gfx::Size new_natural_size(new_width, new_height);
-  int new_reserved = 0;
+  decoder_->SetSize(new_width, new_height);
 
-  decoder_->SetSize(new_width, new_height, new_reserved);
+  EXPECT_CALL(*this, FrameReady(media::VideoDecoder::kOk,
+                                HasSize(new_width, new_height)));
+  decoder_->Read(read_cb_);
+  RenderFrame();
+  message_loop_.RunAllPending();
+}
 
-  EXPECT_EQ(new_width, decoder_->natural_size().width());
-  EXPECT_EQ(new_height, decoder_->natural_size().height());
+TEST_F(RTCVideoDecoderTest, ReadAndShutdown) {
+  // Test all the Read requests can be fullfilled (which is needed in order to
+  // teardown the pipeline) even when there's no input frame.
+  InitializeDecoderSuccessfully();
+
+  EXPECT_CALL(*this, FrameReady(media::VideoDecoder::kOk,
+                                scoped_refptr<media::VideoFrame>())).Times(2);
+  decoder_->Read(read_cb_);
+  EXPECT_FALSE(decoder_->shutting_down_);
+  decoder_->PrepareForShutdownHack();
+  EXPECT_TRUE(decoder_->shutting_down_);
+  decoder_->Read(read_cb_);
 
   message_loop_.RunAllPending();
 }

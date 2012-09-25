@@ -4,7 +4,6 @@
 
 #ifndef UI_WEB_DIALOGS_CONSTRAINED_WEB_DIALOG_UI_H_
 #define UI_WEB_DIALOGS_CONSTRAINED_WEB_DIALOG_UI_H_
-#pragma once
 
 #include "base/compiler_specific.h"
 #include "content/public/browser/web_ui_controller.h"
@@ -13,8 +12,6 @@
 class ConstrainedWindow;
 class Profile;
 class TabContents;
-typedef TabContents TabContentsWrapper;
-class WebDialogWebContentsDelegate;
 
 namespace base {
 template<class T> class PropertyAccessor;
@@ -26,6 +23,7 @@ class RenderViewHost;
 
 namespace ui {
 class WebDialogDelegate;
+class WebDialogWebContentsDelegate;
 
 class WEB_DIALOGS_EXPORT ConstrainedWebDialogDelegate {
  public:
@@ -42,10 +40,12 @@ class WEB_DIALOGS_EXPORT ConstrainedWebDialogDelegate {
   virtual void ReleaseTabContentsOnDialogClose() = 0;
 
   // Returns the ConstrainedWindow.
+  // TODO: fix this function name and the one below to conform to the style
+  // guide (i.e. GetWindow, GetTab).
   virtual ConstrainedWindow* window() = 0;
 
-  // Returns the TabContentsWrapper owned by the constrained window.
-  virtual TabContentsWrapper* tab() = 0;
+  // Returns the TabContents owned by the constrained window.
+  virtual TabContents* tab() = 0;
 
  protected:
   virtual ~ConstrainedWebDialogDelegate() {}
@@ -100,7 +100,7 @@ ConstrainedWebDialogDelegate* CreateConstrainedWebDialog(
     Profile* profile,
     WebDialogDelegate* delegate,
     WebDialogWebContentsDelegate* tab_delegate,
-    TabContentsWrapper* overshadowed);
+    TabContents* overshadowed);
 
 }  // namespace ui
 

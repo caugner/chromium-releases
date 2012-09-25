@@ -4,12 +4,12 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_BROWSER_ACTION_VIEW_H_
 #define CHROME_BROWSER_UI_VIEWS_BROWSER_ACTION_VIEW_H_
-#pragma once
 
 #include <string>
 
 #include "chrome/browser/extensions/image_loading_tracker.h"
 #include "content/public/browser/notification_observer.h"
+#include "ui/views/context_menu_controller.h"
 #include "ui/views/controls/button/menu_button.h"
 #include "ui/views/controls/button/menu_button_listener.h"
 #include "ui/views/view.h"
@@ -29,6 +29,7 @@ class MenuItemView;
 // loading the image for the button asynchronously on the file thread.
 class BrowserActionButton : public views::MenuButton,
                             public views::ButtonListener,
+                            public views::ContextMenuController,
                             public ImageLoadingTracker::Observer,
                             public content::NotificationObserver {
  public:
@@ -44,19 +45,21 @@ class BrowserActionButton : public views::MenuButton,
   // Called to update the display to match the browser action's state.
   void UpdateState();
 
-  // Returns the default icon, if any.
-  const SkBitmap& default_icon() const { return default_icon_; }
-
   // Does this button's action have a popup?
   virtual bool IsPopup();
   virtual GURL GetPopupUrl();
 
   // Overridden from views::View:
   virtual bool CanHandleAccelerators() const OVERRIDE;
+  virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
 
   // Overridden from views::ButtonListener:
   virtual void ButtonPressed(views::Button* sender,
                              const views::Event& event) OVERRIDE;
+
+  // Overridden from views::ContextMenuController.
+  virtual void ShowContextMenuForView(View* source,
+                                      const gfx::Point& point) OVERRIDE;
 
   // Overridden from ImageLoadingTracker.
   virtual void OnImageLoaded(const gfx::Image& image,
@@ -78,8 +81,6 @@ class BrowserActionButton : public views::MenuButton,
   virtual void OnMouseReleased(const views::MouseEvent& event) OVERRIDE;
   virtual void OnMouseExited(const views::MouseEvent& event) OVERRIDE;
   virtual bool OnKeyReleased(const views::KeyEvent& event) OVERRIDE;
-  virtual void ShowContextMenu(const gfx::Point& p,
-                               bool is_mouse_gesture) OVERRIDE;
 
   // Overridden from ui::AcceleratorTarget.
   virtual bool AcceleratorPressed(const ui::Accelerator& accelerator) OVERRIDE;
@@ -89,6 +90,11 @@ class BrowserActionButton : public views::MenuButton,
   void SetButtonPushed();
   void SetButtonNotPushed();
 
+  // Whether the browser action is enabled on this tab. Note that we cannot use
+  // the built-in views enabled/SetEnabled because disabled views do not
+  // receive drag events.
+  bool IsEnabled(int tab_id) const;
+
  protected:
   // Overridden from views::View:
   virtual void ViewHierarchyChanged(bool is_add,
@@ -97,6 +103,13 @@ class BrowserActionButton : public views::MenuButton,
 
  private:
   virtual ~BrowserActionButton();
+
+  // Register an extension command if the extension has an active one.
+  void MaybeRegisterExtensionCommand();
+
+  // Unregisters an extension command, if the extension has registered one and
+  // it is active.
+  void MaybeUnregisterExtensionCommand(bool only_if_active);
 
   // The browser action this view represents. The ExtensionAction is not owned
   // by this class.
@@ -108,10 +121,6 @@ class BrowserActionButton : public views::MenuButton,
   // The object that is waiting for the image loading to complete
   // asynchronously.
   ImageLoadingTracker tracker_;
-
-  // The default icon for our browser action. This might be non-empty if the
-  // browser action had a value for default_icon in the manifest.
-  SkBitmap default_icon_;
 
   // The browser action shelf.
   BrowserActionsContainer* panel_;

@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_PANELS_OLD_PANEL_H_
 #define CHROME_BROWSER_UI_PANELS_OLD_PANEL_H_
-#pragma once
 
 #include "chrome/browser/ui/panels/panel.h"
 
@@ -25,7 +24,7 @@ class OldPanel : public Panel {
   virtual CommandUpdater* command_updater() OVERRIDE;
   virtual Profile* profile() const OVERRIDE;
   virtual void Initialize(const gfx::Rect& bounds, Browser* browser) OVERRIDE;
-  virtual content::WebContents* WebContents() const OVERRIDE;
+  virtual content::WebContents* GetWebContents() const OVERRIDE;
   virtual bool ShouldCloseWindow() OVERRIDE;
   virtual void OnWindowClosing() OVERRIDE;
   virtual void ExecuteCommandWithDisposition(

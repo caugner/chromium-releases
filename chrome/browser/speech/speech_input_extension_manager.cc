@@ -8,7 +8,7 @@
 #include "base/json/json_writer.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/extensions/extension_event_router.h"
+#include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -207,7 +207,7 @@ void SpeechInputExtensionManager::ShutdownOnUIThread() {
 
 void SpeechInputExtensionManager::AbortAllSessionsOnIOThread() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  // TODO(primiano) The following check should not be really needed if the
+  // TODO(primiano): The following check should not be really needed if the
   // SpeechRecognitionManager and this class are destroyed in the correct order
   // (this class first), as it is in current chrome implementation.
   // However, it seems the some ChromiumOS tests violate the destruction order
@@ -253,9 +253,10 @@ void SpeechInputExtensionManager::ResetToIdleState() {
 int SpeechInputExtensionManager::GetRenderProcessIDForExtension(
     const std::string& extension_id) const {
   ExtensionProcessManager* epm =
-      ExtensionSystem::Get(profile_)->process_manager();
+      extensions::ExtensionSystem::Get(profile_)->process_manager();
   DCHECK(epm);
-  ExtensionHost* eh = epm->GetBackgroundHostForExtension(extension_id);
+  extensions::ExtensionHost* eh =
+      epm->GetBackgroundHostForExtension(extension_id);
   DCHECK(eh);
   content::RenderProcessHost* rph = eh->render_process_host();
   DCHECK(rph);
@@ -578,12 +579,10 @@ void SpeechInputExtensionManager::StartOnIOThread(
   if (state_ == kShutdown)
     return;
 
-  // TODO(primiano) These two checks below could be avoided, since they are
+  // TODO(primiano): These two checks below could be avoided, since they are
   // already handled in the speech recognition classes. However, since the
   // speech input extensions tests are bypassing the manager, we need them to
-  // pass the tests. A complete unit test which puts all the pieces together,
-  // mocking just the endpoints (the audio input controller and the URL fetcher)
-  // should be written.
+  // pass the tests.
   if (!GetSpeechInputExtensionInterface()->HasAudioInputDevices()) {
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
@@ -662,7 +661,7 @@ void SpeechInputExtensionManager::StartRecording(
   context.context_name = extension_name;
 
   content::SpeechRecognitionSessionConfig config;
-  // config.is_one_shot = true; // TODO(primiano) Uncomment when CL2.0 lands.
+  config.is_one_shot = true;
   config.language = language;
   config.grammars.push_back(content::SpeechRecognitionGrammar(grammar));
   config.initial_context = context;

@@ -4,7 +4,6 @@
 
 #ifndef BASE_BASE_PATHS_H_
 #define BASE_BASE_PATHS_H_
-#pragma once
 
 // This file declares path keys for the base module.  These can be used with
 // the PathService to access various special directories and files.
@@ -41,6 +40,7 @@ enum BasePathKey {
                 // browser cache can be a subdirectory.
                 // This is $XDG_CACHE_HOME on Linux and
                 // ~/Library/Caches on Mac.
+  DIR_HOME,     // $HOME on POSIX-like systems.
 #endif
 
   PATH_END

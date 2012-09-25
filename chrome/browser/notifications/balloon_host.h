@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_NOTIFICATIONS_BALLOON_HOST_H_
 #define CHROME_BROWSER_NOTIFICATIONS_BALLOON_HOST_H_
-#pragma once
 
 #include <string>
 #include <vector>
@@ -36,7 +35,7 @@ class BalloonHost : public content::WebContentsDelegate,
   void Shutdown();
 
   // ExtensionFunctionDispatcher::Delegate overrides.
-  virtual ExtensionWindowController* GetExtensionWindowController()
+  virtual extensions::WindowController* GetExtensionWindowController()
       const OVERRIDE;
   virtual content::WebContents* GetAssociatedWebContents() const OVERRIDE;
 

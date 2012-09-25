@@ -9,9 +9,7 @@
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "grit/generated_resources.h"  // Accessibility names
 #include "grit/theme_resources.h"
-#include "grit/theme_resources_standard.h"
 #include "grit/ui_resources.h"
-#include "grit/ui_resources_standard.h"
 #include "ui/aura/window.h"
 #include "ui/base/animation/slide_animation.h"
 #include "ui/base/hit_test.h"
@@ -71,9 +69,6 @@ class AppNonClientFrameViewAura::ControlView
         IDR_AURA_WINDOW_HEADER_BASE_INCOGNITO_ACTIVE :
         IDR_AURA_WINDOW_HEADER_BASE_ACTIVE;
     control_base_ = rb.GetImageNamed(control_base_resource_id).ToImageSkia();
-
-    separator_ =
-        rb.GetImageNamed(IDR_AURA_WINDOW_FULLSCREEN_SEPARATOR).ToImageSkia();
     shadow_ = rb.GetImageNamed(IDR_AURA_WINDOW_FULLSCREEN_SHADOW).ToImageSkia();
 
     AddChildView(close_button_);
@@ -119,9 +114,6 @@ class AppNonClientFrameViewAura::ControlView
 
     views::View::OnPaint(canvas);
 
-    // Separator overlaps the left edge of the close button.
-    canvas->DrawImageInt(*separator_,
-                         close_button_->x(), 0);
     canvas->DrawImageInt(*shadow_, 0, kShadowHeightStretch);
   }
 
@@ -153,7 +145,6 @@ class AppNonClientFrameViewAura::ControlView
   views::ImageButton* close_button_;
   views::ImageButton* restore_button_;
   const gfx::ImageSkia* control_base_;
-  const gfx::ImageSkia* separator_;
   const gfx::ImageSkia* shadow_;
 
   DISALLOW_COPY_AND_ASSIGN(ControlView);
@@ -167,7 +158,7 @@ class AppNonClientFrameViewAura::Host : public views::MouseWatcherHost {
   virtual bool Contains(
       const gfx::Point& screen_point,
       views::MouseWatcherHost::MouseEventType type) OVERRIDE {
-    gfx::Rect top_margin = owner_->GetScreenBounds();
+    gfx::Rect top_margin = owner_->GetBoundsInScreen();
     top_margin.set_height(kTopMargin);
     gfx::Rect control_bounds = owner_->GetControlBounds();
     control_bounds.Inset(kShadowStart, 0, 0, kShadowStart);
@@ -236,9 +227,9 @@ gfx::Rect AppNonClientFrameViewAura::GetBoundsForTabStrip(
   return gfx::Rect();
 }
 
-int AppNonClientFrameViewAura::GetHorizontalTabStripVerticalOffset(
-    bool restored) const {
-  return 0;
+BrowserNonClientFrameView::TabStripInsets
+AppNonClientFrameViewAura::GetTabStripInsets(bool restored) const {
+  return TabStripInsets();
 }
 
 void AppNonClientFrameViewAura::UpdateThrobber(bool running) {

@@ -14,11 +14,12 @@
 #include "base/stl_util.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
+#include "google/cacheinvalidation/deps/callback.h"
 #include "google/cacheinvalidation/include/types.h"
 #include "jingle/notifier/listener/push_client.h"
 #include "sync/notifier/invalidation_util.h"
 
-namespace sync_notifier {
+namespace syncer {
 
 ChromeLogger::ChromeLogger() {}
 ChromeLogger::~ChromeLogger() {}
@@ -123,8 +124,9 @@ void ChromeScheduler::SetSystemResources(
 
 void ChromeScheduler::RunPostedTask(invalidation::Closure* task) {
   CHECK_EQ(created_on_loop_, MessageLoop::current());
-  RunAndDeleteClosure(task);
+  task->Run();
   posted_tasks_.erase(task);
+  delete task;
 }
 
 ChromeStorage::ChromeStorage(StateWriter* state_writer,
@@ -250,4 +252,4 @@ ChromeScheduler* ChromeSystemResources::listener_scheduler() {
   return listener_scheduler_.get();
 }
 
-}  // namespace sync_notifier
+}  // namespace syncer

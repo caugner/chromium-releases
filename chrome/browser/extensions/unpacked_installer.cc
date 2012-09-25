@@ -7,11 +7,12 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/file_util.h"
+#include "base/threading/thread_restrictions.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
+#include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/permissions_updater.h"
-#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_file_util.h"
 #include "chrome/common/string_ordinal.h"
@@ -50,8 +51,8 @@ SimpleExtensionLoadPrompt::SimpleExtensionLoadPrompt(
     const Extension* extension)
     : service_weak_(extension_service),
       extension_(extension) {
-  Browser* browser = browser::FindLastActiveWithProfile(profile);
-  install_ui_.reset(new ExtensionInstallPrompt(browser));
+  install_ui_.reset(
+      ExtensionInstallUI::CreateInstallPromptWithProfile(profile));
 }
 
 SimpleExtensionLoadPrompt::~SimpleExtensionLoadPrompt() {
@@ -64,7 +65,7 @@ void SimpleExtensionLoadPrompt::ShowPrompt() {
 void SimpleExtensionLoadPrompt::InstallUIProceed() {
   if (service_weak_.get()) {
     extensions::PermissionsUpdater perms_updater(service_weak_->profile());
-    perms_updater.GrantActivePermissions(extension_);
+    perms_updater.GrantActivePermissions(extension_, false);
     service_weak_->OnExtensionInstalled(
         extension_, false, StringOrdinal());  // Not from web store.
   }
@@ -237,7 +238,7 @@ void UnpackedInstaller::OnLoaded(
   }
 
   PermissionsUpdater perms_updater(service_weak_->profile());
-  perms_updater.GrantActivePermissions(extension);
+  perms_updater.GrantActivePermissions(extension, false);
   service_weak_->OnExtensionInstalled(extension,
                                       false,  // Not from web store.
                                       StringOrdinal());

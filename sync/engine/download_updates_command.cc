@@ -9,20 +9,16 @@
 #include "base/command_line.h"
 #include "sync/engine/syncer.h"
 #include "sync/engine/syncer_proto_util.h"
-#include "sync/engine/syncproto.h"
-#include "sync/internal_api/public/syncable/model_type_payload_map.h"
-#include "sync/syncable/syncable.h"
+#include "sync/internal_api/public/base/model_type_payload_map.h"
+#include "sync/syncable/directory.h"
+#include "sync/syncable/read_transaction.h"
 
 using sync_pb::DebugInfo;
 
-namespace browser_sync {
+namespace syncer {
 using sessions::StatusController;
 using sessions::SyncSession;
 using std::string;
-using syncable::FIRST_REAL_MODEL_TYPE;
-using syncable::MODEL_TYPE_COUNT;
-using syncable::ModelTypeSet;
-using syncable::ModelTypeSetToString;
 
 DownloadUpdatesCommand::DownloadUpdatesCommand(
     bool create_mobile_bookmarks_folder)
@@ -30,14 +26,38 @@ DownloadUpdatesCommand::DownloadUpdatesCommand(
 
 DownloadUpdatesCommand::~DownloadUpdatesCommand() {}
 
+namespace {
+
+SyncerError HandleGetEncryptionKeyResponse(
+    const sync_pb::ClientToServerResponse& update_response,
+    syncable::Directory* dir) {
+  bool success = false;
+  if (!update_response.get_updates().has_encryption_key()) {
+    LOG(ERROR) << "Failed to receive encryption key from server.";
+    return SERVER_RESPONSE_VALIDATION_FAILED;
+  }
+  syncable::ReadTransaction trans(FROM_HERE, dir);
+  Cryptographer* cryptographer = dir->GetCryptographer(&trans);
+  success = cryptographer->SetKeystoreKey(
+      update_response.get_updates().encryption_key());
+
+  DVLOG(1) << "GetUpdates returned encryption key of length "
+           << update_response.get_updates().encryption_key().length()
+           << ". Cryptographer keystore key "
+           << (success ? "" : "not ") << "updated.";
+  return (success ? SYNCER_OK : SERVER_RESPONSE_VALIDATION_FAILED);
+}
+
+}  // namespace
+
 SyncerError DownloadUpdatesCommand::ExecuteImpl(SyncSession* session) {
-  ClientToServerMessage client_to_server_message;
-  ClientToServerResponse update_response;
+  sync_pb::ClientToServerMessage client_to_server_message;
+  sync_pb::ClientToServerResponse update_response;
 
   client_to_server_message.set_share(session->context()->account_name());
   client_to_server_message.set_message_contents(
-      ClientToServerMessage::GET_UPDATES);
-  GetUpdatesMessage* get_updates =
+      sync_pb::ClientToServerMessage::GET_UPDATES);
+  sync_pb::GetUpdatesMessage* get_updates =
       client_to_server_message.mutable_get_updates();
   get_updates->set_create_mobile_bookmarks_folder(
       create_mobile_bookmarks_folder_);
@@ -51,8 +71,7 @@ SyncerError DownloadUpdatesCommand::ExecuteImpl(SyncSession* session) {
            << ModelTypeSetToString(enabled_types);
   DCHECK(!enabled_types.Empty());
 
-  const syncable::ModelTypePayloadMap& type_payload_map =
-      session->source().types;
+  const ModelTypePayloadMap& type_payload_map = session->source().types;
   for (ModelTypeSet::Iterator it = enabled_types.First();
        it.Good(); it.Inc()) {
     sync_pb::DataTypeProgressMarker* progress_marker =
@@ -60,11 +79,22 @@ SyncerError DownloadUpdatesCommand::ExecuteImpl(SyncSession* session) {
     dir->GetDownloadProgress(it.Get(), progress_marker);
 
     // Set notification hint if present.
-    syncable::ModelTypePayloadMap::const_iterator type_payload =
+    ModelTypePayloadMap::const_iterator type_payload =
         type_payload_map.find(it.Get());
     if (type_payload != type_payload_map.end()) {
       progress_marker->set_notification_hint(type_payload->second);
     }
+  }
+
+  bool need_encryption_key = false;
+  if (session->context()->keystore_encryption_enabled()) {
+    syncable::Directory* dir = session->context()->directory();
+    syncable::ReadTransaction trans(FROM_HERE, dir);
+    Cryptographer* cryptographer =
+        session->context()->directory()->GetCryptographer(&trans);
+    need_encryption_key = !cryptographer->HasKeystoreKey();
+    get_updates->set_need_encryption_key(need_encryption_key);
+
   }
 
   // We want folders for our associated types, always.  If we were to set
@@ -78,6 +108,7 @@ SyncerError DownloadUpdatesCommand::ExecuteImpl(SyncSession* session) {
   get_updates->mutable_caller_info()->set_notifications_enabled(
       session->context()->notifications_enabled());
 
+  SyncerProtoUtil::SetProtocolVersion(&client_to_server_message);
   SyncerProtoUtil::AddRequestBirthday(dir, &client_to_server_message);
 
   DebugInfo* debug_info = client_to_server_message.mutable_debug_info();
@@ -107,6 +138,12 @@ SyncerError DownloadUpdatesCommand::ExecuteImpl(SyncSession* session) {
            << " updates and indicated "
            << update_response.get_updates().changes_remaining()
            << " updates left on server.";
+
+  if (need_encryption_key) {
+    status->set_last_get_key_result(
+        HandleGetEncryptionKeyResponse(update_response, dir));
+  }
+
   return result;
 }
 
@@ -126,5 +163,4 @@ void DownloadUpdatesCommand::AppendClientDebugInfoIfNeeded(
   }
 }
 
-
-}  // namespace browser_sync
+}  // namespace syncer

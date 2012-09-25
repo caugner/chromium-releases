@@ -141,8 +141,6 @@ class PageCyclerCachedBrowserTest : public PageCyclerBrowserTest {
   // For a cached test, we use the provided user data directory from the test
   // directory.
   virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
-    InProcessBrowserTest::SetUpCommandLine(command_line);
-
     FilePath test_dir;
     ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_dir));
     test_dir = test_dir.AppendASCII("page_cycler");
@@ -187,7 +185,6 @@ class PageCyclerCachedBrowserTest : public PageCyclerBrowserTest {
 // Sanity check; iterate through a series of URLs and make sure there are no
 // errors.
 IN_PROC_BROWSER_TEST_F(PageCyclerBrowserTest, BasicTest) {
-  const size_t kNumIterations = 3;
   ScopedTempDir temp;
   ASSERT_TRUE(temp.CreateUniqueTempDir());
 
@@ -202,9 +199,9 @@ IN_PROC_BROWSER_TEST_F(PageCyclerBrowserTest, BasicTest) {
                                    urls_string.size()));
 
   InitPageCycler();
-  page_cycler()->Run(kNumIterations);
+  page_cycler()->Run();
 
-  ui_test_utils::RunMessageLoop();
+  content::RunMessageLoop();
   ASSERT_FALSE(file_util::PathExists(errors_file()));
   ASSERT_TRUE(file_util::PathExists(stats_file()));
 }
@@ -212,7 +209,7 @@ IN_PROC_BROWSER_TEST_F(PageCyclerBrowserTest, BasicTest) {
 // Test to make sure that PageCycler will recognize unvisitable URLs, and will
 // handle them appropriately.
 IN_PROC_BROWSER_TEST_F(PageCyclerBrowserTest, UnvisitableURL) {
-  const size_t kNumIterations = 3;
+  const size_t kNumErrors = 1;
   const char kFakeURL[] = "http://www.pleasenoonehavethisurlanytimeinthenext"
                           "century.com/gibberish";
   ScopedTempDir temp;
@@ -231,28 +228,23 @@ IN_PROC_BROWSER_TEST_F(PageCyclerBrowserTest, UnvisitableURL) {
                                    urls_string.size()));
 
   InitPageCycler();
-  page_cycler()->Run(kNumIterations);
+  page_cycler()->Run();
 
-  ui_test_utils::RunMessageLoop();
+  content::RunMessageLoop();
   ASSERT_TRUE(file_util::PathExists(errors_file()));
   ASSERT_TRUE(file_util::PathExists(stats_file()));
 
   std::vector<std::string> errors = GetErrorsFromFile();
 
-  size_t num_errors = errors.size();
-  ASSERT_EQ(kNumIterations, num_errors);
+  ASSERT_EQ(kNumErrors, errors.size());
 
   // Check that each error message contains the fake URL (i.e., that it wasn't
   // from a valid URL, and that the fake URL was caught each time).
-  for (std::vector<std::string>::const_iterator iter = errors.begin();
-       iter != errors.end(); ++iter) {
-    ASSERT_NE(iter->find(kFakeURL), std::string::npos);
-  }
+  ASSERT_NE(std::string::npos, errors[0].find(kFakeURL));
 }
 
 // Test that PageCycler will remove an invalid URL prior to running.
 IN_PROC_BROWSER_TEST_F(PageCyclerBrowserTest, InvalidURL) {
-  const size_t kNumIterations = 1;
   const char kBadURL[] = "notarealurl";
 
   ScopedTempDir temp;
@@ -270,9 +262,9 @@ IN_PROC_BROWSER_TEST_F(PageCyclerBrowserTest, InvalidURL) {
                                    urls_string.size()));
 
   InitPageCycler();
-  page_cycler()->Run(kNumIterations);
+  page_cycler()->Run();
 
-  ui_test_utils::RunMessageLoop();
+  content::RunMessageLoop();
   ASSERT_TRUE(file_util::PathExists(errors_file()));
   ASSERT_TRUE(file_util::PathExists(stats_file()));
 
@@ -287,7 +279,6 @@ IN_PROC_BROWSER_TEST_F(PageCyclerBrowserTest, InvalidURL) {
 
 // Test that PageCycler will remove a Chrome Error URL prior to running.
 IN_PROC_BROWSER_TEST_F(PageCyclerBrowserTest, ChromeErrorURL) {
-  const size_t kNumIterations = 1;
   ScopedTempDir temp;
   ASSERT_TRUE(temp.CreateUniqueTempDir());
 
@@ -304,9 +295,9 @@ IN_PROC_BROWSER_TEST_F(PageCyclerBrowserTest, ChromeErrorURL) {
                                    urls_string.size()));
 
   InitPageCycler();
-  page_cycler()->Run(kNumIterations);
+  page_cycler()->Run();
 
-  ui_test_utils::RunMessageLoop();
+  content::RunMessageLoop();
   ASSERT_TRUE(file_util::PathExists(errors_file()));
   ASSERT_TRUE(file_util::PathExists(stats_file()));
 
@@ -327,13 +318,12 @@ IN_PROC_BROWSER_TEST_F(PageCyclerBrowserTest, ChromeErrorURL) {
 // ChromeOS?
 #else
 // Bug 131333: This test fails on a XP debug bot since Build 17609.
-#if defined(OS_WIN) && !defined(NDEBUG)
+#if (defined(OS_WIN) || defined(OS_MACOSX)) && !defined(NDEBUG)
 #define MAYBE_PlaybackMode DISABLED_PlaybackMode
 #else
 #define MAYBE_PlaybackMode PlaybackMode
 #endif
 IN_PROC_BROWSER_TEST_F(PageCyclerCachedBrowserTest, MAYBE_PlaybackMode) {
-  const size_t kNumIterations = 1;
   ScopedTempDir temp;
   ASSERT_TRUE(temp.CreateUniqueTempDir());
 
@@ -342,9 +332,9 @@ IN_PROC_BROWSER_TEST_F(PageCyclerCachedBrowserTest, MAYBE_PlaybackMode) {
 
   InitPageCycler();
 
-  page_cycler()->Run(kNumIterations);
+  page_cycler()->Run();
 
-  ui_test_utils::RunMessageLoop();
+  content::RunMessageLoop();
   ASSERT_TRUE(file_util::PathExists(stats_file()));
   ASSERT_FALSE(file_util::PathExists(errors_file()));
 }
@@ -352,13 +342,12 @@ IN_PROC_BROWSER_TEST_F(PageCyclerCachedBrowserTest, MAYBE_PlaybackMode) {
 // Test that PageCycler will have a cache miss if a URL is missing from the
 // cache directory while in playback mode.
 // Bug 131333: This test fails on a XP debug bot since Build 17609.
-#if defined(OS_WIN) && !defined(NDEBUG)
+#if (defined(OS_WIN) || defined(OS_MACOSX)) && !defined(NDEBUG)
 #define MAYBE_URLNotInCache DISABLED_URLNotInCache
 #else
 #define MAYBE_URLNotInCache URLNotInCache
 #endif
 IN_PROC_BROWSER_TEST_F(PageCyclerCachedBrowserTest, MAYBE_URLNotInCache) {
-  const size_t kNumIterations = 1;
   const char kCacheMissURL[] = "http://www.images.google.com/";
 
   ScopedTempDir temp;
@@ -379,9 +368,9 @@ IN_PROC_BROWSER_TEST_F(PageCyclerCachedBrowserTest, MAYBE_URLNotInCache) {
                                    urls_string.size()));
 
   InitPageCycler(new_urls_file, errors_file(), stats_file());
-  page_cycler()->Run(kNumIterations);
+  page_cycler()->Run();
 
-  ui_test_utils::RunMessageLoop();
+  content::RunMessageLoop();
   ASSERT_TRUE(file_util::PathExists(errors_file()));
   ASSERT_TRUE(file_util::PathExists(stats_file()));
 

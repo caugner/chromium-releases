@@ -23,7 +23,8 @@
 
 using content::ResourceController;
 using content::ResourceThrottle;
-using extensions::Extension;
+
+namespace extensions {
 
 namespace {
 
@@ -121,9 +122,10 @@ class UserScriptListenerTest
 
  protected:
   TestURLRequest* StartTestRequest(net::URLRequest::Delegate* delegate,
-                                   const std::string& url_string) {
+                                   const std::string& url_string,
+                                   TestURLRequestContext* context) {
     GURL url(url_string);
-    TestURLRequest* request = new TestURLRequest(url, delegate);
+    TestURLRequest* request = new TestURLRequest(url, delegate, context);
 
     ResourceThrottle* throttle =
         listener_->CreateResourceThrottle(url, ResourceType::MAIN_FRAME);
@@ -150,7 +152,7 @@ class UserScriptListenerTest
         .AppendASCII("Extensions")
         .AppendASCII("behllobkkfkfnphdnhnkndlbkcpglgmj")
         .AppendASCII("1.0.0.0");
-    extensions::UnpackedInstaller::Create(service_)->Load(extension_path);
+    UnpackedInstaller::Create(service_)->Load(extension_path);
   }
 
   void UnloadTestExtension() {
@@ -169,7 +171,9 @@ TEST_F(UserScriptListenerTest, DelayAndUpdate) {
   MessageLoop::current()->RunAllPending();
 
   TestDelegate delegate;
-  scoped_ptr<TestURLRequest> request(StartTestRequest(&delegate, kMatchingUrl));
+  TestURLRequestContext context;
+  scoped_ptr<TestURLRequest> request(
+      StartTestRequest(&delegate, kMatchingUrl, &context));
   ASSERT_FALSE(request->is_pending());
 
   content::NotificationService::current()->Notify(
@@ -185,7 +189,9 @@ TEST_F(UserScriptListenerTest, DelayAndUnload) {
   MessageLoop::current()->RunAllPending();
 
   TestDelegate delegate;
-  scoped_ptr<TestURLRequest> request(StartTestRequest(&delegate, kMatchingUrl));
+  TestURLRequestContext context;
+  scoped_ptr<TestURLRequest> request(
+      StartTestRequest(&delegate, kMatchingUrl, &context));
   ASSERT_FALSE(request->is_pending());
 
   UnloadTestExtension();
@@ -205,7 +211,9 @@ TEST_F(UserScriptListenerTest, DelayAndUnload) {
 
 TEST_F(UserScriptListenerTest, NoDelayNoExtension) {
   TestDelegate delegate;
-  scoped_ptr<TestURLRequest> request(StartTestRequest(&delegate, kMatchingUrl));
+  TestURLRequestContext context;
+  scoped_ptr<TestURLRequest> request(
+      StartTestRequest(&delegate, kMatchingUrl, &context));
 
   // The request should be started immediately.
   ASSERT_TRUE(request->is_pending());
@@ -219,8 +227,10 @@ TEST_F(UserScriptListenerTest, NoDelayNotMatching) {
   MessageLoop::current()->RunAllPending();
 
   TestDelegate delegate;
+  TestURLRequestContext context;
   scoped_ptr<TestURLRequest> request(StartTestRequest(&delegate,
-                                                      kNotMatchingUrl));
+                                                      kNotMatchingUrl,
+                                                      &context));
 
   // The request should be started immediately.
   ASSERT_TRUE(request->is_pending());
@@ -247,7 +257,9 @@ TEST_F(UserScriptListenerTest, MultiProfile) {
       content::Details<Extension>(extension.get()));
 
   TestDelegate delegate;
-  scoped_ptr<TestURLRequest> request(StartTestRequest(&delegate, kMatchingUrl));
+  TestURLRequestContext context;
+  scoped_ptr<TestURLRequest> request(
+      StartTestRequest(&delegate, kMatchingUrl, &context));
   ASSERT_FALSE(request->is_pending());
 
   // When the first profile's user scripts are ready, the request should still
@@ -270,3 +282,5 @@ TEST_F(UserScriptListenerTest, MultiProfile) {
 }
 
 }  // namespace
+
+}  // namespace extensions

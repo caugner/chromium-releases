@@ -4,9 +4,6 @@
 
 #ifndef UI_WEB_DIALOGS_WEB_DIALOG_OBSERVER_H_
 #define UI_WEB_DIALOGS_WEB_DIALOG_OBSERVER_H_
-#pragma once
-
-#include "ui/web_dialogs/web_dialogs_export.h"
 
 namespace content {
 class RenderViewHost;
@@ -16,7 +13,7 @@ class WebUI;
 namespace ui {
 
 // Implement this class to receive notifications.
-class WEB_DIALOGS_EXPORT WebDialogObserver {
+class WebDialogObserver {
  public:
   // Invoked when a web dialog has been shown.
   // |webui| is the WebUI with which the dialog is associated.

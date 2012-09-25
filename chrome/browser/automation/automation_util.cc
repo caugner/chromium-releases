@@ -24,6 +24,7 @@
 #include "chrome/browser/ui/app_modal_dialogs/app_modal_dialog_queue.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/view_type_utils.h"
 #include "chrome/common/automation_id.h"
@@ -32,6 +33,7 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
+#include "net/cookies/canonical_cookie.h"
 #include "net/cookies/cookie_monster.h"
 #include "net/cookies/cookie_store.h"
 #include "net/url_request/url_request_context.h"
@@ -100,7 +102,7 @@ void SetCookieOnIOThread(
 
 void SetCookieWithDetailsOnIOThread(
     const GURL& url,
-    const net::CookieMonster::CanonicalCookie& cookie,
+    const net::CanonicalCookie& cookie,
     const std::string& original_domain,
     const scoped_refptr<net::URLRequestContextGetter>& context_getter,
     base::WaitableEvent* event,
@@ -145,7 +147,7 @@ WebContents* GetWebContentsAt(int browser_index, int tab_index) {
   Browser* browser = GetBrowserAt(browser_index);
   if (!browser || tab_index >= browser->tab_count())
     return NULL;
-  return browser->GetWebContentsAt(tab_index);
+  return chrome::GetWebContentsAt(browser, tab_index);
 }
 
 Browser* GetBrowserForTab(WebContents* tab) {
@@ -153,7 +155,7 @@ Browser* GetBrowserForTab(WebContents* tab) {
   for (; browser_iter != BrowserList::end(); ++browser_iter) {
     Browser* browser = *browser_iter;
     for (int tab_index = 0; tab_index < browser->tab_count(); ++tab_index) {
-      if (browser->GetWebContentsAt(tab_index) == tab)
+      if (chrome::GetWebContentsAt(browser, tab_index) == tab)
         return browser;
     }
   }
@@ -254,7 +256,7 @@ void GetCookiesJSON(AutomationProvider* provider,
 
   ListValue* list = new ListValue();
   for (size_t i = 0; i < cookie_list.size(); ++i) {
-    const net::CookieMonster::CanonicalCookie& cookie = cookie_list[i];
+    const net::CanonicalCookie& cookie = cookie_list[i];
     DictionaryValue* cookie_dict = new DictionaryValue();
     cookie_dict->SetString("name", cookie.Name());
     cookie_dict->SetString("value", cookie.Value());
@@ -262,7 +264,7 @@ void GetCookiesJSON(AutomationProvider* provider,
     cookie_dict->SetString("domain", cookie.Domain());
     cookie_dict->SetBoolean("secure", cookie.IsSecure());
     cookie_dict->SetBoolean("http_only", cookie.IsHttpOnly());
-    if (cookie.DoesExpire())
+    if (cookie.IsPersistent())
       cookie_dict->SetDouble("expiry", cookie.ExpiryDate().ToDoubleT());
     list->Append(cookie_dict);
   }
@@ -363,11 +365,11 @@ void SetCookieJSON(AutomationProvider* provider,
     return;
   }
 
-  scoped_ptr<net::CookieMonster::CanonicalCookie> cookie(
-      net::CookieMonster::CanonicalCookie::Create(
+  scoped_ptr<net::CanonicalCookie> cookie(
+      net::CanonicalCookie::Create(
           GURL(url), name, value, domain, path,
           mac_key, mac_algorithm, base::Time(),
-          base::Time::FromDoubleT(expiry), secure, http_only, expiry != 0));
+          base::Time::FromDoubleT(expiry), secure, http_only));
   if (!cookie.get()) {
     reply.SendError("given 'cookie' parameters are invalid");
     return;
@@ -452,7 +454,7 @@ bool GetTabForId(const AutomationId& id, WebContents** tab) {
   for (; iter != BrowserList::end(); ++iter) {
     Browser* browser = *iter;
     for (int tab_index = 0; tab_index < browser->tab_count(); ++tab_index) {
-      TabContents* tab_contents = browser->GetTabContentsAt(tab_index);
+      TabContents* tab_contents = chrome::GetTabContentsAt(browser, tab_index);
       if (base::IntToString(
               tab_contents->restore_tab_helper()->session_id().id()) ==
                   id.id()) {
